@@ -4,7 +4,8 @@
 # (or `source` this file in gdb, or in ~/.gdbinit).
 #
 # A string or an array is a pointer to [rc][len][cap][data...] (null: empty); an optional `T?` is
-# its value followed by a flag.
+# its value followed by a flag; a field whose type holds the struct it is in (next: Node?) is a
+# pointer to [rc][value] (null: none, or its type's default).
 import gdb
 
 LIMIT = 200         # elements shown of a long array
@@ -81,6 +82,19 @@ class OptPrinter:
         return self.val["value"]
 
 
+class BoxPrinter:
+    """a boxed field: the value in its box"""
+
+    def __init__(self, val):
+        self.p = val.cast(val.type.strip_typedefs())
+        self.opt = (val.type.name or "").endswith("?")
+
+    def to_string(self):
+        if int(self.p) == 0:
+            return "none" if self.opt else "(default)"
+        return self.p.dereference()["value"]
+
+
 class MapPrinter:
     """{K: V}: its keys and values, in the order they were added"""
 
@@ -129,6 +143,8 @@ def lookup(val):
     if name.endswith("[]") and val.type.strip_typedefs().code == gdb.TYPE_CODE_PTR:
         return ArrayPrinter(val)
     t = val.type.strip_typedefs()
+    if t.code == gdb.TYPE_CODE_PTR and (t.target().strip_typedefs().name or "").endswith(" box"):
+        return BoxPrinter(val)
     if t.code != gdb.TYPE_CODE_STRUCT:
         return None
     if name.endswith("?"):

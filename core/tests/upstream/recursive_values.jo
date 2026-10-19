@@ -1,0 +1,154 @@
+# requires: sloppy
+# Types that hold themselves, through optionals, unions, enums, tuples, fixed-size arrays and one
+# another: values like any others (copied, compared, hashed, printed, read back), each copy its own
+struct Leaf:
+    text: str
+
+struct Branch:
+    name: str
+    child: Branch | Leaf
+
+struct A:
+    n: int
+    b: B?
+
+struct B:
+    s: str
+    a: A?
+
+enum Expr:
+    add(l: Expr, r: Expr)
+    num(v: int)
+    neg(e: Expr)
+
+struct Pair:
+    tag: str
+    link: (int, Pair)?
+    kids: Pair?[2]
+
+struct Item:
+    name = "item"
+    qty = 1
+    next: Item?
+
+struct Box3:
+    v: vec3
+    inner: Box3?
+
+eval = (e: Expr) -> int:
+    match e:
+        add(l, r): eval(l) + eval(r)
+        num(v): v
+        neg(x): -eval(x)
+
+leaves = (b: Branch | Leaf) -> str[]:
+    if b is Leaf: return [b.text]
+    out = [b.name]
+    loop s in leaves(b.child): out.push(s)
+    out
+
+grow = (b: mut Branch, name: str):
+    if b.child is Branch: grow(b.child, name)
+    else: b.child = Branch(name, b.child)
+
+work = ():
+    # through a union
+    br = Branch("a", Branch("b", Leaf("x")))
+    br2 = br
+    grow(br2, "c")
+    print(br)
+    print(br2)
+    print(leaves(br), leaves(br2), br == br2)
+    if br2.child is Branch: br2.child.child = Leaf("y")
+    print(leaves(br2))
+    zb: Branch
+    print(zb)
+
+    # mutual recursion
+    x = A(1, B("one", A(2, B("two"))))
+    y = x
+    y.b!.a!.n = 20
+    y.b!.a!.b!.s = "TWO"
+    print(x)
+    print(y)
+    print(x.b!.a!.n, y.b!.a!.n, x == y)
+
+    # enums: each variant's fields, matched
+    e = Expr.add(Expr.num(1), Expr.neg(Expr.add(Expr.num(2), Expr.num(3))))
+    print(e, eval(e))
+    e2 = e
+    match e2:
+        add(l, r):
+            print(l, r)
+            e2 = Expr.add(r, l)
+        _: pass
+    print(e2, eval(e2), e == e2)
+    # (a zero Expr is its first variant, whose empty boxes read as the first variant that ends: num)
+    ez: Expr
+    print(ez, eval(ez))
+
+    # tuples and fixed-size arrays kept in a box, as one value
+    p = Pair("root", (1, Pair("one")), [Pair("left"), none])
+    p.kids[1] = Pair("right", (2, Pair("two")))
+    q = p
+    q.link!.1.tag = "ONE"
+    q.kids[0]!.tag = "LEFT"
+    print(p)
+    print(q)
+    print(p == q, p.link!.0, q.kids[1]!.link!.1.tag)
+
+    # field defaults, and a default kept when the field is given anew
+    it = Item(next = Item("second", 2, Item()))
+    print(it)
+    it.next!.next!.qty += 10
+    print(it.next!.next!)
+    z: Item
+    print(z, z.next == none)
+
+    # vectors inside, changed through the boxes
+    bx = Box3(vec3(1, 2, 3), Box3(vec3(4, 5, 6)))
+    by = bx
+    by.inner!.v.y = 50
+    print(bx.inner!.v, by.inner!.v)
+
+    # a closure reading one (the variable it shares, changed after), and one made in a function
+    f = () -> int: x.b!.a!.n
+    x.b!.a!.n = 200
+    print(f(), x.b!.a!.n)
+    mk = (n: int) -> A: A(n, B("made", A(n + 1)))
+    print(mk(7))
+
+    # loop mut over an array of them, and a map of them
+    xs = [A(1), A(2, B("b2")), A(3, B("b3", A(30)))]
+    loop mut a in xs:
+        a.n *= 10
+        if let bb = a.b: a.b = B(bb.s + "!", bb.a)
+        else: a.b = B("new")
+    print(xs)
+    ys = xs
+    ys[2].b!.a!.n = -1
+    print(xs[2].b!.a!.n, ys[2].b!.a!.n)
+    m: {A: int} = {}
+    loop i in 0.. and a in xs: m[a] = i
+    print(m[A(30, B("b3!", A(30)))], m.len())
+    print(hash(xs[2]) == hash(A(30, B("b3!", A(30)))), hash(xs[2]) == hash(ys[2]))
+
+    # a value given itself holds a copy of itself as it was: no loop
+    self = Item("a", 1, Item("b"))
+    self.next = self
+    self.next!.next!.next = self
+    print(self)
+
+    # str() and JSON of each
+    print(str(e))
+    print(to_json(br))
+    print(from_text[Branch](to_text(br)))
+    print(to_json(x))
+    print(from_json[A](to_json(x)))
+    print(to_json(e))
+    print(from_json[Expr](to_json(e)))
+    print(from_text[Pair](to_text(q)))
+
+base = alloc_count()
+work()
+print(alloc_count() - base)

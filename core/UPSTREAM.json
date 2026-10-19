@@ -170,6 +170,68 @@
       ],
       "description": "Flat Pike VM, ASCII class bitmaps, prefix/start-set skipping and bounded lazy DFAs for long texts. Imported from the pinned pre-character-literal-syntax revision.",
       "regex_sha256": "64e7f8496f1f41bf1411f4e22bc68407b3da1e1d15f75327f489eb9700e79068"
+    },
+    {
+      "revision": "403f7de7baeab6eac2e462fe4730641ee83527b9",
+      "paths": [
+        "compiler/check.jo",
+        "compiler/dwarf.jo",
+        "compiler/lower.jo",
+        "compiler/pdb.jo",
+        "compiler/types.jo",
+        "compiler/watch.jo",
+        "lib/core/rt.jo",
+        "lib/debug/sloppy.natvis",
+        "lib/debug/sloppy_gdb.py",
+        "lib/debug/sloppy_lldb.py",
+        "tests/t/recursive_values.jo",
+        "tests/t/recursive_values.out",
+        "tests/t/recursive_list.jo",
+        "tests/t/recursive_list.out",
+        "tests/t/recursive_tree.jo",
+        "tests/t/recursive_tree.out",
+        "tests/t/recursive_expr.jo",
+        "tests/t/recursive_expr.out"
+      ],
+      "description": "Recursive value fields use private copy-on-write boxes with iterative destruction. Adapted to Dewy callable copying, narrowed capture writes, JSON writers and C ABI checks. Existing nested-optional semantics are retained. Recursive tree fixture uses explicit half-open ranges to preserve upstream iteration counts. Dewy additionally packs small boxes into allocator header space with size-aware freeing; large allocations retain their full allocator header.",
+      "upstream_paths_sha256": {
+        "compiler/check.jo": "0333331641ddeee29277e4529f4200d4b53a7273bcc397ec398f747b30ccff2f",
+        "compiler/dwarf.jo": "5941468deda2e4bc1503ca6a9bf6b44be2331cf7e0335d4396887624d770a0d3",
+        "compiler/lower.jo": "5fd24e0e106b9524913d92b25959459a6ef5bf8ef9f65d85c21b01e52de2d3ed",
+        "compiler/pdb.jo": "d3f78c76c2d731b28cfb27c23182435dd0e9ec4d5cd2841fb18f36bcd61ccb1b",
+        "compiler/types.jo": "190bdf6a9128a9f25067c403f2771f001b3ae8039b37c5e7cc3c50f7fb114db3",
+        "compiler/watch.jo": "b99e8676dcc827eba3d38f896d5b8ca39128080f5f5353e106f4cdb5759b3368",
+        "lib/core/rt.jo": "3f63b890ddb378a9ab630cca9daf63b7a8b42b182cfaa9e6e0c1c1dc39f2f05f",
+        "lib/debug/sloppy.natvis": "3540cb5bed19940430f2207b36e6e113032fb80c3d6fcdb75ed4e8f94cc94960",
+        "lib/debug/sloppy_gdb.py": "dc780f2beccb8e4007bb04c6cc6e1650afcc2517a195fe81d54c747c76c9db0b",
+        "lib/debug/sloppy_lldb.py": "7ea0d36896374d3a12bd545ce7f9cadb6f19097de356a06ef5db17850e8aeb0a",
+        "tests/t/recursive_values.jo": "53310020ce14ef9b4be4bdc9d40dd79018c2c483238e2b3d100e4251ef02edf3",
+        "tests/t/recursive_values.out": "7ad5c10a9d79a7ff45f9aeaf0a60df18d7b8ced789feaacb75204ba24764fccf",
+        "tests/t/recursive_list.jo": "667f61a651bef8624c0b500acc6aeef555e9d38794fe00c39a547a7a03c42b55",
+        "tests/t/recursive_list.out": "032c2b4ee6dd2d2242dd49cb27b9ab71a142d46df55c51d2cbb0d3f3ae0d7a18",
+        "tests/t/recursive_tree.jo": "6e456849126f63995905b6930fa03457cf656132a7056b954dd9b82609de8229",
+        "tests/t/recursive_tree.out": "91e3d06db9c4cb6001c55bf6e3e4370f114bebb4635691cf8a5741d62d76425b",
+        "tests/t/recursive_expr.jo": "a198290bd0a7e02bed87f4b68584751adecfba585579767827aa5a3fdf229d54",
+        "tests/t/recursive_expr.out": "7276eb2798cbbe88608fb169f4964ecbb2ce7796e1f9d506990831407a45b502"
+      }
+    },
+    {
+      "revision": "f11c0a4e78b63b109cadd5a360531b4fed7a73e4",
+      "paths": [
+        "compiler/lower.jo",
+        "tests/t/held_views.jo",
+        "tests/t/held_views.out",
+        "tests/t/held_views_copies.jo",
+        "tests/t/held_views_copies.out"
+      ],
+      "description": "Read-only traversal locals borrow stable parts of value parameters in release builds. Adapted to Dewy parameter views, closure/private-state exclusions, raw-storage exposure and repeated lowering. Fixture variant if/loop-let forms use equivalent match forms; bounded ranges are explicit. Dewy synthetic borrowed parameter bindings remain analysis roots; optional held views use null/biased addresses internally to avoid per-node optional-tag loads. A cached inline-box layout flag enables recursive traversal views in default builds too, while unrelated managed aggregates remain release-only.",
+      "upstream_paths_sha256": {
+        "compiler/lower.jo": "842da8874c91f139dd0c8b35da0de8214559cb9b213c1e568e93916ea49ebece",
+        "tests/t/held_views.jo": "27913f4fda274127c20397661f6b467bde24e85dfbd8d9e9dbbc4ccb8a948af9",
+        "tests/t/held_views.out": "d3ff75dcde549ee9eb308b97b0fc82ae3b45b7ec9dfc5ea1d303b2dd765fcbff",
+        "tests/t/held_views_copies.jo": "d3270327a756b0a99282a742093a4bcb1262849bf58409217385184c808e2d76",
+        "tests/t/held_views_copies.out": "e82d91a2b6236f03a6ac0c7c9e2647143639ea9bcba5e6b615daa1cea21dee88"
+      }
     }
   ]
 }

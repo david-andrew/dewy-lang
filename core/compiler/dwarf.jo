@@ -30,6 +30,8 @@ const DW_BYTE = -2
 const DW_VOIDP = -3
 const DW_STRHDR = -4
 const DW_STRPTR = -5
+const DW_BOX = -10              # - (DW_BOX + e): the box a boxed field keeps a value of type e in
+const DW_BOXP = -500000         # a pointer to that box
 const DW_HDR = -1000000         # - (DW_HDR + e)... the header of an array of e
 const DW_FLEX = -2000000        # an array of e of unknown length
 const DW_PTR = -3000000         # a pointer to the header of an array of e
@@ -479,7 +481,7 @@ dw_type_die = (t0: int):
             put32(dw_tb, tsize(t) - poff)
             loop i in [0..int(variants[vi].nfields)):
                 fi = int(variants[vi].fields) + i
-                dw_member(names[int(fields[fi].name)], int(fields[fi].type), int(fields[fi].offset) - poff)
+                dw_member(names[int(fields[fi].name)], field_store_type(fi), int(fields[fi].offset) - poff)
             dw_tb.push(0)
             return
         if t0 == DW_LONG: dw_base_type("long", 0x05, 8)
@@ -517,6 +519,19 @@ dw_type_die = (t0: int):
             dw_tb.push(8)
             dw_tb.push(0)
         else if t0 <= DW_HDR: dw_header("{type_str(DW_HDR - t0)}[] header", DW_FLEX - (DW_HDR - t0))
+        else if t0 <= DW_BOXP:
+            dw_tb.push(3)
+            dw_tb.push(8)
+            dw_ref(0, DW_BOX - (DW_BOXP - t0))
+        else if t0 <= DW_BOX:
+            # [rc][value] (lib/debug's printers show the value, or the default for none)
+            e = DW_BOX - t0
+            dw_tb.push(5)
+            cstr(dw_tb, "{type_str(e)} box")
+            put32(dw_tb, 8 + tsize(e))
+            dw_member("rc", DW_LONG, 0)
+            dw_member("value", e, 8)
+            dw_tb.push(0)
         return
     t = prune(t0)
     k = types[t].kind
@@ -535,6 +550,11 @@ dw_type_die = (t0: int):
         dw_tb.push(4)
         cstr(dw_tb, type_str(t))
         dw_ref(0, DW_PTR - int(types[t].elem))
+    else if k == .box:
+        # (a boxed field: named as its type is, a pointer to the box)
+        dw_tb.push(4)
+        cstr(dw_tb, type_str(t))
+        dw_ref(0, DW_BOXP - int(types[t].elem))
     else if k == .ptr:
         e = int(types[t].elem)
         if e == T_VOID or tkind(e) == .void_:
@@ -554,7 +574,7 @@ dw_type_die = (t0: int):
         put32(dw_tb, size)
         loop i in [0..int(structs[si].nfields)):
             fi = int(structs[si].fields) + i
-            dw_member(names[int(fields[fi].name)], int(fields[fi].type), int(fields[fi].offset))
+            dw_member(names[int(fields[fi].name)], field_store_type(fi), int(fields[fi].offset))
         dw_tb.push(0)
     else if k == .enum_:
         si = int(types[t].st)

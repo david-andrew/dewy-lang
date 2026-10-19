@@ -1,0 +1,29 @@
+from p"harness.dewy" import size_argument, clock
+Node:type=[value:int64 next:Node?]
+build_list=(count:int64):>Node?=>{
+    let root:Node?=none
+    loop i in [0..count) {root=Node[i root]}
+    return root
+}
+sum=(root:Node? limit:int64):>int64=>{
+    let cur=root let result:int64=0 let left=limit
+    loop left >? 0 {
+        if cur is?none break
+        result+=cur.value cur=cur.next left-=1
+    }
+    return result
+}
+kernel=(root:Node? count:int64):>int64=>{
+    let result:int64=0
+    loop i in [0..count) {result+=sum(root 512+i%512)}
+    return result
+}
+main=(args:array<string>):>int64=>{
+    let count=size_argument(args 20000)
+    let root=build_list(1023)
+    let started=clock()
+    let result=kernel(root count)
+    let finished=clock()
+    printl"{result} {finished-started}"
+    return 0
+}

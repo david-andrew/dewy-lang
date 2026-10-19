@@ -23,7 +23,7 @@ const VC_AGG = 3
 const LK_INST = 0
 const LK_HELPER = 1
 
-enum HK: drop, copy, arrrel, arruniq, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop
+enum HK: drop, copy, arrrel, arruniq, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq
 
 struct LFunc:
     kind: int
@@ -251,10 +251,8 @@ retain = (v: int, t: int):
 
 release = (v: int, t0: int):
     t = prune(t0)
-    managed_arr = types[t].kind == .array and is_managed(int(types[t].elem))
     if not opt_release:
-        if managed_arr: e_call(lf_helper(.arrrel, t, 0), [v], -1)
-        else: e_call(rt("__rc_dec"), [v], -1)
+        release_call(v, t)
         ir.code[ir.code.len() - 1].c = CALL_RC_DEC
         note_mt_active()
         return
@@ -263,8 +261,7 @@ release = (v: int, t0: int):
     iff(rt_global("__mt_active"))
     was = ir_cold
     ir_cold = true
-    if managed_arr: e_call(lf_helper(.arrrel, t, 0), [v], -1)
-    else: e_call(rt("__rc_dec"), [v], -1)
+    release_call(v, t)
     ir_cold = was
     br_to(done)
     endc()
@@ -275,12 +272,18 @@ release = (v: int, t0: int):
     els()
     # last reference: the out-of-line path frees (and releases elements)
     iff(e_bin(.eq, VI, rc, e_iconst(1)))
-    if managed_arr: e_call(lf_helper(.arrrel, t, 0), [v], -1)
+    release_call(v, t)
+    endc()
+    endc()
+    endc()
+    endc()
+
+# (the call dropping a reference to v, freeing it with the last: an array's elements and a box's
+# value are released by a helper for the type)
+release_call = (v: int, t: int):
+    if types[t].kind == .array and is_managed(int(types[t].elem)): e_call(lf_helper(.arrrel, t, 0), [v], -1)
+    else if types[t].kind == .box: e_call(lf_helper(.boxrel, t, 0), [v], -1)
     else: e_call(rt("__rc_dec"), [v], -1)
-    endc()
-    endc()
-    endc()
-    endc()
 
 drop_at = (addr: int, t0: int):
     t = prune(t0)
@@ -303,8 +306,9 @@ copy_at = (addr: int, t0: int):
 # it also works when a callback is invoked by a borrowed implementation-library API.
 copy_ref = (v: int, t: int) -> int:
     retain(v, t)
-    if types[prune(t)].kind == .array and type_has_fn(t):
-        return e_call(lf_helper(.arruniq, t, 0), [v], VI)
+    k = types[prune(t)].kind
+    if (k == .array or k == .box) and type_has_fn(t):
+        return e_call(lf_helper((if k == .array: HK.arruniq else: HK.boxuniq), t, 0), [v], VI)
     v
 
 # ---------------- temps ----------------
@@ -479,6 +483,132 @@ place_addr = (p: Place, t: int) -> int:
     store_val(t, a, 0, p.v)
     a
 
+# ---------------- boxes ----------------
+# A boxed field (types.jo, decide_boxes) holds a pointer to [rc][value], null until it is given a
+# value: an empty box reads as its type's default (box_dflt_off). Copies of what holds it share
+# the box, and a write through it first makes the box the writer's own (box_unique), as an array
+# is; a new value for the whole field is a new box (box_put).
+const BOX_HDR = 8
+
+# the type a field's memory holds: its value, or the box keeping it
+field_store_type = (f: int) -> int:
+    if fields[f].boxed: return mk_box(int(fields[f].type))
+    int(fields[f].type)
+
+# the boxed field (an index into fields) that field node e reads, or -1
+boxed_field_of = (e: int) -> int:
+    if nodes[e].kind != .field: return -1
+    aux = int(nodes[e].aux)
+    bt = prune(ntype(int(nodes[e].a)))
+    if types[bt].kind == .ptr: bt = prune(int(types[bt].elem))
+    f = -1
+    if aux == -3:
+        layout(bt)
+        f = int(variants[int(structs[int(types[bt].st)].variants) + int(nodes[e].aux2)].fields) + int(nodes[e].ival)
+    else if aux >= 0 and types[bt].kind == .struct_:
+        layout(bt)
+        f = int(structs[int(types[bt].st)].fields) + aux
+    if f >= 0 and fields[f].boxed: return f
+    -1
+
+box_dflt_data: {int: int} = {}
+
+# (the rodata offset of) the value an empty box of type t reads as
+box_dflt_off = (t0: int) -> int:
+    t = prune(t0)
+    if let o = box_dflt_data.get(t): return o
+    loop rodata.len() % 8 != 0: rodata.push(0)
+    o = rodata.len()
+    ro_starts.push(o)
+    rodata.resize(o + max(tsize(t), 8))
+    v = box_default(t)
+    if v > 0:
+        loop i in [0..4): rodata[o + i] = u8((v >> (8 * i)) & 255)
+    box_dflt_data[t] = o
+    o
+
+# the address of the value in box p (of a value of type t), or of the default when p is empty
+box_val = (p: int, t: int) -> int:
+    r = vreg(VI)
+    e_mov(r, e_daddr(box_dflt_off(t)))
+    iff(e_bin(.ne, VI, p, e_iconst(0)))
+    e_mov(r, e_addi(p, BOX_HDR))
+    endc()
+    r
+
+# the box at slot made the writer's own (a new one holding the default when it is empty, a copy
+# when it is shared), for a write through it: the address of its value
+box_unique = (slot: int, t: int) -> int:
+    sz = tsize(t)
+    iff(e_bin(.eq, VI, e_load(VI, slot, 0, ptr_size), e_iconst(0)))
+    was = ir_cold
+    ir_cold = true
+    np = e_call(rt("__box_new"), [e_iconst(sz)], VI)
+    e_copy(e_addi(np, BOX_HDR), e_daddr(box_dflt_off(t)), sz)
+    e_store(slot, 0, np, ptr_size)
+    ir_cold = was
+    endc()
+    p = e_load(VI, slot, 0, ptr_size)
+    bt = mk_box(t)
+    if not opt_release:
+        # (one call, which the code generator skips for a box with one reference: CALL_IF_SHARED)
+        q = e_call(lf_helper(.boxuniq, bt, 0), [p], VI)
+        ir.code[ir.code.len() - 1].c = CALL_IF_SHARED
+        e_store(slot, 0, q, ptr_size)
+        return e_addi(q, BOX_HDR)
+    r = vreg(VI)
+    e_mov(r, p)
+    iff(e_bin(.ne, VI, hdr_load(p, 0), e_iconst(1)))
+    was2 = ir_cold
+    ir_cold = true
+    e_mov(r, e_call(lf_helper(.boxuniq, bt, 0), [p], VI))
+    e_store(slot, 0, r, ptr_size)
+    ir_cold = was2
+    endc()
+    e_addi(r, BOX_HDR)
+
+# the owned value v of type t put in the box at slot (empty, or its box already released): a new
+# box, or none for none (an empty box reads as none)
+box_put = (slot: int, t0: int, v: int):
+    t = prune(t0)
+    sz = tsize(t)
+    is_opt = types[t].kind == .opt
+    if is_opt:
+        e_store(slot, 0, e_iconst(0), ptr_size)
+        iff(e_load(VI, v, tsize(int(types[t].elem)), 1))
+    p = e_call(rt("__box_new"), [e_iconst(sz)], VI)
+    e_copy(e_addi(p, BOX_HDR), v, sz)
+    e_store(slot, 0, p, ptr_size)
+    if is_opt: endc()
+
+# owned value v stored in field f of the value at addr (whose memory there is zero, or released)
+store_field = (f: int, addr: int, v: int):
+    if fields[f].boxed: box_put(e_addi(addr, int(fields[f].offset)), int(fields[f].type), v)
+    else: store_val(int(fields[f].type), addr, int(fields[f].offset), v)
+
+# the address of field f's value in the value at addr, for reading
+field_val_addr = (f: int, addr: int) -> int:
+    a = e_addi(addr, int(fields[f].offset))
+    if not fields[f].boxed: return a
+    box_val(e_load(VI, a, 0, ptr_size), int(fields[f].type))
+
+# (gen_place of a boxed field gives the field's own memory, the box pointer, when this is set:
+# assign_to, giving it a new box)
+box_slot = false
+# (the last box a place for writing went through, made the writer's own, and its type)
+pinned_box = -1
+pinned_type = 0
+
+field_place = (f: int, addr: int, write: bool, slot: bool) -> Place:
+    a = e_addi(addr, int(fields[f].offset))
+    if not fields[f].boxed or slot: return Place(true, a)
+    if write:
+        v = box_unique(a, int(fields[f].type))
+        pinned_box = e_load(VI, a, 0, ptr_size)
+        pinned_type = mk_box(int(fields[f].type))
+        return Place(true, v)
+    Place(true, box_val(e_load(VI, a, 0, ptr_size), int(fields[f].type)))
+
 # ---------------- shared variables ----------------
 # A variable that closures share by reference (LF_SHARED, see check.jo) lives in a cell: a
 # one-element array. The variable (and each capture) holds the cell, and every access goes to its
@@ -518,7 +648,10 @@ local_place = (l: int, write: bool) -> Place:
     if f & LF_ALIAS != 0: return gen_place(int(locals[l].alias), write)
     if is_shared(l): return Place(true, e_addi(read_place(cell_place(l), store_type(l)), 24))
     if f & LF_CAPTURE != 0: return Place(true, e_addi(env_v, int(locals[l].env_off)))
-    if f & LF_BYREF != 0: return Place(true, int(locals[l].vreg))
+    if f & LF_BYREF != 0:
+        v = int(locals[l].vreg)
+        if f & LF_HELDVIEW != 0 and tkind(int(locals[l].type)) == .opt: v = box_val(v, int(locals[l].type))
+        return Place(true, v)
     if f & LF_PARAM != 0:
         if f & LF_MUTPARAM != 0 or vc(int(locals[l].type)) == VC_AGG: return Place(true, int(locals[l].vreg))
     if locals[l].offset >= 0: return Place(true, e_slot(int(locals[l].offset)))
@@ -632,12 +765,14 @@ gen_place = (e: int, write: bool) -> Place:
     else if k == .field:
         a = int(nodes[e].a)
         bt = prune(ntype(a))
+        slot = box_slot
+        box_slot = false
         if nodes[e].aux == -3:
             base = gen_place(a, write)
             si = int(types[bt].st)
             layout(bt)
             v = int(structs[si].variants) + int(nodes[e].aux2)
-            return Place(true, e_addi(place_addr(base, bt), int(fields[int(variants[v].fields) + nodes[e].ival].offset)))
+            return field_place(int(variants[v].fields) + int(nodes[e].ival), place_addr(base, bt), write, slot)
         if nodes[e].aux == -4 and swizzle_run(e):
             base = gen_place(a, write)
             ci = swizzle_index(name_of(int(nodes[e].name))[0])
@@ -656,10 +791,8 @@ gen_place = (e: int, write: bool) -> Place:
             base = gen_place(a, write)
             addr = place_addr(base, bt)
         layout(bt)
-        off = 0
-        if types[bt].kind == .tuple: off = tuple_off(bt, nodes[e].ival)
-        else: off = int(fields[int(structs[int(types[bt].st)].fields) + int(nodes[e].aux)].offset)
-        return Place(true, e_addi(addr, off))
+        if types[bt].kind == .tuple: return Place(true, e_addi(addr, tuple_off(bt, nodes[e].ival)))
+        return field_place(int(structs[int(types[bt].st)].fields) + int(nodes[e].aux), addr, write, slot)
     else if k == .index:
         a = int(nodes[e].a)
         bt = prune(ntype(a))
@@ -740,9 +873,16 @@ gen_place = (e: int, write: bool) -> Place:
     else if k == .unwrap:
         a = int(nodes[e].a)
         ot = prune(ntype(a))
-        base = gen_place(a, write)
-        addr = place_addr(base, ot)
-        has = e_load(VI, addr, tsize(int(types[ot].elem)), 1)
+        view = held_opt_reg(a)
+        addr = 0
+        has = 0
+        if view >= 0:
+            addr = e_addi(view, BOX_HDR)
+            has = view
+        else:
+            base = gen_place(a, write)
+            addr = place_addr(base, ot)
+            has = e_load(VI, addr, tsize(int(types[ot].elem)), 1)
         iff(e_bin(.eq, VI, has, e_iconst(0)))
         e_call_nr(rt("__panic_unwrap"), [e_daddr(loc_data(nodes[e].pos))], -1)
         endc()
@@ -824,8 +964,16 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
             if copy_through(a, callee):
                 out.push(copy_in(a))
                 continue
+            pinned_box = -1
             p = gen_place(a, true)
             out.push(place_addr(p, ntype(a)))
+            # (a place in a box: the box kept, with a reference of the statement's, while the
+            # call runs, which may give what holds it another value)
+            if pinned_box >= 0:
+                c = vreg(VI)
+                e_mov(c, pinned_box)
+                retain(c, pinned_type)
+                reg_temp_vreg(c, pinned_type)
             continue
         pt = ntype(a)
         if i < ptypes.len(): pt = ptypes[i]
@@ -865,8 +1013,8 @@ struct CopyBack:
 copy_backs: CopyBack[]
 
 copy_through = (a: int, callee: int) -> bool:
-    r = elem_root(a)
-    if r == 0: return false
+    r = place_var(a)
+    if r == 0 or not pw_heap: return false
     if nodes[r].aux != i32(int(SK.global)):
         if nodes[r].aux != i32(int(SK.local)) or int(locals[int(nodes[r].sym)].flags) & LF_MUTPARAM == 0: return false
     callee <= 0 or fn_writes(callee).all
@@ -923,6 +1071,7 @@ borrow_may_change = (a: int, args: int[], i: int, callee: int) -> bool:
             if not calls_leave(args[j], n, false): return true
         return false
     if nodes[n].aux != i32(int(SK.local)): return false
+    if held_views.contains(int(nodes[n].sym)): return false
     flags = int(locals[int(nodes[n].sym)].flags)
     if flags & (LF_SHARED | LF_CAPTURE | LF_BYREF | LF_ALIAS) != 0: return true
     if flags & LF_MUTPARAM == 0: return false
@@ -945,6 +1094,10 @@ mut_alias_check = (args: int[], mutmask: int, callee: int):
         if mutmask & (1 << i) == 0: continue
         r = elem_root(a)
         if r == 0: continue
+        # (a place only in a box, not an array: the box is kept while the call runs, call_args)
+        in_arr = pw_heap
+        hint = ""
+        if in_arr: hint = " (pass the index instead)"
         sa = place_steps(a)
         nm = name_of(int(nodes[r].name))
         loop j in 0.. and b in args:
@@ -959,14 +1112,14 @@ mut_alias_check = (args: int[], mutmask: int, callee: int):
                 sb = place_steps(b)
                 nested = steps_overlap(sa, sb) and not (bmut and sa.len() == sb.len())
             if nested or may_write_root(b, r):
-                fatal(nodes[b].pos, "{place_text(a)} is passed as a `mut` argument, so this argument cannot also hold or change '{nm}' (pass the index instead)")
+                fatal(nodes[b].pos, "{place_text(a)} is passed as a `mut` argument, so this argument cannot also hold or change '{nm}'{hint}")
         glob = nodes[r].aux == i32(int(SK.global))
         lf = 0
         if not glob: lf = int(locals[int(nodes[r].sym)].flags)
         mutparam = lf & LF_MUTPARAM != 0
         # (a variable a closure changes: the callee may be that closure, or call it)
         if lf & LF_SHARED != 0 and (callee <= 0 or fn_writes(callee).all):
-            fatal(nodes[a].pos, "'{nm}' is changed by a closure, which this call may run, so {place_text(a)} cannot be passed as a `mut` argument (pass the index instead)")
+            fatal(nodes[a].pos, "'{nm}' is changed by a closure, which this call may run, so {place_text(a)} cannot be passed as a `mut` argument{hint}")
         if glob or mutparam:
             who = "the function called"
             if callee > 0: who = "'{name_of(int(nodes[int(fns[callee].decl)].name))}'"
@@ -975,9 +1128,9 @@ mut_alias_check = (args: int[], mutmask: int, callee: int):
             fw = FnWrites(false, [], [], [])
             if callee > 0: fw = fn_writes_named(callee)
             if glob and fw.globals.contains(int(nodes[r].sym)):
-                fatal(nodes[a].pos, "{who} may change the global '{nm}' (or call something that does), so {place_text(a)} cannot be passed to it as a `mut` argument (pass the index instead)")
-            if mutparam and fw.globals.len() > 0:
-                fatal(nodes[a].pos, "{who} changes globals, and '{nm}' (a `mut` parameter) may be one of them, so {place_text(a)} cannot be passed to it as a `mut` argument (pass the index instead)")
+                fatal(nodes[a].pos, "{who} may change the global '{nm}' (or call something that does), so {place_text(a)} cannot be passed to it as a `mut` argument{hint}")
+            if mutparam and in_arr and fw.globals.len() > 0:
+                fatal(nodes[a].pos, "{who} changes globals, and '{nm}' (a `mut` parameter) may be one of them, so {place_text(a)} cannot be passed to it as a `mut` argument{hint}")
 
 # a place as written (xs[i].pos), for messages
 place_text = (n: int) -> str:
@@ -1000,13 +1153,15 @@ place_text = (n: int) -> str:
 
 # The variable a place belongs to: through fields, indexing, `!`, narrowing and the names that
 # stand for a place (a narrowed variable or field, `loop mut`'s element). pw_heap: some step
-# indexes an array or map; pw_depth: how many fields and indexes. 0 (no variable) for a place
-# reached through a raw pointer, or a value that is no place.
+# indexes an array or map; pw_box: some step is a boxed field; pw_depth: how many fields and
+# indexes. 0 (no variable) for a place reached through a raw pointer, or a value that is no place.
 pw_heap = false
+pw_box = false
 pw_depth = 0
 place_var = (n0: int) -> int:
     n = n0
     pw_heap = false
+    pw_box = false
     pw_depth = 0
     loop true:
         k = nodes[n].kind
@@ -1014,6 +1169,7 @@ place_var = (n0: int) -> int:
             bk = tkind(ntype(int(nodes[n].a)))
             if bk == .ptr: return 0
             if k == .index and bk != .fixed and bk != .vec: pw_heap = true
+            if k == .field and boxed_field_of(n) >= 0: pw_box = true
             pw_depth += 1
             n = int(nodes[n].a)
         else if k == .unwrap or k == .narrow or (k == .conv and nodes[n].aux == i32(int(CV.union_))): n = int(nodes[n].a)
@@ -1052,10 +1208,10 @@ steps_overlap = (a: int[], b: int[]) -> bool:
             if nodes[bx].kind == .int_lit and nodes[by].kind == .int_lit and nodes[bx].ival != nodes[by].ival: return false
     true
 
-# the variable (ident node) whose array or map holds the element place n is in, or 0
+# the variable (ident node) whose array or map, or box, holds the element place n is in, or 0
 elem_root = (n: int) -> int:
     r = place_var(n)
-    if pw_heap: return r
+    if pw_heap or pw_box: return r
     0
 
 # does expression n name the variable of ident node r?
@@ -1972,7 +2128,7 @@ gen_match_switch = (m: int, st0: int, rs: int, rtp: int, val: bool) -> bool:
         blk()
         arm_level[i] = ctl
         i -= 1
-    ha = e_slot(int(locals[int(nodes[m].sym)].offset))
+    ha = local_place(int(nodes[m].sym), false).v
     x = 0
     if is_enum: x = e_load(VI, ha, 0, 4)
     else: x = load_val(st, ha, 0)
@@ -2006,11 +2162,13 @@ gen_match = (m: int, want: bool) -> Val:
         rs = new_temp(rtp)
         e_zero(e_slot(rs), tsize(rtp))
     scope_push()
-    stmt_begin()
-    sv = gen_owned(int(nodes[m].a))
-    store_val(st, e_slot(int(locals[hidden].offset)), 0, sv.v)
-    stmt_end()
-    scope_add_local(hidden)
+    if held_views.contains(hidden): e_mov(int(locals[hidden].vreg), held_value_addr(int(nodes[m].a)))
+    else:
+        stmt_begin()
+        sv = gen_owned(int(nodes[m].a))
+        store_val(st, e_slot(int(locals[hidden].offset)), 0, sv.v)
+        stmt_end()
+        scope_add_local(hidden)
     if gen_match_switch(m, st, rs, rtp, val):
         scope_pop()
         if val: return result_from_slot(rs, rtp)
@@ -2025,7 +2183,7 @@ gen_match = (m: int, want: bool) -> Val:
         match_level = ctl
         loop k in [0..nkids(arm)):
             p = kid(arm, k)
-            ha = e_slot(int(locals[hidden].offset))
+            ha = local_place(hidden, false).v
             enter_cond()
             ok = gen_match_test(p, st, ha)
             leave_cond()
@@ -2530,7 +2688,7 @@ gen_intrinsic = (e: int) -> Val:
                 if a == 0: continue
                 f = int(structs[si].fields) + i
                 fv = gen_owned(a)
-                store_val(int(fields[f].type), slotp, int(fields[f].offset), fv.v)
+                store_field(f, slotp, fv.v)
             return V(-1, false)
         store_val(et, slotp, 0, val.v)
         return V(-1, false)
@@ -2933,7 +3091,7 @@ gen_fmt_struct = (e: int) -> Val:
             sep = ""
             if i > 0: sep = ", "
             lit(ba, "{sep}{name_of(int(fields[f].name))}=")
-            fmt_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), e_addi(va, int(fields[f].offset)))
+            fmt_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), field_val_addr(f, va))
             fi += 1
         lit(ba, ")")
     else if k == .tuple:
@@ -2965,7 +3123,7 @@ gen_fmt_struct = (e: int) -> Val:
                 loop j in [0..nf):
                     if j > 0: lit(ba, ", ")
                     f = int(variants[vi].fields) + j
-                    fmt_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), e_addi(va, int(fields[f].offset)))
+                    fmt_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), field_val_addr(f, va))
                     fi += 1
                 lit(ba, ")")
             endc()
@@ -3004,7 +3162,7 @@ gen_json_fields = (e: int) -> Val:
         loop i in [0..int(structs[si].nfields)):
             f = int(structs[si].fields) + i
             json_key(ba, name_of(int(fields[f].name)), indent, level, i)
-            json_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), e_addi(va, int(fields[f].offset)), indent, child)
+            json_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), field_val_addr(f, va), indent, child)
             fi += 1
         if structs[si].nfields > 0: e_call(rt("__json_newline"), [ba, indent, level], -1)
         lit(ba, "}}")
@@ -3039,7 +3197,7 @@ gen_json_fields = (e: int) -> Val:
             name = name_of(int(variants[vi].name))
             if structs[si].union_:
                 f = int(variants[vi].fields)
-                json_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), e_addi(va, int(fields[f].offset)), indent, level)
+                json_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), field_val_addr(f, va), indent, level)
                 fi += 1
             else if nf == 0:
                 e_call(rt("__json_write_str"), [ba, e_daddr(str_data(name))], -1)
@@ -3050,7 +3208,7 @@ gen_json_fields = (e: int) -> Val:
                 loop j in [0..nf):
                     e_call(rt("__json_sep"), [ba, indent, child, e_iconst(j)], -1)
                     f = int(variants[vi].fields) + j
-                    json_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), e_addi(va, int(fields[f].offset)), indent, e_addi(child, 1))
+                    json_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), field_val_addr(f, va), indent, e_addi(child, 1))
                     fi += 1
                 e_call(rt("__json_newline"), [ba, indent, child], -1)
                 lit(ba, "]")
@@ -3266,6 +3424,10 @@ gen_expr = (e: int) -> Val:
             has = gen_map_presence(a, int(nodes[e].aux2))
             if vi == -1: return V(e_bin(.eq, VI, has, e_iconst(0)), false)
             return V(has, false)
+        if vi < 0:
+            view = held_opt_reg(a)
+            if view >= 0:
+                return V(e_bin((if vi == -1: Op.eq else: Op.ne), VI, view, e_iconst(0)), false)
         p = gen_place(a, false)
         addr = place_addr(p, at)
         if vi < 0:
@@ -3308,7 +3470,7 @@ gen_expr = (e: int) -> Val:
                 if a == 0: continue
                 f = int(structs[si].fields) + i
                 val = gen_owned(a)
-                store_val(int(fields[f].type), d, int(fields[f].offset), val.v)
+                store_field(f, d, val.v)
             return Val(e_slot(s), true, s)
         if aux == 3:
             si = int(types[t].st)
@@ -3328,7 +3490,7 @@ gen_expr = (e: int) -> Val:
             loop i in call_eval_order(e):
                 f = int(variants[vi].fields) + i
                 val = gen_owned(kid(e, i))
-                store_val(int(fields[f].type), d, int(fields[f].offset), val.v)
+                store_field(f, d, val.v)
             return Val(e_slot(s), true, s)
         fatal(nodes[e].pos, "invalid call")
     if k == .intrinsic: return gen_intrinsic(e)
@@ -3892,17 +4054,22 @@ gen_iflet = (e: int, t: int) -> Val:
     ot = prune(ntype(a))
     inner = int(types[ot].elem)
     scope_push()
-    stmt_begin()
-    # (an owned optional: its value moves into the variable, with no copy to release)
-    ov = gen_owned(a)
-    pa = ov.v
     has = vreg(VI)
-    e_mov(has, e_load(VI, pa, tsize(inner), 1))
-    iff(has)
-    write_place(local_place(l, true), inner, load_val(inner, pa, 0))
-    endc()
-    stmt_end()
-    scope_add_local(l)
+    if held_views.contains(l):
+        pa = gen_place(a, false).v
+        e_mov(int(locals[l].vreg), held_encode_addr(pa, inner))
+        e_mov(has, e_load(VI, pa, tsize(inner), 1))
+    else:
+        stmt_begin()
+        # Move an owned optional's value into the local, without another copy.
+        ov = gen_owned(a)
+        pa = ov.v
+        e_mov(has, e_load(VI, pa, tsize(inner), 1))
+        iff(has)
+        write_place(local_place(l, true), inner, load_val(inner, pa, 0))
+        endc()
+        stmt_end()
+        scope_add_local(l)
     iff(has)
     enter_cond()
     if val: gen_value_block(int(nodes[e].b), rs, t)
@@ -3962,6 +4129,15 @@ assign_to = (target: int, t: int, v: int):
         nm = name_of(int(nodes[target].name))
         loop i in [0..len(nm)): e_store(pa, 4 * swizzle_index(nm[i]), e_load(ty, v, 4 * i, mode), mode)
         return
+    f = boxed_field_of(target)
+    if f >= 0:
+        # (a boxed field given a value: a new box, and the old one released)
+        box_slot = true
+        sa = gen_place(target, true).v
+        old = e_load(VI, sa, 0, ptr_size)
+        box_put(sa, t, v)
+        release(old, mk_box(int(fields[f].type)))
+        return
     pl = gen_place(target, true)
     if is_managed(t):
         if pl.mem: drop_at(pl.v, t)
@@ -3997,6 +4173,10 @@ gen_assign = (s: int):
         else: write_place(pl, t, e_bin(.sub, VI, cur, d))
         return
     if nodes[s].op == i32(int(Tok.assign)):
+        if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and held_views.contains(int(nodes[a].sym)):
+            # (a held view given another part: its address)
+            e_mov(int(locals[int(nodes[a].sym)].vreg), held_value_addr(int(nodes[s].b)))
+            return
         val = gen_owned(int(nodes[s].b))
         assign_to(a, t, val.v)
         return
@@ -4054,6 +4234,9 @@ gen_vardecl = (s: int):
     l = int(nodes[s].sym)
     t = int(locals[l].type)
     if nodes[s].aux2 == 1 and int(locals[l].flags) & LF_PARAM != 0: return
+    if held_views.contains(l):
+        e_mov(int(locals[l].vreg), held_value_addr(int(nodes[s].b)))
+        return
     if view_decl(s, l): return
     if is_shared(l): new_cell(l)
     pl = local_place(l, true)
@@ -4160,6 +4343,161 @@ plain_read = (n: int) -> bool:
         a = int(nodes[n].a)
         kind = tkind(ntype(a))
         return (kind == .array or kind == .fixed) and plain_read(a) and plain_read(int(nodes[n].b))
+    false
+
+# A walk down a tree, `cur = n` and then `loop let c = cur: cur = c.left`, or a match on a
+# parameter, `match e: .bin(op, l, r): ...`, would copy each node it passes into a variable (and
+# retain what the node holds, to release it after). What a parameter holds stays as it is for the
+# whole call: the function cannot change it, and a caller gives a copy of what the call could
+# change (borrow_may_change). So a variable only ever given parts of a parameter (through fields,
+# boxed ones too, `!` and narrowing), or parts of other such variables, and never changed through,
+# can be the address of the part: no copy and no reference counting (release builds, and
+# recursive records in default builds). These
+# held views are plain variables (given another part by assignment), the names of `if let` and
+# `loop let`, and the value a match or a variant `if let` / `loop let` looks at, whose names stand
+# for its fields.
+const LF_HELDVIEW = 2097152    # lowering-only; reset before a repeated lowering
+held_views: {int: bool}         # the held views of the function being lowered
+hv_given: (int, int)[]          # (finding them) each variable and a value it is given
+hv_cand: {int: bool}            # ... the variables given values
+hv_bad: {int: bool}             # ... those that cannot be views
+hv_lambda = false               # ... a closure is made (none then: it may change what it captures)
+
+# Optional held views use null for none, otherwise an address biased by BOX_HDR.
+# A recursive optional field already stores exactly that pointer, so advancing
+# a read-only cursor becomes one pointer load. Its presence check needs no tag
+# load or default-address selection. Only general value reads materialize the
+# ordinary optional address; this representation never escapes the function.
+held_opt_reg = (e: int) -> int:
+    if held_views.len() == 0 or nodes[e].kind != .ident or nodes[e].aux != i32(int(SK.local)): return -1
+    l = int(nodes[e].sym)
+    if int(locals[l].flags) & LF_HELDVIEW == 0 or tkind(int(locals[l].type)) != .opt: return -1
+    int(locals[l].vreg)
+
+held_encode_addr = (addr: int, t: int) -> int:
+    if tkind(t) != .opt: return addr
+    value = e_addi(addr, 0 - BOX_HDR)
+    has = e_load(VI, addr, tsize(telem(t)), 1)
+    result = vreg(VI)
+    emit(.select, VI, result, has, value, e_iconst(0), 0)
+    result
+
+held_value_addr = (e: int) -> int:
+    t = ntype(e)
+    if tkind(t) == .opt:
+        view = held_opt_reg(e)
+        if view >= 0: return view
+        if boxed_field_of(e) >= 0:
+            box_slot = true
+            slot = gen_place(e, false).v
+            return e_load(VI, slot, 0, ptr_size)
+    held_encode_addr(gen_place(e, false).v, t)
+
+find_views = (f: int):
+    held_views = {}
+    loop l in fns[f].locals:
+        if int(locals[l].flags) & LF_HELDVIEW != 0: locals[l].flags &= i32(~(LF_HELDVIEW | LF_BYREF))
+    hv_bad = {}
+    # (what C gives a function it calls is C's, which may change it meanwhile)
+    if dbg_on or fns[f].body == 0 or fns[f].cabi: return
+    rooted = false
+    loop l in fns[f].params:
+        # Recursive walks need this even in the fast development mode. Other
+        # managed aggregates retain release-only analysis; their layout flag
+        # lets default builds skip scanning unrelated function bodies.
+        if opt_release or int(types[prune(int(locals[l].type))].flags) & TF_BOXED != 0:
+            if hv_root(l): rooted = true
+    if not rooted: return
+    hv_given = []
+    hv_cand = {}
+    hv_bad = {}
+    hv_lambda = false
+    hv_scan(int(fns[f].body))
+    if hv_lambda or hv_given.len() == 0: return
+    # (assumed views until a value given cannot be one: what is left gives each other only parts)
+    changed = true
+    loop changed:
+        changed = false
+        loop g in hv_given:
+            if not hv_bad.contains(g.0) and not hv_part(g.1):
+                hv_bad[g.0] = true
+                changed = true
+    loop l in hv_cand.keys():
+        if hv_bad.contains(l): continue
+        held_views[l] = true
+        locals[l].flags = i32(int(locals[l].flags) | LF_BYREF | LF_HELDVIEW)
+
+# a parameter whose parts can be views: a value in memory the function cannot change
+hv_root = (l: int) -> bool:
+    fl = int(locals[l].flags)
+    fl & (LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_SHARED) == 0 and vc(int(locals[l].type)) == VC_AGG and is_managed(int(locals[l].type)) and not type_has_fn(int(locals[l].type))
+
+hv_give = (l: int, v: int):
+    fl = int(locals[l].flags)
+    # (a match's own variable is LF_ADDR: the match reads it in memory)
+    ok = v != 0 and fl & (LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM | LF_EXPOSED) == 0 and (fl & LF_ADDR == 0 or locals[l].name == 0)
+    if not ok or is_shared(l) or not is_managed(int(locals[l].type)) or type_has_fn(int(locals[l].type)):
+        hv_bad[l] = true
+        return
+    hv_given.push((l, v))
+    hv_cand[l] = true
+
+# place p is written: what it is in cannot be a view
+hv_spoil = (p: int):
+    r = place_var(p)
+    if r != 0 and nodes[r].aux == i32(int(SK.local)): hv_bad[int(nodes[r].sym)] = true
+
+hv_scan = (n: int):
+    if n <= 0: return
+    k = nodes[n].kind
+    if k == .lambda:
+        hv_lambda = true
+        return
+    if k == .vardecl:
+        if nodes[n].nlist > 0:
+            loop i in [0..nkids(n)): hv_spoil(kid(n, i))
+        else if not has_flag(n, NF_GLOBAL):
+            l = int(nodes[n].sym)
+            # param_view_decl already proved this synthetic Dewy binding is
+            # the borrowed parameter itself. It is a root, not a candidate
+            # local whose LF_PARAM flag would disqualify every walk from it.
+            if nodes[n].aux2 != 1 or int(locals[l].flags) & LF_PARAM == 0: hv_give(l, int(nodes[n].b))
+    else if k == .iflet or k == .match_ or (k == .while_ and nodes[n].aux == 1): hv_give(int(nodes[n].sym), int(nodes[n].a))
+    else if k == .assign:
+        a = int(nodes[n].a)
+        if nodes[n].aux == 1:
+            loop i in [0..nkids(a)): hv_spoil(kid(a, i))
+        else if nodes[n].aux == 0 and nodes[n].op == i32(int(Tok.assign)) and nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and int(locals[int(nodes[a].sym)].flags) & LF_ALIAS == 0: hv_give(int(nodes[a].sym), int(nodes[n].b))
+        else: hv_spoil(a)
+    else if k == .intrinsic and nkids(n) > 0:
+        id = nodes[n].aux as IN
+        if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .setlen or id == .extend or id == .arrdata: hv_spoil(kid(n, 0))
+    else if k == .addr or (k == .cast or k == .conv) and raw_view(n): hv_spoil(int(nodes[n].a))
+    else if k == .for_ and has_flag(n, NF_MUT): hv_spoil(int(nodes[n].a))
+    fs = [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]
+    if k == .for_: fs = [int(nodes[n].a), int(nodes[n].b)]
+    loop c in fs: hv_scan(c)
+    loop i in [0..nkids(n)):
+        c = kid(n, i)
+        if has_flag(c, NF_MUT): hv_spoil(c)
+        hv_scan(c)
+    loop i in [0..nkids2(n)): hv_scan(kid2(n, i))
+
+# is p a part of a parameter or of a view (as views are assumed so far)?
+hv_part = (p: int) -> bool:
+    k = nodes[p].kind
+    if k == .ident:
+        if nodes[p].aux != i32(int(SK.local)): return false
+        l = int(nodes[p].sym)
+        fl = int(locals[l].flags)
+        if fl & LF_ALIAS != 0: return locals[l].alias != 0 and hv_part(int(locals[l].alias))
+        if fl & LF_PARAM != 0: return not hv_bad.contains(l) and hv_root(l)
+        return hv_cand.contains(l) and not hv_bad.contains(l)
+    if k == .field:
+        a = int(nodes[p].a)
+        tk = tkind(ntype(a))
+        return (nodes[p].aux == -3 or nodes[p].aux >= 0 and (tk == .struct_ or tk == .tuple)) and hv_part(a)
+    if k == .unwrap or k == .narrow: return hv_part(int(nodes[p].a))
     false
 
 # is e a variable (or a field path of one) that code n cannot change?
@@ -5175,7 +5513,7 @@ lpath_key = (n: int) -> int:
         if nodes[n].aux == i32(int(SK.global)): return lpath_intern(0, int(nodes[n].sym) * 2 + 1)
     if k == .field and nodes[n].aux >= 0:
         a = int(nodes[n].a)
-        if tkind(ntype(a)) != .struct_: return 0
+        if tkind(ntype(a)) != .struct_ or boxed_field_of(n) >= 0: return 0
         parent = lpath_key(a)
         if parent == 0: return 0
         return lpath_intern(parent, int(nodes[n].aux))
@@ -5614,10 +5952,12 @@ gen_while = (s: int):
         stmt_begin()
         pa = place_addr(gen_place(a, false), ot)
         e_mov(has, e_load(VI, pa, tsize(inner), 1))
-        iff(has)
-        vv = own(V(load_val(inner, pa, 0), false), inner)
-        write_place(local_place(l, true), inner, vv.v)
-        endc()
+        if held_views.contains(l): e_mov(int(locals[l].vreg), held_encode_addr(pa, inner))
+        else:
+            iff(has)
+            vv = own(V(load_val(inner, pa, 0), false), inner)
+            write_place(local_place(l, true), inner, vv.v)
+            endc()
         stmt_end()
         brif_to(e_bin(.eq, VI, has, e_iconst(0)), brk)
         scope_push()
@@ -5777,6 +6117,7 @@ lower_inst = (lf: int, f: int):
         if l < 0: continue
         locals[l].flags &= i32(~LF_PARAM)
         param_view_decl(s, l)
+    find_views(f)
     # locals
     loop l in fns[f].locals:
         fl = int(locals[l].flags)
@@ -5874,7 +6215,7 @@ field_list = (t0: int) -> (int, int)[]:
         si = int(types[t].st)
         loop i in [0..int(structs[si].nfields)):
             f = int(structs[si].fields) + i
-            out.push((int(fields[f].type), int(fields[f].offset)))
+            out.push((field_store_type(f), int(fields[f].offset)))
     else if types[t].kind == .tuple:
         loop i in [0..int(types[t].nargs)): out.push((targ(t, i), tuple_off(t, i)))
     out
@@ -5909,12 +6250,12 @@ helper_drop = (t: int, copy: bool):
             vi = int(structs[si].variants) + v
             any = false
             loop i in [0..int(variants[vi].nfields)):
-                if is_managed(int(fields[int(variants[vi].fields) + i].type)): any = true
+                if is_managed(field_store_type(int(variants[vi].fields) + i)): any = true
             if not any: continue
             iff(e_bin(.eq, VI, tag, e_iconst(v)))
             loop i in [0..int(variants[vi].nfields)):
                 f = int(variants[vi].fields) + i
-                ft = int(fields[f].type)
+                ft = field_store_type(f)
                 if copy: copy_at(e_addi(a, int(fields[f].offset)), ft)
                 else: drop_at(e_addi(a, int(fields[f].offset)), ft)
             endc()
@@ -6009,7 +6350,7 @@ helper_value_members = (t: int, hashing: bool = false) -> int[]:
             result.push(f)
             continue
         k = types[current].kind
-        if k == .array or k == .fixed or k == .opt: pending.push(int(types[current].elem))
+        if k == .array or k == .fixed or k == .opt or k == .box: pending.push(int(types[current].elem))
         else if k == .struct_ or k == .tuple:
             loop field in field_list(current): pending.push(field.0)
         else if k == .enum_:
@@ -6048,6 +6389,52 @@ helper_value_snapshot = (t: int, source: int) -> int:
     e_copy(result, source, tsize(t))
     copy_at(result, t)
     result
+
+# a box's last reference gone: its value dropped and the box freed. Boxes that dropping it frees
+# wait their turn (__box_defer), so a list a million long is freed in a loop, not a million calls
+# deep: the first box dropped on a thread drops those after it (__box_next)
+helper_boxrel = (t: int):
+    ps = helper_params(1)
+    p = ps[0]
+    drop = lf_helper(.boxdrop, t, 0)
+    iff(e_call(rt("__rc_dec_test"), [p], VI))
+    iff(e_bin(.eq, VI, e_call(rt("__box_defer"), [p, e_faddr(drop)], VI), e_iconst(0)))
+    e_call(drop, [p], -1)
+    blk()
+    lop()
+    q = e_call(rt("__box_next"), [], VI)
+    brif_to(e_bin(.eq, VI, q, e_iconst(0)), ctl - 1)
+    e_calli(e_load(VI, q, ptr_size, ptr_size), [e_load(VI, q, 0, ptr_size)], -1, false)
+    br_to(ctl)
+    endc()
+    endc()
+    endc()
+    endc()
+    e_ret(-1)
+
+# (the box p's value dropped, and the box freed)
+helper_boxdrop = (t: int):
+    ps = helper_params(1)
+    p = ps[0]
+    drop_at(e_addi(p, BOX_HDR), int(types[t].elem))
+    e_call(rt("__box_free"), [p, e_iconst(tsize(int(types[t].elem)))], -1)
+    e_ret(-1)
+
+# takes a box, gives back one with no other reference: itself, or a copy holding what it holds
+helper_boxuniq = (t: int):
+    ps = helper_params(1)
+    ir.ret = VI
+    p = ps[0]
+    et = int(types[t].elem)
+    r = vreg(VI)
+    e_mov(r, p)
+    iff(e_bin(.ne, VI, p, e_iconst(0)))
+    iff(e_bin(.ne, VI, hdr_load(p, 0), e_iconst(1)))
+    e_mov(r, e_call(rt("__box_clone"), [p, e_iconst(tsize(et))], VI))
+    copy_at(e_addi(r, BOX_HDR), et)
+    endc()
+    endc()
+    e_ret(r)
 
 helper_eq = (t: int):
     ps = helper_params(2)
@@ -6097,7 +6484,7 @@ helper_eq = (t: int):
             iff(e_bin(.eq, VI, ta, e_iconst(v)))
             loop i in [0..int(variants[vi].nfields)):
                 f = int(variants[vi].fields) + i
-                eq_member(int(fields[f].type), e_addi(a, int(fields[f].offset)), e_addi(b, int(fields[f].offset)), fail)
+                eq_member(field_store_type(f), e_addi(a, int(fields[f].offset)), e_addi(b, int(fields[f].offset)), fail)
             endc()
     else if k == .array:
         et = int(types[t].elem)
@@ -6174,6 +6561,28 @@ helper_eq = (t: int):
 eq_member = (t0: int, a: int, b: int, fail: int):
     t = prune(t0)
     k = types[t].kind
+    if k == .box:
+        # (the same box, or both empty: equal without looking inside)
+        pa = e_load(VI, a, 0, ptr_size)
+        pb = e_load(VI, b, 0, ptr_size)
+        blk()
+        same = ctl
+        brif_to(e_bin(.eq, VI, pa, pb), same)
+        et = prune(int(types[t].elem))
+        va = box_val(pa, et)
+        vb = box_val(pb, et)
+        if types[et].kind == .opt:
+            # (an optional's flags here, its value by the value's helper: one call deep for each
+            # node of a list, not two)
+            inner = int(types[et].elem)
+            ha = e_load(VI, va, tsize(inner), 1)
+            brif_to(e_bin(.ne, VI, ha, e_load(VI, vb, tsize(inner), 1)), fail)
+            brif_to(e_bin(.eq, VI, ha, e_iconst(0)), same)
+            et = prune(inner)
+        r = e_call(lf_helper(.eq, et, 0), [va, vb], VI)
+        brif_to(e_bin(.eq, VI, r, e_iconst(0)), fail)
+        endc()
+        return
     if k == .str_:
         r = e_call(rt("__str_eq"), [e_load(VI, a, 0, ptr_size), e_load(VI, b, 0, ptr_size)], VI)
         brif_to(e_bin(.eq, VI, r, e_iconst(0)), fail)
@@ -6232,7 +6641,7 @@ helper_hash = (t: int):
             iff(e_bin(.eq, VI, tag, e_iconst(v)))
             loop i in [0..int(variants[vi].nfields)):
                 f = int(variants[vi].fields) + i
-                hash_member(h, int(fields[f].type), e_addi(a, int(fields[f].offset)))
+                hash_member(h, field_store_type(f), e_addi(a, int(fields[f].offset)))
             endc()
     else if k == .array:
         et = int(types[t].elem)
@@ -6273,6 +6682,19 @@ hash_member = (h: int, t0: int, a: int):
     c = vc(t)
     x = 0
     if k == .str_: x = e_call(rt("__str_hash"), [e_load(VI, a, 0, ptr_size)], VI)
+    else if k == .box:
+        et = prune(int(types[t].elem))
+        va = box_val(e_load(VI, a, 0, ptr_size), et)
+        if types[et].kind == .opt:
+            # (as helper_hash does for an optional, but one call deep for each node of a list)
+            inner = int(types[et].elem)
+            has = e_load(VI, va, tsize(inner), 1)
+            hash_mix(h, has)
+            iff(has)
+            hash_mix(h, e_call(lf_helper(.hash, prune(inner), 0), [va], VI))
+            endc()
+            return
+        x = e_call(lf_helper(.hash, et, 0), [va], VI)
     else if c == VC_INT and k != .array: x = load_val(t, a, 0)
     else if c == VC_FLT: x = hash_float(load_val(t, a, 0), vt_of(t))
     else if k == .fn_: x = e_load(VI, a, 0, ptr_size)
@@ -6416,6 +6838,10 @@ lower_helper = (lf: int):
         envdrop: helper_envdrop(h.inst)
         stackenvdrop: helper_envdrop(h.inst, false)
         envcopy: helper_envcopy(h.inst)
+
+        boxrel: helper_boxrel(t)
+        boxdrop: helper_boxdrop(t)
+        boxuniq: helper_boxuniq(t)
 
 # native FFI: a thunk that resolves the C function on first use and calls it
 # macOS: the C functions dyld puts in their slots when the program starts: (slot's offset in the

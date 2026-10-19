@@ -1,0 +1,35 @@
+Branch(name="a", child=Branch(name="b", child=Leaf(text="x")))
+Branch(name="a", child=Branch(name="b", child=Branch(name="c", child=Leaf(text="x"))))
+["a", "b", "x"] ["a", "b", "c", "x"] false
+["a", "b", "y"]
+Branch(name="", child=Leaf(text=""))
+A(n=1, b=B(s="one", a=A(n=2, b=B(s="two", a=none))))
+A(n=1, b=B(s="one", a=A(n=20, b=B(s="TWO", a=none))))
+2 20 false
+add(num(1), neg(add(num(2), num(3)))) -4
+num(1) neg(add(num(2), num(3)))
+add(neg(add(num(2), num(3))), num(1)) -4 false
+add(num(0), num(0)) 0
+Pair(tag="root", link=(1, Pair(tag="one", link=none, kids=[none, none])), kids=[Pair(tag="left", link=none, kids=[none, none]), Pair(tag="right", link=(2, Pair(tag="two", link=none, kids=[none, none])), kids=[none, none])])
+Pair(tag="root", link=(1, Pair(tag="ONE", link=none, kids=[none, none])), kids=[Pair(tag="LEFT", link=none, kids=[none, none]), Pair(tag="right", link=(2, Pair(tag="two", link=none, kids=[none, none])), kids=[none, none])])
+false 1 two
+Item(name="item", qty=1, next=Item(name="second", qty=2, next=Item(name="item", qty=1, next=none)))
+Item(name="item", qty=11, next=none)
+Item(name="item", qty=1, next=none) true
+vec3(4.0, 5.0, 6.0) vec3(4.0, 50.0, 6.0)
+200 200
+A(n=7, b=B(s="made", a=A(n=8, b=none)))
+[A(n=10, b=B(s="new", a=none)), A(n=20, b=B(s="b2!", a=none)), A(n=30, b=B(s="b3!", a=A(n=30, b=none)))]
+30 -1
+2 3
+true false
+Item(name="a", qty=1, next=Item(name="a", qty=1, next=Item(name="b", qty=1, next=Item(name="a", qty=1, next=Item(name="a", qty=1, next=Item(name="b", qty=1, next=none))))))
+add(num(1), neg(add(num(2), num(3))))
+{"name":"a","child":{"name":"b","child":{"text":"x"}}}
+Branch(name="a", child=Branch(name="b", child=Leaf(text="x")))
+{"n":1,"b":{"s":"one","a":{"n":200,"b":{"s":"two","a":null}}}}
+A(n=1, b=B(s="one", a=A(n=200, b=B(s="two", a=none))))
+{"add":[{"num":[1]},{"neg":[{"add":[{"num":[2]},{"num":[3]}]}]}]}
+add(num(1), neg(add(num(2), num(3))))
+Pair(tag="root", link=(1, Pair(tag="ONE", link=none, kids=[none, none])), kids=[Pair(tag="LEFT", link=none, kids=[none, none]), Pair(tag="right", link=(2, Pair(tag="two", link=none, kids=[none, none])), kids=[none, none])])
+0

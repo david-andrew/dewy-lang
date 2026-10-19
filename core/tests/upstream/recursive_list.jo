@@ -1,0 +1,138 @@
+# requires: sloppy
+# A linked list: a struct whose field holds the next one (kept in a box of its own), with value
+# semantics: a copy shares the nodes until one of the two changes, as an array does
+struct Node:
+    value: int
+    next: Node?
+
+push_front = (l: Node?, v: int) -> Node: Node(v, l)
+
+from_range = (n: int) -> Node?:
+    l: Node? = none
+    loop i in [n - 1, n - 2..0]: l = push_front(l, i)
+    l
+
+length = (l: Node?) -> int:
+    n = 0
+    cur = l
+    loop cur != none:
+        n += 1
+        cur = cur!.next
+    n
+
+sum = (l: Node?) -> int:
+    s = 0
+    cur = l
+    loop:
+        if let c = cur:
+            s += c.value
+            cur = c.next
+        else: break
+    s
+
+to_array = (l: Node?) -> int[]:
+    out: int[]
+    cur = l
+    loop cur != none:
+        out.push(cur!.value)
+        cur = cur!.next
+    out
+
+reversed = (l: Node?) -> Node?:
+    out: Node? = none
+    cur = l
+    loop:
+        if let c = cur:
+            out = Node(c.value, out)
+            cur = c.next
+        else: break
+    out
+
+# (recursive, as one would write it in a functional language)
+mapped = (l: Node?, f: (int) -> int) -> Node?:
+    if let c = l: return Node(f(c.value), mapped(c.next, f))
+    none
+
+# the node at i changed in place, the list itself (a `mut` parameter) written through its boxes
+set_at = (l: mut Node, i: int, v: int):
+    if i == 0:
+        l.value = v
+        return
+    if let n = l.next:
+        rest = n
+        set_at(rest, i - 1, v)
+        l.next = rest
+
+# the node after each with an even value dropped
+drop_after_even = (l: mut Node):
+    if l.value % 2 == 0:
+        if let n = l.next: l.next = n.next
+    if let n = l.next:
+        rest = n
+        drop_after_even(rest)
+        l.next = rest
+
+show = (l: Node?) -> str: "{to_array(l)}"
+
+base = alloc_count()
+
+a = from_range(5)
+print(show(a), length(a), sum(a))
+print(a)
+b = a                                 # shares every node
+a!.next!.next!.value = 20             # a's first three nodes copied, the rest still shared
+print(show(a), show(b))
+print(a == b, b == from_range(5))
+b!.next = none
+print(show(a), show(b))
+print(show(reversed(a)), show(mapped(a, (x): x * x)))
+
+if let n = a:
+    c = n
+    set_at(c, 4, 40)
+    drop_after_even(c)
+    print(show(c), show(a))
+
+# in place, the whole node given anew through `if let`
+if let n = a!.next: a!.next = Node(n.value + 100, n.next)
+print(show(a))
+
+# a list in a map, as a key and as a value
+seen: {Node: str} = {}
+seen[a!] = "a"
+seen[from_range(3)!] = "short"
+print(seen[from_range(3)!], seen.get(b!) == none, seen.len())
+lists: {str: Node?} = {}
+lists["one"] = from_range(1)
+lists["one"]!.value = 7
+print(lists)
+
+# 100,000 nodes made, made again, changed and dropped; a million made and freed (in a loop, not a
+# million calls deep)
+big = from_range(100000)
+print(length(big), sum(big))
+big2 = big
+big = from_range(100000)
+big2!.value = -1
+print(sum(big) - sum(big2))
+# (comparing walks the lists, as deep as they are long)
+long = from_range(2000)
+long2 = from_range(2000)
+print(long == long2)
+long2!.next!.value = 0
+print(long == long2)
+long = none
+long2 = none
+small = mapped(from_range(3000), (x): x + 1)
+print(sum(small))
+small = none
+huge = from_range(1000000)
+print(length(huge))
+huge = none
+big = none
+big2 = none
+a = none
+b = none
+seen = {}
+lists = {}
+print(alloc_count() - base)

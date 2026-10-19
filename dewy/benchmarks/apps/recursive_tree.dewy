@@ -1,0 +1,32 @@
+from p"harness.dewy" import size_argument, clock
+Node:type=[key:int64 left:Node? right:Node?]
+build_tree=(lo:int64 hi:int64):>Node?=>{
+    if lo >=? hi return none
+    let mid=(lo+hi)>>1
+    return Node[mid build_tree(lo mid) build_tree(mid+1 hi)]
+}
+find_key=(root:Node? key:int64):>int64=>{
+    let cur=root
+    loop true {
+        let node=cur
+        if node is?none break
+        if key <? node.key {cur=node.left}
+        else if key >? node.key {cur=node.right}
+        else return node.key+1
+    }
+    return 0
+}
+kernel=(root:Node? count:int64):>int64=>{
+    let result:int64=0
+    loop i in [0..count) {result+=find_key(root (i*73)%4096)}
+    return result
+}
+main=(args:array<string>):>int64=>{
+    let count=size_argument(args 2000000)
+    let root=build_tree(0 2047)
+    let started=clock()
+    let result=kernel(root count)
+    let finished=clock()
+    printl"{result} {finished-started}"
+    return 0
+}

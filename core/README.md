@@ -502,6 +502,20 @@ handwritten hash table, while Dewy uses per-node arrays and an insertion-ordered
 dictionary, so that comparison includes representation and library costs.
 The correctness gate also runs all five workloads on native and web targets.
 
+Recursive lists and binary-search trees have a separate C comparison, since
+the fixed historical compiler predates recursive values:
+
+```sh
+python3 -m tools.sloppy_core.benchmark_recursive /tmp/new/bin/dewy-core \
+  --baseline /tmp/previous-recursive/bin/dewy-core --cpu 1 \
+  --output /tmp/recursive-times.json
+```
+
+This runs both default and release builds with seven rotating pairs and Linux
+thread-CPU timing. Both languages allocate individual nodes before timing and
+free them afterward. Checksums are checked against C and an independent formula.
+This extends the runtime coverage without replacing the historical gate.
+
 String iteration has a separate full-scan/early-exit measurement:
 
 ```sh

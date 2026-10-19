@@ -566,6 +566,15 @@ check_place = (n: int, for_mut: bool):
             l = int(nodes[n].sym)
             f = int(locals[l].flags)
             nm = name_of(int(locals[l].name))
+            if f & LF_ALIAS != 0 and locals[l].alias != 0 and narrowed_var(l) == 0:
+                alias = int(locals[l].alias)
+                if nodes[alias].kind == .unwrap or nodes[alias].kind == .narrow:
+                    # A narrowed field path still writes its owning binding.
+                    # In particular, a private capture's environment must be
+                    # copied when mutation goes through an optional child.
+                    locals[l].flags |= i32(LF_ASSIGNED)
+                    check_place(alias, for_mut)
+                    return
             if f & LF_SOAELEM != 0: fatal(nodes[n].pos, "'{nm}' stands for an element of a soa array: assign it a whole value (in `loop mut`) or change its fields")
             # a closure modifying a variable it captured modifies the variable itself
             # (and a narrowed name stands for its variable, which a closure may have captured)

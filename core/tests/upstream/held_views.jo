@@ -1,0 +1,208 @@
+# Adapted: explicit half-open ranges and equivalent match forms for variant if/loop-let.
+# requires: sloppy
+# Release builds walk what a parameter holds without copying it: `cur = n` and then
+# `loop let c = cur: cur = c.left`, or `match e: .bin(op, l, r)`, point into the parameter.
+# Each case here must print what a copy would: a value taken out lives on after the tree changes,
+# a variable changed through is a copy of its own, and nothing leaks.
+enum Expr:
+    num(v: int)
+    neg(e: Expr)
+    bin(op: str, l: Expr, r: Expr)
+
+struct Tree:
+    key: int
+    left: Tree?
+    right: Tree?
+
+value = (e: Expr) -> int:
+    match e:
+        .num(v): v
+        .neg(x): -value(x)
+        .bin(op, l, r):
+            match op:
+                "+": value(l) + value(r)
+                "*": value(l) * value(r)
+                _: value(l) - value(r)
+
+# the leftmost number, by `loop let` on a variant
+leftmost = (e: Expr) -> int:
+    cur = e
+    loop:
+        match cur:
+            .bin(_, l, _): cur = l
+            .num(v): return v
+            .neg(x): return leftmost(x)
+            _: return 0
+    0
+
+# an operand taken out of the tree: a value of its own
+left_of = (e: Expr) -> Expr:
+    match e:
+        .bin(_, l, _): l
+        _: e
+
+# a name of the pattern given another value: the tree stays as it was
+swapped = (e: Expr) -> int:
+    match e:
+        .bin(op, l, r):
+            l = Expr.num(100)
+            value(Expr.bin(op, l, r))
+        _: value(e)
+
+show = (e: Expr) -> str:
+    match e:
+        .num(v): "{v}"
+        .neg(x): "-{show(x)}"
+        .bin(op, l, r): "({show(l)} {op} {show(r)})"
+
+insert = (n: mut Tree?, k: int):
+    if n == none:
+        n = Tree(k)
+        return
+    if n is Tree:
+        if k < n.key: insert(n.left, k)
+        else if n.key < k: insert(n.right, k)
+
+contains = (n: Tree?, k: int) -> bool:
+    cur = n
+    loop let c = cur:
+        if k < c.key: cur = c.left
+        else if c.key < k: cur = c.right
+        else: return true
+    false
+
+# the subtree at k: it outlives the walk, and changes to the tree after
+subtree = (n: Tree?, k: int) -> Tree?:
+    cur = n
+    loop let c = cur:
+        if k < c.key: cur = c.left
+        else if c.key < k: cur = c.right
+        else: return cur
+    none
+
+# the nodes on the way to k, in an array
+path = (n: Tree?, k: int) -> Tree[]:
+    out: Tree[]
+    cur = n
+    loop let c = cur:
+        out.push(c)
+        if k < c.key: cur = c.left
+        else if c.key < k: cur = c.right
+        else: break
+    out
+
+min_key = (n: Tree) -> int:
+    cur = n
+    loop let l = cur.left: cur = l
+    cur.key
+
+delete = (n: mut Tree?, k: int) -> bool:
+    if n == none: return false
+    if k < n!.key: return delete(n!.left, k)
+    if n!.key < k: return delete(n!.right, k)
+    if n!.left == none:
+        n = n!.right
+        return true
+    if n!.right == none:
+        n = n!.left
+        return true
+    s = min_key(n!.right!)
+    n!.key = s
+    delete(n!.right, s)
+
+keys = (n: Tree?, out: mut int[]):
+    if let c = n:
+        keys(c.left, out)
+        out.push(c.key)
+        keys(c.right, out)
+
+all_keys = (n: Tree?) -> int[]:
+    out: int[]
+    keys(n, out)
+    out
+
+height = (n: Tree?) -> int:
+    if let c = n: 1 + max(height(c.left), height(c.right))
+    else: 0
+
+# the variable of `loop let` changed: a copy, the parameter stays as it was
+bump_all = (n: Tree?) -> int:
+    s = 0
+    cur = n
+    loop let c = cur:
+        c.key += 1000
+        s += c.key
+        cur = c.right
+    s
+
+# a copy of the parameter changed while views walk the parameter itself
+walk_and_change = (n: Tree?) -> str:
+    m = n
+    if m is Tree: m.key = -1
+    if let c = m:
+        if let l = c.left: m!.left!.key = -2
+    cur = n
+    seen: int[]
+    loop let c = cur:
+        seen.push(c.key)
+        cur = c.left
+    "{seen} copy {m!.key} {m!.left!.key}"
+
+G: Tree? = none
+grow_g = ():
+    loop k in [1, 2, 3]: insert(G, k)
+    G = none
+
+# given G, changed by a call while the walk is on: the walk sees what it was given
+walk_while_global_changes = (n: Tree?) -> int[]:
+    seen: int[]
+    cur = n
+    loop let c = cur:
+        seen.push(c.key)
+        if seen.len() == 1: grow_g()
+        cur = c.right
+    seen
+
+main = ():
+    # (after seed_random, which makes the generator)
+    seed_random(3)
+    base = alloc_count()
+    e = Expr.bin("+", Expr.bin("*", Expr.num(3), Expr.num(4)), Expr.neg(Expr.bin("-", Expr.num(10), Expr.num(7))))
+    print(show(e), "=", value(e), "leftmost", leftmost(e))
+    l = left_of(e)
+    e = Expr.num(0)
+    print("left operand after the tree is gone:", show(l), value(l))
+    e2 = Expr.bin("-", Expr.num(1), Expr.num(2))
+    print("swapped", swapped(e2), "tree still", show(e2))
+
+    t: Tree? = none
+    loop k in [50, 30, 70, 20, 40, 60, 80, 35, 45, 65]: insert(t, k)
+    print(all_keys(t), height(t), contains(t, 45), contains(t, 46))
+    s = subtree(t, 30)
+    p = path(t, 45)
+    print("path", [loop x in p: x.key])
+    print(delete(t, 30), delete(t, 50), delete(t, 999), all_keys(t))
+    t!.left!.key = 31
+    print("subtree after the tree changed:", all_keys(s), "tree", all_keys(t))
+    print("path after:", [loop x in p: x.key], all_keys(p[1].left))
+    print("bump", bump_all(t), all_keys(t))
+    print(walk_and_change(t), all_keys(t))
+    G = none
+    loop k in [5, 6, 7]: insert(G, k)
+    print("global walk", walk_while_global_changes(G), G == none)
+
+    # a million lookups through views, and nothing left behind
+    big: Tree? = none
+    loop i in [0..2000): insert(big, random_int(0, 100_000))
+    found = 0
+    loop i in [0..200_000):
+        if contains(big, i % 100_000): found += 1
+    print("found", found, "height", height(big))
+    t = none
+    s = none
+    p = []
+    l = Expr.num(0)
+    e2 = Expr.num(0)
+    big = none
+    leaked = alloc_count() - base
+    print("leaked", leaked)

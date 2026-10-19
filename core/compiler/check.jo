@@ -1389,10 +1389,43 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
                 why = ""
                 if an == "inline" or an == "always_inline" or an == "forceinline": why = " (small functions are put inline automatically; @noinline keeps one out)"
                 fatal(nodes[at].pos, "unknown attribute @{an}{why}: there are @noinline, @parallel, @deterministic, @plain, @cabi, @export, @no_web(\"why\"), and for externs @lib, @symbol, @variadic")
+    if has_flag(decl, NF_EXTERN) or fns[f].cabi:
+        loop t in fns[f].ptypes: check_c_boxes(t, nodes[decl].pos)
+        if fns[f].ret != 0: check_c_boxes(int(fns[f].ret), nodes[decl].pos)
     decl_infos[di].insts.push(f)
     if zt.len() > 0: fn_instances[FnInstanceKey(decl, zt)] = f
     ensure_ret(f, use_pos)
     f
+
+# Recursive value fields use private managed boxes, so their containing layout
+# cannot be passed to C as an ordinary struct (including through a typed pointer).
+check_c_boxes = (t0: int, pos: int):
+    t = prune(t0)
+    if types[t].kind == .ptr: t = prune(int(types[t].elem))
+    if types[t].kind != .struct_ and types[t].kind != .enum_: return
+    pending = [t]
+    seen: {int: bool} = {}
+    loop pending.len() > 0:
+        current = prune(pending.pop())
+        if seen.has(current): continue
+        seen[current] = true
+        k = types[current].kind
+        if k == .opt or k == .fixed: pending.push(int(types[current].elem))
+        else if k == .tuple:
+            loop i in [0..int(types[current].nargs)): pending.push(targ(current, i))
+        else if k == .struct_ or k == .enum_:
+            si = int(types[current].st)
+            check_struct_fields(si)
+            decide_boxes(si)
+            fs: int[]
+            loop i in [0..int(structs[si].nfields)): fs.push(int(structs[si].fields) + i)
+            loop v in [0..int(structs[si].nvariants)):
+                vi = int(structs[si].variants) + v
+                loop i in [0..int(variants[vi].nfields)): fs.push(int(variants[vi].fields) + i)
+            loop f in fs:
+                if fields[f].boxed:
+                    fatal(pos, "recursive value field '{name_of(int(fields[f].name))}' in {type_str(current)} uses managed storage and cannot cross the C ABI; use an explicit pointer-based C representation")
+                pending.push(int(fields[f].type))
 
 ensure_ret = (f: int, use_pos: int):
     if fns[f].ret != 0: return
@@ -3011,6 +3044,9 @@ check_stmt = (s: int):
             ct = check_expr(int(nodes[s].a), T_BOOL)
             if tkind(ct) == .array or nodes[int(nodes[s].a)].kind == .range: fatal(nodes[s].pos, "`loop cond:` repeats while cond is true; to go through a range or an array, name the element: `loop i in [0..n):` (`loop _ in` when it is not used)")
             nodes[s].a = i32(coerce(last_checked, T_BOOL))
+            # The body runs only after its guard succeeds. Assignment still
+            # invalidates these aliases, just as it does inside an if arm.
+            narrow_by(int(nodes[s].a), true)
         check_loop_enter(s)
         check_block(int(nodes[s].b), 0, false)
         check_loop_leave(s)
@@ -3571,7 +3607,7 @@ runtime_names = ["__alloc", "__free", "__panic", "__panic_bounds", "__panic_slic
     "__arr_reserve", "__arr_insert_slot", "__arr_remove_slot", "__arr_slice", "__fixed_slice", "__arr_concat", "__str_concat", "__str_eq",
     "__str_cmp", "__str_slice", "__str_append", "__buf_finish", "__buf_append_str", "__arr_resize", "__arr_repeat", "__arr_filled",
     "__print_str", "__str_from_bytes", "__assert_fail", "__hash_bytes", "__str_hash", "__div_zero", "__rc_inc", "__rc_dec",
-    "__arr_extend", "__arr_extend_raw", "__rc_dec_test", "__out_flush", "__end_flush"]
+    "__arr_extend", "__arr_extend_raw", "__rc_dec_test", "__out_flush", "__end_flush", "__box_new", "__box_free", "__box_clone", "__box_defer", "__box_next"]
 optional_runtime = ["__c_str", "__mat4_mul", "__mat4_mul_vec4", "__fmt_i32", "__fmt_f32", "__ffi_resolve", "__panic_narrow", "__ffi_missing", "__mac_syscall"]
 runtime_insts: {str: int} = {}
 
@@ -4089,11 +4125,13 @@ check_program = (main_path: str):
         if not modules[m].is_prelude: init_fns.push(int(modules[m].init_fn))
     cx = -1
     check_pushers_first()
-    # (a struct of the program's that holds itself, a: A, is an error used or not)
+    # (a struct or enum of the program's whose values hold one another without end, a: A, is an
+    # error used or not)
     loop m in order:
         if modules[m].is_prelude: continue
         loop nm, s in modules[m].names:
-            if syms[s].kind == .struct_ and syms[s].decl != 0 and nkids2(int(syms[s].decl)) == 0 and nodes[int(syms[s].decl)].kind == .struct_:
+            sk = syms[s].kind
+            if (sk == .struct_ or sk == .enum_) and syms[s].decl != 0 and nkids2(int(syms[s].decl)) == 0 and (nodes[int(syms[s].decl)].kind == .struct_ or nodes[int(syms[s].decl)].kind == .enum_):
                 layout(get_struct_inst(int(syms[s].decl), []))
     if let s = modules[mainm].names.get(intern("main")):
         # (main() at the end of the file, as in Python: it runs once, there)

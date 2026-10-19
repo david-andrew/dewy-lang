@@ -51,9 +51,11 @@ __tid = () -> int:
 
 # ---------------- low level memory ----------------
 # per-thread allocator state: [heap_cur, heap_end, live count, free list heads (64 size classes),
-# large blocks freed for reuse (a list), the bytes in that list]
-const __TS_WORDS = 72
+# large blocks freed for reuse (a list), the bytes in that list, boxes waiting to be dropped (a
+# list, its length and capacity), a box being dropped]
+const __TS_WORDS = 76
 const __TS_BIG = 67
+const __TS_BOXES = 69
 const __BIG_KEEP = 64 << 20            # (native: at most this much is kept; a web page keeps all)
 __tstate: *int = null
 # (threads C made, which call @cabi functions: one more state, which they take turns at, by
@@ -414,6 +416,81 @@ __mem_eq = (a: *u8, b: *u8, n: int) -> bool:
         return (a as *u16)[0] == (b as *u16)[0] and ((a + n - 2) as *u16)[0] == ((b + n - 2) as *u16)[0]
     if n > 0: return a[0] == b[0]
     true
+
+# ---------------- boxes ----------------
+# A field whose type holds the struct or enum it is in (struct Node: next: Node?) keeps its value
+# in a box, [rc][value...] (lower.jo). Dropping a box's value may drop the boxes in it: on each
+# thread, the first box dropped drops them in turn after it, so a list a million long is freed
+# in a loop, not a million calls deep.
+__box_new = (size: int) -> *u8:
+    # Small boxes know their size at every drop site, so the allocator's two
+    # header words can hold the reference count and the start of the value.
+    # Keep large allocations' headers: a reused block may exceed this request.
+    p: *u8
+    if size + 8 <= 262144: p = __alloc_raw(max(0, size - 8)) - 16
+    else: p = __alloc_raw(8 + size)
+    (p as *int)[0] = 1
+    p
+
+__box_free = (p: *u8, size: int):
+    if size + 8 > 262144:
+        __free(p)
+        return
+    # The value has been dropped; restore the allocator header before returning
+    # the block to its ordinary size-class list, where any allocation can use it.
+    h = p as *int
+    h[0] = __size_class(size + 8)
+    h[1] = 0
+    __free(p + 16)
+
+# a copy of a shared box (the caller retains what its value holds); drops one reference to it
+__box_clone = (p: *u8, size: int) -> *u8:
+    q = __box_new(size)
+    mem_copy(q + 8, p + 8, size)
+    h = p as *int
+    if h[0] > 0:
+        if __mt_active: __atomic_add(h, -1)
+        else: h[0] -= 1
+    q
+
+# box p, its last reference gone, is to be dropped by f (its value released, then freed): later,
+# when another box is being dropped on this thread (true); false when none is, and the caller
+# drops p now, then each box __box_next gives
+__box_defer = (p: *u8, f: *u8) -> bool:
+    t = __ts()
+    # (threads C made share a state: each drops its own boxes at once)
+    if t == __ts_foreign: return false
+    w = t + __TS_BOXES
+    if w[3] == 0:
+        w[3] = 1
+        return false
+    n = w[1]
+    if n == w[2]:
+        cap = w[2] * 2
+        if cap == 0: cap = 256
+        q = __os_pages(cap * 16)
+        if w[0] != 0:
+            mem_copy(q, w[0] as *u8, n * 16)
+            __os_free_pages(w[0] as *u8, w[2] * 16)
+        w[0] = q as int
+        w[2] = cap
+    e = (w[0] as **u8) + 2 * n
+    e[0] = p
+    e[1] = f
+    w[1] = n + 1
+    true
+
+# the next box waiting to be dropped, as [box, function], or null when there is none: the dropping
+# is over
+__box_next = () -> **u8:
+    t = __ts()
+    w = t + __TS_BOXES
+    n = w[1]
+    if n == 0:
+        if t != __ts_foreign: w[3] = 0
+        return null
+    w[1] = n - 1
+    (w[0] as **u8) + 2 * (n - 1)
 
 # ---------------- process ----------------
 __write_fd = (fd: int, p: *u8, n: int):

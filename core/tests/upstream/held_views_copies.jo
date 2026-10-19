@@ -1,0 +1,142 @@
+# Adapted: variant if-let uses the existing equivalent match form.
+# requires: sloppy
+# Held views (see held_views.jo) where the walk's values go elsewhere or the variables change:
+# into a global, a map, a tuple, a copy changed after; a `mut` argument given the same variable;
+# a match giving the walking variable another value; narrowing; a function value made (no views)
+enum Expr:
+    num(v: int)
+    neg(e: Expr)
+    bin(op: str, l: Expr, r: Expr)
+
+struct Tree:
+    key: int
+    name: str
+    left: Tree?
+    right: Tree?
+
+struct World:
+    root: Tree?
+    count: int
+
+enum Shape:
+    circle(r: int)
+    group(a: Shape, b: Shape)
+
+insert = (n: mut Tree?, k: int):
+    if n == none:
+        n = Tree(k, "n{k}")
+        return
+    if n is Tree:
+        if k < n.key: insert(n.left, k)
+        else if n.key < k: insert(n.right, k)
+
+# a mut and a borrowed argument from the same variable
+both = (t: mut Tree?, n: Tree?) -> int:
+    cur = n
+    s = 0
+    loop let c = cur:
+        t = none
+        s += c.key
+        cur = c.left
+    s
+
+# match that gives the view variable another value in an arm
+walk_expr = (e: Expr) -> int:
+    cur = e
+    n = 0
+    loop n < 100:
+        match cur:
+            .bin(op, l, r):
+                n += 1
+                cur = l
+            .neg(x): cur = x
+            .num(v): return v * 1000 + n
+    -1
+
+# optional chaining, conversions, and a view put in a global, a map, a tuple
+G: Tree? = none
+GS: str[]
+odd = (w: World) -> str:
+    cur = w.root
+    m: {str: Tree} = {}
+    best: Tree? = none
+    loop let c = cur:
+        m[c.name] = c
+        if c.key % 2 == 1: best = c
+        G = c.left
+        pair = (c, c.key)
+        GS.push(pair.0.name)
+        cur = c.right
+    k = (cur ?? Tree(-1, "")).key
+    "{m.len()} {(best ?? Tree(-1, "")).key} {k} {(G ?? Tree(-1, "")).key} {GS}"
+
+# narrowing a view of a union
+area = (s: Shape) -> int:
+    cur = s
+    total = 0
+    loop:
+        match cur:
+            .group(a, b):
+                total += area(b)
+                cur = a
+            .circle(r): return total + r * r
+            _: return total
+
+# the view variable changed inside an `if` that narrowed it
+narrowed = (n: Tree?) -> int:
+    cur = n
+    s = 0
+    loop cur != none:
+        s += cur!.key
+        if cur!.left != none: cur = cur!.left
+        else: cur = cur!.right
+    s
+
+# a value taken out and changed: a copy
+taken = (n: Tree?) -> str:
+    cur = n
+    out: Tree[]
+    loop let c = cur:
+        x = c
+        x.key = 0
+        x.name = "changed"
+        out.push(x)
+        cur = c.right
+    "{[loop t in out: t.name]} {n!.name}"
+
+# a nested function value: no views
+with_lambda = (n: Tree?) -> int:
+    cur = n
+    f = (t: Tree) -> int: t.key
+    s = 0
+    loop let c = cur:
+        s += f(c)
+        cur = c.left
+    s
+
+main = ():
+    base = alloc_count()
+    a: Tree? = none
+    loop k in [5, 3, 8, 1, 4, 9, 7]: insert(a, k)
+    r = both(a, a)
+    print("both", r, a == none)
+    e = Expr.bin("+", Expr.neg(Expr.bin("*", Expr.num(6), Expr.num(2))), Expr.num(1))
+    print("walk", walk_expr(e))
+    b: Tree? = none
+    loop k in [5, 3, 8, 1, 4, 9, 7]: insert(b, k)
+    w = World(b, 7)
+    print("odd", odd(w))
+    G = none
+    GS = []
+    sh = Shape.group(Shape.group(Shape.circle(2), Shape.circle(3)), Shape.circle(4))
+    print("area", area(sh))
+    print("narrowed", narrowed(b))
+    print("taken", taken(b), b!.right!.name)
+    print("lambda", with_lambda(b))
+    a = none
+    b = none
+    w = World(none, 0)
+    e = Expr.num(0)
+    sh = Shape.circle(0)
+    leaked = alloc_count() - base
+    print("leaked", leaked)

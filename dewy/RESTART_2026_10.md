@@ -5,6 +5,51 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Recursive values with fast traversal (2026-10-19)
+
+Records can now contain themselves through optionals, other records, generic
+instances and unions. `Node:type=[value:int64 next:Node?]` is an ordinary value:
+copying it and changing a descendant leaves the original unchanged. Equality,
+hashing, text/JSON conversion, debugger displays and live-reload migration follow
+the value. Types with no finite value are rejected. Private callback captures
+remain independent inside recursive values, and `$capture @name` remains explicit
+sharing. Writes through narrowed captured fields now mark their actual owner.
+
+This ports Sloppy `403f7de` and `f11c0a4`, with pinned source hashes and adapted
+fixtures in `core/UPSTREAM.json`. The upstream read-only traversal analysis initially
+rejected Dewy's synthetic parameter bindings, leaving traversal **9–10× behind C**.
+Those bindings now remain analysis roots. Optional cursors use internal nullable
+pointers, avoiding a tag load/default-address choice on each step. Small boxes
+reuse the allocator header while live and restore it when freed; this halves the
+list node's allocation from 64 to 32 bytes. Large allocations keep their headers.
+A cached layout flag enables these recursive walks in default builds too, without
+scanning unrelated function bodies. None of this requires new user notation.
+
+The independent C bootstrap and **all 6,274 checks pass in 145.66 s**. Coverage
+includes native/web and default/release, private/shared callbacks, 100k-node list
+cleanup, the upstream million-node drop, size-class/large-allocation boundaries,
+GDB and live reload. Two expressions were rewritten for the smaller bootstrap
+parser; its restrictions were not relaxed.
+
+Seven rotating pairs compare matching algorithms against C pointer nodes, with
+construction/destruction outside the thread-CPU timer and independent checksums.
+Tree lookup takes **84.95 ms default / 79.09 ms release**, versus **61.56 ms C**;
+list traversal takes **17.11 / 16.95 ms**, versus **16.75 ms C**. Relative to the
+first recursive implementation, both modes improve roughly **7× for trees** and
+**10× for lists**. The remaining tree gap is real; these two kernels do not establish
+universal C parity. The maintained `tools.sloppy_core.benchmark_recursive` runner
+extends coverage without replacing the fixed historical gate. A conditional-move
+experiment made traversal slower and was discarded; its evidence is retained.
+
+The final native compiler executes **0.30% / 0.24%** more instructions for large
+Dewy default/release builds and **0.21%** more for the fixed compiler rebuild.
+Compilation timing comparisons give **8 pass / 4 inconclusive**, and the twelve
+existing runtime kernels in both modes give **15 pass / 9 inconclusive**; neither
+finds an established regression. These bounded comparisons do not accept a new
+whole-stage baseline or resolve earlier uncertainty. They compare native hosts;
+the preceding O3 PGO host's ~238k lines/s is not a fresh measurement of this source.
+[Raw measurements, experiments, bootstrap provenance and validation](audits/2026-10-19/recursive-values.json).
+
 ## Fresh O3 profile-trained compiler host (2026-10-19)
 
 The maintained optimized-host builder now uses `-O3` for PGO, with an explicit

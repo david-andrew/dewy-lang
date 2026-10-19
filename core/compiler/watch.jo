@@ -239,12 +239,12 @@ wk_sig = (t0: int, depth: int) -> str:
         out = "{type_str(t)}:{tsize(t)}("
         loop i in [0..int(structs[si].nfields)):
             f = int(structs[si].fields) + i
-            out = "{out}{name_of(int(fields[f].name))}={wk_sig(int(fields[f].type), depth + 1)}@{fields[f].offset},"
+            out = "{out}{name_of(int(fields[f].name))}={wk_sig(field_store_type(f), depth + 1)}@{fields[f].offset},"
         loop i in [0..int(structs[si].nvariants)):
             v = int(structs[si].variants) + i
             out = "{out}|{name_of(int(variants[v].name))}"
         "{out})"
-    else if k == .array or k == .opt or k == .ptr: "{k}({wk_sig(int(types[t].elem), depth + 1)})"
+    else if k == .array or k == .opt or k == .ptr or k == .box: "{k}({wk_sig(int(types[t].elem), depth + 1)})"
     else if k == .fixed: "{k}{fixed_len(t)}({wk_sig(int(types[t].elem), depth + 1)})"
     else if k == .tuple:
         out = "("
@@ -1623,6 +1623,7 @@ watch_build_child = (path: str, state: str, res: str, first: bool, out: str):
 # F<size of element>,<count>(<element>) (a fixed-size array)
 # O<size of value>(<value>) S<size><name>{field@offset:<description>,...} R<name>; (the struct
 # of that name enclosing it: recursion) T<size>{@offset:<description>,...} X<size><layout>;
+# B<size of value>(<value>) (a boxed field's box)
 
 wd_desc = (t0: int) -> str:
     t = prune(t0)
@@ -1637,6 +1638,7 @@ wd_desc = (t0: int) -> str:
     if k == .array: return "A{tsize(int(types[t].elem))}({wd_desc(int(types[t].elem))})"
     if k == .fixed: return "F{tsize(int(types[t].elem))},{fixed_len(t)}({wd_desc(int(types[t].elem))})"
     if k == .opt: return "O{tsize(int(types[t].elem))}({wd_desc(int(types[t].elem))})"
+    if k == .box: return "B{tsize(int(types[t].elem))}({wd_desc(int(types[t].elem))})"
     if k == .struct_:
         nm = type_str(t)
         if wd_path.contains(nm): return "R<{nm}>;"
@@ -1645,7 +1647,7 @@ wd_desc = (t0: int) -> str:
         out = "S{sz}<{nm}>\{"
         loop i in [0..int(structs[si].nfields)):
             f = int(structs[si].fields) + i
-            out += "{name_of(int(fields[f].name))}@{fields[f].offset}:{wd_desc(int(fields[f].type))},"
+            out += "{name_of(int(fields[f].name))}@{fields[f].offset}:{wd_desc(field_store_type(f))},"
         wd_path.pop()
         return out + "}"
     if k == .tuple:
@@ -1657,7 +1659,7 @@ wd_desc = (t0: int) -> str:
 # where the description starting at i ends
 wd_end = (s: str, i: int) -> int:
     c = s[i]
-    if c == 'A' or c == 'O' or c == 'F':
+    if c == 'A' or c == 'O' or c == 'F' or c == 'B':
         j = find_byte(s, '(', i)
         e = wd_end(s, j + 1)
         return e + 1
@@ -1771,7 +1773,7 @@ watch_lower_migrate = ():
             loop of in olds:
                 if of.0 == fnm:
                     found = true
-                    wc_conv(of.2, e_addi(ps[0], of.1), e_addi(ps[1], int(fields[f].offset)), int(fields[f].type))
+                    wc_conv(of.2, e_addi(ps[0], of.1), e_addi(ps[1], int(fields[f].offset)), field_store_type(f))
             if not found: wc_default(f, ps[1])
         e_ret(-1)
         w_emit()
@@ -1915,6 +1917,18 @@ wc_conv = (od: str, op: int, np: int, nt0: int):
         iff(e_bin(.ne, VI, e_load(VI, op, ops, 1), e_iconst(0)))
         e_store(np, tsize(et), e_iconst(1), 1)
         wc_conv(ed, op, np, et)
+        endc()
+        return
+    if c == 'B' and tk == .box:
+        # (a new box, its value converted)
+        ed = od[find_byte(od, '(', 0) + 1..len(od) - 1)
+        et = int(types[nt].elem)
+        ob = e_load(VI, op, 0, 8)
+        iff(e_bin(.ne, VI, ob, e_iconst(0)))
+        nb = e_call(rt("__box_new"), [e_iconst(tsize(et))], VI)
+        e_zero(e_addi(nb, BOX_HDR), tsize(et))
+        e_store(np, 0, nb, 8)
+        wc_conv(ed, e_addi(ob, BOX_HDR), e_addi(nb, BOX_HDR), et)
         endc()
         return
     if c == 'T' and tk == .tuple:

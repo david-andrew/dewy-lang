@@ -702,6 +702,8 @@ cv_struct_name = (key: int) -> str:
     if key <= DW_PTR: return ""
     if key <= DW_FLEX: return ""
     if key <= DW_HDR: return "array<{cv_name(DW_HDR - key)}>"
+    if key <= DW_BOXP: return ""
+    if key <= DW_BOX: return "box<{cv_name(DW_BOX - key)}>"
     cv_name(key)
 
 # the index of type t (a key: dwarf.jo's)
@@ -738,7 +740,7 @@ cv_type_new = (t0: int) -> int:
             loop i in [0..int(variants[vi].nfields)):
                 fi = int(variants[vi].fields) + i
                 fnm.push(names[int(fields[fi].name)])
-                ft.push(int(fields[fi].type))
+                ft.push(field_store_type(fi))
                 fo.push(int(fields[fi].offset) - poff)
             return cv_struct(t0, cv_struct_name(t0), tsize(t) - poff, fnm, ft, fo)
         if t0 <= DW_TAGS:
@@ -758,7 +760,10 @@ cv_type_new = (t0: int) -> int:
             if e == T_VOID: return cv_array(CV_CHAR, 0)        # (a string's bytes)
             if e == T_U8: return cv_array(0x69, 0)
             return cv_array(cv_type(e), 0)
-        return cv_header(t0, DW_FLEX - (DW_HDR - t0))
+        if t0 <= DW_HDR: return cv_header(t0, DW_FLEX - (DW_HDR - t0))
+        if t0 <= DW_BOXP: return cv_pointer(cv_type(DW_BOX - (DW_BOXP - t0)), false)
+        e = DW_BOX - t0
+        return cv_struct(t0, cv_struct_name(t0), 8 + tsize(e), ["rc", "value"], [DW_LONG, e], [0, 8])
     t = prune(t0)
     k = types[t].kind
     size = tsize(t)
@@ -781,6 +786,7 @@ cv_type_new = (t0: int) -> int:
         return 0x41
     if k == .str_: return cv_type(DW_STRPTR)
     if k == .array: return cv_type(DW_PTR - int(types[t].elem))
+    if k == .box: return cv_type(DW_BOXP - int(types[t].elem))
     if k == .ptr:
         e = int(types[t].elem)
         if e == T_VOID or tkind(e) == .void_: return CV_VOIDP
@@ -796,7 +802,7 @@ cv_type_new = (t0: int) -> int:
         loop i in [0..int(structs[si].nfields)):
             fi = int(structs[si].fields) + i
             fnm.push(names[int(fields[fi].name)])
-            ft.push(int(fields[fi].type))
+            ft.push(field_store_type(fi))
             fo.push(int(fields[fi].offset))
     else if k == .enum_:
         si = int(types[t].st)

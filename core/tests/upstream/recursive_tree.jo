@@ -1,0 +1,127 @@
+# Adapted: explicit half-open bounds preserve the pinned upstream iteration counts.
+# requires: sloppy
+# A binary search tree, generic over its keys: each node holds its two subtrees (`left: Tree[K]?`),
+# kept in boxes; inserting gives a new tree that shares what did not change with the old one
+struct Tree[K]:
+    key: K
+    count = 1
+    left: Tree[K]?
+    right: Tree[K]?
+
+insert[K] = (t: Tree[K]?, k: K) -> Tree[K]:
+    if let n = t:
+        r = n
+        if k < n.key: r.left = insert(n.left, k)
+        else if k > n.key: r.right = insert(n.right, k)
+        else: r.count += 1
+        return r
+    Tree[K](k)
+
+# the same, changing the tree it is given: through `if let` and back, or in place
+add[K] = (t: mut Tree[K]?, k: K):
+    if t == none:
+        t = Tree[K](k)
+        return
+    if k == t!.key: t!.count += 1
+    else if k < t!.key: add(t!.left, k)
+    else: add(t!.right, k)
+
+lookup[K] = (t: Tree[K]?, k: K) -> int:
+    cur = t
+    loop cur != none:
+        n = cur!
+        if k == n.key: return n.count
+        cur = if k < n.key: n.left else: n.right
+    0
+
+keys[K] = (t: Tree[K]?, out: mut K[]):
+    if let n = t:
+        keys(n.left, out)
+        out.push(n.key)
+        keys(n.right, out)
+
+size[K] = (t: Tree[K]?) -> int:
+    if let n = t: return 1 + size(n.left) + size(n.right)
+    0
+
+height[K] = (t: Tree[K]?) -> int:
+    if let n = t: return 1 + max(height(n.left), height(n.right))
+    0
+
+# the smallest key gone
+without_min[K] = (t: Tree[K]) -> Tree[K]?:
+    if let l = t.left:
+        r = t
+        r.left = without_min(l)
+        return r
+    t.right
+
+sorted_keys[K] = (t: Tree[K]?) -> K[]:
+    out: K[]
+    keys(t, out)
+    out
+
+base = alloc_count()
+
+words = ["pear", "fig", "apple", "fig", "kiwi", "plum", "apple", "fig", "date"]
+t: Tree[str]? = none
+loop w in words: t = insert(t, w)
+print(sorted_keys(t), size(t), height(t))
+print(lookup(t, "fig"), lookup(t, "apple"), lookup(t, "lime"))
+print(t!.left!.key, t!.right!.key)
+
+# the old tree is still there, sharing the nodes the insert did not pass
+before = t
+t = insert(t, "lime")
+print(sorted_keys(before), sorted_keys(t))
+print(before == t, insert(before, "fig") == insert(before, "fig"))
+t = without_min(t!)
+print(sorted_keys(t), sorted_keys(before))
+
+# changed in place through `mut`: the copy kept before stays as it was
+u = before
+add(u, "cherry")
+add(u, "pear")
+add(u, "zucchini")
+print(sorted_keys(u), lookup(u, "pear"), lookup(before, "pear"))
+u!.left!.left!.count = 99
+print(lookup(u, "apple"), lookup(before, "apple"))
+print(before!.left)
+
+# numbers: shuffled keys, then sorted ones (a tree as deep as a list)
+nums: Tree[int]? = none
+loop i in [0..2000): nums = insert(nums, (i * 7919) % 2000)
+print(size(nums), height(nums) < 40, lookup(nums, 1234), sorted_keys(nums)[0..5))
+deep: Tree[int]? = none
+loop i in [0..3000): add(deep, i)
+print(size(deep), height(deep))
+d2 = deep
+add(d2, -1)
+print(size(deep), size(d2), deep == d2)
+
+# as text and JSON, and back
+small: Tree[int]? = none
+loop k in [5, 3, 8, 1]: small = insert(small, k)
+tx = to_text(small)
+print(tx)
+parsed = from_text[Tree[int]](tx)
+print(parsed is Tree[int] and parsed == small!)
+js = to_json(small)
+print(js)
+back = from_json[Tree[int]](js)
+print(back is Tree[int] and back == small!)
+print(hash(small!) == hash(insert(insert(insert(insert(none, 5), 3), 8), 1)))
+
+t = none
+before = none
+u = none
+nums = none
+deep = none
+d2 = none
+small = none
+back = Tree[int](0)
+parsed = Tree[int](0)
+words = []
+tx = ""
+js = ""
+print(alloc_count() - base)

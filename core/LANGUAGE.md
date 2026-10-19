@@ -95,6 +95,8 @@ missing imported file or embedded asset appears. `check` reports errors without
 emitting an executable. `build --time` reports compiler phase timings.
 Development builds are the default. Ordinary builds expand tiny functions that
 call no other functions, then apply one local optimization pass per function.
+Read-only walks through recursive records avoid per-node copies in development
+builds as well as release builds.
 `watch` and the interactive prompt retain calls so definitions can be replaced.
 `--release` adds broader inlining and further loop optimization.
 Use `-g` without `--release` for native variable debugging; it preserves local
@@ -554,6 +556,34 @@ Inline shapes work in parameters, returns, nested fields, collections, optional
 values and function types. They share type identity with inferred anonymous
 records. Named records remain distinct types; use a named declaration when fields
 need defaults. Inline fields may also refer to a generic function's type parameters.
+
+Records can contain optional values of their own type, including through other
+records and unions. Lists and trees keep ordinary value semantics:
+
+```dewy
+Node:type=[value:int64 next:Node?]
+sum=(node:Node?):>int64=>{
+    let cur=node let total=0
+    loop cur is?Node {total+=cur.value cur=cur.next}
+    return total
+}
+main=()=>{
+    let original=Node[20 Node[22]]
+    let copy=original
+    if copy.next is?Node {copy.next.value=100}
+    printl(sum(original))  # 42
+    printl(sum(copy))      # 120
+}
+```
+
+Copies remain independent when nested values change. The compiler manages
+recursive storage automatically; no pointer syntax or manual allocation is
+needed. A recursive type must admit a finite value: `next:Node?` can end with
+`none`, whereas `next:Node` alone cannot. Recursive values also support equality,
+dictionary keys, formatting and JSON conversion. Private callback captures keep
+their copy semantics inside these values; `$capture @name` still opts into sharing.
+Recursive managed layouts cannot cross the C ABI; use an explicit C pointer
+representation at that boundary.
 
 Declare type parameters before a function's parameters or a record's fields:
 

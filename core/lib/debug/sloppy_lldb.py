@@ -5,7 +5,8 @@
 # (or put that command in ~/.lldbinit; CodeLLDB in VS Code: "initCommands").
 #
 # A string or an array is a pointer to [rc][len][cap][data...] (null: empty); an optional `T?` is
-# its value followed by a flag.
+# its value followed by a flag; a field whose type holds the struct it is in (next: Node?) is a
+# pointer to [rc][value] (null: none, or its type's default).
 import lldb
 
 LIMIT = 200         # elements shown of a long array
@@ -131,11 +132,64 @@ class MapChildren:
         return True
 
 
+def _unbox(v):
+    """the value a boxed field's box holds (None: an empty box); anything else as it is (lldb may
+    give a formatter the pointer or, matching through it, the box)"""
+    t = v.GetType().GetCanonicalType()
+    if (t.GetName() or "").endswith(" box"):
+        at = v.GetLoadAddress()
+    elif t.IsPointerType() and (t.GetPointeeType().GetName() or "").endswith(" box"):
+        at = v.GetValueAsUnsigned(0)
+        if at == 0:
+            return None
+        t = t.GetPointeeType()
+    else:
+        return v
+    # (made from the box's field, by its type, and without formatters: the value's type is
+    # named as the pointer to the box is)
+    return v.CreateValueFromAddress("value", at + 8, t.GetFieldAtIndex(1).GetType()).GetNonSyntheticValue()
+
+
+def box_summary(valobj, internal_dict):
+    v = _unbox(valobj.GetNonSyntheticValue())
+    if v is None:
+        return "(default)"
+    return v.GetSummary() or v.GetValue() or ""
+
+
+class BoxChildren:
+    """a boxed field: what the value in its box holds"""
+
+    def __init__(self, valobj, internal_dict):
+        self.valobj = valobj
+        self.update()
+
+    def update(self):
+        v = _unbox(self.valobj.GetNonSyntheticValue())
+        if v is not None and (v.GetType().GetName() or "").endswith("?"):
+            v = v.GetChildAtIndex(0) if v.GetChildAtIndex(1).GetValueAsUnsigned(0) else None
+        self.v = v.GetSyntheticValue() if v is not None and v.GetSyntheticValue().IsValid() else v
+        return False
+
+    def num_children(self):
+        return self.v.GetNumChildren() if self.v is not None else 0
+
+    def get_child_index(self, name):
+        return self.v.GetIndexOfChildWithName(name) if self.v is not None else -1
+
+    def get_child_at_index(self, i):
+        return self.v.GetChildAtIndex(i) if self.v is not None else None
+
+    def has_children(self):
+        return self.v is not None
+
+
+# (by place, [value, has]: a boxed one's type has the name of the box's pointer too)
 def opt_summary(valobj, internal_dict):
-    v = valobj.GetNonSyntheticValue()
-    if not v.GetChildMemberWithName("has").GetValueAsUnsigned(0):
+    v = _unbox(valobj.GetNonSyntheticValue())
+    if v is None or not v.GetChildAtIndex(1).GetValueAsUnsigned(0):
         return "none"
-    x = v.GetChildMemberWithName("value")
+    x = v.GetChildAtIndex(0)
     return x.GetSummary() or x.GetValue() or ""
 
 
@@ -188,6 +242,9 @@ def __lldb_init_module(debugger, internal_dict):
     run('type synthetic add -w sloppy -x "\\[\\]$" -l %s.ArrayChildren' % m)
     run('type summary add -w sloppy -v -x "\\[\\]$" -F %s.array_summary' % m)
     run('type summary add -w sloppy -x "\\?$" -F %s.opt_summary' % m)
+    # (boxed fields, by the box's name; one of an optional type is named as that, T?)
+    run('type summary add -w sloppy -x " box \\*$" -F %s.box_summary' % m)
+    run('type synthetic add -w sloppy -x " box \\*$" -l %s.BoxChildren' % m)
     # (maps by their type's name, {K: V})
     run('type synthetic add -w sloppy -x "^\\{.+: .+\\}$" -l %s.MapChildren' % m)
     # (Windows: the names in a PDB, compiler/pdb.jo: str *, array<T> *, optional<T>, Map<K, V>;

@@ -5,7 +5,8 @@
          .nvload <sloppy>\lib\debug\sloppy.natvis
      (VS Code's F5 loads it.) A string or an array is a pointer to [rc][len][cap][data...] (null:
      empty), named `str` and `array<T>` in the program's PDB (compiler/pdb.jo); an optional is
-     `optional<T>`, its value followed by a flag. -->
+     `optional<T>`, its value followed by a flag; a field whose type holds the struct it is in
+     points to `box<T>`, [rc][value] (null: none, or its type's default). -->
 <AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
   <Type Name="str">
     <DisplayString>{(char*)data,[len]s8}</DisplayString>
@@ -28,6 +29,12 @@
     <DisplayString>none</DisplayString>
     <Expand>
       <ExpandedItem Condition="has">value</ExpandedItem>
+    </Expand>
+  </Type>
+  <Type Name="box&lt;*&gt;">
+    <DisplayString>{value}</DisplayString>
+    <Expand>
+      <ExpandedItem>value</ExpandedItem>
     </Expand>
   </Type>
   <Type Name="Map&lt;*,*&gt;">

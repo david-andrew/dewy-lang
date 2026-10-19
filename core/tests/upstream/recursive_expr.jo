@@ -1,0 +1,354 @@
+# requires: sloppy
+# An expression language (tokenizer, parser, evaluator) whose syntax tree holds itself: a binary
+# operation has exactly two operands, `binary(op, l: Expr, r: Expr)`, not an array of them
+enum Kind: num, ident, op, lparen, rparen, comma, eof
+
+struct Token:
+    kind: Kind
+    text: str
+    pos: int          # byte offset
+    num = 0.0
+
+struct Error:
+    msg: str
+    pos: int
+
+tokenize = (src: str) -> Token[] | Error:
+    toks: Token[]
+    i = 0
+    n = len(src)
+    loop i < n:
+        c = src[i]
+        if c == ' ' or c == '\t' or c == '\n':
+            i += 1
+            continue
+        start = i
+        if c >= '0' and c <= '9' or c == '.':
+            loop i < n and (src[i] >= '0' and src[i] <= '9' or src[i] == '.'): i += 1
+            text = src[start..i)
+            v = to_float(text)
+            if v == none: return Error("bad number '{text}'", start)
+            toks.push(Token(.num, text, start, v!))
+            continue
+        if c >= 'a' and c <= 'z' or c >= 'A' and c <= 'Z' or c == '_':
+            loop i < n and (src[i] >= 'a' and src[i] <= 'z' or src[i] >= 'A' and src[i] <= 'Z' or src[i] == '_' or src[i] >= '0' and src[i] <= '9'): i += 1
+            toks.push(Token(.ident, src[start..i), start))
+            continue
+        if c == '(':
+            toks.push(Token(.lparen, "(", start))
+        else if c == ')':
+            toks.push(Token(.rparen, ")", start))
+        else if c == ',':
+            toks.push(Token(.comma, ",", start))
+        else if c in "+-*/^=<>":
+            if i + 1 < n and src[i + 1] == '=' and (c == '=' or c == '<' or c == '>'):
+                toks.push(Token(.op, src[i..i + 2), start))
+                i += 2
+                continue
+            toks.push(Token(.op, byte_str(c), start))
+        else:
+            return Error("unexpected character '{byte_str(c)}'", start)
+        i += 1
+    toks.push(Token(.eof, "", n))
+    toks
+
+enum Expr:
+    num(v: f64, pos: int)
+    var(name: str, pos: int)
+    neg(e: Expr, pos: int)
+    bin(op: str, l: Expr, r: Expr, pos: int)
+    call(name: str, args: Expr[], pos: int)
+    let_in(name: str, value: Expr, body: Expr, pos: int)
+    lambda(params: str[], body: Expr, pos: int)
+
+struct Parser:
+    toks: Token[]
+    at = 0
+
+peek = (p: Parser) -> Token: p.toks[p.at]
+advance = (p: mut Parser) -> Token:
+    t = p.toks[p.at]
+    if t.kind != .eof: p.at += 1
+    t
+
+expect = (p: mut Parser, k: Kind, what: str) -> Token | Error:
+    t = p.peek()
+    if t.kind != k: return Error("expected {what}, found '{t.text}'", t.pos)
+    p.advance()
+
+prec = (op: str) -> int:
+    match op:
+        "==", "<", ">", "<=", ">=": 1
+        "+", "-": 2
+        "*", "/": 3
+        "^": 4
+        _: -1
+
+parse_expr = (p: mut Parser, min_prec: int) -> Expr | Error:
+    lhs = parse_unary(p)
+    if lhs is Error: return lhs
+    loop:
+        t = p.peek()
+        if t.kind != .op: break
+        pr = prec(t.text)
+        if pr < min_prec: break
+        p.advance()
+        next_min = if t.text == "^": pr else: pr + 1
+        rhs = parse_expr(p, next_min)
+        if rhs is Error: return rhs
+        lhs = Expr.bin(t.text, lhs, rhs, t.pos)
+    lhs
+
+parse_unary = (p: mut Parser) -> Expr | Error:
+    t = p.peek()
+    if t.kind == .op and t.text == "-":
+        p.advance()
+        e = parse_expr(p, 4)     # binds looser than ^
+        if e is Error: return e
+        return Expr.neg(e, t.pos)
+    parse_primary(p)
+
+parse_primary = (p: mut Parser) -> Expr | Error:
+    t = p.advance()
+    match t.kind:
+        .num: Expr.num(t.num, t.pos)
+        .lparen:
+            e = parse_expr(p, 0)
+            if e is Error: return e
+            r = p.expect(.rparen, "')'")
+            if r is Error: return r
+            e
+        .ident:
+            if t.text == "let":
+                name = p.expect(.ident, "a name after let")
+                if name is Error: return name
+                eq = p.expect(.op, "'='")
+                if eq is Error: return eq
+                v = parse_expr(p, 0)
+                if v is Error: return v
+                kw = p.peek()
+                if kw.kind != .ident or kw.text != "in": return Error("expected 'in', found '{kw.text}'", kw.pos)
+                p.advance()
+                body = parse_expr(p, 0)
+                if body is Error: return body
+                return Expr.let_in(name.text, v, body, t.pos)
+            if t.text == "fn":
+                lp = p.expect(.lparen, "'('")
+                if lp is Error: return lp
+                params: str[]
+                loop p.peek().kind != .rparen:
+                    id = p.expect(.ident, "a parameter name")
+                    if id is Error: return id
+                    params.push(id.text)
+                    if p.peek().kind == .comma: p.advance()
+                p.advance()
+                body = parse_expr(p, 0)
+                if body is Error: return body
+                return Expr.lambda(params, body, t.pos)
+            if p.peek().kind == .lparen:
+                p.advance()
+                args: Expr[]
+                loop p.peek().kind != .rparen:
+                    a = parse_expr(p, 0)
+                    if a is Error: return a
+                    args.push(a)
+                    if p.peek().kind == .comma: p.advance()
+                    else if p.peek().kind != .rparen: return Error("expected ',' or ')' in call", p.peek().pos)
+                p.advance()
+                return Expr.call(t.text, args, t.pos)
+            Expr.var(t.text, t.pos)
+        .eof: Error("unexpected end of input", t.pos)
+        _: Error("unexpected '{t.text}'", t.pos)
+
+parse = (src: str) -> Expr | Error:
+    toks = tokenize(src)
+    if toks is Error: return toks
+    p = Parser(toks)
+    e = parse_expr(p, 0)
+    if e is Error: return e
+    t = p.peek()
+    if t.kind != .eof: return Error("unexpected '{t.text}' after expression", t.pos)
+    e
+
+# ---- values and evaluation ----
+
+struct Closure:
+    params: str[]
+    body: Expr
+    env: Env
+
+struct Env:
+    names: str[]
+    vals: Value[]
+
+type Value = f64 | Closure
+
+lookup = (env: Env, name: str) -> Value?:
+    loop i in [env.names.len() - 1, env.names.len() - 2..0]:
+        if env.names[i] == name: return env.vals[i]
+    none
+
+bind = (env: Env, name: str, v: Value) -> Env:
+    e = env
+    e.names.push(name)
+    e.vals.push(v)
+    e
+
+num_of = (v: Value, pos: int) -> f64 | Error:
+    if v is f64: return v
+    Error("expected a number, got a function", pos)
+
+eval = (e: Expr, env: Env) -> Value | Error:
+    match e:
+        .num(v, _): v
+        .var(name, pos):
+            if let v = lookup(env, name): return v
+            Error("unknown variable '{name}'", pos)
+        .neg(a, pos):
+            v = eval(a, env)
+            if v is Error: return v
+            x = num_of(v, pos)
+            if x is Error: return x
+            -x
+        .bin(op, l, r, pos):
+            a = eval(l, env)
+            if a is Error: return a
+            b = eval(r, env)
+            if b is Error: return b
+            x = num_of(a, pos)
+            if x is Error: return x
+            y = num_of(b, pos)
+            if y is Error: return y
+            res: Value | Error = match op:
+                "+": x + y
+                "-": x - y
+                "*": x * y
+                "/":
+                    if y == 0.0: return Error("division by zero", pos)
+                    x / y
+                "^": x ^ y
+                "==": if x == y: 1.0 else: 0.0
+                "<": if x < y: 1.0 else: 0.0
+                ">": if x > y: 1.0 else: 0.0
+                "<=": if x <= y: 1.0 else: 0.0
+                ">=": if x >= y: 1.0 else: 0.0
+                _: Error("unknown operator {op}", pos)
+            res
+        .let_in(name, value, body, pos):
+            v = eval(value, env)
+            if v is Error: return v
+            eval(body, bind(env, name, v))
+        .lambda(params, body, pos):
+            Closure(params, body, env)
+        .call(name, args, pos):
+            if name == "if":
+                if args.len() != 3: return Error("if takes 3 arguments", pos)
+                cv = eval(args[0], env)
+                if cv is Error: return cv
+                c = num_of(cv, pos)
+                if c is Error: return c
+                return eval(if c != 0.0: args[1] else: args[2], env)
+            vals: Value[]
+            loop a in args:
+                v = eval(a, env)
+                if v is Error: return v
+                vals.push(v)
+            builtin = builtin_call(name, vals, pos)
+            if builtin != none: return builtin!
+            f = lookup(env, name)
+            if f == none: return Error("unknown function '{name}'", pos)
+            fv = f!
+            if fv is f64: return Error("'{name}' is a number, not a function", pos)
+            if fv.params.len() != vals.len():
+                return Error("'{name}' takes {fv.params.len()} arguments, got {vals.len()}", pos)
+            inner = fv.env
+            inner = bind(inner, name, fv)     # allow recursion by name
+            loop i in 0.. and pn in fv.params: inner = bind(inner, pn, vals[i])
+            eval(fv.body, inner)
+
+builtin_call = (name: str, vals: Value[], pos: int) -> (Value | Error)?:
+    one = (f: (f64) -> f64) -> Value | Error:
+        if vals.len() != 1: return Error("{name} takes 1 argument", pos)
+        x = num_of(vals[0], pos)
+        if x is Error: return x
+        f(x)
+    match name:
+        "sqrt": one((x): sqrt(x))
+        "abs": one((x): abs(x))
+        _: none
+
+# the tree, as written: (1 + (2 * 3))
+show = (e: Expr) -> str:
+    match e:
+        .num(v, _): "{v}"
+        .var(name, _): name
+        .neg(a, _): "-{show(a)}"
+        .bin(op, l, r, _): "({show(l)} {op} {show(r)})"
+        .call(name, args, _):
+            parts: str[]
+            loop a in args: parts.push(show(a))
+            "{name}({join(parts, ", ")})"
+        .let_in(name, value, body, _): "let {name} = {show(value)} in {show(body)}"
+        .lambda(params, body, _): "fn({join(params, ", ")}) {show(body)}"
+
+# how many operations deep
+depth = (e: Expr) -> int:
+    match e:
+        .bin(_, l, r, _): 1 + max(depth(l), depth(r))
+        .neg(a, _): 1 + depth(a)
+        .let_in(_, value, body, _): 1 + max(depth(value), depth(body))
+        .lambda(_, body, _): 1 + depth(body)
+        _: 0
+
+# the same tree with each number doubled
+doubled = (e: Expr) -> Expr:
+    match e:
+        .num(v, pos): Expr.num(v * 2.0, pos)
+        .neg(a, pos): Expr.neg(doubled(a), pos)
+        .bin(op, l, r, pos): Expr.bin(op, doubled(l), doubled(r), pos)
+        _: e
+
+line_col = (src: str, pos: int) -> (int, int):
+    line = 1
+    col = 1
+    loop i in [0..min(pos, len(src))):
+        if src[i] == '\n':
+            line += 1
+            col = 1
+        else: col += 1
+    (line, col)
+
+report = (src: str, err: Error) -> str:
+    lc = line_col(src, err.pos)
+    "{lc.0}:{lc.1}: error: {err.msg}"
+
+run = (src: str) -> str:
+    e = parse(src)
+    if e is Error: return report(src, e)
+    v = eval(e, Env())
+    if v is Error: return report(src, v)
+    if v is Closure: return "<function>"
+    "{v}"
+
+base = alloc_count()
+srcs = ["1 + 2 * 3", "(1 + 2) * 3", "2 ^ 3 ^ 2", "-2 ^ 2", "10 / 4", "let x = 5 in x * x",
+    "let sq = fn(x) x * x in sq(7)", "let fact = fn(n) if(n < 1, 1, n * fact(n - 1)) in fact(5)",
+    "sqrt(16) + abs(-2)", "let k = 3 in let add = fn(x) x + k in let k = 100 in add(1)",
+    "fn(x) x", "1 + * 2", "1 / 0", "foo + 1", "1 $ 2", "(1 + 2"]
+loop s in srcs: print("{s}  =>  {run(s)}")
+
+tree = parse("1 + 2 * 3 - 4 / (5 + 6)")
+if tree is Expr:
+    print(show(tree), depth(tree))
+    # (a copy shares the tree; changing it leaves the first as it was)
+    d = doubled(tree)
+    print(show(d), show(tree))
+    same = tree
+    print(same == tree, d == tree)
+    match same:
+        .bin(op, l, r, pos): print(op, show(l), show(r), pos)
+        _: pass
+    print(tree)
+tree = Expr.num(0, 0)
+srcs = []
+print(alloc_count() - base)

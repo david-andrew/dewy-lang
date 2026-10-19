@@ -32,6 +32,7 @@ TESTS = (
     'tests/python_misc/test_sloppy_core_watch.py',
     'tests/python_misc/test_sloppy_core_upstream.py',
     'tests/python_misc/test_sloppy_core_regex.py',
+    'tests/python_misc/test_sloppy_core_recursive.py',
     'tests/python_misc/test_core_dev.py',
 )
 
