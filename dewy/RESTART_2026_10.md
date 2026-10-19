@@ -1074,6 +1074,14 @@ preserves patches and raw measurements for reconsideration alongside general
 loop improvements. The full suite was not run after the performance failure.
 [Experiments](audits/2026-10-19/cold-panic-experiments.json).
 
+Batching native instruction bytes into unaligned word stores also passed
+correctness checks on x86-64 and ARM64. Replacing resize-and-clear with reserve
+and length adjustment reduced instruction counts by 0.36–0.71%, but a 15-pair
+pilot showed essentially flat compile times, including the compiler self-build.
+Both variants are deferred. Six encoding, copy-on-write and bounds tests remain
+useful regression coverage for the original emitter.
+[Measurements and patches](audits/2026-10-19/word-emission-experiments.json).
+
 ## Classify Dewy words by interned ID
 
 The Dewy lexer now follows Sloppy's keyword-ID lookup: initialize the keyword

@@ -10763,3 +10763,75 @@ def test_core_string_equality_guard_pages(compiler, tmp_path, release):
     assert built.returncode == 0, built.stdout + built.stderr
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+def emission_word_helpers(compiler):
+    implementation = (compiler.parent.parent / 'compiler/x64.jo').read_text()
+    return 'code: u8[]\n' + implementation[implementation.index('b = (x: int):'):
+                                            implementation.index('\nrip_kind =')]
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+@pytest.mark.parametrize('target', ['native', 'linux-arm64'])
+def test_core_emission_words(compiler, tmp_path, release, target):
+    runner = shutil.which('qemu-aarch64') if target == 'linux-arm64' else None
+    if target == 'linux-arm64' and runner is None:
+        pytest.skip('QEMU is needed to exercise word emission on ARM64')
+    # Exercise the actual emitter helpers against independently encoded words,
+    # with unaligned offsets, signed boundaries, growth and retained snapshots.
+    rng = random.Random(138)
+    values = [-(1 << 63), -(1 << 31), -1, 0, 1, (1 << 31)-1, (1 << 32)-1, (1 << 63)-1]
+    values += [rng.randrange(-(1 << 63), 1 << 63) for _ in range(24)]
+    initial = bytearray([0xA5])
+    for value in values:
+        initial += (value & 0xffffffff).to_bytes(4, 'little') + b'\x5a'
+        initial += (value & 0xffffffffffffffff).to_bytes(8, 'little') + b'\xa5'
+    changes = [(0, -1), (17, -(1 << 31)), (len(initial)-4, 0x12345678)]
+    expected = initial.copy()
+    for offset, value in changes:
+        expected[offset:offset+4] = (value & 0xffffffff).to_bytes(4, 'little')
+    statements = '\n'.join(f'    b32({value}); b(90); b64({value}); b(165)' for value in values)
+    patches = '\n'.join(f'    patch32({offset}, {value})' for offset, value in changes)
+    source = tmp_path / 'emission-words.jo'
+    source.write_text(emission_word_helpers(compiler) + f'''\nmain = () -> int:
+    b(165)
+    first = code
+{statements}
+    saved = code
+{patches}
+    assert(first == [u8(165)])
+    loop byte in saved: print(int(byte))
+    print("patched")
+    loop byte in code: print(int(byte))
+    0
+''')
+    binary = tmp_path / 'words'
+    flags = ['--release'] if release else []
+    if target != 'native':
+        flags += ['--target', target]
+    built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [runner, binary] if runner else [binary]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == [*map(str, initial), 'patched', *map(str, expected)]
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('offset', [-1, 5], ids=['before-buffer', 'past-buffer'])
+def test_core_emission_fixup_bounds(compiler, tmp_path, offset):
+    source = tmp_path / 'bad-fixup.jo'
+    source.write_text(emission_word_helpers(compiler) + f'''\nmain = () -> int:
+    b64(0)
+    patch32({offset}, 42)
+    0
+''')
+    binary = tmp_path / 'bad-fixup'
+    built = subprocess.run([compiler, 'build', source, '--release', '-o', binary],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode != 0, ran.stdout + ran.stderr
+    assert 'panic:' in ran.stderr, ran.stderr
