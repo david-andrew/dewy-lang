@@ -11242,13 +11242,16 @@ def test_core_lexer_bounded_spans(compiler, tmp_path, release):
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('debug', [False, True], ids=['default', 'debug'])
-def test_core_parameter_view_frame(compiler, tmp_path, debug):
+@pytest.mark.parametrize('method', [False, True], ids=['fields', 'method'])
+def test_core_parameter_view_frame(compiler, tmp_path, debug, method):
     source = tmp_path / 'parameter-frame.dewy'
+    expression = 'row.read_score()' if method else 'row.values[0]+row.bias'
     source.write_text('''Row:type=[values:array<int64> bias:int64]
-parameter_frame_probe=(row:Row):>int64=>row.values[0]+row.bias
+read_score=(row:Row):>int64=>row.values[0]+row.bias
+parameter_frame_probe=(row:Row):>int64=>EXPRESSION
 let callback=parameter_frame_probe
 main=()=>callback(Row[[20] 22])
-''')
+'''.replace('EXPRESSION', expression))
     binary = tmp_path / 'parameter-frame'
     built = subprocess.run([compiler, 'build', source, '--ir', *(['-g'] if debug else []), '-o', binary],
                            capture_output=True, text=True, timeout=30)

@@ -104,3 +104,9 @@ records and runtime bounds checks differ from Dewy's boxed records and proven
 bounds; the measured difference includes representation and semantic costs,
 not just instruction selection. No Sloppy installation is needed for the
 existing benchmark runner or Dewy's ordinary tests.
+
+`method_params` uses the same records, arithmetic, counts and C implementation
+as `managed_params`, but calls the read-only helpers through method syntax.
+Both stay in the suite: method receivers must not force private copies merely
+because the parser permits a mutable method to be selected. The checksum at
+1,000 iterations is 250508 in both cases.

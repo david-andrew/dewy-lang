@@ -1383,6 +1383,34 @@ SSE2/detected CPU paths, vector tails, overflowing endpoints, overlap fallback,
 and observable first-failure order.
 [Full evidence and retained recheck](audits/2026-10-19/affine-vectors.json).
 
+## Reuse checker facts for private parameter views
+
+The checker now records all direct raw storage exposure when checking it:
+array/string data pointers, field/index addresses, and permitted internal header
+casts. Lowering uses those facts together with existing write/capture/alias flags,
+removing its extra walk over eligible function bodies. An instrumented comparison
+passed all 6,007 existing tests before the duplicate walk was removed.
+
+That comparison also exposed a false positive: Dewy initially marks every method
+receiver as permitting mutation, even when the selected method is read-only.
+The old parameter walk treated that permission as a write. Private read-only
+parameters now stay borrowed through such calls. The new `method_params`
+benchmark retains the original `managed_params` data and arithmetic, with method
+syntax instead of free-function calls; both remain in the suite. It uses
+**0.280× default / 0.262× release** CPU time versus the preceding stage (about
+**3.6× / 3.8× faster**). Release remains roughly **1.6× C**, so C parity is open.
+
+The independent C-bootstrap compiler passes **378 quick checks**, and the final
+full suite passes **6,013 checks in 158.39 seconds**. Frame regressions cover both
+field reads and read-only methods, including debug-visible owned storage.
+All **52** performance comparisons pass after focused rechecks of default
+compilation and release graph traversal; every original sample is retained.
+Large default/release compile ratios are **0.981× / 0.984×** versus the previous
+stage, and compiler self-build is **0.990×**. The initial stage's fresh throughput
+is about **91k root lines/CPU-second** under varying host load, still short of
+250k. This absolute number is not a comparison with earlier host conditions.
+[Full evidence](audits/2026-10-19/checker-exposure.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

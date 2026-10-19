@@ -656,18 +656,18 @@ check_place = (n: int, for_mut: bool):
         fatal(nodes[n].pos, "this is a const, which never changes: made without `const`, it is a variable, which can")
     fatal(nodes[n].pos, "cannot assign to this expression")
 
-# Raw element pointers can write without a checked assignment. Keep their
+# Raw addresses can write without a checked assignment. Keep their
 # owning bindings out of read-only view optimizations, and make copied private
-# closure environments independent even when their only write is through data().
-note_data_access = (n: int):
+# closure environments independent even when their only write is through a pointer.
+note_storage_access = (n: int):
     k = nodes[n].kind
     if k == .field or k == .index or k == .unwrap or k == .narrow:
-        note_data_access(int(nodes[n].a))
+        note_storage_access(int(nodes[n].a))
     else if k == .ident and nodes[n].aux == i32(int(SK.local)):
         l = int(nodes[n].sym)
-        locals[l].flags |= i32(LF_RAWDATA)
+        locals[l].flags |= i32(LF_EXPOSED)
         if int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
-            note_data_access(int(locals[l].alias))
+            note_storage_access(int(locals[l].alias))
 
 # ---------------- type expressions written as expressions ----------------
 expr_as_type = (e: int) -> int:
@@ -3554,10 +3554,9 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         nargs_check(n, nargs, 1, 1, "data")
         t = arg_type(args, 0, 0)
         if types[t].kind == .str_: r = T_RAWPTR
-        else if types[t].kind == .array:
-            note_data_access(args[0])
-            r = mk_ptr(int(types[t].elem))
+        else if types[t].kind == .array: r = mk_ptr(int(types[t].elem))
         else: fatal(nodes[n].pos, "data() needs an array or string")
+        note_storage_access(args[0])
     else if id == .syscall:
         if nargs < 1 or nargs > 7: fatal(nodes[n].pos, "syscall takes 1 to 7 arguments")
         loop i in [0..nargs):
@@ -5828,6 +5827,7 @@ check_expr = (n: int, expected: int) -> int:
         if (fk == .str_ or fk == .array) and tk == .ptr:
             # (the runtime's: the header; a program means the bytes, which data(x) gives)
             if not pos_in_lib(nodes[n].pos): fatal(nodes[n].pos, "`x as {type_str(tt)}` would be where the {type_str(ft)}'s header is, not its contents: `data(x)` is a pointer to its first element (what C wants; a str's bytes end with a 0)")
+            note_storage_access(a)
             ok = true
         if fk == .ptr and (tk == .str_ or tk == .array): ok = true
         if not ok:
@@ -5844,6 +5844,7 @@ check_expr = (n: int, expected: int) -> int:
             l = int(nodes[int(nodes[n].a)].sym)
             if int(locals[l].flags) & LF_CAPTURE != 0: fatal(nodes[n].pos, "cannot take the address of a captured variable")
             locals[l].flags = i32(int(locals[l].flags) | LF_ADDR)
+        note_storage_access(int(nodes[n].a))
         t = mk_ptr(at)
     else if k == .hole: fatal(nodes[n].pos, "'_' can only be used as a function argument (partial application)")
     else if k == .namedarg: fatal(nodes[n].pos, "named arguments are only allowed in calls")
