@@ -105,11 +105,18 @@ New front-end or user-facing language design requires David's approval.
   fits, retaining checks through signed narrowing. Exhaustive native/web tests,
   599 quick checks, artifact comparisons and laptop compilation checks pass.
   Lookup latency is flat; the 16-bit timing remains inconclusive. This is a
-  smaller-code improvement, not a claimed speedup. Full validation follows at
-  the next compiler batch. [Evidence](audits/2026-10-19/fixed-index-domain.json).
+  smaller-code improvement, not a claimed speedup. Full validation is closed
+  by the following inlining batch. [Evidence](audits/2026-10-19/fixed-index-domain.json).
 - Read-only comparison-call facts were tested and reverted: a targeted load
   disappears, but compiler workloads do not improve. The wider graph pass is
   deferred. [Evidence](audits/2026-10-19/readonly-comparisons.json).
+- Release inlining now admits tiny read-only leaf loops into larger callers.
+  Ordinary compiler instruction counts fall 0.7–0.9%; on the laptop, the default
+  synthetic build is about 1.1% faster while compiler rebuilding is 1.15% slower.
+  All twelve compilation comparisons pass; all 32 runtime artifacts are unchanged.
+  Independent bootstrap passes 6,468 tests, plus 100 fresh fuzz seeds in five
+  modes. Native throughput is about 127k root lines/s, still below the target.
+  [Evidence and rejected variants](audits/2026-10-19/tiny-read-loop.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 

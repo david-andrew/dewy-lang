@@ -1,0 +1,51 @@
+{
+  "change": "Release inlining treats a single tiny read-only leaf loop as a small function at every call site: at most 32 IR instructions, two parameters, scalar integer return, no frame slots/raw pointers/stores/opaque calls. Larger loops retain the existing caller-size cap. No surface attributes or language rules added.",
+  "validation": {
+    "focused": "101 passed, 5879 deselected in 3.09s",
+    "quick": "599 passed in 15.49s",
+    "bootstrap": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792453295726415179",
+    "full": "6468 passed in 215.84s (0:03:35)",
+    "fuzz": "100 fresh seeds 1301..1400 across five modes (500 executions). This also closes independent bootstrap/full validation for the preceding fixed-index-domain change."
+  },
+  "compiler_instruction_ratios": {
+    "throughput-default": 0.9916134468314168,
+    "throughput-release": 0.9930823256267207,
+    "tour-default": 0.9920159567952427,
+    "netpong-default": 0.9906042515702005,
+    "dunes-default": 0.9908897594346642,
+    "compiler-reference": 1.0034286574153997
+  },
+  "laptop_compile_ratios": {
+    "throughput-default": 0.9886827771560397,
+    "throughput-release": 0.9983765211974681,
+    "tour-default": 0.9960786697876285,
+    "netpong-default": 1.0003718370610002,
+    "dunes-default": 1.0044959405005298,
+    "compiler-reference": 1.0114779991885892
+  },
+  "native_default_root_lines_per_second": 127169.216986721,
+  "artifact_and_code_size": {
+    "previous": {
+      "prune_direct_calls": 768,
+      "binary_bytes": 7341088
+    },
+    "loop-only": {
+      "prune_direct_calls": 681,
+      "binary_bytes": 7353040
+    },
+    "final": {
+      "prune_direct_calls": 0,
+      "binary_bytes": 7391824
+    }
+  },
+  "limits": [
+    "All 12 laptop comparisons pass the unchanged 2% limit. Default synthetic build improves about 1.1%; compiler rebuilding costs about 1.15% more. The 250k goal remains unmet.",
+    "All 32 ordinary benchmark artifacts unchanged, with fresh independent checksums. Prior runtime evidence and unresolved timings carry forward.",
+    "Removing 768 direct prune calls shifts most of its work into callers; ordinary compiler instruction savings are 0.7\u20130.9%, not the full former function-attributed cost. Compiler binary grows about 0.7%.",
+    "The loop-call-sites-only prototype removed 87 prune calls with essentially flat compiler work and was superseded. Its measurements remain in the evidence. No new whole-program analysis pass or baseline promotion."
+  ],
+  "evidence": {
+    "file": "tiny-read-loop-evidence.json.gz",
+    "sha256": "398e882633d0161f897c723481c1b708ba4f53386b76a47ac0eaf6952cda2107"
+  }
+}

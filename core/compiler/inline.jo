@@ -106,8 +106,13 @@ inlinable = (f: IrFn) -> int:
     leaf = true
     has_loop = false
     size = f.code.len()
+    loops = 0
+    tiny_read_loop = size <= 32 and f.nparams <= 2 and f.ret == VI and f.slot_size.len() == 0 and not f.raw_mem
     loop ins in f.code:
-        if ins.op == .loop: has_loop = true
+        if ins.op == .loop:
+            has_loop = true
+            loops += 1
+        if tiny_read_loop and ((kills_memory(ins.op) and not (ins.op == .call and ins.c == 1)) or ins.op == .vst): tiny_read_loop = false
         if ins.op == .streq:
             # Match the existing string helper plus its bounded comparison.
             size += 81
@@ -129,6 +134,9 @@ inlinable = (f: IrFn) -> int:
     if target_wasm and has_loop: return 0
     if size > INLINE_LOOP_MAX: return 0
     if size <= INLINE_MAX: return 1
+    # A single tiny read-only search has bounded register needs even in a large
+    # caller. Keep larger/allocating loops under the existing caller-size cap.
+    if leaf and has_loop and loops == 1 and tiny_read_loop: return 1
     if leaf and has_loop: return 3
     if leaf: return 2
     0
