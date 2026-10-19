@@ -284,31 +284,53 @@ repeat = (s: str, n: int) -> str:
 (*) = (n: int, s: str) -> str: repeat(s, n)
 
 # s in capitals (letters of Latin, accented ones too, Greek and Cyrillic: "café" is "CAFÉ")
-upper = (s: str) -> str:
-    b = bytes(s)
-    wide = false
-    loop mut c in b:
-        if c >= 'a' and c <= 'z': c = c - 32
-        else if c >= 128: wide = true
-    if not wide: return str_from_bytes(b)
-    __case_text(str_from_bytes(b), true)
+upper = (s: str) -> str: __case_text(s, true)
 
 # s in small letters (as upper)
-lower = (s: str) -> str:
-    b = bytes(s)
-    wide = false
-    loop mut c in b:
-        if c >= 'A' and c <= 'Z': c = c + 32
-        else if c >= 128: wide = true
-    if not wide: return str_from_bytes(b)
-    __case_text(str_from_bytes(b), false)
+lower = (s: str) -> str: __case_text(s, false)
 
+# (a copy of s changed in place, a byte at a time: an ASCII letter by itself, a two-byte UTF-8
+# character (the only ones with another case here, and its other case is two bytes too) decoded
+# and encoded again; the bytes of longer ones, and bytes that are not UTF-8, as they are)
 __case_text = (s: str, up: bool) -> str:
-    out: u8[]
-    loop c in chars(s):
-        d = __case_of(c, up)
-        loop x in bytes(chr(d)): out.push(x)
-    str_from_bytes(out)
+    n = len(s)
+    if n == 0: return ""
+    out = __str_from(data(s), n)
+    p = data(out)
+    lo = u8(65)               # ('A' to 'Z', or 'a' to 'z')
+    hi = u8(90)
+    # (eight ASCII bytes at a time: a byte plus 0x80 - lo has its top bit set when it is lo or
+    # more, plus 0x80 - hi - 1 when it is past hi; no carry from one byte to the next, as each
+    # is under 0x80. The letters' 0x20 bit flipped)
+    add_lo = u64(0x3F3F3F3F3F3F3F3F)
+    add_hi = u64(0x2525252525252525)
+    if up:
+        lo = u8(97)
+        hi = u8(122)
+        add_lo = u64(0x1F1F1F1F1F1F1F1F)
+        add_hi = u64(0x0505050505050505)
+    i = 0
+    loop i < n:
+        if i + 8 <= n:
+            w = ((p + i) as *u64)[0]
+            if w & 0x8080808080808080 == 0:
+                m = (w + add_lo) & ((w + add_hi) xor 0xFFFFFFFFFFFFFFFF) & 0x8080808080808080
+                if m != 0: ((p + i) as *u64)[0] = w xor (m >> 2)
+                i += 8
+                continue
+        c = p[i]
+        if c < 128:
+            if c >= lo and c <= hi: p[i] = c xor 32
+            i += 1
+        else if c >= 0xC2 and c <= 0xDF and i + 1 < n and p[i + 1] & 0xC0 == 0x80:
+            cp = ((int(c) & 0x1F) << 6) | (int(p[i + 1]) & 0x3F)
+            d = __case_of(cp, up)
+            if d != cp:
+                p[i] = u8(0xC0 | (d >> 6))
+                p[i + 1] = u8(0x80 | (d & 0x3F))
+            i += 2
+        else: i += 1
+    out
 
 # (the other case of a letter of Latin-1, Latin Extended-A, Greek or Cyrillic; c when it has none)
 __case_of = (c: int, up: bool) -> int:

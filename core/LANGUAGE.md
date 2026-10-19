@@ -1579,6 +1579,12 @@ loop time about 32%. See the
 [grapheme measurements](../dewy/audits/2026-10-17/source-core/grapheme-ascii-validation.json)
 for the specific inputs, release results and limits.
 
+`upper(text)` and `lower(text)` (also `text.upper()` and `text.lower()`)
+return independent strings using the core's current simple mappings for ASCII
+and supported Latin, Greek and Cyrillic letters. For example, `upper("café")`
+is `"CAFÉ"`. Unmapped characters and malformed UTF-8 bytes are preserved;
+these byte-oriented transformations do not perform grapheme validation.
+
 Interpolation uses `{expression}` inside a string.
 Single or double quotes support escapes and interpolation. Unicode escapes use
 four hexadecimal digits (`"\u00E9"`) or one to six inside braces

@@ -5,6 +5,40 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Text conversion: correctness complete, performance acceptance pending (2026-10-19)
+
+A pinned Sloppy `e5be9225` port changes `upper`/`lower` to make one private copy,
+process ASCII eight bytes at a time, and update supported two-byte UTF-8 letters
+in place. Source values and their aliases remain unchanged. The existing limited
+simple-case repertoire remains; malformed bytes are now preserved instead of
+being repaired by a character-decoding round trip. The language guide documents
+this behavior. A permanent mixed ASCII/Unicode benchmark uses the same algorithm
+and allocation work in C.
+
+The independent C bootstrap passes the focused checks, the native quick suite
+passes **423 checks in 10.34 s**, and the optional C host passes **6,073 checks
+in 169.19 s**. Tests cover every ASCII byte, aligned/unaligned word boundaries,
+UTF-8 cases, malformed sequences, retained aliases, and guard-page bounds.
+
+The full native stage measures **47× default / 44× release** improvement on the
+conversion kernel against the preceding stage. Its release/C paired ratio is
+**0.977** in this run; the earlier seven-pair pilot was **1.095**, so this is not
+a general claim of being faster than C on all hardware or inputs.
+
+After retaining the initial 15 pairs and one bounded 31-pair recheck of uncertain
+rows, **56 of 60 comparisons pass**. Four remain inconclusive: default throughput
+and fixed compiler rebuild versus the previous native compiler, and default
+records/graph versus the fixed reference. No comparison shows a definite
+regression. Compiler medians are flat or slightly better; a separate diagnostic
+finds less than **0.004%** change in retired instructions, which does not replace
+the timing gate. **This is not an accepted performance baseline**; `cd07ea34`
+remains the last accepted stage. There is no additional resampling loop.
+
+The C-host candidate has full correctness coverage but has not had a separate
+performance stage. Further compiler improvements continue against the accepted
+baseline. All initial/recheck samples and validation logs are preserved in the
+[pending audit](audits/2026-10-19/text-case-pending.json).
+
 ## Optional optimized compiler host (2026-10-19)
 
 The compiler can now be built through a maintained scalar-IR-to-C path for

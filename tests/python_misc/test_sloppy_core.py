@@ -24,6 +24,7 @@ from tools.sloppy_core.benchmark_types import record_source
 
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
+    'optimizer-text-case-values',
     'optimizer-read-method-mutable-loop', 'optimizer-read-method-global-loop',
     'optimizer-read-method-parallel',
     'optimizer-data-narrowed-parameter', 'optimizer-data-mutable-loop',
@@ -66,6 +67,7 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'optimizer-text-case-values': 'main=()=>{\nlet text="café Ωω Яя" let saved=text\nif text.upper() not=? "CAFÉ ΩΩ ЯЯ" return 1\nif text.lower() not=? "café ωω яя" return 2\nreturn if text=?saved 42 else 3\n}',
     'lexer-keyword-ids': '''probe=(is:int64? isnt:int64? notin:int64):>int64=>{
 if false or not true return 1
 if (is is? none) or (isnt isnt? int64) return 2
@@ -12090,5 +12092,106 @@ main = () -> int: probe(-args().len())
     translate(ir, generated)
     binary = tmp_path / 'host-probe'
     compile_c(generated, binary, ['gcc'])
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_text_case_bytes(compiler, tmp_path, release, target):
+    # Python supplies the expected text for the existing simple-case repertoire.
+    # Include every ASCII byte, word-load/tail boundaries, and retained aliases.
+    pairs = []
+    for size in [*range(34), 63, 64, 65, 255, 256, 257, 4095, 4096, 4097]:
+        text = (''.join(map(chr, range(128))) * 33)[:size]
+        pairs.append((text.encode(), text.upper().encode(), text.lower().encode()))
+    for offset in range(16):
+        for tail in ('é', 'ÿ', 'Ÿ', 'Ω', 'Я', 'Ё', '漢', '🙂', 'é'):
+            text = 'aZ_ ' * offset + tail + ' azAZ09'
+            pairs.append((text.encode(), text.upper().encode(), text.lower().encode()))
+    text = 'café déjà vu ÄÖÜ ÿŸ Ąą Ćć Ωω Яя Ёё 漢字🙂'
+    pairs.append((text.encode(), text.upper().encode(), text.lower().encode()))
+    # Malformed UTF-8 is a byte-preserving transformation, not an implicit repair.
+    # These sequences contain no valid two-byte letters to map.
+    for raw in [bytes(range(256)), bytes(reversed(range(256))),
+                b'a\xc2', b'Z\xdf', b'\xc0\x80a', b'\xc1\xbfZ',
+                b'\xe0\x80\x80Az', b'\xffa\x80Z', b'\xf0\x80A\x80']:
+        pairs.append((raw, raw.upper(), raw.lower()))
+    arrays = [f'[{" ".join("0x\"" + row[k].hex() + "\"" for row in pairs)}]'
+              for k in range(3)]
+    source = tmp_path / 'case-bytes.dewy'
+    source.write_text('''main=()=>{
+let inputs:array<array<uint8>>=INPUTS
+let uppers:array<array<uint8>>=UPPERS
+let lowers:array<array<uint8>>=LOWERS
+loop i in [0..inputs.length) {
+    let text=str_from_bytes(inputs[i])
+    let saved=text
+    let hi=upper(text)
+    let lo=lower(text)
+    if bytes(hi) not=? uppers[i] return 1
+    if bytes(lo) not=? lowers[i] return 2
+    if bytes(text) not=? inputs[i] or saved not=? text return 3
+}
+return 42
+}
+'''.replace('INPUTS', arrays[0]).replace('UPPERS', arrays[1]).replace('LOWERS', arrays[2]))
+    binary = tmp_path / 'case-bytes'
+    flags = ['--release'] if release else []
+    if target == 'wasm':
+        flags += ['--target', target]
+    built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'case-bytes.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = ['node', runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=15)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_core_text_case_guard_page(compiler, tmp_path, release):
+    if platform.system() != 'Linux' or platform.machine() != 'x86_64':
+        pytest.skip('guard-page probe uses Linux x86-64 memory syscalls')
+    source = tmp_path / 'case-guard.jo'
+    source.write_text('''main = () -> int:
+    page = __os_raw_pages(8192)
+    assert(syscall(10, page + 4096, 4096, 0) == 0)
+    loop n in [0..65):
+        p = page + 4096 - n - 24
+        h = p as *int
+        h[0] = -1
+        h[1] = n
+        h[2] = n
+        loop tail in [0..4):
+            loop i in [0..n): p[24 + i] = u8(97 + i % 26)
+            if n > 0 and tail == 1: p[24 + n - 1] = u8(0xC2)
+            if n > 0 and tail == 2: p[24 + n - 1] = u8(0xDF)
+            if n > 1 and tail == 3:
+                p[24 + n - 2] = u8(0xC3)
+                p[24 + n - 1] = u8(0xA9)
+            text = p as str
+            hi = upper(text)
+            lo = lower(text)
+            assert(len(hi) == n and len(lo) == n)
+            loop i in [0..n):
+                c = p[24 + i]
+                expected = c
+                if c >= 'a' and c <= 'z': expected = c - 32
+                if tail == 3 and n > 1 and i == n - 1: expected = u8(0x89)
+                assert(hi[i] == expected and lo[i] == c and text[i] == c)
+    __os_raw_free(page, 8192)
+    42
+''')
+    binary = tmp_path / 'case-guard'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
     assert ran.returncode == 42, ran.stdout + ran.stderr

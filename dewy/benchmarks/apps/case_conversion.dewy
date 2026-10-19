@@ -1,0 +1,17 @@
+# Materialize both cases of mixed ASCII/UTF-8 text. Input construction and the
+# checksum are outside the timed region; output allocation is included.
+from p"harness.dewy" import size_argument, clock
+
+main=(args:array<string>):>int64=>{
+    let count=size_argument(args 20000)
+    let text=repeat("abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789 _- café Ωω Яя Ёё." count)
+    let started=clock()
+    let hi=upper(text)
+    let lo=lower(text)
+    let finished=clock()
+    let checksum:int64=0
+    loop b in bytes(hi) {checksum+=b as int64}
+    loop b in bytes(lo) {checksum+=b as int64}
+    printl"{checksum} {finished-started}"
+    return 0
+}
