@@ -66,6 +66,16 @@ New front-end or user-facing language design requires David's approval.
 - A broad release inlining-cost adjustment was tested and reverted: ordinary
   builds gained less than 1% latency while compiler rebuilding cost increased
   about 2%. [Deferred experiment](audits/2026-10-19/structural-inline-cost.json).
+- Existing C bindings now honor variadic float promotion and System V's
+  vector-register convention. Tests call a separately compiled C library from
+  Dewy in default, release and debug modes, including stack arguments.
+  [Evidence](audits/2026-10-19/c-variadic-arguments.json).
+- Early return/break/continue now releases abandoned statement temporaries and
+  partially constructed values, including closures and pending mutable-argument
+  copies. Initialization needed for safe cleanup is added only where an escaping
+  path requires it. All 32 ordinary benchmark artifacts remain unchanged;
+  laptop compilation comparisons and 100 fresh fuzz seeds pass.
+  [Evidence](audits/2026-10-19/partial-construction-cleanup.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 

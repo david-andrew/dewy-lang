@@ -1,0 +1,154 @@
+{
+  "change": "Drop statement temporaries and partially built values when return, break or continue leaves their expression. Adapt Sloppy tracking with Dewy labeled-loop boundaries, mutable copy-backs, partial closures and repeated-array counts. Patch zero initialization only where an actual early exit requires safe cleanup; ordinary constructors keep their generated code.",
+  "reproductions": [
+    "Returning from an array literal after constructing its first string leaked two allocations. The same source now reports zero leaked allocations in default/release/debug.",
+    "A mutable argument prepared for copy-back leaked a retained value when a later argument returned before the call. A focused case fails before tracking the copy-back slot and passes afterward."
+  ],
+  "validation": {
+    "focused": "9 passed in 0.90s",
+    "coverage": "20 Dewy cases in four native/web modes plus tuple, variant and partial-closure cases in five modes. Covers conditional temporaries, repeated arrays, captured closure state, owned return values, named record arguments, nested and labeled loop exits, and outer values that must survive an inner loop.",
+    "quick": "562 passed in 15.30s",
+    "bootstrap": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792449497812658471",
+    "full": "6431 passed in 207.27s (0:03:27)",
+    "fuzz": "Seeds 1001..1100 pass in five modes (500 executions)."
+  },
+  "performance": {
+    "instructions_vs_previous": {
+      "throughput-default": 1.0000935596004017,
+      "throughput-release": 1.000067662877268,
+      "tour-default": 1.0002323928426118,
+      "netpong-default": 1.0002800581910882,
+      "dunes-default": 1.0002276623487243,
+      "compiler-reference": 1.000206574953351
+    },
+    "laptop_compile": {
+      "throughput-default": {
+        "reference": {
+          "paired_median_ratio": 0.8960930089471119,
+          "bootstrap_95_percent_interval": [
+            0.8929525207428715,
+            0.8972121684387541
+          ],
+          "limit": 1.02,
+          "status": "pass"
+        },
+        "previous": {
+          "paired_median_ratio": 0.9959008593139698,
+          "bootstrap_95_percent_interval": [
+            0.9940964036573376,
+            0.9970932056892157
+          ],
+          "limit": 1.02,
+          "status": "pass"
+        }
+      },
+      "throughput-release": {
+        "reference": {
+          "paired_median_ratio": 0.8678673783492798,
+          "bootstrap_95_percent_interval": [
+            0.8653335425200313,
+            0.8779668101032527
+          ],
+          "limit": 1.02,
+          "status": "pass"
+        },
+        "previous": {
+          "paired_median_ratio": 1.0002709399431076,
+          "bootstrap_95_percent_interval": [
+            0.9930772336721286,
+            1.0028759647465175
+          ],
+          "limit": 1.02,
+          "status": "pass"
+        }
+      },
+      "tour-default": {
+        "reference": {
+          "paired_median_ratio": 0.9747353438304851,
+          "bootstrap_95_percent_interval": [
+            0.9725538058523883,
+            0.9769772157937759
+          ],
+          "limit": 1.02,
+          "status": "pass"
+        },
+        "previous": {
+          "paired_median_ratio": 1.0023889739661602,
+          "bootstrap_95_percent_interval": [
+            1.001893534496001,
+            1.0026989725501843
+          ],
+          "limit": 1.02,
+          "status": "pass"
+        }
+      },
+      "netpong-default": {
+        "reference": {
+          "paired_median_ratio": 0.9721433173910087,
+          "bootstrap_95_percent_interval": [
+            0.9709521028830442,
+            0.9758088466903805
+          ],
+          "limit": 1.02,
+          "status": "pass"
+        },
+        "previous": {
+          "paired_median_ratio": 1.001854299686604,
+          "bootstrap_95_percent_interval": [
+            0.9925620791002111,
+            1.0086016505869906
+          ],
+          "limit": 1.02,
+          "status": "pass"
+        }
+      },
+      "dunes-default": {
+        "reference": {
+          "paired_median_ratio": 0.9742898394419544,
+          "bootstrap_95_percent_interval": [
+            0.9733334106109849,
+            0.9813009494165396
+          ],
+          "limit": 1.02,
+          "status": "pass"
+        },
+        "previous": {
+          "paired_median_ratio": 1.0019797847282308,
+          "bootstrap_95_percent_interval": [
+            1.0015205996529422,
+            1.0025920011440488
+          ],
+          "limit": 1.02,
+          "status": "pass"
+        }
+      },
+      "compiler-reference": {
+        "reference": {
+          "paired_median_ratio": 0.9362624547747176,
+          "bootstrap_95_percent_interval": [
+            0.9348747110604985,
+            0.9388244551769532
+          ],
+          "limit": 1.02,
+          "status": "pass"
+        },
+        "previous": {
+          "paired_median_ratio": 1.0013839442805157,
+          "bootstrap_95_percent_interval": [
+            0.9989704738178135,
+            1.0037643828297824
+          ],
+          "limit": 1.02,
+          "status": "pass"
+        }
+      }
+    },
+    "artifacts": "All 32 default/release benchmark artifacts match the preceding variadic-call stage, with fresh independent checksums. The laptop compilation checkpoint compares the combined variadic/cleanup batch to the prior terminal-call stage and fixed reference; all twelve comparisons pass."
+  },
+  "baseline": "No baseline promotion or threshold change. Fixed ea1cba0e and accepted whole stage cd07ea34 remain.",
+  "evidence": {
+    "file": "partial-construction-cleanup-evidence.json.gz",
+    "sha256": "4750a015ead339ef75a12f220c7e7bb3dc6b31ee0229162117952d6536ff9314",
+    "format": "gzip JSON"
+  }
+}

@@ -34,6 +34,7 @@ TESTS = (
     'tests/python_misc/test_sloppy_core_regex.py',
     'tests/python_misc/test_sloppy_core_recursive.py',
     'tests/python_misc/test_sloppy_core_ffi.py',
+    'tests/python_misc/test_sloppy_core_lifetimes.py',
     'tests/python_misc/test_core_dev.py',
 )
 

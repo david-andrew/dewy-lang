@@ -194,6 +194,19 @@ struct LoopInfo:
     brk: int
     cont: int
     scope: int
+    items: int
+    built: int
+
+# A value whose children are still being evaluated. init is a deferred zero
+# instruction (slots) or the allocation call (arrays), patched only if an early
+# exit actually needs to drop an incompletely initialized managed value.
+struct BuildItem:
+    is_slot: bool
+    ref: int
+    t: int
+    init: int = -1
+
+building: BuildItem[]
 
 cur_fn = 0
 cur_ret = 0
@@ -384,6 +397,39 @@ stmt_end = ():
             release(it.ref, it.t)
             if it.cond: e_mov(it.ref, e_iconst(0))
         i -= 1
+
+# Keep ordinary construction unchanged: a placeholder becomes a zero only
+# when return/break/continue can bypass writes to some managed fields.
+build_slot = (s: int, t: int, needs_zero: bool = false) -> bool:
+    if not is_managed(t): return false
+    at = -1
+    if needs_zero: at = emit(.nop, 0, 0, e_slot(s), 0, 0, 0)
+    building.push(BuildItem(true, s, t, at))
+    true
+
+drop_held = (items: int, built: int):
+    k = building.len() - 1
+    loop k >= built:
+        it = building[k]
+        if it.init >= 0:
+            ins = ir.code[it.init]
+            if it.is_slot:
+                ins.op = .zero
+                ins.imm = tsize(it.t)
+            else: ins.imm = rt("__arr_repeat")
+            ir.code[it.init] = ins
+        if it.is_slot: drop_at(e_slot(it.ref), it.t)
+        else: release(it.ref, it.t)
+        k -= 1
+    j = tl_items.len() - 1
+    loop j >= items:
+        k = tl_items[j].len() - 1
+        loop k >= 0:
+            it = tl_items[j][k]
+            if it.is_slot: drop_at(e_slot(it.ref), it.t)
+            else: release(it.ref, it.t)
+            k -= 1
+        j -= 1
 
 enter_cond = (): cond_depth += 1
 leave_cond = (): cond_depth -= 1
@@ -1030,6 +1076,7 @@ copy_in = (a: int) -> int:
     tmp = e_slot(cb.slot)
     store_val(t, tmp, 0, load_val(t, src, 0))
     copy_at(tmp, t)
+    build_slot(cb.slot, t)
     copy_backs.push(cb)
     tmp
 
@@ -1044,6 +1091,7 @@ copy_back = (mark: int):
         loop x in cb.idx: frozen.remove(x.0)
         drop_at(dst, t)
         store_val(t, dst, 0, load_val(t, e_slot(cb.slot), 0))
+        if is_managed(t): building.pop()
 
 # could the place argument i was read from (without a reference of its own) be given another
 # value before the call returns, by the callee or a later argument, freeing what was read? It
@@ -1869,6 +1917,7 @@ gen_partial = (e: int) -> Val:
     hdr_store(env, 0, e_iconst(1))
     hdr_store(env, 8, e_faddr(lf_helper(.envdrop, 0, th)))
     hdr_store(env, 16, e_faddr(lf_helper(.envcopy, 0, th)))
+    tracked = build_slot(s, ntype(e))
     target = int(nodes[e].sym)
     if target != 0: parallel_direct(target, nodes[e].pos)
     if nodes[e].aux == 1:
@@ -1883,6 +1932,7 @@ gen_partial = (e: int) -> Val:
         if is_mut: fatal(nodes[arg].pos, "cannot partially apply a `mut` argument; use `_` for it")
         val = gen_owned(arg)
         store_val(ntype(arg), env, offs[i], val.v)
+    if tracked: building.pop()
     Val(e_slot(s), true, s)
 
 # ---------------- string interpolation ----------------
@@ -1890,6 +1940,7 @@ gen_interp = (e: int) -> Val:
     bs = new_slot(8, 8)
     ba = e_slot(bs)
     e_store(ba, 0, e_iconst(0), 8)
+    building.push(BuildItem(true, bs, mk_array(T_U8)))
     loop i in [0..nkids(e)):
         p = kid(e, i)
         if nodes[p].kind == .str_lit:
@@ -1906,6 +1957,7 @@ gen_interp = (e: int) -> Val:
         argv = [e_slot(bs), val.v]
         if nodes[p].sval >= 0: argv.push(e_daddr(str_data(name_of(int(nodes[p].sval)))))
         e_call(lf_of_inst(f), argv, -1)
+    building.pop()
     r = e_call(rt("__buf_finish"), [e_load(VI, e_slot(bs), 0, 8)], VI)
     V(r, true)
 
@@ -3477,12 +3529,14 @@ gen_expr = (e: int) -> Val:
             s = new_temp(t)
             d = e_slot(s)
             e_zero(d, tsize(t))
+            tracked = build_slot(s, t)
             loop i in call_eval_order(e):
                 a = kid(e, i)
                 if a == 0: continue
                 f = int(structs[si].fields) + i
                 val = gen_owned(a)
                 store_field(f, d, val.v)
+            if tracked: building.pop()
             return Val(e_slot(s), true, s)
         if aux == 3:
             si = int(types[t].st)
@@ -3499,10 +3553,12 @@ gen_expr = (e: int) -> Val:
             d = e_slot(s)
             e_zero(d, tsize(t))
             e_store(d, 0, e_iconst(v), 4)
+            tracked = build_slot(s, t)
             loop i in call_eval_order(e):
                 f = int(variants[vi].fields) + i
                 val = gen_owned(kid(e, i))
                 store_field(f, d, val.v)
+            if tracked: building.pop()
             return Val(e_slot(s), true, s)
         fatal(nodes[e].pos, "invalid call")
     if k == .intrinsic: return gen_intrinsic(e)
@@ -3599,19 +3655,23 @@ gen_expr = (e: int) -> Val:
         d = e_slot(s)
         e_zero(d, tsize(t))
         f = int(nodes[e].sym)
+        tracked = build_slot(s, t)
         loop i in [0..nkids(e)):
             p = kid(e, i)
             kv = gen_borrowed(int(nodes[p].a)).v
             vv = gen_borrowed(int(nodes[p].b)).v
             e_call(lf_of_inst(f), [e_slot(s), kv, vv], -1)
+        if tracked: building.pop()
         return Val(e_slot(s), true, s)
     if k == .tuple:
         if vc(t) == VC_VOID: return V(-1, false)
         s = new_temp(t)
+        tracked = build_slot(s, t, true)
         loop i in [0..int(types[t].nargs)):
             el = targ(t, i)
             val = gen_owned(kid(e, i))
             store_val(el, e_slot(s), tuple_off(t, i), val.v)
+        if tracked: building.pop()
         return Val(e_slot(s), true, s)
     if k == .range:
         s = new_temp(T_RANGE)
@@ -3729,9 +3789,11 @@ gen_fixed_array = (e: int, t: int) -> Val:
             endc()
     else if nkids(e) == 0: e_zero(d, tsize(t))
     else:
+        tracked = build_slot(s, t, true)
         loop i in [0..nkids(e)):
             val = gen_owned(kid(e, i))
             store_val(et, d, i * esz, val.v)
+        if tracked: building.pop()
     Val(e_slot(s), true, s)
 
 gen_array = (e: int, t: int) -> Val:
@@ -3766,7 +3828,9 @@ gen_array = (e: int, t: int) -> Val:
         vs = new_temp(et)
         va = e_slot(vs)
         store_val(et, va, 0, val.v)
+        tracked = build_slot(vs, et)
         n = gen_expr(int(nodes[e].b)).v
+        if tracked: building.pop()
         arr = e_call(rt("__arr_filled"), [n, e_iconst(esz)], VI)
         res = vreg(VI)
         e_mov(res, arr)
@@ -3791,11 +3855,15 @@ gen_array = (e: int, t: int) -> Val:
         # immutable static array: lives in rodata, copied on first write
         return V(e_daddr(const_array(e, et)), false)
     arr = e_call(rt("__arr_filled"), [e_iconst(n), e_iconst(esz)], VI)
+    init = -1
+    if is_managed(et): init = ir.code.len() - 1
     res = vreg(VI)
     e_mov(res, arr)
+    building.push(BuildItem(false, res, t, init))
     loop i in [0..n):
         val = gen_owned(kid(e, i))
         store_val(et, res, 24 + i * esz, val.v)
+    building.pop()
     V(res, true)
 
 all_const = (e: int, et: int) -> bool:
@@ -4120,6 +4188,7 @@ gen_return = (s: int):
         val = gen_expr(a)
         borrow(val, ntype(a))
         stmt_end()
+    drop_held(0, 0)
     i = scope_locals.len() - 1
     loop i >= 0:
         emit_scope_exit(i)
@@ -5102,7 +5171,7 @@ gen_stepped_for = (s: int):
     if not direct: write_place(local_place(l, true), lt, ctr)
     blk()
     cont = ctl
-    loops.push(LoopInfo(brk, cont, scope_locals.len()))
+    loops.push(LoopInfo(brk, cont, scope_locals.len(), tl_items.len(), building.len()))
     gen_loop_body(int(nodes[s].b))
     loops.pop()
     range_facts_end(facts)
@@ -5308,7 +5377,7 @@ gen_for = (s: int):
         if not direct: write_place(local_place(l, true), lt, ctr)
         blk()
         cont = ctl
-        loops.push(LoopInfo(brk, cont, scope_locals.len()))
+        loops.push(LoopInfo(brk, cont, scope_locals.len(), tl_items.len(), building.len()))
         gen_loop_body(int(nodes[s].b))
         loops.pop()
         range_facts_end(facts)
@@ -5454,7 +5523,7 @@ gen_for = (s: int):
             e_mov(int(locals[vl].vreg), e_bin(.add, VI, vals, e_bin(.mul, VI, i, e_iconst(tsize(vt)))))
     blk()
     cont = ctl
-    loops.push(LoopInfo(brk, cont, scope_locals.len()))
+    loops.push(LoopInfo(brk, cont, scope_locals.len(), tl_items.len(), building.len()))
     gen_loop_body(int(nodes[s].b))
     loops.pop()
     endc()
@@ -5976,7 +6045,7 @@ gen_while = (s: int):
         scope_add_local(l)
         blk()
         cont = ctl
-        loops.push(LoopInfo(brk, cont, scope_locals.len()))
+        loops.push(LoopInfo(brk, cont, scope_locals.len(), tl_items.len(), building.len()))
         gen_block_stmts(int(nodes[s].b))
         loops.pop()
         endc()
@@ -5987,7 +6056,7 @@ gen_while = (s: int):
         if not rotate: jump_if_false(int(nodes[s].a), brk)
         blk()
         cont = ctl
-        loops.push(LoopInfo(brk, cont, scope_locals.len()))
+        loops.push(LoopInfo(brk, cont, scope_locals.len(), tl_items.len(), building.len()))
         gen_loop_body(int(nodes[s].b))
         loops.pop()
         endc()
@@ -6033,6 +6102,7 @@ gen_stmt = (s: int):
     else if k == .return_: gen_return(s)
     else if k == .break_ or k == .continue_:
         lp = loops[loops.len() - 1 - int(nodes[s].ival)]
+        drop_held(lp.items, lp.built)
         i = scope_locals.len() - 1
         loop i >= lp.scope:
             emit_scope_exit(i)
@@ -6068,6 +6138,7 @@ begin_fn = (name: str, idx: int):
     tl_items = []
     tl_nop = []
     tl_cond = []
+    building = []
     sret_v = -1
     env_v = -1
 

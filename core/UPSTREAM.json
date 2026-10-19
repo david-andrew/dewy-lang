@@ -284,6 +284,13 @@
         "compiler/x64.jo"
       ],
       "description": "Adapt the C variadic ABI fixes: promote f32 only in the variadic tail and set the System V vector-register count in al. Keep fixed f32 parameters unchanged and retain existing Windows/ARM conventions. Independently test native default/release/debug against a C library, including stack arguments and narrow integers. Dewy optional C-host emission also retains variadic function-pointer signatures; no new source interface."
+    },
+    {
+      "revision": "61ae2c071401658a9289cf9cb007d3b7545bde7b",
+      "paths": [
+        "compiler/lower.jo"
+      ],
+      "description": "Adapt partial-construction tracking for early returns, without importing new error-propagation syntax. Also adapt break/continue cleanup from 41997586da1d2457d7e87a531ae60711212aaed2, including Dewy labeled exits. Track statements, arrays, records, variants, tuples, fixed arrays and interpolation; additionally cover partial closures, repeated-value evaluation and pending mutable copy-backs. Defer zero initialization until an actual escaping path requires it, preserving ordinary constructor code."
     }
   ]
 }
