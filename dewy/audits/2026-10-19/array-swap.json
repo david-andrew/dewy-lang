@@ -1,0 +1,86 @@
+{
+  "change": "Selectively port Sloppy d19f386 array swap: bounds checks once, mutable data detachment once, then exchange elements through the buffer. No new API. Add a matching C/Dewy swap benchmark and independent Python-derived 1000-iteration checksum.",
+  "validation": {
+    "focused": "20 passed, 5894 deselected in 3.18s",
+    "quick": "518 passed in 13.37s",
+    "harness": "8 passed, 105 deselected in 0.38s",
+    "coverage": "Native/WebAssembly default/release: copy isolation, managed record/array fields, stateful closure copies, self swaps, negative/out-of-range/empty indices.",
+    "bootstrap": "Two native generations seeded from the preceding independently bootstrapped 6,359-test stage. Full suite at the next coherent library batch."
+  },
+  "instructions_vs_previous": {
+    "throughput-default": 1.0001617487706016,
+    "throughput-release": 1.0001167912576667,
+    "tour-default": 1.000276526041201,
+    "netpong-default": 0.9999445514344751,
+    "dunes-default": 0.9999471464670704,
+    "compiler-reference": 1.0000190091773586
+  },
+  "laptop_runtime": {
+    "default": {
+      "reference": {
+        "paired_median_ratio": 0.7889942694768934,
+        "bootstrap_95_percent_interval": [
+          0.7886513673954761,
+          0.7899682135141223
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      },
+      "previous": {
+        "paired_median_ratio": 0.7696726452555015,
+        "bootstrap_95_percent_interval": [
+          0.7667579069671302,
+          0.7710126639600008
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      },
+      "c": {
+        "paired_median_ratio": 1.4961335129380167,
+        "bootstrap_95_percent_interval": [
+          1.4960053559840625,
+          1.4975909118552995
+        ],
+        "limit": 1.0,
+        "status": "regression"
+      }
+    },
+    "release": {
+      "reference": {
+        "paired_median_ratio": 0.9315158358349463,
+        "bootstrap_95_percent_interval": [
+          0.9154566502439545,
+          0.9408075837575475
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      },
+      "previous": {
+        "paired_median_ratio": 0.9272163118915935,
+        "bootstrap_95_percent_interval": [
+          0.9098946515386503,
+          0.950350324995447
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      },
+      "c": {
+        "paired_median_ratio": 1.4961884017198428,
+        "bootstrap_95_percent_interval": [
+          1.49593837549546,
+          1.5000222874907434
+        ],
+        "limit": 1.0,
+        "status": "regression"
+      }
+    }
+  },
+  "performance": "Ten million swaps: default about 54.3 -> 41.8 ms, release 45.2 -> 41.8 ms, C 28.0 ms. About 23%/7% faster; still about 1.50x C. All 28 preceding benchmark artifacts match with fresh checksums; only the two new swap artifacts differ. Compilation instruction differences range from -0.006% to +0.028%; this is diagnostic, not a new wall-time acceptance campaign.",
+  "benchmark_setup": "Two attempts failed before timing because & in a declaration was treated as an overload group. Benchmark now uses documented integer and spelling on all variants. No parser/language rule changed.",
+  "baseline": "Fixed ea1cba0e and accepted cd07ea34 unchanged; no whole-stage promotion.",
+  "evidence": {
+    "file": "array-swap-evidence.json.gz",
+    "sha256": "f0b2c1d754fa3af7e8b2911495d4ac33e7580141721b9c87ec580c84e506b23a",
+    "format": "gzip JSON"
+  }
+}

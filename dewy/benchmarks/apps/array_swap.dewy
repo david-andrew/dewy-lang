@@ -1,0 +1,24 @@
+# Repeated unpredictable swaps in a small mutable array.
+from p"harness.dewy" import size_argument, clock, mix
+kernel=(@values:array<int64> count:int64):>int64=>{
+    let state:int64=305419896
+    loop i in [0..count) {
+        state=(state*1664525+1013904223) and 2147483647
+        let left_index=(state>>8) and 1023
+        state=(state*1664525+1013904223) and 2147483647
+        let right_index=(state>>8) and 1023
+        values.swap(left_index right_index)
+    }
+    let hash:int64=0
+    loop value in values {hash=mix(hash value)}
+    return hash
+}
+main=(args:array<string>):>int64=>{
+    let count=size_argument(args 10000000)
+    let values:array<int64>=[]
+    loop i in [0..1024) {values.push(i)}
+    let started=clock()
+    let result=kernel(@values count)
+    printl"{result} {clock()-started}"
+    return 0
+}

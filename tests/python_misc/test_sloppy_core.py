@@ -24,7 +24,7 @@ from tools.sloppy_core.benchmark_types import record_source
 
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
-    'named-value-order', 'named-value-mutable',
+    'named-value-order', 'named-value-mutable', 'sequence-swap-values',
     'partial-operator-arithmetic', 'partial-operator-private-capture',
     'conversion-transmute-bit-roundtrip',
     'optimizer-text-case-values',
@@ -70,6 +70,24 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'sequence-swap-values': """Row:type=[name:string values:array<int64>]
+main=()=>{
+let xs=[1 2 3] let saved=xs xs.swap(0 2)
+if xs not=?[3 2 1] or saved not=?[1 2 3] return 1
+xs.swap(1 1) xs.swap(0 2)
+if xs not=?saved return 2
+let rows=[Row["a" [20]] Row["b" [22]]] let original=rows
+rows.swap(0 1) rows[0].values.push(99)
+if rows[0].name not=?"b" or rows[0].values not=?[22 99] return 3
+if original[1].values not=?[22] or rows[1] not=?original[0] return 4
+let count=0
+let counters:array<():>int64>=[()=>{count+=1; count} ()=>{count+=10; count}]
+let callbacks=counters counters.swap(0 1)
+if counters[0]() not=?10 or counters[1]() not=?1 return 5
+if callbacks[0]() not=?1 or callbacks[1]() not=?10 return 6
+counters.swap(0 0)
+return if counters[0]()=?20 and counters[1]()=?2 42 else 7
+}""",
     'named-value-unpacked': 'sum_pair=([left right]:array<int64>)=>left+right\nmain=()=>{let original=sum_pair let renamed:((items:array<int64>):>int64)=original\nreturn if original([20 22])=?42 and renamed(items=[20 22])=?42 42 else 1}',
     'named-value-unnamed-tail': 'main=()=>{let f=(left:int64 _:int64)=>left\nreturn f(left=42 0)}',
     'named-value-nested-context': 'Apply:type=(left:int64):>int64\nOuter:type=(callback:Apply):>int64\nmain=()=>{let f=(callback:((value:int64):>int64))=>callback(value=42)\nlet g:Outer=f return g(callback=(x)=>x)}',
@@ -12578,3 +12596,34 @@ else:
                 os.killpg(group, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+@pytest.mark.parametrize('values,left,right,bad,length', [
+    ('1 2 3', -1, 0, -1, 3),
+    ('1 2 3', 0, 3, 3, 3),
+    ('1 2 3', 3, -1, 3, 3),
+    ('', 0, 0, 0, 0),
+])
+def test_core_array_swap_bounds(compiler, tmp_path, target, release, values, left, right, bad, length):
+    source = tmp_path / 'swap.dewy'
+    source.write_text(f'main=()=>{{let xs:array<int64>=[{values}] xs.swap({left} {right}) return 42}}')
+    binary = tmp_path / 'swap'
+    built = subprocess.run([compiler, 'build', source, '-o', binary, '--target', target,
+                            *(['--release'] if release else [])],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed for web array-swap checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'swap.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode not in (0, 42), (ran.returncode, ran.stdout, ran.stderr)
+    assert f'index {bad} out of bounds (length {length})' in ran.stdout + ran.stderr

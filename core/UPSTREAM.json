@@ -255,6 +255,13 @@
         "compiler/main.jo"
       ],
       "description": "Port the release-only recursive return-sinking pass. Branches to a common return may return a preceding same-type moved value directly, reducing its lifetime across sibling recursive calls. Existing Dewy select lowering and scalar promotion remain independent; no source-language change."
+    },
+    {
+      "revision": "d19f386114ef572ed802714d81072c279d96983c",
+      "paths": [
+        "lib/core/array.jo"
+      ],
+      "description": "Array swap checks both indices once and obtains mutable data once, then exchanges values through the detached buffer. Preserve existing value semantics, including managed elements and closure copies; no new library API."
     }
   ]
 }
