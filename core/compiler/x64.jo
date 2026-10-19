@@ -362,6 +362,19 @@ call_like = (ins: Ins) -> bool:
     if op == .copy or op == .zero: return ins.imm > INLINE_COPY
     false
 
+# A returned scalar consumed only by the following nonreturning call needs no
+# earlier registers preserved. Linear live intervals otherwise extend values
+# from the successful path across this terminal failure path.
+call_ends_here = (pos: int, ins: Ins) -> bool:
+    if dbg_on or ins.dst < 0 or pos + 1 >= ir.code.len(): return false
+    if ins.op != .call and ins.op != .calli and ins.op != .callc: return false
+    next = ir.code[pos + 1]
+    if next.op != .call or next.c != 1: return false
+    loop k in [0..int(next.b)):
+        v = int(ir.args[int(next.a) + k])
+        if v != int(ins.dst) and not is_kv(v): return false
+    true
+
 fits32 = (v: int) -> bool: v >= -2147483648 and v <= 2147483647
 
 # a vector operand into xmm x: n f32 lanes from memory, or a scalar repeated in every lane
@@ -450,7 +463,7 @@ analyze = ():
                     if pos < v_first[v]: v_first[v] = pos
                     if pos > v_last[v]: v_last[v] = pos
                     v_ndef[v] += 2
-        if call_like(ins):
+        if call_like(ins) and not call_ends_here(pos, ins):
             call_pos.push(pos)
             # (a call on a rarely taken path counts as if outside any loop)
             if ins.op == .call and ins.c == 2: call_w.push(1)

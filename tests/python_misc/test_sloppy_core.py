@@ -12728,3 +12728,61 @@ return 42
         command = [node, runner]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('target,flags', [
+    ('native', []), ('native', ['--release']), ('native', ['-g']),
+    ('wasm', []), ('wasm', ['--release']),
+])
+@pytest.mark.parametrize('failure', ['none', 'direct', 'callback', 'multiple', 'assert'])
+def test_core_terminal_message_calls(compiler, tmp_path, target, flags, failure):
+    terminal = {
+        'none': 'panic(message(a))',
+        'direct': 'panic(message(a))',
+        'callback': 'panic(callback(a))',
+        'multiple': 'panic("{message(a)}:{message(x)}")',
+        'assert': 'assert(x >= 0, message(a))',
+    }[failure]
+    argument = 10 if failure == 'none' else -10
+    source = tmp_path / 'terminal.jo'
+    source.write_text('''@noinline
+message = (x: int) -> str:
+    print("message {x}")
+    "value={x}"
+@noinline
+probe = (x: int, callback: (int) -> str) -> int:
+    a = x * 3 + 7
+    b = f64(x) * 2.5
+    if x < 0:
+        ''' + terminal + '''
+    a + x + int(b)
+main = () -> int:
+    if probe(10, message) != 72: return 1
+    if probe(20, message) != 137: return 2
+    if probe(''' + str(argument) + ''', message) != 72: return 3
+    42
+''')
+    binary = tmp_path / 'terminal'
+    built = subprocess.run([compiler, 'build', source, '-o', binary, '--target', target, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed for web terminal-call checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'terminal.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    if failure == 'none':
+        assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+        assert ran.stdout == ''
+    else:
+        assert ran.returncode not in (0, 1, 2, 3, 42), (ran.returncode, ran.stdout, ran.stderr)
+        messages = [line for line in ran.stdout.splitlines() if line.startswith('message ')]
+        assert messages == (['message -23', 'message -10'] if failure == 'multiple' else ['message -23'])
+        assert ('value=-23:value=-10' if failure == 'multiple' else 'value=-23') in ran.stdout + ran.stderr

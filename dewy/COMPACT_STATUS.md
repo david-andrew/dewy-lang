@@ -56,6 +56,16 @@ New front-end or user-facing language design requires David's approval.
   comparisons and two inconclusive default timings (string equality and shifted
   arrays against the preceding compiler), with no established regression.
   [Evidence](audits/2026-10-19/integer-parsing.json).
+- Register allocation now recognizes a scalar-returning call immediately
+  consumed by a nonreturning call, without extending successful-path values
+  across it. Array swap improves another 6.6% by default and 9.0% in release
+  on the laptop; release now matches C on that workload. Other 30 benchmark
+  artifacts are unchanged, and all twelve compilation comparisons pass.
+  Debug builds retain their existing variable-preservation behavior.
+  [Evidence](audits/2026-10-19/terminal-message-calls.json).
+- A broad release inlining-cost adjustment was tested and reverted: ordinary
+  builds gained less than 1% latency while compiler rebuilding cost increased
+  about 2%. [Deferred experiment](audits/2026-10-19/structural-inline-cost.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 
