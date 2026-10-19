@@ -11420,3 +11420,190 @@ main = () -> int:
         assert f'index {index} out of bounds' in ran.stdout + ran.stderr, (case, ran.stdout, ran.stderr)
         if case == 'order':
             assert (ran.stdout + ran.stderr).startswith('0:\na:\n1:\na:\n'), (ran.stdout, ran.stderr)
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_affine_loop_checks(compiler, tmp_path, release, target):
+    runner = shutil.which('node') if target == 'wasm' else None
+    if target == 'wasm' and runner is None:
+        pytest.skip('Node is needed to exercise web loop checks')
+    source = tmp_path / 'affine-checks.jo'
+    source.write_text('''@noinline
+shifted = (a: int[], b: int[], start: int, stop: int, offset: int) -> int:
+    total = 0
+    loop i in [start..stop):
+        total += a[i + offset] + b[i + offset]
+        if i == start + 3: return total
+    total
+@noinline
+unsigned_shift = (a: int[], b: int[], start: u64, stop: u64, offset: u64) -> int:
+    total = 0
+    loop i in [start..stop):
+        total += a[int(i + offset)] + b[int(i + offset)]
+        if i == start + 3: return total
+    total
+@noinline
+sum_offset = (a: int[], b: int[], start: int, stop: int, x: int, y: int) -> int:
+    total = 0
+    loop i in [start..stop): total += a[i + x + y] + b[i + x + y]
+    total
+@noinline
+row_offset = (a: int[], b: int[], row: int, width: int, count: int) -> int:
+    total = 0
+    loop j in [0..count): total += a[(row - 1) * width + j] + b[(row - 1) * width + j]
+    total
+@noinline
+invariant = (a: int[], b: int[], row: int, width: int, count: int) -> int:
+    total = 0
+    loop j in [0..count): total += a[row * width] + b[row * width] + j
+    total
+@noinline
+ordered = (a: int[], b: int[], stop: int, offset: int) -> int:
+    total = 0
+    loop i in [0..stop):
+        print("{i}:")
+        total += a[i + offset]
+        print("a:")
+        total += b[i + offset]
+    total
+main = () -> int:
+    case = args()[1]
+    if case == "negative-start": return shifted([10, 11], [10, 11], -2, 0, 2)
+    if case == "near-max": return shifted([10, 11], [10, 11], 9223372036854775805, 9223372036854775807, -9223372036854775805)
+    if case == "sum-wrap": return sum_offset([10, 11], [10, 11], -9223372036854775808, -9223372036854775806, 9223372036854775807, 1)
+    if case == "unsigned-wrap": return unsigned_shift([10, 11], [10, 11], u64(0xfffffffffffffffd), u64(0xffffffffffffffff), u64(3))
+    if case == "row": return row_offset([0, 0, 0, 10, 11], [0, 0, 0, 10, 11], 2, 3, 2)
+    if case == "invariant": return invariant([0, 21], [0, 21], 1, 1, 1)
+    if case == "empty":
+        a: int[]
+        return 42 + shifted(a, a, 5, 2, 9) + unsigned_shift(a, a, u64(5), u64(2), u64(9))
+    if case == "high": return shifted([1, 2, 3], [4, 5, 6], 0, 9223372036854775807, 2)
+    if case == "low": return shifted([1], [2], -9223372036854775808, -9223372036854775804, -1)
+    if case == "wide": return shifted([10, 11], [10, 11], -9223372036854775808, 9223372036854775807, -9223372036854775808)
+    if case == "unsigned-gap": return unsigned_shift([1, 2, 3], [4, 5, 6], u64(0), u64(0xffffffffffffffff), u64(2))
+    if case == "row-overflow": return row_offset([1], [2], 9223372036854775807, 2, 1)
+    if case == "invariant-bad": return invariant([1], [2], 1, 1, 1)
+    if case == "order": return ordered([1, 2], [3], 2, 0)
+    99
+''')
+    binary = tmp_path / 'affine-checks'
+    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary,
+                            *(['--release'] if release else [])],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        script = tmp_path / 'affine-checks.cjs'
+        script.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        command = [runner, script]
+    for case in ('negative-start', 'near-max', 'sum-wrap', 'unsigned-wrap', 'row', 'invariant', 'empty'):
+        ran = subprocess.run([*command, case], capture_output=True, text=True, timeout=10)
+        assert ran.returncode == 42, (case, ran.stdout, ran.stderr)
+    for case, index in [('high', '3'), ('low', '9223372036854775807'), ('wide', '2'),
+                        ('unsigned-gap', '3'), ('row-overflow', '-4'), ('invariant-bad', '1'), ('order', '1')]:
+        ran = subprocess.run([*command, case], capture_output=True, text=True, timeout=10)
+        assert ran.returncode not in (0, 42), (case, ran.stdout, ran.stderr)
+        assert f'index {index} out of bounds' in ran.stdout + ran.stderr, (case, ran.stdout, ran.stderr)
+        if case == 'order':
+            assert (ran.stdout + ran.stderr).startswith('0:\na:\n1:\na:\n'), (ran.stdout, ran.stderr)
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('float_type', ['f32', 'f64'])
+def test_core_shifted_vector_loops(compiler, tmp_path, release, target, float_type):
+    runner = shutil.which('node') if target == 'wasm' else None
+    if target == 'wasm' and runner is None:
+        pytest.skip('Node is needed to exercise web loop checks')
+    source = tmp_path / 'shifted-vectors.jo'
+    source.write_text('''@noinline
+shifted_sum = (a: int[], b: int[], start: int, stop: int, offset: int) -> int:
+    total = 0
+    loop i in [start..stop): total += a[i + offset] + b[i + offset]
+    total
+@noinline
+reverse_offset_sum = (a: int[], b: int[], start: int, stop: int, offset: int) -> int:
+    total = 0
+    loop i in [start..stop): total += a[i - offset] + b[i - offset]
+    total
+@noinline
+commuted_sum = (a: int[], b: int[], start: int, stop: int, offset: int) -> int:
+    total = 0
+    loop i in [start..stop): total += a[offset + i] + b[offset + i]
+    total
+@noinline
+unsigned_sum = (a: int[], b: int[], start: u64, stop: u64, offset: u64) -> int:
+    total = 0
+    loop i in [start..stop): total += a[int(i + offset)] + b[int(i + offset)]
+    total
+@noinline
+shifted_copy = (dst: *f64, src: *f64, proof: f64[], start: int, stop: int, offset: int):
+    loop i in [start..stop): dst[i + offset] = src[i + offset] + proof[i + offset]
+@noinline
+index_as_value = (a: int[], b: int[], stop: int, offset: int) -> int:
+    total = 0
+    loop i in [0..stop):
+        index = i + offset
+        total += a[index] + b[index] + index
+    total
+main = () -> int:
+    if args().len() > 1:
+        return shifted_sum([1, 2], [3, 4], 0, 8, 0)
+    integers = [loop i in [0..24): i + 1]
+    zeros = fill(0.0, 24)
+    saved_avx = __cpu_avx2
+    loop mode in [0..2):
+        if mode == 1: __cpu_avx2 = false
+        loop n in [0..18):
+            assert(shifted_sum(integers, integers, -3, n - 3, 3) == n * (n + 1))
+            assert(shifted_sum(integers, integers, 0, n, 3) == n * (n + 7))
+            start = 9223372036854775807 - n
+            assert(shifted_sum(integers, integers, start, 9223372036854775807, -start) == n * (n + 1))
+            assert(reverse_offset_sum(integers, integers, start, 9223372036854775807, start) == n * (n + 1))
+            assert(commuted_sum(integers, integers, -3, n - 3, 3) == n * (n + 1))
+            ustop = u64(0xffffffffffffffff)
+            assert(unsigned_sum(integers, integers, ustop - u64(n), ustop, u64(n + 1)) == n * (n + 1))
+            assert(index_as_value(integers, integers, n, 3) == n * (n + 7) + n * (n + 5) / 2)
+            values = [loop i in [0..24): f64(i + 1)]
+            shifted_copy(&values[1], &values[0], zeros, 0, n, 3)
+            loop i in [0..24):
+                expected = if i >= 4 and i < n + 4: 4.0 else: f64(i + 1)
+                assert(values[i] == expected)
+            src = [loop i in [0..24): f64(i + 1)]
+            dst = fill(-7.0, 24)
+            shifted_copy(&dst[0], &src[0], zeros, start, 9223372036854775807, -start)
+            loop i in [0..24): assert(dst[i] == (if i < n: f64(i + 1) else: -7.0))
+    __cpu_avx2 = saved_avx
+    42
+'''.replace('f64', float_type)
+        .replace('fill(0.0, 24)', f'fill({float_type}(0.0), 24)')
+        .replace('fill(-7.0, 24)', f'fill({float_type}(-7.0), 24)'))
+    binary = tmp_path / 'shifted-vectors'
+    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target, '-o', binary,
+                            *(['--release'] if release else [])],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    if target == 'native' and platform.machine().lower() in ('x86_64', 'amd64'):
+        names = ['shifted_copy']
+        if release:
+            names += ['shifted_sum', 'unsigned_sum', 'reverse_offset_sum', 'commuted_sum']
+        for name in names:
+            probe = re.search(rf'^fn f_{name}_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
+            assert probe and ' = vld ' in probe[0], f'{name}: shifted loop did not vectorize'
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        script = tmp_path / 'shifted-vectors.cjs'
+        script.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        command = [runner, script]
+    good = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert good.returncode == 42, good.stdout + good.stderr
+    bad = subprocess.run([*command, 'outside'], capture_output=True, text=True, timeout=10)
+    assert bad.returncode not in (0, 42), bad.stdout + bad.stderr
+    assert 'index 2 out of bounds' in bad.stdout + bad.stderr, bad.stdout + bad.stderr

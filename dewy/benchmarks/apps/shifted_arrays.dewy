@@ -1,0 +1,22 @@
+# Shifted array indexing with a runtime offset and a varying integer reduction.
+# Count is the number of 1024-element passes; initialization is outside timing.
+from p"harness.dewy" import size_argument, clock
+let left:array<int64>=[]
+let right:array<int64>=[]
+kernel=(rounds:int64):>int64=>{
+    let total:int64=0
+    let shift=rounds%2+1
+    loop r in [0..rounds) {
+        loop i in [0..1024) {total+=(left[i+shift]+right[i+shift]) xor r}
+    }
+    return total
+}
+main=(args:array<string>):>int64=>{
+    let count=size_argument(args 100000)
+    loop i in [0..1026) {left.push(i) right.push(i*3+1)}
+    let start=clock()
+    let result=kernel(count)
+    let stop=clock()
+    printl"{result} {stop-start}"
+    return 0
+}

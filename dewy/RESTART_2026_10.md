@@ -1340,6 +1340,39 @@ It did not proceed to C bootstrap or a full stage gate. The independent affine
 indexing portion of the Sloppy change remains a separate candidate.
 [Prototype and pilot evidence](audits/2026-10-19/global-hoist-experiment.json).
 
+## Shifted-index loop proofs and vectors
+
+The affine-index portion of Sloppy `cd6ead0` now supports checks involving a
+counter plus invariant terms, including row-stride arithmetic. Dewy's endpoint
+proof tests the unsigned first and last indexes of a nonempty counter interval;
+it preserves legal modular arithmetic and retains the checked loop when the
+index sequence wraps during the interval or exceeds the array.
+
+Simple checked `i + offset`, `i - offset`, and `offset + i` memory indexes can
+also vectorize. Their bases are shifted once, overlap guards remain, and indexes
+used as data retain the scalar path. Vector trip checks use remaining distance
+so counters near the integer limit cannot overflow a `counter + lanes` test.
+The source-level range machinery and explicit value semantics are unchanged.
+
+The new permanent `shifted_arrays` workload takes **0.130×** the preceding
+release kernel time; its default artifact is unchanged. The focused pilot is
+**0.877× C compiled with `-O3 -march=native`**. The stage suite retains its
+established C `-O2` reference, against which this workload is **0.443×**; these
+are distinct comparisons. All eight earlier runtime workloads remain in the
+gate. This result does not establish C parity for the whole language.
+
+All **48** stage comparisons pass after one focused record-release recheck,
+retaining its original samples. Large default/release compile ratios are
+**1.006× / 1.004×**, and the compiler self-build is **1.002×**, versus the
+preceding accepted stage. Fresh default throughput on this run is about **101k
+root lines/CPU-second**; host-dependent absolute figures still fall short of
+250k. The independent C bootstrap passes **376 quick checks**, the full suite
+passes **6,007 checks in 141.15 seconds**, and the strengthened vector/application
+selection passes 12 checks. Coverage includes native/web, float32/float64,
+SSE2/detected CPU paths, vector tails, overflowing endpoints, overlap fallback,
+and observable first-failure order.
+[Full evidence and retained recheck](audits/2026-10-19/affine-vectors.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

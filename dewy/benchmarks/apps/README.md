@@ -36,6 +36,13 @@ expected checksum is 250508. Native/web checks cover both build modes; runtime
 measurements compare default and release with C. These additions describe the
 compact-core implementation, separately from the earlier runner below.
 
+The compact-core suite also retains `shifted_arrays`: 100,000 passes over two
+arrays, with 1,024 shifted indexes per pass, a runtime offset, and a varying
+integer reduction. Its expected checksum at 1,000 passes is 2100736000. This
+protects loop bounds-check elimination and vectorization without replacing any
+existing workload. The standard runner uses C `-O2`; separate experiments with
+C `-O3 -march=native` must identify those flags explicitly.
+
 ## Semantics matched and differences recorded
 
 - Arithmetic is 64-bit signed integers in both languages; every division and
