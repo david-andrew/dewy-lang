@@ -2292,6 +2292,12 @@ capture_narrowed = (l: int, pos: int) -> int:
 # The log avoids scanning all locals or copying checker state for every branch.
 narrow_changes: int[]
 
+struct NarrowJump:
+    context: i32
+    depth: i32
+
+narrow_jumps: NarrowJump[]
+
 narrow_restore = (mark: int) -> int[]:
     if narrow_changes.len() == mark: return []
     changed: int[]
@@ -2309,6 +2315,20 @@ narrow_invalidate = (l: int):
 
 narrow_merge = (changed: int[]):
     loop l in changed: narrow_invalidate(l)
+
+# A returning arm cannot change the state on the path after it. Jumps to an
+# enclosing loop must retain writes; jumps contained in the arm do not escape.
+# Log targets while checking instead of walking checked ASTs again. Callees
+# and nested closures have their own context IDs and cannot exit this branch.
+narrow_returned = (mark: int, jumps: int, body: int):
+    if not stmt_terminates(body): return
+    loop i in [jumps..narrow_jumps.len()):
+        jump = narrow_jumps[i]
+        if jump.context == i32(cx) and jump.depth <= ctxs[cx].loop_depth: return
+    loop i in [mark..narrow_changes.len()):
+        l = narrow_changes[i]
+        locals[l].flags = i32(int(locals[l].flags) & ~LF_UNNARROWED)
+    narrow_changes.truncate(mark)
 
 # x = v where x is narrowed (by `is`) and v is not of the narrowed type: x is the whole variable again
 unnarrow_assign = (s: int):
@@ -2797,11 +2817,13 @@ check_assign = (s: int) -> int:
         rt = prune(check_expr(int(nodes[s].b), lt))
         if rt != lt and nodes[lhs].kind == .ident and (nodes[lhs].aux == i32(int(SK.local)) or nodes[lhs].aux == i32(int(SK.global))) and not can_coerce(last_checked, rt, lt): var_type_error(lhs, lt, rt, nodes[last_checked].pos)
         nodes[s].b = i32(coerce(last_checked, lt))
-        if path_narrows > 0 and nodes[lhs].kind != .ident or path_narrows > 0 and nodes[lhs].aux == i32(int(SK.global)):
+        if (nodes[lhs].kind != .ident or nodes[lhs].aux == i32(int(SK.global))) and (path_narrows > 0 or is_union(lt) or tkind(lt) == .opt):
             key = path_key(lhs)
             path_forget(key, rt)
             # x.f = 5 where x.f is int | str: x.f is an int from here on
-            if is_union(lt) and union_index(lt, rt) >= 0 and len(key) > 0: narrow_expr(copy_path(lhs), [rt], nodes[s].pos, intern(key))
+            if is_union(lt) and union_index(lt, rt) >= 0 and len(key) > 0:
+                path_narrows += 1
+                narrow_expr(copy_path(lhs), [rt], nodes[s].pos, intern(key))
             # x.f = Enemy() where x.f is an Enemy?: it holds one from here on
             else if tkind(lt) == .opt and len(key) > 0 and type_eq(int(types[prune(lt)].elem), rt): narrow_path(lhs, -2, true)
         else if path_narrows > 0 and nodes[lhs].kind == .ident: path_forget(path_key(lhs))
@@ -3060,6 +3082,9 @@ check_stmt = (s: int):
         if nodes[s].aux == 1:
             t = prune(check_expr(int(nodes[s].a), 0))
             nodes[s].a = i32(last_checked)
+            if types[t].kind != .opt:
+                nodes[s].a = i32(narrow_optional_source(int(nodes[s].a)))
+                t = prune(ntype(int(nodes[s].a)))
             if types[t].kind != .opt: fatal(nodes[int(nodes[s].a)].pos, "'loop let x = value' needs an optional value, found {type_str(t)}")
             nodes[s].sym = i32(new_local(int(nodes[s].name), int(types[t].elem), nodes[s].pos))
         else:
@@ -3107,6 +3132,7 @@ check_stmt = (s: int):
                 if item.0 == cx and item.1 == int(nodes[s].name): target = item.2
             if target < 0: fatal(nodes[s].pos, "unknown loop label '${name_of(int(nodes[s].name))}'")
             nodes[s].ival = int(ctxs[cx].loop_depth) - target
+        narrow_jumps.push(NarrowJump(i32(cx), ctxs[cx].loop_depth - i32(nodes[s].ival)))
     else if k == .defer_:
         d = int(nodes[s].a)
         if nodes[d].kind == .block: check_block(d, 0, false)

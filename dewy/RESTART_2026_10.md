@@ -5,6 +5,32 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Returning arms and definite field assignments (2026-10-19)
+
+A branch that changes a narrowed local or field and then returns no longer
+poisons the continuing path. The checker records loop-exit targets as it checks
+statements: exits to enclosing loops retain invalidations, while contained
+breaks/continues and jumps inside other functions or closures do not block
+return-path refinement. Match guard effects remain separate from returning body
+effects. This adds no whole-function traversal.
+
+Known-member assignments to optional and union fields now establish a refinement
+consistently. Previously, the same program could pass only if an unrelated
+helper's field guard had been checked first. Fresh compiler-process tests cover
+both kinds with no helper call, a prior call, and a subsequent call. Explicit
+optional operations retain their optional view after narrowing; this fixes a
+compatibility failure caught by the pinned optional fixture. Dewy errors now
+recommend `is?none` instead of unsupported Jo unwrapping syntax.
+
+The independent C bootstrap and **6,296 checks pass in 191.71 s**. Four additional
+updated value batches verify that returning branches preserve independent
+private captures and explicit shared captures. Compilation instruction increases
+remain **below 0.01%** for large default/release programs and compiler rebuilds.
+The paired pilot gives **7 pass / 5 inconclusive**, with no established regression;
+all 28 runtime artifacts match with fresh checksums. The fixed reference and
+accepted baseline remain unchanged; a fresh optimized host is the next check.
+[Reproductions, compatibility fixes and measured evidence](audits/2026-10-19/return-field-narrowing.json).
+
 ## Keep guard refinements valid after writes (2026-10-19)
 
 The checker no longer re-applies an old condition after its surviving branch

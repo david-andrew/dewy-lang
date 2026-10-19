@@ -1736,6 +1736,11 @@ arms are checked independently: an assignment in one arm does not change the
 type assumptions used to check another arm. A guard carries forward only
 refinements still valid on its continuing path. Replacing a parent value
 invalidates refinements of its fields, including across block boundaries.
+An arm that returns does not invalidate refinements on paths that continue;
+writes on `break` and `continue` paths remain in effect at their destinations.
+Assigning a known member to an optional or union field establishes that member's
+type for subsequent accesses. `??` also works after an optional has been narrowed
+to its value, and its fallback remains lazy.
 
 `match` supports typed bindings, literals and `_` as a fallback. A union is
 written `int64|string`; union matches must cover its members or have a fallback.

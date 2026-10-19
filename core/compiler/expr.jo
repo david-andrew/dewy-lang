@@ -4773,6 +4773,8 @@ check_match = (m: int, expected: int) -> int:
             path_narrows += 1
             narrow_expr(copy_path(sc), arm_members, nodes[arm].pos, intern(pkey))
         body = int(nodes[arm].b)
+        body_changes = narrow_changes.len()
+        jumps = narrow_jumps.len()
         if is_stmt: check_block(body, 0, false)
         else:
             exp = expected
@@ -4794,6 +4796,7 @@ check_match = (m: int, expected: int) -> int:
                     else if first_val != 0: result = join_types(block_value(first_val), vp, nodes[arm].pos)
                     else: coerce(vp, result)
             coerce_hint = ""
+        if narrow_changes.len() != body_changes: narrow_returned(body_changes, jumps, body)
         scope_reset(amark)
         loop l in narrow_restore(changes): changed.push(l)
     scope_reset(mark)
@@ -5253,6 +5256,8 @@ check_expr = (n: int, expected: int) -> int:
                         loop i in [0..int(structs[esi].nfields)):
                             if int(fields[int(structs[esi].fields) + i].name) == fname: has = true
                     if has:
+                        if files[pos_file(nodes[n].pos)].is_dewy:
+                            fatal(nodes[n].pos, "this {type_str(bt)} may be none (nothing), which has no {name_of(fname)}: check it with `is?none` before accessing the field")
                         fatal(nodes[n].pos, "this {type_str(bt)} may be none (nothing), which has no {name_of(fname)}: `x!.{name_of(fname)}` when it cannot be none, or `if let v = x: v.{name_of(fname)}`")
                 # (transform.position: a function's name, with a field after it)
                 if tkind(bt) == .fn_:
@@ -5577,6 +5582,9 @@ check_expr = (n: int, expected: int) -> int:
             else: h = mk_opt(ex)
         at = prune(check_expr(int(nodes[n].a), h))
         if types[at].kind != .opt:
+            nodes[n].a = i32(narrow_optional_source(int(nodes[n].a)))
+            at = prune(ntype(int(nodes[n].a)))
+        if types[at].kind != .opt:
             lhs = int(nodes[n].a)
             # (an index into a map has become a call by now; its position is still the '[')
             lp = int(nodes[lhs].pos)
@@ -5599,13 +5607,9 @@ check_expr = (n: int, expected: int) -> int:
         h = 0
         if ex != 0: h = mk_opt(ex)
         at = prune(check_expr(int(nodes[n].a), h))
-        a = int(nodes[n].a)
-        if types[at].kind != .opt and nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and int(locals[int(nodes[a].sym)].flags) & LF_ALIAS != 0:
-            # (x! where x is known not to be none (after `if x == none: return`): x's value)
-            al = int(locals[int(nodes[a].sym)].alias)
-            if al != 0 and nodes[al].kind == .unwrap:
-                nodes[n].a = nodes[al].a
-                at = prune(ntype(int(nodes[al].a)))
+        if types[at].kind != .opt:
+            nodes[n].a = i32(narrow_optional_source(int(nodes[n].a)))
+            at = prune(ntype(int(nodes[n].a)))
         if types[at].kind != .opt: fatal(nodes[n].pos, "'!' needs an optional value, found {type_str(at)}")
         t = int(types[at].elem)
     else if k == .lambda: t = check_lambda(n, expected)
@@ -5946,7 +5950,9 @@ check_if = (n: int, ex: int) -> int:
         narrow_by(cond, true)
         after_b = locals.len()
         changes = narrow_changes.len()
+        jumps = narrow_jumps.len()
         check_block(b, 0, false)
+        if narrow_changes.len() != changes: narrow_returned(changes, jumps, b)
         scope_reset(mark)
         before_c = 0
         after_c = 0
@@ -5955,7 +5961,9 @@ check_if = (n: int, ex: int) -> int:
             before_c = locals.len()
             narrow_by(cond, false)
             after_c = locals.len()
+            jumps = narrow_jumps.len()
             check_block(c, 0, false)
+            if narrow_changes.len() != changes: narrow_returned(changes, jumps, c)
             scope_reset(mark)
             narrow_merge(first)
         # Reuse the surviving arm's still-valid facts. Retesting the old
@@ -5969,11 +5977,15 @@ check_if = (n: int, ex: int) -> int:
     mark = scope_mark()
     narrow_by(cond, true)
     changes = narrow_changes.len()
+    jumps = narrow_jumps.len()
     t1 = check_block(b, ex, true)
+    if narrow_changes.len() != changes: narrow_returned(changes, jumps, b)
     scope_reset(mark)
     first = narrow_restore(changes)
     narrow_by(cond, false)
+    jumps = narrow_jumps.len()
     t2 = check_block(c, ex, true)
+    if narrow_changes.len() != changes: narrow_returned(changes, jumps, c)
     scope_reset(mark)
     narrow_merge(first)
     if t1 == T_NEVER and t2 == T_NEVER: return T_NEVER
@@ -7021,6 +7033,16 @@ plain_path = (e: int) -> bool:
     if k == .ident: return true
     k == .field and plain_path(int(nodes[e].a))
 
+# Optional operations keep their declared optional view even when an alias is
+# known to hold a value. Ordinary nonoptional operands remain type errors.
+narrow_optional_source = (a: int) -> int:
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return a
+    l = int(nodes[a].sym)
+    if int(locals[l].flags) & LF_ALIAS == 0: return a
+    al = int(locals[l].alias)
+    if al != 0 and nodes[al].kind == .unwrap: return int(nodes[al].a)
+    a
+
 # Only condition-created aliases escape a guard, never locals declared in an arm.
 narrow_promote = (first: int, limit: int):
     loop l in [first..limit):
@@ -7232,6 +7254,9 @@ path_forget = (key: str, same_type: int = 0):
 check_iflet = (n: int, ex: int) -> int:
     is_stmt = has_flag(n, NF_STMT)
     ot = prune(check_expr(int(nodes[n].a), 0))
+    if types[ot].kind != .opt:
+        nodes[n].a = i32(narrow_optional_source(int(nodes[n].a)))
+        ot = prune(ntype(int(nodes[n].a)))
     if types[ot].kind != .opt: fatal(nodes[int(nodes[n].a)].pos, "'if let x = value' needs an optional value, found {type_str(ot)}")
     mark = scope_mark()
     l = new_local(int(nodes[n].name), int(types[ot].elem), nodes[n].pos)
@@ -7241,7 +7266,9 @@ check_iflet = (n: int, ex: int) -> int:
     e1 = ex
     if is_stmt: e1 = 0
     changes = narrow_changes.len()
+    jumps = narrow_jumps.len()
     t1 = check_block(b, e1, not is_stmt)
+    if narrow_changes.len() != changes: narrow_returned(changes, jumps, b)
     scope_reset(mark)
     t2 = T_VOID
     if c != 0:
@@ -7249,7 +7276,9 @@ check_iflet = (n: int, ex: int) -> int:
         e2 = ex
         if e2 == 0: e2 = t1
         if is_stmt: e2 = 0
+        jumps = narrow_jumps.len()
         t2 = check_block(c, e2, not is_stmt)
+        if narrow_changes.len() != changes: narrow_returned(changes, jumps, c)
         narrow_merge(first)
     if is_stmt: return T_VOID
     if c == 0: fatal(nodes[n].pos, "an if expression needs an else branch")

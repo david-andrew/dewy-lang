@@ -202,6 +202,115 @@ if x is?none {return 0} else {let x:Node?=none}
 return x.value}
 main=()=>f(Node[42])''',
 
+    'returning-local': '''Node:type=[value:int64]
+f=(input:Node? change:bool):>int64=>{let x=input
+if x is?none return 0
+if change {x=none return 1}
+return x.value}
+main=()=>{return if f(Node[42] false)=?42 and f(Node[42] true)=?1 42 else 2}''',
+    'returning-field': '''Node:type=[value:int64]
+Box:type=[child:Node?]
+f=(input:Box change:bool):>int64=>{let x=input
+if x.child is?none return 0
+if change {x.child=none return 1}
+return x.child.value}
+main=()=>{return if f(Box[Node[42]] false)=?42 and f(Box[Node[42]] true)=?1 42 else 2}''',
+    'returning-else': '''Node:type=[value:int64]
+f=(input:Node? change:bool):>int64=>{let x=input
+if x is?none return 0
+if change {} else {x=none return 1}
+return x.value}
+main=()=>{return if f(Node[42] true)=?42 and f(Node[42] false)=?1 42 else 2}''',
+    'returning-expression': '''Node:type=[value:int64]
+f=(input:Node? change:bool):>int64=>{let x=input
+if x is?none return 0
+let extra=if change {x=none return 1} else 0
+return x.value+extra}
+main=()=>{return if f(Node[42] false)=?42 and f(Node[42] true)=?1 42 else 2}''',
+    'returning-match': '''Node:type=[value:int64]
+f=(input:Node? choice:int64):>int64=>{let x=input
+if x is?none return 0
+let extra=match choice {<0>=>{x=none return 1} _=>0}
+return x.value+extra}
+main=()=>{return if f(Node[42] 1)=?42 and f(Node[42] 0)=?1 42 else 2}''',
+    'returning-union': '''A:type=[value:int64]
+B:type=[text:string]
+f=(input:A|B change:bool):>int64=>{let x=input
+if x is?B return 0
+if change {x=B["changed"] return 1}
+return x.value}
+main=()=>{return if f(A[42] false)=?42 and f(A[42] true)=?1 42 else 2}''',
+    'returning-lazy-callee': '''Node:type=[value:int64]
+helper=()=>{loop true {break} return 0}
+f=(input:Node? change:bool):>int64=>{let x=input
+if x is?none return 0
+if change {x=none helper() return 1}
+return x.value}
+main=()=>{return if f(Node[42] false)=?42 and f(Node[42] true)=?1 42 else 2}''',
+    'returning-nested-closure': '''Node:type=[value:int64]
+f=(input:Node? change:bool):>int64=>{let x=input
+if x is?none return 0
+if change {x=none let helper=()=>{loop true {break} return 0} helper() return 1}
+return x.value}
+main=()=>{return if f(Node[42] false)=?42 and f(Node[42] true)=?1 42 else 2}''',
+    'returning-contained-break': '''Node:type=[value:int64]
+f=(input:Node? change:bool):>int64=>{let x=input
+if x is?none return 0
+if change {x=none loop true {break} return 1}
+return x.value}
+main=()=>{return if f(Node[42] false)=?42 and f(Node[42] true)=?1 42 else 2}''',
+    'returning-contained-continue': '''Node:type=[value:int64]
+f=(input:Node? change:bool):>int64=>{let x=input
+if x is?none return 0
+if change {x=none loop i in [0..3) {if i <? 2 continue} return 1}
+return x.value}
+main=()=>{return if f(Node[42] false)=?42 and f(Node[42] true)=?1 42 else 2}''',
+
+    'coalesce-narrowed-local': '''Node:type=[value:int64]
+let calls:int64=0
+fallback=()=>{calls+=1 return Node[1]}
+f=(input:Node?):>int64=>{let x=input
+if x is?none return 0
+let answer=x??fallback()
+return answer.value}
+main=()=>{return if f(Node[42])=?42 and calls=?0 42 else 1}''',
+    'coalesce-assigned-field': '''Node:type=[value:int64]
+Box:type=[child:Node?]
+let calls:int64=0
+fallback=()=>{calls+=1 return Node[1]}
+main=()=>{let x=Box[none] x.child=Node[42]
+let answer=x.child??fallback()
+return if answer.value=?42 and x.child.value=?42 and calls=?0 42 else 1}''',
+    'coalesce-narrowed-optional-fallback': '''Node:type=[value:int64]
+let calls:int64=0
+fallback=():>Node?=>{calls+=1 return none}
+f=(input:Node?):>int64=>{let x=input
+if x is?none return 0
+let answer:Node?=x??fallback()
+if answer is?none return 1
+return answer.value}
+main=()=>{return if f(Node[42])=?42 and calls=?0 42 else 1}''',
+
+    'returning-private-capture': '''Node:type=[value:int64]
+make=()=>{let x:Node?=Node[42]
+return (clear:bool)=>{
+if x is?none return 0
+if clear {x=none return 1}
+return x.value}}
+main=()=>{let a=make() let b=a
+if a(false) not=?42 or b(false) not=?42 return 2
+if a(true) not=?1 or a(false) not=?0 return 3
+return if b(false)=?42 and b(true)=?1 and b(false)=?0 42 else 4}''',
+    'returning-shared-capture': '''Node:type=[value:int64]
+main=()=>{let x:Node?=Node[42]
+let a=($capture @x clear:bool)=>{
+if x is?none return 0
+if clear {x=none return 1}
+return x.value}
+let b=a
+if a(false) not=?42 or b(false) not=?42 return 2
+return if b(true)=?1 and a(false)=?0 and x is?none 42 else 3}''',
+
 }
 
 
@@ -270,7 +379,7 @@ main=()=>{return f(Node[42] 0)}''', 'none'),
 f=(input:Node?):>int64=>{let x=input
 if x is?none {return 0} else {x=none}
 return x.value}
-main=()=>f(Node[42])''', 'may be none'),
+main=()=>f(Node[42])''', 'check it with `is?none`'),
     # local-then
     ('''Node:type=[value:int64]
 f=(input:Node?):>int64=>{let x=input
@@ -331,6 +440,32 @@ if x is?none {return 0} else {let hidden=42}
 return hidden}
 main=()=>f(Node[42])''', "unknown name 'hidden'"),
 
+    # returning-labeled-break
+    ('''Node:type=[value:int64]
+f=(input:Node? change:bool):>int64=>{let x=input
+if x is?none return 0
+$outer loop true {
+if change {loop true {x=none break $outer} return 1}
+break}
+return x.value}
+main=()=>f(Node[42] true)''', 'may be none'),
+    # returning-labeled-continue
+    ('''Node:type=[value:int64]
+f=(input:Node? change:bool):>int64=>{let x=input
+if x is?none return 0
+$outer loop i in [0..2) {
+if change {loop true {x=none continue $outer} return 1}}
+return x.value}
+main=()=>f(Node[42] true)''', 'may be none'),
+    # returning-prior-invalid
+    ('''Node:type=[value:int64]
+f=(input:Node? change:bool):>int64=>{let x=input
+if x is?none return 0
+{x=none}
+if change {return 1}
+return x.value}
+main=()=>f(Node[42] false)''', 'may be none'),
+
 ])
 def test_core_recursive_layout_diagnostics(compiler, tmp_path, source, message):
     path = tmp_path / ('bad.jo' if source.startswith('struct') else 'bad.dewy')
@@ -355,8 +490,29 @@ pick = (input: Node?, other: int?) -> int:
         return y
     else:
         return x.value
+finish = (input: Node?, other: int?) -> int:
+    x = input
+    if x == none: return 0
+    if let y = other:
+        x = none
+        return y
+    return x.value
+struct Box:
+    value: int?
+optional_ops = () -> int:
+    b = Box()
+    b.value = 42
+    if let v = b.value: assert(v == 42)
+    total = 0
+    loop let v = b.value:
+        total += v
+        b.value = none
+    total
 main = () -> int:
+    assert(optional_ops() == 42)
     assert(pick(Node(42), 10) == 10)
+    assert(finish(Node(42), 10) == 10)
+    assert(finish(Node(42), none) == 42)
     pick(Node(42), none)
 ''')
     binary = tmp_path / 'siblings'
@@ -444,3 +600,39 @@ draw=():>void=>clear(BLACK)
         assert after > before, watcher.output
     finally:
         watcher.close()
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('kind', ['optional', 'union'])
+def test_core_field_assignment_narrowing_is_order_independent(compiler, tmp_path, kind):
+    if kind == 'optional':
+        prefix = '''Node:type=[value:int64]
+Box:type=[child:Node?]
+prime=(b:Box)=>{if b.child is?none return 0 return b.child.value}
+'''
+        initial, value = 'none', 'Node[42]'
+    else:
+        prefix = '''A:type=[value:int64]
+B:type=[text:string]
+Box:type=[child:A|B]
+prime=(b:Box)=>{if b.child is?B return 0 return b.child.value}
+'''
+        initial, value = 'B["before"]', 'A[42]'
+    # Each build is a fresh compiler process. A combined value batch could
+    # conceal the bug by checking another function's field guard first.
+    for order in ('none', 'before', 'after'):
+        source = prefix + 'main=()=>{let x=Box[' + initial + ']\n'
+        if order == 'before':
+            source += 'prime(x)\n'
+        source += 'x.child=' + value + '\n'
+        if order == 'after':
+            source += 'prime(x)\n'
+        source += 'return x.child.value}\n'
+        path = tmp_path / f'{kind}_{order}.dewy'
+        path.write_text(source)
+        binary = tmp_path / f'{kind}_{order}'
+        built = subprocess.run([compiler, 'build', path, '-o', binary],
+                               capture_output=True, text=True, timeout=30)
+        assert built.returncode == 0, (order, built.stdout, built.stderr)
+        ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+        assert ran.returncode == 42, (order, ran.stdout, ran.stderr)
