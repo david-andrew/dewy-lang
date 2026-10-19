@@ -793,7 +793,8 @@ div_magic = (d: int) -> (int, int):
     (int(q2 + 1), p - 64)
 
 # ---------------- small slots to registers ----------------
-# Non-escaping slots of at most 16 bytes become registers. Four-byte lanes cover
+# Non-escaping slots of at most 16 bytes become registers. Standalone byte and
+# two-byte slots use one integer lane. Four-byte lanes cover
 # vec2..vec4 and small i32/f32 records; eight-byte lanes cover i64/f64 records.
 # Mixed-width accesses, incompatible lane kinds, and escaping addresses retain
 # memory storage. Address discovery also selects lane widths, without another
@@ -804,21 +805,24 @@ sra_soff: int[]        # ... and the offset
 sra_ok: bool[]         # per slot: becomes registers
 sra_lane: int[]        # per slot lane: its vreg
 sra_nv = 0
-sra_widths: int[]      # per slot: 4 or 8 bytes
+sra_widths: int[]      # per slot: 1/2 for narrow scalars, 4/8 for aggregates
+
+sra_shift = (width: int) -> int: if width == 8: 3 else: width >> 1
 
 # May this byte range be used as lanes of kind k (0: just bits, copied)?
 sra_lane_use = (s: int, off: int, bytes: int, k: int) -> bool:
     width = sra_widths[s]
+    if k == 1 and width < 4: return false
     if off < 0 or off & (width - 1) != 0 or bytes & (width - 1) != 0 or off + bytes > int(ir.slot_size[s]): return false
-    loop i in [0..(bytes >> (if width == 8: 3 else: 2))):
-        j = s * 4 + (off >> (if width == 8: 3 else: 2)) + i
+    loop i in [0..(bytes >> sra_shift(width))):
+        j = s * 4 + (off >> sra_shift(width)) + i
         if k != 0:
             if sra_kind[j] != 0 and sra_kind[j] != k: return false
             sra_kind[j] = k
     true
 
 sra_is_p = (v: int) -> bool: v >= 0 and v < sra_nv and sra_sl[v] >= 0 and sra_ok[sra_sl[v]]
-sra_lane_of = (v: int, i: int) -> int: sra_lane[sra_sl[v] * 4 + (sra_soff[v] >> (if sra_widths[sra_sl[v]] == 8: 3 else: 2)) + i]
+sra_lane_of = (v: int, i: int) -> int: sra_lane[sra_sl[v] * 4 + (sra_soff[v] >> sra_shift(sra_widths[sra_sl[v]])) + i]
 
 # A lane as vreg type ty, preserving bits between equal-width float/integer lanes.
 sra_as_ty = (out: mut Ins[], x: int, ty: int) -> int:
@@ -847,7 +851,9 @@ o_sra = ():
     soff = fill(0, nv)
     sra_widths = fill(8, ns)
     loop s in [0..ns):
-        if int(ir.slot_size[s]) % 8 != 0: sra_widths[s] = 4
+        size = int(ir.slot_size[s])
+        if size == 1 or size == 2: sra_widths[s] = size
+        else if size % 8 != 0: sra_widths[s] = 4
     any = false
     loop ins in code:
         d = int(ins.dst)
@@ -877,15 +883,15 @@ o_sra = ():
             if b >= 0 and sl[b] >= 0: sra_widths[sl[b]] = 4
             if c >= 0 and sl[c] >= 0: sra_widths[sl[c]] = 4
         else if op == .load or op == .store:
-            if a >= 0 and sl[a] >= 0 and c & 15 != 8: sra_widths[sl[a]] = 4
+            if a >= 0 and sl[a] >= 0 and sra_widths[sl[a]] == 8 and c & 15 != 8: sra_widths[sl[a]] = 4
         else if op == .copy or op == .zero:
-            if a >= 0 and sl[a] >= 0 and (soff[a] % 8 != 0 or ins.imm % 8 != 0): sra_widths[sl[a]] = 4
-            if op == .copy and b >= 0 and sl[b] >= 0 and (soff[b] % 8 != 0 or ins.imm % 8 != 0): sra_widths[sl[b]] = 4
+            if a >= 0 and sl[a] >= 0 and sra_widths[sl[a]] == 8 and (soff[a] % 8 != 0 or ins.imm % 8 != 0): sra_widths[sl[a]] = 4
+            if op == .copy and b >= 0 and sl[b] >= 0 and sra_widths[sl[b]] == 8 and (soff[b] % 8 != 0 or ins.imm % 8 != 0): sra_widths[sl[b]] = 4
     if not any: return
     # Lanes keep their observed numeric kind; copy-only lanes contain integer bits.
     ok = addressed
     loop s in [0..ns):
-        if int(ir.slot_size[s]) % 4 != 0: ok[s] = false
+        if int(ir.slot_size[s]) & (sra_widths[s] - 1) != 0: ok[s] = false
     sra_kind = fill(0, ns * 4)
     loop ins in code:
         op = ins.op
@@ -915,13 +921,13 @@ o_sra = ():
         if op == .copy:
             # Keep one side in memory when copy endpoints use different lane widths.
             if a >= 0 and b >= 0 and sl[a] >= 0 and sl[b] >= 0 and sra_widths[sl[a]] != sra_widths[sl[b]]:
-                if sra_widths[sl[a]] == 8: ok[sl[a]] = false
+                if sra_widths[sl[a]] > sra_widths[sl[b]]: ok[sl[a]] = false
                 else: ok[sl[b]] = false
-            if a >= 0 and sl[a] >= 0 and (ins.imm % 4 != 0 or not sra_lane_use(sl[a], soff[a], int(ins.imm), 0)): ok[sl[a]] = false
-            if b >= 0 and sl[b] >= 0 and (ins.imm % 4 != 0 or not sra_lane_use(sl[b], soff[b], int(ins.imm), 0)): ok[sl[b]] = false
+            if a >= 0 and sl[a] >= 0 and not sra_lane_use(sl[a], soff[a], int(ins.imm), 0): ok[sl[a]] = false
+            if b >= 0 and sl[b] >= 0 and not sra_lane_use(sl[b], soff[b], int(ins.imm), 0): ok[sl[b]] = false
             continue
         if op == .zero:
-            if a >= 0 and sl[a] >= 0 and (ins.imm % 4 != 0 or not sra_lane_use(sl[a], soff[a], int(ins.imm), 0)): ok[sl[a]] = false
+            if a >= 0 and sl[a] >= 0 and not sra_lane_use(sl[a], soff[a], int(ins.imm), 0): ok[sl[a]] = false
             continue
         if (op == .add or op == .mov) and int(ins.dst) >= 0 and sl[int(ins.dst)] >= 0: continue
         if op == .slot: continue
@@ -935,7 +941,7 @@ o_sra = ():
     any = false
     loop s in [0..ns):
         if not ok[s]: continue
-        loop i in [0..(int(ir.slot_size[s]) >> (if sra_widths[s] == 8: 3 else: 2))):
+        loop i in [0..(int(ir.slot_size[s]) >> sra_shift(sra_widths[s]))):
             ty = if sra_kind[s * 4 + i] == 1: (if sra_widths[s] == 8: VF else: VS) else: VI
             lane[s * 4 + i] = vreg(ty)
             any = true
@@ -957,14 +963,16 @@ o_sra = ():
         if op == .load and sra_is_p(a):
             width = sra_widths[sl[a]]
             ty = if width == 8: VF else: VS
-            x = sra_lane_of(a, int((ins.imm >> (if width == 8: 3 else: 2))))
+            x = sra_lane_of(a, int((ins.imm >> sra_shift(width))))
             if c & M_FLOAT != 0: out.push(Ins(.mov, i32(ty), i32(d), i32(sra_as_ty(out, x, ty)), 0, 0, 0))
             else if width == 8: out.push(Ins(.mov, VI, i32(d), i32(sra_as_ty(out, x, VI)), 0, 0, 0))
-            else if c & M_SIGNED != 0: out.push(Ins(.sext32, VI, i32(d), i32(sra_as_ty(out, x, VI)), 0, 0, 0))
-            else: out.push(Ins(.zext32, VI, i32(d), i32(sra_as_ty(out, x, VI)), 0, 0, 0))
+            else:
+                conv = if width == 1: Op.zext8 else if width == 2: Op.zext16 else: Op.zext32
+                if c & M_SIGNED != 0: conv = if width == 1: Op.sext8 else if width == 2: Op.sext16 else: Op.sext32
+                out.push(Ins(conv, VI, i32(d), i32(sra_as_ty(out, x, VI)), 0, 0, 0))
             continue
         if op == .store and sra_is_p(a):
-            x = sra_lane_of(a, int((ins.imm >> (if sra_widths[sl[a]] == 8: 3 else: 2))))
+            x = sra_lane_of(a, int((ins.imm >> sra_shift(sra_widths[sl[a]]))))
             out.push(Ins(.mov, i32(vtype(x)), i32(x), i32(sra_as_ty(out, b, vtype(x))), 0, 0, 0))
             continue
         if op == .vop and (sra_is_p(a) or (ins.imm & VOP_SPLAT_B == 0 and sra_is_p(b)) or (ins.imm & VOP_SPLAT_C == 0 and sra_is_p(c))):
@@ -994,7 +1002,7 @@ o_sra = ():
             continue
         if op == .copy and (sra_is_p(a) or sra_is_p(b)):
             width = sra_widths[sl[if sra_is_p(a): a else: b]]
-            n = int((ins.imm >> (if width == 8: 3 else: 2)))
+            n = int((ins.imm >> sra_shift(width)))
             xs: int[]
             loop i in [0..n):
                 if sra_is_p(b): xs.push(sra_lane_of(b, i))
@@ -1015,7 +1023,7 @@ o_sra = ():
                     out.push(Ins(.store, i32(vtype(xs[i])), 0, i32(a), i32(xs[i]), i32(m), width * i))
             continue
         if op == .zero and sra_is_p(a):
-            loop i in [0..int((ins.imm >> (if sra_widths[sl[a]] == 8: 3 else: 2)))):
+            loop i in [0..int((ins.imm >> sra_shift(sra_widths[sl[a]])))):
                 t = sra_lane_of(a, i)
                 if vtype(t) != VI:
                     out.push(Ins(.fconst, i32(vtype(t)), i32(t), 0, 0, 0, 0))
@@ -1028,7 +1036,7 @@ o_sra = ():
                 item = int(ir.args[a + k])
                 if item & 1 == 0 and ok[item >> 1] and int(ir.slot_size[item >> 1]) <= 16:
                     s = item >> 1
-                    loop i in [0..(int(ir.slot_size[s]) >> (if sra_widths[s] == 8: 3 else: 2))):
+                    loop i in [0..(int(ir.slot_size[s]) >> sra_shift(sra_widths[s]))):
                         t = lane[s * 4 + i]
                         if vtype(t) != VI: out.push(Ins(.fconst, i32(vtype(t)), i32(t), 0, 0, 0, 0))
                         else: out.push(Ins(.mov, VI, i32(t), i32(k_vreg(0)), 0, 0, 0))

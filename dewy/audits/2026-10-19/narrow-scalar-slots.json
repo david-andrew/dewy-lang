@@ -1,0 +1,32 @@
+{
+  "change": "Extend existing small-slot register promotion to standalone one- and two-byte integer slots, preserving load signedness and low-bit truncation. Escaping and mixed-width storage remains in memory; no new optimizer pass.",
+  "validation": {
+    "focused": "20 native/WebAssembly default/release checks pass, including signed extrema, private record copies with escaping mutation, and loop-local zero resets.",
+    "quick": "508 passed in 11.29 seconds.",
+    "fuzz": "Seeds 301..400 pass in five modes (500 executions).",
+    "bootstrap": "Two native generations; full suite and independent bootstrap close the next optimizer batch."
+  },
+  "instructions_vs_previous": {
+    "throughput-default": 0.9984905114186228,
+    "throughput-release": 0.9977093300643916,
+    "tour-default": 0.9989556159971997,
+    "netpong-default": 0.9989681547288872,
+    "dunes-default": 0.9989554200307871,
+    "compiler-reference": 0.9979922028307002
+  },
+  "laptop_cpu_vs_previous": {
+    "throughput-default": 0.9926859105423967,
+    "throughput-release": 0.9940373409338307,
+    "tour-default": 0.9989584928777769,
+    "netpong-default": 0.9925733744122092,
+    "dunes-default": 0.9998461310844663,
+    "compiler-reference": 0.9957986230502351
+  },
+  "performance": "All 12 laptop compilation comparisons pass. Existing 28 runtime artifacts are unchanged with fresh checksum checks. Narrow scalar cases are not represented by those historical kernels.",
+  "baseline": "No whole-stage promotion; fixed ea1cba0e and accepted cd07ea34 unchanged.",
+  "evidence": {
+    "file": "narrow-scalar-slots-evidence.json.gz",
+    "sha256": "eb421705ad012c8d5212e90e7f56006d0ca1e3a33b0d19ec003c9aac15350ba3",
+    "format": "gzip JSON"
+  }
+}

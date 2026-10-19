@@ -7656,6 +7656,73 @@ main = () -> int:
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
+@pytest.mark.core_quick
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.parametrize('kind,values', [
+    ('bool', ['false', 'true']),
+    ('i8', ['-128', '-1', '0', '1', '127']),
+    ('u8', ['0', '1', '127', '128', '255']),
+    ('i16', ['-32768', '-1', '0', '1', '32767']),
+    ('u16', ['0', '1', '32767', '32768', '65535']),
+])
+def test_core_narrow_slot_promotion(compiler, tmp_path, target, release, kind, values):
+    # Branch-result slots must preserve sign/zero extension. Record copies also
+    # exercise promotion next to an escaping mutable argument and loop resets.
+    source = tmp_path / 'narrow.jo'
+    source.write_text(f'''struct Box:
+    value: {kind}
+@noinline
+narrow_probe = (flag: bool, a: {kind}, b: {kind}) -> {kind}:
+    if flag: a else: b
+@noinline
+replace = (box: mut Box, value: {kind}): box.value = value
+@noinline
+copy_probe = (flag: bool, a: {kind}, b: {kind}) -> {kind}:
+    original = Box(a)
+    private = original
+    replace(original, b)
+    if flag: private.value else: original.value
+@noinline
+reset_probe = (a: {kind}) -> {kind}:
+    answer: {kind}
+    loop i in [0..3):
+        fresh: Box
+        if i == 0: fresh.value = a
+        answer = fresh.value
+    answer
+main = () -> int:
+    values: {kind}[] = [{', '.join(values)}]
+    loop a in values:
+        loop b in values:
+            if narrow_probe(true, a, b) != a or narrow_probe(false, a, b) != b: return 1
+            if copy_probe(true, a, b) != a or copy_probe(false, a, b) != b: return 2
+        if reset_probe(a) != {('false' if kind == 'bool' else '0')}: return 3
+    42
+''')
+    binary = tmp_path / 'narrow'
+    flags = ['--ir', '--target', target, *(['--release'] if release else [])]
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_narrow_probe_.*?(?=^fn |\Z)',
+                      built.stdout + built.stderr, re.M | re.S)
+    assert probe, 'narrow scalar probe was not emitted'
+    assert ' = load ' not in probe[0] and 'store ' not in probe[0], probe[0]
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed for web narrow scalar checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'narrow.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_fast_inline(compiler, tmp_path, target):
     source = tmp_path / 'leaf.jo'
@@ -11534,6 +11601,73 @@ score(saved)
 
 
 @pytest.mark.core_quick
+@pytest.mark.core_quick
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.parametrize('kind,values', [
+    ('bool', ['false', 'true']),
+    ('i8', ['-128', '-1', '0', '1', '127']),
+    ('u8', ['0', '1', '127', '128', '255']),
+    ('i16', ['-32768', '-1', '0', '1', '32767']),
+    ('u16', ['0', '1', '32767', '32768', '65535']),
+])
+def test_core_narrow_slot_promotion(compiler, tmp_path, target, release, kind, values):
+    # Branch-result slots must preserve sign/zero extension. Record copies also
+    # exercise promotion next to an escaping mutable argument and loop resets.
+    source = tmp_path / 'narrow.jo'
+    source.write_text(f'''struct Box:
+    value: {kind}
+@noinline
+narrow_probe = (flag: bool, a: {kind}, b: {kind}) -> {kind}:
+    if flag: a else: b
+@noinline
+replace = (box: mut Box, value: {kind}): box.value = value
+@noinline
+copy_probe = (flag: bool, a: {kind}, b: {kind}) -> {kind}:
+    original = Box(a)
+    private = original
+    replace(original, b)
+    if flag: private.value else: original.value
+@noinline
+reset_probe = (a: {kind}) -> {kind}:
+    answer: {kind}
+    loop i in [0..3):
+        fresh: Box
+        if i == 0: fresh.value = a
+        answer = fresh.value
+    answer
+main = () -> int:
+    values: {kind}[] = [{', '.join(values)}]
+    loop a in values:
+        loop b in values:
+            if narrow_probe(true, a, b) != a or narrow_probe(false, a, b) != b: return 1
+            if copy_probe(true, a, b) != a or copy_probe(false, a, b) != b: return 2
+        if reset_probe(a) != {('false' if kind == 'bool' else '0')}: return 3
+    42
+''')
+    binary = tmp_path / 'narrow'
+    flags = ['--ir', '--target', target, *(['--release'] if release else [])]
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_narrow_probe_.*?(?=^fn |\Z)',
+                      built.stdout + built.stderr, re.M | re.S)
+    assert probe, 'narrow scalar probe was not emitted'
+    assert ' = load ' not in probe[0] and 'store ' not in probe[0], probe[0]
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed for web narrow scalar checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'narrow.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_fast_inline_failure_path(compiler, tmp_path, target):
     runner = shutil.which('node') if target == 'wasm' else None
