@@ -48,6 +48,7 @@ const LF_SOAMUT = 8192      # ... and the loop is `loop mut`
 const LF_ELEMALIAS = 16384  # `mut x in xs` in a combined loop: x stands for xs[k] (writes to x write xs)
 const LF_READ = 32768       # its value is read somewhere (not only the base of a write: v.f = 1)
 const LF_QUIET = 65536      # a loop counter or part of `a, b = f()`: not warned about when unused
+const LF_PARAMWRITE = 524288 # private parameter storage can be written/exposed in its body
 const LF_VALUECAP = 262144  # Dewy capture owns a snapshot; outer links stop here
 const LF_CONST = 131072     # Dewy const: one initialized value, no writes through the binding
 assign_root = 0                 # (the variable an assignment being checked writes through)

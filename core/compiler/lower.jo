@@ -4039,6 +4039,8 @@ gen_vardecl = (s: int):
 # stays read-only, it can use the borrowed parameter storage instead of copying
 # and retaining it again. Calls already preserve borrowed parameter snapshots.
 # Keep real local storage for captures, address-taking and raw buffer access.
+param_writes_scanned = false
+
 param_view_decl = (s: int, l: int) -> bool:
     if dbg_on or nodes[s].aux2 != 1: return false
     fl = int(locals[l].flags)
@@ -4054,11 +4056,10 @@ param_view_decl = (s: int, l: int) -> bool:
     t = prune(int(locals[l].type))
     if not is_managed(t) and vc(t) != VC_AGG: return false
     if type_has_fn(t) or not type_eq(ntype(iv), t): return false
-    root = mk(.ident, nodes[s].pos)
-    nodes[root].aux = i32(int(SK.local))
-    nodes[root].sym = i32(l)
-    nodes[root].type = i32(t)
-    if may_write_root(int(fns[cur_fn].body), root): return false
+    if not param_writes_scanned:
+        param_writes_scan(int(fns[cur_fn].body))
+        param_writes_scanned = true
+    if int(locals[l].flags) & LF_PARAMWRITE != 0: return false
     # Treat this binding as another read-only view of the parameter. It owns
     # no reference and must not be dropped as a separately initialized local.
     locals[l].vreg = locals[source].vreg
@@ -4175,6 +4176,39 @@ raw_view = (n: int) -> bool:
     tk = tkind(ntype(n))
     fk = tkind(ntype(a))
     (tk == .ptr or tk == .int_) and (fk == .array or fk == .str_)
+
+# Parameter views only concern private locals: globals, mutable parameters,
+# aliases and captures are rejected before this analysis. Collect the same direct
+# writes/raw exposures as may_write_root once for the entire function instead of
+# rescanning its body and allocating a synthetic root node for each parameter.
+param_write = (n: int):
+    w = write_root(n)
+    if w != 0 and nodes[w].aux == i32(int(SK.local)):
+        l = int(nodes[w].sym)
+        locals[l].flags |= i32(LF_PARAMWRITE)
+
+param_writes_scan = (n: int):
+    if n <= 0: return
+    k = nodes[n].kind
+    if k == .lambda: return
+    if k == .assign: param_write(int(nodes[n].a))
+    if k == .intrinsic and nkids(n) > 0:
+        id = nodes[n].aux as IN
+        if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend or id == .arrdata:
+            param_write(kid(n, 0))
+    if k == .addr or (k == .cast or k == .conv) and raw_view(n):
+        param_write(int(nodes[n].a))
+    if k == .for_ and has_flag(n, NF_MUT): param_write(int(nodes[n].a))
+    if k == .call or (k == .pair and nodes[n].sym > 0):
+        loop i in [0..nkids(n)):
+            if has_flag(kid(n, i), NF_MUT): param_write(kid(n, i))
+    param_writes_scan(int(nodes[n].a))
+    param_writes_scan(int(nodes[n].b))
+    if k != .for_:
+        param_writes_scan(int(nodes[n].c))
+        param_writes_scan(int(nodes[n].d))
+    loop i in [0..nkids(n)): param_writes_scan(kid(n, i))
+    loop i in [0..nkids2(n)): param_writes_scan(kid2(n, i))
 
 may_write_root = (n: int, rn: int) -> bool:
     if n <= 0: return false
@@ -5686,6 +5720,7 @@ lower_inst = (lf: int, f: int):
         ir_set_pos(nodes[int(fns[f].decl)].pos)
         ir.decl_pos = ir_pos
     cur_fn = f
+    param_writes_scanned = false
     cur_closed = -1
     cur_ret = int(fns[f].ret)
     ir.cabi = fns[f].cabi

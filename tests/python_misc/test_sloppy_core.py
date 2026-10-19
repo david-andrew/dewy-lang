@@ -24,7 +24,7 @@ from tools.sloppy_core.benchmark_types import record_source
 
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
-    'lexer-keyword-ids',
+    'lexer-keyword-ids', 'optimizer-parameter-effects-shared-scan',
     'constant-local-once', 'numeric-sum-literal-exact', 'numeric-matrix-slices',
     'array-comparison-word-boundaries', 'array-comparison-string-blocks', 'sequence-value-protocol-nesting',
     'sequence-slice-bound-loop-local',
@@ -2400,6 +2400,16 @@ row[0].push("changed") result[1].push("copy")
 if get() not=? [["a"] ["b"]] or result not=? [["a"] ["b" "copy"]] panic("escaped snapshot changed")}
 main=()=>{work() let before=alloc_count() loop i in [0..20) work()
 return if alloc_count() =? before 42 else 1}''',
+    'optimizer-parameter-effects-shared-scan': '''bump=(@values:array<int64>):>void=>{values[0]+=1}
+edit=(first:array<int64> raw:array<int64> changed:array<int64> last:array<int64> take:bool):>int64=>{
+if take {let p=raw.data() p[0]=40 bump(@changed)}
+return first[0]+raw[0]+changed[0]+last[0]}
+read=(first:array<int64> second:array<int64> third:array<int64>):>int64=>first[0]+second[0]+third[0]
+main=()=>{let original=[10] original.push(22)
+if edit(original original original original true) not=? 71 return 1
+if edit(original original original original false) not=? 40 return 2
+if read(original original original) not=? 30 return 3
+return if original =? [10 22] 42 else 4}''',
     'optimizer-parameter-raw-copy': '''edit=(values:array<int64>):>array<int64>=>{let p=values.data() p[0]=42 return values}
 main=()=>{let values=[20 22] values.push(0) let edited=edit(values)
 return if values =? [20 22 0] and edited =? [42 22 0] 42 else 1}''',

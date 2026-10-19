@@ -1112,6 +1112,33 @@ profile identifies repeated parameter-ownership body scans and native emission
 as further costs to investigate.
 [Validation, measurements and profile](audits/2026-10-19/keyword-ids.json).
 
+## Share parameter ownership analysis within each function
+
+Private value-parameter views now share one collection of direct writes and raw
+storage exposures per function. The old implementation scanned the entire body
+and created a temporary identifier node for each eligible parameter. The new
+analysis preserves those checks in per-local flags; global and mutable-parameter
+call-effect analysis retains its separate, broader rules. A mixed-parameter test
+checks read-only arguments alongside raw-buffer access and mutable arguments,
+including a later function whose analysis must start fresh.
+
+An independent C bootstrap passes **306 quick checks**; the full suite passes
+**5,933 checks in 229.72 seconds**, using two workers. All **44** performance
+comparisons pass after focused rechecks of Netpong and Dunes, with every matched
+sample retained. Large default and release compilation take **0.997×** and
+**0.992×** the preceding stage's CPU time. These are small gains; the structural
+benefit is avoiding repeated body traversals as parameter counts increase.
+
+All eight runtime workloads retain their accepted artifacts in both modes and
+pass fresh boundary/full-size checks. Runtime timing and fresh C ratios are
+unmeasured for this stage. Fresh default throughput is about **72k root
+lines/CPU-second** on the contended host, still well short of 250k.
+[Validation and measurements](audits/2026-10-19/parameter-effects.json).
+
+The new testing also exposed a preexisting issue in raw `.data()` access through
+nested record fields. Its regression case and the broader interaction with
+borrowed locals and closure state are the next correctness work.
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or
