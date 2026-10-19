@@ -11093,3 +11093,53 @@ main = () -> int:
         command = [node, runner]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=30)
     assert ran.returncode == 0, ran.stdout + ran.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_core_short_copy_bounds_and_live_values(compiler, tmp_path, release):
+    guarded = platform.system() == 'Linux' and platform.machine().lower() in ('x86_64', 'amd64')
+    setup = """    aa = syscall(9, 0, 12288, 3, 0x22, -1, 0)
+    bb = syscall(9, 0, 12288, 3, 0x22, -1, 0)
+    assert(aa > 0 and bb > 0)
+    assert(syscall(10, aa, 4096, 0) == 0 and syscall(10, aa + 8192, 4096, 0) == 0)
+    assert(syscall(10, bb, 4096, 0) == 0 and syscall(10, bb + 8192, 4096, 0) == 0)
+    a = (aa + 4096) as *u8
+    b = (bb + 4096) as *u8
+""" if guarded else """    a = __alloc(4096)
+    b = __alloc(4096)
+"""
+    cleanup = """    assert(syscall(11, aa, 12288) == 0 and syscall(11, bb, 12288) == 0)
+""" if guarded else """    __free(a)
+    __free(b)
+"""
+    params = ', '.join(f'x{i}: int' for i in range(12))
+    total = ' + '.join(f'x{i}' for i in range(12))
+    source = tmp_path / 'short-copy.jo'
+    source.write_text(f"""@noinline
+transfer = (to: *u8, from: *u8, n: int, {params}) -> int:
+    mem_copy(to, from, n)
+    {total}
+main = () -> int:
+{setup}    loop n in [0..129):
+        loop side_a in [0..2):
+            loop side_b in [0..2):
+                ai = if side_a == 0: 0 else: 4096 - n
+                bi = if side_b == 0: 0 else: 4096 - n
+                mem_set(a, 60, 4096)
+                mem_set(b, 165, 4096)
+                loop i in [0..n): a[ai + i] = u8(i * 11 + 7)
+                assert(transfer(b + bi, a + ai, n, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12) == 78)
+                loop i in [0..4096):
+                    expected = if i >= bi and i < bi + n: u8((i - bi) * 11 + 7) else: u8(165)
+                    assert(b[i] == expected)
+                    original = if i >= ai and i < ai + n: u8((i - ai) * 11 + 7) else: u8(60)
+                    assert(a[i] == original)
+{cleanup}    42
+""")
+    binary = tmp_path / 'short-copy'
+    built = subprocess.run([compiler, 'build', source, *(['--release'] if release else []), '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=15)
+    assert ran.returncode == 42, ran.stdout + ran.stderr

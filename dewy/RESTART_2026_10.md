@@ -1223,6 +1223,23 @@ performance gate. Four useful alignment, reuse-zeroing, growth, chunk-boundary
 and C-ABI lookup checks remain, and pass on the accepted compiler in 3.02 seconds.
 [Experiment and measurements](audits/2026-10-19/allocator-experiment.json).
 
+## Deferred short-copy emission
+
+A selective Sloppy `06a297d` port replaces short x86-64 `rep movsb` copies
+with bounded scalar loads and stores. The isolated 1–16-byte workload uses
+**0.628×** the preceding emitter's CPU time; medium and bulk copies are flat.
+The independent C bootstrap passes 353 quick checks and the full suite passes
+**5,980 checks in 139.10 seconds** with two workers.
+
+The implementation is **deferred and reverted**: 43 of 44 performance comparisons
+pass, but default match dispatch remains inconclusive after 108 matched samples
+(**1.017×**, 95% interval **1.0145–1.0203×**). Its diagnostic kernel and classifier
+have unchanged instructions apart from addresses; layout sensitivity is plausible,
+not established. Further resampling is not the next step. The exact patch and
+all measurements are retained, along with useful copy bounds and live-register
+tests. This candidate does not become the next performance reference.
+[Experiment and measurements](audits/2026-10-19/short-copy-experiment.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or
