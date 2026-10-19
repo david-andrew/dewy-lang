@@ -1,5 +1,9 @@
 # Restart: fast feedback and a Sloppy-derived implementation core
 
+Current work is tracked in [COMPACT_STATUS](COMPACT_STATUS.md). This document
+retains the experiment history; see the [October 19 audit](AUDIT_2026_10_19.md)
+for the revised iteration process.
+
 Assessment begun 2026-10-16 at Dewy `15e57975` and Sloppy `235e19a`.
 Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its

@@ -109,7 +109,8 @@ Named and positional call arguments may be interleaved; positional values fill
 the next unassigned parameter. Explicit Dewy arguments evaluate in source order,
 followed by omitted defaults in parameter order, including record construction.
 Already evaluated scalar and managed values survive changes made by later
-arguments. Named arguments on first-class function values remain unsupported.
+arguments. Named arguments also work on first-class function values whose
+callable types retain parameter names; positional calls do not require names.
 Defaults may refer to earlier parameters: `combine=(a b=a)=>a+b` accepts
 `combine(next())` and evaluates `next()` once. Explicit values are captured in
 source order, followed by defaults in parameter order. Defaults resolve globals

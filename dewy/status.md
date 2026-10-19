@@ -1,5 +1,8 @@
 # Cleanparse implementation status
 
+This is the historical cleanparse tracker. Current compact-core work is tracked
+in [COMPACT_STATUS](COMPACT_STATUS.md), under the current [language goals](GOALS.md).
+
 This document tracks language features in the cleanparse compiler. Checked items are supported through parsing, semantic analysis, udewy lowering, and emission.
 
 ## Principles

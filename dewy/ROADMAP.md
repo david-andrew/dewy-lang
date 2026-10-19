@@ -1,5 +1,10 @@
 # Dewy roadmap after the native bootstrap
 
+For current compact-core capabilities and the next work items, start with
+[COMPACT_STATUS](COMPACT_STATUS.md). The phase plan below retains historical
+design context; the [October 19 process audit](AUDIT_2026_10_19.md) records the
+current validation and prioritization adjustments.
+
 **Restart, 2026-10-16:** [the Sloppy comparison and restart plan](RESTART_2026_10.md)
 prioritizes fast focused validation, representative application benchmarks, and
 a Sloppy-derived implementation core. Preserve Dewy's useful user-facing

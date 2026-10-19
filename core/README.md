@@ -9,6 +9,8 @@ The supported language and measured results are documented in
 [the implementation notes](../tools/sloppy_core/README.md). This is still an
 experimental subset, not a replacement for the published Dewy compiler.
 Start with the [language guide and executable tour](LANGUAGE.md) to try it.
+The [current completion ledger](../dewy/COMPACT_STATUS.md) tracks remaining
+capabilities, performance gaps and the next implementation steps.
 
 Projects can use native `test "description" { assert(...) }` blocks and run them
 with `./tools/dewy test file.dewy [name filters...]`; see the
