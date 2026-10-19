@@ -1063,10 +1063,16 @@ mentions_var = (n: int, r: int) -> bool:
     if n <= 0: return false
     if nodes[n].kind == .ident and same_var(n, r): return true
     if nodes[n].kind == .lambda: return false
-    fs = [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]
-    if nodes[n].kind == .for_: fs = [int(nodes[n].a), int(nodes[n].b)]
-    loop c in fs:
-        if mentions_var(c, r): return true
+    child_a = int(nodes[n].a)
+    child_b = int(nodes[n].b)
+    child_c = int(nodes[n].c)
+    child_d = int(nodes[n].d)
+    more_children = nodes[n].kind != .for_
+    if mentions_var(child_a, r): return true
+    if mentions_var(child_b, r): return true
+    if more_children:
+        if mentions_var(child_c, r): return true
+        if mentions_var(child_d, r): return true
     loop i in [0..nkids(n)):
         if mentions_var(kid(n, i), r): return true
     loop i in [0..nkids2(n)):
@@ -2230,10 +2236,16 @@ has_call = (n: int) -> bool:
     k = nodes[n].kind
     if k == .call or (k == .pair and nodes[n].sym > 0): return true
     if k == .lambda: return false
-    fs = [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]
-    if k == .for_: fs = [int(nodes[n].a), int(nodes[n].b)]
-    loop c in fs:
-        if has_call(c): return true
+    child_a = int(nodes[n].a)
+    child_b = int(nodes[n].b)
+    child_c = int(nodes[n].c)
+    child_d = int(nodes[n].d)
+    more_children = k != .for_
+    if has_call(child_a): return true
+    if has_call(child_b): return true
+    if more_children:
+        if has_call(child_c): return true
+        if has_call(child_d): return true
     loop i in [0..nkids(n)):
         if has_call(kid(n, i)): return true
     loop i in [0..nkids2(n)):
@@ -4028,18 +4040,20 @@ gen_vardecl = (s: int):
 # and retaining it again. Calls already preserve borrowed parameter snapshots.
 # Keep real local storage for captures, address-taking and raw buffer access.
 param_view_decl = (s: int, l: int) -> bool:
-    if not opt_release or dbg_on or not files[pos_file(nodes[s].pos)].is_dewy: return false
+    if dbg_on or nodes[s].aux2 != 1: return false
     fl = int(locals[l].flags)
     if fl & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM) != 0 or is_shared(l): return false
-    t = prune(int(locals[l].type))
-    if type_has_fn(t): return false
-    if not is_managed(t) and vc(t) != VC_AGG: return false
+    # Most local initializers are not the parameter binding introduced by the
+    # frontend. Reject their shape before asking about layouts or closure types.
     iv = int(nodes[s].b)
     if iv == 0 or nodes[iv].kind != .ident or nodes[iv].aux != i32(int(SK.local)): return false
     source = int(nodes[iv].sym)
     flags = int(locals[source].flags)
     if flags & LF_PARAM == 0 or flags & (LF_MUTPARAM | LF_ADDR | LF_CAPTURE | LF_CAPTURED) != 0: return false
-    if locals[source].owner != i32(cur_fn) or locals[source].name != locals[l].name or not type_eq(ntype(iv), t): return false
+    if locals[source].owner != i32(cur_fn) or locals[source].name != locals[l].name: return false
+    t = prune(int(locals[l].type))
+    if not is_managed(t) and vc(t) != VC_AGG: return false
+    if type_has_fn(t) or not type_eq(ntype(iv), t): return false
     root = mk(.ident, nodes[s].pos)
     nodes[root].aux = i32(int(SK.local))
     nodes[root].sym = i32(l)
@@ -4128,10 +4142,16 @@ mentions_local = (n: int, l: int) -> bool:
     if n <= 0: return false
     k = nodes[n].kind
     if k == .ident: return nodes[n].aux == i32(int(SK.local)) and int(nodes[n].sym) == l
-    fs = [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]
-    if k == .for_: fs = [int(nodes[n].a), int(nodes[n].b)]
-    loop c in fs:
-        if mentions_local(c, l): return true
+    child_a = int(nodes[n].a)
+    child_b = int(nodes[n].b)
+    child_c = int(nodes[n].c)
+    child_d = int(nodes[n].d)
+    more_children = k != .for_
+    if mentions_local(child_a, l): return true
+    if mentions_local(child_b, l): return true
+    if more_children:
+        if mentions_local(child_c, l): return true
+        if mentions_local(child_d, l): return true
     loop i in [0..nkids(n)):
         if mentions_local(kid(n, i), l): return true
     loop i in [0..nkids2(n)):
@@ -4195,10 +4215,16 @@ may_write_root = (n: int, rn: int) -> bool:
             # caller's global)
             w = fn_writes(int(nodes[n].sym))
             if w.all or (glob and w.globals.contains(int(nodes[rn].sym))) or (mutparam and w.globals.len() > 0): return true
-    fs = [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]
-    if k == .for_: fs = [int(nodes[n].a), int(nodes[n].b)]
-    loop c in fs:
-        if may_write_root(c, rn): return true
+    child_a = int(nodes[n].a)
+    child_b = int(nodes[n].b)
+    child_c = int(nodes[n].c)
+    child_d = int(nodes[n].d)
+    more_children = k != .for_
+    if may_write_root(child_a, rn): return true
+    if may_write_root(child_b, rn): return true
+    if more_children:
+        if may_write_root(child_c, rn): return true
+        if may_write_root(child_d, rn): return true
     loop i in [0..nkids(n)):
         if may_write_root(kid(n, i), rn): return true
     loop i in [0..nkids2(n)):
@@ -4231,10 +4257,16 @@ calls_leave = (n: int, rn: int, written: bool) -> bool:
             else:
                 # (a mut parameter may be any of the caller's globals)
                 if w.globals.len() > 0 or (written and w.mentions.len() > 0): return false
-    fs = [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]
-    if k == .for_: fs = [int(nodes[n].a), int(nodes[n].b)]
-    loop c in fs:
-        if not calls_leave(c, rn, written): return false
+    child_a = int(nodes[n].a)
+    child_b = int(nodes[n].b)
+    child_c = int(nodes[n].c)
+    child_d = int(nodes[n].d)
+    more_children = k != .for_
+    if not calls_leave(child_a, rn, written): return false
+    if not calls_leave(child_b, rn, written): return false
+    if more_children:
+        if not calls_leave(child_c, rn, written): return false
+        if not calls_leave(child_d, rn, written): return false
     loop i in [0..nkids(n)):
         if not calls_leave(kid(n, i), rn, written): return false
     loop i in [0..nkids2(n)):
@@ -4436,10 +4468,16 @@ closed_scan = (n: int, seen: mut bool[]) -> bool:
     if k == .call and not harmless_call(n): return false
     if k == .ident and nodes[n].aux == i32(int(SK.global)): return false
     # (a `for` keeps local variable numbers in c and d)
-    fs = [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]
-    if k == .for_: fs = [int(nodes[n].a), int(nodes[n].b)]
-    loop c in fs:
-        if not closed_scan(c, seen): return false
+    child_a = int(nodes[n].a)
+    child_b = int(nodes[n].b)
+    child_c = int(nodes[n].c)
+    child_d = int(nodes[n].d)
+    more_children = k != .for_
+    if not closed_scan(child_a, seen): return false
+    if not closed_scan(child_b, seen): return false
+    if more_children:
+        if not closed_scan(child_c, seen): return false
+        if not closed_scan(child_d, seen): return false
     loop i in [0..nkids(n)):
         if not closed_scan(kid(n, i), seen): return false
     loop i in [0..nkids2(n)):
@@ -4913,7 +4951,7 @@ gen_for = (s: int):
         # If the body writes the source, copying its selected range can be
         # cheaper than retaining the full array and forcing a whole-array detach.
         if sliced: sliced = unchanged_by(int(nodes[it].a), int(nodes[s].b))
-        borrowed = not type_has_fn(ct) and not sliced and not is_slice(it) and aux == 1 and opt_release and unchanged_by(it, int(nodes[s].b))
+        borrowed = not type_has_fn(ct) and not sliced and not is_slice(it) and aux == 1 and not dbg_on and unchanged_by(it, int(nodes[s].b))
         stmt_begin()
         if sliced:
             # Iteration needs a retained source and bounds, not a copied slice.

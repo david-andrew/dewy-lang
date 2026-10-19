@@ -2305,9 +2305,10 @@ emit_ins = (pos: int, ins: Ins):
                 if d >= 0 and vloc[d] != LOC_NONE: st(d, RAX)
         block: xctl.push(XCtl(0, code.len(), [], []))
         loop:
-            # (loop tops on 16-byte boundaries, like C compilers do: when that takes few bytes)
+            # Default code needs a consistent loop entry before comparison
+            # padding. Release keeps its measured limited-padding policy.
             if ra_on:
-                if (16 - code.len() % 16) % 16 <= 10: nop_pad((16 - code.len() % 16) % 16)
+                if not opt_release or (16 - code.len() % 16) % 16 <= 10: nop_pad((16 - code.len() % 16) % 16)
                 else: nop_pad((8 - code.len() % 8) % 8)
             xctl.push(XCtl(1, code.len(), [], []))
         if_:

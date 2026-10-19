@@ -1004,6 +1004,54 @@ host; the 250k target remains unmet. Absolute rates across different host loads
 are not speedup measurements.
 [Raw measurements, compiler identities and validation](audits/2026-10-18/native-string-equality.json).
 
+## Default value-parameter and loop borrows
+
+The next stage applies the existing release-mode borrowing proofs to default
+builds. Read-only value parameters can use their incoming storage, and loops
+whose bodies cannot change their source can avoid retaining a snapshot. Mutation,
+address-taking, shared/captured bindings and function-containing values keep the
+existing copying behavior. Private closure state remains independent.
+
+Six recursive AST visitors now visit their fixed children directly, avoiding a
+temporary heap array at every visited node. The parser marks its synthesized
+value-parameter bindings, so ordinary declarations skip parameter borrowing
+analysis.
+
+The initial independently bootstrapped prototype passes 270 quick checks.
+A nine-pair runtime pilot measures **192 → 68 ms CPU** for default builds of the
+new `managed_params` workload, which passes records and arrays through small
+read-only helpers. Release artifacts are unchanged; its roughly 23 ms release
+time still exceeds the C counterpart's roughly 15 ms. Default graph traversal
+improves about 1%. The initial full suite passed 5,895 checks, but the stage
+was withheld: its default text scanner regressed about 10%. Removing ownership
+instructions changed loop layout, exposing the backend's fallback to 8-byte
+alignment and comparison padding on loop back edges.
+
+A matched 23-pair text experiment compares consistent 16-byte and 32-byte loop
+alignment. Both pass against the accepted compiler. Although 32-byte alignment
+improves the text scanner, its full gate exposes a 15% regression in release
+value-parameter calls, so that policy is rejected. The next candidate uses
+consistent 16-byte alignment only in default builds and retains release's
+existing limited-padding policy. This candidate passes all 5,917 checks in
+331.02 seconds with two workers after an independent C bootstrap.
+
+The final stage passes all **44** compile/runtime comparisons against both the
+fixed reference and preceding compiler, retaining every matched follow-up
+sample. Default value-parameter calls take **0.352×** the preceding stage's CPU
+time, and default text scanning takes **0.971×**. All eight release artifacts
+are unchanged from the preceding stage after masking equal-width bundle paths.
+Default compilation is effectively unchanged (1.003× on the large workload);
+release compilation takes 0.984× and the compiler self-build 0.995×. The tiny tour
+comparison needed a larger isolated sample on this contended host and settles
+at 1.001×.
+
+The full gate measures about **68k fresh root lines/CPU-second**; a later focused
+run of the same compiler reaches about 83k under different host load. Neither
+meets the 250k goal. Release value-parameter calls remain about **1.58× C**;
+several other kernels also remain slower than C. These are measured intermediate
+gains, not completion of the performance goals.
+[Raw measurements, rejected prototypes and validation](audits/2026-10-19/default-value-borrows.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

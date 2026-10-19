@@ -513,6 +513,7 @@ dw_function = (id: int, name: str) -> int:
     loop param in ps:
         if has_flag(param, NF_MUT): continue
         local = mk(.vardecl, nodes[param].pos)
+        nodes[local].aux2 = 1   # synthesized value-parameter binding
         nodes[local].name = nodes[param].name
         if nkids(param) > 0: set_list(local, kids(param))
         value = mk(.ident, nodes[param].pos)
