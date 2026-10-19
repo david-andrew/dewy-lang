@@ -217,6 +217,27 @@ fixed reference's source, and generated throughput programs check their output.
 Unavailable or multiplexed counters fail explicitly. This is a diagnostic,
 not a replacement for timing checks or a new accepted performance baseline.
 
+For bounded optimizer/backend differential testing, reuse the Sloppy program
+generator through:
+
+```sh
+python3 -m tools.sloppy_core.fuzz --compiler /path/to/bundle/bin/dewy-core \
+  --output /path/to/new-fuzz-directory --seed 1 --count 25
+```
+
+The runner compares native default, release, `-g`, and WebAssembly default and
+release builds sequentially. Every requested mode must compile, terminate
+successfully and print identical bytes. Timeouts, crashes, output limits and
+shared compile errors cannot pass. It stops at the first failure and preserves
+the source, executables and output for reduction. Successful cases retain seed,
+source/output hashes and mode results; `--keep` retains their files too.
+`--basic` excludes unions, stateful closures, SOA and matrices; `--no-wasm`
+explicitly omits Node-dependent runs. No recurring work is scheduled.
+
+These generated programs use the internal Jo frontend and exercise existing
+shared backend features. They do not replace Dewy source conformance tests or
+provide an independent semantic oracle for bugs shared by all compiler modes.
+
 Callback runtime comparisons are available with `python3 -m
 tools.sloppy_core.benchmark_callbacks CANDIDATE --baseline BASELINE --output
 callbacks.json`. Use `--workload local-counter` to isolate stack-local callbacks;

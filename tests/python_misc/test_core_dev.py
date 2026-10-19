@@ -33,6 +33,30 @@ def test_instruction_counter_accepts_complete_measurement_after_diagnostics():
         'instructions': 123, 'enabled_ns': 456, 'running_ns': 456}
 
 
+@pytest.mark.parametrize('phase,status,code,output,expected', [
+    ('run', 'complete', 0, b'answer', 'pass'),
+    ('run', 'complete', 0, b'wrong', 'mismatch'),
+    ('build', 'complete', 1, b'answer', 'execution-error'),
+    ('run', 'complete', -11, b'answer', 'execution-error'),
+    ('run', 'timeout', -9, b'answer', 'incomplete'),
+    ('run', 'output-limit', 0, b'answer', 'incomplete'),
+])
+def test_fuzz_outcome_requires_success_in_every_mode(phase, status, code, output, expected):
+    from tools.sloppy_core.fuzz import outcome
+
+    reference = dict(phase='run', status='complete', returncode=0, stdout=b'answer')
+    candidate = dict(phase=phase, status=status, returncode=code, stdout=output)
+    assert outcome({'default': reference, 'release': candidate}) == expected
+    if phase == 'build' or status != 'complete' or code:
+        assert outcome({'default': candidate, 'release': candidate}) != 'pass'
+
+
+def test_fuzz_no_results_cannot_pass():
+    from tools.sloppy_core.fuzz import outcome
+
+    assert outcome({}) == 'incomplete'
+
+
 @pytest.fixture
 def checkout(tmp_path, monkeypatch):
     root = tmp_path / 'source'

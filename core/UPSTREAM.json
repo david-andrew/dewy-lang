@@ -239,6 +239,14 @@
         "lib/std/json.jo"
       ],
       "description": "Selective JSON reader fast paths: dispatch literal tokens by their first byte, compare words without temporary substring allocations, and scan whitespace with a local cursor. The upstream number representation, decoder changes and new formatting APIs are not imported. String bulk-copy experiments were measured and dropped after escaped-string regressions."
+    },
+    {
+      "revision": "6725916fc98f650372fbdf6bd72e266a74a1fe2e",
+      "paths": [
+        "tools/fuzz.py"
+      ],
+      "description": "Reuse the deterministic random Jo-program generator for Dewy shared-backend differential checks. New bounded runner verifies immutable compiler identity and compares successful native default/release/debug and WebAssembly default/release runs. No import-time filesystem writes, automatic scheduling, formatter comparison or C-bootstrap-subset inference. Failures and timeouts are retained and fail the run. Adaptation: generated field-array loops check the current length before indexing after possible shrinking replacement, so valid-program trials do not end in an intentional bounds panic.",
+      "upstream_sha256": "cd36130882a39e68a6b7e1f297eba5b1b625158772b36c49e734ee3db428ee44"
     }
   ]
 }

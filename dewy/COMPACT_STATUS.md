@@ -25,6 +25,10 @@ New front-end or user-facing language design requires David's approval.
   String timing remains machine-sensitive: desktop release regressed, while a
   bounded laptop check of the same executables was flat. String-copy prototypes
   were dropped. [Evidence](audits/2026-10-19/json-token-dispatch.json).
+- The audit batch passes 6,323 tests after an independent bootstrap and 200
+  differential fuzz seeds across five modes (1,000 executions). All 28 existing
+  benchmark artifacts match the preceding wrapper stage, with fresh checksums.
+  [Validation](audits/2026-10-19/bounded-differential-fuzz.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 
@@ -44,13 +48,11 @@ New front-end or user-facing language design requires David's approval.
 
 ## Next sequence
 
-1. Consolidate instruction measurement around the existing counter and immutable
-   bundles; use the laptop for meaningful matched timing checkpoints.
-2. Triage Sloppy correctness/library/tooling changes, including differential
-   fuzzing, before starting another speculative compiler representation change.
-3. Use current profiles and native-versus-GCC generated-code comparisons to
-   choose the next substantial runtime/compiler improvement.
-4. Complete an ordinary-language/application capability from the ledger;
+1. Use current profiles and native-versus-GCC generated-code comparisons to
+   choose the next substantial runtime/compiler improvement. Instruction
+   diagnostics and bounded differential fuzzing are now maintained commands.
+2. Continue selective Sloppy correctness/library ports with matched measurements.
+3. Complete an ordinary-language/application capability from the ledger;
    present any missing user-facing design before implementing it.
 
 Quick and focused checks accompany edits. Full suites and independent bootstrap

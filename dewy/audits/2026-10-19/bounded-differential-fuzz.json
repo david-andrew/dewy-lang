@@ -1,0 +1,25 @@
+{
+  "implementation": "Pinned Sloppy random Jo generator plus bounded Dewy runner; native default/release/debug and web default/release must compile, exit successfully and print identical bytes. Compiler and generator identities checked before and after. No automatic scheduling.",
+  "validation": "6323 passed in 164.56s (0:02:44)",
+  "fuzz": {
+    "seeds": "1..200 inclusive",
+    "programs": 200,
+    "modes_per_program": 5,
+    "executions": 1000,
+    "first_100_seconds": 45.24970140500227,
+    "second_100_seconds": 45.9976923270151,
+    "generator_sha256": "8f1d5d3970e41a595e91b498d8ade8b747ffb9bae20bd9bb5cb6104b1ef64fd6"
+  },
+  "existing_runtime_artifacts": "All 28 default/release artifacts for 14 workloads match the preceding wrapper stage, with fresh checksums at input 1000. Only exact equal-width bundle path prefixes are masked; raw hashes are retained.",
+  "limits": [
+    "Shared-backend fuzzing uses the internal Jo frontend; Dewy syntax keeps its separate conformance suite.",
+    "Cross-mode agreement is not an independent semantic oracle.",
+    "JSON performance has its own measurements, including conflicting desktop/laptop string results.",
+    "Fixed ea1cba0e and accepted cd07ea34 remain unchanged; no new whole-stage baseline."
+  ],
+  "evidence": {
+    "file": "bounded-differential-fuzz-evidence.json.gz",
+    "sha256": "d9355b1756ffa1293bfb2faa9f5c14cb61a88abb390f011f1e05c831a765f4af",
+    "format": "gzip JSON"
+  }
+}
