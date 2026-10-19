@@ -1,0 +1,722 @@
+{
+  "decision": "Deferred: the prologue-only and combined packed-register pilots did not establish a reliable compilation gain. All compiler edits reverted; mixed-parameter tests retained. No full suite or stage gate run for either candidate.",
+  "prologue_patch": "diff --git a/core/compiler/x64.jo b/core/compiler/x64.jo\nindex ef02a939..f587040c 100644\n--- a/core/compiler/x64.jo\n+++ b/core/compiler/x64.jo\n@@ -1196,7 +1196,7 @@ emit_prologue = ():\n         if l == LOC_SPILL: reg_spills.push((p, src))\n         else: moves.push(PMove(l, p))\n         # record the incoming register as the temporary source location\n-        pin_src.push((p, src))\n+        pin_src.push((p, src, l))\n     # spills first (they read incoming registers)\n     loop rs in reg_spills:\n         if is_xmm(rs.1):\n@@ -1204,12 +1204,13 @@ emit_prologue = ():\n             else: sse_rm(0xF2, 0x11, rs.1 - XMM, RBP, vspill[rs.0])\n         else: mov_mr(RBP, vspill[rs.0], rs.1)\n     # register moves: sources are the incoming registers\n-    saved = vloc\n+    # Only register-passed parameters change temporarily. Saving their old\n+    # locations avoids copying every virtual register's location for a prologue.\n     loop ps in pin_src: vloc[ps.0] = ps.1\n     real: PMove[]\n     loop m in moves: real.push(m)\n     emit_parallel(real)\n-    vloc = saved\n+    loop ps in pin_src: vloc[ps.0] = ps.2\n     pin_src.clear()\n     loop sp in stack_params:\n         p = sp.0\n@@ -1222,7 +1223,7 @@ emit_prologue = ():\n             sse_rm(0xF2, 0x10, 0, RBP, sp.1)\n             sts(p, 0, vtype(p))\n \n-pin_src: (int, int)[]\n+pin_src: (int, int, int)[]       # parameter, incoming register, allocated location\n \n emit_epilogue = ():\n     loop r in [0..16):\n",
+  "combined_layout_patch": "diff --git a/core/compiler/arm64.jo b/core/compiler/arm64.jo\nindex eec95bac..887c8f87 100644\n--- a/core/compiler/arm64.jo\n+++ b/core/compiler/arm64.jo\n@@ -242,11 +242,11 @@ a_allocate = ():\n     head = fill(-1, n)\n     nxt = fill(-1, nv)\n     loop v in [0..nv):\n-        if vloc[v] == LOC_CONST or vloc[v] == LOC_FCONST or vloc[v] == LOC_SLOT or vloc[v] == LOC_GLOBAL: continue\n-        if v_last[v] < 0 or (v_nuse[v] == 0 and v >= ir.nparams):\n-            vloc[v] = LOC_NONE\n+        if v_live[v].location == LOC_CONST or v_live[v].location == LOC_FCONST or v_live[v].location == LOC_SLOT or v_live[v].location == LOC_GLOBAL: continue\n+        if v_live[v].last < 0 or (v_nuse[v] == 0 and v >= ir.nparams):\n+            v_live[v].location = LOC_NONE\n             continue\n-        f = v_first[v]\n+        f = v_live[v].first\n         nxt[v] = head[f]\n         head[f] = v\n     # (a parameter may keep the register it arrives in)\n@@ -271,19 +271,19 @@ a_allocate = ():\n             k = 0\n             loop k < active.len():\n                 u = active[k]\n-                if v_last[u] < pos:\n-                    free[vloc[u]] = true\n+                if v_live[u].last < pos:\n+                    free[v_live[u].location] = true\n                     active[k] = active[active.len() - 1]\n                     active.pop()\n                 else:\n-                    if v_last[u] < min_end: min_end = v_last[u]\n+                    if v_live[u].last < min_end: min_end = v_live[u].last\n                     k += 1\n         loop v >= 0:\n             s = live_start(v)\n             # the registers v may have: 0 any, 1 not an argument register, 2 callee-saved ones\n             w = 0\n-            if crosses_call(s, v_last[v]): w = 2\n-            else if v < ir.nparams or a_call_in(s, v_last[v]): w = 1\n+            if crosses_call(s, v_live[v].last): w = 2\n+            else if v < ir.nparams or a_call_in(s, v_live[v].last): w = 1\n             fp = vtype(v) != VI\n             base = 0\n             pool = a_int_pool\n@@ -291,7 +291,7 @@ a_allocate = ():\n                 base = A_V\n                 pool = a_fp_pool\n             reg = -1\n-            if v < ir.nparams and w == 1 and arrive[v] >= 0 and free[arrive[v]] and not a_call_in(s, v_last[v]): reg = arrive[v]\n+            if v < ir.nparams and w == 1 and arrive[v] >= 0 and free[arrive[v]] and not a_call_in(s, v_live[v].last): reg = arrive[v]\n             loop r in pool:\n                 if reg >= 0: break\n                 k = a_kind(base + r)\n@@ -302,31 +302,31 @@ a_allocate = ():\n                 # take the register of the active value cheapest to spill, if it is cheaper than v\n                 best = -1\n                 loop u in active:\n-                    ru = vloc[u]\n+                    ru = v_live[u].location\n                     if (ru >= A_V) != fp: continue\n                     k = a_kind(ru)\n                     if not (w == 0 or (w == 1 and k != 1) or k == 2): continue\n                     if not spills_before(u, v): continue\n                     if best < 0 or spills_before(u, best): best = u\n                 if best >= 0:\n-                    reg = vloc[best]\n-                    vloc[best] = LOC_SPILL\n+                    reg = v_live[best].location\n+                    v_live[best].location = LOC_SPILL\n                     active.remove(active.index_of(best))\n             if reg >= 0:\n-                vloc[v] = reg\n+                v_live[v].location = reg\n                 free[reg] = false\n                 active.push(v)\n-                if v_last[v] < min_end: min_end = v_last[v]\n+                if v_live[v].last < min_end: min_end = v_live[v].last\n                 if a_kind(reg) == 2 and not used[reg]:\n                     used[reg] = true\n                     a_saved.push(reg)\n-            else: vloc[v] = LOC_SPILL\n+            else: v_live[v].location = LOC_SPILL\n             v = nxt[v]\n \n # ---------------- operands ----------------\n # int vreg v into register r\n a_ld = (r: int, v: int):\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l == LOC_SPILL: a_ldr(r, A_SP, vspill[v])\n     else if l == LOC_CONST or l == LOC_FCONST: a_mov_imm(r, vcval[v])\n     else if l == LOC_SLOT: a_add_imm(r, A_SP, slot_disp(v))\n@@ -337,27 +337,27 @@ a_ld = (r: int, v: int):\n \n # int register r into vreg v (or the bits of a float)\n a_st = (v: int, r: int):\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l == LOC_SPILL: a_str(r, A_SP, vspill[v])\n     else if l >= A_V: a_fmov_from(vtype(v), l - A_V, r)\n     else if l >= 0: a_mov(l, r)\n \n # the register int vreg v is read from: its own, else r (loaded)\n a_src = (v: int, r: int) -> int:\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l >= 0 and l < A_V: return l\n     a_ld(r, v)\n     r\n \n # the register int vreg v's new value is made in: its own, else r (then a_st)\n a_dst = (v: int, r: int) -> int:\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l >= 0 and l < A_V: return l\n     r\n \n # float vreg v into fp register f\n a_lds = (f: int, v: int, ty: int):\n-    l = vloc[v]\n+    l = v_live[v].location\n     sz = 8\n     if ty == VS: sz = 4\n     if l == LOC_SPILL: a_mem(true, f, A_SP, vspill[v], sz, false, true)\n@@ -375,7 +375,7 @@ a_lds = (f: int, v: int, ty: int):\n         a_fmov_from(ty, f, 17)\n \n a_sts = (v: int, f: int, ty: int):\n-    l = vloc[v]\n+    l = v_live[v].location\n     sz = 8\n     if ty == VS: sz = 4\n     if l == LOC_SPILL: a_mem(false, f, A_SP, vspill[v], sz, false, true)\n@@ -384,13 +384,13 @@ a_sts = (v: int, f: int, ty: int):\n     else if l >= 0: a_fmov_to(ty, l, f)\n \n a_fsrc = (v: int, f: int, ty: int) -> int:\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l >= A_V: return l - A_V\n     a_lds(f, v, ty)\n     f\n \n a_fdst = (v: int, f: int) -> int:\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l >= A_V: return l - A_V\n     f\n \n@@ -402,7 +402,7 @@ a_adr_data = (r: int, kind: int, off: int):\n \n # the address a memory access through vreg v goes to: (base register, offset)\n a_addr = (v: int, scratch: int) -> (int, int):\n-    if vloc[v] == LOC_SLOT: return (A_SP, slot_disp(v))\n+    if v_live[v].location == LOC_SLOT: return (A_SP, slot_disp(v))\n     (a_src(v, scratch), 0)\n \n # ---------------- frame ----------------\n@@ -437,9 +437,9 @@ a_layout = ():\n     head = fill(-1, n + 1)\n     nxt = fill(-1, nv)\n     loop v in [0..nv):\n-        if vloc[v] != LOC_SPILL: continue\n-        if v_last[v] < 0:\n-            vloc[v] = LOC_NONE\n+        if v_live[v].location != LOC_SPILL: continue\n+        if v_live[v].last < 0:\n+            v_live[v].location = LOC_NONE\n             continue\n         s = live_start(v) + 1\n         nxt[v] = head[s]\n@@ -452,7 +452,7 @@ a_layout = ():\n         k = 0\n         loop k < active.len():\n             u = active[k]\n-            if v_last[u] < s - 1:\n+            if v_live[u].last < s - 1:\n                 free.push(vspill[u])\n                 active[k] = active[active.len() - 1]\n                 active.pop()\n@@ -502,7 +502,7 @@ a_prologue = ():\n                 nf += 1\n                 continue\n         # (on the stack above the saved x29 and x30)\n-        if vloc[p] != LOC_NONE:\n+        if v_live[p].location != LOC_NONE:\n             if ty == VI:\n                 a_ldr(9, A_FP, 16 + 8 * stack_k)\n                 a_st(p, 9)\n@@ -562,7 +562,7 @@ a_call_args = (ins: Ins):\n \n a_result = (ins: Ins):\n     d = int(ins.dst)\n-    if d < 0 or vloc[d] == LOC_NONE: return\n+    if d < 0 or v_live[d].location == LOC_NONE: return\n     if vtype(d) == VI: a_st(d, 0)\n     else: a_sts(d, 0, vtype(d))\n \n@@ -665,7 +665,7 @@ a_syscall = (ins: Ins):\n     a = int(ins.a)\n     n = int(ins.b)\n     nv = int(ir.args[a])\n-    if vloc[nv] != LOC_CONST: ice(\"arm64: a system call number must be a constant\")\n+    if v_live[nv].location != LOC_CONST: ice(\"arm64: a system call number must be a constant\")\n     if target_macos: ice(\"macOS: {lfuncs[ir.fn_index].name} makes Linux system call {vcval[nv]} (the library has no macOS version of it yet)\")\n     sn, how = a_sys(vcval[nv])\n     if sn < 0: ice(\"arm64: system call {vcval[nv]} is not translated (see a_sys in compiler/arm64.jo)\")\n@@ -760,7 +760,7 @@ a_fill_loop = ():\n # ---------------- instructions ----------------\n a_int_bin = (base: int, ins: Ins):\n     d = int(ins.dst)\n-    if vloc[d] == LOC_NONE: return\n+    if v_live[d].location == LOC_NONE: return\n     rn = a_src(int(ins.a), 9)\n     rm = a_src(int(ins.b), 10)\n     rd = a_dst(d, 11)\n@@ -769,13 +769,13 @@ a_int_bin = (base: int, ins: Ins):\n \n # a small constant operand (add, sub, compare as an immediate): its value, else -1\n a_imm12 = (v: int) -> int:\n-    if vloc[v] == LOC_CONST and vcval[v] >= 0 and vcval[v] < 4096: return vcval[v]\n+    if v_live[v].location == LOC_CONST and vcval[v] >= 0 and vcval[v] < 4096: return vcval[v]\n     -1\n \n a_fbin = (base: int, ins: Ins):\n     ty = int(ins.ty)\n     d = int(ins.dst)\n-    if vloc[d] == LOC_NONE: return\n+    if v_live[d].location == LOC_NONE: return\n     fa = a_fsrc(int(ins.a), 16, ty)\n     fm = a_fsrc(int(ins.b), 17, ty)\n     fd = a_fdst(d, 18)\n@@ -785,7 +785,7 @@ a_fbin = (base: int, ins: Ins):\n a_funary = (base: int, ins: Ins):\n     ty = int(ins.ty)\n     d = int(ins.dst)\n-    if vloc[d] == LOC_NONE: return\n+    if v_live[d].location == LOC_NONE: return\n     fa = a_fsrc(int(ins.a), 16, ty)\n     fd = a_fdst(d, 18)\n     a_fun(base, ty, fd, fa)\n@@ -838,7 +838,7 @@ a_fuses = (v: int, pos: int) -> bool:\n     n = ir.code[pos + 1]\n     if int(n.a) != v: return false\n     if n.op == .if_ or n.op == .brif: return true\n-    (n.op == .eq or n.op == .ne) and vloc[int(n.b)] == LOC_CONST and vcval[int(n.b)] == 0\n+    (n.op == .eq or n.op == .ne) and v_live[int(n.b)].location == LOC_CONST and vcval[int(n.b)] == 0\n \n # the result of a comparison (condition cc in the flags) into d, or left there\n a_set_cc = (d: int, cc: int, pos: int):\n@@ -918,12 +918,12 @@ arm64_ins = (pos: int, ins: Ins):\n     match op:\n         nop, assume: pass\n         iconst, fconst:\n-            if vloc[d] == LOC_CONST or vloc[d] == LOC_FCONST or vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_CONST or v_live[d].location == LOC_FCONST or v_live[d].location == LOC_NONE: return\n             rd = a_dst(d, 9)\n             a_mov_imm(rd, ins.imm)\n             a_st(d, rd)\n         mov:\n-            if vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_NONE: return\n             ty = vtype(d)\n             if ty != VI and vtype(a) == ty: a_sts(d, a_fsrc(a, 16, ty), ty)\n             else if ty == VI and vtype(a) == VI: a_st(d, a_src(a, 9))\n@@ -931,8 +931,8 @@ arm64_ins = (pos: int, ins: Ins):\n                 a_ld(9, a)\n                 a_st(d, 9)\n         add, sub:\n-            if vloc[d] == LOC_NONE or vloc[d] == LOC_SLOT: return\n-            if vloc[bb] == LOC_CONST and vcval[bb] > -4096 and vcval[bb] < 4096:\n+            if v_live[d].location == LOC_NONE or v_live[d].location == LOC_SLOT: return\n+            if v_live[bb].location == LOC_CONST and vcval[bb] > -4096 and vcval[bb] < 4096:\n                 k = vcval[bb]\n                 if op == .sub: k = -k\n                 rn = a_src(a, 9)\n@@ -942,9 +942,9 @@ arm64_ins = (pos: int, ins: Ins):\n             else if op == .add: a_int_bin(A_ADD, ins)\n             else: a_int_bin(A_SUB, ins)\n         and_, or_, xor:\n-            if vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_NONE: return\n             li = -1\n-            if vloc[bb] == LOC_CONST: li = a_logimm(vcval[bb])\n+            if v_live[bb].location == LOC_CONST: li = a_logimm(vcval[bb])\n             if li >= 0:\n                 rn = a_src(a, 9)\n                 rd = a_dst(d, 11)\n@@ -957,8 +957,8 @@ arm64_ins = (pos: int, ins: Ins):\n             else if op == .or_: a_int_bin(A_ORR, ins)\n             else: a_int_bin(A_EOR, ins)\n         shl, shrs, shru:\n-            if vloc[d] == LOC_NONE: return\n-            if vloc[bb] == LOC_CONST:\n+            if v_live[d].location == LOC_NONE: return\n+            if v_live[bb].location == LOC_CONST:\n                 k = vcval[bb] & 63\n                 rn = a_src(a, 9)\n                 rd = a_dst(d, 11)\n@@ -974,7 +974,7 @@ arm64_ins = (pos: int, ins: Ins):\n         mulhu: a_int_bin(0x9BC07C00, ins)          # umulh\n         divu: a_int_bin(A_UDIV, ins)\n         mul:\n-            if vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_NONE: return\n             rn = a_src(a, 9)\n             rm = a_src(bb, 10)\n             rd = a_dst(d, 11)\n@@ -1063,7 +1063,7 @@ arm64_ins = (pos: int, ins: Ins):\n             a_fmov_to(ty, rd, fa)\n             a_st(d, rd)\n         load:\n-            if vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_NONE: return\n             mode = int(ins.c)\n             size = mode & 15\n             if mode & M_FLOAT != 0:\n@@ -1077,15 +1077,15 @@ arm64_ins = (pos: int, ins: Ins):\n         store:\n             size = int(ins.c) & 15\n             if vtype(bb) != VI: a_mem_op(false, a_fsrc(bb, 16, vtype(bb)), ins, d, size, false, true)\n-            else if vloc[bb] == LOC_CONST and vcval[bb] == 0: a_mem_op(false, A_ZR, ins, d, size, false, false)\n+            else if v_live[bb].location == LOC_CONST and vcval[bb] == 0: a_mem_op(false, A_ZR, ins, d, size, false, false)\n             else: a_mem_op(false, a_src(bb, 11), ins, d, size, false, false)\n         slot:\n-            if vloc[d] == LOC_SLOT or vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_SLOT or v_live[d].location == LOC_NONE: return\n             rd = a_dst(d, 9)\n             a_add_imm(rd, A_SP, slot_off[a])\n             a_st(d, rd)\n         gaddr, daddr:\n-            if vloc[d] == LOC_GLOBAL or vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_GLOBAL or v_live[d].location == LOC_NONE: return\n             kind = 1\n             if op == .daddr: kind = 0\n             rd = a_dst(d, 9)\n@@ -1118,7 +1118,7 @@ arm64_ins = (pos: int, ins: Ins):\n                 item = int(ir.args[a + k])\n                 if item & 1 == 1:\n                     v = item >> 1\n-                    if vloc[v] != LOC_NONE: a_st(v, A_ZR)\n+                    if v_live[v].location != LOC_NONE: a_st(v, A_ZR)\n                 else:\n                     s = item >> 1\n                     size = int(ir.slot_size[s])\n@@ -1166,7 +1166,7 @@ arm64_ins = (pos: int, ins: Ins):\n                 a_call_args(ins)\n                 a_stub_fix.push((code.len(), int(ins.imm)))\n                 a_bl()\n-                if d >= 0 and vloc[d] != LOC_NONE: a_st(d, 0)\n+                if d >= 0 and v_live[d].location != LOC_NONE: a_st(d, 0)\n             else: ice(\"arm64: intrinsic {ins.imm}\")\n         block: actl.push(ACtl(0, code.len(), [], []))\n         loop: actl.push(ACtl(1, code.len(), [], []))\n@@ -1515,7 +1515,7 @@ a_guarded_call = (ins: Ins):\n         if rd32(p) & 0xFC000000 == 0x14000000: a_fix26(p)\n         else: a_fix19(p)\n     d = int(ins.dst)\n-    if d >= 0 and vloc[d] != LOC_NONE: a_st(d, 9)\n+    if d >= 0 and v_live[d].location != LOC_NONE: a_st(d, 9)\n \n arm64_resolve = (text_addr: int, ro_addr: int, data_addr: int):\n     loop f in a_call_fix:\ndiff --git a/core/compiler/x64.jo b/core/compiler/x64.jo\nindex ef02a939..c42438fa 100644\n--- a/core/compiler/x64.jo\n+++ b/core/compiler/x64.jo\n@@ -320,7 +320,14 @@ vgoff: int[]\n const XMM = 16\n const INF_POS = 1 << 60\n \n-vloc: int[]\n+# Allocation repeatedly visits these properties of the same virtual register.\n+struct LiveInfo:\n+    first: int\n+    last: int\n+    weight: int\n+    location: int\n+\n+v_live: LiveInfo[]\n vspill: int[]\n vcval: int[]\n vslot: int[]\n@@ -340,11 +347,8 @@ caller_pool = [RSI, RDI, R8, R9, R10, R11]\n vsave: bool[]              # in a caller-saved register, saved/restored around calls\n dbg_keep: bool[]           # (sloppy build -g) a variable's: not in a register a call changes\n save_list: int[]\n-v_first: int[]\n-v_last: int[]\n v_ndef: int[]\n v_nuse: int[]\n-v_weight: int[]            # uses and definitions, weighted by loop depth (what spilling costs)\n call_pos: int[]\n call_w: int[]              # per call: its weight by loop depth\n loop_s: int[]\n@@ -382,12 +386,9 @@ vop_operand = (x: int, v: int, splat: bool, n: int, scratch: int):\n \n analyze = ():\n     nv = ir.vtypes.len()\n-    v_first = fill(INF_POS, nv)\n-    v_last = fill(-1, nv)\n+    v_live = fill(LiveInfo(INF_POS, -1, 0, LOC_SPILL), nv)\n     v_ndef = fill(0, nv)\n     v_nuse = fill(0, nv)\n-    v_weight = fill(0, nv)\n-    vloc = fill(LOC_SPILL, nv)\n     vcval = fill(0, nv)\n     vslot = fill(-1, nv)\n     vsoff = fill(0, nv)\n@@ -400,13 +401,13 @@ analyze = ():\n     kinds: int[]\n     starts: int[]\n     loop p in [0..ir.nparams):\n-        v_first[p] = 0\n-        v_last[p] = 0\n+        v_live[p].first = 0\n+        v_live[p].last = 0\n         v_ndef[p] = 1\n     loop v in [0..ir.kval.len()):\n         if is_kv(v):\n             v_ndef[v] = 1\n-            vloc[v] = LOC_CONST\n+            v_live[v].location = LOC_CONST\n             vcval[v] = ir.kval[v]\n     depth = 0\n     loop pos in 0.. and ins in ir.code:\n@@ -414,32 +415,32 @@ analyze = ():\n         w = 1 << (3 * min(depth, 6))\n         loop operand_index in [0..ir_use_count):\n             let u = ir_use(operand_index)\n-            if pos < v_first[u]: v_first[u] = pos\n-            if pos > v_last[u]: v_last[u] = pos\n+            if pos < v_live[u].first: v_live[u].first = pos\n+            if pos > v_live[u].last: v_live[u].last = pos\n             v_nuse[u] += 1\n-            v_weight[u] += w\n+            v_live[u].weight += w\n         if d >= 0:\n-            if pos < v_first[d]: v_first[d] = pos\n-            if pos > v_last[d]: v_last[d] = pos\n+            if pos < v_live[d].first: v_live[d].first = pos\n+            if pos > v_live[d].last: v_live[d].last = pos\n             v_ndef[d] += 1\n-            v_weight[d] += w\n+            v_live[d].weight += w\n             if v_ndef[d] == 1:\n                 op = ins.op\n                 if op == .iconst and fits32(ins.imm):\n-                    vloc[d] = LOC_CONST\n+                    v_live[d].location = LOC_CONST\n                     vcval[d] = ins.imm\n                 else if op == .fconst:\n-                    vloc[d] = LOC_FCONST\n+                    v_live[d].location = LOC_FCONST\n                     vcval[d] = ins.imm\n                 else if op == .slot:\n-                    vloc[d] = LOC_SLOT\n+                    v_live[d].location = LOC_SLOT\n                     vslot[d] = int(ins.a)\n                 else if op == .gaddr or op == .daddr:\n-                    vloc[d] = LOC_GLOBAL\n+                    v_live[d].location = LOC_GLOBAL\n                     vgoff[d] = int(ins.imm)\n                     if op == .gaddr: vgkind[d] = 1\n-                else if op == .add and vloc[int(ins.a)] == LOC_SLOT and vloc[int(ins.b)] == LOC_CONST and v_ndef[int(ins.a)] == 1 and v_ndef[int(ins.b)] == 1:\n-                    vloc[d] = LOC_SLOT\n+                else if op == .add and v_live[int(ins.a)].location == LOC_SLOT and v_live[int(ins.b)].location == LOC_CONST and v_ndef[int(ins.a)] == 1 and v_ndef[int(ins.b)] == 1:\n+                    v_live[d].location = LOC_SLOT\n                     vslot[d] = vslot[int(ins.a)]\n                     vsoff[d] = vsoff[int(ins.a)] + vcval[int(ins.b)]\n         if ins.op == .zeroslots:\n@@ -447,8 +448,8 @@ analyze = ():\n                 item = int(ir.args[int(ins.a) + k])\n                 if item & 1 == 1:\n                     v = item >> 1\n-                    if pos < v_first[v]: v_first[v] = pos\n-                    if pos > v_last[v]: v_last[v] = pos\n+                    if pos < v_live[v].first: v_live[v].first = pos\n+                    if pos > v_live[v].last: v_live[v].last = pos\n                     v_ndef[v] += 2\n         if call_like(ins):\n             call_pos.push(pos)\n@@ -473,13 +474,13 @@ analyze = ():\n         loop l in ir.dbg_locals:\n             if locals[l].offset >= 0 or int(locals[l].flags) & (LF_CAPTURE | LF_ALIAS) != 0: continue\n             v = int(locals[l].vreg)\n-            if v < 0 or v >= nv or v_last[v] < 0: continue\n+            if v < 0 or v >= nv or v_live[v].last < 0: continue\n             dbg_keep[v] = true\n-            v_last[v] = ir.code.len()\n+            v_live[v].last = ir.code.len()\n             v_nuse[v] += 1\n     # a vreg defined more than once can't stay a constant/address\n     loop v in [0..nv):\n-        if v_ndef[v] != 1 and (vloc[v] == LOC_CONST or vloc[v] == LOC_FCONST or vloc[v] == LOC_SLOT or vloc[v] == LOC_GLOBAL): vloc[v] = LOC_SPILL\n+        if v_ndef[v] != 1 and (v_live[v].location == LOC_CONST or v_live[v].location == LOC_FCONST or v_live[v].location == LOC_SLOT or v_live[v].location == LOC_GLOBAL): v_live[v].location = LOC_SPILL\n     # loops in order of their start\n     nl = loop_s.len()\n     order: int[]\n@@ -494,7 +495,7 @@ analyze = ():\n     loop_e = le\n     # extend intervals of values live around loops\n     loop v in [0..nv):\n-        if v_last[v] < 0: continue\n+        if v_live[v].last < 0: continue\n         f = live_start(v)\n         # first loop starting after f\n         lo = 0\n@@ -504,8 +505,8 @@ analyze = ():\n             if loop_s[mid] <= f: lo = mid + 1\n             else: hi = mid\n         i = lo\n-        loop i < nl and loop_s[i] <= v_last[v]:\n-            if loop_e[i] > v_last[v]: v_last[v] = loop_e[i]\n+        loop i < nl and loop_s[i] <= v_live[v].last:\n+            if loop_e[i] > v_live[v].last: v_live[v].last = loop_e[i]\n             i += 1\n \n hint_op = (op: Op) -> bool:\n@@ -521,14 +522,14 @@ hint_operand = (v: int, pos: int) -> int:\n     ins = ir.code[pos]\n     if int(ins.dst) != v or not hint_op(ins.op): return -1\n     a = int(ins.a)\n-    if a < 0 or a == v or vloc[a] < 0 or v_last[a] != pos: return -1\n-    if (vloc[a] >= XMM) != (vtype(v) != VI): return -1\n+    if a < 0 or a == v or v_live[a].location < 0 or v_live[a].last != pos: return -1\n+    if (v_live[a].location >= XMM) != (vtype(v) != VI): return -1\n     a\n \n # params are live on entry, before the first instruction\n live_start = (v: int) -> int:\n     if v < ir.nparams: return -1\n-    v_first[v]\n+    v_live[v].first\n \n crosses_call = (s: int, e: int) -> bool:\n     lo = 0\n@@ -541,11 +542,11 @@ crosses_call = (s: int, e: int) -> bool:\n \n # is a cheaper to spill than b: fewer weighted uses per instruction it lives (ties: lives longer)\n spills_before = (a: int, b: int) -> bool:\n-    la = v_last[a] - live_start(a) + 1\n-    lb = v_last[b] - live_start(b) + 1\n-    x = v_weight[a] * lb\n-    y = v_weight[b] * la\n-    x < y or (x == y and v_last[a] > v_last[b])\n+    la = v_live[a].last - live_start(a) + 1\n+    lb = v_live[b].last - live_start(b) + 1\n+    x = v_live[a].weight * lb\n+    y = v_live[b].weight * la\n+    x < y or (x == y and v_live[a].last > v_live[b].last)\n \n allocate = ():\n     nv = ir.vtypes.len()\n@@ -553,21 +554,21 @@ allocate = ():\n     vsave = fill(false, nv)\n     if not ra_on:\n         loop v in [0..nv):\n-            if vloc[v] != LOC_CONST and vloc[v] != LOC_FCONST and vloc[v] != LOC_SLOT and vloc[v] != LOC_GLOBAL: vloc[v] = LOC_SPILL\n+            if v_live[v].location != LOC_CONST and v_live[v].location != LOC_FCONST and v_live[v].location != LOC_SLOT and v_live[v].location != LOC_GLOBAL: v_live[v].location = LOC_SPILL\n         return\n     # bucket vregs by interval start\n     n = ir.code.len() + 1\n     head = fill(-1, n)\n     nxt = fill(-1, nv)\n     loop v in [0..nv):\n-        if vloc[v] == LOC_CONST or vloc[v] == LOC_FCONST or vloc[v] == LOC_SLOT or vloc[v] == LOC_GLOBAL: continue\n-        if v_last[v] < 0:\n-            vloc[v] = LOC_NONE\n+        if v_live[v].location == LOC_CONST or v_live[v].location == LOC_FCONST or v_live[v].location == LOC_SLOT or v_live[v].location == LOC_GLOBAL: continue\n+        if v_live[v].last < 0:\n+            v_live[v].location = LOC_NONE\n             continue\n         if v_nuse[v] == 0 and v >= ir.nparams:\n-            vloc[v] = LOC_NONE\n+            v_live[v].location = LOC_NONE\n             continue\n-        f = v_first[v]\n+        f = v_live[v].first\n         nxt[v] = head[f]\n         head[f] = v\n     free = fill(true, 32)\n@@ -586,25 +587,25 @@ allocate = ():\n             k = 0\n             loop k < active.len():\n                 a = active[k]\n-                if v_last[a] < pos:\n-                    free[vloc[a]] = true\n+                if v_live[a].last < pos:\n+                    free[v_live[a].location] = true\n                     in_active[a] = false\n                     active[k] = active[active.len() - 1]\n                     active.pop()\n                 else:\n-                    if v_last[a] < min_end: min_end = v_last[a]\n+                    if v_live[a].last < min_end: min_end = v_live[a].last\n                     k += 1\n         loop v >= 0:\n-            crosses = crosses_call(live_start(v), v_last[v])\n+            crosses = crosses_call(live_start(v), v_live[v].last)\n             reg = -1\n             # two-operand forms: take over the register of a first operand that dies here\n             h = hint_operand(v, pos)\n             # (not a caller-saved register for a value living across calls: a callee-saved one\n             # costs a move here, not a save and a reload at every call)\n-            if h >= 0 and crosses and vloc[h] < XMM and not is_callee[vloc[h]]: h = -1\n-            if h >= 0 and crosses and dbg_on and dbg_keep[v] and vloc[h] >= XMM: h = -1\n+            if h >= 0 and crosses and v_live[h].location < XMM and not is_callee[v_live[h].location]: h = -1\n+            if h >= 0 and crosses and dbg_on and dbg_keep[v] and v_live[h].location >= XMM: h = -1\n             if h >= 0 and in_active[h]:\n-                reg = vloc[h]\n+                reg = v_live[h].location\n                 active.remove(active.index_of(h))\n                 in_active[h] = false\n                 vsave[v] = crosses and (reg >= XMM or not is_callee[reg])\n@@ -643,25 +644,25 @@ allocate = ():\n                 # every use when the calls are rarer than the uses)\n                 best = -1\n                 loop a in active:\n-                    ra = vloc[a]\n+                    ra = v_live[a].location\n                     if (ra >= XMM) != (vtype(v) != VI): continue\n                     if crosses and dbg_on and dbg_keep[v] and (ra >= XMM or not is_callee[ra]): continue\n                     if not spills_before(a, v): continue\n                     if best < 0 or spills_before(a, best): best = a\n                 if best >= 0:\n-                    reg = vloc[best]\n-                    vloc[best] = LOC_SPILL\n+                    reg = v_live[best].location\n+                    v_live[best].location = LOC_SPILL\n                     vsave[v] = crosses and (reg >= XMM or not is_callee[reg])\n                     active.remove(active.index_of(best))\n                     in_active[best] = false\n             if reg >= 0:\n-                vloc[v] = reg\n+                v_live[v].location = reg\n                 free[reg] = false\n                 active.push(v)\n                 in_active[v] = true\n-                if v_last[v] < min_end: min_end = v_last[v]\n+                if v_live[v].last < min_end: min_end = v_live[v].last\n                 if reg < XMM and is_callee[reg]: callee_off[reg] = 1\n-            else: vloc[v] = LOC_SPILL\n+            else: v_live[v].location = LOC_SPILL\n             v = nxt[v]\n \n # release builds: two passes of linear scan. First the integer values living across calls\n@@ -740,12 +741,12 @@ allocate_release = ():\n     loop k in [0..call_pos.len()): ra_cw[k + 1] = ra_cw[k] + call_w[k]\n     cross = fill(0, nv)\n     loop v in [0..nv):\n-        if vloc[v] == LOC_CONST or vloc[v] == LOC_FCONST or vloc[v] == LOC_SLOT or vloc[v] == LOC_GLOBAL: continue\n-        if v_last[v] < 0 or (v_nuse[v] == 0 and v >= ir.nparams):\n-            vloc[v] = LOC_NONE\n+        if v_live[v].location == LOC_CONST or v_live[v].location == LOC_FCONST or v_live[v].location == LOC_SLOT or v_live[v].location == LOC_GLOBAL: continue\n+        if v_live[v].last < 0 or (v_nuse[v] == 0 and v >= ir.nparams):\n+            v_live[v].location = LOC_NONE\n             continue\n-        cross[v] = ra_cross_w(live_start(v), v_last[v])\n-        f = v_first[v]\n+        cross[v] = ra_cross_w(live_start(v), v_live[v].last)\n+        f = v_live[v].first\n         nxt[v] = head[f]\n         head[f] = v\n     ra_words = (n + 1) / 64 + 1\n@@ -759,7 +760,7 @@ allocate_release = ():\n         if v < 0: continue\n         k = 0\n         loop k < active.len():\n-            if v_last[active[k]] < pos:\n+            if v_live[active[k]].last < pos:\n                 active[k] = active[active.len() - 1]\n                 active.pop()\n             else: k += 1\n@@ -772,28 +773,28 @@ allocate_release = ():\n                 loop r in callee_pool:\n                     used = false\n                     loop a in active:\n-                        if vloc[a] == r: used = true\n+                        if v_live[a].location == r: used = true\n                     if not used:\n                         reg = r\n                         break\n                 if reg < 0:\n                     best = -1\n                     loop a in active:\n-                        if v_weight[a] < v_weight[v] and (best < 0 or v_weight[a] < v_weight[best]): best = a\n+                        if v_live[a].weight < v_live[v].weight and (best < 0 or v_live[a].weight < v_live[best].weight): best = a\n                     if best >= 0:\n-                        reg = vloc[best]\n-                        vloc[best] = LOC_SPILL\n+                        reg = v_live[best].location\n+                        v_live[best].location = LOC_SPILL\n                         placed[best] = false\n                         active.remove(active.index_of(best))\n                 if reg >= 0:\n-                    vloc[v] = reg\n+                    v_live[v].location = reg\n                     placed[v] = true\n                     active.push(v)\n             v = nxt[v]\n     loop v in [0..nv):\n         if placed[v]:\n-            ra_take(vloc[v], live_start(v) + 1, v_last[v] + 1)\n-            callee_off[vloc[v]] = 1\n+            ra_take(v_live[v].location, live_start(v) + 1, v_live[v].last + 1)\n+            callee_off[v_live[v].location] = 1\n     # pass 2: the rest by linear scan, around what pass 1 placed\n     free = fill(true, 32)\n     loop r in [RAX, RCX, RDX, RSP, RBP]: free[r] = false\n@@ -810,28 +811,28 @@ allocate_release = ():\n             k = 0\n             loop k < active.len():\n                 a = active[k]\n-                if v_last[a] < pos:\n-                    free[vloc[a]] = true\n+                if v_live[a].last < pos:\n+                    free[v_live[a].location] = true\n                     in_active[a] = false\n                     active[k] = active[active.len() - 1]\n                     active.pop()\n                 else:\n-                    if v_last[a] < min_end: min_end = v_last[a]\n+                    if v_live[a].last < min_end: min_end = v_live[a].last\n                     k += 1\n         loop v >= 0:\n             if placed[v]:\n                 v = nxt[v]\n                 continue\n             s = live_start(v) + 1\n-            e = v_last[v] + 1\n+            e = v_live[v].last + 1\n             c = cross[v]\n             # a caller-saved register for a value living across calls: only if saving and\n             # reloading it around them costs less than spilling it\n-            caller_ok = c == 0 or 4 * c < 2 * v_weight[v]\n+            caller_ok = c == 0 or 4 * c < 2 * v_live[v].weight\n             reg = -1\n             h = hint_operand(v, pos)\n             if h >= 0 and in_active[h]:\n-                r = vloc[h]\n+                r = v_live[h].location\n                 ok = ra_free(r, s + 1, e)\n                 if r < XMM and not is_callee[r] and not caller_ok: ok = false\n                 if r >= XMM and not caller_ok: ok = false\n@@ -870,34 +871,34 @@ allocate_release = ():\n                 # pass 1's values) for all of this one\n                 best = -1\n                 loop a in active:\n-                    ra = vloc[a]\n+                    ra = v_live[a].location\n                     if (ra >= XMM) != (vtype(v) != VI): continue\n                     if not spills_before(a, v): continue\n                     if (ra >= XMM or not is_callee[ra]) and not caller_ok: continue\n                     if not ra_free(ra, s, e): continue\n                     if best < 0 or spills_before(a, best): best = a\n                 if best >= 0:\n-                    reg = vloc[best]\n-                    vloc[best] = LOC_SPILL\n+                    reg = v_live[best].location\n+                    v_live[best].location = LOC_SPILL\n                     vsave[best] = false\n                     active.remove(active.index_of(best))\n                     in_active[best] = false\n             if reg >= 0:\n-                vloc[v] = reg\n+                v_live[v].location = reg\n                 vsave[v] = c > 0 and (reg >= XMM or not is_callee[reg])\n                 free[reg] = false\n                 active.push(v)\n                 in_active[v] = true\n-                if v_last[v] < min_end: min_end = v_last[v]\n+                if v_live[v].last < min_end: min_end = v_live[v].last\n                 if reg < XMM and is_callee[reg]: callee_off[reg] = 1\n-            else: vloc[v] = LOC_SPILL\n+            else: v_live[v].location = LOC_SPILL\n             v = nxt[v]\n     if len(ra_dump) > 0 and ir.name == ra_dump:\n         loop v in [0..nv):\n-            if v_last[v] < 0: continue\n+            if v_live[v].last < 0: continue\n             tag = \"\"\n             if placed[v]: tag = \" (pass 1)\"\n-            eprint(\"v{v} {live_start(v)}..{v_last[v]} w {v_weight[v]} calls {cross[v]} -> {vloc[v]}{tag}\")\n+            eprint(\"v{v} {live_start(v)}..{v_live[v].last} w {v_live[v].weight} calls {cross[v]} -> {v_live[v].location}{tag}\")\n \n layout_frame = ():\n     off = 0\n@@ -909,11 +910,11 @@ layout_frame = ():\n     vspill = fill(0, nv)\n     save_list = []\n     loop v in [0..nv):\n-        if vloc[v] == LOC_SPILL or (vsave[v] and vloc[v] >= 0):\n+        if v_live[v].location == LOC_SPILL or (vsave[v] and v_live[v].location >= 0):\n             off += 8\n             if is_vreg_vec(vtype(v)): off += 24      # (vectors take 32 bytes)\n             vspill[v] = -off\n-            if vloc[v] >= 0: save_list.push(v)\n+            if v_live[v].location >= 0: save_list.push(v)\n     slot_off = fill(0, ir.slot_size.len())\n     loop s in [0..ir.slot_size.len()):\n         sz = int(ir.slot_size[s])\n@@ -928,7 +929,7 @@ slot_disp = (v: int) -> int: slot_off[vslot[v]] + vsoff[v]\n \n # value of int vreg v into register r\n ld = (r: int, v: int):\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l >= 0:\n         if l != r: mov_rr(r, l)\n     else if l == LOC_SPILL: mov_rm(r, RBP, vspill[v])\n@@ -939,21 +940,21 @@ ld = (r: int, v: int):\n \n # register holding int vreg v (loads into scratch if needed)\n reg_of = (v: int, scratch: int) -> int:\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l >= 0 and l < XMM: return l\n     ld(scratch, v)\n     scratch\n \n # store register r into vreg v\n st = (v: int, r: int):\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l >= 0:\n         if l != r: mov_rr(l, r)\n     else if l == LOC_SPILL: mov_mr(RBP, vspill[v], r)\n \n # destination register for v (its own register, or scratch)\n dreg = (v: int, scratch: int) -> int:\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l >= 0 and l < XMM: return l\n     scratch\n \n@@ -969,7 +970,7 @@ movsd_rr = (x: int, y: int, ty: int):\n xzero = (x: int): sse_rr(0, 0x57, x, x)          # xorps x, x\n \n lds = (x: int, v: int, ty: int):\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l >= XMM: movsd_rr(x, l - XMM, ty)\n     else if l == LOC_SPILL and is_vreg_vec(ty): vmov_rm(x, RBP, vspill[v], ty)\n     else if l == LOC_SPILL:\n@@ -987,19 +988,19 @@ lds = (x: int, v: int, ty: int):\n         ld(RAX, v)\n         movq_xr(x, RAX)\n sts = (v: int, x: int, ty: int):\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l >= XMM: movsd_rr(l - XMM, x, ty)\n     else if l == LOC_SPILL and is_vreg_vec(ty): vmov_mr(RBP, vspill[v], x, ty)\n     else if l == LOC_SPILL:\n         if ty == VS: sse_rm(0xF3, 0x11, x, RBP, vspill[v])\n         else: sse_rm(0xF2, 0x11, x, RBP, vspill[v])\n xreg_of = (v: int, scratch: int, ty: int) -> int:\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l >= XMM: return l - XMM\n     lds(scratch, v, ty)\n     scratch\n xdreg = (v: int, scratch: int) -> int:\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l >= XMM: return l - XMM\n     scratch\n \n@@ -1019,7 +1020,7 @@ movq_rx = (r: int, x: int):\n # ALU r, operand(v): register / memory / imm32 forms\n # opc_rr: \"op r/m64, r64\" opcode (e.g. 0x01 add); ext: /digit for 0x81 imm form\n alu_v = (opc_rr: int, ext: int, r: int, v: int):\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l >= 0 and l < XMM: op_rr(opc_rr, true, l, r)\n     else if l == LOC_CONST:\n         c = vcval[v]\n@@ -1039,15 +1040,15 @@ alu_v = (opc_rr: int, ext: int, r: int, v: int):\n \n # memory base for an address vreg: returns (base register, displacement)\n addr_of = (v: int, scratch: int) -> (int, int):\n-    if vloc[v] == LOC_SLOT: return (RBP, slot_disp(v))\n-    if vloc[v] == LOC_GLOBAL:\n+    if v_live[v].location == LOC_SLOT: return (RBP, slot_disp(v))\n+    if v_live[v].location == LOC_GLOBAL:\n         rip_kind = vgkind[v]\n         return (RIPREL, vgoff[v])\n     (reg_of(v, scratch), 0)\n \n # like addr_of, but never rip-relative (for instructions with two memory operands)\n addr_reg = (v: int, scratch: int) -> (int, int):\n-    if vloc[v] == LOC_SLOT: return (RBP, slot_disp(v))\n+    if v_live[v].location == LOC_SLOT: return (RBP, slot_disp(v))\n     (reg_of(v, scratch), 0)\n \n # ---------------- parallel moves ----------------\n@@ -1057,7 +1058,7 @@ struct PMove:\n     v: int\n \n src_reg = (v: int) -> int:\n-    l = vloc[v]\n+    l = v_live[v].location\n     if l >= 0: return l\n     -1\n \n@@ -1191,12 +1192,12 @@ emit_prologue = ():\n             stack_params.push((p, 16 + 8 * stack_k))\n             stack_k += 1\n             continue\n-        l = vloc[p]\n+        l = v_live[p].location\n         if l == LOC_NONE: continue\n         if l == LOC_SPILL: reg_spills.push((p, src))\n         else: moves.push(PMove(l, p))\n         # record the incoming register as the temporary source location\n-        pin_src.push((p, src))\n+        pin_src.push((p, src, l))\n     # spills first (they read incoming registers)\n     loop rs in reg_spills:\n         if is_xmm(rs.1):\n@@ -1204,16 +1205,17 @@ emit_prologue = ():\n             else: sse_rm(0xF2, 0x11, rs.1 - XMM, RBP, vspill[rs.0])\n         else: mov_mr(RBP, vspill[rs.0], rs.1)\n     # register moves: sources are the incoming registers\n-    saved = vloc\n-    loop ps in pin_src: vloc[ps.0] = ps.1\n+    # Only register-passed parameters change temporarily. Saving their old\n+    # locations avoids copying every virtual register's location for a prologue.\n+    loop ps in pin_src: v_live[ps.0].location = ps.1\n     real: PMove[]\n     loop m in moves: real.push(m)\n     emit_parallel(real)\n-    vloc = saved\n+    loop ps in pin_src: v_live[ps.0].location = ps.2\n     pin_src.clear()\n     loop sp in stack_params:\n         p = sp.0\n-        l = vloc[p]\n+        l = v_live[p].location\n         if l == LOC_NONE: continue\n         if vtype(p) == VI:\n             mov_rm(RAX, RBP, sp.1)\n@@ -1222,7 +1224,7 @@ emit_prologue = ():\n             sse_rm(0xF2, 0x10, 0, RBP, sp.1)\n             sts(p, 0, vtype(p))\n \n-pin_src: (int, int)[]\n+pin_src: (int, int, int)[]       # parameter, incoming register, allocated location\n \n emit_epilogue = ():\n     loop r in [0..16):\n@@ -1318,7 +1320,7 @@ pop_call_stack = ():\n \n store_result = (ins: Ins):\n     d = int(ins.dst)\n-    if d < 0 or vloc[d] == LOC_NONE: return\n+    if d < 0 or v_live[d].location == LOC_NONE: return\n     ty = vtype(d)\n     if ty == VI: st(d, RAX)\n     else: sts(d, 0, ty)\n@@ -1365,9 +1367,9 @@ branch_target_jcc = (depth: int, cc: int):\n # d = a + b (sign -1: a - b, b a constant) into a register other than a's in one instruction:\n # lea d, [a + b]\n lea_add = (d: int, a: int, bb: int, sign: int) -> bool:\n-    rd = vloc[d]\n-    ra = vloc[a]\n-    rb = vloc[bb]\n+    rd = v_live[d].location\n+    ra = v_live[a].location\n+    rb = v_live[bb].location\n     if rd < 0 or rd >= XMM or ra < 0 or ra >= XMM or ra == rd: return false\n     if rb == LOC_CONST:\n         k = vcval[bb] * sign\n@@ -1382,11 +1384,11 @@ lea_add = (d: int, a: int, bb: int, sign: int) -> bool:\n \n int_bin = (opc_rr: int, ext: int, ins: Ins):\n     d = int(ins.dst)\n-    if vloc[d] == LOC_NONE: return\n+    if v_live[d].location == LOC_NONE: return\n     a = int(ins.a)\n     bb = int(ins.b)\n     r = dreg(d, RAX)\n-    if vloc[bb] == r and r != vloc[a]: r = RAX\n+    if v_live[bb].location == r and r != v_live[a].location: r = RAX\n     ld(r, a)\n     alu_v(opc_rr, ext, r, bb)\n     st(d, r)\n@@ -1401,7 +1403,7 @@ cmp_branch_pad = (span: int):\n cmp_ops = (a: int, bb: int, branch: bool = false):\n     ra = reg_of(a, RAX)\n     if branch and ra_on:\n-        l = vloc[bb]\n+        l = v_live[bb].location\n         size = 3  # REX.W, opcode, register ModRM\n         if l == LOC_CONST:\n             size = if vcval[bb] >= -128 and vcval[bb] <= 127: 4 else: 7\n@@ -1480,7 +1482,7 @@ falu = (opc: int, ins: Ins):\n         sts(d, x, ty)\n         return\n     bv = int(ins.b)\n-    if vloc[bv] == LOC_FCONST and vcval[bv] != 0:\n+    if v_live[bv].location == LOC_FCONST and vcval[bv] != 0:\n         # op x, [constant]\n         x = xdreg(d, 0)\n         lds(x, int(ins.a), ty)\n@@ -1519,9 +1521,9 @@ x_unary = (prefix: int, opc: int, ins: Ins, src_ty: int, dst_ty: int):\n # destination. Keeping this operation in IR avoids lowering a runtime loop and\n # its control-flow joins at every call site. No read crosses either byte span.\n emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings: bool = false):\n-    if vloc[d] == LOC_NONE: return\n+    if v_live[d].location == LOC_NONE: return\n     mask = dreg(d, R11)\n-    saved = vloc[d] < 0\n+    saved = v_live[d].location < 0\n     if saved:\n         b(0x41); b(0x53)                       # push r11 (spilled destination)\n     ld(RAX, a)\n@@ -1666,7 +1668,7 @@ emit_ins = (pos: int, ins: Ins):\n             emit_memeq(d, a, bb, int(ins.c), true, op == .streq)\n             fused_cc = 4\n             return\n-        if nx.op == .eq and int(nx.a) == d and vloc[int(nx.b)] == LOC_CONST and vcval[int(nx.b)] == 0 and pos + 2 < ir.code.len():\n+        if nx.op == .eq and int(nx.a) == d and v_live[int(nx.b)].location == LOC_CONST and vcval[int(nx.b)] == 0 and pos + 2 < ir.code.len():\n             t = int(nx.dst)\n             n2 = ir.code[pos + 2]\n             if v_nuse[t] == 1 and (n2.op == .if_ or n2.op == .brif) and int(n2.a) == t:\n@@ -1693,7 +1695,7 @@ emit_ins = (pos: int, ins: Ins):\n                 else: fused_cc = fcmp_flags(ins)\n                 return\n             # a float comparison tested for false (c == 0): branch on the opposite flags\n-            if is_fcmp(op) and nx.op == .eq and int(nx.a) == d and vloc[int(nx.b)] == LOC_CONST and vcval[int(nx.b)] == 0 and pos + 2 < ir.code.len():\n+            if is_fcmp(op) and nx.op == .eq and int(nx.a) == d and v_live[int(nx.b)].location == LOC_CONST and vcval[int(nx.b)] == 0 and pos + 2 < ir.code.len():\n                 t = int(nx.dst)\n                 n2 = ir.code[pos + 2]\n                 if v_nuse[t] == 1 and (n2.op == .if_ or n2.op == .brif) and int(n2.a) == t:\n@@ -1707,14 +1709,14 @@ emit_ins = (pos: int, ins: Ins):\n     match op:\n         nop, assume: pass\n         iconst:\n-            if vloc[d] == LOC_CONST or vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_CONST or v_live[d].location == LOC_NONE: return\n             r = dreg(d, RAX)\n             mov_imm(r, ins.imm)\n             st(d, r)\n         fconst:\n-            if vloc[d] == LOC_NONE or vloc[d] == LOC_FCONST: return\n-            if vloc[d] >= XMM:\n-                x = vloc[d] - XMM\n+            if v_live[d].location == LOC_NONE or v_live[d].location == LOC_FCONST: return\n+            if v_live[d].location >= XMM:\n+                x = v_live[d].location - XMM\n                 if ins.imm == 0: xzero(x)\n                 else:\n                     # float constants live in read-only data: one load, no integer register\n@@ -1724,7 +1726,7 @@ emit_ins = (pos: int, ins: Ins):\n             mov_imm(RAX, ins.imm)\n             st(d, RAX)\n         mov:\n-            if vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_NONE: return\n             if vtype(d) == VI:\n                 r = dreg(d, RAX)\n                 ld(r, a)\n@@ -1734,20 +1736,20 @@ emit_ins = (pos: int, ins: Ins):\n                 lds(x, a, vtype(d))\n                 sts(d, x, vtype(d))\n         add:\n-            if vloc[d] == LOC_NONE or vloc[d] == LOC_SLOT: return\n+            if v_live[d].location == LOC_NONE or v_live[d].location == LOC_SLOT: return\n             if lea_add(d, a, bb, 1): return\n             int_bin(0x01, 0, ins)\n         sub:\n-            if vloc[bb] == LOC_CONST and lea_add(d, a, bb, -1): return\n+            if v_live[bb].location == LOC_CONST and lea_add(d, a, bb, -1): return\n             int_bin(0x29, 5, ins)\n         and_: int_bin(0x21, 4, ins)\n         or_: int_bin(0x09, 1, ins)\n         xor: int_bin(0x31, 6, ins)\n         mul:\n-            if vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_NONE: return\n             r = dreg(d, RAX)\n-            if vloc[bb] == r and r != vloc[a]: r = RAX\n-            l = vloc[bb]\n+            if v_live[bb].location == r and r != v_live[a].location: r = RAX\n+            l = v_live[bb].location\n             if l == LOC_CONST:\n                 c = vcval[bb]\n                 if c == 3 or c == 5 or c == 9:\n@@ -1804,11 +1806,11 @@ emit_ins = (pos: int, ins: Ins):\n             if op == .rems or op == .remu: st(d, RDX)\n             else: st(d, RAX)\n         shl, shrs, shru:\n-            if vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_NONE: return\n             ext = 7\n             if op == .shl: ext = 4\n             else if op == .shru: ext = 5\n-            if vloc[bb] == LOC_CONST:\n+            if v_live[bb].location == LOC_CONST:\n                 r = dreg(d, RAX)\n                 ld(r, a)\n                 rex(true, 0, 0, r, false)\n@@ -1985,7 +1987,7 @@ emit_ins = (pos: int, ins: Ins):\n             if ty == VS: op_rr(0x8B, false, r, r)          # zero upper half\n             st(d, r)\n         load:\n-            if vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_NONE: return\n             mode = int(ins.c)\n             size = mode & 15\n             if mode & M_FLOAT != 0 and v_nuse[d] == 1 and pos + 1 < ir.code.len():\n@@ -2028,7 +2030,7 @@ emit_ins = (pos: int, ins: Ins):\n                 use_index(ix, mem_scale(ins))\n                 if size == 4: sse_rm(0xF3, 0x11, xb, base, disp)\n                 else: sse_rm(0xF2, 0x11, xb, base, disp)\n-            else if vloc[bb] == LOC_CONST and size >= 4 and base != RIPREL:\n+            else if v_live[bb].location == LOC_CONST and size >= 4 and base != RIPREL:\n                 use_index(ix, mem_scale(ins))\n                 rex(size == 8, 0, 0, base, false)\n                 b(0xC7)\n@@ -2040,12 +2042,12 @@ emit_ins = (pos: int, ins: Ins):\n                 store_sized(base, disp, rb, size)\n             cur_index = -1\n         slot:\n-            if vloc[d] == LOC_SLOT or vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_SLOT or v_live[d].location == LOC_NONE: return\n             r = dreg(d, RAX)\n             lea(r, RBP, slot_off[a])\n             st(d, r)\n         gaddr, daddr:\n-            if vloc[d] == LOC_GLOBAL or vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_GLOBAL or v_live[d].location == LOC_NONE: return\n             r = dreg(d, RAX)\n             kind = 1\n             if op == .daddr: kind = 0\n@@ -2101,7 +2103,7 @@ emit_ins = (pos: int, ins: Ins):\n                 b(0x31); b(0xC0)\n                 b(0xF3); b(0xAA)          # rep stosb\n         vld:\n-            if vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_NONE: return\n             ty = int(ins.ty)\n             base, disp = addr_of(a, RCX)\n             disp += int(ins.imm)\n@@ -2127,7 +2129,7 @@ emit_ins = (pos: int, ins: Ins):\n             vmov_mr(base, disp, x, ty)\n             cur_index = -1\n         vbin:\n-            if vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_NONE: return\n             ty = int(ins.ty)\n             vk = int(ins.imm)\n             vo = int(ins.c)\n@@ -2146,7 +2148,7 @@ emit_ins = (pos: int, ins: Ins):\n                 vop2(vo, vk, x, xb)\n             sts(d, x, ty)\n         vsplat:\n-            if vloc[d] == LOC_NONE: return\n+            if v_live[d].location == LOC_NONE: return\n             ty = int(ins.ty)\n             vk = int(ins.imm)\n             x = xdreg(d, 0)\n@@ -2217,7 +2219,7 @@ emit_ins = (pos: int, ins: Ins):\n                 item = int(ir.args[a + k])\n                 if item & 1 == 1:\n                     v = item >> 1\n-                    if vloc[v] != LOC_NONE: st(v, RAX)\n+                    if v_live[v].location != LOC_NONE: st(v, RAX)\n                 else:\n                     s = item >> 1\n                     size = int(ir.slot_size[s])\n@@ -2325,7 +2327,7 @@ emit_ins = (pos: int, ins: Ins):\n                 b32(0)\n                 stub_fix.push((code.len() - 4, int(ins.imm)))\n                 pop_call_stack()\n-                if d >= 0 and vloc[d] != LOC_NONE: st(d, RAX)\n+                if d >= 0 and v_live[d].location != LOC_NONE: st(d, RAX)\n         block: xctl.push(XCtl(0, code.len(), [], []))\n         loop:\n             # Default code needs a consistent loop entry before comparison\n@@ -2401,7 +2403,7 @@ emit_ins = (pos: int, ins: Ins):\n             if sel_fused == pos:\n                 # (its compare first: what follows only moves, which keep the flags)\n                 sel_fused = -1\n-                if vloc[d] == LOC_NONE: return\n+                if v_live[d].location == LOC_NONE: return\n                 cmp_ops(sel_ca, sel_cb)\n                 cc = sel_cc\n                 rb = reg_of(bb, RDX)\n@@ -2409,7 +2411,7 @@ emit_ins = (pos: int, ins: Ins):\n                 if r == rb: r = RAX\n                 ld(r, int(ins.c))\n             else:\n-                if vloc[d] == LOC_NONE: return\n+                if v_live[d].location == LOC_NONE: return\n                 rb = reg_of(bb, RDX)\n                 rc = reg_of(a, RCX)\n                 r = dreg(d, RAX)\n@@ -2519,7 +2521,7 @@ x64_function = ():\n                 save_next += 1\n             k = 0\n             loop k < save_active.len():\n-                if v_last[save_active[k]] <= pos:\n+                if v_live[save_active[k]].last <= pos:\n                     save_active[k] = save_active[save_active.len() - 1]\n                     save_active.pop()\n                 else: k += 1\n@@ -2530,7 +2532,7 @@ x64_function = ():\n             save_around_call(pos, false, d)\n             if ra_stat:\n                 loop v in save_active:\n-                    if vloc[v] >= XMM: ra_save_x += 2 * call_w[ci]\n+                    if v_live[v].location >= XMM: ra_save_x += 2 * call_w[ci]\n                     else: ra_save_cost += 2 * call_w[ci]\n         else: emit_ins(pos, ins)\n         if ci < call_pos.len() and call_pos[ci] == pos: ci += 1\n@@ -2564,12 +2566,12 @@ x64_function = ():\n         if ra_verbose:\n             sp = 0\n             loop v in [0..ir.vtypes.len()):\n-                if vloc[v] == LOC_SPILL: sp += v_weight[v]\n+                if v_live[v].location == LOC_SPILL: sp += v_live[v].weight\n             eprint(\"  {ir.name}: spill {sp}, save {ra_save_cost + ra_save_x - ra_fn_base}\\n\")\n             ra_fn_base = ra_save_cost + ra_save_x\n         loop v in [0..ir.vtypes.len()):\n-            if vloc[v] == LOC_SPILL: ra_spill_cost += v_weight[v]\n-            if vloc[v] == LOC_SPILL or vloc[v] >= 0: ra_total += v_weight[v]\n+            if v_live[v].location == LOC_SPILL: ra_spill_cost += v_live[v].weight\n+            if v_live[v].location == LOC_SPILL or v_live[v].location >= 0: ra_total += v_live[v].weight\n \n # x86-64 registers by encoding, as DWARF numbers them\n X64_DWREG = [0, 2, 1, 3, 7, 6, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15]\n@@ -2603,14 +2605,14 @@ dbg_function = (start: int, body: int, dwreg: int[], fp_base: int, fp_dw: int, f\n             off = slot_off[int(locals[l].offset)]\n         else:\n             v = int(locals[l].vreg)\n-            if v >= 0 and v < vloc.len():\n+            if v >= 0 and v < v_live.len():\n                 # (the vreg holds the variable's address: by reference, a mut parameter, a struct parameter)\n                 at = fl & LF_BYREF != 0 or fl & LF_PARAM != 0 and (fl & LF_MUTPARAM != 0 or vc(int(locals[l].type)) == VC_AGG)\n                 s0 = live_start(v)\n-                e = v_last[v]\n+                e = v_live[v].last\n                 if s0 >= 0 and s0 < n: lo = dbg_pos[s0]\n                 if e >= 0 and e + 1 <= n: hi = dbg_pos[e + 1]\n-                loc = vloc[v]\n+                loc = v_live[v].location\n                 if loc >= fp_base:\n                     kind = DL_REG\n                     r = fp_dw + loc - fp_base\n@@ -2652,7 +2654,7 @@ save_active: int[]\n save_around_call = (pos: int, before: bool, dst: int):\n     loop v in save_active:\n         if v != dst:\n-            r = vloc[v]\n+            r = v_live[v].location\n             if r >= XMM and is_vreg_vec(vtype(v)):\n                 if before: vmov_mr(RBP, vspill[v], r - XMM, vtype(v))\n                 else: vmov_rm(r - XMM, RBP, vspill[v], vtype(v))\n",
+  "prologue_pilot": {
+    "toolchains": {
+      "previous": {
+        "binary_sha256": "ef7796ad84c22bb71179ac0038aaca3d17eec3049058a5147e9ab604b37ceb5a",
+        "compiler_sources_sha256": "7361cef914d4c4aa28d375a7e87b4e1476e479e56a385dce26e4d3c0c52886f1",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      },
+      "candidate": {
+        "binary_sha256": "ab2018f6e922201b125c9a1ba8aa2c948263c9d68ea39f2b499d2f9ab68298b7",
+        "compiler_sources_sha256": "91e4b3d50cf200e61cd5724b3a5fe58f9a02873d07571e2afba9e36b4168a981",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      }
+    },
+    "status": "complete",
+    "compilation": {
+      "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+      "cpu_affinity": [
+        1
+      ],
+      "revision": "ec56a76a5780a0496b2802f7f44ed12e55cc75c6",
+      "working_tree": " M core/compiler/x64.jo\n M tests/python_misc/test_sloppy_core.py\n",
+      "diff_sha256": "5e55eb5cf093973c73560f55fa99722f2235d438f1abbaef2dd0c7eaf56ee1c6",
+      "load_average_start": [
+        7.08251953125,
+        5.69970703125,
+        6.08642578125
+      ],
+      "workers": 1,
+      "samples": 7,
+      "warmups_per_compiler": 1,
+      "sample_order": "Alternating for two variants; rotating positions and direction for three or more.",
+      "cpu_time_definition": "User + system CPU seconds for the compiler and its waited-for children; may exceed wall time with multiple emission workers.",
+      "compilers": {
+        "previous": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792411983171089597/bin/dewy-core",
+          "sha256": "ef7796ad84c22bb71179ac0038aaca3d17eec3049058a5147e9ab604b37ceb5a"
+        },
+        "candidate": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792412657929188120/bin/dewy-core",
+          "sha256": "ab2018f6e922201b125c9a1ba8aa2c948263c9d68ea39f2b499d2f9ab68298b7"
+        }
+      },
+      "workloads": {
+        "throughput-default": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/sloppy-comparison/prologue-entries-throughput.dewy"
+          ],
+          "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+          "seconds": {
+            "previous": [
+              0.5988134180079214,
+              0.5905385579972062,
+              0.6073725650057895,
+              0.6112591029959731,
+              0.5871587800065754,
+              0.6609344710013829,
+              0.5996819889987819
+            ],
+            "candidate": [
+              0.6386418980109738,
+              0.6120131249917904,
+              0.6237700420024339,
+              0.6115839510021033,
+              0.5990209699957632,
+              0.6004143040045165,
+              0.5883002240007045
+            ]
+          },
+          "median_seconds": {
+            "previous": 0.5996819889987819,
+            "candidate": 0.6115839510021033
+          },
+          "cpu_seconds": {
+            "previous": [
+              0.5881670000000001,
+              0.5807290000000002,
+              0.592996,
+              0.596123,
+              0.555688,
+              0.5979769999999994,
+              0.5908260000000006
+            ],
+            "candidate": [
+              0.5161239999999998,
+              0.5701290000000002,
+              0.5967039999999996,
+              0.590047,
+              0.5882060000000002,
+              0.5885059999999995,
+              0.5796840000000012
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 0.5908260000000006,
+            "candidate": 0.5882060000000002
+          },
+          "output_bytes": {
+            "candidate": 1987384,
+            "previous": 1987384
+          },
+          "output_validated": {
+            "candidate": true,
+            "previous": true
+          }
+        },
+        "throughput-release": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/sloppy-comparison/prologue-entries-throughput.dewy",
+            "--release"
+          ],
+          "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+          "seconds": {
+            "previous": [
+              0.7817758140008664,
+              0.7800851150095696,
+              0.787546633000602,
+              0.8060602439945797,
+              0.8395712510100566,
+              0.8026218270097161,
+              0.7900938219972886
+            ],
+            "candidate": [
+              0.7940368910058169,
+              0.7448077450098936,
+              0.8046633570047561,
+              0.8099507040024037,
+              0.9040775580069749,
+              0.7551196459971834,
+              0.8235309110023081
+            ]
+          },
+          "median_seconds": {
+            "previous": 0.7900938219972886,
+            "candidate": 0.8046633570047561
+          },
+          "cpu_seconds": {
+            "previous": [
+              0.7709629999999998,
+              0.7693730000000004,
+              0.7719220000000007,
+              0.7732239999999998,
+              0.7855890000000018,
+              0.7830849999999999,
+              0.7753730000000001
+            ],
+            "candidate": [
+              0.7830689999999997,
+              0.7328609999999991,
+              0.788086000000001,
+              0.7891239999999969,
+              0.7706509999999992,
+              0.7288190000000028,
+              0.8101479999999995
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 0.7732239999999998,
+            "candidate": 0.7830689999999997
+          },
+          "output_bytes": {
+            "candidate": 2227080,
+            "previous": 2227080
+          },
+          "output_validated": {
+            "candidate": true,
+            "previous": true
+          }
+        },
+        "compiler-reference": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792358113531010162/compiler/main.jo"
+          ],
+          "source_sha256": "8953419aa5cb93761641ffeb8d714d2ce2bcf913c2a279361c124a50748b03f7",
+          "seconds": {
+            "previous": [
+              1.7359241280064452,
+              1.7940036099898862,
+              1.9509337899944512,
+              1.6944850309955655,
+              1.7490770049917046,
+              1.7951211710023927,
+              2.364482210992719
+            ],
+            "candidate": [
+              1.8509834080032306,
+              1.6525855489890091,
+              1.7172013359959237,
+              1.6645330839965027,
+              1.7173448679968715,
+              1.7444780980003998,
+              1.924531647004187
+            ]
+          },
+          "median_seconds": {
+            "previous": 1.7940036099898862,
+            "candidate": 1.7173448679968715
+          },
+          "cpu_seconds": {
+            "previous": [
+              1.6184760000000014,
+              1.6388420000000015,
+              1.6750030000000051,
+              1.5714129999999944,
+              1.6697579999999994,
+              1.6897090000000017,
+              1.661474999999996
+            ],
+            "candidate": [
+              1.6399699999999986,
+              1.6157359999999998,
+              1.552258000000002,
+              1.598461000000001,
+              1.5557429999999997,
+              1.6833710000000028,
+              1.6814600000000013
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 1.661474999999996,
+            "candidate": 1.6157359999999998
+          },
+          "output_bytes": {
+            "candidate": 7150920,
+            "previous": 7150920
+          },
+          "output_validated": {
+            "candidate": false,
+            "previous": false
+          }
+        }
+      },
+      "load_average_end": [
+        8.83544921875,
+        6.3876953125,
+        6.2978515625
+      ]
+    },
+    "comparisons": {
+      "throughput-default": {
+        "paired_median_ratio": 0.9841615981885593,
+        "bootstrap_95_percent_interval": [
+          0.9811416559190025,
+          1.0062529932748274
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      },
+      "throughput-release": {
+        "paired_median_ratio": 1.0157024396760932,
+        "bootstrap_95_percent_interval": [
+          0.9525431747669839,
+          1.0209399395275691
+        ],
+        "limit": 1.02,
+        "status": "inconclusive"
+      },
+      "compiler-reference": {
+        "paired_median_ratio": 0.9962490582697975,
+        "bootstrap_95_percent_interval": [
+          0.9317176501025899,
+          1.01328039464286
+        ],
+        "limit": 1.02,
+        "status": "pass"
+      }
+    }
+  },
+  "prologue_instructions": {
+    "toolchains": {
+      "previous": {
+        "binary_sha256": "ef7796ad84c22bb71179ac0038aaca3d17eec3049058a5147e9ab604b37ceb5a",
+        "compiler_sources_sha256": "7361cef914d4c4aa28d375a7e87b4e1476e479e56a385dce26e4d3c0c52886f1",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      },
+      "candidate": {
+        "binary_sha256": "ab2018f6e922201b125c9a1ba8aa2c948263c9d68ea39f2b499d2f9ab68298b7",
+        "compiler_sources_sha256": "91e4b3d50cf200e61cd5724b3a5fe58f9a02873d07571e2afba9e36b4168a981",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      }
+    },
+    "status": "complete",
+    "instructions": {
+      "throughput-default": {
+        "previous": [
+          {
+            "instructions": 2493946208,
+            "enabled_ns": 591627235,
+            "running_ns": 591627235
+          },
+          {
+            "instructions": 2493946145,
+            "enabled_ns": 579426860,
+            "running_ns": 579426860
+          },
+          {
+            "instructions": 2493946138,
+            "enabled_ns": 579006944,
+            "running_ns": 579006944
+          }
+        ],
+        "candidate": [
+          {
+            "instructions": 2492219093,
+            "enabled_ns": 613111419,
+            "running_ns": 613111419
+          },
+          {
+            "instructions": 2492219099,
+            "enabled_ns": 604894562,
+            "running_ns": 604894562
+          },
+          {
+            "instructions": 2492219058,
+            "enabled_ns": 591676483,
+            "running_ns": 591676483
+          }
+        ]
+      },
+      "throughput-release": {
+        "previous": [
+          {
+            "instructions": 3517621659,
+            "enabled_ns": 776642607,
+            "running_ns": 776642607
+          },
+          {
+            "instructions": 3517621633,
+            "enabled_ns": 752636797,
+            "running_ns": 752636797
+          },
+          {
+            "instructions": 3517621681,
+            "enabled_ns": 787956132,
+            "running_ns": 787956132
+          }
+        ],
+        "candidate": [
+          {
+            "instructions": 3514378582,
+            "enabled_ns": 788680161,
+            "running_ns": 788680161
+          },
+          {
+            "instructions": 3514378555,
+            "enabled_ns": 776492518,
+            "running_ns": 776492518
+          },
+          {
+            "instructions": 3514378572,
+            "enabled_ns": 774557160,
+            "running_ns": 774557160
+          }
+        ]
+      },
+      "compiler-reference": {
+        "previous": [
+          {
+            "instructions": 7223191116,
+            "enabled_ns": 1615024223,
+            "running_ns": 1615024223
+          },
+          {
+            "instructions": 7223191191,
+            "enabled_ns": 1670535908,
+            "running_ns": 1670535908
+          },
+          {
+            "instructions": 7223191196,
+            "enabled_ns": 1685519772,
+            "running_ns": 1685519772
+          }
+        ],
+        "candidate": [
+          {
+            "instructions": 7216578885,
+            "enabled_ns": 1648824247,
+            "running_ns": 1648824247
+          },
+          {
+            "instructions": 7216578872,
+            "enabled_ns": 1607299269,
+            "running_ns": 1607299269
+          },
+          {
+            "instructions": 7216578986,
+            "enabled_ns": 1675866736,
+            "running_ns": 1675866736
+          }
+        ]
+      }
+    }
+  },
+  "assembly": {
+    "previous": {
+      "analyze": {
+        "array_clone_call_sites": 15
+      },
+      "allocate": {
+        "array_clone_call_sites": 16
+      },
+      "emit_prologue": {
+        "array_clone_call_sites": 15
+      }
+    },
+    "candidate": {
+      "analyze": {
+        "array_clone_call_sites": 12
+      },
+      "allocate": {
+        "array_clone_call_sites": 11
+      },
+      "emit_prologue": {
+        "array_clone_call_sites": 14
+      }
+    }
+  },
+  "combined_pilot": {
+    "toolchains": {
+      "previous": {
+        "binary_sha256": "ef7796ad84c22bb71179ac0038aaca3d17eec3049058a5147e9ab604b37ceb5a",
+        "compiler_sources_sha256": "7361cef914d4c4aa28d375a7e87b4e1476e479e56a385dce26e4d3c0c52886f1",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      },
+      "candidate": {
+        "binary_sha256": "0d7549c8155baca52e7de4c90256d63556451996c3af5709ed4b091ff6931571",
+        "compiler_sources_sha256": "c339cd875f3448ed393d1b70970e5e2735fc0ba3ed870d437c7953631fe947ee",
+        "library_sha256": "ba3d6a97c93044e9233120c8cbaa8192db0e8399f3b96dbdece2650cfcb8e515"
+      }
+    },
+    "status": "complete",
+    "compilation": {
+      "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+      "cpu_affinity": [
+        1
+      ],
+      "revision": "ec56a76a5780a0496b2802f7f44ed12e55cc75c6",
+      "working_tree": " M core/compiler/arm64.jo\n M core/compiler/x64.jo\n M tests/python_misc/test_sloppy_core.py\n",
+      "diff_sha256": "0e2a2862933e9ec990661e039c37ffabdf4d271cc80a36ec9b1220ef17d24baf",
+      "load_average_start": [
+        7.90966796875,
+        7.74169921875,
+        6.880859375
+      ],
+      "workers": 1,
+      "samples": 7,
+      "warmups_per_compiler": 1,
+      "sample_order": "Alternating for two variants; rotating positions and direction for three or more.",
+      "cpu_time_definition": "User + system CPU seconds for the compiler and its waited-for children; may exceed wall time with multiple emission workers.",
+      "compilers": {
+        "previous": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792411983171089597/bin/dewy-core",
+          "sha256": "ef7796ad84c22bb71179ac0038aaca3d17eec3049058a5147e9ab604b37ceb5a"
+        },
+        "candidate": {
+          "path": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792413001358502927/bin/dewy-core",
+          "sha256": "0d7549c8155baca52e7de4c90256d63556451996c3af5709ed4b091ff6931571"
+        }
+      },
+      "workloads": {
+        "throughput-default": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/sloppy-comparison/live-entries-throughput.dewy"
+          ],
+          "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+          "seconds": {
+            "previous": [
+              0.35711399900901597,
+              0.3512733279931126,
+              0.3518248979962664,
+              0.3495864349970361,
+              0.3483767540019471,
+              0.35205585601215716,
+              0.35027320600056555
+            ],
+            "candidate": [
+              0.40486092799983453,
+              0.3491264259937452,
+              0.35124395799357444,
+              0.39940962199762,
+              0.3552546899882145,
+              0.35404292699240614,
+              0.3562568470078986
+            ]
+          },
+          "median_seconds": {
+            "previous": 0.3512733279931126,
+            "candidate": 0.3552546899882145
+          },
+          "cpu_seconds": {
+            "previous": [
+              0.35179600000000005,
+              0.3465890000000002,
+              0.34712500000000024,
+              0.3450740000000001,
+              0.3438669999999996,
+              0.3472950000000004,
+              0.3456329999999994
+            ],
+            "candidate": [
+              0.3990709999999999,
+              0.34460900000000017,
+              0.3464579999999998,
+              0.39331799999999945,
+              0.35014200000000056,
+              0.34915999999999975,
+              0.3509890000000004
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 0.3465890000000002,
+            "candidate": 0.35014200000000056
+          },
+          "output_bytes": {
+            "candidate": 1987368,
+            "previous": 1987368
+          },
+          "output_validated": {
+            "candidate": true,
+            "previous": true
+          }
+        },
+        "throughput-release": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/task-tmp/sloppy-comparison/live-entries-throughput.dewy",
+            "--release"
+          ],
+          "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+          "seconds": {
+            "previous": [
+              0.4677872999891406,
+              0.4617734359926544,
+              0.6155447189958068,
+              0.5505419039982371,
+              0.46683900299831294,
+              0.4611512470000889,
+              0.48778202099492773
+            ],
+            "candidate": [
+              0.46073171799071133,
+              0.4780713109939825,
+              0.5251682469970547,
+              0.581166467993171,
+              0.4596014769922476,
+              0.46624245098792017,
+              0.46234976999403443
+            ]
+          },
+          "median_seconds": {
+            "previous": 0.4677872999891406,
+            "candidate": 0.46624245098792017
+          },
+          "cpu_seconds": {
+            "previous": [
+              0.4615079999999998,
+              0.4563070000000001,
+              0.6065700000000013,
+              0.5432890000000002,
+              0.4608290000000006,
+              0.455537999999999,
+              0.48110300000000006
+            ],
+            "candidate": [
+              0.4551910000000004,
+              0.4720350000000024,
+              0.5186469999999986,
+              0.5733329999999988,
+              0.45422900000000066,
+              0.46058500000000147,
+              0.4566049999999985
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 0.4615079999999998,
+            "candidate": 0.46058500000000147
+          },
+          "output_bytes": {
+            "candidate": 2227064,
+            "previous": 2227064
+          },
+          "output_validated": {
+            "candidate": true,
+            "previous": true
+          }
+        },
+        "compiler-reference": {
+          "arguments": [
+            "build",
+            "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792358113531010162/compiler/main.jo"
+          ],
+          "source_sha256": "8953419aa5cb93761641ffeb8d714d2ce2bcf913c2a279361c124a50748b03f7",
+          "seconds": {
+            "previous": [
+              1.5644917280005757,
+              1.673688854003558,
+              1.766744540000218,
+              1.465009222010849,
+              1.1523687000008067,
+              1.3526994849962648,
+              1.362206043995684
+            ],
+            "candidate": [
+              1.0505810210015625,
+              1.6180497200111859,
+              1.6789931609964697,
+              1.118098414997803,
+              1.2303180809976766,
+              1.2993355959915789,
+              1.5329342389886733
+            ]
+          },
+          "median_seconds": {
+            "previous": 1.465009222010849,
+            "candidate": 1.2993355959915789
+          },
+          "cpu_seconds": {
+            "previous": [
+              1.5418009999999993,
+              1.6437060000000003,
+              1.6400279999999965,
+              1.4072030000000009,
+              1.137377999999999,
+              1.3333649999999995,
+              1.3422569999999987
+            ],
+            "candidate": [
+              1.039074999999999,
+              1.5960240000000008,
+              1.6371549999999992,
+              1.1029150000000005,
+              1.2132100000000003,
+              1.2812249999999978,
+              1.4824090000000032
+            ]
+          },
+          "median_cpu_seconds": {
+            "previous": 1.4072030000000009,
+            "candidate": 1.2812249999999978
+          },
+          "output_bytes": {
+            "candidate": 7150920,
+            "previous": 7150920
+          },
+          "output_validated": {
+            "candidate": false,
+            "previous": false
+          }
+        }
+      },
+      "load_average_end": [
+        7.45361328125,
+        7.634765625,
+        6.88037109375
+      ]
+    },
+    "comparisons": {
+      "throughput-default": {
+        "paired_median_ratio": 1.0154962055127865,
+        "bootstrap_95_percent_interval": [
+          0.9980785019805534,
+          1.1343818576675113
+        ],
+        "limit": 1.02,
+        "status": "inconclusive"
+      },
+      "throughput-release": {
+        "paired_median_ratio": 0.9863122632760442,
+        "bootstrap_95_percent_interval": [
+          0.9490795110402521,
+          1.0344680226251237
+        ],
+        "limit": 1.02,
+        "status": "inconclusive"
+      },
+      "compiler-reference": {
+        "paired_median_ratio": 0.9709911626531755,
+        "bootstrap_95_percent_interval": [
+          0.7837639629818867,
+          1.066672645329874
+        ],
+        "limit": 1.02,
+        "status": "inconclusive"
+      }
+    }
+  },
+  "validation": {
+    "prologue_quick": {
+      "passed": 412,
+      "seconds": 11.86,
+      "sha256": "8a7520c63a821f8b17c6830403110a54bdfff3f97fff3f7d34f78a0bd2d80d1d"
+    },
+    "prologue_focused": {
+      "passed": 3,
+      "seconds": 4.68,
+      "sha256": "7c26c743fe4b5ec9e1fe3bb719e9145483f3ca9b7acc59cfa5652d94d4f16580"
+    },
+    "combined_independent_C_bootstrap_quick": {
+      "passed": 412,
+      "seconds": 9.97,
+      "sha256": "a03dd1b9070f3717868d798995aa88f6c624bda4d6911a3921c57f5152f40d01"
+    },
+    "accepted_focused": {
+      "passed": 3,
+      "seconds": 1.73,
+      "sha256": "425a33c554c360523bad2ccec358dfab4bc1f92cb54c2675ab2eed79ce617dfa"
+    }
+  },
+  "notes": [
+    "The original prologue saves and restores the whole location array; the prototype saves only the affected incoming parameter locations.",
+    "The combined prototype packs first/last/weight/location into a 32-byte record shared by the x86-64 and ARM64 emitters. It retains sparse prologue restoration to avoid expanding the snapshot copy.",
+    "The first quick run stopped because the new Jo fixture used float instead of f64. Correcting the fixture passed all three modes and the complete quick suite, without further compiler changes.",
+    "Prologue-only hardware instruction counts fell only 0.07-0.09%; the timing pilot had an inconclusive release comparison. All three combined-layout timing comparisons were inconclusive on the variable-frequency, busy host. No extra samples were taken to force acceptance."
+  ]
+}

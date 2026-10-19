@@ -90,6 +90,23 @@ The measured **126k fresh root lines/CPU-second** is still below 250k and is
 not compared with absolute rates from other host-load conditions.
 [Measurements, earlier field-store prototype and validation](audits/2026-10-19/cse-whole.json).
 
+## Register snapshots and packed metadata: deferred (2026-10-19)
+
+Two prototypes targeted native-emitter working storage. The first saved only
+incoming parameters' temporarily changed register locations instead of copying
+the entire location array. The second additionally packed first/last use,
+allocation weight and location into a 32-byte record. Both bootstrap from C and
+pass the **412-check quick suite**. New default/release/debug tests exercise
+integer/floating, register/stack, sparse and zero-argument functions with values
+live across calls; they also pass on the accepted compiler.
+
+The prologue-only pilot has an inconclusive release result, while hardware
+instruction counts fall only **0.07–0.09%**. All three compilation comparisons
+for the combined layout are inconclusive. Neither establishes enough benefit
+to retain it or justify repeated sampling. Both compiler changes are reverted;
+no full suite or stage gate was run. The semantic tests are retained.
+[Exact patches, samples and validation](audits/2026-10-19/register-layout-experiments.json).
+
 ## Recommendation
 
 The user's October 18 continuation criteria are explicit: keep working until

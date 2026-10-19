@@ -11982,3 +11982,56 @@ main = ():
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == expected
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('mode', ['default', 'release', 'debug'])
+def test_core_mixed_parameter_prologues(compiler, tmp_path, mode):
+    definitions = ['@noinline\ntouch = (x: int) -> int: x * 3 + 1\n']
+    calls, probes = [], []
+    for ni, nf in [(0, 0), (1, 0), (0, 1), (6, 0), (7, 0), (0, 8),
+                   (0, 9), (6, 8), (7, 9), (10, 12)]:
+        for sparse in (False, True):
+            name = f'probe_{ni}_{nf}_{int(sparse)}'
+            params, values, arguments = [], [], []
+            for i in range(max(ni, nf)):
+                if i < ni:
+                    params.append((f'i{i}', 'int'))
+                    values.append(('int', (i + 1) * 13))
+                    arguments.append(f'seed + {(i + 1) * 13}')
+                if i < nf:
+                    params.append((f'f{i}', 'f64'))
+                    values.append(('float', (i + 1) / 2))
+                    arguments.append(f'f64(seed) + {(i + 1) / 2}')
+            used = [i for i in range(len(params)) if not sparse or i % 3 == 0]
+            terms = [f'{2 * (i + 1)} * f64({params[i][0]})' for i in used]
+            left = ' + '.join(reversed(terms)) or '0.0'
+            right = ' + '.join(terms) or '0.0'
+            first = f'int({params[used[0]][0]})' if used else '7'
+            signature = ', '.join(f'{name}: {kind}' for name, kind in params)
+            # Keep parameters live across a call, with both dense and sparse
+            # uses. This exercises incoming register moves, spills, stack
+            # arguments and restoration before the function body is emitted.
+            definitions.append(f'@noinline\n{name} = ({signature}) -> int:\n'
+                               f'    before = {left}\n    middle = touch({first})\n'
+                               f'    after = {right}\n    int(before + after) + middle\n')
+            calls.append(f'    print({name}({", ".join(arguments)}))')
+            probes.append((values, used))
+    source = tmp_path / 'parameter-prologues.jo'
+    source.write_text('\n'.join(definitions) + 'main = ():\n    seed = args().len()\n' +
+                      '\n'.join(calls) + '\n')
+    binary = tmp_path / 'parameter-prologues'
+    flags = {'default': [], 'release': ['--release'], 'debug': ['-g']}[mode]
+    built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    for extra in ([], ['one', 'two']):
+        seed = 1 + len(extra)
+        expected = []
+        for values, used in probes:
+            total = sum(2 * (i + 1) * (seed + values[i][1]) for i in used)
+            first = int(seed + values[used[0]][1]) if used else 7
+            expected.append(str(int(2 * total) + 3 * first + 1))
+        ran = subprocess.run([binary, *extra], capture_output=True, text=True, timeout=10)
+        assert ran.returncode == 0, ran.stdout + ran.stderr
+        assert ran.stdout.splitlines() == expected
