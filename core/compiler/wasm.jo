@@ -276,7 +276,7 @@ emit_wins = (ins: Ins):
     bb = int(ins.b)
     match o:
         nop, assume: pass
-        vld, vst, vbin, vsplat, vzu, mulhs, mulhu, memeq: ice("native-only instructions in wasm code")
+        vld, vst, vbin, vsplat, vzu, mulhs, mulhu, memeq, streq: ice("native-only instructions in wasm code")
         iconst:
             i64c(ins.imm)
             lset(d)

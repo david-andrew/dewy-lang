@@ -1518,7 +1518,7 @@ x_unary = (prefix: int, opc: int, ins: Ins, src_ty: int, dst_ty: int):
 # A bounded memory comparison, using only reserved scratch registers plus its
 # destination. Keeping this operation in IR avoids lowering a runtime loop and
 # its control-flow joins at every call site. No read crosses either byte span.
-emit_memeq = (d: int, a: int, bb: int, count: int):
+emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings: bool = false):
     if vloc[d] == LOC_NONE: return
     mask = dreg(d, R11)
     saved = vloc[d] < 0
@@ -1526,15 +1526,36 @@ emit_memeq = (d: int, a: int, bb: int, count: int):
         b(0x41); b(0x53)                       # push r11 (spilled destination)
     ld(RAX, a)
     ld(RCX, bb)
-    ld(RDX, count)
+    unequal: int[]
+    results: int[]
+    same = -1
+    nil_left = -1
+    nil_right = -1
+    if strings:
+        # Runtime strings have length at +8 and bytes at +24. Nil is empty;
+        # handle it before reading either header. The input values stay live.
+        cmp_branch_pad(9)
+        op_rr(0x39, true, RAX, RCX)
+        same = jcc32(4)
+        cmp_branch_pad(9)
+        op_rr(0x85, true, RAX, RAX)
+        nil_left = jcc32(4)
+        cmp_branch_pad(9)
+        op_rr(0x85, true, RCX, RCX)
+        nil_right = jcc32(4)
+        mov_rm(RDX, RAX, 8)
+        cmp_branch_pad(10)
+        op_rm(0x3B, true, RDX, RCX, 8)
+        unequal.push(jcc32(5))
+        lea(RAX, RAX, 24)
+        lea(RCX, RCX, 24)
+    else: ld(RDX, count)
     cmp_branch_pad(10)
     b(0x48); b(0x83); b(0xFA); b(0)            # cmp rdx, 0
     empty = jcc32(14)                          # jle: portable n <= 0 behavior
     cmp_branch_pad(10)
     b(0x48); b(0x83); b(0xFA); b(16)
     short = jcc32(12)                          # jl: fewer than 16 bytes
-    unequal: int[]
-    results: int[]
     nop_pad((16 - code.len() % 16) % 16)
     vector_loop = code.len()
     sse_rm(0xF3, 0x6F, 0, RAX, 0)             # movdqu xmm0, [a]
@@ -1588,13 +1609,36 @@ emit_memeq = (d: int, a: int, bb: int, count: int):
     load_sized(RDX, RAX, 0, 1, false)
     load_sized(RAX, RCX, 0, 1, false)
     op_rr(0x39, true, RDX, RAX)
+    if strings:
+        results.push(jmp32())
+        patch_here(nil_left)
+        rex(true, 0, 0, RCX, false)
+        b(0x83); mem(7, RCX, 8); b(0)         # cmp qword [b+8], 0
+        results.push(jmp32())
+        patch_here(nil_right)
+        rex(true, 0, 0, RAX, false)
+        b(0x83); mem(7, RAX, 8); b(0)
     loop fix in results: patch_here(fix)
+    if flags:
+        # All nonempty exits already have ZF = equality. Empty (including the
+        # portable negative-count case) must establish true before the join.
+        done = jmp32()
+        patch_here(empty)
+        if strings: patch_here(same)
+        if not saved: cmp_branch_pad(9)
+        op_rr(0x39, true, RAX, RAX)
+        patch_here(done)
+        loop fix in unequal: patch_here(fix)
+        if saved:
+            b(0x41); b(0x5B)
+        return
     setcc(4)
     done_result = jmp32()
     loop fix in unequal: patch_here(fix)
     mov_imm(RAX, 0)
     done_false = jmp32()
     patch_here(empty)
+    if strings: patch_here(same)
     mov_imm(RAX, 1)
     patch_here(done_result)
     patch_here(done_false)
@@ -1612,6 +1656,20 @@ emit_ins = (pos: int, ins: Ins):
     a = int(ins.a)
     bb = int(ins.b)
     if pos == fuse_skip: return
+    if (op == .memeq or op == .streq) and pos + 1 < ir.code.len() and v_nuse[d] == 1:
+        nx = ir.code[pos + 1]
+        if (nx.op == .if_ or nx.op == .brif) and int(nx.a) == d:
+            emit_memeq(d, a, bb, int(ins.c), true, op == .streq)
+            fused_cc = 4
+            return
+        if nx.op == .eq and int(nx.a) == d and vloc[int(nx.b)] == LOC_CONST and vcval[int(nx.b)] == 0 and pos + 2 < ir.code.len():
+            t = int(nx.dst)
+            n2 = ir.code[pos + 2]
+            if v_nuse[t] == 1 and (n2.op == .if_ or n2.op == .brif) and int(n2.a) == t:
+                emit_memeq(d, a, bb, int(ins.c), true, op == .streq)
+                fused_cc = 5
+                fuse_skip = pos + 1
+                return
     if is_icmp(op) or is_fcmp(op):
         # fuse with a following if/brif that is the only user
         if pos + 1 < ir.code.len() and v_nuse[d] == 1:
@@ -1979,8 +2037,8 @@ emit_ins = (pos: int, ins: Ins):
             if target_windows and lf_is_cabi(int(ins.imm)): cabi_fix.push((code.len() - 4, int(ins.imm)))
             else: call_fix.push((code.len() - 4, int(ins.imm)))
             st(d, r)
-        memeq:
-            emit_memeq(d, a, bb, int(ins.c))
+        memeq, streq:
+            emit_memeq(d, a, bb, int(ins.c), false, op == .streq)
         copy:
             size = int(ins.imm)
             if size <= INLINE_COPY:

@@ -3619,6 +3619,9 @@ return if text =? "result 42" 42 else 1}''',
 4] return xs[0]+xs[1]+xs[2]}''',
     'calls': 'add=(a:int64 b:int64):>int64=>a+b\nmain=():>int64=>add(20 22)',
     'inferred-function': 'twice=(x)=>x*2\nmain=()=>twice(21)',
+    'optimizer-private-string-equality': '''__str_eq=(a:string b:string):>bool=>false
+main=()=>{if __str_eq("same" "same") return 1
+return if "same" =? "same" and "a" not=? "b" 42 else 2}''',
     'optimizer-select-arithmetic': """choose=(x:int64):>int64=>if x%2 =? 0 x//2 else 3*x+1
 main=()=>{let total:int64=0
 loop x in [0..100) total+=choose(x)
@@ -10651,3 +10654,103 @@ def test_core_memory_equality_live_results(compiler, tmp_path, release):
         assembly = assert_x64_compare_branch_layout(objdump, binary, 'probe')
         assert 'pcmpeqb' in assembly, assembly
         assert any('push' in line and '%r11' in line for line in assembly.splitlines()), assembly
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_core_memory_equality_branches(compiler, tmp_path, release):
+    source = tmp_path / 'branches.jo'
+    source.write_text("""@noinline
+identity = (x: int) -> int: x
+@noinline
+positive = (a: *u8, b: *u8, n: int) -> int:
+    result = 0
+    loop _ in [0..2):
+        if __mem_eq(a, b, n): result += identity(17)
+        else: result += identity(42)
+    result / 2
+@noinline
+negative = (a: *u8, b: *u8, n: int) -> int:
+    result = 0
+    loop _ in [0..2):
+        if not __mem_eq(a, b, n): result += identity(29)
+        else: result += identity(31)
+    result / 2
+main = () -> int:
+    a = fill(u8(7), 64)
+    b = fill(u8(7), 64)
+    loop n in [-3, 0, 1, 2, 4, 8, 16, 31, 32, 63, 64]:
+        if positive(data(a), data(b), n) != 17: return 1
+        if negative(data(a), data(b), n) != 31: return 2
+    b[17] = 8
+    loop n in [18, 31, 32, 63, 64]:
+        if positive(data(a), data(b), n) != 42: return 3
+        if negative(data(a), data(b), n) != 29: return 4
+    if positive(data(a), data(b), 17) != 17: return 5
+    42
+""")
+    binary = tmp_path / 'branches'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+    objdump = shutil.which('objdump')
+    if platform.system() == 'Linux' and platform.machine().lower() in ('x86_64', 'amd64') and objdump:
+        for symbol in ['positive', 'negative']:
+            assembly = assert_x64_compare_branch_layout(objdump, binary, symbol)
+            assert 'pcmpeqb' in assembly, assembly
+            assert not re.search(r'\bset(?:e|ne)\b', assembly), assembly
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_core_string_equality_guard_pages(compiler, tmp_path, release):
+    if platform.system() != 'Linux' or platform.machine().lower() not in ('x86_64', 'amd64'):
+        pytest.skip('guard-page syscalls require x86-64 Linux')
+    source = tmp_path / 'string-guard.jo'
+    # Immortal headers keep the test's mappings outside refcount ownership.
+    # An unequal length must return before touching an inaccessible payload.
+    source.write_text('''main = () -> int:
+    aa = syscall(9, 0, 8192, 3, 0x22, -1, 0)
+    bb = syscall(9, 0, 8192, 3, 0x22, -1, 0)
+    if aa < 0 or bb < 0: return 3
+    if syscall(10, aa + 4096, 4096, 0) != 0: return 4
+    if syscall(10, bb + 4096, 4096, 0) != 0: return 5
+    nil_: str
+    loop n in [0..129):
+        loop offset in [0..8):
+            a = (aa + 4096 - n - 24) as *u8
+            b = (bb + 4096 - n - 24 - offset) as *u8
+            (a as *int)[0] = 0
+            (b as *int)[0] = 0
+            (a as *int)[1] = n
+            (b as *int)[1] = n
+            (a as *int)[2] = n
+            (b as *int)[2] = n
+            loop i in [0..n):
+                a[24 + i] = u8((i * 13 + n) % 256)
+                b[24 + i] = a[24 + i]
+            if not __str_eq(a as str, b as str): return 6
+            if not __str_eq(a as str, a as str): return 7
+            if __str_eq(a as str, nil_) != (n == 0): return 8
+            if __str_eq(nil_, b as str) != (n == 0): return 9
+            (b as *int)[1] = n + 1
+            if __str_eq(a as str, b as str): return 10
+            (b as *int)[1] = n
+            loop i in [0..n):
+                b[24 + i] = b[24 + i] xor u8(128)
+                if __str_eq(a as str, b as str): return 11
+                b[24 + i] = b[24 + i] xor u8(128)
+    if syscall(11, aa, 8192) != 0: return 12
+    if syscall(11, bb, 8192) != 0: return 13
+    42
+''')
+    binary = tmp_path / 'string-guard'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, ran.stdout + ran.stderr

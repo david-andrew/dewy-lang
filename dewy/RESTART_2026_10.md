@@ -971,6 +971,39 @@ release optimization. The [experiment audit](audits/2026-10-18/frontend-storage-
 preserves patches, raw timing and instruction measurements for those rejected
 approaches.
 
+## Native string equality
+
+Bounded native comparison now covers the complete private string-equality
+operation. It checks pointer identity, nil/allocated-empty
+equivalence and unequal lengths before reading payload bytes. The native
+operation shares the bounded SSE2 and short-tail implementation. Other targets
+and debug builds retain the portable library body. Default inlining keeps its
+existing policy; release inlining charges the operation for the previous
+helper's expanded size.
+
+Single-use comparisons can feed native branches directly through their flags.
+A small cleanup removes redundant single-instruction blocks left by inlining,
+which otherwise separate the comparison from its consumer. The branch-only
+prototype showed no meaningful application improvement; including the string
+operation removes the larger null/length/result joins and produces the gain.
+
+The independent C bootstrap passes 266 quick checks. The full suite passes
+**5,887 checks in 211.67 seconds**, including native/web behavior, explicit
+function-name shadowing, register spills and guard pages. The added string
+checks cover every mismatch position, relative alignment, nil values, allocated
+empty values and unequal lengths whose payload would cross an inaccessible
+page. A nine-pair pilot of the independently rebuilt compiler measures runtime
+ratios of **0.820 default and 0.728 release** against the match-lookup stage.
+The full stage gate and focused rechecks pass all **40** comparisons against
+both the fixed reference and preceding match-lookup stage. All samples are
+retained: compilation has 23 pairs, runtime has 23–77 depending on the required
+rechecks. Against the preceding stage, string equality takes **0.793× default
+and 0.709× release CPU time**. Release remains about **1.17× C** on this kernel.
+The initial fresh-build rate is about **82k root lines/CPU-second** on this busy
+host; the 250k target remains unmet. Absolute rates across different host loads
+are not speedup measurements.
+[Raw measurements, compiler identities and validation](audits/2026-10-18/native-string-equality.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

@@ -24,7 +24,7 @@ fast_by_index: int[]
 fast_inlinable = (f: IrFn) -> bool:
     if f.cabi or f.noinline or len(f.export_name) > 0 or f.code.len() > 24 or f.slot_size.len() > 0: return false
     loop ins in f.code:
-        if ins.op == .call or ins.op == .calli or ins.op == .callc or ins.op == .syscall or ins.op == .intr or ins.op == .loop: return false
+        if ins.op == .call or ins.op == .calli or ins.op == .callc or ins.op == .syscall or ins.op == .intr or ins.op == .loop or ins.op == .streq: return false
     true
 
 fast_inline_prepare = (fs: IrFn[]):
@@ -74,6 +74,10 @@ inlinable = (f: IrFn) -> int:
     size = f.code.len()
     loop ins in f.code:
         if ins.op == .loop: has_loop = true
+        if ins.op == .streq:
+            # Match the existing string helper plus its bounded comparison.
+            size += 81
+            has_loop = true
         if ins.op == .memeq:
             # A variable-length comparison expands to several size cases and
             # a vector loop. Charge it as a substantial body, not one scalar

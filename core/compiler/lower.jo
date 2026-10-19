@@ -5666,12 +5666,17 @@ lower_inst = (lf: int, f: int):
         locals[l].offset = -1
     ir.nparams = ir.vtypes.len()
     ir.ret = ret_vt(cur_ret)
-    if f == runtime_memeq and not target_arm64 and not target_wasm and not dbg_on:
+    if (f == runtime_memeq or f == runtime_streq) and not target_arm64 and not target_wasm and not dbg_on:
         # Ordinary scalar body remains available to the bootstrap, debugger and
-        # other targets. This exact runtime instance has two pointers and a byte count.
+        # other targets. Select only the exact private runtime instances.
         ir.raw_mem = true
         result = vreg(VI)
-        emit(.memeq, VI, result, 0, 1, 2, 0)
+        operation = Op.memeq
+        count = 2
+        if f == runtime_streq:
+            operation = .streq
+            count = 0
+        emit(operation, VI, result, 0, 1, count, 0)
         e_ret(result)
         return
     # (called from C, whose callers leave the upper bits of narrow integers undefined: made

@@ -3557,6 +3557,7 @@ check_build_block = ():
 
 # ---------------- program ----------------
 runtime_memeq = -1            # private bounded memory comparison, native lowering
+runtime_streq = -1            # private string equality, including nil/empty values
 want_cpu_flag = false           # (x86-64 builds: the vectorizer may use __cpu_avx2)
 want_loop_watch = false         # (debug web builds: loops count down to __loop_watchdog)
 watch_build = false             # (built for `sloppy watch`: WATCH is true in the program)
@@ -4117,6 +4118,7 @@ check_program = (main_path: str):
             if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and not fn_sig(d).generic: get_fn_inst(d, [], nodes[d].pos)
     loop nm in runtime_names: runtime_fn(nm)
     runtime_memeq = runtime_fn("__mem_eq")
+    runtime_streq = runtime_fn("__str_eq")
     loop nm in optional_runtime:
         if prelude.get(intern(nm)) != none: runtime_fn(nm)
     # (@cabi functions set __c_threads: lib/core/rt.jo)

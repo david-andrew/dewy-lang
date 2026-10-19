@@ -69,7 +69,7 @@ o_pure = (op: Op) -> bool:
         fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc: true
         feq, fne, flt, fle, fgt, fge: true
         sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits: true
-        vld, vbin, vsplat, memeq: true
+        vld, vbin, vsplat, memeq, streq: true
         _: false
 
 o_resize = (n: int):
@@ -523,7 +523,7 @@ o_emit = (ins0: Ins):
         else if kills_memory(op) and not (op == .call and ins.c == 1): kill_all()
     # Record the boolean result without making raw-memory reads available
     # expressions: subsequent stores must still perform a new comparison.
-    if op == .memeq and stable(int(ins.dst)): o_dop[int(ins.dst)] = i32(int(op))
+    if (op == .memeq or op == .streq) and stable(int(ins.dst)): o_dop[int(ins.dst)] = i32(int(op))
     o_push(ins)
 
 # Only single-definition values have facts. Direct indexing avoids hashing the
@@ -593,7 +593,7 @@ o_simplify = (ins0: Ins, pos: int):
         return
     # The bounded memory comparison already produces a canonical boolean.
     # Inlined bool returns otherwise carry an unnecessary ABI byte extension.
-    if op == .zext8 and stable(a) and o_dop[a] == i32(int(Op.memeq)):
+    if op == .zext8 and stable(a) and (o_dop[a] == i32(int(Op.memeq)) or o_dop[a] == i32(int(Op.streq))):
         o_simplify(Ins(.mov, VI, i32(d), i32(a), 0, 0, 0), pos)
         return
     # unary integer ops
@@ -1503,6 +1503,16 @@ o_cleanup = (code: Ins[]) -> Ins[]:
                 continue
             last = out[out.len() - 1]
             if last.op == .br and last.imm == 0 and kinds[kinds.len() - 1] != .loop: out.pop()
+            # Inlining a leaf can leave `block; value; end` after its final
+            # branch is removed. A single pure instruction cannot target this
+            # block; removing the wrapper exposes adjacent compare/branch pairs.
+            if kinds[kinds.len() - 1] == .block and out.len() == starts[starts.len() - 1] + 2 and o_pure(out[out.len() - 1].op):
+                value = out.pop()
+                out[out.len() - 1] = value
+                kinds.pop()
+                starts.pop()
+                exits.pop()
+                continue
             # `if c { br d }` is `brif c, d - 1` (one branch instead of two)
             if out.len() >= 2 and kinds[kinds.len() - 1] == .if_:
                 last = out[out.len() - 1]
@@ -1608,7 +1618,7 @@ o_negate = (op: Op) -> Op:
 # instructions whose result register may be renamed
 o_retargetable = (op: Op) -> bool:
     match op:
-        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, neg, not_, load, mov, mulhs, mulhu, memeq: true
+        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, neg, not_, load, mov, mulhs, mulhu, memeq, streq: true
         eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
         fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc: true
         sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits, fconst, iconst: true
