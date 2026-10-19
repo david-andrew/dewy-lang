@@ -1,4 +1,4 @@
-"""Chain unchanged runtime artifacts to an already accepted performance stage.
+"""Chain unchanged runtime artifacts to accepted per-workload comparisons.
 
 This supplies code-equivalence evidence, never samples or fresh C speed ratios.
 Compiler latency is still measured; every runtime binary still gets boundary
@@ -23,9 +23,11 @@ class RuntimeCertificate:
         stage = document.get('stage_measurement', document.get('initial_stage_measurement', document))
         assessment = document.get('final_assessment', stage.get('assessment', {}))
         comparisons = assessment.get('comparisons', {})
-        if stage.get('status') != 'complete' or not assessment.get('no_regression') or not comparisons or any(
-                row.get('status') != 'pass' for row in comparisons.values()):
-            raise ValueError('The previous runtime report must be an accepted stage')
+        # Compilation uncertainty or an unrelated kernel does not invalidate
+        # an independently passing runtime comparison. prove() still requires
+        # acceptance against the fixed reference for both modes of this kernel.
+        if stage.get('status') != 'complete' or not comparisons:
+            raise ValueError('The previous runtime report must be complete and assessed')
         previous = identities.get('previous')
         if previous is None or stage.get('toolchains', {}).get('candidate') != previous:
             raise ValueError('The previous report does not identify the supplied previous toolchain')
@@ -65,7 +67,7 @@ class RuntimeCertificate:
             if not equivalent_canonical_artifact(previous, accepted_artifact):
                 return None
             canonical[mode] = previous['canonical_sha256']
-        return {'evidence': 'candidate matches the previous artifact; that artifact matches the accepted stage '
+        return {'evidence': 'candidate matches the previous artifact; that artifact matches accepted runtime comparisons '
                             'after masking equal-width bundle/input paths, with identical workload and harness sources',
                 'previous_report_sha256': self.report_sha256,
                 'accepted_artifact_canonical_sha256': canonical}

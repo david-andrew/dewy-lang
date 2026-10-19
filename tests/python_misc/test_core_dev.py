@@ -723,17 +723,15 @@ def test_core_runtime_certificate_requires_matching_inputs_and_binaries(runtime_
     assert certificate.prove('kernel', current, workload) is None
 
 
-@pytest.mark.parametrize('change', ['incomplete', 'not-accepted', 'failed-comparison', 'previous-toolchain', 'fixed-reference'])
+@pytest.mark.parametrize('change', ['incomplete', 'unassessed', 'previous-toolchain', 'fixed-reference'])
 def test_core_runtime_certificate_rejects_invalid_previous_stage(runtime_certificate, change):
     from tools.sloppy_core.runtime_certificate import RuntimeCertificate
 
     _, _, _, document, path, identities = runtime_certificate
     if change == 'incomplete':
         document['stage_measurement']['status'] = 'incomplete'
-    elif change == 'not-accepted':
-        document['final_assessment']['no_regression'] = False
-    elif change == 'failed-comparison':
-        document['final_assessment']['comparisons']['runtime/kernel/default/reference']['status'] = 'inconclusive'
+    elif change == 'unassessed':
+        document['final_assessment']['comparisons'] = {}
     elif change == 'previous-toolchain':
         document['stage_measurement']['toolchains']['candidate'] = {'binary_sha256': 'wrong'}
     else:
@@ -741,6 +739,35 @@ def test_core_runtime_certificate_rejects_invalid_previous_stage(runtime_certifi
     path.write_text(json.dumps(document))
     with pytest.raises(ValueError):
         RuntimeCertificate(path, identities)
+
+
+@pytest.mark.parametrize('status', ['inconclusive', 'regression'])
+@pytest.mark.parametrize('comparison', ['compile/throughput-default/reference',
+                                       'runtime/other/default/reference'])
+def test_core_runtime_certificate_keeps_independent_acceptance(runtime_certificate, status, comparison):
+    from tools.sloppy_core.runtime_certificate import RuntimeCertificate
+
+    _, current, workload, document, path, identities = runtime_certificate
+    document['final_assessment']['no_regression'] = False
+    document['final_assessment']['comparisons'][comparison] = {'status': status}
+    path.write_text(json.dumps(document))
+    certificate = RuntimeCertificate(path, identities)
+    assert certificate.prove('kernel', current, workload) is not None
+    assert certificate.prove('other', current, workload) is None
+    assert not document['final_assessment']['no_regression']
+
+
+@pytest.mark.parametrize('status', ['inconclusive', 'regression'])
+@pytest.mark.parametrize('mode', ['default', 'release'])
+def test_core_runtime_certificate_cannot_reuse_unaccepted_kernel(runtime_certificate, status, mode):
+    from tools.sloppy_core.runtime_certificate import RuntimeCertificate
+
+    _, current, workload, document, path, identities = runtime_certificate
+    document['final_assessment']['no_regression'] = False
+    document['final_assessment']['comparisons'][f'runtime/kernel/{mode}/reference']['status'] = status
+    path.write_text(json.dumps(document))
+    certificate = RuntimeCertificate(path, identities)
+    assert certificate.prove('kernel', current, workload) is None
 
 
 @pytest.mark.parametrize('bad', ['version', 'opcode', 'threads'])

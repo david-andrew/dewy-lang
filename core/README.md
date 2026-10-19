@@ -161,9 +161,13 @@ gets `status: complete`; this means the run finished, not that performance passe
 Check `assessment.no_regression` and the separate target results. Checkpoints are
 replaced atomically and do not automatically resume or reuse earlier timings.
 
-For a compiler-only change, `--previous-report /path/to/accepted-stage.json`
+For a compiler-only change, `--previous-report /path/to/completed-stage.json`
 can avoid repeatedly timing unchanged generated programs. It requires an
-accepted report for the exact previous compiler and fixed reference, matching
+assessed, complete report for the exact previous compiler and fixed reference,
+with passing runtime comparisons against that reference for both modes of the
+specific workload. An inconclusive compiler comparison or a different kernel's
+failure does not discard this independent evidence or accept the whole stage.
+It also requires matching
 workload/harness hashes, input sizes and build flags, and matching artifacts in
 both build modes. Across runs, only equal-width input-directory and compiler
 bundle path prefixes embedded in source locations may be masked; all other
