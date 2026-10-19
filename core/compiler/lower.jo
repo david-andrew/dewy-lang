@@ -6888,6 +6888,12 @@ lower_extern_thunk = (lf: int, f: int):
     cps: int[]
     loop i in 0.. and t in fns[f].ptypes:
         if tkind(t) == .str_: cps.push(e_call(rt("__c_str"), [ps[i]], VI))
+        else if fns[f].cvariadic > 0 and i >= int(fns[f].cvariadic) - 1 and vt_of(t) == VS:
+            # C promotes variadic floats to double. Fixed f32 parameters keep
+            # their declared type; narrow integers already use extended registers.
+            d = vreg(VF)
+            emit(.f2f, VF, d, ps[i], 0, 0, 0)
+            cps.push(d)
         else: cps.push(ps[i])
     ret = int(fns[f].ret)
     if vc(ret) == VC_AGG: fatal(nodes[int(fns[f].decl)].pos, "C functions can only return scalars or pointers")

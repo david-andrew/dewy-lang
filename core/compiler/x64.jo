@@ -2333,7 +2333,16 @@ emit_ins = (pos: int, ins: Ins):
             store_result(ins)
         calli, callc:
             if op == .callc and target_windows: emit_call_args_win64(a, bb, int(ins.c), R11)
-            else: emit_call_args(a, bb, int(ins.c), R11)
+            else:
+                emit_call_args(a, bb, int(ins.c), R11)
+                # System V variadic calls report their vector-register count
+                # in al, including fixed floating parameters (at most eight).
+                if op == .callc and ins.imm > 0:
+                    nvec = 0
+                    loop k in [0..bb):
+                        if vtype(int(ir.args[a + k])) != VI: nvec += 1
+                    b(0xB8)                       # mov eax, nvec
+                    b32(min(nvec, 8))
             b(0x41); b(0xFF); b(0xD3)     # call r11
             call_site(ins)
             pop_call_stack()

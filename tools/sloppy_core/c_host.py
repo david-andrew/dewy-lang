@@ -170,6 +170,10 @@ def translate(source: Path, out: Path) -> dict:
                     expr = f'{symbol(byidx[imm])}({vs})'
                 elif op in ('calli', 'callc'):
                     ts = ','.join((types[vt[x]] for x in av)) or 'void'
+                    if op == 'callc' and imm > 0:
+                        if imm == 1:
+                            raise ValueError('Compiler-host C translation requires a named variadic parameter')
+                        ts = ','.join([*(types[vt[x]] for x in av[:imm - 1]), '...'])
                     expr = f'(({types[ty]} (*)({ts})){v(c)})({vs})'
                 elif op == 'syscall':
                     expr = 'sc(' + ','.join(values + ['0'] * (7 - len(values))) + ')'

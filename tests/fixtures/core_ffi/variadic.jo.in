@@ -1,0 +1,14 @@
+@lib(LIBRARY)
+@variadic(2)
+extern check_mix = (fixed: f32, tag: int, a: f32, b: f64, c: i8, d: u8) -> int
+@lib(LIBRARY)
+@variadic(1)
+extern check_many = (tag: int, a: f32, b: f64, c: f32, d: f64, e: f32, f: f64, g: f32, h: f64, i: f32, j: f64) -> int
+@lib(LIBRARY)
+@variadic(1)
+extern check_empty = (tag: int) -> int
+run_probe = () -> int:
+    if check_empty(42) != 42: return 3
+    if check_mix(2.5, 7, 1.25, 3.75, -7, 250) != 42: return 1
+    if check_many(10, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0) != 42: return 2
+    42
