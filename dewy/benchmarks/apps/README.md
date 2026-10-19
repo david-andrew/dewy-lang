@@ -43,6 +43,11 @@ protects loop bounds-check elimination and vectorization without replacing any
 existing workload. The standard runner uses C `-O2`; separate experiments with
 C `-O3 -march=native` must identify those flags explicitly.
 
+`branch_dispatch` complements the constant-result `match_dispatch` lookup with
+24 computed arms and a varying operand. It exercises actual branch dispatch,
+including default cases, over ten million iterations. The expected checksum at
+1,000 iterations is 517766884; Dewy and C perform the same integer operations.
+
 ## Semantics matched and differences recorded
 
 - Arithmetic is 64-bit signed integers in both languages; every division and

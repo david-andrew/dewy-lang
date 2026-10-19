@@ -1,0 +1,48 @@
+# Dense dispatch whose arms compute with a changing operand.
+# Unlike match_dispatch, this cannot become a constant-result lookup.
+from p"harness.dewy" import size_argument, clock
+
+dispatch=(code:int64 value:int64):>int64=>match code {
+    <0>=>value+3
+    <1>=>value xor 10
+    <2>=>value*17
+    <3>=>(value>>1)+24
+    <4>=>value+31
+    <5>=>value xor 38
+    <6>=>value*45
+    <7>=>(value>>2)+52
+    <8>=>value+59
+    <9>=>value xor 66
+    <10>=>value*73
+    <11>=>(value>>3)+80
+    <12>=>value+87
+    <13>=>value xor 94
+    <14>=>value*101
+    <15>=>(value>>1)+108
+    <16>=>value+115
+    <17>=>value xor 122
+    <18>=>value*129
+    <19>=>(value>>2)+136
+    <20>=>value+143
+    <21>=>value xor 150
+    <22>=>value*157
+    <23>=>(value>>3)+164
+    _=>value-17
+}
+
+kernel=(count:int64):>int64=>{
+    let state:int64=305419896
+    let checksum:int64=0
+    loop i in [0..count) {
+        state=(state*1664525+1013904223)&2147483647
+        checksum+=dispatch((state>>16)&31 state&65535)
+    }
+    return checksum
+}
+main=(args:array<string>):>int64=>{
+    let count=size_argument(args 10000000)
+    let started=clock()
+    let result=kernel(count)
+    printl"{result} {clock()-started}"
+    return 0
+}

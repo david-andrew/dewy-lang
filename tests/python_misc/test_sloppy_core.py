@@ -11747,3 +11747,82 @@ main = () -> int:
     assert built.returncode == 0, built.stdout + built.stderr
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
     assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('mode', ['default', 'release', 'debug'])
+def test_core_branch_table_control_flow(compiler, tmp_path, mode):
+    keys = [-(1 << 63), -100, *range(-5, 11), (1 << 63)-1]
+    source = tmp_path / 'branch-tables.jo'
+    source.write_text('''@noinline
+dispatch_probe = (key: int, salt: int) -> int:
+    total = 17
+    loop round in [0..3):
+        match key:
+            -3: total += salt + round
+            -2, 0: total = total xor (salt * 3 + round)
+            1: total -= salt - round
+            4, 5: total *= 2
+            7:
+                if round == 1: continue
+                total += 7
+            8: break
+            _: total += 11
+        total += 1
+    match key:
+        -3: total += salt
+        -2: total -= salt
+        0, 1: total = total xor salt
+        4, 5, 7: total += salt * 2
+        8: total *= salt
+        _: total -= salt * 2
+    total
+main = ():
+    loop key in [''' + ', '.join(map(str, keys)) + ''']:
+        print(dispatch_probe(key, 7))
+''')
+    expected = []
+    for key in keys:
+        total = 17
+        for iteration in range(3):
+            if key == -3:
+                total += 7 + iteration
+            elif key in (-2, 0):
+                total ^= 21 + iteration
+            elif key == 1:
+                total -= 7 - iteration
+            elif key in (4, 5):
+                total *= 2
+            elif key == 7:
+                if iteration == 1:
+                    continue
+                total += 7
+            elif key == 8:
+                break
+            else:
+                total += 11
+            total += 1
+        if key == -3:
+            total += 7
+        elif key == -2:
+            total -= 7
+        elif key in (0, 1):
+            total ^= 7
+        elif key in (4, 5, 7):
+            total += 14
+        elif key == 8:
+            total *= 7
+        else:
+            total -= 14
+        expected.append(str(total))
+    binary = tmp_path / 'branch-tables'
+    flags = {'default': [], 'release': ['--release'], 'debug': ['-g']}[mode]
+    built = subprocess.run([compiler, 'build', source, '--ir', *flags, '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_dispatch_probe_.*?(?=^fn |\Z)',
+                      built.stdout + built.stderr, re.M | re.S)
+    assert probe and probe[0].count('brtable') >= 2, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == expected

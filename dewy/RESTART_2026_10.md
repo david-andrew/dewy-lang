@@ -1462,6 +1462,23 @@ One concrete difference is dispatch: the native emitter jumps into a table of
 jump instructions, whereas C optimization uses compact address tables and bit
 tests. That gives the next native-backend experiment a measured motivation.
 
+## Deferred relative branch tables
+
+Two native table layouts were tested after the code-quality probe. Entry-relative
+32-bit offsets reduced table size but regressed a computed-arm dispatch kernel:
+**1.054×** previous CPU time in default and **1.046×** in release. A simpler
+base-relative layout removed one address calculation but still showed no gain:
+**1.022×** and **1.009×**, both inconclusive. Compiler changes are reverted.
+Both variants passed independent C bootstrap and quick checks (384 and 387).
+No full suite or stage gate was run for these unsuccessful pilots.
+
+The new `branch_dispatch` benchmark remains: existing `match_dispatch` becomes a
+constant-result lookup and does not exercise branch tables. Three retained tests
+cover holes, duplicate targets, extreme keys, multiple tables and loop exits in
+default/release/debug; they also pass on the accepted compiler. The stage now
+covers eleven runtime kernels, or **56** fixed/previous comparisons including
+compilation. [Patches and samples](audits/2026-10-19/relative-table-experiments.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

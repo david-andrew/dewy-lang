@@ -20,10 +20,10 @@ from tools.sloppy_core.benchmark_compile import positive, sample_order
 ROOT = Path(__file__).resolve().parents[2]
 APPS = ROOT / 'dewy/benchmarks/apps'
 COUNTS = {'helpers': 2000000, 'arrays': 10000000, 'records': 1000000,
-          'text': 10000000, 'graph': 1000000, 'string_equal': 10000000, 'match_dispatch': 10000000,
+          'text': 10000000, 'graph': 1000000, 'string_equal': 10000000, 'match_dispatch': 10000000, 'branch_dispatch': 10000000,
           'managed_params': 10000000, 'method_params': 10000000, 'shifted_arrays': 100000}
 CHECKSUMS_1000 = {'helpers': 985290002, 'arrays': 876830114, 'records': 649125068,
-                  'text': 681360428, 'graph': 740553269, 'string_equal': 171284, 'match_dispatch': 29443,
+                  'text': 681360428, 'graph': 740553269, 'string_equal': 171284, 'match_dispatch': 29443, 'branch_dispatch': 517766884,
                   'managed_params': 250508, 'method_params': 250508, 'shifted_arrays': 2100736000}
 
 
