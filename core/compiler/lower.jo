@@ -1492,7 +1492,7 @@ gen_direct_call = (f: int, args: int[], order: int[] = []) -> Val:
     copy_back(mark)
     finish_call(ret, rv, rslot)
 
-gen_closure_call = (callee: int, args: int[]) -> Val:
+gen_closure_call = (callee: int, args: int[], order: int[] = []) -> Val:
     ft = prune(ntype(callee))
     ret = int(types[ft].elem)
     target = -1
@@ -1541,7 +1541,7 @@ gen_closure_call = (callee: int, args: int[]) -> Val:
     pts: int[]
     loop i in [0..int(types[ft].nargs)): pts.push(targ(ft, i))
     mark = copy_backs.len()
-    call_args(args, pts, int(types[ft].mutmask), argv)
+    call_args(args, pts, int(types[ft].mutmask), argv, order = order)
     rv = if target >= 0: e_call(lf_of_inst(target), argv, ret_vt(ret)) else: e_calli(fp, argv, ret_vt(ret), false)
     copy_back(mark)
     finish_call(ret, rv, rslot)
@@ -3291,7 +3291,9 @@ gen_expr = (e: int) -> Val:
             if vc(t) == VC_VOID: return V(-1, false)
             return r
         if aux == 1:
-            r = gen_closure_call(int(nodes[e].a), kids(e))
+            order: int[]
+            if nodes[e].c != 0: order = call_eval_order(e)
+            r = gen_closure_call(int(nodes[e].a), kids(e), order)
             if vc(t) == VC_VOID: return V(-1, false)
             return r
         if aux == 4: return gen_cfn_call(int(nodes[e].a), kids(e))

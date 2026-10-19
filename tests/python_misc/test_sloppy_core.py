@@ -24,6 +24,7 @@ from tools.sloppy_core.benchmark_types import record_source
 
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
+    'named-value-order', 'named-value-mutable',
     'partial-operator-arithmetic', 'partial-operator-private-capture',
     'conversion-transmute-bit-roundtrip',
     'optimizer-text-case-values',
@@ -69,6 +70,22 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'named-value-unpacked': 'sum_pair=([left right]:array<int64>)=>left+right\nmain=()=>{let original=sum_pair let renamed:((items:array<int64>):>int64)=original\nreturn if original([20 22])=?42 and renamed(items=[20 22])=?42 42 else 1}',
+    'named-value-unnamed-tail': 'main=()=>{let f=(left:int64 _:int64)=>left\nreturn f(left=42 0)}',
+    'named-value-nested-context': 'Apply:type=(left:int64):>int64\nOuter:type=(callback:Apply):>int64\nmain=()=>{let f=(callback:((value:int64):>int64))=>callback(value=42)\nlet g:Outer=f return g(callback=(x)=>x)}',
+    'named-value-return-context': 'factory=():>((amount:int64):>int64)=>(value)=>value*2\nmain=()=>{let f=factory() return f(amount=21)}',
+    'named-value-shared-capture': 'main=()=>{let count=0 let f=($capture @count amount:int64)=>{count+=amount; count}\nlet g=f f(amount=20) return g(amount=22)}',
+    'named-value-const-capture': 'main=()=>{let count=0 const f=(amount:int64)=>{count+=amount; count}\nreturn if f(amount=20)=?20 and f(amount=22)=?22 42 else 1}',
+    'named-value-basic': 'sum_named_values=(left:int64 right:int64)=>left+right\nmain=()=>{let f=sum_named_values return f(right=22 left=20)}',
+    'named-value-context': 'Apply:type=(left:int64 right:int64):>int64\nsum_named_values=(a:int64 b:int64)=>a+b\nmain=()=>{let original=sum_named_values let renamed:Apply=original\nlet inline:Apply=(x y)=>x+y\nreturn if original(b=22 a=20)=?42 and renamed(right=22 left=20)=?42 and inline(right=2 left=40)=?42 42 else 1}',
+    'named-value-order': 'let trace:int64=0\nmark=(tag:int64 value:int64)=>{trace=trace*10+tag; value}\nmake=()=>{trace=trace*10+1; (left:int64 right:int64)=>left+right}\nmain=()=>{let answer=make()(right=mark(2 22) left=mark(3 20))\nreturn if answer=?42 and trace=?123 42 else 1}',
+    'named-value-mutable': 'update_named_values=(@left:int64 @right:int64 amount:int64)=>{left+=amount right+=left}\nmain=()=>{let f=update_named_values let x=10 let y=20\nf(right=@y amount=2 left=@x)\nreturn if x=?12 and y=?32 42 else 1}',
+    'named-value-stateful-copy': 'main=()=>{let count=0\nlet a=(amount:int64)=>{count+=amount; count}\nlet b=a\nreturn if a(amount=20)=?20 and b(amount=22)=?22 and a(amount=1)=?21 42 else 1}',
+    'named-value-generic': 'sum_named_values=<T>(a:T b:T):>T=>a+b\nrun=<T>(f:((left:T right:T):>T) x:T y:T):>T=>f(right=y left=x)\nmain=()=>{let f=sum_named_values<int64> return if f(b=22 a=20)=?42 and run<int64>(f 20 22)=?42 42 else 1}',
+    'named-value-member': 'Options:type=[run:((amount:int64):>int64)]\nmain=()=>{let options=Options[(x)=>x*2]\nlet saved=[options.run] return if options.run(amount=21)=?42 and saved[0](amount=21)=?42 42 else 1}',
+    'named-value-partial-operator': 'main=()=>{let f:((value:int64):>int64)=(*2) return f(value=21)}',
+    'named-value-unnamed-slot': 'main=()=>{let f=(_:int64 right:int64)=>right\nreturn f(right=42 0)}',
+    'named-value-managed-order': 'let trace:int64=0\nmark=(tag:int64 value:array<int64>)=>{trace=trace*10+tag; value}\nsum_named_arrays=(left:array<int64> right:array<int64>)=>left[0]+right[0]\nmain=()=>{let f=sum_named_arrays let a=[20] let b=[22]\nlet answer=f(right=mark(1 b) left=mark(2 a))\nreturn if answer=?42 and trace=?12 and a[0]=?20 and b[0]=?22 42 else 1}',
     'partial-operator-named-argument': 'apply=(f:((value:int64):>int64) value:int64)=>f(value)\nmain=()=>apply(value=21 f=(*2))',
     'partial-operator-type-query': 'apply=(f:((value:int64|none):>bool) value:int64|none)=>f(value)\nmain=()=>{if not apply((is?int64)42) or apply((isnt?int64)42) return 1\nreturn if apply((isnt?int64)none) 42 else 2}',
     'partial-operator-interpolation': 'apply=(f:((value:int64):>int64) value:int64)=>f(value)\nmain=()=>{let text="answer={apply((*2)21)}" return if text=?"answer=42" 42 else 1}',
@@ -5803,6 +5820,11 @@ loop x in [10 20 12] and i in 0.. {if i =? 1 continue sum+=x} return sum+20}''',
 loop i in 0.. and i <? 3 {loop j in 0.. and j <? 2 {sum+=7}} return sum}''',
 }
 ERRORS = {
+    'named-value-type-default': ('Apply:type=(value:int64=42):>int64\nmain=()=>{let f:Apply=(x)=>x return f()}', 'defaults in a function type'),
+    'named-value-unknown': ('sum_named_values=(left:int64 right:int64)=>left+right\nmain=()=>{let f=sum_named_values return f(wrong=20 right=22)}', "no parameter named 'wrong'"),
+    'named-value-duplicate': ('sum_named_values=(left:int64 right:int64)=>left+right\nmain=()=>{let f=sum_named_values return f(left=20 left=22)}', 'given twice'),
+    'named-value-missing': ('sum_named_values=(left:int64 right:int64)=>left+right\nmain=()=>{let f=sum_named_values return f(right=22)}', 'expects 2 argument'),
+    'named-value-duplicate-type-label': ('Apply:type=(value:int64 value:int64):>int64\nmain=()=>{let f:Apply=(x y)=>x+y return f(20 22)}', 'duplicate callable parameter name'),
     'partial-operator-missing-context': ('main=()=>{let f=(*2) return 42}', 'partial operator needs a function type'),
     'partial-operator-missing-operand': ('main=()=>{let f=(* +); return 42}', 'expected an expression'),
     'conversion-transmute-integer-width': ('main=()=>{let x:uint32=42 return x transmute uint64}', 'transmute needs integer or float values of equal width'),

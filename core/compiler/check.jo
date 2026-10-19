@@ -1024,7 +1024,12 @@ resolve_type = (tn: int) -> int:
         ret = T_VOID
         if nodes[tn].a != 0: ret = resolve_type(int(nodes[tn].a))
         if has_flag(tn, NF_CABI): return mk_cfn(ps, ret)
-        return mk_fn(ps, ret, mm)
+        key = 0
+        if nkids2(tn) > 0:
+            labels: int[]
+            loop p in kids2(tn): labels.push(int(nodes[p].name))
+            key = fn_label_key(labels)
+        return mk_fn(ps, ret, mm, key)
     fatal(nodes[tn].pos, "invalid type")
     0
 
@@ -1115,7 +1120,7 @@ subst = (t0: int, targs: int[]) -> int:
         loop i in [0..int(types[t].nargs)): a.push(subst(targ(t, i), targs))
         if k == .tuple: return mk_tuple(a)
         if k == .cfn: return mk_cfn(a, subst(int(types[t].elem), targs))
-        return mk_fn(a, subst(int(types[t].elem), targs), int(types[t].mutmask))
+        return mk_fn(a, subst(int(types[t].elem), targs), int(types[t].mutmask), int(types[t].st))
     if k == .struct_ or k == .enum_:
         si = int(types[t].st)
         a: int[]

@@ -156,7 +156,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if fk == .array and is_soa(to): return can_coerce(0, int(types[from].elem), soa_elem(to))
     if fk == .fixed and tk == .array: return type_eq(int(types[from].elem), int(types[to].elem))
     if tk == .array and is_nd(from): return type_eq(nd_elem(from), int(types[to].elem))
-    if fk == .fn_ and tk == .fn_ and never_fn_fits(from, to): return true
+    if fk == .fn_ and tk == .fn_ and callable_fits(from, to): return true
     if fk == .array and tk == .fixed:
         if n != 0 and fixed_literal_ok(n, to): return true
         return n != 0 and nodes[n].kind != .array and type_eq(int(types[from].elem), int(types[to].elem))
@@ -270,7 +270,7 @@ coerce = (n: int, target: int) -> int:
     if fk == .fixed and tk == .array and type_eq(int(types[from].elem), int(types[to].elem)):
         wrap_conv(n, .fixed2arr, to)
         return n
-    if fk == .fn_ and tk == .fn_ and never_fn_fits(from, to):
+    if fk == .fn_ and tk == .fn_ and callable_fits(from, to):
         nodes[n].type = i32(to)
         return n
     if tk == .array and is_nd(from) and type_eq(nd_elem(from), int(types[to].elem)):
@@ -943,7 +943,7 @@ subst_partial = (pat0: int, binds: mut int[]) -> int:
         a: int[]
         loop i in [0..int(types[pat].nargs)): a.push(subst_partial(targ(pat, i), binds))
         if k == .tuple: return mk_tuple(a)
-        return mk_fn(a, subst_partial(int(types[pat].elem), binds), int(types[pat].mutmask))
+        return mk_fn(a, subst_partial(int(types[pat].elem), binds), int(types[pat].mutmask), int(types[pat].st))
     if k == .struct_ or k == .enum_:
         si = int(types[pat].st)
         a: int[]
@@ -1736,10 +1736,19 @@ value_call = (n: int, callee: int, args: int[]) -> int:
     if types[ft].kind != .fn_ and types[ft].kind != .cfn: fatal(nodes[n].pos, "cannot call a value of type {type_str(ft)}")
     na = int(types[ft].nargs)
     if args.len() != na: fatal(nodes[n].pos, "function value expects {na} argument(s), got {args.len()}")
-    loop i in 0.. and a in args:
-        if nodes[a].kind == .namedarg: fatal(nodes[a].pos, "named arguments are not allowed when calling a function value")
+    named = false
+    loop a in args:
+        if nodes[a].kind == .namedarg: named = true
+    final = args
+    if named:
+        if types[ft].kind == .cfn or types[ft].st == 0: fatal(nodes[n].pos, "this callable has no parameter names; use positional arguments or give it a named function type")
+        let names = fn_label_names(int(types[ft].st), na)
+        message = map_args(names, fill(false, na), args, final)
+        if message != "": fatal(nodes[n].pos, message)
+    loop i in 0.. and a in final:
         finish_arg(a, targ(ft, i), int(types[ft].mutmask) & (1 << i) != 0)
-    set_list(n, args)
+    set_list(n, final)
+    if named: save_call_order(n, args, final)
     nodes[n].a = i32(callee)
     nodes[n].sym = 0
     nodes[n].aux = 1
@@ -4855,7 +4864,7 @@ check_lambda = (lam: int, expected: int) -> int:
     zonk_tree(int(fns[f].body))
     loop l in fns[f].locals: locals[l].type = i32(zonk(int(locals[l].type)))
     nodes[lam].sym = i32(f)
-    t = mk_fn(zp, int(fns[f].ret), mm)
+    t = mk_fn(zp, int(fns[f].ret), mm, if et != 0: int(types[et].st) else: decl_fn_labels(lam))
     nodes[lam].type = i32(t)
     fns[f].fntype = i32(t)
     t
@@ -4918,7 +4927,7 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1) ->
         if has_flag(kid(d, i), NF_MUT): mm |= 1 << i
     nodes[n].kind = .fnref
     nodes[n].sym = i32(f)
-    t = mk_fn(fns[f].ptypes, int(fns[f].ret), mm)
+    t = mk_fn(fns[f].ptypes, int(fns[f].ret), mm, if et != 0 and types[et].kind == .fn_: int(types[et].st) else: decl_fn_labels(d))
     if et != 0 and types[et].kind == .cfn:
         if not fns[f].cabi: fatal(nodes[n].pos, "'{name_of(int(nodes[n].name))}' must be marked @cabi to be used as a C function pointer")
         t = mk_cfn(fns[f].ptypes, int(fns[f].ret))
@@ -6733,13 +6742,23 @@ typed_array = (elems: int[], t: int, pos: int) -> int:
     nodes[c].b = i32(tn)
     c
 
-# a function that never returns (one whose body is left out when the compiler looks for the
-# next error) fits a function type with the same parameters, whatever it returns
-never_fn_fits = (from: int, to: int) -> bool:
-    if prune(int(types[from].elem)) != T_NEVER or int(types[from].nargs) != int(types[to].nargs): return false
+# Renaming a callable's labels, including nested callback labels, needs no
+# adapter. All value types and mutation modes must still have the same shape.
+callable_shape_eq = (a0: int, b0: int) -> bool:
+    if type_eq(a0, b0): return true
+    a = prune(a0)
+    b = prune(b0)
+    if types[a].kind != .fn_ or types[b].kind != .fn_: return false
+    if types[a].nargs != types[b].nargs or types[a].mutmask != types[b].mutmask: return false
+    loop i in [0..int(types[a].nargs)):
+        if not callable_shape_eq(targ(a, i), targ(b, i)): return false
+    callable_shape_eq(int(types[a].elem), int(types[b].elem))
+
+callable_fits = (from: int, to: int) -> bool:
+    if types[from].mutmask != types[to].mutmask or types[from].nargs != types[to].nargs: return false
     loop i in [0..int(types[from].nargs)):
-        if not type_eq(targ(from, i), targ(to, i)): return false
-    true
+        if not callable_shape_eq(targ(from, i), targ(to, i)): return false
+    prune(int(types[from].elem)) == T_NEVER or callable_shape_eq(int(types[from].elem), int(types[to].elem))
 
 is_nd = (t0: int) -> bool:
     t = prune(t0)

@@ -359,13 +359,22 @@ dw_type = (id: int) -> int:
         if dewy_syntax[params].kind != .block or dewy_syntax[params].text != "():": return dw_fail(params, "this function type")
         n = mk(.tfn, pos)
         types_: int[]
+        labels: int[]
         loop param in dewy_syntax[params].children:
             p = dw_param(param, .param)
             if nodes[p].a == 0: return dw_fail(param, "an untyped parameter in a function type")
+            if nodes[p].b != 0: return dw_fail(param, "defaults in a function type; declare defaults on a directly called function")
             t = int(nodes[p].a)
             if has_flag(p, NF_MUT): add_flag(t, NF_MUT)
+            loop earlier in labels:
+                if nodes[earlier].name == nodes[p].name and name_of(int(nodes[p].name)) != "_": fatal(nodes[p].pos, "duplicate callable parameter name '{name_of(int(nodes[p].name))}'")
+            # Only the label belongs here; retaining its parameter subtree
+            # would duplicate type/pattern cloning in generic callable types.
+            nodes[p] = Node(kind = .ident, pos = nodes[p].pos, name = nodes[p].name)
+            labels.push(p)
             types_.push(t)
         set_list(n, types_)
+        set_list2(n, labels)
         result = dw_child(id, 2)
         if dw_name(result) != "void": nodes[n].a = i32(dw_type(result))
         return n
@@ -511,7 +520,7 @@ dw_function = (id: int, name: str) -> int:
     body = dw_block(dw_child(id, 2))
     prefix: int[]
     loop param in ps:
-        if has_flag(param, NF_MUT): continue
+        if has_flag(param, NF_MUT) or name_of(int(nodes[param].name)) == "_": continue
         local = mk(.vardecl, nodes[param].pos)
         nodes[local].aux2 = 1   # synthesized value-parameter binding
         nodes[local].name = nodes[param].name

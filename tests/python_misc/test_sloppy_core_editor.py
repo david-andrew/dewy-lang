@@ -382,7 +382,7 @@ def test_vscode_core_test_tasks(tmp_path):
     ('', 'let value=[loop key in ["a" "b"] key->21] return value["a"]+value["b"]', 'value', 'dict<string int64>'),
     ('', 'let [value]=[answer=1 value=42] return value', 'value', 'int64'),
     ('', 'let value:(int64|string)?=none return if value is? none 42 else 1', 'value', '(int64 | string)?'),
-    ('Fn:type=(@x:int64):>void\n', 'let value:Fn=(@x:int64):>void=>{x+=1} let n:int64=41 value(@n) return n', 'value', '(@arg0: int64):>void'),
+    ('Fn:type=(@x:int64):>void\n', 'let value:Fn=(@x:int64):>void=>{x+=1} let n:int64=41 value(@n) return n', 'value', '(@x: int64):>void'),
     ('bump=(@x:int64 n:int64=2):>void=>{x+=n}\n', 'let n:int64=40 bump(@n) return n', 'bump', 'bump = (@x: int64 n: int64 = …):>void'),
     ('Box:type=<T>[text:T]\n', 'let value=Box<string>["hello"] return value.text.length', 'value', 'Box<string>'),
     ('identity=<T>(x:T):>T=>x\n', 'return identity<int64>(42)', 'identity', 'identity = (x: int64):>int64'),

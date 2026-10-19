@@ -212,6 +212,15 @@ are supported. Explicit arguments evaluate in written order, then omitted
 defaults in parameter order. An earlier parameter used in a default refers to
 its captured value, so `combine(next())` calls `next()` once.
 
+Named arguments also work through function values, returned callbacks, record
+fields and array elements. An inferred function value retains its declared
+parameter names. A function-type annotation supplies the names at that boundary:
+`let f:((amount:int64):>int64) = (x)=>x*2` can be called as `f(amount=21)`.
+These names do not change the runtime calling convention. The callee evaluates
+first, then explicit arguments in written order. Parameters named `_` accept
+positional arguments only. Function values require all arguments; default
+arguments remain a direct-call feature.
+
 Parameters can unpack a single argument with the same patterns as `let` and
 `loop`: arrays and tuple results use positions, records use field names, and
 nested patterns can combine them.

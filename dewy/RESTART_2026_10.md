@@ -5,6 +5,35 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Named calls through function values (2026-10-19)
+
+Named arguments now work through stored/returned callbacks, record fields and
+array elements. Inferred values retain their declared labels; a callable-type
+annotation supplies the labels at that boundary, including nested callback
+types. Label changes require no runtime adapter. Callees evaluate first and
+arguments retain written evaluation order. Closure copying, explicit shared
+captures, const snapshots and mutable arguments keep their existing semantics.
+
+Labels occupy the otherwise unused function-type `st` field and are interned
+with the existing name pool; neither type-record size nor runtime closure
+layout grows. Generic substitution preserves them, and editor hover shows the
+actual labels. Ignored `_` parameters no longer produce a synthesized read of
+an unbound `_`. Function-type annotations reject defaults that value calls do
+not support; defaults remain available on directly called declarations.
+
+The corrected source passes **71 focused checks**, independently bootstrapped
+from C, and **6,231 full checks in 187.33 s**. All twelve existing runtime
+kernels retain their artifacts and pass fresh full-size checks. Three hardware
+pairs show **0.028% / 0.020%** more instructions for default/release throughput
+and **0.0053%** for the compiler rebuild.
+
+Nine of twelve seven-pair compilation comparisons pass. Against the immediate
+predecessor, only release throughput remains inconclusive (ratio **1.0032**,
+interval **0.9943–1.0245**); default throughput, Tour, Netpong, Dunes and self-build
+pass. Against the last accepted native stage, default throughput and self-build
+remain uncertain. No comparison establishes a regression, and the accepted
+baseline is not moved. [Corrected-source validation and raw performance evidence](audits/2026-10-19/named-function-values.json).
+
 ## Partial operators restored (2026-10-19)
 
 Parenthesized right operands now form ordinary unary functions: `(* 2)`,
