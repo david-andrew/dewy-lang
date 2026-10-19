@@ -288,16 +288,21 @@ o_holds = (d: int, s: int) -> bool:
 # their control construct. An unconditional block can export its prefix before
 # the first branch; conditional arms and loops never export. Loads also die when
 # memory may have changed (any store or call bumps the memory generation).
-ht_k1: int[]
-ht_k2: int[]
-ht_k3: int[]
-ht_val: i32[]
-ht_scope: i32[]
-ht_nbr: int[]          # branch count when the entry was made
-ht_gen: int[]
-ht_epoch: int[]
-ht_va: i32[]            # versions of the entry's operands when it was made
-ht_vb: i32[]
+# Keep one probed entry together instead of visiting ten separate arrays.
+# The key and validity metadata occupy 64 bytes; their meaning is unchanged.
+struct AvailableValue:
+    key1: int
+    key2: int
+    key3: int
+    value: i32
+    scope: i32
+    branches: int
+    generation: int
+    epoch: int
+    version_a: i32
+    version_b: i32
+
+ht_entries: AvailableValue[]
 ht_mask = 0
 o_epoch = 0
 o_gen = 0              # memory generation for integer data
@@ -312,17 +317,7 @@ o_scope_nbr: int[]
 ht_setup = (n: int):
     size = 64
     loop size < n * 4: size *= 2
-    if ht_k1.len() < size:
-        ht_k1.resize(size)
-        ht_k2.resize(size)
-        ht_k3.resize(size)
-        ht_val.resize(size)
-        ht_scope.resize(size)
-        ht_nbr.resize(size)
-        ht_gen.resize(size)
-        ht_epoch.resize(size)
-        ht_va.resize(size)
-        ht_vb.resize(size)
+    if ht_entries.len() < size: ht_entries.resize(size)
     ht_mask = size - 1
     o_epoch += 1
     o_gen = 0
@@ -350,23 +345,23 @@ o_scope_close = ():
 ht_slot = (k1: int, k2: int, k3: int) -> int:
     h = (k1 * -7046029254386353131) xor (k2 * -4417276706812531889) xor (k3 * 1609587929392839161)
     i = (h >> 29) & ht_mask
-    loop ht_epoch[i] == o_epoch:
-        if ht_k1[i] == k1 and ht_k2[i] == k2 and ht_k3[i] == k3: return i
+    loop ht_entries[i].epoch == o_epoch:
+        if ht_entries[i].key1 == k1 and ht_entries[i].key2 == k2 and ht_entries[i].key3 == k3: return i
         i = (i + 1) & ht_mask
     i
 
 ht_available = (i: int, gen: int, va: int, vb: int) -> int:
-    if ht_epoch[i] != o_epoch: return -1
-    scope = int(ht_scope[i])
+    if ht_entries[i].epoch != o_epoch: return -1
+    scope = int(ht_entries[i].scope)
     loop not o_open[scope]:
         # Every exit from this block passes its straight-line prefix. After
         # any earlier branch the value might have been skipped, so discard it.
-        if not o_export[scope] or ht_nbr[i] != o_scope_nbr[scope]: return -1
+        if not o_export[scope] or ht_entries[i].branches != o_scope_nbr[scope]: return -1
         scope = o_parent[scope]
         if scope < 0: return -1
-    if gen >= 0 and ht_gen[i] != gen: return -1
-    if int(ht_va[i]) != va or int(ht_vb[i]) != vb: return -1
-    int(ht_val[i])
+    if gen >= 0 and ht_entries[i].generation != gen: return -1
+    if int(ht_entries[i].version_a) != va or int(ht_entries[i].version_b) != vb: return -1
+    int(ht_entries[i].value)
 
 mem_gen = (mode: int) -> int:
     if ir.raw_mem: return o_gen
@@ -391,16 +386,10 @@ ht_put_gen = (k1: int, k2: int, k3: int, v: int, gen: int, va: int, vb: int):
 load_key1 = (ty: int, mode: int, addr: int) -> int: int(Op.load) | (ty << 8) | ((mode & 4095) << 12) | (addr << 24)
 
 ht_insert = (i: int, k1: int, k2: int, k3: int, v: int, gen: int, va: int, vb: int):
-    ht_va[i] = i32(va)
-    ht_vb[i] = i32(vb)
-    ht_epoch[i] = o_epoch
-    ht_k1[i] = k1
-    ht_k2[i] = k2
-    ht_k3[i] = k3
-    ht_val[i] = i32(v)
-    ht_scope[i] = i32(o_scopes[o_scopes.len() - 1])
-    ht_nbr[i] = o_nbr
-    ht_gen[i] = gen
+    # Replace the complete entry through one checked array access.
+    scope = i32(o_scopes[o_scopes.len() - 1])
+    ht_entries[i] = AvailableValue(k1, k2, k3, i32(v), scope, o_nbr, gen, o_epoch, i32(va), i32(vb))
+
 
 # a value that is defined once and never read before its definition
 stable = (v: int) -> bool: o_ndef[v] == 1 and o_first[v] > o_defpos[v]

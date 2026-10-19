@@ -66,6 +66,30 @@ This run measured about **124k fresh root lines/CPU-second**, still below 250k.
 Absolute rates vary with host load/frequency and are not compared across runs.
 [Raw paired samples, identities and validation](audits/2026-10-19/leaf-dispatch.json).
 
+## Pack common-subexpression table entries (2026-10-19)
+
+The optimizer now stores each available-expression key and its validity metadata
+in one 64-byte scalar record, replacing ten separate arrays. Insertion replaces
+the complete record through one checked array access. The hash function, probing
+order, epochs, scope/export rules, memory generations and operand versions are
+unchanged. This reduces scattered accesses and removes repeated checks during
+insertion; no optimization pass or user-facing behavior is added.
+
+The independent C bootstrap passes **409 quick checks**, and the full suite
+passes **6,048 checks in 146.88 seconds**. All **56 performance comparisons pass**
+after one bounded Netpong recheck retaining the original samples. Large-source
+candidate/previous CPU ratios are **0.98989 default** and **0.97982 release**.
+Self-build is 0.99109 with an interval including no change; Netpong and Dunes
+are essentially flat. Tour is 1.01431, within the gate's 2% timing resolution;
+the cumulative fixed-reference checks also pass. Three hardware-counter pairs
+show about **0.4–0.6% fewer instructions** across the compilation workloads.
+
+All eleven runtime benchmark artifacts preserve the accepted generated code,
+using the existing exact-artifact certificates and fresh checksum preflights.
+The measured **126k fresh root lines/CPU-second** is still below 250k and is
+not compared with absolute rates from other host-load conditions.
+[Measurements, earlier field-store prototype and validation](audits/2026-10-19/cse-whole.json).
+
 ## Recommendation
 
 The user's October 18 continuation criteria are explicit: keep working until
