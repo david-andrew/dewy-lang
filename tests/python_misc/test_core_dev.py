@@ -629,7 +629,7 @@ def runtime_certificate(tmp_path):
                             for label in ('previous', 'candidate') for mode in ('default', 'release')}}
     identities = {'reference': {'binary_sha256': 'fixed'}, 'previous': {'binary_sha256': 'old'},
                   'candidate': {'binary_sha256': 'new'}}
-    stage = {'toolchains': {'reference': identities['reference'], 'candidate': identities['previous']},
+    stage = {'status': 'complete', 'toolchains': {'reference': identities['reference'], 'candidate': identities['previous']},
              'runtime': old}
     assessment = {'no_regression': True,
                   'comparisons': {f'runtime/kernel/{mode}/reference': {'status': 'pass'}
@@ -691,12 +691,14 @@ def test_core_runtime_certificate_requires_matching_inputs_and_binaries(runtime_
     assert certificate.prove('kernel', current, workload) is None
 
 
-@pytest.mark.parametrize('change', ['not-accepted', 'failed-comparison', 'previous-toolchain', 'fixed-reference'])
+@pytest.mark.parametrize('change', ['incomplete', 'not-accepted', 'failed-comparison', 'previous-toolchain', 'fixed-reference'])
 def test_core_runtime_certificate_rejects_invalid_previous_stage(runtime_certificate, change):
     from tools.sloppy_core.runtime_certificate import RuntimeCertificate
 
     _, _, _, document, path, identities = runtime_certificate
-    if change == 'not-accepted':
+    if change == 'incomplete':
+        document['stage_measurement']['status'] = 'incomplete'
+    elif change == 'not-accepted':
         document['final_assessment']['no_regression'] = False
     elif change == 'failed-comparison':
         document['final_assessment']['comparisons']['runtime/kernel/default/reference']['status'] = 'inconclusive'

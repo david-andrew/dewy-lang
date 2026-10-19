@@ -23,7 +23,7 @@ class RuntimeCertificate:
         stage = document.get('stage_measurement', document.get('initial_stage_measurement', document))
         assessment = document.get('final_assessment', stage.get('assessment', {}))
         comparisons = assessment.get('comparisons', {})
-        if not assessment.get('no_regression') or not comparisons or any(
+        if stage.get('status') != 'complete' or not assessment.get('no_regression') or not comparisons or any(
                 row.get('status') != 'pass' for row in comparisons.values()):
             raise ValueError('The previous runtime report must be an accepted stage')
         previous = identities.get('previous')
