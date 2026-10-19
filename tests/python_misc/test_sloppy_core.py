@@ -12663,3 +12663,68 @@ main = () -> int:
         command = [node, runner]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_core_integer_parse_boundaries(compiler, tmp_path, target, release):
+    rng = random.Random(9217)
+    texts = ['', '+', '-', '_', '__', '+_', '-_', '0', '-0', '+0',
+             '999999999999999999', '-999999999999999999',
+             '9223372036854775807', '-9223372036854775808',
+             '9223372036854775808', '-9223372036854775809',
+             '0x7fffffffffffffff', '-0X8000000000000000', '0x8000000000000000',
+             '0x', '-0x', '0x_', '0b10', '0o10', '1.0', '1e3', '1 2', '1\x002',
+             '  \t-42\r\n', '\v42', '42\f', '\u00a042', '１２', '🙂',
+             '_1_', '0_x10', '0x_f_f_', '+0x2a', '--1', '+-1', '1-',
+             '0' * 80, '0' * 80 + '42', '9' * 80]
+    for _ in range(160):
+        value = rng.randrange(-(1 << 66), 1 << 66)
+        token = str(value) if rng.randrange(2) else ('-' if value < 0 else '+') + hex(abs(value))
+        texts.append(token)
+        texts.append(' \t' + token + '\r\n')
+    def expected(text):
+        token = text.strip(' \t\r\n')
+        negative = token.startswith('-')
+        if token[:1] in ('+', '-'):
+            token = token[1:]
+        base = 16 if token[:2].lower() == '0x' else 10
+        if base == 16:
+            token = token[2:]
+        token = token.replace('_', '')
+        pattern = '[0-9a-fA-F]+' if base == 16 else '[0-9]+'
+        if not re.fullmatch(pattern, token):
+            return None
+        value = int(token, base) * (-1 if negative else 1)
+        return value if -(1 << 63) <= value < (1 << 63) else None
+    answers = [expected(text) for text in texts]
+    literals = ' '.join(json.dumps(text, ensure_ascii=False) for text in texts)
+    results = ' '.join('none' if value is None else str(value) for value in answers)
+    source = tmp_path / 'integers.dewy'
+    source.write_text(f'''main=()=>{{
+let texts=[{literals}]
+let expected:array<int64?>=[{results}]
+loop i in [0..texts.length) {{
+    if to_int(texts[i]) not=?expected[i] {{printl"case {{i}}" return 1}}
+}}
+return 42
+}}
+''')
+    binary = tmp_path / 'integers'
+    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary,
+                            *(['--release'] if release else [])],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed for web integer parsing checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'integers.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)

@@ -42,6 +42,20 @@ New front-end or user-facing language design requires David's approval.
   compilation comparisons pass. The optimizer batch passes 6,359 tests after
   an independent bootstrap; existing 28 benchmark artifacts are unchanged.
   [Evidence](audits/2026-10-19/recursive-branch-returns.json).
+- Sloppy's array-swap implementation plus panic-message call metadata cut
+  ten million release swaps from about 45.2 to 30.7 ms on the laptop; C is
+  28.0 ms. Default falls from about 54.3 to 41.8 ms. Shared arrays, nested
+  managed values and stateful closure copies retain their isolation.
+  [Swap](audits/2026-10-19/array-swap.json),
+  [checked-helper inlining](audits/2026-10-19/panic-argument-calls.json).
+- Bounded decimal parsing is about 8.6x faster by default and 10.2x in release
+  on the signed-decimal workload, and faster than the checked C `strtoll`
+  counterpart there. Whitespace, hex, boundary and malformed-input workloads
+  also improve. The library batch passes 6,393 tests after independent bootstrap
+  plus 100 fresh fuzz seeds in five modes. Its laptop checkpoint has 70 passing
+  comparisons and two inconclusive default timings (string equality and shifted
+  arrays against the preceding compiler), with no established regression.
+  [Evidence](audits/2026-10-19/integer-parsing.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 

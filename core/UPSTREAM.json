@@ -269,6 +269,13 @@
         "compiler/lower.jo"
       ],
       "description": "Mark calls constructing panic arguments as cold so checked helpers remain eligible for release inlining. Calls still execute in order on the failure path and retain side effects; no native code outlining or alignment-policy change."
+    },
+    {
+      "revision": "06a297d890c6db0ce8f43668e61fd2ba36556336",
+      "paths": [
+        "lib/core/str.jo"
+      ],
+      "description": "Adapt the bounded decimal to_int fast path and trim by pointer offsets instead of allocating a substring. Retain Dewy existing decimal/hexadecimal, underscore, whitespace and overflow behavior; do not import base-taking overloads or the ints API."
     }
   ]
 }

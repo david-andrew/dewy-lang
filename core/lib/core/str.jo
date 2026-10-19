@@ -358,23 +358,45 @@ __case_of = (c: int, up: bool) -> int:
 # parse an integer (decimal, or hex after 0x; _ may separate digits); none if it is not one or
 # does not fit in an int
 to_int = (s: str) -> int?:
-    t = trim(s)
-    n = len(t)
-    if n == 0: return none
+    p = data(s)
+    n = len(s)
+    # Up to 18 decimal digits fit without per-digit overflow checks. Keep
+    # prefixes, separators and long/invalid input on the existing parser.
     i = 0
+    if n > 0 and (p[0] == '-' or p[0] == '+'): i = 1
+    if i < n and n - i <= 18:
+        v = 0
+        j = i
+        loop j < n:
+            c = p[j]
+            if c < '0' or c > '9': break
+            v = v * 10 + int(c) - 48
+            j += 1
+        if j == n:
+            if p[0] == '-': return -v
+            return v
+    __to_int_slow(p, n)
+
+__to_int_slow = (p: *u8, n0: int) -> int?:
+    a = 0
+    n = n0
+    loop a < n and is_space(p[a]): a += 1
+    loop n > a and is_space(p[n - 1]): n -= 1
+    if a == n: return none
+    i = a
     neg = false
-    if t[0] == '-' or t[0] == '+':
-        neg = t[0] == '-'
-        i = 1
+    if p[i] == '-' or p[i] == '+':
+        neg = p[i] == '-'
+        i += 1
     if i >= n: return none
     base = 10
-    if i + 1 < n and t[i] == '0' and (t[i + 1] == 'x' or t[i + 1] == 'X'):
+    if i + 1 < n and p[i] == '0' and (p[i + 1] == 'x' or p[i + 1] == 'X'):
         base = 16
         i += 2
     v = 0
     any = false
     loop i < n:
-        c = t[i]
+        c = p[i]
         d = -1
         if c >= '0' and c <= '9': d = int(c) - 48
         else if c >= 'a' and c <= 'f': d = int(c) - 87

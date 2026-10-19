@@ -235,7 +235,7 @@ flatten[T] = (xss: T[][]) -> T[]:
 # the elements at i and j trade places
 swap[T] = (xs: mut T[], i: int, j: int):
     # (the indexes checked once, and the array made its own once if it is shared, by data();
-    # then the two trade places as they are, through the pointer: as fast as by hand)
+    # then the two trade places through the pointer)
     n = xs.len()
     if (i as u64) >= (n as u64) or (j as u64) >= (n as u64): panic(__swap_bounds(i, j, n))
     p = data(xs)
