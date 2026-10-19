@@ -586,9 +586,6 @@ dw_expr = (id: int) -> int:
     k = dewy_syntax[id].kind
     text = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
-    op = dw_op(id)
-    if op == .range_apply: return dw_range_value(dw_iterable(id, true, true))
-    if dw_is_include(id): return dw_include(id)
     if k == .based_string: return dw_binary(id)
     if k == .identifier:
         if text == "none": return mk(.none_lit, pos)
@@ -656,6 +653,11 @@ dw_expr = (id: int) -> int:
         n = mk(.str_lit, pos)
         nodes[n].sval = i32(intern(text))
         return n
+    # Leaves cannot be operators or include calls. Handle them before asking
+    # compound-expression helpers to unwrap and classify the same node again.
+    op = dw_op(id)
+    if op == .range_apply: return dw_range_value(dw_iterable(id, true, true))
+    if dn_token_call(op) and dw_is_include(id): return dw_include(id)
     if k == .block:
         children = dewy_syntax[id].children
         if children.len() == 1 and dw_op(children[0]) == .range_apply: return dw_range_value(dw_iterable(id, true, true))

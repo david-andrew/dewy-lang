@@ -46,6 +46,26 @@ A static branch-table scan also ruled out a narrowly scoped few-destination
 bitset emitter as the next experiment: the compiler's hot dispatch tables have
 more destinations than that approach would handle.
 
+## Classify expression leaves before compound syntax (2026-10-19)
+
+The syntax projection now handles identifiers and literal nodes before calling
+operator and include-file recognizers. Include recognition runs only for call
+operators. This avoids repeatedly unwrapping/classifying ordinary leaf nodes;
+syntax, AST representation and lowering remain unchanged.
+
+The independent C bootstrap passes **409 quick checks**, the full suite passes
+**6,048 checks in 150.17 seconds**, and all **56 performance comparisons pass**
+without rechecks. The large-source default candidate/previous CPU ratio is
+**0.99255**, with a 95% bootstrap interval **[0.98577, 0.99742]**: a small but
+measured saving. Release and self-build stage intervals include no change.
+All eleven generated runtime artifacts match the preceding accepted stage
+apart from equal-width embedded compiler paths; their validated performance
+certificates are retained, without claiming new C-comparison timings.
+
+This run measured about **124k fresh root lines/CPU-second**, still below 250k.
+Absolute rates vary with host load/frequency and are not compared across runs.
+[Raw paired samples, identities and validation](audits/2026-10-19/leaf-dispatch.json).
+
 ## Recommendation
 
 The user's October 18 continuation criteria are explicit: keep working until
