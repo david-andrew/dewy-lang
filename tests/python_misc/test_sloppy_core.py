@@ -24,6 +24,8 @@ from tools.sloppy_core.benchmark_types import record_source
 
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
+    'optimizer-read-method-mutable-loop', 'optimizer-read-method-global-loop',
+    'optimizer-read-method-parallel',
     'optimizer-data-narrowed-parameter', 'optimizer-data-mutable-loop',
     'optimizer-data-parameter-snapshots', 'optimizer-data-index-once',
     'optimizer-data-nested-array', 'optimizer-data-record-local',
@@ -50,7 +52,8 @@ QUICK_CASES = {
     'match-constant-effects', 'match-constant-wide-keys',
     'fixed-array-values', 'fixed-array-dynamic-conversion',
 }
-QUICK_ERRORS = {'generic-value-conflicting-type', 'coalesce-nonoptional', 'array-comparison-overflow'}
+QUICK_ERRORS = {'generic-value-conflicting-type', 'coalesce-nonoptional', 'array-comparison-overflow',
+                'method-mutating-loop', 'method-hidden-global-loop', 'method-indirect-mutating-loop'}
 VALUE_BATCH_SIZE = 64
 
 
@@ -1760,6 +1763,40 @@ let values=[[20] [21]] let snapshots:array<array<array<int64>>>=[]
 loop @value in values {snapshots.push(values) value[0]+=1 value.push(22)}
 return if values=?[[21 22] [22 22]]
 and snapshots[0]=?[[20] [21]] and snapshots[1]=?[[21 22] [21]] 42 else 1}""",
+    'optimizer-read-method-mutable-loop': '''first=(values:array<int64>):>int64=>values[0]
+private_first=(values:array<int64>):>int64=>{
+let local=values local.push(99) return local[0]
+}
+Box:type=[values:array<int64>]
+main=()=>{
+let values=[2 3 4] let saved=values
+loop @item in values {item+=values.first()}
+if values not=? [4 7 8] or saved not=? [2 3 4] return 1
+let box=Box[[2 3 4]] let original=box
+loop @item in box.values {item+=box.values.private_first()}
+if box.values not=? [4 7 8] or original.values not=? [2 3 4] return 2
+return 42
+}''',
+    'optimizer-read-method-global-loop': '''let values=[2 3 4]
+first=(xs:array<int64>):>int64=>xs[0]
+read_global=():>int64=>values.first()
+main=()=>{
+let saved=values
+loop @item in values {item+=read_global()}
+if values not=? [4 7 8] or saved not=? [2 3 4] return 1
+let nested=[values [9 10]] let original=nested
+loop @row in nested {loop @item in row {item+=row.first()}}
+if nested not=? [[8 15 16] [18 28]] or original not=? [[4 7 8] [9 10]] return 2
+return 42
+}''',
+    'optimizer-read-method-parallel': '''first=(xs:array<int64>):>int64=>xs[0]
+main=()=>{
+let values=[20 22]
+let results=parallel_range(17 (i:int64)=>values.first()+i)
+loop i in [0..17) {if results[i] not=? 20+i return 1}
+if values not=? [20 22] return 2
+return 42
+}''',
     'sequence-mutable-nested': """main=()=>{
 let rows=[[19 20] [21 22]] let saved=rows
 loop @row in rows {loop @value in row value+=1}
@@ -5773,6 +5810,18 @@ ERRORS = {
     'sequence-mutable-call': ('items=()=>[1]\nmain=()=>{loop @x in items() x+=1}', 'use an array binding'),
     'sequence-mutable-index': ('main=()=>{let xs=[[1]] loop @x in xs[0] x+=1}', 'use an array binding'),
     'sequence-mutable-slice': ('main=()=>{let xs=[1] loop @x in xs[..] x+=1}', 'use an array binding'),
+    'method-mutating-loop': ('''grow=(@values:array<int64>):>int64=>{values.push(9) return 1}
+main=()=>{let values=[2 3 4] loop @item in values {item+=values.grow()} return 42}''',
+                             'add, remove or replace'),
+    'method-hidden-global-loop': ('''let values=[2 3 4]
+read=(xs:array<int64>):>int64=>{values.push(9) return xs[0]}
+main=()=>{loop @item in values {item+=values.read()} return 42}''',
+                                  'add, remove or replace'),
+    'method-indirect-mutating-loop': ('''main=()=>{
+let values=[2 3 4]
+let grow=(@xs:array<int64>):>int64=>{xs.push(9) return 1}
+loop @item in values {item+=grow(@values)} return 42}''',
+                                      'add, remove or replace'),
     'sequence-mutable-combined': ('main=()=>{let xs=[1] loop @x in xs and x<?2 x+=1}', 'mutable binding in a combined loop'),
     'sequence-mutable-pattern': ('main=()=>{let xs=[[1]] loop @[x] in xs x+=1}', 'unpacking a mutable loop binding'),
     'sequence-mutable-push': ('main=()=>{let xs=[1] loop @x in xs {xs.push(2) x+=1}}', '`loop @item` changes the elements'),

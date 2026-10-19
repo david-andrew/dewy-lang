@@ -1451,6 +1451,11 @@ runtime bounds checks. An escaping callback captures an independent snapshot
 of the element. The mutable place itself cannot be kept through an explicit
 shared capture for later changes.
 
+Read-only helpers may inspect the source during a mutable loop, including through
+method syntax such as `values.first()`. The resolved parameter types determine
+whether a call can mutate its arguments. Calls that can resize the source through
+an `@` parameter or a global still cannot run inside that loop.
+
 `loop condition { ... }` repeats while the condition holds. Ranges such as
 `[0..10)` exclude the upper bound. Give the first two values for a stepped range:
 

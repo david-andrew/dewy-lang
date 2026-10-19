@@ -1479,6 +1479,32 @@ default/release/debug; they also pass on the accepted compiler. The stage now
 covers eleven runtime kernels, or **56** fixed/previous comparisons including
 compilation. [Patches and samples](audits/2026-10-19/relative-table-experiments.json).
 
+## Resolve method effects from checked parameter modes
+
+Read-only method calls now work inside mutable loops and parallel callbacks.
+Previously, `loop @item in values {item+=values.first()}` was rejected as a
+possible resize, even when `first` only read its argument. Lowering effect scans
+mistook the receiver's syntactic permission to select a mutable method for the
+resolved method's actual argument modes.
+
+Direct calls now reuse the cached checked signature; indirect calls use their
+function type. Writes, resizes, loop footprints, ownership, race/determinism
+checks and closure argument pinning share that information. Source permissions
+remain intact. Tests retain rejection of mutable arguments, indirect mutating
+calls and hidden global resizing, and verify independent local/field/global
+snapshots plus read-only captured methods in parallel callbacks.
+
+Independent C bootstrap passes **402 quick checks**; the full suite passes
+**6,041 checks in 153.98 seconds**, with two pytest workers. All **56** fixed and
+previous-stage comparisons pass. Against the previous stage, paired CPU ratios
+are **1.00454** for default compilation, **1.00190** for release and **1.00238**
+for self-build: within the gate's resolution, not a compilation speedup. Three
+initially inconclusive compilation comparisons retain all 15 original samples
+plus 31 recheck pairs. Existing identical artifacts reuse their accepted runtime
+evidence; the new computed-arm dispatch workload is measured. The throughput
+and broad C parity targets remain unmet.
+[Validation and measurements](audits/2026-10-19/checked-call-effects.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or
