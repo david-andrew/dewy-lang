@@ -1328,6 +1328,18 @@ host conditions differ from the earlier 71k run, so that difference is not a
 compiler speedup. The 250k target and broad C parity remain unmet.
 [Complete validation and measurements](audits/2026-10-19/loop-endpoints.json).
 
+## Deferred additional global-load hoisting
+
+An isolated port of Sloppy `cd6ead0`'s IR global/header-load hoisting passes
+364 quick checks, but three Dewy pilots produce identical before/after IR in
+both build modes: read-only global arrays, array updates, and raw-buffer updates.
+The first two already benefit from Dewy's existing loop analysis; the raw-buffer
+case still contains an ownership call that prevents the new pass from helping.
+The port is reverted rather than adding analysis without a demonstrated benefit.
+It did not proceed to C bootstrap or a full stage gate. The independent affine
+indexing portion of the Sloppy change remains a separate candidate.
+[Prototype and pilot evidence](audits/2026-10-19/global-hoist-experiment.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or
