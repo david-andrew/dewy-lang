@@ -15,6 +15,11 @@ New front-end or user-facing language design requires David's approval.
   goal. Native and optional GCC-host results must remain separately labeled.
 - Generated-program performance is mixed. Managed helper calls, text and
   dispatch still trail C; some record/array workloads are faster.
+- Bounded wrapper inlining now cuts default managed-helper runtime about 39%
+  on the laptop, from about 22.8 to 13.9 ms. Release stays near 12.9 ms; C is
+  8.4 ms. The independent native bootstrap passes 6,303 tests in 170 seconds.
+  Its checkpoint has 56 passes and four inconclusive record timings, with no
+  established regression. [Summary and raw evidence](audits/2026-10-19/bounded-wrapper-inlining.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 
@@ -34,15 +39,13 @@ New front-end or user-facing language design requires David's approval.
 
 ## Next sequence
 
-1. Finish the bounded managed-wrapper inlining checkpoint, including compile
-   cost, generated-code checks, independent bootstrap and full validation.
-2. Consolidate instruction measurement around the existing counter and immutable
+1. Consolidate instruction measurement around the existing counter and immutable
    bundles; use the laptop for meaningful matched timing checkpoints.
-3. Triage Sloppy correctness/library/tooling changes, including differential
+2. Triage Sloppy correctness/library/tooling changes, including differential
    fuzzing, before starting another speculative compiler representation change.
-4. Use current profiles and native-versus-GCC generated-code comparisons to
+3. Use current profiles and native-versus-GCC generated-code comparisons to
    choose the next substantial runtime/compiler improvement.
-5. Complete an ordinary-language/application capability from the ledger;
+4. Complete an ordinary-language/application capability from the ledger;
    present any missing user-facing design before implementing it.
 
 Quick and focused checks accompany edits. Full suites and independent bootstrap

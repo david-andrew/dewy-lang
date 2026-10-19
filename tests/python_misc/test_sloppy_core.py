@@ -7536,6 +7536,8 @@ next = () -> int:
 small = (x: int) -> int:
     if x < 0: return -x
     x + 2
+wrapped = (x: int) -> int: small(x) + 1
+outer = (x: int) -> int: wrapped(x) + 2
 @noinline
 kept = (x: int) -> int: x * 2
 bump = (value: mut int) -> int:
@@ -7547,7 +7549,9 @@ main = () -> int:
     b = small(-3)
     c = kept(4)
     d = bump(x)
-    if a + b + c + d + x + counter == 39: return 42
+    e = wrapped(next())
+    f = outer(-3)
+    if a + b + c + d + e + f + x + counter == 51: return 42
     1
 ''')
     binary = tmp_path / 'leaf'
@@ -7556,7 +7560,7 @@ main = () -> int:
     assert built.returncode == 0, built.stdout + built.stderr
     main = re.search(r'^fn f_main_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
     assert main, 'main was not emitted'
-    assert main[0].count(' = call ') == 1, 'only the @noinline call should remain'
+    assert main[0].count(' = call ') == 2, 'only the @noinline call and the deeper wrapper should remain'
     command = [binary]
     if target == 'wasm':
         node = shutil.which('node')
@@ -11407,8 +11411,9 @@ def test_core_fast_inline_failure_path(compiler, tmp_path, target):
         pytest.skip('Node is needed to exercise the web failure path')
     source = tmp_path / 'checked-leaf.jo'
     source.write_text('''read = (values: int[], at: int) -> int: values[at]
+wrapped_read = (values: int[], at: int, live: int) -> int: read(values, at) + live
 @noinline
-checked_leaf_probe = (values: int[], at: int, live: int) -> int: read(values, at) + live
+checked_leaf_probe = (values: int[], at: int, live: int) -> int: wrapped_read(values, at, live)
 main = () -> int:
     at = if args().len() > 1: 1 else: 0
     checked_leaf_probe([20], at, 22)

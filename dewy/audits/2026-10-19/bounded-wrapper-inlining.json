@@ -1,0 +1,54 @@
+{
+  "change": "Default inlining expands exactly one small wrapper around an original tiny leaf. Original bodies are limited to 24 IR instructions, expanded wrappers to 48; no additional optimizer pass or call-graph traversal. Bounds failures, effects, explicit noinline and deeper call boundaries remain.",
+  "validation": "6303 passed in 169.83s (0:02:49)",
+  "quick": "455 passed in 10.98s",
+  "focused": "4 native/web inlining and failure-path checks passed",
+  "compile_instruction_metrics": {
+    "throughput-default": {
+      "previous": 2496122397,
+      "candidate": 2496162105,
+      "ratio": 1.0000159078737676
+    },
+    "throughput-release": {
+      "previous": 3496552031,
+      "candidate": 3496552877,
+      "ratio": 1.0000002419526415
+    },
+    "compiler-reference": {
+      "previous": 7134977006,
+      "candidate": 7134976653,
+      "ratio": 0.9999999505254187
+    }
+  },
+  "laptop_runtime": {
+    "managed_params": {
+      "default_ms": 13.937461,
+      "previous_default_ms": 22.749773,
+      "ratio_to_previous": 0.6126417613046073,
+      "default_ratio_to_c": 1.6664776691367473
+    },
+    "method_params": {
+      "default_ms": 13.937463,
+      "previous_default_ms": 22.923634,
+      "ratio_to_previous": 0.6079953553611962,
+      "default_ratio_to_c": 1.6664589789944904
+    }
+  },
+  "checkpoint": {
+    "pass": 56,
+    "inconclusive": 4
+  },
+  "unresolved": [
+    "runtime/records/default/reference",
+    "runtime/records/default/previous",
+    "runtime/records/release/reference",
+    "runtime/records/release/previous"
+  ],
+  "artifact_scope": "Only managed_params and method_params changed in the 14-workload prototype comparison; all release artifacts unchanged. Final bootstrap separately verifies recursive tree/list artifacts and checksums. Laptop stage executes all 12 historical workloads in both modes.",
+  "baseline": "Fixed ea1cba0e and last accepted whole stage cd07ea34 unchanged. Target not reached; this native compiler is about 125k root lines/CPU-second on the laptop. Optional optimized host was not retrained for this checkpoint.",
+  "evidence": {
+    "file": "bounded-wrapper-inlining-evidence.json.gz",
+    "sha256": "fad3afe3666372c1e570d028a24f7ba90bf3552fb6eaa833650c9dcfab2204dd",
+    "format": "gzip-compressed JSON; decompress to inspect raw samples, identities and validation"
+  }
+}
