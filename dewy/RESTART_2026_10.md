@@ -5,6 +5,15 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Reject a word-at-a-time name hash (2026-10-19)
+
+A bounded prototype replaced the compiler interner's byte loop with bounded
+8/4/2/1-byte loads and a final mixing step. The quick suite passed, but native
+compiler instruction counts increased **0.09% default / 0.06% release /
+0.04% compiler rebuild**. The prototype was reverted without a full timing
+campaign. No language or runtime-library hash behavior changed.
+[Prototype and rejection evidence](audits/2026-10-19/rejected-word-name-hash.json).
+
 ## Store optimizer scope metadata together (2026-10-19)
 
 Scope openness, parent, branch count and export state now occupy one 16-byte
