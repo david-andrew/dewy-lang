@@ -180,6 +180,7 @@ emit_function = ():
 # a release build's last passes over a function, before its code is made
 rel_finish = ():
     kc_fn += 1
+    ir.code = o_ret_sink(ir.code)
     loop_versioning()
     ir.code = o_licm(ir.code)
 

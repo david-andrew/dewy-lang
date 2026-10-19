@@ -1,0 +1,54 @@
+{
+  "change": "Adapt Sloppy f9ba5a4 recursive return sinking for release builds: return same-type moved branch values directly instead of keeping them live across sibling calls. Loop back-edges, conversions, cleanup and effects remain barriers.",
+  "validation": {
+    "focused": "4 passed, 5886 deselected in 1.14s",
+    "quick": "514 passed in 11.72s",
+    "independent_bootstrap": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792445732054036894",
+    "full": "6359 passed in 171.68s (0:02:51)",
+    "fuzz": "Seeds 401..600 pass in five modes, half using the independent bootstrap (1,000 executions).",
+    "test_cleanup": "Remove a duplicate definition of the narrow-slot test; pytest had collected the identical final definition. Coverage is unchanged."
+  },
+  "instruction_ratios_to_previous": {
+    "throughput-default": 1.000000358053169,
+    "throughput-release": 1.0013166841261962,
+    "tour-default": 1.0000055673788846,
+    "netpong-default": 1.0000005526471045,
+    "dunes-default": 1.0000009552775075,
+    "compiler-reference": 1.0028757934822048
+  },
+  "laptop_compile_ratios_to_previous": {
+    "throughput-default": 1.001485020289522,
+    "throughput-release": 1.00688173081567,
+    "tour-default": 1.0031545741324026,
+    "netpong-default": 0.9998543725806792,
+    "dunes-default": 1.0033345221112593,
+    "compiler-reference": 1.003131391606287
+  },
+  "laptop_runtime_ratios_to_previous": {
+    "integer": {
+      "paired_median_ratio": 0.9583879747327001,
+      "bootstrap_95_percent_interval": [
+        0.9582556033925957,
+        0.9589381592848365
+      ],
+      "limit": 1.02,
+      "status": "pass"
+    },
+    "float": {
+      "paired_median_ratio": 0.999209101285985,
+      "bootstrap_95_percent_interval": [
+        0.9701748032456616,
+        1.0012970301663768
+      ],
+      "limit": 1.02,
+      "status": "pass"
+    }
+  },
+  "performance": "Integer fib(38) is about 4.2% faster on the laptop, with a smaller stack frame and one fewer saved register; floating recursion is flat. Desktop integer timing is inconclusive. Release compilation adds about 0.13% instructions on throughput and 0.29% on the fixed compiler; all 12 laptop compilation comparisons pass. Existing 28 runtime artifacts remain unchanged. These are bounded recursion results, not general C parity.",
+  "baseline": "No whole-stage baseline promotion. Fixed ea1cba0e and accepted cd07ea34 unchanged.",
+  "evidence": {
+    "file": "recursive-branch-returns-evidence.json.gz",
+    "sha256": "4253bab6f3464414cc740c410b76768e1d883c59ca638f1efe938ad113d456bf",
+    "format": "gzip JSON"
+  }
+}

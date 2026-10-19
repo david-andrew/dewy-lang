@@ -247,6 +247,14 @@
       ],
       "description": "Reuse the deterministic random Jo-program generator for Dewy shared-backend differential checks. New bounded runner verifies immutable compiler identity and compares successful native default/release/debug and WebAssembly default/release runs. No import-time filesystem writes, automatic scheduling, formatter comparison or C-bootstrap-subset inference. Failures and timeouts are retained and fail the run. Adaptation: generated field-array loops check the current length before indexing after possible shrinking replacement, so valid-program trials do not end in an intentional bounds panic.",
       "upstream_sha256": "cd36130882a39e68a6b7e1f297eba5b1b625158772b36c49e734ee3db428ee44"
+    },
+    {
+      "revision": "f9ba5a464f0171b3a47a4ccc46df6e11f894eb88",
+      "paths": [
+        "compiler/opt.jo",
+        "compiler/main.jo"
+      ],
+      "description": "Port the release-only recursive return-sinking pass. Branches to a common return may return a preceding same-type moved value directly, reducing its lifetime across sibling recursive calls. Existing Dewy select lowering and scalar promotion remain independent; no source-language change."
     }
   ]
 }

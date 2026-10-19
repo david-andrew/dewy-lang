@@ -29,6 +29,19 @@ New front-end or user-facing language design requires David's approval.
   differential fuzz seeds across five modes (1,000 executions). All 28 existing
   benchmark artifacts match the preceding wrapper stage, with fresh checksums.
   [Validation](audits/2026-10-19/bounded-differential-fuzz.json).
+- Grouped constant matches now use bounded lookup tables where appropriate;
+  private 1-/2-byte scalar slots can stay in registers. Native instruction
+  counts fell across the measured compile workloads, and laptop comparisons
+  passed. The latest native synthetic default result is about 127k root lines/s
+  on the older laptop, still well short of the target.
+  [Grouped matches](audits/2026-10-19/grouped-match-lookup.json),
+  [narrow slots](audits/2026-10-19/narrow-scalar-slots.json).
+- Sloppy's recursive-return optimization cuts integer fib(38) runtime about
+  4.2% on the laptop, with floating recursion flat. Desktop integer timing is
+  inconclusive. Release compile instruction cost rises 0.13–0.29%; all laptop
+  compilation comparisons pass. The optimizer batch passes 6,359 tests after
+  an independent bootstrap; existing 28 benchmark artifacts are unchanged.
+  [Evidence](audits/2026-10-19/recursive-branch-returns.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 
@@ -42,7 +55,7 @@ New front-end or user-facing language design requires David's approval.
 | Numerics | Machine numbers, explicit `BigInt`/`Rational`, numeric arrays and matrices | Improve ordinary kernels and library implementations; automatic integer growth remains absent | Required for arithmetic-policy changes |
 | Compile-time work | Constant expressions and fixed-array lengths | General compile-time execution remains absent; define its supported boundary before implementation | Required for new evaluation/effect rules |
 | Games and batteries | Native/web game examples, GPU arrays, networking and rollback examples | Triage Sloppy improvements by actual application need; run selected game/tool integration checks | Internal fixes need none; new APIs/syntax need review |
-| Developer feedback | Fast native edit loop, quick/full suites, C bootstrap, editor/watch/REPL | Keep test lists unified; add bounded differential fuzzing and reusable instruction measurements | No language change |
+| Developer feedback | Fast native edit loop, quick/full suites, C bootstrap, editor/watch/REPL | Maintain unified quick/full test lists, bounded differential fuzzing and instruction measurements | No language change |
 | Compilation performance | Native pipeline plus separately built optional GCC host | Attribute costs on representative programs and the compiler itself; keep default/release, native/host, and hardware explicit | No change to targets without agreement |
 | Strict systems lane | Goal recorded; proof/effect and forbidden-cost checking not recreated | Keep separate from completion of ordinary language/game work | Required before selecting its interface |
 
