@@ -1411,6 +1411,22 @@ is about **91k root lines/CPU-second** under varying host load, still short of
 250k. This absolute number is not a comparison with earlier host conditions.
 [Full evidence](audits/2026-10-19/checker-exposure.json).
 
+## Deferred masked-index versioning
+
+An isolated prototype used a constant bitmask as an unsigned upper bound for
+array indexes, removing the repeated check behind one entry guard. It passed
+382 quick checks after independent C bootstrap and all 6,017 full-suite checks.
+A focused pilot suggested a 3% release gain, but the permanent method and
+managed-parameter workloads did not reproduce a useful improvement. Four of
+52 stage comparisons were inconclusive. The compiler change is reverted;
+there is no reason to keep adding loop copies without a demonstrated benefit.
+
+The tests retain negative/unsigned indexes, empty loops, conditional assignment,
+shrinking arrays and effects before the first failure. The experimental patch,
+identities and every sample remain in
+[the deferred experiment](audits/2026-10-19/masked-checks-experiment.json).
+The accepted compiler remains `94952e82`, whose four platform CI jobs passed.
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

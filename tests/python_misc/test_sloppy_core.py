@@ -11610,3 +11610,97 @@ main = () -> int:
     bad = subprocess.run([*command, 'outside'], capture_output=True, text=True, timeout=10)
     assert bad.returncode not in (0, 42), bad.stdout + bad.stderr
     assert 'index 2 out of bounds' in bad.stdout + bad.stderr, bad.stdout + bad.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+def test_core_masked_loop_bounds(compiler, tmp_path, release, target):
+    runner = shutil.which('node') if target == 'wasm' else None
+    if target == 'wasm' and runner is None:
+        pytest.skip('Node is needed to exercise web loop checks')
+    source = tmp_path / 'masked-bounds.jo'
+    source.write_text('''@noinline
+masked_bound_probe = (values: int[], start: int, stop: int) -> int:
+    total = 0
+    loop i in [start..stop): total += values[(i * 17 ^ 42) & 7]
+    total
+@noinline
+unsigned_mask = (values: int[], start: u64, stop: u64) -> int:
+    total = 0
+    loop i in [start..stop): total += values[int(i & u64(5))]
+    total
+@noinline
+negative_mask = (values: int[], start: int, stop: int) -> int:
+    total = 0
+    loop i in [start..stop): total += values[i & (-2)]
+    total
+@noinline
+conditional_mask = (values: int[], seed: int, stop: int) -> int:
+    total = 0
+    at = seed
+    loop i in [0..stop):
+        if i > 0: at = i & 7
+        total += values[at]
+    total
+@noinline
+ordered_mask = (values: int[], stop: int) -> int:
+    total = 0
+    loop i in [0..stop):
+        print("{i}:")
+        total += values[i & 7]
+    total
+@noinline
+shrinking_mask = (values: mut int[], stop: int) -> int:
+    total = 0
+    loop i in [0..stop):
+        if i == 1: values.clear()
+        total += values[i & 7]
+    total
+main = () -> int:
+    mode = if args().len() > 1: args()[1] else: "ok"
+    values = [3, 5, 7, 11, 13, 17, 19, 23]
+    if mode == "negative": return negative_mask(values, -1, 2)
+    if mode == "conditional": return conditional_mask(values, 8, 2)
+    if mode == "ordered": return ordered_mask([20, 22], 4)
+    if mode == "shrink": return shrinking_mask(values, 3)
+    loop start in [-17, -9, -1, 0, 9, 9223372036854775780]:
+        loop count in [0..18):
+            expected = 0
+            loop j in [0..count): expected += values[((start + j) * 17 ^ 42) & 7]
+            assert(masked_bound_probe(values, start, start + count) == expected)
+    loop count in [0..18):
+        start = u64(18446744073709551590)
+        expected = 0
+        loop j in [0..count): expected += values[int((start + u64(j)) & u64(5))]
+        assert(unsigned_mask(values, start, start + u64(count)) == expected)
+    assert(masked_bound_probe([], 0, 0) == 0)
+    assert(negative_mask([], 0, 0) == 0)
+    assert(negative_mask(values, 1, 2) == 3)
+    assert(conditional_mask(values, 7, 2) == 28)
+    42
+''')
+    binary = tmp_path / 'masked-bounds'
+    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target, '-o', binary,
+                            *(['--release'] if release else [])],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_masked_bound_probe_.*?(?=^fn |\Z)',
+                      built.stdout + built.stderr, re.M | re.S)
+    assert probe, 'masked index probe was not emitted'
+    command = [binary]
+    if target == 'wasm':
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        script = tmp_path / 'masked-bounds.cjs'
+        script.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        command = [runner, script]
+    good = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert good.returncode == 42, good.stdout + good.stderr
+    for case in ('negative', 'conditional', 'ordered', 'shrink'):
+        bad = subprocess.run([*command, case], capture_output=True, text=True, timeout=10)
+        assert bad.returncode not in (0, 42), (case, bad.stdout, bad.stderr)
+        assert 'out of bounds' in bad.stdout + bad.stderr, (case, bad.stdout, bad.stderr)
+        if case == 'ordered':
+            assert bad.stdout.splitlines()[:3] == ['0:', '1:', '2:'], bad.stdout + bad.stderr
+            assert '3:' not in bad.stdout.splitlines(), bad.stdout + bad.stderr
