@@ -770,3 +770,66 @@ DATA []
     source.write_text(records)
     with pytest.raises(ValueError):
         translate(source, tmp_path / 'c')
+
+def test_core_c_host_float_operations(tmp_path):
+    """Check exported scalar op semantics even when compiler sources don't use them."""
+    import platform
+    import shutil
+    import subprocess
+    from tools.sloppy_core.c_host import translate
+
+    if platform.system() != 'Linux' or platform.machine() != 'x86_64' or not shutil.which('gcc'):
+        pytest.skip('optional optimized host requires Linux x86-64 and GCC')
+    records = ['DEWY_HOST_IR 1']
+    checks = ['#include "host.h"', '#include <assert.h>', 'int main(void) {']
+    index = 0
+    for ty, ctype in [(1, 'double'), (2, 'float')]:
+        for op in ('fabs', 'fsqrt', 'ffloor', 'fceil', 'ftrunc', 'fmin', 'fmax', 'f2i'):
+            n = 2 if op in ('fmin', 'fmax') else 1
+            ret = 0 if op == 'f2i' else ty
+            name = f'{op}_{ty}'
+            records.extend([f'FN {index} {n} {ret} false', f'NAME {name}',
+                            'VT ' + json.dumps([ty] * n + [ret]),
+                            'KV ' + json.dumps([0] * (n + 1)), 'SS []', 'SA []', 'ARGS []',
+                            f'I {op} {ret} {n} 0 {1 if n == 2 else -1} -1 0',
+                            f'I ret {ret} -1 {n} -1 -1 0', 'END'])
+            f = f'dw_{index}_{name}'
+            if op in ('fmin', 'fmax'):
+                checks.extend([f'assert({f}(3.0, 7.0) == {3 if op == "fmin" else 7}.0);',
+                               f'assert(signbit({f}(0.0, -0.0)));',
+                               f'assert(!signbit({f}(-0.0, 0.0)));',
+                               f'assert({f}(NAN, 7.0) == 7.0);',
+                               f'assert(isnan({f}(7.0, NAN)));'])
+            elif op == 'f2i':
+                checks.extend([f'assert({f}(NAN) == 0);',
+                               f'assert({f}(INFINITY) == INT64_MAX);',
+                               f'assert({f}(-INFINITY) == (U)INT64_MIN);',
+                               f'assert({f}(0x1p63) == INT64_MAX);',
+                               f'assert({f}(-0x1p63) == (U)INT64_MIN);',
+                               f'assert({f}(-1.75) == UINT64_MAX);',
+                               f'assert({f}(1.75) == 1);'])
+            else:
+                value, expected = {'fabs': (-3.75, 3.75), 'fsqrt': (16, 4),
+                                   'ffloor': (-3.75, -4), 'fceil': (-3.75, -3),
+                                   'ftrunc': (-3.75, -3)}[op]
+                checks.extend([f'assert({f}({value}) == {expected});', f'assert(isnan({f}(NAN)));'])
+                if op == 'fabs':
+                    checks.append(f'assert(!signbit({f}(-0.0)));')
+                else:
+                    checks.append(f'assert(signbit({f}(-0.0)));')
+            index += 1
+    records.extend(['META 8 -1 false -1 -1', 'ROOTS []', 'DATA []'])
+    source = tmp_path / 'float.ir'
+    source.write_text('\n'.join(records) + '\n')
+    out = tmp_path / 'generated'
+    manifest = translate(source, out)
+    harness = out / 'probe.c'
+    harness.write_text('\n'.join(checks + ['return 0;', '}']) + '\n')
+    binary = tmp_path / 'float-probe'
+    units = [out / name for name in manifest['units'] if name != 'runtime.c']
+    built = subprocess.run(['gcc', '-O2', '-fno-strict-aliasing', '-ffp-contract=off',
+                            '-Werror=implicit-function-declaration', *units, harness, '-lm', '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 0, ran.stdout + ran.stderr

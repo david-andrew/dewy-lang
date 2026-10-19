@@ -122,7 +122,8 @@ def translate(source: Path, out: Path) -> dict:
             elif op == 'fneg':
                 expr = f'-{va()}'
             elif op in ('fsqrt', 'ffloor', 'fceil', 'fabs', 'ftrunc'):
-                expr = f"{op[1:]}{('f' if ty == 2 else '')}({va()})"
+                function = 'fabs' if op == 'fabs' else op[1:]
+                expr = f"{function}{('f' if ty == 2 else '')}({va()})"
             elif op in ('fmin', 'fmax'):
                 expr = f"{va()} {('<' if op == 'fmin' else '>')} {vb()} ? {va()} : {vb()}"
             elif op in ('i2f', 'u2f', 'f2f'):
