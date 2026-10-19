@@ -59,6 +59,13 @@ def test_core_format_implementation_language(compiler, tmp_path):
 
 
 PROGRAMS = {
+    'keyword-ids': '''probe=(is:int64? isnt:int64? notin:int64)=>{
+let iffy=true and not false
+printl(iffy) printl(is isnt? int64) printl(isnt is? none)
+let λ=notin
+printl((is ?? 0) in? [20 21]) printl(λ notin? [22])
+return (is ?? 0)+λ}
+main=()=>{printl(probe(20 21 22)); return 0}''',
     'decimal-literals': '''main=()=>{
 printl(0d4_2.0_0E+0_0) printl(2.1(10+10))
 printl(0d18_446_744_073_709_551_615) printl(18_446_744_073_709_551_616)

@@ -23,6 +23,29 @@ dn_file = 0
 dn_angles = 0
 dn_depth = 0
 
+# Like the implementation-language lexer, classify interned words by ID. Names
+# added after this table cannot be keywords; formatting keeps its noninterning
+# path so editing a document does not grow the compiler's persistent name pool.
+dn_word_tokens: DewyToken[]
+dn_true_id = 0
+dn_false_id = 0
+dn_is_id = 0
+dn_isnt_id = 0
+dn_in_id = 0
+dn_notin_id = 0
+
+dn_init_words = ():
+    dn_true_id = intern("true")
+    dn_false_id = intern("false")
+    dn_is_id = intern("is")
+    dn_isnt_id = intern("isnt")
+    dn_in_id = intern("in")
+    dn_notin_id = intern("notin")
+    words = ["as", "and", "break", "const", "continue", "else", "from", "import", "if", "in", "let", "loop", "match", "not", "or", "return", "test", "transmute", "xor"]
+    loop word in words: intern(word)
+    dn_word_tokens = fill(DewyToken.none, names.len())
+    loop word in words: dn_word_tokens[intern(word)] = dn_token_kind(word)
+
 dn_error = (offset: int, message: str) -> int:
     fatal(mkpos(dn_file, offset), message)
     0
@@ -172,6 +195,7 @@ dn_lex_symbol = (source: str, at: int, stop: int) -> DewyToken:
     dn_single_token(source[at])
 
 dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLexeme[]:
+    if intern_names and dn_word_tokens.len() == 0: dn_init_words()
     source = files[file].src
     out: DewyLexeme[]
     i = begin
@@ -199,16 +223,29 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
         else if dn_ident_start(c):
             i += 1
             loop i < stop and dn_ident_part(source[i]): i += 1
-            if intern_names:
-                name = i32(intern_sub(source, start, i - start))
-                value = name_of(int(name))
-            else: value = source[start..i)
             kind = .identifier
-            if value == "true" or value == "false": kind = .boolean
-            if (value == "is" or value == "isnt" or value == "in" or value == "notin") and i < stop and source[i] == '?':
-                value += "?"
-                i += 1
-                kind = .op
+            if intern_names:
+                id = intern_sub(source, start, i - start)
+                name = i32(id)
+                if id < dn_word_tokens.len(): symbol = dn_word_tokens[id]
+                if id == dn_true_id or id == dn_false_id: kind = .boolean
+                if i < stop and source[i] == '?':
+                    query = DewyToken.none
+                    if id == dn_is_id: query = .is_type
+                    else if id == dn_isnt_id: query = .isnt_type
+                    else if id == dn_in_id: query = .contains
+                    else if id == dn_notin_id: query = .not_contains
+                    if query != .none:
+                        symbol = query
+                        kind = .op
+                        i += 1
+            else:
+                value = source[start..i)
+                if value == "true" or value == "false": kind = .boolean
+                if (value == "is" or value == "isnt" or value == "in" or value == "notin") and i < stop and source[i] == '?':
+                    value += "?"
+                    i += 1
+                    kind = .op
         else if c == '$':
             i += 1
             loop i < stop and dn_ident_part(source[i]): i += 1
@@ -250,7 +287,7 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
             if symbol == .none: dn_error(start, "unexpected character in Dewy source")
             value = dn_token_text(symbol)
             i += len(value)
-        if symbol == .none and (kind == .op or kind == .identifier): symbol = dn_token_kind(value)
+        if not intern_names and symbol == .none and (kind == .op or kind == .identifier): symbol = dn_token_kind(value)
         out.push(DewyLexeme(kind, name, start, i, spaced, newline, symbol))
         spaced = false
         newline = false

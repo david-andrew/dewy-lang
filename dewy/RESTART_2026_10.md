@@ -1074,6 +1074,36 @@ preserves patches and raw measurements for reconsideration alongside general
 loop improvements. The full suite was not run after the performance failure.
 [Experiments](audits/2026-10-19/cold-panic-experiments.json).
 
+## Classify Dewy words by interned ID
+
+The Dewy lexer now follows Sloppy's keyword-ID lookup: initialize the keyword
+table once, then classify identifiers with an indexed lookup. Boolean literals
+and question-mark word operators also use their interned IDs. This avoids
+retrieving and comparing the same keyword strings at every occurrence. The
+formatter keeps its noninterning path, so formatting a document does not add its
+names to the persistent compiler name pool. Language behavior is unchanged.
+
+An independent C bootstrap passes 292 existing quick checks; seven focused
+checks cover query operators beside ordinary bindings named `is`, `isnt` and
+`notin`, Unicode identifiers, contextual `test`, and formatting/execution on
+native and WebAssembly. The final full suite passes **5,923 checks in 194.34
+seconds**, with two workers.
+
+All **44** performance comparisons pass against the fixed reference and the
+preceding accepted compiler, retaining the initial 15 pairs and focused 31-pair
+follow-ups. Large default compilation takes **0.980×** the preceding stage's
+CPU time; release takes **0.984×**. Other build workloads are essentially flat.
+All eight runtime workloads match the accepted artifacts in both build modes,
+so the certificate skips repeated runtime timing while still checking every
+binary at boundary inputs and full size. No historical timing samples are
+substituted. Fresh C ratios are consequently unmeasured for this stage.
+
+The run measures about **69k fresh root lines/CPU-second** on the shared host;
+the 250k target and broad C/Rust runtime goal remain unmet. A fresh instruction
+profile identifies repeated parameter-ownership body scans and native emission
+as further costs to investigate.
+[Validation, measurements and profile](audits/2026-10-19/keyword-ids.json).
+
 ## Default optimization is a measured tradeoff
 
 An isolated experiment disabled default vectorization, local optimization, or

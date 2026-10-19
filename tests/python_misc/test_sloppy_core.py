@@ -24,6 +24,7 @@ from tools.sloppy_core.benchmark_types import record_source
 
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
+    'lexer-keyword-ids',
     'constant-local-once', 'numeric-sum-literal-exact', 'numeric-matrix-slices',
     'array-comparison-word-boundaries', 'array-comparison-string-blocks', 'sequence-value-protocol-nesting',
     'sequence-slice-bound-loop-local',
@@ -58,6 +59,14 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'lexer-keyword-ids': '''probe=(is:int64? isnt:int64? notin:int64):>int64=>{
+if false or not true return 1
+if (is is? none) or (isnt isnt? int64) return 2
+if not (is in? [20 21]) or notin notin? [22] return 3
+let iffy=is
+let λ=notin
+return iffy+λ}
+main=()=>probe(20 21 22)''',
     'optimizer-return-facts': """probe=(value:int64):>int64=>{
 if value=?0 return 11
 if value=?0 return 12
@@ -9991,7 +10000,7 @@ def test_core_new_unknown_template(compiler, tmp_path):
     assert not project.exists()
 
 
-@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('global-array-', 'closure-', 'game-camera-', 'game-polyline-', 'game-shadow-', 'game-font-', 'game-chart-', 'constant-', 'format-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
+@pytest.mark.parametrize('name', quick_parameters([*[name for name in CASES if name.startswith(('lexer-', 'global-array-', 'closure-', 'game-camera-', 'game-polyline-', 'game-shadow-', 'game-font-', 'game-chart-', 'constant-', 'format-', 'set-', 'json-', 'sort-', 'spread-', 'end-index-', 'numeric-', 'sequence-', 'slice-update-', 'range-index-', 'coalesce-', 'compound-', 'loop-else-', 'loop-label-', 'stored-range-', 'dictionary-', 'array-comparison-', 'fixed-array-', 'unit-range-', 'stepped-range-', 'optimizer-', 'power-', 'rational-', 'bigint-', 'overload-group-', 'generic-', 'match-', 'named-', 'argument-', 'conversion-', 'record-', 'default-reference-', 'comprehension-', 'unpack-'))], 'floor-literal-inference', 'unsigned-constant-math', 'narrow-integers', 'scientific', 'optional-managed-copy', 'optional-union', 'array-slices', 'slice-bound-side-effect', 'slice-replaced-source', 'grapheme-length', 'grapheme-index', 'grapheme-slices', 'grapheme-loop', 'grapheme-zipped-loop', 'grapheme-bound-side-effect', 'panic-ended-search', 'binary-literals', 'utf8-decode', 'utf8-copy'], QUICK_CASES))
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_value_web(value_batches, name, release):
     code, output = value_batches(name, release, 'wasm')
