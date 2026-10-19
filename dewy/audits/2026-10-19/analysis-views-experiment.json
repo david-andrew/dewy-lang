@@ -1,0 +1,131 @@
+{
+  "status": "deferred; compiler change reverted",
+  "patch": "diff --git a/core/compiler/x64.jo b/core/compiler/x64.jo\nindex ef02a939..fc7d3360 100644\n--- a/core/compiler/x64.jo\n+++ b/core/compiler/x64.jo\n@@ -408,22 +408,33 @@ analyze = ():\n             v_ndef[v] = 1\n             vloc[v] = LOC_CONST\n             vcval[v] = ir.kval[v]\n+    # These five buffers were freshly allocated above, all with nv elements.\n+    # They are neither shared nor resized in this pass. Check each IR register\n+    # once before accessing their private storage, rather than repeating the\n+    # same bounds and copy-on-write checks for every field of its live range.\n+    first = data(v_first) as *int\n+    last = data(v_last) as *int\n+    ndef = data(v_ndef) as *int\n+    nuse = data(v_nuse) as *int\n+    weight = data(v_weight) as *int\n     depth = 0\n     loop pos in 0.. and ins in ir.code:\n         d = ir_operands(ins)\n         w = 1 << (3 * min(depth, 6))\n         loop operand_index in [0..ir_use_count):\n             let u = ir_use(operand_index)\n-            if pos < v_first[u]: v_first[u] = pos\n-            if pos > v_last[u]: v_last[u] = pos\n-            v_nuse[u] += 1\n-            v_weight[u] += w\n+            if u < 0 or u >= nv: panic(\"invalid operand register in native analysis\")\n+            if pos < first[u]: first[u] = pos\n+            if pos > last[u]: last[u] = pos\n+            nuse[u] += 1\n+            weight[u] += w\n         if d >= 0:\n-            if pos < v_first[d]: v_first[d] = pos\n-            if pos > v_last[d]: v_last[d] = pos\n-            v_ndef[d] += 1\n-            v_weight[d] += w\n-            if v_ndef[d] == 1:\n+            if d >= nv: panic(\"invalid destination register in native analysis\")\n+            if pos < first[d]: first[d] = pos\n+            if pos > last[d]: last[d] = pos\n+            ndef[d] += 1\n+            weight[d] += w\n+            if ndef[d] == 1:\n                 op = ins.op\n                 if op == .iconst and fits32(ins.imm):\n                     vloc[d] = LOC_CONST\n@@ -438,7 +449,7 @@ analyze = ():\n                     vloc[d] = LOC_GLOBAL\n                     vgoff[d] = int(ins.imm)\n                     if op == .gaddr: vgkind[d] = 1\n-                else if op == .add and vloc[int(ins.a)] == LOC_SLOT and vloc[int(ins.b)] == LOC_CONST and v_ndef[int(ins.a)] == 1 and v_ndef[int(ins.b)] == 1:\n+                else if op == .add and vloc[int(ins.a)] == LOC_SLOT and vloc[int(ins.b)] == LOC_CONST and ndef[int(ins.a)] == 1 and ndef[int(ins.b)] == 1:\n                     vloc[d] = LOC_SLOT\n                     vslot[d] = vslot[int(ins.a)]\n                     vsoff[d] = vsoff[int(ins.a)] + vcval[int(ins.b)]\n",
+  "quick_log": "Building the compact core from the previous core\u2026\nCompiler ready: /var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792419645810522388/bin/dewy-core\nRunning the quick smoke suite (native/web, default/release).\nbringing up nodes...\nbringing up nodes...\n\n........................................................................ [ 16%]\n........................................................................ [ 33%]\n........................................................................ [ 50%]\n........................................................................ [ 67%]\n........................................................................ [ 84%]\n................................................................         [100%]\n424 passed in 14.91s\n",
+  "instruction_counts": {
+    "toolchains": {
+      "previous": {
+        "binary_sha256": "da937d997da8cd8f9cacb9cf6805f5faa0bd75c0ad0239570ec6ee9c471061d0",
+        "compiler_sources_sha256": "67b5a6b86ba38be21cf8fcd8108a31219c4edfccea10469a6f043a44e67bdf76",
+        "library_sha256": "a5c323101543f27835dab32f48dc861d7b20efcb3edcec153dfc4af955a6455e"
+      },
+      "candidate": {
+        "binary_sha256": "413de7cd703a4bc938aa3c1530f2a7a971c16f1572abe54ad438ec39852c5a91",
+        "compiler_sources_sha256": "3a9bf303759a44574d81b10bbb6a65a9bda2980941640c72a8344b70cf3b4c04",
+        "library_sha256": "a5c323101543f27835dab32f48dc861d7b20efcb3edcec153dfc4af955a6455e"
+      }
+    },
+    "status": "complete",
+    "instructions": {
+      "throughput-default": {
+        "previous": [
+          {
+            "instructions": 2494006445,
+            "enabled_ns": 612148601,
+            "running_ns": 612148601
+          },
+          {
+            "instructions": 2494006438,
+            "enabled_ns": 604522568,
+            "running_ns": 604522568
+          },
+          {
+            "instructions": 2494006440,
+            "enabled_ns": 612020203,
+            "running_ns": 612020203
+          }
+        ],
+        "candidate": [
+          {
+            "instructions": 2477097940,
+            "enabled_ns": 613885062,
+            "running_ns": 613885062
+          },
+          {
+            "instructions": 2477097934,
+            "enabled_ns": 614506162,
+            "running_ns": 614506162
+          },
+          {
+            "instructions": 2477097922,
+            "enabled_ns": 610803761,
+            "running_ns": 610803761
+          }
+        ]
+      },
+      "throughput-release": {
+        "previous": [
+          {
+            "instructions": 3517681769,
+            "enabled_ns": 803037331,
+            "running_ns": 803037331
+          },
+          {
+            "instructions": 3517681770,
+            "enabled_ns": 804393969,
+            "running_ns": 804393969
+          },
+          {
+            "instructions": 3517681765,
+            "enabled_ns": 802276450,
+            "running_ns": 802276450
+          }
+        ],
+        "candidate": [
+          {
+            "instructions": 3494867349,
+            "enabled_ns": 626525986,
+            "running_ns": 626525986
+          },
+          {
+            "instructions": 3494867211,
+            "enabled_ns": 491734174,
+            "running_ns": 491734174
+          },
+          {
+            "instructions": 3494867515,
+            "enabled_ns": 790865517,
+            "running_ns": 790865517
+          }
+        ]
+      },
+      "compiler-reference": {
+        "previous": [
+          {
+            "instructions": 7223437278,
+            "enabled_ns": 1658721621,
+            "running_ns": 1658721621
+          },
+          {
+            "instructions": 7223437264,
+            "enabled_ns": 1527006613,
+            "running_ns": 1527006613
+          },
+          {
+            "instructions": 7223437388,
+            "enabled_ns": 1679106625,
+            "running_ns": 1679106625
+          }
+        ],
+        "candidate": [
+          {
+            "instructions": 7166080565,
+            "enabled_ns": 1653244149,
+            "running_ns": 1653244149
+          },
+          {
+            "instructions": 7166080570,
+            "enabled_ns": 1651789838,
+            "running_ns": 1651789838
+          },
+          {
+            "instructions": 7166080598,
+            "enabled_ns": 1654616197,
+            "running_ns": 1654616197
+          }
+        ]
+      }
+    }
+  },
+  "reason": "Only 0.65\u20130.79% fewer retired instructions across three workloads. This narrow result does not justify additional pointer-lifetime invariants or a full stage campaign; no latency pilot/full gate was run. Seeking larger sources of repeated work."
+}

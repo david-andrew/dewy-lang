@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 
 from tools.sloppy_core.benchmark_apps import prepare_clock, prepare_source
-from tools.sloppy_core.benchmark_compile import ROOT, positive
+from tools.sloppy_core.benchmark_compile import ROOT, positive, sample_order
 
 
 def digest(path: Path) -> str:
@@ -80,17 +80,18 @@ def generate_dewy(count: int) -> str:
 
 
 def measure(dewy: Path, sloppy_root: Path, samples: int, functions: int,
-            candidate: Path | None = None) -> dict:
+            candidate: Path | None = None, shared_library: bool = True) -> dict:
     report = {
         'platform': platform.platform(),
         'cpu_affinity': sorted(os.sched_getaffinity(0)),
-        'method': 'Sequential alternating fresh builds, one emission worker, one discarded warmup; '
+        'method': 'Sequential fresh builds with rotating positions/directions, one emission worker, one discarded warmup; '
                   'warm filesystem caches. CPU = child user + system. Phase times are wall times. '
                   'Jo source is identical across compilers. Shared-library variants use Dewy library '
                   'snapshot because Dewy requires runtime helpers absent from Sloppy. '
                   'Source lines exclude libraries; the equivalent Dewy source has different formatting. '
                   'Compare time per workload, not only LOC/s. Libraries/binaries are snapshotted.',
         'samples': samples, 'generated_functions': functions,
+        'include_sloppy_shared_library': shared_library,
         'dewy_checkout': identity(ROOT), 'sloppy_checkout': identity(sloppy_root),
         'compilers': {}, 'libraries': {}, 'workloads': {},
     }
@@ -137,18 +138,17 @@ def measure(dewy: Path, sloppy_root: Path, samples: int, functions: int,
                                                ('records', jo_records, records)]:
             for mode in ['default', 'release']:
                 variants = {'sloppy-own': ('sloppy', 'sloppy', jo_source),
-                            'sloppy-shared': ('sloppy', 'dewy', jo_source),
                             'dewy-jo': ('dewy', 'dewy', jo_source),
                             'dewy-language': ('dewy', 'dewy', dewy_source)}
+                if shared_library:
+                    variants['sloppy-shared'] = ('sloppy', 'dewy', jo_source)
                 if candidate:
                     variants.update({'candidate-jo': ('candidate', 'dewy', jo_source),
                                      'candidate-language': ('candidate', 'dewy', dewy_source)})
                 rows = {name: [] for name in variants}
                 outputs = {}
                 for sample in range(samples + 1):
-                    order = list(variants)
-                    if sample % 2:
-                        order.reverse()
+                    order = sample_order(list(variants), sample)
                     for name in order:
                         compiler, library, source = variants[name]
                         run_env = {**env, 'SLOPPY_LIB': str(libraries[library]),
@@ -192,9 +192,7 @@ def measure(dewy: Path, sloppy_root: Path, samples: int, functions: int,
                                      for binary in outputs.values()]
                         assert len(set(checksums)) == 1, (count, checksums)
                     for sample in range(samples + 1):
-                        order = list(outputs)
-                        if sample % 2:
-                            order.reverse()
+                        order = sample_order(list(outputs), sample)
                         checksums = []
                         for name in order:
                             result = subprocess.check_output([str(outputs[name]), '1000000'], text=True, timeout=30)
@@ -225,7 +223,10 @@ if __name__ == '__main__':
     parser.add_argument('--samples', type=positive, default=5)
     parser.add_argument('--functions', type=positive, default=2000)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--no-shared-library', action='store_true',
+                        help='omit the cross-library variant when upstream runtime APIs have diverged')
     args = parser.parse_args()
     result = measure(args.dewy.resolve(strict=True), args.sloppy_root.resolve(strict=True),
-                     args.samples, args.functions, args.candidate.resolve(strict=True) if args.candidate else None)
+                     args.samples, args.functions, args.candidate.resolve(strict=True) if args.candidate else None,
+                     shared_library=not args.no_shared_library)
     args.output.write_text(json.dumps(result, indent=2) + '\n')

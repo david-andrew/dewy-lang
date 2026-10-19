@@ -5,6 +5,53 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Refreshed Sloppy comparison (2026-10-19)
+
+Ten rotating matched samples compare the current Sloppy binary with native and
+optional LTO Dewy hosts. On equivalent large programs, LTO Dewy takes **13.1%
+more CPU time in default mode** and **32.0% less in release mode** than Sloppy.
+The same-host comparison of Dewy versus equivalent Jo source costs **20.8%
+more in default mode / 17.5% more in release mode**. This points to frontend
+work as a more substantial opportunity than the small backend probes below.
+
+The record-update workload compiles **34.9% faster default / 43.4% faster
+release** than Sloppy; its generated kernel takes **36.5% / 79.6%** of Sloppy's
+runtime respectively. Release runtime is **87.0%** of the equivalent C kernel
+on this run. These are workload-specific paired ratios, not universal claims.
+
+Both languages call every generated function and produce matching checksums.
+The equivalent sources contain 44,005 Dewy versus 50,009 Jo lines, so elapsed
+CPU time per workload is the meaningful cross-language comparison. Dewy's
+median default build is 432 ms (about 102k root lines/CPU-second on this busy
+host), still below the 250k target. This should not be compared directly with
+the earlier 163k result under different host conditions.
+
+The tool now rotates sample positions/directions and supports explicitly
+omitting a cross-library variant: current Sloppy needs `__panic_unwrap_in`,
+which Dewy's library does not provide. Neither Sloppy nor its runtime was
+modified. Own-library results include product/runtime differences; recorded
+binary hashes identify the actual executables independently of checkout
+revisions. This diagnostic does not replace the fixed-reference stage gate or
+change the last accepted baseline. [Raw samples, identities, paired estimates
+and logs](audits/2026-10-19/sloppy-refresh.json).
+
+## Small compiler probes deferred (2026-10-19)
+
+Three additional source-level probes are reverted. Operand classification by a
+lookup table passed 424 quick checks but slightly increased instructions on the
+generated workloads; its seven-pair timings did not establish a broad gain.
+Local views over five private register-analysis arrays passed 424 quick checks
+and removed **0.65–0.79%** of instructions. A built-in-type prefix fast path also
+passed 424 quick checks and removed **0.43–1.16%**. Those latter two did not proceed
+to latency pilots or full gates: their small measured upside did not justify
+additional pointer-lifetime/type-initialization assumptions and another broad
+validation campaign. No compiler changes from these probes remain.
+
+[Operand-table patch and evidence](audits/2026-10-19/operand-table-experiment.json),
+[register-array views](audits/2026-10-19/analysis-views-experiment.json), and
+[built-in type resolution](audits/2026-10-19/prune-prefix-experiment.json)
+retain the exact experiments for future work.
+
 ## Optional cross-file compiler-host optimization (2026-10-19)
 
 `build_optimized_host --lto` additionally lets GCC optimize across generated C

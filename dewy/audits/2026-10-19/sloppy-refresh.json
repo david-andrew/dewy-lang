@@ -1,0 +1,1608 @@
+{
+  "status": "diagnostic comparison, not an accepted performance stage",
+  "scope": "Current Sloppy binary and own library versus Dewy native and optional LTO compiler hosts. Binary hashes identify executables independently from checkout revisions. Own-library differences are included. Equivalent source algorithms use different line counts.",
+  "limitations": [
+    "Shared-library variant omitted: current Sloppy requires __panic_unwrap_in absent from Dewy library.",
+    "No conclusion about all programs or all runtime kernels. Host load and CPU frequency vary; paired rotating samples mitigate but do not eliminate noise.",
+    "The last accepted whole-stage baseline remains cd07ea34."
+  ],
+  "report": {
+    "platform": "Linux-6.18.52-ogc1.1.fc44.x86_64-x86_64-with-glibc2.43",
+    "cpu_affinity": [
+      1
+    ],
+    "method": "Sequential fresh builds with rotating positions/directions, one emission worker, one discarded warmup; warm filesystem caches. CPU = child user + system. Phase times are wall times. Jo source is identical across compilers. Shared-library variants use Dewy library snapshot because Dewy requires runtime helpers absent from Sloppy. Source lines exclude libraries; the equivalent Dewy source has different formatting. Compare time per workload, not only LOC/s. Libraries/binaries are snapshotted.",
+    "samples": 10,
+    "generated_functions": 2000,
+    "include_sloppy_shared_library": false,
+    "dewy_checkout": {
+      "revision": "2a64f1870441ca16a6fd909908342b0605575d0a",
+      "status": " M tools/sloppy_core/benchmark_sloppy.py\n?? dewy/audits/2026-10-19/analysis-views-experiment.json\n?? dewy/audits/2026-10-19/operand-table-experiment.json\n?? dewy/audits/2026-10-19/prune-prefix-experiment.json\n",
+      "diff_sha256": "0c0abda0d22e8b2c62fe78267c65705c71cd6ef53f09583ea262a13c53356e47"
+    },
+    "sloppy_checkout": {
+      "revision": "437e60530fd5570cce4cdcd0be7919cf069ecd3a",
+      "status": " M compiler/check.jo\n M lib/http.jo\n M lib/std/task.jo\n M tests/t/http_tasks.jo\n M tests/t/tasks.jo\n M tests/t/tasks.out\n",
+      "diff_sha256": "0726ec05e0583ee4f24cb8098e6a0958b1c055cb19392ff8bdfc9659eb998292"
+    },
+    "compilers": {
+      "sloppy": {
+        "source": "/var/home/david/dev/slop-lang/bin/sloppy",
+        "sha256": "3da2474515d9b32f4c0881118732940426ea0e83822b56cf6417affe67b7ed0f"
+      },
+      "dewy": {
+        "source": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792415673747283097/bin/dewy-core",
+        "sha256": "da937d997da8cd8f9cacb9cf6805f5faa0bd75c0ad0239570ec6ee9c471061d0"
+      },
+      "candidate": {
+        "source": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792418000000000000/bin/dewy-core",
+        "sha256": "150551c767b5693d79088718931a2e08143844d6ae62bdd96559a0cdbb0d6655"
+      }
+    },
+    "libraries": {
+      "sloppy": {
+        "source": "/var/home/david/dev/slop-lang/lib",
+        "snapshot_sha256": "448b5b84a729510442fb59ff228b87861acf755f118bab465cd46a293b3f1523"
+      },
+      "dewy": {
+        "source": "/var/home/david/dev/dewy-lang/core/lib",
+        "snapshot_sha256": "a5c323101543f27835dab32f48dc861d7b20efcb3edcec153dfc4af955a6455e"
+      }
+    },
+    "workloads": {
+      "synthetic-default": {
+        "variants": {
+          "sloppy-own": {
+            "compiler": "sloppy",
+            "library": "sloppy",
+            "source_sha256": "f3226fd3c3909a76024581b256eb682ded78d9de5d946b0a02340ba814db0991",
+            "source_lines": 50009,
+            "samples": [
+              {
+                "wall_seconds": 0.4339462410134729,
+                "cpu_seconds": 0.37583400000000033,
+                "phases": "check 214.4 ms, lower+codegen 196.9 ms, write 14.3 ms; 2183 functions, 365011 nodes, 1965830 bytes of code"
+              },
+              {
+                "wall_seconds": 0.43740348698338494,
+                "cpu_seconds": 0.3743230000000005,
+                "phases": "check 212.6 ms, lower+codegen 206.7 ms, write 9.7 ms; 2183 functions, 365011 nodes, 1965830 bytes of code"
+              },
+              {
+                "wall_seconds": 0.3939337609917857,
+                "cpu_seconds": 0.372803999999999,
+                "phases": "check 193.1 ms, lower+codegen 185.6 ms, write 9.9 ms; 2183 functions, 365011 nodes, 1965830 bytes of code"
+              },
+              {
+                "wall_seconds": 0.4290099109930452,
+                "cpu_seconds": 0.3774409999999979,
+                "phases": "check 229.4 ms, lower+codegen 181.4 ms, write 10.0 ms; 2183 functions, 365011 nodes, 1965830 bytes of code"
+              },
+              {
+                "wall_seconds": 0.45295198098756373,
+                "cpu_seconds": 0.382741999999999,
+                "phases": "check 262.3 ms, lower+codegen 173.1 ms, write 9.7 ms; 2183 functions, 365011 nodes, 1965830 bytes of code"
+              },
+              {
+                "wall_seconds": 0.4210785739996936,
+                "cpu_seconds": 0.38394799999999996,
+                "phases": "check 229.3 ms, lower+codegen 173.4 ms, write 11.0 ms; 2183 functions, 365011 nodes, 1965830 bytes of code"
+              },
+              {
+                "wall_seconds": 0.47692167898640037,
+                "cpu_seconds": 0.37208499999999867,
+                "phases": "check 275.8 ms, lower+codegen 183.6 ms, write 9.7 ms; 2183 functions, 365011 nodes, 1965830 bytes of code"
+              },
+              {
+                "wall_seconds": 0.3979414159839507,
+                "cpu_seconds": 0.38601800000000297,
+                "phases": "check 198.7 ms, lower+codegen 182.5 ms, write 11.0 ms; 2183 functions, 365011 nodes, 1965830 bytes of code"
+              },
+              {
+                "wall_seconds": 0.3979357270000037,
+                "cpu_seconds": 0.3873219999999997,
+                "phases": "check 202.2 ms, lower+codegen 175.9 ms, write 11.6 ms; 2183 functions, 365011 nodes, 1965830 bytes of code"
+              },
+              {
+                "wall_seconds": 0.4398474610061385,
+                "cpu_seconds": 0.38574199999999936,
+                "phases": "check 238.2 ms, lower+codegen 182.2 ms, write 11.0 ms; 2183 functions, 365011 nodes, 1965830 bytes of code"
+              }
+            ],
+            "median_cpu_seconds": 0.3800914999999985,
+            "median_wall_seconds": 0.43147807600325905
+          },
+          "dewy-jo": {
+            "compiler": "dewy",
+            "library": "dewy",
+            "source_sha256": "f3226fd3c3909a76024581b256eb682ded78d9de5d946b0a02340ba814db0991",
+            "source_lines": 50009,
+            "samples": [
+              {
+                "wall_seconds": 0.514624317002017,
+                "cpu_seconds": 0.46818499999999996,
+                "phases": "check 200.7 ms, lower+codegen 297.7 ms, write 7.0 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.5299408590071835,
+                "cpu_seconds": 0.47952099999999986,
+                "phases": "check 199.6 ms, lower+codegen 311.8 ms, write 7.7 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.5409631859802175,
+                "cpu_seconds": 0.4739060000000005,
+                "phases": "check 216.0 ms, lower+codegen 307.1 ms, write 6.9 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.5606309620197862,
+                "cpu_seconds": 0.48551200000000116,
+                "phases": "check 204.5 ms, lower+codegen 340.2 ms, write 7.0 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.5209403120097704,
+                "cpu_seconds": 0.47100900000000145,
+                "phases": "check 208.6 ms, lower+codegen 294.4 ms, write 7.0 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.5990998990018852,
+                "cpu_seconds": 0.5062919999999987,
+                "phases": "check 245.9 ms, lower+codegen 334.6 ms, write 10.0 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.5536640539939981,
+                "cpu_seconds": 0.49343000000000137,
+                "phases": "check 182.8 ms, lower+codegen 352.1 ms, write 7.2 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.5353855970024597,
+                "cpu_seconds": 0.507331999999997,
+                "phases": "check 203.7 ms, lower+codegen 315.6 ms, write 7.5 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.6099477429816034,
+                "cpu_seconds": 0.5027009999999996,
+                "phases": "check 268.5 ms, lower+codegen 322.3 ms, write 7.1 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.5435062909964472,
+                "cpu_seconds": 0.512895999999998,
+                "phases": "check 192.3 ms, lower+codegen 335.1 ms, write 7.1 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.48947100000000127,
+            "median_wall_seconds": 0.5422347384883324
+          },
+          "dewy-language": {
+            "compiler": "dewy",
+            "library": "dewy",
+            "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+            "source_lines": 44005,
+            "samples": [
+              {
+                "wall_seconds": 0.6392583739943802,
+                "cpu_seconds": 0.5857190000000001,
+                "phases": "check 316.4 ms, lower+codegen 302.6 ms, write 9.4 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.7163088730012532,
+                "cpu_seconds": 0.5766840000000006,
+                "phases": "check 387.3 ms, lower+codegen 309.1 ms, write 9.6 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.6830714489915408,
+                "cpu_seconds": 0.590827,
+                "phases": "check 335.9 ms, lower+codegen 327.0 ms, write 9.4 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.6642603310174309,
+                "cpu_seconds": 0.6122630000000011,
+                "phases": "check 317.3 ms, lower+codegen 326.3 ms, write 9.5 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.5919506069913041,
+                "cpu_seconds": 0.563748999999999,
+                "phases": "check 284.4 ms, lower+codegen 286.6 ms, write 9.7 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.712099958996987,
+                "cpu_seconds": 0.6005610000000008,
+                "phases": "check 281.9 ms, lower+codegen 403.9 ms, write 14.9 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.6661756350076757,
+                "cpu_seconds": 0.6129659999999959,
+                "phases": "check 327.8 ms, lower+codegen 319.5 ms, write 9.7 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.6546880730020348,
+                "cpu_seconds": 0.6103320000000019,
+                "phases": "check 304.7 ms, lower+codegen 329.4 ms, write 9.7 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.6679391189827584,
+                "cpu_seconds": 0.6166360000000017,
+                "phases": "check 304.0 ms, lower+codegen 344.1 ms, write 9.6 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.6963871780026238,
+                "cpu_seconds": 0.6283120000000002,
+                "phases": "check 343.6 ms, lower+codegen 329.9 ms, write 9.8 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.6054465000000013,
+            "median_wall_seconds": 0.667057376995217
+          },
+          "candidate-jo": {
+            "compiler": "candidate",
+            "library": "dewy",
+            "source_sha256": "f3226fd3c3909a76024581b256eb682ded78d9de5d946b0a02340ba814db0991",
+            "source_lines": 50009,
+            "samples": [
+              {
+                "wall_seconds": 0.3879523499927018,
+                "cpu_seconds": 0.355156,
+                "phases": "check 137.6 ms, lower+codegen 233.8 ms, write 7.0 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.4145693029859103,
+                "cpu_seconds": 0.34089600000000025,
+                "phases": "check 153.7 ms, lower+codegen 243.8 ms, write 7.2 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.4889955949911382,
+                "cpu_seconds": 0.3493880000000006,
+                "phases": "check 143.4 ms, lower+codegen 328.7 ms, write 10.3 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.3965138210041914,
+                "cpu_seconds": 0.35301000000000016,
+                "phases": "check 128.2 ms, lower+codegen 253.7 ms, write 6.9 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.4046916849911213,
+                "cpu_seconds": 0.35859599999999925,
+                "phases": "check 151.2 ms, lower+codegen 237.4 ms, write 6.8 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.39994201000081375,
+                "cpu_seconds": 0.36222399999999877,
+                "phases": "check 148.6 ms, lower+codegen 234.8 ms, write 6.9 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.3848985670192633,
+                "cpu_seconds": 0.3589730000000003,
+                "phases": "check 129.2 ms, lower+codegen 239.4 ms, write 6.9 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.4598432769998908,
+                "cpu_seconds": 0.3688019999999974,
+                "phases": "check 171.2 ms, lower+codegen 271.0 ms, write 6.9 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.49993492700741626,
+                "cpu_seconds": 0.37231099999999917,
+                "phases": "check 180.8 ms, lower+codegen 302.6 ms, write 7.0 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.38114084699191153,
+                "cpu_seconds": 0.3727490000000018,
+                "phases": "check 133.0 ms, lower+codegen 234.0 ms, write 6.9 ms; 2160 functions, 320323 nodes, 1515273 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.3587844999999998,
+            "median_wall_seconds": 0.4023168474959675
+          },
+          "candidate-language": {
+            "compiler": "candidate",
+            "library": "dewy",
+            "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+            "source_lines": 44005,
+            "samples": [
+              {
+                "wall_seconds": 0.48294791200896725,
+                "cpu_seconds": 0.4336009999999999,
+                "phases": "check 226.4 ms, lower+codegen 238.4 ms, write 8.8 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.4544856330030598,
+                "cpu_seconds": 0.41150599999999954,
+                "phases": "check 209.1 ms, lower+codegen 219.9 ms, write 18.6 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.43390706498757936,
+                "cpu_seconds": 0.414147,
+                "phases": "check 197.1 ms, lower+codegen 218.7 ms, write 8.7 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.5127555939834565,
+                "cpu_seconds": 0.4192470000000005,
+                "phases": "check 278.3 ms, lower+codegen 216.5 ms, write 8.6 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.4496189719939139,
+                "cpu_seconds": 0.4357080000000001,
+                "phases": "check 202.4 ms, lower+codegen 230.3 ms, write 8.7 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.4937997829983942,
+                "cpu_seconds": 0.4312210000000005,
+                "phases": "check 222.5 ms, lower+codegen 252.1 ms, write 9.4 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.4569904600211885,
+                "cpu_seconds": 0.4364900000000025,
+                "phases": "check 213.5 ms, lower+codegen 226.5 ms, write 9.6 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.5196308660088107,
+                "cpu_seconds": 0.4469839999999985,
+                "phases": "check 220.4 ms, lower+codegen 280.3 ms, write 11.0 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.4910429260053206,
+                "cpu_seconds": 0.4501519999999988,
+                "phases": "check 236.9 ms, lower+codegen 236.5 ms, write 8.9 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.35888595500728115,
+                "cpu_seconds": 0.35407400000000155,
+                "phases": "check 201.5 ms, lower+codegen 145.4 ms, write 6.2 ms; 2165 functions, 347132 nodes, 1550201 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.4324110000000002,
+            "median_wall_seconds": 0.46996918601507787
+          }
+        },
+        "checksums": {
+          "sloppy-own": 102380577.897,
+          "dewy-jo": 102380577.897,
+          "dewy-language": 102380577.8970889,
+          "candidate-jo": 102380577.897,
+          "candidate-language": 102380577.8970889
+        }
+      },
+      "synthetic-release": {
+        "variants": {
+          "sloppy-own": {
+            "compiler": "sloppy",
+            "library": "sloppy",
+            "source_sha256": "f3226fd3c3909a76024581b256eb682ded78d9de5d946b0a02340ba814db0991",
+            "source_lines": 50009,
+            "samples": [
+              {
+                "wall_seconds": 0.8769367579952814,
+                "cpu_seconds": 0.8549439999999966,
+                "phases": "check 201.5 ms, lower+codegen 660.2 ms, write 9.0 ms; 2184 functions, 365044 nodes, 1744006 bytes of code"
+              },
+              {
+                "wall_seconds": 1.079336880997289,
+                "cpu_seconds": 0.8291580000000018,
+                "phases": "check 269.4 ms, lower+codegen 792.4 ms, write 9.3 ms; 2184 functions, 365044 nodes, 1744006 bytes of code"
+              },
+              {
+                "wall_seconds": 0.8787435539998114,
+                "cpu_seconds": 0.838115000000001,
+                "phases": "check 199.8 ms, lower+codegen 663.4 ms, write 9.1 ms; 2184 functions, 365044 nodes, 1744006 bytes of code"
+              },
+              {
+                "wall_seconds": 0.9005985629919451,
+                "cpu_seconds": 0.8535030000000012,
+                "phases": "check 220.1 ms, lower+codegen 664.6 ms, write 8.9 ms; 2184 functions, 365044 nodes, 1744006 bytes of code"
+              },
+              {
+                "wall_seconds": 0.9135648380033672,
+                "cpu_seconds": 0.849636999999996,
+                "phases": "check 249.2 ms, lower+codegen 646.7 ms, write 8.9 ms; 2184 functions, 365044 nodes, 1744006 bytes of code"
+              },
+              {
+                "wall_seconds": 0.8771508700156119,
+                "cpu_seconds": 0.8517909999999964,
+                "phases": "check 207.5 ms, lower+codegen 654.1 ms, write 9.0 ms; 2184 functions, 365044 nodes, 1744006 bytes of code"
+              },
+              {
+                "wall_seconds": 0.9442080350127071,
+                "cpu_seconds": 0.8380930000000069,
+                "phases": "check 248.4 ms, lower+codegen 673.6 ms, write 11.5 ms; 2184 functions, 365044 nodes, 1744006 bytes of code"
+              },
+              {
+                "wall_seconds": 0.9135026279836893,
+                "cpu_seconds": 0.8312329999999983,
+                "phases": "check 212.5 ms, lower+codegen 684.7 ms, write 9.0 ms; 2184 functions, 365044 nodes, 1744006 bytes of code"
+              },
+              {
+                "wall_seconds": 0.8919458729797043,
+                "cpu_seconds": 0.8205340000000056,
+                "phases": "check 226.4 ms, lower+codegen 647.0 ms, write 9.2 ms; 2184 functions, 365044 nodes, 1744006 bytes of code"
+              },
+              {
+                "wall_seconds": 0.9862729629967362,
+                "cpu_seconds": 0.8555010000000021,
+                "phases": "check 202.1 ms, lower+codegen 762.1 ms, write 11.9 ms; 2184 functions, 365044 nodes, 1744006 bytes of code"
+              }
+            ],
+            "median_cpu_seconds": 0.8438759999999985,
+            "median_wall_seconds": 0.9070505954878172
+          },
+          "dewy-jo": {
+            "compiler": "dewy",
+            "library": "dewy",
+            "source_sha256": "f3226fd3c3909a76024581b256eb682ded78d9de5d946b0a02340ba814db0991",
+            "source_lines": 50009,
+            "samples": [
+              {
+                "wall_seconds": 0.9377909190079663,
+                "cpu_seconds": 0.8573229999999992,
+                "phases": "check 206.3 ms, lower+codegen 679.7 ms, write 25.6 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.6983576920174528,
+                "cpu_seconds": 0.643876000000001,
+                "phases": "check 195.0 ms, lower+codegen 486.9 ms, write 7.6 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.7005276169802528,
+                "cpu_seconds": 0.6721409999999981,
+                "phases": "check 197.8 ms, lower+codegen 482.5 ms, write 7.6 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.6882112780003808,
+                "cpu_seconds": 0.6740629999999963,
+                "phases": "check 180.4 ms, lower+codegen 490.9 ms, write 7.6 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.7173438599857036,
+                "cpu_seconds": 0.6770170000000029,
+                "phases": "check 209.3 ms, lower+codegen 491.1 ms, write 7.7 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.7680274239974096,
+                "cpu_seconds": 0.6774430000000007,
+                "phases": "check 186.2 ms, lower+codegen 564.3 ms, write 7.7 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.6938329779950436,
+                "cpu_seconds": 0.6748769999999977,
+                "phases": "check 180.3 ms, lower+codegen 495.2 ms, write 8.3 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.7265377159928903,
+                "cpu_seconds": 0.6699810000000039,
+                "phases": "check 213.3 ms, lower+codegen 496.4 ms, write 7.6 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.6730574970133603,
+                "cpu_seconds": 0.6425610000000006,
+                "phases": "check 182.0 ms, lower+codegen 471.1 ms, write 7.9 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.849732088012388,
+                "cpu_seconds": 0.714542999999999,
+                "phases": "check 254.7 ms, lower+codegen 574.3 ms, write 7.9 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.674469999999997,
+            "median_wall_seconds": 0.7089357384829782
+          },
+          "dewy-language": {
+            "compiler": "dewy",
+            "library": "dewy",
+            "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+            "source_lines": 44005,
+            "samples": [
+              {
+                "wall_seconds": 1.7757042850134894,
+                "cpu_seconds": 1.3555570000000026,
+                "phases": "check 511.9 ms, lower+codegen 1216.8 ms, write 21.1 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 1.2159770900034346,
+                "cpu_seconds": 1.0248999999999988,
+                "phases": "check 318.4 ms, lower+codegen 873.1 ms, write 11.4 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.8419414880045224,
+                "cpu_seconds": 0.7741949999999966,
+                "phases": "check 334.2 ms, lower+codegen 485.9 ms, write 10.3 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.8800750380032696,
+                "cpu_seconds": 0.8068960000000036,
+                "phases": "check 306.1 ms, lower+codegen 538.6 ms, write 19.4 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.9405449030164164,
+                "cpu_seconds": 0.8044510000000025,
+                "phases": "check 400.2 ms, lower+codegen 520.3 ms, write 10.5 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.8314776190090925,
+                "cpu_seconds": 0.8059179999999944,
+                "phases": "check 302.4 ms, lower+codegen 506.9 ms, write 10.8 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.9113672520034015,
+                "cpu_seconds": 0.7954720000000046,
+                "phases": "check 342.0 ms, lower+codegen 549.5 ms, write 10.5 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.8020378119836096,
+                "cpu_seconds": 0.7531829999999946,
+                "phases": "check 299.7 ms, lower+codegen 481.8 ms, write 10.9 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.8428490840015002,
+                "cpu_seconds": 0.7867840000000035,
+                "phases": "check 310.9 ms, lower+codegen 509.3 ms, write 13.6 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.8809416849981062,
+                "cpu_seconds": 0.8172179999999987,
+                "phases": "check 307.0 ms, lower+codegen 551.0 ms, write 10.8 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.8051844999999984,
+            "median_wall_seconds": 0.8805083615006879
+          },
+          "candidate-jo": {
+            "compiler": "candidate",
+            "library": "dewy",
+            "source_sha256": "f3226fd3c3909a76024581b256eb682ded78d9de5d946b0a02340ba814db0991",
+            "source_lines": 50009,
+            "samples": [
+              {
+                "wall_seconds": 1.0799789240118116,
+                "cpu_seconds": 0.913055,
+                "phases": "check 329.8 ms, lower+codegen 714.7 ms, write 7.9 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.5884612310037483,
+                "cpu_seconds": 0.48449699999999885,
+                "phases": "check 154.4 ms, lower+codegen 406.4 ms, write 14.8 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.5237659120175522,
+                "cpu_seconds": 0.47050999999999776,
+                "phases": "check 158.7 ms, lower+codegen 349.8 ms, write 7.5 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.5518046480137855,
+                "cpu_seconds": 0.49346900000000327,
+                "phases": "check 172.6 ms, lower+codegen 362.0 ms, write 7.6 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.5322912429983262,
+                "cpu_seconds": 0.48748500000000705,
+                "phases": "check 147.6 ms, lower+codegen 362.6 ms, write 10.2 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.49598747098934837,
+                "cpu_seconds": 0.48807200000000517,
+                "phases": "check 129.1 ms, lower+codegen 351.8 ms, write 7.5 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.5432199790084269,
+                "cpu_seconds": 0.48520099999999733,
+                "phases": "check 169.3 ms, lower+codegen 357.9 ms, write 7.5 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.4897020859934855,
+                "cpu_seconds": 0.4745840000000028,
+                "phases": "check 136.1 ms, lower+codegen 337.2 ms, write 7.6 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.5353087659750599,
+                "cpu_seconds": 0.47647999999999513,
+                "phases": "check 150.4 ms, lower+codegen 367.9 ms, write 7.5 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              },
+              {
+                "wall_seconds": 0.5449458060029428,
+                "cpu_seconds": 0.4940500000000023,
+                "phases": "check 133.9 ms, lower+codegen 392.0 ms, write 7.6 ms; 2160 functions, 320323 nodes, 1728073 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 86070 implementation lines (2631107 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.4863430000000022,
+            "median_wall_seconds": 0.5392643724917434
+          },
+          "candidate-language": {
+            "compiler": "candidate",
+            "library": "dewy",
+            "source_sha256": "77648268ca6aba75ca28b6111fe7e2d7e09674d1670af122a7094e072174ad95",
+            "source_lines": 44005,
+            "samples": [
+              {
+                "wall_seconds": 0.6103282760013826,
+                "cpu_seconds": 0.5885840000000004,
+                "phases": "check 214.7 ms, lower+codegen 375.6 ms, write 10.3 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.6477125009987503,
+                "cpu_seconds": 0.5834170000000021,
+                "phases": "check 239.9 ms, lower+codegen 383.9 ms, write 10.0 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.5785033789870795,
+                "cpu_seconds": 0.5708970000000018,
+                "phases": "check 198.5 ms, lower+codegen 362.4 ms, write 9.6 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.5966333719843533,
+                "cpu_seconds": 0.5572930000000018,
+                "phases": "check 210.3 ms, lower+codegen 365.0 ms, write 13.9 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.6343592480116058,
+                "cpu_seconds": 0.5775479999999962,
+                "phases": "check 242.6 ms, lower+codegen 371.1 ms, write 10.0 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.5961344490060583,
+                "cpu_seconds": 0.5803430000000072,
+                "phases": "check 206.0 ms, lower+codegen 372.3 ms, write 9.7 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.6739926360023674,
+                "cpu_seconds": 0.5656270000000019,
+                "phases": "check 271.3 ms, lower+codegen 379.2 ms, write 14.3 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.5965241529920604,
+                "cpu_seconds": 0.5496049999999975,
+                "phases": "check 203.3 ms, lower+codegen 376.1 ms, write 9.6 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.6568013960204553,
+                "cpu_seconds": 0.5714479999999966,
+                "phases": "check 272.5 ms, lower+codegen 366.7 ms, write 9.8 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              },
+              {
+                "wall_seconds": 0.597228211001493,
+                "cpu_seconds": 0.5752370000000022,
+                "phases": "check 205.4 ms, lower+codegen 373.4 ms, write 9.7 ms; 2167 functions, 347134 nodes, 1779385 bytes of code\nsources: 70 files, 44005 Dewy lines (1099549 bytes), 36061 implementation lines (1427564 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.5733424999999994,
+            "median_wall_seconds": 0.6037782435014378
+          }
+        },
+        "checksums": {
+          "sloppy-own": 102380577.897,
+          "dewy-jo": 102380577.897,
+          "dewy-language": 102380577.8970889,
+          "candidate-jo": 102380577.897,
+          "candidate-language": 102380577.8970889
+        }
+      },
+      "records-default": {
+        "variants": {
+          "sloppy-own": {
+            "compiler": "sloppy",
+            "library": "sloppy",
+            "source_sha256": "382cb037a7b88015b81cd8e9ead7fa4bc3ba1bdcec78c73a1f463343b2ed050e",
+            "source_lines": 59,
+            "samples": [
+              {
+                "wall_seconds": 0.08595366100780666,
+                "cpu_seconds": 0.05888499999999386,
+                "phases": "check 67.7 ms, lower+codegen 13.8 ms, write 1.1 ms; 190 functions, 103399 nodes, 104555 bytes of code"
+              },
+              {
+                "wall_seconds": 0.08721431897720322,
+                "cpu_seconds": 0.06007199999999635,
+                "phases": "check 62.0 ms, lower+codegen 18.7 ms, write 1.1 ms; 190 functions, 103399 nodes, 104555 bytes of code"
+              },
+              {
+                "wall_seconds": 0.07739743299316615,
+                "cpu_seconds": 0.06005500000000641,
+                "phases": "check 59.2 ms, lower+codegen 13.6 ms, write 1.4 ms; 190 functions, 103399 nodes, 104555 bytes of code"
+              },
+              {
+                "wall_seconds": 0.08244643098441884,
+                "cpu_seconds": 0.059347999999996404,
+                "phases": "check 60.3 ms, lower+codegen 15.9 ms, write 1.1 ms; 190 functions, 103399 nodes, 104555 bytes of code"
+              },
+              {
+                "wall_seconds": 0.07689007799490355,
+                "cpu_seconds": 0.05997299999999317,
+                "phases": "check 60.2 ms, lower+codegen 10.3 ms, write 1.1 ms; 190 functions, 103399 nodes, 104555 bytes of code"
+              },
+              {
+                "wall_seconds": 0.05715886899270117,
+                "cpu_seconds": 0.0546220000000055,
+                "phases": "check 42.9 ms, lower+codegen 10.1 ms, write 1.1 ms; 190 functions, 103399 nodes, 104555 bytes of code"
+              },
+              {
+                "wall_seconds": 0.08550283900694922,
+                "cpu_seconds": 0.05712700000000748,
+                "phases": "check 53.9 ms, lower+codegen 22.0 ms, write 5.1 ms; 190 functions, 103399 nodes, 104555 bytes of code"
+              },
+              {
+                "wall_seconds": 0.0916543529892806,
+                "cpu_seconds": 0.059745999999998745,
+                "phases": "check 71.7 ms, lower+codegen 16.0 ms, write 1.1 ms; 190 functions, 103399 nodes, 104555 bytes of code"
+              },
+              {
+                "wall_seconds": 0.07680586699279957,
+                "cpu_seconds": 0.05936499999999967,
+                "phases": "check 60.3 ms, lower+codegen 10.3 ms, write 1.2 ms; 190 functions, 103399 nodes, 104555 bytes of code"
+              },
+              {
+                "wall_seconds": 0.07193363999249414,
+                "cpu_seconds": 0.05933400000000599,
+                "phases": "check 54.8 ms, lower+codegen 10.3 ms, write 1.1 ms; 190 functions, 103399 nodes, 104555 bytes of code"
+              }
+            ],
+            "median_cpu_seconds": 0.059356499999998036,
+            "median_wall_seconds": 0.0799219319887925
+          },
+          "dewy-jo": {
+            "compiler": "dewy",
+            "library": "dewy",
+            "source_sha256": "382cb037a7b88015b81cd8e9ead7fa4bc3ba1bdcec78c73a1f463343b2ed050e",
+            "source_lines": 59,
+            "samples": [
+              {
+                "wall_seconds": 0.07071212399750948,
+                "cpu_seconds": 0.050171000000003296,
+                "phases": "check 42.4 ms, lower+codegen 21.3 ms, write 0.7 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.07273414501105435,
+                "cpu_seconds": 0.05132700000000234,
+                "phases": "check 50.7 ms, lower+codegen 14.8 ms, write 0.7 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.07108482398325577,
+                "cpu_seconds": 0.05040199999999828,
+                "phases": "check 42.2 ms, lower+codegen 20.3 ms, write 0.7 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.06614627901581116,
+                "cpu_seconds": 0.050225999999990556,
+                "phases": "check 45.0 ms, lower+codegen 15.7 ms, write 0.7 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.0630035920185037,
+                "cpu_seconds": 0.04662999999999684,
+                "phases": "check 38.5 ms, lower+codegen 16.2 ms, write 0.6 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.07044548500562087,
+                "cpu_seconds": 0.04977699999999441,
+                "phases": "check 44.7 ms, lower+codegen 18.8 ms, write 0.6 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.07158801998593844,
+                "cpu_seconds": 0.04945600000000461,
+                "phases": "check 45.1 ms, lower+codegen 20.1 ms, write 0.7 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.06533870499697514,
+                "cpu_seconds": 0.04955499999999269,
+                "phases": "check 45.4 ms, lower+codegen 14.4 ms, write 0.6 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.07028665399411693,
+                "cpu_seconds": 0.050245000000001205,
+                "phases": "check 44.2 ms, lower+codegen 18.5 ms, write 1.3 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.05267555298632942,
+                "cpu_seconds": 0.05000799999999561,
+                "phases": "check 32.8 ms, lower+codegen 14.0 ms, write 0.6 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.050089499999999454,
+            "median_wall_seconds": 0.0703660694998689
+          },
+          "dewy-language": {
+            "compiler": "dewy",
+            "library": "dewy",
+            "source_sha256": "2310abf4a2bd5f71e93bc72e34825384b0a49866645f6f0fbfc25b781824d711",
+            "source_lines": 60,
+            "samples": [
+              {
+                "wall_seconds": 0.05583402901538648,
+                "cpu_seconds": 0.049630000000011165,
+                "phases": "check 33.9 ms, lower+codegen 13.9 ms, write 0.6 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.059945038985461,
+                "cpu_seconds": 0.04980300000000781,
+                "phases": "check 39.2 ms, lower+codegen 14.0 ms, write 0.6 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.05296850501326844,
+                "cpu_seconds": 0.048765999999998755,
+                "phases": "check 34.6 ms, lower+codegen 13.1 ms, write 0.7 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.062256241973955184,
+                "cpu_seconds": 0.04931500000000266,
+                "phases": "check 40.2 ms, lower+codegen 14.0 ms, write 0.6 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.07064567398629151,
+                "cpu_seconds": 0.051463000000000036,
+                "phases": "check 44.2 ms, lower+codegen 19.0 ms, write 0.7 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.07671557102003135,
+                "cpu_seconds": 0.05021600000000159,
+                "phases": "check 48.9 ms, lower+codegen 21.2 ms, write 0.6 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.05492863297695294,
+                "cpu_seconds": 0.049449000000006293,
+                "phases": "check 33.3 ms, lower+codegen 14.4 ms, write 0.6 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.053317829995648935,
+                "cpu_seconds": 0.048177999999999166,
+                "phases": "check 34.6 ms, lower+codegen 13.4 ms, write 0.6 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.07417121200705878,
+                "cpu_seconds": 0.04989199999999805,
+                "phases": "check 43.3 ms, lower+codegen 20.7 ms, write 2.6 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.06243304300005548,
+                "cpu_seconds": 0.05083500000000285,
+                "phases": "check 41.1 ms, lower+codegen 14.4 ms, write 0.7 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.04971650000000949,
+            "median_wall_seconds": 0.06110064047970809
+          },
+          "candidate-jo": {
+            "compiler": "candidate",
+            "library": "dewy",
+            "source_sha256": "382cb037a7b88015b81cd8e9ead7fa4bc3ba1bdcec78c73a1f463343b2ed050e",
+            "source_lines": 59,
+            "samples": [
+              {
+                "wall_seconds": 0.04594727902440354,
+                "cpu_seconds": 0.0382059999999953,
+                "phases": "check 27.8 ms, lower+codegen 10.9 ms, write 0.6 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.04956976100220345,
+                "cpu_seconds": 0.03847599999999307,
+                "phases": "check 30.9 ms, lower+codegen 13.6 ms, write 0.6 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.050195269024698064,
+                "cpu_seconds": 0.03919399999999662,
+                "phases": "check 31.1 ms, lower+codegen 13.9 ms, write 0.6 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.04631691600661725,
+                "cpu_seconds": 0.03701599999999772,
+                "phases": "check 29.3 ms, lower+codegen 12.5 ms, write 0.6 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.04332386399619281,
+                "cpu_seconds": 0.03764000000000145,
+                "phases": "check 28.2 ms, lower+codegen 10.5 ms, write 0.6 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.06007749601849355,
+                "cpu_seconds": 0.037820999999999216,
+                "phases": "check 34.9 ms, lower+codegen 16.3 ms, write 0.6 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.057495676999678835,
+                "cpu_seconds": 0.03933999999999571,
+                "phases": "check 36.6 ms, lower+codegen 12.3 ms, write 4.4 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.04450364600052126,
+                "cpu_seconds": 0.03708399999999923,
+                "phases": "check 26.9 ms, lower+codegen 12.9 ms, write 0.6 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.04584178901859559,
+                "cpu_seconds": 0.037188999999998806,
+                "phases": "check 30.5 ms, lower+codegen 10.4 ms, write 0.6 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.06174356598057784,
+                "cpu_seconds": 0.039401000000001574,
+                "phases": "check 40.7 ms, lower+codegen 14.2 ms, write 0.6 ms; 167 functions, 58724 nodes, 77022 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.03801349999999726,
+            "median_wall_seconds": 0.04794333850441035
+          },
+          "candidate-language": {
+            "compiler": "candidate",
+            "library": "dewy",
+            "source_sha256": "2310abf4a2bd5f71e93bc72e34825384b0a49866645f6f0fbfc25b781824d711",
+            "source_lines": 60,
+            "samples": [
+              {
+                "wall_seconds": 0.046932662022300065,
+                "cpu_seconds": 0.037157000000007656,
+                "phases": "check 27.2 ms, lower+codegen 13.2 ms, write 1.5 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.06137247398146428,
+                "cpu_seconds": 0.03940600000000671,
+                "phases": "check 40.0 ms, lower+codegen 13.7 ms, write 1.1 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.044807588012190536,
+                "cpu_seconds": 0.03969100000000125,
+                "phases": "check 28.2 ms, lower+codegen 11.1 ms, write 0.6 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.05899406800745055,
+                "cpu_seconds": 0.0385499999999972,
+                "phases": "check 39.1 ms, lower+codegen 13.8 ms, write 0.6 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.045490276999771595,
+                "cpu_seconds": 0.03714400000000673,
+                "phases": "check 26.0 ms, lower+codegen 10.4 ms, write 0.6 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.05758555998909287,
+                "cpu_seconds": 0.038111000000004225,
+                "phases": "check 35.4 ms, lower+codegen 16.2 ms, write 0.6 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.07193598002777435,
+                "cpu_seconds": 0.03783399999999659,
+                "phases": "check 46.5 ms, lower+codegen 17.3 ms, write 0.6 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.04327208601171151,
+                "cpu_seconds": 0.03731000000000151,
+                "phases": "check 25.1 ms, lower+codegen 12.2 ms, write 0.6 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.03994710199185647,
+                "cpu_seconds": 0.03780799999999651,
+                "phases": "check 25.0 ms, lower+codegen 10.2 ms, write 0.6 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.04292176599847153,
+                "cpu_seconds": 0.038702000000003345,
+                "phases": "check 25.1 ms, lower+codegen 11.0 ms, write 0.6 ms; 169 functions, 58842 nodes, 77542 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.03797250000000041,
+            "median_wall_seconds": 0.04621146951103583
+          }
+        },
+        "runtime": {
+          "clock": "CLOCK_THREAD_CPUTIME_ID",
+          "count": 1000000,
+          "checksum": 995937830,
+          "kernel_ns": {
+            "sloppy-own": [
+              496181631,
+              494269253,
+              502425575,
+              511293093,
+              516879496,
+              496846923,
+              504590860,
+              554670965,
+              560543363,
+              552414117
+            ],
+            "dewy-jo": [
+              172550644,
+              183603848,
+              170289383,
+              181209721,
+              192752326,
+              189896035,
+              233459647,
+              264128785,
+              202353303,
+              236150431
+            ],
+            "dewy-language": [
+              174241978,
+              166787409,
+              176175358,
+              187050470,
+              203296498,
+              192241610,
+              175062615,
+              258116993,
+              268591817,
+              198831979
+            ],
+            "candidate-jo": [
+              164904985,
+              170048554,
+              162427490,
+              198813846,
+              179604892,
+              176481577,
+              169146972,
+              235123906,
+              214556120,
+              223328752
+            ],
+            "candidate-language": [
+              164320116,
+              173682937,
+              172029109,
+              180909885,
+              202232292,
+              179556125,
+              186099004,
+              239710124,
+              233006372,
+              218918402
+            ],
+            "c": [
+              204059075,
+              194189628,
+              189834314,
+              237454147,
+              215738403,
+              196543371,
+              202131567,
+              294770311,
+              293149323,
+              243928780
+            ]
+          },
+          "median_kernel_ns": {
+            "sloppy-own": 507941976.5,
+            "dewy-jo": 191324180.5,
+            "dewy-language": 189646040.0,
+            "candidate-jo": 178043234.5,
+            "candidate-language": 183504444.5,
+            "c": 209898739.0
+          }
+        }
+      },
+      "records-release": {
+        "variants": {
+          "sloppy-own": {
+            "compiler": "sloppy",
+            "library": "sloppy",
+            "source_sha256": "382cb037a7b88015b81cd8e9ead7fa4bc3ba1bdcec78c73a1f463343b2ed050e",
+            "source_lines": 59,
+            "samples": [
+              {
+                "wall_seconds": 0.13777424101135693,
+                "cpu_seconds": 0.0825709999999944,
+                "phases": "check 74.8 ms, lower+codegen 59.0 ms, write 1.1 ms; 191 functions, 103432 nodes, 126923 bytes of code"
+              },
+              {
+                "wall_seconds": 0.15038656000979245,
+                "cpu_seconds": 0.0841240000000063,
+                "phases": "check 96.9 ms, lower+codegen 49.5 ms, write 1.2 ms; 191 functions, 103432 nodes, 126923 bytes of code"
+              },
+              {
+                "wall_seconds": 0.12088753399439156,
+                "cpu_seconds": 0.0857560000000035,
+                "phases": "check 61.9 ms, lower+codegen 51.8 ms, write 2.1 ms; 191 functions, 103432 nodes, 126923 bytes of code"
+              },
+              {
+                "wall_seconds": 0.13847227999940515,
+                "cpu_seconds": 0.08677500000000293,
+                "phases": "check 81.7 ms, lower+codegen 52.3 ms, write 1.3 ms; 191 functions, 103432 nodes, 126923 bytes of code"
+              },
+              {
+                "wall_seconds": 0.12936888699186966,
+                "cpu_seconds": 0.0854470000000056,
+                "phases": "check 89.0 ms, lower+codegen 36.2 ms, write 1.2 ms; 191 functions, 103432 nodes, 126923 bytes of code"
+              },
+              {
+                "wall_seconds": 0.14400529200793244,
+                "cpu_seconds": 0.08644399999999663,
+                "phases": "check 91.4 ms, lower+codegen 45.8 ms, write 1.2 ms; 191 functions, 103432 nodes, 126923 bytes of code"
+              },
+              {
+                "wall_seconds": 0.11981719499453902,
+                "cpu_seconds": 0.08443200000000672,
+                "phases": "check 63.5 ms, lower+codegen 49.5 ms, write 3.7 ms; 191 functions, 103432 nodes, 126923 bytes of code"
+              },
+              {
+                "wall_seconds": 0.1050857009831816,
+                "cpu_seconds": 0.08167199999999397,
+                "phases": "check 51.2 ms, lower+codegen 48.9 ms, write 1.1 ms; 191 functions, 103432 nodes, 126923 bytes of code"
+              },
+              {
+                "wall_seconds": 0.14595884399022907,
+                "cpu_seconds": 0.08662500000000861,
+                "phases": "check 81.2 ms, lower+codegen 57.6 ms, write 4.2 ms; 191 functions, 103432 nodes, 126923 bytes of code"
+              },
+              {
+                "wall_seconds": 0.092559811018873,
+                "cpu_seconds": 0.08400399999999486,
+                "phases": "check 52.6 ms, lower+codegen 36.0 ms, write 1.1 ms; 191 functions, 103432 nodes, 126923 bytes of code"
+              }
+            ],
+            "median_cpu_seconds": 0.08493950000000616,
+            "median_wall_seconds": 0.1335715640016133
+          },
+          "dewy-jo": {
+            "compiler": "dewy",
+            "library": "dewy",
+            "source_sha256": "382cb037a7b88015b81cd8e9ead7fa4bc3ba1bdcec78c73a1f463343b2ed050e",
+            "source_lines": 59,
+            "samples": [
+              {
+                "wall_seconds": 0.10163208199082874,
+                "cpu_seconds": 0.06535599999999775,
+                "phases": "check 52.0 ms, lower+codegen 41.8 ms, write 0.8 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.07095466702594422,
+                "cpu_seconds": 0.05898199999999143,
+                "phases": "check 38.0 ms, lower+codegen 24.7 ms, write 0.7 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.1068308959947899,
+                "cpu_seconds": 0.06240400000000612,
+                "phases": "check 49.8 ms, lower+codegen 49.2 ms, write 0.8 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.09899838900309987,
+                "cpu_seconds": 0.06192299999998596,
+                "phases": "check 52.5 ms, lower+codegen 39.2 ms, write 0.7 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.12640886401641183,
+                "cpu_seconds": 0.062113000000005414,
+                "phases": "check 66.4 ms, lower+codegen 52.6 ms, write 0.7 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.06928276302642189,
+                "cpu_seconds": 0.06034100000000997,
+                "phases": "check 35.4 ms, lower+codegen 27.5 ms, write 0.7 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.07778990399674512,
+                "cpu_seconds": 0.06195599999999857,
+                "phases": "check 40.7 ms, lower+codegen 30.4 ms, write 1.5 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.05597968600341119,
+                "cpu_seconds": 0.053261999999998366,
+                "phases": "check 29.7 ms, lower+codegen 21.0 ms, write 0.6 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.10052926000207663,
+                "cpu_seconds": 0.05804999999999261,
+                "phases": "check 55.6 ms, lower+codegen 36.1 ms, write 0.7 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.09518321900395676,
+                "cpu_seconds": 0.057781000000000304,
+                "phases": "check 64.7 ms, lower+codegen 21.9 ms, write 0.7 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.061131999999997966,
+            "median_wall_seconds": 0.09709080400352832
+          },
+          "dewy-language": {
+            "compiler": "dewy",
+            "library": "dewy",
+            "source_sha256": "2310abf4a2bd5f71e93bc72e34825384b0a49866645f6f0fbfc25b781824d711",
+            "source_lines": 60,
+            "samples": [
+              {
+                "wall_seconds": 0.11140596301993355,
+                "cpu_seconds": 0.06703899999999585,
+                "phases": "check 62.5 ms, lower+codegen 40.5 ms, write 2.8 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.12300544799654745,
+                "cpu_seconds": 0.05598500000000861,
+                "phases": "check 49.5 ms, lower+codegen 59.0 ms, write 3.0 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.11030974599998444,
+                "cpu_seconds": 0.06254799999999783,
+                "phases": "check 60.2 ms, lower+codegen 43.4 ms, write 0.7 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.1337910500005819,
+                "cpu_seconds": 0.06254700000000568,
+                "phases": "check 69.6 ms, lower+codegen 51.1 ms, write 1.4 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.15099219299736433,
+                "cpu_seconds": 0.0641279999999913,
+                "phases": "check 81.9 ms, lower+codegen 59.4 ms, write 0.7 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.065482368983794,
+                "cpu_seconds": 0.058642999999998224,
+                "phases": "check 35.9 ms, lower+codegen 24.5 ms, write 0.5 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.11499709798954427,
+                "cpu_seconds": 0.06354800000000438,
+                "phases": "check 66.4 ms, lower+codegen 43.3 ms, write 0.7 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.08211953000864014,
+                "cpu_seconds": 0.06070799999999643,
+                "phases": "check 51.3 ms, lower+codegen 25.0 ms, write 0.7 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.08300884699565358,
+                "cpu_seconds": 0.05666699999999025,
+                "phases": "check 35.7 ms, lower+codegen 39.3 ms, write 0.7 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.06881508001242764,
+                "cpu_seconds": 0.05409400000000275,
+                "phases": "check 35.6 ms, lower+codegen 27.9 ms, write 0.6 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.061627500000001056,
+            "median_wall_seconds": 0.110857854509959
+          },
+          "candidate-jo": {
+            "compiler": "candidate",
+            "library": "dewy",
+            "source_sha256": "382cb037a7b88015b81cd8e9ead7fa4bc3ba1bdcec78c73a1f463343b2ed050e",
+            "source_lines": 59,
+            "samples": [
+              {
+                "wall_seconds": 0.07540219099610113,
+                "cpu_seconds": 0.050433999999988544,
+                "phases": "check 39.9 ms, lower+codegen 28.5 ms, write 1.7 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.1256049319927115,
+                "cpu_seconds": 0.04759299999999733,
+                "phases": "check 70.5 ms, lower+codegen 49.2 ms, write 0.7 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.06149230099981651,
+                "cpu_seconds": 0.04704499999999889,
+                "phases": "check 31.2 ms, lower+codegen 25.5 ms, write 0.7 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.1302110440155957,
+                "cpu_seconds": 0.050499999999999545,
+                "phases": "check 71.3 ms, lower+codegen 46.0 ms, write 0.6 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.11655364398029633,
+                "cpu_seconds": 0.04776199999998809,
+                "phases": "check 68.1 ms, lower+codegen 41.4 ms, write 0.7 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.12272446500719525,
+                "cpu_seconds": 0.04701299999999442,
+                "phases": "check 88.1 ms, lower+codegen 20.6 ms, write 1.0 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.09986626100726426,
+                "cpu_seconds": 0.04810899999998952,
+                "phases": "check 54.7 ms, lower+codegen 37.1 ms, write 0.8 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.08173638599691913,
+                "cpu_seconds": 0.04349899999999529,
+                "phases": "check 45.2 ms, lower+codegen 29.7 ms, write 0.6 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.05646733599132858,
+                "cpu_seconds": 0.04589900000000391,
+                "phases": "check 28.4 ms, lower+codegen 23.0 ms, write 0.8 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              },
+              {
+                "wall_seconds": 0.048470864014234394,
+                "cpu_seconds": 0.04239499999999197,
+                "phases": "check 24.7 ms, lower+codegen 17.3 ms, write 0.7 ms; 167 functions, 58724 nodes, 98334 bytes of code\nsources: 70 files, 0 Dewy lines (0 bytes), 36120 implementation lines (1429490 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.04731899999999811,
+            "median_wall_seconds": 0.09080132350209169
+          },
+          "candidate-language": {
+            "compiler": "candidate",
+            "library": "dewy",
+            "source_sha256": "2310abf4a2bd5f71e93bc72e34825384b0a49866645f6f0fbfc25b781824d711",
+            "source_lines": 60,
+            "samples": [
+              {
+                "wall_seconds": 0.08012501397752203,
+                "cpu_seconds": 0.051494000000015916,
+                "phases": "check 39.0 ms, lower+codegen 32.4 ms, write 1.7 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.13381225898046978,
+                "cpu_seconds": 0.04975800000000774,
+                "phases": "check 69.6 ms, lower+codegen 53.5 ms, write 0.7 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.05657243900350295,
+                "cpu_seconds": 0.047181000000001916,
+                "phases": "check 30.1 ms, lower+codegen 21.5 ms, write 0.7 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.08186202598153614,
+                "cpu_seconds": 0.049144999999995775,
+                "phases": "check 42.2 ms, lower+codegen 30.5 ms, write 0.7 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.11509512399788946,
+                "cpu_seconds": 0.0489809999999995,
+                "phases": "check 65.8 ms, lower+codegen 42.5 ms, write 0.6 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.0781596349843312,
+                "cpu_seconds": 0.04891300000000243,
+                "phases": "check 39.6 ms, lower+codegen 20.2 ms, write 0.7 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.06571478498517536,
+                "cpu_seconds": 0.046698000000006346,
+                "phases": "check 35.0 ms, lower+codegen 24.9 ms, write 0.6 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.06410133899771608,
+                "cpu_seconds": 0.04622500000000329,
+                "phases": "check 38.5 ms, lower+codegen 18.1 ms, write 0.6 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.06415730001754127,
+                "cpu_seconds": 0.047401999999989286,
+                "phases": "check 34.2 ms, lower+codegen 25.2 ms, write 0.6 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              },
+              {
+                "wall_seconds": 0.10011155399843119,
+                "cpu_seconds": 0.047614000000015366,
+                "phases": "check 52.9 ms, lower+codegen 37.4 ms, write 0.6 ms; 172 functions, 58845 nodes, 99206 bytes of code\nsources: 71 files, 60 Dewy lines (1678 bytes), 36078 implementation lines (1428238 bytes)"
+              }
+            ],
+            "median_cpu_seconds": 0.048263500000008897,
+            "median_wall_seconds": 0.07914232448092662
+          }
+        },
+        "runtime": {
+          "clock": "CLOCK_THREAD_CPUTIME_ID",
+          "count": 1000000,
+          "checksum": 995937830,
+          "kernel_ns": {
+            "sloppy-own": [
+              209436085,
+              204129187,
+              209746247,
+              220539927,
+              214437463,
+              218423408,
+              208274747,
+              214691705,
+              211480082,
+              215063980
+            ],
+            "dewy-jo": [
+              175571967,
+              160183167,
+              158962834,
+              163357751,
+              163311332,
+              161563540,
+              167905925,
+              159581519,
+              173526903,
+              167054560
+            ],
+            "dewy-language": [
+              172728414,
+              163726433,
+              165970027,
+              173122378,
+              169159152,
+              165030773,
+              174294933,
+              167120477,
+              174264753,
+              176991549
+            ],
+            "candidate-jo": [
+              163297820,
+              156093224,
+              157241909,
+              168616162,
+              162442475,
+              155654008,
+              166206540,
+              165698718,
+              163008025,
+              163608170
+            ],
+            "candidate-language": [
+              166087881,
+              165629762,
+              162253304,
+              165738823,
+              171401918,
+              167663260,
+              176737371,
+              174823800,
+              169183528,
+              167485921
+            ],
+            "c": [
+              191378125,
+              187330861,
+              196946347,
+              193825946,
+              199731228,
+              190226515,
+              197848032,
+              197366505,
+              196600208,
+              192195818
+            ]
+          },
+          "median_kernel_ns": {
+            "sloppy-own": 212958772.5,
+            "dewy-jo": 163334541.5,
+            "dewy-language": 170943783.0,
+            "candidate-jo": 163152922.5,
+            "candidate-language": 167574590.5,
+            "c": 195213077.0
+          }
+        }
+      }
+    },
+    "sloppy_generator_sha256": "fec51478572cf75b0619a6015d4e893df1e24645316c5027a418c9cdaa4fd92f"
+  },
+  "comparisons": {
+    "compile/synthetic-default/candidate-language-over-sloppy-own": {
+      "paired_median_ratio": 1.130754546308975,
+      "bootstrap_95_percent_interval": [
+        1.1107616819582473,
+        1.1579356403069159
+      ],
+      "limit": 1.02,
+      "status": "regression"
+    },
+    "compile/synthetic-default/candidate-language-over-candidate-jo": {
+      "paired_median_ratio": 1.2081029145559175,
+      "bootstrap_95_percent_interval": [
+        1.1876349111923183,
+        1.2150386507378805
+      ],
+      "limit": 1.02,
+      "status": "regression"
+    },
+    "compile/synthetic-default/candidate-language-over-dewy-language": {
+      "paired_median_ratio": 0.7158015397757198,
+      "bootstrap_95_percent_interval": [
+        0.6984224077253292,
+        0.7363252452538136
+      ],
+      "limit": 1.02,
+      "status": "pass"
+    },
+    "compile/synthetic-release/candidate-language-over-sloppy-own": {
+      "paired_median_ratio": 0.6804631954996039,
+      "bootstrap_95_percent_interval": [
+        0.6680450620281798,
+        0.6888010660581846
+      ],
+      "limit": 1.02,
+      "status": "pass"
+    },
+    "compile/synthetic-release/candidate-language-over-candidate-jo": {
+      "paired_median_ratio": 1.1752542042522292,
+      "bootstrap_95_percent_interval": [
+        1.1468334632450268,
+        1.1993116185359354
+      ],
+      "limit": 1.02,
+      "status": "regression"
+    },
+    "compile/synthetic-release/candidate-language-over-dewy-language": {
+      "paired_median_ratio": 0.7144994492123813,
+      "bootstrap_95_percent_interval": [
+        0.6365697438206843,
+        0.7263086183755568
+      ],
+      "limit": 1.02,
+      "status": "pass"
+    },
+    "compile/records-default/candidate-language-over-sloppy-own": {
+      "paired_median_ratio": 0.6509160530260363,
+      "bootstrap_95_percent_interval": [
+        0.6310095949734488,
+        0.6609108317375242
+      ],
+      "limit": 1.02,
+      "status": "pass"
+    },
+    "compile/records-default/candidate-language-over-candidate-jo": {
+      "paired_median_ratio": 1.0068809851512681,
+      "bootstrap_95_percent_interval": [
+        0.9796830543835853,
+        1.0166447067680693
+      ],
+      "limit": 1.02,
+      "status": "pass"
+    },
+    "compile/records-default/candidate-language-over-dewy-language": {
+      "paired_median_ratio": 0.763218693609287,
+      "bootstrap_95_percent_interval": [
+        0.7538108034985647,
+        0.7828286676705632
+      ],
+      "limit": 1.02,
+      "status": "pass"
+    },
+    "runtime/records-default/candidate-language-over-sloppy-own": {
+      "paired_median_ratio": 0.3651014606028207,
+      "bootstrap_95_percent_interval": [
+        0.34811266980575084,
+        0.4059867402645022
+      ],
+      "limit": 1.0,
+      "status": "pass"
+    },
+    "runtime/records-default/candidate-language-over-c": {
+      "paired_median_ratio": 0.8959335760704734,
+      "bootstrap_95_percent_interval": [
+        0.8040241876523648,
+        0.9135699875626943
+      ],
+      "limit": 1.0,
+      "status": "pass"
+    },
+    "compile/records-release/candidate-language-over-sloppy-own": {
+      "paired_median_ratio": 0.5661666005464262,
+      "bootstrap_95_percent_interval": [
+        0.5530841387152102,
+        0.5791451711825931
+      ],
+      "limit": 1.02,
+      "status": "pass"
+    },
+    "compile/records-release/candidate-language-over-candidate-jo": {
+      "paired_median_ratio": 1.029134096632659,
+      "bootstrap_95_percent_interval": [
+        0.9970929421730672,
+        1.0515412303949376
+      ],
+      "limit": 1.02,
+      "status": "inconclusive"
+    },
+    "compile/records-release/candidate-language-over-dewy-language": {
+      "paired_median_ratio": 0.7769245906082624,
+      "bootstrap_95_percent_interval": [
+        0.7612183671549189,
+        0.8571446599281596
+      ],
+      "limit": 1.02,
+      "status": "pass"
+    },
+    "runtime/records-release/candidate-language-over-sloppy-own": {
+      "paired_median_ratio": 0.7961668822799863,
+      "bootstrap_95_percent_interval": [
+        0.7731895916151081,
+        0.8113967651279579
+      ],
+      "limit": 1.0,
+      "status": "pass"
+    },
+    "runtime/records-release/candidate-language-over-c": {
+      "paired_median_ratio": 0.8696428516286209,
+      "bootstrap_95_percent_interval": [
+        0.8578185163524414,
+        0.8841563056713864
+      ],
+      "limit": 1.0,
+      "status": "pass"
+    }
+  },
+  "run_log": "synthetic-default: sloppy-own 380.1 ms CPU, dewy-jo 489.5 ms CPU, dewy-language 605.4 ms CPU, candidate-jo 358.8 ms CPU, candidate-language 432.4 ms CPU\nsynthetic-release: sloppy-own 843.9 ms CPU, dewy-jo 674.5 ms CPU, dewy-language 805.2 ms CPU, candidate-jo 486.3 ms CPU, candidate-language 573.3 ms CPU\nrecords-default: sloppy-own 59.4 ms CPU, dewy-jo 50.1 ms CPU, dewy-language 49.7 ms CPU, candidate-jo 38.0 ms CPU, candidate-language 38.0 ms CPU\n  runtime: sloppy-own 507.9 ms, dewy-jo 191.3 ms, dewy-language 189.6 ms, candidate-jo 178.0 ms, candidate-language 183.5 ms, c 209.9 ms\nrecords-release: sloppy-own 84.9 ms CPU, dewy-jo 61.1 ms CPU, dewy-language 61.6 ms CPU, candidate-jo 47.3 ms CPU, candidate-language 48.3 ms CPU\n  runtime: sloppy-own 213.0 ms, dewy-jo 163.3 ms, dewy-language 170.9 ms, candidate-jo 163.2 ms, candidate-language 167.6 ms, c 195.2 ms\n",
+  "cross_library_failure_log": "Traceback (most recent call last):\n  File \"<frozen runpy>\", line 203, in _run_module_as_main\n  File \"<frozen runpy>\", line 88, in _run_code\n  File \"/var/home/david/dev/dewy-lang/tools/sloppy_core/benchmark_sloppy.py\", line 225, in <module>\n    result = measure(args.dewy.resolve(strict=True), args.sloppy_root.resolve(strict=True),\n                     args.samples, args.functions, args.candidate.resolve(strict=True) if args.candidate else None)\n  File \"/var/home/david/dev/dewy-lang/tools/sloppy_core/benchmark_sloppy.py\", line 164, in measure\n    raise RuntimeError(f'{name}: {run.stdout}{run.stderr}')\nRuntimeError: sloppy-shared: internal compiler error: missing runtime function __panic_unwrap_in\n\n"
+}
