@@ -2084,7 +2084,9 @@ gen_match_switch = (m: int, st0: int, rs: int, rtp: int, val: bool) -> bool:
     is_enum = types[st].kind == .enum_
     if not is_enum and types[st].kind != .int_: return false
     na = nkids(m)
-    if na < 3: return false
+    # A grouped constant arm plus a wildcard can cover many alternatives.
+    # The lookup threshold depends on those alternatives, not the arm count.
+    if na < 2 or (na < 3 and (not val or dbg_on)): return false
     vals: int[]
     arms: int[]
     wild = -1
@@ -2114,8 +2116,13 @@ gen_match_switch = (m: int, st0: int, rs: int, rtp: int, val: bool) -> bool:
         if v < lo: lo = v
         if v > hi: hi = v
     span = hi - lo + 1
-    if span <= 0 or span > 2 * vals.len() + 16 or span > 4096: return false
-    if val and not dbg_on and gen_match_lookup(m, st, rs, rtp, vals, arms, wild, lo, span): return true
+    if span <= 0 or span > 4096: return false
+    dense = span <= 2 * vals.len() + 16
+    # Large boolean membership sets still need at most 256 bytes. Their
+    # otherwise sparse tags should not require a long linear branch chain.
+    small_bool = val and vals.len() >= 8 and span <= 256 and types[prune(rtp)].kind == .bool_
+    if val and not dbg_on and (dense or small_bool) and gen_match_lookup(m, st, rs, rtp, vals, arms, wild, lo, span): return true
+    if na < 3 or not dense: return false
     if is_enum: layout(st)
     # blocks: end, fail, then one per arm (arm 0 innermost)
     blk()

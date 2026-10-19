@@ -1,0 +1,34 @@
+{
+  "change": "Constant-result lookup lowering now counts grouped alternatives rather than requiring three distinct arms. Boolean tables with at least eight alternatives are bounded to 256 bytes even when sparse. Effectful arms, debug stepping, wildcard order and existing jump-table limits are retained.",
+  "validation": {
+    "focused": "16 passed, 5850 deselected in 2.20s",
+    "quick": "486 passed in 10.34s",
+    "fuzz": "Seeds 201..300 pass across five modes (500 executions).",
+    "bootstrap": "Two native generations; independent bootstrap/full suite at the next coherent batch checkpoint."
+  },
+  "instruction_ratios_to_previous": {
+    "throughput-default": 0.9860900640444495,
+    "throughput-release": 0.9742695793771116,
+    "tour-default": 0.9918962039857425,
+    "netpong-default": 0.9836154152882269,
+    "dunes-default": 0.9836540908248329,
+    "compiler-reference": 0.9697462579598468
+  },
+  "laptop_cpu_ratios_to_previous": {
+    "throughput-default": 0.9928683570250372,
+    "throughput-release": 0.9812294867234758,
+    "tour-default": 0.9965165311983931,
+    "netpong-default": 0.9941777982496559,
+    "dunes-default": 0.9967543177588247,
+    "compiler-reference": 0.9871901083599767
+  },
+  "laptop_comparisons": "All 12 compilation comparisons pass against the preceding bundle and fixed reference. About 126k physical root lines per CPU-second for this native compiler on the older laptop; target not reached.",
+  "runtime": "All 28 existing artifacts match after exact equal-width bundle path normalization and fresh checksum checks. JSON and grouped predicate costs are not represented by those historical kernels.",
+  "profile_limit": "Same-source native/GCC exclusive instruction sampling guided the change. Inlining moves costs between functions; per-function sample differences are not direct removable-cost estimates.",
+  "baseline": "No whole-stage baseline promotion. Fixed ea1cba0e and accepted cd07ea34 remain unchanged.",
+  "evidence": {
+    "file": "grouped-match-lookup-evidence.json.gz",
+    "sha256": "08f6781fe4a38b88699d951ac2007e0775efb570ed037df75159ee72293ee752",
+    "format": "gzip JSON"
+  }
+}

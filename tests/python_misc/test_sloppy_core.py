@@ -7580,6 +7580,82 @@ main = () -> int: lookup_probe(3)
     assert ' = daddr ' in probe[0] and ' = load ' in probe[0], probe[0]
 
 
+@pytest.mark.core_quick
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+@pytest.mark.parametrize('subject', ['integer', 'enum', 'grouped-int'])
+def test_core_grouped_match_lookup(compiler, tmp_path, target, release, subject):
+    selected = [0, 58, 64, 66, 68, 71, 81, 83, 91, 93]
+    result_type = 'bool'
+    if subject == 'enum':
+        declaration = 'enum Tag: ' + ', '.join(f'v{i}' for i in range(96)) + '\n'
+        parameter = 'Tag'
+        patterns = ', '.join(f'v{i}' for i in selected)
+        values = '[' + ', '.join(f'Tag.v{i}' for i in range(96)) + ']'
+        yes, no = 'false', 'true'
+    else:
+        declaration, parameter = '', 'int'
+        patterns = ', '.join(map(str, selected))
+        values = '[loop i in [-2..258): i] + [int.min, int.max]'
+        yes, no = 'true', 'false'
+        if subject == 'grouped-int':
+            selected = [-2, 0, 3]
+            patterns = ', '.join(map(str, selected))
+            result_type, yes, no = 'int', '32767', '-127'
+    reference = ' or '.join(f'int(key) == {i}' for i in selected)
+    membership = reference
+    if subject == 'enum':
+        reference = f'not ({reference})'
+    elif subject == 'grouped-int':
+        reference = f'if {reference}: {yes} else: {no}'
+    source = tmp_path / 'grouped.jo'
+    effect_patterns = ', '.join(map(str, selected))
+    source.write_text(declaration + f'''calls = 0
+evaluated = (key: int) -> int:
+    calls += 1
+    key
+effectful = (key: int) -> bool:
+    match evaluated(key):
+        {effect_patterns}:
+            calls += 10
+            true
+        _: false
+@noinline
+lookup_probe = (key: {parameter}) -> {result_type}:
+    match key:
+        {patterns}: {yes}
+        _: {no}
+main = () -> int:
+    loop key in {values}:
+        if lookup_probe(key) != ({reference}): return 1
+        before = calls
+        hit = {membership}
+        if effectful(int(key)) != hit: return 2
+        if calls != before + 1 + (if hit: 10 else: 0): return 3
+    42
+''')
+    binary = tmp_path / 'grouped'
+    flags = ['--ir', '--target', target, *(['--release'] if release else [])]
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_lookup_probe_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
+    assert probe and ' = daddr ' in probe[0] and ' = load ' in probe[0], built.stdout
+    assert probe[0].count(' = eq ') < 3, 'grouped alternatives still form a comparison chain'
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed for web lookup checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'grouped.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_fast_inline(compiler, tmp_path, target):
     source = tmp_path / 'leaf.jo'
