@@ -426,6 +426,43 @@ kills_memory = (op: Op) -> bool:
 o_cse = false
 o_nbr = 0              # branches emitted so far
 
+# A final register copy before leaving one arm does not execute on its sibling
+# path. Restore that register's version there, then invalidate it at the real
+# join. The bounded recognizer handles the common cursor/counter update without
+# snapshotting optimizer state or adding a control-flow pass.
+struct OptControl:
+    kind: int
+    condition: int
+    branches: int
+    deferred: int = -1
+
+o_join_regs: int[]
+o_join_next: int[]
+
+o_join_kill = (head: int):
+    let head = head
+    loop head >= 0:
+        o_ver[o_join_regs[head]] += 1
+        head = o_join_next[head]
+
+o_branch_copy = () -> int:
+    n = o_out.len()
+    if n < 3 or o_out[n - 2].op != .mov: return -1
+    d = int(o_out[n - 2].dst)
+    if d < 0 or o_ndef[d] <= 1 or o_repl[d] != i32(d): return -1
+    i = n - 3
+    floor = max(0, n - 19)
+    loop i >= floor:
+        ins = o_out[i]
+        op = ins.op
+        if op == .brif:
+            if ins.imm == 0: return d
+            return -1
+        if op == .block or op == .loop or op == .if_ or op == .else_ or op == .end or op == .br or op == .brtable or op == .ret or op == .trap or op == .zeroslots: return -1
+        if o_defines(op) and ins.dst == i32(d): return -1
+        i -= 1
+    -1
+
 # v was computed by `op` from operands that still hold the same values here
 def_is = (v: int, op: Op) -> bool:
     if not stable(v) or o_dop[v] != i32(int(op)): return false
@@ -1102,24 +1139,24 @@ optimize = ():
     o_out.reserve(ir.code.len())
     o_cse = true
     ht_setup(ir.code.len() + 16)
-    ctl: int[]          # 0 normal, 1 if(true), 2 if(false), 3 block
-    ctl_c: int[]        # an if's condition, or a conditional exit from a block (-1 otherwise)
-    ctl_nbr: int[]      # branch count when the construct was opened
+    # 0 normal, 1 if(true), 2 if(false), 3 block; keep each control's facts together.
+    ctl: OptControl[]
+    o_join_regs.clear()
+    o_join_next.clear()
     skip = 0           # nesting depth inside a dead branch
     loop pos in 0.. and ins in ir.code:
         op = ins.op
         if skip > 0:
             if op == .block or op == .loop or op == .if_: skip += 1
             if op == .loop: lp_next += 1
-            else if op == .else_ and skip == 1 and ctl[ctl.len() - 1] == 2:
+            else if op == .else_ and skip == 1 and ctl[ctl.len() - 1].kind == 2:
                 skip = 0
                 o_scope_open()
             else if op == .end:
                 skip -= 1
                 if skip == 0:
-                    ctl.pop()
-                    ctl_c.pop()
-                    ctl_nbr.pop()
+                    frame = ctl.pop()
+                    o_join_kill(frame.deferred)
                     lop = o_out[o_out.len() - 1].op
                     if lop == .block or lop == .if_: o_out.pop()
                     else: o_out.push(ins)
@@ -1129,9 +1166,7 @@ optimize = ():
             if op == .loop: enter_loop()
             kind = 0
             if op == .block: kind = 3
-            ctl.push(kind)
-            ctl_c.push(-1)
-            ctl_nbr.push(o_nbr)
+            ctl.push(OptControl(kind, -1, o_nbr))
             o_scope_open(op == .block)
             o_out.push(ins)
             continue
@@ -1141,18 +1176,14 @@ optimize = ():
             if known:
                 # the if becomes a plain block so branch depths inside stay valid
                 o_out.push(Ins(.block, 0, 0, 0, 0, 0, 0))
-                ctl_c.push(-1)
-                ctl_nbr.push(o_nbr)
                 if (o_const[c] and o_cval[c] != 0) or fact_true(c):
-                    ctl.push(1)
+                    ctl.push(OptControl(1, -1, o_nbr))
                     o_scope_open()
                 else:
-                    ctl.push(2)
+                    ctl.push(OptControl(2, -1, o_nbr))
                     skip = 1
                 continue
-            ctl.push(0)
-            ctl_c.push(c)
-            ctl_nbr.push(o_nbr)
+            ctl.push(OptControl(0, c, o_nbr))
             o_scope_open()
             add_fact_true(c)
             ins2 = ins
@@ -1160,10 +1191,10 @@ optimize = ():
             o_out.push(ins2)
             continue
         if op == .else_:
-            c = ctl_c[ctl_c.len() - 1]
-            ctl_c[ctl_c.len() - 1] = -1
+            c = ctl[ctl.len() - 1].condition
+            ctl[ctl.len() - 1].condition = -1
             o_scope_close()
-            if ctl[ctl.len() - 1] == 1:
+            if ctl[ctl.len() - 1].kind == 1:
                 skip = 1
                 continue
             o_scope_open()
@@ -1174,10 +1205,21 @@ optimize = ():
             # A terminating if arm leaves its condition false. For a block with exactly
             # one conditional exit and a terminating tail, only that taken exit reaches
             # the join. Count all branches conservatively, including nested breaks.
-            c = ctl_c.pop()
-            nbr = ctl_nbr.pop()
-            kind = ctl.pop()
+            frame = ctl.pop()
+            c = frame.condition
+            nbr = frame.branches
+            kind = frame.kind
+            o_join_kill(frame.deferred)
             last = o_out[o_out.len() - 1]
+            if kind == 3 and c >= 0 and nbr + 2 == o_nbr and last.op == .br and last.imm > 0:
+                target = ctl.len() - int(last.imm)
+                if target >= 0:
+                    d = o_branch_copy()
+                    if d >= 0:
+                        o_ver[d] -= 1
+                        o_join_regs.push(d)
+                        o_join_next.push(ctl[target].deferred)
+                        ctl[target].deferred = o_join_regs.len() - 1
             terminates = last.op == .ret or last.op == .trap or (last.op == .call and last.c == 1)
             noret = c >= 0 and terminates
             o_scope_close()
@@ -1199,7 +1241,7 @@ optimize = ():
             # Remember an exit's condition for a possible terminating block. Multiple
             # exits (even with the same condition) fail the branch-count check at its end.
             target = ctl.len() - 1 - int(ins.imm)
-            if target >= 0 and ctl[target] == 3: ctl_c[target] = c
+            if target >= 0 and ctl[target].kind == 3: ctl[target].condition = c
             # (after it, in this construct, the condition is false)
             o_simplify(ins, pos)
             add_fact_false(c)

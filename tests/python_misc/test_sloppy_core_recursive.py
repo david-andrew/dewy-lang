@@ -117,6 +117,55 @@ let base=alloc_count()
 if saved is?none return 1
 if saved.value not=?99999 return 2}
 return if alloc_count()=?base 42 else 3}''',
+    'narrow-tree-branches': '''Node:type=[key:int64 left:Node? right:Node?]
+find=(tree:Node? key:int64):>int64=>{
+let cur=tree
+loop true {
+if cur is?none return 0
+if key <? cur.key {cur=cur.left}
+else if key >? cur.key {cur=cur.right}
+else return cur.key
+}}
+main=()=>{let root=Node[20 Node[10] Node[30]]
+return if find(root 10)=?10 and find(root 20)=?20 and find(root 30)=?30 and find(root 17)=?0 42 else 1}''',
+    'narrow-expression-arms': '''Node:type=[value:int64]
+f=(input:Node? change:bool):>int64=>{
+let x=input
+if x is?none return 0
+let value=if change {x=none 10} else x.value
+return value}
+main=()=>{return if f(Node[42] false)=?42 and f(Node[42] true)=?10 42 else 1}''',
+    'narrow-match-arms': '''Node:type=[value:int64]
+f=(input:Node? choice:int64):>int64=>{
+let x=input
+if x is?none return 0
+return match choice {<0>=>{x=none 10} _=>x.value}}
+main=()=>{return if f(Node[42] 1)=?42 and f(Node[42] 0)=?10 42 else 1}''',
+    'narrow-union-sibling-arms': '''f=(input:int64|string change:bool):>int64=>{
+let x=input
+if x is?string return 0
+if change {x="changed" return 10} else {return x}}
+main=()=>{return if f(42 false)=?42 and f(42 true)=?10 42 else 1}''',
+    'branch-join-versions': '''pick=(a:bool b:bool):>int64=>{
+let value=7
+if value=?7 {
+if a {value=9}
+else if b {value=11}
+else {if value not=?7 return 0}
+}
+return value}
+walk=(change:bool):>int64=>{
+let value=1 let total=0
+loop i in [0..4) {
+if value>?0 {
+if change {value=0} else {total+=value}
+}
+total+=value}
+return total}
+main=()=>{
+if pick(false false)+pick(true false)+pick(false true)+pick(true true) not=?36 return 1
+return if walk(true)=?0 and walk(false)=?8 42 else 2}''',
+
 }
 
 
@@ -144,6 +193,42 @@ def test_core_recursive_deep_drop(compiler, tmp_path, target, release):
     ('Node:type=[value:int64 next:Node?]\nmain=()=>{let n:Node?=Node[1] loop n is?Node {n=none return n.value} return 0}', 'none'),
     ('A:type=[b:B]\nB:type=[a:A]\nmain=()=>0', 'no finite value'),
     ('struct Node:\n    next: Node?\nextern use_node = (n: *Node)\nmain = ():\n    n: Node\n    use_node(&n)\n', 'cannot cross the C ABI'),
+    ('''Node:type=[value:int64]
+f=(input:Node? change:bool):>int64=>{
+let x=input
+if x is?none return 0
+if change {x=none}
+return x.value}
+main=()=>{return f(Node[42] true)}''', 'none'),
+    ('''Node:type=[value:int64]
+f=(input:Node? change:bool):>int64=>{
+let x=input
+if x is?none return 0
+loop true {if change {x=none break} break}
+return x.value}
+main=()=>{return f(Node[42] true)}''', 'none'),
+    ('''Node:type=[value:int64]
+f=(input:Node? change:bool):>int64=>{
+let x=input
+if x is?none return 0
+{x=none}
+if change {x=none} else {return x.value}
+return 0}
+main=()=>{return f(Node[42] false)}''', 'none'),
+    ('''Node:type=[value:int64]
+f=(input:Node? change:bool):>int64=>{
+let x=input
+if x is?none return 0
+if change {x=none} else {}
+return x.value}
+main=()=>{return f(Node[42] true)}''', 'none'),
+    ('''Node:type=[value:int64]
+f=(input:Node? choice:int64):>int64=>{
+let x=input
+if x is?none return 0
+let ignored=match choice {<0>=>{x=none 10} _=>20}
+return x.value}
+main=()=>{return f(Node[42] 0)}''', 'none'),
 ])
 def test_core_recursive_layout_diagnostics(compiler, tmp_path, source, message):
     path = tmp_path / ('bad.jo' if source.startswith('struct') else 'bad.dewy')
@@ -153,6 +238,32 @@ def test_core_recursive_layout_diagnostics(compiler, tmp_path, source, message):
     assert result.returncode != 0
     assert message in result.stdout + result.stderr
     assert 'internal compiler error' not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_core_narrow_iflet_siblings(compiler, tmp_path, release):
+    source = tmp_path / 'siblings.jo'
+    source.write_text('''struct Node:
+    value: int
+pick = (input: Node?, other: int?) -> int:
+    x = input
+    if x == none: return 0
+    if let y = other:
+        x = none
+        return y
+    else:
+        return x.value
+main = () -> int:
+    assert(pick(Node(42), 10) == 10)
+    pick(Node(42), none)
+''')
+    binary = tmp_path / 'siblings'
+    flags = ['--release'] if release else []
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])

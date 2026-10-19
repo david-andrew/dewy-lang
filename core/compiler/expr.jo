@@ -4617,9 +4617,11 @@ check_match = (m: int, expected: int) -> int:
     # (a field path or a global: narrowed like `if x.f is T`)
     pkey = ""
     if is_union(st) and not narrows: pkey = path_key(sc)
+    changed: int[]
     loop i in [0..nkids(m)):
         arm = kid(m, i)
         amark = scope_mark()
+        changes = narrow_changes.len()
         arm_members: int[]
         arm_wild = false
         seen_before = seen
@@ -4793,7 +4795,9 @@ check_match = (m: int, expected: int) -> int:
                     else: coerce(vp, result)
             coerce_hint = ""
         scope_reset(amark)
+        loop l in narrow_restore(changes): changed.push(l)
     scope_reset(mark)
+    narrow_merge(changed)
     exhaustive = has_wild or finite_seen == 3
     if not exhaustive and types[st].kind == .enum_:
         exhaustive = true
@@ -5939,12 +5943,15 @@ check_if = (n: int, ex: int) -> int:
     if is_stmt:
         mark = scope_mark()
         narrow_by(cond, true)
+        changes = narrow_changes.len()
         check_block(b, 0, false)
         scope_reset(mark)
         if c != 0:
+            first = narrow_restore(changes)
             narrow_by(cond, false)
             check_block(c, 0, false)
             scope_reset(mark)
+            narrow_merge(first)
         # if x is E: return ...   narrows x for the rest of the block
         if stmt_terminates(b) and (c == 0 or not stmt_terminates(c)): narrow_by(cond, false)
         else if c != 0 and stmt_terminates(c) and not stmt_terminates(b): narrow_by(cond, true)
@@ -5952,11 +5959,14 @@ check_if = (n: int, ex: int) -> int:
     if c == 0: fatal(nodes[n].pos, "an if expression needs an else branch")
     mark = scope_mark()
     narrow_by(cond, true)
+    changes = narrow_changes.len()
     t1 = check_block(b, ex, true)
     scope_reset(mark)
+    first = narrow_restore(changes)
     narrow_by(cond, false)
     t2 = check_block(c, ex, true)
     scope_reset(mark)
+    narrow_merge(first)
     if t1 == T_NEVER and t2 == T_NEVER: return T_NEVER
     if t1 != T_NEVER and nodes[b].aux == 0 and tkind(t1) == .void_: return T_VOID
     if t2 != T_NEVER and nodes[c].aux == 0 and tkind(t2) == .void_ and ex == 0: return T_VOID
@@ -7202,14 +7212,17 @@ check_iflet = (n: int, ex: int) -> int:
     c = int(nodes[n].c)
     e1 = ex
     if is_stmt: e1 = 0
+    changes = narrow_changes.len()
     t1 = check_block(b, e1, not is_stmt)
     scope_reset(mark)
     t2 = T_VOID
     if c != 0:
+        first = narrow_restore(changes)
         e2 = ex
         if e2 == 0: e2 = t1
         if is_stmt: e2 = 0
         t2 = check_block(c, e2, not is_stmt)
+        narrow_merge(first)
     if is_stmt: return T_VOID
     if c == 0: fatal(nodes[n].pos, "an if expression needs an else branch")
     # (branches that are statements, as at the end of a function: no value, as check_if)

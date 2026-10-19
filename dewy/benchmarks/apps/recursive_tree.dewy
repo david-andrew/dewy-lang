@@ -8,11 +8,10 @@ build_tree=(lo:int64 hi:int64):>Node?=>{
 find_key=(root:Node? key:int64):>int64=>{
     let cur=root
     loop true {
-        let node=cur
-        if node is?none break
-        if key <? node.key {cur=node.left}
-        else if key >? node.key {cur=node.right}
-        else return node.key+1
+        if cur is?none break
+        if key <? cur.key {cur=cur.left}
+        else if key >? cur.key {cur=cur.right}
+        else return cur.key+1
     }
     return 0
 }

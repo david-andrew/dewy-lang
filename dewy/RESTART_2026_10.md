@@ -5,6 +5,34 @@ Sloppy's checkout already had edits to `compiler/main.jo` and `CHANGELOG.md`;
 it is a reference, and this work does not modify it. Measurements of its
 existing binary identify that binary separately from its source revision.
 
+## Independent narrowing in sibling branches (2026-10-19)
+
+Assigning an optional or union local in one `if` or `match` arm no longer
+incorrectly widens the same local while checking a sibling arm. A small log
+records newly invalidated aliases; sibling checking rolls those changes back,
+and the join merges them. Prior invalidations remain in force. This also covers
+if expressions and the implementation language's if-let. Post-join narrowing
+remains conservative; this is not a complete flow-analysis redesign.
+
+The direct recursive-tree walk initially retained redundant `none` checks and
+was slower than the snapshot workaround. A bounded optimizer rule now recognizes
+a final register copy that leaves by another edge, restores its version for the
+sibling path, and invalidates it at the actual join. It adds no whole-function
+pass or state snapshots. Keeping each optimizer control frame's data together
+also removes the initial prototype's bookkeeping overhead. The maintained tree
+benchmark now uses the straightforward cursor spelling. It matches the snapshot
+version's speed, although the paired comparison remains **1.27× C default /
+1.16× C release**, so tree parity is still unfinished.
+
+The independent C bootstrap and **all 6,282 checks pass in 178.73 s**. Compilation
+instruction counts improve **0.086% default / 0.325% release / 0.456% compiler
+rebuild** against the preceding native compiler. The compilation pilot gives
+**9 pass / 3 inconclusive**, with no established regression. All twelve existing
+runtime workloads in both modes retain identical generated artifacts except
+equal-width bundle paths, verified with fresh checksums. The fixed reference and
+accepted baseline remain unchanged.
+[Diagnostics, rejected drafts, bootstrap and performance evidence](audits/2026-10-19/branch-narrowing.json).
+
 ## Omit optimized-host frame pointers (2026-10-19)
 
 The optional GCC host now omits frame pointers, with `--frame-pointers` for

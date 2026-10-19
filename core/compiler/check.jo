@@ -2288,6 +2288,26 @@ capture_narrowed = (l: int, pos: int) -> int:
     locals[nl].alias = i32(e)
     nl
 
+# Only writes to narrowed aliases need rollback between sibling branches.
+# The log avoids scanning all locals or copying checker state for every branch.
+narrow_changes: int[]
+
+narrow_restore = (mark: int) -> int[]:
+    if narrow_changes.len() == mark: return []
+    changed: int[]
+    loop i in [mark..narrow_changes.len()):
+        l = narrow_changes[i]
+        locals[l].flags = i32(int(locals[l].flags) & ~LF_UNNARROWED)
+        changed.push(l)
+    narrow_changes.truncate(mark)
+    changed
+
+narrow_merge = (changed: int[]):
+    loop l in changed:
+        if int(locals[l].flags) & LF_UNNARROWED == 0:
+            locals[l].flags = i32(int(locals[l].flags) | LF_UNNARROWED)
+            narrow_changes.push(l)
+
 # x = v where x is narrowed (by `is`) and v is not of the narrowed type: x is the whole variable again
 unnarrow_assign = (s: int):
     lhs = int(nodes[s].a)
@@ -2305,7 +2325,9 @@ unnarrow_assign = (s: int):
     al = int(locals[l].alias)
     in_place = nodes[al].kind != .conv
     if in_place and not is_union(rt) and types[rt].kind != .opt and can_coerce(int(nodes[s].b), rt, int(locals[l].type)): return
-    locals[l].flags = i32(int(locals[l].flags) | LF_UNNARROWED)
+    if int(locals[l].flags) & LF_UNNARROWED == 0:
+        locals[l].flags = i32(int(locals[l].flags) | LF_UNNARROWED)
+        narrow_changes.push(l)
     nm = int(nodes[lhs].name)
     push_scope_sym(nm, new_sym(nm, .local, u, 0))
 

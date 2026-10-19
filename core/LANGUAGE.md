@@ -1731,6 +1731,10 @@ let size=match found {n:int64=>n <none>=>0}
 printl"Length: {size}"
 ```
 
+Assigning another type invalidates a narrowed local. Sibling `if` and `match`
+arms are checked independently: an assignment in one arm does not change the
+type assumptions used to check another arm.
+
 `match` supports typed bindings, literals and `_` as a fallback. A union is
 written `int64|string`; union matches must cover its members or have a fallback.
 Literal arms also work directly on unions:
