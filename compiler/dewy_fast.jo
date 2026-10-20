@@ -370,6 +370,10 @@ dn_op_node = (kind: DewyKind, symbol: DewyToken, offset: int, children: int[]) -
 dn_operator = (kind: DewyKind, op: DewyToken, left: int, right: int) -> int:
     scalar = dn_token_uninvert(op)
     sentinel = if scalar != op: 1 else: 0
+    if kind == .binary:
+        id = dewy_syntax.len()
+        dewy_syntax.push(DewySyntax(kind, "", dewy_syntax[left].pos, [], scalar, 0, sentinel + 1, left, right))
+        return id
     dn_op_node(kind, scalar, pos_off(dewy_syntax[left].pos), [sentinel, left, right])
 
 # The supported precedence follows Dewy's user-facing operators. A whitespace
@@ -716,7 +720,7 @@ dn_expr = (minimum: int) -> int:
         right = dn_expr(if op == .function or op == .caret or op == .dot_caret or op == .coalesce: power else: power + 1)
         if op == .comma:
             parts: int[]
-            if dw_op(left) == .comma: parts = dewy_syntax[left].children
+            if dw_op(left) == .comma: parts = dw_children(left)
             else: parts = [0, left]
             parts.push(right)
             left = dn_op_node(.flat, .comma, pos_off(dewy_syntax[left].pos), parts)

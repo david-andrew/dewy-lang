@@ -58,14 +58,32 @@ struct DewySyntax:
     children: int[]
     symbol: DewyToken = .none
     name: i32 = 0
+    # Binary nodes keep their sentinel and operands inline; other nodes use children.
+    child_mode: int = 0
+    child_left: int = 0
+    child_right: int = 0
 
 dewy_syntax: DewySyntax[]
 dw_index_context: int[]  # enclosing index nodes, for contextual `end`
 
-dw_child = (id: int, at: int) -> int: dewy_syntax[id].children[at]
+dw_child = (id: int, at: int) -> int:
+    mode = dewy_syntax[id].child_mode
+    if mode == 0: return dewy_syntax[id].children[at]
+    if at == 0: return mode - 1
+    if at == 1: return dewy_syntax[id].child_left
+    dewy_syntax[id].child_right
+
+dw_children = (id: int) -> int[]:
+    if dewy_syntax[id].child_mode == 0: return dewy_syntax[id].children
+    [dewy_syntax[id].child_mode - 1, dewy_syntax[id].child_left, dewy_syntax[id].child_right]
+
+dw_nchildren = (id: int) -> int:
+    if dewy_syntax[id].child_mode != 0: return 3
+    dewy_syntax[id].children.len()
+
 dw_multiplications = (id: int) -> int:
     score = if dewy_syntax[id].text == "MultiplyJuxtapose": 1 else: 0
-    loop child in dewy_syntax[id].children: score += dw_multiplications(child)
+    loop child in dw_children(id): score += dw_multiplications(child)
     score
 
 dw_unwrap = (id: int) -> int:
@@ -76,7 +94,7 @@ dw_unwrap = (id: int) -> int:
             best = -1
             score = 1000000000
             tied = false
-            loop child in dewy_syntax[id].children:
+            loop child in dw_children(id):
                 next = dw_multiplications(child)
                 if next < score:
                     best = child
@@ -316,7 +334,7 @@ dw_is_include = (id: int) -> bool:
 
 dw_include = (id: int) -> int:
     arg = dw_unwrap(dw_child(id, 2))
-    if dewy_syntax[arg].kind != .block or dewy_syntax[arg].children.len() != 1:
+    if dewy_syntax[arg].kind != .block or dw_nchildren(arg) != 1:
         return dw_fail(id, "$include_bytes without one literal path")
     path = dw_unwrap(dw_child(arg, 0))
     if dw_op(path) != .call or dw_name(dw_child(path, 1)) != "p":
@@ -356,7 +374,7 @@ dw_type = (id: int) -> int:
     if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "[]:":
         n = mk(.trecord, pos)
         fields: int[]
-        loop child in dewy_syntax[id].children:
+        loop child in dw_children(id):
             if dw_op(child) != .colon: return dw_fail(child, "an inline record field without a type; use a named record for defaults")
             field = dw_param(child, .vardecl)
             if has_flag(field, NF_MUT): return dw_fail(child, "a mutable inline record field; mutability belongs on the parameter")
@@ -383,7 +401,7 @@ dw_type = (id: int) -> int:
         n = mk(.tfn, pos)
         types_: int[]
         labels: int[]
-        loop param in dewy_syntax[params].children:
+        loop param in dw_children(params):
             p = dw_param(param, .param)
             if nodes[p].a == 0: return dw_fail(param, "an untyped parameter in a function type")
             if nodes[p].b != 0: return dw_fail(param, "defaults in a function type; declare defaults on a directly called function")
@@ -410,14 +428,14 @@ dw_type = (id: int) -> int:
         nodes[n].name = i32(intern(member))
         return n
     # Function types have one grouping spelling: `<(value:int64):>int64>`.
-    if dewy_syntax[id].kind == .block and (dewy_syntax[id].text == "():" or dewy_syntax[id].text == "<>:") and dewy_syntax[id].children.len() == 1:
+    if dewy_syntax[id].kind == .block and (dewy_syntax[id].text == "():" or dewy_syntax[id].text == "<>:") and dw_nchildren(id) == 1:
         inner = dw_child(id, 0)
         if dewy_syntax[id].text == "():" and dw_op(inner) == .returns:
             fatal(pos, "function types use angle brackets: replace the outer (...) with <...>, as in `<(x:int64):>int64>`")
         return dw_type(inner)
     if dw_op(id) == .type_apply and dw_name(dw_child(id, 1)) == "array":
         args = dw_child(id, 2)
-        count = dewy_syntax[args].children.len()
+        count = dw_nchildren(args)
         if count < 1 or count > 2: return dw_fail(id, "array type constraints; use array<T> or array<T length=N>")
         n = mk(.tarray, pos)
         nodes[n].a = i32(dw_type(dw_child(args, 0)))
@@ -429,7 +447,7 @@ dw_type = (id: int) -> int:
         return n
     if dw_op(id) == .type_apply and dw_name(dw_child(id, 1)) == "dict":
         args = dw_child(id, 2)
-        if dewy_syntax[args].children.len() != 2: return dw_fail(id, "dictionary type constraints")
+        if dw_nchildren(args) != 2: return dw_fail(id, "dictionary type constraints")
         n = mk(.tmap, pos)
         nodes[n].a = i32(dw_type(dw_child(args, 0)))
         nodes[n].b = i32(dw_type(dw_child(args, 1)))
@@ -438,7 +456,7 @@ dw_type = (id: int) -> int:
         n = dw_type(dw_child(id, 1))
         if nodes[n].kind != .tname or nkids(n) != 0: return dw_fail(id, "type arguments on this type expression")
         args: int[]
-        loop child in dewy_syntax[dw_child(id, 2)].children: args.push(dw_type(child))
+        loop child in dw_children(dw_child(id, 2)): args.push(dw_type(child))
         set_list(n, args)
         return n
     return dw_fail(id, "this type expression")
@@ -448,7 +466,7 @@ dw_type = (id: int) -> int:
 dw_type_params = (id: int) -> int[]:
     out: int[]
     seen: str[]
-    loop child in dewy_syntax[id].children:
+    loop child in dw_children(id):
         name = dw_name(child)
         if name == "" or name == "of": return [dw_fail(child, "constrained type parameters; use plain type parameter names")]
         if seen.contains(name): fatal(dewy_syntax[child].pos, "duplicate type parameter '{name}'")
@@ -516,7 +534,7 @@ dw_function = (id: int, name: str) -> int:
     captures: int[]
     capture = false
     bound: {int: bool} = {}
-    loop p in dewy_syntax[params].children:
+    loop p in dw_children(params):
         if dewy_syntax[p].kind == .metatag:
             if dewy_syntax[p].text != "capture":
                 if dw_designed_directive(dewy_syntax[p].text): return dw_metatag_fail(p)
@@ -678,13 +696,13 @@ dw_expr = (id: int) -> int:
         n = mk(.str_lit, pos)
         nodes[n].aux = 1
         pieces: int[]
-        loop child in dewy_syntax[id].children:
+        loop child in dw_children(id):
             if dewy_syntax[child].kind == .string_chunk:
                 part = mk(.str_lit, dewy_syntax[child].pos)
                 nodes[part].sval = i32(intern(dewy_syntax[child].text))
                 pieces.push(part)
             else:
-                if dewy_syntax[child].kind != .block or dewy_syntax[child].children.len() != 1: return dw_fail(child, "this string interpolation")
+                if dewy_syntax[child].kind != .block or dw_nchildren(child) != 1: return dw_fail(child, "this string interpolation")
                 part = mk(.pair, dewy_syntax[child].pos)
                 nodes[part].a = i32(dw_expr(dw_child(child, 0)))
                 nodes[part].sval = -1
@@ -709,7 +727,7 @@ dw_expr = (id: int) -> int:
     if op == .range_apply: return dw_range_value(dw_iterable(id, true, true))
     if dn_token_call(op) and dw_is_include(id): return dw_include(id)
     if k == .block:
-        children = dewy_syntax[id].children
+        children = dw_children(id)
         if children.len() == 1 and dw_op(children[0]) == .range_apply: return dw_range_value(dw_iterable(id, true, true))
         if text == "():" and children.len() == 1: return dw_expr(children[0])
         if text == "[]:":
@@ -781,7 +799,7 @@ dw_expr = (id: int) -> int:
         nodes[n].a = i32(e)
         return n
     if k == .flow:
-        loop arm in dewy_syntax[id].children:
+        loop arm in dw_children(id):
             if dewy_syntax[arm].kind == .keyword_expr and dewy_syntax[dw_child(arm, 0)].text == "loop":
                 return dw_fail(arm, "a loop used as a value; use return or a comprehension")
         return dw_flow(id, 0)
@@ -816,7 +834,7 @@ dw_expr = (id: int) -> int:
             loop nodes[type_base].kind == .field: type_base = int(nodes[type_base].a)
             if nodes[type_base].kind == .ident: nodes[n].c = i32(dw_type(id))
             args: int[]
-            loop child in dewy_syntax[right].children: args.push(dw_type(child))
+            loop child in dw_children(right): args.push(dw_type(child))
             set_list(n, args)
             return n
         if op == .floor or op == .percent or op == .caret or op == .slash:
@@ -843,7 +861,7 @@ dw_expr = (id: int) -> int:
             if op == .kw_transmute: nodes[n].aux2 = 1
             return n
         if dn_token_call(op) or op == .index:
-            xs = dewy_syntax[right].children
+            xs = dw_children(right)
             bracket = dewy_syntax[right].kind == .block and dewy_syntax[right].text in ["[]:", "[):"]
             if bracket and dw_name(left) == "set":
                 return bc_call("__dewy_set", [dw_expr(right)], pos)
@@ -921,12 +939,12 @@ dw_stmt = (id: int, top: bool = false) -> int:
             return dw_import(id)
         if word == "return":
             n = mk(.return_, pos)
-            if dewy_syntax[id].children.len() > 1: nodes[n].a = i32(dw_expr(dw_child(id, 1)))
+            if dw_nchildren(id) > 1: nodes[n].a = i32(dw_expr(dw_child(id, 1)))
             return n
         if word == "let" or word == "const": return dw_declare(dw_child(id, 1), word == "const", top)
         if word == "break" or word == "continue":
             n = mk(if word == "break": NK.break_ else: NK.continue_, pos)
-            if dewy_syntax[id].children.len() > 1:
+            if dw_nchildren(id) > 1:
                 label = dw_child(id, 1)
                 if dewy_syntax[label].kind != .metatag: return dw_fail(label, "a loop exit without a $label")
                 nodes[n].name = i32(intern(dewy_syntax[label].text))
@@ -971,7 +989,7 @@ dw_bindings = (id: int) -> int[]:
 
 dw_binding_items = (id: int, seen: mut {str: bool}) -> int[]:
     bindings: int[]
-    loop child in dewy_syntax[id].children:
+    loop child in dw_children(id):
         let child = dw_unwrap(child)
         annotation = 0
         if dw_op(child) == .colon:
@@ -1050,7 +1068,7 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         fields: int[]
         if structure != 0:
             if dewy_syntax[structure].text != "[]:": return dw_fail(structure, "this nominal intersection; expected record fields")
-            loop field in dewy_syntax[structure].children: fields.push(dw_param(field, .vardecl))
+            loop field in dw_children(structure): fields.push(dw_param(field, .vardecl))
         set_list(n, fields)
         return n
     if annotation != 0 and dw_name(annotation) == "type":
@@ -1073,7 +1091,7 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
             set_list2(n, type_params)
             add_flag(n, NF_GENERIC)
         fields: int[]
-        loop field in dewy_syntax[initial].children: fields.push(dw_param(field, .vardecl))
+        loop field in dw_children(initial): fields.push(dw_param(field, .vardecl))
         set_list(n, fields)
         return n
     n = mk(.vardecl, dewy_syntax[id].pos)
@@ -1106,22 +1124,22 @@ dw_import = (id: int) -> int:
     nodes[n].name = i32(intern(strip_ext(file_name(value))))
     if alias != "": nodes[n].name = i32(intern(alias))
     if dewy_syntax[dw_child(id, 0)].text == "from":
-        if dewy_syntax[id].children.len() != 4: return dw_fail(id, "this import")
+        if dw_nchildren(id) != 4: return dw_fail(id, "this import")
         nodes[n].aux = 2
         selected = dw_unwrap(dw_child(id, 3))
         imported: int[]
         if dw_op(selected) == .comma:
-            loop i in [1..dewy_syntax[selected].children.len()): imported.push(dw_import_name(dw_child(selected, i)))
+            loop i in [1..dw_nchildren(selected)): imported.push(dw_import_name(dw_child(selected, i)))
         else: imported.push(dw_import_name(selected))
         loop item in imported:
             if nodes[item].kind != .ident: return dw_fail(selected, "this imported name")
         set_list(n, imported)
-    else if dewy_syntax[id].children.len() != 2: return dw_fail(id, "this import alias")
+    else if dw_nchildren(id) != 2: return dw_fail(id, "this import alias")
     return n
 
 dw_import_name = (id: int) -> int:
     let id = dw_unwrap(id)
-    loop dewy_syntax[id].kind == .block and dewy_syntax[id].text == "():" and dewy_syntax[id].children.len() == 1:
+    loop dewy_syntax[id].kind == .block and dewy_syntax[id].text == "():" and dw_nchildren(id) == 1:
         id = dw_unwrap(dw_child(id, 0))
     alias = ""
     if dw_op(id) == .kw_as:
@@ -1144,7 +1162,7 @@ dw_iterable = (id: int, slice: bool = false, membership: bool = false) -> int:
     let id = dw_unwrap(id)
     inclusive = true
     exclude_first = false
-    if dewy_syntax[id].kind == .block and dewy_syntax[id].children.len() == 1 and (dw_op(dw_child(id, 0)) == .range_apply or dw_name(dw_child(id, 0)) == ".."):
+    if dewy_syntax[id].kind == .block and dw_nchildren(id) == 1 and (dw_op(dw_child(id, 0)) == .range_apply or dw_name(dw_child(id, 0)) == ".."):
         wrapper = dewy_syntax[id].text
         if wrapper not in ["[]:", "[):", "():", "(]:"]: return dw_fail(id, "this range boundary")
         inclusive = wrapper == "[]:" or wrapper == "(]:"
@@ -1163,13 +1181,13 @@ dw_iterable = (id: int, slice: bool = false, membership: bool = false) -> int:
         nodes[call].a = i32(callee)
         set_list(call, [value])
         return call
-    size = dewy_syntax[id].children.len()
+    size = dw_nchildren(id)
     n = mk(.range, dewy_syntax[id].pos)
     at = 1
     if dw_name(dw_child(id, at)) != "..":
         first = dw_unwrap(dw_child(id, at))
         if dw_op(first) == .comma:
-            if dewy_syntax[first].children.len() != 3: return dw_fail(first, "a stepped range without exactly two starting values")
+            if dw_nchildren(first) != 3: return dw_fail(first, "a stepped range without exactly two starting values")
             nodes[n].a = i32(dw_expr(dw_child(first, 1)))
             nodes[n].c = i32(dw_expr(dw_child(first, 2)))
             add_flag(n, NF_STEP)
@@ -1252,7 +1270,7 @@ dw_pattern = (id: int) -> int:
         binding = dw_name(dw_child(id, 1))
         if binding == "": return dw_fail(id, "this match binding")
         id = dw_unwrap(dw_child(id, 2))
-    else if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "<>:" and dewy_syntax[id].children.len() == 1:
+    else if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "<>:" and dw_nchildren(id) == 1:
         id = dw_unwrap(dw_child(id, 0))
     else: return dw_fail(id, "this match pattern")
     k = dewy_syntax[id].kind
@@ -1268,7 +1286,7 @@ dw_match = (id: int, accumulator: int = 0, map: bool = false) -> int:
     nodes[n].a = i32(dw_expr(dw_child(id, 1)))
     body = dw_child(id, 2)
     arms = [body]
-    if dewy_syntax[body].kind == .block and dewy_syntax[body].text == "{{}}:": arms = dewy_syntax[body].children
+    if dewy_syntax[body].kind == .block and dewy_syntax[body].text == "{{}}:": arms = dw_children(body)
     xs: int[]
     loop source in arms:
         if dw_op(source) != .function: return dw_fail(source, "a match arm without =>")
@@ -1280,7 +1298,7 @@ dw_match = (id: int, accumulator: int = 0, map: bool = false) -> int:
     n
 
 dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
-    items = dewy_syntax[id].children
+    items = dw_children(id)
     if at >= items.len(): return 0
     arm = items[at]
     if dewy_syntax[arm].kind != .keyword_expr: return dw_block(arm, accumulator, map)
@@ -1301,7 +1319,7 @@ dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
             set_list(n, xs)
         return n
     if word != "if" and word != "loop": return dw_block(arm, accumulator, map)
-    if dewy_syntax[arm].children.len() != 3: return dw_fail(arm, "this flow arm")
+    if dw_nchildren(arm) != 3: return dw_fail(arm, "this flow arm")
     n = mk(if word == "if": NK.if_ else: NK.while_, dewy_syntax[arm].pos)
     if word == "loop":
         head = dw_loop_head(dw_child(arm, 1))
@@ -1335,7 +1353,7 @@ dw_block = (id: int, accumulator: int = 0, map: bool = false) -> int:
     n = mk(.block, dewy_syntax[id].pos)
     statements: int[]
     if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "{{}}:":
-        children = dewy_syntax[id].children
+        children = dw_children(id)
         label = 0
         label_pos = 0
         loop i in 0.. and child in children:
@@ -1362,7 +1380,7 @@ dw_block = (id: int, accumulator: int = 0, map: bool = false) -> int:
 dw_collection_kind = (id: int) -> int:
     let id = dw_unwrap(id)
     kind = dewy_syntax[id].kind
-    children = dewy_syntax[id].children
+    children = dw_children(id)
     candidates: int[]
     if kind == .flow:
         loop arm in children:
@@ -1371,7 +1389,7 @@ dw_collection_kind = (id: int) -> int:
                 if word == "match":
                     body = dw_child(arm, 2)
                     arms = [body]
-                    if dewy_syntax[body].kind == .block: arms = dewy_syntax[body].children
+                    if dewy_syntax[body].kind == .block: arms = dw_children(body)
                     loop branch in arms:
                         if dw_op(branch) != .function: return dw_fail(branch, "a match arm without =>")
                         candidates.push(dw_child(branch, 2))
@@ -1448,7 +1466,7 @@ dw_comprehension = (id: int) -> int:
 # Strip grouping parentheses when recognizing a function declaration or group.
 dw_grouped = (id: int) -> int:
     let id = dw_unwrap(id)
-    loop dewy_syntax[id].kind == .block and dewy_syntax[id].text == "():" and dewy_syntax[id].children.len() == 1:
+    loop dewy_syntax[id].kind == .block and dewy_syntax[id].text == "():" and dw_nchildren(id) == 1:
         id = dw_unwrap(dw_child(id, 0))
     id
 
@@ -1457,7 +1475,7 @@ dw_grouped = (id: int) -> int:
 dw_overload_group = (id: int) -> bool:
     let id = dw_grouped(id)
     if dw_op(id) != .amp: return false
-    loop i in [1..dewy_syntax[id].children.len()):
+    loop i in [1..dw_nchildren(id)):
         member = dw_grouped(dw_child(id, i))
         if dw_op(member) == .function or dw_overload_group(member): return true
     false
@@ -1465,7 +1483,7 @@ dw_overload_group = (id: int) -> bool:
 dw_overload_members = (id: int, name: str, declarations: mut int[]):
     let id = dw_grouped(id)
     if dw_op(id) == .amp:
-        loop i in [1..dewy_syntax[id].children.len()):
+        loop i in [1..dw_nchildren(id)):
             dw_overload_members(dw_child(id, i), name, declarations)
     else if dw_op(id) == .function: declarations.push(dw_function(id, name))
     else: dw_fail(id, "an overload group member other than a function literal")
