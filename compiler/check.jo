@@ -131,6 +131,7 @@ struct FnInst:
     cabi: bool
     deterministic: bool # callback results should depend only on their state and inputs
     parallel: bool      # @parallel: the functions it is given run on many threads at once
+    no_indexes: bool    # finalized normal body has no indexing; init/lambda bodies stay unknown
     noinline: bool      # @noinline: call it rather than copy it into its callers
     gdepth: i32         # generic instances: how many were being checked, one inside the other, when it was made
     export_name: str
@@ -3518,7 +3519,9 @@ __check_fn_body = (f: int):
                         fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but an `if` without `else` gives nothing when it does not hold: add {jd(nodes[ls].pos, "`else:` and the value then", "`else` and the value then")}")
                     fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but its last line gives nothing: end it with the value to give back (or `return value`)")
                 fatal(p, "missing return value: function returns {dt(r)}")
+    index_mark = zonk_indexes
     zonk_tree(body)
+    fns[f].no_indexes = fns[f].kind == FK_NORMAL and zonk_indexes == index_mark
     loop l in fns[f].locals:
         locals[l].type = i32(zonk(int(locals[l].type)))
         if has_var(prune(int(locals[l].type))):
@@ -3778,10 +3781,15 @@ settle_open_globals = ():
         if globals[g].type != 0: globals[g].type = i32(zonk(int(globals[g].type)))
         if globals[g].decl != 0: zonk_tree(int(globals[g].decl))
 
+# Count index nodes during the existing finalization walk. A negative summary
+# lets lowering avoid path proofs that cannot discover an indexed array.
+zonk_indexes = 0
+
 zonk_tree = (n: int):
     if n == 0: return
     if nodes[n].type != 0: nodes[n].type = i32(zonk(int(nodes[n].type)))
     k = nodes[n].kind
+    if k == .index: zonk_indexes += 1
     if k == .lambda: return
     zonk_tree(int(nodes[n].a))
     zonk_tree(int(nodes[n].b))

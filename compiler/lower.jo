@@ -6111,6 +6111,7 @@ fp_target = (t: int):
 # the paths of loop s (with variable l) fixed during it; returns how many were added
 # (place: the array of a `loop mut x in place`, whose elements the loop writes)
 fp_begin = (s: int, l: int, bound: int, place: int) -> int:
+    if place == 0 and fns[cur_fn].no_indexes: return 0
     fp_bases.clear()
     fp_kill.clear()
     fp_escape.clear()
