@@ -514,6 +514,7 @@ dw_effect_suffix = (owner: int, result: int) -> int:
 
 # Surface type spellings share one translation in both construction paths.
 dw_type_name = (name: str) -> str:
+    if name == "addr": refine_active = true
     if name == "int64": return "i64"
     else if name == "uint64": return "u64"
     else if name == "int32": return "i32"
@@ -625,9 +626,15 @@ dw_type = (id: int) -> int:
         nodes[n].a = i32(dw_type(dw_child(args, 0)))
         if count == 2:
             constraint = dw_child(args, 1)
-            if dw_op(constraint) != .assign or dw_name(dw_child(constraint, 1)) != "length":
-                return dw_fail(constraint, "array type constraints; the supported constraint is length=N")
-            nodes[n].b = i32(dw_expr(dw_child(constraint, 2)))
+            if dw_op(constraint) == .assign and dw_name(dw_child(constraint, 1)) == "length":
+                nodes[n].b = i32(dw_expr(dw_child(constraint, 2)))
+            else:
+                if dw_op(constraint) == .assign: return dw_fail(constraint, "array type constraints; use length=N or a length comparison")
+                refine_active = true
+                qualified = mk(.trefined, pos)
+                nodes[qualified].a = i32(n)
+                nodes[qualified].b = i32(dw_ref_predicate(constraint))
+                return qualified
         return n
     if dw_op(id) == .type_apply and dw_name(dw_child(id, 1)) == "dict":
         args = dw_child(id, 2)

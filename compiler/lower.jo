@@ -3857,8 +3857,21 @@ gen_expr = (e: int) -> Val:
                 a = kid(e, i)
                 if a == 0: continue
                 f = int(structs[si].fields) + i
-                val = gen_owned(a)
+                source = a
+                if refine_active and nodes[a].kind == .conv and nodes[a].aux == i32(int(CV.refinement)): source = int(nodes[a].a)
+                val = gen_owned(source)
                 store_field(f, d, val.v)
+            if refine_active:
+                values: int[]
+                arg_types: int[]
+                loop i in [0..nkids(e)):
+                    f = int(structs[si].fields) + i
+                    ft = int(fields[f].type)
+                    values.push(load_val(ft, field_val_addr(f, d), 0))
+                    arg_types.push(ft)
+                loop i in [0..nkids(e)):
+                    a = kid(e, i)
+                    if a != 0 and nodes[a].kind == .conv and nodes[a].aux == i32(int(CV.refinement)): ref_gen_check(a, values[i], values, arg_types)
             if tracked: building.pop()
             return Val(e_slot(s), true, s)
         if aux == 3:
@@ -4072,6 +4085,7 @@ gen_slice = (e: int) -> Val:
 
 # a struct constructor whose arguments cannot run code (so it may be built in place)
 is_plain_ctor = (e: int) -> bool:
+    if refine_active and ref_storage_contract(ntype(e)): return false
     if nodes[e].kind != .call or nodes[e].aux != 2: return false
     t = prune(ntype(e))
     if types[t].kind != .struct_: return false
@@ -4134,7 +4148,7 @@ gen_array = (e: int, t: int) -> Val:
         if copies_on: copy_components(e, et, "array repetition may duplicate its heap-bearing element")
         # fresh heap memory is zeroed, so [0; n] needs no fill loop
         z = kid(e, 0)
-        if nodes[z].kind == .conv: z = int(nodes[z].a)
+        if nodes[z].kind == .conv and (nodes[z].aux != i32(int(CV.refinement)) or nodes[z].ival == 1): z = int(nodes[z].a)
         zk = nodes[z].kind
         if not math_optional(prune(et)) and ((zk == .int_lit and nodes[z].ival == 0) or (zk == .bool_lit and nodes[z].ival == 0) or zk == .null_lit or (zk == .float_lit and nodes[z].fval == 0.0 and f64_bits(nodes[z].fval) == 0)):
             n = gen_expr(int(nodes[e].b)).v

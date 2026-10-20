@@ -492,9 +492,29 @@ instances retain contracts. Callable conversion requires compatible
 preconditions and guarantees; it cannot silently strengthen a result promise.
 Fixed-width arithmetic still wraps before its result meets a refinement.
 
-Scalar refinements do not yet support mutable place parameters, refined fields
-or collection elements, length predicates, or captured lexical dependencies.
-There is no public strict-lane spelling.
+Refinements also apply to record fields and array elements. Constructors,
+defaults, structural record conversions and stores check the declared contracts.
+A field may depend on a sibling, as in `[low:int64 high:int64<i => i >=? low>]`;
+a dependent write checks a private candidate before replacing the record.
+Missing initialization must satisfy the contract too. Fixed-width increments
+retain runtime checks when overflow cannot be ruled out.
+
+`array<int64 length <? 10>` is a dynamic array with a checked length contract;
+`array<int64 length=10>` remains a fixed-size array. Length-changing operations
+check a private candidate before publishing it. `addr` is a nonnegative index
+below `2^48` on native targets and `2^32` on WebAssembly. Arithmetic does not
+automatically preserve this range. A returned refinement may
+project a mutable parameter's final length, for example
+`append=(@xs:array<int64> x:int64):>addr<i => i <? xs.length>=>{...}`.
+References to by-value parameters still describe their captured entry values.
+
+Mutable `@` access requires an equivalent storage contract. A dependent record
+must be passed as a whole so its field updates retain invariant authority.
+Raw mutable access cannot expose refined storage; changing a container's element
+contract through an alias is rejected. Captured lexical dependencies remain
+unsupported. Parameter-dependent contracts nested inside element types, and
+projected mutable postconditions with deferred cleanup, are conservatively
+rejected. There is no public strict-lane spelling.
 
 Fixed-width integer types expose typed `.min` and `.max` constants, including
 the full `uint64` range; these also work through type aliases and generic type
@@ -1945,8 +1965,12 @@ builtin comparison guards, interval/nonzero facts, assignments, snapshots and
 successful `$runtime_assert` conditions. Early returns remove unreachable
 paths; joins retain only evidence shared by every incoming path. Calls forget
 facts about mutable or exposed storage, and loops forget changing values.
-Symbolic operands must be pure scalar fact terms; calls, fields and nonlinear
-inference are not supported by this pilot. An erased assertion cannot introduce
+Symbolic operands may use pure scalar terms, record fields, array lengths, and
+array elements whose indices are proven in bounds. Copies retain captured value
+facts; parent replacement and possibly overlapping element stores invalidate the
+corresponding current projections. Reserve and element replacement preserve the
+containing length. Calls and nonlinear inference remain unsupported in erased
+symbolic operands. An erased assertion cannot introduce
 a new implicit closure capture; existing runtime captures remain usable.
 An unknown assertion reports the
 missing evidence or its invalidation witness. A false condition reports

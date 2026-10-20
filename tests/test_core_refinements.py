@@ -53,8 +53,6 @@ def test_refinement_proven_erasure(compiler, tmp_path, release):
 @pytest.mark.core_quick
 @pytest.mark.parametrize('source,diagnostic', [
     ('main=()=>{let x:int64<i => i >? 0>; printl(x)}', 'refinement refuted'),
-    ('main=()=>{let xs:array<int64<i => i >? 0> length=1>=[1]; printl(xs[0])}', 'refined elements'),
-    ('main=()=>{let xs:array<int64<i => i >? 0>?>=[]; printl(xs.length)}', 'refined elements'),
     ('main=()=>{let x:int64<i => i >? 0>=1; x=0; printl(x)}', 'refinement refuted'),
     ('f=(x:int64):>int64<i => i =? x>=>{x=0; return x}\nmain=()=>printl(f(3))', None),
     ('main=()=>{let limit:int64=5; let x:int64<i => i <? limit>=1; printl(x)}', 'stable binding'),

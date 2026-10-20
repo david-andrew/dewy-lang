@@ -254,6 +254,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     fk = types[from].kind
     tk = types[to].kind
     if fk == .refined or tk == .refined: return can_coerce(n, representation_type(from), representation_type(to))
+    if refine_active and fk == .struct_ and tk == .struct_ and ref_record_conversion(from, to): return true
     if fk == .quantity or tk == .quantity:
         if fk == .var or tk == .var: return true
         if fk == .quantity and tk == .quantity:
@@ -429,6 +430,7 @@ coerce = (n: int, target: int) -> int:
         clear_flag(n, NF_LITERAL)
         return n
     fk = types[from].kind
+    if refine_active and fk == .struct_ and tk == .struct_ and ref_record_conversion(from, to): return ref_convert_record(n, to)
     if fk == .array and is_soa(to) and can_coerce(0, int(types[from].elem), soa_elem(to)):
         soa_from_array(n, to)
         return n
@@ -569,6 +571,12 @@ fixed_literal_ok = (n: int, to: int) -> bool:
 # make array literal n (already checked as T[]) the fixed-size array type `to`
 fixed_literal = (n: int, to: int):
     et = int(types[prune(to)].elem)
+    if refine_active and nkids(n) == 0 and fixed_len(to) > 0 and ref_storage_contract(et):
+        value = struct_default(et, nodes[n].pos)
+        if value != 0:
+            set_list(n, [value])
+            nodes[n].b = i32(bc_int(fixed_len(to), nodes[n].pos))
+            nodes[int(nodes[n].b)].type = i32(T_INT)
     if nodes[n].b != 0:
         c = int(nodes[n].b)
         if nodes[c].kind != .int_lit or nodes[c].ival != fixed_len(to): fatal(nodes[n].pos, "a fixed-size array of {fixed_len(to)} elements needs the count {fixed_len(to)} here")
@@ -1581,9 +1589,10 @@ check_mutable_arguments = (args: int[], mask: int, pos: int):
 
 finish_arg = (a: int, pt: int, is_mut: bool):
     if is_mut and refine_active:
+        ref_mutable_authority(a)
         storage = refine_storage(a, ntype(a))
-        if types[prune(storage)].kind == .refined or types[prune(pt)].kind == .refined:
-            fatal(nodes[a].pos, "mutable refinement access is not supported in the scalar slice")
+        if ref_storage_contract(storage) or ref_storage_contract(pt):
+            if not type_eq(storage, pt): fatal(nodes[a].pos, "mutable refinement access requires an equivalent storage contract")
     if is_mut and not has_flag(a, NF_MUT) and files[pos_file(nodes[a].pos)].is_dewy:
         fatal(nodes[a].pos, "a mutable argument needs `@` at the call site")
     if nodes[a].kind == .hole:
@@ -1595,7 +1604,8 @@ finish_arg = (a: int, pt: int, is_mut: bool):
     if is_mut:
         check_place(a, true)
         if path_narrows > 0: path_forget(path_key(a))
-        if not type_eq(ntype(a), pt) and not unify(ntype(a), pt): fatal(nodes[a].pos, "{jd(nodes[a].pos, "`mut`", "an `@`")} argument must have type {dt(pt)} exactly, found {dt(ntype(a))}")
+        actual = if refine_active: refine_storage(a, ntype(a)) else: ntype(a)
+        if not type_eq(actual, pt) and not unify(actual, pt): fatal(nodes[a].pos, "{jd(nodes[a].pos, "`mut`", "an `@`")} argument must have type {dt(pt)} exactly, found {dt(ntype(a))}")
         add_flag(a, NF_MUT)
         return
     coerce(a, pt)
@@ -1816,7 +1826,10 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                     ok2 = r >= 0
                     if ok2:
                         ptx = subst(pt, cd.binds)
-                        if not has_var(prune(ptx)) and not has_var(prune(ntype(a))) and not type_eq(ptx, ntype(a)): ok2 = false
+                        actual = ntype(a)
+                        shape = ptx
+                        if refine_active: actual = representation_type(actual); shape = representation_type(shape)
+                        if not has_var(prune(shape)) and not has_var(prune(actual)) and not type_eq(shape, actual): ok2 = false
                     if not ok2:
                         ok = false
                         if i + 1 < last_err_arg: break
@@ -2233,6 +2246,17 @@ slot_of = (args: int[], a: int) -> int:
 # or nothing to set)
 struct_default = (t0: int, pos: int) -> int:
     t = prune(t0)
+    if refine_active and types[t].kind == .refined:
+        d = if tkind(int(types[t].elem)) == .array: mk(.array, pos) else: bc_int(0, pos)
+        check_expr(d, int(types[t].elem))
+        coerce(d, t)
+        return d
+    if refine_active and types[t].kind == .fixed and ref_storage_contract(int(types[t].elem)):
+        value = mk(.array, pos)
+        nodes[value].type = i32(t)
+        fixed_literal(value, t)
+        add_flag(value, NF_CHECKED)
+        return value
     if types[t].kind != .struct_ or is_map_type(t) or is_union(t): return 0
     si = int(types[t].st)
     if not struct_has_defaults(si, 0): return 0
@@ -2249,7 +2273,7 @@ struct_has_defaults = (si: int, depth: int) -> bool:
     has = false
     loop i in [0..int(structs[si].nfields)):
         f = fields[int(structs[si].fields) + i]
-        if f.defval != 0: has = true
+        if f.defval != 0 or refine_active and ref_storage_contract(int(f.type)): has = true
         else:
             ft = prune(int(f.type))
             if types[ft].kind == .struct_ and not is_map_type(ft) and not is_union(ft) and struct_has_defaults(int(types[ft].st), depth + 1): has = true
@@ -2511,7 +2535,7 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
             loop i in [0..nf):
                 if mapped[i] != a and mapped[i] != source: continue
                 if nodes[a].kind == .hole: fatal(nodes[a].pos, "partial application of constructors is not supported")
-                ft = int(fields[int(structs[si].fields) + i].type)
+                ft = representation_type(int(fields[int(structs[si].fields) + i].type))
                 finish_arg(a, ft, false)
                 captured[i] = capture_value(a, ft, statements)
                 break
@@ -2539,20 +2563,21 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
                         if captured[j] == 0: continue
                         name = int(fields[int(structs[si].fields) + j].name)
                         push_scope_sym(name, new_sym(name, .local, int(nodes[captured[j]].sym), 0))
-                check_expr(d, int(fields[fi].type))
-                coerce(d, int(fields[fi].type))
+                check_expr(d, representation_type(int(fields[fi].type)))
+                coerce(d, representation_type(int(fields[fi].type)))
                 scope_reset(mark)
                 ctxs.pop()
                 cx = saved
                 if dependent:
-                    d = capture_value(d, int(fields[fi].type), statements)
+                    d = capture_value(d, representation_type(int(fields[fi].type)), statements)
                     finish_arg(d, int(fields[fi].type), false)
+                finish_arg(d, int(fields[fi].type), false)
                 captured[i] = d
                 fin.push(d)
             else:
                 d = struct_default(int(fields[fi].type), nodes[n].pos)
                 if dependent and d != 0:
-                    d = capture_value(d, int(fields[fi].type), statements)
+                    d = capture_value(d, representation_type(int(fields[fi].type)), statements)
                     finish_arg(d, int(fields[fi].type), false)
                 captured[i] = d
                 fin.push(d)
@@ -4517,12 +4542,15 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if types[t].kind != .array: fatal(nodes[n].pos, "this operation needs an array")
         check_place(args[0], false)
         arg_type(args, 1, T_INT)
+        if refine_active and (id == .resize or id == .setlen) and ref_storage_contract(int(types[t].elem)):
+            fatal(nodes[n].pos, "refined elements cannot be created by unchecked zero initialization")
     else if id == .arrdata:
         nargs_check(n, nargs, 1, 1, "data")
         t = arg_type(args, 0, 0)
         if types[t].kind == .str_: r = T_RAWPTR
         else if types[t].kind == .array: r = mk_ptr(int(types[t].elem))
         else: fatal(nodes[n].pos, "data() needs an array or string")
+        if refine_active and ref_storage_contract(t): fatal(nodes[n].pos, "mutable refinement access through raw data is not supported")
         note_storage_access(args[0])
     else if id == .syscall:
         if nargs < 1 or nargs > 7: fatal(nodes[n].pos, "syscall takes 1 to 7 arguments")
@@ -4997,6 +5025,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         r = T_VOID
     else: fatal(nodes[n].pos, "unsupported intrinsic")
     nodes[n].type = i32(r)
+    if refine_active: return ref_length_mutation(n, r)
     r
 
 # ---------------- vectors ----------------
@@ -6564,6 +6593,9 @@ check_expr = (n: int, expected: int) -> int:
             return t
         if bk == .typeval:
             tt = prune(int(types[bt].elem))
+            if tt == ref_addr_type and (name_of(fname) == "min" or name_of(fname) == "max"):
+                nodes[n] = nodes[bc_int((if name_of(fname) == "max": ref_addr_max() else: 0), nodes[n].pos)]
+                return check_expr(n, T_INT)
             if tt == T_MATH_INT and (name_of(fname) == "min" or name_of(fname) == "max"):
                 fatal(nodes[n].pos, "mathematical int has no min or max; int64 describes the interim storage limits")
             if tt != 0 and is_int(tt) and (name_of(fname) == "min" or name_of(fname) == "max"):
@@ -7375,7 +7407,7 @@ check_expr = (n: int, expected: int) -> int:
     else if k == .range: return check_range_value(n, expected)
     else if k == .addr:
         at = check_expr(int(nodes[n].a), 0)
-        if refine_active and types[prune(refine_storage(int(nodes[n].a), at))].kind == .refined: fatal(nodes[n].pos, "mutable refinement access awaits storage invariant checking")
+        if refine_active and ref_storage_contract(refine_storage(int(nodes[n].a), at)): fatal(nodes[n].pos, "mutable refinement access awaits storage invariant checking")
         ak = nodes[int(nodes[n].a)].kind
         if ak != .ident and ak != .field and ak != .index: fatal(nodes[n].pos, "can only take the address of a variable, field or element")
         if ak == .ident and nodes[int(nodes[n].a)].aux == i32(int(SK.local)):
@@ -8527,7 +8559,7 @@ check_istype = (n: int) -> int:
         nodes[n].aux = i32(vi)
     else if types[at].kind == .opt:
         if types[tt].kind == .none_lit: nodes[n].aux = -1
-        else if type_eq(tt, int(types[at].elem)): nodes[n].aux = -2
+        else if type_eq(tt, int(types[at].elem)) or refine_active and refine_implies(int(types[at].elem), tt): nodes[n].aux = -2
         else: fatal(nodes[int(nodes[n].b)].pos, "a {dt(at)} is either a {dt(int(types[at].elem))} or none, never a {dt(tt)}")
         nodes[n].aux2 = i32(map_presence_fn(int(nodes[n].a)))
     else if type_eq(at, tt) or (is_union(tt) and union_index(tt, at) >= 0): nodes[n].aux = -3      # (already narrowed to it, say): always true

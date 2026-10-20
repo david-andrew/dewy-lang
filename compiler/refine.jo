@@ -14,6 +14,7 @@ struct RefTerm:
     kind: int = 0 # self, literal, formal ordinal, stable lexical declaration, type limit
     value: int = 0
     unsigned: bool = false
+    path: int[]
 
 struct RefAtom:
     op: Tok
@@ -22,6 +23,10 @@ struct RefAtom:
 
 ref_predicates: RefAtom[][] = [[]]
 refine_active = false
+ref_addr_type = 0
+ref_addr_max = () -> int: if ptr_size == 4: 4294967295 else: 281474976710655
+
+refine_fields: int[]
 refine_formals: int[]
 refine_self = 0
 refine_base_type = 0
@@ -38,6 +43,8 @@ representation_type = (t0: int) -> int:
 refine_reset = ():
     ref_predicates = [[]]
     refine_active = false
+    refine_fields = []
+    ref_addr_type = 0
     refine_formals = []
     refine_self = 0
     refine_requests = []
@@ -46,7 +53,10 @@ refine_reset = ():
 ref_term_less = (a: RefTerm, b: RefTerm) -> bool:
     if a.kind != b.kind: return a.kind < b.kind
     if a.unsigned != b.unsigned: return not a.unsigned
-    a.value < b.value
+    if a.value != b.value: return a.value < b.value
+    loop i in [0..min(a.path.len(), b.path.len())):
+        if a.path[i] != b.path[i]: return a.path[i] < b.path[i]
+    a.path.len() < b.path.len()
 
 ref_atom_less = (a: RefAtom, b: RefAtom) -> bool:
     if a.a != b.a: return ref_term_less(a.a, b.a)
@@ -80,8 +90,8 @@ mk_refined = (base0: int, predicate: int) -> int:
             if term.kind == 4: dependencies.push(term.value)
         normalized.push(atom)
     predicate = ref_intern(normalized)
-    if not is_int(base) and not has_var(base): fatal(-1, "scalar refinement requires an integer base")
-    if not has_var(base):
+    if not is_int(base) and types[base].kind != .array and not has_var(base): fatal(-1, "refinement requires an integer or array base")
+    if not has_var(base) and is_int(base):
         loop atom in ref_predicates[predicate]:
             loop term in [atom.a, atom.b]:
                 if term.kind != 1: continue
@@ -95,6 +105,9 @@ ref_term = (n: int, binder: int) -> RefTerm:
     if k == .ident:
         name = int(nodes[n].name)
         if name == binder and binder != 0: return RefTerm()
+        if name_of(name) == "length" and tkind(refine_base_type) == .array: return RefTerm(path = [-1])
+        loop i in [0..refine_fields.len()):
+            if name == refine_fields[i]: return RefTerm(5, i)
         loop i in [0..refine_formals.len()):
             if name == refine_formals[i]: return RefTerm(2, i)
         sym = lookup(name)
@@ -108,8 +121,6 @@ ref_term = (n: int, binder: int) -> RefTerm:
             l = int(syms[sym].ref)
             if cx < 0 or locals[l].owner != ctxs[cx].inst: fatal(nodes[n].pos, "captured refinement dependencies await closure invariant checking")
             if int(locals[l].flags) & LF_CONST == 0: fatal(nodes[n].pos, "refinement dependency must be a stable binding")
-            if not is_int(representation_type(int(locals[l].type))): fatal(nodes[n].pos, "refinement dependency must be scalar")
-            if not type_eq(representation_type(int(locals[l].type)), representation_type(refine_base_type)): fatal(nodes[n].pos, "dependent scalar refinement requires matching integer representations")
             return RefTerm(3, l)
         fatal(nodes[n].pos, "unsupported refinement term '{name_of(name)}'")
     if k == .int_lit: return RefTerm(1, nodes[n].ival, has_flag(n, NF_U64))
@@ -138,8 +149,13 @@ ref_term = (n: int, binder: int) -> RefTerm:
             if ty != T_VOID and has_var(ty) and (member == "min" or member == "max"): return RefTerm(4, ty, member == "max")
             if ty != T_VOID and (member == "min" or member == "max"):
                 if ty == T_U64: return RefTerm(1, (if member == "max": -1 else: 0), member == "max")
+                if ty == ref_addr_type: return RefTerm(1, if member == "max": ref_addr_max() else: 0)
                 bound = fact_domain(ty)
                 return RefTerm(1, if member == "max": bound.hi else: bound.lo)
+        term = ref_term(base, binder)
+        if term.kind == 1 or term.kind == 4: fatal(nodes[n].pos, "refinement projection requires a value")
+        term.path.push(if name_of(int(nodes[n].name)) == "length": -1 else: int(nodes[n].name))
+        return term
     fatal(nodes[n].pos, "unsupported refinement term; expected a scalar binding or integer bound")
     RefTerm()
 
@@ -194,10 +210,32 @@ resolve_refinement = (n: int) -> int:
     refine_base_type = base
     ref_atoms(int(nodes[n].b), binder, atoms)
     refine_base_type = previous_base
+    expected = if tkind(representation_type(base)) == .array: T_INT else: representation_type(base)
+    loop atom in atoms:
+        loop term in [atom.a, atom.b]:
+            if refine_fields.len() > 0 and term.kind == 2: fatal(nodes[n].pos, "record field refinement dependencies must name siblings or stable lexical bindings")
+            root = 0
+            if term.kind == 0: root = base
+            else if term.kind == 3: root = int(locals[term.value].type)
+            if root == 0: continue
+            actual = ref_projection_type(root, term.path, nodes[n].pos)
+            if not has_var(actual) and not is_int(actual): fatal(nodes[n].pos, "refinement comparisons require scalar or length projections")
+            if not has_var(actual) and not has_var(expected) and not type_eq(actual, expected): fatal(nodes[n].pos, "dependent scalar refinement requires matching integer representations")
     mk_refined(base, ref_intern(atoms))
 
 refine_storage = (n: int, fallback: int) -> int:
+    if nodes[n].kind == .field:
+        t = representation_type(ntype(int(nodes[n].a)))
+        if types[t].kind == .tuple and nodes[n].aux == -2: return targ(t, nodes[n].ival)
+        if types[t].kind == .struct_ and nodes[n].aux >= 0:
+            return int(fields[int(structs[int(types[t].st)].fields) + int(nodes[n].aux)].type)
+    if nodes[n].kind == .index:
+        t = representation_type(ntype(int(nodes[n].a)))
+        if types[t].kind == .array or types[t].kind == .fixed: return int(types[t].elem)
     if nodes[n].kind == .ident:
+        if nodes[n].aux == i32(int(SK.local)):
+            l = int(nodes[n].sym)
+            if int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0: return refine_storage(int(locals[l].alias), fallback)
         if nodes[n].aux == i32(int(SK.local)): return int(locals[int(nodes[n].sym)].type)
         if nodes[n].aux == i32(int(SK.global)): return int(globals[int(nodes[n].sym)].type)
     fallback
@@ -219,15 +257,32 @@ ref_encoded = (value: int, base: int) -> int:
     if representation_type(base) == T_U64: return value xor FACT_MIN
     value
 
+ref_project = (term: RefTerm, value0: int, s: mut FactState) -> int:
+    value = value0
+    loop selector in term.path:
+        t = if value != 0: representation_type(fact_terms[value].type) else: 0
+        projected = T_INT
+        if selector != -1:
+            if t == 0 or types[t].kind != .struct_: return 0
+            si = int(types[t].st)
+            projected = 0
+            loop i in [0..int(structs[si].nfields)):
+                field = fields[int(structs[si].fields) + i]
+                if int(field.name) == selector: projected = int(field.type)
+            if projected == 0: return 0
+        value = fact_project(s, value, selector, false, projected)
+    value
+
 ref_value = (term: RefTerm, self: int, args: int[], base: int, s: mut FactState) -> int:
-    if term.kind == 0: return self
     if term.kind == 1: return fact_constant(s, ref_encoded(term.value, base))
-    if term.kind == 2:
-        if term.value < args.len(): return args[term.value]
-        return 0
-    if term.kind != 3: fatal(-1, "unresolved generic refinement bound")
-    e = mk_ident_local(term.value, locals[term.value].pos)
-    fact_read(s, e)
+    value = self
+    if term.kind == 2 or term.kind == 5:
+        value = if term.value < args.len(): args[term.value] else: 0
+    else if term.kind == 3:
+        e = mk_ident_local(term.value, locals[term.value].pos)
+        value = fact_read(s, e)
+    else if term.kind != 0: fatal(-1, "unresolved generic refinement bound")
+    ref_project(term, value, s)
 
 ref_assume = (t0: int, self: int, args: int[], s: mut FactState):
     t = prune(t0)
@@ -288,21 +343,43 @@ refine_implies = (from: int, to: int) -> bool:
     fact_terms = saved
     ok
 
-ref_ir_term = (term: RefTerm, self: int, args: int[]) -> int:
-    if term.kind == 0: return self
+ref_ir_term = (term: RefTerm, self: int, args: int[], self_type: int, arg_types: int[]) -> int:
     if term.kind == 1: return e_iconst(term.value)
-    if term.kind == 2:
+    value = self
+    t = self_type
+    if term.kind == 2 or term.kind == 5:
         if term.value >= args.len(): ice("missing refinement entry snapshot")
-        return args[term.value]
-    if term.kind != 3: fatal(-1, "unresolved generic refinement bound")
-    gen_expr(mk_ident_local(term.value, locals[term.value].pos)).v
+        value = args[term.value]
+        t = arg_types[term.value]
+        if value == -1:
+            value = gen_expr(mk_ident_local(fns[cur_fn].params[term.value], -1)).v
+    else if term.kind == 3:
+        t = int(locals[term.value].type)
+        value = gen_expr(mk_ident_local(term.value, locals[term.value].pos)).v
+    else if term.kind != 0: fatal(-1, "unresolved generic refinement bound")
+    loop selector in term.path:
+        t = representation_type(t)
+        if selector == -1:
+            if types[t].kind == .fixed: value = e_iconst(fixed_len(t))
+            else: value = arr_len(value)
+            t = T_INT
+        else:
+            si = int(types[t].st)
+            fi = -1
+            loop i in [0..int(structs[si].nfields)):
+                f = int(structs[si].fields) + i
+                if int(fields[f].name) == selector: fi = f
+            if fi < 0: ice("unresolved refinement field")
+            t = int(fields[fi].type)
+            value = load_val(t, field_val_addr(fi, value), 0)
+    value
 
-ref_gen_check = (n: int, self: int, args: int[]):
+ref_gen_check = (n: int, self: int, args: int[], arg_types: int[]):
     if nodes[n].ival == 1: return
     t = zonk(int(nodes[n].aux2))
-    unsigned = not types[representation_type(t)].sign
+    unsigned = is_int(representation_type(t)) and not types[representation_type(t)].sign
     loop atom in ref_predicates[int(types[t].st)]:
-        a = ref_ir_term(atom.a, self, args); b = ref_ir_term(atom.b, self, args)
+        a = ref_ir_term(atom.a, self, args, int(types[t].elem), arg_types); b = ref_ir_term(atom.b, self, args, int(types[t].elem), arg_types)
         op = if atom.op == .lt: Op.lts else if atom.op == .le: Op.les else: Op.ne
         if unsigned and atom.op != .ne:
             # Bias both operands for an exact unsigned comparison on every target.
@@ -315,15 +392,17 @@ ref_gen_check = (n: int, self: int, args: int[]):
 
 refine_gen = (n: int) -> Val:
     value = gen_expr(int(nodes[n].a))
-    ref_gen_check(n, value.v, refine_ir_entry)
+    ref_gen_check(n, value.v, refine_ir_entry, fns[cur_fn].ptypes)
     value
 
 refine_gen_args = (args: int[], values: int[], offset: int):
     captured: int[]
+    arg_types: int[]
+    loop arg in args: arg_types.push(ntype(arg))
     loop i in [offset..values.len()): captured.push(values[i])
     loop i in [0..args.len()):
         n = args[i]
-        if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.refinement)): ref_gen_check(n, captured[i], captured)
+        if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.refinement)): ref_gen_check(n, captured[i], captured, arg_types)
 
 refine_gen_entry = (f: int):
     refine_ir_entry = []
@@ -333,17 +412,22 @@ refine_gen_entry = (f: int):
         else: refine_ir_entry.push(freeze_scalar(int(locals[l].vreg), representation_type(int(locals[l].type))))
 
 ref_validate_signature = (params: int[], ret: int, mask: int, pos: int):
-    all = params + [ret]
+    loop t in params:
+        if ref_nested_formals(t): fatal(pos, "dependent element contracts require instantiated storage authority")
+    result = prune(ret)
+    loop types[result].kind == .opt: result = prune(int(types[result].elem))
+    all = params + [result]
     loop i in [0..all.len()):
         t = prune(all[i])
         if types[t].kind != .refined: continue
-        if i < params.len() and mask & (1 << i) != 0: fatal(pos, "mutable refinement parameters await storage invariant checking")
         loop atom in ref_predicates[int(types[t].st)]:
             loop term in [atom.a, atom.b]:
                 if term.kind != 2: continue
                 j = term.value
-                if j >= params.len() or mask & (1 << j) != 0: fatal(pos, "scalar refinement dependency needs a by-value parameter")
-                a = representation_type(t); b = representation_type(params[j])
+                if j >= params.len(): fatal(pos, "missing refinement parameter")
+                if mask & (1 << j) != 0 and (i < params.len() or term.path.len() == 0): fatal(pos, "mutable refinement dependencies are only valid in projected postconditions")
+                a = if tkind(representation_type(t)) == .array: T_INT else: representation_type(t)
+                b = ref_projection_type(params[j], term.path, pos)
                 if not has_var(a) and not has_var(b) and not type_eq(a, b): fatal(pos, "dependent scalar refinement requires matching integer representations")
     # Dependency cycles cannot define a self-justifying set of contracts.
     done = fill(false, params.len())
@@ -393,14 +477,271 @@ ref_subst = (predicate: int, args: int[], zonking: bool = false) -> int:
         atoms.push(atom)
     ref_intern(atoms)
 
-# Aggregate storage authority belongs to the next slice, including wrapped
-# element contracts. Callable contracts inside an aggregate remain value types.
-ref_storage_contract = (t0: int) -> bool:
+# Wrapped element contracts and record fields retain storage authority.
+# Callable contracts inside an aggregate remain value types.
+ref_storage_contract = (t0: int, seen: int[] = []) -> bool:
     t = prune(t0)
+    if seen.contains(t): return false
+    if seen.len() >= 32: return true
+    let seen = seen
+    seen.push(t)
     k = types[t].kind
     if k == .refined: return true
-    if k == .opt or k == .array or k == .fixed: return ref_storage_contract(int(types[t].elem))
+    if k == .opt or k == .array or k == .fixed: return ref_storage_contract(int(types[t].elem), seen)
     if k == .tuple:
         loop i in [0..int(types[t].nargs)):
-            if ref_storage_contract(targ(t, i)): return true
+            if ref_storage_contract(targ(t, i), seen): return true
+    if k == .struct_:
+        si = int(types[t].st)
+        check_struct_fields(si)
+        loop i in [0..int(structs[si].nfields)):
+            if ref_storage_contract(int(fields[int(structs[si].fields) + i].type), seen): return true
+    false
+
+# Resolve a projection against its concrete binder before publishing a contract.
+ref_projection_type = (root: int, path: int[], pos: int) -> int:
+    t = representation_type(root)
+    loop selector in path:
+        if has_var(t): return t
+        if selector == -1:
+            if tkind(t) != .array and tkind(t) != .fixed: fatal(pos, "refinement length requires an array")
+            t = T_INT
+        else:
+            if tkind(t) != .struct_: fatal(pos, "refinement field requires a record")
+            si = int(types[t].st)
+            check_struct_fields(si)
+            next = 0
+            loop i in [0..int(structs[si].nfields)):
+                f = fields[int(structs[si].fields) + i]
+                if int(f.name) == selector: next = int(f.type)
+            if next == 0: fatal(pos, "unknown refinement field")
+            t = representation_type(next)
+    t
+
+ref_fact_current_entry = (s: mut FactState) -> int[]:
+    args = refine_entry
+    if fact_owner <= 0: return args
+    f = fact_owner
+    loop i in [0..fns[f].params.len()):
+        l = fns[f].params[i]
+        if int(locals[l].flags) & LF_MUTPARAM != 0: args[i] = fact_read(s, mk_ident_local(l, locals[l].pos))
+    args
+
+ref_has_fields = (t0: int) -> bool:
+    t = prune(t0)
+    if types[t].kind != .refined: return false
+    loop atom in ref_predicates[int(types[t].st)]:
+        if atom.a.kind == 5 or atom.b.kind == 5: return true
+    false
+
+ref_dependent_record = (t: int) -> bool:
+    if tkind(t) != .struct_: return false
+    si = int(types[prune(t)].st)
+    loop i in [0..int(structs[si].nfields)):
+        if ref_has_fields(int(fields[int(structs[si].fields) + i].type)): return true
+    false
+
+ref_validate_record = (t: int, pos: int):
+    si = int(types[prune(t)].st)
+    count = int(structs[si].nfields)
+    done = fill(false, count)
+    loop _ in [0..count):
+        loop i in [0..count):
+            if done[i]: continue
+            ft = prune(int(fields[int(structs[si].fields) + i].type))
+            ready = true
+            if types[ft].kind == .refined:
+                loop atom in ref_predicates[int(types[ft].st)]:
+                    loop term in [atom.a, atom.b]:
+                        if term.kind != 5: continue
+                        j = term.value
+                        if j >= count: fatal(pos, "refinement field is outside its record")
+                        if not done[j]: ready = false
+                        dep = int(fields[int(structs[si].fields) + j].type)
+                        bound = ref_projection_type(dep, term.path, pos)
+                        expected = if tkind(representation_type(ft)) == .array: T_INT else: representation_type(ft)
+                        if not has_var(bound) and not has_var(expected) and not type_eq(bound, expected): fatal(pos, "dependent field refinement requires matching integer representations")
+            if ready: done[i] = true
+    loop yes in done:
+        if not yes: fatal(pos, "cyclic dependent field refinements")
+
+# Dependent field updates construct a private candidate. Every sibling reads
+# the same captured parent; only a validated complete value replaces storage.
+ref_field_store = (statement: int, target: int) -> int:
+    lhs = int(nodes[statement].a)
+    if nodes[lhs].kind != .field: return 0
+    parent = int(nodes[lhs].a)
+    t = representation_type(ntype(parent))
+    if not ref_dependent_record(t) and not ref_dependent_ancestor(parent): return 0
+    pos = nodes[statement].pos
+    before: int[]
+    path = index_update_path(parent)
+    # A compound read captures selectors before evaluating the RHS. A plain
+    # store evaluates its RHS first, exactly as gen_assign does.
+    compound = nodes[statement].op != i32(int(Tok.assign))
+    if compound:
+        j = path.len() - 1
+        loop j >= 0:
+            part = path[j]; j -= 1
+            if nodes[part].kind == .index and nodes[part].b != 0:
+                nodes[part].b = i32(capture_value(int(nodes[part].b), ntype(int(nodes[part].b)), before))
+    value = int(nodes[statement].b)
+    if compound: value = compound_checked(statement, copy_place(lhs), value, representation_type(target))
+    else:
+        check_expr(value, representation_type(target))
+        value = last_checked
+    coerce(value, representation_type(target))
+    value = capture_value(value, representation_type(target), before)
+    if not compound:
+        j = path.len() - 1
+        loop j >= 0:
+            part = path[j]; j -= 1
+            if nodes[part].kind == .index and nodes[part].b != 0:
+                nodes[part].b = i32(capture_value(int(nodes[part].b), ntype(int(nodes[part].b)), before))
+    snapshot = capture_value(copy_place(parent), t, before)
+    si = int(types[t].st)
+    args: int[]
+    loop i in [0..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        field = value
+        if i != int(nodes[lhs].aux):
+            field = bc_field(snapshot, name_of(int(fields[f].name)), pos)
+            check_expr(field, 0)
+            field = last_checked
+        # Distinct AST nodes prevent one field's wrapper modifying another use.
+        field = copy_checked(field)
+        coerce(field, int(fields[f].type))
+        args.push(field)
+    ctor = mk(.call, pos)
+    nodes[ctor] = Node(kind = .call, pos = pos, aux = 2, type = i32(t), flags = i32(NF_CHECKED))
+    set_list(ctor, args)
+    store = mk(.assign, pos)
+    nodes[store].a = i32(parent)
+    nodes[store].b = i32(ctor)
+    nodes[store].op = i32(int(Tok.assign))
+    store = check_assign(store)
+    before.push(store)
+    return bc_block(before, pos)
+
+copy_checked = (n: int) -> int:
+    copy = nodes.len()
+    nodes.push(nodes[n])
+    copy
+
+ref_mutable_authority = (n: int):
+    value = n
+    if nodes[value].kind == .ident and nodes[value].aux == i32(int(SK.local)):
+        l = int(nodes[value].sym)
+        if int(locals[l].flags) & LF_ALIAS != 0: value = int(locals[l].alias)
+    loop nodes[value].kind == .field or nodes[value].kind == .index:
+        parent = int(nodes[value].a)
+        if ref_dependent_record(representation_type(ntype(parent))): fatal(nodes[n].pos, "mutable refinement access needs the full record invariant authority")
+        value = parent
+
+# Length-changing operations execute on a private candidate. Later argument
+# effects run before that candidate is published, so callbacks cannot observe
+# an intermediate violation of the destination's storage contract.
+ref_length_mutation = (n: int, r: int) -> int:
+    id = nodes[n].aux as IN
+    if id != .push and id != .pop and id != .insert and id != .remove and id != .clear and id != .extend and id != .resize and id != .truncate and id != .setlen: return r
+    place = kid(n, 0)
+    t = prune(refine_storage(place, ntype(place)))
+    if types[t].kind != .refined and not ref_dependent_ancestor(place): return r
+    before: int[]
+    args = kids(n)
+    if id == .insert:
+        args[2] = capture_value(args[2], ntype(args[2]), before)
+        args[1] = capture_value(args[1], ntype(args[1]), before)
+    else:
+        loop i in [1..args.len()): args[i] = capture_value(args[i], ntype(args[i]), before)
+    # gen_intrinsic evaluates operands before reacquiring receiver storage.
+    path = index_update_path(place)
+    j = path.len() - 1
+    loop j >= 0:
+        part = path[j]; j -= 1
+        if nodes[part].kind == .index and nodes[part].b != 0: nodes[part].b = i32(capture_value(int(nodes[part].b), ntype(int(nodes[part].b)), before))
+    candidate = capture_value(copy_place(place), representation_type(t), before)
+    args[0] = candidate
+    operation = copy_checked(n)
+    add_flag(operation, NF_CHECKED)
+    set_list(operation, args)
+    result = 0
+    if r != T_VOID: result = capture_value(operation, r, before)
+    else: before.push(bc_stmt(operation, nodes[n].pos))
+    store = bc_assign(place, copy_checked(candidate), nodes[n].pos)
+    store = check_assign(store)
+    before.push(store)
+    if result != 0: before.push(bc_stmt(result, nodes[n].pos))
+    nodes[n] = nodes[bc_block(before, nodes[n].pos)]
+    nodes[n].type = i32(r)
+    nodes[n].aux = 1
+    add_flag(n, NF_CHECKED)
+    r
+
+# Structural record conversion checks target fields after one source capture.
+# Nominal records and mutable element-contract changes retain exact identity.
+ref_record_conversion = (from: int, to: int) -> bool:
+    if types[from].kind != .struct_ or types[to].kind != .struct_: return false
+    fs = int(types[from].st); ts = int(types[to].st)
+    if structs[fs].decl != structs[ts].decl or not has_flag(int(structs[fs].decl), NF_RECORD): return false
+    if not ref_storage_contract(from) and not ref_storage_contract(to): return false
+    check_struct_fields(fs)
+    check_struct_fields(ts)
+    loop i in [0..int(structs[ts].nfields)):
+        a = int(fields[int(structs[fs].fields) + i].type)
+        b = int(fields[int(structs[ts].fields) + i].type)
+        if not can_coerce(0, a, b): return false
+    true
+
+ref_convert_record = (n: int, target: int) -> int:
+    source = copy_checked(n)
+    before: int[]
+    source = capture_value(source, ntype(source), before)
+    si = int(types[target].st)
+    args: int[]
+    loop i in [0..int(structs[si].nfields)):
+        field = fields[int(structs[si].fields) + i]
+        value = bc_field(source, name_of(int(field.name)), nodes[n].pos)
+        check_expr(value, 0)
+        value = last_checked
+        coerce(value, int(field.type))
+        args.push(value)
+    ctor = mk(.call, nodes[n].pos)
+    nodes[ctor] = Node(kind = .call, pos = nodes[n].pos, aux = 2, type = i32(target), flags = i32(NF_CHECKED))
+    set_list(ctor, args)
+    before.push(bc_stmt(ctor, nodes[n].pos))
+    nodes[n] = nodes[bc_block(before, nodes[n].pos)]
+    nodes[n].type = i32(target)
+    nodes[n].aux = 1
+    add_flag(n, NF_CHECKED)
+    n
+
+ref_dependent_ancestor = (n: int) -> bool:
+    value = n
+    loop nodes[value].kind == .field or nodes[value].kind == .index:
+        value = int(nodes[value].a)
+        if ref_dependent_record(representation_type(ntype(value))): return true
+    false
+
+ref_mutable_result = (f: int) -> bool:
+    t = prune(int(fns[f].ret))
+    loop types[t].kind == .opt: t = prune(int(types[t].elem))
+    if types[t].kind != .refined: return false
+    loop atom in ref_predicates[int(types[t].st)]:
+        loop term in [atom.a, atom.b]:
+            if term.kind != 2 or term.value >= fns[f].params.len(): continue
+            if int(locals[fns[f].params[term.value]].flags) & LF_MUTPARAM != 0: return true
+    false
+
+ref_nested_formals = (t0: int, nested: bool = false, depth: int = 0) -> bool:
+    if depth >= 32: return true
+    t = prune(t0)
+    k = types[t].kind
+    if k == .refined:
+        if nested and ref_has_formals(t): return true
+        return ref_nested_formals(int(types[t].elem), nested, depth + 1)
+    if k == .array or k == .fixed or k == .opt: return ref_nested_formals(int(types[t].elem), true, depth + 1)
+    if k == .tuple:
+        loop i in [0..int(types[t].nargs)):
+            if ref_nested_formals(targ(t, i), true, depth + 1): return true
     false

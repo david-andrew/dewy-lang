@@ -1113,16 +1113,26 @@ resolve_type = (tn: int) -> int:
     if k == .trecord:
         let fields = kids(tn)
         seen: {int: bool} = {}
+        old_fields = refine_fields
+        if refine_active:
+            refine_fields = []
+            loop field in fields:
+                name = int(nodes[field].name)
+                i = 0
+                loop i < refine_fields.len() and name_of(refine_fields[i]) < name_of(name): i += 1
+                refine_fields.insert(i, name)
         loop field in fields:
             name = int(nodes[field].name)
             if seen.has(name): fatal(nodes[field].pos, "duplicate record field '{name_of(name)}'")
             seen[name] = true
             t = resolve_type(int(nodes[field].a))
-            if refine_active and ref_storage_contract(t): fatal(nodes[field].pos, "refined fields await aggregate invariant checking")
             if tkind(t) == .void_ or tkind(t) == .typeval:
                 fatal(nodes[field].pos, "inline record fields need value types")
             nodes[field].type = i32(t)
-        return dewy_record_schema(tn, fields)
+        refine_fields = old_fields
+        t = dewy_record_schema(tn, fields)
+        if refine_active: ref_validate_record(t, nodes[tn].pos)
+        return t
     if k == .tarray:
         if nodes[tn].b != 0: return mk_fixed_checked(resolve_type(int(nodes[tn].a)), fixed_size(int(nodes[tn].b)), nodes[tn].pos)
         if nodes[tn].aux >= 2: return nd_of(resolve_type(int(nodes[tn].a)), nodes[tn].pos)
@@ -1305,6 +1315,11 @@ check_struct_fields = (si: int):
         structs[si].nfields = i32(n + inherited.len())
         loop field in inherited: fields.push(field)
         loop i in [0..n): fields.push(Field())
+        old_fields = refine_fields
+        if refine_active:
+            refine_fields = []
+            loop field in inherited: refine_fields.push(int(field.name))
+            loop i in [0..n): refine_fields.push(int(nodes[kid(d, i)].name))
         loop i in [0..n):
             f = kid(d, i)
             fi = int(structs[si].fields) + inherited.len() + i
@@ -1325,9 +1340,10 @@ check_struct_fields = (si: int):
                     t = lit_default(cl)
                 fields[fi].type = i32(zonk(t))
             else: fatal(nodes[f].pos, "field needs a type")
-            if refine_active and ref_storage_contract(int(fields[fi].type)): fatal(nodes[f].pos, "refined fields await aggregate invariant checking")
             loop k in [0..inherited.len() + i):
                 if fields[int(structs[si].fields) + k].name == nodes[f].name: fatal(nodes[f].pos, "duplicate field '{name_of(int(nodes[f].name))}'")
+        refine_fields = old_fields
+        if refine_active: ref_validate_record(int(structs[si].type), nodes[d].pos)
     else:
         nv = nkids(d)
         structs[si].variants = i32(variants.len())
@@ -1411,7 +1427,7 @@ fn_sig = (decl: int) -> FnSig:
         ref_validate_signature(sig.params, int(sig.ret), mm, nodes[decl].pos)
         if has_flag(decl, NF_EXTERN):
             loop t in sig.params + [int(sig.ret)]:
-                if types[prune(t)].kind == .refined: fatal(nodes[decl].pos, "extern refinement contracts require a checked implementation")
+                if ref_storage_contract(t): fatal(nodes[decl].pos, "extern refinement contracts require a checked implementation")
     if nodes[decl].sval != 0: sig.contract = i32(effect_decl_contract(decl, sig.params))
     scope_reset(mark)
     ctxs.pop()
@@ -1866,7 +1882,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
     else:
         t = 0
         if nodes[d].a != 0: t = resolve_type(int(nodes[d].a))
-        if refine_active and types[prune(t)].kind == .refined and nodes[d].b == 0: nodes[d].b = i32(bc_int(0, nodes[d].pos))
+        if refine_active and types[prune(t)].kind == .refined and nodes[d].b == 0: nodes[d].b = i32(struct_default(t, nodes[d].pos))
         # (x: T, a struct with default field values: it starts with them)
         if nodes[d].b == 0 and t != 0: nodes[d].b = i32(struct_default(t, nodes[d].pos))
         if nodes[d].b != 0:
@@ -2974,6 +2990,26 @@ check_assign = (s: int) -> int:
             set_kid(lhs, i, last_checked)
             check_place(last_checked, false)
             if not can_coerce(0, targ(t, i), tt) and not type_eq(targ(t, i), tt): fatal(nodes[tp].pos, "cannot assign {dt(targ(t, i))} to {dt(tt)}")
+        if refine_active:
+            contracted = false
+            loop target in kids(lhs):
+                if nodes[target].kind == .hole: continue
+                if ref_storage_contract(refine_storage(target, ntype(target))) or ref_dependent_ancestor(target): contracted = true
+            if contracted:
+                before: int[]
+                source = capture_value(int(nodes[s].b), t, before)
+                loop i in [0..nkids(lhs)):
+                    target = kid(lhs, i)
+                    if nodes[target].kind == .hole: continue
+                    field = mk(.field, nodes[s].pos)
+                    nodes[field].a = i32(source)
+                    nodes[field].aux = -2
+                    nodes[field].ival = i
+                    check_expr(field, 0)
+                    field = last_checked
+                    store = bc_assign(target, field, nodes[s].pos)
+                    before.push(check_assign(store))
+                return bc_block(before, nodes[s].pos)
         nodes[s].aux = 1
         converted = false
         loop i in [0..nkids(lhs)):
@@ -3113,7 +3149,10 @@ check_assign = (s: int) -> int:
         else if r != 0 and nodes[r].kind == .ident and nodes[r].aux == i32(int(SK.global)):
             wg = int(nodes[r].sym)
             if not gcopy_writes.has(wg): gcopy_writes[wg] = nodes[s].pos
-    if refine_active: lt = refine_storage(lhs, lt)
+    if refine_active:
+        lt = refine_storage(lhs, lt)
+        replacement = ref_field_store(s, lt)
+        if replacement != 0: return replacement
     if op == int(Tok.assign):
         rt = prune(check_expr(int(nodes[s].b), lt))
         if rt != lt and nodes[lhs].kind == .ident and (nodes[lhs].aux == i32(int(SK.local)) or nodes[lhs].aux == i32(int(SK.global))) and not can_coerce(last_checked, rt, lt): var_type_error(lhs, lt, rt, nodes[last_checked].pos)
@@ -3130,11 +3169,23 @@ check_assign = (s: int) -> int:
         else if path_narrows > 0 and nodes[lhs].kind == .ident: path_forget(path_key(lhs))
         return s
     if types[prune(lt)].kind == .refined:
+        # The checked replacement reads and writes one selected element.
+        # Capture selectors before the old-value read, including scalar names
+        # which the RHS could change, rather than replaying the target.
+        before: int[]
+        path = index_update_path(lhs)
+        i = path.len() - 1
+        loop i >= 0:
+            part = path[i]; i -= 1
+            if nodes[part].kind == .index and nodes[part].b != 0:
+                selector = int(nodes[part].b)
+                if nodes[selector].kind != .int_lit: nodes[part].b = i32(capture_value(selector, ntype(selector), before))
         rd = copy_place(lhs)
         add_flag(rd, NF_CHECKED)
         value = compound_checked(s, rd, int(nodes[s].b), representation_type(lt))
         nodes[s].b = i32(coerce(value, lt))
         nodes[s].op = i32(int(Tok.assign))
+        if before.len() > 0: return bc_block(before + [copy_checked(s)], nodes[s].pos)
         return s
     l = prune(lt)
     if types[l].kind == .quantity and quantity_compound(s, l): return s
@@ -3297,7 +3348,7 @@ check_vardecl = (s: int):
         refine_self = int(nodes[s].name)
         t = resolve_type(int(nodes[s].a))
         refine_self = previous_self
-    if refine_active and types[prune(t)].kind == .refined and nodes[s].b == 0: nodes[s].b = i32(bc_int(0, nodes[s].pos))
+    if refine_active and types[prune(t)].kind == .refined and nodes[s].b == 0: nodes[s].b = i32(struct_default(t, nodes[s].pos))
     nm = name_of(int(nodes[s].name))
     # (x: T, a struct with default field values: it starts with them, as T() would)
     if nodes[s].b == 0 and t != 0: nodes[s].b = i32(struct_default(t, nodes[s].pos))
@@ -3460,6 +3511,8 @@ check_stmt = (s: int):
             nodes[s].ival = int(ctxs[cx].loop_depth) - target
         narrow_jumps.push(NarrowJump(i32(cx), ctxs[cx].loop_depth - i32(nodes[s].ival)))
     else if k == .defer_:
+        if refine_active and ref_mutable_result(int(ctxs[cx].inst)):
+            fatal(nodes[s].pos, "projected mutable postconditions with deferred cleanup are not yet supported")
         d = int(nodes[s].a)
         if nodes[d].kind == .block: check_block(d, 0, false)
         else: check_stmt(d)
@@ -4204,6 +4257,11 @@ add_universe = ():
     loop t in tys:
         nm = intern(t.0)
         universe[nm] = new_sym(nm, .type_, t.1, 0)
+    active = refine_active
+    addr_atoms = [RefAtom(.le, RefTerm(1, 0), RefTerm()), RefAtom(.le, RefTerm(), RefTerm(1, ref_addr_max()))]
+    ref_addr_type = mk_refined(T_INT, ref_intern(addr_atoms))
+    universe[intern("addr")] = new_sym(intern("addr"), .type_, ref_addr_type, 0)
+    refine_active = active
     tv = mk(.str_lit, 0)
     tgt = "linux"
     if target_wasm: tgt = "wasm"
