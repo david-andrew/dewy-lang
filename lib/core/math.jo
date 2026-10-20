@@ -235,6 +235,50 @@ __sin_q = (x: f64, q: int) -> f64:
 
 tan = (x: f64) -> f64: sin(x) / cos(x)
 
+# Dewy's trigonometry on angles, which count whole turns: sin of k quarter turns and d of a
+# quarter turn more (|d| <= 1/2, the exact reduction done by the caller), exact at quarter
+# turns. The design's results are fixed-point (32 fraction bits): rounded to those here, in a
+# float64 until that type exists.
+__sin_quarters = (k: int, d: f64) -> f64:
+    a = d * 1.5707963267948966
+    r = if k & 1 == 0: __ksin(a, 0.0) else: __kcos(a, 0.0)
+    if k & 2 != 0: r = 0.0 - r
+    __fixed_round(r)
+
+__tan_quarters = (k: int, d: f64) -> f64:
+    a = d * 1.5707963267948966
+    s = __ksin(a, 0.0)
+    c = __kcos(a, 0.0)
+    __fixed_round(if k & 1 == 0: s / c else: 0.0 - c / s)
+
+# (to the nearest multiple of 2^-32, ties away from zero)
+__fixed_round = (r: f64) -> f64:
+    x = r * 4294967296.0
+    if not (abs(x) < 4503599627370496.0): return r
+    q = floor(abs(x) + 0.5)
+    (if x < 0.0: 0.0 - q else: q) / 4294967296.0
+
+# (a turn count in floating point: t - floor(t) and the steps after it are exact)
+__turn_quarters = (t: f64) -> (int, f64):
+    x = (t - floor(t)) * 4.0
+    k = floor(x + 0.5)
+    (int(k), x - k)
+
+__sin_turns = (t: f64) -> f64:
+    if t - t != 0.0: return 0.0 / 0.0
+    q = __turn_quarters(t)
+    __sin_quarters(q.0, q.1)
+
+__cos_turns = (t: f64) -> f64:
+    if t - t != 0.0: return 0.0 / 0.0
+    q = __turn_quarters(t)
+    __sin_quarters(q.0 + 1, q.1)
+
+__tan_turns = (t: f64) -> f64:
+    if t - t != 0.0: return 0.0 / 0.0
+    q = __turn_quarters(t)
+    __tan_quarters(q.0, q.1)
+
 atan = (x0: f64) -> f64:
     x = x0
     if x != x: return x

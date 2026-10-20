@@ -2670,9 +2670,10 @@ number_literal_tree = (n: int) -> bool:
     false
 
 # (the library functions Dewy calls with physical quantities: dewy_quantity_call)
+quantity_call_names: int[]
 dewy_quantity_name = (name: int) -> bool:
-    nm = name_of(name)
-    nm == "sleep"
+    if quantity_call_names.len() == 0: quantity_call_names = [intern("sleep"), intern("sin"), intern("cos"), intern("tan")]
+    name == quantity_call_names[0] or name == quantity_call_names[1] or name == quantity_call_names[2] or name == quantity_call_names[3]
 
 call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool) -> int:
     if ide_sentinel != 0 and name == ide_sentinel:
@@ -2683,7 +2684,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
     if not ufcs and mod_scope < 0 and args.len() == 2 and (name == intern("__floor_div") or name == intern("__floor_mod") or name == intern("__dewy_power") or name == intern("__dewy_divide")) and files[pos_file(nodes[n].pos)].is_dewy:
         if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
             return dewy_arithmetic_call(n, name, args, expected)
-    if not ufcs and mod_scope < 0 and args.len() == 1 and (name == intern("sleep") or not number_literal_tree(args[0])) and nodes[args[0]].kind != .namedarg and dewy_quantity_name(name) and files[pos_file(nodes[n].pos)].is_dewy:
+    if not ufcs and mod_scope < 0 and args.len() == 1 and dewy_quantity_name(name) and (name == quantity_call_names[0] or not number_literal_tree(args[0])) and nodes[args[0]].kind != .namedarg and files[pos_file(nodes[n].pos)].is_dewy:
         s = lookup(name)
         if s != 0 and syms[s].kind == .fns and decl_in_prelude(int(syms[s].decl)):
             a0 = args[0]

@@ -518,7 +518,10 @@ preserve dimensions. Ordinary conversions cannot add or remove a dimension;
 Formatting currently prints the canonical number without a unit suffix.
 Display-unit selection, offset units such as Celsius, and calendar durations
 remain open. `sleep` takes a time, `sleep(300ms)`, and waits whole nanoseconds;
-a plain number is rejected. Fixed-point radians/trigonometry remain unimplemented.
+a plain number is rejected. `sin`, `cos` and `tan` take an angle, `cos(45°)`, reduced
+exactly in whole turns; until `fixed` exists they give a `float64` rounded to
+fixed's 32 fraction bits (a plain number is still radians). The radian unit
+remains unimplemented.
 
 ## Exact large integers
 

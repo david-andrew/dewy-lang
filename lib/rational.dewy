@@ -162,6 +162,19 @@ __mod__ = ((a:Rational b:Rational):>Rational=>_mod(a b))
 
 __pow__=(base:Rational exponent:int64):>Rational=>pow(base exponent)
 
+# Quantities in exact turns and seconds reach the system here. A turn count reduces exactly to
+# the nearest quarter turn and the rest of a quarter turn (|rest| <= 1/2) before evaluation.
+_QuarterTurns:type=[quarter:int64 rest:float64]
+_quarter_turns=(turns:Rational):>_QuarterTurns=>{
+    let x=turns*4
+    let k=floor(x+rational(1 2))
+    let quarter=to_int64(k%4) ?? 0
+    return _QuarterTurns[quarter to_float64(x-rational(k))]
+}
+_sin_turns=(turns:Rational):>float64=>{let q=_quarter_turns(turns) return __sin_quarters(q.quarter q.rest)}
+_cos_turns=(turns:Rational):>float64=>{let q=_quarter_turns(turns) return __sin_quarters(q.quarter+1 q.rest)}
+_tan_turns=(turns:Rational):>float64=>{let q=_quarter_turns(turns) return __tan_quarters(q.quarter q.rest)}
+
 # Whole nanoseconds, rounded down: sleep's system boundary.
 _whole_nanoseconds=(seconds:Rational):>int64=>{
     let count=floor(seconds*1000000000)
