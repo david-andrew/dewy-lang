@@ -39,6 +39,7 @@ TESTS = (
     'tests/test_core_lifetimes.py',
     'tests/test_core_io.py',
     'tests/test_core_dev.py',
+    'tests/test_core_speed.py',
 )
 
 
