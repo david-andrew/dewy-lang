@@ -1,28 +1,15 @@
 #compiled object files
 *.o
 
-#QBE ssa files
-*.ssa
-
 #assembly language source files
 *.s
-# (except hand-written fixtures for the direct object writers)
-!tests/fixtures/*.s
-
-#llvm bitcode files
-*.bc
-
-#llvm ir text files
-*.ll
 
 #misc executable files
 *.out
 
-# local vscode/cursor state; shared workspace settings are committed
-# .vscode/*
-# !.vscode/settings.json
-# !.vscode/extensions.json
-
+# C stage zero, when built in place
+/stage0/sloppy0
+/build/
 
 # autoenv files
 .autoenv
@@ -35,12 +22,11 @@
 # nix environment files
 *.nix
 
-# easyrepl input history files
-.chat
 
-
-#pyc files
+# python caches
 __pycache__/
+.pytest_cache/
+.ruff_cache/
 
 
 # dewy cache files

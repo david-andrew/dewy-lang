@@ -12,17 +12,17 @@ Dewy is a general purpose programming language with a focus on engineering.
 ## Current Status
 
 The `restart/sloppy-frontend` branch develops a faster implementation in
-[core/](core/README.md), derived from Sloppy with Dewy syntax and language behavior.
+[core/](docs/DEVELOPMENT.md), derived from Sloppy with Dewy syntax and language behavior.
 It runs native/web game examples, with a quick smoke suite taking a few seconds
 and a full validation gate taking a few minutes. It is still experimental;
 see its README for building and limitations.
-The [compact-core language guide](core/LANGUAGE.md) includes an executable tour
+The [compact-core language guide](docs/LANGUAGE.md) includes an executable tour
 and the native/web game workflow. From a checkout, the everyday commands are:
 
 ```sh
 python3 -m tools.core test --quick
-./tools/dewy examples/sloppy_core/paddle.dewy
-./tools/dewy test examples/sloppy_core/paddle_tests.dewy
+./tools/dewy examples/paddle.dewy
+./tools/dewy test examples/paddle_tests.dewy
 ```
 
 The development launcher builds a local compiler when its sources change and
@@ -33,7 +33,7 @@ full compact-core gate. The published installer below still installs the
 previous implementation.
 
 To try the compact core without building it locally, use a
-[CI toolchain download](core/README.md#download-a-ci-build). Successful runs
+[CI toolchain download](docs/DEVELOPMENT.md#download-a-ci-build). Successful runs
 provide standalone compilers for Linux x86-64/ARM64, macOS ARM64 and Windows x64,
 with the native/web game libraries.
 
@@ -42,7 +42,7 @@ with the native/web game libraries.
 The previous compiler lives under [dewy/](dewy/), retained as a language-design
 and behavior reference during development of the compact core.
 
-A VS Code extension with a TextMate grammar for Dewy lives under [dewy/vscode-dewy/](dewy/vscode-dewy/) (not yet published to the marketplace; install it from the folder with `code --install-extension` after packaging, or symlink it into `~/.vscode/extensions`).
+A VS Code extension with a TextMate grammar for Dewy lives under [editors/vscode/](editors/vscode/) (not yet published to the marketplace; install it from the folder with `code --install-extension` after packaging, or symlink it into `~/.vscode/extensions`).
 
 ### udewy
 
@@ -86,7 +86,7 @@ The hero program on the [dewy-lang.org](https://dewy-lang.org) front page lives 
 python -m dewy examples/hero.dewy
 ```
 
-For more working programs, see the executable fixtures in [dewy/tests/](dewy/tests/) (each one compiles and runs in CI) and the curated, status-labeled examples on the [site examples page](https://dewy-lang.org/examples/). Implementation status for every language feature is tracked in [dewy/status.md](dewy/status.md).
+For more working programs, see the executable fixtures in [tests/fixtures/programs/](tests/fixtures/programs/) (each one compiles and runs in CI) and the curated, status-labeled examples on the [site examples page](https://dewy-lang.org/examples/). Implementation status for every language feature is tracked in [dewy/status.md](dewy/status.md).
 
 Programs written for the previous interpreter implementation are archived in [examples/old/](examples/old/); most have not yet been ported to the current compiler.
 

@@ -22,21 +22,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / '__dewycache__' / 'compact-core'
 TESTS = (
-    'tests/python_misc/test_sloppy_core.py',
-    'tests/python_misc/test_sloppy_core_editor.py',
-    'tests/python_misc/test_sloppy_core_format.py',
-    'tests/python_misc/test_sloppy_core_network.py',
-    'tests/python_misc/test_sloppy_core_package.py',
-    'tests/python_misc/test_sloppy_core_testing.py',
-    'tests/python_misc/test_sloppy_core_parallel.py',
-    'tests/python_misc/test_sloppy_core_watch.py',
-    'tests/python_misc/test_sloppy_core_upstream.py',
-    'tests/python_misc/test_sloppy_core_regex.py',
-    'tests/python_misc/test_sloppy_core_recursive.py',
-    'tests/python_misc/test_sloppy_core_ffi.py',
-    'tests/python_misc/test_sloppy_core_lifetimes.py',
-    'tests/python_misc/test_sloppy_core_io.py',
-    'tests/python_misc/test_core_dev.py',
+    'tests/test_core.py',
+    'tests/test_core_editor.py',
+    'tests/test_core_format.py',
+    'tests/test_core_network.py',
+    'tests/test_core_package.py',
+    'tests/test_core_testing.py',
+    'tests/test_core_parallel.py',
+    'tests/test_core_watch.py',
+    'tests/test_core_upstream.py',
+    'tests/test_core_regex.py',
+    'tests/test_core_recursive.py',
+    'tests/test_core_ffi.py',
+    'tests/test_core_lifetimes.py',
+    'tests/test_core_io.py',
+    'tests/test_core_dev.py',
 )
 
 
@@ -46,16 +46,15 @@ def digest(path: Path) -> str:
 
 def build(*args, **kwargs):
     # Most invocations reuse the toolchain; don't import bootstrap tooling then.
-    from tools.sloppy_core.build import build as build_toolchain
+    from tools.compiler.build import build as build_toolchain
     return build_toolchain(*args, **kwargs)
 
 
 def source_paths(root: Path) -> list[Path]:
-    paths = [root / 'tools/sloppy_core/build.py']
-    core = root / 'core'
-    paths.extend(core / name for name in ('LICENSE', 'NOTICE', 'UPSTREAM.json'))
+    paths = [root / 'tools/compiler/build.py']
+    paths.extend(root / 'docs/origin' / name for name in ('LICENSE', 'NOTICE', 'UPSTREAM.json'))
     for directory in ('compiler', 'lib', 'stage0', 'bootstrap'):
-        paths.extend(path for path in (core / directory).rglob('*')
+        paths.extend(path for path in (root / directory).rglob('*')
                      if path.is_file() and path.name != 'sloppy0' and '__pycache__' not in path.parts)
     return sorted(paths)
 
@@ -118,7 +117,7 @@ def test_runner_options(python: Path, arguments: list[str]) -> list[str]:
         )
         if available.returncode:
             return []
-    options = ['-p', 'xdist.plugin', '-p', 'tools.sloppy_core.pytest_parallel', '--dist=loadgroup']
+    options = ['-p', 'xdist.plugin', '-p', 'tools.compiler.pytest_parallel', '--dist=loadgroup']
     if not explicit:
         options += ['-n', str(workers)]
     return options

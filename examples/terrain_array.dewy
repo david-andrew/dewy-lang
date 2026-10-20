@@ -1,0 +1,23 @@
+# A height field from one fused expression, with a CPU reference calculation.
+# Native: tools/dewy examples/terrain_array.dewy
+# Web: tools/dewy build examples/terrain_array.dewy --target wasm -o terrain
+# Force the portable CPU fallback with SLOPPY_SOFTWARE=1.
+height=(x:float32 z:float32 phase:float32):>float32=>{
+    return sin(x*0.25+phase)*cos(z*0.25-phase)*2.0
+}
+
+main=()=>{
+    let axis=float32.(linspace(-8.0 8.0 33))
+    let x=reshape(axis 1 axis.length)
+    let z=reshape(axis axis.length 1)
+    # Upload the two axes once; broadcasting constructs their full grid.
+    let gx=gpu(x) let gz=gpu(z)
+    let field=height.(gx gz 0.5)
+    let downloaded=cpu(field)
+    let reference=height.(x z 0.5)
+    let error=max(abs.(downloaded .- reference))
+    assert(downloaded.shape =? [33 33] and error <? 0.00002)
+    printl"Generated {rows(downloaded)}x{cols(downloaded)} height field (GPU available: {gpu_available()})."
+    printl"Maximum CPU difference: {format(error ".6f")}"
+    return 0
+}

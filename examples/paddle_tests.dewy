@@ -1,0 +1,25 @@
+# Run: tools/dewy test examples/paddle_tests.dewy
+# Filter: tools/dewy test examples/paddle_tests.dewy bounce
+from p"paddle_model.dewy" import fresh, advance
+
+test "fresh world" {
+    let world = fresh()
+    assert(world.score =? 0 and world.misses =? 0)
+    assert(world.position.x =? 640.0)
+}
+
+test "side wall bounce" {
+    let world = fresh()
+    world.position.x = 1259.0
+    advance(@world 0.1 640.0)
+    assert(world.position.x =? 1260.0)
+    assert(world.velocity.x <? 0.0)
+}
+
+test "miss resets the ball" {
+    let world = fresh()
+    world.position.y = 759.0
+    advance(@world 0.1 80.0)
+    assert(world.misses =? 1 and world.score =? 0)
+    assert(world.position.x =? 640.0 and world.position.y =? 220.0)
+}
