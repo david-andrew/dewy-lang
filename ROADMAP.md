@@ -24,7 +24,6 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 
 - **Effects slice 1** (Astra): direct-place effect rows; shares places with
   facts.jo.
-- **Object methods** (Opus): bare sibling-field access, no `self`.
 
 ## Next
 
@@ -62,8 +61,11 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
   lowering/emission (~18 M) and the optimizer (~11 M).
 - Small items:
   - the remaining Jo-shaped hints in diagnostics;
-  - bare sibling-field access from function fields and type methods
-    (designed; the front-page counter example needs it);
+  - **bug:** a recursive generic closure stored in a record crashes the
+    optimizer (opt.jo:928);
+  - methods follow-ups: field defaults that use earlier fields
+    (`stop:int64 = start`); methods on nominal `type of X & [...]` types;
+    static `Type.method` calls; printing a record literal that has methods;
   - delete `restart/sloppy-frontend` and its publish-policy entry once the
     bigint task lands.
 
@@ -100,6 +102,8 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 13. Lifecycle hooks: must `$__copy__`/`$__move__` preserve the abstract value?
     Can a move hook fail?
 14. Errors that reach `main`.
+17. Can a function nested inside a method change the object's members?
+    Today it can't, and that's a clear error.
 16. Partial application of an overloaded function without a type annotation:
     the version leaving the fewest parameters open wins (implemented
     provisionally). OK?
