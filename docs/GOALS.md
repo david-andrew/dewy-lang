@@ -69,6 +69,6 @@ needs predictability or speed the default does not promise.
 
 - Value semantics, and why copy-on-write is reserved for the collections where
   it pays: [`design/value_semantics.md`](design/value_semantics.md)
-- The module directive that turns an unproved aggregate copy into an error:
-  `$explicit_copies` in [`ROADMAP.md`](../ROADMAP.md)
-- Implementation order and measured performance targets: [`ROADMAP.md`](../ROADMAP.md)
+- The strict lane's `$explicit_copies` directive and copy policy:
+  [`design/value_semantics.md`](design/value_semantics.md)
+- Work queue, acceptance ladder and measured targets: [`ROADMAP.md`](../ROADMAP.md)

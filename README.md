@@ -49,7 +49,7 @@ python3 -m tools.compiler.build --bootstrap --output /tmp/dewy-core   # standalo
 
 ## Documentation
 
-[Goals](docs/GOALS.md) · [language guide and tour](docs/LANGUAGE.md) ·
+[Goals](docs/GOALS.md) · [roadmap](ROADMAP.md) · [contributor and agent rules](AGENTS.md) · [language guide and tour](docs/LANGUAGE.md) ·
 [developing the compiler](docs/DEVELOPMENT.md) · [design notes](docs/design/README.md) ·
 [origin and licensing](docs/origin/ORIGIN.md)
 
