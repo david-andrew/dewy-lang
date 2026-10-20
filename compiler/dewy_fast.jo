@@ -493,7 +493,15 @@ dn_unicode_escape = (source: str, start: int, stop: int) -> (int, int):
     if value > 0x10FFFF or (value >= 0xD800 and value <= 0xDFFF): return (dn_error(start, "Unicode escape must name a scalar value, not a surrogate or out-of-range code point"), i)
     (value, i)
 
-dn_string = (token: DewyLexeme) -> int:
+# String decoding is shared; the construction target selects syntax nodes for
+# the reference parser or compact nodes for the value parser.
+dn_text = (kind: DewyKind, text: str, offset: int, direct: bool) -> int:
+    if not direct: return dn_node(kind, text, offset)
+    n = mk(.str_lit, mkpos(dn_file, offset))
+    nodes[n].sval = i32(intern(text))
+    n
+
+dn_string = (token: DewyLexeme, direct: bool = false) -> int:
     source = files[dn_file].src
     raw = token.kind == .rawquoted
     opening = token.start
@@ -501,7 +509,7 @@ dn_string = (token: DewyLexeme) -> int:
     width = dn_quote_width(source, opening, token.stop)
     i = opening + width
     stop = token.stop - width
-    if raw: return dn_node(.string, source[i..stop), token.start)
+    if raw: return dn_text(.string, source[i..stop), token.start, direct)
     chunks: int[]
     bytes_: u8[]
     chunk_start = i
@@ -534,7 +542,7 @@ dn_string = (token: DewyLexeme) -> int:
         if c == '{':
             interpolated = true
             if bytes_.len() > 0:
-                chunks.push(dn_node(.string_chunk, str_from_bytes(bytes_), chunk_start))
+                chunks.push(dn_text(.string_chunk, str_from_bytes(bytes_), chunk_start, direct))
                 bytes_.clear()
             first = i + 1
             i = dn_interpolation_end(source, first, stop, 0)
@@ -546,20 +554,31 @@ dn_string = (token: DewyLexeme) -> int:
             dn_at = 0
             dn_angles = 0
             dn_comma_stop = false
-            expression = dn_expr(0)
-            if dn_tokens[dn_at].kind != .eof: dn_error(dn_tokens[dn_at].start, "expected one interpolation expression")
+            expression = if direct: dc_expr(0) else: dn_expr(0)
+            if expression != 0 and dn_tokens[dn_at].kind != .eof: dn_error(dn_tokens[dn_at].start, "expected one interpolation expression")
             dn_tokens = saved_tokens
             dn_at = saved_at
             dn_angles = saved_angles
             dn_comma_stop = saved_comma
-            chunks.push(dn_node(.block, "{{}}:", first, [expression]))
+            if direct:
+                if expression == 0: return 0
+                part = mk(.pair, mkpos(dn_file, first))
+                nodes[part].a = i32(expression)
+                nodes[part].sval = -1
+                chunks.push(part)
+            else: chunks.push(dn_node(.block, "{{}}:", first, [expression]))
             i += 1
             chunk_start = i
             continue
         bytes_.push(c)
         i += 1
-    if not interpolated: return dn_node(.string, str_from_bytes(bytes_), token.start)
-    if bytes_.len() > 0: chunks.push(dn_node(.string_chunk, str_from_bytes(bytes_), chunk_start))
+    if not interpolated: return dn_text(.string, str_from_bytes(bytes_), token.start, direct)
+    if bytes_.len() > 0: chunks.push(dn_text(.string_chunk, str_from_bytes(bytes_), chunk_start, direct))
+    if direct:
+        n = mk(.str_lit, mkpos(dn_file, token.start))
+        nodes[n].aux = 1
+        set_list(n, chunks)
+        return n
     dn_node(.interpolated_string, "", token.start, chunks)
 
 # A right operand in parentheses supplies a unary function. Operators with
