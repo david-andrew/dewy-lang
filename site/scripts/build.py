@@ -163,6 +163,10 @@ def main(argv=None):
     ladder=coverage['ladder'];rows=ladder['results']
     def esc(s):return html.escape(str(s))
     ladder_html='<p>Native release on '+esc(ladder['host'])+'. Design '+str(sum(r['ok'] for r in rows if r['version']=='design'))+'/'+str(len(rows)//2)+'; core '+str(sum(r['ok'] for r in rows if r['version']=='core'))+'/'+str(len(rows)//2)+'.</p><details><summary>Individual programs and failures</summary><ul>'+''.join(f'<li>{esc(r["program"])} / {r["version"]}: {"pass" if r["ok"] else "FAIL — "+esc(r["error"])}</li>' for r in rows)+'</ul></details>'
+    failures=[r for r in rows if r['version']=='design' and not r['ok']]
+    if failures:
+        ladder_html += '<h3>Known design failures</h3><ul>'+''.join(
+            f'<li><code>{esc(r["program"])}</code>: {esc(r["error"])}</li>' for r in failures)+'</ul>'
     counts={m:sum(e['mode']==m for e in examples) for m in ('run','check','reject','design-only')}
     example_html='<p>'+', '.join(f'{v} {k}' for k,v in counts.items())+'. Check/reject rows measure diagnostics and checking; only run rows compare stdout.</p><details><summary>Exact snippet IDs</summary><ul>'+''.join(f'<li>{esc(e["id"])}: {e["mode"]} — {e["status"]}</li>' for e in examples)+'</ul></details>'
     channel_exists=(DIST/'toolchain-channel.txt').is_file()
