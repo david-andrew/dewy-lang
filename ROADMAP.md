@@ -24,7 +24,7 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 
 - **Refinement slice 3** (Astra): lengths, fields, invariants.
 - **Throughput project 3 pilot** (Astra): check once and finalize once (check plus lowering ~567 M → target 135 M).
-- **Printing per design** (Opus): `[1 2 3]`, `[x=1 name="q"]`; plus small bugs.
+- **Construction safety** (Opus): missing constructor fields are silently zero-filled; this must be an error unless the field has a default.
 
 ## Next
 
@@ -101,6 +101,9 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 14. Errors that reach `main`.
 17. Can a function nested inside a method change the object's members?
     Today it can't, and that's a clear error.
+18. Printing details decided provisionally: minted values print with their
+    type name (`Fault[code=7]`); ranges print as `[0..2]`/`[1,3..9]`; methods
+    get unused warnings only on private types. OK?
 16. Partial application of an overloaded function without a type annotation:
     the version leaving the fewest parameters open wins (implemented
     provisionally). OK?
