@@ -1536,10 +1536,70 @@ narrowed concrete error exposes its payload normally. Arguments do not forward
 implicitly, and assignments through union routes require narrowing first.
 Forwarding method calls are not yet implemented.
 
-`TextError` and `JsonError` belong to `error`. `read_text(path)` returns UTF-8
-text or a file error (including `InvalidUtf8`); `write_text(path text)` returns
-the byte count or a file error. `main` still returns void or an integer exit
-code: handle exceptions there explicitly.
+`TextError` and `JsonError` belong to `error`, as do the file errors and
+`SpawnError` below. `main` still returns void or an integer exit code: handle
+exceptions there explicitly.
+
+## Files, paths and processes
+
+`p"dir/file.txt"` is a path literal and `p(text)` builds a path at run time.
+Both make a `Path`, which holds its text in `.path`. A path interpolates as its
+text, and `path as string` is that text too, so paths are joined by
+interpolation: `p"{root}/{name}.csv"`. There is no `join` method.
+
+```dewy
+main=():>int64=>{
+    let source=p"project/src/main.dewy"
+    match source.read_text {
+        text:string => printl(text)
+        <FileNotFound> => printl"no such file: {source}"
+        _ => printl"cannot read {source}"
+    }
+    printl(source.with_suffix(".udewy"))   # project/src/main.udewy
+    printl(source.parent.name)             # src
+    return 0
+}
+```
+
+The methods follow Python's `pathlib`. The lexical ones read only the text:
+`name`, `stem`, `suffix` (with its dot; `.bashrc` has none), `parent`, `parts` (a
+leading `/` is the root part), `is_absolute`, `with_name(name)`,
+`with_stem(stem)` and `with_suffix(suffix)`. The file-system ones give every
+outcome as a value:
+
+- `exists`, `is_file` and `is_dir` give a `bool`;
+- `read_text` gives a `string`, `read_bytes` an `array<uint8>`, and `list` the
+  directory's entry names;
+- `write_text(text)` and `write_bytes(bytes)` replace the file and give the byte
+  count;
+- `mkdir`, `rmdir` and `unlink` give `true`.
+
+A failure is `FileNotFound`, `FileAccessDenied`, `IsDirectory`, `FileExists` or
+`FileError` (any other failure), and `read_text` adds `InvalidUtf8`. All are
+`error`s, so `is? error`, `or_throw` and `match` handle them.
+
+The same operations exist as functions of a path's text: `read_text(path)`,
+`read_bytes`, `write_text(path text)`, `write_bytes`, `file_exists`, `is_file`,
+`is_directory`, `list_directory`, `make_directory`, `remove_directory` and
+`remove_file`. `append_file(path text)` still answers with a `bool`. The
+implementation language's spellings (`read_file`, `write_file`, `mkdir`,
+`delete_file`, `list_dir`, `file_name`, `join_path`, `run_program` and the like)
+are rejected in Dewy with the Dewy spelling to use instead.
+
+`run(program args)` runs a child process and gives its status: the exit code, or
+`128 + n` when signal `n` ended it. `SpawnError` means no child could be started.
+`program` is a path: there is no `PATH` search (`run("/usr/bin/env" ["python3"
+"tool.py"])` does one), and a program that cannot be run ends with `127`, as in a
+shell. The child shares the standard streams. `run_silent` sends its stdout and
+stderr to `/dev/null`. `spawn(program args)` gives a `Child` whose `wait` gives
+the status. `capture(program args)` waits and gives an `Output`: `status`,
+`stdout` and `stderr` bytes (both drained as they fill), and `stdout_text` and
+`stderr_text` (`string | none`).
+
+In a web build, files live in the page's memory, and directories exist as the
+paths of its files and those made with `mkdir`. Processes are `SpawnError` there.
+On Windows, `run` works and `run_silent`, `spawn` and `capture` are not available
+yet (`SpawnError`).
 
 ## Loops, text and optional values
 
@@ -2013,7 +2073,7 @@ from p"helpers.dewy" import advance, fresh
 ```
 
 Bare names search beside the importing file, then the bundled library folders;
-`p"..."` names a file explicitly. Within each folder, a Dewy importer prefers
+a path literal `p"..."` names a file explicitly. Within each folder, a Dewy importer prefers
 `.dewy` and falls back to `.jo`; a Jo importer prefers `.jo`. The importing file
 itself is skipped, so `physics.dewy` can import the bundled `physics` library.
 Watch mode notices creation/removal of a preferred local module and reloads it.
