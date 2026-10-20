@@ -1,0 +1,9 @@
+# modes: web web-release
+# A web page starts no processes: every attempt is SpawnError.
+main=():>int64=>{
+    printl(run("/bin/sh" ["-c" "exit 3"]) is? SpawnError)
+    printl(run_silent("/bin/sh" []) is? SpawnError)
+    printl(spawn("/bin/sh" []) is? SpawnError)
+    printl(capture("/bin/sh" []) is? error)
+    return 0
+}

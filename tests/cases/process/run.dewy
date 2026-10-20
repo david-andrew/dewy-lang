@@ -1,0 +1,18 @@
+# modes: native native-release
+# A child's status: its exit code, 128 + n when signal n ended it, and 127 when its program
+# could not be run (there is no PATH search: a program is a path).
+main=():>int64=>{
+    printl(run("/bin/sh" ["-c" "exit 0"]))
+    printl(run("/bin/sh" ["-c" "exit 3"]))
+    printl(run("/bin/sh" ["-c" "kill -9 $$"]))
+    printl(run("/bin/sh" ["-c" "kill -15 $$"]))
+    printl(run("/nonexistent/program" []))
+    printl(run("sh" ["-c" "exit 5"]))
+    printl(run("/usr/bin/env" ["sh" "-c" "exit 6"]))
+    printl(run("/bin/sh" ["-c" "printf 'shared stdout\\n'"]))
+    printl(run_silent("/bin/sh" ["-c" "echo hidden; echo hidden 1>&2; exit 4"]))
+    let status=run("/bin/sh" ["-c" "exit 9"])
+    if status is? SpawnError return 1
+    printl(status+1)
+    return 0
+}

@@ -1,0 +1,31 @@
+# Every file-system method of a path, each outcome a value.
+main=():>int64=>{
+    let dir=p"case_path_methods"
+    printl(dir.exists)
+    printl(dir.mkdir)
+    printl"{dir.exists} {dir.is_dir} {dir.is_file}"
+    let notes=p"{dir}/notes.txt"
+    printl(notes.write_text("héllo\nworld\n"))
+    printl"{notes.exists} {notes.is_file} {notes.is_dir}"
+    let text=notes.read_text
+    if text is? error return 1
+    printl(text.split("\n")[0])
+    let data=p"{dir}/data.bin"
+    printl(data.write_bytes([uint8(0) 1 254 255]))
+    let loaded=data.read_bytes
+    if loaded is? error return 2
+    printl(loaded)
+    let names=dir.list
+    if names is? error return 3
+    names.sort
+    printl(names)
+    printl(notes.unlink)
+    printl(data.unlink)
+    printl(notes.exists)
+    let left=dir.list
+    if left is? error return 4
+    printl(left.length)
+    printl(dir.rmdir)
+    printl(dir.exists)
+    return 0
+}

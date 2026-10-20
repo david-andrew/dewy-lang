@@ -1,0 +1,13 @@
+# quick
+# A record converts with `as` through its `__as__` function, one per result type.
+Celsius:type=[degrees:float64]
+__as__=(c:Celsius):>string=>"{c.degrees} C"
+__as__=(c:Celsius):>float64=>c.degrees*9.0/5.0+32.0
+main=():>int64=>{
+    let warm=Celsius[25.0]
+    printl(warm as string)
+    printl(warm as float64)
+    let text:string=p"/tmp/x.txt" as string
+    printl(text)
+    return 0
+}

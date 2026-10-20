@@ -1,0 +1,27 @@
+# quick
+# The lexical methods read only the text, as Python's pathlib does.
+show=(path:Path):>void=>{
+    printl"{path}: name={path.name} stem={path.stem} suffix={path.suffix} parent={path.parent} parts={path.parts} absolute={path.is_absolute}"
+}
+main=():>int64=>{
+    show(p"src/main.dewy")
+    show(p"/usr/lib/archive.tar.gz")
+    show(p"notes")
+    show(p".bashrc")
+    show(p"trailing.")
+    show(p"dir/sub/")
+    show(p"a//b/./c.txt")
+    show(p"/")
+    show(p"")
+    let source=p"project/src/main.dewy"
+    printl(source.parent.name)
+    printl(source.parent.parent)
+    printl(source.with_name("lib.dewy"))
+    printl(source.with_stem("entry"))
+    printl(source.with_suffix(".udewy"))
+    printl(source.with_suffix(""))
+    printl(p"/top".with_name("other"))
+    printl(p"bare.txt".with_suffix(".md"))
+    printl(p"archive.tar.gz".with_stem("backup"))
+    return 0
+}

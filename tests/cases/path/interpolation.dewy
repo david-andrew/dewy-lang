@@ -1,0 +1,22 @@
+# quick
+# A path interpolates as its text, so interpolation joins paths; there is no join method.
+main=():>int64=>{
+    let root=p"/srv/data"
+    let name="report"
+    let joined=p"{root}/{name}.csv"
+    printl(joined)
+    printl(joined.path)
+    printl(joined as string)
+    let text:string=joined as string
+    printl(text.length)
+    let nested=p"{joined.parent}/archive/{joined.name}"
+    printl(nested)
+    printl(p(text) =? joined)
+    printl(p"{root}" =? root)
+    printl(p"a" =? p"b")
+    let folders=["one" "two"]
+    loop folder in folders {
+        printl(p"{root}/{folder}".name)
+    }
+    return 0
+}

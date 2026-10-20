@@ -1,0 +1,36 @@
+# The same operations as functions of a path's text.
+main=():>int64=>{
+    let dir="case_path_text"
+    printl(file_exists(dir))
+    printl(make_directory(dir))
+    printl"{is_directory(dir)} {is_file(dir)}"
+    let file="{dir}/value.txt"
+    printl(write_text(file "42"))
+    printl"{file_exists(file)} {is_file(file)} {is_directory(file)}"
+    let text=read_text(file)
+    if text is? error return 1
+    printl(text)
+    printl(write_bytes(file [uint8(52) 50 10]))
+    let data=read_bytes(file)
+    if data is? error return 2
+    printl(data)
+    let line=first_line(file)
+    if line is? error return 4
+    printl(line)
+    printl(first_line("{dir}/missing.txt") is? FileNotFound)
+    let entries=list_directory(dir)
+    if entries is? error return 3
+    printl(entries)
+    printl(remove_file(file))
+    printl(remove_file(file) is? FileNotFound)
+    printl(remove_directory(dir))
+    printl(remove_directory(dir) is? FileNotFound)
+    printl(list_directory(dir) is? FileNotFound)
+    return 0
+}
+
+# A function that propagates a file error to its caller.
+first_line=(path:string):>string|error=>{
+    let text=read_text(path) or_throw
+    return text.split("\n")[0]
+}

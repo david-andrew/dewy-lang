@@ -1,0 +1,41 @@
+# Failures are error values: the missing file, a directory where a file is wanted, a
+# directory already there, one not empty, and bytes that are not UTF-8.
+describe=(outcome:string|int64|bool|array<uint8>|array<string>|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError|InvalidUtf8):>string=>{
+    if outcome is? FileNotFound return "FileNotFound"
+    if outcome is? FileAccessDenied return "FileAccessDenied"
+    if outcome is? IsDirectory return "IsDirectory"
+    if outcome is? FileExists return "FileExists"
+    if outcome is? InvalidUtf8 return "InvalidUtf8"
+    if outcome is? FileError return "FileError"
+    return "ok"
+}
+main=():>int64=>{
+    let dir=p"case_path_errors"
+    let missing=p"{dir}/missing.txt"
+    printl(missing.read_text is? FileNotFound)
+    printl(missing.read_bytes is? error)
+    printl(missing.unlink is? FileNotFound)
+    printl(missing.list is? FileNotFound)
+    printl(dir.mkdir)
+    printl(describe(dir.mkdir))
+    printl(describe(dir.read_text))
+    printl(describe(dir.read_bytes))
+    printl(describe(dir.write_text("x")))
+    printl(describe(dir.unlink))
+    let inside=p"{dir}/inside.txt"
+    printl(describe(inside.write_bytes([uint8(255) 254])))
+    printl(describe(inside.read_text))
+    printl(describe(inside.read_bytes))
+    printl(describe(inside.list))
+    printl(describe(dir.rmdir))
+    printl(describe(inside.rmdir))
+    printl(inside.unlink)
+    printl(dir.rmdir)
+    let failure=missing.read_text
+    match failure {
+        text:string => printl(text)
+        <FileNotFound> => printl"no such file: {missing.name}"
+        _ => printl"cannot read {missing}"
+    }
+    return 0
+}
