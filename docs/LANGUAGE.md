@@ -395,7 +395,9 @@ A binary operator with its right operand can be used as a function:
 Normal precedence applies: `(* 2 + 2)` means `x => x * 2 + 2`.
 These functions use ordinary private captures and evaluate their bodies when
 called. Function types use angle brackets, for example `<(x:int64):>int64>`;
-parenthesized function type grouping is rejected. Pass them to a typed callback
+parenthesized function type grouping is rejected. An inferred `@fn` handle
+selects a single concrete user function ahead of prelude functions with the same
+name; multiple concrete user overloads still require a callable type. Pass them to a typed callback
 parameter or give a local a function type,
 for example `let twice:<(value:int64):>int64> = (* 2)`. A module declaration such
 as `twice = (* 2)` can infer its parameter type at calls, like other functions.

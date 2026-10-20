@@ -5356,6 +5356,14 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
     else: collect_fns(int(nodes[n].name), decls)
     et = prune(expected)
     if expected == 0: et = 0
+    # Only inferred Dewy handles prefer a concrete program declaration.
+    # Keep Jo implementation-library values and contextual overload matching
+    # on their existing resolution path.
+    if explicit_types.len() == 0 and files[pos_file(nodes[n].pos)].is_dewy and (et == 0 or (types[et].kind != .fn_ and types[et].kind != .cfn)):
+        own: int[]
+        loop d in decls:
+            if not decl_in_prelude(d) and not fn_sig(d).generic: own.push(d)
+        if own.len() == 1: decls = own
     f = 0
     selected = 0
     selected_binds: int[]
