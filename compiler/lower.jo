@@ -290,7 +290,7 @@ release = (v: int, t0: int):
         iff(math_tag(v))
         was = ir_cold
         ir_cold = true
-        release(e_addi(v, -1), math_payload_type())
+        release_call(e_addi(v, -1), math_payload_type())
         ir_cold = was
         endc()
         return
@@ -1562,7 +1562,15 @@ positive_bound = (n: int, use_locals: bool) -> int:
         if let limit = math_word_limits.get(int(nodes[n].sym)): return limit
         loop i in [0..nonneg_locals.len()):
             if nonneg_locals[i] == int(nodes[n].sym): return nonneg_limits[i]
-        return positive_bounds.get(int(nodes[n].sym)) ?? -1
+        l = int(nodes[n].sym)
+        fl = int(locals[l].flags)
+        if fl & LF_DECL == 0 or fl & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_SOAELEM | LF_ELEMALIAS | LF_QUIET) != 0: return -1
+        if positive_bounds_fn != cur_fn:
+            positive_bounds_fn = cur_fn
+            positive_bounds.clear()
+            if math_has_mutable: math_prepare_writes()
+            else: positive_writes(int(fns[cur_fn].body))
+        return positive_bounds.get(l) ?? -1
     if k == .conv and nodes[n].aux == i32(int(CV.int_)):
         return positive_bound(int(nodes[n].a), use_locals)
     if k == .intrinsic and nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1:
@@ -1603,12 +1611,8 @@ positive_target_write = (n: int, bound: int):
     else if nodes[n].kind == .tuple:
         loop i in [0..nkids(n)): positive_target_write(kid(n, i), -1)
 
-# All writes must independently establish a bound. Address-taken and captured
-# locals are excluded above, so a call cannot silently invalidate the result.
-positive_writes = (n: int):
-    if n == 0: return
+positive_write = (n: int):
     k = nodes[n].kind
-    if k == .lambda or k == .fn_: return
     if k == .vardecl and not has_flag(n, NF_GLOBAL):
         if nkids(n) == 0:
             b = int(nodes[n].b)
@@ -1619,6 +1623,14 @@ positive_writes = (n: int):
         bound = -1
         if nodes[n].op == i32(int(Tok.assign)) and nodes[n].aux == 0: bound = positive_bound(int(nodes[n].b), false)
         positive_target_write(int(nodes[n].a), bound)
+
+# All writes must independently establish a bound. Address-taken and captured
+# locals are excluded above, so a call cannot silently invalidate the result.
+positive_writes = (n: int):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .lambda or k == .fn_: return
+    positive_write(n)
     positive_writes(int(nodes[n].a))
     positive_writes(int(nodes[n].b))
     if k != .for_:
@@ -1631,10 +1643,6 @@ gen_positive_mod = (n: int) -> int:
     if prune(ntype(n)) == T_MATH_INT: return -1
     modulus = positive_modulus(n)
     if modulus == 0: return -1
-    if positive_bounds_fn != cur_fn:
-        positive_bounds_fn = cur_fn
-        positive_bounds.clear()
-        positive_writes(int(fns[cur_fn].body))
     a = kid(n, 0)
     if positive_bound(a, true) < 0: return -1
     # The divisor is a pure literal; the dividend is evaluated exactly once.
@@ -2584,7 +2592,7 @@ gen_binary = (e: int) -> Val:
     if lt == T_MATH_INT:
         if is_cmp and math_proven_word(a) and math_proven_word(b):
             return V(e_bin(int_op(op, true), VI, math_word_expr(a), math_word_expr(b)), false)
-        if not is_cmp and math_proven_word(e): return math_word(math_word_expr(e))
+        if not is_cmp and math_proven_word(e): return math_pack_word(e, math_word_expr(e))
         va = gen_left(a, lt, keep_left)
         if op == .shl or op == .shr: return math_shift(op, va, math_shift_count(b), types[prune(ntype(b))].sign)
         vb = gen_borrowed(b).v
@@ -2621,10 +2629,6 @@ gen_binary = (e: int) -> Val:
         # Reuse existing bounded-range and local-constant facts. A successful
         # proof keeps indexed loops eligible for ordinary loop/vector lowering.
         if (op == .plus or op == .star) and nonneg_locals.len() > 0:
-            if positive_bounds_fn != cur_fn:
-                positive_bounds_fn = cur_fn
-                positive_bounds.clear()
-                positive_writes(int(fns[cur_fn].body))
             if positive_bound(e, true) >= 0: return V(e_bin(int_op(op, true), VI, va, vb), false)
         return V(gen_math_int(op, va, vb, types[prune(ntype(b))].sign), false)
     if (op == .shl or op == .shr) and dewy_at(nodes[e].pos): return V(norm(wide_shift(op, sg, va, vb, b), ntype(e)), false)
@@ -3563,7 +3567,7 @@ gen_conv = (e: int) -> Val:
         v = gen_borrowed(a).v
         if to == T_MATH_INT:
             if from == T_U64: return math_call("__mi_unsigned", [v])
-            return math_word(v)
+            return math_pack_word(a, v)
         if from == T_MATH_INT:
             v = if types[to].sign: math_signed(v) else: e_call(rt("__mi_to_unsigned"), [v], VI)
         if (from == T_MATH_INT or to == T_MATH_INT) and not int_widens(from, to):
@@ -3761,7 +3765,7 @@ gen_expr = (e: int) -> Val:
         return V(e_daddr(str_data(name_of(int(nodes[e].sval)))), false)
     if k == .ident:
         if t == T_MATH_INT and nodes[e].aux == i32(int(SK.local)):
-            if let word = math_word_regs.get(int(nodes[e].sym)): return math_word(word)
+            if let word = math_word_regs.get(int(nodes[e].sym)): return math_pack_word(e, word)
         if nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global)):
             p = gen_place(e, false)
             return V(read_place(p, t), false)
@@ -3810,7 +3814,7 @@ gen_expr = (e: int) -> Val:
         layout(at)
         return V(e_bin(.eq, VI, e_load(VI, addr, 0, 4), e_iconst(vi)), false)
     if k == .call:
-        if t == T_MATH_INT and math_word_helper(e) > 0: return math_word(math_word_expr(e))
+        if t == T_MATH_INT and math_word_helper(e) > 0: return math_pack_word(e, math_word_expr(e))
         ir_set_pos(nodes[e].pos)
         aux = int(nodes[e].aux)
         if aux == 0:
@@ -5668,7 +5672,7 @@ gen_for = (s: int):
     if aux == 0 or aux == 4:
         l = int(nodes[s].sym)
         lt = int(locals[l].type)
-        if prune(lt) == T_MATH_INT: scope_add_local(l)
+        if prune(lt) == T_MATH_INT and not stable_loop_index(l): scope_add_local(l)
         endv = vreg(VI)
         ctr = vreg(VI)
         # (a 64-bit loop variable in a register that the body does not assign is the counter)
@@ -6503,6 +6507,11 @@ begin_fn = (name: str, idx: int):
     math_word_regs.clear()
     math_word_limits.clear()
     math_word_updates.clear()
+    math_writes_ready = false
+    math_has_mutable = false
+    math_writes.clear()
+    math_decl_depth.clear()
+    math_loop_sites.clear()
     ctl = 0
     cond_depth = 0
     scope_locals = []
@@ -6579,6 +6588,7 @@ lower_inst = (lf: int, f: int):
     loop l in fns[f].locals:
         fl = int(locals[l].flags)
         t = int(locals[l].type)
+        if t == T_MATH_INT and fl & LF_ASSIGNED != 0: math_has_mutable = true
         if fl & (LF_CAPTURE | LF_ALIAS) != 0: continue
         if fl & LF_PARAM != 0:
             if fl & LF_ADDR != 0 and fl & LF_MUTPARAM == 0 and vc(t) != VC_AGG:

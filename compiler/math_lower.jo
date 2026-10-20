@@ -6,6 +6,8 @@ use 'types.jo'
 use 'expr.jo'
 use 'ir.jo'
 use 'util.jo'
+use 'facts.jo'
+use 'refine.jo'
 
 # Boundary values occupy one register. Even words encode signed 63-bit
 # integers; odd words own an immutable BigInt allocation. Word proofs keep
@@ -27,6 +29,18 @@ math_word = (word: int) -> Val:
     ir_cold = old
     endc()
     V(out, true)
+
+# Existing scalar domains prove narrow inputs fit the immediate payload.
+# Local/range upper bounds are demanded only at an actual tagged boundary.
+math_pack_word = (e: int, word: int) -> Val:
+    t = representation_type(ntype(e))
+    if t != T_MATH_INT and is_int(t) and types[t].bits < 63:
+        bound = fact_domain(t)
+        if bound.lo >= -4611686018427387904 and bound.hi <= 4611686018427387903:
+            return V(e_bin(.shl, VI, word, e_iconst(1)), false)
+    limit = positive_bound(e, true)
+    if limit >= 0 and limit <= 4611686018427387903: return V(e_bin(.shl, VI, word, e_iconst(1)), false)
+    math_word(word)
 
 math_call = (name: str, args: int[], result: int = 0) -> Val:
     t = if result == 0: T_MATH_INT else: result
@@ -255,10 +269,6 @@ math_proven_word = (e: int) -> bool:
     if math_word_updates.has(e): return true
     if math_word_bound(e): return true
     if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)) and math_word_regs.has(int(nodes[e].sym)): return true
-    if positive_bounds_fn != cur_fn:
-        positive_bounds_fn = cur_fn
-        positive_bounds.clear()
-        positive_writes(int(fns[cur_fn].body))
     if positive_bound(e, true) >= 0: return true
     if math_word_helper(e) > 0: return true
     if nodes[e].kind == .binary and nodes[e].aux == 0:
@@ -354,20 +364,57 @@ math_word_updates: {int: bool}
 math_local_is = (n: int, l: int) -> bool:
     nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.local)) and nodes[n].sym == i32(l)
 
-math_local_updates = (n: int, l: int, enclosing: int, out: mut (int, int)[]):
+# Build the write index only when a mutable mathematical local demands it.
+# Loop ancestry is relative to each declaration, including declarations inside
+# an outer loop; sibling scopes cannot refer to that declaration.
+math_writes_ready = false
+math_has_mutable = false
+math_writes: {int: (int, int)[]}
+math_decl_depth: {int: int}
+math_loop_sites: {int: int}
+
+math_prepare_writes = ():
+    if math_writes_ready: return
+    math_writes_ready = true
+    positive_bounds_fn = cur_fn
+    positive_bounds.clear()
+    enclosing: int[]
+    math_index_writes(int(fns[cur_fn].body), enclosing)
+
+
+math_index_writes = (n: int, enclosing: mut int[]):
     if n == 0: return
     k = nodes[n].kind
+    is_loop = k == .for_ or k == .while_
+    if enclosing.len() > 0 and (is_loop or k == .lambda or k == .fn_ or k == .return_ or k == .break_ or k == .continue_):
+        math_loop_sites[enclosing[enclosing.len() - 1]] = -1
     if k == .lambda or k == .fn_: return
-    if k == .assign and math_local_is(int(nodes[n].a), l): out.push((n, enclosing))
-    inner = enclosing
-    if k == .for_ or k == .while_: inner = if enclosing == 0: n else: -1
-    math_local_updates(int(nodes[n].a), l, inner, out)
-    math_local_updates(int(nodes[n].b), l, inner, out)
+    positive_write(n)
+    if k == .vardecl and nkids(n) == 0 and not has_flag(n, NF_GLOBAL):
+        l = int(nodes[n].sym)
+        if l > 0 and prune(int(locals[l].type)) == T_MATH_INT: math_decl_depth[l] = enclosing.len()
+    if k == .assign:
+        a = int(nodes[n].a)
+        if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)):
+            l = int(nodes[a].sym)
+            if enclosing.len() > 0 and prune(ntype(a)) == T_MATH_INT:
+                loop_ = enclosing[enclosing.len() - 1]
+                old = math_loop_sites.get(loop_) ?? 0
+                math_loop_sites[loop_] = if old == 0: n else: -1
+            if let depth = math_decl_depth.get(l):
+                loop_ = if enclosing.len() == depth: 0 else if enclosing.len() == depth + 1: enclosing[depth] else: -1
+                writes = math_writes.get(l) ?? []
+                writes.push((n, loop_))
+                math_writes[l] = writes
+    if is_loop: enclosing.push(n)
+    math_index_writes(int(nodes[n].a), enclosing)
+    math_index_writes(int(nodes[n].b), enclosing)
     if k != .for_:
-        math_local_updates(int(nodes[n].c), l, inner, out)
-        if k != .partial: math_local_updates(int(nodes[n].d), l, inner, out)
-    loop i in [0..nkids(n)): math_local_updates(kid(n, i), l, inner, out)
-    loop i in [0..nkids2(n)): math_local_updates(kid2(n, i), l, inner, out)
+        math_index_writes(int(nodes[n].c), enclosing)
+        if k != .partial: math_index_writes(int(nodes[n].d), enclosing)
+    loop i in [0..nkids(n)): math_index_writes(kid(n, i), enclosing)
+    loop i in [0..nkids2(n)): math_index_writes(kid2(n, i), enclosing)
+    if is_loop: enclosing.pop()
 
 math_update_value = (s: int, l: int) -> int:
     if nodes[s].op != i32(int(Tok.assign)) or nodes[s].aux != 0: return 0
@@ -439,9 +486,8 @@ math_word_local_decl = (s: int) -> bool:
     writes: (int, int)[]
     if fl & LF_ASSIGNED != 0:
         if cur_block == 0 or kid(cur_block, cur_block_i) != s: return false
-        # All references to this declaration lie in its lexical block suffix.
-        loop i in [cur_block_i + 1..nkids(cur_block)):
-            math_local_updates(kid(cur_block, i), l, 0, writes)
+        math_prepare_writes()
+        writes = math_writes.get(l) ?? []
         if writes.len() == 0: return false
         limit = math_counter_limit(s, writes)
         if limit < 0: limit = math_length_counter_limit(s, writes)
@@ -526,34 +572,17 @@ math_addend_bound = (e0: int, index: int, bound: int) -> int:
         if a >= 0 and b >= 0: return max(a, b)
     -1
 
-# Only a single assignment site, with no control transfers or nested loops.
-# That makes the maximum number of updates the enclosing range's trip count.
-math_accumulator_site = (n: int, found: mut int[]) -> bool:
-    if n == 0: return true
-    k = nodes[n].kind
-    if k == .for_ or k == .while_ or k == .lambda or k == .fn_ or k == .return_ or k == .break_ or k == .continue_: return false
-    if k == .assign:
-        a = int(nodes[n].a)
-        if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and prune(ntype(a)) == T_MATH_INT: found.push(n)
-    if not math_accumulator_site(int(nodes[n].a), found) or not math_accumulator_site(int(nodes[n].b), found) or not math_accumulator_site(int(nodes[n].c), found): return false
-    if k != .partial and not math_accumulator_site(int(nodes[n].d), found): return false
-    loop i in [0..nkids(n)):
-        if not math_accumulator_site(kid(n, i), found): return false
-    loop i in [0..nkids2(n)):
-        if not math_accumulator_site(kid2(n, i), found): return false
-    true
-
 math_accumulator_for = (s: int) -> bool:
-    if math_versioning or dbg_on or nodes[s].aux != 0: return false
+    if not math_has_mutable or math_versioning or dbg_on or nodes[s].aux != 0: return false
     it = int(nodes[s].a)
     start = int(nodes[it].a)
     end = int(nodes[it].b)
     index = int(nodes[s].sym)
     if nodes[start].kind != .int_lit or nodes[start].ival != 0 or end == 0 or has_flag(it, NF_STEP) or has_flag(it, NF_INCLUSIVE): return false
     if not stable_loop_index(index) or not math_word_bound(end) or not plain_read(word_integer_value(end)): return false
-    sites: int[]
-    if not math_accumulator_site(int(nodes[s].b), sites) or sites.len() != 1: return false
-    site = sites[0]
+    math_prepare_writes()
+    site = math_loop_sites.get(s) ?? 0
+    if site <= 0: return false
     l = int(nodes[int(nodes[site].a)].sym)
     active = false
     loop scope in scope_locals:

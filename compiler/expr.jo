@@ -103,12 +103,6 @@ decimal_type = (pos: int) -> int:
     decimal_cached_type = telem(check_expr(ty, 0))
     decimal_cached_type
 
-bundled_rational_type = (t0: int) -> bool:
-    t = prune(t0)
-    if types[t].kind != .struct_: return false
-    decl = int(structs[int(types[t].st)].decl)
-    name_of(int(nodes[decl].name)) == "Rational" and files[pos_file(nodes[decl].pos)].path == "{lib_dir}/rational.dewy"
-
 decimal_part = (digits: str, pos: int) -> int:
     ensure_bundled_import("bigint.dewy", "$dewy_decimal_bigint", pos)
     negative = len(digits) > 0 and digits[0] == '-'
@@ -349,6 +343,8 @@ coerce = (n: int, target: int) -> int:
     from = prune(ntype(n))
     to = prune(target)
     if from == 0: ice("unchecked expression at {pos_str(nodes[n].pos)}")
+    # Settled identical scalar/aggregate types require no conversion node.
+    if from == to and not is_lit(n): return n
     if from == T_NEVER:
         # (what never comes back taken as a value, "a" + panic(...): marked, so code is made for
         # it as for any value of that type, never used)

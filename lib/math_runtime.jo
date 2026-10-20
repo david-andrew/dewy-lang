@@ -115,13 +115,14 @@ __mi_parse = (s: str) -> __dewy_int?:
         value = 0
         j = i
         loop j < n:
-            c = p[j]
-            if c < '0' or c > '9': break
-            value = value * 10 + int(c) - 48
+            digit = int(p[j]) - 48
+            if u64(digit) > 9: break
+            value = value * 10 + digit
             j += 1
         if j == n:
-            if p[0] == '-': return -value
-            return value
+            if p[0] == '-': value = -value
+            # At most 18 digits fits the signed 63-bit immediate payload.
+            return (value << 1) as __dewy_int
     __mi_parse_slow(s)
 
 __mi_parse_slow = (s: str) -> __dewy_int?:

@@ -1,0 +1,29 @@
+# quick
+nested=(n:int64):>int=>{
+    let total=0
+    loop outer in [0..n) {
+        let count=0
+        loop inner in [0..outer) {count+=1}
+        loop count>?2 {count-=3}
+        total+=count
+    }
+    return total
+}
+twice=(n:int64):>int=>{
+    let count=0
+    loop i in [0..n) {count+=1 count+=1}
+    return count
+}
+promoted=(n:int64):>int=>{
+    let count=0
+    loop i in [0..n) {
+        count+=1
+        if i=?1 {count=9223372036854775808}
+    }
+    return count
+}
+main=()=>{
+    printl(nested(8))
+    printl(twice(7))
+    printl(promoted(4))
+}

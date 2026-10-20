@@ -1110,11 +1110,16 @@ def test_core_bounded_remainder_ir(compiler, tmp_path, target, release):
     assert built.returncode == 0, built.stdout + built.stderr
     # The recurrence may now live entirely in main after inlining.
     output = built.stdout + built.stderr
-    probe = (re.search(r'^fn f_probe_.*?(?=^fn |\Z)', output, re.M | re.S)
-             or re.search(r'^fn f_main_.*?(?=^fn |\Z)', output, re.M | re.S))
-    assert probe, 'bounded recurrence was not emitted'
-    assert re.search(r' = (mulhu|remu) ', probe[0]), 'bounded recurrence still uses signed remainder'
-    assert ' = mulhs ' not in probe[0]
+    # Inspect every possible owner, including the tagged-int entry wrapper.
+    # An uninlined probe or an empty main must not hide another owner's signed
+    # recurrence; runtime helpers are deliberately outside this set.
+    owners = re.findall(r'^fn (?:f_probe_|f_main_|h_math_main)[^\n]*\n.*?(?=^fn |\Z)',
+                        output, re.M | re.S)
+    assert owners, 'bounded recurrence was not emitted'
+    assert any(re.search(r' = (mulhu|remu) ', body) for body in owners), \
+        'bounded recurrence still uses signed remainder'
+    assert all(' = mulhs ' not in body and ' = rems ' not in body for body in owners)
+
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])

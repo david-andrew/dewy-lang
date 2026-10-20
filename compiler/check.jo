@@ -802,6 +802,9 @@ ensure_bundled_import = (file: str, alias: str, pos: int):
     m = cur_mod()
     name = intern(alias)
     if modules[m].names.get(name) != none: return
+    if files[int(modules[m].file)].path == lib_dir + "/" + file:
+        scope_add_module(m, name, .module, m, 0)
+        return
     first_module = modules.len()
     first_import = from_imports.len()
     d = mk(.import_, pos)
