@@ -1,0 +1,47 @@
+name: Nightly fuzz
+
+"on":
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: 'Minutes of fuzzing'
+        default: '25'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-nightly
+  cancel-in-progress: false
+
+jobs:
+  dewy-programs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Bootstrap the complete compiler from C
+        run: python -m tools.compiler.build --bootstrap --output "$RUNNER_TEMP/dewy-core"
+      - name: Fuzz Dewy programs against the oracle (native/web, default/release)
+        env:
+          MINUTES: ${{ github.event.inputs.minutes || '25' }}
+        run: |
+          # A different seed range every night; the summary names any failures.
+          python -m tools.core fuzz --compiler "$RUNNER_TEMP/dewy-core/bin/dewy-core" \
+            --seed "$(( GITHUB_RUN_NUMBER * 100000 ))" --minutes "$MINUTES" \
+            --failures "$RUNNER_TEMP/fuzz-failures"
+      - name: Upload minimized failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dewy-fuzz-failures-${{ github.run_number }}
+          path: ${{ runner.temp }}/fuzz-failures
+          if-no-files-found: ignore

@@ -80,6 +80,37 @@ python3 -m tools.core ladder [--update-ratchet]     # acceptance-ladder scoreboa
   design programs listed in `ladder.json`'s `design_passing` must keep
   passing, and `--update-ratchet` adds newly passing ones.
 
+## Fuzzing Dewy programs
+
+```sh
+python3 -m tools.core fuzz [--seed N] [--count N] [--minutes M]   # default: 50 seeds
+python3 -m tools.core fuzz --seed 259 --print                      # one program and its oracle output
+```
+
+- `tools/compiler/dewy_fuzz_programs.py` generates typed, bounded programs in
+  the documented surface: fixed-width and checked `int` arithmetic, floats,
+  records, arrays, dicts and sets, snapshots, `@` places, closures, loops,
+  ranges, comprehensions, `if`/`match`, optionals and unions, errors with
+  `or_throw`, interpolation, recursion and `$runtime_assert`. A Python
+  interpreter of the same tree is the oracle; it copies values eagerly and
+  shares nothing with the compiler.
+- Each seed also yields metamorphic variants that must print the same output:
+  an identity copy, reordered independent statements, an outlined helper and a
+  loop rewritten as a comprehension.
+- `tools/compiler/dewy_fuzz.py` compiles a batch of programs as modules of one
+  program in each mode (native and web, default and release), runs it once and
+  compares each program's output with the oracle. A failure is confirmed alone,
+  shrunk, and written to `~/dev/tmp/dewy-fuzz-failures/<kind>-seed<N>/`
+  (`--failures DIR` elsewhere) with the program, expected and actual output.
+- To add a feature: a node with `render` and `eval`, a `Generator.block_<feature>`
+  listed in `FEATURES`; variants and shrinking need nothing more. Programs the
+  oracle cannot judge (an out-of-range index, too much work) are discarded and
+  regenerated.
+- The full gate runs a three-seed smoke check; `.github/workflows/fuzz-nightly.yml`
+  fuzzes a fresh seed range for 25 minutes each night and uploads failures.
+- `python3 -m tools.compiler.fuzz` is the older differential check of generated
+  implementation-language (Jo) programs across build modes.
+
 ## Use the current compiler from another project
 
 `tools/dewy` is an executable launcher with the same arguments as the compiler:

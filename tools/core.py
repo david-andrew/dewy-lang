@@ -10,6 +10,7 @@
     python3 -m tools.core ladder [--update-ratchet]
     python3 -m tools.core speed [--base REV] [--checkpoint TAG] [--limit 1.0] [--release]
     python3 -m tools.core bench [-k WORDS]
+    python3 -m tools.core fuzz [--seed N] [--count N] [--minutes M]
 """
 from __future__ import annotations
 
@@ -220,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     cli = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     cli.add_argument('--bootstrap', action='store_true', help='force an independent build from C')
     cli.add_argument('command', choices=('path', 'test', 'cases', 'ladder', 'build', 'check', 'run', 'watch', 'new', 'lsp',
-                                        'fmt', 'repl', 'speed', 'bench'))
+                                        'fmt', 'repl', 'speed', 'bench', 'fuzz'))
     cli.add_argument('arguments', nargs=argparse.REMAINDER,
                      help='arguments for pytest, speed, bench or the compiler; test --quick selects the smoke suite')
     args = cli.parse_args(argv)
@@ -231,6 +232,9 @@ def main(argv: list[str] | None = None) -> int:
         if any(arg.startswith('-m') for arg in args.arguments):
             cli.error('--quick selects its own test marker; use -k to narrow the smoke suite')
         args.arguments = [arg for arg in args.arguments if arg != '--quick']
+    if args.command == 'fuzz' and any(a.split('=')[0] in ('--compiler', '--print') for a in args.arguments):
+        from tools.compiler import dewy_fuzz
+        return dewy_fuzz.main(args.arguments)
     if args.command in ('cases', 'ladder',) and any(a.split('=')[0] == '--compiler' for a in args.arguments):
         from importlib import import_module
         return import_module(f'tools.{args.command}').main(args.arguments)
@@ -245,6 +249,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in ('cases', 'ladder',):
         from importlib import import_module
         return import_module(f'tools.{args.command}').main(args.arguments, binary)
+    if args.command == 'fuzz':
+        from tools.compiler import dewy_fuzz
+        return dewy_fuzz.main(args.arguments, binary)
     if args.command in ('speed', 'bench'):
         from importlib import import_module
         try:
