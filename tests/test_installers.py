@@ -98,10 +98,11 @@ def fake_archive(path: Path, platform_name: str, revision: str, label: str, *,
                  behavior: str = '', defect: str = '') -> None:
     with tarfile.open(path, 'w:gz') as archive:
         binary = 'bin/dewy-core.exe' if platform_name == 'windows-x86_64' else 'bin/dewy-core'
+        other = 'linux-arm64' if platform_name == 'linux-x86_64' else 'linux-x86_64'
         files = {
             binary: fake_compiler(label, behavior),
             'lib/core/rt.jo': b'# runtime\n',
-            'RELEASE': release_identity('macos-arm64' if defect == 'wrong-platform' else platform_name,
+            'RELEASE': release_identity(other if defect == 'wrong-platform' else platform_name,
                                         '0' * 40 if defect == 'wrong-revision' else revision).encode(),
             'LICENSE': b'license\n',
         }
@@ -144,11 +145,12 @@ class Releases:
                 archive(asset, platform_name, revision)
             else:
                 fake_archive(asset, platform_name, revision, label, **fake)
-            asset.with_name(asset.name + '.sha256').write_text(f'{sha256(asset)}  {asset.name}\n')
+            asset.with_name(asset.name + '.sha256').write_text(f'{sha256(asset)}  {asset.name}\n', newline='\n')
         for name in channel.INSTALLERS:
             shutil.copyfile(ROOT / name, directory / name)
+        # Release files are LF everywhere, as release.py writes them on Linux.
         (directory / 'SHA256SUMS').write_text(
-            ''.join(f'{sha256(directory / name)}  {name}\n' for name in channel.ASSETS))
+            ''.join(f'{sha256(directory / name)}  {name}\n' for name in channel.ASSETS), newline='\n')
         return tag
 
     def point(self, tag: str) -> None:
@@ -196,6 +198,20 @@ class Server:
         self.resume.set()
         self.httpd.shutdown()
         self.httpd.server_close()
+
+
+def kill_group(process: subprocess.Popen) -> None:
+    """SIGKILL an installer and everything it started.
+
+    macOS reports EPERM (Linux ESRCH or success) for a group whose leader has
+    already exited; that installer simply finished before the signal.
+    """
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        if process.poll() is None:
+            raise
+    process.wait(30)
 
 
 def snapshot(*roots: Path) -> dict:
@@ -415,8 +431,7 @@ def test_interrupted_download_keeps_previous_toolchain(world):
         process = subprocess.Popen([BASH, str(ROOT / 'install.sh')], env=env, start_new_session=True,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         assert server.stalled.wait(60)
-        os.killpg(process.pid, signal.SIGKILL)
-        process.wait(30)
+        kill_group(process)
         assert pointer(world.prefix) == [a, '']
         assert launch(world.prefix, '--version', env=env).stdout == 'dewy-core fake a\n'
         assert (world.prefix / 'toolchains/.lock').is_dir()  # left by the killed installer
@@ -442,8 +457,7 @@ def test_interrupted_smoke_test_keeps_previous_toolchain(world):
     while not marker.exists():
         assert time.monotonic() < deadline and process.poll() is None
         time.sleep(0.05)
-    os.killpg(process.pid, signal.SIGKILL)
-    process.wait(30)
+    kill_group(process)
     assert pointer(world.prefix) == [a, '']
     assert toolchains(world.prefix) == [a]
     assert launch(world.prefix, '--version', env=world.env).stdout == 'dewy-core fake a\n'
@@ -456,6 +470,9 @@ def test_interruption_at_any_point_leaves_a_working_toolchain(world):
     world.releases.point(a)
     install(world)
     world.releases.point(b)
+    install(world)
+    launch(world.prefix, 'rollback', env=world.env)
+    # Time the run the sweep interrupts: b is installed, so it is reused.
     started = time.monotonic()
     install(world)
     duration = time.monotonic() - started
@@ -464,11 +481,7 @@ def test_interruption_at_any_point_leaves_a_working_toolchain(world):
         process = subprocess.Popen([BASH, str(ROOT / 'install.sh')], env=world.env, start_new_session=True,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(duration * step / 10)
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        process.wait(30)
+        kill_group(process)
         assert pointer(world.prefix)[0] in (a, b)
         version = launch(world.prefix, '--version', env=world.env).stdout
         assert version in ('dewy-core fake a\n', 'dewy-core fake b\n')
@@ -674,8 +687,17 @@ def test_powershell_install_update_and_rollback(ps_world, real_toolchain, shell,
     (work / 'main.dewy').write_text(SAMPLE)
     cmd(prefix, 'build', 'main.dewy', '-o', 'main.exe', env=env, cwd=work)
     assert subprocess.run([str(work / 'main.exe')], cwd=work).returncode == 42
-    assert cmd(prefix, '--print-lib', env=env).stdout.strip().lower() == str(prefix / 'toolchains' / a / 'lib').lower()
-    assert cmd(prefix, 'check', 'missing file.dewy', env=env, check=False).returncode != 0
+    # The launcher returns exactly the compiler's or the program's exit code.
+    assert cmd(prefix, 'main.dewy', env=env, cwd=work, check=False).returncode == 42
+    compiler = prefix / 'toolchains' / a / 'bin' / 'dewy-core.exe'
+    direct = subprocess.run([str(compiler), 'check', 'missing file.dewy'], env=env, capture_output=True,
+                            text=True, timeout=60, cwd=work).returncode
+    assert direct != 0
+    assert cmd(prefix, 'check', 'missing file.dewy', env=env, check=False, cwd=work).returncode == direct
+    rollback = cmd(prefix, 'rollback', env=env, check=False)
+    assert rollback.returncode != 0 and 'no previous toolchain' in rollback.stderr
+    assert os.path.normcase(cmd(prefix, '--print-lib', env=env).stdout.strip()) == \
+        os.path.normcase(str(prefix / 'toolchains' / a / 'lib'))
 
     b = releases.publish('real b', archive=real_archive(real_toolchain))
     releases.point(b)

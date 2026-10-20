@@ -265,7 +265,10 @@ function Write-TextFile([string]$path, [string]$content) {
     Set-FileAtomically $next $path
 }
 
-# Each command is one line so that cmd.exe never rereads a replaced launcher.
+# The commands that start a program use the npm cmd-shim form: the failed
+# `goto` ends the batch file, so cmd.exe neither rereads a launcher that
+# `dewy update` replaced nor masks the program's exit code, which becomes
+# cmd.exe's own.
 function Write-Launcher([string]$prefix, [string]$name) {
     $content = @"
 @echo off
@@ -273,12 +276,14 @@ rem Dewy launcher written by the Dewy installer: runs the active toolchain's
 rem compiler. "$name update [--release TAG]" and "$name rollback" manage toolchains.
 setlocal DisableDelayedExpansion
 set "DEWY_ROOT=$prefix"
-if /i "%~1"=="update" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%DEWY_ROOT%\libexec\dewy-install.ps1" -Prefix "%DEWY_ROOT%" %* & exit /b
-if /i "%~1"=="rollback" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%DEWY_ROOT%\libexec\dewy-install.ps1" -Prefix "%DEWY_ROOT%" %* & exit /b
+if /i "%~1"=="update" goto manage
+if /i "%~1"=="rollback" goto manage
 set "DEWY_TOOLCHAIN="
 if exist "%DEWY_ROOT%\toolchains\current" set /p DEWY_TOOLCHAIN=<"%DEWY_ROOT%\toolchains\current"
 if not defined DEWY_TOOLCHAIN goto missing
-"%DEWY_ROOT%\toolchains\%DEWY_TOOLCHAIN%\bin\dewy-core.exe" %* & exit /b
+endlocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%DEWY_ROOT%\toolchains\%DEWY_TOOLCHAIN%\bin\dewy-core.exe" %*
+:manage
+endlocal & goto #_undefined_# 2>NUL || title %COMSPEC% & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%DEWY_ROOT%\libexec\dewy-install.ps1" -Prefix "%DEWY_ROOT%" %*
 :missing
 echo ${name}: no Dewy toolchain is active in "%DEWY_ROOT%"; run the installer again 1>&2
 exit /b 1
