@@ -118,11 +118,18 @@ New front-end or user-facing language design requires David's approval.
   modes. Native throughput is about 127k root lines/s, still below the target.
   [Evidence and rejected variants](audits/2026-10-19/tiny-read-loop.json).
 - Existing matrix multiplication now uses cache blocks and four-row accumulation.
-  Laptop release dense products improve 27–47%, sparse about14%, and all-zero
-  about20%; all fourteen targeted comparisons pass. Six new boundary cases,
-  587 focused checks and 611 quick checks pass; all32 ordinary runtime artifacts
-  are unchanged. Full validation will close the next related runtime batch.
+  Laptop release dense products improve 27–47%, sparse about 14%, and all-zero
+  about 20%; all fourteen targeted comparisons pass. Six new boundary cases,
+  587 focused checks and 611 quick checks pass; all 32 ordinary runtime artifacts
+  are unchanged. Full validation is closed by the following allocation batch.
   [Measurements and rejected fallback](audits/2026-10-19/blocked-matrix-product.json).
+- Ordinary array-size validation now avoids division when a cheap operand bound
+  proves the product safe. Targeted allocation/growth runs improve 11–16%; all 12
+  laptop compilation comparisons pass, improving 0.8–1.5%. Native synthetic
+  throughput is about 129k root lines/s. Independent bootstrap passes 6,484 tests
+  plus 100 fresh five-mode fuzz cases, closing the matrix batch. Across 80 runtime
+  comparisons, 74 pass and 6 remain inconclusive; no established regression and
+  no whole-stage promotion. [Evidence](audits/2026-10-19/array-byte-count.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 

@@ -653,7 +653,12 @@ __print_str = (s: str):
 __arr_bytes = (cap: int, es: int) -> int:
     limit = 9223372036854775807 - 65535 - 16 - 24
     when TARGET == "wasm": limit = 4294967295 - 65535 - 16 - 24
-    if cap < 0 or es < 0 or (es > 0 and cap > limit / es): panic("array is too large")
+    if cap < 0 or es < 0: panic("array is too large")
+    # Ordinary capacities and element sizes fit a product proved safe without
+    # division. Larger operands retain the exact bound, including zero sizes.
+    small = 2147483647
+    when TARGET == "wasm": small = 65535
+    if (cap | es) > small and es > 0 and cap > limit / es: panic("array is too large")
     24 + cap * es
 
 # (an array's elements past its length are not zeroed: whatever makes the array longer writes

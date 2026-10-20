@@ -13172,3 +13172,43 @@ return 42
     ran = subprocess.run(command, env={**os.environ, 'SLOPPY_THREADS': str(threads)},
                          capture_output=True, text=True, timeout=15)
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_core_array_byte_count_boundaries(compiler, tmp_path, target, release):
+    limit = ((1 << 32) - 1 if target == 'wasm' else (1 << 63) - 1) - 65535 - 16 - 24
+    pairs = [(0, 0), ((1 << 63) - 1, 0), (0, (1 << 63) - 1)]
+    for size in [1, 2, 3, 8, 40, 65535, 65536, (1 << 31) - 1, 1 << 31]:
+        pairs.extend((cap, size) for cap in {0, 1, limit // size, max(0, limit // size - 1)})
+    rng = random.Random(30417)
+    for _ in range(80):
+        size = rng.randrange(1, 1 << 20)
+        pairs.append((rng.randrange(limit // size + 1), size))
+    rows = ','.join(f'({cap}, {size}, {24 + cap * size})' for cap, size in pairs)
+    source = tmp_path / 'byte-count.jo'
+    source.write_text(f'''@noinline
+checked = (cap: int, size: int) -> int: __arr_bytes(cap, size)
+main = () -> int:
+    cases = [{rows}]
+    loop item in cases: assert(checked(item.0, item.1) == item.2)
+    42
+''')
+    binary = tmp_path / 'byte-count'
+    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary,
+                            *(['--release'] if release else [])],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed for web byte-count checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'byte-count.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
