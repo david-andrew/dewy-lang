@@ -28,6 +28,7 @@ enum Op:
     mulhs             # dst = the high 64 bits of a * b, signed (division by a constant: x86-64 and arm64)
     mulhu             # ... unsigned
     memeq           # compare c bytes at a and b (bounded reads, x86-64 only)
+    checked_add, checked_sub, checked_mul # signed word result, imm = nonreturning overflow helper
     streq           # compare runtime strings a and b, including nil (x86-64 only)
 
 const VI = 0
@@ -85,6 +86,7 @@ struct IrFn:
     dbg_locals: int[] # (debug information: its parameters, then its other variables)
 
 dbg_on = false        # debug information for debuggers: where variables are (sloppy build)
+checked_flags = true # native overflow checks may overwrite an input; wasm must keep both
 mulh_ok = true        # the target has mulhs (x86-64 and arm64; not WebAssembly)
 
 # current function being built

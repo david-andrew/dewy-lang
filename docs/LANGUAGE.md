@@ -371,10 +371,31 @@ for example `let twice:((value:int64):>int64) = (* 2)`. A module declaration suc
 as `twice = (* 2)` can infer its parameter type at calls, like other functions.
 Operators with prefix meanings keep those meanings: `(-1)` is a negative value.
 
-Integer types are `int8` through `int64` and `uint8` through `uint64`; floating
-types are `float32` and `float64`. Ordinary integer literals default to `int64`
-when they fit. Use `as` or a type call such as `uint8(value)` for numeric value
-conversion. Integer types expose typed `.min` and `.max` constants, including
+`int` is the mathematical integer type, distinct from `int64` in signatures,
+containers and generic arguments. Unannotated integer literals default to `int`.
+Its interim representation is signed 64-bit: addition, subtraction, multiplication,
+negation, `abs`, powers and left shifts fail with an integer-overflow error when
+an exact result cannot fit. Constant overflow is a compile error. Automatic bigint
+promotion is not yet implemented. `int` has no `.min` or `.max` members.
+
+Explicit `int8` through `int64` and `uint8` through `uint64` retain wrapping
+arithmetic. Floating types are `float32` and `float64`. Literals in an explicit
+numeric context must fit that type exactly. Mixed `int`/fixed-width arithmetic
+uses `int`; a literal beside a fixed-width operand can take that operand's type.
+Implicit conversions involving `int` preserve the value, checking narrowing at
+runtime (or diagnosing known constant failures). `as` and type calls use those
+same checks. Float-to-`int` truncates toward zero and rejects NaN, infinity and
+out-of-range values; `int`-to-float retains the usual rounding. Existing conversions
+between explicit fixed widths retain their behavior. Mutable arguments and
+containers require matching element types: an `int` local is not an `@int64` place.
+
+Lengths retain their current `int64` type. An `int` index uses the ordinary bounds
+checks. `to_int(text)` still returns `int64 | none`, including `none` on overflow;
+its present value converts to `int` without loss. Printing, interpolation and
+`string(value)` format `int` as decimal. Checked mathematical integers are not yet
+supported in shaders; shader integer values need explicit fixed-width types.
+
+Fixed-width integer types expose typed `.min` and `.max` constants, including
 the full `uint64` range; these also work through type aliases and generic type
 parameters. For example, `uint8.max` is 255 and `int64.min` is −9223372036854775808.
 `value transmute Type` reinterprets bits between equal-width machine integers
@@ -387,10 +408,15 @@ and optional/union types cannot be reinterpreted this way.
 
 `string(value)` formats a value as text. Integer `//` is floor
 division and `%` gives a remainder with the divisor’s sign (or zero). These
-operators support signed `int64` and unsigned `uint64`, preserving the full
+operators support `int`, signed `int64` and unsigned `uint64`, preserving the full
 unsigned range; narrower operands retain the existing integer widening rules.
 Integer `/` produces an exact fraction; `/` with a floating operand uses floating math.
-Literals beyond a machine word automatically use the bundled exact `BigInt` type.
+`int` division of the minimum stored word by −1 overflows; its remainder is zero.
+Mathematical shifts reject negative counts. A right shift of at least 64 bits
+returns the sign continuation (zero or −1); a left shift that cannot fit fails,
+except that shifting zero by any nonnegative count remains zero.
+Literals outside the checked `int` range need an explicit fixed-width context
+that fits, or an explicit `BigInt` annotation.
 
 Shift counts are unsigned: a negative literal count is an error, and a negative
 runtime count acts as a huge one. Shifting a fixed-width integer by at least its
@@ -404,8 +430,8 @@ for general multiplication. A semicolon discards an expression's result.
 `^` raises a value to a power and associates right: `2^3^2` is `2^(3^2)`.
 It binds above multiplication, literal coefficients and unary minus, so `2x^2`
 is `2*(x^2)` and `-2^2` is `-(2^2)`. Use `xor` for bitwise exclusive-or.
-Machine-integer powers use a nonnegative `int64` exponent and wrap at 64 bits,
-like repeated fixed-width multiplication; negative exponents panic with guidance
+Integer powers use a nonnegative `int64` exponent. `int` powers check each
+product; fixed-width powers retain wrapping multiplication; negative exponents panic with guidance
 to use an explicit rational or floating base. Float powers use the inherited
 floating math library. `BigInt` powers remain exact for nonnegative exponents;
 `Rational` supports signed exponents. All these types define zero to the zero
@@ -424,7 +450,7 @@ old value and right operand. Existing copies retain their independent values.
 ```dewy
 from bigint import BigInt, bigint, parse_bigint
 main=():>void=>{
-    let value=123456789012345678901234567890
+    let value:BigInt=123456789012345678901234567890
     printl"{value*value}"
     printl"{bigint(2)^256}"
     let parts=(-value).divmod(bigint(7))
@@ -432,13 +458,12 @@ main=():>void=>{
 }
 ```
 
-Integer literals outside `int64`/`uint64` become `BigInt` values without an
-explicit import. Decimal and all supported based literals work, including digit
+Oversized integer literals adopt an explicitly expected `BigInt` type. Decimal and all supported based literals work, including digit
 separators. Their digits are converted at compilation, not parsed at runtime.
 Small literals also adopt an expected `BigInt` type, for example
 `let value:BigInt=42`, typed arguments, record fields and arrays. Import `BigInt`
-when naming its type. Mixed arrays such as `[1 123456789012345678901234567890]`
-infer `array<BigInt>`; ordinary word-only arrays keep their word element type.
+when naming its type. Annotate mixed-size literal arrays as `array<BigInt>`;
+unannotated ordinary integer arrays infer `array<int>`.
 
 `bigint` constructs from `int64`, `uint64`, `BigInt` or signed decimal text. `parse_bigint`
 returns `BigInt|none` for text that may be invalid; the constructor panics on

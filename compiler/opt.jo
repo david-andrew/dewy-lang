@@ -3,6 +3,8 @@
 # passes over the code, so it pays for itself in faster register allocation and emission.
 
 use 'ir.jo'
+use 'types.jo'
+use 'util.jo'
 
 const MIN_INT = -9223372036854775807 - 1
 
@@ -590,6 +592,21 @@ o_simplify = (ins0: Ins, pos: int):
     d = int(ins.dst)
     a = int(ins.a)
     bb = int(ins.b)
+    if op == .checked_add or op == .checked_sub or op == .checked_mul:
+        raw = if op == .checked_add: Op.add else if op == .checked_sub: Op.sub else: Op.mul
+        if is_k(a) and is_k(bb):
+            operation = if op == .checked_add: 0 else if op == .checked_sub: 1 else: 2
+            if math_word_overflow(operation, o_cval[a], o_cval[bb]):
+                fatal(ir_positions[int(ins.pos)], "integer overflow in constant expression (int64 representation of mathematical int)")
+            ok, value = fold(raw, o_cval[a], o_cval[bb])
+            o_simplify(Ins(.iconst, VI, i32(d), 0, 0, 0, value), pos)
+            return
+        if is_k(bb) and ((raw != .mul and o_cval[bb] == 0) or (raw == .mul and (o_cval[bb] == 0 or o_cval[bb] == 1))):
+            ins.op = raw
+            o_simplify(ins, pos)
+            return
+        o_emit(ins)
+        return
     if op == .iconst:
         if stable(d):
             o_const[d] = true
@@ -1798,6 +1815,9 @@ o_negate = (op: Op) -> Op:
 # instructions whose result register may be renamed
 o_retargetable = (op: Op) -> bool:
     match op:
+        # Native flags consume the operands before assigning the result. Wasm
+        # checks the saved operands afterwards, so it must retain a fresh local.
+        checked_add, checked_sub, checked_mul: checked_flags
         add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, neg, not_, load, mov, mulhs, mulhu, memeq, streq: true
         eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
         fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc: true

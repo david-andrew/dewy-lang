@@ -1,0 +1,34 @@
+# Mathematical integers keep a separate identity even while represented by one
+# signed word. These overloads never route their arithmetic through wrapping int.
+__int_overflow = (): panic("integer overflow: mathematical int currently requires an int64 representation")
+
+abs = (x: __dewy_int) -> __dewy_int: if x < 0: -x else: x
+min = (a: __dewy_int, b: __dewy_int) -> __dewy_int: if a < b: a else: b
+max = (a: __dewy_int, b: __dewy_int) -> __dewy_int: if a > b: a else: b
+
+__dewy_power = (base: __dewy_int, exponent: int) -> __dewy_int:
+    if exponent < 0: panic("negative integer exponent: use a rational or floating base")
+    let base = base
+    let exponent = exponent
+    result: __dewy_int = 1
+    loop exponent > 0:
+        if exponent & 1 == 1: result *= base
+        exponent = exponent >> 1
+        if exponent > 0: base *= base
+    result
+
+pow = (base: __dewy_int, exponent: int) -> __dewy_int: __dewy_power(base, exponent)
+
+__floor_div = (a: __dewy_int, b: __dewy_int) -> __dewy_int:
+    q = a / b
+    # q*b and a-q*b are representable for a truncating quotient.
+    if a - q * b != 0 and (a < 0) != (b < 0): q -= 1
+    q
+
+__floor_mod = (a: __dewy_int, b: __dewy_int) -> __dewy_int:
+    r = a % b
+    if r != 0 and (r < 0) != (b < 0): r += b
+    r
+
+__floor_div_pow2 = (a: __dewy_int, shift: int) -> __dewy_int: a >> shift
+__floor_mod_pow2 = (a: __dewy_int, mask: __dewy_int) -> __dewy_int: a & mask

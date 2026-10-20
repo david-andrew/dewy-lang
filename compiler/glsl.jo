@@ -346,6 +346,7 @@ gl_binop = (op: Tok) -> str:
 gl_expr = (e: int) -> str:
     k = nodes[e].kind
     t = prune(ntype(e))
+    if t == T_MATH_INT: gl_err(nodes[e].pos, "checked mathematical int is not yet supported in shaders; use an explicit fixed width")
     if k == .int_lit:
         if types[t].kind == .float_: return gl_float(f64(nodes[e].ival))
         if nodes[e].ival < -2147483648 or nodes[e].ival > 4294967295: gl_err(nodes[e].pos, "shader integers are 32 bits, and this number does not fit in one (a hash written for 64 bits gives other values here)")

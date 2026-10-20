@@ -293,6 +293,57 @@ emit_wins = (ins: Ins):
         mov:
             lget(a)
             lset(d)
+        checked_add, checked_sub, checked_mul:
+            opcode = if o == .checked_add: 0x7C else if o == .checked_sub: 0x7D else: 0x7E
+            bin64(opcode, ins)
+            if o == .checked_mul:
+                # wasm has no overflow flags or high multiply. Check the quotient,
+                # guarding its own MIN/-1 trap and the zero divisor explicitly.
+                lget(a)
+                i64c(-1)
+                op(0x51)
+                op(0x04)
+                op(0x7F)             # if (result i32)
+                lget(bb)
+                i64c(-9223372036854775807 - 1)
+                op(0x51)
+                op(0x05)
+                lget(a)
+                i64c(0)
+                op(0x52)
+                op(0x04)
+                op(0x7F)
+                lget(d)
+                lget(a)
+                op(0x7F)             # i64.div_s
+                lget(bb)
+                op(0x52)
+                op(0x05)
+                op(0x41)
+                sleb(wb, 0)
+                op(0x0B)
+                op(0x0B)
+            else:
+                lget(a)
+                lget(d)
+                op(0x85)
+                if o == .checked_add:
+                    lget(bb)
+                    lget(d)
+                else:
+                    lget(a)
+                    lget(bb)
+                op(0x85)
+                op(0x83)
+                i64c(0)
+                op(0x53)             # (a xor result) & (b xor result) < 0
+            op(0x04)
+            op(0x40)
+            w_site(ins)
+            op(0x10)
+            uleb(wb, wfn_index[int(ins.imm)])
+            op(0x00)
+            op(0x0B)
         add: bin64(0x7C, ins)
         sub: bin64(0x7D, ins)
         mul: bin64(0x7E, ins)

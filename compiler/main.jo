@@ -271,7 +271,7 @@ prune_emit_queue = (roots: int[]):
         if k < 0 or live[k]: continue
         live[k] = true
         loop ins in emit_queue[k].code:
-            if ins.op == .call or ins.op == .faddr: todo.push(int(ins.imm))
+            if ins.op == .call or ins.op == .faddr or ins.op == .checked_add or ins.op == .checked_sub or ins.op == .checked_mul: todo.push(int(ins.imm))
     n = 0
     loop k in [0..emit_queue.len()):
         if not live[k]: continue
@@ -381,6 +381,7 @@ compile = (path: str, out0: str) -> str:
     want_cpu_flag = (opt_release or not dbg_on and not watch_build and not repl_image) and not target_wasm and not target_arm64 and not lower_only
     want_loop_watch = target_wasm and not opt_release and not lower_only
     mulh_ok = not target_wasm
+    checked_flags = not target_wasm
     # (code made after lowering everything, except where code is patched in place as it is made)
     queue_emit = not watch_build and not repl_image and not lower_only
     check_program(path)

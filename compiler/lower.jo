@@ -1463,12 +1463,17 @@ gen_map_presence = (call: int, f: int) -> int:
 positive_modulus = (n: int) -> int:
     if nodes[n].kind != .call or nodes[n].aux != 0 or nkids(n) != 2: return 0
     f = int(nodes[n].sym)
-    if prune(int(fns[f].ret)) != T_INT: return 0
+    if prune(int(fns[f].ret)) != T_INT and prune(int(fns[f].ret)) != T_MATH_INT: return 0
     d = int(fns[f].decl)
-    if d == 0 or nodes[d].name != intern("__floor_mod"): return 0
-    if files[pos_file(nodes[d].pos)].path != lib_dir + "/std/date.jo": return 0
+    if d == 0: return 0
+    masked = nodes[d].name == intern("__floor_mod_pow2")
+    if nodes[d].name != intern("__floor_mod") and not masked: return 0
+    if files[pos_file(nodes[d].pos)].path != lib_dir + "/std/date.jo" and files[pos_file(nodes[d].pos)].path != lib_dir + "/math_int.jo": return 0
     b = kid(n, 1)
     if nodes[b].kind != .int_lit or has_flag(b, NF_U64) or nodes[b].ival <= 0: return 0
+    if masked:
+        if nodes[b].ival == 9223372036854775807: return 0
+        return nodes[b].ival + 1
     nodes[b].ival
 
 positive_bounds_fn = -1
@@ -1482,12 +1487,14 @@ positive_bound = (n: int, use_locals: bool) -> int:
     t = prune(ntype(n))
     if types[t].kind != .int_: return -1
     if not types[t].sign and int(types[t].bits) < 64: return (1 << int(types[t].bits)) - 1
-    if t != T_INT: return -1
+    if t != T_INT and t != T_MATH_INT: return -1
     k = nodes[n].kind
     if k == .int_lit:
         if has_flag(n, NF_U64) or nodes[n].ival < 0: return -1
         return nodes[n].ival
     if k == .ident and nodes[n].aux == i32(int(SK.local)) and use_locals:
+        loop i in [0..nonneg_locals.len()):
+            if nonneg_locals[i] == int(nodes[n].sym): return nonneg_limits[i]
         return positive_bounds.get(int(nodes[n].sym)) ?? -1
     if k == .conv and nodes[n].aux == i32(int(CV.int_)):
         return positive_bound(int(nodes[n].a), use_locals)
@@ -1510,7 +1517,7 @@ positive_local_write = (l: int, bound: int):
     if l <= 0 or int(locals[l].owner) != cur_fn: return
     fl = int(locals[l].flags)
     skip = LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_SOAELEM | LF_ELEMALIAS | LF_QUIET
-    if fl & LF_DECL == 0 or fl & skip != 0 or prune(int(locals[l].type)) != T_INT: return
+    if fl & LF_DECL == 0 or fl & skip != 0 or (prune(int(locals[l].type)) != T_INT and prune(int(locals[l].type)) != T_MATH_INT): return
     old = positive_bounds.get(l) ?? bound
     if old < 0 or bound < 0: positive_bounds[l] = -1
     else: positive_bounds[l] = max(old, bound)
@@ -1567,12 +1574,12 @@ gen_constant_floor = (n: int) -> int:
     if nkids(n) != 2: return -1
     f = int(nodes[n].sym)
     t = prune(int(fns[f].ret))
-    if t != T_INT and t != T_U64: return -1
+    if t != T_INT and t != T_U64 and t != T_MATH_INT: return -1
     d = int(fns[f].decl)
     if d == 0: return -1
     name = name_of(int(nodes[d].name))
     if name != "__floor_mod" and name != "__floor_div" and name != "__floor_mod_pow2" and name != "__floor_div_pow2": return -1
-    if files[pos_file(nodes[d].pos)].path != lib_dir + "/std/date.jo": return -1
+    if files[pos_file(nodes[d].pos)].path != lib_dir + "/std/date.jo" and files[pos_file(nodes[d].pos)].path != lib_dir + "/math_int.jo": return -1
     b = kid(n, 1)
     if nodes[b].kind != .int_lit or has_flag(b, NF_U64): return -1
     divisor = nodes[b].ival
@@ -2395,6 +2402,39 @@ left_operand_addr = (a: int, t: int, keep: bool) -> int:
     if keep: return kept_operand_addr(a, t)
     place_addr(gen_place(a, false), t)
 
+# Semantic integer operations, with a word representation for step 1. The
+# overflow edge will become the promotion edge when a general representation exists.
+math_int_guard = (bad: int):
+    iff(bad)
+    e_call_nr(rt("__int_overflow"), [], -1)
+    endc()
+
+gen_math_int = (op: Tok, a: int, b: int, signed_count: bool = true) -> int:
+    if op == .plus or op == .minus or op == .star:
+        code = if op == .plus: Op.checked_add else if op == .minus: Op.checked_sub else: Op.checked_mul
+        d = vreg(VI)
+        emit(code, VI, d, a, b, 0, rt("__int_overflow"))
+        return d
+    if op == .slash:
+        math_int_guard(e_bin(.and_, VI, e_bin(.eq, VI, a, e_iconst(-9223372036854775807 - 1)), e_bin(.eq, VI, b, e_iconst(-1))))
+        return e_bin(.divs, VI, a, b)
+    if op == .percent: return sdiv_wrap(op, a, b, T_MATH_INT)
+    if op == .shl or op == .shr:
+        if signed_count: math_int_guard(e_bin(.lts, VI, b, e_iconst(0)))
+        d = vreg(VI)
+        iff(e_bin(.geu, VI, b, e_iconst(64)))
+        if op == .shl:
+            math_int_guard(e_bin(.ne, VI, a, e_iconst(0)))
+            e_mov(d, e_iconst(0))
+        else: e_mov(d, e_bin(.shrs, VI, a, e_iconst(63)))
+        els()
+        result = e_bin(int_op(op, true), VI, a, b)
+        if op == .shl: math_int_guard(e_bin(.ne, VI, e_bin(.shrs, VI, result, b), a))
+        e_mov(d, result)
+        endc()
+        return d
+    e_bin(int_op(op, true), VI, a, b)
+
 gen_binary = (e: int) -> Val:
     a = int(nodes[e].a)
     b = int(nodes[e].b)
@@ -2485,8 +2525,19 @@ gen_binary = (e: int) -> Val:
         endc()
     if types[lt].kind == .bool_ and (op == .amp or op == .pipe or op == .caret):
         return V(e_bin(int_op(op, false), VI, va, vb), false)
+    if lt == T_MATH_INT and (op == .slash or op == .percent): return V(gen_math_int(op, va, vb), false)
     if sg and (op == .slash or op == .percent) and not (nodes[b].kind == .int_lit and nodes[b].ival != -1):
         return V(norm(sdiv_wrap(op, va, vb, lt), ntype(e)), false)
+    if lt == T_MATH_INT and not is_cmp:
+        # Reuse existing bounded-range and local-constant facts. A successful
+        # proof keeps indexed loops eligible for ordinary loop/vector lowering.
+        if (op == .plus or op == .star) and nonneg_locals.len() > 0:
+            if positive_bounds_fn != cur_fn:
+                positive_bounds_fn = cur_fn
+                positive_bounds.clear()
+                positive_writes(int(fns[cur_fn].body))
+            if positive_bound(e, true) >= 0: return V(e_bin(int_op(op, true), VI, va, vb), false)
+        return V(gen_math_int(op, va, vb, types[prune(ntype(b))].sign), false)
     if (op == .shl or op == .shr) and dewy_at(nodes[e].pos): return V(norm(wide_shift(op, sg, va, vb, b), ntype(e)), false)
     r = e_bin(int_op(op, sg), VI, va, vb)
     if is_cmp: return V(r, false)
@@ -3394,7 +3445,21 @@ gen_conv = (e: int) -> Val:
     from = prune(ntype(a))
     cv = nodes[e].aux as CV
     if cv == .none_ or cv == .ptr: return gen_expr(a)
-    if cv == .int_: return V(norm(gen_expr(a).v, to), false)
+    if cv == .int_:
+        v = gen_expr(a).v
+        if (from == T_MATH_INT or to == T_MATH_INT) and not int_widens(from, to):
+            lo = 0
+            hi = -1
+            bits = int(types[to].bits)
+            if bits < 64: hi = (1 << bits) - 1
+            if types[to].sign:
+                hi = int(u64(hi) >> 1)
+                lo = -hi - 1
+            if types[from].sign:
+                math_int_guard(e_bin(.lts, VI, v, e_iconst(lo)))
+                if types[to].sign or bits < 64: math_int_guard(e_bin(.gts, VI, v, e_iconst(hi)))
+            else: math_int_guard(e_bin(.gtu, VI, v, e_iconst(hi)))
+        return V(norm(v, to), false)
     if cv == .int2float:
         v = gen_expr(a).v
         if types[from].kind == .int_ and not types[from].sign and int(types[from].bits) == 64: return V(e_un(.u2f, vt_of(to), v), false)
@@ -3403,6 +3468,9 @@ gen_conv = (e: int) -> Val:
         # f2i saturates to i64; narrower and unsigned types saturate to their own range
         v = gen_expr(a).v
         ft = vt_of(from)
+        if to == T_MATH_INT:
+            valid = e_bin(.and_, VI, e_bin(.fge, ft, v, e_fconst(-9223372036854775808.0, ft)), e_bin(.flt, ft, v, e_fconst(9223372036854775808.0, ft)))
+            math_int_guard(e_bin(.eq, VI, valid, e_iconst(0)))
         d = vreg(VI)
         bits = 64
         sg = true
@@ -3687,6 +3755,7 @@ gen_expr = (e: int) -> Val:
         v = gen_expr(a).v
         if nodes[e].op == i32(int(Tok.minus)):
             if vc(t) == VC_FLT: return V(e_un(.fneg, vt_of(t), v), false)
+            if t == T_MATH_INT: return V(gen_math_int(.minus, e_iconst(0), v), false)
             return V(norm(e_un(.neg, VI, v), t), false)
         return V(norm(e_un(.not_, VI, v), t), false)
     if k == .not_: return V(e_bin(.xor, VI, gen_expr(int(nodes[e].a)).v, e_iconst(1)), false)
@@ -4381,7 +4450,8 @@ gen_assign = (s: int):
             iff(e_bin(.eq, VI, rhs, e_iconst(0)))
             e_call_nr(rt("__div_zero"), [e_daddr(loc_data(nodes[s].pos))], -1)
             endc()
-        if types[t].kind == .bool_: r = e_bin(int_op(op, false), VI, cur, rhs)
+        if t == T_MATH_INT: r = gen_math_int(op, cur, rhs, types[prune(ntype(int(nodes[s].b)))].sign)
+        else if types[t].kind == .bool_: r = e_bin(int_op(op, false), VI, cur, rhs)
         else if sg and (op == .slash or op == .percent): r = norm(sdiv_wrap(op, cur, rhs, t), t)
         else if (op == .shl or op == .shr) and dewy_at(nodes[s].pos): r = norm(wide_shift(op, sg, cur, rhs, int(nodes[s].b)), t)
         else: r = norm(e_bin(int_op(op, sg), VI, cur, rhs), t)
@@ -5006,6 +5076,7 @@ lm_resizing_call = (n: int, g: int) -> int:
 len_of_local: {int: int}        # local n -> local A when n := A.len() and neither ever changes
 safe_index: (int, int, bool)[]  # (array local, loop variable local, keep its null check)
 nonneg_locals: int[]            # loop variables of ranges that start at a value >= 0
+nonneg_limits: int[]            # matching constant upper limits, or -1
 # A loop's control counter stays in range, but its user-visible variable can
 # be reassigned, passed by reference, or changed by a closure in the body.
 stable_loop_index = (l: int) -> bool:
@@ -5014,7 +5085,21 @@ stable_loop_index = (l: int) -> bool:
     fl & (LF_ASSIGNED | LF_ALIAS | LF_CAPTURE | LF_BYREF | LF_ADDR) == 0 and not is_shared(l)
 
 # e is an integer expression that is never negative
-is_nonneg = (e: int) -> bool:
+# The step-1 int/int64 boundary changes semantic type but preserves every bit
+# and value. Existing index/length proofs can look through just that boundary.
+# This is representation-specific: step 2 must prove a word representation first.
+word_integer_value = (n0: int) -> int:
+    n = n0
+    loop nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int_)):
+        inner = int(nodes[n].a)
+        source = prune(ntype(inner))
+        target = prune(ntype(n))
+        if not ((source == T_INT and target == T_MATH_INT) or (source == T_MATH_INT and target == T_INT)): break
+        n = inner
+    n
+
+is_nonneg = (e0: int) -> bool:
+    e = word_integer_value(e0)
     if e == 0: return false
     k = nodes[e].kind
     if k == .int_lit: return nodes[e].ival >= 0
@@ -5025,7 +5110,8 @@ is_nonneg = (e: int) -> bool:
     false
 
 # A, if e is A.len() / len(A) for an array local A that is never modified, else -1
-fixed_array_len = (e: int) -> int:
+fixed_array_len = (e0: int) -> int:
+    e = word_integer_value(e0)
     if e == 0 or nodes[e].kind != .intrinsic or (nodes[e].aux as IN) != .len or nkids(e) != 1: return -1
     a = kid(e, 0)
     if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return -1
@@ -5077,7 +5163,7 @@ nonnegative_range = (it: int) -> bool:
 range_bounds_arrays = (it: int) -> int[]:
     out: int[]
     if not nonnegative_range(it) or has_flag(it, NF_INCLUSIVE): return out
-    hi = int(nodes[it].b)
+    hi = word_integer_value(int(nodes[it].b))
     if hi == 0: return out
     a = fixed_array_len(hi)
     if a >= 0: out.push(a)
@@ -5092,7 +5178,8 @@ range_bounds_arrays = (it: int) -> int[]:
 
 # 0: needs a bounds check, 1: in bounds, 2: in bounds but keep the null check (other
 # accesses to the array in the loop are checked and can build on it)
-index_safety = (arr: int, idx: int) -> int:
+index_safety = (arr: int, idx0: int) -> int:
+    idx = word_integer_value(idx0)
     if safe_index.len() == 0: return 0
     if nodes[arr].kind != .ident or nodes[idx].kind != .ident: return 0
     if nodes[arr].aux != i32(int(SK.local)) or nodes[idx].aux != i32(int(SK.local)): return 0
@@ -5113,7 +5200,7 @@ other_index_of = (n: int, a: int, ok: int[], seen: mut bool[]) -> bool:
     if k == .index:
         b = int(nodes[n].a)
         if nodes[b].kind == .ident and nodes[b].aux == i32(int(SK.local)) and int(nodes[b].sym) == a:
-            ix = int(nodes[n].b)
+            ix = word_integer_value(int(nodes[n].b))
             if not (nodes[ix].kind == .ident and nodes[ix].aux == i32(int(SK.local)) and ok.contains(int(nodes[ix].sym))): return true
     if k == .for_:
         inner = ok
@@ -5140,9 +5227,16 @@ range_facts_begin = (s: int, l: int) -> (int, int, bool):
         if nonneg:
             safe_arrs = range_bounds_arrays(it)
             if not has_flag(it, NF_INCLUSIVE):
-                hi = int(nodes[it].b)
+                hi = word_integer_value(int(nodes[it].b))
                 if nodes[hi].kind == .intrinsic and (nodes[hi].aux as IN) == .len and nkids(hi) == 1: bound = kid(hi, 0)
-    if nonneg: nonneg_locals.push(l)
+    if nonneg:
+        nonneg_locals.push(l)
+        hi = int(nodes[int(nodes[s].a)].b)
+        limit = -1
+        if nodes[hi].kind == .int_lit and not has_flag(hi, NF_U64) and nodes[hi].ival > 0:
+            limit = nodes[hi].ival
+            if not has_flag(int(nodes[s].a), NF_INCLUSIVE): limit -= 1
+        nonneg_limits.push(limit)
     nfp = fp_begin(s, l, bound, 0)
     loop sa in safe_arrs:
         seen = fill(false, nodes.len())
@@ -5155,7 +5249,9 @@ range_facts_begin = (s: int, l: int) -> (int, int, bool):
 range_facts_end = (facts: (int, int, bool)):
     loop _ in [0..facts.1): safe_index.pop()
     fp_end(facts.0)
-    if facts.2: nonneg_locals.pop()
+    if facts.2:
+        nonneg_locals.pop()
+        nonneg_limits.pop()
 
 gen_loop_body = (b: int):
     scope_push()
@@ -5261,7 +5357,7 @@ bounded_open_for = (s: int) -> int:
     it = int(nodes[s].a)
     if nodes[it].kind != .range or nodes[it].b != 0 or has_flag(it, NF_STEP): return 0
     l = int(nodes[s].sym)
-    if not stable_loop_index(l) or prune(int(locals[l].type)) != T_INT: return 0
+    if not stable_loop_index(l) or (prune(int(locals[l].type)) != T_INT and prune(int(locals[l].type)) != T_MATH_INT): return 0
     body = int(nodes[s].b)
     if nkids(body) == 0: return 0
     guard = kid(body, 0)
@@ -5270,10 +5366,10 @@ bounded_open_for = (s: int) -> int:
     if nodes[condition].kind != .not_: return 0
     condition = int(nodes[condition].a)
     if nodes[condition].kind != .binary or nodes[condition].aux != 0 or nodes[condition].op != i32(int(Tok.lt)): return 0
-    index = int(nodes[condition].a)
+    index = word_integer_value(int(nodes[condition].a))
     if nodes[index].kind != .ident or nodes[index].aux != i32(int(SK.local)) or int(nodes[index].sym) != l: return 0
-    stop = int(nodes[condition].b)
-    if prune(ntype(stop)) != T_INT: return 0
+    stop = word_integer_value(int(nodes[condition].b))
+    if prune(ntype(stop)) != T_INT and prune(ntype(stop)) != T_MATH_INT: return 0
     stable = nodes[stop].kind == .int_lit or fixed_array_len(stop) >= 0
     if nodes[stop].kind == .ident and nodes[stop].aux == i32(int(SK.local)):
         end_local = int(nodes[stop].sym)

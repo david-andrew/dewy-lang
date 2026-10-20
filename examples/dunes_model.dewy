@@ -57,14 +57,14 @@ sand_fs=(i: SandOut u: SandParams):>vec4=>{
         # Match the real shadow map: four samples on the CPU, nine on a GPU.
         let lit: float32 = 0.0
         if u.shadow_taps <? 5.0 {
-            loop k in [0..4) {
+            loop k in [int32(0)..int32(4)) {
                 let d = sample(u.shadow_map sp.xy + vec2(f32(k%2)-0.5 f32(k//2)-0.5) * u.shadow_texel).x
                 if sp.z - 0.003 <=? d {lit = lit + 1.0}
             }
             lit /= 4.0
         } else {
-            loop x in [-1..2) {
-                loop y in [-1..2) {
+            loop x in [int32(-1)..int32(2)) {
+                loop y in [int32(-1)..int32(2)) {
                     let d = sample(u.shadow_map sp.xy + vec2(f32(x) f32(y)) * u.shadow_texel).x
                     if sp.z - 0.003 <=? d {lit = lit + 1.0}
                 }

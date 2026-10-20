@@ -10,6 +10,9 @@ use 'ast.jo'
 use 'elf.jo'
 use 'pe.jo'
 
+x_int_fail: int[]
+x_int_fail_fn = 0
+
 const RAX = 0
 const RCX = 1
 const RDX = 2
@@ -1772,6 +1775,27 @@ emit_ins = (pos: int, ins: Ins):
                 x = xdreg(d, 0)
                 lds(x, a, vtype(d))
                 sts(d, x, vtype(d))
+        checked_add, checked_sub, checked_mul:
+            # No LEA/strength reduction: the immediately following JO consumes OF.
+            r = dreg(d, RAX)
+            if vloc[bb] == r and r != vloc[a]: r = RAX
+            ld(r, a)
+            if op == .checked_add: alu_v(0x01, 0, r, bb)
+            else if op == .checked_sub: alu_v(0x29, 5, r, bb)
+            else if vloc[bb] == LOC_CONST:
+                rex(true, r, 0, r, false)
+                b(0x69)
+                modrr(r, r)
+                b32(vcval[bb])
+            else:
+                rb = reg_of(bb, RCX)
+                rex(true, r, 0, rb, false)
+                b(0x0F)
+                b(0xAF)
+                modrr(r, rb)
+            x_int_fail.push(jcc32(0))
+            x_int_fail_fn = int(ins.imm)
+            st(d, r)
         add:
             if vloc[d] == LOC_NONE or vloc[d] == LOC_SLOT: return
             if lea_add(d, a, bb, 1): return
@@ -2524,6 +2548,7 @@ dbg_cfi: int[]
 dbg_epis: int[]         # (while a function is emitted: where its epilogues pop rbp)
 
 x64_function = ():
+    x_int_fail.clear()
     loop fn_addr.len() <= ir.fn_index: fn_addr.push(-1)
     loop fn_len.len() <= ir.fn_index: fn_len.push(0)
     loop code.len() % 16 != 0: b(0xCC)
@@ -2581,6 +2606,13 @@ x64_function = ():
                     else: ra_save_cost += 2 * call_w[ci]
         else: emit_ins(pos, ins)
         if ci < call_pos.len() and call_pos[ci] == pos: ci += 1
+    if x_int_fail.len() > 0:
+        loop fix in x_int_fail: patch32(fix, code.len() - fix - 4)
+        b(0xE8)
+        b32(0)
+        call_fix.push((code.len() - 4, x_int_fail_fn))
+        b(0x0F)
+        b(0x0B)                 # unreachable if the failure helper returns
     if dbg_on:
         dbg_pos[ir.code.len()] = code.len()
         dbg_function(fn_start, body_start, X64_DWREG, XMM, 17, 6)

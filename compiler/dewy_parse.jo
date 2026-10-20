@@ -241,6 +241,7 @@ dw_bigint_value = (limbs: u64[], pos: int, negative: bool = false) -> int:
     result = mk(.call, pos)
     nodes[result].a = i32(callee)
     set_list(result, [sign_arg, magnitude_arg])
+    nodes[result].aux2 = -1       # oversized literal; the checker requires an explicit BigInt context
     result
 
 dw_big_integer = (text: str, id: int) -> int:
@@ -346,7 +347,8 @@ dw_type = (id: int) -> int:
         else if name == "float32": name = "f32"
         else if name == "string": name = "str"
         else if name == "set": name = "Set"
-        else if name == "int" or name == "uint": return dw_fail(id, "unbounded integer types; use an explicit fixed width in this experiment")
+        else if name == "int": name = "__dewy_int"
+        else if name == "uint": return dw_fail(id, "unbounded uint is not yet supported; use an explicit fixed width")
         n = mk(.tname, pos)
         nodes[n].name = if name == dewy_syntax[id].text: dw_name_id(id) else: i32(intern(name))
         return n
@@ -629,7 +631,7 @@ dw_expr = (id: int) -> int:
             name = if axis == 0: base else: "{base}_{axis}"
             return comp_ident(intern(name), pos)
         n = mk(.ident, pos)
-        nodes[n].name = if text == "printl": i32(intern("print")) else: dw_name_id(id)
+        nodes[n].name = if text == "printl": i32(intern("print")) else if text == "int": i32(intern("__dewy_int")) else: dw_name_id(id)
         return n
     if dw_integer_kind(k):
         if let value = dw_unsigned(text, id):

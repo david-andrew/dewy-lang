@@ -427,6 +427,7 @@ ml_as = (e: int, x: str, t: int) -> str:
 ml_expr = (e: int) -> str:
     k = nodes[e].kind
     t = prune(ntype(e))
+    if t == T_MATH_INT: ml_err(nodes[e].pos, "checked mathematical int is not yet supported in shaders; use an explicit fixed width")
     pos = nodes[e].pos
     # (the uniforms, or a part of them: read from memory)
     if k == .ident or k == .field or k == .index or ml_is_gbuf_op(e, "[]"):

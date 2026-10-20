@@ -52,7 +52,7 @@ begin=(connection:invite.Invited)=>{
     friend=connection.peer
     let player=if connection.inviter 0 else 1
     session=netplay.session(Game[] tick players=2 me=player)
-    let peers=[-1 -1]
+    let peers:array<int64>=[-1 -1]
     peers[1-player]=friend
     session.over(peers)
     spare=0.0

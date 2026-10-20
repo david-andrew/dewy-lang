@@ -22,6 +22,9 @@ use 'ast.jo'
 use 'elf.jo'
 use 'x64.jo'
 
+a_int_fail: int[]
+a_int_fail_fn = 0
+
 const A_SP = 31              # as a base register (loads, stores, add/sub immediate)
 const A_ZR = 31              # as an operand elsewhere
 const A_FP = 29
@@ -930,6 +933,32 @@ arm64_ins = (pos: int, ins: Ins):
             else:
                 a_ld(9, a)
                 a_st(d, 9)
+        checked_add, checked_sub, checked_mul:
+            rn = a_src(a, 9)
+            rd = a_dst(d, 11)
+            cc = 6                 # VS (signed overflow)
+            if op == .checked_mul:
+                rm = a_src(bb, 10)
+                w32(0x9B407C00 | (rm << 16) | (rn << 5) | 12) # smulh x12, rn, rm
+                a_mul(rd, rn, rm)
+                w32(0xEB00001F | (2 << 22) | (rd << 16) | (63 << 10) | (12 << 5)) # cmp x12, rd, asr #63
+                cc = AC_NE
+            else if vloc[bb] == LOC_CONST and vcval[bb] > -4096 and vcval[bb] < 4096:
+                k = vcval[bb]
+                if op == .checked_sub: k = -k
+                base = 0xB1000000   # adds immediate
+                if k < 0:
+                    k = -k
+                    base = 0xF1000000 # subs immediate
+                w32(base | (k << 10) | (rn << 5) | rd)
+            else:
+                rm = a_src(bb, 10)
+                base = if op == .checked_add: 0xAB000000 else: 0xEB000000
+                w32(base | (rm << 16) | (rn << 5) | rd)
+            a_int_fail.push(code.len())
+            w32(0x54000000 | cc)
+            a_int_fail_fn = int(ins.imm)
+            a_st(d, rd)
         add, sub:
             if vloc[d] == LOC_NONE or vloc[d] == LOC_SLOT: return
             if vloc[bb] == LOC_CONST and vcval[bb] > -4096 and vcval[bb] < 4096:
@@ -1223,6 +1252,7 @@ arm64_ins = (pos: int, ins: Ins):
         _: ice("arm64: {op} is not supported")
 
 arm64_function = ():
+    a_int_fail.clear()
     loop fn_addr.len() <= ir.fn_index: fn_addr.push(-1)
     loop fn_len.len() <= ir.fn_index: fn_len.push(0)
     # (at a multiple of 8, as its float constants are: their padding, so its bytes, then do not
@@ -1246,6 +1276,11 @@ arm64_function = ():
         line_row(int(ins.pos))
         if dbg_on: dbg_pos[pos] = code.len()
         arm64_ins(pos, ins)
+    if a_int_fail.len() > 0:
+        loop fix in a_int_fail: wr32(fix, rd32(fix) | (((code.len() - fix) / 4) << 5))
+        a_call_fix.push((code.len(), a_int_fail_fn))
+        a_bl()
+        w32(0xD4200000)
     if dbg_on: a_dbg(fn_start, body_start)
     a_put_lits()
     elf_syms.push((sym_name(ir.name), fn_start, code.len() - fn_start))

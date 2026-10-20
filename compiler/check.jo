@@ -1199,8 +1199,7 @@ check_struct_fields = (si: int):
                 cl = clone(int(nodes[f].b))
                 t = check_expr(cl, 0)
                 if has_flag(cl, NF_LITERAL):
-                    if nodes[cl].kind == .float_lit: t = T_FLOAT
-                    else: t = T_INT
+                    t = lit_default(cl)
                 fields[fi].type = i32(zonk(t))
             else: fatal(nodes[f].pos, "field needs a type")
             loop k in [0..inherited.len() + i):
@@ -1635,8 +1634,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
         cl = last_checked
         if t != 0: cl = coerce(cl, t)
         else if has_flag(cl, NF_LITERAL):
-            if nodes[cl].kind == .float_lit: t = T_FLOAT
-            else: t = T_INT
+            t = lit_default(cl)
         else: t = et
         globals[g].type = i32(zonk(t))
         globals[g].init = nodes[d].b      # unchecked original: each use checks a fresh copy
@@ -2142,7 +2140,7 @@ check_for = (s: int):
             check_expr(int(nodes[it].c), 0)
             nodes[it].c = i32(last_checked)
             if la and lb and not has_flag(int(nodes[it].c), NF_LITERAL): t = int(nodes[int(nodes[it].c)].type)
-        if la and lb and (not has_flag(it, NF_STEP) or has_flag(int(nodes[it].c), NF_LITERAL)): t = T_INT
+        if la and lb and (not has_flag(it, NF_STEP) or has_flag(int(nodes[it].c), NF_LITERAL)): t = lit_default(int(nodes[it].a))
         if tkind(t) == .str_: fatal(nodes[it].pos, "text is joined with `+` (or put in a string: \"\{a}\{b}\"); `..` makes a range of numbers")
         if not is_int(t) or nodes[int(nodes[it].a)].kind == .float_lit or nodes[int(nodes[it].b)].kind == .float_lit:
             if is_int(t): t = T_FLOAT
@@ -3871,7 +3869,7 @@ runtime_fn = (name: str) -> int:
 
 add_universe = ():
     exception_builtins()
-    tys = [("int", T_INT), ("i8", T_I8), ("i16", T_I16), ("i32", T_I32), ("i64", T_INT), ("u8", T_U8), ("byte", T_U8),
+    tys = [("__dewy_int", T_MATH_INT), ("int", T_INT), ("i8", T_I8), ("i16", T_I16), ("i32", T_I32), ("i64", T_INT), ("u8", T_U8), ("byte", T_U8),
         ("u16", T_U16), ("u32", T_U32), ("u64", T_U64), ("f64", T_FLOAT), ("f32", T_F32),
         ("int8", T_I8), ("int16", T_I16), ("int32", T_I32), ("int64", T_INT),
         ("uint8", T_U8), ("uint16", T_U16), ("uint32", T_U32), ("uint64", T_U64),
@@ -3919,6 +3917,9 @@ load_prelude = ():
         names_.sort()
         loop n in names_:
             if ends_with(n, ".jo"): load_module("{lib_dir}/{sub}/{n}", true, -1)
+    # Keep existing fixed-width overloads first for widening ties. Separate from
+    # the seed-scanned prelude: old seeds do not know the mathematical type.
+    if file_exists(lib_dir + "/math_int.jo"): load_module(lib_dir + "/math_int.jo", true, -1)
 
 dfs_state: bool[]
 skip_main = false

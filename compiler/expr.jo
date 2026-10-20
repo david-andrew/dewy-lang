@@ -74,10 +74,10 @@ is_lit = (n: int) -> bool: has_flag(n, NF_LITERAL)
 lit_default = (n: int) -> int:
     k = nodes[n].kind
     if k == .float_lit: return T_FLOAT
-    if has_flag(n, NF_U64) and files[pos_file(nodes[n].pos)].is_dewy: return T_U64
     if k == .unary or k == .conv: return lit_default(int(nodes[n].a))
     if k == .binary:
         if lit_default(int(nodes[n].a)) == T_FLOAT or lit_default(int(nodes[n].b)) == T_FLOAT: return T_FLOAT
+    if files[pos_file(nodes[n].pos)].is_dewy: return T_MATH_INT
     T_INT
 
 ntype = (n: int) -> int: int(nodes[n].type)
@@ -89,6 +89,29 @@ wrap_conv = (n: int, cv: CV, to: int):
     nodes[n] = Node(kind = .conv, pos = nodes[inner].pos, a = i32(inner), aux = i32(int(cv)), type = i32(to), flags = i32(NF_CHECKED))
 
 # ---------------- coercion ----------------
+# Values already fixed to a scalar type can still be compile-time constants.
+# This deliberately excludes calls and reads, whose effects must remain visible.
+integer_constant = (n: int) -> (bool, int):
+    if nodes[n].kind == .int_lit: return (true, nodes[n].ival)
+    if nodes[n].kind != .conv or nodes[n].aux != i32(int(CV.int_)): return (false, 0)
+    known, value = integer_constant(int(nodes[n].a))
+    if not known: return (false, 0)
+    t = prune(ntype(n))
+    bits = int(types[t].bits)
+    if bits < 64:
+        if types[t].sign: value = (value << (64 - bits)) >> (64 - bits)
+        else: value = value & ((1 << bits) - 1)
+    (true, value)
+
+check_integer_boundary = (n: int, from: int, to: int):
+    if from != T_MATH_INT and to != T_MATH_INT: return
+    if int_widens(from, to): return
+    known, value = integer_constant(n)
+    if not known: return
+    fits = int_fits(value, to)
+    if not types[from].sign and value < 0 and types[to].sign: fits = false
+    if not fits: fatal(nodes[n].pos, "integer overflow in constant conversion to {type_str(to)}")
+
 int_widens = (f: int, t: int) -> bool:
     fb = int(types[f].bits)
     tb = int(types[t].bits)
@@ -154,7 +177,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
         if dewy_bigint_literal_target(n, to): return true
         if nodes[n].kind == .int_lit and (tk == .int_ or tk == .float_): return true
         if nodes[n].kind == .float_lit and tk == .float_: return true
-    if fk == .int_ and tk == .int_: return int_widens(from, to)
+    if fk == .int_ and tk == .int_: return from == T_MATH_INT or to == T_MATH_INT or int_widens(from, to)
     if fk == .int_ and tk == .float_: return true
     if fk == .float_ and tk == .float_: return true
     if tk == .enum_ and not is_union(from) and is_union(to): return union_target(n, from, to) >= 0
@@ -316,6 +339,10 @@ coerce = (n: int, target: int) -> int:
             wrap_conv(n, .opt, to)
             return n
     if fk == .int_ and tk == .int_:
+        if from == T_MATH_INT or to == T_MATH_INT:
+            check_integer_boundary(n, from, to)
+            wrap_conv(n, .int_, to)
+            return n
         if int_widens(from, to):
             # (a + b with a, b: u8, put in an int: added as u8s first, so 200 + 200 is 144)
             if nodes[n].kind == .binary and int(types[from].bits) <= 16 and int(types[to].bits) > int(types[from].bits) and not pos_in_lib(nodes[n].pos):
@@ -437,6 +464,7 @@ num_join = (a0: int, b0: int) -> int:
     if ka == .float_ and kb == .int_: return a
     if kb == .float_ and ka == .int_: return b
     if ka == .int_ and kb == .int_:
+        if a == T_MATH_INT or b == T_MATH_INT: return T_MATH_INT
         if int_widens(a, b): return b
         if int_widens(b, a): return a
     0
@@ -455,8 +483,7 @@ join_types = (a: int, b: int, pos: int) -> int:
         coerce(b, ta)
         return ta
     if la and lb:
-        t = T_INT
-        if lit_default(a) == T_U64 or lit_default(b) == T_U64: t = T_U64
+        t = lit_default(a)
         if nodes[a].kind == .float_lit or nodes[b].kind == .float_lit: t = T_FLOAT
         coerce(a, t)
         coerce(b, t)
@@ -755,6 +782,7 @@ dewy_set_literal = (a: int) -> bool:
     nodes[a].kind == .call and nodes[a].type == 0 and nkids(a) == 1 and nodes[int(nodes[a].a)].kind == .ident and name_of(int(nodes[int(nodes[a].a)].name)) == "__dewy_set"
 
 ctx_dependent = (a: int) -> bool:
+    if nodes[a].kind == .call and nodes[a].aux2 == -1: return true
     k = nodes[a].kind
     if dewy_set_literal(a): return true
     if k == .ident or k == .field or k == .typeapply: return has_flag(a, NF_FNREF_ARG)
@@ -875,6 +903,7 @@ match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
             if ak == .opt and pk == .opt: return 0
         if ak == .none_lit and pk == .opt: return 0
         if can_coerce(0, a, pat):
+            if a == T_MATH_INT and pk == .int_ and not int_widens(a, pat): return 2
             if ak == .float_ and pk == .float_:
                 if int(types[a].bits) < int(types[pat].bits): return 4
                 return 5
@@ -994,6 +1023,11 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
     p = prune(pat)
     pk = types[p].kind
     if ctx_dependent(a):
+        if nodes[a].kind == .call and nodes[a].aux2 == -1:
+            target = p
+            if pk == .opt: target = prune(int(types[p].elem))
+            if bundled_bigint_type(target): return 0
+            return -1
         k = nodes[a].kind
         if dewy_set_literal(a):
             target = p
@@ -1139,7 +1173,7 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
         return -1
     if is_lit(a):
         # Prefer the literal's default integer width/sign, but only among types
-        # that can represent it (large Dewy literals default to uint64).
+        # that can represent it; Dewy literals prefer mathematical int.
         if pk == .param:
             b = binds[int(types[p].id)]
             if b == 0: return 3
@@ -1150,9 +1184,11 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
             if nodes[a].kind == .int_lit:
                 if not lit_fits(a, p): return -1
                 if p == lit_default(a): return 0
+                if p == T_U64 and has_flag(a, NF_U64): return 1
+                if lit_default(a) == T_MATH_INT and p != T_INT: return 2
                 return 1
             return -1
-        if dewy_bigint_literal_target(a, p): return 2
+        if dewy_bigint_literal_target(a, p): return 3
         if pk == .float_:
             if p == T_FLOAT:
                 if nodes[a].kind == .int_lit: return 2
@@ -2181,6 +2217,8 @@ conversion = (n: int, to0: int, args: int[]) -> int:
     check_expr(a, 0)
     ft = prune(ntype(a))
     if is_lit(a) and nodes[a].kind == .float_lit and tk == .int_:
+        if to == T_MATH_INT and not (nodes[a].fval >= -9223372036854775808.0 and nodes[a].fval < 9223372036854775808.0):
+            fatal(nodes[n].pos, "integer overflow in float-to-int conversion")
         nodes[a].kind = .int_lit
         nodes[a].ival = int(nodes[a].fval)
     if is_lit(a) and is_numeric(to):
@@ -2190,6 +2228,7 @@ conversion = (n: int, to0: int, args: int[]) -> int:
     fk = types[ft].kind
     cv = -1
     if tk == .int_:
+        if fk == .int_: check_integer_boundary(a, ft, to)
         if fk == .int_ or fk == .bool_: cv = int(CV.int_)
         else if fk == .float_: cv = int(CV.float2int)
         else if fk == .enum_ and simple_enum(ft): cv = int(CV.int_)
@@ -2258,11 +2297,44 @@ collect_fns = (name: int, out: mut int[]):
     collect_in(prelude, name, out)
     hide_private = false
 
+# Fold mathematical powers and floor operations before selecting their runtime
+# overload. Every intermediate is checked, including exponentiation by squaring.
+dewy_math_fold = (n: int, a: int, b: int, power: bool, modulo: bool) -> bool:
+    if prune(ntype(a)) != T_MATH_INT: return false
+    known_a, x = integer_constant(a)
+    known_b, y = integer_constant(b)
+    if not known_a or not known_b: return false
+    value = 0
+    if power:
+        if y < 0: return false
+        value = 1
+        loop y > 0:
+            if y & 1 == 1:
+                if math_word_overflow(2, value, x): fatal(nodes[n].pos, "integer overflow in constant power")
+                value *= x
+            y = y >> 1
+            if y > 0:
+                if math_word_overflow(2, x, x): fatal(nodes[n].pos, "integer overflow in constant power")
+                x *= x
+    else:
+        if y == 0: fatal(nodes[n].pos, "integer division by zero in constant expression")
+        if not modulo and math_word_overflow(3, x, y): fatal(nodes[n].pos, "integer overflow in constant division")
+        if modulo:
+            if y != -1: value = x % y
+            if value != 0 and (value < 0) != (y < 0): value += y
+        else:
+            value = x / y
+            if x - value * y != 0 and (x < 0) != (y < 0): value -= 1
+    nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = value, type = i32(T_MATH_INT), flags = i32(NF_CHECKED))
+    true
+
 dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
     literal_divisor = nodes[args[1]].kind == .int_lit
     checked: int[]
-    loop arg in args:
-        check_expr(arg, 0)
+    loop i in 0.. and arg in args:
+        hint = 0
+        if i == 0 and expected != 0 and is_numeric(expected) and name != intern("__dewy_divide"): hint = expected
+        check_expr(arg, hint)
         checked.push(last_checked)
         add_flag(last_checked, NF_CHECKED)
     a = checked[0]
@@ -2291,6 +2363,10 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
             label = if power: "^" else: op
             fatal(nodes[n].pos, "operator {label} is not defined for {dt(ntype(a))} and {dt(ntype(b))}")
         return result
+    if is_numeric(ntype(a)) and is_numeric(ntype(b)):
+        if power: finalize_literal(a)
+        else: join_types(a, b, nodes[n].pos)
+        if dewy_math_fold(n, a, b, power, modulo): return T_MATH_INT
     # Only built-in arithmetic may replace a literal divisor with a shift or
     # mask. Custom protocols receive the original operand, including 1 or 2^k.
     helper = name
@@ -2306,6 +2382,7 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
                 divisor = divisor >> 1
                 shift += 1
             nodes[b].ival = shift
+            nodes[b].type = i32(T_INT) # generated shift count, not the divisor
     if nodes[n].a != 0: nodes[int(nodes[n].a)].name = i32(helper)
     declarations: int[]
     collect_fns(helper, declarations)
@@ -4467,6 +4544,13 @@ check_binary = (n: int, expected: int) -> int:
         ta = prune(ntype(a))
         tb = prune(ntype(b))
         if not is_int(ta) or not is_int(tb): fatal(nodes[n].pos, "shift operands must be integers")
+        if ta == T_MATH_INT:
+            known_a, x = integer_constant(a)
+            known_b, y = integer_constant(b)
+            if known_b and y < 0 and types[tb].sign: fatal(nodes[n].pos, "shift count must be nonnegative")
+            if op == .shl and known_a and known_b:
+                overflow = if y < 0 and not types[tb].sign: x != 0 else: math_word_overflow(4, x, y)
+                if overflow: fatal(nodes[n].pos, "integer overflow in constant shift")
         nodes[n].type = i32(ta)
         return ta
     tka = types[ta].kind
@@ -4580,6 +4664,11 @@ check_binary = (n: int, expected: int) -> int:
         if nodes[a].kind == .int_lit and nodes[b].kind == .int_lit:
             x = nodes[a].ival
             y = nodes[b].ival
+            mathematical = lit_default(n) == T_MATH_INT
+            operation = if op == .plus: 0 else if op == .minus: 1 else if op == .star: 2 else if op == .slash: 3 else if op == .shl: 4 else: -1
+            if mathematical and operation >= 0 and math_word_overflow(operation, x, y):
+                fatal(nodes[n].pos, "integer overflow in constant expression (int64 representation of mathematical int)")
+            if mathematical and (op == .shl or op == .shr) and y < 0: fatal(nodes[n].pos, "shift count must be nonnegative")
             v = 0
             ok = true
             if op == .plus: v = x + y
@@ -4607,7 +4696,8 @@ check_binary = (n: int, expected: int) -> int:
                 big = v < 0 and (has_flag(a, NF_U64) or has_flag(b, NF_U64) or (op == .shl and x >= 0))
                 nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = v, flags = i32(NF_LITERAL | NF_CHECKED), type = i32(T_INT))
                 if big: add_flag(n, NF_U64)
-                return T_INT
+                nodes[n].type = i32(lit_default(n))
+                return ntype(n)
         else if (op == .plus or op == .minus or op == .star or op == .slash) and (nodes[a].kind == .int_lit or nodes[a].kind == .float_lit) and (nodes[b].kind == .int_lit or nodes[b].kind == .float_lit):
             x = nodes[a].fval
             if nodes[a].kind == .int_lit: x = f64(nodes[a].ival)
@@ -5075,13 +5165,19 @@ check_expr = (n: int, expected: int) -> int:
     if ex != 0: exk = types[ex].kind
     if nodes[n].kind == .array: dewy_classify_spread(n)
     k = nodes[n].kind
+    if k == .call and nodes[n].aux2 == -1:
+        literal_target = ex
+        if exk == .opt: literal_target = prune(int(types[ex].elem))
+        if literal_target == 0 or not bundled_bigint_type(literal_target):
+            fatal(nodes[n].pos, "integer literal does not fit in int's interim int64 representation; use an explicit BigInt annotation")
+        nodes[n].aux2 = 0
     if k == .array and exk == .opt and (tkind(int(types[ex].elem)) == .array or tkind(int(types[ex].elem)) == .fixed):
         ex = prune(int(types[ex].elem))
         exk = types[ex].kind
     if k == .propagate: return check_propagate(n, expected)
     if k == .int_lit:
         add_flag(n, NF_LITERAL)
-        nodes[n].type = i32(T_INT)
+        nodes[n].type = i32(lit_default(n))
         if ex != 0 and exk == .int_:
             coerce(n, ex)
             t = ex
@@ -5092,8 +5188,7 @@ check_expr = (n: int, expected: int) -> int:
             coerce(n, prune(int(types[ex].elem)))
             t = ntype(n)
         else:
-            t = T_INT
-            if has_flag(n, NF_U64) and files[pos_file(nodes[n].pos)].is_dewy: t = T_U64
+            t = lit_default(n)
     else if k == .float_lit:
         if ex != 0 and exk == .float_:
             clear_flag(n, NF_LITERAL)
@@ -5284,6 +5379,8 @@ check_expr = (n: int, expected: int) -> int:
             return t
         if bk == .typeval:
             tt = prune(int(types[bt].elem))
+            if tt == T_MATH_INT and (name_of(fname) == "min" or name_of(fname) == "max"):
+                fatal(nodes[n].pos, "mathematical int has no min or max; int64 describes the interim storage limits")
             if tt != 0 and is_int(tt) and (name_of(fname) == "min" or name_of(fname) == "max"):
                 if ide_on: ide_ref(nodes[n].pos, fname, IK_CONST, 0, tt, 0)
                 bits = int(types[tt].bits)
@@ -5298,8 +5395,9 @@ check_expr = (n: int, expected: int) -> int:
                 lit = mk(.int_lit, nodes[n].pos)
                 nodes[lit].ival = value
                 # Keep the bound's type when a constant/default is cloned and checked again.
-                nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(lit), aux = i32(int(CV.int_)), type = i32(tt))
-                check_expr(lit, 0)
+                nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(lit), aux = i32(int(CV.int_)), aux2 = 1, type = i32(tt))
+                if not types[tt].sign and value < 0: add_flag(lit, NF_U64)
+                check_expr(lit, tt)
                 t = tt
             else if tt != 0 and types[tt].kind == .enum_:
                 vi = find_variant(int(types[tt].st), fname)
@@ -5643,6 +5741,8 @@ check_expr = (n: int, expected: int) -> int:
             if is_lit(a):
                 # fold -literal into a literal (keeps it untyped, e.g. -PI or -1)
                 if nodes[a].kind == .int_lit:
+                    if lit_default(n) == T_MATH_INT and not has_flag(a, NF_U64) and nodes[a].ival == -9223372036854775807 - 1:
+                        fatal(nodes[n].pos, "integer overflow in constant negation")
                     nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = -nodes[a].ival, flags = i32(NF_LITERAL | NF_CHECKED), type = nodes[a].type)
                     last_checked = n
                     return ntype(n)
@@ -5867,7 +5967,7 @@ check_expr = (n: int, expected: int) -> int:
                 if allchar: elt = T_STR
                 else if anyfloat: elt = T_FLOAT
                 else if anyunsigned: elt = T_U64
-                else: elt = T_INT
+                else: elt = if files[pos_file(nodes[n].pos)].is_dewy: T_MATH_INT else: T_INT
             # ([1, "two", 3]: an array holds one kind of value)
             coerce_hint = " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, make a struct or a union)"
             loop i in [0..nkids(n)):
@@ -5939,6 +6039,7 @@ check_expr = (n: int, expected: int) -> int:
             nodes[n].a = i32(a)
             finalize_literal(a)
             ft = prune(ntype(a))
+            if ft == T_MATH_INT or tt == T_MATH_INT: fatal(nodes[n].pos, "transmute requires an explicit fixed-width type; mathematical int has no fixed bit representation")
             if not is_numeric(ft) or not is_numeric(tt) or tsize(ft) != tsize(tt):
                 fatal(nodes[n].pos, "transmute needs integer or float values of equal width (found {dt(ft)} to {dt(tt)})")
             nodes[n].type = i32(tt)
@@ -6028,7 +6129,8 @@ check_expr = (n: int, expected: int) -> int:
         # converts is checked again)
         ca = int(nodes[n].a)
         if ca != 0 and not has_flag(ca, NF_CHECKED):
-            check_expr(ca, 0)
+            hint = if nodes[n].aux2 == 1: ntype(n) else: 0 # fixed-width .min/.max literal
+            check_expr(ca, hint)
             nodes[n].a = i32(last_checked)
         t = ntype(n)
     else if k == .block:
@@ -6634,7 +6736,7 @@ index_array_fn = (b: int, base: str) -> str:
     if types[it].kind != .array and types[it].kind != .fixed: return ""
     et = prune(int(types[it].elem))
     if types[et].kind == .bool_: return base + "_mask"
-    if et == T_INT: return base + "_indices"
+    if et == T_INT or et == T_MATH_INT: return base + "_indices"
     fatal(nodes[b].pos, "an array of indexes is int[], or a mask bool[] (found {dt(it)})")
     ""
 

@@ -80,6 +80,7 @@ ptr_size = 8     # 4 for wasm32
 T_VOID = 0
 T_BOOL = 0
 T_INT = 0
+T_MATH_INT = 0    # semantic mathematical integer; step 1 representation is checked i64
 T_I8 = 0
 T_I16 = 0
 T_I32 = 0
@@ -102,6 +103,25 @@ T_MAT4 = 0
 T_IVEC2 = 0
 T_IVEC3 = 0
 T_IVEC4 = 0
+
+# Word overflow predicate shared by semantic folding and IR folding. Operands
+# are bit patterns in the implementation language, whose int remains wrapping.
+math_word_overflow = (operation: int, x: int, y: int) -> bool:
+    if operation == 0:
+        r = x + y
+        return ((x xor r) & (y xor r)) < 0
+    if operation == 1:
+        r = x - y
+        return ((x xor y) & (x xor r)) < 0
+    if operation == 2:
+        ax = if x < 0: u64(-(x + 1)) + 1 else: u64(x)
+        ay = if y < 0: u64(-(y + 1)) + 1 else: u64(y)
+        limit = if (x < 0) != (y < 0): u64(9223372036854775807) + 1 else: u64(9223372036854775807)
+        return ay != 0 and ax > limit / ay
+    if operation == 3: return y == 0 or (x == -9223372036854775807 - 1 and y == -1)
+    if y < 0: return true
+    if y >= 64: return x != 0
+    ((x << y) >> y) != x
 
 targ = (t: int, i: int) -> int: int(type_args[int(types[t].args) + i])
 tkind = (t: int) -> TK: types[prune(t)].kind
@@ -224,6 +244,7 @@ init_types = ():
     T_VOID = basic(.void_, 0, false, 0)
     T_BOOL = basic(.bool_, 8, false, 1)
     T_INT = basic(.int_, 64, true, 8)
+    T_MATH_INT = mk_type(TypeInfo(kind = .int_, bits = 64, sign = true, st = -1, size = 8, align = 8, flags = i32(TF_LAID_OUT)), [])
     T_I8 = basic(.int_, 8, true, 1)
     T_I16 = basic(.int_, 16, true, 2)
     T_I32 = basic(.int_, 32, true, 4)
@@ -349,6 +370,7 @@ unify = (a0: int, b0: int) -> bool:
         loop i in [0..int(structs[sa].ntargs)):
             if not unify(struct_targ(sa, i), struct_targ(sb, i)): return false
         return true
+    if ta.kind == .int_ and ta.st != tb.st: return false
     if ta.elem != 0 or tb.elem != 0:
         if ta.elem == 0 or tb.elem == 0 or not unify(int(ta.elem), int(tb.elem)): return false
     loop i in [0..int(ta.nargs)):
@@ -763,10 +785,11 @@ type_str_in = (t0: int, dewy: bool) -> str:
             "void"
         bool_: "bool"
         int_:
+            if t == T_MATH_INT: return "int"
             if dewy:
                 if ti.sign: return "int{ti.bits}"
                 return "uint{ti.bits}"
-            if t == T_INT: return "int"
+            if t == T_INT: return "int64"
             if ti.sign: return "i{ti.bits}"
             "u{ti.bits}"
         float_:
