@@ -1,0 +1,10 @@
+$explicit_copies
+main=():>int64=>{
+    let value:int64=0
+    let first=($capture value):>int64=>{value+=1 return value}
+    let second=first.copy
+    $runtime_assert first()=?1
+    $runtime_assert first()=?2
+    $runtime_assert second()=?1
+    return 0
+}

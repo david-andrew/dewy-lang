@@ -2,6 +2,7 @@ use 'units.jo'
 use 'poly_closure.jo'
 use 'isolation.jo'
 # Lowering: typed AST -> IR, including reference counting, copy-on-write and closures.
+use 'copies.jo'
 # Ownership rules: function parameters are borrowed; results of calls and constructors are
 # owned. Owned temporaries used in borrowing positions are released at the end of the
 # statement. Copying a borrowed value into storage retains it.
@@ -364,7 +365,9 @@ own = (val: Val, t: int) -> Val:
     if is_managed(t): return Val(copy_ref(val.v, t), true, -1)
     Val(val.v, true, -1)
 
-gen_owned = (e: int) -> Val: own(gen_expr(e), ntype(e))
+gen_owned = (e: int) -> Val:
+    if copies_on: return copy_own(e, gen_expr(e), ntype(e))
+    own(gen_expr(e), ntype(e))
 gen_borrowed = (e: int) -> Val:
     v = gen_expr(e)
     borrow(v, ntype(e))
@@ -1006,7 +1009,7 @@ freeze_scalar = (v: int, t: int) -> int:
     e_mov(saved, v)
     saved
 
-call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: int = 0, order: int[] = []):
+call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: int = 0, order: int[] = [], slots: int[] = []):
     if order.len() > 0:
         ordered_args: int[]
         ordered_types: int[]
@@ -1016,7 +1019,7 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
             ordered_types.push(ptypes[slot])
             if mutmask & (1 << slot) != 0: ordered_mut |= 1 << i
         values: int[]
-        call_args(ordered_args, ordered_types, ordered_mut, values, callee)
+        call_args(ordered_args, ordered_types, ordered_mut, values, callee, slots = order)
         base = out.len()
         out.resize(base + order.len())
         loop i in 0.. and slot in order: out[base + slot] = values[i]
@@ -1046,16 +1049,24 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
             continue
         pt = ntype(a)
         if i < ptypes.len(): pt = ptypes[i]
+        if copies_on:
+            parameter = if slots.len() == 0: i else: slots[i]
+            if copy_consumes(callee, parameter):
+                val = gen_owned(a)
+                out.push(val.v)
+                continue
         val = gen_expr(a)
         # A scalar can live in a local's mutable vreg. Capture its value before
         # a later argument reassigns that local, just as we retain managed data.
         if i + 1 < args.len() and vc(pt) != VC_AGG: val.v = freeze_scalar(val.v, pt)
-        if not val.owned and (not dewy_entry or i + 1 < args.len()) and type_has_fn(pt) and files[pos_file(nodes[a].pos)].is_dewy: val = own(val, pt)
-        if not val.owned and is_managed(pt) and (any_mut or borrow_may_change(a, args, i, callee)): val = own(val, pt)
+        if not val.owned and (not dewy_entry or i + 1 < args.len()) and type_has_fn(pt) and files[pos_file(nodes[a].pos)].is_dewy: val = own_at(a, val, pt)
+        mut_snapshot = any_mut
+        if copies_on and copy_strict(a): mut_snapshot = any_mut and shares_mut_root(a, args, mutmask)
+        if not val.owned and is_managed(pt) and (mut_snapshot or borrow_may_change(a, args, i, callee)): val = own_at(a, val, pt)
         # (a struct passed by its address, in memory that a `mut` argument of the same call
         # reaches, f(p, p.hs[0]): the callee writing p would change it, so a copy; or that the
         # callee changes by name)
-        else if not val.owned and vc(pt) == VC_AGG and ((any_mut and shares_mut_root(a, args, mutmask)) or borrow_may_change(a, args, i, callee)): val = own(val, pt)
+        else if not val.owned and vc(pt) == VC_AGG and ((any_mut and shares_mut_root(a, args, mutmask)) or borrow_may_change(a, args, i, callee)): val = own_at(a, val, pt)
         borrow(val, pt)
         out.push(val.v)
 
@@ -1089,6 +1100,7 @@ copy_through = (a: int, callee: int) -> bool:
     callee <= 0 or fn_writes(callee).all
 
 copy_in = (a: int) -> int:
+    if copies_on: copy_components(a, ntype(a), "place writeback needs an independent heap-bearing snapshot")
     t = ntype(a)
     cb = CopyBack(a, new_temp(t), [])
     loop st in place_steps(a):
@@ -1763,7 +1775,7 @@ gen_closure_call = (callee: int, args: int[], order: int[] = []) -> Val:
     if root != 0:
         if nodes[root].aux == i32(int(SK.local)): frozen_value = int(locals[int(nodes[root].sym)].flags) & LF_CONST != 0
         else if nodes[root].aux == i32(int(SK.global)): frozen_value = readonly_global(int(nodes[root].sym))
-    if frozen_value: cval = own(cval, ft)
+    if frozen_value: cval = own_at(source, cval, ft)
     borrow(cval, ft)
     # Pin the exact environment when arguments or the callback can replace its
     # owner. Owned temporaries already stay alive through statement cleanup, and
@@ -1925,7 +1937,7 @@ gen_lambda = (e: int, stack: bool = false) -> Val:
             continue
         t = int(locals[outer].type)
         id = mk_ident_local(outer, nodes[e].pos)
-        val = own(gen_expr(id), t)
+        val = own_at(id, gen_expr(id), t)
         if is_shared(inn):
             # A nested explicit capture may share this private snapshot. Give
             # it a fresh cell, never the enclosing variable's cell.
@@ -2023,7 +2035,7 @@ gen_interp = (e: int) -> Val:
         x = int(nodes[p].a)
         val = gen_expr(x)
         # (a __fmt of the program's may change where the value came from)
-        if not val.owned and is_managed(ntype(x)) and not in_lib(nodes[int(fns[f].decl)].pos) and borrow_may_change(x, [], 0, f): val = own(val, ntype(x))
+        if not val.owned and is_managed(ntype(x)) and not in_lib(nodes[int(fns[f].decl)].pos) and borrow_may_change(x, [], 0, f): val = own_at(x, val, ntype(x))
         borrow(val, ntype(x))
         argv = [e_slot(bs), val.v]
         if nodes[p].sval >= 0: argv.push(e_daddr(str_data(name_of(int(nodes[p].sval)))))
@@ -2391,7 +2403,7 @@ is_slice = (x: int) -> bool: nodes[x].kind == .index and nodes[x].aux == 1
 
 # The address of x's value, kept through later operand evaluation.
 kept_operand_addr = (x: int, t: int) -> int:
-    kv = own(gen_expr(x), t)
+    kv = own_at(x, gen_expr(x), t)
     borrow(kv, t)
     if vc(t) != VC_AGG:
         ks = new_slot(8, 8)
@@ -2596,7 +2608,7 @@ sdiv_wrap = (op: Tok, va: int, vb: int, t: int) -> int:
 gen_left = (a: int, t: int, keep: bool) -> int:
     v = gen_expr(a)
     if keep:
-        v = own(v, t)
+        v = own_at(a, v, t)
         if vc(t) != VC_AGG:
             # Retaining the object does not freeze a local's mutable register.
             v.v = freeze_scalar(v.v, t)
@@ -3445,7 +3457,12 @@ gen_conv = (e: int) -> Val:
     a = int(nodes[e].a)
     from = prune(ntype(a))
     cv = nodes[e].aux as CV
-    if cv == .explicit_copy: return own(gen_expr(a), from)
+    if cv == .explicit_copy:
+        if not copies_on: return own(gen_expr(a), from)
+        copy_explicit[a] = true
+        value = gen_expr(a)
+        copy_explicit.remove(a)
+        return own(value, from)
     if cv == .none_ or cv == .quantity_const or cv == .ptr: return gen_expr(a)
     if cv == .int_:
         v = gen_expr(a).v
@@ -3537,6 +3554,7 @@ gen_conv = (e: int) -> Val:
             endc()
         return Val(d, true, s)
     if cv == .arr2fixed:
+        if copies_on: copy_components(e, to, "the fixed array contains heap payloads that must be copied")
         # Check the shape once, then copy the value into inline storage.
         src = gen_borrowed(a).v
         n = fixed_len(to)
@@ -3549,6 +3567,7 @@ gen_conv = (e: int) -> Val:
         if is_managed(to): copy_at(d, to)
         return Val(d, true, s)
     if cv == .fixed2arr:
+        if copies_on: copy_components(e, from, "the array conversion duplicates heap payloads")
         # a new array holding copies of the elements
         et = int(types[from].elem)
         esz = tsize(et)
@@ -3808,10 +3827,10 @@ gen_expr = (e: int) -> Val:
         has = e_load(VI, pa, tsize(inner), 1)
         iff(has)
         if nodes[e].aux == 1:
-            vv = own(V(pa, false), ot)
+            vv = own_at(a, V(pa, false), ot)
             store_val(ot, e_slot(rs), 0, vv.v)
         else:
-            vv = own(V(load_val(inner, pa, 0), false), inner)
+            vv = own_at(a, V(load_val(inner, pa, 0), false), inner)
             store_val(inner, e_slot(rs), 0, vv.v)
         els()
         enter_cond()
@@ -3896,9 +3915,11 @@ gen_slice_bounds = (e: int, p: int) -> (int, int):
 gen_slice = (e: int) -> Val:
     a = int(nodes[e].a)
     bt = prune(ntype(a))
+    if copies_on and copy_strict(e) and tkind(bt) != .str_ and not copy_explicit.has(e):
+        copy_error(e, "an array slice duplicates its selected elements")
     # Bounds can call code that mutates or replaces the source. Keep the value
     # read before those calls alive, independently of the original variable.
-    source = gen_owned(a)
+    source = own(gen_expr(a), bt)
     borrow(source, bt)
     p = vreg(VI)
     e_mov(p, source.v)
@@ -3942,6 +3963,7 @@ gen_fixed_array = (e: int, t: int) -> Val:
     s = new_temp(t)
     d = e_slot(s)
     if nodes[e].b != 0:
+        if copies_on and n > 1: copy_components(e, et, "array repetition duplicates its heap-bearing element")
         val = gen_owned(kid(e, 0))
         store_val(et, d, 0, val.v)
         if n > 1:
@@ -3972,6 +3994,7 @@ gen_array = (e: int, t: int) -> Val:
     et = int(types[t].elem)
     esz = tsize(et)
     if nodes[e].b != 0:
+        if copies_on: copy_components(e, et, "array repetition may duplicate its heap-bearing element")
         # fresh heap memory is zeroed, so [0; n] needs no fill loop
         z = kid(e, 0)
         if nodes[z].kind == .conv: z = int(nodes[z].a)
@@ -4481,16 +4504,22 @@ gen_vardecl = (s: int):
         g = int(nodes[s].sym)
         iv = int(nodes[s].b)
         if iv == 0: return
+        if copies_on and copy_shared_global(s, g): return
         # (also `x = 0`: globals start as zero, but a function called above could have changed it)
         val = gen_owned(iv)
         store_val(int(globals[g].type), e_gaddr(global_addr_off(g)), 0, val.v)
         return
     l = int(nodes[s].sym)
     t = int(locals[l].type)
+    if copies_on and copy_bindings.has(l) and nodes[s].aux2 == 1:
+        write_place(local_place(l, true), t, gen_expr(int(nodes[s].b)).v)
+        scope_add_local(l)
+        return
     if nodes[s].aux2 == 1 and int(locals[l].flags) & LF_PARAM != 0: return
     if held_views.contains(l):
         e_mov(int(locals[l].vreg), held_value_addr(int(nodes[s].b)))
         return
+    if copies_on and copy_shared_decl(s, l): return
     if view_decl(s, l): return
     if is_shared(l): new_cell(l)
     pl = local_place(l, true)
@@ -4515,7 +4544,8 @@ gen_vardecl = (s: int):
 # The checker records writes and raw exposures when checking those operations;
 # captures, address-taking and buffer access retain their owned local storage.
 param_view_decl = (s: int, l: int) -> bool:
-    if dbg_on or nodes[s].aux2 != 1: return false
+    if (dbg_on and (not copies_on or not copy_strict(s))) or nodes[s].aux2 != 1: return false
+    if copies_on and copy_bindings.has(l): return false
     fl = int(locals[l].flags)
     if fl & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM | LF_EXPOSED) != 0 or is_shared(l): return false
     # Most local initializers are not the parameter binding introduced by the
@@ -4544,6 +4574,7 @@ cur_block = 0                  # the block whose statement is being lowered, and
 cur_block_i = 0
 
 view_decl = (s: int, l: int) -> bool:
+    if copies_on and copy_strict(s): return false
     if not opt_release or cur_block == 0 or kid(cur_block, cur_block_i) != s: return false
     fl = int(locals[l].flags)
     if fl & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM | LF_EXPOSED) != 0 or is_shared(l): return false
@@ -4654,7 +4685,7 @@ find_views = (f: int):
         if int(locals[l].flags) & (LF_HELDVIEW | LF_ELEMENTVIEW) != 0: locals[l].flags &= i32(~(LF_HELDVIEW | LF_ELEMENTVIEW | LF_BYREF))
     hv_bad = {}
     # (what C gives a function it calls is C's, which may change it meanwhile)
-    if dbg_on or fns[f].body == 0 or fns[f].cabi: return
+    if dbg_on or fns[f].body == 0 or fns[f].cabi or (copies_on and copy_strict(int(fns[f].body))): return
     rooted = false
     loop l in fns[f].params:
         # Recursive walks need this even in the fast development mode. Other
@@ -5556,7 +5587,7 @@ gen_for = (s: int):
         # If the body writes the source, copying its selected range can be
         # cheaper than retaining the full array and forcing a whole-array detach.
         if sliced: sliced = unchanged_by(int(nodes[it].a), int(nodes[s].b))
-        borrowed = not type_has_fn(ct) and not sliced and not is_slice(it) and aux == 1 and not dbg_on and unchanged_by(it, int(nodes[s].b))
+        borrowed = not type_has_fn(ct) and not sliced and not is_slice(it) and aux == 1 and (not dbg_on or copy_strict(s)) and unchanged_by(it, int(nodes[s].b))
         stmt_begin()
         if sliced:
             # Iteration needs a retained source and bounds, not a copied slice.
@@ -6199,7 +6230,7 @@ gen_while = (s: int):
         if held_views.contains(l): e_mov(int(locals[l].vreg), held_encode_addr(pa, inner))
         else:
             iff(has)
-            vv = own(V(load_val(inner, pa, 0), false), inner)
+            vv = own_at(a, V(load_val(inner, pa, 0), false), inner)
             write_place(local_place(l, true), inner, vv.v)
             endc()
         stmt_end()
@@ -6363,6 +6394,7 @@ lower_inst = (lf: int, f: int):
         locals[l].flags &= i32(~LF_PARAM)
         param_view_decl(s, l)
     find_views(f)
+    if copies_on: copies_prepare(f)
     # locals
     loop l in fns[f].locals:
         fl = int(locals[l].flags)

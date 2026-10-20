@@ -3428,7 +3428,12 @@ synthetic_copy = (t: int, name: int, pos: int) -> bool:
     collect_fns(name, decls)
     m = module_of_type(t)
     if m >= 0: collect_module(m, name, decls)
-    decls.len() == 0
+    loop d in decls:
+        if nkids(d) == 0: continue
+        sig = fn_sig(d)
+        binds = fill(0, int(sig.ntp))
+        if match_type(sig.params[0], t, binds, 0) >= 0: return false
+    true
 
 check_copy = (n: int, receiver: int, t: int) -> int:
     nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(receiver), aux = i32(int(CV.explicit_copy)), type = i32(t), flags = i32(NF_CHECKED))

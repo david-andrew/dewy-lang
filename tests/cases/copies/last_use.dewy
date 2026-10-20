@@ -1,0 +1,20 @@
+# quick
+$explicit_copies
+Box:type=[items:array<int64>]
+grow=(xs:array<int64>):>array<int64>=>{xs.push(42) return xs}
+choose=(flag:bool):>array<int64>=>{
+    let xs:array<int64>=[20]
+    xs.push(22)
+    return if flag xs else xs
+}
+main=():>int64=>{
+    let a=grow([])
+    let b=a
+    b[0]=99
+    $runtime_assert b[0]=?99
+    let chosen=choose(true)
+    let boxed=Box[chosen]
+    let final=boxed.items
+    $runtime_assert final=?[20 22]
+    return 0
+}

@@ -1,0 +1,11 @@
+Box:type=[number:int64]
+copy=(box:Box):>int64=>box.number+1
+main=():>int64=>{
+    let box=Box[41]
+    $runtime_assert box.copy=?42
+    let xs:array<int64>=[42]
+    let ys=xs.copy
+    ys[0]=0
+    $runtime_assert xs[0]=?42
+    return 0
+}

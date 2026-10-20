@@ -1,0 +1,6 @@
+$explicit_copies
+change=(left:array<int64> right:array<int64>):>int64=>{right[0]=0 return left[0]}
+main=():>int64=>{
+    let xs:array<int64>=[42]
+    return change(xs xs)
+}

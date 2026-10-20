@@ -1754,7 +1754,7 @@ compiler proves conditions decided by integer, boolean and string constants,
 `assertion refuted` for a false condition and `cannot prove assertion yet` for
 anything else; it never becomes a runtime check. The directive owns the comma
 after its condition, and `$assert(condition, "message")` is the same form.
-Other directives of the design (`$explicit_copies`, `$no_prelude`, `$lend`,
+Other directives of the design (`$no_prelude`, `$lend`,
 `$allocator`, `$expect`, `$unsafe_assume`, `$target`, …) are reported as not
 implemented yet where they appear.
 
@@ -1764,6 +1764,24 @@ optional/union values. Parentheses are also accepted (`value.copy()`).
 Declared `copy` members take precedence. The operation preserves ordinary
 value semantics, including private closure state, and may share COW storage
 until a write or transfer a fresh result instead of duplicating it.
+
+`$explicit_copies` at file scope rejects unproven implicit costly copies in
+that module, including imported modules and unused checked function bodies.
+It can be set once; `$explicit_copies = false` keeps the ordinary COW policy.
+Costly values include dynamic arrays, records/containers with mutable heap
+payloads, and closure environments. Scalars, fixed inline storage and shared
+immutable strings are exempt. Stable read-only record snapshots can share
+their payloads. A slice or repeated heap-bearing element also has a copy
+obligation.
+
+Write `.copy` for an independent snapshot, borrow a stable value for reading,
+or arrange a last-use transfer. The compiler transfers dead local values and
+unboxed record fields, distinguishes conditional return paths, borrows
+read-only arguments and iteration sources, and infers owning parameters for
+closed direct calls. Moves clear their old storage before cleanup. Loops,
+captured or exposed owners, live readers, and indirect calls retain conservative
+checks when these proofs do not apply. This directive does not forbid fresh
+allocation or panics, and is not a separate no-detach guarantee.
 
 String length, indexing, slicing and iteration use extended grapheme clusters.
 `"é🙂".length` is 2. String loops stream from an independent input snapshot;

@@ -1,0 +1,7 @@
+$explicit_copies
+main=():>int64=>{
+    let first=():>int64=>42
+    let second=first
+    $runtime_assert first()=?42 and second()=?42
+    return 0
+}

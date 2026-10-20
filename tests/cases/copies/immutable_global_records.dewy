@@ -1,0 +1,8 @@
+$explicit_copies
+Box:type=[items:array<int64>]
+const first=Box[[42]]
+const second=first
+main=():>int64=>{
+    $runtime_assert first.items[0]=?42 and second.items[0]=?42
+    return 0
+}

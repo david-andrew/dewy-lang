@@ -117,7 +117,7 @@ dw_fail = (id: int, what: str) -> int:
 # Metatags the design defines that this compiler does not implement yet. Each
 # is reported where it is written rather than as a generic syntax error.
 dw_designed_directive = (name: str) -> bool:
-    name in ["abstract", "allocator", "breakpoint", "expect", "explicit_copies", "fail", "field", "lend", "no_prelude", "proof", "prototype", "prototype_warnings", "supported_targets", "target", "test", "unsafe_assume", "__copy__", "__drop__", "__move__"]
+    name in ["abstract", "allocator", "breakpoint", "expect", "fail", "field", "lend", "no_prelude", "proof", "prototype", "prototype_warnings", "supported_targets", "target", "test", "unsafe_assume", "__copy__", "__drop__", "__move__"]
 
 dw_unimplemented = (id: int, name: str) -> int:
     fatal(dewy_syntax[id].pos, "`${name}` is part of the design but not implemented yet")
@@ -127,6 +127,7 @@ dw_unimplemented = (id: int, name: str) -> int:
 dw_metatag_fail = (id: int) -> int:
     name = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
+    if name == "explicit_copies": fatal(pos, "`$explicit_copies` is a module directive; put it at file scope")
     if dw_designed_directive(name): return dw_unimplemented(id, name)
     if name == "capture": fatal(pos, "`$capture` belongs in a parameter list before a name: `($capture @count) => ...`")
     if name == "include_bytes": fatal(pos, "`$include_bytes` takes one path literal: `$include_bytes(p\"asset.png\") as image`")
@@ -1336,7 +1337,7 @@ dw_block = (id: int, accumulator: int = 0, map: bool = false) -> int:
         label_pos = 0
         loop i in 0.. and child in children:
             if dewy_syntax[child].kind == .metatag:
-                if dw_designed_directive(dewy_syntax[child].text) or dewy_syntax[child].text == "capture" or dewy_syntax[child].text == "include_bytes": dw_metatag_fail(child)
+                if dw_designed_directive(dewy_syntax[child].text) or dewy_syntax[child].text == "capture" or dewy_syntax[child].text == "include_bytes" or dewy_syntax[child].text == "explicit_copies": dw_metatag_fail(child)
                 if label != 0: dw_label_fail(label_pos, label)
                 label = intern(dewy_syntax[child].text)
                 label_pos = dewy_syntax[child].pos
@@ -1461,6 +1462,18 @@ dw_overload_members = (id: int, name: str, declarations: mut int[]):
 dw_top_declarations = (id: int) -> int[]:
     declaration = dw_unwrap(id)
     if dw_op(declaration) == .statement_end: declaration = dw_unwrap(dw_child(declaration, 1))
+    tag = declaration
+    enabled = 1
+    if dw_op(declaration) == .assign: tag = dw_unwrap(dw_child(declaration, 1))
+    if dewy_syntax[tag].kind == .metatag and dewy_syntax[tag].text == "explicit_copies":
+        if tag != declaration:
+            value = dw_unwrap(dw_child(declaration, 2))
+            if dewy_syntax[value].kind != .boolean: fatal(dewy_syntax[value].pos, "`$explicit_copies` takes a literal true or false")
+            if dewy_syntax[value].text == "false": enabled = -1
+        file = pos_file(dewy_syntax[tag].pos)
+        if files[file].explicit_copies != 0: fatal(dewy_syntax[tag].pos, "`$explicit_copies` may be set only once per module")
+        files[file].explicit_copies = enabled
+        return []
     if dewy_syntax[declaration].kind == .keyword_expr:
         word = dewy_syntax[dw_child(declaration, 0)].text
         if word == "let" or word == "const": declaration = dw_unwrap(dw_child(declaration, 1))

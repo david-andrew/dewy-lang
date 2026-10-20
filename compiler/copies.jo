@@ -1,0 +1,321 @@
+# Source copy policy. Nothing is scanned unless a source module opts in.
+# Cost is a property of the value, never of backend placement or optimization.
+use 'lower.jo'
+use 'isolation.jo'
+use 'util.jo'
+use 'ast.jo'
+use 'check.jo'
+use 'types.jo'
+use 'expr.jo'
+use 'ir.jo'
+
+copies_on = false
+copy_costs: {int: int}
+copy_moves: {int: bool}
+copy_blocked: {int: bool}
+copy_explicit: {int: bool}
+copy_inputs: {int: bool} # owned ABI: actual parameter local -> true
+copy_bindings: {int: bool} # synthetic local initialized by ownership transfer
+copy_noenv: {int: bool}
+
+copies_reset = ():
+    copies_on = false
+    loop file in files:
+        if file.explicit_copies > 0: copies_on = true
+    copy_costs = {}
+    copy_moves = {}
+    copy_blocked = {}
+    copy_explicit = {}
+    copy_inputs = {}
+    copy_bindings = {}
+    copy_noenv = {}
+    if copies_on: copies_parameters()
+
+copy_consumes = (f: int, i: int) -> bool:
+    f > 0 and i < fns[f].params.len() and copy_inputs.has(fns[f].params[i])
+
+# Does this local cross an owning boundary? Scalar projections and read-only
+# direct calls do not. Unknown calls and escaping aggregate results fail closed.
+# This is also the escape check for sharing a read-only local snapshot.
+copy_escapes = (n: int, l: int, owning: bool = false) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .ident:
+        return owning and nodes[n].aux == i32(int(SK.local)) and nodes[n].sym == i32(l)
+    if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)): return false
+    if k == .field or k == .index or k == .narrow or k == .unwrap:
+        if copy_escapes(int(nodes[n].a), l, owning and costly_copy(ntype(n))): return true
+        if k == .index: return copy_escapes(int(nodes[n].b), l)
+        return false
+    if k == .return_: return copy_escapes(int(nodes[n].a), l, true)
+    if k == .vardecl:
+        if nodes[n].aux2 == 1: return false
+        return copy_escapes(int(nodes[n].b), l, true)
+    if k == .assign:
+        return copy_escapes(int(nodes[n].a), l) or copy_escapes(int(nodes[n].b), l, true)
+    if k == .call:
+        aux = int(nodes[n].aux)
+        f = if aux == 0: int(nodes[n].sym) else: 0
+        if copy_escapes(int(nodes[n].a), l): return true
+        loop i in [0..nkids(n)):
+            take = aux != 0 or copy_consumes(f, i) or costly_copy(ntype(n))
+            if f > 0 and i < fns[f].params.len() and int(locals[fns[f].params[i]].flags) & LF_MUTPARAM != 0: take = false
+            if copy_escapes(kid(n, i), l, take): return true
+        return false
+    if k == .intrinsic:
+        id = nodes[n].aux as IN
+        loop i in [0..nkids(n)):
+            take = i > 0 and (id == .push or id == .insert or id == .extend)
+            if id == .fill and i == 0: take = true
+            if copy_escapes(kid(n, i), l, take): return true
+        return false
+    if k == .block:
+        loop i in [0..nkids(n)):
+            if copy_escapes(kid(n, i), l, nodes[n].aux != 0 and i == nkids(n) - 1): return true
+        return false
+    if k == .if_:
+        return copy_escapes(int(nodes[n].a), l) or copy_escapes(int(nodes[n].b), l, owning) or copy_escapes(int(nodes[n].c), l, owning)
+    take = owning or k == .array or k == .tuple or k == .map_lit
+    loop c in copy_children(n):
+        if copy_escapes(c, l, take): return true
+    false
+
+# A closed direct callee can receive ownership instead of taking an entry
+# snapshot. Handles, callbacks, exports and C entry points keep the borrowed
+# ABI; their unsupported ownership proofs retain a diagnostic.
+copies_parameters = ():
+    indirect: {int: bool}
+    loop n in nodes:
+        if n.kind == .fnref or n.kind == .partial:
+            if n.sym > 0: indirect[int(n.sym)] = true
+    changed = true
+    loop changed:
+        changed = false
+        loop f in [1..fns.len()):
+            body = int(fns[f].body)
+            if body == 0 or not copy_strict(body) or fns[f].kind != FK_NORMAL or fns[f].cabi or len(fns[f].export_name) > 0 or indirect.has(f): continue
+            loop i in [0..nkids(body)):
+                s = kid(body, i)
+                if nodes[s].kind != .vardecl or nodes[s].aux2 != 1: break
+                if nkids(s) > 0: continue
+                l = int(nodes[s].sym)
+                source = int(nodes[s].b)
+                if nodes[source].kind != .ident or nodes[source].aux != i32(int(SK.local)): continue
+                p = int(nodes[source].sym)
+                if copy_inputs.has(p) or not costly_copy(int(locals[l].type)): continue
+                if int(locals[l].flags) & (LF_ASSIGNED | LF_CAPTURED | LF_EXPOSED) != 0 or copy_escapes(body, l):
+                    copy_inputs[p] = true
+                    copy_bindings[l] = true
+                    changed = true
+
+copy_strict = (e: int) -> bool:
+    e > 0 and files[pos_file(nodes[e].pos)].explicit_copies > 0
+
+costly_copy = (t0: int) -> bool:
+    t = prune(t0)
+    if copy_costs.has(t): return copy_costs[t] != 2
+    copy_costs[t] = 1 # a recursive heap graph is conservatively costly
+    k = tkind(t)
+    costly = k == .array or k == .fn_ or k == .polyfn or k == .box
+    if k == .fixed or k == .opt: costly = costly_copy(telem(t))
+    else if k == .tuple:
+        loop i in [0..int(types[t].nargs)):
+            if costly_copy(targ(t, i)): costly = true
+    else if k == .enum_:
+        si = int(types[t].st)
+        layout(t)
+        loop i in [0..int(structs[si].nvariants)):
+            v = int(structs[si].variants) + i
+            loop j in [0..int(variants[v].nfields)):
+                if costly_copy(int(fields[int(variants[v].fields) + j].type)): costly = true
+    else if k == .struct_:
+        layout(t)
+        loop field in field_list(t):
+            if costly_copy(field.0): costly = true
+    copy_costs[t] = if costly: 3 else: 2
+    costly
+
+copy_error = (e: int, why: str):
+    fatal(nodes[e].pos, "implicit costly copy of {dt(ntype(e))}: {why}; use `.copy`, a view (`const view = @source`), or restructure to transfer the value at its last use")
+
+copy_reason = (t: int) -> str:
+    k = tkind(t)
+    if k == .fn_ or k == .polyfn: return "duplicating a closure environment is not proven unnecessary"
+    if k == .array: return "runtime-sized mutable array storage may need duplication or detachment"
+    "the value contains heap payloads that may need duplication or detachment"
+
+# Use runtime children, never local IDs or type syntax. The liveness proof is
+# deliberately conservative across loops, defers and captured/exposed places.
+copy_children = (n: int) -> int[]:
+    out: int[]
+    mask = isolation_children(nodes[n].kind)
+    if mask < 0: return out
+    if mask & 1 != 0 and nodes[n].a != 0: out.push(int(nodes[n].a))
+    if mask & 2 != 0 and nodes[n].b != 0: out.push(int(nodes[n].b))
+    if mask & 4 != 0 and nodes[n].c != 0: out.push(int(nodes[n].c))
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)): out.push(kid(n, i))
+    out
+
+copy_mentions = (n: int, live: mut {int: bool}):
+    if n == 0: return
+    if nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.local)):
+        live[int(nodes[n].sym)] = true
+    loop c in copy_children(n): copy_mentions(c, live)
+
+copy_live = (n: int, live: mut {int: bool}):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .return_: live.clear()
+    if k == .ident and nodes[n].aux == i32(int(SK.local)):
+        l = int(nodes[n].sym)
+        skip = LF_PARAM | LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE | LF_CAPTURED | LF_EXPOSED
+        if not live.has(l) and not copy_blocked.has(l) and int(locals[l].flags) & skip == 0:
+            copy_moves[n] = true
+        live[l] = true
+        return
+    if k == .while_ or k == .for_ or k == .defer_:
+        copy_mentions(n, live)
+        return
+    if k == .if_:
+        left = live
+        right = live
+        copy_live(int(nodes[n].b), left)
+        copy_live(int(nodes[n].c), right)
+        loop l, unused in left: live[l] = true
+        loop l, unused in right: live[l] = true
+        copy_live(int(nodes[n].a), live)
+        return
+    # Named arguments can be evaluated in a different order to their slots.
+    if k == .call and nodes[n].c != 0:
+        copy_mentions(n, live)
+        return
+    if k == .call:
+        # Earlier arguments can borrow a root through the whole call, even
+        # though their evaluation precedes its lexical last read. Transferring
+        # that root to a consuming parameter would invalidate those borrows.
+        seen: {int: bool}
+        loop i in [0..nkids(n)):
+            arg = kid(n, i)
+            if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.explicit_copy)): continue
+            here: {int: bool}
+            copy_mentions(arg, here)
+            loop l, unused in here:
+                if seen.has(l): live[l] = true
+                seen[l] = true
+    cs = copy_children(n)
+    i = cs.len() - 1
+    loop i >= 0:
+        copy_live(cs[i], live)
+        i -= 1
+
+copies_prepare = (f: int):
+    copy_moves.clear()
+    copy_blocked.clear()
+    copy_noenv.clear()
+    if not copies_on: return
+    body = int(fns[f].body)
+    if body == 0 or not copy_strict(body): return
+    loop l in fns[f].locals:
+        if int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
+            copy_mentions(int(locals[l].alias), copy_blocked)
+    copy_deferred(body)
+    live: {int: bool}
+    copy_live(body, live)
+
+copy_deferred = (n: int):
+    if n == 0: return
+    if nodes[n].kind == .defer_ or nodes[n].kind == .addr:
+        copy_mentions(n, copy_blocked)
+        return
+    if nodes[n].kind == .vardecl and not has_flag(n, NF_GLOBAL):
+        l = int(nodes[n].sym)
+        e = int(nodes[n].b)
+        if nkids(n) == 0 and e != 0 and int(locals[l].flags) & LF_ASSIGNED == 0:
+            if nodes[e].kind == .fnref and nodes[e].aux == 0: copy_noenv[l] = true
+            if nodes[e].kind == .lambda and not has_flag(e, NF_GENERIC) and fns[int(nodes[e].sym)].caps.len() == 0: copy_noenv[l] = true
+            if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)) and copy_noenv.has(int(nodes[e].sym)): copy_noenv[l] = true
+    loop c in copy_children(n): copy_deferred(c)
+
+# Transfer a dead local's ownership, clearing its old slot so ordinary cleanup
+# remains correct on every exit. Other references created by an explicit copy
+# retain their COW ownership and permission to detach.
+copy_take = (e: int, value: Val, t: int) -> Val:
+    p = gen_place(e, false)
+    if vc(t) == VC_AGG:
+        s = new_temp(t)
+        a = e_slot(s)
+        e_copy(a, value.v, tsize(t))
+        e_zero(place_addr(p, t), tsize(t))
+        return Val(a, true, s)
+    v = vreg(vt_of(t))
+    e_mov(v, value.v)
+    write_place(p, t, zero_val(t))
+    Val(v, true, -1)
+
+copy_movable = (e: int) -> bool:
+    n = e
+    loop nodes[n].kind == .field:
+        if boxed_field_of(n) >= 0: return false
+        n = int(nodes[n].a)
+    if nodes[n].kind != .ident or not copy_moves.has(n) or copy_blocked.has(int(nodes[n].sym)): return false
+    n == e or vc(ntype(n)) == VC_AGG
+
+copy_own = (e: int, value: Val, t: int) -> Val:
+    if value.owned or not copy_strict(e) or not costly_copy(t): return own(value, t)
+    # A literal may be placed in read-only data, then promoted on its first
+    # write. That implementation choice is not a source-level duplication.
+    if nodes[e].kind == .array: return own(value, t)
+    if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)) and copy_noenv.has(int(nodes[e].sym)): return own(value, t)
+    if copy_explicit.has(e): return own(value, t)
+    if type_eq(ntype(e), t) and copy_movable(e): return copy_take(e, value, t)
+    copy_error(e, copy_reason(t))
+    value
+
+copy_components = (e: int, t: int, why: str):
+    if copies_on and copy_strict(e) and costly_copy(t) and not copy_explicit.has(e):
+        copy_error(e, why)
+
+# Additional duplications whose source has already been evaluated: argument
+# snapshots, captures, optional payloads and operands kept across effects.
+own_at = (e: int, value: Val, t: int) -> Val:
+    if copies_on: return copy_own(e, value, t)
+    own(value, t)
+
+# Keeping two read-only values shares immutable storage. This does not grant
+# permission to mutate a live snapshot later. Address exposure and captures
+# prevent the proof; a parameter may be borrowed only for this call's lifetime.
+copy_readonly = (l: int) -> bool:
+    int(locals[l].flags) & (LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_EXPOSED | LF_ALIAS | LF_BYREF | LF_MUTPARAM | LF_ADDR) == 0
+
+copy_shared_decl = (s: int, l: int) -> bool:
+    if not copy_strict(s) or not copy_readonly(l): return false
+    e = int(nodes[s].b)
+    if e == 0 or not costly_copy(ntype(e)) or type_has_fn(ntype(e)): return false
+    if copy_movable(e): return false
+    if copy_escapes(int(fns[cur_fn].body), l): return false
+    root = place_root(e)
+    if root == 0 or nodes[root].kind != .ident: return false
+    if nodes[root].aux == i32(int(SK.local)):
+        if not copy_readonly(int(nodes[root].sym)): return false
+    else if nodes[root].aux == i32(int(SK.global)):
+        if not readonly_global(int(nodes[root].sym)): return false
+    else: return false
+    value = own(gen_expr(e), ntype(e))
+    # This immutable reader keeps the source live. A subsequent transfer into
+    # a mutable owner cannot use the source's lexical last read as uniqueness.
+    if nodes[root].aux == i32(int(SK.local)) and int(locals[l].flags) & LF_READ != 0:
+        copy_blocked[int(nodes[root].sym)] = true
+    write_place(local_place(l, true), int(locals[l].type), value.v)
+    scope_add_local(l)
+    true
+
+copy_shared_global = (s: int, g: int) -> bool:
+    if not copy_strict(s) or not readonly_global(g): return false
+    e = int(nodes[s].b)
+    if e == 0 or type_has_fn(ntype(e)): return false
+    root = place_root(e)
+    if root == 0 or nodes[root].aux != i32(int(SK.global)) or not readonly_global(int(nodes[root].sym)): return false
+    value = own(gen_expr(e), ntype(e))
+    store_val(int(globals[g].type), e_gaddr(global_addr_off(g)), 0, value.v)
+    true

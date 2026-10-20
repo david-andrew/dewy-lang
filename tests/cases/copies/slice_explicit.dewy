@@ -1,0 +1,5 @@
+$explicit_copies
+let a:array<int64>=[1 2]
+let b=a[0..1].copy
+b[0]=9
+$runtime_assert a[0]=?1 and b[0]=?9

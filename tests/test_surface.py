@@ -179,7 +179,6 @@ DIRECTIVE_ERRORS = {
     'assert-needs-condition': ('main = () => { $assert }', '`$assert` needs a condition'),
     'runtime-assert-refuted': ('main = () => { $runtime_assert 1 =? 2 }', 'assertion refuted'),
     'runtime-assert-bool': ('main = () => { $runtime_assert 3 }', 'expected bool'),
-    'explicit-copies': ('$explicit_copies\nmain = () => 0', '1:1: error: `$explicit_copies` is part of the design but not implemented yet'),
     'no-prelude-setting': ('$no_prelude = true', '`$no_prelude` is part of the design but not implemented yet'),
     'lend': ('main = () => { let bytes = [1u8]\n$lend(bytes) { 1 } }', '`$lend` is part of the design'),
     'allocator': ('main = () => { let s = $allocator(@scratch) [1 2] }', '`$allocator` is part of the design'),

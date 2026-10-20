@@ -1,0 +1,11 @@
+$explicit_copies
+make=():>array<int64>=>[42]
+work=(flag:bool):>int64=>{
+ let owner=make()
+ const first:array<int64>=if flag owner else []
+ const second:array<int64>=if flag first else []
+ let changed=owner
+ changed.clear()
+ return if second.length>?0 second[0] else 1
+}
+main=():>int64=>work(true)
