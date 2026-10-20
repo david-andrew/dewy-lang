@@ -6,6 +6,8 @@
     python3 -m tools.core fmt example.dewy
     python3 -m tools.core --bootstrap test
     python3 -m tools.core path
+    python3 -m tools.core speed [--base REV] [--checkpoint TAG] [--limit 1.0] [--release]
+    python3 -m tools.core bench [-k WORDS]
 """
 from __future__ import annotations
 
@@ -160,9 +162,10 @@ def toolchain(*, bootstrap: bool = False, cache: Path = CACHE, root: Path = ROOT
 def main(argv: list[str] | None = None) -> int:
     cli = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     cli.add_argument('--bootstrap', action='store_true', help='force an independent build from C')
-    cli.add_argument('command', choices=('path', 'test', 'build', 'check', 'run', 'watch', 'new', 'lsp', 'fmt', 'repl'))
+    cli.add_argument('command', choices=('path', 'test', 'build', 'check', 'run', 'watch', 'new', 'lsp', 'fmt', 'repl',
+                                        'speed', 'bench'))
     cli.add_argument('arguments', nargs=argparse.REMAINDER,
-                     help='arguments for pytest or the compiler; test --quick selects the smoke suite')
+                     help='arguments for pytest, speed, bench or the compiler; test --quick selects the smoke suite')
     args = cli.parse_args(argv)
     if args.command == 'path' and args.arguments:
         cli.error('path takes no additional arguments')
@@ -179,6 +182,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == 'path':
         print(binary)
         return 0
+    if args.command in ('speed', 'bench'):
+        from importlib import import_module
+        try:
+            return import_module(f'tools.compiler.{args.command}').main(args.arguments, binary)
+        except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+            print(f'{args.command}: {error}', file=sys.stderr)
+            return 1
     env = os.environ.copy()
     if args.command == 'test':
         if quick:
