@@ -1453,6 +1453,56 @@ has_value_return = (n: int) -> bool:
         if has_value_return(kid(n, i)): return true
     false
 
+# The type of a value the body `b` of the function `name` ends with that does not call it (a
+# typed one before a literal), or 0. Each candidate is checked as a copy, here, so it may only
+# use names already in scope.
+recursive_base_type = (b: int, name: int) -> int:
+    leaves: int[]
+    value_leaves(b, leaves)
+    returned_values(b, leaves)
+    literal = 0
+    loop leaf in leaves:
+        if not base_case(leaf, name): continue
+        e = clone(leaf)
+        t = check_expr(e, 0)
+        if has_flag(e, NF_LITERAL):
+            if literal == 0: literal = lit_default(e)
+            continue
+        if t != 0 and tkind(t) != .var and tkind(t) != .void_ and t != T_NEVER: return prune(t)
+    literal
+
+value_leaves = (n: int, out: mut int[]):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .block:
+        if nkids(n) > 0: value_leaves(kid(n, nkids(n) - 1), out)
+    else if k == .exprstmt or k == .return_: value_leaves(int(nodes[n].a), out)
+    else if k == .if_:
+        value_leaves(int(nodes[n].b), out)
+        value_leaves(int(nodes[n].c), out)
+    else if k == .match_:
+        loop arm in kids(n): value_leaves(int(nodes[arm].b), out)
+    else: out.push(n)
+
+returned_values = (n: int, out: mut int[]):
+    if n == 0 or nodes[n].kind == .lambda: return
+    if nodes[n].kind == .return_ and nodes[n].a != 0: value_leaves(int(nodes[n].a), out)
+    returned_values(int(nodes[n].a), out)
+    returned_values(int(nodes[n].b), out)
+    returned_values(int(nodes[n].c), out)
+    loop i in [0..nkids(n)): returned_values(kid(n, i), out)
+
+# (an expression that names no function `name` and nothing out of scope here)
+base_case = (n: int, name: int) -> bool:
+    if n == 0: return true
+    k = nodes[n].kind
+    if k == .lambda or k == .block or k == .match_: return false
+    if k == .ident and (nodes[n].name == i32(name) or lookup(int(nodes[n].name)) == 0): return false
+    if not base_case(int(nodes[n].a), name) or not base_case(int(nodes[n].b), name) or not base_case(int(nodes[n].c), name): return false
+    loop i in [0..nkids(n)):
+        if not base_case(kid(n, i), name): return false
+    true
+
 syntactic_void = (body: int) -> bool:
     if body == 0 or nkids(body) == 0: return true
     if has_value_return(body): return false
@@ -1612,6 +1662,19 @@ check_c_boxes = (t0: int, pos: int):
 ensure_ret = (f: int, use_pos: int):
     if fns[f].ret != 0: return
     if fns[f].decl != 0: ensure_body(int(fns[f].decl))
+    # (a Dewy function whose value is its last expression, `fact = (n:int64) => if n <=? 1 1
+    # else n * fact(n - 1)`: its result is that of a branch that does not call it)
+    if fns[f].state == 1 and fns[f].decl != 0 and dewy_at(nodes[int(fns[f].decl)].pos):
+        c = ctx_for_inst(f)
+        if c >= 0 and ctxs[c].infer_ret:
+            # (or the type an earlier `return` gave it)
+            g = prune(int(ctxs[c].ret))
+            if tkind(g) == .var:
+                g = recursive_base_type(int(fns[f].body), int(nodes[int(fns[f].decl)].name))
+                if g != 0: unify(int(ctxs[c].ret), g)
+            if g != 0:
+                fns[f].ret = i32(g)
+                return
     if fns[f].state == 1 and fns[f].decl != 0 and not has_value_return(int(nodes[int(fns[f].decl)].b)):
         fns[f].ret = i32(T_VOID)
         fns[f].aux_void = true

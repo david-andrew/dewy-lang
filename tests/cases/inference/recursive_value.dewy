@@ -1,0 +1,16 @@
+# quick
+# A recursive function without `:>T` takes its result from a branch that does not call it.
+fact = (n:int64) => if n <=? 1 1 else n * fact(n - 1)
+fib = (n:int64) => {
+    if n <? 2 n else fib(n - 1) + fib(n - 2)
+}
+early = (n:int64) => {
+    if n <? 2 { return n }
+    return early(n - 1) + early(n - 2)
+}
+sum = (xs:array<int64> i:int64) => if i >=? xs.length 0 else xs[i] + sum(xs i + 1)
+half = (x:float64) => if x <? 1.0 x else half(x / 2.0)
+digits = (n:int64) => if n <=? 0 "" else "{digits(n - 1)}{n}"
+main = () => {
+    printl"{fact(5)} {fib(10)} {early(10)} {sum([1 2 3] 0)} {half(10.0)} {digits(3)}"
+}

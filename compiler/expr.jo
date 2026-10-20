@@ -3945,7 +3945,7 @@ void_rec_hint = (n: int) -> str:
     f = int(nodes[n].sym)
     if f >= fns.len() or not fns[f].aux_void or fns[f].decl == 0: return ""
     nm = name_of(int(nodes[int(fns[f].decl)].name))
-    " ('{nm}' calls itself, so the type of its result must be written: `{nm} = (...) -> int: ...`)"
+    " ('{nm}' calls itself, so the type of its result must be written: {jd(nodes[n].pos, "`{nm} = (...) -> int: ...`", "`{nm} = (...):>int64 => ...`")})"
 
 # the functions that may be called with a dot on a value of type t (for messages)
 # Whether `x.name` alone can call a function of x: an array or text builtin
