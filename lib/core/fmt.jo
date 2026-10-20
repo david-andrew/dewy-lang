@@ -749,8 +749,12 @@ __fmt[T] = (buf: mut u8[], xs: T[]):
         __fmt_elem(buf, x)
     __buf_byte(buf, ']')
 
-__fmt[T] = (buf: mut u8[], x: T?):
+__fmt_elem[T] = (buf: mut u8[], x: T?):
     if let v = x: __fmt_elem(buf, v)
+    else: __buf_append_str(buf, "none")
+
+__fmt[T] = (buf: mut u8[], x: T?):
+    if let v = x: __fmt(buf, v)
     else: __buf_append_str(buf, "none")
 
 __fmt[T] = (buf: mut u8[], p: *T):

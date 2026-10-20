@@ -1865,6 +1865,10 @@ may span lines. Comment markers inside strings are string contents.
 let total = 1 #{ inline }# + 2
 ```
 
+Printing, interpolation and `string(value)` show a present optional as its payload:
+an optional string prints bare on its own and quoted inside a container or record.
+An absent optional prints `none`.
+
 `format(value spec)` formats machine numbers or text, including inside an
 interpolation. The specification is an ordinary string and may be computed:
 

@@ -2425,9 +2425,7 @@ def flatten(stmts):
 
 
 def shown(expr):
-    # A present `string?` prints quoted, unlike `string` and `int64|string` (reported);
-    # print its payload so that this one difference does not drown everything else.
-    return Bin(S, '??', expr, Lit(S, 'none')) if expr.ty == OS else expr
+    return expr
 
 
 def minlen(expr, scope) -> int:

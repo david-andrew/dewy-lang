@@ -70,7 +70,7 @@ for key in [9,1,7,3,5,2,8,4,6,0]:
  while page+1<len(pages) and key>=pages[page+1][0]:page+=1
  bisect.insort(pages[page],key)
  if len(pages[page])>4:pages.insert(page+1,pages[page][2:]);pages[page]=pages[page][:2]
-assert [k for p in pages for k in p]==list(range(10));put(22,f'{len(pages)} {json.dumps("v7")}')
+assert [k for p in pages for k in p]==list(range(10));put(22,f'{len(pages)} v7')
 put(23,'hello café|second request|0123456789')
 # HTTP wire status/body cases are standard known values, checked by Dewy socket assertions.
 put(24,'200 hello 404 missing')
