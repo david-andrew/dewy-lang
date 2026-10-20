@@ -394,7 +394,9 @@ A binary operator with its right operand can be used as a function:
 `(* 2)` doubles its input, `(<? limit)` compares it, and `(.x)` reads a field.
 Normal precedence applies: `(* 2 + 2)` means `x => x * 2 + 2`.
 These functions use ordinary private captures and evaluate their bodies when
-called. Pass them to a typed callback parameter or give a local a function type,
+called. Function types use angle brackets, for example `<(x:int64):>int64>`;
+parenthesized function type grouping is rejected. Pass them to a typed callback
+parameter or give a local a function type,
 for example `let twice:<(value:int64):>int64> = (* 2)`. A module declaration such
 as `twice = (* 2)` can infer its parameter type at calls, like other functions.
 Operators with prefix meanings keep those meanings: `(-1)` is a negative value.

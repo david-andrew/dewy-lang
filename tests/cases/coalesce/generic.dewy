@@ -1,3 +1,3 @@
 # exit: 42
-or_else=<T>(value:T? fallback:(():>T)):>T=>value??fallback()
+or_else=<T>(value:T? fallback:<():>T>):>T=>value??fallback()
 main=()=>if or_else(none ()=>42) =? 42 and or_else("yes" ()=>"no") =? "yes" 42 else 1

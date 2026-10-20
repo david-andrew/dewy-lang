@@ -1,4 +1,4 @@
 # exit: 42
-apply=(f:((value:int64|none):>bool) value:int64|none)=>f(value)
+apply=(f:<(value:int64|none):>bool> value:int64|none)=>f(value)
 main=()=>{if not apply((is?int64)42) or apply((isnt?int64)42) return 1
 return if apply((isnt?int64)none) 42 else 2}

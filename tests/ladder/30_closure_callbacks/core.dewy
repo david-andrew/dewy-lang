@@ -2,7 +2,7 @@ make_counter=(initial:int64)=>{
     let count=initial
     return (step:int64)=>{count+=step return count}
 }
-apply=(items:array<int64> callback:((value:int64):>int64)):>array<int64>=>{
+apply=(items:array<int64> callback:<(value:int64):>int64>):>array<int64>=>{
     let result:array<int64>=[]
     loop item in items {
         result.push(callback(item))

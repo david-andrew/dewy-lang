@@ -8,7 +8,7 @@ main=()=>{
     let a=first([42 10]) let b=first(["yes"])
     let items=identity<array<dict<string int64>>>([["answer"->42]])
     let no_values=empty<string>()
-    let typed:((x:int64):>int64)=@identity
+    let typed:<(x:int64):>int64>=@identity
     return if a =? 42 and b =? "yes" and items[0]["answer"] =? 42 and no_values.length =? 0
         and typed(42) =? 42 and combine(21) =? 42 and combine<string>(b="b" a="a") =? "ab"
         and count_down(4 0) =? 10 42 else 1

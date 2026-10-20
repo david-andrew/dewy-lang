@@ -3,7 +3,7 @@ unsigned=(values:array<uint64>)=>values[0]+values[1]
 single=(values:array<float32>)=>values[0]+values[1]
 octets=(values:array<uint8>)=>values[0]+values[1]
 main=()=>{
-let indirect:((values:array<uint64>):>uint64)=@unsigned
+let indirect:<(values:array<uint64>):>uint64>=@unsigned
 return if unsigned([20 22]) =? 42 and single([20 22]) =? 42.0
 and octets([20 22]) =? 42 and indirect([20 22]) =? 42 42 else 1
 }

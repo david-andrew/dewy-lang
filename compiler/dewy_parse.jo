@@ -409,9 +409,12 @@ dw_type = (id: int) -> int:
         nodes[n].sval = i32(intern(owner))
         nodes[n].name = i32(intern(member))
         return n
-    # `(T)` and `<T>` group a type: `callback:<(value:int64):>int64>`.
+    # Function types have one grouping spelling: `<(value:int64):>int64>`.
     if dewy_syntax[id].kind == .block and (dewy_syntax[id].text == "():" or dewy_syntax[id].text == "<>:") and dewy_syntax[id].children.len() == 1:
-        return dw_type(dw_child(id, 0))
+        inner = dw_child(id, 0)
+        if dewy_syntax[id].text == "():" and dw_op(inner) == .returns:
+            fatal(pos, "function types use angle brackets: replace the outer (...) with <...>, as in `<(x:int64):>int64>`")
+        return dw_type(inner)
     if dw_op(id) == .type_apply and dw_name(dw_child(id, 1)) == "array":
         args = dw_child(id, 2)
         count = dewy_syntax[args].children.len()

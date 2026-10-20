@@ -1,7 +1,7 @@
 # exit: 42
 Row:type=array<array<string> length=2>
 identity=(value:Row):>Row=>value
-capture=(value:Row):>(():>Row)=>()=>value
+capture=(value:Row):><():>Row>=>()=>value
 work=():>void=>{let row:Row=[["a"] ["b"]]
 let result=identity(row) let get=capture(row)
 row[0].push("changed") result[1].push("copy")

@@ -1,4 +1,4 @@
 # exit: 42
 Point:type=[x:int64 y:int64]
-apply=(f:((value:Point):>int64) value:Point):>int64=>f(value)
+apply=(f:<(value:Point):>int64> value:Point):>int64=>f(value)
 main=()=>{return if apply((.x)Point(42 1))=?42 42 else 1}

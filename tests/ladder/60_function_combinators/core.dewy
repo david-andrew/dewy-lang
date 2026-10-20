@@ -1,11 +1,11 @@
-map_values=<T U>(values:array<T> f:((x:T):>U)):>array<U>=> {
+map_values=<T U>(values:array<T> f:<(x:T):>U>):>array<U>=> {
     let output:array<U>=[]
     loop value in values  {
         output.push(f(value))
     }
     return output
 }
-filter_values=<T>(values:array<T> predicate:((x:T):>bool)):>array<T>=> {
+filter_values=<T>(values:array<T> predicate:<(x:T):>bool>):>array<T>=> {
     let output:array<T>=[]
     loop value in values  {
         if predicate(value)  {
@@ -14,7 +14,7 @@ filter_values=<T>(values:array<T> predicate:((x:T):>bool)):>array<T>=> {
     }
     return output
 }
-fold_values=<T U>(values:array<T> initial:U combine:((a:U b:T):>U)):>U=> {
+fold_values=<T U>(values:array<T> initial:U combine:<(a:U b:T):>U>):>U=> {
     let result=initial
     loop value in values  {
         result=combine(result value)
@@ -34,7 +34,7 @@ counter=(start:int64)=> {
 }
 main=():>int64=> {
     let source:array<int64>=[loop i in [0..20) i]
-    let handlers:dict<string ((x:int64):>int64)>=["double"->@double "square"->@square]
+    let handlers:dict<string <(x:int64):>int64>>=["double"->@double "square"->@square]
     let transformed=map_values(source handlers["square"])
     let selected=filter_values(transformed @even)
     let sum=fold_values<int64 int64>(selected 0 @add_int)

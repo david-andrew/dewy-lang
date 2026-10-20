@@ -1,4 +1,4 @@
 # exit: 42
-Options:type=[run:((amount:int64):>int64)]
+Options:type=[run:<(amount:int64):>int64>]
 main=()=>{let options=Options[(x)=>x*2]
 let saved=[@options.run] return if options.run(amount=21)=?42 and saved[0](amount=21)=?42 42 else 1}
