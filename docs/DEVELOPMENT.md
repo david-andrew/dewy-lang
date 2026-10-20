@@ -228,6 +228,98 @@ generated programs.
 Build hashes identify provenance; byte-identical executables are not required.
 Runtime tuning variables inherited from Sloppy keep their `SLOPPY_*` names for now.
 
+## Releases and installers
+
+A toolchain release publishes the packages CI already built and tested for one
+commit; nothing is rebuilt. Its tag is `dewy-<language version>-dev.<commit
+date, UTC>.<12-digit commit>` (`python3 -m tools.compiler.release tag SHA`), so
+each commit has exactly one tag. Tags and releases are never replaced. Assets:
+`dewy-core-{linux-x86_64,linux-arm64,macos-arm64,windows-x86_64}.tar.gz` with
+`.sha256` sidecars, `install.sh`, `install.ps1` and `SHA256SUMS`. Each archive
+holds `dewy-core/` with `bin/`, `lib/`, `PACKAGE.json` (payload hashes) and
+`RELEASE`, plain text: `dewy-toolchain-release 1`, then `version`, `platform`
+and `revision` lines.
+
+```sh
+gh workflow run release.yml -f sha=<40-digit commit> -f branch=master [-f site_ref=master]
+```
+
+`.github/workflows/release.yml`, in order:
+
+1. Requires the commit to be on `branch` and a successful push run of CI for
+   that exact commit in which every job passed, including the speed gate and all
+   host checks (`release certify`).
+2. Downloads the four packages from that run by run ID and checks them: the
+   sidecar, the member paths, the `PACKAGE.json` revision and payload hashes,
+   and `RELEASE` (`release assemble`).
+3. Creates a draft prerelease, then checks that the draft holds exactly those
+   assets.
+4. Installs the draft's assets on all four hosts, then builds and runs a
+   program natively and for the web.
+5. Publishes the release as a prerelease with `--latest=false`. A failed run
+   deletes its unpublished draft.
+6. Dispatches `deploy-site.yml` on `site_ref` with input `toolchain_release`
+   (leave `site_ref` empty to skip this).
+
+Install, update and roll back:
+
+```sh
+curl -fsSL https://dewy-lang.org/install.sh | bash        # [-s -- --release TAG --prefix DIR --no-modify-path]
+dewy update [--release TAG]
+dewy rollback
+```
+
+On Windows, `install.ps1 [-Release TAG] [-Prefix DIR] [-NoModifyPath]` does the
+same and changes only the user PATH. The installers support Linux
+x86_64/aarch64, macOS arm64 and Windows x86_64, and stop on any other host
+before changing anything. Without `--release` they install the release named by
+the site's channel; with it, they check the release's own `SHA256SUMS`.
+
+Each install runs as one transaction:
+
+- downloads are verified before extraction;
+- archives with links, absolute paths or `..` are rejected;
+- the toolchain is staged under `PREFIX/toolchains` (default `~/.dewy`) and
+  must pass a smoke test: `--version`, then build and run a small program;
+- it is renamed to `toolchains/<tag>`, and the two-line pointer
+  `toolchains/current` (active tag, previous tag) is replaced by one rename.
+
+An interrupted install leaves the previous toolchain active; a lock serializes
+installers. `PREFIX/bin` holds the launchers `dewy` and `dewy-core` (`.cmd` on
+Windows). Both run the active `bin/dewy-core` and handle `update`/`rollback`
+themselves with the release's verified installer (`PREFIX/libexec`). The
+installers keep one previous toolchain. A marked block in the shell startup
+files puts `PREFIX/bin` first on PATH. A legacy installation (`~/.dewy/current`,
+`~/.dewy/dewy`) is left untouched, and `bin/udewy` explains that µDewy is
+retired. `DEWY_INSTALL_CHANNEL_URL` and `DEWY_INSTALL_DOWNLOAD_URL` (default
+`https://github.com/david-andrew/dewy-lang/releases/download`) select a mirror
+or a local directory. `tests/test_installers.py` covers the transactions with
+fake releases; its PowerShell checks run on Windows CI.
+
+`toolchain-channel.txt` is the website's pointer to the current release. The
+site build writes it from a published tag:
+
+```sh
+python3 -m tools.compiler.channel --tag TAG --output dist/toolchain-channel.txt   # or --latest
+```
+
+The digests come from the release's `SHA256SUMS`, cross-checked against
+GitHub's. Format version 1:
+
+- ASCII with LF line endings, at most 64 lines;
+- first `dewy-toolchain-channel 1`, then `release <tag>`;
+- then one `sha256 <64 lowercase hex> <asset>` line for each archive and
+  installer;
+- last `end`.
+
+Anything else, including a missing `end`, invalid lines or CRLF, makes the
+channel invalid. Installers parse it line by line and never evaluate it.
+
+The legacy `native-*`/`udewy-*` releases stay published, labelled "Archived
+implementation". The newest complete one stays Latest, so cached legacy
+installers keep working. `python3 -m tools.compiler.archive_legacy_releases`
+prints the plan, and `--apply` carries it out.
+
 ## Releasing the VS Code extension
 
 Versions: the language stays at 0.0.0 until David decides otherwise. The extension
