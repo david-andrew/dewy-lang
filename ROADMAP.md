@@ -8,13 +8,13 @@ Dewy must become; this file says what we do next and how we know we are closer.
 
 | Measure | Now (2026-10-19) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 19/31 programs (was 0/31 on 10-19) | all milestones |
+| Acceptance ladder, design surface | 20/31 programs (was 0/31 on 10-19) | all milestones |
 | Acceptance ladder, current dialect | 31/31 | stays green |
 | Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.35 G instructions, ~330 ms | 250k root lines/s (~88 ms) |
 | Compiler self-build | 7.5 G instructions, ~1.6 s | seconds-scale edit loop |
 | Game-tick kernel vs C -O2 | 8.85× | ~1× |
 | Managed helper calls / generic closures vs C | 1.65× / 2.5× | ~1× |
-| Quick suite / full suite | 25 s / 3 min | stay under 30 s / 5 min |
+| Quick suite / full suite (+bootstrap) | ~30 s / ~2 min | stay under 30 s / 5 min |
 
 Measured on the i7-6700 desktop (shared, so expect noise). Compile numbers are
 fresh builds, one emitter. Update this table at checkpoints, not per commit.
