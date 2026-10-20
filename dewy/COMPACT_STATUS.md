@@ -154,7 +154,8 @@ New front-end or user-facing language design requires David's approval.
   The targeted masked-helper loop improves about one-third in both modes.
   Four boundary tests (496 comparison bitsets each) and 629 quick checks pass;
   all 32 ordinary artifacts are unchanged and all 12 compilation comparisons
-  pass. Full validation will close the next optimizer batch.
+  pass. Independent bootstrap passes all 6,498 tests and 100 fresh five-mode
+  fuzz cases, closing this optimizer batch.
   [Evidence](audits/2026-10-19/mask-comparisons.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.

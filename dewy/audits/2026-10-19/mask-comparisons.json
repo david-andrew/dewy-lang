@@ -94,7 +94,7 @@
   "limits": [
     "Targeted masked-helper loop is about one-third faster in both modes, not a general runtime-parity claim.",
     "Whole-compiler instruction counts increase0.03..0.10%; laptop latency comparisons pass.",
-    "No full suite/bootstrap claim yet; next optimizer batch will close validation. No baseline promotion."
+    "Independent bootstrap, full suite and 100 fresh five-mode fuzz cases pass. No baseline promotion."
   ],
   "segment_cache_estimate": {
     "optimize": {
@@ -127,5 +127,10 @@
   "evidence": {
     "file": "mask-comparisons-evidence.json.gz",
     "sha256": "d91dd0f6612b3cf48cf6736f85b7a93481be2191bb2803424442f8c01aac789d"
+  },
+  "validation_closure": {
+    "independent_bootstrap": "1792458805468107295",
+    "full_suite": "6498 passed in 168.65s",
+    "differential_fuzz": "100 fresh seeds 1701..1800, five modes, passed"
   }
 }
