@@ -20,11 +20,49 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from tools.compiler import fuzz_programs
-from tools.compiler.benchmark_compile import positive
-from tools.compiler.performance_gate import save_report, toolchain_identity
 
 MAX_OUTPUT = 2 * 1024 * 1024
 MAX_SOURCE = 256 * 1024
+
+
+def positive(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError('must be positive')
+    return number
+
+
+def tree_digest(root: Path) -> str:
+    result = hashlib.sha256()
+    for path in sorted(root.rglob('*')):
+        if path.is_file():
+            result.update(path.relative_to(root).as_posix().encode() + b'\0')
+            result.update(hashlib.sha256(path.read_bytes()).digest())
+    return result.hexdigest()
+
+
+def toolchain_identity(binary: Path) -> dict:
+    """The compiler and the sources its build.json records; reject later changes."""
+    root = binary.parent.parent
+    manifest = json.loads((root / 'build.json').read_text())
+    digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+    if digest != manifest['core_sha256']:
+        raise ValueError(f'Compiler does not match its build manifest: {binary}')
+    for directory in ('compiler', 'lib'):
+        actual = {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+                  for p in (root / directory).rglob('*') if p.is_file()}
+        expected = {k: v for k, v in manifest['sources_sha256'].items() if k.startswith(directory + '/')}
+        if actual != expected:
+            raise ValueError(f'Toolchain {directory} changed after its build: {root}')
+    return {'binary_sha256': digest, 'compiler_sources_sha256': tree_digest(root / 'compiler'),
+            'library_sha256': tree_digest(root / 'lib')}
+
+
+def save_report(path: Path, report: dict) -> None:
+    """Replace the report atomically; never leave a truncated JSON file."""
+    temporary = path.with_name(path.name + '.tmp')
+    temporary.write_text(json.dumps(report, indent=2) + '\n')
+    temporary.replace(path)
 
 
 class Scripts(HTMLParser):

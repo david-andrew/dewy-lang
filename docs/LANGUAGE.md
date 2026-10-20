@@ -979,13 +979,6 @@ cleanup. General loop bodies, filters and early exits keep the ordinary
 collection path. This needs no annotation or explicit allocation code in the
 program.
 
-Compare a numerical comprehension, its fused dotted equivalent and C with:
-
-```sh
-python3 -m tools.compiler.benchmark_broadcast "$(python3 -m tools.core path)" \
-    --count 262144 --steps 64 --samples 7 --output /tmp/broadcast.json
-```
-
 `values.insert_if_absent(key value)` adds an entry only when the key is missing
 and returns whether it was added. An existing value and its iteration position
 stay unchanged. This combines the lookup and insertion, useful for graph visits,
@@ -1282,13 +1275,7 @@ apply broader optimization. Bounds and overlap guards select a scalar fallback
 when a whole loop cannot safely use SIMD; tail elements also use scalar code.
 Web builds use the same scalar
 operations. `SLOPPY_THREADS=1` restricts native execution to the
-calling thread. To compare default/release builds, one/two threads and the same
-flat-buffer algorithm in C:
-
-```sh
-python3 -m tools.compiler.benchmark_matrix "$(python3 -m tools.core path)" \
-    --size 192 --steps 8 --samples 7 --threads 2 --output /tmp/matrix.json
-```
+calling thread.
 
 ## GPU arrays
 
@@ -1355,12 +1342,10 @@ reference counts can cost more than a small callback saves. Keep drawing and
 window/input operations on the main thread. The
 [particle example](../examples/parallel_particles.dewy) computes each
 particle's forces from a shared previous-frame snapshot and checks the result
-against the serial calculation. The repeatable benchmark is:
+against the serial calculation. Run it on two threads:
 
 ```sh
 SLOPPY_THREADS=2 ./tools/dewy --release examples/parallel_particles.dewy
-python3 -m tools.compiler.benchmark_parallel "$(python3 -m tools.core path)" \
-    --threads 2 --count 2048 --steps 16 --samples 7 --output /tmp/parallel.json
 ```
 
 ## Settings and JSON
