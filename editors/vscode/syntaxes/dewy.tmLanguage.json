@@ -4,257 +4,115 @@
   "scopeName": "source.dewy",
   "patterns": [
     {
-      "include": "#comment"
-    },
-    {
-      "include": "#heredoc-string"
-    },
-    {
-      "include": "#rest-of-file-string"
-    },
-    {
-      "include": "#based-string"
-    },
-    {
-      "include": "#based-block"
-    },
-    {
-      "include": "#raw-string"
-    },
-    {
-      "include": "#prefixed-string"
-    },
-    {
-      "include": "#string"
-    },
-    {
-      "include": "#number"
-    },
-    {
-      "include": "#metatag"
-    },
-    {
-      "include": "#constant"
-    },
-    {
-      "include": "#generic-parameters"
-    },
-    {
-      "include": "#type-block"
-    },
-    {
-      "include": "#anonymous-type-block"
-    },
-    {
-      "include": "#type-annotation"
-    },
-    {
-      "include": "#function-definition"
-    },
-    {
-      "include": "#keyword"
-    },
-    {
-      "include": "#comparison-word"
-    },
-    {
-      "include": "#word-operator"
-    },
-    {
-      "include": "#builtin-type"
-    },
-    {
-      "include": "#function-handle"
-    },
-    {
-      "include": "#function-call"
-    },
-    {
-      "include": "#operator"
-    },
-    {
-      "include": "#identifier"
-    },
-    {
-      "include": "#punctuation"
+      "include": "#expression"
     }
   ],
   "repository": {
     "comment": {
-      "patterns": [
-        {
-          "include": "#block-comment"
-        },
-        {
-          "name": "comment.line.number-sign.dewy",
-          "match": "#.*$"
-        }
-      ]
-    },
-    "block-comment": {
-      "name": "comment.block.dewy",
-      "begin": "#\\{",
-      "end": "\\}#",
-      "patterns": [
-        {
-          "include": "#block-comment"
-        }
-      ]
+      "name": "comment.line.number-sign.dewy",
+      "match": "#.*$"
     },
     "string-escape": {
-      "patterns": [
-        {
-          "name": "invalid.illegal.hex-escape.dewy",
-          "match": "\\\\[xX][0-9A-Fa-f]{0,2}"
-        },
-        {
-          "name": "constant.character.escape.unicode.dewy",
-          "match": "\\\\[uU](?:\\{[0-9A-Fa-f]+\\}|[0-9A-Fa-f]{4})"
-        },
-        {
-          "name": "constant.character.escape.line-continuation.dewy",
-          "match": "\\\\$"
-        },
-        {
-          "name": "constant.character.escape.dewy",
-          "match": "\\\\."
-        }
-      ]
+      "name": "constant.character.escape.dewy",
+      "match": "\\\\(?:u\\{[0-9A-Fa-f]+\\}|U\\{[0-9A-Fa-f]+\\}|.)"
     },
-    "string-interpolation": {
-      "patterns": [
-        {
-          "name": "meta.embedded.line.dewy",
-          "begin": "\\{",
-          "beginCaptures": {
-            "0": {
-              "name": "punctuation.definition.template-expression.begin.dewy"
-            }
-          },
-          "end": "\\}",
-          "endCaptures": {
-            "0": {
-              "name": "punctuation.definition.template-expression.end.dewy"
-            }
-          },
-          "patterns": [
-            {
-              "include": "#brace-group"
-            },
-            {
-              "include": "$self"
-            }
-          ]
-        }
-      ]
-    },
-    "brace-group": {
-      "name": "meta.group.braces.dewy",
+    "interpolation": {
+      "name": "meta.interpolation.dewy",
       "begin": "\\{",
+      "end": "\\}",
       "beginCaptures": {
         "0": {
-          "name": "punctuation.section.braces.begin.dewy"
+          "name": "punctuation.section.interpolation.begin.dewy"
         }
       },
-      "end": "\\}",
       "endCaptures": {
         "0": {
-          "name": "punctuation.section.braces.end.dewy"
+          "name": "punctuation.section.interpolation.end.dewy"
         }
       },
+      "contentName": "source.dewy.embedded",
       "patterns": [
         {
-          "include": "#group"
-        },
-        {
-          "include": "$self"
-        }
-      ]
-    },
-    "group": {
-      "patterns": [
-        {
-          "name": "meta.group.parens.dewy",
-          "begin": "\\(",
-          "beginCaptures": {
-            "0": {
-              "name": "punctuation.section.parens.begin.dewy"
-            }
-          },
-          "end": "\\)",
-          "endCaptures": {
-            "0": {
-              "name": "punctuation.section.parens.end.dewy"
-            }
-          },
-          "patterns": [
-            {
-              "include": "#group"
-            },
-            {
-              "include": "$self"
-            }
-          ]
-        },
-        {
-          "name": "meta.group.brackets.dewy",
-          "begin": "\\[",
-          "beginCaptures": {
-            "0": {
-              "name": "punctuation.section.brackets.begin.dewy"
-            }
-          },
-          "end": "\\]",
-          "endCaptures": {
-            "0": {
-              "name": "punctuation.section.brackets.end.dewy"
-            }
-          },
-          "patterns": [
-            {
-              "include": "#group"
-            },
-            {
-              "include": "$self"
-            }
-          ]
-        },
-        {
-          "name": "meta.group.braces.dewy",
-          "begin": "\\{",
-          "beginCaptures": {
-            "0": {
-              "name": "punctuation.section.braces.begin.dewy"
-            }
-          },
-          "end": "\\}",
-          "endCaptures": {
-            "0": {
-              "name": "punctuation.section.braces.end.dewy"
-            }
-          },
-          "patterns": [
-            {
-              "include": "#group"
-            },
-            {
-              "include": "$self"
-            }
-          ]
+          "include": "#expression"
         }
       ]
     },
     "string": {
       "patterns": [
         {
-          "name": "string.quoted.triple.double.dewy",
-          "begin": "(\\\"\\\"\\\")",
+          "name": "string.quoted.raw.triple.dewy",
+          "begin": "r\"\"\"",
+          "end": "\"\"\"",
           "beginCaptures": {
-            "1": {
+            "0": {
               "name": "punctuation.definition.string.begin.dewy"
             }
           },
-          "end": "\\\"\\\"\\\"",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.dewy"
+            }
+          }
+        },
+        {
+          "name": "string.quoted.raw.triple.dewy",
+          "begin": "r'''",
+          "end": "'''",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.dewy"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.dewy"
+            }
+          }
+        },
+        {
+          "name": "string.quoted.raw.double.dewy",
+          "begin": "r\"",
+          "end": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.dewy"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.dewy"
+            }
+          }
+        },
+        {
+          "name": "string.quoted.raw.single.dewy",
+          "begin": "r'",
+          "end": "'",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.dewy"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.dewy"
+            }
+          }
+        },
+        {
+          "comment": "p\"file.dewy\" and other prefixed strings: a name written against a string",
+          "match": "\\b(?!r[\"\\'])([A-Za-z_][A-Za-z0-9_]*)(?=[\"\\'])",
+          "name": "storage.type.string.prefix.dewy"
+        },
+        {
+          "name": "string.quoted.triple.dewy",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.dewy"
+            }
+          },
           "endCaptures": {
             "0": {
               "name": "punctuation.definition.string.end.dewy"
@@ -265,19 +123,19 @@
               "include": "#string-escape"
             },
             {
-              "include": "#string-interpolation"
+              "include": "#interpolation"
             }
           ]
         },
         {
-          "name": "string.quoted.triple.single.dewy",
-          "begin": "(''')",
+          "name": "string.quoted.triple.dewy",
+          "begin": "'''",
+          "end": "'''",
           "beginCaptures": {
-            "1": {
+            "0": {
               "name": "punctuation.definition.string.begin.dewy"
             }
           },
-          "end": "'''",
           "endCaptures": {
             "0": {
               "name": "punctuation.definition.string.end.dewy"
@@ -288,19 +146,19 @@
               "include": "#string-escape"
             },
             {
-              "include": "#string-interpolation"
+              "include": "#interpolation"
             }
           ]
         },
         {
           "name": "string.quoted.double.dewy",
-          "begin": "(\\\")",
+          "begin": "\"",
+          "end": "\"",
           "beginCaptures": {
-            "1": {
+            "0": {
               "name": "punctuation.definition.string.begin.dewy"
             }
           },
-          "end": "\\\"",
           "endCaptures": {
             "0": {
               "name": "punctuation.definition.string.end.dewy"
@@ -311,19 +169,19 @@
               "include": "#string-escape"
             },
             {
-              "include": "#string-interpolation"
+              "include": "#interpolation"
             }
           ]
         },
         {
           "name": "string.quoted.single.dewy",
-          "begin": "(')",
-          "beginCaptures": {
-            "1": {
-              "name": "punctuation.definition.string.begin.dewy"
-            }
-          },
+          "begin": "'",
           "end": "'",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.dewy"
+            }
+          },
           "endCaptures": {
             "0": {
               "name": "punctuation.definition.string.end.dewy"
@@ -334,916 +192,312 @@
               "include": "#string-escape"
             },
             {
-              "include": "#string-interpolation"
+              "include": "#interpolation"
             }
           ]
         }
       ]
-    },
-    "raw-string": {
-      "patterns": [
-        {
-          "name": "string.quoted.raw.triple.double.dewy",
-          "begin": "(r)(\\\"\\\"\\\")",
-          "beginCaptures": {
-            "1": {
-              "name": "storage.type.string.raw.dewy"
-            },
-            "2": {
-              "name": "punctuation.definition.string.begin.dewy"
-            }
-          },
-          "end": "\\\"\\\"\\\"",
-          "endCaptures": {
-            "0": {
-              "name": "punctuation.definition.string.end.dewy"
-            }
-          },
-          "patterns": []
-        },
-        {
-          "name": "string.quoted.raw.triple.single.dewy",
-          "begin": "(r)(''')",
-          "beginCaptures": {
-            "1": {
-              "name": "storage.type.string.raw.dewy"
-            },
-            "2": {
-              "name": "punctuation.definition.string.begin.dewy"
-            }
-          },
-          "end": "'''",
-          "endCaptures": {
-            "0": {
-              "name": "punctuation.definition.string.end.dewy"
-            }
-          },
-          "patterns": []
-        },
-        {
-          "name": "string.quoted.raw.double.dewy",
-          "begin": "(r)(\\\")",
-          "beginCaptures": {
-            "1": {
-              "name": "storage.type.string.raw.dewy"
-            },
-            "2": {
-              "name": "punctuation.definition.string.begin.dewy"
-            }
-          },
-          "end": "\\\"",
-          "endCaptures": {
-            "0": {
-              "name": "punctuation.definition.string.end.dewy"
-            }
-          },
-          "patterns": []
-        },
-        {
-          "name": "string.quoted.raw.single.dewy",
-          "begin": "(r)(')",
-          "beginCaptures": {
-            "1": {
-              "name": "storage.type.string.raw.dewy"
-            },
-            "2": {
-              "name": "punctuation.definition.string.begin.dewy"
-            }
-          },
-          "end": "'",
-          "endCaptures": {
-            "0": {
-              "name": "punctuation.definition.string.end.dewy"
-            }
-          },
-          "patterns": []
-        }
-      ]
-    },
-    "prefixed-string": {
-      "patterns": [
-        {
-          "name": "string.quoted.template.triple.double.dewy",
-          "begin": "(t)(\\\"\\\"\\\")",
-          "beginCaptures": {
-            "1": {
-              "name": "storage.type.string.template.dewy"
-            },
-            "2": {
-              "name": "punctuation.definition.string.begin.dewy"
-            }
-          },
-          "end": "\\\"\\\"\\\"",
-          "endCaptures": {
-            "0": {
-              "name": "punctuation.definition.string.end.dewy"
-            }
-          },
-          "patterns": [
-            {
-              "include": "#string-escape"
-            },
-            {
-              "include": "#string-interpolation"
-            }
-          ]
-        },
-        {
-          "name": "string.quoted.template.triple.single.dewy",
-          "begin": "(t)(''')",
-          "beginCaptures": {
-            "1": {
-              "name": "storage.type.string.template.dewy"
-            },
-            "2": {
-              "name": "punctuation.definition.string.begin.dewy"
-            }
-          },
-          "end": "'''",
-          "endCaptures": {
-            "0": {
-              "name": "punctuation.definition.string.end.dewy"
-            }
-          },
-          "patterns": [
-            {
-              "include": "#string-escape"
-            },
-            {
-              "include": "#string-interpolation"
-            }
-          ]
-        },
-        {
-          "name": "string.quoted.template.double.dewy",
-          "begin": "(t)(\\\")",
-          "beginCaptures": {
-            "1": {
-              "name": "storage.type.string.template.dewy"
-            },
-            "2": {
-              "name": "punctuation.definition.string.begin.dewy"
-            }
-          },
-          "end": "\\\"",
-          "endCaptures": {
-            "0": {
-              "name": "punctuation.definition.string.end.dewy"
-            }
-          },
-          "patterns": [
-            {
-              "include": "#string-escape"
-            },
-            {
-              "include": "#string-interpolation"
-            }
-          ]
-        },
-        {
-          "name": "string.quoted.template.single.dewy",
-          "begin": "(t)(')",
-          "beginCaptures": {
-            "1": {
-              "name": "storage.type.string.template.dewy"
-            },
-            "2": {
-              "name": "punctuation.definition.string.begin.dewy"
-            }
-          },
-          "end": "'",
-          "endCaptures": {
-            "0": {
-              "name": "punctuation.definition.string.end.dewy"
-            }
-          },
-          "patterns": [
-            {
-              "include": "#string-escape"
-            },
-            {
-              "include": "#string-interpolation"
-            }
-          ]
-        }
-      ]
-    },
-    "heredoc-string": {
-      "name": "string.quoted.heredoc.dewy",
-      "begin": "(\\$)([rt]?)([\"'])([^\"'\\s]+)\\3",
-      "beginCaptures": {
-        "1": {
-          "name": "punctuation.definition.string.begin.dewy"
-        },
-        "2": {
-          "name": "storage.type.string.prefix.dewy"
-        },
-        "3": {
-          "name": "punctuation.definition.string.begin.dewy"
-        },
-        "4": {
-          "name": "entity.name.tag.heredoc-delimiter.dewy"
-        }
-      },
-      "end": "\\4",
-      "endCaptures": {
-        "0": {
-          "name": "entity.name.tag.heredoc-delimiter.dewy"
-        }
-      },
-      "patterns": [
-        {
-          "include": "#string-escape"
-        },
-        {
-          "include": "#string-interpolation"
-        }
-      ]
-    },
-    "rest-of-file-string": {
-      "name": "string.quoted.rest-of-file.dewy",
-      "begin": "(\\$)([rt]?)(\"\"\"|''')",
-      "beginCaptures": {
-        "1": {
-          "name": "punctuation.definition.string.begin.dewy"
-        },
-        "2": {
-          "name": "storage.type.string.prefix.dewy"
-        },
-        "3": {
-          "name": "punctuation.definition.string.begin.dewy"
-        }
-      },
-      "end": "\\b\\B",
-      "patterns": [
-        {
-          "include": "#string-escape"
-        },
-        {
-          "include": "#string-interpolation"
-        }
-      ]
-    },
-    "based-string": {
-      "patterns": [
-        {
-          "name": "meta.based-string.dewy",
-          "begin": "(?<![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])(0[btqsodzxurg])(\\\"\\\"\\\")",
-          "beginCaptures": {
-            "1": {
-              "name": "storage.type.numeric.prefix.dewy"
-            },
-            "2": {
-              "name": "string.quoted.based.dewy"
-            }
-          },
-          "end": "\\\"\\\"\\\"",
-          "endCaptures": {
-            "0": {
-              "name": "string.quoted.based.dewy"
-            }
-          },
-          "patterns": [
-            {
-              "include": "#comment"
-            },
-            {
-              "name": "constant.numeric.based.dewy",
-              "match": "[0-9A-Za-z+/=_-]+"
-            }
-          ]
-        },
-        {
-          "name": "meta.based-string.dewy",
-          "begin": "(?<![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])(0[btqsodzxurg])(''')",
-          "beginCaptures": {
-            "1": {
-              "name": "storage.type.numeric.prefix.dewy"
-            },
-            "2": {
-              "name": "string.quoted.based.dewy"
-            }
-          },
-          "end": "'''",
-          "endCaptures": {
-            "0": {
-              "name": "string.quoted.based.dewy"
-            }
-          },
-          "patterns": [
-            {
-              "include": "#comment"
-            },
-            {
-              "name": "constant.numeric.based.dewy",
-              "match": "[0-9A-Za-z+/=_-]+"
-            }
-          ]
-        },
-        {
-          "name": "meta.based-string.dewy",
-          "begin": "(?<![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])(0[btqsodzxurg])(\\\")",
-          "beginCaptures": {
-            "1": {
-              "name": "storage.type.numeric.prefix.dewy"
-            },
-            "2": {
-              "name": "string.quoted.based.dewy"
-            }
-          },
-          "end": "\\\"",
-          "endCaptures": {
-            "0": {
-              "name": "string.quoted.based.dewy"
-            }
-          },
-          "patterns": [
-            {
-              "include": "#comment"
-            },
-            {
-              "name": "constant.numeric.based.dewy",
-              "match": "[0-9A-Za-z+/=_-]+"
-            }
-          ]
-        },
-        {
-          "name": "meta.based-string.dewy",
-          "begin": "(?<![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])(0[btqsodzxurg])(')",
-          "beginCaptures": {
-            "1": {
-              "name": "storage.type.numeric.prefix.dewy"
-            },
-            "2": {
-              "name": "string.quoted.based.dewy"
-            }
-          },
-          "end": "'",
-          "endCaptures": {
-            "0": {
-              "name": "string.quoted.based.dewy"
-            }
-          },
-          "patterns": [
-            {
-              "include": "#comment"
-            },
-            {
-              "name": "constant.numeric.based.dewy",
-              "match": "[0-9A-Za-z+/=_-]+"
-            }
-          ]
-        }
-      ]
-    },
-    "based-block": {
-      "match": "(?<![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])(0[btqsodzxurg])(\\[)",
-      "captures": {
-        "1": {
-          "name": "storage.type.numeric.prefix.dewy"
-        },
-        "2": {
-          "name": "punctuation.section.brackets.begin.dewy"
-        }
-      }
     },
     "number": {
       "patterns": [
         {
-          "match": "(?<![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])(0[btqsodzx])([0-9A-Za-z_]+)",
+          "comment": "binary data: 0x\"ff00\"",
+          "name": "constant.numeric.bytes.dewy",
+          "match": "\\b0[btqsodzxug]([\"\\'])[0-9A-Za-z_ ]*\\1"
+        },
+        {
+          "comment": "based integers: 0xFF, 0b1010, 0d42",
+          "match": "\\b(0[btqsodzxug][0-9A-Za-z_]+)",
           "captures": {
             "1": {
-              "name": "storage.type.numeric.prefix.dewy"
-            },
-            "2": {
-              "name": "constant.numeric.based.dewy"
+              "name": "constant.numeric.integer.based.dewy"
             }
           }
         },
         {
-          "name": "constant.numeric.decimal.dewy",
-          "match": "(?<![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])(?:(?<=\\.\\.)|(?<!\\.))[0-9][0-9_]*(?:\\.[0-9][0-9_]*)?(?:[eE][+-]?[0-9][0-9_]*)?"
+          "comment": "decimals with an optional unit: 42, 1_000, 2.5e-3, 300ms, 9.81m",
+          "match": "(?<![A-Za-z0-9_.])(\\d[\\d_]*(?:\\.\\d[\\d_]*)?(?:[eE][+-]?\\d[\\d_]*)?)([A-Za-z_][A-Za-z0-9_]*)?",
+          "captures": {
+            "1": {
+              "name": "constant.numeric.decimal.dewy"
+            },
+            "2": {
+              "name": "keyword.other.unit.dewy"
+            }
+          }
         }
       ]
     },
-    "metatag": {
-      "match": "(\\$)([A-Za-z_][A-Za-z0-9_]*)?",
-      "captures": {
-        "1": {
-          "name": "punctuation.definition.metatag.dewy"
-        },
-        "2": {
-          "name": "keyword.other.metatag.dewy"
-        }
-      }
-    },
-    "constant": {
+    "directive": {
       "patterns": [
         {
-          "name": "constant.language.boolean.dewy",
-          "match": "\\b(true|false)\\b"
+          "match": "(\\$)(assert|runtime_assert|capture|include_bytes|abstract|allocator|breakpoint|expect|explicit_copies|fail|field|lend|no_prelude|proof|prototype|prototype_warnings|supported_targets|target|test|unsafe_assume|__copy__|__drop__|__move__)\\b",
+          "captures": {
+            "0": {
+              "name": "keyword.other.directive.dewy"
+            },
+            "1": {
+              "name": "punctuation.definition.directive.dewy"
+            }
+          }
         },
         {
-          "name": "constant.language.void.dewy",
-          "match": "\\bvoid\\b"
-        },
-        {
-          "name": "constant.language.none.dewy",
-          "match": "\\bnone\\b"
-        },
-        {
-          "name": "constant.language.end.dewy",
-          "match": "\\bend\\b"
-        },
-        {
-          "name": "constant.language.symbolic.dewy",
-          "match": "[∞∅]"
+          "comment": "loop labels: $rows before a loop, break $rows",
+          "match": "(\\$)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "0": {
+              "name": "entity.name.label.dewy"
+            },
+            "1": {
+              "name": "punctuation.definition.label.dewy"
+            }
+          }
         }
       ]
     },
     "keyword": {
       "patterns": [
         {
-          "name": "keyword.control.dewy",
-          "match": "\\b(if|else|loop|match|return|yield|break|continue)\\b"
-        },
-        {
-          "name": "keyword.declaration.dewy",
-          "match": "\\b(let|const|local_const|overload_only)\\b"
-        },
-        {
           "name": "keyword.control.import.dewy",
-          "match": "\\b(import|from)\\b"
-        }
-      ]
-    },
-    "comparison-word": {
-      "patterns": [
-        {
-          "name": "keyword.other.word-operator.comparison.dewy",
-          "match": "\\b(?:in|is|isnt)\\?|\\bnot=\\?"
-        }
-      ]
-    },
-    "word-operator": {
-      "patterns": [
-        {
-          "name": "keyword.other.word-operator.dewy",
-          "match": "\\b(and|or|xor|nand|nor|xnor|not|no|as|in|of|transmute|or_throw)\\b"
-        }
-      ]
-    },
-    "builtin-type": {
-      "patterns": [
-        {
-          "name": "support.type.primitive.dewy",
-          "match": "\\b(int|uint|int8|int16|int32|int64|uint8|uint16|uint32|uint64|bool|string|char|rational|fixed|bigint|type)\\b"
+          "match": "\\b(?:import|from)\\b"
         },
         {
-          "name": "support.type.container.dewy",
-          "match": "\\b(array|dict|set)\\b(?=\\s*<)"
+          "name": "keyword.control.dewy",
+          "match": "\\b(?:if|else|loop|match|return|break|continue|or_throw)\\b"
         },
         {
-          "name": "support.type.dimension.dewy",
-          "match": "\\b(Time|Length|Mass|Current|Temperature|Amount|Luminosity|Angle)\\b"
-        }
-      ]
-    },
-    "type-annotation": {
-      "patterns": [
-        {
-          "begin": "(?:(:>)|(:)(?![=:>?]))\\s*(?=[<\\[])",
-          "beginCaptures": {
-            "1": {
-              "name": "keyword.operator.arrow.return-type.dewy"
-            },
-            "2": {
-              "name": "punctuation.separator.type.dewy"
-            }
-          },
-          "end": "(?!\\s*[<\\[]|\\s*[|&]\\s*)",
-          "applyEndPatternLast": true,
-          "patterns": [
-            {
-              "include": "#type-expression"
-            }
-          ]
+          "name": "storage.type.dewy",
+          "match": "\\b(?:let|const)\\b"
         },
         {
-          "begin": "(?:(:>)|(:)(?![=:>?]))\\s*([©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ]*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°µΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋][!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋]*)",
-          "beginCaptures": {
-            "1": {
-              "name": "keyword.operator.arrow.return-type.dewy"
-            },
-            "2": {
-              "name": "punctuation.separator.type.dewy"
-            },
-            "3": {
-              "name": "entity.name.type.dewy"
-            }
-          },
-          "end": "(?!\\s*[<\\[]|\\s*[|&]\\s*)",
-          "applyEndPatternLast": true,
-          "patterns": [
-            {
-              "include": "#type-expression"
-            }
-          ]
-        }
-      ]
-    },
-    "type-expression": {
-      "patterns": [
-        {
-          "include": "#type-parameter"
-        },
-        {
-          "include": "#bracketed-type"
-        },
-        {
-          "match": "([|&])\\s*([©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ]*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°µΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋][!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋]*)?",
+          "comment": "test \"name\" { ... }",
+          "match": "^\\s*(test)(?=\\s*[\"\\'])",
           "captures": {
             "1": {
-              "name": "keyword.operator.type.dewy"
-            },
-            "2": {
-              "name": "entity.name.type.dewy"
+              "name": "keyword.other.test.dewy"
             }
           }
+        },
+        {
+          "name": "keyword.operator.comparison.word.dewy",
+          "match": "\\b(?:is|isnt|in|notin)\\?"
+        },
+        {
+          "name": "keyword.operator.comparison.dewy",
+          "match": "(?<![A-Za-z0-9_])\\.?not(?:>=|<=|=|>|<)\\?"
+        },
+        {
+          "name": "keyword.operator.word.dewy",
+          "match": "\\b(?:and|or|xor|not|in|of|as|transmute)\\b"
+        },
+        {
+          "name": "constant.language.dewy",
+          "match": "\\b(?:true|false|none)\\b"
         }
       ]
     },
-    "type-block": {
-      "name": "meta.type-block.dewy",
-      "begin": "((?<![=!<>:?])=)(\\s*)(<)(?![?=<|]|->)",
-      "beginCaptures": {
+    "type-declaration": {
+      "comment": "Point:type=[x:float64 y:float64]",
+      "match": "^\\s*(?:(?:let|const)\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*(:)\\s*(type)\\b",
+      "captures": {
         "1": {
-          "name": "keyword.operator.assignment.dewy"
+          "name": "entity.name.type.dewy"
+        },
+        "2": {
+          "name": "punctuation.separator.annotation.dewy"
         },
         "3": {
-          "name": "punctuation.section.angle.begin.dewy"
+          "name": "support.type.dewy"
         }
-      },
-      "end": "(?<![:-])>(?!\\?|=\\?)",
-      "endCaptures": {
-        "0": {
-          "name": "punctuation.section.angle.end.dewy"
-        }
-      },
-      "patterns": [
-        {
-          "include": "#comment"
-        },
-        {
-          "name": "keyword.other.word-operator.dewy",
-          "match": "\\bof\\b"
-        },
-        {
-          "include": "#type-parameter"
-        },
-        {
-          "include": "#bracketed-type"
-        },
-        {
-          "include": "#string"
-        },
-        {
-          "include": "#number"
-        },
-        {
-          "include": "#builtin-type"
-        },
-        {
-          "name": "keyword.operator.type.dewy",
-          "match": "[|&]"
-        },
-        {
-          "name": "entity.name.type.dewy",
-          "match": "(?<![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])[©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ]*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°µΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋][!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋]*(?![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])"
-        },
-        {
-          "include": "#punctuation"
-        }
-      ]
+      }
     },
-    "anonymous-type-block": {
-      "name": "meta.type-block.anonymous.dewy",
-      "begin": "(?<![!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°µΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋<\\]\\)])<(?![?=<|]|->)",
-      "beginCaptures": {
-        "0": {
-          "name": "punctuation.section.angle.begin.dewy"
-        }
-      },
-      "end": "(?<![:-])>(?!\\?|=\\?)",
-      "endCaptures": {
-        "0": {
-          "name": "punctuation.section.angle.end.dewy"
-        }
-      },
-      "patterns": [
-        {
-          "include": "#comment"
-        },
-        {
-          "name": "keyword.other.word-operator.dewy",
-          "match": "\\bof\\b"
-        },
-        {
-          "include": "#type-parameter"
-        },
-        {
-          "include": "#bracketed-type"
-        },
-        {
-          "include": "#string"
-        },
-        {
-          "include": "#number"
-        },
-        {
-          "include": "#builtin-type"
-        },
-        {
-          "name": "keyword.operator.type.dewy",
-          "match": "[|&]"
-        },
-        {
-          "name": "entity.name.type.dewy",
-          "match": "(?<![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])[©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ]*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°µΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋][!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋]*(?![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])"
-        },
-        {
-          "include": "#punctuation"
-        }
-      ]
-    },
-    "generic-parameters": {
-      "name": "meta.generic-parameters.dewy",
-      "begin": "<(?=[^<>\\n]*>\\s*[(\\[])",
-      "beginCaptures": {
-        "0": {
-          "name": "punctuation.section.angle.begin.dewy"
-        }
-      },
-      "end": ">",
-      "endCaptures": {
-        "0": {
-          "name": "punctuation.section.angle.end.dewy"
-        }
-      },
-      "patterns": [
-        {
-          "include": "#comment"
-        },
-        {
-          "name": "keyword.other.word-operator.dewy",
-          "match": "\\bof\\b"
-        },
-        {
-          "include": "#type-parameter"
-        },
-        {
-          "include": "#builtin-type"
-        },
-        {
-          "name": "entity.name.type.dewy",
-          "match": "(?<![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])[©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ]*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°µΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋][!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋]*(?![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])"
-        },
-        {
-          "include": "#punctuation"
-        }
-      ]
-    },
-    "type-parameter": {
-      "name": "meta.type-parameter.dewy",
-      "begin": "<(?![?=<|]|->)",
-      "beginCaptures": {
-        "0": {
-          "name": "punctuation.section.angle.begin.dewy"
-        }
-      },
-      "end": "(?<![:-])>(?!\\?|=\\?)",
-      "endCaptures": {
-        "0": {
-          "name": "punctuation.section.angle.end.dewy"
-        }
-      },
-      "patterns": [
-        {
-          "include": "#comment"
-        },
-        {
-          "name": "variable.parameter.dewy",
-          "match": "[©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ]*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°µΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋][!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋]*(?=\\s*[:=](?![=>?:]))"
-        },
-        {
-          "name": "meta.type-parameter.value.dewy",
-          "begin": "=(?![=>?])",
-          "beginCaptures": {
-            "0": {
-              "name": "keyword.operator.assignment.dewy"
-            }
-          },
-          "end": "(?=[\\s>\\])])",
-          "patterns": [
-            {
-              "include": "#group"
-            },
-            {
-              "include": "$self"
-            }
-          ]
-        },
-        {
-          "name": "keyword.other.word-operator.dewy",
-          "match": "\\bof\\b"
-        },
-        {
-          "include": "#type-annotation"
-        },
-        {
-          "include": "#type-parameter"
-        },
-        {
-          "include": "#bracketed-type"
-        },
-        {
-          "include": "#string"
-        },
-        {
-          "include": "#number"
-        },
-        {
-          "include": "#constant"
-        },
-        {
-          "include": "#builtin-type"
-        },
-        {
-          "include": "#operator"
-        },
-        {
-          "name": "entity.name.type.dewy",
-          "match": "(?<![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])[©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ]*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°µΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋][!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋]*(?![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])"
-        },
-        {
-          "include": "#punctuation"
-        }
-      ]
-    },
-    "bracketed-type": {
-      "name": "meta.bracketed-type.dewy",
-      "begin": "\\[",
-      "beginCaptures": {
-        "0": {
-          "name": "punctuation.section.brackets.begin.dewy"
-        }
-      },
-      "end": "\\]",
-      "endCaptures": {
-        "0": {
-          "name": "punctuation.section.brackets.end.dewy"
-        }
-      },
-      "patterns": [
-        {
-          "include": "#bracketed-type"
-        },
-        {
-          "include": "#group"
-        },
-        {
-          "include": "$self"
-        }
-      ]
-    },
-    "function-definition": {
-      "match": "([©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ]*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°µΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋][!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋]*)(?=\\s*=\\s*\\([^#\\n]*\\)\\s*(?::>[^#\\n=]*)?=>)",
+    "function-declaration": {
+      "comment": "name = <T>(params) => body, name = (params):>Result => body",
+      "match": "^\\s*(?:(?:let|const)\\s+)?([A-Za-z_][A-Za-z0-9_]*)(?=\\s*=\\s*(?:<(?:[^<>]|<[^<>]*>)*>\\s*)?\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)\\s*(?:=>|:>))",
       "captures": {
         "1": {
           "name": "entity.name.function.dewy"
         }
       }
     },
-    "function-handle": {
-      "match": "(@)([©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ]*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°µΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋][!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋]*)",
+    "type-name": {
+      "patterns": [
+        {
+          "name": "support.type.builtin.dewy",
+          "match": "\\b(?:int|int8|int16|int32|int64|int128|uint|uint8|uint16|uint32|uint64|uint128|float32|float64|bool|string|array|dict|set|void|type|error|vec2|vec3|vec4|mat4|quat|BigInt|Rational|NDArray)\\b(?!\\s*=[^=?>])"
+        },
+        {
+          "comment": "Capitalized names are types by convention; the language server refines them",
+          "name": "entity.name.type.dewy",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b(?!\\s*\\()"
+        }
+      ]
+    },
+    "handle": {
+      "comment": "@f: the function itself; @x: the place itself",
+      "match": "(@)(?=[A-Za-z_][A-Za-z0-9_]*)",
       "captures": {
         "1": {
           "name": "storage.modifier.reference.dewy"
-        },
-        "2": {
-          "name": "variable.function.dewy"
         }
       }
     },
-    "function-call": {
-      "match": "(?<![!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°µΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ])([©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ]*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°µΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋][!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋]*)(?=\\(|[\"'])",
+    "call": {
+      "patterns": [
+        {
+          "match": "\\b(printl|print|assert)\\b(?=\\()",
+          "captures": {
+            "1": {
+              "name": "support.function.builtin.dewy"
+            }
+          }
+        },
+        {
+          "match": "(?<=\\.)([A-Za-z_][A-Za-z0-9_]*)(?=\\(|<[^<>()]*>\\()",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.member.dewy"
+            }
+          }
+        },
+        {
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(?=\\(|<(?:[^<>()]|<[^<>()]*>)*>\\()",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.call.dewy"
+            }
+          }
+        }
+      ]
+    },
+    "member": {
+      "match": "(?<=\\.)([A-Za-z_][A-Za-z0-9_]*)",
       "captures": {
         "1": {
-          "name": "entity.name.function.call.dewy"
+          "name": "variable.other.member.dewy"
         }
       }
     },
     "operator": {
       "patterns": [
         {
-          "name": "keyword.operator.comparison.dewy",
-          "match": "<=>|>=\\?|<=\\?|>\\?|<\\?|=\\?"
+          "name": "storage.type.function.arrow.dewy",
+          "match": "=>"
         },
         {
-          "name": "keyword.operator.assignment.compound.dewy",
-          "match": "\\+=|-=|\\*=|//=|/=|%=|\\^=|<<=|>>="
+          "name": "keyword.operator.type.returns.dewy",
+          "match": ":>"
+        },
+        {
+          "name": "keyword.operator.mapping.dewy",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.comparison.dewy",
+          "match": "\\.?(?:<=|>=|=|<|>)\\?"
+        },
+        {
+          "name": "keyword.operator.coalesce.dewy",
+          "match": "\\?\\?"
+        },
+        {
+          "name": "keyword.operator.spread.dewy",
+          "match": "\\.\\.\\."
+        },
+        {
+          "name": "keyword.operator.range.dewy",
+          "match": "\\.\\."
         },
         {
           "name": "keyword.operator.pipe.dewy",
           "match": "\\|>|<\\|"
         },
         {
-          "name": "keyword.operator.arrow.dewy",
-          "match": "=>|<->|->|:>"
+          "name": "keyword.operator.assignment.compound.dewy",
+          "match": "\\.?(?://|<<|>>|[-+*/%^])="
         },
         {
-          "name": "keyword.operator.binding.dewy",
-          "match": "::|:="
-        },
-        {
-          "name": "keyword.operator.range.dewy",
-          "match": "\\.\\.\\.|\\.\\."
-        },
-        {
-          "name": "keyword.operator.optional.dewy",
-          "match": "\\?\\?|@\\?|\\?"
-        },
-        {
-          "name": "storage.modifier.reference.dewy",
-          "match": "@"
-        },
-        {
-          "name": "keyword.operator.shift.dewy",
-          "match": "<<<|>>>|<<!|!>>|<<|>>"
+          "name": "keyword.operator.bitwise.shift.dewy",
+          "match": "<<|>>"
         },
         {
           "name": "keyword.operator.arithmetic.dewy",
-          "match": "//|[+\\-*/%^\\\\]"
-        },
-        {
-          "name": "keyword.operator.bitwise.dewy",
-          "match": "[|&~`]"
+          "match": "\\.?(?://|[-+*/%^])"
         },
         {
           "name": "keyword.operator.assignment.dewy",
-          "match": "(?<![=!<>:?])=(?![=>?])"
+          "match": "="
         },
         {
-          "name": "punctuation.separator.type.dewy",
-          "match": ":"
-        },
-        {
-          "name": "punctuation.accessor.dewy",
-          "match": "\\."
+          "name": "keyword.operator.type.dewy",
+          "match": "[|&?]"
         }
       ]
-    },
-    "identifier": {
-      "name": "variable.other.dewy",
-      "match": "(?<![!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°µΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ])[©®²³¹ʰʲʳʷʸˡˢˣᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜ℠™ⱼꜝ]*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz°µΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵ‾ℂℍℒℕℙℚℝℤℵ𝔼𝔽𝔾𝕊𝕋][!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋]*(?![!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz©®°²³µ¹ʰʲʳʷʸˡˢˣΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψωϵᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶻᶿ′″‴‾⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜℂℍℒℕℙℚℝ℠™ℤℵⱼꜝ𝔼𝔽𝔾𝕊𝕋])"
     },
     "punctuation": {
       "patterns": [
         {
-          "name": "punctuation.section.braces.begin.dewy",
-          "match": "\\{"
+          "name": "punctuation.separator.annotation.dewy",
+          "match": ":"
         },
         {
-          "name": "punctuation.section.braces.end.dewy",
-          "match": "\\}"
-        },
-        {
-          "name": "punctuation.section.brackets.begin.dewy",
-          "match": "\\["
-        },
-        {
-          "name": "punctuation.section.brackets.end.dewy",
-          "match": "\\]"
-        },
-        {
-          "name": "punctuation.section.parens.begin.dewy",
-          "match": "\\("
-        },
-        {
-          "name": "punctuation.section.parens.end.dewy",
-          "match": "\\)"
-        },
-        {
-          "name": "punctuation.terminator.dewy",
-          "match": ";"
-        },
-        {
-          "name": "punctuation.separator.dewy",
+          "name": "punctuation.separator.comma.dewy",
           "match": ","
         },
         {
-          "name": "punctuation.separator.angle.dewy",
+          "name": "punctuation.terminator.statement.dewy",
+          "match": ";"
+        },
+        {
+          "name": "punctuation.accessor.dewy",
+          "match": "\\."
+        },
+        {
+          "name": "punctuation.definition.typeparameters.dewy",
           "match": "[<>]"
+        }
+      ]
+    },
+    "expression": {
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "include": "#string"
+        },
+        {
+          "include": "#number"
+        },
+        {
+          "include": "#directive"
+        },
+        {
+          "include": "#type-declaration"
+        },
+        {
+          "include": "#function-declaration"
+        },
+        {
+          "include": "#keyword"
+        },
+        {
+          "include": "#handle"
+        },
+        {
+          "include": "#call"
+        },
+        {
+          "include": "#type-name"
+        },
+        {
+          "include": "#member"
+        },
+        {
+          "include": "#operator"
+        },
+        {
+          "include": "#punctuation"
         }
       ]
     }
