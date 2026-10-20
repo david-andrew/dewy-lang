@@ -11,7 +11,7 @@ what landed. Keep this file short.
 |---|---|---|
 | Acceptance ladder, design surface | 66/81 (tiers 1–2: 63/63; tier 3: 3/18), 13 held open on decisions | all milestones |
 | Acceptance ladder, current dialect | 82/82 | stays green |
-| Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.27 G instructions | ~0.40 G (250k root lines/s) |
+| Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.24 G instructions (was 1.36 G on 10-20 morning) | ~0.40 G (250k root lines/s) |
 | Compiler self-build | 8.0 G instructions | seconds-scale edit loop |
 | Game-tick kernel vs C -O2 | ~2× instructions | ~1× |
 | Quick / full suite | 38 s / 6.6 min (load average 14–24; remeasure when quiet) | ≤30 s / ≤5 min |
@@ -23,7 +23,7 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 ## Now
 
 - **Refinement slice 3** (Astra): lengths, fields, invariants.
-- **Frontend** (Astra): finish direct compact-AST construction.
+- **Throughput project 3 pilot** (Astra): check once and finalize once (check plus lowering ~567 M → target 135 M).
 - **Printing per design** (Opus): `[1 2 3]`, `[x=1 name="q"]`; plus small bugs.
 
 ## Next
@@ -39,8 +39,9 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
   - `sort(key=…)`.
 - Compile throughput, toward ~0.40 G. Budget in
   ~/dev/tmp/coord/throughput-budget.md. Open projects, roughly in order:
-  - finish direct compact-AST construction (statements, declarations, special
-    forms) and delete the projection path;
+  - direct compact-AST construction: mostly landed (parse plus projection
+    169 → 86 M); the rest is rare contextual forms, <0.15%; the lexer is 49 M
+    against a 20 M target;
   - finalize checked-function results once, with shared proof summaries;
   - shared optimizer facts;
   - cheaper register-allocation intervals and encoding;
@@ -56,9 +57,8 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
   (5–10 engineer-weeks) until the zip pilot works without private syntax and a
   lexer/IR kernel matches Jo in results and speed. Bootstrap afterwards:
   C → stage0 → frozen Jo compiler → Dewy compiler.
-- Recover the compile cost of mathematical `int` (synthetic +3.0%, game +5.7%,
-  accepted 10-20). The remaining excess is in checking (game ~25 M),
-  lowering/emission (~18 M) and the optimizer (~11 M).
+- Recover the game-panel compile cost of mathematical `int` (+5.7%, accepted
+  10-20); the frontend work recovered the synthetic panel's share.
 - Small items:
   - the remaining Jo-shaped hints in diagnostics;
   - methods follow-ups: members inherited across modules; static calls
