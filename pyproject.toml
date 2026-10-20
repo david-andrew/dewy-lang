@@ -14,9 +14,7 @@ ignore = ["E701"]
 
 [dependency-groups]
 dev = [
-    "mypy>=1.19.1",
     "pillow>=12.1.1",
-    "pyright>=1.1.408",
     "pytest>=9.0.2",
     "pytest-xdist>=3.8.0",
     "ruff>=0.15.6",
@@ -25,12 +23,6 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-# parallel by default (pytest-xdist); `-n 0` runs serially for debugging. Tests
-# are grouped by file so the ones that compile the same fixture share a worker
-# and never race on its `__dewycache__` artifacts (tests/conftest.py orders the
-# big files first so no worker is left running one alone at the end).
-addopts = "-n auto --dist loadfile"
 markers = [
-    "core_quick: compact-core edit-loop smoke coverage; selected by tools.core test --quick",
-    "slow: an integration test that spawns the CLI, a debugger, or an installer; `-m 'not slow'` for the everyday gate",
+    "core_quick: edit-loop smoke coverage; selected by tools.core test --quick",
 ]
