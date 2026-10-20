@@ -200,13 +200,13 @@ lx_checks = (code: Ins[], ends: int[], L: CLoop) -> LCheck[]:
             out.push(LCheck(p, q, d, 2, int(cd.a), 0, 0, []))
     out
 
-# o_repl as the identity for every vreg made so far (it renames uses in copies)
+# o_regs.repl as the identity for every vreg made so far (it renames uses in copies)
 lx_known = 0
 lx_sync = ():
     n = ir.vtypes.len()
     if n == 0: return
     o_resize_one(n - 1)
-    loop v in [lx_known..n): o_repl[v] = i32(v)
+    loop v in [lx_known..n): o_regs[v].repl = i32(v)
     lx_known = n
 
 # to the checking loop if c (out of the innermost block)
@@ -259,7 +259,7 @@ lx_copy = (code: Ins[], s: int, e: int, checks: LCheck[], ren: int[], out: mut I
         ins = code[p - 1]
         op = ins.op
         if ren.len() > 0:
-            # (o_repl holds the renaming of uses; definitions are renamed here; argument lists
+            # (o_regs.repl holds the renaming of uses; definitions are renamed here; argument lists
             # are copied first, the original loop keeps its own)
             if op == .call or op == .calli or op == .callc or op == .syscall or op == .intr or op == .zeroslots:
                 st = ir.args.len()
@@ -776,7 +776,7 @@ loop_versioning = (vector_only: bool = false):
                 ren[d] = vreg(vtype(d))
                 renamed.push(d)
         lx_sync()
-        loop d in renamed: o_repl[d] = i32(ren[d])
+        loop d in renamed: o_regs[d].repl = i32(ren[d])
         if plan.ok:
             # vectors first, then the rest one at a time (if any is left)
             lx_vec_emit(code, L, checks, plan, out)
@@ -787,7 +787,7 @@ loop_versioning = (vector_only: bool = false):
             lx_copy(code, L.pl, L.pe, checks, ren, out, wrap + 1)
             out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
         else: lx_copy(code, L.pl, L.pe, checks, ren, out, wrap)
-        loop v in renamed: o_repl[v] = i32(v)
+        loop v in renamed: o_regs[v].repl = i32(v)
         if checks.len() > 0:
             out.push(Ins(.br, 0, 0, 0, 0, 0, 1))
             out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
