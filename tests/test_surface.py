@@ -168,10 +168,6 @@ def test_surface_directive_runs(compiler, tmp_path, name):
 
 
 DIRECTIVE_ERRORS = {
-    'assert-unknown-local': ('main = () => { let x = 3\n$assert x >? 1 }',
-                             "'x' is not a compile-time constant"),
-    'assert-unknown-call': ('main = (args:array<string>) => { $assert args.length >? 0 }',
-                            "'args' is not a compile-time constant"),
     'assert-refuted-message': ('$assert 1 >? 2, "one is small"', 'assertion refuted: one is small'),
     'assert-refuted': ('main = () => { $assert 2 + 2 =? 5 }', 'assertion refuted: this condition is always false'),
     'assert-message-literal': ('main = () => { let m = "x"\n$assert true, m }', 'a `$assert` message is a string literal'),

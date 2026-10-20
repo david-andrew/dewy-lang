@@ -1,0 +1,7 @@
+checked=(flag:bool):>int64=>{
+    let x:int64
+    if flag { x=3 } else { x=5 }
+    $assert x >=? 3 and x <=? 5
+    return x
+}
+main=()=>printl(checked(false))

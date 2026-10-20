@@ -1,0 +1,10 @@
+checked=(x:int64):>int64=>{
+    if x >? 0 {
+        let saved=x
+        loop x >? 0 { x-=1 }
+        $assert saved >? 0
+        return saved
+    }
+    return 0
+}
+main=()=>printl(checked(3))

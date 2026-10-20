@@ -1,0 +1,8 @@
+checked=(x:int64):>int64=>{
+    let saved=x
+    let positive=x >? 0
+    x=0
+    if positive { $assert saved >? 0; return saved }
+    return 0
+}
+main=()=>printl(checked(7))

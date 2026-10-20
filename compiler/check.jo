@@ -15,6 +15,7 @@ use 'ide.jo'
 use 'poly_closure.jo'
 use 'prelude.jo'
 use 'comptime.jo'
+use 'facts.jo'
 use 'reflection.jo'
 
 enum SK: none_, local, global, fns, struct_, enum_, const_, module, type_, builtin, alias_, reflected
@@ -3727,10 +3728,10 @@ ceval = (e: int) -> CVal:
 const_eval_bool = (e: int) -> bool: ceval(e).i != 0
 
 # ---------------- static assertions ----------------
-# `$assert` must be proven while checking. The facts available so far are
-# integer, boolean and string constants, compile-time bindings and type tests
-# that narrowing has already decided. Anything else is unknown, never a
-# runtime check. sa_blocker is the first part that left a value unknown.
+# Closed `$assert` requests keep this constant/evaluator fast path. facts.jo
+# queues open scalar requests until checked bodies and helpers have settled;
+# runtime values never fall through from a failed fact query into ct_run.
+# sa_blocker is the first part that left a constant value unknown.
 struct SVal:
     known: bool
     is_str: bool
@@ -4260,6 +4261,7 @@ check_pending_functions = (start: int) -> int:
     k
 
 check_program = (main_path: str):
+    facts_reset()
     if len(program_name) > 0: program_named = true
     if len(program_name) == 0:
         program_name = main_path

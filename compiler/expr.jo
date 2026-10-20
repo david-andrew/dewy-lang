@@ -9,6 +9,7 @@ use 'lex.jo'
 use 'ast.jo'
 use 'types.jo'
 use 'check.jo'
+use 'facts.jo'
 use 'reflection.jo'
 use 'ide.jo'
 
@@ -2652,7 +2653,12 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
     if nodes[n].a != 0: nodes[int(nodes[n].a)].name = i32(helper)
     declarations: int[]
     collect_fns(helper, declarations)
-    resolve_fn_call(n, helper, declarations, checked, expected)
+    result = resolve_fn_call(n, helper, declarations, checked, expected)
+    # Internal scalar policy: retain the builtin operation's captured actuals.
+    # Custom operators and the proven positive power-of-two path are separate.
+    if fact_policy == .RequireStatic and not power and helper == name and is_int(ntype(a)) and is_int(ntype(b)):
+        fact_divisors[n] = if modulo: 2 else: 1
+    result
 
 call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool) -> int:
     if ide_sentinel != 0 and name == ide_sentinel:
@@ -4129,11 +4135,15 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if id == .runtime_assert and static_truth(args[0]) == 0: assertion_refuted(args[0], 0)
     else if id == .static_assert:
         nargs_check(n, nargs, 1, 2, "$assert")
+        captures_before = if cx >= 0: fns[int(ctxs[cx].inst)].caps.len() else: 0
         arg_type(args, 0, T_BOOL)
         if nargs == 2: arg_type(args, 1, T_STR)
-        prove_assertion(args[0], if nargs == 2: args[1] else: 0)
-        # Proven: nothing remains to evaluate or emit.
-        set_list(n, [])
+        # An erased read must not introduce an environment allocation. Existing
+        # runtime/explicit captures are supported; proof-only captures await a
+        # separate compile-time binding representation.
+        if cx >= 0 and fns[int(ctxs[cx].inst)].caps.len() > captures_before and fact_open(args[0]):
+            fatal(nodes[n].pos, "assertion unknown: erased operand would introduce a runtime capture; witness at {pos_str(nodes[args[0]].pos)}")
+        fact_queue(n, args[0], if nargs == 2: args[1] else: 0)
     else if id == .print:
         s = mk(.str_lit, nodes[n].pos)
         nodes[s].aux = 1

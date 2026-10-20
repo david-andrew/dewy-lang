@@ -1824,8 +1824,19 @@ the condition when the program runs; a failure reports the condition (or the
 message, which may interpolate values) and exits with status 101.
 `$assert condition [, "message"]` must be proven while compiling. The compiler
 uses constant facts and settled type tests, then executes ordinary checked code
-when needed. It reports `assertion refuted` for a false condition; failed
-evaluation reports the source operation and compile-time call chain.
+for closed compile-time requests. For runtime scalar values, it also uses
+builtin comparison guards, interval/nonzero facts, assignments, snapshots and
+successful `$runtime_assert` conditions. Early returns remove unreachable
+paths; joins retain only evidence shared by every incoming path. Calls forget
+facts about mutable or exposed storage, and loops forget changing values.
+Symbolic operands must be pure scalar fact terms; calls, fields and nonlinear
+inference are not supported by this pilot. An erased assertion cannot introduce
+a new implicit closure capture; existing runtime captures remain usable.
+An unknown assertion reports the
+missing evidence or its invalidation witness. A false condition reports
+`assertion refuted`; failed closed evaluation reports the source operation and
+compile-time call chain. Ordinary division and bounds checks remain runtime
+checks; these facts do not change their optimization.
 It never becomes a runtime check. The directive owns the comma
 after its condition, and `$assert(condition, "message")` is the same form.
 General compile-time execution has no mandatory step limit or termination proof.

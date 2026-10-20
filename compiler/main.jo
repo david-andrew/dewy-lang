@@ -12,6 +12,7 @@ use 'ast.jo'
 use 'parse.jo'
 use 'types.jo'
 use 'check.jo'
+use 'facts.jo'
 use 'prelude.jo'
 use 'expr.jo'
 use 'ir.jo'
@@ -399,6 +400,7 @@ compile = (path: str, out0: str) -> str:
     if lower_only: det_check_program()
     if repl_image: repl_set_main()
     isolation_reset()
+    facts_finalize()
     copies_reset()
     find_unique_globals(not watch_build and not repl_image and not lower_only)
     t1 = time()

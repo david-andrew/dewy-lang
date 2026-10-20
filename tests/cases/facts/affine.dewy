@@ -1,0 +1,11 @@
+checked=(x:int64):>int64=>{
+    if x >=? 1 and x <=? 8 {
+        $assert x+2 >=? 3 and x+2 <=? 10
+        $assert -x <? 0
+        x+=2
+        $assert x >=? 3 and x <=? 10
+        return x
+    }
+    return 0
+}
+main=()=>printl(checked(4))

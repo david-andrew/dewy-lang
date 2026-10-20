@@ -1,0 +1,7 @@
+mutate=(@x:int64):>bool=>{ x=0; return true }
+checked=(x:int64):>int64=>{
+    let saved=x
+    if x >? 0 and mutate(@x) { $assert saved >? 0; return saved }
+    return 0
+}
+main=()=>printl(checked(3))

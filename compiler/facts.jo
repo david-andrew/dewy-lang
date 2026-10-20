@@ -1,0 +1,617 @@
+# Demanded scalar facts. Places name storage; values name immutable evaluations.
+# No optimization consumes this pilot. In particular, isolation is not purity.
+use 'ast.jo'
+use 'lex.jo'
+use 'types.jo'
+use 'util.jo'
+use 'expr.jo'
+use 'lower.jo'
+use 'check.jo'
+use 'comptime.jo'
+use 'isolation.jo'
+
+enum FactPolicy: RuntimeAllowed, RequireStatic
+enum FactReason: missing, write, call, join, loop_, unsupported, wrap, budget
+
+enum PlaceRoot: local, global, formal, capture, resource
+enum PlaceProjection: root, field, index, selector, unknown
+# Owner-qualified roots and parent-linked projections are also the interface
+# for future effect regions. Runtime ValueIds never become declaration identity.
+struct FactPlace:
+    root: PlaceRoot
+    owner: int
+    declaration: int
+    parent: int = 0
+    projection: PlaceProjection = .root
+    selector: int = 0
+
+struct FactBound:
+    lo: int = -9223372036854775807 - 1
+    hi: int = 9223372036854775807
+    nz: bool = false
+    reason: FactReason = .missing
+    witness: int = 0
+
+struct FactTerm:
+    op: Tok = .eof
+    a: int = 0
+    b: int = 0
+    origin: int = 0
+
+struct FactBinding:
+    place: FactPlace
+    value: int
+
+struct FactState:
+    bindings: FactBinding[]
+    ids: int[]
+    bounds: FactBound[]
+    live: bool = true
+
+struct FactRequest:
+    node: int
+    owner: int
+
+fact_divisors: {int: int} = {}
+fact_requests: FactRequest[]
+fact_terms: FactTerm[]
+fact_validated: {int: bool} = {}
+fact_query = false
+fact_policy = FactPolicy.RuntimeAllowed
+const FACT_CAP = 256
+const FACT_MIN = -9223372036854775807 - 1
+const FACT_MAX = 9223372036854775807
+
+# A runtime-child walk, never into nested function bodies. Closed calls
+# keep comptime's existing semantics; an open operand must NEVER reach ct_run.
+fact_open = (e: int) -> bool:
+    todo = [e]
+    loop todo.len() > 0:
+        n = todo.pop()
+        if n == 0: continue
+        if nodes[n].kind == .ident:
+            kind = nodes[n].aux as SK
+            if kind == .local or kind == .global:
+                if binding_const_init(kind, int(nodes[n].sym), nodes[n].pos) == 0: return true
+        mask = isolation_children(nodes[n].kind)
+        if mask < 0: return true
+        if mask & 1 != 0: todo.push(int(nodes[n].a))
+        if mask & 2 != 0: todo.push(int(nodes[n].b))
+        if mask & 4 != 0: todo.push(int(nodes[n].c))
+        if mask & 16 != 0:
+            loop c in kids(n): todo.push(c)
+    false
+
+fact_scalar = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .bool_ or types[t].kind == .int_ and (types[t].sign or types[t].bits < 64)
+
+fact_comparison = (op: Tok) -> bool:
+    op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
+
+# The erased subset has no calls (including overloaded operators), projections,
+# raw access or implicit helpers. Nonlinear arithmetic is pure but unsupported.
+fact_pure = (e: int, budget: mut int) -> int:
+    if e == 0: return 0
+    budget -= 1
+    if budget < 0: return e
+    k = nodes[e].kind
+    if k == .int_lit or k == .bool_lit: return 0
+    if k == .str_lit and nodes[e].aux == 0: return 0
+    if k == .ident:
+        if nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global)): return 0
+    if k == .not_ or k == .unary or k == .conv:
+        if not fact_scalar(ntype(e)) or not fact_scalar(ntype(int(nodes[e].a))): return e
+        if k == .conv and nodes[e].aux != i32(int(CV.int_)) and nodes[e].aux != i32(int(CV.none_)): return e
+        return fact_pure(int(nodes[e].a), budget)
+    if k == .and_ or k == .or_ or k == .binary and nodes[e].aux == 0:
+        if not fact_scalar(ntype(int(nodes[e].a))) or not fact_scalar(ntype(int(nodes[e].b))): return e
+        a = fact_pure(int(nodes[e].a), budget)
+        if a != 0: return a
+        return fact_pure(int(nodes[e].b), budget)
+    e
+
+fact_queue = (n: int, cond: int, message: int):
+    if message != 0 and (nodes[message].kind != .str_lit or nodes[message].aux != 0):
+        fatal(nodes[message].pos, "assertion unknown: unsupported symbolic message; erased operands must be pure scalar fact terms")
+    # Keep settled narrowing tests, but never erase an effectful tested value.
+    if nodes[cond].kind == .istype and nodes[cond].aux == -3:
+        value = int(nodes[cond].a)
+        loop nodes[value].kind == .narrow: value = int(nodes[value].a)
+        if nodes[value].kind == .ident:
+            set_list(n, [])
+            return
+    if not fact_open(cond):
+        # Even `effect() or true` must pass through comptime's effect checks.
+        budget = 128
+        if fact_pure(cond, budget) == 0: prove_assertion(cond, message)
+        else if ct_values[ct_run(cond)].i == 0: assertion_refuted(cond, message)
+        set_list(n, [])
+        return
+    budget = 128
+    bad = fact_pure(cond, budget)
+    if budget < 0: fact_unknown(cond, FactBound(reason = .budget, witness = bad))
+    if bad != 0:
+        fatal(nodes[bad].pos, "assertion unknown: unsupported symbolic operand; erased operands must be pure scalar fact terms; witness at {pos_str(nodes[bad].pos)}")
+    owner = if cx >= 0: int(ctxs[cx].inst) else: 0
+    fact_requests.push(FactRequest(n, owner))
+
+fact_domain = (t0: int, reason: FactReason = .missing, at: int = 0) -> FactBound:
+    t = prune(t0)
+    r = FactBound(reason = reason, witness = at)
+    if types[t].kind == .bool_: r.lo = 0; r.hi = 1
+    else if types[t].kind == .int_ and types[t].bits < 64:
+        bits = int(types[t].bits)
+        r.lo = if types[t].sign: -(1 << (bits - 1)) else: 0
+        r.hi = if types[t].sign: (1 << (bits - 1)) - 1 else: (1 << bits) - 1
+    r
+
+fact_slot = (s: FactState, v: int) -> int:
+    loop i in [0..s.ids.len()):
+        if s.ids[i] == v: return i
+    -1
+
+fact_bound = (s: FactState, v: int) -> FactBound:
+    i = fact_slot(s, v)
+    if i < 0: return FactBound(reason = .budget)
+    s.bounds[i]
+
+fact_new = (s: mut FactState, b: FactBound, term: FactTerm = FactTerm()) -> int:
+    if s.ids.len() >= FACT_CAP: return 0
+    v = fact_terms.len()
+    fact_terms.push(term)
+    s.ids.push(v)
+    s.bounds.push(b)
+    v
+
+fact_constant = (s: mut FactState, x: int, at: int = 0) -> int:
+    fact_new(s, FactBound(x, x, x != 0), FactTerm(origin = at))
+
+fact_place = (e: int) -> FactPlace:
+    if e == 0: return FactPlace(.local, 0, 0)
+    if nodes[e].kind == .addr: return fact_place(int(nodes[e].a))
+    if nodes[e].kind != .ident: return FactPlace(.local, 0, 0)
+    l = int(nodes[e].sym)
+    if nodes[e].aux == i32(int(SK.global)): return FactPlace(.global, 0, l)
+    if nodes[e].aux != i32(int(SK.local)): return FactPlace(.local, 0, 0)
+    depth = 0
+    loop int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
+        a = int(locals[l].alias)
+        if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return FactPlace(.local, 0, 0)
+        l = int(nodes[a].sym)
+        depth += 1
+        if depth > 32: return FactPlace(.local, 0, 0)
+    FactPlace(.local, int(locals[l].owner), l)
+
+fact_binding = (s: FactState, p: FactPlace) -> int:
+    loop i in [0..s.bindings.len()):
+        if s.bindings[i].place == p: return i
+    -1
+
+fact_bind = (s: mut FactState, p: FactPlace, v: int):
+    if p.declaration == 0: return
+    i = fact_binding(s, p)
+    if i >= 0: s.bindings[i].value = v
+    else if s.bindings.len() < FACT_CAP: s.bindings.push(FactBinding(p, v))
+
+fact_read = (s: mut FactState, e: int) -> int:
+    p = fact_place(e)
+    if p.declaration == 0 or not fact_scalar(ntype(e)): return fact_new(s, FactBound(reason = .unsupported, witness = e))
+    i = fact_binding(s, p)
+    if i >= 0: return s.bindings[i].value
+    v = fact_new(s, fact_domain(ntype(e)))
+    fact_bind(s, p, v)
+    v
+
+fact_exposed = (p: FactPlace) -> bool:
+    if p.root != .local: return true
+    int(locals[p.declaration].flags) & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_ADDR | LF_BYREF | LF_EXPOSED) != 0
+
+fact_forget = (s: mut FactState, at: int, reason: FactReason, all: bool = false):
+    loop i in [0..s.bindings.len()):
+        p = s.bindings[i].place
+        if not all and not fact_exposed(p): continue
+        t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
+        v = fact_new(s, fact_domain(t, reason, at))
+        s.bindings[i].value = v
+
+fact_truth = (s: FactState, v: int) -> int:
+    b = fact_bound(s, v)
+    if b.lo == 0 and b.hi == 0: return 0
+    if b.nz or b.lo > 0 or b.hi < 0: return 1
+    -1
+
+fact_compare = (s: FactState, op: Tok, a: int, b: int) -> int:
+    x = fact_bound(s, a)
+    y = fact_bound(s, b)
+    if a != 0 and b != 0:
+        loop i in [0..s.ids.len()):
+            term = fact_terms[s.ids[i]]
+            if term.a == a and term.b == b and term.op == op and s.bounds[i].lo == s.bounds[i].hi: return int(s.bounds[i].lo != 0)
+    if op == .gt: return fact_compare(s, .lt, b, a)
+    if op == .ge: return fact_compare(s, .le, b, a)
+    if op == .ne:
+        r = fact_compare(s, .eq, a, b)
+        return if r < 0: -1 else: 1 - r
+    if a != 0 and a == b: return if op == .lt: 0 else: 1
+    if op == .eq:
+        if x.hi < y.lo or y.hi < x.lo: return 0
+        if x.nz and y.lo == 0 and y.hi == 0 or y.nz and x.lo == 0 and x.hi == 0: return 0
+        if x.lo == x.hi and y.lo == y.hi: return int(x.lo == y.lo)
+    if op == .lt:
+        if x.hi < y.lo: return 1
+        if x.lo >= y.hi: return 0
+    if op == .le:
+        if x.hi <= y.lo: return 1
+        if x.lo > y.hi: return 0
+    -1
+
+fact_inverse = (op: Tok) -> Tok:
+    if op == .eq: return .ne
+    if op == .ne: return .eq
+    if op == .lt: return .ge
+    if op == .le: return .gt
+    if op == .gt: return .le
+    .lt
+
+fact_set_bound = (s: mut FactState, v: int, b: FactBound):
+    i = fact_slot(s, v)
+    if i < 0: return
+    if b.lo > b.hi or b.nz and b.lo == 0 and b.hi == 0: s.live = false
+    s.bounds[i] = b
+
+# Assume the CAPTURED Boolean, never reevaluate its syntax after later effects.
+fact_assume = (s: mut FactState, v: int, truth: bool):
+    if v == 0: return
+    known = fact_truth(s, v)
+    if known >= 0 and (known == 1) != truth: s.live = false
+    t = fact_terms[v]
+    fact_set_bound(s, v, FactBound(int(truth), int(truth), truth))
+    if t.op == .kw_not:
+        fact_assume(s, t.a, not truth)
+        return
+    if not fact_comparison(t.op): return
+    op = if truth: t.op else: fact_inverse(t.op)
+    a = t.a
+    b = t.b
+    if op == .gt or op == .ge:
+        a = t.b
+        b = t.a
+        op = if op == .gt: Tok.lt else: Tok.le
+    x = fact_bound(s, a)
+    y = fact_bound(s, b)
+    if op == .eq:
+        lo = max(x.lo, y.lo)
+        hi = min(x.hi, y.hi)
+        x.lo = lo; y.lo = lo; x.hi = hi; y.hi = hi
+        x.nz = x.nz or y.nz; y.nz = x.nz
+    else if op == .ne:
+        if y.lo == 0 and y.hi == 0: x.nz = true
+        if x.lo == 0 and x.hi == 0: y.nz = true
+    else if op == .lt or op == .le:
+        d = if op == .lt: 1 else: 0
+        if d == 1 and (y.hi == FACT_MIN or x.lo == FACT_MAX): s.live = false
+        else:
+            x.hi = min(x.hi, y.hi - d)
+            y.lo = max(y.lo, x.lo + d)
+    fact_set_bound(s, a, x)
+    fact_set_bound(s, b, y)
+
+fact_hull = (a: FactBound, b: FactBound, at: int) -> FactBound:
+    FactBound(min(a.lo, b.lo), max(a.hi, b.hi), (a.nz or a.lo > 0 or a.hi < 0) and (b.nz or b.lo > 0 or b.hi < 0), .join, at)
+
+fact_join = (a: FactState, b: FactState, at: int) -> FactState:
+    if not a.live: return b
+    if not b.live: return a
+    s = FactState()
+    # Keep immutable evaluations shared by both paths, including snapshots.
+    loop i in [0..a.ids.len()):
+        j = fact_slot(b, a.ids[i])
+        if j >= 0:
+            s.ids.push(a.ids[i])
+            s.bounds.push(fact_hull(a.bounds[i], b.bounds[j], at))
+    loop binding in a.bindings:
+        j = fact_binding(b, binding.place)
+        if j < 0: continue
+        other = b.bindings[j].value
+        v = binding.value
+        if v != other: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at))
+        fact_bind(s, binding.place, v)
+    s
+
+fact_unknown = (n: int, b: FactBound, what: str = "assertion"):
+    why = "missing scalar bound"
+    if b.reason == .write: why = "value changed by assignment"
+    else if b.reason == .call: why = "call invalidated a mutable or exposed root"
+    else if b.reason == .join: why = "a predecessor lacks the required evidence"
+    else if b.reason == .loop_: why = "loop may change the tested value"
+    else if b.reason == .unsupported: why = "unsupported symbolic operation"
+    else if b.reason == .wrap: why = "possible fixed-width wrap"
+    else if b.reason == .budget: why = "scalar fact budget exhausted"
+    witness = if b.witness != 0: " at {pos_str(nodes[b.witness].pos)}" else: " at {pos_str(nodes[n].pos)}"
+    fatal(nodes[n].pos, "{what} unknown: {why}; witness{witness}")
+
+# Loop speculation is deliberately absent: pre-kill every changing route on
+# entry, validate one arbitrary iteration, and export none of its new evidence.
+fact_changes = (n: int, s: mut FactState, at: int):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .assign:
+        p = fact_place(int(nodes[n].a))
+        if p.declaration != 0:
+            if fact_exposed(p): fact_forget(s, at, .loop_)
+            v = fact_new(s, fact_domain(ntype(int(nodes[n].a)), .loop_, at))
+            fact_bind(s, p, v)
+        else: fact_forget(s, at, .loop_, true)
+    if k == .call or k == .intrinsic or k == .lambda or k == .partial: fact_forget(s, at, .loop_)
+    mask = isolation_children(k)
+    if mask < 0: fact_forget(s, at, .loop_, true); return
+    if mask & 1 != 0: fact_changes(int(nodes[n].a), s, at)
+    if mask & 2 != 0: fact_changes(int(nodes[n].b), s, at)
+    if mask & 4 != 0: fact_changes(int(nodes[n].c), s, at)
+    if mask & 16 != 0:
+        loop c in kids(n): fact_changes(c, s, at)
+
+struct FactPaths:
+    yes: FactState
+    no: FactState
+    reason: FactBound
+
+# Split during evaluation: RHS effects see the appropriate LHS edge, and
+# success can only narrow the old captured value, not its replacement.
+fact_condition = (n: int, entry: FactState) -> FactPaths:
+    k = nodes[n].kind
+    if k == .not_:
+        p = fact_condition(int(nodes[n].a), entry)
+        return FactPaths(p.no, p.yes, p.reason)
+    if k == .and_ or k == .or_:
+        a = fact_condition(int(nodes[n].a), entry)
+        b = fact_condition(int(nodes[n].b), if k == .and_: a.yes else: a.no)
+        reason = if a.yes.live and a.no.live: a.reason else: b.reason
+        if k == .and_: return FactPaths(b.yes, fact_join(a.no, b.no, n), reason)
+        return FactPaths(fact_join(a.yes, b.yes, n), b.no, reason)
+    yes = entry
+    v = fact_capture(n, yes)
+    no = yes
+    reason = fact_bound(yes, v)
+    fact_assume(yes, v, true)
+    fact_assume(no, v, false)
+    FactPaths(yes, no, reason)
+
+fact_unmodeled = (s: mut FactState, n: int, reason: FactReason) -> int:
+    b = fact_domain(ntype(n), reason, n)
+    if fact_query: fact_unknown(n, b)
+    fact_new(s, b)
+
+fact_add_fits = (a: int, b: int) -> bool:
+    if b > 0: return a <= FACT_MAX - b
+    if b < 0: return a >= FACT_MIN - b
+    true
+
+fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
+    x = fact_bound(s, a); y = fact_bound(s, b)
+    if op == .minus:
+        if y.lo == FACT_MIN: return fact_unmodeled(s, n, .wrap)
+        lo = -y.hi
+        y.hi = -y.lo
+        y.lo = lo
+    if not fact_add_fits(x.lo, y.lo) or not fact_add_fits(x.hi, y.hi): return fact_unmodeled(s, n, .wrap)
+    lo = x.lo + y.lo; hi = x.hi + y.hi
+    if not sa_fits(lo, ntype(n)) or not sa_fits(hi, ntype(n)): return fact_unmodeled(s, n, .wrap)
+    fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0))
+
+fact_divisor = (s: mut FactState, n: int, a: int, b: int, modulo: bool):
+    zero = fact_constant(s, 0)
+    truth = fact_compare(s, .ne, b, zero)
+    if truth == 0: fatal(nodes[n].pos, "divisor refuted: zero")
+    if truth < 0: fact_unknown(n, fact_bound(s, b), "divisor")
+    # Fixed-width signed division wraps MIN/-1 in the existing lowerer.
+    # Mathematical int currently has a separate representability obligation.
+    if not modulo and prune(ntype(n)) == T_MATH_INT:
+        x = fact_bound(s, a); y = fact_bound(s, b)
+        if x.lo <= FACT_MIN and y.lo <= -1 and y.hi >= -1:
+            fact_unknown(n, FactBound(reason = .wrap, witness = n), "division result")
+
+fact_capture = (n: int, s: mut FactState) -> int:
+    if n == 0 or not s.live: return 0
+    k = nodes[n].kind
+    if k == .int_lit or k == .bool_lit:
+        if not fact_scalar(ntype(n)): return fact_new(s, FactBound(reason = .unsupported, witness = n))
+        return fact_constant(s, nodes[n].ival, n)
+    if k == .ident: return fact_read(s, n)
+    if k == .str_lit and nodes[n].aux == 0 or k == .float_lit or k == .none_lit or k == .null_lit: return 0
+    if k == .addr: return fact_capture(int(nodes[n].a), s)
+    if k == .lambda or k == .fnref or k == .partial:
+        fact_capture(int(nodes[n].a), s)
+        loop child in kids(n): fact_capture(child, s)
+        fact_forget(s, n, .call)
+        return 0
+    if k == .unary:
+        a = fact_capture(int(nodes[n].a), s)
+        if nodes[n].op == i32(int(Tok.minus)) and fact_scalar(ntype(n)):
+            return fact_arithmetic(s, n, .minus, fact_constant(s, 0), a)
+        return fact_unmodeled(s, n, .unsupported)
+    if k == .exprstmt: return fact_capture(int(nodes[n].a), s)
+    if k == .block:
+        r = 0
+        defers: int[]
+        loop c in kids(n):
+            if nodes[c].kind == .defer_: defers.push(int(nodes[c].a))
+            else: r = fact_capture(c, s)
+        loop i in [0..defers.len()): fact_capture(defers[defers.len() - 1 - i], s)
+        return r
+    if k == .return_:
+        r = fact_capture(int(nodes[n].a), s)
+        s.live = false
+        return r
+    if k == .break_ or k == .continue_:
+        s.live = false
+        return 0
+    if k == .vardecl:
+        r = if nodes[n].b != 0: fact_capture(int(nodes[n].b), s) else: fact_constant(s, 0, n)
+        l = int(nodes[n].sym)
+        if nkids(n) > 0 or l == 0: fact_forget(s, n, .write, true); return 0
+        if has_flag(n, NF_GLOBAL): fact_bind(s, FactPlace(.global, 0, l), r)
+        else if not (nodes[n].aux2 == 1 and int(locals[l].flags) & LF_PARAM != 0): fact_bind(s, FactPlace(.local, int(locals[l].owner), l), r)
+        return r
+    if k == .assign:
+        a = int(nodes[n].a)
+        old = 0
+        if nodes[n].op != i32(int(Tok.assign)): old = fact_capture(a, s)
+        r = fact_capture(int(nodes[n].b), s)
+        p = fact_place(a)
+        if p.declaration == 0:
+            fact_capture(a, s)
+            fact_forget(s, n, .write, true)
+        else:
+            op = nodes[n].op as Tok
+            if nodes[n].aux == 0 and (op == .pluseq or op == .minuseq):
+                arithmetic_op = if op == .pluseq: Tok.plus else: Tok.minus
+                r = fact_arithmetic(s, a, arithmetic_op, old, r)
+            else if op != .assign or nodes[n].aux != 0: r = fact_new(s, fact_domain(ntype(a), .write, n))
+            # Distinct mutable formals can denote the same caller storage.
+            if fact_exposed(p): fact_forget(s, n, .write)
+            fact_bind(s, p, r)
+        return r
+    if k == .if_:
+        paths = fact_condition(int(nodes[n].a), s)
+        y = fact_capture(int(nodes[n].b), paths.yes)
+        z = fact_capture(int(nodes[n].c), paths.no)
+        result = fact_hull(fact_bound(paths.yes, y), fact_bound(paths.no, z), n)
+        if not paths.yes.live: result = fact_bound(paths.no, z)
+        if not paths.no.live: result = fact_bound(paths.yes, y)
+        s = fact_join(paths.yes, paths.no, n)
+        return fact_new(s, result)
+    if k == .and_ or k == .or_:
+        paths = fact_condition(n, s)
+        result = fact_domain(T_BOOL)
+        if not paths.yes.live: result = FactBound(0, 0)
+        if not paths.no.live: result = FactBound(1, 1, true)
+        s = fact_join(paths.yes, paths.no, n)
+        return fact_new(s, result)
+    if k == .while_ or k == .for_:
+        fact_changes(n, s, n)
+        after = s
+        body = s
+        if k == .while_ and nodes[n].aux == 0:
+            paths = fact_condition(int(nodes[n].a), body)
+            body = paths.yes
+        else: fact_capture(int(nodes[n].a), body)
+        fact_capture(int(nodes[n].b), body)
+        s = after
+        return 0
+    if k == .not_:
+        a = fact_capture(int(nodes[n].a), s)
+        v = fact_truth(s, a)
+        b = if v < 0: fact_domain(T_BOOL) else: FactBound(1 - v, 1 - v, v == 0)
+        return fact_new(s, b, FactTerm(.kw_not, a, 0, n))
+    if k == .binary:
+        a = fact_capture(int(nodes[n].a), s)
+        b = fact_capture(int(nodes[n].b), s)
+        op = nodes[n].op as Tok
+        if nodes[n].aux == 0 and fact_scalar(ntype(int(nodes[n].a))) and fact_scalar(ntype(int(nodes[n].b))) and fact_comparison(op):
+            truth = fact_compare(s, op, a, b)
+            x = fact_bound(s, a); y = fact_bound(s, b)
+            reason = if x.lo != x.hi: x else: y
+            result = fact_domain(T_BOOL, reason.reason, reason.witness)
+            if truth >= 0: result = FactBound(truth, truth, truth != 0)
+            return fact_new(s, result, FactTerm(op, a, b, n))
+        if nodes[n].aux == 0 and fact_scalar(ntype(n)) and (op == .plus or op == .minus): return fact_arithmetic(s, n, op, a, b)
+        if fact_policy == .RequireStatic and nodes[n].aux == 0 and (op == .slash or op == .percent) and is_int(ntype(int(nodes[n].b))):
+            fact_divisor(s, n, a, b, op == .percent)
+        if nodes[n].aux != 0: fact_forget(s, n, .call)
+        return fact_unmodeled(s, n, .unsupported)
+    if k == .conv:
+        a = fact_capture(int(nodes[n].a), s)
+        b = fact_bound(s, a)
+        if fact_scalar(ntype(n)) and fact_scalar(ntype(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))):
+            if sa_fits(b.lo, ntype(n)) and sa_fits(b.hi, ntype(n)): return a
+            return fact_unmodeled(s, n, .wrap)
+        fact_forget(s, n, .call)
+        return fact_new(s, FactBound(reason = .unsupported, witness = n))
+    if k == .intrinsic:
+        id = nodes[n].aux as IN
+        if id == .static_assert:
+            if nkids(n) == 0: return 0
+            fact_validated[n] = true
+            fact_query = true
+            paths = fact_condition(kid(n, 0), s)
+            fact_query = false
+            if paths.yes.live and paths.no.live: fact_unknown(kid(n, 0), paths.reason)
+            if not paths.yes.live: assertion_refuted(kid(n, 0), if nkids(n) > 1: kid(n, 1) else: 0)
+            return 0
+        if id == .runtime_assert or id == .assert:
+            paths = fact_condition(kid(n, 0), s)
+            if id == .runtime_assert and not paths.yes.live: assertion_refuted(kid(n, 0), 0)
+            s = paths.yes
+            # Messages execute only on failure, never on this success edge.
+            return 0
+    if k == .call:
+        fact_capture(int(nodes[n].a), s)
+        values = fill(0, nkids(n))
+        loop i in call_eval_order(n): values[i] = fact_capture(kid(n, i), s)
+        if let obligation = fact_divisors.get(n): fact_divisor(s, n, values[0], values[1], obligation == 2)
+        fact_forget(s, n, .call)
+        if ntype(n) == T_NEVER: s.live = false
+        return fact_new(s, fact_domain(ntype(n), .call, n))
+    if k == .iflet or k == .match_:
+        fact_capture(int(nodes[n].a), s)
+        fact_forget(s, n, .unsupported, true)
+        if k == .iflet:
+            yes = s; no = s
+            fact_capture(int(nodes[n].b), yes)
+            fact_capture(int(nodes[n].c), no)
+        else:
+            loop arm in kids(n):
+                path = s
+                fact_capture(int(nodes[arm].c), path)
+                fact_capture(int(nodes[arm].b), path)
+        fact_forget(s, n, .unsupported, true)
+        return fact_unmodeled(s, n, .unsupported)
+    # Opaque forms cannot export facts; evaluate each child from top so control
+    # alternatives, implicit hooks and raw aliases cannot mint stale evidence.
+    fact_forget(s, n, .unsupported, true)
+    mask = isolation_children(k)
+    if mask & 1 != 0 and mask >= 0: fact_capture(int(nodes[n].a), s)
+    if mask & 2 != 0 and mask >= 0: fact_capture(int(nodes[n].b), s)
+    if mask & 4 != 0 and mask >= 0: fact_capture(int(nodes[n].c), s)
+    if mask & 16 != 0 and mask >= 0:
+        loop c in kids(n):
+            fact_forget(s, n, .unsupported, true)
+            fact_capture(c, s)
+    fact_forget(s, n, .unsupported, true)
+    return fact_new(s, FactBound(reason = .unsupported, witness = n))
+
+facts_finalize = ():
+    if fact_requests.len() == 0 and fact_policy == .RuntimeAllowed: return
+    demanded: {int: bool} = {}
+    loop request in fact_requests: demanded[request.owner] = true
+    if fact_policy == .RequireStatic:
+        loop f in [1..fns.len()):
+            if fns[f].body != 0 and fns[f].state == 2 and not pos_in_lib(nodes[int(fns[f].body)].pos): demanded[f] = true
+    loop f, _ in demanded:
+        if f <= 0 or f >= isolation_limit or fns[f].state != 2: fatal(-1, "assertion unknown: unsettled checked body")
+        fact_terms = [FactTerm()]
+        state = FactState()
+        fact_capture(int(fns[f].body), state)
+    # A conservative transfer must never silently lose an obligation (opaque
+    # controls, deferred cleanup, or checked nodes absent from a published body).
+    # Retry such a request with no evidence, never as compile-time execution.
+    loop request in fact_requests:
+        if not fact_validated.has(request.node):
+            fact_terms = [FactTerm()]
+            state = FactState()
+            fact_capture(request.node, state)
+    loop request in fact_requests: set_list(request.node, [])
+    fact_requests = []
+    fact_terms = []
+
+# Harness-only policy; this is not a strict-lane surface or no-panic claim.
+facts_reset = ():
+    fact_requests = []
+    fact_divisors = {}
+    fact_validated = {}
+    fact_query = false
+    fact_policy = FactPolicy.RuntimeAllowed
+    if let policy = env("DEWY_INTERNAL_FACT_POLICY"):
+        if policy == "require-static": fact_policy = .RequireStatic
