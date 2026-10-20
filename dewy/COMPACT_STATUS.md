@@ -149,6 +149,13 @@ New front-end or user-facing language design requires David's approval.
   comparisons pass. Independent bootstrap passes 6,494 tests and 100 fresh
   five-mode fuzz cases, closing the call-lowering batch.
   [Evidence and rejected variant](audits/2026-10-19/nonreturning-helper-calls.json).
+- Constant masks now prove relational bounds during local optimization, removing
+  impossible checks while retaining signed/unsigned boundaries and equality.
+  The targeted masked-helper loop improves about one-third in both modes.
+  Four boundary tests (496 comparison bitsets each) and 629 quick checks pass;
+  all 32 ordinary artifacts are unchanged and all 12 compilation comparisons
+  pass. Full validation will close the next optimizer batch.
+  [Evidence](audits/2026-10-19/mask-comparisons.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 

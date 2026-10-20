@@ -661,6 +661,18 @@ o_simplify = (ins0: Ins, pos: int):
         o_emit(ins)
         return
     k = o_cval[bb]
+    # A nonnegative constant mask bounds its result in [0, mask]. Relational
+    # comparisons are monotone on that interval, in both signed and unsigned
+    # order. Equal endpoints prove the whole comparison; equality is excluded.
+    if op == .lts or op == .les or op == .gts or op == .ges or op == .ltu or op == .leu or op == .gtu or op == .geu:
+        if def_is(a, .and_) and is_k(int(o_db[a])):
+            limit = o_cval[int(o_db[a])]
+            if limit >= 0:
+                lo = fold(op, 0, k)
+                hi = fold(op, limit, k)
+                if lo.1 == hi.1:
+                    o_simplify(Ins(.iconst, VI, i32(d), 0, 0, 0, lo.1), pos)
+                    return
     # identities: result is a
     if (k == 0 and (op == .add or op == .sub or op == .or_ or op == .xor or op == .shl or op == .shrs or op == .shru)) or (k == 1 and (op == .mul or op == .divs or op == .divu)):
         o_simplify(Ins(.mov, VI, i32(d), i32(a), 0, 0, 0), pos)

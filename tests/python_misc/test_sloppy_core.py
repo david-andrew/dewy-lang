@@ -13315,3 +13315,70 @@ main = () -> int:
     assert ran.returncode == 42, ran.stdout + ran.stderr
     failed = subprocess.run([*command, 'fail'], capture_output=True, text=True, timeout=10)
     assert failed.returncode != 0 and 'custom limit 42' in failed.stderr, failed.stdout + failed.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('target', ['native', 'wasm'])
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_core_mask_comparison_boundaries(compiler, tmp_path, target, release):
+    import operator
+    masks = [-1, -(1 << 63), 1, 15, 255, 65535, (1 << 63) - 1]
+    inputs = [-(1 << 63), -(1 << 31), -256, -1, 0, 1, 2, 14, 15, 16,
+              254, 255, 256, (1 << 31) - 1, 1 << 31, (1 << 63) - 1]
+    ops = [('<', operator.lt), ('<=', operator.le), ('>', operator.gt),
+           ('>=', operator.ge), ('==', operator.eq), ('!=', operator.ne)]
+    definitions, checks = [], []
+    for mask in masks:
+        for bound in sorted({-1, 0, 1, mask, min(mask + 1, (1 << 63) - 1)}):
+            name = f'check{len(definitions)}'
+            expressions = []
+            for unsigned in [False, True]:
+                for op, _ in ops:
+                    left = '(m as u64)' if unsigned else 'm'
+                    right = f'({bound & ((1 << 64) - 1)} as u64)' if unsigned else str(bound)
+                    expressions.append(f'(int({left} {op} {right}) << {len(expressions)})')
+            definitions.append(f'@noinline\n{name} = (v: int) -> int:\n    m = v & {mask}\n    '
+                               + ' | '.join(expressions))
+            for value in inputs:
+                masked, expected, bit = value & mask, 0, 0
+                for unsigned in [False, True]:
+                    left = masked & ((1 << 64) - 1) if unsigned else masked
+                    right = bound & ((1 << 64) - 1) if unsigned else bound
+                    for _, compare in ops:
+                        expected |= int(compare(left, right)) << bit
+                        bit += 1
+                checks.append(f'    assert({name}({value}) == {expected})')
+    definitions.append('''@noinline
+changed_mask = (change: bool) -> int:
+    m = 99 & 255
+    if change: m = 4096
+    int(m >= 256)
+@noinline
+mask_probe = (x: int) -> int:
+    m = x & 1023
+    if m < 0 or m >= 1024: panic("impossible mask bounds")
+    m
+''')
+    source = tmp_path / 'mask-comparisons.jo'
+    source.write_text('\n'.join(definitions) + '\nmain = () -> int:\n'
+                      + '\n'.join(checks)
+                      + '\n    assert(changed_mask(false) == 0 and changed_mask(true) == 1)\n    mask_probe(42)\n')
+    binary = tmp_path / 'mask-comparisons'
+    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target,
+                            *(['--release'] if release else []), '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_mask_probe_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
+    assert probe and 'call a=' not in probe[0], probe[0] if probe else 'missing probe'
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed for web mask checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'mask-comparisons.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
