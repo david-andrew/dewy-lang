@@ -13268,3 +13268,50 @@ main = () -> int: view_probe([Row([20], 22)])
     assert not re.search(r'\b(?:store|copy) a=', probe[0]), probe[0]
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
     assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('target,flags', [('native', []), ('native', ['--release']), ('native', ['-g']),
+                                         ('wasm', []), ('wasm', ['--release'])])
+def test_core_nonreturning_helper_calls(compiler, tmp_path, target, flags):
+    source = tmp_path / 'nonreturning.jo'
+    source.write_text('''fail_limit = (value: int): panic("custom limit {value}")
+@noinline
+checked_probe = (value: int, limit: int) -> int:
+    if value >= limit: fail_limit(value)
+    value * 2
+# A nonreturning call with mutable arguments must leave lowering's copy-back
+# bookkeeping balanced when compiling the other branch and following calls.
+values = [20]
+fail_mut = (xs: mut int[], marker: int):
+    xs.push(marker)
+    fail_limit(xs[1])
+@noinline
+change_values = (xs: mut int[]): xs[0] += 1
+main = () -> int:
+    if args().len() > 1: fail_mut(values, checked_probe(21, 22))
+    change_values(values)
+    checked_probe(values[0], 22)
+''')
+    binary = tmp_path / 'nonreturning'
+    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target, *flags, '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_checked_probe_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
+    assert probe, 'checked helper was not emitted'
+    if not flags:
+        assert re.search(r'call a=\d+ b=1 c=1 ', probe[0]), probe[0]
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed for web nonreturning-call checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'nonreturning.cjs'
+        runner.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 42, ran.stdout + ran.stderr
+    failed = subprocess.run([*command, 'fail'], capture_output=True, text=True, timeout=10)
+    assert failed.returncode != 0 and 'custom limit 42' in failed.stderr, failed.stdout + failed.stderr

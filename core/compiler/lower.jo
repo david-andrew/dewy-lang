@@ -1715,7 +1715,12 @@ gen_direct_call = (f: int, args: int[], order: int[] = []) -> Val:
         argv.push(e_slot(rslot))
     mark = copy_backs.len()
     call_args(args, fns[f].ptypes, inst_mutmask(f), argv, f, order)
-    rv = e_call(lf_of_inst(f), argv, ret_vt(ret))
+    # Default builds can inline tiny checked helpers without expanding their
+    # failure path. Release keeps its measured whole-function inlining policy.
+    # Still unwind lowering's pending copy-back records; their unreachable
+    # instructions are discarded by control-flow cleanup.
+    nr = not opt_release and not dbg_on and prune(ret) == T_NEVER
+    rv = if nr: e_call_nr(lf_of_inst(f), argv, -1) else: e_call(lf_of_inst(f), argv, ret_vt(ret))
     copy_back(mark)
     finish_call(ret, rv, rslot)
 

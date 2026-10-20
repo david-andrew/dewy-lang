@@ -320,6 +320,13 @@
         "compiler/lower.jo"
       ],
       "description": "Pass already-proven stable array-element views directly to calls, without per-call managed copies. Mark with a lowering-only flag and reset it before repeated lowering. Keep existing may_write_root proof and all value snapshots when root mutation is possible. Only the element-view optimization is adapted; nonreturn-call metadata is not imported."
+    },
+    {
+      "revision": "ef8d9a908c2cab8eb86c4dfadf17a1c2b682ce92",
+      "paths": [
+        "compiler/lower.jo"
+      ],
+      "description": "Default-mode direct calls whose checked result is never carry nonreturning IR metadata. Tiny checked helpers can inline their successful path while preserving an out-of-line failure. Lowering still balances mutable-argument copy-back bookkeeping. Release/debug retain their previous policy. Adapted separately from the earlier element-view port; unconditional release application regressed the targeted workload and was rejected."
     }
   ]
 }

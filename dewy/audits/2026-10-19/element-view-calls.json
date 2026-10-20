@@ -1,5 +1,5 @@
 {
-  "status": "focused, quick, targeted runtime and compile checks passed; full validation deferred to next compiler batch",
+  "status": "compiler batch validated; see nonreturning-helper-calls.json",
   "compiler_bundle": "build-1792457452068008461",
   "upstream": "ef8d9a908c2cab8eb86c4dfadf17a1c2b682ce92",
   "change": "Pass already-proven stable array-element views directly to calls, without per-call managed copies. Mark with a lowering-only flag and reset it before repeated lowering. Keep existing may_write_root proof and all value snapshots when root mutation is possible.",
@@ -113,11 +113,11 @@
   "compile_comparisons": "all12 pass against preceding compiler and unchanged fixed reference",
   "limits": [
     "Release-only optimization; default runtime unchanged.",
-    "No full-suite or independent-bootstrap claim for this checkpoint; queued for next coherent compiler batch.",
     "No source-language changes; unrelated upstream nonreturn-call change is not imported."
   ],
   "evidence": {
     "file": "element-view-calls-evidence.json.gz",
     "sha256": "2262573e4a3c7e5d8a2f4119c90489d3b1d6c91d17a96ff938b08cab6f9d14b9"
-  }
+  },
+  "batch_validation": "Independent C bootstrap,6494 tests and100 fresh five-mode fuzz cases pass"
 }

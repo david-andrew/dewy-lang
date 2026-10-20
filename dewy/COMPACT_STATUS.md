@@ -140,7 +140,15 @@ New front-end or user-facing language design requires David's approval.
   in release mode. Matrix-row indexing is 4.6x faster on the laptop; default
   mode is unchanged. All 32 ordinary artifacts are unchanged and all 12 compile
   comparisons pass. Snapshot boundary checks and 615 quick checks pass; full
-  validation will close the next compiler batch. [Evidence](audits/2026-10-19/element-view-calls.json).
+  validation is closed by the following call-lowering batch. [Evidence](audits/2026-10-19/element-view-calls.json).
+- Default compilation now recognizes calls to custom helpers that never return,
+  keeping their failure path out of small inlined callers. A checked-helper loop
+  runs about 2.2x faster on the laptop; release/debug policy is unchanged after
+  rejecting an unconditional variant's 6% release regression. All 32 ordinary
+  artifacts and the targeted release artifact are unchanged; all 12 compile
+  comparisons pass. Independent bootstrap passes 6,494 tests and 100 fresh
+  five-mode fuzz cases, closing the call-lowering batch.
+  [Evidence and rejected variant](audits/2026-10-19/nonreturning-helper-calls.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 
