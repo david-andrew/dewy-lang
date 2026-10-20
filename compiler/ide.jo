@@ -2,7 +2,8 @@
 # refers to (its declaration) and its type; the completions possible at a placeholder name; and
 # errors, all written as lines for the language server:
 #   F <file> <path>                         a source file (positions below are <file>:<offset>)
-#   R <pos> <len> <decl> <info>             a name at pos refers to decl (info: its type)
+#   R <pos> <len> <decl> <info> <alias> <kind>   a name at pos refers to decl (info: its type;
+#                                           alias: where a name imported as another is bound)
 #   D <pos> <len> <kind> <name> <snippet> <doc>   a declaration
 #   H <pos> <label>                         an inlay hint (an inferred type) at pos
 #   C <label> <kind> <detail>               a completion
@@ -132,9 +133,29 @@ ide_find_name = (f: int, from: int, name: int) -> int:
         i += 1
     -1
 
+# The Dewy spelling of a name the checker knows by the library's: int64 for i64, xs.pop(i) for
+# remove, printl for print (0: none)
+ide_dewy_alt = (name: int) -> int:
+    n = name_of(name)
+    if n == "__dewy_int": return intern("int")
+    if n == "str": return intern("string")
+    if n == "Set": return intern("set")
+    if n == "print": return intern("printl")
+    if n == "remove": return intern("pop")
+    if n == "__dewy_insert": return intern("insert")
+    if n == "starts_with" or n == "ends_with": return intern(replace(n, "_", ""))
+    if n == "len": return intern("length")
+    if len(n) >= 2 and len(n) <= 3 and (n[0] == 'i' or n[0] == 'u' or n[0] == 'f') and is_digit(n[1]):
+        base = if n[0] == 'i': "int" else if n[0] == 'u': "uint" else: "float"
+        return intern(base + n[1..])
+    0
+
 ide_ref = (pos: int, name: int, kind: int, decl: int, type: int, inst: int):
     if not ide_on or not ide_indexed(pos_file(pos)): return
     p = ide_name_at(pos, name)
+    if p < 0 and files[pos_file(pos)].is_dewy:
+        alt = ide_dewy_alt(name)
+        if alt != 0: p = ide_name_at(pos, alt)
     if p < 0: return
     d = -1
     if decl > 0: d = ide_name_at(decl, name)
@@ -326,7 +347,15 @@ ide_comment_at = (src: str, a: int, b: int) -> int:
         i += 1
     -1
 
-# the comment lines right above the declaration at p, and a comment after it on its line
+# does the declaration at offset i start its line (after keywords such as let or const only)?
+ide_leads_line = (src: str, i: int) -> bool:
+    loop k in [ide_line_start(src, i)..i):
+        c = src[k]
+        if c != ' ' and c != '\t' and not is_ident_char(c): return false
+    true
+
+# the comment lines right above the declaration at p (when it starts its line: not a field
+# of a record written on one line), and a comment after it on its line
 ide_doc_of = (p: int) -> str:
     f = pos_file(p)
     if p <= 0 or f < 0 or f >= files.len(): return ""
@@ -334,6 +363,7 @@ ide_doc_of = (p: int) -> str:
     a = ide_line_start(src, pos_off(p))
     out = ""
     k = a
+    if not ide_leads_line(src, pos_off(p)): k = 0
     loop k > 0:
         pa = ide_line_start(src, k - 1)
         t = trim(src[pa..k - 1))
@@ -344,6 +374,8 @@ ide_doc_of = (p: int) -> str:
         if len(t) == 0 or t[0] != '#': break
         t = t[1..]
         if len(t) > 0 and t[0] == ' ': t = t[1..]
+        # (a section banner, # ---- name ----, is not about the declaration)
+        if starts_with(t, "---") or starts_with(t, "==="): break
         if len(out) > 0: out = t + "\n" + out
         else: out = t
         k = pa
@@ -362,6 +394,7 @@ ide_snippet = (p: int, whole: bool) -> str:
     f = pos_file(p)
     if p <= 0 or f < 0 or f >= files.len(): return ""
     src = files[f].src
+    if not whole and ends_with(files[f].path, ".dewy") and not ide_leads_line(src, pos_off(p)): return ide_dewy_item(src, pos_off(p))
     a = ide_line_start(src, pos_off(p))
     b = ide_line_end(src, a)
     c = ide_comment_at(src, a, b)
@@ -384,6 +417,36 @@ ide_snippet = (p: int, whole: bool) -> str:
                 n += 1
         i = j + 1
     out
+
+# A Dewy field or parameter written among others, `[x:float64 y:float64]`: the one at
+# offset i, up to where the next starts (a name followed by : or =), as `x: float64`.
+ide_dewy_item = (src: str, i: int) -> str:
+    j = i
+    depth = 0
+    loop j < len(src):
+        c = src[j]
+        if ide_str_start(src, j):
+            j = ide_skip_str(src, j)
+            continue
+        if c == '\n' or c == '#': break
+        if c == '(' or c == '[' or c == '{{' or c == '<': depth += 1
+        else if c == ')' or c == ']' or c == '}}' or c == '>' and (j == 0 or src[j - 1] != ':' and src[j - 1] != '='):
+            if depth == 0: break
+            depth -= 1
+        else if (c == ' ' or c == '\t') and depth == 0:
+            k = j
+            loop k < len(src) and (src[k] == ' ' or src[k] == '\t'): k += 1
+            if k < len(src) and src[k] == '@': k += 1
+            e = k
+            loop e < len(src) and is_ident_char(src[e]): e += 1
+            loop e < len(src) and src[e] == ' ': e += 1
+            if e > k and e < len(src) and (src[e] == ':' or src[e] == '=' and e + 1 < len(src) and src[e + 1] != '=' and src[e + 1] != '?' and src[e + 1] != '>'): break
+        j += 1
+    t = trim(src[i..j))
+    # (name:Type as name: Type)
+    c = find_byte(t, ':')
+    if c > 0 and c + 1 < len(t) and t[c + 1] != ' ' and t[c + 1] != '>': t = t[..c + 1) + " " + t[c + 1..]
+    t
 
 # a parameter as written: name: Type = default
 ide_param_text = (p: int) -> str:
@@ -611,7 +674,12 @@ ide_decl_of_ref = (r: IdeRef):
     loop e < len(src) and ide_is_name_byte(src[e]): e += 1
     nm = intern(src[pos_off(r.decl)..e))
     k = int(r.kind)
-    if k == IK_FN: ide_decl(r.decl, nm, k, ide_fn_header(int(fns[int(r.inst)].decl)), ide_doc_of(r.decl))
+    if k == IK_FN:
+        # (inst: the function's instance; for an imported name, minus its declaration node)
+        fd = 0
+        if r.inst > 0: fd = int(fns[int(r.inst)].decl)
+        else: fd = -int(r.inst)
+        if fd > 0: ide_decl(r.decl, nm, k, ide_fn_header(fd), ide_doc_of(r.decl))
     else if k == IK_MODULE: ide_decl(r.decl, nm, k, "module {files[f].path}", "")
     else if k == IK_LOCAL or k == IK_PARAM or k == IK_GLOBAL: ide_decl(r.decl, nm, k, "{name_of(nm)}: {ide_type_info(int(r.type))}", ide_doc_of(r.decl))
     else if k == IK_VARIANT and tkind(int(r.type)) == .enum_:
@@ -746,8 +814,8 @@ ide_finish = ():
         # (a name imported as another: where it is bound)
         al = ""
         if r.decl >= 0 and ide_alias_at.len() > 0 and nm != ide_ref_name(r.decl):
-            if let ap = ide_alias_at.get("{pos_file(r.pos)}:{nm}"): al = "\t" + ide_pos_str(ap)
-        ide_emit("R\t{ide_pos_str(r.pos)}\t{len(nm)}\t{d}\t{ide_esc(info)}{al}")
+            if let ap = ide_alias_at.get("{pos_file(r.pos)}:{nm}"): al = ide_pos_str(ap)
+        ide_emit("R\t{ide_pos_str(r.pos)}\t{len(nm)}\t{d}\t{ide_esc(info)}\t{al}\t{r.kind}")
     # hints: inferred types of variables and of functions' results (where all of a generic
     # function's instances agree)
     hints: {int: str} = {}
@@ -778,6 +846,8 @@ ide_finish = ():
 # a variable declared as `name = value`: worth a hint unless the value says its type
 ide_hint_local = (s: int, l: int):
     if not ide_on or not ide_indexed(pos_file(nodes[s].pos)): return
+    # (a Dewy value parameter's binding: its type is the parameter's)
+    if nodes[s].aux2 == 1: return
     b = int(nodes[s].b)
     if b == 0 or has_flag(b, NF_LITERAL): return
     k = nodes[b].kind
@@ -876,6 +946,8 @@ ide_sym_detail = (s: int) -> (int, str):
 ide_completion_name = (nm: int, s: int) -> str:
     if ends_with(ide_doc, ".dewy") and syms[s].kind == .type_:
         return ide_type_str(int(syms[s].ref))
+    # (Dewy writes a line with printl)
+    if ends_with(ide_doc, ".dewy") and name_of(nm) == "print": return "printl"
     name_of(nm)
 
 ide_complete_names = ():
@@ -895,7 +967,9 @@ ide_complete_names = ():
         nm = intern(it.name)
         if seen.get(nm) != none: continue
         seen[nm] = true
-        ide_emit("C\t{it.name}\t{IK_FN}\tbuiltin")
+        label = it.name
+        if ends_with(ide_doc, ".dewy") and label == "print": label = "printl"
+        ide_emit("C\t{label}\t{IK_FN}\tbuiltin")
     ide_flush()
     stop(0)
 

@@ -486,6 +486,7 @@ struct Ref:
     decl: str       # "file:offset" of the declaration ("" if none)
     info: str
     alias: str      # a name imported as another (from m import x as y): "file:offset" of y there
+    kind: int       # what it names (IK_*; 0: see its declaration)
 
 struct Decl:
     file: int
@@ -855,7 +856,9 @@ take_lines = (r: mut Result, lines_: str[]):
             r.seen[key] = true
             al = ""
             if f.len() >= 6 and len(f[5]) > 0: al = remap_key(fmap, f[5])
-            r.refs.push(Ref(p.0, p.1, to_int(f[2]) ?? 0, d, f[4], al))
+            rk = 0
+            if f.len() >= 7: rk = to_int(f[6]) ?? 0
+            r.refs.push(Ref(p.0, p.1, to_int(f[2]) ?? 0, d, f[4], al, rk))
         else if k == "D" and f.len() >= 7:
             p = remap(fmap, f[1])
             key = "{p.0}:{p.1}"
@@ -1468,7 +1471,7 @@ no_items = "\{\"isIncomplete\":false,\"items\":[]\}"
 
 # the keywords to complete: the lexer's, and the words that are keywords where they start something
 comp_words = (dewy: bool = false) -> str[]:
-    if dewy: return ["let", "const", "if", "else", "loop", "in", "return", "break", "continue", "match", "true", "false", "none", "import", "from", "as", "and", "or", "xor", "not", "transmute", "type", "printl"]
+    if dewy: return ["let", "const", "if", "else", "loop", "in", "return", "break", "continue", "match", "test", "true", "false", "none", "void", "import", "from", "as", "and", "or", "xor", "not", "of", "or_throw", "transmute", "type"]
     out: str[]
     loop k, _ in keywords: out.push(k)
     loop k in ["type", "from", "soa"]: out.push(k)
@@ -1485,16 +1488,59 @@ comp_kind = (k: int) -> int:
     if k == IK_MODULE: return 9
     7
 
+# In a Dewy import's path, from p"dir/na|": the .dewy and .jo files and folders there, replacing
+# the part after the last / ("" when the cursor is not in one)
+import_paths = (d: int, off: int) -> str:
+    if not ends_with(docs[d].path, ".dewy"): return ""
+    text = docs[d].text
+    a = off
+    loop a > 0 and text[a - 1] != '\n': a -= 1
+    pre = text[a..off)
+    t = trim(pre)
+    if not starts_with(t, "from ") and not starts_with(t, "import "): return ""
+    q = rfind(pre, "p\"")
+    if q < 0 or find_byte(pre, '"', q + 2) >= 0: return ""
+    typed = pre[q + 2..]
+    sl = rfind(typed, "/")
+    base = docs[d].path[..rfind(docs[d].path, "/"))
+    dir = base
+    if sl >= 0:
+        if is_abs_path(typed[..sl + 1)): dir = typed[..sl + 1)
+        else: dir = ide_norm(base + "/" + typed[..sl + 1))
+    from = a + q + 2 + sl + 1
+    text_ls = line_starts_of(text)
+    rg = "\{\"start\":{jpos(lpos_of(text, text_ls, from))},\"end\":{jpos(lpos_of(text, text_ls, off))}\}"
+    items: str[]
+    loop n in list_dir(dir):
+        if starts_with(n, ".") or n == "__dewycache__" or n == "node_modules": continue
+        full = dir + "/" + n
+        if is_dir(full):
+            items.push("\{\"label\":{jq(n + "/")},\"kind\":19,\"sortText\":{jq("1" + n)},\"textEdit\":\{\"range\":{rg},\"newText\":{jq(n + "/")}\},\"command\":\{\"title\":\"\",\"command\":\"editor.action.triggerSuggest\"\}\}")
+        else if (ends_with(n, ".dewy") or ends_with(n, ".jo")) and full != docs[d].path:
+            items.push("\{\"label\":{jq(n)},\"kind\":17,\"sortText\":{jq("0" + n)},\"textEdit\":\{\"range\":{rg},\"newText\":{jq(n)}\}\}")
+    if items.len() == 0: return no_items
+    "\{\"isIncomplete\":false,\"items\":[{join(items, ",")}]\}"
+
 on_completion = (id: int, params: int) -> int:
     d = text_params_doc(params)
     if d < 0: return lsp_reply(id, "null")
     text = docs[d].text
     off = req_off(d, params)
+    paths = import_paths(d, off)
+    if len(paths) > 0: return lsp_reply(id, paths)
+    # (typed / or ": only paths are wanted; $: directives)
+    trig = jstr(jpath(params, "context", "triggerCharacter"))
+    if (trig == "/" or trig == "\"") or trig == "$" and (off < 1 or text[off - 1] != '$'): return lsp_reply(id, no_items)
     if in_comment_or_str(text, off, ends_with(docs[d].path, ".dewy")): return lsp_reply(id, no_items)
     a = name_start(text, off)
     b = name_end(text, off)
     prefix = text[a..off)
     member = a > 0 and text[a - 1] == '.'
+    if a > 0 and text[a - 1] == '$' and ends_with(docs[d].path, ".dewy"):
+        # (the directives this compiler implements)
+        dv: str[]
+        loop w in ["assert", "runtime_assert", "capture", "include_bytes"]: dv.push("\{\"label\":{jq(w)},\"kind\":14,\"detail\":\"directive\"\}")
+        return lsp_reply(id, "\{\"isIncomplete\":false,\"items\":[{join(dv, ",")}]\}")
     if member and a > 1 and text[a - 2] == '.': return lsp_reply(id, no_items)     # a range: 0..
     if not member and len(prefix) > 0 and is_digit(prefix[0]): return lsp_reply(id, no_items)
     sent = "__sloppy_complete__"
@@ -1541,13 +1587,128 @@ on_completion = (id: int, params: int) -> int:
             if seen.get(kw) == none: items.push("\{\"label\":{jq(kw)},\"kind\":14,\"sortText\":{jq("2" + kw)}\}")
     lsp_reply(id, "\{\"isIncomplete\":false,\"items\":[{join(items, ",")}]\}")
 
+# Dewy arguments are separated by spaces, `f(a b+1 @c name=d)`: a word continues the argument
+# before it when either side of the space is an operator (`b + 1`, `x or_throw`). The index of
+# the argument the cursor (at b) is in, and its name when it is written name=value
+dewy_op_word = (w: str) -> bool:
+    w in ["and", "or", "xor", "not", "in", "as", "is?", "isnt?", "in?", "notin?", "if", "else", "of", "or_throw", "transmute"]
+
+dewy_op_byte = (c: u8) -> bool: find_byte("+-*/%^=<>?&|.:!~", c) >= 0
+
+# does word w continue the argument that word prev is in?
+dewy_joins = (prev: str, w: str) -> bool:
+    if dewy_op_word(prev) or dewy_op_word(w): return true
+    if w[0] != '@' and dewy_op_byte(w[0]): return true
+    dewy_ends_op(prev)
+
+# does word w end with an operator (`a +`, `x <?`), not a complete value (`xs`, `f()`, `v?`)?
+dewy_ends_op = (w: str) -> bool:
+    c = w[len(w) - 1]
+    if not dewy_op_byte(c): return false
+    # (an optional type or value, `T?`: complete; an operator, `<?`, `is?`: not)
+    if c == '?': return len(w) >= 2 and dewy_op_byte(w[len(w) - 2]) or dewy_op_word(w)
+    true
+
+dewy_arg_at = (text: str, m: u8[], a: int, b: int) -> (int, str):
+    words: str[]
+    j = a
+    depth = 0
+    w0 = -1
+    loop j < b:
+        c = text[j]
+        inside = m[j] != 0 and m[j + 1] != 0
+        space = not inside and depth == 0 and (c == ' ' or c == '\t' or c == '\n' or c == '\r')
+        if space:
+            if w0 >= 0:
+                words.push(text[w0..j))
+                w0 = -1
+        else:
+            if w0 < 0: w0 = j
+            if not inside:
+                if c == '(' or c == '[' or c == '{{': depth += 1
+                else if (c == ')' or c == ']' or c == '}}') and depth > 0: depth -= 1
+        j += 1
+    open_word = w0 >= 0
+    if open_word:
+        words.push(text[w0..b))
+    index = -1
+    first = -1          # the first word of the current argument
+    loop k in [0..words.len()):
+        w = words[k]
+        if k == 0 or not dewy_joins(words[k - 1], w):
+            index += 1
+            first = k
+    # (after a space that ends a complete argument: the next one)
+    if not open_word and words.len() > 0:
+        last = words[words.len() - 1]
+        if not dewy_op_word(last) and not dewy_ends_op(last):
+            index += 1
+            first = -1
+    if index < 0: index = 0
+    name = ""
+    if first >= 0:
+        w = words[first]
+        e = 0
+        loop e < len(w) and is_ident_char(w[e]): e += 1
+        if e > 0 and e < len(w) and w[e] == '=' and (e + 1 >= len(w) or w[e + 1] != '=' and w[e + 1] != '?' and w[e + 1] != '>'): name = w[..e)
+    (index, name)
+
+# the parameters of a signature label (UTF-16 offsets [start, end] of each, and their names):
+# Dewy's are separated by spaces, (a: int64 @b: T c = …); the implementation language's by commas
+sig_params = (label: str, dewy: bool) -> (str[], str[]):
+    ps: str[]
+    names: str[]
+    a = find_byte(label, '(')
+    if a < 0: return (ps, names)
+    lm = str_mask(label, len(label))
+    k = a + 1
+    dep = 0
+    st = k
+    loop k < len(label):
+        c = label[k]
+        if lm[k] != 0 or lm[k + 1] != 0:
+            k += 1
+            continue
+        if c == '(' or c == '[' or c == '{{' or c == '<' and dewy: dep += 1
+        else if c == ')' or c == ']' or c == '}}' or c == '>' and dewy and label[k - 1] != ':' and label[k - 1] != '=':
+            if dep == 0:
+                sig_param(label, st, k, ps, names)
+                break
+            dep -= 1
+        else if dep == 0 and (not dewy and c == ',' or dewy and c == ' '):
+            split = true
+            if dewy:
+                pv = k - 1
+                loop pv > st and label[pv] == ' ': pv -= 1
+                nx = k + 1
+                loop nx < len(label) and label[nx] == ' ': nx += 1
+                if pv < st or nx >= len(label): split = false
+                else if dewy_op_byte(label[pv]) or label[nx] == '=' or label[nx] == ':' or label[nx] == '|' or label[nx] == '&' or label[nx] == ')' or label[nx] >= 0x80: split = false
+            if split:
+                sig_param(label, st, k, ps, names)
+                st = k + 1
+        k += 1
+    (ps, names)
+
+sig_param = (label: str, x: int, y: int, ps: mut str[], names: mut str[]):
+    x0 = x + count_lead(label, x)
+    y0 = y - count_trail(label, y)
+    if y0 <= x0: return
+    ps.push("[{utf16_units(label, 0, x0)},{utf16_units(label, 0, y0)}]")
+    q = x0
+    if label[q] == '@': q += 1
+    e = q
+    loop e < y0 and is_ident_char(label[e]): e += 1
+    names.push(label[q..e))
+
 on_signature = (id: int, params: int) -> int:
     d = text_params_doc(params)
     if d < 0: return lsp_reply(id, "null")
     text = docs[d].text
     off = req_off(d, params)
+    dewy = ends_with(docs[d].path, ".dewy")
     # the call the cursor is in: back to its unmatched ( (past strings and comments)
-    m = str_mask(text, off)
+    m = str_mask(text, off, dewy)
     i = off
     depth = 0
     commas = 0
@@ -1563,9 +1724,20 @@ on_signature = (id: int, params: int) -> int:
                 break
             depth -= 1
         else if c == ',' and depth == 0: commas += 1
-    if i <= stop or text[i] != '(': return lsp_reply(id, "null")
+    if i < stop or i >= len(text) or text[i] != '(': return lsp_reply(id, "null")
     e = i
     loop e > 0 and text[e - 1] == ' ': e -= 1
+    # (f<int64>(...): past the type arguments)
+    if dewy and e > 0 and text[e - 1] == '>':
+        g = e - 1
+        dg = 0
+        loop g > 0:
+            if text[g] == '>': dg += 1
+            else if text[g] == '<':
+                dg -= 1
+                if dg == 0: break
+            g -= 1
+        if g > 0: e = g
     s = name_start(text, e)
     if s == e: return lsp_reply(id, "null")
     if docs[d].dirty and not lsp_input_ready(): refresh(d)
@@ -1574,41 +1746,30 @@ on_signature = (id: int, params: int) -> int:
     dc = h.res.decls.get(h.ref.decl) ?? Decl()
     if dc.kind != IK_FN or len(dc.snippet) == 0: return lsp_reply(id, "null")
     label = dc.snippet
-    # the parameters: label offsets of each
-    a = find_byte(label, '(')
-    if a < 0: return lsp_reply(id, "null")
-    lm = str_mask(label, len(label))
-    ps: str[]
-    k = a + 1
-    dep = 0
-    st = k
-    loop k < len(label):
-        c = label[k]
-        if lm[k] != 0 or lm[k + 1] != 0:
-            k += 1
-            continue
-        if c == '(' or c == '[' or c == '{{': dep += 1
-        else if c == ')' or c == ']' or c == '}}':
-            if dep == 0:
-                if k > st and len(trim(label[st..k))) > 0: ps.push("[{utf16_units(label, 0, st + count_lead(label, st))},{utf16_units(label, 0, k - count_trail(label, k))}]")
-                break
-            dep -= 1
-        else if c == ',' and dep == 0:
-            ps.push("[{utf16_units(label, 0, st + count_lead(label, st))},{utf16_units(label, 0, k)}]")
-            st = k + 1
-        k += 1
+    # (the instance used here, as hover shows it: its parameters' types)
+    if dewy and starts_with(h.ref.info, "(") and len(dc.name) > 0: label = dc.name + " = " + h.ref.info
+    sp = sig_params(label, dewy)
+    ps = sp.0
     # x.f(a): the receiver is the first argument (m.f(a) of a module m is not)
     active = commas
+    named = ""
+    if dewy:
+        ai = dewy_arg_at(text, m, i + 1, off)
+        active = ai.0
+        named = ai.1
     if s > 0 and text[s - 1] == '.':
         active += 1
         rs = name_start(text, s - 1)
         if rs < s - 1:
             rh = ref_at(d, rs)
             if rh.found and starts_with(rh.ref.info, "module "): active -= 1
+    if len(named) > 0:
+        k = sp.1.index_of(named)
+        if k >= 0: active = k
     pj: str[]
     loop p in ps: pj.push("\{\"label\":{p}\}")
     sig = "\{\"label\":{jq(label)},\"parameters\":[{join(pj, ",")}]"
-    if len(dc.doc) > 0: sig += ",\"documentation\":{jq(dc.doc)}"
+    if len(dc.doc) > 0: sig += ",\"documentation\":\{\"kind\":\"markdown\",\"value\":{jq(dc.doc)}\}"
     sig += "\}"
     lsp_reply(id, "\{\"signatures\":[{sig}],\"activeSignature\":0,\"activeParameter\":{active}\}")
 
@@ -1650,7 +1811,7 @@ on_inlay = (id: int, params: int) -> int:
 # ---------------- semantic tokens (what each name is: the references a check found) ----------------
 
 # token types and modifiers, by index (the legend in the capabilities)
-sem_types = ["namespace", "type", "struct", "enum", "parameter", "variable", "property", "enumMember", "function"]
+sem_types = ["namespace", "type", "struct", "enum", "parameter", "variable", "property", "enumMember", "function", "method"]
 sem_mods = ["declaration", "readonly", "defaultLibrary"]
 
 sem_type = (k: int) -> int:
@@ -1686,14 +1847,26 @@ on_semantic = (id: int, params: int) -> int:
         f = file_in(r, docs[d].path)
         if f < 0: continue
         loop x in r.refs:
-            if x.file != f or len(x.decl) == 0: continue
+            if x.file != f: continue
+            o = unmap_off(r, docs[d].path, x.off)
+            if o < 0 or o + x.len > len(text) or toks.get(o) != none: continue
             dco = r.decls.get(x.decl)
-            if dco == none: continue
+            if dco == none:
+                # (the language's own types and builtin functions: no declaration to show)
+                bt = -1
+                if x.kind == IK_TYPE: bt = 1
+                else if x.kind == IK_BUILTIN:
+                    bt = 8
+                    if o > 0 and text[o - 1] == '.':
+                        # (xs.length: a property; xs.push(x): a method)
+                        bt = 6
+                        if o + x.len < len(text) and text[o + x.len] == '(': bt = 9
+                if bt >= 0: toks[o] = SemTok(x.len, bt, 4)
+                continue
             dc = dco!
             t = sem_type(dc.kind)
             if t < 0: continue
-            o = unmap_off(r, docs[d].path, x.off)
-            if o < 0 or o + x.len > len(text) or toks.get(o) != none: continue
+            if t == 8 and o > 0 and text[o - 1] == '.': t = 9
             mods = 0
             if dc.file == f and dc.off == x.off: mods |= 1
             if dc.kind == IK_CONST: mods |= 2
@@ -1862,6 +2035,13 @@ symbols_in = (lines_: str[], from: int, to: int, ind: int) -> str[]:
             continue
         col = indent_of(raw)
         e = block_end(lines_, i, ind)
+        if sy_dewy and starts_with(t, "test") and starts_with(trim(t[4..]), "\""):
+            # test "name" { ... }: the name is its string
+            q = trim(t[4..])
+            qe = find_byte(q, '"', 1)
+            if qe > 0: out.push(sym_json("test " + q[..qe + 1), 24, i, col, e, []))
+            i = e + 1
+            continue
         if sy_dewy:
             word = ident_prefix(t)
             constant = word == "const" or word == "local_const"
@@ -2024,6 +2204,29 @@ on_workspace_symbol = (id: int, params: int) -> int:
     all = out[0] + out[1] + out[2]
     lsp_reply(id, "[{join(all[..min(all.len(), 1000)), ",")}]")
 
+# ---------------- code lenses: run a Dewy program or one of its tests ----------------
+
+lens_json = (line: int, title: str, command: str, args: str) -> str:
+    rg = "\{\"start\":\{\"line\":{line},\"character\":0\},\"end\":\{\"line\":{line},\"character\":0\}\}"
+    "\{\"range\":{rg},\"command\":\{\"title\":{jq(title)},\"command\":{jq(command)},\"arguments\":[{args}]\}\}"
+
+on_code_lens = (id: int, params: int) -> int:
+    d = text_params_doc(params)
+    if d < 0 or not ends_with(docs[d].path, ".dewy"): return lsp_reply(id, "[]")
+    out: str[]
+    u = jq(docs[d].uri)
+    tests = 0
+    loop y in ws_symbols_of(docs[d].path, docs[d].text):
+        if y.kind == 24 and starts_with(y.name, "test \""):
+            name = y.name[6..len(y.name) - 1)
+            if tests == 0: out.push(lens_json(y.line, "Run all tests", "dewy.core.test", u))
+            out.push(lens_json(y.line, "Run test", "dewy.core.runTest", "{u},{jq(name)}"))
+            tests += 1
+        else if y.kind == 12 and y.name == "main" and len(y.container) == 0:
+            out.push(lens_json(y.line, "Run", "dewy.core.run", u))
+            out.push(lens_json(y.line, "Debug", "dewy.core.debug", u))
+    lsp_reply(id, "[{join(out, ",")}]")
+
 # Language-specific layout as one edit of the current buffer.
 on_formatting = (id: int, params: int) -> int:
     d = text_params_doc(params)
@@ -2149,6 +2352,44 @@ qf_dewy_element = (d: int, off: int, name: str) -> int:
         if declaration.kind == IK_CONST: return -1
     at
 
+# A fix a Dewy message spells out in backquotes: "write `@f` for the function itself" (an @ before
+# the name at p), "write `s.startswith(...)`" or "removes by position with pop: `xs.pop(i)`" (the
+# member after `s.` on p's line). [title, start, end, text], or [] when the text does not fit.
+dewy_fixit = (d: int, p: int, msg: str) -> str[]:
+    if not ends_with(docs[d].path, ".dewy"): return []
+    text = docs[d].text
+    k = find(msg, "`")
+    loop k >= 0:
+        e = find(msg, "`", k + 1)
+        if e < 0: break
+        want = msg[k + 1..e)
+        k = find(msg, "`", e + 1)
+        if starts_with(want, "@") and len(want) > 1 and is_ident_start(want[1]):
+            nm = ident_prefix(want[1..])
+            if p < len(text) and starts_with(text[p..], nm) and (p == 0 or text[p - 1] != '@') and name_end(text, p) == p + len(nm):
+                return ["Write `@{nm}` for the function itself", "{p}", "{p}", "@"]
+            continue
+        # recv.member(...)
+        dot = find_byte(want, '.')
+        open = find_byte(want, '(')
+        if dot <= 0 or open <= dot: continue
+        recv = want[..dot)
+        member = want[dot + 1..open)
+        if not is_word(member) or len(member) == 0: continue
+        at = word_near(text, p, recv)
+        loop at >= 0:
+            m0 = at + len(recv)
+            if m0 < len(text) and text[m0] == '.':
+                m1 = name_end(text, m0 + 1)
+                old = text[m0 + 1..m1)
+                if len(old) > 0 and old != member: return ["Change '{old}' to '{member}'", "{m0 + 1}", "{m1}", member]
+            # (the next use of recv on the line)
+            nx = find(text, recv, at + 1)
+            le = find(text, "\n", at)
+            if nx < 0 or le >= 0 and nx > le: break
+            at = nx
+    []
+
 on_code_action = (id: int, params: int) -> int:
     d = text_params_doc(params)
     if d < 0: return lsp_reply(id, "[]")
@@ -2185,6 +2426,11 @@ on_code_action = (id: int, params: int) -> int:
             if starts_with(msg, swap[si]) and starts_with(text[p..], swap[si + 1]): out.push(qf_json(d, "Change '{swap[si + 1]}' to '{swap[si + 2]}'", dg, p, p + len(swap[si + 1]), swap[si + 2]))
             si += 3
         if starts_with(msg, "use `not`") and starts_with(text[p..], "!"): out.push(qf_json(d, "Change '!' to 'not'", dg, p, p + 1, "not "))
+        # the spelling a message gives: `@f` for a function itself, `xs.pop(i)` for a member
+        fx = dewy_fixit(d, p, msg)
+        if len(fx) > 0:
+            out.push(qf_json(d, fx[0], dg, to_int(fx[1]) ?? 0, to_int(fx[2]) ?? 0, fx[3]))
+            continue
         if starts_with(msg, "cannot modify loop variable '"):
             nm = quoted(msg, 0)
             if ends_with(docs[d].path, ".dewy"):
@@ -2307,7 +2553,7 @@ on_close = (params: int):
     docs[d].diag_uris = []
     loop o in owners: publish(o)
 
-capabilities = "\{\"textDocumentSync\":\{\"openClose\":true,\"change\":1,\"save\":\{\"includeText\":false\}\},\"hoverProvider\":true,\"definitionProvider\":true,\"referencesProvider\":true,\"documentHighlightProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,\"documentFormattingProvider\":true,\"codeActionProvider\":\{\"codeActionKinds\":[\"quickfix\"]\},\"renameProvider\":\{\"prepareProvider\":true\},\"completionProvider\":\{\"triggerCharacters\":[\".\"]\},\"signatureHelpProvider\":\{\"triggerCharacters\":[\"(\",\",\"],\"retriggerCharacters\":[\",\"]\},\"inlayHintProvider\":true,\"semanticTokensProvider\":\{\"legend\":\{\"tokenTypes\":{sem_legend(sem_types)},\"tokenModifiers\":{sem_legend(sem_mods)}\},\"full\":true\}\}"
+capabilities = "\{\"textDocumentSync\":\{\"openClose\":true,\"change\":1,\"save\":\{\"includeText\":false\}\},\"hoverProvider\":true,\"definitionProvider\":true,\"referencesProvider\":true,\"documentHighlightProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,\"documentFormattingProvider\":true,\"codeActionProvider\":\{\"codeActionKinds\":[\"quickfix\"]\},\"renameProvider\":\{\"prepareProvider\":true\},\"completionProvider\":\{\"triggerCharacters\":[\".\",\"$\",\"/\",\"\\\"\"]\},\"signatureHelpProvider\":\{\"triggerCharacters\":[\"(\",\",\"],\"retriggerCharacters\":[\",\"]\},\"inlayHintProvider\":true,\"codeLensProvider\":\{\"resolveProvider\":false\},\"semanticTokensProvider\":\{\"legend\":\{\"tokenTypes\":{sem_legend(sem_types)},\"tokenModifiers\":{sem_legend(sem_mods)}\},\"full\":true\}\}"
 
 sem_legend = (xs: str[]) -> str:
     out: str[]
@@ -2397,4 +2643,5 @@ lsp_main = ():
         else if method == "textDocument/inlayHint": on_inlay(id, params)
         else if method == "textDocument/semanticTokens/full": on_semantic(id, params)
         else if method == "textDocument/documentSymbol": on_symbols(id, params)
+        else if method == "textDocument/codeLens": on_code_lens(id, params)
         else if id != 0: lsp_error(id, -32601, "unsupported: {method}")

@@ -303,7 +303,7 @@ bind_from_imports = (start: int = 0):
                     loop k, v in modules[im].names: cands.push(k)
                 fatal(nodes[id].pos, "'{name_of(int(nodes[d].sval))}' has no '{name_of(nm)}'{suggestion(name_of(nm), cands)}")
             if ide_on:
-                if syms[s].kind == .fns and syms[s].decl != 0: ide_ref(nodes[id].pos, nm, IK_FN, nodes[int(syms[s].decl)].pos, 0, 0)
+                if syms[s].kind == .fns and syms[s].decl != 0: ide_ref(nodes[id].pos, nm, IK_FN, nodes[int(syms[s].decl)].pos, 0, -int(syms[s].decl))
                 else: ide_sym_ref(id, s)
             if syms[s].kind == .fns:
                 if let ex = modules[m].names.get(alias):
@@ -968,6 +968,9 @@ resolve_type = (tn: int) -> int:
     if nodes[tn].kind == .tname and nodes[tn].aux == -7: return int(nodes[tn].ival)
     k = nodes[tn].kind
     if k == .tquantity: return resolve_quantity_type(tn)
+    # (Dewy's array<T> and dict<K V>: the type words, for the editor)
+    if ide_on and (k == .tarray or k == .tmap) and nodes[tn].pos > 0 and files[pos_file(nodes[tn].pos)].is_dewy:
+        ide_ref(nodes[tn].pos, intern(if k == .tarray: "array" else: "dict"), IK_TYPE, 0, 0, 0)
     if k == .tname:
         nm = int(nodes[tn].name)
         s = 0
