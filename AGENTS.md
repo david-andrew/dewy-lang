@@ -78,6 +78,9 @@ python3 -m tools.core --bootstrap test     # independent C bootstrap + full suit
 9. **Housekeeping.**
    - Commit messages are terse and imperative, with no trailers or
      attribution.
+   - Commit work in progress to your task branch often (squash before
+     handing off). Agents get interrupted by quotas and capacity errors;
+     uncommitted work is easily lost.
    - Scratch work goes in `~/dev/tmp/<task>`, never `/tmp` (tiny quota).
    - Use at most 4 parallel test workers; the machine is shared.
    - Plain `grep` here is ugrep and skips `.dewy` files when recursive; use
