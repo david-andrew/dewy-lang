@@ -60,8 +60,12 @@ python3 -m tools.core --bootstrap test     # independent C bootstrap + full suit
      them.
    - If the budget runs out, stop and report what you learned.
 6. **Surface and semantics belong to David.**
-   - New syntax, spellings, keywords, members, or changes to established
-     semantics need his approval; ask through the coordinator.
+   - Implementing what the design docs already specify (docs/design, and
+     `git show archive/master-pre-restart:site/reference/src/...`) is not a new
+     decision: just do it.
+   - Only genuinely new syntax, spellings, keywords, members, or changes to
+     established semantics need his approval. Note them in your report; the
+     coordinator batches them.
    - Natural extensions clearly implied by the design proceed, and get
      reported.
    - Internal representations are ours to choose.
