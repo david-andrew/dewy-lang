@@ -1503,6 +1503,12 @@ base_case = (n: int, name: int) -> bool:
         if not base_case(kid(n, i), name): return false
     true
 
+# the name of the type a Dewy method belongs to, or ""
+method_type_name = (d: int) -> str:
+    t = int(nodes[kid(d, 0)].a)
+    if t == 0 or nodes[t].kind != .tname: return ""
+    name_of(int(nodes[t].name))
+
 syntactic_void = (body: int) -> bool:
     if body == 0 or nkids(body) == 0: return true
     if has_value_return(body): return false
@@ -4818,11 +4824,16 @@ check_program = (main_path: str):
             if nodes[d].kind != .fn_ or fn_used.has(d) or has_flag(d, NF_EXTERN) or nodes[d].c != 0: continue
             dn = name_of(int(nodes[d].name))
             if dn == "main" or dn == "update" or dn == "draw" or starts_with(dn, "_") or starts_with(dn, "(") or starts_with(dn, "op_"): continue
+            # (a method is a member of its type, there for whoever uses the type: only a private
+            # type's, `_Name`, is held to this rule)
+            if dewy_is_method(d) and not starts_with(method_type_name(d), "_"): continue
             # (its name written anywhere else in the file: an overload used under it, or a use in
             # code for another target, as in `when TARGET == "windows":`)
             if word_count(files[pos_file(nodes[d].pos)].src, dn) > 1: continue
             how = "`{dn}()`"
             if nkids(d) > 0: how = "`{dn}(...)`"
+            if dewy_is_method(d) and nkids(d) > 1: how = "`value.{dn}(...)`"
+            else if dewy_is_method(d): how = "`value.{dn}`"
             warn(nodes[d].pos, "'{dn}' is never called: nothing runs it (call it, as {how} where it should run)")
     # (globals of the program whose fields or elements are changed and that are never read)
     loop g, wp in gcopy_writes:
