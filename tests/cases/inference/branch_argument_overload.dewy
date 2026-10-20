@@ -1,0 +1,17 @@
+# quick
+choose=(x:int64):>int64=>x
+choose=(x:string):>int64=>0
+byte=(x:int8):>int8=>x
+main=()=>{
+    let x:int64=42
+    let y:int64=43
+    let c=true
+    printl(byte(if c -128 else 0))
+    printl(choose(if c x else y))
+    printl(choose(match c {<true>=>x <false>=>y}))
+    printl(choose(if c 42 else 43))
+    printl(choose(if c x+0 else y+1))
+    let n="outer"
+    printl(choose(match x {n:int64=>n _=>42}))
+    printl(choose(if c {let n:int64=42; n} else 42))
+}

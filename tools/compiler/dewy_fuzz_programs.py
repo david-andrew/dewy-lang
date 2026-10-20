@@ -245,9 +245,6 @@ class Cond(Expr):
     other: Expr
 
     def render(self, typed=False):
-        # A parameter type does not reach `if`/`match` branches (a let annotation does):
-        # there a bare literal is an `int` (reported). `typed` is 'arg' in that context.
-        typed = typed is True and self.ty != U
         return f'(if {render(self.test)} {render(self.then, typed)} else {render(self.other, typed)})'
 
     def eval(self, m, env):
@@ -262,7 +259,6 @@ class MatchLit(Expr):
     default: Expr
 
     def render(self, typed=False):
-        typed = typed is True and self.ty != U  # (as for `if` branches)
         arms = ' '.join(f'<{k.value}>=>{render(v, typed)}' for k, v in self.arms)
         return f'(match {render(self.subject)} {{{arms} _=>{render(self.default, typed)}}})'
 

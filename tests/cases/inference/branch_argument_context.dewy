@@ -1,0 +1,14 @@
+# quick
+id=(x:int64):>int64=>x
+take=(x:int64):>int64=>x
+wide=(x:uint64):>uint64=>x
+main=():>void=>{
+    let n:int64=id(int64.min)
+    let k:int64=id(0)
+    let a:int64=(match k {<-1>=>2 <0>=>(17-n) _=>n})
+    printl(a)
+    printl(take((match k {<-1>=>2 <0>=>(17-n) _=>n})))
+    printl(take((if k =? 0 (17-n) else 2)))
+    printl(wide((if k =? 0 9223372036854775808 else 34)))
+    printl(take((match k {n:int64=>{let x:int64=n; 17-x} })))
+}

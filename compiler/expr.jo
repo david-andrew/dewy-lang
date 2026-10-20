@@ -804,6 +804,7 @@ ctx_dependent = (a: int) -> bool:
     if k == .call and nodes[a].type == 0 and nodes[int(nodes[a].a)].kind == .dotname: return true     # .v(args)
     if k == .lambda or k == .none_lit or k == .hole: return true
     if k == .record_lit: return true
+    if (k == .if_ or k == .match_) and not has_flag(a, NF_CHECKED) and files[pos_file(nodes[a].pos)].is_dewy: return true
     if k == .block and has_flag(a, NF_COMPREHENSION): return true
     if k == .array:
         if nkids(a) == 0: return nodes[a].b == 0
@@ -1037,6 +1038,84 @@ find_variant = (si: int, name: int) -> int:
         if int(variants[int(structs[si].variants) + v].name) == name: return v
     -1
 
+# Recognize scalar arithmetic without checking or folding it before context is
+# known. This also lets numeric branches rule out nonnumeric overloads.
+branch_numeric = (a: int, hidden: int[]) -> bool:
+    k = nodes[a].kind
+    if k == .int_lit or k == .float_lit: return true
+    if k == .ident and not (int(nodes[a].name) in hidden):
+        sym = lookup(int(nodes[a].name))
+        if sym != 0 and syms[sym].kind == .local: return is_numeric(int(locals[int(syms[sym].ref)].type))
+        if sym != 0 and syms[sym].kind == .global and globals[int(syms[sym].ref)].type != 0: return is_numeric(int(globals[int(syms[sym].ref)].type))
+    if k == .unary: return branch_numeric(int(nodes[a].a), hidden)
+    if k == .binary:
+        op = nodes[a].op as Tok
+        if op != .plus and op != .minus and op != .star and op != .slash and op != .percent: return false
+        return branch_numeric(int(nodes[a].a), hidden) and branch_numeric(int(nodes[a].b), hidden)
+    false
+
+# Branch bodies must be checked in their own scopes, with the selected parameter
+# type. Only score literal results here; bindings and statements wait until then.
+branch_arg_cost = (a: int, pat: int, binds: mut int[], hidden: int[] = []) -> int:
+    k = nodes[a].kind
+    if k == .block:
+        if nkids(a) == 0: return 0
+        local_hidden = hidden
+        loop statement in kids(a):
+            if nodes[statement].kind == .vardecl:
+                local_hidden.push(int(nodes[statement].name))
+                loop binding in binding_leaves(kids(statement)): local_hidden.push(int(nodes[binding].name))
+        last = kid(a, nkids(a) - 1)
+        if nodes[last].kind == .exprstmt: return branch_arg_cost(int(nodes[last].a), pat, binds, local_hidden)
+        if nodes[last].kind == .if_: return branch_arg_cost(last, pat, binds, local_hidden)
+        return 0
+    if k == .if_ or k == .match_:
+        bodies: int[]
+        local_hidden = hidden
+        if k == .if_:
+            bodies.push(int(nodes[a].b))
+            if nodes[a].c != 0: bodies.push(int(nodes[a].c))
+        else:
+            loop arm in kids(a):
+                bodies.push(int(nodes[arm].b))
+                loop pattern in kids(arm):
+                    if nodes[pattern].name != 0: local_hidden.push(int(nodes[pattern].name))
+        cost = 0
+        loop body in bodies:
+            r = branch_arg_cost(body, pat, binds, local_hidden)
+            if r < 0: return -1
+            cost = max(cost, r)
+        return cost
+    if k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit or k == .none_lit:
+        probe = clone(a)
+        check_expr(probe, 0)
+        return arg_cost(probe, pat, binds)
+    if k == .unary and (nodes[int(nodes[a].a)].kind == .int_lit or nodes[int(nodes[a].a)].kind == .float_lit):
+        # The sign is part of a literal's range, e.g. -128 fits int8 but 128 does not.
+        probe = clone(a)
+        check_expr(probe, 0)
+        return arg_cost(probe, pat, binds)
+    if (k == .binary or k == .unary) and branch_numeric(a, hidden):
+        left = branch_arg_cost(int(nodes[a].a), pat, binds, hidden)
+        if left < 0 or k == .unary: return left
+        right = branch_arg_cost(int(nodes[a].b), pat, binds, hidden)
+        if right < 0: return -1
+        return max(left, right)
+    if k == .ident and not (int(nodes[a].name) in hidden):
+        sym = lookup(int(nodes[a].name))
+        t = 0
+        if sym != 0 and syms[sym].kind == .local: t = int(locals[int(syms[sym].ref)].type)
+        else if sym != 0 and syms[sym].kind == .global: t = int(globals[int(syms[sym].ref)].type)
+        # Type-test branches may narrow optionals/unions; let their own scope
+        # establish that view. Ordinary typed values already constrain overloads.
+        if t != 0 and not has_var(t) and not is_union(t) and tkind(t) != .opt and not is_fn_type(t):
+            probe = clone(a)
+            nodes[probe].type = i32(t)
+            add_flag(probe, NF_CHECKED)
+            return arg_cost(probe, pat, binds)
+    if types[prune(pat)].kind == .param: return 3
+    0
+
 arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
     p = prune(pat)
     pk = types[p].kind
@@ -1047,6 +1126,7 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
             if bundled_bigint_type(target): return 0
             return -1
         k = nodes[a].kind
+        if k == .if_ or k == .match_: return branch_arg_cost(a, pat, binds)
         if dewy_set_literal(a):
             target = p
             if pk == .param and binds[int(types[p].id)] != 0: target = prune(binds[int(types[p].id)])
