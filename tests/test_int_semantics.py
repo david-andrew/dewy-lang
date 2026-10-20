@@ -137,7 +137,7 @@ def run(program, op, x, y=0):
     ('compound', MAX-1, 1, MAX), ('wrap', MAX, 1, MIN),
     pytest.param('identity', 1, 2, 'int int int int64\nint int int', marks=pytest.mark.core_quick),
     ('format', MIN, 0, f'{MIN} {MIN}'),
-    ('indices', 0, 0, '[10, 30]\n[11, 20, 32]'), ('fixed-u-div', 0, 0, MAX),
+    ('indices', 0, 0, '[10 30]\n[11 20 32]'), ('fixed-u-div', 0, 0, MAX),
     ('index', 2, 0, '30 3'),
 ])
 def test_int_values(int_program, op, x, y, expected):

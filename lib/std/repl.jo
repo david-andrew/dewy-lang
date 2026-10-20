@@ -269,3 +269,8 @@ __repl_unwind = ():
 # what the prompt shows for an expression's value
 __repl_show = (x): print(x)
 __repl_show = (x: str): print("\"{x}\"")
+# (Dewy's: as its literal syntax, a string quoted)
+__dewy_repl_show = (x):
+    buf: u8[]
+    __dewy_fmt_elem(buf, x)
+    print(str_from_bytes(buf))

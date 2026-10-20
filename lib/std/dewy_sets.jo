@@ -86,3 +86,9 @@ hash[T] = (s: Set[T]) -> u64:
 __fmt[T] = (buf: mut u8[], s: Set[T]):
     __buf_append_str(buf, "set")
     __fmt(buf, __dewy_set_values(s))
+
+__dewy_fmt[T] = (buf: mut u8[], s: Set[T]):
+    __buf_append_str(buf, "set")
+    __dewy_fmt(buf, __dewy_set_values(s))
+
+__dewy_fmt_elem[T] = (buf: mut u8[], s: Set[T]): __dewy_fmt(buf, s)

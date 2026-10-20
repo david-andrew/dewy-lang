@@ -3120,7 +3120,7 @@ def test_core_check_and_format_boundary(compiler, tmp_path):
     (('{\n# A comment inside the final expression.\nlet x=20\nx+22\n}\n'
      'f=(x)=>{\nx+2\n}\nf(40)\n[loop i in [0..3) i*2]\n'
      'let text="""first\nan unmatched " inside triple quotes\nlast"""\ntext.length >? 10\n'
-     'let raw=r"\\hello"\nraw.length\n'), ['42', '42', '[0, 2, 4]', 'true', '6'], []),
+     'let raw=r"\\hello"\nraw.length\n'), ['42', '42', '[0 2 4]', 'true', '6'], []),
     (('let xs=[20 22]\n{xs[0]=99 panic("restore values")}\nxs[0]\n'
      'missing_repl_name\nxs[1]\nbroken=()=>missing_repl_name\n'
      'explode=():>int64=>{panic("restore declarations") return 42}\n'
@@ -3131,7 +3131,7 @@ def test_core_check_and_format_boundary(compiler, tmp_path):
      ['int', '0', '42', '1'], []),
     (('let calls=0\nnext=()=>{calls+=1 return [20 22]}\nconst saved=next()\n'
      'saved\nsaved\ncalls\nsaved[0]=99\nsaved\nlet saved=[42]\nsaved\n'),
-     ['[20, 22]', '[20, 22]', '1', '[20, 22]', '[42]'], ['cannot modify const']),
+     ['[20 22]', '[20 22]', '1', '[20 22]', '[42]'], ['cannot modify const']),
 ], ids=['values', 'bindings', 'types', 'multiline', 'recovery', 'query-effects', 'constant-values'])
 def test_core_repl_inputs(compiler, tmp_path, text, expected, errors):
     env = {**os.environ, 'TMPDIR': str(tmp_path)}

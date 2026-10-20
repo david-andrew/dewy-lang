@@ -270,7 +270,9 @@ repl_compile = (text: str, n: int) -> ReplOut:
                 out.type = type_str(zonk(t), true)
                 if len(repl_sig) > 0: out.type = repl_sig
                 if not repl_sig_query:
-                    shown = synth_call("__repl_show", [int(nodes[last].a)], nodes[last].pos)
+                    show = "__repl_show"
+                    if dewy_at(nodes[last].pos): show = "__dewy_repl_show"
+                    shown = synth_call(show, [int(nodes[last].a)], nodes[last].pos)
                     check_stmt(shown)
                     nodes[last] = nodes[shown]
     scope_reset(mark)

@@ -94,7 +94,7 @@ __mi_from_float = (x: f64) -> __dewy_int:
 
 __mi_format = (buf: mut u8[], a: __dewy_int):
     if (a as int) & 1 == 0: __fmt(buf, ((a as int) >> 1))
-    else: __buf_append_str(buf, __bi.str(__mi_payload(a)[0]))
+    else: __buf_append_str(buf, __bi.__as__(__mi_payload(a)[0]))
 
 
 __mi_hash = (a: __dewy_int) -> int:

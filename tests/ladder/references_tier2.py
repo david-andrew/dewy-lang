@@ -6,6 +6,14 @@ from fractions import Fraction
 import base64,binascii,csv,hashlib,heapq,html,io,json,math,re,sqlite3,struct,sys,unicodedata
 ROOT=Path(__file__).parent
 ORACLES={}
+def dewy(v,inside=False):
+ """A value as Dewy prints it: its literal syntax, a string quoted only inside a structure."""
+ if isinstance(v,str):return '"'+v.translate({92:'\\\\',34:'\\"',123:'\\{',10:'\\n',9:'\\t',13:'\\r'})+'"' if inside else v
+ if isinstance(v,bool):return 'true' if v else 'false'
+ if v is None:return 'none'
+ if isinstance(v,dict):return '['+' '.join(f'{dewy(k,True)} -> {dewy(x,True)}' for k,x in v.items())+']'
+ if isinstance(v,(list,tuple)):return '['+' '.join(dewy(x,True) for x in v)+']'
+ return str(v)
 def oracle(n):
     def register(f):ORACLES[n]=f;return f
     return register
@@ -150,7 +158,7 @@ def protocol():
 def crc():
     data=bytes((i*37+11)%256 for i in range(1024));return f'{binascii.crc32(data)} {len(data)+1} {binascii.crc32(bytes([255]))}'
 @oracle(18)
-def sha():return '\n'.join(json.dumps(list(struct.unpack('>8I',hashlib.sha256(m).digest()))) for m in [b'abc',b'a'*1000,b'x'*56])
+def sha():return '\n'.join(dewy(list(struct.unpack('>8I',hashlib.sha256(m).digest()))) for m in [b'abc',b'a'*1000,b'x'*56])
 @oracle(19)
 def b64():
     encoded=[base64.b64encode(bytes((i*53+n)%256 for i in range(n))) for n in range(130)]

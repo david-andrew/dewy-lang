@@ -51,6 +51,25 @@ __dewy_range_value = (it: mut __DewyRangeIter) -> int:
     it.cursor += it.delta
     value
 
+# (Dewy's range literal, its bounds included: [0..2], [1,3..9]; an empty one as [0..0))
+__dewy_fmt = (buf: mut u8[], r: IntRange):
+    __buf_byte(buf, '[')
+    __fmt(buf, r._first)
+    if r._empty or r._stride == 0:
+        __buf_append_str(buf, "..")
+        __fmt(buf, r._first)
+        __buf_byte(buf, ')')
+        return
+    delta = if r._up: r._stride else: u64(0) - r._stride
+    if r._stride != 1 or not r._up:
+        __buf_byte(buf, ',')
+        __fmt(buf, int(u64(r._first) + delta))
+    __buf_append_str(buf, "..")
+    __fmt(buf, int(u64(r._first) + (r._count - 1) * delta))
+    __buf_byte(buf, ']')
+
+__dewy_fmt_elem = (buf: mut u8[], r: IntRange): __dewy_fmt(buf, r)
+
 # Open counters can accompany a finite sequence or a condition. Keep exhaustion
 # separate from ordinary iterator completion: requesting another value must
 # diagnose overflow, while stopping the combined loop needs no extra value.

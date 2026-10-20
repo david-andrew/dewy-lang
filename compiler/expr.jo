@@ -23,7 +23,7 @@ enum IN:
     hash, alignof, unreachable, arrcap, fmt_struct, sqrt, vec_ctor, cfn_cast, wasm_call, callc, floor_,
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
     read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
-    static_assert, runtime_assert, dewy_print
+    static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big, rational2math
@@ -43,6 +43,8 @@ intrinsics = [
     Intrinsic("__dewy_iter_pair", .dewy_iter_pair, false),
     Intrinsic("__dewy_set", .dewy_set, false),
     Intrinsic("__dewy_print", .dewy_print, false),
+    Intrinsic("__dewy_fmt_value", .dewy_fmt, false),
+    Intrinsic("__dewy_fmt_elem_value", .dewy_fmt_elem, false),
     Intrinsic("len", .len, true), Intrinsic("cap", .arrcap, true), Intrinsic("push", .push, true),
     Intrinsic("pop", .pop, true), Intrinsic("insert", .insert, true), Intrinsic("remove", .remove, true),
     Intrinsic("clear", .clear, true), Intrinsic("reserve", .reserve, true), Intrinsic("resize", .resize, true),
@@ -3291,6 +3293,23 @@ frame_call_check = (n: int, decl: int):
 
 fmt_plain: {int: bool} = {}       # (__fmt_fields nodes that format the fields, not the program's str)
 
+# (an __fmt_fields node's aux2: 1 inside a container, FMT_DEWY in Dewy's literal syntax)
+const FMT_DEWY = 2
+
+# a field formatting leaves out: a record literal's method, and in Dewy any function
+fmt_hidden = (ft: int, aux2: i32) -> bool:
+    dewy_method_field(ft) != 0 or (int(aux2) & FMT_DEWY != 0 and is_fn_type(ft))
+
+# a minted Dewy type (`type of error & [...]`): its values print with its name, Name[x=1]
+fmt_minted = (si: int) -> bool:
+    d = int(structs[si].decl)
+    d != 0 and nodes[d].kind == .struct_ and nodes[d].a != 0 and dewy_at(nodes[d].pos)
+
+# the library's last-resort __fmt, (buf, x): __fmt_fields(buf, x), rather than one for the type
+fmt_fallback = (inst: int) -> bool:
+    sig = fn_sig(int(fns[inst].decl))
+    sig.params.len() == 2 and tkind(sig.params[1]) == .param
+
 # the program's `str` for type t (str = (b: Big) -> str, beside the type), as an instance, or 0
 program_str_fn = (t0: int, pos: int) -> int:
     t = prune(t0)
@@ -4292,7 +4311,10 @@ fmt_part = (part: int, pos: int):
         if is_int(t) and nodes[e].kind == .binary and nodes[e].op == i32(int(Tok.slash)) and len(spec) > 0 and (spec[len(spec) - 1] == '%' or spec[len(spec) - 1] == 'f' or find_byte(spec, '.') >= 0):
             warn(nodes[e].pos, "this divides whole numbers, dropping the fraction before it is formatted: `f64(a) / b` keeps it")
         nodes[part].sym = i32(resolve_by_types(intern("__fmt_spec"), [bt, t, T_STR], pos, true))
-    else: nodes[part].sym = i32(resolve_by_types(intern("__fmt"), [bt, t], pos, true))
+    else:
+        writer = "__fmt"
+        if dewy_at(pos): writer = "__dewy_fmt"
+        nodes[part].sym = i32(resolve_by_types(intern(writer), [bt, t], pos, true))
 
 is_dewy_grapheme_iter = (t: int) -> bool:
     p = prune(t)
@@ -4669,7 +4691,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         # (a type with the program's own `str = (b: Big) -> str`: shown as the text it gives,
         # and to_text, while it writes, as its fields: `if __text_exact: fields else: str(x)`)
         sf = 0
-        if not fmt_plain.has(n): sf = program_str_fn(t, nodes[n].pos)
+        if not fmt_plain.has(n) and int(nodes[n].aux2) & FMT_DEWY == 0: sf = program_str_fn(t, nodes[n].pos)
         if sf != 0:
             pos = nodes[n].pos
             plain = nodes.len()
@@ -4701,7 +4723,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             check_struct_fields(si)
             loop i in [0..int(structs[si].nfields)):
                 ft = int(fields[int(structs[si].fields) + i].type)
-                if dewy_method_field(ft) == 0: fts.push(ft)
+                if not fmt_hidden(ft, nodes[n].aux2): fts.push(ft)
         else if k == .tuple:
             loop i in [0..int(types[t].nargs)): fts.push(targ(t, i))
         else if k == .enum_:
@@ -4714,8 +4736,12 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         else: fatal(nodes[n].pos, "cannot format a value of type {dt(t)}")
         refs: int[]
         # (a union shows just its value: quoted inside a container, as a string would be)
+        dewy = int(nodes[n].aux2) & FMT_DEWY != 0
+        top = is_union(t) and int(nodes[n].aux2) & 1 == 0
         fname = intern("__fmt_elem")
-        if is_union(t) and nodes[n].aux2 == 0: fname = intern("__fmt")
+        if top: fname = intern("__fmt")
+        if dewy and top: fname = intern("__dewy_fmt")
+        else if dewy: fname = intern("__dewy_fmt_elem")
         loop ft in fts:
             ref = mk(.fnref, nodes[n].pos)
             nodes[ref].sym = i32(resolve_by_types(fname, [bt, ft], nodes[n].pos, true))
@@ -4873,6 +4899,46 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         nodes[callee].name = i32(intern("__fmt"))
         nodes[c].a = i32(callee)
         set_list(c, args)
+        nodes[n] = nodes[c]
+        return check_expr(n, expected)
+    else if id == .dewy_fmt or id == .dewy_fmt_elem:
+        # __dewy_fmt_value(buf, x): Dewy's text for what the library's overloads leave: an
+        # object through its `__as__` to string, or field by field as [x=1 name="q"]; a union
+        # as its member; anything else (numbers, library types) as the library writes it
+        elem = id == .dewy_fmt_elem
+        nargs_check(n, nargs, 2, 2, "__dewy_fmt_value")
+        arg_type(args, 0, 0)
+        t = arg_type(args, 1, 0)
+        pos = nodes[n].pos
+        if is_quantity(t):
+            nodes[n] = nodes[bc_call("__dewy_fmt", [args[0], quantity_number(args[1])], pos)]
+            return check_expr(n, 0)
+        bt = mk_array(T_U8)
+        k = types[t].kind
+        own = is_union(t) or k == .tuple
+        if k == .struct_:
+            conv = as_conversion(t, T_STR)
+            if conv != 0:
+                inner = mk(.call, pos)
+                nodes[inner].a = i32(bc_ident("__as__", pos))
+                set_list(inner, [args[1]])
+                nodes[inner].type = i32(resolve_fn_call(inner, intern("__as__"), [conv], [args[1]], T_STR))
+                add_flag(inner, NF_CHECKED)
+                nodes[n] = nodes[bc_call("__buf_append_str", [args[0], inner], pos)]
+                return check_expr(n, 0)
+            # (a library type the library writes, as a BigInt: as it writes it)
+            jo = resolve_by_types(intern("__fmt"), [bt, t], pos, false)
+            own = jo == 0 or fmt_fallback(jo)
+        if own:
+            nodes[n].aux = i32(int(IN.fmt_struct))
+            nodes[n].aux2 = i32(FMT_DEWY)
+            if elem: nodes[n].aux2 = i32(FMT_DEWY | 1)
+            return check_intrinsic(n, .fmt_struct, args, expected)
+        # (inside a structure, a container as it is on its own: a call, which copies a
+        # fixed-size array into the T[] the library's overload takes)
+        writer = "__fmt"
+        if elem: writer = "__dewy_fmt"
+        c = bc_call(writer, args, pos)
         nodes[n] = nodes[c]
         return check_expr(n, expected)
     else if id == .fill:
@@ -7240,6 +7306,16 @@ check_expr = (n: int, expected: int) -> int:
                     add_flag(n, NF_CHECKED)
                     last_checked = n
                     return t
+            # (any other value converts to string as it prints: "{x}")
+            if tt == T_STR and fk != .void_ and fk != .typeval and fk != .module:
+                text = mk(.str_lit, nodes[n].pos)
+                nodes[text].aux = 1
+                part = mk(.pair, nodes[n].pos)
+                nodes[part].a = i32(a)
+                nodes[part].sval = -1
+                set_list(text, [part])
+                nodes[n] = nodes[text]
+                return check_expr(n, expected)
         ok = false
         if (fk == .ptr or fk == .int_ or fk == .null_ or fk == .cfn) and (tk == .ptr or tk == .int_ or tk == .cfn): ok = true
         if (fk == .int_ or fk == .float_) and (tk == .int_ or tk == .float_):

@@ -763,6 +763,48 @@ __fmt[T] = (buf: mut u8[], p: *T):
 
 # structs, enums, tuples
 __fmt = (buf: mut u8[], x): __fmt_fields(buf, x)
+
+# ---------------- Dewy values ----------------
+# Dewy writes a value as its literal syntax: [1 2 3], [x=1 name="q"]; a string bare on its own
+# and quoted inside a structure. (__dewy_fmt: a value on its own; __dewy_fmt_elem: inside one)
+__dewy_fmt = (buf: mut u8[], s: str): __buf_append_str(buf, s)
+
+__dewy_fmt_elem = (buf: mut u8[], s: str):
+    __buf_byte(buf, '"')
+    loop c in s:
+        if c == '"': __buf_append_str(buf, "\\\"")
+        else if c == '\\': __buf_append_str(buf, "\\\\")
+        else if c == '{{': __buf_append_str(buf, "\\\{")
+        else if c == '\n': __buf_append_str(buf, "\\n")
+        else if c == '\t': __buf_append_str(buf, "\\t")
+        else if c == '\r': __buf_append_str(buf, "\\r")
+        else if c == 0: __buf_append_str(buf, "\\0")
+        else if c < 32 or c == 127:
+            # (other control characters, which would change the terminal: as \u{1b})
+            __buf_append_str(buf, "\\u\{")
+            __fmt_hex(buf, u64(c), 0, false)
+            __buf_byte(buf, '}}')
+        else: __buf_byte(buf, int(c))
+    __buf_byte(buf, '"')
+
+__dewy_fmt[T] = (buf: mut u8[], xs: T[]):
+    __buf_byte(buf, '[')
+    loop i in 0.. and x in xs:
+        if i > 0: __buf_byte(buf, ' ')
+        __dewy_fmt_elem(buf, x)
+    __buf_byte(buf, ']')
+
+__dewy_fmt[T] = (buf: mut u8[], x: T?):
+    if let v = x: __dewy_fmt(buf, v)
+    else: __buf_append_str(buf, "none")
+
+__dewy_fmt_elem[T] = (buf: mut u8[], x: T?):
+    if let v = x: __dewy_fmt_elem(buf, v)
+    else: __buf_append_str(buf, "none")
+
+# objects, unions, tuples and numbers
+__dewy_fmt = (buf: mut u8[], x): __dewy_fmt_value(buf, x)
+__dewy_fmt_elem = (buf: mut u8[], x): __dewy_fmt_elem_value(buf, x)
 # (true while to_text writes: a type with a str of the program's own is written as its fields,
 # for from_text to read back; shown, it is the text its str gives)
 __text_exact = false

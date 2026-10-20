@@ -1,7 +1,7 @@
 # exit: 42
 let source:array<int64>=[20]
 Marker:type=[id:int64]
-__fmt=(@buf:array<uint8> value:Marker):>void=>{source[0]=99 buf.push(120 as uint8)}
+__as__=(value:Marker):>string=>{source[0]=99 return "x"}
 read=(value:array<int64>)=>{let text="{Marker[0]}" return value[0]}
 through=(@value:array<int64>)=>read(value)
 main=()=>{source.push(1) let before=through(@source)

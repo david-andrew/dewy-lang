@@ -310,7 +310,7 @@ const saved=values
 values[0]=99
 let editable=saved
 editable[0]=0
-printl(saved) # [20, 22]
+printl(saved) # [20 22]
 ```
 
 Constant expressions can also supply fixed-array lengths and `$assert`
@@ -2088,9 +2088,14 @@ may span lines. Comment markers inside strings are string contents.
 let total = 1 #{ inline }# + 2
 ```
 
-Printing, interpolation and `string(value)` show a present optional as its payload:
-an optional string prints bare on its own and quoted inside a container or record.
-An absent optional prints `none`.
+Printing, interpolation, `string(value)` and `value as string` show a value as
+its literal syntax: `[1 2 3]`, `set["a" "b"]`, `["a" -> 1]`, a range as `[0..2]`
+or `[1,3..9]`, and an object field by field, `[x=1 name="q"]`. A minted type
+adds its name, `Fault[code=7]`, or is just `Unit` without fields. A type that
+declares `__as__ = ():>string` shows that text instead, and function fields are
+left out. A string prints bare on its own and quoted, with its escapes, inside a
+structure (`["a\tb"]`). A present optional or a union shows its member; an
+absent optional prints `none`.
 
 `format(value spec)` formats machine numbers or text, including inside an
 interpolation. The specification is an ordinary string and may be computed:

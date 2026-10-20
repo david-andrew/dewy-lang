@@ -1005,18 +1005,19 @@ def show(value, nested=False) -> str:
     if isinstance(value, str):
         if not nested:
             return value
-        table = {'"': '\\"', '\\': '\\\\', '\n': '\\n', '\t': '\\t', '\r': '\\r'}
+        table = {'"': '\\"', '\\': '\\\\', '{': '\\{', '\n': '\\n', '\t': '\\t', '\r': '\\r'}
         return '"' + ''.join(table.get(c, c) for c in value) + '"'
     if isinstance(value, list):
-        return '[' + ', '.join(show(x, True) for x in value) + ']'
+        return '[' + ' '.join(show(x, True) for x in value) + ']'
     if isinstance(value, Rec):
+        # Dewy's literal syntax: a minted type (only Bad) with its name, an alias's fields alone
         names = list(value.fields) if value.name else sorted(value.fields)
-        inner = ', '.join(f'{n}={show(value.fields[n], True)}' for n in names)
-        return f'{value.name or "<record>"}({inner})'
+        inner = ' '.join(f'{n}={show(value.fields[n], True)}' for n in names)
+        return f'{value.name if value.name == "Bad" else ""}[{inner}]'
     if isinstance(value, dict):
-        return '{' + ', '.join(f'{show(k, True)}: {show(v, True)}' for k, v in value.items()) + '}'
+        return '[' + ' '.join(f'{show(k, True)} -> {show(v, True)}' for k, v in value.items()) + ']'
     if isinstance(value, DSet):
-        return 'set[' + ', '.join(show(x, True) for x in value.items) + ']'
+        return 'set[' + ' '.join(show(x, True) for x in value.items) + ']'
     raise InvalidProgram(f'cannot print {type(value).__name__}')
 
 

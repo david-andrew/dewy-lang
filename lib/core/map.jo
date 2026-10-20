@@ -377,6 +377,22 @@ __fmt[K, V] = (buf: mut u8[], m: Map[K, V]):
         __fmt_elem(buf, m.vals[i])
     __buf_byte(buf, '}}')
 
+# (Dewy's dictionary literal: ["a" -> 1 "b" -> 2])
+__dewy_fmt[K, V] = (buf: mut u8[], m: Map[K, V]):
+    __buf_byte(buf, '[')
+    ng = m.gone.len()
+    first = true
+    loop i in 0.. and k in m.__keys:
+        if i < ng and m.gone[i]: continue
+        if not first: __buf_byte(buf, ' ')
+        first = false
+        __dewy_fmt_elem(buf, k)
+        __buf_append_str(buf, " -> ")
+        __dewy_fmt_elem(buf, m.vals[i])
+    __buf_byte(buf, ']')
+
+__dewy_fmt_elem[K, V] = (buf: mut u8[], m: Map[K, V]): __dewy_fmt(buf, m)
+
 # ({loop w in words: w: len(w)}: a map from its (key, value) pairs; a later key replaces an earlier)
 __map_of[K, V] = (pairs: (K, V)[]) -> {K: V}:
     m: {K: V}

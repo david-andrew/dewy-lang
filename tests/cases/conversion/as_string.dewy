@@ -1,0 +1,12 @@
+# quick
+# `x as string` is the text `x` prints as.
+let Point:type = [x:int64 y:int64]
+let Named:type = [x:int64 __as__ = ():>string => "#{x}"]
+let main = () => {
+    let parts:array<string> = [5 as string  true as string  (1/3) as string  [1 2] as string]
+    printl(parts)
+    let record:string = Point(1 2) as string
+    let named:string = Named(4) as string
+    let nested = [p=Point(3 4) tags=["a"]] as string
+    printl"{record} {named} {nested} {record.length}"
+}

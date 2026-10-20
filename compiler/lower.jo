@@ -3390,19 +3390,28 @@ gen_fmt_struct = (e: int) -> Val:
     va = place_addr(gen_place(args[1], false), t)
     fi = 0
     k = types[t].kind
+    # (Dewy's literal syntax: [x=1 name="q"], no type name and no commas)
+    dewy = int(nodes[e].aux2) & FMT_DEWY != 0
     if k == .struct_:
         si = int(types[t].st)
         layout(t)
-        lit(ba, "{structs[si].name}(")
+        # (a minted type with its name: Payload[code=1], or Unit with no fields)
+        name = if not dewy or fmt_minted(si): structs[si].name else: ""
+        shown = nkids2(e)
+        if dewy and shown == 0 and name != "": lit(ba, name)
+        else if dewy: lit(ba, "{name}[")
+        else: lit(ba, "{name}(")
         loop i in [0..int(structs[si].nfields)):
             f = int(structs[si].fields) + i
-            if dewy_method_field(int(fields[f].type)) != 0: continue
+            if fmt_hidden(int(fields[f].type), nodes[e].aux2): continue
             sep = ""
-            if fi > 0: sep = ", "
+            if fi > 0 and dewy: sep = " "
+            else if fi > 0: sep = ", "
             lit(ba, "{sep}{name_of(int(fields[f].name))}=")
             fmt_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), field_val_addr(f, va))
             fi += 1
-        lit(ba, ")")
+        if not dewy: lit(ba, ")")
+        else if shown > 0 or name == "": lit(ba, "]")
     else if k == .tuple:
         lit(ba, "(")
         loop i in [0..int(types[t].nargs)):

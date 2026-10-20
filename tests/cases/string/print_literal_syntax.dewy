@@ -1,0 +1,33 @@
+# exit: 7
+# quick
+# Values print as their literal syntax; a string is bare on its own and quoted,
+# with its literal's escapes, inside a structure.
+let Point:type = [x:int64 y:int64]
+let Grid:type = [cells:array<int64 length=3> name:string]
+let Shown:type = [x:int64 __as__ = ():>string => "<{x}>"]
+let Fault:type = type of error & [code:int64 = 7]
+let Bare:type = type of error
+let Box:type = [value:int64 on_change:<(v:int64):>int64>]
+let main = ():>int64 => {
+    printl(5)
+    printl([1 2 3])
+    printl(set["ab" "c"])
+    printl(["k" -> Point(1 2)])
+    printl'{[true false]} and {[name="q"]}'
+    printl("a\tb")
+    printl(["a\tb" "q\"t" "back\\slash" "\{brace}" "line\nnext" "nul\0" "esc\u{1b}"])
+    let maybe:array<string|none> = ["a" none]
+    printl(maybe)
+    let either:string|int64 = "bare"
+    printl"{either} {[either]}"
+    printl(Grid([1 2 3] "g"))
+    printl([Shown(1) Shown(2)])
+    printl"{Fault()} {[Fault(3)]} {Bare}"
+    printl(Box(1 (v:int64):>int64 => v))
+    let empty:dict<string int64> = []
+    let none_set:set<int64> = set[]
+    printl"{empty} {none_set} {[[1 2] [3]]}"
+    printl"{[0..3)} {[1,3..9]} {[5,4..1]}"
+    let text:string = [1 2 3] as string
+    return text.length
+}

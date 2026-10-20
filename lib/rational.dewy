@@ -91,7 +91,7 @@ divmod=(a:Rational b:Rational):>RationalDivision=>{
 _floordiv=(a:Rational b:Rational):>BigInt=>floor(_div(a b))
 _mod=(a:Rational b:Rational):>Rational=>divmod(a b).remainder
 
-str=(value:Rational):>string=>{
+__as__=(value:Rational):>string=>{
     if value.denominator =? 1 return "{value.numerator}"
     return "{value.numerator}/{value.denominator}"
 }
