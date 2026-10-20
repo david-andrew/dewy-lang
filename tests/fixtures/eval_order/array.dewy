@@ -1,0 +1,6 @@
+R:type=[a:int64 b:int64 c:int64 d:int64 e:int64 f:int64]
+read=(r:R unused:int64):>int64=>r.a+r.f
+write=(@r:R):>int64=>{r.a=100 r.f=200 return 0}
+read_a=(a:array<int64> unused:int64)=>a[0]
+write_a=(@a:array<int64>)=>{a[0]=100 return 0}
+main=()=>{let a=[42] return read_a(a write_a(@a))}

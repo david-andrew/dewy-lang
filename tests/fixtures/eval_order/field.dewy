@@ -1,0 +1,5 @@
+R:type=[a:int64 b:int64 c:int64 d:int64 e:int64 f:int64]
+read=(r:R unused:int64):>int64=>r.a+r.f
+write=(@r:R):>int64=>{r.a=100 r.f=200 return 0}
+Outer:type=[left:R right:R]
+main=()=>{let a=Outer[R[20 0 0 0 0 22] R[1 2 3 4 5 6]] return read(a.left write(@a.left))}

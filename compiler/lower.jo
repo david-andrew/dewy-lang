@@ -1138,7 +1138,7 @@ borrow_may_change = (a: int, args: int[], i: int, callee: int) -> bool:
         w = fn_writes(callee)
         if w.all or w.globals.contains(int(nodes[n].sym)): return true
         loop j in [i + 1..args.len()):
-            if not calls_leave(args[j], n, false): return true
+            if may_write_root(args[j], n, a): return true
         return false
     if nodes[n].aux != i32(int(SK.local)): return false
     if held_views.contains(int(nodes[n].sym)): return false
@@ -1147,6 +1147,10 @@ borrow_may_change = (a: int, args: int[], i: int, callee: int) -> bool:
     # including this call and its remaining arguments. The view needs no retain.
     if flags & LF_ELEMENTVIEW != 0: return false
     if flags & (LF_SHARED | LF_CAPTURE | LF_BYREF | LF_ALIAS) != 0: return true
+    # Even an ordinary local can be changed by evaluating a later argument.
+    # Compare places, not just roots: disjoint fields/elements keep borrowing.
+    loop j in [i + 1..args.len()):
+        if may_write_root(args[j], n, a): return true
     if flags & LF_MUTPARAM == 0: return false
     # A mutable parameter may alias a caller's global. A read-only direct call
     # cannot replace it when it writes no globals and invokes no unknown code.
@@ -4722,7 +4726,11 @@ raw_view = (n: int) -> bool:
     fk = tkind(ntype(a))
     (tk == .ptr or tk == .int_) and (fk == .array or fk == .str_)
 
-may_write_root = (n: int, rn: int) -> bool:
+write_overlaps = (target: int, root: int, place: int) -> bool:
+    w = place_var(target)
+    w != 0 and same_var(w, root) and (place == 0 or steps_overlap(place_steps(target), place_steps(place)))
+
+may_write_root = (n: int, rn: int, place: int = 0) -> bool:
     if n <= 0: return false
     k = nodes[n].kind
     if k == .lambda: return false
@@ -4733,26 +4741,21 @@ may_write_root = (n: int, rn: int) -> bool:
             w = fn_writes(f)
             if w.all or (glob and w.globals.contains(int(nodes[rn].sym))) or (mutparam and w.globals.len() > 0): return true
     if k == .assign:
-        w = write_root(int(nodes[n].a))
-        if w != 0 and same_var(w, rn): return true
+        if write_overlaps(int(nodes[n].a), rn, place): return true
     if k == .intrinsic and nkids(n) > 0:
         id = nodes[n].aux as IN
         if (id == .fmt_struct or id == .json_fields) and (glob or mutparam): return true
         if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend or id == .arrdata:
-            w = write_root(kid(n, 0))
-            if w != 0 and same_var(w, rn): return true
+            if write_overlaps(kid(n, 0), rn, place): return true
     if k == .addr or (k == .cast or k == .conv) and raw_view(n):
-        w = write_root(int(nodes[n].a))
-        if w != 0 and same_var(w, rn): return true
+        if write_overlaps(int(nodes[n].a), rn, place): return true
     if k == .for_ and has_flag(n, NF_MUT):
-        w = write_root(int(nodes[n].a))
-        if w != 0 and same_var(w, rn): return true
+        if write_overlaps(int(nodes[n].a), rn, place): return true
     if k == .call or (k == .pair and nodes[n].sym > 0):
         mm = checked_call_mutmask(n)
         loop i in [0..nkids(n)):
             if mm & (1 << i) != 0:
-                w = write_root(kid(n, i))
-                if w != 0 and same_var(w, rn): return true
+                if write_overlaps(kid(n, i), rn, place): return true
         aux = if k == .pair: 0 else: int(nodes[n].aux)
         if mwr_direct: pass
         else if aux == 1 or aux == 4:
@@ -4767,15 +4770,15 @@ may_write_root = (n: int, rn: int) -> bool:
     child_c = int(nodes[n].c)
     child_d = int(nodes[n].d)
     more_children = k != .for_
-    if may_write_root(child_a, rn): return true
-    if may_write_root(child_b, rn): return true
+    if may_write_root(child_a, rn, place): return true
+    if may_write_root(child_b, rn, place): return true
     if more_children:
-        if may_write_root(child_c, rn): return true
-        if may_write_root(child_d, rn): return true
+        if may_write_root(child_c, rn, place): return true
+        if may_write_root(child_d, rn, place): return true
     loop i in [0..nkids(n)):
-        if may_write_root(kid(n, i), rn): return true
+        if may_write_root(kid(n, i), rn, place): return true
     loop i in [0..nkids2(n)):
-        if may_write_root(kid2(n, i), rn): return true
+        if may_write_root(kid2(n, i), rn, place): return true
     false
 
 # do the calls in n leave the variable at ident node rn (a global or a mut parameter) alone:

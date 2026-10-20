@@ -1,0 +1,6 @@
+R:type=[a:int64 b:int64 c:int64 d:int64 e:int64 f:int64]
+read=(r:R unused:int64):>int64=>r.a+r.f
+write=(@r:R):>int64=>{r.a=100 r.f=200 return 0}
+let a=R[20 0 0 0 0 22]
+default_read=(r:R unused:int64=write(@a))=>r.a+r.f
+main=()=>default_read(a)
