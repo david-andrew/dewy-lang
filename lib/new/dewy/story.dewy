@@ -38,7 +38,7 @@ Bookmark: type = [position: StorySave background: vec4 shown: dict<string string
 Reading: type = [
     script: Story step: StoryStep = StoryStep[kind = StoryKind.end]
     background: vec4 = rgb(0.1 0.1 0.14) shown: dict<string string> = []
-    bookmark: Bookmark
+    bookmark: Bookmark = Bookmark[script.save() background shown]
 ]
 advance = (@reading: Reading) :> void => {
     loop true {

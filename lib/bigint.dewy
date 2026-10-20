@@ -2,7 +2,7 @@
 # Magnitude arithmetic is adapted from the pre-restart library/bigint.dewy.
 # Limbs are little-endian base 2^32, held in uint64 words for full products.
 # The representation is internal: construct through bigint / parse_bigint.
-BigInt:type=[_sign:int64=0 _limbs:array<uint64>]
+BigInt:type=[_sign:int64=0 _limbs:array<uint64>=[]]
 const _LIMB_BASE:uint64=4294967296
 const _LIMB_MASK:uint64=4294967295
 
@@ -384,7 +384,7 @@ _mul=(a:BigInt b:BigInt):>BigInt=>{
 BigIntDivision:type=[quotient:BigInt remainder:BigInt]
 divmod=(a:BigInt b:BigInt):>BigIntDivision=>{
     if b._sign =? 0 panic("big integer division by zero")
-    if a._sign =? 0 return BigIntDivision[]
+    if a._sign =? 0 return BigIntDivision[BigInt[] BigInt[]]
     let parts=_mag_divmod(a._limbs b._limbs)
     let negative=a._sign not=? b._sign
     let quotient=_pack(negative parts.quotient)

@@ -2,7 +2,7 @@
 # library/rational.dewy; representation and error handling use the compact core.
 from bigint import BigInt, bigint, parse_bigint, to_int64, _ratio_float_bits
 
-Rational:type=[numerator:BigInt denominator:BigInt=bigint(1)]
+Rational:type=[numerator:BigInt=bigint(0) denominator:BigInt=bigint(1)]
 
 _integer = ((value:BigInt):>BigInt=>value)
     & ((value:int):>BigInt=>bigint(value))

@@ -735,7 +735,9 @@ main=()=>{
 `Point[20 22]` explicitly constructs a named record. `[x=20]` uses the expected
 record type and its defaults, and so does a positional `[20]`, which gives the
 fields in order, as `Point(20)` would: in an annotation, an element of
-`array<Point>`, a dictionary value or an argument. Without an expected type, named fields infer an
+`array<Point>`, a dictionary value or an argument. A field without a default must
+be given, an optional one too (declare `next:Node?=none` to leave it out); leaving
+one out is an error naming the field. Without an expected type, named fields infer an
 anonymous record. Anonymous record types agree by field names and types, even
 when written in a different order. Their shape can also be written directly in
 an annotation:
@@ -759,7 +761,7 @@ Records can contain optional values of their own type, including through other
 records and unions. Lists and trees keep ordinary value semantics:
 
 ```dewy
-Node:type=[value:int64 next:Node?]
+Node:type=[value:int64 next:Node?=none]
 sum=(node:Node?):>int64=>{
     let cur=node let total=0
     loop cur is?Node {total+=cur.value cur=cur.next}

@@ -19,7 +19,7 @@ read_word=(a:Arena at:int64):>uint32=>{
     return result
 }
 main=():>int64=>{
-    let arena:Arena=[]
+    let arena:Arena=[bytes=[]]
     let first=allocate(@arena 3 1) ?? -1
     let second=allocate(@arena 4 4) ?? -1
     $runtime_assert (first =? 0 and second =? 4)

@@ -8,7 +8,7 @@ import pytest
 from tests.support import compiler, run_value_batch
 
 CASES = {
-    'list-copies': '''Node:type=[value:int64 next:Node?]
+    'list-copies': '''Node:type=[value:int64 next:Node?=none]
 sum=(node:Node?):>int64=>{
 let cur=node let result=0
 loop cur is?Node {result+=cur.value cur=cur.next}
@@ -23,7 +23,7 @@ if sum(a) not=?42 or sum(b) not=?120 return 4
 let c=a c.next=c
 if sum(c) not=?62 or sum(a) not=?42 return 5
 return 42}''',
-    'generic-tree': '''Tree:type=<T>[value:T left:Tree<T>? right:Tree<T>?]
+    'generic-tree': '''Tree:type=<T>[value:T left:Tree<T>?=none right:Tree<T>?=none]
 sum=<T>(tree:Tree<T>?):>T=>{
 if tree is?none return 0 as T
 return tree.value+sum(tree.left)+sum(tree.right)}
@@ -33,7 +33,7 @@ let copy=root
 if copy.left is?none return 1
 copy.left.value=100
 return if sum(root)=?42 and sum(copy)=?132 42 else 2}''',
-    'mutual-recursion': '''A:type=[value:int64 b:B?]
+    'mutual-recursion': '''A:type=[value:int64 b:B?=none]
 B:type=[text:string a:A?]
 main=()=>{
 let source=A[20 B["before" A[22]]]
@@ -56,7 +56,7 @@ let tree=Branch[Leaf[10] Branch[Leaf[20] Leaf[12]]]
 let saved=tree tree.right=Leaf[100]
 return if evaluate(saved)=?42 and evaluate(tree)=?110 42 else 1}''',
     'callback-private-state': '''Counter:type=():>int
-Link:type=[counter:Counter next:Link?]
+Link:type=[counter:Counter next:Link?=none]
 make=()=>{let n=0 return ()=>{n+=1 return n}}
 main=()=>{
 let a=Link[make() Link[make()]] let b=a
@@ -68,7 +68,7 @@ let xs=[a] let ys=xs
 if xs[0].counter() not=?2 or ys[0].counter() not=?2 return 5
 return 42}''',
     'callback-explicit-sharing': '''Counter:type=():>int
-Link:type=[counter:Counter next:Link?]
+Link:type=[counter:Counter next:Link?=none]
 main=()=>{
 let n=0 let next=($capture @n)=>{n+=1 return n}
 let a=Link[@next Link[@next]] let b=a
@@ -76,7 +76,7 @@ if a.counter() not=?1 or b.counter() not=?2 return 1
 if a.next is?none return 2
 if b.next is?none return 3
 return if a.next.counter()=?3 and b.next.counter()=?4 and n=?4 42 else 4}''',
-    'containers-and-equality': '''Node:type=[value:int64 next:Node?]
+    'containers-and-equality': '''Node:type=[value:int64 next:Node?=none]
 main=()=>{
 let node=Node[20 Node[22]] let same=Node[20 Node[22]]
 if node not=?same return 1
@@ -88,7 +88,7 @@ if saved[0] not=?same or rows[0]=?same return 3
 let map=[node->42] let copied=map
 if copied[same] not=?42 return 4
 return 42}''',
-    'tree-walk-snapshot': '''Node:type=[value:int64 next:Node?]
+    'tree-walk-snapshot': '''Node:type=[value:int64 next:Node?=none]
 let global=Node[20 Node[22]]
 replace=()=>{global=Node[99] return 0}
 sum=(node:Node?):>int64=>{
@@ -98,7 +98,7 @@ return result}
 main=()=>{
 let result=sum(global)
 return if result=?42 and global.value=?99 42 else 1}''',
-    'private-captured-tree': '''Node:type=[value:int64 next:Node?]
+    'private-captured-tree': '''Node:type=[value:int64 next:Node?=none]
 make=()=>{
 let tree=Node[20 Node[21]]
 return ()=>{
@@ -106,7 +106,7 @@ if tree.next is?none return 0
 tree.next.value+=1 return tree.value+tree.next.value}}
 main=()=>{let a=make() let b=@a
 return if a()=?42 and b()=?42 and a()=?43 and b()=?43 42 else 1}''',
-    'deep-list-drop': '''Node:type=[value:int64 next:Node?]
+    'deep-list-drop': '''Node:type=[value:int64 next:Node?=none]
 make=(size:int64):>Node?=>{
 let list:Node?=none
 loop i in [0..size) {list=Node[i list]}
@@ -117,7 +117,7 @@ let base=alloc_count()
 if saved is?none return 1
 if saved.value not=?99999 return 2}
 return if alloc_count()=?base 42 else 3}''',
-    'narrow-tree-branches': '''Node:type=[key:int64 left:Node? right:Node?]
+    'narrow-tree-branches': '''Node:type=[key:int64 left:Node?=none right:Node?=none]
 find=(tree:Node? key:int64):>int64=>{
 let cur=tree
 loop true {
@@ -334,8 +334,8 @@ def test_core_recursive_deep_drop(compiler, tmp_path, target, release):
 
 @pytest.mark.parametrize('source, message', [
     ('Bad:type=[next:Bad]\nmain=()=>0', 'no finite value'),
-    ('Node:type=[value:int64 next:Node?]\nmain=()=>{const n=Node[1 Node[2]] if n.next is?none return 0 n.next.value=3 return 0}', 'cannot modify const'),
-    ('Node:type=[value:int64 next:Node?]\nmain=()=>{let n:Node?=Node[1] loop n is?Node {n=none return n.value} return 0}', 'none'),
+    ('Node:type=[value:int64 next:Node?=none]\nmain=()=>{const n=Node[1 Node[2]] if n.next is?none return 0 n.next.value=3 return 0}', 'cannot modify const'),
+    ('Node:type=[value:int64 next:Node?=none]\nmain=()=>{let n:Node?=Node[1] loop n is?Node {n=none return n.value} return 0}', 'none'),
     ('A:type=[b:B]\nB:type=[a:A]\nmain=()=>0', 'no finite value'),
     ('struct Node:\n    next: Node?\nextern use_node = (n: *Node)\nmain = ():\n    n: Node\n    use_node(&n)\n', 'cannot cross the C ABI'),
     ('''Node:type=[value:int64]
@@ -418,7 +418,7 @@ if change {x.child=none} else {}
 return x.child.value}
 main=()=>f(Box[Node[42]] true)''', 'may be none'),
     # nested-parent-block
-    ('''Node:type=[value:int64 next:Node?]
+    ('''Node:type=[value:int64 next:Node?=none]
 Box:type=[child:Node?]
 f=(input:Box):>int64=>{let x=input
 if x.child is?none return 0
@@ -531,7 +531,7 @@ def test_core_recursive_box_size_classes(compiler, tmp_path, target, release):
     # and large-block reuse. Mix ordinary allocations into the freed classes.
     cases = {}
     for length in (1, 2, 3, 5, 13, 29, 32764, 32765, 32766, 40000):
-        cases[f'payload-{length}'] = f"""Node:type=[data:array<int64 length={length}> next:Node?]
+        cases[f'payload-{length}'] = f"""Node:type=[data:array<int64 length={length}>=[] next:Node?=none]
 main=()=>{{
 let base=alloc_count()
 loop i in [0..3) {{
@@ -554,7 +554,7 @@ def test_core_recursive_debug_value(compiler, tmp_path):
     if platform.system() != 'Linux' or platform.machine() != 'x86_64' or not shutil.which('gdb'):
         pytest.skip('native Linux x86-64 with GDB required')
     source = tmp_path / 'debug.dewy'
-    source.write_text('''Node:type=[value:int64 next:Node?]
+    source.write_text('''Node:type=[value:int64 next:Node?=none]
 probe=()=>{
 let node=Node[20 Node[22]]
 printl(node.value)
@@ -578,7 +578,7 @@ main=()=>probe()
 def test_core_recursive_watch_layout(compiler, tmp_path):
     from tests.test_core_watch import Watch, save
     source = tmp_path / 'recursive-game.dewy'
-    program = '''Node:type=[value:int64 next:Node?]
+    program = '''Node:type=[value:int64 next:Node?=none]
 let root=Node[0 Node[7]]
 update=(dt:float64):>void=>{
 root.value+=1
@@ -591,7 +591,7 @@ draw=():>void=>clear(BLACK)
     watcher = Watch(compiler, source, game=True)
     try:
         before = int(watcher.expect(r'tick=(\d+) child=7').group(1))
-        changed = program.replace('next:Node?]', 'next:Node? health:int64=100]')
+        changed = program.replace('next:Node?=none]', 'next:Node?=none health:int64=100]')
         changed = changed.replace('child={root.next.value}',
                                   'child={root.next.value} health={root.health}/{root.next.health}')
         save(source, changed)

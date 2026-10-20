@@ -4,7 +4,7 @@ next=(@n:int64):>int64=> { n+=1 return n }
 compute=(n:int64):>array<int64>=> {
     let count=n
     let record=Pair[b=next(@count) a=next(@count)]
-    let zero=Pair[]
+    let zero=Pair[a=0 b=0]
     let xs=[record.a record.b zero.a zero.b]
     let nested=[xs xs]
     nested[0][0]=99

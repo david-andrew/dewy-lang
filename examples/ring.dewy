@@ -4,7 +4,7 @@ Ring:type=<T>[capacity:int64 values:array<T> head:int64=0]
 
 new_ring=<T>(capacity:int64):>Ring<T>=>{
     if capacity <=? 0 panic("ring capacity must be positive")
-    return Ring<T>[capacity=capacity]
+    return Ring<T>[capacity=capacity values=[]]
 }
 
 len=<T>(ring:Ring<T>):>int64=>ring.values.length

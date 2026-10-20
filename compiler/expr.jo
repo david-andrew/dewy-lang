@@ -730,7 +730,7 @@ map_elem_place = (n: int):
             if fields[int(structs[si].fields) + i].defval != 0: has_def = true
         if has_def:
             d = mk(.call, pos)
-            struct_ctor(d, pv, int(structs[si].decl), [], pv)
+            struct_ctor_zero(d, pv, int(structs[si].decl))
             add_flag(d, NF_CHECKED)
             args.push(d)
     call = bc_call("__map_entry", args, pos)
@@ -2261,7 +2261,7 @@ struct_default = (t0: int, pos: int) -> int:
     si = int(types[t].st)
     if not struct_has_defaults(si, 0): return 0
     d = mk(.call, pos)
-    struct_ctor(d, t, int(structs[si].decl), [], t)
+    struct_ctor_zero(d, t, int(structs[si].decl))
     add_flag(d, NF_CHECKED)
     d
 
@@ -2453,7 +2453,18 @@ dewy_record_schema = (n: int, args: int[]) -> int:
     check_struct_fields(int(types[t].st))
     t
 
+# (set by the compiler's own default-value constructions, T() as `x: T` starts: those fill what
+# has no default with zero; a construction written in Dewy may not)
+ctor_fills_zero = false
+
+# T() for the compiler's own use: the type's defaults, zero where it has none
+struct_ctor_zero = (n: int, st_type: int, decl: int) -> int:
+    ctor_fills_zero = true
+    struct_ctor(n, st_type, decl, [], st_type)
+
 struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> int:
+    fills_zero = ctor_fills_zero
+    ctor_fills_zero = false
     t = st_type
     if t == 0 and nkids2(decl) == 0: t = get_struct_inst(decl, [])
     if t == 0:
@@ -2510,6 +2521,12 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
     mapped: int[]
     err = map_args(pnames, hasdef, args, mapped)
     if len(err) > 0: fatal(nodes[n].pos, "in {name_of(int(nodes[decl].name))}(...): {err}")
+    if not fills_zero and files[pos_file(nodes[decl].pos)].is_dewy:
+        # (a Dewy object is built from what is given and its defaults, never from invented zeros)
+        loop i in [0..nf):
+            fi = int(structs[si].fields) + i
+            if mapped[i] == 0 and int(fields[fi].defval) == 0:
+                fatal(nodes[n].pos, "{dt(t)} needs its field '{name_of(int(fields[fi].name))}', which has no default")
     missing_field_check(n, decl, si, args, mapped)
     if ide_on:
         fts: int[]
@@ -2549,6 +2566,10 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
             continue
         if a == 0:
             dv = int(fields[fi].defval)
+            if dv != 0 and not dependent and default_is_zero(dv, int(fields[fi].type)):
+                # (filled in place with zeros, not built aside and copied in)
+                fin.push(0)
+                continue
             if dv != 0:
                 d = clone(dv)
                 saved = cx
@@ -2600,6 +2621,13 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
         nodes[n] = Node(kind = .block, pos = nodes[n].pos, type = i32(t), aux = 1)
         set_list(n, statements)
     t
+
+# A field default whose value is the zero bytes: `none` for an optional, `[]` for a fixed array
+default_is_zero = (dv: int, ft: int) -> bool:
+    k = nodes[dv].kind
+    fk = tkind(ft)
+    if k == .none_lit: return fk == .opt
+    k == .array and nkids(dv) == 0 and nodes[dv].b == 0 and fk == .fixed
 
 # (P(1) for struct P: x: f64; y: f64: values given in order stop short of a field without a
 # default, which would be zero unnoticed; T() and names only, T(x = 1), leave fields out on purpose)
@@ -4925,7 +4953,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
                 if fields[int(structs[si].fields) + i].defval != 0: has_def = true
             if has_def:
                 d = mk(.call, pos)
-                struct_ctor(d, t, int(structs[si].decl), [], t)
+                struct_ctor_zero(d, t, int(structs[si].decl))
                 add_flag(d, NF_CHECKED)
                 stmts.push(bc_assign(bc_ident(name_of(int(nodes[args[0]].name)), pos), d, pos))
         nodes[n] = nodes[bc_block(stmts, pos)]
