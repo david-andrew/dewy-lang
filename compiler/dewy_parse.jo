@@ -225,7 +225,10 @@ dw_op = (id: int) -> DewyToken:
     dewy_syntax[dw_child(id, 0)].symbol
 
 dw_fail = (id: int, what: str) -> int:
-    fatal(dewy_syntax[id].pos, "Dewy core experiment does not yet support {what}")
+    dw_fail_pos(dewy_syntax[id].pos, what)
+
+dw_fail_pos = (pos: int, what: str) -> int:
+    fatal(pos, "Dewy core experiment does not yet support {what}")
     0
 
 # Metatags the design defines that this compiler does not implement yet. Each
@@ -776,6 +779,11 @@ dw_function = (id: int, name: str) -> int:
         else: set_list2(n, captures)
     body = dw_block(dw_child(id, 2))
     dw_siblings = outer_siblings
+    dw_finish_function(n, ps, body, name)
+
+# Both constructors synthesize the same local bindings for value parameters.
+dw_finish_function = (n: int, parameters: int[], body: int, name: str) -> int:
+    let ps = parameters
     prefix: int[]
     loop param in ps:
         if has_flag(param, NF_MUT) or name_of(int(nodes[param].name)) == "_": continue
@@ -787,7 +795,7 @@ dw_function = (id: int, name: str) -> int:
         nodes[value].name = nodes[param].name
         nodes[value].aux2 = 1   # the parameter's value itself, even a function
         if name == "main":
-            if ps.len() != 1: return dw_fail(id, "multiple entry-point parameters")
+            if ps.len() != 1: return dw_fail_pos(nodes[n].pos, "multiple entry-point parameters")
             nodes[value].name = i32(intern("args"))
             call = mk(.call, nodes[param].pos)
             nodes[call].a = i32(value)
@@ -797,7 +805,7 @@ dw_function = (id: int, name: str) -> int:
         prefix.push(local)
     if name == "main":
         loop param in ps:
-            if has_flag(param, NF_MUT): return dw_fail(id, "a mutable entry-point parameter")
+            if has_flag(param, NF_MUT): return dw_fail_pos(nodes[n].pos, "a mutable entry-point parameter")
         ps = []
     set_list(n, ps)
     loop statement in kids(body): prefix.push(statement)

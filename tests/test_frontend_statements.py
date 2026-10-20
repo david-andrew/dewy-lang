@@ -49,12 +49,12 @@ def test_statement_diagnostics(compiler, tmp_path, statement):
     source = tmp_path / 'invalid.dewy'
     source.write_text(f'main=()=>{{let value=0\n{statement}}}\n')
     results = []
-    for mode in ('old', 'compare'):
+    for mode in ('old', 'direct', 'compare'):
         result = subprocess.run([compiler, 'check', source],
                                 env=dict(os.environ, DEWY_FRONTEND=mode),
                                 capture_output=True, text=True, timeout=30)
         results.append((result.returncode, result.stdout, result.stderr))
-    assert results[0] == results[1]
+    assert results[0] == results[1] == results[2]
 
 
 @pytest.mark.core_quick
@@ -64,9 +64,9 @@ def test_statement_record_sibling_scope(compiler, tmp_path, body):
     source.write_text('Counter:type=[value:int64 get=()=>{' + body + '} ]\n'
                       'main=()=>{let c=Counter(40) return c.get}\n')
     results = []
-    for mode in ('old', 'compare'):
+    for mode in ('old', 'direct', 'compare'):
         result = subprocess.run([compiler, 'check', source],
                                 env=dict(os.environ, DEWY_FRONTEND=mode),
                                 capture_output=True, text=True, timeout=30)
         results.append((result.returncode, result.stdout, result.stderr))
-    assert results[0] == results[1]
+    assert results[0] == results[1] == results[2]

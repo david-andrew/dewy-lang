@@ -38,9 +38,9 @@ def test_string_diagnostics(compiler, tmp_path, literal):
     source = tmp_path / 'strings.dewy'
     source.write_text(f'main=()=>{{let text={literal}\nreturn 0}}\n')
     results = []
-    for mode in ('old', 'compare'):
+    for mode in ('old', 'direct', 'compare'):
         result = subprocess.run([compiler, 'check', source],
                                 env=dict(os.environ, DEWY_FRONTEND=mode),
                                 capture_output=True, text=True, timeout=30)
         results.append((result.returncode, result.stdout, result.stderr))
-    assert results[0] == results[1]
+    assert results[0] == results[1] == results[2]
