@@ -246,8 +246,13 @@ main=()=>{
 result is a function of the remaining parameters. Every argument group in an
 ungrouped `@` chain partially evaluates (`@sum(1)(2)`); parentheses end the
 chain, after which an argument group calls (`(@sum(1))(2)`). A parameter left to
-its default must have a literal default for now. Partial evaluation of an
-overloaded or generic function, or of a method, is not supported yet. Inside a
+its default must have a literal default for now. An overloaded or generic
+function partially evaluates too: the arguments choose the version, as in a
+call, and an annotation such as `let f:<(b:int64):>int64>=@max(x)` chooses
+among versions leaving different parameters open (without one, the version
+leaving the fewest wins) and settles type parameters the arguments leave open.
+`@text.split(" ")` saves the receiver with the arguments; built-in container
+methods and methods that change their receiver are not supported yet. Inside a
 generic function, a binding whose type is a type parameter stays a value even
 when an instance makes it a function.
 

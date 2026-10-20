@@ -1865,6 +1865,19 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                 f = name_of(int(nodes[cd.args[0]].sval))
                 warn(nodes[n].pos, "a web page has no files from the disk: {fnm}(\"{f}\") finds only what the page wrote itself; `embed(\"{f}\")` builds the file into the program")
     partial = has_hole(args) or nodes[n].aux2 == i32(AUX2_PARTIAL)
+    if partial and expected != 0 and tkind(expected) == .fn_:
+        # (a partial evaluation's expected type is the function it makes: the open parameters
+        # in order, then the result)
+        rb = cd.binds
+        ok = true
+        j = 0
+        loop i in [0..np):
+            a = cd.args[i]
+            if a == 0 or nodes[a].kind != .hole: continue
+            if j >= int(types[prune(expected)].nargs) or match_type(cd.sig.params[i], targ(prune(expected), j), rb, 0) < 0: ok = false
+            j += 1
+        if ok and cd.sig.ret != 0 and match_type(int(cd.sig.ret), int(types[prune(expected)].elem), rb, 0) < 0: ok = false
+        if ok: cd.binds = rb
     loop i in [0..np):
         a = cd.args[i]
         if a == 0 or not is_lit(a): continue
@@ -1884,7 +1897,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         check_expr(a, pt)
         add_flag(a, NF_CHECKED)
         match_type(cd.sig.params[i], ntype(a), cd.binds, 0)
-    if expected != 0 and cd.sig.ret != 0:
+    if not partial and expected != 0 and cd.sig.ret != 0:
         rb = cd.binds
         if match_type(int(cd.sig.ret), expected, rb, 0) >= 0: cd.binds = rb
     # (show = false, an untyped parameter, left out: its type is its default's)
@@ -1921,7 +1934,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                 if param_in_union(pt, i): cd.binds[i] = T_NEVER
             b = cd.binds[i]
         if b == 0 or tkind(b) == .var:
-            if partial: fatal(nodes[n].pos, "cannot infer generic types for partial application of '{name_of(name)}'; annotate the arguments")
+            if partial: fatal(nodes[n].pos, jd(nodes[n].pos, "cannot infer generic types for partial application of '{name_of(name)}'; annotate the arguments", "cannot infer the type parameters of '{name_of(name)}' for this partial evaluation; give the result a function type (`let f:<(b:int64):>int64> = @{name_of(name)}(...)`)"))
             tp = "{i + 1}"
             if int(nodes[decl].nlist2) > i: tp = "'{name_of(int(nodes[kid2(decl, i)].name))}'"
             fatal(nodes[n].pos, "cannot infer type parameter {tp} of '{name_of(name)}' from the arguments")
@@ -5672,6 +5685,7 @@ dewy_partial = (n: int, expected: int) -> int:
     if nodes[callee].kind == .call and not has_flag(callee, NF_CHECKED): nodes[callee].aux2 = i32(AUX2_PARTIAL)
     mod = -1
     s = 0
+    receiver = false
     if nodes[callee].kind == .ident: s = lookup(int(nodes[callee].name))
     else if nodes[callee].kind == .field:
         rt = prune(check_expr(int(nodes[callee].a), 0))
@@ -5688,8 +5702,21 @@ dewy_partial = (n: int, expected: int) -> int:
                 check_struct_fields(si)
                 loop i in [0..int(structs[si].nfields)):
                     if fields[int(structs[si].fields) + i].name == nodes[callee].name: is_field = true
-            if not is_field: fatal(pos, "partial evaluation of a method is not supported yet; use a function literal")
+            if not is_field:
+                # `@text.split(" ")`: the receiver is the first argument, saved with the rest
+                recv = int(nodes[callee].a)
+                fname = dewy_member_name(callee, rt, int(nodes[callee].name), args)
+                s = lookup(fname)
+                ii = intrinsic_of(fname)
+                if s == 0 or syms[s].kind != .fns or (ii >= 0 and intrinsics[ii].arr): fatal(pos, "partial evaluation of the built-in `.{name_of(int(nodes[callee].name))}` is not supported yet; use a function literal")
+                f = mk(.ident, nodes[callee].pos)
+                nodes[f].name = i32(fname)
+                callee = f
+                nodes[n].a = i32(f)
+                args = [recv] + args
+                receiver = true
     holes: int[]
+    fitting: int[]
     if s != 0 and syms[s].kind == .fns:
         decls: int[]
         if mod >= 0: collect_module(mod, int(nodes[callee].name), decls)
@@ -5703,8 +5730,26 @@ dewy_partial = (n: int, expected: int) -> int:
         own = false
         loop c in decls:
             if not decl_in_prelude(c): own = true
+        # The versions of that name these arguments fit (the program's own before the
+        # prelude's); the call with holes then picks one by the arguments' types, as a call does.
+        # An expected function type says how many parameters stay open.
+        if decls.len() > 1: check_args_untyped(args)
+        open_wanted = if expected != 0 and tkind(expected) == .fn_: int(types[prune(expected)].nargs) else: -1
+        # (else the versions leaving the fewest parameters open: those an ordinary call with these
+        # arguments is nearest to)
+        if open_wanted < 0 and decls.len() > 1:
+            loop c in decls:
+                if own and decl_in_prelude(c): continue
+                names: int[]
+                loop i in [0..nkids(c)): names.push(int(nodes[kid(c, i)].name))
+                fit: int[]
+                if len(map_args(names, fill(true, names.len()), args, fit)) > 0 or not partial_args_fit(c, fit): continue
+                open = 0
+                loop i in [0..names.len()):
+                    if fit[i] == 0 and nodes[kid(c, i)].b == 0: open += 1
+                if open_wanted < 0 or open < open_wanted: open_wanted = open
         loop c in decls:
-            if nkids2(c) > 0 or (own and decl_in_prelude(c)): continue
+            if own and decl_in_prelude(c): continue
             names: int[]
             loop i in [0..nkids(c)): names.push(int(nodes[kid(c, i)].name))
             fit: int[]
@@ -5712,13 +5757,26 @@ dewy_partial = (n: int, expected: int) -> int:
             if len(e) > 0:
                 err = e
                 continue
-            if d != 0: fatal(pos, "partial evaluation of an overloaded function is not supported yet")
-            d = c
-            pnames = names
-            slots = fit
+            if decls.len() > 1 and not partial_args_fit(c, fit): continue
+            if decls.len() > 1 and open_wanted >= 0:
+                open = 0
+                loop i in [0..names.len()):
+                    if fit[i] == 0 and nodes[kid(c, i)].b == 0: open += 1
+                if open != open_wanted: continue
+                if expected != 0 and tkind(expected) == .fn_ and not partial_open_fit(c, fit, prune(expected)): continue
+            if d != 0 and not same_partial_shape(d, pnames, slots, c, names, fit):
+                fatal(pos, "partial evaluation of '{name_of(int(nodes[callee].name))}' is ambiguous: the versions these arguments fit leave different parameters open (give the result a function type, or use a function literal)")
+            if receiver and nkids(c) > 0 and has_flag(kid(c, 0), NF_MUT): fatal(pos, "partial evaluation of `.{name_of(int(nodes[callee].name))}`, which changes its receiver, is not supported; use a function literal")
+            fitting.push(c)
+            if d == 0:
+                d = c
+                pnames = names
+                slots = fit
         if d == 0:
-            if len(err) > 0: fatal(pos, err)
-            fatal(pos, "partial evaluation of a generic function is not supported yet")
+            if len(err) > 0 and not receiver: fatal(pos, err)
+            which = ""
+            if receiver: which = " and this receiver"
+            fatal(pos, "no version of '{name_of(int(nodes[callee].name))}' takes these arguments{which}")
         named = false
         skipped = false
         loop i in [0..pnames.len()):
@@ -5750,9 +5808,41 @@ dewy_partial = (n: int, expected: int) -> int:
         loop i in [args.len()..int(types[ft].nargs)): holes.push(mk(.hole, pos))
     set_list(n, args + holes)
     nodes[n].aux2 = i32(AUX2_PARTIAL)
-    t = check_call(n, expected)
+    t = 0
+    if s != 0 and syms[s].kind == .fns and nodes[callee].kind == .ident:
+        # (among the versions that fit, as a call would choose)
+        t = resolve_fn_call(n, int(nodes[callee].name), fitting, kids(n), expected)
+    else: t = check_call(n, expected)
     last_checked = n
     t
+
+# (could the arguments given in slots go to version d's parameters, by their types?)
+partial_args_fit = (d: int, slots: int[]) -> bool:
+    sig = fn_sig(d)
+    binds = fill(0, int(sig.ntp))
+    loop i in 0.. and a in slots:
+        if a == 0 or i >= sig.params.len() or ctx_dependent(a) or nodes[a].type == 0: continue
+        if arg_cost(a, sig.params[i], binds) < 0: return false
+    true
+
+# (do version d's open parameters take the expected function type's, in order?)
+partial_open_fit = (d: int, slots: int[], ft: int) -> bool:
+    sig = fn_sig(d)
+    binds = fill(0, int(sig.ntp))
+    j = 0
+    loop i in 0.. and a in slots:
+        if a != 0 or nodes[kid(d, i)].b != 0: continue
+        if j >= int(types[ft].nargs) or match_type(sig.params[i], targ(ft, j), binds, 0) < 0: return false
+        j += 1
+    true
+
+# (do two versions leave the same parameters open, by position and name, with the same defaults?)
+same_partial_shape = (d: int, names: int[], slots: int[], c: int, cnames: int[], cslots: int[]) -> bool:
+    if names.len() != cnames.len(): return false
+    loop i in [0..names.len()):
+        if (slots[i] == 0) != (cslots[i] == 0): return false
+        if slots[i] == 0 and (names[i] != cnames[i] or (nodes[kid(d, i)].b == 0) != (nodes[kid(c, i)].b == 0)): return false
+    true
 
 mk_ident_local = (l: int, pos: int) -> int:
     n = mk(.ident, pos)
