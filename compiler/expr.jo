@@ -3404,6 +3404,24 @@ check_expr_in_module = (n: int, m: int, expected: int = 0) -> int:
 id_len = 0
 
 id_at = 0
+# The library's names for Dewy's members: `xs.pop(i)` removes by position,
+# `xs.insert(value i)` names the value first, `text.startswith(p)`. The
+# library's own spellings are not Dewy's.
+dewy_member_name = (callee: int, rt: int, fname: int, args: int[]) -> int:
+    name = name_of(fname)
+    k = types[rt].kind
+    pos = nodes[callee].pos
+    recv = receiver_text(int(nodes[callee].a))
+    if k == .array:
+        if name == "pop" and args.len() == 1: return intern("remove")
+        if name == "insert": return intern("__dewy_insert")
+        if name == "remove": fatal(pos, "an array removes by position with pop: `{recv}.pop(i)`")
+    if k == .str_:
+        if name == "startswith": return intern("starts_with")
+        if name == "endswith": return intern("ends_with")
+        if name == "starts_with" or name == "ends_with": fatal(pos, "write `{recv}.{replace(name, "_", "")}(...)`")
+    fname
+
 is_unchecked_at = (n: int) -> bool:
     callee = int(nodes[n].a)
     if nodes[callee].kind != .ident or nkids(n) != 2: return false
@@ -3505,6 +3523,7 @@ check_call = (n: int, expected: int) -> int:
                     callee_at = callee
                     check_expr(callee, 0)
                     return value_call(n, callee, args, expected)
+        if files[pos_file(nodes[n].pos)].is_dewy: fname = dewy_member_name(callee, rt, fname, args)
         # uniform call syntax
         add_flag(recv, NF_CHECKED)
         nl = [recv]

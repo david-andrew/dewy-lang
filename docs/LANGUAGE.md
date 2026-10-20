@@ -840,7 +840,8 @@ handle lookup is unnecessary.
 
 Arrays and records retain independent values when copied, including nested
 managed fields. Arrays support indexing, `.length`, and methods such as
-`.push(value)`, `.pop()`, `.clear()` and `.truncate(count)`. `xs[1..3)` is an
+`.push(value)`, `.pop()`, `.pop(i)` (removes and returns the element at `i`),
+`.insert(value i)` (inserts before `i`), `.clear()` and `.truncate(count)`. `xs[1..3)` is an
 exclusive-end slice; `xs[1..2]` includes index 2.
 
 A member call that needs no other arguments may omit its parentheses: `xs.pop`,
@@ -1090,6 +1091,10 @@ Both arguments evaluate once, in order, even if the key already exists; the valu
 argument is not lazy. Copies of the dictionary and inserted values remain
 independent. `values.reserve(count)` reserves capacity for a known entry count
 without adding entries or changing their order; arrays have `reserve` too.
+
+`values.pop(key)` removes an entry and returns its value; a missing key fails
+as `values[key]` does. `values.pop(key default=none)` returns the default for a
+missing key instead. `values.remove(key)` returns whether it removed an entry.
 
 When `values.get(key)` is immediately tested against `none`, the compiler uses
 a presence lookup without constructing the optional value. `is?`, `isnt?`,
@@ -1768,6 +1773,7 @@ return independent strings using the core's current simple mappings for ASCII
 and supported Latin, Greek and Cyrillic letters. For example, `upper("café")`
 is `"CAFÉ"`. Unmapped characters and malformed UTF-8 bytes are preserved;
 these byte-oriented transformations do not perform grapheme validation.
+`text.startswith(prefix)` and `text.endswith(suffix)` test the ends of a string.
 
 `regex(pattern)` prepares a reusable regular expression. `text.find(pattern)`
 returns `Match|none`; `find_all` returns nonoverlapping matches, `contains` tests

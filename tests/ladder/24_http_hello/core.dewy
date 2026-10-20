@@ -1,7 +1,7 @@
 import net
 respond=(request:string):>string=>{
-    let body=if request.starts_with("GET /hello ") "hello\n" else "missing\n"
-    let status=if request.starts_with("GET /hello ") "200 OK" else "404 Not Found"
+    let body=if request.startswith("GET /hello ") "hello\n" else "missing\n"
+    let status=if request.startswith("GET /hello ") "200 OK" else "404 Not Found"
     return "HTTP/1.1 {status}\r\nContent-Length: {bytes(body).length}\r\nConnection: close\r\n\r\n{body}"
 }
 request=(port:int64 path:string):>string=>{
@@ -22,11 +22,11 @@ request=(port:int64 path:string):>string=>{
 main=():>int64=>{
     let found=request(37425 "/hello")
     let missing=request(37426 "/missing")
-    assert(found.starts_with("HTTP/1.1 200 OK"))
+    assert(found.startswith("HTTP/1.1 200 OK"))
     assert("Content-Length: 6" in? found)
-    assert(found.ends_with("hello\n"))
-    assert(missing.starts_with("HTTP/1.1 404 Not Found"))
-    assert(missing.ends_with("missing\n"))
+    assert(found.endswith("hello\n"))
+    assert(missing.startswith("HTTP/1.1 404 Not Found"))
+    assert(missing.endswith("missing\n"))
     printl("200 hello 404 missing")
     return 0
 }

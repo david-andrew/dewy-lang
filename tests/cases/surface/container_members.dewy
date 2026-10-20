@@ -1,0 +1,15 @@
+# quick
+main=():>int64=>{
+    let xs=[10 20 30]
+    printl(xs.pop(1))
+    xs.insert(15 1)
+    xs.insert(40 xs.length)
+    printl(xs)
+    let d=["a"->1 "b"->2 "c"->3]
+    printl(d.pop("b"))
+    printl(d.pop("z" default=none))
+    printl(d.length)
+    let text="GET /hello HTTP/1.1"
+    printl(text.startswith("GET ") and text.endswith("1.1") and not text.startswith("POST"))
+    return 0
+}

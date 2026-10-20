@@ -8,7 +8,7 @@ let trail:array<vec2>=[]
 update=(dt:float64):>void=>{
     position=approach(position mouse_pos() 10.0 dt)
     trail.push(position)
-    if trail.length >? 40 {trail.remove(0);}
+    if trail.length >? 40 {trail.pop(0);}
 }
 
 draw=():>void=>{
