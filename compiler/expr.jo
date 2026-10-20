@@ -110,7 +110,7 @@ check_integer_boundary = (n: int, from: int, to: int):
     if not known: return
     fits = int_fits(value, to)
     if not types[from].sign and value < 0 and types[to].sign: fits = false
-    if not fits: fatal(nodes[n].pos, "integer overflow in constant conversion to {type_str(to)}")
+    if not fits: fatal(nodes[n].pos, "integer overflow in constant conversion to {dt(to)}")
 
 int_widens = (f: int, t: int) -> bool:
     fb = int(types[f].bits)
@@ -781,8 +781,12 @@ variant_enum = (t0: int, name: int) -> int:
 dewy_set_literal = (a: int) -> bool:
     nodes[a].kind == .call and nodes[a].type == 0 and nkids(a) == 1 and nodes[int(nodes[a].a)].kind == .ident and name_of(int(nodes[int(nodes[a].a)].name)) == "__dewy_set"
 
+oversized_literal = (a: int) -> bool:
+    if nodes[a].kind == .unary and nodes[a].op == i32(int(Tok.minus)): return oversized_literal(int(nodes[a].a))
+    nodes[a].kind == .call and nodes[a].aux2 == -1
+
 ctx_dependent = (a: int) -> bool:
-    if nodes[a].kind == .call and nodes[a].aux2 == -1: return true
+    if oversized_literal(a): return true
     k = nodes[a].kind
     if dewy_set_literal(a): return true
     if k == .ident or k == .field or k == .typeapply: return has_flag(a, NF_FNREF_ARG)
@@ -801,7 +805,7 @@ ctx_dependent = (a: int) -> bool:
         loop e in kids(a):
             if ctx_dependent(e): return true
         return false
-    if k == .map_lit: return nkids(a) == 0
+    if k == .map_lit: return nkids(a) == 0 or (nodes[a].type == 0 and not has_flag(a, NF_CHECKED) and files[pos_file(nodes[a].pos)].is_dewy)
     false
 
 unnamed = (a: int) -> int:
@@ -1023,9 +1027,9 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
     p = prune(pat)
     pk = types[p].kind
     if ctx_dependent(a):
-        if nodes[a].kind == .call and nodes[a].aux2 == -1:
-            target = p
-            if pk == .opt: target = prune(int(types[p].elem))
+        if oversized_literal(a):
+            target = prune(subst_partial(p, binds))
+            if types[target].kind == .opt: target = prune(int(types[target].elem))
             if bundled_bigint_type(target): return 0
             return -1
         k = nodes[a].kind
@@ -1118,7 +1122,7 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
                         # Inferring an array element is cheaper than changing
                         # an integer to float. Literals wait for the whole array;
                         # a typed element can supply T, in either source order.
-                        if is_lit(element): r = 1
+                        if is_lit(element): r = if lit_default(element) == T_MATH_INT: 2 else: 1
                         else:
                             r = match_type(ep, ntype(element), binds, 1)
                             if r >= 0: r += 1
@@ -1163,7 +1167,18 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
             if pk == .param: return 3
             return -1
         if k == .map_lit:
-            if pk == .struct_ and structs[int(types[p].st)].name == "Map": return 0
+            target = prune(subst_partial(p, binds))
+            if types[target].kind == .opt: target = prune(int(types[target].elem))
+            if is_map_type(target):
+                si = int(types[target].st)
+                cost = 0
+                loop pair in kids(a):
+                    key = arg_cost(int(nodes[pair].a), struct_targ(si, 0), binds)
+                    value = arg_cost(int(nodes[pair].b), struct_targ(si, 1), binds)
+                    if key < 0 or value < 0: return -1
+                    cost = max(cost, key + value)
+                return cost
+            if pk == .param: return 3
             return -1
         return -1
     if charlike(a) and pk == .int_: return 1
@@ -1191,9 +1206,9 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
         if dewy_bigint_literal_target(a, p): return 3
         if pk == .float_:
             if p == T_FLOAT:
-                if nodes[a].kind == .int_lit: return 2
+                if nodes[a].kind == .int_lit: return if lit_default(a) == T_MATH_INT: 3 else: 2
                 return 0
-            if nodes[a].kind == .int_lit: return 3
+            if nodes[a].kind == .int_lit: return if lit_default(a) == T_MATH_INT: 4 else: 3
             return 1
         if pk == .opt and not has_var(p) and can_coerce(a, ntype(a), p): return 2
         if pk == .vec: return -1
@@ -1231,6 +1246,9 @@ check_args_untyped = (args: int[]):
         if nodes[a].kind == .array: dewy_classify_spread(a)
         if nodes[a].kind == .record_lit:
             check_args_untyped(kids(a))
+            continue
+        if nodes[a].kind == .map_lit and ctx_dependent(a):
+            loop pair in kids(a): check_args_untyped([int(nodes[pair].a), int(nodes[pair].b)])
             continue
         if nodes[a].kind == .array and files[pos_file(nodes[a].pos)].is_dewy and ctx_dependent(a):
             check_args_untyped(kids(a))
@@ -2464,7 +2482,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                 takes = false
                 loop d in fd:
                     sig = fn_sig(d)
-                    if sig.params.len() >= 1 and (sig.generic or type_eq(prune(sig.params[0]), at)): takes = true
+                    if sig.params.len() >= 1 and (sig.generic or can_coerce(args[0], at, sig.params[0])): takes = true
                 if not takes: return conversion(n, int(syms[universe[name]].ref), args)
             else if sk == .const_ or sk == .module: fatal(nodes[n].pos, "'{name_of(name)}' is not a function")
             else if sk == .builtin:
@@ -3605,6 +3623,13 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         nargs_check(n, nargs, 1, 1, "set literal")
         ex = prune(expected)
         if types[ex].kind == .opt: ex = prune(int(types[ex].elem))
+        if is_union(ex):
+            selected = 0
+            loop member in union_members(ex):
+                if is_dewy_set_type(member):
+                    if selected != 0: selected = 0; break
+                    selected = member
+            if selected != 0: ex = selected
         if is_dewy_set_type(ex):
             check_to(args[0], mk_array(struct_targ(int(types[ex].st), 0)))
             add_flag(args[0], NF_CHECKED)
@@ -5169,6 +5194,8 @@ check_expr = (n: int, expected: int) -> int:
         literal_target = ex
         if exk == .opt: literal_target = prune(int(types[ex].elem))
         if literal_target == 0 or not bundled_bigint_type(literal_target):
+            if literal_target != 0 and is_int(literal_target) and literal_target != T_MATH_INT:
+                fatal(nodes[n].pos, "integer literal does not fit in {dt(literal_target)}")
             fatal(nodes[n].pos, "integer literal does not fit in int's interim int64 representation; use an explicit BigInt annotation")
         nodes[n].aux2 = 0
     if k == .array and exk == .opt and (tkind(int(types[ex].elem)) == .array or tkind(int(types[ex].elem)) == .fixed):
@@ -5300,8 +5327,9 @@ check_expr = (n: int, expected: int) -> int:
             p = nodes[n].pos
             nodes[n] = nodes[v]
             nodes[n].pos = p
-            check_expr(n, expected)
-            if not is_lit(n) and globals[g].type != 0 and globals[g].decl != 0 and nodes[int(globals[g].decl)].a != 0 and not has_var(prune(int(globals[g].type))): coerce(n, int(globals[g].type))
+            declared = globals[g].type != 0 and globals[g].decl != 0 and nodes[int(globals[g].decl)].a != 0 and not has_var(prune(int(globals[g].type)))
+            check_expr(n, if declared: int(globals[g].type) else: expected)
+            if declared: coerce(n, int(globals[g].type))
             last_checked = n
             return ntype(n)
         else if sk == .fns:
@@ -5728,7 +5756,7 @@ check_expr = (n: int, expected: int) -> int:
     else if k == .unary:
         if has_flag(n, NF_BROADCAST): return check_dotted(n, expected)
         hint = 0
-        if ex != 0 and (is_numeric(ex) or is_vec(ex)): hint = ex
+        if ex != 0 and (is_numeric(ex) or is_vec(ex) or bundled_bigint_type(ex)): hint = ex
         at = prune(check_expr(int(nodes[n].a), hint))
         if nodes[n].op == i32(int(Tok.minus)):
             if is_struct_like(at):

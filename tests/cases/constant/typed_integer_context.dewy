@@ -1,0 +1,13 @@
+# exit: 42
+# quick
+const word:uint64=18446744073709551615
+const narrow:int8=42
+kind=(value:int):>int=>1
+kind=(value:uint64):>int=>2
+kind=(value:int8):>int=>3
+main=()=>{
+    $assert word >? uint64(1)
+    let values=[word]
+    return if kind(word) =? 2 and kind(narrow) =? 3
+        and values[0] =? uint64.max 42 else 1
+}

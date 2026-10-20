@@ -71,6 +71,8 @@ line = (c: mut Chart, xs: f32[], ys: f32[], name: str = "", color: vec4? = none,
     line(c, __f64s(xs), __f64s(ys), name, color, width, dash)
 line = (c: mut Chart, xs: int[], ys: int[], name: str = "", color: vec4? = none, width: f64 = 2.0, dash: f64 = 0.0):
     line(c, __f64s(xs), __f64s(ys), name, color, width, dash)
+line = (c: mut Chart, xs: __dewy_int[], ys: __dewy_int[], name: str = "", color: vec4? = none, width: f64 = 2.0, dash: f64 = 0.0):
+    line(c, __f64s(xs), __f64s(ys), name, color, width, dash)
 
 # a line through ys, at x = 0, 1, 2...
 line = (c: mut Chart, ys: f64[], name: str = "", color: vec4? = none, width: f64 = 2.0, dash: f64 = 0.0):
@@ -78,6 +80,8 @@ line = (c: mut Chart, ys: f64[], name: str = "", color: vec4? = none, width: f64
 line = (c: mut Chart, ys: f32[], name: str = "", color: vec4? = none, width: f64 = 2.0, dash: f64 = 0.0):
     line(c, __f64s(ys), name, color, width, dash)
 line = (c: mut Chart, ys: int[], name: str = "", color: vec4? = none, width: f64 = 2.0, dash: f64 = 0.0):
+    line(c, __f64s(ys), name, color, width, dash)
+line = (c: mut Chart, ys: __dewy_int[], name: str = "", color: vec4? = none, width: f64 = 2.0, dash: f64 = 0.0):
     line(c, __f64s(ys), name, color, width, dash)
 
 # a dot at each point (a scatter plot)
@@ -87,12 +91,15 @@ points = (c: mut Chart, xs: f32[], ys: f32[], name: str = "", color: vec4? = non
     points(c, __f64s(xs), __f64s(ys), name, color, radius)
 points = (c: mut Chart, xs: int[], ys: int[], name: str = "", color: vec4? = none, radius: f64 = 3.0):
     points(c, __f64s(xs), __f64s(ys), name, color, radius)
+points = (c: mut Chart, xs: __dewy_int[], ys: __dewy_int[], name: str = "", color: vec4? = none, radius: f64 = 3.0):
+    points(c, __f64s(xs), __f64s(ys), name, color, radius)
 
 # a bar for each category (more bars series stand side by side)
 bars = (c: mut Chart, labels: str[], values: f64[], name: str = "", color: vec4? = none):
     if c.categories.len() < labels.len(): c.categories = labels
     c.series.push(ChartSeries(2, [loop i in [0..values.len()): f64(i)], values, name, __chart_color(c, color), 0.0))
 bars = (c: mut Chart, labels: str[], values: int[], name: str = "", color: vec4? = none): bars(c, labels, __f64s(values), name, color)
+bars = (c: mut Chart, labels: str[], values: __dewy_int[], name: str = "", color: vec4? = none): bars(c, labels, __f64s(values), name, color)
 bars = (c: mut Chart, labels: str[], values: f32[], name: str = "", color: vec4? = none): bars(c, labels, __f64s(values), name, color)
 
 # words written at the point (x, y), in the ink's color unless given one (not in the legend)
@@ -101,6 +108,7 @@ annotate = (c: mut Chart, x: f64, y: f64, words: str, color: vec4? = none):
 
 __f64s = (xs: f32[]) -> f64[]: [loop x in xs: f64(x)]
 __f64s = (xs: int[]) -> f64[]: [loop x in xs: f64(x)]
+__f64s = (xs: __dewy_int[]) -> f64[]: [loop x in xs: f64(x)]
 
 # how the values spread: how many fall in each of `bins` equal ranges (NaN left out)
 histogram = (c: mut Chart, values: f64[], bins: int = 20, name: str = "", color: vec4? = none):

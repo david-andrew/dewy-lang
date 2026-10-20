@@ -418,10 +418,11 @@ except that shifting zero by any nonnegative count remains zero.
 Literals outside the checked `int` range need an explicit fixed-width context
 that fits, or an explicit `BigInt` annotation.
 
-Shift counts are unsigned: a negative literal count is an error, and a negative
-runtime count acts as a huge one. Shifting a fixed-width integer by at least its
-width gives `0` for `<<` and unsigned `>>`, and the sign (`0` or `-1`) for signed
-`>>`: `uint64(1) << 64` is `0` and `-2 >> 64` is `-1`.
+For fixed-width integers, shift counts are unsigned: a negative literal count
+is an error, and a negative runtime count acts as a huge one. Shifting a
+fixed-width integer by at least its width gives `0` for `<<` and unsigned `>>`,
+and the sign (`0` or `-1`) for signed `>>`: `uint64(1) << 64` is `0` and
+`int64(-2) >> 64` is `-1`.
 
 Comparisons use `=?`, `<?`, `>?`, `<=?` and `>=?`. Boolean expressions use `and`,
 `or` and `not`. Literal coefficients such as `2x` and `2(x+1)` multiply; use `*`
