@@ -195,3 +195,51 @@ DIRECTIVE_ERRORS = {
 def test_surface_directive_errors(compiler, tmp_path, name):
     source, expected = DIRECTIVE_ERRORS[name]
     assert expected in diagnose(compiler, tmp_path, source)
+
+
+# ------------------------------------------------- zero-argument member calls
+
+MEMBER_CALL_PROGRAM = '''
+Shape:type = [w:int64 h:int64 label:string]
+area = (s:Shape):>int64 => s.w * s.h
+scaled = (s:Shape factor:int64 = 2):>int64 => area(s) * factor
+label = (s:Shape):>string => "function"
+main = () => {
+    let xs = [3 1 2]
+    let last = xs.pop
+    printl"{last} {xs.length}"
+    xs.push(5)
+    printl"{xs.pop()} {xs.length}"
+    xs.push(0)
+    xs.sort
+    printl"{xs[0]} {xs[1]} {xs[2]}"
+    xs.clear
+    printl"{xs.length}"
+    let shape = Shape[2 3 "field"]
+    printl"{shape.area} {shape.scaled} {shape.scaled(3)} {shape.area()}"
+    printl"{shape.label}"
+    let text = "  hi  "
+    printl"[{text.trim}] [{text.trim()}] {text.length}"
+}
+'''
+
+
+@quick
+def test_surface_member_calls(compiler, tmp_path):
+    ran = run(compiler, tmp_path, MEMBER_CALL_PROGRAM)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == ['2 2', '5 2', '0 1 3', '0', '6 12 18 6', 'field', '[hi] [hi] 6']
+
+
+MEMBER_CALL_ERRORS = {
+    'builtin-needs-arguments': ('main = () => { let xs = [1]\nxs.push }', "'push' needs arguments: `xs.push(...)`"),
+    'function-needs-arguments': ('Shape:type = [w:int64]\ngrow = (s:Shape by:int64):>int64 => s.w + by\n'
+                                 'main = () => { let s = Shape[1]\nprintl"{s.grow}" }', "'grow' needs arguments: `s.grow(...)`"),
+    'const-receiver': ('main = () => { const xs = [1 2]\nlet x = xs.pop }', "cannot modify const 'xs'"),
+}
+
+
+@pytest.mark.parametrize('name', list(MEMBER_CALL_ERRORS))
+def test_surface_member_call_errors(compiler, tmp_path, name):
+    source, expected = MEMBER_CALL_ERRORS[name]
+    assert expected in diagnose(compiler, tmp_path, source)

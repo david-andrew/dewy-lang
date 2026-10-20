@@ -752,6 +752,11 @@ managed fields. Arrays support indexing, `.length`, and methods such as
 `.push(value)`, `.pop()`, `.clear()` and `.truncate(count)`. `xs[1..3)` is an
 exclusive-end slice; `xs[1..2]` includes index 2.
 
+A member call that needs no other arguments may omit its parentheses: `xs.pop`,
+`xs.sort`, `text.trim` and `shape.area` (for `area=(s:Shape)=>...`) call the
+function, exactly as `xs.pop()` does. A record field of the same name wins and
+is read, not called; a function with required arguments still needs them.
+
 Low-level code can obtain an owned growable array's element pointer with
 `.data()`. This first detaches shared storage, including containing arrays along
 a field/index path, so existing value copies remain independent:

@@ -3219,6 +3219,33 @@ void_rec_hint = (n: int) -> str:
     " ('{nm}' calls itself, so the type of its result must be written: `{nm} = (...) -> int: ...`)"
 
 # the functions that may be called with a dot on a value of type t (for messages)
+# Whether `x.name` alone can call a function of x: an array or text builtin
+# that takes nothing else, or a visible function whose other parameters all
+# have defaults.
+member_call_without_arguments = (t: int, name: int) -> bool:
+    tk = types[t].kind
+    ii = intrinsic_of(name)
+    if ii >= 0 and intrinsics[ii].arr and (tk == .array or tk == .str_):
+        id = intrinsics[ii].id
+        return id == .len or id == .arrcap or id == .pop or id == .clear or id == .arrdata
+    loop table in [modules[cur_mod()].names, prelude]:
+        if not table.has(name): continue
+        s = table[name]
+        loop s != 0:
+            if syms[s].kind == .fns and syms[s].decl != 0:
+                d = int(syms[s].decl)
+                required = 0
+                loop i in [0..nkids(d)):
+                    if nodes[kid(d, i)].b == 0: required += 1
+                if nkids(d) >= 1 and required <= 1: return true
+            s = int(syms[s].next)
+    ii >= 0 and not intrinsics[ii].arr
+
+# A short spelling of a receiver for a suggested call.
+receiver_text = (n: int) -> str:
+    if nodes[n].kind == .ident: return name_of(int(nodes[n].name))
+    "x"
+
 fn_names_for = (t: int) -> int[]:
     out = method_names(t)
     tk = types[t].kind
@@ -5325,7 +5352,19 @@ check_expr = (n: int, expected: int) -> int:
                     fatal(nodes[n].pos, "a Body is a handle into its world: ask the world, `w.pos(b)`, `w.velocity(b)`, `w.rotation(b)`, and change it there, `w.set_pos(b, p)`, `w.set_velocity(b, v)`, `w.push(b, impulse)`")
                 cands = fn_names_for(bt)
                 loop c in cands:
-                    if c == fname: fatal(nodes[n].pos, "'{name_of(fname)}' is a function: call it, `x.{name_of(fname)}()`")
+                    if c != fname: continue
+                    if files[pos_file(nodes[n].pos)].is_dewy:
+                        # Zero-argument calls may omit their parentheses:
+                        # `xs.pop` is `xs.pop()`. A field of that name wins.
+                        if member_call_without_arguments(bt, fname):
+                            add_flag(int(nodes[n].a), NF_MUT)
+                            method = mk(.field, nodes[n].pos)
+                            nodes[method].a = nodes[n].a
+                            nodes[method].name = i32(fname)
+                            nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
+                            return check_expr(n, expected)
+                        fatal(nodes[n].pos, "'{name_of(fname)}' needs arguments: `{receiver_text(int(nodes[n].a))}.{name_of(fname)}(...)`")
+                    fatal(nodes[n].pos, "'{name_of(fname)}' is a function: call it, `x.{name_of(fname)}()`")
                 if types[bt].kind == .struct_:
                     si = int(types[bt].st)
                     loop i in [0..int(structs[si].nfields)): cands.push(int(fields[int(structs[si].fields) + i].name))
