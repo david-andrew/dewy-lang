@@ -158,9 +158,16 @@ __fsys_kind = (path: str) -> int:
         if mode == 0x4000: return 2
         return 3
     else:
-        st = fill(0, 18)                              # (struct stat: st_mode, a u32, at 24)
-        if syscall(4, data(__zstr(path)), data(st)) != 0: return 0
-        mode = int(((data(st) as *u8 + 24) as *u32)[0]) & 0xF000
+        # (O_PATH: opened only to name it, then fstat; st_mode, a u32, is at 24 in x86-64's
+        # struct stat and at 16 in arm64's)
+        fd = syscall(2, data(__zstr(path)), 0x200000, 0)
+        if fd < 0: return 0
+        st = fill(0, 18)
+        r = syscall(5, fd, data(st))
+        syscall(3, fd)
+        if r != 0: return 0
+        at = if ARCH == "arm64": 16 else: 24
+        mode = int(((data(st) as *u8 + at) as *u32)[0]) & 0xF000
         if mode == 0x8000: return 1
         if mode == 0x4000: return 2
         return 3
