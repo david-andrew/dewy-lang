@@ -1,0 +1,26 @@
+let generic_values:array<int64>=[]
+let closure_values:array<int64>=[]
+let private_values:array<int64>=[]
+generic_values.push(10)
+closure_values.push(20)
+private_values.push(30)
+
+snapshot=<T>(unused:T):>array<int64>=>generic_values
+make_snapshot=()=>()=>closure_values
+mutate=()=>{
+    generic_values[0]=11
+    closure_values[0]=21
+    private_values[0]=31
+}
+main=()=>{
+    let first=snapshot(0)
+    let take=make_snapshot()
+    let second=take()
+    mutate()
+    assert(first[0]=?10)
+    assert(second[0]=?20)
+    assert(generic_values[0]=?11)
+    assert(closure_values[0]=?21)
+    assert(private_values[0]=?31)
+    printl"ok"
+}

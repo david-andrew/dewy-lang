@@ -134,6 +134,7 @@ struct FnInst:
     write_sites: int[]  # finalization events for integer write proofs
     writes_ready: bool
     no_indexes: bool    # finalized normal body has no indexing; init/lambda bodies stay unknown
+    no_user_globals: bool # finalized body cannot mention a closed-program array candidate
     noinline: bool      # @noinline: call it rather than copy it into its callers
     gdepth: i32         # generic instances: how many were being checked, one inside the other, when it was made
     export_name: str
@@ -3597,6 +3598,7 @@ __check_fn_body = (f: int):
                     fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but its last line gives nothing: end it with the value to give back (or `return value`)")
                 fatal(p, "missing return value: function returns {dt(r)}")
     index_mark = zonk_indexes
+    global_mark = zonk_user_globals
     saved_sites = zonk_write_sites
     saved_collect = zonk_collect_writes
     zonk_write_sites = []
@@ -3612,6 +3614,7 @@ __check_fn_body = (f: int):
     zonk_write_sites = saved_sites
     zonk_collect_writes = saved_collect
     fns[f].no_indexes = fns[f].kind == FK_NORMAL and zonk_indexes == index_mark
+    fns[f].no_user_globals = fns[f].kind == FK_NORMAL and zonk_user_globals == global_mark
     loop l in fns[f].locals:
         locals[l].type = i32(zonk(int(locals[l].type)))
         if has_var(prune(int(locals[l].type))):
@@ -3873,13 +3876,22 @@ settle_open_globals = ():
 
 # Count index nodes during the existing finalization walk. A negative summary
 # lets lowering avoid path proofs that cannot discover an indexed array.
+# Likewise, normal bodies without user globals or narrowed aliases cannot
+# disprove closed-program ownership. Init/lambda bodies remain unsummarized.
 zonk_indexes = 0
+zonk_user_globals = 0
 
 zonk_tree = (n: int):
     if n == 0: return
     if nodes[n].type != 0: nodes[n].type = i32(zonk(int(nodes[n].type)))
     k = nodes[n].kind
     if k == .index: zonk_indexes += 1
+    if k == .ident:
+        if nodes[n].aux == i32(int(SK.global)):
+            if not modules[int(globals[int(nodes[n].sym)].mod)].is_prelude: zonk_user_globals += 1
+        else if nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ALIAS != 0:
+            # Narrowed locals may hide a reference to global storage.
+            zonk_user_globals += 1
     # Unlike zonking, the write walk stops at function templates. Keep the
     # fallback for a body containing one instead of recording its children.
     if k == .fn_: zonk_collect_writes = false

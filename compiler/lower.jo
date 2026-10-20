@@ -6376,7 +6376,7 @@ find_unique_globals = (closed: bool):
         if uniq_globals[g]: any = true
     if not any: return
     loop f in fns:
-        if f.state == 2: ug_scan(int(f.body), 0)
+        if f.state == 2 and not f.no_user_globals: ug_scan(int(f.body), 0)
 
 is_uniq_array = (e: int) -> bool:
     if nodes[e].kind != .ident: return false
