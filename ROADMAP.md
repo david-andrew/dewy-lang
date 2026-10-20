@@ -149,6 +149,17 @@ Landed 10-19 and 10-20:
   - cyclic imports, which the design rejects and the core accepts;
   - `$target` (bench harness, self-hosting).
 
+- **Tier-3 implementation (no decisions needed), by weight:**
+  - refinement contracts on parameters, results, fields and lengths;
+  - finite-fact/interval `$assert` and proven indexing/division;
+  - effect rows;
+  - builtin `rational`;
+  - lifecycle hooks and drop;
+  - `$lend` lifetime checking;
+  - arena scopes;
+  - `$test`/`$expect`;
+  - `sort(key=…)`.
+
 ## Later (pull in when a capability needs it)
 
 - Semantic-boundary slices 2–9: places and effects, lowering storage split,
@@ -198,6 +209,27 @@ Open (batched for David, not blocking):
 
 - Units: display-unit selection, Celsius point/delta semantics, calendar
   durations.
+- **Tier-3 design questions** (10-20, from the tier-3 ladder; options are written
+  up in each program's notes):
+  1. The strict-lane opt-in surface: one profile directive, or effect rows plus
+     a module default? Are panic and detach named separately?
+  2. Scope of `$prototype`: module-only, or narrower?
+  3. Readonly/lifetime-bearing payload places beyond `$lend`, e.g. a
+     `Rc.get_mut` shape.
+  4. Allocation capabilities and allocation-failure policy.
+  5. Explicit `move` syntax, in addition to inferred moves at last use.
+  6. The partition/task surface for structured fork-join.
+  7. `Send`/`Sync` spelling and atomics/memory orders.
+  8. Cancellation, locks and task authority.
+  9. Multidimensional array/tensor syntax and broadcasting rules.
+  10. IEEE float policy: special values, promotion, FMA/reassociation.
+  11. Display units (`as km`) and affine units (Celsius point vs delta).
+  12. Invariant authority beyond scalar refinements: sortedness, provenance.
+  13. Finite-resource and denial-of-service guarantees.
+  14. The portable sockets/FFI boundary.
+
+  Decided from GOALS: ordinary code keeps runtime checks; static rejection of
+  unproven index/divisor is a strict-lane property.
 - Files and processes (10-20): provisional Dewy-facing helpers the design
   doesn't list: `copy_file`, `rename_file`, `make_dirs`, `walk_dir`, `glob`,
   `file_size`, `file_time`, `chmod`, and `env` (the design names
