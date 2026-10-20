@@ -1558,13 +1558,13 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
 check_c_boxes = (t0: int, pos: int):
     t = prune(t0)
     if types[t].kind == .ptr: t = prune(int(types[t].elem))
-    if types[t].kind != .struct_ and types[t].kind != .enum_: return
     pending = [t]
     seen: {int: bool} = {}
     loop pending.len() > 0:
         current = prune(pending.pop())
         if seen.has(current): continue
         seen[current] = true
+        if current == T_MATH_INT: fatal(pos, "mathematical int cannot cross the C ABI; use an explicit fixed-width integer")
         k = types[current].kind
         if k == .opt or k == .fixed: pending.push(int(types[current].elem))
         else if k == .tuple:
@@ -2879,6 +2879,40 @@ check_assign = (s: int) -> int:
             check_place(last_checked, false)
             if not can_coerce(0, targ(t, i), tt) and not type_eq(targ(t, i), tt): fatal(nodes[tp].pos, "cannot assign {dt(targ(t, i))} to {dt(tt)}")
         nodes[s].aux = 1
+        converted = false
+        loop i in [0..nkids(lhs)):
+            target = kid(lhs, i)
+            if nodes[target].kind != .hole and not type_eq(targ(t, i), ntype(target)): converted = true
+        if converted:
+            # Freeze the tuple once, then convert every element before writing
+            # destinations. Semantic int and fixed widths have different ABIs.
+            elem_tmp_n += 1
+            name = "$unpack_convert{elem_tmp_n}"
+            pos = nodes[s].pos
+            decl = bc_let(name, int(nodes[s].b), pos)
+            add_flag(int(nodes[s].b), NF_CHECKED)
+            check_stmt(decl)
+            values: int[]
+            targets: int[]
+            loop i in [0..nkids(lhs)):
+                field = mk(.field, pos)
+                nodes[field].a = i32(bc_ident(name, pos))
+                nodes[field].aux = -2
+                nodes[field].ival = i
+                check_expr(field, 0)
+                field = last_checked
+                target = kid(lhs, i)
+                tt = if nodes[target].kind == .hole: targ(t, i) else: ntype(target)
+                values.push(coerce(field, tt))
+                targets.push(tt)
+            tuple = mk(.tuple, pos)
+            nodes[tuple].type = i32(mk_tuple(targets))
+            add_flag(tuple, NF_CHECKED)
+            set_list(tuple, values)
+            nodes[s].b = i32(tuple)
+            assignment = nodes.len()
+            nodes.push(nodes[s])
+            return bc_block([decl, assignment], pos)
         return s
     if nodes[lhs].kind == .field or (nodes[lhs].kind == .index and (op != int(Tok.assign) or nodes[int(nodes[lhs].a)].kind == .index or nodes[int(nodes[lhs].a)].kind == .field)):
         r = elem_field_assign(s)
@@ -3020,7 +3054,7 @@ check_assign = (s: int) -> int:
         nodes[s].b = i32(coerce(last_checked, T_INT))
         nodes[s].aux = 3
         return s
-    if nodes[s].sval != 0 or has_flag(s, NF_BROADCAST) or (not is_numeric(l) and types[l].kind != .bool_) or nodes[lhs].kind == .index or nodes[lhs].kind == .field:
+    if l == T_MATH_INT or nodes[s].sval != 0 or has_flag(s, NF_BROADCAST) or (not is_numeric(l) and types[l].kind != .bool_) or nodes[lhs].kind == .index or nodes[lhs].kind == .field:
         # Helper calls, overloads and vectors: x = operation(x, y). Capture
         # indices before reading x, including names the right side may change.
         # Reacquire indexed/field storage after the RHS: it can resize an array.
@@ -4016,6 +4050,7 @@ runtime_fn = (name: str) -> int:
     if s == 0 or syms[s].kind != .fns: ice("missing runtime function {name}")
     f = get_fn_inst(int(syms[s].decl), [], nodes[int(syms[s].decl)].pos)
     runtime_insts[name] = f
+    if starts_with(name, "__mi_"): check_pending_functions(f)
     f
 
 add_universe = ():

@@ -1,6 +1,6 @@
 Particle:type=[x:float64 v:float64]
 advance=(p:Particle all:array<Particle>):>Particle=>{
-    let force=0.0
+    let force:float64=0.0
     loop other in all {
         let dx=other.x-p.x
         force+=dx/(1.0+dx*dx)
@@ -22,7 +22,7 @@ main=():>int64=>{
     }
     assert(parallel =? serial)
     assert(initial[0].x =? 0.0)
-    let center=0.0
+    let center:float64=0.0
     loop p in parallel {center+=p.x}
     assert(abs(center-496.0) <? 1e-9)
     assert(parallel[0].x >? 0.0)

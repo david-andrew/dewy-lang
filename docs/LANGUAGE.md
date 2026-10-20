@@ -412,10 +412,8 @@ Operators with prefix meanings keep those meanings: `(-1)` is a negative value.
 
 `int` is the mathematical integer type, distinct from `int64` in signatures,
 containers and generic arguments. Unannotated integer literals default to `int`.
-Its interim representation is signed 64-bit: addition, subtraction, multiplication,
-negation, `abs`, powers and left shifts fail with an integer-overflow error when
-an exact result cannot fit. Constant overflow is a compile error. Automatic bigint
-promotion is not yet implemented. `int` has no `.min` or `.max` members.
+Arithmetic is arbitrary precision: word-sized values promote to a big integer
+when their exact result exceeds the signed 64-bit range. `int` has no `.min` or `.max` members.
 
 Explicit `int8` through `int64` and `uint8` through `uint64` retain wrapping
 arithmetic. Floating types are `float32` and `float64`. Literals in an explicit
@@ -426,8 +424,9 @@ types from the typed operand on either side. Mixed `int`/fixed-width arithmetic
 uses `int`; a literal beside a fixed-width operand can take that operand's type.
 Implicit conversions involving `int` preserve the value, checking narrowing at
 runtime (or diagnosing known constant failures). `as` and type calls use those
-same checks. Float-to-`int` truncates toward zero and rejects NaN, infinity and
-out-of-range values; `int`-to-float retains the usual rounding. Existing conversions
+same checks. Float-to-`int` truncates toward zero and rejects NaN and infinity;
+exact decimal and fraction conversions to integers also truncate toward zero,
+without rounding through a float. `int`-to-float retains the usual rounding. Existing conversions
 between explicit fixed widths retain their behavior. Mutable arguments and
 containers require matching element types: an `int` local is not an `@int64` place. Two mutable arguments in one call
 must be disjoint: the same binding, a parent and its field/element, or possibly
@@ -435,9 +434,10 @@ equal indices of one array are rejected. Distinct fields and distinct constant
 indices are accepted.
 
 Lengths retain their current `int64` type. An `int` index uses the ordinary bounds
-checks. `to_int(text)` still returns `int64 | none`, including `none` on overflow;
-its present value converts to `int` without loss. Printing, interpolation and
-`string(value)` format `int` as decimal. Checked mathematical integers are not yet
+checks. `to_int(text)` returns `int | none`, parsing integers of arbitrary size.
+`from_text<int>` and integer fields in parsed records and containers preserve
+the same arbitrary precision. Printing, interpolation and
+`string(value)` format `int` as decimal. Mathematical integers are not yet
 supported in shaders; shader integer values need explicit fixed-width types.
 
 Scalar integer annotations can carry checked refinements:
@@ -655,8 +655,9 @@ keys.
 `.to_float32()` and `.to_float64()` round the exact ratio once, to nearest with
 ties to even. They handle very large parts without first rounding the numerator
 and denominator separately. Overflow produces signed infinity; underflow can
-produce signed zero. Conversion is explicit, for example when passing an exact
-time step to a vector or rendering API:
+produce signed zero. A float annotation, parameter, or operand supplies a
+floating context. An explicit conversion also works, for example when passing
+an exact time step to a vector or rendering API:
 
 ```dewy
 let step=(1/60).to_float32()

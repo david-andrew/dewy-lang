@@ -2185,7 +2185,7 @@ def test_core_gpu_arrays(compiler, tmp_path, target, backend, release, request):
 half=(x:float32):>float32=>x*0.5+0.25
 main=()=>{
 printl"{gpu_available()} {engine.__gpu_vk}"
-let original=[1.0 2.0 3.0 4.0] let g=gpu(original) let saved=g
+let original:array<float64>=[1.0 2.0 3.0 4.0] let g=gpu(original) let saved=g
 original[0]=99.0
 let h=half.(g) .* 2.0 .+ 1.0
 assert(cpu(h).data =? [2.5 3.5 4.5 5.5])
@@ -2203,8 +2203,8 @@ let zeros=cpu(.-gpu([0.0 -0.0])).data
 assert(1.0/zeros[0] <? 0.0 and 1.0/zeros[1] >? 0.0)
 assert(sum(h) =? 16.0 and min(h) =? 2.5 and max(h) =? 5.5)
 assert(cpu(g .>? 2.0).data =? [0.0 0.0 1.0 1.0])
-let m=gpu(reshape([1.0 2.0 3.0 4.0 5.0 6.0] 2 3))
-let row=gpu([10.0 20.0 30.0]) let col=gpu(reshape([100.0 200.0] 2 1))
+let m=gpu(reshape<float64>([1.0 2.0 3.0 4.0 5.0 6.0] 2 3))
+let row=gpu([10.0 20.0 30.0]) let col=gpu(reshape<float64>([100.0 200.0] 2 1))
 let result=cpu(m .+ row .+ col)
 assert(result.shape =? [2 3] and result.data =? [111.0 122.0 133.0 214.0 225.0 236.0])
 assert(cpu(m ./ 2.0).data =? [0.5 1.0 1.5 2.0 2.5 3.0])
@@ -2215,7 +2215,7 @@ assert(cpu(.+ints).data =? [-7 0 9])
 assert(sum(ints) =? 2 and min(ints) =? -7 and max(ints) =? 9)
 let empty=gpu(zeros(0 3)) .+ row
 assert(cpu(empty).shape =? [0 3] and size(cpu(empty)) =? 0 and sum(empty) =? 0.0)
-let many=gpu(fill(1.0 4097)) .* 3.0
+let many=gpu(fill(float64(1.0) 4097)) .* 3.0
 assert(sum(many) =? 12291.0 and min(many) =? 3.0 and max(many) =? 3.0)
 loop i in [0..24) {g .+= 0.5}
 assert(cpu(g).data =? [13.0 14.0 15.0 16.0])
@@ -2396,8 +2396,8 @@ assert(f32_bits(loop32[i]) =? f32_bits(negative32[i]))
 }
 }
 if argv.length >? 1 {
-if argv[1] =? "values" printl(valued(fill(1.0 20) fill(2.0 19)))
-else printl(looped(fill(1.0 20) fill(2.0 19)))
+if argv[1] =? "values" printl(valued(fill(float64(1.0) 20) fill(float64(2.0) 19)))
+else printl(looped(fill(float64(1.0) 20) fill(float64(2.0) 19)))
 }
 return 42
 }''')
@@ -3255,8 +3255,8 @@ def test_core_cli_identity(compiler):
 def test_core_build_source_counts(compiler, tmp_path):
     source = tmp_path / 'main.dewy'
     helper = tmp_path / 'helper.dewy'
-    body = 'import p"helper.dewy" as h\n# 🙂\n\nmain=()=>h.answer()'
-    imported = 'answer=()=>42\n'
+    body = 'import p"helper.dewy" as h\n# 🙂\n\nmain=():>int64=>h.answer()'
+    imported = 'answer=():>int64=>42\n'
     source.write_text(body)
     helper.write_text(imported)
     built = subprocess.run([compiler, 'build', source, '--time', '-o', tmp_path / 'program'],
@@ -4075,7 +4075,7 @@ conditional_runtime = () -> int:
 
 
 @pytest.mark.parametrize('source_text', [
-    'divide=(a b)=>a/b\nmain=()=>if divide(3.0 2.0) =? 1.5 42 else 1',
+    'divide=(a:float64 b:float64)=>a/b\nmain=():>int64=>if divide(3.0 2.0) =? 1.5 42 else 1',
     'BigInt:type=[value:int64]\n__truediv__=(a:BigInt b:BigInt)=>a.value//b.value\nmain=()=>BigInt[84]/BigInt[2]',
 ], ids=['float', 'custom'])
 def test_core_division_without_exact_libraries(compiler, tmp_path, source_text):
@@ -5711,14 +5711,14 @@ def test_core_integer_parse_boundaries(compiler, tmp_path, target, release):
         if not re.fullmatch(pattern, token):
             return None
         value = int(token, base) * (-1 if negative else 1)
-        return value if -(1 << 63) <= value < (1 << 63) else None
+        return value
     answers = [expected(text) for text in texts]
     literals = ' '.join(json.dumps(text, ensure_ascii=False) for text in texts)
     results = ' '.join('none' if value is None else str(value) for value in answers)
     source = tmp_path / 'integers.dewy'
     source.write_text(f'''main=()=>{{
 let texts=[{literals}]
-let expected:array<int64?>=[{results}]
+let expected:array<int?>=[{results}]
 loop i in [0..texts.length) {{
     if to_int(texts[i]) not=?expected[i] {{printl"case {{i}}" return 1}}
 }}

@@ -1,12 +1,12 @@
-# Mathematical integers keep a separate identity even while represented by one
-# signed word. These overloads never route their arithmetic through wrapping int.
-__int_overflow = (): panic("integer overflow: mathematical int currently requires an int64 representation")
+# Mathematical integers preserve their semantic identity across word and
+# BigInt storage. Arithmetic never routes through a wrapping conversion.
+__int_overflow = (): panic("integer overflow: value does not fit the requested fixed width")
 
 abs = (x: __dewy_int) -> __dewy_int: if x < 0: -x else: x
 min = (a: __dewy_int, b: __dewy_int) -> __dewy_int: if a < b: a else: b
 max = (a: __dewy_int, b: __dewy_int) -> __dewy_int: if a > b: a else: b
 
-__dewy_power = (base: __dewy_int, exponent: int) -> __dewy_int:
+__dewy_power = (base: __dewy_int, exponent: __dewy_int) -> __dewy_int:
     if exponent < 0: panic("negative integer exponent: use a rational or floating base")
     let base = base
     let exponent = exponent
@@ -17,7 +17,7 @@ __dewy_power = (base: __dewy_int, exponent: int) -> __dewy_int:
         if exponent > 0: base *= base
     result
 
-pow = (base: __dewy_int, exponent: int) -> __dewy_int: __dewy_power(base, exponent)
+pow = (base: __dewy_int, exponent: __dewy_int) -> __dewy_int: __dewy_power(base, exponent)
 
 __floor_div = (a: __dewy_int, b: __dewy_int) -> __dewy_int:
     q = a / b
@@ -32,3 +32,18 @@ __floor_mod = (a: __dewy_int, b: __dewy_int) -> __dewy_int:
 
 __floor_div_pow2 = (a: __dewy_int, shift: int) -> __dewy_int: a >> shift
 __floor_mod_pow2 = (a: __dewy_int, mask: __dewy_int) -> __dewy_int: a & mask
+
+__fmt = (buf: mut u8[], a: __dewy_int): __mi_format(buf, a)
+hash = (x: __dewy_int) -> u64: hash(u64(__mi_hash(x)))
+__fmt_spec = (buf: mut u8[], x: __dewy_int, spec: str): __mi_format_spec(buf, x, spec)
+__map_tag = (k: __dewy_int, h: u64) -> u64: h
+__read = (r: mut __TextIn, x: mut __dewy_int):
+    __tx_word_at(r, true)
+    if let value = __mi_parse(r.s[r.n0..r.n1)): x = value
+    else: __tx_bad(r, "expected a whole number")
+format = (value: __dewy_int, spec: str) -> str:
+    sp = __format_checked(spec, "dxXbofeEgG%", true)
+    buf: u8[]
+    if sp.prec >= 0 or find_byte("feEgG%", u8(sp.kind)) >= 0: __fmt_spec(buf, f64(value), spec)
+    else: __fmt_spec(buf, value, spec)
+    str_from_bytes(buf)

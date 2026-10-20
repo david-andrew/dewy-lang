@@ -1,0 +1,18 @@
+# quick
+factorial=(n:int):>int=>{let result=1 loop i in [1..n] result*=i return result}
+const FACT=factorial(30)
+$assert FACT =? 265252859812191058636308480000000
+twice=(n:int):>int=>n*2
+count=(start:int):>int=>{let n=0 loop i in [start..start+3) n+=i-start return n}
+const LARGE=twice(9223372036854775808)
+const NEGNOT=not FACT
+const RANGE=count(2^100)
+main=()=>{
+printl"{LARGE} {NEGNOT} {RANGE}"
+printl"{1^(2^100)} {(-1)^(2^100)} {(-1)^(2^100+1)} {(-2)>>(2^100)} {0<<(2^100)}"
+printl(FACT)
+let start=2^100
+loop i in [start..start+3) printl(i-start)
+loop i in [start,start-2..start-6] printl(i-start)
+loop i in [start..] {printl(i-start) if i >? start break}
+}

@@ -52,8 +52,8 @@ main=():>int64=> {
     let input=[loop i in [0..64) Complex[((i*7)%13) as float64 0.0]]
     let spectrum=fft(input false)
     let restored=fft(spectrum true)
-    let energy=0.0
-    let spectral=0.0
+    let energy:float64=0.0
+    let spectral:float64=0.0
     loop i in [0..64)  {
         assert(abs(restored[i].re-input[i].re) <? 1e-9)
         assert(abs(restored[i].im) <? 1e-9)

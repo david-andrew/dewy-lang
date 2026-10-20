@@ -420,7 +420,9 @@ compile = (path: str, out0: str) -> str:
             lf_of_inst(f)
             exp_done[k] = true
     main_lf = -1
-    if main_fn != 0: main_lf = lf_of_inst(main_fn)
+    if main_fn != 0:
+        main_lf = lf_of_inst(main_fn)
+        if prune(int(fns[main_fn].ret)) == T_MATH_INT: main_lf = lf_helper(.math_main, T_MATH_INT, main_fn)
     # (main = () -> int: its value is the exit code)
     main_code = main_fn != 0 and is_int(prune(int(fns[main_fn].ret)))
     main_exit_lf = -1

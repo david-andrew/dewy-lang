@@ -324,6 +324,7 @@ _from_unsigned=(value:uint64 negative:bool=false):>BigInt=>{
 }
 
 bigint = ((value:BigInt):>BigInt=>value)
+       & ((value:int):>BigInt=>value as BigInt)
        & ((value:uint64):>BigInt=>_from_unsigned(value))
        & ((value:int64):>BigInt=>{
             let magnitude=value as uint64

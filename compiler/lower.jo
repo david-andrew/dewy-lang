@@ -19,6 +19,7 @@ use 'glsl.jo'
 use 'spirv.jo'
 use 'msl.jo'
 use 'pe.jo'
+use 'math_lower.jo'
 
 const VC_VOID = 0
 const VC_INT = 1
@@ -28,7 +29,7 @@ const VC_AGG = 3
 const LK_INST = 0
 const LK_HELPER = 1
 
-enum HK: drop, copy, arrrel, arruniq, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq
+enum HK: drop, copy, arrrel, arruniq, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq, math_main
 
 struct LFunc:
     kind: int
@@ -304,16 +305,34 @@ release_call = (v: int, t: int):
     else: e_call(rt("__rc_dec"), [v], -1)
 
 drop_at = (addr: int, t0: int):
-    t = prune(t0)
+    t = quantity_base(t0)
     if not is_managed(t): return
+    if not opt_release and (t == T_MATH_INT or math_rep_type(t)):
+        handle = e_load(VI, addr, 8, ptr_size)
+        iff(e_bin(.ne, VI, handle, e_iconst(0)))
+        was = ir_cold
+        ir_cold = true
+        release(handle, math_payload_type())
+        ir_cold = was
+        endc()
+        return
     if vc(t) == VC_INT:
         release(e_load(VI, addr, 0, ptr_size), t)
         return
     e_call(lf_helper(.drop, t, 0), [addr], -1)
 
 copy_at = (addr: int, t0: int):
-    t = prune(t0)
+    t = quantity_base(t0)
     if not is_managed(t): return
+    if not opt_release and (t == T_MATH_INT or math_rep_type(t)):
+        handle = e_load(VI, addr, 8, ptr_size)
+        iff(e_bin(.ne, VI, handle, e_iconst(0)))
+        was = ir_cold
+        ir_cold = true
+        retain(handle, math_payload_type())
+        ir_cold = was
+        endc()
+        return
     if vc(t) == VC_INT:
         e_store(addr, 0, copy_ref(e_load(VI, addr, 0, ptr_size), t), ptr_size)
         return
@@ -1518,6 +1537,11 @@ positive_bound = (n: int, use_locals: bool) -> int:
     if modulus > 0: return modulus - 1
     if k != .binary or nodes[n].aux != 0: return -1
     op = nodes[n].op as Tok
+    if op == .amp:
+        a = positive_bound(int(nodes[n].a), use_locals)
+        b = positive_bound(int(nodes[n].b), use_locals)
+        if a >= 0 and b >= 0: return min(a, b)
+        return max(a, b)
     if op != .plus and op != .star: return -1
     a = positive_bound(int(nodes[n].a), use_locals)
     b = positive_bound(int(nodes[n].b), use_locals)
@@ -1569,6 +1593,7 @@ positive_writes = (n: int):
     loop i in [0..nkids2(n)): positive_writes(kid2(n, i))
 
 gen_positive_mod = (n: int) -> int:
+    if prune(ntype(n)) == T_MATH_INT: return -1
     modulus = positive_modulus(n)
     if modulus == 0: return -1
     if positive_bounds_fn != cur_fn:
@@ -1590,7 +1615,7 @@ gen_constant_floor = (n: int) -> int:
     if nkids(n) != 2: return -1
     f = int(nodes[n].sym)
     t = prune(int(fns[f].ret))
-    if t != T_INT and t != T_U64 and t != T_MATH_INT: return -1
+    if t != T_INT and t != T_U64: return -1
     d = int(fns[f].decl)
     if d == 0: return -1
     name = name_of(int(nodes[d].name))
@@ -2108,6 +2133,7 @@ gen_match_test = (p: int, st0: int, hidden_addr: int) -> int:
             endc()
             return result
         a = int(nodes[p].a)
+        if st == T_MATH_INT: return math_compare(.eq, hidden_addr, gen_borrowed(a).v)
         if types[st].kind == .str_:
             v = gen_borrowed(a).v
             return e_call(rt("__str_eq"), [e_load(VI, hidden_addr, 0, ptr_size), v], VI)
@@ -2222,6 +2248,7 @@ gen_match_lookup = (m: int, st: int, rs: int, rtp: int, vals: int[], arms: int[]
 gen_match_switch = (m: int, st0: int, rs: int, rtp: int, val: bool) -> bool:
     st = prune(st0)
     is_enum = types[st].kind == .enum_
+    if st == T_MATH_INT: return false
     if not is_enum and types[st].kind != .int_: return false
     na = nkids(m)
     # A grouped constant arm plus a wildcard can cover many alternatives.
@@ -2519,6 +2546,15 @@ gen_binary = (e: int) -> Val:
         sz = tsize(int(types[lt].elem))
         if sz > 1: d = e_bin(.divs, VI, d, e_iconst(sz))
         return V(d, false)
+    if lt == T_MATH_INT:
+        if is_cmp and math_proven_word(a) and math_proven_word(b):
+            return V(e_bin(int_op(op, true), VI, math_word_expr(a), math_word_expr(b)), false)
+        if not is_cmp and math_proven_word(e): return math_word(math_word_expr(e))
+        va = gen_left(a, lt, keep_left)
+        if op == .shl or op == .shr: return math_shift(op, va, math_shift_count(b), types[prune(ntype(b))].sign)
+        vb = gen_borrowed(b).v
+        if is_cmp: return V(math_compare(op, va, vb), false)
+        return math_binary(op, va, vb)
     if aux >= 7: return gen_vec_binary(e, keep_left)
     if vc(lt) == VC_FLT:
         ty = vt_of(lt)
@@ -2535,7 +2571,7 @@ gen_binary = (e: int) -> Val:
             low = e_bin(.and_, VI, gen_expr(int(nodes[a].a)).v, e_iconst(nodes[m].ival - 1))
             return V(e_bin(int_op(op, false), VI, low, e_iconst(0)), false)
     va = freeze_scalar(gen_expr(a).v, lt)
-    vb = gen_expr(b).v
+    vb = if op == .shl or op == .shr: math_shift_count(b) else: gen_expr(b).v
     sg = (types[lt].kind == .int_ and types[lt].sign)
     if op == .slash or op == .percent:
         iff(e_bin(.eq, VI, vb, e_iconst(0)))
@@ -3470,8 +3506,31 @@ gen_conv = (e: int) -> Val:
         copy_explicit.remove(a)
         return own(value, from)
     if cv == .none_ or cv == .quantity_const or cv == .ptr: return gen_expr(a)
+    if cv == .big2math: return math_call("__mi_pack", [gen_borrowed(a).v])
+    if cv == .math2big: return math_call("__mi_big", [gen_borrowed(a).v], to)
+    if cv == .rational2math:
+        value = gen_borrowed(a).v
+        layout(from)
+        denominator = int(structs[int(types[from].st)].fields) + 1
+        return math_call("__mi_ratio_int", [value, e_addi(value, int(fields[denominator].offset))])
     if cv == .int_:
-        v = gen_expr(a).v
+        if from == T_MATH_INT and math_proven_word(a):
+            v = math_word_expr(a)
+            # The proof removes only the representation check, not narrowing.
+            bits = int(types[to].bits)
+            if not types[to].sign: math_int_guard(e_bin(.lts, VI, v, e_iconst(0)))
+            if bits < 64:
+                hi = (1 << (bits - int(types[to].sign))) - 1
+                lo = if types[to].sign: -hi - 1 else: 0
+                math_int_guard(e_bin(.lts, VI, v, e_iconst(lo)))
+                math_int_guard(e_bin(.gts, VI, v, e_iconst(hi)))
+            return V(norm(v, to), false)
+        v = gen_borrowed(a).v
+        if to == T_MATH_INT:
+            if from == T_U64: return math_call("__mi_unsigned", [v])
+            return math_word(v)
+        if from == T_MATH_INT:
+            v = if types[to].sign: math_signed(v) else: e_call(rt("__mi_to_unsigned"), [v], VI)
         if (from == T_MATH_INT or to == T_MATH_INT) and not int_widens(from, to):
             lo = 0
             hi = -1
@@ -3480,12 +3539,16 @@ gen_conv = (e: int) -> Val:
             if types[to].sign:
                 hi = int(u64(hi) >> 1)
                 lo = -hi - 1
-            if types[from].sign:
+            if types[from].sign and (from != T_MATH_INT or types[to].sign):
                 math_int_guard(e_bin(.lts, VI, v, e_iconst(lo)))
                 if types[to].sign or bits < 64: math_int_guard(e_bin(.gts, VI, v, e_iconst(hi)))
             else: math_int_guard(e_bin(.gtu, VI, v, e_iconst(hi)))
         return V(norm(v, to), false)
     if cv == .int2float:
+        if from == T_MATH_INT:
+            v = e_call(rt("__mi_float"), [gen_borrowed(a).v], VF)
+            if to == T_F32: v = e_un(.f2f, VS, v)
+            return V(v, false)
         v = gen_expr(a).v
         if types[from].kind == .int_ and not types[from].sign and int(types[from].bits) == 64: return V(e_un(.u2f, vt_of(to), v), false)
         return V(e_un(.i2f, vt_of(to), v), false)
@@ -3494,8 +3557,8 @@ gen_conv = (e: int) -> Val:
         v = gen_expr(a).v
         ft = vt_of(from)
         if to == T_MATH_INT:
-            valid = e_bin(.and_, VI, e_bin(.fge, ft, v, e_fconst(-9223372036854775808.0, ft)), e_bin(.flt, ft, v, e_fconst(9223372036854775808.0, ft)))
-            math_int_guard(e_bin(.eq, VI, valid, e_iconst(0)))
+            if from == T_F32: v = e_un(.f2f, VF, v)
+            return math_call("__mi_from_float", [v])
         d = vreg(VI)
         bits = 64
         sg = true
@@ -3634,6 +3697,9 @@ gen_expr = (e: int) -> Val:
         nodes[e].type = saved_t
         return never_value(t)
     if k == .int_lit:
+        if quantity_base(t) == T_MATH_INT:
+            if has_flag(e, NF_U64) and nodes[e].ival < 0: return math_call("__mi_unsigned", [e_iconst(nodes[e].ival)])
+            return math_word(e_iconst(nodes[e].ival))
         if vc(t) == VC_FLT: return V(e_fconst(f64(nodes[e].ival), vt_of(t)), false)
         return V(e_iconst(nodes[e].ival), false)
     if k == .float_lit: return V(e_fconst(nodes[e].fval, vt_of(t)), false)
@@ -3649,6 +3715,8 @@ gen_expr = (e: int) -> Val:
         if nodes[e].aux != 0: return gen_interp(e)
         return V(e_daddr(str_data(name_of(int(nodes[e].sval)))), false)
     if k == .ident:
+        if t == T_MATH_INT and nodes[e].aux == i32(int(SK.local)):
+            if let word = math_word_regs.get(int(nodes[e].sym)): return math_word(word)
         if nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global)):
             p = gen_place(e, false)
             return V(read_place(p, t), false)
@@ -3697,6 +3765,7 @@ gen_expr = (e: int) -> Val:
         layout(at)
         return V(e_bin(.eq, VI, e_load(VI, addr, 0, 4), e_iconst(vi)), false)
     if k == .call:
+        if t == T_MATH_INT and math_word_helper(e) > 0: return math_word(math_word_expr(e))
         ir_set_pos(nodes[e].pos)
         aux = int(nodes[e].aux)
         if aux == 0:
@@ -3779,6 +3848,9 @@ gen_expr = (e: int) -> Val:
             nodes[neg].aux = 10
             nodes[neg].type = i32(t)
             return gen_vec_binary(neg, false)
+        if t == T_MATH_INT:
+            base = if nodes[e].op == i32(int(Tok.minus)): 0 else: -1
+            return math_binary(.minus, math_word(e_iconst(base)).v, gen_borrowed(a).v)
         v = gen_expr(a).v
         if nodes[e].op == i32(int(Tok.minus)):
             if vc(t) == VC_FLT: return V(e_un(.fneg, vt_of(t), v), false)
@@ -4090,7 +4162,7 @@ const_array = (e: int, et: int) -> int:
             if sz == 4: bits = int(f32_bits(f32(nodes[c].fval)))
             else: bits = int(f64_bits(nodes[c].fval))
         else: bits = nodes[c].ival
-        loop b in [0..sz): rodata.push(u8((bits >> (8 * b)) & 255))
+        loop b in [0..sz): rodata.push(if b >= 8: u8(0) else: u8((bits >> (8 * b)) & 255))
     o
 
 # ---------------- conditions as branches ----------------
@@ -4167,6 +4239,7 @@ gen_range_cond = (e: int, invert: bool = false) -> int:
     b = range_cmp(int(nodes[e].b))
     if b.0 == 0 or not same_range_read(a.0, b.0): return -1
     first_read = a.0
+    if prune(ntype(first_read)) == T_MATH_INT: return -1
     if k == .or_:
         a.1 = if a.1 == .lt: .ge else if a.1 == .le: .gt else if a.1 == .gt: .le else: .lt
         b.1 = if b.1 == .lt: .ge else if b.1 == .le: .gt else if b.1 == .gt: .le else: .lt
@@ -5275,6 +5348,8 @@ range_facts_begin = (s: int, l: int) -> (int, int, bool):
         if nodes[hi].kind == .int_lit and not has_flag(hi, NF_U64) and nodes[hi].ival > 0:
             limit = nodes[hi].ival
             if not has_flag(int(nodes[s].a), NF_INCLUSIVE): limit -= 1
+        if limit < 0 and bound != 0 and tkind(ntype(bound)) == .array:
+            limit = 9223372036854775807 / max(1, tsize(telem(ntype(bound)))) - 1
         nonneg_limits.push(limit)
     nfp = fp_begin(s, l, bound, 0)
     loop sa in safe_arrs:
@@ -5314,6 +5389,7 @@ gen_stepped_for = (s: int):
     it = int(nodes[s].a)
     l = int(nodes[s].sym)
     lt = prune(int(locals[l].type))
+    if lt == T_MATH_INT: scope_add_local(l)
     signed = types[lt].sign
     less = if signed: Op.lts else: Op.ltu
     greater = if signed: Op.gts else: Op.gtu
@@ -5324,11 +5400,11 @@ gen_stepped_for = (s: int):
     open_end = nodes[it].b == 0
     inclusive = has_flag(it, NF_INCLUSIVE)
     stmt_begin()
-    e_mov(ctr, gen_expr(int(nodes[it].a)).v)
-    second = gen_expr(int(nodes[it].c)).v
+    e_mov(ctr, math_count(int(nodes[it].a)))
+    second = math_count(int(nodes[it].c))
     up = e_bin(greater, VI, second, ctr)
     step = e_bin(.sub, VI, second, ctr)
-    if not open_end: e_mov(endv, gen_expr(int(nodes[it].b)).v)
+    if not open_end: e_mov(endv, math_count(int(nodes[it].b)))
     iff(e_bin(.eq, VI, step, e_iconst(0)))
     e_call_nr(rt("__panic"), [e_daddr(str_data("range step must be nonzero"))], -1)
     endc()
@@ -5355,7 +5431,11 @@ gen_stepped_for = (s: int):
     facts = range_facts_begin(s, l)
     lop()
     top = ctl
-    if not direct: write_place(local_place(l, true), lt, ctr)
+    if not direct:
+        if lt == T_MATH_INT:
+            drop_at(place_addr(local_place(l, true), lt), lt)
+            write_place(local_place(l, true), lt, math_word(ctr).v)
+        else: write_place(local_place(l, true), lt, ctr)
     blk()
     cont = ctl
     loops.push(LoopInfo(brk, cont, scope_locals.len(), tl_items.len(), building.len()))
@@ -5508,6 +5588,10 @@ gen_for = (s: int):
         return
     scope_push()
     aux = int(nodes[s].aux)
+    if aux == 0 and prune(int(locals[int(nodes[s].sym)].type)) == T_MATH_INT and not math_word_range(s):
+        gen_math_for(s)
+        scope_pop()
+        return
     if aux == 0 and has_flag(int(nodes[s].a), NF_STEP):
         gen_stepped_for(s)
         scope_pop()
@@ -5515,6 +5599,7 @@ gen_for = (s: int):
     if aux == 0 or aux == 4:
         l = int(nodes[s].sym)
         lt = int(locals[l].type)
+        if prune(lt) == T_MATH_INT: scope_add_local(l)
         endv = vreg(VI)
         ctr = vreg(VI)
         # (a 64-bit loop variable in a register that the body does not assign is the counter)
@@ -5525,7 +5610,7 @@ gen_for = (s: int):
         stmt_begin()
         if aux == 0:
             it = int(nodes[s].a)
-            e_mov(ctr, gen_expr(int(nodes[it].a)).v)
+            e_mov(ctr, math_count(int(nodes[it].a)))
             inclusive = has_flag(it, NF_INCLUSIVE)
             if nodes[it].b == 0:
                 open_end = true
@@ -5534,7 +5619,7 @@ gen_for = (s: int):
                 maxv = -1
                 if bits < 64: maxv = (1 << bits) - 1
                 e_mov(endv, e_iconst(maxv))
-            else: e_mov(endv, gen_expr(int(nodes[it].b)).v)
+            else: e_mov(endv, math_count(int(nodes[it].b)))
         else:
             r = gen_expr(int(nodes[s].a)).v
             e_mov(ctr, e_load(VI, r, 0, 8))
@@ -5561,11 +5646,18 @@ gen_for = (s: int):
             e_mov(remaining, e_addi(e_bin(.sub, VI, endv, ctr), 1))
         lop()
         top = ctl
-        if not direct: write_place(local_place(l, true), lt, ctr)
+        if not direct:
+            if prune(lt) == T_MATH_INT:
+                if stable_loop_index(l): math_word_regs[l] = ctr
+                else:
+                    drop_at(place_addr(local_place(l, true), lt), lt)
+                    write_place(local_place(l, true), lt, math_word(ctr).v)
+            else: write_place(local_place(l, true), lt, ctr)
         blk()
         cont = ctl
         loops.push(LoopInfo(brk, cont, scope_locals.len(), tl_items.len(), building.len()))
         gen_loop_body(int(nodes[s].b))
+        math_word_regs.remove(l)
         loops.pop()
         range_facts_end(facts)
         endc()
@@ -6339,6 +6431,7 @@ gen_block_stmts = (b: int):
 begin_fn = (name: str, idx: int):
     ir_begin(name, idx)
     stack_closure_fn = -1
+    math_word_regs.clear()
     ctl = 0
     cond_depth = 0
     scope_locals = []
@@ -6504,6 +6597,7 @@ field_list = (t0: int) -> (int, int)[]:
     t = quantity_base(t0)
     layout(t)
     out: (int, int)[]
+    if t == T_MATH_INT: return [(math_payload_type(), 8)]
     if types[t].kind == .struct_:
         si = int(types[t].st)
         loop i in [0..int(structs[si].nfields)):
@@ -6731,6 +6825,10 @@ helper_boxuniq = (t: int):
 
 helper_eq = (t: int):
     ps = helper_params(2)
+    if t == T_MATH_INT:
+        ir.ret = VI
+        e_ret(math_compare(.eq, ps[0], ps[1]))
+        return
     ir.ret = VI
     a = ps[0]
     b = ps[1]
@@ -6786,7 +6884,7 @@ helper_eq = (t: int):
         na = arr_len(pa)
         brif_to(e_bin(.ne, VI, na, arr_len(pb)), fail)
         ek = types[prune(et)].kind
-        bits_equal = ek == .int_ or ek == .bool_
+        bits_equal = (ek == .int_ and et != T_MATH_INT) or ek == .bool_
         if bits_equal:
             # A single scalar needs neither a word loop nor a tail loop.
             iff(e_bin(.eq, VI, na, e_iconst(1)))
@@ -6895,6 +6993,10 @@ eq_member = (t0: int, a: int, b: int, fail: int):
 
 helper_hash = (t: int):
     ps = helper_params(1)
+    if t == T_MATH_INT:
+        ir.ret = VI
+        e_ret(e_call(rt("__mi_hash"), [ps[0]], VI))
+        return
     ir.ret = VI
     a = ps[0]
     snapshot = helper_callback_snapshot(t, true)
@@ -6997,6 +7099,7 @@ hash_member = (h: int, t0: int, a: int):
 
 # does helper_hash for t do more than hash_member for t (which would call it again)?
 helper_hash_differs = (t: int) -> bool:
+    if t == T_MATH_INT: return true
     k = types[t].kind
     k == .struct_ or k == .tuple or k == .fixed or k == .opt or k == .enum_ or k == .array or k == .vec
 
@@ -7135,6 +7238,7 @@ lower_helper = (lf: int):
         boxrel: helper_boxrel(t)
         boxdrop: helper_boxdrop(t)
         boxuniq: helper_boxuniq(t)
+        math_main: math_main(h.inst)
 
 # native FFI: a thunk that resolves the C function on first use and calls it
 # macOS: the C functions dyld puts in their slots when the program starts: (slot's offset in the

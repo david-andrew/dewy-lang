@@ -359,6 +359,7 @@ def arguments(argv):
     cli.add_argument('--batch', type=int, default=8, help='seeds compiled together per build (default 8)')
     cli.add_argument('--shrink', type=int, default=6, help='distinct failures to minimize (default 6)')
     cli.add_argument('--features', nargs='+', choices=gen.FEATURES, help='restrict the generated features')
+    cli.add_argument('--work', type=Path, default=SCRATCH, help='scratch directory for builds and runs')
     cli.add_argument('--failures', type=Path, default=FAILURES, help=f'failure directory (default {FAILURES})')
     cli.add_argument('--compiler', type=Path, help='use this compiler instead of the cached build')
     cli.add_argument('--print', dest='show', action='store_true', help='print the seed\'s program and oracle output')
@@ -380,7 +381,7 @@ def main(argv=None, compiler: Path | None = None) -> int:
         return fuzz(Path(compiler).resolve(), seed=options.seed, count=options.count, minutes=options.minutes,
                     modes=options.modes, workers=options.workers, batch_size=options.batch, shrink=options.shrink,
                     failures_dir=options.failures.expanduser().resolve(), features=options.features,
-                    quiet=options.quiet)
+                    quiet=options.quiet, work=options.work.expanduser().resolve())
     except RuntimeError as error:
         print(f'fuzz: {error}', file=sys.stderr)
         return 2

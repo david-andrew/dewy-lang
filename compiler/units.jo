@@ -410,6 +410,7 @@ quantity_unary = (n: int, expected: int) -> int:
 # Preserve the scalar compound-update path after checking the qualifier. The
 # indexed/field path still captures and reacquires places in the usual checker.
 quantity_compound = (s: int, target: int) -> bool:
+    if quantity_base(target) == T_MATH_INT: return false
     if not is_numeric(quantity_base(target)) or nodes[s].sval != 0 or has_flag(s, NF_BROADCAST): return false
     if nodes[int(nodes[s].a)].kind != .ident: return false
     if nodes[s].op != i32(int(Tok.pluseq)) and nodes[s].op != i32(int(Tok.minuseq)): return false

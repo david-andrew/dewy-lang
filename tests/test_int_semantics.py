@@ -1,4 +1,4 @@
-"""Mathematical int identity, checked word representation and fixed-width boundaries."""
+"""Mathematical int identity and checked fixed-width boundaries."""
 import shutil
 import subprocess
 
@@ -128,7 +128,7 @@ def run(program, op, x, y=0):
     ('fixed-constants', 0, 0, f'{MIN} 0'), ('zero-huge-shift', 0, 0, 0),
     ('u64', MAX, 0, MAX), ('from-u64', MAX, 0, MAX),
     ('float', '-9223372036854775808', 0, MIN), ('float', '42.9', 0, 42),
-    ('bounded-index', 0, 0, 5150), ('parse', '9223372036854775808', 0, 'none'),
+    ('bounded-index', 0, 0, 5150), ('parse', '9223372036854775808', 0, '9223372036854775808'),
     ('parse', str(MIN), 0, str(MIN)), ('parse', 'invalid', 0, 'none'),
     ('bigint-context', 0, 0, '18446744073709551616'),
     ('bigint', 0, 0, '18446744073709551616'), ('bigint-word', 0, 0, '18446744073709551615'),
@@ -147,16 +147,11 @@ def test_int_values(int_program, op, x, y, expected):
 
 
 @pytest.mark.parametrize('op,x,y', [
-    pytest.param('add', MAX, 1, marks=pytest.mark.core_quick), ('add', MIN, -1), ('sub', MIN, 1), ('sub', MAX, -1),
-    ('mul', MAX, 2), ('mul', MIN, -1), ('mul', -1, MIN), ('mul', MIN, MIN),
-    ('neg', MIN, 0), ('abs', MIN, 0), ('pow', 2, 63), ('pow-call', 2, 63),
-    ('shl', 1, 63), ('shl', MIN, 1), ('shl', 1, 64), ('u-shl', 1, -1), ('shl', 1, -1),
-    ('shr', 1, -1), ('div', MIN, -1), pytest.param('i8', 128, 0, marks=pytest.mark.core_quick), ('i8', -129, 0),
+    ('shl', 1, -1), ('shr', 1, -1),
+    pytest.param('i8', 128, 0, marks=pytest.mark.core_quick), ('i8', -129, 0),
     ('i16', -32769, 0), ('i16', 32768, 0), ('u16', -1, 0), ('u16', 65536, 0),
     ('i32', -(1 << 31)-1, 0), ('i32', 1 << 31, 0), ('u32', -1, 0), ('u32', 1 << 32, 0),
-    ('u8', -1, 0), ('u8', 256, 0), ('u64', -1, 0), ('from-u64', -1, 0),
-    ('float', '9223372036854775808', 0), ('float', '1e100', 0),
-    ('compound', MAX, 1), ('discard', MAX, 1), ('mutated-index', MAX, 1), ('float-nan', 0, 0),
+    ('u8', -1, 0), ('u8', 256, 0), ('u64', -1, 0), ('float-nan', 0, 0),
 ])
 def test_int_overflow(int_program, op, x, y):
     result = run(int_program, op, x, y)
@@ -164,13 +159,7 @@ def test_int_overflow(int_program, op, x, y):
     assert 'integer overflow' in result.stdout + result.stderr
 
 
-@pytest.mark.parametrize('expression', [
-    '9223372036854775807+1', '-9223372036854775808-1',
-    '3037000500*3037000500', '2^63', '(-9223372036854775808)//(-1)', '-(-9223372036854775808)', '1<<63',
-    '9223372036854775808', '18446744073709551616', '-9223372036854775809',
-    'int(1)<<63', 'int(1)<<uint64.max', 'int(int64.min)//int(-1)', 'int(2)^int(63)',
-    'int(9223372036854775808.0)', 'uint8(int(256))', 'int(uint64.max)',
-])
+@pytest.mark.parametrize('expression', ['uint8(int(256))'])
 @pytest.mark.parametrize('release', [False, True])
 def test_int_constant_errors(compiler, tmp_path, expression, release):
     source = tmp_path / 'constant.dewy'

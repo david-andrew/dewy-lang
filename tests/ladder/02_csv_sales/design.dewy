@@ -1,7 +1,7 @@
 Sale:type=[region:string units:int64 price:float64]
 summarize=(text:string):>float64=>{
     let rows=csv_rows(text)
-    let total=0.0
+    let total:float64=0.0
     loop i in [1..rows.length) {
         let fields=rows[i]
         if fields.length not=? 3 {continue}

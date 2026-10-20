@@ -20,7 +20,7 @@ payload=():>array<uint8>=>{
     return data
 }
 main=(args:array<string>):>int64=>{
-    let port=match to_int(args[2]) {value:int64=>value <none>=>0}
+    let port=match to_int(args[2]) {value:int=>int64(value) <none>=>0}
     let server=args[1] =? "server"
     let count=0 let peer=-1 let data=payload()
     if server {
@@ -349,7 +349,7 @@ import rtc
 rtc.rtc_stun_servers=[]
 if env("ROLE")=?"host" invite.start(reliable=false)
 let wrote=false
-let reported=-1.0
+let reported:float64=-1.0
 let started=time()
 update=(dt:float64)=>{
     advance_game(dt)

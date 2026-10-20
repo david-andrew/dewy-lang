@@ -1,0 +1,32 @@
+# quick
+factorial=(n:int):>int=>{let result=1 loop i in [1..n] result*=i return result}
+identity=<T>(x:T):>T=>x
+main=()=>{
+    let max=9223372036854775807
+    let large=max+1
+    printl"{factorial(30)} {2^100}"
+    printl"{large} {large+large} {-large-1} {-(-large-1)}"
+    printl"{large*large} {large-large} {large//3} {large%3}"
+    printl"{(-large-1)//3} {(-large-1)%3} {large//(-3)} {large%(-3)}"
+    printl"{large<<40} {(large<<40)>>100} {(-large)>>100}"
+    printl"{large and (large-1)} {large or 3} {large xor 3} {not large}"
+    let values=[max 2]
+    let saved=values
+    values[0]+=1
+    values.push(2^100)
+    printl"{values} {saved} {values =? [large 2 2^100]}"
+    let item=[count=max]
+    let prior=item
+    item.count+=2
+    printl"{item.count} {prior.count} {identity(item).count}"
+    let keys=[large->"large" 0->"zero"]
+    printl"{keys[max+1]} {keys[large-large]}"
+    printl"{to_int("1267650600228229401496703205376")} {to_int(" -0x8000_0000_0000_0001 ")} {to_int("invalid")}"
+    printl"{format(large "x")} {format(large "#x")} {format(large ",")}"
+    let fixed:int64=9223372036854775807
+    fixed+=1
+    printl"{fixed} {large+int8(1)} {int8(1)+large} {uint64(large)}"
+    let f:float64=18446744073709551616.0
+    printl"{int(f)} {float64(large) =? 9223372036854775808.0}"
+    printl"{0.1*large} {large/10}"
+}

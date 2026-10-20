@@ -1,11 +1,11 @@
 predict=(x:float64 w:float64 b:float64):>float64=>w*x+b
 train=(xs:array<float64> ys:array<float64> epochs:int64):>array<float64>=>{
-    let w=0.0
-    let b=0.0
+    let w:float64=0.0
+    let b:float64=0.0
     let n=xs.length as float64
     loop epoch in [0..epochs) {
-        let dw=0.0
-        let db=0.0
+        let dw:float64=0.0
+        let db:float64=0.0
         loop i in [0..xs.length) {
             let error=predict(xs[i] w b)-ys[i]
             dw+=2.0*error*xs[i]/n
@@ -17,8 +17,8 @@ train=(xs:array<float64> ys:array<float64> epochs:int64):>array<float64>=>{
     return [w b]
 }
 main=():>int64=>{
-    let xs=[-2.0 -1.0 0.0 1.0 2.0]
-    let ys=[-3.0 -1.0 1.0 3.0 5.0]
+    let xs:array<float64>=[-2.0 -1.0 0.0 1.0 2.0]
+    let ys:array<float64>=[-3.0 -1.0 1.0 3.0 5.0]
     let weights=train(xs ys 1000)
     assert(abs(weights[0]-2.0) <? 1e-8)
     assert(abs(weights[1]-1.0) <? 1e-8)

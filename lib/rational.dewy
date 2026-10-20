@@ -5,6 +5,7 @@ from bigint import BigInt, bigint, parse_bigint, to_int64, _ratio_float_bits
 Rational:type=[numerator:BigInt denominator:BigInt=bigint(1)]
 
 _integer = ((value:BigInt):>BigInt=>value)
+    & ((value:int):>BigInt=>bigint(value))
     & ((value:int64):>BigInt=>bigint(value))
     & ((value:uint64):>BigInt=>bigint(value))
     & ((value:string):>BigInt=>bigint(value))

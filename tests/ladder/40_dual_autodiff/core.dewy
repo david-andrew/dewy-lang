@@ -13,12 +13,12 @@ f=(x:Dual):>Dual=> {
 }
 plain=(x:float64):>float64=>(sin(x)+x*x*x)/(1.0+x*x)
 main=():>int64=> {
-    let maximum=0.0
-    let derivative_sum=0.0
+    let maximum:float64=0.0
+    let derivative_sum:float64=0.0
     loop i in [-8..9)  {
         let x=(i as float64)/4.0
         let value=f(Dual[x 1.0])
-        let h=1e-5
+        let h:float64=1e-5
         let finite=(plain(x+h)-plain(x-h))/(2.0*h)
         let error=abs(value.tangent-finite)
         if error >? maximum  {

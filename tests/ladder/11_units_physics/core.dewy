@@ -10,9 +10,9 @@ check_energy=(mass:float64 height:float64 gravity:float64 kinetic:float64):>bool
     return abs(potential-kinetic) <? 1e-9
 }
 main=():>int64=>{
-    let mass=2.0
-    let launch=20.0
-    let gravity=10.0
+    let mass:float64=2.0
+    let launch:float64=20.0
+    let gravity:float64=10.0
     let result=simulate(mass launch gravity)
     let fall=simulate(mass 0.0 gravity)
     assert(result.height =? 20.0)

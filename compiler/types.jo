@@ -21,6 +21,8 @@ const TF_MANAGED = 4
 const TF_NEVER = 8
 const TF_BOXED = 16    # inline storage contains recursive managed boxes
 
+enum RepId: ordinary, tagged_int
+
 struct TypeInfo:
     kind: TK
     bits: i32
@@ -36,6 +38,7 @@ struct TypeInfo:
     size: i32
     align: i32
     mod: i32
+    rep: RepId
 
 struct Field:
     name: i32
@@ -82,7 +85,7 @@ ptr_size = 8     # 4 for wasm32
 T_VOID = 0
 T_BOOL = 0
 T_INT = 0
-T_MATH_INT = 0    # semantic mathematical integer; step 1 representation is checked i64
+T_MATH_INT = 0    # semantic integer, independent of its selected storage representation
 T_I8 = 0
 T_I16 = 0
 T_I32 = 0
@@ -131,14 +134,14 @@ telem = (t: int) -> int: int(types[prune(t)].elem)
 has_var = (t: int) -> bool: int(types[t].flags) & TF_HAS_VAR != 0
 
 __type_hash = (t: TypeInfo, args: int[]) -> u64:
-    h = u64(int(t.kind)) * 31 + u64(int(t.elem)) * 7 + u64(int(t.st)) * 13 + u64(int(t.bits)) + u64(int(t.mutmask)) * 17
+    h = u64(int(t.kind)) * 31 + u64(int(t.elem)) * 7 + u64(int(t.st)) * 13 + u64(int(t.bits)) + u64(int(t.mutmask)) * 17 + u64(int(t.rep)) * 10007
     if t.sign: h += 1000003
     loop a in args: h = h * 131 + u64(a)
     (h xor (h >> 29))
 
 __type_same = (id: int, t: TypeInfo, args: int[]) -> bool:
     x = types[id]
-    if x.kind != t.kind or x.elem != t.elem or x.st != t.st or int(x.nargs) != args.len() or x.bits != t.bits or x.mutmask != t.mutmask or x.sign != t.sign: return false
+    if x.rep != t.rep or x.kind != t.kind or x.elem != t.elem or x.st != t.st or int(x.nargs) != args.len() or x.bits != t.bits or x.mutmask != t.mutmask or x.sign != t.sign: return false
     loop i in 0.. and a in args:
         if int(type_args[int(x.args) + i]) != a: return false
     true
@@ -250,7 +253,7 @@ init_types = ():
     T_VOID = basic(.void_, 0, false, 0)
     T_BOOL = basic(.bool_, 8, false, 1)
     T_INT = basic(.int_, 64, true, 8)
-    T_MATH_INT = mk_type(TypeInfo(kind = .int_, bits = 64, sign = true, st = -1, size = 8, align = 8, flags = i32(TF_LAID_OUT)), [])
+    T_MATH_INT = mk_type(TypeInfo(kind = .int_, bits = 64, sign = true, st = -1, size = 16, align = 8, flags = i32(TF_LAID_OUT | TF_MANAGED), rep = .tagged_int), [])
     T_I8 = basic(.int_, 8, true, 1)
     T_I16 = basic(.int_, 16, true, 2)
     T_I32 = basic(.int_, 32, true, 4)
@@ -414,6 +417,7 @@ simple_enum = (t: int) -> bool:
 
 is_managed = (t0: int) -> bool:
     t = quantity_base(t0)
+    if types[t].rep == .tagged_int: return true
     k = types[t].kind
     if k == .str_ or k == .array or k == .fn_ or k == .polyfn or k == .box: return true
     if k == .struct_ or k == .enum_ or k == .tuple or k == .opt or k == .fixed:
@@ -505,6 +509,7 @@ type_has_fn = (t0: int) -> bool:
 
 is_aggregate = (t0: int) -> bool:
     t = quantity_base(t0)
+    if types[t].rep == .tagged_int: return true
     k = types[t].kind
     if k == .struct_ or k == .tuple or k == .opt or k == .fn_ or k == .polyfn or k == .range or k == .vec or k == .fixed: return true
     if k == .enum_: return not simple_enum(t)

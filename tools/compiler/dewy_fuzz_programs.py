@@ -7,7 +7,7 @@ independent value (let, assignment, arguments, captures, collection inserts)
 the oracle makes an eager deep copy instead of copy-on-write.
 
 Integers are mostly explicit `int64`/`uint64`, which wrap; the `checked` feature
-adds unannotated `int`, whose overflow is a checked failure (exit 101, or a
+adds unannotated arbitrary-precision `int`; fixed-width narrowing can fail (exit 101, or a
 compile-time error when provable). Floats are `float64`. `@fn` handles and
 units are deliberately absent while they change.
 
@@ -57,7 +57,7 @@ class Ty:
 
 
 I, U, F, B, S = (Ty(k) for k in ('int64', 'uint64', 'float64', 'bool', 'string'))
-INT = Ty('int')  # checked mathematical integer: unannotated literals; overflow is a failure
+INT = Ty('int')  # mathematical integer: Python's unbounded integers are the oracle
 Q = Ty('Rational')
 VOID, RANGE, HIDDEN = Ty('void'), Ty('range'), Ty('hidden')
 FN = Ty('fn', (I,), I)  # (int64):>int64 closures with private state
@@ -935,9 +935,7 @@ class Jumped(Exception):
 
 def wrap(value, ty):
     if ty == INT:
-        if not -2 ** 63 <= value < 2 ** 63:
-            raise Panicked('integer overflow')
-        return value
+        return int(value)
     if ty == I:
         value = int(value) & (2 ** 64 - 1)
         return value - 2 ** 64 if value >= 2 ** 63 else value
@@ -2336,8 +2334,7 @@ class Generator:
         return [self.print_value(Call(I, helper.name, (depth, self.expr(I, 1))))]
 
     def expr_int(self, ty, depth):
-        """Checked `int`, straight-line only: every expression runs exactly once, so a
-        compile-time overflow diagnostic and a runtime panic predict the same programs."""
+        """Unbounded integer arithmetic, including overflow promotion and demotion."""
         r = self.r
         v = self.pick(lambda v: v.ty == INT)
         if depth >= 3 or self.chance(.3):
@@ -2345,7 +2342,7 @@ class Generator:
                 return Var(INT, v.name)
             if self.chance(.85):
                 return Lit(INT, r.randint(-30, 30))
-            return Lit(INT, r.choice((3037000499, 3037000500, 2 ** 40, 2 ** 62, -(2 ** 62), 2 ** 63 - 1)))
+            return Lit(INT, r.choice((3037000499, 3037000500, 2 ** 40, 2 ** 62, -(2 ** 62), 2 ** 63 - 1, 2 ** 63, -(2 ** 63) - 1, 2 ** 100)))
         d = depth + 1
         choice = r.choice(('binary', 'binary', 'mixed', 'negate', 'divide', 'power'))
         if choice == 'mixed':

@@ -259,7 +259,7 @@ def test_core_watch_exact_division(compiler, tmp_path):
     source = tmp_path / 'game.dewy'
     helper = tmp_path / 'helper.dewy'
     save(source, GAME)
-    save(helper, 'label=()=>"{1.0/2}"')
+    save(helper, 'label=()=>"{float64(1.0)/2}"')
     watcher = Watch(compiler, source, game=True)
     try:
         before = int(watcher.expect(r'tick count=(\d+) label=0\.5 value=22').group(1))
@@ -267,7 +267,7 @@ def test_core_watch_exact_division(compiler, tmp_path):
         watcher.expect(r'reloaded in \d+ ms:')
         after = int(watcher.expect(r'tick count=(\d+) label=1/2 value=22').group(1))
         assert after > before, watcher.output
-        save(helper, 'label=()=>"{1.0/2}"')
+        save(helper, 'label=()=>"{float64(1.0)/2}"')
         watcher.expect(r'reloaded in \d+ ms:')
         final = int(watcher.expect(r'tick count=(\d+) label=0\.5 value=22').group(1))
         assert final > after, watcher.output

@@ -8,6 +8,7 @@ use 'types.jo'
 use 'expr.jo'
 use 'util.jo'
 use 'lower.jo'
+use 'math_comptime.jo'
 
 struct CTValue:
     type: int
@@ -91,6 +92,7 @@ ct_equal = (a: int, b: int) -> bool:
 ct_binary = (e: int, op: Tok, a: int, b: int, t: int) -> int:
     x = ct_values[a]
     y = ct_values[b]
+    if x.type == T_MATH_INT and (x.items.len() > 0 or y.items.len() > 0): return ct_math_binary(e, op, a, b)
     if tkind(x.type) == .ptr:
         if tkind(t) != .ptr or (op != .plus and op != .minus): ct_fail(e, "pointer comparisons and host addresses are not allowed")
         x.i += (if op == .plus: y.i else: -y.i) * tsize(telem(x.type))
@@ -161,7 +163,7 @@ ct_binary = (e: int, op: Tok, a: int, b: int, t: int) -> int:
             if q < 0 or q >= 64: overflow = p != 0
             else: overflow = (r >> q) != p
     else: ct_fail(e, "unsupported arithmetic operator")
-    if t == T_MATH_INT and overflow: ct_fail(e, "integer overflow: mathematical int currently requires an int64 representation")
+    if t == T_MATH_INT and overflow: return ct_math_binary(e, op, a, b)
     ct_int(t, r)
 
 ct_member = (e: int) -> int:
@@ -262,18 +264,31 @@ ct_convert = (e: int, v: int) -> int:
     t = prune(ntype(e))
     x = ct_values[v]
     cv = nodes[e].aux as CV
+    if cv == .math2big: return ct_math_runtime("__mi_big", [ct_math_rep(v)], e)
+    if cv == .big2math: return ct_math_unpack(ct_math_runtime("__mi_pack", [v], e))
+    if cv == .rational2math: return ct_math_unpack(ct_math_runtime("__mi_ratio_int", x.items, e))
+    if cv == .none_ and x.type == T_MATH_INT and math_rep_type(t): return ct_math_rep(v)
+    if cv == .none_ and t == T_MATH_INT and math_rep_type(x.type): return ct_math_unpack(v)
     if cv == .int_:
+        if t == T_MATH_INT and x.type == T_U64 and x.i < 0: return ct_math_unpack(ct_math_runtime("__mi_unsigned", [v], e))
+        if x.type == T_MATH_INT and x.items.len() > 0:
+            checked = ct_math_runtime((if types[t].sign: "__mi_signed" else: "__mi_to_unsigned"), [ct_math_rep(v)], e)
+            x = ct_values[checked]
         if (x.type == T_MATH_INT or t == T_MATH_INT) and not int_widens(x.type, t):
             fits = int_fits(x.i, t)
             if not types[x.type].sign and x.i < 0 and types[t].sign: fits = false
             if not fits: ct_fail(e, "integer overflow in conversion to {dt(t)}")
         return ct_int(t, x.i)
     if cv == .int2float:
+        if x.type == T_MATH_INT and x.items.len() > 0:
+            value = ct_math_runtime("__mi_float", [ct_math_rep(v)], e)
+            return ct_float(t, ct_values[value].f)
         f = if types[x.type].sign: f64(x.i) else: f64(u64(x.i))
         return ct_float(t, f)
     if cv == .float_: return ct_float(t, x.f)
     if cv == .float2int:
-        if t == T_MATH_INT and not (x.f >= -9223372036854775808.0 and x.f < 9223372036854775808.0): ct_fail(e, "integer overflow in floating conversion")
+        if t == T_MATH_INT and not (x.f >= -9223372036854775808.0 and x.f < 9223372036854775808.0):
+            return ct_math_unpack(ct_math_runtime("__mi_from_float", [v], e))
         bits = int(types[t].bits)
         if bits == 64 and not types[t].sign:
             r = 0
@@ -408,7 +423,10 @@ ct_expr_impl = (e: int) -> int:
     if e == 0: return 0
     k = nodes[e].kind
     t = prune(ntype(e))
-    if k == .int_lit or k == .bool_lit: return ct_int(t, nodes[e].ival)
+    if k == .int_lit or k == .bool_lit:
+        if t == T_MATH_INT and has_flag(e, NF_U64) and nodes[e].ival < 0:
+            return ct_math_unpack(ct_math_runtime("__mi_unsigned", [ct_int(T_U64, nodes[e].ival)], e))
+        return ct_int(t, nodes[e].ival)
     if k == .float_lit: return ct_float(t, nodes[e].fval)
     if k == .none_lit: return ct_zero(t)
     if k == .str_lit:
@@ -504,6 +522,12 @@ ct_expr_impl = (e: int) -> int:
     if k == .cast:
         v = ct_values[ct_expr(int(nodes[e].a))]
         if ct_frames[ct_frame].signal != 0: return ct_frames[ct_frame].result
+        # The bundled IEEE helpers are pure and needed by exact conversions.
+        if files[pos_file(nodes[e].pos)].path == lib_dir + "/core/math.jo":
+            if is_float(v.type) and is_int(t):
+                return ct_int(t, if tsize(v.type) == 4: int(f32_bits(f32(v.f))) else: int(f64_bits(v.f)))
+            if is_int(v.type) and is_float(t):
+                return ct_float(t, if tsize(t) == 4: f64(f32_from_bits(u32(v.i))) else: f64_from_bits(u64(v.i)))
         if tkind(v.type) != .ptr or tkind(t) != .ptr: ct_fail(e, "raw representation casts are not supported")
         v.type = t
         return ct_add(v)
@@ -516,6 +540,7 @@ ct_expr_impl = (e: int) -> int:
         if op == .minus:
             if is_float(t): return ct_float(t, -ct_values[a].f)
             return ct_binary(e, .minus, ct_int(t, 0), a, t)
+        if t == T_MATH_INT: return ct_binary(e, .minus, ct_int(t, -1), a, t)
         return ct_int(t, ~ct_values[a].i)
     if k == .and_ or k == .or_:
         a = ct_expr(int(nodes[e].a))
@@ -626,7 +651,9 @@ ct_stmt = (s: int) -> int:
             if ct_loop_exit(): break
     else if k == .for_:
         it = int(nodes[s].a)
-        if nodes[it].kind == .range:
+        if nodes[it].kind == .range and prune(int(locals[int(nodes[s].sym)].type)) == T_MATH_INT:
+            ct_math_for(s)
+        else if nodes[it].kind == .range:
             i = ct_values[ct_expr(int(nodes[it].a))].i
             end = if nodes[it].b != 0: ct_values[ct_expr(int(nodes[it].b))].i else: 9223372036854775807
             step = if has_flag(it, NF_STEP): ct_values[ct_expr(int(nodes[it].c))].i - i else: 1
@@ -679,6 +706,10 @@ ct_block = (b: int) -> int:
 ct_literal = (v: int, pos: int) -> int:
     x = ct_values[v]
     k = tkind(x.type)
+    if x.type == T_MATH_INT and x.items.len() > 0:
+        n = ct_literal(x.items[0], pos)
+        wrap_conv(n, .big2math, T_MATH_INT)
+        return n
     n = mk(.int_lit, pos)
     nodes[n].type = i32(x.type)
     nodes[n].ival = x.i

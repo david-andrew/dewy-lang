@@ -48,7 +48,21 @@ parse_prelude_module = (m: int):
     modules[m].decls = source_declarations(int(modules[m].file))
     p_lazy = false
 
+math_runtime_loaded = false
+
 demand_prelude_name = (name: int):
+    if not math_runtime_loaded and starts_with(name_of(name), "__mi_"):
+        math_runtime_loaded = true
+        first_module = modules.len()
+        first_import = from_imports.len()
+        register_module(load_module(lib_dir + "/math_runtime.jo", true, -1))
+        mi = first_module
+        loop mi < modules.len():
+            register_module(mi)
+            mi += 1
+        bind_from_imports(first_import)
+        if module_ctx.len() > 0: setup_module_contexts(init_fns[0])
+        late_module_imports = true
     if let owners = prelude_names.get(name):
         prelude_names.remove(name)
         # Register all overload owners before selecting one. Registration and

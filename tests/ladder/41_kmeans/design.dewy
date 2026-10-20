@@ -42,7 +42,7 @@ main=():>int64=> {
     let seeds=[Point[-1.0 0.0] Point[19.0 10.0] Point[39.0 20.0] Point[999.0 999.0]]
     let result=fit(points seeds 12)
     let counts=[0 0 0 0]
-    let loss=0.0
+    let loss:float64=0.0
     loop point in points  {
         let c=nearest(point result)
         counts[c]+=1

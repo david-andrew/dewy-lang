@@ -1,0 +1,181 @@
+# The second word is both the tag and the shared immutable BigInt handle.
+# A null handle selects the full signed first word. Large values use a one-item
+# owned array, so the ordinary reference-counted aggregate machinery owns them.
+import 'bigint.dewy' as __bi
+
+struct __MathRep:
+    word: int
+    big: __bi.BigInt[]
+
+__mi_pack = (value: __bi.BigInt) -> __MathRep:
+    if let word = __bi.to_int64(value): return __MathRep(word)
+    __MathRep(0, [value])
+
+__mi_big = (value: __MathRep) -> __bi.BigInt:
+    if value.big.len() == 0: return __bi.bigint(value.word)
+    value.big[0]
+
+__mi_unsigned = (value: u64) -> __MathRep:
+    if value <= u64(9223372036854775807): return __MathRep(int(value))
+    __mi_pack(__bi.bigint(value))
+
+__mi_ratio_int = (numerator: __bi.BigInt, denominator: __bi.BigInt) -> __MathRep:
+    parts = __bi.divmod(numerator, denominator)
+    quotient = parts.quotient
+    if parts.remainder._sign != 0 and numerator._sign != denominator._sign:
+        quotient = __bi.__add__(quotient, __bi.bigint(1))
+    __mi_pack(quotient)
+
+__mi_slow = (a: __MathRep, b: __MathRep, operation: int) -> __MathRep:
+    x = __mi_big(a)
+    y = __mi_big(b)
+    if operation == 0: return __mi_pack(__bi.__add__(x, y))
+    if operation == 1: return __mi_pack(__bi.__sub__(x, y))
+    if operation == 2: return __mi_pack(__bi.__mul__(x, y))
+    if operation == 3 or operation == 4:
+        parts = __bi.divmod(x, y)
+        if x._sign != y._sign and parts.remainder._sign != 0:
+            parts.quotient = __bi.__add__(parts.quotient, __bi.bigint(1))
+            parts.remainder = __bi.__sub__(parts.remainder, y)
+        return __mi_pack(if operation == 3: parts.quotient else: parts.remainder)
+    if operation == 5: return __mi_pack(__bi.__and__(x, y))
+    if operation == 6: return __mi_pack(__bi.__or__(x, y))
+    if operation == 7: return __mi_pack(__bi.__xor__(x, y))
+    panic("invalid mathematical integer operation")
+
+__mi_compare = (a: __MathRep, b: __MathRep) -> int:
+    if a.big.len() == 0 and b.big.len() == 0:
+        if a.word < b.word: return -1
+        return int(a.word > b.word)
+    __bi._compare(__mi_big(a), __mi_big(b))
+
+__mi_shift = (a: __MathRep, count: int, right: bool) -> __MathRep:
+    if count < 0: panic("shift count must be nonnegative")
+    if right: return __mi_pack(__bi.__rshift__(__mi_big(a), count))
+    __mi_pack(__bi.__lshift__(__mi_big(a), count))
+
+__mi_signed = (a: __MathRep) -> int:
+    if a.big.len() == 0: return a.word
+    if let value = __bi.to_int64(a.big[0]): return value
+    __int_overflow()
+    0
+
+__mi_to_unsigned = (a: __MathRep) -> u64:
+    if a.big.len() == 0:
+        if a.word < 0: __int_overflow()
+        return u64(a.word)
+    if let value = __bi.to_uint64(a.big[0]): return value
+    __int_overflow()
+    0
+
+__mi_float = (a: __MathRep) -> f64:
+    if a.big.len() == 0: return f64(a.word)
+    __bi.to_float64(a.big[0])
+
+__mi_from_float = (x: f64) -> __MathRep:
+    if x != x or x - x != 0.0: __int_overflow()
+    if x >= -9223372036854775808.0 and x < 9223372036854775808.0: return __MathRep(int(x))
+    bits = f64_bits(x)
+    exponent = int((bits >> 52) & 2047) - 1023 - 52
+    mantissa = (bits & 4503599627370495) | 4503599627370496
+    big = __bi.bigint(mantissa)
+    if exponent >= 0: big = __bi.__lshift__(big, exponent)
+    else: big = __bi.__rshift__(big, -exponent)
+    if x < 0.0: big = __bi.__unary_sub__(big)
+    __mi_pack(big)
+
+__mi_format = (buf: mut u8[], a: __MathRep):
+    if a.big.len() == 0: __fmt(buf, a.word)
+    else: __buf_append_str(buf, __bi.str(a.big[0]))
+
+
+__mi_hash = (a: __MathRep) -> int:
+    if a.big.len() == 0: return a.word
+    value = a.big[0]
+    h = value._sign
+    loop limb in value._limbs: h = (h ^ int(limb)) * 1099511628211
+    h
+
+__mi_parse = (s: str) -> __dewy_int?:
+    if let word = to_int(s): return word
+    text = trim(s)
+    p = data(text)
+    n = len(text)
+    if n == 0: return none
+    i = 0
+    negative = false
+    if p[i] == '-' or p[i] == '+':
+        negative = p[i] == '-'
+        i += 1
+    if i >= n: return none
+    base = 10
+    if i + 1 < n and p[i] == '0' and (p[i + 1] == 'x' or p[i + 1] == 'X'):
+        base = 16
+        i += 2
+    value = __bi.bigint(0)
+    radix = __bi.bigint(base)
+    any = false
+    loop i < n:
+        c = p[i]
+        digit = -1
+        if c >= '0' and c <= '9': digit = int(c) - 48
+        else if c >= 'a' and c <= 'f': digit = int(c) - 87
+        else if c >= 'A' and c <= 'F': digit = int(c) - 55
+        else if c == '_':
+            i += 1
+            continue
+        if digit < 0 or digit >= base: return none
+        value = __bi.__add__(__bi.__mul__(value, radix), __bi.bigint(digit))
+        any = true
+        i += 1
+    if not any: return none
+    if negative: value = __bi.__unary_sub__(value)
+    result: __dewy_int = __mi_pack(value)
+    result
+
+__mi_format_spec = (buf: mut u8[], x: __MathRep, spec: str):
+    if x.big.len() == 0:
+        __fmt_spec(buf, x.word, spec)
+        return
+    sp = __spec_parse(spec)
+    start = len(buf)
+    k = sp.kind
+    if k == 'x' or k == 'X' or k == 'b' or k == 'o':
+        value = __bi.abs(x.big[0])
+        base = if k == 'b': 2 else if k == 'o': 8 else: 16
+        radix = __bi.bigint(base)
+        digits = if k == 'X': "0123456789ABCDEF" else: "0123456789abcdef"
+        reversed: u8[]
+        loop value._sign != 0:
+            parts = __bi.divmod(value, radix)
+            digit = __bi.to_int64(parts.remainder) ?? 0
+            reversed.push(digits[digit])
+            value = parts.quotient
+        if x.big[0]._sign < 0: __buf_byte(buf, '-')
+        if sp.alt: __radix_prefix(buf, k)
+        i = reversed.len()
+        loop i > 0:
+            i -= 1
+            __buf_byte(buf, reversed[i])
+    else if sp.prec >= 0 or k == 'f' or k == '%':
+        __fmt_spec(buf, __mi_float(x), spec)
+        return
+    else: __mi_format(buf, x)
+    __spec_finish(buf, start, sp, true)
+
+# Low two's-complement word, used only by masking proofs. This is not a
+# numeric narrowing conversion: bits outside the mask are unobservable.
+__mi_low_word = (a: __MathRep) -> int:
+    if a.big.len() == 0: return a.word
+    value = a.big[0]
+    word = value._limbs[0]
+    if value._limbs.len() > 1: word = word | (value._limbs[1] << 32)
+    if value._sign < 0: word = 0 - word
+    int(word)
+
+__mi_count = (value: __MathRep) -> int:
+    if value.big.len() == 0: return value.word
+    if value.big[0]._sign < 0: __int_overflow()
+    # Every realizable word or BigInt has fewer bits than this. Saturation
+    # preserves right shifts and zero left shifts without narrowing the value.
+    9223372036854775807
