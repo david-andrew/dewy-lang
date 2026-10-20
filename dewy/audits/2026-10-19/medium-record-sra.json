@@ -1,0 +1,84 @@
+{
+  "status": "rejected; both optimizer prototypes reverted",
+  "hypothesis": "Promote private17..64-byte mixed4/8-byte records in the existing SRA pass, bounded to256 new medium lanes per function. The follow-up Sol audit identified eligible-looking private slots in retained IR.",
+  "variants": {
+    "v1": {
+      "compiler_instruction_ratios": {
+        "throughput-default": 1.0230176885308986,
+        "throughput-release": 1.032026775274372,
+        "tour-default": 1.0155350523013666,
+        "netpong-default": 1.039045119240833,
+        "dunes-default": 1.0387505245416966,
+        "compiler-reference": 1.0514674287798345
+      }
+    },
+    "v2": {
+      "compiler_instruction_ratios": {
+        "throughput-default": 1.0199058584050054,
+        "throughput-release": 1.0269283885520093,
+        "tour-default": 1.013381140999219,
+        "netpong-default": 1.0347672944676711,
+        "dunes-default": 1.0342324485293555,
+        "compiler-reference": 1.045113067393421
+      }
+    }
+  },
+  "targeted_result": {
+    "medium-sra": {
+      "loads": 15,
+      "stores": 25,
+      "lines": 110
+    },
+    "medium-sra-v2": {
+      "loads": 0,
+      "stores": 0,
+      "lines": 84
+    }
+  },
+  "validation": "Both prototypes self-built; v1 passes388 focused and599 quick tests, v2 passes381 focused and599 quick tests. Both mixed-field probes pass native default/release/debug and web default/release with independent expected result42. No full/laptop campaign for regressions already exposed by instruction counts.",
+  "decision": "The second prototype unifies whole-record copy layouts and removes all targeted mixed-record loads/stores, yet whole-compiler instruction counts rise1.3\u20134.5%. Added optimizer/register-allocation work does not pay for itself. Retain the current small-slot implementation; do not broaden this prototype without a materially cheaper analysis or different evidence.",
+  "fresh_frame_attribution": {
+    "samples": 7290,
+    "categories": {
+      "push-pop": 241,
+      "other": 4823,
+      "callee-save": 557,
+      "address-or-nop": 522,
+      "register-spill": 702,
+      "call-preservation": 46,
+      "frame-unmapped-function": 21,
+      "small-slot": 36,
+      "medium-record-slot": 323,
+      "incoming-frame": 2,
+      "frame-slot-or-padding": 17
+    },
+    "fractions": {
+      "push-pop": 0.03305898491083676,
+      "other": 0.66159122085048,
+      "callee-save": 0.07640603566529493,
+      "address-or-nop": 0.07160493827160494,
+      "register-spill": 0.0962962962962963,
+      "call-preservation": 0.006310013717421125,
+      "frame-unmapped-function": 0.002880658436213992,
+      "small-slot": 0.0049382716049382715,
+      "medium-record-slot": 0.04430727023319616,
+      "incoming-frame": 0.00027434842249657066,
+      "frame-slot-or-padding": 0.0023319615912208505
+    },
+    "mapping": "A diagnostic emitter recorded frame ranges while compiling the accepted compiler source. Its emitted .text is byte-identical to the sampled accepted native compiler. Non-unique normalized function names are excluded from frame mapping. Three instruction-PC samples of the44,005-line default workload, with independently checked generated numeric output.",
+    "exact_text_sha256": "d318ecb48f52c6c9d9c6da8be74902581ecc3db7693914edb8628bcdafe5b414",
+    "limits": [
+      "Retired-instruction PCs sample instruction addresses, not precise memory-latency or removable cost.",
+      "Only direct RBP-relative memory accesses are mapped; pointer aliases and indexed addresses remain unclassified.",
+      "Frame-slot-or-padding includes slots larger than64 bytes and alignment padding.",
+      "Calls and inlining can move cost between functions."
+    ],
+    "interpretation": "Direct spill accesses and callee-save accesses exceed medium-record accesses. These fractions are sampled instructions, not removable-time budgets. The previous native/GCC pair remains the matched host comparison; this fresh accepted-native-only run attributes its stack accesses.",
+    "artifact_recovery": "The initial objcopy dump command rewrote a cache executable. It was restored from the laptop copy and checked against its original build.json SHA-256 before sampling. The corrected reproducible script supplies a separate output path. No source or committed artifact was affected."
+  },
+  "next": "Inspect actual register lifetime/call-save decisions, especially cold allocation calls that currently induce hot-path callee saves; do not repeat a broad SRA expansion merely by increasing budgets.",
+  "evidence": {
+    "file": "medium-record-sra-evidence.json.gz",
+    "sha256": "1302c49242ddca72e220f29d3663ed45d7d9fe444faeef551f1e841a0abd808e"
+  }
+}
