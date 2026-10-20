@@ -1,5 +1,8 @@
 # Publish the VS Code extension (editors/vscode) to the VS Code Marketplace and Open VSX.
 # Trigger: push a tag vscode-vX.Y.Z matching editors/vscode/package.json's version, or run by hand.
+# Packages: one per platform with the compiler toolchain bundled (linux-x64, linux-arm64,
+# darwin-arm64, win32-x64), each smoke-checked on its own runner, and a universal one without a
+# compiler for every other platform (it uses dewy.core.path or an installed compiler).
 # No stored tokens: GitHub's OIDC token is exchanged for short-lived ones (an Azure managed
 # identity for the Marketplace, trusted publishing for Open VSX). The Marketplace step needs the
 # repository variables AZURE_CLIENT_ID and AZURE_TENANT_ID. Setup: docs/DEVELOPMENT.md.
@@ -16,14 +19,15 @@ on:
 permissions:
   contents: read
 jobs:
-  publish:
+  toolchains:
+    if: ${{ !inputs.whoami }}
     runs-on: ubuntu-latest
-    environment: marketplace-publish
-    permissions:
-      contents: read
-      id-token: write
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -32,10 +36,112 @@ jobs:
         run: |
           version=$(node -p "require('./editors/vscode/package.json').version")
           test "vscode-v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != package.json $version"; exit 1; }
-      - name: Package
-        if: ${{ !inputs.whoami }}
-        working-directory: editors/vscode
-        run: npx --yes @vscode/vsce@3 package -o "$GITHUB_WORKSPACE/dewy.vsix"
+      - name: Bootstrap the compiler from C
+        run: python -m tools.compiler.build --bootstrap --output "$RUNNER_TEMP/dewy-core"
+      - name: Package the Linux x86-64 toolchain and cross-build the other hosts
+        run: |
+          mkdir -p "$RUNNER_TEMP/toolchains"
+          python -m tools.compiler.package "$RUNNER_TEMP/dewy-core" --revision "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/toolchains/linux-x86_64.tar.gz"
+          python -m tools.compiler.hosts build "$RUNNER_TEMP/dewy-core" --output "$RUNNER_TEMP/hosts"
+          cp "$RUNNER_TEMP"/hosts/*.tar.gz "$RUNNER_TEMP/toolchains/"
+      - name: Package the universal extension
+        run: python -m tools.compiler.vsix --output "$RUNNER_TEMP/vsix/dewy.vsix"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-toolchains
+          path: ${{ runner.temp }}/toolchains/*.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix-universal
+          path: ${{ runner.temp }}/vsix/*.vsix
+          if-no-files-found: error
+
+  package:
+    needs: toolchains
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-latest
+            archive: linux-x86_64
+            suffix: ''
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            archive: linux-arm64
+            suffix: ''
+          - target: darwin-arm64
+            runner: macos-15
+            archive: macos
+            suffix: ''
+          - target: win32-x64
+            runner: windows-latest
+            archive: windows
+            suffix: .exe
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: extension-toolchains
+          path: ${{ runner.temp }}/toolchains
+      - name: Extract this platform's compiler
+        run: python -m tools.compiler.hosts extract "$RUNNER_TEMP/toolchains/${{ matrix.archive }}.tar.gz" --output "$RUNNER_TEMP/host"
+      - name: Smoke-check the compiler and its language server on this platform
+        env:
+          DEWY_CORE_COMPILER: ${{ runner.temp }}/host/dewy-core/bin/dewy-core${{ matrix.suffix }}
+        run: |
+          python -m pip install pytest==9.0.2
+          "$DEWY_CORE_COMPILER" --version
+          python -m pytest -q -o addopts='' tests/test_core_editor.py -k vscode_core_client
+      - name: Package the toolchain and the extension for ${{ matrix.target }}
+        run: |
+          toolchain="$RUNNER_TEMP/toolchains/${{ matrix.archive }}.tar.gz"
+          if [ "${{ matrix.archive }}" != linux-x86_64 ]; then
+            # (cross-built bundles become packages with a verified manifest, as CI's are)
+            toolchain="$RUNNER_TEMP/dewy-core-${{ matrix.archive }}.tar.gz"
+            python -m tools.compiler.package "$RUNNER_TEMP/host/dewy-core" --revision "$GITHUB_SHA" --output "$toolchain"
+          fi
+          python -m tools.compiler.vsix --target ${{ matrix.target }} --toolchain "$toolchain" \
+            --output "$RUNNER_TEMP/vsix/dewy-${{ matrix.target }}.vsix"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.target }}
+          path: ${{ runner.temp }}/vsix/*.vsix
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    environment: marketplace-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          path: vsix
+          merge-multiple: true
+      - run: ls -l vsix
       - name: Sign in to Azure (the Marketplace publisher's managed identity)
         if: vars.AZURE_CLIENT_ID != ''
         uses: azure/login@v2
@@ -43,12 +149,25 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
-      - name: The identity's Marketplace id (to add it to the publisher's members)
-        if: inputs.whoami && vars.AZURE_CLIENT_ID != ''
-        run: az rest -u https://app.vssps.visualstudio.com/_apis/connectionData --resource 499b84ac-1321-427f-aa17-267ca6975798 --query authenticatedUser.id -o tsv
       - name: Publish to the VS Code Marketplace
-        if: ${{ !inputs.whoami && vars.AZURE_CLIENT_ID != '' }}
-        run: npx --yes @vscode/vsce@3 publish --packagePath dewy.vsix --skip-duplicate --azure-credential
+        if: vars.AZURE_CLIENT_ID != ''
+        run: npx --yes @vscode/vsce@3 publish --packagePath vsix/*.vsix --skip-duplicate --azure-credential
       - name: Publish to Open VSX
-        if: ${{ !inputs.whoami }}
-        run: npx --yes ovsx publish -i dewy.vsix --skip-duplicate --trusted-publishing
+        run: for package in vsix/*.vsix; do npx --yes ovsx publish -i "$package" --skip-duplicate --trusted-publishing; done
+
+  whoami:
+    if: ${{ inputs.whoami }}
+    runs-on: ubuntu-latest
+    environment: marketplace-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Sign in to Azure (the Marketplace publisher's managed identity)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: The identity's Marketplace id (to add it to the publisher's members)
+        run: az rest -u https://app.vssps.visualstudio.com/_apis/connectionData --resource 499b84ac-1321-427f-aa17-267ca6975798 --query authenticatedUser.id -o tsv
