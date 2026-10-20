@@ -41,7 +41,7 @@ python3 -m tools.compiler.build --bootstrap --output /tmp/dewy-core   # standalo
 | `stage0/`, `bootstrap/` | the C bootstrap and its stand-in frontend |
 | `examples/` | example programs and games |
 | `tests/` | the test suite; `tests/legacy_corpus/` holds untested pre-restart programs |
-| `tools/` | `tools/dewy` launcher, `tools/core.py` driver, `tools/compiler/` build, packaging and benchmark tooling |
+| `tools/` | `tools/dewy` launcher, `tools/core.py` driver, `tools/compiler/` build, packaging, speed gate and fuzz tooling |
 | `bench/` | application benchmarks with C counterparts |
 | `docs/` | goals, language guide, development guide, design notes, origin |
 | `editors/vscode/` | VS Code extension |
