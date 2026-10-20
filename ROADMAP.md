@@ -150,7 +150,7 @@ Landed 10-19 and 10-20:
   - `$target` (bench harness, self-hosting).
 
 - **Tier-3 implementation (no decisions needed), by weight:**
-  - refinement contracts on parameters, results, fields and lengths;
+  - refinement contracts on parameters, results, fields and lengths (6-slice design ready: scalar facts pilot → canonical refinements → lengths/fields → joins/loops → checked proofs → diagnostics);
   - finite-fact/interval `$assert` and proven indexing/division;
   - effect rows;
   - builtin `rational`;
