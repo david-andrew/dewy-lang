@@ -1,0 +1,273 @@
+name: Release toolchain
+
+# Publishes the toolchains CI built and tested for one commit as an immutable
+# prerelease, then rebuilds the website so its toolchain channel names it.
+# Nothing is rebuilt here: the four packages come from the certified CI run.
+# See docs/DEVELOPMENT.md, "Releases and installers".
+"on":
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full 40-digit commit; CI must have passed for this exact commit
+        required: true
+        type: string
+      branch:
+        description: Publication branch that must contain the commit
+        required: true
+        default: master
+        type: string
+      site_ref:
+        description: Ref whose website workflow publishes the channel (empty skips it)
+        required: false
+        default: master
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: toolchain-release
+  cancel-in-progress: false
+
+env:
+  SHA: ${{ inputs.sha }}
+  GH_REPO: ${{ github.repository }}
+  PLATFORMS: linux-x86_64 linux-arm64 macos-arm64 windows-x86_64
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      tag: ${{ steps.identity.outputs.tag }}
+      run: ${{ steps.identity.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Require a certified commit on the publication branch and a new tag
+        id: identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "sha must be a full 40-digit commit, got '$SHA'" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+          if ! git merge-base --is-ancestor "$SHA" "origin/$BRANCH"; then
+            echo "$SHA is not on $BRANCH" >&2
+            exit 1
+          fi
+          # The newest successful push run of CI for this commit in which every
+          # job passed (full suite, speed gate, all host checks), with all four
+          # toolchain packages still available.
+          run=$(python -m tools.compiler.release certify "$SHA" --repo "$GH_REPO")
+          tag=$(python -m tools.compiler.release tag "$SHA")
+          if gh release view "$tag" > /dev/null 2>&1 || git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+            echo "$tag already exists; releases are never replaced" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "Releasing $SHA as $tag from CI run https://github.com/$GH_REPO/actions/runs/$run" >> "$GITHUB_STEP_SUMMARY"
+      - name: Download the toolchain packages of the certified run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ steps.identity.outputs.run }}
+        run: |
+          for platform in $PLATFORMS; do
+            gh run download "$RUN" --name "dewy-core-$platform-$SHA" --dir "artifacts/$platform"
+          done
+      - name: Verify package revisions and payload hashes; assemble the assets
+        env:
+          RUN: ${{ steps.identity.outputs.run }}
+        run: |
+          python -m tools.compiler.release assemble "$SHA" artifacts dist
+          python -m tools.compiler.release notes "$SHA" "$RUN" --repo "$GH_REPO" > notes.md
+          cat dist/SHA256SUMS >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: dist/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: notes.md
+          if-no-files-found: error
+
+  draft:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+      - name: Create the draft release
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "$TAG already exists; releases are never replaced" >&2
+            exit 1
+          fi
+          gh release create "$TAG" dist/* --draft --prerelease --latest=false --target "$SHA" \
+            --title "Dewy toolchain $TAG" --notes-file notes.md
+      - name: Check that the draft holds exactly the assembled assets
+        run: |
+          gh release download "$TAG" --dir downloaded
+          python -m tools.compiler.release compare dist downloaded
+
+  # Install the draft's own downloaded assets on each platform and build and
+  # run a program natively and for the web.
+  verify:
+    needs: [prepare, draft]
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm, macos-15, windows-latest]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    permissions:
+      contents: write  # draft releases are visible only to writers
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download the draft assets
+        shell: bash
+        run: gh release download "$TAG" --dir "$RUNNER_TEMP/served/$TAG"
+      - name: Install with install.sh and build a program
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          DEWY_INSTALL_DOWNLOAD_URL: file://${{ runner.temp }}/served
+        run: |
+          prefix="$RUNNER_TEMP/dewy home"
+          /bin/bash "$RUNNER_TEMP/served/$TAG/install.sh" --release "$TAG" --prefix "$prefix" --no-modify-path
+          cd "$RUNNER_TEMP"
+          printf 'main=()=>{let values=[20 22] return sum(values)}\n' > check.dewy
+          "$prefix/bin/dewy" --version
+          "$prefix/bin/dewy" build check.dewy -o check-native
+          status=0
+          ./check-native || status=$?
+          test "$status" -eq 42
+          "$prefix/bin/dewy" build check.dewy --target wasm -o check-web
+          test -s check-web.html
+      - name: Install with install.ps1 and build a program
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          DEWY_INSTALL_DOWNLOAD_URL: ${{ runner.temp }}\served
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP 'dewy home'
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$env:RUNNER_TEMP\served\$env:TAG\install.ps1" -Release $env:TAG -Prefix $prefix -NoModifyPath
+          if ($LASTEXITCODE) { exit 1 }
+          Set-Location $env:RUNNER_TEMP
+          [IO.File]::WriteAllText("$env:RUNNER_TEMP\check.dewy", "main=()=>{let values=[20 22] return sum(values)}`n")
+          & "$prefix\bin\dewy.cmd" --version
+          & "$prefix\bin\dewy.cmd" build check.dewy -o check-native.exe
+          if ($LASTEXITCODE) { exit 1 }
+          & .\check-native.exe
+          if ($LASTEXITCODE -ne 42) { exit 1 }
+          & "$prefix\bin\dewy.cmd" build check.dewy --target wasm -o check-web
+          if ($LASTEXITCODE -or -not (Test-Path check-web.html)) { exit 1 }
+          exit 0
+
+  publish:
+    needs: [prepare, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
+      - name: Publish the complete draft as a prerelease, never as Latest
+        run: |
+          gh release download "$TAG" --dir downloaded
+          python -m tools.compiler.release compare dist downloaded
+          test "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
+            echo "tag $TAG appeared while the draft was checked; not publishing" >&2
+            exit 1
+          fi
+          gh release edit "$TAG" --draft=false --prerelease --latest=false
+          test "$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq .object.sha)" = "$SHA"
+          latest=$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name || echo none)
+          echo "Published $TAG as a prerelease; Latest remains $latest." >> "$GITHUB_STEP_SUMMARY"
+
+  # A failed or cancelled run never leaves a draft behind; a published
+  # release is never touched.
+  discard-draft:
+    needs: [prepare, draft, verify, publish]
+    if: always() && needs.draft.result == 'success' && needs.publish.result != 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Delete the unpublished draft
+        run: |
+          if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft 2> /dev/null)" = true ]; then
+            gh release delete "$TAG" --yes
+          fi
+
+  # The website owns toolchain-channel.txt; its build writes it with
+  # `python -m tools.compiler.channel --tag TAG`. A failure here leaves the
+  # previous channel installable; rerun this job or dispatch the site.
+  channel:
+    needs: [prepare, publish]
+    if: inputs.site_ref != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      SITE_REF: ${{ inputs.site_ref }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Check the channel pointer for the published release
+        run: |
+          python -m tools.compiler.channel --tag "$TAG" --repo "$GH_REPO" | tee toolchain-channel.txt
+          { echo '```'; cat toolchain-channel.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Rebuild the website with the new channel
+        run: gh workflow run deploy-site.yml --ref "$SITE_REF" -f toolchain_release="$TAG"
