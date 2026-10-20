@@ -1,0 +1,5 @@
+R:type=[x:int64 y:int64 z:int64]
+make=(r:R)=>{let state=r return ()=>{state.x+=1 return state.x+state.y+state.z}}
+main=()=>{let a=R[1 2 3] let f=make(a) let g=f a.y=100
+let x=f() let y=f() let z=g()
+return if x=?7 and y=?8 and z=?7 and a.x=?1 42 else 1}

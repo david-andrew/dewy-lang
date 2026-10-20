@@ -1,0 +1,4 @@
+R:type=[x:int64 y:int64 z:int64]
+choose=(r:R early:bool):>R=>{let next=r next.x+=10 if early return next next.y+=20 return next}
+main=()=>{let a=R[1 2 3] let b=choose(a true) let c=choose(a false)
+return if a.x=?1 and b.x=?11 and b.y=?2 and c.x=?11 and c.y=?22 and c.z=?3 42 else 1}

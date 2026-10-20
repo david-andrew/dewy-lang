@@ -1,0 +1,9 @@
+R:type=[a:int64 b:int64 c:int64 d:int64 e:int64 f:int64]
+change=(r:R):>R=>{let next=r next.a+=10 next.f+=20 return next}
+write=(@r:R):>int64=>{r.a=100 r.f=200 return 0}
+read=(r:R):>int64=>r.a+r.f
+main=()=>{let a=R[1 2 3 4 5 6] let b=change(a) let c=b b.c=30
+let saved=a
+write(@a)
+let snapshot=read(saved)
+return if snapshot=?7 and a.a=?100 and a.f=?200 and b.a=?11 and b.f=?26 and c.c=?3 and c.e=?5 42 else 1}

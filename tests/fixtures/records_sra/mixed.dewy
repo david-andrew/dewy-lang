@@ -1,0 +1,4 @@
+R:type=[x:float64 y:int64 z:float64 w:int64]
+change=(r:R):>R=>{let next=r next.x+=0.5 next.y+=10 next.z=-next.z return next}
+main=()=>{let a=R[1.25 2 3.5 4] let b=change(a)
+return if a.x=?1.25 and a.y=?2 and a.z=?3.5 and b.x=?1.75 and b.y=?12 and b.z=?-3.5 and b.w=?4 42 else 1}

@@ -1,0 +1,6 @@
+Small:type=[a:int32 b:int32 c:int32 d:int32]
+Large:type=[a:int32 b:int32 c:int32 d:int32 e:int32 f:int32]
+change=(r:Large):>Large=>{let next=r next.a+=10 next.f+=20 return next}
+main=()=>{let s=Small[1 2 3 4] let t=s t.d=40
+let a=Large[1 2 3 4 5 6] let b=change(a) b.c=30
+return if s.d=?4 and t.d=?40 and a.a=?1 and a.f=?6 and a.c=?3 and b.a=?11 and b.f=?26 and b.e=?5 42 else 1}

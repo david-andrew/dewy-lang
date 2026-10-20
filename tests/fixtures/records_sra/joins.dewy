@@ -1,0 +1,5 @@
+R:type=[x:int64 y:int64 z:int64]
+run=(n:int64):>int64=>{let a=R[1 2 3] let saved=a
+loop i in [0..n) {let old=a if i%2=?0 {a.x+=old.y a.y=old.z} else {a.z+=old.x a.x=old.y}}
+return a.x+10*a.y+100*a.z+saved.x+saved.y+saved.z}
+main=()=>{return if run(0)=?327 and run(1)=?339 and run(2)=?639 and run(3)=?672 42 else 1}

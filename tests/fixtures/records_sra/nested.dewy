@@ -1,0 +1,5 @@
+Pair:type=[x:int64 y:int64]
+R:type=[pair:Pair z:int64 w:int64]
+change=(r:R):>R=>{let next=r next.pair.x+=10 next.w+=20 return next}
+main=()=>{let a=R[Pair[1 2] 3 4] let b=change(a) let saved=b b.pair.y=100
+return if a.pair.x=?1 and a.w=?4 and b.pair.x=?11 and b.w=?24 and saved.pair.y=?2 42 else 1}

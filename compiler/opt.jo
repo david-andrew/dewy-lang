@@ -805,7 +805,7 @@ div_magic = (d: int) -> (int, int):
     (int(q2 + 1), p - 64)
 
 # ---------------- small slots to registers ----------------
-# Non-escaping slots of at most 16 bytes become registers. Standalone byte and
+# Non-escaping slots of at most four lanes (32 bytes) become registers. Standalone byte and
 # two-byte slots use one integer lane. Four-byte lanes cover
 # vec2..vec4 and small i32/f32 records; eight-byte lanes cover i64/f64 records.
 # Mixed-width accesses, incompatible lane kinds, and escaping addresses retain
@@ -824,6 +824,7 @@ sra_shift = (width: int) -> int: if width == 8: 3 else: width >> 1
 # May this byte range be used as lanes of kind k (0: just bits, copied)?
 sra_lane_use = (s: int, off: int, bytes: int, k: int) -> bool:
     width = sra_widths[s]
+    if int(ir.slot_size[s]) >> sra_shift(width) > 4: return false
     if k == 1 and width < 4: return false
     if off < 0 or off & (width - 1) != 0 or bytes & (width - 1) != 0 or off + bytes > int(ir.slot_size[s]): return false
     loop i in [0..(bytes >> sra_shift(width))):
@@ -876,7 +877,7 @@ o_sra = ():
         if op == .iconst and ndef[d] == 1:
             kconst[d] = true
             kval[d] = ins.imm
-        else if op == .slot and ndef[d] == 1 and int(ir.slot_size[int(ins.a)]) <= 16:
+        else if op == .slot and ndef[d] == 1 and int(ir.slot_size[int(ins.a)]) <= 32:
             sl[d] = int(ins.a)
             addressed[int(ins.a)] = true
             any = true
@@ -903,7 +904,7 @@ o_sra = ():
     # Lanes keep their observed numeric kind; copy-only lanes contain integer bits.
     ok = addressed
     loop s in [0..ns):
-        if int(ir.slot_size[s]) & (sra_widths[s] - 1) != 0: ok[s] = false
+        if int(ir.slot_size[s]) & (sra_widths[s] - 1) != 0 or int(ir.slot_size[s]) >> sra_shift(sra_widths[s]) > 4: ok[s] = false
     sra_kind = fill(0, ns * 4)
     loop ins in code:
         op = ins.op
@@ -1046,7 +1047,7 @@ o_sra = ():
             # (lanes of slots cleared here start at zero)
             loop k in [0..b):
                 item = int(ir.args[a + k])
-                if item & 1 == 0 and ok[item >> 1] and int(ir.slot_size[item >> 1]) <= 16:
+                if item & 1 == 0 and ok[item >> 1]:
                     s = item >> 1
                     loop i in [0..(int(ir.slot_size[s]) >> sra_shift(sra_widths[s]))):
                         t = lane[s * 4 + i]

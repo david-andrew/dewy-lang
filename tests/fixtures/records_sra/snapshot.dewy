@@ -1,0 +1,4 @@
+R:type=[x:int64 y:int64 z:int64]
+change=(r:R):>R=>{let next=r next.x+=10 return next}
+main=()=>{let a=R[1 2 3] let b=a a.y=20 let c=change(b)
+return if a.x=?1 and a.y=?20 and b.y=?2 and b.x=?1 and c.x=?11 and c.z=?3 42 else 1}
