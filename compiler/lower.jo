@@ -1528,11 +1528,15 @@ positive_bound = (n: int, use_locals: bool) -> int:
         if has_flag(n, NF_U64) or nodes[n].ival < 0: return -1
         return nodes[n].ival
     if k == .ident and nodes[n].aux == i32(int(SK.local)) and use_locals:
+        if let limit = math_word_limits.get(int(nodes[n].sym)): return limit
         loop i in [0..nonneg_locals.len()):
             if nonneg_locals[i] == int(nodes[n].sym): return nonneg_limits[i]
         return positive_bounds.get(int(nodes[n].sym)) ?? -1
     if k == .conv and nodes[n].aux == i32(int(CV.int_)):
         return positive_bound(int(nodes[n].a), use_locals)
+    if k == .intrinsic and nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1:
+        t = prune(ntype(kid(n, 0)))
+        if types[t].kind == .array: return 9223372036854775807 / max(1, tsize(telem(t))) - 1
     modulus = positive_modulus(n)
     if modulus > 0: return modulus - 1
     if k != .binary or nodes[n].aux != 0: return -1
@@ -3546,6 +3550,13 @@ gen_conv = (e: int) -> Val:
         return V(norm(v, to), false)
     if cv == .int2float:
         if from == T_MATH_INT:
+            if math_proven_word(a):
+                v = e_un(.i2f, VF, math_word_expr(a))
+                if to == T_F32: v = e_un(.f2f, VS, v)
+                return V(v, false)
+            fast = math_float_binary(a, to)
+            if fast >= 0: return V(fast, false)
+        if from == T_MATH_INT:
             v = e_call(rt("__mi_float"), [gen_borrowed(a).v], VF)
             if to == T_F32: v = e_un(.f2f, VS, v)
             return V(v, false)
@@ -4502,6 +4513,10 @@ gen_assign = (s: int):
     a = int(nodes[s].a)
     t = quantity_base(ntype(a))
     aux = int(nodes[s].aux)
+    if t == T_MATH_INT and math_local_is(a, int(nodes[a].sym)):
+        if let word = math_word_regs.get(int(nodes[a].sym)):
+            e_mov(word, math_word_expr(int(nodes[s].b)))
+            return
     if aux == 1:
         tt = prune(ntype(int(nodes[s].b)))
         val = gen_owned(int(nodes[s].b))
@@ -4600,6 +4615,7 @@ gen_vardecl = (s: int):
         return
     if copies_on and copy_shared_decl(s, l): return
     if view_decl(s, l): return
+    if math_word_local_decl(s): return
     if is_shared(l): new_cell(l)
     pl = local_place(l, true)
     if nodes[s].b != 0:
@@ -5493,6 +5509,9 @@ bounded_open_for = (s: int) -> int:
     if nodes[stop].kind == .ident and nodes[stop].aux == i32(int(SK.local)):
         end_local = int(nodes[stop].sym)
         stable = stable_loop_index(end_local) and int(locals[end_local].flags) & LF_MUTPARAM == 0
+    if not stable and nodes[stop].kind == .intrinsic and nodes[stop].aux == i32(int(IN.len)) and nkids(stop) == 1:
+        array = kid(stop, 0)
+        stable = plain_read(array) and unchanged_by(array, body)
     if not stable: return 0
     exit = int(nodes[guard].b)
     if nodes[exit].kind == .block and nkids(exit) == 1: exit = kid(exit, 0)
@@ -5582,6 +5601,7 @@ gen_comprehension_reserve = (s: int, count: int):
     endc()
 
 gen_for = (s: int):
+    if math_accumulator_for(s): return
     bounded = bounded_open_for(s)
     if bounded != 0:
         gen_for(bounded)
@@ -6432,6 +6452,8 @@ begin_fn = (name: str, idx: int):
     ir_begin(name, idx)
     stack_closure_fn = -1
     math_word_regs.clear()
+    math_word_limits.clear()
+    math_word_updates.clear()
     ctl = 0
     cond_depth = 0
     scope_locals = []
@@ -6534,6 +6556,8 @@ lower_inst = (lf: int, f: int):
     else:
         n = nkids(body)
         loop i in [0..n):
+            cur_block = body
+            cur_block_i = i
             s = kid(body, i)
             if i == n - 1 and nodes[body].aux != 0 and vc(cur_ret) != VC_VOID:
                 r = mk(.return_, nodes[s].pos)

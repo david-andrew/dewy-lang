@@ -97,6 +97,26 @@ __mi_hash = (a: __MathRep) -> int:
     h
 
 __mi_parse = (s: str) -> __dewy_int?:
+    # The same 18-digit proof as to_int, returning directly into the exact
+    # result. Avoid an intermediate optional-word result on ordinary input.
+    p = data(s)
+    n = len(s)
+    i = 0
+    if n > 0 and (p[0] == '-' or p[0] == '+'): i = 1
+    if i < n and n - i <= 18:
+        value = 0
+        j = i
+        loop j < n:
+            c = p[j]
+            if c < '0' or c > '9': break
+            value = value * 10 + int(c) - 48
+            j += 1
+        if j == n:
+            if p[0] == '-': return -value
+            return value
+    __mi_parse_slow(s)
+
+__mi_parse_slow = (s: str) -> __dewy_int?:
     if let word = to_int(s): return word
     text = trim(s)
     p = data(text)
@@ -179,3 +199,6 @@ __mi_count = (value: __MathRep) -> int:
     # Every realizable word or BigInt has fewer bits than this. Saturation
     # preserves right shifts and zero left shifts without narrowing the value.
     9223372036854775807
+
+__mi_word_float = (a: int, b: int, operation: int) -> f64:
+    __mi_float(__mi_slow(__MathRep(a), __MathRep(b), operation))
