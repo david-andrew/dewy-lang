@@ -1,3 +1,4 @@
+use 'units.jo'
 use 'errors.jo'
 use 'poly_closure.jo'
 # Expression checking: type inference, coercions, overload resolution, generics, lambdas.
@@ -19,7 +20,7 @@ enum IN:
     static_assert, runtime_assert
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
-enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed
+enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const
 
 struct Intrinsic:
     name: str
@@ -165,6 +166,11 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if from == T_NEVER: return true
     fk = types[from].kind
     tk = types[to].kind
+    if fk == .quantity or tk == .quantity:
+        if fk == .var or tk == .var: return true
+        if fk == .quantity and tk == .quantity:
+            return types[from].st == types[to].st and (quantity_constant_fits(n, to) or can_coerce(0, quantity_base(from), quantity_base(to)))
+        if tk != .opt and not is_union(to): return false
     if fk == .polyfn and tk == .fn_: return poly_matches(from, to)
     if has_var(from) or has_var(to):
         if fk == .var or tk == .var: return true
@@ -254,6 +260,8 @@ coerce = (n: int, target: int) -> int:
         if to != T_NEVER and types[to].kind != .void_ and types[to].kind != .var and types[to].kind != .param: wrap_conv(n, CV.none_, to)
         return n
     tk = types[to].kind
+    if types[from].kind == .quantity and tk == .quantity:
+        return quantity_coerce(n, to)
     if types[from].kind == .polyfn and tk == .fn_:
         source = nodes.len()
         nodes.push(nodes[n])
@@ -921,6 +929,9 @@ match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
         r = match_type(int(types[pat].elem), a, binds, depth + 1)
         if r < 0: return -1
         return r + 4
+    if pk == .quantity:
+        if ak != .quantity or types[pat].st != types[a].st: return -1
+        return match_type(quantity_base(pat), quantity_base(a), binds, depth + 1)
     if pk == .array and ak == .fixed:
         # (passed as a copy in a new array)
         r = match_type(int(types[pat].elem), int(types[a].elem), binds, depth + 1)
@@ -1002,6 +1013,7 @@ subst_partial = (pat0: int, binds: mut int[]) -> int:
         if binds[id] == 0: binds[id] = mk_var()
         return binds[id]
     if k == .array: return mk_array(subst_partial(int(types[pat].elem), binds))
+    if k == .quantity: return mk_quantity(subst_partial(int(types[pat].elem), binds), int(types[pat].st))
     if k == .fixed: return mk_fixed(subst_partial(int(types[pat].elem), binds), fixed_len(pat))
     if k == .ptr: return mk_ptr(subst_partial(int(types[pat].elem), binds))
     if k == .opt: return mk_opt(subst_partial(int(types[pat].elem), binds))
@@ -1215,6 +1227,9 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
         return -1
     fp = p
     if pk == .param and binds[int(types[p].id)] != 0: fp = prune(binds[int(types[p].id)])
+    if types[fp].kind == .quantity and quantity_constant_fits(a, fp):
+        if type_eq(ntype(a), fp): return 0
+        return 2
     if types[fp].kind == .fixed and nodes[a].kind == .array and tkind(ntype(a)) == .array and fixed_literal_ok(a, fp):
         # an array literal for a fixed-size array parameter
         et = int(types[fp].elem)
@@ -2357,6 +2372,8 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
         add_flag(last_checked, NF_CHECKED)
     a = checked[0]
     b = checked[1]
+    if is_quantity(ntype(a)) or is_quantity(ntype(b)):
+        return quantity_arithmetic(n, name, a, b, expected)
     if name == intern("__dewy_divide"):
         ta = prune(ntype(a))
         tb = prune(ntype(b))
@@ -3559,6 +3576,9 @@ nargs_check = (n: int, nargs: int, lo: int, hi: int, name: str):
 
 fmt_part = (part: int, pos: int):
     t = prune(ntype(int(nodes[part].a)))
+    if is_quantity(t):
+        nodes[part].a = i32(quantity_number(int(nodes[part].a)))
+        t = quantity_base(t)
     if types[t].kind == .fixed:
         # (shown like an array: [1, 2, 3])
         t = mk_array(int(types[t].elem))
@@ -3942,6 +3962,9 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         nargs_check(n, nargs, 2, 2, "__fmt_fields")
         arg_type(args, 0, 0)
         t = arg_type(args, 1, 0)
+        if is_quantity(t):
+            nodes[n] = nodes[bc_call("__fmt", [args[0], quantity_number(args[1])], nodes[n].pos)]
+            return check_expr(n, 0)
         # (a type with the program's own `str = (b: Big) -> str`: shown as the text it gives,
         # and to_text, while it writes, as its fields: `if __text_exact: fields else: str(x)`)
         sf = 0
@@ -4470,6 +4493,7 @@ check_binary = (n: int, expected: int) -> int:
         if not is_lit(a) and not is_shift and is_numeric(ta): h = ta
         if not a_literal and b_literal and binary_literal_context(b, ta, op): h = ta
         tb = prune(check_expr(b, h))
+    if types[ta].kind == .quantity or types[tb].kind == .quantity: return quantity_binary(n, a, b, expected)
     # (y == 650 in update, y moved by speed * dt: it steps over 650, never on it)
     if op == .eq and is_float(ta) and (nodes[a].kind == .ident or nodes[a].kind == .field) and (nodes[b].kind == .int_lit or nodes[b].kind == .float_lit) and cx >= 0 and not pos_in_lib(nodes[n].pos):
         lv = 0.0
@@ -5202,6 +5226,8 @@ check_expr = (n: int, expected: int) -> int:
         ex = prune(int(types[ex].elem))
         exk = types[ex].kind
     if k == .propagate: return check_propagate(n, expected)
+    if k == .unit_lit:
+        return quantity_constant(n, nodes[n].ival, int(nodes[n].aux), int(nodes[n].aux2), expected)
     if k == .int_lit:
         add_flag(n, NF_LITERAL)
         nodes[n].type = i32(lit_default(n))
@@ -5301,6 +5327,9 @@ check_expr = (n: int, expected: int) -> int:
         else if sk == .global:
             g = int(syms[s].ref)
             ensure_global(g, nodes[n].pos)
+            if globals[g].is_const and is_quantity(int(globals[g].type)):
+                q = quantity_scales[quantity_constant_scale(int(globals[g].init))]
+                return quantity_constant(n, q.numerator, q.denominator, quantity_dimension(int(globals[g].type)), expected)
             if n != assign_root:
                 loop global_read.len() <= g: global_read.push(false)
                 global_read[g] = true
@@ -5758,6 +5787,7 @@ check_expr = (n: int, expected: int) -> int:
         hint = 0
         if ex != 0 and (is_numeric(ex) or is_vec(ex) or bundled_bigint_type(ex)): hint = ex
         at = prune(check_expr(int(nodes[n].a), hint))
+        if types[at].kind == .quantity: return quantity_unary(n, expected)
         if nodes[n].op == i32(int(Tok.minus)):
             if is_struct_like(at):
                 r = op_overload(n, "-")
@@ -6067,6 +6097,8 @@ check_expr = (n: int, expected: int) -> int:
             nodes[n].a = i32(a)
             finalize_literal(a)
             ft = prune(ntype(a))
+            if is_quantity(ft) or is_quantity(tt):
+                return quantity_transmute(n, a, ft, tt)
             if ft == T_MATH_INT or tt == T_MATH_INT: fatal(nodes[n].pos, "transmute requires an explicit fixed-width type; mathematical int has no fixed bit representation")
             if not is_numeric(ft) or not is_numeric(tt) or tsize(ft) != tsize(tt):
                 fatal(nodes[n].pos, "transmute needs integer or float values of equal width (found {dt(ft)} to {dt(tt)})")
@@ -6096,6 +6128,11 @@ check_expr = (n: int, expected: int) -> int:
             return tt
         fk = types[ft].kind
         tk = types[tt].kind
+        if fk == .quantity or tk == .quantity:
+            coerce(a, tt)
+            nodes[n] = nodes[a]
+            last_checked = n
+            return ntype(n)
         if ((fk == .array and tk == .fixed) or (fk == .fixed and tk == .array)) and can_coerce(a, ft, tt):
             coerce(a, tt)
             nodes[n] = nodes[a]

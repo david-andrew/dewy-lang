@@ -1,0 +1,19 @@
+# quick
+from units import m, cm
+main=():>int64=>{
+    let distances:array<float64 * Length>=[1m 250cm 3m]
+    let snapshot=distances
+    distances[0]=4m
+    $runtime_assert (snapshot[0] =? 1m)
+    $runtime_assert (distances[1] =? 5m/2)
+    let total=0.0m
+    loop distance in distances {total+=distance}
+    $runtime_assert (total =? 9.5m)
+    printl"{distances} {snapshot}"
+    let times=[1ms 2ms 3ms]
+    let copy=times
+    times[0]=4ms
+    $runtime_assert (copy[0] =? 1ms)
+    printl"{times} {copy}"
+    return 0
+}

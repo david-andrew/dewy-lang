@@ -1,0 +1,13 @@
+from units import m
+main=():>int64=>{
+    let distance=2m
+    let inverse=distance^-2
+    let area=distance^2
+    let scalar=distance^0
+    $runtime_assert (inverse*area =? 1)
+    $runtime_assert (scalar =? 1)
+    $runtime_assert (2m^-2 =? 2/m^2)
+    $runtime_assert ((2m)^-2 =? 1/(4m^2))
+    printl"{inverse} {area} {scalar}"
+    return 0
+}

@@ -1,0 +1,14 @@
+# quick
+from units import m, kg, N, J
+main=():>int64=>{
+    let distance=12m
+    let elapsed=3s
+    let velocity=distance/elapsed
+    let force=2kg*velocity/elapsed
+    $runtime_assert (velocity/(m/s) =? 4)
+    $runtime_assert (force*9 =? 24N)
+    $runtime_assert ((force*distance)/(32J) =? 1)
+    $runtime_assert (distance/distance =? 1)
+    printl"{velocity} {force} {distance/distance}"
+    return 0
+}

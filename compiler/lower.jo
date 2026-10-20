@@ -1,3 +1,4 @@
+use 'units.jo'
 use 'poly_closure.jo'
 use 'isolation.jo'
 # Lowering: typed AST -> IR, including reference counting, copy-on-write and closures.
@@ -122,7 +123,7 @@ global_addr_off = (g: int) -> int:
 
 # ---------------- type helpers ----------------
 vc = (t0: int) -> int:
-    t = prune(t0)
+    t = quantity_base(t0)
     k = types[t].kind
     if k == .void_ or k == .typeval or k == .module: return VC_VOID
     if k == .float_: return VC_FLT
@@ -130,14 +131,14 @@ vc = (t0: int) -> int:
     VC_INT
 
 vt_of = (t0: int) -> int:
-    t = prune(t0)
+    t = quantity_base(t0)
     if types[t].kind == .float_:
         if int(types[t].bits) == 32: return VS
         return VF
     VI
 
 mem_mode = (t0: int) -> int:
-    t = prune(t0)
+    t = quantity_base(t0)
     k = types[t].kind
     s = tsize(t)
     if k == .float_: return s | M_FLOAT
@@ -155,7 +156,7 @@ store_val = (t: int, addr: int, off: int, v: int):
     else if c != VC_VOID: e_store(addr, off, v, mem_mode(t))
 
 norm = (v: int, t0: int) -> int:
-    t = prune(t0)
+    t = quantity_base(t0)
     k = types[t].kind
     if k == .bool_: return e_un(.zext8, VI, v)
     if k != .int_: return v
@@ -3444,7 +3445,7 @@ gen_conv = (e: int) -> Val:
     a = int(nodes[e].a)
     from = prune(ntype(a))
     cv = nodes[e].aux as CV
-    if cv == .none_ or cv == .ptr: return gen_expr(a)
+    if cv == .none_ or cv == .quantity_const or cv == .ptr: return gen_expr(a)
     if cv == .int_:
         v = gen_expr(a).v
         if (from == T_MATH_INT or to == T_MATH_INT) and not int_widens(from, to):
@@ -4396,7 +4397,7 @@ assign_to = (target: int, t: int, v: int):
 
 gen_assign = (s: int):
     a = int(nodes[s].a)
-    t = prune(ntype(a))
+    t = quantity_base(ntype(a))
     aux = int(nodes[s].aux)
     if aux == 1:
         tt = prune(ntype(int(nodes[s].b)))
@@ -6451,7 +6452,7 @@ each_field = (t0: int, addr: int, f: (int, int) -> void):
 
 field_list = (t0: int) -> (int, int)[]:
     # (type, offset) of each member of a struct/tuple
-    t = prune(t0)
+    t = quantity_base(t0)
     layout(t)
     out: (int, int)[]
     if types[t].kind == .struct_:
@@ -6802,7 +6803,7 @@ helper_eq = (t: int):
 
 # compare members at addresses a and b; branch to `fail` level when different
 eq_member = (t0: int, a: int, b: int, fail: int):
-    t = prune(t0)
+    t = quantity_base(t0)
     k = types[t].kind
     if k == .box:
         # (the same box, or both empty: equal without looking inside)
@@ -6920,7 +6921,7 @@ hash_float = (v: int, ty: int) -> int:
     d
 
 hash_member = (h: int, t0: int, a: int):
-    t = prune(t0)
+    t = quantity_base(t0)
     k = types[t].kind
     c = vc(t)
     x = 0
@@ -7068,7 +7069,7 @@ helper_envcopy = (f: int):
 lower_helper = (lf: int):
     h = lfuncs[lf]
     begin_fn(h.name, lf)
-    t = prune(h.htype)
+    t = quantity_base(h.htype)
     match h.hkind:
         drop: helper_drop(t, false)
         copy: helper_drop(t, true)

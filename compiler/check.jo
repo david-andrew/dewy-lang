@@ -1,3 +1,4 @@
+use 'units.jo'
 use 'errors.jo'
 use 'watch.jo'
 use 'frontend.jo'
@@ -966,6 +967,7 @@ new_global = (name: int, decl: int, m: int) -> int:
 resolve_type = (tn: int) -> int:
     if nodes[tn].kind == .tname and nodes[tn].aux == -7: return int(nodes[tn].ival)
     k = nodes[tn].kind
+    if k == .tquantity: return resolve_quantity_type(tn)
     if k == .tname:
         nm = int(nodes[tn].name)
         s = 0
@@ -1145,6 +1147,7 @@ subst = (t0: int, targs: int[]) -> int:
         if id < targs.len() and targs[id] != 0: return targs[id]
         return t
     if k == .var: return t
+    if k == .quantity: return mk_quantity(subst(int(types[t].elem), targs), int(types[t].st))
     if k == .array: return mk_array(subst(int(types[t].elem), targs))
     if k == .fixed: return mk_fixed(subst(int(types[t].elem), targs), fixed_len(t))
     if k == .ptr: return mk_ptr(subst(int(types[t].elem), targs))
@@ -1681,6 +1684,11 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
         if tkind(t) == .null_: fatal(nodes[d].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(nodes[d].pos, "`{name_of(int(globals[g].name))}: Enemy? = none`", "`let {name_of(int(globals[g].name))}:Enemy? = none`")}")
         if tkind(t) == .typeval or tkind(t) == .module: fatal(nodes[d].pos, "'{name_of(int(globals[g].name))}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
         globals[g].type = i32(t)
+        # Exact quantity constants have no runtime storage or initialization.
+        if has_flag(d, NF_RDONLY) and is_quantity(t) and quantity_constant_scale(int(nodes[d].b)) >= 0:
+            globals[g].is_const = true
+            globals[g].init = nodes[d].b
+            nodes[d].kind = .const_
         add_flag(d, NF_CHECKED)
     globals[g].state = 2
     ctxs[cx].floor = saved_floor
@@ -2879,6 +2887,7 @@ check_assign = (s: int) -> int:
         else if path_narrows > 0 and nodes[lhs].kind == .ident: path_forget(path_key(lhs))
         return s
     l = prune(lt)
+    if types[l].kind == .quantity and quantity_compound(s, l): return s
     if types[l].kind == .str_ and op == int(Tok.pluseq) and not has_flag(s, NF_BROADCAST):
         srt = prune(check_expr(int(nodes[s].b), T_STR))
         if nodes[lhs].kind == .ident and is_numeric(srt) and not can_coerce(last_checked, srt, T_STR): var_type_error(lhs, l, srt, nodes[s].pos)
@@ -3907,6 +3916,7 @@ add_universe = ():
         nm = intern(c.0)
         globals.push(Global(name = i32(nm), is_const = true, init = i32(c.1), state = 2, type = i32(c.2)))
         universe[nm] = new_sym(nm, .const_, globals.len() - 1, 0)
+    register_quantity_names()
     register_intrinsics()
 
 load_prelude = ():

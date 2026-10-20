@@ -362,6 +362,12 @@ dw_type = (id: int) -> int:
             fields.push(field)
         set_list(n, fields)
         return n
+    if dw_op(id) == .star or dw_op(id) == .slash or dw_op(id) == .caret:
+        n = mk(.tquantity, pos)
+        nodes[n].op = i32(int(dw_op(id)))
+        nodes[n].a = i32(dw_type(dw_child(id, 1)))
+        nodes[n].b = i32(if dw_op(id) == .caret: dw_expr(dw_child(id, 2)) else: dw_type(dw_child(id, 2)))
+        return n
     if dw_op(id) == .pipe:
         n = mk(.tunion, pos)
         set_list(n, [dw_type(dw_child(id, 1)), dw_type(dw_child(id, 2))])

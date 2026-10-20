@@ -1,0 +1,411 @@
+use 'check.jo'
+use 'ast.jo'
+use 'lex.jo'
+use 'util.jo'
+use 'dewy_tokens.jo'
+# Physical dimensions are canonical semantic qualifiers. Numeric operations and
+# storage use their underlying representation; specialization keeps the qualifier.
+use 'types.jo'
+use 'expr.jo'
+use 'dewy_parse.jo'
+
+quantity_dimensions: int[][] = [[0, 0, 0, 0, 0, 0, 0, 0]]
+quantity_dimension_names: str[] = ["Time", "Length", "Mass", "Current", "Temperature", "Amount", "Luminosity", "Angle"]
+
+struct QuantityScale:
+    numerator: int
+    denominator: int
+quantity_scales: QuantityScale[]
+
+is_quantity = (t: int) -> bool: types[prune(t)].kind == .quantity
+quantity_base = (t0: int) -> int:
+    t = prune(t0)
+    if types[t].kind == .quantity: return prune(int(types[t].elem))
+    t
+quantity_dimension = (t0: int) -> int:
+    t = prune(t0)
+    if types[t].kind == .quantity or types[t].kind == .dimension: return int(types[t].st)
+    0
+
+intern_dimension = (powers: int[]) -> int:
+    loop i in [0..quantity_dimensions.len()):
+        same = true
+        loop j in [0..8):
+            if quantity_dimensions[i][j] != powers[j]: same = false
+        if same: return i
+    quantity_dimensions.push(powers)
+    quantity_dimensions.len() - 1
+
+combine_dimensions = (a: int, b: int, sign: int, pos: int) -> int:
+    powers: int[]
+    loop i in [0..8):
+        power = quantity_dimensions[a][i] + sign * quantity_dimensions[b][i]
+        if power < -32767 or power > 32767: fatal(pos, "physical dimension exponent is too large")
+        powers.push(power)
+    intern_dimension(powers)
+
+power_dimension = (dim: int, power: int, pos: int) -> int:
+    if power < -32767 or power > 32767: fatal(pos, "physical dimension exponent is too large")
+    powers: int[]
+    loop i in [0..8):
+        value = quantity_dimensions[dim][i] * power
+        if value < -32767 or value > 32767: fatal(pos, "physical dimension exponent is too large")
+        powers.push(value)
+    intern_dimension(powers)
+
+quantity_numeric = (t0: int) -> bool:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .param or k == .var or is_numeric(t): return true
+    if bundled_bigint_type(t): return true
+    if k != .struct_: return false
+    si = int(types[t].st)
+    d = int(structs[si].decl)
+    d != 0 and structs[si].name == "Rational" and files[pos_file(nodes[d].pos)].path == lib_dir + "/rational.dewy"
+
+mk_quantity = (base: int, dim: int, pos: int = 0) -> int:
+    if dim == 0: return base
+    if not quantity_numeric(base): fatal(pos, "physical quantities need a numeric representation, found {dt(base)}")
+    mk_type(TypeInfo(kind = .quantity, elem = i32(base), st = i32(dim)), [])
+
+mk_dimension = (dim: int) -> int: mk_type(TypeInfo(kind = .dimension, st = i32(dim)), [])
+
+dimension_str = (dim: int) -> str:
+    text = ""
+    loop i in [0..8):
+        power = quantity_dimensions[dim][i]
+        if power == 0: continue
+        if text != "": text += " * "
+        text += quantity_dimension_names[i]
+        if power != 1: text += "^{power}"
+    if text == "": return "dimensionless"
+    text
+
+quantity_mismatch = (pos: int, a: int, b: int):
+    fatal(pos, "dimension mismatch: {dimension_str(quantity_dimension(a))} and {dimension_str(quantity_dimension(b))} ({dt(a)} and {dt(b)})")
+
+resolve_quantity_type = (n: int) -> int:
+    a = resolve_type(int(nodes[n].a))
+    ad = quantity_dimension(a)
+    op = nodes[n].op as DewyToken
+    if op == .caret:
+        if types[a].kind != .dimension: fatal(nodes[n].pos, "raise the dimension factor to a power, not its numeric representation")
+        power = ceval(int(nodes[n].b)).i
+        return mk_dimension(power_dimension(ad, power, nodes[n].pos))
+    b = resolve_type(int(nodes[n].b))
+    bd = quantity_dimension(b)
+    dim = combine_dimensions(ad, bd, if op == .slash: -1 else: 1, nodes[n].pos)
+    ak = types[a].kind
+    bk = types[b].kind
+    if ak == .dimension and bk == .dimension: return mk_dimension(dim)
+    if bk == .dimension: return mk_quantity(quantity_base(a), dim, nodes[n].pos)
+    if ak == .dimension and op == .star: return mk_quantity(quantity_base(b), dim, nodes[n].pos)
+    fatal(nodes[n].pos, "a quantity type combines one numeric representation with physical dimensions")
+    0
+
+register_quantity_names = ():
+    loop i in [0..8):
+        powers = fill(0, 8)
+        powers[i] = 1
+        dim = intern_dimension(powers)
+        nm = intern(quantity_dimension_names[i])
+        universe[nm] = new_sym(nm, .type_, mk_dimension(dim), 0)
+    # Time is prelude surface. Other unit values live in units.dewy.
+    loop item in [("s", 1, 1), ("second", 1, 1), ("seconds", 1, 1),
+        ("ms", 1, 1000), ("millisecond", 1, 1000), ("milliseconds", 1, 1000),
+        ("us", 1, 1000000), ("microsecond", 1, 1000000), ("microseconds", 1, 1000000),
+        ("ns", 1, 1000000000), ("nanosecond", 1, 1000000000), ("nanoseconds", 1, 1000000000),
+        ("minute", 60, 1), ("hour", 3600, 1)]:
+        nm = intern(item.0)
+        n = mk(.unit_lit, 0)
+        nodes[n].ival = item.1
+        nodes[n].aux = i32(item.2)
+        nodes[n].aux2 = 1
+        globals.push(Global(name = i32(nm), is_const = true, init = i32(n), state = 2))
+        universe[nm] = new_sym(nm, .const_, globals.len() - 1, 0)
+
+quantity_gcd = (a0: int, b0: int) -> int:
+    a = abs(a0)
+    b = abs(b0)
+    loop b != 0:
+        r = a % b
+        a = b
+        b = r
+    if a == 0: return 1
+    a
+
+quantity_scale = (num0: int, den0: int) -> int:
+    num = num0
+    den = den0
+    if den < 0:
+        num = -num
+        den = -den
+    g = quantity_gcd(num, den)
+    quantity_scales.push(QuantityScale(num / g, den / g))
+    quantity_scales.len() - 1
+
+# A marked, representation-preserving conversion retains exact constant data
+# through ordinary AST cloning. Its child is the same numeric value as a plain
+# program would use; there is no runtime unit descriptor.
+quantity_constant = (n: int, num: int, den: int, dim: int, expected: int) -> int:
+    if den == 0: fatal(nodes[n].pos, "division by zero in a physical quantity constant")
+    scale = quantity_scale(num, den)
+    value = quantity_scales[scale]
+    pos = nodes[n].pos
+    hint = if dim != 0 and not is_quantity(expected): 0 else: quantity_base(expected)
+    a = 0
+    if is_float(hint):
+        a = mk(.float_lit, pos)
+        nodes[a].fval = f64(value.numerator) / f64(value.denominator)
+        check_expr(a, hint)
+    else if value.denominator == 1:
+        a = bc_int(value.numerator, pos)
+        check_expr(a, if is_int(hint): hint else: 0)
+        finalize_literal(a)
+    else:
+        ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
+        callee = bc_field(bc_ident("$dewy_rational", pos), "rational", pos)
+        a = mk(.call, pos)
+        nodes[a].a = i32(callee)
+        set_list(a, [bc_int(value.numerator, pos), bc_int(value.denominator, pos)])
+        check_expr(a, 0)
+    t = mk_quantity(ntype(a), dim)
+    nodes[n] = Node(kind = .conv, pos = pos, a = i32(a), aux = i32(int(CV.quantity_const)), aux2 = i32(scale), type = i32(t), flags = i32(NF_CHECKED))
+    last_checked = n
+    t
+
+quantity_constant_scale = (n: int) -> int:
+    if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.quantity_const)):
+        if is_float(quantity_base(ntype(n))): return -1
+        return int(nodes[n].aux2)
+    if nodes[n].kind == .ident and nodes[n].type != 0:
+        source = binding_const_init(nodes[n].aux as SK, int(nodes[n].sym), nodes[n].pos)
+        if source != 0: return quantity_constant_scale(source)
+    if nodes[n].kind == .int_lit and not has_flag(n, NF_U64) and nodes[n].ival != (-9223372036854775807 - 1): return quantity_scale(nodes[n].ival, 1)
+    -1
+
+quantity_number = (n: int) -> int:
+    if not is_quantity(ntype(n)): return n
+    if nodes[n].kind == .conv and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.quantity_const))): return int(nodes[n].a)
+    a = mk(.conv, nodes[n].pos)
+    nodes[a].a = i32(n)
+    nodes[a].aux = i32(int(CV.none_))
+    nodes[a].type = i32(quantity_base(ntype(n)))
+    add_flag(a, NF_CHECKED)
+    a
+
+quantity_result = (n: int, dim: int) -> int:
+    finalize_literal(n)
+    t = mk_quantity(ntype(n), dim)
+    if dim != 0: wrap_conv(n, .none_, t)
+    add_flag(n, NF_CHECKED)
+    last_checked = n
+    t
+
+quantity_constant_fits = (n: int, target: int) -> bool:
+    if n == 0 or not is_quantity(ntype(n)) or not is_quantity(target): return false
+    if quantity_dimension(ntype(n)) != quantity_dimension(target): return false
+    scale = quantity_constant_scale(n)
+    if scale < 0: return false
+    base = quantity_base(target)
+    q = quantity_scales[scale]
+    if is_float(base): return true
+    is_int(base) and q.denominator == 1 and int_fits(q.numerator, base)
+
+quantity_coerce = (n: int, target: int) -> int:
+    source = ntype(n)
+    if quantity_dimension(source) != quantity_dimension(target): quantity_mismatch(nodes[n].pos, source, target)
+    if type_eq(source, target): return n
+    constant = quantity_constant_scale(n)
+    if constant >= 0 and is_numeric(quantity_base(target)):
+        scale = quantity_scales[constant]
+        if scale.denominator != 1 and is_int(quantity_base(target)): fatal(nodes[n].pos, "fractional quantity cannot convert to {dt(target)}")
+        quantity_constant(n, scale.numerator, scale.denominator, quantity_dimension(target), target)
+        return n
+    a = quantity_number(n)
+    # Do not mutate a source node that may be shared with a place or another use.
+    copy = nodes.len()
+    nodes.push(nodes[a])
+    coerce(copy, quantity_base(target))
+    nodes[n] = nodes[copy]
+    wrap_conv(n, .none_, target)
+    add_flag(n, NF_CHECKED)
+    n
+
+quantity_transmute = (n: int, a: int, from: int, to: int) -> int:
+    fb = quantity_base(from)
+    tb = quantity_base(to)
+    if not type_eq(fb, tb): fatal(nodes[n].pos, "quantity transmute must preserve its numeric representation ({dt(fb)} to {dt(tb)})")
+    scale = quantity_constant_scale(a)
+    if scale >= 0:
+        q = quantity_scales[scale]
+        return quantity_constant(n, q.numerator, q.denominator, quantity_dimension(to), to)
+    nodes[n] = nodes[a]
+    wrap_conv(n, .none_, to)
+    add_flag(n, NF_CHECKED)
+    last_checked = n
+    to
+
+quantity_product_fits = (a: int, b: int) -> bool:
+    # The minimum signed value is excluded from the small constant evaluator.
+    if a == (-9223372036854775807 - 1) or b == (-9223372036854775807 - 1): return false
+    b == 0 or abs(a) <= 9223372036854775807 / abs(b)
+
+quantity_fold = (n: int, a: int, b: int, dim: int, op: Tok, expected: int) -> bool:
+    ai = quantity_constant_scale(a)
+    bi = quantity_constant_scale(b)
+    if ai < 0 or bi < 0: return false
+    av = quantity_scales[ai]
+    bv = quantity_scales[bi]
+    an = av.numerator
+    ad = av.denominator
+    bn = bv.numerator
+    bd = bv.denominator
+    if op == .slash:
+        if bn == 0: fatal(nodes[n].pos, "division by zero in a physical quantity constant")
+        swap = bn
+        bn = bd
+        bd = swap
+    if op == .star or op == .slash:
+        g = quantity_gcd(an, bd)
+        an /= g
+        bd /= g
+        g = quantity_gcd(bn, ad)
+        bn /= g
+        ad /= g
+        if not quantity_product_fits(an, bn) or not quantity_product_fits(ad, bd): return false
+        quantity_constant(n, an * bn, ad * bd, dim, expected)
+        return true
+    if op == .plus or op == .minus:
+        g = quantity_gcd(ad, bd)
+        if not quantity_product_fits(an, bd / g) or not quantity_product_fits(bn, ad / g) or not quantity_product_fits(ad, bd / g): return false
+        left = an * (bd / g)
+        right = bn * (ad / g)
+        if op == .minus: right = -right
+        if right > 0 and left > 9223372036854775807 - right: return false
+        if right < 0 and left < -9223372036854775807 - right: return false
+        quantity_constant(n, left + right, ad * (bd / g), dim, expected)
+        return true
+    false
+
+quantity_operands = (a: int, b: int) -> int[]:
+    aa = quantity_number(a)
+    bb = quantity_number(b)
+    # Exact scales are rounded only where a floating representation requests it.
+    ai = quantity_constant_scale(a)
+    bi = quantity_constant_scale(b)
+    if is_float(ntype(bb)) and ai >= 0:
+        q = quantity_scales[ai]
+        aa = mk(.unit_lit, nodes[a].pos)
+        quantity_constant(aa, q.numerator, q.denominator, 0, ntype(bb))
+    if is_float(ntype(aa)) and bi >= 0:
+        q = quantity_scales[bi]
+        bb = mk(.unit_lit, nodes[b].pos)
+        quantity_constant(bb, q.numerator, q.denominator, 0, ntype(aa))
+    add_flag(aa, NF_CHECKED)
+    add_flag(bb, NF_CHECKED)
+    [aa, bb]
+
+quantity_binary = (n: int, a: int, b: int, expected: int) -> int:
+    op = nodes[n].op as Tok
+    ad = quantity_dimension(ntype(a))
+    bd = quantity_dimension(ntype(b))
+    dim = ad
+    cmp = op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
+    if op == .star: dim = combine_dimensions(ad, bd, 1, nodes[n].pos)
+    else if op == .slash: dim = combine_dimensions(ad, bd, -1, nodes[n].pos)
+    else if op == .plus or op == .minus or cmp:
+        if ad != bd: quantity_mismatch(nodes[n].pos, ntype(a), ntype(b))
+    else: fatal(nodes[n].pos, "operator {tok_text(op)} is not defined for physical quantities")
+    if quantity_fold(n, a, b, dim, op, expected): return ntype(n)
+    # Attaching/removing a canonical unit does not perform arithmetic at all.
+    # In particular float * 1 must not survive as an otherwise unoptimized fmul.
+    unit = if op == .star and is_quantity(ntype(a)) and quantity_constant_scale(a) >= 0: a else: b
+    value = if unit == a: b else: a
+    scale = quantity_constant_scale(unit)
+    if scale >= 0 and is_quantity(ntype(unit)) and (op == .star or (op == .slash and is_float(quantity_base(ntype(value))))):
+        q = quantity_scales[scale]
+        if q.numerator == 1 and q.denominator == 1:
+            nodes[n] = nodes[quantity_number(value)]
+            return quantity_result(n, dim)
+    operands = quantity_operands(a, b)
+    nodes[n].a = i32(operands[0])
+    nodes[n].b = i32(operands[1])
+    check_expr(n, quantity_base(expected))
+    if cmp: return T_BOOL
+    quantity_result(n, dim)
+
+quantity_arithmetic = (n: int, name: int, a: int, b: int, expected: int) -> int:
+    dim = quantity_dimension(ntype(a))
+    bd = quantity_dimension(ntype(b))
+    power = name == intern("__dewy_power")
+    divide = name == intern("__dewy_divide")
+    if power:
+        if bd != 0: fatal(nodes[b].pos, "a physical quantity exponent must be a dimensionless constant integer")
+        bi = quantity_constant_scale(b)
+        if bi < 0 or quantity_scales[bi].denominator != 1: fatal(nodes[b].pos, "a physical quantity exponent must be a constant integer")
+        exponent = quantity_scales[bi].numerator
+        dim = power_dimension(dim, exponent, nodes[n].pos)
+        ai = quantity_constant_scale(a)
+        if ai >= 0 and exponent >= -64 and exponent <= 64:
+            q = quantity_scales[ai]
+            if exponent < 0:
+                if q.numerator == 0: fatal(nodes[n].pos, "division by zero in a physical quantity constant")
+                q = QuantityScale(q.denominator, q.numerator)
+            num = 1
+            den = 1
+            fits = true
+            loop i in [0..abs(exponent)):
+                if not quantity_product_fits(num, q.numerator) or not quantity_product_fits(den, q.denominator):
+                    fits = false
+                    break
+                num *= q.numerator
+                den *= q.denominator
+            if fits: return quantity_constant(n, num, den, dim, expected)
+    else if divide:
+        dim = combine_dimensions(dim, bd, -1, nodes[n].pos)
+        if quantity_fold(n, a, b, dim, .slash, expected): return ntype(n)
+        scale = quantity_constant_scale(b)
+        if scale >= 0 and is_quantity(ntype(b)) and is_float(quantity_base(ntype(a))):
+            q = quantity_scales[scale]
+            if q.numerator == 1 and q.denominator == 1:
+                nodes[n] = nodes[quantity_number(a)]
+                return quantity_result(n, dim)
+    else: fatal(nodes[n].pos, "floor division and remainder are not defined for physical quantities")
+    operands = quantity_operands(a, b)
+    if power and quantity_scales[quantity_constant_scale(b)].numerator < 0 and is_int(ntype(operands[0])):
+        pos = nodes[n].pos
+        ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
+        value = mk(.call, pos)
+        nodes[value].a = i32(bc_field(bc_ident("$dewy_rational", pos), "rational", pos))
+        set_list(value, [operands[0]])
+        check_expr(value, 0)
+        add_flag(value, NF_CHECKED)
+        operands[0] = value
+    set_list(n, operands)
+    check_expr(n, quantity_base(expected))
+    quantity_result(n, dim)
+
+quantity_unary = (n: int, expected: int) -> int:
+    a = int(nodes[n].a)
+    dim = quantity_dimension(ntype(a))
+    op = nodes[n].op as Tok
+    if op != .minus and op != .plus: fatal(nodes[n].pos, "operator {tok_text(op)} is not defined for physical quantities")
+    scale = quantity_constant_scale(a)
+    if scale >= 0:
+        q = quantity_scales[scale]
+        return quantity_constant(n, if op == .minus: -q.numerator else: q.numerator, q.denominator, dim, expected)
+    nodes[n].a = i32(quantity_number(a))
+    check_expr(n, quantity_base(expected))
+    quantity_result(n, dim)
+
+# Preserve the scalar compound-update path after checking the qualifier. The
+# indexed/field path still captures and reacquires places in the usual checker.
+quantity_compound = (s: int, target: int) -> bool:
+    if not is_numeric(quantity_base(target)) or nodes[s].sval != 0 or has_flag(s, NF_BROADCAST): return false
+    if nodes[int(nodes[s].a)].kind != .ident: return false
+    if nodes[s].op != i32(int(Tok.pluseq)) and nodes[s].op != i32(int(Tok.minuseq)): return false
+    right = int(nodes[s].b)
+    check_expr(right, target)
+    nodes[s].b = i32(quantity_number(coerce(last_checked, target)))
+    true
