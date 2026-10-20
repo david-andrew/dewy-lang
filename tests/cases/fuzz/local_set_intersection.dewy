@@ -1,0 +1,11 @@
+# `a & b` on two names inside a function is an intersection, not an overload
+# group; only `&` joining function literals forms a group.
+both=(a:set<string> b:set<string>):>set<string>=>{
+    let r:set<string>=(a & b)
+    return r
+}
+main=():>void=>{
+    let x:set<string>=set["p" "q"]
+    let y:set<string>=set["q" "r"]
+    printl(both(x y))
+}
