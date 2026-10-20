@@ -169,12 +169,11 @@ def test_surface_directive_runs(compiler, tmp_path, name):
 
 DIRECTIVE_ERRORS = {
     'assert-unknown-local': ('main = () => { let x = 3\n$assert x >? 1 }',
-                             'cannot prove assertion yet: `x` is not a compile-time constant'),
+                             "'x' is not a compile-time constant"),
     'assert-unknown-call': ('main = (args:array<string>) => { $assert args.length >? 0 }',
-                            'cannot prove assertion yet: it depends on a function call'),
+                            "'args' is not a compile-time constant"),
     'assert-refuted-message': ('$assert 1 >? 2, "one is small"', 'assertion refuted: one is small'),
     'assert-refuted': ('main = () => { $assert 2 + 2 =? 5 }', 'assertion refuted: this condition is always false'),
-    'assert-real': ('main = () => { $assert 1.5 <? 2.0 }', 'cannot prove assertion yet: real-number'),
     'assert-message-literal': ('main = () => { let m = "x"\n$assert true, m }', 'a `$assert` message is a string literal'),
     'assert-needs-condition': ('main = () => { $assert }', '`$assert` needs a condition'),
     'runtime-assert-refuted': ('main = () => { $runtime_assert 1 =? 2 }', 'assertion refuted'),
@@ -191,7 +190,6 @@ DIRECTIVE_ERRORS = {
     'test': ('$test\nf = () => 1', '`$test` is part of the design'),
     'proof': ('$proof\nf = () => 1', '`$proof` is part of the design'),
     'prototype-in-block': ('main = () => { $prototype\nreturn 0 }', '`$prototype` is part of the design'),
-    'field': ('main = () => { let p = [x = 1]\nprintl"{p.$field("x")}" }', '`$field` is part of the design'),
     'unknown-label': ('main = () => { $foo\nreturn 0 }',
                       'a loop label must be followed by a loop (`$foo` is not a directive)'),
     'unknown-setting': ('$frob = 3', 'unknown directive `$frob`'),

@@ -9,6 +9,7 @@ use 'lex.jo'
 use 'ast.jo'
 use 'types.jo'
 use 'check.jo'
+use 'reflection.jo'
 use 'ide.jo'
 
 enum IN:
@@ -742,6 +743,7 @@ note_storage_access = (n: int):
 # ---------------- type expressions written as expressions ----------------
 expr_as_type = (e: int) -> int:
     k = nodes[e].kind
+    if k == .field and reflect_active and reflect_member(e): return telem(ntype(e))
     if k == .ident:
         tn = mk(.tname, nodes[e].pos)
         nodes[tn].name = nodes[e].name
@@ -3602,7 +3604,11 @@ is_unchecked_at = (n: int) -> bool:
     int(nodes[callee].name) == id_at and modules[cur_mod()].is_prelude
 
 check_call = (n: int, expected: int) -> int:
+    if reflect_fields(n): fatal(nodes[n].pos, "fields(T) is a compile-time sequence; iterate over it with `loop field in fields(T)`")
     callee = int(nodes[n].a)
+    if nodes[callee].kind == .field:
+        if nodes[callee].b != 0: reflect_name(callee)
+        if reflect_active: reflect_member(callee)
     args = kids(n)
     ck = nodes[callee].kind
     if ck == .typeapply:
@@ -5787,6 +5793,7 @@ check_expr = (n: int, expected: int) -> int:
         else if sk == .type_: t = mk_typeval(int(syms[s].ref))
         else if sk == .module: t = mk_modval(int(syms[s].ref))
         else if sk == .builtin: fatal(nodes[n].pos, "'{name_of(nm)}' must be called")
+        else if sk == .reflected: fatal(nodes[n].pos, "field descriptors cannot escape into runtime storage; use .name or .type")
         else: fatal(nodes[n].pos, "invalid use of '{name_of(nm)}'")
         if (sk == .local or sk == .global) and is_fn_type(t) and dewy_bare_fn(n, is_callee) and not (sk == .local and in_generic_instance()): return bare_fn_value(n, t, name_of(nm), expected)
         if tkind(t) == .typeval:
@@ -5797,6 +5804,8 @@ check_expr = (n: int, expected: int) -> int:
                 if structs[si].nfields == 0:
                     return struct_ctor(n, tt, int(structs[si].decl), [], expected)
     else if k == .field:
+        if nodes[n].b != 0: reflect_name(n)
+        if reflect_active and reflect_member(n): return ntype(n)
         a0 = int(nodes[n].a)
         is_callee = n == callee_at
         # (c.__peer in a program: a library's own field, which may change or go in any version)
@@ -6371,7 +6380,12 @@ check_expr = (n: int, expected: int) -> int:
         set_list(b, stmts)
         nodes[n] = nodes[b]
         return check_expr(n, expected)
+    else if k == .record_loop:
+        reflect_record(n)
+        return check_expr(n, expected)
     else if k == .record_lit:
+        loop entry in kids(n):
+            if nodes[entry].kind == .namedarg: reflect_name(entry)
         if array_has_spread(n):
             stmts: int[]
             members = dewy_record_spread_entries(n, expected, stmts, true)

@@ -1,5 +1,7 @@
 Settings:type=[workers:int64 limit:int64 mode:int64]
 Point:type=[x:int64 y:int64]
+Mixed:type=[count:int64 title:string enabled:bool]
+copy_fields=<T>(value:T)=>[loop f in fields(T) $field(f.name)=value.$field(f.name)]
 describe=<T>(value:T):>string=> {
     let result=""
     loop field in fields(T)  {
@@ -26,6 +28,9 @@ reset=<T>(value:T):>T=> {
 main=():>int64=> {
     let settings=Settings[4 16 3]
     let point=Point[20 22]
+    let mixed=Mixed[42 "ready" true]
+    let generated=copy_fields(mixed)
+    $runtime_assert generated.count =? 42 and generated.title =? "ready" and generated.enabled
     $runtime_assert (describe(settings) =? "workers=4;limit=16;mode=3;")
     $runtime_assert (describe(point) =? "x=20;y=22;")
     let saved=settings

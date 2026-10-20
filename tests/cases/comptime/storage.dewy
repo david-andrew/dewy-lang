@@ -1,0 +1,21 @@
+# quick
+Pair:type=[a:int64 b:int64]
+next=(@n:int64):>int64=> { n+=1 return n }
+compute=(n:int64):>array<int64>=> {
+    let count=n
+    let record=Pair[b=next(@count) a=next(@count)]
+    let zero=Pair[]
+    let xs=[record.a record.b zero.a zero.b]
+    let nested=[xs xs]
+    nested[0][0]=99
+    $runtime_assert nested[1][0] =? xs[0]
+    xs.push(count)
+    return xs
+}
+const VALUES=compute(10)
+$assert VALUES =? [12 11 0 0 12]
+main=()=> {
+    let n:int64=10
+    $runtime_assert VALUES =? compute(n)
+    printl("storage agrees")
+}

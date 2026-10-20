@@ -1,0 +1,50 @@
+# quick
+Mixed:type=[count:int64 title:string enabled:bool]
+Pair:type=[x:int64 y:int64]
+identity=<T>(value:T)=>[loop f in fields(T) $field(f.name)=value.$field(f.name)]
+sum=<T>(value:T):>int64=> {
+    let total:int64=0
+    loop f in fields(T) {
+        let copy:f.type=value.$field(f.name)
+        total+=f.type(copy)
+    }
+    return total
+}
+names=<T>(value:T):>string=> {
+    let text=""
+    loop f in fields(T) { text+=f.name+";" }
+    return text
+}
+control=<T>(value:T):>int64=> {
+    let total:int64=0
+    loop f in fields(T) {
+        if f.name =? "x" { continue }
+        total+=value.$field(f.name)
+        break
+    }
+    return total
+}
+const COPIED=identity(Mixed[42 "hello" true])
+const TOTAL=sum(Pair[20 22])
+const NAMES=names(Pair[1 2])
+$assert COPIED.count =? 42 and COPIED.title =? "hello" and COPIED.enabled
+$assert TOTAL =? 42
+$assert NAMES =? "x;y;"
+$assert control(Pair[10 32]) =? 32
+main=()=> {
+    let value=Mixed[42 "hello" true]
+    let copy=identity(value)
+    $runtime_assert COPIED =? copy
+    $runtime_assert TOTAL =? sum(Pair[20 22])
+    $runtime_assert NAMES =? names(Pair[1 2])
+    $runtime_assert control(Pair[10 32]) =? 32
+    copy.$field("ti"+"tle")="changed"
+    $runtime_assert value.title =? "hello"
+    let generated=[loop name in ["first" "second"] $field(name)=name.length]
+    $runtime_assert generated.first =? 5 and generated.second =? 6
+    let grid=[loop row in ["a" "b"] loop col in ["x" "y"] $field(row+col)=row+col]
+    $runtime_assert grid.ax =? "ax" and grid.by =? "by"
+    let literal=[$field("an"+"swer")=42]
+    $runtime_assert literal.answer =? 42
+    printl("reflection agrees")
+}

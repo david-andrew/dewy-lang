@@ -1,0 +1,153 @@
+# Type-derived sequences specialize ordinary checked code; no source generation.
+use 'check.jo'
+use 'expr.jo'
+use 'comptime.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'util.jo'
+use 'lex.jo'
+
+reflect_active = false
+
+reflect_source = (e: int) -> int:
+    if nodes[e].kind == .call and nkids(e) == 1:
+        callee = int(nodes[e].a)
+        if nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "__dewy_iter": return kid(e, 0)
+    e
+
+reflect_fields = (e: int) -> bool:
+    if nodes[e].kind != .call or not dewy_at(nodes[e].pos): return false
+    callee = int(nodes[e].a)
+    nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "fields" and lookup(int(nodes[callee].name)) == 0
+
+# Scope nodes carry either a field-table index or a checked constant value.
+reflect_sequence = (e: int, binder: int) -> int[]:
+    let e = reflect_source(e)
+    out: int[]
+    if reflect_fields(e):
+        if nkids(e) != 1: fatal(nodes[e].pos, "fields(T) needs one record type")
+        t = prune(expr_as_type(kid(e, 0)))
+        if tkind(t) != .struct_ or is_map_type(t): fatal(nodes[e].pos, "fields(T) needs a record type, found {dt(t)}")
+        si = int(types[t].st)
+        check_struct_fields(si)
+        loop i in [0..int(structs[si].nfields)):
+            scope = mk(.reflect_scope, nodes[e].pos)
+            nodes[scope].name = i32(binder)
+            nodes[scope].ival = int(structs[si].fields) + i
+            nodes[scope].aux = 1
+            out.push(scope)
+    else:
+        t = prune(check_expr(e, 0))
+        checked = last_checked
+        if tkind(t) != .array and tkind(t) != .fixed: fatal(nodes[e].pos, "a record loop needs fields(T) or a compile-time array")
+        v = ct_values[ct_run(checked)]
+        loop item in v.items:
+            scope = mk(.reflect_scope, nodes[e].pos)
+            nodes[scope].name = i32(binder)
+            nodes[scope].a = i32(ct_literal(item, nodes[e].pos))
+            out.push(scope)
+    out
+
+reflect_bind = (s: int):
+    name = int(nodes[s].name)
+    if nodes[s].aux == 1:
+        push_scope_sym(name, new_sym(name, .reflected, nodes[s].ival, 0))
+    else:
+        initial = int(nodes[s].a)
+        g = globals.len()
+        globals.push(Global(name = i32(name), type = i32(ntype(initial)), init = i32(initial), mod = i32(cur_mod()), is_const = true, state = 2))
+        push_scope_sym(name, new_sym(name, .const_, g, 0))
+
+reflect_name = (n: int):
+    e = int(nodes[n].b)
+    if e == 0: return
+    check_expr(e, T_STR)
+    e = coerce(last_checked, T_STR)
+    value = ct_values[ct_run(e)]
+    if tkind(value.type) != .str_: fatal(nodes[n].pos, "an object's fields are fixed at compile time; `$field` needs a compile-time string (use a dictionary for runtime names)")
+    nodes[n].name = i32(intern(value.s))
+    nodes[n].b = 0
+
+reflect_member = (n: int) -> bool:
+    receiver = int(nodes[n].a)
+    if nodes[receiver].kind != .ident: return false
+    s = lookup(int(nodes[receiver].name))
+    if s == 0 or syms[s].kind != .reflected: return false
+    f = fields[int(syms[s].ref)]
+    member = name_of(int(nodes[n].name))
+    pos = nodes[n].pos
+    if member == "name": nodes[n] = Node(kind = .str_lit, pos = pos, sval = f.name, type = i32(T_STR), flags = i32(NF_CHECKED))
+    else if member == "type":
+        name = intern("$field_type{int(f.type)}")
+        push_scope_sym(name, new_sym(name, .type_, int(f.type), 0))
+        nodes[n] = Node(kind = .ident, name = i32(name), pos = pos, type = i32(mk_typeval(int(f.type))))
+        add_flag(n, NF_CHECKED)
+    else: fatal(pos, "a field descriptor has .name and .type, not .{member}")
+    last_checked = n
+    true
+
+reflect_jumps = (n: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .break_ or k == .continue_: return true
+    if k == .lambda: return false
+    if reflect_jumps(int(nodes[n].a)) or reflect_jumps(int(nodes[n].b)) or reflect_jumps(int(nodes[n].c)) or reflect_jumps(int(nodes[n].d)): return true
+    loop child in kids(n):
+        if reflect_jumps(child): return true
+    false
+
+reflect_loop = (s: int) -> bool:
+    it = reflect_source(int(nodes[s].a))
+    if not reflect_fields(it): return false
+    if nkids(s) != 1 or has_flag(s, NF_MUT): fatal(nodes[s].pos, "fields(T) yields one immutable descriptor per iteration")
+    binder = int(nodes[kid(s, 0)].name)
+    scopes = reflect_sequence(it, binder)
+    pos = nodes[s].pos
+    index = "$field_iteration{s}"
+    bodies: int[]
+    jumping = reflect_jumps(int(nodes[s].b))
+    loop i in [0..scopes.len()):
+        scope = scopes[i]
+        nodes[scope].b = i32(clone(int(nodes[s].b)))
+        if jumping: bodies.push(bc_if(bc_bin(.eq, bc_ident(index, pos), bc_int(i, pos), pos), [scope], [], pos))
+        else: bodies.push(scope)
+    if not jumping:
+        nodes[s] = nodes[bc_block(bodies, pos)]
+        check_block(s, 0, false)
+        return true
+    # A counted dispatch retains ordinary break/continue (including labels),
+    # while every iteration's code and member types are checked independently.
+    range = mk(.range, pos)
+    nodes[range].a = i32(bc_int(0, pos))
+    nodes[range].b = i32(bc_int(scopes.len(), pos))
+    nodes[s].a = i32(range)
+    nodes[s].b = i32(bc_block(bodies, pos))
+    set_list(s, [bc_ident(index, pos)])
+    false
+
+reflect_entries = (n: int, entries: mut int[]):
+    if nodes[n].kind == .record_loop:
+        scopes = reflect_sequence(int(nodes[n].a), int(nodes[n].name))
+        loop scope in scopes:
+            mark = scope_mark()
+            reflect_bind(scope)
+            active = reflect_active
+            reflect_active = true
+            reflect_entries(clone(int(nodes[n].b)), entries)
+            reflect_active = active
+            scope_reset(mark)
+        return
+    reflect_name(n)
+    value = int(nodes[n].a)
+    check_expr(value, 0)
+    value = last_checked
+    finalize_literal(value)
+    add_flag(value, NF_CHECKED)
+    nodes[n].a = i32(value)
+    entries.push(n)
+
+reflect_record = (n: int):
+    entries: int[]
+    reflect_entries(n, entries)
+    nodes[n] = Node(kind = .record_lit, pos = nodes[n].pos)
+    set_list(n, entries)

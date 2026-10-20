@@ -1,0 +1,25 @@
+# quick
+size=():>int64=>4
+grow=(@xs:array<int64>):>int64=> { xs.push(30) return 40 }
+compute=(n:int64):>array<int64>=> {
+    let xs:array<int64>=[10 n]
+    xs.push(grow(@xs))
+    let removed=xs.pop(1)
+    xs.insert(removed 1)
+    let last=xs.pop()
+    xs.extend([last 50])
+    xs.resize(7)
+    xs.truncate(6)
+    let fixed:array<int64 length=size()>=[1 2 3 4]
+    xs.push(fixed[2])
+    let text="hé🙂z"
+    $runtime_assert text[1..3) =? "é🙂"
+    return xs
+}
+const VALUES=compute(20)
+$assert VALUES =? [10 20 30 40 50 0 3]
+main=()=> {
+    let n:int64=20
+    $runtime_assert VALUES =? compute(n)
+    printl("arrays agree")
+}

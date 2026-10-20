@@ -643,6 +643,28 @@ dw_broadcast = (op: DewyToken, a: int, b: int, id: int) -> int:
     nodes[n].b = i32(b)
     return n
 
+# Computed names are expressions, resolved by the checker in an instantiated scope.
+dw_field_name = (id: int) -> int:
+    let id = dw_unwrap(id)
+    if not dn_token_call(dw_op(id)): return 0
+    callee = dw_child(id, 1)
+    if dewy_syntax[callee].kind != .metatag or dewy_syntax[callee].text != "field": return 0
+    args = dewy_syntax[dw_child(id, 2)].children
+    if args.len() != 1: fatal(dewy_syntax[id].pos, "`$field` needs one compile-time string")
+    dw_expr(args[0])
+
+dw_record_entry = (id: int) -> int:
+    if dw_op(id) != .assign: return dw_fail(id, "a record item without a field name and =")
+    lhs = dw_child(id, 1)
+    field = mk(.namedarg, dewy_syntax[id].pos)
+    nodes[field].b = i32(dw_field_name(lhs))
+    if nodes[field].b == 0:
+        name = dw_name(lhs)
+        if name == "": return dw_fail(lhs, "a record field without a name")
+        nodes[field].name = i32(intern(name))
+    nodes[field].a = i32(dw_expr(dw_child(id, 2)))
+    field
+
 dw_expr = (id: int) -> int:
     let id = dw_unwrap(id)
     k = dewy_syntax[id].kind
@@ -753,13 +775,7 @@ dw_expr = (id: int) -> int:
                     nodes[pair].b = i32(dw_expr(dw_child(child, 2)))
                     xs.push(pair)
                 else if is_record:
-                    if dw_op(child) != .assign: return dw_fail(child, "a record item without a field name and =")
-                    name = dw_name(dw_child(child, 1))
-                    if name == "": return dw_fail(child, "a record field without a simple name")
-                    field = mk(.namedarg, dewy_syntax[child].pos)
-                    nodes[field].name = i32(intern(name))
-                    nodes[field].a = i32(dw_expr(dw_child(child, 2)))
-                    xs.push(field)
+                    xs.push(dw_record_entry(child))
                 else: xs.push(dw_expr(child))
             set_list(n, xs)
             return n
@@ -849,10 +865,12 @@ dw_expr = (id: int) -> int:
             return n
         if op == .dot:
             name = dw_name(right)
-            if name == "": return dw_fail(id, "computed member names")
+            computed = dw_field_name(right)
+            if name == "" and computed == 0: return dw_fail(id, "computed member names")
             n = mk(.field, pos)
             nodes[n].a = i32(dw_expr(left))
-            nodes[n].name = dw_name_id(right)
+            nodes[n].b = i32(computed)
+            if computed == 0: nodes[n].name = dw_name_id(right)
             return n
         if op == .kw_as or op == .kw_transmute:
             n = mk(.cast, pos)
@@ -1399,6 +1417,7 @@ dw_collection_kind = (id: int) -> int:
         if children.len() == 0: return 0
         candidates.push(children[children.len() - 1])
     else:
+        if dw_op(id) == .assign and dw_field_name(dw_child(id, 1)) != 0: return 3
         if kind == .keyword_expr or dn_token_statement(dw_op(id)): return 0
         return if dw_op(id) == .arrow: 2 else: 1
     result = 0
@@ -1438,8 +1457,28 @@ dw_collect = (id: int, accumulator: int, map: bool) -> int:
     nodes[statement].a = i32(call)
     statement
 
+dw_record_loop = (id: int) -> int:
+    let id = dw_unwrap(id)
+    if dewy_syntax[id].kind == .flow:
+        items = dewy_syntax[id].children
+        if items.len() != 1: return dw_fail(id, "a conditional record shape")
+        arm = items[0]
+        if dewy_syntax[dw_child(arm, 0)].text != "loop": return dw_fail(arm, "a record shape without a compile-time loop")
+        head = dw_loop_head(dw_child(arm, 1))
+        if nodes[head].op != 1 or nkids(head) != 1: return dw_fail(arm, "a combined record loop")
+        n = mk(.record_loop, dewy_syntax[id].pos)
+        nodes[n].a = nodes[head].a
+        nodes[n].name = nodes[kid(head, 0)].name
+        nodes[n].b = i32(dw_record_loop(dw_child(arm, 2)))
+        return n
+    if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "{{}}:":
+        if dewy_syntax[id].children.len() != 1: return dw_fail(id, "a record loop body with multiple entries")
+        return dw_record_loop(dw_child(id, 0))
+    dw_record_entry(id)
+
 dw_comprehension = (id: int) -> int:
     pos = dewy_syntax[id].pos
+    if dw_collection_kind(id) == 3: return dw_record_loop(id)
     map = dw_collection_kind(id) == 2
     # `$` cannot begin an ordinary identifier, so this binding cannot capture a
     # user-written name, including one inside a nested comprehension.

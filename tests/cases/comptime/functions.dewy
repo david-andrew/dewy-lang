@@ -1,0 +1,44 @@
+# quick
+Pair:type=[x:int64 text:string]
+Bad:type=type of error
+fib=(n:int64):>int64=> {
+    if n <? 2 { return n }
+    return fib(n-1)+fib(n-2)
+}
+fallible=(n:int64):>int64|Bad=> {
+    if n <? 0 { return Bad }
+    return n+1
+}
+forward=(n:int64):>int64|Bad=> { return fallible(n) or_throw }
+compute=(n:int64):>int64=> {
+    let values=[loop i in [0..n) fib(i)]
+    let copy=values
+    copy[0]=99
+    let total=0
+    loop i in [0..values.length) {
+        if i =? 2 { continue }
+        total+=values[i]
+    }
+    let pair=Pair[total "ab"+"cd"]
+    let saved=pair
+    pair.x+=1
+    $runtime_assert saved.text =? "abcd"
+    $runtime_assert values[0] =? 0
+    let j=0
+    loop j <? 3 { j+=1 }
+    total=match forward(n) { value:int64=>value+pair.x+j <Bad>=>0 }
+    return total
+}
+const TABLE=[compute(8) fib(10)]
+$assert TABLE[0] =? 45
+$assert TABLE[1] =? 55
+$assert forward(-1) is? Bad
+main=()=> {
+    let n:int64=8
+    $runtime_assert TABLE[0] =? compute(n)
+    $runtime_assert TABLE[1] =? fib(n+2)
+    let copy=TABLE
+    copy[0]=0
+    $runtime_assert TABLE[0] =? 45
+    printl("functions agree")
+}

@@ -308,11 +308,13 @@ editable[0]=0
 printl(saved) # [20, 22]
 ```
 
-Literal constants can be folded. Integer constant expressions can also supply
-fixed-array lengths; a runtime call does not become a compile-time expression
-just because its result is bound with `const`. Explicit `let` shadowing remains
-available. This corrects the earlier inherited behavior that expanded arbitrary
-constant initializers on every use.
+Constant expressions can also supply fixed-array lengths and `$assert`
+conditions. In these contexts ordinary checked functions execute at compile
+time, including recursion, local mutation, loops, records, arrays, strings,
+and error values. A demanded module constant is materialized as a value:
+its table-generation code does not run again at startup. A `const` initializer
+otherwise retains its ordinary runtime behavior. Explicit `let` shadowing
+remains available.
 
 Parameters have
 value semantics. Release builds can avoid a redundant entry copy when a
@@ -1759,12 +1761,39 @@ Assertions are directives with their own argument grammar:
 `$runtime_assert condition` or `$runtime_assert condition, "message"` checks
 the condition when the program runs; a failure reports the condition (or the
 message, which may interpolate values) and exits with status 101.
-`$assert condition [, "message"]` must be proven while compiling: today the
-compiler proves conditions decided by integer, boolean and string constants,
-`const` bindings and type tests that narrowing has settled. It reports
-`assertion refuted` for a false condition and `cannot prove assertion yet` for
-anything else; it never becomes a runtime check. The directive owns the comma
+`$assert condition [, "message"]` must be proven while compiling. The compiler
+uses constant facts and settled type tests, then executes ordinary checked code
+when needed. It reports `assertion refuted` for a false condition; failed
+evaluation reports the source operation and compile-time call chain.
+It never becomes a runtime check. The directive owns the comma
 after its condition, and `$assert(condition, "message")` is the same form.
+General compile-time execution has no mandatory step limit or termination proof.
+It cannot read runtime locals or mutable globals, mutate global state, perform
+I/O, call external functions, or access host memory. Bounded read-only views of
+evaluator-owned integer buffers support ordinary library scanners, including
+Unicode string length. Existing `$include_bytes` inputs retain their tracked
+file dependencies. Indirect/capturing calls, raw writes, generated declarations
+and general artifact/host APIs are not yet supported; unsupported operations
+are diagnosed, never silently deferred to runtime.
+`fields(T)` is a compile-time sequence of a record type's field descriptors.
+Each descriptor has `.name` (a constant string) and `.type`. A loop over
+`fields(T)` specializes its body for each field when the enclosing function is
+instantiated. `value.$field(name)` reads or writes the ordinary field selected
+by a compile-time string; runtime names require a dictionary. For example:
+
+```dewy
+copy_fields = <T>(value:T) =>
+    [loop f in fields(T) $field(f.name) = value.$field(f.name)]
+```
+
+A loop in a record literal expands into ordinary named fields, whose types are
+inferred independently. Constant arrays can also supply these iterations:
+`[loop name in ["x" "y"] $field(name) = 0]`. Nested record loops are supported;
+conditional record shapes and general generated declarations are not. Field
+descriptors themselves cannot escape into runtime storage. Compile-time string
+operations include concatenation, slicing and ordinary checked string-library
+calls; interpolation and indirect/capturing calls remain unsupported.
+
 Other directives of the design (`$no_prelude`, `$lend`,
 `$allocator`, `$expect`, `$unsafe_assume`, `$target`, …) are reported as not
 implemented yet where they appear.

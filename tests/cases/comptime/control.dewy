@@ -1,0 +1,37 @@
+# quick
+Bad:type=type of error
+condition=(n:int64):>bool|Bad=> { if n <? 0 { return Bad } return n >? 0 }
+fallible_loop=(n:int64):>int64|Bad=> {
+    loop (condition(n) or_throw) { return 1 }
+    return 0
+}
+read=(n:int64):>int64=>match fallible_loop(n) { value:int64=>value <Bad>=>-1 }
+compute=(n:int64):>array<int64>=> {
+    let zero:int64
+    let empty:array<int64>
+    let record:[x:int64 text:string]
+    let total:int64=0
+    $outer
+    loop i in [0..n) {
+        loop j in [0..4) {
+            if j =? 1 { continue $outer }
+            total+=i
+        }
+    }
+    let reverse:int64=0
+    loop i in [5,3..1] { reverse=reverse*10+i }
+    return [zero empty.length record.x record.text.length total reverse]
+}
+const VALUES=compute(5)
+$assert VALUES =? [0 0 0 0 10 531]
+$assert fallible_loop(-1) is? Bad
+$assert read(0) =? 0
+$assert read(2) =? 1
+main=()=> {
+    let n:int64=5
+    $runtime_assert VALUES =? compute(n)
+    $runtime_assert fallible_loop(-1) is? Bad
+    $runtime_assert read(0) =? 0
+    $runtime_assert read(2) =? 1
+    printl("control agrees")
+}

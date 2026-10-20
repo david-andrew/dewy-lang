@@ -14,8 +14,10 @@ use 'expr.jo'
 use 'ide.jo'
 use 'poly_closure.jo'
 use 'prelude.jo'
+use 'comptime.jo'
+use 'reflection.jo'
 
-enum SK: none_, local, global, fns, struct_, enum_, const_, module, type_, builtin, alias_
+enum SK: none_, local, global, fns, struct_, enum_, const_, module, type_, builtin, alias_, reflected
 
 struct Sym:
     name: i32
@@ -1025,6 +1027,7 @@ resolve_type = (tn: int) -> int:
         s = 0
         if nodes[tn].sval != 0:
             ms = lookup(int(nodes[tn].sval))
+            if ms != 0 and syms[ms].kind == .reflected and name_of(nm) == "type": return int(fields[int(syms[ms].ref)].type)
             if ms == 0 or syms[ms].kind != .module: fatal(nodes[tn].pos, "unknown module '{name_of(int(nodes[tn].sval))}'")
             s = module_lookup(int(syms[ms].ref), nm)
         else:
@@ -2165,6 +2168,7 @@ dewy_at = (pos: int) -> bool:
 jd = (pos: int, jo: str, dewy: str) -> str: if dewy_at(pos): dewy else: jo
 
 check_for = (s: int):
+    if dewy_at(nodes[s].pos) and reflect_loop(s): return
     if has_flag(s, NF_MUT) and files[pos_file(nodes[s].pos)].is_dewy:
         source_type = prune(check_expr(int(nodes[s].a), 0))
         nodes[s].a = i32(last_checked)
@@ -3125,6 +3129,17 @@ check_vardecl = (s: int):
 
 check_stmt = (s: int):
     k = nodes[s].kind
+    if k == .reflect_scope:
+        mark = scope_mark()
+        reflect_bind(s)
+        body = int(nodes[s].b)
+        active = reflect_active
+        reflect_active = true
+        check_block(body, 0, false)
+        reflect_active = active
+        scope_reset(mark)
+        nodes[s] = nodes[body]
+        return
     if k == .vardecl and has_flag(s, NF_CHECKED): return
     if k == .vardecl: check_vardecl(s)
     else if k == .const_:
@@ -3648,6 +3663,14 @@ struct CVal:
 
 ceval = (e: int) -> CVal:
     k = nodes[e].kind
+    if nodes[e].type != 0 or k == .call or k == .index or k == .field or k == .unary:
+        checked = e
+        if nodes[e].type == 0:
+            check_expr(e, 0)
+            checked = last_checked
+            finalize_literal(checked)
+        value = ct_values[ct_run(checked)]
+        return CVal(tkind(value.type) == .str_, value.i, value.s)
     if k == .bool_lit or k == .int_lit: return CVal(false, nodes[e].ival, "")
     if k == .str_lit: return CVal(true, 0, name_of(int(nodes[e].sval)))
     if k == .ident:
@@ -3829,24 +3852,11 @@ assertion_refuted = (cond: int, message: int):
     if message != 0 and nodes[message].kind == .str_lit and nodes[message].aux == 0: why = name_of(int(nodes[message].sval))
     fatal(nodes[cond].pos, "assertion refuted: {why}")
 
-# What stopped a proof, in the source's terms.
-sa_reason = (e: int) -> str:
-    k = nodes[e].kind
-    if k == .ident: return "`{name_of(int(nodes[e].name))}` is not a compile-time constant"
-    if k == .call or k == .intrinsic: return "it depends on a function call, which `$assert` cannot evaluate yet"
-    if k == .field: return "it depends on the field `{name_of(int(nodes[e].name))}`, which `$assert` cannot follow yet"
-    if k == .index: return "it depends on an element, which `$assert` cannot follow yet"
-    if k == .float_lit: return "real-number arithmetic is not evaluated by `$assert` yet"
-    if k == .istype: return "the value's type is only known when the program runs"
-    if k == .binary or k == .unary or k == .conv: return "this arithmetic could overflow or is not evaluated by `$assert` yet"
-    "this expression is not evaluated by `$assert` yet"
-
 prove_assertion = (cond: int, message: int):
     truth = static_truth(cond)
     if truth == 1: return
     if truth == 0: assertion_refuted(cond, message)
-    at = if sa_blocker != 0: sa_blocker else: cond
-    fatal(nodes[at].pos, "cannot prove assertion yet: {sa_reason(at)} (`$assert` is proven while compiling; `$runtime_assert` checks a condition when the program runs)")
+    if ct_values[ct_run(cond)].i == 0: assertion_refuted(cond, message)
 
 # the build: block of the main file, checked (main.jo's scan_build_block read it before checking
 # began, to know the target: here its mistakes are errors with places)

@@ -1,0 +1,18 @@
+# quick
+Bad:type=type of error
+fail=():>int64|Bad=>Bad
+at=():>int64|Bad=> { let xs:array<int64>=[] return xs[fail() or_throw] }
+cast=():>int64|Bad=>int64(fail() or_throw)
+member=():>int64|Bad=> { let record=[x=fail() or_throw] return record.x }
+condition=():>int64|Bad=> { if (fail() or_throw) >? 0 { panic("not reached") } return 42 }
+$assert at() is? Bad
+$assert cast() is? Bad
+$assert member() is? Bad
+$assert condition() is? Bad
+main=()=> {
+    $runtime_assert at() is? Bad
+    $runtime_assert cast() is? Bad
+    $runtime_assert member() is? Bad
+    $runtime_assert condition() is? Bad
+    printl("propagation agrees")
+}

@@ -52,6 +52,8 @@ valid_tables=():>bool=> {
 $assert (valid_tables())
 main=():>int64=> {
     $runtime_assert (valid_tables())
+    $runtime_assert REVERSE =? reverse_table()
+    $runtime_assert PRIME =? prime_table()
     let primes:array<int64>=[]
     let checksum=0
     loop i in [0..128)  {

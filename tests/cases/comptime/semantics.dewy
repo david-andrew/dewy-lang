@@ -1,0 +1,23 @@
+# quick
+bump=(@xs:array<int64> index:int64)=> { xs[index]+=5 }
+values=(n:int64):>array<int64>=> {
+    let x:uint8=250
+    x+=uint8(n)
+    let y:int8=120
+    y+=int8(n)
+    let xs:array<int64>=[10 20]
+    bump(@xs 1)
+    let text="a\r\né🙂"+"x"
+    let f:float32=1.25
+    f+=float32(n)
+    return [int64(x) int64(y) (-17)//n (-17)%n int64(uint64(18446744073709551615)>>uint64(n)) int64(f) xs[1] text.length]
+}
+const RESULT=values(9)
+$assert RESULT =? [3 -127 -2 1 36028797018963967 10 25 5]
+$assert 1.5 <? 2.0
+$assert not false and true
+main=()=> {
+    let n:int64=9
+    $runtime_assert RESULT =? values(n)
+    printl("semantics agree")
+}
