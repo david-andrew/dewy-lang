@@ -65,8 +65,16 @@ surface (one language, no dialect forks), that must all pass:
   are the seam.
 - Erased physical units (milestone 5) via dimension-qualified canonical types.
 - Mathematical `int` and exact decimals (milestone 3), staged as decided below.
-- Profile and fix the 8.85× game-tick gap (record return/copy/refcount
-  suspected, unproven).
+- Game-tick gap (8.85×), diagnosed 2026-10-19. Five 24-byte record copies per
+  tick survive inlining, because `opt.jo:o_sra` only promotes slots of 16 bytes
+  or less; the scalar-local control is 4.6× fewer cycles. Fix:
+  - extend SRA to three 8-byte lanes, guarding the lane count;
+  - coalesce dead ownership/return copy temporaries after inlining.
+  Then:
+  - float compare/negate selection;
+  - outer-target SIMD for particles;
+  - escape-proven stack closure environments with devirtualization (the
+    callback kernel spends 35% in allocation and free).
 - Wide-shift semantics bug; Jo text in diagnostics.
 - Dewy-grammar differential fuzzer with independent oracles (nightly). The
   current fuzzer only generates Jo.
@@ -124,5 +132,7 @@ Open:
 - Word-at-a-time name hash; paired SSE string equality; transitive
   effect-summary reuse.
 - Broad release inlining-cost adjustment.
-- Medium-record scalar replacement: whole-compiler instruction count rose
-  1.3–4.5%.
+- Medium-record scalar replacement was rejected on whole-compiler instruction
+  counts (+1.3–4.5%) alone. **Reopened:** a game kernel stands to gain roughly
+  4×; judge it on application workloads plus the speed gate's explicit-accept
+  path.
