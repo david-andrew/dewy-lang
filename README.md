@@ -4,115 +4,56 @@
 
 # The Dewy Programming Language
 
-
 Dewy is a general purpose programming language with a focus on engineering.
+A binding names a value: assignment, argument passing and return give the
+receiver its own value, and sharing is either unobservable or written in the
+source. Ordinary programs should be comfortable to write, run well without
+pervasive annotations, and compile from source quickly enough to stay in the
+edit loop. Games are a primary customer. See [docs/GOALS.md](docs/GOALS.md).
 
-> **NOTE: Still very work in progress, and the docs (including this README) are frequently out of date!**
+## Status
 
-## Current Status
+Experimental. The current compiler is a compact native/web compiler forked from
+Sloppy and adapted to Dewy syntax and behavior; it implements a growing subset
+of the language. The previous implementation (the Python/native compiler, µDewy
+and their library) is archived in git tag `archive/master-pre-restart`.
 
-The `restart/sloppy-frontend` branch develops a faster implementation in
-[core/](docs/DEVELOPMENT.md), derived from Sloppy with Dewy syntax and language behavior.
-It runs native/web game examples, with a quick smoke suite taking a few seconds
-and a full validation gate taking a few minutes. It is still experimental;
-see its README for building and limitations.
-The [compact-core language guide](docs/LANGUAGE.md) includes an executable tour
-and the native/web game workflow. From a checkout, the everyday commands are:
+## Build, run and test
+
+Needs Python 3.14, a C compiler and `make` (Linux x86-64 for the C bootstrap),
+plus pytest, pytest-xdist, Pillow and Node for the test suite (`uv sync`).
 
 ```sh
-python3 -m tools.core test --quick
-./tools/dewy examples/paddle.dewy
-./tools/dewy test examples/paddle_tests.dewy
+./tools/dewy examples/tour.dewy                  # build the compiler if needed, then run
+./tools/dewy test examples/paddle_tests.dewy     # run a program's test blocks
+python3 -m tools.core test --quick               # smoke suite
+python3 -m tools.core test                       # full suite
+python3 -m tools.core --bootstrap test           # rebuild from C, then the full suite
+python3 -m tools.compiler.build --bootstrap --output /tmp/dewy-core   # standalone toolchain
 ```
 
-The development launcher builds a local compiler when its sources change and
-reuses it otherwise. `tools/dewy` forwards the native compiler's commands and
-works from other project directories too. Use its absolute path for the editor;
-it remains stable across compiler rebuilds. `python3 -m tools.core test` runs the
-full compact-core gate. The published installer below still installs the
-previous implementation.
+## Layout
 
-To try the compact core without building it locally, use a
-[CI toolchain download](docs/DEVELOPMENT.md#download-a-ci-build). Successful runs
-provide standalone compilers for Linux x86-64/ARM64, macOS ARM64 and Windows x64,
-with the native/web game libraries.
-
-### dewy
-
-The previous compiler lives under [dewy/](dewy/), retained as a language-design
-and behavior reference during development of the compact core.
-
-A VS Code extension with a TextMate grammar for Dewy lives under [editors/vscode/](editors/vscode/) (not yet published to the marketplace; install it from the folder with `code --install-extension` after packaging, or symlink it into `~/.vscode/extensions`).
-
-### udewy
-
-The micro subset, udewy, is largely feature complete and available under [udewy/](udewy/). Currently only supports linux x86_64.
-
-A vscode extension for syntax highlighting is available at https://marketplace.visualstudio.com/items?itemName=RedFoxLabs.udewy
-
-## Installation
-
-Linux x86_64 with glibc 2.34 or newer. This installs the verified native `dewy`/`udewy` compiler pair and its matching library into `~/.dewy`:
-
-```
-curl -fsSL https://dewy-lang.org/install.sh | bash
-```
-
-The installed compilers run without Python. Run a program with:
-
-```
-dewy path/to/my_script.dewy
-```
-
-Update both the Dewy compiler and the `udewy` bootstrap binary to the latest published version with:
-
-```
-dewy update
-```
-
-This is a development toolchain. Native self-bootstrap is verified, but some hosted features remain unsupported; see [the native parity notes](dewy/bootstrap/IMPLEMENTATION.md#hosted-parity-gaps). The hosted compiler remains available from a checkout with Python 3.14 or newer:
-
-```
-python -m dewy path/to/my_script.dewy
-```
-
-`udewy` programs can also be run with `python -m udewy` from a checkout.
-
-## Examples
-
-The hero program on the [dewy-lang.org](https://dewy-lang.org) front page lives at [examples/hero.dewy](examples/hero.dewy) and runs today:
-
-```
-python -m dewy examples/hero.dewy
-```
-
-For more working programs, see the executable fixtures in [tests/fixtures/programs/](tests/fixtures/programs/) (each one compiles and runs in CI) and the curated, status-labeled examples on the [site examples page](https://dewy-lang.org/examples/). Implementation status for every language feature is tracked in [dewy/status.md](dewy/status.md).
-
-Programs written for the previous interpreter implementation are archived in [examples/old/](examples/old/); most have not yet been ported to the current compiler.
-
-## Buzzwords
-
-Just an (unsorted) collection of common buzzwords that apply to Dewy
-
-- expression oriented
-- statically compiled
-- strongly typed
-- type inference
-- parametric polymorphism
-- refinement types / liquid types
-- effects system
-- first-class types
-- value semantics
-- hybrid nominal-structural type system
-- first-class functions
-- function overloading
-- array programming / broadcasting
-- units of measure
-- (mostly) automatic memory management, no GC
-- ergonomic strings (extended grapheme clusters, interpolation, multilin, flexible delimiters)
-- compiletime evaluation for metaprogramming
-- juxtaposition (type-directed call, multiply, index)
+| Path | Contents |
+| --- | --- |
+| `compiler/` | the compiler (implementation language `.jo`) |
+| `lib/` | runtime and libraries |
+| `stage0/`, `bootstrap/` | the C bootstrap and its stand-in frontend |
+| `examples/` | example programs and games |
+| `tests/` | the test suite; `tests/legacy_corpus/` holds untested pre-restart programs |
+| `tools/` | `tools/dewy` launcher, `tools/core.py` driver, `tools/compiler/` build, packaging and benchmark tooling |
+| `bench/` | application benchmarks with C counterparts |
+| `docs/` | goals, language guide, development guide, design notes, origin |
+| `editors/vscode/` | VS Code extension |
+| `site/` | the dewy-lang.org website |
 
 ## Documentation
 
-The language website, learning guide, reference, examples, and µDewy playground are built from [`site/`](site/) and published at https://dewy-lang.org/.
+[Goals](docs/GOALS.md) · [language guide and tour](docs/LANGUAGE.md) ·
+[developing the compiler](docs/DEVELOPMENT.md) · [design notes](docs/design/README.md) ·
+[origin and licensing](docs/origin/ORIGIN.md)
+
+## Published installer
+
+`curl -fsSL https://dewy-lang.org/install.sh | bash` installs the **previous
+implementation**, not the compiler in this repository.
