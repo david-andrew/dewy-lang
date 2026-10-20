@@ -13,8 +13,10 @@ struct DewyMethod:
     decl: int
     members: {int: int} = {}  # the object's members: a method's index, -1 for any other row
     state: int = 0            # 0 not inferred, 1 inferring, 2 reads its object, 3 changes it
+    reads: bool = false       # reaches a member, or calls a method that does; otherwise static
 
 dewy_methods: DewyMethod[]
+dewy_type_members: {int: {int: int}} = {}   # a type's declaration -> its members
 dewy_methods_inferred = 0
 dewy_receivers: {int: int[]} = {}   # function name -> declarations taking an argument first
 dewy_module_of_file: {int: int} = {}
@@ -69,7 +71,49 @@ dewy_infer_methods = ():
     loop i in [dewy_methods_inferred..dewy_methods.len()):
         if dewy_methods[i].state == 3: add_flag(kid(dewy_methods[i].decl, 0), NF_MUT)
         else: dewy_methods[i].state = 2
+    # A method is static unless it reaches a member other than a static method:
+    # a least fixed point again, so static methods may call one another.
+    loop true:
+        progress = false
+        loop i in [dewy_methods_inferred..dewy_methods.len()):
+            if dewy_methods[i].reads: continue
+            decl = dewy_methods[i].decl
+            receiver = int(nodes[kid(decl, 0)].name)
+            reads = dewy_reads(int(nodes[decl].b), receiver, i)
+            loop param in kids(decl):
+                if dewy_reads(int(nodes[param].b), receiver, i): reads = true
+            if reads:
+                dewy_methods[i].reads = true
+                progress = true
+        if not progress: break
     dewy_methods_inferred = dewy_methods.len()
+
+# Whether n reaches the object through `receiver` other than to call a static method.
+dewy_reads = (n: int, receiver: int, i: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .ident: return int(nodes[n].name) == receiver
+    if k == .field:
+        base = int(nodes[n].a)
+        if nodes[base].kind == .ident and int(nodes[base].name) == receiver:
+            if let j = dewy_methods[i].members.get(int(nodes[n].name)):
+                if j >= 0 and not dewy_methods[j].reads: return false
+            return true
+        return dewy_reads(base, receiver, i)
+    if dewy_reads(int(nodes[n].a), receiver, i) or dewy_reads(int(nodes[n].b), receiver, i): return true
+    if dewy_reads(int(nodes[n].c), receiver, i) or dewy_reads(int(nodes[n].d), receiver, i): return true
+    loop child in kids(n):
+        if dewy_reads(child, receiver, i): return true
+    if k != .lambda and k != .fn_:
+        loop child in kids2(n):
+            if dewy_reads(child, receiver, i): return true
+    false
+
+# The method `name` of the type declared by `decl` (an index of dewy_methods), or -1.
+dewy_type_method = (decl: int, name: int) -> int:
+    if let members = dewy_type_members.get(decl):
+        if let j = members.get(name): return j
+    -1
 
 dewy_method_changes = (i: int) -> bool: dewy_methods[i].state == 3
 

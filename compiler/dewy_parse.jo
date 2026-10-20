@@ -1466,8 +1466,10 @@ dw_type_methods = (struct_: int, rows: int[], methods: int[]):
         dw_add_receiver(fn_, receiver, object_type)
         dw_pending_decls.push(fn_)
         decls.push(fn_)
-    types_here[int(nodes[struct_].name)] = dewy_method_group(row_names, decls, inherited)
+    group = dewy_method_group(row_names, decls, inherited)
+    types_here[int(nodes[struct_].name)] = group
     dw_type_members[file] = types_here
+    if methods.len() > 0: dewy_type_members[struct_] = group
 
 dw_import = (id: int) -> int:
     pos = dewy_syntax[id].pos

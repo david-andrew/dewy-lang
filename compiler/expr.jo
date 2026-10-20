@@ -4054,6 +4054,21 @@ dewy_method_call = (n: int, callee: int, method: int, args: int[], expected: int
     dewy_literal_method_name = saved
     t
 
+# `Type.method(args)`: a static method, given a placeholder for the object it does
+# not reach (its zero value, never read).
+dewy_static_call = (n: int, t: int, j: int, args: int[], expected: int) -> int:
+    decl = dewy_methods[j].decl
+    name = int(nodes[decl].name)
+    if dewy_methods[j].reads: fatal(nodes[n].pos, "'{name_of(name)}' reaches the members of a {dt(t)}, so it is called on a value of it, not on the type")
+    si = int(types[t].st)
+    check_struct_fields(si)
+    placeholder = mk(.call, nodes[n].pos)
+    nodes[placeholder].aux = 2
+    nodes[placeholder].type = i32(t)
+    set_list(placeholder, fill(0, int(structs[si].nfields)))
+    add_flag(placeholder, NF_CHECKED)
+    resolve_fn_call(n, name, [decl], [placeholder] + args, expected)
+
 is_unchecked_at = (n: int) -> bool:
     callee = int(nodes[n].a)
     if nodes[callee].kind != .ident or nkids(n) != 2: return false
@@ -4141,6 +4156,9 @@ check_call = (n: int, expected: int) -> int:
                 if vi < 0: fatal(nodes[callee].pos, "{dt(tt)} has no variant '{name_of(fname)}'{variant_hint_for(tt, name_of(fname))}")
                 if ide_on: ide_variant_ref(nodes[callee].pos, fname, tt, vi)
                 return variant_ctor(n, tt, vi, args)
+            if tt != 0 and types[tt].kind == .struct_:
+                j = dewy_type_method(int(structs[int(types[tt].st)].decl), fname)
+                if j >= 0: return dewy_static_call(n, tt, j, args, expected)
             why = ""
             fd: int[]
             collect_fns(fname, fd)
@@ -6469,6 +6487,13 @@ check_expr = (n: int, expected: int) -> int:
                 if not types[tt].sign and value < 0: add_flag(lit, NF_U64)
                 check_expr(lit, tt)
                 t = tt
+            else if tt != 0 and types[tt].kind == .struct_ and not is_callee and dewy_type_method(int(structs[int(types[tt].st)].decl), fname) >= 0:
+                # `Type.method`: a static method of no arguments is called by its name
+                callee = mk(.field, nodes[n].pos)
+                nodes[callee].a = nodes[n].a
+                nodes[callee].name = i32(fname)
+                nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(callee))
+                return check_expr(n, expected)
             else if tt != 0 and types[tt].kind == .enum_:
                 vi = find_variant(int(types[tt].st), fname)
                 if vi < 0: fatal(nodes[n].pos, "{dt(tt)} has no variant '{name_of(fname)}'{variant_hint_for(tt, name_of(fname))}")

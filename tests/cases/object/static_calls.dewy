@@ -1,0 +1,18 @@
+# quick
+# A method that reaches no member (nor calls one that does) is called off its type too.
+Span:type = [
+    start:int64
+    stop:int64 = start
+    width = () => stop - start
+    describe = ():>string => "spans: {count(3)}"
+    count = (k:int64):>int64 => if k <=? 0 0 else 1 + again(k - 1)
+    again = (k:int64):>int64 => count(k)
+    unit = ():>Span => Span(0 1)
+]
+Box:type = <T>[value:T  wrap = (v:T):>Box<T> => Box<T>[v]]
+Fault:type = type of error & [code:int64  kind = ():>string => "fault"]
+main = () => {
+    let s = Span(3 7)
+    printl"{Span.describe} {Span.count(4)} {Span.unit} {s.count(2)} {s.unit.width}"
+    printl"{Box<int64>.wrap(5)} {Fault.kind} {Fault[1].kind}"
+}
