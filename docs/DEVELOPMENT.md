@@ -196,3 +196,30 @@ generated programs.
 
 Build hashes identify provenance; byte-identical executables are not required.
 Runtime tuning variables inherited from Sloppy keep their `SLOPPY_*` names for now.
+
+## Releasing the VS Code extension
+
+Versions: the language stays at 0.0.0 until David decides otherwise. The extension
+(`editors/vscode/package.json`) only gets **patch** bumps, at most **one release per day**;
+a minor bump needs David's approval.
+
+1. Bump the patch version in `editors/vscode/package.json`, commit, push.
+2. `git tag vscode-vX.Y.Z && git push origin vscode-vX.Y.Z`.
+
+`.github/workflows/extension.yml` packages `editors/vscode` and publishes it to the VS Code
+Marketplace and Open VSX with no stored tokens (GitHub OIDC exchanged for short-lived
+credentials). It runs in the GitHub environment `marketplace-publish`, which only admits
+`vscode-v*` tags and the main branches.
+
+One-time setup (mirrors Sloppy's):
+
+- **Marketplace:** Azure managed identity → Federated credentials → GitHub Actions:
+  organization `david-andrew` (ID `41205753`), repository `dewy-lang` (ID `141009909`),
+  entity Environment `marketplace-publish`. Subject:
+  `repo:david-andrew@41205753/dewy-lang@141009909:environment:marketplace-publish`.
+  Put the identity's Client ID and Tenant ID in repository variables `AZURE_CLIENT_ID` and
+  `AZURE_TENANT_ID`. Run the Extension workflow by hand with *whoami* to print the identity's
+  Marketplace id and add it as a Contributor member of the RedFoxLabs publisher.
+- **Open VSX:** Settings → Trusted Publishers → namespace RedFoxLabs → GitHub Actions: owner
+  `david-andrew`, repository `dewy-lang`, workflow `extension.yml`, environment
+  `marketplace-publish`.
