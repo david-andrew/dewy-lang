@@ -1,0 +1,26 @@
+# quick
+Tally:type = [
+    count:int64
+    bump = () => (count += 1)
+]
+
+counter = (start:int64) => [
+    value = start
+    increment = () => (value += 1)
+]
+
+main = () => {
+    let a = Tally(0)
+    a.bump
+    let b = a
+    b.bump
+    b.bump
+    let c = counter(40)
+    c.increment
+    let d = c
+    d.increment
+    d.increment
+    let all = [c d]
+    all[0].increment
+    printl"{a.count} {b.count} {c.value} {d.value} {all[0].value} {all[1].value}"
+}

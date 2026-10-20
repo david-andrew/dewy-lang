@@ -1,0 +1,11 @@
+Span:type = [
+    start:int64
+    stop:int64
+    width = () => stop - start
+    grow = (by:int64) => { stop += by }
+]
+
+make_counter = (start:int64) => [
+    value = start
+    increment = () => (value += 1)
+]

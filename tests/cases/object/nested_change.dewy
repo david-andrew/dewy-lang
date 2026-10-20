@@ -1,0 +1,9 @@
+Tally:type = [
+    count:int64
+    items:array<int64>
+    add_all = () => { let add = (x:int64) => (count += x)  loop x in items add(x) }
+]
+main = () => {
+    let t = Tally(0 [1 2])
+    t.add_all
+}

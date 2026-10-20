@@ -14,6 +14,7 @@ use 'refine.jo'
 use 'reflection.jo'
 use 'prelude.jo'
 use 'ide.jo'
+use 'dewy_methods.jo'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -736,6 +737,12 @@ is_map_entries_type = (t: int) -> bool:
     d = int(structs[st].decl)
     d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/core/map.jo"
 
+# The method whose object is being checked as a place, for its diagnostics.
+place_method = 0
+place_fatal = (pos: int, message: str):
+    if place_method != 0: fatal(pos, "'{name_of(place_method)}' changes its object: {message}")
+    fatal(pos, message)
+
 check_place = (n: int, for_mut: bool):
     if is_map_get(n): map_elem_place(n)
     k = nodes[n].kind
@@ -765,12 +772,12 @@ check_place = (n: int, for_mut: bool):
                 else if narrowed_var(r) != 0: r = narrowed_var(r)
                 else: break
             rf = int(locals[r].flags)
-            if rf & LF_CONST != 0: fatal(nodes[n].pos, "cannot modify const '{nm}'; copy it with `let {nm} = {nm}`")
+            if rf & LF_CONST != 0: place_fatal(nodes[n].pos, "cannot modify const '{nm}'; copy it with `let {nm} = {nm}`")
             ag = alias_global(r)
-            if ag >= 0 and readonly_global(ag): fatal(nodes[n].pos, "cannot modify const '{nm}'")
-            if rf & LF_PARAM != 0 and rf & LF_MUTPARAM == 0: fatal(nodes[n].pos, "cannot modify parameter '{nm}' (parameters are read-only; {jd(nodes[n].pos, "mark it `mut`", "take it by place, `@{nm}`,")} or copy it with `let {nm} = {nm}`)")
+            if ag >= 0 and readonly_global(ag): place_fatal(nodes[n].pos, "cannot modify const '{nm}'")
+            if rf & LF_PARAM != 0 and rf & LF_MUTPARAM == 0: place_fatal(nodes[n].pos, "cannot modify parameter '{nm}' (parameters are read-only; {jd(nodes[n].pos, "mark it `mut`", "take it by place, `@{nm}`,")} or copy it with `let {nm} = {nm}`)")
             if rf & LF_BYREF != 0 and via_closure: fatal(nodes[n].pos, "cannot modify loop variable '{nm}', a copy of an element, and the function changing it runs later: change the element by its position, {jd(nodes[n].pos, "`loop i in 0.. and {nm} in xs:` and then `(): xs[i]...`", "`loop i in 0.. and {nm} in xs \{ ... }` and then `() => xs[i]...`")} in the function")
-            if rf & LF_BYREF != 0: fatal(nodes[n].pos, "cannot modify loop variable '{nm}' (use `{mutable_loop_syntax(nodes[n].pos)}` to modify elements)")
+            if rf & LF_BYREF != 0: place_fatal(nodes[n].pos, "cannot modify loop variable '{nm}' (use `{mutable_loop_syntax(nodes[n].pos)}` to modify elements)")
             nf = f | LF_ASSIGNED
             if cp_inner == 0: nf |= LF_RESIZED
             if for_mut and f & LF_CAPTURE == 0: nf |= LF_ADDR
@@ -783,7 +790,7 @@ check_place = (n: int, for_mut: bool):
             if ag >= 0: note_global_write(ag)
             return
         if nodes[n].aux == i32(int(SK.global)):
-            if readonly_global(int(nodes[n].sym)): fatal(nodes[n].pos, "cannot modify const '{name_of(int(nodes[n].name))}'")
+            if readonly_global(int(nodes[n].sym)): place_fatal(nodes[n].pos, "cannot modify const '{name_of(int(nodes[n].name))}'")
             note_global_write(int(nodes[n].sym))
             return
         fatal(nodes[n].pos, "cannot assign to '{name_of(int(nodes[n].name))}'")
@@ -823,6 +830,7 @@ check_place = (n: int, for_mut: bool):
         check_place(int(nodes[n].a), for_mut)
         cp_inner -= 1
         return
+    if for_mut and place_method != 0: fatal(nodes[n].pos, "'{name_of(place_method)}' changes its object, so it is called on a variable or a field, not on a temporary value")
     if for_mut: fatal(nodes[n].pos, "{jd(nodes[n].pos, "a `mut`", "an `@`")} argument must be a variable, field or element")
     # (w.pos(b).y = 3: a value a function gave back, changed where nothing keeps it)
     if k == .call:
@@ -2120,7 +2128,11 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             finish_arg(captured[i], fns[f].ptypes[i], false)
             fin.push(captured[i])
             continue
-        finish_arg(a, fns[f].ptypes[i], is_mut)
+        if i == 0 and is_mut and dewy_is_method(decl) and place_method == 0:
+            place_method = if nodes[decl].kind == .fn_: int(nodes[decl].name) else: dewy_literal_method_name
+            finish_arg(a, fns[f].ptypes[i], is_mut)
+            place_method = 0
+        else: finish_arg(a, fns[f].ptypes[i], is_mut)
         fin.push(a)
     check_mutable_arguments(fin, int(cd.sig.mutmask), nodes[n].pos)
     set_list(n, fin)
@@ -3470,9 +3482,14 @@ dewy_call_text = (d: int) -> str:
     sig = fn_sig(d)
     if alt == 0: alt = nm
     s = "{name_of(alt)}("
-    loop i in [0..nkids(d)):
+    # (a method by its type, without its hidden receiver)
+    first = 0
+    if dewy_is_method(d) and sig.params.len() > 0:
+        s = "{dt(sig.params[0])}.{name_of(alt)}("
+        first = 1
+    loop i in [first..nkids(d)):
         p = kid(d, i)
-        if i > 0: s += " "
+        if i > first: s += " "
         if has_flag(p, NF_MUT) or int(sig.mutmask) & (1 << i) != 0: s += "@"
         pn = name_of(int(nodes[p].name))
         if starts_with(pn, "$parameter"): pn = "_"
@@ -3832,7 +3849,10 @@ member_call_without_arguments = (t: int, name: int) -> bool:
     if ii >= 0 and intrinsics[ii].arr and (tk == .array or tk == .str_):
         id = intrinsics[ii].id
         return id == .len or id == .arrcap or id == .pop or id == .clear or id == .arrdata
-    loop table in [modules[cur_mod()].names, prelude]:
+    tables = [modules[cur_mod()].names, prelude]
+    tm = module_of_type(t)
+    if tm >= 0 and tm != cur_mod(): tables.push(modules[tm].names)
+    loop table in tables:
         if not table.has(name): continue
         s = table[name]
         loop s != 0:
@@ -3924,6 +3944,53 @@ dewy_member_name = (callee: int, rt: int, fname: int, args: int[]) -> int:
         if name == "endswith": return intern("ends_with")
         if name == "starts_with" or name == "ends_with": fatal(pos, "write `{recv}.{replace(name, "_", "")}(...)`")
     fname
+
+# A record literal's method: a closure stored in the object, taking the object first.
+dewy_method_field = (t0: int) -> int:
+    t = prune(t0)
+    if tkind(t) != .polyfn: return 0
+    d = poly_families[int(types[t].st)].decl
+    if dewy_is_method(d): d else: 0
+
+# The receiver route is evaluated again to pass the object: variables, fields, and
+# elements at a variable or constant index.
+dewy_plain_route = (n: int) -> bool:
+    k = nodes[n].kind
+    if k == .ident: return true
+    if k == .index and nkids(n) == 1:
+        let i = kid(n, 0)
+        loop nodes[i].kind == .conv: i = int(nodes[i].a)
+        return (nodes[i].kind == .ident or nodes[i].kind == .int_lit) and dewy_plain_route(int(nodes[n].a))
+    k == .field and nodes[n].b == 0 and dewy_plain_route(int(nodes[n].a))
+
+dewy_literal_method_name = 0
+# `object.method(args)`: the method field's closure, given the object first (as a
+# place when the method changes it). A temporary object is named first.
+dewy_method_call = (n: int, callee: int, method: int, args: int[], expected: int) -> int:
+    recv = int(nodes[callee].a)
+    name = name_of(int(nodes[callee].name))
+    changes = has_flag(kid(method, 0), NF_MUT)
+    if not dewy_plain_route(recv):
+        if changes: fatal(nodes[n].pos, "'{name}' changes its object, so it is called on a variable or a field, not on a temporary value")
+        pos = nodes[n].pos
+        temp = "$object{n}"
+        object = bc_ident(temp, pos)
+        nodes[callee].a = i32(object)
+        call = mk(.call, pos)
+        nodes[call].a = i32(callee)
+        set_list(call, args)
+        nodes[n] = nodes[bc_block([bc_let(temp, recv, pos), bc_stmt(call, pos)], pos)]
+        return check_expr(n, expected)
+    receiver = clone(recv)
+    nodes[receiver].pos = nodes[n].pos
+    if changes: add_flag(receiver, NF_MUT)
+    callee_at = callee
+    check_expr(callee, 0)
+    saved = dewy_literal_method_name
+    dewy_literal_method_name = int(nodes[callee].name)
+    t = value_call(n, callee, [receiver] + args, expected)
+    dewy_literal_method_name = saved
+    t
 
 is_unchecked_at = (n: int) -> bool:
     callee = int(nodes[n].a)
@@ -4032,6 +4099,8 @@ check_call = (n: int, expected: int) -> int:
                 fi = int(structs[si].fields) + i
                 if int(fields[fi].name) == fname and (tkind(int(fields[fi].type)) == .fn_ or tkind(int(fields[fi].type)) == .cfn or tkind(int(fields[fi].type)) == .polyfn):
                     if ide_on: ide_field_ref(nodes[callee].pos, fname, int(structs[si].decl), i, int(fields[fi].type))
+                    method = dewy_method_field(int(fields[fi].type))
+                    if method != 0: return dewy_method_call(n, callee, method, args, expected)
                     callee_at = callee
                     check_expr(callee, 0)
                     return value_call(n, callee, args, expected)
@@ -6388,6 +6457,14 @@ check_expr = (n: int, expected: int) -> int:
                     nodes[n].aux = i32(fi)
                     t = int(fields[int(structs[si].fields) + fi].type)
                     if ide_on: ide_field_ref(nodes[n].pos, fname, int(structs[si].decl), fi, t)
+                    method = dewy_method_field(t)
+                    if method != 0 and not is_callee:
+                        text = "{receiver_text(int(nodes[n].a))}.{name_of(fname)}"
+                        if not dewy_bare_fn(n, is_callee): fatal(nodes[n].pos, "'{text}' is a method, which is not a value yet: call it, `{text}()`")
+                        loop i in [1..nkids(method)):
+                            if nodes[kid(method, i)].b == 0: bare_fn_error(n, text, true)
+                        add_flag(int(nodes[n].a), NF_CHECKED)
+                        return bare_call(n, expected)
                     if is_fn_type(t) and dewy_bare_fn(n, is_callee):
                         add_flag(int(nodes[n].a), NF_CHECKED)
                         return bare_fn_value(n, t, "{receiver_text(int(nodes[n].a))}.{name_of(fname)}", expected)

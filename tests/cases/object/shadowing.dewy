@@ -1,0 +1,32 @@
+# quick
+Box:type = [
+    value:int64
+    items:array<int64>
+    twice = (value:int64):>int64 => value * 2          # a parameter hides the field
+    local = ():>int64 => {
+        let value = 100                                # so does a local, from here on
+        value + 1
+    }
+    later = ():>int64 => {
+        let before = value
+        if before >? 0 { let value = 7  before += value }
+        before + value                                 # the block's local is gone
+    }
+    summed = ():>int64 => {
+        let total = 0
+        loop value in items { total += value }         # the loop binding hides the field
+        total + value
+    }
+    matched = (x:int64|string):>int64 => match x {
+        value:int64 => value
+        <string> => value
+    }
+]
+
+value = 1000
+
+main = () => {
+    let b = Box(20 [1 2 3])
+    let r = [value=b.value f=(value:int64)=>{let value=value+1 value}]
+    printl"{b.twice(21)} {b.local} {b.later} {b.summed} {b.matched(5)} {b.matched("x")} {r.f(4)} {value}"
+}

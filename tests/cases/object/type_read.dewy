@@ -1,0 +1,21 @@
+# quick
+Span:type = [
+    start:int64
+    stop:int64
+    width = () => stop - start
+    contains = (x:int64):>bool => start <=? x and x <? stop
+    scaled = (factor:int64):>Span => Span(start * factor stop * factor)
+]
+
+total = (spans:array<Span>):>int64 => {
+    let sum = 0
+    loop s in spans { sum += s.width }
+    return sum
+}
+
+main = () => {
+    const fixed = Span(2 9)
+    let spans = [Span(0 3) fixed]
+    printl"{fixed.width} {fixed.contains(4)} {fixed.contains(9)}"
+    printl"{Span(1 4).width} {fixed.scaled(2).width()} {total(spans)}"
+}

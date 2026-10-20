@@ -1,0 +1,12 @@
+# quick
+Math:type = [
+    base:int64
+    steps:int64
+    power = (k:int64):>int64 => if k <=? 0 1 else base * power(k - 1)
+    count_down = (k:int64) => if k >? 0 { steps += 1  count_down(k - 1) }
+]
+main = () => {
+    let m = Math(3 0)
+    m.count_down(4)
+    printl"{m.power(4)} {m.steps}"
+}

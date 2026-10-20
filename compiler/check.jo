@@ -18,6 +18,7 @@ use 'comptime.jo'
 use 'facts.jo'
 use 'refine.jo'
 use 'reflection.jo'
+use 'dewy_methods.jo'
 
 enum SK: none_, local, global, fns, struct_, enum_, const_, module, type_, builtin, alias_, reflected
 
@@ -701,7 +702,10 @@ type_names = () -> int[]:
 method_names = (recv: int) -> int[]:
     out: int[]
     rt = prune(recv)
-    loop tbl in [modules[cur_mod()].names, prelude]:
+    tables = [modules[cur_mod()].names, prelude]
+    tm = module_of_type(rt)
+    if tm >= 0 and tm != cur_mod(): tables.push(modules[tm].names)
+    loop tbl in tables:
         loop k, s0 in tbl:
             s = s0
             loop s != 0:
@@ -4397,6 +4401,7 @@ check_program = (main_path: str):
         if not prelude_pending.has(i): register_module(i)
         i += 1
     bind_from_imports()
+    dewy_infer_methods()
     prepare_nominals()
     check_build_block()
     # (native programs report crashes as they do panics: lib/std/backtrace.jo)

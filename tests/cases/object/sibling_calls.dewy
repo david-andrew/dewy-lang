@@ -1,0 +1,32 @@
+# quick
+Account:type = [
+    balance:int64
+    history:array<int64>
+    deposit = (amount:int64) => {
+        balance += amount
+        history.push(amount)
+    }
+    deposit_twice = (amount:int64) => { deposit(amount) deposit(amount) }
+    count = () => history.length
+    summary = ():>string => "{balance} after {count} deposits"
+    # mutual recursion: settles which of them change the object
+    drain = (n:int64) => if n >? 0 { balance -= 1 settle(n - 1) }
+    settle = (n:int64) => if n >? 0 drain(n)
+]
+
+counter = (start:int64) => [
+    value = start
+    step = () => (value += 1)
+    steps = (n:int64) => { loop i in [1..n] step }
+    report = ():>string => "at {value}"
+]
+
+main = () => {
+    let account = Account(0 [])
+    account.deposit_twice(5)
+    account.settle(3)
+    printl(account.summary)
+    let c = counter(10)
+    c.steps(3)
+    printl(c.report)
+}

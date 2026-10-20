@@ -1,0 +1,26 @@
+# quick
+Span:type = [
+    start:int64
+    stop:int64
+    width = () => stop - start
+    grow = (by:int64) => { stop += by }
+    reset = () => { stop = start }
+]
+Pair:type = [first:Span second:Span]
+
+stretch = (@span:Span) => span.grow(10)
+
+main = () => {
+    let s = Span(3 7)
+    s.grow(2)
+    printl"{s.width}"
+    let pair = Pair(Span(0 1) Span(5 6))
+    pair.second.grow(4)
+    let spans = [Span(0 1) Span(0 2)]
+    spans[1].grow(3)
+    loop @item in spans { item.grow(1) }
+    stretch(@s)
+    printl"{pair.first.width} {pair.second.width} {spans[0].width} {spans[1].width} {s.width}"
+    s.reset
+    printl"{s.width}"
+}

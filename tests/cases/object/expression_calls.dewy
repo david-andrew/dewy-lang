@@ -1,0 +1,16 @@
+# quick
+Gen:type = [
+    n:int64
+    next = ():>int64 => { n += 1  return n }
+    two = ():>int64 => { let r = next() + next()  return r }
+]
+counter = () => [
+    n = 0
+    next = ():>int64 => { n += 1  return n }
+    two = ():>int64 => { let r = next() + next()  return r }
+]
+main = () => {
+    let g = Gen(0)
+    let c = counter()
+    printl"{g.two} {g.n} {c.two} {c.n}"
+}

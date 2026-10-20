@@ -1,0 +1,170 @@
+# Dewy methods: which ones change their object.
+# A method reaches its object only through bare member names, which the frontend
+# reads through a hidden receiver parameter (`$self...`). A method that assigns or
+# grows a member, places one with `@`, or calls a method that does, takes its
+# receiver as a place: it must be called on a variable or field. This is decided
+# from the bodies before checking, so every call sees the final signature.
+use 'util.jo'
+use 'ast.jo'
+use 'check.jo'
+use 'expr.jo'
+
+struct DewyMethod:
+    decl: int
+    members: {int: int} = {}  # the object's members: a method's index, -1 for any other row
+    state: int = 0            # 0 not inferred, 1 inferring, 2 reads its object, 3 changes it
+
+dewy_methods: DewyMethod[]
+dewy_methods_inferred = 0
+dewy_receivers: {int: int[]} = {}   # function name -> declarations taking an argument first
+dewy_module_of_file: {int: int} = {}
+dewy_reachable: {int: {int: bool}} = {}   # module -> the modules it can name types from
+
+dewy_is_method = (decl: int) -> bool:
+    nkids(decl) > 0 and starts_with(name_of(int(nodes[kid(decl, 0)].name)), "$self")
+
+# The rows of one object (a type or a record literal), in order: decls[i] is the
+# method declared by names[i], or 0 for a field or a function stored as a value.
+dewy_method_group = (names: int[], decls: int[]):
+    members: {int: int} = {}
+    first = dewy_methods.len()
+    loop i in 0.. and name in names:
+        members[name] = -1
+        if decls[i] != 0:
+            members[name] = dewy_methods.len()
+            dewy_methods.push(DewyMethod(decl = decls[i]))
+    loop i in [first..dewy_methods.len()): dewy_methods[i].members = members
+
+# A least fixed point: a method changes its object if its body does, given what the
+# methods found so far do (so mutual recursion settles).
+dewy_infer_methods = ():
+    if dewy_methods_inferred == dewy_methods.len(): return
+    dewy_receivers = {}
+    dewy_module_of_file = {}
+    dewy_reachable = {}
+    loop m in [0..modules.len()):
+        dewy_module_of_file[int(modules[m].file)] = m
+        loop d in modules[m].decls:
+            if nodes[d].kind != .fn_ or nkids(d) == 0: continue
+            name = int(nodes[d].name)
+            ds = dewy_receivers.get(name) ?? []
+            ds.push(d)
+            dewy_receivers[name] = ds
+    loop true:
+        progress = false
+        loop i in [dewy_methods_inferred..dewy_methods.len()):
+            if dewy_methods[i].state == 3: continue
+            decl = dewy_methods[i].decl
+            receiver = int(nodes[kid(decl, 0)].name)
+            changes = dewy_changes(int(nodes[decl].b), receiver, i, false)
+            loop param in kids(decl):
+                if dewy_changes(int(nodes[param].b), receiver, i, false): changes = true
+            if changes:
+                dewy_methods[i].state = 3
+                progress = true
+        if not progress: break
+    loop i in [dewy_methods_inferred..dewy_methods.len()):
+        if dewy_methods[i].state == 3: add_flag(kid(dewy_methods[i].decl, 0), NF_MUT)
+        else: dewy_methods[i].state = 2
+    dewy_methods_inferred = dewy_methods.len()
+
+dewy_method_changes = (i: int) -> bool: dewy_methods[i].state == 3
+
+# The modules whose functions a member of an object reachable from `m` may be:
+# m, what it uses (transitively) and the prelude.
+dewy_reachable_from = (m: int) -> {int: bool}:
+    if let known = dewy_reachable.get(m): return known
+    seen: {int: bool} = {}
+    stack = [m]
+    loop stack.len() > 0:
+        x = stack.pop()
+        if seen.has(x): continue
+        seen[x] = true
+        loop u in modules[x].uses: stack.push(u)
+    loop p in [0..modules.len()):
+        if modules[p].is_prelude: seen[p] = true
+    dewy_reachable[m] = seen
+    seen
+
+# The variable a route of fields and elements starts from.
+dewy_route_root = (n: int) -> int:
+    let n = n
+    loop n != 0 and (nodes[n].kind == .field or nodes[n].kind == .index): n = int(nodes[n].a)
+    n
+
+dewy_reaches = (n: int, receiver: int) -> bool:
+    root = dewy_route_root(n)
+    root != 0 and nodes[root].kind == .ident and int(nodes[root].name) == receiver
+
+# Member `name` of the route `base` (from the receiver), called or read: whether that
+# changes it. The object's own members are known; anything else is judged by name.
+dewy_member_changes = (base: int, name: int, receiver: int, i: int) -> bool:
+    if nodes[base].kind == .ident:
+        if let j = dewy_methods[i].members.get(name):
+            if j < 0: return false
+            return dewy_method_changes(j)
+    ii = intrinsic_of(name)
+    if ii >= 0 and intrinsics[ii].arr:
+        id = intrinsics[ii].id
+        if id != .len and id != .arrcap and id != .slice: return true
+    m = dewy_module_of_file.get(pos_file(nodes[dewy_methods[i].decl].pos)) ?? -1
+    if let ds = dewy_receivers.get(name):
+        loop d in ds:
+            if m >= 0:
+                dm = dewy_module_of_file.get(pos_file(nodes[d].pos)) ?? -1
+                if dm >= 0 and not dewy_reachable_from(m).has(dm): continue
+            if has_flag(kid(d, 0), NF_MUT): return true
+            if dewy_is_method(d):
+                loop j in [0..dewy_methods.len()):
+                    if dewy_methods[j].decl == d and dewy_method_changes(j): return true
+    false
+
+dewy_change_found = (n: int, nested: bool) -> bool:
+    if nested: fatal(nodes[n].pos, "a function inside a method cannot change the object's members yet (it would change its own copy); change them in the method itself")
+    true
+
+# Whether n changes the object reached through `receiver`. `nested` is set inside a
+# function written in the method's body, whose captured copy of the object is its own.
+dewy_changes = (n: int, receiver: int, i: int, nested: bool) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    found = false
+    inner = nested or k == .lambda
+    if k == .assign:
+        target = int(nodes[n].a)
+        targets = if nodes[target].kind == .tuple: binding_leaves(kids(target)) else: [target]
+        loop t in targets:
+            if dewy_reaches(t, receiver): found = dewy_change_found(n, nested)
+    if (k == .for_ or k == .lhead) and has_flag(n, NF_MUT) and dewy_reaches(int(nodes[n].a), receiver):
+        found = dewy_change_found(n, nested)
+    if k == .call and nodes[int(nodes[n].a)].kind == .field:
+        callee = int(nodes[n].a)
+        base = int(nodes[callee].a)
+        if dewy_reaches(base, receiver) and dewy_member_changes(base, int(nodes[callee].name), receiver, i):
+            found = dewy_change_found(n, nested)
+        # The receiver of a member call is marked as a possible place; judged above.
+        if dewy_changes_within(base, receiver, i, inner): found = true
+        loop arg in kids(n):
+            if dewy_changes(arg, receiver, i, inner): found = true
+        return found
+    if k == .field and nodes[n].name != 0 and dewy_reaches(int(nodes[n].a), receiver):
+        if dewy_member_changes(int(nodes[n].a), int(nodes[n].name), receiver, i): found = dewy_change_found(n, nested)
+    if has_flag(n, NF_MUT) and (k == .ident or k == .field or k == .index) and dewy_reaches(n, receiver):
+        found = dewy_change_found(n, nested)
+    if dewy_changes_within(n, receiver, i, inner): found = true
+    found
+
+dewy_changes_within = (n: int, receiver: int, i: int, nested: bool) -> bool:
+    found = false
+    k = nodes[n].kind
+    if dewy_changes(int(nodes[n].a), receiver, i, nested): found = true
+    if k == .field: return found
+    if dewy_changes(int(nodes[n].b), receiver, i, nested): found = true
+    if dewy_changes(int(nodes[n].c), receiver, i, nested): found = true
+    if dewy_changes(int(nodes[n].d), receiver, i, nested): found = true
+    loop child in kids(n):
+        if dewy_changes(child, receiver, i, nested): found = true
+    if k != .lambda and k != .fn_:
+        loop child in kids2(n):
+            if dewy_changes(child, receiver, i, nested): found = true
+    found

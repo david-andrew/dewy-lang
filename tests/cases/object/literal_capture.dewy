@@ -1,0 +1,19 @@
+# quick
+make = (start:int64 step:int64) => {
+    let label = "counter"
+    [
+        value = start
+        advance = () => (value += step)
+        show = ():>string => "{label} {value}"
+    ]
+}
+
+main = () => {
+    let c = make(1 10)
+    c.advance
+    c.advance
+    let d = c
+    d.advance
+    printl(c.show)
+    printl(d.show)
+}

@@ -1,0 +1,23 @@
+# quick
+Box:type = <T>[
+    value:T
+    get = ():>T => value
+    set = (v:T) => { value = v }
+    pair = <U>(other:U) => [first=value second=other]
+]
+
+Stack:type = <T>[
+    items:array<T>
+    push_all = (xs:array<T>) => { loop x in xs items.push(x) }
+    top = ():>T => items[items.length - 1]
+]
+
+main = () => {
+    let a = Box(20)
+    a.set(42)
+    let s = Box("Dewy")
+    let p = s.pair(3)
+    let stack = Stack<string>([])
+    stack.push_all(["a" "b"])
+    printl"{a.get} {s.get} {p.first} {p.second} {stack.top} {stack.items.length}"
+}

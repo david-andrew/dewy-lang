@@ -9,6 +9,7 @@ use 'expr.jo'
 use 'check.jo'
 use 'dewy_tokens.jo'
 use 'refine.jo'
+use 'dewy_methods.jo'
 
 # Compact tags shared by lexical tokens and syntax nodes. Names are needed
 # only for formatter/diagnostic text.
@@ -120,36 +121,95 @@ dw_name_id = (id: int) -> i32:
     dewy_syntax[id].name
 
 # The compact name of a Dewy identifier used as a value (printl is the library's print).
-# Inside a function field, a sibling field's name is that field, never a function of the
-# same name in scope (the field wins); reaching it is not implemented yet.
-dw_siblings: {int: bool} = {}
 dw_renamed: int[]               # printl, print, int and the compact names they become
 dw_value_name = (name: i32, pos: int) -> i32:
-    if dw_siblings.len() > 0 and dw_siblings.has(int(name)):
-        fatal(pos, "'{name_of(int(name))}' is a field of this record: a function field reaching its sibling fields is part of the design but not implemented yet (pass the value as a parameter)")
     if dw_renamed.len() == 0: dw_renamed = [intern("printl"), intern("print"), intern("print"), intern("__dewy_print"), intern("int"), intern("__dewy_int")]
     if int(name) == dw_renamed[0]: return i32(dw_renamed[1])
     if int(name) == dw_renamed[2]: return i32(dw_renamed[3])
     if int(name) == dw_renamed[4]: return i32(dw_renamed[5])
     name
 
-# The field names of a record literal or type with a function field (none otherwise):
-# what a function field's body sees as its siblings.
-dw_sibling_names = (entries: int[]) -> {int: bool}:
-    names: {int: bool} = {}
-    has_function = false
-    loop entry in entries:
-        item = dw_unwrap(entry)
+# Inside a method, a bare name of one of the object's fields or methods is that member
+# of the instance (there is no `self`): it reads through the method's hidden receiver
+# parameter. Maps a member name to that receiver's name; locals and parameters shadow it.
+dw_siblings: {int: int} = {}
+dw_receivers_used: {int: bool} = {}   # receivers a method body reached
+dw_pending_decls: int[]               # methods of the type just declared, as module functions
+
+dw_receiver_field = (receiver: int, name: i32, pos: int) -> int:
+    dw_receivers_used[receiver] = true
+    base = mk(.ident, pos)
+    nodes[base].name = i32(receiver)
+    n = mk(.field, pos)
+    nodes[n].a = i32(base)
+    nodes[n].name = name
+    n
+
+dw_value_ident = (name: i32, pos: int) -> int:
+    if dw_siblings.len() > 0:
+        if let receiver = dw_siblings.get(int(name)): return dw_receiver_field(receiver, name, pos)
+    n = mk(.ident, pos)
+    nodes[n].name = dw_value_name(name, pos)
+    n
+
+# Names bound from here on hide the members of the same name.
+dw_shadow = (names: int[]):
+    if dw_siblings.len() == 0: return
+    hidden = false
+    loop name in names:
+        if dw_siblings.has(name): hidden = true
+    if not hidden: return
+    visible: {int: int} = {}
+    loop name, receiver in dw_siblings:
+        if not names.contains(name): visible[name] = receiver
+    dw_siblings = visible
+
+# The direct expression frontend builds compact nodes before any method is known:
+# rewrite its member names in place.
+dw_rewrite_members = (n: int):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .ident:
+        if let receiver = dw_siblings.get(int(nodes[n].name)):
+            field = dw_receiver_field(receiver, nodes[n].name, nodes[n].pos)
+            nodes[field].flags = nodes[n].flags
+            nodes[n] = nodes[field]
+        return
+    dw_rewrite_members(int(nodes[n].a))
+    if k == .field: return
+    # A member call's receiver may be a place, as the direct frontend marks it.
+    if k == .call and nodes[int(nodes[n].a)].kind == .field: add_flag(int(nodes[int(nodes[n].a)].a), NF_MUT)
+    dw_rewrite_members(int(nodes[n].b))
+    loop child in kids(n): dw_rewrite_members(child)
+
+# `name = (params) => body` among an object's rows: a method.
+dw_method_row = (id: int) -> bool:
+    let id = dw_unwrap(id)
+    if dw_op(id) != .assign: return false
+    if dewy_syntax[dw_unwrap(dw_child(id, 1))].kind != .identifier: return false
+    dw_op(dw_grouped(dw_child(id, 2))) == .function
+
+# The names of an object's rows, in order.
+dw_row_names = (rows: int[]) -> int[]:
+    out: int[]
+    loop row in rows:
+        item = dw_unwrap(row)
         lhs = item
-        if dw_op(item) == .assign:
-            lhs = dw_child(item, 1)
-            if dw_op(dw_unwrap(dw_child(item, 2))) == .function: has_function = true
+        if dw_op(item) == .assign: lhs = dw_child(item, 1)
         if dw_op(lhs) == .colon: lhs = dw_child(lhs, 1)
         if dw_op(lhs) == .at: lhs = dw_child(lhs, 1)
         name = dw_name_id(lhs)
-        if name != 0: names[int(name)] = true
-    if not has_function: names.clear()
-    names
+        if name != 0: out.push(int(name))
+    out
+
+# A method's receiver comes first. Its type is the object's (the type parameter
+# `object_type` for a record literal's method); whether it is a place is inferred
+# from the body before checking (dewy_methods.jo).
+dw_add_receiver = (fn_: int, receiver: int, receiver_type: int):
+    param = mk(.param, nodes[fn_].pos)
+    nodes[param].name = i32(receiver)
+    nodes[param].a = i32(receiver_type)
+    set_list(fn_, [param] + kids(fn_))
 
 dw_op = (id: int) -> DewyToken:
     let id = dw_unwrap(id)
@@ -632,6 +692,7 @@ dw_function = (id: int, name: str) -> int:
             nm = dw_name(target)
             if nm == "" or nm == "_": return dw_fail(p, "a capture other than an enclosing local name")
             cap = dw_expr(target)
+            if nodes[cap].kind != .ident: fatal(dewy_syntax[target].pos, "'{nm}' is a member of this object, which the method already reaches by name; `$capture` takes an enclosing local")
             if dw_op(p) == .at: add_flag(cap, NF_MUT)
             if bound.has(int(nodes[cap].name)): fatal(nodes[cap].pos, "duplicate parameter binding '{nm}'")
             bound[int(nodes[cap].name)] = true
@@ -649,10 +710,9 @@ dw_function = (id: int, name: str) -> int:
     if capture: return dw_fail(params, "$capture without a local name")
     outer_siblings = dw_siblings
     if dw_siblings.len() > 0 and bound.len() > 0:
-        visible: {int: bool} = {}
-        loop name, seen in dw_siblings:
-            if not bound.has(name): visible[name] = true
-        dw_siblings = visible
+        hidden: int[]
+        loop nm, seen in bound: hidden.push(nm)
+        dw_shadow(hidden)
     if captures.len() > 0:
         if type_params.len() > 0:
             caplist = mk(.block, nodes[n].pos)
@@ -756,12 +816,56 @@ dw_record_entry = (id: int) -> int:
     nodes[field].a = i32(dw_expr(dw_child(id, 2)))
     field
 
+# A function row of a record literal. One that reaches a member of the object becomes a
+# method: a closure stored in the object (keeping what it captures), taking the object
+# itself first. The object's type is a type parameter, so the record's type does not
+# contain itself; each call supplies it.
+dw_literal_method = (row: int, members: int[]) -> int:
+    receiver = intern("$self{nodes.len()}")
+    outer = dw_siblings
+    inner: {int: int} = {}
+    loop name, other in outer: inner[name] = other
+    loop name in members: inner[name] = receiver
+    dw_siblings = inner
+    entry = dw_record_entry(row)
+    dw_siblings = outer
+    if not dw_receivers_used.has(receiver): return entry
+    lambda = int(nodes[entry].a)
+    if nodes[lambda].kind != .lambda: return dw_fail(row, "this method")
+    object_type = mk(.ident, nodes[lambda].pos)
+    nodes[object_type].name = i32(intern("$Object{receiver}"))
+    if has_flag(lambda, NF_GENERIC): set_list2(lambda, [object_type] + kids2(lambda))
+    else:
+        captures = kids2(lambda)
+        if captures.len() > 0:
+            caplist = mk(.block, nodes[lambda].pos)
+            set_list(caplist, captures)
+            nodes[lambda].d = i32(caplist)
+        set_list2(lambda, [object_type])
+        add_flag(lambda, NF_GENERIC)
+    receiver_type = mk(.tname, nodes[lambda].pos)
+    nodes[receiver_type].name = nodes[object_type].name
+    dw_add_receiver(lambda, receiver, receiver_type)
+    entry
+
+dw_register_literal_methods = (entries: int[]):
+    row_names: int[]
+    decls: int[]
+    loop entry in entries:
+        if nodes[entry].kind != .namedarg or nodes[entry].name == 0: continue
+        value = int(nodes[entry].a)
+        row_names.push(int(nodes[entry].name))
+        decls.push(if nodes[value].kind == .lambda and dewy_is_method(value): value else: 0)
+    dewy_method_group(row_names, decls)
+
 dw_expr = (id: int) -> int:
     let id = dw_unwrap(id)
     k = dewy_syntax[id].kind
     text = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
-    if k == .compact_expr: return dewy_syntax[id].child_left
+    if k == .compact_expr:
+        if dw_siblings.len() > 0: dw_rewrite_members(dewy_syntax[id].child_left)
+        return dewy_syntax[id].child_left
     if k == .based_string: return dw_binary(id)
     if k == .directive: return dw_directive(id)
     if k == .metatag: return dw_metatag_fail(id)
@@ -774,9 +878,7 @@ dw_expr = (id: int) -> int:
             axis = int(nodes[ix].aux2)
             name = if axis == 0: base else: "{base}_{axis}"
             return comp_ident(intern(name), pos)
-        n = mk(.ident, pos)
-        nodes[n].name = dw_value_name(dw_name_id(id), pos)
-        return n
+        return dw_value_ident(dw_name_id(id), pos)
     if dw_integer_kind(k):
         if let value = dw_unsigned(text, id):
             n = mk(.int_lit, pos)
@@ -854,14 +956,12 @@ dw_expr = (id: int) -> int:
                 if dw_op(child) == .assign: is_record = true
             n = mk(if is_map: NK.map_lit else if is_record: NK.record_lit else: NK.array, pos)
             xs: int[]
-            outer_siblings = dw_siblings
+            members: int[]
+            methods: int[]
             if is_record:
-                inner = dw_sibling_names(children)
-                if inner.len() > 0:
-                    merged: {int: bool} = {}
-                    loop name, seen in outer_siblings: merged[name] = true
-                    loop name, seen in inner: merged[name] = true
-                    dw_siblings = merged
+                members = dw_row_names(children)
+                loop child in children:
+                    if dw_method_row(child): methods.push(child)
             loop child in children:
                 item = dw_unwrap(child)
                 if not is_map and dewy_syntax[item].kind == .postfix and dw_op(item) == .ellipsis:
@@ -874,10 +974,12 @@ dw_expr = (id: int) -> int:
                     nodes[pair].a = i32(dw_expr(dw_child(child, 1)))
                     nodes[pair].b = i32(dw_expr(dw_child(child, 2)))
                     xs.push(pair)
+                else if is_record and methods.contains(child):
+                    xs.push(dw_literal_method(child, members))
                 else if is_record:
                     xs.push(dw_record_entry(child))
                 else: xs.push(dw_expr(child))
-            dw_siblings = outer_siblings
+            if methods.len() > 0: dw_register_literal_methods(xs)
             set_list(n, xs)
             return n
         if text == "{{}}:": return dw_block(id)
@@ -1028,6 +1130,9 @@ dw_expr = (id: int) -> int:
 
 dw_stmt = (id: int, top: bool = false) -> int:
     let id = dw_unwrap(id)
+    # `(count += 1)`: a parenthesized update is the update (a function body may be one).
+    grouped = dw_grouped(id)
+    if grouped != id and (dn_token_assignment(dw_op(grouped)) or dw_op(grouped) == .assign): id = grouped
     pos = dewy_syntax[id].pos
     k = dewy_syntax[id].kind
     if dw_op(id) == .kw_as and dw_is_include(dw_child(id, 1)):
@@ -1162,18 +1267,15 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         nodes[n].b = i32(dw_expr(initial))
         if annotation != 0: nodes[n].a = i32(dw_type(annotation))
         if constant: add_flag(n, NF_RDONLY)
+        if not top: dw_shadow(dw_bound_names(kids(n)))
         return n
     name = dw_name(lhs)
     if name == "": return dw_fail(lhs, "this declaration")
-    if not top and dw_siblings.len() > 0 and dw_siblings.has(int(dw_name_id(lhs))):
-        visible: {int: bool} = {}
-        loop sibling, seen in dw_siblings:
-            if sibling != int(dw_name_id(lhs)): visible[sibling] = true
-        dw_siblings = visible
     if not top and initial != 0 and dw_overload_group(initial):
         return dw_fail(initial, "a local overload group; declare it at module level")
     if initial != 0 and dw_op(initial) == .function:
         if top: return dw_function(initial, name)
+        dw_shadow([int(dw_name_id(lhs))])
         n = mk(.vardecl, dewy_syntax[id].pos)
         nodes[n].name = i32(intern(name))
         nodes[n].b = i32(dw_function(initial, ""))
@@ -1222,21 +1324,82 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
             set_list2(n, type_params)
             add_flag(n, NF_GENERIC)
         fields: int[]
+        methods: int[]
         outer_siblings = dw_siblings
-        dw_siblings = dw_sibling_names(dw_children(initial))
-        loop field in dw_children(initial): fields.push(dw_param(field, .vardecl))
+        dw_siblings = {}
+        loop field in dw_children(initial):
+            if dw_method_row(field): methods.push(field)
+            else: fields.push(dw_param(field, .vardecl))
         dw_siblings = outer_siblings
         set_list(n, fields)
+        if methods.len() > 0:
+            if not top: return dw_fail(methods[0], "methods on a local type; declare the type at module level")
+            dw_type_methods(n, dw_children(initial), methods)
         return n
     n = mk(.vardecl, dewy_syntax[id].pos)
     nodes[n].name = i32(intern(name))
     if annotation != 0: nodes[n].a = i32(dw_type(annotation))
     if initial != 0: nodes[n].b = i32(dw_expr(initial))
+    if not top: dw_shadow([int(nodes[n].name)])
     if constant:
         value = int(nodes[n].b)
         if dw_const_number(value) or nodes[value].kind == .str_lit or nodes[value].kind == .none_lit: nodes[n].kind = .const_
         else: add_flag(n, NF_RDONLY)
     return n
+
+# The names a declaration's unpacking pattern binds.
+dw_bound_names = (bindings: int[]) -> int[]:
+    out: int[]
+    loop binding in binding_leaves(bindings):
+        if nodes[binding].kind == .ident: out.push(int(nodes[binding].name))
+    out
+
+# A type's methods become module functions of the same name taking the instance first
+# (`s.width` is `width(s)` by the uniform call syntax); no function is stored in the
+# object. A generic type's methods take its type parameters first.
+dw_type_methods = (struct_: int, rows: int[], methods: int[]):
+    receiver = intern("$self")
+    row_names = dw_row_names(rows)
+    members: {int: int} = {}
+    loop name in row_names: members[name] = receiver
+    type_params = kids2(struct_)
+    decls: int[]
+    loop row in rows:
+        if not methods.contains(row):
+            decls.push(0)
+            continue
+        item = dw_unwrap(row)
+        name = dw_name(dw_child(item, 1))
+        if name == "main": fatal(dewy_syntax[item].pos, "a method cannot be named main")
+        loop other in kids(struct_):
+            if name_of(int(nodes[other].name)) == name: fatal(dewy_syntax[item].pos, "'{name}' is both a field and a method of {name_of(int(nodes[struct_].name))}")
+        outer = dw_siblings
+        dw_siblings = members
+        fn_ = dw_function(dw_grouped(dw_child(item, 2)), name)
+        dw_siblings = outer
+        pos = nodes[fn_].pos
+        object_type = mk(.tname, pos)
+        nodes[object_type].name = nodes[struct_].name
+        if type_params.len() > 0:
+            own = kids2(fn_)
+            params: int[]
+            arguments: int[]
+            loop tp in type_params:
+                loop mine in own:
+                    if nodes[mine].name == nodes[tp].name: fatal(nodes[mine].pos, "type parameter '{name_of(int(nodes[tp].name))}' is already {name_of(int(nodes[struct_].name))}'s")
+                param = mk(.ident, pos)
+                nodes[param].name = nodes[tp].name
+                params.push(param)
+                argument = mk(.tname, pos)
+                nodes[argument].name = nodes[tp].name
+                arguments.push(argument)
+            set_list(object_type, arguments)
+            set_list2(fn_, params + own)
+            add_flag(fn_, NF_GENERIC)
+        dw_add_receiver(fn_, receiver, object_type)
+        dw_pending_decls.push(fn_)
+        decls.push(fn_)
+    dewy_method_group(row_names, decls)
 
 dw_import = (id: int) -> int:
     pos = dewy_syntax[id].pos
@@ -1348,6 +1511,8 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
             add_flag(n, NF_MUT)
             binder = dw_unwrap(dw_child(binder, 1))
         binders: int[]
+        # The binders hide members of their names in the body, not in the iterable.
+        before = dw_siblings
         if dewy_syntax[binder].kind == .block and dewy_syntax[binder].text == "[]:":
             if has_flag(n, NF_MUT): return dw_fail(binder, "unpacking a mutable loop binding; use a named @item and its fields")
             binders = dw_bindings(binder)
@@ -1359,9 +1524,14 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
                 binders = [pattern]
         else:
             if dw_name(binder) == "": return dw_fail(binder, "this loop binding")
+            dw_shadow([int(dw_name_id(binder))])
             binders.push(dw_expr(binder))
         set_list(n, binders)
+        dw_shadow(dw_bound_names(binders))
+        inside = dw_siblings
+        dw_siblings = before
         it = if has_flag(n, NF_MUT): dw_expr(dw_child(id, 2)) else: dw_iterable(dw_child(id, 2))
+        dw_siblings = inside
         if has_flag(n, NF_MUT):
             # Element aliases reuse this route. Indexed/call routes need a captured
             # selector rather than reevaluating effects at each access.
@@ -1425,8 +1595,12 @@ dw_match = (id: int, accumulator: int = 0, map: bool = false) -> int:
     loop source in arms:
         if dw_op(source) != .function: return dw_fail(source, "a match arm without =>")
         arm = mk(.arm, dewy_syntax[source].pos)
-        set_list(arm, [dw_pattern(dw_child(source, 1))])
+        pattern = dw_pattern(dw_child(source, 1))
+        set_list(arm, [pattern])
+        outer_siblings = dw_siblings
+        if nodes[pattern].name != 0: dw_shadow([int(nodes[pattern].name)])
         nodes[arm].b = i32(dw_block(dw_child(source, 2), accumulator, map))
+        dw_siblings = outer_siblings
         xs.push(arm)
     set_list(n, xs)
     n
@@ -1455,6 +1629,7 @@ dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
     if word != "if" and word != "loop": return dw_block(arm, accumulator, map)
     if dw_nchildren(arm) != 3: return dw_fail(arm, "this flow arm")
     n = mk(if word == "if": NK.if_ else: NK.while_, dewy_syntax[arm].pos)
+    outer_siblings = dw_siblings
     if word == "loop":
         head = dw_loop_head(dw_child(arm, 1))
         if at + 1 < items.len():
@@ -1471,6 +1646,7 @@ dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
             nodes[n].a = i32(head)
     else: nodes[n].a = i32(dw_expr(dw_child(arm, 1)))
     nodes[n].b = i32(dw_block(dw_child(arm, 2), accumulator, map))
+    dw_siblings = outer_siblings
     if at + 1 < items.len():
         rest = dw_flow(id, at + 1, accumulator, map)
         if nodes[rest].kind != .block:
@@ -1485,6 +1661,9 @@ dw_label_fail = (pos: int, label: int):
 
 dw_block = (id: int, accumulator: int = 0, map: bool = false) -> int:
     n = mk(.block, dewy_syntax[id].pos)
+    scoped = dw_siblings.len() > 0
+    outer_siblings: {int: int} = {}
+    if scoped: outer_siblings = dw_siblings
     statements: int[]
     if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "{{}}:":
         children = dw_children(id)
@@ -1506,6 +1685,7 @@ dw_block = (id: int, accumulator: int = 0, map: bool = false) -> int:
         if label != 0: dw_label_fail(label_pos, label)
     else if accumulator != 0: statements.push(dw_collect(id, accumulator, map))
     else: statements.push(dw_stmt(id))
+    if scoped: dw_siblings = outer_siblings
     set_list(n, statements)
     return n
 
@@ -1680,4 +1860,7 @@ dw_top_declarations = (id: int) -> int[]:
             dw_overload_members(initial, name, declarations)
             return declarations
         if name != "" and dw_op(initial) == .function: return [dw_function(initial, name)]
-    [dw_stmt(id, true)]
+    declarations = [dw_stmt(id, true)]
+    loop method in dw_pending_decls: declarations.push(method)
+    dw_pending_decls = []
+    declarations
