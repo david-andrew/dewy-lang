@@ -9,7 +9,7 @@ what landed. Keep this file short.
 
 | Measure | Now (2026-10-20) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 64/81 (tiers 1–2: 63/63; tier 3: 1/18), 13 held open on decisions | all milestones |
+| Acceptance ladder, design surface | 66/81 (tiers 1–2: 63/63; tier 3: 3/18), 13 held open on decisions | all milestones |
 | Acceptance ladder, current dialect | 82/82 | stays green |
 | Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.27 G instructions | ~0.40 G (250k root lines/s) |
 | Compiler self-build | 8.0 G instructions | seconds-scale edit loop |
@@ -22,16 +22,16 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 
 ## Now
 
-- **Effects slice 1** (Astra): direct-place effect rows; shares places with
-  facts.jo.
+- **Refinement slice 3** (Astra): lengths, fields, invariants.
+- **Frontend** (Astra): finish direct compact-AST construction.
+- **Printing per design** (Opus): `[1 2 3]`, `[x=1 name="q"]`; plus small bugs.
 
 ## Next
 
 - Tier-3 implementation (designed, no decisions needed):
   - refinement slices 3–6 (1–2 landed: scalar facts, refinement types): lengths and fields,
     joins/loops, checked proofs, diagnostics;
-  - effect rows, 6 slices (~/dev/tmp/coord/effects-design.md). Slice 1 shares
-    places with refinement slice 1;
+  - effect rows slices 2–6 (slice 1 landed; ~/dev/tmp/coord/effects-design.md);
   - ownership: lifecycle hooks and drop, `$lend` checking, arenas, 6 slices
     (~/dev/tmp/coord/ownership-design.md);
   - builtin `rational`;
@@ -61,11 +61,8 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
   lowering/emission (~18 M) and the optimizer (~11 M).
 - Small items:
   - the remaining Jo-shaped hints in diagnostics;
-  - **bug:** a recursive generic closure stored in a record crashes the
-    optimizer (opt.jo:928);
-  - methods follow-ups: field defaults that use earlier fields
-    (`stop:int64 = start`); methods on nominal `type of X & [...]` types;
-    static `Type.method` calls; printing a record literal that has methods;
+  - methods follow-ups: members inherited across modules; static calls
+    through a type value; `type of any` parents;
   - delete `restart/sloppy-frontend` and its publish-policy entry once the
     bigint task lands.
 
