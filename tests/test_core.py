@@ -3159,7 +3159,7 @@ def test_core_repl_imports(compiler, tmp_path):
 def test_core_repl_failed_import(compiler, tmp_path):
     (tmp_path / 'gate.dewy').write_text('if not file_exists("ready") panic("retry import")\n'
                                        'let answer=42\n')
-    text = ('import gate as g\ng.answer\nwrite_file("ready" "yes")\n'
+    text = ('import gate as g\ng.answer\nwrite_text("ready" "yes") isnt? error\n'
             'import gate as g\ng.answer\n:quit\n')
     ran = subprocess.run([compiler, 'repl'], input=text, cwd=tmp_path,
                          env={**os.environ, 'TMPDIR': str(tmp_path)}, capture_output=True,
