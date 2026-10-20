@@ -104,6 +104,34 @@ jobs:
             ${{ runner.temp }}/dewy-core/*.log
           if-no-files-found: ignore
 
+  compile-speed:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Install valgrind
+        # Hosted runners expose no hardware instruction counters; the gate then
+        # counts with valgrind, which is slower but as exact.
+        run: |
+          sudo sysctl -q -w kernel.perf_event_paranoid=1 || true
+          sudo apt-get update -q
+          sudo apt-get install -y -q valgrind
+      - name: Compare compile speed with the previous push
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          base=HEAD~1
+          if [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            base=$(git merge-base "$BEFORE" HEAD)
+          fi
+          python -m tools.core speed --base "$base"
+
   host-smoke:
     needs: bootstrap-and-test
     strategy:

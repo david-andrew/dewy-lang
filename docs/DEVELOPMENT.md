@@ -117,43 +117,47 @@ The compiler cross-builds for Windows x64, macOS ARM64 and Linux ARM64
 (`python3 -m tools.compiler.hosts build`); the `compiler_hosts` check covers
 those builds.
 
-### Optional optimized compiler host
-
-On Linux x86-64 the compiler itself can additionally be optimized by GCC:
+## Speed and bench
 
 ```sh
-python3 -m tools.compiler.build_optimized_host "$(dirname "$(dirname "$(python3 -m tools.core path)")")" \
-  --output /path/to/new-optimized-toolchain
+python3 -m tools.core speed                       # compile speed vs HEAD~1
+python3 -m tools.core speed --base master --release
+python3 -m tools.core speed --checkpoint speed-checkpoint
+python3 -m tools.core bench                       # runtime kernels vs C
+python3 -m tools.core bench -k "graph records"
 ```
 
-Add `--lto` for cross-file optimization, `--pgo` to train on a fixed set of
-builds, `--optimization 2|3` to choose the level, and `--frame-pointers` for
-profilers that walk frame chains. `HOST_BUILD.json` records provenance. This
-changes only the compiler host, not application code generation, and
-`tools.core test` keeps using the native development build.
+`speed` is the compile-speed gate. It counts the user-space instructions that
+compiling a fixed panel takes: the compiler's own source, a synthetic 22k-line
+Dewy program and `examples/dunes.dewy` (`--release` adds the synthetic program
+in release mode). It compares this checkout's compiler (working tree included)
+with the base commit's and fails when any item needs more than `--limit`
+percent (default 1) more. Each compiler is its commit's own fixed point and uses
+its commit's library; base compilers are built in a temporary git worktree
+(with the current compiler, or the base's C bootstrap when needed) and cached
+by commit under `__dewycache__/speed/`. Counts come from `perf_event_open`
+(`tools/compiler/count_instructions.c`), or from valgrind's cachegrind where
+hardware counters are unavailable, as on CI. Every item runs twice and must
+agree within 0.01%. A cached run takes about 10 s with counters, about 4
+minutes under valgrind.
 
-## Measure
+When a cost is intended, add a line `speed: accept <reason>` to the commit
+message; any such line between the base and HEAD waives the base comparison.
+`--checkpoint TAG` also compares with a fixed revision so that sub-limit losses
+cannot compound silently; accept lines never waive it. The coordinator moves
+the tag after reviewing accepted costs:
+`git tag -f speed-checkpoint <commit> && git push -f origin speed-checkpoint`.
+CI runs the gate (default panel) on every push against the previous pushed
+commit.
 
-Runners in `tools/compiler/` compare compiler executables with sequential,
-alternating samples and write JSON reports:
-
-- `benchmark_compile`: compile latency on representative programs and a
-  compiler self-build. `build --time` reports compiler phases and loaded source.
-- `benchmark_throughput`, `benchmark_types`, `benchmark_corpus`: compile throughput
-  and type-checking scale.
-- `benchmark_apps`: the [application benchmarks](../bench/README.md) against C;
-  `benchmark_recursive`, `benchmark_graphemes`, `benchmark_callbacks`,
-  `benchmark_matrix`, `benchmark_broadcast`, `benchmark_parallel` and others cover
-  specific runtime features.
-- `performance_gate`: compile and runtime regressions against a pinned reference
-  (`performance_reference.json`) and the previous stage.
-- `benchmark_instructions`: retired-instruction counts via
-  `count_instructions.c`, for locating extra compiler work on a busy host.
-- `fuzz`: bounded differential testing of native/web, default/release and `-g`
-  builds on generated programs.
-
-Run timing comparisons on a quiet machine with matched inputs and one emission
-worker. `SLOPPY_PAR_TIME=1` adds optimizer and emission timing.
+`bench` builds the [application kernels](../bench/README.md) in Dewy default
+and release modes and in C (`cc -O2`), runs each binary a few times
+(`--runs`, default 3) and prints median kernel milliseconds, the Dewy/C ratios
+and whether all outputs match. It is a quick look on a shared machine, not a
+gate. `build --time` reports compiler phases; `SLOPPY_PAR_TIME=1` adds
+optimizer and emission timing. `python3 -m tools.compiler.fuzz` runs bounded
+differential checks of native/web, default/release and `-g` builds on
+generated programs.
 
 ## Source layout and bootstrap
 
