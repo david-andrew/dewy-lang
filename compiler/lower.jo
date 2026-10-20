@@ -1124,6 +1124,7 @@ copy_back = (mark: int):
 borrow_may_change = (a: int, args: int[], i: int, callee: int) -> bool:
     n = place_var(a)
     if n == 0: return false
+    heap_place = pw_heap
     if nodes[n].aux == i32(int(SK.global)):
         # (a global only top-level code changes cannot change during a call, only in the
         # arguments after this one)
@@ -1138,7 +1139,7 @@ borrow_may_change = (a: int, args: int[], i: int, callee: int) -> bool:
         w = fn_writes(callee)
         if w.all or w.globals.contains(int(nodes[n].sym)): return true
         loop j in [i + 1..args.len()):
-            if may_write_root(args[j], n, a): return true
+            if may_write_root(args[j], n): return true
         return false
     if nodes[n].aux != i32(int(SK.local)): return false
     if held_views.contains(int(nodes[n].sym)): return false
@@ -1148,9 +1149,12 @@ borrow_may_change = (a: int, args: int[], i: int, callee: int) -> bool:
     if flags & LF_ELEMENTVIEW != 0: return false
     if flags & (LF_SHARED | LF_CAPTURE | LF_BYREF | LF_ALIAS) != 0: return true
     # Even an ordinary local can be changed by evaluating a later argument.
-    # Compare places, not just roots: disjoint fields/elements keep borrowing.
+    # Disjoint fields keep borrowing. A dynamic element also borrows its
+    # container's storage: a sibling write may detach it, and later code may
+    # release the old backing storage's last other owner. Treat that ownership
+    # place as overlapping, even when the logical elements are disjoint.
     loop j in [i + 1..args.len()):
-        if may_write_root(args[j], n, a): return true
+        if may_write_root(args[j], n, (if heap_place: 0 else: a)): return true
     if flags & LF_MUTPARAM == 0: return false
     # A mutable parameter may alias a caller's global. A read-only direct call
     # cannot replace it when it writes no globals and invokes no unknown code.
