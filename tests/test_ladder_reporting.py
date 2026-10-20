@@ -8,7 +8,8 @@ def test_ladder_json_keeps_failures_and_target_identity(compiler, tmp_path, monk
     doc = {'programs':{'01_example':{'milestone':1}}, 'milestones':{'1':'Example'}, 'design_passing':['01_example']}
     monkeypatch.setattr(ladder, 'load', lambda:doc)
     monkeypatch.setattr(ladder, 'validate', lambda doc:[])
-    monkeypatch.setattr(ladder, 'evaluate', lambda compiler,directory,version,scratch,env:
+    monkeypatch.setattr(ladder, 'has_core', lambda name:True)
+    monkeypatch.setattr(ladder, 'evaluate', lambda compiler,directory,version,scratch,env,entry:
                         ladder.Result(directory.name,version,version=='core',version=='core',
                                       '' if version=='core' else 'example diagnostic'))
     output = tmp_path/'ladder.json'

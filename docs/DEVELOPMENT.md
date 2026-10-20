@@ -76,9 +76,11 @@ python3 -m tools.core ladder [--update-ratchet]     # acceptance-ladder scoreboa
   and `-n` apply to all of them.
 - The [ladder](../tests/ladder/README.md) builds each program's `design.dewy`
   and `core.dewy` natively in release mode and compares stdout with
-  `expected.out` from independent Python oracles. Every core version must pass;
-  design programs listed in `ladder.json`'s `design_passing` must keep
-  passing, and `--update-ratchet` adds newly passing ones.
+  `expected.out` from independent Python oracles; programs that must be
+  rejected instead need a matching semantic diagnostic, and `open` programs are
+  listed but not counted. Every core version must pass; design programs listed
+  in `ladder.json`'s `design_passing` must keep passing, and
+  `--update-ratchet` adds newly passing ones.
 
 ## Fuzzing Dewy programs
 
