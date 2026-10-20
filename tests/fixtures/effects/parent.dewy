@@ -1,0 +1,4 @@
+Pair:type=[left:int64 right:int64]
+replace=(@p:Pair):>void=>{ p=Pair[1 2] }
+bad=(@p:Pair):>void & mutates<p.left>=>replace(@p)
+main=():>int64=>0

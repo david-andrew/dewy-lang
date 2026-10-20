@@ -742,8 +742,11 @@ static void check_for(FnCtx *c, Node *s) {
       s->sym = el;
       s->c = (Node *)idx; // stash
       s->d = (Node *)snap;
-    } else if ((t->kind == TY_STRUCT) && t->st->nfields >= 2 && str_eqc(t->st->decl->name, "Map")) {
+    } else if (t->kind == TY_STRUCT && str_eqc(t->st->decl->name, "Map")) {
+      // A newly demanded Map instance has no fields until resolved. Module
+      // discovery order must not decide whether its first iteration checks.
       check_struct_fields(t->st);
+      if (t->st->nfields < 2) fatal(it->pos, "cannot iterate over a value of type %s", type_str(t));
       Type *kt = t->st->fields[0].type, *vt = t->st->fields[1].type;
       Local *idx = new_local(c, (Str){0}, t_int, s->pos);
       Local *snap = new_local(c, (Str){0}, t, s->pos);

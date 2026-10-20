@@ -1,0 +1,85 @@
+# Shared declaration identity. Evaluation values and epochs belong to facts.
+use 'ast.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'types.jo'
+
+enum PlaceRoot: local, global, formal, capture, resource
+enum PlaceProjection: root, field, index, selector, unknown
+# Owner-qualified roots and parent-linked projections are also the interface
+# for future effect regions. Runtime ValueIds never become declaration identity.
+struct PlaceIdentity:
+    root: PlaceRoot
+    owner: int
+    declaration: int
+    parent: int = 0
+    projection: PlaceProjection = .root
+    selector: int = 0
+
+place_scalar_root = (e: int) -> PlaceIdentity:
+    if e == 0: return PlaceIdentity(.local, 0, 0)
+    if nodes[e].kind == .addr: return place_scalar_root(int(nodes[e].a))
+    if nodes[e].kind != .ident: return PlaceIdentity(.local, 0, 0)
+    l = int(nodes[e].sym)
+    if nodes[e].aux == i32(int(SK.global)): return PlaceIdentity(.global, 0, l)
+    if nodes[e].aux != i32(int(SK.local)): return PlaceIdentity(.local, 0, 0)
+    depth = 0
+    loop int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
+        a = int(locals[l].alias)
+        if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return PlaceIdentity(.local, 0, 0)
+        l = int(nodes[a].sym)
+        depth += 1
+        if depth > 32: return PlaceIdentity(.local, 0, 0)
+    PlaceIdentity(.local, int(locals[l].owner), l)
+
+
+# Projection parents are interned only on demand. Zero means unknown, never a
+# fresh invented root. Field selectors are declaration names, not byte offsets.
+place_parents: PlaceIdentity[] = [PlaceIdentity(.local, 0, 0)]
+
+place_intern = (p: PlaceIdentity) -> int:
+    loop i in [1..place_parents.len()):
+        if place_parents[i] == p: return i
+    place_parents.push(p)
+    place_parents.len() - 1
+
+place_project = (p: PlaceIdentity, field: int) -> PlaceIdentity:
+    if p.declaration == 0: return p
+    depth = 0
+    q = p
+    loop q.parent != 0:
+        depth += 1
+        q = place_parents[q.parent]
+    if depth >= 8: return PlaceIdentity(.local, 0, 0)
+    PlaceIdentity(p.root, p.owner, p.declaration, place_intern(p), .field, field)
+
+place_route = (e: int, depth: int = 0) -> PlaceIdentity:
+    if e == 0 or depth > 32: return PlaceIdentity(.local, 0, 0)
+    k = nodes[e].kind
+    if k == .addr: return place_route(int(nodes[e].a), depth + 1)
+    if k == .field:
+        if tkind(ntype(int(nodes[e].a))) != .struct_: return PlaceIdentity(.local, 0, 0)
+        return place_project(place_route(int(nodes[e].a), depth + 1), int(nodes[e].name))
+    if k == .ident and nodes[e].aux == i32(int(SK.local)):
+        l = int(nodes[e].sym)
+        if l <= 0 or l >= locals.len(): return PlaceIdentity(.local, 0, 0)
+        if int(locals[l].flags) & LF_ALIAS != 0:
+            return place_route(int(locals[l].alias), depth + 1)
+    place_scalar_root(e)
+
+place_base = (p0: PlaceIdentity) -> PlaceIdentity:
+    p = p0
+    loop p.parent != 0: p = place_parents[p.parent]
+    p
+
+place_append = (base: PlaceIdentity, route: PlaceIdentity) -> PlaceIdentity:
+    if route.parent == 0: return base
+    place_project(place_append(base, place_parents[route.parent]), route.selector)
+
+place_covers = (parent: PlaceIdentity, child0: PlaceIdentity) -> bool:
+    child = child0
+    loop true:
+        if parent == child: return true
+        if child.parent == 0: return false
+        child = place_parents[child.parent]
+    false

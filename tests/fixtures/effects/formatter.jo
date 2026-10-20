@@ -1,0 +1,9 @@
+shared: int = 0
+struct Marker:
+    value: int
+__fmt = (buf: mut u8[], value: Marker):
+    shared += 1
+    buf.push(120 as u8)
+hidden = () -> int:
+    text = "{Marker(0)}"
+    text.len()

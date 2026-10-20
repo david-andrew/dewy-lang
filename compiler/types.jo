@@ -13,7 +13,7 @@ use 'refine.jo'
 # own struct or enum keeps, a pointer to its value (elem) on the heap; only the lowering sees it)
 enum TK:
     void_, bool_, int_, float_, str_, array, ptr, fn_, struct_, enum_, tuple, opt, var, param,
-    null_, range, module, typeval, none_lit, vec, cfn, fixed, box, polyfn, quantity, dimension, refined
+    null_, range, module, typeval, none_lit, vec, cfn, fixed, box, polyfn, quantity, dimension, refined, callable
 
 const TF_HAS_VAR = 1
 const TF_LAID_OUT = 2
@@ -381,7 +381,7 @@ unify = (a0: int, b0: int) -> bool:
         loop i in [0..int(structs[sa].ntargs)):
             if not unify(struct_targ(sa, i), struct_targ(sb, i)): return false
         return true
-    if (ta.kind == .int_ or ta.kind == .quantity or ta.kind == .dimension) and ta.st != tb.st: return false
+    if (ta.kind == .int_ or ta.kind == .quantity or ta.kind == .dimension or ta.kind == .callable) and ta.st != tb.st: return false
     if ta.elem != 0 or tb.elem != 0:
         if ta.elem == 0 or tb.elem == 0 or not unify(int(ta.elem), int(tb.elem)): return false
     loop i in [0..int(ta.nargs)):
@@ -482,7 +482,7 @@ type_has_fn = (t0: int) -> bool:
         if seen.has(t): continue
         seen[t] = true
         k = types[t].kind
-        if k == .fn_ or k == .polyfn:
+        if k == .fn_ or k == .polyfn or k == .callable:
             found = true
             break
         if let cached = has_fn_memo.get(t):
@@ -662,7 +662,7 @@ layout = (t0: int):
     al = 1
     m = false
     boxed = false
-    if k == .quantity or k == .refined:
+    if k == .quantity or k == .refined or k == .callable:
         base = int(types[t].elem)
         layout(base)
         types[t].size = types[base].size
@@ -805,6 +805,7 @@ type_str_in = (t0: int, dewy: bool) -> str:
     if t == 0: return "?"
     ti = types[t]
     match ti.kind:
+        callable: "{type_str(int(ti.elem), dewy)} & <effects>"
         refined: "{type_str(int(ti.elem), dewy)}<refinement>"
         quantity: "{type_str(int(ti.elem), dewy)} * {dimension_str(int(ti.st))}"
         dimension: dimension_str(int(ti.st))

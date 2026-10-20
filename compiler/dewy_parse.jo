@@ -10,6 +10,7 @@ use 'check.jo'
 use 'dewy_tokens.jo'
 use 'refine.jo'
 use 'dewy_methods.jo'
+use 'effects.jo'
 
 # Compact tags shared by lexical tokens and syntax nodes. Names are needed
 # only for formatter/diagnostic text.
@@ -460,6 +461,53 @@ dw_ref_predicate = (id: int) -> int:
         return n
     dw_expr(entry)
 
+# Effect suffixes belong to the callable, never to the returned value type.
+# sval on fn_/lambda/tfn is an immutable syntax-row ID; clone preserves it.
+dw_effect_path = (id0: int) -> int[]:
+    id = dw_unwrap(id0)
+    if dw_op(id) == .dot:
+        out = dw_effect_path(dw_child(id, 1))
+        name = dw_name(dw_child(id, 2))
+        if name == "": fatal(dewy_syntax[id].pos, "effect projection needs a field name")
+        out.push(intern(name))
+        return out
+    name = dw_name(id)
+    if name == "": fatal(dewy_syntax[id].pos, "effect row needs a place name")
+    [intern(name)]
+
+dw_effect_atom = (id0: int, entries: mut EffectSyntax[], empty: mut bool):
+    id = dw_unwrap(id0)
+    if dw_name(id) == "no_effects":
+        if empty or entries.len() != 0: fatal(dewy_syntax[id].pos, "no_effects cannot be combined with another effect permission")
+        empty = true
+        return
+    if empty: fatal(dewy_syntax[id].pos, "no_effects cannot be combined with another effect permission")
+    if dw_op(id) != .type_apply: fatal(dewy_syntax[id].pos, "effect pilot requires reads<place>, mutates<place>, or no_effects")
+    name = dw_name(dw_child(id, 1))
+    if name != "reads" and name != "mutates": fatal(dewy_syntax[id].pos, "effect pilot requires reads<place>, mutates<place>, or no_effects")
+    args = dw_child(id, 2)
+    if dw_nchildren(args) != 1: fatal(dewy_syntax[id].pos, "effect permission needs exactly one place")
+    kind = if name == "reads": EffectKind.read else: EffectKind.write
+    entries.push(EffectSyntax(kind, dw_effect_path(dw_child(args, 0)), dewy_syntax[id].pos))
+
+dw_effect_result = (id: int, entries: mut EffectSyntax[], empty: mut bool) -> int:
+    if dw_op(id) != .amp: return id
+    # Scalar refinement intersection is still part of the return type.
+    if dw_op(dw_grouped(dw_child(id, 2))) == .tilde: return id
+    base = dw_effect_result(dw_child(id, 1), entries, empty)
+    dw_effect_atom(dw_child(id, 2), entries, empty)
+    base
+
+dw_effect_suffix = (owner: int, result: int) -> int:
+    entries: EffectSyntax[]
+    empty = false
+    base = dw_effect_result(result, entries, empty)
+    if base != result:
+        effects_active = true
+        effect_syntax.push(entries)
+        nodes[owner].sval = i32(effect_syntax.len() - 1)
+    base
+
 dw_type = (id: int) -> int:
     let id = dw_unwrap(id)
     pos = dewy_syntax[id].pos
@@ -543,7 +591,7 @@ dw_type = (id: int) -> int:
             types_.push(t)
         set_list(n, types_)
         set_list2(n, labels)
-        result = dw_child(id, 2)
+        result = dw_effect_suffix(n, dw_child(id, 2))
         if dw_name(result) != "void": nodes[n].a = i32(dw_type(result))
         return n
     if dw_op(id) == .dot:
@@ -672,6 +720,7 @@ dw_function = (id: int, name: str) -> int:
         set_list2(n, type_params)
         add_flag(n, NF_GENERIC)
     if result != 0:
+        result = dw_effect_suffix(n, result)
         if dw_name(result) == "void": add_flag(n, NF_VOID)
         else: nodes[n].a = i32(dw_type(result))
     ps: int[]

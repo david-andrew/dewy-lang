@@ -1,0 +1,11 @@
+let shared:int64=0
+first=(n:int64):>int64 & no_effects=>{
+    if n >? 0 { return second(n-1) }
+    return 0
+}
+second=(n:int64):>int64=>{
+    let result=first(n)
+    shared+=1
+    return result
+}
+main=():>int64=>0

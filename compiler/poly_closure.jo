@@ -6,6 +6,7 @@ use 'util.jo'
 use 'check.jo'
 use 'expr.jo'
 use 'lower.jo'
+use 'effects.jo'
 
 struct PolyScope:
     frames: FnCtx[]
@@ -141,6 +142,7 @@ poly_inst = (decl: int, targs: int[], use_pos: int) -> int:
     zonk_tree(int(fns[f].body))
     loop l in fns[f].locals: locals[l].type = i32(zonk(int(locals[l].type)))
     fns[f].fntype = i32(mk_fn(zp, int(fns[f].ret), int(sig.mutmask), decl_fn_labels(decl)))
+    if sig.contract != 0: fns[f].fntype = i32(mk_callable_contract(int(fns[f].fntype), int(sig.contract)))
     poly_leave(saved)
     f
 

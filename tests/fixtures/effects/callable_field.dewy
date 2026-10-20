@@ -1,0 +1,6 @@
+Holder:type=[f:<(x:int64):>int64 & no_effects>]
+quiet=(x:int64):>int64 & no_effects=>x+1
+main=():>int64=>{
+    let holder=Holder[f=@quiet]
+    return holder.f(1)
+}

@@ -1,0 +1,20 @@
+Pair:type=[left:int64 right:int64]
+put=(@x:int64 v:int64):>void & mutates<x>=>{ x=v }
+get=(@x:int64):>int64 & reads<x>=>x
+# Ordinals differ at each call edge, including aliases of the same actual.
+swap=(@src:int64 @dst:int64):>void & reads<src> & mutates<dst>=>put(@dst get(@src))
+right=(@p:Pair):>void & mutates<p.right>=>put(@p.right 8)
+scalar=(x:int64):>int64 & no_effects=>{
+    let y:int64=x
+    put(@y x*2)
+    let z:int64=0
+    swap(@y @z)
+    return get(@z)
+}
+main=():>int64=>{
+    let p=Pair[3 5]
+    right(@p)
+    swap(@p.right @p.left)
+    printl("{p.left} {p.right} {scalar(21)}")
+    return 0
+}

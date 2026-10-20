@@ -1,0 +1,7 @@
+quiet=(x:int64):>int64 & no_effects=>x+1
+make=():><(x:int64):>int64 & no_effects>=>@quiet
+main=():>int64=>{
+    let f:<(x:int64):>int64>=make()
+    printl("{f(41)}")
+    return 0
+}

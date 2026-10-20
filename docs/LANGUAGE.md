@@ -410,6 +410,33 @@ for example `let twice:<(value:int64):>int64> = (* 2)`. A module declaration suc
 as `twice = (* 2)` can infer its parameter type at calls, like other functions.
 Operators with prefix meanings keep those meanings: `(-1)` is a negative value.
 
+Function signatures can bound direct place effects with `reads<place>`,
+`mutates<place>`, and `no_effects`:
+
+```dewy
+read = (@x:int64):>int64 & reads<x> => x
+write = (@x:int64 value:int64):>void & mutates<x> => { x=value }
+quiet = (x:int64):>int64 & no_effects => x*2
+```
+
+A positive row is a closed upper bound. Field permissions such as
+`mutates<pair.left>` cover that field and its descendants, not a sibling or
+replacement of the parent. Calls translate permissions by argument position and
+actual place, including through recursive helpers. Private scalar locals and
+value parameters do not export place effects. Existing disjointness rules for
+mutable arguments still apply. Omitted rows are inferred when a checked contract
+needs them; an unannotated or external function is never assumed pure.
+
+This direct-place pilot certifies empty implementation costs only for supported
+wrapping fixed-width scalar operations, scalar frame places and their direct
+callees. Allocation, aggregates passed by value, formatting, division, unknown
+externs and other unclassified operations cannot satisfy a closed row.
+Declarations are checked even when no caller reaches them. Callable types retain
+declared rows; a conversion may forget a guarantee, but cannot recover it from an
+unconstrained handle. Calls through constrained handles currently reject
+conservatively. Row variables, exclusions, allocation permissions and the public
+strict profile are not implemented by this pilot.
+
 `int` is the mathematical integer type, distinct from `int64` in signatures,
 containers and generic arguments. Unannotated integer literals default to `int`.
 Arithmetic is arbitrary precision: word-sized values promote to a big integer

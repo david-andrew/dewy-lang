@@ -1,0 +1,8 @@
+first=(@a:int64 @b:int64 n:int64):>void & mutates<a>=>{
+    if n >? 0 { second(@b @a n-1) }
+}
+second=(@x:int64 @y:int64 n:int64):>void=>{
+    first(@x @y n)
+    y=1
+}
+main=():>int64=>0

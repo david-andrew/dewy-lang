@@ -6,6 +6,7 @@ use 'types.jo'
 use 'check.jo'
 use 'expr.jo'
 use 'lower.jo'
+use 'effects.jo'
 
 enum IsolationReason: none_, unavailable, global_, capture, indirect, raw, intrinsic, node
 
@@ -110,6 +111,11 @@ isolation_block = (f: int, reason: IsolationReason, witness: int):
 # deduplicated: Tarjan visits a target once, so diamonds remain O(nodes + edges).
 isolation_scan = (f: int) -> int[]:
     edges: int[]
+    if f < effect_summaries.len() and effect_summaries[f].done:
+        row = effect_summaries[f]
+        if row.isolation != .none_: isolation_block(f, row.isolation, row.isolation_witness)
+        loop edge in row.edges: edges.push(edge.callee)
+        return edges
     todo = [int(fns[f].body)]
     loop todo.len() > 0:
         n = todo.pop()

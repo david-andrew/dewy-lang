@@ -17,6 +17,7 @@ use 'prelude.jo'
 use 'comptime.jo'
 use 'facts.jo'
 use 'refine.jo'
+use 'effects.jo'
 use 'reflection.jo'
 use 'dewy_methods.jo'
 
@@ -141,6 +142,7 @@ struct FnInst:
     made_in: i32        # ... in the body of this instance (0: none)
 
 struct FnSig:
+    contract: i32
     ntp: i32
     nexplicit: i32
     params: int[]
@@ -1165,7 +1167,11 @@ resolve_type = (tn: int) -> int:
             labels: int[]
             loop p in kids2(tn): labels.push(int(nodes[p].name))
             key = fn_label_key(labels)
-        return mk_fn(ps, ret, mm, key)
+        base = mk_fn(ps, ret, mm, key)
+        if nodes[tn].sval == 0: return base
+        names: int[]
+        loop p in kids2(tn): names.push(int(nodes[p].name))
+        return mk_callable_contract(base, effect_contract(tn, ps, names, mm))
     fatal(nodes[tn].pos, "invalid type")
     0
 
@@ -1247,6 +1253,7 @@ subst = (t0: int, targs: int[]) -> int:
         if id < targs.len() and targs[id] != 0: return targs[id]
         return t
     if k == .var: return t
+    if k == .callable: return mk_callable_contract(subst(int(types[t].elem), targs), int(types[t].st))
     if k == .refined: return mk_refined(subst(int(types[t].elem), targs), ref_subst(int(types[t].st), targs))
     if k == .quantity: return mk_quantity(subst(int(types[t].elem), targs), int(types[t].st))
     if k == .array: return mk_array(subst(int(types[t].elem), targs))
@@ -1393,6 +1400,7 @@ fn_sig = (decl: int) -> FnSig:
         if has_flag(decl, NF_EXTERN):
             loop t in sig.params + [int(sig.ret)]:
                 if types[prune(t)].kind == .refined: fatal(nodes[decl].pos, "extern refinement contracts require a checked implementation")
+    if nodes[decl].sval != 0: sig.contract = i32(effect_decl_contract(decl, sig.params))
     scope_reset(mark)
     ctxs.pop()
     cx = saved
@@ -4380,6 +4388,7 @@ check_pending_functions = (start: int) -> int:
 check_program = (main_path: str):
     facts_reset()
     refine_reset()
+    effects_reset()
     if len(program_name) > 0: program_named = true
     if len(program_name) == 0:
         program_name = main_path
@@ -4722,3 +4731,6 @@ check_program = (main_path: str):
     order_prelude_globals(pl)
     set_list(int(fns[prelude_init].body), pl)
     zonk_tree(int(fns[prelude_init].body))
+    # Close declared promises after every checked helper has been discovered,
+    # including check-only callers and unreachable checked declarations.
+    if not errors_only: effects_finalize()

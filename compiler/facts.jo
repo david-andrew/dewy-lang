@@ -10,21 +10,10 @@ use 'check.jo'
 use 'comptime.jo'
 use 'isolation.jo'
 use 'refine.jo'
+use 'places.jo'
 
 enum FactPolicy: RuntimeAllowed, RequireStatic
 enum FactReason: missing, write, call, join, loop_, unsupported, wrap, budget
-
-enum PlaceRoot: local, global, formal, capture, resource
-enum PlaceProjection: root, field, index, selector, unknown
-# Owner-qualified roots and parent-linked projections are also the interface
-# for future effect regions. Runtime ValueIds never become declaration identity.
-struct FactPlace:
-    root: PlaceRoot
-    owner: int
-    declaration: int
-    parent: int = 0
-    projection: PlaceProjection = .root
-    selector: int = 0
 
 struct FactBound:
     lo: int = -9223372036854775807 - 1
@@ -40,7 +29,7 @@ struct FactTerm:
     origin: int = 0
 
 struct FactBinding:
-    place: FactPlace
+    place: PlaceIdentity
     value: int
 
 struct FactState:
@@ -168,28 +157,14 @@ fact_new = (s: mut FactState, b: FactBound, term: FactTerm = FactTerm()) -> int:
 fact_constant = (s: mut FactState, x: int, at: int = 0) -> int:
     fact_new(s, FactBound(x, x, x != 0), FactTerm(origin = at))
 
-fact_place = (e: int) -> FactPlace:
-    if e == 0: return FactPlace(.local, 0, 0)
-    if nodes[e].kind == .addr: return fact_place(int(nodes[e].a))
-    if nodes[e].kind != .ident: return FactPlace(.local, 0, 0)
-    l = int(nodes[e].sym)
-    if nodes[e].aux == i32(int(SK.global)): return FactPlace(.global, 0, l)
-    if nodes[e].aux != i32(int(SK.local)): return FactPlace(.local, 0, 0)
-    depth = 0
-    loop int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
-        a = int(locals[l].alias)
-        if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return FactPlace(.local, 0, 0)
-        l = int(nodes[a].sym)
-        depth += 1
-        if depth > 32: return FactPlace(.local, 0, 0)
-    FactPlace(.local, int(locals[l].owner), l)
+fact_place = (e: int) -> PlaceIdentity: place_scalar_root(e)
 
-fact_binding = (s: FactState, p: FactPlace) -> int:
+fact_binding = (s: FactState, p: PlaceIdentity) -> int:
     loop i in [0..s.bindings.len()):
         if s.bindings[i].place == p: return i
     -1
 
-fact_bind = (s: mut FactState, p: FactPlace, v: int):
+fact_bind = (s: mut FactState, p: PlaceIdentity, v: int):
     if p.declaration == 0: return
     i = fact_binding(s, p)
     if i >= 0: s.bindings[i].value = v
@@ -204,7 +179,7 @@ fact_read = (s: mut FactState, e: int) -> int:
     fact_bind(s, p, v)
     v
 
-fact_exposed = (p: FactPlace) -> bool:
+fact_exposed = (p: PlaceIdentity) -> bool:
     if p.root != .local: return true
     int(locals[p.declaration].flags) & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_ADDR | LF_BYREF | LF_EXPOSED) != 0
 
@@ -454,8 +429,8 @@ fact_capture = (n: int, s: mut FactState) -> int:
         r = if nodes[n].b != 0: fact_capture(int(nodes[n].b), s) else: fact_constant(s, 0, n)
         l = int(nodes[n].sym)
         if nkids(n) > 0 or l == 0: fact_forget(s, n, .write, true); return 0
-        if has_flag(n, NF_GLOBAL): fact_bind(s, FactPlace(.global, 0, l), r)
-        else if not (nodes[n].aux2 == 1 and int(locals[l].flags) & LF_PARAM != 0): fact_bind(s, FactPlace(.local, int(locals[l].owner), l), r)
+        if has_flag(n, NF_GLOBAL): fact_bind(s, PlaceIdentity(.global, 0, l), r)
+        else if not (nodes[n].aux2 == 1 and int(locals[l].flags) & LF_PARAM != 0): fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), r)
         return r
     if k == .assign:
         a = int(nodes[n].a)
