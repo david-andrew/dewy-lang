@@ -1,0 +1,32 @@
+Stats:type=[count:int64 mean:float64 variance:float64]
+statistics=(xs:array<float64>):>Stats=>{
+    let n=0
+    let mean=0.0
+    let m2=0.0
+    loop x in xs {
+        n+=1
+        let delta=x-mean
+        mean+=delta/(n as float64)
+        m2+=delta*(x-mean)
+    }
+    let variance=if n >? 1 m2/((n-1) as float64) else 0.0
+    return Stats[n mean variance]
+}
+median=(xs:array<float64>):>float64=>{
+    let values=xs
+    values.sort
+    let n=values.length
+    if n%2 =? 1 {return values[n//2]}
+    return (values[n//2-1]+values[n//2])/2.0
+}
+main=():>int64=>{
+    let input=[2.0 4.0 4.0 4.0 5.0 5.0 7.0 9.0]
+    let result=statistics(input)
+    $runtime_assert (result.count =? 8)
+    $runtime_assert (abs(result.mean-5.0) <? 1e-10)
+    $runtime_assert (abs(result.variance-32.0/7.0) <? 1e-10)
+    $runtime_assert (median(input) =? 4.5)
+    $runtime_assert (statistics([2.0]).variance =? 0.0)
+    printl("{result.count} {result.mean} {format(result.variance ".6f")} {median(input)}")
+    return 0
+}

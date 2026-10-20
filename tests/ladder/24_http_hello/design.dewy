@@ -1,0 +1,32 @@
+import net
+respond=(request:string):>string=>{
+    let body=if request.startswith("GET /hello ") "hello\n" else "missing\n"
+    let status=if request.startswith("GET /hello ") "200 OK" else "404 Not Found"
+    return "HTTP/1.1 {status}\r\nContent-Length: {bytes(body).length}\r\nConnection: close\r\n\r\n{body}"
+}
+request=(port:int64 path:string):>string=>{
+    let server=net.tcp_listen(port)
+    $runtime_assert (server >=? 0)
+    let client=net.tcp_connect("127.0.0.1" port 1.0)
+    let peer=net.tcp_accept(server 1.0)
+    $runtime_assert (client >=? 0 and peer >=? 0)
+    $runtime_assert (net.tcp_send(client "GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n"))
+    let text=str_from_bytes(net.tcp_receive(peer 1.0))
+    $runtime_assert (net.tcp_send(peer respond(text)))
+    let response=str_from_bytes(net.tcp_receive(client 1.0))
+    net.tcp_close(peer)
+    net.tcp_close(client)
+    net.tcp_close(server)
+    return response
+}
+main=():>int64=>{
+    let found=request(37425 "/hello")
+    let missing=request(37426 "/missing")
+    $runtime_assert (found.startswith("HTTP/1.1 200 OK"))
+    $runtime_assert ("Content-Length: 6" in? found)
+    $runtime_assert (found.endswith("hello\n"))
+    $runtime_assert (missing.startswith("HTTP/1.1 404 Not Found"))
+    $runtime_assert (missing.endswith("missing\n"))
+    printl("200 hello 404 missing")
+    return 0
+}

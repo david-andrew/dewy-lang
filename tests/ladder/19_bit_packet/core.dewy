@@ -1,0 +1,32 @@
+Packet:type=[version:uint64 kind:uint64 length:uint64]
+encode=(p:Packet):>uint64=>{
+    assert(p.version <? 16)
+    assert(p.kind <? 16)
+    assert(p.length <? 65536)
+    return (p.version << 20) or (p.kind << 16) or p.length
+}
+decode=(word:uint64):>Packet=>{
+    let version=(word >> 20) and 15
+    let kind=(word >> 16) and 15
+    let length=word and 65535
+    return Packet[version kind length]
+}
+popcount=(word:uint64):>int64=>{
+    let x=word
+    let count=0
+    loop x not=? 0 {
+        x=x and (x-1)
+        count+=1
+    }
+    return count
+}
+main=():>int64=>{
+    let packet=Packet[2 3 1024]
+    let word=encode(packet)
+    assert(decode(word) =? packet)
+    assert(popcount(18446744073709551615) =? 64)
+    assert(popcount(0) =? 0)
+    assert(popcount(word) =? 4)
+    printl("{word} {popcount(word)} {decode(word).length}")
+    return 0
+}

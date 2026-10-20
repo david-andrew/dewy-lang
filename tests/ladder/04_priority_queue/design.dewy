@@ -1,0 +1,31 @@
+from heap import Heap
+Event:type=[name:string time:int64]
+run_events=(events:array<Event>):>array<string>=>{
+    let pending:Heap<Event>
+    loop event in events {
+        pending.push(event event.time as float64)
+    }
+    let out:array<string>=[]
+    loop len(pending) >? 0 {
+        let event=pending.pop
+        out.push(event.name)
+    }
+    return out
+}
+main=():>int64=>{
+    let events=[Event["flush" 30] Event["read" 5] Event["write" 10]]
+    let ordered=run_events(events)
+    $runtime_assert (ordered =? ["read" "write" "flush"])
+    let pending:Heap<int64>
+    pending.push(8 8.0)
+    pending.push(2 2.0)
+    let saved=pending
+    $runtime_assert (pending.pop =? 2)
+    $runtime_assert (pending.pop =? 8)
+    $runtime_assert (saved.pop =? 2)
+    $runtime_assert (saved.pop =? 8)
+    let empty:array<Event>=[]
+    $runtime_assert (run_events(empty).length =? 0)
+    printl(ordered)
+    return 0
+}

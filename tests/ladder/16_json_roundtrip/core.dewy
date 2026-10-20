@@ -1,0 +1,32 @@
+Player:type=[name:string score:uint64 tags:array<string> active:bool=true]
+load=(text:string):>Player|TextError=>from_json<Player>(text)
+main=():>int64=>{
+    let original=Player["Ada" 18446744073709551615 ["red" "café"]]
+    let encoded=to_json(original)
+    let decoded=load(encoded)
+    if decoded is? TextError {
+        printl(decoded.message)
+        return 1
+    }
+    assert(decoded =? original)
+    let reordered=load(r'{"tags":[],"score":42,"name":"Bob","extra":7}')
+    if reordered is? TextError {return 2}
+    assert(reordered.active)
+    assert(reordered.score =? 42)
+    let bad=load(r'{"name":}')
+    assert(bad is? TextError)
+    let negative=from_json<float64>("-0.0")
+    if negative is? TextError {return 3}
+    assert((negative transmute uint64) =? 9223372036854775808)
+    let list=[original reordered]
+    let list_text=to_json(list)
+    let recovered=from_json<array<Player>>(list_text)
+    if recovered is? TextError {return 4}
+    assert(recovered.length =? 2)
+    assert(recovered[0].score =? original.score)
+    let independent=recovered
+    recovered[0].tags.push("new")
+    assert(independent[0].tags.length =? 2)
+    printl("{decoded.name} {decoded.score} {reordered.active} {independent.length}")
+    return 0
+}

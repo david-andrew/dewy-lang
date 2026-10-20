@@ -1,0 +1,31 @@
+Series:type=[first:int64 step:int64 count:int64]
+len=(s:Series):>int64=>s.count
+__index__=(s:Series index:int64):>int64=>s.first+index*s.step
+sum_series=(s:Series):>int64=>{
+    let sum=0
+    loop value in s {sum+=value}
+    return sum
+}
+filter_series=(s:Series):>array<int64>=>{
+    let values:array<int64>=[]
+    loop value in s {
+        if value%2 =? 0 {values.push(value)}
+    }
+    return values
+}
+main=():>int64=>{
+    let source=Series[1 3 5]
+    let original=source
+    let values=[loop value in source value]
+    source.first=100
+    assert(values =? [1 4 7 10 13])
+    assert(sum_series(original) =? 35)
+    assert(filter_series(original) =? [4 10])
+    assert(sum_series(Series[1 1 0]) =? 0)
+    let paired=[loop index in 0.. and value in original index+value]
+    assert(paired =? [1 5 9 13 17])
+    let doubled=[loop value in original 2value]
+    assert(doubled =? [2 8 14 20 26])
+    printl("{values} {sum_series(original)} {filter_series(original)}")
+    return 0
+}

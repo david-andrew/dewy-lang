@@ -1,0 +1,31 @@
+import net
+exchange=(port:int64 payload:string):>string=>{
+    let server=net.tcp_listen(port)
+    $runtime_assert (server >=? 0)
+    let client=net.tcp_connect("127.0.0.1" port 1.0)
+    $runtime_assert (client >=? 0)
+    let peer=net.tcp_accept(server 1.0)
+    $runtime_assert (peer >=? 0)
+    $runtime_assert (net.tcp_send(client payload))
+    let received=net.tcp_receive(peer 1.0)
+    $runtime_assert (net.tcp_send(peer received))
+    let echoed=str_from_bytes(net.tcp_receive(client 1.0))
+    net.tcp_close(client)
+    net.tcp_close(peer)
+    net.tcp_close(server)
+    return echoed
+}
+main=():>int64=>{
+    let base=37421
+    let one=exchange(base "hello café")
+    $runtime_assert (one =? "hello café")
+    let two=exchange(base+1 "second request")
+    $runtime_assert (two =? "second request")
+    let three=exchange(base+2 "0123456789")
+    $runtime_assert (three.length =? 10)
+    let checksum=0
+    loop b in bytes(one) {checksum+=b as int64}
+    $runtime_assert (checksum >? 0)
+    printl("{one}|{two}|{three}")
+    return 0
+}

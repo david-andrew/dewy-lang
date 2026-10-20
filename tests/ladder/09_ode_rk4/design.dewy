@@ -1,0 +1,30 @@
+derivative=(y:float64):>float64=>-y
+step=(y:float64 h:float64):>float64=>{
+    let k1=derivative(y)
+    let k2=derivative(y+h*k1/2.0)
+    let k3=derivative(y+h*k2/2.0)
+    let k4=derivative(y+h*k3)
+    return y+h*(k1+2.0*k2+2.0*k3+k4)/6.0
+}
+integrate=(initial:float64 h:float64 count:int64):>array<float64>=>{
+    let history:array<float64>=[initial]
+    let y=initial
+    loop i in [0..count) {
+        y=step(y h)
+        history.push(y)
+    }
+    return history
+}
+main=():>int64=>{
+    let history=integrate(1.0 0.01 100)
+    let answer=history[end]
+    $runtime_assert (abs(answer-exp(-1.0)) <? 1e-8)
+    $runtime_assert (history.length =? 101)
+    loop i in [1..history.length) {
+        $runtime_assert (history[i] <? history[i-1])
+    }
+    $runtime_assert (step(0.0 0.01) =? 0.0)
+    $runtime_assert (integrate(2.0 0.1 0)[0] =? 2.0)
+    printl(format(answer ".8f"))
+    return 0
+}

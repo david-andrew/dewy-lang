@@ -1,0 +1,32 @@
+Token:type=[kind:string text:string]
+is_digit=(c:string):>bool=>c in? "0123456789"
+tokenize=(source:string):>array<Token>=>{
+    let tokens:array<Token>=[]
+    let i=0
+    loop i <? source.length {
+        let c=source[i]
+        if c in? " \t\n" {i+=1 continue}
+        if is_digit(c) {
+            let start=i
+            loop i <? source.length and is_digit(source[i]) {i+=1}
+            tokens.push(Token["number" source[start..i)])
+            continue
+        }
+        tokens.push(Token["punct" c])
+        i+=1
+    }
+    return tokens
+}
+main=():>int64=>{
+    let tokens=tokenize("12 + (3*40)")
+    assert(tokens.length =? 7)
+    assert(tokens[0].text =? "12")
+    assert(tokens[4].text =? "*")
+    assert(tokens[5].kind =? "number")
+    let rebuilt=""
+    loop token in tokens {rebuilt+=token.text}
+    assert(rebuilt =? "12+(3*40)")
+    assert(tokenize(" \t\n").length =? 0)
+    printl(rebuilt)
+    return 0
+}

@@ -1,0 +1,30 @@
+find_lines=(text:string pattern:string):>array<string>=>{
+    let matcher=regex(pattern)
+    let found:array<string>=[]
+    let number=0
+    loop line in text.split("\n") {
+        number+=1
+        let hit=line.find(matcher)
+        if hit isnt? none {
+            found.push("{number}:{line}")
+        }
+    }
+    return found
+}
+join_lines=(lines:array<string>):>string=>{
+    let out=""
+    loop line in lines {
+        if out.length >? 0 {out+="|"}
+        out+=line
+    }
+    return out
+}
+main=():>int64=>{
+    let input="INFO boot\nERROR disk\nWARN hot\nERROR network\n"
+    let results=find_lines(input "^ERROR")
+    assert(results.length =? 2)
+    assert(find_lines(input "^DEBUG").length =? 0)
+    assert(find_lines("café" "caf.").length =? 1)
+    printl(join_lines(results))
+    return 0
+}

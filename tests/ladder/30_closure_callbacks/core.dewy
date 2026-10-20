@@ -1,0 +1,32 @@
+make_counter=(initial:int64)=>{
+    let count=initial
+    return (step:int64)=>{count+=step return count}
+}
+apply=(items:array<int64> callback:((value:int64):>int64)):>array<int64>=>{
+    let result:array<int64>=[]
+    loop item in items {
+        result.push(callback(item))
+    }
+    return result
+}
+main=():>int64=>{
+    let counter=make_counter(10)
+    let copy=counter
+    assert(counter(2) =? 12)
+    assert(counter(3) =? 15)
+    assert(copy(1) =? 11)
+    let total=0
+    let shared=(step:int64 $capture @total)=>{total+=step return total}
+    let other=shared
+    assert(shared(2) =? 2)
+    assert(other(3) =? 5)
+    assert(total =? 5)
+    let values=apply([1 2 3] (n)=>n*2)
+    assert(values =? [2 4 6])
+    let private=make_counter(0)
+    let cumulative=apply([1 2 3] private)
+    assert(cumulative =? [1 3 6])
+    assert(private(1) =? 1)
+    printl("{values} {cumulative} {total}")
+    return 0
+}

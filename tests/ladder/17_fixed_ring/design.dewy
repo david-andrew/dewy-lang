@@ -1,0 +1,32 @@
+$explicit_copies
+Ring:type=[data:array<int64 length=4>=[0 0 0 0] head:int64=0 count:int64=0]
+push=(@r:Ring value:int64):>void=>{
+    let slot=(r.head+r.count)%4
+    r.data[slot]=value
+    if r.count <? 4 {r.count+=1}
+    else {r.head=(r.head+1)%4}
+}
+pop=(@r:Ring):>int64?=>{
+    if r.count =? 0 {return none}
+    let value=r.data[r.head]
+    r.head=(r.head+1)%4
+    r.count-=1
+    return value
+}
+main=():>int64=>{
+    let ring:Ring=[]
+    loop n in [1..7] {push(@ring n)}
+    let snapshot=ring
+    let out:array<int64>=[]
+    loop ring.count >? 0 {
+        let value=pop(@ring)
+        if value is? int64 {out.push(value)}
+    }
+    $runtime_assert (out =? [4 5 6 7])
+    $runtime_assert (pop(@ring) is? none)
+    $runtime_assert (snapshot.count =? 4)
+    push(@ring 9)
+    $runtime_assert (pop(@ring) =? 9)
+    printl(out)
+    return 0
+}

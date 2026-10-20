@@ -7,6 +7,7 @@
     python3 -m tools.core --bootstrap test
     python3 -m tools.core path
     python3 -m tools.core cases [-k expression] [--update]
+    python3 -m tools.core ladder [--update-ratchet]
     python3 -m tools.core speed [--base REV] [--checkpoint TAG] [--limit 1.0] [--release]
     python3 -m tools.core bench [-k WORDS]
 """
@@ -173,8 +174,8 @@ def gate_options(arguments: list[str]) -> tuple[str, int | None, bool, bool]:
 
 
 def test(binary: Path, arguments: list[str], quick: bool) -> int:
-    """Golden cases, then pytest."""
-    from tools import cases
+    """Golden cases, then the ladder's core versions and ratchet, then pytest."""
+    from tools import cases, ladder
     keyword, workers, every, paths = gate_options(arguments)
     if quick:
         print('Running the quick smoke suite (native/web, default/release).', file=sys.stderr)
@@ -191,6 +192,11 @@ def test(binary: Path, arguments: list[str], quick: bool) -> int:
         selected += len(chosen)
         if chosen:
             failed = cases.run(binary, chosen, workers=count or 1) != 0
+        if not quick and not (failed and not every):
+            programs = [n for n in ladder.load()['programs'] if cases.keyword_filter(keyword)(n)]
+            selected += len(programs)
+            if programs:
+                failed = ladder.run(binary, keyword=keyword, workers=count or 1, scoreboard=False) != 0 or failed
         if failed and not every:
             return 1
     python = ROOT / '.venv/bin/python'
@@ -206,14 +212,14 @@ def test(binary: Path, arguments: list[str], quick: bool) -> int:
                *test_runner_options(python, arguments), *TESTS, *arguments]
     status = subprocess.call(command, cwd=ROOT, env=env)
     if status == 5 and selected:
-        status = 0  # -k matched only golden cases
+        status = 0  # -k matched only golden cases or ladder programs
     return 1 if failed else status
 
 
 def main(argv: list[str] | None = None) -> int:
     cli = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     cli.add_argument('--bootstrap', action='store_true', help='force an independent build from C')
-    cli.add_argument('command', choices=('path', 'test', 'cases', 'build', 'check', 'run', 'watch', 'new', 'lsp',
+    cli.add_argument('command', choices=('path', 'test', 'cases', 'ladder', 'build', 'check', 'run', 'watch', 'new', 'lsp',
                                         'fmt', 'repl', 'speed', 'bench'))
     cli.add_argument('arguments', nargs=argparse.REMAINDER,
                      help='arguments for pytest, speed, bench or the compiler; test --quick selects the smoke suite')
@@ -225,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
         if any(arg.startswith('-m') for arg in args.arguments):
             cli.error('--quick selects its own test marker; use -k to narrow the smoke suite')
         args.arguments = [arg for arg in args.arguments if arg != '--quick']
-    if args.command in ('cases',) and any(a.split('=')[0] == '--compiler' for a in args.arguments):
+    if args.command in ('cases', 'ladder',) and any(a.split('=')[0] == '--compiler' for a in args.arguments):
         from importlib import import_module
         return import_module(f'tools.{args.command}').main(args.arguments)
     try:
@@ -236,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == 'path':
         print(binary)
         return 0
-    if args.command in ('cases',):
+    if args.command in ('cases', 'ladder',):
         from importlib import import_module
         return import_module(f'tools.{args.command}').main(args.arguments, binary)
     if args.command in ('speed', 'bench'):

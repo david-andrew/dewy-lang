@@ -1,0 +1,52 @@
+Parser:type=[tokens:array<string> at:int64=0]
+lex=(source:string):>array<string>=>{
+    let tokens:array<string>=[]
+    let number=""
+    loop c in source {
+        if c in? "0123456789" {number="{number}{c}" continue}
+        if number.length >? 0 {tokens.push(number) number=""}
+        if c not in? " \t\n" {tokens.push(c)}
+    }
+    if number.length >? 0 {tokens.push(number)}
+    return tokens
+}
+evaluate=(source:string):>int=>{
+    let parser:Parser=[tokens=lex(source)]
+    let result=expression(@parser)
+    $runtime_assert (parser.at =? parser.tokens.length)
+    return result
+}
+peek=(p:Parser):>string=>if p.at <? p.tokens.length p.tokens[p.at] else ""
+factor=(@p:Parser):>int=>{
+    let token=peek(p)
+    p.at+=1
+    if token =? "(" {
+        let value=expression(@p)
+        $runtime_assert (peek(p) =? ")")
+        p.at+=1
+        return value
+    }
+    return to_int(token) ?? 0
+}
+term=(@p:Parser):>int=>{
+    let value=factor(@p)
+    loop peek(p) =? "*" {p.at+=1 value*=factor(@p)}
+    return value
+}
+expression=(@p:Parser):>int=>{
+    let value=term(@p)
+    loop peek(p) =? "+" {p.at+=1 value+=term(@p)}
+    return value
+}
+main=():>int=>{
+    let p:Parser=[tokens=["2" "+" "3" "*" "(" "4" "+" "5" ")"]]
+    let value=expression(@p)
+    $runtime_assert (evaluate("2+3*(4+5)") =? 29)
+    $runtime_assert (evaluate("12 + 3*4") =? 24)
+    $runtime_assert (value =? 29)
+    $runtime_assert (p.at =? p.tokens.length)
+    let q:Parser=[tokens=["(" "2" "+" "3" ")" "*" "4"]]
+    $runtime_assert (expression(@q) =? 20)
+    printl(value)
+    return 0
+}

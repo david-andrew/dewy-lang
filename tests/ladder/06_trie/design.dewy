@@ -1,0 +1,34 @@
+Trie:type=[edges:dict<string int64> terminal:array<bool>]
+insert=(@trie:Trie word:string):>void=>{
+    let node=0
+    loop letter in word {
+        let key="{node}:{letter}"
+        let next=trie.edges.get(key)
+        if next is? none {
+            let fresh=trie.terminal.length
+            trie.terminal.push(false)
+            trie.edges[key]=fresh
+            node=fresh
+        } else {node=next}
+    }
+    trie.terminal[node]=true
+}
+contains_word=(trie:Trie word:string):>bool=>{
+    let node=0
+    loop letter in word {
+        let next=trie.edges.get("{node}:{letter}")
+        if next is? none {return false}
+        node=next
+    }
+    return trie.terminal[node]
+}
+main=():>int64=>{
+    let t:Trie=[edges=[] terminal=[false]]
+    loop word in ["cat" "car" "café" "dog"] {insert(@t word)}
+    $runtime_assert (contains_word(t "cat"))
+    $runtime_assert (contains_word(t "café"))
+    $runtime_assert (not contains_word(t "ca"))
+    $runtime_assert (not contains_word(t "cow"))
+    printl("{t.terminal.length} {contains_word(t "car")}")
+    return 0
+}

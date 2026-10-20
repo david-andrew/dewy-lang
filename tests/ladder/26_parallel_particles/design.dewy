@@ -1,0 +1,32 @@
+Particle:type=[x:float64 v:float64]
+advance=(p:Particle all:array<Particle>):>Particle=>{
+    let force=0.0
+    loop other in all {
+        let dx=other.x-p.x
+        force+=dx/(1.0+dx*dx)
+    }
+    let velocity=p.v+force*0.001
+    return Particle[p.x+velocity*0.001 velocity]
+}
+main=():>int64=>{
+    let initial=[loop i in [0..32) Particle[i as float64 0.0]]
+    let parallel=initial
+    let serial=initial
+    loop frame in [0..10) {
+        let previous=parallel
+        parallel=parallel_map(previous (p)=>advance(p previous))
+        let last=serial
+        let next:array<Particle>=[]
+        loop p in last {next.push(advance(p last))}
+        serial=next
+    }
+    $runtime_assert (parallel =? serial)
+    $runtime_assert (initial[0].x =? 0.0)
+    let center=0.0
+    loop p in parallel {center+=p.x}
+    $runtime_assert (abs(center-496.0) <? 1e-9)
+    $runtime_assert (parallel[0].x >? 0.0)
+    $runtime_assert (parallel[end].x <? 31.0)
+    printl("{parallel.length} {format(center ".6f")} {parallel =? serial}")
+    return 0
+}

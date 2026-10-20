@@ -1,0 +1,31 @@
+work=(n:int64):>int64=>{
+    let sum=0
+    loop i in [0..1000) {
+        sum+=(n+i)%97
+    }
+    return sum
+}
+main=():>int64=>{
+    let input=[loop i in [0..128) i]
+    let output=parallel_map(input (n)=>work(n))
+    let total=0
+    loop i in [0..input.length) {
+        assert(output[i] =? work(input[i]))
+        total+=output[i]
+    }
+    let saved=output
+    parallel_update(@output (n)=>n+1)
+    loop i in [0..output.length) {
+        assert(output[i] =? saved[i]+1)
+    }
+    let nested=parallel_range(8 (i:int64)=>{
+        let inner=parallel_range(4 (j:int64)=>i+j)
+        return inner[0]+inner[3]
+    })
+    assert(nested[7] =? 17)
+    let serial=0
+    loop i in input {serial+=work(i)}
+    assert(serial =? total)
+    printl("{output.length} {total} {nested[7]}")
+    return 0
+}

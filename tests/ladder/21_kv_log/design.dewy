@@ -1,0 +1,36 @@
+Entry:type=[key:string value:string deleted:bool=false]
+append=(path:string entry:Entry):>bool=>append_file(path "{to_json(entry)}\n")
+recover=(path:string):>dict<string string>|error=>{
+    let state:dict<string string>=[]
+    let text=read_text(path) or_throw
+    loop line in text.split("\n") {
+        if line.length =? 0 {continue}
+        let record=from_json<Entry>(line)
+        if record is? TextError {continue}
+        if record.deleted {if record.key in? state {state.pop(record.key)}}
+        else {state[record.key]=record.value}
+    }
+    return state
+}
+main=():>int64=>{
+    let path="kv.log"
+    let initialized=write_text(path "")
+    if initialized is? error {return 1}
+    $runtime_assert (append(path Entry["a" "one"]))
+    $runtime_assert (append(path Entry["b" "two"]))
+    $runtime_assert (append(path Entry["a" "three"]))
+    $runtime_assert (append(path Entry["b" "" true]))
+    let first=recover(path)
+    if first is? error {return 2}
+    $runtime_assert (first.length =? 1)
+    $runtime_assert (first["a"] =? "three")
+    $runtime_assert (append_file(path "partial-record"))
+    let second=recover(path)
+    if second is? error {return 3}
+    $runtime_assert (second["a"] =? "three")
+    $runtime_assert (second.length =? first.length)
+    let persisted=read_text(path)
+    if persisted is? error {return 4}
+    printl("{second.length} {second["a"]} {persisted.split("\n").length}")
+    return 0
+}

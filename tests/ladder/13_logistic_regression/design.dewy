@@ -1,0 +1,31 @@
+sigmoid=(z:float64):>float64=>1.0/(1.0+exp(-z))
+train_binary=(xs:array<float64> ys:array<float64>):>array<float64>=>{
+    let weights=[0.0 0.0]
+    loop epoch in [0..2000) {
+        let grad=[0.0 0.0]
+        loop i in [0..xs.length) {
+            let prediction=sigmoid(weights[0]*xs[i]+weights[1])
+            let error=prediction-ys[i]
+            grad[0]+=error*xs[i]
+            grad[1]+=error
+        }
+        weights[0]-=0.1*grad[0]/(xs.length as float64)
+        weights[1]-=0.1*grad[1]/(xs.length as float64)
+    }
+    return weights
+}
+main=():>int64=>{
+    let xs=[-3.0 -2.0 -1.0 1.0 2.0 3.0]
+    let ys=[0.0 0.0 0.0 1.0 1.0 1.0]
+    let model=train_binary(xs ys)
+    let correct=0
+    loop i in [0..xs.length) {
+        let probability=sigmoid(model[0]*xs[i]+model[1])
+        let predicted=if probability >=? 0.5 1.0 else 0.0
+        if predicted =? ys[i] {correct+=1}
+    }
+    $runtime_assert (correct =? 6)
+    $runtime_assert (abs(model[1]) <? 1e-10)
+    printl("{correct} {format(model[0] ".4f")}")
+    return 0
+}
