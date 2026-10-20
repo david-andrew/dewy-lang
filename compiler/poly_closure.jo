@@ -7,6 +7,7 @@ use 'check.jo'
 use 'expr.jo'
 use 'lower.jo'
 use 'effects.jo'
+use 'dewy_methods.jo'
 
 struct PolyScope:
     frames: FnCtx[]
@@ -112,7 +113,16 @@ poly_inst = (decl: int, targs: int[], use_pos: int) -> int:
         zs.push(z)
     key = FnInstanceKey(decl, zs)
     if let f = fn_instances.get(key):
-        if fns[f].ret == 0: fatal(use_pos, "a recursive generic closure needs an explicit return type")
+        if fns[f].ret == 0:
+            # (called again while its body is checked: one returning no value is void,
+            # as a recursive function is)
+            if fns[f].state == 1 and syntactic_void(int(nodes[decl].b)):
+                fns[f].ret = i32(T_VOID)
+                fns[f].aux_void = true
+                fns[f].fntype = i32(mk_fn(fns[f].ptypes, T_VOID, int(fn_sig(decl).mutmask), decl_fn_labels(decl)))
+                return f
+            if dewy_is_method(decl) and dewy_literal_method_name != 0: fatal(use_pos, "recursive method '{name_of(dewy_literal_method_name)}' needs an explicit return type (add `:>Type`)")
+            fatal(use_pos, "a recursive generic closure needs an explicit return type")
         return f
     family = int(nodes[decl].aux)
     f = new_inst(FK_LAMBDA, int(nodes[decl].mod), "generic_lambda")
@@ -129,7 +139,11 @@ poly_inst = (decl: int, targs: int[], use_pos: int) -> int:
             if fns[f].gdepth > 500: fatal(use_pos, "generic closures expand without end (more than 500 specializations deep)")
     sig = fn_sig(decl)
     loop pt in sig.params: fns[f].ptypes.push(subst(pt, zs))
-    if sig.ret != 0: fns[f].ret = i32(subst(int(sig.ret), zs))
+    if sig.ret != 0:
+        fns[f].ret = i32(subst(int(sig.ret), zs))
+        # A recursive call (through the object of a record literal's method, or
+        # a parameter) selects this instance before its body is checked.
+        fns[f].fntype = i32(mk_fn(fns[f].ptypes, int(fns[f].ret), int(sig.mutmask), decl_fn_labels(decl)))
     fns[f].body = i32(clone(int(nodes[decl].b)))
     fn_instances[key] = f
     decl_infos[decl_info(poly_families[family].decl)].insts.push(f)
@@ -139,6 +153,9 @@ poly_inst = (decl: int, targs: int[], use_pos: int) -> int:
     loop pt in fns[f].ptypes: zp.push(zonk(pt))
     fns[f].ptypes = zp
     fns[f].ret = i32(zonk(int(fns[f].ret)))
+    if fns[f].aux_void and tkind(int(fns[f].ret)) != .void_:
+        if dewy_is_method(decl) and dewy_literal_method_name != 0: fatal(nodes[decl].pos, "recursive method '{name_of(dewy_literal_method_name)}' returns a value; add an explicit return type (`:>Type`)")
+        fatal(nodes[decl].pos, "a recursive generic closure that returns a value needs an explicit return type")
     zonk_tree(int(fns[f].body))
     loop l in fns[f].locals: locals[l].type = i32(zonk(int(locals[l].type)))
     fns[f].fntype = i32(mk_fn(zp, int(fns[f].ret), int(sig.mutmask), decl_fn_labels(decl)))
