@@ -15,7 +15,8 @@ enum DewyKind:
     unknown, op, identifier, boolean, metatag, based_string, integer, real,
     quoted, rawquoted, eof, atom, ambiguous, binary, block, combined_assignment,
     flat, flow, interpolated_string, inverted_comparison, keyword, keyword_expr,
-    operator, postfix, prefix, string, string_chunk, source_integer, source_real
+    operator, postfix, prefix, string, string_chunk, source_integer, source_real,
+    directive
 
 dw_kind_name = (kind: DewyKind) -> str:
     match kind:
@@ -48,6 +49,7 @@ dw_kind_name = (kind: DewyKind) -> str:
         prefix: "Prefix"
         string: "String"
         string_chunk: "StringChunk"
+        directive: "Directive"
 
 struct DewySyntax:
     kind: DewyKind
@@ -111,6 +113,48 @@ dw_op = (id: int) -> DewyToken:
 dw_fail = (id: int, what: str) -> int:
     fatal(dewy_syntax[id].pos, "Dewy core experiment does not yet support {what}")
     0
+
+# Metatags the design defines that this compiler does not implement yet. Each
+# is reported where it is written rather than as a generic syntax error.
+dw_designed_directive = (name: str) -> bool:
+    name in ["abstract", "allocator", "breakpoint", "expect", "explicit_copies", "fail", "field", "lend", "no_prelude", "proof", "prototype", "prototype_warnings", "supported_targets", "target", "test", "unsafe_assume", "__copy__", "__drop__", "__move__"]
+
+dw_unimplemented = (id: int, name: str) -> int:
+    fatal(dewy_syntax[id].pos, "`${name}` is part of the design but not implemented yet")
+    0
+
+# A metatag where no metatag form fits: name the directive precisely.
+dw_metatag_fail = (id: int) -> int:
+    name = dewy_syntax[id].text
+    pos = dewy_syntax[id].pos
+    if dw_designed_directive(name): return dw_unimplemented(id, name)
+    if name == "capture": fatal(pos, "`$capture` belongs in a parameter list before a name: `($capture @count) => ...`")
+    if name == "include_bytes": fatal(pos, "`$include_bytes` takes one path literal: `$include_bytes(p\"asset.png\") as image`")
+    fatal(pos, "unknown directive `${name}` (a loop label goes on its own line just before its loop)")
+    0
+
+# `$assert`/`$runtime_assert` become calls of internal intrinsics whose names
+# no program can shadow; unimplemented directive forms are reported here.
+dw_directive = (id: int) -> int:
+    name = dewy_syntax[id].text
+    pos = dewy_syntax[id].pos
+    if name != "assert" and name != "runtime_assert": return dw_unimplemented(id, name)
+    condition = dw_child(id, 0)
+    message = dw_child(id, 1)
+    args = [dw_expr(condition)]
+    if message != 0:
+        if name == "assert" and dewy_syntax[dw_unwrap(message)].kind != .string: fatal(dewy_syntax[message].pos, "a `$assert` message is a string literal: the compiler reports it")
+        args.push(dw_expr(message))
+    else if name == "runtime_assert":
+        text = mk(.str_lit, pos)
+        nodes[text].sval = i32(intern("assertion failed: " + join(words(dewy_syntax[dw_child(id, 2)].text), " ")))
+        args.push(text)
+    callee = mk(.ident, pos)
+    nodes[callee].name = i32(intern("$" + name))
+    call = mk(.call, pos)
+    nodes[call].a = i32(callee)
+    set_list(call, args)
+    call
 
 # The syntax parser has already recognized the digits and base. Accumulate with
 # an explicit limit so neither overflow nor a high unsigned bit changes a value.
@@ -287,6 +331,7 @@ dw_include = (id: int) -> int:
 dw_type = (id: int) -> int:
     let id = dw_unwrap(id)
     pos = dewy_syntax[id].pos
+    if dewy_syntax[id].kind == .metatag: return dw_metatag_fail(id)
     name = dw_name(id)
     if name != "":
         if name == "int64": name = "i64"
@@ -416,6 +461,7 @@ dw_param = (id: int, kind: NK) -> int:
     else if kind == .vardecl and initial == 0: return dw_fail(id, "a field without a type or default")
     by_place = dw_op(lhs) == .at
     if by_place: lhs = dw_child(lhs, 1)
+    if dewy_syntax[dw_unwrap(lhs)].kind == .metatag: return dw_metatag_fail(dw_unwrap(lhs))
     name = dw_name(lhs)
     pattern = kind == .param and dewy_syntax[lhs].kind == .block and dewy_syntax[lhs].text == "[]:"
     if name == "" and not pattern: return dw_fail(lhs, "this parameter or field")
@@ -459,7 +505,9 @@ dw_function = (id: int, name: str) -> int:
     bound: {int: bool} = {}
     loop p in dewy_syntax[params].children:
         if dewy_syntax[p].kind == .metatag:
-            if dewy_syntax[p].text != "capture": return dw_fail(p, "this parameter modifier; use $capture")
+            if dewy_syntax[p].text != "capture":
+                if dw_designed_directive(dewy_syntax[p].text): return dw_metatag_fail(p)
+                fatal(dewy_syntax[p].pos, "unknown parameter modifier `${dewy_syntax[p].text}` (the one modifier is `$capture`)")
             if capture: return dw_fail(p, "$capture without a local name")
             if name != "": return dw_fail(p, "$capture on a module function")
             capture = true
@@ -569,6 +617,8 @@ dw_expr = (id: int) -> int:
     text = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
     if k == .based_string: return dw_binary(id)
+    if k == .directive: return dw_directive(id)
+    if k == .metatag: return dw_metatag_fail(id)
     if k == .identifier:
         if text == "none": return mk(.none_lit, pos)
         if text == "end" and dw_index_context.len() > 0:
@@ -1241,6 +1291,9 @@ dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
         nodes[n].c = i32(rest)
     return n
 
+dw_label_fail = (pos: int, label: int):
+    fatal(pos, "a loop label must be followed by a loop (`${name_of(label)}` is not a directive)")
+
 dw_block = (id: int, accumulator: int = 0, map: bool = false) -> int:
     n = mk(.block, dewy_syntax[id].pos)
     statements: int[]
@@ -1250,17 +1303,18 @@ dw_block = (id: int, accumulator: int = 0, map: bool = false) -> int:
         label_pos = 0
         loop i in 0.. and child in children:
             if dewy_syntax[child].kind == .metatag:
-                if label != 0: fatal(label_pos, "a loop label must be followed by a loop")
+                if dw_designed_directive(dewy_syntax[child].text) or dewy_syntax[child].text == "capture" or dewy_syntax[child].text == "include_bytes": dw_metatag_fail(child)
+                if label != 0: dw_label_fail(label_pos, label)
                 label = intern(dewy_syntax[child].text)
                 label_pos = dewy_syntax[child].pos
                 continue
             statement = if accumulator != 0 and i + 1 == children.len(): dw_collect(child, accumulator, map) else: dw_stmt(child)
             if label != 0:
-                if nodes[statement].kind != .loopx and nodes[statement].kind != .for_ and nodes[statement].kind != .while_: fatal(label_pos, "a loop label must be followed by a loop")
+                if nodes[statement].kind != .loopx and nodes[statement].kind != .for_ and nodes[statement].kind != .while_: dw_label_fail(label_pos, label)
                 nodes[statement].sval = i32(label)
                 label = 0
             statements.push(statement)
-        if label != 0: fatal(label_pos, "a loop label must be followed by a loop")
+        if label != 0: dw_label_fail(label_pos, label)
     else if accumulator != 0: statements.push(dw_collect(id, accumulator, map))
     else: statements.push(dw_stmt(id))
     set_list(n, statements)

@@ -3593,6 +3593,154 @@ ceval = (e: int) -> CVal:
 
 const_eval_bool = (e: int) -> bool: ceval(e).i != 0
 
+# ---------------- static assertions ----------------
+# `$assert` must be proven while checking. The facts available so far are
+# integer, boolean and string constants, compile-time bindings and type tests
+# that narrowing has already decided. Anything else is unknown, never a
+# runtime check. sa_blocker is the first part that left a value unknown.
+struct SVal:
+    known: bool
+    is_str: bool
+    i: int
+    s: str
+
+sa_blocker = 0
+
+sa_unknown = (e: int) -> SVal:
+    if sa_blocker == 0: sa_blocker = e
+    SVal(false, false, 0, "")
+
+sa_int = (v: int) -> SVal: SVal(true, false, v, "")
+
+# A 64-bit signed operand: arithmetic folds only when it cannot wrap.
+sa_wide_signed = (e: int) -> bool:
+    t = prune(int(nodes[e].type))
+    t != 0 and types[t].kind == .int_ and types[t].sign and int(types[t].bits) == 64
+
+sa_unsigned = (e: int) -> bool:
+    t = prune(int(nodes[e].type))
+    t != 0 and types[t].kind == .int_ and not types[t].sign
+
+sa_fits = (v: int, t0: int) -> bool:
+    t = prune(t0)
+    if t == 0: return false
+    if types[t].kind != .int_: return types[t].kind == .bool_
+    bits = int(types[t].bits)
+    if bits >= 64: return types[t].sign or v >= 0
+    if types[t].sign: return v >= -(1 << (bits - 1)) and v < (1 << (bits - 1))
+    v >= 0 and v < (1 << bits)
+
+static_value = (e: int) -> SVal:
+    k = nodes[e].kind
+    if k == .bool_lit or k == .int_lit: return sa_int(nodes[e].ival)
+    if k == .str_lit and nodes[e].aux == 0: return SVal(true, true, 0, name_of(int(nodes[e].sval)))
+    if k == .ident:
+        initial = 0
+        if nodes[e].type != 0 and (nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global))):
+            initial = binding_const_init(nodes[e].aux as SK, int(nodes[e].sym), nodes[e].pos)
+        else:
+            s = lookup(int(nodes[e].name))
+            if s != 0: initial = binding_const_init(syms[s].kind, int(syms[s].ref), nodes[e].pos)
+        if initial == 0: return sa_unknown(e)
+        return static_value(initial)
+    if k == .conv:
+        v = static_value(int(nodes[e].a))
+        if not v.known or v.is_str: return v
+        if nodes[e].aux != i32(int(CV.int_)) or not sa_fits(v.i, int(nodes[e].type)): return sa_unknown(e)
+        return v
+    if k == .unary and nodes[e].op == i32(int(Tok.minus)):
+        v = static_value(int(nodes[e].a))
+        if not v.known: return v
+        if not sa_wide_signed(e) or v.i == -9223372036854775807 - 1: return sa_unknown(e)
+        return sa_int(-v.i)
+    if k == .not_:
+        v = static_value(int(nodes[e].a))
+        if not v.known: return v
+        return sa_int(if v.i == 0: 1 else: 0)
+    if k == .and_ or k == .or_:
+        a = static_value(int(nodes[e].a))
+        b = static_value(int(nodes[e].b))
+        decisive = if k == .and_: 0 else: 1
+        if a.known and (a.i != 0) == (decisive == 1): return sa_int(decisive)
+        if b.known and (b.i != 0) == (decisive == 1): return sa_int(decisive)
+        if a.known and b.known: return sa_int(1 - decisive)
+        return SVal(false, false, 0, "")
+    if k == .istype:
+        # (already narrowed to exactly this type: always true)
+        if nodes[e].aux == -3: return sa_int(1)
+        return sa_unknown(e)
+    if k == .binary:
+        a = static_value(int(nodes[e].a))
+        b = static_value(int(nodes[e].b))
+        if not a.known: return a
+        if not b.known: return b
+        op = nodes[e].op as Tok
+        if a.is_str or b.is_str:
+            if a.is_str != b.is_str: return sa_unknown(e)
+            if op == .eq: return sa_int(int(a.s == b.s))
+            if op == .ne: return sa_int(int(a.s != b.s))
+            return sa_unknown(e)
+        if op == .eq: return sa_int(int(a.i == b.i))
+        if op == .ne: return sa_int(int(a.i != b.i))
+        if op == .lt or op == .le or op == .gt or op == .ge:
+            # Order unsigned words by their unsigned values.
+            x = a.i
+            y = b.i
+            if sa_unsigned(int(nodes[e].a)):
+                x = x ^ (-9223372036854775807 - 1)
+                y = y ^ (-9223372036854775807 - 1)
+            if op == .lt: return sa_int(int(x < y))
+            if op == .le: return sa_int(int(x <= y))
+            if op == .gt: return sa_int(int(x > y))
+            return sa_int(int(x >= y))
+        if not sa_wide_signed(e): return sa_unknown(e)
+        if op == .plus:
+            r = a.i + b.i
+            if ((a.i ^ r) & (b.i ^ r)) < 0: return sa_unknown(e)
+            return sa_int(r)
+        if op == .minus:
+            r = a.i - b.i
+            if ((a.i ^ b.i) & (a.i ^ r)) < 0: return sa_unknown(e)
+            return sa_int(r)
+        if op == .star:
+            if a.i == 0 or b.i == 0: return sa_int(0)
+            r = a.i * b.i
+            if (a.i == -1 and b.i == -9223372036854775807 - 1) or (b.i == -1 and a.i == -9223372036854775807 - 1) or r / b.i != a.i: return sa_unknown(e)
+            return sa_int(r)
+        return sa_unknown(e)
+    sa_unknown(e)
+
+# 1 when the condition is proven, 0 when it is refuted, -1 when unknown.
+static_truth = (e: int) -> int:
+    sa_blocker = 0
+    v = static_value(e)
+    if not v.known: return -1
+    if v.i != 0: 1 else: 0
+
+assertion_refuted = (cond: int, message: int):
+    why = "this condition is always false"
+    if message != 0 and nodes[message].kind == .str_lit and nodes[message].aux == 0: why = name_of(int(nodes[message].sval))
+    fatal(nodes[cond].pos, "assertion refuted: {why}")
+
+# What stopped a proof, in the source's terms.
+sa_reason = (e: int) -> str:
+    k = nodes[e].kind
+    if k == .ident: return "`{name_of(int(nodes[e].name))}` is not a compile-time constant"
+    if k == .call or k == .intrinsic: return "it depends on a function call, which `$assert` cannot evaluate yet"
+    if k == .field: return "it depends on the field `{name_of(int(nodes[e].name))}`, which `$assert` cannot follow yet"
+    if k == .index: return "it depends on an element, which `$assert` cannot follow yet"
+    if k == .float_lit: return "real-number arithmetic is not evaluated by `$assert` yet"
+    if k == .istype: return "the value's type is only known when the program runs"
+    if k == .binary or k == .unary or k == .conv: return "this arithmetic could overflow or is not evaluated by `$assert` yet"
+    "this expression is not evaluated by `$assert` yet"
+
+prove_assertion = (cond: int, message: int):
+    truth = static_truth(cond)
+    if truth == 1: return
+    if truth == 0: assertion_refuted(cond, message)
+    at = if sa_blocker != 0: sa_blocker else: cond
+    fatal(nodes[at].pos, "cannot prove assertion yet: {sa_reason(at)} (`$assert` is proven while compiling; `$runtime_assert` checks a condition when the program runs)")
+
 # the build: block of the main file, checked (main.jo's scan_build_block read it before checking
 # began, to know the target: here its mistakes are errors with places)
 check_build_block = ():

@@ -20,6 +20,9 @@ dn_at = 0
 dn_file = 0
 dn_angles = 0
 dn_depth = 0
+# Set while an assertion directive parses its condition: the directive owns
+# the top-level comma that separates the condition from its message.
+dn_comma_stop = false
 
 # Like the implementation-language lexer, classify interned words by ID. Names
 # added after this table cannot be keywords; formatting keeps its noninterning
@@ -453,14 +456,17 @@ dn_string = (token: DewyLexeme) -> int:
             saved_tokens = dn_tokens
             saved_at = dn_at
             saved_angles = dn_angles
+            saved_comma = dn_comma_stop
             dn_tokens = dn_lex(dn_file, first, i)
             dn_at = 0
             dn_angles = 0
+            dn_comma_stop = false
             expression = dn_expr(0)
             if dn_tokens[dn_at].kind != .eof: dn_error(dn_tokens[dn_at].start, "expected one interpolation expression")
             dn_tokens = saved_tokens
             dn_at = saved_at
             dn_angles = saved_angles
+            dn_comma_stop = saved_comma
             chunks.push(dn_node(.block, "{{}}:", first, [expression]))
             i += 1
             chunk_start = i
@@ -495,7 +501,15 @@ dn_partial = (opening: DewyLexeme) -> int:
     fn = dn_operator(.binary, .function, params, body)
     dn_node(.block, "():", opening.start, [fn])
 
+# Brackets start a fresh comma context, even inside an assertion condition.
 dn_block = () -> int:
+    saved = dn_comma_stop
+    dn_comma_stop = false
+    block = dn_bracketed()
+    dn_comma_stop = saved
+    block
+
+dn_bracketed = () -> int:
     opening = dn_take()
     if opening.symbol == .lparen:
         op = dn_peek()
@@ -541,10 +555,51 @@ dn_flow = () -> int:
         break
     dn_node(.flow, "", start, arms)
 
+# Directive forms with their own argument grammar, as `if` and `return` have:
+# 1 takes a condition and an optional message, 2 only an optional message and
+# 3 nothing. Other metatags stay single tokens: labels, settings, `$capture`.
+dn_directive_form = (name: str) -> int:
+    if name == "assert" or name == "runtime_assert" or name == "expect" or name == "unsafe_assume": return 1
+    if name == "fail": return 2
+    if name == "breakpoint": return 3
+    0
+
+# Children: the condition, the message and the condition's source text (each
+# 0 when absent). The text gives a failed check its default description.
+dn_directive = (token: DewyLexeme, form: int) -> int:
+    dn_at += 1
+    name = dn_payload(token)
+    next = dn_tokens[dn_at]
+    present = not next.newline and dn_can_start()
+    if form == 3 or not present:
+        if form == 1: return dn_error(token.start, "`${name}` needs a condition: `${name} condition` or `${name} condition, \"message\"`")
+        return dn_node(.directive, name, token.start, [0, 0, 0])
+    saved = dn_comma_stop
+    dn_comma_stop = true
+    condition = 0
+    text = 0
+    message = 0
+    if form == 1:
+        # `$assert(condition, "message")`: an adjacent group is the argument
+        # list, as for other directives, with the same comma.
+        listed = next.symbol == .lparen and not next.space
+        if listed: dn_at += 1
+        first = dn_tokens[dn_at].start
+        condition = dn_expr(0)
+        text = dn_node(.string, files[dn_file].src[first..dn_tokens[dn_at - 1].stop), first)
+        if dn_accept(.comma): message = dn_expr(0)
+        if listed: dn_expect(.rparen)
+    else: message = dn_expr(0)
+    dn_comma_stop = saved
+    dn_node(.directive, name, token.start, [condition, message, text])
+
 dn_atom = () -> int:
     token = dn_tokens[dn_at]
     symbol = token.symbol
     if token.kind == .eof: return dn_error(token.start, "expected an expression")
+    if token.kind == .metatag:
+        form = dn_directive_form(dn_payload(token))
+        if form != 0: return dn_directive(token, form)
     if symbol == .lparen or symbol == .lbrack or symbol == .lbrace or symbol == .langle: return dn_block()
     if symbol == .kw_if or symbol == .kw_loop or symbol == .kw_match: return dn_flow()
     if (symbol == .kw_let or symbol == .kw_const or symbol == .kw_return or symbol == .kw_break or symbol == .kw_continue or symbol == .kw_import or symbol == .kw_from): return dn_stmt()
@@ -590,6 +645,7 @@ dn_expr = (minimum: int) -> int:
                 left = dn_operator(.binary, .broadcast_call, left, dn_block())
                 continue
             right = dn_take()
+            if right.kind == .metatag and dw_designed_directive(dn_payload(right)): return dn_error(right.start, "`${dn_payload(right)}` is part of the design but not implemented yet")
             if right.kind != .identifier: return dn_error(right.start, "expected a member name")
             left = dn_operator(.binary, .dot, left, dn_node(.identifier, dn_payload(right), right.start, name = right.name))
             continue
@@ -615,6 +671,7 @@ dn_expr = (minimum: int) -> int:
             if inverted != .none:
                 op = inverted
                 token.stop = dn_tokens[dn_at + 1].stop
+        if op == .comma and dn_comma_stop: break
         power = dn_power(op)
         if power == 0 or power < minimum: break
         if (op == .plus or op == .minus) and token.space and not dn_tokens[dn_at + 1].space: break

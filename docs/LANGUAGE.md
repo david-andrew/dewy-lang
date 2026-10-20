@@ -1598,6 +1598,20 @@ stored ranges and strings. Active labels must be unique within a function;
 a label can be reused after its loop ends. A closure cannot exit its caller's
 loop. Unlabeled exits still target the nearest loop.
 
+Assertions are directives with their own argument grammar:
+`$runtime_assert condition` or `$runtime_assert condition, "message"` checks
+the condition when the program runs; a failure reports the condition (or the
+message, which may interpolate values) and exits with status 101.
+`$assert condition [, "message"]` must be proven while compiling: today the
+compiler proves conditions decided by integer, boolean and string constants,
+`const` bindings and type tests that narrowing has settled. It reports
+`assertion refuted` for a false condition and `cannot prove assertion yet` for
+anything else; it never becomes a runtime check. The directive owns the comma
+after its condition, and `$assert(condition, "message")` is the same form.
+Other directives of the design (`$explicit_copies`, `$no_prelude`, `$lend`,
+`$allocator`, `$expect`, `$unsafe_assume`, `$target`, …) are reported as not
+implemented yet where they appear.
+
 String length, indexing, slicing and iteration use extended grapheme clusters.
 `"é🙂".length` is 2. String loops stream from an independent input snapshot;
 changing the source variable does not change the remaining input. They create

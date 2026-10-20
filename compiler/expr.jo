@@ -14,7 +14,8 @@ enum IN:
     arrdata, panic, assert, print, embed, from_bytes, to_bytes, argv, setlen, truncate, resize,
     hash, alignof, unreachable, arrcap, fmt_struct, sqrt, vec_ctor, cfn_cast, wasm_call, callc, floor_,
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
-    read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set
+    read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
+    static_assert, runtime_assert
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed
@@ -26,6 +27,8 @@ struct Intrinsic:
 
 intrinsics = [
     Intrinsic("$dewy_range_exhausted", .panic, false),
+    Intrinsic("$assert", .static_assert, false),
+    Intrinsic("$runtime_assert", .runtime_assert, false),
     Intrinsic("__dewy_iter", .dewy_iter, false),
     Intrinsic("__dewy_iter_done", .dewy_iter_done, false),
     Intrinsic("__dewy_iter_value", .dewy_iter_value, false),
@@ -3648,10 +3651,19 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if nargs > 0: arg_type(args, 0, T_STR)
         r = T_NEVER
     else if id == .unreachable: r = T_NEVER
-    else if id == .assert:
+    else if id == .assert or id == .runtime_assert:
         nargs_check(n, nargs, 1, 2, "assert")
         arg_type(args, 0, T_BOOL)
         if nargs == 2: arg_type(args, 1, T_STR)
+        # A runtime assertion whose condition is known to fail is an error.
+        if id == .runtime_assert and static_truth(args[0]) == 0: assertion_refuted(args[0], 0)
+    else if id == .static_assert:
+        nargs_check(n, nargs, 1, 2, "$assert")
+        arg_type(args, 0, T_BOOL)
+        if nargs == 2: arg_type(args, 1, T_STR)
+        prove_assertion(args[0], if nargs == 2: args[1] else: 0)
+        # Proven: nothing remains to evaluate or emit.
+        set_list(n, [])
     else if id == .print:
         s = mk(.str_lit, nodes[n].pos)
         nodes[s].aux = 1

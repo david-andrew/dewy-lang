@@ -42,6 +42,7 @@ TESTS = (
     'tests/test_core_dev.py',
     'tests/test_core_speed.py',
     'tests/test_records_sra.py',
+    'tests/test_surface.py',
 )
 
 

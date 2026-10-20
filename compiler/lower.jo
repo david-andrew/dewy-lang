@@ -3065,7 +3065,8 @@ gen_intrinsic = (e: int) -> Val:
     if id == .unreachable:
         e_call_nr(rt("__panic"), [e_daddr(str_data("unreachable code reached"))], -1)
         return never_after(e)
-    if id == .assert:
+    if id == .static_assert: return V(-1, false)
+    if id == .assert or id == .runtime_assert:
         c = gen_expr(args[0]).v
         iff(e_bin(.eq, VI, c, e_iconst(0)))
         # (the message is made only when it fails: a temporary made there is a conditional one)
