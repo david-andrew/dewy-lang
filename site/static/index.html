@@ -1,14 +1,250 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>An Everyday Language — Dewy</title><meta name="description" content="Clear, expressive computation, from everyday programs to engineering, science and games."><meta name="theme-color" content="#f3faf6">
-<link rel="canonical" href="https://dewy-lang.org/"><link rel="icon" href="/assets/images/dewy-logo-128.png">
-<script src="/assets/js/theme-init.js"></script><link rel="stylesheet" href="/assets/css/site.css"><script src="/assets/js/site.js" defer></script></head>
-<body class="publication-home"><a class="skip-link" href="#main">Skip to content</a><header class="site-header" data-header><nav class="nav-wrap" aria-label="Primary navigation">
-<a class="brand" href="/"><img src="/assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a><div class="nav-end"><div class="nav-links" id="site-nav" data-nav><a href="/learn/">Learn</a><a href="/reference/">Reference</a><a href="/examples/">Examples</a><a href="/status/">Status</a><a class="nav-cta" href="/playground/">Try Dewy</a></div>
-<button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to dark theme"></button><button type="button" class="nav-toggle" data-nav-toggle aria-controls="site-nav" aria-expanded="false">Menu</button></div></nav></header>
-<main id="main" class="page-wrap"><header class="page-hero"><p class="eyebrow">The Dewy programming language</p><h1>An Everyday Language</h1><p>Clear, expressive computation, from everyday programs to engineering, science and games.</p></header><div class="button-row"><a class="button primary" href="/install/">Install Dewy</a><a class="button" href="/learn/">Start learning</a><a class="button" href="/playground/">Run browser examples</a></div><section class="content-section" id="everyday"><h2>Small program. Explicit result.</h2><div class="hero-code"><div class="code-top"><span>Independent array values</span><a href="/status/#website-examples">Generated example results</a></div><div class="hero-code-body"><div><pre><code class="language-dewy" data-example="{&quot;mode&quot;: &quot;run&quot;, &quot;stdout&quot;: &quot;42\n&quot;}">let original = [20 22]
-let copy = original
-copy[0] = 99
-printl(original[0]+original[1])
-</code></pre></div><div class="code-out"><span class="output-label">Expected stdout</span><pre class="output-lines">42</pre></div></div></div></section><section class="content-section" id="compiler"><h2>One current compiler</h2><p>The experimental compiler checks Dewy and emits native code or WebAssembly. It is implemented in Jo while Dewy grows toward self-hosting. Start with the tested Learn examples; use the reference to explore the complete language design.</p><p><a href="/status/">Fresh coverage and known failures</a> · <a href="/reference/">Language design</a></p></section><section class="content-section" id="install"><h2>Try a toolchain</h2><pre><code>curl -fsSL https://dewy-lang.org/install.sh | bash</code></pre><p>Linux x86-64/ARM64 and macOS ARM64; <a href="/install/#windows">PowerShell instructions for Windows x64</a>. See prerequisites and release-channel availability on the install page.</p></section></main>
-<footer class="site-footer"><div class="footer-wrap"><div class="footer-brand"><a class="brand" href="/">Dewy</a><p>Python-like ease. C-like speed. Safe by default. These are our goals; measured behavior lives in coverage.</p></div><nav class="footer-links" aria-label="More"><a href="/install/">Install</a><a href="/tools/">Tools</a><a href="/contribute/">Contribute</a><a href="/archive/">Archive</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a></nav></div></footer></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dewy Programming Language</title>
+  <meta name="description" content="Dewy is a programming language for clear, expressive computation—from ordinary programs to engineering, science, and mathematics.">
+  <meta name="theme-color" content="#f3faf6">
+  <meta property="og:title" content="The Dewy Programming Language">
+  <meta property="og:description" content="An everyday programming language for clear, expressive computation.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://dewy-lang.org/">
+  <meta property="og:image" content="https://dewy-lang.org/assets/images/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Dewy — An Everyday Language">
+  <meta property="og:site_name" content="Dewy">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Dewy Programming Language">
+  <meta name="twitter:description" content="An everyday programming language for clear, expressive computation.">
+  <meta name="twitter:image" content="https://dewy-lang.org/assets/images/og-image.png">
+  <link rel="canonical" href="https://dewy-lang.org/">
+  <link rel="icon" href="/assets/images/dewy-logo-128.png">
+  <script src="/assets/js/theme-init.js"></script>
+  <link rel="stylesheet" href="/assets/css/site.css">
+  <script src="/assets/js/site.js" defer></script>
+</head>
+<body class="home-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" data-header>
+    <nav class="nav-wrap" aria-label="Primary navigation">
+      <a class="brand" href="/"><img src="/assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a>
+      <div class="nav-end">
+        <div class="nav-links" id="site-nav" data-nav><a href="/learn/">Learn</a><a href="/reference/">Reference</a><a href="/examples/">Examples</a><a href="/status/">Status</a><a class="nav-cta" href="/playground/">Try Dewy</a></div>
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to dark theme"></button>
+        <button type="button" class="nav-toggle" data-nav-toggle aria-controls="site-nav" aria-expanded="false">Menu</button>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="home-hero">
+      <div class="drop drop-a" aria-hidden="true"></div>
+      <div class="drop drop-b" aria-hidden="true"></div>
+      <div class="drop drop-c" aria-hidden="true"></div>
+      <div class="hero-brand" data-hero-brand>
+        <img src="/assets/images/dewy-logo-128.png" alt="">
+        <span>Dewy</span>
+      </div>
+      <h1>An Everyday Language</h1>
+      <p class="lead">Dewy is a language for clear, expressive computation—useful for anything from ordinary programming to complex engineering, science, and mathematics, and everything in between.</p>
+
+      <div class="dewline" aria-label="Install command">
+        <span class="prompt" aria-hidden="true">$</span>
+        <code id="install-cmd">curl -fsSL https://dewy-lang.org/install.sh | bash</code>
+        <button type="button" class="copy" data-copy="curl -fsSL https://dewy-lang.org/install.sh | bash">Copy</button>
+      </div>
+      <p class="dewline-note">Linux and macOS. Windows: <code>irm https://dewy-lang.org/install.ps1 | iex</code> · <a href="/install/">Install details</a> · <a href="/playground/">Try examples in your browser</a></p>
+
+      <div class="hero-code" aria-label="Dewy source example">
+        <div class="code-top"><span>example.dewy</span><a class="runs" href="/status/#website-examples">tested ✓</a></div>
+        <div class="hero-code-body">
+          <pre class="hero-source"><code class="language-dewy" data-example='{"mode":"run","stdout":"0: c\n1: a\n2: f\n3: é\n5: 👨‍👩‍👧‍👦\n7: 🍀\n"}'>text = "café 👨‍👩‍👧‍👦 🍀"
+
+loop i in 0.. and c in text
+    if c not =? ' ' {
+        printl"{i}: {c}"
+    }</code></pre>
+          <div class="code-out">
+            <span class="output-label">Output</span>
+            <pre class="output-lines"><code>0: c
+1: a
+2: f
+3: é
+5: 👨‍👩‍👧‍👦
+7: 🍀</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <p class="caveat">Dewy is in early development. The experimental compiler is written in Jo while Dewy grows toward self-hosting, and it implements a growing part of the language design. The browser playground runs precompiled examples. <a href="/status/">See generated coverage and known failures.</a></p>
+    </section>
+
+    <div class="showcase">
+      <div class="showcase-intro">
+        <h2>Key Features</h2>
+        <p>Capabilities at the heart of Dewy’s design. Examples marked <em>tested</em> are compiled and run with the current compiler on every site build; <em>design previews</em> show language the compiler does not support yet.</p>
+      </div>
+
+      <section class="showcase-row" aria-labelledby="units-heading">
+        <div class="showcase-pane code-pane">
+          <div class="pane-top"><span>units.dewy</span><a class="tag implemented" href="/status/#website-examples">tested ✓</a></div>
+          <pre><code class="language-dewy lined" data-example='{"mode":"run","stdout":"4500 J  9800.0 N  50 W\n"}'>from units import kg, m, N, J, W
+
+# Units are values. Juxtaposition multiplies.
+mass = 10kg
+velocity = 30m/s
+energy = 1/2 * mass * velocity^2   # 4500 J
+
+force = 1000kg * 9.8(m/s^2)        # 9800 N
+work = 20N * 10m                   # 200 J
+power = work / 4s                  # 50 W
+
+printl"{energy/J} J  {force/N} N  {power/W} W"</code></pre>
+        </div>
+        <div class="showcase-pane prose-pane">
+          <span class="chip">engineering &amp; science</span>
+          <h2 id="units-heading">Physical units, built in</h2>
+          <p>Dewy treats kilograms, meters, and seconds as values with dimensions, not as plain numbers. Juxtaposing a number with a unit multiplies them, dimensions carry through arithmetic, and mismatched dimensions are errors—so <code>20N * 10m</code> is joules and <code>3m + 5s</code> doesn’t compile. Dimensions are checked at compile time and cost nothing at runtime.</p>
+        </div>
+      </section>
+
+      <section class="showcase-row" aria-labelledby="ranges-heading">
+        <div class="showcase-pane code-pane">
+          <div class="pane-top"><span>ranges.dewy</span><a class="tag implemented" href="/status/#website-examples">tested ✓</a></div>
+          <pre><code class="language-dewy lined" data-example='{"mode":"run","stdout":"false\n[5, 9, 2, 6]\nhello\n"}'># Bounds are visible: [ ] includes, ( ) excludes.
+window = [0..10)              # 0 1 ... 9
+evens = 0,2..100              # step inferred from the pair
+countdown = [10,8..0]         # negative steps too
+
+printl(16 in? (5..15])        # false
+
+# Slices use the same bounds.
+samples = [3 1 4 1 5 9 2 6]
+printl(samples[end-3..])      # [5, 9, 2, 6]
+printl('hello world'[0..5))   # hello</code></pre>
+        </div>
+        <div class="showcase-pane prose-pane">
+          <span class="chip">ranges</span>
+          <h2 id="ranges-heading">Ranges with clear bounds</h2>
+          <p>Brackets say exactly which endpoints belong to a range, a second anchor sets the step—including negative steps—and the same bound forms drive loops, membership tests, and slicing.</p>
+        </div>
+      </section>
+
+      <section class="showcase-row" aria-labelledby="loop-heading">
+        <div class="showcase-pane code-pane">
+          <div class="pane-top"><span>loops.dewy</span><a class="tag implemented" href="/status/#website-examples">tested ✓</a></div>
+          <pre><code class="language-dewy lined" data-example='{"mode":"run","stdout":"I give star wars a 73 out of 100\nI give star trek a 89 out of 100\nI give legend of the galactic heroes a 100 out of 100\n0: D\n1: e\n2: w\n3: y\n"}'>ratings = [
+    'star wars' -&gt; 73
+    'star trek' -&gt; 89
+    'legend of the galactic heroes' -&gt; 100
+]
+
+# One keyword covers while, for, and beyond.
+loop [show rating] in ratings
+    printl'I give {show} a {rating} out of 100'
+
+# Iterators compose logically.
+loop i in 0.. and letter in 'Dewy' printl'{i}: {letter}'</code></pre>
+        </div>
+        <div class="showcase-pane prose-pane">
+          <span class="chip">iteration</span>
+          <h2 id="loop-heading">One loop to rule them all</h2>
+          <p>There is no <code>for</code> / <code>while</code> / <code>do-while</code> zoo—<code>loop</code> takes any condition. The <code>in</code> operator assigns the next value and reports whether one existed, so iterators can combine with <code>and</code> or <code>or</code> in a single loop.</p>
+        </div>
+      </section>
+
+      <section class="showcase-row" aria-labelledby="types-heading">
+        <div class="showcase-pane code-pane">
+          <div class="pane-top"><span>refinements.dewy</span><a class="tag planned" href="/reference/refinements-and-effects.html">design preview</a></div>
+          <pre><code class="language-dewy lined" data-example='{"mode":"design-only"}'># Types can carry liquid refinement conditions.
+Positive = int&lt; i=&gt;i&gt;?0 &gt;
+NonEmptyArray = array&lt; length&gt;?0 &gt;
+
+score:Positive = 42
+values:NonEmptyArray&lt;int&gt; = [3 5 8]
+
+# Proven facts can remove checks and guide layout.
+first = values[0]</code></pre>
+        </div>
+        <div class="showcase-pane prose-pane">
+          <span class="chip">type system</span>
+          <h2 id="types-heading">Types that carry useful facts</h2>
+          <p>Dewy’s liquid refinement design lets types state relationships such as “positive integer” or “non-empty array.” The compiler proves conditions from literals and ordinary control flow — a guard, a store, an iteration — then reuses those facts for safety, bounds-check elimination, and integer-width selection, so <code>values[0]</code> needs no runtime check. Today it checks exact array lengths such as <code>array&lt;int64 length=3&gt;</code> and narrows optional and union values; the general syntax shown here is a design preview.</p>
+        </div>
+      </section>
+
+      <section class="showcase-row" aria-labelledby="fn-heading">
+        <div class="showcase-pane code-pane">
+          <div class="pane-top"><span>functions.dewy</span><a class="tag implemented" href="/status/#website-examples">tested ✓</a></div>
+          <pre><code class="language-dewy lined" data-example='{"mode":"run","stdout":"integer: 42\ntext: Dewy\n40\n"}'># `&amp;` combines implementations into one overload set.
+format = ((value:int64):&gt;string =&gt; "integer: {value}")
+       &amp; ((value:string):&gt;string =&gt; "text: {value}")
+
+printl(format(42))      # integer: 42
+printl(format("Dewy"))  # text: Dewy
+
+# `@` passes a function without calling it.
+double = (x:int64):&gt;int64 =&gt; x * 2
+twice = (f:&lt;(x:int64):&gt;int64&gt; x:int64) =&gt; f(f(x))
+printl(twice(@double 10))   # 40</code></pre>
+        </div>
+        <div class="showcase-pane prose-pane">
+          <span class="chip">functions</span>
+          <h2 id="fn-heading">Functions are ordinary values</h2>
+          <p>Function literals are expressions like any other: pass them, store them, and combine them. The <code>&amp;</code> operator merges two implementations into one overload set, and each call selects the implementation whose parameter type matches the argument. <code>@double</code> names the function itself, ready to pass along.</p>
+        </div>
+      </section>
+
+      <section class="showcase-row" aria-labelledby="obj-heading">
+        <div class="showcase-pane code-pane">
+          <div class="pane-top"><span>objects.dewy</span><a class="tag planned" href="/reference/objects.html#function-fields">design preview</a></div>
+          <pre><code class="language-dewy lined" data-example='{"mode":"design-only"}'>counter = (start=0) =&gt; [
+    value = start
+    increment = () =&gt; (value += 1)
+]
+
+# make a new counter object
+count = counter(40)
+
+# called on access
+count.increment
+count.increment
+
+printl"count is {count.value}"</code></pre>
+        </div>
+        <div class="showcase-pane prose-pane">
+          <span class="chip">objects</span>
+          <h2 id="obj-heading">Objects, blocks, and functions are one thing</h2>
+          <p>Dewy’s syntax is deliberately unified: functions can construct structural objects, members can capture their siblings, and accessing a zero-argument function member calls it. Fields and behavior live together without separate <code>class</code> machinery. Records with function fields and closures work today; members that update their siblings are a design preview.</p>
+        </div>
+      </section>
+
+      <section class="showcase-row next-row" aria-labelledby="next-heading">
+        <div class="showcase-pane code-pane">
+          <pre><code class="language-dewy lined" data-example='{"mode":"check"}'># Dewy → native executables · WebAssembly
+# The compiler is written in Jo for now;
+# Dewy will compile itself later.</code></pre>
+        </div>
+        <div class="showcase-pane prose-pane">
+          <span class="chip">project</span>
+          <h2 id="next-heading">Where to go next</h2>
+          <ul class="next-list">
+            <li><a href="/learn/">Learn</a> — tested, example-led walkthroughs</li>
+            <li><a href="/reference/">Reference</a> — the complete language design</li>
+            <li><a href="/examples/">Examples</a> — programs with checked results</li>
+            <li><a href="/install/">Install</a> — toolchains for Linux, macOS, and Windows</li>
+            <li><a href="/status/">Status</a> — generated coverage and known failures</li>
+            <li><a href="/contribute/">Contribute</a> — build the compiler, find starting points</li>
+          </ul>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="site-footer"><div class="footer-wrap"><div class="footer-brand"><a class="brand" href="/">Dewy</a><p>Python-like ease. C-like speed. Safe by default. These are our goals; measured behavior lives in coverage.</p></div><nav class="footer-links" aria-label="More"><a href="/install/">Install</a><a href="/tools/">Tools</a><a href="/contribute/">Contribute</a><a href="/archive/">Archive</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a></nav></div></footer>
+</body>
+</html>
