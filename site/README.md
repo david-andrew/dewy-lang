@@ -17,7 +17,8 @@ python3 site/scripts/build.py --compiler /path/to/toolchain/bin/dewy-core
 ```
 
 `python3 site/scripts/watch.py [port]` serves on port 9000 by default and reruns
-the same complete build after source changes. Only successful builds notify
+the same complete build in a fresh Python process after source changes. Set
+`DEWY_SITE_COMPILER=/path/to/toolchain/bin/dewy-core` to pin watch builds. Only successful builds notify
 browser clients. Build output lives in ignored `site/dist/`; do not commit it.
 
 ## Sources and claims

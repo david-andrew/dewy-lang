@@ -6,6 +6,8 @@ import argparse
 import os
 import shutil
 import signal
+import subprocess
+import sys
 import threading
 import time
 from functools import partial
@@ -49,7 +51,8 @@ def snapshot(paths: list[Path]) -> dict[Path, tuple[int, int]]:
 
 def rebuild(changed: set[Path]) -> None:
     # Use the same complete validation path as CI; failed checks never notify clients.
-    build.main([])
+    subprocess.run([sys.executable, str(build.SITE_ROOT / "scripts/build.py")],
+                   cwd=build.REPO_ROOT, check=True)
 
 
 class Reload:
@@ -234,7 +237,7 @@ def serve(port: int) -> ThreadingHTTPServer:
 def main() -> None:
     args = parse_args()
     print("initial build", flush=True)
-    build.main([])
+    rebuild(set())
     serve(args.port)
     print(f"serving http://0.0.0.0:{args.port}/  (ctrl-c to stop)", flush=True)
     previous = snapshot(WATCH)

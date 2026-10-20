@@ -73,7 +73,7 @@ def examples_in(page: Path) -> list[Example]:
         while previous >= 0 and not lines[previous].strip(): previous -= 1
         marker = MARKER.fullmatch(lines[previous].strip()) if previous >= 0 else None
         data = metadata(marker[1] if marker else None, f'{page}:{start+1}')
-        examples.append(Example(page, start+1, '\n'.join(body)+'\n', data))
+        examples.append(Example(page, start+2, '\n'.join(body)+'\n', data))
         i += 1
     return examples
 
@@ -126,7 +126,9 @@ def validate(example: Example, compiler: Path, scratch: Path) -> dict:
             path.parent.mkdir(parents=True, exist_ok=True); path.write_text(content)
         source = work / 'example.dewy'
         # Blank lines keep diagnostics aligned with the documentation source.
-        source.write_text('\n'*(example.line) + data.get('prefix', '') + example.source + data.get('suffix', ''))
+        prefix = data.get('prefix', '')
+        padding = '\n' * max(0, example.line - 1 - prefix.count('\n'))
+        source.write_text(prefix + padding + example.source + data.get('suffix', ''))
         def call(args):
             return subprocess.run(args, cwd=work, capture_output=True, timeout=60,
                                   env={k:v for k,v in os.environ.items() if not k.startswith('SLOPPY_')})
