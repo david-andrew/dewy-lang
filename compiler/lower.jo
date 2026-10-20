@@ -3445,6 +3445,7 @@ gen_conv = (e: int) -> Val:
     a = int(nodes[e].a)
     from = prune(ntype(a))
     cv = nodes[e].aux as CV
+    if cv == .explicit_copy: return own(gen_expr(a), from)
     if cv == .none_ or cv == .quantity_const or cv == .ptr: return gen_expr(a)
     if cv == .int_:
         v = gen_expr(a).v

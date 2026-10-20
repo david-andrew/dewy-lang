@@ -1,0 +1,22 @@
+Box:type=[items:array<string>]
+Payload:type=Box|array<string>|string|int64|none
+snapshot=(value:Payload):>Payload=>value.copy
+exercise=(value:Payload):>void=>{
+    let twin=value.copy()
+    let twice=snapshot(value).copy
+    if twin is? Box {twin.items.push('independent')}
+    if twin is? array<string> {twin.push('independent')}
+    $runtime_assert twice=?value
+    value.copy;
+}
+optional=(value:Box?):>Box?=>value.copy
+main=():>int64=>{
+    let array:array<string>=['original']
+    exercise(Box[['original']]) exercise(array)
+    exercise('text') exercise(42) exercise(none)
+    let box=optional(Box[['original']])
+    $runtime_assert box isnt? none
+    $runtime_assert box.items.length=?1
+    $runtime_assert optional(none) is? none
+    return 0
+}

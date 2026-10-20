@@ -20,7 +20,7 @@ enum IN:
     static_assert, runtime_assert
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
-enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const
+enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy
 
 struct Intrinsic:
     name: str
@@ -3403,6 +3403,38 @@ check_expr_in_module = (n: int, m: int, expected: int = 0) -> int:
 
 id_len = 0
 
+# A declared member wins over the synthesized value operation, including on
+# an alternative of a union. Leave those unions to ordinary member forwarding.
+copy_member = (t0: int, name: int) -> bool:
+    t = prune(t0)
+    if is_union(t):
+        loop m in union_members(t):
+            if copy_member(m, name): return true
+    else if tkind(t) == .opt: return copy_member(telem(t), name)
+    else if tkind(t) == .struct_:
+        si = int(types[t].st)
+        check_struct_fields(si)
+        loop i in [0..int(structs[si].nfields)):
+            if fields[int(structs[si].fields) + i].name == i32(name): return true
+    false
+
+synthetic_copy = (t: int, name: int, pos: int) -> bool:
+    if name_of(name) != "copy" or not files[pos_file(pos)].is_dewy: return false
+    k = tkind(t)
+    if k == .module or k == .typeval or k == .void_ or t == T_NEVER: return false
+    if copy_member(t, name): return false
+    # Uniform-call methods are user declarations too.
+    decls: int[]
+    collect_fns(name, decls)
+    m = module_of_type(t)
+    if m >= 0: collect_module(m, name, decls)
+    decls.len() == 0
+
+check_copy = (n: int, receiver: int, t: int) -> int:
+    nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(receiver), aux = i32(int(CV.explicit_copy)), type = i32(t), flags = i32(NF_CHECKED))
+    last_checked = n
+    t
+
 id_at = 0
 # The library's names for Dewy's members: `xs.pop(i)` removes by position,
 # `xs.insert(value i)` names the value first, `text.startswith(p)`. The
@@ -3489,7 +3521,12 @@ check_call = (n: int, expected: int) -> int:
     if ck == .field:
         recv = int(nodes[callee].a)
         rt = prune(check_expr(recv, 0))
+        recv = last_checked
+        nodes[callee].a = i32(recv)
         fname = int(nodes[callee].name)
+        if synthetic_copy(rt, fname, nodes[n].pos):
+            nargs_check(n, args.len(), 0, 0, ".copy")
+            return check_copy(n, recv, rt)
         if ide_sentinel != 0 and fname == ide_sentinel: ide_complete_members(rt)
         rk = types[rt].kind
         if rk == .module: return call_by_name(n, fname, int(types[rt].mod), args, expected, false)
@@ -5621,6 +5658,7 @@ check_expr = (n: int, expected: int) -> int:
         bt = prune(check_expr(int(nodes[n].a), 0))
         nodes[n].a = i32(last_checked)
         fname = int(nodes[n].name)
+        if synthetic_copy(bt, fname, nodes[n].pos): return check_copy(n, int(nodes[n].a), bt)
         if (is_union(bt) or tkind(bt) == .opt) and files[pos_file(nodes[n].pos)].is_dewy:
             return forward_member(n, int(nodes[n].a), bt, expected)
         if ide_sentinel != 0 and fname == ide_sentinel: ide_complete_members(bt)

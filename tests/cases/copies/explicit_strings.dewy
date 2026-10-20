@@ -1,0 +1,10 @@
+copy_return=(value:string):>string=>value.copy
+main=():>int64=>{
+    let source="value {42}"
+    let copy=source.copy
+    let twice=copy_return(source).copy()
+    source.copy;
+    $runtime_assert source=?copy and copy=?twice
+    $runtime_assert 'literal'.copy=?'literal'
+    return 0
+}

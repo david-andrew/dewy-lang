@@ -1758,6 +1758,13 @@ Other directives of the design (`$explicit_copies`, `$no_prelude`, `$lend`,
 `$allocator`, `$expect`, `$unsafe_assume`, `$target`, …) are reported as not
 implemented yet where they appear.
 
+`value.copy` requests an independent value. It evaluates the receiver once
+and supports arrays, records, dictionaries, sets, strings, closures and
+optional/union values. Parentheses are also accepted (`value.copy()`).
+Declared `copy` members take precedence. The operation preserves ordinary
+value semantics, including private closure state, and may share COW storage
+until a write or transfer a fresh result instead of duplicating it.
+
 String length, indexing, slicing and iteration use extended grapheme clusters.
 `"é🙂".length` is 2. String loops stream from an independent input snapshot;
 changing the source variable does not change the remaining input. They create
