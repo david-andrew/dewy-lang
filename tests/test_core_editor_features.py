@@ -207,11 +207,21 @@ def test_dewy_rename_across_files(project):
     client, root = project
     model = root / 'model.dewy'
     game = root / 'game.dewy'
+    # A program in the workspace that is not open uses it too.
+    other = root / 'tools' / 'other.dewy'
+    other.parent.mkdir()
+    other_text = 'from p"../model.dewy" import fresh, advance\nmain=():>int64=>{\n    let w=fresh()\n    advance(@w 1.0 2.0)\n    return w.score\n}\n'
+    other.write_text(other_text)
+    (root / 'tools' / 'unrelated.dewy').write_text('advance=()=>0\nmain=()=>advance()\n')
+    found = client.request('textDocument/references', {**at(model, MODEL, 'advance'), 'context': {'includeDeclaration': True}})
+    assert sorted((r['uri'].rsplit('/', 1)[1], r['range']['start']['line']) for r in found) == [
+        ('game.dewy', 0), ('game.dewy', 3), ('model.dewy', 7), ('other.dewy', 0), ('other.dewy', 3)]
     prepared = client.request('textDocument/prepareRename', at(game, GAME, 'advance'))
     assert prepared == {'start': position(GAME, 'advance'), 'end': position(GAME, 'advance', len('advance'))}
     edit = client.request('textDocument/rename', {**at(game, GAME, 'advance', 0, 1), 'newName': 'step_world'})
     changes = edit['changes']
-    assert sorted(len(edits) for edits in changes.values()) == [1, 2]
+    assert sorted(len(edits) for edits in changes.values()) == [1, 2, 2]
+    assert other.as_uri() in changes and other.read_text() == other_text
     assert all(e['newText'] == 'step_world' for edits in changes.values() for e in edits)
     assert changes[model.as_uri()][0]['range']['start'] == position(MODEL, 'advance')
     # Renaming to a name that is taken, or a library name, is refused.

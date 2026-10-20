@@ -1279,6 +1279,29 @@ uses_of = (d: int, h: Hit) -> Use[]:
         w = wide_of(i, r)
         f = file_in(w, path)
         if f >= 0: out.push(Use(w, "{f}:{p.1}"))
+    # (the workspace's other programs that may use it: files not open that name it, checked when
+    # they include the declaration's file; not the standard library's users)
+    if starts_with(path, root_lib + "/"): return out
+    name = ""
+    if let dc = h.res.decls.get(h.ref.decl): name = dc.name
+    if len(name) == 0: return out
+    ws_ensure_scanned()
+    t0 = time()
+    loop wf in ws_files:
+        if time() - t0 > 3.0 or lsp_stop != 0: break
+        if wf == path or ends_with(path, ".dewy") and not ends_with(wf, ".dewy"): continue
+        od = doc_by_uri.get(path_to_uri(wf)) ?? -1
+        if od >= 0 and docs[od].open: continue
+        known = false
+        loop u in out:
+            if u.res.paths.contains(wf): known = true
+        if known: continue
+        if not has_word(read_file(wf) ?? "", name): continue
+        w = check_doc(wf, -1, false, true)
+        if lsp_stop != 0: break
+        w.texts = ide_texts
+        f = file_in(w, path)
+        if f >= 0: out.push(Use(w, "{f}:{p.1}"))
     out
 
 # every reference to the declaration under the cursor
@@ -2147,7 +2170,7 @@ ws_cache: {str: WsSym[]} = {}       # by path: a file's symbols, until files cha
 ws_walk = (d: str, depth: int):
     if depth > 12 or ws_files.len() >= 5000: return
     loop n in list_dir(d):
-        if starts_with(n, ".") or n == "build" or n == "node_modules" or n == "target": continue
+        if starts_with(n, ".") or n == "build" or n == "node_modules" or n == "target" or n == "__dewycache__": continue
         full = d + "/" + n
         if ends_with(n, ".jo") or ends_with(n, ".dewy"): ws_files.push(full)
         else if find_byte(n, '.') < 0 or file_exists(full + "/."): ws_walk(full, depth + 1)
@@ -2178,12 +2201,23 @@ ws_match = (name: str, q: str) -> int:
     if k == len(ql): return 2
     3
 
+# does text have w as a whole word?
+has_word = (text: str, w: str) -> bool:
+    i = find(text, w)
+    loop i >= 0:
+        if (i == 0 or not is_ident_char(text[i - 1])) and (i + len(w) >= len(text) or not is_ident_char(text[i + len(w)])): return true
+        i = find(text, w, i + 1)
+    false
+
+ws_ensure_scanned = ():
+    if ws_scanned: return
+    ws_scanned = true
+    ws_files = []
+    loop r in ws_roots: ws_walk(r, 0)
+
 on_workspace_symbol = (id: int, params: int) -> int:
     q = jstr(jget(params, "query"))
-    if not ws_scanned:
-        ws_scanned = true
-        ws_files = []
-        loop r in ws_roots: ws_walk(r, 0)
+    ws_ensure_scanned()
     out: str[][] = [[], [], []]      # (by how well they match)
     loop f in ws_files:
         syms: WsSym[]
