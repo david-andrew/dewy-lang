@@ -26,6 +26,7 @@ main=():>int64=>{
     assert(double_mass.energy =? 2.0*result.energy)
     let duration=launch/gravity
     assert(duration =? 2.0)
-    printl("{result.height} {result.energy} {duration}")
+    # Report integral counts like the design's exact rational arithmetic.
+    printl("{int64(result.height)} {int64(result.energy)} {int64(duration)}")
     return 0
 }

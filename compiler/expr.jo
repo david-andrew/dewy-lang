@@ -5329,7 +5329,9 @@ check_expr = (n: int, expected: int) -> int:
             ensure_global(g, nodes[n].pos)
             if globals[g].is_const and is_quantity(int(globals[g].type)):
                 q = quantity_scales[quantity_constant_scale(int(globals[g].init))]
-                return quantity_constant(n, q.numerator, q.denominator, quantity_dimension(int(globals[g].type)), expected)
+                hint = expected
+                if nodes[int(globals[g].decl)].a != 0: hint = int(globals[g].type)
+                return quantity_constant(n, q.numerator, q.denominator, quantity_dimension(int(globals[g].type)), hint)
             if n != assign_root:
                 loop global_read.len() <= g: global_read.push(false)
                 global_read[g] = true

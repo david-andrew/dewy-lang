@@ -6,6 +6,7 @@ Only Python's standard library is used; no Dewy program output is read.
     python3 tests/ladder/references.py --write   # regenerate them
 """
 from pathlib import Path
+from fractions import Fraction
 import bisect,collections,csv,heapq,io,json,math,re,statistics,sys
 W=Path(__file__).parent;expected={}
 def put(n,s):expected[n]=str(s)
@@ -35,7 +36,7 @@ for _ in range(100):
  k1=-y;k2=-(y+h*k1/2);k3=-(y+h*k2/2);k4=-(y+h*k3);y+=h*(k1+2*k2+2*k3+k4)/6
 assert abs(y-math.exp(-1))<1e-8;put(9,f'{y:.8f}')
 xs=[2.,4.,4.,4.,5.,5.,7.,9.];put(10,f'{len(xs)} {statistics.mean(xs)} {statistics.variance(xs):.6f} {statistics.median(xs)}')
-mass,speed,g=2.,20.,10.;t=speed/g;put(11,f'{speed*t-g*t*t/2} {mass*speed*speed/2} {t}')
+mass,speed,g=map(Fraction, (2,20,10));t=speed/g;put(11,f'{speed*t-g*t*t/2} {mass*speed*speed/2} {t}')
 xs=[-2.,-1.,0.,1.,2.];ys=[2*x+1 for x in xs];w=b=0.
 for epoch in range(1000):
  errors=[w*x+b-y for x,y in zip(xs,ys)];dw=sum(2*e*x/len(xs) for e,x in zip(errors,xs));db=sum(2*e/len(xs) for e in errors);w-=.05*dw;b-=.05*db

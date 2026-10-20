@@ -446,6 +446,40 @@ or start with a fractional value. Arrays, record fields, dictionary entries and
 custom indexed values support these updates; indices evaluate once, before the
 old value and right operand. Existing copies retain their independent values.
 
+## Physical quantities
+
+A quantity's dimension is part of its type and is erased at runtime. Time
+units `s`, `ms`, `us`, `ns`, their written names, `minute`, and `hour` are in
+the prelude. Import other units from `units`:
+
+```dewy
+from units import m, km, kg, deg, turn
+Speed:type = float64 * Length / Time
+Duration:type = <T>(T * Time)
+travel=(speed:Speed elapsed:Duration<float64>):>(float64 * Length)=>speed*elapsed
+let distance=travel(20m/s 300ms)
+printl"{distance/m}"  # 6.0
+```
+
+The base dimensions are `Time`, `Length`, `Mass`, `Current`, `Temperature`,
+`Amount`, `Luminosity`, and `Angle`. Values use canonical seconds, metres,
+kilograms, amperes, kelvins, moles, candelas, and whole turns. Unit scales are
+exact: `3km =? 3000m`, `300ms =? 3s/10`, and `90deg =? turn/4`; `°` also
+spells degrees. Fractions use `Rational`, and quantities also support machine
+integers, `BigInt`, `float32`, and `float64`. A floating annotation rounds an
+exact scale to that representation.
+
+Addition, subtraction, and comparisons require identical dimensions.
+Multiplication/division combine dimensions; powers require a constant integer
+exponent. Divide by a unit to get a dimensionless count in that unit.
+Annotations, generic functions, overloads, arrays, records, and conversions
+preserve dimensions. Ordinary conversions cannot add or remove a dimension;
+`transmute` can explicitly change it while preserving the numeric representation.
+Formatting currently prints the canonical number without a unit suffix.
+Display-unit selection, offset units such as Celsius, and calendar durations
+remain open. Fixed-point radians/trigonometry and quantity-aware `sleep` remain
+unimplemented.
+
 ## Exact large integers
 
 ```dewy

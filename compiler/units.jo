@@ -161,7 +161,6 @@ quantity_constant = (n: int, num: int, den: int, dim: int, expected: int) -> int
     else if value.denominator == 1:
         a = bc_int(value.numerator, pos)
         check_expr(a, if is_int(hint): hint else: 0)
-        finalize_literal(a)
     else:
         ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
         callee = bc_field(bc_ident("$dewy_rational", pos), "rational", pos)
@@ -222,7 +221,11 @@ quantity_coerce = (n: int, target: int) -> int:
         if scale.denominator != 1 and is_int(quantity_base(target)): fatal(nodes[n].pos, "fractional quantity cannot convert to {dt(target)}")
         quantity_constant(n, scale.numerator, scale.denominator, quantity_dimension(target), target)
         return n
-    a = quantity_number(n)
+    # Save the source before introducing an erasing conversion: that conversion
+    # must not point back to n after n is replaced by the converted result.
+    source_copy = nodes.len()
+    nodes.push(nodes[n])
+    a = quantity_number(source_copy)
     # Do not mutate a source node that may be shared with a place or another use.
     copy = nodes.len()
     nodes.push(nodes[a])
@@ -252,6 +255,9 @@ quantity_product_fits = (a: int, b: int) -> bool:
     b == 0 or abs(a) <= 9223372036854775807 / abs(b)
 
 quantity_fold = (n: int, a: int, b: int, dim: int, op: Tok, expected: int) -> bool:
+    # Explicit machine widths use their ordinary wrapping arithmetic.
+    if is_quantity(ntype(a)) and is_int(quantity_base(ntype(a))) and quantity_base(ntype(a)) != T_INT: return false
+    if is_quantity(ntype(b)) and is_int(quantity_base(ntype(b))) and quantity_base(ntype(b)) != T_INT: return false
     ai = quantity_constant_scale(a)
     bi = quantity_constant_scale(b)
     if ai < 0 or bi < 0: return false
