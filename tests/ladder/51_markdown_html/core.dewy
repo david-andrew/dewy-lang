@@ -1,0 +1,114 @@
+escape_html=(text:string):>string=> {
+    let out=""
+    loop ch in text  {
+        if ch =? "&"  {
+            out+="&amp;"
+        }
+        else if ch =? "<"  {
+            out+="&lt;"
+        }
+        else if ch =? ">"  {
+            out+="&gt;"
+        }
+        else  {
+            out+=ch
+        }
+    }
+    return out
+}
+inline=(text:string):>string=> {
+    let out=""
+    let strong=false
+    let code=false
+    let i=0
+    loop i <? text.length  {
+        let ch=text[i]
+        if ch =? "`"  {
+            if code  {
+                out+="</code>"
+            }
+            else  {
+                out+="<code>"
+            }
+            code=not code
+        }
+        else if not code and ch =? "*" and i+1 <? text.length and text[i+1] =? "*"  {
+            if strong  {
+                out+="</strong>"
+            }
+            else  {
+                out+="<strong>"
+            }
+            strong=not strong
+            i+=1
+        }
+        else  {
+            out+=escape_html(ch)
+        }
+        i+=1
+    }
+    if code  {
+        out+="</code>"
+    }
+    if strong  {
+        out+="</strong>"
+    }
+    return out
+}
+render=(source:string):>string=> {
+    let result=""
+    let list=false
+    let paragraph=""
+    loop line in source.split("\n")  {
+        if line.starts_with("- ")  {
+            if paragraph not=? ""  {
+                result+="<p>{inline(paragraph)}</p>"
+                paragraph=""
+            }
+            if not list  {
+                result+="<ul>"
+                list=true
+            }
+            result+="<li>{inline(line[2..])}</li>"
+        }
+        else  {
+            if list  {
+                result+="</ul>"
+                list=false
+            }
+            if line =? "" or line.starts_with("# ")  {
+                if paragraph not=? ""  {
+                    result+="<p>{inline(paragraph)}</p>"
+                    paragraph=""
+                }
+                if line.starts_with("# ")  {
+                    result+="<h1>{inline(line[2..])}</h1>"
+                }
+            }
+            else  {
+                if paragraph not=? ""  {
+                    paragraph+=" "
+                }
+                paragraph+=line
+            }
+        }
+    }
+    if list  {
+        result+="</ul>"
+    }
+    if paragraph not=? ""  {
+        result+="<p>{inline(paragraph)}</p>"
+    }
+    return result
+}
+main=():>int64=> {
+    let source="# Dewy & tools\n\nA **bold** line\nwith `<tag>`.\n\n- one\n- **two**\n\n<script>"
+    let output=render(source)
+    assert(not output.contains("<script>"))
+    assert(render("") =? "")
+    assert(render("- a\n- b") =? "<ul><li>a</li><li>b</li></ul>")
+    assert(inline("`**x**`") =? "<code>**x**</code>")
+    assert(inline("**x") =? "<strong>x</strong>")
+    printl(output)
+    return 0
+}

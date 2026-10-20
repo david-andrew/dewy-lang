@@ -1,0 +1,86 @@
+# Structure-of-arrays ECS, stable IDs, dense swap removal and a sparse map.
+World:type=[ids:array<int64> x:array<int64> y:array<int64> vx:array<int64> vy:array<int64> slot:dict<int64 int64>]
+spawn_entity=(@w:World id:int64):>void=> {
+    w.slot[id]=w.ids.length
+    w.ids.push(id)
+    w.x.push(id%101)
+    w.y.push(id%79)
+    w.vx.push(id%7-3)
+    w.vy.push(id%5-2)
+}
+despawn=(@w:World id:int64):>bool=> {
+    let index=w.slot.get(id)
+    if index is? none  {
+        return false
+    }
+    let last=w.ids.length-1
+    if index not=? last  {
+        let moved=w.ids[last]
+        w.ids[index]=moved
+        w.x[index]=w.x[last]
+        w.y[index]=w.y[last]
+        w.vx[index]=w.vx[last]
+        w.vy[index]=w.vy[last]
+        w.slot[moved]=index
+    }
+    w.ids.pop()
+    w.x.pop()
+    w.y.pop()
+    w.vx.pop()
+    w.vy.pop()
+    w.slot.pop(id)
+    return true
+}
+tick=(@w:World):>void=> {
+    loop i in [0..w.ids.length)  {
+        w.x[i]+=w.vx[i]
+        w.y[i]+=w.vy[i]
+        if w.x[i] <? 0 or w.x[i] >? 100  {
+            w.vx[i]=-w.vx[i]
+            w.x[i]+=2*w.vx[i]
+        }
+        if w.y[i] <? 0 or w.y[i] >? 78  {
+            w.vy[i]=-w.vy[i]
+            w.y[i]+=2*w.vy[i]
+        }
+    }
+}
+checksum=(w:World):>int64=> {
+    let result=0
+    loop i in [0..w.ids.length)  {
+        result+=w.ids[i]*13+w.x[i]*7+w.y[i]*3+w.vx[i]+w.vy[i]
+    }
+    return result
+}
+main=():>int64=> {
+    let world=World[[] [] [] [] [] []]
+    loop id in [0..4096)  {
+        spawn_entity(@world id)
+    }
+    let snapshot=world
+    loop frame in [0..60)  {
+        tick(@world)
+        if frame =? 20  {
+            loop id in [0..4096)  {
+                if id%3 =? 0  {
+                    $runtime_assert (despawn(@world id))
+                }
+            }
+        }
+        if frame =? 30  {
+            loop id in [4096..4608)  {
+                spawn_entity(@world id)
+            }
+        }
+    }
+    $runtime_assert (snapshot.ids.length =? 4096)
+    $runtime_assert (world.ids.length =? 3242)
+    $runtime_assert (not despawn(@world 99999))
+    loop i in [0..world.ids.length)  {
+        $runtime_assert (world.slot.get(world.ids[i]) =? i)
+        $runtime_assert (world.x[i] >=? 0 and world.x[i] <=? 100)
+        $runtime_assert (world.y[i] >=? 0 and world.y[i] <=? 78)
+    }
+    printl("{world.ids.length} {checksum(world)} {checksum(snapshot)}")
+    return 0
+}

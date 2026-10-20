@@ -1,0 +1,84 @@
+Entry:type=[node:int64 cost:int64 score:int64]
+heuristic=(node:int64 goal:int64 width:int64):>int64=>abs(node%width-goal%width)+abs(node//width-goal//width)
+search=(grid:array<int64> width:int64 start:int64 goal:int64):>array<int64>=> {
+    let distance=[loop cell in grid 1000000]
+    let parent=[loop cell in grid -1]
+    let open:array<Entry>=[Entry[start 0 heuristic(start goal width)]]
+    distance[start]=0
+    loop open.length >? 0  {
+        let best=0
+        loop i in [1..open.length)  {
+            if open[i].score <? open[best].score  {
+                best=i
+            }
+        }
+        let current=open[best]
+        open.remove(best)
+        if current.cost not=? distance[current.node]  {
+            continue
+        }
+        if current.node =? goal  {
+            let path:array<int64>=[]
+            let node=goal
+            loop node >=? 0  {
+                path.insert(0 node)
+                node=parent[node]
+            }
+            return path
+        }
+        let x=current.node%width
+        let y=current.node//width
+        loop delta in [-1 1 (-width) width]  {
+            let next=current.node+delta
+            if next <? 0 or next >=? grid.length  {
+                continue
+            }
+            if abs(next%width-x)+abs(next//width-y) not=? 1  {
+                continue
+            }
+            if grid[next] =? 1  {
+                continue
+            }
+            let cost=current.cost+1
+            if cost <? distance[next]  {
+                distance[next]=cost
+                parent[next]=current.node
+                open.push(Entry[next cost cost+heuristic(next goal width)])
+            }
+        }
+    }
+    return []
+}
+main=():>int64=> {
+    let width=32
+    let grid:array<int64>=[loop i in [0..1024) 0]
+    loop y in [0..31)  {
+        if y not=? 17  {
+            grid[y*32+15]=1
+        }
+    }
+    loop x in [1..30)  {
+        if x not=? 8  {
+            grid[10*32+x]=1
+        }
+    }
+    let path=search(grid width 0 1023)
+    assert(path.length >? 0)
+    assert(path[0] =? 0)
+    assert(path[path.length-1] =? 1023)
+    loop i in [1..path.length)  {
+        assert(grid[path[i]] =? 0)
+        assert(heuristic(path[i] path[i-1] width) =? 1)
+    }
+    let blocked=grid
+    blocked[1]=1
+    blocked[32]=1
+    assert(search(blocked width 0 1023).length =? 0)
+    assert(search(grid width 42 42) =? [42])
+    let sum=0
+    loop node in path  {
+        sum+=grid[node]
+    }
+    printl("{path.length-1} {path[0]} {path[path.length-1]} {sum}")
+    return 0
+}

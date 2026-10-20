@@ -1,0 +1,83 @@
+K:array<uint32>=[1116352408 1899447441 3049323471 3921009573 961987163 1508970993 2453635748 2870763221 3624381080 310598401 607225278 1426881987 1925078388 2162078206 2614888103 3248222580 3835390401 4022224774 264347078 604807628 770255983 1249150122 1555081692 1996064986 2554220882 2821834349 2952996808 3210313671 3336571891 3584528711 113926993 338241895 666307205 773529912 1294757372 1396182291 1695183700 1986661051 2177026350 2456956037 2730485921 2820302411 3259730800 3345764771 3516065817 3600352804 4094571909 275423344 430227734 506948616 659060556 883997877 958139571 1322822218 1537002063 1747873779 1955562222 2024104815 2227730452 2361852424 2428436474 2756734187 3204031479 3329325298]
+rotate=(x:uint32 n:int64):>uint32=>(x >> n) or (x << (32-n))
+digest=(input:array<uint8>):>array<uint32>=> {
+    let data=input
+    let bits=(input.length as uint64)*8
+    data.push(128)
+    loop data.length%64 not=? 56  {
+        data.push(0)
+    }
+    loop i in [0..8)  {
+        data.push(((bits >> (56-8*i)) and 255) as uint8)
+    }
+    let h:array<uint32>=[1779033703 3144134277 1013904242 2773480762 1359893119 2600822924 528734635 1541459225]
+    let block=0
+    loop block <? data.length  {
+        let w:array<uint32>=[loop i in [0..64) 0 as uint32]
+        loop i in [0..16)  {
+            let at=block+4*i
+            w[i]=((data[at] as uint32) << 24) or ((data[at+1] as uint32) << 16) or ((data[at+2] as uint32) << 8) or (data[at+3] as uint32)
+        }
+        loop i in [16..64)  {
+            let x=w[i-15]
+            let y=w[i-2]
+            let small0=rotate(x 7) xor rotate(x 18) xor (x >> 3)
+            let small1=rotate(y 17) xor rotate(y 19) xor (y >> 10)
+            w[i]=w[i-16]+small0+w[i-7]+small1
+        }
+        let a=h[0]
+        let b=h[1]
+        let c=h[2]
+        let d=h[3]
+        let e=h[4]
+        let f=h[5]
+        let g=h[6]
+        let z=h[7]
+        loop i in [0..64)  {
+            let big1=rotate(e 6) xor rotate(e 11) xor rotate(e 25)
+            let choice=(e and f) xor ((e xor 4294967295) and g)
+            let t1=z+big1+choice+K[i]+w[i]
+            let big0=rotate(a 2) xor rotate(a 13) xor rotate(a 22)
+            let majority=(a and b) xor (a and c) xor (b and c)
+            let t2=big0+majority
+            z=g
+            g=f
+            f=e
+            e=d+t1
+            d=c
+            c=b
+            b=a
+            a=t1+t2
+        }
+        h[0]+=a
+        h[1]+=b
+        h[2]+=c
+        h[3]+=d
+        h[4]+=e
+        h[5]+=f
+        h[6]+=g
+        h[7]+=z
+        block+=64
+    }
+    return h
+}
+main=():>int64=> {
+    let abc=digest(bytes("abc"))
+    assert(abc =? [3128432319 2399260650 1094795486 1571693091 2953011619 2518121116 3021012833 4060091821])
+    let empty=digest([])
+    assert(empty[0] =? 3820012610)
+    let message:array<uint8>=[loop i in [0..1000) 97 as uint8]
+    let multi=digest(message)
+    assert(multi.length =? 8)
+    let changed=message
+    changed[999]=98
+    assert(digest(changed) not=? multi)
+    let boundary:array<uint8>=[loop i in [0..56) 120 as uint8]
+    let two=digest(boundary)
+    assert(two not=? empty)
+    assert(digest(message) =? multi)
+    printl(abc)
+    printl(multi)
+    printl(two)
+    return 0
+}

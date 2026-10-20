@@ -8,8 +8,8 @@ Dewy must become; this file says what we do next and how we know we are closer.
 
 | Measure | Now (2026-10-19) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 24/31 programs (was 0/31 on 10-19) | all milestones |
-| Acceptance ladder, current dialect | 31/31 | stays green |
+| Acceptance ladder, design surface | 45/63 programs (tier 1: 24/31, was 0/31 on 10-19; tier 2: 21/32) | all milestones |
+| Acceptance ladder, current dialect | 63/63 | stays green |
 | Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.36 G instructions (10-20; was 1.30 G at the 10-19 checkpoint) | 250k root lines/s (~88 ms) |
 | Compiler self-build | 7.5 G instructions, ~1.6 s | seconds-scale edit loop |
 | Game-tick kernel vs C -O2 | ~2× instructions (was 3.6×; 8.85× wall) | ~1× |
@@ -40,6 +40,22 @@ surface (one language, no dialect forks), that must all pass:
 9. Strict lane: no hidden allocation, copy, detach or panic in opted-in
    modules; lifecycle cleanup on early exits; scoped views.
 10. Games and large applications at C-class speed with a fresh-build edit loop.
+
+Tier 2 (programs 32–63, added 10-20), harder programs:
+11. Interpreter and checker kernels: bytecode VM, type checker, regex.
+12. Robust text and records: query, base64, Markdown, quoted CSV, Unicode wrap.
+13. Mutable indexed data structures: B-tree with deletes, O(1) LRU.
+14. Durable data and module failures: WAL crash recovery (needs `Path`),
+    errors across modules.
+15. Scientific and ML kernels: broadcasting, dual-number autodiff, k-means,
+    backprop, FFT, units.
+16. Bounded systems kernels: slab allocator, ring, binary protocol, CRC32,
+    SHA-256.
+17. Generic callback libraries: deque, combinators (`<(args):>R>` contracts).
+18. Deterministic owned parallelism: reduce, pipeline.
+19. Large game state: ECS with 4k entities, A*, rollback.
+20. Compile-time library generation: `fields`/`$field` reflection, compile-time
+    tables.
 
 ## Now
 
@@ -84,6 +100,12 @@ Landed 10-19 and 10-20:
   - point the site and installer at the new compiler;
   - merge this branch into master;
   - prune the old `native-*`/`udewy-*` release tags.
+
+- **Next capability gaps from tier 2:**
+  - the `Path` filesystem API with error-valued I/O (36);
+  - reflection, `fields(T)`/`$field` (62);
+  - compile-time evaluation for `$assert` and tables (63);
+  - the B-tree type mismatch (35), probably the collection API.
 
 ## Later (pull in when a capability needs it)
 

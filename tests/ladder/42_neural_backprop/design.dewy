@@ -1,0 +1,81 @@
+# A 2-3-1 tanh network; full batch gradients, independently checked numerically.
+Net:type=[w:array<float64> b:array<float64> v:array<float64> bias:float64]
+forward=(net:Net x:float64 y:float64):>array<float64>=> {
+    let hidden:array<float64>=[]
+    loop j in [0..3)  {
+        hidden.push(tanh(net.w[2*j]*x+net.w[2*j+1]*y+net.b[j]))
+    }
+    let output=net.bias
+    loop j in [0..3)  {
+        output+=net.v[j]*hidden[j]
+    }
+    hidden.push(output)
+    return hidden
+}
+loss=(net:Net):>float64=> {
+    let total=0.0
+    loop x in [-1.0 1.0]  {
+        loop y in [-1.0 1.0]  {
+            let out=forward(net x y)
+            total+=(out[3]-x*y)^2/4.0
+        }
+    }
+    return total
+}
+gradient=(net:Net):>Net=> {
+    let g=Net[[0.0 0.0 0.0 0.0 0.0 0.0] [0.0 0.0 0.0] [0.0 0.0 0.0] 0.0]
+    loop x in [-1.0 1.0]  {
+        loop y in [-1.0 1.0]  {
+            let h=forward(net x y)
+            let delta=(h[3]-x*y)/2.0
+            g.bias+=delta
+            loop j in [0..3)  {
+                g.v[j]+=delta*h[j]
+                let back=delta*net.v[j]*(1.0-h[j]*h[j])
+                g.w[2*j]+=back*x
+                g.w[2*j+1]+=back*y
+                g.b[j]+=back
+            }
+        }
+    }
+    return g
+}
+main=():>int64=> {
+    let net=Net[[0.3 -0.2 0.5 0.4 -0.7 0.6] [0.1 -0.3 0.2] [0.2 -0.4 0.7] 0.05]
+    let start=loss(net)
+    let grad=gradient(net)
+    loop i in [0..6)  {
+        let plus=net
+        let minus=net
+        plus.w[i]+=1e-5
+        minus.w[i]-=1e-5
+        let finite=(loss(plus)-loss(minus))/2e-5
+        $runtime_assert (abs(finite-grad.w[i]) <? 1e-7)
+    }
+    let original=net
+    loop epoch in [0..800)  {
+        let g=gradient(net)
+        loop i in [0..6)  {
+            net.w[i]-=0.1*g.w[i]
+        }
+        loop j in [0..3)  {
+            net.b[j]-=0.1*g.b[j]
+            net.v[j]-=0.1*g.v[j]
+        }
+        net.bias-=0.1*g.bias
+    }
+    let finish=loss(net)
+    $runtime_assert (finish <? 0.01)
+    $runtime_assert (loss(original) =? start)
+    let correct=0
+    loop x in [-1.0 1.0]  {
+        loop y in [-1.0 1.0]  {
+            let h=forward(net x y)
+            if h[3]*x*y >? 0.0  {
+                correct+=1
+            }
+        }
+    }
+    printl("{format(start ".6f")} {format(finish ".6f")} {correct}")
+    return 0
+}

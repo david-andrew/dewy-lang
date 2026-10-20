@@ -1,0 +1,228 @@
+take=<T>(@items:array<T> i:int64):>T=>{
+    let value=items[i]
+    items.remove(i)
+    return value
+}
+# Minimum degree 2: at most three keys, at least one except the root.
+Node:type=[keys:array<int64> children:array<Node>]
+leaf=():>Node=>Node[[] []]
+split=(@parent:Node i:int64):>void=> {
+    let child=parent.children[i]
+    let right=leaf()
+    right.keys=[child.keys[2]]
+    let middle=child.keys[1]
+    child.keys.truncate(1)
+    if child.children.length >? 0  {
+        right.children=[child.children[2] child.children[3]]
+        child.children.truncate(2)
+    }
+    parent.keys.insert(i middle)
+    parent.children[i]=child
+    parent.children.insert(i+1 right)
+}
+insert_nonfull=(@node:Node key:int64):>void=> {
+    let i=0
+    loop i <? node.keys.length and key >? node.keys[i]  {
+        i+=1
+    }
+    if i <? node.keys.length  {
+        if key =? node.keys[i]  {
+            return
+        }
+    }
+    if node.children.length =? 0  {
+        node.keys.insert(i key)
+        return
+    }
+    if node.children[i].keys.length =? 3  {
+        split(@node i)
+        if key =? node.keys[i]  {
+            return
+        }
+        if key >? node.keys[i]  {
+            i+=1
+        }
+    }
+    insert_nonfull(@node.children[i] key)
+}
+insert=(@root:Node key:int64):>void=> {
+    if root.keys.length =? 3  {
+        root=Node[[] [root]]
+        split(@root 0)
+    }
+    insert_nonfull(@root key)
+}
+merge=(@node:Node i:int64):>void=> {
+    let left=node.children[i]
+    let right=node.children[i+1]
+    left.keys.push(take(@node.keys i))
+    loop key in right.keys  {
+        left.keys.push(key)
+    }
+    loop child in right.children  {
+        left.children.push(child)
+    }
+    node.children[i]=left
+    take(@node.children i+1)
+}
+extreme=(node:Node last:bool):>int64=> {
+    if node.children.length =? 0  {
+        if last  {
+            return node.keys[node.keys.length-1]
+        }
+        return node.keys[0]
+    }
+    if last  {
+        return extreme(node.children[node.children.length-1] last)
+    }
+    return extreme(node.children[0] last)
+}
+erase=(@node:Node key:int64):>bool=> {
+    let i=0
+    loop i <? node.keys.length and key >? node.keys[i]  {
+        i+=1
+    }
+    if i <? node.keys.length  {
+        if node.keys[i] =? key  {
+            if node.children.length =? 0  {
+                take(@node.keys i)
+                return true
+            }
+            if node.children[i].keys.length >=? 2  {
+                let replacement=extreme(node.children[i] true)
+                node.keys[i]=replacement
+                return erase(@node.children[i] replacement)
+            }
+            if node.children[i+1].keys.length >=? 2  {
+                let replacement=extreme(node.children[i+1] false)
+                node.keys[i]=replacement
+                return erase(@node.children[i+1] replacement)
+            }
+            merge(@node i)
+            return erase(@node.children[i] key)
+        }
+    }
+    if node.children.length =? 0  {
+        return false
+    }
+    if node.children[i].keys.length =? 1  {
+        if i >? 0 and node.children[i-1].keys.length >=? 2  {
+            let sibling=node.children[i-1]
+            node.children[i].keys.insert(0 node.keys[i-1])
+            node.keys[i-1]=sibling.keys.pop()
+            if sibling.children.length >? 0  {
+                node.children[i].children.insert(0 sibling.children.pop())
+            }
+            node.children[i-1]=sibling
+        }
+        else if i+1 <? node.children.length and node.children[i+1].keys.length >=? 2  {
+            let sibling=node.children[i+1]
+            node.children[i].keys.push(node.keys[i])
+            node.keys[i]=take(@sibling.keys 0)
+            if sibling.children.length >? 0  {
+                node.children[i].children.push(take(@sibling.children 0))
+            }
+            node.children[i+1]=sibling
+        }
+        else  {
+            if i+1 <? node.children.length  {
+                merge(@node i)
+            }
+            else  {
+                i-=1
+                merge(@node i)
+            }
+        }
+    }
+    return erase(@node.children[i] key)
+}
+remove=(@root:Node key:int64):>bool=> {
+    let found=erase(@root key)
+    if root.keys.length =? 0 and root.children.length >? 0  {
+        root=root.children[0]
+    }
+    return found
+}
+walk=(node:Node):>array<int64>=> {
+    let result:array<int64>=[]
+    loop i in [0..node.keys.length)  {
+        if node.children.length >? 0  {
+            loop key in walk(node.children[i])  {
+                result.push(key)
+            }
+        }
+        result.push(node.keys[i])
+    }
+    if node.children.length >? 0  {
+        loop key in walk(node.children[node.keys.length])  {
+            result.push(key)
+        }
+    }
+    return result
+}
+height=(node:Node):>int64=>{
+    if node.children.length =? 0 {return 0}
+    return 1+height(node.children[0])
+}
+valid=(node:Node root:bool):>bool=> {
+    if node.keys.length >? 3  {
+        return false
+    }
+    if not root and node.keys.length <? 1  {
+        return false
+    }
+    loop i in [1..node.keys.length)  {
+        if node.keys[i-1] >=? node.keys[i]  {
+            return false
+        }
+    }
+    if node.children.length >? 0  {
+        if node.children.length not=? node.keys.length+1  {
+            return false
+        }
+        loop child in node.children  {
+            if not valid(child false)  {
+                return false
+            }
+        }
+    }
+    let ordered=walk(node)
+    loop i in [1..ordered.length) {
+        if ordered[i-1] >=? ordered[i] {return false}
+    }
+    if node.children.length >? 0 {
+        let depth=height(node.children[0])
+        loop child in node.children {
+            if height(child) not=? depth {return false}
+        }
+    }
+    return true
+}
+main=():>int64=> {
+    let tree=leaf()
+    loop i in [0..64)  {
+        insert(@tree (i*37)%64)
+    }
+    loop i in [0..64) {insert(@tree i)}
+    assert(walk(tree).length =? 64)
+    assert(valid(tree true))
+    let saved=tree
+    loop i in [0..48)  {
+        assert(remove(@tree (i*19)%64))
+        assert(valid(tree true))
+    }
+    assert(not remove(@tree 999))
+    let remaining=walk(tree)
+    let sum=0
+    loop key in remaining  {
+        sum+=key
+    }
+    assert(walk(saved).length =? 64)
+    assert(remaining.length =? 16)
+    loop key in remaining  {
+        assert(remove(@tree key))
+    }
+    assert(tree.keys.length =? 0)
+    printl("{remaining.length} {sum} {walk(saved).length}")
+    return 0
+}

@@ -1,0 +1,66 @@
+# Full-match Thompson-style state sets for literals, dot and postfix star.
+closure=(pattern:string states:array<bool>):>array<bool>=> {
+    let result=states
+    loop i in [0..pattern.length)  {
+        if i+1 <? pattern.length  {
+            if result[i] and pattern[i+1] =? "*"  {
+                result[i+2]=true
+            }
+        }
+    }
+    return result
+}
+accepts=(pattern:string text:string):>bool=> {
+    let active=[loop i in [0..pattern.length+1) false]
+    active[0]=true
+    active=closure(pattern active)
+    loop ch in text  {
+        let next=[loop i in [0..pattern.length+1) false]
+        loop i in [0..pattern.length)  {
+            if active[i] and pattern[i] not=? "*"  {
+                if pattern[i] =? "." or pattern[i] =? ch  {
+                    if i+1 <? pattern.length  {
+                        if pattern[i+1] =? "*"  {
+                            next[i]=true
+                        }
+                        else  {
+                            next[i+1]=true
+                        }
+                    }
+                    else  {
+                        next[i+1]=true
+                    }
+                }
+            }
+        }
+        active=closure(pattern next)
+    }
+    return active[pattern.length]
+}
+main=():>int64=> {
+    let patterns=["a*b" ".*" "ab*" "c*a*b" "a.*c" "a*a*a*b"]
+    let texts=["" "b" "ab" "aaab" "ac" "axxc" "miss"]
+    let count=0
+    let signature=0
+    let position=0
+    loop pattern in patterns  {
+        loop text in texts  {
+            let hit=accepts(pattern text)
+            if hit  {
+                count+=1
+                signature+=position+1
+            }
+            position+=1
+        }
+    }
+    $runtime_assert (accepts("a*" ""))
+    $runtime_assert (accepts("a*b" "aaab"))
+    $runtime_assert (not accepts("a*b" "aaabc"))
+    $runtime_assert (accepts(".*" "café"))
+    $runtime_assert (not accepts("" "a"))
+    $runtime_assert (accepts("" ""))
+    $runtime_assert (accepts("a*b*c*" ""))
+    $runtime_assert (not accepts("a*a*a*b" "aaaaaaaaac"))
+    printl("{count} {signature}")
+    return 0
+}

@@ -1,0 +1,76 @@
+Player:type=[x:int64 velocity:int64 score:int64]
+Game:type=[players:array<Player> random:uint32 frame:int64]
+advance=(state:Game input:array<int64>):>Game=> {
+    let next=state
+    next.frame+=1
+    next.random=next.random*1664525+1013904223
+    loop i in [0..next.players.length)  {
+        next.players[i].velocity+=input[i]
+        if next.players[i].velocity >? 5  {
+            next.players[i].velocity=5
+        }
+        if next.players[i].velocity <? -5  {
+            next.players[i].velocity=-5
+        }
+        next.players[i].x+=next.players[i].velocity
+        if next.players[i].x <? 0  {
+            next.players[i].x=0
+            next.players[i].velocity=0
+        }
+        if next.players[i].x >? 100  {
+            next.players[i].x=100
+            next.players[i].velocity=0
+        }
+        if next.players[i].x%13 =? (next.random%13 as int64)  {
+            next.players[i].score+=1
+        }
+    }
+    return next
+}
+inputs=(frame:int64):>array<int64>=>[frame%3-1 (frame*7)%3-1]
+fingerprint=(g:Game):>uint64=> {
+    let hash=g.random as uint64
+    loop p in g.players  {
+        hash=hash*257+(p.x+p.velocity*100+p.score*1000 as uint64)
+    }
+    return hash*257+(g.frame as uint64)
+}
+main=():>int64=> {
+    let initial=Game[[Player[20 0 0] Player[80 0 0]] 12345 0]
+    let baseline=initial
+    let snapshots:array<Game>=[initial]
+    loop frame in [0..180)  {
+        baseline=advance(baseline inputs(frame))
+        snapshots.push(baseline)
+    }
+    let predicted=initial
+    loop frame in [0..180)  {
+        predicted=advance(predicted [0 0])
+    }
+    assert(fingerprint(predicted) not=? fingerprint(baseline))
+    let replayed=0
+    loop rewind in [0 1 7 31 90 179]  {
+        let corrected=snapshots[rewind]
+        loop frame in [rewind..180)  {
+            corrected=advance(corrected inputs(frame))
+            replayed+=1
+        }
+        assert(corrected =? baseline)
+    }
+    let changed=snapshots[30]
+    changed.players[0].x=999
+    assert(snapshots[30].players[0].x not=? 999)
+    assert(initial.frame =? 0)
+    assert(initial.random =? 12345)
+    let repeated=initial
+    loop frame in [0..180)  {
+        repeated=advance(repeated inputs(frame))
+    }
+    assert(repeated =? baseline)
+    let score=0
+    loop player in baseline.players  {
+        score+=player.score
+    }
+    printl("{baseline.frame} {fingerprint(baseline)} {score} {replayed}")
+    return 0
+}

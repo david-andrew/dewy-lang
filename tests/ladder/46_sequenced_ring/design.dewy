@@ -1,0 +1,71 @@
+$explicit_copies
+# Sequentially consistent interleaving simulation; sequence counters prevent ABA.
+Ring:type=[data:array<int64 length=4> sequence:array<int64 length=4> write:int64 read:int64]
+Reservation:type=[position:int64 slot:int64]
+reserve=(@r:Ring):>Reservation?=> {
+    let position=r.write
+    let slot=position%4
+    if r.sequence[slot] not=? position  {
+        return none
+    }
+    r.write+=1
+    return Reservation[position slot]
+}
+commit=(@r:Ring reservation:Reservation value:int64):>void=> {
+    r.data[reservation.slot]=value
+    r.sequence[reservation.slot]=reservation.position+1
+}
+consume=(@r:Ring):>int64?=> {
+    let position=r.read
+    let slot=position%4
+    if r.sequence[slot] not=? position+1  {
+        return none
+    }
+    let value=r.data[slot]
+    r.sequence[slot]=position+4
+    r.read+=1
+    return value
+}
+main=():>int64=> {
+    let ring=Ring[[0 0 0 0] [0 1 2 3] 0 0]
+    let a=reserve(@ring)
+    let b=reserve(@ring)
+    if a is? none  {
+        return 1
+    }
+    if b is? none  {
+        return 2
+    }
+    commit(@ring b 20)
+    # Later publication cannot bypass a stalled earlier producer.
+    $runtime_assert (consume(@ring) is? none)
+    commit(@ring a 10)
+    $runtime_assert (consume(@ring) =? 10)
+    $runtime_assert (consume(@ring) =? 20)
+    let count=0
+    let checksum=0
+    loop batch in [0..200)  {
+        loop j in [0..4)  {
+            let ticket=reserve(@ring)
+            if ticket is? none  {
+                return 3
+            }
+            commit(@ring ticket batch*4+j)
+        }
+        $runtime_assert (reserve(@ring) is? none)
+        loop j in [0..4)  {
+            let item=consume(@ring)
+            if item is? none  {
+                return 4
+            }
+            $runtime_assert (item =? batch*4+j)
+            checksum+=item
+            count+=1
+        }
+        $runtime_assert (consume(@ring) is? none)
+    }
+    $runtime_assert (ring.read =? ring.write)
+    $runtime_assert (ring.read =? 802)
+    printl("{count} {checksum} {ring.read}")
+    return 0
+}

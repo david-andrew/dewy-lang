@@ -1,0 +1,71 @@
+Literal:type=[kind:string]
+Variable:type=[name:string]
+Binary:type=[op:string left:int64 right:int64]
+Expr:type=Literal|Variable|Binary
+TypeError:type=type of error & [message:string]
+infer=(nodes:array<Expr> index:int64 env:dict<string string>):>string|TypeError=> {
+    if index <? 0 or index >=? nodes.length  {
+        return TypeError["missing node"]
+    }
+    let node=nodes[index]
+    if node is? Literal  {
+        return node.kind
+    }
+    if node is? Variable  {
+        let kind=env.get(node.name)
+        if kind is? none  {
+            return TypeError["unbound"]
+        }
+        return kind
+    }
+    if node is? Binary  {
+        let left=infer(nodes node.left env) or_throw
+        let right=infer(nodes node.right env) or_throw
+        if left not=? right  {
+            return TypeError["mismatch"]
+        }
+        if node.op =? "+"  {
+            if left not=? "int"  {
+                return TypeError["numeric"]
+            }
+            return "int"
+        }
+        if node.op =? "=="  {
+            return "bool"
+        }
+        if node.op =? "and"  {
+            if left not=? "bool"  {
+                return TypeError["boolean"]
+            }
+            return "bool"
+        }
+        return TypeError["operator"]
+    }
+    return TypeError["unreachable"]
+}
+main=():>int64=> {
+    let nodes:array<Expr>=[Literal["int"] Variable["x"] Binary["+" 0 1] Binary["==" 2 0] Literal["bool"] Binary["and" 3 4] Binary["+" 0 4] Variable["missing"] Binary["?" 0 1]]
+    let env:dict<string string>=["x"->"int"]
+    let valid=0
+    let invalid=0
+    loop i in [0..nodes.length)  {
+        let kind=infer(nodes i env)
+        if kind is? TypeError  {
+            invalid+=1
+        }
+        else  {
+            valid+=1
+        }
+    }
+    assert(valid =? 6)
+    assert(invalid =? 3)
+    let saved=env
+    env["x"]="bool"
+    let broken=infer(nodes 2 env)
+    assert(broken is? TypeError)
+    assert(infer(nodes 2 saved) is? string)
+    let bad=infer(nodes 999 saved)
+    assert(bad is? TypeError)
+    printl("{valid} {invalid}")
+    return 0
+}

@@ -1,0 +1,7 @@
+from p"parse.dewy" import BadNumber
+from p"policy.dewy" import BadQuantity, quantity
+Invoice:type=[total:int64 count:int64]
+invoice=(text:string):>Invoice|BadNumber|BadQuantity=> {
+    let count=quantity(text) or_throw
+    return Invoice[count*7 1]
+}

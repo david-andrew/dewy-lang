@@ -1,0 +1,102 @@
+# Hash map + index-linked list. No scan or shift in get/put/evict.
+Link:type=[key:int64 value:int64 prev:int64 next:int64]
+Cache:type=[index:dict<int64 int64> links:array<Link> free:array<int64> head:int64 tail:int64 capacity:int64]
+unlink=(@c:Cache i:int64):>void=> {
+    let left=c.links[i].prev
+    let right=c.links[i].next
+    if left >=? 0  {
+        c.links[left].next=right
+    }
+    else  {
+        c.head=right
+    }
+    if right >=? 0  {
+        c.links[right].prev=left
+    }
+    else  {
+        c.tail=left
+    }
+}
+touch=(@c:Cache i:int64):>void=> {
+    if c.tail =? i  {
+        return
+    }
+    unlink(@c i)
+    c.links[i].prev=c.tail
+    c.links[i].next=-1
+    if c.tail >=? 0  {
+        c.links[c.tail].next=i
+    }
+    else  {
+        c.head=i
+    }
+    c.tail=i
+}
+get=(@c:Cache key:int64):>int64?=> {
+    let slot=c.index.get(key)
+    if slot is? none  {
+        return none
+    }
+    touch(@c slot)
+    return c.links[slot].value
+}
+put=(@c:Cache key:int64 value:int64):>void=> {
+    if c.capacity =? 0  {
+        return
+    }
+    let existing=c.index.get(key)
+    if existing is? int64  {
+        c.links[existing].value=value
+        touch(@c existing)
+        return
+    }
+    let slot=0
+    if c.index.length =? c.capacity  {
+        slot=c.head
+        c.index.remove(c.links[slot].key)
+        unlink(@c slot)
+    }
+    else  {
+        slot=c.links.length
+        c.links.push(Link[0 0 -1 -1])
+    }
+    c.links[slot]=Link[key value c.tail -1]
+    if c.tail >=? 0  {
+        c.links[c.tail].next=slot
+    }
+    else  {
+        c.head=slot
+    }
+    c.tail=slot
+    c.index[key]=slot
+}
+main=():>int64=> {
+    let c=Cache[[] [] [] -1 -1 8]
+    let hits=0
+    let checksum=0
+    loop i in [0..2000)  {
+        let key=(i*17)%23
+        put(@c key i)
+        let value=get(@c (i*7)%23)
+        if value is? int64  {
+            hits+=1
+            checksum+=value
+        }
+    }
+    let keys:array<int64>=[]
+    let cursor=c.head
+    loop cursor >=? 0  {
+        keys.push(c.links[cursor].key)
+        cursor=c.links[cursor].next
+    }
+    assert(keys.length =? 8)
+    assert(c.links.length =? 8)
+    let saved=c
+    put(@c 999 5)
+    assert(saved.index.get(999) is? none)
+    let zero=Cache[[] [] [] -1 -1 0]
+    put(@zero 1 2)
+    assert(get(@zero 1) is? none)
+    printl("{hits} {checksum} {keys[0]} {keys[7]}")
+    return 0
+}

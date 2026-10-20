@@ -1,0 +1,65 @@
+# Library-level matrix operations, with row/column broadcasting and alias tests.
+center=(matrix:NDArray<float64>):>NDArray<float64>=> {
+    let means=[0.0 0.0 0.0]
+    loop j in [0..3)  {
+        loop i in [0..2)  {
+            means[j]+=matrix[i j]/2.0
+        }
+    }
+    return matrix .- means
+}
+gram=(matrix:NDArray<float64>):>NDArray<float64>=>transpose(matrix)*matrix
+close=(a:float64 b:float64):>bool=>abs(a-b) <? 1e-8
+main=():>int64=> {
+    let a=reshape([1.0 2.0 3.0 4.0 5.0 6.0] 2 3)
+    let row=[10.0 20.0 30.0]
+    let column=reshape([100.0 200.0] 2 1)
+    let saved=a
+    let b=(a .+ row) .+ column
+    assert(b.shape =? [2 3])
+    assert(b[0 0] =? 111.0)
+    assert(b[1 2] =? 236.0)
+    let scalar=b .* 2.0 .- 1.0
+    assert(scalar[1 2] =? 471.0)
+    let c=center(a)
+    loop j in [0..3)  {
+        assert(close(c[0 j]+c[1 j] 0.0))
+    }
+    let g=gram(c)
+    loop i in [0..3)  {
+        loop j in [0..3)  {
+            assert(close(g[i j] 4.5))
+        }
+    }
+    a .+= row
+    assert(saved.data =? [1.0 2.0 3.0 4.0 5.0 6.0])
+    let selected=b[[..] 1]
+    b[[..] 1] .*= 2.0
+    assert(selected.data =? [122.0 225.0])
+    let cube=reshape([1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0] 2 4)
+    let expanded=cube .+ [1.0 2.0 3.0 4.0]
+    assert(expanded[1 3] =? 12.0)
+    let square=reshape([2.0 0.0 0.0 4.0] 2 2)
+    let solution=solve(square [8.0 8.0])
+    assert(close(solution[0] 4.0))
+    assert(close(solution[1] 2.0))
+    let total=0.0
+    loop x in b.data  {
+        total+=x
+    }
+    let checksum=0.0
+    loop x in g.data  {
+        checksum+=x
+    }
+    let zero=zeros(0 3)
+    assert(zero.data.length =? 0)
+    let rowsum=a*[1.0 1.0 1.0]
+    assert(rowsum =? [66.0 75.0])
+    let diagonal=eye(3)
+    let identity_product=saved*diagonal
+    assert(identity_product.data =? saved.data)
+    let shifted_again=saved .+ 0.0
+    assert(shifted_again.data =? saved.data)
+    printl("{format(total ".1f")} {format(checksum ".1f")} {format(sum(expanded) ".1f")}")
+    return 0
+}

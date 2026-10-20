@@ -1,0 +1,67 @@
+# Fixed binary merge tree, including an order-sensitive rolling digest.
+Summary:type=[sum:int64 count:int64 hash:uint64 power:uint64]
+leaf_summary=(chunk:array<int64>):>Summary=> {
+    let result=Summary[0 0 0 1]
+    loop x in chunk  {
+        result.sum+=x
+        result.count+=1
+        result.hash=result.hash*257+(x as uint64)
+        result.power*=257
+    }
+    return result
+}
+merge_summary=(left:Summary right:Summary):>Summary=>Summary[left.sum+right.sum left.count+right.count left.hash*right.power+right.hash left.power*right.power]
+reduce_tree=(input:array<int64> chunk_size:int64):>Summary=> {
+    let chunks:array<array<int64>>=[]
+    let at=0
+    loop at <? input.length  {
+        let chunk:array<int64>=[]
+        loop j in [0..chunk_size)  {
+            if at+j <? input.length  {
+                chunk.push(input[at+j])
+            }
+        }
+        chunks.push(chunk)
+        at+=chunk_size
+    }
+    if chunks.length =? 0  {
+        return Summary[0 0 0 1]
+    }
+    let level=parallel_map(chunks leaf_summary)
+    loop level.length >? 1  {
+        let next:array<Summary>=[]
+        let i=0
+        loop i <? level.length  {
+            if i+1 <? level.length  {
+                next.push(merge_summary(level[i] level[i+1]))
+            }
+            else  {
+                next.push(level[i])
+            }
+            i+=2
+        }
+        level=next
+    }
+    return level[0]
+}
+main=():>int64=> {
+    let input:array<int64>=[loop i in [0..4097) (i*37)%101]
+    let serial=leaf_summary(input)
+    loop chunk in [1 7 64 511 4097]  {
+        let parallel=reduce_tree(input chunk)
+        assert(parallel.sum =? serial.sum)
+        assert(parallel.hash =? serial.hash)
+        assert(parallel.count =? 4097)
+    }
+    let empty=reduce_tree([] 7)
+    assert(empty.count =? 0)
+    let left=leaf_summary([1 2])
+    let right=leaf_summary([3 4])
+    assert(merge_summary(left right).hash not=? merge_summary(right left).hash)
+    let snapshot=input
+    let a=reduce_tree(input 64)
+    input[0]=999
+    assert(reduce_tree(snapshot 64).hash =? a.hash)
+    printl("{serial.count} {serial.sum} {serial.hash}")
+    return 0
+}

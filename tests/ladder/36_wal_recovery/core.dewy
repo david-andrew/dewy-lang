@@ -1,0 +1,82 @@
+# Length, key, value, checksum; a record commits only after its checksum.
+encode=(key:int64 value:int64):>array<uint8>=> {
+    return [4 (key as uint8) (value as uint8) ((key+value+4)%256 as uint8)]
+}
+recover=(bytes:array<uint8>):>dict<int64 int64>=> {
+    let store:dict<int64 int64>=[]
+    let offset=0
+    loop offset <? bytes.length  {
+        let length=bytes[offset] as int64
+        if length not=? 4  {
+            break
+        }
+        if bytes.length-offset <? length  {
+            break
+        }
+        let key=bytes[offset+1] as int64
+        let value=bytes[offset+2] as int64
+        let checksum=bytes[offset+3] as int64
+        if checksum not=? (key+value+4)%256  {
+            break
+        }
+        if value =? 255  {
+            store.remove(key)
+        }
+        else  {
+            store[key]=value
+        }
+        offset+=length
+    }
+    return store
+}
+main=():>int64=> {
+    let log:array<uint8>=[]
+    loop record in [encode(1 10) encode(2 20) encode(1 30) encode(2 255) encode(3 40)]  {
+        loop byte in record  {
+            log.push(byte)
+        }
+    }
+    let cases=0
+    let total=0
+    # Every possible crash cut, including exactly at transaction boundaries.
+    loop cut in [0..log.length+1)  {
+        let prefix:array<uint8>=[]
+        loop i in [0..cut)  {
+            prefix.push(log[i])
+        }
+        let path="crash.wal"
+        let written=write_bytes(path prefix)
+        if not written  {
+            return 1
+        }
+        let loaded=read_bytes(path)
+        if loaded is? none  {
+            return 2
+        }
+        let state=recover(loaded)
+        cases+=1
+        loop [key value] in state  {
+            total+=key*100+value
+        }
+        if cut <? 4  {
+            assert(state.length =? 0)
+        }
+        if cut >=? 16  {
+            assert(state.get(2) is? none)
+        }
+    }
+    let full=recover(log)
+    assert(full.get(1) =? 30)
+    assert(full.get(3) =? 40)
+    let corrupt=log
+    corrupt[11]=0
+    let recovered=recover(corrupt)
+    assert(recovered.get(1) =? 10)
+    assert(recovered.get(2) =? 20)
+    let removed=delete_file("crash.wal")
+    if not removed  {
+        return 3
+    }
+    printl("{cases} {total} {full.length}")
+    return 0
+}

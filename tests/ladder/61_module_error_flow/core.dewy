@@ -1,0 +1,79 @@
+from p"invoice.dewy" import Invoice, invoice
+from p"parse.dewy" import BadNumber
+from p"policy.dewy" import BadQuantity
+summarize=(lines:array<string>):>Invoice|BadNumber|BadQuantity=> {
+    let total=0
+    let count=0
+    loop line in lines  {
+        let item=invoice(line) or_throw
+        total+=item.total
+        count+=item.count
+    }
+    return Invoice[total count]
+}
+main=():>int64=> {
+    let good=summarize(["2" "3" "0" "10"])
+    if good is? error  {
+        return 1
+    }
+    assert(good.total =? 105)
+    assert(good.count =? 4)
+    let bad=summarize(["2" "oops" "3"])
+    assert(bad is? BadNumber)
+    if bad is? BadNumber  {
+        assert(bad.text =? "oops")
+    }
+    else  {
+        return 2
+    }
+    let negative=summarize(["1" "-4"])
+    assert(negative is? BadQuantity)
+    if negative is? BadQuantity  {
+        assert(negative.value =? -4)
+    }
+    else  {
+        return 3
+    }
+    let maximum=summarize(["100" "0"])
+    if maximum is? error  {
+        return 4
+    }
+    assert(maximum.total =? 700)
+    let excessive=summarize(["101"])
+    if excessive is? BadQuantity  {
+        assert(excessive.value =? 101)
+    }
+    else  {
+        return 5
+    }
+    let empty=summarize([])
+    if empty is? error  {
+        return 6
+    }
+    assert(empty.total =? 0)
+    assert(empty.count =? 0)
+    # Member forwarding preserves the imported concrete error payload.
+    let forwarded=invoice("bad").total
+    assert(forwarded is? BadNumber)
+    if forwarded is? BadNumber  {
+        assert(forwarded.text =? "bad")
+    }
+    let saved=good
+    good.total=0
+    assert(saved.total =? 105)
+    let successes=0
+    let failures=0
+    loop text in ["0" "1" "100" "-1" "101" "x"]  {
+        let result=invoice(text)
+        if result is? error  {
+            failures+=1
+        }
+        else  {
+            successes+=1
+        }
+    }
+    assert(successes =? 3)
+    assert(failures =? 3)
+    printl("{saved.total} {saved.count} {successes} {failures}")
+    return 0
+}

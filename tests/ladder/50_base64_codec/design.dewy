@@ -1,0 +1,103 @@
+alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+Invalid:type=type of error
+encode64=(input:array<uint8>):>string=> {
+    let result=""
+    let i=0
+    loop i <? input.length  {
+        let a=input[i] as int64
+        let b=0
+        let c=0
+        if i+1 <? input.length  {
+            b=input[i+1] as int64
+        }
+        if i+2 <? input.length  {
+            c=input[i+2] as int64
+        }
+        result+=alphabet[a//4]
+        result+=alphabet[(a%4)*16+b//16]
+        if i+1 <? input.length  {
+            result+=alphabet[(b%16)*4+c//64]
+        }
+        else  {
+            result+="="
+        }
+        if i+2 <? input.length  {
+            result+=alphabet[c%64]
+        }
+        else  {
+            result+="="
+        }
+        i+=3
+    }
+    return result
+}
+digit=(ch:string):>int64=> {
+    loop i in [0..64)  {
+        if alphabet[i] =? ch  {
+            return i
+        }
+    }
+    return -1
+}
+decode64=(text:string):>array<uint8>|Invalid=> {
+    if text.length%4 not=? 0  {
+        return Invalid
+    }
+    let out:array<uint8>=[]
+    let i=0
+    loop i <? text.length  {
+        let a=digit(text[i])
+        let b=digit(text[i+1])
+        let c=digit(text[i+2])
+        let d=digit(text[i+3])
+        if a <? 0 or b <? 0  {
+            return Invalid
+        }
+        if c <? 0 and text[i+2] not=? "="  {
+            return Invalid
+        }
+        if d <? 0 and text[i+3] not=? "="  {
+            return Invalid
+        }
+        if c <? 0  {
+            if d >=? 0 or b%16 not=? 0 or i+4 not=? text.length  {
+                return Invalid
+            }
+        }
+        else if d <? 0  {
+            if c%4 not=? 0 or i+4 not=? text.length  {
+                return Invalid
+            }
+        }
+        out.push((a*4+b//16) as uint8)
+        if c >=? 0  {
+            out.push(((b%16)*16+c//4) as uint8)
+        }
+        if d >=? 0  {
+            out.push(((c%4)*64+d) as uint8)
+        }
+        i+=4
+    }
+    return out
+}
+main=():>int64=> {
+    let cases=0
+    let length=0
+    loop n in [0..130)  {
+        let input:array<uint8>=[loop i in [0..n) ((i*53+n)%256) as uint8]
+        let encoded=encode64(input)
+        let decoded=decode64(encoded)
+        if decoded is? Invalid  {
+            return 1
+        }
+        $runtime_assert (decoded =? input)
+        cases+=1
+        length+=encoded.length
+    }
+    loop bad in ["A" "====" "AA=A" "AB==" "AAB=" "AA==AAAA" "!!!!"]  {
+        $runtime_assert (decode64(bad) is? Invalid)
+    }
+    $runtime_assert (encode64(bytes("foobar")) =? "Zm9vYmFy")
+    printl("{cases} {length} {encode64(bytes("hello"))}")
+    return 0
+}

@@ -1,0 +1,9 @@
+from p"parse.dewy" import BadNumber, parse_number
+BadQuantity:type=type of error & [value:int64]
+quantity=(text:string):>int64|BadNumber|BadQuantity=> {
+    let number=parse_number(text) or_throw
+    if number <? 0 or number >? 100  {
+        return BadQuantity[number]
+    }
+    return number
+}
