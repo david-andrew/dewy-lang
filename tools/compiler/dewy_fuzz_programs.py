@@ -244,6 +244,9 @@ class Cond(Expr):
     other: Expr
 
     def render(self, typed=False):
+        # A parameter type does not reach `if`/`match` branches (a let annotation does):
+        # there a bare literal is an `int` (reported). `typed` is 'arg' in that context.
+        typed = typed is True and self.ty != U
         return f'(if {render(self.test)} {render(self.then, typed)} else {render(self.other, typed)})'
 
     def eval(self, m, env):
@@ -258,6 +261,7 @@ class MatchLit(Expr):
     default: Expr
 
     def render(self, typed=False):
+        typed = typed is True and self.ty != U  # (as for `if` branches)
         arms = ' '.join(f'<{k.value}>=>{render(v, typed)}' for k, v in self.arms)
         return f'(match {render(self.subject)} {{{arms} _=>{render(self.default, typed)}}})'
 
@@ -446,7 +450,7 @@ class Call(Expr):
     closure: bool = False
 
     def render(self, typed=False):
-        return f'{self.callee}(' + ' '.join(render(a, True) for a in self.args) + ')'
+        return f'{self.callee}(' + ' '.join(render(a, 'arg') for a in self.args) + ')'
 
     def eval(self, m, env):
         target = env.get(self.callee, m) if self.closure else m.functions[self.callee]
@@ -462,7 +466,7 @@ class Method(Expr):
     parens: bool = True
 
     def render(self, typed=False):
-        args = '(' + ' '.join(render(a, True) for a in self.args) + ')' if self.args or self.parens else ''
+        args = '(' + ' '.join(render(a, 'arg') for a in self.args) + ')' if self.args or self.parens else ''
         return f'{atom(self.recv)}.{self.name}{args}'
 
     def eval(self, m, env):
@@ -2342,8 +2346,10 @@ class Generator:
         z = Var(INT, out[-2].name)
         choice = r.choice(('int64', 'int64', 'uint64', 'update', 'update'))
         if choice == 'int64':
+            # Literals alone in an int64 context are int64 (and wrap): an `int` variable
+            # keeps the arithmetic checked.
             name = self.fresh('n')
-            out.append(Let(name, I, Narrow(I, self.expr(INT, 1))))
+            out.append(Let(name, I, Narrow(I, Bin(INT, r.choice(('+', '-', '*')), z, self.expr(INT, 1)))))
             self.declare(name, I)
             out.append(self.print_value(Var(I, name)))
         elif choice == 'uint64':
