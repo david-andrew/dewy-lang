@@ -23,6 +23,7 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -106,7 +107,12 @@ def published(repo: str, tag: str | None) -> dict:
     if tag is not None:
         if not TAG.fullmatch(tag):
             raise ChannelError(f'not a toolchain release tag: {tag!r}')
-        release = json.loads(fetch(f'https://api.github.com/repos/{repo}/releases/tags/{tag}', api=True))
+        try:
+            release = json.loads(fetch(f'https://api.github.com/repos/{repo}/releases/tags/{tag}', api=True))
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                raise ChannelError(f'{tag} is not a published release of {repo}') from error
+            raise
     else:
         releases = json.loads(fetch(f'https://api.github.com/repos/{repo}/releases?per_page=100', api=True))
         candidates = [r for r in releases if not r['draft'] and TAG.fullmatch(r['tag_name'])]
