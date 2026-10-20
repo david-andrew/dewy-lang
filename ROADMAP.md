@@ -8,7 +8,7 @@ Dewy must become; this file says what we do next and how we know we are closer.
 
 | Measure | Now (2026-10-19) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 0/31 programs | all milestones |
+| Acceptance ladder, design surface | 19/31 programs (was 0/31 on 10-19) | all milestones |
 | Acceptance ladder, current dialect | 31/31 | stays green |
 | Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.35 G instructions, ~330 ms | 250k root lines/s (~88 ms) |
 | Compiler self-build | 7.5 G instructions, ~1.6 s | seconds-scale edit loop |
@@ -55,9 +55,10 @@ surface (one language, no dialect forks), that must all pass:
   - replace it with checked per-instance isolation summaries.
   This is slice 1 of the semantic-boundary design; later slices are pulled in
   only when a capability needs them.
-- **Surface convergence (milestone 2)**: directives and metatags in the parser
-  with precise diagnostics; Dewy-native diagnostics (no Jo syntax in
-  suggestions).
+- **Surface convergence (milestone 2)**: directives, zero-argument members and
+  Dewy-native diagnostics landed (0→19/31). Next: the function-handle migration,
+  then `pop(index)`/`insert` order/`starts_with` spellings, function-type
+  expressions, and `.copy`.
 
 ## Next
 
@@ -112,6 +113,9 @@ Resolved 2026-10-19 (David):
   otherwise (e.g. `float64`). Representation strategy is ours.
 - **Zero-argument calls** may omit or include the parentheses: `xs.pop` and
   `xs.pop()` are both accepted.
+- **Function handles** (2026-10-20) follow the design: a bare function name
+  calls; `@fn` is the handle (`xs.map(@double)`). Migrate in stages: warn on
+  bare function values, then switch, updating lib/ and examples.
 
 Open:
 
