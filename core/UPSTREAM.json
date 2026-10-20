@@ -313,6 +313,13 @@
         "lib/std/nd.jo"
       ],
       "description": "Cache-blocked matrix product with four-row accumulation, adapted to existing pointer-based vector loops. Preserves Dewy dimension/overflow checks, accumulation order and zero-factor handling; new axis, conversion and indexing APIs are not imported."
+    },
+    {
+      "revision": "ef8d9a908c2cab8eb86c4dfadf17a1c2b682ce92",
+      "paths": [
+        "compiler/lower.jo"
+      ],
+      "description": "Pass already-proven stable array-element views directly to calls, without per-call managed copies. Mark with a lowering-only flag and reset it before repeated lowering. Keep existing may_write_root proof and all value snapshots when root mutation is possible. Only the element-view optimization is adapted; nonreturn-call metadata is not imported."
     }
   ]
 }

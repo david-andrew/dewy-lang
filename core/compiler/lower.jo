@@ -1141,6 +1141,9 @@ borrow_may_change = (a: int, args: int[], i: int, callee: int) -> bool:
     if nodes[n].aux != i32(int(SK.local)): return false
     if held_views.contains(int(nodes[n].sym)): return false
     flags = int(locals[int(nodes[n].sym)].flags)
+    # view_decl proved that the array root cannot change through the last use,
+    # including this call and its remaining arguments. The view needs no retain.
+    if flags & LF_ELEMENTVIEW != 0: return false
     if flags & (LF_SHARED | LF_CAPTURE | LF_BYREF | LF_ALIAS) != 0: return true
     if flags & LF_MUTPARAM == 0: return false
     # A mutable parameter may alias a caller's global. A read-only direct call
@@ -4423,7 +4426,7 @@ view_decl = (s: int, l: int) -> bool:
     v = vreg(VI)
     e_mov(v, p.v)
     locals[l].vreg = i32(v)
-    locals[l].flags = i32(fl | LF_BYREF)
+    locals[l].flags = i32(fl | LF_BYREF | LF_ELEMENTVIEW)
     true
 
 # Only direct reads: custom getters, calls, conversions and computed indexes
@@ -4458,6 +4461,7 @@ plain_read = (n: int) -> bool:
 # `loop let`, and the value a match or a variant `if let` / `loop let` looks at, whose names stand
 # for its fields.
 const LF_HELDVIEW = 2097152    # lowering-only; reset before a repeated lowering
+const LF_ELEMENTVIEW = 4194304 # array element address, protected through its last use
 held_views: {int: bool}         # the held views of the function being lowered
 hv_given: (int, int)[]          # (finding them) each variable and a value it is given
 hv_cand: {int: bool}            # ... the variables given values
@@ -4497,7 +4501,7 @@ held_value_addr = (e: int) -> int:
 find_views = (f: int):
     held_views = {}
     loop l in fns[f].locals:
-        if int(locals[l].flags) & LF_HELDVIEW != 0: locals[l].flags &= i32(~(LF_HELDVIEW | LF_BYREF))
+        if int(locals[l].flags) & (LF_HELDVIEW | LF_ELEMENTVIEW) != 0: locals[l].flags &= i32(~(LF_HELDVIEW | LF_ELEMENTVIEW | LF_BYREF))
     hv_bad = {}
     # (what C gives a function it calls is C's, which may change it meanwhile)
     if dbg_on or fns[f].body == 0 or fns[f].cabi: return

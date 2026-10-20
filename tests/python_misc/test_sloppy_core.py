@@ -34,6 +34,7 @@ QUICK_CASES = {
     'optimizer-data-parameter-snapshots', 'optimizer-data-index-once',
     'optimizer-data-nested-array', 'optimizer-data-record-local',
     'optimizer-data-private-capture', 'optimizer-data-shared-capture', 'optimizer-data-loop-local',
+    'optimizer-element-view-call-snapshots',
     'lexer-keyword-ids', 'optimizer-parameter-effects-shared-scan',
     'constant-local-once', 'numeric-sum-literal-exact', 'numeric-matrix-slices',
     'array-comparison-word-boundaries', 'array-comparison-string-blocks', 'sequence-value-protocol-nesting',
@@ -70,6 +71,31 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'optimizer-element-view-call-snapshots': '''Row:type=[values:array<int64> bias:int64]
+let global_rows=[Row[[20] 22]]
+read_row=(row:Row ignored:int64):>int64=>row.values[0]+row.bias
+replace_rows=(@rows:array<Row>):>int64=>{rows=[] return 0}
+replace_global=():>int64=>{global_rows=[] return 0}
+mutating_reader=(row:Row):>int64=>{global_rows=[] return row.values[0]+row.bias}
+return_row=(row:Row):>Row=>row
+main=()=>{
+let rows=[Row[[20] 22]] let row=rows[0]
+if read_row(row replace_rows(@rows)) not=?42 return 1
+let global_row=global_rows[0]
+if read_row(global_row replace_global()) not=?42 return 2
+global_rows=[Row[[20] 22]] let direct=global_rows[0]
+if mutating_reader(direct) not=?42 return 3
+global_rows=[Row[[20] 22]] let indirect=global_rows[0]
+let callback=mutating_reader
+if callback(indirect) not=?42 return 4
+let originals=[Row[[20] 22]] let element=originals[0]
+let saved=return_row(element) originals=[]
+saved.values[0]+=1
+if saved.values[0]+saved.bias not=?43 return 5
+let captured=[Row[[20] 22]] let snapshot=captured[0]
+let clear=($capture @captured)=>{captured=[] return 0}
+return read_row(snapshot clear())
+}''',
     'sequence-swap-values': """Row:type=[name:string values:array<int64>]
 main=()=>{
 let xs=[1 2 3] let saved=xs xs.swap(0 2)
@@ -13212,3 +13238,33 @@ main = () -> int:
         command = [node, runner]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10)
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.mark.core_quick
+def test_core_element_view_call_ir(compiler, tmp_path):
+    source = tmp_path / 'element-view.jo'
+    source.write_text('''struct Row:
+    values: int[]
+    bias: int
+@noinline
+read_row = (r: Row) -> int: r.values[0] + r.bias
+@noinline
+view_probe = (rows: Row[]) -> int:
+    total = 0
+    loop i in [0..rows.len()):
+        r = rows[i]
+        total += read_row(r)
+    total
+main = () -> int: view_probe([Row([20], 22)])
+''')
+    binary = tmp_path / 'element-view'
+    built = subprocess.run([compiler, 'build', source, '--release', '--ir', '-o', binary],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    probe = re.search(r'^fn f_view_probe_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
+    assert probe, 'element-view probe was not emitted'
+    # Keep read_row, without retain/drop calls or copying the stable element.
+    assert len(re.findall(r'\bcall a=', probe[0])) == 1, probe[0]
+    assert not re.search(r'\b(?:store|copy) a=', probe[0]), probe[0]
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 42, ran.stdout + ran.stderr

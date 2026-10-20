@@ -130,6 +130,17 @@ New front-end or user-facing language design requires David's approval.
   plus 100 fresh five-mode fuzz cases, closing the matrix batch. Across 80 runtime
   comparisons, 74 pass and 6 remain inconclusive; no established regression and
   no whole-stage promotion. [Evidence](audits/2026-10-19/array-byte-count.json).
+- A fresh same-laptop Sloppy comparison (native self-hosted, same workload,
+  own libraries) measures default Sloppy Jo at 226 ms, Dewy Jo at 283 ms, and
+  equivalent Dewy source at 346 ms. Release is 521/378/453 ms respectively.
+  Default Sloppy skips optimization passes Dewy uses for generated-code quality;
+  source formatting also differs. This leaves a real default-build gap without
+  implying all of it is frontend cost. [Calibration](audits/2026-10-19/fresh-sloppy-calibration.json).
+- Proven stable array-element views no longer acquire per-call managed copies
+  in release mode. Matrix-row indexing is 4.6x faster on the laptop; default
+  mode is unchanged. All 32 ordinary artifacts are unchanged and all 12 compile
+  comparisons pass. Snapshot boundary checks and 615 quick checks pass; full
+  validation will close the next compiler batch. [Evidence](audits/2026-10-19/element-view-calls.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 
