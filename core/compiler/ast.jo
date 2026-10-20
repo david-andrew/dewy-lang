@@ -29,6 +29,12 @@ enum NK:
     trecord,        # Dewy inline structural type [field: Type ...]
     typeapply       # Dewy f<T> / Type<T>: a is the base, c the type syntax, kids the type arguments
 
+# Generic lambdas retain type parameters in kids2, as module functions do.
+# Their explicit captures use a child block so cloning preserves both lists.
+lambda_captures = (n: int) -> int[]:
+    if has_flag(n, NF_GENERIC): return kids(int(nodes[n].d))
+    kids2(n)
+
 # node flags
 const NF_MUT = 1
 const NF_INCLUSIVE = 2

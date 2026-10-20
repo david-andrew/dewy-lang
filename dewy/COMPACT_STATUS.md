@@ -3,7 +3,9 @@
 Updated 2026-10-19. This tracks `restart/sloppy-frontend`; it does not redefine
 the [language goals](GOALS.md). The [language guide](../core/LANGUAGE.md) specifies
 current behavior. [RESTART](RESTART_2026_10.md) retains historical experiments.
-New front-end or user-facing language design requires David's approval.
+Changes to established frontend/user-facing design require David's approval.
+Natural extensions and behavior clearly implied by the existing design should
+proceed without another approval request and be reported to David.
 
 ## Current position
 
@@ -157,6 +159,19 @@ New front-end or user-facing language design requires David's approval.
   pass. Independent bootstrap passes all 6,498 tests and 100 fresh five-mode
   fuzz cases, closing this optimizer batch.
   [Evidence](audits/2026-10-19/mask-comparisons.json).
+- Generic local closures now support inferred and explicit specializations,
+  contextual callbacks, defaults, storage/forwarding and hot reload. All concrete
+  signatures of one closure share its private environment; ordinary copies
+  remain independent and `$capture @name` explicitly shares bindings.
+  Independent C bootstrap passes 6,587 tests in 184 seconds and 100 fresh
+  five-mode fuzz cases. All 32 ordinary benchmark artifacts are unchanged.
+  Final laptop compilation comparisons pass the unchanged 2% limits, with
+  0.2–1.6% measured increases against the preceding compiler; default synthetic
+  throughput is about 127k root lines/s. The dense generic-closure workload
+  costs 7.2% more compile CPU than equivalent ordinary closures. Generic and
+  ordinary counter runtimes match, but remain about 2.5× C-O2 on that kernel.
+  These are remaining costs, not evidence that either overall target is met.
+  [Feature, validation and retained measurements](audits/2026-10-19/generic-local-closures.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 
@@ -165,7 +180,7 @@ New front-end or user-facing language design requires David's approval.
 | Area | Implemented boundary | Next useful work / evidence | Design approval |
 |---|---|---|---|
 | Value semantics | Independent ordinary values and private closure copies; explicit shared captures; recursive records | Preserve behavior while removing managed-call overhead; native/web mutation and callback tests | Required for changing the contract |
-| Functions and generics | Named/default arguments, named callable values, overloads, generic top-level functions/records | Complete composition cases; explicit generic local closures and constrained parameters remain absent | Required for new surface rules |
+| Functions and generics | Named/default arguments, named callable values, overloads, generic functions/records and local closures | Reduce specialization/default-inference cost; constrained parameters remain absent | Required for changes to established design; natural extensions proceed and are reported |
 | Records and collections | Named/anonymous records, arrays, dictionaries, sets, literal spreads, typed matching and narrowing | Maintain consistent assignments/guards; structural conversions and call-argument spreads remain absent | Required before selecting their missing semantics |
 | Numerics | Machine numbers, explicit `BigInt`/`Rational`, numeric arrays and matrices | Improve ordinary kernels and library implementations; automatic integer growth remains absent | Required for arithmetic-policy changes |
 | Compile-time work | Constant expressions and fixed-array lengths | General compile-time execution remains absent; define its supported boundary before implementation | Required for new evaluation/effect rules |
@@ -174,14 +189,17 @@ New front-end or user-facing language design requires David's approval.
 | Compilation performance | Native pipeline plus separately built optional GCC host | Attribute costs on representative programs and the compiler itself; keep default/release, native/host, and hardware explicit | No change to targets without agreement |
 | Strict systems lane | Goal recorded; proof/effect and forbidden-cost checking not recreated | Keep separate from completion of ordinary language/game work | Required before selecting its interface |
 
-## Next sequence
+## Paused checkpoint
 
-1. Use current profiles and native-versus-GCC generated-code comparisons to
-   choose the next substantial runtime/compiler improvement. Instruction
-   diagnostics and bounded differential fuzzing are now maintained commands.
-2. Continue selective Sloppy correctness/library ports with matched measurements.
-3. Complete an ordinary-language/application capability from the ledger;
-   present any missing user-facing design before implementing it.
+At David's request, stop after finishing generic local closures, performance and
+integration validation, and committing/pushing that feature. Those three items
+are complete with this checkpoint; no next optimization is started.
+
+When work resumes, prioritize the measured runtime/compiler gaps while keeping
+existing performance references and the newly recorded feature-density cost
+visible. Continue selective Sloppy ports and capability work as evidence warrants.
+Natural extensions proceed with a report; changes to established design require
+David's approval.
 
 Quick and focused checks accompany edits. Full suites and independent bootstrap
 close coherent batches; optimized-host retraining belongs at larger checkpoints.

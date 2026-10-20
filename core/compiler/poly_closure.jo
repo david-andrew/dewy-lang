@@ -1,0 +1,315 @@
+use 'types.jo'
+use 'ast.jo'
+use 'util.jo'
+# Explicitly generic local closures. A family has one lexical environment and
+# compile-time identity; each concrete signature gets ordinary lambda code.
+use 'check.jo'
+use 'expr.jo'
+use 'lower.jo'
+
+struct PolyScope:
+    frames: FnCtx[]
+    names: int[]
+    symbols: int[]
+    loops: int[]
+
+struct PolyFamily:
+    decl: int
+    envfn: int
+    scope: PolyScope
+
+struct PolyActivation:
+    current: int
+    frames: int
+    mark: int
+    loops: int[]
+
+poly_families: PolyFamily[] = [PolyFamily()]
+poly_pending_warnings: {int: bool} = {}
+
+poly_scope = () -> PolyScope:
+    scope = PolyScope(loops = loop_serials)
+    chain: int[]
+    c = cx
+    loop c >= 0:
+        chain.push(c)
+        c = int(ctxs[c].parent)
+    loop i in [0..chain.len()): scope.frames.push(ctxs[chain[chain.len() - 1 - i]])
+    frozen: {int: int} = {}
+    loop i in [int(ctxs[cx].floor)..sc_names.len()):
+        name = sc_names[i]
+        if sc_top[name] != i: continue
+        symbol = sc_syms[i]
+        if syms[symbol].kind == .local and narrowed_var(int(syms[symbol].ref)) != 0:
+            local = poly_freeze_narrowing(int(syms[symbol].ref), frozen)
+            symbol = new_sym(name, .local, local, int(syms[symbol].decl))
+        scope.names.push(name)
+        scope.symbols.push(symbol)
+    scope
+
+# Append an isolated lexical frame to the caller's ordinary scope stack. Saving
+# the dense name lookup table would trigger whole-table COW on every family.
+# These bindings instead pop normally; callers' names below the floor are hidden.
+poly_enter = (family: int) -> PolyActivation:
+    saved = PolyActivation(cx, ctxs.len(), scope_mark(), loop_serials)
+    scope = poly_families[family].scope
+    parent = -1
+    loop original in scope.frames:
+        frame = original
+        frame.parent = i32(parent)
+        frame.floor = i32(saved.mark)
+        ctxs.push(frame)
+        parent = ctxs.len() - 1
+    cx = parent
+    loop i in [0..scope.names.len()): push_scope_sym(scope.names[i], scope.symbols[i])
+    loop_serials = scope.loops
+    saved
+
+poly_leave = (saved: PolyActivation):
+    scope_reset(saved.mark)
+    ctxs.truncate(saved.frames)
+    cx = saved.current
+    loop_serials = saved.loops
+
+check_poly_lambda = (lam: int, expected: int) -> int:
+    # Keep the declaration separate from the expression, which contextual
+    # selection may rewrite to a concrete function value.
+    # Syntax children stay immutable here; concrete instances clone the body.
+    # Copying that whole tree once more at family creation adds no isolation.
+    d = nodes.len()
+    nodes.push(nodes[lam])
+    nodes[d].sym = 0
+    nodes[d].mod = i32(cur_mod())
+    nodes[d].name = i32(intern("lambda"))
+    family = poly_families.len()
+    env = new_inst(FK_LAMBDA, cur_mod(), "generic_environment")
+    fns[env].decl = i32(d)
+    fns[env].target = i32(family)
+    fns[env].state = 2
+    fns[env].ret = i32(T_VOID)
+    poly_families.push(PolyFamily(d, env, poly_scope()))
+    nodes[d].aux = i32(family)
+    frame = cx
+    loop frame >= 0:
+        poly_pending_warnings[int(ctxs[frame].inst)] = true
+        frame = int(ctxs[frame].parent)
+    fn_sig(d)
+    nodes[lam].aux = i32(family)
+    t = mk_type(TypeInfo(kind = .polyfn, st = i32(family)), [])
+    nodes[lam].type = i32(t)
+    if expected != 0 and tkind(expected) == .fn_:
+        source = nodes.len()
+        nodes.push(nodes[lam])
+        return fn_value(lam, expected, closure = source)
+    t
+
+poly_inst = (decl: int, targs: int[], use_pos: int) -> int:
+    zs: int[]
+    loop t in targs:
+        z = zonk(t)
+        if has_var(z): fatal(use_pos, "cannot infer a generic closure's type argument; give its argument or result a type")
+        zs.push(z)
+    key = FnInstanceKey(decl, zs)
+    if let f = fn_instances.get(key):
+        if fns[f].ret == 0: fatal(use_pos, "a recursive generic closure needs an explicit return type")
+        return f
+    family = int(nodes[decl].aux)
+    f = new_inst(FK_LAMBDA, int(nodes[decl].mod), "generic_lambda")
+    fns[f].decl = i32(decl)
+    fns[f].target = i32(family)
+    fns[f].has_env = true
+    fns[f].targs = zs
+    fns[f].use_pos = use_pos
+    if cx >= 0:
+        caller = int(ctxs[cx].inst)
+        fns[f].made_in = i32(caller)
+        if caller > 0 and fns[caller].targs.len() > 0:
+            fns[f].gdepth = fns[caller].gdepth + 1
+            if fns[f].gdepth > 500: fatal(use_pos, "generic closures expand without end (more than 500 specializations deep)")
+    sig = fn_sig(decl)
+    loop pt in sig.params: fns[f].ptypes.push(subst(pt, zs))
+    if sig.ret != 0: fns[f].ret = i32(subst(int(sig.ret), zs))
+    fns[f].body = i32(clone(int(nodes[decl].b)))
+    fn_instances[key] = f
+    decl_infos[decl_info(poly_families[family].decl)].insts.push(f)
+    saved = poly_enter(family)
+    check_lambda_body(f, decl, int(fns[f].ret))
+    zp: int[]
+    loop pt in fns[f].ptypes: zp.push(zonk(pt))
+    fns[f].ptypes = zp
+    fns[f].ret = i32(zonk(int(fns[f].ret)))
+    zonk_tree(int(fns[f].body))
+    loop l in fns[f].locals: locals[l].type = i32(zonk(int(locals[l].type)))
+    fns[f].fntype = i32(mk_fn(zp, int(fns[f].ret), int(sig.mutmask), decl_fn_labels(decl)))
+    poly_leave(saved)
+    f
+
+poly_fnref = (source: int, f: int) -> int:
+    n = mk(.fnref, nodes[source].pos)
+    nodes[n].a = i32(source)
+    nodes[n].sym = i32(f)
+    nodes[n].aux = 2
+    nodes[n].type = fns[f].fntype
+    add_flag(n, NF_CHECKED)
+    n
+
+poly_matches = (from: int, to: int) -> bool:
+    family = int(types[from].st)
+    sig = fn_sig(poly_families[family].decl)
+    if sig.params.len() != int(types[to].nargs) or sig.mutmask != types[to].mutmask: return false
+    binds = fill(0, int(sig.ntp))
+    loop i in [0..sig.params.len()):
+        r = match_type(sig.params[i], targ(to, i), binds, 0)
+        if r < 0 or r == 1: return false
+    if sig.ret != 0:
+        if match_type(int(sig.ret), int(types[to].elem), binds, 0) < 0: return false
+    loop b in binds:
+        if b == 0: return false
+    true
+
+# All source specializations have been checked before lowering. Union captures
+# by lexical binding, including effects discovered by later specializations.
+# Each concrete body retains its own local IDs but uses the same field offsets.
+poly_env_layout = (family: int):
+    env = poly_families[family].envfn
+    if fns[env].env_size != 0: return
+    instances = decl_infos[decl_info(poly_families[family].decl)].insts
+    canonical: {int: int} = {}
+    loop f in instances:
+        loop cap in fns[f].caps:
+            outer = int(cap.outer)
+            inner = int(cap.inner)
+            if let first = canonical.get(outer):
+                locals[first].flags |= locals[inner].flags
+            else:
+                canonical[outer] = inner
+                fns[env].caps.push(cap)
+    off = 24
+    loop cap in fns[env].caps:
+        inn = int(cap.inner)
+        if is_shared(inn): check_cell_type(inn)
+        t = store_type(inn)
+        off = align_up(off, max(8, talign(t)))
+        locals[inn].env_off = i32(off)
+        off += tsize(t)
+    fns[env].env_size = i32(align_up(off, 8))
+    loop f in instances:
+        fns[f].env_size = fns[env].env_size
+        loop cap in fns[f].caps:
+            first = canonical[int(cap.outer)]
+            inner = int(cap.inner)
+            locals[inner].flags |= locals[first].flags
+            locals[inner].env_off = locals[first].env_off
+
+poly_finish_warnings = ():
+    pending: int[]
+    loop f, active in poly_pending_warnings:
+        if active: pending.push(f)
+    loop f in pending:
+        poly_pending_warnings[f] = false
+        copy_write_warnings(f)
+
+struct PolyDefaultKey:
+    decl: int
+    omitted: int[]
+
+poly_defaults: {PolyDefaultKey: int} = {}
+
+# Defaults execute in the selected closure, after explicit arguments, so their
+# lexical names refer to this environment and earlier value parameters. A
+# cached declaration variant omits the supplied-at-runtime parameters' defaults
+# and initializes missing parameters in the ordinary body binding prefix.
+poly_default_variant = (decl: int, args: int[]) -> int:
+    omitted: int[]
+    loop i in [0..args.len()):
+        if args[i] == 0: omitted.push(i)
+    if omitted.len() == 0: return decl
+    key = PolyDefaultKey(decl, omitted)
+    if let variant = poly_defaults.get(key): return variant
+    variant = clone(decl)
+    nodes[variant].mod = nodes[decl].mod
+    sig = fn_sig(decl)
+    sig.params = []
+    sig.mutmask = 0
+    params: int[]
+    body = int(nodes[variant].b)
+    prefix: int[]
+    # The projection's synthetic bindings are a contiguous prefix, one per
+    # ordinary named value parameter. Retain their order and replace only a
+    # missing parameter's binding with its actual default expression.
+    at = 0
+    loop i in [0..nkids(decl)):
+        p = kid(variant, i)
+        supplied = args[i] != 0
+        if supplied:
+            if has_flag(p, NF_MUT): sig.mutmask |= i32(1 << params.len())
+            params.push(p)
+            sig.params.push(fn_sig(decl).params[i])
+        binding = 0
+        if not has_flag(p, NF_MUT) and name_of(int(nodes[p].name)) != "_":
+            binding = kid(body, at)
+            at += 1
+        if not supplied:
+            if binding == 0:
+                binding = mk(.vardecl, nodes[p].pos)
+                nodes[binding].name = nodes[p].name
+            nodes[binding].b = i32(clone(int(nodes[p].b)))
+            nodes[binding].a = nodes[p].a
+            nodes[binding].aux2 = 0
+        if binding != 0: prefix.push(binding)
+    loop i in [at..nkids(body)): prefix.push(kid(body, i))
+    set_list(body, prefix)
+    set_list(variant, params)
+    decl_infos[decl_info(variant)].sig = sig
+    poly_defaults[key] = variant
+    variant
+
+# Only used to infer the type of an omitted unannotated parameter. Runtime
+# evaluation belongs to poly_default_variant, never the caller's lexical scope.
+poly_default_type = (decl: int, i: int, targs: int[]) -> int:
+    saved = poly_enter(int(nodes[decl].aux))
+    mark = scope_mark()
+    # A nonliteral default can refer to earlier parameters (y=x+1). Give
+    # inference its own temporary owner, never locals in the enclosing function.
+    owner = new_inst(FK_LAMBDA, int(nodes[decl].mod), "default_type")
+    fns[owner].state = 2
+    fns[owner].ret = i32(T_VOID)
+    fns[owner].targs = targs
+    if saved.current >= 0:
+        caller = int(ctxs[saved.current].inst)
+        if caller > 0:
+            fns[owner].gdepth = fns[caller].gdepth
+            fns[owner].made_in = i32(caller)
+    parent = cx
+    ctxs.push(FnCtx(i32(owner), i32(parent), i32(T_VOID), false, 0, nodes[decl].mod, ctxs[parent].floor))
+    cx = ctxs.len() - 1
+    push_type_params(decl, targs)
+    sig = fn_sig(decl)
+    loop j in [0..i):
+        p = kid(decl, j)
+        l = new_local(int(nodes[p].name), subst(sig.params[j], targs), nodes[p].pos)
+        locals[l].flags = i32(LF_PARAM)
+    d = clone(int(nodes[kid(decl, i)].b))
+    check_expr(d, 0)
+    finalize_literal(d)
+    scope_reset(mark)
+    poly_leave(saved)
+    d
+
+# Narrowed aliases are flow facts, not mutable captured state. Freeze just this
+# alias chain; the underlying binding stays canonical so capture effects merge.
+poly_freeze_narrowing = (l: int, frozen: mut {int: int}) -> int:
+    if let known = frozen.get(l): return known
+    outer = narrowed_var(l)
+    if outer == 0: return l
+    base = poly_freeze_narrowing(outer, frozen)
+    if int(locals[l].flags) & LF_UNNARROWED != 0: return base
+    alias = nodes.len()
+    nodes.push(nodes[int(locals[l].alias)])
+    nodes[alias].a = i32(mk_ident_local(base, locals[l].pos))
+    copy = locals[l]
+    copy.alias = i32(alias)
+    locals.push(copy)
+    result = locals.len() - 1
+    frozen[l] = result
+    result

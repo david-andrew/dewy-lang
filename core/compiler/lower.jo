@@ -1,3 +1,4 @@
+use 'poly_closure.jo'
 # Lowering: typed AST -> IR, including reference counting, copy-on-write and closures.
 # Ownership rules: function parameters are borrowed; results of calls and constructors are
 # owned. Owned temporaries used in borrowing positions are released at the end of the
@@ -496,7 +497,7 @@ emit_scope_exit = (i: int):
         t = store_type(l)
         if locals[l].offset >= 0:
             a = e_slot(int(locals[l].offset))
-            target = if tkind(t) == .fn_: stack_closure_target(l) else: -1
+            target = if tkind(t) == .fn_ or tkind(t) == .polyfn: stack_closure_target(l) else: -1
             if target >= 0: drop_stack_closure(a, target)
             else: drop_at(a, t)
             e_zero(a, tsize(t))
@@ -1243,7 +1244,7 @@ place_var = (n0: int) -> int:
             if k == .field and boxed_field_of(n) >= 0: pw_box = true
             pw_depth += 1
             n = int(nodes[n].a)
-        else if k == .unwrap or k == .narrow or (k == .conv and nodes[n].aux == i32(int(CV.union_))): n = int(nodes[n].a)
+        else if k == .unwrap or k == .narrow or (k == .fnref and nodes[n].aux == 2) or (k == .conv and nodes[n].aux == i32(int(CV.union_))): n = int(nodes[n].a)
         else if k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ALIAS != 0 and locals[int(nodes[n].sym)].alias != 0:
             n = int(locals[int(nodes[n].sym)].alias)
         else: break
@@ -1360,7 +1361,10 @@ race_arg = (a: int, who: str):
     k = nodes[a].kind
     if k == .conv: race_arg(int(nodes[a].a), who)
     else if k == .lambda: race_scan(int(fns[int(nodes[a].sym)].body), int(nodes[a].sym), who, true)
-    else if k == .fnref: race_named(int(nodes[a].sym), who)
+    else if k == .fnref:
+        f = int(nodes[a].sym)
+        if nodes[a].aux == 2: race_scan(int(fns[f].body), f, who, true)
+        else: race_named(f, who)
     else if k == .partial:
         if nodes[a].aux == 1: race_arg(int(nodes[a].a), who)
         else: race_named(int(nodes[a].sym), who)
@@ -1727,10 +1731,14 @@ gen_direct_call = (f: int, args: int[], order: int[] = []) -> Val:
 gen_closure_call = (callee: int, args: int[], order: int[] = []) -> Val:
     ft = prune(ntype(callee))
     ret = int(types[ft].elem)
+    source = callee
+    selected = nodes[callee].kind == .fnref and nodes[callee].aux == 2
+    if selected: source = int(nodes[callee].a)
     target = -1
-    if nodes[callee].kind == .ident and nodes[callee].aux == i32(int(SK.local)):
-        target = stack_closure_target(int(nodes[callee].sym))
-    cval = gen_expr(callee)
+    if nodes[source].kind == .ident and nodes[source].aux == i32(int(SK.local)):
+        target = stack_closure_target(int(nodes[source].sym))
+    known = if selected: int(nodes[callee].sym) else: target
+    cval = gen_expr(source)
     # A const callable is a saved value: call a temporary copy so its private
     # state cannot change through the const binding. Explicit shared cells stay shared.
     root = place_var(callee)
@@ -1757,7 +1765,7 @@ gen_closure_call = (callee: int, args: int[], order: int[] = []) -> Val:
         retain(e_load(VI, cv, ptr_size, ptr_size), T_STR)
         reg_temp_slot(saved, ft)
     fp = 0
-    if target < 0:
+    if known < 0:
         fp = e_load(VI, cv, 0, ptr_size)
         # (a field or variable of a function type never given one: none, said as that)
         iff(e_bin(.eq, VI, fp, e_iconst(0)))
@@ -1774,7 +1782,7 @@ gen_closure_call = (callee: int, args: int[], order: int[] = []) -> Val:
     loop i in [0..int(types[ft].nargs)): pts.push(targ(ft, i))
     mark = copy_backs.len()
     call_args(args, pts, int(types[ft].mutmask), argv, order = order)
-    rv = if target >= 0: e_call(lf_of_inst(target), argv, ret_vt(ret)) else: e_calli(fp, argv, ret_vt(ret), false)
+    rv = if known >= 0: e_call(lf_of_inst(known), argv, ret_vt(ret)) else: e_calli(fp, argv, ret_vt(ret), false)
     copy_back(mark)
     finish_call(ret, rv, rslot)
 
@@ -1794,6 +1802,9 @@ gen_cfn_call = (callee: int, args: int[]) -> Val:
 # ---------------- closures ----------------
 env_layout = (f: int):
     if fns[f].env_size != 0: return
+    if fns[f].kind == FK_LAMBDA and fns[f].target != 0:
+        poly_env_layout(int(fns[f].target))
+        return
     off = 24
     loop cap in fns[f].caps:
         inn = int(cap.inner)
@@ -1835,13 +1846,16 @@ stack_closure_uses = (n: int, called: bool = false):
     if n == 0: return
     k = nodes[n].kind
     if k == .lambda or k == .fn_: return
+    if k == .fnref and nodes[n].aux == 2:
+        stack_closure_uses(int(nodes[n].a), called)
+        return
     if k == .ident:
         if not called and nodes[n].aux == i32(int(SK.local)):
             l = int(nodes[n].sym)
             if stack_closure_locals.has(l): stack_closure_locals[l] = false
         return
     a = int(nodes[n].a)
-    direct = k == .call and nodes[n].aux == 1 and a != 0 and nodes[a].kind == .ident
+    direct = k == .call and nodes[n].aux == 1 and a != 0 and (nodes[a].kind == .ident or nodes[a].kind == .fnref and nodes[a].aux == 2)
     stack_closure_uses(a, direct)
     stack_closure_uses(int(nodes[n].b))
     if k != .for_:
@@ -1858,16 +1872,18 @@ stack_closure_local = (l: int) -> bool:
         skip = LF_CONST | LF_PARAM | LF_MUTPARAM | LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_SHARED
         loop candidate in fns[cur_fn].locals:
             if int(locals[candidate].flags) & skip != 0: continue
-            if tkind(int(locals[candidate].type)) == .fn_: stack_closure_locals[candidate] = true
+            if tkind(int(locals[candidate].type)) == .fn_ or tkind(int(locals[candidate].type)) == .polyfn: stack_closure_locals[candidate] = true
         if stack_closure_locals.len() > 0: stack_closure_uses(int(fns[cur_fn].body))
     stack_closure_locals.get(l) ?? false
 
 gen_lambda = (e: int, stack: bool = false) -> Val:
     f = int(nodes[e].sym)
+    generic = has_flag(e, NF_GENERIC)
+    if generic: f = poly_families[int(nodes[e].aux)].envfn
     env_layout(f)
     s = new_slot(closure_size(), ptr_size)
     a = e_slot(s)
-    e_store(a, 0, e_faddr(lf_of_inst(f)), ptr_size)
+    e_store(a, 0, (if generic: e_iconst(0) else: e_faddr(lf_of_inst(f))), ptr_size)
     if fns[f].caps.len() == 0:
         e_store(a, ptr_size, e_iconst(0), ptr_size)
         return Val(a, true, s)
@@ -1905,6 +1921,16 @@ gen_lambda = (e: int, stack: bool = false) -> Val:
 gen_fnref = (e: int) -> Val:
     f = int(nodes[e].sym)
     parallel_direct(f, nodes[e].pos)
+    if nodes[e].aux == 2:
+        source = gen_expr(int(nodes[e].a))
+        borrow(source, ntype(int(nodes[e].a)))
+        s = new_slot(closure_size(), ptr_size)
+        a = e_slot(s)
+        e_store(a, 0, e_faddr(lf_of_inst(f)), ptr_size)
+        e_store(a, ptr_size, e_load(VI, source.v, ptr_size, ptr_size), ptr_size)
+        # Selection borrows the existing environment. Binding/returning/passing
+        # this value invokes the normal private-state copy machinery.
+        return Val(a, false, s)
     if nodes[e].aux == 1:
         # C function pointer: the raw function
         return V(e_faddr(lf_of_inst(f)), false)
@@ -4356,7 +4382,7 @@ gen_vardecl = (s: int):
         # A := [x; E]: A's length is E for as long as A is not resized
         if nodes[iv].kind == .array and nodes[iv].b != 0 and fixed_array_local(l): array_len_expr[l] = int(nodes[iv].b)
         stack = nodes[iv].kind == .lambda and files[pos_file(nodes[s].pos)].is_dewy and stack_closure_local(l)
-        if stack: stack_closure_targets[l] = int(nodes[iv].sym)
+        if stack: stack_closure_targets[l] = if has_flag(iv, NF_GENERIC): poly_families[int(nodes[iv].aux)].envfn else: int(nodes[iv].sym)
         val = if stack: gen_lambda(iv, true) else: gen_owned(iv)
         write_place(pl, t, val.v)
     else:
@@ -6336,7 +6362,7 @@ helper_drop = (t: int, copy: bool):
     ps = helper_params(1)
     a = ps[0]
     k = types[t].kind
-    if k == .fn_:
+    if k == .fn_ or k == .polyfn:
         env = e_load(VI, a, ptr_size, ptr_size)
         if copy:
             iff(e_bin(.ne, VI, env, e_iconst(0)))
@@ -6706,7 +6732,7 @@ eq_member = (t0: int, a: int, b: int, fail: int):
     if c == VC_FLT:
         brif_to(e_bin(.fne, vt_of(t), load_val(t, a, 0), load_val(t, b, 0)), fail)
         return
-    if k == .fn_:
+    if k == .fn_ or k == .polyfn:
         brif_to(e_bin(.ne, VI, e_load(VI, a, 0, ptr_size), e_load(VI, b, 0, ptr_size)), fail)
         return
     r = e_call(lf_helper(.eq, t, 0), [a, b], VI)
@@ -6809,7 +6835,7 @@ hash_member = (h: int, t0: int, a: int):
         x = e_call(lf_helper(.hash, et, 0), [va], VI)
     else if c == VC_INT and k != .array: x = load_val(t, a, 0)
     else if c == VC_FLT: x = hash_float(load_val(t, a, 0), vt_of(t))
-    else if k == .fn_: x = e_load(VI, a, 0, ptr_size)
+    else if k == .fn_ or k == .polyfn: x = e_load(VI, a, 0, ptr_size)
     else if (c == VC_AGG or k == .array) and helper_hash_differs(t): x = e_call(lf_helper(.hash, t, 0), [a], VI)
     else: return
     hash_mix(h, x)

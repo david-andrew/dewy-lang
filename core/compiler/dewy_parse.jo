@@ -472,7 +472,6 @@ dw_function = (id: int, name: str) -> int:
         return dw_fail(params, "a separate capture list; use ($capture @name) in the parameter list")
     type_params: int[]
     if dw_op(params) == .call and dewy_syntax[dw_child(params, 1)].text == "<>:":
-        if name == "": return dw_fail(params, "an explicitly generic closure; declare a top-level generic function")
         type_params = dw_type_params(dw_child(params, 1))
         params = dw_child(params, 2)
     if dewy_syntax[params].kind != .block or dewy_syntax[params].text != "():": return dw_fail(params, "this parameter list")
@@ -516,7 +515,12 @@ dw_function = (id: int, name: str) -> int:
             bound[nm] = true
         ps.push(param)
     if capture: return dw_fail(params, "$capture without a local name")
-    if captures.len() > 0: set_list2(n, captures)
+    if captures.len() > 0:
+        if type_params.len() > 0:
+            caplist = mk(.block, nodes[n].pos)
+            set_list(caplist, captures)
+            nodes[n].d = i32(caplist)
+        else: set_list2(n, captures)
     body = dw_block(dw_child(id, 2))
     prefix: int[]
     loop param in ps:
@@ -769,7 +773,9 @@ dw_expr = (id: int) -> int:
         if op == .type_apply:
             n = mk(.typeapply, pos)
             nodes[n].a = i32(dw_expr(left))
-            nodes[n].c = i32(dw_type(id))
+            type_base = int(nodes[n].a)
+            loop nodes[type_base].kind == .field: type_base = int(nodes[type_base].a)
+            if nodes[type_base].kind == .ident: nodes[n].c = i32(dw_type(id))
             args: int[]
             loop child in dewy_syntax[right].children: args.push(dw_type(child))
             set_list(n, args)

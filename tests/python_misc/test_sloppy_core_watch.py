@@ -439,16 +439,20 @@ draw=():>void=>clear(BLACK)
         watcher.close()
 
 
-def test_core_watch_closure_asset_keeps_capture(compiler, tmp_path):
+@pytest.mark.parametrize("generic", [False, True])
+def test_core_watch_closure_asset_keeps_capture(compiler, tmp_path, generic):
     source = tmp_path / 'game.dewy'
     asset = tmp_path / 'label.txt'
     save(asset, 'one')
-    save(source, '''make=()=>{let count:int64=0
+    program = '''make=()=>{let count:int64=0
 return ()=>{count+=1 return "{count}:{str_from_bytes($include_bytes(p\"label.txt\"))}"}}
 let next=make()
 update=(dt:float64):>void=>{if frame_number()%10 =? 0 printl(next()) sleep(0.005)}
 draw=():>void=>clear(BLACK)
-''')
+'''
+    if generic:
+        program = program.replace('return ()=>', 'return <T>(unused:T)=>').replace('next()', 'next(0)')
+    save(source, program)
     watcher = Watch(compiler, source, game=True)
     try:
         before = int(watcher.expect(r'(\d+):one').group(1))
@@ -499,5 +503,35 @@ printl"tick {count} program={program.prog} color={pixels[index]},{pixels[index+1
             assert int(after[1]) > int(before[1]), watcher.output
             assert after[2] != before[2], 'The generated GPU program must also be recreated'
             before = after
+    finally:
+        watcher.close()
+
+
+def test_core_watch_generic_closure_layout_keeps_old_cleanup(compiler, tmp_path):
+    """A saved concrete selection keeps copy/drop code for its old environment."""
+    source = tmp_path / 'game.dewy'
+    program = '''make=()=>{let count=0 let word="kept"
+return <T>(unused:T)=>{count+=1; "{word}:{count}"}}
+let next=make()<int64>
+update=(dt:float64):>void=>{
+next(0)
+if frame_number()%10 =? 0 {let copy=next printl(copy(0))}
+sleep(0.005)
+}
+draw=():>void=>clear(BLACK)
+'''
+    save(source, program)
+    watcher = Watch(compiler, source, game=True)
+    try:
+        before = int(watcher.expect(r'kept:(\d+)').group(1))
+        # Same lambda source identity, different capture-discovery order:
+        # old layout [count, word], new layout [word, count]. The existing
+        # concrete function value still owns the old environment and headers.
+        save(source, program.replace('count+=1; "{word}:{count}"',
+                                     'let label=word count+=1; "{label}:{count}"'))
+        watcher.expect(r'reloaded in \d+ ms:')
+        after = int(watcher.expect(r'kept:(\d+)').group(1))
+        assert after > before, watcher.output
+        assert int(watcher.expect(r'kept:(\d+)').group(1)) > after, watcher.output
     finally:
         watcher.close()

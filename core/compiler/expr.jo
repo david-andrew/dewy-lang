@@ -1,3 +1,4 @@
+use 'poly_closure.jo'
 # Expression checking: type inference, coercions, overload resolution, generics, lambdas.
 # Nodes are rewritten in place (wrapping moves the old content to a fresh node).
 
@@ -137,6 +138,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if from == T_NEVER: return true
     fk = types[from].kind
     tk = types[to].kind
+    if fk == .polyfn and tk == .fn_: return poly_matches(from, to)
     if has_var(from) or has_var(to):
         if fk == .var or tk == .var: return true
         if fk == tk and fk == .array:
@@ -225,6 +227,11 @@ coerce = (n: int, target: int) -> int:
         if to != T_NEVER and types[to].kind != .void_ and types[to].kind != .var and types[to].kind != .param: wrap_conv(n, CV.none_, to)
         return n
     tk = types[to].kind
+    if types[from].kind == .polyfn and tk == .fn_:
+        source = nodes.len()
+        nodes.push(nodes[n])
+        fn_value(n, to, closure = source)
+        from = prune(ntype(n))
     if dewy_bigint_literal_target(n, to):
         dewy_coerce_bigint_literal(n, to)
         return n
@@ -995,6 +1002,7 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
                 if nkids(a) > 0 and nodes[kid(a, 0)].a != 0: return 3
                 return -1
             if pk != .fn_ or int(types[p].nargs) != nkids(a): return -1
+            if has_flag(a, NF_GENERIC): return 0
             # (a parameter the lambda gives a type must have that type)
             loop i in [0..nkids(a)):
                 pn = kid(a, i)
@@ -1153,6 +1161,7 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
         r = match_type(int(types[fp].elem), int(types[prune(ntype(a))].elem), binds, 1)
         if r >= 0: return r + 1
         return -1
+    if tkind(ntype(a)) == .polyfn and types[fp].kind == .fn_ and poly_matches(prune(ntype(a)), fp): return 0
     r = match_type(pat, ntype(a), binds, 0)
     if r < 0 and types[fp].kind == .array and is_nd(ntype(a)):
         # a 1-D T[,] (a row, a column) for a T[] parameter
@@ -1336,7 +1345,7 @@ call_targs: int[]              # type arguments written at the call being resolv
 cur_assign = 0                 # the assignment whose target is being checked (`x = ...`, `x += ...`)
 early_set: {int: bool} = {}    # globals top-level code assigns above their own line
 
-resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) -> int:
+resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0) -> int:
     # (this call's own type arguments: a call among its arguments has none, from_text[S](f(x)))
     targs_here = call_targs
     call_targs = []
@@ -1663,12 +1672,12 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
         # Nonliteral defaults (including large integer literals lowered to
         # constructors) have their ordinary expression type. Resolve names in
         # the declaration's module, just as when emitting the actual default.
-        if cd.binds[int(types[p].id)] == 0 and files[pos_file(nodes[n].pos)].is_dewy and not default_uses_params(dv, decl, i):
+        if cd.binds[int(types[p].id)] == 0 and files[pos_file(nodes[n].pos)].is_dewy and (closure != 0 or not default_uses_params(dv, decl, i)):
             ready = true
             loop j in [0..nkids2(decl)):
                 if cd.binds[j] == 0 or has_var(cd.binds[j]): ready = false
             if ready:
-                inferred = default_arg(decl, i, 0, targs = cd.binds)
+                inferred = if closure != 0: poly_default_type(decl, i, cd.binds) else: default_arg(decl, i, 0, targs = cd.binds)
                 cd.binds[int(types[p].id)] = ntype(inferred)
     loop i in [0..int(cd.sig.ntp)):
         b = cd.binds[i]
@@ -1682,6 +1691,16 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
             tp = "{i + 1}"
             if int(nodes[decl].nlist2) > i: tp = "'{name_of(int(nodes[kid2(decl, i)].name))}'"
             fatal(nodes[n].pos, "cannot infer type parameter {tp} of '{name_of(name)}' from the arguments")
+    if closure != 0:
+        variant = poly_default_variant(decl, cd.args)
+        if variant != decl:
+            decl = variant
+            cd.sig = fn_sig(decl)
+            supplied: int[]
+            loop arg in cd.args:
+                if arg != 0: supplied.push(arg)
+            cd.args = supplied
+            np = supplied.len()
     f = get_fn_inst(decl, cd.binds, nodes[n].pos)
     if ide_on:
         if nodes[n].a != 0: ide_fn_ref(nodes[int(nodes[n].a)].pos, name, f)
@@ -1726,6 +1745,10 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
     nodes[n].aux = 0
     nodes[n].kind = .call
     nodes[n].a = 0
+    if closure != 0:
+        nodes[n].a = i32(poly_fnref(closure, f))
+        nodes[n].sym = 0
+        nodes[n].aux = 1
     if partial: return finish_partial(n, fns[f].ptypes, int(cd.sig.mutmask), int(fns[f].ret))
     if not capture_defaults: save_call_order(n, args, fin)
     nodes[n].type = fns[f].ret
@@ -1740,8 +1763,11 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int) 
         set_list(n, statements)
     int(fns[f].ret)
 
-value_call = (n: int, callee: int, args: int[]) -> int:
+value_call = (n: int, callee: int, args: int[], expected: int = 0) -> int:
     ft = prune(ntype(callee))
+    if types[ft].kind == .polyfn:
+        d = poly_families[int(types[ft].st)].decl
+        return resolve_fn_call(n, intern("lambda"), [d], args, expected, callee)
     if types[ft].kind != .fn_ and types[ft].kind != .cfn: fatal(nodes[n].pos, "cannot call a value of type {type_str(ft)}")
     na = int(types[ft].nargs)
     if args.len() != na: fatal(nodes[n].pos, "function value expects {na} argument(s), got {args.len()}")
@@ -2315,13 +2341,13 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                 else:
                     ensure_global(int(syms[s].ref), nodes[n].pos)
                     vt = int(globals[int(syms[s].ref)].type)
-                if tkind(vt) == .fn_ or tkind(vt) == .cfn:
+                if tkind(vt) == .fn_ or tkind(vt) == .cfn or tkind(vt) == .polyfn:
                     callee = mk(.ident, nodes[n].pos)
                     nodes[callee].name = i32(name)
                     if mod_scope >= 0:
                         check_expr_in_module(callee, mod_scope)
                     else: check_expr(callee, 0)
-                    return value_call(n, callee, args)
+                    return value_call(n, callee, args, expected)
             else if sk == .struct_: return struct_ctor(n, 0, int(syms[s].ref), args, expected)
             else if sk == .enum_:
                 ed = int(syms[s].ref)
@@ -3227,9 +3253,9 @@ check_call = (n: int, expected: int) -> int:
         if nodes[base].kind == .ident: s = lookup(name)
         else if nodes[base].kind == .field:
             mt = prune(check_expr(int(nodes[base].a), 0))
-            if types[mt].kind != .module: fatal(nodes[base].pos, "explicit type arguments on a method are not supported; call its function directly")
-            mod = int(types[mt].mod)
-            s = module_lookup(mod, name)
+            if types[mt].kind == .module:
+                mod = int(types[mt].mod)
+                s = module_lookup(mod, name)
         if s != 0 and syms[s].kind == .fns:
             targs: int[]
             loop arg in kids(callee): targs.push(resolve_type(arg))
@@ -3239,6 +3265,16 @@ check_call = (n: int, expected: int) -> int:
             r = call_by_name(n, name, mod, args, expected, false)
             call_targs = saved
             return r
+        if (s != 0 and (syms[s].kind == .local or syms[s].kind == .global)) or (nodes[base].kind != .ident and mod < 0):
+            check_expr(base, 0)
+            if tkind(ntype(base)) == .polyfn:
+                explicit: int[]
+                loop arg in kids(callee): explicit.push(resolve_type(arg))
+                saved = call_targs
+                call_targs = explicit
+                r = value_call(n, base, args, expected)
+                call_targs = saved
+                return r
         t = prune(resolve_type(int(nodes[callee].c)))
         if types[t].kind != .struct_: fatal(nodes[callee].pos, "this type does not have a record constructor")
         return struct_ctor(n, t, int(structs[int(types[t].st)].decl), args, expected)
@@ -3294,10 +3330,10 @@ check_call = (n: int, expected: int) -> int:
             check_struct_fields(si)
             loop i in [0..int(structs[si].nfields)):
                 fi = int(structs[si].fields) + i
-                if int(fields[fi].name) == fname and (tkind(int(fields[fi].type)) == .fn_ or tkind(int(fields[fi].type)) == .cfn):
+                if int(fields[fi].name) == fname and (tkind(int(fields[fi].type)) == .fn_ or tkind(int(fields[fi].type)) == .cfn or tkind(int(fields[fi].type)) == .polyfn):
                     if ide_on: ide_field_ref(nodes[callee].pos, fname, int(structs[si].decl), i, int(fields[fi].type))
                     check_expr(callee, 0)
-                    return value_call(n, callee, args)
+                    return value_call(n, callee, args, expected)
         # uniform call syntax
         add_flag(recv, NF_CHECKED)
         nl = [recv]
@@ -3321,7 +3357,7 @@ check_call = (n: int, expected: int) -> int:
             call_targs = saved
             return r
     check_expr(callee, 0)
-    value_call(n, callee, args)
+    value_call(n, callee, args, expected)
 
 resolve_by_types = (name: int, ts: int[], pos: int, required: bool) -> int:
     decls: int[]
@@ -4840,6 +4876,7 @@ check_match = (m: int, expected: int) -> int:
 
 # ---------------- lambdas ----------------
 check_lambda = (lam: int, expected: int) -> int:
+    if has_flag(lam, NF_GENERIC): return check_poly_lambda(lam, expected)
     et = prune(expected)
     if expected != 0 and types[et].kind != .fn_: et = 0
     if expected == 0: et = 0
@@ -4885,9 +4922,10 @@ check_lambda = (lam: int, expected: int) -> int:
     fns[f].fntype = i32(t)
     t
 
-fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1) -> int:
+fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, closure: int = 0) -> int:
     decls: int[]
-    if mod >= 0: collect_module(mod, int(nodes[n].name), decls)
+    if closure != 0: decls.push(poly_families[int(types[prune(ntype(closure))].st)].decl)
+    else if mod >= 0: collect_module(mod, int(nodes[n].name), decls)
     else: collect_fns(int(nodes[n].name), decls)
     et = prune(expected)
     if expected == 0: et = 0
@@ -4943,6 +4981,9 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1) ->
         if has_flag(kid(d, i), NF_MUT): mm |= 1 << i
     nodes[n].kind = .fnref
     nodes[n].sym = i32(f)
+    if closure != 0:
+        nodes[n].a = i32(closure)
+        nodes[n].aux = 2
     t = mk_fn(fns[f].ptypes, int(fns[f].ret), mm, if et != 0 and types[et].kind == .fn_: int(types[et].st) else: decl_fn_labels(d))
     if et != 0 and types[et].kind == .cfn:
         if not fns[f].cabi: fatal(nodes[n].pos, "'{name_of(int(nodes[n].name))}' must be marked @cabi to be used as a C function pointer")
@@ -5340,6 +5381,12 @@ check_expr = (n: int, expected: int) -> int:
             nodes[n].name = i32(name)
             t = fn_value(n, expected, targs, mod)
             if ide_on: ide_fn_ref(nodes[base].pos, name, int(nodes[n].sym))
+        else if (s != 0 and (syms[s].kind == .local or syms[s].kind == .global)) or (nodes[base].kind != .ident and mod < 0):
+            check_expr(base, 0)
+            if tkind(ntype(base)) != .polyfn: fatal(nodes[n].pos, "type arguments require a generic callable")
+            targs: int[]
+            loop arg in kids(n): targs.push(resolve_type(arg))
+            t = fn_value(n, expected, targs, closure = base)
         else: t = mk_typeval(resolve_type(int(nodes[n].c)))
     else if k == .index:
         if nodes[n].sval != 0:

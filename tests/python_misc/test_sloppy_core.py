@@ -24,6 +24,10 @@ from tools.sloppy_core.benchmark_types import record_source
 
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
+    'generic-local-default-expression', 'generic-local-narrowed',
+    'generic-local-basic', 'generic-local-returned', 'generic-local-shared',
+    'generic-local-defaults', 'generic-local-replaced', 'generic-local-nested-generic',
+    'generic-local-cleanup', 'generic-local-field-explicit',
     'named-value-order', 'named-value-mutable', 'sequence-swap-values',
     'partial-operator-arithmetic', 'partial-operator-private-capture',
     'conversion-transmute-bit-roundtrip',
@@ -71,6 +75,27 @@ def quick_parameters(names, selected):
 
 
 CASES = {
+    'generic-local-default-expression': 'main=()=>{let x="wrong scope" let f=<T>(x:T y=x+1)=>y return f(41)}\n',
+    'generic-local-named-defaults': 'let trace=0\nmark=(x:int64)=>{trace=trace*10+x; x}\nmain=()=>{let n=10 let f=<T>(a:T b=a+1 c:int64=n)=>{n+=1; a+b+c}\nlet result=f(c=mark(2) a=mark(1))\nreturn if result=?5 and trace=?21 and f(1)=?14 and f(2)=?17 42 else 1}\n',
+    'generic-local-narrowed': 'main=()=>{let value:(int64|string)=41\nif value is? int64 {\n let f=<T>(x:T)=>value+1\n value="changed"\n return f(false)\n}\nreturn 1}\n',
+    'generic-local-parallel': 'main=()=>{let offset=40 let f=<T>(x:T)=>x+offset\nreturn if parallel_range(3 f<int64>)=?[40 41 42] 42 else 1}\n',
+    'generic-local-basic': 'main=()=>{\n let count=0\n let f=<T>(x:T)=>{count+=1; count}\n let b=f\n let x=f(1)\n let y=f("s")\n let z=b(true)\n return if x=?1 and y=?2 and z=?1 42 else 1\n}\n',
+    'generic-local-cleanup': 'make=()=>{let count=0 let data=[1 2 3] return <T>(x:T)=>{count+=1 data.push(count); count+data.length}}\nwork=()=>{let f=make() let g=f let rows=[[f g] [g f]] let other=rows\nloop i in [0..5) {rows[0][0](i) rows[1][1]("a") other[0][0](false)}\nlet selected=f<int64> selected(1)\nmake()(true)\n}\nmain=()=>{let before=alloc_count() loop i in [0..20) work() return if alloc_count()=?before 42 else 1}\n',
+    'generic-local-const': 'main=()=>{let count=40 const f=<T>(x:T)=>{count+=1; count}\nreturn if f(1)=?41 and f("a")=?41 42 else 1}\n',
+    'generic-local-context': 'apply=(f:((x:int64):>int64))=>f(21)\nmain=()=>{let f=<T>(x:T):>T=>x+x\nreturn if apply(f)=?42 and apply(<T>(x:T)=>x+x)=?42 42 else 1}\n',
+    'generic-local-defaults': 'main=()=>{let count=0\nlet f=<T>(x:T step:int64=count+1)=>{count+=step; count}\nlet g=f\nlet same=<T>(x:T y:T=x)=>y\nlet u=<T>(x:T y=count)=>{count+=y+1; count}\nreturn if f(1)=?1 and f("a")=?3 and g(true)=?1 and same(42)=?42 and u(1)=?1 and u(false)=?3 and count=?0 42 else 1}\n',
+    'generic-local-field-explicit': 'make=()=>[f=<T>(x:T)=>x]\nmain=()=>{let row=make() let xs=[row.f]\nlet a=row.f<int64> let b=xs[0]<int64> let c=make().f<int64>\nreturn if row.f<int64>(42)=?42 and xs[0]<int64>(42)=?42 and a(42)=?42 and b(42)=?42 and c(42)=?42 and make().f<int64>(42)=?42 42 else 1}\n',
+    'generic-local-forward': 'invoke=<F T>(f:F x:T)=>f(x)\nidentity=<F>(f:F)=>f\nmain=()=>{let count=40 let f=<T>(x:T)=>{count+=1; count}\nlet a=identity(f)\nreturn if invoke(f 1)=?41 and invoke(f "a")=?41 and a(false)=?41 and f(1)=?41 and f(2)=?42 42 else 1}\n',
+    'generic-local-late': 'read=(x:int64 @state:int64)=>state\nread=(x:string @state:int64)=>{state+=1; state}\nmain=()=>{let count=40 let f=<T>(x:T)=>read(x @count)\nlet g=f\nreturn if f(1)=?40 and f("a")=?41 and g("b")=?41 and f("c")=?42 42 else 1}\n',
+    'generic-local-nested-generic': 'make=()=>{let count=40 return <T>(x:T)=><U>(y:U)=>{count+=1; count}}\nmain=()=>{let f=make() let a=f(1) let b=f("x") let c=a\nreturn if a(true)=?41 and a(1)=?42 and b(1)=?41 and c("a")=?41 42 else 1}\n',
+    'generic-local-nested-shared': 'make=()=>{let count=0 return <T>(x:T)=>($capture @count)=>{count+=1; count}}\nmain=()=>{let f=make() let a=f(1) let b=f("x")\nlet first=a() let second=b()\nlet g=f let c=g(false)\nreturn if first=?1 and second=?2 and c()=?3 and a()=?3 and c()=?4 42 else 1}\n',
+    'generic-local-nested': 'make=<S>(initial:S)=>{let saved=initial return <T>(x:T)=>[first=saved second=x]}\nmain=()=>{let a=make(20) let b=make("hello")\nlet x=a(true) let y=b(22)\nreturn if x.first+y.second=?42 and y.first=?"hello" and x.second 42 else 1}\n',
+    'generic-local-record': 'make=()=>{let count=0 return [f=<T>(x:T)=>{count+=1; count}]}\nmain=()=>{let a=make() let b=a let fs=[a.f b.f]\nreturn if a.f(1)=?1 and a.f("s")=?2 and b.f(true)=?1 and fs[0](1)=?1 and fs[0](false)=?2 and fs[1](1)=?1 42 else 1}\n',
+    'generic-local-replaced': 'make=(start:int64)=>{let count=start return <T>(x:T)=>{count+=1; count}}\nreplace=<F>(@f:F other:F)=>{f=other; "x"}\nmain=()=>{let f=make(0) let g=make(100)\nlet answer=f(replace(@f g))\nreturn if answer=?1 and f(1)=?101 and g(1)=?101 42 else 1}\n',
+    'generic-local-returned': 'make=(start:int64)=>{let count=start return <T>(x:T)=>{count+=1; count}}\nmain=()=>{let f=make(10) let g=f return if f(1)=?11 and f("a")=?12 and g(false)=?11 42 else 1}\n',
+    'generic-local-selected': 'main=()=>{let count=0 let f=<T>(x:T)=>{count+=1; count}\nlet x=f<int64>(1) let a=f<string> let b:((x:bool):>int64)=f\nreturn if x=?1 and a("x")=?2 and a("y")=?3 and b(true)=?2 and f(false)=?2 42 else 1}\n',
+    'generic-local-shadow': 'make=()=>{let outer=40 return <T>(x:T)=>outer+2}\nmain=()=>{let f=make() let outer=3 return f(false)}\n',
+    'generic-local-shared': 'main=()=>{let count=0 let private=0\nlet f=<T>($capture @count x:T)=>{count+=1 private+=1; count*10+private}\nlet g=f\nreturn if f(1)=?11 and f("a")=?22 and g(false)=?31 and count=?3 and private=?0 42 else 1}\n',
     'optimizer-element-view-call-snapshots': '''Row:type=[values:array<int64> bias:int64]
 let global_rows=[Row[[20] 22]]
 read_row=(row:Row ignored:int64):>int64=>row.values[0]+row.bias
@@ -6105,7 +6130,10 @@ loop @item in values {item+=grow(@values)} return 42}''',
     'generic-constraint': ('f=<T of int64>(x:T)=>x\nmain=()=>f(42)', 'constrained type parameters'),
     'generic-empty': ('f=<>(x)=>x\nmain=()=>f(42)', 'empty type parameter'),
     'generic-main': ('main=<T>()=>42', 'generic entry point'),
-    'generic-local': ('main=()=>{let f=<T>(x:T)=>x return f(42)}', 'generic closure'),
+    'generic-local-parallel-capture': ('main=()=>{let count=0 let f=<T>(x:T)=>{count+=1; count} parallel_range(2 f<int64>) return 42}', 'variable it captured'),
+    'generic-local-parallel-shared': ('main=()=>{let count=0 let f=<T>($capture @count x:T)=>{count+=1; count} parallel_range(2 f<int64>) return 42}', 'variable it captured'),
+    'generic-local-arity': ('main=()=>{let f=<T>(x:T)=>x return f<int64 string>(42)}', 'type argument'),
+    'generic-local-mismatch': ('main=()=>{let f=<T>(x:T)=>x return f<int64>("bad")}', "argument 'x' expects"),
     'generic-type-arity': ('main=()=>{let pool:Pool<int64 string>=[] return 42}', 'expects 1 type argument'),
     'generic-value-type-argument': ('main=()=>{let pool:Pool<42>=[] return 42}', 'type expression'),
     'generic-type-mismatch': ('identity=<T>(x:T):>T=>x\nmain=()=>identity<int64>("bad")', "argument 'x' expects"),

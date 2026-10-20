@@ -10,6 +10,7 @@ use 'parse.jo'
 use 'types.jo'
 use 'expr.jo'
 use 'ide.jo'
+use 'poly_closure.jo'
 
 enum SK: none_, local, global, fns, struct_, enum_, const_, module, type_, builtin, alias_
 
@@ -1214,7 +1215,9 @@ fn_sig = (decl: int) -> FnSig:
     sig = FnSig(done = true)
     sig.nexplicit = i32(nkids2(decl))
     saved = cx
-    ctxs.push(FnCtx(0, -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(sc_names.len())))
+    parent = if nodes[decl].kind == .lambda: cx else: -1
+    floor = if parent >= 0: ctxs[parent].floor else: i32(sc_names.len())
+    ctxs.push(FnCtx(0, i32(parent), i32(T_VOID), false, 0, nodes[decl].mod, floor))
     cx = ctxs.len() - 1
     mark = scope_mark()
     ntp = nkids2(decl)
@@ -1295,6 +1298,7 @@ no_web_check = (decl: int, use_pos: int):
         warn(use_pos, "{name_of(int(nodes[decl].name))} {name_of(int(nodes[int(nodes[at].a)].sval))}")
 
 get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
+    if nodes[decl].kind == .lambda: return poly_inst(decl, targs, use_pos)
     if target_wasm and nodes[decl].c != 0: no_web_check(decl, use_pos)
     di = decl_info(decl)
     sig = fn_sig(decl)
@@ -1457,8 +1461,8 @@ ctx_for_inst = (inst: int) -> int:
 value_capture = (inst: int, name: int) -> bool:
     d = int(fns[inst].decl)
     if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy: return false
-    loop i in [0..nkids2(d)):
-        if nodes[kid2(d, i)].name == i32(name): return not has_flag(kid2(d, i), NF_MUT)
+    loop cap in lambda_captures(d):
+        if nodes[cap].name == i32(name): return not has_flag(cap, NF_MUT)
     true
 
 capture_in = (c: int, l: int) -> int:
@@ -3294,6 +3298,7 @@ warn_unused_copy = (pos: int, name: str):
 # a function's variables whose fields or elements it changes but whose value it never reads: a
 # copy changed for nothing (`if let e = enemies.find(...): e.hp -= 5` leaves the enemy as it was)
 copy_write_warnings = (f: int):
+    if poly_families.len() > 1 and poly_pending_warnings.get(f) == true: return
     unused_local_warnings(f)
     if copy_writes.len() == 0: return
     skip = LF_READ | LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_ELEMALIAS | LF_SOAELEM | LF_SHARED
@@ -3389,8 +3394,9 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
     ctxs.push(FnCtx(i32(f), i32(parent), 0, false, 0, ctxs[parent].mod, ctxs[parent].floor))
     cx = ctxs.len() - 1
     mark = scope_mark()
-    loop i in [0..nkids2(lam)):
-        cap = kid2(lam, i)
+    if has_flag(lam, NF_GENERIC): push_type_params(lam, fns[f].targs)
+    loop original in lambda_captures(lam):
+        cap = if has_flag(lam, NF_GENERIC): clone(original) else: original
         nm = int(nodes[cap].name)
         s = lookup(nm)
         # Folded lexical constants need no environment slot, but they are
@@ -4243,6 +4249,7 @@ check_program = (main_path: str):
                 export_fns.push(get_fn_inst(d, [], nodes[d].pos))
                 more = true
         if not more: break
+    if poly_families.len() > 1: poly_finish_warnings()
     if open_globals.len() > 0: settle_open_globals()
     # (make_world written and never called: nothing runs it. A file of definitions alone, with
     # no main, update or draw and no statement at its top that does something, is a module that

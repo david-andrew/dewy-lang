@@ -11,7 +11,7 @@ use 'expr.jo'
 # own struct or enum keeps, a pointer to its value (elem) on the heap; only the lowering sees it)
 enum TK:
     void_, bool_, int_, float_, str_, array, ptr, fn_, struct_, enum_, tuple, opt, var, param,
-    null_, range, module, typeval, none_lit, vec, cfn, fixed, box
+    null_, range, module, typeval, none_lit, vec, cfn, fixed, box, polyfn
 
 const TF_HAS_VAR = 1
 const TF_LAID_OUT = 2
@@ -353,6 +353,7 @@ unify = (a0: int, b0: int) -> bool:
         if ta.elem == 0 or tb.elem == 0 or not unify(int(ta.elem), int(tb.elem)): return false
     loop i in [0..int(ta.nargs)):
         if not unify(targ(a, i), targ(b, i)): return false
+    if ta.kind == .polyfn and ta.st != tb.st: return false
     if ta.kind == .fn_ and ta.mutmask != tb.mutmask: return false
     true
 
@@ -384,7 +385,7 @@ simple_enum = (t: int) -> bool:
 is_managed = (t0: int) -> bool:
     t = prune(t0)
     k = types[t].kind
-    if k == .str_ or k == .array or k == .fn_ or k == .box: return true
+    if k == .str_ or k == .array or k == .fn_ or k == .polyfn or k == .box: return true
     if k == .struct_ or k == .enum_ or k == .tuple or k == .opt or k == .fixed:
         layout(t)
         return int(types[t].flags) & TF_MANAGED != 0
@@ -395,7 +396,7 @@ is_managed = (t0: int) -> bool:
 plain_problem = (t0: int) -> str:
     t = prune(t0)
     k = types[t].kind
-    if k == .str_ or k == .array or k == .fn_ or k == .ptr or k == .cfn or k == .null_: return type_str(t)
+    if k == .str_ or k == .array or k == .fn_ or k == .polyfn or k == .ptr or k == .cfn or k == .null_: return type_str(t)
     if k == .opt or k == .fixed: return plain_problem(int(types[t].elem))
     if k == .tuple:
         loop i in [0..int(types[t].nargs)):
@@ -447,7 +448,7 @@ type_has_fn = (t0: int) -> bool:
         if seen.has(t): continue
         seen[t] = true
         k = types[t].kind
-        if k == .fn_:
+        if k == .fn_ or k == .polyfn:
             found = true
             break
         if let cached = has_fn_memo.get(t):
@@ -475,7 +476,7 @@ type_has_fn = (t0: int) -> bool:
 is_aggregate = (t0: int) -> bool:
     t = prune(t0)
     k = types[t].kind
-    if k == .struct_ or k == .tuple or k == .opt or k == .fn_ or k == .range or k == .vec or k == .fixed: return true
+    if k == .struct_ or k == .tuple or k == .opt or k == .fn_ or k == .polyfn or k == .range or k == .vec or k == .fixed: return true
     if k == .enum_: return not simple_enum(t)
     false
 
@@ -626,7 +627,7 @@ layout = (t0: int):
         al = ptr_size
         m = k == .array or k == .box
         boxed = k == .box
-    else if k == .fn_:
+    else if k == .fn_ or k == .polyfn:
         size = 2 * ptr_size
         al = ptr_size
         m = true
@@ -786,6 +787,7 @@ type_str_in = (t0: int, dewy: bool) -> str:
             if t == T_MAT4: return "mat4"
             if ti.sign: return "ivec{ti.bits}"
             "vec{ti.bits}"
+        polyfn: "generic closure"
         fn_, cfn:
             s = "("
             labels: str[]

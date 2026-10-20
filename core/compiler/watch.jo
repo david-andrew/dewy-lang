@@ -22,6 +22,7 @@ use 'ast.jo'
 use 'parse.jo'
 use 'types.jo'
 use 'check.jo'
+use 'poly_closure.jo'
 use 'expr.jo'
 use 'ir.jo'
 use 'lower.jo'
@@ -146,10 +147,12 @@ wk_inst = (f: int) -> str:
     u = rfind(base, "_")
     if u > 0: base = base[..u)
     t = ""
-    if fns[f].fntype != 0: t = type_str(int(fns[f].fntype))
+    if fns[f].fntype != 0: t = wk_sig(int(fns[f].fntype), 0)
     ta = ""
-    loop a in fns[f].targs: ta = "{ta},{type_str(a)}"
-    "{wk_mod(int(fns[f].mod))}|{base}|{fns[f].kind}|{t}|{ta}"
+    loop a in fns[f].targs: ta = "{ta},{wk_sig(a, 0)}"
+    family = ""
+    if fns[f].kind == FK_LAMBDA and fns[f].target != 0: family = wk_poly_layout(int(fns[f].target), 0)
+    "{wk_mod(int(fns[f].mod))}|{base}|{fns[f].kind}|{t}|{ta}|{family}"
 
 # lambdas: by the top-level declaration they are in, their place among its lambdas, their type
 # and what they capture (closures made by the old code keep their environment: a lambda whose
@@ -179,8 +182,12 @@ wk_lambda_keys = ():
         en = "?"
         if encl[k] != 0 and nodes[encl[k]].name != 0: en = name_of(int(nodes[encl[k]].name))
         t = ""
-        if fns[f].fntype != 0: t = type_str(int(fns[f].fntype))
-        wk_lam[f] = "{wk_mod(int(fns[f].mod))}|lambda@{en}#{rank}|{FK_LAMBDA}|{t}|{caps}"
+        if fns[f].fntype != 0: t = wk_sig(int(fns[f].fntype), 0)
+        ta = ""
+        loop a in fns[f].targs: ta = "{ta},{wk_sig(a, 0)}"
+        family = ""
+        if fns[f].target != 0: family = wk_poly_layout(int(fns[f].target), 0)
+        wk_lam[f] = "{wk_mod(int(fns[f].mod))}|lambda@{en}#{rank}|{FK_LAMBDA}|{t}|{caps}|{ta}|{family}"
 
 # the top-level declaration a lambda is written in (0: none found)
 wk_enclosing = (f: int) -> int:
@@ -205,7 +212,7 @@ wk_fn_keys = () -> str[]:
         k = ""
         if w_mig_lfs.get(i) != none: k = "watch-mig|{lfuncs[i].name}"
         else if lfuncs[i].kind == LK_HELPER:
-            k = "h|{lfuncs[i].hkind}|{type_str(lfuncs[i].htype)}"
+            k = "h|{lfuncs[i].hkind}|{wk_sig(lfuncs[i].htype, 0)}"
             if lfuncs[i].inst >= 0 and lfuncs[i].inst < fns.len() and (lfuncs[i].hkind == .thunk or lfuncs[i].hkind == .partial or lfuncs[i].hkind == .envdrop or lfuncs[i].hkind == .envcopy): k = "{k}|{wk_inst(lfuncs[i].inst)}"
         else if lfuncs[i].inst == w_init_inst: k = "watch-init"
         else if wk_lam.get(lfuncs[i].inst) != none: k = wk_lam[lfuncs[i].inst]
@@ -233,7 +240,12 @@ wk_glob = (g: int) -> str: "{wk_mod(int(globals[g].mod))}|{name_of(int(globals[g
 wk_sig = (t0: int, depth: int) -> str:
     t = prune(t0)
     k = types[t].kind
+    if k == .polyfn: return wk_poly_layout(int(types[t].st), depth)
     if depth > 6: return type_str(t)
+    if k == .fn_ or k == .cfn:
+        out = "{k}:{types[t].mutmask}:{name_of(int(types[t].st))}("
+        loop i in [0..int(types[t].nargs)): out += wk_sig(targ(t, i), depth + 1) + ","
+        return out + ")->" + wk_sig(int(types[t].elem), depth + 1)
     if k == .struct_ or k == .enum_:
         si = int(types[t].st)
         out = "{type_str(t)}:{tsize(t)}("
@@ -251,6 +263,25 @@ wk_sig = (t0: int, depth: int) -> str:
         loop fo in field_list(t): out = "{out}{wk_sig(fo.0, depth + 1)},"
         "{out})"
     else: type_str(t)
+
+# Family IDs are compilation-local. Watch keys use source identity, enclosing
+# concrete type arguments, and the complete canonical environment layout.
+wk_poly_layout = (family: int, depth: int) -> str:
+    d = poly_families[family].decl
+    out = "generic@{files[pos_file(nodes[d].pos)].path}:{pos_off(nodes[d].pos)}"
+    if depth > 6: return out
+    loop frame in poly_families[family].scope.frames:
+        f = int(frame.inst)
+        if f <= 0: continue
+        loop t in fns[f].targs: out += "<" + wk_sig(t, depth + 1) + ">"
+    env = poly_families[family].envfn
+    env_layout(env)
+    out += "[{fns[env].env_size}:"
+    loop cap in fns[env].caps:
+        inner = int(cap.inner)
+        mode = int(locals[inner].flags) & (LF_VALUECAP | LF_ASSIGNED | LF_EXPOSED)
+        out += "{name_of(int(locals[inner].name))}@{locals[inner].env_off}:{mode}:{is_shared(inner)}=" + wk_sig(store_type(inner), depth + 1) + ","
+    out + "]"
 
 # A global's initializer also depends on the globals whose values it reads.
 # Hash their declarations, not their live contents: an asset change refreshes
@@ -330,12 +361,12 @@ wk_init_scan = (n: int, m: int, h0: int, refs: mut int[], seen: mut int[]) -> in
     if n <= 0 or n >= nodes.len(): return h0
     h = h0
     k = nodes[n].kind
-    if k == .lambda or k == .fnref: return h
+    if k == .lambda or k == .fnref and nodes[n].aux != 2: return h
     if k == .ident and nodes[n].aux == i32(int(SK.global)):
         g = int(nodes[n].sym)
         if not refs.contains(g): refs.push(g)
-    if k == .call and nodes[n].aux == 0:
-        f = int(nodes[n].sym)
+    if k == .call and (nodes[n].aux == 0 or nodes[n].aux == 1 and nodes[int(nodes[n].a)].kind == .fnref and nodes[int(nodes[n].a)].aux == 2):
+        f = if nodes[n].aux == 0: int(nodes[n].sym) else: int(nodes[int(nodes[n].a)].sym)
         if f > 0 and f < fns.len() and not seen.contains(f):
             seen.push(f)
             h = wk_init_scan(int(fns[f].body), int(fns[f].mod), h, refs, seen)

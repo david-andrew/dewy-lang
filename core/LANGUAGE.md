@@ -622,8 +622,31 @@ Passing `identity<int64>` directly as a callback works too. If several overloads
 remain after specialization, give the value a callable type to select one.
 Without explicit type arguments, an expected callable type can infer them.
 
+Local closures use the same generic syntax and inference:
+
+```dewy
+main=()=>{
+    let count=0
+    let next=<T>(value:T)=>{count+=1; [value=value count=count]}
+    let other=next
+    assert(next(20).count =? 1)
+    assert(next("hello").count =? 2)
+    assert(other(false).count =? 1)
+}
+```
+
+All specializations of one closure use its private captured state. Copying the
+closure copies that state independently; `$capture @name` in its parameter list
+keeps sharing explicit. A generic closure can be returned, stored in records or
+collections, and forwarded through another generic function. Its concrete calls
+use specialized code and the existing closure environment, without a runtime
+type dictionary. `next<int64>` selects an ordinary callable value; assigning that
+value follows the same independent-copy rules as other closures. An expected
+callable type can select the specialization too. Defaults run against the
+closure's captured state after explicitly supplied arguments, in parameter order.
+
 This slice accepts plain type parameter names. Constraints such as `T of Bound`
-and explicitly generic local closures remain unsupported.
+remain unsupported.
 
 Custom records can define arithmetic and indexing with ordinary functions:
 
