@@ -1,6 +1,6 @@
-# Test expectations are compared byte for byte; keep LF on every platform.
-*.out text eol=lf
-*.err text eol=lf
-*.dewy text eol=lf
-*.jo text eol=lf
+# Test data is compared byte for byte: never convert line endings (some cases contain CR on purpose).
+tests/** -text
+*.out -text
+*.err -text
+# Historical notes keep their own line endings.
 resources/** -text
