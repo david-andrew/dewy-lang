@@ -509,26 +509,31 @@ dw_effect_suffix = (owner: int, result: int) -> int:
         nodes[owner].sval = i32(effect_syntax.len() - 1)
     base
 
+# Surface type spellings share one translation in both construction paths.
+dw_type_name = (name: str) -> str:
+    if name == "int64": return "i64"
+    else if name == "uint64": return "u64"
+    else if name == "int32": return "i32"
+    else if name == "uint32": return "u32"
+    else if name == "int16": return "i16"
+    else if name == "uint16": return "u16"
+    else if name == "int8": return "i8"
+    else if name == "uint8": return "u8"
+    else if name == "float64": return "f64"
+    else if name == "float32": return "f32"
+    else if name == "string": return "str"
+    else if name == "set": return "Set"
+    else if name == "int": return "__dewy_int"
+    name
+
 dw_type = (id: int) -> int:
     let id = dw_unwrap(id)
     pos = dewy_syntax[id].pos
     if dewy_syntax[id].kind == .metatag: return dw_metatag_fail(id)
     name = dw_name(id)
     if name != "":
-        if name == "int64": name = "i64"
-        else if name == "uint64": name = "u64"
-        else if name == "int32": name = "i32"
-        else if name == "uint32": name = "u32"
-        else if name == "int16": name = "i16"
-        else if name == "uint16": name = "u16"
-        else if name == "int8": name = "i8"
-        else if name == "uint8": name = "u8"
-        else if name == "float64": name = "f64"
-        else if name == "float32": name = "f32"
-        else if name == "string": name = "str"
-        else if name == "set": name = "Set"
-        else if name == "int": name = "__dewy_int"
-        else if name == "uint": return dw_fail(id, "unbounded uint is not yet supported; use an explicit fixed width")
+        if name == "uint": return dw_fail(id, "unbounded uint is not yet supported; use an explicit fixed width")
+        name = dw_type_name(name)
         n = mk(.tname, pos)
         nodes[n].name = if name == dewy_syntax[id].text: dw_name_id(id) else: i32(intern(name))
         return n

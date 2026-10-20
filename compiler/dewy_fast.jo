@@ -841,7 +841,7 @@ dewy_fast_file = (file: int) -> int[]:
     declarations: int[]
     loop dn_tokens[dn_at].kind != .eof:
         before = dn_at
-        syntax = dn_stmt()
+        syntax = dn_statement(true)
         loop declaration in dw_top_declarations(syntax): declarations.push(declaration)
         # Projection owns the retained data in the compact AST. Discard each
         # declaration's temporary syntax before parsing the next declaration.
