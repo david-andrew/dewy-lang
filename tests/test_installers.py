@@ -44,7 +44,8 @@ def host_platform() -> str | None:
 
 
 HOST = host_platform()
-BASH = shutil.which('bash') if os.name != 'nt' else None
+# /bin/bash is bash 3.2 on macOS: the oldest shell install.sh must support.
+BASH = ('/bin/bash' if os.path.exists('/bin/bash') else shutil.which('bash')) if os.name != 'nt' else None
 posix_only = pytest.mark.skipif(not (BASH and shutil.which('curl') and HOST and HOST != 'windows-x86_64'),
                                 reason='install.sh runs on Linux and macOS hosts with bash and curl')
 POWERSHELLS = [shell for shell in ('powershell', 'pwsh') if shutil.which(shell)] if os.name == 'nt' else []
