@@ -25,8 +25,7 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- **Throughput project 6** (Astra): backend code quality, improving both the
-  compiler and user programs.
+- **Refinement slice 4** (Astra, medium): joins, loops, consolidation of the bounds/numeric walkers onto facts.jo.
 - **Construction safety** (Opus): missing fields become errors, not zero-fill.
 
 ## Next
@@ -127,5 +126,8 @@ Each tier-3 program's ladder note says which question holds it open.
 - Broad release inlining-cost adjustment.
 - Compact IR encoding: −0.3%.
 - Selective default passes: −10% compile, but kernels regressed 16–92%.
+- Readonly aggregate argument forwarding from loop snapshots: self-build −1.25%,
+  no runtime change (under the 3% pilot bar).
+- Local check-traversal fixes beyond the two landed: four pilots each under 1%.
 - Fork-based parallel lowering: 0.88–1.00× latency. Lowering is only about 13%
   of a default build.
