@@ -1,0 +1,54 @@
+# Publish the VS Code extension (editors/vscode) to the VS Code Marketplace and Open VSX.
+# Trigger: push a tag vscode-vX.Y.Z matching editors/vscode/package.json's version, or run by hand.
+# No stored tokens: GitHub's OIDC token is exchanged for short-lived ones (an Azure managed
+# identity for the Marketplace, trusted publishing for Open VSX). The Marketplace step needs the
+# repository variables AZURE_CLIENT_ID and AZURE_TENANT_ID. Setup: docs/DEVELOPMENT.md.
+name: Extension
+on:
+  push:
+    tags: ["vscode-v*"]
+  workflow_dispatch:
+    inputs:
+      whoami:
+        description: "only print the Azure identity's Marketplace id"
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: marketplace-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the tag matches package.json
+        if: github.event_name == 'push'
+        run: |
+          version=$(node -p "require('./editors/vscode/package.json').version")
+          test "vscode-v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != package.json $version"; exit 1; }
+      - name: Package
+        if: ${{ !inputs.whoami }}
+        working-directory: editors/vscode
+        run: npx --yes @vscode/vsce@3 package -o "$GITHUB_WORKSPACE/dewy.vsix"
+      - name: Sign in to Azure (the Marketplace publisher's managed identity)
+        if: vars.AZURE_CLIENT_ID != ''
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: The identity's Marketplace id (to add it to the publisher's members)
+        if: inputs.whoami && vars.AZURE_CLIENT_ID != ''
+        run: az rest -u https://app.vssps.visualstudio.com/_apis/connectionData --resource 499b84ac-1321-427f-aa17-267ca6975798 --query authenticatedUser.id -o tsv
+      - name: Publish to the VS Code Marketplace
+        if: ${{ !inputs.whoami && vars.AZURE_CLIENT_ID != '' }}
+        run: npx --yes @vscode/vsce@3 publish --packagePath dewy.vsix --skip-duplicate --azure-credential
+      - name: Publish to Open VSX
+        if: ${{ !inputs.whoami }}
+        run: npx --yes ovsx publish -i dewy.vsix --skip-duplicate --trusted-publishing
