@@ -13066,3 +13066,55 @@ main = () -> int:
     assert built.returncode == 0, built.stdout + built.stderr
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('flags', [[], ['--release'], ['-g']], ids=['default', 'release', 'debug'])
+def test_core_entry_guard_argument_and_return_conventions(compiler, tmp_path, flags):
+    source = tmp_path / 'entry-guard.jo'
+    source.write_text('''ticks = 0
+@noinline
+void_probe = (n: int):
+    if n == 0: return
+    ticks += n
+    void_probe(n - 1)
+@noinline
+constant_probe = (n: int) -> int:
+    if n == 0: return 4294967297
+    100 + n
+@noinline
+nonzero_probe = (n: int) -> int:
+    if n != 0: return -73
+    n + 9
+@noinline
+mixed_probe = (a: f64, b: int, c: f32, d: int, e: int, f: int, g: int, h: int) -> int:
+    if h == 0: return -91
+    int(a) + b + int(c) + d + e + f + g + h
+@noinline
+stack_probe = (a: int, b: int, c: int, d: int, e: int, f: int, g: int) -> int:
+    if g == 0: return -19
+    a + b + c + d + e + f + g
+@noinline
+float_probe = (n: int) -> f64:
+    if n == 0: return 1.5
+    f64(n) + 0.25
+main = () -> int:
+    void_probe(0)
+    if ticks != 0: return 1
+    void_probe(3)
+    if ticks != 6: return 2
+    if constant_probe(0) != 4294967297 or constant_probe(2) != 102: return 3
+    if nonzero_probe(-3) != -73 or nonzero_probe(0) != 9: return 4
+    if mixed_probe(1.25, 2, 3.5, 4, 5, 6, 7, 0) != -91: return 5
+    if mixed_probe(1.25, 2, 3.5, 4, 5, 6, 7, 8) != 36: return 6
+    if stack_probe(1, 2, 3, 4, 5, 6, 0) != -19: return 7
+    if stack_probe(1, 2, 3, 4, 5, 6, 7) != 28: return 8
+    if float_probe(0) != 1.5 or float_probe(3) != 3.25: return 9
+    42
+''')
+    binary = tmp_path / 'entry-guard'
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
