@@ -2282,6 +2282,16 @@ struct_has_defaults = (si: int, depth: int) -> bool:
     has
 
 dewy_record_shapes: {str: int} = {}
+# an anonymous record shape's fields in the order first written ([y=2 x=1]: y, x), for printing:
+# the shape itself is kept by name
+dewy_record_order: {int: int[]} = {}
+
+# the order a struct's fields print in: as written for an anonymous record, else as declared
+fmt_field_order = (si: int) -> int[]:
+    if let order = dewy_record_order.get(int(structs[si].decl)): return order
+    order: int[]
+    loop i in [0..int(structs[si].nfields)): order.push(i)
+    order
 
 dewy_record_target = (expected: int) -> int:
     target = prune(expected)
@@ -2449,6 +2459,11 @@ dewy_record_schema = (n: int, args: int[]) -> int:
         set_list(decl, members)
         set_list2(decl, params)
         dewy_record_shapes[key] = decl
+        written: int[]
+        loop field in args:
+            loop i in 0.. and other in ordered:
+                if other == field: written.push(i)
+        dewy_record_order[decl] = written
     t = get_struct_inst(decl, targs)
     check_struct_fields(int(types[t].st))
     t
@@ -4804,7 +4819,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if k == .struct_:
             si = int(types[t].st)
             check_struct_fields(si)
-            loop i in [0..int(structs[si].nfields)):
+            loop i in fmt_field_order(si):
                 ft = int(fields[int(structs[si].fields) + i].type)
                 if not fmt_hidden(ft, nodes[n].aux2): fts.push(ft)
         else if k == .tuple:

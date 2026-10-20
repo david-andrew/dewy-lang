@@ -3401,7 +3401,7 @@ gen_fmt_struct = (e: int) -> Val:
         if dewy and shown == 0 and name != "": lit(ba, name)
         else if dewy: lit(ba, "{name}[")
         else: lit(ba, "{name}(")
-        loop i in [0..int(structs[si].nfields)):
+        loop i in fmt_field_order(si):
             f = int(structs[si].fields) + i
             if fmt_hidden(int(fields[f].type), nodes[e].aux2): continue
             sep = ""
