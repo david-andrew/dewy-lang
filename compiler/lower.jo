@@ -6183,6 +6183,13 @@ find_unique_globals = (closed: bool):
             uniq_globals[g] = true
             any = true
     if not any: return
+    # Initializers commonly expose every candidate (for example by passing a
+    # global array to a function). Disprove those before walking other bodies.
+    loop fi in init_fns: ug_scan(int(fns[fi].body), 0)
+    any = false
+    loop g in global_ids:
+        if uniq_globals[g]: any = true
+    if not any: return
     loop f in fns:
         if f.state == 2: ug_scan(int(f.body), 0)
 

@@ -1,0 +1,24 @@
+let exposed:array<int64>=[]
+let survivor:array<int64>=[]
+let private_values:array<int64>=[]
+exposed.push(10)
+survivor.push(20)
+private_values.push(30)
+let first=exposed
+
+copy_survivor=()=>survivor
+mutate=()=>{
+    exposed[0]=11
+    survivor[0]=21
+    private_values[0]=31
+}
+main=()=>{
+    let second=copy_survivor()
+    mutate()
+    assert(first[0]=?10)
+    assert(second[0]=?20)
+    assert(exposed[0]=?11)
+    assert(survivor[0]=?21)
+    assert(private_values[0]=?31)
+    printl"ok"
+}
