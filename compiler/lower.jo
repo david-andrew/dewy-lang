@@ -5654,7 +5654,7 @@ gen_for = (s: int):
                 loop e < len(src) and (is_alnum(src[e]) or src[e] == '_' or src[e] == '.'): e += 1
                 if e < len(src) and e > o and (src[e] == ')' or src[e] == ',') and starts_with(p, src[o..e)):
                     why = " (here all of {src[o..e)} is given to a function that may change it, with its {p}: set a flag in the loop and call it after)"
-                fatal(at, "`{spelling}` changes the elements of {p} in place, so its body cannot add, remove or replace elements of {p}{why}: do that after the loop ({p}.retain((x): keep) keeps some; push new ones to another array first), or loop over its indexes")
+                fatal(at, "`{spelling}` changes the elements of {p} in place, so its body cannot add, remove or replace elements of {p}{why}: do that after the loop ({p}.retain({jd(nodes[s].pos, "(x): keep", "(x)=>keep")}) keeps some; push new ones to another array first), or loop over its indexes")
             # (a function called in the body that does it, to a global's array)
             r = write_root(int(nodes[s].a))
             if r != 0 and nodes[r].aux == i32(int(SK.global)):

@@ -567,6 +567,10 @@ DEWY_HABITS = ["float", "`float64` (and `to_float(s)` for text)", "double", "`fl
     "self", "a parameter: functions take what they work on first (`move = (@p:Player dt:float64) => ...`, called as `p.move(dt)`)",
     "this", "a parameter: functions take what they work on first (`move = (@p:Player dt:float64) => ...`, called as `p.move(dt)`)",
     "includes", "`contains` or `x in? xs`", "delta_time", "`dt`, what update is given: `update = (dt:float64) => ...`", "deltaTime", "`dt`, what update is given: `update = (dt:float64) => ...`",
+    "open", "`read_text(path)` (or `p\"file\".read_text`) gives the text or a file error; `write_text(path text)` and `append_file(path text)` write",
+    "os", "the plain functions: `read_text`, `list_directory`, `run`, `env`, and paths, `p\"dir/file\"`",
+    "isinstance", "`x is? T` (which member of a union x holds)", "Number", "`to_float(s)` (none when it is not a number) or `float64(x)`",
+    "list_files", "`list_directory(path)`", "list_dir", "`list_directory(path)`",
     "copy", "nothing: `ys = xs` copies (arrays and records are values)", "clone", "nothing: `ys = xs` copies (arrays and records are values)", "deep_copy", "nothing: `ys = xs` copies (arrays and records are values)"]
 
 DEWY_MAP_HABITS = ["size", "`m.length`", "length", "`m.length`", "has_key", "`m.has(k)` or `k in? m`", "containsKey", "`m.has(k)` or `k in? m`",
@@ -584,7 +588,7 @@ map_habit_name = (name: str) -> str:
             i += 2
         i = 0
     loop i + 1 < MAP_HABITS.len():
-        if MAP_HABITS[i] == name: return MAP_HABITS[i + 1]
+        if MAP_HABITS[i] == name: return if ts_dewy and jo_shaped(MAP_HABITS[i + 1]): "" else: MAP_HABITS[i + 1]
         i += 2
     ""
 
@@ -596,9 +600,26 @@ habit_name = (name: str) -> str:
             i += 2
         i = 0
     loop i < HABITS.len():
-        if HABITS[i] == name: return HABITS[i + 1]
+        if HABITS[i] == name: return if ts_dewy and jo_shaped(HABITS[i + 1]): "" else: HABITS[i + 1]
         i += 2
     ""
+
+# (a hint written for Jo: its types, its commas between arguments, its `mut` and `->`, or a
+# library spelling Dewy has another for; a Dewy program is better told nothing than that)
+JO_HINT_WORDS = ["str", "f64", "f32", "i64", "i32", "i16", "i8", "u64", "u32", "u16", "u8", "mut", "struct", "enum", "elif", "len"]
+jo_shaped = (hint: str) -> bool:
+    if find(hint, ", ") >= 0 or find(hint, "[]") >= 0 or find(hint, "): ") >= 0 or find(hint, "->") >= 0 or find(hint, "if let") >= 0: return true
+    i = 0
+    loop i < len(hint):
+        if not is_ident_start(hint[i]):
+            i += 1
+            continue
+        j = i
+        loop j < len(hint) and (is_alnum(hint[j]) or hint[j] == '_'): j += 1
+        w = hint[i..j)
+        if w in JO_HINT_WORDS or dewy_surface_table().has(intern(w)): return true
+        i = j
+    false
 
 # an example of the annotation for an empty array or map
 empty_hint = (nm: str, t0: int) -> str:

@@ -610,11 +610,18 @@ ide_fn_header = (d: int) -> str:
 trail_sig = (k: int) -> str:
     f = err_trail_fns[k]
     d = int(fns[f].decl)
+    # (in the language the function is written in: a Dewy one's types, @ and spacing)
+    dewy = d != 0 and pos_file(nodes[d].pos) >= 0 and files[pos_file(nodes[d].pos)].is_dewy
     s = err_trail_names[k] + "("
     loop i in [0..fns[f].ptypes.len()):
-        if i > 0: s += ", "
-        if i < nkids(d): s += name_of(int(nodes[kid(d, i)].name)) + ": "
-        s += type_str(zonk(fns[f].ptypes[i]))
+        if i > 0: s += if dewy: " " else: ", "
+        if i < nkids(d):
+            pn = name_of(int(nodes[kid(d, i)].name))
+            if dewy and starts_with(pn, "$parameter"): pn = "_"
+            if dewy and has_flag(kid(d, i), NF_MUT): pn = "@" + pn
+            s += pn + ":"
+            if not dewy: s += " "
+        s += type_str(zonk(fns[f].ptypes[i]), dewy)
     s + ")"
 
 # Display types for the edited language, including imported implementation declarations.

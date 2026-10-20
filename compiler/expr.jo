@@ -1654,7 +1654,9 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                         ok = false
                         if i + 1 < last_err_arg: break
                         last_err_arg = i + 1
-                        last_err = "argument {i + 1} must have type {dt(subst(pt, cd.binds))} (mut parameters need an exact match)"
+                        mutable = "mut parameters"
+                        if caller_dewy(): mutable = "`@` parameters"
+                        last_err = "argument {i + 1} must have type {dt(subst(pt, cd.binds))} ({mutable} need an exact match)"
                         break
                     cost += r
                     continue
@@ -1811,7 +1813,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         ts = ""
         loop i in 0.. and a0 in args:
             a = unnamed(a0)
-            if i > 0: ts += ", "
+            if i > 0: ts += if caller_dewy(): " " else: ", "
             if nodes[a].type != 0: ts += dt(ntype(a))
             else: ts += "?"
         sep = ""
@@ -2713,7 +2715,10 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             return check_intrinsic(n, intrinsics[ii].id, args, expected)
         if types[t0].kind == .fixed:
             if intrinsics[ii].id == .arrdata: fatal(nodes[n].pos, "data() is for a growable array T[]; a fixed-size one is stored in place: `&x` is where its first element is (what C wants)")
-            if intrinsics[ii].id != .len: fatal(nodes[n].pos, "{name_of(name)}() needs a growable array T[]; {dt(t0)} has a fixed size")
+            if intrinsics[ii].id != .len:
+                member = name
+                if ide_dewy_alt(name) != 0: member = ide_dewy_alt(name)
+                fatal(nodes[n].pos, jd(nodes[n].pos, "{name_of(name)}() needs a growable array T[]; {dt(t0)} has a fixed size", "`.{name_of(member)}` needs a growable array (`array<T>`); {dt(t0)} has a fixed length"))
             # Calls and indexed receivers still evaluate, even though the
             # resulting length is statically known.
             if nodes[a0].kind != .ident: return check_intrinsic(n, .len, args, expected)
@@ -3269,11 +3274,36 @@ overloads_text = (decls: int[], err: str) -> str:
     s
 
 call_text = (d: int) -> str:
+    if caller_dewy(): return dewy_call_text(d)
     s = "{name_of(int(nodes[d].name))}("
     loop i in [0..nkids(d)):
         if i > 0: s += ", "
         s += ide_param_text(nodes[kid(d, i)].pos)
     s + ")"
+
+# (a declaration as a Dewy program sees it: its Dewy name, `@` for a mutable parameter and Dewy
+# types, whitespace between parameters, whichever language declares it)
+dewy_call_text = (d: int) -> str:
+    nm = int(nodes[d].name)
+    alt = ide_dewy_alt(nm)
+    sig = fn_sig(d)
+    if alt == 0: alt = nm
+    s = "{name_of(alt)}("
+    loop i in [0..nkids(d)):
+        p = kid(d, i)
+        if i > 0: s += " "
+        if has_flag(p, NF_MUT) or int(sig.mutmask) & (1 << i) != 0: s += "@"
+        pn = name_of(int(nodes[p].name))
+        if starts_with(pn, "$parameter"): pn = "_"
+        s += pn
+        if i < sig.params.len() and sig.params[i] != 0: s += ":{dt(sig.params[i])}"
+    s += ")"
+    # (a generic declaration's type parameters by their names)
+    i = nkids2(d) - 1
+    loop i >= 0:
+        s = replace(s, "${i}", name_of(int(nodes[kid2(d, i)].name)))
+        i -= 1
+    s
 
 # ---------------- reading values from text (lib/std/text.jo) ----------------
 # __read_fields(r, x) for a value of type t: statements that read it with r (a __TextIn)
@@ -4256,7 +4286,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if is_lit(args[0]) or types[t].kind == .int_:
             coerce(args[0], T_FLOAT)
             t = T_FLOAT
-        if types[t].kind != .float_: fatal(nodes[n].pos, "sqrt() needs a float")
+        if types[t].kind != .float_: fatal(nodes[n].pos, jd(nodes[n].pos, "sqrt() needs a float", "sqrt needs a float64 or float32 (found {dt(t)})"))
         r = t
     else if id == .json_fields:
         nargs_check(n, nargs, 4, 4, "__json_fields")
@@ -5974,7 +6004,7 @@ check_expr = (n: int, expected: int) -> int:
             m = int(types[bt].mod)
             s = module_lookup(m, fname)
             if s == 0:
-                if name_of(fname) == "path": fatal(nodes[n].pos, "paths are plain functions: `join_path(a, b)`, `file_name(p)`, `dir_name(p)`, `extension(p)`, `file_exists(p)`")
+                if name_of(fname) == "path" and not dewy_at(nodes[n].pos): fatal(nodes[n].pos, "paths are plain functions: `join_path(a, b)`, `file_name(p)`, `dir_name(p)`, `extension(p)`, `file_exists(p)`")
                 fatal(nodes[n].pos, "module '{name_of(int(modules[m].name))}' has no member '{name_of(fname)}'")
             nodes[n] = Node(kind = .ident, pos = nodes[n].pos, name = i32(fname), flags = i32(int(nodes[n].flags) & NF_MUT))
             if is_callee: callee_at = n
@@ -6590,7 +6620,7 @@ check_expr = (n: int, expected: int) -> int:
                 else if anyunsigned: elt = T_U64
                 else: elt = if files[pos_file(nodes[n].pos)].is_dewy: T_MATH_INT else: T_INT
             # ([1, "two", 3]: an array holds one kind of value)
-            coerce_hint = " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, make a struct or a union)"
+            coerce_hint = jd(nodes[n].pos, " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, make a struct or a union)", " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, use a record type or a union such as `array<int64|string>`)")
             loop i in [0..nkids(n)):
                 c = kid(n, i)
                 if has_flag(c, NF_SPREAD): coerce(c, mk_array(elt))
@@ -7392,7 +7422,7 @@ index_array_fn = (b: int, base: str) -> str:
     et = prune(int(types[it].elem))
     if types[et].kind == .bool_: return base + "_mask"
     if et == T_INT or et == T_MATH_INT: return base + "_indices"
-    fatal(nodes[b].pos, "an array of indexes is int[], or a mask bool[] (found {dt(it)})")
+    fatal(nodes[b].pos, jd(nodes[b].pos, "an array of indexes is int[], or a mask bool[] (found {dt(it)})", "an array of indexes is array<int64>, or a mask array<bool> (found {dt(it)})"))
     ""
 
 bc_call = (name: str, args: int[], pos: int) -> int:
