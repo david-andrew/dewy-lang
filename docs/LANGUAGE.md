@@ -2090,6 +2090,10 @@ and native/browser endpoint details. `net.listen(port largest=4096)` can bound
 incoming message size for a small signaling service; ordinary games retain the
 16 MiB default. Fragmented WebSocket messages retain their bytes across polls.
 
+For native TCP, `net.tcp_listen(0)` lets the operating system choose an available
+port. `net.tcp_port(socket)` returns the bound local port, or `-1` on failure
+(including in a browser).
+
 `import netplay` adds rollback sessions: each peer runs the game from ordinary
 value snapshots, predicts remote input, then rewinds and replays when late input
 differs. The tick callback must be deterministic for its state and inputs; keep

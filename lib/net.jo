@@ -766,6 +766,10 @@ tcp_connect = (host: str, port: int, timeout: f64 = 5.0) -> int:
 @no_web("gives -1 in a web page: a page cannot listen (the server is a native program)")
 tcp_listen = (port: int) -> int: __n_listen(port)
 
+# the bound local port (including the one chosen by tcp_listen(0)); -1 on failure
+@no_web("gives -1 in a web page: browsers have no TCP sockets")
+tcp_port = (sock: int) -> int: __n_sock_port(sock)
+
 # a connection made to the server (waiting up to `wait` seconds for one), or -1 if none came
 tcp_accept = (server: int, wait: f64 = 0.0) -> int:
     if server < 0: return -1
