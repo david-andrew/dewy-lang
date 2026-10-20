@@ -13,9 +13,9 @@ edit loop. Games are a primary customer. See [docs/GOALS.md](docs/GOALS.md).
 
 ## Status
 
-Experimental. The current compiler is a compact native/web compiler forked from
-Sloppy and adapted to Dewy syntax and behavior; it implements a growing subset
-of the language. The previous implementation (the Python/native compiler, µDewy
+Experimental (version 0.0.0). The compiler is a compact native/web compiler,
+originally forked from Sloppy, that implements a growing part of the designed
+language; the acceptance ladder in [ROADMAP.md](ROADMAP.md) tracks how much. The previous implementation (the Python/native compiler, µDewy
 and their library) is archived in git tag `archive/master-pre-restart`.
 
 ## Build, run and test
@@ -53,7 +53,13 @@ python3 -m tools.compiler.build --bootstrap --output /tmp/dewy-core   # standalo
 [developing the compiler](docs/DEVELOPMENT.md) · [design notes](docs/design/README.md) ·
 [origin and licensing](docs/origin/ORIGIN.md)
 
-## Published installer
+## Install
 
-`curl -fsSL https://dewy-lang.org/install.sh | bash` installs the **previous
-implementation**, not the compiler in this repository.
+```sh
+curl -fsSL https://dewy-lang.org/install.sh | bash        # Linux x86-64/arm64, macOS arm64
+irm https://dewy-lang.org/install.ps1 | iex                 # Windows x64 (PowerShell)
+```
+
+This installs the latest development toolchain (a GitHub prerelease, version 0.0.0) into
+`~/.dewy`; `dewy update` and `dewy rollback` manage it. The VS Code extension
+(RedFoxLabs.dewy on the Marketplace and Open VSX) bundles the compiler.
