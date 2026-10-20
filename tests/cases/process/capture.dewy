@@ -5,8 +5,9 @@ main=():>int64=>{
     match result {
         output:Output => {
             printl(output.status)
-            printl(output.stdout_text)
-            printl(output.stderr_text)
+            let out=output.stdout_text ?? "not UTF-8"
+            let err=output.stderr_text ?? "not UTF-8"
+            printl"{out.trim}|{err.trim}"
             printl(output.stdout.length)
         }
         <SpawnError> => return 1
