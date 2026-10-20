@@ -107,6 +107,16 @@ Landed 10-19 and 10-20:
   - compile-time evaluation for `$assert` and tables (63);
   - the B-tree type mismatch (35), probably the collection API.
 
+- **VS Code extension as a first-class product.** The goal is everything users
+  expect, backed by the compiler's LSP:
+  - diagnostics, completion, hover, go-to-definition/references, rename;
+  - signature help, semantic tokens, inlay hints, formatting;
+  - test explorer, run/debug;
+  - an easy way to get the compiler (bundled or downloaded) without a checkout.
+
+  Publishing is automated (`.github/workflows/extension.yml`). Patch bumps only,
+  at most one release a day; see docs/DEVELOPMENT.md.
+
 ## Later (pull in when a capability needs it)
 
 - Semantic-boundary slices 2–9: places and effects, lowering storage split,
