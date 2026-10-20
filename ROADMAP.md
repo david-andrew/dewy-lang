@@ -26,7 +26,6 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
   decimal literals; completes milestone 27's arithmetic base.
 - **Refinement slice 1** (Astra): scalar facts and symbolic `$assert`. The
   design is in ~/dev/tmp/coord/refinement-design.md, in 6 slices.
-- **Front page** (Opus): restore the previous design, with verified examples.
 
 ## Next
 
@@ -62,6 +61,10 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 - Small items:
   - the remaining Jo-shaped hints in diagnostics;
   - partial application for overloaded/generic functions;
+  - bugs: `print` appends a newline (only `printl` should); a record field
+    named `value` resolves to a builtin function instead of the field;
+  - `sleep` taking time units, and trigonometry on angles (front-page examples
+    hit both);
   - delete `restart/sloppy-frontend` and its publish-policy entry once the
     bigint task lands.
 
