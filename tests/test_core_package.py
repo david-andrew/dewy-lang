@@ -32,6 +32,9 @@ def test_core_packaged_toolchain(toolchain, tmp_path):
     (unpacked / 'dewy-core').rename(moved)
     metadata = json.loads((moved / 'PACKAGE.json').read_text())
     assert metadata['revision'] == 'test-revision'
+    release = (moved / 'RELEASE').read_text().splitlines()
+    assert release[0] == 'dewy-toolchain-release 1' and release[3] == 'revision test-revision'
+    assert release[2].startswith('platform ') and 'RELEASE' in metadata['files']
     for name, expected in metadata['files'].items():
         assert hashlib.sha256((moved / name).read_bytes()).hexdigest() == expected
     compiler = moved / 'bin' / ('dewy-core.exe' if os.name == 'nt' else 'dewy-core')

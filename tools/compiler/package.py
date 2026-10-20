@@ -8,12 +8,16 @@ import json
 import tarfile
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[2]
 HOSTS = {
     'linux-x86_64': ('Linux x86-64', 'dewy-core', 'my-game-native', 'Linux'),
     'windows': ('Windows x64', 'dewy-core.exe', 'my-game-native.exe', 'Windows'),
     'macos': ('macOS ARM64', 'dewy-core', 'my-game-native', 'macOS'),
     'linux-arm64': ('Linux ARM64', 'dewy-core', 'my-game-native', 'Linux'),
 }
+# Compiler host -> release platform (the dewy-core-<platform>.tar.gz asset name).
+PLATFORMS = {'linux-x86_64': 'linux-x86_64', 'windows': 'windows-x86_64',
+             'macos': 'macos-arm64', 'linux-arm64': 'linux-arm64'}
 
 README = """Dewy compact core — development toolchain for {title}
 
@@ -35,13 +39,21 @@ Use an absolute path to bin/{binary} when working from another directory.
 This is the experimental compact core. Language and platform coverage:
 https://github.com/david-andrew/dewy-lang/blob/master/docs/DEVELOPMENT.md
 
-PACKAGE.json records the payload hashes and an optional source revision.
+PACKAGE.json records the payload hashes and an optional source revision;
+RELEASE repeats the platform and revision as plain text for installers.
 {provenance} records the compiler build and source provenance.
 """
 
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def release_identity(platform: str, revision: str | None) -> str:
+    """The plain-text identity installers check without a JSON parser."""
+    version = (ROOT / 'VERSION').read_text().strip()
+    return (f'dewy-toolchain-release 1\nversion {version}\nplatform {platform}\n'
+            f'revision {revision or "unknown"}\n')
 
 
 def package(toolchain: Path, output: Path, *, revision: str | None = None) -> Path:
@@ -79,6 +91,7 @@ def package(toolchain: Path, output: Path, *, revision: str | None = None) -> Pa
     payload[provenance] = (toolchain / provenance).read_bytes()
     payload['README.txt'] = README.format(title=title, binary=binary, native=native,
                                          desktop=desktop, provenance=provenance).encode()
+    payload['RELEASE'] = release_identity(PLATFORMS[host], revision).encode()
     metadata = {'format': 1, 'host': host, 'revision': revision,
                 'files': {name: digest(data) for name, data in payload.items()}}
     payload['PACKAGE.json'] = (json.dumps(metadata, indent=2) + '\n').encode()
