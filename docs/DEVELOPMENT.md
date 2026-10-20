@@ -181,6 +181,8 @@ python3 -m tools.core speed --base master --release
 python3 -m tools.core speed --checkpoint speed-checkpoint
 python3 -m tools.core bench                       # runtime kernels vs C
 python3 -m tools.core bench -k "graph records"
+python3 -m tools.core bench --instructions        # runtime kernels, instructions
+python3 -m tools.core bench --baseline master     # fail on a >3% kernel regression
 ```
 
 `speed` is the compile-speed gate. It counts the user-space instructions that
@@ -210,7 +212,16 @@ commit.
 and release modes and in C (`cc -O2`), runs each binary a few times
 (`--runs`, default 3) and prints median kernel milliseconds, the Dewy/C ratios
 and whether all outputs match. It is a quick look on a shared machine, not a
-gate. `build --time` reports compiler phases; `SLOPPY_PAR_TIME=1` adds
+gate. `bench --instructions` counts the user-space instructions of each Dewy
+build's whole run instead, with `speed`'s counter. `bench --baseline REV` also
+builds REV's compiler as `speed` does (same cache) and fails when any kernel and
+mode needs more than `--limit` percent (default 3) more instructions than REV's
+build, or prints a different checksum; a base that cannot build a kernel is
+noted, not compared. It is the check for the rule that no bench kernel regresses
+more than 3%: run it against the main line before merging optimizer, code
+generation or library changes. A cached run takes about 20 s with counters.
+Without counters it uses valgrind with inputs a tenth the size (`--counter
+valgrind` forces this); CI does not run it. `build --time` reports compiler phases; `SLOPPY_PAR_TIME=1` adds
 optimizer and emission timing. `python3 -m tools.compiler.fuzz` runs bounded
 differential checks of native/web, default/release and `-g` builds on
 generated programs.

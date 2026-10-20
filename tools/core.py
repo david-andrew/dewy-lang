@@ -9,7 +9,7 @@
     python3 -m tools.core cases [-k expression] [--update]
     python3 -m tools.core ladder [--update-ratchet]
     python3 -m tools.core speed [--base REV] [--checkpoint TAG] [--limit 1.0] [--release]
-    python3 -m tools.core bench [-k WORDS]
+    python3 -m tools.core bench [-k WORDS] [--instructions] [--baseline REV]
     python3 -m tools.core fuzz [--seed N] [--count N] [--minutes M]
 """
 from __future__ import annotations

@@ -146,17 +146,21 @@ class Counter:
         return 'perf counters' if self.kind == 'perf' else 'valgrind cachegrind'
 
     def count(self, command: list, env: dict) -> int:
+        return self.run(command, env)[0]
+
+    def run(self, command: list, env: dict) -> tuple[int, str]:
+        """The command's user-space instructions and its stdout."""
         if self.kind == 'perf':
             run = subprocess.run([self.binary, *command], cwd=ROOT, env=env, capture_output=True, text=True)
             if run.returncode:
                 raise CompileError(run.stdout + run.stderr)
-            return counter_result(run.stderr)
+            return counter_result(run.stderr), run.stdout
         run = subprocess.run(['valgrind', '--tool=cachegrind', '--cache-sim=no',
                               '--cachegrind-out-file=/dev/null', *command],
                              cwd=ROOT, env=env, capture_output=True, text=True)
         if run.returncode:
             raise CompileError(run.stdout + run.stderr)
-        return cachegrind_result(run.stderr)
+        return cachegrind_result(run.stderr), run.stdout
 
 
 class CompileError(RuntimeError):
