@@ -1,10 +1,10 @@
 # Errors, Exceptions, and Forwarding
 
+> **Language design.** [Generated coverage](/status/#ref-errors-and-forwarding) names measured programs and target restrictions; examples here illustrate the design.
+
 Dewy models expected failures as values belonging to nominal error types. A function exposes those values directly as alternatives in its return type rather than wrapping its result in a runtime `Result<T, E>` object.
 
 Automatic forwarding is defined by the broader nominal `exception` family. Errors are one kind of exception; `none` is another. The direct-union model, exception classification, receiver-forwarding rule, explicit treatment of arguments, and separation of errors from effects are settled semantic direction. The surface forms called out as provisional below are not yet normative.
-
-Implemented today: error types minted with `type of error`, unit-like or carrying fields, error alternatives in return unions and other unions, `is?` handling (including `is? error` for the whole family), postfix `or_throw`, and forwarding member access (safe navigation, reads only). Not yet implemented: forwarding through method calls and the fallback operators. Examples marked as compiler examples below compile with the current compiler; the rest are design.
 
 Errors are the second half of Dewy's no-trap rule (see [No Traps](refinements-and-effects.md#no-traps)): what cannot be proven safe at compile time is returned as a value, never raised, never aborted.
 
@@ -26,15 +26,14 @@ Any value whose type descends from `exception` is a forwarding value. Programs m
 
 An error type descends from the nominal base type `error`, which itself descends from `exception`. `type of error` creates a fresh nominal error type:
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 const MyCustomError:type = type of error
 ```
 
 A unit-like nominal error has one canonical inhabitant, written with the type's name. The question of whether that inhabitant is literally the type value itself remains open, but there is no separate `MyCustomError()` spelling:
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let MyCustomError:type = type of error
 
@@ -48,7 +47,7 @@ Minted names are nominal: two `type of error` aliases are distinct types even th
 
 Intersect the fresh nominal type with an object type when an error carries fields. The result is constructed, matched, and read like any minted object (`Report`'s methods included when the structure is `Report`), sits in the `error` family for `is? error`, `or_throw`, and forwarding, and — being a fresh nominal child of its structure — satisfies a parameter of that structure:
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let TokenError:type = type of error & [message:string offset:int64 = 0]
 
@@ -65,7 +64,7 @@ describe = (n:int64):>string => match count("abc") {
 
 `type of error` mints the identity; `&` only adds the structural requirement. Further structural extension therefore reuses the existing nominal ancestry:
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 const MyMoreComplexError:type =
     MyComplexError & [metadata:string]
@@ -75,7 +74,7 @@ const MyMoreComplexError:type =
 
 ## Error Return Unions
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let loadCustomer = (id:CustomerId)
     :> Customer | NotFoundError | DatabaseError
@@ -103,8 +102,7 @@ where each `Xi` descends from `exception` and no `Vi` does. For `receiver.member
 3. When the runtime receiver is an `Xi`, member lookup is not performed and that exception value is forwarded.
 4. If the member results have types `R1` through `Rn`, the result type is `R1 | ... | Rn | X1 | ... | Xm`.
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let UserError:type = type of error
 let Address:type = [city:string]
@@ -124,8 +122,7 @@ Each successive route segment applies the rule again. This gives exception-beari
 
 The rule with no exception alternatives is plain common-member access: when every alternative of an ordinary union has the member, the access reads it without narrowing, at the union of the member types (one type when they agree):
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let Customer:type = [name:string id:int64]
 let Organization:type = [name:string members:int64]
@@ -144,7 +141,7 @@ Forwarding applies at the receiver's current type; it does not recursively searc
 
 Selecting a member on an exception-bearing receiver follows the forwarding rule. Arguments to a call do not forward implicitly.
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let service:Service | ServiceError = connect()
 let request:Request | ParseError = parseRequest(text)
@@ -167,8 +164,7 @@ For an expression of type `V | X`, where `X` contains its `exception` alternativ
 
 The enclosing return contract must accept every propagated exception alternative. This includes `none` and user-defined exception kinds as well as errors.
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let NotFound:type = type of error
 
@@ -191,7 +187,7 @@ let twice = (id:int64):>int64 | NotFound | none => {
 
 Type tests narrow error unions through ordinary control flow:
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let result = loadUser(id)
 
@@ -213,7 +209,7 @@ The current fallback direction keeps absence and failure distinct: `??` would re
 
 Safe navigation is a read and receiver-selection rule. An assignment through an exception-bearing route must not silently become a no-op:
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 user.profile.name = "Ada"  # invalid if user may be UserError or none
 ```
@@ -236,7 +232,7 @@ Code should use an ordinary domain type when both outcomes are meant to particip
 
 Errors are return values. Effects describe observable behavior or requirements of evaluation. They occupy separate parts of a function contract and must not be mixed as alternatives of one union.
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let loadInvoice = (id:InvoiceId)
     :> (Invoice | NotFoundError | DatabaseError) & reads<database>

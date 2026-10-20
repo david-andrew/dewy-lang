@@ -1,5 +1,7 @@
 # Compile-Time Facilities and Metatags
 
+> **Language design.** [Generated coverage](/status/#ref-compile-time) names measured programs and target restrictions; examples here illustrate the design.
+
 Dewy uses ordinary language values and expressions at compile time where possible rather than defining unrelated macro, type, and project languages.
 
 ## Type Values
@@ -18,6 +20,7 @@ A `$name` metatag declares scope-level metadata. Its exact interpretation depend
 
 Loop labels use a bare metatag:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 {
     $rows
@@ -35,6 +38,7 @@ The name applies to loops directly in that scope rather than attaching textually
 
 Configuration metatags may bind a compile-time value:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 $no_prelude = true
 ```
@@ -61,7 +65,6 @@ checked construction/preservation, explicit fallible validation or the documente
 trusted boundary; further facts need checked implications or a narrow documented
 trusted contract. The default
 strategy prefers static guarantees while permitting an explicit trust boundary
-where needed, subject to reevaluation. The validator interface is not yet settled
-or generally implemented; see the [provisional design status](design-status.md#provisional-designs).
+where needed, subject to reevaluation. The validator interface is not yet settled; see the [provisional design status](design-status.md#provisional-designs).
 
 The complete evaluation boundary, user-defined metatag model, generated declarations, syntax extension facilities, and artifact APIs remain provisional. Implementations must reject unsupported compile-time operations rather than silently defer them to runtime when that would change meaning.

@@ -1,14 +1,9 @@
-# µDewy and host interoperability
+# Host Interoperability
 
-Dewy currently lowers to µDewy as its primary backend. µDewy is a strict,
-minimal subset designed for bootstrapping; its runtime values occupy 64 bits and
-its type annotations are intentionally lightweight.
+> **Language design.** [Generated coverage](/status/#ref-interoperability) names measured programs and target restrictions; examples here illustrate the design.
 
-Dewy exposes typed forms of µDewy's memory, allocation, shift, unsigned
-operation, and supported syscall intrinsics. Linux x86-64 syscall intrinsics are
-available today. A stable foreign-function interface and portable host
-capability selection remain in development.
+The current compiler emits native executables and WebAssembly directly. Native libraries and browser services have different capabilities; [generated coverage](/status/) keeps their results separate.
 
-The µDewy compiler supports x86-64 Linux, WebAssembly, RISC-V, AArch64, and C
-backends. Dewy's standard prelude does not yet provide equivalent host behavior
-on every target.
+Use `dewy-core --print-lib` to locate the matching standard and platform libraries. Source imports and library bindings are described in [Modules and Imports](modules-and-imports.md). The [current language guide](https://github.com/david-andrew/dewy-lang/blob/master/docs/LANGUAGE.md) documents host-facing examples and limitations. A stable general foreign-function interface remains a design topic.
+
+The [archived implementation](/archive/) records the earlier lowering through µDewy. It is not required to build or run the current compiler.

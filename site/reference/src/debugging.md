@@ -1,6 +1,12 @@
 # Debugging
 
-Dewy compiles to native code, so debugging is a conversation with the compiled program: stop it, look at its values, step it. Two things make that conversation speak Dewy rather than assembly — a `$breakpoint` directive that stops the program and shows the live bindings, and debug line information that lets a native debugger (gdb or lldb) set breakpoints and step by `.dewy` source lines.
+> **Language design.** [Generated coverage](/status/#ref-debugging) names measured programs and target restrictions; examples here illustrate the design.
+
+## Current compiler and editor
+
+Use `dewy build hello.dewy -g -o hello-debug`, then debug the executable with a native debugger. The VS Code extension uses CodeLLDB; configure `dewy.core.path` to the standalone `bin/dewy-core` or the checkout launcher. See [tools](/tools/) and the [extension guide](https://github.com/david-andrew/dewy-lang/blob/master/editors/vscode/README.md).
+
+The following directive describes the language design. Its behavior is not certified by the command above; consult [generated coverage](/status/#ref-debugging).
 
 ## `$breakpoint`
 
@@ -27,67 +33,4 @@ Then the program stops. **Without a debugger** it waits at a `>>> ` prompt readi
 
 The end of input (a pipe that runs dry, `/dev/null`) continues, so a program with breakpoints left in still runs unattended.
 
-**Under a debugger** (`dewy debug`, or any gdb/lldb attached to the process) the same directive traps into the debugger instead — the program stops on the `$breakpoint` line in your function, with the debugger's prompt and the snapshot already printed. The program decides at runtime by asking the kernel whether it is being traced, so one build serves both uses.
-
-## `dewy debug`
-
-`dewy debug file.dewy args…` makes a debug build of the program and runs it under a native debugger — gdb if installed, else lldb (`--debugger` chooses). Every emitted statement carries its Dewy source position and every variable its Dewy name and type, so the debugger's own commands work on `.dewy` files and show Dewy values:
-
-```text
-(lldb) b t0.dewy:222          # a breakpoint by Dewy line
-(lldb) run
-(lldb) n                       # step to the next Dewy statement
-(lldb) bt                      # the call stack, by Dewy function names
-(lldb) frame variable          # the live bindings, as Dewy prints them
-(array<Hit>) hits = [Hit[length=3 name="a"] Hit[length=10 name="b"]]
-(string) label = "run"
-(int64 | none) maybe = none
-(int64) total = 9
-(Hit) h = Hit[length=3 name="a"]
-(lldb) p total                 # or one value
-(int64) 9
-```
-
-A variable is visible from its declaration on, a parameter throughout its function (gdb's `info args`, and frames print as `describe (hits=[…], label="run")`), and a loop variable under its own name. Values print exactly as `"{value}"` would — a string in its literal form, a container or object as its literal, a union as its member. The debugger sees Dewy function names (`describe`, `__dewy_user_main` for the program's `main`); the prelude's functions appear under their module-mangled names, and its variables as words. gdb and lldb are both supported, with the same view.
-
-The debug build is a separate artifact (`<name>.debug` beside the ordinary binary): the value display costs compile time and size, so `dewy file.dewy` builds without it. An ordinary binary still has the line information — `$breakpoint` traps into an attached debugger, breakpoints and stepping work — but its variables show as raw words.
-
-## In an editor
-
-Cursor, VS Code, and VSCodium debug Dewy through their stock native-debugger extensions — CodeLLDB (`lldb`, on Open VSX too) or C/C++ (`cppdbg`, gdb) — since the program carries DWARF for its Dewy source and the `dewy_lldb.py` / `dewy_gdb.py` scripts give the Variables pane, hovers, and the Debug Console Dewy values. The Dewy extension registers `.dewy` files for gutter breakpoints and offers two launch configurations under "Add Configuration…", both running the file in the active editor: **Dewy: debug current file**, and **Dewy: debug current file with arguments**, which asks for the program's command line each run (the prompt offers the last one again, and the extension splits the line like a shell — quotes for a path with a space — into the debugger's argument list; this is the way to run the bootstrap tokenizer on a file). Written out, with a task that builds the debug executable first (`dewy debug --build file.dewy` prints its path, `__dewycache__/<path>/<name>.debug`, and launches nothing):
-
-```json
-// launch.json
-{
-    "name": "Dewy: debug current file with arguments",
-    "type": "lldb",
-    "request": "launch",
-    "program": "${workspaceFolder}/__dewycache__/${relativeFileDirname}/${fileBasenameNoExtension}.debug",
-    "args": "${command:dewy.programArguments}",
-    "cwd": "${workspaceFolder}",
-    "preLaunchTask": "dewy: build debug",
-    "initCommands": ["command script import ~/.dewy/runtime/tools/dewy_lldb.py"],
-    "sourceLanguages": ["c"]
-}
-// tasks.json
-{
-    "label": "dewy: build debug",
-    "type": "shell",
-    "command": "dewy",
-    "args": ["debug", "--build", "${file}"],
-    "options": { "cwd": "${workspaceFolder}" },
-    "problemMatcher": []
-}
-```
-
-`${command:dewy.programArguments}` is the extension's prompt (a `${command:…}` can only yield a string, which is why the extension, not the debugger, does the splitting); `"args": []` (or a fixed list, `"args": ["tests/sample.dewy"]`) is the configuration without one.
-
-The gdb form is the same with `"type": "cppdbg"`, `"MIMode": "gdb"`, and `"setupCommands": [{ "text": "source ~/.dewy/runtime/tools/dewy_gdb.py" }]`. (CodeLLDB is the one exercised by the compiler's own tests, through its debug adapter.) In a checkout of the compiler the scripts are `${workspaceFolder}/tools/…` and the command `python -m dewy` (the repository's own `.vscode/launch.json` is exactly this). Gutter breakpoints, stepping, the call stack, and the Variables pane then behave as for any native program, with Dewy names, lines, and values; a `$breakpoint` in the program pauses the editor on its line. The `>>>` prompt of a program run *without* a debugger belongs to the terminal, not the editor.
-
-## How the debugger sees Dewy
-
-Positions: the compiler marks each statement of the µDewy it emits with a `# @loc path:line:column` comment naming the Dewy position it came from; the µDewy compiler turns each into a DWARF line-table row (a `.loc` for the assembler) for whatever it emits next, and a µDewy file compiled on its own reports its own lines the same way.
-
-Variables: each declaration is marked `# @var name shown formatter type`; the µDewy compiler records every variable (a fixed slot in the frame) with the name it is shown under and its type, in a lexical block that starts at the declaration, as DWARF variable information. Values: for each type of a variable in a debug build, the compiler adds a function `__dewy_debug_show_N = (v:T):>int64` that renders a value the way `"{v}"` does into a static text block; the variable's DWARF type is named after it, and the debugger scripts `dewy debug` loads (`tools/dewy_lldb.py`, `tools/dewy_gdb.py`) call that function on the stopped frame's word and read the text back. A type the module cannot spell or print (a function, a `bigint` under a unit) gets no formatter and shows as a word.
-
-All of it is metadata: a program compiled with or without it is the same program, and a µDewy implementation that ignores the markers is still a correct one — though both µDewy compilers, the Python one and the bootstrap one written in µDewy, emit it (a parity test keeps their assembly identical). Evaluating typed-in Dewy expressions at a stop, and an IDE front end, come next.
+**Under a debugger** (a native debugger attached to the process) the same directive traps into the debugger instead — the program stops on the `$breakpoint` line in your function, with the debugger's prompt and the snapshot already printed. The program decides at runtime by asking the kernel whether it is being traced, so one build serves both uses.

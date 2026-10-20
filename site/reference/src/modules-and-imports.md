@@ -1,11 +1,14 @@
 # Modules and Imports
 
+> **Language design.** [Generated coverage](/status/#ref-modules-and-imports) names measured programs and target restrictions; examples here illustrate the design.
+
 Each source file defines a module containing its top-level bindings and executable initialization expressions.
 
 ## Relative Source Imports
 
 An import path resolves relative to the file containing the import:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 from p"lib.dewy" import (answer add)
 import p"lib.dewy" as library
@@ -21,6 +24,7 @@ The `from path import names` and `import names from path` orders are equivalent.
 
 `p` is an ordinary prelude function producing a structural path value. Any exact compile-time object with the required string `path` field satisfies the source-import contract:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 from [path="lib.dewy"] import answer
 ```
@@ -62,6 +66,7 @@ Installed package lookup, directory or glob imports, non-source artifacts, proje
 - lexical: `name`, `stem`, `suffix` (with its dot; a dotfile has none), `parent`, `parts` (a leading `/` is the root part), `is_absolute`, `with_name(name)`, `with_stem(stem)`, `with_suffix(suffix)`;
 - the file system, every outcome a value: `exists`, `is_file`, `is_dir`, `list` (the directory's entries), `read_text` (`string | FileNotFound | FileAccessDenied | IsDirectory | FileExists | FileError | InvalidUtf8`), `read_bytes`, `write_text(text)` and `write_bytes(bytes)` (the byte count or an error), `mkdir`, `rmdir`, `unlink` (`true` or an error). Zero-argument methods are read like fields: `source.parent.name`.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let source = p"{project}/src/main.dewy"
 match source.read_text {
@@ -83,8 +88,7 @@ The prelude runs programs as child processes (`library/linux/process.dewy`); eve
 - `capture(program args):>Output | SpawnError` waits with the child's output collected: `status`, `stdout` and `stderr` (bytes, drained as the pipes fill, so a large output cannot block the child), and `stdout_text` / `stderr_text` (`string | none`: the bytes decoded, `none` when they are not UTF-8).
 - `environment(name):>string | none` reads one of this process's own environment variables.
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let main = ():>int64 => {
     match capture("/bin/sh" ["-c" "echo out; echo err 1>&2; exit 3"]) {

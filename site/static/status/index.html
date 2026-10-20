@@ -1,87 +1,10 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Dewy implementation status</title>
-  <meta name="description" content="What the Dewy compiler supports today and where development is headed.">
-  <meta name="theme-color" content="#f3faf6">
-  <meta property="og:title" content="Dewy implementation status">
-  <meta property="og:description" content="What the Dewy compiler supports today and where development is headed.">
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://dewy-lang.org/status/">
-  <meta property="og:image" content="https://dewy-lang.org/assets/images/og-image.png">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Dewy — An Everyday Language">
-  <meta property="og:site_name" content="Dewy">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Dewy implementation status">
-  <meta name="twitter:description" content="What the Dewy compiler supports today and where development is headed.">
-  <meta name="twitter:image" content="https://dewy-lang.org/assets/images/og-image.png">
-  <link rel="canonical" href="https://dewy-lang.org/status/">
-  <link rel="icon" href="../assets/images/dewy-logo-128.png">
-  <script src="../assets/js/theme-init.js"></script>
-  <link rel="stylesheet" href="../assets/css/site.css">
-  <script src="../assets/js/site.js" defer></script>
-</head>
-<body>
-  <a class="skip-link" href="#main">Skip to content</a>
-  <header class="site-header"><nav class="nav-wrap" aria-label="Primary navigation"><a class="brand" href="../"><img src="../assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a><div class="nav-end"><div class="nav-links" id="site-nav" data-nav><a href="../learn/">Learn</a><a href="../reference/">Reference</a><a href="../examples/">Examples</a><a href="./" aria-current="page">Status</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a><a class="nav-cta" href="../playground/">Try µDewy</a></div><button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to dark theme" title="Switch to dark theme"></button><button class="nav-toggle" type="button" data-nav-toggle aria-expanded="false" aria-controls="site-nav">Menu</button></div></nav></header>
-  <main id="main" class="page-wrap">
-    <header class="page-hero"><p class="eyebrow">Implementation status</p><h1>Real compiler. Early language.</h1><p>Dewy is under active development and has no stable release yet. This page gives the useful short version; the repository carries the detailed feature checklist.</p></header>
-    <section class="content-section">
-      <h2>Works through code generation today</h2>
-      <ul>
-        <li>Declarations, lexical scopes, top-level execution, modules, imports, and a source prelude</li>
-        <li>Fixed-width integers, exact literals, booleans, structural function types, and bounded generic type aliases</li>
-        <li>Direct and indirect calls, recursion, overloads, named arguments, and per-call positional-or-named defaults</li>
-        <li>Conditional values, loops, labeled exits, ranges, and logically combined range/grapheme iterators</li>
-        <li>Homogeneous arrays with statically or flow-proven indexing, <code>end</code>, and fixed-range slicing</li>
-        <li>Structural objects, mutating object methods, optionals, and flow-sensitive narrowing</li>
-        <li>Unicode grapheme strings, slicing, iteration, representation-changing views, and streamed interpolation</li>
-        <li>All eight base dimensions with a canonical-scale unit catalog (SI units, prefixes, <code>N</code>/<code>J</code>/<code>W</code>, degrees and turns), dimension algebra through <code>* / ^</code>, and <code>cos</code>/<code>sin</code>/<code>tan</code></li>
-        <li>Exact rationals (<code>1/3</code>, decimal literals), Q32.32 fixed-point, integer and rational powers, and proof-based 64-bit lowering of abstract <code>int</code></li>
-        <li>Growable arrays (<code>push</code>/<code>pop</code>/<code>insert</code>/<code>truncate</code>/<code>sort</code>) with proven indexes, and runtime-length arrays as results and object fields</li>
-        <li>Dictionaries and sets as values: insertion order, compact hash tables, proven-key lookups, <code>get</code>/<code>pop</code> with defaults, <code>keys</code>/<code>values</code>, and set algebra</li>
-        <li>Liquid refinements on bindings (<code>int&lt; i=&gt;i&gt;?0 &gt;</code>, <code>array&lt; length&gt;?0 &gt;</code>) with proven/refuted/unknown diagnostics; exhaustive <code>is?</code> chains</li>
-        <li>Target-gated imports (<code>$target</code>, <code>$supported_targets</code>), <code>main(args)</code>, and file I/O on Linux</li>
-      </ul>
-    </section>
-    <section class="content-section">
-      <h2>Important limits</h2>
-      <ul>
-        <li>Abstract <code>int</code> is arbitrary precision: values proven to fit are 64-bit words, everything else is a big integer (<code>dewy analyze</code> reports where). Word-sized signatures still need a proof or an explicit <code>bigint</code>.</li>
-        <li>Capturing local functions are analyzed but do not lower as closures.</li>
-        <li>Recursive union members, user-defined generic functions, effects, error values, and pattern matching are not complete; floating-point arithmetic is deliberately absent.</li>
-        <li>Runtime-sized storage uses a single process arena; deterministic release and scoped arenas are designed but not built.</li>
-        <li>Host capabilities and the Dewy prelude are not portable across every µDewy backend yet.</li>
-        <li>The public documentation contains aspirational syntax and is being separated from the implemented reference.</li>
-      </ul>
-    </section>
-    <section class="content-section">
-      <h2>Current direction</h2>
-      <div class="route-grid" style="grid-template-columns:1fr 1fr">
-        <article class="route-card"><span class="badge works">Now</span><h3>Compiler convergence</h3><p>Stabilize the new typed compiler, µDewy lowering, module system, installation path, and behavior parity.</p></article>
-        <article class="route-card"><span class="badge works">Now</span><h3>Representation analysis</h3><p>Use bounds, alias, and lifetime facts to choose safe compact layouts and calling conventions.</p></article>
-        <article class="route-card"><span class="badge planned">Next</span><h3>Closures, errors, memory</h3><p>Lower closures, add error values, then deterministic release and scoped arenas on the ownership model.</p></article>
-        <article class="route-card"><span class="badge planned">Long term</span><h3>Auditable self-hosting</h3><p>Complete the path from a small trusted bootstrap through µDewy to a full compiler written in Dewy.</p></article>
-      </div>
-      <div class="future-features">
-        <h3>Future features</h3>
-        <ul>
-          <li>Rationals over big integers, plus real, complex, and quaternion numbers.</li>
-          <li>Display units for printing quantities, <code>as unit</code>, offset units, library-declared dimensions, broadcasting, and multidimensional arrays.</li>
-          <li>Bidirectional maps, container equality, and user-defined generic containers implemented in Dewy itself.</li>
-          <li>Refined parameters and results, checked proofs, and <code>unsafe</code> claims.</li>
-          <li>First-class interpolation materialization and conversion hooks, pattern matching, effects and error values, generators, and unpack-and-collect syntax.</li>
-          <li>Partial application, compile-time evaluation, and metaprogramming.</li>
-          <li>A portable standard library, packages, versioned releases, and installers for more platforms.</li>
-          <li>A Dewy language server, formatter, richer editor tooling, and a full Dewy browser playground.</li>
-        </ul>
-      </div>
-      <div class="button-row"><a class="button primary" href="https://github.com/david-andrew/dewy-lang/blob/master/dewy/status.md">Detailed checklist</a><a class="button" href="https://github.com/david-andrew/dewy-lang/commits/master/">Recent development</a></div>
-    </section>
-  </main>
-  <footer class="site-footer"><div class="footer-wrap"><div class="footer-brand"><a class="brand" href="../"><img src="../assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a><p>An honest view of an evolving compiler.</p></div><nav class="footer-links" aria-label="Footer navigation"><a href="../learn/">Learn</a><a href="../reference/">Reference</a><a href="../examples/">Examples</a><a href="../playground/">Playground</a><a href="../install/">Install</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a></nav></div></footer>
-</body>
-</html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compiler coverage — Dewy</title><meta name="description" content="Fresh program results, scoped to their target. A passing example does not certify a language chapter."><meta name="theme-color" content="#f3faf6">
+<link rel="canonical" href="https://dewy-lang.org/status/"><link rel="icon" href="/assets/images/dewy-logo-128.png">
+<script src="/assets/js/theme-init.js"></script><link rel="stylesheet" href="/assets/css/site.css"><script src="/assets/js/site.js" defer></script></head>
+<body><a class="skip-link" href="#main">Skip to content</a><header class="site-header" data-header><nav class="nav-wrap" aria-label="Primary navigation">
+<a class="brand" href="/"><img src="/assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a><div class="nav-end"><div class="nav-links" id="site-nav" data-nav><a href="/learn/">Learn</a><a href="/reference/">Reference</a><a href="/examples/">Examples</a><a href="/status/">Status</a><a class="nav-cta" href="/playground/">Try Dewy</a></div>
+<button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to dark theme"></button><button type="button" class="nav-toggle" data-nav-toggle aria-controls="site-nav" aria-expanded="false">Menu</button></div></nav></header>
+<main id="main" class="page-wrap"><header class="page-hero"><p class="eyebrow">The Dewy programming language</p><h1>Compiler coverage</h1><p>Fresh program results, scoped to their target. A passing example does not certify a language chapter.</p></header><section class="content-section" id="revisions"><h2>Source and release identities</h2><!-- generated: revisions --></section><section class="content-section" id="platforms"><h2>Targets and platforms</h2><p>This build measures native release programs on its named build host and runs precompiled WebAssembly examples in Node. Node execution does not certify browser graphics, input, networking, or every host platform. Downloadable toolchains target Linux x86-64/ARM64, macOS ARM64 and Windows x64; their release workflow owns platform certification.</p></section><section class="content-section" id="coverage"><h2>Reference coverage</h2><p><strong>tested example</strong>: the exact snippet met its declared check, output or rejection. <strong>partial</strong>: a related acceptance/golden program was measured; its individual result does not certify the section. <strong>design only</strong>: normative material with no executable claim. <strong>not measured</strong>: no fresh result for the mapped test.</p><!-- generated: coverage --></section><section class="content-section" id="website-examples"><h2>Website examples</h2><!-- generated: examples --></section><section class="content-section" id="ladder"><h2>Acceptance ladder</h2><!-- generated: ladder --></section><section class="content-section" id="web"><h2>WebAssembly examples</h2><!-- generated: web --></section></main>
+<footer class="site-footer"><div class="footer-wrap"><div class="footer-brand"><a class="brand" href="/">Dewy</a><p>Python-like ease. C-like speed. Safe by default. These are our goals; measured behavior lives in coverage.</p></div><nav class="footer-links" aria-label="More"><a href="/install/">Install</a><a href="/tools/">Tools</a><a href="/contribute/">Contribute</a><a href="/archive/">Archive</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a></nav></div></footer></body></html>

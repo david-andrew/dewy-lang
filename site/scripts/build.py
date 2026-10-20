@@ -1,228 +1,189 @@
-"""Build the complete Dewy website into ``site/dist``."""
-
+"""Build and validate the current-toolchain website into ignored site/dist."""
 from __future__ import annotations
-
+import argparse
 import hashlib
+import html
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+from xml.sax.saxutils import escape
 
-from highlight_dewy import highlight_tree as highlight_dewy_tree
-from highlight_udewy import highlight_tree
-from udewy_showcase import DEMOS
-from udewy_spec_book import generate as generate_udewy_spec
-
-from udewy.cache import cache_artifact
+from check_dewy_examples import check_all, compiler_path
+from check_links import LinkParser
+from highlight_dewy import highlight_tree
+import site_coverage
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SITE_ROOT = REPO_ROOT / "site"
-DIST = SITE_ROOT / "dist"
-STATIC = SITE_ROOT / "static"
-LEARN = SITE_ROOT / "learn"
-REFERENCE = SITE_ROOT / "reference"
-UDEWY_REFERENCE = SITE_ROOT / "udewy" / "reference"
-UDEWY_README = REPO_ROOT / "udewy" / "README.md"
-PLAYGROUND_SOURCE = REPO_ROOT / "udewy" / "tests" / "web" / "playground.udewy"
-PLAYGROUND_WEB = REPO_ROOT / "udewy" / "third_party" / "web"
-PLAYGROUND_PAGE_INPUTS = (
-    PLAYGROUND_SOURCE,
-    PLAYGROUND_WEB / "dom.udewy",
-    PLAYGROUND_WEB / "highlight.udewy",
-    PLAYGROUND_WEB / "playground_host.js",
-)
-BOOTSTRAP = REPO_ROOT / "udewy" / "bootstrap"
-INSTALL_SCRIPT = REPO_ROOT / "install.sh"
-UDEWY_INSTALL_SCRIPT = REPO_ROOT / "udewy" / "install.sh"
-CACHE = REPO_ROOT / "__dewycache__"
-SHOWCASE_HASHES = CACHE / "showcase-hashes.json"
+SITE_ROOT = REPO_ROOT/'site'
+DIST = SITE_ROOT/'dist'
+STATIC = SITE_ROOT/'static'
+LEARN = SITE_ROOT/'learn'
+REFERENCE = SITE_ROOT/'reference'
 
 
-def run(command: list[str], *, cwd: Path = REPO_ROOT) -> None:
-    printable = " ".join(command)
-    print(f"+ {printable}", flush=True)
-    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
-    subprocess.run(command, cwd=cwd, env=env, check=True)
+def run(command, **kwargs):
+    print('+ '+' '.join(map(str,command)), flush=True)
+    return subprocess.run(command, cwd=REPO_ROOT, check=True, **kwargs)
 
 
-def require_tool(name: str) -> str:
-    path = shutil.which(name)
-    if path is None:
-        raise SystemExit(
-            f"Required tool {name!r} was not found on PATH. "
-            f"See site/README.md for local setup."
-        )
-    return path
+def require_tool(name):
+    value = shutil.which(name)
+    if not value: raise SystemExit(f'Required tool {name!r} is missing; see site/README.md')
+    return value
 
 
-def copy_static_site() -> None:
-    if DIST.exists():
-        shutil.rmtree(DIST)
-    shutil.copytree(STATIC, DIST, ignore=shutil.ignore_patterns("designs"))
-    (DIST / ".nojekyll").write_text("")
-    copy_install_script()
-
-
-def copy_install_script() -> None:
-    shutil.copy2(INSTALL_SCRIPT, DIST / "install.sh")
-    udewy_dest = DIST / "udewy"
-    udewy_dest.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(UDEWY_INSTALL_SCRIPT, udewy_dest / "install.sh")
-
-
-def build_book(source: Path, destination: Path, mdbook: str) -> None:
-    run([mdbook, "build", str(source), "--dest-dir", str(destination)])
-
-
-def build_udewy_spec(mdbook: str) -> None:
-    generate_udewy_spec()
-    build_book(UDEWY_REFERENCE, DIST / "udewy" / "reference", mdbook)
-
-
-def _paths_digest(paths: list[Path] | tuple[Path, ...]) -> str:
-    digest = hashlib.sha256()
-    for root in paths:
-        root = root.resolve()
-        files = [root] if root.is_file() else sorted(p for p in root.rglob("*") if p.is_file())
-        for path in files:
-            digest.update(path.relative_to(REPO_ROOT).as_posix().encode())
-            digest.update(b"\0")
-            digest.update(path.read_bytes())
-            digest.update(b"\0")
-    return digest.hexdigest()
-
-
-def _load_showcase_hashes() -> dict[str, str]:
-    try:
-        data = json.loads(SHOWCASE_HASHES.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    return {str(slug): str(digest) for slug, digest in data.items()}
-
-
-def _save_showcase_hashes(hashes: dict[str, str]) -> None:
-    CACHE.mkdir(parents=True, exist_ok=True)
-    SHOWCASE_HASHES.write_text(json.dumps(hashes, indent=2, sort_keys=True) + "\n")
-
-
-def compile_showcase_demos(slugs: set[str] | None = None) -> None:
-    dest_root = DIST / "udewy" / "showcase" / "demos"
-    dest_root.mkdir(parents=True, exist_ok=True)
-    hashes = _load_showcase_hashes()
-    for demo in DEMOS:
-        if slugs is not None and demo.slug not in slugs:
-            continue
-        generated = cache_artifact(demo.source, ".html", cwd=REPO_ROOT)
-        destination = dest_root / demo.slug
-        destination.mkdir(parents=True, exist_ok=True)
-        digest = demo.source_digest()
-        if hashes.get(demo.slug) == digest and generated.is_file():
-            print(f"showcase {demo.slug}: unchanged, reusing cache", flush=True)
-            shutil.copy2(generated, destination / "index.html")
-            continue
-        run(
-            [
-                sys.executable,
-                "-m",
-                "udewy",
-                "-c",
-                "--target",
-                "wasm32",
-                str(demo.source),
-            ]
-        )
-        if not generated.is_file():
-            raise SystemExit(f"µDewy did not produce the expected file: {generated}")
-        shutil.copy2(generated, destination / "index.html")
-        hashes[demo.slug] = digest
-        _save_showcase_hashes(hashes)
-
-
-def build_playground() -> None:
-    generated = cache_artifact(PLAYGROUND_SOURCE, ".html", cwd=REPO_ROOT)
-    destination = DIST / "playground"
-    destination.mkdir(parents=True, exist_ok=True)
-    hashes = _load_showcase_hashes()
-    bootstrap_digest = _paths_digest((BOOTSTRAP,))
-    playground_digest = _paths_digest((*PLAYGROUND_PAGE_INPUTS, BOOTSTRAP))
-    if hashes.get("playground") == playground_digest and generated.is_file():
-        print("playground: unchanged, reusing cache", flush=True)
-        shutil.copy2(generated, destination / "index.html")
-        return
-
-    wasm = PLAYGROUND_WEB / "artifacts" / "web_compiler.wasm"
-    wabt = PLAYGROUND_WEB / "artifacts" / "wabt.js"
-    if hashes.get("web_compiler") == bootstrap_digest and wasm.is_file() and wabt.is_file():
-        print("web compiler: unchanged, reusing cache", flush=True)
+def copy_install_scripts():
+    for name in ('install.sh','install.ps1'):
+        source = REPO_ROOT/name
+        if source.exists(): shutil.copy2(source,DIST/name)
+        else: print(f'warning: {name} is absent; installer agent must supply it',file=sys.stderr)
+    channel = REPO_ROOT/'tools/compiler/channel.py'
+    tag = os.environ.get('DEWY_CHANNEL_TAG')
+    if channel.is_file() and tag:
+        run([sys.executable,str(channel),'--tag',tag,'--output',str(DIST/'toolchain-channel.txt')])
     else:
-        run([sys.executable, "udewy/third_party/web/setup_web_compiler.py"])
-        hashes["web_compiler"] = bootstrap_digest
-        _save_showcase_hashes(hashes)
-
-    run(
-        [
-            sys.executable,
-            "-m",
-            "udewy",
-            "-c",
-            "--target",
-            "wasm32",
-            str(PLAYGROUND_SOURCE),
-        ]
-    )
-    if not generated.is_file():
-        raise SystemExit(f"µDewy did not produce the expected file: {generated}")
-    shutil.copy2(generated, destination / "index.html")
-    hashes["playground"] = playground_digest
-    _save_showcase_hashes(hashes)
+        print('warning: no toolchain-channel.txt: supply channel.py and DEWY_CHANNEL_TAG after publishing a complete release',file=sys.stderr)
 
 
-def write_sitemap() -> None:
-    base = "https://dewy-lang.org"
-    routes = [
-        "",
-        "learn/",
-        "reference/",
-        "examples/",
-        "playground/",
-        "install/",
-        "status/",
-        "tools/",
-        "contribute/",
-        "udewy/",
-        "udewy/showcase/",
-        "udewy/reference/",
-    ]
-    urls = "\n".join(f"  <url><loc>{base}/{route}</loc></url>" for route in routes)
-    (DIST / "sitemap.xml").write_text(
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-        f"{urls}\n"
-        "</urlset>\n"
-    )
+def build_book(source, destination, mdbook, scratch):
+    # Expand generated prose in a disposable source copy; never edit tracked source.
+    book = scratch/source.name
+    shutil.copytree(source,book,ignore=shutil.ignore_patterns('book','__pycache__'))
+    # mdBook resolves theme paths relative to the copied book.
+    for p in (book/'src').rglob('*.md'):
+        value = p.read_text()
+        for key,text in REPLACEMENTS.items():value=value.replace(f'<!-- generated: {key} -->',text)
+        p.write_text(value)
+    run([mdbook,'build',str(book),'--dest-dir',str(destination)])
+    # mdBook 0.4 prefixes root-relative Markdown URLs in nested print chapters.
+    # Keep the printable route, repairing only the spurious directory + slash.
+    printable = destination/'print.html'
+    printable.write_text(re.sub(r'(href=["\'])(?:[^/:"\']+/)+/([^"\']*)',
+                                r'\1/\2', printable.read_text()))
 
 
-def main() -> None:
-    mdbook = require_tool("mdbook")
-    node = require_tool("node")
-    require_tool("wat2wasm")
-    run([sys.executable, "site/scripts/check_dewy_examples.py"])
-    copy_static_site()
-    build_book(LEARN, DIST / "learn", mdbook)
-    build_book(REFERENCE, DIST / "reference", mdbook)
-    build_udewy_spec(mdbook)
-    highlight_dewy_tree(DIST, node=node)
-    highlight_tree(DIST / "udewy")
-    compile_showcase_demos()
-    build_playground()
+def redirect(target, aliases):
+    safe = html.escape(target,quote=True)
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Archived page — Dewy</title><link rel="canonical" href="{safe}"><meta http-equiv="refresh" content="0; url={safe}"></head><body><main><h1>This page has moved</h1><p><a data-redirect="{safe}" href="{safe}">Continue to the archived page</a>.</p>{''.join(f'<span id="{html.escape(a,quote=True)}"></span>' for a in aliases)}</main><script>const target=new URL({json.dumps(target)},location.href);if(location.hash)target.hash=location.hash;location.replace(target.href);</script></body></html>'''
+
+
+def preserve_routes():
+    doc=json.loads((SITE_ROOT/'routes.json').read_text())
+    for route,target in doc['redirects'].items():
+        dest=DIST/route;dest.parent.mkdir(parents=True,exist_ok=True)
+        dest.write_text(redirect(target,doc['aliases'].get(route,[])))
+    # Retired local destinations retain incoming fragment names too.
+    archive_aliases=set()
+    for route,target in doc['redirects'].items():
+        if target=='/archive/':archive_aliases.update(doc['aliases'].get(route,[]))
+    doc['aliases'].setdefault('archive/index.html',[]).extend(archive_aliases)
+    for route,aliases in doc['aliases'].items():
+        dest=DIST/route
+        if not dest.is_file():raise ValueError(f'preserved route missing: {route}')
+        source=dest.read_text();parser=LinkParser();parser.feed(source)
+        missing=set(aliases)-parser.ids
+        spans=''.join(f'<span class="anchor-alias" id="{html.escape(a,quote=True)}"></span>' for a in sorted(missing))
+        source=source.replace('</main>',spans+'</main>',1) if '</main>' in source else source.replace('</body>',spans+'</body>',1)
+        dest.write_text(source)
+
+
+def build_playground(compiler, scratch, node):
+    from tools.cases import Scripts
+    examples=json.loads((SITE_ROOT/'playground/examples.json').read_text())
+    cards=[];results=[]
+    for e in examples:
+        if e['mode'] not in ('run','check') or e['target'] != 'wasm-release':
+            raise ValueError('playground entries must declare check or run, and wasm-release')
+        if 'source_path' in e:
+            source=REPO_ROOT/e['source_path']
+        else:
+            source=scratch/(e['id']+'.dewy');source.write_text(e['source'])
+        run([str(compiler),'check',str(source)])
+        output=DIST/'playground/programs'/e['id']
+        output.parent.mkdir(parents=True,exist_ok=True)
+        run([str(compiler),'build',str(source),'--target','wasm','--release','-o',str(output)])
+        page=output.with_suffix('.html')
+        if e['mode']=='run':
+            scripts=Scripts();scripts.feed(page.read_text());runner=scratch/(e['id']+'.cjs')
+            runner.write_text('\n'.join(scripts.parts))
+            ran=run([node,str(runner)],capture_output=True,timeout=15)
+            if ran.stdout.decode()!=e['stdout']:raise ValueError(f'wasm {e["id"]}: stdout mismatch: {ran.stdout!r}')
+        # Browser examples get an opaque origin, no network, and bounded visible output.
+        bounded='''<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data:"><script>addEventListener('DOMContentLoaded',()=>{const log=document.getElementById('log');if(!log)return;new MutationObserver(()=>{while(log.childNodes.length>200)log.firstChild.remove();for(const n of log.childNodes)if(n.textContent.length>8192)n.textContent=n.textContent.slice(0,8192)}).observe(log,{childList:true});});</script>'''
+        page.write_text(page.read_text().replace('<head>','<head>'+bounded,1))
+        result={'id':e['id'],'status':'tested example','mode':e['mode'],'target':'wasm-release',
+                'runner':'Node' if e['mode']=='run' else 'compiler (check and wasm build only)'}
+        if e['mode']=='run':result['stdout']=e['stdout']
+        results.append(result)
+        note=('Expected stdout: <code>'+html.escape(e['stdout'].strip())+'</code>') if e['mode']=='run' else html.escape(e['instructions'])
+        displayed = '<pre><code class="language-dewy">'+html.escape(source.read_text())+'</code></pre>'
+        if 'source_path' in e:
+            displayed = '<details><summary>Source</summary>'+displayed+'<p><a href="https://github.com/david-andrew/dewy-lang/tree/master/examples/">Source and companion modules</a></p></details>'
+        cards.append(f'''<article class="example-card"><h3>{html.escape(e['title'])}</h3>{displayed}<p>{note}</p><div class="button-row"><button class="button primary" data-program="/playground/programs/{e['id']}.html">Run example</button><button class="button" data-stop>Stop</button></div><p role="status" data-run-status>Ready</p><div data-run-host></div></article>''')
+    return '<div class="example-grid">'+''.join(cards)+'</div><script src="/assets/js/playground.js" defer></script>',results
+
+
+def write_sitemap():
+    urls=[]
+    for path in sorted(DIST.rglob('*.html')):
+        route=path.relative_to(DIST).as_posix();parser=LinkParser();parser.feed(path.read_text())
+        if parser.redirect or path.name in ('404.html','print.html','toc.html') or '/programs/' in '/'+route:continue
+        route=route.removesuffix('index.html')
+        urls.append(f'<url><loc>https://dewy-lang.org/{escape(route)}</loc></url>')
+    (DIST/'sitemap.xml').write_text('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+''.join(urls)+'</urlset>\n')
+
+REPLACEMENTS={}
+
+def main(argv=None):
+    cli=argparse.ArgumentParser(description=__doc__);cli.add_argument('--compiler',help='pinned standalone bin/dewy-core')
+    options=cli.parse_args(argv)
+    mdbook=require_tool('mdbook');node=require_tool('node')
+    compiler=compiler_path(options.compiler or os.environ.get('DEWY_SITE_COMPILER'))
+    if DIST.exists():shutil.rmtree(DIST)
+    shutil.copytree(STATIC,DIST,ignore=shutil.ignore_patterns('designs'))
+    scratch=DIST/'.work';scratch.mkdir();os.environ['TMPDIR']=str(scratch)
+    # Reset tempfile's cached default for repeated watch builds.
+    import tempfile
+    tempfile.tempdir=str(scratch)
+    (DIST/'.nojekyll').write_text('')
+    copy_install_scripts()
+    examples=check_all(compiler,scratch)
+    coverage=site_coverage.collect(compiler,DIST,scratch)
+    revision=subprocess.check_output(['git','rev-parse','HEAD'],cwd=REPO_ROOT,text=True).strip()
+    dirty=bool(subprocess.check_output(['git','status','--porcelain'],cwd=REPO_ROOT,text=True))
+    run_url=(f'{os.environ.get("GITHUB_SERVER_URL","https://github.com")}/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{os.environ["GITHUB_RUN_ID"]}' if os.environ.get('GITHUB_RUN_ID') else None)
+    coverage.update({'schema':1,'revision':revision,'source_dirty':dirty,'generated_at':datetime.now(timezone.utc).isoformat(),
+                     'release_tag':os.environ.get('DEWY_CHANNEL_TAG'),'run_url':run_url,'examples':examples})
+    playground,web=build_playground(compiler,scratch,node);coverage['web']=web
+    (DIST/'coverage/index.json').write_text(json.dumps(coverage,indent=2)+'\n')
+    ladder=coverage['ladder'];rows=ladder['results']
+    def esc(s):return html.escape(str(s))
+    ladder_html='<p>Native release on '+esc(ladder['host'])+'. Design '+str(sum(r['ok'] for r in rows if r['version']=='design'))+'/'+str(len(rows)//2)+'; core '+str(sum(r['ok'] for r in rows if r['version']=='core'))+'/'+str(len(rows)//2)+'.</p><details><summary>Individual programs and failures</summary><ul>'+''.join(f'<li>{esc(r["program"])} / {r["version"]}: {"pass" if r["ok"] else "FAIL — "+esc(r["error"])}</li>' for r in rows)+'</ul></details>'
+    counts={m:sum(e['mode']==m for e in examples) for m in ('run','check','reject','design-only')}
+    example_html='<p>'+', '.join(f'{v} {k}' for k,v in counts.items())+'. Check/reject rows measure diagnostics and checking; only run rows compare stdout.</p><details><summary>Exact snippet IDs</summary><ul>'+''.join(f'<li>{esc(e["id"])}: {e["mode"]} — {e["status"]}</li>' for e in examples)+'</ul></details>'
+    channel_exists=(DIST/'toolchain-channel.txt').is_file()
+    REPLACEMENTS.update({
+      'coverage':site_coverage.render(coverage,revision),
+      'revisions':f'<p>Website source: <code>{revision}</code>{" (working tree modified)" if dirty else ""}. Generated {esc(coverage["generated_at"])}.</p><p>Compiler SHA-256: <code class="digest">{ladder["compiler_sha256"]}</code>. Target: native-release on {esc(ladder["host"])}.</p><p>Downloadable release: {esc(coverage["release_tag"]) if channel_exists else "no channel generated by this build"}.</p>'+ (f'<p><a href="{esc(run_url)}">Build run</a></p>' if run_url else '<p>Local build; no CI run attached.</p>')+'<p><a href="/coverage/index.json">Machine-readable coverage</a> · <a href="/coverage/ladder.json">Fresh ladder results</a></p>',
+      'channel':'<p><a href="/toolchain-channel.txt">Published toolchain channel</a></p>' if channel_exists else '<p class="notice">No downloadable toolchain channel is attached to this website build. Use a checkout until the publication coordinator supplies a complete release.</p>',
+      'examples':example_html,'ladder':ladder_html,'playground':playground,
+      'web':'<ul>'+''.join(f'<li>{esc(r["id"])}: tested example · wasm-release · {esc(r["runner"])}</li>' for r in web)+'</ul>'})
+    for p in DIST.rglob('*.html'):
+        text=p.read_text()
+        for key,value in REPLACEMENTS.items():text=text.replace(f'<!-- generated: {key} -->',value)
+        p.write_text(text)
+    build_book(LEARN,DIST/'learn',mdbook,scratch)
+    build_book(REFERENCE,DIST/'reference',mdbook,scratch)
+    preserve_routes()
+    highlight_tree(DIST,node=node)
+    shutil.rmtree(scratch)
     write_sitemap()
-    run([sys.executable, "site/scripts/check_links.py", str(DIST)])
-    print(f"Built site: {DIST}")
+    run([sys.executable,'site/scripts/check_links.py',str(DIST)])
+    print(f'Built site: {DIST}; {len(list(DIST.rglob("*.html")))} HTML routes',flush=True)
 
-
-if __name__ == "__main__":
-    main()
+if __name__=='__main__':main()

@@ -1,11 +1,14 @@
 # Strings and Graphemes
 
+> **Language design.** [Generated coverage](/status/#ref-strings) names measured programs and target restrictions; examples here illustrate the design.
+
 ## Semantic Model
 
 A `string` is an immutable sequence of Unicode extended grapheme clusters. A `grapheme` is a string whose length is one; `char` is an alias for the same semantic type.
 
 Length, indexing, slicing, and default iteration operate in grapheme-cluster units rather than UTF-8 bytes or Unicode scalar values.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let text = "café 👨‍👩‍👧‍👦"
 text.length
@@ -18,7 +21,7 @@ The exact scalar sequence is preserved. Canonically equivalent spellings are not
 
 `text[i]` is the grapheme at `i` and `text[a..b]` a slice; both are proven in bounds, never checked at runtime. A string with a known length (a literal, or a binding initialized from one and not reassigned) is checked against that length. A runtime-length string is indexed from facts, exactly like a runtime-length array: a guard `i <? text.length` (or a failed `i >=? text.length`) proves `text[i]` for that binding, a proven minimum length (`text.length >? 0`) proves constant indexes and `text[text.length - k]`, and a slice needs both endpoints proven the same way. Reassigning the binding drops its facts. Inside an index, `end` is the last index — `text.length - 1` — and may take part in any expression: `text[end]`, `text[end - 1]`, `text[2..end]` (each proven the same way, so `text[end]` needs `text.length >? 0`).
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let first_word = (text:string):>string => {
     let i:int64 = 0
@@ -36,6 +39,7 @@ let main = ():>int64 => first_word("héllo world").length   # 5
 
 Braces inside a string literal evaluate an ordinary Dewy expression and convert its value to string:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let message = "item {index}: {value}"
 let combined = "{left}{right}"
@@ -49,8 +53,7 @@ An implementation may stream the literal chunks and converted fields directly to
 
 `print` writes a value; `printl` writes it and a newline. Both are ordinary generic functions of the prelude (`library/io.dewy`): a string, an integer, a boolean, or one of the number objects (`Rational`, `BigInt`, …) prints through its own arm — the arms are type tests decided per instance — and anything else prints as its `as string` text. So every value with a string conversion prints: a container as its literal syntax (`[1 2 3]`, `set["a" "b"]`, `["a" -> 1]`), an object through its `__as__ = ():>string` when its type declares one and otherwise field by field (`[x=1 name="q"]`), members the same way, so nesting is arbitrary. A string inside a structure is quoted, with the escapes of its literal syntax (`"a\tb"`); a string printed on its own prints bare.
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let Point:type = [x:int64 y:int64]
 
@@ -71,8 +74,7 @@ Because printing is `as string`, an array of graphemes prints as the text they f
 
 Strings have methods, written in Dewy in the prelude's `strings.dewy`; positions and lengths are graphemes, like indexing. `text.contains(x)`, `text.startswith(x)`, `text.endswith(x)`; `text.find(x)` and `text.rfind(x)` yield the first or last position or `none`; `text.split(sep)` yields the pieces between separators (adjacent separators give empty pieces; an empty separator splits into graphemes); `text.lines` the lines without their breaks (a final break adds no empty line); `text.trim`, `text.trim_start`, `text.trim_end` drop spaces, tabs, and line breaks; `text.replace(old new)` replaces every occurrence. Zero-argument methods are called without parentheses.
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let main = ():>int64 => {
     let line:string = "  key: value  ".trim
@@ -93,6 +95,7 @@ let main = ():>int64 => {
 
 Loop-built strings use an `array<string>` as the builder: push each piece (an interpolation such as `"{value}"` converts anything printable), then `join`:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let render = (values:array<int64>):>string => {
     let pieces:array<string> = []
@@ -107,6 +110,7 @@ let render = (values:array<int64>):>string => {
 
 `bytes as string` requires a proof that the bytes are valid UTF-8, which the compiler cannot make for runtime data. The checked form is `bytes as string | none`: it validates the bytes (RFC 3629 — no overlong forms, no surrogates, nothing above U+10FFFF, no truncated sequences) and yields the decoded string, or `none` for invalid input, so the program decides what to do at that point:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let text = read_text(path)          # `string`, or a file error, or `InvalidUtf8`
 if text is? string { printl(text) } else { printl"not readable text" }
@@ -116,8 +120,9 @@ if text is? string { printl(text) } else { printl"not readable text" }
 
 ## Including Files
 
-`$include_bytes(p"path")` embeds a file's bytes at compile time. The path must be known when compiling — a path literal today, resolved against the source file — and the result is a binary literal (`array<uint8>` of a known length), usable like `0x"…"`: `.length`, indexing, `as string | none`. `$include_bytes(p"path") as name` is the statement form, declaring `name`. The generated program does not spell the bytes out; the target embeds the file itself, which is how the compiler's Unicode tables travel.
+`$include_bytes(p"path")` embeds a file's bytes at compile time. The path must be known when compiling — a path literal, resolved against the source file — and the result is a binary literal (`array<uint8>` of a known length), usable like `0x"…"`: `.length`, indexing, `as string | none`. `$include_bytes(p"path") as name` is the statement form, declaring `name`. The generated program does not spell the bytes out; the target embeds the file itself, which is how the compiler's Unicode tables travel.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let table = $include_bytes(p"data/table.bin")
 $include_bytes(p"data/notes.bin") as notes
@@ -142,8 +147,7 @@ A range whose unannotated anchors are one-grapheme strings advances in Unicode s
 
 `chr(scalar)` is the one-scalar string of a Unicode scalar value (`chr(0x1F600)` is `"😀"`). The scalar's range, `0` to `0x10FFFF`, is a proof obligation at the call — a loop over `[0x41..0x5B)` proves it — and a surrogate code point, which no string can hold, yields the replacement character U+FFFD.
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let main = ():>int64 => {
     let letters:array<string> = []

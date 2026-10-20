@@ -1,7 +1,10 @@
 # Functions and Calls
 
+> **Language design.** [Generated coverage](/status/#ref-functions-and-calls) names measured programs and target restrictions; examples here illustrate the design.
+
 A function literal consists of a parameter contract, an optional return contract, `=>`, and a body expression:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let add = (left:int64 right:int64=2):>int64 => left + right
 ```
@@ -19,6 +22,7 @@ Each explicit argument binds one currently unset parameter. Arguments are proces
 
 Defaults are fallbacks, not values bound when the function is defined. They retain their positions:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let combine = (
     left:int64
@@ -41,6 +45,7 @@ Default expressions evaluate independently for every completed call that omits t
 
 An ordinary named parameter before the positional divider may be bound by position or name:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let subtract = (left:int64 right:int64):>int64 => left - right
 subtract(7 2)
@@ -51,6 +56,7 @@ subtract(right=2 left=7)
 
 A bare `...` ends the positional run. Parameters after it require names:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let offset = (value:int64 ... amount:int64):>int64 => value + amount
 offset(40 amount=2)
@@ -60,6 +66,7 @@ offset(40 amount=2)
 
 Wrapping the name and type in `<>` preserves the local name but removes it from the keyword interface:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let increment = (<value:int64>):>int64 => value + 1
 increment(41)
@@ -77,6 +84,7 @@ The direction for `...rest` is to capture arguments not claimed by earlier param
 
 A function type records its parameter and return contract:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let callback:<(value:int64):>int64> = increment
 ```
@@ -87,7 +95,7 @@ A function value is an ordinary value of its contract type: `@name` selects a na
 
 A function value fits a slot of a wider contract by the usual rules — parameters contravariant, the result covariant — and a narrower *union* result needs no adapter: a function returning `uint64?` is stored where `uint64? | TokenError` is expected and called through it, because a union value carries its member's identity rather than a position in one particular union. The one result difference that is rejected is a bare value against a tagged one (a function returning `none` alone, or `int64`, in a slot returning `int64?`): those are different runtime forms.
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let TokenError:type = type of error
 let TokenProtocol:type = [eat:<(src:string):>uint64? | TokenError>]
@@ -106,6 +114,7 @@ Expected failures appear as direct [error alternatives](errors-and-forwarding.md
 Effects describe what evaluation may do, independently of the returned value
 or error alternatives. Attach the row to the result with `&`:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 Filesystem = type of any
 forward = (f:():>int64 & reads<Filesystem>):>int64 & reads<Filesystem> => f()
@@ -133,6 +142,7 @@ empty row or negative promise. In particular COW deferral is not proof of no
 allocation. A function literal with an omitted row now carries its inferred
 body effects when used as a callback:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 answer = ():>int64 => 42
 use = (f:():>int64 & no_effects):>int64 & no_effects => f()
@@ -150,6 +160,7 @@ allocation/failure vocabulary remain in progress.
 
 Effect rows have their own generic kind:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let apply = <E:Effect>(f:():>int64 & E):>int64 & E => f()
 ```
@@ -186,6 +197,7 @@ is not evaluated.
 
 `&` combines compatible functions into an overload set. The call contract selects a unique applicable alternative:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let describe = ((value:int64):>string => "integer")
              & ((value:string):>string => value)
@@ -197,6 +209,7 @@ Ambiguous or unmatched calls are errors. Runtime multifunction values remain par
 
 A bare function name is always a call: a function whose parameters all have defaults is called with none, and mentioning a function with required parameters without its arguments is an error rather than a reference. `@fn` selects the function binding as a first-class value instead:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let sum = (a:int64 b:int64) => a + b
 let reference = @sum
@@ -207,6 +220,7 @@ Selectors use the ordinary whole-route place rule: `@worker.on_event` selects th
 
 A leading `@` suppresses calls at every function-valued node in its complete ungrouped selector-and-application chain. The route still selects only its final place; intermediate nodes are not separately observable place values. Argument groups within that chain partially evaluate functions. A grouping boundary ends the `@` chain, so an argument group outside it performs an ordinary call.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 @worker.on_event.metadata     # metadata belonging to the function value
 worker.on_event().metadata    # call on_event, then read result.metadata
@@ -215,6 +229,7 @@ worker.on_event().metadata    # call on_event, then read result.metadata
 
 An ordinary call resolves the callable at that node without automatically calling it first. `@sum(5)` saves `5`, while `(@sum)(5)` invokes the selected function. Repeated argument groups do not implicitly end the chain:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 @sum(1)(2)       # two stages of partial evaluation
 (@sum(1))(2)     # partially evaluate with 1, then call with 2
@@ -226,12 +241,14 @@ An empty partial evaluation does not invoke the function or evaluate its signatu
 
 Partial evaluation also works when the selected function is an object member:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let on_item = @worker.on_event(5)
 ```
 
 This selects `on_event` at the endpoint of the route, preserves its receiver, and saves `5`; it does not call either `worker` or `on_event`. When the object must first be produced by a call, bind that result before selecting its function member:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let worker = make_worker()
 let on_item = @worker.on_event(5)
@@ -242,5 +259,3 @@ let on_item = @worker.on_event(5)
 Partial evaluation binds explicitly supplied values immediately. Defaults remain fallbacks evaluated when the resulting function is eventually called.
 
 Handle identity, explicit function copying, escaping captures, and closure storage remain provisional.
-
-Implemented today: a local function may read enclosing locals and parameters (it observes their current values at each call, since the compiler lambda-lifts them into hidden trailing parameters); writes to captured bindings and capturing functions used as values (escaping closures) are rejected with a message naming the binding.

@@ -6,22 +6,41 @@ name: Build and deploy language website
     branches: [master]
     paths:
       - "site/**"
-      - "dewy/vscode-dewy/**"
-      - "udewy/**"
+      - "editors/vscode/**"
+      - "compiler/**"
+      - "lib/**"
+      - "stage0/**"
+      - "bootstrap/**"
+      - "tools/**"
+      - "tests/**"
+      - "docs/**"
       - "assets/**"
       - "install.sh"
+      - "install.ps1"
       - "VERSION"
       - ".github/workflows/deploy-site.yml"
   pull_request:
     paths:
       - "site/**"
-      - "dewy/vscode-dewy/**"
-      - "udewy/**"
+      - "editors/vscode/**"
+      - "compiler/**"
+      - "lib/**"
+      - "stage0/**"
+      - "bootstrap/**"
+      - "tools/**"
+      - "tests/**"
+      - "docs/**"
       - "assets/**"
       - "install.sh"
+      - "install.ps1"
       - "VERSION"
       - ".github/workflows/deploy-site.yml"
   workflow_dispatch:
+    inputs:
+      channel_tag:
+        description: "Complete published current-toolchain release tag (optional)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -54,11 +73,6 @@ jobs:
       - name: Install site dependencies
         run: npm ci --prefix site
 
-      - name: Install WABT
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes wabt
-
       - name: Install mdBook
         env:
           MDBOOK_VERSION: "0.4.52"
@@ -73,20 +87,28 @@ jobs:
           sudo install -m 755 "${RUNNER_TEMP}/mdbook" /usr/local/bin/mdbook
 
       - name: Build and validate website
+        env:
+          DEWY_CHANNEL_TAG: ${{ inputs.channel_tag || vars.DEWY_CHANNEL_TAG }}
         run: python site/scripts/build.py
 
+      - name: Upload website preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: dewy-website-${{ github.sha }}
+          path: site/dist
+
       - name: Configure GitHub Pages
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
         uses: actions/configure-pages@v5
 
       - name: Upload GitHub Pages artifact
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
           path: site/dist
 
   deploy:
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

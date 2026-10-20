@@ -1,11 +1,9 @@
 # Dewy language reference
 
-This mdBook is the concise, semantics-oriented companion to the narrative
-guide under `site/learn/`. It should describe implemented behavior precisely.
-Proposed behavior must be marked as such and should link to its design note.
+`src/` preserves the normative language design. Example fences are explicitly
+design-only; fresh compiler evidence comes from declarative section associations
+in `site/coverage-map.json`, generated into `site/dist/coverage/` on every build.
+Do not weaken a language rule to fit the compiler or commit generated `book/`.
 
-Build the complete website from the repository root:
-
-```sh
-python site/scripts/build.py
-```
+Build through `python3 site/scripts/build.py` from the repository root so links,
+legacy anchors, coverage and highlighting are validated together.

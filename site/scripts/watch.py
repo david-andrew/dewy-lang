@@ -13,24 +13,15 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import build
-from udewy_showcase import DEMOS, demo_for_path
 
 DEFAULT_PORT = 9000
 POLL = 0.4
 SKIP_DIRS = {".git", "__pycache__", "book", "dist", "designs"}
-WATCH = [
-    build.STATIC,
-    build.LEARN,
-    build.REFERENCE,
-    build.UDEWY_REFERENCE / "book.toml",
-    build.UDEWY_REFERENCE / "theme",
-    build.UDEWY_README,
-    build.REPO_ROOT / "dewy" / "vscode-dewy" / "syntaxes" / "dewy.tmLanguage.json",
-    *build.PLAYGROUND_PAGE_INPUTS,
-    build.INSTALL_SCRIPT,
-    build.UDEWY_INSTALL_SCRIPT,
-    *[demo.watch for demo in DEMOS],
-]
+WATCH = [build.STATIC, build.LEARN, build.REFERENCE,
+         build.SITE_ROOT/'scripts', build.SITE_ROOT/'playground',
+         build.SITE_ROOT/'routes.json', build.SITE_ROOT/'coverage-map.json',
+         *[build.REPO_ROOT/name for name in ('compiler','lib','tests/ladder','tests/cases',
+           'tools','docs','editors/vscode/syntaxes','install.sh','install.ps1')]]
 RELOAD_SNIPPET = (
     b'<script>(()=>{const e=new EventSource("/__watch__/events");'
     b"e.onmessage=()=>location.reload()})()</script>"
@@ -56,40 +47,9 @@ def snapshot(paths: list[Path]) -> dict[Path, tuple[int, int]]:
     return out
 
 
-def sync_static() -> None:
-    build.DIST.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(
-        build.STATIC,
-        build.DIST,
-        dirs_exist_ok=True,
-        ignore=shutil.ignore_patterns("designs"),
-    )
-    (build.DIST / ".nojekyll").write_text("")
-    build.copy_install_script()
-
-
 def rebuild(changed: set[Path]) -> None:
-    mdbook = build.require_tool("mdbook")
-    sync_static()
-    build.build_book(build.LEARN, build.DIST / "learn", mdbook)
-    build.build_book(build.REFERENCE, build.DIST / "reference", mdbook)
-    build.build_udewy_spec(mdbook)
-    build.highlight_dewy_tree(build.DIST)
-    build.highlight_tree(build.DIST / "udewy")
-    demo_slugs = {
-        demo.slug
-        for path in changed
-        if (demo := demo_for_path(path)) is not None
-    }
-    if demo_slugs:
-        build.require_tool("wat2wasm")
-        build.compile_showcase_demos(demo_slugs)
-    playground_inputs = {path.resolve() for path in build.PLAYGROUND_PAGE_INPUTS}
-    if playground_inputs & {path.resolve() for path in changed}:
-        build.require_tool("wat2wasm")
-        build.build_playground()
-    build.write_sitemap()
-    print(f"rebuilt {build.DIST}", flush=True)
+    # Use the same complete validation path as CI; failed checks never notify clients.
+    build.main([])
 
 
 class Reload:
@@ -198,7 +158,7 @@ def _cmdline(pid: int) -> bytes:
 
 
 def _pid_file(port: int) -> Path:
-    return Path(f"/tmp/dewy-watch-{port}.pid")
+    return build.SITE_ROOT / f".tools/watch-{port}.pid"
 
 
 def _listen_inode(port: int) -> str | None:
@@ -265,6 +225,7 @@ def serve(port: int) -> ThreadingHTTPServer:
         httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
     except OSError as error:
         raise SystemExit(f"could not bind 0.0.0.0:{port}: {error}") from error
+    _pid_file(port).parent.mkdir(parents=True, exist_ok=True)
     _pid_file(port).write_text(f"{os.getpid()}\n")
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return httpd
@@ -273,7 +234,7 @@ def serve(port: int) -> ThreadingHTTPServer:
 def main() -> None:
     args = parse_args()
     print("initial build", flush=True)
-    build.main()
+    build.main([])
     serve(args.port)
     print(f"serving http://0.0.0.0:{args.port}/  (ctrl-c to stop)", flush=True)
     previous = snapshot(WATCH)
@@ -291,7 +252,7 @@ def main() -> None:
             try:
                 rebuild(changed)
                 reload.bump()
-            except Exception as error:
+            except (Exception, SystemExit) as error:
                 print(f"rebuild failed: {error}", flush=True)
     except KeyboardInterrupt:
         print("\nstopped", flush=True)

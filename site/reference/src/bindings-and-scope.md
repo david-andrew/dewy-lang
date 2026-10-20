@@ -1,9 +1,12 @@
 # Bindings, Initialization, and Scope
 
+> **Language design.** [Generated coverage](/status/#ref-bindings-and-scope) names measured programs and target restrictions; examples here illustrate the design.
+
 ## Declarations
 
 `let` creates a mutable binding. `const` creates a binding that cannot be reassigned after initialization.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let count = 0
 const limit = 10
@@ -11,6 +14,7 @@ const limit = 10
 
 An assignment to a name with no visible binding implicitly declares a mutable binding. Otherwise it updates the visible mutable binding:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 message = "hello"     # implicit let
 message = "welcome"   # reassignment
@@ -18,6 +22,7 @@ message = "welcome"   # reassignment
 
 Type annotations follow `:`:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let count:int64 = 0
 const Name:type = string
@@ -33,6 +38,7 @@ Each declaration creates a distinct lexical binding. A child scope may shadow an
 
 `{}` creates a child lexical scope. `()` groups expressions in the surrounding scope.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let value = 1
 {

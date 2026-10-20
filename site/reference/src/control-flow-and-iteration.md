@@ -1,9 +1,12 @@
 # Control Flow
 
+> **Language design.** [Generated coverage](/status/#ref-control-flow-and-iteration) names measured programs and target restrictions; examples here illustrate the design.
+
 ## Conditionals
 
 `if`, `else if`, and `else` form an ordered flow expression. Conditions evaluate from left to right until one succeeds; only the selected body evaluates.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let label = if count =? 0
     "empty"
@@ -23,6 +26,7 @@ A chain whose arms are all `is?` tests on one union binding is exhaustive when t
 
 `match <scrutinee> <arm | { arms }>` is a member of the flow chain, so `else` (and `else if`, `else match`) attaches outside the arms. An arm is `<signature> => <body>`, and it matches when the scrutinee satisfies the signature, exactly as a call satisfies a parameter list:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let describe = (v:bool|int64|string):>string => match v {
     <bool>              => "a flag"          # a type: narrows, binds nothing
@@ -47,6 +51,7 @@ A chain that contains a `match` must be **total**: the arms must cover every mem
 
 `loop condition body` reevaluates its condition and executes its body according to the condition's Boolean or iterator behavior.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 loop connected
     receive_message()
@@ -65,7 +70,7 @@ An exit may target an enclosing labeled loop through Dewy's scope metatag mechan
 
 `never` is the type of a path that cannot complete normally. It is distinct from `void`, which represents normal completion without a produced value. A function may declare it — `exit(code:int64):>never` ends the process, and a wrapper propagates the divergence:
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let panic = (msg:string?=none):>never => {
     if msg isnt? none printl(msg)

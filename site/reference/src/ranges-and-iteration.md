@@ -1,9 +1,12 @@
 # Ranges and Iteration
 
+> **Language design.** [Generated coverage](/status/#ref-ranges-and-iteration) names measured programs and target restrictions; examples here illustrate the design.
+
 ## Range Forms
 
 A range contains `..`. Endpoints immediately juxtaposed with `..` supply its anchors:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 first..last
 first..
@@ -13,6 +16,7 @@ first..
 
 Square and round boundaries independently include or exclude an endpoint:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 [first..last]
 [first..last)
@@ -24,6 +28,7 @@ An unbracketed `first..last` includes both endpoints.
 
 A first pair determines a step:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 1,3..9       # 1 3 5 7 9
 5,4..0       # 5 4 3 2 1 0
@@ -45,6 +50,7 @@ Right-unbounded iteration continues until surrounding control flow or a finite c
 
 A range used as an index selects a slice. `end` refers to the last valid index of the selected axis:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 text[3..12)
 values[..end-1]
@@ -55,6 +61,7 @@ matrix[row][1..end]
 
 In a loop condition, `name in iterable` requests the next value, binds it to `name`, and reports whether a value was produced:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 loop item in items
     process(item)
@@ -62,6 +69,7 @@ loop item in items
 
 Iterator clauses may be combined with Boolean operators. Leaves advance from left to right once per condition evaluation:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 loop index in 0.. and item in items
     printl"{index}: {item}"
@@ -85,7 +93,7 @@ See [Design Maturity and Open Questions](design-status.md).
 
 A loop condition may join iterator clauses and ordinary Boolean predicates with `and`. The iterators advance first, then the predicates are tested with the targets bound; the loop ends at the first false predicate, and inside the body the predicates are known to hold — so `i <? src.length` proves the index in `src[i]`:
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 const whitespace = set[' ' '\t' '\n' '\r']
 leading = (src:string):>int64 => {

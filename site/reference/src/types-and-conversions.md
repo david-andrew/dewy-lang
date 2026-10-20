@@ -1,11 +1,14 @@
 # Types and Conversions
 
+> **Language design.** [Generated coverage](/status/#ref-types-and-conversions) names measured programs and target restrictions; examples here illustrate the design.
+
 Dewy statically checks values and expressions. Types describe semantic values; implementations may select any representation that preserves those semantics.
 
 ## Type Values and Aliases
 
 A type is a compile-time value of type `type`. A binding may name it explicitly or infer a type-valued expression:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 const Name:type = string
 const Index = <int64>
@@ -18,9 +21,9 @@ A type alias does not create nominal identity unless its defining construct expl
 
 ## Nominal Identity
 
-`type of Parent` evaluates to a fresh nominal child of `Parent` — so a value of `type of any & Info` also satisfies an `Info` parameter, the structure's fields leading the child's. Implemented today: error types (`type of error`, alone or `& [...]` for an error carrying fields) and object types, where the operand may be an object type, `any` alone (an empty marker type), or an intersection of `any` with object types (`&` contributes structure, never identity):
+`type of Parent` evaluates to a fresh nominal child of `Parent` — so a value of `type of any & Info` also satisfies an `Info` parameter, the structure's fields leading the child's. Error types (`type of error`, alone or `& [...]` for an error carrying fields) and object types, where the operand may be an object type, `any` alone (an empty marker type), or an intersection of `any` with object types (`&` contributes structure, never identity):
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let NotFoundError:type = type of error
 let Name:type = type of any & [text:string]
@@ -32,7 +35,7 @@ let Vec = type of [x:int64 y:int64  length_squared = ():>int64 => x*x + y*y]
 
 Conversion to string follows the brand too: a value seen through its parent — or through the structure the mints were minted from — converts as what it is, so an `array<TokenProtocol>` prints each element as its child. A parent's `__as__` applies to every child (a child may override it), and can name the child through `typename`, read bare inside a method like any field: the minted name a value carries, or a plain object's structural spelling.
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let Protocol:type = [
     eat:<(src:string):>int64>
@@ -52,7 +55,7 @@ The types minted under a family are runtime values. `type<Token>` is the type of
 
 A method that reads no field of its type — and calls no method that does, transitively — is *static*: it is called off the type's name (`Whitespace.eat(src ctx)`), off a type value (`kind.eat(src ctx)`, which dispatches to the named type's method), and off an instance alike. A method that reads a field needs an instance, and saying `Whitespace.width` for one is an error. Calling a type value constructs the type it names, with the family's own required fields: `kind(src=… idx=…)` — a type under the family may add fields only with defaults, and fills every function-typed slot with a method.
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 Token = $abstract type of any & [
     src:string  idx:int64
@@ -76,7 +79,7 @@ next_token = (src:string):>Token | none => {
 
 A `match` over a minted type is exhaustive when its arms cover every brand the *whole program* mints under it — the parent itself included unless it is `$abstract`. `$abstract` is written on the mint and says the type has no values of its own, only its children's: constructing it is an error at that site, it is no unit inhabitant even without fields, and its children alone make a match exhaustive. A child minted in a module compiled later still counts (the program is one closed world), so a match without an `else` reports it; with an `else`, later children take that branch.
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 Context = $abstract type of any & [depth:int64]
 Root = type of Context & [base:string = '0d']
@@ -90,16 +93,16 @@ describe = (ctx:Context):>int64 => match ctx {
 
 A minted type with no fields is both the type and its single inhabitant — written with its name where a value is wanted, as an error type is: `[Whitespace Name(text='x')]`, `return Whitespace`, `let w = Whitespace` (`Whitespace()` constructs the same value). The same holds for a minted type every field of which has a default: its bare name is the construction `Name()`, as a callable with no required parameters is called by its name. A method declared in a mint under the name of an inherited function-typed field is that field's value — the child implements the protocol's slot — so `Whitespace = type of Protocol & [eat = (src:string):>int64 => …]` is fully defaulted and `[Whitespace LineComment]` is an `array<Protocol>`.
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let Token = type of any
 let Whitespace = type of Token
 let Name = type of Token & [text:string]
 ```
 
-A minted object type is structurally its operand but distinct from every other type, including a structurally identical one: `Name | Punct` is a two-member union that `match` distinguishes, and a `Name` value does not satisfy a `Punct` annotation. The type prints by its name. Values are constructed by calling the type (`Name(text='hi')`, positionally `Vec(3 4)`) or by an object literal in the minted type's context (`let n:Name = [text='hi']`); methods and `&=` constructor overloads work as on any object type. Numeric parents such as `type of int` are not implemented yet:
+A minted object type is structurally its operand but distinct from every other type, including a structurally identical one: `Name | Punct` is a two-member union that `match` distinguishes, and a `Name` value does not satisfy a `Punct` annotation. The type prints by its name. Values are constructed by calling the type (`Name(text='hi')`, positionally `Vec(3 4)`) or by an object literal in the minted type's context (`let n:Name = [text='hi']`); methods and `&=` constructor overloads work as on any object type. A numeric parent can be written as follows in the design:
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 const UserId:type = type of int
 ```
@@ -110,7 +113,7 @@ An alias is declared by any of `Name = <type expr>`, `let Name = <type expr>`, `
 
 `type of` is the only generative type operation. Intersection does not mint nominal identity:
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 const ContextError:type =
     (type of error) & [context:string code:int64]
@@ -127,7 +130,7 @@ const DetailedContextError:type =
 
 Structural-object intersections merge requirements by field name. A field found on only one side is retained. Matching fields intersect their required types:
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 const T1:type = [a:int | bool b:string c:bool | none]
 const T2:type = [a:bool b:int]
@@ -161,8 +164,7 @@ Narrowing applies to member routes as well as bindings: after `if node.next is? 
 
 A type test against a union of string literals is a membership test when the value is a runtime string: `head is? BasePrefix` with `BasePrefix:type = '0b' | '0t' | '0x'` compares `head` with each member, and narrows it to the union where the test passes. A test the static types settle is decided while checking (a three-grapheme string is never a two-grapheme member; see [Generic Functions](#generic-functions)).
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let BasePrefix:type = '0b' | '0t' | '0x'
 
@@ -181,6 +183,7 @@ let main = ():>int64 => classify("0x1f").length     # 2
 
 A type alias may refer to itself, but only as a union member of one of its fields:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let Node:type = [value:int64 next:Node|none]
 let Tree:type = [value:int64 left:Tree|none right:Tree|none]
@@ -194,6 +197,7 @@ An alternative belonging to the nominal `exception` family receives special rece
 
 Parameterized types apply compile-time arguments:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 array<string>
 array<int64 length=3>
@@ -206,8 +210,7 @@ User type aliases take parameters the same way: `let Box:type = <T>[value:T]`, t
 
 A generic function declares its type parameters before the parameter list and must declare its result type:
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let first = <T>(xs:array<T>):>T | none =>
     if xs.length >? 0 xs[0] else none
@@ -224,12 +227,11 @@ let main = ():>int64 => {
 }
 ```
 
-Type arguments are inferred from the arguments (and a contextual result type), structurally through arrays, objects, and function types; a literal argument binds its ordinary type (`1` is `int64`, `"one"` is `string`). `T of Bound` restricts the arguments a call may supply. The body is checked per instantiation with the type parameters bound to the inferred types — an operation the instance's types do not support is reported at that use, as it would be in a plain function — and each distinct instantiation is compiled as an ordinary function (`first__string`). A generic function is declared with `let` at module level, is called by name, and cannot be used as a value. Generic type aliases that refer to themselves, and generic *local* functions, are not implemented yet.
+Type arguments are inferred from the arguments (and a contextual result type), structurally through arrays, objects, and function types; a literal argument binds its ordinary type (`1` is `int64`, `"one"` is `string`). `T of Bound` restricts the arguments a call may supply. The body is checked per instantiation with the type parameters bound to the inferred types — an operation the instance's types do not support is reported at that use, as it would be in a plain function — and each distinct instantiation is compiled as an ordinary function (`first__string`). A generic function is declared with `let` at module level, is called by name, and cannot be used as a value.
 
 A type test the static types settle is decided while checking — `v is? string` is true when `v`'s type is `string` and false when it cannot be — and only the live arm of an `if` on it is checked. In a generic, that is how a body varies by type parameter: each instance keeps the arm written for its type, which may use members the other arm's type lacks.
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let size = <T>(v:T):>int64 => if v is? string v.length else 1
 
@@ -242,8 +244,7 @@ In a type context a literal denotes its singleton type: `x:5` admits only `5`, `
 
 Unions of literals are enumerations, mixed freely with other types, and `is?` narrows them:
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let Mode:type = <1 | 2 | "fast" | "slow">
 
@@ -258,8 +259,7 @@ let main = ():>int64 => {
 
 A literal-typed parameter specializes an overload — dispatch picks the most specific applicable method, and each call has the selected method's result type:
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let DivZero:type = type of error
 let safe_div = ((n:int64 d:0):>DivZero => DivZero)
@@ -273,16 +273,17 @@ let main = ():>int64 => {
 }
 ```
 
-The literal method wins exactly when the divisor is the literal `0`; `int64 & ~0` — the intersection of `int64` with the negation of the literal type `0` — is the structural spelling of the refinement `int64<d not=? 0>`, so the two methods partition `int64`, the general method's `n // d` is proven, and a call with a runtime divisor must establish `d not=? 0` first (a guard, or a `$runtime_assert`). Boolean literal types (`true`, `false`) are not implemented; use `bool`.
+The literal method wins exactly when the divisor is the literal `0`; `int64 & ~0` — the intersection of `int64` with the negation of the literal type `0` — is the structural spelling of the refinement `int64<d not=? 0>`, so the two methods partition `int64`, the general method's `n // d` is proven, and a call with a runtime divisor must establish `d not=? 0` first (a guard, or a `$runtime_assert`).
 
 ## Refined Types
 
-Refinements attach facts that values must satisfy. On a named declaration the declared name is the value — `d:int64<d not=? 0>`, `xs:array<int64 xs.length >? 0>` — while the lambda form names it where there is no name (`Positive = int64<i => i >? 0>`), and `length>?0` alone still means the sequence's length. An object value can be refined by an integer field (`r:Ratio<bottom >? 0>`), and `length` on an array is the same idea for the one measure arrays expose today. Excluding literals has a structural spelling: `int64 & ~0` and `int64 & ~(0 | 1)` are `int64<d not=? 0>` and `int64<d not=? 0 and d not=? 1>`. On a binding they are proven at the declaration; on a parameter at every call site and assumed inside the body (see [Refined Parameters](refinements-and-effects.md#refined-parameters)). The exact general refinement proposition language and proof interfaces remain provisional; value comparisons against constants and length facts use this model today.
+Refinements attach facts that values must satisfy. On a named declaration the declared name is the value — `d:int64<d not=? 0>`, `xs:array<int64 xs.length >? 0>` — while the lambda form names it where there is no name (`Positive = int64<i => i >? 0>`), and `length>?0` alone still means the sequence's length. An object value can be refined by an integer field (`r:Ratio<bottom >? 0>`), and `length` on an array is the same idea for the one measure arrays expose today. Excluding literals has a structural spelling: `int64 & ~0` and `int64 & ~(0 | 1)` are `int64<d not=? 0>` and `int64<d not=? 0 and d not=? 1>`. On a binding they are proven at the declaration; on a parameter at every call site and assumed inside the body (see [Refined Parameters](refinements-and-effects.md#refined-parameters)). The exact general refinement proposition language and proof interfaces remain provisional; value comparisons against constants and length facts illustrate this model.
 
 ## `as`
 
 `as` requests a meaning-preserving conversion defined for the source and destination types:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 value as string
 text as array<uint8>
@@ -292,8 +293,7 @@ Conversions may change representation and may invoke overloadable conversion beh
 
 A declared type says how its values convert with a conversion method: `__as__ = ():>T => …` serves `x as T`, and — for `T` = `string` — string interpolation (`"{x}"`). The target type is the method's result type; nothing about a type's name or shape is special to the compiler. The prelude's `Path` converts to its text this way, which is why `p"{root}/{name}"` joins paths:
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let Point:type = [
     x:int64

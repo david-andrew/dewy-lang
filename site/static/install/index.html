@@ -1,84 +1,17 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Install Dewy</title>
-  <meta name="description" content="Install the Dewy and µDewy compilers or run them from a source checkout.">
-  <meta name="theme-color" content="#f3faf6">
-  <meta property="og:title" content="Install Dewy">
-  <meta property="og:description" content="Install the Dewy and µDewy compilers or run them from a source checkout.">
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://dewy-lang.org/install/">
-  <meta property="og:image" content="https://dewy-lang.org/assets/images/og-image.png">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Dewy — An Everyday Language">
-  <meta property="og:site_name" content="Dewy">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Install Dewy">
-  <meta name="twitter:description" content="Install the Dewy and µDewy compilers or run them from a source checkout.">
-  <meta name="twitter:image" content="https://dewy-lang.org/assets/images/og-image.png">
-  <link rel="canonical" href="https://dewy-lang.org/install/">
-  <link rel="icon" href="../assets/images/dewy-logo-128.png">
-  <script src="../assets/js/theme-init.js"></script>
-  <link rel="stylesheet" href="../assets/css/site.css">
-  <script src="../assets/js/site.js" defer></script>
-</head>
-<body>
-  <a class="skip-link" href="#main">Skip to content</a>
-  <header class="site-header">
-    <nav class="nav-wrap" aria-label="Primary navigation">
-      <a class="brand" href="../"><img src="../assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a>
-      <div class="nav-end">
-        <div class="nav-links" id="site-nav" data-nav>
-          <a href="../learn/">Learn</a><a href="../reference/">Reference</a><a href="../examples/">Examples</a><a href="../status/">Status</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a><a class="nav-cta" href="../playground/">Try µDewy</a>
-        </div>
-        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to dark theme" title="Switch to dark theme"></button>
-        <button class="nav-toggle" type="button" data-nav-toggle aria-expanded="false" aria-controls="site-nav">Menu</button>
-      </div>
-    </nav>
-  </header>
-  <main id="main" class="page-wrap">
-    <header class="page-hero">
-      <p class="eyebrow">Install</p>
-      <h1>Run Dewy on your machine.</h1>
-      <p>The packaged installation supports Linux x86-64 with glibc 2.34 or newer. It installs the verified native Dewy/µDewy compiler pair and its matching library.</p>
-    </header>
-
-    <section class="content-section">
-      <h2>Install the current toolchain</h2>
-      <div class="notice"><strong>Early software:</strong> inspect the installer before running it in an environment you care about. Dewy has not reached a stable release.</div>
-      <div class="install-box" style="margin-top:1.25rem">
-        <div class="install-head"><span>shell</span><button class="copy-button" type="button" data-copy="curl -fsSL https://dewy-lang.org/install.sh | bash">Copy</button></div>
-        <pre><code>curl -fsSL https://dewy-lang.org/install.sh | bash</code></pre>
-      </div>
-      <p>The installer writes to <code>~/.dewy</code> and adds that directory to your shell path. The installed compilers run without Python. Use <code>dewy update</code> to update the pair and library together.</p>
-      <pre><code>dewy hello.dewy
-udewy hello.udewy</code></pre>
-    </section>
-
-    <section class="content-section">
-      <h2>Run from a checkout</h2>
-      <p>The native compiler is a development version with some hosted-parity gaps. The hosted compiler remains available from a checkout with Python 3.14 or newer.</p>
-      <pre><code>git clone https://github.com/david-andrew/dewy-lang.git
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install Dewy — Dewy</title><meta name="description" content="Use a standalone compiler and its matching libraries. Python is only needed for checkout development."><meta name="theme-color" content="#f3faf6">
+<link rel="canonical" href="https://dewy-lang.org/install/"><link rel="icon" href="/assets/images/dewy-logo-128.png">
+<script src="/assets/js/theme-init.js"></script><link rel="stylesheet" href="/assets/css/site.css"><script src="/assets/js/site.js" defer></script></head>
+<body><a class="skip-link" href="#main">Skip to content</a><header class="site-header" data-header><nav class="nav-wrap" aria-label="Primary navigation">
+<a class="brand" href="/"><img src="/assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a><div class="nav-end"><div class="nav-links" id="site-nav" data-nav><a href="/learn/">Learn</a><a href="/reference/">Reference</a><a href="/examples/">Examples</a><a href="/status/">Status</a><a class="nav-cta" href="/playground/">Try Dewy</a></div>
+<button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to dark theme"></button><button type="button" class="nav-toggle" data-nav-toggle aria-controls="site-nav" aria-expanded="false">Menu</button></div></nav></header>
+<main id="main" class="page-wrap"><header class="page-hero"><p class="eyebrow">The Dewy programming language</p><h1>Install Dewy</h1><p>Use a standalone compiler and its matching libraries. Python is only needed for checkout development.</p></header><section class="content-section" id="availability"><h2>Development channel</h2><!-- generated: channel --><p>Downloads are selected by a published toolchain channel. Website source and downloadable release revisions are separate; <a href="/status/#revisions">inspect their identities</a>. Until a complete current release is published, use the checkout instructions below.</p></section><section class="content-section" id="unix"><h2>Linux and macOS</h2><p>Supported toolchain hosts: Linux x86-64, Linux ARM64 and macOS ARM64. Require Bash, curl, tar and sha256sum (or shasum on macOS). Linux ARM64 uses aarch64 names in system tools.</p><pre><code>curl -fsSL https://dewy-lang.org/install.sh | bash</code></pre></section><section class="content-section" id="windows"><h2>Windows x64</h2><p>Use PowerShell with Invoke-RestMethod, Get-FileHash and tar available. The installer updates your user PATH; it does not need a machine policy change.</p><pre><code>irm https://dewy-lang.org/install.ps1 | iex</code></pre></section><section class="content-section" id="verify"><h2>Verify the installation</h2><pre><code>dewy --version
+dewy-core --print-lib
+dewy check hello.dewy
+dewy hello.dewy</code></pre><p>Create <code>hello.dewy</code> with:</p><pre><code class="language-dewy" data-example="{&quot;mode&quot;: &quot;run&quot;, &quot;stdout&quot;: &quot;Hello, Dewy!\n&quot;}">printl&quot;Hello, Dewy!&quot;
+</code></pre><p>The final command prints <code>Hello, Dewy!</code>. The installer reports the immutable release identity; keep it when reporting a problem.</p></section><section class="content-section" id="updates"><h2>Update and rollback</h2><pre><code>dewy update
+dewy rollback</code></pre><p>The new installer stages and verifies a complete toolchain before switching the active compiler. Rollback returns to the saved previous generation. To select an immutable release, download the installer and pass <code>--release TAG</code>. Use <code>--prefix PATH</code> or <code>--no-modify-path</code> for a custom location or shell setup.</p></section><section class="content-section" id="checkout"><h2>Build from source</h2><p>On Linux x86-64, install Python, a C compiler and make. Clone the repository, then run:</p><pre><code>git clone https://github.com/david-andrew/dewy-lang
 cd dewy-lang
-python -m dewy dewy/tests/hello.dewy
-python -m udewy udewy/tests/test_hello.udewy</code></pre>
-      <p>The compiler writes intermediate source and target artifacts under <code>__dewycache__/</code>. Use <code>-c</code> to compile without running, and <code>--target</code> to select a µDewy backend.</p>
-    </section>
-
-    <section class="content-section">
-      <h2>Targets and present limits</h2>
-      <ul class="meta-list">
-        <li><strong>Dewy installer</strong><span>Linux x86-64, glibc 2.34 or newer</span></li>
-        <li><strong>µDewy backends</strong><span>x86-64 Linux, WebAssembly, RISC-V, AArch64, and C</span></li>
-        <li><strong>Dewy console I/O</strong><span><code>print</code> and <code>printl</code> currently use Linux x86-64 syscalls</span></li>
-        <li><strong>Stability</strong><span>Development version; syntax and semantics can change</span></li>
-      </ul>
-      <div class="button-row"><a class="button primary" href="../learn/">Continue to the guide</a><a class="button" href="../status/">See implementation status</a></div>
-    </section>
-  </main>
-  <footer class="site-footer"><div class="footer-wrap"><div class="footer-brand"><a class="brand" href="../"><img src="../assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a><p>Clear code for hard problems.</p></div><nav class="footer-links" aria-label="Footer navigation"><a href="../learn/">Learn</a><a href="../reference/">Reference</a><a href="../examples/">Examples</a><a href="../playground/">Playground</a><a href="../status/">Status</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a></nav></div></footer>
-</body>
-</html>
+./tools/dewy examples/tour.dewy</code></pre><p>The launcher builds from C on first use. For standalone builds and other host targets, see <a href="https://github.com/david-andrew/dewy-lang/blob/master/docs/DEVELOPMENT.md">development instructions</a>.</p></section><section class="content-section" id="legacy"><h2>Migrating an older install</h2><p>The new installation uses <code>~/.dewy/bin</code> ahead of the legacy root PATH entry. Keep legacy executables and libraries until your projects have migrated. µDewy is retired; the new channel does not promise compatibility with archived programs. <a href="/archive/">Find historical sources and releases</a>.</p></section></main>
+<footer class="site-footer"><div class="footer-wrap"><div class="footer-brand"><a class="brand" href="/">Dewy</a><p>Python-like ease. C-like speed. Safe by default. These are our goals; measured behavior lives in coverage.</p></div><nav class="footer-links" aria-label="More"><a href="/install/">Install</a><a href="/tools/">Tools</a><a href="/contribute/">Contribute</a><a href="/archive/">Archive</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a></nav></div></footer></body></html>

@@ -35,7 +35,7 @@
 
 - [Modules and Imports](modules-and-imports.md)
 - [Compile-Time Facilities and Metatags](compile-time.md)
-- [µDewy and Host Interoperability](interoperability.md)
+- [Host Interoperability](interoperability.md)
 
 ## Appendices
 

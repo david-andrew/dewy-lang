@@ -1,13 +1,20 @@
 # Testing
 
-Tests are ordinary functions marked `$test`. `dewy test` finds them, builds each module with a generated runner as its entry, runs the runners, and adds up the failures. Nothing about a test function is special to the compiler beyond the annotation: it is checked, callable, and compiled like any other function, and a module keeps its own `main` for ordinary runs.
+> **Language design.** [Generated coverage](/status/#ref-testing) names measured programs and target restrictions; examples here illustrate the design.
+
+## Current project tests
+
+Use `test "adds numbers" { assert(20+22 =? 42) }` at module level and run `dewy test file.dewy`. These are current compiler test blocks. See the [project testing guide](https://github.com/david-andrew/dewy-lang/blob/master/docs/LANGUAGE.md#test-a-project). The `$test` and `$expect` forms below are the language design, with coverage reported separately.
+
+## Design test functions
+
+In the language design, tests are ordinary functions marked `$test`. The test driver finds them, builds each module with a generated runner as its entry, runs the runners, and adds up the failures. Nothing about a test function is special to the compiler beyond the annotation: it is checked, callable, and compiled like any other function, and a module keeps its own `main` for ordinary runs.
 
 ## `$test` and `$expect`
 
 `$test` on the line before a module-level function declaration marks it as a test. `$expect condition` (or `$expect condition, message`) states what the test checks:
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let identity = (x:int64):>int64 => x
 
@@ -32,8 +39,7 @@ let identity_is_itself = () => {
 
 `$test(cases=…)` runs the test once per case. A tuple or array of values passes each element as the single argument; an array of object literals passes each object's fields by name; a computed array (a module constant) is looped over with each element as the single argument:
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let identity = (x:int64):>int64 => x
 
@@ -54,20 +60,16 @@ Each case is reported as `name[index]`. A test that takes parameters must be giv
 
 ## Running tests
 
-`dewy test` is the one command, a subcommand like `dewy analyze`:
-
-- `dewy test file.dewy` runs one module's tests. The module is built with a generated entry that calls each test (per case), printing a green `.` for each pass and a red `F` for each failure as it goes; everything a test prints — its expectation report included — is captured and shown only if it fails, under a `--- FAIL name[case]` header after the marks, followed by the summary (`1 failed, 10 passed`). The exit status is the failure count (at most 100), or 101 when a `$runtime_assert` aborted the binary, 102 when the module did not build, 128+n for a signal. The binary is `<stem>.test` beside the module's ordinary one, and the module's own `main` is untouched.
-- `dewy test [directory]` (default `.`) runs every `.dewy` file under the directory with a line beginning `$test` — hidden entries and `__dewycache__` are skipped — by running `dewy test` on each (one line per file: `tests/dewy/expectations.dewy .................`) and adding up the failures. The runner itself is a Dewy program (`tools/dewy_test.dewy`). Output of child processes a test starts is not captured; `run_silent` discards it.
-- `--json` on either form switches every line to a JSON object (per test, per file, and a summary).
-
-Each module's tests run in their own process, so a test cannot disturb another module's, and an aborted binary is reported without hiding the others.
+For the current compiler, use the [project-test guide](#current-project-tests).
+The `$test` model above specifies test discovery and per-case expectations;
+its runner behavior is part of the design rather than a promise about the current
+command. Historical driver details are retained in the [archive](/archive/).
 
 ## Whole programs
 
-A program's behaviour is tested the same way as anything else: a test that builds an executable, runs it, and checks the result. The compiler's own fixture programs are tested like this (`tests/dewy/programs.dewy`), by running the host compiler and then the binary:
+A program's behaviour is tested the same way as anything else: a test that builds an executable, runs it, and checks the result. The design can express a subprocess-based compiler test as follows:
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 $test(cases=[
     [name="overload_calls.dewy" expected=42]
@@ -77,7 +79,7 @@ let program_exit_status = (name:string expected:int64) => {
     let source = p"dewy/tests/{name}"
     let binary = p"__dewycache__/dewy/tests/{p(name).stem}"
     if not binary.exists {
-        match run_silent("/usr/bin/env" ["python3" "-m" "dewy" "--compile" source.path]) {
+        match run_silent("dewy" ["build" source.path "-o" binary.path]) {
             status:int64 => $expect status =? 0, "compiling {name} failed ({status})"
             <SpawnError> => $fail "could not start the compiler"
         }
@@ -93,4 +95,4 @@ Once the compiler is written in Dewy, `compile` is a library function and the sp
 
 ## Planned
 
-The design continues past what is implemented (see `dewy/status.md`): fixtures (`$test(fixtures=[db=temporary_db])`, passed before the case arguments, with lifecycle hooks for teardown), `$test.case` introspection inside a test, documentation tests (examples in doc strings and in these books), generated and guided cases (`cases=Generated`) with shrinking of failures, and parallel execution.
+The further design includes: fixtures (`$test(fixtures=[db=temporary_db])`, passed before the case arguments, with lifecycle hooks for teardown), `$test.case` introspection inside a test, documentation tests (examples in doc strings and in these books), generated and guided cases (`cases=Generated`) with shrinking of failures, and parallel execution.

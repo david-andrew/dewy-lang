@@ -1,5 +1,7 @@
 # Expressions and Evaluation
 
+> **Language design.** [Generated coverage](/status/#ref-expressions-and-operators) names measured programs and target restrictions; examples here illustrate the design.
+
 Every executable construct in Dewy is an expression. An expression may produce one value, several values for a surrounding collector, `void`, or `never` when it cannot complete.
 
 ## Produced Values
@@ -8,6 +10,7 @@ Literals, value-returning calls, exhaustive conditionals, and value-producing bl
 
 An attached postfix semicolon evaluates an expression and suppresses the values it would otherwise produce:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 operation();
 ```
@@ -20,6 +23,7 @@ An unattached semicolon is reserved for array-dimension selection and does not a
 
 A block evaluates its expressions in source order and expresses each non-`void` result. A context requiring one value rejects a block that can produce an incompatible number of values.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let circumference = {
     let diameter = 2 * radius
@@ -45,6 +49,7 @@ See [Operators and Precedence](operators-and-precedence.md), [Bindings](bindings
 
 The prefix `@` must begin a place route and selects the location at the end of the complete member-and-index route:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 @pair.left
 @values[i]

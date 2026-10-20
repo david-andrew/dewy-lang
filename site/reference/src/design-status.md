@@ -1,5 +1,7 @@
 # Design Maturity and Open Questions
 
+> **Language design.** [Generated coverage](/status/#ref-design-status) names measured programs and target restrictions; examples here illustrate the design.
+
 This appendix records where Dewy's intended semantics are settled, provisional, or open. It is about language design, not compiler progress.
 
 ## Settled Foundations
@@ -39,7 +41,7 @@ These areas have a clear direction, but some syntax, edge cases, or runtime cont
 - the exact liquid-refinement language, proof boundary, and `unsafe` obligations;
 - the general effect vocabulary and effect-polymorphic contracts;
 - multidimensional array shape syntax, broadcasting, and contiguous layout selection;
-- IEEE floating-point formats, conversions, promotion, and numerical execution policies; implementation is tentatively expected alongside the full matrix math system;
+- IEEE floating-point formats, conversions, promotion, and numerical execution policies;
 - bidictionaries, dictionary and set equality, container ordering, compound container operators, and keys beyond words and strings;
 - the numeric hierarchy beyond integers, rationals, and fixed-point (reals, complex, quaternions);
 - the overloadable string-conversion protocol beyond built-in conversions;

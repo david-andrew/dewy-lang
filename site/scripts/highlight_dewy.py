@@ -12,7 +12,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SITE_ROOT = REPO_ROOT / "site"
-GRAMMAR = REPO_ROOT / "dewy" / "vscode-dewy" / "syntaxes" / "dewy.tmLanguage.json"
+GRAMMAR = REPO_ROOT / "editors" / "vscode" / "syntaxes" / "dewy.tmLanguage.json"
 RENDERER = SITE_ROOT / "scripts" / "render_dewy.mjs"
 SHIKI_PACKAGE = SITE_ROOT / "node_modules" / "shiki" / "package.json"
 CODE_BLOCK = re.compile(

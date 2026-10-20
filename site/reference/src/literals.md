@@ -1,5 +1,7 @@
 # Literals
 
+> **Language design.** [Generated coverage](/status/#ref-literals) names measured programs and target restrictions; examples here illustrate the design.
+
 A literal introduces a value directly in source. Literal syntax may preserve more exact type information than the eventual context requires. In a type context the same literal is a singleton type — see [Literal Types](types-and-conversions.md#literal-types).
 
 ## Booleans and Absence
@@ -21,6 +23,7 @@ Decimal integers require no prefix. Integer numerals support the following bases
 |   12 |  `0z`  | `0`–`9`, `x`, `e` |
 |   16 |  `0x`  | `0`–`9`, `a`–`f`  |
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 42
 0b101010
@@ -49,6 +52,7 @@ Integer numeral prefixes and packed based-string prefixes are related spellings 
 
 Single and double quotes delimit strings. Both forms have the same string semantics.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 'short text'
 "text with {interpolation}"
@@ -60,6 +64,7 @@ Escape syntax may insert code points. Interpolation braces contain ordinary Dewy
 
 Power-of-two based strings encode digit sequences densely as exact bytes:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 0b"11110000"
 0x"deadbeef"
@@ -75,8 +80,7 @@ Non-power-of-two dense packing remains a provisional design because the width of
 
 Square brackets use the top-level contents to determine the constructed form:
 
-<!-- dewy-example: design-only -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 [1 2 3]                       # array
 [name="Ada" active=true]     # object
@@ -84,4 +88,4 @@ Square brackets use the top-level contents to determine the constructed form:
 set[1 2 3]                    # set
 ```
 
-Array, object, dictionary, and set forms are settled; a dictionary or set literal may appear in any expression, and an empty one needs a `dict<K V>` or `set<T>` context. Postfix `...` spreads an existing container into a literal: `[xs... 0 ys...]` builds an array from the elements of arrays (or the members of sets) and written elements, with an exact length when every operand's length is known; `[base... c=3 other...]` builds an object from the fields of objects and written fields, a later entry winning over an earlier one with the same name (at the first one's position), as in Python. This is how containers combine — `+` never concatenates. Operands are named values (bind a computed value first) with a non-union type; spreading into dictionary and set literals is not implemented yet. Bidictionary and multidimensional literal details are catalogued in [Arrays and Containers](arrays-and-containers.md) and the [design appendix](design-status.md).
+Array, object, dictionary, and set forms are settled; a dictionary or set literal may appear in any expression, and an empty one needs a `dict<K V>` or `set<T>` context. Postfix `...` spreads an existing container into a literal: `[xs... 0 ys...]` builds an array from the elements of arrays (or the members of sets) and written elements, with an exact length when every operand's length is known; `[base... c=3 other...]` builds an object from the fields of objects and written fields, a later entry winning over an earlier one with the same name (at the first one's position), as in Python. This is how containers combine — `+` never concatenates. Operands are named values (bind a computed value first) with a non-union type. Bidictionary and multidimensional literal details are catalogued in [Arrays and Containers](arrays-and-containers.md) and the [design appendix](design-status.md).

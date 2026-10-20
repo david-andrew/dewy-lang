@@ -1,5 +1,7 @@
 # Lexical Structure
 
+> **Language design.** [Generated coverage](/status/#ref-lexical-structure) names measured programs and target restrictions; examples here illustrate the design.
+
 ## Source Text
 
 Dewy source is Unicode text. Source-file suffixes are conventional and do not alter tokenization or semantic rules.
@@ -21,6 +23,7 @@ An underscore followed by decimal digits spells subscript digits; an overline
 `‾` (U+203E) followed by decimal digits spells superscript digits. Adjacent runs
 combine, and the ordinary Unicode spelling names the same binding:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let x_12 = 42       # also x_1_2 or x₁₂
 let x‾12 = 7       # also x¹²; distinct from x₁₂ and x12
@@ -33,7 +36,7 @@ not exponentiation. Normalization does not change string contents or the
 source spans used in diagnostics.
 
 The full Unicode repertoire and additional equivalences remain open. A doubled
-marker as an escape is still a design question; no such escape is implemented.
+marker as an escape is still a design question.
 
 Reserved operator words such as `and`, `or`, `not`, `in`, `as`, and `transmute` tokenize as operators in their grammatical contexts. A word operator cannot simultaneously be used as an ordinary identifier in that context.
 
@@ -52,6 +55,7 @@ Whitespace separates tokens. Dewy does not generally use commas to separate argu
 
 Spacing can also determine whether expressions are juxtaposed with a punctuation operator. Range endpoints are the clearest example:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 first..last    # both endpoints
 first ..last   # no left endpoint
@@ -65,6 +69,7 @@ Newlines normally behave as whitespace. A construct may assign additional struct
 
 `#` begins a line comment. `#{` and `}#` delimit a nestable block comment.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 # one line
 #{ outer
@@ -77,6 +82,7 @@ Comment markers inside strings are string contents.
 
 A documentation string is an ordinary call of the prelude's `doc` with a string — usually a `"""` block — at the top of a module, a function body, or a type. The compiler keeps nothing from it yet, so the call is a no-op:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 doc"""
 Tokenizer framework.

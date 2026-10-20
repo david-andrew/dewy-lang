@@ -1,7 +1,10 @@
 # Structural Objects
 
+> **Language design.** [Generated coverage](/status/#ref-objects) names measured programs and target restrictions; examples here illustrate the design.
+
 An object is a structural value containing named fields in source order. Field names, field types, and order participate in its structural type.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let Pair:type = [left:int64 right:int64]
 let pair:Pair = [left=20 right=22]
@@ -13,7 +16,7 @@ A type alias names the structure; it does not create a runtime class object or g
 
 Intersecting object types combines their field requirements. Unique fields are retained; a field required by both sides receives the intersection of its two types.
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 const Located:type = [line:int64 column:int64]
 const Labeled:type = [label:string]
@@ -31,6 +34,7 @@ Intersection never creates nominal identity. A structurally stronger alias remai
 
 Member access uses `.`. A mutable object binding permits assignment to its mutable fields. Ordinary object copies remain independent:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let original = [name="draft" saved=false]
 let copy = original
@@ -49,7 +53,7 @@ Nested array and object fields recursively follow the same value rule.
 
 What cannot change stays proven, which is what the qualifier is for: a field of an immutable record may relate to an earlier sibling — `radix:uint8<radix =? alphabet.length>` — and the relation is checked when the record is built (for the default and for an explicit value; a wrong explicit value is refuted) and known wherever the record is read afterwards. A writable record refuses such an invariant: either field could be assigned later.
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 BaseInfo:type = const [
     alphabet:string<2 <=? length <=? uint8.max>
@@ -79,7 +83,7 @@ repeating those imports. Earlier fields use the values supplied to this
 particular construction; explicit arguments are evaluated in the caller's
 scope.
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let Span:type = [start:int64 stop:int64 = start label:string = "span"]
 
@@ -92,7 +96,7 @@ The call is checked as the object literal `[start=1 stop=9 label="span"]` agains
 
 Construction that needs more than filling fields is an ordinary function added to the type's **constructor overload set** with `&=`; a call dispatches over the field-wise signature and the overloads by the usual most-specific rule, so keyword-only parameters, validation, and error-value results live where functions already have them:
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let Range:type = [start:int64 stop:int64]
 Range &= (text:string):>Range => Range(0 text.length)
@@ -103,6 +107,7 @@ let b = Range("seven..")    # the overload
 
 A constructor can also be an ordinary function returning an object:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let make_pair = (left:int64 right:int64):>Pair =>
     [left=left right=right]
@@ -112,8 +117,7 @@ let make_pair = (left:int64 right:int64):>Pair =>
 
 Where an object type is expected — an annotation, an element of `array<Point>`, a dictionary's value — an object literal may give its fields *positionally*, in declaration order, exactly as a constructor call would; a field left out takes its default:
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let Point:type = [x:int64 y:int64 = 0]
 let Spec:type = [digits:set<string> case_insensitive:bool]
@@ -136,7 +140,7 @@ Mixing named and positional items is not allowed; too many items, or a missing f
 
 An object type may declare methods: `name = (params) => body` rows among the fields. Inside a method, bare names of the type's fields and methods refer to the instance (`stop - start`, `width`); a method that assigns or grows a field takes its receiver as a place, so it must be called on a binding or a field, not on a temporary. Calls are `value.method(args)`, and a zero-argument method is called by `value.method` alone.
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let Span:type = [
     start:int64
@@ -157,7 +161,7 @@ Methods are compiled as ordinary functions taking the instance first as a hidden
 
 A structural or hybrid type can also contextually construct an object literal:
 
-<!-- dewy-example: design-only -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 const ContextError:type =
     (type of error) & [context:string code:int64]
@@ -174,7 +178,7 @@ The fields are checked against the structural portion, and the resulting value c
 
 A function field may use sibling fields from the object literal's scope:
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let counter = (start:int64=0) => [
     value = start

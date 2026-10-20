@@ -1,0 +1,34 @@
+[
+  {
+    "id": "hello",
+    "title": "Hello, Dewy",
+    "source": "printl\"Hello, Dewy!\"\n",
+    "stdout": "Hello, Dewy!\n",
+    "mode": "run",
+    "target": "wasm-release"
+  },
+  {
+    "id": "values",
+    "title": "Independent array values",
+    "source": "let original = [20 22]\nlet copy = original\ncopy[0] = 99\nprintl(original[0]+original[1])\n",
+    "stdout": "42\n",
+    "mode": "run",
+    "target": "wasm-release"
+  },
+  {
+    "id": "graphemes",
+    "title": "Grapheme lengths",
+    "source": "let word = \"café\"\nprintl\"{word}: {word.length}\"\n",
+    "stdout": "café: 4\n",
+    "mode": "run",
+    "target": "wasm-release"
+  },
+  {
+    "id": "paddle",
+    "title": "Paddle",
+    "source_path": "examples/paddle.dewy",
+    "mode": "check",
+    "target": "wasm-release",
+    "instructions": "Move the pointer to keep the ball in play. This game is compile-checked; browser graphics and input need their own checks."
+  }
+]

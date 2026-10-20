@@ -1,11 +1,14 @@
 # Physical Quantities
 
+> **Language design.** [Generated coverage](/status/#ref-physical-quantities) names measured programs and target restrictions; examples here illustrate the design.
+
 A physical quantity combines a numeric representation with a dimension. Dimensions participate in static type checking and need not survive as runtime objects.
 
 ## Type Products
 
 Applying arithmetic to type values describes the type produced by that operation. A duration may therefore be described as a real-valued representation multiplied by the `Time` dimension:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 const Duration:type = <T of real>(T * Time)
 ```
@@ -16,6 +19,7 @@ const Duration:type = <T of real>(T * Time)
 
 Juxtaposing a number with a unit multiplies them. The second and its scales are the prelude's; every other unit is imported from the library module `units`:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 from units import m
 

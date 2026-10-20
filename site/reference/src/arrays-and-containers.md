@@ -1,9 +1,12 @@
 # Arrays and Containers
 
+> **Language design.** [Generated coverage](/status/#ref-arrays-and-containers) names measured programs and target restrictions; examples here illustrate the design.
+
 ## Arrays
 
 An array is an ordered homogeneous value. Array indexing is zero-based.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let names:array<string> = ["Ada" "Grace"]
 let triple:array<int64 length=3> = [10 20 30]
@@ -11,6 +14,7 @@ let triple:array<int64 length=3> = [10 20 30]
 
 `array<T>` specifies the element type. Growable arrays hold word scalars, strings, and objects; an object element is stored as an independent copy, so the array never aliases the value pushed into it, and a popped element remains valid. Inside an index, `end` is the last index (`xs.length - 1`) and composes freely: `xs[end]`, `xs[end - 1]`, `xs[2..end]`, proven from the same facts. Iterating an array of objects (`loop s in spans`) binds the loop variable as a read-only borrow of each element — assigning it, its fields, growing its arrays, or passing it as a place is rejected; copy it (`let mine:Span = s`) to change it. `array<T length=N>` additionally refines the length. Array values follow Dewy's value semantics: binding, assignment, argument passing, and return produce an independent value unless the program explicitly passes a place.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let original = [1 2 3]
 let copy = original
@@ -56,8 +60,7 @@ The exact general multidimensional literal and type syntax remains provisional. 
 
 A dictionary literal uses `->` pairs; a bidictionary uses `<->` pairs and supports lookup in both directions:
 
-<!-- dewy-example: design-only -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let scores = ["Ada" -> 10 "Grace" -> 12]
 let names = [1 <-> "one" 2 <-> "two"]
@@ -65,8 +68,7 @@ let names = [1 <-> "one" 2 <-> "two"]
 
 Dictionaries retain insertion order, and iteration yields key/value pairs in that order:
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let scores = ["Ada" -> 10 "Grace" -> 12]
 
@@ -78,14 +80,13 @@ loop [name score] in scores
 
 ### Lookup
 
-The current hash-table implementation supports fixed-width integer, boolean, string, and word-enum keys. Other key representations, including optional cells and aggregates, are rejected when hashing is needed; storage addresses are not a substitute for value hashes. General value hashing and matching key equality remain implementation work.
-
 `d[key]` is valid only when the key is *proven present* and then has type `V`. A key is proven when it is a constant entry of the literal that initialized the dictionary, was stored by `d[key] = value`, is the key bound by `loop [key value] in d`, or was tested by a guard `if key in? d`. Facts are path-sensitive (a key proven on every branch stays proven after the branches join) and are invalidated when the dictionary or the key binding is reassigned. A guard's search result is reused by the guarded lookup, so a proven lookup performs no second search. An unproven `d[key]` is a compile error.
 
 `d.get(key)` is the lookup that may miss, with type `V | none`. `d.get(key default)` yields `default` when the key is absent and has type `V`.
 
 A dictionary whose key type is *finite* — a union of literals such as `'0b' | '0o' | '0x'` — and whose literal has an entry for every value of it is *total*: `d[k]` is then proven for any `k` of the key type, not only for a constant key. Totality is inferred from the literal (a `const` keeps it everywhere; a `let` keeps it until a `pop` or `clear`), or declared with `totaldict<K V>`, which makes a missing entry an error at the literal (naming the missing keys) rather than at some later lookup, and refuses `pop` and `clear`, so the type is an invariant: a `totaldict<K V>` parameter proves `table[k]` without any fact at the call site. A total dictionary passes where a `totaldict` is expected; a `dict<K V>` that may be partial does not. `totaldict` needs a finite key type.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 const BasePrefix:type = '0b' | '0o' | '0x'
 const RADIX:totaldict<BasePrefix int64> = ['0b' -> 2 '0o' -> 8 '0x' -> 16]   # forgetting `'0x'` is an error here
@@ -104,16 +105,13 @@ A dictionary must not be mutated by a loop that iterates it; stores, `pop`, and 
 
 ### Representation
 
-A dictionary is a compact hash table: dense entries in insertion order with their stored hashes, plus a sparse probe table using open addressing with CPython's perturbation sequence. Removal leaves a tombstone, iteration and growth compact entries lazily, and none of this is observable beyond the order and complexity guarantees. Keys and values are currently word-sized scalars or strings.
-
 Bidirectional dictionaries and dictionary equality remain provisional.
 
 ## Sets
 
 `set[...]` constructs a set; `set<T>` names its type. Members are distinct, and a set remembers first-seen order for iteration and `s.values` (a fresh `array<T>`).
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let permissions = set["read" "write"]
 permissions.push("execute")
@@ -123,7 +121,7 @@ let taken = permissions.pop("read")
 
 `set"0123"` is the set of a string's graphemes and `set(values)` the set of an array's elements (`set(xs)` also drops duplicates). `s.push(x)` inserts a member, using the same operation name as arrays; inserting an existing member preserves its position. `x in? s` tests membership. `s.pop(x)` removes a proven member and yields it; `s.pop(x default=v)` removes `x` if present and yields it, else `v` (`default=none` makes the result `T | none`). `s.clear` empties the set; `s.length` counts members. Sets are not indexable and have no `keys`.
 
-Set operators produce new sets: `|`/`or` union, `&`/`and` intersection, `-` difference, `xor` symmetric difference. Operands must have the same element type. Literal members must currently be constants (duplicates collapse at compile time), and a set must not be mutated by a loop that iterates it.
+Set operators produce new sets: `|`/`or` union, `&`/`and` intersection, `-` difference, `xor` symmetric difference. Operands must have the same element type. A set must not be mutated by a loop that iterates it.
 
 Set equality, ordering, and compound operator forms remain provisional.
 
@@ -133,8 +131,7 @@ Arrays, sets, and dictionaries print — and convert to `string` — as their li
 
 An array literal whose only item is a loop collects the values the loop body expresses, in order — one per iteration, or none when the body expresses nothing on that path, so an `if` without an `else` filters. Nested loops flatten into the one array.
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let main = ():>int64 => {
     let squares = [loop i in [1..5) i * i]                     # [1 4 9 16]
@@ -146,8 +143,7 @@ let main = ():>int64 => {
 
 `set[loop …]` collects into a set, and a loop whose values are `key -> value` pairs collects into a dictionary (a later pair with the same key replaces the value, as a store does):
 
-<!-- dewy-example: compiler -->
-
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let main = ():>int64 => {
     let odds = set[loop n in [0..10) if n % 2 =? 1 n]          # set[1 3 5 7 9]

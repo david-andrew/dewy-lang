@@ -1,5 +1,7 @@
 # Dewy Language Reference
 
+> **Language design.** [Generated coverage](/status/#ref-index) names measured programs and target restrictions; examples here illustrate the design.
+
 This reference defines the intended syntax and semantics of the Dewy programming language. It is organized by language construct and is meant for answering exact questions rather than teaching the language in sequence.
 
 For a guided introduction, read [Learning Dewy](../learn/).
@@ -14,12 +16,11 @@ Language-design maturity is recorded in [Design Maturity and Open Questions](des
 - provisional behavior is documented only as far as decisions have been made;
 - unspecified behavior is identified without inventing a default.
 
-Current compiler coverage, target restrictions, and µDewy compatibility belong to [Implementation Compatibility](compatibility.md). Those implementation notes do not redefine the source language.
+Fresh compiler examples and target-scoped acceptance results belong to [Implementation Compatibility](compatibility.md). Those implementation notes do not redefine the source language.
 
 ## Conventions
 
 - Dewy source conventionally uses the `.dewy` suffix.
-- µDewy source conventionally uses `.udewy`; suffixes do not select Dewy semantic rules.
 - Code labelled **provisional** illustrates a design whose stated portions are decided but whose surrounding rules may change.
 - `T | none` denotes an optional value.
 - `exception` is the nominal parent of values forwarded by safe navigation; both `error` and `none` descend from it.

@@ -1,9 +1,12 @@
 # Values, Copies, and Places
 
+> **Language design.** [Generated coverage](/status/#ref-values) names measured programs and target restrictions; examples here illustrate the design.
+
 ## Value Semantics
 
 Assignment, argument passing, and return supply an independent value. Mutating the destination cannot change the source merely because an implementation reused backing storage.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let original = [1 2 3]
 let copy = original
@@ -18,7 +21,7 @@ Scalar, array, object, string, and container values all follow this rule. A fiel
 
 `@` explicitly selects the place occupied by a mutable value. A parameter that accepts a place also carries `@`, making caller-visible mutation explicit at both boundaries:
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let update = (@xs:array<int64 length=3>):>void => {
     xs[0] = 9
@@ -34,6 +37,7 @@ Passing `values` without `@` supplies an ordinary value. Passing `@values` to a 
 
 A leading `@` selects the place at the end of the complete field-and-index route:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 set(@pair.left)
 set(@values[i])
@@ -56,6 +60,7 @@ Inside a function, `const name = @route` demands a read-only view of an
 existing stored value. The compiler must prove that the storage stays
 valid and stable; it cannot silently replace this request with a copy.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 Box:type = [value:int64]
 read = (boxes:array<Box length=1>):>int64 => {
@@ -89,14 +94,12 @@ Replacing or resizing its owner in that interval is rejected. A local place
 retains the selected storage's write contract and const barriers, and its
 reads/writes retain the owner's effects and facts. It is not a first-class
 reference: captured or escaping places still require further lifetime support.
-Removing, replacing or inserting dictionary entries while a place is live is
-currently rejected, including writes through another key; the analysis does
-not yet prove those entries disjoint. Writes through the selected alias keep
+Writes through the selected alias keep
 the containing dictionary’s keys present, while invalidating changed value
 facts. Earlier value snapshots remain independent. Ordinary value reads can still produce independent
-snapshots. These aliases currently lower to rooted selections, so the debugger
-shows the owner rather than a separate stored alias variable.
+snapshots.
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let xs:array<int64> = [40]
 let cursor = @xs[0]
@@ -131,6 +134,7 @@ Use `.copy()` when an independent value is intended, or
 `const view = @source` when stable borrowed storage is required. For example,
 a function that needs a mutable working array can copy it explicitly:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 $explicit_copies
 changed = (source:array<int64>):>array<int64> => {
@@ -144,13 +148,7 @@ The check includes nested storage and fields added by concrete child types.
 A fixed-size record can contain a runtime-length array; a single grapheme
 can contain arbitrarily many bytes. Copy-on-write sharing does not satisfy
 the requirement by deferring those copies. Fixed-size copies remain allowed
-and appear in `dewy analyze`; this directive is not a no-allocation contract.
-
-The initial implementation uses the lowerer's recorded copy decisions.
-Reporting coverage and some ownership proofs remain in progress. In
-particular, the native compiler still makes conservative entry copies for
-some mutating by-value parameters. Copying an input into an explicit local
-working value avoids that entry-copy requirement.
+; this directive is not a no-allocation contract.
 
 ## Escaping Places and Identity
 
@@ -190,14 +188,14 @@ Mutable entry places can replace resource values: the replacement is evaluated
 first, then the old value drops once. General field transfers remain
 conservative.
 
-The broader typed allocation capabilities remain provisional. Their direction
-is recorded in the compiler's [`user_managed_storage.md`](https://github.com/david-andrew/dewy-lang/blob/main/dewy/semantic/user_managed_storage.md) note.
+The broader typed allocation capabilities remain provisional; see [Design Maturity](design-status.md).
 
 ## Scoped Allocators
 
 `$allocator(@scratch) expression` requests allocation from an `Arena` for the
 whole next expression. Braces group several statements under the same request:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let scratch = Arena[]
 let summary = $allocator(@scratch) build_summary(input)
@@ -210,19 +208,13 @@ it is lent to the expression. Cross-allocator copies remain subject to
 `$explicit_copies`, including immutable strings whose bytes must leave the
 arena.
 
-Placement is currently conservative. The native compiler uses the enclosing
-allocator if it cannot establish safe lifetimes for outer stores, captures or
-calls. The hosted compiler currently uses the enclosing allocator for every
-request. `dewy analyze` reports each fallback and its reason; this preserves
-value behavior but is not a guarantee that the requested arena was used.
-
 ## Storage and Escape Copies
 
-Where a value's bytes live is the implementation's business, but it is observable in one way: cost. A string may be static (a literal), arena-backed (decoded bytes, a `join`), owned by a container (an array element, an object field), frame-backed (an interpolation, or a call result copied into the calling frame), or a parameter's (the caller's, unknown to the callee). Storing a string where it outlives the current evaluation — into a growable array, an object field, a union cell — stores a static literal as it is, takes over a fresh arena string nobody else holds (a `join` or a decode stored directly), and copies everything else into the arena, so **every stored string has exactly one owner**. `dewy analyze file.dewy` lists every such *escape copy* with its reason, so the copies a program pays for are never a mystery; the ownership model's later steps (moves by liveness, borrowed parameters) will remove the ones that proofs can.
+Where a value's bytes live is the implementation's business, but it is observable in one way: cost. A string may be static (a literal), arena-backed (decoded bytes, a `join`), owned by a container (an array element, an object field), frame-backed (an interpolation, or a call result copied into the calling frame), or a parameter's (the caller's, unknown to the callee). Storing a string where it outlives the current evaluation — into a growable array, an object field, a union cell — stores a static literal as it is, takes over a fresh arena string nobody else holds (a `join` or a decode stored directly), and copies everything else into the arena, so **every stored string has exactly one owner**.
 
-A transfer at a value's last use is a *move*: `return xs`, `[items = xs]`, `box.items = xs`, or `return box` for a local built here, when nothing uses the local afterwards (and the store is not inside a loop the local outlives), adopts the arena storage instead of copying it. Transfers of a value that is used again copy, as value semantics require. `dewy analyze` lists every transfer of an owned array as a move or a copy with its reason.
+A transfer at a value's last use is a *move*: `return xs`, `[items = xs]`, `box.items = xs`, or `return box` for a local built here, when nothing uses the local afterwards (and the store is not inside a loop the local outlives), adopts the arena storage instead of copying it. Transfers of a value that is used again copy, as value semantics require.
 
-An array of strings owns its elements: when a local array's scope ends (or the binding is rebound), the element strings are released with the buffer — so building and dropping string arrays in a loop runs in constant memory. It follows that element strings never alias: reading an element out and storing or returning it copies it, and a copy of a string array (`let copy = parts`) gets its own element strings. `dewy analyze` reports each of these copies too.
+An array of strings owns its elements: when a local array's scope ends (or the binding is rebound), the element strings are released with the buffer — so building and dropping string arrays in a loop runs in constant memory. It follows that element strings never alias: reading an element out and storing or returning it copies it, and a copy of a string array (`let copy = parts`) gets its own element strings.
 
 Objects own their runtime-sized members the same way. When a local object's scope ends, its string fields, its array fields (with their elements), and the string payloads of its union cells are released; a copy of an object (`let two:Point = one`) owns copies of its own; assigning over a string field (`two.name = "changed"`, through a nested object or an element too — `o.inner.name = …`, `pts[0].name = …`, `xs[0] = …`) releases the value it held; an exact-length local array releases its element strings and element objects with it; and a literal or call result stored into an array or returned *moves* its members into the new owner rather than cloning them. Dictionaries are objects of arrays, so a local dictionary releases its keys and values too. Building and dropping objects, arrays of objects, and dictionaries in a loop runs in constant memory.
 

@@ -1,5 +1,7 @@
 # Operators and Precedence
 
+> **Language design.** [Generated coverage](/status/#ref-operators-and-precedence) names measured programs and target restrictions; examples here illustrate the design.
+
 Operator tokens resolve to typed operations. An operator's spelling determines parsing precedence; operand types and available overloads determine its meaning.
 
 ## Main Operator Families
@@ -25,6 +27,7 @@ Most infix operations have a combined-assignment spelling such as `+=`. Combined
 
 Adjacent expressions can form several operations:
 
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 function(argument)
 values[index]
@@ -93,7 +96,7 @@ Word-`not` sits just above `and`, below the comparisons — the same symbol/word
 
 `a <? b <? c` is a chain: consecutive comparisons joined by `and`, each interior operand evaluated once (`0 <? x <? 10` is `0 <? x and x <? 10`; `0 <=? f(x) <? n` calls `f` once — a hidden local holds the value, in front of the statement or, in an expression-bodied function, in front of the chain; a name, a literal, or a route of member reads such as `loc.stop` or `src.length` is simply reused, so the facts a chain establishes are about that term). A chain is one monotonic statement: its operators are rising (`<?`, `<=?`) or falling (`>?`, `>=?`), and `=?` may appear in either without changing direction. Mixing directions is an error, and `not =?`, `is?`, `isnt?`, and `in?` do not chain — write `and`. Parenthesizing the left comparison (`(a <? b) =? c`) compares its boolean instead.
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let x = 5
 $assert 0 <? x <? 10
@@ -105,7 +108,7 @@ $assert 0 <? x =? 5 <=? 5
 
 A binary operator applied to only its right operand, in parentheses, is a *partial operator*: a one-parameter function of the missing left operand. `(<? n)` is `i => i <? n`, `(* 2)` is `i => i * 2`, `(in? 1..3)` is `i => i in? 1..3`, `(.length)` is `x => x.length`, `(as string)` is `x => x as string`. Only that form exists, and only for operators that have no prefix form — the comparisons and tests (`=?`, `not =?`, `<?`, `>?`, `<=?`, `>=?`, `is?`, `isnt?`, `in?`, `not in?`), `.`, `as`, `transmute`, `*`, `/`, `//`, `^`, `%`, and `\` — so `(- 1)` remains negative one and `(+ 1)` is just one. (`*`, `/`, and `//` have no prefix form; `x ^/ 2` for a root is an opchain compound, its own operator.) The operand is everything to the closing parenthesis (`(<? a + b)` is `i => i <? a + b`). A partial operator is an ordinary function value: it is typed like an unannotated lambda, from the function type it is checked against (a sort key, a slot, an annotation — whose parameter name it takes), and it is a [fact](refinements-and-effects.md#type-facts) wherever a lambda is: `uint64<(<? src.length)>`.
 
-<!-- dewy-example: compiler -->
+<!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let main = ():>int64 => {
     let names:array<string> = ["bb" "a" "ccc"]
