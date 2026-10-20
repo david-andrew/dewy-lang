@@ -1,0 +1,11 @@
+g: int[] = [10, 20, 30]
+saved: int[] = []
+snapshot = (): saved = g
+bump = (xs: mut int[]):
+    loop i in [0..xs.len()):
+        if i == 0: snapshot()
+        xs[i] += 1
+main = ():
+    bump(mut g)
+    print(g)
+    print(saved)

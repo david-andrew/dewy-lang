@@ -1,0 +1,9 @@
+g: int[] = [10, 20, 30]
+shrink = (): g.pop()
+sum = (xs: mut int[]) -> int:
+    total = 0
+    loop i in [0..xs.len()):
+        if i == 0: shrink()
+        total += xs[i]
+    total
+main = (): print(sum(mut g))

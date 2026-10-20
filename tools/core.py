@@ -24,6 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / '__dewycache__' / 'compact-core'
 TESTS = (
+    'tests/test_isolation.py',
     'tests/test_core.py',
     'tests/test_core_editor.py',
     'tests/test_core_format.py',

@@ -4994,20 +4994,10 @@ closed_scan = (n: int, seen: mut bool[]) -> bool:
         if not closed_scan(kid2(n, i), seen): return false
     true
 
-# struct construction, or a call into the core library that is given no functions (the core
-# library cannot reach the program's globals otherwise)
+# Only construction is intrinsically closed. A source pathname cannot establish
+# anything about ambient accesses, including calls hidden inside library code.
 harmless_call = (n: int) -> bool:
-    aux = int(nodes[n].aux)
-    if aux == 2: return true
-    if aux != 0: return false
-    f = int(nodes[n].sym)
-    if f <= 0 or f >= fns.len() or fns[f].decl == 0: return false
-    fi = pos_file(int(nodes[int(fns[f].decl)].pos))
-    if fi < 0 or fi >= files.len() or find(files[fi].path, "/lib/core/") < 0: return false
-    loop i in [0..nkids(n)):
-        tk = types[prune(ntype(kid(n, i)))].kind
-        if tk == .fn_ or tk == .cfn: return false
-    true
+    nodes[n].aux == 2
 
 # A loop's control counter stays in range, but its user-visible variable can
 # be reassigned, passed by reference, or changed by a closure in the body.
