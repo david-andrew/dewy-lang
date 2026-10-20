@@ -715,7 +715,8 @@ method_names = (recv: int) -> int[]:
                     sig = fn_sig(int(syms[s].decl))
                     if sig.params.len() > 0:
                         p0 = prune(sig.params[0])
-                        if types[p0].kind != .var and (types[p0].kind == types[rt].kind or type_eq(p0, rt)):
+                        # (a method of a minted parent takes its family, which this type is in)
+                        if types[p0].kind != .var and (types[p0].kind == types[rt].kind or type_eq(p0, rt) or family_annotation(p0) and value_members(p0).contains(rt)):
                             out.push(k)
                             break
                 s = int(syms[s].next)

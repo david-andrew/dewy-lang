@@ -126,7 +126,11 @@ check_propagate = (n: int, expected: int) -> int:
 # A narrowed concrete error still exposes its own payload fields normally.
 forward_member = (n: int, receiver: int, t: int, expected: int) -> int:
     pos = nodes[n].pos
+    # A method's own object (a family's member, seen through its parent) is read,
+    # not forwarded: every member of the family has the parent's members.
+    own = nodes[receiver].kind == .ident and starts_with(name_of(int(nodes[receiver].name)), "$self")
     if cur_assign != 0 and int(nodes[cur_assign].a) == n:
+        if own: fatal(pos, "a method of a type with minted children cannot change its object yet")
         fatal(pos, "cannot assign through a union receiver; narrow it with is? first")
     name = "$receiver{n}"
     add_flag(receiver, NF_CHECKED)
@@ -138,7 +142,7 @@ forward_member = (n: int, receiver: int, t: int, expected: int) -> int:
         base = bc_ident(name, pos)
         value = base
         if member == T_NONE: value = mk(.none_lit, pos)
-        else if not exception_member(member): value = bc_field(base, name_of(int(nodes[n].name)), pos)
+        else if own or not exception_member(member): value = bc_field(base, name_of(int(nodes[n].name)), pos)
         body = bc_block([bc_stmt(value, pos)], pos)
         if chain == 0: chain = body
         else:

@@ -1343,10 +1343,19 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         nodes[n].name = i32(intern(name))
         nodes[n].a = i32(dw_type(dw_child(mint, 1)))
         fields: int[]
+        methods: int[]
+        rows: int[]
         if structure != 0:
             if dewy_syntax[structure].text != "[]:": return dw_fail(structure, "this nominal intersection; expected record fields")
-            loop field in dw_children(structure): fields.push(dw_param(field, .vardecl))
+            rows = dw_children(structure)
+            outer_siblings = dw_siblings
+            dw_siblings = {}
+            loop field in rows:
+                if dw_method_row(field): methods.push(field)
+                else: fields.push(dw_param(field, .vardecl))
+            dw_siblings = outer_siblings
         set_list(n, fields)
+        dw_type_methods(n, rows, methods)
         return n
     inferred_refinement = initial != 0 and dw_op(initial) == .amp and dw_op(dw_grouped(dw_child(initial, 2))) == .tilde
     if annotation == 0 and initial != 0 and dw_op(initial) == .type_apply:
@@ -1381,9 +1390,8 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
             else: fields.push(dw_param(field, .vardecl))
         dw_siblings = outer_siblings
         set_list(n, fields)
-        if methods.len() > 0:
-            if not top: return dw_fail(methods[0], "methods on a local type; declare the type at module level")
-            dw_type_methods(n, dw_children(initial), methods)
+        if methods.len() > 0 and not top: return dw_fail(methods[0], "methods on a local type; declare the type at module level")
+        if top: dw_type_methods(n, dw_children(initial), methods)
         return n
     n = mk(.vardecl, dewy_syntax[id].pos)
     nodes[n].name = i32(intern(name))
@@ -1406,10 +1414,20 @@ dw_bound_names = (bindings: int[]) -> int[]:
 # A type's methods become module functions of the same name taking the instance first
 # (`s.width` is `width(s)` by the uniform call syntax); no function is stored in the
 # object. A generic type's methods take its type parameters first.
+# A minted type's methods also reach the members it inherits from a parent declared
+# earlier in this module.
+dw_type_members: {int: {int: {int: int}}} = {}   # file -> type name -> its members (dewy_method_group)
+
 dw_type_methods = (struct_: int, rows: int[], methods: int[]):
     receiver = intern("$self")
     row_names = dw_row_names(rows)
+    inherited: {int: int} = {}
+    parent = int(nodes[struct_].a)
+    file = pos_file(nodes[struct_].pos)
+    types_here = dw_type_members.get(file) ?? {}
+    if parent != 0 and nodes[parent].kind == .tname: inherited = types_here.get(int(nodes[parent].name)) ?? {}
     members: {int: int} = {}
+    loop name, member in inherited: members[name] = receiver
     loop name in row_names: members[name] = receiver
     type_params = kids2(struct_)
     decls: int[]
@@ -1448,7 +1466,8 @@ dw_type_methods = (struct_: int, rows: int[], methods: int[]):
         dw_add_receiver(fn_, receiver, object_type)
         dw_pending_decls.push(fn_)
         decls.push(fn_)
-    dewy_method_group(row_names, decls)
+    types_here[int(nodes[struct_].name)] = dewy_method_group(row_names, decls, inherited)
+    dw_type_members[file] = types_here
 
 dw_import = (id: int) -> int:
     pos = dewy_syntax[id].pos
@@ -1901,7 +1920,7 @@ dw_top_declarations = (id: int) -> int[]:
                 if op == .function or op == .kw_and or op == .eq or op == .not_eq or op == .lt or op == .le or op == .gt or op == .ge or op == .contains: return [dw_declare(declaration, false, true)]
         mint = initial
         if dw_op(mint) == .amp: mint = dw_grouped(dw_child(mint, 1))
-        if name != "" and dw_op(mint) == .kw_of: return [dw_declare(declaration, false, true)]
+        if name != "" and dw_op(mint) == .kw_of: return dw_with_methods(dw_declare(declaration, false, true))
         if name != "" and dw_op(initial) == .amp:
             if dw_op(dw_grouped(dw_child(initial, 2))) == .tilde: return [dw_declare(declaration, false, true)]
             if name == "main": return [dw_fail(id, "an overloaded entry point")]
@@ -1909,7 +1928,11 @@ dw_top_declarations = (id: int) -> int[]:
             dw_overload_members(initial, name, declarations)
             return declarations
         if name != "" and dw_op(initial) == .function: return [dw_function(initial, name)]
-    declarations = [dw_stmt(id, true)]
+    dw_with_methods(dw_stmt(id, true))
+
+# A declaration followed by the module functions its type's methods became.
+dw_with_methods = (declaration: int) -> int[]:
+    declarations = [declaration]
     loop method in dw_pending_decls: declarations.push(method)
     dw_pending_decls = []
     declarations

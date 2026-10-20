@@ -1,0 +1,21 @@
+# quick
+# Methods of minted types see their own and inherited members by bare name.
+Base:type = type of error & [
+    message:string
+    describe = ():>string => "error: {message}"
+]
+Payload:type = type of Base & [
+    code:int64 = 42
+    detail = ():>string => "{describe} ({code})"
+    bump = () => { code += 1  message = message + "!" }
+]
+Unit = type of error & [hint = ():>string => "a unit error"]
+show = (error:Base):>string => describe(error)
+main = () => {
+    let p = Payload(message='bad')
+    p.bump
+    printl"{p.detail} {p.describe} {p}"
+    let b = Base['plain']
+    let u = Unit
+    printl"{b.describe} {show(p)} {u.hint}"
+}
