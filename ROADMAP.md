@@ -8,11 +8,11 @@ Dewy must become; this file says what we do next and how we know we are closer.
 
 | Measure | Now (2026-10-19) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 20/31 programs (was 0/31 on 10-19) | all milestones |
+| Acceptance ladder, design surface | 24/31 programs (was 0/31 on 10-19) | all milestones |
 | Acceptance ladder, current dialect | 31/31 | stays green |
-| Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.35 G instructions, ~330 ms | 250k root lines/s (~88 ms) |
+| Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.36 G instructions (10-20; was 1.30 G at the 10-19 checkpoint) | 250k root lines/s (~88 ms) |
 | Compiler self-build | 7.5 G instructions, ~1.6 s | seconds-scale edit loop |
-| Game-tick kernel vs C -O2 | 8.85× | ~1× |
+| Game-tick kernel vs C -O2 | ~2× instructions (was 3.6×; 8.85× wall) | ~1× |
 | Managed helper calls / generic closures vs C | 1.65× / 2.5× | ~1× |
 | Quick suite / full suite (+bootstrap) | ~30 s / ~2 min | stay under 30 s / 5 min |
 
@@ -41,31 +41,32 @@ surface (one language, no dialect forks), that must all pass:
    modules; lifecycle cleanup on early exits; scoped views.
 10. Games and large applications at C-class speed with a fresh-build edit loop.
 
-## Now (at most three active streams)
+## Now
 
-- **Process foundation**:
-  - golden-file tests, one case per file, replacing growth of the giant pytest
-    module;
-  - an instruction-count speed gate (≤1% vs the previous compiler, plus a
-    fixed checkpoint) in CI;
-  - the acceptance ladder runner and scoreboard.
-- **Soundness pilot**:
-  - remove the `/lib/core/` pathname trust in `lower.jo`; it causes a
-    reproduced miscompile;
-  - replace it with checked per-instance isolation summaries.
-  This is slice 1 of the semantic-boundary design; later slices are pulled in
-  only when a capability needs them.
-- **Surface convergence (milestone 2)**: directives, zero-argument members and
-  Dewy-native diagnostics landed (0→19/31). Next: the function-handle migration,
-  then `pop(index)`/`insert` order/`starts_with` spellings, function-type
-  expressions, and `.copy`.
+- **Surface convergence, round 2:**
+  - function handles (`@fn`, bare names call);
+  - `pop(index)`, dictionary `pop(key)`, `insert` order, `starts_with`;
+  - function type expressions.
+- **Dewy-program differential tester:** a generator plus an independent Python
+  interpreter oracle, metamorphic variants, shrinking, and nightly CI.
+- **Compile throughput, structural:** pay back the feature drift (+1.7% to
+  +4.3% since the 10-19 checkpoint), then pull the big levers toward 250k
+  lines/s.
+- **`$explicit_copies`:** the strict-lane first slice; ladder programs 17 and 18.
+
+Landed 10-19 and 10-20:
+- golden tests, ladder and speed gate;
+- isolation summaries (the pathname miscompile fixed);
+- record SRA and copy forwarding (game −44% instructions);
+- directives, zero-argument members, Dewy diagnostics;
+- the error family with `or_throw`;
+- checked mathematical `int`;
+- erased physical units.
 
 ## Next
 
-- Error family + `or_throw` (milestone 4). Existing unions and return cleanup
-  are the seam.
-- Erased physical units (milestone 5) via dimension-qualified canonical types.
-- Mathematical `int` and exact decimals (milestone 3), staged as decided below.
+- `int` step 2: bigint promotion. The plan: semantic TypeId vs RepId, and a
+  two-word tag/payload boundary ABI. Then exact decimal literals.
 - Game-tick gap (8.85×), diagnosed 2026-10-19. Five 24-byte record copies per
   tick survive inlining, because `opt.jo:o_sra` only promotes slots of 16 bytes
   or less; the scalar-local control is 4.6× fewer cycles. Fix:
@@ -76,7 +77,7 @@ surface (one language, no dialect forks), that must all pass:
   - outer-target SIMD for particles;
   - escape-proven stack closure environments with devirtualization (the
     callback kernel spends 35% in allocation and free).
-- Wide-shift semantics bug; Jo text in diagnostics.
+- The rest of the Jo-shaped hint catalog in diagnostics.
 - Dewy-grammar differential fuzzer with independent oracles (nightly). The
   current fuzzer only generates Jo.
 - Publication migration:
@@ -117,7 +118,12 @@ Resolved 2026-10-19 (David):
   calls; `@fn` is the handle (`xs.map(@double)`). Migrate in stages: warn on
   bare function values, then switch, updating lib/ and examples.
 
-Open:
+Open (batched for David, not blocking):
+
+- Units: display-unit selection, Celsius point/delta semantics, calendar
+  durations.
+- Errors: what happens when an exception reaches `main` (today `main` keeps its
+  void/int contract and must handle errors explicitly).
 
 - Small library spellings (`starts_with` vs `startswith`, `insert` argument
   order, `pop(key)` vs `remove(key)`): check the design docs. Where they're
