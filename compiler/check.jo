@@ -3144,7 +3144,8 @@ check_stmt = (s: int):
         scope_reset(mark)
         nodes[s] = nodes[body]
         return
-    if k == .vardecl and has_flag(s, NF_CHECKED): return
+    # (a quantity constant ensure_global settled, used before its module's own code ran)
+    if (k == .vardecl or k == .const_) and has_flag(s, NF_CHECKED): return
     if k == .vardecl: check_vardecl(s)
     else if k == .const_:
         g = Global(name = nodes[s].name, decl = 0, mod = i32(cur_mod()), is_const = true, state = 2)
