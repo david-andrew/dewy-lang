@@ -217,10 +217,10 @@ def test_core_driver_test_command(monkeypatch, tmp_path):
 
     monkeypatch.setattr(core.subprocess, 'call', run)
     stages = stub_stages(monkeypatch)
-    assert core.main(['test', '-k', 'record']) == 7
-    # -k selects golden cases too; no ladder program matches 'record'.
+    assert core.main(['test', '-k', 'snapshot']) == 7
+    # -k selects golden cases too; no ladder program matches 'snapshot'.
     assert [stage[0] for stage in stages] == ['cases'] and stages[0][1] > 0
-    assert received['command'][-2:] == ['-k', 'record']
+    assert received['command'][-2:] == ['-k', 'snapshot']
     assert '--maxfail=1' in received['command']
     assert all(path in received['command'] for path in core.TESTS)
     assert received['env']['DEWY_CORE_COMPILER'] == str(binary)
