@@ -1,0 +1,33 @@
+# A value-record game tick: update, bounce, and return the next state.
+from p"harness.dewy" import size_argument, clock, mix
+
+Ball:type=[x:float64 velocity:float64 hits:int64=0]
+tick=(state:Ball dt:float64):>Ball=>{
+    let next=state
+    next.x+=next.velocity*dt
+    if next.x >? 10.0 {
+        next.x=20.0-next.x
+        next.velocity=-next.velocity
+        next.hits+=1
+    }
+    if next.x <? 0.0 {
+        next.x=-next.x
+        next.velocity=-next.velocity
+        next.hits+=1
+    }
+    return next
+}
+simulate=(start:Ball frames:int64):>Ball=>{
+    let state=start
+    loop frame in [0..frames) {state=tick(state 0.125)}
+    return state
+}
+main=(args:array<string>):>int64=>{
+    let frames=size_argument(args 5000000)
+    let started=clock()
+    let final=simulate(Ball[1.0 4.0] frames)
+    let result=mix(mix(i64(final.x*2.0) i64(final.velocity)) final.hits)
+    let finished=clock()
+    printl"{result} {finished-started}"
+    return 0
+}
