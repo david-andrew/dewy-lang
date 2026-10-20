@@ -578,6 +578,13 @@ path_to_uri = (path: str) -> str:
             out.push(hexd[int(c) & 15])
     str_from_bytes(out)
 
+# the open document at a path, or -1 (by path: editors spell drive letters and colons
+# differently from path_to_uri)
+open_doc_at = (path: str) -> int:
+    loop k in 0.. and dc in docs:
+        if dc.open and dc.path == path: return k
+    -1
+
 # a file's URI (an open document's as the editor wrote it)
 uri_of = (path: str) -> str:
     loop dc in docs:
@@ -1292,8 +1299,7 @@ uses_of = (d: int, h: Hit) -> Use[]:
     loop wf in ws_files:
         if time() - t0 > 3.0 or lsp_stop != 0: break
         if wf == path or ends_with(path, ".dewy") and not ends_with(wf, ".dewy"): continue
-        od = doc_by_uri.get(path_to_uri(wf)) ?? -1
-        if od >= 0 and docs[od].open: continue
+        if open_doc_at(wf) >= 0: continue
         known = false
         loop u in out:
             if u.res.paths.contains(wf): known = true
@@ -2225,13 +2231,13 @@ on_workspace_symbol = (id: int, params: int) -> int:
     out: str[][] = [[], [], []]      # (by how well they match)
     loop f in ws_files:
         syms: WsSym[]
-        d = doc_by_uri.get(path_to_uri(f)) ?? -1
-        if d >= 0 and docs[d].open: syms = ws_symbols_of(f, docs[d].text)
+        d = open_doc_at(f)
+        if d >= 0: syms = ws_symbols_of(f, docs[d].text)
         else if let c = ws_cache.get(f): syms = c
         else:
             syms = ws_symbols_of(f, read_file(f) ?? "")
             ws_cache[f] = syms
-        uri = path_to_uri(f)
+        uri = uri_of(f)
         loop y in syms:
             m = ws_match(y.name, q)
             if y.kind == 24 or m == 3 or out[m].len() >= 1000: continue
