@@ -1,0 +1,23 @@
+R:type=[a:int64 b:int64 c:int64 d:int64 e:int64 f:int64]
+write=(@r:R value:int64):>void=>{r.a=value r.f=value+1}
+choose=(r:R early:bool):>R=>{
+    let saved=r
+    let next=r
+    write(@next 100)
+    if early return saved
+    next=saved
+    next.b+=10
+    return next
+}
+main=()=>{
+    let a=R[1 2 3 4 5 6]
+    let b=choose(a true)
+    let c=choose(a false)
+    let capture=()=>{return a.a+a.f}
+    let saved=a
+    write(@a 20)
+    let xs=[saved saved]
+    xs[0].a=30
+    return if b.a=?1 and b.f=?6 and c.a=?1 and c.b=?12 and c.f=?6
+        and saved.a=?1 and saved.f=?6 and capture()=?7 and xs[1].a=?1 42 else 1
+}

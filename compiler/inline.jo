@@ -92,6 +92,7 @@ fast_inline_into = ():
         if j >= 0: inline_call(ins, fast_fns[j], out)
         else: out.push(ins)
     ir.code = out
+    o_copy_forward()
 
 rel_collect = ():
     loop rel_by_index.len() <= ir.fn_index: rel_by_index.push(-1)
@@ -286,4 +287,5 @@ inline_into = (self_pos: int, snap: IrFn[], can: int[]) -> bool:
         else if ins.op == .end:
             if kinds.pop() == .loop: depth -= 1
     ir.code = out
+    o_copy_forward()
     true

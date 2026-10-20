@@ -1,0 +1,17 @@
+R:type=[a:int64 b:float64 c:int64 d:float64]
+Small:type=[a:float32 b:int32 c:float32 d:int32]
+Large:type=[a:float32 b:int32 c:float32 d:int32 e:float32 f:int32 g:float32 h:int32]
+main=()=>{
+    let r:R
+    let saved=r
+    r.c=10 r.d=2.5
+    let small=Small[1.25 2 3.5 4]
+    let s=small
+    s.a=5.5 s.d=40
+    let large=Large[1.25 2 3.5 4 5.5 6 7.75 8]
+    let t=large
+    t.g=9.5 t.h=80
+    return if saved.a=?0 and saved.b=?0.0 and saved.c=?0 and saved.d=?0.0
+        and r.c=?10 and r.d=?2.5 and small.a=?1.25 and small.d=?4 and s.a=?5.5
+        and large.g=?7.75 and large.h=?8 and t.g=?9.5 and t.h=?80 42 else 1
+}

@@ -34,3 +34,24 @@ def test_records_sra_game_codegen(compiler, tmp_path):
     # Check the emitted IR, not slot declarations (which can remain after SRA).
     assert not re.search(r'\bcopy .*imm=24\b', simulate), simulate
     assert not re.search(r'\bcall[ic]? a=', simulate), simulate
+
+
+@pytest.mark.core_quick
+def test_records_sra_large_copy_codegen(compiler, tmp_path):
+    import re
+    import subprocess
+
+    built = subprocess.run([compiler, 'build', FIXTURES / 'large_game.dewy', '--release', '--ir',
+                            '-o', tmp_path / 'large-game'], capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    main = next(body for body in re.split(r'^fn ', built.stdout, flags=re.MULTILINE)
+                if body.startswith('f_main_'))
+    lines = main.splitlines()
+    start = next(i for i, line in enumerate(lines) if re.search(r'\bloop a=', line))
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    end = next(i for i in range(start + 1, len(lines))
+               if lines[i].startswith(' ' * indent + 'end '))
+    loop = '\n'.join(lines[start:end])
+    # The six-lane record remains in memory. Its five copies per tick become
+    # three: the owning-argument and return intermediates have no observer.
+    assert len(re.findall(r'\bcopy .*imm=48\b', loop)) == 3, loop

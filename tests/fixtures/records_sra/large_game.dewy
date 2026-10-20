@@ -1,0 +1,24 @@
+# A value-record game tick: update, bounce, and return the next state.
+
+Ball:type=[x:float64 velocity:float64 hits:int64=0 a:int64=7 b:int64=8 c:int64=9]
+tick=(state:Ball dt:float64):>Ball=>{
+    let next=state
+    next.x+=next.velocity*dt
+    if next.x >? 10.0 {
+        next.x=20.0-next.x
+        next.velocity=-next.velocity
+        next.hits+=1
+    }
+    if next.x <? 0.0 {
+        next.x=-next.x
+        next.velocity=-next.velocity
+        next.hits+=1
+    }
+    return next
+}
+simulate=(start:Ball frames:int64):>Ball=>{
+    let state=start
+    loop frame in [0..frames) {state=tick(state 0.125)}
+    return state
+}
+main=()=>{let final=simulate(Ball[1.0 4.0] 1000) return if final.x=?1.0 and final.velocity=?4.0 and final.hits=?50 and final.a=?7 and final.b=?8 and final.c=?9 42 else 1}

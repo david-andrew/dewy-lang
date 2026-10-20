@@ -804,6 +804,67 @@ div_magic = (d: int) -> (int, int):
         if not (q1 < delta or (q1 == delta and r1 == 0)): break
     (int(q2 + 1), p - 64)
 
+# Forward whole-slot copies through dead intermediates after inlining. A
+# temporary must have one address definition and exactly two uses: the incoming
+# and outgoing copies. No derived address, call, or later observer can exist.
+# Both endpoints are distinct stack slots and no write/control boundary may
+# intervene, so the source still contains the snapshot the second copy needs.
+# Larger records benefit without adding scalar lanes or register pressure.
+o_copy_forward = ():
+    if ir.raw_mem or ir.slot_size.len() == 0: return
+    code = ir.code
+    previous = -1
+    found = false
+    loop i in [0..code.len()):
+        ins = code[i]
+        if ins.op == .copy:
+            if previous >= 0 and ins.b == code[previous].a and ins.imm == code[previous].imm:
+                found = true
+                break
+            previous = i
+        else if not o_defines(ins.op) or kills_memory(ins.op): previous = -1
+    if not found: return
+    nv = ir.vtypes.len()
+    ns = ir.slot_size.len()
+    ndef = fill(0, nv)
+    nuse = fill(0, nv)
+    slot = fill(-1, nv)
+    addresses = fill(0, ns)
+    loop ins in code:
+        d = ir_operands(ins)
+        if d >= 0: ndef[d] += 1
+        loop k in [0..ir_use_count): nuse[ir_use(k)] += 1
+        if ins.op == .slot:
+            slot[int(ins.dst)] = int(ins.a)
+            addresses[int(ins.a)] += 1
+        else if ins.op == .zeroslots:
+            loop k in [0..int(ins.b)):
+                item = int(ir.args[int(ins.a) + k])
+                if item & 1 == 1: ndef[item >> 1] += 1
+    previous = -1
+    loop i in [0..code.len()):
+        ins = code[i]
+        if ins.op != .copy:
+            if not o_defines(ins.op) or kills_memory(ins.op): previous = -1
+            continue
+        first_pos = previous
+        previous = i
+        if first_pos < 0: continue
+        first = code[first_pos]
+        tmp = int(ins.b)
+        src = int(first.b)
+        dst = int(ins.a)
+        if tmp != int(first.a) or ins.imm != first.imm or tmp < 0 or src < 0 or dst < 0: continue
+        t = slot[tmp]
+        s = slot[src]
+        d = slot[dst]
+        if t < 0 or s < 0 or d < 0 or t == s or t == d or s == d: continue
+        if ndef[tmp] != 1 or ndef[src] != 1 or ndef[dst] != 1 or nuse[tmp] != 2 or addresses[t] != 1: continue
+        if ins.imm != int(ir.slot_size[t]) or ins.imm != int(ir.slot_size[s]) or ins.imm != int(ir.slot_size[d]): continue
+        code[first_pos].op = .nop
+        code[i].b = first.b
+    ir.code = code
+
 # ---------------- small slots to registers ----------------
 # Non-escaping slots of at most four lanes (32 bytes) become registers. Standalone byte and
 # two-byte slots use one integer lane. Four-byte lanes cover
