@@ -1151,16 +1151,15 @@ let active=tags & set["visible" "selected"]
 let names=[loop tag in active tag]
 let [first second]=active
 let visited:set<int64>=set[]
-if visited.add(7) {printl"first visit"}
+if 7 not in? visited {visited.push(7) printl"first visit"}
 ```
 
 `set<T>` supplies the element type for an empty literal or narrower numeric
 members. Function parameters provide the same context. `set[loop ...]` and
 `set[values...]` also work, with arrays or sets as spread operands. For example,
 `set[existing... "new"]` preserves the first occurrence of each member, and
-`[existing...]` collects a set's members into an array. `push` adds a member;
-`add` returns whether it was
-new. Adding an existing member leaves its position unchanged. `remove(value)`
+`[existing...]` collects a set's members into an array. `push` adds a member.
+Adding an existing member leaves its position unchanged. `remove(value)`
 returns whether it removed a member, while `clear()` and `reserve(count)` work
 like their dictionary counterparts. `.length`, `has`, `contains` and `is_empty`
 inspect the set.

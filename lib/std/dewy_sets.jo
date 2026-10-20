@@ -17,11 +17,8 @@ len[T] = (s: Set[T]) -> int: s._entries.len()
 is_empty[T] = (s: Set[T]) -> bool: s._entries.is_empty()
 contains[T] = (s: Set[T], value: T) -> bool: s._entries.has(value)
 has[T] = (s: Set[T], value: T) -> bool: s._entries.has(value)
-add[T] = (s: mut Set[T], value: T) -> bool:
-    added = s._entries.insert_if_absent(value, true)
-    if added: s._tail = s._entries.__keys.len()
-    added
-push[T] = (s: mut Set[T], value: T): s.add(value)
+push[T] = (s: mut Set[T], value: T):
+    if s._entries.insert_if_absent(value, true): s._tail = s._entries.__keys.len()
 remove[T] = (s: mut Set[T], value: T) -> bool:
     removed = s._entries.remove(value)
     # Removal may compact the entry arrays and renumber their indices.

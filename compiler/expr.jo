@@ -3529,6 +3529,7 @@ dewy_member_name = (callee: int, rt: int, fname: int, args: int[]) -> int:
     k = types[rt].kind
     pos = nodes[callee].pos
     recv = receiver_text(int(nodes[callee].a))
+    if name == "add" and is_dewy_set_type(rt): fatal(pos, "sets insert with push: replace `{recv}.add(value)` with `{recv}.push(value)`")
     if k == .array:
         if name == "pop" and args.len() == 1: return intern("remove")
         if name == "insert": return intern("__dewy_insert")
@@ -5759,6 +5760,7 @@ check_expr = (n: int, expected: int) -> int:
         bt = prune(check_expr(int(nodes[n].a), 0))
         nodes[n].a = i32(last_checked)
         fname = int(nodes[n].name)
+        if name_of(fname) == "add" and is_dewy_set_type(bt) and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "sets insert with push: replace `.add(value)` with `.push(value)`")
         if synthetic_copy(bt, fname, nodes[n].pos): return check_copy(n, int(nodes[n].a), bt)
         if (is_union(bt) or tkind(bt) == .opt) and files[pos_file(nodes[n].pos)].is_dewy:
             return forward_member(n, int(nodes[n].a), bt, expected)

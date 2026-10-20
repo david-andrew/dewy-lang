@@ -5,7 +5,7 @@ loop step in [0..1200) {
 let key=(step*37+11)%41 let action=step%7
 if action <? 3 {
 let fresh=key not in? expected
-if values.add(key) not=? fresh return 1
+values.push(key)
 if fresh expected.push(key)
 } else if action =? 3 {
 if values.remove(key) not=? (key in? expected) return 2
