@@ -13,15 +13,18 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import contextlib
+import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from tools.cases import ROOT, clean_environment, default_workers, keyword_filter
@@ -117,7 +120,7 @@ def validate(doc: dict) -> list[str]:
 
 
 def run(compiler: Path, *, keyword: str = '', workers: int = 2, update_ratchet: bool = False,
-        scoreboard: bool = True) -> int:
+        scoreboard: bool = True, json_output: Path | None = None) -> int:
     started = time.perf_counter()
     doc = load()
     problems = validate(doc)
@@ -153,6 +156,20 @@ def run(compiler: Path, *, keyword: str = '', workers: int = 2, update_ratchet: 
     core_failed = sorted(n for n in names if not core[n].ok)
     newly = sorted(n for n in names if design[n].ok and n not in ratchet)
     elapsed = time.perf_counter() - started
+
+    if json_output is not None:
+        revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+        payload = {
+            'schema': 1, 'revision': revision,
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'compiler_sha256': hashlib.sha256(compiler.read_bytes()).hexdigest(),
+            'host': f'{sys.platform}-{platform.machine()}', 'target': 'native-release',
+            'milestones': doc['milestones'],
+            'results': [dict(asdict(results[n, v]), milestone=doc['programs'][n]['milestone'])
+                        for n, v in jobs],
+        }
+        json_output.parent.mkdir(parents=True, exist_ok=True)
+        json_output.write_text(json.dumps(payload, indent=2) + '\n')
 
     if scoreboard:
         print_scoreboard(doc, names, design, core)
@@ -210,6 +227,8 @@ def arguments(argv: list[str] | None = None):
     cli.add_argument('-n', dest='workers', type=int, default=None, help='parallel workers (default: up to 4)')
     cli.add_argument('--update-ratchet', action='store_true',
                      help='add newly passing design programs to design_passing')
+    cli.add_argument('--json', type=Path, dest='json_output', metavar='PATH',
+                     help='write fresh target-scoped results as JSON (build output only)')
     cli.add_argument('--compiler', type=Path, help='use this compiler instead of the cached build')
     return cli.parse_args(argv)
 
@@ -222,7 +241,7 @@ def main(argv: list[str] | None = None, compiler: Path | None = None) -> int:
         return 2
     workers = options.workers if options.workers is not None else default_workers()
     return run(Path(compiler).resolve(), keyword=options.keyword, workers=workers or 1,
-               update_ratchet=options.update_ratchet)
+               update_ratchet=options.update_ratchet, json_output=options.json_output)
 
 
 if __name__ == '__main__':
