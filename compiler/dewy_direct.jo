@@ -86,7 +86,7 @@ dc_atom = () -> int:
         if text == "end" or text == "type": return 0
         if text == "none": return mk(.none_lit, pos)
         n = mk(.ident, pos)
-        nodes[n].name = if text == "printl": i32(intern("print")) else if text == "int": i32(intern("__dewy_int")) else: token.name
+        nodes[n].name = if text == "printl": i32(intern("print")) else if text == "print": i32(intern("__dewy_print")) else if text == "int": i32(intern("__dewy_int")) else: token.name
         return n
     if token.kind == .boolean:
         n = mk(.bool_lit, pos)

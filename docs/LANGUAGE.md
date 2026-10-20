@@ -1604,6 +1604,8 @@ yet (`SpawnError`).
 
 ## Loops, text and optional values
 
+`printl(x)` writes a value and a line break; `print(x)` writes it without one.
+
 Optional types use `T?`, including generic types such as `array<uint16>?`
 and nested `array<array<uint16>?>?`. `none` represents an absent value.
 

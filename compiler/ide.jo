@@ -141,6 +141,7 @@ ide_dewy_alt = (name: int) -> int:
     if n == "str": return intern("string")
     if n == "Set": return intern("set")
     if n == "print": return intern("printl")
+    if n == "__dewy_print": return intern("print")
     if n == "remove": return intern("pop")
     if n == "__dewy_insert": return intern("insert")
     if n == "starts_with" or n == "ends_with": return intern(replace(n, "_", ""))
@@ -971,6 +972,7 @@ ide_completion_name = (nm: int, s: int) -> str:
         return ide_type_str(int(syms[s].ref))
     # (Dewy writes a line with printl)
     if ends_with(ide_doc, ".dewy") and name_of(nm) == "print": return "printl"
+    if ends_with(ide_doc, ".dewy") and name_of(nm) == "__dewy_print": return "print"
     name_of(nm)
 
 ide_complete_names = ():
@@ -993,6 +995,8 @@ ide_complete_names = ():
         seen[nm] = true
         label = it.name
         if ends_with(ide_doc, ".dewy") and label == "print": label = "printl"
+        else if ends_with(ide_doc, ".dewy") and label == "__dewy_print": label = "print"
+        else if label == "__dewy_print": continue
         ide_emit("C\t{label}\t{IK_FN}\tbuiltin")
     ide_flush()
     stop(0)

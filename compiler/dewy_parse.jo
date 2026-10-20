@@ -685,7 +685,7 @@ dw_expr = (id: int) -> int:
             name = if axis == 0: base else: "{base}_{axis}"
             return comp_ident(intern(name), pos)
         n = mk(.ident, pos)
-        nodes[n].name = if text == "printl": i32(intern("print")) else if text == "int": i32(intern("__dewy_int")) else: dw_name_id(id)
+        nodes[n].name = if text == "printl": i32(intern("print")) else if text == "print": i32(intern("__dewy_print")) else if text == "int": i32(intern("__dewy_int")) else: dw_name_id(id)
         return n
     if dw_integer_kind(k):
         if let value = dw_unsigned(text, id):

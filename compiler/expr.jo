@@ -19,7 +19,7 @@ enum IN:
     hash, alignof, unreachable, arrcap, fmt_struct, sqrt, vec_ctor, cfn_cast, wasm_call, callc, floor_,
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
     read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
-    static_assert, runtime_assert
+    static_assert, runtime_assert, dewy_print
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy
@@ -38,6 +38,7 @@ intrinsics = [
     Intrinsic("__dewy_iter_value", .dewy_iter_value, false),
     Intrinsic("__dewy_iter_pair", .dewy_iter_pair, false),
     Intrinsic("__dewy_set", .dewy_set, false),
+    Intrinsic("__dewy_print", .dewy_print, false),
     Intrinsic("len", .len, true), Intrinsic("cap", .arrcap, true), Intrinsic("push", .push, true),
     Intrinsic("pop", .pop, true), Intrinsic("insert", .insert, true), Intrinsic("remove", .remove, true),
     Intrinsic("clear", .clear, true), Intrinsic("reserve", .reserve, true), Intrinsic("resize", .resize, true),
@@ -4144,7 +4145,8 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if cx >= 0 and fns[int(ctxs[cx].inst)].caps.len() > captures_before and fact_open(args[0]):
             fatal(nodes[n].pos, "assertion unknown: erased operand would introduce a runtime capture; witness at {pos_str(nodes[args[0]].pos)}")
         fact_queue(n, args[0], if nargs == 2: args[1] else: 0)
-    else if id == .print:
+    else if id == .print or id == .dewy_print:
+        # (Dewy's print: no line break; its printl is the library's print)
         s = mk(.str_lit, nodes[n].pos)
         nodes[s].aux = 1
         parts: int[]
@@ -4164,7 +4166,9 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         nodes[n].kind = .call
         nodes[n].aux = 0
         set_list(n, [s])
-        nodes[n].sym = i32(runtime_fn("__print_str"))
+        printer = "__print_str"
+        if id == .dewy_print: printer = "write"
+        nodes[n].sym = i32(runtime_fn(printer))
         nodes[n].type = i32(T_VOID)
         return T_VOID
     else if id == .embed:
