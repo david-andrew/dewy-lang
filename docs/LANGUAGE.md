@@ -713,7 +713,9 @@ main=()=>{
 ```
 
 `Point[20 22]` explicitly constructs a named record. `[x=20]` uses the expected
-record type and its defaults. Without an expected type, named fields infer an
+record type and its defaults, and so does a positional `[20]`, which gives the
+fields in order, as `Point(20)` would: in an annotation, an element of
+`array<Point>`, a dictionary value or an argument. Without an expected type, named fields infer an
 anonymous record. Anonymous record types agree by field names and types, even
 when written in a different order. Their shape can also be written directly in
 an annotation:

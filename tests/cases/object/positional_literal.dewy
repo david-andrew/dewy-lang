@@ -1,0 +1,19 @@
+# exit: 12
+# quick
+# Where an object type is expected, a literal may give its fields in order.
+let Point:type = [x:int64 y:int64 = 0]
+let Spec:type = [digits:set<string> case_insensitive:bool]
+const specs:dict<string Spec> = [
+    'b' -> [set["0" "1"] false]
+    't' -> [set["0" "1" "2"] false]
+]
+let sum = (p:Point):>int64 => p.x + p.y
+let origin = (x:int64):>Point => [x]
+let main = ():>int64 => {
+    let p:Point = [3]
+    let corners:array<Point> = [[1 2] [5 6]]
+    let maybe:Point|none = [4 5]
+    corners.push([7 8])
+    printl"{p} {corners} {maybe} {sum([20 22])} {origin(9)}"
+    return p.x + corners[1].y + specs['t'].digits.length
+}

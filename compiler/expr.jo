@@ -1372,6 +1372,18 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
                     # make a typed-array overload lose to a catch-all T.
                     element_cost = max(element_cost, r)
                 return cost + element_cost
+            # (a positional object literal, Point(3 4) written [3 4]: its items against the
+            # fields in order)
+            if tk == .struct_ and not has_var(target) and not is_map_type(target) and dewy_positional_fits(a, target):
+                si = int(types[target].st)
+                check_struct_fields(si)
+                if nkids(a) > int(structs[si].nfields): return -1
+                element_cost = 0
+                loop i in 0.. and element in kids(a):
+                    r = arg_cost(element, int(fields[int(structs[si].fields) + i].type), binds)
+                    if r < 0: return -1
+                    element_cost = max(element_cost, r)
+                return cost + element_cost
             # A bound scalar parameter cannot accept an array literal. Do not
             # let its generic fallback compete with the matching T[] overload.
             if pk == .param and has_var(target): return 3
@@ -2253,6 +2265,21 @@ dewy_record_target = (expected: int) -> int:
     if types[target].kind == .opt: target = prune(int(types[target].elem))
     if types[target].kind == .struct_ and not is_map_type(target): return target
     0
+
+# The object type a positional literal `[3 4]` builds, or 0: one declared in Dewy, expected
+# here, and a literal of plain items (no spread).
+dewy_positional_record = (n: int, expected: int) -> int:
+    target = dewy_record_target(expected)
+    if target == 0 or not dewy_positional_fits(n, target): return 0
+    target
+
+dewy_positional_fits = (n: int, target: int) -> bool:
+    if not files[pos_file(nodes[n].pos)].is_dewy or array_has_spread(n): return false
+    d = int(structs[int(types[target].st)].decl)
+    if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy: return false
+    loop i in [0..nkids(n)):
+        if nodes[kid(n, i)].kind == .namedarg: return false
+    true
 
 # With no written field names, the first spread distinguishes `[xs...]` from
 # `[record...]`. Inspect a clone so contextual checking retains the source AST.
@@ -7098,6 +7125,11 @@ check_expr = (n: int, expected: int) -> int:
     else if k == .array and nkids(n) == 0 and nodes[n].b == 0 and dewy_record_target(ex) != 0 and files[pos_file(nodes[n].pos)].is_dewy:
         target = dewy_record_target(ex)
         t = struct_ctor(n, target, int(structs[int(types[target].st)].decl), [], expected)
+    else if k == .array and nodes[n].b == 0 and dewy_positional_record(n, ex) != 0:
+        # [3 4] where a Dewy object type is expected: its fields in declaration order, as the
+        # constructor call Point(3 4) takes them
+        target = dewy_positional_record(n, ex)
+        t = struct_ctor(n, target, int(structs[int(types[target].st)].decl), kids(n), expected)
     else if k == .array and ex != 0 and exk == .fixed and fixed_literal_ok(n, ex):
         # [a, b, c] (or [] for zeros, or [v] * N) as a fixed-size array
         et = int(types[ex].elem)
