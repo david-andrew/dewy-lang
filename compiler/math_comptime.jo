@@ -1,5 +1,5 @@
 # Reuse the bundled arithmetic inside the evaluator. CT mathematical integers
-# have a word or one immutable BigInt value, just like the runtime boundary.
+# have a word or one immutable BigInt value, independent of the tagged runtime boundary.
 use 'comptime.jo'
 use 'check.jo'
 use 'types.jo'
@@ -9,7 +9,7 @@ use 'expr.jo'
 use 'util.jo'
 
 ct_math_runtime = (name: str, args: int[], e: int) -> int:
-    f = runtime_fn(name)
+    f = runtime_fn("__mc_" + name[5..])
     call = mk(.call, nodes[e].pos)
     nodes[call].sym = i32(f)
     nodes[call].type = fns[f].ret
@@ -20,7 +20,7 @@ ct_math_runtime = (name: str, args: int[], e: int) -> int:
 
 ct_math_rep = (value: int) -> int:
     x = ct_values[value]
-    f = runtime_fn("__mi_compare")
+    f = runtime_fn("__mc_compare")
     rep = prune(fns[f].ptypes[0])
     layout(rep)
     handle = int(fields[int(structs[int(types[rep].st)].fields) + 1].type)

@@ -933,6 +933,20 @@ arm64_ins = (pos: int, ins: Ins):
             else:
                 a_ld(9, a)
                 a_st(d, 9)
+        overflow_add, overflow_sub, overflow_mul:
+            rn = a_src(a, 9)
+            rm = a_src(bb, 10)
+            cc = 6
+            if op == .overflow_mul:
+                w32(0x9B407C00 | (rm << 16) | (rn << 5) | 12)
+                a_mul(11, rn, rm)
+                w32(0xEB00001F | (2 << 22) | (11 << 16) | (63 << 10) | (12 << 5))
+                cc = AC_NE
+            else:
+                base = if op == .overflow_add: 0xAB000000 else: 0xEB000000
+                w32(base | (rm << 16) | (rn << 5) | 11)
+            a_cset(11, cc)
+            a_st(d, 11)
         checked_add, checked_sub, checked_mul:
             rn = a_src(a, 9)
             rd = a_dst(d, 11)

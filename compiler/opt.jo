@@ -76,7 +76,7 @@ o_pure = (op: Op) -> bool:
     match op:
         select: true
         iconst, fconst, mov, slot, gaddr, daddr, faddr, load: true
-        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, neg, not_, mulhs, mulhu: true
+        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, neg, not_, mulhs, mulhu, overflow_add, overflow_sub, overflow_mul: true
         eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
         fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc: true
         feq, fne, flt, fle, fgt, fge: true
@@ -113,6 +113,9 @@ is_k = (v: int) -> bool: o_regs[v].constant
 # fold an integer operation on constants; returns (ok, value)
 fold = (op: Op, x: int, y: int) -> (bool, int):
     match op:
+        overflow_add: (true, int(math_word_overflow(0, x, y)))
+        overflow_sub: (true, int(math_word_overflow(1, x, y)))
+        overflow_mul: (true, int(math_word_overflow(2, x, y)))
         add: (true, x + y)
         sub: (true, x - y)
         mul: (true, x * y)
@@ -376,7 +379,7 @@ cse_arity = (op: Op, mode: int) -> int:
         load: if mode & M_INDEX != 0: 2 else: 1
         neg, not_, fneg, fsqrt, ffloor, fceil, fabs, ftrunc: 1
         sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits: 1
-        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, mulhs, mulhu: 2
+        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, mulhs, mulhu, overflow_add, overflow_sub, overflow_mul: 2
         eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: 2
         fadd, fsub, fmul, fdiv, fmin, fmax, feq, fne, flt, fle, fgt, fge: 2
         _: -1
@@ -1784,7 +1787,7 @@ o_retargetable = (op: Op) -> bool:
         # Native flags consume the operands before assigning the result. Wasm
         # checks the saved operands afterwards, so it must retain a fresh local.
         checked_add, checked_sub, checked_mul: checked_flags
-        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, neg, not_, load, mov, mulhs, mulhu, memeq, streq: true
+        add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, neg, not_, load, mov, mulhs, mulhu, memeq, streq, overflow_add, overflow_sub, overflow_mul: true
         eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: true
         fadd, fsub, fmul, fdiv, fneg, fsqrt, fmin, fmax, ffloor, fceil, fabs, ftrunc: true
         sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits, fconst, iconst: true

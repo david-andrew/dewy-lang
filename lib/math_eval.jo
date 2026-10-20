@@ -1,0 +1,90 @@
+# Compiler-evaluator model: values here have no machine addresses.
+# Loaded only for exact compile-time arithmetic; never a runtime ABI.
+import 'bigint.dewy' as __ctbi
+
+struct __CTMathRep:
+    word: int
+    big: __ctbi.BigInt[]
+
+__mc_pack = (value: __ctbi.BigInt) -> __CTMathRep:
+    if let word = __ctbi.to_int64(value): return __CTMathRep(word)
+    __CTMathRep(0, [value])
+
+__mc_big = (value: __CTMathRep) -> __ctbi.BigInt:
+    if value.big.len() == 0: return __ctbi.bigint(value.word)
+    value.big[0]
+
+__mc_unsigned = (value: u64) -> __CTMathRep:
+    if value <= u64(9223372036854775807): return __CTMathRep(int(value))
+    __mc_pack(__ctbi.bigint(value))
+
+__mc_ratio_int = (numerator: __ctbi.BigInt, denominator: __ctbi.BigInt) -> __CTMathRep:
+    parts = __ctbi.divmod(numerator, denominator)
+    quotient = parts.quotient
+    if parts.remainder._sign != 0 and numerator._sign != denominator._sign:
+        quotient = __ctbi.__add__(quotient, __ctbi.bigint(1))
+    __mc_pack(quotient)
+
+__mc_slow = (a: __CTMathRep, b: __CTMathRep, operation: int) -> __CTMathRep:
+    x = __mc_big(a)
+    y = __mc_big(b)
+    if operation == 0: return __mc_pack(__ctbi.__add__(x, y))
+    if operation == 1: return __mc_pack(__ctbi.__sub__(x, y))
+    if operation == 2: return __mc_pack(__ctbi.__mul__(x, y))
+    if operation == 3 or operation == 4:
+        parts = __ctbi.divmod(x, y)
+        if x._sign != y._sign and parts.remainder._sign != 0:
+            parts.quotient = __ctbi.__add__(parts.quotient, __ctbi.bigint(1))
+            parts.remainder = __ctbi.__sub__(parts.remainder, y)
+        return __mc_pack(if operation == 3: parts.quotient else: parts.remainder)
+    if operation == 5: return __mc_pack(__ctbi.__and__(x, y))
+    if operation == 6: return __mc_pack(__ctbi.__or__(x, y))
+    if operation == 7: return __mc_pack(__ctbi.__xor__(x, y))
+    panic("invalid mathematical integer operation")
+
+__mc_compare = (a: __CTMathRep, b: __CTMathRep) -> int:
+    if a.big.len() == 0 and b.big.len() == 0:
+        if a.word < b.word: return -1
+        return int(a.word > b.word)
+    __ctbi._compare(__mc_big(a), __mc_big(b))
+
+__mc_shift = (a: __CTMathRep, count: int, right: bool) -> __CTMathRep:
+    if count < 0: panic("shift count must be nonnegative")
+    if right: return __mc_pack(__ctbi.__rshift__(__mc_big(a), count))
+    __mc_pack(__ctbi.__lshift__(__mc_big(a), count))
+
+__mc_signed = (a: __CTMathRep) -> int:
+    if a.big.len() == 0: return a.word
+    if let value = __ctbi.to_int64(a.big[0]): return value
+    __int_overflow()
+    0
+
+__mc_to_unsigned = (a: __CTMathRep) -> u64:
+    if a.big.len() == 0:
+        if a.word < 0: __int_overflow()
+        return u64(a.word)
+    if let value = __ctbi.to_uint64(a.big[0]): return value
+    __int_overflow()
+    0
+
+__mc_float = (a: __CTMathRep) -> f64:
+    if a.big.len() == 0: return f64(a.word)
+    __ctbi.to_float64(a.big[0])
+
+__mc_from_float = (x: f64) -> __CTMathRep:
+    if x != x or x - x != 0.0: __int_overflow()
+    if x >= -9223372036854775808.0 and x < 9223372036854775808.0: return __CTMathRep(int(x))
+    bits = f64_bits(x)
+    exponent = int((bits >> 52) & 2047) - 1023 - 52
+    mantissa = (bits & 4503599627370495) | 4503599627370496
+    big = __ctbi.bigint(mantissa)
+    if exponent >= 0: big = __ctbi.__lshift__(big, exponent)
+    else: big = __ctbi.__rshift__(big, -exponent)
+    if x < 0.0: big = __ctbi.__unary_sub__(big)
+    __mc_pack(big)
+
+
+__mc_count = (value: __CTMathRep) -> int:
+    if value.big.len() == 0: return value.word
+    if value.big[0]._sign < 0: __int_overflow()
+    9223372036854775807

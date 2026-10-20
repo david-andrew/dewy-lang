@@ -49,6 +49,7 @@ parse_prelude_module = (m: int):
     p_lazy = false
 
 math_runtime_loaded = false
+math_eval_loaded = false
 
 demand_prelude_name = (name: int):
     if not math_runtime_loaded and starts_with(name_of(name), "__mi_"):
@@ -56,6 +57,18 @@ demand_prelude_name = (name: int):
         first_module = modules.len()
         first_import = from_imports.len()
         register_module(load_module(lib_dir + "/math_runtime.jo", true, -1))
+        mi = first_module
+        loop mi < modules.len():
+            register_module(mi)
+            mi += 1
+        bind_from_imports(first_import)
+        if module_ctx.len() > 0: setup_module_contexts(init_fns[0])
+        late_module_imports = true
+    if not math_eval_loaded and starts_with(name_of(name), "__mc_"):
+        math_eval_loaded = true
+        first_module = modules.len()
+        first_import = from_imports.len()
+        register_module(load_module(lib_dir + "/math_eval.jo", true, -1))
         mi = first_module
         loop mi < modules.len():
             register_module(mi)

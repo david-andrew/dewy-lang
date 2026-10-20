@@ -7,18 +7,30 @@ use 'expr.jo'
 use 'ir.jo'
 use 'util.jo'
 
-# The default int boundary representation is [signed word, nullable BigInt
-# handle]. The handle owns an immutable one-element array; a null handle
-# selects the word. Every result uses caller-owned aggregate return storage.
+# Boundary values occupy one register. Even words encode signed 63-bit
+# integers; odd words own an immutable BigInt allocation. Word proofs keep
+# nonescaping locals untagged and convert only at these boundaries.
 math_word = (word: int) -> Val:
-    s = new_temp(T_MATH_INT)
-    a = e_slot(s)
-    e_zero(a, 16)
-    e_store(a, 0, word, 8)
-    Val(a, true, s)
+    if is_kv(word):
+        value = kv_of(word)
+        if value >= -4611686018427387904 and value <= 4611686018427387903:
+            return V(e_iconst(value << 1), false)
+        return math_call("__mi_word", [word])
+    out = vreg(VI)
+    tagged = e_bin(.shl, VI, word, e_iconst(1))
+    iff(e_bin(.eq, VI, e_bin(.shrs, VI, tagged, e_iconst(1)), word))
+    e_mov(out, tagged)
+    els()
+    old = ir_cold
+    ir_cold = true
+    e_mov(out, e_call(rt("__mi_word"), [word], VI))
+    ir_cold = old
+    endc()
+    V(out, true)
 
 math_call = (name: str, args: int[], result: int = 0) -> Val:
     t = if result == 0: T_MATH_INT else: result
+    if vc(t) != VC_AGG: return V(e_call(rt(name), args, vt_of(t)), true)
     s = new_temp(t)
     a = e_slot(s)
     e_zero(a, tsize(t))
@@ -26,12 +38,22 @@ math_call = (name: str, args: int[], result: int = 0) -> Val:
     Val(a, true, s)
 
 math_payload_type = () -> int:
-    f = runtime_fn("__mi_compare")
-    t = prune(fns[f].ptypes[0])
-    layout(t)
-    int(fields[int(structs[int(types[t].st)].fields) + 1].type)
+    f = runtime_fn("__mi_payload")
+    mk_array(telem(prune(int(fns[f].ret))))
 
-math_signed = (a: int) -> int: e_call(rt("__mi_signed"), [a], VI)
+math_tag = (a: int) -> int: e_bin(.and_, VI, a, e_iconst(1))
+math_untag = (a: int) -> int: e_bin(.shrs, VI, a, e_iconst(1))
+
+math_signed = (a: int) -> int:
+    result = vreg(VI)
+    e_mov(result, math_untag(a))
+    iff(math_tag(a))
+    old = ir_cold
+    ir_cold = true
+    e_mov(result, e_call(rt("__mi_signed"), [a], VI))
+    ir_cold = old
+    endc()
+    result
 
 math_count = (e: int) -> int:
     if prune(ntype(e)) == T_MATH_INT and math_proven_word(e): return math_word_expr(e)
@@ -42,9 +64,9 @@ math_count = (e: int) -> int:
 
 math_compare = (op: Tok, a: int, b: int) -> int:
     result = vreg(VI)
-    tag = e_bin(.or_, VI, e_load(VI, a, 8, ptr_size), e_load(VI, b, 8, ptr_size))
+    tag = math_tag(e_bin(.or_, VI, a, b))
     iff(e_bin(.eq, VI, tag, e_iconst(0)))
-    e_mov(result, e_bin(int_op(op, true), VI, e_load(VI, a, 0, 8), e_load(VI, b, 0, 8)))
+    e_mov(result, e_bin(int_op(op, true), VI, a, b))
     els()
     old = ir_cold
     ir_cold = true
@@ -55,27 +77,33 @@ math_compare = (op: Tok, a: int, b: int) -> int:
     result
 
 math_binary = (op: Tok, a: int, b: int) -> Val:
-    s = new_temp(T_MATH_INT)
-    out = e_slot(s)
-    e_zero(out, 16)
-    tag = e_bin(.or_, VI, e_load(VI, a, 8, ptr_size), e_load(VI, b, 8, ptr_size))
+    out = vreg(VI)
+    e_mov(out, e_iconst(0))
+    tag = math_tag(e_bin(.or_, VI, a, b))
     operation = if op == .plus: 0 else if op == .minus: 1 else if op == .star: 2 else if op == .slash: 3 else if op == .percent: 4 else if op == .amp: 5 else if op == .pipe: 6 else: 7
     blk()
     done = ctl
     iff(e_bin(.eq, VI, tag, e_iconst(0)))
-    x = e_load(VI, a, 0, 8)
-    y = e_load(VI, b, 0, 8)
+    x = a
+    y = b
+    if op == .star: x = math_untag(a)
+    if op == .slash or op == .percent:
+        x = math_untag(a)
+        y = math_untag(b)
     result = 0
     bad = e_iconst(0)
     if op == .plus or op == .minus:
         result = e_bin(int_op(op, true), VI, x, y)
-        left = e_bin(.xor, VI, x, result)
-        right = e_bin(.xor, VI, (if op == .plus: y else: x), (if op == .plus: result else: y))
-        bad = e_bin(.lts, VI, e_bin(.and_, VI, left, right), e_iconst(0))
+        if not target_wasm:
+            bad = e_bin((if op == .plus: Op.overflow_add else: Op.overflow_sub), VI, x, y)
+        else:
+            left = e_bin(.xor, VI, x, result)
+            right = e_bin(.xor, VI, (if op == .plus: y else: x), (if op == .plus: result else: y))
+            bad = e_bin(.lts, VI, e_bin(.and_, VI, left, right), e_iconst(0))
     else if op == .star:
         result = e_bin(.mul, VI, x, y)
         if not target_wasm:
-            bad = e_bin(.ne, VI, e_bin(.mulhs, VI, x, y), e_bin(.shrs, VI, result, e_iconst(63)))
+            bad = e_bin(.overflow_mul, VI, x, y)
         else:
             bad = vreg(VI)
             e_mov(bad, e_iconst(0))
@@ -87,61 +115,60 @@ math_binary = (op: Tok, a: int, b: int) -> Val:
             endc()
             endc()
     else if op == .slash or op == .percent:
-        bad = e_bin(.or_, VI, e_bin(.eq, VI, y, e_iconst(0)), e_bin(.and_, VI, e_bin(.eq, VI, x, e_iconst(-9223372036854775807 - 1)), e_bin(.eq, VI, y, e_iconst(-1))))
+        bad = e_bin(.or_, VI, e_bin(.eq, VI, y, e_iconst(0)), e_bin(.and_, VI, e_bin(.eq, VI, x, e_iconst(-4611686018427387904)), e_bin(.eq, VI, y, e_iconst(-1))))
         # The hardware division must remain inside the proven-safe arm.
     else: result = e_bin(int_op(op, true), VI, x, y)
     iff(e_bin(.eq, VI, bad, e_iconst(0)))
     if op == .slash or op == .percent: result = e_bin(int_op(op, true), VI, x, y)
-    e_store(out, 0, result, 8)
+    if op == .slash or op == .percent: result = e_bin(.shl, VI, result, e_iconst(1))
+    e_mov(out, result)
     br_to(done)
     endc()
     endc()
     # Both source values are still live here, including their original words.
     old = ir_cold
     ir_cold = true
-    e_call(rt("__mi_slow"), [out, a, b, e_iconst(operation)], -1)
+    e_mov(out, e_call(rt("__mi_slow"), [a, b, e_iconst(operation)], VI))
     ir_cold = old
     endc()
-    Val(out, true, s)
+    V(out, true)
 
 math_shift = (op: Tok, a: int, count: int, signed_count: bool) -> Val:
     if signed_count: math_int_guard(e_bin(.lts, VI, count, e_iconst(0)))
-    s = new_temp(T_MATH_INT)
-    out = e_slot(s)
-    e_zero(out, 16)
+    out = vreg(VI)
+    e_mov(out, e_iconst(0))
     blk()
     done = ctl
-    iff(e_bin(.eq, VI, e_load(VI, a, 8, ptr_size), e_iconst(0)))
-    x = e_load(VI, a, 0, 8)
+    iff(e_bin(.eq, VI, math_tag(a), e_iconst(0)))
+    x = a
     iff(e_bin(.geu, VI, count, e_iconst(64)))
     if op == .shr:
-        e_store(out, 0, e_bin(.shrs, VI, x, e_iconst(63)), 8)
+        e_mov(out, e_bin(.and_, VI, e_bin(.shrs, VI, x, e_iconst(63)), e_iconst(-2)))
         br_to(done)
     else:
         brif_to(e_bin(.eq, VI, x, e_iconst(0)), done)
     els()
     result = e_bin(int_op(op, true), VI, x, count)
     if op == .shl: iff(e_bin(.eq, VI, e_bin(.shrs, VI, result, count), x))
-    e_store(out, 0, result, 8)
+    if op == .shr: result = e_bin(.and_, VI, result, e_iconst(-2))
+    e_mov(out, result)
     br_to(done)
     if op == .shl: endc()
     endc()
     endc()
     old = ir_cold
     ir_cold = true
-    e_call(rt("__mi_shift"), [out, a, count, e_iconst(int(op == .shr))], -1)
+    e_mov(out, e_call(rt("__mi_shift"), [a, count, e_iconst(int(op == .shr))], VI))
     ir_cold = old
     endc()
-    Val(out, true, s)
+    V(out, true)
 
 math_main = (f: int):
     helper_params(0)
     ir.ret = VI
-    s = new_temp(T_MATH_INT)
-    a = e_slot(s)
-    e_call(lf_of_inst(f), [a], -1)
+    a = e_call(lf_of_inst(f), [], VI)
     result = math_signed(a)
-    drop_at(a, T_MATH_INT)
+    release(a, T_MATH_INT)
     e_ret(result)
 
 math_word_bound = (e: int) -> bool:
@@ -166,7 +193,7 @@ math_loop_slot = () -> int:
     locals.push(Local(type = i32(T_MATH_INT), owner = i32(cur_fn), offset = i32(slot)))
     scope_add_local(l)
     address = e_slot(slot)
-    e_zero(address, 16)
+    e_zero(address, 8)
     address
 
 gen_math_for = (s: int):
@@ -177,18 +204,18 @@ gen_math_for = (s: int):
     endv = math_loop_slot()
     step = math_loop_slot()
     stmt_begin()
-    e_copy(ctr, gen_owned(int(nodes[it].a)).v, 16)
+    e_store(ctr, 0, gen_owned(int(nodes[it].a)).v, 8)
     open_end = nodes[it].b == 0
-    if not open_end: e_copy(endv, gen_owned(int(nodes[it].b)).v, 16)
+    if not open_end: e_store(endv, 0, gen_owned(int(nodes[it].b)).v, 8)
     if has_flag(it, NF_STEP):
         second = gen_borrowed(int(nodes[it].c)).v
-        e_copy(step, math_binary(.minus, second, ctr).v, 16)
-    else: e_copy(step, math_word(e_iconst(1)).v, 16)
+        e_store(step, 0, math_binary(.minus, second, e_load(VI, ctr, 0, 8)).v, 8)
+    else: e_store(step, 0, math_word(e_iconst(1)).v, 8)
     zero = math_word(e_iconst(0)).v
-    iff(math_compare(.eq, step, zero))
+    iff(math_compare(.eq, e_load(VI, step, 0, 8), zero))
     e_call_nr(rt("__panic"), [e_daddr(str_data("range step must be nonzero"))], -1)
     endc()
-    up = math_compare(.gt, step, zero)
+    up = math_compare(.gt, e_load(VI, step, 0, 8), zero)
     stmt_end()
     scope_add_local(l)
     blk()
@@ -198,23 +225,24 @@ gen_math_for = (s: int):
     if not open_end:
         inclusive = has_flag(it, NF_INCLUSIVE)
         iff(up)
-        brif_to(math_compare((if inclusive: Tok.gt else: Tok.ge), ctr, endv), brk)
+        brif_to(math_compare((if inclusive: Tok.gt else: Tok.ge), e_load(VI, ctr, 0, 8), e_load(VI, endv, 0, 8)), brk)
         els()
-        brif_to(math_compare((if inclusive: Tok.lt else: Tok.le), ctr, endv), brk)
+        brif_to(math_compare((if inclusive: Tok.lt else: Tok.le), e_load(VI, ctr, 0, 8), e_load(VI, endv, 0, 8)), brk)
         endc()
-    target = place_addr(local_place(l, true), T_MATH_INT)
-    drop_at(target, T_MATH_INT)
-    e_copy(target, ctr, 16)
-    copy_at(target, T_MATH_INT)
+    target = local_place(l, true)
+    release(read_place(target, T_MATH_INT), T_MATH_INT)
+    value = e_load(VI, ctr, 0, 8)
+    retain(value, T_MATH_INT)
+    write_place(target, T_MATH_INT, value)
     blk()
     cont = ctl
     loops.push(LoopInfo(brk, cont, scope_locals.len(), tl_items.len(), building.len()))
     gen_loop_body(int(nodes[s].b))
     loops.pop()
     endc()
-    next = math_binary(.plus, ctr, step)
+    next = math_binary(.plus, e_load(VI, ctr, 0, 8), e_load(VI, step, 0, 8))
     drop_at(ctr, T_MATH_INT)
-    e_copy(ctr, next.v, 16)
+    e_store(ctr, 0, next.v, 8)
     br_to(top)
     endc()
     endc()
@@ -281,7 +309,7 @@ math_word_expr = (e: int) -> int:
         a = math_word_expr(int(nodes[e].a))
         b = math_word_expr(int(nodes[e].b))
         return e_bin(int_op(nodes[e].op as Tok, true), VI, a, b)
-    e_load(VI, gen_borrowed(e).v, 0, 8)
+    math_signed(gen_borrowed(e).v)
 
 math_word_helper = (e: int) -> int:
     if nodes[e].kind != .call or nodes[e].aux != 0 or nkids(e) != 2: return 0
@@ -304,8 +332,8 @@ math_low_word = (e: int) -> int:
     if math_proven_word(e): return math_word_expr(e)
     value = gen_borrowed(e).v
     result = vreg(VI)
-    e_mov(result, e_load(VI, value, 0, 8))
-    iff(e_bin(.ne, VI, e_load(VI, value, 8, ptr_size), e_iconst(0)))
+    e_mov(result, math_untag(value))
+    iff(math_tag(value))
     old = ir_cold
     ir_cold = true
     e_mov(result, e_call(rt("__mi_low_word"), [value], VI))
@@ -542,9 +570,10 @@ math_accumulator_for = (s: int) -> bool:
     bound = math_addend_bound(addend, index, cap)
     if bound < 0 or bound > 9223372036854775807 / cap: return false
     room = 9223372036854775807 - cap * bound
-    addr = place_addr(local_place(l, true), T_MATH_INT)
-    word = e_load(VI, addr, 0, 8)
-    guard = e_bin(.eq, VI, e_load(VI, addr, 8, ptr_size), e_iconst(0))
+    place = local_place(l, true)
+    initial = read_place(place, T_MATH_INT)
+    word = math_untag(initial)
+    guard = e_bin(.eq, VI, math_tag(initial), e_iconst(0))
     guard = e_bin(.and_, VI, guard, e_bin(.les, VI, math_count(end), e_iconst(cap)))
     guard = e_bin(.and_, VI, guard, e_bin(.and_, VI, e_bin(.ges, VI, word, e_iconst(-room)), e_bin(.les, VI, word, e_iconst(room))))
     saved_regs = math_word_regs
@@ -559,7 +588,7 @@ math_accumulator_for = (s: int) -> bool:
     math_versioning = true
     math_fresh_loop_regs(s)
     gen_for(s)
-    e_store(addr, 0, acc, 8)
+    write_place(place, T_MATH_INT, math_word(acc).v)
     math_word_regs = saved_regs
     math_word_limits = saved_limits
     math_word_updates = saved_updates

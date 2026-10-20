@@ -1,0 +1,36 @@
+# quick
+# exit: 42
+identity=(x:int):>int=>x
+mutate=(@x:int):>void=>{x+=1}
+exercise=():>int=>{
+    let top=identity(4611686018427387903)
+    let bottom=identity(-4611686018427387904)
+    if top+1 not=?4611686018427387904 or bottom-1 not=?-4611686018427387905 return 1
+    if -bottom not=?4611686018427387904 or top*2 not=?9223372036854775806 return 2
+    if bottom//(-1) not=?4611686018427387904 or bottom%(-1) not=?0 return 3
+    if (top<<1)>>1 not=?top or bottom>>63 not=?-1 or top>>63 not=?0 return 4
+    if (top or 1) not=?top or (bottom xor top) not=?-1 return 5
+    let small=[0 1 -1 top bottom]
+    let saved=small
+    small[3]+=1 small[4]-=1
+    if saved[3] not=?top or small[3] not=?top+1 or small[4] not=?bottom-1 return 6
+    let absent:int?=none let zero:int?=0 let large:int?=top+1
+    if absent isnt? none or zero is? none or large is? none return 7
+    if (absent ?? 9) not=?9 or (zero ?? 9) not=?0 or (large ?? 9) not=?top+1 return 8
+    mutate(@large) if large not=?top+2 return 9
+    let slots:array<int?>=[none 0 top+1]
+    let zeros:array<int?>=fill(0 3)
+    if zeros not=?[0 0 0] return 14
+    let old=slots
+    slots[1]=bottom-1 slots[2]=none
+    if old[1] is? none or (old[1] ?? 9) not=?0 or slots[2] isnt? none return 10
+    if old not=?[none 0 top+1] or slots not=?[none bottom-1 none] return 11
+    let keys:dict<int? string>=[none->"none" 0->"zero" (top+1)->"big"]
+    if keys[none] not=?"none" or keys[0] not=?"zero" or keys[top+1] not=?"big" return 12
+    return 42
+}
+main=()=>{
+    let before=alloc_count()
+    loop i in [0..20) {let result=exercise() if result not=?42 return result}
+    return if alloc_count()=?before 42 else 13
+}

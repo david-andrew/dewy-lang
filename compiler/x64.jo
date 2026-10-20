@@ -1775,6 +1775,18 @@ emit_ins = (pos: int, ins: Ins):
                 x = xdreg(d, 0)
                 lds(x, a, vtype(d))
                 sts(d, x, vtype(d))
+        overflow_add, overflow_sub, overflow_mul:
+            ld(RAX, a)
+            if op == .overflow_add: alu_v(0x01, 0, RAX, bb)
+            else if op == .overflow_sub: alu_v(0x29, 5, RAX, bb)
+            else:
+                rb = reg_of(bb, RCX)
+                rex(true, RAX, 0, rb, false)
+                b(0x0F)
+                b(0xAF)
+                modrr(RAX, rb)
+            setcc(0)  # OF from the tagged-word operation
+            st(d, RAX)
         checked_add, checked_sub, checked_mul:
             # No LEA/strength reduction: the immediately following JO consumes OF.
             r = dreg(d, RAX)

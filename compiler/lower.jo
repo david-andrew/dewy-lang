@@ -189,6 +189,7 @@ struct Val:
 struct Place:
     mem: bool
     v: int
+    math_opt: bool = false
 
 struct TempItem:
     is_slot: bool
@@ -243,7 +244,19 @@ note_mt_active = ():
     mt_active_off = global_addr_off(int(syms[s].ref))
 
 # rc <= 0 marks immortal objects
-retain = (v: int, t: int):
+retain = (v: int, t0: int):
+    t = quantity_base(t0)
+    if math_optional(t):
+        retain(e_bin(.xor, VI, v, e_iconst(1)), T_MATH_INT)
+        return
+    if t == T_MATH_INT:
+        iff(math_tag(v))
+        was = ir_cold
+        ir_cold = true
+        retain(e_addi(v, -1), math_payload_type())
+        ir_cold = was
+        endc()
+        return
     if not opt_release:
         # (one call in the IR, which the code generator does inline when it can: CALL_RC_INC)
         e_call(rt("__rc_inc"), [v], -1)
@@ -269,7 +282,18 @@ retain = (v: int, t: int):
     endc()
 
 release = (v: int, t0: int):
-    t = prune(t0)
+    t = quantity_base(t0)
+    if math_optional(t):
+        release(e_bin(.xor, VI, v, e_iconst(1)), T_MATH_INT)
+        return
+    if t == T_MATH_INT:
+        iff(math_tag(v))
+        was = ir_cold
+        ir_cold = true
+        release(e_addi(v, -1), math_payload_type())
+        ir_cold = was
+        endc()
+        return
     if not opt_release:
         release_call(v, t)
         ir.code[ir.code.len() - 1].c = CALL_RC_DEC
@@ -307,15 +331,6 @@ release_call = (v: int, t: int):
 drop_at = (addr: int, t0: int):
     t = quantity_base(t0)
     if not is_managed(t): return
-    if not opt_release and (t == T_MATH_INT or math_rep_type(t)):
-        handle = e_load(VI, addr, 8, ptr_size)
-        iff(e_bin(.ne, VI, handle, e_iconst(0)))
-        was = ir_cold
-        ir_cold = true
-        release(handle, math_payload_type())
-        ir_cold = was
-        endc()
-        return
     if vc(t) == VC_INT:
         release(e_load(VI, addr, 0, ptr_size), t)
         return
@@ -324,15 +339,6 @@ drop_at = (addr: int, t0: int):
 copy_at = (addr: int, t0: int):
     t = quantity_base(t0)
     if not is_managed(t): return
-    if not opt_release and (t == T_MATH_INT or math_rep_type(t)):
-        handle = e_load(VI, addr, 8, ptr_size)
-        iff(e_bin(.ne, VI, handle, e_iconst(0)))
-        was = ir_cold
-        ir_cold = true
-        retain(handle, math_payload_type())
-        ir_cold = was
-        endc()
-        return
     if vc(t) == VC_INT:
         e_store(addr, 0, copy_ref(e_load(VI, addr, 0, ptr_size), t), ptr_size)
         return
@@ -536,23 +542,37 @@ scope_pop = ():
     scope_locals.pop()
     scope_defers.pop()
 
+opt_has = (addr: int, inner: int) -> int:
+    if quantity_base(inner) == T_MATH_INT: return e_bin(.ne, VI, e_load(VI, addr, 0, 8), e_iconst(0))
+    e_load(VI, addr, tsize(inner), 1)
+
+opt_value = (addr: int, inner: int) -> int:
+    if quantity_base(inner) == T_MATH_INT: return e_bin(.xor, VI, e_load(VI, addr, 0, 8), e_iconst(1))
+    load_val(inner, addr, 0)
+
 # ---------------- places ----------------
 read_place = (p: Place, t: int) -> int:
+    if p.math_opt: return e_bin(.xor, VI, (if p.mem: e_load(VI, p.v, 0, 8) else: p.v), e_iconst(1))
     if not p.mem: return p.v
     load_val(t, p.v, 0)
 
 write_place = (p: Place, t: int, v: int):
+    if p.math_opt:
+        encoded = e_bin(.xor, VI, v, e_iconst(1))
+        if p.mem: e_store(p.v, 0, encoded, 8)
+        else: e_mov(p.v, encoded)
+        return
     if not p.mem:
         e_mov(p.v, v)
         return
     store_val(t, p.v, 0, v)
 
 place_addr = (p: Place, t: int) -> int:
-    if p.mem: return p.v
+    if p.mem and not p.math_opt: return p.v
     # a value in a register: spill to a temporary slot
     s = new_temp(t)
     a = e_slot(s)
-    store_val(t, a, 0, p.v)
+    store_val(t, a, 0, read_place(p, t))
     a
 
 # ---------------- boxes ----------------
@@ -965,6 +985,12 @@ gen_place = (e: int, write: bool) -> Place:
     else if k == .unwrap:
         a = int(nodes[e].a)
         ot = prune(ntype(a))
+        if math_optional(ot):
+            base = gen_place(a, write)
+            iff(e_bin(.eq, VI, read_place(base, ot), e_iconst(0)))
+            e_call_nr(rt("__panic_unwrap"), [e_daddr(loc_data(nodes[e].pos))], -1)
+            endc()
+            return Place(base.mem, base.v, true)
         view = held_opt_reg(a)
         addr = 0
         has = 0
@@ -974,11 +1000,11 @@ gen_place = (e: int, write: bool) -> Place:
         else:
             base = gen_place(a, write)
             addr = place_addr(base, ot)
-            has = e_load(VI, addr, tsize(int(types[ot].elem)), 1)
+            has = opt_has(addr, int(types[ot].elem))
         iff(e_bin(.eq, VI, has, e_iconst(0)))
         e_call_nr(rt("__panic_unwrap"), [e_daddr(loc_data(nodes[e].pos))], -1)
         endc()
-        return Place(true, addr)
+        return Place(true, addr, math_optional(ot))
     else if k == .narrow:
         # a union variable known (by `is`) to hold member aux: checked, since a closure could
         # have changed it
@@ -1115,6 +1141,10 @@ struct CopyBack:
 copy_backs: CopyBack[]
 
 copy_through = (a: int, callee: int) -> bool:
+    alias = a
+    loop nodes[alias].kind == .ident and nodes[alias].aux == i32(int(SK.local)) and int(locals[int(nodes[alias].sym)].flags) & LF_ALIAS != 0:
+        alias = int(locals[int(nodes[alias].sym)].alias)
+    if nodes[alias].kind == .unwrap and math_optional(prune(ntype(int(nodes[alias].a)))): return true
     r = place_var(a)
     if r == 0 or not pw_heap: return false
     if nodes[r].aux != i32(int(SK.global)):
@@ -1144,10 +1174,11 @@ copy_back = (mark: int):
         cb = copy_backs.pop()
         t = ntype(cb.arg)
         loop x in cb.idx: frozen[x.0] = x.1
-        dst = place_addr(gen_place(cb.arg, true), t)
+        dst = gen_place(cb.arg, true)
         loop x in cb.idx: frozen.remove(x.0)
-        drop_at(dst, t)
-        store_val(t, dst, 0, load_val(t, e_slot(cb.slot), 0))
+        if dst.math_opt: release(read_place(dst, t), t)
+        else: drop_at(place_addr(dst, t), t)
+        write_place(dst, t, load_val(t, e_slot(cb.slot), 0))
         if is_managed(t): building.pop()
 
 # could the place argument i was read from (without a reference of its own) be given another
@@ -2113,7 +2144,7 @@ gen_match_test = (p: int, st0: int, hidden_addr: int) -> int:
                 hit = e_bin(.eq, VI, tag, e_iconst(union_index(st, member)))
                 result = e_bin(.or_, VI, result, hit)
             return result
-        return e_load(VI, hidden_addr, tsize(telem(st)), 1)
+        return opt_has(hidden_addr, telem(st))
     if k == .pvariant:
         si = int(types[st].st)
         layout(st)
@@ -2137,12 +2168,12 @@ gen_match_test = (p: int, st0: int, hidden_addr: int) -> int:
             endc()
             return result
         a = int(nodes[p].a)
-        if st == T_MATH_INT: return math_compare(.eq, hidden_addr, gen_borrowed(a).v)
+        if st == T_MATH_INT: return math_compare(.eq, e_load(VI, hidden_addr, 0, 8), gen_borrowed(a).v)
         if types[st].kind == .str_:
             v = gen_borrowed(a).v
             return e_call(rt("__str_eq"), [e_load(VI, hidden_addr, 0, ptr_size), v], VI)
         if types[st].kind == .opt:
-            if nodes[a].kind == .none_lit: return e_bin(.eq, VI, e_load(VI, hidden_addr, tsize(int(types[st].elem)), 1), e_iconst(0))
+            if nodes[a].kind == .none_lit: return e_bin(.eq, VI, opt_has(hidden_addr, int(types[st].elem)), e_iconst(0))
             fatal(nodes[p].pos, "only `none` and `_` patterns are supported for optionals; use {jd(nodes[p].pos, "`if let v = x`", "`if x isnt? none \{ }`")}")
         if vc(st) == VC_FLT: fatal(nodes[p].pos, "cannot match on floats")
         if vc(st) == VC_AGG: fatal(nodes[p].pos, "unsupported pattern for this type")
@@ -2517,7 +2548,7 @@ gen_binary = (e: int) -> Val:
             if op == .eq: return V(e_bin(.eq, VI, has, e_iconst(0)), false)
             return V(has, false)
         pa = gen_place(a, false)
-        has = e_load(VI, place_addr(pa, lt), tsize(int(types[lt].elem)), 1)
+        has = opt_has(place_addr(pa, lt), int(types[lt].elem))
         if op == .eq: return V(e_bin(.eq, VI, has, e_iconst(0)), false)
         return V(e_bin(.ne, VI, has, e_iconst(0)), false)
     if aux == 2:
@@ -3669,6 +3700,9 @@ gen_conv = (e: int) -> Val:
             endc()
         return V(arr, true)
     if cv == .opt:
+        if math_optional(to):
+            value = gen_owned(a)
+            return V(e_bin(.xor, VI, value.v, e_iconst(1)), true)
         inner = int(types[to].elem)
         s = new_temp(to)
         d = e_slot(s)
@@ -3770,7 +3804,7 @@ gen_expr = (e: int) -> Val:
         addr = place_addr(p, at)
         if vi < 0:
             # optional: its has-value flag follows the value
-            has = e_load(VI, addr, tsize(int(types[at].elem)), 1)
+            has = opt_has(addr, int(types[at].elem))
             if vi == -1: return V(e_bin(.eq, VI, has, e_iconst(0)), false)
             return V(e_bin(.ne, VI, has, e_iconst(0)), false)
         layout(at)
@@ -3913,13 +3947,13 @@ gen_expr = (e: int) -> Val:
         rs = new_temp(t)
         pa = place_addr(gen_place(a, false), ot)
         inner = int(types[ot].elem)
-        has = e_load(VI, pa, tsize(inner), 1)
+        has = opt_has(pa, inner)
         iff(has)
         if nodes[e].aux == 1:
             vv = own_at(a, V(pa, false), ot)
             store_val(ot, e_slot(rs), 0, vv.v)
         else:
-            vv = own_at(a, V(load_val(inner, pa, 0), false), inner)
+            vv = own_at(a, V(opt_value(pa, inner), false), inner)
             store_val(inner, e_slot(rs), 0, vv.v)
         els()
         enter_cond()
@@ -4088,7 +4122,7 @@ gen_array = (e: int, t: int) -> Val:
         z = kid(e, 0)
         if nodes[z].kind == .conv: z = int(nodes[z].a)
         zk = nodes[z].kind
-        if (zk == .int_lit and nodes[z].ival == 0) or (zk == .bool_lit and nodes[z].ival == 0) or zk == .null_lit or (zk == .float_lit and nodes[z].fval == 0.0 and f64_bits(nodes[z].fval) == 0):
+        if not math_optional(prune(et)) and ((zk == .int_lit and nodes[z].ival == 0) or (zk == .bool_lit and nodes[z].ival == 0) or zk == .null_lit or (zk == .float_lit and nodes[z].fval == 0.0 and f64_bits(nodes[z].fval) == 0)):
             n = gen_expr(int(nodes[e].b)).v
             return V(e_call(rt("__arr_repeat"), [n, e_iconst(esz)], VI), true)
         val = gen_owned(kid(e, 0))
@@ -4153,7 +4187,9 @@ all_const = (e: int, et: int) -> bool:
     k = types[prune(et)].kind
     if k != .int_ and k != .float_ and k != .bool_: return false
     loop i in [0..nkids(e)):
-        ck = nodes[kid(e, i)].kind
+        item = kid(e, i)
+        if quantity_base(et) == T_MATH_INT and (has_flag(item, NF_U64) or nodes[item].ival < -4611686018427387904 or nodes[item].ival > 4611686018427387903): return false
+        ck = nodes[item].kind
         if ck != .int_lit and ck != .float_lit and ck != .bool_lit: return false
     true
 
@@ -4172,7 +4208,9 @@ const_array = (e: int, et: int) -> int:
         if nodes[c].kind == .float_lit:
             if sz == 4: bits = int(f32_bits(f32(nodes[c].fval)))
             else: bits = int(f64_bits(nodes[c].fval))
-        else: bits = nodes[c].ival
+        else:
+            bits = nodes[c].ival
+            if quantity_base(et) == T_MATH_INT: bits = bits << 1
         loop b in [0..sz): rodata.push(if b >= 8: u8(0) else: u8((bits >> (8 * b)) & 255))
     o
 
@@ -4422,15 +4460,18 @@ gen_iflet = (e: int, t: int) -> Val:
     if held_views.contains(l):
         pa = gen_place(a, false).v
         e_mov(int(locals[l].vreg), held_encode_addr(pa, inner))
-        e_mov(has, e_load(VI, pa, tsize(inner), 1))
+        e_mov(has, opt_has(pa, inner))
     else:
         stmt_begin()
         # Move an owned optional's value into the local, without another copy.
         ov = gen_owned(a)
         pa = ov.v
-        e_mov(has, e_load(VI, pa, tsize(inner), 1))
+        if math_optional(ot):
+            pa = e_slot(new_temp(ot))
+            e_store(pa, 0, ov.v, 8)
+        e_mov(has, opt_has(pa, inner))
         iff(has)
-        write_place(local_place(l, true), inner, load_val(inner, pa, 0))
+        write_place(local_place(l, true), inner, opt_value(pa, inner))
         endc()
         stmt_end()
         scope_add_local(l)
@@ -4505,7 +4546,8 @@ assign_to = (target: int, t: int, v: int):
         return
     pl = gen_place(target, true)
     if is_managed(t):
-        if pl.mem: drop_at(pl.v, t)
+        if pl.math_opt: release(read_place(pl, t), t)
+        else if pl.mem: drop_at(pl.v, t)
         else: release(pl.v, t)
     write_place(pl, t, v)
 
@@ -4553,6 +4595,13 @@ gen_assign = (s: int):
     op = compound_op(int(nodes[s].op)) as Tok
     pl = gen_place(a, true)
     cur = read_place(pl, t)
+    if t == T_MATH_INT:
+        value = V(0, false)
+        if op == .shl or op == .shr: value = math_shift(op, cur, math_shift_count(int(nodes[s].b)), types[prune(ntype(int(nodes[s].b)))].sign)
+        else: value = math_binary(op, cur, gen_borrowed(int(nodes[s].b)).v)
+        release(cur, t)
+        write_place(pl, t, value.v)
+        return
     rhs = gen_expr(int(nodes[s].b)).v
     r = 0
     if is_vec(t):
@@ -4758,7 +4807,7 @@ held_opt_reg = (e: int) -> int:
 held_encode_addr = (addr: int, t: int) -> int:
     if tkind(t) != .opt: return addr
     value = e_addi(addr, 0 - BOX_HDR)
-    has = e_load(VI, addr, tsize(telem(t)), 1)
+    has = opt_has(addr, telem(t))
     result = vreg(VI)
     emit(.select, VI, result, has, value, e_iconst(0), 0)
     result
@@ -5409,7 +5458,7 @@ gen_stepped_for = (s: int):
     signed = types[lt].sign
     less = if signed: Op.lts else: Op.ltu
     greater = if signed: Op.gts else: Op.gtu
-    direct = stable_loop_index(l) and locals[l].offset < 0 and tsize(lt) == 8
+    direct = lt != T_MATH_INT and stable_loop_index(l) and locals[l].offset < 0 and tsize(lt) == 8
     ctr = vreg(VI)
     if direct: ctr = int(locals[l].vreg)
     endv = vreg(VI)
@@ -5623,7 +5672,7 @@ gen_for = (s: int):
         endv = vreg(VI)
         ctr = vreg(VI)
         # (a 64-bit loop variable in a register that the body does not assign is the counter)
-        direct = stable_loop_index(l) and locals[l].offset < 0 and vc(lt) == VC_INT and tsize(lt) == 8
+        direct = prune(lt) != T_MATH_INT and stable_loop_index(l) and locals[l].offset < 0 and vc(lt) == VC_INT and tsize(lt) == 8
         if direct: ctr = int(locals[l].vreg)
         open_end = false
         inclusive = false
@@ -6353,11 +6402,11 @@ gen_while = (s: int):
         has = vreg(VI)
         stmt_begin()
         pa = place_addr(gen_place(a, false), ot)
-        e_mov(has, e_load(VI, pa, tsize(inner), 1))
+        e_mov(has, opt_has(pa, inner))
         if held_views.contains(l): e_mov(int(locals[l].vreg), held_encode_addr(pa, inner))
         else:
             iff(has)
-            vv = own_at(a, V(load_val(inner, pa, 0), false), inner)
+            vv = own_at(a, V(opt_value(pa, inner), false), inner)
             write_place(local_place(l, true), inner, vv.v)
             endc()
         stmt_end()
@@ -6621,7 +6670,6 @@ field_list = (t0: int) -> (int, int)[]:
     t = quantity_base(t0)
     layout(t)
     out: (int, int)[]
-    if t == T_MATH_INT: return [(math_payload_type(), 8)]
     if types[t].kind == .struct_:
         si = int(types[t].st)
         loop i in [0..int(structs[si].nfields)):
@@ -6649,7 +6697,7 @@ helper_drop = (t: int, copy: bool):
             endc()
     else if k == .opt:
         inner = int(types[t].elem)
-        iff(e_bin(.ne, VI, e_load(VI, a, tsize(inner), 1), e_iconst(0)))
+        iff(e_bin(.ne, VI, opt_has(a, inner), e_iconst(0)))
         if copy: copy_at(a, inner)
         else: drop_at(a, inner)
         endc()
@@ -6851,7 +6899,7 @@ helper_eq = (t: int):
     ps = helper_params(2)
     if t == T_MATH_INT:
         ir.ret = VI
-        e_ret(math_compare(.eq, ps[0], ps[1]))
+        e_ret(math_compare(.eq, e_load(VI, ps[0], 0, 8), e_load(VI, ps[1], 0, 8)))
         return
     ir.ret = VI
     a = ps[0]
@@ -6882,11 +6930,13 @@ helper_eq = (t: int):
         fixed_loop_end(i)
     else if k == .opt:
         inner = int(types[t].elem)
-        ha = e_load(VI, a, tsize(inner), 1)
-        hb = e_load(VI, b, tsize(inner), 1)
+        ha = opt_has(a, inner)
+        hb = opt_has(b, inner)
         brif_to(e_bin(.ne, VI, ha, hb), fail)
         iff(ha)
-        eq_member(inner, a, b, fail)
+        if math_optional(t):
+            brif_to(e_bin(.eq, VI, math_compare(.eq, opt_value(a, inner), opt_value(b, inner)), e_iconst(0)), fail)
+        else: eq_member(inner, a, b, fail)
         endc()
     else if k == .enum_:
         si = int(types[t].st)
@@ -6990,8 +7040,8 @@ eq_member = (t0: int, a: int, b: int, fail: int):
             # (an optional's flags here, its value by the value's helper: one call deep for each
             # node of a list, not two)
             inner = int(types[et].elem)
-            ha = e_load(VI, va, tsize(inner), 1)
-            brif_to(e_bin(.ne, VI, ha, e_load(VI, vb, tsize(inner), 1)), fail)
+            ha = opt_has(va, inner)
+            brif_to(e_bin(.ne, VI, ha, opt_has(vb, inner)), fail)
             brif_to(e_bin(.eq, VI, ha, e_iconst(0)), same)
             et = prune(inner)
         r = e_call(lf_helper(.eq, et, 0), [va, vb], VI)
@@ -7003,6 +7053,12 @@ eq_member = (t0: int, a: int, b: int, fail: int):
         brif_to(e_bin(.eq, VI, r, e_iconst(0)), fail)
         return
     c = vc(t)
+    if math_optional(t):
+        brif_to(e_bin(.eq, VI, e_call(lf_helper(.eq, t, 0), [a, b], VI), e_iconst(0)), fail)
+        return
+    if t == T_MATH_INT:
+        brif_to(e_bin(.eq, VI, math_compare(.eq, load_val(t, a, 0), load_val(t, b, 0)), e_iconst(0)), fail)
+        return
     if c == VC_INT and k != .array:
         brif_to(e_bin(.ne, VI, load_val(t, a, 0), load_val(t, b, 0)), fail)
         return
@@ -7019,7 +7075,7 @@ helper_hash = (t: int):
     ps = helper_params(1)
     if t == T_MATH_INT:
         ir.ret = VI
-        e_ret(e_call(rt("__mi_hash"), [ps[0]], VI))
+        e_ret(e_call(rt("__mi_hash"), [e_load(VI, ps[0], 0, 8)], VI))
         return
     ir.ret = VI
     a = ps[0]
@@ -7044,10 +7100,11 @@ helper_hash = (t: int):
         fixed_loop_end(i)
     else if k == .opt:
         inner = int(types[t].elem)
-        has = e_load(VI, a, tsize(inner), 1)
+        has = opt_has(a, inner)
         hash_mix(h, has)
         iff(has)
-        hash_member(h, inner, a)
+        if math_optional(t): hash_mix(h, e_call(rt("__mi_hash"), [opt_value(a, inner)], VI))
+        else: hash_member(h, inner, a)
         endc()
     else if k == .enum_:
         si = int(types[t].st)
@@ -7107,13 +7164,15 @@ hash_member = (h: int, t0: int, a: int):
         if types[et].kind == .opt:
             # (as helper_hash does for an optional, but one call deep for each node of a list)
             inner = int(types[et].elem)
-            has = e_load(VI, va, tsize(inner), 1)
+            has = opt_has(va, inner)
             hash_mix(h, has)
             iff(has)
             hash_mix(h, e_call(lf_helper(.hash, prune(inner), 0), [va], VI))
             endc()
             return
         x = e_call(lf_helper(.hash, et, 0), [va], VI)
+    else if math_optional(t): x = e_call(lf_helper(.hash, t, 0), [a], VI)
+    else if t == T_MATH_INT: x = e_call(rt("__mi_hash"), [load_val(t, a, 0)], VI)
     else if c == VC_INT and k != .array: x = load_val(t, a, 0)
     else if c == VC_FLT: x = hash_float(load_val(t, a, 0), vt_of(t))
     else if k == .fn_ or k == .polyfn: x = e_load(VI, a, 0, ptr_size)

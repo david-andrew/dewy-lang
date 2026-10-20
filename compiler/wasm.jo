@@ -293,6 +293,8 @@ emit_wins = (ins: Ins):
         mov:
             lget(a)
             lset(d)
+        overflow_add, overflow_sub, overflow_mul:
+            ice("native overflow predicate reached wasm lowering")
         checked_add, checked_sub, checked_mul:
             opcode = if o == .checked_add: 0x7C else if o == .checked_sub: 0x7D else: 0x7E
             bin64(opcode, ins)

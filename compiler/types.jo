@@ -253,7 +253,7 @@ init_types = ():
     T_VOID = basic(.void_, 0, false, 0)
     T_BOOL = basic(.bool_, 8, false, 1)
     T_INT = basic(.int_, 64, true, 8)
-    T_MATH_INT = mk_type(TypeInfo(kind = .int_, bits = 64, sign = true, st = -1, size = 16, align = 8, flags = i32(TF_LAID_OUT | TF_MANAGED), rep = .tagged_int), [])
+    T_MATH_INT = mk_type(TypeInfo(kind = .int_, bits = 64, sign = true, st = -1, size = 8, align = 8, flags = i32(TF_LAID_OUT | TF_MANAGED), rep = .tagged_int), [])
     T_I8 = basic(.int_, 8, true, 1)
     T_I16 = basic(.int_, 16, true, 2)
     T_I32 = basic(.int_, 32, true, 4)
@@ -507,9 +507,14 @@ type_has_fn = (t0: int) -> bool:
     has_fn_memo[root] = if found: 2 else: 3
     found
 
+# Optional mathematical integers invert the low bit: zero is none, odd is
+# a small integer, and a nonzero even word is a BigInt header.
+math_optional = (t: int) -> bool:
+    types[t].kind == .opt and quantity_base(int(types[t].elem)) == T_MATH_INT
+
 is_aggregate = (t0: int) -> bool:
     t = quantity_base(t0)
-    if types[t].rep == .tagged_int: return true
+    if math_optional(t): return false
     k = types[t].kind
     if k == .struct_ or k == .tuple or k == .opt or k == .fn_ or k == .polyfn or k == .range or k == .vec or k == .fixed: return true
     if k == .enum_: return not simple_enum(t)
@@ -677,7 +682,7 @@ layout = (t0: int):
         e = int(types[t].elem)
         layout(e)
         al = talign(e)
-        size = align_up(tsize(e) + 1, al)
+        size = if math_optional(t): 8 else: align_up(tsize(e) + 1, al)
         m = is_managed(e)
         boxed = int(types[prune(e)].flags) & TF_BOXED != 0
     else if k == .fixed:

@@ -94,10 +94,14 @@ ntype = (n: int) -> int: int(nodes[n].type)
 # Decimal source text survives parsing until its numeric context is known.
 # A float context consumes fval directly; otherwise construct exact BigInt
 # parts, without parsing text or rounding through a float at run time.
+decimal_cached_type = 0
+
 decimal_type = (pos: int) -> int:
+    if decimal_cached_type != 0: return decimal_cached_type
     ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
     ty = bc_field(bc_ident("$dewy_rational", pos), "Rational", pos)
-    telem(check_expr(ty, 0))
+    decimal_cached_type = telem(check_expr(ty, 0))
+    decimal_cached_type
 
 bundled_rational_type = (t0: int) -> bool:
     t = prune(t0)
@@ -148,6 +152,7 @@ exact_decimal = (n: int) -> int:
     denominator = "1"
     if exponent > 0: digits += repeat("0", exponent)
     else if exponent < 0: denominator += repeat("0", -exponent)
+    ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
     decimal_type(pos)
     numerator = decimal_part(digits, pos)
     divisor = decimal_part(denominator, pos)
@@ -213,7 +218,7 @@ math_rep_type = (t0: int) -> bool:
     t = prune(t0)
     if types[t].kind != .struct_: return false
     decl = int(structs[int(types[t].st)].decl)
-    name_of(int(nodes[decl].name)) == "__MathRep" and files[pos_file(nodes[decl].pos)].path == "{lib_dir}/math_runtime.jo"
+    name_of(int(nodes[decl].name)) == "__CTMathRep" and files[pos_file(nodes[decl].pos)].path == "{lib_dir}/math_eval.jo"
 
 dewy_coerce_bigint_literal = (n: int, t: int):
     pos = nodes[n].pos
@@ -5051,7 +5056,8 @@ check_binary = (n: int, expected: int) -> int:
         if not is_lit(a) and not is_shift and is_numeric(ta): h = ta
         if not a_literal and b_literal and binary_literal_context(b, ta, op): h = if tkind(ta) == .opt: telem(ta) else: ta
         tb = prune(check_expr(b, h))
-    exact_operands = (is_numeric(ta) or bundled_rational_type(ta) or bundled_bigint_type(ta)) and (is_numeric(tb) or bundled_rational_type(tb) or bundled_bigint_type(tb))
+    pending_decimal = (nodes[a].kind == .float_lit and nodes[a].sval != 0 and is_lit(a)) or (nodes[b].kind == .float_lit and nodes[b].sval != 0 and is_lit(b))
+    exact_operands = pending_decimal and (is_numeric(ta) or bundled_rational_type(ta) or bundled_bigint_type(ta)) and (is_numeric(tb) or bundled_rational_type(tb) or bundled_bigint_type(tb))
     if exact_operands and not is_float(hint) and not (is_float(ta) and not is_lit(a)) and not (is_float(tb) and not is_lit(b)):
         if nodes[a].kind == .float_lit and nodes[a].sval != 0 and is_lit(a): ta = exact_decimal(a)
         if nodes[b].kind == .float_lit and nodes[b].sval != 0 and is_lit(b): tb = exact_decimal(b)
