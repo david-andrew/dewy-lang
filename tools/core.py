@@ -23,27 +23,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / '__dewycache__' / 'compact-core'
-TESTS = (
-    'tests/test_isolation.py',
-    'tests/test_core.py',
-    'tests/test_core_editor.py',
-    'tests/test_core_format.py',
-    'tests/test_core_network.py',
-    'tests/test_core_package.py',
-    'tests/test_core_testing.py',
-    'tests/test_core_parallel.py',
-    'tests/test_core_watch.py',
-    'tests/test_core_upstream.py',
-    'tests/test_core_regex.py',
-    'tests/test_core_recursive.py',
-    'tests/test_core_ffi.py',
-    'tests/test_core_lifetimes.py',
-    'tests/test_core_io.py',
-    'tests/test_core_dev.py',
-    'tests/test_core_speed.py',
-    'tests/test_records_sra.py',
-    'tests/test_surface.py',
-)
+# Every tests/test_*.py runs; adding a test file needs no registration here.
+# The largest files go first so parallel workers finish together.
+TESTS = tuple(sorted((str(p.relative_to(ROOT)) for p in (ROOT / 'tests').glob('test_*.py')),
+                     key=lambda name: -(ROOT / name).stat().st_size))
 
 
 def digest(path: Path) -> str:
