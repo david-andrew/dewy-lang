@@ -29,7 +29,7 @@ def build(toolchain: Path, output: Path) -> None:
         if result.returncode:
             raise RuntimeError(f'{host} compiler build failed:\n{result.stdout}{result.stderr}')
         shutil.copytree(toolchain / 'lib', bundle / 'lib')
-        for name in ('LICENSE', 'NOTICE', 'UPSTREAM.json'):
+        for name in ('LICENSE', 'NOTICE'):
             shutil.copy2(toolchain / name, bundle / name)
         provenance = {
             'host': host,

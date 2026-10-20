@@ -52,7 +52,7 @@ def build(*args, **kwargs):
 
 def source_paths(root: Path) -> list[Path]:
     paths = [root / 'tools/compiler/build.py']
-    paths.extend(root / 'docs/origin' / name for name in ('LICENSE', 'NOTICE', 'UPSTREAM.json'))
+    paths.extend(root / 'docs/origin' / name for name in ('LICENSE', 'NOTICE'))
     for directory in ('compiler', 'lib', 'stage0', 'bootstrap'):
         paths.extend(path for path in (root / directory).rglob('*')
                      if path.is_file() and path.name != 'sloppy0' and '__pycache__' not in path.parts)

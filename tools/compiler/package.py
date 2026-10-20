@@ -64,7 +64,7 @@ def package(toolchain: Path, output: Path, *, revision: str | None = None) -> Pa
     expected = {executable: compiler_hash}
     expected.update({name: sha for name, sha in manifest['sources_sha256'].items()
                      if name.startswith('lib/')})
-    for name in ('LICENSE', 'NOTICE', 'UPSTREAM.json'):
+    for name in ('LICENSE', 'NOTICE'):
         expected[name] = manifest['sources_sha256'][name]
     if 'lib/core/rt.jo' not in expected:
         raise ValueError('build manifest has no standard library')

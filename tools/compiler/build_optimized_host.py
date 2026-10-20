@@ -102,7 +102,7 @@ def build(toolchain: Path, output: Path, cc: list[str], *, lto: bool = False, pg
     output.mkdir(parents=True, exist_ok=False)
     for name in ('compiler', 'lib'):
         shutil.copytree(toolchain / name, output / name)
-    for name in ('LICENSE', 'NOTICE', 'UPSTREAM.json'):
+    for name in ('LICENSE', 'NOTICE'):
         shutil.copy2(toolchain / name, output / name)
     (output / 'bin').mkdir()
     work = output / 'host-build'
