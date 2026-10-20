@@ -4563,7 +4563,13 @@ binary_literal_context = (n: int, t0: int, op: Tok) -> bool:
     t = prune(t0)
     if types[t].kind == .opt: t = prune(int(types[t].elem))
     if dewy_set_literal(n): return is_dewy_set_type(t)
-    (op == .eq or op == .ne) and nodes[n].kind == .array and (types[t].kind == .array or types[t].kind == .fixed)
+    if op != .eq and op != .ne: return false
+    if nodes[n].kind == .record_lit: return dewy_record_target(t) != 0
+    if nodes[n].kind == .map_lit: return is_map_type(t)
+    if nodes[n].kind == .array:
+        if nkids(n) == 0 and (is_map_type(t) or dewy_record_target(t) != 0): return true
+        return types[t].kind == .array or types[t].kind == .fixed
+    false
 
 check_binary = (n: int, expected: int) -> int:
     op = nodes[n].op as Tok
@@ -4629,14 +4635,14 @@ check_binary = (n: int, expected: int) -> int:
         add_flag(b, NF_CHECKED)
         if is_int(tb0): hint = tb0
     literal_op = (op == .eq or op == .ne or op == .amp or op == .pipe or op == .caret or op == .minus) and files[pos_file(nodes[n].pos)].is_dewy
-    a_literal = literal_op and (nodes[a].kind == .array or dewy_set_literal(a))
-    b_literal = literal_op and (nodes[b].kind == .array or dewy_set_literal(b))
+    a_literal = literal_op and (nodes[a].kind == .array or nodes[a].kind == .record_lit or nodes[a].kind == .map_lit or dewy_set_literal(a))
+    b_literal = literal_op and (nodes[b].kind == .array or nodes[b].kind == .record_lit or nodes[b].kind == .map_lit or dewy_set_literal(b))
     if a_literal and not b_literal:
         # Type-checking the typed operand first supplies context without moving
         # either operand in the runtime expression or checking it twice.
         bt = prune(check_expr(b, 0))
         add_flag(b, NF_CHECKED)
-        if binary_literal_context(a, bt, op): hint = bt
+        if binary_literal_context(a, bt, op): hint = if tkind(bt) == .opt: telem(bt) else: bt
     ta = prune(check_expr(a, hint))
     tb = 0
     bk = nodes[b].kind
@@ -4644,7 +4650,7 @@ check_binary = (n: int, expected: int) -> int:
     else:
         h = 0
         if not is_lit(a) and not is_shift and is_numeric(ta): h = ta
-        if not a_literal and b_literal and binary_literal_context(b, ta, op): h = ta
+        if not a_literal and b_literal and binary_literal_context(b, ta, op): h = if tkind(ta) == .opt: telem(ta) else: ta
         tb = prune(check_expr(b, h))
     if types[ta].kind == .quantity or types[tb].kind == .quantity: return quantity_binary(n, a, b, expected)
     # (y == 650 in update, y moved by speed * dt: it steps over 650, never on it)

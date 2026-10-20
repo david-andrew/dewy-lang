@@ -409,7 +409,9 @@ promotion is not yet implemented. `int` has no `.min` or `.max` members.
 Explicit `int8` through `int64` and `uint8` through `uint64` retain wrapping
 arithmetic. Floating types are `float32` and `float64`. Literals in an explicit
 numeric context must fit that type exactly. A call parameter supplies that context
-to `if` and `match` branch values, just as a binding annotation does. Mixed `int`/fixed-width arithmetic
+to `if` and `match` branch values, just as a binding annotation does. In `=?`
+and `not=?`, array, record and dictionary literals take their element or field
+types from the typed operand on either side. Mixed `int`/fixed-width arithmetic
 uses `int`; a literal beside a fixed-width operand can take that operand's type.
 Implicit conversions involving `int` preserve the value, checking narrowing at
 runtime (or diagnosing known constant failures). `as` and type calls use those

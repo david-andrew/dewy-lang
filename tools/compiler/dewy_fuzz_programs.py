@@ -190,8 +190,9 @@ class Bin(Expr):
     def render(self, typed=False):
         # A literal beside an operand with a declared type adopts that type; anything
         # else renders without context (its literals spell their type).
-        left = render(self.left, isinstance(self.left, Lit) and declared(self.right))
-        right = render(self.right, isinstance(self.right, Lit) and declared(self.left))
+        literals = (Lit, ArrayLit, RecLit, DictLit, SetLit) if self.op in ('=?', 'not=?') else (Lit,)
+        left = render(self.left, isinstance(self.left, literals) and declared(self.right))
+        right = render(self.right, isinstance(self.right, literals) and declared(self.left))
         return f'({left} {self.op} {right})'
 
     def eval(self, m, env):
