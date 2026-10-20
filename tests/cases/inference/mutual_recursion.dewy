@@ -1,0 +1,17 @@
+# quick
+# Functions calling each other without `:>T` take their result from a branch that calls none of them.
+is_even = (n:int64) => if n =? 0 true else is_odd(n - 1)
+is_odd = (n:int64) => if n =? 0 false else is_even(n - 1)
+ping = (n:int64) => if n <=? 0 0 else pong(n - 1) + 1
+pong = (n:int64) => if n <=? 0 0 else ping(n - 1) + 2
+a = (n:int64) => if n <=? 0 0.5 else b(n - 1) * 2.0
+b = (n:int64) => c(n) + 1.0
+c = (n:int64) => {
+    if n <? 0 { return 0.0 }
+    return a(n - 1)
+}
+words = (n:int64) => if n <=? 0 "go" else "{n} {more(n - 1)}"
+more = (n:int64) => if n <=? 0 "end" else words(n - 1)
+main = () => {
+    printl"{is_even(10)} {is_odd(7)} {ping(5)} {a(3)} {words(4)}"
+}

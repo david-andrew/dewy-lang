@@ -4013,7 +4013,7 @@ void_rec_hint = (n: int) -> str:
     f = int(nodes[n].sym)
     if f >= fns.len() or not fns[f].aux_void or fns[f].decl == 0: return ""
     nm = name_of(int(nodes[int(fns[f].decl)].name))
-    " ('{nm}' calls itself, so the type of its result must be written: {jd(nodes[n].pos, "`{nm} = (...) -> int: ...`", "`{nm} = (...):>int64 => ...`")})"
+    " ('{nm}' calls itself, directly or through another function, with no branch that gives its result's type: write it, {jd(nodes[n].pos, "`{nm} = (...) -> int: ...`", "`{nm} = (...):>int64 => ...`")})"
 
 # the functions that may be called with a dot on a value of type t (for messages)
 # Whether `x.name` alone can call a function of x: an array or text builtin
@@ -4395,7 +4395,7 @@ fmt_part = (part: int, pos: int):
     if t == T_NEVER:
         coerce(int(nodes[part].a), T_STR)
         t = T_STR
-    if types[t].kind == .void_: fatal(nodes[int(nodes[part].a)].pos, "cannot format a value of type void")
+    if types[t].kind == .void_: fatal(nodes[int(nodes[part].a)].pos, "cannot format a value of type void{void_rec_hint(int(nodes[part].a))}")
     if types[t].kind == .typeval or types[t].kind == .module: fatal(nodes[int(nodes[part].a)].pos, "this is a type or module, not a value (a value of a type is made by calling it: `T()`)")
     if types[t].kind == .ptr or types[t].kind == .cfn: fatal(nodes[int(nodes[part].a)].pos, "a {dt(t)} is not printed: its address is `int(p as *u8)` (in hex, \"\{int(p as *u8):#x}\")")
     bt = mk_array(T_U8)

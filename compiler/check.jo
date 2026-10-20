@@ -1470,16 +1470,22 @@ has_value_return = (n: int) -> bool:
         if has_value_return(kid(n, i)): return true
     false
 
-# The type of a value the body `b` of the function `name` ends with that does not call it (a
-# typed one before a literal), or 0. Each candidate is checked as a copy, here, so it may only
+# The type of a value the body `b` of the function `name` ends with that does not call it, nor
+# any function whose result is still being worked out (is_even and is_odd calling each other),
+# (a typed one before a literal), or 0. Each candidate is checked as a copy, here, so it may only
 # use names already in scope.
 recursive_base_type = (b: int, name: int) -> int:
+    pending = [name]
+    loop c in ctxs:
+        f = int(c.inst)
+        if f > 0 and f < fns.len() and fns[f].state == 1 and fns[f].ret == 0 and fns[f].decl != 0:
+            pending.push(int(nodes[int(fns[f].decl)].name))
     leaves: int[]
     value_leaves(b, leaves)
     returned_values(b, leaves)
     literal = 0
     loop leaf in leaves:
-        if not base_case(leaf, name): continue
+        if not base_case(leaf, pending): continue
         e = clone(leaf)
         t = check_expr(e, 0)
         if has_flag(e, NF_LITERAL):
@@ -1509,15 +1515,15 @@ returned_values = (n: int, out: mut int[]):
     returned_values(int(nodes[n].c), out)
     loop i in [0..nkids(n)): returned_values(kid(n, i), out)
 
-# (an expression that names no function `name` and nothing out of scope here)
-base_case = (n: int, name: int) -> bool:
+# (an expression that names none of the functions `pending` and nothing out of scope here)
+base_case = (n: int, pending: int[]) -> bool:
     if n == 0: return true
     k = nodes[n].kind
     if k == .lambda or k == .block or k == .match_: return false
-    if k == .ident and (nodes[n].name == i32(name) or lookup(int(nodes[n].name)) == 0): return false
-    if not base_case(int(nodes[n].a), name) or not base_case(int(nodes[n].b), name) or not base_case(int(nodes[n].c), name): return false
+    if k == .ident and (int(nodes[n].name) in pending or lookup(int(nodes[n].name)) == 0): return false
+    if not base_case(int(nodes[n].a), pending) or not base_case(int(nodes[n].b), pending) or not base_case(int(nodes[n].c), pending): return false
     loop i in [0..nkids(n)):
-        if not base_case(kid(n, i), name): return false
+        if not base_case(kid(n, i), pending): return false
     true
 
 # the name of the type a Dewy method belongs to, or ""
@@ -1689,6 +1695,8 @@ ensure_ret = (f: int, use_pos: int):
     # else n * fact(n - 1)`: its result is that of a branch that does not call it)
     if fns[f].state == 1 and fns[f].decl != 0 and dewy_at(nodes[int(fns[f].decl)].pos):
         c = ctx_for_inst(f)
+        # (or one further down: a function it calls, calling it back)
+        if c < 0: c = ctx_in_progress(f)
         if c >= 0 and ctxs[c].infer_ret:
             # (or the type an earlier `return` gave it)
             g = prune(int(ctxs[c].ret))
@@ -1712,6 +1720,14 @@ new_local = (name: int, t: int, pos: int) -> int:
     fns[inst].locals.push(l)
     if name != 0 and name_of(name) != "_": push_scope_sym(name, new_sym(name, .local, l, 0))
     l
+
+# the context of function inst anywhere on the stack of bodies being checked, or -1
+ctx_in_progress = (inst: int) -> int:
+    c = ctxs.len() - 1
+    loop c >= 0:
+        if int(ctxs[c].inst) == inst: return c
+        c -= 1
+    -1
 
 ctx_for_inst = (inst: int) -> int:
     c = cx
@@ -3364,7 +3380,7 @@ check_vardecl = (s: int):
             if tkind(t) == .none_lit: fatal(nodes[s].pos, "cannot infer the type of '{nm}' from 'none'; add a type: {nm}: T? = none")
     if t == 0: fatal(nodes[s].pos, "variable needs a type or a value")
     tk = tkind(t)
-    if tk == .void_: fatal(nodes[s].pos, "cannot assign a value with no type (void) to '{nm}'")
+    if tk == .void_: fatal(nodes[s].pos, "cannot assign a value with no type (void) to '{nm}'{void_rec_hint(int(nodes[s].b))}")
     if tk == .null_: fatal(nodes[s].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(nodes[s].pos, "`{nm}: Enemy? = none`", "`let {nm}:Enemy? = none`")}")
     if tk == .typeval or tk == .module: fatal(nodes[s].pos, "'{nm}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
     l = new_local(int(nodes[s].name), t, nodes[s].pos)
