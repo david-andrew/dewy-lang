@@ -29,6 +29,7 @@ struct Module:
     dir: str
     names: {int: int}
     uses: int[]
+    imports: (int, int)[]     # resolved module and import position, for every import form
     decls: int[]
     is_prelude: bool
     is_main: bool
@@ -282,6 +283,7 @@ lib_private = (name: int) -> bool:
 from_imports: int[]
 
 bind_from_imports = (start: int = 0):
+    check_import_cycles()
     loop di in [start..from_imports.len()):
         d = from_imports[di]
         m = int(nodes[d].mod)
@@ -693,10 +695,16 @@ module_source = (stem: str, dewy: bool, exclude: str = "", watch_candidates: boo
         if watch_candidates: watch_missing_input(path)
     ""
 
-find_module = (path: str) -> int: module_by_path.get(path) ?? -1
+# Normalize graph identity without changing source paths: library checks also
+# accept a relative lib_dir and compare it with the original source spelling.
+module_path_key = (path: str) -> str:
+    ide_norm(if is_abs_path(path): path else: "{os_path(cwd())}/{path}")
+
+find_module = (path: str) -> int: module_by_path.get(module_path_key(path)) ?? -1
 
 load_module = (path: str, is_prelude: bool, from: int) -> int:
-    ex = find_module(path)
+    key = module_path_key(path)
+    ex = module_by_path.get(key) ?? -1
     if ex >= 0: return ex
     src = read_source(path)
     if src == none: fatal(from, "cannot read '{path}'")
@@ -711,12 +719,37 @@ load_module = (path: str, is_prelude: bool, from: int) -> int:
     m = Module(name = i32(intern(base)), file = i32(fi), dir = d, is_prelude = is_prelude)
     modules.push(m)
     mi = modules.len() - 1
-    module_by_path[path] = mi
+    module_by_path[key] = mi
     p_lazy = is_prelude and not ide_on
     decls = source_declarations(fi)
     p_lazy = false
     modules[mi].decls = decls
     mi
+
+# Search from each Dewy module for a path back to itself. Traversing Jo
+# modules catches mixed cycles, while visited nodes terminate Jo-only cycles.
+# Compiler self-builds contain no Dewy modules and need no graph walks.
+check_import_path = (root: int, m: int, seen: mut bool[], path: mut int[]) -> void:
+    seen[m] = true
+    path.push(m)
+    loop edge in modules[m].imports:
+        next = edge.0
+        if next == root:
+            names: str[]
+            loop part in path: names.push(files[int(modules[part].file)].path)
+            names.push(files[int(modules[root].file)].path)
+            cycle = join(names, " -> ")
+            fatal(edge.1, "Dewy module import cycle: {cycle}")
+        if not seen[next]: check_import_path(root, next, seen, path)
+    path.pop()
+    return
+
+check_import_cycles = ():
+    loop m in [0..modules.len()):
+        if not files[int(modules[m].file)].is_dewy: continue
+        seen = fill(false, modules.len())
+        path: int[]
+        check_import_path(m, m, seen, path)
 
 late_module_imports = false
 
@@ -917,6 +950,7 @@ register_decls = (m: int, decls: int[]):
                     else if rel == "hashlib": pym = ": `sha256(text_or_bytes)` is there without an import (as hex digits)"
                     fatal(nodes[d].pos, "cannot find module '{rel}'{pym}")
             im = load_module(path, false, nodes[d].pos)
+            modules[m].imports.push((im, nodes[d].pos))
             if nodes[d].aux == 1:
                 modules[m].uses.push(im)
                 register_module(im)

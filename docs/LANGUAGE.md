@@ -1992,6 +1992,10 @@ Use `import p"@lib/physics.jo" as physics` to select a bundled library explicitl
 even when a neighboring file has the same name. `@lib/` resolves inside the
 active toolchain's library directory and also works with selected imports.
 
+Import cycles containing a Dewy (`.dewy`) module are rejected, with the import
+path through the cycle in the diagnostic. This includes cycles that pass through
+Jo implementation libraries; cycles made entirely of Jo modules remain allowed.
+
 Start a game with the built-in template, then edit it while it runs:
 
 ```sh
