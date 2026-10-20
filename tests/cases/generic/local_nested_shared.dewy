@@ -2,5 +2,5 @@
 make=()=>{let count=0 return <T>(x:T)=>($capture @count)=>{count+=1; count}}
 main=()=>{let f=make() let a=f(1) let b=f("x")
 let first=a() let second=b()
-let g=f let c=g(false)
+let g=@f let c=g(false)
 return if first=?1 and second=?2 and c()=?3 and a()=?3 and c()=?4 42 else 1}

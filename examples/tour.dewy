@@ -18,7 +18,7 @@ main=():>void=>{
     let adjusted:Point=[point... x=40 y=2]
     printl"Record override: {adjusted.x+adjusted.y}"
     printl"Dependent default: {combine(21)}"
-    let callback=identity<int64>
+    let callback=@identity<int64>
     printl"Specialized callback: {callback(42)}"
 
     let doubled=[loop value in values value*2]

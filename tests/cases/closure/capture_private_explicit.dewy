@@ -1,7 +1,7 @@
 # exit: 42
 make=(value:int64)=>($capture value)=>{value+=1; value}
-main=()=>{let a=make(10) let b=a
+main=()=>{let a=make(10) let b=@a
 if a() not=?11 or a() not=?12 or b() not=?11 return 1
 let xs=[20 22] let read=($capture xs)=>{xs[0]+=1; xs[0]}
-xs[0]=100 let copy=read
+xs[0]=100 let copy=@read
 return if read()=?21 and copy()=?21 and read()=?22 and xs[0]=?100 42 else 2}

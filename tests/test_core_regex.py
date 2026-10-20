@@ -97,7 +97,7 @@ if "a, b;c".split(regex(r"[,;]\s*")) not=?["a" "b" "c"] return 2
 if "ab".split(regex("")) not=?["a" "b"] return 3
 if "x".replace(regex("y*") "-") not=?"-x-" return 4
 let replace_word=(m:Match)=>m.groups[0].upper()
-if "ab ab ab".replace(regex("(ab) ?") replace_word) not=?"ABABAB" return 5
+if "ab ab ab".replace(regex("(ab) ?") @replace_word) not=?"ABABAB" return 5
 return 42}''',
         'regex-offsets': r'''main=()=>{
 let text="ab".repeat(200)+"aab" let r=regex("a+b")

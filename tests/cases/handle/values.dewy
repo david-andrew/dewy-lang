@@ -1,0 +1,29 @@
+# quick
+double=(x:int64):>int64=>x*2
+seven=():>int64=>7
+apply=(f:<(x:int64):>int64> v:int64):>int64=>f(v)
+twice=(f:<(x:int64):>int64> v:int64):>int64=>apply(@f apply(@f v))
+make_adder=(k:int64)=>(x:int64)=>x+k
+Worker:type=[on_event:<(x:int64):>int64> tick:<():>int64>]
+main=():>int64=>{
+    printl(apply(@double 5))
+    let g=@double
+    printl(g(3))
+    printl(seven+1)
+    let s=@seven
+    printl(s)
+    printl(twice(@double 3))
+    let a3=make_adder(3)
+    printl(apply(@a3 10))
+    let w=Worker(on_event=@double tick=@seven)
+    printl(w.on_event(4))
+    printl(w.tick)
+    let h=@w.on_event
+    printl(h(6))
+    let table=["double"->@double "add3"->@a3]
+    printl(table["add3"](4))
+    let op=if true @double else @a3
+    op=@a3
+    printl(op(3))
+    return 0
+}

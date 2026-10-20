@@ -31,8 +31,8 @@ input_for=(player:int64 tick:int64):>Pad=>Pad[
 ]
 
 fresh=(latency:float64=0.12 jitter:float64=0.03 loss:float64=0.1):>Simulation=>Simulation[
-    left=netplay.session(World[] step players=2 me=0)
-    right=netplay.session(World[] step players=2 me=1)
+    left=netplay.session(World[] @step players=2 me=0)
+    right=netplay.session(World[] @step players=2 me=1)
     link=netplay.Link(latency=latency jitter=jitter loss=loss)
 ]
 

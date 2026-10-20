@@ -41,7 +41,7 @@ tick=(state:Game pads:array<Pad>):>Game=>{
 # Connection and presentation state is separate from the rollback snapshot.
 let Mode=[menu=0 online=1 practice=2]
 let mode=Mode.menu
-let session=netplay.session(Game[] tick players=2 me=0)
+let session=netplay.session(Game[] @tick players=2 me=0)
 let friend=-1
 let practice=Game[]
 let spare=0.0
@@ -51,7 +51,7 @@ let colors=[rgb(0.35 0.7 1.0) rgb(1.0 0.6 0.3)]
 begin=(connection:invite.Invited)=>{
     friend=connection.peer
     let player=if connection.inviter 0 else 1
-    session=netplay.session(Game[] tick players=2 me=player)
+    session=netplay.session(Game[] @tick players=2 me=player)
     let peers:array<int64>=[-1 -1]
     peers[1-player]=friend
     session.over(peers)

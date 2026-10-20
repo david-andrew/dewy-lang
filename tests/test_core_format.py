@@ -79,7 +79,7 @@ printl(-0d9_223_372_036_854_775_808) return 0
 let n=0 let xs=[10]
 let next=($capture @n step:int64
 $capture xs extra:int64)=>{n+=step xs[0]+=extra; n+xs[0]}
-let other=next printl(next(1 2)) printl(other(3 4)) printl(n) return 0
+let other=@next printl(next(1 2)) printl(other(3 4)) printl(n) return 0
 }''',
     'mutable-loop': """main=()=>{
 let values=[20 22] let saved=values
@@ -112,7 +112,7 @@ return 0
 }''',
     'unpack-leaf-types': 'main=()=>{const [x:int64 y:float64]=[20 22] printl(x+y) return 0}',
     'record-spread': 'main=()=>{let base=[x=20 y=1] let next=[base... y=22] printl(next.x+next.y) return 0}',
-    'generic-value': 'identity=<T>(x:T):>T=>x\nmain=()=>{let f=identity<int64> printl(f(42)) return 0}',
+    'generic-value': 'identity=<T>(x:T):>T=>x\nmain=()=>{let f=@identity<int64> printl(f(42)) return 0}',
     'generic-return-adjacency': 'pair=():>array<array<int64>>=>[[20 22]]\nmain=()=>{printl(pair()[0]) return 0}',
     'spread': 'main=()=>{let xs=[20 22] printl([0 xs... 1 (xs)...]) return 0}',
     'sequence': 'Series:type=[count:int64]\nlen=(s:Series)=>s.count\n__index__=(s:Series i:int64)=>i\nmain=()=>{printl([loop x in Series[3] x]) return 0}',

@@ -3,8 +3,8 @@ let trace:int=0
 key=(value:int):>int=>{trace=trace*10+value return value}
 main=()=>{
 let values=[4 2 8 1]
-if values.min_by(key) not=?1 or trace not=?4281 return 1
+if values.min_by(@key) not=?1 or trace not=?4281 return 1
 trace=0
-if values.max_by(key) not=?8 or trace not=?4281 return 2
+if values.max_by(@key) not=?8 or trace not=?4281 return 2
 trace=0
-return if [42].min_by(key)=?42 and trace=?42 42 else 3}
+return if [42].min_by(@key)=?42 and trace=?42 42 else 3}

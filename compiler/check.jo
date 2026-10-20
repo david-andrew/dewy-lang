@@ -4339,11 +4339,13 @@ check_program = (main_path: str):
         if has_upd:
             nodes[ua].name = i32(intern("update"))
             nodes[ua].pos = nodes[int(syms[modules[mainm].names[intern("update")]].decl)].pos
+            add_flag(ua, NF_MUT)   # the function itself (Dewy's `@update`)
         else: nodes[ua].name = i32(intern("__no_update"))
         da = mk(.ident, 0)
         if has_drw:
             nodes[da].name = i32(intern("draw"))
             nodes[da].pos = nodes[int(syms[modules[mainm].names[intern("draw")]].decl)].pos
+            add_flag(da, NF_MUT)
         else: nodes[da].name = i32(intern("__no_draw"))
         set_list(gc, [ua, da])
         # (quit = (): the game's own, in place of the library's that closes the window)
@@ -4362,6 +4364,7 @@ check_program = (main_path: str):
                 nodes[qc].a = i32(qf)
                 qa = mk(.ident, nodes[qd].pos)
                 nodes[qa].name = i32(intern("on_quit"))
+                add_flag(qa, NF_MUT)
                 set_list(qc, [qa])
                 qst = mk(.exprstmt, 0)
                 nodes[qst].a = i32(qc)

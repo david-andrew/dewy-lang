@@ -93,7 +93,7 @@ let rows:array<string>=[]
 Action:type=():>void
 mutate=(@text:string n:int64 callback:Action):>void=>{callback() text+="!"}
 nothing=():>void=>{}
-probe=()=>{mutate(@rows[0] {return 42; 1} nothing) return 0}
+probe=()=>{mutate(@rows[0] {return 42; 1} @nothing) return 0}
 main=()=>{let before=alloc_count()
 loop i in [0..20) {
     rows=[make(i)]

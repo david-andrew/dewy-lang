@@ -2,6 +2,6 @@
 Counter:type=():>int
 make=()=>{let n=0 return ()=>{n+=1; n}}
 twice=(f:Counter)=>f()+f()
-forward=(f:Counter)=>{let run=twice return run(f)+f()}
+forward=(f:Counter)=>{let run=@twice return run(@f)+f()}
 main=()=>{let f=make()
-return if forward(f)=?4 and forward(f)=?4 and f()=?1 42 else 1}
+return if forward(@f)=?4 and forward(@f)=?4 and f()=?1 42 else 1}

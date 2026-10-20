@@ -71,7 +71,7 @@ return 42}''',
 Link:type=[counter:Counter next:Link?]
 main=()=>{
 let n=0 let next=($capture @n)=>{n+=1 return n}
-let a=Link[next Link[next]] let b=a
+let a=Link[@next Link[@next]] let b=a
 if a.counter() not=?1 or b.counter() not=?2 return 1
 if a.next is?none return 2
 if b.next is?none return 3
@@ -104,7 +104,7 @@ let tree=Node[20 Node[21]]
 return ()=>{
 if tree.next is?none return 0
 tree.next.value+=1 return tree.value+tree.next.value}}
-main=()=>{let a=make() let b=a
+main=()=>{let a=make() let b=@a
 return if a()=?42 and b()=?42 and a()=?43 and b()=?43 42 else 1}''',
     'deep-list-drop': '''Node:type=[value:int64 next:Node?]
 make=(size:int64):>Node?=>{
@@ -297,7 +297,7 @@ return (clear:bool)=>{
 if x is?none return 0
 if clear {x=none return 1}
 return x.value}}
-main=()=>{let a=make() let b=a
+main=()=>{let a=make() let b=@a
 if a(false) not=?42 or b(false) not=?42 return 2
 if a(true) not=?1 or a(false) not=?0 return 3
 return if b(false)=?42 and b(true)=?1 and b(false)=?0 42 else 4}''',
@@ -307,7 +307,7 @@ let a=($capture @x clear:bool)=>{
 if x is?none return 0
 if clear {x=none return 1}
 return x.value}
-let b=a
+let b=@a
 if a(false) not=?42 or b(false) not=?42 return 2
 return if b(true)=?1 and a(false)=?0 and x is?none 42 else 3}''',
 

@@ -1,0 +1,23 @@
+plus=(a:int64 b:int64):>int64=>a+b
+scaled=(a:int64 scale:int64=10):>int64=>a*scale
+Worker:type=[on_event:<(x:int64 y:int64):>int64>]
+main=():>int64=>{
+    let add5=@plus(5)
+    printl(add5(1))
+    printl((@plus)(4 5))
+    let both=@plus(1)(2)
+    printl(both())
+    printl((@plus(1))(9))
+    printl((@plus(b=2))(40))
+    printl((@scaled(3))())
+    printl(@scaled(3)())
+    let w=Worker(on_event=@plus)
+    let bound=@w.on_event(20)
+    printl(bound(22))
+    let calls=0
+    let count=($capture @calls x:int64):>int64=>{calls+=1 return x}
+    let early=@plus(count(1))
+    printl(calls)
+    printl(early(1))
+    return 0
+}

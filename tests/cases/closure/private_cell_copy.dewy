@@ -1,5 +1,5 @@
 # exit: 42
 main=()=>{let n=0
 let outer=()=>{let inner=($capture @n)=>{n+=1; n} return inner()}
-let other=outer
+let other=@outer
 return if outer()=?1 and other()=?1 and outer()=?2 and n=?0 42 else 1}

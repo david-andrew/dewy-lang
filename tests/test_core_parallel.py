@@ -66,16 +66,16 @@ return 0
     'nested-and-repeated': '''square=(i:int64)=>i*i
 main=()=>{
 let empty:array<int64>=[]
-assert(parallel_map(empty square) =? [])
-parallel_update(@empty square)
-assert(parallel_range(0 square) =? [])
-assert(parallel_range(1 square) =? [0])
+assert(parallel_map(empty @square) =? [])
+parallel_update(@empty @square)
+assert(parallel_range(0 @square) =? [])
+assert(parallel_range(1 @square) =? [0])
 loop round in [0..20) {
     let nested=parallel_range(37 (i:int64)=>parallel_range(7 (j:int64)=>i+j))
     loop i in [0..37) {
         loop j in [0..7) { assert(nested[i][j] =? i+j) }
     }
-    assert(parallel_range(2 square) =? [0 1])
+    assert(parallel_range(2 @square) =? [0 1])
 }
 return 0
 }''',
@@ -121,7 +121,7 @@ def test_core_parallel_values(compiler, tmp_path, name, release, target):
 @pytest.mark.parametrize('body', [
     'let total=0\nmain=()=>{parallel_range(10 (i:int64)=>{total+=i return i}); return 0}',
     'main=()=>{let total=0 parallel_range(10 (i:int64)=>{total+=i return i}); return 0}',
-    'let total=0\nchange=(i:int64)=>{total+=i return i}\nmain=()=>{parallel_range(10 change); return 0}',
+    'let total=0\nchange=(i:int64)=>{total+=i return i}\nmain=()=>{parallel_range(10 @change); return 0}',
     'let total:array<int64>=[]\nmain=()=>{parallel_range(10 (i:int64)=>{total.push(i) return i}); return 0}',
 ])
 def test_core_parallel_rejects_shared_writes(compiler, tmp_path, body):

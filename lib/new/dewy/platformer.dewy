@@ -92,7 +92,7 @@ tick = (state: Player map: Tilemap start: vec2 pad: Pad dt: float64) :> Step => 
     return next
 }
 
-Coin: type = [pos: vec2 taken: bool = false pop: Tween<float64> = tween(0.0 1.0 0.35 ease_out)]
+Coin: type = [pos: vec2 taken: bool = false pop: Tween<float64> = tween(0.0 1.0 0.35 @ease_out)]
 collect = (@coins: array<Coin> at: vec2 dt: float64) :> int64 => {
     let count = 0
     loop @coin in coins {

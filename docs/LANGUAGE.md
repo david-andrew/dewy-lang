@@ -217,11 +217,37 @@ its captured value, so `combine(next())` calls `next()` once.
 Named arguments also work through function values, returned callbacks, record
 fields and array elements. An inferred function value retains its declared
 parameter names. A function-type annotation supplies the names at that boundary:
-`let f:((amount:int64):>int64) = (x)=>x*2` can be called as `f(amount=21)`.
+`let f:<(amount:int64):>int64> = (x)=>x*2` can be called as `f(amount=21)`.
 These names do not change the runtime calling convention. The callee evaluates
 first, then explicit arguments in written order. Parameters named `_` accept
 positional arguments only. Function values require all arguments; default
 arguments remain a direct-call feature.
+
+A bare function name calls the function: `seven` is `seven()` when every
+parameter of `seven` has a default, and a name whose function needs arguments
+is an error. `@name` is the function itself, a value that can be passed,
+stored and called later. This holds for named functions, function-valued
+locals and parameters, and function-valued record fields (`w.on_event` calls
+it; `@w.on_event` selects it):
+
+```dewy
+double=(x:int64):>int64=>x*2
+apply=(f:<(x:int64):>int64> x:int64):>int64=>f(x)
+main=()=>{
+    let f=@double     # the function, not a call
+    let g=@f          # copy a function value with `@` too
+    printl(apply(@double 20)+g(1))   # 42
+}
+```
+
+`@f(args)` partially evaluates `f`: the arguments are evaluated now, and the
+result is a function of the remaining parameters. Every argument group in an
+ungrouped `@` chain partially evaluates (`@sum(1)(2)`); parentheses end the
+chain, after which an argument group calls (`(@sum(1))(2)`). A parameter left to
+its default must have a literal default for now. Partial evaluation of an
+overloaded or generic function, or of a method, is not supported yet. Inside a
+generic function, a binding whose type is a type parameter stays a value even
+when an instance makes it a function.
 
 Parameters can unpack a single argument with the same patterns as `let` and
 `loop`: arrays and tuple results use positions, records use field names, and
@@ -311,7 +337,7 @@ make_counter = () => {
 }
 main = () => {
     let a = make_counter()
-    let b = a
+    let b = @a
     printl(a()) # 1
     printl(b()) # 1
     printl(a()) # 2
@@ -324,7 +350,7 @@ Use `$capture @name` in the parameter list to share an enclosing local binding:
 main = () => {
     let count = 0
     let next = ($capture @count) => { count += 1; count }
-    let other = next
+    let other = @next
     printl(next()) # 1
     printl(other()) # 2
     printl(count) # 2
@@ -367,7 +393,7 @@ A binary operator with its right operand can be used as a function:
 Normal precedence applies: `(* 2 + 2)` means `x => x * 2 + 2`.
 These functions use ordinary private captures and evaluate their bodies when
 called. Pass them to a typed callback parameter or give a local a function type,
-for example `let twice:((value:int64):>int64) = (* 2)`. A module declaration such
+for example `let twice:<(value:int64):>int64> = (* 2)`. A module declaration such
 as `twice = (* 2)` can infer its parameter type at calls, like other functions.
 Operators with prefix meanings keep those meanings: `(-1)` is a negative value.
 
@@ -681,9 +707,9 @@ and an integer alias exposes `.min` and `.max`. The editor completes these
 bounds and shows their integer type on hover; `end` inside brackets hovers as
 `int64`.
 
-Generic functions can also be specialized as values: `let convert=identity<int64>`
+Generic functions can also be specialized as values: `let convert=@identity<int64>`
 stores a callable, including functions imported from Dewy or core modules.
-Passing `identity<int64>` directly as a callback works too. If several overloads
+Passing `@identity<int64>` directly as a callback works too. If several overloads
 remain after specialization, give the value a callable type to select one.
 Without explicit type arguments, an expected callable type can infer them.
 
@@ -693,7 +719,7 @@ Local closures use the same generic syntax and inference:
 main=()=>{
     let count=0
     let next=<T>(value:T)=>{count+=1; [value=value count=count]}
-    let other=next
+    let other=@next
     assert(next(20).count =? 1)
     assert(next("hello").count =? 2)
     assert(other(false).count =? 1)
@@ -1150,7 +1176,7 @@ the receiver. Use `sorted_by(key)` or `sort_by(key)` for records:
 Player:type=[name:string score:int64]
 by_score=(p:Player)=>p.score
 let players=[Player["Ada" 20] Player["Bea" 42] Player["Cal" 42]]
-let leaderboard=players.sorted_by(by_score true)
+let leaderboard=players.sorted_by(@by_score true)
 ```
 
 The optional `true` requests descending order. Equal keys retain their original

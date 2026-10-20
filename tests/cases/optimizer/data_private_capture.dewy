@@ -2,7 +2,7 @@
 # quick
 make=()=>{let values=[0]
 return ()=>{let p=values.data() p[0]+=1 return values[0]}}
-work=():>int64=>{let a=make() let b=a
+work=():>int64=>{let a=make() let b=@a
 let first=a() let second=b() let third=a()
 return if first =? 1 and second =? 1 and third =? 2 42 else 1}
 main=()=>{if work() not=? 42 return 1

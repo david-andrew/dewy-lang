@@ -7,6 +7,6 @@ main=()=>{
 let transform=Transform(20 (x)=>x+22)
 let format=Transform(42 (x)=>"value={x}")
 let function=Box((x:int64)=>x+2)
-let runner=Runner(42 identity)
+let runner=Runner(42 @identity)
 return if transform.step(transform.value)=?42 and format.step(format.value)=?"value=42"
 and function.value(40)=?42 and runner.step(runner.value)=?42 42 else 1}

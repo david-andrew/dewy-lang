@@ -5,7 +5,7 @@ main=()=>{
 loop size in [0 1 2 15 16 17 31 32 33 129] {
     let items=[loop i in [0..size) Item[(i*17)%13 i]]
     loop descending in [false true] {
-        let result=items.sorted_by(key descending)
+        let result=items.sorted_by(@key descending)
         if result.length not=? size return 1
         loop i in [1..size) {
             let a=result[i-1] let b=result[i]

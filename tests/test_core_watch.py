@@ -476,7 +476,7 @@ fs=(v:Out u:U):>vec4=>''' + color + '\n'
     save(shader, shading('vec4(1 0 0 1)'))
     source = tmp_path / 'game.dewy'
     save(source, '''from p"shaders.dewy" import V, U, vs, fs
-let shading=shader(vs fs)
+let shading=shader(@vs @fs)
 let program=make_shader(shading)
 let triangle=mesh([V(vec2(-1 -1)) V(vec2(3 -1)) V(vec2(-1 3))])
 let count:int64=0
@@ -513,7 +513,7 @@ return <T>(unused:T)=>{count+=1; "{word}:{count}"}}
 let next=make()<int64>
 update=(dt:float64):>void=>{
 next(0)
-if frame_number()%10 =? 0 {let copy=next printl(copy(0))}
+if frame_number()%10 =? 0 {let copy=@next printl(copy(0))}
 sleep(0.005)
 }
 draw=():>void=>clear(BLACK)

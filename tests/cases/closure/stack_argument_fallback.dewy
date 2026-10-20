@@ -1,7 +1,7 @@
 # exit: 42
 Counter:type=():>int
 save=(f:Counter)=>()=>f()
-work=()=>{let n=0 let a=()=>{n+=1; n} let b=save(a)
+work=()=>{let n=0 let a=()=>{n+=1; n} let b=save(@a)
 return if a()=?1 and b()=?1 and a()=?2 and b()=?2 and n=?0 42 else 1}
 main=()=>{work() let before=alloc_count()
 loop i in [0..20) {if work() not=?42 return 1}

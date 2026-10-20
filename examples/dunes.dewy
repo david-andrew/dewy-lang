@@ -24,9 +24,9 @@ let t = 0.0
 let cam_pos = pos + vec3(0 2.4 8)
 let intro = 8.0
 
-let sand_sh = make_shader(shader(sand_vs sand_fs))
+let sand_sh = make_shader(shader(@sand_vs @sand_fs))
 seed_random(11)
-let terrain = terrain_mesh(WORLD 220 dune_height sand_color)
+let terrain = terrain_mesh(WORLD 220 @dune_height @sand_color)
 let robe = mesh(robe_vertices(0.0 0.0) robe_indices())
 let head = sphere_mesh(0.2 16 10)
 let hood = cone_mesh(0.24 0.42 16)
@@ -35,7 +35,7 @@ let MAX_SCARF = 64
 let scarf_mesh = mesh(ribbon_vertices(fill(vec3(0 0 0) MAX_SCARF) 0.1 0.0) ribbon_indices(MAX_SCARF))
 let banner_mesh = mesh(ribbon_vertices(fill(vec3(0 0 0) 12) 0.25 0.0) ribbon_indices(12))
 let light_pillar = cylinder_mesh(3.0 420.0 32)
-let beam_sh = make_shader(shader(beam_vs beam_fs))
+let beam_sh = make_shader(shader(@beam_vs @beam_fs))
 let footprint = cylinder_mesh(0.09 0.03 10)
 let steps: array<vec3>
 let step_side = 1.0

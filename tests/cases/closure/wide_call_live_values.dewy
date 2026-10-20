@@ -3,6 +3,6 @@
 make=()=>{let n=0
 return (a:int64 b:int64 c:int64 d:int64 e:int64 f:int64 g:int64 h:int64)=>{
 n+=1; a+2*b+3*c+4*d+5*e+6*f+7*g+8*h+n}}
-main=()=>{let call=make() let copy=call let saved=1000 let total=0
+main=()=>{let call=make() let copy=@call let saved=1000 let total=0
 loop i in [0..3) {total+=call(1 2 3 4 5 6 7 8)+saved+i}
 return if total=?3621 and copy(1 2 3 4 5 6 7 8)=?205 42 else 1}

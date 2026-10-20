@@ -386,7 +386,7 @@ def test_vscode_core_test_tasks(tmp_path):
     ('bump=(@x:int64 n:int64=2):>void=>{x+=n}\n', 'let n:int64=40 bump(@n) return n', 'bump', 'bump = (@x: int64 n: int64 = …):>void'),
     ('Box:type=<T>[text:T]\n', 'let value=Box<string>["hello"] return value.text.length', 'value', 'Box<string>'),
     ('identity=<T>(x:T):>T=>x\n', 'return identity<int64>(42)', 'identity', 'identity = (x: int64):>int64'),
-    ('identity=<T>(x:T):>T=>x\n', 'let callback=identity<int64> return callback(42)', 'identity', 'identity = (x: int64):>int64'),
+    ('identity=<T>(x:T):>T=>x\n', 'let callback=@identity<int64> return callback(42)', 'identity', 'identity = (x: int64):>int64'),
     ('choose=((value:int64)=>value+2)&((text:string)=>text.length)\n',
      'return choose(40)', 'choose', 'choose = (value: int64):>int64'),
     ('choose=((value:int64)=>value+2)&((text:string)=>text.length)\n',

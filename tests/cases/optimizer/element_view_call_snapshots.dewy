@@ -15,7 +15,7 @@ if read_row(global_row replace_global()) not=?42 return 2
 global_rows=[Row[[20] 22]] let direct=global_rows[0]
 if mutating_reader(direct) not=?42 return 3
 global_rows=[Row[[20] 22]] let indirect=global_rows[0]
-let callback=mutating_reader
+let callback=@mutating_reader
 if callback(indirect) not=?42 return 4
 let originals=[Row[[20] 22]] let element=originals[0]
 let saved=return_row(element) originals=[]

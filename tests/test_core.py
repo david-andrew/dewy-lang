@@ -106,13 +106,13 @@ more = (a: int, b: int) -> bool: key(b) < key(a)
         literal = ' '.join(map(str, values))
         statements += [f'let values_{size}:array<int64>=[{literal}]']
         if ordering == 'key':
-            statements += [f'printl(to_json(values_{size}.sorted_by(key)))',
-                           f'printl(to_json(values_{size}.sorted_by(key true)))']
+            statements += [f'printl(to_json(values_{size}.sorted_by(@key)))',
+                           f'printl(to_json(values_{size}.sorted_by(@key true)))']
         else:
             statements += [f'let ascending_{size}=values_{size}',
                            f'let descending_{size}=values_{size}',
-                           f'ascending_{size}.sort_with(less)',
-                           f'descending_{size}.sort_with(more)',
+                           f'ascending_{size}.sort_with(@less)',
+                           f'descending_{size}.sort_with(@more)',
                            f'printl(to_json(ascending_{size}))',
                            f'printl(to_json(descending_{size}))']
         statements += [f'printl(to_json(values_{size}))']
@@ -1816,9 +1816,9 @@ main=()=>{
     let nested:b.Nested<string>=[value=["one"]]
     let words=Package<array<string>>[["yes"]]
     let item=wrap<string>("wrapped")
-    let dewy_identity=a.identity<int64>
-    let core_identity=b.identity<string>
-    let make_package=wrap<int64>
+    let dewy_identity=@a.identity<int64>
+    let core_identity=@b.identity<string>
+    let make_package=@wrap<int64>
     return if one.value+b.identity<int64>(two.value) =? 42 and two.extra =? 2
         and nested.value[0] =? "one" and item.value =? "wrapped"
         and dewy_identity(42) =? 42 and core_identity("ok") =? "ok"
@@ -2580,18 +2580,18 @@ def test_core_rollback_model(compiler, tmp_path, target, release):
 
 
 @pytest.mark.parametrize(('setup', 'callback', 'start', 'diagnostic'), [
-    ('tick=(state:int64 _inputs:array<int64>)=>state+int64(time())', 'tick', 'int64(0)', 'reads the clock'),
-    ('clock=()=>time()\ntick=(state:int64 _inputs:array<int64>)=>state+int64(clock())', 'tick', 'int64(0)', 'reads the clock'),
+    ('tick=(state:int64 _inputs:array<int64>)=>state+int64(time())', '@tick', 'int64(0)', 'reads the clock'),
+    ('clock=()=>time()\ntick=(state:int64 _inputs:array<int64>)=>state+int64(clock())', '@tick', 'int64(0)', 'reads the clock'),
     ('', '((state:int64 _inputs:array<int64>)=>state+int64(random()))', 'int64(0)', 'takes random numbers'),
-    ('let count:int64=0\nhelper=()=>{count+=1 return count}\ntick=(state:int64 _inputs:array<int64>)=>state+helper()', 'tick', 'int64(0)', "changes the global 'count'"),
-    ('input=():>int64=>if key_down(Key.space) 1 else 0\ntick=(state:int64 _inputs:array<int64>)=>state+input()', 'tick', 'int64(0)', 'reads the input'),
-    ('helper=(n:int64):>int64=>if n>?0 helper(n-1) else int64(time())\ntick=(state:int64 _inputs:array<int64>)=>state+helper(1)', 'tick', 'int64(0)', 'reads the clock'),
-    ('tick=(state:Rng _inputs:array<int64>)=>{state.next_int(0 10) return state}', 'tick', 'rng(7)', None),
-    ('tick=(state:Rng _inputs:array<int64>)=>{let xs=[1 2 3] shuffle(@state @xs) return state}', 'tick', 'rng(7)', None),
-    ('tick=(state:int64 _inputs:array<int64>)=>state+int64(unix_time(date(0.0 utc=true)))', 'tick', 'int64(0)', None),
-    ('let random_state=rng(7)\ntick=(state:int64 _inputs:array<int64>)=>state+random_state.next_int(0 10)', 'tick', 'int64(0)', "changes the global 'random_state'"),
-    ('random=(value:int64)=>value\ntick=(state:int64 _inputs:array<int64>)=>state+random(1)', 'tick', 'int64(0)', None),
-    ('tick=(state:int64 inputs:array<int64>)=>state+inputs[0]+inputs[1]', 'tick', 'int64(0)', None),
+    ('let count:int64=0\nhelper=()=>{count+=1 return count}\ntick=(state:int64 _inputs:array<int64>)=>state+helper()', '@tick', 'int64(0)', "changes the global 'count'"),
+    ('input=():>int64=>if key_down(Key.space) 1 else 0\ntick=(state:int64 _inputs:array<int64>)=>state+input()', '@tick', 'int64(0)', 'reads the input'),
+    ('helper=(n:int64):>int64=>if n>?0 helper(n-1) else int64(time())\ntick=(state:int64 _inputs:array<int64>)=>state+helper(1)', '@tick', 'int64(0)', 'reads the clock'),
+    ('tick=(state:Rng _inputs:array<int64>)=>{state.next_int(0 10) return state}', '@tick', 'rng(7)', None),
+    ('tick=(state:Rng _inputs:array<int64>)=>{let xs=[1 2 3] shuffle(@state @xs) return state}', '@tick', 'rng(7)', None),
+    ('tick=(state:int64 _inputs:array<int64>)=>state+int64(unix_time(date(0.0 utc=true)))', '@tick', 'int64(0)', None),
+    ('let random_state=rng(7)\ntick=(state:int64 _inputs:array<int64>)=>state+random_state.next_int(0 10)', '@tick', 'int64(0)', "changes the global 'random_state'"),
+    ('random=(value:int64)=>value\ntick=(state:int64 _inputs:array<int64>)=>state+random(1)', '@tick', 'int64(0)', None),
+    ('tick=(state:int64 inputs:array<int64>)=>state+inputs[0]+inputs[1]', '@tick', 'int64(0)', None),
 ], ids=['clock', 'helper-clock', 'lambda-random', 'helper-global', 'helper-input', 'recursive-clock', 'seeded-rng', 'seeded-shuffle', 'date-conversion', 'global-rng', 'user-random', 'pure'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
@@ -2881,10 +2881,10 @@ def test_core_shader_driver(compiler, shader_driver, tmp_path, case):
         model = Path(__file__).resolve().parents[1] / 'examples/dunes_model.dewy'
         shutil.copy2(model, tmp_path / model.name)
         body = 'from p"dunes_model.dewy" import sand_vs, sand_fs\n'
-        pair = 'sand_vs sand_fs'
+        pair = '@sand_vs @sand_fs'
     elif case == 'lit':
         body = ''
-        pair = 'lit_vs lit_fs'
+        pair = '@lit_vs @lit_fs'
     else:
         body = """Vertex:type=[pos:vec4 uv:vec2]
 Surface:type=[tex:Texture tint:vec4]
@@ -2898,7 +2898,7 @@ return Output(v.pos vec2(before v.uv.x))
 fetch=(tex:Texture uv:vec2):>vec4=>sample(tex uv)
 fragment=(i:Output u:Uniform):>vec4=>fetch(u.surface.tex i.uv)*u.surface.tint
 """
-        pair = 'vertex fragment'
+        pair = '@vertex @fragment'
     body += f"""main=()=>{{let source=shader({pair})
 write_file("shader.vert" source.vs); write_file("shader.frag" source.fs); return 0}}
 """
@@ -4802,7 +4802,7 @@ def test_core_parameter_view_frame(compiler, tmp_path, debug, method):
     source.write_text('''Row:type=[values:array<int64> bias:int64]
 read_score=(row:Row):>int64=>row.values[0]+row.bias
 parameter_frame_probe=(row:Row):>int64=>EXPRESSION
-let callback=parameter_frame_probe
+let callback=@parameter_frame_probe
 main=()=>callback(Row[[20] 22])
 '''.replace('EXPRESSION', expression))
     binary = tmp_path / 'parameter-frame'

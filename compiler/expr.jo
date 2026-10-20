@@ -56,6 +56,8 @@ intrinsics = [
 ]
 
 last_checked = 0
+const AUX2_PARTIAL = -10       # a call node that `@` makes a partial evaluation
+callee_at = 0                  # the callee a call is resolving: a Dewy function name there is not called by itself
 embedded_files: str[]          # actual compile-time inputs, including those used inside functions
 intrinsic_names: int[]         # interned name -> intrinsic index + 1; 0 means no intrinsic
 
@@ -1273,6 +1275,9 @@ check_args_untyped = (args: int[]):
         if nodes[base].kind == .ident and not has_flag(a, NF_CHECKED):
             s = lookup(int(nodes[base].name))
             if s != 0 and syms[s].kind == .fns: add_flag(a, NF_FNREF_ARG)
+            # A Dewy function-valued local named alone: its parameter's type
+            # says whether that is a call or a mistaken `@`.
+            if s != 0 and syms[s].kind == .local and a == base and not has_flag(a, NF_MUT) and is_fn_type(int(locals[int(syms[s].ref)].type)) and files[pos_file(nodes[a].pos)].is_dewy: add_flag(a, NF_FNREF_ARG)
         # (cm.step: a module's function, checked with the parameter's type as a plain one is)
         if nodes[base].kind == .field and not has_flag(a, NF_CHECKED) and nodes[int(nodes[base].a)].kind == .ident:
             ms = lookup(int(nodes[int(nodes[base].a)].name))
@@ -1720,7 +1725,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             if fnm == "read_file" or fnm == "read_bytes":
                 f = name_of(int(nodes[cd.args[0]].sval))
                 warn(nodes[n].pos, "a web page has no files from the disk: {fnm}(\"{f}\") finds only what the page wrote itself; `embed(\"{f}\")` builds the file into the program")
-    partial = has_hole(args)
+    partial = has_hole(args) or nodes[n].aux2 == i32(AUX2_PARTIAL)
     loop i in [0..np):
         a = cd.args[i]
         if a == 0 or not is_lit(a): continue
@@ -1839,7 +1844,9 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         nodes[n].a = i32(poly_fnref(closure, f))
         nodes[n].sym = 0
         nodes[n].aux = 1
-    if partial: return finish_partial(n, fns[f].ptypes, int(cd.sig.mutmask), int(fns[f].ret))
+    if partial:
+        nodes[n].aux2 = 0
+        return finish_partial(n, fns[f].ptypes, int(cd.sig.mutmask), int(fns[f].ret))
     if not capture_defaults: save_call_order(n, args, fin)
     nodes[n].type = fns[f].ret
     if capture_defaults:
@@ -1878,7 +1885,8 @@ value_call = (n: int, callee: int, args: int[], expected: int = 0) -> int:
     nodes[n].sym = 0
     nodes[n].aux = 1
     if types[ft].kind == .cfn: nodes[n].aux = 4
-    if has_hole(args):
+    if has_hole(args) or nodes[n].aux2 == i32(AUX2_PARTIAL):
+        nodes[n].aux2 = 0
         if types[ft].kind == .cfn: fatal(nodes[n].pos, "partial application of C function pointers is not supported")
         pts: int[]
         loop i in [0..na): pts.push(targ(ft, i))
@@ -2477,6 +2485,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                 if tkind(vt) == .fn_ or tkind(vt) == .cfn or tkind(vt) == .polyfn:
                     callee = mk(.ident, nodes[n].pos)
                     nodes[callee].name = i32(name)
+                    callee_at = callee
                     if mod_scope >= 0:
                         check_expr_in_module(callee, mod_scope)
                     else: check_expr(callee, 0)
@@ -3426,6 +3435,7 @@ check_call = (n: int, expected: int) -> int:
             call_targs = saved
             return r
         if (s != 0 and (syms[s].kind == .local or syms[s].kind == .global)) or (nodes[base].kind != .ident and mod < 0):
+            callee_at = base
             check_expr(base, 0)
             if tkind(ntype(base)) == .polyfn:
                 explicit: int[]
@@ -3492,6 +3502,7 @@ check_call = (n: int, expected: int) -> int:
                 fi = int(structs[si].fields) + i
                 if int(fields[fi].name) == fname and (tkind(int(fields[fi].type)) == .fn_ or tkind(int(fields[fi].type)) == .cfn or tkind(int(fields[fi].type)) == .polyfn):
                     if ide_on: ide_field_ref(nodes[callee].pos, fname, int(structs[si].decl), i, int(fields[fi].type))
+                    callee_at = callee
                     check_expr(callee, 0)
                     return value_call(n, callee, args, expected)
         # uniform call syntax
@@ -3516,6 +3527,7 @@ check_call = (n: int, expected: int) -> int:
             r = call_by_name(n, int(nodes[int(nodes[callee].a)].name), -1, args, expected, false)
             call_targs = saved
             return r
+    callee_at = callee
     check_expr(callee, 0)
     value_call(n, callee, args, expected)
 
@@ -5194,6 +5206,171 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
     nodes[n].type = i32(t)
     t
 
+# Dewy function names. A bare name calls its function; `@f` is the function
+# itself, and `@f(args)` partially evaluates it.
+
+# Whether a name or member read at n is a bare Dewy function use: not `@f`,
+# not a callee, not an assignment target.
+dewy_bare_fn = (n: int, is_callee: bool) -> bool:
+    if is_callee or has_flag(n, NF_MUT) or n == assign_root: return false
+    if nodes[n].kind == .ident:
+        # A synthesized parameter copy or temporary.
+        if nodes[n].aux2 == 1 or starts_with(name_of(int(nodes[n].name)), "$"): return false
+    if cur_assign != 0 and int(nodes[cur_assign].a) == n: return false
+    files[pos_file(nodes[n].pos)].is_dewy
+
+# Inside a generic instance a local's type may be a function for this instance
+# only; its bare name stays a value there.
+in_generic_instance = () -> bool:
+    c = cx
+    loop c >= 0:
+        inst = int(ctxs[c].inst)
+        if inst > 0 and fns[inst].targs.len() > 0: return true
+        c = int(ctxs[c].parent)
+    false
+
+is_fn_type = (t: int) -> bool:
+    k = tkind(t)
+    k == .fn_ or k == .cfn or k == .polyfn
+
+# How a bare use of the visible functions `name` behaves: 0 when none can be
+# called with no arguments, 1 when one can, 2 when that call makes a function.
+bare_fns_call = (name: int, mod: int) -> int:
+    decls: int[]
+    if mod >= 0: collect_module(mod, name, decls)
+    else: collect_fns(name, decls)
+    loop d in decls:
+        required = 0
+        loop i in [0..nkids(d)):
+            if nodes[kid(d, i)].b == 0: required += 1
+        if required == 0:
+            sig = fn_sig(d)
+            return if sig.ret != 0 and is_fn_type(int(sig.ret)): 2 else: 1
+    0
+
+# `f` alone: the call f(), checked in place of n.
+bare_call = (n: int, expected: int) -> int:
+    callee = nodes.len()
+    nodes.push(nodes[n])
+    clear_flag(callee, NF_CHECKED)
+    nodes[callee].type = 0
+    nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(callee))
+    t = check_expr(n, expected)
+    last_checked = n
+    t
+
+bare_fn_error = (n: int, text: str, needs_args: bool):
+    if needs_args: fatal(nodes[n].pos, "'{text}' needs arguments: call it, `{text}(...)`, or write `@{text}` for the function itself")
+    fatal(nodes[n].pos, "'{text}' is a function: write `@{text}` for the function itself")
+
+# A bare function-valued local, global or field of type t at n: called when it
+# takes no arguments, otherwise an error naming `@`.
+bare_fn_value = (n: int, t: int, text: str, expected: int) -> int:
+    ft = prune(t)
+    ex = prune(expected)
+    takes_none = types[ft].kind != .polyfn and int(types[ft].nargs) == 0
+    if expected != 0 and is_fn_type(ex) and not (takes_none and is_fn_type(int(types[ft].elem))): bare_fn_error(n, text, false)
+    if not takes_none: bare_fn_error(n, text, true)
+    bare_call(n, expected)
+
+# A default that is the same whenever it is evaluated.
+constant_default = (d: int) -> bool:
+    k = nodes[d].kind
+    k == .int_lit or k == .float_lit or k == .bool_lit or k == .none_lit or (k == .str_lit and nodes[d].aux == 0)
+
+# `@f(args)`: the function of f's remaining parameters that calls f with args
+# and them. The arguments are evaluated now. A parameter left to a constant
+# default takes it now; other defaults cannot be left out yet.
+dewy_partial = (n: int, expected: int) -> int:
+    pos = nodes[n].pos
+    callee = int(nodes[n].a)
+    args = kids(n)
+    # @sum(1)(2): each argument group in the chain is a partial evaluation.
+    if nodes[callee].kind == .call and not has_flag(callee, NF_CHECKED): nodes[callee].aux2 = i32(AUX2_PARTIAL)
+    mod = -1
+    s = 0
+    if nodes[callee].kind == .ident: s = lookup(int(nodes[callee].name))
+    else if nodes[callee].kind == .field:
+        rt = prune(check_expr(int(nodes[callee].a), 0))
+        nodes[callee].a = i32(last_checked)
+        add_flag(last_checked, NF_CHECKED)
+        if types[rt].kind == .module:
+            mod = int(types[rt].mod)
+            s = module_lookup(mod, int(nodes[callee].name))
+        else:
+            st = if types[rt].kind == .ptr: prune(int(types[rt].elem)) else: rt
+            is_field = false
+            if types[st].kind == .struct_:
+                si = int(types[st].st)
+                check_struct_fields(si)
+                loop i in [0..int(structs[si].nfields)):
+                    if fields[int(structs[si].fields) + i].name == nodes[callee].name: is_field = true
+            if not is_field: fatal(pos, "partial evaluation of a method is not supported yet; use a function literal")
+    holes: int[]
+    if s != 0 and syms[s].kind == .fns:
+        decls: int[]
+        if mod >= 0: collect_module(mod, int(nodes[callee].name), decls)
+        else: collect_fns(int(nodes[callee].name), decls)
+        # The one ordinary function of that name these arguments fit; the
+        # program's own come before the prelude's.
+        d = 0
+        err = ""
+        pnames: int[]
+        slots: int[]
+        own = false
+        loop c in decls:
+            if not decl_in_prelude(c): own = true
+        loop c in decls:
+            if nkids2(c) > 0 or (own and decl_in_prelude(c)): continue
+            names: int[]
+            loop i in [0..nkids(c)): names.push(int(nodes[kid(c, i)].name))
+            fit: int[]
+            e = map_args(names, fill(true, names.len()), args, fit)
+            if len(e) > 0:
+                err = e
+                continue
+            if d != 0: fatal(pos, "partial evaluation of an overloaded function is not supported yet")
+            d = c
+            pnames = names
+            slots = fit
+        if d == 0:
+            if len(err) > 0: fatal(pos, err)
+            fatal(pos, "partial evaluation of a generic function is not supported yet")
+        named = false
+        skipped = false
+        loop i in [0..pnames.len()):
+            if slots[i] != 0: continue
+            dv = int(nodes[kid(d, i)].b)
+            if dv == 0:
+                if skipped: named = true
+                holes.push(i)
+            else if constant_default(dv): skipped = true
+            else: fatal(pos, "partial evaluation that leaves '{name_of(pnames[i])}' to its default is not supported yet: pass it explicitly")
+        unbound = holes
+        holes = []
+        loop h in unbound:
+            hole = mk(.hole, pos)
+            if named:
+                arg = mk(.namedarg, pos)
+                nodes[arg].name = i32(pnames[h])
+                nodes[arg].a = i32(hole)
+                hole = arg
+            holes.push(hole)
+    else:
+        if s != 0 and syms[s].kind != .local and syms[s].kind != .global: fatal(pos, "'{name_of(int(nodes[callee].name))}' is not a function")
+        callee_at = callee
+        ft = prune(check_expr(callee, 0))
+        callee = last_checked
+        nodes[n].a = i32(callee)
+        add_flag(callee, NF_CHECKED)
+        if types[ft].kind != .fn_: fatal(pos, "partial evaluation needs a function, found {dt(ft)}")
+        loop i in [args.len()..int(types[ft].nargs)): holes.push(mk(.hole, pos))
+    set_list(n, args + holes)
+    nodes[n].aux2 = i32(AUX2_PARTIAL)
+    t = check_call(n, expected)
+    last_checked = n
+    t
+
 mk_ident_local = (l: int, pos: int) -> int:
     n = mk(.ident, pos)
     nodes[n].name = locals[l].name
@@ -5277,6 +5454,7 @@ check_expr = (n: int, expected: int) -> int:
         else: t = T_NULL
     else if k == .ident:
         nm = int(nodes[n].name)
+        is_callee = n == callee_at
         if ide_sentinel != 0 and nm == ide_sentinel: ide_complete_names()
         s = lookup(nm)
         if s == 0:
@@ -5365,6 +5543,12 @@ check_expr = (n: int, expected: int) -> int:
             return ntype(n)
         else if sk == .fns:
             fpos = nodes[n].pos
+            if dewy_bare_fn(n, is_callee):
+                ex_fn = expected != 0 and is_fn_type(ex)
+                calls = bare_fns_call(nm, -1)
+                if ex_fn and calls != 2: bare_fn_error(n, name_of(nm), false)
+                if calls == 0: bare_fn_error(n, name_of(nm), true)
+                return bare_call(n, expected)
             t = fn_value(n, expected)
             if ide_on: ide_fn_ref(fpos, nm, int(nodes[n].sym))
             last_checked = n
@@ -5381,6 +5565,7 @@ check_expr = (n: int, expected: int) -> int:
         else if sk == .module: t = mk_modval(int(syms[s].ref))
         else if sk == .builtin: fatal(nodes[n].pos, "'{name_of(nm)}' must be called")
         else: fatal(nodes[n].pos, "invalid use of '{name_of(nm)}'")
+        if (sk == .local or sk == .global) and is_fn_type(t) and dewy_bare_fn(n, is_callee) and not (sk == .local and in_generic_instance()): return bare_fn_value(n, t, name_of(nm), expected)
         if tkind(t) == .typeval:
             tt = telem(t)
             if nominal_parent.has(tt) and tt != error_type:
@@ -5390,6 +5575,7 @@ check_expr = (n: int, expected: int) -> int:
                     return struct_ctor(n, tt, int(structs[si].decl), [], expected)
     else if k == .field:
         a0 = int(nodes[n].a)
+        is_callee = n == callee_at
         # (c.__peer in a program: a library's own field, which may change or go in any version)
         if starts_with(name_of(int(nodes[n].name)), "__") and not pos_in_lib(nodes[n].pos) and not ide_on:
             lt = prune(check_expr(a0, 0))
@@ -5432,7 +5618,8 @@ check_expr = (n: int, expected: int) -> int:
             if s == 0:
                 if name_of(fname) == "path": fatal(nodes[n].pos, "paths are plain functions: `join_path(a, b)`, `file_name(p)`, `dir_name(p)`, `extension(p)`, `file_exists(p)`")
                 fatal(nodes[n].pos, "module '{name_of(int(modules[m].name))}' has no member '{name_of(fname)}'")
-            nodes[n] = Node(kind = .ident, pos = nodes[n].pos, name = i32(fname))
+            nodes[n] = Node(kind = .ident, pos = nodes[n].pos, name = i32(fname), flags = i32(int(nodes[n].flags) & NF_MUT))
+            if is_callee: callee_at = n
             t = check_expr_in_module(n, m, expected)
             last_checked = n
             return t
@@ -5513,6 +5700,9 @@ check_expr = (n: int, expected: int) -> int:
                     nodes[n].aux = i32(fi)
                     t = int(fields[int(structs[si].fields) + fi].type)
                     if ide_on: ide_field_ref(nodes[n].pos, fname, int(structs[si].decl), fi, t)
+                    if is_fn_type(t) and dewy_bare_fn(n, is_callee):
+                        add_flag(int(nodes[n].a), NF_CHECKED)
+                        return bare_fn_value(n, t, "{receiver_text(int(nodes[n].a))}.{name_of(fname)}", expected)
                     if path_narrows > 0 and n != no_narrow_at and bk == .struct_:
                         al = path_alias(n)
                         if al >= 0:
@@ -5606,8 +5796,10 @@ check_expr = (n: int, expected: int) -> int:
             nodes[n].b = i32(args[1])
             add_flag(n, NF_INBOUNDS)
             return check_expr(n, expected)
+        if nodes[n].aux2 == i32(AUX2_PARTIAL): return dewy_partial(n, expected)
         t = check_call(n, expected)
     else if k == .typeapply:
+        is_callee = n == callee_at
         base = int(nodes[n].a)
         name = int(nodes[base].name)
         s = 0
@@ -5618,6 +5810,10 @@ check_expr = (n: int, expected: int) -> int:
             if types[mt].kind == .module:
                 mod = int(types[mt].mod)
                 s = module_lookup(mod, name)
+        if s != 0 and syms[s].kind == .fns and dewy_bare_fn(n, is_callee):
+            calls = bare_fns_call(name, mod)
+            if (expected != 0 and is_fn_type(ex) and calls != 2) or calls == 0: bare_fn_error(n, "{name_of(name)}<...>", calls == 0 and not (expected != 0 and is_fn_type(ex)))
+            return bare_call(n, expected)
         if s != 0 and syms[s].kind == .fns:
             targs: int[]
             loop arg in kids(n): targs.push(resolve_type(arg))
@@ -5625,6 +5821,8 @@ check_expr = (n: int, expected: int) -> int:
             t = fn_value(n, expected, targs, mod)
             if ide_on: ide_fn_ref(nodes[base].pos, name, int(nodes[n].sym))
         else if (s != 0 and (syms[s].kind == .local or syms[s].kind == .global)) or (nodes[base].kind != .ident and mod < 0):
+            if s != 0 and dewy_bare_fn(n, is_callee): fatal(nodes[n].pos, "'{name_of(name)}<...>' needs arguments: call it, or write `@{name_of(name)}<...>` for the function itself")
+            callee_at = base
             check_expr(base, 0)
             if tkind(ntype(base)) != .polyfn: fatal(nodes[n].pos, "type arguments require a generic callable")
             targs: int[]

@@ -557,6 +557,7 @@ dw_function = (id: int, name: str) -> int:
         if nkids(param) > 0: set_list(local, kids(param))
         value = mk(.ident, nodes[param].pos)
         nodes[value].name = nodes[param].name
+        nodes[value].aux2 = 1   # the parameter's value itself, even a function
         if name == "main":
             if ps.len() != 1: return dw_fail(id, "multiple entry-point parameters")
             nodes[value].name = i32(intern("args"))
@@ -747,7 +748,9 @@ dw_expr = (id: int) -> int:
     if k == .prefix:
         e = dw_expr(dw_child(id, 1))
         if op == .at:
-            add_flag(e, NF_MUT)
+            # `@f(args)` partially evaluates f; `@x` selects a place or a function.
+            if nodes[e].kind == .call: nodes[e].aux2 = i32(AUX2_PARTIAL)
+            else: add_flag(e, NF_MUT)
             return e
         if op == .dot_minus or op == .dot_plus:
             n = mk(.unary, pos)

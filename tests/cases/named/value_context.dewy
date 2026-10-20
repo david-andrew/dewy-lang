@@ -1,6 +1,6 @@
 # exit: 42
 Apply:type=(left:int64 right:int64):>int64
 sum_named_values=(a:int64 b:int64)=>a+b
-main=()=>{let original=sum_named_values let renamed:Apply=original
+main=()=>{let original=@sum_named_values let renamed:Apply=@original
 let inline:Apply=(x y)=>x+y
 return if original(b=22 a=20)=?42 and renamed(right=22 left=20)=?42 and inline(right=2 left=40)=?42 42 else 1}
