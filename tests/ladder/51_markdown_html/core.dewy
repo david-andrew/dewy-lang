@@ -60,7 +60,7 @@ render=(source:string):>string=> {
     let list=false
     let paragraph=""
     loop line in source.split("\n")  {
-        if line.starts_with("- ")  {
+        if line.startswith("- ")  {
             if paragraph not=? ""  {
                 result+="<p>{inline(paragraph)}</p>"
                 paragraph=""
@@ -76,12 +76,12 @@ render=(source:string):>string=> {
                 result+="</ul>"
                 list=false
             }
-            if line =? "" or line.starts_with("# ")  {
+            if line =? "" or line.startswith("# ")  {
                 if paragraph not=? ""  {
                     result+="<p>{inline(paragraph)}</p>"
                     paragraph=""
                 }
-                if line.starts_with("# ")  {
+                if line.startswith("# ")  {
                     result+="<h1>{inline(line[2..])}</h1>"
                 }
             }

@@ -34,14 +34,14 @@ counter=(start:int64)=> {
 }
 main=():>int64=> {
     let source:array<int64>=[loop i in [0..20) i]
-    let handlers:dict<string ((x:int64):>int64)>=["double"->double "square"->square]
+    let handlers:dict<string ((x:int64):>int64)>=["double"->@double "square"->@square]
     let transformed=map_values(source handlers["square"])
-    let selected=filter_values(transformed even)
-    let sum=fold_values<int64 int64>(selected 0 add_int)
+    let selected=filter_values(transformed @even)
+    let sum=fold_values<int64 int64>(selected 0 @add_int)
     assert(sum =? 1140)
     let running=counter(0)
-    let saved=running
-    let cumulative=map_values([1 2 3 4] running)
+    let saved=@running
+    let cumulative=map_values([1 2 3 4] @running)
     assert(cumulative =? [1 3 6 10])
     assert(running(1) =? 1)
     assert(saved(2) =? 2)
@@ -51,10 +51,10 @@ main=():>int64=> {
     assert(shifted[0] =? 7)
     let words=map_values<int64 string>([1 2 3] (x:int64):>string=>"v{x}")
     assert(words =? ["v1" "v2" "v3"])
-    assert(filter_values([] even).length =? 0)
-    assert(fold_values<int64 int64>([] 9 add_int) =? 9)
+    assert(filter_values([] @even).length =? 0)
+    assert(fold_values<int64 int64>([] 9 @add_int) =? 9)
     let tablecopy=handlers
-    handlers["square"]=double
+    handlers["square"]=@double
     assert(tablecopy["square"](9) =? 81)
     assert(handlers["square"](9) =? 18)
     printl("{sum} {cumulative[3]} {shifted[19]} {words.length}")

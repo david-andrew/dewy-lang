@@ -1,6 +1,6 @@
 take=<T>(@items:array<T> i:int64):>T=>{
     let value=items[i]
-    items.remove(i)
+    items.pop(i)
     return value
 }
 # Minimum degree 2: at most three keys, at least one except the root.
@@ -16,9 +16,9 @@ split=(@parent:Node i:int64):>void=> {
         right.children=[child.children[2] child.children[3]]
         child.children.truncate(2)
     }
-    parent.keys.insert(i middle)
+    parent.keys.insert(middle i)
     parent.children[i]=child
-    parent.children.insert(i+1 right)
+    parent.children.insert(right i+1)
 }
 insert_nonfull=(@node:Node key:int64):>void=> {
     let i=0
@@ -31,7 +31,7 @@ insert_nonfull=(@node:Node key:int64):>void=> {
         }
     }
     if node.children.length =? 0  {
-        node.keys.insert(i key)
+        node.keys.insert(key i)
         return
     }
     if node.children[i].keys.length =? 3  {
@@ -108,10 +108,10 @@ erase=(@node:Node key:int64):>bool=> {
     if node.children[i].keys.length =? 1  {
         if i >? 0 and node.children[i-1].keys.length >=? 2  {
             let sibling=node.children[i-1]
-            node.children[i].keys.insert(0 node.keys[i-1])
+            node.children[i].keys.insert(node.keys[i-1] 0)
             node.keys[i-1]=sibling.keys.pop()
             if sibling.children.length >? 0  {
-                node.children[i].children.insert(0 sibling.children.pop())
+                node.children[i].children.insert(sibling.children.pop() 0)
             }
             node.children[i-1]=sibling
         }

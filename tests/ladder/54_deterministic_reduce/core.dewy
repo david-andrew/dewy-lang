@@ -27,7 +27,7 @@ reduce_tree=(input:array<int64> chunk_size:int64):>Summary=> {
     if chunks.length =? 0  {
         return Summary[0 0 0 1]
     }
-    let level=parallel_map(chunks leaf_summary)
+    let level=parallel_map(chunks @leaf_summary)
     loop level.length >? 1  {
         let next:array<Summary>=[]
         let i=0

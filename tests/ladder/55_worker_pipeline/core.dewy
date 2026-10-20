@@ -18,14 +18,14 @@ compute=(job:Parsed):>Product=> {
 }
 pipeline=(jobs:array<Job>):>array<Product>=> {
     # Owned value batches between stages. No implicit shared queue or globals.
-    let parsed=parallel_map(jobs parse_job)
+    let parsed=parallel_map(jobs @parse_job)
     let valid:array<Parsed>=[]
     loop item in parsed  {
         if item is? Parsed  {
             valid.push(item)
         }
     }
-    return parallel_map(valid compute)
+    return parallel_map(valid @compute)
 }
 main=():>int64=> {
     let jobs:array<Job>=[]

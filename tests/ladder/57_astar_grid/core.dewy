@@ -13,7 +13,7 @@ search=(grid:array<int64> width:int64 start:int64 goal:int64):>array<int64>=> {
             }
         }
         let current=open[best]
-        open.remove(best)
+        open.pop(best)
         if current.cost not=? distance[current.node]  {
             continue
         }
@@ -21,7 +21,7 @@ search=(grid:array<int64> width:int64 start:int64 goal:int64):>array<int64>=> {
             let path:array<int64>=[]
             let node=goal
             loop node >=? 0  {
-                path.insert(0 node)
+                path.insert(node 0)
                 node=parent[node]
             }
             return path
