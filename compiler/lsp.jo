@@ -1283,7 +1283,9 @@ uses_of = (d: int, h: Hit) -> Use[]:
     # they include the declaration's file; not the standard library's users)
     if starts_with(path, root_lib + "/"): return out
     name = ""
-    if let dc = h.res.decls.get(h.ref.decl): name = dc.name
+    if let dc = h.res.decls.get(h.ref.decl):
+        # (a function's locals and parameters stay in its file)
+        if dc.kind != IK_LOCAL and dc.kind != IK_PARAM: name = dc.name
     if len(name) == 0: return out
     ws_ensure_scanned()
     t0 = time()
