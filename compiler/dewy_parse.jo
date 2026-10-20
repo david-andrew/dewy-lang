@@ -19,7 +19,7 @@ enum DewyKind:
     quoted, rawquoted, eof, atom, ambiguous, binary, block, combined_assignment,
     flat, flow, interpolated_string, inverted_comparison, keyword, keyword_expr,
     operator, postfix, prefix, string, string_chunk, source_integer, source_real,
-    directive, compact_expr
+    directive, compact_expr, compact_stmt
 
 dw_kind_name = (kind: DewyKind) -> str:
     match kind:
@@ -54,6 +54,7 @@ dw_kind_name = (kind: DewyKind) -> str:
         string_chunk: "StringChunk"
         directive: "Directive"
         compact_expr: "CompactExpression"
+        compact_stmt: "CompactStatement"
 
 struct DewySyntax:
     kind: DewyKind
@@ -1184,6 +1185,7 @@ dw_stmt = (id: int, top: bool = false) -> int:
     if grouped != id and (dn_token_assignment(dw_op(grouped)) or dw_op(grouped) == .assign): id = grouped
     pos = dewy_syntax[id].pos
     k = dewy_syntax[id].kind
+    if k == .compact_stmt: return dewy_syntax[id].child_left
     if dw_op(id) == .kw_as and dw_is_include(dw_child(id, 1)):
         name = dw_name(dw_child(id, 2))
         if name == "": return dw_fail(id, "this asset binding")
@@ -1784,7 +1786,7 @@ dw_collection_kind = (id: int) -> int:
         candidates.push(children[children.len() - 1])
     else:
         if dw_op(id) == .assign and dw_field_name(dw_child(id, 1)) != 0: return 3
-        if kind == .keyword_expr or dn_token_statement(dw_op(id)): return 0
+        if kind == .keyword_expr or kind == .compact_stmt or dn_token_statement(dw_op(id)): return 0
         return if dw_op(id) == .arrow: 2 else: 1
     result = 0
     loop candidate in candidates:
@@ -1802,7 +1804,7 @@ dw_collect = (id: int, accumulator: int, map: bool) -> int:
         add_flag(n, NF_STMT)
         return dw_flow_stmt(n)
     if kind == .block and dewy_syntax[id].text == "{{}}:": return dw_block(id, accumulator, map)
-    if kind == .keyword_expr or dn_token_statement(dw_op(id)): return dw_stmt(id)
+    if kind == .keyword_expr or kind == .compact_stmt or dn_token_statement(dw_op(id)): return dw_stmt(id)
     pos = dewy_syntax[id].pos
     value = 0
     if map:

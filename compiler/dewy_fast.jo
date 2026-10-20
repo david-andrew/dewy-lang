@@ -591,10 +591,15 @@ dn_partial = (opening: DewyLexeme) -> int:
 
 # Brackets start a fresh comma context, even inside an assertion condition.
 dn_block = () -> int:
+    # Square brackets may define record function fields. Their sibling scope
+    # is established during projection, after all field names are known.
+    direct = dc_enabled
+    if dn_peek() == .lbrack: dc_enabled = false
     saved = dn_comma_stop
     dn_comma_stop = false
     block = dn_bracketed()
     dn_comma_stop = saved
+    dc_enabled = direct
     block
 
 dn_bracketed = () -> int:
@@ -621,7 +626,7 @@ dn_bracketed = () -> int:
             dn_at += 1
             break
         before = dn_at
-        children.push(dn_stmt())
+        children.push(if opening.symbol == .lbrace: dn_statement() else: dn_stmt())
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a block element")
     if opening.symbol == .langle: dn_angles -= 1
     label = dn_token_text(opening.symbol) + dn_token_text(close) + ":"

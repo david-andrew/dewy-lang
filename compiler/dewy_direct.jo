@@ -227,3 +227,78 @@ dn_value = (minimum: int) -> int:
     id = dn_node(.compact_expr, "", dn_tokens[start].start)
     dewy_syntax[id].child_left = value
     id
+
+# A brace element is a statement, unlike an argument, parameter or record
+# element. Keep that context at the construction boundary.
+dc_statement = () -> int:
+    token = dn_tokens[dn_at]
+    pos = mkpos(dn_file, token.start)
+    op = token.symbol
+    if op == .kw_return:
+        dn_at += 1
+        n = mk(.return_, pos)
+        if dn_can_start() and not dn_tokens[dn_at].newline:
+            value = dc_expr(0)
+            if value == 0: return 0
+            nodes[n].a = i32(value)
+        dn_accept(.semi)
+        return n
+    if op == .kw_break or op == .kw_continue:
+        dn_at += 1
+        n = mk(if op == .kw_break: NK.break_ else: NK.continue_, pos)
+        if dn_tokens[dn_at].kind == .metatag and not dn_tokens[dn_at].newline:
+            nodes[n].name = i32(intern(dn_payload(dn_take())))
+        dn_accept(.semi)
+        return n
+    # Bindings, flows and type syntax are migrated independently.
+    if token.kind != .identifier or (op != .none and op != .kw_test): return 0
+    left = dc_expr(11)
+    if left == 0: return 0
+    op = dn_peek()
+    if op != .assign and not dn_token_assignment(op): return 0
+    dn_at += 1
+    right = dc_expr(11)
+    if right == 0: return 0
+    n = mk(.assign, pos)
+    scalar = dn_token_undot(op)
+    if scalar != .none:
+        add_flag(n, NF_BROADCAST)
+        op = scalar
+    nodes[n].op = i32(int(if op == .assign: Tok.assign else if op == .plus_assign: Tok.pluseq else if op == .minus_assign: Tok.minuseq else if op == .slash_assign or op == .floor_assign: Tok.slasheq else if op == .percent_assign: Tok.percenteq else if op == .power_assign: Tok.careteq else if op == .shl_assign: Tok.shleq else if op == .shr_assign: Tok.shreq else: Tok.stareq))
+    if op == .slash_assign or op == .floor_assign or op == .percent_assign or op == .power_assign:
+        nodes[n].sval = i32(intern(if op == .slash_assign: "__dewy_divide" else if op == .floor_assign: "__floor_div" else if op == .percent_assign: "__floor_mod" else: "__dewy_power"))
+    nodes[n].a = i32(left)
+    nodes[n].b = i32(right)
+    dn_accept(.semi)
+    n
+
+dn_statement = () -> int:
+    if not dc_enabled: return dn_stmt()
+    start = dn_at
+    node_start = nodes.len()
+    list_start = lists.len()
+    dc_depth = 0
+    value = dc_statement()
+    if value == 0:
+        dn_at = start
+        nodes.truncate(node_start)
+        lists.truncate(list_start)
+        return dn_stmt()
+    if dc_compare:
+        stop = dn_at
+        node_stop = nodes.len()
+        list_stop = lists.len()
+        syntax_start = dewy_syntax.len()
+        dn_at = start
+        dc_enabled = false
+        old = dn_stmt()
+        dc_enabled = true
+        assert(dn_at == stop)
+        projected = dw_stmt(old)
+        if not dc_same(value, projected): fatal(mkpos(dn_file, dn_tokens[start].start), "direct statement AST differs")
+        nodes.truncate(node_stop)
+        lists.truncate(list_stop)
+        dewy_syntax.truncate(syntax_start)
+    id = dn_node(.compact_stmt, "", dn_tokens[start].start)
+    dewy_syntax[id].child_left = value
+    id
