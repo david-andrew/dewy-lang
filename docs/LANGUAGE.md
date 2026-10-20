@@ -852,18 +852,18 @@ main=()=>{
 A method that assigns or grows a member, places one with `@`, or calls a method
 that does, changes its object, so it is called on a variable, field or element:
 calling it on a const or a temporary value is an error. Other methods work on
-any value. A type's method that reaches no member, nor calls one that does,
-is static: it is also called on the type, as `Span.unit` for a row
-`unit=():>Span=>Span(0 1)`.
-Copies of an object carry its methods and stay independent. A type's
+any value. A type's method that reaches no member, nor calls one that does, is
+static: it is also called on the type, as `Span.unit` for a row
+`unit=():>Span=>Span(0 1)`. Copies of an object carry its methods and stay
+independent. Printing an object shows its fields, not its methods. A type's
 methods are not stored in its values and are not constructor fields; methods of
 a generic type use its type parameters, and imported types bring their methods.
 A literal's methods keep what they capture from the enclosing function, as
 closures do. A function written inside a method may read members but cannot
 change them yet. Methods are not values yet (`@c.increment` is an error), and
-types with methods are declared at module level. Minted types such as
-`type of error & [...]` take methods too, which also reach the members the type
-inherits; a method of a type with minted children cannot change its object yet.
+types with methods are declared at module level. Minted types such as `type of
+error & [...]` take methods too, which also reach the members the type inherits;
+a method of a type with minted children cannot change its object yet.
 
 Custom records can define arithmetic and indexing with ordinary functions:
 

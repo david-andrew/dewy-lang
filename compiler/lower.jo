@@ -3396,8 +3396,9 @@ gen_fmt_struct = (e: int) -> Val:
         lit(ba, "{structs[si].name}(")
         loop i in [0..int(structs[si].nfields)):
             f = int(structs[si].fields) + i
+            if dewy_method_field(int(fields[f].type)) != 0: continue
             sep = ""
-            if i > 0: sep = ", "
+            if fi > 0: sep = ", "
             lit(ba, "{sep}{name_of(int(fields[f].name))}=")
             fmt_field(ba, int(nodes[kid2(e, fi)].sym), int(fields[f].type), field_val_addr(f, va))
             fi += 1

@@ -4008,6 +4008,8 @@ dewy_member_name = (callee: int, rt: int, fname: int, args: int[]) -> int:
     fname
 
 # A record literal's method: a closure stored in the object, taking the object first.
+# (a record literal's method is kept in the object, but it is not one of its fields:
+# formatting leaves it out)
 dewy_method_field = (t0: int) -> int:
     t = prune(t0)
     if tkind(t) != .polyfn: return 0
@@ -4697,7 +4699,9 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if k == .struct_:
             si = int(types[t].st)
             check_struct_fields(si)
-            loop i in [0..int(structs[si].nfields)): fts.push(int(fields[int(structs[si].fields) + i].type))
+            loop i in [0..int(structs[si].nfields)):
+                ft = int(fields[int(structs[si].fields) + i].type)
+                if dewy_method_field(ft) == 0: fts.push(ft)
         else if k == .tuple:
             loop i in [0..int(types[t].nargs)): fts.push(targ(t, i))
         else if k == .enum_:

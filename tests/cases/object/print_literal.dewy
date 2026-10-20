@@ -1,0 +1,13 @@
+# quick
+# A record literal's methods are not among the fields it prints.
+counter = (start:int64) => [
+    value = start
+    label = "c"
+    increment = () => (value += 1)
+]
+main = () => {
+    let c = counter(1)
+    c.increment
+    printl(c)
+    printl"{[c c]} {[only = () => c.value]}"
+}
