@@ -4,11 +4,11 @@
 # Escape releases the mouse. Gamepad: sticks, A to jump, RB/right trigger to shoot.
 import physics3d
 
-const WALK = 6.0
-const JUMP = 6.5
-const GRAVITY = 18.0
-const EYE = 1.6
-const LOOK = 0.0025
+const WALK:float64 = 6.0
+const JUMP:float64 = 6.5
+const GRAVITY:float64 = 18.0
+const EYE:float64 = 1.6
+const LOOK:float64 = 0.0025
 const ORBS = 8
 
 Orb: type = [pos: vec3 phase: float64 = 0.0 pop: float64 = 0.0]
@@ -48,13 +48,13 @@ test "shots choose the nearest visible orb" {
 window("Dewy / Orb Yard" 1280 720)
 let world = physics3d.World[gravity = vec3(0 -GRAVITY 0)]
 let player = world.character(vec3(0 0 8) radius = 0.35)
-let yaw = 0.0
-let pitch = 0.0
+let yaw:float64 = 0.0
+let pitch:float64 = 0.0
 let crates: array<physics3d.Body> = []
 let orbs: array<Orb> = []
-let flash = 0.0
+let flash:float64 = 0.0
 let hits = 0
-let run_time = 0.0
+let run_time:float64 = 0.0
 let done = false
 let snd_shot = sfx_laser()
 let snd_pop = sfx_chime()
@@ -144,7 +144,7 @@ update = (dt: float64) :> void => {
     let side = vec3(cos(yaw) 0 -sin(yaw))
     let move = ahead*(-axis.y)+side*axis.x
     if length(move)>?1.0 move = normalize(move)
-    let jump = 0.0
+    let jump:float64 = 0.0
     if player.on_ground and (key_pressed(Key.space) or gamepad_pressed(PadButton.a)) {
         jump = JUMP
         play(snd_jump 0.3)
@@ -165,12 +165,12 @@ draw = () :> void => {
     loop body in crates draw_mesh(crate world.transform(body)*scaling(world.size(body)) rgb(0.62 0.45 0.3))
     loop orb in orbs {
         if orb.pop>?0.4 continue
-        let size = 1.0+orb.pop*4.0
+        let size:float64 = 1.0+orb.pop*4.0
         draw_mesh(ball translation(orb_at(orb run_time))*scaling(vec3(size size size))
             hsv(orb.phase/TAU 0.8 1.0) emissive = 0.8*(1.0-orb.pop/0.4))
     }
     let view = inverse(look_at(eye_pos eye_pos+forward() vec3(0 1 0)))
-    let kick = 0.06*flash
+    let kick:float64 = 0.06*flash
     draw_mesh(gun view*translation(vec3(0.18 -0.16 -0.4+kick))*scaling(vec3(0.04 0.05 0.24))
         rgb(0.45 0.46 0.5) in_front = true)
     if flash>?0.0 point_light(eye_pos+forward()*0.8 vec3(1.0 0.8 0.5) 6.0 flash*2.0)

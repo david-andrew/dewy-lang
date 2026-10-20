@@ -1,0 +1,22 @@
+# quick
+from rational import Rational
+identity=<T>(value:T):>T=>value
+float_identity=(value:float64):>float64=>value
+main=()=>{
+    printl"{0.1+0.2 =? 0.3}"
+    let tenth=0.1
+    printl"{tenth} {tenth+0.2} {tenth*10} {tenth/0.2}"
+    printl"{-0.125} {1.25e2} {125e-3} {1.00} {0.000}"
+    printl"{0.00000000000000000001} {123456789012345678901234567890.125}"
+    let values=[0.1 0.2 0.3]
+    let saved=values
+    values[0]=0.4
+    printl"{values} {saved}"
+    let record=[amount=0.1]
+    record.amount+=0.2
+    printl"{record.amount} {identity(tenth)}"
+    let f:float64=0.1
+    let g:float64=0.1+0.2
+    printl"{f} {g} {float_identity(0.1)}"
+    printl"{f+0.2 =? 0.2+f} {g =? f+0.2}"
+}

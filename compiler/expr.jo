@@ -80,6 +80,7 @@ intrinsic_of = (name: int) -> int:
 is_lit = (n: int) -> bool: has_flag(n, NF_LITERAL)
 lit_default = (n: int) -> int:
     k = nodes[n].kind
+    if k == .float_lit and nodes[n].sval != 0: return decimal_type(nodes[n].pos)
     if k == .float_lit: return T_FLOAT
     if k == .unary or k == .conv: return lit_default(int(nodes[n].a))
     if k == .binary:
@@ -88,6 +89,70 @@ lit_default = (n: int) -> int:
     T_INT
 
 ntype = (n: int) -> int: int(nodes[n].type)
+
+# Decimal source text survives parsing until its numeric context is known.
+# A float context consumes fval directly; otherwise construct exact BigInt
+# parts, without parsing text or rounding through a float at run time.
+decimal_type = (pos: int) -> int:
+    ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
+    ty = bc_field(bc_ident("$dewy_rational", pos), "Rational", pos)
+    telem(check_expr(ty, 0))
+
+bundled_rational_type = (t0: int) -> bool:
+    t = prune(t0)
+    if types[t].kind != .struct_: return false
+    decl = int(structs[int(types[t].st)].decl)
+    name_of(int(nodes[decl].name)) == "Rational" and files[pos_file(nodes[decl].pos)].path == "{lib_dir}/rational.dewy"
+
+decimal_part = (digits: str, pos: int) -> int:
+    ensure_bundled_import("bigint.dewy", "$dewy_decimal_bigint", pos)
+    negative = len(digits) > 0 and digits[0] == '-'
+    limbs: u64[]
+    loop c in digits:
+        if c == '-' or c == '+': continue
+        carry = u64(c - '0')
+        loop i in [0..limbs.len()):
+            word = limbs[i] * 10 + carry
+            limbs[i] = word & 0xFFFFFFFF
+            carry = word >> 32
+        if carry != 0: limbs.push(carry)
+    items: int[]
+    loop limb in limbs:
+        item = mk(.int_lit, pos)
+        nodes[item].ival = int(limb)
+        items.push(item)
+    magnitude = mk(.array, pos)
+    set_list(magnitude, items)
+    sign = mk(.int_lit, pos)
+    nodes[sign].ival = if limbs.len() == 0: 0 else if negative: -1 else: 1
+    result = mk(.call, pos)
+    nodes[result].a = i32(bc_field(bc_ident("$dewy_decimal_bigint", pos), "BigInt", pos))
+    set_list(result, [sign, magnitude])
+    result
+
+exact_decimal = (n: int) -> int:
+    pos = nodes[n].pos
+    text = lower(name_of(int(nodes[n].sval)))
+    exponent = 0
+    parts = split(text, "e")
+    if parts.len() == 2:
+        parsed = to_int(parts[1])
+        if parsed == none: fatal(pos, "decimal exponent is too large")
+        exponent = parsed!
+    digits = parts[0]
+    fraction = split(digits, ".")
+    if fraction.len() == 2:
+        exponent -= len(fraction[1])
+        digits = fraction[0] + fraction[1]
+    denominator = "1"
+    if exponent > 0: digits += repeat("0", exponent)
+    else if exponent < 0: denominator += repeat("0", -exponent)
+    decimal_type(pos)
+    numerator = decimal_part(digits, pos)
+    divisor = decimal_part(denominator, pos)
+    nodes[n] = Node(kind = .call, pos = pos, a = i32(bc_field(bc_ident("$dewy_rational", pos), "rational", pos)))
+    set_list(n, [numerator, divisor])
+    check_expr(n, 0)
 
 # replace node n by a conversion of its old content
 wrap_conv = (n: int, cv: CV, to: int):
@@ -169,6 +234,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     from = prune(from0)
     to = prune(to0)
     if type_eq(from, to): return true
+    if n != 0 and is_float(to) and bundled_rational_type(from): return true
     if from == T_NEVER: return true
     fk = types[from].kind
     tk = types[to].kind
@@ -187,6 +253,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
             return types[fe].kind == .var or types[te].kind == .var or type_eq(fe, te)
         if fk == .opt and tk == .opt: return true
     if n != 0 and is_lit(n):
+        if nodes[n].kind == .float_lit and nodes[n].sval != 0 and bundled_rational_type(to): return true
         if dewy_bigint_literal_target(n, to): return true
         if nodes[n].kind == .int_lit and (tk == .int_ or tk == .float_): return true
         if nodes[n].kind == .float_lit and tk == .float_: return true
@@ -255,6 +322,8 @@ lit_fits = (n: int, t: int) -> bool:
 coerce = (n: int, target: int) -> int:
     if target == 0: return n
     if refine_active and types[prune(target)].kind == .refined: return refine_coerce(n, target)
+    if nodes[n].kind == .float_lit and nodes[n].sval != 0 and is_lit(n) and tkind(target) == .struct_:
+        exact_decimal(n)
     if charlike(n) and is_int(target):
         charlike_to_int(n)
         nodes[n].type = i32(target)
@@ -270,6 +339,23 @@ coerce = (n: int, target: int) -> int:
     tk = types[to].kind
     if types[from].kind == .quantity and tk == .quantity:
         return quantity_coerce(n, to)
+    if tk == .struct_ and is_int(from) and bundled_rational_type(to):
+        source = nodes.len()
+        nodes.push(nodes[n])
+        pos = nodes[n].pos
+        ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
+        nodes[n] = Node(kind = .call, pos = pos, a = i32(bc_field(bc_ident("$dewy_rational", pos), "rational", pos)))
+        set_list(n, [source])
+        check_expr(n, to)
+        return n
+    if tk == .float_ and bundled_rational_type(from):
+        source = nodes.len()
+        nodes.push(nodes[n])
+        name = if to == T_F32: "to_float32" else: "to_float64"
+        callee = bc_field(source, name, nodes[n].pos)
+        nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(callee))
+        check_expr(n, to)
+        return n
     if types[from].kind == .polyfn and tk == .fn_:
         source = nodes.len()
         nodes.push(nodes[n])
@@ -296,6 +382,7 @@ coerce = (n: int, target: int) -> int:
             clear_flag(n, NF_LITERAL)
             return n
         if k == .float_lit and tk == .float_:
+            if nodes[n].sval != 0 and nodes[n].fval - nodes[n].fval != 0.0: fatal(nodes[n].pos, "real literal exceeds float64")
             nodes[n].type = i32(to)
             clear_flag(n, NF_LITERAL)
             return n
@@ -500,7 +587,8 @@ join_types = (a: int, b: int, pos: int) -> int:
         return ta
     if la and lb:
         t = lit_default(a)
-        if nodes[a].kind == .float_lit or nodes[b].kind == .float_lit: t = T_FLOAT
+        if nodes[a].kind == .float_lit: t = lit_default(a)
+        else if nodes[b].kind == .float_lit: t = lit_default(b)
         coerce(a, t)
         coerce(b, t)
         return t
@@ -1130,6 +1218,10 @@ branch_arg_cost = (a: int, pat: int, binds: mut int[], hidden: int[] = []) -> in
 arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
     p = representation_type(pat)
     pk = types[p].kind
+    target = p
+    if pk == .param and binds[int(types[p].id)] != 0: target = prune(binds[int(types[p].id)])
+    if nodes[a].kind == .float_lit and nodes[a].sval != 0 and bundled_rational_type(target): return 0
+    if is_float(target) and nodes[a].type != 0 and bundled_rational_type(ntype(a)): return 10
     if ctx_dependent(a):
         if oversized_literal(a):
             target = prune(subst_partial(p, binds))
@@ -2426,8 +2518,12 @@ conversion = (n: int, to0: int, args: int[]) -> int:
         set_list(n, [part])
         return check_expr(n, 0)
     a = args[0]
-    check_expr(a, 0)
+    check_expr(a, if tk == .float_ and nodes[a].kind == .float_lit: to else: 0)
     ft = prune(ntype(a))
+    if bundled_rational_type(ft) and tk == .float_:
+        coerce(a, to)
+        nodes[n] = nodes[a]
+        return to
     if is_lit(a) and nodes[a].kind == .float_lit and tk == .int_:
         if to == T_MATH_INT and not (nodes[a].fval >= -9223372036854775808.0 and nodes[a].fval < 9223372036854775808.0):
             fatal(nodes[n].pos, "integer overflow in float-to-int conversion")
@@ -2631,12 +2727,18 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
     checked: int[]
     loop i in 0.. and arg in args:
         hint = 0
-        if i == 0 and expected != 0 and is_numeric(expected) and name != intern("__dewy_divide"): hint = expected
+        if i == 0 and is_quantity(expected) and is_float(quantity_base(expected)): hint = expected
+        if expected != 0 and is_float(expected) and nodes[arg].kind == .float_lit: hint = expected
+        else if i == 0 and expected != 0 and is_numeric(expected) and name != intern("__dewy_divide"): hint = expected
         check_expr(arg, hint)
         checked.push(last_checked)
         add_flag(last_checked, NF_CHECKED)
     a = checked[0]
     b = checked[1]
+    exact_operands = (is_numeric(ntype(a)) or bundled_rational_type(ntype(a)) or bundled_bigint_type(ntype(a))) and (is_numeric(ntype(b)) or bundled_rational_type(ntype(b)) or bundled_bigint_type(ntype(b)))
+    if exact_operands and not is_float(expected) and not (is_float(ntype(a)) and not is_lit(a)) and not (is_float(ntype(b)) and not is_lit(b)):
+        if nodes[a].kind == .float_lit and nodes[a].sval != 0 and is_lit(a): exact_decimal(a)
+        if nodes[b].kind == .float_lit and nodes[b].sval != 0 and is_lit(b): exact_decimal(b)
     if is_quantity(ntype(a)) or is_quantity(ntype(b)):
         return quantity_arithmetic(n, name, a, b, expected)
     if name == intern("__dewy_divide"):
@@ -4313,7 +4415,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
     else if id == .sqrt:
         nargs_check(n, nargs, 1, 1, "sqrt")
         t = arg_type(args, 0, 0)
-        if is_lit(args[0]) or types[t].kind == .int_:
+        if is_lit(args[0]) or types[t].kind == .int_ or bundled_rational_type(t):
             coerce(args[0], T_FLOAT)
             t = T_FLOAT
         if types[t].kind != .float_: fatal(nodes[n].pos, jd(nodes[n].pos, "sqrt() needs a float", "sqrt needs a float64 or float32 (found {dt(t)})"))
@@ -4869,6 +4971,7 @@ check_binary = (n: int, expected: int) -> int:
     is_shift = op == .shl or op == .shr
     hint = 0
     if not is_cmp and expected != 0 and (is_numeric(expected) or is_vec(expected)): hint = expected
+    if not is_cmp and is_quantity(expected) and is_float(quantity_base(expected)): hint = quantity_base(expected)
     a = int(nodes[n].a)
     b = int(nodes[n].b)
     # ("-" * 40 is forty dashes, as in Python: a character's code multiplied means nothing)
@@ -4900,7 +5003,17 @@ check_binary = (n: int, expected: int) -> int:
         if not is_lit(a) and not is_shift and is_numeric(ta): h = ta
         if not a_literal and b_literal and binary_literal_context(b, ta, op): h = if tkind(ta) == .opt: telem(ta) else: ta
         tb = prune(check_expr(b, h))
+    exact_operands = (is_numeric(ta) or bundled_rational_type(ta) or bundled_bigint_type(ta)) and (is_numeric(tb) or bundled_rational_type(tb) or bundled_bigint_type(tb))
+    if exact_operands and not is_float(hint) and not (is_float(ta) and not is_lit(a)) and not (is_float(tb) and not is_lit(b)):
+        if nodes[a].kind == .float_lit and nodes[a].sval != 0 and is_lit(a): ta = exact_decimal(a)
+        if nodes[b].kind == .float_lit and nodes[b].sval != 0 and is_lit(b): tb = exact_decimal(b)
     if types[ta].kind == .quantity or types[tb].kind == .quantity: return quantity_binary(n, a, b, expected)
+    if is_float(tb) and bundled_rational_type(ta):
+        coerce(a, tb)
+        ta = tb
+    else if is_float(ta) and bundled_rational_type(tb):
+        coerce(b, ta)
+        tb = ta
     # (y == 650 in update, y moved by speed * dt: it steps over 650, never on it)
     if op == .eq and is_float(ta) and (nodes[a].kind == .ident or nodes[a].kind == .field) and (nodes[b].kind == .int_lit or nodes[b].kind == .float_lit) and cx >= 0 and not pos_in_lib(nodes[n].pos):
         lv = 0.0
@@ -5920,6 +6033,7 @@ check_expr = (n: int, expected: int) -> int:
             t = lit_default(n)
     else if k == .float_lit:
         if ex != 0 and exk == .float_:
+            if nodes[n].sval != 0 and nodes[n].fval - nodes[n].fval != 0.0: fatal(nodes[n].pos, "real literal exceeds float64")
             clear_flag(n, NF_LITERAL)
             t = ex
         else if ex != 0 and exk == .opt and is_float(int(types[ex].elem)):
@@ -6708,6 +6822,7 @@ check_expr = (n: int, expected: int) -> int:
             # (a generic parameter's T, not known yet: the elements say what it is)
             if elt != 0 and tkind(prune(elt)) == .var: elt = 0
             anyfloat = false
+            decimal = 0
             anyunsigned = false
             allchar = true
             spread = false
@@ -6726,12 +6841,14 @@ check_expr = (n: int, expected: int) -> int:
                 if not charlike(c): allchar = false
                 if is_lit(c):
                     if nodes[c].kind == .float_lit: anyfloat = true
+                    if nodes[c].kind == .float_lit and nodes[c].sval != 0: decimal = c
                     if lit_default(c) == T_U64: anyunsigned = true
                     # ([Kind.a, .b]: the first names the enum for the rest)
                     if elt == 0 and it != 0 and tkind(it) == .enum_: elt = it
                 else if elt == 0 and not charlike(c): elt = it
             if elt == 0:
                 if allchar: elt = T_STR
+                else if decimal != 0: elt = lit_default(decimal)
                 else if anyfloat: elt = T_FLOAT
                 else if anyunsigned: elt = T_U64
                 else: elt = if files[pos_file(nodes[n].pos)].is_dewy: T_MATH_INT else: T_INT
@@ -6854,7 +6971,7 @@ check_expr = (n: int, expected: int) -> int:
             last_checked = n
             return tt
         if files[pos_file(nodes[n].pos)].is_dewy:
-            if is_numeric(ft) and is_numeric(tt):
+            if (is_numeric(ft) and is_numeric(tt)) or (bundled_rational_type(ft) and is_float(tt)):
                 add_flag(a, NF_CHECKED)
                 t = conversion(n, tt, [a])
                 last_checked = n

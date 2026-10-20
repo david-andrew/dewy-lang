@@ -6150,7 +6150,7 @@ loop dims in [[0 3 2] [2 0 3] [3 7 5] [9 65 513] [3 64 512] [2 66 515]] {
     let c=a*b
     assert(c.shape =? [r p])
     loop i in [0..r) {loop j in [0..p) {
-        let want=0.0
+        let want:float64=0.0
         loop k in [0..m) {want+=a[i k]*b[k j]}
         assert(c[i j] =? want)
     }}
@@ -6160,9 +6160,9 @@ let ints=reshape([loop i in [0..2*65) (i%19)-9] 2 65)
 let ones=reshape([loop i in [0..65*3) 1] 65 3)
 let product=ints*ones
 loop i in [0..2) {loop j in [0..3) {assert(product[i j] =? sum(row(ints i)))}}
-let cancellation=reshape([1e16 1.0 (-1e16) 1.0 3.0] 1 5)*reshape([1.0 1.0 1.0 1.0 1.0] 5 1)
+let cancellation=reshape([float64(1e16) 1.0 (-1e16) 1.0 3.0] 1 5)*reshape([float64(1.0) 1.0 1.0 1.0 1.0] 5 1)
 assert(cancellation[0 0] =? 4.0)
-let zero=reshape([0.0 (-0.0) 0.0 0.0 0.0] 1 5)
+let zero=reshape([float64(0.0) (-0.0) 0.0 0.0 0.0] 1 5)
 let nonfinite=reshape([INF NAN INF NAN INF] 5 1)
 assert((zero*nonfinite)[0 0] =? 0.0)
 return 42

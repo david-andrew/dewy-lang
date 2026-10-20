@@ -2,9 +2,9 @@
 from p"rollback_model.dewy" import World, fresh, advance
 
 let simulation=fresh()
-let latency=0.4
-let jitter=0.2
-let loss=0.4
+let latency:float64=0.4
+let jitter:float64=0.2
+let loss:float64=0.4
 let paused=false
 
 main=():>void=>{
@@ -29,7 +29,7 @@ view=(world:World x:float64 name:string tick:int64 rollbacks:int64 waiting:bool)
     text(name vec2(f32(x+20.0) 153) 25 WHITE)
     text("Tick {tick} | {rollbacks} rollbacks" vec2(f32(x+20.0) 190) 20 WHITE)
     loop player in [0..2) {
-        let y=270.0+(player as float64)*75.0
+        let y:float64=270.0+(player as float64)*75.0
         let px=x+290.0+(world.positions[player] as float64)*8.0
         let color=if player=?0 rgb(0.3 0.8 0.7) else rgb(1.0 0.65 0.3)
         rect(x+20.0 y+20.0 540 2 rgb(0.2 0.25 0.32))

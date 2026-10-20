@@ -10,19 +10,19 @@ Glyph:type=[
 ]
 let pos = vec3(40 f32(dune_height(40.0 150.0)) 150)
 let vel = vec3(0 0 0)
-let yaw = 0.0 # camera orbit angle around the traveler (0: looking north, at the beacon)
+let yaw:float64 = 0.0 # camera orbit angle around the traveler (0: looking north, at the beacon)
 let heading = PI
 let grounded = true
-let energy = 1.0
+let energy:float64 = 1.0
 let scarf: array<vec3>
 let scarf_len = 6
 let glyphs: array<Glyph>
 let collected = 0
 let won = false
-let won_t = 0.0
-let t = 0.0
+let won_t:float64 = 0.0
+let t:float64 = 0.0
 let cam_pos = pos + vec3(0 2.4 8)
-let intro = 8.0
+let intro:float64 = 8.0
 
 let sand_sh = make_shader(shader(@sand_vs @sand_fs))
 seed_random(11)
@@ -38,9 +38,9 @@ let light_pillar = cylinder_mesh(3.0 420.0 32)
 let beam_sh = make_shader(shader(@beam_vs @beam_fs))
 let footprint = cylinder_mesh(0.09 0.03 10)
 let steps: array<vec3>
-let step_side = 1.0
+let step_side:float64 = 1.0
 let last_step = vec3(0 0 0)
-let moved = 0.0
+let moved:float64 = 0.0
 let pillar = cylinder_mesh(0.7 7.0 10)
 let block = cube_mesh(1.0)
 let ring = sphere_mesh(0.45 20 10)
@@ -75,7 +75,7 @@ loop c in [0..9) {
 }
 loop k in [0..12) {
     let a = f64(k) / 12.0 * TAU
-    let r = 40.0 + f64(k % 3) * 35.0
+    let r:float64 = 40.0 + f64(k % 3) * 35.0
     let x = cos(a) * r
     let z = sin(a) * r * 0.8 + 10.0
     glyphs.push(Glyph(vec3(f32(x) f32(dune_height(x z) + 2.2) f32(z))))
@@ -114,7 +114,7 @@ update=(dt: float64)=>{
     let fwd = vec3(f32(-sin(yaw)) 0 f32(-cos(yaw)))
     let right = vec3(f32(cos(yaw)) 0 f32(-sin(yaw)))
     let wish = right * inp.x - fwd * inp.y
-    let speed = 7.5
+    let speed:float64 = 7.5
     if length(wish) >? 0.01 {
         wish = normalize(wish)
         heading = atan2(f64(wish.x) f64(wish.z))
@@ -131,7 +131,7 @@ update=(dt: float64)=>{
         play(sfx_whoosh() 0.3)
     }
     let gliding = jump_held and not grounded and vel.y <? 0.0 and energy >? 0.0
-    let g = 18.0
+    let g:float64 = 18.0
     if gliding {
         g = 3.0
         energy -= dt / (1.0 + f64(scarf_len) * 0.25)
@@ -259,7 +259,7 @@ draw=()=>{
     # the beacon on the mountain
     }
     let bpos = vec3(0 f32(dune_height(0.0 -150.0) + 6.0) -150)
-    let k = 1.5
+    let k:float64 = 1.5
     if won {k = 4.0 + 2.0 * sin(t * 2.0)}
     draw_mesh(beacon translation(bpos) rgb(1 0.9 0.7) emissive = k cast_shadow = false)
     # a pillar of light rises from the mountain: the goal is visible from everywhere

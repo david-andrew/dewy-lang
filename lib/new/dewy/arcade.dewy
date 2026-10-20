@@ -2,13 +2,13 @@
 # Escape/Start pauses; leaving the window pauses too. Menus accept mouse or keys.
 # Adapted from Sloppy's MIT-licensed lib/new/arcade.jo; see the toolchain LICENSE.
 
-const SPEED = 420.0
-const PLAYER_R = 16.0
-const GOLD_R = 12.0
-const ROCK_SPEED = 150.0
-const ROCK_SPEED_MAX = 420.0
-const ROCK_GAP = 1.0
-const ROCK_GAP_MIN = 0.25
+const SPEED:float64 = 420.0
+const PLAYER_R:float64 = 16.0
+const GOLD_R:float64 = 12.0
+const ROCK_SPEED:float64 = 150.0
+const ROCK_SPEED_MAX:float64 = 420.0
+const ROCK_GAP:float64 = 1.0
+const ROCK_GAP_MIN:float64 = 0.25
 
 Rock: type = [pos: vec2 vel: vec2 r: float64 angle: float64 = 0.0 spin: float64 = 0.0]
 Game: type = [
@@ -95,7 +95,7 @@ let game = fresh(1)
 let sparks = Particles[gravity = vec2(0 0) drag = 2.5]
 let best = to_int(load_data("best")??"0")??0
 let shake = Shake[]
-let t = 0.0
+let t:float64 = 0.0
 let snd_gold = sfx_coin()
 let snd_crash = sfx_explosion()
 
@@ -137,7 +137,7 @@ update = (dt: float64) :> void => {
 draw_rock = (rock: Rock) :> void => {
     let points = [loop i in [0..7) {
             let angle = rock.angle+i/7.0*TAU
-            let bump = 0.8+0.2*sin(i*2.7+rock.r)
+            let bump:float64 = 0.8+0.2*sin(i*2.7+rock.r)
             rock.pos+from_angle(angle)*rock.r*bump
     }]
     polygon(points rgb(0.42 0.38 0.4))
@@ -148,7 +148,7 @@ draw = () :> void => {
     camera2d(vec2(640 360)+shake.offset())
     loop x in [0..33) { loop y in [0..19) circle(vec2(x*40 y*40) 1.5 rgba(1 1 1 0.06)) }
     if screen not=?Screen.title {
-        let pulse = 1.0+0.15*sin(t*6.0)
+        let pulse:float64 = 1.0+0.15*sin(t*6.0)
         circle_gradient(game.gold GOLD_R*3.0*pulse rgba(1 0.8 0.2 0.35) rgba(1 0.6 0.1 0))
         circle(game.gold GOLD_R rgb(1.0 0.82 0.25))
         loop rock in game.rocks draw_rock(rock)

@@ -4,7 +4,7 @@
 Particle:type=[x:float64 y:float64 vx:float64 vy:float64]
 make=(count:int64):>array<Particle>=>[loop i in [0..count) Particle[(i%32) as float64 (i//32) as float64 0.0 0.0]]
 step=(p:Particle others:array<Particle> dt:float64):>Particle=>{
-    let ax=0.0 let ay=0.0
+    let ax:float64=0.0 let ay:float64=0.0
     loop q in others {
         let dx=q.x-p.x let dy=q.y-p.y
         let r2=dx*dx+dy*dy+0.25

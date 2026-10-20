@@ -6,7 +6,7 @@ main=():>int64=>{
     distances[0]=4m
     $runtime_assert (snapshot[0] =? 1m)
     $runtime_assert (distances[1] =? 5m/2)
-    let total=0.0m
+    let total:float64 * Length=0.0m
     loop distance in distances {total+=distance}
     $runtime_assert (total =? 9.5m)
     printl"{distances} {snapshot}"

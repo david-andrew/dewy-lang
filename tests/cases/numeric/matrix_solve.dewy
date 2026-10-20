@@ -1,6 +1,6 @@
 # exit: 42
 main=()=>{
-let a=reshape([0.0 2.0 1.0 3.0] 2 2) let b=[4.0 7.0]
+let a=reshape([float64(0.0) 2.0 1.0 3.0] 2 2) let b:array<float64>=[4.0 7.0]
 let x=solve(a b)
 assert(abs(x[0]-1.0) <? 1e-12 and abs(x[1]-2.0) <? 1e-12)
 let identity=a*inverse(a)

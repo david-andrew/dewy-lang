@@ -61,7 +61,7 @@ def test_core_format_implementation_language(compiler, tmp_path):
 PROGRAMS = {
     'named-values': 'main=()=>{let f:<(left:int64 right:int64):>int64>=(x y)=>x+y printl(f(right=22 left=20)) return 0}',
     'partial-operators': 'apply=(f:<(value:int64):>int64> x:int64)=>f(x)\nmain=()=>{printl(apply((*2+2)20)) let p:<(value:int64):>bool>=(not in? [1 2]) printl(p(3)) return 0}',
-    'transmute': 'main=()=>{let bits:uint32=1065353216 printl(bits transmute float32) printl(1.0 transmute uint64) return 0}',
+    'transmute': 'main=()=>{let bits:uint32=1065353216 printl(bits transmute float32) printl(float64(1.0) transmute uint64) return 0}',
     'keyword-ids': '''probe=(is:int64? isnt:int64? notin:int64)=>{
 let iffy=true and not false
 printl(iffy) printl(is isnt? int64) printl(isnt is? none)
@@ -89,7 +89,7 @@ return 0
 }""",
     'broadcast': '''square=(x:float64)=>x*x
 main=()=>{
-let xs=[1.0 4.0 9.0]
+let xs:array<float64>=[1.0 4.0 9.0]
 xs .+=1.0 xs .*=2.0
 xs[1..end] .+=0.5 xs[[true false true]] .*=2.0
 printl(square.(sqrt.(xs) .+ 1.0))

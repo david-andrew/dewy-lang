@@ -801,9 +801,9 @@ dw_expr = (id: int) -> int:
                 number += "e" + exponent[..1) + dw_digits(exponent[2..])
         value = to_float(replace(number, "_", ""))
         if value == none: return dw_fail(id, "this real literal")
-        if value! - value! != 0.0: fatal(pos, "real literal exceeds float64")
         n = mk(.float_lit, pos)
         nodes[n].fval = value!
+        nodes[n].sval = i32(intern(replace(number, "_", "")))
         add_flag(n, NF_LITERAL)
         return n
     if k == .interpolated_string:
@@ -908,6 +908,7 @@ dw_expr = (id: int) -> int:
             return e
         if op == .minus and nodes[e].kind == .float_lit:
             nodes[e].fval = -nodes[e].fval
+            if nodes[e].sval != 0: nodes[e].sval = i32(intern("-" + name_of(int(nodes[e].sval))))
             nodes[e].pos = pos
             return e
         n = mk(if op == .kw_not: NK.not_ else: NK.unary, pos)

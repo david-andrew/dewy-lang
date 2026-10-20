@@ -473,7 +473,7 @@ Fixed-width integer types expose typed `.min` and `.max` constants, including
 the full `uint64` range; these also work through type aliases and generic type
 parameters. For example, `uint8.max` is 255 and `int64.min` is −9223372036854775808.
 `value transmute Type` reinterprets bits between equal-width machine integers
-and floats; for example, `1.0 transmute uint64` is `4607182418800017408`.
+and floats; for example, `float64(1.0) transmute uint64` is `4607182418800017408`.
 It evaluates the source once, preserving signed zero and NaN payloads. The
 source has its own type: to reinterpret 32 bits, write a `uint32` or `float32`
 source explicitly. The destination does not change the width of a literal.
@@ -626,8 +626,10 @@ Dividing two machine integers or `BigInt` values with `/` constructs a `Rational
 without an explicit import. This includes mixed signed/unsigned words, and the
 full-width values are preserved. `4/2` is still a fraction value, formatted as
 `2`. Use `//` for a whole-number quotient. Floating operands retain floating
-division, so `1.0/2` is `float64`; a floating annotation alone does not convert
-the exact result of `1/2`. Fraction support is loaded only when needed after
+division. Decimal literals are exact fractions by default: `0.1 + 0.2 =? 0.3`
+is true, `1.0/2` is `1/2`, and `1.25e2` is `125`. A float annotation or
+floating operand gives literals a floating context (`let x:float64=0.1`).
+Fraction support is loaded only when needed after
 operand types are known. Import `Rational` when naming its type.
 
 `rational(numerator denominator)` accepts machine integers, `BigInt` values, or
@@ -661,7 +663,9 @@ let step=(1/60).to_float32()
 let movement=vec2(step 2.0*step)
 ```
 
-Floating values cannot yet be converted back to `Rational` directly.
+Floating values cannot yet be converted back to `Rational` directly. Inferred
+decimal bindings hold fractions; annotate an accumulator that will receive
+floating values with `float32` or `float64`.
 
 [The exact-fraction example](../examples/exact_rationals.dewy) computes
 harmonic sums, dice probabilities and exact time steps.

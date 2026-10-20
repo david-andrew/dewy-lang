@@ -9,9 +9,9 @@ import invite
 window("Dewy / Netpong" 1280 720)
 
 let PORT = to_int(env("DEWY_NETPONG_PORT") ?? "47200") ?? 47200
-const PADDLE_H = 120.0
-const PADDLE_SPEED = 620.0
-const BALL_SPEED = 520.0
+const PADDLE_H:float64 = 120.0
+const PADDLE_SPEED:float64 = 620.0
+const BALL_SPEED:float64 = 520.0
 const WIN = 7
 # Set this to a hosted build's URL to share links from native games. With no URL,
 # native games share invite codes; browser games use their own page address.
@@ -26,14 +26,14 @@ let screen = Screen.title
 let hosting = false
 let other = -1 # the other player (a peer)
 let address = env("JOIN") ?? "localhost" # (a web page: ?join=address)
-let left_y = 360.0 # the host's paddle (left), the other's (right)
-let right_y = 360.0
-let right_move = 0.0 # (the host: what the other player last asked for)
+let left_y:float64 = 360.0 # the host's paddle (left), the other's (right)
+let right_y:float64 = 360.0
+let right_move:float64 = 0.0 # (the host: what the other player last asked for)
 let ball = vec2(640 360)
 let vel = vec2(0 0)
 let score_l = 0
 let score_r = 0
-let send_wait = 0.0
+let send_wait:float64 = 0.0
 let status = ""
 let why = "" # (why the other player could not be reached)
 let via_relay = false # relay-compatible host/guest messages
@@ -339,7 +339,7 @@ let HELP = [
 
 draw_help = () => {
     text_centered("How to play together" vec2(640 80) 44 BLUE)
-    let y = 150.0
+    let y:float64 = 150.0
     loop i in 0.. and h in HELP {
         text_centered("{i + 1}" vec2(150 f32(y + 12.0)) 28 GOLD)
         y += text_wrapped(h vec2(190 f32(y)) 900 22 WHITE) + 24.0

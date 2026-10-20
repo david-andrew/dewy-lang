@@ -30,7 +30,7 @@ label start:
 """
 const SCENES = ["square"->rgb(0.32 0.38 0.5) "tower"->rgb(0.55 0.42 0.36)]
 const PEOPLE = ["mira"->rgb(0.96 0.65 0.78) "ren"->rgb(0.56 0.78 1.0)]
-const SPEED = 45.0
+const SPEED:float64 = 45.0
 
 # Save the position BEFORE the visible step, so reopening repeats the same line
 # or choice. Scene state is included; a resumed conversation keeps its portraits.
@@ -97,7 +97,7 @@ test "the two choices lead to different replies" {
 # Presentation and live game state.
 window("Dewy / The Bell Tower" 1280 720)
 let reading = resume(load_value("place" fresh().bookmark))
-let typed = 0.0
+let typed:float64 = 0.0
 on_quit = () => { save_value("place" reading.bookmark) }
 
 update = (dt: float64) :> void => {
@@ -117,7 +117,7 @@ update = (dt: float64) :> void => {
 draw = () :> void => {
     clear(reading.background)
     loop [who at] in reading.shown {
-        let x = 640.0
+        let x:float64 = 640.0
         if at=?"left" x = 300.0
         else if at=?"right" x = 980.0
         circle(vec2(x 330) 130 PEOPLE.get(who)??GRAY)

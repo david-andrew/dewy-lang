@@ -398,7 +398,7 @@ def test_vscode_core_test_tasks(tmp_path):
     ('', 'const value=[20 22] return value[0]', 'value', '(constant)'),
     ('const value=[20 22]\n', 'return value[0]', 'value', '(constant)'),
     ('', 'let value:Pool<array<int64>>=[] return value.items.length', 'value', 'Pool<array<int64>>'),
-    ('twice=(x)=>x+x\n', 'return if twice(21.0) =? 42.0 42 else 1', 'twice', 'twice = (x: float64):>float64'),
+    ('twice=(x)=>x+x\n', 'return if twice(21.0) =? 42.0 42 else 1', 'twice', 'twice = (x: Rational):>Rational'),
     ('from p"support.jo" import answer\n', 'return answer(40)', 'answer', 'answer = (x: int64 n: int64 = …):>int64'),
 ])
 def test_dewy_hover_type_spelling(tmp_path, declarations, body, name, expected):

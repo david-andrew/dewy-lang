@@ -4,12 +4,12 @@
 # Run `dewy-core watch main.dewy`, edit update/draw and save to keep playing.
 
 const T = 48
-const RUN = 330.0
-const ACCEL = 12.0
-const JUMP = 820.0
-const GRAVITY = 2400.0
-const COYOTE = 0.1       # Jump briefly after leaving a ledge.
-const BUFFER = 0.12      # Remember a jump pressed just before landing.
+const RUN:float64 = 330.0
+const ACCEL:float64 = 12.0
+const JUMP:float64 = 820.0
+const GRAVITY:float64 = 2400.0
+const COYOTE:float64 = 0.1       # Jump briefly after leaving a ledge.
+const BUFFER:float64 = 0.12      # Remember a jump pressed just before landing.
 
 # '#' ground, '=' one-way platform, '/' and '\' slopes, 'o' coin, '@' start.
 const LEVEL = r"
@@ -156,8 +156,8 @@ let start = markers("@")[0]
 let player = spawn(start)
 let coins = [loop at in markers("o") Coin[pos = at]]
 let got = 0
-let run_time = 0.0
-let t = 0.0
+let run_time:float64 = 0.0
+let t:float64 = 0.0
 let cam = start
 let shake = Shake[]
 let snd_jump = sfx_jump()

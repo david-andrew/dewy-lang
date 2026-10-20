@@ -25,6 +25,7 @@ import math
 import random
 from dataclasses import dataclass, fields, replace
 from decimal import Decimal
+from fractions import Fraction
 from typing import Any
 
 # Types ------------------------------------------------------------------------
@@ -57,6 +58,7 @@ class Ty:
 
 I, U, F, B, S = (Ty(k) for k in ('int64', 'uint64', 'float64', 'bool', 'string'))
 INT = Ty('int')  # checked mathematical integer: unannotated literals; overflow is a failure
+Q = Ty('Rational')
 VOID, RANGE, HIDDEN = Ty('void'), Ty('range'), Ty('hidden')
 FN = Ty('fn', (I,), I)  # (int64):>int64 closures with private state
 AI, AS, AF = Ty('array', (I,)), Ty('array', (S,)), Ty('array', (F,))
@@ -126,6 +128,8 @@ class Lit(Expr):
 
     def render(self, typed=False):
         v, k = self.value, self.ty.kind
+        if self.ty == Q:
+            return f'({v.numerator}/{v.denominator})'
         if v is None:
             return 'none'
         if k == 'bool':
@@ -143,6 +147,19 @@ class Lit(Expr):
 
     def eval(self, m, env):
         return self.value
+
+
+@dataclass(frozen=True)
+class DecimalLit(Expr):
+    """Keep source digits: the oracle must never round them through a float."""
+    text: str
+    ty: Ty = Q
+
+    def render(self, typed=False):
+        return f'({self.text})'
+
+    def eval(self, m, env):
+        return Fraction(self.text)
 
 
 @dataclass(frozen=True)
@@ -221,7 +238,7 @@ class Bin(Expr):
             if op == '&':
                 return DSet(k for k in x.items if k in y.items)
             return DSet(k for k in x.items if k not in y.items)
-        if self.ty == F:
+        if self.ty in (F, Q):
             if op == '/' and y == 0:
                 raise InvalidProgram('float division by zero')
             return {'+': x + y, '-': x - y, '*': x * y, '/': x / y if y else 0.0}[op]
@@ -791,6 +808,8 @@ class Program(Node):
 
     def render(self, typed=False):
         parts = ['Item:type=[id:int64 tags:array<int64> label:string]', 'Bad:type=type of error & [code:int64]']
+        if any(getattr(node, 'ty', None) == Q for node in walk(self)):
+            parts.insert(0, 'from rational import Rational')
         parts += [render(f) for f in self.functions]
         parts.append('main=():>void=>{\n' + block(self.body) + '\n}')
         return '\n'.join(parts) + '\n'
@@ -980,6 +999,8 @@ def show(value, nested=False) -> str:
     if isinstance(value, bool):
         return 'true' if value else 'false'
     if isinstance(value, int):
+        return str(value)
+    if isinstance(value, Fraction):
         return str(value)
     if isinstance(value, float):
         return format_float(value)
@@ -1317,7 +1338,7 @@ def scope_errors(program) -> list[str]:
 
 FEATURES = ('arithmetic', 'floats', 'strings', 'records', 'arrays', 'snapshots', 'places',
             'closures', 'loops', 'comprehensions', 'branches', 'optionals', 'collections',
-            'recursion', 'asserts', 'checked', 'errors')
+            'recursion', 'asserts', 'checked', 'errors', 'decimals')
 
 
 @dataclass
@@ -2124,6 +2145,17 @@ class Generator:
         if self.chance(.5):
             out.insert(1, self.new_variable(AF))
         return out
+
+    def block_decimals(self):
+        def literal():
+            return DecimalLit(f'{self.r.randint(-10**22, 10**22)}.{self.r.randrange(10000):04}e-{self.r.randrange(8)}')
+        name = self.fresh('decimal')
+        x = Var(Q, name)
+        y = literal()
+        return [Let(name, Q, literal(), annotate=False),
+                Print(x), Print(Bin(Q, '+', x, y)), Print(Bin(Q, '-', x, y)),
+                Print(Bin(Q, '*', x, y)), Print(Bin(Q, '/', x, y)),
+                Print(Bin(B, '=?', Bin(Q, '+', DecimalLit('0.1'), DecimalLit('0.2')), DecimalLit('0.3')))]
 
     def block_strings(self):
         let = self.new_variable(S)

@@ -75,6 +75,7 @@ dc_atom = () -> int:
             return e
         if op == .minus and nodes[e].kind == .float_lit:
             nodes[e].fval = -nodes[e].fval
+            if nodes[e].sval != 0: nodes[e].sval = i32(intern("-" + name_of(int(nodes[e].sval))))
             nodes[e].pos = pos
             return e
         n = mk(if op == .kw_not: NK.not_ else: NK.unary, pos)
@@ -105,10 +106,12 @@ dc_atom = () -> int:
         add_flag(n, NF_LITERAL)
         return n
     if token.kind == .source_real:
-        value = to_float(replace(dn_payload(token), "_", ""))
+        number = replace(dn_payload(token), "_", "")
+        value = to_float(number)
         if value == none or value! - value! != 0.0: return 0
         n = mk(.float_lit, pos)
         nodes[n].fval = value!
+        nodes[n].sval = i32(intern(number))
         add_flag(n, NF_LITERAL)
         return n
     0
