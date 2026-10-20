@@ -3735,8 +3735,8 @@ static_value = (e: int) -> SVal:
             x = a.i
             y = b.i
             if sa_unsigned(int(nodes[e].a)):
-                x = x ^ (-9223372036854775807 - 1)
-                y = y ^ (-9223372036854775807 - 1)
+                x = x xor (-9223372036854775807 - 1)
+                y = y xor (-9223372036854775807 - 1)
             if op == .lt: return sa_int(int(x < y))
             if op == .le: return sa_int(int(x <= y))
             if op == .gt: return sa_int(int(x > y))
@@ -3744,11 +3744,11 @@ static_value = (e: int) -> SVal:
         if not sa_wide_signed(e): return sa_unknown(e)
         if op == .plus:
             r = a.i + b.i
-            if ((a.i ^ r) & (b.i ^ r)) < 0: return sa_unknown(e)
+            if ((a.i xor r) & (b.i xor r)) < 0: return sa_unknown(e)
             return sa_int(r)
         if op == .minus:
             r = a.i - b.i
-            if ((a.i ^ b.i) & (a.i ^ r)) < 0: return sa_unknown(e)
+            if ((a.i xor b.i) & (a.i xor r)) < 0: return sa_unknown(e)
             return sa_int(r)
         if op == .star:
             if a.i == 0 or b.i == 0: return sa_int(0)

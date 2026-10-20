@@ -129,6 +129,16 @@ main = () => {
     }
 }
 ''', '7\n', 0),
+    'assert-unsigned-and-sums': ('''
+const big:uint64 = 18446744073709551615
+const one:uint64 = 1
+main = () => {
+    $assert big >? one
+    $assert 9223372036854775806 + 1 =? 9223372036854775807
+    $assert 40000 * 40000 =? 1600000000
+    printl"ok"
+}
+''', 'ok\n', 0),
     'loop-label-kept': ('''
 main = () => {
     let total = 0
