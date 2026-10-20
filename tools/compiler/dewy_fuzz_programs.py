@@ -151,7 +151,8 @@ class Var(Expr):
     name: str
 
     def render(self, typed=False):
-        return self.name
+        # A function value is a handle: a bare function name would call it.
+        return f'@{self.name}' if self.ty == FN else self.name
 
     def eval(self, m, env):
         return env.get(self.name, m)
