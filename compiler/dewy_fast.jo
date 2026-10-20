@@ -208,6 +208,37 @@ dn_lex_symbol = (source: *u8, at: int, stop: int) -> DewyToken:
             if dn_matches(source, at, stop, "|>"): return .pipe_right
     dn_single_token(source[at])
 
+# The hot punctuation path needs only two bounded byte loads and a table
+# lookup. A negative entry delegates longer spellings to the complete scanner.
+# Store width beside the token so scanning does not materialize token text.
+dn_classes: u8[]
+dn_symbols: i32[]
+dn_symbol_widths: int[]
+dn_init_symbols = ():
+    dn_classes = fill(u8(0), 256)
+    loop c in [0..256):
+        bits = int(lx_cls[c])
+        if is_digit(u8(c)) or c == '_': bits |= 4
+        if is_digit(u8(c)) or is_alpha(u8(c)) or c == '_': bits |= 8
+        if c == ' ' or c == '\t' or c == '\r' or c == '\n': bits |= 16
+        dn_classes[c] = u8(bits)
+    dn_symbols = fill(i32(0), 128 * 128)
+    dn_symbol_widths = fill(0, int(DewyToken.kw_or_throw) + 1)
+    loop i in [1..int(DewyToken.kw_or_throw) + 1):
+        text = dn_token_text(DewyToken(i))
+        width = len(text)
+        dn_symbol_widths[i] = width
+        if width == 0 or dn_ident_start(text[0]): continue
+        first = int(text[0]) * 128
+        if width == 1:
+            loop next in [0..128): dn_symbols[first + next] = i32(i)
+    loop i in [1..int(DewyToken.kw_or_throw) + 1):
+        text = dn_token_text(DewyToken(i))
+        if len(text) < 2 or dn_ident_start(text[0]): continue
+        slot = int(text[0]) * 128 + int(text[1])
+        if len(text) > 2: dn_symbols[slot] = -1
+        else if dn_symbols[slot] != -1: dn_symbols[slot] = i32(i)
+
 dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLexeme[]:
     if intern_names and dn_word_tokens.len() == 0: dn_init_words()
     source = files[file].src
@@ -216,18 +247,29 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
     assert(begin >= 0 and begin <= stop and stop <= len(source))
     bytes = source.data()
     if lx_cls == null: lx_init_classes()
-    classes = lx_cls
+    if dn_symbols.len() == 0: dn_init_symbols()
+    classes = data(dn_classes)
+    symbols = data(dn_symbols)
+    widths = data(dn_symbol_widths)
     out: DewyLexeme[]
+    out.resize((stop - begin) / 2 + 1)
+    slots = data(out)
+    count = 0
     dn_block_comments = []
     i = begin
     spaced = false
     newline = false
     loop i < stop:
         c = bytes[i]
-        if c == ' ' or c == '\t' or c == '\r' or c == '\n':
+        if classes[c] & 16 != 0:
             spaced = true
             if c == '\n': newline = true
             i += 1
+            loop i < stop:
+                c = bytes[i]
+                if c == '\n': newline = true
+                else if classes[c] & 16 == 0: break
+                i += 1
             continue
         if c == '#' and i + 1 < stop and bytes[i + 1] == '{':
             e = dewy_block_comment_end(source, i, stop)
@@ -293,35 +335,48 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
                 i = dn_quote_end(source, i, stop)
                 kind = .based_string
             else:
-                loop i < stop:
-                    d = bytes[i]
-                    if is_digit(d) or d == '_' or (not decimal and is_alpha(d)): i += 1
-                    else: break
+                mask: u8 = if decimal: 4 else: 8
+                loop i < stop and classes[bytes[i]] & mask != 0: i += 1
                 if i == digits: dn_error(start, "expected digits after the base prefix")
                 kind = if decimal: DewyKind.source_integer else: DewyKind.integer
                 if decimal and i + 1 < stop and bytes[i] == '.' and is_digit(bytes[i + 1]):
                     i += 1
-                    loop i < stop and (is_digit(bytes[i]) or bytes[i] == '_'): i += 1
+                    loop i < stop and classes[bytes[i]] & 4 != 0: i += 1
                     kind = .source_real
                 if decimal and i + 1 < stop and (bytes[i] == 'e' or bytes[i] == 'E') and (is_digit(bytes[i + 1]) or bytes[i + 1] == '+' or bytes[i + 1] == '-'):
                     i += 1
                     if i < stop and (bytes[i] == '+' or bytes[i] == '-'): i += 1
                     first = i
-                    loop i < stop and (is_digit(bytes[i]) or bytes[i] == '_'): i += 1
+                    loop i < stop and classes[bytes[i]] & 4 != 0: i += 1
                     if i == first: dn_error(start, "expected exponent digits")
                     kind = .source_real
         else if c == '"' or c == '\'':
             i = dn_quote_end(source, i, stop)
             kind = .quoted
         else:
-            symbol = dn_lex_symbol(bytes, start, stop)
+            next: u8 = 0
+            if start + 1 < stop: next = bytes[start + 1]
+            code: i32 = -1
+            if c < 128 and next < 128: code = symbols[int(c) * 128 + int(next)]
+            if code < 0: symbol = dn_lex_symbol(bytes, start, stop)
+            else: symbol = DewyToken(code)
             if symbol == .none: dn_error(start, "unexpected character in Dewy source")
-            value = dn_token_text(symbol)
-            i += len(value)
+            i += widths[int(symbol)]
         if not intern_names and symbol == .none and (kind == .op or kind == .identifier): symbol = dn_token_kind(value)
-        out.push(DewyLexeme(kind, name, start, i, spaced, newline, symbol))
+        if count == out.len():
+            out.resize(out.len() * 2)
+            slots = data(out)
+        slots[count].kind = kind
+        slots[count].name = name
+        slots[count].start = start
+        slots[count].stop = i
+        slots[count].space = spaced
+        slots[count].newline = newline
+        slots[count].symbol = symbol
+        count += 1
         spaced = false
         newline = false
+    out.truncate(count)
     out.push(DewyLexeme(.eof, 0, stop, stop, spaced, newline))
     out
 
