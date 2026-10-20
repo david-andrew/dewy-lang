@@ -1,0 +1,5 @@
+# exit: 42
+let xs:array<int64>=[10 20 30] let calls:int64=0
+indices=():>IntRange=>{calls+=1 xs[0]=999 return [0,2..2]}
+main=()=>{xs.push(40) let result=xs[indices()]
+return if result =? [10 30] and xs[0] =? 999 and calls =? 1 42 else 1}

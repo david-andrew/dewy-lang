@@ -1,0 +1,10 @@
+# exit: 42
+let trace=0 let m=reshape([loop i in [0..12) i] 3 4)
+source=()=>{trace=trace*10+1 return m}
+first=()=>{trace=trace*10+2 m=zeros<int64>(1 1) return 2}
+second=()=>{trace=trace*10+3 return 0}
+last=()=>{trace=trace*10+4 return 0}
+columns=()=>{trace=trace*10+5 return [3,1..0]}
+main=()=>{let out=source()[[first(),second()..last()] columns()]
+return if trace =? 12345 and out.shape =? [2 2] and out.data =? [11 9 3 1]
+and m.shape =? [1 1] 42 else 1}

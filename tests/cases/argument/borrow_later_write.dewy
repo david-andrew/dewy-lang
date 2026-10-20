@@ -1,0 +1,5 @@
+# exit: 42
+read=(value:array<int64> ignored:int64)=>value[0]
+through=(@value:array<int64>)=>read(value {value=[99]; 0})
+main=()=>{let source=[20] source.push(1) let before=through(@source)
+return if source[0]=?99 before+22 else 1}

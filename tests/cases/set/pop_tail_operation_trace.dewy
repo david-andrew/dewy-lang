@@ -1,0 +1,23 @@
+# exit: 42
+main=()=>{
+let values:set<int64>=set[] let expected:array<int64>=[]
+loop step in [0..1200) {
+let key=(step*37+11)%41 let action=step%7
+if action <? 3 {
+let fresh=key not in? expected
+if values.add(key) not=? fresh return 1
+if fresh expected.push(key)
+} else if action =? 3 {
+if values.remove(key) not=? (key in? expected) return 2
+loop i in [0..expected.length) {if expected[i] =? key {expected.remove(i) break}}
+} else if action =? 4 {
+if expected.length >? 0 {if values.pop() not=? expected.pop() return 3}
+else {if values.pop(default=none) isnt? none return 4}
+} else if action =? 5 {
+let copy=values
+if expected.length >? 0 {if copy.pop() not=? expected[end] return 5}
+} else if step%13 =? 0 {values.clear() expected.clear()}
+if [values...] not=? expected return 6
+}
+loop expected.length >? 0 {if values.pop() not=? expected.pop() return 7}
+return if values.is_empty() 42 else 8}

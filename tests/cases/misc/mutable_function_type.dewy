@@ -1,0 +1,5 @@
+# exit: 42
+# modes: native native-release
+Fn:type=(@x:int64):>void
+apply=(f:Fn @x:int64):>void=>{f(@x)}
+main=()=>{let x:int64=40 apply((@a:int64):>void=>{a+=2} @x) return x}

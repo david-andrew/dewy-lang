@@ -1,0 +1,7 @@
+# exit: 42
+let source:array<int64>=[20]
+replace=():>void=>{source=[99]}
+read=(value:array<int64>)=>{replace() return value[0]}
+through=(@value:array<int64>)=>read(value)
+main=()=>{source.push(1) let before=through(@source)
+return if source[0]=?99 before+22 else 1}

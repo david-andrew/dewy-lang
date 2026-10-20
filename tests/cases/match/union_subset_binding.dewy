@@ -1,0 +1,5 @@
+# exit: 42
+TextOrCount:type=int64|string
+read=(v:TextOrCount):>int64=>if v is? int64 v else v.length
+pick=(v:TextOrCount|bool):>int64=>match v {part:TextOrCount=>read(part) <bool>=>2}
+main=()=>pick(37)+pick("abc")+pick(true)

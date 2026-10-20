@@ -1,0 +1,5 @@
+# exit: 42
+Word:type=uint32
+reinterpret=<T U>(value:T):>U=>value transmute U
+main=()=>{let bits:Word=1065353216 let value=reinterpret<Word float32>(bits)
+return if value=?1.0 and reinterpret<float32 Word>(value)=?bits 42 else 1}

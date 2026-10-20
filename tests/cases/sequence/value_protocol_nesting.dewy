@@ -1,0 +1,15 @@
+# exit: 42
+# quick
+from p"../../../tests/fixtures/programs/hash_keys.dewy" import Key, Tagged
+main=()=>{
+let a=Key[7 "first"] let b=Key[7 "other"]
+if [a] not=?[b] or [item=a] not=?[item=b] return 1
+let optional:Key?=a let other:Key?=b
+if optional not=?other return 2
+let variant:Key|string=a let second:Key|string=b
+if variant not=?second return 3
+if hash([a]) not=?hash([b]) or hash([item=a]) not=?hash([item=b]) return 4
+let keys=[[item=[a]]->42]
+if keys[[item=[b]]] not=?42 return 5
+let generic=[Tagged<string>["same" "first"]]
+return if generic=?[Tagged<string>["same" "other"]] 42 else 6}

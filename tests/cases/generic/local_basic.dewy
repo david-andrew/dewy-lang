@@ -1,0 +1,11 @@
+# exit: 42
+# quick
+main=()=>{
+ let count=0
+ let f=<T>(x:T)=>{count+=1; count}
+ let b=f
+ let x=f(1)
+ let y=f("s")
+ let z=b(true)
+ return if x=?1 and y=?2 and z=?1 42 else 1
+}

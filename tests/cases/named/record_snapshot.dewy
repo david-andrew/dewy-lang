@@ -1,0 +1,6 @@
+# exit: 42
+Item:type=[values:array<int64>]
+let item=Item[[40]]
+replace=()=>{item=Item[[99]] return 2}
+combine=(n:int64 old:Item)=>old.values[0]+n
+main=()=>combine(old=item n=replace())

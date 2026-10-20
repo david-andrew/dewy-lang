@@ -1,0 +1,8 @@
+# exit: 42
+sum=(items:array<uint16>)=>items[0]+items[1]
+main=()=>{
+let values:array<uint8>=[set[]... set[20 22]...]
+let unique:set<uint8>=set[set[]... set[20 22]... 20]
+let inferred=[set[]... 42]
+return if values =? [20 22] and unique =? set[20 22] and inferred =? [42]
+sum([set[20 22]...]) as int64 else 1}

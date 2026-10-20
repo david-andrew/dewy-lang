@@ -192,6 +192,15 @@ def test_core_driver_rejects_source_edit_during_build(checkout, monkeypatch):
     assert not (cache / 'current.json').exists()
 
 
+def stub_stages(monkeypatch):
+    """Record the golden-case stages instead of running them."""
+    from tools import cases
+    calls = []
+    monkeypatch.setattr(cases, 'run', lambda binary, chosen, **options: calls.append(
+        ('cases', len(chosen), options['workers'])) or 0)
+    return calls
+
+
 def test_core_driver_test_command(monkeypatch, tmp_path):
     binary = tmp_path / 'dewy-core'
     monkeypatch.setattr(core, 'toolchain', lambda **kwargs: binary)
@@ -205,7 +214,9 @@ def test_core_driver_test_command(monkeypatch, tmp_path):
         return 7
 
     monkeypatch.setattr(core.subprocess, 'call', run)
+    stages = stub_stages(monkeypatch)
     assert core.main(['test', '-k', 'record']) == 7
+    assert [stage[0] for stage in stages] == ['cases'] and stages[0][1] > 0
     assert received['command'][-2:] == ['-k', 'record']
     assert '--maxfail=1' in received['command']
     assert all(path in received['command'] for path in core.TESTS)
@@ -224,7 +235,9 @@ def test_core_driver_quick_command(monkeypatch, tmp_path):
         return 7
 
     monkeypatch.setattr(core.subprocess, 'call', run)
+    stages = stub_stages(monkeypatch)
     assert core.main(['test', '--quick', '-k', 'dictionary']) == 7
+    assert [stage[0] for stage in stages] == ['cases']
     command = received['command']
     assert command[command.index('-m', 3)+1] == 'core_quick'
     assert command[-2:] == ['-k', 'dictionary']
@@ -265,7 +278,9 @@ def test_core_driver_worker_selection(monkeypatch, tmp_path, arguments, cpus, av
 
     monkeypatch.setattr(core.subprocess, 'run', probe)
     monkeypatch.setattr(core.subprocess, 'call', run)
+    stages = stub_stages(monkeypatch)
     assert core.main(['test', *arguments]) == 0
+    assert stages[0][2] == (int(expected_workers) or 1 if '-n' in arguments else min(4, cpus))
     command = received['command']
     if expected_workers is None:
         assert 'xdist.plugin' not in command

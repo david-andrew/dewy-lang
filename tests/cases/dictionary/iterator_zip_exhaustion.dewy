@@ -1,0 +1,17 @@
+# exit: 42
+main=()=>{
+let values=[0->0 1->99 2->20 3->22 4->99]
+values.remove(1) values.remove(4)
+let count:int64=0 let total:int64=0
+loop [key value] in values and i in [0..10) {
+count+=1 if key =? 0 continue total+=value
+values.clear()
+}
+if count not=? 3 or total not=? 42 return 1
+values=[1->99 2->20 3->99] values.remove(1) values.remove(3)
+count=0 total=0
+loop key in values or value in [20 22 0] {
+if key isnt? none {if key not=? 2 return 2 count+=1}
+total+=value??0
+}
+return if count =? 1 total else 3}

@@ -1,0 +1,10 @@
+# exit: 42
+# quick
+make=()=>{let count=40
+let parent=()=>{count+=1 return ($capture @count)=>{count+=1; count}}
+return parent()}
+work=()=>{let a=make() let b=a
+return if a()=?42 and b()=?43 and a()=?44 42 else 1}
+main=()=>{work() let before=alloc_count()
+loop i in [0..20) {if work() not=?42 return 1}
+return if alloc_count()=?before 42 else 2}

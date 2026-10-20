@@ -1,0 +1,13 @@
+# exit: 42
+Row:type=array<int64 length=3>
+Box:type=[row:Row]
+main=()=>{let rows:array<Box>=[Box[[10 20 30]] Box[[40 50 60]]] let saved=rows
+let which:int64=0 let calls:int64=0
+select=($capture @calls $capture @which)=>{calls+=1 return which}
+replace=($capture @which)=>{which=1 return [7 8]}
+rows[select()].row[1..end]=replace()
+if calls not=? 1 or rows[0].row not=? [10 7 8] or rows[1].row not=? [40 50 60] return 1
+let m:dict<string Row>=['a'->[10 20 30]] let old=m
+m['a'][0,2..]=[5 6]
+return if m['a'] =? [5 20 6] and old['a'] =? [10 20 30]
+and saved[0].row =? [10 20 30] 42 else 2}

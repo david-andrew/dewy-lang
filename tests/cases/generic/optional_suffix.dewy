@@ -1,0 +1,6 @@
+# exit: 42
+choose=(yes:bool):>array<uint16>?=>if yes [20 22] else none
+sum=(values:array<uint16>?):>int64=>if values is? none 0 else values[0]+values[1]
+main=()=>{let empty:array<uint16>?=none let present:array<uint16>?=[20 22]
+return if sum(empty)=?0 and sum(choose(false))=?0 and sum(choose(true))=?42
+and 5>?3 and not (3>?5) sum(present) else 1}

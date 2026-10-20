@@ -1,0 +1,9 @@
+# exit: 42
+# quick
+Box:type=[values:array<int64>]
+edit=(box:Box?):>int64=>{
+if box is? none return 0
+let p=box.values.data() p[0]=42
+return box.values[0]}
+main=()=>{let original=Box[[10 11]]
+return if edit(original) =? 42 and edit(none) =? 0 and original.values =? [10 11] 42 else 1}

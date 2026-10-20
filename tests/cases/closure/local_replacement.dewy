@@ -1,0 +1,5 @@
+# exit: 42
+make=(n:int64)=>{let value=n return (x:int64)=>{value+=x; value}}
+main=()=>{let current=make(40)
+let before=current({current=make(100); 2})
+return if before=?42 and current(1)=?101 42 else 1}

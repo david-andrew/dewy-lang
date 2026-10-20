@@ -1,0 +1,11 @@
+# exit: 42
+main=()=>{
+let empty:array<int64>=[]
+let a=[loop x in empty x*2]
+let b=[loop x in [10 20 30] {let y=x+1 y*2}]
+let fixed:array<int64 length=3>=[10 20 30]
+let c=[loop x in fixed x+1]
+let d=[loop i in 0.. and x in fixed i+x]
+return if a.length =? 0 and b =? [22 42 62] and c =? [11 21 31]
+and d =? [10 21 32] 42 else 1
+}

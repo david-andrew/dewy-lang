@@ -1,0 +1,9 @@
+# exit: 42
+main=()=>{
+let xs:array<float32 length=3>=[1 2 3] let saved=xs
+let result=xs .* 2 .+ 1
+if result not=? [3.0 5.0 7.0] or xs not=? saved return 1
+let words:array<string length=2>=["a" "b"]
+let decorate=(s:string)=>s+"!"
+return if decorate.(words) =? ["a!" "b!"] 42 else 2
+}

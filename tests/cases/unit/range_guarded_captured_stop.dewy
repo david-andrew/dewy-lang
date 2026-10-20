@@ -1,0 +1,6 @@
+# exit: 42
+main=()=>{
+let stop:int64=4 let count:int64=0
+let shrink=($capture @stop)=>{stop=1}
+loop i in 0.. and i <? stop {count+=1 shrink()}
+return if count =? 1 42 else 1}

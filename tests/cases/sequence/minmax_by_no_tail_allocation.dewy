@@ -1,0 +1,10 @@
+# exit: 42
+let before:int64=0
+let extra=false
+key=(value:int64):>int64=>{if alloc_count() not=?before extra=true return value}
+main=()=>{
+let values=[20 99 22 1]
+values.min_by(key) values.max_by(key)
+before=alloc_count() extra=false
+let low=values.min_by(key) let high=values.max_by(key)
+return if not extra and low=?1 and high=?99 42 else 1}

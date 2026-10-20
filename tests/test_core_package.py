@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_core import Scripts
+from tests.support import Scripts
 from tools.compiler.package import package
 
 

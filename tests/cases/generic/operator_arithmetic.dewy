@@ -1,0 +1,10 @@
+# exit: 42
+Vec:type=[x:int64 y:int64]
+__add__=(a:Vec b:Vec)=>Vec[a.x+b.x a.y+b.y]
+__sub__=(a:Vec b:Vec)=>Vec[a.x-b.x a.y-b.y]
+__mul__=(a:Vec b:int64)=>Vec[a.x*b a.y*b]
+__mul__=(a:int64 b:Vec)=>Vec[a*b.x a*b.y]
+__unary_sub__=(a:Vec)=>Vec[-a.x -a.y]
+main=()=>{let a=Vec[10 11] let b=Vec[1 2]
+let total=2a+2b-2b let negative=-total
+return if negative.x =? -20 and negative.y =? -22 and __add__(a a) =? total 42 else 1}

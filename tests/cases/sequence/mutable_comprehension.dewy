@@ -1,0 +1,8 @@
+# exit: 42
+main=()=>{
+let values=[19 21] let saved=values
+let doubled=[loop @value in values {value+=1; value*2}]
+let empty:array<int64>=[]
+let fallback=[loop @value in empty value else 42]
+return if values=?[20 22] and saved=?[19 21]
+and doubled=?[40 44] and fallback=?[42] 42 else 1}

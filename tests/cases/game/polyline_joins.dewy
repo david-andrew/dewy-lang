@@ -1,0 +1,18 @@
+# exit: 42
+import p"@lib/game/draw2d.jo" as surface
+vertex=(buffer:array<float32> i:int64):>vec2=>vec2(buffer[i*9] buffer[i*9+1])
+work=(buffer:array<float32>):>int64=>{
+polyline([vec2(10 10) vec2(100 10) vec2(100 100)] 10 WHITE)
+if surface.__b_count not=? 12 return 1
+if vertex(buffer 1) not=? vertex(buffer 6) or vertex(buffer 2) not=? vertex(buffer 11) return 2
+if vertex(buffer 1) not=? vec2(94 16) or vertex(buffer 2) not=? vec2(106 4) return 3
+surface.__b_count=0
+polyline([vec2(10 10) vec2(100 10) vec2(100 10) vec2(100 100) vec2(10 10)] 10 WHITE closed=true)
+if surface.__b_count not=? 18 return 4
+if vertex(buffer 0) not=? vertex(buffer 13) or vertex(buffer 5) not=? vertex(buffer 14) return 5
+return 42}
+main=()=>{let buffer:array<float32>=[] buffer.resize(18*9)
+let previous=surface.__b_buf
+surface.__b_buf=buffer.data() surface.__b_tex=surface.__white.id surface.__b_count=0
+let result=work(buffer) surface.__b_buf=previous surface.__b_count=0
+return result}

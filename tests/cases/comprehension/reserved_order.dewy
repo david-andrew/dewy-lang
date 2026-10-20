@@ -1,0 +1,6 @@
+# exit: 42
+let bound=3 let reads=0 let visited:array<int64>=[]
+limit=()=>{reads+=1 return bound}
+value=(i:int64)=>{bound=0 visited.push(i) return i*7}
+main=()=>{let result=[loop i in [0..limit()) value(i)]
+return if result =? [0 7 14] and visited =? [0 1 2] and reads =? 1 and bound =? 0 42 else 1}

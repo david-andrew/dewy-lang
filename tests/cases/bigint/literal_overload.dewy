@@ -1,0 +1,5 @@
+# exit: 42
+from bigint import BigInt
+choose=((value:int64)=>1)&((value:uint64)=>2)&((value:BigInt)=>3)
+main=()=>if choose(42) =? 1 and choose(18446744073709551615) =? 2
+and choose(18446744073709551616) =? 3 and choose(-9223372036854775809) =? 3 42 else 1

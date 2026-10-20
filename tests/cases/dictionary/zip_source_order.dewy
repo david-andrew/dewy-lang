@@ -1,0 +1,7 @@
+# exit: 42
+let trace:int64=0
+entries=()=>{trace=trace*10+1 return ["a"->20 "b"->22]}
+weights=()=>{trace=trace*10+2 return [1 1]}
+main=()=>{let total:int64=0
+loop [key value] in entries() and weight in weights() {total+=value*weight}
+return if trace =? 12 total else 1}

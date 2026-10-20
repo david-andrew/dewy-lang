@@ -1,0 +1,9 @@
+# exit: 42
+run=<T>(value:T):>int64=>{
+$again
+loop x in [1] {loop y in [1] {break $again}}
+$again
+loop true {break $again}
+return 21
+}
+main=()=>run(1)+run("hello")

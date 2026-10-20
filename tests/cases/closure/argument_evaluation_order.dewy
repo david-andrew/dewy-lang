@@ -1,0 +1,8 @@
+# exit: 42
+Counter:type=():>int64
+make=()=>{let n=0 return ()=>{n+=1; n}}
+read=(f:Counter ignored:int64)=>f()
+main=()=>{let f=make()
+if read(f f()) not=?1 return 1
+if read(ignored=f() f=f) not=?3 return 2
+return if f()=?3 42 else 3}

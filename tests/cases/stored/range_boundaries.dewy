@@ -1,0 +1,11 @@
+# exit: 42
+main=()=>{
+let low:int64=-9223372036854775808 let high:int64=9223372036854775807
+let all=[low..high] let wide=[low,high..high] let reverse=[high,low..low]
+let a=[loop x in wide x] let b=[loop x in reverse x]
+let count:int64=0 loop x in all {count+=1 if count =? 3 break}
+let last=[high..high] let empty=[high..high)
+let c=[loop x in last x] let d=[loop x in empty x]
+return if count =? 3 and a =? [low high] and b =? [high low] and c =? [high] and d.length =? 0
+and low in? all and high in? all and 0 in? all and 0 notin? wide 42 else 1
+}

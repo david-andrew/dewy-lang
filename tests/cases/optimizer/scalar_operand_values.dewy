@@ -1,0 +1,25 @@
+# exit: 42
+main=()=>{
+let x:int64=10
+if x+{x=20; 3} not=? 13 return 1
+x=10
+if x-{x=20; 3} not=? 7 return 2
+x=10
+if x*{x=20; 3} not=? 30 return 3
+x=10
+if x//{x=20; 3} not=? 3 return 4
+x=10
+if x%{x=20; 3} not=? 1 return 5
+x=10
+if x<<{x=20; 1} not=? 20 return 6
+x=10
+if (x xor {x=20; 3}) not=? 9 return 7
+x=10
+if x <? {x=0; 5} return 8
+x=10
+if (x as uint64)+{x=20; 3} not=? 13 return 9
+let small:int8=10
+if small+{small=20; 3} not=? 13 return 10
+let flag:bool=true
+return if flag xor {flag=false; false} 42 else 11
+}

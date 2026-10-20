@@ -1,0 +1,15 @@
+# exit: 42
+main=()=>{
+let low:int64=-9223372036854775808 let high:int64=9223372036854775807
+let top:uint64=18446744073709551615 let zero:uint64=0
+let a:array<int64>=[] let b:array<int64>=[] let c:array<uint64>=[] let d:array<uint64>=[]
+loop i in [low,high..high] {a.push(i) if a.length >? 3 break}
+loop i in [high,low..low] {b.push(i) if b.length >? 3 break}
+loop i in [zero,top..top] {c.push(i) if c.length >? 3 break}
+loop i in [top,zero..zero] {d.push(i) if d.length >? 3 break}
+let signed_prefix:array<int64>=[] let unsigned_prefix:array<uint64>=[]
+loop i in [low,low+1..high] {signed_prefix.push(i) if signed_prefix.length =? 3 break}
+loop i in [zero,zero+1..top] {unsigned_prefix.push(i) if unsigned_prefix.length =? 3 break}
+return if a =? [low high] and b =? [high low] and c =? [zero top] and d =? [top zero]
+and signed_prefix =? [low low+1 low+2] and unsigned_prefix =? [zero zero+1 zero+2] 42 else 1
+}

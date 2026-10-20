@@ -1,0 +1,14 @@
+# exit: 42
+main=()=>{
+let count:int64=0 let result:int64=0
+$outer
+loop true {
+    count+=1
+    loop true {
+        if count <? 3 {continue $outer}
+        result=42
+        break $outer
+    }
+}
+return result
+}

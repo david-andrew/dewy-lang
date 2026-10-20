@@ -1,0 +1,9 @@
+# exit: 42
+change=(@values:array<uint64>):>uint64=>{values[0]=2 return 1}
+main=()=>{
+let values:array<uint64>=[1]
+if values not=? [change(@values)] or values[0] not=? 2 return 1
+values[0]=1
+if [change(@values)] =? values or values[0] not=? 2 return 2
+return 42
+}

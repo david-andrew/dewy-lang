@@ -1,0 +1,4 @@
+# exit: 42
+select=<T>(xs:array<T> indices:IntRange):>array<T>=>xs[indices]
+main=()=>{let xs=["a" "b" "c"] let picked=select(xs [0,2..2]) picked[0]="new"
+return if picked =? ["new" "c"] and xs =? ["a" "b" "c"] 42 else 1}

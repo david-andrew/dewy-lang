@@ -1,0 +1,12 @@
+# exit: 42
+Pair:type=[x:float64 y:float64]
+advance=(p:Pair):>Pair=>Pair(x=p.x+0.5 y=p.y+p.x)
+main=()=>{
+let p=Pair(x=2.5 y=1.25) let saved=p
+loop i in [0..20) {p=advance(p)}
+let values=[saved p] values.push(p)
+p.y=0.0
+let precise=advance(Pair(x=1.0000000000000002 y=0.0))
+return if saved.x =? 2.5 and saved.y =? 1.25 and precise.y >? 1.0
+and values[1].x =? 12.5 and values[2].y =? 146.25 42 else 1
+}

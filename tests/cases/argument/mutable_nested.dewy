@@ -1,0 +1,6 @@
+# exit: 42
+Item:type=[values:array<int64>]
+bump=(@value:int64):>void=>{value+=22}
+main=()=>{let items=[Item[[20 30]]] let copy=items let calls:int64=0
+bump(@items[{calls+=1; 0}].values[0])
+return if calls=?1 and copy[0].values[0]=?20 items[0].values[0] else 1}

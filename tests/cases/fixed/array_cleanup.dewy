@@ -1,0 +1,8 @@
+# exit: 42
+Pair:type=array<array<int64> length=2>
+work=()=>{let pair:Pair=[[20] [22]] let copy=pair copy[0].push(1)
+let values:array<Pair>=[pair copy] values[0][1][0]=0
+return pair[0][0]+pair[1][0]}
+main=()=>{if work() not=? 42 return 1 let before=alloc_count()
+loop i in [0..30) {if work() not=? 42 return 2}
+return if alloc_count() =? before 42 else 3}

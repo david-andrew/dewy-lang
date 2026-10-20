@@ -1,0 +1,7 @@
+# exit: 42
+let trace:int64=0
+needle=()=>{trace=trace*10+1 return 0}
+low=()=>{trace=trace*10+2 return 10}
+high=()=>{trace=trace*10+3 return 20}
+probe=()=>{let found=needle() in? [low()..high()] return if not found and trace =? 123 42 else 1}
+main=()=>probe()

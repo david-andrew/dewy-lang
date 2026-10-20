@@ -1,0 +1,5 @@
+# exit: 42
+main=()=>{let shared=0 let private=0
+let a=($capture @shared)=>{shared+=1 private+=1 return private}
+let b=a
+return if a()=?1 and b()=?1 and a()=?2 and shared=?3 and private=?0 42 else 1}

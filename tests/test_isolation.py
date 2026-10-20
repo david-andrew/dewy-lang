@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from tests.test_core import compiler
+from tests.support import compiler
 
 
 FIXTURES = Path(__file__).parent / 'fixtures/isolation'

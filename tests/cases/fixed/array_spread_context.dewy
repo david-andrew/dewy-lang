@@ -1,0 +1,9 @@
+# exit: 42
+sum=(values:array<uint8 length=2>)=>(values[0] as int64)+(values[1] as int64)
+first=<T>(values:array<T length=2>):>T=>values[0]
+main=()=>{let pair:array<uint8 length=2>=[20 22]
+let values:array<uint8 length=3>=[pair... 99]
+let dynamic=[pair...] dynamic[0]=0
+let zeros:array<int64 length=2>=[]
+return if values[2] =? 99 and pair[0] =? 20 and zeros[0]+zeros[1] =? 0
+and first([pair...]) =? 20 sum([[]... 20 22]) else 1}

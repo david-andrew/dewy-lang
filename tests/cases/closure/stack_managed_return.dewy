@@ -1,0 +1,9 @@
+# exit: 42
+make=()=>{let xs=[40]
+let parent=()=>{xs[0]+=1 return ()=>{xs[0]+=1; xs[0]}}
+return parent()}
+work=()=>{let a=make() let b=a
+return if a()=?42 and b()=?42 and a()=?43 42 else 1}
+main=()=>{work() let before=alloc_count()
+loop i in [0..20) {if work() not=?42 return 1}
+return if alloc_count()=?before 42 else 2}

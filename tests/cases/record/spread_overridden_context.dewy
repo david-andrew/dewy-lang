@@ -1,0 +1,8 @@
+# exit: 42
+Answer:type=[value:uint8]
+let calls=0
+discarded=()=>{calls+=1 return "discarded"}
+read=(answer:Answer)=>answer.value as int64
+main=()=>{let base=Answer[42] let first:Answer=[value=discarded() base...]
+let second=read([value=discarded() base... value=42])
+return if calls =? 2 and first.value =? 42 second else 1}

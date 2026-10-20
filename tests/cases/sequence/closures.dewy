@@ -1,0 +1,7 @@
+# exit: 42
+# quick
+Series:type=[first:int64 count:int64]
+len=(s:Series)=>s.count
+__index__=(s:Series index:int64)=>s.first+index
+main=()=>{let callbacks=[loop x in Series[13 3] ()=>x]
+return if callbacks[0]() =? 13 and callbacks[1]() =? 14 and callbacks[2]() =? 15 42 else 1}

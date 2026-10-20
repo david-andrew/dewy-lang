@@ -1,0 +1,19 @@
+# exit: 42
+# quick
+main=()=>{
+loop size in [0..130) {
+    let bytes:array<uint8>=[]
+    loop i in [0..size) {bytes.push(((i*17)%128) as uint8)}
+    let left=str_from_bytes(bytes)
+    let right=str_from_bytes(bytes)
+    if left not=?right or left not=?left return 1
+    loop i in [0..size) {
+        let old=bytes[i]
+        bytes[i]=((old as int64) xor 64) as uint8
+        if left=?str_from_bytes(bytes) return 2
+        bytes[i]=old
+    }
+    bytes.push(0 as uint8)
+    if left=?str_from_bytes(bytes) return 3
+}
+return 42}

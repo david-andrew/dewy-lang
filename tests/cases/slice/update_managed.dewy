@@ -1,0 +1,8 @@
+# exit: 42
+work=():>void=>{
+let pool:Pool<array<string>>=[] let h=pool.add(["a" "b" "c"])
+let saved=pool pool[h][1..]=["new" "last"]
+if pool[h] not=? ["a" "new" "last"] or saved[h] not=? ["a" "b" "c"] panic("snapshot changed")
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}

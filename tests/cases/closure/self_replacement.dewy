@@ -1,0 +1,7 @@
+# exit: 42
+Counter:type=(x:int64):>int64
+let current:Counter
+make=(n:int64)=>{let value=n return (x:int64)=>{value+=x; value}}
+replace=()=>{current=make(100); 2}
+main=()=>{current=make(40)
+return if current(replace())=?42 and current(1)=?101 42 else 1}

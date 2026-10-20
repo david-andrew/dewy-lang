@@ -1,0 +1,16 @@
+# exit: 42
+work=(empty:bool):>int64=>{
+let source:array<string>=if empty [] else ["x"]
+loop text in source {
+    let values=["body {text}"] values.push(text)
+    return values.length
+} else {
+    let values=["fallback {empty}"] values.push("y")
+    return values.length
+}
+}
+main=()=>{
+work(true) work(false) let before=alloc_count()
+loop i in [0..20) {if work(i%2 =? 0) not=? 2 return 1}
+return if alloc_count() =? before 42 else 2
+}

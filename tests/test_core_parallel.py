@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_core import Scripts
+from tests.support import Scripts
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL = ROOT / 'examples/parallel_particles.dewy'

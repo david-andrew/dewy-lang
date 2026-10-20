@@ -1,0 +1,16 @@
+# exit: 42
+main=()=>{
+let total=0
+$outer
+loop i in [0..3) {
+    $inner
+    loop j in [0..2) {
+        total+=1
+        if i =? 0 {continue $outer}
+        if i =? 1 {break $inner}
+        break $outer
+    } else {total=999}
+    total+=10
+} else {total=999}
+return if total =? 13 42 else 1
+}

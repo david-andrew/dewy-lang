@@ -1,0 +1,10 @@
+# exit: 42
+identity=(m:NDArray<float64>):>NDArray<float64>=>m
+main=()=>{
+let original=zeros(2 3) let copied=identity(original)
+copied[1 2]=42.0
+assert(sum(original) =? 0.0 and sum(copied) =? 42.0)
+let boxed:array<NDArray<float64>>=[original copied]
+let maybe:NDArray<float64>?=boxed[1]
+if maybe is? none return 1
+return maybe[1 2] as int64}

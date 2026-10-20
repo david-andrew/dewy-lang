@@ -1,0 +1,8 @@
+# exit: 42
+let source:array<int64>=[20]
+Marker:type=[id:int64]
+__fmt=(@buf:array<uint8> value:Marker):>void=>{source[0]=99 buf.push(120 as uint8)}
+read=(value:array<int64> ignored:string)=>value[0]
+through=(@value:array<int64>)=>read(value "{Marker[0]}")
+main=()=>{source.push(1) let before=through(@source)
+return if source[0]=?99 before+22 else 1}

@@ -1,0 +1,9 @@
+# exit: 42
+# quick
+main=()=>{
+let small:array<uint32>=[0 1 2147483648 2139095040 4286578688 2143363909 4290773281 8388607 8388608 2139095039]
+loop bits in small {let value=bits transmute float32 if (value transmute uint32) not=?bits return 1}
+let wide:array<uint64>=[0 1 9223372036854775808 9218868437227405312 18442240474082181120 9221140253039434428 18444512289894291659 4503599627370495 4503599627370496 9218868437227405311]
+loop bits in wide {let value=bits transmute float64 if (value transmute uint64) not=?bits return 2}
+return 42
+}

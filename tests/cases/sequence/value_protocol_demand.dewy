@@ -1,0 +1,10 @@
+# exit: 42
+Box:type=<T>[value:T]
+__eq__=<T>(a:Box<T> b:Box<T>):>bool=>a.value=?b.value
+hash=<T>(box:Box<T>):>uint64=>box.value.special_hash()
+HashOnly:type=<T>[value:T]
+__eq__=<T>(a:HashOnly<T> b:HashOnly<T>):>bool=>a.value.special_equal(b.value)
+hash=<T>(box:HashOnly<T>):>uint64=>(box.value as uint64).hash()
+main=()=>{
+if [Box<int64>[20]] not=?[Box<int64>[20]] return 1
+return if hash([HashOnly<int64>[22]])=?hash([HashOnly<int64>[22]]) 42 else 2}

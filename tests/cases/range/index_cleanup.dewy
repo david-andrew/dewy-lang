@@ -1,0 +1,8 @@
+# exit: 42
+work=():>void=>{
+let xs=["a" "b" "c"] xs.push("d") let saved=xs let picked=xs[[3,1..0]]
+xs[[0,2..2]]=picked
+if xs not=? ["d" "b" "b" "d"] or saved not=? ["a" "b" "c" "d"] panic("snapshot changed")
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}

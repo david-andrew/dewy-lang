@@ -1,0 +1,7 @@
+# exit: 42
+# quick
+Box:type=[values:array<int64>]
+main=()=>{let rows=[Box[[10 11]]]
+let item=rows[0]
+let p=item.values.data() p[0]=42
+return if rows[0].values =? [10 11] and item.values =? [42 11] 42 else 1}

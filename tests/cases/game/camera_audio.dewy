@@ -1,0 +1,10 @@
+# exit: 42
+from p"@lib/game/audio.jo" import __place_3d
+main=()=>{
+let eye=vec3(0 0 5) let point=vec3(1 0 5)
+camera3d(eye vec3(0 0 0))
+let [gain normal]=__place_3d(point 40.0)
+camera3d(eye vec3(0 0 0) up=vec3(0 -1 0))
+let [rolledGain rolled]=__place_3d(point 40.0)
+camera3d(eye vec3(0 0 0))
+return if normal>?0.79 and rolled<?-0.79 and abs(gain-rolledGain)<?0.0001 42 else 1}

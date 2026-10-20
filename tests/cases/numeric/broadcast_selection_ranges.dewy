@@ -1,0 +1,12 @@
+# exit: 42
+main=()=>{
+let xs=[1 2 3 4 5 6] let saved=xs
+xs[1..3] .+= 10
+xs[5,3..] .*= 2
+xs[0,2..4] .-= [1 2 3]
+if xs not=? [0 24 11 28 2 12] or saved not=? [1 2 3 4 5 6] return 1
+xs[..] .//= 2
+xs[0..0) .+= 99
+xs[[]] .+= 99
+return if xs =? [0 12 5 14 1 6] 42 else 2
+}

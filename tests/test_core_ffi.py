@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_core import compiler
+from tests.support import compiler
 
 FIXTURES = Path(__file__).resolve().parent / 'fixtures/core_ffi'
 

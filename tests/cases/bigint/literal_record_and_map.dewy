@@ -1,0 +1,9 @@
+# exit: 42
+from bigint import BigInt
+Record:type=[value:BigInt=42]
+main=()=>{
+let row=Record[] let data:dict<BigInt string>=[0->"zero" 42->"answer" 123456789012345678901234567890->"large"]
+let copy=data data[42]="changed"
+return if row.value =? 42 and data[0] =? "zero" and copy[42] =? "answer"
+and data[123456789012345678901234567890] =? "large" 42 else 1
+}

@@ -1,0 +1,14 @@
+# exit: 42
+main=()=>{
+let values=[0 1 2 3] let empty:array<int64>=[] let total=0
+loop @value in empty {return 1} else {total+=10}
+loop @value in values {
+value+=10
+if value=?10 continue
+if value=?12 break
+} else {return 2}
+$outer
+loop @value in values {
+loop i in [0..2) {value+=1 continue $outer}
+} else {return 3}
+return if total=?10 and values=?[11 12 13 4] 42 else 4}

@@ -1,0 +1,9 @@
+# exit: 42
+Item:type=[count:int64 parts:array<int64>]
+bump=(@item:Item):>void=>{item.count+=1 item.parts.push(22)}
+main=()=>{
+let items=[Item[19 [20]] Item[21 [20]]] let saved=items
+loop @item in items {bump(@item) item.parts[0]+=1}
+return if items[0].count=?20 and items[1].count=?22
+and items[0].parts=?[21 22] and items[1].parts=?[21 22]
+and saved[0].count=?19 and saved[0].parts=?[20] 42 else 1}

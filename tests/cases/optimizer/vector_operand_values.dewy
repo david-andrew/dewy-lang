@@ -1,0 +1,15 @@
+# exit: 42
+main=()=>{
+let v=vec2(1 2)
+let sum=v+{v=vec2(10 20); vec2(3 4)}
+if sum not=? vec2(4 6) return 1
+v=vec2(1 2)
+let scaled=v*{v=vec2(10 20); 2.0}
+if scaled not=? vec2(2 4) return 2
+let factor:float32=2.0
+let reverse=factor*{factor=10.0; vec2(3 4)}
+if reverse not=? vec2(6 8) return 3
+let iv=ivec2(1 2)
+let integers=iv+{iv=ivec2(10 20); ivec2(3 4)}
+return if integers =? ivec2(4 6) 42 else 4
+}

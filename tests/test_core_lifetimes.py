@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from tests.test_core import compiler, run_value_batch, Scripts
+from tests.support import compiler, run_value_batch, Scripts
 
 MAKE = 'make=(n:int64):>string=>"value={n}"\n'
 EXIT = '{if stop return 42; make(2)}'

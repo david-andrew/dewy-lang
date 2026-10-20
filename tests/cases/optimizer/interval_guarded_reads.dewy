@@ -1,0 +1,13 @@
+# exit: 42
+inside=(take:bool xs:array<int64>):>bool=>take and xs[0] >=? 0 and xs[0] <=? 42
+outside=(skip:bool xs:array<int64>):>bool=>skip or xs[0] <? 0 or xs[0] >? 42
+main=()=>{let empty:array<int64>=[]
+if inside(false empty) or not outside(true empty) return 1
+if not inside(true [42]) or outside(false [42]) return 2
+let xs=[20] let calls:int64=0
+index=($capture @calls)=>{calls+=1 return 0}
+let ok=xs[index()] >=? 0 and xs[index()] <=? 42
+if not ok or calls not=? 2 return 3
+calls=0
+let short=xs[index()] <? 42 or xs[index()] >? 100
+return if short and calls =? 1 42 else 4}

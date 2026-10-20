@@ -1,0 +1,12 @@
+# exit: 42
+Box:type=[value:int64?]
+get=(box:Box key:int64):>int64?=>box.value
+has=(box:Box key:int64):>bool=>false
+has=(values:dict<int64 int64> key:int64):>bool=>false
+main=()=>{
+let box=Box[42] let empty=Box[none]
+if box.get(1) is? none or box.get(1) =? none return 1
+if empty.get(1) isnt? none or empty.get(1) not=? none return 2
+let values=[1->42]
+if values.get(1) is? none or values.get(1) =? none return 3
+return 42}

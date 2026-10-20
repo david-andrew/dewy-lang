@@ -1,0 +1,12 @@
+# exit: 42
+let order:int64=0
+bound=(tag:int64 value:int64)=>{order=order*10+tag return value}
+main=()=>{
+let count:int64=0
+loop i in [bound(1 9223372036854775805)..bound(2 9223372036854775807)] {
+    i=0 count+=1 continue
+}
+let start:uint8=255
+loop i in [start..] {if i not=? 255 return 1 break}
+return if count =? 3 and order =? 12 42 else 2
+}

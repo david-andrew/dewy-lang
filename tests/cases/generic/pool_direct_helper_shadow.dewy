@@ -1,0 +1,7 @@
+# exit: 42
+main=()=>{
+let __pool_index=(p:Pool<array<int64>> h:Handle):>int64=>1
+let pool:Pool<array<int64>>=[] let a=pool.add([20]) let b=pool.add([30])
+pool[a][0]=42
+return if pool[a][0] =? 42 and pool[b][0] =? 30 and __pool_index(pool a) =? 1 42 else 1
+}

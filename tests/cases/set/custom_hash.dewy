@@ -1,0 +1,12 @@
+# exit: 42
+from p"../../../tests/fixtures/programs/hash_keys.dewy" import Key, Tagged
+main=()=>{
+let first=set[Key[20 "a"] Key[22 "b"] Key[20 "c"]]
+let second=set[Key[22 "other"] Key[20 "labels"]]
+if first.length not=?2 or first not=?second return 1
+let outer=set[first second]
+if outer.length not=?1 or second not in? outer return 2
+let records=[[members=first]->42]
+if records[[members=second]] not=?42 return 3
+let generic=set[Tagged<string>["same" "a"] Tagged<string>["same" "b"]]
+return if generic.length=?1 42 else 4}

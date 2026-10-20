@@ -1,0 +1,9 @@
+# exit: 42
+Point:type=[x:int64 y:float64]
+main=()=>{
+let points=[loop i in [0..17) Point[i (i as float64)*0.5]] let saved=points
+points[0].x=99
+if saved[0].x not=? 0 or points[1].x not=? 1 return 1
+loop i in [0..17) {if saved[i].x not=? i or saved[i].y not=? (i as float64)*0.5 return 2}
+return 42
+}

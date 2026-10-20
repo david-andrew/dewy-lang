@@ -1,0 +1,8 @@
+# exit: 42
+main=()=>{
+let a=reshape([3.0 1.0 1.0 2.0] 2 2) let saved=a
+let flat=flatten(a) let reshaped=reshape(a 1 4)
+a[0 1]=4.0 flat[0]=99.0 reshaped[0 3]=7.0
+assert(saved.data =? [3.0 1.0 1.0 2.0])
+assert(a[0 1] =? 4.0 and a[0 0] =? 3.0 and a[1 1] =? 2.0)
+return 42}

@@ -1,0 +1,10 @@
+# exit: 42
+pick=(value:int64):>int64=>{
+match value {<0>=>{return 10} <1>=>{return 11} <2>=>{return 12}
+<3>=>{return 13} _=>{return 14}}
+panic("unreachable match tail")
+}
+main=()=>{loop i in [-2..6) {
+if pick(i) not=? (if i >=? 0 and i <? 4 i+10 else 14) return 1
+}
+return 42}

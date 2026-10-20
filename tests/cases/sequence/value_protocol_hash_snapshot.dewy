@@ -1,0 +1,18 @@
+# exit: 42
+Key:type=[value:int64]
+let current:array<Key>=[] let armed=false let calls:int64=0
+hash=(key:Key):>uint32=>{
+calls+=1
+if armed {armed=false current.clear()}
+return key.value as uint32
+}
+through=(values:array<Key>):>int64=>{
+let code=hash(values)
+let noise=[Key[99] Key[100]]
+return if noise.length=?2 and code=?hash([Key[20] Key[22]])
+values[0].value+values[1].value else 1
+}
+main=()=>{
+current=[Key[20] Key[22]] armed=true
+let result=through(current)
+return if current.length=?0 and calls=?4 result else 2}

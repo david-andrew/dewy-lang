@@ -1,0 +1,10 @@
+# exit: 42
+let word="first"
+spec=():>string=>{word="later" return ">8"}
+main=()=>{
+let result=format(word spec())
+if result not=? "   first" or word not=? "later" return 1
+let pattern=".2f"
+if format(1.125 pattern) not=? "1.12" return 2
+return 42
+}

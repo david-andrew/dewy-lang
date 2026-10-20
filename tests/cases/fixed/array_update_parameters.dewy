@@ -1,0 +1,7 @@
+# exit: 42
+Row:type=array<int64 length=2>
+change=(xs:Row):>Row=>{xs[..]=0 return xs}
+edit=(@xs:Row)=>{xs[..]=42}
+main=()=>{let xs:Row=[20 22] let result=change(xs)
+if xs not=? [20 22] or result not=? [0 0] return 1
+edit(@xs) return if xs =? [42 42] 42 else 2}

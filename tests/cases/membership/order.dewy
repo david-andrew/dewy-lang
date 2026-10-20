@@ -1,0 +1,6 @@
+# exit: 42
+let trace:int64=0
+needle=()=>{trace=trace*10+1 return 42}
+container=()=>{trace=trace*10+2 return [42]}
+probe=()=>if needle() in? container() and trace =? 12 42 else 1
+main=()=>probe()

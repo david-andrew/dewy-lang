@@ -1,0 +1,6 @@
+# exit: 42
+Box:type=[value:int64]
+__floordiv__=(a:Box b:int64)=>Box[a.value+b]
+__mod__=(a:Box b:int64)=>Box[a.value+b]
+main=()=>{let box=Box[40] let a=box//2 let b=box%8
+return if a.value =? 42 and b.value =? 48 42 else 1}

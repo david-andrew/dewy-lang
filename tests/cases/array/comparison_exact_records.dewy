@@ -1,0 +1,10 @@
+# exit: 42
+from bigint import BigInt
+Item:type=[amount:uint64]
+main=()=>{
+let exact:array<BigInt>=[0 123456789012345678901234567890]
+let items:array<Item>=[[amount=42]]
+return if exact =? [0 123456789012345678901234567890]
+and [0 123456789012345678901234567890] =? exact
+and items =? [[amount=42]] and [[amount=42]] =? items 42 else 1
+}

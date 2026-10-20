@@ -1,0 +1,11 @@
+# exit: 42
+# quick
+Callback:type=(step:int64 extra:int64):>int64
+apply=(f:Callback)=>f(2 3)
+main=()=>{let count=0 let total=0 let initial=10
+let next=($capture @count step:int64 $capture initial extra:int64 $capture @total):>int64=>{
+count+=1 total+=step+extra initial+=1; initial}
+let other=next initial=100
+if next(2 3) not=?11 or other(4 5) not=?11 or next(0 1) not=?12 return 1
+if apply(next) not=?13 or next(0 0) not=?13 return 2
+return if count=?5 and total=?20 and initial=?100 42 else 3}

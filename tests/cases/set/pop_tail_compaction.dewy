@@ -1,0 +1,14 @@
+# exit: 42
+main=()=>{
+let values=set[loop i in [0..64) i]
+loop i in [40..64) values.remove(i)
+if values.pop() not=? 39 return 1
+loop i in [0..30) values.remove(i)
+if [values...] not=? [30 31 32 33 34 35 36 37 38] return 2
+values.add(99) values.remove(99)
+if values.pop() not=? 38 return 3
+values.add(100) values.add(100)
+if values.pop() not=? 100 return 4
+loop expected in [37,36..30] {if values.pop() not=? expected return 5}
+values.clear() values.push(42)
+return values.pop()}

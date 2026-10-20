@@ -1,0 +1,7 @@
+# exit: 42
+# quick
+apply=(f:((value:int64):>int64) value:int64):>int64=>f(value)
+main=()=>{if apply((*2+2)20) not=?42 return 1
+if apply((//2)84) not=?42 or apply((^2)3) not=?9 return 2
+if apply((%10)42) not=?2 or apply((*-2) (-21)) not=?42 return 3
+return if apply((*apply((*2)3))7)=?42 and (-1)=?-1 42 else 4}

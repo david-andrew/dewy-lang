@@ -1,0 +1,9 @@
+# exit: 42
+work=()=>{
+let xs=["a" "b" "c"] let saved=xs
+xs[0,2..] .+= "!"
+xs[[false true false]] .+= ["?"]
+assert(xs =? ["a!" "b?" "c!"] and saved =? ["a" "b" "c"])
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}

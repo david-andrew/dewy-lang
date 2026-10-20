@@ -1,0 +1,24 @@
+# exit: 42
+count=<T>(start:T end:T):>int64=>{
+let result:int64=0
+loop i in [start..end] {result+=1 if result >? 4 panic("range did not stop")}
+return result
+}
+main=()=>{
+let total:int64=0
+ total+=count(125 as int8 127 as int8)
+ total+=count(253 as uint8 255 as uint8)
+ total+=count(32765 as int16 32767 as int16)
+ total+=count(65533 as uint16 65535 as uint16)
+ total+=count(2147483645 as int32 2147483647 as int32)
+ total+=count(4294967293 as uint32 4294967295 as uint32)
+ total+=count(9223372036854775805 9223372036854775807)
+ total+=count(18446744073709551613 18446744073709551615)
+let signed:array<int64>=[] let unsigned:array<uint64>=[]
+let low:int64=-9223372036854775808
+loop i in [low..9223372036854775807] {signed.push(i) if signed.length =? 3 break}
+let zero:uint64=0
+loop i in [zero..18446744073709551615] {unsigned.push(i) if unsigned.length =? 3 break}
+return if total =? 24 and signed =? [low low+1 low+2]
+and unsigned =? [zero zero+1 zero+2] 42 else 1
+}

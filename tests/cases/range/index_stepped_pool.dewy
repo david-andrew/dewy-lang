@@ -1,0 +1,6 @@
+# exit: 42
+main=()=>{
+let pool:Pool<array<int64>>=[] let h=pool.add([10 20 30 40]) let saved=pool
+pool[h][0,2..]=42
+return if pool[h] =? [42 20 42 40] and saved[h] =? [10 20 30 40] 42 else 1
+}

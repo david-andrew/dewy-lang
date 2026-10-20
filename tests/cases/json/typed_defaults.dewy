@@ -1,0 +1,5 @@
+# exit: 42
+Settings:type=[count:int64=42 label:string="default"]
+main=()=>{let loaded=from_json<Settings>(r'{"old":[1,2,3],"label":"kept"}')
+if loaded is? TextError return 1
+return if loaded.count =? 42 and loaded.label =? "kept" 42 else 1}

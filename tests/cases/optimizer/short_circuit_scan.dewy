@@ -1,0 +1,15 @@
+# exit: 42
+scan=(text:array<uint8>):>int64=>{
+let i:int64=0 let total:int64=0
+loop i <? text.length {
+    if text[i] <? 48 or text[i] >? 57 {i+=1 continue}
+    let value:int64=0
+    loop i <? text.length and text[i] >=? 48 and text[i] <=? 57 {
+        value=10*value+(text[i] as int64)-48 i+=1
+    }
+    total+=value
+}
+return total
+}
+main=()=>{return if scan(bytes("123 x 45 0 7")) =? 175 and scan(bytes("")) =? 0
+and scan(bytes("1 20 300")) =? 321 and scan(bytes("no digits")) =? 0 42 else 1}

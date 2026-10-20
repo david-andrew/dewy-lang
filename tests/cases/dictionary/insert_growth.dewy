@@ -1,0 +1,14 @@
+# exit: 42
+main=()=>{let values:dict<int64 int64>=[]
+loop i in [0..300) {if not values.insert_if_absent(i i+1) return 1}
+let snapshot=values
+loop i in [0,2..300) {if not values.remove(i) return 2}
+loop i in [0..300) {
+let added=values.insert_if_absent(i i+42)
+if added not=? (i%2 =? 0) return 3
+if values[i] not=? (if added i+42 else i+1) return 4
+if snapshot[i] not=? i+1 return 5
+}
+let keys=values.keys()
+if keys[0] not=? 1 or keys[149] not=? 299 or keys[150] not=? 0 or keys[299] not=? 298 return 6
+return if values.length=?300 42 else 7}

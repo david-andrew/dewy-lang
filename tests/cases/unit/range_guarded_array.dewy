@@ -1,0 +1,7 @@
+# exit: 42
+bump=(@values:array<int64>):>void=>{
+loop i in 0.. and i <? values.length {if i%2 =? 0 continue values[i]+=1}
+}
+main=()=>{let values=[10 20 11] let snapshot=values bump(@values)
+let empty:array<int64>=[] bump(@empty)
+return if snapshot =? [10 20 11] and empty.length =? 0 values[0]+values[1]+values[2] else 1}

@@ -1,0 +1,5 @@
+# exit: 42
+Item:type=[values:array<int64>]
+main=()=>{let a:Item|string=Item[[20 22]]
+let result=match a {b:Item=>{b.values[0]=99 b.values[1]} <string>=>0}
+return if a is? Item a.values[0]+result else 1}

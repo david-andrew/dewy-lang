@@ -1,0 +1,15 @@
+# exit: 42
+work=(mode:int64):>int64=>{
+let result:int64=0
+$outer
+loop i in [0..4) {
+loop j in [0..3) {
+if mode =? 0 {if j =? 1 break $outer else continue}
+else {if j =? 1 break else result+=1}
+result+=100
+}
+result+=10
+}
+return result
+}
+main=()=>{return if work(0)=?0 and work(1)=?444 42 else 1}

@@ -1,0 +1,9 @@
+# exit: 42
+let values:array<int64>=[99 20 22 100]
+let trace:int64=0
+lower=():>int64=>{trace=trace*10+2 values=[99] return 1}
+upper=():>int64=>{trace=trace*10+3 return 3}
+main=()=>{
+let sum:int64=0
+loop value in values[lower()..upper()) {trace=trace*10+4 sum+=value}
+return if trace=?2344 and values=?[99] sum else 1}

@@ -1,0 +1,9 @@
+# exit: 42
+change=(@value:int64):>void=>{value=-5}
+reference=():>int64=>{
+let word:int64=0 change(@word)
+word=(word*131+255)%1000000007 return word}
+closure=():>int64=>{
+let word:int64=0 let mutate=($capture @word)=>{word=-5} mutate()
+word=(word*131+255)%1000000007 return word}
+main=()=>if reference()=?999999607 and closure()=?999999607 42 else 1

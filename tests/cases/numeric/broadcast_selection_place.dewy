@@ -1,0 +1,10 @@
+# exit: 42
+let rows=[[1 2 3 4]] let index=0 let trace=0
+at=()=>{trace=trace*10+1 return index}
+lower=()=>{trace=trace*10+2 rows[0]=[10 20 30 40] return 1}
+upper=()=>{trace=trace*10+3 return 3}
+right=()=>{trace=trace*10+4 rows.push([99]) index=1 return 10}
+main=()=>{let saved=rows
+rows[at()][lower()..upper()) .+= right()
+return if trace =? 1234 and rows =? [[10 12 13 40] [99]]
+and saved =? [[1 2 3 4]] 42 else 1}

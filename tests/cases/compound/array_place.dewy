@@ -1,0 +1,7 @@
+# exit: 42
+let values:array<int64>=[84 100] let index:int64=0 let calls:int64=0
+pick=()=>{calls+=1 return index}
+change=()=>{index=1 values[0]=999 return 2}
+main=()=>{values.push(200) let saved=values
+values[pick()]//=change()
+return if values =? [42 100 200] and saved =? [84 100 200] and calls =? 1 42 else 1}

@@ -1,0 +1,14 @@
+# exit: 42
+# quick
+let values=[2 3 4]
+first=(xs:array<int64>):>int64=>xs[0]
+read_global=():>int64=>values.first()
+main=()=>{
+let saved=values
+loop @item in values {item+=read_global()}
+if values not=? [4 7 8] or saved not=? [2 3 4] return 1
+let nested=[values [9 10]] let original=nested
+loop @row in nested {loop @item in row {item+=row.first()}}
+if nested not=? [[8 15 16] [18 28]] or original not=? [[4 7 8] [9 10]] return 2
+return 42
+}

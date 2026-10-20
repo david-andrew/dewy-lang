@@ -1,0 +1,8 @@
+# exit: 42
+work=()=>{
+let m=reshape(["a" "b" "c" "d"] 2 2) let saved=m
+m[[..] 1] .+= "!"
+assert(m.data =? ["a" "b!" "c" "d!"] and saved.data =? ["a" "b" "c" "d"])
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}

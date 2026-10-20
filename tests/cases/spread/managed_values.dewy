@@ -1,0 +1,7 @@
+# exit: 42
+Item:type=[words:array<string>]
+main=()=>{let xs=[Item[["a"]]] xs.push(Item[["b"]])
+let ys=[xs... Item[["c"]]] ys[0].words.push("changed")
+xs[1].words[0]="new"
+return if xs[0].words =? ["a"] and ys[1].words =? ["b"]
+and ys[2].words =? ["c"] 42 else 1}

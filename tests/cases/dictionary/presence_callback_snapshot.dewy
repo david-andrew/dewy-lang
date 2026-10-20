@@ -1,0 +1,21 @@
+# exit: 42
+Key:type=[value:int64]
+let values:dict<Key array<int64>>=[]
+let hash_calls:int64=0 let equal_calls:int64=0 let armed=false
+hash=(key:Key):>uint64=>{
+hash_calls+=1
+if armed values.clear()
+return 0
+}
+__eq__=(a:Key b:Key):>bool=>{
+equal_calls+=1
+if armed values.clear()
+return a.value =? b.value
+}
+main=()=>{
+values=[Key[1]->[42]] hash_calls=0 equal_calls=0 armed=true
+if values.get(Key[1]) is? none return 1
+if values.length not=?0 or hash_calls not=?1 or equal_calls not=?1 return 2
+armed=false values=[Key[1]->[42]] hash_calls=0 equal_calls=0 armed=true
+if values.get(Key[2]) not=? none return 3
+return if values.length=?0 and hash_calls=?1 and equal_calls=?1 42 else 4}

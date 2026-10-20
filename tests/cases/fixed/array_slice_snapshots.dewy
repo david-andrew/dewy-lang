@@ -1,0 +1,8 @@
+# exit: 42
+Pair:type=array<array<int64> length=2>
+let values:Pair=[[20] [22]] let calls:int64=0
+bound=()=>{calls+=1 values[0][0]=99 values[1].push(5) return 2}
+main=()=>{let slice=values[0..bound())
+slice[0].push(1)
+return if calls =? 1 and slice[0] =? [20 1] and slice[1] =? [22]
+and values[0] =? [99] and values[1] =? [22 5] 42 else 1}

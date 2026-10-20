@@ -1,0 +1,10 @@
+# exit: 42
+fallback=(stop:int64):>int64=>{
+let count:int64=0
+loop i in 0.. and i <? stop {count+=1} else {count=42}
+return count
+}
+main=()=>{
+let sum:int64=0
+loop i in 0.. and i <? 4 {loop j in 0.. and j <? i {sum+=j}}
+return if sum =? 4 and fallback(0) =? 42 and fallback(2) =? 2 42 else 1}

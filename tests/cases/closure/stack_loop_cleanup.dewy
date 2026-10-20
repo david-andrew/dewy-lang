@@ -1,0 +1,10 @@
+# exit: 42
+work=()=>{loop i in [0..8) {
+let xs=[i] let next=()=>{xs[0]+=1; xs[0]}
+if next() not=?i+1 return 1
+if i<?3 continue
+if i>?5 break
+} return 42}
+main=()=>{work() let before=alloc_count()
+loop i in [0..20) {if work() not=?42 return 1}
+return if alloc_count()=?before 42 else 2}

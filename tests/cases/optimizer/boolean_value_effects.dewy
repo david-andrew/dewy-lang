@@ -1,0 +1,22 @@
+# exit: 42
+# quick
+let trace=0
+mark=(tag:int64 value:bool):>bool=>{trace=trace*10+tag return value}
+identity=(value:bool):>bool=>value
+main=()=>{
+loop a in [false true] {loop b in [false true] {loop c in [false true] {
+    trace=0
+    let first=(mark(1 a) and mark(2 b)) or mark(3 c)
+    let expected=if a (if b true else c) else c
+    let steps=if a (if b 12 else 123) else 13
+    if first not=?expected or trace not=?steps return 1
+    trace=0
+    let second=identity(not (mark(1 a) or (mark(2 b) and mark(3 c))))
+    expected=if a false else (if b (not c) else true)
+    steps=if a 1 else (if b 123 else 12)
+    if second not=?expected or trace not=?steps return 2
+}}}
+let empty:array<int64>=[]
+let skipped=empty.length>?0 and empty[0]=?1
+if skipped return 3
+return 42}

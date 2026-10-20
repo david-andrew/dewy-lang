@@ -1,0 +1,11 @@
+# exit: 42
+main=()=>{
+let empty:array<float64>=[]
+if f64_bits(norm(empty)) not=?0 or f64_bits(norm([-0.0 0.0])) not=?0 return 1
+if f64_bits(hypot(-0.0 -0.0)) not=?0 return 2
+if hypot(NAN INF) not=?INF or hypot(-INF NAN) not=?INF return 3
+if not is_nan(hypot(NAN 1.0)) or not is_nan(norm([NAN INF])) return 4
+if norm([-INF 1.0]) not=?INF return 5
+if f64_bits(abs(-0.0)) not=?0 or f32_bits(abs(f32_from_bits(0x80000000))) not=?0 return 6
+if f64_bits(abs(f64_from_bits(0xfff8000000000042))) not=?0x7ff8000000000042 return 7
+return 42}

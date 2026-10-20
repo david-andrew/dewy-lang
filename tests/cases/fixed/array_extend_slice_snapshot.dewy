@@ -1,0 +1,12 @@
+# exit: 42
+let source:array<array<int64> length=4>=[[10] [20] [22] [90]]
+lower=()=>{source[1]=[99] return 1}
+work=():>void=>{source=[[10] [20] [22] [90]]
+let out:array<array<int64>>=[] out.extend(source[lower()..3))
+out[0].push(42)
+assert(out =? [[20 42] [22]] and source[1] =? [99])
+let fixed:array<int64 length=1>=[99] let ints:array<int64>=[]
+ints.extend(fixed[1..1)) assert(ints.length =? 0)
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}

@@ -1,0 +1,11 @@
+# exit: 42
+Row:type=array<array<string> length=3>
+work=():>void=>{let row:Row=[['a'] ['b'] ['c']] let saved=row
+row[1..]=[['new'] ['last']] row[0..0]=row[2..2]
+row[0].push('!')
+if saved not=? [['a'] ['b'] ['c']] or row not=? [['last' '!'] ['new'] ['last']] panic("snapshot changed")
+let pool:Pool<Row>=[] let h=pool.add(saved) let old=pool
+pool[h][1..]=[['x'] ['y']]
+if pool[h] not=? [['a'] ['x'] ['y']] or old[h] not=? saved panic("writeback failed")}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}

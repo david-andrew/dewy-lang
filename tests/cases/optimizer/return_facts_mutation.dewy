@@ -1,0 +1,8 @@
+# exit: 42
+probe=(value:int64):>int64=>{
+let x=value
+if x<?0 return 11
+x=-1
+if x<?0 return 12
+return 13}
+main=()=>{return if probe(-1)=?11 and probe(0)=?12 and probe(1)=?12 42 else 1}

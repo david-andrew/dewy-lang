@@ -1,0 +1,11 @@
+# exit: 42
+Box:type=[rows:array<array<int64>>]
+let trace="" let index=0
+__index__=(box:Box i:int64):>array<int64>=>{trace+="g" return box.rows[i]}
+__setindex__=(@box:Box i:int64 value:array<int64>)=>{trace+="s" box.rows[i]=value}
+at=()=>{trace+="i" return index}
+right=()=>{trace+="r" index=1 return 10}
+main=()=>{let box=Box[[[1 2 3] [4 5 6]]] let saved=box
+box[at()][1..] .+= right()
+return if box.rows =? [[1 12 13] [4 5 6]] and saved.rows =? [[1 2 3] [4 5 6]]
+and trace =? "igrs" 42 else 1}

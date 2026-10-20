@@ -1,0 +1,14 @@
+# exit: 42
+read=(take:bool values:array<int64>):>int64=>{
+if take and values[0] >? 0 and values[0] <? 100 return values[0]
+return 42
+}
+main=()=>{let empty:array<int64>=[]
+if read(false empty) not=? 42 return 1
+loop take in [true false] {
+    let values=[7]
+    let first=if take {let value=values[0] value*2} else 10
+    if first not=? (if take 14 else 10) return 2
+    if read(take values) not=? (if take 7 else 42) return 3
+}
+return 42}

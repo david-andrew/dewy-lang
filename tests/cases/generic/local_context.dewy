@@ -1,0 +1,4 @@
+# exit: 42
+apply=(f:((x:int64):>int64))=>f(21)
+main=()=>{let f=<T>(x:T):>T=>x+x
+return if apply(f)=?42 and apply(<T>(x:T)=>x+x)=?42 42 else 1}

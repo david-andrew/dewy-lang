@@ -1,0 +1,10 @@
+# exit: 42
+let values=[99 20 22 100] let trace=0
+source=():>array<int64>=>{trace=trace*10+1 return values}
+lower=():>int64=>{trace=trace*10+2 values=[99] return 1}
+upper=():>int64=>{trace=trace*10+3 return 3}
+item=(x:int64)=>{trace=trace*10+4 return x}
+main=()=>{let result=[loop x in source()[lower()..upper()) item(x)]
+let empty=[loop x in result[1..1) x+1]
+return if result =? [20 22] and empty.length =? 0 and trace =? 12344
+and values =? [99] 42 else 1}

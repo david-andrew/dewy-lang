@@ -1,0 +1,21 @@
+# exit: 42
+# quick
+byte=(v:int64):>int64=>match v {<-2>=>255 <0>=>2 <3>=>7 _=>5}
+short=(v:int64):>int64=>match v {<-2>=>65535 <0>=>2 <3>=>7 _=>5}
+word=(v:int64):>int64=>match v {<-2>=>4294967295 <0>=>2 <3>=>7 _=>5}
+wide=(v:int64):>int64=>match v {<-2>=>9223372036854775807 <0>=>2 <3>=>7 _=>5}
+sbyte=(v:int64):>int64=>match v {<-2>=>-128 <0>=>2 <3>=>7 _=>-5}
+sshort=(v:int64):>int64=>match v {<-2>=>-32768 <0>=>2 <3>=>7 _=>-5}
+sword=(v:int64):>int64=>match v {<-2>=>-2147483648 <0>=>2 <3>=>7 _=>-5}
+swide=(v:int64):>int64=>match v {<-2>=>-9223372036854775808 <0>=>2 <3>=>7 _=>-5}
+main=()=>{
+    if byte(-2) not=? 255 or short(-2) not=? 65535 or word(-2) not=? 4294967295 or wide(-2) not=? 9223372036854775807 return 1
+    if sbyte(-2) not=? -128 or sshort(-2) not=? -32768 or sword(-2) not=? -2147483648 or swide(-2) not=? -9223372036854775808 return 2
+    loop v in [-9223372036854775808 -3 -1 0 1 2 3 4 9223372036854775807] {
+        let expected=if v=?0 2 else if v=?3 7 else 5
+        if byte(v) not=? expected or short(v) not=? expected or word(v) not=? expected or wide(v) not=? expected return 3
+        if expected=?5 expected=-5
+        if sbyte(v) not=? expected or sshort(v) not=? expected or sword(v) not=? expected or swide(v) not=? expected return 4
+    }
+    return 42
+}

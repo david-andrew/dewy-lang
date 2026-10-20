@@ -1,0 +1,7 @@
+# exit: 42
+Pool:type=<T>[items:array<T>]
+let writes:int64=0
+__index__=<T>(p:Pool<T> i:int64):>T=>p.items[i]
+__setindex__=<T>(@p:Pool<T> i:int64 value:T):>void=>{writes+=1 p.items[i]=value}
+main=()=>{let pool=Pool<array<int64>>[[[20]]]
+pool[0][0]+=22 return if writes =? 1 and pool.items[0][0] =? 42 42 else 1}

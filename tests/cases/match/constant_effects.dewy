@@ -1,0 +1,12 @@
+# exit: 42
+# quick
+let calls:int64=0
+next=(v:int64):>int64=>{calls+=1 v}
+pick=(v:int64):>int64=>match next(v) {<0>=>10 <1>=>{calls+=10 20} <2>=>30 _=>{calls+=100 40}}
+main=()=>{
+    if pick(0) not=? 10 or calls not=? 1 return 1
+    if pick(1) not=? 20 or calls not=? 12 return 2
+    if pick(2) not=? 30 or calls not=? 13 return 3
+    if pick(-1) not=? 40 or calls not=? 114 return 4
+    return 42
+}

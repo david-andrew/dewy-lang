@@ -1,0 +1,5 @@
+# exit: 42
+make=()=>{let n=0 return ()=>{n+=1; n}}
+main=()=>{let values=[make()] let total=0
+loop f in values {total+=f()+f()}
+return if total=?3 and values[0]()=?1 42 else 1}

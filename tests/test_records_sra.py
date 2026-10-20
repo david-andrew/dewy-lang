@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_core import compiler, run_value_batch
+from tests.support import compiler, run_value_batch
 
 FIXTURES = Path(__file__).parent / 'fixtures' / 'records_sra'
 

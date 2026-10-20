@@ -1,0 +1,4 @@
+# exit: 42
+pick=(v:int64|uint8|string):>int64=>match v {
+<42>=>40 <uint8>=>2 _=>0}
+main=()=>{let small:uint8=42 return pick(42)+pick(small)+pick("42")}

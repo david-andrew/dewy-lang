@@ -1,0 +1,7 @@
+# exit: 42
+update=(values:array<int64>):>array<int64>=>{
+loop @value in values value+=1
+return values
+}
+main=()=>{let values=[19 21] let result=update(values)
+return if result=?[20 22] and values=?[19 21] 42 else 1}

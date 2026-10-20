@@ -1,0 +1,8 @@
+# exit: 42
+Box:type=[values:array<int64>]
+let reads:int64=0 let writes:int64=0 let index:int64=0
+__index__=(box:Box i:int64):>int64=>{reads+=1 return box.values[i]}
+__setindex__=(@box:Box i:int64 value:int64):>void=>{writes+=1 box.values[i]=value}
+change=()=>{index=1 return 2}
+main=()=>{let box=Box[[84 100]] box[index]//=change()
+return if box.values =? [42 100] and reads =? 1 and writes =? 1 42 else 1}

@@ -1,0 +1,8 @@
+# exit: 42
+main=()=>{
+let stop:int64=7 let total:int64=0
+loop i in 0.. and i <? stop {total+=i if i =? 2 stop=4}
+if total not=? 6 return 1
+stop=2 total=0
+loop i in 0.. and i <? stop {total+=1 if i =? 1 stop=4}
+return if total =? 4 42 else 2}

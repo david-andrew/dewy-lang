@@ -1,0 +1,8 @@
+# exit: 42
+# quick
+Item:type=[name:string ids:array<uint64> optional:int64?]
+main=()=>{let values=[Item["a\n🙂" [uint64.max 42] none] Item["b" [] int64.min]]
+let copy=from_json<array<Item>>(to_json(values 2))
+if copy is? TextError return 1
+return if copy.length =? 2 and copy[0].name =? values[0].name and copy[0].ids =? values[0].ids
+and copy[0].optional is? none and copy[1].optional =? int64.min 42 else 1}

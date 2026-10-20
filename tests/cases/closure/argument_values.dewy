@@ -1,0 +1,8 @@
+# exit: 42
+Counter:type=():>int64
+make=()=>{let n=0 return ()=>{n+=1; n}}
+twice=(f:Counter)=>f()+f()
+advance=(@f:Counter)=>f()
+main=()=>{let a=make()
+if twice(a) not=?3 or twice(a) not=?3 or a() not=?1 return 1
+return if advance(@a)=?2 and a()=?3 42 else 2}

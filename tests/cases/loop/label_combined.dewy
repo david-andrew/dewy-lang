@@ -1,0 +1,21 @@
+# exit: 42
+main=()=>{
+let total=0
+$range
+loop x in [0..4) and x <? 3 {
+    loop y in [0..2) {total+=1 continue $range}
+}
+$array
+loop x in [1 2 3] and x <? 3 {
+    loop y in [0..2) {total+=2 continue $array}
+}
+$zip
+loop x in [1 2 3] and y in [4 5 6] {
+    loop z in [0..2) {total+=3 continue $zip}
+}
+$longest
+loop x in [1] or y in [2 3 4] {
+    loop z in [0..2) {total+=4 continue $longest}
+}
+return if total =? 28 42 else 1
+}

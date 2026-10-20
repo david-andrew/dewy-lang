@@ -1,0 +1,13 @@
+# exit: 42
+make=(present:bool):>array<string>?=>{
+let values=["a"] values.push("b") return if present values else none
+}
+work=(present:bool):>void=>{
+let source=make(present) let values=source??["fallback"] let saved=values
+values.push("new")
+if present {if saved not=? ["a" "b"] panic("snapshot changed")}
+else {if saved not=? ["fallback"] panic("fallback changed")}
+}
+main=()=>{work(true) work(false) let before=alloc_count()
+loop i in [0..20) {work(true) work(false)}
+return if alloc_count() =? before 42 else 1}

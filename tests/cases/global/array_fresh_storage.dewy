@@ -1,0 +1,13 @@
+# exit: 42
+Cell:type=[value:int64]
+let cells=[Cell(10)]
+let counts:array<int64>=[]
+mutate=()=>{cells[0].value+=1 counts[0]+=2}
+main=()=>{
+counts.push(3)
+mutate() mutate()
+if cells[0].value not=?12 or counts[0] not=?7 return 1
+cells=[Cell(20)] counts=[] counts.push(4)
+mutate()
+return if cells[0].value=?21 and counts[0]=?6 42 else 1
+}

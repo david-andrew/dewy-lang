@@ -1,0 +1,18 @@
+# exit: 42
+Number:type=[value:int64 label:string]
+let trace=0
+source=()=>{trace=trace*10+1 return [Number[2 "a"] Number[3 "b"]]}
+offset=()=>{trace=trace*10+4 return 10}
+extract=(value:Number):>int64=>value.value
+__unary_sub__=(value:Number):>Number=>{
+trace=trace*10+value.value
+return Number[-value.value value.label]
+}
+main=()=>{
+let values=.-source()
+if trace not=?123 or values not=?[Number[-2 "a"] Number[-3 "b"]] return 1
+trace=0
+let fused=extract.(.-source()) .+ offset()
+if trace not=?1423 or fused not=?[8 7] return 3
+let saved=values values[0].label="changed"
+return if saved[0].label=?"a" 42 else 2}

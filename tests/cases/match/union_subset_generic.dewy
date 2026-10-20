@@ -1,0 +1,4 @@
+# exit: 42
+read=(v:int64|string):>int64=>if v is? int64 v else v.length
+pick=<T>(v:T|bool):>int64=>match v {part:T=>read(part) <bool>=>2}
+main=()=>pick<int64|string>(37)+pick<int64|string>("abc")+pick<int64|string>(true)

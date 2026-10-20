@@ -1,0 +1,13 @@
+# exit: 42
+main=()=>{
+let fixed:array<int64 length=3>=[1 -2 3]
+let result:array<int64>=.-fixed
+if result not=?[-1 2 -3] return 1
+let matrix=reshape([1 2 3 4 5 6] 2 3)
+let changed=.-(matrix .+ [10 20 30])
+if changed.shape not=?[2 3] or changed.data not=?[-11 -22 -33 -14 -25 -36] return 2
+let empty:array<int64>=[]
+if (.-empty).length not=?0 or (.+empty).length not=?0 return 3
+let empty_matrix=.-zeros<int64>(0 3)
+if empty_matrix.shape not=?[0 3] or empty_matrix.data.length not=?0 return 4
+return 42}

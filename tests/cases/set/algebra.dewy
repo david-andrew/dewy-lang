@@ -1,0 +1,9 @@
+# exit: 42
+main=()=>{
+let evens=set[0 2 4 6 8] let small=set[0 1 2 3]
+if [loop x in (evens & small) x] not=? [0 2] return 1
+if [loop x in (evens | small) x] not=? [0 2 4 6 8 1 3] return 2
+if [loop x in (evens-small) x] not=? [4 6 8] return 3
+if [loop x in (evens xor small) x] not=? [4 6 8 1 3] return 4
+if evens not=? set[8 6 4 2 0] or small =? evens return 5
+return if (evens & evens)=?evens and (evens-evens).length=?0 42 else 6}

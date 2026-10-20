@@ -1,0 +1,10 @@
+# exit: 42
+let source:array<int64>=[20 22]
+let calls:int64=0
+key=(value:int64):>int64=>{calls+=1 source=[99] return value}
+main=()=>{
+let low=source.min_by(key)
+if low not=?20 or calls not=?2 or source not=?[99] return 1
+source=[20 22] calls=0
+let high=source.max_by(key)
+return if high=?22 and calls=?2 and source=?[99] low+high else 2}

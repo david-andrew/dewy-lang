@@ -1,0 +1,8 @@
+# exit: 42
+make=()=>{let n=0 return ()=>{n+=1; n}}
+main=()=>{let a=[make()] let b=a let r=[call=make() rows=[a]] let q=r
+if a[0]() not=?1 or b[0]() not=?1 or a[0]() not=?2 return 1
+if r.call() not=?1 or q.call() not=?1 return 2
+if r.rows[0][0]() not=?1 or q.rows[0][0]() not=?1 return 3
+let m=["counter"->make()] let k=m
+return if m["counter"]()=?1 and k["counter"]()=?1 42 else 4}

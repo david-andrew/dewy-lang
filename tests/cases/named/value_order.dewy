@@ -1,0 +1,7 @@
+# exit: 42
+# quick
+let trace:int64=0
+mark=(tag:int64 value:int64)=>{trace=trace*10+tag; value}
+make=()=>{trace=trace*10+1; (left:int64 right:int64)=>left+right}
+main=()=>{let answer=make()(right=mark(2 22) left=mark(3 20))
+return if answer=?42 and trace=?123 42 else 1}

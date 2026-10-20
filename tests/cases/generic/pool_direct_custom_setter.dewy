@@ -1,0 +1,8 @@
+# exit: 42
+let writes:int64=0
+__setindex__=(@pool:Pool<array<int64>> h:Handle value:array<int64>):>void=>{
+writes+=1 pool.items[pool.index_of(h)]=value
+}
+main=()=>{let pool:Pool<array<int64>>=[] let h=pool.add([20])
+pool[h][0]+=22
+return if pool[h][0] =? 42 and writes =? 1 42 else 1}

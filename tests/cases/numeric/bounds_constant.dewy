@@ -1,0 +1,7 @@
+# exit: 42
+const BYTE_TOP=uint8.max
+const WORD_TOP=uint64.max
+width=((x:uint8)=>8)&((x:uint64)=>64)&((x:int64)=>0)
+default_byte=(x:uint8=BYTE_TOP)=>x
+main=()=>{let x=BYTE_TOP let y=WORD_TOP
+return if width(x) =? 8 and width(y) =? 64 and default_byte() =? 255 42 else 1}

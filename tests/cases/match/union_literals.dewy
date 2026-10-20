@@ -1,0 +1,4 @@
+# exit: 42
+pick=(v:int64|string):>int64=>match v {
+<0>=>1 s:"yes"=>s.length+v.length <"no">=>0 n:42=>n _=>2}
+main=()=>pick(0)+pick("yes")+pick("no")+pick(42)-pick(8)-pick("other")-3

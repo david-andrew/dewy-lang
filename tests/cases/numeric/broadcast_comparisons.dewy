@@ -1,0 +1,15 @@
+# exit: 42
+main=()=>{
+let xs=[1 2 3]
+if (xs .=? 2) not=? [false true false] return 1
+if (xs .not=? 2) not=? [true false true] return 2
+if (xs .<? 2) not=? [true false false] return 3
+if (xs .<=? 2) not=? [true true false] return 4
+if (xs .>? 2) not=? [false false true] return 5
+if (xs .>=? 2) not=? [false true true] return 6
+if (xs .not<? 2) not=? [false true true] return 7
+if (xs .not<=? 2) not=? [false false true] return 8
+if (xs .not>? 2) not=? [true true false] return 9
+if (xs .not>=? 2) not=? [true false false] return 10
+return 42
+}

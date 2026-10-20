@@ -1,0 +1,12 @@
+# exit: 42
+let trace:int64=0
+values=(tag:int64)=>{trace=trace*10+tag return [1 2 3]}
+scalar=()=>{trace=trace*10+3 return 2}
+main=()=>{
+let result=values(1) .+ values(2) .* scalar()
+if trace not=? 123 or result not=? [3 6 9] return 1
+let seen:array<int64>=[]
+visit=($capture @seen x:int64)=>{seen.push(x) return x+1}
+let visited=visit.([1 2 3])
+return if visited =? [2 3 4] and seen =? [1 2 3] 42 else 2
+}

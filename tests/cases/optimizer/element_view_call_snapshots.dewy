@@ -1,0 +1,27 @@
+# exit: 42
+# quick
+Row:type=[values:array<int64> bias:int64]
+let global_rows=[Row[[20] 22]]
+read_row=(row:Row ignored:int64):>int64=>row.values[0]+row.bias
+replace_rows=(@rows:array<Row>):>int64=>{rows=[] return 0}
+replace_global=():>int64=>{global_rows=[] return 0}
+mutating_reader=(row:Row):>int64=>{global_rows=[] return row.values[0]+row.bias}
+return_row=(row:Row):>Row=>row
+main=()=>{
+let rows=[Row[[20] 22]] let row=rows[0]
+if read_row(row replace_rows(@rows)) not=?42 return 1
+let global_row=global_rows[0]
+if read_row(global_row replace_global()) not=?42 return 2
+global_rows=[Row[[20] 22]] let direct=global_rows[0]
+if mutating_reader(direct) not=?42 return 3
+global_rows=[Row[[20] 22]] let indirect=global_rows[0]
+let callback=mutating_reader
+if callback(indirect) not=?42 return 4
+let originals=[Row[[20] 22]] let element=originals[0]
+let saved=return_row(element) originals=[]
+saved.values[0]+=1
+if saved.values[0]+saved.bias not=?43 return 5
+let captured=[Row[[20] 22]] let snapshot=captured[0]
+let clear=($capture @captured)=>{captured=[] return 0}
+return read_row(snapshot clear())
+}

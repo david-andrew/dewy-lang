@@ -1,0 +1,5 @@
+# exit: 42
+Rank:type=[value:int64]
+__lt__=(a:Rank b:Rank):>bool=>a.value <? b.value
+key=(value:int64):>Rank=>Rank[-value]
+main=()=>[20 22].min_by(key)+[20 22].max_by(key)

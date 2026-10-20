@@ -1,0 +1,12 @@
+# exit: 42
+let calls=0
+value=(i:int64)=>{calls+=1 return i}
+main=()=>{
+let bound:int64=-3
+let negative=[loop i in [0..bound) value(i)]
+let empty=[loop i in [0..0) value(i)]
+if calls not=? 0 or negative.length not=? 0 or empty.length not=? 0 return 1
+let small:uint8=3 let unsigned:uint64=3
+let a=[loop i in [0..small) i] let b=[loop i in [0..unsigned) i]
+return if a =? [0 1 2] and b =? [0 1 2] 42 else 2
+}

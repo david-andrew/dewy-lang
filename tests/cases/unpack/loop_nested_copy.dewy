@@ -1,0 +1,5 @@
+# exit: 42
+main=()=>{let entries=["a"->[[20 22] [99]]]
+loop [key [first _]] in entries {first[0]=0 if first[1] not=? 22 return 1}
+let value=entries.get("a") if value is? none return 2
+return value[0][0]+value[0][1]}

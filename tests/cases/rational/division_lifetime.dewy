@@ -1,0 +1,9 @@
+# exit: 42
+work=():>void=>{
+let fractions=[1/2 2/3 3/4] let copy=fractions
+fractions[0]=5/6
+if copy[0] not=? 1/2 panic("lost value copy")
+loop n in [1..15) {let ratio=n/(n+1) let text="{ratio}" if text.length =? 0 panic("missing fraction")}
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) {work()}
+return if alloc_count() =? before 42 else 1}

@@ -1,0 +1,23 @@
+# exit: 42
+Key:type=[value:int64 label:string]
+hash=(key:Key):>uint64=>0
+__eq__=(a:Key b:Key):>bool=>a.value=?b.value
+main=()=>{
+let values:dict<Key array<int64>>=[]
+loop i in [0..80) values[Key[i "first"]]=[i]
+let saved=values
+loop i in [0..61) {if not values.remove(Key[i "remove"]) return 1}
+if values.has(Key[100 "missing"]) return 2
+values.reserve(300)
+loop i in [0..61) {
+if not values.insert_if_absent(Key[i "again"] [i+100]) return 3
+}
+loop i in [0..80) {
+if values.insert_if_absent(Key[i "duplicate"] [999]) return 4
+if saved[Key[i "snapshot"]] not=?[i] return 5
+if values[Key[i "lookup"]] not=?[if i<?61 i+100 else i] return 6
+}
+let keys=values.keys()
+if keys.length not=?80 or keys[0].value not=?61 or keys[19].value not=?0 return 7
+values[Key[0 "mutate"]].push(42)
+return if saved[Key[0 "original"]]=?[0] 42 else 8}

@@ -1,0 +1,6 @@
+# exit: 42
+first=<T>(values:array<T> seed:T):>T=>values[0]
+plain=<T>(values:array<T>):>T=>values[0]
+main=()=>{let seed:uint64=0
+return if first([42] seed) =? 42 and first<float32>([42] 0) =? 42.0
+and plain([42]) =? 42 and plain([[42]])[0] =? 42 42 else 1}

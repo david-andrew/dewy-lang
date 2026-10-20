@@ -1,0 +1,13 @@
+# exit: 42
+main=()=>{
+let top:uint8=255 let rows:int64=0 let missing:int64=0 let total:int64=0
+loop i in [top..top] or x in [10 20 12] {
+    rows+=1
+    if rows >? 4 panic("range did not stay exhausted")
+    if i is? none {missing+=1} else {if i not=? top return 1}
+    if x isnt? none {total+=x}
+}
+let empty:int64=0
+loop i in [top..top) or x in [1 2] {if i isnt? none return 2 empty+=1}
+return if rows =? 3 and missing =? 2 and total =? 42 and empty =? 2 42 else 3
+}

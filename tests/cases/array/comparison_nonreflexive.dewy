@@ -1,0 +1,10 @@
+# exit: 42
+Key:type=[value:int64]
+let calls:int64=0
+__eq__=(a:Key b:Key):>bool=>{calls+=1 return false}
+main=()=>{
+let zero:float64=0.0 let nan=zero/zero let values=[nan] let shared=values
+if values=?shared return 1
+if [0.0] not=?[-0.0] return 2
+let keys=[Key[42]] let copy=keys
+return if keys not=?copy and calls=?1 42 else 3}

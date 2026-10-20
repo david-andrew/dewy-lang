@@ -1,0 +1,6 @@
+# exit: 42
+let calls:int64=0
+next=():>int64=>{calls+=1 return -7}
+main=()=>{
+let values=[next()%3 next()//3 next()%1 next()//1 next()%2 next()//2 next()%8 next()//8]
+return if calls=?8 and values=?[2 -3 0 -7 1 -4 1 -1] 42 else 1}

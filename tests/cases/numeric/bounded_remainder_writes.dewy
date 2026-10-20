@@ -1,0 +1,13 @@
+# exit: 42
+branch=(negative:bool):>int64=>{
+let word:int64=0 if negative {word=-5}
+word=(word*131+255)%1000000007 return word}
+compound=():>int64=>{
+let word:int64=0 word-=5
+word=(word*131+255)%1000000007 return word}
+tuple_write=():>int64=>{
+let word:int64=0 let other:int64=0
+[word other]=[-5 42]
+word=(word*131+255)%1000000007 return word+other}
+main=()=>if branch(true)=?999999607 and branch(false)=?255
+and compound()=?999999607 and tuple_write()=?999999649 42 else 1

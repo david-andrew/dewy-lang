@@ -1,0 +1,9 @@
+# exit: 42
+let shared=[0 1 2]
+shrink=():>void=>{shared.pop()}
+visit=(@values:array<int64>):>int64=>{
+let count:int64=0
+loop i in 0.. and i <? values.length {count+=1 shrink()}
+return count
+}
+main=()=>if visit(@shared) =? 2 and shared.length =? 1 42 else 1

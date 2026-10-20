@@ -1,0 +1,7 @@
+# exit: 42
+let xs:array<int64>=[10 20 30] let trace:int64=0
+first=()=>{trace=trace*10+1 xs[0]=999 return 0}
+second=()=>{trace=trace*10+2 return 2}
+last=()=>{trace=trace*10+3 return 2}
+main=()=>{xs.push(40) let result=xs[first(),second()..last()]
+return if result =? [10 30] and xs[0] =? 999 and trace =? 123 42 else 1}

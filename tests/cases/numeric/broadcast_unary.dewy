@@ -1,0 +1,11 @@
+# exit: 42
+main=()=>{
+let xs=[1 -2 3] let saved=xs
+let negated=.-xs let positive=.+xs
+if negated not=?[-1 2 -3] or positive not=?xs return 1
+negated[0]=99 positive[1]=99
+if xs not=?saved return 2
+if (.-(xs .+ 1) .* 2) not=?[-4 2 -8] return 3
+if (.-xs .^ 2) not=?[-1 -4 -9] return 4
+if (.- .-xs) not=?xs or (.+42) not=?42 or (.-42) not=? -42 return 5
+return 42}

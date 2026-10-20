@@ -1,0 +1,17 @@
+# exit: 42
+Key:type=[value:int64]
+let current:array<Key>=[] let armed=false let calls:int64=0
+__eq__=(a:Key b:Key):>bool=>{
+calls+=1
+if armed {armed=false current.clear()}
+return a.value=?b.value
+}
+through=(values:array<Key>):>int64=>{
+if values not=?[Key[20] Key[22]] return 1
+let noise=[Key[99] Key[100]]
+return if noise.length=?2 values[0].value+values[1].value else 2
+}
+main=()=>{
+current=[Key[20] Key[22]] armed=true
+let result=through(current)
+return if current.length=?0 and calls=?2 result else 3}

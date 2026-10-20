@@ -1,0 +1,9 @@
+# exit: 42
+# quick
+recur_value=<T>(value:T depth:int64):>T=>
+if depth=?0 value else recur_value(value depth-1)
+main=()=>{
+let values=[20 22]
+let copied=recur_value(values 5) copied[0]=99
+return if recur_value("kept" 2)=?"kept" and recur_value(true 3)
+values[0]+recur_value(values[1] 4) else 1}

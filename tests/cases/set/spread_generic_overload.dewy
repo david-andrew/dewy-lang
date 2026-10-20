@@ -1,0 +1,10 @@
+# exit: 42
+append=<T>(source:set<T> item:T):>array<T>=>[source... item]
+choose=(values:array<uint8>)=>1
+choose=(values:array<int64>)=>42
+main=()=>{
+let small:set<uint8>=set[20]
+let words=append(set["first"] "last")
+if append(small 22) not=? [20 as uint8 22 as uint8] return 1
+if words not=? ["first" "last"] return 2
+return choose([set[20 22]...])}

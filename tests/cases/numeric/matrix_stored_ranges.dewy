@@ -1,0 +1,9 @@
+# exit: 42
+main=()=>{
+let m=reshape([loop i in [0..20) i] 4 5)
+let rows=[3,1..0] let cols=[0,2..5)
+let selected=m[rows cols] let all_columns=m[rows]
+let pair:array<IntRange>=[rows cols]
+return if selected.shape =? [2 3] and selected.data =? [15 17 19 5 7 9]
+and all_columns.shape =? [2 5] and all_columns.data =? [15 16 17 18 19 5 6 7 8 9]
+and m[pair[0] pair[1]].data =? selected.data 42 else 1}

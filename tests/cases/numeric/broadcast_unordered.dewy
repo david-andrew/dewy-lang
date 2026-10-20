@@ -1,0 +1,10 @@
+# exit: 42
+main=()=>{
+let zero:float64=0.0 let nan=zero/zero let xs=[nan 1.0]
+if (xs .not<? 2.0) not=? [true false] return 1
+if (xs .not<=? 2.0) not=? [true false] return 2
+if (xs .not>? 2.0) not=? [true true] return 3
+if (xs .not>=? 2.0) not=? [true true] return 4
+if (xs .not=? xs) not=? [true false] return 5
+return 42
+}

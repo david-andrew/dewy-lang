@@ -1,0 +1,12 @@
+# exit: 42
+import p"../../../tests/fixtures/programs/hash_keys.dewy"
+through=(values:array<dict<int64 hash_keys.Key>>):>int64=>{
+let code=hash(values)
+let noise=[[3->hash_keys.Key[99 "other"]]]
+return if noise.length=?1 and code=?hash(values) values[0].length*21 else 1
+}
+main=()=>{
+hash_keys.current_maps=[[1->hash_keys.Key[20 "a"] 2->hash_keys.Key[22 "b"]]]
+hash_keys.armed=true
+let result=through(hash_keys.current_maps)
+return if hash_keys.current_maps.length=?0 and not hash_keys.armed result else 2}

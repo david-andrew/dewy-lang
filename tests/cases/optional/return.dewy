@@ -1,0 +1,5 @@
+# exit: 42
+# modes: native native-release
+choose=(yes:bool):>int64?=>if yes 42 else none
+main=()=>{let a=choose(true) let b=choose(false)
+return if a is? int64 and b is? none a else 1}

@@ -5,7 +5,7 @@ import shutil
 
 import pytest
 
-from tests.test_core import compiler, run_value_batch
+from tests.support import compiler, run_value_batch
 
 CASES = {
     'list-copies': '''Node:type=[value:int64 next:Node?]

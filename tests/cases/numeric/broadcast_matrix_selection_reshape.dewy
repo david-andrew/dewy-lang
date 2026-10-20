@@ -1,0 +1,10 @@
+# exit: 42
+let m=reshape([1 2 3 4] 2 2)
+right=()=>{m=reshape([100 200 300 400 500 600] 2 3) return 10}
+main=()=>{
+m[[..] [..]] .+= right()
+if m.shape not=? [2 3] or m.data not=? [11 12 300 13 14 600] return 1
+m=reshape([1 2 3 4] 2 2)
+m[0..0] .+= right()
+return if m.shape =? [2 3] and m.data =? [11 12 300 400 500 600] 42 else 2
+}

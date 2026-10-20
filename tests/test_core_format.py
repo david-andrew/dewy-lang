@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_core import Scripts
+from tests.support import Scripts
 from tests.test_core_editor import Client
 
 

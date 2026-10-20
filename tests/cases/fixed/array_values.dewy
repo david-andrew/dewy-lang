@@ -1,0 +1,11 @@
+# exit: 42
+# quick
+const WIDTH:int64=2
+Pair:type=<T>(array<T length=WIDTH>)
+make=(a:int64 b:int64):>Pair<int64>=>[a b]
+change=(@value:Pair<int64>):>void=>{value[0]=99}
+main=()=>{let before=alloc_count() let pair=make(20 22) let copy=pair
+change(@copy)
+if pair[0] not=? 20 or copy[0] not=? 99 or pair[end] not=? 22 return 1
+let total:int64=0 loop value in pair {total+=value}
+return if pair.length =? 2 and alloc_count() =? before total else 2}

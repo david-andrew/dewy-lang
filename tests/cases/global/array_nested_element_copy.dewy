@@ -1,0 +1,8 @@
+# exit: 42
+Cell:type=[values:array<int64>]
+let cells=[Cell([10 20])]
+main=()=>{
+let saved=cells[0]
+cells[0].values[0]+=1
+return if saved.values[0]=?10 and cells[0].values[0]=?11 42 else 1
+}

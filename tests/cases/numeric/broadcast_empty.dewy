@@ -1,0 +1,10 @@
+# exit: 42
+main=()=>{
+let xs:array<float64>=[]
+if (xs .* 2.0 .+ [1.0]).length not=? 0 return 1
+if sqrt.(xs).length not=? 0 return 2
+let result=zeros(0 3) .+ [1.0 2.0 3.0]
+if result.shape not=? [0 3] or size(result) not=? 0 return 3
+let other=zeros(2 0) .+ reshape([10.0 20.0] 2 1)
+return if other.shape =? [2 0] and size(other) =? 0 42 else 4
+}

@@ -1,0 +1,24 @@
+# exit: 42
+main=()=>{
+let c=Chart[equal_axes=true legend_at=LegendAt.bottom_left]
+let xs=[0 1 2] let ys=[3 4 5]
+c.line(xs ys "integer" dash=2.1)
+xs[0]=99 ys[1]=99
+let floats:array<float32>=[0.5 1.5 2.5]
+c.points(floats floats "custom" color=RED)
+c.annotate(100.0 100.0 "note")
+c.bars(["a" "b" "c"] floats "float32")
+c.line([1.0 2.0] "float64")
+c.line(floats "float32 line")
+c.points([0 1] [2 3] "integer points")
+c.bars(["a" "b"] [10 20] "integer bars")
+if c.series[0].xs[0] not=?0.0 or c.series[0].ys[1] not=?4.0 return 1
+if c.series[0].dash not=?2.1 return 2
+if c.series[1].ys[0] not=?0.5 or c.series[1].color not=?RED return 3
+if c.series[0].color not=?CHART_COLORS[0] return 4
+if c.series[3].color not=?CHART_COLORS[1] return 5
+if c.series[4].color not=?CHART_COLORS[2] return 6
+if c.series[5].xs not=?[0.0 1.0 2.0] return 7
+if c.series[2].name not=?"note" return 8
+return 42
+}

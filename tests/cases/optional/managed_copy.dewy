@@ -1,0 +1,6 @@
+# exit: 42
+# quick
+Item:type=[values:array<int64>]
+main=()=>{let a:Item?=Item[[20 22]] let b=a
+if b is? Item b.values[0]=99
+return if a is? Item a.values[0]+a.values[1] else 1}

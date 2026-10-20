@@ -1,0 +1,7 @@
+# exit: 42
+Numbers:type=[a:int8 b:int16 c:int32 d:int64 e:uint8 f:uint16 g:uint32 h:uint64]
+main=()=>{let value=Numbers[int8.min int16.min int32.min int64.min uint8.max uint16.max uint32.max uint64.max]
+let copy=from_json<Numbers>(to_json(value))
+if copy is? TextError return 1
+return if copy.a =? value.a and copy.b =? value.b and copy.c =? value.c and copy.d =? value.d
+and copy.e =? value.e and copy.f =? value.f and copy.g =? value.g and copy.h =? value.h 42 else 1}

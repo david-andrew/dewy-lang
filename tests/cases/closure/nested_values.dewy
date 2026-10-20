@@ -1,0 +1,4 @@
+# exit: 42
+make=()=>{let n=0 return ()=>{n+=1 return ()=>{n+=10; n}}}
+main=()=>{let outer=make() let other=outer let a=outer() let b=outer() let c=other()
+return if a()=?11 and b()=?12 and c()=?11 and a()=?21 42 else 1}

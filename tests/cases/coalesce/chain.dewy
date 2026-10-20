@@ -1,0 +1,5 @@
+# exit: 42
+read=(value:int64):>int64?=>if value >? 0 value else none
+main=()=>{let a=read(0)??read(0)??42 let b:int64?=read(0)??read(42)
+let c:int64?=read(0)??read(0)
+return if a =? 42 and b =? 42 and c is? none 42 else 1}

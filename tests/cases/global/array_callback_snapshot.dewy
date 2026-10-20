@@ -1,0 +1,10 @@
+# exit: 42
+Cell:type=[value:int64]
+let cells=[Cell(10)]
+mutate=()=>{cells[0].value=99}
+main=()=>{
+let saved=cells
+let callback=()=>{mutate()}
+callback()
+return if saved[0].value=?10 and cells[0].value=?99 42 else 1
+}

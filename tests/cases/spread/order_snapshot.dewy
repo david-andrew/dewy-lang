@@ -1,0 +1,6 @@
+# exit: 42
+let values=[20 21] let calls=0
+source=()=>{calls=calls*10+1 return values}
+change=()=>{calls=calls*10+2 values[0]=99 return 22}
+main=()=>{values.push(0) let result=[source()... change() values...]
+return if calls =? 12 and result =? [20 21 0 22 99 21 0] 42 else 1}

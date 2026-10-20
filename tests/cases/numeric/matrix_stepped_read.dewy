@@ -1,0 +1,7 @@
+# exit: 42
+main=()=>{
+let m=reshape([loop i in [0..20) i] 4 5)
+let selected=m[[3,1..0] [0,2..end]]
+let reversed=m[2 [end,end-1..]]
+return if selected.shape =? [2 3] and selected.data =? [15 17 19 5 7 9]
+and reversed.shape =? [5] and reversed.data =? [14 13 12 11 10] 42 else 1}

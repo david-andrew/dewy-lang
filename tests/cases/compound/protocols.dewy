@@ -1,0 +1,7 @@
+# exit: 42
+Box:type=[value:int64]
+__floordiv__=(a:Box b:int64)=>Box[a.value+b]
+__mod__=(a:Box b:int64)=>Box[a.value+b]
+__truediv__=(a:Box b:int64)=>Box[a.value+b]
+__pow__=(a:Box b:int64)=>Box[a.value+b]
+main=()=>{let value=Box[10] value//=2 value%=8 value/=2 value^=20 return value.value}

@@ -1,0 +1,20 @@
+# exit: 42
+# quick
+Row:type=[name:string values:array<int64>]
+main=()=>{
+let xs=[1 2 3] let saved=xs xs.swap(0 2)
+if xs not=?[3 2 1] or saved not=?[1 2 3] return 1
+xs.swap(1 1) xs.swap(0 2)
+if xs not=?saved return 2
+let rows=[Row["a" [20]] Row["b" [22]]] let original=rows
+rows.swap(0 1) rows[0].values.push(99)
+if rows[0].name not=?"b" or rows[0].values not=?[22 99] return 3
+if original[1].values not=?[22] or rows[1] not=?original[0] return 4
+let count=0
+let counters:array<():>int64>=[()=>{count+=1; count} ()=>{count+=10; count}]
+let callbacks=counters counters.swap(0 1)
+if counters[0]() not=?10 or counters[1]() not=?1 return 5
+if callbacks[0]() not=?1 or callbacks[1]() not=?10 return 6
+counters.swap(0 0)
+return if counters[0]()=?20 and counters[1]()=?2 42 else 7
+}

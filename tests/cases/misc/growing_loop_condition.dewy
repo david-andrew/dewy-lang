@@ -1,0 +1,6 @@
+# exit: 42
+# modes: native native-release
+let xs:array<int64>=[20]
+let index:int64=0
+keep=()=>{if index =? 1 {xs.push(22)} return index <? xs.length}
+main=()=>{let sum:int64=0 loop keep() {sum+=xs[index] index+=1} return sum}

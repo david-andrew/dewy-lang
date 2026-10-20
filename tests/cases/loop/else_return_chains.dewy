@@ -1,0 +1,8 @@
+# exit: 42
+choose=(take:bool):>int64=>{
+if take {return 42}
+else loop x in [0..0) {return x}
+else loop c in "a" {if c =? "a" {return 42} else {return 1}}
+else {return 2}
+}
+main=()=>if choose(true) =? 42 and choose(false) =? 42 42 else 1

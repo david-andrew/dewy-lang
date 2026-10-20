@@ -1,0 +1,9 @@
+# exit: 42
+Node:type=<T>[value:T children:array<Node<T>>=[]]
+sum=<T>(node:Node<T>):>T=>{
+let result=node.value loop child in node.children {result+=sum(child)} return result}
+main=()=>{
+let tree=Node<int64>[20 [Node<int64>[10] Node<int64>[12]]]
+let strings=Node<string>["a" [Node<string>["b"]]]
+let saved=tree tree.children[0].value=99
+return if sum(strings)=?"ab" and sum(saved)=?42 and sum(tree)=?131 42 else 1}

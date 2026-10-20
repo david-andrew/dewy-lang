@@ -1,0 +1,14 @@
+# exit: 42
+from bigint import bigint
+exercise=():>void=>{
+let a=123456789012345678901234567890 let b=-98765432109876543210987654321
+let saved=a
+loop i in [0..20) {
+    let shifted=a << i
+    let mixed=(a and b) or (a xor b)
+    if (shifted >> i) not=? saved or mixed not=? (a or b) panic("bit operation mismatch")
+    a=not (not a)
+}
+}
+main=()=>{exercise() let before=alloc_count() exercise()
+return if before =? alloc_count() 42 else 1}

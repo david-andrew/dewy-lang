@@ -1,0 +1,5 @@
+# exit: 42
+Box:type=<T>[value:T]
+__add__=<T>(a:Box<T> b:Box<T>):>Box<T>=>Box<T>[a.value+b.value]
+main=()=>{let number=Box<int64>[20]+Box<int64>[22] let text=Box<string>["hello"]+Box<string>["!"]
+return if number.value =? 42 and text.value =? "hello!" 42 else 1}

@@ -1,0 +1,15 @@
+# exit: 42
+let values:array<int64>=[]
+main=()=>{
+values.reserve(16)
+loop i in [0..8) {values.push(i) values[0]+=1}
+values.insert(1 99)
+if values.remove(1) not=?99 return 1
+if values.pop() not=?7 return 2
+values.extend([20 22])
+if values[7]+values[8] not=?42 return 3
+values.truncate(4) values.resize(6)
+if values.length not=?6 or values[4] not=?0 or values[5] not=?0 return 4
+values.clear() values.push(42)
+return values[0]
+}

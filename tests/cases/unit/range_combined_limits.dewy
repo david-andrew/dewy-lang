@@ -1,0 +1,14 @@
+# exit: 42
+count=<T>(start:T end:T):>int64=>{
+let result:int64=0
+loop i in [start..end] and j in [0..5) {result+=1 i=start if result >? 4 panic("range did not stop")}
+return result
+}
+main=()=>{
+let total=count(125 as int8 127 as int8)+count(253 as uint8 255 as uint8)
+let high:int64=9223372036854775807 let top:uint64=18446744073709551615
+ total+=count(high-2 high)+count(top-2 top)
+let conditional:int64=0
+loop i in [high-2..high] and i >=? 0 {conditional+=1}
+return if total =? 12 and conditional =? 3 42 else 1
+}

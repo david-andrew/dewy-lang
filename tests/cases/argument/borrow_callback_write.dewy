@@ -1,0 +1,7 @@
+# exit: 42
+# quick
+let source:array<int64>=[20]
+read=(value:array<int64> callback:(():>void))=>{callback() return value[0]}
+through=(@value:array<int64>)=>read(value ()=>{source=[99]})
+main=()=>{source.push(1) let before=through(@source)
+return if source[0]=?99 before+22 else 1}

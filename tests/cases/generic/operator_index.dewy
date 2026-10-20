@@ -1,0 +1,7 @@
+# exit: 42
+Store:type=<T>[values:array<T>]
+__index__=<T>(s:Store<T> i:int64):>T=>s.values[i]
+__setindex__=<T>(@s:Store<T> i:int64 value:T):>void=>{s.values[i]=value}
+main=()=>{let s=Store<array<int64>>[[[20 22]]] let old=s
+s[0][1]+=20 s[0][0]=42
+return if s[0] =? [42 42] and old[0] =? [20 22] 42 else 1}

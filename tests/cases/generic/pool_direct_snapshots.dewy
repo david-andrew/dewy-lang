@@ -1,0 +1,14 @@
+# exit: 42
+Item:type=[values:array<int64> health:int64=10]
+main=()=>{
+let original_values=[20 22] let pool:Pool<Item>=[]
+let a=pool.add(Item[original_values]) let b=pool.add(Item[original_values])
+let snapshot=pool let delta:int64=2
+pool[a].values[0]+=delta pool[b].values[1]=40 pool[a].health-=delta
+let pools=[pool] let at:int64=0
+pools[at][a].values[0]=42
+return if original_values =? [20 22] and snapshot[a].values =? [20 22]
+and snapshot[b].values =? [20 22] and pool[a].values =? [22 22]
+and pool[b].values =? [20 40] and pool[a].health =? 8
+and pools[0][a].values =? [42 22] 42 else 1
+}

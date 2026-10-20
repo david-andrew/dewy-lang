@@ -1,0 +1,12 @@
+# exit: 42
+# quick
+bump=(@values:array<int64>):>void=>{values[0]+=1}
+edit=(first:array<int64> raw:array<int64> changed:array<int64> last:array<int64> take:bool):>int64=>{
+if take {let p=raw.data() p[0]=40 bump(@changed)}
+return first[0]+raw[0]+changed[0]+last[0]}
+read=(first:array<int64> second:array<int64> third:array<int64>):>int64=>first[0]+second[0]+third[0]
+main=()=>{let original=[10] original.push(22)
+if edit(original original original original true) not=? 71 return 1
+if edit(original original original original false) not=? 40 return 2
+if read(original original original) not=? 30 return 3
+return if original =? [10 22] 42 else 4}

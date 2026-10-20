@@ -1,0 +1,13 @@
+# exit: 42
+product=(byte:uint8):>int64=>{
+let word:int64=9223372036854775807
+word=(word*131+(byte as int64))%1000000007 return word}
+sum=(byte:uint8):>int64=>{
+let word:int64=9223372036854775607
+word=(word+(byte as int64))%1000000007 return word}
+narrow=(byte:int8):>int64=>(byte as int64)*131+255
+main=()=>{
+if product(255) not=?708828127 or sum(255) not=?708828057 return 1
+if narrow(-128)%1000000007 not=?999983494 return 2
+let high:uint64=18446744073709551615
+return if ((high as int64)*131+255)%1000000007=?124 42 else 3}

@@ -1,0 +1,5 @@
+# modes: native
+Inner:type=[values:array<int64>]
+Outer:type=[inner:Inner]
+replace=(@inner:Inner)=>{inner=Inner([42])}
+main=()=>{let world=Outer(Inner([1])) loop @x in world.inner.values {replace(@world.inner) x+=1}}

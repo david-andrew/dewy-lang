@@ -1,0 +1,9 @@
+# exit: 42
+# quick
+probe=(value:float64):>int64=>{
+if value<?0.0 return 11
+if value<?0.0 return 12
+if value>=?0.0 return 13
+return 14}
+main=()=>{if probe(-1.0) not=?11 or probe(0.0) not=?13 or probe(1.0) not=?13 return 1
+return if probe(NAN)=?14 42 else 2}

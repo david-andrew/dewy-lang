@@ -1,0 +1,19 @@
+# exit: 42
+work=()=>{
+let values=["first"->[20] "gone"->[99] "last"->[22]] values.remove("gone")
+let result:int64=0
+$outer loop [key value] in values {
+loop i in 0.. and inner in values {
+if i =? 0 continue
+result+=value[0] break $outer
+}
+}
+loop [key value] in values and i in [0..2) {
+if i =? 0 continue
+return result+value[0]
+}
+return 1
+}
+main=()=>{if work() not=? 42 return 1 let before=alloc_count()
+loop i in [0..30) {if work() not=? 42 return 2}
+return if alloc_count() =? before 42 else 3}

@@ -1,0 +1,21 @@
+# exit: 42
+Enemy:type=[name:string health:int64]
+main=()=>{
+    let enemies:Pool<Enemy>=[]
+    let first=enemies.add(Enemy["one" 42]) let second=enemies.add(Enemy["two" 20])
+    let copy=enemies
+    enemies[first].health-=10
+    if copy[first].health not=? 42 or enemies[first].health not=? 32 return 1
+    if not enemies.remove(first) or enemies.has(first) or not enemies.has(second) return 2
+    let third=enemies.add(Enemy["three" 30])
+    if enemies.has(first) or enemies[second].name not=? "two" or enemies[third].health not=? 30 return 3
+    let removed=enemies.get(first)
+    if removed isnt? none return 4
+    let pending:Heap<string>=[]
+    pending.push("later" 2.0) pending.push("first" 1.0)
+    let saved=pending
+    if pending.pop() not=? "first" or pending.pop() not=? "later" or saved.peek() not=? "first" return 5
+    let arrays:Pool<array<string>>=[] let handle=arrays.add(["hello"])
+    let original=arrays let updated=arrays[handle] updated[0]="changed" arrays[handle]=updated
+    return if original[handle][0] =? "hello" and arrays[handle][0] =? "changed" 42 else 6
+}

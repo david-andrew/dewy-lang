@@ -1,0 +1,11 @@
+# exit: 42
+work=():>void=>{
+let m=reshape([["a"] ["b"] ["c"] ["d"] ["e"] ["f"]] 2 3) let saved=m
+let rows=[1,0..0] let cols=[2,0..0]
+let selected=m[rows cols] selected.data[0].push("!")
+m[rows cols]=selected
+assert(m.data =? [["a"] ["b"] ["c"] ["d"] ["e"] ["f" "!"]])
+assert(saved.data =? [["a"] ["b"] ["c"] ["d"] ["e"] ["f"]])
+}
+main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+return if alloc_count() =? before 42 else 1}

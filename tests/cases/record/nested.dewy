@@ -1,0 +1,5 @@
+# exit: 42
+Inner:type=[values:array<int64>]
+Outer:type=[inner:Inner]
+main=()=>{let a:Outer=[inner=[values=[20 22]]] let b=a b.inner.values[0]=99
+return a.inner.values[0]+a.inner.values[1]}

@@ -1,0 +1,7 @@
+# exit: 42
+Box:type=[values:array<array<int64>> label:string]
+let shared=Box[[[20] [22]] "old"]
+read=(box:Box action:(():>void)):>int64=>{action() return box.values[0][0]+box.values[1][0]}
+change=():>void=>{shared.values[0][0]=99 shared.label="new"}
+main=()=>{let result=read(shared change)
+return if result =? 42 and shared.values[0][0] =? 99 and shared.label =? "new" 42 else 1}

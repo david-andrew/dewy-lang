@@ -1,0 +1,6 @@
+# exit: 42
+Score:type=[value:int64 label:string]
+__eq__=(a:Score b:Score)=>a.value =? b.value
+__lt__=(a:Score b:Score)=>a.value <? b.value
+main=()=>{let a=Score[1 "a"] let b=Score[2 "b"] let same=Score[1 "different"]
+return if a =? same and a not=? b and a <? b and b >? a and a <=? same and same >=? a 42 else 1}

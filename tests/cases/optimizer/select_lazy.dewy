@@ -1,0 +1,12 @@
+# exit: 42
+let calls:int64=0
+bump=(n:int64):>int64=>{calls+=1 return n}
+choose=(take:bool value:int64 divisor:int64 values:array<int64>):>int64=>
+if take value+1 else value//divisor+values[10]
+main=()=>{let a:int64=0 let b:int64=0
+loop i in [0..10) {
+a=if i%2 =? 0 {b+=1; a+1} else {b+=10; a+2}
+let result=if i%2 =? 0 bump(20) else bump(22)
+if result not=? (if i%2 =? 0 20 else 22) return 1
+}
+return if a=?15 and b=?55 and calls=?10 and choose(true 41 0 [])=?42 42 else 2}

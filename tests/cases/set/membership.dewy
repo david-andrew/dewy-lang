@@ -1,0 +1,7 @@
+# exit: 42
+main=()=>{
+let seen=set["read" "write" "read"]
+seen.push("execute") seen.push("write")
+if seen.length not=? 3 or "read" not in? seen or "absent" in? seen return 1
+if seen.add("read") or not seen.add("new") return 2
+return if seen.has("new") and seen.contains("write") and not seen.is_empty() 42 else 3}

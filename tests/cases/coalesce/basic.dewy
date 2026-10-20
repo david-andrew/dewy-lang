@@ -1,0 +1,3 @@
+# exit: 42
+read=(present:bool):>int64?=>if present 42 else none
+main=()=>if (read(true)??0) =? 42 and (read(false)??42) =? 42 42 else 1

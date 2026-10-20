@@ -1,0 +1,11 @@
+# exit: 42
+Pair:type=[x:int64 y:int64]
+advance=(p:Pair):>Pair=>Pair(x=p.x+1 y=p.y-2)
+main=()=>{
+let p=Pair(x=4294967296 y=-4294967296) let saved=p
+loop i in [0..20) {p=advance(p)}
+let values=[saved p] values.push(p)
+p.x=99
+return if saved.x =? 4294967296 and saved.y =? (-4294967296)
+and values[1].x =? 4294967316 and values[2].y =? (-4294967336) 42 else 1
+}

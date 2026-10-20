@@ -1,0 +1,8 @@
+# exit: 42
+main=()=>{
+let m=reshape([loop i in [0..6) i] 2 3) let empty=[3..2]
+let a=m[empty [..]] let b=m[[..] empty]
+m[empty [..]] .+= [10 20 30]
+let zero=zeros<int64>(0 3) let c=zero[[..] [2,0..0]]
+return if a.shape =? [0 3] and b.shape =? [2 0] and c.shape =? [0 2]
+and m.data =? [0 1 2 3 4 5] 42 else 1}

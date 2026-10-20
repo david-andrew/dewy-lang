@@ -1,0 +1,10 @@
+# exit: 42
+let trace:int64=0
+value=(tag:int64):>uint64=>{trace=trace*10+tag return 42}
+make_array=(tag:int64):>array<uint64>=>{trace=trace*10+tag return [42]}
+main=()=>{
+if [value(1)] not=? make_array(2) or trace not=? 12 return 1
+trace=0
+if make_array(1) not=? [value(2)] or trace not=? 12 return 2
+return 42
+}

@@ -1,0 +1,14 @@
+# exit: 42
+Optional:type=int64?
+wrap=<T>(value:T):>T?=>value
+read=(value:Optional?):>int64=>{
+if value is? none return 1
+let inner=value
+if inner is? none return 20
+return inner
+}
+main=()=>{
+let empty:Optional=none let value:Optional=22
+let wrapped:Optional?=empty
+return if read(wrapped)=?20 and read(none)=?1
+read(wrap<Optional>(empty))+read(wrap<Optional>(value)) else 2}

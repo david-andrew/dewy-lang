@@ -1,0 +1,12 @@
+# exit: 42
+Pair:type=[a:IntRange b:IntRange]
+Single:type=[range:IntRange]
+main=()=>{
+let pair=Pair[[0..2] (2..4]]
+assert([loop i in pair.a i] =? [0 1 2])
+assert([loop i in pair.b i] =? [3 4])
+let stepped=Pair[[0,2..4] [4,2..0]]
+assert([loop i in stepped.a i] =? [0 2 4] and [loop i in stepped.b i] =? [4 2 0])
+let single=Single[0..2]
+assert([loop i in single.range i] =? [0 1 2])
+return 42}

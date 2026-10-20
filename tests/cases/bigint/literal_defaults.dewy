@@ -1,0 +1,10 @@
+# exit: 42
+let calls:int64=0
+make=()=>{calls=calls+1 123456789012345678901234567890}
+read=(value=123456789012345678901234567890)=>value
+called=(value=make())=>value
+main=()=>{
+if read() not=? called() or calls not=? 1 return 1
+if called(42) not=? 42 or calls not=? 1 return 2
+return if called() =? read() and calls =? 2 42 else 3
+}

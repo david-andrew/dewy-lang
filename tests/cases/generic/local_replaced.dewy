@@ -1,0 +1,7 @@
+# exit: 42
+# quick
+make=(start:int64)=>{let count=start return <T>(x:T)=>{count+=1; count}}
+replace=<F>(@f:F other:F)=>{f=other; "x"}
+main=()=>{let f=make(0) let g=make(100)
+let answer=f(replace(@f g))
+return if answer=?1 and f(1)=?101 and g(1)=?101 42 else 1}

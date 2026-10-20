@@ -1,0 +1,7 @@
+# exit: 42
+let trace:int64=0
+next=():>uint64=>{trace=trace*10+1 return 20}
+last=():>uint64=>{trace=trace*10+2 return 22}
+accept=(values:array<uint64> tail:uint64):>uint64=>values[0]+values[1]+tail
+main=()=>{let result=accept([next() 0] last())
+return if result =? 42 and trace =? 12 42 else 1}

@@ -1,0 +1,8 @@
+# exit: 42
+main=()=>{
+let a:int8=-128 let b:uint64=18446744073709551615 let c:int64=-9223372036854775808
+let d:int16=-17 let e:uint8=3
+a//=-1 b//=2 c//=-1 d%=8 e^=3
+return if a =? -128 and b =? 9223372036854775807 and c =? -9223372036854775808
+and d =? 7 and e =? 27 42 else 1
+}

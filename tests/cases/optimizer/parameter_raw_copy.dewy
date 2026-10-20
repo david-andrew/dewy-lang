@@ -1,0 +1,4 @@
+# exit: 42
+edit=(values:array<int64>):>array<int64>=>{let p=values.data() p[0]=42 return values}
+main=()=>{let values=[20 22] values.push(0) let edited=edit(values)
+return if values =? [20 22 0] and edited =? [42 22 0] 42 else 1}

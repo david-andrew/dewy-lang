@@ -1,0 +1,14 @@
+# exit: 42
+Box:type=[values:array<int64>]
+main=()=>{
+let rows=[Box[[1 2]] Box[[3 4]]] let saved=rows
+let which=0 let calls=0
+index=($capture @calls $capture @which)=>{calls+=1 return which}
+amount=($capture @which $capture @rows)=>{which=1 rows.push(Box[[5 6]]) return 10}
+rows[index()].values .+= amount()
+if calls not=? 1 or rows[0].values not=? [11 12] or rows[1].values not=? [3 4] return 1
+if rows.length not=? 3 or saved[0].values not=? [1 2] return 2
+let m:dict<string array<int64>>=["a"->[1 2]] let old=m
+m["a"] .*= [10 20]
+return if m["a"] =? [10 40] and old["a"] =? [1 2] 42 else 3
+}

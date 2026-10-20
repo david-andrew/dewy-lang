@@ -1,0 +1,9 @@
+# exit: 42
+main=()=>{
+let m=reshape([loop i in [0..20) i] 4 5) let saved=m
+let rows=[3,1..0] let cols=[0,2..4]
+m[rows cols] .+= [10 20 30]
+m[0 [4,2..0]]=[100 200 300]
+m[[2,0..0] 1]=99
+return if m.data =? [300 99 200 3 100 15 6 27 8 39 10 99 12 13 14 25 16 37 18 49]
+and saved.data =? [loop i in [0..20) i] 42 else 1}

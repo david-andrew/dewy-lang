@@ -1,0 +1,12 @@
+# exit: 42
+main=()=>{
+let xs=[1 2 3] let saved=xs
+xs .+= xs .* 2
+if xs not=? [3 6 9] or saved not=? [1 2 3] return 1
+let rows=[[1 2] [3 4]] let old=rows
+rows[end] .*= rows[0]
+let strings=["a" "b"] let words=strings
+strings .+= "!"
+return if rows =? [[1 2] [3 8]] and old =? [[1 2] [3 4]]
+and strings =? ["a!" "b!"] and words =? ["a" "b"] 42 else 2
+}

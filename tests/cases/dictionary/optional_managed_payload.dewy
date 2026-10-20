@@ -1,0 +1,11 @@
+# exit: 42
+# quick
+main=()=>{
+let values:dict<int64 array<int64>?>=[1->none 2->[20 22]]
+let found=values.get(2) let empty=values.get(1)
+if found is? none or empty is? none return 1
+let inner=found let absent=empty
+if inner is? none or absent isnt? none return 2
+let saved=inner
+inner[0]=99 values.clear()
+return saved[0]+saved[1]}
