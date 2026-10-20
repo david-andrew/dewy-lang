@@ -209,6 +209,20 @@ def test_grammar_leaves_names_alone(grammar, line, text):
     assert not any(s.startswith(('keyword', 'storage', 'constant')) for s in scopes), scopes
 
 
+def test_grammar_block_comments(grammar):
+    lines, stack = grammar.tokenize('let a=1 #{ one #{ nested }# still\nmore }# let b="#{ text }#"\n#{}# x')
+    assert [t for t, s in lines[0] if 'comment.block.dewy' in s] == ['#{', ' one ', '#{', ' nested ', '}#', ' still']
+    assert sum('comment.block.dewy' in s for t, s in lines[0] if t == '#{') == 2
+    assert [t for t, s in lines[1] if 'comment.block.dewy' in s] == ['more ', '}#']
+    assert any('storage.type.dewy' in s for t, s in lines[1] if t == 'let')
+    assert any(s[-1].startswith('string.quoted.double') for t, s in lines[1] if '#' in t)
+    assert not any('comment' in str(s) for t, s in lines[2] if t.strip() == 'x')
+    assert stack == []
+    # A line comment that mentions #{ opens nothing.
+    lines, stack = grammar.tokenize('# not #{ a block\nlet c=1')
+    assert stack == [] and any('storage.type.dewy' in s for t, s in lines[1] if t == 'let')
+
+
 def test_grammar_multiline_strings(grammar):
     lines, stack = grammar.tokenize('let caption = """He said "go".\nNext frame: {42}"""\nlet after=1')
     assert any(s[-1].startswith('string.quoted.triple') for t, s in lines[0] if t == 'He said "go".')
