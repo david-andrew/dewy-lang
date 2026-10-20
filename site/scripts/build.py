@@ -44,8 +44,12 @@ def copy_install_scripts():
         else: print(f'warning: {name} is absent; installer agent must supply it',file=sys.stderr)
     channel = REPO_ROOT/'tools/compiler/channel.py'
     tag = os.environ.get('DEWY_CHANNEL_TAG')
-    if channel.is_file() and tag:
-        run([sys.executable,str(channel),'--tag',tag,'--output',str(DIST/'toolchain-channel.txt')])
+    if channel.is_file() and (tag or os.environ.get('CI')):
+        # A deploy names its release; other CI builds point at the newest published toolchain.
+        which=['--tag',tag] if tag else ['--latest']
+        if subprocess.call([sys.executable,'-m','tools.compiler.channel',*which,'--output',str(DIST/'toolchain-channel.txt')],cwd=REPO_ROOT):
+            if tag: sys.exit(f'error: cannot write the channel for {tag}')
+            print('warning: no toolchain-channel.txt: no published toolchain release yet',file=sys.stderr)
     else:
         print('warning: no toolchain-channel.txt: supply channel.py and DEWY_CHANNEL_TAG after publishing a complete release',file=sys.stderr)
 

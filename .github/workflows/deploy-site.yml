@@ -37,8 +37,8 @@ name: Build and deploy language website
       - ".github/workflows/deploy-site.yml"
   workflow_dispatch:
     inputs:
-      channel_tag:
-        description: "Complete published current-toolchain release tag (optional)"
+      toolchain_release:
+        description: "Complete published current-toolchain release tag (default: the newest published one)"
         required: false
         type: string
 
@@ -88,7 +88,8 @@ jobs:
 
       - name: Build and validate website
         env:
-          DEWY_CHANNEL_TAG: ${{ inputs.channel_tag || vars.DEWY_CHANNEL_TAG }}
+          DEWY_CHANNEL_TAG: ${{ inputs.toolchain_release || vars.DEWY_CHANNEL_TAG }}
+          GH_TOKEN: ${{ github.token }}
         run: python site/scripts/build.py
 
       - name: Upload website preview
