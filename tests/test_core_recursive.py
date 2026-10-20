@@ -55,7 +55,7 @@ main=()=>{
 let tree=Branch[Leaf[10] Branch[Leaf[20] Leaf[12]]]
 let saved=tree tree.right=Leaf[100]
 return if evaluate(saved)=?42 and evaluate(tree)=?110 42 else 1}''',
-    'callback-private-state': '''Counter:type=():>int64
+    'callback-private-state': '''Counter:type=():>int
 Link:type=[counter:Counter next:Link?]
 make=()=>{let n=0 return ()=>{n+=1 return n}}
 main=()=>{
@@ -67,7 +67,7 @@ if a.next.counter() not=?1 or b.next.counter() not=?1 return 4
 let xs=[a] let ys=xs
 if xs[0].counter() not=?2 or ys[0].counter() not=?2 return 5
 return 42}''',
-    'callback-explicit-sharing': '''Counter:type=():>int64
+    'callback-explicit-sharing': '''Counter:type=():>int
 Link:type=[counter:Counter next:Link?]
 main=()=>{
 let n=0 let next=($capture @n)=>{n+=1 return n}

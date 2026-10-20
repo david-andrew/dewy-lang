@@ -1,6 +1,6 @@
 # exit: 42
 let source=[10 20 22 90]
-let boxes:array<array<int64>>=[[]] let before=0
+let boxes:array<array<int>>=[[]] let before=0
 choose=()=>{assert(alloc_count() =? before) return 0}
 main=()=>{boxes[0].reserve(4) before=alloc_count()
 boxes[choose()].extend(source[1..3))

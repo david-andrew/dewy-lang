@@ -1,7 +1,7 @@
 # exit: 42
 import p"../../../tests/fixtures/programs/set_effects.jo"
 through=(values:array<dict<int64 set_effects.Key>>):>int64=>{
-let other=[[2->set_effects.Key[22] 1->set_effects.Key[20]]]
+let other:array<dict<int64 set_effects.Key>>=[[2->set_effects.Key[22] 1->set_effects.Key[20]]]
 if values not=?other return 1
 let noise=[[3->set_effects.Key[99]]]
 return if noise.length=?1 values[0].length*21 else 2

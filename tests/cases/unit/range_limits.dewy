@@ -13,7 +13,7 @@ let total:int64=0
  total+=count(2147483645 as int32 2147483647 as int32)
  total+=count(4294967293 as uint32 4294967295 as uint32)
  total+=count(9223372036854775805 9223372036854775807)
- total+=count(18446744073709551613 18446744073709551615)
+ total+=count<uint64>(18446744073709551613 18446744073709551615)
 let signed:array<int64>=[] let unsigned:array<uint64>=[]
 let low:int64=-9223372036854775808
 loop i in [low..9223372036854775807] {signed.push(i) if signed.length =? 3 break}

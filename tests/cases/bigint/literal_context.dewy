@@ -3,7 +3,7 @@ from bigint import BigInt, bigint
 read=(value:BigInt=42):>BigInt=>value
 main=()=>{
 let values:array<BigInt>=[0 42 -9223372036854775808 18446744073709551615]
-let inferred=[1 -2 123456789012345678901234567890]
+let inferred:array<BigInt>=[1 -2 123456789012345678901234567890]
 let optional:BigInt|none=42
 if optional is? none return 1
 if values[0] not=? 0 or values[1] not=? 42 or values[2].to_int64() not=? -9223372036854775808 return 2

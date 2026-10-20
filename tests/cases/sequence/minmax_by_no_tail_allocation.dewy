@@ -1,7 +1,7 @@
 # exit: 42
-let before:int64=0
+let before:int=0
 let extra=false
-key=(value:int64):>int64=>{if alloc_count() not=?before extra=true return value}
+key=(value:int):>int=>{if alloc_count() not=?before extra=true return value}
 main=()=>{
 let values=[20 99 22 1]
 values.min_by(key) values.max_by(key)

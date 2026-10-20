@@ -1,8 +1,8 @@
 # exit: 42
-Box:type=[rows:array<array<int64>>]
+Box:type=[rows:array<array<int>>]
 let trace="" let index=0
-__index__=(box:Box i:int64):>array<int64>=>{trace+="g" return box.rows[i]}
-__setindex__=(@box:Box i:int64 value:array<int64>)=>{trace+="s" box.rows[i]=value}
+__index__=(box:Box i:int):>array<int>=>{trace+="g" return box.rows[i]}
+__setindex__=(@box:Box i:int value:array<int>)=>{trace+="s" box.rows[i]=value}
 at=()=>{trace+="i" return index}
 right=()=>{trace+="r" index=1 return 10}
 main=()=>{let box=Box[[[1 2 3] [4 5 6]]] let saved=box

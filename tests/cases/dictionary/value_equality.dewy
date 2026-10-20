@@ -6,10 +6,10 @@ let second=["b"->[22] "gone"->[0] "a"->[20]]
 second.remove("gone") second.reserve(100)
 if first not=?second or [first] not=?[second] return 1
 if [mapping=first] not=?[mapping=second] return 2
-let optional:dict<string array<int64>>?=first
+let optional:dict<string array<int>>?=first
 if optional not=?second return 3
-let variant:dict<string array<int64>>|string=first
-let other:dict<string array<int64>>|string=second
+let variant:dict<string array<int>>|string=first
+let other:dict<string array<int>>|string=second
 if variant not=?other return 4
 let values=[first->42]
 let saved=second second["a"].push(99)

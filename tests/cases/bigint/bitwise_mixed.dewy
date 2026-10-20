@@ -1,16 +1,16 @@
 # exit: 42
-from bigint import bigint
+from bigint import BigInt, bigint
 main=()=>{
-let a=18446744073709551616 let signed:int64=-1 let word:uint64=18446744073709551615
+let a:BigInt=18446744073709551616 let signed:int64=-1 let word:uint64=18446744073709551615
 let saved=a
 if (a and signed) not=? a or (signed and a) not=? a return 1
-if (a or word) not=? 36893488147419103231 or (word or a) not=? 36893488147419103231 return 2
-if (a xor signed) not=? -18446744073709551617 or (signed xor a) not=? -18446744073709551617 return 3
+if (a or word) not=? bigint(36893488147419103231) or (word or a) not=? bigint(36893488147419103231) return 2
+if (a xor signed) not=? bigint(-18446744073709551617) or (signed xor a) not=? bigint(-18446744073709551617) return 3
 if (a and word) not=? 0 or (word and a) not=? 0 return 4
 if (a or signed) not=? -1 or (signed or a) not=? -1 return 5
-if (a xor word) not=? 36893488147419103231 or (word xor a) not=? 36893488147419103231 return 6
+if (a xor word) not=? bigint(36893488147419103231) or (word xor a) not=? bigint(36893488147419103231) return 6
 a<<=17 a>>=17
-if a not=? saved or (not a) not=? -18446744073709551617 return 7
+if a not=? saved or (not a) not=? bigint(-18446744073709551617) return 7
 let huge:int64=9223372036854775807
 return if (a >> huge) =? 0 and ((-a) >> huge) =? -1 and (bigint(0) << huge) =? 0 42 else 8
 }

@@ -1,7 +1,7 @@
 # exit: 42
-change=(@values:array<int64>):>bool=>{values[0]+=1 return true}
+change=(@values:array<int>):>bool=>{values[0]+=1 return true}
 main=()=>{
-let values=[7 11] let index:int64=0
+let values=[7 11] let index:int=0
 if values[index] =? 7 and values[index] >? 0 {index=1}
 if values[index] not=? 11 return 1
 if values[0] =? 7 and change(@values) and values[0] =? 8 {values[0]=40}

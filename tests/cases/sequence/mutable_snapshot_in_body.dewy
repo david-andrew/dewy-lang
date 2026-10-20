@@ -1,7 +1,7 @@
 # exit: 42
 # quick
 main=()=>{
-let values=[[20] [21]] let snapshots:array<array<array<int64>>>=[]
+let values=[[20] [21]] let snapshots:array<array<array<int>>>=[]
 loop @value in values {snapshots.push(values) value[0]+=1 value.push(22)}
 return if values=?[[21 22] [22 22]]
 and snapshots[0]=?[[20] [21]] and snapshots[1]=?[[21 22] [21]] 42 else 1}

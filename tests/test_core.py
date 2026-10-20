@@ -725,12 +725,12 @@ def test_core_bigint_literal_bases(compiler, tmp_path, target, release):
         for value in values:
             literal = integer_literal(value, prefix, alphabet)
             for sign in ['', '-']:
-                statements.append(f'printl"{{{sign}{literal}}}"')
+                statements.append(f'printl"{{bigint({sign}{literal})}}"')
                 expected.append(str(-value if sign else value))
     # A local module cannot replace the implementation of a numeric literal.
     (tmp_path / 'bigint.dewy').write_text('BigInt:type=[wrong:bool]\n')
     source = tmp_path / 'literals.dewy'
-    source.write_text('main=():>void=>{\n' + '\n'.join(statements) + '\n}\n')
+    source.write_text('from p"@lib/bigint.dewy" import bigint\nmain=():>void=>{\n' + '\n'.join(statements) + '\n}\n')
     binary = tmp_path / 'literals'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -757,14 +757,16 @@ def test_core_bigint_literal_bases(compiler, tmp_path, target, release):
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_bigint_literal_modules(compiler, tmp_path, target, release):
     (tmp_path / 'rational.dewy').write_text('rational=()=>"wrong library"\n')
-    (tmp_path / 'constants.dewy').write_text('''const amount=123456789012345678901234567890
+    (tmp_path / 'constants.dewy').write_text('''from bigint import BigInt
+const amount:BigInt=123456789012345678901234567890
 const fraction=amount/7
 read=(value=amount)=>value+1
 fractional=(value=fraction)=>value*7
 ''')
     source = tmp_path / 'main.dewy'
-    source.write_text('''from constants import amount, read, fractional
-main=()=>if amount+1 =? read() and read(18446744073709551616) =? 18446744073709551617
+    source.write_text('''from bigint import bigint
+from constants import amount, read, fractional
+main=()=>if amount+1 =? read() and read(bigint(18446744073709551616)) =? bigint(18446744073709551617)
 and fractional() =? amount 42 else 1
 ''')
     binary = tmp_path / 'modules'
@@ -1598,11 +1600,13 @@ def test_core_compiler_hosts(compiler, tmp_path, host):
         assert header[:4] == b'\x7fELF' and int.from_bytes(header[18:20], 'little') == 183
         if runner := shutil.which('qemu-aarch64'):
             source = tmp_path / 'values.dewy'
-            source.write_text('''main=()=>{
+            source.write_text('''from bigint import BigInt
+main=()=>{
 let original=[20 21] let changed=original
 loop @item in changed {item+=1}
 assert(original =? [20 21] and changed =? [21 22])
-printl"{changed[1]} {1/3+1/6} {18446744073709551616+1}"
+let huge:BigInt=18446744073709551616
+printl"{changed[1]} {1/3+1/6} {huge+1}"
 return 0
 }''')
             for flags in [[], ['--release']]:
@@ -1674,8 +1678,10 @@ def test_core_signed_floor_arithmetic(compiler, tmp_path, target, release):
     constant_cases = '\n'.join(f'printl"{{a%{b}}} {{a//{b}}}"' for b in constants)
     source = tmp_path / 'floor.dewy'
     source.write_text(f'''main=():>void=>{{
-loop a in [{' '.join(map(str, numerators))}] {{
-    loop b in [{' '.join(map(str, denominators))}] {{
+let numerators:array<int64>=[{' '.join(map(str, numerators))}]
+let denominators:array<int64>=[{' '.join(map(str, denominators))}]
+loop a in numerators {{
+    loop b in denominators {{
         let remainder=a%b
         let quotient=a//b
         printl"{{remainder}} {{quotient}}"
@@ -2574,18 +2580,18 @@ def test_core_rollback_model(compiler, tmp_path, target, release):
 
 
 @pytest.mark.parametrize(('setup', 'callback', 'start', 'diagnostic'), [
-    ('tick=(state:int64 _inputs:array<int64>)=>state+int64(time())', 'tick', '0', 'reads the clock'),
-    ('clock=()=>time()\ntick=(state:int64 _inputs:array<int64>)=>state+int64(clock())', 'tick', '0', 'reads the clock'),
-    ('', '((state:int64 _inputs:array<int64>)=>state+int64(random()))', '0', 'takes random numbers'),
-    ('let count=0\nhelper=()=>{count+=1 return count}\ntick=(state:int64 _inputs:array<int64>)=>state+helper()', 'tick', '0', "changes the global 'count'"),
-    ('input=()=>if key_down(Key.space) 1 else 0\ntick=(state:int64 _inputs:array<int64>)=>state+input()', 'tick', '0', 'reads the input'),
-    ('helper=(n:int64):>int64=>if n>?0 helper(n-1) else int64(time())\ntick=(state:int64 _inputs:array<int64>)=>state+helper(1)', 'tick', '0', 'reads the clock'),
+    ('tick=(state:int64 _inputs:array<int64>)=>state+int64(time())', 'tick', 'int64(0)', 'reads the clock'),
+    ('clock=()=>time()\ntick=(state:int64 _inputs:array<int64>)=>state+int64(clock())', 'tick', 'int64(0)', 'reads the clock'),
+    ('', '((state:int64 _inputs:array<int64>)=>state+int64(random()))', 'int64(0)', 'takes random numbers'),
+    ('let count:int64=0\nhelper=()=>{count+=1 return count}\ntick=(state:int64 _inputs:array<int64>)=>state+helper()', 'tick', 'int64(0)', "changes the global 'count'"),
+    ('input=():>int64=>if key_down(Key.space) 1 else 0\ntick=(state:int64 _inputs:array<int64>)=>state+input()', 'tick', 'int64(0)', 'reads the input'),
+    ('helper=(n:int64):>int64=>if n>?0 helper(n-1) else int64(time())\ntick=(state:int64 _inputs:array<int64>)=>state+helper(1)', 'tick', 'int64(0)', 'reads the clock'),
     ('tick=(state:Rng _inputs:array<int64>)=>{state.next_int(0 10) return state}', 'tick', 'rng(7)', None),
     ('tick=(state:Rng _inputs:array<int64>)=>{let xs=[1 2 3] shuffle(@state @xs) return state}', 'tick', 'rng(7)', None),
-    ('tick=(state:int64 _inputs:array<int64>)=>state+int64(unix_time(date(0.0 utc=true)))', 'tick', '0', None),
-    ('let random_state=rng(7)\ntick=(state:int64 _inputs:array<int64>)=>state+random_state.next_int(0 10)', 'tick', '0', "changes the global 'random_state'"),
-    ('random=(value:int64)=>value\ntick=(state:int64 _inputs:array<int64>)=>state+random(1)', 'tick', '0', None),
-    ('tick=(state:int64 inputs:array<int64>)=>state+inputs[0]+inputs[1]', 'tick', '0', None),
+    ('tick=(state:int64 _inputs:array<int64>)=>state+int64(unix_time(date(0.0 utc=true)))', 'tick', 'int64(0)', None),
+    ('let random_state=rng(7)\ntick=(state:int64 _inputs:array<int64>)=>state+random_state.next_int(0 10)', 'tick', 'int64(0)', "changes the global 'random_state'"),
+    ('random=(value:int64)=>value\ntick=(state:int64 _inputs:array<int64>)=>state+random(1)', 'tick', 'int64(0)', None),
+    ('tick=(state:int64 inputs:array<int64>)=>state+inputs[0]+inputs[1]', 'tick', 'int64(0)', None),
 ], ids=['clock', 'helper-clock', 'lambda-random', 'helper-global', 'helper-input', 'recursive-clock', 'seeded-rng', 'seeded-shuffle', 'date-conversion', 'global-rng', 'user-random', 'pure'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
@@ -3105,7 +3111,7 @@ def test_core_check_and_format_boundary(compiler, tmp_path):
     (('let score=20\nread=()=>score\nscore=40\nread()+2\nlet score=99\nread()\nscore\n'
      'identity=<T>(value:T):>T=>value\nidentity(42)\n'), ['42', '40', '99', '42'], []),
     ('repl_add=(x:int64 y:int64):>int64=>x+y\n:type repl_add\n:type [1 2]\n:type 40+2\n',
-     ['repl_add = (x: int64 y: int64):>int64', 'array<int64>', 'int64'], []),
+     ['repl_add = (x: int64 y: int64):>int64', 'array<int>', 'int'], []),
     (('{\n# A comment inside the final expression.\nlet x=20\nx+22\n}\n'
      'f=(x)=>{\nx+2\n}\nf(40)\n[loop i in [0..3) i*2]\n'
      'let text="""first\nan unmatched " inside triple quotes\nlast"""\ntext.length >? 10\n'
@@ -3117,7 +3123,7 @@ def test_core_check_and_format_boundary(compiler, tmp_path):
      ['20', '22', '42'], ['panic: restore values', "unknown name 'missing_repl_name'",
                          'panic: restore declarations', "unknown name 'transient_repl'"]),
     ('let calls=0\nnext=()=>{calls+=1 return 42}\n:type next()\ncalls\nnext()\ncalls\n',
-     ['int64', '0', '42', '1'], []),
+     ['int', '0', '42', '1'], []),
     (('let calls=0\nnext=()=>{calls+=1 return [20 22]}\nconst saved=next()\n'
      'saved\nsaved\ncalls\nsaved[0]=99\nsaved\nlet saved=[42]\nsaved\n'),
      ['[20, 22]', '[20, 22]', '1', '[20, 22]', '[42]'], ['cannot modify const']),
@@ -5960,10 +5966,10 @@ main=()=>{
  let small:array<uint8 length=256>=[]
  loop i in [0..256) {small[i]=i as uint8}
  let large:array<uint8 length=65536>=[]
- loop i in [0..65536) {large[i]=i as uint8}
+ loop i in [int64(0)..65536) {large[i]=i as uint8}
  loop i in [0..256) {if read8(small i as uint8) not=? i return 1
  if read_widen(small i as uint8) not=? i return 2}
- loop i in [0..65536) {if read16(large i as uint16) not=? ((i as uint8) as int64) return 3}
+ loop i in [int64(0)..65536) {if read16(large i as uint16) not=? ((i as uint8) as int64) return 3}
  if read_wrap(small -1) not=? 255 return 4
  return 42
 }

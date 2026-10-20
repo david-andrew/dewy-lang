@@ -1,6 +1,6 @@
 # exit: 42
-let trace:int64=0
-key=(value:int64):>int64=>{trace=trace*10+value return value}
+let trace:int=0
+key=(value:int):>int=>{trace=trace*10+value return value}
 main=()=>{
 let values=[4 2 8 1]
 if values.min_by(key) not=?1 or trace not=?4281 return 1

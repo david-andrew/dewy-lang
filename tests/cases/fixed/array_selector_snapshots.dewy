@@ -1,8 +1,8 @@
 # exit: 42
-main=()=>{let values:array<int64 length=2>=[1 0]
+main=()=>{let values:array<int length=2>=[1 0]
 values[values]=[20 22]
 if values not=? [22 20] return 1
-let indexes:array<int64 length=2>=[1 0]
+let indexes:array<int length=2>=[1 0]
 replacement=($capture @indexes)=>{indexes[0]=0 return [40 42]}
 values[indexes]=replacement()
 return if values =? [42 40] and indexes =? [0 0] 42 else 2}

@@ -1,5 +1,5 @@
 # exit: 42
-edit=(@xs:array<int64> amount:int64)=>{xs .+= amount}
+edit=(@xs:array<int> amount:int)=>{xs .+= amount}
 main=()=>{
 let xs=[1 2] let saved=xs edit(@xs 40)
 if xs not=? [41 42] or saved not=? [1 2] return 1

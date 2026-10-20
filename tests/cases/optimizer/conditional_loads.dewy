@@ -1,9 +1,9 @@
 # exit: 42
-read=(take:bool values:array<int64>):>int64=>{
+read=(take:bool values:array<int>):>int=>{
 if take and values[0] >? 0 and values[0] <? 100 return values[0]
 return 42
 }
-main=()=>{let empty:array<int64>=[]
+main=()=>{let empty:array<int>=[]
 if read(false empty) not=? 42 return 1
 loop take in [true false] {
     let values=[7]

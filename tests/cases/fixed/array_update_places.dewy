@@ -1,8 +1,8 @@
 # exit: 42
-Row:type=array<int64 length=3>
+Row:type=array<int length=3>
 Box:type=[row:Row]
 main=()=>{let rows:array<Box>=[Box[[10 20 30]] Box[[40 50 60]]] let saved=rows
-let which:int64=0 let calls:int64=0
+let which:int=0 let calls:int=0
 select=($capture @calls $capture @which)=>{calls+=1 return which}
 replace=($capture @which)=>{which=1 return [7 8]}
 rows[select()].row[1..end]=replace()

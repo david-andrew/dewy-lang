@@ -162,7 +162,7 @@ async function change(text, predicate) {
         await change('main=()=>{let point=[x=42 y=1] return point.x}', (ds) => ds.length === 0);
         const fields = await providers.completion.provideCompletionItems(document, new Position(0, body.lastIndexOf('.x') + 1));
         assert.equal(fields.items.find((item) => item.label === 'x').kind, 4); // VS Code Field
-        assert.equal(fields.items.find((item) => item.label === 'y').detail, 'int64');
+        assert.equal(fields.items.find((item) => item.label === 'y').detail, 'int');
         await change('# 🙂\nmain=()=>unknown_editor', (ds) => ds.some((d) => d.message.includes('unknown_editor')));
         assert.equal(notices.at(-1)[0].range.start.line, 1);
         await change('main=()=>{', (ds) => ds.length > 0 && !ds[0].message.includes('unknown_editor'));

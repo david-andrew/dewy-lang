@@ -69,9 +69,10 @@ let λ=notin
 printl((is ?? 0) in? [20 21]) printl(λ notin? [22])
 return (is ?? 0)+λ}
 main=()=>{printl(probe(20 21 22)); return 0}''',
-    'decimal-literals': '''main=()=>{
+    'decimal-literals': '''from bigint import bigint
+main=()=>{
 printl(0d4_2.0_0E+0_0) printl(2.1(10+10))
-printl(0d18_446_744_073_709_551_615) printl(18_446_744_073_709_551_616)
+printl(uint64(0d18_446_744_073_709_551_615)) printl(bigint(18_446_744_073_709_551_616))
 printl(-0d9_223_372_036_854_775_808) return 0
 }''',
     'closure-captures': '''main=()=>{
@@ -99,7 +100,7 @@ return 0
 }''',
     'matrix-slices': '''main=()=>{
 let m=reshape([1 2 3 4 5 6] 2 3)
-let part:NDArray<int64>=m[[0..end] [1..end]]
+let part:NDArray<int>=m[[0..end] [1..end]]
 m[[..] end]=[20 22]
 m[[..] end] .+=10
 printl(part.data) printl(m.data) printl(m[0 [0..end+1)].data)

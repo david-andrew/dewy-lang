@@ -258,9 +258,9 @@ def test_surface_member_call_errors(compiler, tmp_path, name):
 # ------------------------------------------------- Dewy-native diagnostics
 
 NATIVE_DIAGNOSTICS = {
-    'union-comparison': ('read=(x:int64|string):>bool=>x =? 1\nmain=()=>printl(read(1))',
+    'union-comparison': ('read=(x:int64|string):>bool=>x =? int64(1)\nmain=()=>printl(read(1))',
                          'cannot compare int64 | string with int64 (find out which it holds first: `x is? int64 and x =? value`)'),
-    'type-names': ('main = () => { let x:string = 3 }', 'expected string, found int64'),
+    'type-names': ('main = () => { let x:string = 3 }', 'expected string, found int'),
     'array-type-name': ('accept=(xs:array<uint8>)=>0\nmain=()=>accept([256])', 'expects array<uint8>'),
     'count-hint': ('main = () => { if 3 { printl"x" } }', '`loop i in [1..3] { }`'),
     'optional-condition': ('f = (xs:array<int64>):>int64? => none\nmain = () => { if f([1]) { printl"x" } }',
@@ -274,7 +274,7 @@ NATIVE_DIAGNOSTICS = {
     'empty-array': ('main = () => { let m = [] }', '`let m:array<int64> = []`'),
     'real-to-integer': ('main = () => { let x = 1.5\nlet y:int64 = x }', 'int64(x) makes it a whole number'),
     'union-cast': ('f = (x:int64|string):>int64 => x as int64\nmain = () => f(1)', 'inside `if x is? int64 { }`'),
-    'array-habit': ('main = () => { let xs = [1 2]\nprintl"{xs.size()}" }', "no 'size' for array<int64> (use `.length`)"),
+    'array-habit': ('main = () => { let xs = [1 2]\nprintl"{xs.size()}" }', "no 'size' for array<int> (use `.length`)"),
     'dict-habit': ('main = () => { let d:dict<string int64> = ["a"->1]\nprintl"{d.size()}" }', '(use `m.length`)'),
     'type-habit': ('main = () => { let x:float = 1.0 }', "unknown type 'float' (use `float64`"),
     'function-habit': ('f = (x:int64) => { let y = toString(x) }\nmain = () => f(1)', '(use `string(x)`)'),
@@ -289,7 +289,7 @@ def test_surface_native_diagnostics(compiler, tmp_path, name):
     assert expected in line
     # No Jo spellings of types or operators in a Dewy program's diagnostics.
     message = line.split('error:', 1)[1]
-    for jo in (' str ', ' str)', ' int ', ' int)', '==', '!=', 'u8[]', '-> ', 'if let'):
+    for jo in (' str ', ' str)', '==', '!=', 'u8[]', '-> ', 'if let'):
         assert jo not in message + ' ', (jo, message)
 
 
@@ -312,7 +312,7 @@ main=():>int64=>{
     y >>= 70
     let z:int64 = 5
     z <<= 2
-    printl"{x} {y} {z} {1 << 64} {-2 >> 64} {1 << 3} {(1 << 62) >> 61}"
+    printl"{x} {y} {z} {int64(1) << 64} {-2 >> 64} {1 << 3} {(1 << 62) >> 61}"
     return 0
 }
 '''
