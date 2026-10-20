@@ -85,6 +85,12 @@ Tier 2 (programs 32–63, added 10-20), harder programs:
   - Every slice must keep bench kernels within +3% instructions.
 - **`$explicit_copies`:** the strict-lane first slice; ladder programs 17 and 18.
 
+Landed 10-20:
+- **Publication:** `master` is the current compiler (old implementation in tag
+  `archive/master-pre-restart`); the website migrated; installers and the
+  release `dewy-0.0.0-dev.20261020.091b7243dd67` are live; extension 0.1.8
+  shipped with a bundled compiler and full LSP; legacy releases are archived.
+
 Landed 10-19 and 10-20:
 - golden tests, ladder and speed gate;
 - isolation summaries (the pathname miscompile fixed);
@@ -111,11 +117,12 @@ Landed 10-19 and 10-20:
 - The rest of the Jo-shaped hint catalog in diagnostics.
 - Dewy-grammar differential fuzzer with independent oracles (nightly). The
   current fuzzer only generates Jo.
-- Publication migration:
-  - point the site and installer at the new compiler;
-  - merge this branch into master;
-  - prune the old `native-*`/`udewy-*` release tags.
-
+- Publication follow-ups:
+  - the install page still says no current release is published, so generate
+    that sentence from the channel;
+  - error-valued `append_file`;
+  - the LSP still offers hidden Jo names as completions;
+  - delete `restart/sloppy-frontend` once in-flight agents land.
 - **Next capability gaps from tier 2:**
   - the `Path` filesystem API with error-valued I/O (36);
   - reflection, `fields(T)`/`$field` (62);
