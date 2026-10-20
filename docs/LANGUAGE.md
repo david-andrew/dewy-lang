@@ -729,7 +729,9 @@ main=()=>{
 Inline shapes work in parameters, returns, nested fields, collections, optional
 values and function types. They share type identity with inferred anonymous
 records. Named records remain distinct types; use a named declaration when fields
-need defaults. Inline fields may also refer to a generic function's type parameters.
+need defaults. A default may use earlier fields, as in
+`Span:type=[start:int64 stop:int64=start]`: given values are evaluated first,
+in written order, then the defaults in field order. Inline fields may also refer to a generic function's type parameters.
 
 Records can contain optional values of their own type, including through other
 records and unions. Lists and trees keep ordinary value semantics:

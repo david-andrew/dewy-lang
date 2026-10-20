@@ -1,0 +1,20 @@
+# quick
+Span:type = [start:int64 stop:int64 = start label:string = "span"]
+Box:type = <T>[first:T second:T = first both:array<T> = [first second]]
+Area:type = [w:int64 h = w * 2 area:int64 = w * h]   # h:int64 from its default
+next = (@counter:int64):>int64 => { counter += 1  counter }
+main = () => {
+    let a = Span(1 9)
+    let b = Span(stop=5 start=2 label="b")
+    let c = Span(7)
+    let d = Span[4]
+    let e = Span(label="x" start=3)
+    printl"{a} {b} {c} {d} {e}"
+    printl"{Box(1)} {Box("a" "b")}"
+    printl"{Area(3)} {Area(h=1 w=5)}"
+    let k:int64 = 0
+    let f = Span(label="{next(@k)}" start=next(@k))
+    printl"{f} {k}"   # given values first, in written order
+    let g:Span = [start=4]
+    printl(g)
+}

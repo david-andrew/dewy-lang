@@ -1308,7 +1308,14 @@ check_struct_fields = (si: int):
             if nodes[f].a != 0: fields[fi].type = i32(resolve_type(int(nodes[f].a)))
             else if nodes[f].b != 0:
                 cl = clone(int(nodes[f].b))
+                # (a default may name the fields before it)
+                inner = scope_mark()
+                if files[pos_file(nodes[d].pos)].is_dewy:
+                    loop j in [0..inherited.len() + i):
+                        earlier = fields[int(structs[si].fields) + j]
+                        if earlier.type != 0: new_local(int(earlier.name), int(earlier.type), nodes[f].pos)
                 t = check_expr(cl, 0)
+                scope_reset(inner)
                 if has_flag(cl, NF_LITERAL):
                     t = lit_default(cl)
                 fields[fi].type = i32(zonk(t))

@@ -83,7 +83,7 @@ repeating those imports. Earlier fields use the values supplied to this
 particular construction; explicit arguments are evaluated in the caller's
 scope.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"check"} -->
 ```dewy
 let Span:type = [start:int64 stop:int64 = start label:string = "span"]
 
@@ -140,7 +140,7 @@ Mixing named and positional items is not allowed; too many items, or a missing f
 
 An object type may declare methods: `name = (params) => body` rows among the fields. Inside a method, bare names of the type's fields and methods refer to the instance (`stop - start`, `width`); a method that assigns or grows a field takes its receiver as a place, so it must be called on a binding or a field, not on a temporary. Calls are `value.method(args)`, and a zero-argument method is called by `value.method` alone.
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"run","stdout":"","exit":10} -->
 ```dewy
 let Span:type = [
     start:int64

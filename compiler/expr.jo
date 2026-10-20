@@ -1626,46 +1626,52 @@ subst_params = (n: int, decl: int, given: int[]):
         if k != .partial: subst_params(int(nodes[n].d), decl, given)
     loop i in [0..nkids(n)): subst_params(kid(n, i), decl, given)
 
-default_uses_params = (n: int, decl: int, before: int, hidden: int[] = []) -> bool:
+default_uses_params = (n: int, decl: int, before: int) -> bool:
+    if n == 0: return false
+    names: int[]
+    loop i in [0..before): names.push(int(nodes[kid(decl, i)].name))
+    default_uses_names(n, names)
+
+# Whether a default names one of `names` (earlier parameters or fields), outside
+# the bindings it makes itself.
+default_uses_names = (n: int, names: int[], hidden: int[] = []) -> bool:
     if n == 0: return false
     if nodes[n].kind == .ident:
         if hidden.contains(int(nodes[n].name)): return false
-        loop i in [0..before):
-            if nodes[n].name == nodes[kid(decl, i)].name: return true
-        return false
+        return names.contains(int(nodes[n].name))
     if nodes[n].kind == .vardecl:
-        return default_uses_params(int(nodes[n].b), decl, before, hidden)
+        return default_uses_names(int(nodes[n].b), names, hidden)
     if nodes[n].kind == .lambda:
         local_hidden = hidden
         loop param in kids(n):
-            if default_uses_params(int(nodes[param].b), decl, before, local_hidden): return true
+            if default_uses_names(int(nodes[param].b), names, local_hidden): return true
             local_hidden.push(int(nodes[param].name))
-        return default_uses_params(int(nodes[n].b), decl, before, local_hidden)
+        return default_uses_names(int(nodes[n].b), names, local_hidden)
     if nodes[n].kind == .block:
         local_hidden = hidden
         loop statement in kids(n):
-            if default_uses_params(statement, decl, before, local_hidden): return true
+            if default_uses_names(statement, names, local_hidden): return true
             if nodes[statement].kind == .vardecl:
                 local_hidden.push(int(nodes[statement].name))
                 loop binding in binding_leaves(kids(statement)): local_hidden.push(int(nodes[binding].name))
         return false
     if nodes[n].kind == .for_:
-        if default_uses_params(int(nodes[n].a), decl, before, hidden): return true
+        if default_uses_names(int(nodes[n].a), names, hidden): return true
         local_hidden = hidden
         loop binder in binding_leaves(kids(n)): local_hidden.push(int(nodes[binder].name))
-        return default_uses_params(int(nodes[n].b), decl, before, local_hidden)
+        return default_uses_names(int(nodes[n].b), names, local_hidden)
     if nodes[n].kind == .match_:
-        if default_uses_params(int(nodes[n].a), decl, before, hidden): return true
+        if default_uses_names(int(nodes[n].a), names, hidden): return true
         loop arm in kids(n):
             local_hidden = hidden
             loop pattern in kids(arm):
                 if nodes[pattern].name != 0: local_hidden.push(int(nodes[pattern].name))
-            if default_uses_params(int(nodes[arm].b), decl, before, local_hidden): return true
+            if default_uses_names(int(nodes[arm].b), names, local_hidden): return true
         return false
-    if default_uses_params(int(nodes[n].a), decl, before, hidden) or default_uses_params(int(nodes[n].b), decl, before, hidden): return true
-    if default_uses_params(int(nodes[n].c), decl, before, hidden) or default_uses_params(int(nodes[n].d), decl, before, hidden): return true
+    if default_uses_names(int(nodes[n].a), names, hidden) or default_uses_names(int(nodes[n].b), names, hidden): return true
+    if default_uses_names(int(nodes[n].c), names, hidden) or default_uses_names(int(nodes[n].d), names, hidden): return true
     loop child in kids(n):
-        if default_uses_params(child, decl, before, hidden): return true
+        if default_uses_names(child, names, hidden): return true
     false
 
 capture_value = (a: int, pt: int, statements: mut int[]) -> int:
@@ -2459,10 +2465,35 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
     # (a struct that holds itself, a: A, says so before its fields' defaults are made: they would
     # make one another without end)
     layout(t)
+    # A default naming an earlier field takes the value this construction gives it:
+    # explicit values are kept first, in written order, then defaults in field order.
+    dependent = false
+    if files[pos_file(nodes[decl].pos)].is_dewy:
+        names: int[]
+        loop i in [0..nf):
+            fi = int(structs[si].fields) + i
+            if mapped[i] == 0 and default_uses_names(int(fields[fi].defval), names): dependent = true
+            names.push(int(fields[fi].name))
+    captured = fill(0, nf)
+    statements: int[]
+    if dependent:
+        loop source in args:
+            a = unnamed(source)
+            loop i in [0..nf):
+                if mapped[i] != a and mapped[i] != source: continue
+                if nodes[a].kind == .hole: fatal(nodes[a].pos, "partial application of constructors is not supported")
+                ft = int(fields[int(structs[si].fields) + i].type)
+                finish_arg(a, ft, false)
+                captured[i] = capture_value(a, ft, statements)
+                break
     fin: int[]
     loop i in [0..nf):
         fi = int(structs[si].fields) + i
         a = mapped[i]
+        if dependent and a != 0:
+            finish_arg(captured[i], int(fields[fi].type), false)
+            fin.push(captured[i])
+            continue
         if a == 0:
             dv = int(fields[fi].defval)
             if dv != 0:
@@ -2474,23 +2505,46 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
                 targs: int[]
                 loop j in [0..int(structs[si].ntargs)): targs.push(struct_targ(si, j))
                 push_type_params(decl, targs)
+                if dependent:
+                    loop j in [0..i):
+                        if captured[j] == 0: continue
+                        name = int(fields[int(structs[si].fields) + j].name)
+                        push_scope_sym(name, new_sym(name, .local, int(nodes[captured[j]].sym), 0))
                 check_expr(d, int(fields[fi].type))
                 coerce(d, int(fields[fi].type))
                 scope_reset(mark)
                 ctxs.pop()
                 cx = saved
+                if dependent:
+                    d = capture_value(d, int(fields[fi].type), statements)
+                    finish_arg(d, int(fields[fi].type), false)
+                captured[i] = d
                 fin.push(d)
-            else: fin.push(struct_default(int(fields[fi].type), nodes[n].pos))
+            else:
+                d = struct_default(int(fields[fi].type), nodes[n].pos)
+                if dependent and d != 0:
+                    d = capture_value(d, int(fields[fi].type), statements)
+                    finish_arg(d, int(fields[fi].type), false)
+                captured[i] = d
+                fin.push(d)
             continue
         if nodes[a].kind == .hole: fatal(nodes[a].pos, "partial application of constructors is not supported")
         finish_arg(a, int(fields[fi].type), false)
         fin.push(a)
     nodes[n].kind = .call
     nodes[n].aux = 2
-    save_call_order(n, args, fin)
+    if not dependent: save_call_order(n, args, fin)
     set_list(n, fin)
     nodes[n].type = i32(t)
     nodes[n].a = 0
+    if dependent:
+        call = nodes.len()
+        nodes.push(nodes[n])
+        result = mk(.exprstmt, nodes[n].pos)
+        nodes[result].a = i32(call)
+        statements.push(result)
+        nodes[n] = Node(kind = .block, pos = nodes[n].pos, type = i32(t), aux = 1)
+        set_list(n, statements)
     t
 
 # (P(1) for struct P: x: f64; y: f64: values given in order stop short of a field without a
