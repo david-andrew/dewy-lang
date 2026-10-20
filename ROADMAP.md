@@ -65,9 +65,24 @@ Tier 2 (programs 32–63, added 10-20), harder programs:
   - function type expressions.
 - **Dewy-program differential tester:** a generator plus an independent Python
   interpreter oracle, metamorphic variants, shrinking, and nightly CI.
-- **Compile throughput, structural:** pay back the feature drift (+1.7% to
-  +4.3% since the 10-19 checkpoint), then pull the big levers toward 250k
-  lines/s.
+- **Compile throughput, budgeted** (10-20). The target is about 400 M instructions
+  for the 22k-line synthetic program, from 1,322 M today: roughly 18k instructions
+  per root line, with library work included.
+
+  | Phase | Now (M) | Target (M) | Kind of work |
+  |---|---:|---:|---|
+  | Lex | 60 | 20 | Tune: scalar scanner, ASCII fast paths |
+  | Parse | 197 | 40 | Redesign: build the compact AST directly, no projection |
+  | Check and lowering | 567 | 135 | Redesign: checked-function results finalized once, shared proof summaries |
+  | Default optimization | 244 | 100 | Redesign: shared operand/control facts, region updates |
+  | Register allocation and emission | 211 | 80 | Redesign: shared interval facts, batched encoding |
+  | Image writing | 21 | 5 | Tune |
+  | Prelude | 68 | 20 | Demand loading (landed) |
+
+  - Plus the compiler's own code quality: SRA of aggregates passed to helpers,
+    condition forwarding, fewer spills. That helps compile speed and runtime
+    alike.
+  - Every slice must keep bench kernels within +3% instructions.
 - **`$explicit_copies`:** the strict-lane first slice; ladder programs 17 and 18.
 
 Landed 10-19 and 10-20:
