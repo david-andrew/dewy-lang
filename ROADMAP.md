@@ -22,15 +22,14 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 
 ## Now
 
-- **Bigint `int` and exact decimals** (Astra): promotion on overflow and exact
-  decimal literals; completes milestone 27's arithmetic base.
-- **Refinement slice 1** (Astra): scalar facts and symbolic `$assert`. The
-  design is in ~/dev/tmp/coord/refinement-design.md, in 6 slices.
+- **Effects slice 1** (Astra): direct-place effect rows; shares places with
+  facts.jo.
+- **Object methods** (Opus): bare sibling-field access, no `self`.
 
 ## Next
 
 - Tier-3 implementation (designed, no decisions needed):
-  - refinement slices 2–6: canonical refinements, lengths and fields,
+  - refinement slices 3–6 (1–2 landed: scalar facts, refinement types): lengths and fields,
     joins/loops, checked proofs, diagnostics;
   - effect rows, 6 slices (~/dev/tmp/coord/effects-design.md). Slice 1 shares
     places with refinement slice 1;
@@ -58,6 +57,9 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
   (5–10 engineer-weeks) until the zip pilot works without private syntax and a
   lexer/IR kernel matches Jo in results and speed. Bootstrap afterwards:
   C → stage0 → frozen Jo compiler → Dewy compiler.
+- Recover the compile cost of mathematical `int` (synthetic +3.0%, game +5.7%,
+  accepted 10-20). The remaining excess is in checking (game ~25 M),
+  lowering/emission (~18 M) and the optimizer (~11 M).
 - Small items:
   - the remaining Jo-shaped hints in diagnostics;
   - bare sibling-field access from function fields and type methods
