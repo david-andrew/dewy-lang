@@ -5859,6 +5859,8 @@ fp_scan = (n: int, ctx: int):
             if mm & (1 << i) != 0:
                 key = lpath_key(kid(n, i))
                 if key != 0: fp_kill.push(key)
+                # (`@xs[i]` writes an element, like an assignment to it: xs must be made unique)
+                else: fp_target(kid(n, i))
     if k == .for_ and has_flag(n, NF_MUT):
         # (loop mut x in p may make p a copy of its own)
         key = lpath_key(int(nodes[n].a))
