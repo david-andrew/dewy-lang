@@ -196,6 +196,12 @@ Open (batched for David, not blocking):
 - Word-at-a-time name hash; paired SSE string equality; transitive
   effect-summary reuse.
 - Broad release inlining-cost adjustment.
+- Fork-based parallel lowering (10-20). Deterministic, byte-identical across
+  1/2/4 workers, but 0.88–1.00× latency, +1–2% instructions, up to 2.8× RSS.
+  Lowering plus initial optimization is only about 13% of a default synthetic
+  build and 31% of a self-build, so there is too little to parallelize.
+- Selective default passes keyed on memory writes: −10% compile, but text
+  kernels regressed 16% and shifted arrays 92%.
 - Medium-record scalar replacement was rejected on whole-compiler instruction
   counts (+1.3–4.5%) alone. **Reopened:** a game kernel stands to gain roughly
   4×; judge it on application workloads plus the speed gate's explicit-accept
