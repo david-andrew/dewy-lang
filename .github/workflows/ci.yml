@@ -57,6 +57,10 @@ jobs:
           python -c 'from tests.core_glsl_driver import ShaderDriver; ShaderDriver().close()'
       - name: Bootstrap the complete compiler from C
         run: python -m tools.compiler.build --bootstrap --output "$RUNNER_TEMP/dewy-core"
+      - name: Check golden cases and the acceptance ladder
+        run: |
+          python -m tools.core cases -n 2 --compiler "$RUNNER_TEMP/dewy-core/bin/dewy-core"
+          python -m tools.core ladder -n 2 --compiler "$RUNNER_TEMP/dewy-core/bin/dewy-core"
       - name: Check language, native/web games, editor and live reload
         env:
           DEWY_CORE_COMPILER: ${{ runner.temp }}/dewy-core/bin/dewy-core
@@ -177,7 +181,9 @@ jobs:
       - name: Execute native and web language smoke checks
         env:
           DEWY_CORE_COMPILER: ${{ runner.temp }}/host-check/dewy-core/bin/dewy-core${{ matrix.suffix }}
-        run: python -m pytest -q -o addopts='' -m core_quick tests/test_core.py
+        run: |
+          python -m tools.cases --quick -n 2 --compiler "$DEWY_CORE_COMPILER"
+          python -m pytest -q -o addopts='' -m core_quick tests/test_core.py
       - name: Exercise native project tests and diagnostics
         env:
           DEWY_CORE_COMPILER: ${{ runner.temp }}/host-check/dewy-core/bin/dewy-core${{ matrix.suffix }}

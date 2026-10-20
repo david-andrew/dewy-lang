@@ -59,6 +59,27 @@ quick suite when a change crosses language/tooling boundaries. CI
 x86-64 and smoke checks on Windows x64, macOS ARM64 and Linux ARM64 using
 cross-built compilers, then uploads `dewy-core-<host>-<commit>` toolchains.
 
+## Golden cases and the acceptance ladder
+
+```sh
+python3 -m tools.core cases [-k WORDS] [--update]   # tests/cases golden files
+python3 -m tools.core ladder [--update-ratchet]     # acceptance-ladder scoreboard
+```
+
+- Language behavior that only needs stdout, an exit code or a diagnostic is a
+  golden case: `tests/cases/<area>/<name>.dewy` with `.out`/`.err` files and an
+  optional header ([format](../tests/cases/README.md)). Pytest
+  (`tests/test_core_*.py`, shared helpers in `tests/support.py`) is for
+  multi-file programs, servers, timing, the editor and IR inspection.
+- `test` runs the cases first (`--quick`: those marked `# quick`), then, for
+  the full gate, the ladder's core versions and its ratchet, then pytest. `-k`
+  and `-n` apply to all of them.
+- The [ladder](../tests/ladder/README.md) builds each program's `design.dewy`
+  and `core.dewy` natively in release mode and compares stdout with
+  `expected.out` from independent Python oracles. Every core version must pass;
+  design programs listed in `ladder.json`'s `design_passing` must keep
+  passing, and `--update-ratchet` adds newly passing ones.
+
 ## Use the current compiler from another project
 
 `tools/dewy` is an executable launcher with the same arguments as the compiler:
