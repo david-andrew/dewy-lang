@@ -16,8 +16,6 @@ import pytest
 class Watch:
     def __init__(self, compiler, source, *, game=False, options=None, filters=()):
         env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
-        if frontend := os.environ.get('DEWY_CORE_FRONTEND'):
-            env['DEWY_CORE_FRONTEND'] = frontend
         env.update(SLOPPY_SOFTWARE='1', SLOPPY_FRAMES='1000000', SLOPPY_EMIT_WORKERS='1')
         if game:
             env['SLOPPY_SCREENSHOT'] = str(source.parent / 'unused.png')

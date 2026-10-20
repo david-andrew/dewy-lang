@@ -324,8 +324,7 @@ launches CodeLLDB with this toolchain's value formatters. See the
 including `DEWY_CORE_LIB` overrides and development-launcher snapshots.
 
 The compiler itself also cross-builds for Windows x64, macOS ARM64 and Linux
-ARM64. The default in-process frontend is independent of the optional legacy
-parser's Linux-only source transport. The `compiler_hosts` check builds those
+ARM64. The `compiler_hosts` check builds those
 three compilers; when QEMU is available, it uses the Linux ARM64 compiler to
 build and execute Dewy programs in default and release modes. This is initial
 host-port coverage. CI also runs a bounded language/native-web, project-test and editor-transport
@@ -597,15 +596,8 @@ native-server integration test in the editor gate above.
 - `bootstrap/frontend.jo` selects only the implementation-language parser for
   the initial bootstrap generation. That compiler then builds the complete
   frontend, which builds itself again.
-- `bootstrap/dewy_parse.c.gz` is the optional legacy syntax-parser seed. Its
-  [regeneration instructions](bootstrap/README.md) and source provenance are
-  included. The parser source still lives in `dewy/bootstrap/parser/`, with
-  the driver at `../tools/sloppy_core/parse.dewy`.
 
-The default frontend reads source snapshots directly, including unsaved editor
-text. It does not need a parser executable, temporary files or a syntax transport.
-For investigation, build with `--legacy-parser` (or reuse one with `--parser`),
-then select it with `DEWY_CORE_FRONTEND=legacy`. There is no automatic fallback.
+The frontend reads source snapshots directly, including unsaved editor text.
 
 The C bootstrap intentionally implements a smaller language. The frontend seam
 allows the main compiler to evolve without implementing every feature twice.

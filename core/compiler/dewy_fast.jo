@@ -1,7 +1,5 @@
-# In-process Dewy syntax frontend. It shares the compact AST projection with the
-# syntax-seed frontend while removing subprocesses, TSV and JSON from parsing.
-# The default frontend; unsupported syntax is an error, never a silent retry
-# through a different parser. DEWY_CORE_FRONTEND=legacy selects the old seed.
+# In-process Dewy syntax frontend. It lexes and parses Dewy source, then uses
+# the compact AST projection in dewy_parse.jo. Unsupported syntax is an error.
 use 'util.jo'
 use 'lex.jo'
 use 'ast.jo'

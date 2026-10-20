@@ -6437,23 +6437,6 @@ def test_core_copy_warning_dewy_syntax(compiler, tmp_path, scope):
     assert 'loop mut' not in checked.stderr
 
 
-@pytest.mark.parametrize('mode', [None, 'invalid'])
-def test_core_frontend_selection(compiler, tmp_path, mode):
-    source = tmp_path / 'main.dewy'
-    source.write_text('main=()=>42')
-    env = dict(os.environ)
-    env.pop('DEWY_CORE_FRONTEND', None)
-    env['DEWY_CORE_PARSER'] = str(tmp_path / 'nonexistent-legacy-parser')
-    if mode is not None:
-        env['DEWY_CORE_FRONTEND'] = mode
-    checked = subprocess.run([compiler, 'check', source], env=env, capture_output=True,
-                             text=True, timeout=10, check=False)
-    if mode is None:
-        assert checked.returncode == 0, checked.stdout + checked.stderr
-    else:
-        assert checked.returncode == 1 and 'DEWY_CORE_FRONTEND' in checked.stderr, checked.stderr
-
-
 def test_core_debug_local_values(compiler, tmp_path):
     if platform.system() != 'Linux' or platform.machine() != 'x86_64' or not shutil.which('gdb'):
         pytest.skip('native Linux x86-64 with GDB required')

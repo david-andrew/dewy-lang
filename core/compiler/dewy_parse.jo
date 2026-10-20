@@ -1,4 +1,4 @@
-# Dewy's syntax tree projected into the pinned core's compact AST.
+# Dewy's syntax tree projected into the compact AST.
 # This is an explicitly limited source-level experiment, not Sloppy syntax
 # accepted under a different extension. Unknown Dewy forms fail at their source.
 use 'util.jo'
@@ -10,7 +10,7 @@ use 'check.jo'
 use 'dewy_tokens.jo'
 
 # Compact tags shared by lexical tokens and syntax nodes. Names are needed
-# only at the legacy parser boundary and for formatter/diagnostic text.
+# only for formatter/diagnostic text.
 enum DewyKind:
     unknown, op, identifier, boolean, metatag, based_string, integer, real,
     quoted, rawquoted, eof, atom, ambiguous, binary, block, combined_assignment,
@@ -48,37 +48,6 @@ dw_kind_name = (kind: DewyKind) -> str:
         prefix: "Prefix"
         string: "String"
         string_chunk: "StringChunk"
-
-dw_kind_from_name = (name: str) -> DewyKind:
-    match name:
-        "Unknown": DewyKind.unknown
-        "op": DewyKind.op
-        "Identifier": DewyKind.identifier
-        "Bool": DewyKind.boolean
-        "Metatag": DewyKind.metatag
-        "BasedString": DewyKind.based_string
-        "Integer": DewyKind.integer
-        "Real": DewyKind.real
-        "quoted": DewyKind.quoted
-        "rawquoted": DewyKind.rawquoted
-        "eof": DewyKind.eof
-        "Atom": DewyKind.atom
-        "Ambiguous": DewyKind.ambiguous
-        "BinOp": DewyKind.binary
-        "Block": DewyKind.block
-        "CombinedAssignmentOp": DewyKind.combined_assignment
-        "Flat": DewyKind.flat
-        "Flow": DewyKind.flow
-        "IString": DewyKind.interpolated_string
-        "InvertedComparisonOp": DewyKind.inverted_comparison
-        "Keyword": DewyKind.keyword
-        "KeywordExpr": DewyKind.keyword_expr
-        "Operator": DewyKind.operator
-        "Postfix": DewyKind.postfix
-        "Prefix": DewyKind.prefix
-        "String": DewyKind.string
-        "StringChunk": DewyKind.string_chunk
-        _: DewyKind.unknown
 
 struct DewySyntax:
     kind: DewyKind
@@ -134,7 +103,7 @@ dw_op = (id: int) -> DewyToken:
     if kind != .binary and kind != .prefix and kind != .postfix and kind != .flat: return .none
     symbol = dewy_syntax[id].symbol
     if symbol != .none: return symbol
-    # The optional legacy parser represents each operator as a child node.
+    # Otherwise the operator is represented as a child node.
     if kind == .binary and dewy_syntax[dw_child(id, 0)].kind == .combined_assignment:
         return dn_token_kind(dewy_syntax[dw_child(dw_child(id, 0), 0)].text + "=")
     dewy_syntax[dw_child(id, 0)].symbol
@@ -1418,69 +1387,3 @@ dw_top_declarations = (id: int) -> int[]:
             return declarations
         if name != "" and dw_op(initial) == .function: return [dw_function(initial, name)]
     [dw_stmt(id, true)]
-
-# Only the optional legacy parser uses this Linux transport. Keep it out of
-# other compiler hosts; their ordinary in-process frontend needs no subprocess.
-dw_legacy_source = (file: int, parser: str) -> (int, str):
-    when TARGET == "linux":
-        # Parse the compiler's source snapshot, including unsaved editor text.
-        # A Linux anonymous file avoids named temporary files and argument-size
-        # limits. The parent keeps it open until the child has finished reading.
-        fd = syscall(319, data(__zstr("dewy-syntax")), 1)  # memfd_create(MFD_CLOEXEC)
-        if fd < 0: fatal(mkpos(file, 0), "could not create the parser's source snapshot")
-        source = files[file].src
-        written = 0
-        loop written < len(source):
-            count = syscall(1, fd, data(source) + written, len(source) - written)
-            if count == -4: continue
-            if count <= 0:
-                syscall(3, fd)
-                fatal(mkpos(file, 0), "could not write the parser's source snapshot")
-            written += count
-        snapshot = "/proc/{syscall(39)}/fd/{fd}"
-        status, output = run_program(parser, [files[file].path, "--snapshot", snapshot])
-        syscall(3, fd)
-        (status, output)
-    else:
-        fatal(mkpos(file, 0), "the legacy syntax parser requires a Linux host; use the default frontend")
-        (1, "")
-
-dewy_parse_file = (file: int) -> int[]:
-    dw_bigint_import = 0
-    parser = env("DEWY_CORE_PARSER") ?? join_path(dir_name(exe_path()), "dewy-parse")
-    if not file_exists(parser): fatal(mkpos(file, 0), "legacy syntax parser is not installed; rebuild with --legacy-parser or use the default frontend")
-    status, output = dw_legacy_source(file, parser)
-    if status != 0:
-        if starts_with(output, "error\t"):
-            fields = split(trim(output), "\t")
-            if fields.len() == 3:
-                payload = parse_json(fields[2])
-                if payload is not JsonError:
-                    fatal(mkpos(file, to_int(fields[1]) ?? 0), payload.as_str() ?? "invalid Dewy syntax")
-        fatal(mkpos(file, 0), "Dewy syntax parser failed (exit {status})")
-    dewy_syntax = [DewySyntax()]
-    stack: int[]
-    root = 0
-    loop line in split(output, "\n"):
-        if line == "": continue
-        fields = split(line, "\t")
-        if fields.len() != 5: fatal(mkpos(file, 0), "invalid syntax transport")
-        depth = to_int(fields[0]) ?? -1
-        start = to_int(fields[2]) ?? -1
-        payload = parse_json(fields[4])
-        if payload is JsonError: fatal(mkpos(file, 0), "invalid syntax payload")
-        text = payload.as_str() ?? ""
-        if depth < 0 or depth > stack.len() or start < 0: fatal(mkpos(file, 0), "invalid syntax location")
-        stack.truncate(depth)
-        id = dewy_syntax.len()
-        kind = dw_kind_from_name(fields[1])
-        dewy_syntax.push(DewySyntax(kind, text, mkpos(file, start), [], dn_syntax_token(text)))
-        if stack.len() > 0: dewy_syntax[stack[stack.len() - 1]].children.push(id)
-        else: root = id
-        stack.push(id)
-    if root == 0: fatal(mkpos(file, 0), "missing syntax root")
-    decls: int[]
-    loop child in dewy_syntax[root].children:
-        loop declaration in dw_top_declarations(child): decls.push(declaration)
-    dewy_syntax = []
-    return dw_finish_declarations(decls)
