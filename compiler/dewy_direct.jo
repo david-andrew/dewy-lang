@@ -285,12 +285,144 @@ dc_declaration = (constant: bool, bare: bool = false) -> int:
     dn_accept(.semi)
     n
 
+# A flow body is a statement block even when its braces are omitted. These
+# functions participate in the enclosing construction transaction: an unknown
+# head, label, declaration or expression retries the reference grammar.
+dc_body = () -> int:
+    dc_depth += 1
+    if dc_depth + dn_depth > 256: return 0
+    pos = mkpos(dn_file, dn_tokens[dn_at].start)
+    braced = dn_accept(.lbrace)
+    n = mk(.block, pos)
+    statements: int[]
+    loop true:
+        if braced and dn_accept(.rbrace): break
+        if dn_tokens[dn_at].kind == .eof: return 0
+        start = dn_at
+        node_start = nodes.len()
+        list_start = lists.len()
+        depth = dc_depth
+        statement = dc_statement()
+        if statement == 0:
+            dn_at = start
+            nodes.truncate(node_start)
+            lists.truncate(list_start)
+            # A failed expression may leave the recursion counter elevated.
+            dc_depth = depth
+            value = dc_expr(0)
+            dc_depth = depth
+            if value == 0: return 0
+            at = mkpos(dn_file, dn_tokens[start].start)
+            if dn_accept(.semi):
+                statement = mk(.assign, at)
+                nodes[statement].op = i32(int(Tok.assign))
+                nodes[statement].a = i32(mk(.hole, at))
+                nodes[statement].b = i32(value)
+            else:
+                statement = mk(.exprstmt, at)
+                nodes[statement].a = i32(value)
+        statements.push(statement)
+        if not braced: break
+    set_list(n, statements)
+    dc_depth -= 1
+    n
+
+dc_iterable = () -> int:
+    opening = dn_tokens[dn_at]
+    bracket = dn_accept(.lbrack)
+    first_pos = mkpos(dn_file, dn_tokens[dn_at].start)
+    first = dc_expr(if bracket: 101 else: 0)
+    if first == 0 or nodes[first].kind == .and_ or nodes[first].kind == .or_: return 0
+    if bracket:
+        if not dn_accept(.range): return 0
+        last = 0
+        if dn_range_bound():
+            last = dc_expr(101)
+            if last == 0: return 0
+        inclusive = dn_accept(.rbrack)
+        if not inclusive and not dn_accept(.rparen): return 0
+        n = mk(.range, first_pos)
+        nodes[n].a = i32(first)
+        nodes[n].b = i32(last)
+        if inclusive: add_flag(n, NF_INCLUSIVE)
+        return n
+    callee = mk(.ident, mkpos(dn_file, opening.start))
+    nodes[callee].name = i32(intern("__dewy_iter"))
+    n = mk(.call, mkpos(dn_file, opening.start))
+    nodes[n].a = i32(callee)
+    set_list(n, [first])
+    n
+
+dc_flow = () -> int:
+    dc_depth += 1
+    if dc_depth + dn_depth > 256: return 0
+    token = dn_take()
+    if token.symbol != .kw_if and token.symbol != .kw_loop: return 0
+    pos = mkpos(dn_file, token.start)
+    n = mk(.if_, pos)
+    head = 0
+    if token.symbol == .kw_loop:
+        binder = dn_tokens[dn_at]
+        head = mk(.lhead, mkpos(dn_file, binder.start))
+        if binder.kind == .identifier and binder.symbol == .none and dn_tokens[dn_at + 1].symbol == .kw_in:
+            dn_at += 2
+            value = mk(.ident, mkpos(dn_file, binder.start))
+            nodes[value].name = dw_value_name(binder.name, nodes[value].pos)
+            set_list(head, [value])
+            iterable = dc_iterable()
+            if iterable == 0: return 0
+            nodes[head].op = 1
+            nodes[head].a = i32(iterable)
+        else:
+            condition = dc_expr(0)
+            if condition == 0 or nodes[condition].kind == .and_ or nodes[condition].kind == .or_: return 0
+            nodes[head].op = 4
+            nodes[head].a = i32(condition)
+    else:
+        condition = dc_expr(0)
+        if condition == 0: return 0
+        nodes[n].a = i32(condition)
+    if not dn_can_start(): return 0
+    body = dc_body()
+    if body == 0: return 0
+    nodes[n].b = i32(body)
+    alternative = 0
+    if dn_accept(.kw_else):
+        if dn_peek() == .kw_if:
+            rest = dc_flow()
+            if rest == 0: return 0
+            alternative = mk(.block, pos)
+            set_list(alternative, [rest])
+        else:
+            alternative = dc_body()
+            if alternative == 0: return 0
+        nodes[n].c = i32(alternative)
+    if head != 0:
+        if alternative != 0:
+            nodes[n].kind = .loopx
+            nodes[n].a = i32(head)
+        else if nodes[head].op == 1:
+            nodes[n].kind = .for_
+            nodes[n].a = nodes[head].a
+            set_list(n, kids(head))
+        else:
+            nodes[n].kind = .while_
+            nodes[n].a = nodes[head].a
+    dc_depth -= 1
+    n
+
 # A brace element is a statement, unlike an argument, parameter or record
 # element. Keep that context at the construction boundary.
 dc_statement = () -> int:
     token = dn_tokens[dn_at]
     pos = mkpos(dn_file, token.start)
     op = token.symbol
+    if op == .kw_if or op == .kw_loop:
+        n = dc_flow()
+        if n == 0: return 0
+        add_flag(n, NF_STMT)
+        dn_accept(.semi)
+        return n
     if op == .kw_return:
         dn_at += 1
         n = mk(.return_, pos)
