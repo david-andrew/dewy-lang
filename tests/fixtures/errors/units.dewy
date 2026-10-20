@@ -1,0 +1,5 @@
+A:type=type of error
+B:type=type of error
+make=(bad:bool):>int64|A|B=>{if bad return A return B}
+main=()=>{let a=make(true) let b=make(false)
+if a is? A {if b is? B return 42} return 1}

@@ -1,0 +1,7 @@
+E:type=(type of error) & [message:string]
+Stop=type of exception
+f=(which:int64):>int64|E|Stop|none=>{if which=?0 return E["bad"] if which=?1 return Stop if which=?2 return none return 42}
+check=(which:int64):>int64=>{let x=f(which) if x is? exception return 42 return x}
+main=()=>{if check(0) not=?42 or check(1) not=?42 or check(2) not=?42 or check(3) not=?42 return 1
+let e=E["x"] if e isnt? error or e isnt? exception return 2
+return 42}

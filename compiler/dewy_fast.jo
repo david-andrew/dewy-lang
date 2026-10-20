@@ -42,7 +42,7 @@ dn_init_words = ():
     dn_isnt_id = intern("isnt")
     dn_in_id = intern("in")
     dn_notin_id = intern("notin")
-    words = ["as", "and", "break", "const", "continue", "else", "from", "import", "if", "in", "let", "loop", "match", "not", "or", "return", "test", "transmute", "xor"]
+    words = ["as", "and", "break", "const", "continue", "else", "from", "import", "if", "in", "let", "loop", "match", "not", "of", "or", "or_throw", "return", "test", "transmute", "xor"]
     loop word in words: intern(word)
     dn_word_tokens = fill(DewyToken.none, names.len())
     loop word in words: dn_word_tokens[intern(word)] = dn_token_kind(word)
@@ -357,6 +357,7 @@ dn_power = (op: DewyToken) -> int:
         function: 30
         returns: 40
         colon: 45
+        kw_or_throw: 48
         kw_as, kw_transmute: 50
         kw_or: 60
         kw_xor: 65
@@ -617,6 +618,8 @@ dn_atom = () -> int:
         bound = dn_expr(101)
         return dn_op_node(.flat, .range_apply, token.start, [0, dots, bound])
     text = dn_payload(token)
+    if text == "type" and dn_accept(.kw_of):
+        return dn_op_node(.prefix, .kw_of, token.start, [0, dn_expr(91)])
     if token.kind == .op: return dn_error(token.start, "expected an expression, found '{text}'")
     dn_node(token.kind, text, token.start, name = token.name)
 
@@ -630,6 +633,10 @@ dn_expr = (minimum: int) -> int:
         if token.kind == .eof: break
         if token.newline and dn_power(op) == 0 and op != .kw_not: break
         if dn_angles > 0 and ((op == .shr or op == .shr_assign or op == .angle_assign) or (op == .gt and not token.space)): break
+        if op == .kw_or_throw and minimum <= 48:
+            dn_at += 1
+            left = dn_op_node(.postfix, .kw_or_throw, pos_off(dewy_syntax[left].pos), [0, left])
+            continue
         if op == .ellipsis and minimum <= 170:
             dn_at += 1
             left = dn_op_node(.postfix, .ellipsis, pos_off(dewy_syntax[left].pos), [0, left])

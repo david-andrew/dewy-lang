@@ -1,3 +1,4 @@
+use 'errors.jo'
 use 'watch.jo'
 use 'frontend.jo'
 # Semantic analysis: modules, scopes, declarations, function instances, statements.
@@ -851,7 +852,9 @@ register_decls = (m: int, decls: int[]):
             if nodes[d].c != 0:
                 loop ai in [0..nkids(int(nodes[d].c))):
                     if name_of(int(nodes[kid(int(nodes[d].c), ai)].name)) == "export": export_decls.push(d)
-        else if k == .struct_: scope_add_module(m, nm, .struct_, d, d)
+        else if k == .struct_:
+            if nominal_ready and nominal_declaration(d): fatal(nodes[d].pos, "nominal types must be declared before function checking; late nominal imports are not yet implemented")
+            scope_add_module(m, nm, .struct_, d, d)
         else if k == .enum_: scope_add_module(m, nm, .enum_, d, d)
         else if k == .typealias: scope_add_module(m, nm, .alias_, d, d)
         else if k == .const_:
@@ -991,12 +994,12 @@ resolve_type = (tn: int) -> int:
         if sk == .alias_:
             targs: int[]
             loop i in [0..nkids(tn)): targs.push(resolve_type(kid(tn, i)))
-            return resolve_alias(int(syms[s].ref), targs, nodes[tn].pos)
+            return nominal_family(resolve_alias(int(syms[s].ref), targs, nodes[tn].pos))
         if sk == .type_:
             if nodes[tn].nlist > 0:
                 if fixed_size_arg(tn): return mk_fixed_checked(int(syms[s].ref), fixed_size(kid(tn, 0)), nodes[tn].pos)
                 fatal(nodes[tn].pos, "type '{name_of(nm)}' takes no type arguments")
-            return int(syms[s].ref)
+            return nominal_family(int(syms[s].ref))
         if sk == .struct_ or sk == .enum_:
             d = int(syms[s].ref)
             ntp = nkids2(d)
@@ -1005,7 +1008,7 @@ resolve_type = (tn: int) -> int:
             if nkids(tn) != ntp: fatal(nodes[tn].pos, "type '{name_of(nm)}' expects {ntp} type argument(s), got {nkids(tn)}")
             targs: int[]
             loop i in [0..ntp): targs.push(resolve_type(kid(tn, i)))
-            return get_struct_inst(d, targs)
+            return nominal_family(get_struct_inst(d, targs))
         h = habit_name(name_of(nm))
         if len(h) > 0: fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type (use {h})")
         fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type")
@@ -1176,12 +1179,19 @@ check_struct_fields = (si: int):
     push_type_params(d, targs)
     if nodes[d].kind == .struct_:
         n = nkids(d)
+        inherited: Field[]
+        parent = nominal_parent.get(int(structs[si].type), 0)
+        if parent != 0:
+            psi = int(types[parent].st)
+            check_struct_fields(psi)
+            loop i in [0..int(structs[psi].nfields)): inherited.push(fields[int(structs[psi].fields) + i])
         structs[si].fields = i32(fields.len())
-        structs[si].nfields = i32(n)
+        structs[si].nfields = i32(n + inherited.len())
+        loop field in inherited: fields.push(field)
         loop i in [0..n): fields.push(Field())
         loop i in [0..n):
             f = kid(d, i)
-            fi = int(structs[si].fields) + i
+            fi = int(structs[si].fields) + inherited.len() + i
             fields[fi].name = nodes[f].name
             fields[fi].defval = nodes[f].b
             if nodes[f].a != 0: fields[fi].type = i32(resolve_type(int(nodes[f].a)))
@@ -1193,7 +1203,7 @@ check_struct_fields = (si: int):
                     else: t = T_INT
                 fields[fi].type = i32(zonk(t))
             else: fatal(nodes[f].pos, "field needs a type")
-            loop k in [0..i):
+            loop k in [0..inherited.len() + i):
                 if fields[int(structs[si].fields) + k].name == nodes[f].name: fatal(nodes[f].pos, "duplicate field '{name_of(int(nodes[f].name))}'")
     else:
         nv = nkids(d)
@@ -3860,6 +3870,7 @@ runtime_fn = (name: str) -> int:
     f
 
 add_universe = ():
+    exception_builtins()
     tys = [("int", T_INT), ("i8", T_I8), ("i16", T_I16), ("i32", T_I32), ("i64", T_INT), ("u8", T_U8), ("byte", T_U8),
         ("u16", T_U16), ("u32", T_U32), ("u64", T_U64), ("f64", T_FLOAT), ("f32", T_F32),
         ("int8", T_I8), ("int16", T_I16), ("int32", T_I32), ("int64", T_INT),
@@ -4187,6 +4198,7 @@ check_program = (main_path: str):
         register_module(i)
         i += 1
     bind_from_imports()
+    prepare_nominals()
     check_build_block()
     # (native programs report crashes as they do panics: lib/std/backtrace.jo)
     if not target_wasm and prelude.get(intern("__crash_install")) != none: modules[mainm].inits.insert(0, synth_call("__crash_install", [], 0))

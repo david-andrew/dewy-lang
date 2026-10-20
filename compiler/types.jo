@@ -703,7 +703,9 @@ layout = (t0: int):
             if off > psize: psize = off
         structs[si].resolving = false
         endless_check(si)
-        structs[si].simple_enum = psize == 0
+        # General unions use address-based tag remapping and narrowing even
+        # when all alternatives are unit records (nominal errors, for example).
+        structs[si].simple_enum = psize == 0 and not structs[si].union_
         poff = align_up(4, pal)
         structs[si].payload_off = i32(poff)
         loop v in [0..int(structs[si].nvariants)):

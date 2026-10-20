@@ -1,0 +1,8 @@
+E:type=type of error & [message:string]
+F:type=type of error
+source=(fail:bool):>int64|E=>{if fail return E["bad"] return 42}
+mid=(fail:bool):>int64|E=>{let n=source(fail) or_throw return n}
+outer=(fail:bool):>int64|E=>mid(fail) or_throw
+main=()=>{let n=outer(false) let e=outer(true) if e is? E {if e.message not=? "bad" return 2} else return 3
+if n is? E return 4
+return n}

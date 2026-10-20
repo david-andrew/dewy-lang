@@ -1,0 +1,10 @@
+read=(path:string):>string|error=>read_text(path) or_throw
+main=()=>{let path="__TEST_IO_PATH__"
+let written=write_text(path "café") if written is? error return 1
+if written not=?5 return 2
+let text=read(path) if text is? error return 3
+if text not=?"café" return 4
+let missing=read_text(path+".missing") if missing isnt? error return 5
+if not write_bytes(path [uint8(255)]) return 6
+let invalid=read_text(path) if invalid isnt? InvalidUtf8 return 7
+return 42}

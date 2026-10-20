@@ -1,0 +1,7 @@
+A:type=[value:int64]
+B:type=[value:string]
+pick=(which:bool):>A|B=>if which A[42] else B["42"]
+main=()=>{let a=pick(true).value let b=pick(false).value
+if a is? string return 1
+if b is? int64 return 2
+return if a=?42 and b=?"42" 42 else 3}

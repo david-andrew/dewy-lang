@@ -1,0 +1,26 @@
+E:type=type of error & [message:string]
+f=(bad:bool):>string|E=>if bad E["bad".repeat(7)] else "ok".repeat(7)
+use=(a:array<string> b:string):>string=>a[0]+b
+work=(bad:bool):>int64|E=>{
+    let outer=["outer".repeat(8)]
+    if true {
+        let inner=[outer ["inner".repeat(8)]]
+        let combined=use(["first".repeat(5)] f(bad) or_throw)
+        let partial=["start".repeat(4) f(bad) or_throw]
+        return 42
+    }
+    return 1
+}
+array_work=(bad:bool):>int64|E=>{
+    let partial=["start".repeat(4) f(bad) or_throw]
+    return 42
+}
+R:type=[first:array<string> second:string]
+record_work=(bad:bool):>int64|E=>{
+    let partial=R[["start".repeat(4)] f(bad) or_throw]
+    return 42
+}
+exercise=()=>{loop i in [0..10) {let a=work(true) let b=work(false) let c=array_work(true) let d=record_work(true) let x=array_work(false) let y=record_work(false)
+if x is? E or y is? E return 5
+if c isnt? E or d isnt? E return 4 if a isnt? E return 1 if b is? E return 2 if b not=?42 return 3} return 42}
+main=()=>{let before=alloc_count() let answer=exercise() return if answer=?42 and before=?alloc_count() 42 else 1}

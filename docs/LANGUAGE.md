@@ -1392,6 +1392,51 @@ write their JSON contents. The inherited non-finite float spellings (`NaN` and
 See [the settings example](../examples/settings.dewy) for defaults,
 record updates and an exact large-ID round trip.
 
+## Errors as values
+
+`type of error` mints a distinct nominal error type. A unit error is written
+with its name; add `& [fields...]` for a payload, constructed like a record.
+`type of exception` and children of minted exception types are also supported,
+including inherited fields. These declarations are currently module-level and
+nongeneric; other nominal parents and general intersections are not yet supported.
+
+```dewy
+Missing:type=type of error
+ParseError:type=type of error & [message:string]
+parse=(text:string):>int64|ParseError=>{
+    let n=to_int(text)
+    if n is? none return ParseError["invalid integer"]
+    return n
+}
+twice=(text:string):>int64|ParseError=>{
+    let n=parse(text) or_throw
+    return n*2
+}
+```
+
+Errors are direct union alternatives. Postfix `or_throw` evaluates its operand
+once, returns an encountered exception, or yields its success value. It binds
+just below `as`. The enclosing function must declare a result type accepting
+every propagated alternative. Early returns clean up pending expressions and
+enclosing scopes. `none` also belongs to `exception`, alongside `error` and
+user-defined descendants. `is? error`, `is? exception`, and tests of individual
+types select family members; parent-typed storage preserves the child's identity
+and payload. Errors use the ordinary named-record formatting.
+A family test on an optional union does not yet narrow an optional exception
+subset in its true branch; handle `none` separately before narrowing that subset.
+
+Member reads on unions forward exception alternatives unchanged, including
+`none`: `person.address.city` has the successful field types plus the encountered
+exceptions. Every ordinary alternative must provide the requested member. A
+narrowed concrete error exposes its payload normally. Arguments do not forward
+implicitly, and assignments through union routes require narrowing first.
+Forwarding method calls are not yet implemented.
+
+`TextError` and `JsonError` belong to `error`. `read_text(path)` returns UTF-8
+text or a file error (including `InvalidUtf8`); `write_text(path text)` returns
+the byte count or a file error. `main` still returns void or an integer exit
+code: handle exceptions there explicitly.
+
 ## Loops, text and optional values
 
 Optional types use `T?`, including generic types such as `array<uint16>?`

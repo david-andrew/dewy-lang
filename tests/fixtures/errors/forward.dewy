@@ -1,0 +1,12 @@
+E:type=type of error & [message:string]
+Address:type=[city:string]
+Person:type=[address:Address|none]
+let calls=0
+load=(which:int64):>Person|E|none=>{calls+=1 if which=?0 return E["missing"] if which=?1 return none if which=?2 return Person[none] return Person[Address["Paris"]]}
+city=(which:int64):>string|E|none=>load(which).address.city
+main=()=>{let e=city(0) let a=city(1) let b=city(2) let c=city(3)
+if e is? E {if e.message not=?"missing" return 1} else return 2
+if a isnt? none or b isnt? none return 3
+if c is? none return 4
+if c is? E return 5
+return if c=?"Paris" and calls=?4 42 else 6}

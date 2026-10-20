@@ -1,0 +1,12 @@
+Base:type=type of error & [message:string]
+Child:type=type of Base & [code:int64]
+Sibling:type=type of Base
+Stop:type=type of exception
+Alias:type=Child
+store=(e:Base):>Base=>e
+stop=():>int64|Stop=>Stop
+propagate=():>int64|Stop=>stop() or_throw
+main=()=>{let e=store(Child["bad" 42])
+if e is? Child {if e.message not=?"bad" or e.code not=?42 return 1} else return 2
+let s=propagate() if s isnt? Stop return 3
+let a:Alias=Child["alias" 42] return a.code}

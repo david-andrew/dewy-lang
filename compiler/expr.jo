@@ -1,3 +1,4 @@
+use 'errors.jo'
 use 'poly_closure.jo'
 # Expression checking: type inference, coercions, overload resolution, generics, lambdas.
 # Nodes are rewritten in place (wrapping moves the old content to a fresh node).
@@ -168,7 +169,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if tk == .opt:
         if fk == .none_lit: return true
         if type_eq(from, int(types[to].elem)): return true
-        if fk == .opt: return type_eq(int(types[from].elem), int(types[to].elem)) or tkind(int(types[from].elem)) == .var
+        if fk == .opt: return can_coerce(0, telem(from), telem(to))
         return can_coerce(n, from, int(types[to].elem))
     if fk == .null_ and (tk == .ptr or tk == .cfn): return true
     if fk == .ptr and tk == .ptr and (to == T_RAWPTR or from == T_RAWPTR): return true
@@ -353,7 +354,19 @@ coerce = (n: int, target: int) -> int:
                 unify(int(types[from].elem), int(types[to].elem))
                 nodes[n].type = i32(to)
                 return n
+            if can_coerce(0, telem(from), telem(to)):
+                source = nodes.len()
+                nodes.push(nodes[n])
+                add_flag(source, NF_CHECKED)
+                pos = nodes[n].pos
+                name = "$optional{n}"
+                yes = bc_block([bc_stmt(bc_ident(name, pos), pos)], pos)
+                no = bc_block([bc_stmt(mk(.none_lit, pos), pos)], pos)
+                nodes[n] = Node(kind = .iflet, pos = pos, a = i32(source), b = i32(yes), c = i32(no), name = i32(intern(name)))
+                check_expr(n, to)
+                return n
             fatal(nodes[n].pos, "type mismatch: expected {dt(to)}, found {dt(from)}")
+
         coerce(n, int(types[to].elem))
         wrap_conv(n, .opt, to)
         return n
@@ -365,6 +378,7 @@ coerce = (n: int, target: int) -> int:
         return n
     if fk == .typeval: fatal(nodes[n].pos, "expected a value of type {dt(to)}, found a type name")
     why = variant_hint(n, to)
+    if fk == .opt and tk != .opt: why = if dewy_at(nodes[n].pos): " (this value may be none; check it with `is?none` before using its value)" else: " (this value may be none; narrow it before using its value)"
     # (shown += c with c from a loop over a string: a character's code)
     if len(why) == 0 and tkind(to) == .str_ and type_eq(prune(from), T_U8): why = " (a string's elements are character codes, numbers: `chr(c)` is the character as text)"
     if fk == .void_: why = void_rec_hint(n)
@@ -1519,6 +1533,8 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         # (f(e) with e a union and an overload of f for each of its members: chosen by what e holds)
         ud = union_dispatch(n, name, decls, args, expected)
         if ud >= 0: return ud
+        if nodes[n].aux2 == -9 and args.len() > 0:
+            fatal(nodes[n].pos, "{dt(ntype(unnamed(args[0])))} has no field '{name_of(name)}' or matching zero-argument member: {last_err}")
         # (x.f() with an x that may be none: the function is there for its value)
         if args.len() > 0 and nodes[unnamed(args[0])].type != 0 and types[prune(ntype(unnamed(args[0])))].kind == .opt:
             at = prune(ntype(unnamed(args[0])))
@@ -5062,6 +5078,7 @@ check_expr = (n: int, expected: int) -> int:
     if k == .array and exk == .opt and (tkind(int(types[ex].elem)) == .array or tkind(int(types[ex].elem)) == .fixed):
         ex = prune(int(types[ex].elem))
         exk = types[ex].kind
+    if k == .propagate: return check_propagate(n, expected)
     if k == .int_lit:
         add_flag(n, NF_LITERAL)
         nodes[n].type = i32(T_INT)
@@ -5210,6 +5227,13 @@ check_expr = (n: int, expected: int) -> int:
         else if sk == .module: t = mk_modval(int(syms[s].ref))
         else if sk == .builtin: fatal(nodes[n].pos, "'{name_of(nm)}' must be called")
         else: fatal(nodes[n].pos, "invalid use of '{name_of(nm)}'")
+        if tkind(t) == .typeval:
+            tt = telem(t)
+            if nominal_parent.has(tt) and tt != error_type:
+                si = int(types[tt].st)
+                check_struct_fields(si)
+                if structs[si].nfields == 0:
+                    return struct_ctor(n, tt, int(structs[si].decl), [], expected)
     else if k == .field:
         a0 = int(nodes[n].a)
         # (c.__peer in a program: a library's own field, which may change or go in any version)
@@ -5236,7 +5260,10 @@ check_expr = (n: int, expected: int) -> int:
                 nodes[n] = Node(kind = .index, pos = nodes[n].pos, a = i32(f), b = nodes[a0].b)
                 return check_expr(n, expected)
         bt = prune(check_expr(int(nodes[n].a), 0))
+        nodes[n].a = i32(last_checked)
         fname = int(nodes[n].name)
+        if (is_union(bt) or tkind(bt) == .opt) and files[pos_file(nodes[n].pos)].is_dewy:
+            return forward_member(n, int(nodes[n].a), bt, expected)
         if ide_sentinel != 0 and fname == ide_sentinel: ide_complete_members(bt)
         bk = types[bt].kind
         if name_of(fname) == "length" and (bk == .array or bk == .fixed or bk == .str_ or is_map_type(bt) or is_dewy_set_type(bt)) and files[pos_file(nodes[n].pos)].is_dewy:
@@ -5369,7 +5396,7 @@ check_expr = (n: int, expected: int) -> int:
                             method = mk(.field, nodes[n].pos)
                             nodes[method].a = nodes[n].a
                             nodes[method].name = i32(fname)
-                            nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
+                            nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method), aux2 = -9)
                             return check_expr(n, expected)
                         fatal(nodes[n].pos, "'{name_of(fname)}' needs arguments: `{receiver_text(int(nodes[n].a))}.{name_of(fname)}(...)`")
                     fatal(nodes[n].pos, "'{name_of(fname)}' is a function: call it, `x.{name_of(fname)}()`")
@@ -6084,13 +6111,15 @@ check_if = (n: int, ex: int) -> int:
     narrow_by(cond, true)
     changes = narrow_changes.len()
     jumps = narrow_jumps.len()
-    t1 = check_block(b, ex, true)
+    branch_expected = ex
+    if nodes[n].aux2 == -8: branch_expected = 0
+    t1 = check_block(b, branch_expected, true)
     if narrow_changes.len() != changes: narrow_returned(changes, jumps, b)
     scope_reset(mark)
     first = narrow_restore(changes)
     narrow_by(cond, false)
     jumps = narrow_jumps.len()
-    t2 = check_block(c, ex, true)
+    t2 = check_block(c, branch_expected, true)
     if narrow_changes.len() != changes: narrow_returned(changes, jumps, c)
     scope_reset(mark)
     narrow_merge(first)
@@ -6110,6 +6139,15 @@ check_if = (n: int, ex: int) -> int:
     if nodes[b].aux == 0 or nodes[c].aux == 0: fatal(nodes[n].pos, "both branches of an if expression need a value")
     va = block_value(b)
     vb = block_value(c)
+    if nodes[n].aux2 == -8:
+        ta = finalize_literal(va)
+        tb = finalize_literal(vb)
+        if nodes[va].kind == .none_lit: ta = T_NONE
+        if nodes[vb].kind == .none_lit: tb = T_NONE
+        result = mk_union([ta, tb])
+        coerce(va, result)
+        coerce(vb, result)
+        return result
     if ex != 0:
         coerce(va, ex)
         coerce(vb, ex)
@@ -7067,6 +7105,21 @@ check_istype = (n: int) -> int:
     at = prune(ntype(int(nodes[n].a)))
     tt = resolve_type(int(nodes[n].b))
     pos = nodes[n].pos
+    # Family annotations denote every descendant, but only alternatives of the
+    # tested value participate. Include none when testing exception itself.
+    if nodes[int(nodes[n].b)].aux != -7 and family_annotation(tt):
+        selected: int[]
+        wanted = value_members(tt)
+        actual = value_members(at)
+        loop member in actual:
+            if wanted.contains(member): selected.push(member)
+        subj = is_subject(n, orig)
+        condition = 0
+        if selected.len() == 0 or selected.len() == actual.len():
+            condition = mk(.bool_lit, pos)
+            if selected.len() > 0: nodes[condition].ival = 1
+        else: condition = members_test(subj, selected, pos)
+        return is_rewritten(n, orig, condition)
     # x is A, x is A | B, where x: (A | B | C)?: x != none and (x is A or x is B)
     if types[at].kind == .opt and is_union(prune(int(types[at].elem))) and types[tt].kind != .none_lit:
         u = prune(int(types[at].elem))
@@ -7090,8 +7143,9 @@ check_istype = (n: int) -> int:
         else if type_eq(tt, int(types[at].elem)): nodes[n].aux = -2
         else: fatal(nodes[int(nodes[n].b)].pos, "a {dt(at)} is either a {dt(int(types[at].elem))} or none, never a {dt(tt)}")
         nodes[n].aux2 = i32(map_presence_fn(int(nodes[n].a)))
-    else if type_eq(at, tt): nodes[n].aux = -3      # (already narrowed to it, say): always true
+    else if type_eq(at, tt) or (is_union(tt) and union_index(tt, at) >= 0): nodes[n].aux = -3      # (already narrowed to it, say): always true
     else: fatal(nodes[n].pos, "{jd(nodes[n].pos, "`is`", "`is?`")} tests which type a union (A | B) or optional value holds; this is always a {dt(at)}")
+
     T_BOOL
 
 # what `x is ...` tests again: x itself (a variable or field path), or else its value put in a
@@ -7118,8 +7172,7 @@ sub_members = (u: int, t: int) -> int[]:
         return out
     if not is_union(t): return out
     loop m in union_members(t):
-        if union_index(u, m) < 0: return []
-        out.push(m)
+        if union_index(u, m) >= 0: out.push(m)
     out
 
 # subj is ms[0] or subj is ms[1] ... (subj: a variable or field path, copied for each test)

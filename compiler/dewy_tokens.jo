@@ -16,7 +16,7 @@ enum DewyToken:
     dot_not_ge, dot_not_le, dot_not_eq, dot_not_gt, dot_not_lt, dot_ge, dot_le, dot_floor_assign,
     dot_plus_assign, dot_minus_assign, dot_star_assign, dot_slash_assign, dot_percent_assign, dot_power_assign, dot_floor, dot_eq,
     dot_gt, dot_lt, dot_plus, dot_minus, dot_star, dot_slash, dot_percent, dot_caret,
-    multiply_apply, call, broadcast_call, index, type_apply, range_apply, statement_end
+    multiply_apply, call, broadcast_call, index, type_apply, range_apply, statement_end, kw_of, kw_or_throw
 
 dn_single_token = (c: u8) -> DewyToken:
     match c:
@@ -168,6 +168,8 @@ dn_token_kind = (text: str) -> DewyToken:
         'o':
             match text:
                 "or": return .kw_or
+                "of": return .kw_of
+                "or_throw": return .kw_or_throw
         'r':
             match text:
                 "return": return .kw_return
@@ -245,6 +247,8 @@ dn_token_text = (token: DewyToken) -> str:
         isnt_type: "isnt?"
         contains: "in?"
         not_contains: "notin?"
+        kw_of: "of"
+        kw_or_throw: "or_throw"
         kw_let: "let"
         kw_const: "const"
         kw_return: "return"

@@ -688,6 +688,10 @@ dw_expr = (id: int) -> int:
     # Leaves cannot be operators or include calls. Handle them before asking
     # compound-expression helpers to unwrap and classify the same node again.
     op = dw_op(id)
+    if op == .kw_or_throw:
+        n = mk(.propagate, pos)
+        nodes[n].a = i32(dw_expr(dw_child(id, 1)))
+        return n
     if op == .range_apply: return dw_range_value(dw_iterable(id, true, true))
     if dn_token_call(op) and dw_is_include(id): return dw_include(id)
     if k == .block:
@@ -1015,6 +1019,23 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         nodes[n].b = i32(dw_function(initial, ""))
         if annotation != 0: nodes[n].a = i32(dw_type(annotation))
         if constant: add_flag(n, NF_RDONLY)
+        return n
+    mint = dw_grouped(initial)
+    structure = 0
+    if dw_op(mint) == .amp:
+        structure = dw_unwrap(dw_child(mint, 2))
+        mint = dw_grouped(dw_child(mint, 1))
+    if dw_op(mint) == .kw_of:
+        if not top: return dw_fail(id, "local nominal type declarations")
+        if annotation != 0 and dw_name(annotation) != "type": return dw_fail(id, "a nominal declaration with a non-type annotation")
+        n = mk(.struct_, dewy_syntax[id].pos)
+        nodes[n].name = i32(intern(name))
+        nodes[n].a = i32(dw_type(dw_child(mint, 1)))
+        fields: int[]
+        if structure != 0:
+            if dewy_syntax[structure].text != "[]:": return dw_fail(structure, "this nominal intersection; expected record fields")
+            loop field in dewy_syntax[structure].children: fields.push(dw_param(field, .vardecl))
+        set_list(n, fields)
         return n
     if annotation != 0 and dw_name(annotation) == "type":
         if initial == 0: return dw_fail(id, "a type declaration without a definition")
@@ -1434,6 +1455,9 @@ dw_top_declarations = (id: int) -> int[]:
     if dw_op(declaration) == .assign:
         name = dw_name(dw_child(declaration, 1))
         initial = dw_grouped(dw_child(declaration, 2))
+        mint = initial
+        if dw_op(mint) == .amp: mint = dw_grouped(dw_child(mint, 1))
+        if name != "" and dw_op(mint) == .kw_of: return [dw_declare(declaration, false, true)]
         if name != "" and dw_op(initial) == .amp:
             if name == "main": return [dw_fail(id, "an overloaded entry point")]
             declarations: int[]

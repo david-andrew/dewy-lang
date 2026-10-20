@@ -1,0 +1,5 @@
+Unit:type=type of error
+Payload:type=type of error & [message:string code:int64=42]
+make=():>int64|Payload=>Payload["oops"]
+main=()=>{let unit=Unit let error=make() let a="{unit}" let b="{error}"
+return if a.contains("Unit") and b.contains("Payload") and b.contains("oops") and b.contains("42") 42 else 1}

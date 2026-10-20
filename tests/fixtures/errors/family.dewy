@@ -1,0 +1,8 @@
+A:type=type of error & [message:string]
+B:type=type of error
+pass_error=(e:error):>error=>e
+source=(bad:bool):>int64|error=>{if bad return pass_error(A["bad"]) return 42}
+main=()=>{let e=source(true) let n=source(false)
+if e is? error {if e is? A {if e.message not=? "bad" return 1} else return 2} else return 3
+if n is? error return 4
+return n}

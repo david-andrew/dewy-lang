@@ -1,0 +1,3 @@
+f=(bad:bool):>int64|none=>if bad none else 42
+g=(bad:bool):>int64|none=>{let n=f(bad) or_throw return n}
+main=()=>{let a=g(true) let b=g(false) if a isnt? none return 1 if b is? none return 2 return b}

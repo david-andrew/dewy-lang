@@ -1,0 +1,10 @@
+E:type=type of error
+only=():>E=>E
+all=():>int64|E=>only() or_throw
+plain=():>int64=>21 or_throw * 2
+choose=(which:int64):>int64|string|E=>{if which=?0 return E if which=?1 return 42 return "ok"}
+pass_value=(which:int64):>int64|string|E=>choose(which) or_throw
+main=()=>{let e=all() if e isnt? E return 1
+let a=pass_value(1) if a is? E return 2 if a is? string return 3
+let b=pass_value(2) if b is? E return 4 if b is? int64 return 5
+return if a=?42 and b=?"ok" and plain()=?42 42 else 6}

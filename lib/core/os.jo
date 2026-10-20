@@ -96,11 +96,13 @@ __zstr = (s: str) -> str:
 file_error = () -> str: __file_err
 
 __file_err = ""
+__file_error_code = 0
 
 # (a system call's result: false, with its error kept, when it failed: -errno, as Linux's)
 __ferr = (r: int) -> bool:
     if r >= 0: return true
     e = -r
+    __file_error_code = e
     m = "error {e}"
     if e == 2: m = "no such file or directory"
     else if e == 13: m = "permission denied"
