@@ -1,6 +1,6 @@
 # Exact fractions over BigInt. Reduction strategies are adapted from the old
 # library/rational.dewy; representation and error handling use the compact core.
-from bigint import BigInt, bigint, parse_bigint, _ratio_float_bits
+from bigint import BigInt, bigint, parse_bigint, to_int64, _ratio_float_bits
 
 Rational:type=[numerator:BigInt denominator:BigInt=bigint(1)]
 
@@ -161,3 +161,10 @@ __mod__ = ((a:Rational b:Rational):>Rational=>_mod(a b))
     & ((a:uint64 b:Rational):>Rational=>_mod(rational(a) b))
 
 __pow__=(base:Rational exponent:int64):>Rational=>pow(base exponent)
+
+# Whole nanoseconds, rounded down: sleep's system boundary.
+_whole_nanoseconds=(seconds:Rational):>int64=>{
+    let count=floor(seconds*1000000000)
+    if count <? 0 return 0
+    return to_int64(count) ?? 9223372036854775807
+}

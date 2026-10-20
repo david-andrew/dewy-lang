@@ -517,8 +517,8 @@ preserve dimensions. Ordinary conversions cannot add or remove a dimension;
 `transmute` can explicitly change it while preserving the numeric representation.
 Formatting currently prints the canonical number without a unit suffix.
 Display-unit selection, offset units such as Celsius, and calendar durations
-remain open. Fixed-point radians/trigonometry and quantity-aware `sleep` remain
-unimplemented.
+remain open. `sleep` takes a time, `sleep(300ms)`, and waits whole nanoseconds;
+a plain number is rejected. Fixed-point radians/trigonometry remain unimplemented.
 
 ## Exact large integers
 

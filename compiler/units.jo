@@ -415,3 +415,79 @@ quantity_compound = (s: int, target: int) -> bool:
     check_expr(right, target)
     nodes[s].b = i32(quantity_number(coerce(last_checked, target)))
     true
+
+bundled_rational_type = (t0: int) -> bool:
+    t = prune(t0)
+    if types[t].kind != .struct_: return false
+    si = int(types[t].st)
+    d = int(structs[si].decl)
+    d != 0 and structs[si].name == "Rational" and files[pos_file(nodes[d].pos)].path == lib_dir + "/rational.dewy"
+
+base_dimension = (i: int) -> int:
+    powers = fill(0, 8)
+    powers[i] = 1
+    intern_dimension(powers)
+
+# (n calls the runtime function fname with the checked arguments args)
+runtime_call = (n: int, fname: str, args: int[], result: int) -> int:
+    nodes[n].kind = .call
+    nodes[n].aux = 0
+    set_list(n, args)
+    nodes[n].sym = i32(runtime_fn(fname))
+    nodes[n].type = i32(result)
+    add_flag(n, NF_CHECKED)
+    last_checked = n
+    result
+
+# (the bundled rational module's helper fname applied to the checked value a, at n)
+rational_helper_call = (n: int, fname: str, a: int, expected: int) -> int:
+    pos = nodes[n].pos
+    ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
+    c = mk(.call, pos)
+    nodes[c].a = i32(bc_field(bc_ident("$dewy_rational", pos), fname, pos))
+    set_list(c, [a])
+    t = check_expr(c, expected)
+    nodes[n] = nodes[last_checked]
+    last_checked = n
+    t
+
+# (the checked number a as a float64)
+quantity_float = (a: int) -> int:
+    t = prune(ntype(a))
+    if type_eq(t, T_FLOAT): return a
+    if not is_float(t) and not is_int(t): return 0
+    c = mk(.conv, nodes[a].pos)
+    nodes[c].a = i32(a)
+    nodes[c].aux = i32(int(CV.int2float))
+    if is_float(t): nodes[c].aux = i32(int(CV.float_))
+    nodes[c].type = i32(T_FLOAT)
+    add_flag(c, NF_CHECKED)
+    c
+
+# Dewy's sleep takes a quantity (physical-quantities.md): a time, converted to whole
+# nanoseconds. a is the checked argument; 0 leaves the call to the library.
+dewy_quantity_call = (n: int, name: int, a: int, expected: int) -> int:
+    fname = name_of(name)
+    t = prune(ntype(a))
+    base = quantity_base(t)
+    number = quantity_number(a)
+    if fname == "sleep":
+        if not is_quantity(t) or quantity_dimension(t) != base_dimension(0):
+            fatal(nodes[a].pos, "sleep takes a time, such as `sleep(300ms)` or `sleep(2s)` (found {dt(t)})")
+        if target_wasm: no_web_check(int(syms[lookup(name)].decl), nodes[n].pos)
+        if bundled_rational_type(base):
+            ns = mk(.call, nodes[n].pos)
+            rational_helper_call(ns, "_whole_nanoseconds", number, T_INT)
+            return runtime_call(n, "__sleep_ns", [coerce(ns, T_INT)], T_VOID)
+        if is_int(base):
+            whole = mk(.conv, nodes[a].pos)
+            nodes[whole].a = i32(number)
+            nodes[whole].aux = i32(int(CV.int_))
+            nodes[whole].type = i32(T_INT)
+            add_flag(whole, NF_CHECKED)
+            ns = bc_bin(.star, whole, bc_int(1000000000, nodes[a].pos), nodes[a].pos)
+            check_expr(ns, T_INT)
+            return runtime_call(n, "__sleep_ns", [last_checked], T_VOID)
+        if is_float(base): return runtime_call(n, "sleep", [quantity_float(number)], T_VOID)
+        fatal(nodes[a].pos, "sleep takes a time counted in an integer, Rational or float (found {dt(t)})")
+    0

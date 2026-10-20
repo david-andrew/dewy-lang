@@ -55,7 +55,7 @@ main=(args:array<string>):>int64=>{
                 return 5
             }
         }
-        sleep(0.001)
+        sleep(1ms)
     }
     return 6
 }

@@ -467,6 +467,16 @@ time_ns = () -> int:
         syscall(228, 1, &ts)
         ts.0 * 1000000000 + ts.1
 
+# (Dewy's sleep: a time quantity, in whole nanoseconds here)
+__sleep_ns = (ns: int):
+    __out_flush()
+    if ns <= 0: return
+    when TARGET == "windows":
+        __w32_sleep(f64(ns) * 1e-9)
+    else when TARGET != "wasm":
+        ts = (ns / 1000000000, ns % 1000000000)
+        syscall(35, &ts, 0)
+
 @no_web("does nothing in a web page (a page cannot pause: count the time in update(dt), or use every())")
 sleep = (seconds: f64):
     __out_flush()
