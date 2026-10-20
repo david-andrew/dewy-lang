@@ -2447,7 +2447,7 @@ collect_in = (table: {int: int}, name: int, out: mut int[]):
     o = s
     loop o != 0:
         d = int(syms[o].decl)
-        if syms[o].surface != 0 and (syms[o].surface == 1) != caller_dewy(): surface_hidden.push(d)
+        if not surface_sees(o, caller_dewy()): surface_hidden.push(d)
         else if not out.contains(d): out.push(d)
         o = int(syms[o].next)
 
@@ -2488,6 +2488,9 @@ dewy_surface = (name: int, decl: int) -> int:
     t = int(nodes[kid(decl, 0)].a)
     if t != 0 and nodes[t].kind == .tname and name_of(int(nodes[t].name)) == "str": return 2
     0
+
+# (does code in Dewy (dewy) or Jo see the library declaration of symbol o? see dewy_surface)
+surface_sees = (o: int, dewy: bool) -> bool: syms[o].surface == 0 or (syms[o].surface == 1) == dewy
 
 # (is the code being checked Dewy's? the library's own code is Jo)
 caller_dewy = () -> bool:

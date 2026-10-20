@@ -955,6 +955,17 @@ ide_sym_detail = (s: int) -> (int, str):
     if sk == .module: return (IK_MODULE, "module")
     (IK_FN, "builtin")
 
+# (the symbol to offer for s: the first of its overloads the document's language can call, or
+# 0 when none can, as for the Jo library's spellings in a Dewy file; the checker's surface_sees)
+ide_offered = (s: int) -> int:
+    if syms[s].kind != .fns: return s
+    dewy = ends_with(ide_doc, ".dewy")
+    o = s
+    loop o != 0:
+        if surface_sees(o, dewy): return o
+        o = int(syms[o].next)
+    0
+
 ide_completion_name = (nm: int, s: int) -> str:
     if ends_with(ide_doc, ".dewy") and syms[s].kind == .type_:
         return ide_type_str(int(syms[s].ref))
@@ -971,6 +982,7 @@ ide_complete_names = ():
         nms = name_of(nm)
         if len(nms) == 0 or not is_ident_start(nms[0]): continue
         s = lookup(nm)
+        if s != 0: s = ide_offered(s)
         if s == 0: continue
         if ends_with(ide_doc, ".dewy") and syms[s].kind == .type_: continue
         kd = ide_sym_detail(s)
@@ -995,8 +1007,10 @@ ide_complete_module = (m: int):
         if starts_with(nms, "__"): continue
         d = int(syms[s].decl)
         if modules[m].is_prelude and (d == 0 or int(nodes[d].mod) != m): continue
-        kd = ide_sym_detail(s)
-        ide_emit("C\t{ide_esc(ide_completion_name(nm, s))}\t{kd.0}\t{ide_esc(kd.1)}")
+        o = ide_offered(s)
+        if o == 0: continue
+        kd = ide_sym_detail(o)
+        ide_emit("C\t{ide_esc(ide_completion_name(nm, o))}\t{kd.0}\t{ide_esc(kd.1)}")
     ide_flush()
     stop(0)
 
@@ -1059,7 +1073,7 @@ ide_complete_members = (t0: int):
         if s == 0: s = module_lookup(-1, nm)
         loop s != 0:
             d = int(syms[s].decl)
-            if syms[s].kind == .fns and d != 0 and nkids(d) > 0:
+            if syms[s].kind == .fns and d != 0 and nkids(d) > 0 and surface_sees(s, ends_with(ide_doc, ".dewy")):
                 sig = fn_sig(d)
                 binds = fill(0, int(sig.ntp))
                 if match_type(sig.params[0], t, binds, 0) >= 0:
