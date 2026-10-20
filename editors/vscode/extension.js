@@ -1,4 +1,5 @@
-// Dewy editor integration and shared shell-style debugger argument parsing.
+// Dewy editor integration: the language client, debugging, run and test commands, and
+// shell-style splitting of program arguments typed for a debug session.
 
 let lastArguments = '';
 
@@ -35,6 +36,7 @@ function splitArguments(line) {
 
 function activate(context) {
     const vscode = require('vscode');
+    require('./compiler').setExtensionPath(context.extensionPath);
     require('./core-client').activate(context, vscode);
     require('./core-debug').activate(context, vscode, splitArguments);
     require('./core-test').activate(context, vscode);
@@ -51,22 +53,6 @@ function activate(context) {
         lastArguments = typed;
         return typed;
     }));
-    const resolver = {
-        resolveDebugConfigurationWithSubstitutedVariables(folder, configuration) {
-            if (typeof configuration.args === 'string') {
-                try {
-                    configuration.args = splitArguments(configuration.args);
-                } catch (error) {
-                    vscode.window.showErrorMessage(error.message);
-                    return undefined;
-                }
-            }
-            return configuration;
-        },
-    };
-    for (const type of ['lldb', 'cppdbg']) {
-        context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider(type, resolver));
-    }
 }
 
 function deactivate() { require('./core-client').deactivate(); }

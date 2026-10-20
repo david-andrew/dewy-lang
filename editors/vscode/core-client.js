@@ -1,6 +1,11 @@
 // Adapted from Sloppy's dependency-free LSP client at 235e19a.
 // Copyright (c) 2026 David Samson. MIT; see THIRD_PARTY_NOTICES.md.
 const cp = require('child_process');
+const { compilerFor, processCommand } = require('./compiler');
+
+// Semantic token types and modifiers, in the order of the server's legend.
+const tokenTypes = ['namespace', 'type', 'struct', 'enum', 'parameter', 'variable', 'property', 'enumMember', 'function', 'method'];
+const tokenModifiers = ['declaration', 'readonly', 'defaultLibrary'];
 
 // Content-Length framed JSON-RPC over the compiler's standard input/output.
 class Connection {
@@ -12,7 +17,7 @@ class Connection {
         this.ready = false;
         this.notification = notification;
         this.exited = exited;
-        this.proc = cp.spawn(command, ['lsp'], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+        this.proc = cp.spawn(...processCommand(command, ['lsp'], { cwd, stdio: ['pipe', 'pipe', 'pipe'] }));
         this.proc.stdout.on('data', (chunk) => this.receive(chunk));
         this.proc.stderr.on('data', (chunk) => output.append(chunk.toString()));
         this.proc.stdin.on('error', (error) => output.appendLine(error.message));
@@ -48,7 +53,7 @@ class Connection {
                 const pending = this.pending.get(message.id);
                 if (!pending) continue;
                 this.pending.delete(message.id);
-                pending.resolve(message.error ? null : message.result);
+                pending.resolve(message.error ? null : message.result, message.error);
             } else if (message.method) this.notification(message.method, message.params);
         }
     }
@@ -62,16 +67,19 @@ class Connection {
 
     notify(method, params) { this.send({ jsonrpc: '2.0', method, params }); }
 
-    request(method, params, token) {
+    // The result, or null (no server, cancelled, failed). With errors, a failure the server
+    // explains (a rename it refuses) rejects with its message instead.
+    request(method, params, token, errors = false) {
         if (this.closed || token?.isCancellationRequested) return Promise.resolve(null);
         const id = this.nextId++;
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             let cancellation;
-            const done = (value) => {
+            const done = (value, error) => {
                 clearTimeout(timer);
                 cancellation?.dispose();
                 this.pending.delete(id);
-                resolve(value);
+                if (error && errors) reject(new Error(error.message));
+                else resolve(value);
             };
             const timer = setTimeout(() => done(null), 10000);
             timer.unref();
@@ -105,6 +113,17 @@ function activate(context, vscode) {
     const position = (p) => new vscode.Position(p.line, p.character);
     const range = (r) => new vscode.Range(position(r.start), position(r.end));
     const location = (l) => new vscode.Location(vscode.Uri.parse(l.uri), range(l.range));
+    const edit = (workspaceEdit) => {
+        const out = new vscode.WorkspaceEdit();
+        for (const [uri, edits] of Object.entries(workspaceEdit?.changes || {})) {
+            for (const item of edits) out.replace(vscode.Uri.parse(uri), range(item.range), item.newText);
+        }
+        return out;
+    };
+    const lspRange = (r) => ({ start: { line: r.start.line, character: r.start.character },
+        end: { line: r.end.line, character: r.end.character } });
+    // (the server checked again: types, hints and what names are may have changed)
+    const results = new vscode.EventEmitter();
     const symbol = (item) => {
         const value = new vscode.DocumentSymbol(item.name, item.detail || '', item.kind - 1,
             range(item.range), range(item.selectionRange));
@@ -123,9 +142,12 @@ function activate(context, vscode) {
     function start() {
         clearTimeout(restartTimer);
         if (disposed || client || !vscode.workspace.isTrusted) return;
-        const command = vscode.workspace.getConfiguration('dewy.core').get('path');
-        if (!command) return; // Opt-in: the new compiler supports a growing subset.
         const folders = (vscode.workspace.workspaceFolders || []).filter((f) => f.uri.scheme === 'file');
+        const command = compilerFor(vscode, folders[0]?.uri);
+        if (!command) {
+            output.appendLine('No Dewy compiler: set dewy.core.path, or install a platform build of the extension.');
+            return;
+        }
         const conn = new Connection(command, folders[0]?.uri.fsPath, output, (method, params) => {
             if (client !== conn || method !== 'textDocument/publishDiagnostics') return;
             const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === params.uri);
@@ -135,6 +157,7 @@ function activate(context, vscode) {
                 diag.source = 'dewy-core';
                 return diag;
             }));
+            results.fire();
         }, (ran) => {
             if (client !== conn) return;
             client = null;
@@ -155,6 +178,7 @@ function activate(context, vscode) {
             conn.notify('initialized', {});
             conn.ready = true;
             for (const doc of vscode.workspace.textDocuments) open(doc);
+            results.fire();
         });
     }
 
@@ -174,7 +198,7 @@ function activate(context, vscode) {
         ready()?.notify('workspace/didChangeWatchedFiles', { changes: [{ uri: uri.toString(), type }] });
     };
     const selector = { language: 'dewy', scheme: 'file' };
-    context.subscriptions.push(output, diagnostics, watcher,
+    context.subscriptions.push(output, diagnostics, watcher, results,
         watcher.onDidCreate(changed(1)), watcher.onDidChange(changed(2)), watcher.onDidDelete(changed(3)),
         vscode.workspace.onDidOpenTextDocument(open),
         vscode.workspace.onDidChangeTextDocument((event) => {
@@ -247,10 +271,106 @@ function activate(context, vscode) {
                     completion.sortText = item.sortText;
                     completion.filterText = item.filterText;
                     completion.insertText = item.insertText;
+                    if (item.textEdit) {
+                        completion.range = range(item.textEdit.range);
+                        completion.insertText = item.textEdit.newText;
+                    }
+                    if (item.command) completion.command = item.command;
                     return completion;
                 }), result.isIncomplete || false);
             },
-        }, '.'),
+        }, '.', '$', '/', '"'),
+        vscode.languages.registerRenameProvider(selector, {
+            async prepareRename(doc, pos, token) {
+                if (!ready()) throw new Error('The Dewy language server is not running.');
+                const result = await ready().request('textDocument/prepareRename', at(doc, pos), token, true);
+                return result ? range(result) : null;
+            },
+            async provideRenameEdits(doc, pos, newName, token) {
+                if (!ready()) return null;
+                const result = await ready().request('textDocument/rename', { ...at(doc, pos), newName }, token, true);
+                return result ? edit(result) : null;
+            },
+        }),
+        vscode.languages.registerSignatureHelpProvider(selector, {
+            async provideSignatureHelp(doc, pos, token) {
+                const result = await ask('textDocument/signatureHelp', at(doc, pos), token);
+                if (!result?.signatures?.length) return null;
+                const help = new vscode.SignatureHelp();
+                help.signatures = result.signatures.map((item) => {
+                    const documentation = item.documentation?.value ?? item.documentation;
+                    const signature = new vscode.SignatureInformation(item.label,
+                        documentation ? new vscode.MarkdownString(documentation) : undefined);
+                    signature.parameters = (item.parameters || []).map((p) => new vscode.ParameterInformation(p.label));
+                    return signature;
+                });
+                help.activeSignature = result.activeSignature || 0;
+                help.activeParameter = result.activeParameter || 0;
+                return help;
+            },
+        }, { triggerCharacters: ['('], retriggerCharacters: [' ', ')', '='] }),
+        vscode.languages.registerInlayHintsProvider(selector, {
+            onDidChangeInlayHints: results.event,
+            async provideInlayHints(doc, visible, token) {
+                const version = doc.version;
+                const result = await ask('textDocument/inlayHint', { textDocument: document(doc), range: lspRange(visible) }, token);
+                if (!result || doc.version !== version) return null;
+                return result.map((item) => {
+                    const hint = new vscode.InlayHint(position(item.position), item.label, item.kind === 2 ? 2 : 1);
+                    hint.paddingLeft = !!item.paddingLeft;
+                    return hint;
+                });
+            },
+        }),
+        vscode.languages.registerDocumentSemanticTokensProvider(selector, {
+            onDidChangeSemanticTokens: results.event,
+            async provideDocumentSemanticTokens(doc, token) {
+                const version = doc.version;
+                const result = await ask('textDocument/semanticTokens/full', { textDocument: document(doc) }, token);
+                if (!result?.data || doc.version !== version) return null;
+                return new vscode.SemanticTokens(new Uint32Array(result.data));
+            },
+        }, new vscode.SemanticTokensLegend(tokenTypes, tokenModifiers)),
+        vscode.languages.registerCodeActionsProvider(selector, {
+            async provideCodeActions(doc, wanted, context, token) {
+                const ours = context.diagnostics.filter((d) => d.source === 'dewy-core');
+                if (ours.length === 0) return [];
+                const version = doc.version;
+                const result = await ask('textDocument/codeAction', {
+                    textDocument: document(doc), range: lspRange(wanted),
+                    context: { diagnostics: ours.map((d) => ({ range: lspRange(d.range), message: d.message,
+                        severity: d.severity + 1, source: d.source })) },
+                }, token);
+                if (!result || doc.version !== version) return [];
+                return result.map((item) => {
+                    const action = new vscode.CodeAction(item.title, vscode.CodeActionKind.QuickFix);
+                    action.edit = edit(item.edit);
+                    action.isPreferred = !!item.isPreferred;
+                    const fixes = (item.diagnostics || []).map((d) => d.message);
+                    action.diagnostics = ours.filter((d) => fixes.includes(d.message));
+                    return action;
+                });
+            },
+        }, { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }),
+        vscode.languages.registerWorkspaceSymbolProvider({
+            async provideWorkspaceSymbols(query, token) {
+                const result = await ask('workspace/symbol', { query }, token);
+                return (result || []).map((item) => new vscode.SymbolInformation(item.name, item.kind - 1,
+                    item.containerName || '', location(item.location)));
+            },
+        }),
+        vscode.languages.registerCodeLensProvider(selector, {
+            onDidChangeCodeLenses: results.event,
+            async provideCodeLenses(doc, token) {
+                const version = doc.version;
+                const result = await ask('textDocument/codeLens', { textDocument: document(doc) }, token);
+                if (!result || doc.version !== version) return null;
+                return result.map((item) => new vscode.CodeLens(range(item.range), {
+                    title: item.command.title, command: item.command.command,
+                    arguments: (item.command.arguments || []).map((value, index) => index === 0 ? vscode.Uri.parse(value) : value),
+                }));
+            },
+        }),
         vscode.commands.registerCommand('dewy.core.restartServer', restart),
         vscode.workspace.onDidChangeConfiguration((event) => {
             if (event.affectsConfiguration('dewy.core.path')) restart();

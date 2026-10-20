@@ -4,6 +4,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const cp = require('node:child_process');
 const [extension, compiler, directory] = process.argv.slice(2);
+// Discovery must not find a compiler installed on this machine: only the configured one.
+process.env.HOME = process.env.USERPROFILE = directory;
+process.env.PATH = (process.env.PATH || '').split(path.delimiter)
+    .filter((d) => !['dewy-core', 'dewy-core.exe', 'dewy-core.cmd'].some((n) => fs.existsSync(path.join(d, n))))
+    .join(path.delimiter);
 const compilerLink = path.join(directory, 'compiler with spaces');
 fs.symlinkSync(compiler, compilerLink);
 const source = path.join(directory, 'tests & $literal.dewy');
@@ -89,6 +94,16 @@ const vscode = {
     await commands.get('dewy.core.testWatch')();
     assert.deepEqual(tasks.at(-1).execution.args, ['test', '--watch', source]);
     assert.match(tasks.at(-1).name, /Watch tests/);
+    // Code lenses name the file and one test; the run command runs the program.
+    await commands.get('dewy.core.runTest')(document.uri, 'saved version');
+    assert.equal(results.at(-1).status, 0, results.at(-1).stderr);
+    assert.deepEqual(tasks.at(-1).execution.args, ['test', source, 'saved version']);
+    assert.match(results.at(-1).stdout, /test saved version .*ok/);
+    body = 'main=():>int64=>{\n    printl("ran")\n    return 0\n}';
+    await commands.get('dewy.core.run')(document.uri);
+    assert.deepEqual(tasks.at(-1).execution.args, ['run', source]);
+    assert.equal(tasks.at(-1).group, undefined);
+    assert.equal(results.at(-1).stdout.trim(), 'ran');
     body = 'test "fails" { assert(false) }\ntest "still runs" { assert(true) }';
     await run();
     assert.notEqual(results.at(-1).status, 0);

@@ -5,6 +5,11 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const [extension, compiler, directory] = process.argv.slice(2);
 const { splitArguments } = require(path.join(path.dirname(extension), 'extension.js'));
+// Discovery must not find a compiler installed on this machine: only the configured one.
+process.env.HOME = process.env.USERPROFILE = directory;
+process.env.PATH = (process.env.PATH || '').split(path.delimiter)
+    .filter((d) => !['dewy-core', 'dewy-core.exe', 'dewy-core.cmd'].some((n) => fs.existsSync(path.join(d, n))))
+    .join(path.delimiter);
 const source = path.join(directory, 'source with spaces.dewy');
 const compilerLink = path.join(directory, 'compiler with spaces');
 fs.symlinkSync(compiler, compilerLink);

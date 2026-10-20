@@ -5,7 +5,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { promisify } = require('node:util');
-const execFile = promisify(cp.execFile);
+const run = promisify(cp.execFile);
+const { compilerFor, processCommand, missing } = require('./compiler');
+const execFile = (command, args, options) => run(...processCommand(command, args, options));
 
 function activate(context, vscode, splitArguments) {
     const output = vscode.window.createOutputChannel('Dewy Core Debug');
@@ -31,8 +33,8 @@ function activate(context, vscode, splitArguments) {
             try {
                 if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace before debugging.');
                 if (config.request !== 'launch') throw new Error('The core debugger supports launching a Dewy source file.');
-                const compiler = vscode.workspace.getConfiguration('dewy', folder?.uri).get('core.path', '').trim();
-                if (!compiler) throw new Error('Set dewy.core.path to the compiler or checkout tools/dewy launcher.');
+                const compiler = compilerFor(vscode, folder?.uri);
+                if (!compiler) throw new Error(missing);
                 if (!config.program || !config.program.endsWith('.dewy')) throw new Error('The debug program must be a .dewy source file.');
                 if (!vscode.extensions.getExtension('vadimcn.vscode-lldb')) throw new Error('Install the CodeLLDB extension to debug with the compact core.');
                 const args = typeof config.args === 'string' ? splitArguments(config.args) : (config.args || []);
@@ -73,11 +75,12 @@ function activate(context, vscode, splitArguments) {
         vscode.debug.onDidTerminateDebugSession((session) => {
             if (session.configuration.program) removeBuild(path.dirname(session.configuration.program));
         }),
-        vscode.commands.registerCommand('dewy.core.debug', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor || editor.document.languageId !== 'dewy' || editor.document.uri.scheme !== 'file') return;
-            const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
-            await vscode.debug.startDebugging(folder, configuration(editor.document.uri.fsPath));
+        vscode.commands.registerCommand('dewy.core.debug', async (uri) => {
+            // (a code lens names its file; the command palette means the active editor's)
+            const document = uri?.fsPath ? { languageId: 'dewy', uri } : vscode.window.activeTextEditor?.document;
+            if (!document || document.languageId !== 'dewy' || document.uri.scheme !== 'file') return;
+            const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+            await vscode.debug.startDebugging(folder, configuration(document.uri.fsPath));
         }),
         { dispose() { for (const directory of [...builds]) removeBuild(directory); } },
     );

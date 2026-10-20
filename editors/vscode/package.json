@@ -1,7 +1,7 @@
 {
   "name": "dewy",
-  "displayName": "dewy",
-  "description": "Dewy syntax highlighting, debugging, and optional compact-core diagnostics, completion, hover and definitions",
+  "displayName": "Dewy",
+  "description": "Dewy language support: highlighting, diagnostics as you type, completion, hover, navigation, rename, signature help, semantic highlighting, inlay hints, quick fixes, formatting, run/test/debug",
   "version": "0.2.0",
   "publisher": "RedFoxLabs",
   "engines": {
@@ -9,8 +9,6 @@
   },
   "main": "./extension.js",
   "activationEvents": [
-    "onDebugResolve:lldb",
-    "onDebugResolve:cppdbg",
     "onLanguage:dewy",
     "onDebugResolve:dewy-core",
     "onDebugInitialConfigurations"
@@ -21,16 +19,18 @@
   "icon": "images/dewy_logo_128x128.png",
   "files": [
     "extension.js",
+    "compiler.js",
+    "core-client.js",
+    "core-debug.js",
+    "core-test.js",
     "language-configuration.json",
     "syntaxes/dewy.tmLanguage.json",
     "images/dewy_logo_128x128.png",
     "images/dewy-file.png",
     "README.md",
     "LICENSE",
-    "core-client.js",
     "THIRD_PARTY_NOTICES.md",
-    "core-debug.js",
-    "core-test.js"
+    "toolchain/**"
   ],
   "contributes": {
     "languages": [
@@ -68,52 +68,8 @@
     ],
     "debuggers": [
       {
-        "type": "dewy",
-        "label": "Dewy",
-        "configurationSnippets": [
-          {
-            "label": "Dewy: debug current file",
-            "description": "Build the active .dewy file with `dewy debug --build` and run it under CodeLLDB with Dewy values",
-            "body": {
-              "name": "Dewy: debug current file",
-              "type": "lldb",
-              "request": "launch",
-              "program": "^\"\\${workspaceFolder}/__dewycache__/\\${relativeFileDirname}/\\${fileBasenameNoExtension}.debug\"",
-              "args": [],
-              "cwd": "^\"\\${workspaceFolder}\"",
-              "preLaunchTask": "dewy: build debug",
-              "initCommands": [
-                "command script import ${1:~/.dewy/runtime/tools}/dewy_lldb.py"
-              ],
-              "sourceLanguages": [
-                "c"
-              ]
-            }
-          },
-          {
-            "label": "Dewy: debug current file with arguments",
-            "description": "The same, asking for the command line each run",
-            "body": {
-              "name": "Dewy: debug current file with arguments",
-              "type": "lldb",
-              "request": "launch",
-              "program": "^\"\\${workspaceFolder}/__dewycache__/\\${relativeFileDirname}/\\${fileBasenameNoExtension}.debug\"",
-              "args": "^\"\\${command:dewy.programArguments}\"",
-              "cwd": "^\"\\${workspaceFolder}\"",
-              "preLaunchTask": "dewy: build debug",
-              "initCommands": [
-                "command script import ${1:~/.dewy/runtime/tools}/dewy_lldb.py"
-              ],
-              "sourceLanguages": [
-                "c"
-              ]
-            }
-          }
-        ]
-      },
-      {
         "type": "dewy-core",
-        "label": "Dewy compact core",
+        "label": "Dewy",
         "languages": [
           "dewy"
         ],
@@ -148,7 +104,8 @@
               },
               "stopOnPanic": {
                 "type": "boolean",
-                "default": true
+                "default": true,
+                "description": "Stop in the debugger when the program panics."
               }
             }
           }
@@ -157,21 +114,32 @@
           {
             "type": "dewy-core",
             "request": "launch",
-            "name": "Dewy core: current file",
+            "name": "Dewy: current file",
             "program": "${file}",
             "args": []
           }
         ],
         "configurationSnippets": [
           {
-            "label": "Dewy core: debug current file",
-            "description": "Build with the configured compact core and launch CodeLLDB.",
+            "label": "Dewy: debug current file",
+            "description": "Build the active .dewy file with variable information and debug it with CodeLLDB.",
             "body": {
               "type": "dewy-core",
               "request": "launch",
-              "name": "Dewy core: current file",
+              "name": "Dewy: current file",
               "program": "^\"\\${file}\"",
               "args": []
+            }
+          },
+          {
+            "label": "Dewy: debug current file with arguments",
+            "description": "The same, asking for the command line (split like a shell) each run.",
+            "body": {
+              "type": "dewy-core",
+              "request": "launch",
+              "name": "Dewy: current file with arguments",
+              "program": "^\"\\${file}\"",
+              "args": "^\"\\${command:dewy.programArguments}\""
             }
           }
         ]
@@ -179,28 +147,46 @@
     ],
     "commands": [
       {
-        "command": "dewy.programArguments",
-        "title": "Dewy: Program Arguments"
-      },
-      {
-        "command": "dewy.core.restartServer",
-        "title": "Dewy: Restart Core Language Server"
+        "command": "dewy.core.run",
+        "title": "Run Current File",
+        "category": "Dewy",
+        "icon": "$(play)"
       },
       {
         "command": "dewy.core.debug",
-        "title": "Dewy: Debug Current File (Core)"
+        "title": "Debug Current File",
+        "category": "Dewy",
+        "icon": "$(debug-alt)"
       },
       {
         "command": "dewy.core.test",
-        "title": "Dewy: Test Current File (Core)"
+        "title": "Test Current File",
+        "category": "Dewy"
       },
       {
         "command": "dewy.core.testRelease",
-        "title": "Dewy: Test Current File in Release Mode (Core)"
+        "title": "Test Current File in Release Mode",
+        "category": "Dewy"
       },
       {
         "command": "dewy.core.testWatch",
-        "title": "Dewy: Watch Tests in Current File (Core)"
+        "title": "Watch Tests in Current File",
+        "category": "Dewy"
+      },
+      {
+        "command": "dewy.core.runTest",
+        "title": "Run Test",
+        "category": "Dewy"
+      },
+      {
+        "command": "dewy.core.restartServer",
+        "title": "Restart Language Server",
+        "category": "Dewy"
+      },
+      {
+        "command": "dewy.programArguments",
+        "title": "Program Arguments",
+        "category": "Dewy"
       }
     ],
     "menus": {
@@ -208,6 +194,14 @@
         {
           "command": "dewy.programArguments",
           "when": "false"
+        },
+        {
+          "command": "dewy.core.runTest",
+          "when": "false"
+        },
+        {
+          "command": "dewy.core.run",
+          "when": "editorLangId == dewy && resourceScheme == file && processExecutionSupported"
         },
         {
           "command": "dewy.core.debug",
@@ -226,7 +220,24 @@
           "when": "editorLangId == dewy && resourceScheme == file && processExecutionSupported"
         }
       ],
+      "editor/title/run": [
+        {
+          "command": "dewy.core.run",
+          "when": "editorLangId == dewy && resourceScheme == file && processExecutionSupported",
+          "group": "navigation@0"
+        },
+        {
+          "command": "dewy.core.debug",
+          "when": "resourceLangId == dewy && resourceScheme == file",
+          "group": "navigation@1"
+        }
+      ],
       "editor/context": [
+        {
+          "command": "dewy.core.run",
+          "when": "editorLangId == dewy && resourceScheme == file && processExecutionSupported",
+          "group": "navigation@19"
+        },
         {
           "command": "dewy.core.test",
           "when": "editorLangId == dewy && resourceScheme == file && processExecutionSupported",
@@ -240,8 +251,9 @@
         "dewy.core.path": {
           "type": "string",
           "default": "",
-          "description": "Path to a standalone dewy-core executable or a checkout's tools/dewy launcher. Empty disables compiler-backed editor features. The standalone toolchain needs its sibling lib/ directory.",
-          "scope": "machine-overridable"
+          "description": "Path to the dewy-core compiler or a checkout's tools/dewy launcher. Empty: the compiler bundled with this platform's extension, else ~/.dewy/bin/dewy-core from the installer, else dewy-core on the PATH. A standalone toolchain needs its sibling lib/ directory.",
+          "scope": "machine-overridable",
+          "markdownDescription": "Path to the `dewy-core` compiler or a checkout's `tools/dewy` launcher. Empty: the compiler bundled with this platform's extension, else `~/.dewy/bin/dewy-core` from the installer, else `dewy-core` on the `PATH`. A standalone toolchain needs its sibling `lib/` directory."
         }
       }
     }
@@ -254,10 +266,15 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "Highlighting is available; the optional core language server starts after workspace trust is granted.",
+      "description": "Highlighting works everywhere; the compiler (language server, run, test, debug) starts once the workspace is trusted.",
       "restrictedConfigurations": [
         "dewy.core.path"
       ]
     }
-  }
+  },
+  "keywords": [
+    "dewy",
+    "language server",
+    "programming language"
+  ]
 }

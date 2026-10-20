@@ -304,3 +304,18 @@ def test_dewy_completion_contexts(project):
     items = complete(GAME.replace('    step(0.1)\n    return', '    or§\n    return'), 6)
     assert 'or_throw' in items and items['or_throw']['kind'] == 14
     assert 'printl' in items and items['printl']['kind'] != 14
+
+
+def test_vscode_compiler_discovery(tmp_path):
+    """The setting, then a bundled toolchain, the installer's launcher and the PATH; no downloads."""
+    import shutil
+    import subprocess
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('Node is needed for the extension')
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run([node, root / 'tests/fixtures/core_editor/discovery.cjs',
+                             root / 'editors/vscode/compiler.js', tmp_path],
+                            capture_output=True, text=True, timeout=20, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'compiler discovery: setting, bundled, installed and PATH passed' in result.stdout
