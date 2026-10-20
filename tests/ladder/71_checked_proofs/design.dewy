@@ -1,0 +1,62 @@
+# Tier 3 / 71_checked_proofs / milestone 22
+# Acceptance: Check and erase proof calls; retain transitive result facts at callers.
+$proof
+transitive=(a:int64 b:int64<v => a <=? v> c:int64<v => b <=? v>):> <a <=? c>=>{
+    $assert a <=? b
+    $assert b <=? c
+    $assert a <=? c
+}
+$proof
+nonnegative=(a:int64<v => v >=? 0> b:int64<v => a <=? v>):> <b >=? 0>=>{
+    $assert a >=? 0
+    $assert a <=? b
+    $assert b >=? 0
+}
+width=(start:int64<i => i >=? 0> end:int64<i => i >=? start>):>int64=>{
+    transitive(0 start end)
+    nonnegative(start end)
+    $assert start <=? end
+    $assert end >=? 0
+    return end-start
+}
+chain=(a:int64<i => i >=? 0 and i <=? 100>):>int64=>{
+    let b=a+1
+    let c=b+1
+    transitive(a b c)
+    $assert a <=? c
+    return width(a c)
+}
+main=():>int64=>{
+    let total:int64=0
+    loop a in [0..64) {
+        total+=chain(a)
+    }
+    transitive(0 0 0)
+    transitive(-9 -3 4)
+    nonnegative(0 0)
+    nonnegative(1 9)
+    $runtime_assert width(0 0) =? 0
+    $runtime_assert width(1 4) =? 3
+    $runtime_assert width(3 9) =? 6
+    $runtime_assert width(10 10) =? 0
+    $runtime_assert chain(0) =? 2
+    $runtime_assert chain(1) =? 2
+    $runtime_assert chain(2) =? 2
+    $runtime_assert chain(100) =? 2
+    $runtime_assert total =? 128
+    $assert 3 <=? 4
+    $assert -3 <=? 0
+    $assert 0 <=? 100
+    $assert 100 >=? 0
+    $runtime_assert width(0 100) =? 100
+    $runtime_assert width(99 100) =? 1
+    $runtime_assert chain(99) =? 2
+    $runtime_assert width(5 5) =? 0
+    $runtime_assert width(50 100) =? 50
+    $runtime_assert width(1 1) =? 0
+    $runtime_assert width(0 1) =? 1
+    $runtime_assert chain(50) =? 2
+    $runtime_assert chain(25) =? 2
+    printl("{total}")
+    return 0
+}

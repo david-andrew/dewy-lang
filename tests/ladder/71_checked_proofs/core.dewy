@@ -1,0 +1,44 @@
+# Current-dialect algorithm projection; does not establish removed design contracts.
+# Tier 3 / 71_checked_proofs / milestone 22
+# Acceptance: Check and erase proof calls; retain transitive result facts at callers.
+width=(start:int64 end:int64):>int64=>{
+    $runtime_assert start <=? end
+    $runtime_assert end >=? 0
+    return end-start
+}
+chain=(a:int64):>int64=>{
+    let b=a+1
+    let c=b+1
+    $runtime_assert a <=? c
+    return width(a c)
+}
+main=():>int64=>{
+    let total:int64=0
+    loop a in [0..64) {
+        total+=chain(a)
+    }
+    $runtime_assert width(0 0) =? 0
+    $runtime_assert width(1 4) =? 3
+    $runtime_assert width(3 9) =? 6
+    $runtime_assert width(10 10) =? 0
+    $runtime_assert chain(0) =? 2
+    $runtime_assert chain(1) =? 2
+    $runtime_assert chain(2) =? 2
+    $runtime_assert chain(100) =? 2
+    $runtime_assert total =? 128
+    $runtime_assert 3 <=? 4
+    $runtime_assert -3 <=? 0
+    $runtime_assert 0 <=? 100
+    $runtime_assert 100 >=? 0
+    $runtime_assert width(0 100) =? 100
+    $runtime_assert width(99 100) =? 1
+    $runtime_assert chain(99) =? 2
+    $runtime_assert width(5 5) =? 0
+    $runtime_assert width(50 100) =? 50
+    $runtime_assert width(1 1) =? 0
+    $runtime_assert width(0 1) =? 1
+    $runtime_assert chain(50) =? 2
+    $runtime_assert chain(25) =? 2
+    printl("{total}")
+    return 0
+}

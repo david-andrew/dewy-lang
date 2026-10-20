@@ -1,0 +1,89 @@
+# Core: exact bounded word-rational library, rather than built-in abstract rationals.
+# Bounded word-rational helper for core projections only; fixtures fit int64.
+Rat:type=[n:int64 d:int64]
+gcd=(a:int64 b:int64):>int64=>{
+    a=abs(a)
+    b=abs(b)
+    loop b not=? 0 {
+        let remainder=a%b
+        a=b
+        b=remainder
+    }
+    return a
+}
+ratio=(n:int64 d:int64):>Rat=>{
+    $runtime_assert d not=? 0
+    if n =? 0 return Rat[0 1]
+    if d <? 0 {
+        n=-n
+        d=-d
+    }
+    let divisor=gcd(n d)
+    return Rat[n//divisor d//divisor]
+}
+plus=(a:Rat b:Rat):>Rat=>ratio(a.n*b.d+b.n*a.d a.d*b.d)
+minus=(a:Rat b:Rat):>Rat=>ratio(a.n*b.d-b.n*a.d a.d*b.d)
+times=(a:Rat b:Rat):>Rat=>ratio(a.n*b.n a.d*b.d)
+over=(a:Rat b:Rat):>Rat=>ratio(a.n*b.d a.d*b.n)
+equal=(a:Rat b:Rat):>bool=>a.n =? b.n and a.d =? b.d
+show=(q:Rat):>string=>{
+    if q.d =? 1 return "{q.n}"
+    return "{q.n}/{q.d}"
+}
+Reading:type=[start:int64 finish:int64 watts:int64]
+energy=(r:Reading):>Rat=>{
+    $runtime_assert r.finish >=? r.start
+    return ratio(r.watts*(r.finish-r.start) 3600000)
+}
+report=(readings:array<Reading> tariff:Rat):>Rat=>{
+    let total=ratio(0 1)
+    loop reading in readings {
+        total=plus(total energy(reading))
+    }
+    return times(total tariff)
+}
+main=():>int64=>{
+    let input:array<Reading>=[Reading[0 1200 1500] Reading[1200 3600 500]]
+    let tariff=ratio(24 100)
+    let cost=report(input tariff)
+    let e=ratio(0 1)
+    loop reading in input {
+        e=plus(e energy(reading))
+    }
+    $runtime_assert equal(e ratio(5 6))
+    $runtime_assert equal(cost ratio(1 5))
+    let split:array<Reading>=[Reading[0 600 1500] Reading[600 1200 1500] Reading[1200 3600 500]]
+    $runtime_assert equal(report(split tariff) cost)
+    let cents=ratio(0 1)
+    loop i in [0..1000) {
+        cents=plus(cents ratio(1 100))
+    }
+    $runtime_assert equal(cents ratio(10 1))
+    $runtime_assert equal(minus(plus(ratio(1 3) ratio(1 7)) ratio(10 21)) ratio(0 1))
+    let saved=input.copy()
+    input[0].watts=0
+    $runtime_assert equal(report(saved tariff) ratio(1 5))
+    $runtime_assert equal(report(input tariff) ratio(2 25))
+    $runtime_assert equal(report([] tariff) ratio(0 1))
+    $runtime_assert equal(energy(Reading[2 2 900]) ratio(0 1))
+    $runtime_assert equal(energy(Reading[0 3600 -1000]) ratio(-1 1))
+    $runtime_assert equal(plus(ratio(1 10) ratio(2 10)) ratio(3 10))
+    $runtime_assert equal(plus(ratio(1 3) ratio(2 3)) ratio(1 1))
+    $runtime_assert equal(minus(ratio(5 6) ratio(1 2)) ratio(1 3))
+    $runtime_assert equal(times(ratio(2 3) ratio(9 4)) ratio(3 2))
+    let growth=ratio(1 1)
+    loop d in [2..18) {
+        growth=plus(growth ratio(1 d))
+    }
+    let mean=over(e ratio(1 1))
+    $runtime_assert equal(mean ratio(5 6))
+    $runtime_assert equal(over(ratio(1 3) ratio(2 3)) ratio(1 2))
+    $runtime_assert equal(ratio(125 100) ratio(5 4))
+    $runtime_assert equal(ratio(125 1000) ratio(1 8))
+    $runtime_assert equal(times(ratio(1 1000000) ratio(1000000 1)) ratio(1 1))
+    $runtime_assert equal(report(saved ratio(0 1)) ratio(0 1))
+    $runtime_assert equal(energy(Reading[0 1800 1000]) ratio(1 2))
+    $runtime_assert equal(report(saved ratio(1 1)) ratio(5 6))
+    printl("{show(e)} {show(cost)} {show(cents)} {show(growth)}")
+    return 0
+}

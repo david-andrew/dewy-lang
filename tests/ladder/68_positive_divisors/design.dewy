@@ -1,0 +1,62 @@
+# Tier 3 / 68_positive_divisors / milestone 22
+# Acceptance: Prove positive divisors and nonempty indexing through helpers and guards.
+positive=int64<i => i >? 0>
+quotient=(n:int64 d:positive):>int64=>{
+    $assert d >? 0
+    return n//d
+}
+first=(xs:array<int64 length >? 0>):>int64=>{
+    $assert xs.length >? 0
+    return xs[0]
+}
+share=(n:int64 d:int64):>int64=>{
+    if d >? 0 {
+        return quotient(n d)
+    }
+    return 0
+}
+triangular=(n:int64<i => i >=? 0 and i <=? 100>):>int64=>{
+    let total:int64=0
+    loop i in [0..n) {
+        $assert i >=? 0
+        $assert i <? 100
+        total+=i
+    }
+    return total
+}
+main=():>int64=>{
+    let total:int64=0
+    loop d in [1..17) {
+        $assert d >? 0
+        total+=quotient(1000 d)
+    }
+    let xs:array<int64>=[31 7 9]
+    if xs.length >? 0 {
+        total+=first(xs)
+    }
+    $runtime_assert share(12 0) =? 0
+    $runtime_assert share(12 -1) =? 0
+    $runtime_assert share(12 3) =? 4
+    $runtime_assert quotient(-13 3) =? -5
+    $runtime_assert quotient(13 3) =? 4
+    $runtime_assert quotient(0 3) =? 0
+    $runtime_assert triangular(0) =? 0
+    $runtime_assert triangular(1) =? 0
+    $runtime_assert triangular(2) =? 1
+    $runtime_assert triangular(10) =? 45
+    $runtime_assert triangular(100) =? 4950
+    $runtime_assert first([9]) =? 9
+    $runtime_assert first([2 3]) =? 2
+    $runtime_assert share(-10 2) =? -5
+    $runtime_assert share(1 2) =? 0
+    $runtime_assert share(10 1) =? 10
+    $runtime_assert quotient(99 9) =? 11
+    $runtime_assert quotient(-99 9) =? -11
+    $runtime_assert quotient(7 8) =? 0
+    $runtime_assert quotient(8 8) =? 1
+    $runtime_assert share(100 10) =? 10
+    $runtime_assert first([0 1]) =? 0
+    $runtime_assert triangular(3) =? 3
+    printl("{total}")
+    return 0
+}

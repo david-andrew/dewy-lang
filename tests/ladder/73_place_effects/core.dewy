@@ -1,0 +1,63 @@
+# Current-dialect algorithm projection; does not establish removed design contracts.
+# Tier 3 / 73_place_effects / milestone 23
+# Acceptance: Translate reads/writes on place parameters through swapped arguments and sibling fields.
+Pair:type=[left:int64 right:int64]
+read=(@x:int64):>int64=>x
+increment=(@x:int64):>void=>{
+    x+=1
+}
+write=(@x:int64 value:int64):>void=>{
+    x=value
+}
+advance=(@pair:Pair):>void=>{
+    increment(@pair.left)
+    increment(@pair.right)
+}
+forward=(@destination:int64 @source:int64):>void=>{
+    write(@destination read(@source))
+}
+quiet=(x:int64):>int64=>x*2
+main=():>int64=>{
+    let pair=Pair[0 10]
+    loop i in [0..64) {
+        advance(@pair)
+    }
+    let saved=pair.copy()
+    forward(@pair.right @pair.left)
+    $runtime_assert pair.left =? 64
+    $runtime_assert pair.right =? 64
+    $runtime_assert saved.left =? 64
+    $runtime_assert saved.right =? 74
+    $runtime_assert quiet(21) =? 42
+    write(@pair.left 7)
+    $runtime_assert read(@pair.left) =? 7
+    $runtime_assert read(@pair.right) =? 64
+    increment(@pair.left)
+    $runtime_assert pair.left =? 8
+    forward(@pair.left @pair.right)
+    $runtime_assert pair.left =? 64
+    $runtime_assert pair.right =? 64
+    write(@pair.right -3)
+    $runtime_assert pair.right =? -3
+    $runtime_assert saved.right =? 74
+    increment(@pair.right)
+    $runtime_assert pair.right =? -2
+    $runtime_assert quiet(0) =? 0
+    $runtime_assert quiet(-3) =? -6
+    $runtime_assert quiet(7) =? 14
+    $runtime_assert saved.left+saved.right =? 138
+    $runtime_assert pair.left+pair.right =? 62
+    $runtime_assert quiet(1) =? 2
+    $runtime_assert quiet(-1) =? -2
+    $runtime_assert quiet(100) =? 200
+    $runtime_assert saved.left =? 64
+    $runtime_assert saved.right =? 74
+    $runtime_assert read(@pair.left) =? 64
+    $runtime_assert read(@pair.right) =? -2
+    $runtime_assert pair.left+pair.right =? 62
+    $runtime_assert read(@pair.left)+read(@pair.right) =? 62
+    $runtime_assert quiet(read(@pair.right)) =? -4
+    $runtime_assert quiet(read(@pair.left)) =? 128
+    printl("{pair.left} {pair.right} {saved.right}")
+    return 0
+}

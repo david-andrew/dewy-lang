@@ -1,0 +1,63 @@
+# Current-dialect algorithm projection; does not establish removed design contracts.
+# Tier 3 / 74_callback_rows / milestone 23
+# Acceptance: Forward nonlocal callback rows while remapping explicit place permissions.
+Action:type=<(x:int64):>int64>
+map_one=(f:Action value:int64):>int64=>{
+    return f(value)
+}
+forward=(f:<(@x:int64):>void> @y:int64):>void=>{
+    f(@y)
+}
+square=(x:int64):>int64=>x*x
+negate=(x:int64):>int64=>-x
+set_seven=(@x:int64):>void=>{
+    x=7
+}
+quiet=(x:int64):>int64=>{
+    return map_one(@square x)+map_one(@negate x)
+}
+fold=(xs:array<int64> f:Action):>int64=>{
+    let total:int64=0
+    loop x in xs {
+        total+=f(x)
+    }
+    return total
+}
+main=():>int64=>{
+    let total:int64=0
+    loop n in [0..32) {
+        total+=quiet(n)
+    }
+    let cell:int64=0
+    forward(@set_seven @cell)
+    $runtime_assert cell =? 7
+    $runtime_assert quiet(0) =? 0
+    $runtime_assert quiet(1) =? 0
+    $runtime_assert quiet(2) =? 2
+    $runtime_assert quiet(3) =? 6
+    $runtime_assert quiet(-2) =? 6
+    $runtime_assert fold([1 2 3] @square) =? 14
+    $runtime_assert fold([1 2 3] @negate) =? -6
+    $runtime_assert fold([] @square) =? 0
+    $runtime_assert map_one(@square 9) =? 81
+    $runtime_assert map_one(@negate 9) =? -9
+    $runtime_assert map_one(@square -9) =? 81
+    $runtime_assert map_one(@negate -9) =? 9
+    $runtime_assert cell =? 7
+    $runtime_assert total =? 9920
+    $runtime_assert quiet(4) =? 12
+    $runtime_assert quiet(-1) =? 2
+    $runtime_assert quiet(-3) =? 12
+    $runtime_assert fold([0] @square) =? 0
+    $runtime_assert fold([-1 1] @negate) =? 0
+    $runtime_assert fold([-2 2] @square) =? 8
+    $runtime_assert map_one(@square 0) =? 0
+    $runtime_assert map_one(@negate 0) =? 0
+    $runtime_assert quiet(5) =? 20
+    $runtime_assert quiet(-5) =? 30
+    $runtime_assert fold([2 2 2] @square) =? 12
+    $runtime_assert fold([2 2 2] @negate) =? -6
+    $runtime_assert quiet(6) =? 30
+    printl("{total} {cell}")
+    return 0
+}

@@ -1,0 +1,236 @@
+# Tier 3 / 92_http_json_routes / milestone 30
+# Acceptance: HTTP/1.1 request parser and JSON integer-schema CRUD routing with status codes and transactional validation; deterministic transport transcripts.
+# OPEN: Portable socket/listen/accept, request framing limits and host capability APIs are unspecified. This tests the API handler, not a listening network server.
+# This executable projection does not establish the OPEN obligation.
+Request:type=[method:string target:string body:string]
+Response:type=[status:int64 body:string]
+Service:type=[values:dict<string int64> writes:int64]
+split_words=(text:string):>array<string>=>{
+    let output:array<string>=[]
+    let word=""
+    loop ch in text {
+        if ch =? ' ' {
+            if word.length >? 0 {
+                output.push(word)
+                word=""
+            }
+        } else {
+            word="{word}{ch}"
+        }
+    }
+    if word.length >? 0 output.push(word)
+    return output
+}
+parse_request=(wire:string):>Request?=>{
+    let lines:array<string>=[]
+    loop source_line in wire.split("\n") {
+        if source_line.length >? 0 and source_line[source_line.length-1] =? '\r' {
+            lines.push(source_line[0..source_line.length-1))
+        } else {
+            lines.push(source_line)
+        }
+    }
+    if lines.length <? 3 return none
+    let first=split_words(lines[0])
+    if first.length not=? 3 return none
+    if first[2] not=? "HTTP/1.1" return none
+    let declared:int64?=none
+    let separator:int64=-1
+    loop i in [1..lines.length) {
+        let header=lines[i]
+        let length_prefix="Content-Length: "
+        if header.length >=? length_prefix.length and header[0..length_prefix.length) =? length_prefix {
+            if declared is? int64 return none
+            declared=integer(header[length_prefix.length..])
+            if declared is? none return none
+        }
+        if lines[i].length =? 0 {
+            separator=i
+            break
+        }
+    }
+    if separator <? 0 return none
+    let body=""
+    loop i in [separator+1..lines.length) {
+        if i >? separator+1 body="{body}\n"
+        body="{body}{lines[i]}"
+    }
+    if declared is? int64 and declared not=? body.length return none
+    return Request[first[0] first[1] body]
+}
+digit_index=(text:string):>int64?=>{
+    loop digit in [0..10) {
+        if text =? "{digit}" return digit
+    }
+    return none
+}
+integer=(text:string):>int64?=>{
+    if text.length =? 0 return none
+    let start:int64=0
+    let sign:int64=1
+    if text[0] =? '-' {
+        start=1
+        sign=-1
+    }
+    if start =? text.length return none
+    let value:int64=0
+    loop i in [start..text.length) {
+        let d=digit_index("{text[i]}")
+        if d is? none return none
+        if value >? 100000 return none
+        value=value*10+d
+    }
+    return value*sign
+}
+json_value=(body:string):>int64?=>{
+    # Deliberate API schema: exactly one integer field, canonical whitespace.
+    let prefix="\{\"value\":"
+    if body.length <? prefix.length+2 return none
+    if body[0..prefix.length) not=? prefix return none
+    if body[body.length-1] not=? '}' return none
+    return integer(body[prefix.length..body.length-1))
+}
+error=(status:int64 code:string):>Response=>{
+    return Response[status "\{\"error\":\"{code}\"\}"]
+}
+route=(@service:Service request:Request):>Response=>{
+    if request.target =? "/health" {
+        if request.method not=? "GET" return error(405 "method")
+        return Response[200 "\{\"ok\":true\}"]
+    }
+    let prefix="/items/"
+    if request.target.length <=? prefix.length return error(404 "route")
+    if request.target[0..prefix.length) not=? prefix return error(404 "route")
+    let key=request.target[prefix.length..]
+    loop ch in key {
+        let found=false
+        loop letter in "abcdefghijklmnopqrstuvwxyz" {
+            if ch =? letter found=true
+        }
+        if not found {
+            return error(400 "key")
+        }
+    }
+    if request.method =? "GET" {
+        if key not in? service.values return error(404 "missing")
+        let value=service.values[key]
+        return Response[200 "\{\"value\":{value}\}"]
+    }
+    if request.method =? "PUT" {
+        let value=json_value(request.body)
+        if value is? none return error(400 "json")
+        let existed=key in? service.values
+        service.values[key]=value
+        service.writes+=1
+        return Response[if existed 200 else 201 "\{\"value\":{value}\}"]
+    }
+    if request.method =? "DELETE" {
+        if key not in? service.values return error(404 "missing")
+        service.values.remove(key)
+        service.writes+=1
+        return Response[204 ""]
+    }
+    return error(405 "method")
+}
+serve=(@service:Service wire:string):>Response=>{
+    let request=parse_request(wire)
+    if request is? none return error(400 "request")
+    return route(@service request)
+}
+wire=(method:string target:string body:string=""):>string=>{
+    return "{method} {target} HTTP/1.1\r\nHost: local\r\nContent-Length: {body.length}\r\n\r\n{body}"
+}
+selfcheck=():>void=>{
+    let service=Service[[] 0]
+    $runtime_assert serve(@service "bad").status =? 400
+    $runtime_assert serve(@service wire("GET" "/health")).status =? 200
+    $runtime_assert serve(@service wire("POST" "/health")).status =? 405
+    $runtime_assert serve(@service wire("GET" "/unknown")).status =? 404
+    $runtime_assert serve(@service wire("GET" "/items/")).status =? 404
+    $runtime_assert serve(@service wire("GET" "/items/a1")).status =? 400
+    $runtime_assert serve(@service wire("PUT" "/items/a" "bad")).status =? 400
+    $runtime_assert service.values.length =? 0
+    $runtime_assert service.writes =? 0
+    let created=serve(@service wire("PUT" "/items/a" "\{\"value\":7\}"))
+    $runtime_assert created.status =? 201
+    $runtime_assert service.values["a"] =? 7
+    let saved=service.copy()
+    $runtime_assert serve(@service wire("DELETE" "/items/a")).status =? 204
+    $runtime_assert saved.values["a"] =? 7
+    $runtime_assert service.values.length =? 0
+    $runtime_assert service.writes =? 2
+    $runtime_assert json_value("\{\"value\":-3\}") =? -3
+    $runtime_assert json_value("\{\"other\":3\}") is? none
+    $runtime_assert json_value("\{\"value\":3.5\}") is? none
+    $runtime_assert json_value("\{\"value\":\}") is? none
+    $runtime_assert integer("-") is? none
+    $runtime_assert integer("12x") is? none
+}
+
+boundaries=():>void=>{
+    let service=Service[[] 0]
+    $runtime_assert parse_request("") is? none
+    $runtime_assert parse_request("GET / HTTP/1.1") is? none
+    $runtime_assert parse_request("GET / HTTP/2\n\n") is? none
+    $runtime_assert integer("0") =? 0
+    $runtime_assert integer("-0") =? 0
+    $runtime_assert integer("123") =? 123
+    $runtime_assert integer("-123") =? -123
+    $runtime_assert integer("+1") is? none
+    $runtime_assert integer(" 1") is? none
+    $runtime_assert json_value("\{\"value\":0\}") =? 0
+    $runtime_assert json_value("\{\"value\":1,\"x\":2\}") is? none
+    $runtime_assert json_value("\{\"value\":true\}") is? none
+    $runtime_assert json_value("[]") is? none
+    $runtime_assert json_value("\{\}") is? none
+    $runtime_assert serve(@service wire("DELETE" "/items/x")).status =? 404
+    $runtime_assert serve(@service wire("PATCH" "/items/x")).status =? 405
+    $runtime_assert serve(@service wire("GET" "/items/X")).status =? 400
+    $runtime_assert serve(@service wire("GET" "/item/x")).status =? 404
+    $runtime_assert serve(@service wire("GET" "/items/a/b")).status =? 400
+    $runtime_assert serve(@service wire("GET" "/items/a?b")).status =? 400
+    $runtime_assert service.writes =? 0
+    $runtime_assert service.values.length =? 0
+    $runtime_assert serve(@service wire("PUT" "/items/x" "\{\"value\":0\}")).status =? 201
+    let saved=service.copy()
+    $runtime_assert serve(@service wire("PUT" "/items/x" "\{\"value\":-1\}")).status =? 200
+    $runtime_assert saved.values["x"] =? 0
+    $runtime_assert service.values["x"] =? -1
+    $runtime_assert service.writes =? 2
+    $runtime_assert serve(@service wire("DELETE" "/items/x")).status =? 204
+    $runtime_assert service.writes =? 3
+    $runtime_assert service.values.length =? 0
+    $runtime_assert saved.values.length =? 1
+    $runtime_assert saved.writes =? 1
+    $runtime_assert serve(@service wire("GET" "/health")).status =? 200
+    $runtime_assert service.writes =? 3
+}
+
+main=():>int64=>{
+    boundaries()
+    selfcheck()
+    let service=Service[[] 0]
+    let requests:array<string>=[
+        wire("GET" "/health")
+        wire("GET" "/items/apple")
+        wire("PUT" "/items/apple" "\{\"value\":7\}")
+        wire("GET" "/items/apple")
+        wire("PUT" "/items/apple" "\{\"value\":9\}")
+        wire("PUT" "/items/pear" "\{\"value\":-4\}")
+        wire("PUT" "/items/pear" "\{\"value\":oops\}")
+        wire("POST" "/items/apple")
+        wire("DELETE" "/items/apple")
+        wire("GET" "/items/apple")
+        wire("GET" "/items/pear")
+        "GET /health HTTP/1.0\n\n"
+    ]
+    loop request in requests {
+        let response=serve(@service request)
+        printl("{response.status} {response.body}")
+    }
+    $runtime_assert service.values.length =? 1
+    $runtime_assert service.values["pear"] =? -4
+    $runtime_assert service.writes =? 4
+    printl("{service.values.length} {service.writes}")
+    return 0
+}

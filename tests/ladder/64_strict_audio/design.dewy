@@ -1,0 +1,62 @@
+# Tier 3 / 64_strict_audio / milestone 21
+# Acceptance: 64 allocation-free fixed-buffer audio blocks; no hidden copy, detach or panic in the kernel.
+# OPEN: Module strict-lane directive and the distinct no-panic/no-detach vocabulary are unspecified; no_effects alone does not certify the full lane.
+# This executable projection does not establish the OPEN obligation.
+$explicit_copies
+mix=(a:int64 b:int64 gain:int64<i => i >=? 0 and i <=? 4>):>int64 & no_effects=>{
+    return (a+b)*gain
+}
+block=(seed:int64):>int64 & no_effects=>{
+    let left:array<int64 length=8>=[1 2 3 4 5 6 7 8]
+    let right:array<int64 length=8>=[8 7 6 5 4 3 2 1]
+    let sum:int64=seed
+    loop i in [0..8) {
+        $assert i >=? 0
+        $assert i <? left.length
+        $assert i <? right.length
+        left[i]=mix(left[i] right[i] 2)
+        sum+=left[i]
+    }
+    return sum
+}
+silence=():>int64 & no_effects=>{
+    let values:array<int64 length=4>=[0 0 0 0]
+    let total:int64=0
+    loop i in [0..4) {
+        $assert i <? values.length
+        total+=values[i]
+    }
+    return total
+}
+clamp=(x:int64):>int64 & no_effects=>{
+    if x <? -100 return -100
+    if x >? 100 return 100
+    return x
+}
+main=():>int64=>{
+    let checksum:int64=0
+    loop frame in [0..64) {
+        checksum+=block(frame)
+    }
+    $runtime_assert checksum =? 11232
+    $runtime_assert silence() =? 0
+    $runtime_assert mix(2 3 0) =? 0
+    $runtime_assert mix(2 3 4) =? 20
+    $runtime_assert clamp(-101) =? -100
+    $runtime_assert clamp(101) =? 100
+    $runtime_assert clamp(3) =? 3
+    $runtime_assert block(0) =? 144
+    $runtime_assert block(1) =? 145
+    $runtime_assert block(-1) =? 143
+    $runtime_assert mix(-7 7 4) =? 0
+    $runtime_assert mix(-7 -3 2) =? -20
+    $runtime_assert clamp(100) =? 100
+    $runtime_assert clamp(-100) =? -100
+    $runtime_assert silence()+block(0) =? 144
+    $runtime_assert mix(1 -1 3) =? 0
+    $runtime_assert mix(5 5 1) =? 10
+    $runtime_assert block(2) =? 146
+    $runtime_assert silence()+silence() =? 0
+    printl("{checksum}")
+    return 0
+}

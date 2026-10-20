@@ -1,0 +1,211 @@
+# Tier 3 / 94_physics_hash / milestone 30
+# Acceptance: 80 integer-step 2D physics frames, spatial hash broad phase cross-checked against all pairs, deterministic axis impulses, walls, conserved kinetic sum and saved world.
+Body:type=[id:int64 x:int64 y:int64 vx:int64 vy:int64 radius:int64]
+World:type=[bodies:array<Body> contacts:int64]
+key=(x:int64 y:int64):>int64 & no_effects=>x*1000+y
+cell=(position:int64):>int64 & no_effects=>position//16
+seed=():>World=>{
+    let bodies:array<Body>=[]
+    loop i in [0..24) {
+        bodies.push(Body[i 10+(i%6)*18 10+(i//6)*18 (i%3)-1 ((i+1)%3)-1 5])
+    }
+    return World[bodies 0]
+}
+build_grid=(bodies:array<Body>):>dict<int64 array<int64>>=>{
+    let grid:dict<int64 array<int64>>=[]
+    loop i in [0..bodies.length) {
+        let body=bodies[i]
+        let bucket=key(cell(body.x) cell(body.y))
+        if bucket not in? grid {
+            grid[bucket]=[]
+        }
+        grid[bucket].push(i)
+    }
+    return grid
+}
+near=(a:Body b:Body):>bool & no_effects=>{
+    let dx=a.x-b.x
+    let dy=a.y-b.y
+    let radius=a.radius+b.radius
+    return dx*dx+dy*dy <=? radius*radius
+}
+contacts=(bodies:array<Body>):>array<int64>=>{
+    let grid=build_grid(bodies)
+    let pairs:array<int64>=[]
+    loop i in [0..bodies.length) {
+        let body=bodies[i]
+        let cx=cell(body.x)
+        let cy=cell(body.y)
+        loop dx in [-1..2) {
+            loop dy in [-1..2) {
+                let bucket=key(cx+dx cy+dy)
+                if bucket not in? grid continue
+                loop j in grid[bucket] {
+                    if j <=? i continue
+                    if near(body bodies[j]) {
+                        pairs.push(i*1000+j)
+                    }
+                }
+            }
+        }
+    }
+    pairs.sort()
+    return pairs
+}
+brute=(bodies:array<Body>):>array<int64>=>{
+    let pairs:array<int64>=[]
+    loop i in [0..bodies.length) {
+        loop j in [i+1..bodies.length) {
+            if near(bodies[i] bodies[j]) {
+                pairs.push(i*1000+j)
+            }
+        }
+    }
+    return pairs
+}
+integrate=(@body:Body):>void=>{
+    body.x+=body.vx
+    body.y+=body.vy
+    if body.x <? body.radius {
+        body.x=2*body.radius-body.x
+        body.vx=-body.vx
+    }
+    if body.x >? 128-body.radius {
+        body.x=2*(128-body.radius)-body.x
+        body.vx=-body.vx
+    }
+    if body.y <? body.radius {
+        body.y=2*body.radius-body.y
+        body.vy=-body.vy
+    }
+    if body.y >? 128-body.radius {
+        body.y=2*(128-body.radius)-body.y
+        body.vy=-body.vy
+    }
+}
+resolve=(@world:World pair:int64):>void=>{
+    let i=pair//1000
+    let j=pair%1000
+    let a=world.bodies[i]
+    let b=world.bodies[j]
+    let dx=a.x-b.x
+    let dy=a.y-b.y
+    # Deterministic axis impulse, not a claim of exact circular dynamics.
+    if abs(dx) >=? abs(dy) {
+        world.bodies[i].vx=b.vx
+        world.bodies[j].vx=a.vx
+    } else {
+        world.bodies[i].vy=b.vy
+        world.bodies[j].vy=a.vy
+    }
+    world.contacts+=1
+}
+energy=(world:World):>int64=>{
+    let total:int64=0
+    loop body in world.bodies {
+        total+=body.vx*body.vx+body.vy*body.vy
+    }
+    return total
+}
+checksum=(world:World):>int64=>{
+    let total:int64=0
+    loop body in world.bodies {
+        total+=(body.id+1)*(body.x*31+body.y*17+body.vx*7+body.vy)
+    }
+    return total
+}
+valid=(world:World):>bool=>{
+    loop body in world.bodies {
+        if body.x <? body.radius return false
+        if body.y <? body.radius return false
+        if body.x >? 128-body.radius return false
+        if body.y >? 128-body.radius return false
+    }
+    return true
+}
+step=(@world:World):>void=>{
+    loop i in [0..world.bodies.length) {
+        integrate(@world.bodies[i])
+    }
+    let pairs=contacts(world.bodies)
+    $runtime_assert pairs =? brute(world.bodies)
+    loop pair in pairs {
+        resolve(@world pair)
+    }
+    $runtime_assert valid(world)
+}
+selfcheck=():>void=>{
+    let world=seed()
+    let saved=world.copy()
+    let initial=energy(world)
+    step(@world)
+    $runtime_assert energy(world) =? initial
+    $runtime_assert saved.bodies[0].x =? 10
+    $runtime_assert world.bodies[0].x =? 9
+    $runtime_assert contacts([]).length =? 0
+    $runtime_assert brute([]).length =? 0
+    let a=Body[0 16 16 1 0 5]
+    let b=Body[1 26 16 -1 0 5]
+    $runtime_assert near(a b)
+    b.x=27
+    $runtime_assert not near(a b)
+    b.x=16
+    b.y=26
+    $runtime_assert near(a b)
+    let collision=World[[a b] 0]
+    resolve(@collision 1)
+    $runtime_assert collision.contacts =? 1
+    $runtime_assert energy(collision) =? 2
+    let edge=Body[0 5 5 -1 -1 5]
+    integrate(@edge)
+    $runtime_assert edge.x =? 6
+    $runtime_assert edge.y =? 6
+    $runtime_assert edge.vx =? 1
+    $runtime_assert edge.vy =? 1
+}
+
+boundaries=():>void=>{
+    let one=World[[Body[0 123 123 1 1 5]] 0]
+    step(@one)
+    $runtime_assert one.bodies[0].x =? 122
+    $runtime_assert one.bodies[0].y =? 122
+    $runtime_assert one.bodies[0].vx =? -1
+    $runtime_assert one.bodies[0].vy =? -1
+    $runtime_assert one.contacts =? 0
+    $runtime_assert cell(15) =? 0
+    $runtime_assert cell(16) =? 1
+    $runtime_assert cell(-1) =? -1
+    $runtime_assert key(1 2) not=? key(2 1)
+    let adjacent:array<Body>=[Body[0 15 16 0 0 5] Body[1 16 16 0 0 5]]
+    $runtime_assert contacts(adjacent) =? [1]
+    $runtime_assert brute(adjacent) =? [1]
+    let apart:array<Body>=[Body[0 10 10 0 0 5] Body[1 100 100 0 0 5]]
+    $runtime_assert contacts(apart).length =? 0
+    $runtime_assert brute(apart).length =? 0
+    let empty=World[[] 0]
+    step(@empty)
+    $runtime_assert energy(empty) =? 0
+    $runtime_assert checksum(empty) =? 0
+    $runtime_assert valid(empty)
+    $runtime_assert empty.contacts =? 0
+    let same:array<Body>=[Body[0 16 16 0 0 5] Body[1 16 16 0 0 5]]
+    $runtime_assert contacts(same) =? [1]
+    $runtime_assert brute(same) =? [1]
+}
+
+main=():>int64=>{
+    boundaries()
+    selfcheck()
+    let world=seed()
+    let saved=world.copy()
+    let initial=energy(world)
+    loop tick in [0..80) {
+        step(@world)
+        $runtime_assert energy(world) =? initial
+    }
+    $runtime_assert checksum(saved) =? 794444
+    $runtime_assert saved.contacts =? 0
+    $runtime_assert valid(world)
+    printl("{checksum(world)} {world.contacts} {energy(world)}")
+    return 0
+}

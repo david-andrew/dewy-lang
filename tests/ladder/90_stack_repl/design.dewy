@@ -1,0 +1,217 @@
+# Tier 3 / 90_stack_repl / milestone 29
+# Acceptance: Interactive stdin RPN interpreter: variables, arithmetic, rollback on parse/stack/divisor errors, EOF and quit; bounded integer parser.
+Machine:type=[stack:array<int64> names:dict<string int64> halted:bool errors:int64]
+fresh=():>Machine=>{
+    return Machine[[] [] false 0]
+}
+words=(text:string):>array<string>=>{
+    let result:array<string>=[]
+    let word=""
+    loop ch in text {
+        if ch =? ' ' {
+            if word.length >? 0 {
+                result.push(word)
+                word=""
+            }
+        } else {
+            word="{word}{ch}"
+        }
+    }
+    if word.length >? 0 {
+        result.push(word)
+    }
+    return result
+}
+digit_index=(text:string):>int64<i => i >=? 0 and i <? 10> | none=>{
+    loop digit in [0..10) {
+        if text =? "{digit}" return digit
+    }
+    return none
+}
+number=(text:string):>int64<i => i in? -10000009..10000009> | none=>{
+    if text.length =? 0 return none
+    let sign:int64=1
+    let start:int64=0
+    if text[0] =? '-' {
+        sign=-1
+        start=1
+    }
+    if start =? text.length return none
+    let value:int64=0
+    loop i in [start..text.length) {
+        let digit=digit_index("{text[i]}")
+        if digit is? none return none
+        if value >? 1000000 return none
+        value=value*10+digit
+    }
+    return value*sign
+}
+binary=(@state:Machine op:string):>bool=>{
+    if state.stack.length <? 2 return false
+    let b=state.stack.pop()
+    let a=state.stack.pop()
+    if op =? "+" {
+        state.stack.push(a+b)
+    } else if op =? "-" {
+        state.stack.push(a-b)
+    } else if op =? "*" {
+        state.stack.push(a*b)
+    } else if op =? "/" {
+        if b =? 0 return false
+        state.stack.push(a//b)
+    } else if op =? "=" {
+        state.stack.push(if a =? b 1 else 0)
+    } else {
+        return false
+    }
+    return true
+}
+execute=(@state:Machine tokens:array<string>):>bool=>{
+    let cursor:int64=0
+    loop cursor <? tokens.length {
+        let token=tokens[cursor]
+        cursor+=1
+        let value=number(token)
+        if value is? int64 {
+            state.stack.push(value)
+            continue
+        }
+        if token =? "quit" {
+            state.halted=true
+            return true
+        }
+        if token =? "clear" {
+            state.stack.clear()
+            continue
+        }
+        if token =? "dup" {
+            if state.stack.length =? 0 return false
+            let last=state.stack[state.stack.length-1]
+            state.stack.push(last)
+            continue
+        }
+        if token =? "swap" {
+            if state.stack.length <? 2 return false
+            let b=state.stack.pop()
+            let a=state.stack.pop()
+            state.stack.push(b)
+            state.stack.push(a)
+            continue
+        }
+        if token =? "drop" {
+            if state.stack.length =? 0 return false
+            state.stack.pop()
+            continue
+        }
+        if token =? "let" {
+            if cursor >=? tokens.length return false
+            if state.stack.length =? 0 return false
+            let name=tokens[cursor]
+            cursor+=1
+            state.names[name]=state.stack.pop()
+            continue
+        }
+        if token in? state.names {
+            state.stack.push(state.names[token])
+            continue
+        }
+        if not binary(@state token) return false
+    }
+    return true
+}
+line=(@state:Machine source:string):>bool=>{
+    let transaction=state.copy()
+    if execute(@transaction words(source)) {
+        state=transaction
+        return true
+    }
+    state.errors+=1
+    return false
+}
+describe=(state:Machine):>string=>{
+    let result="stack"
+    loop value in state.stack {
+        result="{result} {value}"
+    }
+    return result
+}
+selfcheck=():>void=>{
+    let state=fresh()
+    $runtime_assert line(@state "2 3 +")
+    $runtime_assert state.stack =? [5]
+    $runtime_assert line(@state "dup *")
+    $runtime_assert state.stack =? [25]
+    $runtime_assert line(@state "let x")
+    $runtime_assert state.stack.length =? 0
+    $runtime_assert state.names["x"] =? 25
+    $runtime_assert line(@state "x 5 /")
+    $runtime_assert state.stack =? [5]
+    $runtime_assert not line(@state "0 /")
+    $runtime_assert state.stack =? [5]
+    $runtime_assert state.errors =? 1
+    $runtime_assert not line(@state "missing")
+    $runtime_assert state.stack =? [5]
+    $runtime_assert line(@state "clear -7 3 /")
+    $runtime_assert state.stack =? [-3]
+    $runtime_assert not line(@state "let")
+    $runtime_assert state.stack =? [-3]
+    $runtime_assert line(@state "clear")
+    $runtime_assert not line(@state "swap")
+    $runtime_assert not line(@state "drop")
+    $runtime_assert not line(@state "+")
+    $runtime_assert line(@state "1 2 swap")
+    $runtime_assert state.stack =? [2 1]
+    $runtime_assert line(@state "=")
+    $runtime_assert state.stack =? [0]
+    $runtime_assert line(@state "quit")
+    $runtime_assert state.halted
+}
+
+boundaries=():>void=>{
+    let state=fresh()
+    $runtime_assert number("") is? none
+    $runtime_assert number("-") is? none
+    $runtime_assert number("a") is? none
+    $runtime_assert number("12a") is? none
+    $runtime_assert number("0") =? 0
+    $runtime_assert number("-0") =? 0
+    $runtime_assert number("42") =? 42
+    $runtime_assert number("-42") =? -42
+    $runtime_assert words("").length =? 0
+    $runtime_assert words("  a  b  ") =? ["a" "b"]
+    $runtime_assert line(@state "3 4 + let total")
+    $runtime_assert state.names["total"] =? 7
+    $runtime_assert not line(@state "5 let changed missing")
+    $runtime_assert "changed" not in? state.names
+    $runtime_assert state.names["total"] =? 7
+    $runtime_assert state.stack.length =? 0
+    $runtime_assert line(@state "total dup *")
+    $runtime_assert state.stack =? [49]
+    $runtime_assert not line(@state "1 + 0 /")
+    $runtime_assert state.stack =? [49]
+    $runtime_assert state.errors =? 2
+    let saved=state.copy()
+    $runtime_assert line(@state "clear 9 let total")
+    $runtime_assert saved.names["total"] =? 7
+    $runtime_assert state.names["total"] =? 9
+}
+
+main=():>int64=>{
+    boundaries()
+    selfcheck()
+    let state=fresh()
+    let lines:int64=0
+    loop not state.halted {
+        let source=read_line()
+        if source is? none break
+        lines+=1
+        let accepted=line(@state source)
+        if accepted {
+            printl("ok {describe(state)}")
+        } else {
+            printl("error {state.errors} {describe(state)}")
+        }
+    }
+    printl("done {lines} {state.errors} {state.names.length}")
+    return 0
+}

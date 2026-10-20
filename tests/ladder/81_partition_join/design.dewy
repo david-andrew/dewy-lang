@@ -1,0 +1,62 @@
+# Tier 3 / 81_partition_join / milestone 25
+# Acceptance: Fork owned disjoint partitions, join in source order, and prove coverage including an uneven tail.
+# OPEN: Scoped fork-join, partition proof syntax and scheduler context are unspecified; sequential value projection only.
+# This executable projection does not establish the OPEN obligation.
+Partition:type=[begin:int64 end:int64 values:array<int64>]
+split=(xs:array<int64> width:int64<i => i >? 0>):>array<Partition>=>{
+    let parts:array<Partition>=[]
+    let start:int64=0
+    loop start <? xs.length {
+        let finish=min(start+width xs.length)
+        parts.push(Partition[start finish xs[start..finish)])
+        start=finish
+    }
+    return parts
+}
+worker=(part:Partition):>Partition=>{
+    loop i in [0..part.values.length) {
+        part.values[i]=part.values[i]*part.values[i]+part.begin+i
+    }
+    return part
+}
+join=(parts:array<Partition>):>array<int64>=>{
+    let result:array<int64>=[]
+    let cursor:int64=0
+    loop part in parts {
+        $runtime_assert part.begin =? cursor
+        $runtime_assert part.end-part.begin =? part.values.length
+        loop value in part.values {
+            result.push(value)
+        }
+        cursor=part.end
+    }
+    return result
+}
+main=():>int64=>{
+    let source:array<int64>=[loop i in [0..65) i-32]
+    let parts=split(source 8)
+    let completed:array<Partition>=[]
+    loop part in parts {
+        completed.push(worker(part))
+    }
+    let output=join(completed)
+    let checksum:int64=0
+    loop i in [0..output.length) {
+        $runtime_assert output[i] =? source[i]*source[i]+i
+        checksum+=output[i]
+    }
+    $runtime_assert source[0] =? -32
+    $runtime_assert source[64] =? 32
+    $runtime_assert output.length =? 65
+    $runtime_assert split([] 8).length =? 0
+    $runtime_assert parts.length =? 9
+    $runtime_assert parts[8].values.length =? 1
+    $runtime_assert split(source 100).length =? 1
+    $runtime_assert split(source 1).length =? 65
+    $runtime_assert join([]).length =? 0
+    $runtime_assert source.length =? 65
+    $runtime_assert parts[0].begin =? 0
+    $runtime_assert parts[8].end =? 65
+    printl("{checksum} {parts.length}")
+    return 0
+}

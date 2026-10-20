@@ -1,0 +1,62 @@
+# Tier 3 / 89_test_contracts / milestone 28
+# Acceptance: Discover 10 case-expanded tests, report one failed helper expectation, continue the test and retain ordinary main.
+identity=(x:int64):>int64=>x
+first=(xs:array<int64>):>void=>{
+    $expect xs.length >? 0, "nonempty input"
+    $expect xs[0] =? 7, "first element"
+}
+$test(cases=(0 1 -1 42))
+identity_cases=(x:int64):>void=>{
+    $expect identity(x) =? x
+}
+$test
+narrowing=():>void=>{
+    let value:int64?=7
+    $expect value is? int64
+    $expect value+1 =? 8
+    first([7])
+}
+$test
+snapshots=():>void=>{
+    let values:array<int64>=[1 2 3]
+    let saved=values.copy()
+    values[0]=9
+    $expect saved[0] =? 1
+    $expect values[0] =? 9
+    $expect saved.length =? values.length
+}
+$test
+expect_stops_helper=():>void=>{
+    first([])
+    # Failed helper expectation must return only from the helper.
+    printl("continued")
+}
+$test(cases=[ [a=1 b=2] [a=(-3) b=4] [a=0 b=0] ])
+commutes=(a:int64 b:int64):>void=>{
+    $expect a+b =? b+a
+}
+control=():>int64=>{
+    let total:int64=0
+    loop i in [0..16) {
+        total+=identity(i)
+    }
+    return total
+}
+main=():>int64=>{
+    # Ordinary main is preserved when the separate test entry is generated.
+    $runtime_assert control() =? 120
+    $runtime_assert identity(1) =? 1
+    $runtime_assert identity(-1) =? -1
+    $runtime_assert identity(0) =? 0
+    $runtime_assert identity(42) =? 42
+    $runtime_assert control() =? 120
+    $runtime_assert identity(7) =? 7
+    $runtime_assert identity(-7) =? -7
+    $runtime_assert identity(99) =? 99
+    $runtime_assert identity(-99) =? -99
+    $runtime_assert identity(120) =? 120
+    $runtime_assert identity(3)+identity(4) =? 7
+    $runtime_assert identity(0)+identity(0) =? 0
+    printl("{control()}")
+    return 0
+}

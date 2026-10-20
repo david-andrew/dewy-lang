@@ -1,0 +1,211 @@
+# Tier 3 / 91_adventure_state / milestone 29
+# Acceptance: Command-driven adventure with inventory, locked transitions, score, win state and copied save states.
+World:type=[room:string inventory:set<string> flags:set<string> score:int64 turns:int64 won:bool]
+Room:type=[name:string title:string exits:dict<string string> items:array<string>]
+rooms=():>dict<string Room>=>{
+    return [
+        "hall"->Room["hall" "Quiet hall" ["north"->"study" "east"->"garden"] ["lamp"]]
+        "study"->Room["study" "Dusty study" ["south"->"hall" "east"->"vault"] ["key"]]
+        "garden"->Room["garden" "Moon garden" ["west"->"hall" "north"->"gate"] ["coin"]]
+        "vault"->Room["vault" "Stone vault" ["west"->"study"] ["gem"]]
+        "gate"->Room["gate" "Iron gate" ["south"->"garden"] []]
+    ]
+}
+fresh=():>World=>{
+    return World["hall" [] [] 0 0 false]
+}
+words=(text:string):>array<string>=>{
+    let output:array<string>=[]
+    let word=""
+    loop ch in text {
+        if ch =? ' ' {
+            if word.length >? 0 {
+                output.push(word)
+                word=""
+            }
+        } else {
+            word="{word}{ch}"
+        }
+    }
+    if word.length >? 0 output.push(word)
+    return output
+}
+item_here=(room:Room item:string):>bool=>{
+    loop candidate in room.items {
+        if candidate =? item return true
+    }
+    return false
+}
+look=(world:World map:dict<string Room>):>string=>{
+    let room=map[world.room]
+    let output=room.title
+    loop item in room.items {
+        if item not in? world.inventory {
+            output="{output} {item}"
+        }
+    }
+    return output
+}
+move=(@world:World map:dict<string Room> direction:string):>string=>{
+    let room=map[world.room]
+    if direction not in? room.exits return "blocked"
+    let next=room.exits[direction]
+    if next =? "vault" and "unlocked" not in? world.flags {
+        return "locked"
+    }
+    if next =? "gate" and "lamp" not in? world.inventory {
+        return "dark"
+    }
+    world.room=next
+    if next not in? world.flags {
+        world.flags.push(next)
+        world.score+=1
+    }
+    return "entered {next}"
+}
+take=(@world:World map:dict<string Room> item:string):>string=>{
+    if item in? world.inventory return "already held"
+    if not item_here(map[world.room] item) return "not here"
+    world.inventory.push(item)
+    world.score+=5
+    return "took {item}"
+}
+use=(@world:World item:string):>string=>{
+    if item not in? world.inventory return "not held"
+    if item =? "key" and world.room =? "study" {
+        if "unlocked" in? world.flags return "already unlocked"
+        world.flags.push("unlocked")
+        world.score+=10
+        return "vault unlocked"
+    }
+    if item =? "gem" and world.room =? "gate" {
+        if "coin" not in? world.inventory return "toll required"
+        world.won=true
+        world.score+=100
+        return "escaped"
+    }
+    if item =? "lamp" return "lamp shines"
+    return "no effect"
+}
+command=(@world:World map:dict<string Room> source:string):>string=>{
+    if world.won return "game over"
+    let tokens=words(source)
+    if tokens.length =? 0 return "empty"
+    if tokens[0] =? "look" return look(world map)
+    if tokens[0] =? "score" return "score {world.score}"
+    if tokens.length not=? 2 return "syntax"
+    let verb=tokens[0]
+    let arg=tokens[1]
+    world.turns+=1
+    if verb =? "go" return move(@world map arg)
+    if verb =? "take" return take(@world map arg)
+    if verb =? "use" return use(@world arg)
+    return "unknown"
+}
+check=(world:World map:dict<string Room>):>bool=>{
+    if world.room not in? map return false
+    if world.score <? 0 return false
+    if world.turns <? 0 return false
+    if world.won and world.room not=? "gate" return false
+    if world.won and "gem" not in? world.inventory return false
+    if world.won and "coin" not in? world.inventory return false
+    return true
+}
+selfcheck=():>void=>{
+    let map=rooms()
+    let world=fresh()
+    $runtime_assert command(@world map "") =? "empty"
+    $runtime_assert command(@world map "go") =? "syntax"
+    $runtime_assert command(@world map "go west") =? "blocked"
+    $runtime_assert command(@world map "go north") =? "entered study"
+    $runtime_assert command(@world map "go east") =? "locked"
+    $runtime_assert command(@world map "take key") =? "took key"
+    $runtime_assert command(@world map "take key") =? "already held"
+    $runtime_assert command(@world map "use key") =? "vault unlocked"
+    $runtime_assert command(@world map "use key") =? "already unlocked"
+    $runtime_assert command(@world map "go east") =? "entered vault"
+    $runtime_assert command(@world map "take gem") =? "took gem"
+    let saved=world.copy()
+    $runtime_assert command(@world map "go west") =? "entered study"
+    $runtime_assert saved.room =? "vault"
+    $runtime_assert check(world map)
+    $runtime_assert check(saved map)
+    let dark=fresh()
+    $runtime_assert command(@dark map "go east") =? "entered garden"
+    $runtime_assert command(@dark map "go north") =? "dark"
+    $runtime_assert command(@dark map "use key") =? "not held"
+    $runtime_assert command(@dark map "take gem") =? "not here"
+}
+
+boundaries=():>void=>{
+    let map=rooms()
+    let world=fresh()
+    $runtime_assert words(" go  north ") =? ["go" "north"]
+    $runtime_assert command(@world map "dance now") =? "unknown"
+    $runtime_assert command(@world map "go north extra") =? "syntax"
+    $runtime_assert command(@world map "take lamp") =? "took lamp"
+    $runtime_assert command(@world map "use lamp") =? "lamp shines"
+    $runtime_assert command(@world map "take lamp") =? "already held"
+    $runtime_assert world.score =? 5
+    $runtime_assert command(@world map "go east") =? "entered garden"
+    $runtime_assert command(@world map "go north") =? "entered gate"
+    $runtime_assert command(@world map "use lamp") =? "lamp shines"
+    $runtime_assert command(@world map "take nothing") =? "not here"
+    $runtime_assert command(@world map "go north") =? "blocked"
+    $runtime_assert command(@world map "go south") =? "entered garden"
+    $runtime_assert world.score =? 7
+    let saved=world.copy()
+    $runtime_assert command(@world map "take coin") =? "took coin"
+    $runtime_assert "coin" not in? saved.inventory
+    $runtime_assert "coin" in? world.inventory
+    $runtime_assert command(@world map "use coin") =? "no effect"
+    $runtime_assert command(@world map "go west") =? "entered hall"
+    $runtime_assert world.score =? 13
+    $runtime_assert check(saved map)
+    $runtime_assert check(world map)
+    world.won=true
+    $runtime_assert not check(world map)
+    world.room="gate"
+    $runtime_assert not check(world map)
+    world.inventory.push("gem")
+    $runtime_assert check(world map)
+    $runtime_assert command(@world map "go south") =? "game over"
+    $runtime_assert command(@world map "score") =? "game over"
+}
+
+main=():>int64=>{
+    boundaries()
+    selfcheck()
+    let map=rooms()
+    let world=fresh()
+    let script:array<string>=[
+        "look"
+        "take lamp"
+        "go north"
+        "go east"
+        "take key"
+        "use key"
+        "go east"
+        "take gem"
+        "go west"
+        "go south"
+        "go east"
+        "go north"
+        "use gem"
+        "go south"
+        "take coin"
+        "go north"
+        "use gem"
+        "look"
+    ]
+    loop source in script {
+        let response=command(@world map source)
+        $runtime_assert check(world map)
+        printl(response)
+    }
+    $runtime_assert world.won
+    $runtime_assert world.room =? "gate"
+    $runtime_assert world.inventory.length =? 4
+    printl("{world.score} {world.turns} {world.inventory.length}")
+    return 0
+}

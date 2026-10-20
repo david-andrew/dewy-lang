@@ -1,0 +1,17 @@
+insert 1
+insert 1
+insert 1
+rows 2:be:60 3:cy:70
+begin
+changed 1
+changed 1
+rows 1:al:90 3:cy:70
+rollback
+rows 2:be:60 3:cy:70
+begin
+changed 1
+commit
+rows 1:al:40 2:be:60 3:cy:10
+error duplicate
+error syntax
+3 0

@@ -272,7 +272,7 @@ def comptime():
 if __name__=='__main__':
     assert set(ORACLES)==set(range(1,33))
     failed=[]
-    for p in sorted(q for q in ROOT.iterdir() if q.is_dir() and q.name[:2].isdigit() and int(q.name[:2])>=32):
+    for p in sorted(q for q in ROOT.iterdir() if q.is_dir() and q.name[:2].isdigit() and 32<=int(q.name[:2])<=63):
         n=int(p.name[:2])-31;expected=ORACLES[n]()+'\n';target=p/'expected.out'
         if '--write' in sys.argv:target.write_text(expected)
         elif not target.exists() or target.read_text()!=expected:failed.append(p.name)

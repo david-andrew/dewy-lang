@@ -1,0 +1,216 @@
+# Tier 3 / 93_table_queries / milestone 30
+# Acceptance: SQLite-like in-memory table, parsed insert/update/delete/select, primary keys, ordered queries and begin/commit/rollback; independent SQLite oracle.
+Row:type=[id:int64 name:string score:int64]
+Database:type=[rows:array<Row> saved:array<Row> active:bool]
+Query:type=[kind:string id:int64 name:string value:int64]
+words=(text:string):>array<string>=>{
+    let result:array<string>=[]
+    let token=""
+    loop ch in text {
+        if ch =? ' ' {
+            if token.length >? 0 {
+                result.push(token)
+                token=""
+            }
+        } else {
+            token="{token}{ch}"
+        }
+    }
+    if token.length >? 0 result.push(token)
+    return result
+}
+digit_index=(text:string):>int64?=>{
+    loop digit in [0..10) {
+        if text =? "{digit}" return digit
+    }
+    return none
+}
+integer=(text:string):>int64?=>{
+    if text.length =? 0 return none
+    let start:int64=0
+    let sign:int64=1
+    if text[0] =? '-' {
+        sign=-1
+        start=1
+    }
+    if start =? text.length return none
+    let total:int64=0
+    loop i in [start..text.length) {
+        let digit=digit_index("{text[i]}")
+        if digit is? none return none
+        if total >? 100000 return none
+        total=total*10+digit
+    }
+    return sign*total
+}
+parse=(source:string):>Query?=>{
+    let t=words(source)
+    if t.length =? 0 return none
+    if t.length =? 1 {
+        if t[0] in? ["BEGIN" "COMMIT" "ROLLBACK"] {
+            return Query[t[0] 0 "" 0]
+        }
+        return none
+    }
+    if t[0] =? "INSERT" and t.length =? 4 {
+        let id=integer(t[1])
+        let score=integer(t[3])
+        if id is? none or score is? none return none
+        return Query["INSERT" id t[2] score]
+    }
+    if t[0] =? "DELETE" and t.length =? 2 {
+        let id=integer(t[1])
+        if id is? none return none
+        return Query["DELETE" id "" 0]
+    }
+    if t[0] =? "UPDATE" and t.length =? 3 {
+        let id=integer(t[1])
+        let score=integer(t[2])
+        if id is? none or score is? none return none
+        return Query["UPDATE" id "" score]
+    }
+    if t.length =? 6 and t[0] =? "SELECT" {
+        if t[1] not=? "score" or t[2] not=? ">=" return none
+        if t[4] not=? "ORDER" or t[5] not=? "id" return none
+        let score=integer(t[3])
+        if score is? none return none
+        return Query["SELECT" 0 "" score]
+    }
+    return none
+}
+find=(db:Database id:int64):>int64?=>{
+    loop i in [0..db.rows.length) {
+        if db.rows[i].id =? id return i
+    }
+    return none
+}
+select=(db:Database minimum:int64):>string=>{
+    let selected:array<Row>=[]
+    loop row in db.rows {
+        if row.score >=? minimum selected.push(row)
+    }
+    selected.sort_by((r:Row)=>r.id)
+    let result="rows"
+    loop row in selected {
+        result="{result} {row.id}:{row.name}:{row.score}"
+    }
+    return result
+}
+execute=(@db:Database q:Query):>string=>{
+    if q.kind =? "BEGIN" {
+        if db.active return "error transaction"
+        db.saved=db.rows.copy()
+        db.active=true
+        return "begin"
+    }
+    if q.kind =? "ROLLBACK" {
+        if not db.active return "error transaction"
+        db.rows=db.saved
+        db.saved=[]
+        db.active=false
+        return "rollback"
+    }
+    if q.kind =? "COMMIT" {
+        if not db.active return "error transaction"
+        db.saved=[]
+        db.active=false
+        return "commit"
+    }
+    if q.kind =? "SELECT" return select(db q.value)
+    let index=find(db q.id)
+    if q.kind =? "INSERT" {
+        if index is? int64 return "error duplicate"
+        db.rows.push(Row[q.id q.name q.value])
+        return "insert 1"
+    }
+    if index is? none return "changed 0"
+    if q.kind =? "UPDATE" {
+        db.rows[index].score=q.value
+        return "changed 1"
+    }
+    if q.kind =? "DELETE" {
+        db.rows.pop(index)
+        return "changed 1"
+    }
+    return "error query"
+}
+run=(@db:Database source:string):>string=>{
+    let q=parse(source)
+    if q is? none return "error syntax"
+    return execute(@db q)
+}
+selfcheck=():>void=>{
+    let db=Database[[] [] false]
+    $runtime_assert run(@db "INSERT 1 one 5") =? "insert 1"
+    $runtime_assert run(@db "INSERT 1 one 6") =? "error duplicate"
+    $runtime_assert run(@db "BEGIN") =? "begin"
+    $runtime_assert run(@db "BEGIN") =? "error transaction"
+    $runtime_assert run(@db "UPDATE 1 9") =? "changed 1"
+    $runtime_assert run(@db "ROLLBACK") =? "rollback"
+    $runtime_assert db.rows[0].score =? 5
+    $runtime_assert run(@db "COMMIT") =? "error transaction"
+    $runtime_assert run(@db "DELETE 9") =? "changed 0"
+    $runtime_assert run(@db "UPDATE 9 5") =? "changed 0"
+    $runtime_assert run(@db "INSERT x bad 5") =? "error syntax"
+    $runtime_assert run(@db "SELECT score > 0 ORDER id") =? "error syntax"
+    $runtime_assert run(@db "") =? "error syntax"
+    $runtime_assert run(@db "INSERT 2 two x") =? "error syntax"
+    $runtime_assert db.rows.length =? 1
+}
+
+boundaries=():>void=>{
+    let db=Database[[] [] false]
+    $runtime_assert integer("-") is? none
+    $runtime_assert integer("+1") is? none
+    $runtime_assert integer("-9") =? -9
+    $runtime_assert parse("INSERT 1 x") is? none
+    $runtime_assert parse("UPDATE 1") is? none
+    $runtime_assert parse("DELETE") is? none
+    $runtime_assert parse("BEGIN extra") is? none
+    $runtime_assert run(@db "SELECT score >= 0 ORDER id") =? "rows"
+    $runtime_assert run(@db "BEGIN") =? "begin"
+    $runtime_assert run(@db "INSERT 1 a 1") =? "insert 1"
+    $runtime_assert run(@db "ROLLBACK") =? "rollback"
+    $runtime_assert db.rows.length =? 0
+    $runtime_assert run(@db "BEGIN") =? "begin"
+    $runtime_assert run(@db "INSERT 2 b -1") =? "insert 1"
+    $runtime_assert run(@db "COMMIT") =? "commit"
+    $runtime_assert db.rows.length =? 1
+    $runtime_assert db.rows[0].score =? -1
+    $runtime_assert run(@db "SELECT score >= 0 ORDER id") =? "rows"
+    $runtime_assert run(@db "SELECT score >= -1 ORDER id") =? "rows 2:b:-1"
+    $runtime_assert run(@db "DELETE 2") =? "changed 1"
+    $runtime_assert run(@db "DELETE 2") =? "changed 0"
+    $runtime_assert db.rows.length =? 0
+}
+
+main=():>int64=>{
+    boundaries()
+    selfcheck()
+    let db=Database[[] [] false]
+    let script:array<string>=[
+        "INSERT 3 cy 70"
+        "INSERT 1 al 40"
+        "INSERT 2 be 60"
+        "SELECT score >= 50 ORDER id"
+        "BEGIN"
+        "UPDATE 1 90"
+        "DELETE 2"
+        "SELECT score >= 50 ORDER id"
+        "ROLLBACK"
+        "SELECT score >= 50 ORDER id"
+        "BEGIN"
+        "UPDATE 3 10"
+        "COMMIT"
+        "SELECT score >= 0 ORDER id"
+        "INSERT 1 dup 5"
+        "SELECT score >= nope ORDER id"
+    ]
+    loop command in script {
+        printl(run(@db command))
+    }
+    $runtime_assert not db.active
+    $runtime_assert db.rows.length =? 3
+    printl("{db.rows.length} {db.saved.length}")
+    return 0
+}

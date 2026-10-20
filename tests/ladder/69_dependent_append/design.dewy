@@ -1,0 +1,62 @@
+# Tier 3 / 69_dependent_append / milestone 22
+# Acceptance: Carry returned index evidence across a mutable append and a search result.
+append=(@xs:array<int64> value:int64):>addr<i => i <? xs.length>=>{
+    let i=xs.length
+    xs.push(value)
+    return i
+}
+find=(xs:array<int64> needle:int64):>addr<i => i <? xs.length> | none=>{
+    loop i in [0..xs.length) {
+        if xs[i] =? needle return i
+    }
+    return none
+}
+read_found=(xs:array<int64> needle:int64):>int64=>{
+    let index=find(xs needle)
+    if index is? addr {
+        return xs[index]
+    }
+    return -1
+}
+main=():>int64=>{
+    let xs:array<int64>=[]
+    let signature:int64=0
+    loop n in [0..32) {
+        let i=append(@xs n*n)
+        $assert i <? xs.length
+        signature+=xs[i]
+    }
+    $runtime_assert xs.length =? 32
+    let saved=xs.copy()
+    let index=append(@xs 999)
+    $assert index <? xs.length
+    $runtime_assert xs[index] =? 999
+    $runtime_assert saved.length =? 32
+    $runtime_assert read_found(saved 49) =? 49
+    $runtime_assert read_found(saved 999) =? -1
+    $runtime_assert read_found([] 0) =? -1
+    $runtime_assert read_found([8] 8) =? 8
+    $runtime_assert read_found([8] 9) =? -1
+    $runtime_assert saved[0] =? 0
+    $runtime_assert saved[1] =? 1
+    $runtime_assert saved[2] =? 4
+    $runtime_assert saved[3] =? 9
+    $runtime_assert saved[4] =? 16
+    $runtime_assert saved[5] =? 25
+    $runtime_assert saved[6] =? 36
+    $runtime_assert saved[7] =? 49
+    $runtime_assert saved[8] =? 64
+    $runtime_assert saved[9] =? 81
+    $runtime_assert xs.length =? 33
+    $runtime_assert saved[31] =? 961
+    $runtime_assert signature =? 10416
+    $runtime_assert read_found(saved 961) =? 961
+    $runtime_assert read_found(saved 960) =? -1
+    $runtime_assert read_found([0 0] 0) =? 0
+    $runtime_assert saved.length+1 =? xs.length
+    $runtime_assert read_found(saved 16) =? 16
+    $runtime_assert read_found(saved 25) =? 25
+    $runtime_assert read_found(saved 36) =? 36
+    printl("{signature} {xs[index]}")
+    return 0
+}

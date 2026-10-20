@@ -19,7 +19,21 @@
     "17": "Reusable generic callback libraries",
     "18": "Deterministic owned parallelism",
     "19": "Large deterministic game state",
-    "20": "Compile-time library generation"
+    "20": "Compile-time library generation",
+    "21": "Strict predictable kernels and costly-copy diagnostics",
+    "22": "Refinement, evidence and explicit-check boundaries",
+    "23": "Composable effect contracts and callback rows",
+    "24": "Scoped storage and deterministic resource ownership",
+    "25": "Structured concurrency over proven partitions",
+    "26": "Tensor shapes and explicit IEEE policy",
+    "27": "Exact arithmetic beyond machine words",
+    "28": "Affine quantities and language-native test contracts",
+    "29": "Interactive language and state-machine applications",
+    "30": "Service, query-engine and game integration"
+  },
+  "tiers": {
+    "1–2": [1, 20],
+    "3": [21, 30]
   },
   "programs": {
     "01_word_count": {"milestone": 1},
@@ -84,7 +98,38 @@
     "60_function_combinators": {"milestone": 17},
     "61_module_error_flow": {"milestone": 14},
     "62_reflection_fields": {"milestone": 20},
-    "63_compiletime_tables": {"milestone": 20}
+    "63_compiletime_tables": {"milestone": 20},
+    "64_strict_audio": {"milestone": 21, "note": "64 allocation-free fixed-buffer audio blocks; no hidden copy, detach or panic in the kernel.", "open": "Module strict-lane directive and the distinct no-panic/no-detach vocabulary are unspecified; no_effects alone does not certify the full lane."},
+    "65_reject_hidden_allocation": {"milestone": 21, "note": "Reject dynamic allocation behind a no allocates signature.", "expect": {"kind": "compile-error", "diagnostic": "allocat", "line": 35}},
+    "66_reject_implicit_copy": {"milestone": 21, "note": "Reject an implicit independent runtime-sized mutable copy.", "expect": {"kind": "compile-error", "diagnostic": "explicit cop|implicit cop|runtime-sized cop|implicit costly copy", "line": 37}},
+    "67_reject_unproved_index": {"milestone": 22, "note": "Reject indexing with unknown bounds rather than insert a panic.", "open": "Archived default no-traps rejects unproved indexing; authoritative GOALS permits ordinary runtime checks until forbidden. No module-wide strict profile spelling exists. Rejection acceptance requires the policy decision or an approved strict profile.", "expect": {"kind": "compile-error", "diagnostic": "cannot prove|unproven|bounds", "line": 35}},
+    "68_positive_divisors": {"milestone": 22, "note": "Prove positive divisors and nonempty indexing through helpers and guards."},
+    "69_dependent_append": {"milestone": 22, "note": "Carry returned index evidence across a mutable append and a search result."},
+    "70_reject_stale_fact": {"milestone": 22, "note": "Reject stale index evidence after a length-changing place mutation.", "open": "Archived default no-traps rejects unproved indexing; authoritative GOALS permits ordinary runtime checks until forbidden. No module-wide strict profile spelling exists. Rejection acceptance requires the policy decision or an approved strict profile.", "expect": {"kind": "compile-error", "diagnostic": "cannot prove|bounds|refinement|length", "line": 39}},
+    "71_checked_proofs": {"milestone": 22, "note": "Check and erase proof calls; retain transitive result facts at callers."},
+    "72_prototype_boundary": {"milestone": 22, "note": "Prototype-deferred bounds become explicit runtime checks; checked code exports success facts.", "open": "GOALS permits ordinary runtime checks until forbidden, while archived no-traps requires proofs; exact $prototype scope and strict-profile interaction need reconciliation."},
+    "73_place_effects": {"milestone": 23, "note": "Translate reads/writes on place parameters through swapped arguments and sibling fields."},
+    "74_callback_rows": {"milestone": 23, "note": "Forward nonlocal callback rows while remapping explicit place permissions."},
+    "75_reject_effect_violation": {"milestone": 23, "note": "Reject a transitive external mutation inside no_effects.", "expect": {"kind": "compile-error", "diagnostic": "effect|mutat|no_effects", "line": 40}},
+    "76_arena_escape": {"milestone": 24, "note": "Copies escaping nested allocator scopes survive reset and preserve independent aggregates.", "open": "Typed allocation capabilities and allocator exhaustion result contract remain provisional."},
+    "77_owner_cleanup": {"milestone": 24, "note": "Move last-use owners and release actual resources exactly once on return, break and continue; do not assert elidable copy-hook counts."},
+    "78_reject_resource_copy": {"milestone": 24, "note": "Reject copying a drop-only owner while its original remains live.", "expect": {"kind": "compile-error", "diagnostic": "move-only|copy hook|copy|resource", "line": 44}},
+    "79_scoped_byte_loan": {"milestone": 24, "note": "Read scoped bytes, reserve and commit writable bytes, preserve snapshots after detach."},
+    "80_reject_loan_escape": {"milestone": 24, "note": "Reject a raw address returned from a scoped storage loan.", "expect": {"kind": "compile-error", "diagnostic": "escape|lend|address|loan", "line": 36}},
+    "81_partition_join": {"milestone": 25, "note": "Fork owned disjoint partitions, join in source order, and prove coverage including an uneven tail.", "open": "Scoped fork-join, partition proof syntax and scheduler context are unspecified; sequential value projection only."},
+    "82_overlap_race": {"milestone": 25, "note": "Compile-time reject concurrent writes to overlapping ranges; accept adjacent partitions.", "open": "No task/partition spelling exists to encode the rejected concurrent source. This source is the deterministic overlap oracle, not a negative compiler test. Pending rejection: overlapping mutable task partitions."},
+    "83_transfer_properties": {"milestone": 25, "note": "Derive structural task-transfer properties; reject an Rc-like non-atomic handle crossing tasks.", "open": "Send/Sync spelling and negative assertion API are open; this only tests owned-message value behavior. Rc/Arc APIs cannot be invented. Pending rejection: value cannot cross a task boundary because its non-atomic shared owner is not transferable."},
+    "84_tensor_broadcast": {"milestone": 26, "note": "Contiguous rank-2 arrays, row/column broadcast, transpose, snapshot rows, and reject mismatched shapes.", "open": "General multidimensional literals/types, axis broadcasting and view layout are provisional; flat Matrix is an algorithm projection, not the tensor feature."},
+    "85_ieee_policy": {"milestone": 26, "note": "IEEE signed zero, subnormal, overflow/underflow, NaN comparisons and deterministic reduction under an explicit policy.", "open": "Formats, literals/conversions, NaN/Inf/divide-by-zero behavior, promotion, FMA and reduction policy need decisions. Exact controls do not satisfy IEEE acceptance."},
+    "86_exact_energy": {"milestone": 27, "note": "Exact irregular energy integration, decimal tariffs, split invariance and denominator growth."},
+    "87_big_arithmetic": {"milestone": 27, "note": "Runtime bigint modular exponentiation, 100!, binomial exact division and big rational intermediates; arithmetic only, no cryptographic security claim."},
+    "88_temperature_points": {"milestone": 28, "note": "Temperature point-minus-point and point-plus-delta, exact C/F/K conversions and requested display units.", "open": "Offset scale declarations and point/delta arithmetic are provisional; display-unit selection x as km is provisional. Wrappers are exact controls only."},
+    "89_test_contracts": {"milestone": 28, "note": "Discover 10 case-expanded tests, report one failed helper expectation, continue the test and retain ordinary main."},
+    "90_stack_repl": {"milestone": 29, "note": "Interactive stdin RPN interpreter: variables, arithmetic, rollback on parse/stack/divisor errors, EOF and quit; bounded integer parser."},
+    "91_adventure_state": {"milestone": 29, "note": "Command-driven adventure with inventory, locked transitions, score, win state and copied save states."},
+    "92_http_json_routes": {"milestone": 30, "note": "HTTP/1.1 request parser and JSON integer-schema CRUD routing with status codes and transactional validation; deterministic transport transcripts.", "open": "Portable socket/listen/accept, request framing limits and host capability APIs are unspecified. This tests the API handler, not a listening network server."},
+    "93_table_queries": {"milestone": 30, "note": "SQLite-like in-memory table, parsed insert/update/delete/select, primary keys, ordered queries and begin/commit/rollback; independent SQLite oracle."},
+    "94_physics_hash": {"milestone": 30, "note": "80 integer-step 2D physics frames, spatial hash broad phase cross-checked against all pairs, deterministic axis impulses, walls, conserved kinetic sum and saved world."}
   },
   "design_passing": [
     "01_word_count",
@@ -149,6 +194,7 @@
     "60_function_combinators",
     "61_module_error_flow",
     "62_reflection_fields",
-    "63_compiletime_tables"
+    "63_compiletime_tables",
+    "66_reject_implicit_copy"
   ]
 }

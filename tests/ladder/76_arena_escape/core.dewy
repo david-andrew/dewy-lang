@@ -1,0 +1,63 @@
+# Current-dialect algorithm projection; does not establish removed design contracts.
+# Tier 3 / 76_arena_escape / milestone 24
+# Acceptance: Copies escaping nested allocator scopes survive reset and preserve independent aggregates.
+# OPEN: Typed allocation capabilities and allocator exhaustion result contract remain provisional.
+# This executable projection does not establish the OPEN obligation.
+Packet:type=[id:int64 values:array<int64>]
+build=(n:int64):>Packet=>{
+    let values:array<int64>=[]
+    loop i in [0..n) {
+        values.push(i*i)
+    }
+    return Packet[n values]
+}
+sum=(xs:array<int64>):>int64=>{
+    let total:int64=0
+    loop x in xs {
+        total+=x
+    }
+    return total
+}
+main=():>int64=>{
+    let arena:int64=0
+    let other:int64=0
+    let kept:array<Packet>=[]
+    let total:int64=0
+    loop round in [1..17) {
+        let packet={
+            let temporary=build(round)
+            temporary
+        }
+        kept.push(packet)
+        total+=sum(packet.values)
+        arena=0
+    }
+    let nested={
+        let inside={
+            build(5)
+        }
+        inside
+    }
+    arena=0
+    other=0
+    $runtime_assert nested.id =? 5
+    $runtime_assert sum(nested.values) =? 30
+    $runtime_assert kept.length =? 16
+    $runtime_assert kept[0].id =? 1
+    $runtime_assert kept[0].values[0] =? 0
+    $runtime_assert kept[15].id =? 16
+    $runtime_assert kept[15].values[15] =? 225
+    let saved=kept.copy()
+    kept[0].values[0]=99
+    $runtime_assert saved[0].values[0] =? 0
+    $runtime_assert sum(saved[3].values) =? 14
+    $runtime_assert sum(saved[7].values) =? 140
+    $runtime_assert sum(saved[15].values) =? 1240
+    $runtime_assert sum(nested.values) =? 30
+    $runtime_assert sum(saved[1].values) =? 1
+    $runtime_assert sum(saved[2].values) =? 5
+    $runtime_assert sum(saved[4].values) =? 30
+    $runtime_assert sum(saved[5].values) =? 55
+    printl("{total} {sum(nested.values)} {saved.length}")
+    return 0
+}
