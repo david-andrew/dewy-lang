@@ -7,12 +7,13 @@ use 'ast.jo'
 use 'check.jo'
 use 'expr.jo'
 use 'units.jo'
+use 'refine.jo'
 
 # (fixed: T[N], N elements stored in place; elem is T, bits is N. box: what a field holding its
 # own struct or enum keeps, a pointer to its value (elem) on the heap; only the lowering sees it)
 enum TK:
     void_, bool_, int_, float_, str_, array, ptr, fn_, struct_, enum_, tuple, opt, var, param,
-    null_, range, module, typeval, none_lit, vec, cfn, fixed, box, polyfn, quantity, dimension
+    null_, range, module, typeval, none_lit, vec, cfn, fixed, box, polyfn, quantity, dimension, refined
 
 const TF_HAS_VAR = 1
 const TF_LAID_OUT = 2
@@ -194,8 +195,12 @@ basic = (kind: TK, bits: int, sign: bool, size: int) -> int:
     t.flags = i32(TF_LAID_OUT)
     mk_type(t, [])
 
-mk_array = (e: int) -> int: mk_type(TypeInfo(kind = .array, elem = i32(e)), [])
-mk_fixed = (e: int, n: int) -> int: mk_type(TypeInfo(kind = .fixed, elem = i32(e), bits = i32(n)), [])
+mk_array = (e: int) -> int:
+    if refine_active and ref_storage_contract(e): fatal(-1, "refined elements await aggregate invariant checking")
+    mk_type(TypeInfo(kind = .array, elem = i32(e)), [])
+mk_fixed = (e: int, n: int) -> int:
+    if refine_active and ref_storage_contract(e): fatal(-1, "refined elements await aggregate invariant checking")
+    mk_type(TypeInfo(kind = .fixed, elem = i32(e), bits = i32(n)), [])
 fixed_len = (t: int) -> int: int(types[prune(t)].bits)
 mk_ptr = (e: int) -> int: mk_type(TypeInfo(kind = .ptr, elem = i32(e)), [])
 mk_box = (e: int) -> int: mk_type(TypeInfo(kind = .box, elem = i32(e)), [])
@@ -308,6 +313,7 @@ zonk = (t0: int) -> int:
     t = prune(t0)
     if t == 0 or not has_var(t) or types[t].kind == .var or types[t].kind == .param: return t
     k = types[t].kind
+    if k == .refined: return mk_refined(zonk(int(types[t].elem)), ref_subst(int(types[t].st), [], true))
     if k == .quantity: return mk_quantity(zonk(int(types[t].elem)), int(types[t].st))
     if k == .struct_ or k == .enum_:
         si = int(types[t].st)
@@ -646,7 +652,7 @@ layout = (t0: int):
     al = 1
     m = false
     boxed = false
-    if k == .quantity:
+    if k == .quantity or k == .refined:
         base = int(types[t].elem)
         layout(base)
         types[t].size = types[base].size
@@ -789,6 +795,7 @@ type_str_in = (t0: int, dewy: bool) -> str:
     if t == 0: return "?"
     ti = types[t]
     match ti.kind:
+        refined: "{type_str(int(ti.elem), dewy)}<refinement>"
         quantity: "{type_str(int(ti.elem), dewy)} * {dimension_str(int(ti.st))}"
         dimension: dimension_str(int(ti.st))
         void_:

@@ -1,0 +1,10 @@
+# quick
+positive=int64<i => i >? 0>
+large=int64<j => 1 <? j and j >? 1>
+good=(x:positive):>large=>{ if x >? 1 {return x}; return 2 }
+main=()=>{
+ let f:<(renamed:large):>positive>=@good
+ let result=f(3)
+ $assert result >? 0
+ printl(result)
+}

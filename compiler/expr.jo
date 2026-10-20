@@ -10,6 +10,7 @@ use 'ast.jo'
 use 'types.jo'
 use 'check.jo'
 use 'facts.jo'
+use 'refine.jo'
 use 'reflection.jo'
 use 'ide.jo'
 
@@ -22,7 +23,7 @@ enum IN:
     static_assert, runtime_assert, dewy_print
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
-enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy
+enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement
 
 struct Intrinsic:
     name: str
@@ -171,6 +172,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if from == T_NEVER: return true
     fk = types[from].kind
     tk = types[to].kind
+    if fk == .refined or tk == .refined: return can_coerce(n, representation_type(from), representation_type(to))
     if fk == .quantity or tk == .quantity:
         if fk == .var or tk == .var: return true
         if fk == .quantity and tk == .quantity:
@@ -252,6 +254,7 @@ lit_fits = (n: int, t: int) -> bool:
 # coerce node n to `target` (rewrites n in place); returns n
 coerce = (n: int, target: int) -> int:
     if target == 0: return n
+    if refine_active and types[prune(target)].kind == .refined: return refine_coerce(n, target)
     if charlike(n) and is_int(target):
         charlike_to_int(n)
         nodes[n].type = i32(target)
@@ -901,6 +904,9 @@ save_call_order = (n: int, given: int[], final: int[]):
 match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
     pat = prune(pat0)
     a = prune(a0)
+    if refine_active:
+        pat = representation_type(pat)
+        a = representation_type(a)
     if a == T_NEVER: return 0
     pk = types[pat].kind
     ak = types[a].kind
@@ -1020,6 +1026,7 @@ subst_partial = (pat0: int, binds: mut int[]) -> int:
         if binds[id] == 0: binds[id] = mk_var()
         return binds[id]
     if k == .array: return mk_array(subst_partial(int(types[pat].elem), binds))
+    if k == .refined: return mk_refined(subst_partial(int(types[pat].elem), binds), ref_subst(int(types[pat].st), binds))
     if k == .quantity: return mk_quantity(subst_partial(int(types[pat].elem), binds), int(types[pat].st))
     if k == .fixed: return mk_fixed(subst_partial(int(types[pat].elem), binds), fixed_len(pat))
     if k == .ptr: return mk_ptr(subst_partial(int(types[pat].elem), binds))
@@ -1121,7 +1128,7 @@ branch_arg_cost = (a: int, pat: int, binds: mut int[], hidden: int[] = []) -> in
     0
 
 arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
-    p = prune(pat)
+    p = representation_type(pat)
     pk = types[p].kind
     if ctx_dependent(a):
         if oversized_literal(a):
@@ -1426,6 +1433,10 @@ check_mutable_arguments = (args: int[], mask: int, pos: int):
                 fatal(nodes[args[i]].pos, "mutable arguments {j + 1} and {i + 1} overlap; pass disjoint places")
 
 finish_arg = (a: int, pt: int, is_mut: bool):
+    if is_mut and refine_active:
+        storage = refine_storage(a, ntype(a))
+        if types[prune(storage)].kind == .refined or types[prune(pt)].kind == .refined:
+            fatal(nodes[a].pos, "mutable refinement access is not supported in the scalar slice")
     if is_mut and not has_flag(a, NF_MUT) and files[pos_file(nodes[a].pos)].is_dewy:
         fatal(nodes[a].pos, "a mutable argument needs `@` at the call site")
     if nodes[a].kind == .hole:
@@ -1550,6 +1561,9 @@ has_hole = (args: int[]) -> bool:
     false
 
 finish_partial = (n: int, ptypes: int[], mutmask: int, ret: int) -> int:
+    if refine_active:
+        loop t in ptypes + [ret]:
+            if ref_has_formals(t): fatal(nodes[n].pos, "dependent refinement partial application is not yet supported")
     hp: int[]
     mm = 0
     loop i in [0..nkids(n)):
@@ -1969,8 +1983,8 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             a = unnamed(source)
             loop i in [0..np):
                 if cd.args[i] != a: continue
-                finish_arg(a, fns[f].ptypes[i], false)
-                captured[i] = capture_value(a, fns[f].ptypes[i], statements)
+                finish_arg(a, representation_type(fns[f].ptypes[i]), false)
+                captured[i] = capture_value(a, representation_type(fns[f].ptypes[i]), statements)
                 break
     fin: int[]
     loop i in [0..np):
@@ -1978,11 +1992,14 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         is_mut = has_flag(kid(decl, i), NF_MUT)
         if a == 0:
             earlier = if dewy_call and not capture_defaults: [] else: fin
-            a = default_arg(decl, i, fns[f].ptypes[i], earlier, capture_defaults, fns[f].targs)
-            if capture_defaults: a = capture_value(a, fns[f].ptypes[i], statements)
+            a = default_arg(decl, i, (if capture_defaults: representation_type(fns[f].ptypes[i]) else: fns[f].ptypes[i]), earlier, capture_defaults, fns[f].targs)
+            if capture_defaults:
+                a = capture_value(a, representation_type(fns[f].ptypes[i]), statements)
+                finish_arg(a, fns[f].ptypes[i], false)
             fin.push(a)
             continue
         if capture_defaults:
+            finish_arg(captured[i], fns[f].ptypes[i], false)
             fin.push(captured[i])
             continue
         finish_arg(a, fns[f].ptypes[i], is_mut)
@@ -2001,7 +2018,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         nodes[n].aux2 = 0
         return finish_partial(n, fns[f].ptypes, int(cd.sig.mutmask), int(fns[f].ret))
     if not capture_defaults: save_call_order(n, args, fin)
-    nodes[n].type = fns[f].ret
+    nodes[n].type = i32(representation_type(int(fns[f].ret)))
     if capture_defaults:
         call = nodes.len()
         nodes.push(nodes[n])
@@ -2011,7 +2028,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         nodes[n] = Node(kind = .block, pos = nodes[n].pos, type = fns[f].ret)
         if tkind(int(fns[f].ret)) != .void_ and int(fns[f].ret) != T_NEVER: nodes[n].aux = 1
         set_list(n, statements)
-    int(fns[f].ret)
+    representation_type(int(fns[f].ret))
 
 value_call = (n: int, callee: int, args: int[], expected: int = 0) -> int:
     ft = prune(ntype(callee))
@@ -2045,8 +2062,8 @@ value_call = (n: int, callee: int, args: int[], expected: int = 0) -> int:
         pts: int[]
         loop i in [0..na): pts.push(targ(ft, i))
         return finish_partial(n, pts, int(types[ft].mutmask), int(types[ft].elem))
-    nodes[n].type = types[ft].elem
-    int(types[ft].elem)
+    nodes[n].type = i32(representation_type(int(types[ft].elem)))
+    representation_type(int(types[ft].elem))
 
 slot_of = (args: int[], a: int) -> int:
     loop x in args:
@@ -5488,10 +5505,16 @@ check_lambda = (lam: int, expected: int) -> int:
     fns[f].decl = i32(lam)
     fns[f].has_env = true
     fns[f].body = nodes[lam].b
+    old_formals = refine_formals
+    old_self = refine_self
+    if refine_active:
+        refine_formals = []
+        loop p in kids(lam): refine_formals.push(int(nodes[p].name))
     mm = 0
     pts: int[]
     loop i in [0..np):
         p = kid(lam, i)
+        refine_self = int(nodes[p].name)
         pt = 0
         if nodes[p].a != 0:
             pt = resolve_type(int(nodes[p].a))
@@ -5508,6 +5531,8 @@ check_lambda = (lam: int, expected: int) -> int:
             mm |= 1 << i
             add_flag(p, NF_MUT)
         pts.push(pt)
+    refine_formals = old_formals
+    refine_self = old_self
     fns[f].ptypes = pts
     ret_hint = 0
     if et != 0: ret_hint = int(types[et].elem)
@@ -5859,6 +5884,7 @@ check_expr = (n: int, expected: int) -> int:
     if nodes[n].type != 0 and has_flag(n, NF_CHECKED): return ntype(n)
     t = 0
     ex = prune(expected)
+    if refine_active: ex = representation_type(ex)
     if expected == 0: ex = 0
     exk = TK.void_
     if ex != 0: exk = types[ex].kind
@@ -6789,6 +6815,12 @@ check_expr = (n: int, expected: int) -> int:
             add_flag(n, NF_CHECKED)
             last_checked = n
             return tt
+        if types[tt].kind == .refined:
+            check_expr(a, int(types[tt].elem))
+            nodes[n] = nodes[last_checked]
+            refine_coerce(n, tt)
+            last_checked = n
+            return ntype(n)
         ak = nodes[a].kind
         if ak == .array or ak == .map_lit or ak == .tuple or ((ak == .int_lit or ak == .float_lit) and (is_numeric(tt))):
             # `[1, 2] as [u8]`, `0.5 as f32`: the target type guides the literal
@@ -6873,6 +6905,7 @@ check_expr = (n: int, expected: int) -> int:
     else if k == .range: return check_range_value(n, expected)
     else if k == .addr:
         at = check_expr(int(nodes[n].a), 0)
+        if refine_active and types[prune(refine_storage(int(nodes[n].a), at))].kind == .refined: fatal(nodes[n].pos, "mutable refinement access awaits storage invariant checking")
         ak = nodes[int(nodes[n].a)].kind
         if ak != .ident and ak != .field and ak != .index: fatal(nodes[n].pos, "can only take the address of a variable, field or element")
         if ak == .ident and nodes[int(nodes[n].a)].aux == i32(int(SK.local)):
@@ -6899,6 +6932,7 @@ check_expr = (n: int, expected: int) -> int:
         t = check_block(n, expected, true)
     else if k == .matrix: return check_matrix(n, expected)
     else: fatal(nodes[n].pos, "invalid expression")
+    if refine_active and types[t].kind == .refined: t = int(types[t].elem)
     nodes[n].type = i32(t)
     add_flag(n, NF_CHECKED)
     last_checked = n
@@ -7818,8 +7852,10 @@ callable_shape_eq = (a0: int, b0: int) -> bool:
 callable_fits = (from: int, to: int) -> bool:
     if types[from].mutmask != types[to].mutmask or types[from].nargs != types[to].nargs: return false
     loop i in [0..int(types[from].nargs)):
-        if not callable_shape_eq(targ(from, i), targ(to, i)): return false
-    prune(int(types[from].elem)) == T_NEVER or callable_shape_eq(int(types[from].elem), int(types[to].elem))
+        if types[from].mutmask & i32(1 << i) != 0:
+            if not type_eq(targ(from, i), targ(to, i)): return false
+        else if not refine_implies(targ(to, i), targ(from, i)): return false
+    prune(int(types[from].elem)) == T_NEVER or refine_implies(int(types[from].elem), int(types[to].elem))
 
 is_nd = (t0: int) -> bool:
     t = prune(t0)

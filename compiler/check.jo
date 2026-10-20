@@ -16,6 +16,7 @@ use 'poly_closure.jo'
 use 'prelude.jo'
 use 'comptime.jo'
 use 'facts.jo'
+use 'refine.jo'
 use 'reflection.jo'
 
 enum SK: none_, local, global, fns, struct_, enum_, const_, module, type_, builtin, alias_, reflected
@@ -1043,6 +1044,7 @@ new_global = (name: int, decl: int, m: int) -> int:
 resolve_type = (tn: int) -> int:
     if nodes[tn].kind == .tname and nodes[tn].aux == -7: return int(nodes[tn].ival)
     k = nodes[tn].kind
+    if k == .trefined: return resolve_refinement(tn)
     if k == .tquantity: return resolve_quantity_type(tn)
     # (Dewy's array<T> and dict<K V>: the type words, for the editor)
     if ide_on and (k == .tarray or k == .tmap) and nodes[tn].pos > 0 and files[pos_file(nodes[tn].pos)].is_dewy:
@@ -1102,6 +1104,7 @@ resolve_type = (tn: int) -> int:
             if seen.has(name): fatal(nodes[field].pos, "duplicate record field '{name_of(name)}'")
             seen[name] = true
             t = resolve_type(int(nodes[field].a))
+            if refine_active and ref_storage_contract(t): fatal(nodes[field].pos, "refined fields await aggregate invariant checking")
             if tkind(t) == .void_ or tkind(t) == .typeval:
                 fatal(nodes[field].pos, "inline record fields need value types")
             nodes[field].type = i32(t)
@@ -1132,13 +1135,23 @@ resolve_type = (tn: int) -> int:
         return mk_union(ms)
     if k == .tptr: return mk_ptr(resolve_type(int(nodes[tn].a)))
     if k == .tfn:
+        old_formals = refine_formals
+        old_self = refine_self
+        if refine_active:
+            refine_formals = []
+            loop p in kids2(tn): refine_formals.push(int(nodes[p].name))
         ps: int[]
         mm = 0
         loop i in [0..nkids(tn)):
+            if i < refine_formals.len(): refine_self = refine_formals[i]
             ps.push(resolve_type(kid(tn, i)))
             if has_flag(kid(tn, i), NF_MUT): mm |= 1 << i
         ret = T_VOID
+        refine_self = 0
         if nodes[tn].a != 0: ret = resolve_type(int(nodes[tn].a))
+        if refine_active: ref_validate_signature(ps, ret, mm, nodes[tn].pos)
+        refine_formals = old_formals
+        refine_self = old_self
         if has_flag(tn, NF_CABI): return mk_cfn(ps, ret)
         key = 0
         if nkids2(tn) > 0:
@@ -1227,6 +1240,7 @@ subst = (t0: int, targs: int[]) -> int:
         if id < targs.len() and targs[id] != 0: return targs[id]
         return t
     if k == .var: return t
+    if k == .refined: return mk_refined(subst(int(types[t].elem), targs), ref_subst(int(types[t].st), targs))
     if k == .quantity: return mk_quantity(subst(int(types[t].elem), targs), int(types[t].st))
     if k == .array: return mk_array(subst(int(types[t].elem), targs))
     if k == .fixed: return mk_fixed(subst(int(types[t].elem), targs), fixed_len(t))
@@ -1285,6 +1299,7 @@ check_struct_fields = (si: int):
                     t = lit_default(cl)
                 fields[fi].type = i32(zonk(t))
             else: fatal(nodes[f].pos, "field needs a type")
+            if refine_active and ref_storage_contract(int(fields[fi].type)): fatal(nodes[f].pos, "refined fields await aggregate invariant checking")
             loop k in [0..inherited.len() + i):
                 if fields[int(structs[si].fields) + k].name == nodes[f].name: fatal(nodes[f].pos, "duplicate field '{name_of(int(nodes[f].name))}'")
     else:
@@ -1346,9 +1361,15 @@ fn_sig = (decl: int) -> FnSig:
     loop i in [0..ntp):
         nm = int(nodes[kid2(decl, i)].name)
         push_scope_sym(nm, new_sym(nm, .type_, mk_param(i), 0))
+    old_formals = refine_formals
+    old_self = refine_self
+    refine_formals = []
+    if refine_active:
+        loop p in kids(decl): refine_formals.push(int(nodes[p].name))
     mm = 0
     loop i in [0..nkids(decl)):
         p = kid(decl, i)
+        refine_self = int(nodes[p].name)
         if nodes[p].a != 0: sig.params.push(resolve_type(int(nodes[p].a)))
         else:
             sig.params.push(mk_param(ntp))
@@ -1357,11 +1378,19 @@ fn_sig = (decl: int) -> FnSig:
     sig.mutmask = i32(mm)
     sig.ntp = i32(ntp)
     sig.generic = ntp > 0
+    refine_self = 0
     if nodes[decl].a != 0: sig.ret = i32(resolve_type(int(nodes[decl].a)))
     else if has_flag(decl, NF_VOID): sig.ret = i32(T_VOID)
+    if refine_active:
+        ref_validate_signature(sig.params, int(sig.ret), mm, nodes[decl].pos)
+        if has_flag(decl, NF_EXTERN):
+            loop t in sig.params + [int(sig.ret)]:
+                if types[prune(t)].kind == .refined: fatal(nodes[decl].pos, "extern refinement contracts require a checked implementation")
     scope_reset(mark)
     ctxs.pop()
     cx = saved
+    refine_formals = old_formals
+    refine_self = old_self
     decl_infos[di].sig = sig
     sig
 
@@ -1469,6 +1498,7 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
     ensure_body(decl)
     if sig.ret != 0: fns[f].ret = i32(subst(int(sig.ret), zt))
     else if nodes[decl].b != 0 and syntactic_void(int(nodes[decl].b)): fns[f].ret = i32(T_VOID)
+    if refine_active and sig.generic: ref_validate_signature(fns[f].ptypes, int(fns[f].ret), int(sig.mutmask), use_pos)
     if sig.generic: fns[f].body = i32(clone(int(nodes[decl].b)))
     else: fns[f].body = nodes[decl].b
     if has_flag(decl, NF_EXTERN) and fns[f].ret == 0: fns[f].ret = i32(T_VOID)
@@ -1740,6 +1770,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
     else:
         t = 0
         if nodes[d].a != 0: t = resolve_type(int(nodes[d].a))
+        if refine_active and types[prune(t)].kind == .refined and nodes[d].b == 0: nodes[d].b = i32(bc_int(0, nodes[d].pos))
         # (x: T, a struct with default field values: it starts with them)
         if nodes[d].b == 0 and t != 0: nodes[d].b = i32(struct_default(t, nodes[d].pos))
         if nodes[d].b != 0:
@@ -2952,6 +2983,7 @@ check_assign = (s: int) -> int:
         else if r != 0 and nodes[r].kind == .ident and nodes[r].aux == i32(int(SK.global)):
             wg = int(nodes[r].sym)
             if not gcopy_writes.has(wg): gcopy_writes[wg] = nodes[s].pos
+    if refine_active: lt = refine_storage(lhs, lt)
     if op == int(Tok.assign):
         rt = prune(check_expr(int(nodes[s].b), lt))
         if rt != lt and nodes[lhs].kind == .ident and (nodes[lhs].aux == i32(int(SK.local)) or nodes[lhs].aux == i32(int(SK.global))) and not can_coerce(last_checked, rt, lt): var_type_error(lhs, lt, rt, nodes[last_checked].pos)
@@ -2966,6 +2998,13 @@ check_assign = (s: int) -> int:
             # x.f = Enemy() where x.f is an Enemy?: it holds one from here on
             else if tkind(lt) == .opt and len(key) > 0 and type_eq(int(types[prune(lt)].elem), rt): narrow_path(lhs, -2, true)
         else if path_narrows > 0 and nodes[lhs].kind == .ident: path_forget(path_key(lhs))
+        return s
+    if types[prune(lt)].kind == .refined:
+        rd = copy_place(lhs)
+        add_flag(rd, NF_CHECKED)
+        value = compound_checked(s, rd, int(nodes[s].b), representation_type(lt))
+        nodes[s].b = i32(coerce(value, lt))
+        nodes[s].op = i32(int(Tok.assign))
         return s
     l = prune(lt)
     if types[l].kind == .quantity and quantity_compound(s, l): return s
@@ -3123,7 +3162,12 @@ check_vardecl = (s: int):
         ensure_global(int(nodes[s].sym), nodes[s].pos, true)
         return
     t = 0
-    if nodes[s].a != 0: t = resolve_type(int(nodes[s].a))
+    if nodes[s].a != 0:
+        previous_self = refine_self
+        refine_self = int(nodes[s].name)
+        t = resolve_type(int(nodes[s].a))
+        refine_self = previous_self
+    if refine_active and types[prune(t)].kind == .refined and nodes[s].b == 0: nodes[s].b = i32(bc_int(0, nodes[s].pos))
     nm = name_of(int(nodes[s].name))
     # (x: T, a struct with default field values: it starts with them, as T() would)
     if nodes[s].b == 0 and t != 0: nodes[s].b = i32(struct_default(t, nodes[s].pos))
@@ -3567,8 +3611,17 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
         locals[l].flags = i32(fl)
         fns[f].params.push(l)
     declared = 0
+    old_formals = refine_formals
+    old_self = refine_self
+    if refine_active:
+        refine_formals = []
+        refine_self = 0
+        loop p in kids(lam): refine_formals.push(int(nodes[p].name))
     if nodes[lam].a != 0: declared = resolve_type(int(nodes[lam].a))
     else if has_flag(lam, NF_VOID): declared = T_VOID
+    refine_formals = old_formals
+    refine_self = old_self
+    if refine_active: ref_validate_signature(fns[f].ptypes, declared, ref_decl_mask(lam), nodes[lam].pos)
     if declared != 0: ctxs[cx].ret = i32(declared)
     else if ret_hint != 0 and not has_var(prune(ret_hint)): ctxs[cx].ret = i32(ret_hint)
     else:
@@ -4284,6 +4337,7 @@ check_pending_functions = (start: int) -> int:
 
 check_program = (main_path: str):
     facts_reset()
+    refine_reset()
     if len(program_name) > 0: program_named = true
     if len(program_name) == 0:
         program_name = main_path

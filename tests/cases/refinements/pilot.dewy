@@ -1,0 +1,11 @@
+# quick
+positive=int64<i => i >? 0>
+quotient=(n:int64 d:positive):>int64=>{
+    $assert d >? 0
+    return n//d
+}
+share=(n:int64 d:int64):>int64=>{
+    if d >? 0 { return quotient(n d) }
+    return 0
+}
+main=()=>{ printl(share(12 3)); printl(share(12 0)) }

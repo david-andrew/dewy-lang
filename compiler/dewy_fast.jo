@@ -578,7 +578,10 @@ dn_partial = (opening: DewyLexeme) -> int:
     id = i32(intern(name))
     dn_tokens[slot] = DewyLexeme(.identifier, id, opening.start, opening.stop, opening.space, opening.newline)
     dn_at = slot
+    saved_angles = dn_angles
+    dn_angles = 0
     body = dn_expr(0)
+    dn_angles = saved_angles
     dn_tokens[slot] = opening
     dn_expect(.rparen)
     parameter = dn_node(.identifier, name, opening.start, name = id)
@@ -690,7 +693,7 @@ dn_atom = () -> int:
     if (symbol == .kw_let or symbol == .kw_const or symbol == .kw_return or symbol == .kw_break or symbol == .kw_continue or symbol == .kw_import or symbol == .kw_from): return dn_stmt()
     dn_at += 1
     if token.kind == .quoted or token.kind == .rawquoted: return dn_string(token)
-    if (symbol == .plus or symbol == .minus or symbol == .dot_plus or symbol == .dot_minus or symbol == .at or symbol == .kw_not):
+    if (symbol == .tilde or symbol == .plus or symbol == .minus or symbol == .dot_plus or symbol == .dot_minus or symbol == .at or symbol == .kw_not):
         power = 125
         # A reference covers the full postfix place: @point.x, @items[i].x.
         if symbol == .at: power = 160

@@ -9,6 +9,7 @@ use 'lower.jo'
 use 'check.jo'
 use 'comptime.jo'
 use 'isolation.jo'
+use 'refine.jo'
 
 enum FactPolicy: RuntimeAllowed, RequireStatic
 enum FactReason: missing, write, call, join, loop_, unsupported, wrap, budget
@@ -83,8 +84,8 @@ fact_open = (e: int) -> bool:
     false
 
 fact_scalar = (t0: int) -> bool:
-    t = prune(t0)
-    types[t].kind == .bool_ or types[t].kind == .int_ and (types[t].sign or types[t].bits < 64)
+    t = representation_type(t0)
+    types[t].kind == .bool_ or types[t].kind == .int_
 
 fact_comparison = (op: Tok) -> bool:
     op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
@@ -137,7 +138,7 @@ fact_queue = (n: int, cond: int, message: int):
     fact_requests.push(FactRequest(n, owner))
 
 fact_domain = (t0: int, reason: FactReason = .missing, at: int = 0) -> FactBound:
-    t = prune(t0)
+    t = representation_type(t0)
     r = FactBound(reason = reason, witness = at)
     if types[t].kind == .bool_: r.lo = 0; r.hi = 1
     else if types[t].kind == .int_ and types[t].bits < 64:
@@ -389,6 +390,7 @@ fact_add_fits = (a: int, b: int) -> bool:
     true
 
 fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
+    if ntype(n) == T_U64: return fact_unmodeled(s, n, .wrap)
     x = fact_bound(s, a); y = fact_bound(s, b)
     if op == .minus:
         if y.lo == FACT_MIN: return fact_unmodeled(s, n, .wrap)
@@ -401,7 +403,8 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
     fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0))
 
 fact_divisor = (s: mut FactState, n: int, a: int, b: int, modulo: bool):
-    zero = fact_constant(s, 0)
+    operand = if nodes[n].kind == .call: kid(n, 1) else: int(nodes[n].b)
+    zero = fact_constant(s, ref_encoded(0, ntype(operand)))
     truth = fact_compare(s, .ne, b, zero)
     if truth == 0: fatal(nodes[n].pos, "divisor refuted: zero")
     if truth < 0: fact_unknown(n, fact_bound(s, b), "divisor")
@@ -417,7 +420,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
     k = nodes[n].kind
     if k == .int_lit or k == .bool_lit:
         if not fact_scalar(ntype(n)): return fact_new(s, FactBound(reason = .unsupported, witness = n))
-        return fact_constant(s, nodes[n].ival, n)
+        return fact_constant(s, ref_encoded(nodes[n].ival, ntype(n)), n)
     if k == .ident: return fact_read(s, n)
     if k == .str_lit and nodes[n].aux == 0 or k == .float_lit or k == .none_lit or k == .null_lit: return 0
     if k == .addr: return fact_capture(int(nodes[n].a), s)
@@ -523,7 +526,11 @@ fact_capture = (n: int, s: mut FactState) -> int:
         return fact_unmodeled(s, n, .unsupported)
     if k == .conv:
         a = fact_capture(int(nodes[n].a), s)
+        if nodes[n].aux == i32(int(CV.refinement)):
+            ref_check(n, a, refine_entry, s)
+            return a
         b = fact_bound(s, a)
+        if ntype(n) != ntype(int(nodes[n].a)) and (ntype(n) == T_U64 or ntype(int(nodes[n].a)) == T_U64): return fact_unmodeled(s, n, .wrap)
         if fact_scalar(ntype(n)) and fact_scalar(ntype(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))):
             if sa_fits(b.lo, ntype(n)) and sa_fits(b.hi, ntype(n)): return a
             return fact_unmodeled(s, n, .wrap)
@@ -549,11 +556,22 @@ fact_capture = (n: int, s: mut FactState) -> int:
     if k == .call:
         fact_capture(int(nodes[n].a), s)
         values = fill(0, nkids(n))
-        loop i in call_eval_order(n): values[i] = fact_capture(kid(n, i), s)
+        loop i in call_eval_order(n):
+            arg = kid(n, i)
+            if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)): values[i] = fact_capture(int(nodes[arg].a), s)
+            else: values[i] = fact_capture(arg, s)
+        loop i in [0..nkids(n)):
+            arg = kid(n, i)
+            if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)): ref_check(arg, values[i], values, s)
         if let obligation = fact_divisors.get(n): fact_divisor(s, n, values[0], values[1], obligation == 2)
         fact_forget(s, n, .call)
         if ntype(n) == T_NEVER: s.live = false
-        return fact_new(s, fact_domain(ntype(n), .call, n))
+        result = fact_new(s, fact_domain(ntype(n), .call, n))
+        if nodes[n].aux == 0 and nodes[n].sym > 0: ref_assume(int(fns[int(nodes[n].sym)].ret), result, values, s)
+        else if nodes[n].aux == 1:
+            ft = prune(ntype(int(nodes[n].a)))
+            if types[ft].kind == .fn_: ref_assume(int(types[ft].elem), result, values, s)
+        return result
     if k == .iflet or k == .match_:
         fact_capture(int(nodes[n].a), s)
         fact_forget(s, n, .unsupported, true)
@@ -583,9 +601,10 @@ fact_capture = (n: int, s: mut FactState) -> int:
     return fact_new(s, FactBound(reason = .unsupported, witness = n))
 
 facts_finalize = ():
-    if fact_requests.len() == 0 and fact_policy == .RuntimeAllowed: return
+    if fact_requests.len() == 0 and refine_requests.len() == 0 and fact_policy == .RuntimeAllowed: return
     demanded: {int: bool} = {}
     loop request in fact_requests: demanded[request.owner] = true
+    loop request in refine_requests: demanded[request.owner] = true
     if fact_policy == .RequireStatic:
         loop f in [1..fns.len()):
             if fns[f].body != 0 and fns[f].state == 2 and not pos_in_lib(nodes[int(fns[f].body)].pos): demanded[f] = true
@@ -593,6 +612,7 @@ facts_finalize = ():
         if f <= 0 or f >= isolation_limit or fns[f].state != 2: fatal(-1, "assertion unknown: unsettled checked body")
         fact_terms = [FactTerm()]
         state = FactState()
+        if refine_active: refine_fact_entry(f, state)
         fact_capture(int(fns[f].body), state)
     # A conservative transfer must never silently lose an obligation (opaque
     # controls, deferred cleanup, or checked nodes absent from a published body).
@@ -601,6 +621,12 @@ facts_finalize = ():
         if not fact_validated.has(request.node):
             fact_terms = [FactTerm()]
             state = FactState()
+            fact_capture(request.node, state)
+    loop request in refine_requests:
+        if not fact_validated.has(request.node):
+            fact_terms = [FactTerm()]
+            state = FactState()
+            refine_entry = []
             fact_capture(request.node, state)
     loop request in fact_requests: set_list(request.node, [])
     fact_requests = []

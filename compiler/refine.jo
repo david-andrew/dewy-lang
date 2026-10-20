@@ -1,0 +1,406 @@
+# Scalar contracts are immutable type metadata. Evaluated values and proof
+# answers belong to facts.jo and never participate in interning.
+use 'ast.jo'
+use 'lex.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'facts.jo'
+use 'lower.jo'
+use 'ir.jo'
+use 'util.jo'
+
+struct RefTerm:
+    kind: int = 0 # self, literal, formal ordinal, stable lexical declaration, type limit
+    value: int = 0
+    unsigned: bool = false
+
+struct RefAtom:
+    op: Tok
+    a: RefTerm
+    b: RefTerm
+
+ref_predicates: RefAtom[][] = [[]]
+refine_active = false
+refine_formals: int[]
+refine_self = 0
+refine_base_type = 0
+refine_requests: FactRequest[]
+refine_owners: {int: bool} = {}
+refine_entry: int[]
+refine_ir_entry: int[]
+
+representation_type = (t0: int) -> int:
+    t = prune(t0)
+    if types[t].kind == .refined: return prune(int(types[t].elem))
+    t
+
+refine_reset = ():
+    ref_predicates = [[]]
+    refine_active = false
+    refine_formals = []
+    refine_self = 0
+    refine_requests = []
+    refine_owners = {}
+
+ref_term_less = (a: RefTerm, b: RefTerm) -> bool:
+    if a.kind != b.kind: return a.kind < b.kind
+    if a.unsigned != b.unsigned: return not a.unsigned
+    a.value < b.value
+
+ref_atom_less = (a: RefAtom, b: RefAtom) -> bool:
+    if a.a != b.a: return ref_term_less(a.a, b.a)
+    if a.b != b.b: return ref_term_less(a.b, b.b)
+    int(a.op) < int(b.op)
+
+ref_intern = (atoms0: RefAtom[]) -> int:
+    atoms: RefAtom[]
+    loop atom in atoms0:
+        i = 0
+        loop i < atoms.len() and ref_atom_less(atoms[i], atom): i += 1
+        if i == atoms.len() or atoms[i] != atom: atoms.insert(i, atom)
+    loop i in [1..ref_predicates.len()):
+        if ref_predicates[i] == atoms: return i
+    ref_predicates.push(atoms)
+    ref_predicates.len() - 1
+
+mk_refined = (base0: int, predicate: int) -> int:
+    base = prune(base0)
+    let predicate = predicate
+    if types[base].kind == .refined:
+        predicate = ref_intern(ref_predicates[int(types[base].st)] + ref_predicates[predicate])
+        base = int(types[base].elem)
+    normalized: RefAtom[]
+    dependencies: int[]
+    loop original in ref_predicates[predicate]:
+        atom = original
+        atom.a = ref_resolve_limit(atom.a)
+        atom.b = ref_resolve_limit(atom.b)
+        loop term in [atom.a, atom.b]:
+            if term.kind == 4: dependencies.push(term.value)
+        normalized.push(atom)
+    predicate = ref_intern(normalized)
+    if not is_int(base) and not has_var(base): fatal(-1, "scalar refinement requires an integer base")
+    if not has_var(base):
+        loop atom in ref_predicates[predicate]:
+            loop term in [atom.a, atom.b]:
+                if term.kind != 1: continue
+                if term.unsigned and base != T_U64 or not term.unsigned and not int_fits(term.value, base):
+                    fatal(-1, "refinement bound is outside its integer representation")
+    refine_active = true
+    mk_type(TypeInfo(kind = .refined, elem = i32(base), st = i32(predicate)), dependencies)
+
+ref_term = (n: int, binder: int) -> RefTerm:
+    k = nodes[n].kind
+    if k == .ident:
+        name = int(nodes[n].name)
+        if name == binder and binder != 0: return RefTerm()
+        loop i in [0..refine_formals.len()):
+            if name == refine_formals[i]: return RefTerm(2, i)
+        sym = lookup(name)
+        if sym != 0 and syms[sym].kind == .const_:
+            value = clone(n)
+            check_expr(value, 0)
+            if not is_int(ntype(value)): fatal(nodes[n].pos, "refinement bound must be an integer")
+            result = ceval(value)
+            return RefTerm(1, result.i, ntype(value) == T_U64 and result.i < 0)
+        if sym != 0 and syms[sym].kind == .local:
+            l = int(syms[sym].ref)
+            if cx < 0 or locals[l].owner != ctxs[cx].inst: fatal(nodes[n].pos, "captured refinement dependencies await closure invariant checking")
+            if int(locals[l].flags) & LF_CONST == 0: fatal(nodes[n].pos, "refinement dependency must be a stable binding")
+            if not is_int(representation_type(int(locals[l].type))): fatal(nodes[n].pos, "refinement dependency must be scalar")
+            if not type_eq(representation_type(int(locals[l].type)), representation_type(refine_base_type)): fatal(nodes[n].pos, "dependent scalar refinement requires matching integer representations")
+            return RefTerm(3, l)
+        fatal(nodes[n].pos, "unsupported refinement term '{name_of(name)}'")
+    if k == .int_lit: return RefTerm(1, nodes[n].ival, has_flag(n, NF_U64))
+    if k == .unary and nodes[n].op == i32(int(Tok.minus)):
+        term = ref_term(int(nodes[n].a), binder)
+        if term.kind != 1 or term.unsigned: fatal(nodes[n].pos, "unsupported refinement bound")
+        term.value = -term.value
+        return term
+    if k == .field:
+        base = int(nodes[n].a)
+        if nodes[base].kind == .ident:
+            spelling = name_of(int(nodes[base].name))
+            ty = T_VOID
+            if spelling == "int64": ty = T_INT
+            else if spelling == "int8": ty = T_I8
+            else if spelling == "int16": ty = T_I16
+            else if spelling == "int32": ty = T_I32
+            else if spelling == "uint64": ty = T_U64
+            else if spelling == "uint8": ty = T_U8
+            else if spelling == "uint16": ty = T_U16
+            else if spelling == "uint32": ty = T_U32
+            if ty == T_VOID:
+                symbol = lookup(int(nodes[base].name))
+                if symbol != 0 and syms[symbol].kind == .type_: ty = int(syms[symbol].ref)
+            member = name_of(int(nodes[n].name))
+            if ty != T_VOID and has_var(ty) and (member == "min" or member == "max"): return RefTerm(4, ty, member == "max")
+            if ty != T_VOID and (member == "min" or member == "max"):
+                if ty == T_U64: return RefTerm(1, (if member == "max": -1 else: 0), member == "max")
+                bound = fact_domain(ty)
+                return RefTerm(1, if member == "max": bound.hi else: bound.lo)
+    fatal(nodes[n].pos, "unsupported refinement term; expected a scalar binding or integer bound")
+    RefTerm()
+
+ref_add = (op0: Tok, a0: RefTerm, b0: RefTerm, out: mut RefAtom[]):
+    op = op0; a = a0; b = b0
+    if op == .gt or op == .ge:
+        a = b0; b = a0
+        op = if op == .gt: Tok.lt else: Tok.le
+    if op == .eq:
+        out.push(RefAtom(.le, a, b))
+        out.push(RefAtom(.le, b, a))
+    else:
+        if op == .ne and ref_term_less(b, a): a = b0; b = a0
+        out.push(RefAtom(op, a, b))
+
+ref_atoms = (n: int, binder: int, out: mut RefAtom[], depth: int = 0):
+    if depth > 32 or out.len() >= 32: fatal(nodes[n].pos, "refinement predicate budget exhausted")
+    if nodes[n].kind == .and_:
+        ref_atoms(int(nodes[n].a), binder, out, depth + 1)
+        ref_atoms(int(nodes[n].b), binder, out, depth + 1)
+        return
+    if nodes[n].kind == .not_:
+        inner = int(nodes[n].a)
+        if nodes[inner].kind == .binary and fact_comparison(nodes[inner].op as Tok):
+            ref_add(fact_inverse(nodes[inner].op as Tok), ref_term(int(nodes[inner].a), binder), ref_term(int(nodes[inner].b), binder), out)
+            return
+    if nodes[n].kind != .binary: fatal(nodes[n].pos, "unsupported refinement predicate; expected an integer comparison")
+    op = nodes[n].op as Tok
+    a = int(nodes[n].a); b = int(nodes[n].b)
+    if op == .kw_in and nodes[b].kind == .range:
+        lo = ref_term(int(nodes[b].a), binder)
+        hi = ref_term(int(nodes[b].b), binder)
+        if lo.kind != 1 or hi.kind != 1: fatal(nodes[b].pos, "refinement range needs literal bounds")
+        value = ref_term(a, binder)
+        ref_add((if has_flag(b, NF_EXCL_FIRST): Tok.lt else: Tok.le), lo, value, out)
+        ref_add((if has_flag(b, NF_INCLUSIVE): Tok.le else: Tok.lt), value, hi, out)
+        return
+    if not fact_comparison(op): fatal(nodes[n].pos, "unsupported refinement predicate; expected an integer comparison")
+    if nodes[a].kind == .binary and fact_comparison(nodes[a].op as Tok):
+        earlier = nodes[a].op as Tok
+        if not ((earlier == .lt or earlier == .le) and (op == .lt or op == .le) or (earlier == .gt or earlier == .ge) and (op == .gt or op == .ge)):
+            fatal(nodes[n].pos, "refinement comparison chain must have one direction")
+        ref_atoms(a, binder, out, depth + 1)
+        a = int(nodes[a].b)
+    ref_add(op, ref_term(a, binder), ref_term(b, binder), out)
+
+resolve_refinement = (n: int) -> int:
+    base = resolve_type(int(nodes[n].a))
+    binder = if nodes[n].name != 0: int(nodes[n].name) else: refine_self
+    atoms: RefAtom[]
+    previous_base = refine_base_type
+    refine_base_type = base
+    ref_atoms(int(nodes[n].b), binder, atoms)
+    refine_base_type = previous_base
+    mk_refined(base, ref_intern(atoms))
+
+refine_storage = (n: int, fallback: int) -> int:
+    if nodes[n].kind == .ident:
+        if nodes[n].aux == i32(int(SK.local)): return int(locals[int(nodes[n].sym)].type)
+        if nodes[n].aux == i32(int(SK.global)): return int(globals[int(nodes[n].sym)].type)
+    fallback
+
+refine_coerce = (n: int, target: int) -> int:
+    t = prune(target)
+    coerce(n, int(types[t].elem))
+    if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.refinement)) and nodes[n].aux2 == i32(t): return n
+    wrap_conv(n, .refinement, int(types[t].elem))
+    nodes[n].aux2 = i32(t)
+    owner = if cx >= 0: int(ctxs[cx].inst) else: 0
+    refine_requests.push(FactRequest(n, owner))
+    refine_owners[owner] = true
+    n
+
+# uint64 intervals use the signed ordering of (bits xor MIN), never signed
+# reinterpretation of an endpoint. Arithmetic remains unknown at this width.
+ref_encoded = (value: int, base: int) -> int:
+    if representation_type(base) == T_U64: return value xor FACT_MIN
+    value
+
+ref_value = (term: RefTerm, self: int, args: int[], base: int, s: mut FactState) -> int:
+    if term.kind == 0: return self
+    if term.kind == 1: return fact_constant(s, ref_encoded(term.value, base))
+    if term.kind == 2:
+        if term.value < args.len(): return args[term.value]
+        return 0
+    if term.kind != 3: fatal(-1, "unresolved generic refinement bound")
+    e = mk_ident_local(term.value, locals[term.value].pos)
+    fact_read(s, e)
+
+ref_assume = (t0: int, self: int, args: int[], s: mut FactState):
+    t = prune(t0)
+    if types[t].kind != .refined: return
+    base = int(types[t].elem)
+    loop atom in ref_predicates[int(types[t].st)]:
+        a = ref_value(atom.a, self, args, base, s)
+        b = ref_value(atom.b, self, args, base, s)
+        v = fact_new(s, fact_domain(T_BOOL), FactTerm(atom.op, a, b))
+        fact_assume(s, v, true)
+
+ref_check = (n: int, self: int, args: int[], s: mut FactState):
+    t = zonk(int(nodes[n].aux2))
+    nodes[n].aux2 = i32(t)
+    if not s.live: return
+    base = int(types[t].elem)
+    proven = true
+    loop atom in ref_predicates[int(types[t].st)]:
+        a = ref_value(atom.a, self, args, base, s)
+        b = ref_value(atom.b, self, args, base, s)
+        truth = fact_compare(s, atom.op, a, b)
+        if truth == 0: fatal(nodes[n].pos, "refinement refuted; witness: captured value violates declared contract")
+        if truth < 0:
+            proven = false
+            if fact_policy == .RequireStatic:
+                bound = fact_bound(s, self)
+                fact_unknown(n, bound, "refinement")
+    # Keep metadata even when erased so calls can publish checked guarantees.
+    nodes[n].ival = if proven: 1 else: 0
+    fact_validated[n] = true
+    ref_assume(t, self, args, s)
+
+refine_fact_entry = (f: int, s: mut FactState):
+    refine_entry = []
+    loop l in fns[f].params:
+        e = mk_ident_local(l, locals[l].pos)
+        refine_entry.push(fact_read(s, e))
+    loop i in [0..fns[f].ptypes.len()): ref_assume(fns[f].ptypes[i], refine_entry[i], refine_entry, s)
+
+refine_implies = (from: int, to: int) -> bool:
+    if type_eq(from, to): return true
+    if not callable_shape_eq(representation_type(from), representation_type(to)): return false
+    if types[prune(to)].kind != .refined: return true
+    # Formal slots are alpha-normalized; distinct lexical declarations remain
+    # distinct terms. Implication never synthesizes a runtime callable wrapper.
+    saved = fact_terms
+    fact_terms = [FactTerm()]
+    s = FactState()
+    value = fact_new(s, fact_domain(representation_type(from)))
+    args: int[]
+    loop _ in [0..32): args.push(fact_new(s, FactBound()))
+    ref_assume(from, value, args, s)
+    ok = true
+    loop atom in ref_predicates[int(types[prune(to)].st)]:
+        a = ref_value(atom.a, value, args, to, s)
+        b = ref_value(atom.b, value, args, to, s)
+        if fact_compare(s, atom.op, a, b) != 1: ok = false
+    fact_terms = saved
+    ok
+
+ref_ir_term = (term: RefTerm, self: int, args: int[]) -> int:
+    if term.kind == 0: return self
+    if term.kind == 1: return e_iconst(term.value)
+    if term.kind == 2:
+        if term.value >= args.len(): ice("missing refinement entry snapshot")
+        return args[term.value]
+    if term.kind != 3: fatal(-1, "unresolved generic refinement bound")
+    gen_expr(mk_ident_local(term.value, locals[term.value].pos)).v
+
+ref_gen_check = (n: int, self: int, args: int[]):
+    if nodes[n].ival == 1: return
+    t = zonk(int(nodes[n].aux2))
+    unsigned = not types[representation_type(t)].sign
+    loop atom in ref_predicates[int(types[t].st)]:
+        a = ref_ir_term(atom.a, self, args); b = ref_ir_term(atom.b, self, args)
+        op = if atom.op == .lt: Op.lts else if atom.op == .le: Op.les else: Op.ne
+        if unsigned and atom.op != .ne:
+            # Bias both operands for an exact unsigned comparison on every target.
+            a = e_bin(.xor, VI, a, e_iconst(FACT_MIN))
+            b = e_bin(.xor, VI, b, e_iconst(FACT_MIN))
+        condition = e_bin(op, VI, a, b)
+        iff(e_bin(.eq, VI, condition, e_iconst(0)))
+        e_call_nr(rt("__assert_fail"), [e_daddr(str_data("refinement failed")), e_daddr(loc_data(nodes[n].pos))], -1)
+        endc()
+
+refine_gen = (n: int) -> Val:
+    value = gen_expr(int(nodes[n].a))
+    ref_gen_check(n, value.v, refine_ir_entry)
+    value
+
+refine_gen_args = (args: int[], values: int[], offset: int):
+    captured: int[]
+    loop i in [offset..values.len()): captured.push(values[i])
+    loop i in [0..args.len()):
+        n = args[i]
+        if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.refinement)): ref_gen_check(n, captured[i], captured)
+
+refine_gen_entry = (f: int):
+    refine_ir_entry = []
+    if not refine_owners.has(f): return
+    loop l in fns[f].params:
+        if int(locals[l].flags) & LF_MUTPARAM != 0: refine_ir_entry.push(-1)
+        else: refine_ir_entry.push(freeze_scalar(int(locals[l].vreg), representation_type(int(locals[l].type))))
+
+ref_validate_signature = (params: int[], ret: int, mask: int, pos: int):
+    all = params + [ret]
+    loop i in [0..all.len()):
+        t = prune(all[i])
+        if types[t].kind != .refined: continue
+        if i < params.len() and mask & (1 << i) != 0: fatal(pos, "mutable refinement parameters await storage invariant checking")
+        loop atom in ref_predicates[int(types[t].st)]:
+            loop term in [atom.a, atom.b]:
+                if term.kind != 2: continue
+                j = term.value
+                if j >= params.len() or mask & (1 << j) != 0: fatal(pos, "scalar refinement dependency needs a by-value parameter")
+                a = representation_type(t); b = representation_type(params[j])
+                if not has_var(a) and not has_var(b) and not type_eq(a, b): fatal(pos, "dependent scalar refinement requires matching integer representations")
+    # Dependency cycles cannot define a self-justifying set of contracts.
+    done = fill(false, params.len())
+    loop _ in [0..params.len()):
+        loop i in [0..params.len()):
+            if done[i]: continue
+            ready = true
+            t = prune(params[i])
+            if types[t].kind == .refined:
+                loop atom in ref_predicates[int(types[t].st)]:
+                    loop term in [atom.a, atom.b]:
+                        if term.kind == 2 and not done[term.value]: ready = false
+            if ready: done[i] = true
+    loop yes in done:
+        if not yes: fatal(pos, "cyclic dependent scalar refinements")
+
+ref_has_formals = (t0: int) -> bool:
+    t = prune(t0)
+    if types[t].kind != .refined: return false
+    loop atom in ref_predicates[int(types[t].st)]:
+        if atom.a.kind == 2 or atom.b.kind == 2: return true
+    false
+
+ref_decl_mask = (decl: int) -> int:
+    mask = 0
+    loop i in [0..nkids(decl)):
+        if has_flag(kid(decl, i), NF_MUT): mask |= 1 << i
+    mask
+
+# Generic type limits are substituted together with the base. Dependencies in
+# the descriptor's argument list propagate TF_HAS_VAR without a new type field.
+ref_resolve_limit = (term: RefTerm) -> RefTerm:
+    if term.kind != 4: return term
+    t = prune(term.value)
+    if has_var(t): return term
+    if not is_int(t): fatal(-1, "refinement type limit requires an integer type")
+    if t == T_U64: return RefTerm(1, (if term.unsigned: -1 else: 0), term.unsigned)
+    domain = fact_domain(t)
+    RefTerm(1, if term.unsigned: domain.hi else: domain.lo)
+
+ref_subst = (predicate: int, args: int[], zonking: bool = false) -> int:
+    atoms: RefAtom[]
+    loop original in ref_predicates[predicate]:
+        atom = original
+        if atom.a.kind == 4: atom.a.value = if zonking: zonk(atom.a.value) else: subst(atom.a.value, args)
+        if atom.b.kind == 4: atom.b.value = if zonking: zonk(atom.b.value) else: subst(atom.b.value, args)
+        atoms.push(atom)
+    ref_intern(atoms)
+
+# Aggregate storage authority belongs to the next slice, including wrapped
+# element contracts. Callable contracts inside an aggregate remain value types.
+ref_storage_contract = (t0: int) -> bool:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .refined: return true
+    if k == .opt or k == .array or k == .fixed: return ref_storage_contract(int(types[t].elem))
+    if k == .tuple:
+        loop i in [0..int(types[t].nargs)):
+            if ref_storage_contract(targ(t, i)): return true
+    false

@@ -1,0 +1,11 @@
+# quick
+positive=int64<(>? 0)>
+small=int64<i => 0 <=? i <=? 10>
+ranged=int64<(in? 1..5)>
+f=(n:int64<n >? 0>):>int64<r => r >=? n>=>n
+main=()=>{
+ let a:positive=2
+ let b:small=3
+ let c:ranged=4
+ printl(f(a)+b+c)
+}

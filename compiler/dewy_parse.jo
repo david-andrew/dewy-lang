@@ -8,6 +8,7 @@ use 'parse.jo'
 use 'expr.jo'
 use 'check.jo'
 use 'dewy_tokens.jo'
+use 'refine.jo'
 
 # Compact tags shared by lexical tokens and syntax nodes. Names are needed
 # only for formatter/diagnostic text.
@@ -381,6 +382,24 @@ dw_include = (id: int) -> int:
     set_list(call, [dw_expr(path)])
     call
 
+# Annotation membership retains its exact endpoint flags; ordinary membership
+# may lower an exclusive-start range to a runtime range object.
+dw_ref_predicate = (id: int) -> int:
+    entry = dw_grouped(id)
+    op = dw_op(entry)
+    if op == .kw_and:
+        n = mk(.and_, dewy_syntax[entry].pos)
+        nodes[n].a = i32(dw_ref_predicate(dw_child(entry, 1)))
+        nodes[n].b = i32(dw_ref_predicate(dw_child(entry, 2)))
+        return n
+    if op == .contains:
+        n = mk(.binary, dewy_syntax[entry].pos)
+        nodes[n].op = i32(int(Tok.kw_in))
+        nodes[n].a = i32(dw_expr(dw_child(entry, 1)))
+        nodes[n].b = i32(dw_iterable(dw_child(entry, 2), true, true))
+        return n
+    dw_expr(entry)
+
 dw_type = (id: int) -> int:
     let id = dw_unwrap(id)
     pos = dewy_syntax[id].pos
@@ -413,6 +432,21 @@ dw_type = (id: int) -> int:
             if has_flag(field, NF_MUT): return dw_fail(child, "a mutable inline record field; mutability belongs on the parameter")
             fields.push(field)
         set_list(n, fields)
+        return n
+    if dw_op(id) == .amp and dw_op(dw_grouped(dw_child(id, 2))) == .tilde:
+        right = dw_grouped(dw_child(id, 2))
+        n = mk(.trefined, pos)
+        nodes[n].a = i32(dw_type(dw_child(id, 1)))
+        binder = intern("$refinement")
+        nodes[n].name = i32(binder)
+        value = mk(.ident, pos)
+        nodes[value].name = i32(binder)
+        predicate = mk(.binary, pos)
+        nodes[predicate].op = i32(int(Tok.ne))
+        nodes[predicate].a = i32(value)
+        nodes[predicate].b = i32(dw_expr(dw_child(right, 1)))
+        nodes[n].b = i32(predicate)
+        refine_active = true
         return n
     if dw_op(id) == .star or dw_op(id) == .slash or dw_op(id) == .caret:
         n = mk(.tquantity, pos)
@@ -486,12 +520,29 @@ dw_type = (id: int) -> int:
         nodes[n].b = i32(dw_type(dw_child(args, 1)))
         return n
     if dw_op(id) == .type_apply:
-        n = dw_type(dw_child(id, 1))
-        if nodes[n].kind != .tname or nkids(n) != 0: return dw_fail(id, "type arguments on this type expression")
+        entries = dw_children(dw_child(id, 2))
+        base = dw_type(dw_child(id, 1))
         args: int[]
-        loop child in dw_children(dw_child(id, 2)): args.push(dw_type(child))
-        set_list(n, args)
-        return n
+        loop child in entries:
+            entry = dw_grouped(child)
+            op = dw_op(entry)
+            condition = op == .function or op == .kw_and or op == .eq or op == .not_eq or op == .lt or op == .le or op == .gt or op == .ge or op == .contains
+            if condition:
+                refine_active = true
+                n = mk(.trefined, dewy_syntax[entry].pos)
+                nodes[n].a = i32(base)
+                if op == .function:
+                    parameter = dw_grouped(dw_child(entry, 1))
+                    if dw_name(parameter) == "": return dw_fail(parameter, "refinement lambda needs one value binder")
+                    nodes[n].name = dw_name_id(parameter)
+                    entry = dw_child(entry, 2)
+                nodes[n].b = i32(dw_ref_predicate(entry))
+                base = n
+            else: args.push(dw_type(child))
+        if args.len() > 0:
+            if nodes[base].kind != .tname or nkids(base) != 0: return dw_fail(id, "type arguments on this type expression")
+            set_list(base, args)
+        return base
     return dw_fail(id, "this type expression")
 
 # Type parameters use the existing compact specialization machinery. Constraints
@@ -900,7 +951,8 @@ dw_expr = (id: int) -> int:
             loop nodes[type_base].kind == .field: type_base = int(nodes[type_base].a)
             if nodes[type_base].kind == .ident: nodes[n].c = i32(dw_type(id))
             args: int[]
-            loop child in dw_children(right): args.push(dw_type(child))
+            if nodes[int(nodes[n].c)].kind != .trefined:
+                loop child in dw_children(right): args.push(dw_type(child))
             set_list(n, args)
             return n
         if op == .floor or op == .percent or op == .caret or op == .slash:
@@ -1144,7 +1196,12 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
             loop field in dw_children(structure): fields.push(dw_param(field, .vardecl))
         set_list(n, fields)
         return n
-    if annotation != 0 and dw_name(annotation) == "type":
+    inferred_refinement = initial != 0 and dw_op(initial) == .amp and dw_op(dw_grouped(dw_child(initial, 2))) == .tilde
+    if annotation == 0 and initial != 0 and dw_op(initial) == .type_apply:
+        loop entry in dw_children(dw_child(initial, 2)):
+            op = dw_op(dw_grouped(entry))
+            if op == .function or op == .kw_and or op == .eq or op == .not_eq or op == .lt or op == .le or op == .gt or op == .ge or op == .contains: inferred_refinement = true
+    if inferred_refinement or annotation != 0 and dw_name(annotation) == "type":
         if initial == 0: return dw_fail(id, "a type declaration without a definition")
         type_params: int[]
         if (dw_op(initial) == .index or dw_op(initial) == .call) and dewy_syntax[dw_child(initial, 1)].text == "<>:":
@@ -1608,10 +1665,15 @@ dw_top_declarations = (id: int) -> int[]:
     if dw_op(declaration) == .assign:
         name = dw_name(dw_child(declaration, 1))
         initial = dw_grouped(dw_child(declaration, 2))
+        if name != "" and dw_op(initial) == .type_apply:
+            loop entry in dw_children(dw_child(initial, 2)):
+                op = dw_op(dw_grouped(entry))
+                if op == .function or op == .kw_and or op == .eq or op == .not_eq or op == .lt or op == .le or op == .gt or op == .ge or op == .contains: return [dw_declare(declaration, false, true)]
         mint = initial
         if dw_op(mint) == .amp: mint = dw_grouped(dw_child(mint, 1))
         if name != "" and dw_op(mint) == .kw_of: return [dw_declare(declaration, false, true)]
         if name != "" and dw_op(initial) == .amp:
+            if dw_op(dw_grouped(dw_child(initial, 2))) == .tilde: return [dw_declare(declaration, false, true)]
             if name == "main": return [dw_fail(id, "an overloaded entry point")]
             declarations: int[]
             dw_overload_members(initial, name, declarations)

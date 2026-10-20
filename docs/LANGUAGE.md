@@ -440,6 +440,35 @@ its present value converts to `int` without loss. Printing, interpolation and
 `string(value)` format `int` as decimal. Checked mathematical integers are not yet
 supported in shaders; shader integer values need explicit fixed-width types.
 
+Scalar integer annotations can carry checked refinements:
+
+```dewy
+positive = int64<i => i >? 0>
+quotient = (n:int64 d:positive):>int64 => n//d
+identity = (n:int64):>int64<r => r =? n> => n
+```
+
+The lambda binder is local to its predicate. A parameter may use its own name
+(`d:int64<d >? 0>`); partial operators (`int64<(>? 0)>`), conjunctions,
+one-direction comparison chains, scalar exclusion (`int64 & ~0`), and membership in literal ranges are also
+supported. Bounds may use integer literals, fixed-width `.min`/`.max`, other
+scalar value parameters of the same representation, or stable local bindings.
+Predicates cannot contain calls or arbitrary arithmetic.
+
+A refuted obligation is a compile error. An unproven obligation becomes an
+ordinary runtime check that panics on failure; a proven obligation emits no
+check. Annotated local initialization and replacement, arguments, and results
+use these checks. Arguments are captured in evaluation order and checked before
+invocation. A result's references to value parameters describe their entry
+values, even when the function changes its private parameter copies. Generic
+instances retain contracts. Callable conversion requires compatible
+preconditions and guarantees; it cannot silently strengthen a result promise.
+Fixed-width arithmetic still wraps before its result meets a refinement.
+
+Scalar refinements do not yet support mutable place parameters, refined fields
+or collection elements, length predicates, or captured lexical dependencies.
+There is no public strict-lane spelling.
+
 Fixed-width integer types expose typed `.min` and `.max` constants, including
 the full `uint64` range; these also work through type aliases and generic type
 parameters. For example, `uint8.max` is 255 and `int64.min` is −9223372036854775808.

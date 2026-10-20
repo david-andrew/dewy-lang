@@ -1,3 +1,4 @@
+use 'refine.jo'
 use 'units.jo'
 use 'poly_closure.jo'
 use 'isolation.jo'
@@ -1055,7 +1056,9 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
                 val = gen_owned(a)
                 out.push(val.v)
                 continue
-        val = gen_expr(a)
+        value_node = a
+        if nodes[a].kind == .conv and nodes[a].aux == i32(int(CV.refinement)): value_node = int(nodes[a].a)
+        val = gen_expr(value_node)
         # A scalar can live in a local's mutable vreg. Capture its value before
         # a later argument reassigns that local, just as we retain managed data.
         if i + 1 < args.len() and vc(pt) != VC_AGG: val.v = freeze_scalar(val.v, pt)
@@ -1748,6 +1751,7 @@ gen_direct_call = (f: int, args: int[], order: int[] = []) -> Val:
         argv.push(e_slot(rslot))
     mark = copy_backs.len()
     call_args(args, fns[f].ptypes, inst_mutmask(f), argv, f, order)
+    if refine_active: refine_gen_args(args, argv, if vc(ret) == VC_AGG: 1 else: 0)
     # Default builds can inline tiny checked helpers without expanding their
     # failure path. Release keeps its measured whole-function inlining policy.
     # Still unwind lowering's pending copy-back records; their unreachable
@@ -1811,6 +1815,7 @@ gen_closure_call = (callee: int, args: int[], order: int[] = []) -> Val:
     loop i in [0..int(types[ft].nargs)): pts.push(targ(ft, i))
     mark = copy_backs.len()
     call_args(args, pts, int(types[ft].mutmask), argv, order = order)
+    if refine_active: refine_gen_args(args, argv, if vc(ret) == VC_AGG: 2 else: 1)
     rv = if known >= 0: e_call(lf_of_inst(known), argv, ret_vt(ret)) else: e_calli(fp, argv, ret_vt(ret), false)
     copy_back(mark)
     finish_call(ret, rv, rslot)
@@ -3457,6 +3462,7 @@ gen_conv = (e: int) -> Val:
     a = int(nodes[e].a)
     from = prune(ntype(a))
     cv = nodes[e].aux as CV
+    if cv == .refinement: return refine_gen(e)
     if cv == .explicit_copy:
         if not copies_on: return own(gen_expr(a), from)
         copy_explicit[a] = true
@@ -6367,6 +6373,7 @@ lower_inst = (lf: int, f: int):
         locals[l].vreg = i32(pv)
         locals[l].offset = -1
     ir.nparams = ir.vtypes.len()
+    if refine_active: refine_gen_entry(f)
     ir.ret = ret_vt(cur_ret)
     if (f == runtime_memeq or f == runtime_streq) and not target_arm64 and not target_wasm and not dbg_on:
         # Ordinary scalar body remains available to the bootstrap, debugger and
