@@ -1,0 +1,15 @@
+# quick
+#{ A block comment
+   over several lines. }#
+main = () => {
+    let a = 1 #{ inline }# + 2
+    #{ outer
+       #{ nested }#
+       still outer: printl("not code")
+    }#
+    let b = #{ before a value }# 40
+    printl(a)
+    printl(b + a #{ between tokens }# - 1)
+    printl("{a #{ in an interpolation }# + 1}")
+    #{}# printl("after an empty comment")
+}

@@ -1852,7 +1852,17 @@ printl(caption)
 Standard escapes include `\n`, `\r`, `\t`, `\0`, `\a`, `\b`, `\v`, `\f`,
 backslash, quotes and braces. A backslash immediately followed by a newline
 continues the string without that newline. Interpolations can contain nested
-strings, blocks and line comments.
+strings, blocks and comments.
+
+`#` begins a line comment; `#{` and `}#` delimit a block comment, which nests and
+may span lines. Comment markers inside strings are string contents.
+
+```dewy
+#{ outer
+   #{ nested }#
+}#
+let total = 1 #{ inline }# + 2
+```
 
 `format(value spec)` formats machine numbers or text, including inside an
 interpolation. The specification is an ordinary string and may be computed:

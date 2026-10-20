@@ -320,7 +320,8 @@ ide_str_end = (src: str, i0: int, marks: mut u8[], nesting: int = 0, dewy: bool 
             if c == '{{': depth += 1
             else if c == '}}': depth -= 1
             else if c == '#':
-                loop i < n and src[i] != '\n':
+                e = ide_comment_end(src, i, dewy or ends_with(ide_doc, ".dewy"))
+                loop i < e:
                     ide_mark(marks, i, 1)
                     i += 1
                 ide_mark(marks, i, 1)
@@ -331,6 +332,17 @@ ide_str_end = (src: str, i0: int, marks: mut u8[], nesting: int = 0, dewy: bool 
         i += 1
     ide_mark(marks, n, 1)
     n
+
+# the end of the comment at i: a line comment's line end; in Dewy, after a block comment's last }#
+# (or the end of the text, while it is unfinished)
+ide_comment_end = (src: str, i: int, dewy: bool) -> int:
+    if dewy and i + 1 < len(src) and src[i + 1] == '{{':
+        e = dewy_block_comment_end(src, i, len(src))
+        if e < 0: return len(src)
+        return e
+    e = i
+    loop e < len(src) and src[e] != '\n': e += 1
+    e
 
 ide_skip_str = (src: str, i: int) -> int:
     m: u8[]

@@ -1479,9 +1479,11 @@ str_mask = (text: str, b0: int, dewy: bool = false) -> u8[]:
     i = 0
     loop i < b:
         if text[i] == '#':
-            e = i
-            loop e < len(text) and text[e] != '\n': e += 1
-            loop k in [i + 1..min(e, b) + 1): m[k] = 1
+            e = ide_comment_end(text, i, dewy)
+            # (inside a line comment up to its line end; inside a block comment before its }#)
+            last = e
+            if dewy and i + 1 < len(text) and text[i + 1] == '{{' and e >= 2 and text[e - 1] == '#': last = e - 1
+            loop k in [i + 1..min(last, b) + 1): m[k] = 1
             i = e
         else if ide_str_start(text, i): i = ide_str_end(text, i, m, 0, dewy)
         else: i += 1
@@ -1976,7 +1978,7 @@ stmt_lines = (text: str, ls: int[]) -> bool[]:
         if i >= len(text): break
         c = text[i]
         if c == '#':
-            loop i < len(text) and text[i] != '\n': i += 1
+            i = ide_comment_end(text, i, sy_dewy)
             continue
         if ide_str_start(text, i):
             marks: u8[]
@@ -2350,8 +2352,7 @@ qf_dewy_space = (text: str, at: int) -> int:
     i = at
     loop i < len(text):
         if text[i] == ' ' or text[i] == '\t' or text[i] == '\r' or text[i] == '\n': i += 1
-        else if text[i] == '#':
-            loop i < len(text) and text[i] != '\n': i += 1
+        else if text[i] == '#': i = ide_comment_end(text, i, true)
         else: break
     i
 

@@ -58,13 +58,20 @@ dn_quote_width = (source: str, start: int, stop: int) -> int:
     if start + 2 < stop and source[start + 1] == source[start] and source[start + 2] == source[start]: return 3
     1
 
-# Find a closing interpolation brace, skipping nested strings and line comments.
+# Find a closing interpolation brace, skipping nested strings and comments.
 # Both token scanning and string construction use this, including unsaved text.
 dn_interpolation_end = (source: str, start: int, stop: int, nesting: int, allow_incomplete: bool = false) -> int:
     i = start
     depth = 1
     loop i < stop:
         c = source[i]
+        if c == '#' and i + 1 < stop and source[i + 1] == '{':
+            e = dewy_block_comment_end(source, i, stop)
+            if e < 0:
+                if allow_incomplete: return -1
+                return dn_block_comment_error(i)
+            i = e
+            continue
         if c == '#':
             loop i < stop and source[i] != '\n': i += 1
             continue
@@ -106,6 +113,12 @@ dn_quote_end = (source: str, start: int, stop: int, nesting: int = 0, raw: bool 
         i += 1
     if allow_incomplete: return -1
     dn_error(start, "unterminated string")
+
+dn_block_comment_error = (start: int) -> int:
+    dn_error(start, "unterminated block comment: `#\{` needs a matching `\}#` (block comments nest)")
+
+# Block comments seen by the last lexing pass ([start, end) pairs), for layout.
+dn_block_comments: int[]
 
 dn_matches = (source: *u8, at: int, stop: int, value: str) -> bool:
     if len(value) > stop - at: return false
@@ -205,6 +218,7 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
     if lx_cls == null: lx_init_classes()
     classes = lx_cls
     out: DewyLexeme[]
+    dn_block_comments = []
     i = begin
     spaced = false
     newline = false
@@ -214,6 +228,16 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
             spaced = true
             if c == '\n': newline = true
             i += 1
+            continue
+        if c == '#' and i + 1 < stop and bytes[i + 1] == '{':
+            e = dewy_block_comment_end(source, i, stop)
+            if e < 0: dn_block_comment_error(i)
+            dn_block_comments.push(i)
+            dn_block_comments.push(e)
+            # (a comment over several lines separates like a line break)
+            if find_byte(source[i..e), '\n') >= 0: newline = true
+            spaced = true
+            i = e
             continue
         if c == '#':
             loop i < stop and bytes[i] != '\n': i += 1

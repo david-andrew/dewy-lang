@@ -329,3 +329,25 @@ def test_vscode_compiler_discovery(tmp_path):
                             capture_output=True, text=True, timeout=20, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'compiler discovery: setting, bundled, installed and PATH passed' in result.stdout
+
+
+def test_dewy_block_comments_in_the_editor(tmp_path):
+    source = tmp_path / 'main.dewy'
+    text = '#{ hidden=()=>1\n   #{ nested }# also=()=>2 }#\nshown=()=>3\nmain=()=>{\n    #{ ans }# return shown()\n}\n'
+    source.write_text(text)
+    client = Client(compiler_path(), tmp_path)
+    try:
+        assert not [d for d in client.set_text(source.as_uri(), text, 1) if d['severity'] == 1]
+        symbols = client.request('textDocument/documentSymbol', {'textDocument': {'uri': source.as_uri()}})
+        assert [s['name'] for s in symbols] == ['shown', 'main']
+        inside = client.request('textDocument/completion', {
+            'textDocument': {'uri': source.as_uri()}, 'position': position(text, 'ans }#', 3)})
+        assert inside['items'] == []
+        after = client.request('textDocument/completion', {
+            'textDocument': {'uri': source.as_uri()}, 'position': position(text, 'shown()', 3)})
+        assert any(item['label'] == 'shown' for item in after['items'])
+        edits = client.request('textDocument/formatting', {
+            'textDocument': {'uri': source.as_uri()}, 'options': {'tabSize': 4, 'insertSpaces': True}})
+        assert edits == [] or '#{ nested }# also=()=>2 }#' in edits[0]['newText']
+    finally:
+        client.close()

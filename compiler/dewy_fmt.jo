@@ -5,6 +5,7 @@ use 'dewy_parse.jo'
 use 'dewy_tokens.jo'
 
 df_lexemes: DewyLexeme[]
+df_blocks: int[]            # block comments of the lexed text: [start, end) pairs
 df_file = () -> int: dn_file
 df_file = (file: int): dn_file = file
 
@@ -27,6 +28,7 @@ df_tokens = (file: int, src: str) -> str[]:
     saved = dn_file
     dn_file = file
     df_lexemes = dn_lex(file, 0, len(src), false)
+    df_blocks = dn_block_comments
     dn_file = saved
     out: str[]
     loop i in 0.. and t in df_lexemes:
@@ -40,6 +42,8 @@ df_tokens = (file: int, src: str) -> str[]:
 
 df_text = (src: str) -> str?:
     tokens = df_lexemes
+    blocks = df_blocks
+    bi = 0
     lines: str[]
     stack: DewyToken[]
     at = 0
@@ -58,6 +62,10 @@ df_text = (src: str) -> str?:
         loop stop < tokens.len() and tokens[stop].kind != .eof and tokens[stop].start < content_end:
             if tokens[stop].stop > content_end: opaque_end = tokens[stop].stop
             stop += 1
+        # (a block comment over several lines is kept as written, like a string)
+        loop bi + 1 < blocks.len() and blocks[bi] < content_end:
+            if blocks[bi + 1] > content_end: opaque_end = max(opaque_end, blocks[bi + 1])
+            bi += 2
         lead = 0
         loop at + lead < stop and tokens[at + lead].kind == .op and (tokens[at + lead].symbol == .rparen or tokens[at + lead].symbol == .rbrack or tokens[at + lead].symbol == .rbrace): lead += 1
         depth = max(0, stack.len() - lead)
@@ -76,8 +84,13 @@ df_text = (src: str) -> str?:
                 # A comment-only line has no lexer tokens.
                 parts.push(src[first..last))
             else:
+                # (a block comment before the line's code, or between its tokens, stays)
+                if tokens[at].start > first: parts.push(src[first..tokens[at].start))
                 loop i in [at..stop):
-                    if i > at: parts.push(df_gap(tokens[i - 1], tokens[i]))
+                    if i > at:
+                        between = src[tokens[i - 1].stop..tokens[i].start)
+                        if find_byte(between, '#') >= 0: parts.push(between)
+                        else: parts.push(df_gap(tokens[i - 1], tokens[i]))
                     t = tokens[i]
                     parts.push(src[t.start..min(t.stop, content_end)))
                 cursor = min(tokens[stop - 1].stop, content_end)
