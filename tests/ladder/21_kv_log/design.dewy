@@ -1,5 +1,5 @@
 Entry:type=[key:string value:string deleted:bool=false]
-append=(path:string entry:Entry):>bool=>append_file(path "{to_json(entry)}\n")
+append=(path:string entry:Entry):>int64|error=>append_file(path "{to_json(entry)}\n")
 recover=(path:string):>dict<string string>|error=>{
     let state:dict<string string>=[]
     let text=read_text(path) or_throw
@@ -16,15 +16,15 @@ main=():>int64=>{
     let path="kv.log"
     let initialized=write_text(path "")
     if initialized is? error {return 1}
-    $runtime_assert (append(path Entry["a" "one"]))
-    $runtime_assert (append(path Entry["b" "two"]))
-    $runtime_assert (append(path Entry["a" "three"]))
-    $runtime_assert (append(path Entry["b" "" true]))
+    $runtime_assert (append(path Entry["a" "one"]) isnt? error)
+    $runtime_assert (append(path Entry["b" "two"]) isnt? error)
+    $runtime_assert (append(path Entry["a" "three"]) isnt? error)
+    $runtime_assert (append(path Entry["b" "" true]) isnt? error)
     let first=recover(path)
     if first is? error {return 2}
     $runtime_assert (first.length =? 1)
     $runtime_assert (first["a"] =? "three")
-    $runtime_assert (append_file(path "partial-record"))
+    $runtime_assert (append_file(path "partial-record") isnt? error)
     let second=recover(path)
     if second is? error {return 3}
     $runtime_assert (second["a"] =? "three")

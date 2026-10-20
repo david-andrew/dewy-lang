@@ -1,5 +1,5 @@
 Entry:type=[key:string value:string deleted:bool=false]
-append=(path:string entry:Entry):>bool=>append_file(path to_json(entry)+"\n")
+append=(path:string entry:Entry):>int64|error=>append_file(path to_json(entry)+"\n")
 recover=(path:string):>dict<string string>=>{
     let state:dict<string string>=[]
     let loaded=read_text(path)
@@ -16,14 +16,14 @@ recover=(path:string):>dict<string string>=>{
 main=():>int64=>{
     let path="kv.log"
     assert(write_text(path "") isnt? error)
-    assert(append(path Entry["a" "one"]))
-    assert(append(path Entry["b" "two"]))
-    assert(append(path Entry["a" "three"]))
-    assert(append(path Entry["b" "" true]))
+    assert(append(path Entry["a" "one"]) isnt? error)
+    assert(append(path Entry["b" "two"]) isnt? error)
+    assert(append(path Entry["a" "three"]) isnt? error)
+    assert(append(path Entry["b" "" true]) isnt? error)
     let first=recover(path)
     assert(first.length =? 1)
     assert(first["a"] =? "three")
-    assert(append_file(path "partial-record"))
+    assert(append_file(path "partial-record") isnt? error)
     let second=recover(path)
     assert(second["a"] =? "three")
     assert(second.length =? first.length)

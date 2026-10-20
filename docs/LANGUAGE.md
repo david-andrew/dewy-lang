@@ -1581,7 +1581,8 @@ A failure is `FileNotFound`, `FileAccessDenied`, `IsDirectory`, `FileExists` or
 The same operations exist as functions of a path's text: `read_text(path)`,
 `read_bytes`, `write_text(path text)`, `write_bytes`, `file_exists`, `is_file`,
 `is_directory`, `list_directory`, `make_directory`, `remove_directory` and
-`remove_file`. `append_file(path text)` still answers with a `bool`. The
+`remove_file`. `append_file(path text)` adds to the end of a file, making it if
+it is not there, and gives the byte count or a file error, as `write_text` does. The
 implementation language's spellings (`read_file`, `write_file`, `mkdir`,
 `delete_file`, `list_dir`, `file_name`, `join_path`, `run_program` and the like)
 are rejected in Dewy with the Dewy spelling to use instead.

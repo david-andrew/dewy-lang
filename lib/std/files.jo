@@ -4,9 +4,9 @@
 # only the text, and the file-system ones give every outcome as a value: the result, or one of
 # FileNotFound, FileAccessDenied, IsDirectory, FileExists, FileError (lib/std/errors.jo), with
 # InvalidUtf8 for text that is not UTF-8. The same operations exist as functions of a path's
-# text: read_text(path), write_text(path text), file_exists(path), is_directory(path)...
-# (`read_bytes`, `write_bytes`, `is_dir` and `mkdir` here are Dewy's: Jo code keeps the Jo
-# library's functions of those names; see dewy_surface in the compiler.)
+# text: read_text(path), write_text(path text), append_file(path text), file_exists(path)...
+# (`read_bytes`, `write_bytes`, `append_file`, `is_dir` and `mkdir` here are Dewy's: Jo code
+# keeps the Jo library's functions of those names; see dewy_surface in the compiler.)
 
 struct Path:
     path: str
@@ -190,6 +190,20 @@ __fsys_write_bytes = (path: str, b: u8[]) -> int | __FileFailure:
     if __fsys_write(path, str_from_bytes(b)): return b.len()
     __file_failure()
 
+__fsys_append = (path: str, text: str) -> int | __FileFailure:
+    __fsys_begin()
+    when TARGET == "wasm":
+        # (a web build's files have no append: what is there, then all of it written back)
+        old = ""
+        if let b = __fsys_read(path): old = str_from_bytes(b)
+        else:
+            if __file_error_code != 2: return __file_failure()
+        if __fsys_write(path, old + text): return len(text)
+        return __file_failure()
+    else:
+        if append_file(path, text): return len(text)
+        return __file_failure()
+
 # A directory's entries (without . and ..), in the order the system gives them.
 __fsys_list = (path: str) -> str[] | __FileFailure:
     __fsys_begin()
@@ -267,6 +281,7 @@ read_text = (path: str) -> str | __FileFailure | InvalidUtf8: __fsys_read_text(p
 read_bytes = (path: str) -> u8[] | __FileFailure: __fsys_read_bytes(path)
 write_text = (path: str, text: str) -> int | __FileFailure: __fsys_write_text(path, text)
 write_bytes = (path: str, b: u8[]) -> int | __FileFailure: __fsys_write_bytes(path, b)
+append_file = (path: str, text: str) -> int | __FileFailure: __fsys_append(path, text)
 is_file = (path: str) -> bool: __fsys_kind(path) == 1
 is_directory = (path: str) -> bool: __fsys_kind(path) == 2
 list_directory = (path: str) -> str[] | __FileFailure: __fsys_list(path)
