@@ -4255,7 +4255,9 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if not type_eq(int(fns[vsf].ret), fns[fsf].ptypes[0]): fatal(nodes[n].pos, "the fragment function's input must be the vertex function's output type")
         if not type_eq(fns[vsf].ptypes[fns[vsf].ptypes.len() - 1], fns[fsf].ptypes[1]): fatal(nodes[n].pos, "both shader functions must take the same uniforms type")
         if not type_eq(int(fns[fsf].ret), T_VEC4): fatal(nodes[n].pos, "the fragment function must return a vec4 color")
-        s = prelude.get(intern("ShaderSource")) ?? 0
+        # The shader intrinsic synthesizes this type without a source-level
+        # reference, so it must demand the module just like an ordinary name.
+        s = module_lookup(-1, intern("ShaderSource"))
         if s == 0: fatal(nodes[n].pos, "ShaderSource is not available")
         r = get_struct_inst(int(syms[s].ref), [])
     else if id == .setjmp:

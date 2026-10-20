@@ -12,6 +12,7 @@ use 'ast.jo'
 use 'parse.jo'
 use 'types.jo'
 use 'check.jo'
+use 'prelude.jo'
 use 'expr.jo'
 use 'ir.jo'
 use 'lower.jo'
@@ -126,6 +127,10 @@ setup_target = ():
 # reports its mistakes)
 scan_build_block = (path: str):
     src = read_source(path) ?? ""
+    # Games reach most of the game prelude. Avoid indexing/hashing it only to
+    # load it all again. False positives merely choose eager loading; names
+    # discovered later still work through ordinary demand loading.
+    prelude_game_hint = find(src, "draw") >= 0 or find(src, "update") >= 0
     # find a top-level `build:` line, then read its indented lines
     at = pkg_block_at(src)
     # (the packages it names: where they are, fetched if need be)
@@ -468,6 +473,7 @@ compile = (path: str, out0: str) -> str:
             if not modules[int(globals[g].mod)].is_prelude or global_off.get(g) == none: continue
             d = int(globals[g].decl)
             if not decls.contains(d): decls.push(d)
+        order_prelude_globals(decls)
         set_list(int(fns[pinit].body), decls)
         nl = lfuncs.len()
         lower_function(pinit_lf)

@@ -1,0 +1,41 @@
+# Regenerate lib/prelude.index with the compiler's own declaration parser:
+# python3 -m tools.core run tools/compiler/prelude_index.jo /absolute/path/to/lib
+use '../../compiler/check.jo'
+use '../../compiler/util.jo'
+use '../../compiler/ast.jo'
+use '../../compiler/types.jo'
+
+index_names = (decls: int[], out: mut str[]):
+    loop d in decls:
+        if nodes[d].kind == .when_:
+            loop b in [int(nodes[d].b), int(nodes[d].c)]:
+                if b != 0: index_names(kids(b), out)
+        else if nodes[d].kind == .assign:
+            lhs = int(nodes[d].a)
+            if nodes[lhs].kind == .ident: index_names([lhs], out)
+            else if nodes[lhs].kind == .tuple: index_names(binding_leaves(kids(lhs)), out)
+        else if nodes[d].kind == .vardecl and nkids(d) > 0:
+            index_names(binding_leaves(kids(d)), out)
+        else if nodes[d].name != 0:
+            nm = name_of(int(nodes[d].name))
+            if not out.contains(nm): out.push(nm)
+
+main = () -> int:
+    argv = args()
+    if argv.len() != 2: return 2
+    lib_dir = argv[1]
+    init_types()
+    entries: str[]
+    paths = list_dir("{lib_dir}/game")
+    paths.sort()
+    loop path in paths:
+        if not ends_with(path, ".jo"): continue
+        m = load_module("{lib_dir}/game/{path}", true, -1)
+        declared: str[]
+        index_names(modules[m].decls, declared)
+        declared.sort()
+        src = files[int(modules[m].file)].src
+        joined = join(declared, " ")
+        entries.push("{path} {int(hash(src))} {joined}")
+    print(join(entries, "\n"))
+    0

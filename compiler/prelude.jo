@@ -1,0 +1,70 @@
+# Demand loading for the optional game prelude. Core/std remain eager: their
+# declarations define the language's builtins and implicit native runtime.
+use 'check.jo'
+use 'util.jo'
+use 'ast.jo'
+use 'frontend.jo'
+use 'parse.jo'
+use 'ide.jo'
+use 'main.jo'
+
+prelude_index: {str: str[]}
+prelude_pending: {int: bool}
+prelude_names: {int: int[]}
+prelude_game_hint = false
+
+read_prelude_index = ():
+    # Interactive sessions need future names and complete completion lists.
+    if ide_on or repl_image or watch_build or prelude_game_hint: return
+    if let src = read_file(lib_dir + "/prelude.index"):
+        loop line in split(src, "\n"):
+            fields_ = split(line, " ")
+            if fields_.len() >= 3: prelude_index[fields_[0]] = fields_
+
+defer_prelude = (path: str, entry: str[]) -> bool:
+    src = read_source(path)
+    if src == none: return false
+    # An edited or third-party library is always parsed normally. The index is
+    # an optimization, never the authority for the library's exported names.
+    if (to_int(entry[1]) ?? 0) != int(hash(src!)): return false
+    d = lib_dir + "/game"
+    fi = files.len()
+    files.push(SrcFile(path, d, src!))
+    mi = modules.len()
+    modules.push(Module(name = i32(intern(strip_ext(entry[0]))), file = i32(fi), dir = d, is_prelude = true))
+    module_by_path[module_path_key(path)] = mi
+    prelude_pending[mi] = true
+    loop i in [2..entry.len()):
+        nm = intern(entry[i])
+        owners = prelude_names.get(nm) ?? []
+        owners.push(mi)
+        prelude_names[nm] = owners
+    true
+
+parse_prelude_module = (m: int):
+    if not prelude_pending.has(m): return
+    prelude_pending.remove(m)
+    p_lazy = true
+    modules[m].decls = source_declarations(int(modules[m].file))
+    p_lazy = false
+
+demand_prelude_name = (name: int):
+    if let owners = prelude_names.get(name):
+        prelude_names.remove(name)
+        # Register all overload owners before selecting one. Registration and
+        # later lazy body checks can demand further names, reaching a fixed point.
+        loop m in owners: register_module(m)
+
+# Deferred declarations retain the eager prelude's module/within-file order.
+prelude_decl_before = (a: int, b: int) -> bool:
+    if nodes[a].mod != nodes[b].mod: return nodes[a].mod < nodes[b].mod
+    nodes[a].pos < nodes[b].pos
+
+order_prelude_globals = (decls: mut int[]):
+    loop i in [1..decls.len()):
+        d = decls[i]
+        j = i
+        loop j > 0 and prelude_decl_before(d, decls[j - 1]):
+            decls[j] = decls[j - 1]
+            j -= 1
+        decls[j] = d

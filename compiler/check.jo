@@ -13,6 +13,7 @@ use 'types.jo'
 use 'expr.jo'
 use 'ide.jo'
 use 'poly_closure.jo'
+use 'prelude.jo'
 
 enum SK: none_, local, global, fns, struct_, enum_, const_, module, type_, builtin, alias_
 
@@ -210,6 +211,16 @@ scope_add_module = (m: int, name: int, kind: SK, r: int, decl: int) -> int:
     if let ex = found:
         if syms[ex].kind == .fns and kind == .fns:
             s = new_sym(name, kind, r, decl)
+            if modules[m].is_prelude:
+                prev = 0
+                e = ex
+                loop e != 0 and not prelude_decl_before(decl, int(syms[e].decl)):
+                    prev = e
+                    e = int(syms[e].next)
+                syms[s].next = i32(e)
+                if prev == 0: prelude[name] = s
+                else: syms[prev].next = i32(s)
+                return prelude[name]
             e = ex
             loop syms[e].next != 0: e = int(syms[e].next)
             syms[e].next = i32(s)
@@ -249,6 +260,7 @@ scope_reset = (mark: int):
     sc_prev.truncate(mark)
 
 module_lookup = (m: int, name: int) -> int:
+    demand_prelude_name(name)
     user = m >= 0 and not modules[m].is_prelude
     if m >= 0:
         if modules[m].is_prelude:
@@ -705,7 +717,9 @@ find_module = (path: str) -> int: module_by_path.get(module_path_key(path)) ?? -
 load_module = (path: str, is_prelude: bool, from: int) -> int:
     key = module_path_key(path)
     ex = module_by_path.get(key) ?? -1
-    if ex >= 0: return ex
+    if ex >= 0:
+        if prelude_pending.has(ex): register_module(ex)
+        return ex
     src = read_source(path)
     if src == none: fatal(from, "cannot read '{path}'")
     d = "."
@@ -860,6 +874,7 @@ registered: bool[]
 register_module = (m: int):
     loop registered.len() <= m: registered.push(false)
     if registered[m]: return
+    parse_prelude_module(m)
     registered[m] = true
     register_decls(m, modules[m].decls)
 
@@ -3907,6 +3922,7 @@ runtime_insts: {str: int} = {}
 
 runtime_fn = (name: str) -> int:
     if let f = runtime_insts.get(name): return f
+    demand_prelude_name(intern(name))
     s = prelude.get(intern(name)) ?? 0
     if s == 0 or syms[s].kind != .fns: ice("missing runtime function {name}")
     f = get_fn_inst(int(syms[s].decl), [], nodes[int(syms[s].decl)].pos)
@@ -3959,11 +3975,17 @@ add_universe = ():
 load_prelude = ():
     # all .jo files in lib/core, lib/std and lib/game are loaded into the shared prelude scope
     # (lib/core must stay compilable by the C bootstrap compiler; lib/std need not)
+    read_prelude_index()
     loop sub in ["core", "std", "game"]:
         names_ = list_dir("{lib_dir}/{sub}")
         names_.sort()
         loop n in names_:
-            if ends_with(n, ".jo"): load_module("{lib_dir}/{sub}/{n}", true, -1)
+            if not ends_with(n, ".jo"): continue
+            path = "{lib_dir}/{sub}/{n}"
+            if sub == "game":
+                if let entry = prelude_index.get(n):
+                    if defer_prelude(path, entry): continue
+            load_module(path, true, -1)
     # Keep existing fixed-width overloads first for widening ties. Separate from
     # the seed-scanned prelude: old seeds do not know the mathematical type.
     if file_exists(lib_dir + "/math_int.jo"): load_module(lib_dir + "/math_int.jo", true, -1)
@@ -4243,7 +4265,7 @@ check_program = (main_path: str):
     modules[mainm].is_main = true
     i = 0
     loop i < modules.len():
-        register_module(i)
+        if not prelude_pending.has(i): register_module(i)
         i += 1
     bind_from_imports()
     prepare_nominals()
@@ -4468,6 +4490,7 @@ check_program = (main_path: str):
     runtime_memeq = runtime_fn("__mem_eq")
     runtime_streq = runtime_fn("__str_eq")
     loop nm in optional_runtime:
+        demand_prelude_name(intern(nm))
         if prelude.get(intern(nm)) != none: runtime_fn(nm)
     # (@cabi functions set __c_threads: lib/core/rt.jo)
     if let ct = prelude.get(intern("__c_threads")):
@@ -4562,5 +4585,6 @@ check_program = (main_path: str):
     pl: int[]
     loop g in global_ids:
         if modules[int(globals[g].mod)].is_prelude and globals[g].state == 2: pl.push(int(globals[g].decl))
+    order_prelude_globals(pl)
     set_list(int(fns[prelude_init].body), pl)
     zonk_tree(int(fns[prelude_init].body))
