@@ -8,7 +8,7 @@ Dewy must become; this file says what we do next and how we know we are closer.
 
 | Measure | Now (2026-10-19) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 45/63 programs (tier 1: 24/31, was 0/31 on 10-19; tier 2: 21/32) | all milestones |
+| Acceptance ladder, design surface | 56/63 programs (0/31 on 10-19) | all milestones |
 | Acceptance ladder, current dialect | 63/63 | stays green |
 | Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.36 G instructions (10-20; was 1.30 G at the 10-19 checkpoint) | 250k root lines/s (~88 ms) |
 | Compiler self-build | 7.5 G instructions, ~1.6 s | seconds-scale edit loop |
@@ -117,6 +117,16 @@ Landed 10-19 and 10-20:
   Publishing is automated (`.github/workflows/extension.yml`). Patch bumps only,
   at most one release a day; see docs/DEVELOPMENT.md.
 
+- Small surface follow-ups:
+  - drop `((x):>y)` type grouping, since the design's `<...>` works (one
+    spelling);
+  - drop set `add` (`push` only);
+  - `f(@a @a)` overlap must be rejected (it compiles);
+  - `let g = @sum` collides with the prelude `sum`;
+  - partial application for overloaded/generic functions;
+  - cyclic imports, which the design rejects and the core accepts;
+  - `$target` (bench harness, self-hosting).
+
 ## Later (pull in when a capability needs it)
 
 - Semantic-boundary slices 2–9: places and effects, lowering storage split,
@@ -130,9 +140,21 @@ Landed 10-19 and 10-20:
 - Compile speed: selective default passes (≤15–19% ceiling), better generated
   compiler code, parallel lower/optimize/emit. No single lever reaches 250k;
   the plan is a combination.
-- Self-hosting: once the surface can express the compiler, a parser-driven
-  Jo→Dewy translation (handle capture and integer-division semantics
-  deliberately), then a fixed point in Dewy.
+- **Self-hosting** (audit 10-20). Start module-level dogfooding now; hold the
+  full port.
+  - Pilot: translate `compiler/zip.jo` to Dewy. Its CRC kernel already matches.
+  - Prerequisites:
+    - a resolved-type translator emitting explicit `int64`/`uint64`, `//`
+      semantics fixed for truncation, and byte views (not graphemes) for
+      scanners;
+    - `$target`;
+    - a pointer/host ABI subset;
+    - import aggregation, flattened or with a cycle policy.
+  - Triggers for the full port: the zip pilot works without private syntax;
+    host/callable subset stable; a lexer and IR kernel match Jo in results
+    and speed.
+  - Bootstrap after the port: C → stage0 → frozen Jo compiler → Dewy compiler.
+  - Estimate: 5–10 engineer-weeks.
 
 ## Decisions
 
