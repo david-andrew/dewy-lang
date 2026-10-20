@@ -1497,8 +1497,7 @@ class Generator:
             if v is not None:
                 bind = self.fresh('m')
                 subject = Var(OI, v.name)
-                # An optional's `n:int64` arm does not narrow the subject itself (reported).
-                self.scopes.append({bind: V(bind, I, False), **self.narrow(subject, HIDDEN)})
+                self.scopes.append({bind: V(bind, I, False), **self.narrow(subject, I)})
                 some = self.expr(I, d)
                 self.scopes[-1] = self.narrow(subject, HIDDEN)
                 absent = self.expr(I, d)

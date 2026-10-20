@@ -1918,7 +1918,9 @@ Assigning a known member to an optional or union field establishes that member's
 type for subsequent accesses. `??` also works after an optional has been narrowed
 to its value, and its fallback remains lazy.
 
-`match` supports typed bindings, literals and `_` as a fallback. A union is
+`match` supports typed bindings, literals and `_` as a fallback. An optional
+payload arm such as `n:int64` also narrows the original variable or field to
+`int64` inside that arm; the binding `n` is an independent value. A union is
 written `int64|string`; union matches must cover its members or have a fallback.
 Literal arms also work directly on unions:
 

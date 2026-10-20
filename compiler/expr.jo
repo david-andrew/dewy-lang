@@ -5004,10 +5004,10 @@ check_match = (m: int, expected: int) -> int:
         check_struct_fields(int(types[st].st))
         seen = fill(false, int(structs[int(types[st].st)].nvariants))
     sc = int(nodes[m].a)
-    narrows = is_union(st) and nodes[sc].kind == .ident and nodes[sc].aux == i32(int(SK.local))
+    narrows = (is_union(st) or types[st].kind == .opt) and nodes[sc].kind == .ident and nodes[sc].aux == i32(int(SK.local))
     # (a field path or a global: narrowed like `if x.f is T`)
     pkey = ""
-    if is_union(st) and not narrows: pkey = path_key(sc)
+    if (is_union(st) or types[st].kind == .opt) and not narrows: pkey = path_key(sc)
     changed: int[]
     loop i in [0..nkids(m)):
         arm = kid(m, i)
@@ -5016,6 +5016,7 @@ check_match = (m: int, expected: int) -> int:
         arm_members: int[]
         arm_wild = false
         seen_before = seen
+        finite_before = finite_seen
         loop k in [0..nkids(arm)):
             p = kid(arm, k)
             pk = nodes[p].kind
@@ -5051,6 +5052,7 @@ check_match = (m: int, expected: int) -> int:
                     if binding != 0: wrap_conv(value, .union_, pt)
                 else if types[st].kind == .opt and type_eq(pt, telem(st)):
                     finite_seen |= 1
+                    arm_members.push(pt)
                     if binding != 0:
                         e = mk(.unwrap, nodes[p].pos)
                         nodes[e].a = i32(value)
@@ -5136,7 +5138,9 @@ check_match = (m: int, expected: int) -> int:
             if pk == .plit:
                 e = int(nodes[p].a)
                 if dewy and is_union(st): continue
-                if types[st].kind == .opt and nodes[e].kind == .none_lit: finite_seen |= 2
+                if types[st].kind == .opt and nodes[e].kind == .none_lit:
+                    finite_seen |= 2
+                    arm_members.push(T_NONE)
                 if st == T_BOOL and nodes[e].kind == .bool_lit:
                     finite_seen |= if nodes[e].ival != 0: 1 else: 2
                 check_expr(e, st)
@@ -5153,14 +5157,20 @@ check_match = (m: int, expected: int) -> int:
             # match x: T: ...   x is a T in the arm (T, U: ... a T | U; _: the members not matched yet)
             if arm_wild:
                 arm_members.clear()
-                loop vi in 0.. and um in union_members(st):
-                    if not seen_before[vi]: arm_members.push(um)
+                if types[st].kind == .opt:
+                    if finite_before & 2 != 0 and finite_before & 1 == 0: arm_members.push(telem(st))
+                else:
+                    loop vi in 0.. and um in union_members(st):
+                        if not seen_before[vi]: arm_members.push(um)
             narrow_local(int(nodes[sc].sym), arm_members, nodes[arm].pos)
         else if len(pkey) > 0:
             if arm_wild:
                 arm_members.clear()
-                loop vi in 0.. and um in union_members(st):
-                    if not seen_before[vi]: arm_members.push(um)
+                if types[st].kind == .opt:
+                    if finite_before & 2 != 0 and finite_before & 1 == 0: arm_members.push(telem(st))
+                else:
+                    loop vi in 0.. and um in union_members(st):
+                        if not seen_before[vi]: arm_members.push(um)
             path_narrows += 1
             narrow_expr(copy_path(sc), arm_members, nodes[arm].pos, intern(pkey))
         body = int(nodes[arm].b)
@@ -7783,10 +7793,15 @@ narrow_local = (l: int, ms: int[], pos: int):
 # the name `name` stands for root (a variable or field path) narrowed to members ms of its union
 narrow_expr = (root: int, ms: int[], pos: int, name: int):
     rt = prune(ntype(root))
-    if not is_union(rt) or ms.len() == 0: return
+    if ms.len() == 0: return
     e = 0
     t = 0
-    if ms.len() == 1:
+    if types[rt].kind == .opt:
+        if ms.len() != 1 or not type_eq(ms[0], telem(rt)): return
+        e = mk(.unwrap, pos)
+        t = telem(rt)
+    else if not is_union(rt): return
+    else if ms.len() == 1:
         e = mk(.narrow, pos)
         nodes[e].aux = i32(union_index(rt, ms[0]))
         t = ms[0]

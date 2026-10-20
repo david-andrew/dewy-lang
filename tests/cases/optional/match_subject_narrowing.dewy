@@ -1,0 +1,14 @@
+# quick
+let global:int64?=9
+main=():>void=>{
+    let o:int64?=5
+    printl(match o {n:int64=>o+1 <none>=>0})
+    let box=[value=o]
+    printl(match box.value {n:int64=>box.value+2 <none>=>0})
+    printl(match global {n:int64=>global+3 <none>=>0})
+    printl(match o {<none>=>0 _=>o+4})
+    match o {n:int64=>{o=none; printl(o)} <none>=>printl("empty")}
+    printl(o)
+    let absent:int64?=none
+    printl(match absent {n:int64=>absent+1 <none>=>42})
+}
