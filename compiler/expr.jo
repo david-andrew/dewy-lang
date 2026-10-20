@@ -1368,6 +1368,59 @@ check_args_untyped = (args: int[]):
         check_expr(a, 0)
         add_flag(a, NF_CHECKED)
 
+# A place route starts at its owning binding. Narrowing aliases and shared
+# captures still designate that same storage; private captures are independent.
+mutable_route = (n: int, route: mut int[]) -> int:
+    k = nodes[n].kind
+    if k == .field or k == .index:
+        root = mutable_route(int(nodes[n].a), route)
+        route.push(n)
+        return root
+    if k == .unwrap or k == .narrow or k == .conv:
+        return mutable_route(int(nodes[n].a), route)
+    if k == .ident and nodes[n].aux == i32(int(SK.local)):
+        l = int(nodes[n].sym)
+        if int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
+            return mutable_route(int(locals[l].alias), route)
+        if int(locals[l].flags) & LF_CAPTURE != 0 and int(locals[l].flags) & LF_VALUECAP == 0:
+            return mutable_route(mk_ident_local(int(locals[l].outer), nodes[n].pos), route)
+    n
+
+mutable_index = (n: int) -> int:
+    let n = n
+    loop nodes[n].kind == .conv: n = int(nodes[n].a)
+    n
+
+mutable_overlap = (a: int, b: int) -> bool:
+    left: int[]
+    right: int[]
+    ar = mutable_route(a, left)
+    br = mutable_route(b, right)
+    if nodes[ar].kind != .ident or nodes[br].kind != .ident: return false
+    if nodes[ar].aux != nodes[br].aux or nodes[ar].sym != nodes[br].sym: return false
+    loop i in [0..min(left.len(), right.len())):
+        x = left[i]
+        y = right[i]
+        if nodes[x].kind != nodes[y].kind: return true
+        if nodes[x].kind == .field:
+            if nodes[x].aux >= 0 and nodes[y].aux >= 0 and nodes[x].aux != nodes[y].aux: return false
+            if nodes[x].aux == -2 and nodes[y].aux == -2 and nodes[x].ival != nodes[y].ival: return false
+        else:
+            xi = mutable_index(int(nodes[x].b))
+            yi = mutable_index(int(nodes[y].b))
+            if nodes[xi].kind == .int_lit and nodes[yi].kind == .int_lit and nodes[xi].ival != nodes[yi].ival: return false
+    # Equal routes and parent/child routes overlap. Unknown indices can overlap.
+    true
+
+check_mutable_arguments = (args: int[], mask: int, pos: int):
+    if mask == 0 or mask & (mask - 1) == 0 or not dewy_at(pos): return
+    loop i in [0..args.len()):
+        if mask & (1 << i) == 0 or nodes[args[i]].kind == .hole: continue
+        loop j in [0..i):
+            if mask & (1 << j) == 0 or nodes[args[j]].kind == .hole: continue
+            if mutable_overlap(args[j], args[i]):
+                fatal(nodes[args[i]].pos, "mutable arguments {j + 1} and {i + 1} overlap; pass disjoint places")
+
 finish_arg = (a: int, pt: int, is_mut: bool):
     if is_mut and not has_flag(a, NF_MUT) and files[pos_file(nodes[a].pos)].is_dewy:
         fatal(nodes[a].pos, "a mutable argument needs `@` at the call site")
@@ -1915,6 +1968,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             continue
         finish_arg(a, fns[f].ptypes[i], is_mut)
         fin.push(a)
+    check_mutable_arguments(fin, int(cd.sig.mutmask), nodes[n].pos)
     set_list(n, fin)
     nodes[n].sym = i32(f)
     nodes[n].aux = 0
@@ -1959,6 +2013,7 @@ value_call = (n: int, callee: int, args: int[], expected: int = 0) -> int:
         if message != "": fatal(nodes[n].pos, message)
     loop i in 0.. and a in final:
         finish_arg(a, targ(ft, i), int(types[ft].mutmask) & (1 << i) != 0)
+    check_mutable_arguments(final, int(types[ft].mutmask), nodes[n].pos)
     set_list(n, final)
     if named: save_call_order(n, args, final)
     nodes[n].a = i32(callee)

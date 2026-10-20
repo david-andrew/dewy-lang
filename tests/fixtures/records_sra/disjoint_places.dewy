@@ -1,0 +1,4 @@
+R:type=[x:int64 y:int64 z:int64]
+change=(@a:R @b:R snapshot:R):>int64=>{a.x=10 b.y=a.x+1 return snapshot.x+snapshot.y+snapshot.z}
+main=()=>{let a=R[1 2 3] let saved=a let b=a let sum=change(@a @b a)
+return if sum=?6 and a.x=?10 and a.y=?2 and b.x=?1 and b.y=?11 and saved.x=?1 and saved.y=?2 42 else 1}

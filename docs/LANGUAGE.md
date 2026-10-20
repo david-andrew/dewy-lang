@@ -420,7 +420,10 @@ runtime (or diagnosing known constant failures). `as` and type calls use those
 same checks. Float-to-`int` truncates toward zero and rejects NaN, infinity and
 out-of-range values; `int`-to-float retains the usual rounding. Existing conversions
 between explicit fixed widths retain their behavior. Mutable arguments and
-containers require matching element types: an `int` local is not an `@int64` place.
+containers require matching element types: an `int` local is not an `@int64` place. Two mutable arguments in one call
+must be disjoint: the same binding, a parent and its field/element, or possibly
+equal indices of one array are rejected. Distinct fields and distinct constant
+indices are accepted.
 
 Lengths retain their current `int64` type. An `int` index uses the ordinary bounds
 checks. `to_int(text)` still returns `int64 | none`, including `none` on overflow;

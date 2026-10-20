@@ -1,0 +1,14 @@
+# quick
+pair=(@a:int64 @b:int64)=>{a+=1 b+=2}
+main=()=>{
+    let a:array<int64>=[10 20]
+    pair(@a[0] @a[1])
+    printl(a)
+    let r:[x:int64 y:int64]=[x=30 y=40]
+    let f=@pair
+    f(@r.x @r.y)
+    printl(r.x+r.y)
+    let b=a
+    pair(@a[0] @b[0])
+    printl(a[0]+b[0])
+}
