@@ -366,7 +366,7 @@ suggestion = (name: str, candidates: int[]) -> str:
         if w[0] == '`': w = w[1..len(w) - 1)
         if find(w, "(") > 0 and find(w, " ") < 0: w = w[..find(w, "("))     # (`random_item(xs)`: random_item)
         if find(w, ".") > 0: w = w[find(w, ".") + 1..]                       # (`xs.remove(0)`: remove)
-        known = w == "true" or w == "false" or w == "none" or find(w, " ") >= 0 or find(w, "`") >= 0
+        known = w == "true" or w == "false" or w == "none" or find(w, " ") >= 0 or find(w, "`") >= 0 or (len(w) > 0 and w[0] == '.')
         loop c in candidates:
             if known: break
             if name_of(c) == w: known = true
@@ -534,12 +534,33 @@ HABITS = ["index", "`find(s, x)` for text (-1 when it is not there), `index_of(x
     "scene", "an enum of screens (`screen = Screen.play`), with a `match screen:` in update and in draw", "Array", "`fill(0, 8)` (eight zeros), `fill(fill(0, 8), 8)` (eight rows of them), or `[a, b, c]`",
     "Object", "a map's `m.keys()` and `m.values()`, or a struct for named fields", "setInterval", "`every(1, 30.0)` in update: true once each 30 seconds (the 1 tells timers apart)", "setTimeout", "`Actions`: `later.then(2.0, (): ...)`, and `later.update(dt)` in update"]
 
+# Dewy spellings where the ones above are Jo's.
+DEWY_HABITS = ["float", "`float64` (and `to_float(s)` for text)", "double", "`float64`", "number", "`float64`", "f64", "`float64`", "f32", "`float32`",
+    "int", "`int64`", "Int", "`int64`", "integer", "`int64`", "long", "`int64`", "i64", "`int64`", "i32", "`int32`", "u8", "`uint8`", "u64", "`uint64`",
+    "str", "`string`", "String", "`string`", "char", "`string` (a character is a one-character string)",
+    "list", "`array<T>` (as `array<int64>`)", "List", "`array<T>` (as `array<int64>`)", "vector", "`array<T>` (as `array<int64>`)", "Vec", "`array<T>` (as `array<int64>`)",
+    "dict", "`dict<K V>` (as `dict<string int64>`)", "Dict", "`dict<K V>` (as `dict<string int64>`)", "HashMap", "`dict<K V>` (as `dict<string int64>`)", "map", "`dict<K V>` (as `dict<string int64>`)",
+    "length", "`.length`", "size", "`.length`", "len", "`.length`", "toString", "`string(x)`", "to_string", "`string(x)`",
+    "forEach", "`loop x in xs \{ ... }`", "items", "`loop [key value] in m \{ ... }`", "entries", "`loop [key value] in m \{ ... }`",
+    "self", "a parameter: functions take what they work on first (`move = (@p:Player dt:float64) => ...`, called as `p.move(dt)`)",
+    "this", "a parameter: functions take what they work on first (`move = (@p:Player dt:float64) => ...`, called as `p.move(dt)`)",
+    "includes", "`contains` or `x in? xs`", "delta_time", "`dt`, what update is given: `update = (dt:float64) => ...`", "deltaTime", "`dt`, what update is given: `update = (dt:float64) => ...`",
+    "copy", "nothing: `ys = xs` copies (arrays and records are values)", "clone", "nothing: `ys = xs` copies (arrays and records are values)", "deep_copy", "nothing: `ys = xs` copies (arrays and records are values)"]
+
+DEWY_MAP_HABITS = ["size", "`m.length`", "length", "`m.length`", "has_key", "`m.has(k)` or `k in? m`", "containsKey", "`m.has(k)` or `k in? m`",
+    "items", "`loop [key value] in m \{ ... }`", "forEach", "`loop [key value] in m \{ ... }`"]
+
 # names from other languages for maps' operations
 MAP_HABITS = ["set", "`m[k] = v`", "size", "`m.len()`", "length", "`m.len()`", "delete", "`m.remove(k)`", "has_key", "`m.has(k)` or `k in m`",
     "containsKey", "`m.has(k)` or `k in m`", "put", "`m[k] = v`", "items", "`loop k, v in m:`", "forEach", "`loop k, v in m:`"]
 
 map_habit_name = (name: str) -> str:
     i = 0
+    if ts_dewy:
+        loop i + 1 < DEWY_MAP_HABITS.len():
+            if DEWY_MAP_HABITS[i] == name: return DEWY_MAP_HABITS[i + 1]
+            i += 2
+        i = 0
     loop i + 1 < MAP_HABITS.len():
         if MAP_HABITS[i] == name: return MAP_HABITS[i + 1]
         i += 2
@@ -547,6 +568,11 @@ map_habit_name = (name: str) -> str:
 
 habit_name = (name: str) -> str:
     i = 0
+    if ts_dewy:
+        loop i + 1 < DEWY_HABITS.len():
+            if DEWY_HABITS[i] == name: return DEWY_HABITS[i + 1]
+            i += 2
+        i = 0
     loop i < HABITS.len():
         if HABITS[i] == name: return HABITS[i + 1]
         i += 2
@@ -555,6 +581,10 @@ habit_name = (name: str) -> str:
 # an example of the annotation for an empty array or map
 empty_hint = (nm: str, t0: int) -> str:
     t = prune(t0)
+    if ts_dewy:
+        if types[t].kind == .array: return " (`let {nm}:array<int64> = []` for an array of integers)"
+        if is_map_type(t): return " (`let {nm}:dict<string int64> = []` for a dictionary from text to integers)"
+        return ""
     if types[t].kind == .array:
         et = pushed_type(nm)
         if len(et) > 0: return " (`{nm}: {et}[] = []`: an array of {et}s, as pushed later)"
@@ -948,7 +978,7 @@ resolve_type = (tn: int) -> int:
             # (push = (h: mut Heap[T], x: T): a generic function names its type parameters)
             tn_s = name_of(nm)
             if len(tn_s) <= 2 and tn_s[0] >= 'A' and tn_s[0] <= 'Z' and cx >= 0 and fns.len() > int(ctxs[cx].inst):
-                fatal(nodes[tn].pos, "unknown type '{tn_s}' (a generic function names its type parameters after its name: `f[{tn_s}] = (x: {tn_s}) -> {tn_s}: ...`; a generic struct, `struct Heap[{tn_s}]:`)")
+                fatal(nodes[tn].pos, jd(nodes[tn].pos, "unknown type '{tn_s}' (a generic function names its type parameters after its name: `f[{tn_s}] = (x: {tn_s}) -> {tn_s}: ...`; a generic struct, `struct Heap[{tn_s}]:`)", "unknown type '{tn_s}' (a generic function declares its type parameters first: `f = <{tn_s}>(x:{tn_s}):>{tn_s} => ...`; a generic record, `Heap:type = <{tn_s}>[items:array<{tn_s}>]`)"))
             fatal(nodes[tn].pos, "unknown type '{name_of(nm)}'{suggestion(name_of(nm), type_names())}")
         sk = syms[s].kind
         # (str = (b: Big) -> str: a function of the program's named as a type, its `str` there
@@ -997,7 +1027,7 @@ resolve_type = (tn: int) -> int:
         if has_flag(tn, NF_SOA):
             et = resolve_type(int(nodes[tn].a))
             # (soa T[] of a generic function's T: a struct once it is known)
-            if (tkind(et) != .struct_ and tkind(et) != .param) or is_soa(et): fatal(nodes[tn].pos, "soa T[] needs a struct type T, not {type_str(et)}")
+            if (tkind(et) != .struct_ and tkind(et) != .param) or is_soa(et): fatal(nodes[tn].pos, "soa T[] needs a struct type T, not {dt(et)}")
             if soa_decl == 0: soa_decl = mk(.struct_, 0)
             return soa_inst(et)
         return mk_array(resolve_type(int(nodes[tn].a)))
@@ -1331,10 +1361,10 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
             fname = name_of(int(nodes[decl].name))
             pz = prune(z)
             # (an empty [] or {} argument: nothing says what it holds)
-            if types[pz].kind == .array: fatal(use_pos, "cannot tell what the array given to '{fname}' holds (an empty `[]` says nothing): write the type where the result goes, `scores: int[] = {fname}(...)`, or pass a variable of a known type")
-            if is_map_type(pz): fatal(use_pos, "cannot tell what the map given to '{fname}' holds (an empty `\{}` says nothing): write the type where the result goes, `m: \{str: int} = {fname}(...)`, or pass a variable of a known type")
-            if starts_with(fname, "__fmt"): fatal(use_pos, "cannot tell what kind of value this is yet (an empty `[]` says nothing of what it will hold): write its type where it is made, `xs: int[] = []`, or put something in it first")
-            fatal(use_pos, "cannot infer the type of an argument to '{fname}'; write the type where the result goes (`x: T = {fname}(...)`) or give the argument a type")
+            if types[pz].kind == .array: fatal(use_pos, "cannot tell what the array given to '{fname}' holds (an empty `[]` says nothing): write the type where the result goes, {jd(use_pos, "`scores: int[] = {fname}(...)`", "`let scores:array<int64> = {fname}(...)`")}, or pass a variable of a known type")
+            if is_map_type(pz): fatal(use_pos, "cannot tell what the map given to '{fname}' holds (an empty {jd(use_pos, "`\{}`", "`[]`")} says nothing): write the type where the result goes, {jd(use_pos, "`m: \{str: int} = {fname}(...)`", "`let m:dict<string int64> = {fname}(...)`")}, or pass a variable of a known type")
+            if starts_with(fname, "__fmt"): fatal(use_pos, "cannot tell what kind of value this is yet (an empty `[]` says nothing of what it will hold): write its type where it is made, {jd(use_pos, "`xs: int[] = []`", "`let xs:array<int64> = []`")}, or put something in it first")
+            fatal(use_pos, "cannot infer the type of an argument to '{fname}'; write the type where the result goes ({jd(use_pos, "`x: T = {fname}(...)`", "`let x:T = {fname}(...)`")}) or give the argument a type")
         # (a generic function that calls itself with bigger type arguments would expand without end)
         zt.push(z)
     fns[f].targs = zt
@@ -1367,7 +1397,7 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
                     if p != "":
                         held = ""
                         if p != type_str(z): held = " (it holds a {p})"
-                        fatal(use_pos, "'{name_of(int(nodes[decl].name))}' takes plain data (numbers, bools, vectors and structs of them), not {type_str(z)}{held}")
+                        fatal(use_pos, "'{name_of(int(nodes[decl].name))}' takes plain data (numbers, bools, vectors and structs of them), not {dt(z)}{held}")
             else if an == "lib":
                 la = int(nodes[at].a)
                 # (or a constant naming it: const SQLITE = "libsqlite3.so.0", then @lib(SQLITE))
@@ -1428,7 +1458,7 @@ check_c_boxes = (t0: int, pos: int):
                 loop i in [0..int(variants[vi].nfields)): fs.push(int(variants[vi].fields) + i)
             loop f in fs:
                 if fields[f].boxed:
-                    fatal(pos, "recursive value field '{name_of(int(fields[f].name))}' in {type_str(current)} uses managed storage and cannot cross the C ABI; use an explicit pointer-based C representation")
+                    fatal(pos, "recursive value field '{name_of(int(fields[f].name))}' in {dt(current)} uses managed storage and cannot cross the C ABI; use an explicit pointer-based C representation")
                 pending.push(int(fields[f].type))
 
 ensure_ret = (f: int, use_pos: int):
@@ -1438,7 +1468,7 @@ ensure_ret = (f: int, use_pos: int):
         fns[f].ret = i32(T_VOID)
         fns[f].aux_void = true
         return
-    if fns[f].state == 1: fatal(use_pos, "recursive function '{name_of(int(nodes[int(fns[f].decl)].name))}' needs an explicit return type (add `-> Type`)")
+    if fns[f].state == 1: fatal(use_pos, "recursive function '{name_of(int(nodes[int(fns[f].decl)].name))}' needs an explicit return type (add {jd(use_pos, "`-> Type`", "`:>Type`")})")
     check_fn_body(f)
 
 new_local = (name: int, t: int, pos: int) -> int:
@@ -1525,7 +1555,7 @@ check_shareable = (r: int, pos: int):
     if int(locals[r].flags) & LF_DECL != 0: return
     nm = name_of(int(locals[r].name))
     # (loop mut g in gems: steps.then(0.1, (): g.scale = 0.0): the element, changed later)
-    if int(locals[r].flags) & LF_ALIAS != 0: fatal(pos, "'{nm}' stands for an element only while the loop is there, and the function changing it runs later: change the element by its position, `loop i in 0.. and {nm} in xs:` and then `(): xs[i]...` in the function")
+    if int(locals[r].flags) & LF_ALIAS != 0: fatal(pos, "'{nm}' stands for an element only while the loop is there, and the function changing it runs later: change the element by its position, {jd(pos, "`loop i in 0.. and {nm} in xs:` and then `(): xs[i]...`", "`loop i in 0.. and {nm} in xs \{ ... }` and then `() => xs[i]...`")} in the function")
     fatal(pos, "'{nm}' is captured by a closure and modified: only variables declared with `=` can be shared like that (copy it first: `let v = {nm}`)")
 
 module_ctx: int[]
@@ -1577,7 +1607,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
     if globals[g].state == 2: return
     if globals[g].state == 1:
         gn = name_of(int(globals[g].name))
-        fatal(use_pos, "'{gn}' is used in its own first value, before it has one: give it one first (`{gn} = 0` on a line above), then change it")
+        fatal(use_pos, "'{gn}' is used in its own first value, before it has one: give it one first ({jd(use_pos, "`{gn} = 0`", "`let {gn} = 0`")} on a line above), then change it")
     globals[g].state = 1
     saved = cx
     m = int(globals[g].mod)
@@ -1607,7 +1637,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
             t = unpacked.0
             set_list(d, unpacked.1)
             nodes[d].b = i32(last_checked)
-            if types[t].kind != .tuple or int(types[t].nargs) != nkids(d): fatal(nodes[d].pos, "expected a tuple with {nkids(d)} elements (or an array), found {type_str(t)}")
+            if types[t].kind != .tuple or int(types[t].nargs) != nkids(d): fatal(nodes[d].pos, "expected a tuple with {nkids(d)} elements (or an array), found {dt(t)}")
             loop k in [0..nkids(d)):
                 id = kid(d, k)
                 if nodes[id].kind == .hole: continue
@@ -1640,7 +1670,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
             if nodes[d].a == 0 and vk == .array and nkids(int(nodes[d].b)) == 0 and tkind(t) == .array: open_globals.push(g)
             else: fatal(nodes[d].pos, "cannot infer the type of '{name_of(int(globals[g].name))}'; add a type annotation{empty_hint(name_of(int(globals[g].name)), t)}")
         if tkind(t) == .void_: fatal(nodes[d].pos, "cannot assign a value of type void")
-        if tkind(t) == .null_: fatal(nodes[d].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: `{name_of(int(globals[g].name))}: Enemy? = none`")
+        if tkind(t) == .null_: fatal(nodes[d].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(nodes[d].pos, "`{name_of(int(globals[g].name))}: Enemy? = none`", "`let {name_of(int(globals[g].name))}:Enemy? = none`")}")
         if tkind(t) == .typeval or tkind(t) == .module: fatal(nodes[d].pos, "'{name_of(int(globals[g].name))}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
         globals[g].type = i32(t)
         add_flag(d, NF_CHECKED)
@@ -1675,7 +1705,7 @@ unused_result = (x: int, pos: int):
     if nodes[a0].kind == .ident:
         v = name_of(int(nodes[a0].name))
         how = " (`{v} = {v}.{fname}(...)` keeps it)"
-    warn(pos, "{fname} gives a new {type_str(r)} and leaves its argument as it was: this does nothing{how}")
+    warn(pos, "{fname} gives a new {dt(r)} and leaves its argument as it was: this does nothing{how}")
 
 # `x == 6`, `speed + 1`, `true` as a statement: a value made and dropped, which changes nothing
 # (written for `=`, `+=` or `return true`)
@@ -1691,11 +1721,12 @@ unused_value = (raw: Node, t: int):
     if k == .binary:
         op = raw.op as Tok
         if op == .eq:
-            if len(name) > 0: warn(raw.pos, "`==` compares, and the answer is not used: to change '{name}', write `{name} = ...`")
-            else: warn(raw.pos, "`==` compares, and the answer is not used (`=` changes a value)")
+            eq = jd(raw.pos, "`==`", "`=?`")
+            if len(name) > 0: warn(raw.pos, "{eq} compares, and the answer is not used: to change '{name}', write `{name} = ...`")
+            else: warn(raw.pos, "{eq} compares, and the answer is not used (`=` changes a value)")
             return
         if op == .ne or op == .lt or op == .gt or op == .le or op == .ge:
-            warn(raw.pos, "this comparison's answer is not used (`if ...:` acts on it)")
+            warn(raw.pos, "this comparison's answer is not used ({jd(raw.pos, "`if ...:`", "`if ... \{ }`")} acts on it)")
             return
         if op == .plus or op == .minus or op == .star or op == .slash or op == .percent:
             if len(name) > 0: warn(raw.pos, "this value is not used: to change '{name}', write `{name} = ...` (or `{name} {tok_text(op)}= ...`)")
@@ -1703,7 +1734,7 @@ unused_value = (raw: Node, t: int):
             return
         return
     if k == .and_ or k == .or_ or k == .not_:
-        warn(raw.pos, "this condition's answer is not used (`if ...:` acts on it)")
+        warn(raw.pos, "this condition's answer is not used ({jd(raw.pos, "`if ...:`", "`if ... \{ }`")} acts on it)")
         return
     if k == .bool_lit or k == .int_lit or k == .float_lit or k == .ident or k == .none_lit:
         if tkind(prune(int(ctxs[cx].ret))) != .void_:
@@ -1892,7 +1923,7 @@ unpack_loop = (s: int):
     if types[t].kind != .array and types[t].kind != .fixed: return
     pos = nodes[s].pos
     et = prune(int(types[t].elem))
-    if not dewy and (types[et].kind != .tuple or int(types[et].nargs) != 2): fatal(pos, "`loop a, b in xs` unpacks pairs, but the elements are {type_str(et)}; to count them write `loop i in 0.. and x in xs`")
+    if not dewy and (types[et].kind != .tuple or int(types[et].nargs) != 2): fatal(pos, "`loop a, b in xs` unpacks pairs, but the elements are {dt(et)}; to count them write `loop i in 0.. and x in xs`")
     if has_flag(s, NF_MUT): fatal(pos, "`loop mut` cannot unpack pairs")
     tn = "__lt{bc_count}"
     bc_count += 1
@@ -2058,6 +2089,13 @@ mutable_loop_syntax = (pos: int) -> str:
     if files[pos_file(pos)].is_dewy: return "loop @item"
     "loop mut"
 
+# Suggestions are spelled in the language of the source they are about.
+dewy_at = (pos: int) -> bool:
+    f = pos_file(pos)
+    pos > 0 and f < files.len() and files[f].is_dewy
+
+jd = (pos: int, jo: str, dewy: str) -> str: if dewy_at(pos): dewy else: jo
+
 check_for = (s: int):
     if has_flag(s, NF_MUT) and files[pos_file(nodes[s].pos)].is_dewy:
         source_type = prune(check_expr(int(nodes[s].a), 0))
@@ -2098,12 +2136,12 @@ check_for = (s: int):
         if tkind(t) == .str_: fatal(nodes[it].pos, "text is joined with `+` (or put in a string: \"\{a}\{b}\"); `..` makes a range of numbers")
         if not is_int(t) or nodes[int(nodes[it].a)].kind == .float_lit or nodes[int(nodes[it].b)].kind == .float_lit:
             if is_int(t): t = T_FLOAT
-            fatal(nodes[it].pos, "a range counts in whole numbers, not {type_str(t)} (for 0.0 to 1.0 in tenths, count to 10 and divide: `loop i in [0..10): x = f64(i) / 10.0`)")
+            fatal(nodes[it].pos, "a range counts in whole numbers, not {dt(t)} (for 0.0 to 1.0 in tenths, count to 10 and divide: {jd(nodes[it].pos, "`loop i in [0..10): x = f64(i) / 10.0`", "`loop i in [0..10] \{ let x = float64(i) / 10 }`")})")
         nodes[it].a = i32(coerce(int(nodes[it].a), t))
         if nodes[it].b != 0: nodes[it].b = i32(coerce(int(nodes[it].b), t))
         if has_flag(it, NF_STEP): nodes[it].c = i32(coerce(int(nodes[it].c), t))
         if nv != 1: fatal(pos, "a range loop has one loop variable")
-        if is_mut: fatal(pos, "`loop mut` needs an array (a range's numbers are not stored anywhere)")
+        if is_mut: fatal(pos, "`{mutable_loop_syntax(pos)}` needs an array (a range's numbers are not stored anywhere)")
         l = new_local(n1, t, pos)
         nodes[s].sym = i32(l)
         nodes[s].aux = 0
@@ -2197,7 +2235,7 @@ check_for = (s: int):
             nodes[s].c = i32(idx)
             nodes[s].d = i32(snap)
             nodes[s].aux2 = i32(vl)
-        else: fatal(nodes[it].pos, "cannot iterate over a value of type {type_str(t)}")
+        else: fatal(nodes[it].pos, "cannot iterate over a value of type {dt(t)}")
     check_loop_enter(s)
     check_block(int(nodes[s].b), 0, false)
     loop_serials.pop()
@@ -2689,7 +2727,7 @@ check_assign = (s: int) -> int:
     sl = soa_alias_of(int(nodes[s].a))
     if sl != 0:
         # p = value in `loop mut p in ps`: ps[i] = value
-        if int(locals[sl].flags) & LF_SOAMUT == 0: fatal(nodes[s].pos, "cannot modify loop variable '{name_of(int(locals[sl].name))}' (use `loop mut`)")
+        if int(locals[sl].flags) & LF_SOAMUT == 0: fatal(nodes[s].pos, "cannot modify loop variable '{name_of(int(locals[sl].name))}' (use `{mutable_loop_syntax(nodes[s].pos)}`)")
         nodes[s].a = i32(clone(int(locals[sl].soa)))
     lhs = int(nodes[s].a)
     op = int(nodes[s].op)
@@ -2704,14 +2742,14 @@ check_assign = (s: int) -> int:
         t = unpacked.0
         set_list(lhs, unpacked.1)
         nodes[s].b = i32(last_checked)
-        if types[t].kind != .tuple or int(types[t].nargs) != nkids(lhs): fatal(nodes[s].pos, "expected a tuple with {nkids(lhs)} elements (or an array), found {type_str(t)}")
+        if types[t].kind != .tuple or int(types[t].nargs) != nkids(lhs): fatal(nodes[s].pos, "expected a tuple with {nkids(lhs)} elements (or an array), found {dt(t)}")
         loop i in [0..nkids(lhs)):
             tp = kid(lhs, i)
             if nodes[tp].kind == .hole: continue
             tt = check_expr(tp, 0)
             set_kid(lhs, i, last_checked)
             check_place(last_checked, false)
-            if not can_coerce(0, targ(t, i), tt) and not type_eq(targ(t, i), tt): fatal(nodes[tp].pos, "cannot assign {type_str(targ(t, i))} to {type_str(tt)}")
+            if not can_coerce(0, targ(t, i), tt) and not type_eq(targ(t, i), tt): fatal(nodes[tp].pos, "cannot assign {dt(targ(t, i))} to {dt(tt)}")
         nodes[s].aux = 1
         return s
     if nodes[lhs].kind == .field or (nodes[lhs].kind == .index and (op != int(Tok.assign) or nodes[int(nodes[lhs].a)].kind == .index or nodes[int(nodes[lhs].a)].kind == .field)):
@@ -2897,7 +2935,7 @@ check_assign = (s: int) -> int:
     else:
         if is_int(l) and is_float(rt):
             if nodes[lhs].kind == .ident: var_type_error(lhs, l, rt, nodes[s].pos)
-            fatal(nodes[s].pos, "cannot apply {tok_text(op as Tok)} to {type_str(l)} and {type_str(rt)} (int(...) makes the value an int, or make the field a float)")
+            fatal(nodes[s].pos, "cannot apply {tok_text(op as Tok)} to {dt(l)} and {dt(rt)} (int(...) makes the value an int, or make the field a float)")
         nodes[s].b = i32(coerce(int(nodes[s].b), l))
     s
 
@@ -2930,7 +2968,7 @@ var_type_error = (lhs: int, lt: int, rt: int, at: int):
     # (score = "0", then score += 1: a number in quotes is text)
     if tkind(lt) == .str_ and is_numeric(rt):
         fatal(at, "'{nm}' holds text{made} (a value in quotes, \"0\", is text, even with digits): for a number, give it one without quotes (`{nm} = 0`)")
-    fatal(at, "'{nm}' has type {type_str(lt)}{made} and cannot hold this {type_str(rt)}: {how}")
+    fatal(at, "'{nm}' has type {dt(lt)}{made} and cannot hold this {dt(rt)}: {how}")
 
 # A type on the whole pattern supplies context before extracting its leaves.
 check_binding_input = (s: int) -> int:
@@ -2973,7 +3011,7 @@ check_vardecl = (s: int):
         t = unpacked.0
         set_list(s, unpacked.1)
         nodes[s].b = i32(last_checked)
-        if types[t].kind != .tuple or int(types[t].nargs) != nkids(s): fatal(nodes[s].pos, "expected a tuple with {nkids(s)} elements (or an array), found {type_str(t)}")
+        if types[t].kind != .tuple or int(types[t].nargs) != nkids(s): fatal(nodes[s].pos, "expected a tuple with {nkids(s)} elements (or an array), found {dt(t)}")
         loop i in [0..nkids(s)):
             id = kid(s, i)
             if nodes[id].kind == .hole: continue
@@ -3004,7 +3042,7 @@ check_vardecl = (s: int):
     if t == 0: fatal(nodes[s].pos, "variable needs a type or a value")
     tk = tkind(t)
     if tk == .void_: fatal(nodes[s].pos, "cannot assign a value with no type (void) to '{nm}'")
-    if tk == .null_: fatal(nodes[s].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: `{nm}: Enemy? = none`")
+    if tk == .null_: fatal(nodes[s].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(nodes[s].pos, "`{nm}: Enemy? = none`", "`let {nm}:Enemy? = none`")}")
     if tk == .typeval or tk == .module: fatal(nodes[s].pos, "'{nm}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
     l = new_local(int(nodes[s].name), t, nodes[s].pos)
     if nodes[s].b != 0 and quat_nodes.has(int(nodes[s].b)): quat_locals[l] = true
@@ -3089,11 +3127,11 @@ check_stmt = (s: int):
             if types[t].kind != .opt:
                 nodes[s].a = i32(narrow_optional_source(int(nodes[s].a)))
                 t = prune(ntype(int(nodes[s].a)))
-            if types[t].kind != .opt: fatal(nodes[int(nodes[s].a)].pos, "'loop let x = value' needs an optional value, found {type_str(t)}")
+            if types[t].kind != .opt: fatal(nodes[int(nodes[s].a)].pos, "'loop let x = value' needs an optional value, found {dt(t)}")
             nodes[s].sym = i32(new_local(int(nodes[s].name), int(types[t].elem), nodes[s].pos))
         else:
             ct = check_expr(int(nodes[s].a), T_BOOL)
-            if tkind(ct) == .array or nodes[int(nodes[s].a)].kind == .range: fatal(nodes[s].pos, "`loop cond:` repeats while cond is true; to go through a range or an array, name the element: `loop i in [0..n):` (`loop _ in` when it is not used)")
+            if tkind(ct) == .array or nodes[int(nodes[s].a)].kind == .range: fatal(nodes[s].pos, jd(nodes[s].pos, "`loop cond:` repeats while cond is true; to go through a range or an array, name the element: `loop i in [0..n):` (`loop _ in` when it is not used)", "`loop cond \{ }` repeats while cond is true; to go through a range or an array, name the element: `loop i in [0..n) \{ }` (`loop _ in` when it is not used)"))
             nodes[s].a = i32(coerce(last_checked, T_BOOL))
             # The body runs only after its guard succeeds. Assignment still
             # invalidates these aliases, just as it does inside an if arm.
@@ -3124,7 +3162,7 @@ check_stmt = (s: int):
         else:
             rt = prune(ret)
             if tkind(rt) == .var: unify(rt, T_VOID)
-            else if tkind(rt) != .void_: fatal(nodes[s].pos, "missing return value (function returns {type_str(rt)})")
+            else if tkind(rt) != .void_: fatal(nodes[s].pos, "missing return value (function returns {dt(rt)})")
     else if k == .break_ or k == .continue_:
         if ctxs[cx].loop_depth == 0:
             w = "continue"
@@ -3247,10 +3285,10 @@ __check_fn_body = (f: int):
             else if types[r].kind == .void_: nodes[body].aux = 0
             else if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
             else if bt != T_NEVER and not (n > 0 and stmt_terminates(kid(body, n - 1))):
-                fatal(nodes[decl].pos, "function must return a value of type {type_str(r)} on all paths")
+                fatal(nodes[decl].pos, "function must return a value of type {dt(r)} on all paths")
             fns[f].ret = i32(zonk(int(ctxs[cx].ret)))
             if ide_on and decl != 0 and nodes[decl].kind == .fn_ and ide_indexed(pos_file(nodes[decl].pos)): ide_hint_fns.push(f)
-            if fns[f].aux_void and tkind(int(fns[f].ret)) != .void_: fatal(nodes[decl].pos, "recursive function '{name_of(int(nodes[decl].name))}' returns a value; add an explicit return type (`-> Type`)")
+            if fns[f].aux_void and tkind(int(fns[f].ret)) != .void_: fatal(nodes[decl].pos, "recursive function '{name_of(int(nodes[decl].name))}' returns a value; add an explicit return type ({jd(nodes[decl].pos, "`-> Type`", "`:>Type`")})")
         else if want:
             if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
             else if bt != T_NEVER and not (n > 0 and stmt_terminates(kid(body, n - 1))):
@@ -3266,16 +3304,16 @@ __check_fn_body = (f: int):
                         fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but its last line gives nothing: a last line `{vn}` gives {vn} back")
                     # (if n > 0: x, with no else: nothing when it does not hold)
                     if (nodes[ls].kind == .if_ or nodes[ls].kind == .iflet) and nodes[ls].c == 0:
-                        fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but an `if` without `else` gives nothing when it does not hold: add `else:` and the value then")
+                        fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but an `if` without `else` gives nothing when it does not hold: add {jd(nodes[ls].pos, "`else:` and the value then", "`else` and the value then")}")
                     fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but its last line gives nothing: end it with the value to give back (or `return value`)")
-                fatal(p, "missing return value: function returns {type_str(r)}")
+                fatal(p, "missing return value: function returns {dt(r)}")
     zonk_tree(body)
     loop l in fns[f].locals:
         locals[l].type = i32(zonk(int(locals[l].type)))
         if has_var(prune(int(locals[l].type))):
             ln = name_of(int(locals[l].name))
             # (a variable the compiler made, as for a loop: said of what it holds)
-            if len(ln) == 0 or starts_with(ln, "__"): fatal(locals[l].pos, "cannot infer the type of what this goes through: write the type where the array is made, as `xs: int[] = []`")
+            if len(ln) == 0 or starts_with(ln, "__"): fatal(locals[l].pos, "cannot infer the type of what this goes through: write the type where the array is made, as {jd(locals[l].pos, "`xs: int[] = []`", "`let xs:array<int64> = []`")}")
             fatal(locals[l].pos, "cannot infer the type of '{ln}'; add a type annotation{empty_hint(ln, int(locals[l].type))}")
     copy_write_warnings(f)
     fns[f].state = 2
@@ -3441,14 +3479,14 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
                 if has_flag(v, NF_LITERAL):
                     bt = lit_default(v)
                     set_block_value(body, coerce(v, bt))
-                if not unify(r, bt): fatal(nodes[body].pos, "lambda returns {type_str(bt)}, expected {type_str(r)}")
+                if not unify(r, bt): fatal(nodes[body].pos, "lambda returns {dt(bt)}, expected {dt(r)}")
             else: unify(r, T_VOID)
         else if types[r].kind == .void_: nodes[body].aux = 0
         else if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
-        else if bt != T_NEVER: fatal(nodes[body].pos, "lambda must return a value of type {type_str(r)}")
+        else if bt != T_NEVER: fatal(nodes[body].pos, "lambda must return a value of type {dt(r)}")
     else if want:
         if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
-        else if bt != T_NEVER: fatal(nodes[body].pos, "lambda must return a value of type {type_str(r)}")
+        else if bt != T_NEVER: fatal(nodes[body].pos, "lambda must return a value of type {dt(r)}")
     else: nodes[body].aux = 0
     fns[f].ret = ctxs[cx].ret
     fns[f].state = 2
@@ -3928,11 +3966,11 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
     is_tuple = types[t].kind == .tuple
     is_map = is_map_type(t)
     if not is_array and not is_tuple and types[t].kind != .struct_:
-        fatal(pos, "unpacking needs an array, tuple, dictionary or record, found {type_str(t)}")
+        fatal(pos, "unpacking needs an array, tuple, dictionary or record, found {dt(t)}")
     if is_tuple and int(types[t].nargs) != bindings.len():
-        fatal(pos, "expected a tuple with {bindings.len()} elements, found {type_str(t)}")
+        fatal(pos, "expected a tuple with {bindings.len()} elements, found {dt(t)}")
     if is_fixed and fixed_len(t) != bindings.len():
-        fatal(pos, "unpacking requires exactly {bindings.len()} elements, found {type_str(t)}")
+        fatal(pos, "unpacking requires exactly {bindings.len()} elements, found {dt(t)}")
     input = e
     input_type = t
     if is_map:
@@ -4052,7 +4090,7 @@ record_value_member = (t: int, hashing: bool) -> int:
     compatible = type_eq(result, expected)
     if hashing: compatible = can_coerce(0, result, expected)
     if not compatible:
-        fatal(pos, "the value protocol '{name_of(protocol_names[0])}' for {type_str(t)} must return {type_str(expected)}")
+        fatal(pos, "the value protocol '{name_of(protocol_names[0])}' for {dt(t)} must return {dt(expected)}")
     f
 
 check_value_members = (t0: int, hashing: bool, seen: mut {int: bool}):
@@ -4137,6 +4175,7 @@ check_program = (main_path: str):
     add_universe()
     load_prelude()
     mainm = load_module(main_path, false, -1)
+    ts_dewy = files[int(modules[mainm].file)].is_dewy
     # The editor checks library documents with an empty main. Named libraries
     # are outside the prelude, so load the opened document explicitly as well.
     if ide_on and starts_with(ide_doc, ide_norm(lib_dir) + "/") and find_module(ide_doc) < 0:
@@ -4344,7 +4383,7 @@ check_program = (main_path: str):
             main_fn = get_fn_inst(int(syms[s].decl), [], 0)
             rt = prune(int(fns[main_fn].ret))
             if rt != T_VOID and rt != T_NEVER and not is_int(rt):
-                fatal(nodes[int(syms[s].decl)].pos, "main must return void or an integer exit code, found {type_str(rt)}")
+                fatal(nodes[int(syms[s].decl)].pos, "main must return void or an integer exit code, found {dt(rt)}")
     if let s = modules[mainm].names.get(intern("update")):
         if syms[s].kind == .fns:
             # (update = (dt): ..., its parameter untyped: the seconds the game loop gives it)

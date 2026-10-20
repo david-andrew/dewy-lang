@@ -737,6 +737,11 @@ type_str_postfix = (t: int, dewy: bool = false) -> str:
 ts_depth = 0
 ts_left = 0
 
+# Diagnostics name types the way the program being compiled spells them:
+# int64, float64, string and array<T> for Dewy; int, f64, str and T[] for Jo.
+ts_dewy = false
+dt = (t: int) -> str: type_str(t, ts_dewy)
+
 type_str = (t0: int, dewy: bool = false) -> str:
     if ts_depth == 0: ts_left = 150
     if ts_left <= 0: return "…"

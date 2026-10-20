@@ -684,7 +684,7 @@ check_cell_type = (l: int):
     # functions are not shared like this)
     if type_has_fn(int(locals[l].type)):
         nm = name_of(int(locals[l].name))
-        fatal(int(locals[l].pos), "'{nm}' is changed after a closure captured it, and it can hold functions ({type_str(int(locals[l].type))}): a closure kept in it would keep it alive forever. Make it a global, or pass it to the closure as a `mut` parameter")
+        fatal(int(locals[l].pos), "'{nm}' is changed after a closure captured it, and it can hold functions ({dt(int(locals[l].type))}): a closure kept in it would keep it alive forever. Make it a global, or pass it to the closure as {jd(int(locals[l].pos), "a `mut`", "an `@`")} parameter")
 new_cell = (l: int):
     check_cell_type(l)
     sz = tsize(int(locals[l].type))
@@ -2080,7 +2080,7 @@ gen_match_test = (p: int, st0: int, hidden_addr: int) -> int:
             return e_call(rt("__str_eq"), [e_load(VI, hidden_addr, 0, ptr_size), v], VI)
         if types[st].kind == .opt:
             if nodes[a].kind == .none_lit: return e_bin(.eq, VI, e_load(VI, hidden_addr, tsize(int(types[st].elem)), 1), e_iconst(0))
-            fatal(nodes[p].pos, "only `none` and `_` patterns are supported for optionals; use `if let v = x`")
+            fatal(nodes[p].pos, "only `none` and `_` patterns are supported for optionals; use {jd(nodes[p].pos, "`if let v = x`", "`if x isnt? none \{ }`")}")
         if vc(st) == VC_FLT: fatal(nodes[p].pos, "cannot match on floats")
         if vc(st) == VC_AGG: fatal(nodes[p].pos, "unsupported pattern for this type")
         v = gen_expr(a).v

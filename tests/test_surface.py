@@ -243,3 +243,41 @@ MEMBER_CALL_ERRORS = {
 def test_surface_member_call_errors(compiler, tmp_path, name):
     source, expected = MEMBER_CALL_ERRORS[name]
     assert expected in diagnose(compiler, tmp_path, source)
+
+
+# ------------------------------------------------- Dewy-native diagnostics
+
+NATIVE_DIAGNOSTICS = {
+    'union-comparison': ('read=(x:int64|string):>bool=>x =? 1\nmain=()=>printl(read(1))',
+                         'cannot compare int64 | string with int64 (find out which it holds first: `x is? int64 and x =? value`)'),
+    'type-names': ('main = () => { let x:string = 3 }', 'expected string, found int64'),
+    'array-type-name': ('accept=(xs:array<uint8>)=>0\nmain=()=>accept([256])', 'expects array<uint8>'),
+    'count-hint': ('main = () => { if 3 { printl"x" } }', '`loop i in [1..3] { }`'),
+    'optional-condition': ('f = (xs:array<int64>):>int64? => none\nmain = () => { if f([1]) { printl"x" } }',
+                           '`x isnt? none` asks'),
+    'collection-condition': ('main = () => { let xs = [1]\nif xs { printl"x" } }', '`xs.length >? 0`'),
+    'optional-arithmetic': ('f = (x:int64?) => x + 1\nmain = () => f(1)', 'or check it first: `if x isnt? none { ... }`'),
+    'optional-order': ('f = (x:int64?) => x <? 1\nmain = () => f(1)', 'compared with <?, >?'),
+    'union-arithmetic': ('f = (x:int64|string) => x + 1\nmain = () => f(1)', '`if x is? int64 { ... }`'),
+    'record-operator': ('P:type=[a:int64]\nmain = () => { let p = P[1]\nlet q = p + p }', '`__add__=(a:P b:P):>P=>...`'),
+    'text-plus-number': ('main = () => { let s = "a" + 1 }', 'convert it (string(x))'),
+    'empty-array': ('main = () => { let m = [] }', '`let m:array<int64> = []`'),
+    'real-to-integer': ('main = () => { let x = 1.5\nlet y:int64 = x }', 'int64(x) makes it a whole number'),
+    'union-cast': ('f = (x:int64|string):>int64 => x as int64\nmain = () => f(1)', 'inside `if x is? int64 { }`'),
+    'array-habit': ('main = () => { let xs = [1 2]\nprintl"{xs.size()}" }', "no 'size' for array<int64> (use `.length`)"),
+    'dict-habit': ('main = () => { let d:dict<string int64> = ["a"->1]\nprintl"{d.size()}" }', '(use `m.length`)'),
+    'type-habit': ('main = () => { let x:float = 1.0 }', "unknown type 'float' (use `float64`"),
+    'function-habit': ('f = (x:int64) => { let y = toString(x) }\nmain = () => f(1)', '(use `string(x)`)'),
+}
+
+
+@pytest.mark.parametrize('name', [pytest.param(name, marks=quick if name == 'union-comparison' else ())
+                                  for name in NATIVE_DIAGNOSTICS])
+def test_surface_native_diagnostics(compiler, tmp_path, name):
+    source, expected = NATIVE_DIAGNOSTICS[name]
+    line = diagnose(compiler, tmp_path, source)
+    assert expected in line
+    # No Jo spellings of types or operators in a Dewy program's diagnostics.
+    message = line.split('error:', 1)[1]
+    for jo in (' str ', ' str)', ' int ', ' int)', '==', '!=', 'u8[]', '-> ', 'if let'):
+        assert jo not in message + ' ', (jo, message)
