@@ -1,11 +1,10 @@
 # Application benchmarks
 
 Small programs, each with a Dewy source and a C counterpart of the same
-algorithm. `python3 -m tools.compiler.benchmark_apps` builds them, checks that
-every build agrees on the checksum at each input size, and compares runtimes
-with C (`-O2`). Other runners in `tools/compiler/` reuse `harness.h`,
-`graph.c` and `records.c`. The correctness gate also runs the workloads on
-native and web targets.
+algorithm. `python3 -m tools.core bench [-k WORDS]` builds them (Dewy default
+and release, C with `cc -O2`), runs each a few times and prints the median
+kernel times, the Dewy/C ratios and whether the checksums agree. The
+correctness suite also runs the workloads on native and web targets.
 
 | name | what it exercises |
 |---|---|
@@ -31,5 +30,6 @@ carries a hand-written open-addressing table and keeps every node's targets in
 one flat array, while Dewy uses its insertion-ordered `dict` and one array per
 node; that comparison includes representation and library costs.
 
-`records.jo` performs the same particle updates in the implementation language,
-for `tools/compiler/benchmark_sloppy.py`.
+The compiler does not yet accept `harness.dewy` (a `$target` metatag and raw
+intrinsics); builds substitute `harness.jo`, which uses the core library.
+`records_nested` has no C file of its own: it shares `records.c`.

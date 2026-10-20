@@ -19,8 +19,7 @@ from pathlib import Path
 import pytest
 
 from tests.core_glsl_driver import DriverUnavailable, ShaderDriver
-from tools.compiler.benchmark_apps import CHECKSUMS_1000, prepare_source
-from tools.compiler.benchmark_types import record_source
+from tools.compiler.bench import CHECKSUMS_1000, prepare_source
 
 # A small cross-section of user behavior, reusing the full gate's batched cases.
 QUICK_CASES = {
@@ -7877,6 +7876,18 @@ main = () -> int:
         command = [node, runner]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 42, ran.stdout + ran.stderr
+
+
+def record_source(count: int) -> str:
+    parts = ['struct Box[T]:\n    value: T\n']
+    for i in range(count):
+        parts.append(f'struct Record{i}:\n    value: int\n'
+                     f'make{i} = (x: int) -> Box[Record{i}]: Box(Record{i}(x))\n')
+    parts.append('main = ():\n    total = 0\n')
+    for i in range(count):
+        parts.append(f'    total += make{i}({i}).value.value\n')
+    parts.append('    print(total)\n')
+    return ''.join(parts)
 
 
 def test_core_many_record_types(compiler, tmp_path):
