@@ -1,0 +1,44 @@
+# quick
+# exit: 42
+sum_to=(n:int):>int=>{
+    let total=0
+    loop i in [0..n) {total+=i}
+    return total
+}
+nested=(n:int):>int=>{
+    let total=0
+    loop i in [0..n) {
+        let inner=0
+        loop j in [0..i) {inner+=j}
+        total+=inner
+    }
+    total+=9223372036854775808
+    return total
+}
+boundaries=(n:int):>int=>{
+    let total=0
+    loop i in [0..n) {
+        if i=?2 continue
+        if i=?6 break
+        let value=()=>i+1
+        total+=value()
+    }
+    let left=n
+    loop left>?0 {left-=1 total+=left}
+    return total
+}
+early=(n:int):>int=>{
+    let total=0
+    loop i in [0..n) {
+        total+=i
+        if i=?3 return total
+    }
+    return total
+}
+main=()=>{
+    if sum_to(10) not=?45 return 1
+    if nested(5) not=?9223372036854775818 return 2
+    if boundaries(8) not=?46 return 3
+    if early(10) not=?6 return 4
+    return 42
+}

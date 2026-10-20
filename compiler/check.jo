@@ -131,6 +131,8 @@ struct FnInst:
     cabi: bool
     deterministic: bool # callback results should depend only on their state and inputs
     parallel: bool      # @parallel: the functions it is given run on many threads at once
+    write_sites: int[]  # finalization events for integer write proofs
+    writes_ready: bool
     no_indexes: bool    # finalized normal body has no indexing; init/lambda bodies stay unknown
     noinline: bool      # @noinline: call it rather than copy it into its callers
     gdepth: i32         # generic instances: how many were being checked, one inside the other, when it was made
@@ -3442,6 +3444,12 @@ check_fn_body = (f: int):
         err_trail_names.pop()
         err_trail_fns.pop()
 
+# Sparse preorder events for lowering's integer write proofs. Negative loop
+# nodes close the enclosing-loop stack; nested closures contribute only their
+# boundary. Save/restore around finalization, which can check other instances.
+zonk_write_sites: int[]
+zonk_collect_writes = false
+
 __check_fn_body = (f: int):
     if fns[f].state != 0: return
     fns[f].state = 1
@@ -3520,7 +3528,20 @@ __check_fn_body = (f: int):
                     fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but its last line gives nothing: end it with the value to give back (or `return value`)")
                 fatal(p, "missing return value: function returns {dt(r)}")
     index_mark = zonk_indexes
+    saved_sites = zonk_write_sites
+    saved_collect = zonk_collect_writes
+    zonk_write_sites = []
+    zonk_collect_writes = false
+    # Other functions retain the demanded lowering walk. No proof is needed
+    # merely because a body contains arithmetic or a read-only integer.
+    if fns[f].kind == FK_NORMAL:
+        loop l in fns[f].locals:
+            if prune(int(locals[l].type)) == T_MATH_INT and int(locals[l].flags) & LF_ASSIGNED != 0: zonk_collect_writes = true
     zonk_tree(body)
+    fns[f].write_sites = zonk_write_sites
+    fns[f].writes_ready = zonk_collect_writes
+    zonk_write_sites = saved_sites
+    zonk_collect_writes = saved_collect
     fns[f].no_indexes = fns[f].kind == FK_NORMAL and zonk_indexes == index_mark
     loop l in fns[f].locals:
         locals[l].type = i32(zonk(int(locals[l].type)))
@@ -3790,6 +3811,11 @@ zonk_tree = (n: int):
     if nodes[n].type != 0: nodes[n].type = i32(zonk(int(nodes[n].type)))
     k = nodes[n].kind
     if k == .index: zonk_indexes += 1
+    # Unlike zonking, the write walk stops at function templates. Keep the
+    # fallback for a body containing one instead of recording its children.
+    if k == .fn_: zonk_collect_writes = false
+    if zonk_collect_writes:
+        if k == .vardecl or k == .assign or k == .for_ or k == .while_ or k == .lambda or k == .return_ or k == .break_ or k == .continue_: zonk_write_sites.push(n)
     if k == .lambda: return
     zonk_tree(int(nodes[n].a))
     zonk_tree(int(nodes[n].b))
@@ -3798,6 +3824,7 @@ zonk_tree = (n: int):
         if k != .partial: zonk_tree(int(nodes[n].d))
     loop i in [0..nkids(n)): zonk_tree(kid(n, i))
     loop i in [0..nkids2(n)): zonk_tree(kid2(n, i))
+    if zonk_collect_writes and (k == .for_ or k == .while_): zonk_write_sites.push(-n)
 
 # ---------------- compile-time evaluation ----------------
 struct CVal:

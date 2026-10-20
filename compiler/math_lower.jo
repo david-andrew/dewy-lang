@@ -379,11 +379,30 @@ math_prepare_writes = ():
     positive_bounds_fn = cur_fn
     positive_bounds.clear()
     enclosing: int[]
-    math_index_writes(int(fns[cur_fn].body), enclosing)
-
+    # Finalization already visited these bodies. Replay only writes and
+    # control boundaries, evaluating bounds with the current lowering state.
+    if fns[cur_fn].writes_ready:
+        loop n in fns[cur_fn].write_sites:
+            if n < 0: enclosing.pop()
+            else: math_index_site(n, enclosing)
+    else: math_index_writes(int(fns[cur_fn].body), enclosing)
 
 math_index_writes = (n: int, enclosing: mut int[]):
     if n == 0: return
+    k = nodes[n].kind
+    is_loop = k == .for_ or k == .while_
+    math_index_site(n, enclosing)
+    if k == .lambda or k == .fn_: return
+    math_index_writes(int(nodes[n].a), enclosing)
+    math_index_writes(int(nodes[n].b), enclosing)
+    if k != .for_:
+        math_index_writes(int(nodes[n].c), enclosing)
+        if k != .partial: math_index_writes(int(nodes[n].d), enclosing)
+    loop i in [0..nkids(n)): math_index_writes(kid(n, i), enclosing)
+    loop i in [0..nkids2(n)): math_index_writes(kid2(n, i), enclosing)
+    if is_loop: enclosing.pop()
+
+math_index_site = (n: int, enclosing: mut int[]):
     k = nodes[n].kind
     is_loop = k == .for_ or k == .while_
     if enclosing.len() > 0 and (is_loop or k == .lambda or k == .fn_ or k == .return_ or k == .break_ or k == .continue_):
@@ -407,14 +426,7 @@ math_index_writes = (n: int, enclosing: mut int[]):
                 writes.push((n, loop_))
                 math_writes[l] = writes
     if is_loop: enclosing.push(n)
-    math_index_writes(int(nodes[n].a), enclosing)
-    math_index_writes(int(nodes[n].b), enclosing)
-    if k != .for_:
-        math_index_writes(int(nodes[n].c), enclosing)
-        if k != .partial: math_index_writes(int(nodes[n].d), enclosing)
-    loop i in [0..nkids(n)): math_index_writes(kid(n, i), enclosing)
-    loop i in [0..nkids2(n)): math_index_writes(kid2(n, i), enclosing)
-    if is_loop: enclosing.pop()
+
 
 math_update_value = (s: int, l: int) -> int:
     if nodes[s].op != i32(int(Tok.assign)) or nodes[s].aux != 0: return 0

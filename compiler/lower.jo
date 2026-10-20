@@ -5640,6 +5640,9 @@ reserve_comprehension = (b: int):
     if not is_managed(int(types[at].elem)) and stable_loop_index(idx):
         add_flag(loop_, NF_INBOUNDS)
         add_flag(push, NF_COMPREHENSION)
+        # The generic write walker observes d as a child. If its first demand
+        # is after this lowering annotation, retain that walk's exact input.
+        fns[cur_fn].writes_ready = false
         nodes[push].d = i32(idx)
 
 gen_comprehension_reserve = (s: int, count: int):
