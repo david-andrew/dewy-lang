@@ -118,6 +118,38 @@ dw_name_id = (id: int) -> i32:
     if dewy_syntax[id].name == 0: dewy_syntax[id].name = i32(intern(dewy_syntax[id].text))
     dewy_syntax[id].name
 
+# The compact name of a Dewy identifier used as a value (printl is the library's print).
+# Inside a function field, a sibling field's name is that field, never a function of the
+# same name in scope (the field wins); reaching it is not implemented yet.
+dw_siblings: {int: bool} = {}
+dw_renamed: int[]               # printl, print, int and the compact names they become
+dw_value_name = (name: i32, pos: int) -> i32:
+    if dw_siblings.len() > 0 and dw_siblings.has(int(name)):
+        fatal(pos, "'{name_of(int(name))}' is a field of this record: a function field reaching its sibling fields is part of the design but not implemented yet (pass the value as a parameter)")
+    if dw_renamed.len() == 0: dw_renamed = [intern("printl"), intern("print"), intern("print"), intern("__dewy_print"), intern("int"), intern("__dewy_int")]
+    if int(name) == dw_renamed[0]: return i32(dw_renamed[1])
+    if int(name) == dw_renamed[2]: return i32(dw_renamed[3])
+    if int(name) == dw_renamed[4]: return i32(dw_renamed[5])
+    name
+
+# The field names of a record literal or type with a function field (none otherwise):
+# what a function field's body sees as its siblings.
+dw_sibling_names = (entries: int[]) -> {int: bool}:
+    names: {int: bool} = {}
+    has_function = false
+    loop entry in entries:
+        item = dw_unwrap(entry)
+        lhs = item
+        if dw_op(item) == .assign:
+            lhs = dw_child(item, 1)
+            if dw_op(dw_unwrap(dw_child(item, 2))) == .function: has_function = true
+        if dw_op(lhs) == .colon: lhs = dw_child(lhs, 1)
+        if dw_op(lhs) == .at: lhs = dw_child(lhs, 1)
+        name = dw_name_id(lhs)
+        if name != 0: names[int(name)] = true
+    if not has_function: names.clear()
+    names
+
 dw_op = (id: int) -> DewyToken:
     let id = dw_unwrap(id)
     kind = dewy_syntax[id].kind
@@ -564,6 +596,12 @@ dw_function = (id: int, name: str) -> int:
             bound[nm] = true
         ps.push(param)
     if capture: return dw_fail(params, "$capture without a local name")
+    outer_siblings = dw_siblings
+    if dw_siblings.len() > 0 and bound.len() > 0:
+        visible: {int: bool} = {}
+        loop name, seen in dw_siblings:
+            if not bound.has(name): visible[name] = true
+        dw_siblings = visible
     if captures.len() > 0:
         if type_params.len() > 0:
             caplist = mk(.block, nodes[n].pos)
@@ -571,6 +609,7 @@ dw_function = (id: int, name: str) -> int:
             nodes[n].d = i32(caplist)
         else: set_list2(n, captures)
     body = dw_block(dw_child(id, 2))
+    dw_siblings = outer_siblings
     prefix: int[]
     loop param in ps:
         if has_flag(param, NF_MUT) or name_of(int(nodes[param].name)) == "_": continue
@@ -685,7 +724,7 @@ dw_expr = (id: int) -> int:
             name = if axis == 0: base else: "{base}_{axis}"
             return comp_ident(intern(name), pos)
         n = mk(.ident, pos)
-        nodes[n].name = if text == "printl": i32(intern("print")) else if text == "print": i32(intern("__dewy_print")) else if text == "int": i32(intern("__dewy_int")) else: dw_name_id(id)
+        nodes[n].name = dw_value_name(dw_name_id(id), pos)
         return n
     if dw_integer_kind(k):
         if let value = dw_unsigned(text, id):
@@ -764,6 +803,14 @@ dw_expr = (id: int) -> int:
                 if dw_op(child) == .assign: is_record = true
             n = mk(if is_map: NK.map_lit else if is_record: NK.record_lit else: NK.array, pos)
             xs: int[]
+            outer_siblings = dw_siblings
+            if is_record:
+                inner = dw_sibling_names(children)
+                if inner.len() > 0:
+                    merged: {int: bool} = {}
+                    loop name, seen in outer_siblings: merged[name] = true
+                    loop name, seen in inner: merged[name] = true
+                    dw_siblings = merged
             loop child in children:
                 item = dw_unwrap(child)
                 if not is_map and dewy_syntax[item].kind == .postfix and dw_op(item) == .ellipsis:
@@ -779,6 +826,7 @@ dw_expr = (id: int) -> int:
                 else if is_record:
                     xs.push(dw_record_entry(child))
                 else: xs.push(dw_expr(child))
+            dw_siblings = outer_siblings
             set_list(n, xs)
             return n
         if text == "{{}}:": return dw_block(id)
@@ -1064,6 +1112,11 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         return n
     name = dw_name(lhs)
     if name == "": return dw_fail(lhs, "this declaration")
+    if not top and dw_siblings.len() > 0 and dw_siblings.has(int(dw_name_id(lhs))):
+        visible: {int: bool} = {}
+        loop sibling, seen in dw_siblings:
+            if sibling != int(dw_name_id(lhs)): visible[sibling] = true
+        dw_siblings = visible
     if not top and initial != 0 and dw_overload_group(initial):
         return dw_fail(initial, "a local overload group; declare it at module level")
     if initial != 0 and dw_op(initial) == .function:
@@ -1111,7 +1164,10 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
             set_list2(n, type_params)
             add_flag(n, NF_GENERIC)
         fields: int[]
+        outer_siblings = dw_siblings
+        dw_siblings = dw_sibling_names(dw_children(initial))
         loop field in dw_children(initial): fields.push(dw_param(field, .vardecl))
+        dw_siblings = outer_siblings
         set_list(n, fields)
         return n
     n = mk(.vardecl, dewy_syntax[id].pos)

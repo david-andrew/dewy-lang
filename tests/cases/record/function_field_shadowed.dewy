@@ -1,0 +1,11 @@
+# quick
+Box:type=[
+    value:int64
+    twice=(value:int64):>int64=>value*2
+]
+main=()=>{
+    let b=Box(20)
+    let r=[value=b.value len=3 f=(len:int64)=>{let value=len+1 value}]
+    printl"{b.value} {b.twice(21)} {r.value} {r.len} {r.f(4)}"
+    return 0
+}
