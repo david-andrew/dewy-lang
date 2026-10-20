@@ -117,6 +117,12 @@ New front-end or user-facing language design requires David's approval.
   Independent bootstrap passes 6,468 tests, plus 100 fresh fuzz seeds in five
   modes. Native throughput is about 127k root lines/s, still below the target.
   [Evidence and rejected variants](audits/2026-10-19/tiny-read-loop.json).
+- Existing matrix multiplication now uses cache blocks and four-row accumulation.
+  Laptop release dense products improve 27–47%, sparse about14%, and all-zero
+  about20%; all fourteen targeted comparisons pass. Six new boundary cases,
+  587 focused checks and 611 quick checks pass; all32 ordinary runtime artifacts
+  are unchanged. Full validation will close the next related runtime batch.
+  [Measurements and rejected fallback](audits/2026-10-19/blocked-matrix-product.json).
 - The fixed performance reference remains `ea1cba0e`; the last accepted whole
   stage remains `cd07ea34`. Conflicting laptop release timing is unresolved.
 

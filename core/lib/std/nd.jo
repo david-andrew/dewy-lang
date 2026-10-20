@@ -852,21 +852,57 @@ __swap_rows = (m: mut f64[], n: int, a: int, b: int):
     op = data(out)
     ap = data(a.data)
     bp = data(b.data)
-    # (row by row, each row of b scaled and added in: the inner loop goes along memory; big
-    # products share the rows out among the threads)
-    some_rows = (lo: int, hi: int):
-        loop i in [lo..hi):
-            # Invariant row pointers leave a single column index in the inner
-            # loop, which the release backend can vectorize.
-            row = op + i * bc
-            loop k in [0..ac):
-                x = ap[i * ac + k]
-                if x == zero: continue
-                other = bp + k * bc
-                loop j in [0..bc): row[j] += x * other[j]
+    # Keep the same per-element accumulation order while reusing the active
+    # output row and a cache-sized block of the right operand.
+    some_rows = (lo: int, hi: int): __nd_product_rows(op, ap, bp, ac, bc, lo, hi)
     if ar > 1 and ar * ac * bc >= 1 << 18: __parallel_run(ar, some_rows)
     else: some_rows(0, ar)
     NDArray(out, shape)
+
+__nd_product_rows[T] = (c: *T, a: *T, b: *T, m: int, p: int, lo: int, hi: int):
+    zero = T(0)
+    jb = 0
+    loop jb < p:
+        je = min(jb + 512, p)
+        kb = 0
+        loop kb < m:
+            ke = min(kb + 64, m)
+            loop i in [lo..hi):
+                row = c + i * p
+                left = a + i * m
+                k = kb
+                loop k + 4 <= ke:
+                    x0 = left[k]
+                    x1 = left[k + 1]
+                    x2 = left[k + 2]
+                    x3 = left[k + 3]
+                    # Preserve the existing zero-factor shortcut, including
+                    # its behavior with nonfinite values in the other operand.
+                    b0 = b + k * p
+                    b1 = b0 + p
+                    b2 = b1 + p
+                    b3 = b2 + p
+                    if x0 == zero or x1 == zero or x2 == zero or x3 == zero:
+                        if x0 != zero:
+                            loop j in [jb..je): row[j] += x0 * b0[j]
+                        if x1 != zero:
+                            loop j in [jb..je): row[j] += x1 * b1[j]
+                        if x2 != zero:
+                            loop j in [jb..je): row[j] += x2 * b2[j]
+                        if x3 != zero:
+                            loop j in [jb..je): row[j] += x3 * b3[j]
+                    else:
+                        loop j in [jb..je):
+                            row[j] = row[j] + x0 * b0[j] + x1 * b1[j] + x2 * b2[j] + x3 * b3[j]
+                    k += 4
+                loop k < ke:
+                    x = left[k]
+                    if x != zero:
+                        other = b + k * p
+                        loop j in [jb..je): row[j] += x * other[j]
+                    k += 1
+            kb = ke
+        jb = je
 
 # matrix times column vector
 (*)[T] = (a: T[,], v: T[]) -> T[]:

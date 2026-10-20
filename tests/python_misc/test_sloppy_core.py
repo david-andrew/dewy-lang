@@ -13118,3 +13118,57 @@ main = () -> int:
     assert built.returncode == 0, built.stdout + built.stderr
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('target,flags,threads', [
+    ('native', [], 1), ('native', ['--release'], 1), ('native', ['-g'], 1),
+    ('native', ['--release'], 2), ('wasm', [], 1), ('wasm', ['--release'], 1),
+])
+def test_core_matrix_product_tiles(compiler, tmp_path, target, flags, threads):
+    source = tmp_path / 'products.dewy'
+    source.write_text('''main=()=>{
+loop dims in [[0 3 2] [2 0 3] [3 7 5] [9 65 513] [3 64 512] [2 66 515]] {
+    let r=dims[0] let m=dims[1] let p=dims[2]
+    let a=reshape([loop i in [0..r*m) ((i%17)-8) as float64] r m)
+    let b=reshape([loop i in [0..m*p) ((i%13)-6) as float64] m p)
+    let saved_a=a let saved_b=b
+    let c=a*b
+    assert(c.shape =? [r p])
+    loop i in [0..r) {loop j in [0..p) {
+        let want=0.0
+        loop k in [0..m) {want+=a[i k]*b[k j]}
+        assert(c[i j] =? want)
+    }}
+    assert(a.data =? saved_a.data and b.data =? saved_b.data)
+}
+let ints=reshape([loop i in [0..2*65) (i%19)-9] 2 65)
+let ones=reshape([loop i in [0..65*3) 1] 65 3)
+let product=ints*ones
+loop i in [0..2) {loop j in [0..3) {assert(product[i j] =? sum(row(ints i)))}}
+let cancellation=reshape([1e16 1.0 (-1e16) 1.0 3.0] 1 5)*reshape([1.0 1.0 1.0 1.0 1.0] 5 1)
+assert(cancellation[0 0] =? 4.0)
+let zero=reshape([0.0 (-0.0) 0.0 0.0 0.0] 1 5)
+let nonfinite=reshape([INF NAN INF NAN INF] 5 1)
+assert((zero*nonfinite)[0 0] =? 0.0)
+return 42
+}
+''')
+    binary = tmp_path / 'products'
+    built = subprocess.run([compiler, 'build', source, '--target', target,
+                            '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stdout + built.stderr
+    command = [binary]
+    if target == 'wasm':
+        node = shutil.which('node')
+        if node is None:
+            pytest.skip('Node is needed for web matrix checks')
+        scripts = Scripts()
+        scripts.feed(binary.with_suffix('.html').read_text())
+        runner = tmp_path / 'products.cjs'
+        runner.write_text('\n'.join(scripts.parts))
+        command = [node, runner]
+    ran = subprocess.run(command, env={**os.environ, 'SLOPPY_THREADS': str(threads)},
+                         capture_output=True, text=True, timeout=15)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
