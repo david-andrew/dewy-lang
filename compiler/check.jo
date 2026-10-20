@@ -25,6 +25,7 @@ struct Sym:
     ref: i32
     decl: i32
     next: i32
+    surface: i32 = 0   # a library function seen only from Dewy (1) or only from Jo (2): dewy_surface
 
 struct Module:
     name: i32
@@ -213,6 +214,7 @@ scope_add_module = (m: int, name: int, kind: SK, r: int, decl: int) -> int:
     if let ex = found:
         if syms[ex].kind == .fns and kind == .fns:
             s = new_sym(name, kind, r, decl)
+            if decl != 0 and modules[m].is_prelude: syms[s].surface = i32(dewy_surface(name, decl))
             if modules[m].is_prelude:
                 prev = 0
                 e = ex
@@ -231,6 +233,7 @@ scope_add_module = (m: int, name: int, kind: SK, r: int, decl: int) -> int:
             if syms[ex].kind == .const_ and kind == .global: fatal(nodes[decl].pos, "'{name_of(name)}' is a constant ({pos_str(nodes[int(syms[ex].decl)].pos)}): it cannot change")
             fatal(nodes[decl].pos, "'{name_of(name)}' is already defined at {pos_str(nodes[int(syms[ex].decl)].pos)}")
     s = new_sym(name, kind, r, decl)
+    if kind == .fns and decl != 0 and modules[m].is_prelude: syms[s].surface = i32(dewy_surface(name, decl))
     if modules[m].is_prelude: prelude[name] = s
     else:
         modules[m].names[name] = s

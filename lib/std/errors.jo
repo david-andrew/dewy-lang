@@ -27,15 +27,3 @@ __file_failure = () -> __FileFailure:
     if code == 21: return IsDirectory()
     if code == 17: return FileExists()
     FileError()
-
-# Preserve the existing platform I/O implementation and expose its failure as
-# an ordinary union member. Text decoding reports invalid UTF-8 explicitly.
-read_text = (path: str) -> str | __FileFailure | InvalidUtf8:
-    if let data = read_bytes(path):
-        if let text = __dewy_decode_utf8(data): return text
-        return InvalidUtf8()
-    __file_failure()
-
-write_text = (path: str, text: str) -> int | __FileFailure:
-    if write_file(path, text): return len(text)
-    __file_failure()

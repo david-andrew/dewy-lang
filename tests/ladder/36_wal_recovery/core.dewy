@@ -46,11 +46,11 @@ main=():>int64=> {
         }
         let path="crash.wal"
         let written=write_bytes(path prefix)
-        if not written  {
+        if written is? error  {
             return 1
         }
         let loaded=read_bytes(path)
-        if loaded is? none  {
+        if loaded is? error  {
             return 2
         }
         let state=recover(loaded)
@@ -73,8 +73,8 @@ main=():>int64=> {
     let recovered=recover(corrupt)
     assert(recovered.get(1) =? 10)
     assert(recovered.get(2) =? 20)
-    let removed=delete_file("crash.wal")
-    if not removed  {
+    let removed=remove_file("crash.wal")
+    if removed is? error  {
         return 3
     }
     printl("{cases} {total} {full.length}")

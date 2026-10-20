@@ -2900,7 +2900,7 @@ fragment=(i:Output u:Uniform):>vec4=>fetch(u.surface.tex i.uv)*u.surface.tint
 """
         pair = '@vertex @fragment'
     body += f"""main=()=>{{let source=shader({pair})
-write_file("shader.vert" source.vs); write_file("shader.frag" source.fs); return 0}}
+write_text("shader.vert" source.vs); write_text("shader.frag" source.fs); return 0}}
 """
     source = tmp_path / 'shaders.dewy'
     source.write_text(body)

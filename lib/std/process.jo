@@ -1,0 +1,138 @@
+# Child processes, every outcome a value. `program` is a path: there is no PATH search
+# (`run("/usr/bin/env" ["python3" ...])` does one), and `args` are the arguments after it. A
+# child inherits the environment; one whose program cannot be run ends with 127, as a shell
+# says. A status is the exit code, or 128 + n when signal n ended the child; SpawnError means
+# no child could be started. Web pages have no processes: SpawnError there.
+#   run(program args): the status, the child sharing this program's standard streams
+#   run_silent(program args): the same, its stdout and stderr sent to /dev/null
+#   spawn(program args): the Child, started (`child.wait` gives its status)
+#   capture(program args): its Output, with stdout and stderr collected
+@nominal(error)
+struct SpawnError:
+    pass
+
+struct Child:
+    pid: int
+
+struct Output:
+    status: int
+    stdout: u8[]
+    stderr: u8[]
+
+# the output as text; none when it is not UTF-8
+stdout_text = (output: Output) -> str?: __dewy_decode_utf8(output.stdout)
+stderr_text = (output: Output) -> str?: __dewy_decode_utf8(output.stderr)
+
+wait = (child: Child) -> int: __proc_wait(child.pid)
+
+run = (program: str, args: str[]) -> int | SpawnError:
+    when TARGET == "wasm":
+        return SpawnError()
+    else when TARGET == "windows":
+        __out_flush()
+        code = __w32_run(program, [program] + args, true)
+        if code < 0: return 127
+        return code
+    else:
+        pid = __proc_start(program, args, -1, -1)
+        if pid < 0: return SpawnError()
+        return __proc_wait(pid)
+
+run_silent = (program: str, args: str[]) -> int | SpawnError:
+    when TARGET == "wasm" or TARGET == "windows":
+        return SpawnError()
+    else:
+        null_fd = syscall(2, data(__zstr("/dev/null")), 0x80001, 0)    # O_WRONLY | O_CLOEXEC
+        if null_fd < 0: return SpawnError()
+        pid = __proc_start(program, args, null_fd, null_fd)
+        syscall(3, null_fd)
+        if pid < 0: return SpawnError()
+        return __proc_wait(pid)
+
+spawn = (program: str, args: str[]) -> Child | SpawnError:
+    when TARGET == "wasm" or TARGET == "windows":
+        return SpawnError()
+    else:
+        pid = __proc_start(program, args, -1, -1)
+        if pid < 0: return SpawnError()
+        return Child(pid = pid)
+
+# Both pipes are drained as they fill, so a child writing much to either cannot block.
+capture = (program: str, args: str[]) -> Output | SpawnError:
+    when TARGET == "wasm" or TARGET == "windows":
+        return SpawnError()
+    else:
+        fds = [0]
+        if syscall(293, data(fds), 0x80000) != 0: return SpawnError()      # pipe2(O_CLOEXEC)
+        out_read = fds[0] & 0xFFFFFFFF
+        out_write = fds[0] >> 32
+        if syscall(293, data(fds), 0x80000) != 0:
+            syscall(3, out_read)
+            syscall(3, out_write)
+            return SpawnError()
+        err_read = fds[0] & 0xFFFFFFFF
+        err_write = fds[0] >> 32
+        pid = __proc_start(program, args, out_write, err_write)
+        syscall(3, out_write)
+        syscall(3, err_write)
+        out: u8[]
+        err: u8[]
+        if pid < 0:
+            syscall(3, out_read)
+            syscall(3, err_read)
+            return SpawnError()
+        __proc_drain(out_read, err_read, out, err)
+        status = __proc_wait(pid)
+        return Output(status = status, stdout = out, stderr = err)
+
+# fork and exec: the child's pid, or -1. Its stdout and stderr are out_fd and err_fd unless
+# they are -1. What this program printed before is shown first.
+__proc_start = (program: str, args: str[], out_fd: int, err_fd: int) -> int:
+    argv = [program] + args
+    __out_flush()
+    pid = syscall(57)                                # fork
+    if pid < 0: return -1
+    if pid == 0:
+        if out_fd >= 0: syscall(33, out_fd, 1)       # dup2
+        if err_fd >= 0: syscall(33, err_fd, 2)
+        exec(program, argv)
+        syscall(60, 127)                             # exit: exec failed
+    pid
+
+# The status of a child, once it has ended: its exit code, or 128 + the signal that ended it.
+__proc_wait = (pid: int) -> int:
+    when TARGET == "wasm" or TARGET == "windows":
+        return -1
+    else:
+        status = [0]
+        r = -4
+        loop r == -4: r = syscall(61, pid, data(status), 0, 0)      # wait4 (EINTR: again)
+        if r < 0: return -1
+        st = status[0] & 0xFFFF
+        if st & 127 != 0: return 128 + (st & 127)
+        return (st >> 8) & 255
+
+# Read two pipes to their ends, whichever has something first (poll; a struct pollfd per word:
+# the descriptor, POLLIN asked, what happened).
+__proc_drain = (out_fd: int, err_fd: int, out: mut u8[], err: mut u8[]):
+    fds = [0, 0]
+    out_open = true
+    err_open = true
+    loop out_open or err_open:
+        fds[0] = ((if out_open: out_fd else: -1) & 0xFFFFFFFF) | (1 << 32)
+        fds[1] = ((if err_open: err_fd else: -1) & 0xFFFFFFFF) | (1 << 32)
+        r = syscall(7, data(fds), 2, -1)
+        if r == -4: continue
+        if r < 0: break
+        if out_open and (fds[0] >> 48) & 0xFFFF != 0: out_open = __proc_read(out_fd, out)
+        if err_open and (fds[1] >> 48) & 0xFFFF != 0: err_open = __proc_read(err_fd, err)
+    syscall(3, out_fd)
+    syscall(3, err_fd)
+
+# (what a pipe has now, added to into: false at its end)
+__proc_read = (fd: int, into: mut u8[]) -> bool:
+    n = into.len()
+    into.resize(n + 65536)
+    r = syscall(0, fd, data(into) + n, 65536)
+    into.resize(n + max(r, 0))
+    r > 0 or r == -4

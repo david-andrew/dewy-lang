@@ -155,7 +155,7 @@ def test_core_watch_tests_cancel_child(compiler, tmp_path, stop):
     source = tmp_path / 'tests.dewy'
     save(source, '''from p"process.jo" import pid
 test "waiting" {
-    write_file("child.pid" "{pid()}")
+    write_text("child.pid" "{pid()}")
     eprint"child is waiting"
     loop true { sleep(0.05) }
 }
@@ -302,7 +302,7 @@ def test_core_watch_startup_asset_write(compiler, tmp_path):
     save(source, '\n'.join(declarations) + '''
 main=():>void=>{
     let label=str_from_bytes(input31)
-    if label =? "first" {write_file("input31/value.txt" "second");}
+    if label =? "first" {write_text("input31/value.txt" "second");}
     printl(label)
 }
 ''')

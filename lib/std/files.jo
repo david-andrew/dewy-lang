@@ -1,0 +1,282 @@
+# Dewy's paths and file system. `p"dir/file.txt"` is a Path (`p` is its constructor, so
+# `p(text)` makes one at run time); it holds its text in `.path` and interpolates as that text,
+# so `p"{root}/{name}"` joins paths. Its methods follow Python's pathlib: the lexical ones read
+# only the text, and the file-system ones give every outcome as a value: the result, or one of
+# FileNotFound, FileAccessDenied, IsDirectory, FileExists, FileError (lib/std/errors.jo), with
+# InvalidUtf8 for text that is not UTF-8. The same operations exist as functions of a path's
+# text: read_text(path), write_text(path text), file_exists(path), is_directory(path)...
+# (`read_bytes`, `write_bytes`, `is_dir` and `mkdir` here are Dewy's: Jo code keeps the Jo
+# library's functions of those names; see dewy_surface in the compiler.)
+
+struct Path:
+    path: str
+
+p = (path: str) -> Path: Path(path = path)
+
+# `path as string`, and "{path}": its text
+__as__ = (path: Path) -> str: path.path
+__fmt = (buf: mut u8[], path: Path): __buf_append_str(buf, path.path)
+
+# ---------------- lexical: the text alone ----------------
+
+# The components: a leading / is the root part; empty and `.` components are left out, so
+# "a//b/" and "a/./b" have the parts of "a/b".
+__fsys_parts = (text: str) -> str[]:
+    out: str[]
+    if len(text) > 0 and text[0] == '/': out.push("/")
+    start = 0
+    loop i in [0..len(text) + 1):
+        if i == len(text) or text[i] == '/':
+            if i > start:
+                part = text[start..i)
+                if part != ".": out.push(part)
+            start = i + 1
+    out
+
+# (the text of the first `count` parts: "." for none)
+__fsys_text = (ps: str[], count: int) -> str:
+    out = ""
+    loop i in [0..count):
+        if i > 0 and ps[i - 1] != "/": out = out + "/"
+        out = out + ps[i]
+    if len(out) == 0: return "."
+    out
+
+# (the last part, unless it is the root: "" then)
+__fsys_name = (text: str) -> str:
+    ps = __fsys_parts(text)
+    if ps.len() == 0 or ps[ps.len() - 1] == "/": return ""
+    ps[ps.len() - 1]
+
+# (where a name's suffix starts: its last dot, unless that is its first character, as in
+# ".bashrc", or its last, as in "notes."; -1 for none)
+__fsys_dot = (name: str) -> int:
+    i = len(name) - 1
+    loop i > 0:
+        if name[i] == '.':
+            if i == len(name) - 1: return -1
+            return i
+        i -= 1
+    -1
+
+parts = (path: Path) -> str[]: __fsys_parts(path.path)
+name = (path: Path) -> str: __fsys_name(path.path)
+
+suffix = (path: Path) -> str:
+    n = __fsys_name(path.path)
+    d = __fsys_dot(n)
+    if d < 0: return ""
+    n[d..]
+
+stem = (path: Path) -> str:
+    n = __fsys_name(path.path)
+    d = __fsys_dot(n)
+    if d < 0: return n
+    n[..d)
+
+# The directory the path is in: "a/b" is in "a", "a" in ".", and the root in itself.
+parent = (path: Path) -> Path:
+    ps = __fsys_parts(path.path)
+    if ps.len() == 0: return Path(path = ".")
+    if ps.len() == 1 and ps[0] == "/": return Path(path = "/")
+    Path(path = __fsys_text(ps, ps.len() - 1))
+
+is_absolute = (path: Path) -> bool: len(path.path) > 0 and path.path[0] == '/'
+
+# The path with its last part replaced (or given one, when it has none).
+with_name = (path: Path, new_name: str) -> Path:
+    ps = __fsys_parts(path.path)
+    keep = ps.len()
+    if keep > 0 and ps[keep - 1] != "/": keep -= 1
+    if keep == 0: return Path(path = new_name)
+    head = __fsys_text(ps, keep)
+    if head == "/": return Path(path = "/" + new_name)
+    Path(path = head + "/" + new_name)
+
+with_stem = (path: Path, new_stem: str) -> Path: with_name(path, new_stem + suffix(path))
+with_suffix = (path: Path, new_suffix: str) -> Path: with_name(path, stem(path) + new_suffix)
+
+# ---------------- the file system ----------------
+
+# (the failure a -errno result names, kept as the last one, as Linux gives them)
+__fsys_failure = (r: int) -> __FileFailure:
+    __ferr(r)
+    __file_failure()
+
+# (each operation starts with no failure kept, so one it does not explain is a FileError)
+__fsys_begin = ():
+    __file_error_code = 0
+
+# A file's bytes; none when it cannot be read, with why kept for __file_failure.
+__fsys_read = (path: str) -> u8[]?:
+    __fsys_begin()
+    when TARGET == "wasm":
+        buf = fill(u8(0), 4096)
+        n = __wasm_read_file(data(path), len(path), data(buf), 4096)
+        if n < 0:
+            __ferr(n)
+            return none
+        if n > 4096:
+            buf = fill(u8(0), n)
+            n = __wasm_read_file(data(path), len(path), data(buf), n)
+            if n < 0:
+                __ferr(n)
+                return none
+        buf.truncate(n)
+        return buf
+    else:
+        if let s = read_file(path): return bytes(s)
+        return none
+
+# Write (or replace) a file; false when it cannot be, with why kept.
+__fsys_write = (path: str, contents: str) -> bool:
+    __fsys_begin()
+    when TARGET == "wasm":
+        r = __wasm_write_file(data(path), len(path), data(contents), len(contents))
+        if r == 1: return true
+        if r >= 0: r = -5                            # (a host that does not say why)
+        return __ferr(r)
+    else:
+        return write_file(path, contents)
+
+# What is at a path: 0 nothing (or nothing that can be looked at), 1 a file, 2 a directory, 3
+# something else (a device, a pipe...). Links are followed.
+__fsys_kind = (path: str) -> int:
+    when TARGET == "wasm":
+        r = __wasm_fs(4, data(path), len(path))
+        if r < 0: return 0
+        return r
+    else when TARGET == "windows":
+        if not file_exists(path): return 0
+        if is_dir(path): return 2
+        return 1
+    else when TARGET == "macos":
+        st = fill(0, 18)                              # (struct stat: st_mode, a u16, at 4)
+        if __c_stat(data(__zstr(path)), data(st) as *u8) != 0: return 0
+        mode = int(((data(st) as *u8 + 4) as *u16)[0]) & 0xF000
+        if mode == 0x8000: return 1
+        if mode == 0x4000: return 2
+        return 3
+    else:
+        st = fill(0, 18)                              # (struct stat: st_mode, a u32, at 24)
+        if syscall(4, data(__zstr(path)), data(st)) != 0: return 0
+        mode = int(((data(st) as *u8 + 24) as *u32)[0]) & 0xF000
+        if mode == 0x8000: return 1
+        if mode == 0x4000: return 2
+        return 3
+
+__fsys_read_bytes = (path: str) -> u8[] | __FileFailure:
+    if let b = __fsys_read(path): return b
+    __file_failure()
+
+__fsys_read_text = (path: str) -> str | __FileFailure | InvalidUtf8:
+    if let b = __fsys_read(path):
+        if let text = __dewy_decode_utf8(b): return text
+        return InvalidUtf8()
+    __file_failure()
+
+__fsys_write_text = (path: str, text: str) -> int | __FileFailure:
+    if __fsys_write(path, text): return len(text)
+    __file_failure()
+
+__fsys_write_bytes = (path: str, b: u8[]) -> int | __FileFailure:
+    if __fsys_write(path, str_from_bytes(b)): return b.len()
+    __file_failure()
+
+# A directory's entries (without . and ..), in the order the system gives them.
+__fsys_list = (path: str) -> str[] | __FileFailure:
+    __fsys_begin()
+    when TARGET == "wasm":
+        buf = fill(u8(0), 4096)
+        n = __wasm_list_dir(data(path), len(path), data(buf), 4096)
+        if n < 0: return __fsys_failure(n)
+        if n > 4096:
+            buf = fill(u8(0), n)
+            n = __wasm_list_dir(data(path), len(path), data(buf), n)
+            if n < 0: return __fsys_failure(n)
+        out: str[]
+        if n > 0:
+            loop entry in split(str_from_bytes(buf[..n)), "\n"): out.push(entry)
+        return out
+    else:
+        when TARGET == "windows":
+            kind = __fsys_kind(path)
+            if kind == 0: return __fsys_failure(-2)
+            if kind != 2: return __fsys_failure(-20)
+        names = list_dir(path)
+        if names.len() == 0 and __file_error_code != 0: return __file_failure()
+        return names
+
+# Make a directory (FileExists when something is there already).
+__fsys_mkdir = (path: str) -> bool | __FileFailure:
+    __fsys_begin()
+    when TARGET == "wasm":
+        r = __wasm_fs(1, data(path), len(path))
+        if r < 0: return __fsys_failure(r)
+        return true
+    else when TARGET == "windows":
+        if file_exists(path): return __fsys_failure(-17)
+        if mkdir(path): return true
+        return __file_failure()
+    else:
+        r = syscall(83, data(__zstr(path)), 0x1ED)
+        if r < 0: return __fsys_failure(r)
+        return true
+
+# Remove an empty directory.
+__fsys_rmdir = (path: str) -> bool | __FileFailure:
+    __fsys_begin()
+    when TARGET == "wasm":
+        r = __wasm_fs(2, data(path), len(path))
+        if r < 0: return __fsys_failure(r)
+        return true
+    else when TARGET == "windows":
+        if delete_dir(path): return true
+        return __file_failure()
+    else:
+        r = syscall(84, data(__zstr(path)))
+        if r < 0: return __fsys_failure(r)
+        return true
+
+# Remove a file (IsDirectory for a directory).
+__fsys_unlink = (path: str) -> bool | __FileFailure:
+    __fsys_begin()
+    when TARGET == "wasm":
+        r = __wasm_fs(3, data(path), len(path))
+        if r < 0: return __fsys_failure(r)
+        return true
+    else when TARGET == "windows":
+        if is_dir(path): return __fsys_failure(-21)
+        if delete_file(path): return true
+        return __file_failure()
+    else:
+        r = syscall(87, data(__zstr(path)))
+        if r < 0: return __fsys_failure(r)
+        return true
+
+# ---------------- functions of a path's text ----------------
+
+read_text = (path: str) -> str | __FileFailure | InvalidUtf8: __fsys_read_text(path)
+read_bytes = (path: str) -> u8[] | __FileFailure: __fsys_read_bytes(path)
+write_text = (path: str, text: str) -> int | __FileFailure: __fsys_write_text(path, text)
+write_bytes = (path: str, b: u8[]) -> int | __FileFailure: __fsys_write_bytes(path, b)
+is_file = (path: str) -> bool: __fsys_kind(path) == 1
+is_directory = (path: str) -> bool: __fsys_kind(path) == 2
+list_directory = (path: str) -> str[] | __FileFailure: __fsys_list(path)
+make_directory = (path: str) -> bool | __FileFailure: __fsys_mkdir(path)
+remove_directory = (path: str) -> bool | __FileFailure: __fsys_rmdir(path)
+remove_file = (path: str) -> bool | __FileFailure: __fsys_unlink(path)
+
+# ---------------- a path's methods ----------------
+
+exists = (path: Path) -> bool: file_exists(path.path)
+is_file = (path: Path) -> bool: __fsys_kind(path.path) == 1
+is_dir = (path: Path) -> bool: __fsys_kind(path.path) == 2
+list = (path: Path) -> str[] | __FileFailure: __fsys_list(path.path)
+read_text = (path: Path) -> str | __FileFailure | InvalidUtf8: __fsys_read_text(path.path)
+read_bytes = (path: Path) -> u8[] | __FileFailure: __fsys_read_bytes(path.path)
+write_text = (path: Path, text: str) -> int | __FileFailure: __fsys_write_text(path.path, text)
+write_bytes = (path: Path, b: u8[]) -> int | __FileFailure: __fsys_write_bytes(path.path, b)
+mkdir = (path: Path) -> bool | __FileFailure: __fsys_mkdir(path.path)
+rmdir = (path: Path) -> bool | __FileFailure: __fsys_rmdir(path.path)
+unlink = (path: Path) -> bool | __FileFailure: __fsys_unlink(path.path)

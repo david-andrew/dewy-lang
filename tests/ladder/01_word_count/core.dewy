@@ -17,7 +17,9 @@ main=():>int64=>{
     let input="hello world\nhello café\n"
     let argv=args()
     if argv.length >? 1 {
-        input=read_file(argv[1]) ?? ""
+        let loaded=read_text(argv[1])
+        if loaded is? error {return 1}
+        input=loaded
     }
     let result=count_text(input)
     assert(result.words >=? 0)

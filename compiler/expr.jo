@@ -2447,8 +2447,90 @@ collect_in = (table: {int: int}, name: int, out: mut int[]):
     o = s
     loop o != 0:
         d = int(syms[o].decl)
-        if not out.contains(d): out.push(d)
+        if syms[o].surface != 0 and (syms[o].surface == 1) != caller_dewy(): surface_hidden.push(d)
+        else if not out.contains(d): out.push(d)
         o = int(syms[o].next)
+
+# Library operations Dewy spells differently from the Jo library underneath. For these
+# names, the definitions in lib/std/files.jo are Dewy's (`read_bytes` gives a value or a file
+# error) and the others stay the Jo library's; a Dewy program calling a Jo spelling is told
+# Dewy's. (One spelling per operation: the Jo names are not Dewy's.)
+dewy_surface_hints: {int: str}
+dewy_surface_table = () -> {int: str}:
+    if dewy_surface_hints.len() == 0:
+        loop entry in [
+            ("read_file", "`read_text(path)` (or `p\"file\".read_text`) gives the text or a file error"),
+            ("write_file", "`write_text(path text)` (or `p\"file\".write_text(text)`) gives the byte count or a file error"),
+            ("read_bytes", "`read_bytes(path)` (or `p\"file\".read_bytes`) gives the bytes or a file error"),
+            ("write_bytes", "`write_bytes(path bytes)` (or `p\"file\".write_bytes(bytes)`) gives the byte count or a file error"),
+            ("is_dir", "`is_directory(path)` (or `p\"dir\".is_dir`)"),
+            ("mkdir", "`make_directory(path)` (or `p\"dir\".mkdir`) gives `true` or a file error"),
+            ("delete_file", "`remove_file(path)` (or `p\"file\".unlink`) gives `true` or a file error"),
+            ("delete_dir", "`remove_directory(path)` (or `p\"dir\".rmdir`) gives `true` or a file error"),
+            ("list_dir", "`list_directory(path)` (or `p\"dir\".list`) gives the entries or a file error"),
+            ("run_program", "`run(program args)` gives the exit status or SpawnError, and `capture(program args)` the output too; a program is a path (`run(\"/usr/bin/env\" [name ...])` searches PATH)"),
+            ("run_shell", "`run(\"/bin/sh\" [\"-c\" command])` (or `capture` for its output)"),
+            ("file_name", "`p(path).name`"),
+            ("dir_name", "`p(path).parent`"),
+            ("extension", "`p(path).suffix`"),
+            ("without_extension", "`p(path).with_suffix(\"\")`"),
+            ("join_path", "`p\"\{a}/\{b}\"`: a path interpolates as its text")]:
+            dewy_surface_hints[intern(entry.0)] = entry.1
+    dewy_surface_hints
+
+# (for a library declaration of the name: 1 when only Dewy sees it, 2 when only Jo does, 0 both;
+# the Jo library's are those of a path's text, `read_bytes(f: File n)` stays both's)
+dewy_surface = (name: int, decl: int) -> int:
+    if not dewy_surface_table().has(name): return 0
+    if files[pos_file(nodes[decl].pos)].path == lib_dir + "/std/files.jo": return 1
+    if nkids(decl) == 0: return 0
+    t = int(nodes[kid(decl, 0)].a)
+    if t != 0 and nodes[t].kind == .tname and name_of(int(nodes[t].name)) == "str": return 2
+    0
+
+# (is the code being checked Dewy's? the library's own code is Jo)
+caller_dewy = () -> bool:
+    m = cur_mod()
+    m >= 0 and files[int(modules[m].file)].is_dewy
+
+# (declarations collect_in left out for the caller's language, since the last call_by_name)
+surface_hidden: int[]
+
+# A Dewy call that only a Jo spelling would take: Dewy's spelling instead.
+dewy_surface_check = (n: int, name: int, decls: int[], args: int[]):
+    if surface_hidden.len() == 0 or not caller_dewy(): return
+    hint = dewy_surface_table().get(name) ?? ""
+    if hint == "": return
+    # (checking an argument may check other calls, which collect their own)
+    hidden: int[]
+    loop d in surface_hidden: hidden.push(d)
+    # (only the first argument, the path, when a Dewy spelling may take these arguments: the
+    # others stay unchecked for its parameters to guide them)
+    count = args.len()
+    loop d in decls:
+        if nkids(d) >= args.len() and count > 1: count = 1
+    ts: int[]
+    loop a in args[..count):
+        if nodes[a].kind == .namedarg: return
+        if not has_flag(a, NF_CHECKED):
+            check_expr(a, 0)
+            add_flag(a, NF_CHECKED)
+        ts.push(ntype(a))
+    if decl_takes(decls, ts) or not decl_takes(hidden, ts): return
+    fatal(nodes[n].pos, "'{name_of(name)}' is not Dewy's: {hint}")
+
+decl_takes = (decls: int[], ts: int[]) -> bool:
+    loop d in decls:
+        sig = fn_sig(d)
+        if nkids(d) < ts.len(): continue
+        binds = fill(0, int(sig.ntp))
+        ok = true
+        loop i in [0..ts.len()):
+            if match_type(sig.params[i], ts[i], binds, 0) < 0:
+                ok = false
+                break
+        if ok: return true
+    false
 
 # (while set, collect_in leaves out private names: those of used modules, or with
 # hide_lib_only those of the library)
@@ -2653,6 +2735,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                 if decls.len() == 0:
                     if ide_on: ide_builtin_ref(n, name)
                     return check_intrinsic(n, int(syms[s].ref) as IN, args, expected)
+    surface_hidden.clear()
     if mod_scope >= 0: collect_module(mod_scope, name, decls)
     else: collect_fns(name, decls)
     # Index operators belong to the receiver's module, just like methods. A
@@ -2669,6 +2752,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             if mod_scope >= 0: collect_module(mod_scope, protocol, decls)
             else: collect_fns(protocol, decls)
             if tm >= 0: collect_module(tm, protocol, decls)
+    if surface_hidden.len() > 0: dewy_surface_check(n, name, decls, args)
     if decls.len() == 0:
         if ii >= 0 and not intrinsics[ii].arr:
             if ide_on: ide_builtin_ref(n, name)
@@ -6590,6 +6674,18 @@ check_expr = (n: int, expected: int) -> int:
                 add_flag(a, NF_CHECKED)
                 nodes[n] = nodes[bc_call(helper, [a], nodes[n].pos)]
                 return check_expr(n, expected)
+            # (a record's own conversion, `__as__ = (x:T):>U => ...`: `x as U` calls it)
+            if fk == .struct_:
+                conv = as_conversion(ft, tt)
+                if conv != 0:
+                    add_flag(a, NF_CHECKED)
+                    nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(bc_ident("__as__", nodes[n].pos)))
+                    set_list(n, [a])
+                    t = resolve_fn_call(n, intern("__as__"), [conv], [a], tt)
+                    nodes[n].type = i32(t)
+                    add_flag(n, NF_CHECKED)
+                    last_checked = n
+                    return t
         ok = false
         if (fk == .ptr or fk == .int_ or fk == .null_ or fk == .cfn) and (tk == .ptr or tk == .int_ or tk == .cfn): ok = true
         if (fk == .int_ or fk == .float_) and (tk == .int_ or tk == .float_):
@@ -6647,6 +6743,21 @@ check_expr = (n: int, expected: int) -> int:
     add_flag(n, NF_CHECKED)
     last_checked = n
     t
+
+# The `__as__` conversion from a record type ft to tt (its declared result), or 0.
+as_conversion = (ft: int, tt: int) -> int:
+    name = intern("__as__")
+    decls: int[]
+    collect_fns(name, decls)
+    tm = module_of_type(ft)
+    if tm >= 0: collect_module(tm, name, decls)
+    loop d in decls:
+        if nkids(d) != 1: continue
+        sig = fn_sig(d)
+        if sig.generic or sig.ret == 0: continue
+        binds: int[]
+        if match_type(sig.params[0], ft, binds, 0) == 0 and type_eq(prune(int(sig.ret)), tt): return d
+    0
 
 # a swizzle whose components follow each other in memory (.x, .xy, .yzw): a place of its own
 swizzle_run = (n: int) -> bool:
