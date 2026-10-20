@@ -178,7 +178,7 @@ The fields are checked against the structural portion, and the resulting value c
 
 A function field may use sibling fields from the object literal's scope:
 
-<!-- dewy-example: {"mode":"design-only"} -->
+<!-- dewy-example: {"mode":"check"} -->
 ```dewy
 let counter = (start:int64=0) => [
     value = start

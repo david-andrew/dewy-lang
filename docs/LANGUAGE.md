@@ -795,6 +795,42 @@ closure's captured state after explicitly supplied arguments, in parameter order
 This slice accepts plain type parameter names. Constraints such as `T of Bound`
 remain unsupported.
 
+Record types and record literals can declare methods: `name = (params) => body`
+rows among the fields. Inside a method, a bare field or method name is that
+member of the object the method was called on; there is no `self`. A parameter
+or local of the same name hides the member.
+
+```dewy
+Span:type=[
+    start:int64
+    stop:int64
+    width=()=>stop-start
+    grow=(by:int64)=>{stop+=by}
+]
+counter=(start=0)=>[
+    value=start
+    increment=()=>(value+=1)
+]
+main=()=>{
+    let s=Span(3 7)
+    s.grow(2)                       # s is 3..9
+    let c=counter(40)
+    c.increment                     # a zero-argument method is called on access
+    printl"{s.width} {c.value}"     # 6 41
+}
+```
+
+A method that assigns or grows a member, places one with `@`, or calls a method
+that does, changes its object, so it is called on a variable, field or element:
+calling it on a const or a temporary value is an error. Other methods work on
+any value. Copies of an object carry its methods and stay independent. A type's
+methods are not stored in its values and are not constructor fields; methods of
+a generic type use its type parameters, and imported types bring their methods.
+A literal's methods keep what they capture from the enclosing function, as
+closures do. A function written inside a method may read members but cannot
+change them yet. Methods are not values yet (`@c.increment` is an error), and
+types with methods are declared at module level.
+
 Custom records can define arithmetic and indexing with ordinary functions:
 
 ```dewy

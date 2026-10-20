@@ -200,8 +200,8 @@ printl(twice(@double 10))   # 40</code></pre>
 
       <section class="showcase-row" aria-labelledby="obj-heading">
         <div class="showcase-pane code-pane">
-          <div class="pane-top"><span>objects.dewy</span><a class="tag planned" href="/reference/objects.html#function-fields">design preview</a></div>
-          <pre><code class="language-dewy lined" data-example='{"mode":"design-only"}'>counter = (start=0) =&gt; [
+          <div class="pane-top"><span>objects.dewy</span><a class="tag implemented" href="/status/#website-examples">tested ✓</a></div>
+          <pre><code class="language-dewy lined" data-example='{"mode":"run","stdout":"count is 42\n"}'>counter = (start=0) =&gt; [
     value = start
     increment = () =&gt; (value += 1)
 ]
@@ -218,7 +218,7 @@ printl"count is {count.value}"</code></pre>
         <div class="showcase-pane prose-pane">
           <span class="chip">objects</span>
           <h2 id="obj-heading">Objects, blocks, and functions are one thing</h2>
-          <p>Dewy’s syntax is deliberately unified: functions can construct structural objects, members can capture their siblings, and accessing a zero-argument function member calls it. Fields and behavior live together without separate <code>class</code> machinery. Records with function fields and closures work today; members that update their siblings are a design preview.</p>
+          <p>Dewy’s syntax is deliberately unified: functions can construct structural objects, members can capture their siblings, and accessing a zero-argument function member calls it. Fields and behavior live together without separate <code>class</code> machinery, and a member that updates its siblings changes the object it is called on.</p>
         </div>
       </section>
 
