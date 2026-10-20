@@ -60,11 +60,8 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
   C → stage0 → frozen Jo compiler → Dewy compiler.
 - Small items:
   - the remaining Jo-shaped hints in diagnostics;
-  - partial application for overloaded/generic functions;
-  - bugs: `print` appends a newline (only `printl` should); a record field
-    named `value` resolves to a builtin function instead of the field;
-  - `sleep` taking time units, and trigonometry on angles (front-page examples
-    hit both);
+  - bare sibling-field access from function fields and type methods
+    (designed; the front-page counter example needs it);
   - delete `restart/sloppy-frontend` and its publish-policy entry once the
     bigint task lands.
 
@@ -101,6 +98,9 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 13. Lifecycle hooks: must `$__copy__`/`$__move__` preserve the abstract value?
     Can a move hook fail?
 14. Errors that reach `main`.
+16. Partial application of an overloaded function without a type annotation:
+    the version leaving the fewest parameters open wins (implemented
+    provisionally). OK?
 15. Provisional file helpers: `copy_file`, `rename_file`, `make_dirs`,
     `walk_dir`, `glob`, `file_size`, `file_time`, `chmod`, `env`. Keep, rename
     or drop?
