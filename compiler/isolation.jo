@@ -1,0 +1,219 @@
+# Serial, demanded ambient-isolation proofs over checked instances. This is NOT
+# purity or a no-allocation/no-panic contract. Arguments can still be mutated,
+# resized and copied; consumers must separately exclude those actual places.
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'lower.jo'
+
+enum IsolationReason: none_, unavailable, global_, capture, indirect, raw, intrinsic, node
+
+# Rows are indexed by FnInst, never by a declaration or source filename. A
+# completed SCC publishes a Boolean (reason == none_) and a blocking witness.
+# The witness is a source node when available, otherwise an instance number.
+struct IsolationRow:
+    index: int
+    low: int
+    done: bool
+    reason: IsolationReason
+    witness: int
+
+isolation_rows: IsolationRow[]
+isolation_stack: int[]
+isolation_seen: int[]
+isolation_serial = 0
+isolation_limit = 0
+isolation_node_limit = 0
+
+# Run after check_program's checking/helper fixed point, once per compilation,
+# including watch/repl. Do not publish init bodies, which lowering still edits,
+# or any instances discovered after this boundary. No incremental invalidation.
+isolation_reset = ():
+    isolation_rows = fill(IsolationRow(), fns.len())
+    isolation_seen = fill(0, nodes.len())
+    isolation_stack = []
+    isolation_serial = 0
+    isolation_limit = fns.len()
+    isolation_node_limit = nodes.len()
+
+# Runtime child fields only: a=1, b=2, c=4, kids=16, kids2=32.
+# There is deliberately no generic a/b/c/d fallback. In particular for_.c/d
+# are local IDs and partial.d is an instance ID, NOT syntax. Type annotations,
+# call ordering metadata and nested function templates are not evaluated here.
+isolation_children = (k: NK) -> int:
+    if k == .int_lit or k == .float_lit or k == .bool_lit or k == .none_lit or k == .null_lit or k == .ident or k == .dotname or k == .hole or k == .break_ or k == .continue_ or k == .pwild: return 0
+    if k == .str_lit or k == .block or k == .tuple or k == .map_lit or k == .matrix: return 16
+    if k == .field or k == .unary or k == .not_ or k == .unwrap or k == .narrow or k == .cast or k == .conv or k == .addr or k == .exprstmt or k == .return_ or k == .defer_ or k == .istype or k == .plit: return 1
+    if k == .binary or k == .and_ or k == .or_ or k == .coalesce or k == .assign or k == .while_ or k == .for_ or k == .prange: return 3
+    if k == .if_ or k == .iflet or k == .range: return 7
+    if k == .vardecl: return 2
+    if k == .array: return 2 | 16
+    if k == .call or k == .partial or k == .intrinsic or k == .match_: return 1 | 16
+    if k == .index or k == .pair: return 3 | 16
+    if k == .arm: return 7 | 16
+    if k == .pvariant: return 16
+    if k == .fnref: return 1
+    # A closure is conservatively a blocker; never walk its body as this owner.
+    if k == .lambda: return 0
+    -1
+
+# Closed intrinsic contract set, selected by the checker's resolved IN identity.
+# Ordinary bundled functions get exactly the same body analysis as user code.
+# No blanket runtime or library exemption, and new intrinsic IDs fail closed.
+# These operations only access their operands (plus private allocation/runtime
+# bookkeeping). Equality/hash user hooks are added separately below. Formatting,
+# raw memory, foreign callbacks, concurrency and reflective helpers are opaque.
+isolation_intrinsic = (id: IN) -> bool:
+    id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .sqrt or id == .floor_ or id == .ceil_ or id == .fabs or id == .fmin or id == .fmax or id == .vec_ctor or id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend or id == .fill or id == .slice or id == .hash or id == .unreachable
+
+# Hidden dependencies of one operation, not its evaluated children. Defaults
+# are already checked actuals; defers remain body children, so all exits count.
+isolation_effect = (n: int, edges: mut int[]) -> IsolationReason:
+    k = nodes[n].kind
+    if isolation_children(k) < 0: return .node
+    if k == .lambda or k == .partial: return .indirect
+    if k == .addr: return .raw
+    if k == .cast or k == .conv:
+        if raw_view(n): return .raw
+        if k == .conv and (nodes[n].aux == i32(int(CV.ptr)) or nodes[n].aux == i32(int(CV.bits))): return .raw
+    if k == .index or k == .field:
+        t = prune(ntype(int(nodes[n].a)))
+        if tkind(t) == .ptr: return .raw
+    if k == .call:
+        aux = int(nodes[n].aux)
+        if aux == 0: edges.push(int(nodes[n].sym))
+        else if aux != 2 and aux != 3: return .indirect
+    if k == .fnref:
+        if nodes[n].aux != 0: return .indirect
+        edges.push(int(nodes[n].sym))
+    if k == .pair and nodes[n].sym > 0: edges.push(int(nodes[n].sym))
+    # Map literals invoke the resolved insertion operation. Presence tests may
+    # replace a value-producing lookup with a different checked helper.
+    if k == .map_lit and nkids(n) > 0: edges.push(int(nodes[n].sym))
+    if (k == .binary and nodes[n].aux == 6 or k == .istype) and nodes[n].aux2 != 0:
+        edges.push(int(nodes[n].aux2))
+    if k == .binary and (nodes[n].aux == 4 or nodes[n].aux == 5): return .raw
+    if k == .intrinsic and not isolation_intrinsic(nodes[n].aux as IN): return .intrinsic
+    if k == .binary or k == .intrinsic:
+        loop f in value_helper_calls(n): edges.push(f)
+    .none_
+
+isolation_block = (f: int, reason: IsolationReason, witness: int):
+    if isolation_rows[f].reason == .none_:
+        isolation_rows[f].reason = reason
+        isolation_rows[f].witness = witness
+
+# Each demanded instance's body and direct edges are collected just once. A
+# generation-wide stamped array handles shared checked expression nodes without
+# allocating/clearing a nodes-sized bitmap for every function. Edges need not be
+# deduplicated: Tarjan visits a target once, so diamonds remain O(nodes + edges).
+isolation_scan = (f: int) -> int[]:
+    edges: int[]
+    todo = [int(fns[f].body)]
+    loop todo.len() > 0:
+        n = todo.pop()
+        if n == 0: continue
+        if n < 0 or n >= isolation_node_limit:
+            isolation_block(f, .node, n)
+            break
+        if isolation_seen[n] == f: continue
+        isolation_seen[n] = f
+        k = nodes[n].kind
+        if k == .ident:
+            if nodes[n].aux == i32(int(SK.global)):
+                isolation_block(f, .global_, n)
+                break
+            if nodes[n].aux != i32(int(SK.local)):
+                isolation_block(f, .node, n)
+                break
+            l = int(nodes[n].sym)
+            if l < 0 or l >= locals.len():
+                isolation_block(f, .node, n)
+                break
+            if int(locals[l].flags) & (LF_CAPTURE | LF_ADDR) != 0:
+                isolation_block(f, .capture, n)
+                break
+        reason = isolation_effect(n, edges)
+        if reason != .none_:
+            isolation_block(f, reason, n)
+            break
+        mask = isolation_children(k)
+        if mask & 1 != 0: todo.push(int(nodes[n].a))
+        if mask & 2 != 0: todo.push(int(nodes[n].b))
+        if mask & 4 != 0: todo.push(int(nodes[n].c))
+        if mask & 16 != 0:
+            loop i in [0..nkids(n)): todo.push(kid(n, i))
+        if mask & 32 != 0:
+            loop i in [0..nkids2(n)): todo.push(kid2(n, i))
+    edges
+
+isolation_visit = (f: int):
+    isolation_serial += 1
+    isolation_rows[f].index = isolation_serial
+    isolation_rows[f].low = isolation_serial
+    isolation_stack.push(f)
+    decl = int(fns[f].decl)
+    if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT:
+        isolation_block(f, .unavailable, f)
+    else if fns[f].has_env or fns[f].caps.len() != 0:
+        isolation_block(f, .capture, int(fns[f].body))
+    else if decl != 0 and has_flag(decl, NF_EXTERN):
+        isolation_block(f, .unavailable, f)
+    else:
+        edges = isolation_scan(f)
+        loop g in edges:
+            if g <= 0 or g >= isolation_limit:
+                isolation_block(f, .unavailable, g)
+                continue
+            if isolation_rows[g].index == 0:
+                isolation_visit(g)
+                if not isolation_rows[g].done: isolation_rows[f].low = min(isolation_rows[f].low, isolation_rows[g].low)
+            else if not isolation_rows[g].done:
+                isolation_rows[f].low = min(isolation_rows[f].low, isolation_rows[g].index)
+            if isolation_rows[g].done and isolation_rows[g].reason != .none_:
+                isolation_block(f, isolation_rows[g].reason, isolation_rows[g].witness)
+    if isolation_rows[f].low != isolation_rows[f].index: return
+    # All members see blockers found even after a recursive backedge. Never
+    # publish an in-progress node as isolated, or accept recursion by assumption.
+    start = isolation_stack.len() - 1
+    loop isolation_stack[start] != f: start -= 1
+    reason = IsolationReason.none_
+    witness = 0
+    loop i in [start..isolation_stack.len()):
+        g = isolation_stack[i]
+        if isolation_rows[g].reason != .none_:
+            reason = isolation_rows[g].reason
+            witness = isolation_rows[g].witness
+    loop isolation_stack.len() > start:
+        g = isolation_stack.pop()
+        isolation_rows[g].reason = reason
+        isolation_rows[g].witness = witness
+        isolation_rows[g].done = true
+
+instance_isolated = (f: int) -> bool:
+    if f <= 0 or f >= isolation_limit: return false
+    if isolation_rows[f].index == 0: isolation_visit(f)
+    isolation_rows[f].done and isolation_rows[f].reason == .none_
+
+# A node-level query for loop consumers: only hidden/ambient call effects.
+# Their existing walkers still account for actual arguments, direct operations,
+# escaping values and aliases. A global identifier itself is handled by those
+# walkers; it is an ambient blocker in a callee's full summary above.
+isolation_operation = (n: int) -> bool:
+    # Lowering may synthesize a counted loop/block around already checked
+    # expressions. Classify those operations normally, but calls still demand
+    # instances from the frozen checking generation (never late helpers).
+    if n <= 0 or n >= nodes.len(): return false
+    edges: int[]
+    if isolation_effect(n, edges) != .none_: return false
+    loop f in edges:
+        if not instance_isolated(f): return false
+    true
+
+# Explicit consumer contracts. Isolation discharges ONLY ambient interference:
+# fixed_array_local must still reject local resize/alias flags; fp_scan must
+# still kill reserve/data/mutable actuals; uq_scan must still reject escapes.
+ambient_length_stable = (f: int) -> bool: instance_isolated(f)
+ambient_storage_stable = (n: int) -> bool: isolation_operation(n)
+ambient_sharing_stable = (n: int) -> bool: isolation_operation(n)

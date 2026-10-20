@@ -1,4 +1,5 @@
 use 'poly_closure.jo'
+use 'isolation.jo'
 # Lowering: typed AST -> IR, including reference counting, copy-on-write and closures.
 # Ownership rules: function parameters are borrowed; results of calls and constructors are
 # owned. Owned temporaries used in borrowing positions are released at the end of the
@@ -4960,45 +4961,6 @@ lm_resizing_call = (n: int, g: int) -> int:
 len_of_local: {int: int}        # local n -> local A when n := A.len() and neither ever changes
 safe_index: (int, int, bool)[]  # (array local, loop variable local, keep its null check)
 nonneg_locals: int[]            # loop variables of ranges that start at a value >= 0
-cur_closed = -1                # 1: the function calls nothing and uses no globals (-1: unknown)
-
-# a mut parameter may be the caller's global; it can only be resized behind this function's
-# back by code it calls or by naming that global, so the function must do neither
-fn_is_closed = () -> bool:
-    if cur_closed < 0:
-        seen = fill(false, nodes.len())
-        cur_closed = 0
-        if fns[cur_fn].body != 0 and closed_scan(int(fns[cur_fn].body), seen): cur_closed = 1
-    cur_closed == 1
-
-closed_scan = (n: int, seen: mut bool[]) -> bool:
-    if n <= 0 or n >= seen.len() or seen[n]: return true
-    seen[n] = true
-    k = nodes[n].kind
-    if k == .call and not harmless_call(n): return false
-    if k == .ident and nodes[n].aux == i32(int(SK.global)): return false
-    # (a `for` keeps local variable numbers in c and d)
-    child_a = int(nodes[n].a)
-    child_b = int(nodes[n].b)
-    child_c = int(nodes[n].c)
-    child_d = int(nodes[n].d)
-    more_children = k != .for_
-    if not closed_scan(child_a, seen): return false
-    if not closed_scan(child_b, seen): return false
-    if more_children:
-        if not closed_scan(child_c, seen): return false
-        if not closed_scan(child_d, seen): return false
-    loop i in [0..nkids(n)):
-        if not closed_scan(kid(n, i), seen): return false
-    loop i in [0..nkids2(n)):
-        if not closed_scan(kid2(n, i), seen): return false
-    true
-
-# Only construction is intrinsically closed. A source pathname cannot establish
-# anything about ambient accesses, including calls hidden inside library code.
-harmless_call = (n: int) -> bool:
-    nodes[n].aux == 2
-
 # A loop's control counter stays in range, but its user-visible variable can
 # be reassigned, passed by reference, or changed by a closure in the body.
 stable_loop_index = (l: int) -> bool:
@@ -5034,7 +4996,7 @@ fixed_array_local = (l: int) -> bool:
     # could be the caller's global) may not
     fl = int(locals[l].flags)
     if fl & (LF_RESIZED | LF_ALIAS | LF_BYREF) != 0 or is_shared(l): return false
-    if fl & LF_MUTPARAM != 0 and not fn_is_closed(): return false
+    if fl & LF_MUTPARAM != 0 and not ambient_length_stable(cur_fn): return false
     true
 
 array_len_expr: {int: int}      # array local A -> E when A := [x; E] and A is never resized
@@ -5663,6 +5625,13 @@ path_within = (p: int, k: int) -> bool:
 fp_scan = (n: int, ctx: int):
     if n == 0: return
     k = nodes[n].kind
+    # An unclassified operation may also affect its local actuals. Merely
+    # marking ambient calls would still allow caching a private local array.
+    mask = isolation_children(k)
+    if mask < 0 or k == .intrinsic and not isolation_intrinsic(nodes[n].aux as IN):
+        fp_lambda = true
+        return
+    if not ambient_storage_stable(n): fp_calls = true
     if k == .lambda:
         fp_lambda = true
         return
@@ -5711,7 +5680,6 @@ fp_scan = (n: int, ctx: int):
             fp_scan(kid(n, 0), 1)
             return
     if k == .call:
-        if not harmless_call(n): fp_calls = true
         mm = checked_call_mutmask(n)
         loop i in [0..nkids(n)):
             if mm & (1 << i) != 0:
@@ -5721,13 +5689,13 @@ fp_scan = (n: int, ctx: int):
         # (loop mut x in p may make p a copy of its own)
         key = lpath_key(int(nodes[n].a))
         if key != 0: fp_kill.push(key)
-    fp_scan(int(nodes[n].a), 0)
-    fp_scan(int(nodes[n].b), 0)
-    if k != .for_:
-        fp_scan(int(nodes[n].c), 0)
-        if k != .partial: fp_scan(int(nodes[n].d), 0)
-    loop i in [0..nkids(n)): fp_scan(kid(n, i), 0)
-    loop i in [0..nkids2(n)): fp_scan(kid2(n, i), 0)
+    if mask & 1 != 0: fp_scan(int(nodes[n].a), 0)
+    if mask & 2 != 0: fp_scan(int(nodes[n].b), 0)
+    if mask & 4 != 0: fp_scan(int(nodes[n].c), 0)
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)): fp_scan(kid(n, i), 0)
+    if mask & 32 != 0:
+        loop i in [0..nkids2(n)): fp_scan(kid2(n, i), 0)
 
 # where loop body n changes how many elements path `key` has, or replaces it, by itself (not
 # through what it calls): 0 if it does not. (`loop mut` writes the elements in place: a body
@@ -5763,6 +5731,7 @@ lm_change_at = (n: int, key: int) -> int:
 
 # an assignment target: the arrays along it have elements written; a path itself is replaced
 fp_target = (t: int):
+    if not ambient_storage_stable(t): fp_calls = true
     k = nodes[t].kind
     # (an element alias's array: written)
     r = t
@@ -5824,17 +5793,16 @@ fp_begin = (s: int, l: int, bound: int, place: int) -> int:
         written = fp_written.contains(key)
         if nodes[rn].aux == i32(int(SK.global)):
             # (what the loop calls could change the global, or copy it while the loop writes it)
-            if fp_calls and not calls_leave(int(nodes[s].b), rn, written): ok = false
+            if fp_calls: ok = false
         else:
             fl = int(locals[r].flags)
             if fl & (LF_ALIAS | LF_CAPTURE | LF_BYREF) != 0 or is_shared(r): ok = false
-            if fl & LF_MUTPARAM != 0 and fp_calls and not calls_leave(int(nodes[s].b), rn, written): ok = false
+            if fl & LF_MUTPARAM != 0 and fp_calls: ok = false
             if fl & LF_PARAM == 0 and not declared_in_scope(r): ok = false
         if written:
             loop e in fp_escape:
                 if path_within(key, e) or path_within(e, key): ok = false
             if fl & LF_PARAM != 0 and fl & LF_MUTPARAM == 0: ok = false
-        if fp_calls and nodes[s].kind == .while_ and not calls_leave(int(nodes[s].a), rn, written): ok = false
         if not ok: continue
         at = prune(ntype(base))
         if written and not is_uniq_array(base): arr_unique(gen_place(base, true), at)
@@ -5874,10 +5842,16 @@ uq_scan = (n: int, ctx: int):
     # ctx: 0 = the value escapes (copied, passed, captured), 1 = indexed read, 2 = indexed write
     if n == 0: return
     k = nodes[n].kind
+    # An unclassified operation may also affect its local actuals. Merely
+    # marking ambient calls would still allow caching a private local array.
+    mask = isolation_children(k)
+    if mask < 0 or k == .intrinsic and not isolation_intrinsic(nodes[n].aux as IN):
+        uq_lambda = true
+        return
     if k == .lambda:
         uq_lambda = true
         return
-    if k == .call and not harmless_call(n): uq_calls = true
+    if not ambient_sharing_stable(n): uq_calls = true
     if k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ELEMALIAS != 0:
         # (as fp_scan: its array is written where the body does not show; left as it is)
         b = int(nodes[int(locals[int(nodes[n].sym)].alias)].a)
@@ -5905,16 +5879,17 @@ uq_scan = (n: int, ctx: int):
             uq_scan(kid(n, 0), 1)
             loop i in [1..nkids(n)): uq_scan(kid(n, i), 0)
             return
-    uq_scan(int(nodes[n].a), 0)
-    uq_scan(int(nodes[n].b), 0)
-    if k != .for_:
-        uq_scan(int(nodes[n].c), 0)
-        if k != .partial: uq_scan(int(nodes[n].d), 0)
-    loop i in [0..nkids(n)): uq_scan(kid(n, i), 0)
-    loop i in [0..nkids2(n)): uq_scan(kid2(n, i), 0)
+    if mask & 1 != 0: uq_scan(int(nodes[n].a), 0)
+    if mask & 2 != 0: uq_scan(int(nodes[n].b), 0)
+    if mask & 4 != 0: uq_scan(int(nodes[n].c), 0)
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)): uq_scan(kid(n, i), 0)
+    if mask & 32 != 0:
+        loop i in [0..nkids2(n)): uq_scan(kid2(n, i), 0)
 
 # assignment target: elements of an indexed array (possibly a field of one) are writes
 uq_target = (t: int):
+    if not ambient_sharing_stable(t): uq_calls = true
     k = nodes[t].kind
     if k == .index:
         uq_scan(int(nodes[t].a), 2)
@@ -6193,7 +6168,6 @@ lower_inst = (lf: int, f: int):
         ir_set_pos(nodes[int(fns[f].decl)].pos)
         ir.decl_pos = ir_pos
     cur_fn = f
-    cur_closed = -1
     cur_ret = int(fns[f].ret)
     ir.cabi = fns[f].cabi
     ir.noinline = fns[f].noinline

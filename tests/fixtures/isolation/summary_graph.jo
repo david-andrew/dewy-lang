@@ -1,0 +1,109 @@
+# Internal boundary cases that valid source syntax cannot construct.
+use '../../../compiler/ast.jo'
+use '../../../compiler/check.jo'
+use '../../../compiler/expr.jo'
+use '../../../compiler/isolation.jo'
+use '../../../compiler/types.jo'
+use '../../../compiler/lower.jo'
+
+body = (items: int[]) -> int:
+    b = mk(.block, 0)
+    set_list(b, items)
+    b
+function = (b: int) -> int:
+    fns.push(FnInst(body = i32(b), state = 2))
+    fns.len() - 1
+call = (f: int) -> int:
+    c = mk(.call, 0)
+    nodes[c].sym = i32(f)
+    c
+
+global_read = () -> int:
+    n = mk(.ident, 0)
+    nodes[n].aux = i32(int(SK.global))
+    n
+
+main = ():
+    init_types()
+    # Unknown node/intrinsic IDs are top, not an empty effect set.
+    unknown_node = function(mk(999 as NK, 0))
+    intrinsic = mk(.intrinsic, 0)
+    nodes[intrinsic].aux = 999
+    unknown_intrinsic = function(intrinsic)
+    # These integers are intentionally invalid AST indexes. Partial application
+    # blocks, and for_.c/d must not be visited even in an otherwise safe body.
+    partial = mk(.partial, 0)
+    nodes[partial].d = 2147483647
+    partial_fn = function(partial)
+    loop_node = mk(.for_, 0)
+    nodes[loop_node].c = 2147483647
+    nodes[loop_node].d = 2147483647
+    loop_fn = function(loop_node)
+    # Tarjan must not freeze the first recursive backedge as a proof. Query
+    # both members, including the one visited before the late blocker.
+    a = function(body([]))
+    b = function(body([call(a)]))
+    blocker = function(global_read())
+    set_list(int(fns[a].body), [call(blocker), call(b)])
+    # A safe recursive SCC must be accepted as well.
+    c = function(body([]))
+    d = function(body([call(c)]))
+    set_list(int(fns[c].body), [call(d)])
+    # Per-instance, not per-declaration: same declaration, different bodies.
+    declaration = mk(.fn_, 0)
+    safe_inst = function(body([]))
+    bad_inst = function(global_read())
+    fns[safe_inst].decl = i32(declaration)
+    fns[bad_inst].decl = i32(declaration)
+    # Shared subgraphs: every instance is demanded repeatedly. The visit count
+    # must stay linear, and all completed answers remain cached.
+    leaf = function(body([]))
+    chain = leaf
+    loop i in [0..300): chain = function(body([call(chain)]))
+    diamond = chain
+    loop i in [0..300):
+        left = function(body([call(diamond)]))
+        right = function(body([call(diamond)]))
+        diamond = function(body([call(left), call(right)]))
+    isolation_reset()
+    assert(not instance_isolated(unknown_node))
+    assert(isolation_rows[unknown_node].reason == .node)
+    assert(not ambient_length_stable(unknown_node))
+    assert(not ambient_storage_stable(int(fns[unknown_node].body)))
+    assert(not ambient_sharing_stable(int(fns[unknown_node].body)))
+    assert(not instance_isolated(unknown_intrinsic))
+    assert(isolation_rows[unknown_intrinsic].reason == .intrinsic)
+    assert(not ambient_storage_stable(intrinsic))
+    assert(not ambient_sharing_stable(intrinsic))
+    loop unknown in [int(fns[unknown_node].body), intrinsic]:
+        fp_lambda = false
+        fp_scan(unknown, 0)
+        assert(fp_lambda)
+        uq_lambda = false
+        uq_scan(unknown, 0)
+        assert(uq_lambda)
+    assert(not instance_isolated(partial_fn))
+    assert(instance_isolated(loop_fn))
+    assert(not instance_isolated(a))
+    assert(not instance_isolated(b))
+    assert(isolation_rows[a].reason == .global_)
+    assert(isolation_rows[a].witness == isolation_rows[b].witness)
+    assert(instance_isolated(c) and instance_isolated(d))
+    assert(instance_isolated(safe_inst) and not instance_isolated(bad_inst))
+    assert(instance_isolated(diamond))
+    count = isolation_serial
+    loop i in [leaf..fns.len()): assert(instance_isolated(i))
+    assert(isolation_serial == count)
+    assert(count == fns.len() - 1)
+    # Initializers and late instances are unavailable. Whole-generation reset
+    # invalidates old positive AND negative proofs when checked bodies change.
+    late = function(body([]))
+    assert(not instance_isolated(late))
+    fns[safe_inst].body = i32(global_read())
+    fns[bad_inst].body = i32(body([]))
+    fns[late].kind = i32(FK_INIT)
+    isolation_reset()
+    assert(not instance_isolated(safe_inst))
+    assert(instance_isolated(bad_inst))
+    assert(not instance_isolated(late))
+    print("summary graph ok")

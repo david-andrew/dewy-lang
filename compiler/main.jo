@@ -15,6 +15,7 @@ use 'check.jo'
 use 'expr.jo'
 use 'ir.jo'
 use 'lower.jo'
+use 'isolation.jo'
 use 'opt.jo'
 use 'inline.jo'
 use 'loops.jo'
@@ -390,6 +391,7 @@ compile = (path: str, out0: str) -> str:
     if lower_only and ide_skip.len() > 0: return ""
     if lower_only: det_check_program()
     if repl_image: repl_set_main()
+    isolation_reset()
     find_unique_globals(not watch_build and not repl_image and not lower_only)
     t1 = time()
     roots: int[]
