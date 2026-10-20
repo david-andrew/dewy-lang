@@ -13018,3 +13018,51 @@ main = () -> int:
     functions = re.findall(r'^fn f_read_[0-9]+[^\n]*\n.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
     assert len(functions) == 1, built.stdout + built.stderr
     assert ' = load ' in functions[0] and 'call ' not in functions[0], functions[0]
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('flags', [[], ['--release'], ['-g']], ids=['default', 'release', 'debug'])
+def test_core_cold_array_calls_preserve_live_values(compiler, tmp_path, flags):
+    # Growth and shared-array detachment must preserve both integer and floating
+    # values assigned to caller-saved registers, including on repeated slow paths.
+    import math
+    inputs = [-9, 0, 1, 2, 7, 31, 127, 257, 65535]
+    expected = []
+    for n in inputs:
+        integer = (n + 11) + (n * 3 + 7) * 3 + (n ^ 19) * 5 + (n - 5) * 7 + (n * 17 + 3) * 11 + (n * n + 1) * 13
+        floating = (n + .25) * 3 + (n * .5 + .5) * 5 + (n * .25 + .75) * 7 + (n * 1.5 + .125) * 11
+        expected.append(integer + math.trunc(floating))
+    source = tmp_path / 'cold-values.jo'
+    source.write_text('''@noinline
+push_probe = (xs: mut int[], n: int) -> int:
+    a = n + 11
+    b = n * 3 + 7
+    c = n xor 19
+    d = n - 5
+    e = n * 17 + 3
+    f = n * n + 1
+    p = f64(n) + 0.25
+    q = f64(n) * 0.5 + 0.5
+    r = f64(n) * 0.25 + 0.75
+    s = f64(n) * 1.5 + 0.125
+    xs.push(n)
+    a + b * 3 + c * 5 + d * 7 + e * 11 + f * 13 + int(p * 3 + q * 5 + r * 7 + s * 11)
+main = () -> int:
+    inputs: int[] = INPUTS
+    expected: int[] = EXPECTED
+    xs: int[]
+    loop i in [0..inputs.len()):
+        snapshot = xs
+        if push_probe(xs, inputs[i]) != expected[i]: return 1
+        if snapshot.len() != i or xs.len() != i + 1: return 2
+        if xs[i] != inputs[i]: return 3
+        loop j in [0..i):
+            if snapshot[j] != inputs[j]: return 4
+    42
+'''.replace('INPUTS', repr(inputs)).replace('EXPECTED', repr(expected)))
+    binary = tmp_path / 'cold-values'
+    built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
+                           capture_output=True, text=True, timeout=30, check=False)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10, check=False)
+    assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)

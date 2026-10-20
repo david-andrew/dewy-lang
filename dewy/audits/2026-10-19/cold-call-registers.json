@@ -1,0 +1,115 @@
+{
+  "status": "rejected; allocator policy reverted",
+  "change": "Set the existing release register-priority prefix weight to zero for c=2 cold calls, while retaining actual crosses_call for volatile-register preservation. Default/debug allocation remained unchanged.",
+  "reason": "The rarity assumption fails for managed callbacks: release managed_params and method_params regress about38\u201339%; branch_dispatch about2.9%; case_conversion about6.3%. Compilation wins cannot compensate for these generated-program regressions.",
+  "validation": {
+    "full": "6471 passed in 198.52s (0:03:18)",
+    "bootstrap": "/var/home/david/dev/dewy-lang/__dewycache__/compact-core/build-1792454568703448732",
+    "fuzz": "100 fresh seeds1401..1500 across five modes, all pass",
+    "focused": "953 passed, 5027 deselected in 20.82s",
+    "quick": "599 passed in 12.02s",
+    "targeted": "Three native default/release/debug live-value cases pass on both the prototype and retained accepted compiler. They exercise growth and shared detachment while integer/float values stay live; these regression tests are retained."
+  },
+  "compiler_instruction_ratios": {
+    "throughput-default": 0.9911279187619109,
+    "throughput-release": 0.998391848487223,
+    "tour-default": 0.9928615106391824,
+    "netpong-default": 0.9904870565004755,
+    "dunes-default": 0.9909000221762946,
+    "compiler-reference": 1.0020732200959765
+  },
+  "laptop_compile": {
+    "throughput-default": {
+      "reference": [
+        "pass",
+        0.8758597966371813
+      ],
+      "previous": [
+        "pass",
+        0.9840363441335138
+      ]
+    },
+    "throughput-release": {
+      "reference": [
+        "pass",
+        0.8575346072825739
+      ],
+      "previous": [
+        "pass",
+        0.9976138249291832
+      ]
+    },
+    "tour-default": {
+      "reference": [
+        "pass",
+        0.9675666042947938
+      ],
+      "previous": [
+        "pass",
+        0.9936556351990278
+      ]
+    },
+    "netpong-default": {
+      "reference": [
+        "pass",
+        0.9683651324712741
+      ],
+      "previous": [
+        "pass",
+        0.994105286646725
+      ]
+    },
+    "dunes-default": {
+      "reference": [
+        "pass",
+        0.9633053831771444
+      ],
+      "previous": [
+        "pass",
+        0.9927828775098981
+      ]
+    },
+    "compiler-reference": {
+      "reference": [
+        "pass",
+        0.9428869492453831
+      ],
+      "previous": [
+        "pass",
+        1.0030604235977645
+      ]
+    }
+  },
+  "laptop_runtime_status_counts": {
+    "pass": 24,
+    "regression": 6
+  },
+  "laptop_release_ratios": {
+    "helpers": 0.9991483603568895,
+    "arrays": 1.0020496314238252,
+    "records": 0.9963278649570904,
+    "text": 0.9923568265024232,
+    "graph": 0.9988013022143942,
+    "string_equal": 0.9965238297193472,
+    "match_dispatch": 0.9984575353703123,
+    "branch_dispatch": 1.0293563549975981,
+    "managed_params": 1.3848714513850544,
+    "method_params": 1.3891152935150903,
+    "shifted_arrays": 1.0020878056744165,
+    "case_conversion": 1.0625724667143335,
+    "array_swap": 0.9999610259783904,
+    "integer_parse": 1.0001986524780333,
+    "recursive_tree": 1.009152876231001,
+    "recursive_list": 1.0011261030415617
+  },
+  "limits": [
+    "All12 laptop compile comparisons pass, but6 of30 runtime comparisons show regressions. Thresholds/references are unchanged.",
+    "All16 default benchmark artifacts match the accepted compiler, with independent checksums; all16 changed release artifacts received fresh timing.",
+    "An initial release-only driver used the both-mode report key and failed after the first kernel before producing comparisons. Corrected key handling and save-before-comparison were applied; the failure log is retained. The campaign was repeated for the harness failure, not to change a measured verdict.",
+    "The Sol follow-up review found preservation sound; actual measurements rejected profitability. No language changes or new ABI rules."
+  ],
+  "evidence": {
+    "file": "cold-call-registers-evidence.json.gz",
+    "sha256": "fe2a0aaa0b379f2c1d06dd00011f541da37d05fbd963676d79fc4072f77c8e51"
+  }
+}
