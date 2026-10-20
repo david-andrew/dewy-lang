@@ -154,7 +154,7 @@ Landed 10-19 and 10-20:
   - finite-fact/interval `$assert` and proven indexing/division;
   - effect rows;
   - builtin `rational`;
-  - lifecycle hooks and drop;
+  - lifecycle hooks and drop (ownership design ready: 6 slices, first slice for programs 77/78);
   - `$lend` lifetime checking;
   - arena scopes;
   - `$test`/`$expect`;
@@ -227,6 +227,9 @@ Open (batched for David, not blocking):
   12. Invariant authority beyond scalar refinements: sortedness, provenance.
   13. Finite-resource and denial-of-service guarantees.
   14. The portable sockets/FFI boundary.
+  15. Lifecycle hooks: may a user `$__copy__`/`$__move__` change the abstract
+      value, or must hooks preserve it? Can a custom move hook fail? The
+      interim plan requires a proven no-failure summary.
 
   Decided from GOALS: ordinary code keeps runtime checks; static rejection of
   unproven index/divisor is a strict-lane property.
