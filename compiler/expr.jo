@@ -4443,6 +4443,8 @@ check_binary = (n: int, expected: int) -> int:
             if op == .gt or op == .le or op == .ge: why = " (define `(<) = (a: {dt(ta)}, b: {dt(ta)}) -> bool: ...` and >, <= and >= come from it)"
             if dewy_at(nodes[n].pos): why = " (a record has the operators defined for it, such as `__add__=(a:{dt(ta)} b:{dt(ta)}):>{dt(ta)}=>...` for + or `__lt__` for <?)"
         fatal(nodes[n].pos, "operator {opn} is not defined for {dt(ta)} and {dt(tb)}{why}")
+    if is_shift and dewy_at(nodes[n].pos) and nodes[b].kind == .int_lit and nodes[b].ival < 0 and not has_flag(b, NF_U64):
+        fatal(nodes[b].pos, "a shift count is unsigned, and {nodes[b].ival} is negative")
     if is_shift and not (is_lit(a) and is_lit(b)):
         finalize_literal(a)
         finalize_literal(b)
@@ -4579,6 +4581,9 @@ check_binary = (n: int, expected: int) -> int:
             else if op == .amp: v = x & y
             else if op == .pipe: v = x | y
             else if op == .caret: v = (x xor y)
+            else if (op == .shl or op == .shr) and dewy_at(nodes[n].pos) and (y >= 64 or y < 0):
+                # (a count past the width reaches the continuation bits)
+                v = if op == .shr and x < 0: -1 else: 0
             else if op == .shl: v = x << y
             else if op == .shr: v = x >> y
             else: ok = false

@@ -281,3 +281,63 @@ def test_surface_native_diagnostics(compiler, tmp_path, name):
     message = line.split('error:', 1)[1]
     for jo in (' str ', ' str)', ' int ', ' int)', '==', '!=', 'u8[]', '-> ', 'if let'):
         assert jo not in message + ' ', (jo, message)
+
+
+# ------------------------------------------------- fixed-width shift counts
+
+SHIFT_PROGRAM = '''
+left=(x:uint64 count:int64):>uint64=>x << count
+right=(x:uint64 count:int64):>uint64=>x >> count
+signed=(x:int64 count:int64):>int64=>x >> count
+narrow=(x:uint8 count:int64):>uint8=>x << count
+nsigned=(x:int8 count:int64):>int8=>x >> count
+masked=(x:uint64 count:int64):>uint64=>x << (count and 63)
+main=():>int64=>{
+    loop c in [0 1 7 8 9 63 64 65 127 128 -1] {
+        printl"{left(1 c)} {right(18446744073709551615 c)} {signed(-2 c)} {signed(2 c)} {narrow(3 c)} {nsigned(-100 c)} {masked(1 c)}"
+    }
+    let x:uint64 = 1
+    x <<= 64
+    let y:int64 = -8
+    y >>= 70
+    let z:int64 = 5
+    z <<= 2
+    printl"{x} {y} {z} {1 << 64} {-2 >> 64} {1 << 3} {(1 << 62) >> 61}"
+    return 0
+}
+'''
+
+
+def shift_expected():
+    mask64 = (1 << 64) - 1
+
+    def wrap(value, bits, signed):
+        value &= (1 << bits) - 1
+        return value - (1 << bits) if signed and value >> (bits - 1) else value
+
+    lines = []
+    for c in [0, 1, 7, 8, 9, 63, 64, 65, 127, 128, -1]:
+        u = c & mask64       # counts are unsigned
+        lines.append(' '.join(str(v) for v in [
+            wrap(1 << u if u < 64 else 0, 64, False),
+            mask64 >> u if u < 64 else 0,
+            -2 >> min(u, 63), 2 >> min(u, 63),
+            wrap(3 << u if u < 64 else 0, 8, False),
+            -100 >> min(u, 63),
+            wrap(1 << (u & 63), 64, False)]))
+    lines.append('0 -1 20 0 -1 8 2')
+    return lines
+
+
+@pytest.mark.parametrize('target', [pytest.param('native', marks=quick), 'wasm', 'linux-arm64'])
+@pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
+def test_surface_wide_shifts(compiler, tmp_path, target, release):
+    ran = run(compiler, tmp_path, SHIFT_PROGRAM, target, release)
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == shift_expected()
+
+
+
+def test_surface_negative_shift_literal(compiler, tmp_path):
+    line = diagnose(compiler, tmp_path, 'main = () => { let x:int64 = 3\nprintl"{x << -1}" }')
+    assert 'a shift count is unsigned, and -1 is negative' in line

@@ -2479,10 +2479,46 @@ gen_binary = (e: int) -> Val:
         return V(e_bin(int_op(op, false), VI, va, vb), false)
     if sg and (op == .slash or op == .percent) and not (nodes[b].kind == .int_lit and nodes[b].ival != -1):
         return V(norm(sdiv_wrap(op, va, vb, lt), ntype(e)), false)
+    if (op == .shl or op == .shr) and dewy_at(nodes[e].pos): return V(norm(wide_shift(op, sg, va, vb, b), ntype(e)), false)
     r = e_bin(int_op(op, sg), VI, va, vb)
     if is_cmp: return V(r, false)
     if op == .shl or op == .shr: return V(norm(r, ntype(e)), false)
     V(norm(r, ntype(e)), false)
+
+# A Dewy shift count is unsigned, and a count of at least the register width
+# reaches the shift's continuation bits: 0, or the sign for a signed right
+# shift. Narrower types are already 0 or sign-filled past their width once
+# normalized. The machine masks the count, so a count not known to be below
+# 64 pays for a branch-free mask shared by shifts of the same count: all ones
+# within range, else zero. A left or unsigned right shift is ANDed with it; a
+# signed right shift sets the count's low bits, making the machine shift by 63.
+wide_shift = (op: Tok, sg: bool, va: int, vb: int, count: int) -> int:
+    k = shift_count_bound(count)
+    if k >= 64:
+        if op == .shr and sg: return e_bin(.shrs, VI, va, e_iconst(63))
+        return e_iconst(0)
+    if k >= 0: return e_bin(int_op(op, sg), VI, va, vb)
+    # ((count >> 6) - 1) >> 63: all ones exactly when count < 64, unsigned
+    within = e_bin(.shrs, VI, e_addi(e_bin(.shru, VI, vb, e_iconst(6)), -1), e_iconst(63))
+    if op == .shr and sg:
+        beyond = e_bin(.and_, VI, e_un(.not_, VI, within), e_iconst(63))
+        return e_bin(.shrs, VI, va, e_bin(.or_, VI, vb, beyond))
+    e_bin(.and_, VI, e_bin(int_op(op, sg), VI, va, vb), within)
+
+# An unsigned bound on a shift count from its syntax: the literal itself (64
+# for any count of at least 64, or a negative one), or the mask of
+# `count & mask`; -1 when unknown.
+shift_count_bound = (n: int) -> int:
+    let n = n
+    loop nodes[n].kind == .conv: n = int(nodes[n].a)
+    k = nodes[n].kind
+    if k == .int_lit: return if nodes[n].ival < 0: 64 else: min(nodes[n].ival, 64)
+    if k == .binary and (nodes[n].op as Tok) == .amp:
+        a = shift_count_bound(int(nodes[n].a))
+        b = shift_count_bound(int(nodes[n].b))
+        if nodes[int(nodes[n].b)].kind == .int_lit and b >= 0 and b < 64: return b
+        if nodes[int(nodes[n].a)].kind == .int_lit and a >= 0 and a < 64: return a
+    -1
 
 # signed / and % of 64-bit integers wrap like other arithmetic: the smallest integer / -1 is
 # itself and % -1 is 0 (the machine's division would trap on the quotient)
@@ -4339,6 +4375,7 @@ gen_assign = (s: int):
             endc()
         if types[t].kind == .bool_: r = e_bin(int_op(op, false), VI, cur, rhs)
         else if sg and (op == .slash or op == .percent): r = norm(sdiv_wrap(op, cur, rhs, t), t)
+        else if (op == .shl or op == .shr) and dewy_at(nodes[s].pos): r = norm(wide_shift(op, sg, cur, rhs, int(nodes[s].b)), t)
         else: r = norm(e_bin(int_op(op, sg), VI, cur, rhs), t)
     write_place(pl, t, r)
 

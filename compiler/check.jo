@@ -3623,7 +3623,7 @@ ceval = (e: int) -> CVal:
         else if op == .minus: r = a.i - b.i
         else if op == .star: r = a.i * b.i
         else if op == .slash and b.i != 0: r = a.i / b.i
-        else if op == .shl: r = a.i << b.i
+        else if op == .shl: r = if dewy_at(nodes[e].pos) and (b.i >= 64 or b.i < 0): 0 else: a.i << b.i
         else: fatal(nodes[e].pos, "unsupported operator in compile-time expression")
         return CVal(false, r, "")
     fatal(nodes[e].pos, "expression is not a compile-time constant")

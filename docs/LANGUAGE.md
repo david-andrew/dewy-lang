@@ -392,6 +392,11 @@ unsigned range; narrower operands retain the existing integer widening rules.
 Integer `/` produces an exact fraction; `/` with a floating operand uses floating math.
 Literals beyond a machine word automatically use the bundled exact `BigInt` type.
 
+Shift counts are unsigned: a negative literal count is an error, and a negative
+runtime count acts as a huge one. Shifting a fixed-width integer by at least its
+width gives `0` for `<<` and unsigned `>>`, and the sign (`0` or `-1`) for signed
+`>>`: `uint64(1) << 64` is `0` and `-2 >> 64` is `-1`.
+
 Comparisons use `=?`, `<?`, `>?`, `<=?` and `>=?`. Boolean expressions use `and`,
 `or` and `not`. Literal coefficients such as `2x` and `2(x+1)` multiply; use `*`
 for general multiplication. A semicolon discards an expression's result.
