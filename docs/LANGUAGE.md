@@ -466,7 +466,7 @@ The base dimensions are `Time`, `Length`, `Mass`, `Current`, `Temperature`,
 kilograms, amperes, kelvins, moles, candelas, and whole turns. Unit scales are
 exact: `3km =? 3000m`, `300ms =? 3s/10`, and `90deg =? turn/4`; `°` also
 spells degrees. Fractions use `Rational`, and quantities also support machine
-integers, `BigInt`, `float32`, and `float64`. A floating annotation rounds an
+integers, checked `int`, `BigInt`, `float32`, and `float64`. A floating annotation rounds an
 exact scale to that representation.
 
 Addition, subtraction, and comparisons require identical dimensions.

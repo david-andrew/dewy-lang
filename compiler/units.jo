@@ -256,8 +256,8 @@ quantity_product_fits = (a: int, b: int) -> bool:
 
 quantity_fold = (n: int, a: int, b: int, dim: int, op: Tok, expected: int) -> bool:
     # Explicit machine widths use their ordinary wrapping arithmetic.
-    if is_quantity(ntype(a)) and is_int(quantity_base(ntype(a))) and quantity_base(ntype(a)) != T_INT: return false
-    if is_quantity(ntype(b)) and is_int(quantity_base(ntype(b))) and quantity_base(ntype(b)) != T_INT: return false
+    if is_quantity(ntype(a)) and is_int(quantity_base(ntype(a))) and quantity_base(ntype(a)) != T_INT and quantity_base(ntype(a)) != T_MATH_INT: return false
+    if is_quantity(ntype(b)) and is_int(quantity_base(ntype(b))) and quantity_base(ntype(b)) != T_INT and quantity_base(ntype(b)) != T_MATH_INT: return false
     ai = quantity_constant_scale(a)
     bi = quantity_constant_scale(b)
     if ai < 0 or bi < 0: return false
