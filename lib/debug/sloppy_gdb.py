@@ -99,7 +99,7 @@ class MapPrinter:
     """{K: V}: its keys and values, in the order they were added"""
 
     def __init__(self, val):
-        self.keys = ArrayPrinter(val["keys"])
+        self.keys = ArrayPrinter(val["__keys"])
         self.vals = ArrayPrinter(val["vals"])
         # (entries removed since the map was last compacted: still there, marked gone)
         self.gone = [bool(int(g)) for _, g in ArrayPrinter(val["gone"]).children()]
@@ -150,7 +150,7 @@ def lookup(val):
     if name.endswith("?"):
         return OptPrinter(val)
     fields = [f.name for f in t.fields()]
-    if fields == ["keys", "vals", "slots", "hashes", "gone", "ngone"]:
+    if fields == ["__keys", "vals", "slots", "hashes", "gone", "ngone"]:
         return MapPrinter(val)
     if fields[:1] == ["tag"] and t.fields()[0].type.strip_typedefs().code == gdb.TYPE_CODE_ENUM:
         return EnumPrinter(val)

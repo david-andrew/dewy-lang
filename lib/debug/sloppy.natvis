@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- How Visual Studio, VS Code (cppvsdbg) and WinDbg show the values of Sloppy programs built with
      `sloppy build -g` on Windows: strings as text, arrays as their elements, optionals as their
-     value or none, maps as their keys and values. Load it in WinDbg with
+     value or none, maps as their __keys and values. Load it in WinDbg with
          .nvload <sloppy>\lib\debug\sloppy.natvis
      (VS Code's F5 loads it.) A string or an array is a pointer to [rc][len][cap][data...] (null:
      empty), named `str` and `array<T>` in the program's PDB (compiler/pdb.jo); an optional is
@@ -38,17 +38,17 @@
     </Expand>
   </Type>
   <Type Name="Map&lt;*,*&gt;">
-    <DisplayString Condition="keys == 0">{{}}</DisplayString>
-    <DisplayString>{{ len={keys->len - ngone} }}</DisplayString>
+    <DisplayString Condition="__keys == 0">{{}}</DisplayString>
+    <DisplayString>{{ len={__keys->len - ngone} }}</DisplayString>
     <Expand>
-      <CustomListItems Condition="keys != 0">
+      <CustomListItems Condition="__keys != 0">
         <Variable Name="i" InitialValue="0" />
-        <Size>keys->len - ngone</Size>
+        <Size>__keys->len - ngone</Size>
         <Loop>
-          <Break Condition="i &gt;= keys->len" />
+          <Break Condition="i &gt;= __keys->len" />
           <!-- (entries removed since the map was last compacted are there, marked gone) -->
           <If Condition="gone == 0 || i &gt;= gone->len || !(&amp;gone->data[0])[i]">
-            <Item Name="[{(&amp;keys->data[0])[i]}]">(&amp;vals->data[0])[i]</Item>
+            <Item Name="[{(&amp;__keys->data[0])[i]}]">(&amp;vals->data[0])[i]</Item>
           </If>
           <Exec>i++</Exec>
         </Loop>

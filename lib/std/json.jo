@@ -314,7 +314,7 @@ __json_write_value[K, V] = (b: mut u8[], m: Map[K, V], indent: int, level: int):
     b.push('{{')
     count = 0
     ng = m.gone.len()
-    loop i in 0.. and key in m.keys:
+    loop i in 0.. and key in m.__keys:
         if i < ng and m.gone[i]: continue
         __json_key(b, __json_key_text(key), indent, level, count)
         __json_write_value(b, m.vals[i], indent, level + 1)

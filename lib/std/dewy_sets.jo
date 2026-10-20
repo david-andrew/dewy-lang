@@ -9,7 +9,7 @@ __dewy_make_set[T] = (values: T[]) -> Set[T]:
     result: Set[T]
     if values.len() > 0: result._entries.reserve(values.len())
     loop value in values: result._entries.insert_if_absent(value, true)
-    result._tail = result._entries.keys.len()
+    result._tail = result._entries.__keys.len()
     result
 
 __dewy_set_values[T] = (s: Set[T]) -> T[]: s._entries.keys()
@@ -19,13 +19,13 @@ contains[T] = (s: Set[T], value: T) -> bool: s._entries.has(value)
 has[T] = (s: Set[T], value: T) -> bool: s._entries.has(value)
 add[T] = (s: mut Set[T], value: T) -> bool:
     added = s._entries.insert_if_absent(value, true)
-    if added: s._tail = s._entries.keys.len()
+    if added: s._tail = s._entries.__keys.len()
     added
 push[T] = (s: mut Set[T], value: T): s.add(value)
 remove[T] = (s: mut Set[T], value: T) -> bool:
     removed = s._entries.remove(value)
     # Removal may compact the entry arrays and renumber their indices.
-    if removed: s._tail = min(s._tail, s._entries.keys.len())
+    if removed: s._tail = min(s._tail, s._entries.__keys.len())
     removed
 clear[T] = (s: mut Set[T]):
     s._entries.clear()
@@ -45,9 +45,9 @@ pop[T] = (s: mut Set[T]) -> T:
     i = s._tail - 1
     ng = s._entries.gone.len()
     loop i < ng and s._entries.gone[i]: i -= 1
-    value = s._entries.keys[i]
+    value = s._entries.__keys[i]
     s.pop(value)
-    s._tail = min(i, s._entries.keys.len())
+    s._tail = min(i, s._entries.__keys.len())
     value
 
 pop[T] = (s: mut Set[T], default: T?) -> T?:

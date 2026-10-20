@@ -2180,7 +2180,7 @@ check_for = (s: int):
             # `i in 0.. and key in map` counts keys. The native two-binding
             # map loop otherwise means key/value, so iterate its key snapshot.
             add_flag(it, NF_CHECKED)
-            t = prune(check_expr(bc_field(it, "keys", pos), 0))
+            t = prune(check_expr(bc_field(it, "__keys", pos), 0))
             it = last_checked
             nodes[s].a = i32(it)
         k = types[t].kind
@@ -4006,7 +4006,7 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
     if (is_array and not is_fixed) or is_map:
         length = mk(.call, pos)
         length_source = source
-        if is_map: length_source = bc_field(source, "keys", pos)
+        if is_map: length_source = bc_field(source, "__keys", pos)
         check_intrinsic(length, .len, [length_source], 0)
         add_flag(length, NF_CHECKED)
         count = mk(.int_lit, pos)

@@ -1668,8 +1668,7 @@ class Generator:
         if choice == 'keys' and not nonempty and ty == AI:
             v = self.pick(lambda v: v.ty == DII)
             if v is not None:
-                # `d.keys` without parentheses reads the internal field (reported), so keep them.
-                return Method(AI, Var(DII, v.name), r.choice(('keys', 'values')))
+                return Method(AI, Var(DII, v.name), r.choice(('keys', 'values')), parens=self.chance(.5))
         if choice == 'field' and ty == AI:
             v = self.pick(lambda v: v.ty in (ITEM, CELL))
             if v is not None:

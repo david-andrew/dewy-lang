@@ -3765,7 +3765,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             nodes[n] = nodes[bc_call("__map_pair_at", args, pos)]
         else:
             ix = mk(.index, pos)
-            nodes[ix].a = i32(if is_map_type(t) or is_map_entries_type(t): bc_field(args[0], "keys", pos) else: args[0])
+            nodes[ix].a = i32(if is_map_type(t) or is_map_entries_type(t): bc_field(args[0], "__keys", pos) else: args[0])
             nodes[ix].b = i32(args[1])
             nodes[n] = nodes[ix]
         return check_expr(n, expected)

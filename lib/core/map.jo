@@ -1,5 +1,5 @@
 # Hash map {K: V}: insertion ordered, open addressing over a dense entry list.
-# The first two fields must stay `keys` and `vals` (the compiler iterates them in mutable loops).
+# The first two fields must stay `__keys` and `vals` (the compiler iterates them in mutable loops).
 # A removed entry stays in place, marked gone (so the others keep theirs), its slot a tombstone
 # (entry -1: probes go on past it); when half of them are gone, they are taken out at once.
 
@@ -19,7 +19,7 @@ __map_slot_equal = (keys: u64[], e: int, k: u64) -> bool: true
 __map_slot_equal[K] = (keys: K[], e: int, k: K) -> bool: __at(keys, e) == k
 
 struct Map[K, V]:
-    keys: K[]
+    __keys: K[]
     vals: V[]
     slots: __MapSlot[]
     hashes: u64[]
@@ -30,25 +30,25 @@ struct Map[K, V]:
 # A dense iteration snapshot needs no hash table, hashes or removal bitmap.
 # Its first two fields share the Map loop layout used by the compiler.
 struct __MapEntries[K, V]:
-    keys: K[]
+    __keys: K[]
     vals: V[]
 
 __map_entries[K, V] = (m: Map[K, V]) -> __MapEntries[K, V]:
-    if m.ngone == 0: return __MapEntries(m.keys, m.vals)
+    if m.ngone == 0: return __MapEntries(m.__keys, m.vals)
     keys: K[]
     vals: V[]
     keys.reserve(m.len())
     vals.reserve(m.len())
     ng = m.gone.len()
-    loop i in 0.. and key in m.keys:
+    loop i in 0.. and key in m.__keys:
         if i < ng and __at(m.gone, i): continue
         keys.push(key)
         vals.push(__at(m.vals, i))
     __MapEntries(keys, vals)
 
-len[K, V] = (entries: __MapEntries[K, V]) -> int: entries.keys.len()
+len[K, V] = (entries: __MapEntries[K, V]) -> int: entries.__keys.len()
 __map_pair_at[K, V] = (entries: __MapEntries[K, V], i: int) -> (K, V):
-    (entries.keys[i], entries.vals[i])
+    (entries.__keys[i], entries.vals[i])
 
 # full 64-bit avalanche (murmur3 finalizer): every key bit affects the low bits used for slots,
 # so keys like multiples of 4096 or float bit patterns spread out
@@ -87,7 +87,7 @@ __map_probe[K, V] = (m: Map[K, V], k: K, h: u64) -> int:
         if s.entry == 0: return -2 - i
         if s.entry > 0 and s.tag == tag:
             e = s.entry - 1
-            if __map_slot_equal(m.keys, e, k): return e
+            if __map_slot_equal(m.__keys, e, k): return e
         i = (i + 1) & mask
 
 __map_find[K, V] = (m: Map[K, V], k: K, h: u64) -> int:
@@ -101,7 +101,7 @@ __map_find[K, V] = (m: Map[K, V], k: K, h: u64) -> int:
         if s.entry == 0: return -1
         if s.entry > 0 and s.tag == tag:
             e = s.entry - 1
-            if __map_slot_equal(m.keys, e, k): return e
+            if __map_slot_equal(m.__keys, e, k): return e
         i = (i + 1) & mask
 
 __map_rehash[K, V] = (m: mut Map[K, V], ns: int):
@@ -113,7 +113,7 @@ __map_rehash[K, V] = (m: mut Map[K, V], ns: int):
         if e < ng and __at(m.gone, e): continue
         i = int(h) & mask
         loop m.slots[i].entry != 0: i = (i + 1) & mask
-        m.slots[i] = __MapSlot(__map_tag(__at(m.keys, e), h), e + 1)
+        m.slots[i] = __MapSlot(__map_tag(__at(m.__keys, e), h), e + 1)
 
 # Method lookup also finds hash in the key's defining module, just as equality
 # finds its operator there. A lexical hash(k) can miss that overload in a caller.
@@ -143,18 +143,18 @@ __map_entry[K, V] = (m: mut Map[K, V], k: K) -> int:
     if e >= 0: return e
     z: V
     __map_add(m, k, z, h, -2 - e)
-    m.keys.len() - 1
+    m.__keys.len() - 1
 
 __map_entry[K, V] = (m: mut Map[K, V], k: K, d: V) -> int:
     h = k.hash()
     e = __map_probe(m, k, h)
     if e >= 0: return e
     __map_add(m, k, d, h, -2 - e)
-    m.keys.len() - 1
+    m.__keys.len() - 1
 
 # room for n entries without growing (when many are to come)
 reserve[K, V] = (m: mut Map[K, V], n: int):
-    m.keys.reserve(n)
+    m.__keys.reserve(n)
     m.vals.reserve(n)
     m.hashes.reserve(n)
     ns = 8
@@ -163,22 +163,22 @@ reserve[K, V] = (m: mut Map[K, V], n: int):
 
 # a new entry (k is not in m; slot: the empty slot a probe for it ended at, or -1)
 __map_add[K, V] = (m: mut Map[K, V], k: K, v: V, h: u64, slot0: int = -1):
-    n = m.keys.len()
+    n = m.__keys.len()
     slot = slot0
     if (n + 1) * 4 > m.slots.len() * 3 and m.ngone > 0:
         # (what is gone taken out first: there may be room then)
         __map_compact(m)
-        n = m.keys.len()
+        n = m.__keys.len()
         slot = -1
     if (n + 1) * 4 > m.slots.len() * 3:
         ns = m.slots.len() * 2
         if ns < 8: ns = 8
-        m.keys.push(k)
+        m.__keys.push(k)
         m.vals.push(v)
         m.hashes.push(h)
         __map_rehash(m, ns)
         return
-    m.keys.push(k)
+    m.__keys.push(k)
     m.vals.push(v)
     m.hashes.push(h)
     i = slot
@@ -199,9 +199,9 @@ __near_key[K, V] = (m: Map[K, V], k: K) -> str:
     best = ""
     bd = 3
     i = 0
-    loop i < m.keys.len():
+    loop i < m.__keys.len():
         if i >= m.gone.len() or not m.gone[i]:
-            s = "{__at(m.keys, i)}"
+            s = "{__at(m.__keys, i)}"
             d = __text_distance(want, s, bd)
             if d < bd:
                 bd = d
@@ -246,20 +246,20 @@ get[K, V] = (m: Map[K, V], k: K, default: V) -> V:
 
 contains[K, V] = (m: Map[K, V], k: K) -> bool: __map_find(m, k, k.hash()) >= 0
 has[K, V] = (m: Map[K, V], k: K) -> bool: __map_find(m, k, k.hash()) >= 0
-len[K, V] = (m: Map[K, V]) -> int: m.keys.len() - m.ngone
+len[K, V] = (m: Map[K, V]) -> int: m.__keys.len() - m.ngone
 
 # Positional access for a compacted iteration snapshot, not a key lookup.
 # Ordinary parameters evaluate each source/index once and retain value copies.
-__map_pair_at[K, V] = (m: Map[K, V], i: int) -> (K, V): (m.keys[i], m.vals[i])
-is_empty[K, V] = (m: Map[K, V]) -> bool: m.keys.len() == m.ngone
+__map_pair_at[K, V] = (m: Map[K, V], i: int) -> (K, V): (m.__keys[i], m.vals[i])
+is_empty[K, V] = (m: Map[K, V]) -> bool: m.__keys.len() == m.ngone
 keys[K, V] = (m: Map[K, V]) -> K[]:
-    if m.ngone == 0: return m.keys
+    if m.ngone == 0: return m.__keys
     # Project only the requested field. Compacting a snapshot would also copy
     # values, hashes and slots, then rebuild a hash table we never use.
     result: K[]
     result.reserve(m.len())
     ng = m.gone.len()
-    loop i in 0.. and key in m.keys:
+    loop i in 0.. and key in m.__keys:
         if i < ng and __at(m.gone, i): continue
         result.push(key)
     result
@@ -274,7 +274,7 @@ values[K, V] = (m: Map[K, V]) -> V[]:
     result
 
 clear[K, V] = (m: mut Map[K, V]):
-    m.keys.clear()
+    m.__keys.clear()
     m.vals.clear()
     m.slots.clear()
     m.hashes.clear()
@@ -294,17 +294,17 @@ remove[K, V] = (m: mut Map[K, V], k: K) -> bool:
         if s.entry == 0: return false
         if s.entry > 0 and s.tag == tag:
             e = s.entry - 1
-            if __map_slot_equal(m.keys, e, k):
+            if __map_slot_equal(m.__keys, e, k):
                 # (a tombstone where its slot was; the entry gone, letting go of what it held)
                 m.slots[i] = __MapSlot(0, -1)
-                if m.gone.len() < m.keys.len(): m.gone.resize(m.keys.len())
+                if m.gone.len() < m.__keys.len(): m.gone.resize(m.__keys.len())
                 m.gone[e] = true
                 zk: K
                 zv: V
-                m.keys[e] = zk
+                m.__keys[e] = zk
                 m.vals[e] = zv
                 m.ngone += 1
-                if m.ngone * 2 > m.keys.len(): __map_compact(m)
+                if m.ngone * 2 > m.__keys.len(): __map_compact(m)
                 return true
         i = (i + 1) & mask
     false
@@ -314,14 +314,14 @@ __map_compact[K, V] = (m: mut Map[K, V]):
     if m.ngone == 0: return
     ng = m.gone.len()
     w = 0
-    loop e in [0..m.keys.len()):
+    loop e in [0..m.__keys.len()):
         if e < ng and m.gone[e]: continue
         if w != e:
-            m.keys[w] = m.keys[e]
+            m.__keys[w] = m.__keys[e]
             m.vals[w] = m.vals[e]
             m.hashes[w] = m.hashes[e]
         w += 1
-    m.keys.resize(w)
+    m.__keys.resize(w)
     m.vals.resize(w)
     m.hashes.resize(w)
     m.gone.clear()
@@ -337,7 +337,7 @@ when not BOOTSTRAP:
     hash[K, V] = (m: Map[K, V]) -> u64:
         total: u64 = 0
         ng = m.gone.len()
-        loop i in 0.. and k in m.keys:
+        loop i in 0.. and k in m.__keys:
             if i < ng and __at(m.gone, i): continue
             kh = k.hash()
             vh = __at(m.vals, i).hash()
@@ -347,7 +347,7 @@ when not BOOTSTRAP:
     (==)[K, V] = (a: Map[K, V], b: Map[K, V]) -> bool:
         if a.len() != b.len(): return false
         ng = a.gone.len()
-        loop i in 0.. and k in a.keys:
+        loop i in 0.. and k in a.__keys:
             if i < ng and a.gone[i]: continue
             e = __map_find(b, k, __at(a.hashes, i))
             if e < 0 or not (__at(b.vals, e) == __at(a.vals, i)): return false
@@ -368,7 +368,7 @@ __fmt[K, V] = (buf: mut u8[], m: Map[K, V]):
     __buf_byte(buf, '{{')
     ng = m.gone.len()
     first = true
-    loop i in 0.. and k in m.keys:
+    loop i in 0.. and k in m.__keys:
         if i < ng and m.gone[i]: continue
         if not first: __buf_append_str(buf, ", ")
         first = false

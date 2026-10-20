@@ -101,7 +101,7 @@ class MapChildren:
 
     def update(self):
         v = self.valobj.GetNonSyntheticValue()
-        self.keys = ArrayChildren(v.GetChildMemberWithName("keys"), None)
+        self.keys = ArrayChildren(v.GetChildMemberWithName("__keys"), None)
         self.vals = ArrayChildren(v.GetChildMemberWithName("vals"), None)
         # (entries removed since the map was last compacted: still there, marked gone)
         gone = ArrayChildren(v.GetChildMemberWithName("gone"), None)
@@ -231,7 +231,7 @@ def _is_enum_with_fields(t, internal_dict):
 
 def _is_map(t, internal_dict):
     t = t.GetCanonicalType()
-    return [t.GetFieldAtIndex(i).GetName() for i in range(t.GetNumberOfFields())] == ["keys", "vals", "slots", "hashes", "gone", "ngone"]
+    return [t.GetFieldAtIndex(i).GetName() for i in range(t.GetNumberOfFields())] == ["__keys", "vals", "slots", "hashes", "gone", "ngone"]
 
 
 def __lldb_init_module(debugger, internal_dict):
