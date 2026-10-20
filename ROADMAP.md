@@ -8,7 +8,7 @@ Dewy must become; this file says what we do next and how we know we are closer.
 
 | Measure | Now (2026-10-19) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 62/63 programs (0/31 on 10-19) | all milestones |
+| Acceptance ladder, design surface | 63/63 programs, tiers 1–2 (0/31 on 10-19); tier 3 being written | all milestones |
 | Acceptance ladder, current dialect | 63/63 | stays green |
 | Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.36 G instructions (10-20; was 1.30 G at the 10-19 checkpoint) | 250k root lines/s (~88 ms) |
 | Compiler self-build | 7.5 G instructions, ~1.6 s | seconds-scale edit loop |
@@ -191,6 +191,10 @@ Open (batched for David, not blocking):
 
 - Units: display-unit selection, Celsius point/delta semantics, calendar
   durations.
+- Files and processes (10-20): provisional Dewy-facing helpers the design
+  doesn't list: `copy_file`, `rename_file`, `make_dirs`, `walk_dir`, `glob`,
+  `file_size`, `file_time`, `chmod`, and `env` (the design names
+  `environment`). Keep, rename or drop?
 - Errors: what happens when an exception reaches `main` (today `main` keeps its
   void/int contract and must handle errors explicitly).
 
