@@ -2,12 +2,10 @@ use 'check.jo'
 use 'ast.jo'
 use 'lex.jo'
 use 'util.jo'
-use 'dewy_tokens.jo'
 # Physical dimensions are canonical semantic qualifiers. Numeric operations and
 # storage use their underlying representation; specialization keeps the qualifier.
 use 'types.jo'
 use 'expr.jo'
-use 'dewy_parse.jo'
 
 quantity_dimensions: int[][] = [[0, 0, 0, 0, 0, 0, 0, 0]]
 quantity_dimension_names: str[] = ["Time", "Length", "Mass", "Current", "Temperature", "Amount", "Luminosity", "Angle"]
@@ -87,14 +85,15 @@ quantity_mismatch = (pos: int, a: int, b: int):
 resolve_quantity_type = (n: int) -> int:
     a = resolve_type(int(nodes[n].a))
     ad = quantity_dimension(a)
-    op = nodes[n].op as DewyToken
+    op = nodes[n].op as Tok
     if op == .caret:
         if types[a].kind != .dimension: fatal(nodes[n].pos, "raise the dimension factor to a power, not its numeric representation")
         power = ceval(int(nodes[n].b)).i
         return mk_dimension(power_dimension(ad, power, nodes[n].pos))
     b = resolve_type(int(nodes[n].b))
     bd = quantity_dimension(b)
-    dim = combine_dimensions(ad, bd, if op == .slash: -1 else: 1, nodes[n].pos)
+    sign = if op == .slash: -1 else: 1
+    dim = combine_dimensions(ad, bd, sign, nodes[n].pos)
     ak = types[a].kind
     bk = types[b].kind
     if ak == .dimension and bk == .dimension: return mk_dimension(dim)
@@ -400,7 +399,8 @@ quantity_unary = (n: int, expected: int) -> int:
     scale = quantity_constant_scale(a)
     if scale >= 0:
         q = quantity_scales[scale]
-        return quantity_constant(n, if op == .minus: -q.numerator else: q.numerator, q.denominator, dim, expected)
+        numerator = if op == .minus: -q.numerator else: q.numerator
+        return quantity_constant(n, numerator, q.denominator, dim, expected)
     nodes[n].a = i32(quantity_number(a))
     check_expr(n, quantity_base(expected))
     quantity_result(n, dim)

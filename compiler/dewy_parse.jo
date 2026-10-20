@@ -364,7 +364,7 @@ dw_type = (id: int) -> int:
         return n
     if dw_op(id) == .star or dw_op(id) == .slash or dw_op(id) == .caret:
         n = mk(.tquantity, pos)
-        nodes[n].op = i32(int(dw_op(id)))
+        nodes[n].op = i32(int(if dw_op(id) == .star: Tok.star else if dw_op(id) == .slash: Tok.slash else: Tok.caret))
         nodes[n].a = i32(dw_type(dw_child(id, 1)))
         nodes[n].b = i32(if dw_op(id) == .caret: dw_expr(dw_child(id, 2)) else: dw_type(dw_child(id, 2)))
         return n
