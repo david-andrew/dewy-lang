@@ -127,11 +127,13 @@ reports the active library directory, including `DEWY_CORE_LIB` overrides.
 
 ## Editor
 
-The [VS Code extension](../editors/vscode/README.md) uses the compiler for
-diagnostics, completions, hover and definitions on unsaved text, and for
-debugging with CodeLLDB. Set `dewy.core.path` to the absolute path of
-`tools/dewy` for checkout development, or to a standalone
-`bin/dewy-core`. **Dewy: Restart Core Language Server** picks up compiler edits.
+The [VS Code extension](../editors/vscode/README.md) runs `dewy-core lsp` (`compiler/lsp.jo`,
+`compiler/ide.jo`) for diagnostics, completion, hover, navigation, rename, signature help,
+semantic tokens, inlay hints, quick fixes, code lenses and formatting on unsaved text, and debugs
+with CodeLLDB. It uses `dewy.core.path`, else a bundled toolchain, else `~/.dewy/bin/dewy-core`,
+else `dewy-core` on the PATH. For checkout development set `dewy.core.path` to the absolute
+path of `tools/dewy`; **Dewy: Restart Language Server** picks up compiler edits.
+`dewy-core lsp --dump file.dewy` prints what one check reports to the server.
 
 ## Build a standalone toolchain
 
@@ -329,9 +331,18 @@ a minor bump needs David's approval.
 1. Bump the patch version in `editors/vscode/package.json`, commit, push.
 2. `git tag vscode-vX.Y.Z && git push origin vscode-vX.Y.Z`.
 
-`.github/workflows/extension.yml` packages `editors/vscode` and publishes it to the VS Code
-Marketplace and Open VSX with no stored tokens (GitHub OIDC exchanged for short-lived
-credentials). It runs in the GitHub environment `marketplace-publish`, which only admits
+`.github/workflows/extension.yml` bootstraps the compiler, cross-builds the other hosts,
+smoke-checks each toolchain on its own runner and packages one VSIX per platform with the
+toolchain bundled (linux-x64, linux-arm64, darwin-arm64, win32-x64), plus a universal VSIX
+without one. It publishes them to the VS Code Marketplace and Open VSX with no stored tokens
+(GitHub OIDC exchanged for short-lived credentials). Package locally with:
+
+```sh
+python3 -m tools.compiler.vsix --output /tmp/dewy.vsix
+python3 -m tools.compiler.package /tmp/dewy-core --output /tmp/dewy-core-linux-x86_64.tar.gz
+python3 -m tools.compiler.vsix --target linux-x64 --toolchain /tmp/dewy-core-linux-x86_64.tar.gz \
+    --output /tmp/dewy-linux-x64.vsix
+``` It runs in the GitHub environment `marketplace-publish`, which only admits
 `vscode-v*` tags and the main branches.
 
 One-time setup (mirrors Sloppy's):

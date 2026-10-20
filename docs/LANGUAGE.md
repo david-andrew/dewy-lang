@@ -55,15 +55,15 @@ The standalone compiler accepts the same `test` command. It compiles the selecte
 file once and runs its test blocks in declaration order. Optional words after the
 filename select test names containing any of those words. A failed test, no tests,
 or no matching names produces a nonzero exit status. Names must be constant strings.
-The VS Code extension also provides **Dewy: Test Current File (Core)** and a release
-variant, using `dewy.core.path`. These save open files and show results in a task
-terminal; the editor's task commands can stop or rerun them.
+The VS Code extension also provides **Dewy: Test Current File**, a release variant,
+and **Run test** code lenses above each test. These save open files and show results in a
+task terminal; the editor's task commands can stop or rerun them.
 
 `test --watch` reruns the selected tests when the source, an imported module or
 an embedded asset changes. It waits for another edit after failed tests or a
 compile error. Each run starts from fresh program state and uses the ordinary
 test build, including `--release` when requested. Enter `r` to rerun manually or
-`q` to quit. **Dewy: Watch Tests in Current File (Core)** starts this workflow in
+`q` to quit. **Dewy: Watch Tests in Current File** starts this workflow in
 a VS Code task; save edits to trigger a rerun and terminate the task to stop it.
 
 On native hosts, each test runs in a separate child process: assertions and
@@ -145,8 +145,10 @@ Closures keep their captured state when assets used by their bodies change.
 Dependency discovery cannot follow arbitrary calls through function values yet.
 
 The [VS Code extension](../editors/vscode/README.md) supports unsaved diagnostics,
-completions, hover, definitions and Format Document. Set `dewy.core.path` to a
-standalone compiler executable, or to the checkout's absolute `tools/dewy` path.
+completions, hover, navigation, rename, signature help, semantic highlighting, inlay hints,
+quick fixes and Format Document. It uses a bundled or installed compiler, or the one
+`dewy.core.path` names: a standalone compiler executable, or the checkout's absolute
+`tools/dewy` path.
 With the development launcher, restarting the language server picks up compiler
 source changes without changing the editor setting.
 For a rejected update to an ordinary loop binding, the editor can insert `@`
