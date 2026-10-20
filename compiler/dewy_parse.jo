@@ -16,7 +16,7 @@ enum DewyKind:
     quoted, rawquoted, eof, atom, ambiguous, binary, block, combined_assignment,
     flat, flow, interpolated_string, inverted_comparison, keyword, keyword_expr,
     operator, postfix, prefix, string, string_chunk, source_integer, source_real,
-    directive
+    directive, compact_expr
 
 dw_kind_name = (kind: DewyKind) -> str:
     match kind:
@@ -50,6 +50,7 @@ dw_kind_name = (kind: DewyKind) -> str:
         string: "String"
         string_chunk: "StringChunk"
         directive: "Directive"
+        compact_expr: "CompactExpression"
 
 struct DewySyntax:
     kind: DewyKind
@@ -670,6 +671,7 @@ dw_expr = (id: int) -> int:
     k = dewy_syntax[id].kind
     text = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
+    if k == .compact_expr: return dewy_syntax[id].child_left
     if k == .based_string: return dw_binary(id)
     if k == .directive: return dw_directive(id)
     if k == .metatag: return dw_metatag_fail(id)

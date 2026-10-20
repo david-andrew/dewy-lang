@@ -1,0 +1,226 @@
+# Incremental value-expression frontend. A transaction falls back to the full
+# grammar whenever a type, binding, range or other unmigrated form is reached.
+use 'util.jo'
+use 'ast.jo'
+use 'lex.jo'
+use 'dewy_tokens.jo'
+use 'dewy_parse.jo'
+use 'dewy_fast.jo'
+
+# DEWY_FRONTEND=old selects the reference path; compare checks every migrated
+# value against a fresh legacy parse and projection before retaining its nodes.
+# Unmigrated grammar remains on that reference path in all modes.
+dc_enabled = true
+dc_compare = false
+dc_depth = 0
+
+dc_binary_token = (op: DewyToken) -> Tok:
+    match op:
+        plus: .plus
+        minus: .minus
+        star, multiply_apply: .star
+        eq: .eq
+        lt: .lt
+        le: .le
+        gt: .gt
+        ge: .ge
+        shl: .shl
+        shr: .shr
+        kw_and: .amp
+        kw_or: .pipe
+        kw_xor: .caret
+        _: .eof
+
+dc_binary = (op: DewyToken, left: int, right: int, pos: int) -> int:
+    scalar = dn_token_uninvert(op)
+    if scalar != op:
+        inner = dc_binary(scalar, left, right, pos)
+        if inner == 0: return 0
+        n = mk(.not_, pos)
+        nodes[n].a = i32(inner)
+        return n
+    if op == .slash or op == .floor or op == .percent or op == .caret:
+        name = if op == .slash: "__dewy_divide" else if op == .caret: "__dewy_power" else if op == .floor: "__floor_div" else: "__floor_mod"
+        callee = mk(.ident, pos)
+        nodes[callee].name = i32(intern(name))
+        n = mk(.call, pos)
+        nodes[n].a = i32(callee)
+        set_list(n, [left, right])
+        return n
+    token = dc_binary_token(op)
+    if token == .eof: return 0
+    n = mk(if op == .kw_and: NK.and_ else if op == .kw_or: NK.or_ else: NK.binary, pos)
+    nodes[n].op = i32(int(token))
+    nodes[n].a = i32(left)
+    nodes[n].b = i32(right)
+    n
+
+dc_atom = () -> int:
+    token = dn_tokens[dn_at]
+    op = token.symbol
+    pos = mkpos(dn_file, token.start)
+    dn_at += 1
+    if op == .lparen:
+        n = dc_expr(0)
+        if n == 0 or not dn_accept(.rparen): return 0
+        return n
+    if op == .plus or op == .minus or op == .kw_not:
+        e = dc_expr(if op == .kw_not: 75 else: 125)
+        if e == 0: return 0
+        if op == .minus and nodes[e].kind == .int_lit and nodes[e].aux2 == 0:
+            if has_flag(e, NF_U64): return 0
+            nodes[e].ival = -nodes[e].ival
+            nodes[e].pos = pos
+            nodes[e].aux2 = 1
+            return e
+        if op == .minus and nodes[e].kind == .float_lit:
+            nodes[e].fval = -nodes[e].fval
+            nodes[e].pos = pos
+            return e
+        n = mk(if op == .kw_not: NK.not_ else: NK.unary, pos)
+        nodes[n].op = i32(int(if op == .minus: Tok.minus else: Tok.plus))
+        nodes[n].a = i32(e)
+        return n
+    if token.kind == .identifier and (op == .none or op == .kw_test):
+        text = name_of(int(token.name))
+        if text == "end" or text == "type": return 0
+        if text == "none": return mk(.none_lit, pos)
+        n = mk(.ident, pos)
+        nodes[n].name = if text == "printl": i32(intern("print")) else if text == "int": i32(intern("__dewy_int")) else: token.name
+        return n
+    if token.kind == .boolean:
+        n = mk(.bool_lit, pos)
+        nodes[n].ival = if int(token.name) == dn_true_id: 1 else: 0
+        return n
+    if token.kind == .source_integer:
+        text = dn_payload(token)
+        value: u64 = 0
+        loop c in text:
+            if c == '_': continue
+            digit = u64(c - '0')
+            if value > (u64(0x7FFFFFFFFFFFFFFF) - digit) / 10: return 0
+            value = value * 10 + digit
+        n = mk(.int_lit, pos)
+        nodes[n].ival = int(value)
+        add_flag(n, NF_LITERAL)
+        return n
+    if token.kind == .source_real:
+        value = to_float(replace(dn_payload(token), "_", ""))
+        if value == none or value! - value! != 0.0: return 0
+        n = mk(.float_lit, pos)
+        nodes[n].fval = value!
+        add_flag(n, NF_LITERAL)
+        return n
+    0
+
+dc_expr = (minimum: int) -> int:
+    dc_depth += 1
+    if dc_depth + dn_depth > 256: return 0
+    pos = mkpos(dn_file, dn_tokens[dn_at].start)
+    coefficient = dw_integer_kind(dn_tokens[dn_at].kind) or dn_tokens[dn_at].kind == .source_real
+    left = dc_atom()
+    if left == 0: return 0
+    loop true:
+        token = dn_tokens[dn_at]
+        op = token.symbol
+        if token.kind == .eof: break
+        if token.newline and dn_power(op) == 0 and op != .kw_not: break
+        if dn_angles > 0 and (op == .shr or op == .shr_assign or op == .angle_assign or (op == .gt and not token.space)): break
+        if not token.space and coefficient and minimum <= 135 and (token.kind == .identifier or op == .lparen):
+            right = dc_expr(136)
+            if right == 0: return 0
+            left = dc_binary(.multiply_apply, left, right, pos)
+            coefficient = false
+            continue
+        if op == .dot and minimum <= 170:
+            dn_at += 1
+            member = dn_tokens[dn_at]
+            if member.kind != .identifier: return 0
+            dn_at += 1
+            n = mk(.field, pos)
+            nodes[n].a = i32(left)
+            nodes[n].name = member.name
+            left = n
+            coefficient = false
+            continue
+        if not token.space and op == .lparen and minimum <= 170:
+            dn_at += 1
+            n = mk(.call, pos)
+            nodes[n].a = i32(left)
+            if nodes[left].kind == .field: add_flag(int(nodes[left].a), NF_MUT)
+            args: int[]
+            loop not dn_accept(.rparen):
+                if dn_tokens[dn_at].kind == .eof: return 0
+                arg = dc_expr(0)
+                if arg == 0: return 0
+                args.push(arg)
+            set_list(n, args)
+            left = n
+            coefficient = false
+            continue
+        if op == .kw_not and dn_at + 1 < dn_tokens.len():
+            inverted = dn_token_invert(dn_tokens[dn_at + 1].symbol)
+            if inverted != .none: op = inverted
+        if op == .comma and dn_comma_stop: break
+        power = dn_power(op)
+        if power == 0 or power < minimum: break
+        if (op == .plus or op == .minus) and token.space and not dn_tokens[dn_at + 1].space: break
+        if dc_binary_token(dn_token_uninvert(op)) == .eof and op != .slash and op != .floor and op != .percent and op != .caret: return 0
+        dn_at += 1
+        if token.symbol == .kw_not: dn_at += 1
+        right = dc_expr(if op == .caret: power else: power + 1)
+        if right == 0: return 0
+        left = dc_binary(op, left, right, pos)
+        coefficient = false
+    # These suffixes belong to this expression, but have not migrated yet.
+    token = dn_tokens[dn_at]
+    if not token.space and (token.symbol == .lbrack or token.symbol == .langle or token.kind == .quoted or token.kind == .rawquoted): return 0
+    if token.symbol == .question or token.symbol == .ellipsis or token.symbol == .kw_or_throw: return 0
+    dc_depth -= 1
+    left
+
+# Compare semantic child links, independent of allocation order. Every scalar
+# field in a compact node participates, including flags and source positions.
+dc_same = (a: int, b: int) -> bool:
+    if a == 0 or b == 0: return a == b
+    x = nodes[a]
+    y = nodes[b]
+    if x.kind != y.kind or x.op != y.op or x.flags != y.flags or x.pos != y.pos or x.name != y.name or x.sval != y.sval or x.ival != y.ival or f64_bits(x.fval) != f64_bits(y.fval) or x.type != y.type or x.sym != y.sym or x.aux != y.aux or x.aux2 != y.aux2 or x.mod != y.mod: return false
+    if not dc_same(int(x.a), int(y.a)) or not dc_same(int(x.b), int(y.b)) or not dc_same(int(x.c), int(y.c)) or not dc_same(int(x.d), int(y.d)): return false
+    if nkids(a) != nkids(b) or nkids2(a) != nkids2(b): return false
+    loop i in [0..nkids(a)):
+        if not dc_same(kid(a, i), kid(b, i)): return false
+    loop i in [0..nkids2(a)):
+        if not dc_same(kid2(a, i), kid2(b, i)): return false
+    true
+
+dn_value = (minimum: int) -> int:
+    if not dc_enabled: return dn_expr(minimum)
+    start = dn_at
+    node_start = nodes.len()
+    list_start = lists.len()
+    dc_depth = 0
+    value = dc_expr(minimum)
+    if value == 0:
+        dn_at = start
+        nodes.truncate(node_start)
+        lists.truncate(list_start)
+        return dn_expr(minimum)
+    if dc_compare:
+        stop = dn_at
+        node_stop = nodes.len()
+        list_stop = lists.len()
+        syntax_start = dewy_syntax.len()
+        dn_at = start
+        dc_enabled = false
+        old = dn_expr(minimum)
+        dc_enabled = true
+        assert(dn_at == stop)
+        projected = dw_expr(old)
+        if not dc_same(value, projected): fatal(mkpos(dn_file, dn_tokens[start].start), "direct expression AST differs")
+        nodes.truncate(node_stop)
+        lists.truncate(list_stop)
+        dewy_syntax.truncate(syntax_start)
+    id = dn_node(.compact_expr, "", dn_tokens[start].start)
+    dewy_syntax[id].child_left = value
+    id

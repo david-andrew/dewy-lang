@@ -1,10 +1,11 @@
-# In-process Dewy syntax frontend. It lexes and parses Dewy source, then uses
-# the compact AST projection in dewy_parse.jo. Unsupported syntax is an error.
+# In-process Dewy frontend. Value expressions construct compact AST nodes;
+# unmigrated grammar uses the syntax projection. Unsupported syntax is an error.
 use 'util.jo'
 use 'lex.jo'
 use 'ast.jo'
 use 'dewy_parse.jo'
 use 'dewy_tokens.jo'
+use 'dewy_direct.jo'
 
 struct DewyLexeme:
     kind: DewyKind
@@ -629,7 +630,7 @@ dn_flow = () -> int:
     loop true:
         keyword = dn_take()
         key = dn_node(.keyword, dn_token_text(keyword.symbol), keyword.start)
-        condition = dn_expr(0)
+        condition = if keyword.symbol == .kw_loop: dn_expr(0) else: dn_value(0)
         if not dn_can_start(): dn_error(dn_tokens[dn_at].start, "expected a body after '{dn_token_text(keyword.symbol)}'")
         body = dn_expr(0)
         arms.push(dn_node(.keyword_expr, "", keyword.start, [key, condition, body]))
@@ -778,7 +779,8 @@ dn_expr = (minimum: int) -> int:
             if dn_range_bound(): parts.push(dn_expr(power + 1))
             left = dn_op_node(.flat, .range_apply, pos_off(dewy_syntax[left].pos), parts)
             continue
-        right = dn_expr(if op == .function or op == .caret or op == .dot_caret or op == .coalesce: power else: power + 1)
+        value_rhs = dn_token_assignment(op) or (op == .assign and dw_name(left) != "")
+        right = if value_rhs: dn_value(power + 1) else: dn_expr(if op == .function or op == .caret or op == .dot_caret or op == .coalesce: power else: power + 1)
         if op == .comma:
             parts: int[]
             if dw_op(left) == .comma: parts = dw_children(left)
@@ -805,7 +807,7 @@ dn_stmt = () -> int:
         dn_at += 1
         parts = [dn_node(.keyword, word, token.start)]
         if symbol != .kw_break and symbol != .kw_continue:
-            if symbol != .kw_return or (dn_can_start() and not dn_tokens[dn_at].newline): parts.push(dn_expr(0))
+            if symbol != .kw_return or (dn_can_start() and not dn_tokens[dn_at].newline): parts.push(if symbol == .kw_return: dn_value(0) else: dn_expr(0))
         else if dn_tokens[dn_at].kind == .metatag and not dn_tokens[dn_at].newline:
             parts.push(dn_atom())
         if symbol == .kw_from:
@@ -820,6 +822,8 @@ dn_stmt = () -> int:
 
 dewy_fast_file = (file: int) -> int[]:
     dw_bigint_import = 0
+    dc_enabled = (env("DEWY_FRONTEND") ?? "") != "old"
+    dc_compare = (env("DEWY_FRONTEND") ?? "") == "compare"
     dn_file = file
     dn_tokens = dn_lex(file, 0, len(files[file].src))
     dn_at = 0
