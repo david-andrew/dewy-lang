@@ -635,7 +635,8 @@ def powershell(shell: str, *args, env, check=True):
 @pytest.mark.skipif(not (shutil.which('pwsh') or POWERSHELLS), reason='needs PowerShell')
 def test_powershell_rejects_unsupported_hosts(tmp_path):
     shell = POWERSHELLS[0] if POWERSHELLS else shutil.which('pwsh')
-    env = dict(os.environ, PROCESSOR_ARCHITECTURE='ARM64', PROCESSOR_ARCHITEW6432='')
+    env = dict(os.environ, PROCESSOR_ARCHITECTURE='ARM64')
+    env.pop('PROCESSOR_ARCHITEW6432', None)
     prefix = tmp_path / 'dewy home'
     result = powershell(shell, '-Prefix', str(prefix), '-NoModifyPath', env=env, check=False)
     assert result.returncode != 0
