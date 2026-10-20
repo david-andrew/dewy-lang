@@ -6,6 +6,7 @@
     python3 -m tools.core fmt example.dewy
     python3 -m tools.core --bootstrap test
     python3 -m tools.core path
+    python3 -m tools.core cases [-k expression] [--update]
     python3 -m tools.core speed [--base REV] [--checkpoint TAG] [--limit 1.0] [--release]
     python3 -m tools.core bench [-k WORDS]
 """
@@ -146,11 +147,74 @@ def toolchain(*, bootstrap: bool = False, cache: Path = CACHE, root: Path = ROOT
         return binary
 
 
+def gate_options(arguments: list[str]) -> tuple[str, int | None, bool, bool]:
+    """The -k expression, -n workers, --maxfail=0 and whether pytest paths were named."""
+    keyword, workers, every, paths = '', None, False, False
+    items = iter(arguments)
+    for arg in items:
+        value = None
+        if arg in ('-k', '-n', '--numprocesses', '--maxfail'):
+            value = next(items, '')
+        elif arg.startswith(('-k', '-n')) and not arg.startswith('--'):
+            arg, value = arg[:2], arg[2:]
+        elif arg.startswith(('--numprocesses=', '--maxfail=')):
+            arg, value = arg.split('=', 1)
+        elif arg in ('-m', '-p', '-o'):
+            next(items, '')
+        elif not arg.startswith('-'):
+            paths = True
+        if arg == '-k':
+            keyword = value
+        elif arg in ('-n', '--numprocesses') and value.isdigit():
+            workers = int(value)
+        elif arg == '--maxfail':
+            every = value == '0'
+    return keyword, workers, every, paths
+
+
+def test(binary: Path, arguments: list[str], quick: bool) -> int:
+    """Golden cases, then pytest."""
+    from tools import cases
+    keyword, workers, every, paths = gate_options(arguments)
+    if quick:
+        print('Running the quick smoke suite (native/web, default/release).', file=sys.stderr)
+    failed = False
+    selected = 0
+    if not paths:
+        # Same worker default as pytest below; -n 0 means serial.
+        count = workers if workers is not None else cases.default_workers()
+        try:
+            chosen = cases.discover(keyword=keyword, quick=quick)
+        except cases.CaseError as error:
+            print(f'cases: {error}', file=sys.stderr)
+            return 2
+        selected += len(chosen)
+        if chosen:
+            failed = cases.run(binary, chosen, workers=count or 1) != 0
+        if failed and not every:
+            return 1
+    python = ROOT / '.venv/bin/python'
+    if not python.exists():
+        python = Path(sys.executable)
+    env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
+    env.update(DEWY_CORE_COMPILER=str(binary), PYTEST_DISABLE_PLUGIN_AUTOLOAD='1')
+    if quick:
+        arguments = ['-m', 'core_quick', *arguments]
+    # A shared compiler/library error otherwise repeats the same failed
+    # build across the gate. A later --maxfail=0 requests every failure.
+    command = [str(python), '-m', 'pytest', '-q', '-o', 'addopts=', '--maxfail=1',
+               *test_runner_options(python, arguments), *TESTS, *arguments]
+    status = subprocess.call(command, cwd=ROOT, env=env)
+    if status == 5 and selected:
+        status = 0  # -k matched only golden cases
+    return 1 if failed else status
+
+
 def main(argv: list[str] | None = None) -> int:
     cli = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     cli.add_argument('--bootstrap', action='store_true', help='force an independent build from C')
-    cli.add_argument('command', choices=('path', 'test', 'build', 'check', 'run', 'watch', 'new', 'lsp', 'fmt', 'repl',
-                                        'speed', 'bench'))
+    cli.add_argument('command', choices=('path', 'test', 'cases', 'build', 'check', 'run', 'watch', 'new', 'lsp',
+                                        'fmt', 'repl', 'speed', 'bench'))
     cli.add_argument('arguments', nargs=argparse.REMAINDER,
                      help='arguments for pytest, speed, bench or the compiler; test --quick selects the smoke suite')
     args = cli.parse_args(argv)
@@ -160,7 +224,10 @@ def main(argv: list[str] | None = None) -> int:
     if quick:
         if any(arg.startswith('-m') for arg in args.arguments):
             cli.error('--quick selects its own test marker; use -k to narrow the smoke suite')
-        args.arguments = ['-m', 'core_quick', *(arg for arg in args.arguments if arg != '--quick')]
+        args.arguments = [arg for arg in args.arguments if arg != '--quick']
+    if args.command in ('cases',) and any(a.split('=')[0] == '--compiler' for a in args.arguments):
+        from importlib import import_module
+        return import_module(f'tools.{args.command}').main(args.arguments)
     try:
         binary = toolchain(bootstrap=args.bootstrap)
     except (OSError, RuntimeError) as error:
@@ -169,6 +236,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == 'path':
         print(binary)
         return 0
+    if args.command in ('cases',):
+        from importlib import import_module
+        return import_module(f'tools.{args.command}').main(args.arguments, binary)
     if args.command in ('speed', 'bench'):
         from importlib import import_module
         try:
@@ -178,18 +248,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     env = os.environ.copy()
     if args.command == 'test':
-        if quick:
-            print('Running the quick smoke suite (native/web, default/release).', file=sys.stderr)
-        python = ROOT / '.venv/bin/python'
-        if not python.exists():
-            python = Path(sys.executable)
-        env = {k: v for k, v in env.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
-        env.update(DEWY_CORE_COMPILER=str(binary), PYTEST_DISABLE_PLUGIN_AUTOLOAD='1')
-        # A shared compiler/library error otherwise repeats the same failed
-        # build across the gate. A later --maxfail=0 requests every failure.
-        command = [str(python), '-m', 'pytest', '-q', '-o', 'addopts=', '--maxfail=1',
-                   *test_runner_options(python, args.arguments), *TESTS, *args.arguments]
-        return subprocess.call(command, cwd=ROOT, env=env)
+        return test(binary, args.arguments, quick)
     # The compiler owns the terminal/LSP streams and receives signals directly;
     # there is no wrapper process to leave a watcher or language server orphaned.
     os.execve(binary, [str(binary), args.command, *args.arguments], env)
