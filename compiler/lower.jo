@@ -3296,7 +3296,11 @@ gen_intrinsic = (e: int) -> Val:
         if sliced:
             source_node = int(nodes[args[1]].a)
             bt = prune(ntype(source_node))
+            # The retained source is only read: the selected elements are the
+            # copy extend makes, so `$explicit_copies` asks for no `.copy` here.
+            if copies_on: copy_explicit[source_node] = true
             source = gen_owned(source_node)
+            if copies_on: copy_explicit.remove(source_node)
             borrow(source, bt)
             p = vreg(VI)
             e_mov(p, source.v)

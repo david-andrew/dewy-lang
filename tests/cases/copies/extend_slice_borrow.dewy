@@ -1,0 +1,22 @@
+# Under $explicit_copies, appending a slice of a still-live array only reads it.
+$explicit_copies
+Buf:type=[
+    pending:array<uint8>=[]
+    total:int64=0
+    add=(data:array<uint8>):>void=>{
+        let at=0
+        if pending.length >? 0 {
+            let take=min(4-pending.length data.length)
+            pending.extend(data[0..take))
+            at=take
+        }
+        if at <? data.length pending.extend(data[at..data.length))
+    }
+]
+main=():>int64=>{
+    let b=Buf()
+    b.add([1 2 3])
+    b.add([1 2 3])
+    printl(b.pending)
+    return 0
+}
