@@ -1,0 +1,17 @@
+# quick
+# A copy keeps the source's length and elements at the copy point; later
+# writes to either side change only that side.
+main=()=>{
+    let xs:array<int64>=[1 2 3]
+    let saved=xs.copy()
+    xs[0]=99
+    xs.clear()
+    $assert saved.length =? 3
+    $assert saved[0] =? 1
+    let again=saved.copy()
+    again.push(4)
+    saved[2]=7
+    $assert saved.length =? 3
+    $assert again.length =? 4
+    printl(saved[2] again[3] xs.length)
+}
