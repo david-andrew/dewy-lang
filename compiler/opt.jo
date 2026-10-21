@@ -566,6 +566,16 @@ o_simplify = (ins0: Ins, pos: int):
     ins = ins0
     o_rewrite(ins)
     op = ins.op
+    # Inlining and store forwarding can expose the address behind a closure
+    # invocation. A stable function address uses the ordinary direct-call ABI.
+    if op == .calli:
+        fp = int(ins.c)
+        at = int(o_regs[fp].defpos)
+        if stable(fp) and at >= 0 and ir.code[at].op == .faddr:
+            ins.op = .call
+            ins.imm = ir.code[at].imm
+            ins.c = 0
+            op = .call
     d = int(ins.dst)
     a = int(ins.a)
     bb = int(ins.b)

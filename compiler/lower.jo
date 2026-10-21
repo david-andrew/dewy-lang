@@ -1877,11 +1877,65 @@ env_layout = (f: int):
 closure_size = () -> int: 2 * ptr_size
 
 # A direct local closure may keep its environment in this activation when every
-# reference is a direct invocation. Copies, returns, argument passing, captures,
-# rebinding and address-taking retain the ordinary heap representation.
+# reference is a direct invocation, or an immutable environment is passed to
+# an invocation-only parameter. Copies, returns, captures, rebinding and
+# address-taking retain the ordinary heap representation.
 stack_closure_fn = -1
 stack_closure_locals: {int: bool} = {}
 stack_closure_targets: {int: int} = {}
+stack_closure_passed: {int: bool} = {}
+stack_closure_params: {int: bool} = {}
+
+# Fail closed: the parameter's private binding may only be invoked. In
+# particular, forwarding, aggregates, captures and return values are excluded.
+closure_invoked_only = (n: int, l: int, called: bool = false) -> bool:
+    if n == 0: return true
+    k = nodes[n].kind
+    if k == .lambda or k == .fn_: return true
+    if k == .ident: return called or nodes[n].aux != i32(int(SK.local)) or nodes[n].sym != i32(l)
+    a = int(nodes[n].a)
+    direct = k == .call and nodes[n].aux == 1
+    if not closure_invoked_only(a, l, direct): return false
+    if not closure_invoked_only(int(nodes[n].b), l): return false
+    if k != .for_:
+        if not closure_invoked_only(int(nodes[n].c), l): return false
+        if k != .partial and not closure_invoked_only(int(nodes[n].d), l): return false
+    loop i in [0..nkids(n)):
+        if not closure_invoked_only(kid(n, i), l): return false
+    loop i in [0..nkids2(n)):
+        if not closure_invoked_only(kid2(n, i), l): return false
+    true
+
+closure_borrow_param = (f: int, i: int) -> bool:
+    if f <= 0 or i >= fns[f].params.len() or fns[f].cabi: return false
+    d = int(fns[f].decl)
+    if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy or copy_consumes(f, i): return false
+    p = fns[f].params[i]
+    if stack_closure_params.has(p): return stack_closure_params[p]
+    stack_closure_params[p] = false
+    if int(locals[p].flags) & (LF_MUTPARAM | LF_CAPTURED | LF_ADDR | LF_EXPOSED) != 0: return false
+    body = int(fns[f].body)
+    loop j in [0..nkids(body)):
+        s = kid(body, j)
+        if nodes[s].kind != .vardecl or nodes[s].aux2 != 1: break
+        iv = int(nodes[s].b)
+        if iv == 0 or nodes[iv].kind != .ident or nodes[iv].aux != i32(int(SK.local)) or nodes[iv].sym != i32(p): continue
+        l = int(nodes[s].sym)
+        if int(locals[l].flags) & (LF_ASSIGNED | LF_CAPTURED | LF_ADDR | LF_EXPOSED | LF_SHARED) != 0: return false
+        ok = closure_invoked_only(body, l)
+        stack_closure_params[p] = ok
+        return ok
+    false
+
+# Match envcopy's retain-only case. A mutable or owner environment must still
+# use the heap: its copy helper may allocate and copy the environment header.
+closure_env_shareable = (f: int) -> bool:
+    if ownership_callable_cap(int(fns[f].fntype)) != 0: return false
+    loop cap in fns[f].caps:
+        inn = int(cap.inner)
+        flags = int(locals[inn].flags)
+        if flags & LF_VALUECAP != 0 and (flags & (LF_ASSIGNED | LF_EXPOSED) != 0 or is_shared(inn) or type_has_fn(int(locals[inn].type)) or ownership_type(int(locals[inn].type))): return false
+    true
 
 stack_closure_target = (l: int) -> int:
     if stack_closure_fn != cur_fn: return -1
@@ -1918,7 +1972,11 @@ stack_closure_uses = (n: int, called: bool = false):
     if k != .for_:
         stack_closure_uses(int(nodes[n].c))
         if k != .partial: stack_closure_uses(int(nodes[n].d))
-    loop i in [0..nkids(n)): stack_closure_uses(kid(n, i))
+    loop i in [0..nkids(n)):
+        arg = kid(n, i)
+        safe = k == .call and nodes[n].aux == 0 and nodes[arg].kind == .ident and nodes[arg].aux == i32(int(SK.local)) and stack_closure_locals.has(int(nodes[arg].sym)) and closure_borrow_param(int(nodes[n].sym), i)
+        if safe: stack_closure_passed[int(nodes[arg].sym)] = true
+        stack_closure_uses(arg, safe)
     loop i in [0..nkids2(n)): stack_closure_uses(kid2(n, i))
 
 stack_closure_local = (l: int) -> bool:
@@ -1926,6 +1984,8 @@ stack_closure_local = (l: int) -> bool:
         stack_closure_fn = cur_fn
         stack_closure_locals.clear()
         stack_closure_targets.clear()
+        stack_closure_passed.clear()
+        stack_closure_params.clear()
         skip = LF_CONST | LF_PARAM | LF_MUTPARAM | LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_SHARED
         loop candidate in fns[cur_fn].locals:
             if int(locals[candidate].flags) & skip != 0: continue
@@ -1953,7 +2013,8 @@ gen_lambda = (e: int, stack: bool = false) -> Val:
     hdr_store(env, 0, e_iconst(1))
     drop_kind = if stack: HK.stackenvdrop else: HK.envdrop
     hdr_store(env, 8, e_faddr(lf_helper(drop_kind, 0, f)))
-    # The stack proof excludes all value copies; only invocation may borrow it.
+    # Stack environments are never retained beyond the activation. Callback
+    # parameters may temporarily retain an immutable one while invoking it.
     resource = ownership_callable_cap(int(fns[f].fntype)) != 0
     if resource and not ownership_copyable(int(fns[f].fntype)):
         hdr_store(env, 16, e_iconst(0))
@@ -4905,6 +4966,8 @@ gen_vardecl = (s: int):
         # A := [x; E]: A's length is E for as long as A is not resized
         if nodes[iv].kind == .array and nodes[iv].b != 0 and fixed_array_local(l): array_len_expr[l] = int(nodes[iv].b)
         stack = nodes[iv].kind == .lambda and files[pos_file(nodes[s].pos)].is_dewy and stack_closure_local(l)
+        if stack and stack_closure_passed.has(l):
+            stack = not has_flag(iv, NF_GENERIC) and closure_env_shareable(int(nodes[iv].sym))
         if stack: stack_closure_targets[l] = if has_flag(iv, NF_GENERIC): poly_families[int(nodes[iv].aux)].envfn else: int(nodes[iv].sym)
         val = if stack: gen_lambda(iv, true) else: gen_owned(iv)
         write_place(pl, t, val.v)
