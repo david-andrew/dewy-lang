@@ -528,7 +528,12 @@ write = (@x:int64 value:int64):>void & mutates<x> => { x=value }
 quiet = (x:int64):>int64 & no_effects => x*2
 ```
 
-A positive row is a closed upper bound. Field permissions such as
+A positive row is a closed upper bound, and it is the contract callers see: a
+caller is checked against what the callee declares, not the narrower row its body
+would infer, so a `reads<y>` or `no mutates<Filesystem>` caller of a function
+declared `mutates<...>` on that place is rejected even if the body only reads.
+Negative-only rows bound nothing from above; their callers see the inferred row.
+Field permissions such as
 `mutates<pair.left>` cover that field and its descendants, not a sibling or
 replacement of the parent. Calls translate permissions by argument position and
 actual place, including through recursive helpers. Private scalar locals and

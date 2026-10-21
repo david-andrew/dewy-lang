@@ -1,0 +1,11 @@
+# quick
+Filesystem:type=[]
+touch=(@x:int64):>void & mutates<x> => {x=5}
+caller=(@y:int64):>void & mutates<y> => touch(@y)
+look=(@x:int64):>int64 & reads<x> => x
+reader=(@y:int64):>int64 & reads<y> & no mutates<Filesystem> => look(@y)
+main=()=>{
+    let v:int64=1
+    caller(@v)
+    printl(reader(@v))
+}

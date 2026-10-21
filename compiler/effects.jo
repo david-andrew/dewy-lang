@@ -60,6 +60,7 @@ struct EffectObligation:
     bound: int
 
 loan_owners: {int: bool} = {}
+effect_declared: {int: int} = {}   # fn -> its declared closed row, 0 when none (effect_declared_row)
 
 effect_obligations: EffectObligation[]
 effect_inference_busy = false
@@ -83,6 +84,7 @@ effect_bounds_proven: {int: bool} = {}
 effects_reset = ():
     effect_bound_sites = []
     effect_bounds_proven = {}
+    effect_declared = {}
     loan_owners = {}
     effects_active = false
     effect_obligations = []
@@ -1125,12 +1127,38 @@ effect_edge_event = (f: int, edge: EffectEdge, event0: EffectEvent) -> EffectEve
                 if event.atom.place.declaration == 0: event.atom = EffectAtom(.opaque)
     event
 
+# A declared closed row is the contract callers see, not the body's narrower inferred
+# row: a caller is checked against what the callee may do, as declared. Open (negative
+# only) rows and rows with variables still left open show the inferred events.
+
+effect_declared_row = (g: int) -> int:
+    if let known = effect_declared.get(g): return known
+    c = 0
+    d = int(fns[g].decl)
+    if d != 0 and nodes[d].sval != 0 and fns[g].kind != FK_LAMBDA and nodes[d].kind == .fn_:
+        k = effect_subst(int(decl_infos[decl_info(d)].sig.contract), fns[g].targs)
+        if k != 0 and not effect_contracts[k].open and effect_contracts[k].variables.len() == 0: c = k
+    effect_declared[g] = c
+    c
+
 effect_propagate = (f: int) -> bool:
     changed = false
     loop edge in effect_summaries[f].edges:
         g = edge.callee
         if g <= 0 or g >= effect_limit:
             if effect_add(f, EffectEvent(EffectAtom(.opaque), edge.origin)): changed = true
+            continue
+        declared = effect_declared_row(g)
+        if declared != 0:
+            d = int(fns[g].decl)
+            loop atom0 in effect_contracts[declared].atoms:
+                atom = atom0
+                if atom.place.root == .formal:
+                    base = place_base(atom.place)
+                    atom.place = place_append(PlaceIdentity(.formal, g, base.declaration), atom.place)
+                e = effect_edge_event(f, edge, EffectEvent(atom, d))
+                if (e.atom.kind == .read or e.atom.kind == .write) and e.atom.place.declaration != 0 and e.atom.place.root == .local: continue
+                if effect_add(f, e): changed = true
             continue
         # Snapshot: self-edges can append to this same arena row.
         events = effect_summaries[g].events
@@ -1189,6 +1217,7 @@ effect_name = (f: int) -> str:
 effect_place_name = (p: PlaceIdentity) -> str:
     if p.parent != 0: return "{effect_place_name(place_parents[p.parent])}.{name_of(p.selector)}"
     if p.root == .global: return name_of(int(globals[p.declaration].name))
+    if p.root == .resource and p.declaration > 0 and p.declaration < nodes.len() and nodes[p.declaration].name > 0: return name_of(int(nodes[p.declaration].name))
     if p.root == .formal and p.owner > 0:
         d = int(fns[p.owner].decl)
         if d != 0: return name_of(int(nodes[kid(d, p.declaration - 1)].name))

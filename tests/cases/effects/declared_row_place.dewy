@@ -1,0 +1,8 @@
+# The callee's body only reads, but it declares mutates<x>: callers see the declaration.
+touch=(@x:int64):>void & mutates<x> => {}
+caller=(@y:int64):>void & reads<y> => touch(@y)
+main=()=>{
+    let v:int64=1
+    caller(@v)
+    printl(v)
+}
