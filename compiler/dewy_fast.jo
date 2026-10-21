@@ -798,6 +798,7 @@ dn_atom = () -> int:
 dn_operator_habit = (text: str) -> str:
     previous = if dn_at >= 2: dn_tokens[dn_at - 2].symbol else: DewyToken.none
     adjacent = dn_at >= 2 and not dn_tokens[dn_at - 1].space
+    if text == "*" and previous == .star and adjacent: return " (`^` raises to a power: `x^2`)"
     if text == "!": return " (`not x` negates, and `x not=? y` asks whether two values differ)"
     if text == "&" and previous == .amp and adjacent: return " (`and` joins conditions: `a and b`)"
     if text == "|" and previous == .pipe and adjacent: return " (`or` joins conditions: `a or b`)"
