@@ -29,8 +29,7 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: inferred scope regions (Goose idea 1).
-- Astra was paused (quota). The Sol parallel review found 2 diagnostic-order bugs,
+- Astra: paused (quota). The Sol parallel review found 2 diagnostic-order bugs,
   both fixed (9109989b), with guards extended.
 - Opus: design coverage, round 3. The 10-21 audit: 613 features, 401 work, 47
   broken, 134 missing; rounds 1–2 fixed ~35 (widths, singleton unions, guards,
@@ -65,9 +64,9 @@ only.
   2.2k-line program −24%, and dunes lost determinism on fallback). Game's
   serial cost looks library-bound: question 22, or parallel library checking.
 - Ideas from Goose (~/dev/tmp/coord/goose-study.md), internal:
-  1. compiler-inferred scope regions: non-escaping data bump-allocated and freed
-     at scope exit; heap fallback (recursive_tree; first arena-runtime user);
-  2. lambda-lifting non-escaping callables (profile first: callbacks 4.6×/2.3×);
+  1. inferred scope regions: an upper-bound test (never free) gave at most 1.18×
+     (tree default); recursive_tree is 97.5% lookup. Rejected for now;
+  2. lambda-lifting: moot, since callback environments are already on the stack;
   3. destination passing for fresh results (`xs.push(f())`);
   4. bounds-check upgrades: call-site entry facts, a 2^48 length axiom,
      hoisting through `@` parameters.
