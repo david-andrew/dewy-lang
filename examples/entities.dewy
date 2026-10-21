@@ -19,7 +19,7 @@ main=():>void=>{
     enemies.remove(scout)
     let replacement=enemies.add(Enemy[name="replacement"])
     let before=enemies
-    loop events.len() >? 0 {
+    loop events.length >? 0 {
         let event=events.pop()
         if not enemies.has(event.target) continue
         enemies[event.target].health-=event.damage
