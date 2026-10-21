@@ -33,7 +33,7 @@ const VC_AGG = 3
 const LK_INST = 0
 const LK_HELPER = 1
 
-enum HK: drop, copy, move, arrrel, arruniq, arrcopy, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq, math_main
+enum HK: drop, copy, move, arrrel, arruniq, arrcopy, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq, math_main, owner_boxcopy
 
 struct LFunc:
     kind: int
@@ -355,7 +355,9 @@ copy_at = (addr: int, t0: int):
 # data arrays retain the normal COW path. This eager path is deliberately small:
 # it also works when a callback is invoked by a borrowed implementation-library API.
 copy_ref = (v: int, t: int) -> int:
-    if ownership_type(t): return e_call(lf_helper(.arrcopy, t, 0), [v], VI)
+    if ownership_type(t):
+        if tkind(t) == .array: return e_call(lf_helper(.arrcopy, t, 0), [v], VI)
+        if tkind(t) == .box: return e_call(lf_helper(.owner_boxcopy, t, 0), [v], VI)
     retain(v, t)
     k = types[prune(t)].kind
     if (k == .array or k == .box) and type_has_fn(t):
@@ -3795,6 +3797,7 @@ gen_conv = (e: int) -> Val:
         val = gen_owned(a)
         store_val(inner, d, 0, val.v)
         e_store(d, tsize(inner), e_iconst(1), 1)
+        if ownership_type(inner): owner_forget_slot(val.slot)
         return Val(d, true, s)
     fatal(nodes[e].pos, "invalid conversion")
     V(-1, false)
@@ -3940,8 +3943,16 @@ gen_expr_value = (e: int) -> Val:
                 val = gen_owned(source)
                 store_field(f, d, val.v)
                 if ownership_type(ntype(source)):
-                    owner_fields.push((val.slot, ntype(source)))
-                    building.push(BuildItem(true, val.slot, ntype(source)))
+                    held_type = ntype(source)
+                    if fields[f].boxed:
+                        # After boxing, the allocation and payload have one
+                        # cleanup authority even before the outer record exists.
+                        held_type = field_store_type(f)
+                        boxed = owner_value(V(e_load(VI, d, int(fields[f].offset), ptr_size), true), held_type)
+                        owner_forget_slot(val.slot)
+                        val = boxed
+                    owner_fields.push((val.slot, held_type))
+                    building.push(BuildItem(true, val.slot, held_type))
             if refine_active:
                 values: int[]
                 arg_types: int[]
@@ -6612,10 +6623,12 @@ helper_drop = (t: int, copy: bool):
                 owner_hook_into(hook, a, t, result)
                 e_copy(a, result, tsize(t))
                 return e_ret(-1)
+            if k == .struct_ and not ownership_inline(t):
+                return helper_owner_record_copy(a, t)
         else if k == .struct_:
             hook = int(structs[int(types[t].st)].drop_fn)
             if hook != 0: e_call(lf_of_inst(hook), [a], -1)
-    if k == .array:
+    if k == .array or k == .box:
         if copy: copy_at(a, t)
         else: release(e_load(VI, a, 0, ptr_size), t)
     else if k == .fn_ or k == .polyfn or k == .callable:
@@ -6634,7 +6647,7 @@ helper_drop = (t: int, copy: bool):
         inner = int(types[t].elem)
         iff(e_bin(.ne, VI, opt_has(a, inner), e_iconst(0)))
         if copy: copy_at(a, inner)
-        else: drop_at(a, inner)
+        else: drop_embedded(a, inner)
         endc()
     else if k == .enum_:
         si = int(types[t].st)
@@ -6813,7 +6826,7 @@ helper_boxrel = (t: int):
 helper_boxdrop = (t: int):
     ps = helper_params(1)
     p = ps[0]
-    drop_at(e_addi(p, BOX_HDR), int(types[t].elem))
+    drop_embedded(e_addi(p, BOX_HDR), int(types[t].elem))
     e_call(rt("__box_free"), [p, e_iconst(tsize(int(types[t].elem)))], -1)
     e_ret(-1)
 
@@ -6823,6 +6836,9 @@ helper_boxuniq = (t: int):
     ir.ret = VI
     p = ps[0]
     et = int(types[t].elem)
+    # Resource snapshots copy eagerly, so mutable access never detaches a
+    # shared resource box or invents a copy of a move-only payload.
+    if ownership_type(t): return e_ret(p)
     r = vreg(VI)
     e_mov(r, p)
     iff(e_bin(.ne, VI, p, e_iconst(0)))
@@ -7262,6 +7278,7 @@ lower_helper = (lf: int):
         boxdrop: helper_boxdrop(t)
         boxuniq: helper_boxuniq(t)
         math_main: math_main(h.inst)
+        owner_boxcopy: helper_owner_boxcopy(t)
 
 # native FFI: a thunk that resolves the C function on first use and calls it
 # macOS: the C functions dyld puts in their slots when the program starts: (slot's offset in the
@@ -7351,8 +7368,15 @@ helper_move = (t: int):
     ps = helper_params(2)
     dest = ps[0]
     source = ps[1]
-    if tkind(t) == .array:
+    if tkind(t) == .array or tkind(t) == .box:
         e_copy(dest, source, tsize(t))
+    else if tkind(t) == .opt:
+        inner = telem(t)
+        e_zero(dest, tsize(t))
+        iff(opt_has(source, inner))
+        e_call(lf_helper(.move, inner, 0), [dest, source], -1)
+        e_store(dest, tsize(inner), e_iconst(1), 1)
+        endc()
     else if tkind(t) == .fixed:
         et = telem(t)
         i = fixed_loop_begin(t)
@@ -7458,3 +7482,36 @@ helper_owner_arrcopy = (t: int):
     retain_elems(r, et)
     endc()
     e_ret(r)
+
+# Unlike inline hooks, recursive copies can allocate. Hold each completed
+# child independently until the complete result can be handed to the caller.
+helper_owner_record_copy = (source: int, t: int):
+    owner_begin()
+    dest = e_slot(new_temp(t))
+    held: int[]
+    loop field in field_list(t):
+        child = own(V(load_val(field.0, source, field.1), false), field.0)
+        store_val(field.0, dest, field.1, child.v)
+        if is_managed(field.0):
+            if not ownership_type(field.0): child = owner_value(child, field.0)
+            held.push(child.slot)
+    e_copy(source, dest, tsize(t))
+    loop slot in held: owner_forget_slot(slot)
+    owner_end()
+    e_ret(-1)
+
+helper_owner_boxcopy = (t: int):
+    owner_begin()
+    ps = helper_params(1)
+    ir.ret = VI
+    et = telem(t)
+    result = vreg(VI)
+    e_mov(result, e_iconst(0))
+    iff(e_bin(.ne, VI, ps[0], e_iconst(0)))
+    child = own(V(load_val(et, e_addi(ps[0], BOX_HDR), 0), false), et)
+    e_mov(result, e_call(rt("__box_new"), [e_iconst(tsize(et))], VI))
+    store_val(et, e_addi(result, BOX_HDR), 0, child.v)
+    owner_forget_slot(child.slot)
+    endc()
+    owner_end()
+    e_ret(result)

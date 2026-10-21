@@ -1,0 +1,36 @@
+# quick
+let drops:int64=0
+let moves:int64=0
+Leaf=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+    $__move__
+    transfer=():>Leaf=>{moves+=1 return Leaf[value+1]}
+]
+Pair:type=[left:Leaf right:Leaf]
+consume=(x:Leaf)=>{assert(x.value>?0)}
+paths=(take:bool)=>{
+    let p=Pair[Leaf[1] Leaf[2]]
+    if take {consume(p.left)}
+    consume(p.right)
+}
+main=()=>{
+    paths(true) paths(false)
+    assert(drops=?4 and moves=?3)
+    {let p=Pair[Leaf[1] Leaf[2]]
+     loop true {consume(p.left) break}}
+    assert(drops=?6)
+    loop i in [0..3) {
+        let p=Pair[Leaf[1] Leaf[2]]
+        consume(p.left)
+        if i=?1 {continue}
+        consume(p.right)
+    }
+    assert(drops=?12)
+    {let p=Pair[Leaf[1] Leaf[2]]
+     consume(p.left)
+     p=Pair[Leaf[3] Leaf[4]]
+     consume(p.left)}
+    assert(drops=?16)
+    printl"ok"
+}

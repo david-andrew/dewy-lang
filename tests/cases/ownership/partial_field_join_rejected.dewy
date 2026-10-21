@@ -1,0 +1,13 @@
+# quick
+Leaf=type of [value:int64
+    $__drop__
+    release=():>void=>{}
+]
+Pair:type=[left:Leaf right:Leaf]
+consume=(x:Leaf)=>{}
+check=(take:bool)=>{
+    let p=Pair[Leaf[1] Leaf[2]]
+    if take {consume(p.left)}
+    printl(p.left.value)
+}
+main=()=>{check(true)}

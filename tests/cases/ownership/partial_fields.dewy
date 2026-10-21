@@ -1,0 +1,28 @@
+# quick
+let drops:int64=0
+Leaf=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=value}
+]
+Pair:type=[left:Leaf right:Leaf]
+Nest:type=[pair:Pair tail:Leaf]
+consume=(x:Leaf)=>{assert(x.value>?0)}
+branch=(take:bool)=>{
+    let p=Pair[Leaf[1] Leaf[10]]
+    if take {consume(p.left)} else {consume(p.right)}
+}
+early=(take:bool)=>{
+    let p=Pair[Leaf[1] Leaf[10]]
+    if take {consume(p.left) return}
+    consume(p.right)
+}
+main=()=>{
+    {let p=Pair[Leaf[1] Leaf[10]] consume(p.left) consume(p.right)}
+    assert(drops=?11)
+    branch(true) branch(false) early(true) early(false)
+    assert(drops=?55)
+    {let p=Nest[Pair[Leaf[1] Leaf[10]] Leaf[100]]
+     consume(p.pair.left) consume(p.tail) consume(p.pair.right)}
+    assert(drops=?166)
+    printl"ok"
+}

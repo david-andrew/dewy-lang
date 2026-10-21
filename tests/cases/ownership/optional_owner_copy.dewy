@@ -1,0 +1,16 @@
+# quick
+let drops:int64=0
+let copies:int64=0
+Leaf=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+    $__copy__
+    duplicate=():>Leaf=>{copies+=1 return Leaf[value]}
+]
+main=()=>{
+    {let value:Leaf?=Leaf[0] let copy=value.copy()}
+    assert(drops=?2 and copies=?1)
+    {let value:Leaf?=none let copy=value.copy()}
+    assert(drops=?2 and copies=?1)
+    printl"ok"
+}

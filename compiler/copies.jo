@@ -21,6 +21,7 @@ copy_bindings: {int: bool} # synthetic local initialized by ownership transfer
 copy_loop_after: {int: bool}[]
 copy_loop_back: {int: bool}[]
 copy_proof_budget = -1
+copy_fields: (int, str)[] # local and field path; negative liveness keys
 copy_noenv: {int: bool}
 
 copies_reset = ():
@@ -172,6 +173,45 @@ copy_mentions = (n: int, live: mut {int: bool}):
         live[int(nodes[n].sym)] = true
     loop c in copy_children(n): copy_mentions(c, live)
 
+# Field paths are per-function and only demanded for resource records.
+copy_field = (n0: int) -> int:
+    n = n0
+    path = ""
+    loop nodes[n].kind == .field:
+        a = int(nodes[n].a)
+        t = ntype(a)
+        if nodes[n].aux < 0 or tkind(t) != .struct_ or ownership_nominal(t) or is_map_type(t): return 0
+        if n != n0 and boxed_field_of(n) >= 0: return 0
+        path = "{int(nodes[n].aux)}/" + path
+        n = a
+    if n == n0 or nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.local)) or not ownership_type(ntype(n)): return 0
+    l = int(nodes[n].sym)
+    loop i in [0..copy_fields.len()):
+        p = copy_fields[i]
+        if p.0 == l and p.1 == path: return -1 - i
+    copy_fields.push((l, path))
+    -copy_fields.len()
+
+copy_field_live = (key: int, live: {int: bool}) -> bool:
+    p = copy_fields[-1 - key]
+    if live.has(p.0): return true
+    loop k, used in live:
+        if k >= 0: continue
+        q = copy_fields[-1 - k]
+        if p.0 == q.0 and (starts_with(p.1, q.1) or starts_with(q.1, p.1)): return true
+    false
+
+copy_local_live = (l: int, live: {int: bool}) -> bool:
+    if live.has(l): return true
+    loop k, used in live:
+        if k < 0 and copy_fields[-1 - k].0 == l: return true
+    false
+
+copy_kill_local = (l: int, live: mut {int: bool}):
+    live.remove(l)
+    loop i in [0..copy_fields.len()):
+        if copy_fields[i].0 == l: live.remove(-1 - i)
+
 copy_live = (n: int, live: mut {int: bool}):
     if n == 0: return
     if copy_proof_budget == 0: return
@@ -184,11 +224,20 @@ copy_live = (n: int, live: mut {int: bool}):
         loop l, used in edge: live[l] = used
         return
     if k == .return_: live.clear()
+    if k == .field:
+        key = copy_field(n)
+        if key < 0:
+            l = copy_fields[-1 - key].0
+            skip = LF_PARAM | LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE | LF_CAPTURED | LF_EXPOSED
+            if copy_inputs.has(l): skip &= ~LF_PARAM
+            if boxed_field_of(n) < 0 and not copy_field_live(key, live) and not copy_blocked.has(l) and int(locals[l].flags) & skip == 0: copy_moves[n] = true
+            live[key] = true
+            return
     if k == .ident and nodes[n].aux == i32(int(SK.local)):
         l = int(nodes[n].sym)
         skip = LF_PARAM | LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE | LF_CAPTURED | LF_EXPOSED
         if copy_inputs.has(l): skip &= ~LF_PARAM
-        if not live.has(l) and not copy_blocked.has(l) and int(locals[l].flags) & skip == 0:
+        if not copy_local_live(l, live) and not copy_blocked.has(l) and int(locals[l].flags) & skip == 0:
             copy_moves[n] = true
         live[l] = true
         return
@@ -197,19 +246,19 @@ copy_live = (n: int, live: mut {int: bool}):
         if nodes[target].kind == .ident and nodes[target].aux == i32(int(SK.local)):
             # Replacement kills the old value; evaluate its RHS against the
             # incoming state so self-assignment still captures before dropping.
-            live.remove(int(nodes[target].sym))
+            copy_kill_local(int(nodes[target].sym), live)
             copy_live(int(nodes[n].b), live)
             return
     if k == .vardecl:
-        live.remove(int(nodes[n].sym))
+        copy_kill_local(int(nodes[n].sym), live)
         copy_live(int(nodes[n].b), live)
         return
     if (k == .while_ or k == .for_) and ownership_decls.len() != 0:
         copy_loop_after.push(live)
         copy_mentions(n, live)
-        copy_loop_back.push(live)
         inner = live
         copy_loop_locals(n, inner)
+        copy_loop_back.push(inner)
         cs = copy_children(n)
         i = cs.len() - 1
         loop i >= 0:
@@ -255,6 +304,7 @@ copy_live = (n: int, live: mut {int: bool}):
 
 copies_prepare = (f: int):
     copy_moves.clear()
+    copy_fields = []
     copy_blocked.clear()
     copy_noenv.clear()
     copy_loop_after = []
@@ -291,7 +341,7 @@ copy_deferred = (n: int):
 copy_take = (e: int, value: Val, t: int) -> Val:
     p = gen_place(e, false)
     if vc(t) == VC_AGG:
-        if ownership_type(t): owner_forget_slot(int(locals[int(nodes[e].sym)].offset))
+        if ownership_type(t): copy_forget(e, t)
         s = new_temp(t)
         a = e_slot(s)
         # Implementation-library forwarding adopts an already initialized API
@@ -307,11 +357,21 @@ copy_take = (e: int, value: Val, t: int) -> Val:
     e_mov(v, value.v)
     write_place(p, t, zero_val(t))
     if ownership_type(t):
-        owner_forget_slot(int(locals[int(nodes[e].sym)].offset))
+        copy_forget(e, t)
         return owner_value(V(v, true), t)
     Val(v, true, -1)
 
+copy_forget = (e: int, t: int):
+    if nodes[e].kind == .ident:
+        owner_forget_slot(int(locals[int(nodes[e].sym)].offset))
+    else:
+        key = copy_field(e)
+        if key >= 0: ice("missing owner field path")
+        p = copy_fields[-1 - key]
+        owner_forget_field(int(locals[p.0].offset), p.1)
+
 copy_movable = (e: int) -> bool:
+    if nodes[e].kind == .field and copy_moves.has(e): return true
     n = e
     loop nodes[n].kind == .field:
         if boxed_field_of(n) >= 0: return false
@@ -322,7 +382,7 @@ copy_movable = (e: int) -> bool:
 copy_own = (e: int, value: Val, t: int) -> Val:
     if ownership_type(t):
         if value.owned: return value
-        if nodes[e].kind == .ident and copy_movable(e): return copy_take(e, value, t)
+        if (nodes[e].kind == .ident or (nodes[e].kind == .field and copy_moves.has(e))) and copy_movable(e): return copy_take(e, value, t)
         if owner_adoptions.has(e): fatal(nodes[e].pos, "a hook result requires fresh construction or a proven last-use local")
         if ownership_copyable(t): return own(value, t)
         if copy_proof_budget == 0: fatal(nodes[e].pos, "move proof budget exhausted; cannot copy a move-only owner")
@@ -388,5 +448,5 @@ copy_shared_global = (s: int, g: int) -> bool:
 # Locals freshly constructed within a loop do not cross its backedge.
 copy_loop_locals = (n: int, live: mut {int: bool}):
     if n == 0: return
-    if nodes[n].kind == .vardecl: live.remove(int(nodes[n].sym))
+    if nodes[n].kind == .vardecl: copy_kill_local(int(nodes[n].sym), live)
     loop c in copy_children(n): copy_loop_locals(c, live)

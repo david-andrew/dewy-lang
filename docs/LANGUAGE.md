@@ -874,6 +874,17 @@ Inline records may contain other owning records. Cleanup runs the outer hook
 first, then fields in reverse order. During construction, only completed fields
 are cleaned up on failure; the incomplete outer hook does not run. Structural
 copyability includes every field; synthesized moves recursively transfer fields.
+An unboxed field of a structural owner can transfer at its own proven last use.
+Sibling fields remain usable and are cleaned up on the path that retains them,
+including panic and early exits. A later read of the moved field or the whole
+record prevents a move-only transfer. Fields beneath an outer lifecycle hook
+cannot transfer independently, because the hook may read them.
+
+Optional owner fields use their presence tag: `none` drops nothing, and a
+present value transfers or copies through its payload's lifecycle. Recursive
+records use owning boxes with exactly-once cleanup. Copyable recursive records
+copy their boxes eagerly; completed children remain protected if a later box
+allocation fails. Move-only payloads make their recursive container move-only.
 
 Fixed arrays of owners copy eagerly through element hooks and transfer elements
 through move hooks. Cleanup runs in reverse element order, including only the

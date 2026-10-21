@@ -1,0 +1,15 @@
+# quick
+let drops:int64=0
+Empty=type of [
+    $__drop__
+    release=():>void=>{drops+=1}
+]
+Pair:type=[left:Empty right:Empty]
+consume=(x:Empty)=>{}
+main=()=>{
+    {let p=Pair[Empty[] Empty[]] consume(p.left)}
+    assert(drops=?2)
+    {let p=Pair[Empty[] Empty[]] consume(p.left) consume(p.right)}
+    assert(drops=?4)
+    printl"ok"
+}

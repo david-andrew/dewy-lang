@@ -1,0 +1,8 @@
+# quick
+Leaf=type of [value:int64
+    $__drop__
+    release=():>void=>{}
+]
+Pair:type=[left:Leaf right:Leaf]
+consume=(x:Leaf)=>{}
+main=()=>{let p=Pair[Leaf[1] Leaf[2]] loop i in [0..2) {consume(p.left)}}

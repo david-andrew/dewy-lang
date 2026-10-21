@@ -1,0 +1,20 @@
+# quick
+let drops:int64=0
+let copies:int64=0
+Leaf=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+    $__copy__
+    duplicate=():>Leaf=>{copies+=1 return Leaf[value]}
+]
+Node:type=[next:Node?=none owner:Leaf]
+main=()=>{
+    {let first=Node[none Leaf[1]]
+     let second=Node[first Leaf[2]]
+     let third=Node[second Leaf[3]]
+     let snapshot=third.copy()
+     if snapshot.next is? Node {snapshot.next.owner.value=9}
+     if third.next is? Node {assert(third.next.owner.value=?2)}}
+    assert(drops=?6 and copies=?3)
+    printl"ok"
+}

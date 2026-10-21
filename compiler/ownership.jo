@@ -44,8 +44,8 @@ ownership_finalize = ():
         layout(t)
         si = int(types[t].st)
         loop i in [0..int(structs[si].nfields)):
-            ft = int(fields[int(structs[si].fields) + i].type)
-            if not ownership_inline(ft): fatal(nodes[hook].pos, "resource fields currently require an inline record layout")
+            ft = field_store_type(int(structs[si].fields) + i)
+            if not ownership_layout(ft): fatal(nodes[hook].pos, "resource fields currently require an inline record layout")
         if role != 1 and prune(int(fns[f].ret)) != t: fatal(nodes[hook].pos, "copy and move hooks must return the same nominal type")
         if role == 1: structs[si].drop_fn = i32(f)
         else if role == 2: ownership_copies[t] = f
@@ -93,7 +93,7 @@ ownership_nominal = (t0: int) -> bool:
 ownership_type = (t0: int) -> bool:
     if ownership_decls.len() == 0: return false
     t = prune(t0)
-    (types[t].kind == .struct_ or types[t].kind == .fixed or types[t].kind == .array) and ownership_contains(t)
+    (types[t].kind == .struct_ or types[t].kind == .fixed or types[t].kind == .array or types[t].kind == .opt or types[t].kind == .box) and ownership_contains(t)
 
 # The call plan records incoming owners separately from borrowed place inputs.
 # Synthetic Dewy parameter bindings adopt the incoming value without copying.
@@ -143,10 +143,12 @@ use 'ir.jo'
 owner_records: {int: int}
 owner_adoptions: {int: bool}
 owner_values: {int: int}
+owner_parts: {int: (str, int)[]} # root slot -> (field path, record)
 owner_init = -1
 
 owner_begin = ():
     owner_records.clear()
+    owner_parts.clear()
     owner_adoptions.clear()
     owner_values.clear()
     owner_init = -1
@@ -165,11 +167,43 @@ owner_record = (slot: int) -> int:
     owner_records[slot] = record
     record
 
+# Structural records have independent cleanup authorities for their resource
+# leaves. This preserves reverse field order and permits path-dependent moves
+# without treating zero bytes as an initialization marker.
+owner_register_part = (slot: int, t: int, offset: int, path: str):
+    if ownership_type(t) and tkind(t) == .struct_ and not ownership_nominal(t) and not is_map_type(t):
+        fs = field_list(t)
+        loop i in [0..fs.len()):
+            field = fs[i]
+            if is_managed(field.0): owner_register_part(slot, field.0, offset + field.1, path + "{i}/")
+        return
+    parts = owner_parts.get(slot) ?? []
+    record = -1
+    loop part in parts:
+        if part.0 == path: record = part.1
+    if record < 0:
+        record = owner_record(new_slot(1, 1))
+        parts.push((path, record))
+        owner_parts[slot] = parts
+    e_call(rt("__owner_link"), [e_slot(record), e_addi(e_slot(slot), offset), e_faddr(lf_helper(.drop, t, 0))], -1)
+
 owner_register = (slot: int, t: int):
+    if ownership_type(t) and tkind(t) == .struct_ and not ownership_nominal(t) and not is_map_type(t):
+        owner_register_part(slot, t, 0, "")
+        return
     record = owner_record(slot)
     e_call(rt("__owner_link"), [e_slot(record), e_slot(slot), e_faddr(lf_helper(.drop, t, 0))], -1)
 
+owner_forget_field = (slot: int, path: str):
+    if let parts = owner_parts.get(slot):
+        loop part in parts:
+            if starts_with(part.0, path):
+                e_call(rt("__owner_unlink"), [e_slot(part.1)], -1)
+
 owner_forget_slot = (slot: int):
+    if let parts = owner_parts.get(slot):
+        loop part in parts: e_call(rt("__owner_unlink"), [e_slot(part.1)], -1)
+        return
     record = owner_record(slot)
     e_call(rt("__owner_unlink"), [e_slot(record)], -1)
 
@@ -215,7 +249,12 @@ owner_element_drop = (addr: int, et: int):
     else: drop_embedded(addr, et)
 
 owner_drop = (addr: int):
-    record = owner_record(owner_address_slot(addr))
+    slot = owner_address_slot(addr)
+    if let parts = owner_parts.get(slot):
+        loop i in [0..parts.len()):
+            e_call(rt("__owner_drop"), [e_slot(parts[parts.len() - 1 - i].1)], -1)
+        return
+    record = owner_record(slot)
     e_call(rt("__owner_drop"), [e_slot(record)], -1)
 
 ownership_contained: {int: bool}
@@ -274,9 +313,9 @@ ownership_validate_node = (n: int, f: int):
     if k == .call and nodes[n].aux == 2 and ownership_type(t):
         si = int(types[prune(t)].st)
         loop i in [0..int(structs[si].nfields)):
-            if ownership_type(int(fields[int(structs[si].fields) + i].type)) and (i >= nkids(n) or kid(n, i) == 0):
+            if ownership_type(int(fields[int(structs[si].fields) + i].type)) and tkind(int(fields[int(structs[si].fields) + i].type)) != .opt and (i >= nkids(n) or kid(n, i) == 0):
                 fatal(nodes[n].pos, "an owning field requires completed construction")
-    if k == .vardecl and not has_flag(n, NF_GLOBAL) and nkids(n) == 0 and nodes[n].sym > 0 and ownership_type(int(locals[int(nodes[n].sym)].type)) and nodes[n].b == 0 and tkind(int(locals[int(nodes[n].sym)].type)) != .array and not is_map_type(int(locals[int(nodes[n].sym)].type)):
+    if k == .vardecl and not has_flag(n, NF_GLOBAL) and nkids(n) == 0 and nodes[n].sym > 0 and ownership_type(int(locals[int(nodes[n].sym)].type)) and nodes[n].b == 0 and tkind(int(locals[int(nodes[n].sym)].type)) != .array and tkind(int(locals[int(nodes[n].sym)].type)) != .opt and not is_map_type(int(locals[int(nodes[n].sym)].type)):
         fatal(nodes[n].pos, "an owner requires completed construction before registration")
     if k == .assign and ownership_type(ntype(int(nodes[n].a))):
         target = int(nodes[n].a)
@@ -357,7 +396,7 @@ ownership_inherit = (child: int):
     layout(child)
     si = int(types[child].st)
     loop field in field_list(child):
-        if not ownership_inline(field.0):
+        if not ownership_layout(field.0):
             fatal(nodes[int(structs[si].decl)].pos, "resource fields currently require an inline record layout")
     if structs[si].drop_fn == 0: structs[si].drop_fn = structs[int(types[parent].st)].drop_fn
     if not ownership_copies.has(child):
@@ -386,9 +425,12 @@ owner_hook_into = (f: int, source: int, t: int, dest: int):
 ownership_declared = (decl: int) -> bool:
     ownership_decls.has(decl * 4 + 1) or ownership_decls.has(decl * 4 + 2) or ownership_decls.has(decl * 4 + 3)
 
-ownership_copyable = (t0: int) -> bool:
+ownership_copyable = (t0: int, seen: int[] = []) -> bool:
     t = prune(t0)
-    if tkind(t) == .fixed or tkind(t) == .array: return ownership_copyable(telem(t))
+    if seen.contains(t): return true
+    let seen = seen
+    seen.push(t)
+    if tkind(t) == .fixed or tkind(t) == .array or tkind(t) == .opt or tkind(t) == .box: return ownership_copyable(telem(t), seen)
     if not ownership_type(t): return true
     first = 0
     if let hook = ownership_copies.get(t):
@@ -397,14 +439,14 @@ ownership_copyable = (t0: int) -> bool:
     else if structs[int(types[t].st)].drop_fn != 0: return false
     fs = field_list(t)
     loop i in [first..fs.len()):
-        if ownership_type(fs[i].0) and not ownership_copyable(fs[i].0): return false
+        if ownership_type(fs[i].0) and not ownership_copyable(fs[i].0, seen): return false
     true
 
 ownership_inline = (t0: int, depth: int = 0) -> bool:
     t = prune(t0)
     if effect_scalar(t) or tkind(t) == .float_: return true
     if depth > 32: return false
-    if tkind(t) == .fixed: return ownership_inline(telem(t), depth + 1)
+    if tkind(t) == .fixed or tkind(t) == .opt: return ownership_inline(telem(t), depth + 1)
     if tkind(t) != .struct_: return false
     layout(t)
     si = int(types[t].st)
@@ -418,7 +460,7 @@ ownership_inline = (t0: int, depth: int = 0) -> bool:
 ownership_fact_type = (t0: int, depth: int = 0) -> bool:
     t = representation_type(t0)
     if depth > 32: return true
-    if tkind(t) == .fixed or tkind(t) == .array: return ownership_fact_type(telem(t), depth + 1)
+    if tkind(t) == .fixed or tkind(t) == .array or tkind(t) == .opt or tkind(t) == .box: return ownership_fact_type(telem(t), depth + 1)
     if tkind(t) != .struct_: return false
     si = int(types[t].st)
     if ownership_declared(int(structs[si].decl)): return true
@@ -444,17 +486,22 @@ owner_adopt_result = (n: int):
 
 # Containers remain finite layouts, but copying them can allocate. Keep this
 # separate from the no-allocation inline predicate used by effect summaries.
-ownership_layout = (t0: int, depth: int = 0) -> bool:
-    if depth > 32: return false
+ownership_layout = (t0: int, depth: int = 0, seen: int[] = []) -> bool:
     t = prune(t0)
+    if seen.contains(t): return true
+    if depth > 32: return false
+    let seen = seen
+    seen.push(t)
     k = tkind(t)
+    if k == .opt or k == .box: return ownership_layout(telem(t), depth + 1, seen)
     if k == .array:
         if ownership_type(telem(t)): return ownership_inline(telem(t))
-        return ownership_layout(telem(t), depth + 1)
+        return ownership_layout(telem(t), depth + 1, seen)
     if k == .fixed: return ownership_inline(telem(t), depth + 1)
     if k == .str_ or effect_scalar(t) or k == .float_: return true
     if k != .struct_: return false
-    if not is_map_type(t): return ownership_inline(t, depth)
     loop field in field_list(t):
-        if not ownership_layout(field.0, depth + 1): return false
+        fk = tkind(field.0)
+        if not is_map_type(t) and (fk == .array or fk == .str_): return false
+        if not ownership_layout(field.0, depth + 1, seen): return false
     true

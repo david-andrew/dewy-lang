@@ -1,0 +1,19 @@
+# quick
+let drops:int64=0
+Leaf=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+]
+Pair:type=[left:Leaf? right:Leaf?]
+consume=(x:Leaf?)=>{}
+main=()=>{
+    {let empty:Leaf?=none}
+    assert(drops=?0)
+    {let some:Leaf?=Leaf[1] let other=some consume(other)}
+    assert(drops=?1)
+    {let p=Pair[Leaf[2] none] consume(p.left)}
+    assert(drops=?2)
+    {let p=Pair[none Leaf[3]]}
+    assert(drops=?3)
+    printl"ok"
+}
