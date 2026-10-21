@@ -1,0 +1,15 @@
+from p"../harness.jo" import clock, size_argument
+fib=(n:int64):>int64=>{if n <? 2 return n return fib(n-1)+fib(n-2)}
+fork_fib=(n:int64):>int64=>{
+    if n <? 2 return n
+    let children=parallel_range(2 (i:int64)=>fork_fib(n-1-i))
+    return children[0]+children[1]
+}
+main=(args:array<string>)=>{
+    let n=size_argument(args 32)
+    let serial=args.length >? 2
+    let start=clock()
+    let result:int64=if serial fib(n) else fork_fib(n)
+    printl"{result} {clock()-start}"
+    return 0
+}

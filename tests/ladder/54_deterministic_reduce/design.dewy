@@ -48,10 +48,10 @@ main=():>int64=> {
     let input:array<int64>=[loop i in [0..4097) (i*37)%101]
     let serial=leaf_summary(input)
     loop chunk in [1 7 64 511 4097]  {
-        let parallel=reduce_tree(input chunk)
-        $runtime_assert (parallel.sum =? serial.sum)
-        $runtime_assert (parallel.hash =? serial.hash)
-        $runtime_assert (parallel.count =? 4097)
+        let threaded=reduce_tree(input chunk)
+        $runtime_assert (threaded.sum =? serial.sum)
+        $runtime_assert (threaded.hash =? serial.hash)
+        $runtime_assert (threaded.count =? 4097)
     }
     let empty=reduce_tree([] 7)
     $runtime_assert (empty.count =? 0)

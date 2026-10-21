@@ -16,6 +16,7 @@ const __C_ACK = 3          # workers finished with the current job (futex word f
 const __C_CHUNKS = 4       # chunks in the current job
 __pool_ctl: *int = null
 __pool_workers = 0
+__pool_started = false
 __job_idle_c: (int, int) -> void = __job_idle      # (made once: converting a function to a closure allocates)
 __job: (int, int) -> void = __job_idle_c
 __job_total = 0
@@ -141,6 +142,7 @@ __worker_main = (id: int):
         __futex_wake(c + __C_ACK)
 
 __pool_start = ():
+    __pool_started = true
     when TARGET != "wasm":
         n = cpu_count() - 1
         if let t = env("SLOPPY_THREADS"): n = (to_int(t) ?? (n + 1)) - 1      # SLOPPY_THREADS caps the threads used
@@ -205,7 +207,7 @@ __parallel_run_job = (total: int, f: (int, int) -> void):
     when TARGET == "wasm":
         f(0, total)
     else:
-        if __pool_ctl == null and __tstack_base == null: __pool_start()
+        if not __pool_started: __pool_start()
         if __pool_workers == 0 or total == 1 or __mt_active or __par_serial:
             f(0, total)                       # no workers (or nested): run here
             return
@@ -284,6 +286,36 @@ parallel_range[U] = (n: int, f: (int) -> U) -> U[]:
         loop i in [lo..hi): op[i] = f(i)
     )
     out
+
+# Compiler lowering for `parallel`: arrays and bounded ranges are indexed
+# partitions. Collection slots are written once and gathered in source order.
+@parallel
+__dewy_parallel_collect[T, U] = (xs: T[], f: (T) -> U) -> U[]:
+    parallel_map(xs, f)
+
+__parallel_range_count = (r: IntRange) -> int:
+    if r._empty: return 0
+    if r._count == 0 or r._count > u64(9223372036854775807): panic("parallel range is too large")
+    int(r._count)
+
+@parallel
+__dewy_parallel_collect[U] = (r: IntRange, f: (int) -> U) -> U[]:
+    delta = if r._up: r._stride else: u64(0) - r._stride
+    parallel_range(__parallel_range_count(r), (i: int): f(int(u64(r._first) + u64(i) * delta)))
+
+@parallel
+__dewy_parallel_each[T] = (xs: T[], f: (T) -> void):
+    p = data(xs)
+    __parallel_run(xs.len(), (lo: int, hi: int):
+        loop i in [lo..hi): f(p[i])
+    )
+
+@parallel
+__dewy_parallel_each = (r: IntRange, f: (int) -> void):
+    delta = if r._up: r._stride else: u64(0) - r._stride
+    __parallel_run(__parallel_range_count(r), (lo: int, hi: int):
+        loop i in [lo..hi): f(int(u64(r._first) + u64(i) * delta))
+    )
 
 # ---------------- atomics ----------------
 # A whole number threads change together: parallel code may change it (and no other variable),

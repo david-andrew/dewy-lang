@@ -67,7 +67,7 @@ dn_init_words = ():
     dn_isnt_id = intern("isnt")
     dn_in_id = intern("in")
     dn_notin_id = intern("notin")
-    words = ["as", "and", "break", "const", "continue", "else", "from", "import", "if", "in", "let", "loop", "match", "not", "of", "or", "or_throw", "return", "test", "transmute", "xor", "nand", "nor", "xnor"]
+    words = ["as", "and", "break", "const", "continue", "else", "from", "import", "if", "in", "let", "loop", "parallel", "match", "not", "of", "or", "or_throw", "return", "test", "transmute", "xor", "nand", "nor", "xnor"]
     loop word in words: intern(word)
     dn_word_tokens = fill(DewyToken.none, names.len())
     loop word in words: dn_word_tokens[intern(word)] = dn_token_kind(word)
@@ -605,7 +605,7 @@ dn_can_start = () -> bool:
 dn_range_bound = () -> bool:
     if not dn_can_start(): return false
     symbol = dn_peek()
-    if (symbol == .lbrace or symbol == .kw_let or symbol == .kw_const or symbol == .kw_return or symbol == .kw_break or symbol == .kw_continue or symbol == .kw_if or symbol == .kw_loop or symbol == .kw_match): return false
+    if (symbol == .lbrace or symbol == .kw_let or symbol == .kw_const or symbol == .kw_return or symbol == .kw_break or symbol == .kw_continue or symbol == .kw_if or symbol == .kw_loop or symbol == .kw_parallel or symbol == .kw_match): return false
     dn_power(symbol) == 0 or symbol == .plus or symbol == .minus
 
 # Static Unicode scalar escapes: four hex digits, or one to six in braces.
@@ -825,7 +825,7 @@ dn_flow = () -> int:
     loop true:
         keyword = dn_take()
         key = dn_node(.keyword, dn_token_text(keyword.symbol), keyword.start)
-        condition = if keyword.symbol == .kw_loop: dn_expr(0) else: dn_value(0)
+        condition = if keyword.symbol == .kw_loop or keyword.symbol == .kw_parallel: dn_expr(0) else: dn_value(0)
         if not dn_can_start():
             next = dn_peek()
             habit = ""
@@ -906,7 +906,7 @@ dn_atom = () -> int:
         form = dn_directive_form(dn_payload(token))
         if form != 0: return dn_directive(token, form)
     if symbol == .lparen or symbol == .lbrack or symbol == .lbrace or symbol == .langle: return dn_block()
-    if symbol == .kw_if or symbol == .kw_loop or symbol == .kw_match: return dn_flow()
+    if symbol == .kw_if or symbol == .kw_loop or symbol == .kw_parallel or symbol == .kw_match: return dn_flow()
     if (symbol == .kw_let or symbol == .kw_const or symbol == .kw_return or symbol == .kw_break or symbol == .kw_continue or symbol == .kw_import or symbol == .kw_from): return dn_stmt()
     dn_at += 1
     if token.kind == .quoted or token.kind == .rawquoted: return dn_string(token)

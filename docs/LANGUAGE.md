@@ -1925,28 +1925,40 @@ the generated programs; they are not hardware GPU performance measurements.
 
 ## Parallel CPU work
 
-The bundled worker pool provides `parallel_map`, `parallel_range` and
-`parallel_update`. They wait for completion and keep results in input order:
+`parallel` visits an array or bounded integer range, and `[parallel ...]`
+collects its results in input order:
 
 ```dewy
-let squares = parallel_range(1000 (i:int64) => i*i)
-let shifted = parallel_map(squares (x) => x+1)
+let squares = [parallel i in [0..1000) i*i]
+let shifted = [parallel x in squares x+1]
 let saved = shifted
-parallel_update(@shifted (x) => x*2)
+parallel @x in shifted {x*=2}
+parallel x in shifted {assert(x >=? 2)}
 assert(saved[0] =? 1 and shifted[0] =? 2)
 ```
 
-Callbacks may read captured values and change their own local values. They return
-results instead of writing shared globals or captured variables; the compiler
-checks direct callbacks and functions they call for those writes. Pass a named
-function or a function literal so it can inspect the code. Arrays, strings and
-records retain ordinary independent value semantics, including snapshots held
-across `parallel_update`. No explicit memory management is needed.
+An ordinary binding is read-only, as in `loop`. A mutable `@x` binding owns one
+array element for the body, including its managed fields. Saved copies keep their original values. Other captured variables and
+globals may be read but cannot be changed, including through called functions.
+Indexed writes to a captured array are currently rejected; use the mutable
+element binding. The first implementation accepts one named binding over an
+array or bounded range; combined headers, destructuring and filtered parallel
+collectors are not yet supported. `return`, `break` and `continue` cannot leave
+a parallel body.
 
-Native programs use a persistent worker pool. `SLOPPY_THREADS=2` limits it to two
-threads including the caller; `SLOPPY_THREADS=1` runs on the caller. Nested parallel
-operations run on the current thread. Web builds currently run these operations
-serially with the same result order and copy semantics.
+The existing `parallel_map`, `parallel_range` and `parallel_update` functions
+remain available. Callbacks must be named functions or function literals so the
+compiler can check their writes. Arrays, strings and records retain ordinary
+independent value semantics. Collection preserves source order, so a subsequent
+`sum` uses the same reduction order as the sequential collection. Scheduling
+does not reassociate reductions.
+
+Native programs use a persistent worker pool. `SLOPPY_THREADS=2` limits it to
+two threads including the caller; `SLOPPY_THREADS=1` runs on the caller. Nested
+operations currently run on the calling thread. Web builds run serially with
+the same result order and copy semantics. Parallel work may always execute
+sequentially; its body must not wait for a sibling to signal it. The current
+checker does not yet prove this blocking restriction.
 
 Use parallel work for substantial independent calculations; scheduling and atomic
 reference counts can cost more than a small callback saves. Keep drawing and

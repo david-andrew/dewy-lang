@@ -15,8 +15,8 @@ step=(p:Particle others:array<Particle> dt:float64):>Particle=>{
     p.x+=p.vx*dt p.y+=p.vy*dt
     return p
 }
-advance=(particles:array<Particle> dt:float64 parallel:bool):>array<Particle>=>{
-    if parallel return parallel_map(particles (p)=>step(p particles dt))
+advance=(particles:array<Particle> dt:float64 threaded:bool):>array<Particle>=>{
+    if threaded return parallel_map(particles (p)=>step(p particles dt))
     return [loop p in particles step(p particles dt)]
 }
 main=()=>{

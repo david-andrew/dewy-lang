@@ -1639,7 +1639,7 @@ dw_expr = (id: int) -> int:
         if text == "[]:":
             if children.len() == 1 and dewy_syntax[children[0]].kind == .flow:
                 first = dw_child(children[0], 0)
-                if dewy_syntax[first].kind == .keyword_expr and dewy_syntax[dw_child(first, 0)].text == "loop": return dw_comprehension(children[0])
+                if dewy_syntax[first].kind == .keyword_expr and (dewy_syntax[dw_child(first, 0)].text == "loop" or dewy_syntax[dw_child(first, 0)].text == "parallel"): return dw_comprehension(children[0])
             is_map = children.len() > 0 and dw_op(children[0]) == .arrow
             is_record = children.len() > 0 and dw_op(children[0]) == .assign
             loop child in children:
@@ -1711,7 +1711,7 @@ dw_expr = (id: int) -> int:
         return n
     if k == .flow:
         loop arm in dw_children(id):
-            if dewy_syntax[arm].kind == .keyword_expr and dewy_syntax[dw_child(arm, 0)].text == "loop":
+            if dewy_syntax[arm].kind == .keyword_expr and (dewy_syntax[dw_child(arm, 0)].text == "loop" or dewy_syntax[dw_child(arm, 0)].text == "parallel"):
                 return dw_fail(arm, "a loop used as a value; use return or a comprehension")
         return dw_flow(id, 0)
     if k == .binary:
@@ -2660,6 +2660,65 @@ dw_match = (id: int, accumulator: int = 0, map: bool = false) -> int:
     set_list(n, xs)
     n
 
+# Parallel bodies become visible callbacks, so the existing race checker
+# checks captured/global writes transitively. Mutable element bindings use the
+# library's unique-array partition path; each callback owns one value.
+dw_parallel_exits = (n: int, depth: int = 0):
+    if n == 0 or nodes[n].kind == .lambda or nodes[n].kind == .fn_: return
+    k = nodes[n].kind
+    if k == .return_: fatal(nodes[n].pos, "return cannot leave a parallel body; return a comprehension value instead")
+    if (k == .break_ or k == .continue_) and depth == 0:
+        fatal(nodes[n].pos, "break and continue cannot leave a parallel body")
+    inner = depth
+    if k == .for_ or k == .while_ or k == .loopx: inner += 1
+    dw_parallel_exits(int(nodes[n].a), depth)
+    dw_parallel_exits(int(nodes[n].b), inner)
+    dw_parallel_exits(int(nodes[n].c), depth)
+    loop child in kids(n): dw_parallel_exits(child, depth)
+
+dw_parallel = (arm: int, collect: bool) -> int:
+    pos = dewy_syntax[arm].pos
+    head = dw_unwrap(dw_child(arm, 1))
+    if dw_op(head) != .kw_in: return dw_fail(head, "a parallel loop without one bounded iterable")
+    binder = dw_unwrap(dw_child(head, 1))
+    mutable = dw_op(binder) == .at
+    if mutable: binder = dw_unwrap(dw_child(binder, 1))
+    name = dw_name(binder)
+    if name == "": return dw_fail(binder, "a parallel binding without a single name")
+    dw_reserved_name(name, binder)
+    if collect and mutable: return dw_fail(binder, "a mutable parallel comprehension binding")
+    source = dw_expr(dw_child(head, 2))
+    param = mk(.param, dewy_syntax[binder].pos)
+    nodes[param].name = i32(intern(name))
+    outer_siblings = dw_siblings
+    dw_shadow([int(nodes[param].name)])
+    outer_result = dw_fn_result
+    dw_fn_result = if collect: 1 else: 0
+    body = dw_block(dw_child(arm, 2))
+    dw_fn_result = outer_result
+    dw_siblings = outer_siblings
+    dw_parallel_exits(body)
+    fn_ = mk(.lambda, pos)
+    if not collect and not mutable: add_flag(fn_, NF_VOID)
+    if mutable:
+        ret = mk(.return_, pos)
+        nodes[ret].a = i32(bc_ident(name, pos))
+        statements = kids(body)
+        statements.push(ret)
+        set_list(body, statements)
+        add_flag(source, NF_MUT)
+    if mutable: dw_finish_function(fn_, [param], body, "")
+    else:
+        # Like `loop x`, a value binding is read-only. Only `@x` makes
+        # the local value that will be written back to its partition.
+        set_list(fn_, [param])
+        nodes[fn_].b = i32(body)
+    call = bc_call(if mutable: "parallel_update" else if collect: "__dewy_parallel_collect" else: "__dewy_parallel_each", [source, fn_], pos)
+    if collect: return call
+    statement = mk(.exprstmt, pos)
+    nodes[statement].a = i32(call)
+    statement
+
 dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
     items = dw_children(id)
     if at >= items.len(): return 0
@@ -2681,6 +2740,10 @@ dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
             xs.push(fallback)
             set_list(n, xs)
         return n
+    if word == "parallel":
+        if at + 1 < items.len(): return dw_fail(arm, "an else arm on a parallel loop")
+        if accumulator != 0: return dw_fail(arm, "a nested parallel collector; collect it as a separate array value")
+        return dw_parallel(arm, false)
     if word != "if" and word != "loop": return dw_block(arm, accumulator, map)
     if dw_nchildren(arm) != 3: return dw_fail(arm, "this flow arm")
     if word == "if":
@@ -2835,6 +2898,10 @@ dw_record_loop = (id: int) -> int:
     dw_record_entry(id)
 
 dw_comprehension = (id: int) -> int:
+    first = dw_child(id, 0)
+    if dewy_syntax[first].kind == .keyword_expr and dewy_syntax[dw_child(first, 0)].text == "parallel":
+        if dw_nchildren(id) != 1: return dw_fail(id, "an else arm on a parallel comprehension")
+        return dw_parallel(first, true)
     pos = dewy_syntax[id].pos
     if dw_collection_kind(id) == 3: return dw_record_loop(id)
     map = dw_collection_kind(id) == 2

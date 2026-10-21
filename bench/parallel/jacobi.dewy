@@ -1,0 +1,16 @@
+from p"../harness.jo" import clock, size_argument
+row=(a:array<array<float64>> i:int64 n:int64):>array<float64>=>{
+    return [loop j in [0..n) if i =? 0 or i =? n-1 or j =? 0 or j =? n-1 a[i][j] else (a[i-1][j]+a[i+1][j]+a[i][j-1]+a[i][j+1])*0.25]
+}
+main=(args:array<string>)=>{
+    let n=size_argument(args 1024)
+    let a=[loop i in [0..n) [loop j in [0..n) ((i+j)%17) as float64]]
+    let start=clock()
+    loop step in [0..20) {
+        a=if args.length >? 2 [loop i in [0..n) row(a i n)] else parallel_range(n (i:int64)=>row(a i n))
+    }
+    let elapsed=clock()-start
+    let result:int64=0 loop r in a {loop v in r {result+=(v*1024.0) as int64}}
+    printl"{result} {elapsed}"
+    return 0
+}

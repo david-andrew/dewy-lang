@@ -1,0 +1,25 @@
+from p"../harness.jo" import clock, size_argument
+sort=(a:array<int64> lo:int64 hi:int64 threaded:bool):>array<int64>=>{
+    if hi-lo <=? 1 return [loop i in [lo..hi) a[i]]
+    let mid=lo+(hi-lo)//2
+    let parts:array<array<int64>>=if threaded parallel_range(2 (i:int64)=>sort(a (if i =? 0 lo else mid) (if i =? 0 mid else hi) threaded)) else [sort(a lo mid false) sort(a mid hi false)]
+    let left=parts[0] let right=parts[1]
+    let result:array<int64>=[] let i:int64=0 let j:int64=0
+    loop i <? left.length and j <? right.length {
+        if left[i] <=? right[j] {result.push(left[i]) i+=1} else {result.push(right[j]) j+=1}
+    }
+    loop i <? left.length {result.push(left[i]) i+=1}
+    loop j <? right.length {result.push(right[j]) j+=1}
+    return result
+}
+main=(args:array<string>)=>{
+    let n=size_argument(args 262144)
+    let a=[loop i in [0..n) (i*1103515245+12345)%2147483648]
+    let start=clock()
+    let result=sort(a 0 n args.length <=? 2)
+    let elapsed=clock()-start
+    let checksum:int64=0
+    loop i in [0..n) {checksum=(checksum+result[i]*(i%97))%1000000007}
+    printl"{checksum} {elapsed}"
+    return 0
+}

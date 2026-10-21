@@ -1,0 +1,25 @@
+from p"../harness.jo" import clock, size_argument
+# 32x32 output tiles; k is traversed in 32-element blocks.
+tile=(a:array<float64> b:array<float64> n:int64 id:int64):>array<float64>=>{
+    let tiles=(n+31)//32 let row=(id//tiles)*32 let col=(id%tiles)*32
+    let out:array<float64>=[loop i in [0..1024) 0.0]
+    loop kk in [0..tiles) {loop i in [0..min(32 n-row)) {
+        loop k in [kk*32..min((kk+1)*32 n)) {
+            let v=a[(row+i)*n+k]
+            loop j in [0..min(32 n-col)) {out[i*32+j]+=v*b[k*n+col+j]}
+        }
+    }}
+    return out
+}
+main=(args:array<string>)=>{
+    let n=size_argument(args 1024)
+    let a=[loop i in [0..n*n) (i%7) as float64]
+    let b=[loop i in [0..n*n) (i%5) as float64]
+    let count=((n+31)//32)^2
+    let start=clock()
+    let out:array<array<float64>>=if args.length >? 2 [loop i in [0..count) tile(a b n i)] else parallel_range(count (i:int64)=>tile(a b n i))
+    let elapsed=clock()-start
+    let result:int64=0 loop part in out {result+=sum(part) as int64}
+    printl"{result} {elapsed}"
+    return 0
+}
