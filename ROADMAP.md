@@ -26,21 +26,20 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: overload-dispatch plans pilot (compile throughput).
+- Astra: ownership slice 2 (copy/move hooks, resource containers, closure copyability).
 - Opus: refinement and container follow-ups (small items).
 
 ## Next
 
 - Tier-3 implementation (designed, no decisions needed):
   - effect rows slices 3, 5–6 (1–2 and 4 landed; ~/dev/tmp/coord/effects-design.md);
-  - ownership slices 2, 4–6 (1, drop hooks and moves, and 3, `$lend`, landed):
-    custom copy/move hooks, resource containers, arenas
+  - ownership slices 4–6 (1, 2 in flight, 3 `$lend`): allocator runtime,
+    escape promotion, integration
     (~/dev/tmp/coord/ownership-design.md);
 - Compile throughput, toward ~0.40 G. Profile (10-21, 1.217 G): checking 371 M,
   optimization 248 M, x64 211 M, lowering 185 M, parse 85 M, lexer 49 M, prelude
   38 M (~/dev/tmp/coord/throughput-profile-2026-10-21.md). Structural projects,
   each estimated (not measured):
-  - reusable typed overload-dispatch plans (`resolve_fn_call` is 109 M): 35–55 M;
   - shared optimizer operand/control/use facts: 40–60 M;
   - a finalized live-interval stream fed into x64 allocation: 35–50 M;
   - the lexer: 49 M against a 20 M target.
@@ -144,6 +143,8 @@ Each tier-3 program's ladder note says which question holds it open.
   no runtime change (under the 3% pilot bar).
 - Local check-traversal fixes beyond the two landed: four pilots each under 1%.
 - Direct null-trap lowering for managed/method params: 14.97 → 15.28 ms.
+- Overload-dispatch plan cache: 80% repeat rate, but repeats cost only 2.79% of
+  synthetic (33.9 M) before overhead.
 - Triangular hash probing for graph: −0.3% instructions, default 7% slower.
   Graph is memory-bound (slot reads 43%, adjacency fetch/retain 24%); the next
   idea is contiguous adjacency storage/ownership.
