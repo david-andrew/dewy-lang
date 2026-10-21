@@ -2403,7 +2403,8 @@ Printing, interpolation, `string(value)` and `value as string` show a value as
 its literal syntax: `[1 2 3]`, `set["a" "b"]`, `["a" -> 1]`, a range as `[0..2]`
 or `[1,3..9]`, and an object field by field, `[x=1 name="q"]`. A minted type
 adds its name, `Fault[code=7]`, or is just `Unit` without fields. A type that
-declares `__as__ = ():>string` shows that text instead, and function fields are
+declares `__as__ = ():>string` shows that text instead (a minted child without
+its own uses its nearest ancestor's, as `as string` does), and function fields are
 left out. A string prints bare on its own and quoted, with its escapes, inside a
 structure (`["a\tb"]`). A present optional or a union shows its member; an
 absent optional prints `none`.

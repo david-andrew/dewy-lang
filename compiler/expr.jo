@@ -8117,12 +8117,21 @@ as_conversion = (ft: int, tt: int) -> int:
     collect_fns(name, decls)
     tm = module_of_type(ft)
     if tm >= 0: collect_module(tm, name, decls)
-    loop d in decls:
-        if nkids(d) != 1: continue
-        sig = fn_sig(d)
-        if sig.generic or sig.ret == 0: continue
-        binds: int[]
-        if match_type(sig.params[0], ft, binds, 0) == 0 and type_eq(prune(int(sig.ret)), tt): return d
+    # (the type's own conversion; then, for a minted child, its nearest
+    # ancestor's, whose methods take the family they are written for)
+    owner = prune(ft)
+    loop owner != 0:
+        family = if nominal_parent.has(owner): nominal_family(owner) else: 0
+        loop d in decls:
+            if nkids(d) != 1: continue
+            sig = fn_sig(d)
+            if sig.generic or sig.ret == 0 or not type_eq(prune(int(sig.ret)), tt): continue
+            p = prune(sig.params[0])
+            if owner == prune(ft):
+                binds: int[]
+                if match_type(p, ft, binds, 0) == 0: return d
+            if type_eq(p, owner) or family != 0 and type_eq(p, prune(family)): return d
+        owner = nominal_parent.get(owner, 0)
     0
 
 # a swizzle whose components follow each other in memory (.x, .xy, .yzw): a place of its own

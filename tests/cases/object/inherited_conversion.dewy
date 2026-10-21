@@ -1,0 +1,11 @@
+Token:type = type of any & [n:int64  __as__ = ():>string => "tok{n}"]
+A:type = type of Token
+B:type = type of Token & [__as__ = ():>string => "B!"]
+C:type = type of A
+main = () => {
+    let ts:array<Token> = [Token(n=0) A(n=1) B(n=2) C(n=3)]
+    printl"{ts}"
+    printl(A(n=4) as string)
+    let t:Token = C(n=5)
+    printl"{t}"
+}
