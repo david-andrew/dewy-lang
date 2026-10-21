@@ -1978,6 +1978,14 @@ dw_pattern = (id: int) -> int:
     if binding != "" and binding != "_": nodes[p].name = i32(intern(binding))
     p
 
+# (`o:Opened => total = 0`: `=` binds more loosely than `=>`, so the arm is the
+# assignment's target)
+dw_arm_fail = (source: int) -> int:
+    op = dw_op(source)
+    if (op == .assign or dn_token_assignment(op)) and dw_op(dw_child(source, 1)) == .function:
+        fatal(dewy_syntax[source].pos, "an arm whose body assigns needs braces, `pattern => \{target = value}`: `=` binds more loosely than `=>`, so without them the whole arm is the assignment's target")
+    dw_fail(source, "a match arm without =>")
+
 dw_match = (id: int, accumulator: int = 0, map: bool = false) -> int:
     n = mk(.match_, dewy_syntax[id].pos)
     nodes[n].a = i32(dw_expr(dw_child(id, 1)))
@@ -1986,7 +1994,7 @@ dw_match = (id: int, accumulator: int = 0, map: bool = false) -> int:
     if dewy_syntax[body].kind == .block and dewy_syntax[body].text == "{{}}:": arms = dw_children(body)
     xs: int[]
     loop source in arms:
-        if dw_op(source) != .function: return dw_fail(source, "a match arm without =>")
+        if dw_op(source) != .function: return dw_arm_fail(source)
         arm = mk(.arm, dewy_syntax[source].pos)
         pattern = dw_pattern(dw_child(source, 1))
         set_list(arm, [pattern])
@@ -2098,7 +2106,7 @@ dw_collection_kind = (id: int) -> int:
                     arms = [body]
                     if dewy_syntax[body].kind == .block: arms = dw_children(body)
                     loop branch in arms:
-                        if dw_op(branch) != .function: return dw_fail(branch, "a match arm without =>")
+                        if dw_op(branch) != .function: return dw_arm_fail(branch)
                         candidates.push(dw_child(branch, 2))
                 else: candidates.push(dw_child(arm, 2))
             else: candidates.push(arm)
