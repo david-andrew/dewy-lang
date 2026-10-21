@@ -1,0 +1,128 @@
+# Bounded known-callback versions, requested before lowering. The original
+# checked body/local identities are reused; only immutable per-version lookup
+# tables differ. Emission workers never publish specialization requests.
+use 'lower.jo'
+use 'util.jo'
+use 'check.jo'
+use 'ir.jo'
+use 'ast.jo'
+use 'expr.jo'
+use 'lex.jo'
+use 'types.jo'
+
+callback_calls: {int: int}
+callback_targets: {int: int}
+callback_versions: {str: int}
+callback_counts: {int: int}
+
+callback_key = (lf: int, node: int) -> int: (lf << 32) | node
+callback_local = (l: int) -> int:
+    if callback_targets.len() == 0: return -1
+    callback_targets.get(callback_key(ir.fn_index, l)) ?? -1
+
+# The work budget counts syntax, including control flow. Nested closures,
+# and large bodies stay on the ordinary path.
+callback_size = (n: int, budget: int) -> int:
+    if n == 0: return budget
+    if budget <= 0 or nodes[n].kind == .lambda: return -1
+    let budget = budget
+    budget -= 1
+    budget = callback_size(int(nodes[n].a), budget)
+    budget = callback_size(int(nodes[n].b), budget)
+    if nodes[n].kind != .for_:
+        budget = callback_size(int(nodes[n].c), budget)
+        if nodes[n].kind != .partial: budget = callback_size(int(nodes[n].d), budget)
+    loop i in [0..nkids(n)): budget = callback_size(kid(n, i), budget)
+    loop i in [0..nkids2(n)): budget = callback_size(kid2(n, i), budget)
+    budget
+
+callback_value = (n0: int, known: {int: int}) -> int:
+    n = n0
+    if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.refinement)): n = int(nodes[n].a)
+    if nodes[n].kind == .fnref and nodes[n].aux == 2: n = int(nodes[n].a)
+    if nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.local)): return known.get(int(nodes[n].sym)) ?? -1
+    if nodes[n].kind != .lambda or has_flag(n, NF_GENERIC): return -1
+    f = int(nodes[n].sym)
+    if not closure_env_shareable(f) or callback_size(int(fns[f].body), 32) < 0: return -1
+    f
+
+callback_bindings = (n: int, known: mut {int: int}):
+    if n == 0 or nodes[n].kind == .lambda: return
+    if nodes[n].kind == .vardecl and nkids(n) == 0 and not has_flag(n, NF_GLOBAL):
+        l = int(nodes[n].sym)
+        if l >= 0 and int(locals[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_BYREF | LF_MUTPARAM) == 0:
+            v = callback_value(int(nodes[n].b), known)
+            if v >= 0: known[l] = v
+    callback_bindings(int(nodes[n].a), known)
+    callback_bindings(int(nodes[n].b), known)
+    if nodes[n].kind != .for_:
+        callback_bindings(int(nodes[n].c), known)
+        if nodes[n].kind != .partial: callback_bindings(int(nodes[n].d), known)
+    loop i in [0..nkids(n)): callback_bindings(kid(n, i), known)
+    loop i in [0..nkids2(n)): callback_bindings(kid2(n, i), known)
+
+callback_request = (f: int, targets: int[], depth: int) -> int:
+    if depth >= 4 or callback_versions.len() >= 128: return -1
+    if fns[f].cabi or fns[f].has_env or fns[f].noinline or len(fns[f].export_name) > 0 or fns[f].body == 0: return -1
+    if callback_size(int(fns[f].body), 180) < 0: return -1
+    key = "{f}:{targets}"
+    if let lf = callback_versions.get(key): return lf
+    count = callback_counts.get(f) ?? 0
+    if count >= 8: return -1
+    lf = lfuncs.len()
+    lfuncs.push(LFunc(LK_INST, f, .drop, 0, "{fns[f].sym}_callback_{lf}"))
+    callback_versions[key] = lf
+    callback_counts[f] = count + 1
+    known: {int: int}
+    loop i in 0.. and t in targets:
+        if t >= 0: known[fns[f].params[i]] = t
+    callback_bindings(int(fns[f].body), known)
+    loop l, t in known: callback_targets[callback_key(lf, l)] = t
+    callback_scan(int(fns[f].body), lf, known, depth + 1)
+    lf
+
+callback_scan = (n: int, caller: int, known: {int: int}, depth: int):
+    if n == 0 or nodes[n].kind == .lambda: return
+    k = nodes[n].kind
+    if k == .call and nodes[n].aux == 0:
+        f = int(nodes[n].sym)
+        if f > 0 and fns[f].params.len() == nkids(n):
+            targets = fill(-1, nkids(n))
+            any = false
+            loop i in [0..nkids(n)):
+                t = callback_value(kid(n, i), known)
+                if t >= 0 and closure_borrow_param(f, i):
+                    targets[i] = t
+                    any = true
+            if any:
+                lf = callback_request(f, targets, depth)
+                if lf >= 0:
+                    caller_lf = if caller < 0: lf_of_inst(-caller - 1) else: caller
+                    callback_calls[callback_key(caller_lf, n)] = lf
+    callback_scan(int(nodes[n].a), caller, known, depth)
+    callback_scan(int(nodes[n].b), caller, known, depth)
+    if k != .for_:
+        callback_scan(int(nodes[n].c), caller, known, depth)
+        if k != .partial: callback_scan(int(nodes[n].d), caller, known, depth)
+    loop i in [0..nkids(n)): callback_scan(kid(n, i), caller, known, depth)
+    loop i in [0..nkids2(n)): callback_scan(kid2(n, i), caller, known, depth)
+
+callback_prepare = ():
+    callback_calls.clear()
+    callback_targets.clear()
+    callback_versions.clear()
+    callback_counts.clear()
+    stack_closure_params.clear()
+    has_lambda = false
+    loop f in fns:
+        if f.kind == FK_LAMBDA and f.decl != 0 and files[pos_file(nodes[int(f.decl)].pos)].is_dewy:
+            has_lambda = true
+            break
+    if not has_lambda: return
+    loop f in [1..fns.len()):
+        d = int(fns[f].decl)
+        if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy: continue
+        known: {int: int}
+        callback_bindings(int(fns[f].body), known)
+        callback_scan(int(fns[f].body), -f - 1, known, 0)
+    stack_closure_params.clear()

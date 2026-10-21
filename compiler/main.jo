@@ -23,6 +23,7 @@ use 'copies.jo'
 use 'ownership.jo'
 use 'opt.jo'
 use 'inline.jo'
+use 'callback_specialize.jo'
 use 'loops.jo'
 use 'x64.jo'
 use 'arm64.jo'
@@ -409,6 +410,7 @@ compile = (path: str, out0: str) -> str:
         # Initialize thread bookkeeping before construction can acquire a resource.
         init_fns.insert(1, runtime_fn("__owner_start"))
     find_unique_globals(not watch_build and not repl_image and not lower_only)
+    if not dbg_on and not watch_build and not repl_image and not lower_only: callback_prepare()
     t1 = time()
     roots: int[]
     loop f in init_fns: roots.push(lf_of_inst(f))

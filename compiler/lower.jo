@@ -24,6 +24,7 @@ use 'spirv.jo'
 use 'msl.jo'
 use 'pe.jo'
 use 'math_lower.jo'
+use 'callback_specialize.jo'
 
 const VC_VOID = 0
 const VC_INT = 1
@@ -1764,7 +1765,7 @@ det_target = (t: int, who: str, pos: int):
     if n == 0 or nodes[n].aux != i32(int(SK.global)): return
     warn(pos, "{who}, and here it changes the global '{name_of(int(nodes[n].name))}', which a rollback does not put back (ticks are played again from an earlier game): keep it in the game")
 
-gen_direct_call = (f: int, args: int[], order: int[] = []) -> Val:
+gen_direct_call = (f: int, args: int[], order: int[] = [], call_node: int = 0) -> Val:
     ret = int(fns[f].ret)
     rslot = -1
     argv: int[]
@@ -1783,7 +1784,9 @@ gen_direct_call = (f: int, args: int[], order: int[] = []) -> Val:
         loop i in [0..fns[f].ptypes.len()):
             if copy_consumes(f, i) and ownership_type(fns[f].ptypes[i]): owner_forget(argv[base + i])
     nr = not opt_release and not dbg_on and prune(ret) == T_NEVER
-    rv = if nr: e_call_nr(lf_of_inst(f), argv, -1) else: e_call(lf_of_inst(f), argv, ret_vt(ret))
+    target_lf = if callback_calls.len() == 0: -1 else: callback_calls.get(callback_key(ir.fn_index, call_node)) ?? -1
+    if target_lf < 0: target_lf = lf_of_inst(f)
+    rv = if nr: e_call_nr(target_lf, argv, -1) else: e_call(target_lf, argv, ret_vt(ret))
     copy_back(mark)
     finish_call(ret, rv, rslot)
 
@@ -1795,7 +1798,8 @@ gen_closure_call = (callee: int, args: int[], order: int[] = []) -> Val:
     if selected: source = int(nodes[callee].a)
     target = -1
     if nodes[source].kind == .ident and nodes[source].aux == i32(int(SK.local)):
-        target = stack_closure_target(int(nodes[source].sym))
+        target = callback_local(int(nodes[source].sym))
+        if target < 0: target = stack_closure_target(int(nodes[source].sym))
     known = if selected: int(nodes[callee].sym) else: target
     cval = gen_expr(source)
     # A const callable is a saved value: call a temporary copy so its private
@@ -4029,7 +4033,7 @@ gen_expr_value = (e: int) -> Val:
             order: int[]
             if nodes[e].c != 0: order = call_eval_order(e)
             target = if ownership_prints.has(e): runtime_fn("__owner_print") else: int(nodes[e].sym)
-            r = gen_direct_call(target, kids(e), order)
+            r = gen_direct_call(target, kids(e), order, e)
             if vc(t) == VC_VOID: return V(-1, false)
             return r
         if aux == 1:
@@ -5007,7 +5011,7 @@ param_view_decl = (s: int, l: int) -> bool:
     if locals[source].owner != i32(cur_fn) or locals[source].name != locals[l].name: return false
     t = prune(int(locals[l].type))
     if not is_managed(t) and vc(t) != VC_AGG: return false
-    if type_has_fn(t) or not type_eq(ntype(iv), t): return false
+    if (type_has_fn(t) and callback_local(l) < 0) or not type_eq(ntype(iv), t): return false
     # Treat this binding as another read-only view of the parameter. It owns
     # no reference and must not be dropped as a separately initialized local.
     locals[l].vreg = locals[source].vreg
@@ -6552,7 +6556,7 @@ begin_fn = (name: str, idx: int):
     env_v = -1
 
 lower_inst = (lf: int, f: int):
-    begin_fn(fns[f].sym, lf)
+    begin_fn(lfuncs[lf].name, lf)
     owner_begin()
     if fns[f].decl != 0:
         ir_set_pos(nodes[int(fns[f].decl)].pos)
