@@ -1,0 +1,11 @@
+# quick
+at_least=(x:int64):>int64<r => r >=? x>|none=>{ if x >? 0 return x; return none }
+nested=(x:int64):>(int64<r => r >=? x>|none)|none=>x
+main=()=>{
+ let r=at_least(7)
+ if r =? 7 printl"seven" else printl"other"
+ printl(at_least(-1) ?? 0)
+ printl(nested(3) =? 3)
+ let fp=@at_least
+ printl(fp(9) =? 9)
+}

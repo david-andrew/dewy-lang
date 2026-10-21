@@ -244,9 +244,14 @@ refine_coerce = (n: int, target: int) -> int:
     t = prune(target)
     coerce(n, int(types[t].elem))
     if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.refinement)) and nodes[n].aux2 == i32(t): return n
+    owner = if cx >= 0: int(ctxs[cx].inst) else: 0
+    # A contract on formals is checked against the arguments of a call to its
+    # function, or against the entry of the function itself. Elsewhere (a
+    # literal compared with a call's optional result) nothing binds them: the
+    # value keeps its base type, and the type's contract is not assumed for it.
+    if ref_has_formals(t) and t != refine_arg_target and not ref_signature_has(owner, t): return n
     wrap_conv(n, .refinement, int(types[t].elem))
     nodes[n].aux2 = i32(t)
-    owner = if cx >= 0: int(ctxs[cx].inst) else: 0
     refine_requests.push(FactRequest(n, owner))
     refine_owners[owner] = true
     n
@@ -452,6 +457,29 @@ ref_has_formals = (t0: int) -> bool:
     if types[t].kind != .refined: return false
     loop atom in ref_predicates[int(types[t].st)]:
         if atom.a.kind == 2 or atom.b.kind == 2: return true
+    false
+
+# (the parameter type finish_arg is coercing an argument to: its formals are that call's)
+refine_arg_target = 0
+
+# Does function f's own signature contain the refined type t, so that its
+# formals are f's parameters?
+ref_signature_has = (f: int, t: int) -> bool:
+    if f <= 0 or f >= fns.len(): return false
+    if ref_type_contains(int(fns[f].ret), t, 0): return true
+    loop p in fns[f].ptypes:
+        if ref_type_contains(p, t, 0): return true
+    false
+
+ref_type_contains = (t0: int, want: int, depth: int) -> bool:
+    t = prune(t0)
+    if t == want: return true
+    if depth >= 32: return false
+    k = types[t].kind
+    if k == .refined or k == .opt or k == .array or k == .fixed: return ref_type_contains(int(types[t].elem), want, depth + 1)
+    if is_union(t):
+        loop m in union_members(t):
+            if ref_type_contains(m, want, depth + 1): return true
     false
 
 ref_decl_mask = (decl: int) -> int:

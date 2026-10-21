@@ -1719,7 +1719,10 @@ finish_arg = (a: int, pt: int, is_mut: bool):
         if not type_eq(actual, pt) and not unify(actual, pt): fatal(nodes[a].pos, "{jd(nodes[a].pos, "`mut`", "an `@`")} argument must have type {dt(pt)} exactly, found {dt(ntype(a))}")
         add_flag(a, NF_MUT)
         return
+    saved = refine_arg_target
+    refine_arg_target = prune(pt)
     coerce(a, pt)
+    refine_arg_target = saved
 
 default_arg = (decl: int, i: int, pt: int, given: int[] = [], captured: bool = false, targs: int[] = []) -> int:
     d = clone(int(nodes[kid(decl, i)].b))
