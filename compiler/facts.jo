@@ -1431,11 +1431,18 @@ fact_capture = (n: int, s: mut FactState) -> int:
         first = true
         loop arm in kids(n):
             wild = false
+            low = 0
+            high = 0
             loop p in kids(arm):
                 if nodes[p].kind == .pwild: wild = true
-                if nodes[p].kind == .plit or nodes[p].kind == .prange: fact_capture(int(nodes[p].a), s)
-                if nodes[p].kind == .prange: fact_capture(int(nodes[p].b), s)
+                if nodes[p].kind == .plit or nodes[p].kind == .prange: low = fact_capture(int(nodes[p].a), s)
+                if nodes[p].kind == .prange: high = fact_capture(int(nodes[p].b), s)
             path = s
+            # (a range arm, as a guard `k:int64<0 <=? k <? 3>` becomes: its bounds hold in the body)
+            if nkids(arm) == 1 and nodes[kid(arm, 0)].kind == .prange and fact_scalar(ntype(subject)) and is_int(representation_type(ntype(subject))) and types[representation_type(ntype(subject))].sign:
+                fact_assume(path, fact_new(path, fact_domain(T_BOOL), FactTerm(.le, low, value)), true)
+                upper = if has_flag(kid(arm, 0), NF_INCLUSIVE): Tok.le else: Tok.lt
+                fact_assume(path, fact_new(path, fact_domain(T_BOOL), FactTerm(upper, value, high)), true)
             wanted = if nkids(arm) == 1: fact_pattern_tag(kid(arm, 0), prune(ntype(subject))) else: -1
             if wanted >= 0:
                 fact_tag(path, value, wanted, true)

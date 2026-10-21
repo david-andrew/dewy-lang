@@ -1,0 +1,12 @@
+# A guard arm's bounds are facts in its body
+need = (k:int64<k >=? 0 and k <? 3>):>int64 => k * 10
+pick = (i:int64):>int64 => match i {
+    k:int64<k >=? 0 and k <? 3> => {
+        $assert k <? 3
+        need(k)
+    }
+    _ => -1
+}
+printl(pick(1))
+printl(pick(5))
+printl(pick(-7))
