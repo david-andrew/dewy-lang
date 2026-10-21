@@ -34,3 +34,10 @@ def test_flagship_runs_on_wasm(compiler, tmp_path, program, release):
     ran = subprocess.run([node, runner], capture_output=True, timeout=60, check=False)
     assert ran.returncode == 0, ran.stderr.decode(errors='replace')
     assert ran.stdout.decode() == (LADDER / program / 'expected.out').read_text()
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_notes_page_builds_for_wasm(compiler, tmp_path, release):
+    # The page needs a browser and the host's WebSocket; building it checks the shell.
+    page = build_web(compiler, LADDER / '98_notes_listen' / 'ui_app.dewy', tmp_path / 'notes_ui', release)
+    assert '<script' in page.read_text()

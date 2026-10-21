@@ -860,6 +860,27 @@ def notes_service():
     return '\n'.join(out)
 
 
+@oracle('98_notes_listen')
+def notes_listen():
+    """The same service over loopback sockets: each client's bytes in order, answers until close."""
+    service, out = Service(), []
+    create = '{"title":"Socket note","tags":["net"]}'
+    sessions = [
+        ('split create, then close', [
+            'POST /api/notes HTTP/1.1\r\nHost: lo',
+            f'cal\r\nContent-Type: application/json\r\nContent-Length: {len(create)}\r\n\r\n{create[:10]}',
+            f'{create[10:]}GET /api/notes/1 HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n']),
+        ('framing error closes', ['GET /api/health HTTP/1.1\r\nHost: local\r\n\r\nGET / HTTP/9\r\n\r\n']),
+        ('http/1.0', ['GET /api/stats HTTP/1.0\r\n\r\n']),
+    ]
+    for label, parts in sessions:
+        out.append(f'== {label}')
+        conn = Conn()
+        show(out, b''.join(conn.feed(service, part.encode()) for part in parts))
+    out.append(f'accepted {len(sessions)}')
+    return '\n'.join(out)
+
+
 if __name__ == '__main__':
     failed = False
     for name, make in ORACLES.items():

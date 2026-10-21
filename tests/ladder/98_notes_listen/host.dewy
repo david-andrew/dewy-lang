@@ -1,0 +1,81 @@
+# The notes server on real sockets. Raw HTTP arrives over TCP (browsers,
+# curl); the wasm UI, which cannot open TCP sockets in a page, sends the same
+# request bytes as WebSocket messages. Both feed the transport-free server
+# connections of 97_notes_service, so the sockets only move bytes.
+#
+# HELD on open question 12 (portable sockets/FFI boundary): `net` is the
+# implementation library's host API, not a designed Dewy surface. Which
+# capability may listen, how accept/receive report failure as values, and
+# what a web or freestanding target offers instead are unsettled.
+import net
+from p"../97_notes_service/router.dewy" import Service
+from p"../97_notes_service/server.dewy" import Connection, feed, finish
+
+Host:type=[
+    service:Service=Service()
+    listener:int64=-1
+    sockets:dict<int64 Connection>=[]
+    peers:dict<int64 Connection>=[]
+    accepted:int64=0
+]
+
+start=(@host:Host port:int64 websocket_port:int64=0):>bool=>{
+    host.listener=net.tcp_listen(port)
+    if host.listener <? 0 return false
+    if websocket_port >? 0 and not net.listen(websocket_port) return false
+    return true
+}
+
+port=(host:Host):>int64=>net.tcp_port(host.listener)
+
+# One pass over every socket: accept, read, answer, close. Returns whether
+# anything happened, so a caller can sleep when idle.
+poll=(@host:Host wait:float64=0.0):>bool=>{
+    let busy=false
+    loop true {
+        let socket=net.tcp_accept(host.listener wait)
+        if socket <? 0 break
+        host.sockets[socket]=Connection()
+        host.accepted+=1
+        busy=true
+    }
+    let finished:array<int64>=[]
+    loop [socket conn] in host.sockets {
+        let data=net.tcp_receive(socket wait)
+        let state=conn
+        let reply=feed(@host.service @state data)
+        if net.tcp_closed(socket) reply.extend(finish(@host.service @state))
+        if reply.length >? 0 {
+            busy=true
+            if not net.tcp_send(socket reply) state.closed=true
+        }
+        host.sockets[socket]=state
+        if state.closed finished.push(socket)
+    }
+    loop socket in finished {
+        net.tcp_close(socket)
+        host.sockets.remove(socket)
+    }
+    loop event in net.receive() {
+        busy=true
+        if event.kind =? net.NetKind.joined {
+            host.peers[event.peer]=Connection()
+        } else if event.kind =? net.NetKind.left {
+            host.peers.remove(event.peer)
+        } else if event.peer in? host.peers {
+            # One message carries one request; each peer keeps its own framing state.
+            let state=host.peers[event.peer]
+            let reply=feed(@host.service @state event.data)
+            host.peers[event.peer]=state
+            if reply.length >? 0 net.send(event.peer reply)
+        }
+    }
+    return busy
+}
+
+stop=(@host:Host):>void=>{
+    loop socket in host.sockets.keys() net.tcp_close(socket)
+    host.sockets=[]
+    net.tcp_close(host.listener)
+    host.listener=-1
+}

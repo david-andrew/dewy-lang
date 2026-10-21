@@ -1,0 +1,106 @@
+# The notes page: build with `--target wasm` and serve the page as
+# /static/notes_ui.html. It renders the UI state machine of 97_notes_service
+# and sends its API calls, as HTTP request bytes, over a WebSocket to the
+# native host (host.dewy), which answers with HTTP response bytes.
+#
+# Keys: type a title, Tab moves to the tags field, Enter saves, Up/Down
+# select, F2 opens, F4 toggles done, Delete removes, Escape clears filters.
+# HELD on open question 12, like host.dewy: the page reaches the server
+# through the implementation library's `net`, not a designed fetch/socket API.
+import net
+from p"../97_notes_service/http.dewy" import Limits, HttpError
+from p"../97_notes_service/client.dewy" import ApiCall, ClientConn, to_wire, receive_bytes
+from p"../97_notes_service/ui_model.dewy" import Ui, Boot, TypeTitle, TypeTags, Submit, MoveCursor,
+    Toggle, Open, Remove, ClearFilters, dispatch, receive
+from p"../97_notes_service/ui_view.dewy" import render
+
+const SERVER_PORT:int64=47210
+
+let ui=Ui()
+let client=ClientConn()
+let server:int64=-1
+let connected=false
+let in_flight:array<ApiCall>=[]
+let editing_tags=false
+
+main=()=>{
+    window("Dewy Notes" 960 640)
+    server=net.connect(env("NOTES_HOST") ?? "127.0.0.1" SERVER_PORT)
+    dispatch(@ui Boot)
+}
+
+# Calls go out in order; responses come back in the same order.
+flush=():>void=>{
+    if not connected return
+    loop ui.outbox.length >? 0 {
+        let call=ui.outbox.pop(0)
+        net.send(server to_wire(call))
+        in_flight.push(call)
+    }
+}
+
+network=():>void=>{
+    loop event in net.receive() {
+        if event.kind =? net.NetKind.joined {
+            connected=true
+        } else if event.kind =? net.NetKind.left {
+            connected=false
+            ui.banner="Disconnected: {net.why(event.peer)}"
+        } else {
+            let responses=receive_bytes(@client event.data)
+            if responses is? HttpError {
+                ui.banner="Bad response: {responses.detail}"
+            } else {
+                loop response in responses {
+                    if in_flight.length >? 0 {
+                        let call=in_flight.pop(0)
+                        receive(@ui call response)
+                    }
+                }
+            }
+        }
+    }
+}
+
+edit=(text:string):>string=>{
+    let typed=text_input()
+    let out="{text}{typed}"
+    if key_typed(Key.backspace) and out.length >? 0 out=out[0..out.length-1)
+    return out
+}
+
+update=(_dt:float64):>void=>{
+    if key_pressed(Key.tab) editing_tags=not editing_tags
+    if editing_tags {
+        let text=edit(ui.tags)
+        if text not=? ui.tags dispatch(@ui TypeTags[text])
+    } else {
+        let text=edit(ui.title)
+        if text not=? ui.title dispatch(@ui TypeTitle[text])
+    }
+    if key_pressed(Key.enter) {
+        dispatch(@ui Submit)
+        editing_tags=false
+    }
+    if key_typed(Key.up) dispatch(@ui MoveCursor[-1])
+    if key_typed(Key.down) dispatch(@ui MoveCursor[1])
+    if key_pressed(Key.f2) dispatch(@ui Open)
+    if key_pressed(Key.f4) dispatch(@ui Toggle)
+    if key_pressed(Key.delete) dispatch(@ui Remove)
+    if key_pressed(Key.escape) dispatch(@ui ClearFilters)
+    network()
+    flush()
+}
+
+draw=():>void=>{
+    clear(rgb(0.04 0.08 0.13))
+    let y=24.0
+    loop line in render(ui) {
+        let colour=if line.startswith("!") rgb(1.0 0.7 0.4) else if line.startswith(">") rgb(0.5 1.0 0.85) else rgb(0.85 0.92 1.0)
+        text(line vec2(24.0 y) 20.0 colour mono=true)
+        y+=26.0
+    }
+    let field=if editing_tags "tags" else "title"
+    let status=if connected "online" else "connecting…"
+    text("editing {field} · {status}" vec2(24.0 600.0) 16.0 rgb(0.5 0.6 0.7))
+}

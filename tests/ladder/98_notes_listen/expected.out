@@ -1,0 +1,33 @@
+== split create, then close
+  HTTP/1.1 201 Created
+  Content-Type: application/json
+  ETag: "1.1"
+  Location: /api/notes/1
+  Content-Length: 93
+
+  {"id":1,"title":"Socket note","body":"","tags":["net"],"done":false,"revision":1,"updated":1}HTTP/1.1 200 OK
+  Content-Type: application/json
+  ETag: "1.1"
+  Content-Length: 93
+  Connection: close
+
+  {"id":1,"title":"Socket note","body":"","tags":["net"],"done":false,"revision":1,"updated":1}
+== framing error closes
+  HTTP/1.1 200 OK
+  Content-Type: application/json
+  Content-Length: 21
+
+  {"ok":true,"notes":1}HTTP/1.1 505 HTTP Version Not Supported
+  Content-Type: application/json
+  Content-Length: 54
+  Connection: close
+
+  {"error":"http","detail":"unsupported version HTTP/9"}
+== http/1.0
+  HTTP/1.1 200 OK
+  Content-Type: application/json
+  Content-Length: 35
+  Connection: close
+
+  {"requests":4,"errors":1,"notes":1}
+accepted 3

@@ -416,6 +416,12 @@
   "97_notes_service": {
    "milestone": 33,
    "note": "Notes web service and UI (tier-4 flagship): HTTP/1.1 byte framing with limits, chunked bodies and pipelining; JSON CRUD with validation, revisions, conditional requests, atomic batches and static files; a UI state machine over the same wire bytes. Also runs as wasm (tests/test_flagship_web.py)."
+  },
+  "98_notes_listen": {
+   "milestone": 33,
+   "serial": true,
+   "note": "The notes service of 97 behind a real loopback listener (accept, partial reads, pipelining, close, EOF) plus the wasm page shell (ui_app.dewy, built by tests/test_flagship_web.py) that talks to it over WebSocket.",
+   "open": "12: portable socket listen/accept, host capabilities and a web fetch/socket surface are unspecified; this uses the implementation library net."
   }
  },
  "design_passing": [
