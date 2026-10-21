@@ -155,7 +155,7 @@ __map_entry[K, V] = (m: mut Map[K, V], k: K, d: V) -> int:
 # the entry of k, for changing m[k] in place in Dewy: a missing key fails as reading m[k] does
 __map_entry_present[K, V] = (m: mut Map[K, V], k: K) -> int:
     e = __map_find(m, k, k.hash())
-    if e < 0: panic("the map has no key {k}{__near_key(m, k)}: m.get(k) gives none for a missing key, and m.has(k) asks whether it is there")
+    if e < 0: panic("the dictionary has no key {k} to change{__near_key(m, k)}: d[k] += 1 changes an entry that is there; to count, write `if k in? d \{d[k] += 1} else \{d[k] = 1}`")
     e
 
 # room for n entries without growing (when many are to come)

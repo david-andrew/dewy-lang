@@ -661,6 +661,7 @@ coerce = (n: int, target: int) -> int:
     dewy = dewy_at(nodes[n].pos)
     if fk == .opt and tk == .bool_: why = if dewy: " (an optional is not true or false: `x isnt? none` asks, and narrows x inside `if x isnt? none \{ }`)" else: " (an optional is not true or false: `if let v = x:` runs when there is a value and names it, `x != none` asks)"
     if fk == .float_ and tk == .int_: why = if dewy: " (int64(x) makes it a whole number, dropping the fraction)" else: " (int(x) makes it a whole number, dropping the fraction)"
+    if dewy and tk == .int_ and bundled_rational_type(from): why = " (`/` gives an exact fraction: `//` divides whole numbers, and `q.floor()` or `q.round()` gives a whole number)"
     if tk == .bool_ and (fk == .array or fk == .str_ or is_map_type(from)): why = if dewy: " (not true or false: `xs.length >? 0` asks if it has anything)" else: " (not true or false: `xs.len() > 0` asks if it has anything)"
     if tk == .bool_ and (fk == .int_ or fk == .float_): why = if dewy: " (a number is not true or false: `x not=? 0` asks)" else: " (a number is not true or false: `x != 0` asks)"
     if tk == .bool_ and fk == .int_ and nodes[n].kind == .int_lit: why = if dewy: " (to do something {nodes[n].ival} times: `loop i in [1..{nodes[n].ival}] \{ }`)" else: " (to do something {nodes[n].ival} times: `loop i in [1..{nodes[n].ival}]:`)"
@@ -4716,7 +4717,11 @@ fmt_part = (part: int, pos: int):
     if t == T_NEVER:
         coerce(int(nodes[part].a), T_STR)
         t = T_STR
-    if types[t].kind == .void_: fatal(nodes[int(nodes[part].a)].pos, "cannot format a value of type void{void_rec_hint(int(nodes[part].a))}")
+    if types[t].kind == .void_:
+        why = void_rec_hint(int(nodes[part].a))
+        # (print(xs.reverse()): Python's in-place methods give None)
+        if why == "" and dewy_at(nodes[part].pos) and nodes[int(nodes[part].a)].kind != .ident: why = " (this gives nothing: a method that changes its object, as `xs.sort()` or `xs.reverse()`, gives no value; show the object afterwards, or make a new one with `xs.sorted()` or `xs.reversed()`)"
+        fatal(nodes[int(nodes[part].a)].pos, "cannot format a value of type void{why}")
     if types[t].kind == .typeval or types[t].kind == .module: fatal(nodes[int(nodes[part].a)].pos, "this is a type or module, not a value (a value of a type is made by calling it: `T()`)")
     if types[t].kind == .ptr or types[t].kind == .cfn: fatal(nodes[int(nodes[part].a)].pos, "a {dt(t)} is not printed: its address is `int(p as *u8)` (in hex, \"\{int(p as *u8):#x}\")")
     bt = mk_array(T_U8)
