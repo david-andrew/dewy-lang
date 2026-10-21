@@ -811,7 +811,8 @@ Dewy's unary minus binds below multiplication and division.
 
 `and`, `or`, `xor` and `not` operate on bits with infinite two's-complement sign
 extension, including mixed signed/unsigned machine words. Thus `not bigint(0)`
-is `-1`. `<<` and `>>` take a nonnegative `int64` count; right shift rounds down
+is `-1`. Prefix `~` is `not` binding as tightly as unary minus: `~flags & 3`
+is `(not flags) & 3`. `<<` and `>>` take a nonnegative `int64` count; right shift rounds down
 for negative values, so `bigint(-3) >> 1` is `-2`. Shifting beyond all magnitude
 bits yields `0` for nonnegative values or `-1` for negative ones. Negative shift
 counts panic. Shift compound assignments (`<<=`, `>>=`) work too, as do

@@ -1700,8 +1700,9 @@ dw_expr = (id: int) -> int:
             if nodes[e].sval != 0: nodes[e].sval = i32(intern("-" + name_of(int(nodes[e].sval))))
             nodes[e].pos = pos
             return e
-        n = mk(if op == .kw_not: NK.not_ else: NK.unary, pos)
-        if op != .minus and op != .kw_not and op != .plus: return dw_fail(id, "prefix '{op}'")
+        # (`~x` is `not x` at a tighter precedence: bitwise on integers, logical on booleans)
+        n = mk(if op == .kw_not or op == .tilde: NK.not_ else: NK.unary, pos)
+        if op != .minus and op != .kw_not and op != .plus and op != .tilde: return dw_fail(id, "prefix '{op}'")
         nodes[n].op = i32(int(if op == .minus: Tok.minus else: Tok.plus))
         nodes[n].a = i32(e)
         return n
