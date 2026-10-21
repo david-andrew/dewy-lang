@@ -482,14 +482,22 @@ explicit: `mutates<x>` on a callback can become `mutates<y>` when invoked with
 `no mutates<Filesystem>` remain open while excluding the named nominal resource.
 `allocates` is bare; `allocates<Resource>` is invalid.
 
-The implementation-cost inventory supports wrapping fixed-width scalar work,
-scalar frame places, bare handles, capture-free lambdas, read-only array parameter
-borrowing and scalar array iteration. Unknown environments and environment
-copies, dynamic storage operations, formatting, division and other unclassified
-operations remain conservative; an allocation permission alone does not certify
-them. Declarations and inferred callback conversions are verified after helper
-discovery, including unreachable checked declarations. Broader storage proofs and
-the public strict profile remain unimplemented.
+The implementation-cost inventory supports wrapping fixed-width scalar work
+(including shifts), inline scalar records, bare handles, capture-free lambdas,
+read-only array parameter borrowing, length/capacity inspection and scalar array
+iteration. Library bodies receive the same analysis as user functions. Intrinsic
+costs use resolved compiler identities. Dynamic growth, formatting, managed
+copies, closure construction and recursive boxes retain allocation costs;
+unknown storage conditions remain conservative. Defaults, defers and known drop
+hooks contribute effects even on early exits. Allocation diagnostics preserve
+the transitive allocating operation as a witness.
+
+An allocation permission alone does not certify absence of failure or other
+unproved costs. Declarations and inferred callback conversions are verified after
+helper discovery, including unreachable checked declarations. Lowering checks
+introduced intrinsic costs against demanded summaries. Broader storage proofs,
+unsupported lifecycle facilities and the public strict profile remain
+unimplemented.
 
 `int` is the mathematical integer type, distinct from `int64` in signatures,
 containers and generic arguments. Unannotated integer literals default to `int`.

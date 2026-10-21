@@ -534,16 +534,80 @@ effect_infer_callable = (n: int, expected: int) -> int:
     mk_callable_contract(t, row)
 
 
-# The inventory is shared by check and both lowering paths. Wrapping word
-# add/sub/mul/bit operations, comparisons, Boolean control and scalar frame
-# slots have no residual helper, allocation, detach or failure branch. No
-# division, conversions from non-scalars, arrays, record values or closures.
+# Residual implementation inventory used by check and both code generators.
+# No optimization-dependent capacity/uniqueness discharge in this slice.
+# Unsupported adapters and managed operations stay top, even with an Alloc
+# event: allocation permission alone never promises failure-free execution.
 effect_scalar = (t0: int) -> bool:
     t = representation_type(t0)
     types[t].kind == .bool_ or types[t].kind == .int_ and t != T_MATH_INT
 
 effect_word_op = (op: Tok) -> bool:
-    op == .plus or op == .minus or op == .star or op == .amp or op == .pipe or op == .caret or op == .kw_xor or op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
+    op == .plus or op == .minus or op == .star or op == .amp or op == .pipe or op == .caret or op == .kw_xor or op == .shl or op == .shr or op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
+
+# Inline POD records use the same layout decision as lowering. A recursive
+# box, custom lifecycle or managed field is never certified as a free copy.
+effect_plain = (t0: int, depth: int = 0) -> bool:
+    t = representation_type(t0)
+    if effect_scalar(t): return true
+    if depth > 16 or tkind(t) != .struct_: return false
+    layout(t)
+    si = int(types[t].st)
+    if structs[si].drop_fn != 0: return false
+    loop i in [0..int(structs[si].nfields)):
+        fi = int(structs[si].fields) + i
+        if fields[fi].boxed or not effect_plain(int(fields[fi].type), depth + 1): return false
+    true
+
+# Reviewed intrinsic identities, assigned by name resolution, never filenames
+# or user spelling. -1 means unclassified. Bits are residual may-costs, not
+# authority to mutate the actual; place access is collected independently.
+effect_intrinsic_cost = (id: IN) -> int:
+    if id == .len or id == .arrcap or id == .sizeof or id == .alignof: return 0
+    if id == .hash: return 0 # resolved value hooks are separate call edges
+    if id == .push or id == .insert or id == .reserve or id == .resize or id == .extend or id == .fill:
+        return (1 << int(EffectKind.alloc)) | (1 << int(EffectKind.detach)) | (1 << int(EffectKind.panic))
+    if id == .pop or id == .remove or id == .clear or id == .truncate:
+        return (1 << int(EffectKind.alloc)) | (1 << int(EffectKind.detach)) | (1 << int(EffectKind.panic))
+    if id == .fmt_struct or id == .json_fields or id == .fmt_elem or id == .dewy_fmt or id == .dewy_fmt_elem:
+        return (1 << int(EffectKind.alloc)) | (1 << int(EffectKind.opaque))
+    if id == .panic or id == .assert or id == .runtime_assert or id == .unreachable: return 1 << int(EffectKind.panic)
+    -1
+
+# One reporting seam for implementation plans. This deliberately records may
+# costs before optimizations; later planners may only discharge them with
+# shared placement/ownership evidence, never a hoped-for lowering choice.
+effect_plan_cost = (f: int, n: int, mask: int):
+    if mask < 0:
+        effect_opaque(f, n)
+        return
+    loop i in [int(EffectKind.alloc)..int(EffectKind.opaque) + 1):
+        if mask & (1 << i) != 0: effect_add(f, EffectEvent(EffectAtom(i as EffectKind), n))
+
+# Lowering may introduce checked intrinsics after helper discovery. A demanded
+# summary must already cover their costs; otherwise fail closed before emission.
+# Ordinary compilation does not consult or allocate effect state here.
+effect_lower_intrinsic = (f: int, n: int):
+    if not effects_active and effect_policy.prohibitions == 0: return
+    if f <= 0 or f >= effect_limit or not effect_summaries[f].done: return
+    mask = effect_intrinsic_cost(nodes[n].aux as IN)
+    covered = 0
+    loop event in effect_summaries[f].events:
+        if event.atom.kind == .opaque: return
+        covered |= 1 << int(event.atom.kind)
+    if mask < 0 or mask & ~covered != 0:
+        fatal(nodes[n].pos, "effect implementation plan introduced an unclassified intrinsic cost after verification")
+
+# Drop authority belongs to the owner even on early exits or failed later
+# construction. Current ownership supports scalar nominal records only;
+# unsupported aggregate/copy/move lifecycle facilities remain blockers.
+effect_cleanup = (f: int, t0: int, n: int, p: PlaceIdentity):
+    t = representation_type(t0)
+    if tkind(t) != .struct_: return
+    layout(t)
+    g = int(structs[int(types[t].st)].drop_fn)
+    if g != 0: effect_summaries[f].edges.push(EffectEdge(g, n, [p]))
+
 
 effect_add = (f: int, event: EffectEvent) -> bool:
     loop old in effect_summaries[f].events:
@@ -596,7 +660,11 @@ effect_place_inventory = (n: int, depth: int = 0) -> bool:
     flags & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF | LF_EXPOSED) == 0
 
 effect_access = (f: int, n: int, write: bool):
-    if not effect_scalar(ntype(n)) or not effect_place_inventory(n): effect_opaque(f, n)
+    if not effect_plain(ntype(n)) or not effect_place_inventory(n): effect_opaque(f, n)
+    if write and nodes[n].kind == .field:
+        t = representation_type(ntype(int(nodes[n].a)))
+        layout(t)
+        if int(types[t].flags) & TF_BOXED != 0: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
     p = effect_export(f, place_route(n))
     if p.declaration == 0:
         effect_opaque(f, n)
@@ -717,6 +785,26 @@ effect_scan_node = (f: int, n: int):
         if nodes[n].aux == i32(int(SK.global)): effect_isolation_block(f, .global_, n)
         else if nodes[n].aux != i32(int(SK.local)): effect_isolation_block(f, .node, n)
         else if int(locals[int(nodes[n].sym)].flags) & (LF_CAPTURE | LF_ADDR) != 0: effect_isolation_block(f, .capture, n)
+    if k == .intrinsic:
+        cost = effect_intrinsic_cost(nodes[n].aux as IN)
+        effect_plan_cost(f, n, cost)
+        if nkids(n) > 0 and cost > 0 and isolation_intrinsic(nodes[n].aux as IN):
+            effect_access(f, kid(n, 0), true)
+    if k == .array and (nkids(n) > 0 or nodes[n].b != 0): effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+    if k == .str_lit and nkids(n) > 0: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+    if k == .lambda and nodes[n].sym > 0 and fns[int(nodes[n].sym)].caps.len() != 0:
+        effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+    if k == .partial: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+    if k == .conv and (nodes[n].aux == i32(int(CV.fixed2arr)) or nodes[n].aux == i32(int(CV.fn2clos)) or nodes[n].aux == i32(int(CV.explicit_copy)) and not effect_plain(ntype(n))):
+        effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+    if k == .call and nodes[n].aux == 2:
+        effect_cleanup(f, ntype(n), n, PlaceIdentity(.local, f, n))
+        t = representation_type(ntype(n))
+        layout(t)
+        if int(types[t].flags) & TF_BOXED != 0: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+    if k == .vardecl and not has_flag(n, NF_GLOBAL) and nodes[n].sym > 0:
+        l = int(nodes[n].sym)
+        effect_cleanup(f, int(locals[l].type), n, effect_export(f, PlaceIdentity(.local, f, l)))
     if ownership_literal_print(n):
         effect_add(f, EffectEvent(EffectAtom(.io), n))
         effect_isolation_block(f, .node, n)
@@ -745,7 +833,7 @@ effect_scan_node = (f: int, n: int):
                 routes.push(PlaceIdentity(.local, 0, 0))
                 effect_scan_node(f, a)
         effect_summaries[f].edges.push(EffectEdge(g, n, routes))
-        if not effect_scalar(int(fns[g].ret)) and int(fns[g].ret) != T_VOID: effect_opaque(f, n)
+        if not effect_plain(int(fns[g].ret)) and int(fns[g].ret) != T_VOID: effect_opaque(f, n)
         return
     if k == .assign:
         effect_access(f, int(nodes[n].a), true)
@@ -768,14 +856,16 @@ effect_scan_node = (f: int, n: int):
         effect_access(f, n, false)
         return
     supported = false
-    if k == .fnref or k == .lambda: supported = effect_bare(n)
+    if k == .intrinsic: supported = effect_intrinsic_cost(nodes[n].aux as IN) >= 0
+    else if k == .call and nodes[n].aux == 2: supported = effect_plain(ntype(n))
+    else if k == .fnref or k == .lambda: supported = effect_bare(n)
     else if k == .for_: supported = tkind(ntype(int(nodes[n].a))) == .array and effect_scalar(telem(ntype(int(nodes[n].a)))) and not has_flag(n, NF_MUT)
     else if k == .int_lit or k == .bool_lit: supported = effect_scalar(ntype(n))
-    else if k == .block or k == .exprstmt or k == .return_ or k == .if_ or k == .and_ or k == .or_ or k == .not_: supported = true
+    else if k == .block or k == .exprstmt or k == .return_ or k == .if_ or k == .and_ or k == .or_ or k == .not_ or k == .defer_: supported = true
     else if k == .vardecl:
         l = int(nodes[n].sym)
         if effect_readonly_binding(n): return
-        supported = l > 0 and (effect_scalar(int(locals[l].type)) or is_fn_type(int(locals[l].type)) and effect_bare(int(nodes[n].b))) and int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) == 0
+        supported = l > 0 and (effect_plain(int(locals[l].type)) or is_fn_type(int(locals[l].type)) and effect_bare(int(nodes[n].b))) and int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) == 0
     else if k == .binary:
         supported = nodes[n].aux == 0 and effect_word_op(nodes[n].op as Tok) and effect_scalar(ntype(int(nodes[n].a))) and effect_scalar(ntype(int(nodes[n].b)))
     else if k == .unary:
@@ -787,6 +877,12 @@ effect_scan_node = (f: int, n: int):
     # explicit dependencies for witnesses and legacy isolation even when this
     # pilot's cost inventory has already rejected their containing operation.
     loop g in hidden: effect_summaries[f].edges.push(EffectEdge(g, n, []))
+    if hidden.len() > 0 and (k == .binary or k == .intrinsic):
+        operand = if k == .binary: int(nodes[n].a) else if nkids(n) > 0: kid(n, 0) else: 0
+        if operand != 0 and is_managed(representation_type(ntype(operand))):
+            # Callback snapshots may copy managed values. No uniqueness proof
+            # is available at this boundary yet, so retain the residual cost.
+            effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
     mask = isolation_children(k)
     if mask < 0: return
     if mask & 1 != 0: effect_scan_node(f, int(nodes[n].a))
@@ -842,11 +938,11 @@ effect_visit = (f: int):
             effect_opaque(f, int(fns[f].body))
             effect_isolation_block(f, .capture, int(fns[f].body))
         if fns[f].cabi: effect_opaque(f, d)
-        if not effect_scalar(int(fns[f].ret)) and int(fns[f].ret) != T_VOID: effect_opaque(f, d)
+        if not effect_plain(int(fns[f].ret)) and int(fns[f].ret) != T_VOID: effect_opaque(f, d)
         loop i in [0..fns[f].params.len()):
             l = fns[f].params[i]
             t = representation_type(int(locals[l].type))
-            if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_scalar(t) and not is_fn_type(t) and not (tkind(t) == .array and effect_scalar(telem(t))): effect_opaque(f, d)
+            if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_plain(t) and not is_fn_type(t) and not (tkind(t) == .array and effect_scalar(telem(t))): effect_opaque(f, d)
         effect_scan_node(f, int(fns[f].body))
     loop edge in effect_summaries[f].edges:
         g = edge.callee
@@ -918,7 +1014,17 @@ effects_finalize = ():
         if fns[f].kind == FK_LAMBDA and has_flag(d, NF_GENERIC) and fns[f].body == 0 and not fns[f].has_env: continue
         contract = if fns[f].kind == FK_LAMBDA and not has_flag(d, NF_GENERIC): callable_contract(int(fns[f].fntype)) else: effect_subst(int(decl_infos[decl_info(d)].sig.contract), fns[f].targs)
         if effect_summaries[f].index == 0: effect_visit(f)
+        # A concrete prohibited cost is more informative than an earlier
+        # conservative aggregate/signature blocker. Preserve the call-site
+        # diagnostic and the allocating operation's original witness.
+        ordered: EffectEvent[]
         loop event in effect_summaries[f].events:
+            if event.atom.kind == .alloc: ordered.push(event)
+        loop event in effect_summaries[f].events:
+            if event.atom.kind != .alloc and event.atom.kind != .opaque: ordered.push(event)
+        loop event in effect_summaries[f].events:
+            if event.atom.kind == .opaque: ordered.push(event)
+        loop event in ordered:
             atom = event.atom
             if atom.place.root == .formal:
                 base = place_base(atom.place)
@@ -927,7 +1033,7 @@ effects_finalize = ():
             if (contract == 0 or effect_allows(contract, atom)) and not prohibited: continue
             at = if event.via != 0: event.via else: event.witness
             if at == 0: at = d
-            what = if atom.kind == .write: "mutation" else if atom.kind == .read: "read" else: "opaque operation or unproved implementation cost"
+            what = if atom.kind == .write: "mutation" else if atom.kind == .read: "read" else if atom.kind == .alloc: "allocation" else if atom.kind == .panic: "possible failure" else if atom.kind == .detach: "storage detach" else if atom.kind == .io: "I/O" else: "opaque operation or unproved implementation cost"
             if event.atom.place.declaration != 0: what += " of '{effect_place_name(event.atom.place)}'"
             chain = effect_witness(f, event)
             origin = if event.witness != 0: pos_str(nodes[event.witness].pos) else: pos_str(nodes[d].pos)

@@ -2839,6 +2839,7 @@ struct LoanCapacity:
 loan_capacities: LoanCapacity[]
 
 gen_intrinsic = (e: int) -> Val:
+    if effects_active or effect_policy.prohibitions != 0: effect_lower_intrinsic(cur_fn, e)
     id = nodes[e].aux as IN
     args = kids(e)
     if id == .lend:
