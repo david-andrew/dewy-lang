@@ -1057,7 +1057,10 @@ fact_capture = (n: int, s: mut FactState) -> int:
     k = nodes[n].kind
     if k == .int_lit or k == .bool_lit:
         if not fact_scalar(ntype(n)): return fact_new(s, FactBound(reason = .unsupported, witness = n))
-        return fact_constant(s, ref_encoded(nodes[n].ival, ntype(n)), n)
+        x = ref_encoded(nodes[n].ival, ntype(n))
+        # A uint64 constant is biased; its type lets a witness decode it.
+        if representation_type(ntype(n)) == T_U64: return fact_new(s, FactBound(x, x, x != 0), FactTerm(origin = n, type = T_U64))
+        return fact_constant(s, x, n)
     # An optional's or union's tag (-3: 0 for none, 1 for a value, or the
     # member) and payload (-4) are projections of its immutable evaluation.
     if k == .istype:

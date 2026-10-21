@@ -163,12 +163,20 @@ wit_tomb = (s: FactState, side: WitSide) -> (int, int):
 
 wit_value = (s: FactState, v: int, x: int) -> str:
     t = if v > 0 and v < fact_terms.len(): representation_type(fact_terms[v].type) else: 0
-    if t == T_U64: return ""
+    # uint64 facts order (bits xor MIN); show the value itself.
+    if t == T_U64: return "{u64(x xor FACT_MIN)}"
     if t == T_BOOL: return if x != 0: "true" else: "false"
     "{x}"
 
 # Representation limits are not interesting evidence; only report real bounds.
-wit_known = (b: FactBound) -> str:
+wit_known = (b: FactBound, unsigned: bool = false) -> str:
+    if unsigned:
+        lo = u64(b.lo xor FACT_MIN); hi = u64(b.hi xor FACT_MIN)
+        if b.lo == b.hi: return "is {lo}"
+        if b.lo > FACT_MIN and b.hi < FACT_MAX: return "is between {lo} and {hi}"
+        if b.lo > FACT_MIN: return "is at least {lo}"
+        if b.hi < FACT_MAX: return "is at most {hi}"
+        return ""
     if b.lo == b.hi: return "is {b.lo}"
     lo = b.lo > -(1 << 62)
     hi = b.hi < (1 << 62)
@@ -246,7 +254,8 @@ wit_relation = (s: FactState, cex: FactState, op: Tok, a: WitSide, b: WitSide, r
         bound = fact_bound(s, side.value)
         tomb = wit_tomb(s, side)
         shown = if bound.lo == bound.hi: wit_value(s, side.value, bound.lo) else: ""
-        known = if shown != "": "is {shown}" else if bound.lo == bound.hi: "" else: wit_known(bound)
+        unsigned = side.value > 0 and side.value < fact_terms.len() and representation_type(fact_terms[side.value].type) == T_U64
+        known = if shown != "": "is {shown}" else if bound.lo == bound.hi: "" else: wit_known(bound, unsigned)
         if tomb.0 != 0:
             what = wit_event(tomb.0)
             if shown != "": wit_note(nodes[tomb.0].pos, "{side.text} {known} after this {what}")
