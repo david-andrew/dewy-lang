@@ -9,7 +9,7 @@ what landed. Keep this file short.
 
 | Measure | Now (2026-10-20) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 69/81 (tiers 1–2: 63/63; tier 3: 6/18), 13 held open on decisions | all milestones |
+| Acceptance ladder, design surface | 70/81 (tiers 1–2: 63/63; tier 3: 7/18), 13 held open on decisions | all milestones |
 | Acceptance ladder, current dialect | 82/82 | stays green |
 | Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.24 G instructions (was 1.36 G on 10-20 morning) | ~0.40 G (250k root lines/s) |
 | Compiler self-build | 8.0 G instructions | seconds-scale edit loop |
@@ -25,12 +25,13 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- **Refinement slice 4** (Astra, medium): joins, loops, consolidation of the bounds/numeric walkers onto facts.jo.
 
 ## Next
 
 - Tier-3 implementation (designed, no decisions needed):
-  - refinement slices 4–6 (1–3 landed: scalar facts, refinement types, lengths/fields):
+  - refinement slices 5–6 (1–4 landed): checked proofs, diagnostics. Also a bug:
+    an internal compiler error ("missing refinement entry snapshot") when a
+    dependent optional result is compared with a literal. The remaining slices:
     joins/loops, checked proofs, diagnostics;
   - effect rows slices 2–6 (slice 1 landed; ~/dev/tmp/coord/effects-design.md);
   - ownership: lifecycle hooks and drop, `$lend` checking, arenas, 6 slices
