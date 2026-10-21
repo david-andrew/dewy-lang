@@ -37,7 +37,10 @@ import statistics
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+from tools.compiler import speed_corpus
 
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / '__dewycache__' / 'speed'
@@ -47,6 +50,9 @@ GAME = 'examples/dunes.dewy'
 SYNTHETIC_FUNCTIONS = 1000
 STABLE = 1e-4          # two runs of one item must agree within 0.01%
 KEEP_BASES = 16        # cached base compilers kept (most recently used)
+IPS = 6.3e9            # compiler instructions per second on the reference machine (compile_throughput.md)
+CORPUS_WORKERS = (1, 4)
+CORPUS_JOBS = 2        # programs compiled at once; critical-path counts do not depend on load
 ACCEPT = re.compile(r'^speed: accept\s+(\S.*)$', re.MULTILINE)
 
 
@@ -384,9 +390,10 @@ def critical_result(stderr: str) -> tuple[int, int]:
         raise ValueError('Missing critical-path instruction count') from error
 
 
-def critical_once(counter: Path, active: Path, source: Path, workers: int) -> tuple[int, int]:
+def critical_once(counter: Path, active: Path, source: Path, workers: int,
+                  output: Path | None = None) -> tuple[int, int]:
     env = clean_env(DEWY_CORE_LIB=str(active / 'lib'), SLOPPY_EMIT_WORKERS=str(workers))
-    run = subprocess.run([counter, active / 'bin/dewy-core', 'build', source, '-o', active / 'program'],
+    run = subprocess.run([counter, active / 'bin/dewy-core', 'build', source, '-o', output or active / 'program'],
                          cwd=ROOT, env=env, capture_output=True, text=True)
     if run.returncode:
         raise CompileError(run.stdout + run.stderr)
@@ -419,6 +426,107 @@ def critical_main(args, staged: dict[str, Path], labels: str, workers: list[int]
     return failures
 
 
+def corpus_critical(counter: Path, staged: dict[str, Path], programs: list[Path]) -> dict:
+    """{program: {role: {workers: critical-path instructions}}}, or None for a program some compiler cannot build."""
+    out = CACHE / 'panel' / 'corpus'
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    tasks = [(program, role, n) for program in programs for role in staged for n in CORPUS_WORKERS]
+
+    def run(numbered):
+        number, (program, role, n) = numbered
+        try:
+            return critical_once(counter, staged[role], program, n, out / str(number))[0]
+        except CompileError as error:
+            return error
+    with ThreadPoolExecutor(CORPUS_JOBS) as pool:
+        results = list(pool.map(run, enumerate(tasks)))
+    shutil.rmtree(out, ignore_errors=True)
+    table: dict = {program: {role: {} for role in staged} for program in programs}
+    for (program, role, n), result in zip(tasks, results):
+        if isinstance(result, CompileError):
+            if table[program] is not None:
+                reason = [line for line in str(result).splitlines() if line.strip() and not line.startswith('{')]
+                print(f'  (left out {program.relative_to(ROOT)}: {role} cannot build it: '
+                      f'{(reason or ["?"])[0][:150]})', file=sys.stderr)
+            table[program] = None
+        elif table[program] is not None:
+            table[program][role][n] = result
+    return table
+
+
+def corpus_library_lines(active: Path, program: Path, physical: int) -> int:
+    env = clean_env(DEWY_CORE_LIB=str(active / 'lib'))
+    run = subprocess.run([active / 'bin/dewy-core', 'build', program, '--time', '-o', active / 'program'],
+                         cwd=ROOT, env=env, capture_output=True, text=True)
+    if run.returncode:
+        raise CompileError(run.stdout + run.stderr)
+    return speed_corpus.library_lines(run.stderr, physical)
+
+
+def corpus_wall(staged: dict[str, Path], programs: list[Path], n: int, runs: int, cpus: list[int]) -> dict:
+    """Median milliseconds to compile every program once, per role (runs interleaved)."""
+    order = list(staged)
+    for role in order:
+        for program in programs:
+            wall_once(staged[role], program, n, cpus)
+    totals = {role: [] for role in order}
+    for k in range(runs):
+        for role in (order if k % 2 == 0 else order[::-1]):
+            totals[role].append(sum(wall_once(staged[role], program, n, cpus)[0] for program in programs))
+    return {role: statistics.median(times) for role, times in totals.items()}
+
+
+def corpus_main(args, staged: dict[str, Path], labels: str, limit: float) -> list:
+    """Per-corpus line counts and critical-path instructions (lines/s with --wall); returns failures."""
+    counter = critical_counter()
+    order = list(staged)
+    hello = Path(wall_panel()[2][1])
+    floor = {role: {n: critical_once(counter, staged[role], hello, n)[0] for n in CORPUS_WORKERS} for role in order}
+    cpus = physical_cpus() if args.wall and not args.no_pin else []
+    print('compile corpora, critical-path instructions, G (own + largest worker; per program, then summed): ' + labels)
+    failures = []
+    for name, programs in speed_corpus.corpora(CACHE / 'panel' / 'bench-game').items():
+        if not programs:
+            print(f'  {name}: no programs yet')
+            continue
+        table = corpus_critical(counter, staged, programs)
+        kept = [program for program in programs if table[program] is not None]
+        if not kept:
+            print(f'  {name}: no program every compiler can build')
+            continue
+        counts = [speed_corpus.root_counts(program) for program in programs if program in kept]
+        lines = sum(source for source, _ in counts)
+        library = sum(corpus_library_lines(staged['candidate'], program, physical)
+                      for program, (_, physical) in zip(kept, counts))
+        print(f'  {name}: {len(kept)} programs, {lines} root lines, {library} library lines loaded (summed over compiles)')
+        total = {role: {n: sum(table[program][role][n] for program in kept) for n in CORPUS_WORKERS} for role in order}
+        walls = {n: corpus_wall(staged, kept, n, args.runs, cpus) for n in CORPUS_WORKERS} if args.wall else {}
+        for n in CORPUS_WORKERS:
+            new = total['candidate'][n]
+            line = f'    {n} worker{"s" if n != 1 else " "}  '
+            if 'base' in total:
+                old = total['base'][n]
+                change = round(delta(old, new), 2) + 0.0
+                over = change > limit
+                if over:
+                    failures.append((name, n, change))
+                line += f'{old / 1e9:8.4f} -> {new / 1e9:8.4f}  {change:+6.2f}%' + (' <-' if over else '   ')
+            else:
+                line += f'{new / 1e9:8.4f}'
+            net = new - len(kept) * floor['candidate'][n]
+            line += f'   {new / lines / 1e3:7.1f} k inst/line ({net / lines / 1e3:.1f} net of hello)'
+            if args.wall:
+                ms = walls[n]
+                line += f'   {lines / ms["candidate"] * 1e3:9.0f} lines/s'
+                if 'base' in ms:
+                    line += f' (base {lines / ms["base"] * 1e3:.0f})'
+            else:
+                line += f'   est. {lines / (new / IPS):9.0f} lines/s' if n == max(CORPUS_WORKERS) else ''
+            print(line.rstrip(), flush=True)
+    return failures
+
+
 def wall_main(args, toolchains: dict[str, Toolchain]) -> int:
     cpus = physical_cpus() if not args.no_pin else []
     workers = [int(w) for w in args.workers.split(',')]
@@ -426,6 +534,12 @@ def wall_main(args, toolchains: dict[str, Toolchain]) -> int:
     staged = {role: stage_wall(toolchain, role) for role, toolchain in toolchains.items()}
     order = list(staged)
     labels = ' -> '.join(f'{role} {toolchains[role].label}' for role in order)
+    if args.corpus:
+        failures = corpus_main(args, staged, labels, limit)
+        for name, n, change in failures:
+            print(f'speed: corpus {name} with {n} workers needs {change:+.2f}% critical-path instructions vs base '
+                  f'(limit {limit}%)', file=sys.stderr)
+        return 1 if failures else 0
     failures = critical_main(args, staged, labels, workers, limit)
     for name, n, change in failures:
         print(f'speed: {name} with {n} workers needs {change:+.2f}% critical-path instructions vs base '
@@ -474,12 +588,15 @@ def main(argv: list[str], current: Path) -> int:
     cli.add_argument('--counter', choices=('auto', 'perf', 'valgrind'), default='auto')
     cli.add_argument('--critical', action='store_true',
                      help='count critical-path instructions (own + largest worker) at --workers')
-    cli.add_argument('--wall', action='store_true', help='--critical, and also report wall-clock time')
+    cli.add_argument('--corpus', action='store_true',
+                     help='critical-path instructions, lines and lines/s of representative program corpora')
+    cli.add_argument('--wall', action='store_true',
+                     help='--critical, and also report wall-clock time (with --corpus: measured lines/s)')
     cli.add_argument('--workers', default='1,2,4', help='--critical/--wall: emission worker counts (default 1,2,4)')
     cli.add_argument('--runs', type=int, default=7, help='--wall: runs per compiler (default 7)')
     cli.add_argument('--no-pin', action='store_true', help='--wall: do not pin to one CPU per core')
     args = cli.parse_args(argv)
-    if args.wall or args.critical:
+    if args.wall or args.critical or args.corpus:
         CACHE.mkdir(parents=True, exist_ok=True)
         with (CACHE / 'speed.lock').open('w') as lock:
             lock_exclusive(lock)
