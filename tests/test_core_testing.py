@@ -20,6 +20,12 @@ def command(compiler, *arguments):
                           timeout=30, check=False)
 
 
+def shown(path):
+    """A path as the compiler prints it: / separators, and on Windows a lower-case drive."""
+    text = str(path).replace('\\', '/')
+    return text[0].lower() + text[1:] if os.name == 'nt' and text[1:2] == ':' else text
+
+
 @pytest.mark.parametrize('flags', [[], ['--release']])
 @pytest.mark.core_quick
 def test_core_native_tests(compiler, tmp_path, flags):
@@ -104,7 +110,7 @@ main = () => 0
     failed = lines[0]
     assert failed['stdout'] == 'test continued\n'
     assert failed['output'].splitlines() == [
-        f'{source}:2:5: expectation failed: nonempty input',
+        f'{shown(source)}:2:5: expectation failed: nonempty input',
         '        $expect xs.length >? 0, "nonempty input"',
         '                ^~~~~~~~~~~~~~',
         'note: xs.length is 0',
