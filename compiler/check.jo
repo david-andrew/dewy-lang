@@ -2437,6 +2437,9 @@ dewy_nested_loop_bindings = (s: int):
         body = int(nodes[s].b)
         set_list(body, declarations + kids(body))
 
+# (the value variables of loops over dictionaries: a change is made through the key)
+map_loop_values: {int: bool} = {}
+
 mutable_loop_syntax = (pos: int) -> str:
     if files[pos_file(pos)].is_dewy: return "loop @item"
     "loop mut"
@@ -2594,6 +2597,7 @@ check_for = (s: int):
                 else:
                     vl = new_local(n2, telem(vt), pos)
                     locals[vl].flags = i32(int(locals[vl].flags) | LF_BYREF)
+                    map_loop_values[vl] = true
             else if is_mut: fatal(pos, "'for mut' over a map needs key and value variables")
             nodes[s].aux = 3
             nodes[s].sym = i32(kl)
