@@ -903,6 +903,14 @@ fact_capture = (n: int, s: mut FactState) -> int:
         s.projections.push(FactProjection(value, -3, false, fact_constant(s, 0)))
         return value
     if k == .str_lit and nodes[n].aux == 0 or k == .float_lit or k == .none_lit or k == .null_lit: return 0
+    if k == .str_lit:
+        # Interpolation evaluates each part in order, then calls its formatter,
+        # which (like any opaque call) may write exposed roots.
+        loop part in kids(n):
+            if nodes[part].kind != .pair: continue
+            fact_capture(int(nodes[part].a), s)
+            fact_forget(s, part, .call)
+        return fact_new(s, FactBound(reason = .unsupported, witness = n))
     if k == .addr: return fact_capture(int(nodes[n].a), s)
     if k == .lambda or k == .fnref or k == .partial:
         fact_capture(int(nodes[n].a), s)
