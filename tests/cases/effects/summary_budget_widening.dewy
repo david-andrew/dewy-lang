@@ -1,0 +1,32 @@
+# quick
+$no_hidden_costs
+Wide:type=[f0:int64 f1:int64 f2:int64 f3:int64 f4:int64 f5:int64 f6:int64 f7:int64 f8:int64 f9:int64 f10:int64 f11:int64 f12:int64 f13:int64 f14:int64 f15:int64 f16:int64 f17:int64 f18:int64 f19:int64]
+touch_all=(@w:Wide):>void & no allocates & no blocks=>{
+    w.f0+=w.f19
+    w.f1+=w.f18
+    w.f2+=w.f17
+    w.f3+=w.f16
+    w.f4+=w.f15
+    w.f5+=w.f14
+    w.f6+=w.f13
+    w.f7+=w.f12
+    w.f8+=w.f11
+    w.f9+=w.f10
+    w.f10+=1
+    w.f11+=1
+    w.f12+=1
+    w.f13+=1
+    w.f14+=1
+    w.f15+=1
+    w.f16+=1
+    w.f17+=1
+    w.f18+=1
+    w.f19+=1
+}
+main=():>int64=>{
+    $no_hidden_costs=false
+    let w:Wide=[f0=0 f1=0 f2=0 f3=0 f4=0 f5=0 f6=0 f7=0 f8=0 f9=0 f10=1 f11=1 f12=1 f13=1 f14=1 f15=1 f16=1 f17=1 f18=1 f19=1]
+    touch_all(@w)
+    printl("{w.f0} {w.f19}")
+    return 0
+}

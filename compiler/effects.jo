@@ -677,10 +677,39 @@ effect_cleanup = (f: int, t0: int, n: int, p: PlaceIdentity, depth: int = 0):
         if ownership_type(ft): effect_cleanup(f, ft, n, p, depth + 1)
 
 
+# A place atom of a read or write: the kinds a summary may widen to a root.
+effect_place_atom = (a: EffectAtom) -> bool: (a.kind == .read or a.kind == .write) and a.place.declaration != 0
+
 effect_add = (f: int, event: EffectEvent) -> bool:
+    covered = effect_place_atom(event.atom)
+    root = if covered: place_base(event.atom.place) else: event.atom.place
     loop old in effect_summaries[f].events:
         if old.atom == event.atom: return false
+        # (a whole-root event already covers its fields)
+        if covered and old.atom.kind == event.atom.kind and old.atom.place == root: return false
     if effect_summaries[f].events.len() >= 32:
+        # Past the budget every place event widens to its whole root, still an
+        # upper bound: a kernel touching many fields of one record stays exact
+        # about which records it reads and writes.
+        kept: EffectEvent[]
+        loop old0 in effect_summaries[f].events:
+            old = old0
+            if effect_place_atom(old.atom): old.atom.place = place_base(old.atom.place)
+            seen = false
+            loop k in kept:
+                if k.atom == old.atom: seen = true
+            if not seen: kept.push(old)
+        wide = event
+        if covered: wide.atom.place = root
+        loop k in kept:
+            if k.atom == wide.atom:
+                effect_summaries[f].events = kept
+                return true
+        if kept.len() < 32:
+            kept.push(wide)
+            effect_summaries[f].events = kept
+            return true
+        effect_summaries[f].events = kept
         loop old in effect_summaries[f].events:
             if old.atom.kind == .opaque: return false
         effect_summaries[f].events.push(EffectEvent(EffectAtom(.opaque), event.witness, event.via))
@@ -1357,7 +1386,7 @@ effects_finalize = ():
             if (contract == 0 or effect_allows(contract, atom)) and not prohibited: continue
             at = if event.via != 0: event.via else: event.witness
             if at == 0: at = d
-            what = if atom.kind == .write: "mutation" else if atom.kind == .read: "read" else if atom.kind == .alloc: "allocation" else if atom.kind == .panic: "possible failure" else if atom.kind == .detach: "storage detach" else if atom.kind == .io: "I/O" else if atom.kind == .block: "blocking" else: "opaque operation or unproved implementation cost"
+            what = if atom.kind == .write: "mutation" else if atom.kind == .read: "read" else if atom.kind == .alloc: "allocation" else if atom.kind == .panic: "possible failure" else if atom.kind == .detach: "storage detach" else if atom.kind == .io: "I/O" else if atom.kind == .block: "blocking" else if atom.kind == .costly_copy: "costly copy" else if atom.kind == .escape: "escape" else if atom.kind == .spawn: "spawn" else: "opaque operation or unproved implementation cost"
             if event.atom.place.declaration != 0 and not starts_with(effect_place_name(event.atom.place), "__"): what += " of '{effect_place_name(event.atom.place)}'"
             chain = effect_witness(f, event)
             origin = if event.witness != 0 and not pos_in_lib(nodes[event.witness].pos): "; witness at {pos_str(nodes[event.witness].pos)}" else if event.witness != 0: "" else: "; witness at {pos_str(nodes[d].pos)}"
