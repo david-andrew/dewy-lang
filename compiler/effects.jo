@@ -600,6 +600,14 @@ effect_plain = (t0: int, depth: int = 0) -> bool:
         if fields[fi].boxed or not effect_plain(int(fields[fi].type), depth + 1): return false
     true
 
+# A payload-free enum (a literal union such as `'ready' | 'blocked'`) is one
+# word: its members are constants and `=?` compares words.
+effect_simple_enum = (t0: int) -> bool:
+    t = representation_type(t0)
+    if tkind(t) != .enum_: return false
+    layout(t)
+    structs[int(types[t].st)].simple_enum
+
 # Reviewed intrinsic identities, assigned by name resolution, never filenames
 # or user spelling. -1 means unclassified. Bits are residual may-costs, not
 # authority to mutate the actual; place access is collected independently.
@@ -1083,9 +1091,13 @@ effect_scan_node = (f: int, n: int):
         shift = nodes[n].op == i32(int(Tok.shl)) or nodes[n].op == i32(int(Tok.shr))
         count_ok = effect_scalar(ntype(int(nodes[n].b))) or shift and effect_count_literal(int(nodes[n].b))
         supported = nodes[n].aux == 0 and effect_word_op(nodes[n].op as Tok) and effect_scalar(ntype(int(nodes[n].a))) and count_ok
+        # (members of one literal union compare as words)
+        if not supported and nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.eq)) or nodes[n].op == i32(int(Tok.ne))):
+            supported = effect_simple_enum(ntype(int(nodes[n].a))) and effect_simple_enum(ntype(int(nodes[n].b)))
         # (small semantic integers: arithmetic that cannot promote, comparisons)
         if not supported and nodes[n].aux == 0 and effect_word(int(nodes[n].a)) and effect_word(int(nodes[n].b)):
             supported = effect_small(n) >= 0 or (effect_word_op(nodes[n].op as Tok) and effect_scalar(ntype(n)))
+    else if k == .dotname: supported = effect_plain(ntype(n))
     else if k == .unary:
         supported = effect_scalar(ntype(n)) and (nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.tilde)))
     else if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_scalar(ntype(n)): supported = true

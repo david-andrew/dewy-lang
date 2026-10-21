@@ -1,0 +1,19 @@
+# quick
+$no_hidden_costs
+State:type='idle'|'ready'|'blocked'
+Task:type=[prio:int64 state:State]
+step=(s:State):>State=>{
+    if s =? 'idle' return 'ready'
+    if s not=? 'blocked' return 'blocked'
+    return 'idle'
+}
+wake=(@t:Task):>void=>{
+    if t.state =? 'blocked' t.state='ready'
+}
+main=():>int64=>{
+    $no_hidden_costs=false
+    let t:Task=[prio=3 state='blocked']
+    wake(@t)
+    printl("{t.state} {step('idle')} {step(t.state)} {step('blocked')}")
+    return 0
+}
