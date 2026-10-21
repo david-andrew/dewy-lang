@@ -30,7 +30,7 @@ def test_scalar_fact_erasure(compiler, tmp_path, release):
 
 @pytest.mark.parametrize('name', ['unknown_parameter', 'write_after_guard', 'later_operand',
                                   'shared_capture', 'nonlinear', 'erased_call', 'join_one_sided',
-                                  'mutable_alias', 'opaque_arm', 'erased_message', 'budget', 'wrap_unknown'])
+                                  'mutable_alias', 'match_arm', 'erased_message', 'budget', 'wrap_unknown'])
 def test_scalar_fact_check_diagnostics(compiler, name):
     result = subprocess.run([compiler, 'check', CASES / f'{name}.dewy'],
                             text=True, capture_output=True, timeout=30)

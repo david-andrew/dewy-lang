@@ -715,6 +715,22 @@ fact_condition = (n: int, entry: FactState) -> FactPaths:
         result_activate(no)
     FactPaths(yes, no, reason, v, entry_state)
 
+# Assume an optional's or union's tag is (or is not) wanted.
+fact_tag = (s: mut FactState, value: int, wanted: int, truth: bool):
+    if value == 0 or not s.live: return
+    tag = fact_project(s, value, -3, false, T_INT)
+    fact_assume(s, fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, tag, fact_constant(s, wanted))), truth)
+
+# The tag one pattern establishes, or -1.
+fact_pattern_tag = (p: int, st: int) -> int:
+    k = nodes[p].kind
+    if is_union(st) and k == .pvariant: return int(nodes[p].aux2)
+    if is_union(st) and k == .plit: return int(nodes[p].aux2)
+    if types[st].kind == .opt:
+        if k == .ptype and nodes[p].aux2 != 1: return 1
+        if k == .plit and nodes[int(nodes[p].a)].kind == .none_lit: return 0
+    -1
+
 fact_unmodeled = (s: mut FactState, n: int, reason: FactReason) -> int:
     b = fact_domain(ntype(n), reason, n)
     if fact_query: fact_unknown(n, b)
@@ -1042,17 +1058,18 @@ fact_capture = (n: int, s: mut FactState) -> int:
     if k == .int_lit or k == .bool_lit:
         if not fact_scalar(ntype(n)): return fact_new(s, FactBound(reason = .unsupported, witness = n))
         return fact_constant(s, ref_encoded(nodes[n].ival, ntype(n)), n)
-    if result_active:
-        if k == .istype:
-            value = fact_capture(int(nodes[n].a), s)
-            if nodes[n].aux == -3: return fact_constant(s, 1)
-            tag = fact_project(s, value, -3, false, T_INT)
-            wanted = if nodes[n].aux >= 0: int(nodes[n].aux) else if nodes[n].aux == -2: 1 else: 0
-            other = fact_constant(s, wanted)
-            return fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, tag, other))
-        if k == .narrow or k == .unwrap:
-            value = fact_capture(int(nodes[n].a), s)
-            return fact_project(s, value, -4, false, ntype(n))
+    # An optional's or union's tag (-3: 0 for none, 1 for a value, or the
+    # member) and payload (-4) are projections of its immutable evaluation.
+    if k == .istype:
+        value = fact_capture(int(nodes[n].a), s)
+        if nodes[n].aux == -3: return fact_constant(s, 1)
+        tag = fact_project(s, value, -3, false, T_INT)
+        wanted = if nodes[n].aux >= 0: int(nodes[n].aux) else if nodes[n].aux == -2: 1 else: 0
+        other = fact_constant(s, wanted)
+        return fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, tag, other))
+    if k == .narrow or k == .unwrap:
+        value = fact_capture(int(nodes[n].a), s)
+        return fact_project(s, value, -4, false, ntype(n))
     if k == .ident: return fact_read(s, n)
     if k == .field and (nodes[n].aux >= 0 and tkind(ntype(int(nodes[n].a))) == .struct_ or nodes[n].aux == -2 and tkind(ntype(int(nodes[n].a))) == .tuple):
         base = fact_capture(int(nodes[n].a), s)
@@ -1380,20 +1397,66 @@ fact_capture = (n: int, s: mut FactState) -> int:
             ft = prune(ntype(int(nodes[n].a)))
             if types[ft].kind == .fn_: ref_assume(int(types[ft].elem), result, values, s)
         return result
-    if k == .iflet or k == .match_:
-        fact_capture(int(nodes[n].a), s)
-        fact_forget(s, n, .unsupported, true)
-        if k == .iflet:
-            yes = s; no = s
-            fact_capture(int(nodes[n].b), yes)
-            fact_capture(int(nodes[n].c), no)
+    if k == .coalesce or k == .iflet:
+        # The value path knows the tag and binds the payload; the other path
+        # knows none. Each path's own writes invalidate as anywhere else.
+        value = fact_capture(int(nodes[n].a), s)
+        yes = s
+        fact_tag(yes, value, 1, true)
+        fact_tag(s, value, 1, false)
+        y = 0
+        if k == .coalesce:
+            y = if nodes[n].aux == 1: value else: fact_project(yes, value, -4, false, ntype(n))
         else:
-            loop arm in kids(n):
-                path = s
-                fact_capture(int(nodes[arm].c), path)
-                fact_capture(int(nodes[arm].b), path)
-        fact_forget(s, n, .unsupported, true)
-        return fact_unmodeled(s, n, .unsupported)
+            l = int(nodes[n].sym)
+            if l != 0: fact_bind(yes, PlaceIdentity(.local, int(locals[l].owner), l), fact_project(yes, value, -4, false, int(locals[l].type)))
+            y = fact_capture(int(nodes[n].b), yes)
+        z = fact_capture((if k == .coalesce: int(nodes[n].b) else: int(nodes[n].c)), s)
+        result = fact_hull(fact_bound(yes, y), fact_bound(s, z), n)
+        if not yes.live: result = fact_bound(s, z)
+        if not s.live: result = fact_bound(yes, y)
+        s = fact_join(yes, s, n)
+        # (an owned binding ends here; its hook may write exposed storage)
+        if k == .iflet and ownership_decls.len() != 0: fact_forget(s, n, .call)
+        return fact_new(s, result)
+    if k == .match_:
+        # Arms are tried in order: each sees its predecessors' pattern
+        # operands and failed tags, and a matched arm knows its tag.
+        subject = int(nodes[n].a)
+        value = fact_capture(subject, s)
+        hidden = int(nodes[n].sym)
+        if hidden != 0: fact_bind(s, PlaceIdentity(.local, int(locals[hidden].owner), hidden), value)
+        exits = FactState(live = false)
+        result = FactBound()
+        first = true
+        loop arm in kids(n):
+            wild = false
+            loop p in kids(arm):
+                if nodes[p].kind == .pwild: wild = true
+                if nodes[p].kind == .plit or nodes[p].kind == .prange: fact_capture(int(nodes[p].a), s)
+                if nodes[p].kind == .prange: fact_capture(int(nodes[p].b), s)
+            path = s
+            wanted = if nkids(arm) == 1: fact_pattern_tag(kid(arm, 0), prune(ntype(subject))) else: -1
+            if wanted >= 0:
+                fact_tag(path, value, wanted, true)
+                # (a literal can fail on its own member)
+                if nodes[kid(arm, 0)].kind != .plit or not is_union(prune(ntype(subject))): fact_tag(s, value, wanted, false)
+            r = fact_capture(int(nodes[arm].b), path)
+            if path.live:
+                result = if first: fact_bound(path, r) else: fact_hull(result, fact_bound(path, r), n)
+                first = false
+            exits = fact_join(exits, path, n)
+            if wild: s.live = false
+        # Without a value, no arm matching falls through; with one, it panics.
+        valued = not has_flag(n, NF_STMT) and vc(ntype(n)) != VC_VOID and ntype(n) != T_NEVER
+        if not valued: exits = fact_join(exits, s, n)
+        s = exits
+        if ownership_decls.len() != 0: fact_forget(s, n, .call)
+        return fact_new(s, if first: fact_domain(ntype(n)) else: result)
+    if k == .field and nodes[n].aux == -3:
+        # (a variant's payload field, bound by a match arm)
+        fact_capture(int(nodes[n].a), s)
+        return fact_new(s, fact_domain(ntype(n)))
     # Opaque forms cannot export facts; evaluate each child from top so control
     # alternatives, implicit hooks and raw aliases cannot mint stale evidence.
     fact_forget(s, n, .unsupported, true)

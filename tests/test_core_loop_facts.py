@@ -228,3 +228,88 @@ def test_broken_lockstep_does_not_prove(compiler, tmp_path, name):
     assert result.returncode == 0, result.stdout + result.stderr
     ran = subprocess.run([tmp_path / 'loops'], text=True, capture_output=True, timeout=30)
     assert ran.returncode != 0 and 'index' in ran.stderr, ran.stdout + ran.stderr
+
+
+# `??` and `match` keep the facts their operands and arms leave: a value path
+# knows its tag and payload, and only a path's own writes invalidate.
+OPTIONAL = '''
+coalesced=(xs:array<int64> ys:array<int64>):>int64=>{
+    let t:int64=0
+    loop x in xs or y in ys { t=t+(x ?? 0)*(y ?? 1) }
+    return t
+}
+matched=(xs:array<int64> ys:array<int64>):>int64=>{
+    let t:int64=0
+    loop x in xs or y in ys {
+        t=t+match x {n:int64=>n <none>=>0}
+        match y {
+            n:int64=>{ t=t+n }
+            <none>=>{}
+        }
+    }
+    return t
+}
+tested=(xs:array<int64> ys:array<int64>):>int64=>{
+    let t:int64=0
+    loop x in xs or y in ys { if y isnt? none { t=t+1 } }
+    return t
+}
+kept=(xs:array<int64> o:int64? i:int64):>int64=>{
+    if i <? 0 or i >=? xs.length return 0
+    let d=o ?? 5
+    let e=match o {n:int64=>n <none>=>1}
+    return xs[i]+d+e
+}
+payload=(xs:array<int64> o:int64?):>int64=>{
+    match o {
+        n:int64=>{ if n >=? 0 and n <? xs.length return xs[n] }
+        <none>=>{}
+    }
+    return 0
+}
+main=()=>{
+    let absent:int64?=none
+    printl(coalesced([1 2 3] [4 5]))
+    printl(matched([1 2 3] [4 5]))
+    printl(tested([1 2 3] [4 5]))
+    printl(kept([1 2 3] 7 2))
+    printl(kept([1 2 3] absent 9))
+    printl(payload([1 2 3] 1))
+}
+'''
+
+
+@pytest.mark.parametrize('strict', [False, True], ids=['ordinary', 'strict'])
+def test_optional_paths_keep_facts(compiler, tmp_path, strict):
+    result = run(compiler, tmp_path, OPTIONAL, 'build', strict)
+    assert result.returncode == 0, result.stdout + result.stderr
+    ran = subprocess.run([tmp_path / 'loops'], text=True, capture_output=True, timeout=30)
+    assert ran.returncode == 0 and ran.stdout == '17\n15\n2\n17\n0\n2\n', ran.stdout + ran.stderr
+
+
+def guarded_case(statement):
+    return ('popped=(@xs:array<int64>):>int64=>{ xs.pop(); return 0 }\n'
+            'f=(@xs:array<int64> o:int64? i:int64):>int64=>{\n    if i <? 0 or i >=? xs.length return 0\n    '
+            + statement + '\n    return xs[i]+popped(@xs)\n}\n'
+            'main=()=>{ let a:array<int64>=[1 2 3]; printl(f(@a 1 2)) }\n')
+
+
+# A write in any arm or default still retires the guard.
+OPTIONAL_NEGATIVE = {
+    'arm_resize': (guarded_case('match o {n:int64=>{ xs.pop() } <none>=>{}}'), True),
+    'arm_rebind': (guarded_case('match o {n:int64=>{ i=i+n } <none>=>{}}'), True),
+    'arm_call': (guarded_case('let d=match o {n:int64=>n <none>=>popped(@xs)}; printl(d)'), False),
+    'default_call': (guarded_case('let d=o ?? popped(@xs); printl(d)'), False),
+}
+
+
+@pytest.mark.parametrize('name', list(OPTIONAL_NEGATIVE))
+def test_optional_path_writes_kill_facts(compiler, tmp_path, name):
+    source, fails = OPTIONAL_NEGATIVE[name]
+    result = run(compiler, tmp_path, source, 'check', True)
+    output = result.stdout + result.stderr
+    assert result.returncode != 0 and '/loops.dewy:5:12: error: cannot prove index is in bounds' in output, output
+    result = run(compiler, tmp_path, source, 'build', False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    ran = subprocess.run([tmp_path / 'loops'], text=True, capture_output=True, timeout=30)
+    assert (ran.returncode != 0 and 'index' in ran.stderr) == fails, ran.stdout + ran.stderr
