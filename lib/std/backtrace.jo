@@ -342,7 +342,7 @@ __backtrace_report = (rets: int[], counts: int[], fnames: str[], b: u8[], lines_
         # (runtime and library internals are left out; update and draw are called by the game loop,
         # which the top level starts: no line of it is where they were called from)
         if fname == "__game_run": game_loop = true
-        if len(fname) == 0 or starts_with(fname, "__") or starts_with(fname, "h_thunk") or fname == "_start" or fname == "_main": continue
+        if len(fname) == 0 or starts_with(fname, "__") or fname == "_start" or fname == "_main": continue
         if game_loop and starts_with(fname, "init_") and shown > 0:
             __write_err("    called by the game loop, each frame\n")
             return

@@ -72,7 +72,7 @@ lf_of_inst = (f: int) -> int:
 lf_helper = (hk: HK, t: int, p: int) -> int:
     key = "{int(hk)}:{t}:{p}"
     if let x = helper_lf.get(key): return x
-    lfuncs.push(LFunc(LK_HELPER, p, hk, t, "h_{hk}_{lfuncs.len()}"))
+    lfuncs.push(LFunc(LK_HELPER, p, hk, t, "__h_{hk}_{lfuncs.len()}"))
     x = lfuncs.len() - 1
     helper_lf[key] = x
     x
