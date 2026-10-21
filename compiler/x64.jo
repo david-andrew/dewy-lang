@@ -1437,12 +1437,16 @@ int_bin = (opc_rr: int, ext: int, ins: Ins):
     alu_v(opc_rr, ext, r, bb)
     st(d, r)
 
+pad_moves = false           # the function being emitted has a pad that depends on where it starts
+
 cmp_branch_pad = (span: int):
     # Keep a fused integer comparison and its near conditional jump within a
     # 32-byte region, including the last byte. Some x86 CPUs are sensitive to
     # crossing or ending on this boundary; pad only an affected pair.
     offset = code.len() % 32
     if offset + span >= 32: nop_pad(32 - offset)
+    # (par.jo: were the function to start 16 bytes further, would this pad differ?)
+    if offset + span >= 32 or (offset + 16) % 32 + span >= 32: pad_moves = true
 
 cmp_ops = (a: int, bb: int, branch: bool = false):
     ra = reg_of(a, RAX)
@@ -2565,6 +2569,7 @@ dbg_epis: int[]         # (while a function is emitted: where its epilogues pop 
 
 x64_function = ():
     x_int_fail.clear()
+    pad_moves = false
     loop fn_addr.len() <= ir.fn_index: fn_addr.push(-1)
     loop fn_len.len() <= ir.fn_index: fn_len.push(0)
     # (fused.jo's programs: 32, as cmp_branch_pad keeps a branch within a 32-byte region, so

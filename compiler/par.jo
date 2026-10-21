@@ -5,7 +5,8 @@
 # information, new constants). The compiler joins them in order, moving each run's offsets to
 # where its code lands: the same bytes as emitting the functions one after another here (each
 # function starts at a multiple of 16, as it would anyway; constants get their places in the
-# order they are first used, as they would anyway). A worker that fails has its run emitted here.
+# order they are first used, as they would anyway; a function whose branch pads would fall
+# elsewhere where it lands is made again here). A worker that fails has its run emitted here.
 
 use 'main.jo'
 use 'util.jo'
@@ -91,14 +92,14 @@ emit_parallel = (q: IrFn[], fin: bool[]) -> bool:
                 ok = st[0] & 0xFFFF == 0 and got.len() >= 8
             if ok:
                 t_1 = time()
-                par_join(got, r0)
+                par_join(got, r0, q, fin, cuts[w])
                 tjoin += time() - t_1
             else:
                 # (that run, here)
                 loop k in [cuts[w]..cuts[w + 1]):
                     ir = q[k]
                     emit_now(fin[k])
-        if tm: eprint("emit: {cuts.len() - 1} workers, fork {(tb - ta) * 1000.0:.1} ms, waiting and reading {tread * 1000.0:.1} ms, joining {tjoin * 1000.0:.1} ms")
+        if tm: eprint("emit: {cuts.len() - 1} workers, fork {(tb - ta) * 1000.0:.1} ms, waiting and reading {tread * 1000.0:.1} ms, joining {tjoin * 1000.0:.1} ms, {par_here} functions again here")
         true
 
 # everything a pipe gives until it is closed
@@ -134,10 +135,16 @@ par_worker = (q: IrFn[], fin: bool[], a: int, b: int, r0: int, fd: int):
     pw(out, b - a)
     loop k in [a..b):
         ir = q[k]
+        # (where it starts in each table: par_join's marks)
+        at: int[] = [code.len(), call_fix.len(), data_fix.len(), stub_fix.len(), cabi_fix.len(), elf_syms.len(), line_rows.len(), call_sites.len(), unwind_fns.len(), uw_data.len(), dbg_raw.len(), dbg_cfi.len(), ro_new.len()]
         emit_now(fin[k])
         pw(out, ir.fn_index)
         pw(out, fn_addr[ir.fn_index])
         pw(out, fn_len[ir.fn_index])
+        moved = 0
+        if pad_moves: moved = 1
+        pw(out, moved)
+        loop x in at: pw(out, x)
     tw1 = time()
     pw(out, code.len())
     out.reserve(out.len() + code.len() + 16 * (call_fix.len() + data_fix.len() + line_rows.len() + call_sites.len()) + 1024)
@@ -184,9 +191,8 @@ par_worker = (q: IrFn[], fin: bool[], a: int, b: int, r0: int, fd: int):
     pw_ints(out, dbg_cfi)
     news: int[]
     loop c in ro_new:
-        if c.0 >= r0:
-            news.push(c.0)
-            news.push(c.1)
+        news.push(c.0)
+        news.push(c.1)
     pw_ints(out, news)
     tw2 = time()
     __olen = 0                      # (the compiler's own output, not yet written, is the parent's to write)
@@ -221,123 +227,165 @@ pr_ints = (r: mut ParIn) -> int[]:
     loop _ in [0..n): xs.push(pr(r))
     xs
 
-par_join = (bytes_: u8[], r0: int):
+pr_n = (r: mut ParIn, per: int) -> int[]:
+    n = pr(r) * per
+    xs: int[]
+    xs.reserve(n)
+    loop _ in [0..n): xs.push(pr(r))
+    xs
+
+par_here = 0                # functions of workers' runs made again here (their pads moved)
+
+# A run's functions are moved as one where they land as far from where the worker made them as
+# a multiple of 32 (so their branch pads fall the same), or, whatever the distance, when their
+# pads do not depend on where they start; a function whose pads would move is made here, where
+# its place is known, and the run's next function lands elsewhere again.
+par_join = (bytes_: u8[], r0: int, q: IrFn[], fin: bool[], a: int):
     r = ParIn(bytes_)
     align = 16
     if fz_layout: align = 32
-    loop code.len() % align != 0: code.push(0xCC)
-    base = code.len()
     nf = pr(r)
+    fis: int[]
+    ats: int[]
+    lns: int[]
+    moves: int[]
+    # per function, then once more at the run's end: where it starts in each of the 13 tables
+    # (code, call_fix, data_fix, stub_fix, cabi_fix, elf_syms, line_rows, call_sites,
+    # unwind_fns, uw_data, dbg_raw, dbg_cfi, constants)
+    marks: int[]
     loop _ in [0..nf):
-        fi = pr(r)
-        at = pr(r)
-        ln = pr(r)
-        loop fn_addr.len() <= fi: fn_addr.push(-1)
-        loop fn_len.len() <= fi: fn_len.push(0)
-        fn_addr[fi] = base + at
-        fn_len[fi] = ln
+        fis.push(pr(r))
+        ats.push(pr(r))
+        lns.push(pr(r))
+        moves.push(pr(r))
+        loop _ in [0..13): marks.push(pr(r))
     nc = pr(r)
-    when BOOTSTRAP:
-        loop k in [0..nc): code.push(r.b[r.i + k])
-    else: code.extend(r.b[r.i..r.i + nc))
+    c0 = r.i
     r.i += nc
-    loop _ in [0..pr(r)):
-        p = pr(r)
-        call_fix.push((base + p, pr(r)))
-    # (constants the worker added: their places here, in the order it first used them)
-    fixes: (int, int, int)[]
-    loop _ in [0..pr(r)):
-        p = pr(r)
-        kind = pr(r)
-        off = pr(r)
-        fixes.push((base + p, kind, off))
-    loop _ in [0..pr(r)):
-        p = pr(r)
-        stub_fix.push((base + p, pr(r)))
-    loop _ in [0..pr(r)):
-        p = pr(r)
-        cabi_fix.push((base + p, pr(r)))
-    loop _ in [0..pr(r)):
-        f = pr(r)
-        cabi_adapter[f] = base + pr(r)
-    e0 = elf_syms.len()
+    calls = pr_n(r, 2)
+    datas = pr_n(r, 3)
+    stubs = pr_n(r, 2)
+    cabis = pr_n(r, 2)
+    adapters = pr_n(r, 2)
+    names: str[]
+    spos: int[]
+    slen: int[]
     loop _ in [0..pr(r)):
         n = pr(r)
-        nm = str_from_bytes(r.b[r.i..r.i + n))
+        names.push(str_from_bytes(r.b[r.i..r.i + n)))
         r.i += n
-        s = pr(r)
-        elf_syms.push((nm, base + s, pr(r)))
+        spos.push(pr(r))
+        slen.push(pr(r))
     rows = pr_ints(r)
-    loop k in [0..rows.len() / 2):
-        line_rows.push(base + rows[2 * k])
-        line_rows.push(rows[2 * k + 1])
     sites = pr_ints(r)
-    loop k in [0..sites.len() / 2):
-        call_sites.push(base + sites[2 * k])
-        call_sites.push(sites[2 * k + 1])
-    u0 = uw_data.len()
-    nu = pr(r)
-    uws: (int, int, int, int)[]
-    loop _ in [0..nu):
-        s = pr(r)
-        e = pr(r)
-        kind = pr(r)
-        sz = pr(r)
-        uws.push((s, e, kind, sz))
-    loop u in uws:
-        sz = u.3
-        if u.2 == UW_SAVES: sz += u0
-        unwind_fns.push((base + u.0, base + u.1, u.2, sz))
-    loop x in pr_ints(r): uw_data.push(x)
-    # dbg_raw: per function its symbol, start, length, frame, count; per variable 6 numbers (lo, hi: code)
+    uws = pr_n(r, 4)
+    uwd = pr_ints(r)
     raw = pr_ints(r)
-    k = 0
-    loop k < raw.len():
-        dbg_raw.push(raw[k] + e0)
-        dbg_raw.push(raw[k + 1] + base)
-        dbg_raw.push(raw[k + 2])
-        dbg_raw.push(raw[k + 3])
-        cnt = raw[k + 4]
-        dbg_raw.push(cnt)
-        k += 5
-        loop _ in [0..cnt):
-            dbg_raw.push(raw[k])
-            dbg_raw.push(raw[k + 1])
+    cfi = pr_ints(r)
+    news = pr_ints(r)
+    ends: int[] = [nc, calls.len() / 2, datas.len() / 3, stubs.len() / 2, cabis.len() / 2, names.len(), rows.len(), sites.len(), uws.len() / 4, uwd.len(), raw.len(), cfi.len(), news.len() / 2]
+    loop x in ends: marks.push(x)
+    starts: int[]           # the worker's constants: where it put each, and where each is here
+    to: int[]
+    j = 0
+    loop j < nf:
+        loop code.len() % align != 0: code.push(0xCC)
+        shift = code.len() - ats[j]
+        e = j
+        loop e < nf and ((shift & 31) == 0 or moves[e] == 0): e += 1
+        if e == j:
+            ir = q[a + j]
+            emit_now(fin[a + j])
+            par_here += 1
+            loop k in [marks[13 * j + 12]..marks[13 * j + 25]):
+                starts.push(news[2 * k])
+                to.push(ro_const(news[2 * k + 1]))
+            j += 1
+            continue
+        m0 = 13 * j
+        m1 = 13 * e
+        # (constants the worker added: their places here, in the order it first used them)
+        loop k in [marks[m0 + 12]..marks[m1 + 12]):
+            starts.push(news[2 * k])
+            to.push(ro_const(news[2 * k + 1]))
+        cs = ats[j]
+        ce = marks[m1]
+        when BOOTSTRAP:
+            loop k in [cs..ce): code.push(r.b[c0 + k])
+        else: code.extend(r.b[c0 + cs..c0 + ce))
+        loop k in [j..e):
+            fi = fis[k]
+            loop fn_addr.len() <= fi: fn_addr.push(-1)
+            loop fn_len.len() <= fi: fn_len.push(0)
+            fn_addr[fi] = ats[k] + shift
+            fn_len[fi] = lns[k]
+        loop k in [marks[m0 + 1]..marks[m1 + 1]): call_fix.push((calls[2 * k] + shift, calls[2 * k + 1]))
+        loop k in [marks[m0 + 2]..marks[m1 + 2]):
+            kind = datas[3 * k + 1]
+            off = datas[3 * k + 2]
+            if kind == 0 and off >= r0:
+                # (within which of the worker's constants)
+                i = starts.len() - 1
+                loop i > 0 and starts[i] > off: i -= 1
+                if i >= 0 and starts[i] <= off: off = to[i] + (off - starts[i])
+            data_fix.push((datas[3 * k] + shift, kind, off))
+        loop k in [marks[m0 + 3]..marks[m1 + 3]): stub_fix.push((stubs[2 * k] + shift, stubs[2 * k + 1]))
+        loop k in [marks[m0 + 4]..marks[m1 + 4]): cabi_fix.push((cabis[2 * k] + shift, cabis[2 * k + 1]))
+        loop k in [0..adapters.len() / 2):
+            p = adapters[2 * k + 1]
+            if p >= cs and p < ce: cabi_adapter[adapters[2 * k]] = p + shift
+        e0 = elf_syms.len() - marks[m0 + 5]
+        loop k in [marks[m0 + 5]..marks[m1 + 5]): elf_syms.push((names[k], spos[k] + shift, slen[k]))
+        k = marks[m0 + 6]
+        loop k < marks[m1 + 6]:
+            line_rows.push(rows[k] + shift)
+            line_rows.push(rows[k + 1])
+            k += 2
+        k = marks[m0 + 7]
+        loop k < marks[m1 + 7]:
+            call_sites.push(sites[k] + shift)
+            call_sites.push(sites[k + 1])
+            k += 2
+        u0 = uw_data.len() - marks[m0 + 9]
+        loop k in [marks[m0 + 8]..marks[m1 + 8]):
+            sz = uws[4 * k + 3]
+            if uws[4 * k + 2] == UW_SAVES: sz += u0
+            unwind_fns.push((uws[4 * k] + shift, uws[4 * k + 1] + shift, uws[4 * k + 2], sz))
+        loop k in [marks[m0 + 9]..marks[m1 + 9]): uw_data.push(uwd[k])
+        # dbg_raw: per function its symbol, start, length, frame, count; per variable 6 numbers (lo, hi: code)
+        k = marks[m0 + 10]
+        loop k < marks[m1 + 10]:
+            dbg_raw.push(raw[k] + e0)
+            dbg_raw.push(raw[k + 1] + shift)
             dbg_raw.push(raw[k + 2])
             dbg_raw.push(raw[k + 3])
-            dbg_raw.push(raw[k + 4] + base)
-            dbg_raw.push(raw[k + 5] + base)
-            k += 6
-    # dbg_cfi: per function its start (code), length, body, then the saved registers and epilogues
-    cfi = pr_ints(r)
-    k = 0
-    loop k < cfi.len():
-        dbg_cfi.push(cfi[k] + base)
-        dbg_cfi.push(cfi[k + 1])
-        dbg_cfi.push(cfi[k + 2])
-        ns = cfi[k + 3]
-        dbg_cfi.push(ns)
-        k += 4
-        loop _ in [0..2 * ns):
-            dbg_cfi.push(cfi[k])
+            cnt = raw[k + 4]
+            dbg_raw.push(cnt)
+            k += 5
+            loop _ in [0..cnt):
+                dbg_raw.push(raw[k])
+                dbg_raw.push(raw[k + 1])
+                dbg_raw.push(raw[k + 2])
+                dbg_raw.push(raw[k + 3])
+                dbg_raw.push(raw[k + 4] + shift)
+                dbg_raw.push(raw[k + 5] + shift)
+                k += 6
+        # dbg_cfi: per function its start (code), length, body, then the saved registers and epilogues
+        k = marks[m0 + 11]
+        loop k < marks[m1 + 11]:
+            dbg_cfi.push(cfi[k] + shift)
+            dbg_cfi.push(cfi[k + 1])
+            dbg_cfi.push(cfi[k + 2])
+            ns = cfi[k + 3]
+            dbg_cfi.push(ns)
+            k += 4
+            loop _ in [0..2 * ns):
+                dbg_cfi.push(cfi[k])
+                k += 1
+            ne = cfi[k]
+            dbg_cfi.push(ne)
             k += 1
-        ne = cfi[k]
-        dbg_cfi.push(ne)
-        k += 1
-        loop _ in [0..ne):
-            dbg_cfi.push(cfi[k])
-            k += 1
-    news = pr_ints(r)
-    starts: int[]
-    to: int[]
-    loop j in [0..news.len() / 2):
-        starts.push(news[2 * j])
-        to.push(ro_const(news[2 * j + 1]))
-    loop f in fixes:
-        off = f.2
-        if f.1 == 0 and off >= r0:
-            # (within which of the worker's constants)
-            j = starts.len() - 1
-            loop j > 0 and starts[j] > off: j -= 1
-            if j >= 0 and starts.len() > 0 and starts[j] <= off: off = to[j] + (off - starts[j])
-        data_fix.push((f.0, f.1, off))
+            loop _ in [0..ne):
+                dbg_cfi.push(cfi[k])
+                k += 1
+        j = e
