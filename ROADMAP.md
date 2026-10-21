@@ -29,9 +29,10 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: paused (quota); next after the Sol review of the parallel pipeline.
-- Sol: correctness review of fused/partitioned/lazy-parse determinism.
-- Opus: strict combined-loop facts.
+- Astra: paused (quota). The Sol parallel review found 2 diagnostic-order bugs,
+  both fixed (9109989b), with guards extended.
+- Opus: fact gaps (counter equality, `??`/`match` facts, spurious `__keys`
+  warning). Combined-loop facts landed (122cb41d).
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
 
