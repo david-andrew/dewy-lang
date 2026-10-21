@@ -11,7 +11,9 @@ what landed. Keep this file short.
 |---|---|---|
 | Acceptance ladder, design surface | 82/82 (tiers 1–2: 63/63; tier 3: 19/19), 12 held open on decisions | all milestones |
 | Acceptance ladder, current dialect | 82/82 | stays green |
-| Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.19 G instructions (was 1.36 G on 10-20 morning) | ~0.40 G (250k root lines/s) |
+| Fresh compile, 22k-line synthetic, wall clock, 4 workers (i7-6700) | 175 ms | ≤88 ms (250k lines/s) |
+| Same, single-thread instructions (guardrail) | 1.19 G (was 1.36 G on 10-20) | ~0.75 G; never regress |
+| Hello-world compile | 31 ms (147 M, all library) | ≤10 ms |
 | Compiler self-build | 9.35 G instructions (the compiler grew) | seconds-scale edit loop |
 | Game-tick kernel vs C -O2 (time) | 1.6× default and release (default was 6.3× before small-leaf inlining) | ~1× both |
 | Worst other kernels vs C (time, default) | params 1.75×, graph 1.7×, string_equal ~1.25×, recursive_tree 1.4× | ≤1.2× |
@@ -29,7 +31,7 @@ only.
 - Astra: ownership slice 2 part 2 (resource containers, recursive/optional owners,
   field moves, closure copyability, generic hooks); part 1 (hooks, inheritance,
   inline aggregates, cleanup) landed.
-- Opus: compile-throughput strategy study (library caching, parallelism).
+- Opus: fused partition workers pilot (compile wall clock).
 
 ## Next
 
@@ -38,15 +40,15 @@ only.
   - ownership slices 4–6 (1, 2 in flight, 3 `$lend`): allocator runtime,
     escape promotion, integration
     (~/dev/tmp/coord/ownership-design.md);
-- Compile throughput, toward ~0.40 G. Profile (10-21, 1.217 G): checking 371 M,
-  optimization 248 M, x64 211 M, lowering 185 M, parse 85 M, lexer 49 M, prelude
-  38 M (~/dev/tmp/coord/throughput-profile-2026-10-21.md). Structural projects,
-  each estimated (not measured):
-  - shared optimizer walks landed (−33 M synthetic, −3% self-build); the rest
-    of the optimizer is sub-percent tweaks;
-  - the lexer: 49 M against a 20 M target.
-  These reach ~1.05 G; 0.40 G needs a bigger idea (per-line checking cost is
-  ~17k instructions).
+- Compile throughput. Strategy: ~/dev/tmp/coord/throughput-strategy-2026-10-21.md.
+  The root program is 86% of the work (46k instructions/line); library 13%;
+  only optimize+x64 (36%) runs in parallel today. 0.40 G single-threaded is not
+  credible, so the target is now wall clock with 4 workers. Projects, in order:
+  1. fused partition workers: lower→optimize→x64 in the emission fork (51%
+     parallel; modelled 120–136 ms);
+  2. partitioned checking with long-lived workers (modelled 90–110 ms);
+  3. a toolchain-baked library image (question 22);
+  4. checker name lookup by id plus a fused zonk (≤6%).
 - Runtime gaps:
   - float compare/negate selection;
   - outer-target SIMD (particles);
@@ -122,6 +124,9 @@ only.
 16. Partial application of an overloaded function without a type annotation:
     the version leaving the fewest parameters open wins (implemented
     provisionally). OK?
+22. A library image built and shipped with the toolchain (keyed by compiler and
+    library hash, fresh fallback): hello 31 → ~5 ms, synthetic −3 to −13%. GOALS
+    says a persistent cache is not how Dewy stays fast; is a shipped image OK?
 15. Provisional file helpers: `copy_file`, `rename_file`, `make_dirs`,
     `walk_dir`, `glob`, `file_size`, `file_time`, `chmod`, `env`. Keep, rename
     or drop?
