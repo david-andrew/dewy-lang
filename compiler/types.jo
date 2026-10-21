@@ -915,6 +915,8 @@ type_str_in = (t0: int, dewy: bool) -> str:
             # (the bundled exact fraction is the builtin `rational`)
             if dewy and nm == "Rational" and bundled_rational_type(t0): return "rational"
             if dewy and nm == "RationalWord" and bundled_word_rational_type(t0): return "rational<int64>"
+            if dewy and nm == "Set" and int(structs[si].ntargs) == 1 and is_dewy_set_type(t0):
+                return "set<{type_str(struct_targ(si, 0), true)}>"
             if dewy and nm == "Map" and int(structs[si].ntargs) == 2:
                 return "dict<{type_str(struct_targ(si, 0), true)} {type_str(struct_targ(si, 1), true)}>"
             if not dewy and nm == "NDArray" and int(structs[si].ntargs) == 1: return "{type_str_postfix(struct_targ(si, 0), false)}[,]"

@@ -1896,6 +1896,9 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
     last_err = ""
     last_err_pos = 0          # (where the argument it is about is: the error points there)
     last_err_arg = 0          # (which argument, from 1)
+    # (candidates that got equally far but fail there for different reasons: blaming one of
+    # them is arbitrary, as len(thing) told of a GpuBuffer's)
+    last_err_tie = false
     recv_fits = false         # (some candidate takes the object of x.f(...), whatever else fails)
     best = -1
     # (an argument that is a number of a known type, the first such, rules out before anything is
@@ -1971,10 +1974,14 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                     if not ok2:
                         ok = false
                         if i + 1 < last_err_arg: break
+                        prev_err = last_err
+                        prev_arg = last_err_arg
                         last_err_arg = i + 1
                         mutable = "mut parameters"
                         if caller_dewy(): mutable = "`@` parameters"
                         last_err = "argument {i + 1} must have type {sig_dt(cd.decl, subst(pt, cd.binds))} ({mutable} need an exact match)"
+                        if prev_arg < i + 1: last_err_tie = false
+                        else if prev_err != last_err: last_err_tie = true
                         break
                     cost += r
                     continue
@@ -1996,6 +2003,8 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                                 fi = j
                                 break
                     a = cd.args[fi]
+                    prev_err = last_err
+                    prev_arg = last_err_arg
                     last_err_arg = i + 1
                     ptx = subst(cd.sig.params[fi], cd.binds)
                     if nodes[a].type != 0: last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' expects {sig_dt(d, ptx)}, found {dt(ntype(a))}{variant_hint(a, ptx)}"
@@ -2035,6 +2044,8 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                     if nodes[a].kind == .lambda and nkids(a) == 2 and name_of(int(nodes[int(cd.decl)].name)) == "sort": last_err += " (`sort_with(xs, (a, b): a.hp > b.hp)` sorts by a comparison, `sort_by(xs, (x): x.hp)` by a key)"
                     if tkind(ptx) == .cfn and (nodes[a].kind == .lambda or (nodes[a].type != 0 and tkind(ntype(a)) == .fn_)):
                         last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' is called from C: give it a top-level function marked @cabi (a function value made in the program cannot be)"
+                    if prev_arg < i + 1: last_err_tie = false
+                    else if prev_err != last_err: last_err_tie = true
                     last_err_pos = nodes[a].pos
                     break
                 cost += r
@@ -2065,8 +2076,13 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         # (f(e) with e a union and an overload of f for each of its members: chosen by what e holds)
         ud = union_dispatch(n, name, decls, args, expected)
         if ud >= 0: return ud
+        if last_err_tie:
+            last_err = ""
+            last_err_pos = 0
         if nodes[n].aux2 == -9 and args.len() > 0:
-            fatal(nodes[n].pos, "{dt(ntype(unnamed(args[0])))} has no field '{name_of(name)}' or matching zero-argument member: {last_err}")
+            # (when nothing of the name takes the object, what its argument expects is beside the point)
+            why = if len(last_err) > 0 and recv_fits: ": " + last_err else: ""
+            fatal(nodes[n].pos, "{dt(ntype(unnamed(args[0])))} has no field '{name_of(name)}' or matching zero-argument member{why}")
         # (x.f() with an x that may be none: the function is there for its value)
         if args.len() > 0 and nodes[unnamed(args[0])].type != 0 and types[prune(ntype(unnamed(args[0])))].kind == .opt:
             at = prune(ntype(unnamed(args[0])))
@@ -3412,8 +3428,8 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             if has_var(prune(ntype(args[0]))):
                 tsh = "this value (its type is not known yet)"
                 if types[t0].kind == .array: tsh = "an array"
-                fatal(nodes[n].pos, "no field or function '{name_of(name)}' for {tsh}{suggestion(name_of(name), surface_names(cands, nodes[n].pos))}")
-            fatal(nodes[n].pos, "no field or function '{name_of(name)}' for type {tsh}{suggestion(name_of(name), surface_names(cands, nodes[n].pos))}")
+                fatal(nodes[n].pos, "no field or function '{name_of(name)}' for {tsh}{suggestion(name_of(name), surface_names(cands, nodes[n].pos), t0)}")
+            fatal(nodes[n].pos, "no field or function '{name_of(name)}' for type {tsh}{suggestion(name_of(name), surface_names(cands, nodes[n].pos), t0)}")
         # a variable of the same name hides the function or type
         hs = lookup(name)
         if hs != 0 and syms[hs].kind == .local:
@@ -4344,6 +4360,29 @@ member_call_without_arguments = (t: int, name: int) -> bool:
 receiver_text = (n: int) -> str:
     if nodes[n].kind == .ident: return name_of(int(nodes[n].name))
     "x"
+
+# (does a function of this name take a t first: `.length` of a type that has no len has none;
+# fn_names_for's names are any that might)
+receiver_fits = (name: str, t0: int) -> bool:
+    t = prune(t0)
+    if has_var(t): return true
+    k = tkind(t)
+    loop it in intrinsics:
+        if it.name == name and (not it.arr or k == .array or k == .fixed or k == .str_): return true
+    nm = intern(name)
+    tables = [modules[cur_mod()].names, prelude]
+    loop tm in method_modules(t):
+        if tm != cur_mod(): tables.push(modules[tm].names)
+    loop tbl in tables:
+        s = tbl.get(nm) ?? 0
+        loop s != 0:
+            if syms[s].kind == .fns and syms[s].decl != 0 and nkids(int(syms[s].decl)) > 0:
+                sig = fn_sig(int(syms[s].decl))
+                if sig.params.len() > 0:
+                    rb = fill(0, int(sig.ntp))
+                    if match_type(sig.params[0], t, rb, 0) >= 0: return true
+            s = int(syms[s].next)
+    false
 
 fn_names_for = (t: int) -> int[]:
     out = method_names(t)
@@ -7231,7 +7270,7 @@ check_expr = (n: int, expected: int) -> int:
                     fatal(nodes[n].pos, "a Body is a handle into its world: ask the world, `w.pos(b)`, `w.velocity(b)`, `w.rotation(b)`, and change it there, `w.set_pos(b, p)`, `w.set_velocity(b, v)`, `w.push(b, impulse)`")
                 cands = fn_names_for(bt)
                 # (Dewy's length of a library container or a sequence, as Heap and Pool: its `len`)
-                if files[pos_file(nodes[n].pos)].is_dewy and name_of(fname) == "length" and cands.contains(intern("len")) and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
+                if files[pos_file(nodes[n].pos)].is_dewy and name_of(fname) == "length" and cands.contains(intern("len")) and receiver_fits("len", bt) and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
                     nodes[n] = nodes[bc_call("len", [int(nodes[n].a)], nodes[n].pos)]
                     return check_expr(n, expected)
                 loop c in cands:
@@ -7268,7 +7307,7 @@ check_expr = (n: int, expected: int) -> int:
                         et = pushed_type(gn)
                         if len(et) == 0: et = "Thing"
                         fatal(nodes[n].pos, "the type of what '{gn}' holds is not known here (it starts empty): write it where '{gn}' is made, as {jd(nodes[n].pos, "`{gn}: {et}[] = []`", "`let {gn}:array<{et}> = []`")}")
-                fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}'{suggestion(name_of(fname), surface_names(cands, nodes[n].pos))}")
+                fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}'{suggestion(name_of(fname), surface_names(cands, nodes[n].pos), bt)}")
     else if k == .dotname:
         if ide_sentinel != 0 and int(nodes[n].name) == ide_sentinel: ide_complete_variants(ex)
         et = ex

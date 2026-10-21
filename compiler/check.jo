@@ -428,7 +428,9 @@ edit_distance = (a: str, b: str, limit: int) -> int:
 
 # the closest of the candidate names (" (did you mean 'x'?)"), or ""; ties go to the longest
 # common prefix, and a short name that starts the misspelling (len / lenght) counts as close
-suggestion = (name: str, candidates: int[]) -> str:
+# (recv: the type whose member was asked for; a habit that names a member, `.length`, is
+# told only when that type has it)
+suggestion = (name: str, candidates: int[], recv: int = 0) -> str:
     h = habit_name(name)
     if len(h) > 0:
         # (`push` only where there is one: a texture's size is not its len)
@@ -437,6 +439,11 @@ suggestion = (name: str, candidates: int[]) -> str:
         if find(w, "(") > 0 and find(w, " ") < 0: w = w[..find(w, "("))     # (`random_item(xs)`: random_item)
         if find(w, ".") > 0: w = w[find(w, ".") + 1..]                       # (`xs.remove(0)`: remove)
         known = w == "true" or w == "false" or w == "none" or find(w, " ") >= 0 or find(w, "`") >= 0 or (len(w) > 0 and w[0] == '.')
+        if recv != 0 and len(w) > 1 and w[0] == '.':
+            e = 1
+            loop e < len(w) and is_ident_char(w[e]): e += 1
+            member = w[1..e)
+            known = receiver_fits((if member == "length": "len" else: member), recv)
         loop c in candidates:
             if known: break
             if name_of(c) == w: known = true
