@@ -491,6 +491,8 @@ dn_power = (op: DewyToken) -> int:
     match op:
         assign, plus_assign, minus_assign, star_assign, slash_assign, power_assign, floor_assign, percent_assign, shl_assign, shr_assign, amp_assign, pipe_assign, and_assign, or_assign, xor_assign, dot_plus_assign, dot_minus_assign, dot_star_assign, dot_slash_assign, dot_power_assign, dot_floor_assign, dot_percent_assign: 10
         arrow: 20
+        pipe_left: 24
+        pipe_right: 25
         function: 30
         returns: 40
         colon: 45
@@ -906,7 +908,7 @@ dn_expr = (minimum: int) -> int:
             left = dn_op_node(.flat, .range_apply, pos_off(dewy_syntax[left].pos), parts)
             continue
         value_rhs = dn_token_assignment(op) or (op == .assign and dw_name(left) != "")
-        right = if value_rhs: dn_value(power + 1) else: dn_expr(if op == .function or op == .caret or op == .dot_caret or op == .coalesce: power else: power + 1)
+        right = if value_rhs: dn_value(power + 1) else: dn_expr(if op == .function or op == .caret or op == .dot_caret or op == .coalesce or op == .pipe_left: power else: power + 1)
         if op == .comma:
             parts: int[]
             if dw_op(left) == .comma: parts = dw_children(left)

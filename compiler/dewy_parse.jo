@@ -1707,6 +1707,12 @@ dw_expr = (id: int) -> int:
             set_list(n, args)
             if bracket and args.len() == 1: nodes[n].b = i32(args[0])
             return n
+        # `x |> @f` and `@f <| x`: the value supplied to the callable expression
+        if op == .pipe_right or op == .pipe_left:
+            n = mk(.call, pos)
+            nodes[n].a = i32(dw_expr(if op == .pipe_right: right else: left))
+            set_list(n, [dw_expr(if op == .pipe_right: left else: right)])
+            return n
         if op == .coalesce:
             dw_coalesce_arithmetic(left, right)
             n = mk(.coalesce, pos)

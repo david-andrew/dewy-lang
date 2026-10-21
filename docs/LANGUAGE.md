@@ -454,6 +454,12 @@ for example `let twice:<(value:int64):>int64> = (* 2)`. A module declaration suc
 as `twice = (* 2)` can infer its parameter type at calls, like other functions.
 Operators with prefix meanings keep those meanings: `(-1)` is a negative value.
 
+Pipes call a callable expression: `x |> @f` is `f(x)` and chains left to right
+(`3 |> @square |> @inc`), while `@f <| x` chains right to left
+(`@inc <| @square <| 3`). The callable side is an ordinary expression, so a named
+function is written `@name`, and a function literal or a function-valued binding
+pipes as written. Pipes bind more loosely than `=>` and arithmetic.
+
 Function signatures can bound direct place effects with `reads<place>`,
 `mutates<place>`, and `no_effects`:
 

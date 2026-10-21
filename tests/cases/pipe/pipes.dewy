@@ -1,0 +1,12 @@
+# `|>` supplies a value to the callable on its right, `<|` to the one on its left
+square = (x:int64):>int64 => x * x
+inc = (x:int64):>int64 => x + 1
+printl(3 |> @square)
+printl(3 |> @square |> @inc)          # left to right: inc(square(3))
+printl(@inc <| @square <| 3)          # right to left: inc(square(3))
+let r = 2 + 1 |> @square              # arithmetic binds tighter
+printl(r)
+printl(5 |> (x:int64) => x * 10)      # a function literal pipes as written
+f = @inc
+printl(4 |> f)
+printl([1 2 3] |> @sum)
