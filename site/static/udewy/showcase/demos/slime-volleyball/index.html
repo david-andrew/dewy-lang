@@ -1,0 +1,1651 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>test_slime_volleyball</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+        body.dom-mode { max-width: none; margin: 0; padding: 0; }
+        #udewy-dom-root { min-height: 100vh; }
+        body.canvas-mode { max-width: none; margin: 0; padding: 0; overflow: hidden; background: #000; }
+        #output { background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; white-space: pre-wrap; font-family: monospace; }
+        #output:empty { display: none; }
+        #canvas { display: none; image-rendering: pixelated; }
+        body.canvas-mode #canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+<link rel="stylesheet" href="/udewy/assets/css/archive.css"><script>if(window.top===window)addEventListener("DOMContentLoaded",()=>{const p=document.createElement("p");p.className="udewy-archive-banner udewy-archive-pill";p.setAttribute("role","note");p.innerHTML='µDewy is archived and no longer developed. This is a snapshot of its documentation. <a href="/">→ Dewy</a>';document.body.append(p)});</script></head>
+<body>
+    <pre id="output"></pre>
+
+    <script id="wasm-module" type="application/wasm-b64">
+AGFzbQEAAAABPQhgAn5+AX5gAX4BfmAAAX5gA35+fgF+YAR+fn5+AX5gBn5+fn5+fgF+YAV+fn5+fgF+YAd+fn5+fn5+AX4C7wxCA2VudgZtZW1vcnkCACADZW52CGhvc3RfbG9nAAADZW52CWhvc3RfZXhpdAABA2Vudglob3N0X3RpbWUAAgNlbnYLaG9zdF9yYW5kb20AAgNlbnYRaG9zdF9kb21fc2V0X3RleHQAAANlbnYPaG9zdF9kb21fYXBwZW5kAAADZW52Dmhvc3RfZG9tX2NsZWFyAAIDZW52E2hvc3RfZG9tX2FwcGVuZF9pbnQAAQNlbnYMaG9zdF9sb2dfaW50AAEDZW52EGhvc3RfY2FudmFzX2luaXQAAANlbnYRaG9zdF9jYW52YXNfd2lkdGgAAgNlbnYSaG9zdF9jYW52YXNfaGVpZ2h0AAIDZW52E2hvc3RfY2FudmFzX3ByZXNlbnQAAgNlbnYbaG9zdF9jYW52YXNfc2V0X2FzcGVjdF9sb2NrAAEDZW52EGhvc3RfZnJhbWVfY291bnQAAgNlbnYPaG9zdF9mcmFtZV90aW1lAAIDZW52EWhvc3Rfd2luZG93X3dpZHRoAAIDZW52Emhvc3Rfd2luZG93X2hlaWdodAACA2Vudg5ob3N0X3BvaW50ZXJfeAACA2Vudg5ob3N0X3BvaW50ZXJfeQACA2VudhFob3N0X3BvaW50ZXJfZG93bgACA2VudhRob3N0X3BvaW50ZXJfYnV0dG9ucwACA2VudhJob3N0X3BvaW50ZXJfd2hlZWwAAgNlbnYNaG9zdF9rZXlfZG93bgAAA2VudhBob3N0X2tleV9wcmVzc2VkAAADZW52EWhvc3Rfa2V5X3JlbGVhc2VkAAADZW52D2hvc3RfYXVkaW9faW5pdAADA2Vudg9ob3N0X2F1ZGlvX3BsYXkAAgNlbnYWaG9zdF9hdWRpb19zYW1wbGVfcmF0ZQACA2VudhZob3N0X2F1ZGlvX3N0cmVhbV9pbml0AAADZW52F2hvc3RfYXVkaW9fc3RyZWFtX3dyaXRlAAIDZW52H2hvc3RfYXVkaW9fc3RyZWFtX25lZWRzX3NhbXBsZXMAAgNlbnYPaG9zdF93ZWJnbF9pbml0AAQDZW52FGhvc3Rfd2ViZ2xfdW5pZm9ybTFpAAMDZW52FGhvc3Rfd2ViZ2xfdW5pZm9ybTJpAAQDZW52FWhvc3Rfd2ViZ2xfdW5pZm9ybTFpdgAEA2VudhVob3N0X3dlYmdsX3VuaWZvcm0yaXYABANlbnYRaG9zdF93ZWJnbF9yZW5kZXIAAgNlbnYNaG9zdF9ncHVfaW5pdAAAA2VudhVob3N0X2dwdV9zZXRfdmlld3BvcnQAAANlbnYOaG9zdF9ncHVfY2xlYXIAAwNlbnYgaG9zdF9ncHVfc2V0X3BlcnNwZWN0aXZlX2ZydXN0dW0ABQNlbnYYaG9zdF9ncHVfc2V0X3ZpZXdfbWF0cml4AAEDZW52FGhvc3RfZ3B1X3NldF90ZXh0dXJlAAEDZW52Emhvc3RfZ3B1X3NldF9ibGVuZAABA2Vudhdob3N0X2dwdV9zZXRfZGVwdGhfdGVzdAABA2Vudhhob3N0X2dwdV9zZXRfZGVwdGhfd3JpdGUAAQNlbnYXaG9zdF9ncHVfc2V0X2xpbmVfd2lkdGgAAQNlbnYPaG9zdF9ncHVfc3VibWl0AAMDZW52Fmhvc3RfZ3B1X292ZXJsYXlfYmVnaW4AAANlbnYUaG9zdF9ncHVfb3ZlcmxheV9lbmQAAgNlbnYXaG9zdF9ncHVfY3JlYXRlX3RleHR1cmUABgNlbnYQaG9zdF9ncHVfcHJlc2VudAACA2VudhVob3N0X2dwdV93aW5kb3dfd2lkdGgAAgNlbnYWaG9zdF9ncHVfd2luZG93X2hlaWdodAACA2VudhVob3N0X2F1ZGlvX3F1ZXVlX2luaXQAAANlbnYVaG9zdF9hdWRpb19xdWV1ZV9wdXNoAAADZW52FWhvc3RfYXVkaW9fcXVldWVfc2l6ZQACA2VudhN1ZF9kb21fZ2V0X3RleHRfbGVuAAEDZW52D3VkX2RvbV9nZXRfdGV4dAADA2VudhB1ZF9kb21fZ2V0X2NhcmV0AAEDZW52EHVkX2RvbV9zZXRfY2FyZXQAAANlbnYZdWRfZG9tX2FkZF9ldmVudF9saXN0ZW5lcgAEA2Vudgx1ZF9kb21fdmFsdWUAAwNlbnYMdWRfZG9tX2ZvY3VzAAEDNDMBAQEBAQECAQEBAQIBAQYHBQcBAwcHBQcHAQIBAgIBAgICAgIEAgICAgIBAgICAgICAgIEBAFwADIGCQF/AUGAgIABCwcbAgRtYWl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
+    </script>
+
+
+    <script>
+const memory = new WebAssembly.Memory({ initial: 32 });
+let outputElement = null;
+let domNextHandle = 1;
+let domRootHandle = 0;
+const domNodes = new Map();
+const domHandles = new WeakMap();
+
+// Canvas state
+let canvas = null;
+let ctx = null;
+let canvasBuffer = null;
+let canvasBufferPtr = 0;
+let canvasBufferBytes = 0;
+let canvasWidth = 0;
+let canvasHeight = 0;
+let frameCount = 0;
+let startTime = 0;
+let canvasMode = false;
+let wasmInstance = null;
+let canvasAspectWidth = 0;
+let canvasAspectHeight = 0;
+
+// Audio state (one-shot mode)
+let audioCtx = null;
+let audioSampleRate = 44100;
+let audioNumSamples = 0;
+let audioChannels = 1;
+let audioBufferPtr = 0;
+let audioBufferBytes = 0;
+let audioPendingPlay = false;
+let audioResumePending = false;
+let audioPromptTimer = null;
+
+// Audio streaming state
+let audioStreamMode = false;
+
+// WebGL fullscreen shader state
+let webglCanvas = null;
+let webglContext = null;
+let webglProgram = null;
+let webglPositionBuffer = null;
+let webglMode = false;
+let pointerInstalled = false;
+let keyboardInstalled = false;
+let pointerX = 0;
+let pointerY = 0;
+let pointerDown = false;
+let pointerButtons = 0;
+let pointerWheelAccum = 0;
+const keysDown = new Set();
+const keysPressedFrame = new Set();
+const keysReleasedFrame = new Set();
+let audioStreamBufferSize = 0;
+let audioStreamStarted = false;
+let audioScriptNode = null;
+
+// General-purpose audio queue (ring of Int16 samples) driven from WASM.
+// Reuses the global `audioCtx` so the existing `requestAudioUnlock()` user-
+// gesture path also unlocks queued playback.
+let audioQueueRate = 44100;
+let audioQueueChannels = 1;
+let audioQueueRing = null;
+let audioQueueRead = 0;
+let audioQueueWrite = 0;
+let audioQueueCount = 0;
+let audioQueueCapacity = 0;
+let audioQueueNode = null;
+let audioQueueMode = false;
+const AUDIO_QUEUE_BLOCK = 2048;
+
+function audioQueueEnsureContext() {
+    if (audioQueueNode) return;
+    if (!audioCtx) {
+        audioCtx = new AudioContext({ sampleRate: audioQueueRate });
+    }
+    audioQueueNode = audioCtx.createScriptProcessor(AUDIO_QUEUE_BLOCK, 0, audioQueueChannels);
+    // The ring holds interleaved frames: one sample per channel.
+    audioQueueNode.onaudioprocess = (e) => {
+        const channels = [];
+        for (let c = 0; c < audioQueueChannels; c++) channels.push(e.outputBuffer.getChannelData(c));
+        for (let i = 0; i < AUDIO_QUEUE_BLOCK; i++) {
+            for (let c = 0; c < audioQueueChannels; c++) {
+                if (audioQueueCount > 0) {
+                    const s = audioQueueRing[audioQueueRead];
+                    audioQueueRead = (audioQueueRead + 1) % audioQueueCapacity;
+                    audioQueueCount--;
+                    channels[c][i] = s / 32768.0;
+                } else {
+                    channels[c][i] = 0;
+                }
+            }
+        }
+    };
+    audioQueueNode.connect(audioCtx.destination);
+    requestAudioUnlock();
+}
+
+// General-purpose 3D GPU state (WebGL1, batched textured+vertex-color)
+let gpuMode = false;
+let gpuCanvas = null;
+let gpuGL = null;
+let gpuProgram = null;
+let gpuVbo = null;
+let gpuQuadIbo = null;
+let gpuQuadIboCount = 0;
+let gpuStripIbo = null;
+let gpuStripIboCount = 0;
+let gpuTextures = [null];  // 1-indexed; index 0 reserved
+let gpuWhiteTex = null;
+let gpuCurrentTex = 0;
+let gpuOverlayActive = false;
+let gpuSavedDepthTest = true;
+let gpuSavedDepthWrite = true;
+let gpuSavedBlend = false;
+let gpuLocPos = -1;
+let gpuLocUV = -1;
+let gpuLocColor = -1;
+let gpuLocProj = null;
+let gpuLocView = null;
+let gpuLocSampler = null;
+let gpuLocUseTex = null;
+let gpuProj = new Float32Array(16);
+let gpuView = new Float32Array(16);
+let gpuOrthoProj = new Float32Array(16);
+let gpuIdentity = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+
+// Double-buffer for audio: WASM writes to one, audio reads from other
+let audioWriteBuffer = 0;  // 0 or 1
+let audioReadBuffer = 0;
+let audioBuffer0Ready = false;
+let audioBuffer1Ready = false;
+const AUDIO_SCRIPT_BUFFER_SIZE = 8192;  // Larger buffer for less crackling
+let AUDIO_BUFFER_0_OFFSET = 0;
+let AUDIO_BUFFER_1_OFFSET = 0;
+
+// Buffers the host hands the module (canvas pixels, audio samples) lie past
+// the memory the module asked for: its data, static reservations and stack
+// fill that, so each buffer grows the memory instead.
+let hostMemoryTop = 0;
+function hostAlloc(bytes) {
+    if (hostMemoryTop === 0) hostMemoryTop = memory.buffer.byteLength;
+    const pointer = hostMemoryTop;
+    hostMemoryTop += Math.ceil(bytes / 16) * 16;
+    if (hostMemoryTop > memory.buffer.byteLength) {
+        memory.grow(Math.ceil((hostMemoryTop - memory.buffer.byteLength) / 65536));
+    }
+    return pointer;
+}
+
+const udewyTextEncoder = new TextEncoder();
+const udewyTextDecoder = new TextDecoder();
+
+function decodeString(ptr, len) {
+    const view = new Uint8Array(memory.buffer);
+    const bytes = view.slice(Number(ptr), Number(ptr) + Number(len));
+    return udewyTextDecoder.decode(bytes);
+}
+
+function domRegister(node) {
+    const existing = domHandles.get(node);
+    if (existing !== undefined) {
+        return existing;
+    }
+    const handle = domNextHandle++;
+    domHandles.set(node, handle);
+    domNodes.set(handle, node);
+    return handle;
+}
+
+function domGet(handle) {
+    return domNodes.get(Number(handle));
+}
+
+function domFlexAlign(value) {
+    switch (Number(value)) {
+        case 1: return 'center';
+        case 2: return 'flex-end';
+        case 3: return 'stretch';
+        default: return 'flex-start';
+    }
+}
+
+function domFlexJustify(value) {
+    switch (Number(value)) {
+        case 1: return 'center';
+        case 2: return 'flex-end';
+        case 3: return 'space-between';
+        case 4: return 'space-around';
+        case 5: return 'space-evenly';
+        default: return 'flex-start';
+    }
+}
+
+function ensureDomRoot() {
+    let root = document.getElementById('udewy-dom-root');
+    if (!root) {
+        root = document.createElement('main');
+        root.id = 'udewy-dom-root';
+        document.body.insertBefore(root, outputElement || document.body.firstChild);
+    }
+    document.body.classList.add('dom-mode');
+    if (outputElement) {
+        outputElement.style.display = 'none';
+    }
+    domRootHandle = domRegister(root);
+    return domRootHandle;
+}
+
+function domBytesToBase64(ptr, len) {
+    const bytes = new Uint8Array(memory.buffer, Number(ptr), Number(len));
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(binary);
+}
+
+function domSetFavicon(mime, ptr, len) {
+    let link = document.querySelector('link[data-udewy-favicon]');
+    if (!link) {
+        link = document.createElement('link');
+        link.dataset.udewyFavicon = 'true';
+        document.head.appendChild(link);
+    }
+    link.rel = 'icon';
+    link.type = mime;
+    link.href = `data:${mime};base64,${domBytesToBase64(ptr, len)}`;
+}
+
+function decodeI64Array(ptr, count) {
+    const values = new Int32Array(Number(count));
+    const view = new DataView(memory.buffer);
+    const base = Number(ptr);
+    for (let i = 0; i < Number(count); i++) {
+        values[i] = Number(view.getBigInt64(base + (i * 8), true));
+    }
+    return values;
+}
+
+// Printed text goes to the console a whole line at a time (a program prints
+// a line in pieces).
+let consoleLine = '';
+function appendOutput(text) {
+    const lines = (consoleLine + text).split('\n');
+    consoleLine = lines.pop();
+    for (const line of lines) console.log(line);
+}
+
+function flushConsole() {
+    if (consoleLine) console.log(consoleLine);
+    consoleLine = '';
+}
+
+// `host_exit` ends the program: this unwinds the module back to the page,
+// which stops calling `main`.
+class UdewyExit extends Error {
+    constructor(code) {
+        super(`exit ${code}`);
+        this.code = BigInt(code);
+    }
+}
+
+// The program has ended, by an exit or a failure. As with an uncaught
+// exception in a script, the page is left as it is and the console says why.
+function endProgram(err) {
+    flushConsole();
+    if (!(err instanceof UdewyExit)) {
+        console.error(err);
+    } else if (err.code === 0n) {
+        console.log('Exit code: 0');
+    } else {
+        console.error(`Exit code: ${err.code}`);
+    }
+}
+
+// The first call to `main`. A program that set up a canvas, WebGL, the GPU
+// or an audio stream is then called again once per animation frame; module
+// startup runs only on the first call.
+function startUdewy(instance) {
+    wasmInstance = instance;
+    let result;
+    try {
+        result = instance.exports.main();
+    } catch (err) {
+        endProgram(err);
+        return;
+    }
+    flushConsole();
+    console.log(`Exit code: ${result}`);
+    if (canvasMode || webglMode || gpuMode) {
+        document.body.classList.add('canvas-mode');
+        requestAnimationFrame(animationLoop);
+    } else if (audioStreamMode) {
+        requestAnimationFrame(animationLoop);
+    }
+}
+
+function getDisplayCanvas() {
+    return webglCanvas || canvas;
+}
+
+function updateCanvasLayout() {
+    const displayCanvas = getDisplayCanvas();
+    if (!displayCanvas || (!canvasMode && !webglMode)) {
+        return;
+    }
+
+    if (canvasAspectWidth > 0 && canvasAspectHeight > 0) {
+        const targetAspect = canvasAspectWidth / canvasAspectHeight;
+        let displayWidth = window.innerWidth;
+        let displayHeight = Math.floor(displayWidth / targetAspect);
+        if (displayHeight > window.innerHeight) {
+            displayHeight = window.innerHeight;
+            displayWidth = Math.floor(displayHeight * targetAspect);
+        }
+
+        displayCanvas.style.position = 'fixed';
+        displayCanvas.style.left = '50%';
+        displayCanvas.style.top = '50%';
+        displayCanvas.style.transform = 'translate(-50%, -50%)';
+        displayCanvas.style.width = `${displayWidth}px`;
+        displayCanvas.style.height = `${displayHeight}px`;
+    } else {
+        displayCanvas.style.position = 'fixed';
+        displayCanvas.style.left = '0';
+        displayCanvas.style.top = '0';
+        displayCanvas.style.transform = 'none';
+        displayCanvas.style.width = '100vw';
+        displayCanvas.style.height = '100vh';
+    }
+}
+
+// Keep the GPU canvas backing buffer matched to the window so the rendered
+// aspect ratio tracks the window instead of being stretched to fit.
+function resizeGpuCanvasToWindow() {
+    if (!gpuCanvas) return;
+    const w = Math.max(1, Math.floor(window.innerWidth));
+    const h = Math.max(1, Math.floor(window.innerHeight));
+    if (gpuCanvas.width !== w || gpuCanvas.height !== h) {
+        gpuCanvas.width = w;
+        gpuCanvas.height = h;
+        if (gpuGL) gpuGL.viewport(0, 0, w, h);
+    }
+}
+
+window.addEventListener('resize', () => {
+    resizeGpuCanvasToWindow();
+    updateCanvasLayout();
+});
+
+function lockCanvasAspect() {
+    const displayCanvas = getDisplayCanvas();
+    if (displayCanvas) {
+        canvasAspectWidth = displayCanvas.width;
+        canvasAspectHeight = displayCanvas.height;
+    } else if (canvasWidth > 0 && canvasHeight > 0) {
+        canvasAspectWidth = canvasWidth;
+        canvasAspectHeight = canvasHeight;
+    }
+    updateCanvasLayout();
+}
+
+function unlockCanvasAspect() {
+    canvasAspectWidth = 0;
+    canvasAspectHeight = 0;
+    updateCanvasLayout();
+}
+
+function ensureCanvasMemory(width, height) {
+    const requiredBytes = width * height * 4;
+    if (requiredBytes > canvasBufferBytes) {
+        canvasBufferPtr = hostAlloc(requiredBytes);
+        canvasBufferBytes = requiredBytes;
+    }
+}
+
+function hideAudioPrompt() {
+    if (audioPromptTimer !== null) {
+        clearTimeout(audioPromptTimer);
+        audioPromptTimer = null;
+    }
+    const overlay = document.getElementById('audio-play-overlay');
+    if (overlay) {
+        overlay.remove();
+    }
+}
+
+function showAudioPrompt() {
+    let overlay = document.getElementById('audio-play-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'audio-play-overlay';
+        overlay.style.cssText = 'position:fixed; top:16px; left:16px; z-index:9999; pointer-events:none;';
+
+        const button = document.createElement('button');
+        button.id = 'audio-play-btn';
+        button.textContent = 'Click to Enable Audio';
+        button.style.cssText = 'pointer-events:auto; font-size:1em; padding:0.75em 1em; cursor:pointer; background:rgba(24,24,24,0.92); color:white; border:1px solid rgba(255,255,255,0.18); border-radius:999px; box-shadow:0 4px 16px rgba(0,0,0,0.35);';
+        button.onclick = () => {
+            requestAudioUnlock(true);
+        };
+
+        overlay.appendChild(button);
+        document.body.appendChild(overlay);
+    }
+}
+
+function playAudioBuffer() {
+    const buffer = audioCtx.createBuffer(audioChannels, audioNumSamples, audioSampleRate);
+    const view = new Int16Array(memory.buffer, audioBufferPtr, audioNumSamples * audioChannels);
+
+    for (let ch = 0; ch < audioChannels; ch++) {
+        const channelData = buffer.getChannelData(ch);
+        for (let i = 0; i < audioNumSamples; i++) {
+            const idx = audioChannels > 1 ? i * audioChannels + ch : i;
+            channelData[i] = view[idx] / 32768.0;
+        }
+    }
+
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioCtx.destination);
+    source.start();
+}
+
+function flushPendingAudio() {
+    if (!audioCtx || audioCtx.state !== 'running') {
+        return;
+    }
+
+    hideAudioPrompt();
+
+    if (audioPendingPlay) {
+        audioPendingPlay = false;
+        playAudioBuffer();
+    }
+
+    if (audioStreamMode && !audioStreamStarted && audioScriptNode) {
+        audioScriptNode.connect(audioCtx.destination);
+        audioStreamStarted = true;
+    }
+}
+
+function scheduleAudioPrompt() {
+    if (audioPromptTimer !== null) {
+        return;
+    }
+
+    audioPromptTimer = window.setTimeout(() => {
+        audioPromptTimer = null;
+        if (audioCtx && audioCtx.state !== 'running') {
+            showAudioPrompt();
+        }
+    }, 150);
+}
+
+function requestAudioUnlock(forceRetry=false) {
+    if (!audioCtx) {
+        return;
+    }
+
+    if (audioCtx.state === 'running') {
+        flushPendingAudio();
+        return;
+    }
+
+    scheduleAudioPrompt();
+
+    if (audioResumePending && !forceRetry) {
+        return;
+    }
+
+    audioResumePending = true;
+    Promise.resolve(audioCtx.resume())
+        .catch(() => null)
+        .then(() => {
+            audioResumePending = false;
+            if (audioCtx && audioCtx.state === 'running') {
+                flushPendingAudio();
+            } else {
+                showAudioPrompt();
+            }
+        });
+}
+
+function getInputCanvas() {
+    return getDisplayCanvas();
+}
+
+function clampPointer(value, limit) {
+    if (limit <= 0) return 0;
+    if (value < 0) return 0;
+    if (value >= limit) return limit - 1;
+    return value;
+}
+
+// Map the DOM `buttons` bitmask (1=left, 2=right, 4=middle) onto the game's
+// MOUSE_L=1 / MOUSE_M=2 / MOUSE_R=4 convention.
+function domButtonsToMask(buttons) {
+    let mask = 0;
+    if (buttons & 1) mask |= 1;
+    if (buttons & 2) mask |= 4;
+    if (buttons & 4) mask |= 2;
+    return mask;
+}
+
+function updatePointerFromEvent(event) {
+    if (typeof event.buttons === 'number') {
+        pointerButtons = domButtonsToMask(event.buttons);
+        pointerDown = (pointerButtons & 1) !== 0;
+    }
+    const targetCanvas = getInputCanvas();
+    if (!targetCanvas) {
+        pointerX = Math.floor(event.clientX);
+        pointerY = Math.floor(event.clientY);
+        return;
+    }
+
+    const rect = targetCanvas.getBoundingClientRect();
+    const scaleX = rect.width ? targetCanvas.width / rect.width : 1;
+    const scaleY = rect.height ? targetCanvas.height / rect.height : 1;
+    const localX = Math.floor((event.clientX - rect.left) * scaleX);
+    const localY = Math.floor((event.clientY - rect.top) * scaleY);
+
+    pointerX = clampPointer(localX, targetCanvas.width);
+    pointerY = clampPointer(localY, targetCanvas.height);
+}
+
+function ensurePointerHandlers() {
+    if (pointerInstalled) return;
+    pointerInstalled = true;
+
+    window.addEventListener('pointermove', (event) => {
+        updatePointerFromEvent(event);
+    });
+
+    window.addEventListener('pointerdown', (event) => {
+        pointerDown = true;
+        updatePointerFromEvent(event);
+        requestAudioUnlock(true);
+    });
+
+    window.addEventListener('pointerup', (event) => {
+        pointerDown = false;
+        updatePointerFromEvent(event);
+    });
+
+    window.addEventListener('pointercancel', () => {
+        pointerDown = false;
+        pointerButtons = 0;
+    });
+
+    // Accumulate wheel notches; the game reads/clears this once per frame.
+    window.addEventListener('wheel', (event) => {
+        if (canvasMode || webglMode || gpuMode) {
+            event.preventDefault();
+        }
+        // deltaY > 0 is scroll-down; report negative steps so up = positive,
+        // matching the SDL backend's wheel sign.
+        pointerWheelAccum += (event.deltaY > 0) ? -1 : ((event.deltaY < 0) ? 1 : 0);
+    }, { passive: false });
+
+    // Suppress the browser context menu so right-button drag works.
+    window.addEventListener('contextmenu', (event) => {
+        if (canvasMode || webglMode || gpuMode) {
+            event.preventDefault();
+        }
+    });
+}
+
+function clearKeyboardFrameState() {
+    keysPressedFrame.clear();
+    keysReleasedFrame.clear();
+}
+
+function releaseAllKeys() {
+    keysDown.clear();
+    clearKeyboardFrameState();
+}
+
+// While a canvas has the page, keys that would scroll it or move focus act
+// only as game input; browser shortcuts (reload, developer tools, any key
+// with Ctrl, Alt or Meta) keep working.
+const GAME_KEYS = new Set([
+    'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab', 'Backspace',
+    'PageUp', 'PageDown', 'Home', 'End', 'Slash', 'Quote',
+]);
+function gameKeyDefault(event) {
+    if (!(canvasMode || webglMode || gpuMode)) return false;
+    if (event.ctrlKey || event.altKey || event.metaKey) return false;
+    return GAME_KEYS.has(event.code);
+}
+
+function ensureKeyboardHandlers() {
+    if (keyboardInstalled) return;
+    keyboardInstalled = true;
+
+    window.addEventListener('keydown', (event) => {
+        const code = event.code || event.key;
+        if (gameKeyDefault(event)) {
+            event.preventDefault();
+        }
+        if (!keysDown.has(code)) {
+            keysPressedFrame.add(code);
+        }
+        keysDown.add(code);
+        requestAudioUnlock(true);
+    });
+
+    window.addEventListener('keyup', (event) => {
+        const code = event.code || event.key;
+        if (gameKeyDefault(event)) {
+            event.preventDefault();
+        }
+        if (keysDown.has(code)) {
+            keysReleasedFrame.add(code);
+        }
+        keysDown.delete(code);
+    });
+
+    window.addEventListener('blur', releaseAllKeys);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            releaseAllKeys();
+        }
+    });
+}
+
+function compileWebglShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        const info = gl.getShaderInfoLog(shader) || 'unknown shader compile error';
+        gl.deleteShader(shader);
+        throw new Error(info);
+    }
+    return shader;
+}
+
+function createWebglProgram(gl, fragmentSource) {
+    const vertexSource = `
+attribute vec2 a_position;
+
+void main() {
+    gl_Position = vec4(a_position, 0.0, 1.0);
+}
+`;
+    const vertexShader = compileWebglShader(gl, gl.VERTEX_SHADER, vertexSource);
+    const fragmentShader = compileWebglShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        const info = gl.getProgramInfoLog(program) || 'unknown program link error';
+        gl.deleteProgram(program);
+        throw new Error(info);
+    }
+    return program;
+}
+
+function q16ToF32(v) {
+    return Number(v) / 65536.0;
+}
+
+function gpuEnsureQuadIndices(quadCount) {
+    if (gpuQuadIboCount >= quadCount) return;
+    const cap = Math.max(quadCount * 2, 64);
+    const indices = new Uint16Array(cap * 6);
+    for (let i = 0; i < cap; i++) {
+        const v = i * 4;
+        const o = i * 6;
+        indices[o] = v;
+        indices[o + 1] = v + 1;
+        indices[o + 2] = v + 2;
+        indices[o + 3] = v;
+        indices[o + 4] = v + 2;
+        indices[o + 5] = v + 3;
+    }
+    if (!gpuQuadIbo) gpuQuadIbo = gpuGL.createBuffer();
+    gpuGL.bindBuffer(gpuGL.ELEMENT_ARRAY_BUFFER, gpuQuadIbo);
+    gpuGL.bufferData(gpuGL.ELEMENT_ARRAY_BUFFER, indices, gpuGL.STATIC_DRAW);
+    gpuQuadIboCount = cap;
+}
+
+function gpuEnsureStripIndices(vertCount) {
+    if (gpuStripIboCount >= vertCount) return;
+    const cap = Math.max(vertCount * 2, 64);
+    const triCount = (cap - 2);
+    const indices = new Uint16Array(Math.max(triCount, 0) * 3);
+    let o = 0;
+    for (let i = 0; i + 2 < cap; i++) {
+        if ((i & 1) === 0) {
+            indices[o++] = i;
+            indices[o++] = i + 1;
+            indices[o++] = i + 2;
+        } else {
+            indices[o++] = i + 1;
+            indices[o++] = i;
+            indices[o++] = i + 2;
+        }
+    }
+    if (!gpuStripIbo) gpuStripIbo = gpuGL.createBuffer();
+    gpuGL.bindBuffer(gpuGL.ELEMENT_ARRAY_BUFFER, gpuStripIbo);
+    gpuGL.bufferData(gpuGL.ELEMENT_ARRAY_BUFFER, indices, gpuGL.STATIC_DRAW);
+    gpuStripIboCount = cap;
+}
+
+function gpuMakeFrustum(out, l, r, b, t, n, f) {
+    const rl = r - l, tb = t - b, fn = f - n;
+    out[0] = (2 * n) / rl;
+    out[1] = 0; out[2] = 0; out[3] = 0;
+    out[4] = 0;
+    out[5] = (2 * n) / tb;
+    out[6] = 0; out[7] = 0;
+    out[8] = (r + l) / rl;
+    out[9] = (t + b) / tb;
+    out[10] = -(f + n) / fn;
+    out[11] = -1;
+    out[12] = 0; out[13] = 0;
+    out[14] = -(2 * f * n) / fn;
+    out[15] = 0;
+}
+
+function gpuMakeOrtho(out, l, r, b, t, n, f) {
+    const rl = r - l, tb = t - b, fn = f - n;
+    out[0] = 2 / rl;
+    out[1] = 0; out[2] = 0; out[3] = 0;
+    out[4] = 0;
+    out[5] = 2 / tb;
+    out[6] = 0; out[7] = 0;
+    out[8] = 0; out[9] = 0;
+    out[10] = -2 / fn;
+    out[11] = 0;
+    out[12] = -(r + l) / rl;
+    out[13] = -(t + b) / tb;
+    out[14] = -(f + n) / fn;
+    out[15] = 1;
+}
+
+function gpuCreateProgram(gl) {
+    const vs = `
+attribute vec3 a_pos;
+attribute vec2 a_uv;
+attribute vec4 a_color;
+uniform mat4 u_proj;
+uniform mat4 u_view;
+varying vec2 v_uv;
+varying vec4 v_color;
+void main() {
+    gl_Position = u_proj * u_view * vec4(a_pos, 1.0);
+    v_uv = a_uv;
+    v_color = a_color;
+}
+`;
+    const fs = `
+precision mediump float;
+varying vec2 v_uv;
+varying vec4 v_color;
+uniform sampler2D u_tex;
+uniform float u_use_tex;
+void main() {
+    vec4 tex = texture2D(u_tex, v_uv);
+    vec4 textured = v_color * tex;
+    gl_FragColor = mix(v_color, textured, u_use_tex);
+}
+`;
+    const vsh = compileWebglShader(gl, gl.VERTEX_SHADER, vs);
+    const fsh = compileWebglShader(gl, gl.FRAGMENT_SHADER, fs);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vsh);
+    gl.attachShader(prog, fsh);
+    gl.linkProgram(prog);
+    gl.deleteShader(vsh);
+    gl.deleteShader(fsh);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        const info = gl.getProgramInfoLog(prog) || 'gpu program link error';
+        gl.deleteProgram(prog);
+        throw new Error(info);
+    }
+    return prog;
+}
+
+function gpuBindTextureSlot(slot) {
+    const gl = gpuGL;
+    let tex;
+    if (slot === 0 || !gpuTextures[slot]) {
+        tex = gpuWhiteTex;
+        gl.uniform1f(gpuLocUseTex, 0.0);
+    } else {
+        tex = gpuTextures[slot];
+        gl.uniform1f(gpuLocUseTex, 1.0);
+    }
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(gpuLocSampler, 0);
+    gpuCurrentTex = slot;
+}
+
+const imports = {
+    env: {
+        memory: memory,
+        // Direct browser APIs
+        host_log: (ptr, len) => {
+            appendOutput(decodeString(ptr, len));
+            return len;
+        },
+        host_exit: (code) => {
+            throw new UdewyExit(code);
+        },
+        host_time: () => BigInt(Date.now()),
+        host_random: () => BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)),
+        // DOM manipulation
+        host_dom_set_text: (ptr, len) => {
+            const text = decodeString(ptr, len);
+            if (outputElement) {
+                outputElement.textContent = text;
+            }
+            return 0n;
+        },
+        host_dom_append: (ptr, len) => {
+            const text = decodeString(ptr, len);
+            if (outputElement) {
+                outputElement.textContent += text;
+            }
+            return len;
+        },
+        host_dom_clear: () => {
+            if (outputElement) {
+                outputElement.textContent = '';
+            }
+            return 0n;
+        },
+        host_dom_append_int: (value) => {
+            if (outputElement) {
+                outputElement.textContent += String(value);
+            }
+            return value;
+        },
+        host_log_int: (value) => {
+            console.log(String(value));
+            return value;
+        },
+        ud_dom_set_title: (titlePtr, titleLen) => {
+            document.title = decodeString(titlePtr, titleLen);
+            return 0n;
+        },
+        ud_dom_set_favicon: (mimePtr, mimeLen, dataPtr, dataLen) => {
+            domSetFavicon(decodeString(mimePtr, mimeLen), dataPtr, dataLen);
+            return 0n;
+        },
+        ud_dom_root: () => BigInt(ensureDomRoot()),
+        ud_dom_body: () => BigInt(domRegister(document.body)),
+        ud_dom_clear: (handle) => {
+            domGet(handle).replaceChildren();
+            return 0n;
+        },
+        ud_dom_create_element: (tagPtr, tagLen) => {
+            return BigInt(domRegister(document.createElement(decodeString(tagPtr, tagLen))));
+        },
+        ud_dom_create_text: (textPtr, textLen) => {
+            return BigInt(domRegister(document.createTextNode(decodeString(textPtr, textLen))));
+        },
+        ud_dom_append: (parentHandle, childHandle) => {
+            domGet(parentHandle).appendChild(domGet(childHandle));
+            return childHandle;
+        },
+        ud_dom_set_text: (handle, textPtr, textLen) => {
+            domGet(handle).textContent = decodeString(textPtr, textLen);
+            return 0n;
+        },
+        ud_dom_set_attr: (handle, namePtr, nameLen, valuePtr, valueLen) => {
+            domGet(handle).setAttribute(decodeString(namePtr, nameLen), decodeString(valuePtr, valueLen));
+            return 0n;
+        },
+        ud_dom_add_class: (handle, classPtr, classLen) => {
+            domGet(handle).classList.add(decodeString(classPtr, classLen));
+            return 0n;
+        },
+        ud_dom_set_style: (handle, propertyPtr, propertyLen, valuePtr, valueLen) => {
+            domGet(handle).style.setProperty(decodeString(propertyPtr, propertyLen), decodeString(valuePtr, valueLen));
+            return 0n;
+        },
+        ud_dom_set_flex: (handle, direction, gap, align, justify, wrap) => {
+            const style = domGet(handle).style;
+            style.display = 'flex';
+            style.flexDirection = Number(direction) === 1 ? 'column' : 'row';
+            style.gap = `${Number(gap)}px`;
+            style.alignItems = domFlexAlign(align);
+            style.justifyContent = domFlexJustify(justify);
+            style.flexWrap = Number(wrap) !== 0 ? 'wrap' : 'nowrap';
+            return 0n;
+        },
+        // Editor primitives.
+        ud_dom_get_text_len: (handle) => {
+            const node = domGet(handle);
+            const text = (node && 'value' in node) ? node.value : (node ? node.textContent : '');
+            return BigInt(udewyTextEncoder.encode(text || '').length);
+        },
+        ud_dom_get_text: (handle, bufPtr, cap) => {
+            const node = domGet(handle);
+            const text = (node && 'value' in node) ? node.value : (node ? node.textContent : '');
+            const encoded = udewyTextEncoder.encode(text || '');
+            const n = Math.min(encoded.length, Number(cap));
+            new Uint8Array(memory.buffer, Number(bufPtr), n).set(encoded.subarray(0, n));
+            return BigInt(n);
+        },
+        ud_dom_get_caret: (handle) => {
+            const node = domGet(handle);
+            if (!node) return 0n;
+            const sel = window.getSelection();
+            if (!sel || sel.rangeCount === 0) return 0n;
+            const range = sel.getRangeAt(0).cloneRange();
+            range.selectNodeContents(node);
+            range.setEnd(sel.anchorNode || node, sel.anchorOffset || 0);
+            return BigInt(udewyTextEncoder.encode(range.toString()).length);
+        },
+        ud_dom_set_caret: (handle, byteOffset) => {
+            const node = domGet(handle);
+            if (!node) return 0n;
+            const target = Number(byteOffset);
+            const sel = window.getSelection();
+            if (!sel) return 0n;
+            // Walk text nodes counting UTF-8 bytes until we hit the target.
+            const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+            let consumed = 0;
+            let tn = walker.nextNode();
+            const range = document.createRange();
+            while (tn) {
+                const bytes = udewyTextEncoder.encode(tn.nodeValue || '');
+                if (consumed + bytes.length >= target) {
+                    // Find char offset for the byte target inside this text node.
+                    const remaining = target - consumed;
+                    const charOffset = udewyTextDecoder.decode(bytes.subarray(0, remaining)).length;
+                    range.setStart(tn, charOffset);
+                    range.collapse(true);
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                    return 0n;
+                }
+                consumed += bytes.length;
+                tn = walker.nextNode();
+            }
+            // Past the end: caret at end of node.
+            range.selectNodeContents(node);
+            range.collapse(false);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            return 0n;
+        },
+        ud_dom_add_event_listener: (handle, eventPtr, eventLen, fnIndex) => {
+            const node = domGet(handle);
+            if (!node) return 0n;
+            const eventName = decodeString(eventPtr, eventLen);
+            const idx = Number(fnIndex);
+            node.addEventListener(eventName, () => {
+                if (!wasmInstance) return;
+                const table = wasmInstance.exports.__udewy_fn_table;
+                if (!table) return;
+                const fn = table.get(idx);
+                if (typeof fn === 'function') fn();
+            });
+            return 0n;
+        },
+        ud_dom_value: (handle, valuePtr, valueLen) => {
+            const node = domGet(handle);
+            if (!node) return 0n;
+            const text = decodeString(valuePtr, valueLen);
+            if ('value' in node) node.value = text;
+            else node.textContent = text;
+            return 0n;
+        },
+        ud_dom_focus: (handle) => {
+            const node = domGet(handle);
+            if (node && node.focus) node.focus();
+            return 0n;
+        },
+        // Canvas graphics
+        host_canvas_init: (width, height) => {
+            canvasWidth = Number(width);
+            canvasHeight = Number(height);
+            canvasMode = true;
+            if (!canvas) {
+                startTime = performance.now();
+            }
+            
+            // Create or resize canvas
+            canvas = document.getElementById('canvas');
+            if (!canvas) {
+                canvas = document.createElement('canvas');
+                canvas.id = 'canvas';
+                document.body.insertBefore(canvas, document.body.firstChild);
+            }
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            canvas.style.display = 'block';
+            updateCanvasLayout();
+            ensurePointerHandlers();
+            ctx = canvas.getContext('2d');
+            
+            // Hide text output in canvas mode
+            if (outputElement) {
+                outputElement.style.display = 'none';
+            }
+            
+            // The RGBA pixel buffer (4 bytes per pixel), past the module's memory
+            ensureCanvasMemory(canvasWidth, canvasHeight);
+            
+            return BigInt(canvasBufferPtr);
+        },
+        host_canvas_width: () => BigInt(canvasWidth),
+        host_canvas_height: () => BigInt(canvasHeight),
+        host_canvas_present: () => {
+            if (!ctx || !canvas) return 0n;
+            
+            // Read pixel data from WASM memory
+            const view = new Uint8ClampedArray(memory.buffer, canvasBufferPtr, canvasWidth * canvasHeight * 4);
+            const imageData = new ImageData(view, canvasWidth, canvasHeight);
+            ctx.putImageData(imageData, 0, 0);
+            
+            return 0n;
+        },
+        host_canvas_set_aspect_lock: (enabled) => {
+            if (Number(enabled) !== 0) {
+                lockCanvasAspect();
+            } else {
+                unlockCanvasAspect();
+            }
+            return 0n;
+        },
+        host_frame_count: () => BigInt(frameCount),
+        host_frame_time: () => BigInt(Math.floor(performance.now() - startTime)),
+        host_window_width: () => BigInt(window.innerWidth),
+        host_window_height: () => BigInt(window.innerHeight),
+        host_pointer_x: () => BigInt(pointerX),
+        host_pointer_y: () => BigInt(pointerY),
+        host_pointer_down: () => (pointerDown ? 1n : 0n),
+        host_pointer_buttons: () => BigInt(pointerButtons),
+        host_pointer_wheel: () => {
+            const steps = pointerWheelAccum;
+            pointerWheelAccum = 0;
+            return BigInt(steps);
+        },
+        host_key_down: (ptr, len) => {
+            ensureKeyboardHandlers();
+            return keysDown.has(decodeString(ptr, len)) ? 1n : 0n;
+        },
+        host_key_pressed: (ptr, len) => {
+            ensureKeyboardHandlers();
+            return keysPressedFrame.has(decodeString(ptr, len)) ? 1n : 0n;
+        },
+        host_key_released: (ptr, len) => {
+            ensureKeyboardHandlers();
+            return keysReleasedFrame.has(decodeString(ptr, len)) ? 1n : 0n;
+        },
+        // Audio
+        host_audio_init: (sampleRate, numSamples, channels) => {
+            audioSampleRate = Number(sampleRate);
+            audioNumSamples = Number(numSamples);
+            audioChannels = Number(channels);
+            // Each sample is i16 (2 bytes), per channel
+            const bytes = audioNumSamples * audioChannels * 2;
+            if (bytes > audioBufferBytes) {
+                audioBufferPtr = hostAlloc(bytes);
+                audioBufferBytes = bytes;
+            }
+            return BigInt(audioBufferPtr);
+        },
+        host_audio_play: () => {
+            if (!audioCtx) {
+                audioCtx = new AudioContext({ sampleRate: audioSampleRate });
+            }
+
+            audioPendingPlay = true;
+            requestAudioUnlock();
+            return 0n;
+        },
+        host_audio_sample_rate: () => BigInt(audioSampleRate),
+        // Audio streaming using ScriptProcessorNode with double-buffering
+        host_audio_stream_init: (sampleRate, bufferSize) => {
+            audioSampleRate = Number(sampleRate);
+            audioStreamBufferSize = AUDIO_SCRIPT_BUFFER_SIZE;
+            audioChannels = 1;
+            audioStreamMode = true;
+            audioStreamStarted = false;
+            audioWriteBuffer = 0;
+            audioReadBuffer = 0;
+            audioBuffer0Ready = false;
+            audioBuffer1Ready = false;
+            if (AUDIO_BUFFER_0_OFFSET === 0) {
+                AUDIO_BUFFER_0_OFFSET = hostAlloc(AUDIO_SCRIPT_BUFFER_SIZE * 2);  // samples * 2 bytes
+                AUDIO_BUFFER_1_OFFSET = hostAlloc(AUDIO_SCRIPT_BUFFER_SIZE * 2);
+            }
+            
+            if (!audioCtx) {
+                audioCtx = new AudioContext({ sampleRate: audioSampleRate });
+            }
+            
+            // Create ScriptProcessorNode with larger buffer
+            audioScriptNode = audioCtx.createScriptProcessor(AUDIO_SCRIPT_BUFFER_SIZE, 0, 1);
+            
+            audioScriptNode.onaudioprocess = (e) => {
+                const output = e.outputBuffer.getChannelData(0);
+                const bufSize = AUDIO_SCRIPT_BUFFER_SIZE;
+                
+                // Read from the ready buffer
+                let bufferOffset, hasData;
+                if (audioReadBuffer === 0 && audioBuffer0Ready) {
+                    bufferOffset = AUDIO_BUFFER_0_OFFSET;
+                    hasData = true;
+                    audioBuffer0Ready = false;
+                    audioReadBuffer = 1;
+                } else if (audioReadBuffer === 1 && audioBuffer1Ready) {
+                    bufferOffset = AUDIO_BUFFER_1_OFFSET;
+                    hasData = true;
+                    audioBuffer1Ready = false;
+                    audioReadBuffer = 0;
+                } else if (audioBuffer0Ready) {
+                    bufferOffset = AUDIO_BUFFER_0_OFFSET;
+                    hasData = true;
+                    audioBuffer0Ready = false;
+                    audioReadBuffer = 1;
+                } else if (audioBuffer1Ready) {
+                    bufferOffset = AUDIO_BUFFER_1_OFFSET;
+                    hasData = true;
+                    audioBuffer1Ready = false;
+                    audioReadBuffer = 0;
+                } else {
+                    hasData = false;
+                }
+                
+                if (hasData) {
+                    const view = new Int16Array(memory.buffer, bufferOffset, bufSize);
+                    for (let i = 0; i < bufSize; i++) {
+                        output[i] = view[i] / 32768.0;
+                    }
+                } else {
+                    // Silence if no buffer ready
+                    for (let i = 0; i < bufSize; i++) {
+                        output[i] = 0;
+                    }
+                }
+            };
+            
+            // Return pointer to write buffer 0
+            audioBufferPtr = AUDIO_BUFFER_0_OFFSET;
+            return BigInt(audioBufferPtr);
+        },
+        host_audio_stream_write: () => {
+            if (!audioStreamMode || !audioCtx) return 0n;
+
+            requestAudioUnlock();
+            
+            // Mark current write buffer as ready and switch to other buffer
+            if (audioWriteBuffer === 0) {
+                audioBuffer0Ready = true;
+                audioWriteBuffer = 1;
+                audioBufferPtr = AUDIO_BUFFER_1_OFFSET;
+            } else {
+                audioBuffer1Ready = true;
+                audioWriteBuffer = 0;
+                audioBufferPtr = AUDIO_BUFFER_0_OFFSET;
+            }
+            
+            // Return next buffer pointer for WASM to write to
+            return BigInt(audioBufferPtr);
+        },
+        host_audio_stream_needs_samples: () => {
+            // Returns true (-1) if we need more samples, false (0) if buffers are full
+            if (!audioStreamMode) return 0n;
+            // Need samples if the current write buffer is not marked ready
+            if (audioWriteBuffer === 0 && !audioBuffer0Ready) return -1n;
+            if (audioWriteBuffer === 1 && !audioBuffer1Ready) return -1n;
+            return 0n;
+        },
+        // WebGL fullscreen fragment shader
+        host_webgl_init: (shaderPtr, shaderLen, width, height) => {
+            if (webglMode) return 0n;
+
+            const w = Number(width);
+            const h = Number(height);
+            const fragmentSource = decodeString(shaderPtr, shaderLen);
+
+            webglCanvas = document.getElementById('canvas');
+            if (!webglCanvas) {
+                webglCanvas = document.createElement('canvas');
+                webglCanvas.id = 'canvas';
+                document.body.insertBefore(webglCanvas, document.body.firstChild);
+            }
+            webglCanvas.width = w;
+            webglCanvas.height = h;
+            webglCanvas.style.display = 'block';
+            updateCanvasLayout();
+            ensurePointerHandlers();
+
+            webglContext = webglCanvas.getContext('webgl');
+            if (!webglContext) {
+                console.error('WebGL not supported');
+                if (outputElement) {
+                    outputElement.textContent = 'WebGL not supported in this browser';
+                }
+                return -1n;
+            }
+
+            try {
+                webglProgram = createWebglProgram(webglContext, fragmentSource);
+            } catch (err) {
+                console.error('WebGL shader setup failed:', err);
+                if (outputElement) {
+                    outputElement.textContent = `WebGL shader setup failed:
+${String(err)}`;
+                }
+                return -1n;
+            }
+
+            webglPositionBuffer = webglContext.createBuffer();
+            webglContext.bindBuffer(webglContext.ARRAY_BUFFER, webglPositionBuffer);
+            webglContext.bufferData(
+                webglContext.ARRAY_BUFFER,
+                new Float32Array([
+                    -1.0, -1.0,
+                    3.0, -1.0,
+                    -1.0, 3.0,
+                ]),
+                webglContext.STATIC_DRAW,
+            );
+
+            webglContext.useProgram(webglProgram);
+            const positionLocation = webglContext.getAttribLocation(webglProgram, 'a_position');
+            if (positionLocation >= 0) {
+                webglContext.enableVertexAttribArray(positionLocation);
+                webglContext.vertexAttribPointer(positionLocation, 2, webglContext.FLOAT, false, 0, 0);
+            }
+
+            if (outputElement) {
+                outputElement.style.display = 'none';
+            }
+
+            webglMode = true;
+            startTime = performance.now();
+            updateCanvasLayout();
+            return 0n;
+        },
+        host_webgl_uniform1i: (namePtr, nameLen, value) => {
+            if (!webglMode || !webglContext || !webglProgram) return 0n;
+
+            const name = decodeString(namePtr, nameLen);
+            const location = webglContext.getUniformLocation(webglProgram, name);
+            if (location === null) return -1n;
+            webglContext.useProgram(webglProgram);
+            webglContext.uniform1i(location, Number(value));
+            return 0n;
+        },
+        host_webgl_uniform2i: (namePtr, nameLen, x, y) => {
+            if (!webglMode || !webglContext || !webglProgram) return 0n;
+
+            const name = decodeString(namePtr, nameLen);
+            const location = webglContext.getUniformLocation(webglProgram, name);
+            if (location === null) return -1n;
+            webglContext.useProgram(webglProgram);
+            webglContext.uniform2i(location, Number(x), Number(y));
+            return 0n;
+        },
+        host_webgl_uniform1iv: (namePtr, nameLen, valuesPtr, count) => {
+            if (!webglMode || !webglContext || !webglProgram) return 0n;
+
+            const name = decodeString(namePtr, nameLen);
+            const location = webglContext.getUniformLocation(webglProgram, name);
+            if (location === null) return -1n;
+            webglContext.useProgram(webglProgram);
+            webglContext.uniform1iv(location, decodeI64Array(valuesPtr, count));
+            return 0n;
+        },
+        host_webgl_uniform2iv: (namePtr, nameLen, valuesPtr, count) => {
+            if (!webglMode || !webglContext || !webglProgram) return 0n;
+
+            const name = decodeString(namePtr, nameLen);
+            const location = webglContext.getUniformLocation(webglProgram, name);
+            if (location === null) return -1n;
+            webglContext.useProgram(webglProgram);
+            webglContext.uniform2iv(location, decodeI64Array(valuesPtr, Number(count) * 2));
+            return 0n;
+        },
+        host_webgl_render: () => {
+            if (!webglMode || !webglContext || !webglProgram) return 0n;
+
+            webglContext.viewport(0, 0, webglCanvas.width, webglCanvas.height);
+            webglContext.useProgram(webglProgram);
+            webglContext.drawArrays(webglContext.TRIANGLES, 0, 3);
+            return 0n;
+        },
+        // General-purpose batched 3D GPU surface
+        host_gpu_init: (width, height) => {
+            if (gpuMode) return 0n;
+            const w = Number(width);
+            const h = Number(height);
+            gpuCanvas = document.getElementById('canvas');
+            if (!gpuCanvas) {
+                gpuCanvas = document.createElement('canvas');
+                gpuCanvas.id = 'canvas';
+                document.body.insertBefore(gpuCanvas, document.body.firstChild);
+            }
+            // Back the canvas at the window's real pixel size so the game's
+            // per-frame aspect/viewport math matches the display and the
+            // content is never stretched. The requested w/h is only a fallback.
+            gpuCanvas.width = Math.max(1, Math.floor(window.innerWidth || w));
+            gpuCanvas.height = Math.max(1, Math.floor(window.innerHeight || h));
+            gpuCanvas.style.display = 'block';
+            webglCanvas = gpuCanvas;
+            webglMode = true;
+            updateCanvasLayout();
+            ensurePointerHandlers();
+            ensureKeyboardHandlers();
+
+            gpuGL = gpuCanvas.getContext('webgl', { antialias: true, depth: true, alpha: false, preserveDrawingBuffer: false });
+            if (!gpuGL) {
+                console.error('WebGL not supported');
+                return -1n;
+            }
+            try {
+                gpuProgram = gpuCreateProgram(gpuGL);
+            } catch (err) {
+                console.error('GPU shader setup failed:', err);
+                return -1n;
+            }
+            gpuGL.useProgram(gpuProgram);
+            gpuLocPos = gpuGL.getAttribLocation(gpuProgram, 'a_pos');
+            gpuLocUV = gpuGL.getAttribLocation(gpuProgram, 'a_uv');
+            gpuLocColor = gpuGL.getAttribLocation(gpuProgram, 'a_color');
+            gpuLocProj = gpuGL.getUniformLocation(gpuProgram, 'u_proj');
+            gpuLocView = gpuGL.getUniformLocation(gpuProgram, 'u_view');
+            gpuLocSampler = gpuGL.getUniformLocation(gpuProgram, 'u_tex');
+            gpuLocUseTex = gpuGL.getUniformLocation(gpuProgram, 'u_use_tex');
+
+            gpuVbo = gpuGL.createBuffer();
+            gpuWhiteTex = gpuGL.createTexture();
+            gpuGL.bindTexture(gpuGL.TEXTURE_2D, gpuWhiteTex);
+            gpuGL.texImage2D(gpuGL.TEXTURE_2D, 0, gpuGL.RGBA, 1, 1, 0, gpuGL.RGBA, gpuGL.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
+            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_MIN_FILTER, gpuGL.NEAREST);
+            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_MAG_FILTER, gpuGL.NEAREST);
+            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_WRAP_S, gpuGL.CLAMP_TO_EDGE);
+            gpuGL.texParameteri(gpuGL.TEXTURE_2D, gpuGL.TEXTURE_WRAP_T, gpuGL.CLAMP_TO_EDGE);
+
+            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuIdentity);
+            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuIdentity);
+            gpuBindTextureSlot(0);
+
+            gpuGL.enable(gpuGL.DEPTH_TEST);
+            gpuGL.depthFunc(gpuGL.LEQUAL);
+            gpuGL.disable(gpuGL.BLEND);
+
+            if (outputElement) outputElement.style.display = 'none';
+            gpuMode = true;
+            startTime = performance.now();
+            updateCanvasLayout();
+            return 0n;
+        },
+        host_gpu_set_viewport: (w, h) => {
+            if (!gpuMode) return 0n;
+            gpuGL.viewport(0, 0, Number(w), Number(h));
+            return 0n;
+        },
+        host_gpu_clear: (r_q, g_q, b_q) => {
+            if (!gpuMode) return 0n;
+            gpuGL.clearColor(q16ToF32(r_q), q16ToF32(g_q), q16ToF32(b_q), 1.0);
+            gpuGL.clear(gpuGL.COLOR_BUFFER_BIT | gpuGL.DEPTH_BUFFER_BIT);
+            return 0n;
+        },
+        host_gpu_set_perspective_frustum: (l_q, r_q, b_q, t_q, n_q, f_q) => {
+            if (!gpuMode) return 0n;
+            gpuMakeFrustum(gpuProj, q16ToF32(l_q), q16ToF32(r_q), q16ToF32(b_q), q16ToF32(t_q), q16ToF32(n_q), q16ToF32(f_q));
+            gpuGL.useProgram(gpuProgram);
+            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuProj);
+            return 0n;
+        },
+        host_gpu_set_view_matrix: (matPtr) => {
+            if (!gpuMode) return 0n;
+            const view = new Float32Array(memory.buffer, Number(matPtr), 16);
+            for (let i = 0; i < 16; i++) gpuView[i] = view[i];
+            gpuGL.useProgram(gpuProgram);
+            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuView);
+            return 0n;
+        },
+        host_gpu_set_texture: (texId) => {
+            if (!gpuMode) return 0n;
+            gpuGL.useProgram(gpuProgram);
+            gpuBindTextureSlot(Number(texId));
+            return 0n;
+        },
+        host_gpu_set_blend: (mode) => {
+            if (!gpuMode) return 0n;
+            const m = Number(mode);
+            if (m === 0) {
+                gpuGL.disable(gpuGL.BLEND);
+            } else if (m === 1) {
+                gpuGL.enable(gpuGL.BLEND);
+                gpuGL.blendFunc(gpuGL.SRC_ALPHA, gpuGL.ONE_MINUS_SRC_ALPHA);
+            } else {
+                gpuGL.enable(gpuGL.BLEND);
+                gpuGL.blendFunc(gpuGL.SRC_ALPHA, gpuGL.ONE);
+            }
+            return 0n;
+        },
+        host_gpu_set_depth_test: (on) => {
+            if (!gpuMode) return 0n;
+            if (Number(on) !== 0) gpuGL.enable(gpuGL.DEPTH_TEST);
+            else gpuGL.disable(gpuGL.DEPTH_TEST);
+            return 0n;
+        },
+        host_gpu_set_depth_write: (on) => {
+            if (!gpuMode) return 0n;
+            gpuGL.depthMask(Number(on) !== 0);
+            return 0n;
+        },
+        host_gpu_set_line_width: (w_q) => {
+            if (!gpuMode) return 0n;
+            gpuGL.lineWidth(q16ToF32(w_q));
+            return 0n;
+        },
+        host_gpu_submit: (kind, ptr, count) => {
+            if (!gpuMode) return 0n;
+            const k = Number(kind);
+            const n = Number(count);
+            if (n <= 0) return 0n;
+            const gl = gpuGL;
+            const stride = 9 * 4;
+            const verts = new Float32Array(memory.buffer, Number(ptr), n * 9);
+            gl.useProgram(gpuProgram);
+            gl.bindBuffer(gl.ARRAY_BUFFER, gpuVbo);
+            gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STREAM_DRAW);
+            gl.enableVertexAttribArray(gpuLocPos);
+            gl.vertexAttribPointer(gpuLocPos, 3, gl.FLOAT, false, stride, 0);
+            if (gpuLocUV >= 0) {
+                gl.enableVertexAttribArray(gpuLocUV);
+                gl.vertexAttribPointer(gpuLocUV, 2, gl.FLOAT, false, stride, 12);
+            }
+            if (gpuLocColor >= 0) {
+                gl.enableVertexAttribArray(gpuLocColor);
+                gl.vertexAttribPointer(gpuLocColor, 4, gl.FLOAT, false, stride, 20);
+            }
+            if (k === 0) {
+                const quads = (n / 4) | 0;
+                gpuEnsureQuadIndices(quads);
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gpuQuadIbo);
+                gl.drawElements(gl.TRIANGLES, quads * 6, gl.UNSIGNED_SHORT, 0);
+            } else if (k === 1) {
+                gpuEnsureStripIndices(n);
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gpuStripIbo);
+                gl.drawElements(gl.TRIANGLES, Math.max(n - 2, 0) * 3, gl.UNSIGNED_SHORT, 0);
+            } else if (k === 2) {
+                gl.drawArrays(gl.TRIANGLES, 0, n);
+            } else if (k === 3) {
+                gl.drawArrays(gl.LINES, 0, n);
+            }
+            return 0n;
+        },
+        host_gpu_overlay_begin: (sw, sh) => {
+            if (!gpuMode) return 0n;
+            const w = Number(sw);
+            const h = Number(sh);
+            gpuMakeOrtho(gpuOrthoProj, 0, w, h, 0, -1, 1);
+            gpuGL.useProgram(gpuProgram);
+            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuOrthoProj);
+            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuIdentity);
+            gpuSavedDepthTest = gpuGL.getParameter(gpuGL.DEPTH_TEST);
+            gpuSavedDepthWrite = gpuGL.getParameter(gpuGL.DEPTH_WRITEMASK);
+            gpuSavedBlend = gpuGL.getParameter(gpuGL.BLEND);
+            gpuGL.disable(gpuGL.DEPTH_TEST);
+            gpuGL.depthMask(false);
+            // Overlay content (HUD text, panels, speed lines) is alpha-keyed,
+            // so blend must be on or transparent texels render as opaque black.
+            gpuGL.enable(gpuGL.BLEND);
+            gpuGL.blendFunc(gpuGL.SRC_ALPHA, gpuGL.ONE_MINUS_SRC_ALPHA);
+            gpuOverlayActive = true;
+            return 0n;
+        },
+        host_gpu_overlay_end: () => {
+            if (!gpuMode) return 0n;
+            gpuGL.useProgram(gpuProgram);
+            gpuGL.uniformMatrix4fv(gpuLocProj, false, gpuProj);
+            gpuGL.uniformMatrix4fv(gpuLocView, false, gpuView);
+            if (gpuSavedDepthTest) gpuGL.enable(gpuGL.DEPTH_TEST);
+            gpuGL.depthMask(!!gpuSavedDepthWrite);
+            if (!gpuSavedBlend) gpuGL.disable(gpuGL.BLEND);
+            gpuOverlayActive = false;
+            return 0n;
+        },
+        host_gpu_create_texture: (width, height, pixelsPtr, repeat, nearest) => {
+            if (!gpuMode) return 0n;
+            const gl = gpuGL;
+            const w = Number(width);
+            const h = Number(height);
+            const pixels = new Uint8Array(memory.buffer, Number(pixelsPtr), w * h * 4);
+            const tex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(pixels));
+            const filter = (Number(nearest) !== 0) ? gl.NEAREST : gl.LINEAR;
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+            const wrap = (Number(repeat) !== 0) ? gl.REPEAT : gl.CLAMP_TO_EDGE;
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
+            gpuTextures.push(tex);
+            return BigInt(gpuTextures.length - 1);
+        },
+        host_gpu_present: () => {
+            return 0n;
+        },
+        host_gpu_window_width: () => BigInt(gpuCanvas ? gpuCanvas.width : 0),
+        host_gpu_window_height: () => BigInt(gpuCanvas ? gpuCanvas.height : 0),
+        host_audio_queue_init: (sampleRate, channels) => {
+            audioQueueRate = Number(sampleRate);
+            audioQueueChannels = Number(channels);
+            audioQueueCapacity = audioQueueRate * audioQueueChannels * 2;  // ~2 s of buffer
+            audioQueueRing = new Int16Array(audioQueueCapacity);
+            audioQueueRead = 0;
+            audioQueueWrite = 0;
+            audioQueueCount = 0;
+            try {
+                audioQueueEnsureContext();
+            } catch (err) {
+                console.error('Audio queue init failed:', err);
+                return -1n;
+            }
+            return 0n;
+        },
+        host_audio_queue_push: (ptr, nBytes) => {
+            if (!audioQueueRing) return 0n;
+            // Until a gesture unlocks audio nothing plays: samples queued
+            // then would all sound late, at once. They are taken and dropped.
+            if (!audioCtx || audioCtx.state !== 'running') return nBytes;
+            const samples = Number(nBytes) >> 1;
+            const view = new Int16Array(memory.buffer, Number(ptr), samples);
+            for (let i = 0; i < samples; i++) {
+                if (audioQueueCount >= audioQueueCapacity) break;
+                audioQueueRing[audioQueueWrite] = view[i];
+                audioQueueWrite = (audioQueueWrite + 1) % audioQueueCapacity;
+                audioQueueCount++;
+            }
+            return BigInt(samples * 2);
+        },
+        host_audio_queue_size: () => BigInt(audioQueueCount * 2),
+    }
+};
+
+function animationLoop() {
+    if ((!canvasMode && !audioStreamMode && !webglMode && !gpuMode) || !wasmInstance) return;
+
+    frameCount++;
+    try {
+        wasmInstance.exports.main();
+    } catch (err) {
+        endProgram(err);
+        return;
+    }
+    flushConsole();
+    clearKeyboardFrameState();
+    requestAnimationFrame(animationLoop);
+}
+
+function setupServerLifecycle() {
+    return; // archived static snapshot: no local udewy server
+    if (window.location.protocol !== 'http:' && window.location.protocol !== 'https:') {
+        return;
+    }
+
+    const heartbeat = () => {
+        fetch('/__udewy_heartbeat__', { cache: 'no-store' }).catch(() => {});
+    };
+
+    heartbeat();
+    const timer = setInterval(heartbeat, 2000);
+    const notifyClose = () => {
+        clearInterval(timer);
+        navigator.sendBeacon('/__udewy_close__', '');
+    };
+
+    window.addEventListener('pagehide', notifyClose, { once: true });
+    window.addEventListener('beforeunload', notifyClose, { once: true });
+}
+
+
+function decodeWasmBase64(b64) {
+    return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+}
+
+async function loadEmbeddedWasm() {
+    const b64 = document.getElementById('wasm-module').textContent.trim();
+    const bytes = decodeWasmBase64(b64);
+    return WebAssembly.instantiate(bytes, imports);
+}
+
+async function loadLinkedWasm(name, imports) {
+    const script = document.querySelector(`script[data-wasm-artifact="${name}"]`);
+    if (script) {
+        return WebAssembly.instantiate(decodeWasmBase64(script.textContent.trim()), imports);
+    }
+    const response = await fetch(name);
+    if (!response.ok) {
+        throw new Error(`Failed to load ${name}: HTTP ${response.status}`);
+    }
+    return WebAssembly.instantiate(await response.arrayBuffer(), imports);
+}
+
+async function run() {
+    outputElement = document.getElementById('output');
+    setupServerLifecycle();
+    try {
+        if (typeof beforeUdewyInstantiate === 'function') {
+            await beforeUdewyInstantiate(imports);
+        }
+        const { instance } = await loadEmbeddedWasm();
+        startUdewy(instance);
+    } catch (err) {
+        endProgram(err);
+    }
+}
+
+run();
+    </script>
+</body>
+</html>

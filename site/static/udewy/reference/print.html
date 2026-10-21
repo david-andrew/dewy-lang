@@ -1,0 +1,1873 @@
+<!DOCTYPE HTML>
+<html lang="en" class="udewy-light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>µDewy Language Specification</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+        <script>
+        (() => {
+          const linkKey = "udewy-theme-link";
+          const siteKey = "dewy-theme";
+          const bookKey = "mdbook-theme";
+          const toBook = { light: "udewy-light", dark: "udewy-dark" };
+          const oldBook = { light: "udewy-light", navy: "udewy-dark", coal: "udewy-dark", "dewy-light": "udewy-light", "dewy-dark": "udewy-dark" };
+          try {
+            let book = localStorage.getItem(bookKey);
+            if (book && oldBook[book]) {
+              book = oldBook[book];
+              localStorage.setItem(bookKey, book);
+            }
+            if (book === "rust" || book === "ayu") {
+              localStorage.setItem(linkKey, "off");
+              return;
+            }
+            if (localStorage.getItem(linkKey) === "off") return;
+            const site = localStorage.getItem(siteKey);
+            if (site === "light" || site === "dark") {
+              localStorage.setItem(bookKey, toBook[site]);
+            }
+          } catch {
+            // ignore
+          }
+        })();
+        </script>
+        <link rel="icon" href="favicon.png">
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="theme/udewy-book.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "udewy-light";
+            const default_dark_theme = "udewy-dark";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    <link rel="stylesheet" href="/udewy/assets/css/archive.css"></head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('udewy-light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="udewy-light">µDewy Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="udewy-dark">µDewy Dark</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">µDewy Language Specification</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/david-andrew/dewy-lang/tree/archive/master-pre-restart/udewy" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main><p class="udewy-archive-banner" role="note">µDewy is archived and no longer developed. This is a snapshot of its documentation. <a href="/">→ Dewy</a></p>
+                        <h1 id="the-μdewy-subset-programming-language"><a class="header" href="#the-μdewy-subset-programming-language">The μDewy Subset Programming Language</a></h1>
+<p>udewy (μdewy, "micro-dewy") is a strict subset of the Dewy programming language, designed for bootstrapping. It serves as an intermediate step in a trusted computing base, providing a language simple enough to implement in assembly while being expressive enough to write a real compiler.</p>
+<p><strong>Key principle</strong>: Any well-formed udewy program should compile and behave identically under both the udewy compiler and the full Dewy compiler.</p>
+<p>This document serves as the <strong>definitive specification</strong> for the udewy language. There is no implementation-defined behavior; all semantics are fully specified here.</p>
+<h2 id="quick-start"><a class="header" href="#quick-start">Quick Start</a></h2>
+<pre><code class="language-bash"># Run a udewy program (default x86_64 target)
+python -m udewy.p0 udewy/tests/test_hello.udewy
+
+# Compile only (don't run)
+python -m udewy.p0 -c udewy/tests/test_hello.udewy
+
+# Target a different backend
+# For wasm32, this opens the generated HTML in your browser
+python -m udewy.p0 --target wasm32 udewy/tests/test_hello.udewy
+python -m udewy.p0 --target riscv udewy/tests/test_hello.udewy
+python -m udewy.p0 --target arm udewy/tests/test_hello.udewy
+</code></pre>
+<p>The compiler writes artifacts under <code>__dewycache__/</code>, mirroring the source
+path relative to the current directory. <code>udewy path/to/main.udewy</code> produces
+<code>__dewycache__/path/to/main</code>. A path already under <code>__dewycache__/</code> is not
+nested again. Sources outside the current directory go under
+<code>__dewycache__/__external__/&lt;12-hex&gt;/…</code>.</p>
+<blockquote>
+<p>NOTE: long-term goals is for the default compile target to match the host machine/OS</p>
+</blockquote>
+<h3 id="supported-targets"><a class="header" href="#supported-targets">Supported Targets</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Target</th><th>Output</th><th>Requirements</th></tr></thead><tbody>
+<tr><td><code>x86_64</code> (default)</td><td>Linux ELF executable</td><td>GNU as, ld</td></tr>
+<tr><td><code>wasm32</code></td><td>Single HTML with embedded WASM</td><td>wat2wasm (wabt)</td></tr>
+<tr><td><code>riscv</code></td><td>RISC-V 64-bit executable</td><td>riscv64-linux-gnu toolchain, qemu-riscv64</td></tr>
+<tr><td><code>arm</code></td><td>AArch64 executable</td><td>aarch64-linux-gnu toolchain, qemu-aarch64</td></tr>
+</tbody></table>
+</div>
+<h3 id="hello-world"><a class="header" href="#hello-world">Hello World</a></h3>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-comment"># SYS_WRITE and STDOUT are builtin constants provided by the x86_64 backend</span>
+<span class="u-declaration">let</span> <span class="u-identifier">main</span> <span class="u-operator">=</span> <span class="u-punctuation">()</span><span class="u-operator">:&gt;</span><span class="u-type">int</span> <span class="u-operator">=&gt;</span> <span class="u-brace">{</span>
+    <span class="u-declaration">let</span> <span class="u-identifier">msg</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-string">"Hello from udewy!\n"</span>
+    <span class="u-declaration">let</span> <span class="u-identifier">len</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-function">__load__</span><span class="u-punctuation">(</span><span class="u-identifier">msg</span> <span class="u-operator">-</span> <span class="u-number">8</span><span class="u-punctuation">)</span>
+    <span class="u-function">__syscall3__</span><span class="u-punctuation">(</span><span class="u-identifier">SYS_WRITE</span> <span class="u-identifier">STDOUT</span> <span class="u-identifier">msg</span> <span class="u-identifier">len</span><span class="u-punctuation">)</span>
+    <span class="u-keyword">return</span> <span class="u-number">0</span>
+<span class="u-brace">}</span></code></pre>
+<span id="status-scope"></span><h2 id="status--scope"><a class="header" href="#status--scope">Status &amp; Scope</a></h2>
+<p>This repo contains a reference implementation of udewy, including a lot of supplimentary features for more pleasant everyday use (e.g. multiple backends, graphics support, float bit helpers, etc). The core trusted computing rung for udewy will likely be a more simplified implementation targeting a single backend (likely risc-v), and skipping most of the other nice-to-have features present in this implementation.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="part-1-core-language-specification"><a class="header" href="#part-1-core-language-specification">Part 1: Core Language Specification</a></h1>
+<h2 id="11-lexical-structure"><a class="header" href="#11-lexical-structure">1.1 Lexical Structure</a></h2>
+<h3 id="character-set"><a class="header" href="#character-set">Character Set</a></h3>
+<p>udewy source code is ASCII. Bytes outside the ASCII range may only appear inside string literals, path literals, and comments; the compiler never interprets them. Inside string literals they pass through to the program verbatim (see <a href="11-lexical-structure.html#string-literals">String Literals</a>).</p>
+<p>Valid ASCII characters:</p>
+<ul>
+<li>Letters: <code>A-Z</code>, <code>a-z</code></li>
+<li>Digits: <code>0-9</code></li>
+<li>Symbols: <code>! " # $ % &amp; ' ( ) * + , - . / : ; &lt; = &gt; ? @ [ \ ] ^ _ { | } ~</code></li>
+<li>Whitespace: space (0x20), tab (0x09), carriage return (0x0D), newline (0x0A)</li>
+</ul>
+<h3 id="whitespace"><a class="header" href="#whitespace">Whitespace</a></h3>
+<p>Whitespace characters (space, tab, carriage return, newline) are ignored except as token separators. There are no significant indentation or newline rules.</p>
+<h3 id="comments"><a class="header" href="#comments">Comments</a></h3>
+<p>Only line comments are supported. A <code>#</code> character begins a comment that extends to the end of the line:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-comment"># This is a comment</span>
+<span class="u-declaration">let</span> <span class="u-identifier">x</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-number">42</span>  <span class="u-comment"># inline comment</span></code></pre>
+<p>Block comments are not supported.</p>
+<p>Two comment forms carry metadata for debuggers. A line of the form <code># @loc path:line:column</code> names the source position of the statements that follow it (until the next such line); a compiler that emits udewy from another language uses it to point a debugger at the original source. Without markers, a statement's position is its own line in the udewy file. A line of the form <code># @var name shown formatter type</code> right before a declaration (or before a function, for its parameters) describes that variable to the debugger: the name it is shown under (<code>-</code> keeps the declared name), a function in the program a debugger may call to render the value as text (<code>-</code> for none; it takes the variable's word and returns the address of a <code>[length][bytes]</code> block), and its type as spelled, to the end of the line; <code># @var name -</code> hides the declaration (a compiler's temporary). Without a marker a variable is shown under its own name with its udewy annotation. Both are debug information only — a backend that ignores them produces the same program — and reach the backend through the <code>mark_location</code>, <code>note_local</code>, <code>begin_scope</code>, and <code>end_scope</code> hooks of the <code>Backend</code> protocol; the x86_64 backend emits DWARF line and variable information from them.</p>
+<h3 id="identifiers"><a class="header" href="#identifiers">Identifiers</a></h3>
+<p>Identifiers consist of letters, digits, and underscores, and must begin with a letter or underscore:</p>
+<pre><code>identifier ::= [a-zA-Z_][a-zA-Z0-9_]*
+</code></pre>
+<p>Identifiers are case-sensitive. The following are reserved keywords and cannot be used as identifiers:</p>
+<pre><code>let  const  if  else  loop  break  continue  return
+import  extern  transmute  and  or  xor  not  true  false  void
+</code></pre>
+<blockquote>
+<p>NOTE: <code>import</code> is a preprocessing-only directive. It is recognized before any actual code; any <code>import</code> that reaches tokenization is an error.</p>
+</blockquote>
+<h3 id="number-literals"><a class="header" href="#number-literals">Number Literals</a></h3>
+<p>udewy supports three number formats. All produce 64-bit integer values. Underscore separators (<code>_</code>) are allowed anywhere within the digit sequence for readability.</p>
+<p><strong>Decimal integers:</strong></p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-number">42</span>
+<span class="u-number">1_000_000</span>
+<span class="u-number">0</span></code></pre>
+<p><strong>Hexadecimal integers</strong> (prefix <code>0x</code>, digits case-insensitive):</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-number">0xff</span>
+<span class="u-number">0x1a2b_3c4d</span>
+<span class="u-number">0xDEAD_BEEF</span></code></pre>
+<p><strong>Binary integers</strong> (prefix <code>0b</code>):</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-number">0b1010</span>
+<span class="u-number">0b1111_0000</span></code></pre>
+<p>All number literals are unsigned and must fit within 64 bits.</p>
+<h3 id="boolean-literals"><a class="header" href="#boolean-literals">Boolean Literals</a></h3>
+<p>Boolean values are represented as specific 64-bit integer patterns:</p>
+<div class="table-wrapper"><table><thead><tr><th>Literal</th><th>Value</th><th>Bit Pattern</th></tr></thead><tbody>
+<tr><td><code>true</code></td><td>-1 (signed) / 18446744073709551615 (unsigned)</td><td><code>0xFFFF_FFFF_FFFF_FFFF</code> (all bits set)</td></tr>
+<tr><td><code>false</code></td><td>0</td><td><code>0x0000_0000_0000_0000</code> (no bits set)</td></tr>
+</tbody></table>
+</div>
+<p>This representation allows bitwise operators (<code>and</code>, <code>or</code>, <code>xor</code>, <code>not</code>) to function correctly as both bitwise and logical operators.</p>
+<h3 id="string-literals"><a class="header" href="#string-literals">String Literals</a></h3>
+<p>Strings are enclosed in double quotes. Strings may span multiple lines:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">msg</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-string">"Hello, World!"</span>
+<span class="u-declaration">let</span> <span class="u-identifier">multi</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-string">"This string</span>
+<span class="u-string">spans multiple lines"</span></code></pre>
+<p><strong>Escape sequences:</strong> A backslash followed by certain characters produces special values:</p>
+<div class="table-wrapper"><table><thead><tr><th>Escape</th><th>Value</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>\n</code></td><td>10</td><td>Newline (line feed)</td></tr>
+<tr><td><code>\t</code></td><td>9</td><td>Horizontal tab</td></tr>
+<tr><td><code>\r</code></td><td>13</td><td>Carriage return</td></tr>
+<tr><td><code>\0</code></td><td>0</td><td>Null byte</td></tr>
+<tr><td><code>\xHH</code> / <code>\XHH</code></td><td><code>0xHH</code></td><td>Hex byte escape (<code>x</code> and the two hex digits are case-insensitive)</td></tr>
+<tr><td><code>\&lt;newline&gt;</code></td><td>(none)</td><td>Line continuation - the newline is skipped</td></tr>
+<tr><td><code>\&lt;other&gt;</code></td><td><code>&lt;other&gt;</code></td><td>Any other character produces that character literally</td></tr>
+</tbody></table>
+</div>
+<p>The last rule means <code>\"</code> produces a double-quote character and <code>\\</code> produces a backslash. Hex byte escapes insert a single raw byte; for example, <code>"\x41"</code> is the byte <code>0x41</code> (<code>'A'</code>), and <code>"\xce\xbc"</code> is the UTF-8 encoding of <code>μ</code>.</p>
+<p><strong>Line continuation:</strong> A backslash immediately before a newline causes that newline to be skipped:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">long</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-string">"\</span>
+<span class="u-string">This is a very \</span>
+<span class="u-string">long string that appears \</span>
+<span class="u-string">on one line"</span></code></pre>
+<p><strong>Non-ASCII content:</strong> Aside from escape sequences, the bytes between the quotes are copied into the literal <strong>verbatim</strong>. The compiler performs no encoding validation, conversion, or normalization, so a literal contains exactly the bytes of the source file. Since source files are conventionally UTF-8, <code>"μZero"</code> produces the UTF-8 encoding of (<code>0xCE 0xBC 0x5A 0x65 0x72 0x6F</code>) -- 2 initial bytes for <code>μ</code> followed by ascii <code>Zero</code>. A source file saved in another encoding would pass its raw bytes through just the same in that encoding rather than UTF-8. The length prefix counts <strong>bytes</strong>, not characters or codepoints; all text-encoding interpretation is left to the program. A backslash followed by a non-ASCII character passes that character's bytes through unchanged.</p>
+<blockquote>
+<p>NOTE: for an explicit byte-stable version with a fixed encoding regardless of the underlying file encoding, use byte escapes for any non-ASCII content, e.g. <code>"\xce\xbcZero"</code>.</p>
+</blockquote>
+<p><strong>Memory layout:</strong> String literals are stored in static memory with an 8-byte length prefix. The variable holds a pointer to the first character (after the length). See <a href="16-memory-layout.html#16-memory-layout">Memory Layout</a>.</p>
+<h3 id="based-string-literals"><a class="header" href="#based-string-literals">Based String Literals</a></h3>
+<p>Based strings use <code>0b"..."</code> or <code>0x"..."</code> to write exact bytes directly:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">bits</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-numeric_prefix">0b</span><span class="u-string">"</span><span class="u-number">1010</span>_<span class="u-number">0001</span> <span class="u-number">11</span><span class="u-string">"</span>       <span class="u-comment"># a1 c0</span>
+<span class="u-declaration">let</span> <span class="u-identifier">header</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-numeric_prefix">0x</span><span class="u-string">"</span><span class="u-number">de</span> <span class="u-number">ad</span>
+    <span class="u-comment"># comments may separate digits</span>
+    <span class="u-number">be</span> <span class="u-number">ef</span><span class="u-string">"</span></code></pre>
+<p>Based strings are ordinary expressions, not directives or a special declaration form. Only base 2 and base 16 are supported, and the prefixes are exactly lowercase <code>0b</code> and <code>0x</code>. Binary bodies accept <code>0</code> and <code>1</code>; hexadecimal bodies accept <code>0</code>-<code>9</code>, <code>a</code>-<code>f</code>, and <code>A</code>-<code>F</code>.</p>
+<p>Whitespace, underscores, and <code>#</code> line comments are separators and contribute no bits. After removing those separators, digits are packed in source order using <strong>MSB-first wire order</strong>: the first digit supplies the highest bit or nibble of the first byte, then packing continues toward the low bits before moving to the next byte. If the final byte is incomplete, its remaining low bits are automatically zero-filled on the right. Thus <code>0b"1"</code> is the byte <code>0x80</code>, <code>0b"1111_0000 1"</code> is <code>0xF0 0x80</code>, and <code>0x"a b c"</code> is <code>0xAB 0xC0</code>.</p>
+<p>Because a <code>#</code> comment continues through the newline, a closing quote on the same line is part of the comment; place the closing quote on a later line.</p>
+<p>No target-endian conversion is performed. The bytes in static storage are exactly this wire-order sequence on every backend. A based string carries no element type, dimensions, or shape metadata; consumers are responsible for knowing the data's format.</p>
+<p>Ordinary strings and based strings share the same static-storage layout: an 8-byte byte-length immediately before the data, with the expression evaluating to a pointer to the first data byte. <code>__load__(ptr - 8)</code> is therefore the byte length for both forms.</p>
+<h3 id="path-literals"><a class="header" href="#path-literals">Path Literals</a></h3>
+<p>Path Literals use the <code>p"..."</code> syntax. They are only recognized by the import preprocessor and are not part of the regular token stream or parser grammar:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-keyword">import</span> <span class="u-function">p</span><span class="u-string">"utils.udewy"</span>
+<span class="u-keyword">import</span> <span class="u-function">p</span><span class="u-string">"../lib/helpers.udewy"</span></code></pre>
+<p>Path literals support the same escape sequences as regular strings.</p>
+<h3 id="the-void-keyword"><a class="header" href="#the-void-keyword">The <code>void</code> Keyword</a></h3>
+<p><code>void</code> is a special keyword representing the absence of a meaningful value. It is primarily used in:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-keyword">return</span> <span class="u-keyword">void</span>              <span class="u-comment"># return from a void function</span>
+<span class="u-declaration">let</span> <span class="u-identifier">f</span> <span class="u-operator">=</span> <span class="u-punctuation">()</span><span class="u-operator">:&gt;</span><span class="u-type">void</span> <span class="u-operator">=&gt;</span> <span class="u-brace">{}</span>   <span class="u-comment"># declare a void-returning function</span></code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="12-type-system"><a class="header" href="#12-type-system">1.2 Type System</a></h2>
+<h3 id="runtime-representation"><a class="header" href="#runtime-representation">Runtime Representation</a></h3>
+<p>udewy treats <strong>everything as 64-bit integers</strong> at runtime. Pointers, booleans, characters—all are integers under the hood. There is no runtime type checking.</p>
+<h3 id="type-annotations"><a class="header" href="#type-annotations">Type Annotations</a></h3>
+<p>Type annotations are syntactically required in variable declarations and function signatures but are <strong>not checked</strong> by the udewy compiler. They exist to:</p>
+<ol>
+<li>Maintain compatibility with full Dewy (which does check types)</li>
+<li>Document programmer intent</li>
+<li>Guide certain parsing decisions</li>
+</ol>
+<p><strong>Variable type annotation</strong> (<code>:type</code>):</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">x</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-number">42</span></code></pre>
+<p><strong>Parameterized types</strong> (<code>:type&lt;param&gt;</code> or <code>&lt;param&gt;</code> alone):</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">data</span><span class="u-operator">:</span><span class="u-type">array&lt;int&gt;</span> <span class="u-operator">=</span> <span class="u-identifier">buffer</span>
+<span class="u-declaration">let</span> <span class="u-identifier">mixed</span><span class="u-type">&lt;int|string&gt;</span> <span class="u-operator">=</span> <span class="u-identifier">value</span>    <span class="u-comment"># type param without colon</span></code></pre>
+<p>The content inside <code>&lt;&gt;</code> is not validated, and annotations such as <code>array&lt;T&gt;</code> are opaque to udewy. This allows complex type expressions that udewy couldn't otherwise parse:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">x</span><span class="u-type">&lt;(int &amp; Something&lt;10&gt;) | undefined&gt;</span> <span class="u-operator">=</span> <span class="u-number">10</span></code></pre>
+<p><strong>Function return type</strong> (<code>:&gt;type</code>, <code>:&gt;type&lt;param&gt;</code> or <code>:&gt; &lt;param&gt;</code>):</p>
+<pre><code class="nohighlight udewy-hl language-udewy">let add = (a:int b:int):&gt;int =&gt; { return a + b }
+let get_value = ():&gt;result&lt;int&gt; =&gt; { ... }
+let flexible = ():&gt; &lt;A&amp;B|C&lt;int&gt;&gt; =&gt; { ... }  <span class="u-comment"># complex return type</span></code></pre>
+<h3 id="the-transmute-keyword"><a class="header" href="#the-transmute-keyword">The <code>transmute</code> Keyword</a></h3>
+<p><code>transmute</code> is a bit-preserving type cast that is a no-op in udewy:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">ptr</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-identifier">some_address</span> <span class="u-keyword">transmute</span> <span class="u-identifier">int</span>
+<span class="u-declaration">let</span> <span class="u-identifier">arr</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-identifier">buffer</span> <span class="u-keyword">transmute</span> <span class="u-identifier">array</span><span class="u-type">&lt;byte&gt;</span></code></pre>
+<p><code>transmute</code> preserves the underlying bits while changing the type annotation. It allows udewy code that manipulates raw integers to be valid in the strictly-typed full Dewy.</p>
+<p><strong>Syntax:</strong> <code>&lt;expr&gt; transmute &lt;type&gt;</code></p>
+<p>Where <code>&lt;type&gt;</code> can be an identifier, an identifier with type parameters, or just type parameters:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-identifier">expr</span> <span class="u-keyword">transmute</span> <span class="u-identifier">int</span>
+<span class="u-identifier">expr</span> <span class="u-keyword">transmute</span> <span class="u-identifier">array</span><span class="u-type">&lt;int&gt;</span>
+<span class="u-identifier">expr</span> <span class="u-keyword">transmute</span> <span class="u-type">&lt;T|U&gt;</span></code></pre>
+<h3 id="ignored-type-declarations"><a class="header" href="#ignored-type-declarations">Ignored Type Declarations</a></h3>
+<p>udewy also accepts a narrow Dewy-compatibility declaration form:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-identifier">Point</span><span class="u-operator">:</span><span class="u-type">type</span> <span class="u-operator">=</span> <span class="u-punctuation">[</span><span class="u-identifier">x</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-identifier">y</span><span class="u-operator">:</span><span class="u-type">int</span><span class="u-punctuation">]</span>
+<span class="u-declaration">let</span> <span class="u-identifier">Point</span><span class="u-operator">:</span><span class="u-type">type</span> <span class="u-operator">=</span> <span class="u-punctuation">[</span><span class="u-identifier">x</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-identifier">y</span><span class="u-operator">:</span><span class="u-type">int</span><span class="u-punctuation">]</span>
+<span class="u-identifier">Line</span><span class="u-operator">:</span><span class="u-type">type</span> <span class="u-operator">=</span> <span class="u-punctuation">[</span><span class="u-identifier">start</span><span class="u-operator">:</span><span class="u-type">Point</span> <span class="u-identifier">end</span><span class="u-operator">:</span><span class="u-type">Point</span><span class="u-punctuation">]</span></code></pre>
+<p>This form is recognized only when the annotation is the literal <code>type</code>. In udewy, it is treated like an ignored type-level declaration:</p>
+<ul>
+<li>the entire right-hand side is consumed syntactically and ignored</li>
+<li>no runtime code is generated</li>
+<li>no local or global value binding is created</li>
+</ul>
+<p>This allows shared udewy/Dewy source to include named type or struct declarations for the full Dewy compiler without affecting udewy execution.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="13-expressions"><a class="header" href="#13-expressions">1.3 Expressions</a></h2>
+<h3 id="operator-precedence"><a class="header" href="#operator-precedence">Operator Precedence</a></h3>
+<p>udewy parses expressions using the precedence table below. Binary operators are left-associative within a precedence level, and parentheses can be used to override the default grouping.</p>
+<p>Operand evaluation remains left-to-right, even when precedence groups the expression differently. For example, <code>a + b * c</code> evaluates <code>a</code>, then <code>b</code>, then <code>c</code>, and groups as <code>a + (b * c)</code>.</p>
+<p>Precedence levels (highest to lowest):</p>
+<div class="table-wrapper"><table><thead><tr><th>Level</th><th>Operators</th><th>Description</th></tr></thead><tbody>
+<tr><td>7</td><td><code>*</code>, <code>//</code>, <code>%</code></td><td>Multiplicative</td></tr>
+<tr><td>6</td><td><code>+</code>, <code>-</code></td><td>Additive</td></tr>
+<tr><td>5</td><td><code>&lt;&lt;</code>, <code>&gt;&gt;</code></td><td>Shift</td></tr>
+<tr><td>4</td><td><code>=?</code>, <code>not=?</code>, <code>&gt;?</code>, <code>&lt;?</code>, <code>&gt;=?</code>, <code>&lt;=?</code></td><td>Comparison</td></tr>
+<tr><td>3</td><td><code>and</code></td><td>Bitwise/logical AND</td></tr>
+<tr><td>2</td><td><code>xor</code></td><td>Bitwise/logical XOR</td></tr>
+<tr><td>1</td><td><code>or</code></td><td>Bitwise/logical OR</td></tr>
+</tbody></table>
+</div>
+<p><strong>Examples:</strong></p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-comment"># OK: multiplicative operators bind before additive operators</span>
+<span class="u-declaration">let</span> <span class="u-identifier">product_sum</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-identifier">a</span> <span class="u-operator">+</span> <span class="u-identifier">b</span> <span class="u-operator">*</span> <span class="u-identifier">c</span>
+
+<span class="u-comment"># OK: explicit grouping</span>
+<span class="u-declaration">let</span> <span class="u-identifier">grouped</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-punctuation">(</span><span class="u-identifier">a</span> <span class="u-operator">+</span> <span class="u-identifier">b</span><span class="u-punctuation">)</span> <span class="u-operator">*</span> <span class="u-identifier">c</span>
+
+<span class="u-comment"># OK: left-associative within the same precedence level</span>
+<span class="u-declaration">let</span> <span class="u-identifier">chain</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-identifier">a</span> <span class="u-operator">+</span> <span class="u-identifier">b</span> <span class="u-operator">+</span> <span class="u-identifier">c</span></code></pre>
+<h3 id="unary-operators"><a class="header" href="#unary-operators">Unary Operators</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Operator</th><th>Description</th><th>Semantics</th></tr></thead><tbody>
+<tr><td><code>-</code></td><td>Negation</td><td>Two's complement negation: <code>0 - x</code></td></tr>
+<tr><td><code>not</code></td><td>Bitwise/logical NOT</td><td>Inverts all 64 bits</td></tr>
+</tbody></table>
+</div>
+<p>Unary operators bind tightly to their operand:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">x</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-operator">-</span><span class="u-punctuation">(</span><span class="u-identifier">a</span> <span class="u-operator">+</span> <span class="u-identifier">b</span><span class="u-punctuation">)</span>
+<span class="u-declaration">let</span> <span class="u-identifier">y</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-keyword">not</span> <span class="u-identifier">flags</span></code></pre>
+<h3 id="arithmetic-operators"><a class="header" href="#arithmetic-operators">Arithmetic Operators</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Operator</th><th>Description</th><th>Semantics</th></tr></thead><tbody>
+<tr><td><code>+</code></td><td>Addition</td><td>64-bit wrapping addition</td></tr>
+<tr><td><code>-</code></td><td>Subtraction</td><td>64-bit wrapping subtraction</td></tr>
+<tr><td><code>*</code></td><td>Multiplication</td><td>64-bit wrapping multiplication</td></tr>
+<tr><td><code>//</code></td><td>Integer division</td><td>Signed 64-bit division, truncated toward zero</td></tr>
+<tr><td><code>%</code></td><td>Modulo</td><td>Signed 64-bit remainder</td></tr>
+</tbody></table>
+</div>
+<p>Division and modulo use <strong>signed</strong> interpretation (RISC-V <code>div</code> / <code>rem</code> semantics on all targets):</p>
+<div class="table-wrapper"><table><thead><tr><th>Case</th><th><code>a // b</code></th><th><code>a % b</code></th></tr></thead><tbody>
+<tr><td><code>b = 0</code></td><td><code>-1</code> (<code>0xFFFF_FFFF_FFFF_FFFF</code>)</td><td><code>a</code></td></tr>
+<tr><td><code>INT_MIN // -1</code></td><td><code>INT_MIN</code></td><td><code>0</code></td></tr>
+</tbody></table>
+</div>
+<p>All other cases use truncating signed division toward zero.</p>
+<h3 id="shift-operators"><a class="header" href="#shift-operators">Shift Operators</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Operator</th><th>Description</th><th>Semantics</th></tr></thead><tbody>
+<tr><td><code>&lt;&lt;</code></td><td>Left shift</td><td>Shift left, fill with zeros</td></tr>
+<tr><td><code>&gt;&gt;</code></td><td>Right shift (unsigned)</td><td>Logical shift right, fill with zeros</td></tr>
+</tbody></table>
+</div>
+<p>The shift amount is masked to the low 6 bits (0-63).</p>
+<p><strong>Important:</strong> The <code>&gt;&gt;</code> operator performs an <strong>unsigned (logical) shift</strong>, filling vacated bits with zeros regardless of the sign bit. For arithmetic (signed) right shift that preserves the sign bit, use the <code>__signed_shr__</code> intrinsic. See <a href="32-semantic-differences-both-compile-different-behavior.html#32-semantic-differences-both-compile-different-behavior">Semantic Differences</a></p>
+<h3 id="comparison-operators"><a class="header" href="#comparison-operators">Comparison Operators</a></h3>
+<p>All comparison operators return <code>true</code> (<code>0xFFFF_FFFF_FFFF_FFFF</code>) or <code>false</code> (<code>0x0000_0000_0000_0000</code>).</p>
+<div class="table-wrapper"><table><thead><tr><th>Operator</th><th>Description</th><th>Semantics</th></tr></thead><tbody>
+<tr><td><code>=?</code></td><td>Equal</td><td>True if operands are bit-identical</td></tr>
+<tr><td><code>not=?</code></td><td>Not equal</td><td>True if operands differ in any bit</td></tr>
+<tr><td><code>&gt;?</code></td><td>Greater than</td><td><strong>Signed</strong> comparison</td></tr>
+<tr><td><code>&lt;?</code></td><td>Less than</td><td><strong>Signed</strong> comparison</td></tr>
+<tr><td><code>&gt;=?</code></td><td>Greater or equal</td><td><strong>Signed</strong> comparison</td></tr>
+<tr><td><code>&lt;=?</code></td><td>Less or equal</td><td><strong>Signed</strong> comparison</td></tr>
+</tbody></table>
+</div>
+<p><strong>Note:</strong> Relational comparisons (<code>&gt;?</code>, <code>&lt;?</code>, etc.) interpret operands as <strong>signed</strong> 64-bit integers.</p>
+<h3 id="bitwiselogical-operators"><a class="header" href="#bitwiselogical-operators">Bitwise/Logical Operators</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Operator</th><th>Description</th><th>Semantics</th></tr></thead><tbody>
+<tr><td><code>and</code></td><td>Bitwise AND</td><td>64-bit bitwise AND</td></tr>
+<tr><td><code>or</code></td><td>Bitwise OR</td><td>64-bit bitwise OR</td></tr>
+<tr><td><code>xor</code></td><td>Bitwise XOR</td><td>64-bit bitwise XOR</td></tr>
+</tbody></table>
+</div>
+<p>Due to the boolean representation (<code>true</code> = all 1s, <code>false</code> = all 0s), these operators work correctly as both bitwise and logical operators.</p>
+<p><strong>Important:</strong> In ordinary expressions, <code>and</code> and <code>or</code> are <strong>bitwise</strong> and both operands are always evaluated. In <code>if</code> and <code>loop</code> conditions only, <code>and</code> and <code>or</code> use <strong>logical short-circuit</strong> evaluation (compatible with Dewy bool conditions): the right-hand side is skipped when the result is already determined.</p>
+<h3 id="parentheses-and-grouping"><a class="header" href="#parentheses-and-grouping">Parentheses and Grouping</a></h3>
+<p>Parentheses override precedence and grouping:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">x</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-punctuation">(</span><span class="u-identifier">a</span> <span class="u-operator">+</span> <span class="u-identifier">b</span><span class="u-punctuation">)</span> <span class="u-operator">*</span> <span class="u-identifier">c</span></code></pre>
+<h3 id="function-calls"><a class="header" href="#function-calls">Function Calls</a></h3>
+<p><strong>Named call:</strong></p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-identifier">result</span> <span class="u-operator">=</span> <span class="u-function">add</span><span class="u-punctuation">(</span><span class="u-number">1</span> <span class="u-number">2</span><span class="u-punctuation">)</span></code></pre>
+<p><strong>Expression call</strong> (calling a computed function pointer):</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">fn_ptr</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-function">get_handler</span><span class="u-punctuation">()</span>
+<span class="u-punctuation">(</span><span class="u-operator">@</span><span class="u-identifier">fn_ptr</span><span class="u-punctuation">)(</span><span class="u-identifier">arg1</span> <span class="u-identifier">arg2</span><span class="u-punctuation">)</span></code></pre>
+<p>Arguments are space-separated (no commas).</p>
+<blockquote>
+<p>NOTE: Indirect calls require parentheses around the callee. Bare <code>fn_ptr(arg1 arg2)</code> is always a named call: it looks up a top-level function <code>fn_ptr</code> and ignores any local or global binding of that name. Use <code>(@fn_ptr)(arg1 arg2)</code> to call through a value. Consequently, binding a local or global with the same name as an existing top-level function is ill-formed — <code>name(...)</code> will still call the function, not the binding.</p>
+<p><code>@name</code> is decorative in udewy: it is the value of <code>name</code>, exactly as the bare name is. It exists so a udewy program reads the same under Dewy, where a bare function name is always a call and <code>@name</code> means the function itself. Write it wherever a function is used as a value — <code>return @double</code>, <code>let handler:int = @on_start</code> — and it is <em>required</em> when a name in parentheses is called: <code>(fn_ptr)(args)</code> is rejected, because under Dewy that would call <code>fn_ptr()</code> first and apply the arguments to its result.</p>
+</blockquote>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="14-statements"><a class="header" href="#14-statements">1.4 Statements</a></h2>
+<h3 id="variable-declarations"><a class="header" href="#variable-declarations">Variable Declarations</a></h3>
+<p>Variables must be declared with <code>let</code> or <code>const</code>, require a <strong>type annotation</strong>, and require an initializer:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">x</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-number">42</span>
+<span class="u-declaration">const</span> <span class="u-identifier">BUFFER_SIZE</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-number">1024</span>
+<span class="u-declaration">let</span> <span class="u-identifier">data</span><span class="u-operator">:</span><span class="u-type">array&lt;int&gt;</span> <span class="u-operator">=</span> <span class="u-function">__alloca__</span><span class="u-punctuation">(</span><span class="u-identifier">BUFFER_SIZE</span><span class="u-punctuation">)</span></code></pre>
+<p><code>let</code> declares a mutable binding. <code>const</code> declares an immutable binding and cannot be assigned after its initializer.</p>
+<p>At local scope, the initializer must be a normal expression. <code>extern</code> initializers are not allowed inside function bodies.</p>
+<h3 id="ignored-type-declarations-1"><a class="header" href="#ignored-type-declarations-1">Ignored Type Declarations</a></h3>
+<p>Anywhere a statement or top-level declaration may appear, udewy accepts type declarations of the form <code>&lt;IDENT&gt;:type = &lt;EXPR&gt;</code>, <code>let &lt;IDENT&gt;:type = &lt;EXPR&gt;</code>, or <code>const &lt;IDENT&gt;:type = &lt;EXPR&gt;</code>, e.g.</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-identifier">Point</span><span class="u-operator">:</span><span class="u-type">type</span> <span class="u-operator">=</span> <span class="u-punctuation">[</span><span class="u-identifier">x</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-identifier">y</span><span class="u-operator">:</span><span class="u-type">int</span><span class="u-punctuation">]</span>
+<span class="u-declaration">let</span> <span class="u-identifier">Point</span><span class="u-operator">:</span><span class="u-type">type</span> <span class="u-operator">=</span> <span class="u-punctuation">[</span><span class="u-identifier">x</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-identifier">y</span><span class="u-operator">:</span><span class="u-type">int</span><span class="u-punctuation">]</span>
+<span class="u-declaration">const</span> <span class="u-identifier">Line</span><span class="u-operator">:</span><span class="u-type">type</span> <span class="u-operator">=</span> <span class="u-punctuation">[</span><span class="u-identifier">start</span><span class="u-operator">:</span><span class="u-type">Point</span> <span class="u-identifier">end</span><span class="u-operator">:</span><span class="u-type">Point</span><span class="u-punctuation">]</span></code></pre>
+<p>Semantics:</p>
+<ul>
+<li>The type annotation must exactly be the literal <code>type</code></li>
+<li>The declaration is parsed and ignored.</li>
+<li>The right-hand side is not evaluated.</li>
+<li>The declared name may still appear inside type annotations or other ignored type declarations.</li>
+<li>The declared name may not be used as a runtime value; doing so is a compile-time error.</li>
+</ul>
+<h3 id="assignment"><a class="header" href="#assignment">Assignment</a></h3>
+<p>Simple assignment:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-identifier">x</span> <span class="u-operator">=</span> <span class="u-number">42</span></code></pre>
+<p>The assignment target must be a <code>let</code> binding. Assigning to a <code>const</code> is a compile-time error.</p>
+<p><strong>Compound assignment</strong> operators combine a binary operation with assignment:</p>
+<div class="table-wrapper"><table><thead><tr><th>Operator</th><th>Equivalent</th></tr></thead><tbody>
+<tr><td><code>x += y</code></td><td><code>x = x + y</code></td></tr>
+<tr><td><code>x -= y</code></td><td><code>x = x - y</code></td></tr>
+<tr><td><code>x *= y</code></td><td><code>x = x * y</code></td></tr>
+<tr><td><code>x //= y</code></td><td><code>x = x // y</code></td></tr>
+<tr><td><code>x %= y</code></td><td><code>x = x % y</code></td></tr>
+<tr><td><code>x &lt;&lt;= y</code></td><td><code>x = x &lt;&lt; y</code></td></tr>
+<tr><td><code>x &gt;&gt;= y</code></td><td><code>x = x &gt;&gt; y</code></td></tr>
+<tr><td><code>x and= y</code></td><td><code>x = x and y</code></td></tr>
+<tr><td><code>x or= y</code></td><td><code>x = x or y</code></td></tr>
+<tr><td><code>x xor= y</code></td><td><code>x = x xor y</code></td></tr>
+</tbody></table>
+</div>
+<span id="if-else"></span><h3 id="if--else"><a class="header" href="#if--else">If / Else</a></h3>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-keyword">if</span> <span class="u-identifier">condition</span> <span class="u-brace">{</span>
+    <span class="u-comment"># then branch</span>
+<span class="u-brace">}</span> <span class="u-keyword">else</span> <span class="u-keyword">if</span> <span class="u-identifier">other_condition</span> <span class="u-brace">{</span>
+    <span class="u-comment"># else-if branch</span>
+<span class="u-brace">}</span> <span class="u-keyword">else</span> <span class="u-brace">{</span>
+    <span class="u-comment"># else branch</span>
+<span class="u-brace">}</span></code></pre>
+<p>Braces are <strong>always required</strong>. Conditions check if <strong>any bit is set</strong> (non-zero = true, zero = false).</p>
+<blockquote>
+<p><strong>Well-formedness note:</strong> Full Dewy requires conditions to be strictly <code>bool</code> typed. Using a non-bool value as a condition (e.g., <code>if some_int { ... }</code>) will fail Dewy type-checking even though it compiles in udewy.</p>
+</blockquote>
+<h3 id="loop"><a class="header" href="#loop">Loop</a></h3>
+<p>udewy has a single loop construct that loops while a condition is true:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">i</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-number">0</span>
+<span class="u-keyword">loop</span> <span class="u-identifier">i</span> <span class="u-operator">&lt;?</span> <span class="u-number">10</span> <span class="u-brace">{</span>
+    <span class="u-comment"># body</span>
+    <span class="u-identifier">i</span> <span class="u-operator">=</span> <span class="u-identifier">i</span> <span class="u-operator">+</span> <span class="u-number">1</span>
+<span class="u-brace">}</span></code></pre>
+<p>The condition is evaluated before each iteration. Braces are required.</p>
+<h3 id="break-and-continue"><a class="header" href="#break-and-continue">Break and Continue</a></h3>
+<p>Within a loop:</p>
+<ul>
+<li><code>break</code> exits the innermost loop immediately</li>
+<li><code>continue</code> jumps to the next iteration (re-evaluates condition)</li>
+</ul>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-keyword">loop</span> <span class="u-number">true</span> <span class="u-brace">{</span>
+    <span class="u-keyword">if</span> <span class="u-identifier">done</span> <span class="u-brace">{</span>
+        <span class="u-keyword">break</span>
+    <span class="u-brace">}</span>
+    <span class="u-keyword">if</span> <span class="u-identifier">skip_this</span> <span class="u-brace">{</span>
+        <span class="u-keyword">continue</span>
+    <span class="u-brace">}</span>
+    <span class="u-comment"># ...</span>
+<span class="u-brace">}</span></code></pre>
+<h3 id="return"><a class="header" href="#return">Return</a></h3>
+<p>All functions must explicitly return using <code>return</code>:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-keyword">return</span> <span class="u-identifier">value</span>     <span class="u-comment"># return a value</span>
+<span class="u-keyword">return</span> <span class="u-keyword">void</span>      <span class="u-comment"># return from a void function</span></code></pre>
+<p>The return expression is <strong>mandatory</strong>. Use <code>return void</code> for functions that don't return a meaningful value.</p>
+<h3 id="prelude-directives"><a class="header" href="#prelude-directives">Prelude Directives</a></h3>
+<p>Prelude directives are preprocessing-only forms recognized before tokenization.
+They may appear only in the leading prelude at the top of a file or inside
+active preprocessor target blocks in that prelude. They are removed before the
+normal udewy parser sees the source.</p>
+<h4 id="include-bytes"><a class="header" href="#include-bytes">Include Bytes</a></h4>
+<pre><code class="nohighlight udewy-hl language-udewy">$include_bytes(p"tables/gcb.bin") as gcb_table</code></pre>
+<p><code>$include_bytes(p"path") as name</code> embeds a file's contents as read-only static data and binds <code>name</code> (a module-level <code>int64</code>) to its address — exactly as <code>let name:int64 = 0x"…"</code> of the same bytes would. It is a prelude directive: it may appear only in the leading prelude alongside <code>import</code> and <code>$supported_targets</code>, the argument must be a single path literal (nothing else is accepted), and a relative path is resolved against the directory of the file containing the directive. The file is read by the preprocessor, so its bytes never appear in the program text; a missing file is a compile-time error. Generated programs use it for large tables (the Dewy compiler's Unicode data).</p>
+<h4 id="import-directives"><a class="header" href="#import-directives">Import Directives</a></h4>
+<p>Import directives bring definitions from other udewy files into scope:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-keyword">import</span> <span class="u-function">p</span><span class="u-string">"utils.udewy"</span>
+<span class="u-keyword">import</span> <span class="u-function">p</span><span class="u-string">"lib/helpers.udewy"</span>
+<span class="u-keyword">import</span> <span class="u-function">p</span><span class="u-string">"../third_party/libfoo.a"</span></code></pre>
+<p><strong>Semantics:</strong></p>
+<ul>
+<li>Paths are relative to the importing file's directory</li>
+<li>Imports are recognized only in the leading prelude at the top of a file</li>
+<li>Imports ending in <code>.udewy</code> are treated as udewy source and processed recursively</li>
+<li>Imported paths with any other suffix are treated as direct external link artifacts, not source</li>
+<li>Native artifacts are expected to be fully prepared for the final backend link step; native targets hand them directly to the system linker</li>
+<li>Each imported source file or artifact path is only included once</li>
+<li>Imported udewy source is prepended to the source being compiled</li>
+<li>After preprocessing, import directives are removed from the source before tokenization and parsing</li>
+<li><code>import</code> remains a reserved word; if it reaches tokenization, the tokenizer reports an error</li>
+</ul>
+<p>The import preprocessor records the resolved paths of imported udewy source files as generic provenance. It does not interpret those paths beyond source loading and duplicate suppression; concrete backends may use that provenance to recognize their own library modules.</p>
+<h4 id="target-support-metadata"><a class="header" href="#target-support-metadata">Target Support Metadata</a></h4>
+<p>Any source file may declare the targets it supports:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-operator">$</span><span class="u-meta">supported_targets</span> <span class="u-operator">=</span> <span class="u-brace">[</span><span class="u-string">"c"</span> <span class="u-string">"wasm32"</span> <span class="u-string">"x86_64"</span><span class="u-brace">]</span></code></pre>
+<p>If the selected compile target is not present, preprocessing stops with a
+diagnostic for that file. Target names are the same names accepted by the
+compiler's <code>--target</code> flag.</p>
+<h4 id="target-conditional-prelude-blocks"><a class="header" href="#target-conditional-prelude-blocks">Target-Conditional Prelude Blocks</a></h4>
+<p>Target-conditional blocks choose which prelude directives are active:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-keyword">if</span> <span class="u-operator">$</span><span class="u-meta">target</span> <span class="u-operator">=?</span> <span class="u-string">"wasm32"</span> <span class="u-brace">{</span>
+    <span class="u-keyword">import</span> <span class="u-function">p</span><span class="u-string">"./backend_wasm.udewy"</span>
+<span class="u-brace">}</span>
+
+<span class="u-keyword">if</span> <span class="u-operator">$</span><span class="u-meta">target</span> <span class="u-declaration">not</span><span class="u-operator">=?</span> <span class="u-string">"c"</span> <span class="u-brace">{</span>
+    <span class="u-keyword">import</span> <span class="u-function">p</span><span class="u-string">"./native_only.udewy"</span>
+<span class="u-brace">}</span></code></pre>
+<p>Only the exact <code>$target =? "..."</code> and <code>$target not=? "..."</code> conditions are
+supported. The block body may contain only prelude directives. Inactive blocks
+are skipped without resolving their imports or emitting their diagnostics.</p>
+<h4 id="diagnostic-directives"><a class="header" href="#diagnostic-directives">Diagnostic Directives</a></h4>
+<p>Source files may emit preprocessor diagnostics:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-operator">$</span><span class="u-meta">warning</span><span class="u-punctuation">(</span><span class="u-string">"wasm32 has limited support"</span><span class="u-punctuation">)</span>
+<span class="u-operator">$</span><span class="u-meta">error</span><span class="u-punctuation">(</span><span class="u-string">"this target needs a custom backend module"</span><span class="u-punctuation">)</span></code></pre>
+<p>Both forms accept exactly one string literal. <code>$warning</code> prints a source-context
+warning and continues. <code>$error</code> stops preprocessing with the provided message.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="15-functions"><a class="header" href="#15-functions">1.5 Functions</a></h2>
+<h3 id="declaration"><a class="header" href="#declaration">Declaration</a></h3>
+<p>Functions are declared using lambda syntax assigned to a variable:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">add</span> <span class="u-operator">=</span> <span class="u-punctuation">(</span><span class="u-identifier">a</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-identifier">b</span><span class="u-operator">:</span><span class="u-type">int</span><span class="u-punctuation">)</span><span class="u-operator">:&gt;</span><span class="u-type">int</span> <span class="u-operator">=&gt;</span> <span class="u-brace">{</span>
+    <span class="u-keyword">return</span> <span class="u-identifier">a</span> <span class="u-operator">+</span> <span class="u-identifier">b</span>
+<span class="u-brace">}</span>
+
+<span class="u-declaration">let</span> <span class="u-identifier">greet</span> <span class="u-operator">=</span> <span class="u-punctuation">()</span><span class="u-operator">:&gt;</span><span class="u-type">void</span> <span class="u-operator">=&gt;</span> <span class="u-brace">{</span>
+    <span class="u-comment"># do something</span>
+    <span class="u-keyword">return</span> <span class="u-keyword">void</span>
+<span class="u-brace">}</span></code></pre>
+<ul>
+<li><strong>All parameters must have type annotations</strong> (e.g., <code>a:int</code>)</li>
+<li><strong>Return type annotation is required</strong> using <code>:&gt;</code> syntax (e.g., <code>:&gt;int</code>)</li>
+<li>Parameters are space-separated (no commas)</li>
+<li>All functions must explicitly <code>return</code></li>
+<li>Functions may only be declared at <strong>top level</strong> (no nested functions)</li>
+</ul>
+<h3 id="external-declarations"><a class="header" href="#external-declarations">External Declarations</a></h3>
+<p>udewy supports top-level external declarations for functions and globals provided by linked artifacts:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">SDL_Init</span> <span class="u-operator">=</span> <span class="u-punctuation">(</span><span class="u-identifier">flags</span><span class="u-operator">:</span><span class="u-type">int</span><span class="u-punctuation">)</span><span class="u-operator">:&gt;</span><span class="u-type">bool</span> <span class="u-operator">=&gt;</span> <span class="u-keyword">extern</span>
+<span class="u-declaration">let</span> <span class="u-identifier">SDL_Quit</span> <span class="u-operator">=</span> <span class="u-punctuation">()</span><span class="u-operator">:&gt;</span><span class="u-type">void</span> <span class="u-operator">=&gt;</span> <span class="u-keyword">extern</span>
+<span class="u-declaration">let</span> <span class="u-identifier">errno</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-keyword">extern</span></code></pre>
+<p>Extern declarations use the same syntax as ordinary top-level declarations, but replace the function body or initializer with the <code>extern</code> keyword.</p>
+<p><strong>Rules:</strong></p>
+<ul>
+<li>Extern declarations are only valid at <strong>top level</strong></li>
+<li>Local extern declarations are a compile-time error</li>
+<li>Extern functions participate in normal forward-reference resolution by name</li>
+<li>Extern globals and functions are resolved by the native linker, not by udewy source imports</li>
+<li>Backends that do not support native external linking may reject <code>extern</code></li>
+</ul>
+<h3 id="forward-references"><a class="header" href="#forward-references">Forward References</a></h3>
+<p>Functions can be called before they are defined. Unknown identifiers during parsing are treated as forward function references and resolved at the end of compilation. If a forward reference remains undefined, compilation fails. Only functions may be forward-referenced; globals, constants, and ignored type declarations must be declared before use.</p>
+<h3 id="calling-convention"><a class="header" href="#calling-convention">Calling Convention</a></h3>
+<p>Functions follow platform-specific calling conventions (see backend addendums). Arguments are passed in registers and/or on the stack depending on the backend.</p>
+<h3 id="no-closures"><a class="header" href="#no-closures">No Closures</a></h3>
+<p>udewy does not support closures. Functions cannot capture variables from enclosing scopes. All functions operate only on their parameters, global variables, and locally declared variables.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="16-memory-layout"><a class="header" href="#16-memory-layout">1.6 Memory Layout</a></h2>
+<h3 id="overview"><a class="header" href="#overview">Overview</a></h3>
+<p>udewy uses a simple, uniform memory layout. All values are 64-bit integers. Complex data structures are built using pointers and manual offset calculations.</p>
+<h3 id="strings-and-based-strings"><a class="header" href="#strings-and-based-strings">Strings and Based Strings</a></h3>
+<p>Ordinary strings and based strings share the same layout in static memory:</p>
+<pre><code>┌──────────────────────┬────────────────┐
+│ Byte length (8 bytes)│ Data (N bytes) │
+└──────────────────────┴────────────────┘
+</code></pre>
+<ul>
+<li><strong>Length prefix:</strong> 8 bytes containing the byte count</li>
+<li><strong>Data:</strong> exactly the ordinary string's decoded source bytes or the based string's MSB-first wire-order bytes</li>
+</ul>
+<p>The expression holds a pointer to the <strong>start of the data</strong> (after the length). Access the byte length at <code>ptr - 8</code>:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">packet</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-numeric_prefix">0x</span><span class="u-string">"</span><span class="u-number">01</span> <span class="u-number">02</span> <span class="u-number">ff</span><span class="u-string">"</span>
+<span class="u-declaration">let</span> <span class="u-identifier">len</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-function">__load__</span><span class="u-punctuation">(</span><span class="u-identifier">packet</span> <span class="u-operator">-</span> <span class="u-number">8</span><span class="u-punctuation">)</span>       <span class="u-comment"># 3</span>
+<span class="u-declaration">let</span> <span class="u-identifier">first</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-function">__load_u8__</span><span class="u-punctuation">(</span><span class="u-identifier">packet</span><span class="u-punctuation">)</span>      <span class="u-comment"># 1</span>
+<span class="u-declaration">let</span> <span class="u-identifier">second</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-function">__load_u8__</span><span class="u-punctuation">(</span><span class="u-identifier">packet</span> <span class="u-operator">+</span> <span class="u-number">1</span><span class="u-punctuation">)</span> <span class="u-comment"># 2</span></code></pre>
+<h3 id="static-vs-dynamic-data"><a class="header" href="#static-vs-dynamic-data">Static vs Dynamic Data</a></h3>
+<p>Ordinary and based string literals are stored in static memory (the data section). Their storage may be shared by multiple uses and persists across calls, so literals should not be used as mutable working buffers.</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">process</span> <span class="u-operator">=</span> <span class="u-punctuation">()</span><span class="u-operator">:&gt;</span><span class="u-type">void</span> <span class="u-operator">=&gt;</span> <span class="u-brace">{</span>
+    <span class="u-declaration">let</span> <span class="u-identifier">local_buf</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-function">__alloca__</span><span class="u-punctuation">(</span><span class="u-number">256</span><span class="u-punctuation">)</span>        <span class="u-comment"># fresh for this call</span>
+    <span class="u-declaration">let</span> <span class="u-identifier">shared_buf</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-function">__static_alloca__</span><span class="u-punctuation">(</span><span class="u-number">64</span><span class="u-punctuation">)</span> <span class="u-comment"># one zero-initialized static buffer</span>
+    <span class="u-comment"># write through __store_u8__, __store_u64__, etc.</span>
+    <span class="u-keyword">return</span> <span class="u-keyword">void</span>
+<span class="u-brace">}</span></code></pre>
+<p>Use <code>__alloca__(size)</code> for a fresh function-local mutable buffer, <code>__static_alloca__(size)</code> for a shared zero-initialized mutable buffer, or an allocator appropriate to the target for other lifetimes.</p>
+<h3 id="simulating-structs"><a class="header" href="#simulating-structs">Simulating Structs</a></h3>
+<p>udewy doesn't have built-in structs. Use offset constants:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">const</span> <span class="u-identifier">PERSON_NAME</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-number">0</span>
+<span class="u-declaration">const</span> <span class="u-identifier">PERSON_AGE</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-number">8</span>
+<span class="u-declaration">const</span> <span class="u-identifier">PERSON_HEIGHT</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-number">16</span>
+<span class="u-declaration">const</span> <span class="u-identifier">PERSON_SIZE</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-number">24</span>
+
+<span class="u-declaration">let</span> <span class="u-identifier">person</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-function">alloc</span><span class="u-punctuation">(</span><span class="u-identifier">PERSON_SIZE</span><span class="u-punctuation">)</span>
+
+<span class="u-function">__store__</span><span class="u-punctuation">(</span><span class="u-identifier">name_ptr</span> <span class="u-identifier">person</span> <span class="u-operator">+</span> <span class="u-identifier">PERSON_NAME</span><span class="u-punctuation">)</span>
+<span class="u-function">__store__</span><span class="u-punctuation">(</span><span class="u-number">25</span> <span class="u-identifier">person</span> <span class="u-operator">+</span> <span class="u-identifier">PERSON_AGE</span><span class="u-punctuation">)</span>
+<span class="u-function">__store__</span><span class="u-punctuation">(</span><span class="u-number">180</span> <span class="u-identifier">person</span> <span class="u-operator">+</span> <span class="u-identifier">PERSON_HEIGHT</span><span class="u-punctuation">)</span>
+
+<span class="u-declaration">let</span> <span class="u-identifier">age</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-function">__load__</span><span class="u-punctuation">(</span><span class="u-identifier">person</span> <span class="u-operator">+</span> <span class="u-identifier">PERSON_AGE</span><span class="u-punctuation">)</span></code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="17-scoping"><a class="header" href="#17-scoping">1.7 Scoping</a></h2>
+<h3 id="block-scope"><a class="header" href="#block-scope">Block Scope</a></h3>
+<p>Variables are block-scoped. A new scope is created for:</p>
+<ul>
+<li>Function bodies</li>
+<li>If/else branches</li>
+<li>Loop bodies</li>
+</ul>
+<p>Variables declared in an inner scope shadow variables with the same name in outer scopes.</p>
+<h3 id="name-resolution"><a class="header" href="#name-resolution">Name Resolution</a></h3>
+<p>When a bare identifier is referenced (not followed by <code>(</code>), it is resolved by searching:</p>
+<ol>
+<li>Current block scope</li>
+<li>Enclosing block scopes (innermost to outermost)</li>
+<li>Function parameters</li>
+<li>Global scope (top-level constants, globals, and functions)</li>
+</ol>
+<p>Ignored type declarations participate only in type annotations and other ignored type declarations. If a name resolves to an ignored type declaration and is used as a runtime value, compilation fails.</p>
+<p>If not found in any runtime scope, it is treated as a forward reference to a function.</p>
+<p>Named calls (<code>name(...)</code>) skip this search and always resolve <code>name</code> as a top-level function (or intrinsic). A local or global binding does not intercept them. Binding a name that already names a top-level function is therefore ill-formed.</p>
+<h3 id="global-scope"><a class="header" href="#global-scope">Global Scope</a></h3>
+<p>Top-level declarations are in global scope and visible throughout the file (including before their declaration point due to forward reference handling).</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="part-2-core-intrinsics"><a class="header" href="#part-2-core-intrinsics">Part 2: Core Intrinsics</a></h1>
+<p>Intrinsics are built-in operations that compile to target-specific instructions. They are called like functions but are handled specially by the compiler.</p>
+<h2 id="21-memory-operations"><a class="header" href="#21-memory-operations">2.1 Memory Operations</a></h2>
+<p>These intrinsics provide direct memory access:</p>
+<div class="table-wrapper"><table><thead><tr><th>Intrinsic</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>__load__(addr)</code></td><td>Shorthand for <code>__load_u64__(addr)</code></td></tr>
+<tr><td><code>__load_u8__(addr)</code></td><td>Load unsigned 8-bit value from <code>addr</code>, zero-extend to 64-bit</td></tr>
+<tr><td><code>__load_u16__(addr)</code></td><td>Load unsigned 16-bit value from <code>addr</code>, zero-extend to 64-bit</td></tr>
+<tr><td><code>__load_u32__(addr)</code></td><td>Load unsigned 32-bit value from <code>addr</code>, zero-extend to 64-bit</td></tr>
+<tr><td><code>__load_u64__(addr)</code></td><td>Load unsigned 64-bit value from <code>addr</code></td></tr>
+<tr><td><code>__load_i8__(addr)</code></td><td>Load signed 8-bit value from <code>addr</code>, sign-extend to 64-bit</td></tr>
+<tr><td><code>__load_i16__(addr)</code></td><td>Load signed 16-bit value from <code>addr</code>, sign-extend to 64-bit</td></tr>
+<tr><td><code>__load_i32__(addr)</code></td><td>Load signed 32-bit value from <code>addr</code>, sign-extend to 64-bit</td></tr>
+<tr><td><code>__load_i64__(addr)</code></td><td>Load signed 64-bit value from <code>addr</code></td></tr>
+<tr><td><code>__store__(val addr)</code></td><td>Shorthand for <code>__store_u64__(val addr)</code></td></tr>
+<tr><td><code>__store_u8__(val addr)</code></td><td>Store low 8 bits of <code>val</code> to <code>addr</code>, return 0</td></tr>
+<tr><td><code>__store_u16__(val addr)</code></td><td>Store low 16 bits of <code>val</code> to <code>addr</code>, return 0</td></tr>
+<tr><td><code>__store_u32__(val addr)</code></td><td>Store low 32 bits of <code>val</code> to <code>addr</code>, return 0</td></tr>
+<tr><td><code>__store_u64__(val addr)</code></td><td>Store 64-bit <code>val</code> to <code>addr</code>, return 0</td></tr>
+<tr><td><code>__store_i8__(val addr)</code></td><td>Store low 8 bits of <code>val</code> to <code>addr</code>, return 0</td></tr>
+<tr><td><code>__store_i16__(val addr)</code></td><td>Store low 16 bits of <code>val</code> to <code>addr</code>, return 0</td></tr>
+<tr><td><code>__store_i32__(val addr)</code></td><td>Store low 32 bits of <code>val</code> to <code>addr</code>, return 0</td></tr>
+<tr><td><code>__store_i64__(val addr)</code></td><td>Store 64-bit <code>val</code> to <code>addr</code>, return 0</td></tr>
+<tr><td><code>__alloca__(size)</code></td><td>Allocate <code>size</code> bytes of temporary storage and return an 8-byte-aligned address</td></tr>
+<tr><td><code>__static_alloca__(size)</code></td><td>Allocate <code>size</code> bytes of writable static storage and return its address</td></tr>
+<tr><td><code>__static_words__(word...)</code></td><td>Intern one or more compile-time stable 64-bit words and return their 8-byte-aligned static address</td></tr>
+</tbody></table>
+</div>
+<p>Signed and unsigned 64-bit loads/stores are identical at runtime; both spellings exist to make programmer intent explicit. <code>__load__</code>/<code>__store__</code> are convenience shorthands for the unsigned 64-bit forms. For stores, signedness affects only intent and documentation; the stored bit pattern is the low <code>N</code> bits of <code>val</code>.</p>
+<p><code>__alloca__(size)</code> reserves temporary storage whose lifetime lasts until the current function returns. The returned address is aligned to at least 8 bytes, and native backends may round the reserved size up further to preserve ABI stack alignment. Native backends typically implement this with function-local stack storage; the wasm backend uses a function-scoped stack region in linear memory.</p>
+<p><code>__static_alloca__(size)</code> reserves writable storage in the program's static data area. The storage is zero-initialized, has a single shared instance for the entire program, and is not tied to any function call frame. Its <code>size</code> argument must be a compile-time stable integer value, which may be provided directly as a number literal or indirectly through a <code>const</code> binding or backend-provided builtin constant.</p>
+<p><code>__static_words__(word...)</code> creates writable static storage initialized with one or more compile-time stable words. Accepted values are integer literals and stable aliases, non-extern function references, ordinary or based string pointers, and pointers returned by <code>__static_alloca__</code> or another <code>__static_words__</code> call. The result points directly to the first word: there is no length prefix, element type, bounds information, or array behavior.</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">const</span> <span class="u-identifier">handlers</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-function">__static_words__</span><span class="u-punctuation">(</span><span class="u-identifier">on_start</span> <span class="u-identifier">on_update</span> <span class="u-identifier">on_stop</span><span class="u-punctuation">)</span>
+<span class="u-declaration">let</span> <span class="u-identifier">handler</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-function">__load__</span><span class="u-punctuation">(</span><span class="u-identifier">handlers</span> <span class="u-operator">+</span> <span class="u-identifier">state</span> <span class="u-operator">*</span> <span class="u-number">8</span><span class="u-punctuation">)</span>
+<span class="u-punctuation">(</span><span class="u-operator">@</span><span class="u-identifier">handler</span><span class="u-punctuation">)(</span><span class="u-identifier">context</span><span class="u-punctuation">)</span></code></pre>
+<p>Integer entries use the target's native 64-bit byte order. References use the backend's normal runtime representation: addresses on native and C targets, linear-memory addresses for WASM data, and WASM function-table indices for functions. This makes <code>__static_words__</code> suitable for vtables, lookup tables, and ABI descriptors interpreted by the consumer. Use based strings instead when the bytes must be identical across targets.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="22-arithmetic-operations"><a class="header" href="#22-arithmetic-operations">2.2 Arithmetic Operations</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Intrinsic</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>__signed_shr__(val bits)</code></td><td>Arithmetic (signed) right shift; fills vacated bits with the sign bit</td></tr>
+<tr><td><code>__unsigned_idiv__(lhs rhs)</code></td><td>Unsigned 64-bit division (RISC-V <code>divu</code> / <code>remu</code> semantics)</td></tr>
+<tr><td><code>__unsigned_mod__(lhs rhs)</code></td><td>Unsigned 64-bit remainder</td></tr>
+</tbody></table>
+</div><div class="table-wrapper"><table><thead><tr><th>Case</th><th><code>__unsigned_idiv__(a, b)</code></th><th><code>__unsigned_mod__(a, b)</code></th></tr></thead><tbody>
+<tr><td><code>b = 0</code></td><td><code>UINT64_MAX</code> (<code>0xFFFF_FFFF_FFFF_FFFF</code>)</td><td><code>a</code></td></tr>
+</tbody></table>
+</div>
+<p>Divide-by-zero quotients use the same bit pattern as signed <code>-1</code>; only the interpretation differs.
+| <code>__unsigned_lt__(lhs rhs)</code> | Unsigned less-than comparison |
+| <code>__unsigned_gt__(lhs rhs)</code> | Unsigned greater-than comparison |
+| <code>__unsigned_lte__(lhs rhs)</code> | Unsigned less-than-or-equal comparison |
+| <code>__unsigned_gte__(lhs rhs)</code> | Unsigned greater-than-or-equal comparison |</p>
+<p>Use <code>__signed_shr__</code> when you need sign-preserving right shift. The <code>&gt;&gt;</code> operator always performs unsigned (logical) shift. Likewise, <code>//</code>, <code>%</code>, and relational operators remain signed by default; use the unsigned intrinsics when you need unsigned interpretation.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="part-3-well-formedness-and-divergence"><a class="header" href="#part-3-well-formedness-and-divergence">Part 3: Well-Formedness and Divergence</a></h1>
+<p>This section documents all cases where udewy behavior can diverge from full Dewy. Writing well-formed udewy <em>today</em> requires programmer diligence in these areas.</p>
+<blockquote>
+<p>When the full dewy compiler is available, well-formedness will be machine-verifiable.</p>
+</blockquote>
+<h2 id="31-type-mismatches-udewy-compiles-dewy-rejects"><a class="header" href="#31-type-mismatches-udewy-compiles-dewy-rejects">3.1 Type Mismatches (udewy compiles, Dewy rejects)</a></h2>
+<p>These patterns compile in udewy but would be rejected by full Dewy's type checker:</p>
+<div class="table-wrapper"><table><thead><tr><th>Pattern</th><th>Issue</th></tr></thead><tbody>
+<tr><td><code>if some_int { ... }</code></td><td>Condition must be <code>bool</code> in Dewy</td></tr>
+<tr><td><code>let x:int = true + 5</code></td><td>Arithmetic on booleans</td></tr>
+<tr><td><code>let p:int = arr + 8</code></td><td>Pointer arithmetic without casts</td></tr>
+<tr><td><code>some_fn(arg1 arg2) transmute int</code></td><td>Transmute on wrong type</td></tr>
+</tbody></table>
+</div><div style="break-before: page; page-break-before: always;"></div><h2 id="32-semantic-differences-both-compile-different-behavior"><a class="header" href="#32-semantic-differences-both-compile-different-behavior">3.2 Semantic Differences (both compile, different behavior)</a></h2>
+<p>These patterns compile in both udewy and Dewy but may behave differently:</p>
+<div class="table-wrapper"><table><thead><tr><th>Pattern</th><th>udewy Behavior</th><th>Dewy Behavior</th></tr></thead><tbody>
+<tr><td><code>x &gt;&gt; n</code> (when x is signed)</td><td>Unsigned shift (zeros fill)</td><td>Signed shift (sign bit fills)*</td></tr>
+<tr><td><code>a and b</code> / <code>a or b</code></td><td>Both sides always evaluated*</td><td>Short-circuit evaluation</td></tr>
+<tr><td><code>str1 =? str2</code></td><td>Compares pointers</td><td>Compares content</td></tr>
+</tbody></table>
+</div>
+<blockquote>
+<p>NOTE: Dewy selects signed or unsigned shift based on left operand type.</p>
+</blockquote>
+<blockquote>
+<p>NOTE: <code>and</code> / <code>or</code> can short-circuit in udewy when they are the condition in an <code>if</code> or <code>loop</code> expression (which matches regular dewy behavior).</p>
+</blockquote>
+<p>In general, using any of these differences is considered not well-formed.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="33-programmer-diligence-required-today"><a class="header" href="#33-programmer-diligence-required-today">3.3 Programmer Diligence Required Today</a></h2>
+<p>Until automatic well-formedness verification is implemented in the dewy compiler, manual care should be taken to write well-formed udewy:</p>
+<ol>
+<li><strong>Use <code>__signed_shr__</code></strong> when arithmetic shift is needed for signed values</li>
+<li><strong>Short-circuit only in conditions</strong> - side effects in <code>and</code>/<code>or</code> operands still always occur in ordinary expressions; only <code>if</code>/<code>loop</code> conditions short-circuit</li>
+<li><strong>Implement content comparison functions</strong> when byte-string content equality is needed</li>
+<li><strong>Use unsigned intrinsics explicitly</strong> when raw unsigned interpretation matters</li>
+<li><strong>Test with increasing compiler strictness</strong> as the Dewy compiler matures. The full dewy compiler will be able to flag ALL cases of ill-formed udewy.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="part-4-compilation-model"><a class="header" href="#part-4-compilation-model">Part 4: Compilation Model</a></h1>
+<h2 id="41-overview"><a class="header" href="#41-overview">4.1 Overview</a></h2>
+<p>The udewy compiler is a <strong>single-pass compiler</strong> with:</p>
+<ol>
+<li>Import preprocessing (recursive file inclusion)</li>
+<li>Tokenization</li>
+<li>Parsing with direct code emission</li>
+<li>Backend-specific assembly/output generation</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="42-prelude-processing"><a class="header" href="#42-prelude-processing">4.2 Prelude Processing</a></h2>
+<p>Before tokenization, leading prelude directives are processed:</p>
+<ol>
+<li>Parse the leading prelude at the beginning of the file</li>
+<li>Check any <code>$supported_targets</code> declaration against the selected compile target</li>
+<li>Evaluate narrow <code>if $target ...</code> blocks and skip inactive block bodies</li>
+<li>Emit any active <code>$warning</code> or <code>$error</code> diagnostics</li>
+<li>For each active import, recursively process the imported file</li>
+<li>Prepend imported content to the main source</li>
+<li>Remove prelude directives from the source being compiled</li>
+<li>Track imported files to prevent duplicate inclusion</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="43-backend-architecture"><a class="header" href="#43-backend-architecture">4.3 Backend Architecture</a></h2>
+<p>udewy's compilation model is designed to be <strong>modular with respect to target platforms</strong>. A backend encapsulates all target-specific concerns:</p>
+<ul>
+<li><strong>Architecture:</strong> CPU instruction set (x86_64, RISC-V, AArch64, WASM, etc.)</li>
+<li><strong>Operating System:</strong> System call interface and conventions (Linux, Windows, macOS, bare metal, browser, etc.)</li>
+<li><strong>Output Format:</strong> Executable format (ELF, PE, Mach-O, WASM, etc.)</li>
+</ul>
+<span id="parser-backend-boundary"></span><h3 id="parser--backend-boundary"><a class="header" href="#parser--backend-boundary">Parser / Backend Boundary</a></h3>
+<p>The parser (<code>p0.py</code>) is responsible for parsing udewy source and translating the result into calls on the abstract <code>Backend</code> interface. It should not contain target-specific logic or special-case knowledge about concrete backends.</p>
+<p>Concrete backends are responsible for responding to those abstract operations in whatever way is appropriate for their target. They may differ in calling conventions, instruction selection, intrinsic support, output format, and runtime environment, but those differences should be expressed through the <code>Backend</code> protocol rather than through extra coupling with the parser.</p>
+<p>In general, the parser, tokenizer/import preprocessor, and concrete backends should only know about each other through what is described by <code>Backend</code> in <code>backend/common.py</code> and the generic import outputs in <code>t0.py</code>. Changes to these shared surfaces should therefore be relatively rare and made only when they provide a clear architectural benefit, such as substantially simplifying the parser/backend relationship, removing complexity, or enabling an important capability that cleanly belongs in the shared abstraction.</p>
+<p>When editing udewy, avoid adding concrete backend names, target ABI rules, syscall tables, host-library conventions, file-layout assumptions, or intrinsic families directly to the parser or import preprocessor. Prefer one of these shapes instead:</p>
+<ul>
+<li>If every backend must implement the behavior, add a small generic method or hook to <code>Backend</code>.</li>
+<li>If only some targets support the behavior, keep the names, validation rules, lowering, constants, and diagnostics inside those backends.</li>
+<li>If source imports need to carry backend-specific configuration, pass generic import provenance through the <code>Backend</code> protocol and let the selected backend interpret its own library modules.</li>
+<li>If a backend needs platform constants or syscall tables, keep them in backend-owned modules rather than in <code>p0.py</code>, <code>t0.py</code>, or <code>backend/common.py</code>.</li>
+</ul>
+<p>udewy-native programs that do not rely on <code>extern</code> declarations use udewy's own entry point and do not require C runtime startup code. When <code>extern</code> declarations are used, the final link additionally depends on whatever artifacts are provided to satisfy those extern symbols.</p>
+<h3 id="backend-responsibilities"><a class="header" href="#backend-responsibilities">Backend Responsibilities</a></h3>
+<p>Each backend implements the parser protocol and provides:</p>
+<ol>
+<li><strong>Code generation</strong> - Emit target-specific instructions</li>
+<li><strong>Calling convention</strong> - How functions pass arguments and return values</li>
+<li><strong>Platform intrinsics</strong> - OS-specific operations (syscalls, host functions, etc.)</li>
+<li><strong>Imported source provenance</strong> - Optional recognition of backend-owned library modules</li>
+<li><strong>Memory model</strong> - Address space layout and constraints</li>
+</ol>
+<h3 id="local-register-allocation"><a class="header" href="#local-register-allocation">Local Register Allocation</a></h3>
+<p>The native register backends (x86_64, RISC-V, AArch64) share one allocation
+pass (<code>LocalRegisterAllocator</code> in <code>udewy/backend/common.py</code>, <code>la_*</code> in
+<code>udewy/bootstrap/backend/common.udewy</code>). Every local starts life in a frame
+slot; the backend records each access as a <em>site</em> (the code line, the slot's
+dense key, the other operand of the move, and whether it is a store), the
+line at which the slot was allocated, the extent of every loop, and every
+<em>clobber</em> line (calls, syscalls, and on x86_64 the last parameter store,
+because the incoming argument registers stay live until then). At the end
+of the function the sites become live intervals over line numbers:</p>
+<ul>
+<li>an interval that touches a loop which began after the slot's allocation
+is widened over the whole loop (the value travels around the back edge);
+a slot allocated inside the loop body is stored before every read of an
+iteration, so such loops never widen it;</li>
+<li>an interval that crosses a clobber may only take a register the callee
+preserves; a call-free interval prefers a scratch register the emitter
+never uses, and falls back to a preserved one;</li>
+<li>when the eligible registers are all held, the busiest interval wins
+(loop depth weights each access by 8^depth, capped at depth 3);</li>
+<li>slots with a single site, and slots whose access needs more than one
+instruction (AArch64 offsets beyond the immediate range), stay in memory.</li>
+</ul>
+<p>µDewy has no address-of-local operation, so the recorded sites are every use
+of a slot and no alias analysis is needed. Assigned sites are rewritten into
+register moves; slots keep their frame homes, so frame sizes, alignment and
+calling conventions do not change. Debug builds keep every local in its slot.
+Register budgets: x86_64 <code>rbx</code>/<code>r15</code> preserved + <code>r8</code>/<code>r9</code>/<code>r11</code> scratch;
+RISC-V <code>s1</code>, <code>s5</code>-<code>s11</code> + <code>t2</code>-<code>t4</code>; AArch64 <code>x19</code>, <code>x24</code>-<code>x28</code> + <code>x11</code>-<code>x15</code>.</p>
+<h3 id="intrinsic-categories"><a class="header" href="#intrinsic-categories">Intrinsic Categories</a></h3>
+<p>Intrinsics and backend-provided names fall into tiers. The tiers matter for portability, for self-hosting, and for thinking about what a minimal trusted-base implementation would need to reproduce.</p>
+<h4 id="minimal-core-language-level"><a class="header" href="#minimal-core-language-level">Minimal core (language-level)</a></h4>
+<p>These are the operations defined in <a href="21-memory-operations.html#part-2-core-intrinsics">Part 2: Core Intrinsics</a>. Every backend in this repository implements them:</p>
+<ul>
+<li>Memory: <code>__load__</code> / <code>__store__</code> and the sized variants, <code>__alloca__</code>, <code>__static_alloca__</code>, <code>__static_words__</code></li>
+<li>Arithmetic helpers: <code>__signed_shr__</code>, <code>__unsigned_idiv__</code>, <code>__unsigned_mod__</code>, unsigned comparisons</li>
+<li>Debugging: <code>__breakpoint__()</code> traps into a debugger attached to the process (<code>int3</code>, <code>ebreak</code>, <code>brk #0</code>; a no-op where the target has no debugger protocol, such as wasm32) and yields <code>void</code></li>
+</ul>
+<p>A program that uses only core intrinsics plus ordinary udewy syntax is backend-portable at the <em>language</em> level. It still needs a platform layer for I/O, allocation, and exit unless it is fully freestanding.</p>
+<p>This tier is the practical floor for a self-hosting compiler, a hand-written bootstrap implementation, or a future minimal single-backend profile (for example targeting only RISC-V Linux). It deliberately excludes graphics, browser host functions, mixed FP extern calls, and third-party library shims.</p>
+<h4 id="platform-surface-per-backend"><a class="header" href="#platform-surface-per-backend">Platform surface (per-backend)</a></h4>
+<p>Each backend adds the intrinsics and builtin constants needed for its environment:</p>
+<ul>
+<li><strong>Native Linux backends</strong> (<code>x86_64</code>, <code>riscv</code>, <code>arm</code>): <code>__syscall0__</code> through <code>__syscall6__</code>, plus syscall numbers, file descriptors, and mmap/open flags</li>
+<li><strong>WASM browser backend</strong>: host functions such as <code>__host_log__</code>, <code>__host_exit__</code>, and (when used) canvas/DOM/WebGL/input intrinsics documented in Addendum D</li>
+<li><strong>C backend</strong>: no syscalls; hosted behavior comes from explicit <code>extern</code> bindings via <code>udewy/third_party/c/</code> capability imports</li>
+</ul>
+<p>Portable programs should call these through a <strong>platform abstraction layer</strong> (wrapper functions + target-specific imports), not by sprinkling backend-specific intrinsics through application logic.</p>
+<h4 id="optional-extensions-not-required-for-the-language-or-bootstrap"><a class="header" href="#optional-extensions-not-required-for-the-language-or-bootstrap">Optional extensions (not required for the language or bootstrap)</a></h4>
+<p>These are real and supported in this reference implementation, but they are not part of the minimal udewy language contract:</p>
+<ul>
+<li><strong>Mixed GP/FP extern calls</strong> (<code>__call_extern_mixed_N__</code>, float bit-pattern helpers) on native Linux and C backends — for linking to C libraries such as SDL/OpenGL</li>
+<li><strong>Third-party integrations</strong> documented in Addendum E (SDL, Clay)</li>
+<li><strong>WASM graphics and input</strong> (canvas, WebGL, pointer/keyboard) — for browser demos and interactive programs</li>
+</ul>
+<p>A smaller trusted-base compiler could omit entire extension families as long as the programs it is asked to compile do not use them.</p>
+<h4 id="summary-table"><a class="header" href="#summary-table">Summary table</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Tier</th><th>Examples</th><th>Required for self-hosting bootstrap?</th></tr></thead><tbody>
+<tr><td>Core intrinsics</td><td><code>__load__</code>, <code>__store__</code>, <code>__alloca__</code>, <code>__signed_shr__</code></td><td>Yes</td></tr>
+<tr><td>Platform intrinsics</td><td><code>__syscall3__</code>, <code>__host_log__</code>, libc <code>extern</code> via C capabilities</td><td>Yes, but only the surface for the chosen target</td></tr>
+<tr><td>Builtin constants</td><td><code>SYS_WRITE</code>, <code>STDOUT</code>, browser host imports</td><td>Per target</td></tr>
+<tr><td>Optional extensions</td><td>canvas/WebGL, <code>__call_extern_mixed_*__</code>, SDL/Clay</td><td>No</td></tr>
+</tbody></table>
+</div>
+<p>For example:</p>
+<ul>
+<li>Linux backends provide <code>__syscall0__</code> through <code>__syscall6__</code> intrinsics, plus builtin constants for syscall numbers (<code>SYS_WRITE</code>, <code>SYS_EXIT</code>, etc.) and common flags</li>
+<li>The WASM browser backend provides <code>__host_log__</code>, <code>__host_time__</code>, etc. for browser interaction</li>
+<li>A hypothetical Windows backend would provide different intrinsics for Win32 API calls</li>
+</ul>
+<h3 id="builtin-constants"><a class="header" href="#builtin-constants">Builtin Constants</a></h3>
+<p>Linux backends automatically provide constants for:</p>
+<ul>
+<li><strong>Syscall numbers</strong>: <code>SYS_READ</code>, <code>SYS_WRITE</code>, <code>SYS_OPEN</code>, <code>SYS_CLOSE</code>, <code>SYS_EXIT</code>, etc.</li>
+<li><strong>File descriptors</strong>: <code>STDIN</code>, <code>STDOUT</code>, <code>STDERR</code></li>
+<li><strong>Open flags</strong>: <code>O_RDONLY</code>, <code>O_WRONLY</code>, <code>O_RDWR</code>, <code>O_CREAT</code>, <code>O_TRUNC</code>, <code>O_APPEND</code></li>
+<li><strong>Memory mapping flags</strong>: <code>PROT_READ</code>, <code>PROT_WRITE</code>, <code>PROT_EXEC</code>, <code>MAP_SHARED</code>, <code>MAP_PRIVATE</code>, <code>MAP_ANONYMOUS</code></li>
+</ul>
+<p>These constants are available without explicit declaration:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-comment"># No need to declare SYS_WRITE - it's provided by the x86_64 backend</span>
+<span class="u-declaration">let</span> <span class="u-identifier">msg</span> <span class="u-operator">=</span> <span class="u-string">"Hello\n"</span>
+<span class="u-declaration">let</span> <span class="u-identifier">len</span> <span class="u-operator">=</span> <span class="u-function">__load__</span><span class="u-punctuation">(</span><span class="u-identifier">msg</span> <span class="u-operator">-</span> <span class="u-number">8</span><span class="u-punctuation">)</span>
+<span class="u-function">__syscall3__</span><span class="u-punctuation">(</span><span class="u-identifier">SYS_WRITE</span> <span class="u-identifier">STDOUT</span> <span class="u-identifier">msg</span> <span class="u-identifier">len</span><span class="u-punctuation">)</span></code></pre>
+<p>Note: Syscall numbers differ between architectures. x86_64 uses the traditional Linux syscall numbers, while RISC-V and AArch64 use the newer unified syscall table (e.g., <code>SYS_OPENAT</code> instead of <code>SYS_OPEN</code>).</p>
+<h3 id="writing-portable-code"><a class="header" href="#writing-portable-code">Writing Portable Code</a></h3>
+<p>To write udewy programs that work across multiple backends:</p>
+<ol>
+<li>Use only core intrinsics for direct operations</li>
+<li>Create a <strong>platform abstraction layer</strong> - a set of wrapper functions that call the appropriate platform intrinsics</li>
+<li>Import the correct platform module for your target</li>
+</ol>
+<p>Example structure:</p>
+<pre><code>program.udewy          # main program using platform API
+├── platform_api.udewy # abstract interface (print, alloc, exit, etc.)
+├── platform_linux_x86_64.udewy  # Linux x86_64 implementation
+├── platform_linux_riscv.udewy   # Linux RISC-V implementation
+├── platform_wasm.udewy          # Browser WASM implementation
+└── platform_windows.udewy       # (future) Windows implementation
+</code></pre>
+<p>For the hosted <code>c</code> backend, "portable" usually means keeping direct operations within core udewy semantics and treating libc or OS APIs as explicit <code>extern</code> boundaries. The backend itself does not provide syscall intrinsics or builtin constants; if a program binds to <code>calloc</code>, <code>printf</code>, <code>syscall</code>, or a platform SDK symbol, that portability boundary is owned by the program.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="44-backend-selection"><a class="header" href="#44-backend-selection">4.4 Backend Selection</a></h2>
+<p>The hosted and native command-line compilers include source/variable debug
+metadata by default. <code>--no-debug-info</code> skips that metadata without changing
+program evaluation, compile diagnostics, or <code>__breakpoint__()</code> instructions.
+Dewy's ordinary compilation uses this option for generated µDewy; <code>dewy debug</code>
+keeps the metadata and source mappings.</p>
+<p>The target backend is selected at compile time via the <code>--target</code> flag:</p>
+<pre><code class="language-bash">python -m udewy.p0 --target &lt;backend&gt; program.udewy
+</code></pre>
+<p>Available backends are documented in the addendums. New backends can be added by implementing the backend protocol defined in <code>backend/common.py</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="45-forward-references"><a class="header" href="#45-forward-references">4.5 Forward References</a></h2>
+<p>Unknown identifiers during parsing are assumed to be forward references to functions unless they resolve to an ignored type declaration. At the end of compilation, all remaining forward references must be resolved or an error is reported.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="part-5-formal-grammar"><a class="header" href="#part-5-formal-grammar">Part 5: Formal Grammar</a></h1>
+<pre><code>source_file     ::= prelude_directive* program
+
+prelude_directive ::= import_directive
+                    | supported_targets
+                    | target_if
+                    | meta_diagnostic
+
+import_directive ::= 'import' path_string
+path_string     ::= 'p' STRING
+
+supported_targets ::= '$supported_targets' '=' '[' STRING* ']'
+
+target_if       ::= 'if' target_condition '{' prelude_directive* '}'
+target_condition ::= '$target' ('=?' | 'not=?') STRING
+
+meta_diagnostic ::= ('$warning' | '$error') '(' STRING ')'
+
+program         ::= top_level_stmt*
+
+top_level_stmt  ::= fn_decl
+                  | const_decl
+                  | ignored_type_decl
+
+fn_decl         ::= ('let' | 'const') IDENT '=' '(' param_list ')' fn_type_annot '=&gt;' (block | 'extern')
+
+const_decl      ::= ('let' | 'const') IDENT type_annot '=' (const_expr | 'extern')
+
+param_list      ::= (IDENT type_annot)*
+
+fn_type_annot   ::= ':&gt;' IDENT type_param?
+                  | ':&gt;' type_param
+type_annot      ::= ':' IDENT type_param?
+                  | type_param
+type_param      ::= '&lt;' type_content '&gt;'
+
+block           ::= '{' statement* '}'
+
+statement       ::= var_decl
+                  | ignored_type_decl
+                  | assign_stmt
+                  | if_stmt
+                  | loop_stmt
+                  | 'break'
+                  | 'continue'
+                  | return_stmt
+                  | expr
+
+var_decl        ::= ('let' | 'const') IDENT type_annot '=' expr
+
+ignored_type_decl ::= IDENT ':type' '=' ignored_expr
+                    | ('let' | 'const') IDENT ':type' '=' ignored_expr
+
+assign_stmt     ::= IDENT '=' expr
+                  | IDENT compound_op expr
+
+compound_op     ::= '+=' | '-=' | '*=' | '//=' | '%=' 
+                  | '&lt;&lt;=' | '&gt;&gt;=' | 'and=' | 'or=' | 'xor='
+
+if_stmt         ::= 'if' expr block else_clause?
+else_clause     ::= 'else' 'if' expr block else_clause?
+                  | 'else' block
+
+loop_stmt       ::= 'loop' expr block
+
+return_stmt     ::= 'return' expr
+
+expr            ::= prefix_expr (binop prefix_expr)* cast_annot?
+
+prefix_expr     ::= '-' prefix_expr
+                  | 'not' prefix_expr
+                  | atom
+
+atom            ::= NUMBER
+                  | STRING
+                  | BASED_STRING
+                  | 'true'
+                  | 'false'
+                  | 'void'
+                  | IDENT
+                  | IDENT '(' arg_list ')'
+                  | '(' expr ')' ('(' arg_list ')')?
+
+arg_list        ::= expr*
+
+cast_annot      ::= 'transmute' (IDENT type_param? | type_param)
+
+ignored_expr    ::= a Dewy-compatible type expression or struct/type literal
+                  # udewy consumes this syntax but does not evaluate it
+
+binop           ::= '+' | '-' | '*' | '//' | '%'
+                  | '&lt;&lt;' | '&gt;&gt;'
+                  | '=?' | 'not=?' | '&gt;?' | '&lt;?' | '&gt;=?' | '&lt;=?'
+                  | 'and' | 'or' | 'xor'
+
+const_expr      ::= NUMBER | STRING | BASED_STRING | IDENT
+
+# Lexical elements
+IDENT           ::= [a-zA-Z_][a-zA-Z0-9_]*
+NUMBER          ::= decimal | hex | binary
+decimal         ::= [0-9][0-9_]*
+hex             ::= '0x' [0-9a-fA-F_]+
+binary          ::= '0b' [01_]+
+STRING          ::= '"' string_char* '"'
+string_char     ::= &lt;any char except '"' or '\'&gt;
+                  | '\' &lt;any char&gt;
+BASED_STRING    ::= ('0b' binary_string_body | '0x' hex_string_body)
+binary_string_body ::= '"' ([01_] | whitespace | line_comment)* '"'
+hex_string_body ::= '"' ([0-9a-fA-F_] | whitespace | line_comment)* '"'
+line_comment    ::= '#' &lt;characters through end of line&gt;
+</code></pre>
+<blockquote>
+<p>NOTE: <code>prelude_directive</code> forms are consumed during preprocessing and do not appear in the token stream seen by the parser. The word <code>import</code> remains reserved, so any surviving <code>import</code> is rejected during tokenization.</p>
+</blockquote>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="part-6-intentional-limitations"><a class="header" href="#part-6-intentional-limitations">Part 6: Intentional Limitations</a></h1>
+<p>udewy deliberately omits features to keep the compiler simple and auditable:</p>
+<ul>
+<li><strong>No indexing syntax</strong> (<code>arr[i]</code>): Would require type information to know element size</li>
+<li><strong>No runtime array literal syntax</strong>: square brackets remain available in prelude metadata, ignored type declarations, and bracketed type annotations</li>
+<li><strong>No value casts</strong> (<code>as</code>): Would require type-aware conversion</li>
+<li><strong>No string interpolation</strong>: Strings are simple byte sequences</li>
+<li><strong>No closures or nested functions</strong>: Functions only at top level</li>
+<li><strong>No function overloading</strong>: Each function name has exactly one definition</li>
+<li><strong>Expression <code>and</code>/<code>or</code> are bitwise</strong>: Both sides are always evaluated; only <code>if</code>/<code>loop</code> conditions short-circuit</li>
+<li><strong>No floating-point</strong>: Everything is 64-bit integers (with the caveat that float-bit helpers exist for extern ABI interop)</li>
+<li><strong>No garbage collection</strong>: Manual memory management via syscalls</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="part-7-examples"><a class="header" href="#part-7-examples">Part 7: Examples</a></h1>
+<h2 id="fibonacci"><a class="header" href="#fibonacci">Fibonacci</a></h2>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">fib</span> <span class="u-operator">=</span> <span class="u-punctuation">(</span><span class="u-identifier">n</span><span class="u-operator">:</span><span class="u-type">int</span><span class="u-punctuation">)</span><span class="u-operator">:&gt;</span><span class="u-type">int</span> <span class="u-operator">=&gt;</span> <span class="u-brace">{</span>
+    <span class="u-keyword">if</span> <span class="u-identifier">n</span> <span class="u-operator">&lt;?</span> <span class="u-number">2</span> <span class="u-brace">{</span>
+        <span class="u-keyword">return</span> <span class="u-identifier">n</span>
+    <span class="u-brace">}</span> <span class="u-keyword">else</span> <span class="u-brace">{</span>
+        <span class="u-keyword">return</span> <span class="u-function">fib</span><span class="u-punctuation">(</span><span class="u-identifier">n</span> <span class="u-operator">-</span> <span class="u-number">1</span><span class="u-punctuation">)</span> <span class="u-operator">+</span> <span class="u-function">fib</span><span class="u-punctuation">(</span><span class="u-identifier">n</span> <span class="u-operator">-</span> <span class="u-number">2</span><span class="u-punctuation">)</span>
+    <span class="u-brace">}</span>
+<span class="u-brace">}</span>
+
+<span class="u-declaration">let</span> <span class="u-identifier">main</span> <span class="u-operator">=</span> <span class="u-punctuation">()</span><span class="u-operator">:&gt;</span><span class="u-type">int</span> <span class="u-operator">=&gt;</span> <span class="u-brace">{</span>
+    <span class="u-keyword">return</span> <span class="u-function">fib</span><span class="u-punctuation">(</span><span class="u-number">10</span><span class="u-punctuation">)</span>  <span class="u-comment"># returns 55</span>
+<span class="u-brace">}</span></code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="memory-allocation-with-mmap"><a class="header" href="#memory-allocation-with-mmap">Memory Allocation with mmap</a></h2>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-comment"># SYS_MMAP, PROT_*, MAP_* constants are provided by the x86_64 backend</span>
+
+<span class="u-declaration">let</span> <span class="u-identifier">alloc</span> <span class="u-operator">=</span> <span class="u-punctuation">(</span><span class="u-identifier">size</span><span class="u-operator">:</span><span class="u-type">int</span><span class="u-punctuation">)</span><span class="u-operator">:&gt;</span><span class="u-type">int</span> <span class="u-operator">=&gt;</span> <span class="u-brace">{</span>
+    <span class="u-keyword">return</span> <span class="u-function">__syscall6__</span><span class="u-punctuation">(</span><span class="u-identifier">SYS_MMAP</span> <span class="u-number">0</span> <span class="u-identifier">size</span> <span class="u-punctuation">(</span><span class="u-identifier">PROT_READ</span> <span class="u-keyword">or</span> <span class="u-identifier">PROT_WRITE</span><span class="u-punctuation">)</span> <span class="u-punctuation">(</span><span class="u-identifier">MAP_PRIVATE</span> <span class="u-keyword">or</span> <span class="u-identifier">MAP_ANONYMOUS</span><span class="u-punctuation">)</span> <span class="u-punctuation">(</span><span class="u-number">0</span> <span class="u-operator">-</span> <span class="u-number">1</span><span class="u-punctuation">)</span> <span class="u-number">0</span><span class="u-punctuation">)</span>
+<span class="u-brace">}</span>
+
+<span class="u-declaration">let</span> <span class="u-identifier">main</span> <span class="u-operator">=</span> <span class="u-punctuation">()</span><span class="u-operator">:&gt;</span><span class="u-type">int</span> <span class="u-operator">=&gt;</span> <span class="u-brace">{</span>
+    <span class="u-declaration">let</span> <span class="u-identifier">buffer</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-function">alloc</span><span class="u-punctuation">(</span><span class="u-number">4096</span><span class="u-punctuation">)</span>
+    <span class="u-function">__store__</span><span class="u-punctuation">(</span><span class="u-number">42</span> <span class="u-identifier">buffer</span><span class="u-punctuation">)</span>
+    <span class="u-keyword">return</span> <span class="u-function">__load__</span><span class="u-punctuation">(</span><span class="u-identifier">buffer</span><span class="u-punctuation">)</span>  <span class="u-comment"># returns 42</span>
+<span class="u-brace">}</span></code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="backend-addendums"><a class="header" href="#backend-addendums">Backend Addendums</a></h1>
+<p>The following addendums document the currently implemented backends. Each backend targets a specific combination of:</p>
+<ul>
+<li><strong>Architecture</strong> - The CPU instruction set</li>
+<li><strong>Operating System</strong> - The system call interface and runtime environment</li>
+</ul>
+<p>New backends can be added for other architecture/OS combinations by implementing the backend protocol. For example, future backends might include:</p>
+<ul>
+<li>x86_64 Windows (PE executables, Win32 API)</li>
+<li>x86_64 macOS (Mach-O executables, Darwin syscalls)</li>
+<li>AArch64 macOS (Apple Silicon)</li>
+<li>Bare metal / embedded targets</li>
+<li>Other browser runtimes (Node.js, Deno)</li>
+</ul>
+<p>Each addendum specifies the platform intrinsics and conventions for that backend. Programs targeting multiple platforms should use a platform abstraction layer as described in <a href="43-backend-architecture.html#43-backend-architecture">Section 4.3</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="addendum-a-x86_64-linux-backend"><a class="header" href="#addendum-a-x86_64-linux-backend">Addendum A: x86_64 Linux Backend</a></h1>
+<h2 id="a1-target-description"><a class="header" href="#a1-target-description">A.1 Target Description</a></h2>
+<ul>
+<li><strong>Architecture:</strong> x86_64 (AMD64)</li>
+<li><strong>Operating System:</strong> Linux</li>
+<li><strong>Output Format:</strong> ELF executable via GNU assembler</li>
+<li><strong>Calling Convention:</strong> System V AMD64 ABI</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="a2-calling-convention"><a class="header" href="#a2-calling-convention">A.2 Calling Convention</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Purpose</th><th>Registers</th></tr></thead><tbody>
+<tr><td>Arguments (1-6)</td><td><code>rdi</code>, <code>rsi</code>, <code>rdx</code>, <code>rcx</code>, <code>r8</code>, <code>r9</code></td></tr>
+<tr><td>Return value</td><td><code>rax</code></td></tr>
+<tr><td>Caller-saved</td><td><code>rax</code>, <code>rcx</code>, <code>rdx</code>, <code>rsi</code>, <code>rdi</code>, <code>r8</code>-<code>r11</code></td></tr>
+<tr><td>Callee-saved</td><td><code>rbx</code>, <code>rbp</code>, <code>r12</code>-<code>r15</code></td></tr>
+</tbody></table>
+</div>
+<p>Additional arguments beyond 6 are passed on the stack.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="a21-codegen-notes"><a class="header" href="#a21-codegen-notes">A.2.1 Codegen Notes</a></h2>
+<p>The x86_64 backend still follows udewy's logical value-stack model, but it does not map every <code>save_value()</code> directly to a machine <code>push</code>.</p>
+<ul>
+<li>The current visible expression result stays in <code>rax</code>.</li>
+<li>A small prefix of the logical saved-value stack is cached in callee-saved registers before falling back to spill slots on the real stack.</li>
+<li>When a call has more than 6 arguments, the extra arguments are written into an outbound stack-argument area and the first 6 are placed in <code>rdi</code>, <code>rsi</code>, <code>rdx</code>, <code>rcx</code>, <code>r8</code>, and <code>r9</code>.</li>
+<li>Call lowering also keeps the machine stack aligned to the ABI-required 16-byte boundary.</li>
+<li>Busy locals live in <code>rbx</code>/<code>r15</code> (across calls) or <code>r8</code>/<code>r9</code>/<code>r11</code> (between calls) through the shared local register allocation described in <a href="43-backend-architecture.html#local-register-allocation">Backend Architecture</a>; ordinary builds only.</li>
+<li>The visible value may be <em>pending</em> instead of in <code>rax</code>: a local plus a constant offset that was named but not yet loaded, a constant, a load not yet performed, or the flags of the last comparison. <code>save_value</code> moves a pending local, constant or load straight into its cache register; a comparison uses a pending local, constant or load as the <code>cmpq</code> operand; a load or store through a pending local uses it as the base register (<code>movq 24(%rbx), %r12</code>, <code>movq %r12, 24(%rbx)</code>); a constant stores directly (<code>movq $0, %r15</code>); and <code>if</code>, loop and short-circuit tests branch on the pending flags (<code>jne</code>, <code>jge</code>, ...) instead of materializing <code>-1</code>/<code>0</code>; <code>not</code> on a pending comparison inverts it. Every other operation materializes the value first. A loop test such as <code>i &lt;? n</code> is therefore <code>movq</code>, <code>cmpq</code>, <code>jge</code>, and a tag test <code>__load_i64__(cell + 8) =? 140</code> is <code>cmpq $140, 8(%rbx)</code>, <code>jne</code>. While a local is still in memory, a site may hold two instructions in one code line (the slot load, then the operation through <code>rax</code>); allocation rewrites it to the one-instruction register form.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="a22-__alloca__-alignment"><a class="header" href="#a22-__alloca__-alignment">A.2.2 <code>__alloca__</code> Alignment</a></h2>
+<ul>
+<li><code>__alloca__</code> returns an address aligned to 8 bytes.</li>
+<li>Successive small allocations therefore advance in 8-byte units on this backend.</li>
+<li>The backend still pads the machine stack as needed at call boundaries to satisfy the System V ABI.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><span id="a23-mixed-gp-fp-extern-intrinsics"></span><h2 id="a23-mixed-gp--fp-extern-intrinsics"><a class="header" href="#a23-mixed-gp--fp-extern-intrinsics">A.2.3 Mixed GP / FP Extern Intrinsics</a></h2>
+<p>The x86_64 backend supports mixed integer/pointer and floating-point extern calls through the intrinsic family:</p>
+<pre><code class="nohighlight udewy-hl language-udewy">__call_extern_mixed_1__(fn type0 value0)
+__call_extern_mixed_2__(fn type0 value0 type1 value1)
+...
+__call_extern_mixed_8__(fn type0 value0 ... type7 value7)</code></pre>
+<p>Rules:</p>
+<ul>
+<li><code>fn</code> is an extern function reference</li>
+<li>each <code>typeN</code> must be a compile-time integer literal</li>
+<li><code>0</code> means pass <code>valueN</code> through the normal integer/pointer calling convention</li>
+<li><code>1</code> means treat the low 32 bits of <code>valueN</code> as raw <code>f32</code> bits and pass them in the next XMM argument register</li>
+<li><code>2</code> means treat all 64 bits of <code>valueN</code> as raw <code>f64</code> bits and pass them in the next XMM argument register</li>
+</ul>
+<p>This backend also provides:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-function">__i64_to_f32_bits__</span><span class="u-punctuation">(</span><span class="u-identifier">value</span><span class="u-punctuation">)</span>
+<span class="u-function">__i64_to_f64_bits__</span><span class="u-punctuation">(</span><span class="u-identifier">value</span><span class="u-punctuation">)</span>
+<span class="u-function">__f32_bits_to_i64__</span><span class="u-punctuation">(</span><span class="u-identifier">value</span><span class="u-punctuation">)</span>
+<span class="u-function">__f64_bits_to_i64__</span><span class="u-punctuation">(</span><span class="u-identifier">value</span><span class="u-punctuation">)</span></code></pre>
+<p>These convert a signed integer value into IEEE-754 <code>f32</code> / <code>f64</code> bit patterns, returned as ordinary udewy integers. <code>__f32_bits_to_i64__</code> and <code>__f64_bits_to_i64__</code> perform the reverse direction for values containing <code>f32</code> / <code>f64</code> bit patterns.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="a3-syscall-intrinsics"><a class="header" href="#a3-syscall-intrinsics">A.3 Syscall Intrinsics</a></h2>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-function">__syscall0__</span><span class="u-punctuation">(</span><span class="u-identifier">num</span><span class="u-punctuation">)</span>
+<span class="u-function">__syscall1__</span><span class="u-punctuation">(</span><span class="u-identifier">num</span> <span class="u-identifier">arg1</span><span class="u-punctuation">)</span>
+<span class="u-function">__syscall2__</span><span class="u-punctuation">(</span><span class="u-identifier">num</span> <span class="u-identifier">arg1</span> <span class="u-identifier">arg2</span><span class="u-punctuation">)</span>
+<span class="u-function">__syscall3__</span><span class="u-punctuation">(</span><span class="u-identifier">num</span> <span class="u-identifier">arg1</span> <span class="u-identifier">arg2</span> <span class="u-identifier">arg3</span><span class="u-punctuation">)</span>
+<span class="u-function">__syscall4__</span><span class="u-punctuation">(</span><span class="u-identifier">num</span> <span class="u-identifier">arg1</span> <span class="u-identifier">arg2</span> <span class="u-identifier">arg3</span> <span class="u-identifier">arg4</span><span class="u-punctuation">)</span>
+<span class="u-function">__syscall5__</span><span class="u-punctuation">(</span><span class="u-identifier">num</span> <span class="u-identifier">arg1</span> <span class="u-identifier">arg2</span> <span class="u-identifier">arg3</span> <span class="u-identifier">arg4</span> <span class="u-identifier">arg5</span><span class="u-punctuation">)</span>
+<span class="u-function">__syscall6__</span><span class="u-punctuation">(</span><span class="u-identifier">num</span> <span class="u-identifier">arg1</span> <span class="u-identifier">arg2</span> <span class="u-identifier">arg3</span> <span class="u-identifier">arg4</span> <span class="u-identifier">arg5</span> <span class="u-identifier">arg6</span><span class="u-punctuation">)</span></code></pre>
+<p>Syscall convention:</p>
+<ul>
+<li>Syscall number in <code>rax</code></li>
+<li>Arguments in <code>rdi</code>, <code>rsi</code>, <code>rdx</code>, <code>r10</code>, <code>r8</code>, <code>r9</code></li>
+<li>Return value in <code>rax</code></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="a4-builtin-constants"><a class="header" href="#a4-builtin-constants">A.4 Builtin Constants</a></h2>
+<p>The x86_64 backend provides the following constants automatically (no declaration needed):</p>
+<p><strong>Syscall Numbers:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th>Constant</th><th>Value</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>SYS_READ</code></td><td>0</td><td>Read from file descriptor</td></tr>
+<tr><td><code>SYS_WRITE</code></td><td>1</td><td>Write to file descriptor</td></tr>
+<tr><td><code>SYS_OPEN</code></td><td>2</td><td>Open file</td></tr>
+<tr><td><code>SYS_CLOSE</code></td><td>3</td><td>Close file descriptor</td></tr>
+<tr><td><code>SYS_STAT</code></td><td>4</td><td>Get file status</td></tr>
+<tr><td><code>SYS_FSTAT</code></td><td>5</td><td>Get file status by fd</td></tr>
+<tr><td><code>SYS_LSEEK</code></td><td>8</td><td>Reposition file offset</td></tr>
+<tr><td><code>SYS_MMAP</code></td><td>9</td><td>Map memory</td></tr>
+<tr><td><code>SYS_MUNMAP</code></td><td>11</td><td>Unmap memory</td></tr>
+<tr><td><code>SYS_BRK</code></td><td>12</td><td>Change data segment size</td></tr>
+<tr><td><code>SYS_IOCTL</code></td><td>16</td><td>Device control</td></tr>
+<tr><td><code>SYS_PIPE</code></td><td>22</td><td>Create pipe</td></tr>
+<tr><td><code>SYS_DUP</code></td><td>32</td><td>Duplicate fd</td></tr>
+<tr><td><code>SYS_DUP2</code></td><td>33</td><td>Duplicate fd to specific number</td></tr>
+<tr><td><code>SYS_GETPID</code></td><td>39</td><td>Get process ID</td></tr>
+<tr><td><code>SYS_FORK</code></td><td>57</td><td>Create child process</td></tr>
+<tr><td><code>SYS_EXECVE</code></td><td>59</td><td>Execute program</td></tr>
+<tr><td><code>SYS_EXIT</code></td><td>60</td><td>Exit process</td></tr>
+<tr><td><code>SYS_WAIT4</code></td><td>61</td><td>Wait for process</td></tr>
+<tr><td><code>SYS_KILL</code></td><td>62</td><td>Send signal</td></tr>
+<tr><td><code>SYS_GETCWD</code></td><td>79</td><td>Get current directory</td></tr>
+<tr><td><code>SYS_CHDIR</code></td><td>80</td><td>Change directory</td></tr>
+<tr><td><code>SYS_MKDIR</code></td><td>83</td><td>Create directory</td></tr>
+<tr><td><code>SYS_RMDIR</code></td><td>84</td><td>Remove directory</td></tr>
+<tr><td><code>SYS_CREAT</code></td><td>85</td><td>Create file</td></tr>
+<tr><td><code>SYS_UNLINK</code></td><td>87</td><td>Delete file</td></tr>
+<tr><td><code>SYS_GETUID</code></td><td>102</td><td>Get user ID</td></tr>
+<tr><td><code>SYS_GETGID</code></td><td>104</td><td>Get group ID</td></tr>
+<tr><td><code>SYS_GETEUID</code></td><td>107</td><td>Get effective user ID</td></tr>
+<tr><td><code>SYS_GETEGID</code></td><td>108</td><td>Get effective group ID</td></tr>
+<tr><td><code>SYS_CLOCK_GETTIME</code></td><td>228</td><td>Get time</td></tr>
+<tr><td><code>SYS_EXIT_GROUP</code></td><td>231</td><td>Exit all threads</td></tr>
+</tbody></table>
+</div>
+<p><strong>File Descriptors:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th>Constant</th><th>Value</th></tr></thead><tbody>
+<tr><td><code>STDIN</code></td><td>0</td></tr>
+<tr><td><code>STDOUT</code></td><td>1</td></tr>
+<tr><td><code>STDERR</code></td><td>2</td></tr>
+</tbody></table>
+</div>
+<p><strong>Open Flags:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th>Constant</th><th>Value</th></tr></thead><tbody>
+<tr><td><code>O_RDONLY</code></td><td>0</td></tr>
+<tr><td><code>O_WRONLY</code></td><td>1</td></tr>
+<tr><td><code>O_RDWR</code></td><td>2</td></tr>
+<tr><td><code>O_CREAT</code></td><td>64</td></tr>
+<tr><td><code>O_TRUNC</code></td><td>512</td></tr>
+<tr><td><code>O_APPEND</code></td><td>1024</td></tr>
+</tbody></table>
+</div>
+<p><strong>Memory Mapping:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th>Constant</th><th>Value</th></tr></thead><tbody>
+<tr><td><code>PROT_NONE</code></td><td>0</td></tr>
+<tr><td><code>PROT_READ</code></td><td>1</td></tr>
+<tr><td><code>PROT_WRITE</code></td><td>2</td></tr>
+<tr><td><code>PROT_EXEC</code></td><td>4</td></tr>
+<tr><td><code>MAP_SHARED</code></td><td>1</td></tr>
+<tr><td><code>MAP_PRIVATE</code></td><td>2</td></tr>
+<tr><td><code>MAP_FIXED</code></td><td>16</td></tr>
+<tr><td><code>MAP_ANONYMOUS</code></td><td>32</td></tr>
+</tbody></table>
+</div><div style="break-before: page; page-break-before: always;"></div><h1 id="addendum-b-risc-v-64-linux-backend"><a class="header" href="#addendum-b-risc-v-64-linux-backend">Addendum B: RISC-V 64 Linux Backend</a></h1>
+<h2 id="b1-target-description"><a class="header" href="#b1-target-description">B.1 Target Description</a></h2>
+<ul>
+<li><strong>Architecture:</strong> RISC-V 64-bit (RV64)</li>
+<li><strong>Operating System:</strong> Linux</li>
+<li><strong>Output Format:</strong> ELF executable</li>
+<li><strong>Calling Convention:</strong> RISC-V LP64 ABI</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="b2-calling-convention"><a class="header" href="#b2-calling-convention">B.2 Calling Convention</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Purpose</th><th>Registers</th></tr></thead><tbody>
+<tr><td>Arguments (1-8)</td><td><code>a0</code>-<code>a7</code></td></tr>
+<tr><td>Return value</td><td><code>a0</code></td></tr>
+<tr><td>Callee-saved</td><td><code>s0</code>-<code>s11</code>, <code>ra</code></td></tr>
+<tr><td>Stack pointer</td><td><code>sp</code> (16-byte aligned)</td></tr>
+</tbody></table>
+</div>
+<p>Additional arguments beyond 8 are passed on the stack.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="b21-codegen-notes"><a class="header" href="#b21-codegen-notes">B.2.1 Codegen Notes</a></h2>
+<p>The RISC-V backend uses the same basic strategy as x86_64: it preserves udewy's logical value-stack behavior, but keeps the shallow part of that stack in registers.</p>
+<ul>
+<li>The current visible expression result stays in <code>a0</code>.</li>
+<li>A small prefix of saved values is cached in callee-saved registers before deeper values spill to the real stack.</li>
+<li>Calls place the first 8 arguments in <code>a0</code>-<code>a7</code> and marshal any remaining arguments into an outbound stack area.</li>
+<li>Call lowering maintains the required 16-byte stack alignment at the actual call instruction.</li>
+<li>Busy locals live in <code>s1</code>, <code>s5</code>-<code>s11</code> (across calls) or <code>t2</code>-<code>t4</code> (between calls) through the shared local register allocation; ordinary builds only.</li>
+<li>The visible value may be <em>pending</em>: a local not yet loaded (it then loads straight into its cache register or into <code>t0</code> as a right operand), or a comparison whose operands are still in <code>a0</code>/<code>t0</code>. <code>if</code>, loop and short-circuit <code>and</code> tests branch on the operands directly (<code>bge a0, t0, ...</code>) instead of materializing <code>-1</code>/<code>0</code>; <code>not</code> on a pending comparison inverts it; everything else materializes first.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="b22-__alloca__-alignment"><a class="header" href="#b22-__alloca__-alignment">B.2.2 <code>__alloca__</code> Alignment</a></h2>
+<ul>
+<li><code>__alloca__</code> returns an address aligned to 16 bytes.</li>
+<li>Successive small allocations therefore advance in 16-byte units on this backend.</li>
+<li>This stronger alignment matches the backend's stack-alignment requirements.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><span id="b23-mixed-gp-fp-extern-intrinsics"></span><h2 id="b23-mixed-gp--fp-extern-intrinsics"><a class="header" href="#b23-mixed-gp--fp-extern-intrinsics">B.2.3 Mixed GP / FP Extern Intrinsics</a></h2>
+<p>The RISC-V backend supports the same mixed integer/pointer and floating-point extern call intrinsic family as the other native Linux backends:</p>
+<pre><code class="nohighlight udewy-hl language-udewy">__call_extern_mixed_1__(fn type0 value0)
+__call_extern_mixed_2__(fn type0 value0 type1 value1)
+...
+__call_extern_mixed_8__(fn type0 value0 ... type7 value7)</code></pre>
+<p>Rules:</p>
+<ul>
+<li><code>fn</code> is an extern function reference</li>
+<li>each <code>typeN</code> must be a compile-time integer literal</li>
+<li><code>0</code> means pass <code>valueN</code> through the normal integer/pointer calling convention in <code>a0</code>-<code>a7</code></li>
+<li><code>1</code> means treat the low 32 bits of <code>valueN</code> as raw <code>f32</code> bits and pass them in the next floating-point argument register (<code>fa0</code>-<code>fa7</code>)</li>
+<li><code>2</code> means treat all 64 bits of <code>valueN</code> as raw <code>f64</code> bits and pass them in the next floating-point argument register (<code>fa0</code>-<code>fa7</code>)</li>
+</ul>
+<p>This backend also provides:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-function">__i64_to_f32_bits__</span><span class="u-punctuation">(</span><span class="u-identifier">value</span><span class="u-punctuation">)</span>
+<span class="u-function">__i64_to_f64_bits__</span><span class="u-punctuation">(</span><span class="u-identifier">value</span><span class="u-punctuation">)</span>
+<span class="u-function">__f32_bits_to_i64__</span><span class="u-punctuation">(</span><span class="u-identifier">value</span><span class="u-punctuation">)</span>
+<span class="u-function">__f64_bits_to_i64__</span><span class="u-punctuation">(</span><span class="u-identifier">value</span><span class="u-punctuation">)</span></code></pre>
+<p>Integer-only udewy programs keep the backend's ordinary minimal RISC-V target assumptions. Using these FP conversion or mixed GP / FP extern intrinsics makes the generated artifact require a hard-float-capable RISC-V ABI/toolchain (LP64D-compatible). This is a whole-artifact requirement, not a per-call ABI switch.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="b3-syscall-intrinsics"><a class="header" href="#b3-syscall-intrinsics">B.3 Syscall Intrinsics</a></h2>
+<p>Same syntax as x86_64:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-function">__syscall0__</span><span class="u-punctuation">(</span><span class="u-identifier">num</span><span class="u-punctuation">)</span>
+<span class="u-function">__syscall1__</span><span class="u-punctuation">(</span><span class="u-identifier">num</span> <span class="u-identifier">arg1</span><span class="u-punctuation">)</span>
+<span class="u-comment"># ... etc.</span></code></pre>
+<p>Syscall convention:</p>
+<ul>
+<li>Syscall number in <code>a7</code></li>
+<li>Arguments in <code>a0</code>-<code>a5</code></li>
+<li>Return value in <code>a0</code></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="b4-builtin-constants"><a class="header" href="#b4-builtin-constants">B.4 Builtin Constants</a></h2>
+<p>The RISC-V backend provides constants automatically. RISC-V Linux uses the unified "new-style" syscall table.</p>
+<p><strong>Syscall Numbers:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th>Constant</th><th>Value</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>SYS_GETCWD</code></td><td>17</td><td>Get current directory</td></tr>
+<tr><td><code>SYS_DUP</code></td><td>23</td><td>Duplicate fd</td></tr>
+<tr><td><code>SYS_DUP3</code></td><td>24</td><td>Duplicate fd with flags</td></tr>
+<tr><td><code>SYS_IOCTL</code></td><td>29</td><td>Device control</td></tr>
+<tr><td><code>SYS_MKDIRAT</code></td><td>34</td><td>Create directory (relative)</td></tr>
+<tr><td><code>SYS_UNLINKAT</code></td><td>35</td><td>Delete file (relative)</td></tr>
+<tr><td><code>SYS_FTRUNCATE</code></td><td>46</td><td>Truncate file</td></tr>
+<tr><td><code>SYS_FACCESSAT</code></td><td>48</td><td>Check file access</td></tr>
+<tr><td><code>SYS_CHDIR</code></td><td>49</td><td>Change directory</td></tr>
+<tr><td><code>SYS_OPENAT</code></td><td>56</td><td>Open file (relative)</td></tr>
+<tr><td><code>SYS_CLOSE</code></td><td>57</td><td>Close fd</td></tr>
+<tr><td><code>SYS_PIPE2</code></td><td>59</td><td>Create pipe</td></tr>
+<tr><td><code>SYS_LSEEK</code></td><td>62</td><td>Seek in file</td></tr>
+<tr><td><code>SYS_READ</code></td><td>63</td><td>Read from fd</td></tr>
+<tr><td><code>SYS_WRITE</code></td><td>64</td><td>Write to fd</td></tr>
+<tr><td><code>SYS_FSTAT</code></td><td>80</td><td>Get file status</td></tr>
+<tr><td><code>SYS_EXIT</code></td><td>93</td><td>Exit process</td></tr>
+<tr><td><code>SYS_EXIT_GROUP</code></td><td>94</td><td>Exit all threads</td></tr>
+<tr><td><code>SYS_KILL</code></td><td>129</td><td>Send signal</td></tr>
+<tr><td><code>SYS_GETPID</code></td><td>172</td><td>Get process ID</td></tr>
+<tr><td><code>SYS_GETUID</code></td><td>174</td><td>Get user ID</td></tr>
+<tr><td><code>SYS_GETEUID</code></td><td>175</td><td>Get effective user ID</td></tr>
+<tr><td><code>SYS_GETGID</code></td><td>176</td><td>Get group ID</td></tr>
+<tr><td><code>SYS_GETEGID</code></td><td>177</td><td>Get effective group ID</td></tr>
+<tr><td><code>SYS_BRK</code></td><td>214</td><td>Change data segment size</td></tr>
+<tr><td><code>SYS_MUNMAP</code></td><td>215</td><td>Unmap memory</td></tr>
+<tr><td><code>SYS_CLONE</code></td><td>220</td><td>Create process</td></tr>
+<tr><td><code>SYS_EXECVE</code></td><td>221</td><td>Execute program</td></tr>
+<tr><td><code>SYS_MMAP</code></td><td>222</td><td>Map memory</td></tr>
+<tr><td><code>SYS_WAIT4</code></td><td>260</td><td>Wait for process</td></tr>
+</tbody></table>
+</div>
+<p><strong>Note:</strong> RISC-V uses <code>*at</code> syscalls (e.g., <code>SYS_OPENAT</code> instead of <code>SYS_OPEN</code>). Use <code>AT_FDCWD</code> (-100) as the directory fd for current directory.</p>
+<p>File descriptor, open flag, and mmap constants are the same as x86_64 (see Addendum A).</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="addendum-c-aarch64-linux-backend"><a class="header" href="#addendum-c-aarch64-linux-backend">Addendum C: AArch64 Linux Backend</a></h1>
+<h2 id="c1-target-description"><a class="header" href="#c1-target-description">C.1 Target Description</a></h2>
+<ul>
+<li><strong>Architecture:</strong> AArch64 (ARM 64-bit)</li>
+<li><strong>Operating System:</strong> Linux</li>
+<li><strong>Output Format:</strong> ELF executable</li>
+<li><strong>Calling Convention:</strong> AAPCS64</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="c2-calling-convention"><a class="header" href="#c2-calling-convention">C.2 Calling Convention</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Purpose</th><th>Registers</th></tr></thead><tbody>
+<tr><td>Arguments (1-8)</td><td><code>x0</code>-<code>x7</code></td></tr>
+<tr><td>Return value</td><td><code>x0</code></td></tr>
+<tr><td>Callee-saved</td><td><code>x19</code>-<code>x28</code>, <code>sp</code>, <code>fp</code></td></tr>
+<tr><td>Link register</td><td><code>lr</code> (<code>x30</code>)</td></tr>
+</tbody></table>
+</div>
+<p>Additional arguments beyond 8 are passed on the stack.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="c21-codegen-notes"><a class="header" href="#c21-codegen-notes">C.2.1 Codegen Notes</a></h2>
+<p>The AArch64 backend also keeps the parser-visible stack model, but uses registers for the shallow saved-value stack instead of immediately spilling everything.</p>
+<ul>
+<li>The current visible expression result stays in <code>x0</code>.</li>
+<li>A small prefix of saved values is cached in callee-saved registers, with deeper values spilling to stack slots.</li>
+<li>Calls place the first 8 arguments in <code>x0</code>-<code>x7</code> and place overflow arguments in the outbound call stack area.</li>
+<li>Because AArch64 already requires 16-byte stack alignment and the backend spills in 16-byte slots, this path stays naturally aligned.</li>
+<li>Busy locals live in <code>x19</code>, <code>x24</code>-<code>x28</code> (across calls) or <code>x11</code>-<code>x15</code> (between calls) through the shared local register allocation; slots beyond the single-instruction offset range stay in memory; ordinary builds only.</li>
+<li>The visible value may be <em>pending</em>: a local not yet loaded (it then loads straight into its cache register or into <code>x9</code> as a right operand), or the flags of the last <code>cmp</code>. <code>if</code>, loop and short-circuit tests branch on the flags (<code>b.ge</code>, <code>b.ne</code>, ...) instead of <code>csetm</code> plus <code>cbz</code>; <code>not</code> on a pending comparison inverts it; everything else materializes first.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="c22-__alloca__-alignment"><a class="header" href="#c22-__alloca__-alignment">C.2.2 <code>__alloca__</code> Alignment</a></h2>
+<ul>
+<li><code>__alloca__</code> returns an address aligned to 16 bytes.</li>
+<li>Successive small allocations therefore advance in 16-byte units on this backend.</li>
+<li>This stronger alignment matches the backend's stack-alignment requirements.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><span id="c23-mixed-gp-fp-extern-intrinsics"></span><h2 id="c23-mixed-gp--fp-extern-intrinsics"><a class="header" href="#c23-mixed-gp--fp-extern-intrinsics">C.2.3 Mixed GP / FP Extern Intrinsics</a></h2>
+<p>The AArch64 backend supports the same mixed extern intrinsic family as x86_64:</p>
+<pre><code class="nohighlight udewy-hl language-udewy">__call_extern_mixed_1__(fn type0 value0)
+__call_extern_mixed_2__(fn type0 value0 type1 value1)
+...
+__call_extern_mixed_8__(fn type0 value0 ... type7 value7)</code></pre>
+<p>Rules:</p>
+<ul>
+<li><code>0</code> passes the value through the general-purpose argument registers <code>x0</code>-<code>x7</code></li>
+<li><code>1</code> treats the low 32 bits as raw <code>f32</code> bits and passes them in the next floating-point argument register</li>
+<li><code>2</code> treats all 64 bits as raw <code>f64</code> bits and passes them in the next floating-point argument register</li>
+</ul>
+<p>This backend also provides:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-function">__i64_to_f32_bits__</span><span class="u-punctuation">(</span><span class="u-identifier">value</span><span class="u-punctuation">)</span>
+<span class="u-function">__i64_to_f64_bits__</span><span class="u-punctuation">(</span><span class="u-identifier">value</span><span class="u-punctuation">)</span>
+<span class="u-function">__f32_bits_to_i64__</span><span class="u-punctuation">(</span><span class="u-identifier">value</span><span class="u-punctuation">)</span>
+<span class="u-function">__f64_bits_to_i64__</span><span class="u-punctuation">(</span><span class="u-identifier">value</span><span class="u-punctuation">)</span></code></pre>
+<p>These convert signed integers to <code>f32</code> / <code>f64</code> bit patterns while keeping udewy's runtime representation as integers. <code>__f32_bits_to_i64__</code> and <code>__f64_bits_to_i64__</code> convert float bit patterns back to signed integers.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="c3-syscall-intrinsics"><a class="header" href="#c3-syscall-intrinsics">C.3 Syscall Intrinsics</a></h2>
+<p>Same syntax as x86_64. Invoked via <code>svc #0</code>.</p>
+<p>Syscall convention:</p>
+<ul>
+<li>Syscall number in <code>x8</code></li>
+<li>Arguments in <code>x0</code>-<code>x5</code></li>
+<li>Return value in <code>x0</code></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="c4-builtin-constants"><a class="header" href="#c4-builtin-constants">C.4 Builtin Constants</a></h2>
+<p>AArch64 Linux uses the same unified syscall table as RISC-V Linux. All builtin constants (syscall numbers, file descriptors, flags) are identical to RISC-V (see Addendum B).</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="addendum-d-wasm32-browser-backend"><a class="header" href="#addendum-d-wasm32-browser-backend">Addendum D: WASM32 Browser Backend</a></h1>
+<h2 id="d1-target-description"><a class="header" href="#d1-target-description">D.1 Target Description</a></h2>
+<ul>
+<li><strong>Architecture:</strong> WebAssembly 32-bit</li>
+<li><strong>Environment:</strong> Web browser</li>
+<li><strong>Output Format:</strong> WAT (WebAssembly Text) converted to WASM, embedded in HTML</li>
+<li><strong>Memory Model:</strong> Linear memory with imported JavaScript memory object</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="d2-value-representation"><a class="header" href="#d2-value-representation">D.2 Value Representation</a></h2>
+<ul>
+<li>All udewy values are <code>i64</code> in WASM</li>
+<li>Memory addresses are <code>i64</code> but truncated to <code>i32</code> at every memory operation</li>
+<li>Ordinary strings and based strings use the same byte-length-prefixed static layout as native backends</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="d21-__alloca__-alignment"><a class="header" href="#d21-__alloca__-alignment">D.2.1 <code>__alloca__</code> Alignment</a></h2>
+<ul>
+<li><code>__alloca__</code> returns an address aligned to 8 bytes.</li>
+<li>Successive small allocations therefore advance in 8-byte units on this backend.</li>
+<li>Because wasm uses a linear-memory bump pointer rather than a native ABI stack, it does not need the stronger 16-byte rule used by some native backends.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="d3-host-function-intrinsics"><a class="header" href="#d3-host-function-intrinsics">D.3 Host Function Intrinsics</a></h2>
+<p>Instead of syscalls, the WASM backend provides browser-focused host functions:</p>
+<div class="table-wrapper"><table><thead><tr><th>Intrinsic</th><th>Args</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>__host_log__(ptr len)</code></td><td>2</td><td>Output text to the browser console</td></tr>
+<tr><td><code>__host_exit__(code)</code></td><td>1</td><td>End the program (does not return)</td></tr>
+<tr><td><code>__host_time__()</code></td><td>0</td><td>Current timestamp in milliseconds</td></tr>
+<tr><td><code>__host_random__()</code></td><td>0</td><td>Random non-negative integer (below 2^53)</td></tr>
+</tbody></table>
+</div>
+<p><code>__host_exit__</code> unwinds the module back to the page, which stops calling <code>main</code>. As with an uncaught exception in a script, an exit or a trap leaves the page as it is; the exit code or the error goes to the console.</p>
+<blockquote>
+<p>These are subject to change</p>
+</blockquote>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="d4-dom-intrinsics"><a class="header" href="#d4-dom-intrinsics">D.4 DOM Intrinsics</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Intrinsic</th><th>Args</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>__dom_set_text__(ptr len)</code></td><td>2</td><td>Set output element text content</td></tr>
+<tr><td><code>__dom_append__(ptr len)</code></td><td>2</td><td>Append text to output element</td></tr>
+<tr><td><code>__dom_clear__()</code></td><td>0</td><td>Clear output element</td></tr>
+<tr><td><code>__dom_append_int__(value)</code></td><td>1</td><td>Append integer as text</td></tr>
+<tr><td><code>__log_int__(value)</code></td><td>1</td><td>Log integer to console</td></tr>
+</tbody></table>
+</div><div style="break-before: page; page-break-before: always;"></div><h2 id="d5-canvas-graphics-intrinsics"><a class="header" href="#d5-canvas-graphics-intrinsics">D.5 Canvas Graphics Intrinsics</a></h2>
+<p>The WASM backend provides intrinsics for canvas-based graphics with animation support:</p>
+<div class="table-wrapper"><table><thead><tr><th>Intrinsic</th><th>Args</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>__canvas_init__(width height)</code></td><td>2</td><td>Initialize canvas and return RGBA pixel buffer pointer</td></tr>
+<tr><td><code>__canvas_width__()</code></td><td>0</td><td>Get current canvas width</td></tr>
+<tr><td><code>__canvas_height__()</code></td><td>0</td><td>Get current canvas height</td></tr>
+<tr><td><code>__canvas_present__()</code></td><td>0</td><td>Copy pixel buffer to canvas (display frame)</td></tr>
+<tr><td><code>__canvas_set_aspect_lock__(enabled)</code></td><td>1</td><td>Enable or disable aspect-ratio locking using a udewy <code>bool</code></td></tr>
+<tr><td><code>__frame_count__()</code></td><td>0</td><td>Get current animation frame number</td></tr>
+<tr><td><code>__frame_time__()</code></td><td>0</td><td>Get milliseconds since canvas initialization</td></tr>
+<tr><td><code>__window_width__()</code></td><td>0</td><td>Get browser window inner width</td></tr>
+<tr><td><code>__window_height__()</code></td><td>0</td><td>Get browser window inner height</td></tr>
+</tbody></table>
+</div>
+<p><strong>Usage:</strong></p>
+<ol>
+<li>Call <code>__canvas_init__(width height)</code> to create a canvas and get a pointer to the pixel buffer</li>
+<li>Optionally call <code>__canvas_set_aspect_lock__(true)</code> to keep the displayed canvas centered at its current aspect ratio as the browser window resizes</li>
+<li>Call <code>__canvas_set_aspect_lock__(false)</code> later if you want to return to unrestricted fullscreen scaling</li>
+<li>Write RGBA pixels (4 bytes per pixel) to the buffer: <code>[R, G, B, A, R, G, B, A, ...]</code></li>
+<li>Call <code>__canvas_present__()</code> to display the frame</li>
+<li>The runtime automatically calls <code>main()</code> each animation frame when canvas mode is active</li>
+</ol>
+<p>The pixel buffer lies past the memory the module asked for (its data, static reservations and stack), so it never overlaps program storage. Calling <code>__canvas_init__</code> again with a size that fits keeps the buffer; a larger size moves it, so use the returned pointer.</p>
+<p>A Dewy program's top-level code runs on the first call to <code>main</code> only; later calls (one per animation frame) run just the program's <code>main</code> function, so module state persists between frames.</p>
+<p><code>__canvas_set_aspect_lock__(enabled)</code> expects a udewy boolean value, normally passed as the <code>true</code> or <code>false</code> literals. Internally, any non-zero value enables the lock and <code>0</code> disables it.</p>
+<p>When aspect lock is enabled, the runtime uses the canvas's current backing dimensions, typically the <code>width</code> and <code>height</code> passed to <code>__canvas_init__()</code>, as the aspect ratio to preserve.</p>
+<p><strong>Example:</strong></p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-declaration">let</span> <span class="u-identifier">buffer</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-number">0</span>
+<span class="u-declaration">let</span> <span class="u-identifier">width</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-number">320</span>
+<span class="u-declaration">let</span> <span class="u-identifier">height</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-number">240</span>
+
+<span class="u-declaration">let</span> <span class="u-identifier">set_pixel</span> <span class="u-operator">=</span> <span class="u-punctuation">(</span><span class="u-identifier">x</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-identifier">y</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-identifier">r</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-identifier">g</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-identifier">b</span><span class="u-operator">:</span><span class="u-type">int</span><span class="u-punctuation">)</span><span class="u-operator">:&gt;</span><span class="u-type">int</span> <span class="u-operator">=&gt;</span> <span class="u-brace">{</span>
+    <span class="u-declaration">let</span> <span class="u-identifier">offset</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-punctuation">((</span><span class="u-identifier">y</span> <span class="u-operator">*</span> <span class="u-identifier">width</span><span class="u-punctuation">)</span> <span class="u-operator">+</span> <span class="u-identifier">x</span><span class="u-punctuation">)</span> <span class="u-operator">*</span> <span class="u-number">4</span>
+    <span class="u-declaration">let</span> <span class="u-identifier">addr</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-identifier">buffer</span> <span class="u-operator">+</span> <span class="u-identifier">offset</span>
+    <span class="u-function">__store_u8__</span><span class="u-punctuation">(</span><span class="u-identifier">r</span> <span class="u-identifier">addr</span><span class="u-punctuation">)</span>
+    <span class="u-function">__store_u8__</span><span class="u-punctuation">(</span><span class="u-identifier">g</span> <span class="u-identifier">addr</span> <span class="u-operator">+</span> <span class="u-number">1</span><span class="u-punctuation">)</span>
+    <span class="u-function">__store_u8__</span><span class="u-punctuation">(</span><span class="u-identifier">b</span> <span class="u-identifier">addr</span> <span class="u-operator">+</span> <span class="u-number">2</span><span class="u-punctuation">)</span>
+    <span class="u-function">__store_u8__</span><span class="u-punctuation">(</span><span class="u-number">255</span> <span class="u-identifier">addr</span> <span class="u-operator">+</span> <span class="u-number">3</span><span class="u-punctuation">)</span>
+    <span class="u-keyword">return</span> <span class="u-number">0</span>
+<span class="u-brace">}</span>
+
+<span class="u-declaration">let</span> <span class="u-identifier">main</span> <span class="u-operator">=</span> <span class="u-punctuation">()</span><span class="u-operator">:&gt;</span><span class="u-type">int</span> <span class="u-operator">=&gt;</span> <span class="u-brace">{</span>
+    <span class="u-identifier">buffer</span> <span class="u-operator">=</span> <span class="u-function">__canvas_init__</span><span class="u-punctuation">(</span><span class="u-identifier">width</span> <span class="u-identifier">height</span><span class="u-punctuation">)</span>
+    <span class="u-declaration">let</span> <span class="u-identifier">t</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-function">__frame_time__</span><span class="u-punctuation">()</span>
+    
+    <span class="u-comment"># Draw something based on time...</span>
+    
+    <span class="u-function">__canvas_present__</span><span class="u-punctuation">()</span>
+    <span class="u-keyword">return</span> <span class="u-number">0</span>
+<span class="u-brace">}</span></code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="d6-pointer-input-intrinsics"><a class="header" href="#d6-pointer-input-intrinsics">D.6 Pointer Input Intrinsics</a></h2>
+<p>The WASM backend exposes basic pointer state for browser-interactive programs:</p>
+<div class="table-wrapper"><table><thead><tr><th>Intrinsic</th><th>Args</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>__pointer_x__()</code></td><td>0</td><td>Get the current pointer x coordinate in canvas pixels</td></tr>
+<tr><td><code>__pointer_y__()</code></td><td>0</td><td>Get the current pointer y coordinate in canvas pixels</td></tr>
+<tr><td><code>__pointer_down__()</code></td><td>0</td><td>Get whether the primary pointer button is currently down</td></tr>
+</tbody></table>
+</div>
+<p>When a canvas or WebGL surface is active, coordinates are reported relative to that surface and scaled to its backing pixel resolution.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="d7-keyboard-input-intrinsics"><a class="header" href="#d7-keyboard-input-intrinsics">D.7 Keyboard Input Intrinsics</a></h2>
+<p>The WASM backend also exposes keyboard state using browser <code>KeyboardEvent.code</code> strings such as <code>ArrowLeft</code>, <code>ArrowRight</code>, <code>KeyW</code>, and <code>Space</code>:</p>
+<div class="table-wrapper"><table><thead><tr><th>Intrinsic</th><th>Args</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>__key_down__(code_ptr code_len)</code></td><td>2</td><td>Get whether a key is currently held down</td></tr>
+<tr><td><code>__key_pressed__(code_ptr code_len)</code></td><td>2</td><td>Get whether a key transitioned from up to down since the last animation frame</td></tr>
+<tr><td><code>__key_released__(code_ptr code_len)</code></td><td>2</td><td>Get whether a key transitioned from down to up since the last animation frame</td></tr>
+</tbody></table>
+</div>
+<p>These intrinsics are intended for animated WASM programs running under canvas or WebGL, where <code>main()</code> is called once per frame.</p>
+<p>While a canvas, WebGL or GPU surface has the page, keys that would scroll it or move focus (arrows, <code>Space</code>, <code>Tab</code>, <code>Backspace</code>, <code>PageUp</code>/<code>PageDown</code>, <code>Home</code>/<code>End</code>, <code>/</code>, <code>'</code>) act only as program input; other keys, and any key held with Ctrl, Alt or Meta, keep their browser behavior. A key press or a click also unlocks audio (D.10).</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="d8-webgl-shader-intrinsics"><a class="header" href="#d8-webgl-shader-intrinsics">D.8 WebGL Shader Intrinsics</a></h2>
+<p>The WASM backend also provides a minimal WebGL path for fullscreen fragment shader demos driven by udewy strings and integer uniforms:</p>
+<div class="table-wrapper"><table><thead><tr><th>Intrinsic</th><th>Args</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>__webgl_init__(shader_ptr shader_len width height)</code></td><td>4</td><td>Compile a fragment shader string and initialize a fullscreen WebGL canvas</td></tr>
+<tr><td><code>__webgl_uniform1i__(name_ptr name_len value)</code></td><td>3</td><td>Set an <code>int</code> uniform on the active shader program</td></tr>
+<tr><td><code>__webgl_uniform2i__(name_ptr name_len x y)</code></td><td>4</td><td>Set an <code>ivec2</code> uniform on the active shader program</td></tr>
+<tr><td><code>__webgl_uniform1iv__(name_ptr name_len values_ptr count)</code></td><td>4</td><td>Set an <code>int[count]</code> uniform array from udewy memory</td></tr>
+<tr><td><code>__webgl_uniform2iv__(name_ptr name_len values_ptr count)</code></td><td>4</td><td>Set an <code>ivec2[count]</code> uniform array from udewy memory</td></tr>
+<tr><td><code>__webgl_render__()</code></td><td>0</td><td>Draw the active fullscreen shader</td></tr>
+</tbody></table>
+</div>
+<p><strong>Usage:</strong></p>
+<ol>
+<li>Store your fragment shader source as a normal udewy string</li>
+<li>Use <code>__load__(shader - 8)</code> to recover its byte length</li>
+<li>Call <code>__webgl_init__(shader shader_len width height)</code> once</li>
+<li>Update uniforms each frame with <code>__webgl_uniform1i__</code>, <code>__webgl_uniform2i__</code>, <code>__webgl_uniform1iv__</code>, or <code>__webgl_uniform2iv__</code></li>
+<li>Call <code>__webgl_render__()</code> to draw</li>
+</ol>
+<p>The runtime provides a built-in passthrough vertex shader with an <code>a_position</code> attribute, so user programs only need to supply fragment shader code.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="d9-build-options"><a class="header" href="#d9-build-options">D.9 Build Options</a></h2>
+<pre><code class="language-bash"># Default: single HTML file with embedded base64 WASM
+python -m udewy.p0 -c --target wasm32 program.udewy
+
+# Run the embedded HTML directly in your browser
+python -m udewy.p0 --target wasm32 program.udewy
+
+# Serve over HTTP instead of opening file:// directly
+python -m udewy.p0 --target wasm32 --serve-wasm program.udewy
+
+# Split mode: separate .wasm file (served automatically when run)
+python -m udewy.p0 -c --target wasm32 --split-wasm program.udewy
+python -m udewy.p0 --target wasm32 --split-wasm program.udewy
+</code></pre>
+<p>When served with <code>--serve-wasm</code> or <code>--split-wasm</code>, the local server exits automatically after the browser tab closes.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="d10-audio-intrinsics"><a class="header" href="#d10-audio-intrinsics">D.10 Audio Intrinsics</a></h2>
+<p>Samples are signed 16-bit integers. Browsers keep audio silent until the page receives a key press or a click; until then a small "Click to Enable Audio" button shows.</p>
+<p><strong>Queue (recommended for sound effects and music).</strong> The program pushes samples from its own memory whenever it has them; they play in order.</p>
+<div class="table-wrapper"><table><thead><tr><th>Intrinsic</th><th>Args</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>__audio_queue_init__(sample_rate channels)</code></td><td>2</td><td>Start the queue (about 2 s of capacity); returns 0, or -1 when audio is unavailable</td></tr>
+<tr><td><code>__audio_queue_push__(ptr n_bytes)</code></td><td>2</td><td>Queue <code>n_bytes</code> of interleaved samples (one per channel per frame); returns the bytes taken</td></tr>
+<tr><td><code>__audio_queue_size__()</code></td><td>0</td><td>Bytes queued and not yet played</td></tr>
+</tbody></table>
+</div>
+<p>Samples pushed while audio is still locked are dropped, so they do not all sound at once when it unlocks. A short effect pushed when nothing is queued starts within about 50 ms.</p>
+<p><strong>One shot.</strong> <code>__audio_init__(sample_rate n_samples channels)</code> returns a buffer for <code>n_samples</code> samples per channel (interleaved); fill it, then <code>__audio_play__()</code> plays it once. <code>__audio_sample_rate__()</code> returns the rate.</p>
+<p><strong>Stream (mono).</strong> <code>__audio_stream_init__(sample_rate buffer_size)</code> returns a buffer of 8192 samples; while <code>__audio_stream_needs_samples__()</code> is true, fill the buffer and call <code>__audio_stream_write__()</code>, which returns the next buffer to fill. The runtime calls <code>main()</code> each animation frame in stream mode.</p>
+<p>All of these buffers lie past the module's memory, like the canvas buffer.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="addendum-e-external-libraries"><a class="header" href="#addendum-e-external-libraries">Addendum E: External Libraries</a></h1>
+<p>This addendum documents the external native libraries currently supported by the repository's checked-in helper code and setup scripts.</p>
+<h2 id="e1-sdl"><a class="header" href="#e1-sdl">E.1 SDL</a></h2>
+<p>The SDL integration lives under <code>udewy/third_party/sdl/</code>.</p>
+<p><strong>Current backend support:</strong></p>
+<ul>
+<li>Supported today: <code>x86_64</code> Linux</li>
+<li>Not currently supported by this SDL setup: <code>riscv</code>, <code>arm</code>, <code>wasm32</code></li>
+</ul>
+<p>The current SDL bundle is built locally by <code>udewy/third_party/sdl/setup_sdl.py</code> for the host Linux machine and stages host-native artifacts into <code>udewy/third_party/sdl/artifacts/</code>. Because those artifacts are native link inputs for the current machine, they are only wired up for the x86_64 Linux backend in the current repository workflow.</p>
+<h3 id="e11-using-sdl"><a class="header" href="#e11-using-sdl">E.1.1 Using SDL</a></h3>
+<p>Get started like this:</p>
+<pre><code class="language-bash"># Build the local SDL bundle and generate the default udewy icon module
+python udewy/third_party/sdl/setup_sdl.py
+
+# Generate a custom icon module next to your source image
+# This writes my_icon.udewy and exports the default symbol MY_ICON
+python udewy/third_party/sdl/generate_udewy_icon.py my_icon.png
+</code></pre>
+<p>Import the SDL wrapper from your udewy program:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-keyword">import</span> <span class="u-function">p</span><span class="u-string">"../third_party/sdl/sdl.udewy"</span></code></pre>
+<p>The wrapper provides the low-level SDL extern declarations together with a few convenience helpers written in udewy, including <code>SDL_SetWindowIconFromUdewyData(window icon_data)</code> and <code>SDL_SetDefaultWindowIcon(window)</code>.</p>
+<h3 id="e12-generated-icon-modules"><a class="header" href="#e12-generated-icon-modules">E.1.2 Generated Icon Modules</a></h3>
+<p>The SDL helper can load packed icon data from a generated <code>.udewy</code> module without adding any new language semantics.</p>
+<p>By default, <code>generate_udewy_icon.py</code> writes the generated module using the input filename with a <code>.udewy</code> extension and exports a symbol matching that filename stem in uppercase. For example:</p>
+<pre><code class="language-bash">python udewy/third_party/sdl/generate_udewy_icon.py my_icon.png
+# writes my_icon.udewy
+# exports MY_ICON
+</code></pre>
+<p>Use <code>--symbol</code> if you want to override the exported symbol name, or pass an explicit output path if you want the generated <code>.udewy</code> file somewhere else.</p>
+<p>The generated module exports one <code>int</code>-annotated pointer whose value is a based string. The consumer knows the record shape; udewy does not attach runtime shape or element metadata. Its byte layout is:</p>
+<ul>
+<li>bytes 0-7: icon magic word</li>
+<li>bytes 8-15: width word</li>
+<li>bytes 16-23: height word</li>
+<li>bytes 24+: raw RGBA pixels in row-major order, four bytes per pixel</li>
+</ul>
+<p>The generator inserts whitespace and line breaks for readability; those separators do not contribute bytes to the based string.</p>
+<p>Use a generated icon module from SDL code like this:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-keyword">import</span> <span class="u-function">p</span><span class="u-string">"../third_party/sdl/sdl.udewy"</span>
+<span class="u-keyword">import</span> <span class="u-function">p</span><span class="u-string">"./my_icon.udewy"</span>
+
+<span class="u-declaration">let</span> <span class="u-identifier">main</span> <span class="u-operator">=</span> <span class="u-punctuation">()</span><span class="u-operator">:&gt;</span><span class="u-type">int</span> <span class="u-operator">=&gt;</span> <span class="u-brace">{</span>
+    <span class="u-declaration">let</span> <span class="u-identifier">title</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-string">"icon demo\0"</span>
+    <span class="u-declaration">let</span> <span class="u-identifier">window</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-function">SDL_CreateWindow</span><span class="u-punctuation">(</span><span class="u-identifier">title</span> <span class="u-number">640</span> <span class="u-number">480</span> <span class="u-identifier">SDL_WINDOW_RESIZABLE</span><span class="u-punctuation">)</span>
+    <span class="u-function">SDL_SetWindowIconFromUdewyData</span><span class="u-punctuation">(</span><span class="u-identifier">window</span> <span class="u-identifier">MY_ICON</span><span class="u-punctuation">)</span>
+    <span class="u-comment"># ...</span>
+<span class="u-brace">}</span></code></pre>
+<p><code>sdl.udewy</code> also imports a generated default icon module and exposes it as <code>SDL_DEFAULT_WINDOW_ICON_DATA</code>. Programs that want the bundled logo can call <code>SDL_SetWindowIconFromUdewyData(window SDL_DEFAULT_WINDOW_ICON_DATA)</code> or <code>SDL_SetDefaultWindowIcon(window)</code>.</p>
+<p>On Linux desktops, successful <code>SDL_SetWindowIcon</code> calls do not guarantee that the dock or launcher will show the new icon. This repository's SDL setup is Wayland-first, and compositor support still determines whether runtime icon changes appear in task switchers or docks.</p>
+<p>For the <code>python -m udewy path/to/program.udewy</code> workflow on GNOME/Wayland, udewy also prepares a desktop-entry fallback:</p>
+<ul>
+<li>the desktop file is written directly to <code>~/.local/share/applications/&lt;app_id&gt;.desktop</code></li>
+<li>the basename before <code>.desktop</code> must match the SDL app ID</li>
+<li>the <code>Icon=</code> entry points at an absolute PNG path</li>
+<li>udewy sets <code>SDL_APP_ID</code> before launching the compiled binary so GNOME can match the running window to that desktop entry</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="e2-clay"><a class="header" href="#e2-clay">E.2 Clay</a></h2>
+<p>The Clay integration lives under <code>udewy/third_party/clay/</code>.</p>
+<p>Clay is a single-header C layout library. The udewy integration keeps <code>clay.h</code> behind a small C ABI adapter (<code>udewy_clay.c</code>) because Clay's public API uses C structs, macros, callbacks, and floating-point values that do not map cleanly to udewy's raw integer/pointer extern boundary.</p>
+<p><strong>Current backend support:</strong></p>
+<ul>
+<li>Supported today: <code>x86_64</code>, <code>c</code>, <code>wasm32</code></li>
+<li>Desktop drawing is provided by the existing SDL wrapper in the demo</li>
+<li>Browser drawing currently uses udewy's canvas host functions</li>
+</ul>
+<p>Build the local Clay artifacts like this:</p>
+<pre><code class="language-bash">python udewy/third_party/clay/setup_clay.py
+</code></pre>
+<p>The setup script downloads <code>clay.h</code> when needed, builds a native shim object, and writes target-specific link bundles under <code>udewy/third_party/clay/artifacts/</code>.</p>
+<p>For <code>wasm32</code>, the setup script also compiles the Clay shim to a side <code>.wasm</code> module. That requires a clang WebAssembly linker such as <code>wasm-ld</code>; the browser demo uses that side module for Clay layout.</p>
+<p>Import Clay from a udewy program:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-keyword">import</span> <span class="u-function">p</span><span class="u-string">"../third_party/clay/clay.udewy"</span></code></pre>
+<p>The wrapper exposes a small scalar shim surface: initialize Clay, set pointer state for hover/click hit testing, begin/end a layout, open/close simple colored boxes and text elements, and iterate rectangle/text render commands. Clay measures text through a callback and emits text render commands, but it does not rasterize fonts itself. The demo uses a tiny built-in bitmap font renderer so it stays dependency-free across SDL and browser canvas targets.</p>
+<pre><code class="language-bash"># Desktop SDL demo
+python -m udewy --target x86_64 udewy/tests/clay/demo_clay.udewy
+
+# Hosted C backend
+python -m udewy --target c udewy/tests/clay/demo_clay.udewy
+
+# Browser demo; serving is recommended when wasm side artifacts are involved
+python -m udewy --target wasm32 --serve-wasm udewy/tests/clay/demo_clay.udewy
+</code></pre>
+<p>The browser route is an app-style canvas renderer, not an HTML/DOM renderer. It is useful for games, tools, and custom UI surfaces. A future Clay-to-DOM renderer would be the better direction for web pages that should preserve native browser behavior such as accessibility, text selection, forms, and find-in-page.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="addendum-f-c-backend"><a class="header" href="#addendum-f-c-backend">Addendum F: C Backend</a></h1>
+<h2 id="f1-target-description"><a class="header" href="#f1-target-description">F.1 Target Description</a></h2>
+<ul>
+<li><strong>Architecture:</strong> C99 implementation with 64-bit <code>uintptr_t</code>, object pointers, function pointers, and <code>uint64_t</code></li>
+<li><strong>Environment:</strong> Any system with a C compiler that can build the generated program</li>
+<li><strong>Output Format:</strong> C source compiled to the host platform's native executable format</li>
+<li><strong>Memory Model:</strong> Native target process memory, using udewy's byte-length-prefixed ordinary-string and based-string layout</li>
+</ul>
+<p>This backend is intended as a portable code-generation target, not as a promise that every udewy program is portable. Programs remain portable only to the extent that their <code>extern</code> bindings, imported C capabilities, and imported native artifacts are portable.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="f2-value-representation"><a class="header" href="#f2-value-representation">F.2 Value Representation</a></h2>
+<ul>
+<li>All runtime values are emitted as <code>udewy_word</code>, a generated C typedef for <code>uint64_t</code></li>
+<li>Signed operations explicitly cast to <code>int64_t</code> where udewy semantics require signed interpretation</li>
+<li>udewy booleans still use <code>true = 0xFFFF_FFFF_FFFF_FFFF</code> and <code>false = 0</code></li>
+<li>Ordinary strings and based strings keep the normal udewy layout: one 8-byte byte-length word immediately before the data pointer</li>
+</ul>
+<p>The generated C helper layer uses direct <code>unsigned char *</code> access for <code>u8</code> loads/stores and fixed-size <code>memcpy</code> helpers for wider loads/stores. The latter permit unaligned access without C aliasing assumptions and use the target's native byte order automatically. This matches the native-backend model: raw memory is target memory, not a fixed little-endian serialization format. Constant-size copies let C compilers recover ordinary word loads/stores without first optimizing byte-packing expressions.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="f21-function-body-lowering"><a class="header" href="#f21-function-body-lowering">F.2.1 Function Body Lowering</a></h2>
+<p>The C backend lowers udewy's parser-driven value-stack events into ordinary C locals and statements. Generated function bodies use readable names such as <code>arg0</code>, <code>local0</code>, and <code>t0</code> rather than a runtime <code>_ud_v</code> / <code>_ud_saved</code> stack. Values are still materialized into temporaries at sequencing boundaries, especially function-call arguments, so udewy's left-to-right evaluation order does not depend on C's argument evaluation order.</p>
+<p>Internal udewy functions use readable mangled C names such as <code>udewy_fn_print_bytes_2</code>, while real extern symbols preserve their linked C names. Generated helper and wrapper symbols keep the <code>udewy_</code> prefix.</p>
+<p>Because generated function-local names are intentionally concise, imported C headers that define macros named <code>t0</code>, <code>local0</code>, <code>arg0</code>, and so on could conflict during preprocessing. Avoid importing headers with macros that use those exact names, or add a backend-specific wrapper if such a header must be used.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="f22-static-address-initializers"><a class="header" href="#f22-static-address-initializers">F.2.2 Static Address Initializers</a></h2>
+<p>Address-bearing <code>__static_words__</code> entries and stable globals are emitted as C99 pointer or function-pointer initializers in an 8-byte <code>udewy_slot</code> union. This lets the C linker initialize function, string, and static-storage references directly; generated programs do not need a startup function to patch address values into otherwise static data. Integer-only globals remain ordinary <code>udewy_word</code> objects.</p>
+<p>This lowering relies on the target ABI representing object and function pointers in one 64-bit word, with pointer object bytes matching the corresponding <code>uintptr_t</code> value. Generated C contains compile-time size checks. A standalone probe checks the remaining representation and indirect-call assumptions for a particular compiler, target ABI, and optimization mode:</p>
+<pre><code class="language-bash">cc -std=c99 -O2 udewy/backend/c_abi_probe.c -o /tmp/udewy-c-abi-probe
+/tmp/udewy-c-abi-probe
+</code></pre>
+<p>Passing the probe certifies that compiler/target/options combination, not every compiler for the same architecture. Cross-compiled probes must be executed on the target hardware or under an emulator.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="f23-__alloca__-alignment"><a class="header" href="#f23-__alloca__-alignment">F.2.3 <code>__alloca__</code> Alignment</a></h2>
+<ul>
+<li><code>__alloca__</code> rounds requested sizes up to 8 bytes</li>
+<li>dynamic <code>__alloca__</code> lowers to the host compiler's <code>alloca</code> facility (or builtin equivalent)</li>
+<li>if the selected C compiler does not expose an <code>alloca</code> facility, compilation fails by default</li>
+</ul>
+<p><code>__static_alloca__</code> remains shared writable static storage and does not depend on <code>alloca</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="f3-platform-surface"><a class="header" href="#f3-platform-surface">F.3 Platform Surface</a></h2>
+<p>With no C capability imports, the C backend implements only the <strong>core intrinsics</strong>. It does <strong>not</strong> provide:</p>
+<ul>
+<li>Linux <code>__syscall0__</code> through <code>__syscall6__</code></li>
+<li>browser/DOM/canvas intrinsics</li>
+<li>backend-provided builtin constants such as <code>SYS_WRITE</code> or <code>STDOUT</code></li>
+</ul>
+<p>Use importable C capability modules for common hosted C APIs:</p>
+<pre><code class="nohighlight udewy-hl language-udewy"><span class="u-keyword">import</span> <span class="u-function">p</span><span class="u-string">"../third_party/c/stdlib.udewy"</span>
+
+<span class="u-declaration">let</span> <span class="u-identifier">main</span> <span class="u-operator">=</span> <span class="u-punctuation">()</span><span class="u-operator">:&gt;</span><span class="u-type">int</span> <span class="u-operator">=&gt;</span> <span class="u-brace">{</span>
+    <span class="u-declaration">let</span> <span class="u-identifier">buf</span><span class="u-operator">:</span><span class="u-type">int</span> <span class="u-operator">=</span> <span class="u-function">calloc</span><span class="u-punctuation">(</span><span class="u-number">4</span> <span class="u-number">8</span><span class="u-punctuation">)</span>
+    <span class="u-keyword">return</span> <span class="u-identifier">buf</span> <span class="u-operator">=?</span> <span class="u-number">0</span>
+<span class="u-brace">}</span></code></pre>
+<p>The checked-in C capability modules live under <code>udewy/third_party/c/</code>. The C backend recognizes imports of these ordinary udewy source modules and maps them to its private capability names:</p>
+<ul>
+<li><code>hosted.udewy</code>: marks that the program targets ordinary hosted C</li>
+<li><code>stdio.udewy</code>: imports <code>hosted.udewy</code>, declares minimal stdio externs, and lets the C backend include <code>&lt;stdio.h&gt;</code></li>
+<li><code>stdlib.udewy</code>: imports <code>hosted.udewy</code>, declares minimal stdlib externs, and lets the C backend include <code>&lt;stdlib.h&gt;</code></li>
+<li><code>math.udewy</code>: imports <code>hosted.udewy</code>, lets the C backend include <code>&lt;math.h&gt;</code>, and links the host math library</li>
+</ul>
+<p>This keeps the portability boundary explicit in source. Importing no C capability modules leaves the program in the minimal/freestanding-oriented profile.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="f4-extern-calls"><a class="header" href="#f4-extern-calls">F.4 Extern Calls</a></h2>
+<p>Extern calls on the C backend follow udewy's usual 64-bit integer/pointer model:</p>
+<ul>
+<li>arguments are passed as raw 64-bit values</li>
+<li>return values are observed as raw 64-bit values</li>
+<li>pointers are passed by their bit pattern</li>
+</ul>
+<p>This is a good match for ordinary integer/pointer C APIs such as allocators, memory functions, or platform handles. It is not intended to automatically model richer C type information, variadic formatting conventions, or mixed integer/floating-point ABI details.</p>
+<p>Indirect function calls also pass through the same integer/pointer representation. As with the native assembly backends, this assumes a conventional hosted platform ABI where function pointers can be used in this manner.</p>
+<p>For known externs from <code>udewy/third_party/c/</code>, the C backend can emit small typed C wrappers. These avoid conflicting libc declarations and keep user code on the normal udewy integer/pointer calling convention.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="f41-mixed-integerfloating-point-extern-calls"><a class="header" href="#f41-mixed-integerfloating-point-extern-calls">F.4.1 Mixed Integer/Floating-Point Extern Calls</a></h2>
+<p>The C backend supports the same low-level <code>__call_extern_mixed_N__</code> intrinsic family used by the native backends. The static tag arguments are:</p>
+<ul>
+<li><code>0</code>: pass the value as <code>udewy_word</code></li>
+<li><code>1</code>: reinterpret the value's low 32 bits as <code>float</code></li>
+<li><code>2</code>: reinterpret the value as <code>double</code></li>
+</ul>
+<p>This is the correct path for C APIs that take floating-point arguments, such as OpenGL functions. The SDL/OpenGL wrapper in <code>udewy/third_party/sdl/sdl.udewy</code> uses this pattern so that the same wrapper can target native Linux backends and the C backend.</p>
+<p>The C backend also supports <code>__i64_to_f32_bits__</code>, <code>__i64_to_f64_bits__</code>, <code>__f32_bits_to_i64__</code>, and <code>__f64_bits_to_i64__</code>, which convert signed integer values into IEEE-754 bit patterns for use with mixed extern calls and convert returned/stored float bit patterns back to integers.</p>
+<div style="break-before: page; page-break-before: always;"></div><h2 id="f5-generated-helper-emission"><a class="header" href="#f5-generated-helper-emission">F.5 Generated Helper Emission</a></h2>
+<p>The C backend emits runtime helpers on demand. For example, a program that does not use <code>__alloca__</code> will not emit the <code>alloca</code> prelude, and a program that only uses <code>__load_u8__</code> will not emit the target-endian wide-load helpers. This keeps the default generated C close to the minimal profile.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="misc"><a class="header" href="#misc">Misc</a></h1>
+<h2 id="pronunciation"><a class="header" href="#pronunciation">Pronunciation</a></h2>
+<p>The name can be pronounced several ways depending on how you read the Greek letter μ (mu):</p>
+<div class="table-wrapper"><table><thead><tr><th>Reading</th><th>Pronunciation</th><th>IPA</th></tr></thead><tbody>
+<tr><td>μ as "micro"</td><td>MY-kroh dew-ee</td><td>/ˌmaɪkroʊ ˈduːi/</td></tr>
+<tr><td>μ as "mu"</td><td>MYOO dew-ee</td><td>/mjuː ˈduːi/</td></tr>
+<tr><td>μ as "u"</td><td>YOO dew-ee</td><td>/juː ˈduːi/</td></tr>
+</tbody></table>
+</div>
+<p>All are equally correct.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="files"><a class="header" href="#files">Files</a></h1>
+<ul>
+<li><code>p0.py</code> - Parser</li>
+<li><code>t0.py</code> - Tokenizer</li>
+<li><code>backend/</code> - Target-specific code generators
+<ul>
+<li><code>x86_64.py</code> - x86_64 Linux</li>
+<li><code>riscv.py</code> - RISC-V 64 Linux</li>
+<li><code>arm.py</code> - AArch64 Linux</li>
+<li><code>c.py</code> - C backend</li>
+<li><code>wasm.py</code> - WebAssembly browser</li>
+<li><code>common.py</code> - Backend protocol definition</li>
+</ul>
+</li>
+<li><code>tests/</code> - Test programs</li>
+<li><code>bootstrap/</code> - Self-hosted bootstrap compiler (in udewy itself)
+<ul>
+<li><code>main.udewy</code> - CLI entry point</li>
+<li><code>t0.udewy</code>, <code>t1.udewy</code>, <code>p0.udewy</code> - Preprocessor, tokenizer, parser</li>
+<li><code>runtime/</code> - Host I/O, subprocess, fs, diagnostics, paths, strbuf</li>
+<li><code>backend/</code> - One file per backend (x86_64, riscv, arm, c, wasm)</li>
+</ul>
+</li>
+</ul>
+<h2 id="bootstrap-compiler"><a class="header" href="#bootstrap-compiler">Bootstrap Compiler</a></h2>
+<p>The <code>bootstrap/</code> directory contains a self-hosted compiler written in udewy
+itself. It is feature-equivalent to the Python implementation and supports all
+five backends (x86_64, riscv, arm, c, wasm32). The x86_64 and C backends are
+fully self-hosting: the bootstrap can compile itself targeting either.</p>
+<h3 id="backend-agnostic-core"><a class="header" href="#backend-agnostic-core">Backend-agnostic core</a></h3>
+<p>Most of the bootstrap is not tied to a single backend. The preprocessor
+(<code>t0.udewy</code>, <code>t1.udewy</code>), tokenizer, parser (<code>p0.udewy</code>), and the shared backend
+protocol (<code>backend/common.udewy</code>) are ordinary udewy code that emits through the
+abstract <code>Backend</code> interface. Each concrete backend file (<code>backend/x86_64.udewy</code>,
+<code>backend/wasm.udewy</code>, etc.) implements that interface for one target.</p>
+<p>The only backend-specific coupling in day-to-day compiler logic is whatever the
+selected backend must provide at codegen time (syscalls vs browser host
+functions vs C <code>extern</code> lowering). The compiler <em>algorithm</em> is the same across
+targets.</p>
+<h3 id="host-io-behind-capabilities"><a class="header" href="#host-io-behind-capabilities">Host I/O behind capabilities</a></h3>
+<p>Operating-system interactions (reading and writing files, spawning subprocesses,
+printing diagnostics, exiting) go through <code>stdlib/stdlib.udewy</code>, which imports a
+<strong>host I/O capability module</strong> for the active compile target:</p>
+<ul>
+<li><code>stdlib/capabilities/host_io_x86_64.udewy</code></li>
+<li><code>stdlib/capabilities/host_io_riscv.udewy</code></li>
+<li><code>stdlib/capabilities/host_io_arm.udewy</code></li>
+<li><code>stdlib/capabilities/host_io_wasm32.udewy</code></li>
+<li><code>stdlib/capabilities/host_io_c.udewy</code></li>
+</ul>
+<p>The bootstrap <code>runtime/</code> helpers (<code>fs.udewy</code>, <code>process.udewy</code>, <code>diag.udewy</code>,
+<code>paths.udewy</code>) sit on top of that shared <code>host_*</code> API. Adding a new backend
+means implementing host I/O for that target, not rewriting the parser.</p>
+<h3 id="why-the-bootstrap-includes-wasm"><a class="header" href="#why-the-bootstrap-includes-wasm">Why the bootstrap includes WASM</a></h3>
+<p>The wasm32 backend is part of the bootstrap so udewy programs including the compiler itself can be hosted and demonstrated directly in the browser.</p>
+<ul>
+<li><code>main.udewy</code> is the normal CLI entry point (native or hosted C).</li>
+<li><code>web_compiler.udewy</code> is a wasm32-only library entry point: a JavaScript host feeds source bytes in, the bootstrap runs <code>t1</code> + <code>p0</code> + the wasm backend, and WAT bytes come back out for assembly in the browser. The playground under <code>udewy/tests/web/</code> is the UI that drives it.</li>
+</ul>
+<p>Longer term, browser hosting might move up to full Dewy instead of living in the trusted-base rung; at that point we would ship Dewy-compiled compiler artifacts for the web rather than depending on udewy's wasm backend forever. For now, having wasm in the bootstrap is a practical way to demo the language and the self-hosted compiler on the web.</p>
+<h3 id="usage"><a class="header" href="#usage">Usage</a></h3>
+<pre><code class="language-bash"># Compile the bootstrap to a native binary (via the Python compiler)
+python -m udewy --target x86_64 -c udewy/bootstrap/main.udewy
+# Now use the bootstrap to compile programs
+./__dewycache__/udewy/bootstrap/main --target wasm32 -c udewy/tests/test_hello.udewy
+# Self-host: bootstrap compiles itself
+./__dewycache__/udewy/bootstrap/main --target x86_64 -c udewy/bootstrap/main.udewy
+</code></pre>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="theme/udewy-book.js"></script>
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+
+    </div>
+    </body>
+</html>

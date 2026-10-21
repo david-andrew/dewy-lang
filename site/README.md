@@ -24,6 +24,11 @@ browser clients. Build output lives in ignored `site/dist/`; do not commit it.
 ## Sources and claims
 
 - `static/`: public pages, shared assets and the retired µDewy installer message.
+- `static/udewy/`: frozen, archived µDewy website (spec book, showcase demos,
+  client-side playground), copied verbatim. It was built once from tag
+  `archive/master-pre-restart` with that tag's `site/scripts/build.py`, then given
+  an archive banner, self-contained assets and archived-source GitHub links.
+  Do not edit or regenerate it.
 - `learn/`: current compiler walkthroughs. `reference/`: normative language design.
 - `coverage-map.json`: reference section associations with ladder programs,
   golden cases and pytest node IDs. An association does not certify a chapter.
@@ -72,6 +77,7 @@ can deploy Pages, including manual dispatches. `channel_tag` or the repository
 source of truth for future builds; every build checks snippets and ladder anew.
 
 Retired HTML routes have canonical/meta-refresh/visible links and preserve
-fragments with JavaScript. `/udewy/install.sh` exits with a retirement message
-before touching the filesystem. `check_links.py` verifies local fragments,
-redirect destinations and cycles; external archives remain external links.
+fragments with JavaScript. `/udewy/` routes serve the archived snapshot;
+`/udewy/install.sh` exits with a retirement message before touching the
+filesystem. `check_links.py` verifies local fragments, redirect destinations and
+cycles, including inside the snapshot; external archives remain external links.
