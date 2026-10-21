@@ -53,7 +53,9 @@ python3 -m tools.core --bootstrap test     # independent C bootstrap + full suit
      ≥3% on a north-star workload (or ≥1.5× on a named kernel), or a
      simplification.
    - Measure the upper bound before building anything.
-   - Time-box it. One failed pilot ends the idea family.
+   - Time-box it. One failed pilot ends the idea family. This applies to
+     optional optimizations only: a decided capability continues with a
+     diagnosed redesign.
    - Do not polish sub-percent wins.
    - Gate compile speed on load-independent critical-path instructions; take
      wall-clock numbers only on a quiet pinned machine or a CI runner.
