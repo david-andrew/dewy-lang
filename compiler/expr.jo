@@ -4724,6 +4724,7 @@ is_unchecked_at = (n: int) -> bool:
     if id_at == 0: id_at = intern("__at")
     int(nodes[callee].name) == id_at and modules[cur_mod()].is_prelude
 
+id_breakpoint = 0
 # `$breakpoint`: the site, and each live binding of the function as `name = value`
 breakpoint_call = (n: int) -> int:
     pos = nodes[n].pos
@@ -4766,7 +4767,8 @@ breakpoint_call = (n: int) -> int:
 check_call = (n: int, expected: int) -> int:
     if reflect_fields(n): fatal(nodes[n].pos, "fields(T) is a compile-time sequence; iterate over it with `loop field in fields(T)`")
     callee = int(nodes[n].a)
-    if nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "$breakpoint" and nkids(n) == 0:
+    if id_breakpoint == 0: id_breakpoint = intern("$breakpoint")
+    if nodes[callee].kind == .ident and int(nodes[callee].name) == id_breakpoint and nkids(n) == 0:
         breakpoint_call(n)
         return check_expr(n, expected)
     if nodes[callee].kind == .field:

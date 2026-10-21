@@ -16,15 +16,19 @@ reflect_source = (e: int) -> int:
         if nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "__dewy_iter": return kid(e, 0)
     e
 
+id_fields = 0
+id_members = 0
 reflect_fields = (e: int) -> bool:
-    if nodes[e].kind != .call or not dewy_at(nodes[e].pos): return false
+    if nodes[e].kind != .call: return false
     callee = int(nodes[e].a)
-    nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "fields" and lookup(int(nodes[callee].name)) == 0
+    if id_fields == 0: id_fields = intern("fields")
+    nodes[callee].kind == .ident and int(nodes[callee].name) == id_fields and dewy_at(nodes[e].pos) and lookup(id_fields) == 0
 
 reflect_members = (e: int) -> bool:
-    if nodes[e].kind != .call or not dewy_at(nodes[e].pos): return false
+    if nodes[e].kind != .call: return false
     callee = int(nodes[e].a)
-    nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "members" and lookup(int(nodes[callee].name)) == 0
+    if id_members == 0: id_members = intern("members")
+    nodes[callee].kind == .ident and int(nodes[callee].name) == id_members and dewy_at(nodes[e].pos) and lookup(id_members) == 0
 
 # the literal members of a type (its string sets and integer singletons), each
 # a checked literal whose type is its own singleton
