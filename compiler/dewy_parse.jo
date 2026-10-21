@@ -1223,6 +1223,7 @@ dw_param = (id: int, kind: NK) -> int:
         lhs = dw_child(id, 1)
         annotation = dw_child(id, 2)
     else if kind == .vardecl and initial == 0: return dw_fail(id, "a field without a type or default")
+    dw_word_operator_name(dw_name(lhs), lhs)
     by_place = dw_op(lhs) == .at
     if by_place: lhs = dw_child(lhs, 1)
     if dewy_syntax[dw_unwrap(lhs)].kind == .metatag: return dw_metatag_fail(dw_unwrap(lhs))
@@ -1958,6 +1959,7 @@ dw_stmt = (id: int, top: bool = false) -> int:
     if dw_op(id) == .assign or dw_op(id) == .colon:
         lhs = dw_unwrap(dw_child(id, 1))
         if dw_op(id) == .colon or top and dw_op(lhs) == .colon: return dw_declare(id, false, top)
+        dw_word_operator_name(dw_name(lhs), lhs)
         n = mk(.assign, pos)
         nodes[n].op = i32(int(Tok.assign))
         if dewy_syntax[lhs].kind == .block and dewy_syntax[lhs].text == "[]:":
@@ -2010,6 +2012,11 @@ dw_const_number = (n: int) -> bool:
         return dw_const_number(int(nodes[n].a)) and dw_const_number(int(nodes[n].b))
     false
 
+# a word operator (`and`, `in`, `as`) is never a name
+dw_word_operator_name = (name: str, at: int):
+    if name == "and" or name == "or" or name == "not" or name == "xor" or name == "nand" or name == "nor" or name == "xnor" or name == "in" or name == "as" or name == "transmute":
+        fatal(dewy_syntax[at].pos, "`{name}` is a word operator, not a name: choose another name")
+
 dw_declare = (id: int, constant: bool, top: bool) -> int:
     let id = dw_unwrap(id)
     initial = 0
@@ -2032,6 +2039,7 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         if not top: dw_shadow(dw_bound_names(kids(n)))
         return n
     name = dw_name(lhs)
+    dw_word_operator_name(name, lhs)
     if name == "":
         word = dw_leftmost_name(lhs)
         # (or the word just before: `def main():` is `def` then `main(): ...`)
