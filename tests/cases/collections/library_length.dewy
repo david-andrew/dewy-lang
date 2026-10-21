@@ -1,0 +1,15 @@
+# quick
+# `.length` reads a library container's or custom sequence's `len`.
+Series:type = [first:int64 count:int64]
+len = (s:Series) => s.count
+main = () => {
+    let queue:Heap<string> = []
+    queue.push("b" 2.0)
+    queue.push("a" 1.0)
+    printl(queue.length)
+    loop queue.length >? 0 { printl(queue.pop()) }
+    let pool:Pool<int64> = []
+    let h = pool.add(42)
+    printl("{pool.length} {pool[h]}")
+    printl(Series[40 3].length)
+}

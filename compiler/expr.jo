@@ -7110,6 +7110,10 @@ check_expr = (n: int, expected: int) -> int:
                 if types[bt].kind == .struct_ and dt(bt) == "Body" and pos_in_lib(nodes[int(structs[int(types[bt].st)].decl)].pos):
                     fatal(nodes[n].pos, "a Body is a handle into its world: ask the world, `w.pos(b)`, `w.velocity(b)`, `w.rotation(b)`, and change it there, `w.set_pos(b, p)`, `w.set_velocity(b, v)`, `w.push(b, impulse)`")
                 cands = fn_names_for(bt)
+                # (Dewy's length of a library container or a sequence, as Heap and Pool: its `len`)
+                if files[pos_file(nodes[n].pos)].is_dewy and name_of(fname) == "length" and cands.contains(intern("len")) and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
+                    nodes[n] = nodes[bc_call("len", [int(nodes[n].a)], nodes[n].pos)]
+                    return check_expr(n, expected)
                 loop c in cands:
                     if c != fname: continue
                     if files[pos_file(nodes[n].pos)].is_dewy:
