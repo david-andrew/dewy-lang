@@ -9,7 +9,7 @@ what landed. Keep this file short.
 
 | Measure | Now (2026-10-20) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 70/81 (tiers 1–2: 63/63; tier 3: 7/18), 13 held open on decisions | all milestones |
+| Acceptance ladder, design surface | 71/82 (tiers 1–2: 63/63; tier 3: 8/19), 12 held open on decisions | all milestones |
 | Acceptance ladder, current dialect | 82/82 | stays green |
 | Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.24 G instructions (was 1.36 G on 10-20 morning) | ~0.40 G (250k root lines/s) |
 | Compiler self-build | 8.0 G instructions | seconds-scale edit loop |
@@ -37,8 +37,8 @@ only.
   - ownership: lifecycle hooks and drop, `$lend` checking, arenas, 6 slices
     (~/dev/tmp/coord/ownership-design.md);
   - builtin `rational`;
-  - `$test`/`$expect`, and scoring test results in the ladder (program 89);
-  - `sort(key=…)`.
+  - single-parameter lambdas without parentheses (`x => …`, specified, not
+    implemented).
 - Compile throughput, toward ~0.40 G. Budget in
   ~/dev/tmp/coord/throughput-budget.md. Open projects, roughly in order:
   - direct compact-AST construction: mostly landed (parse plus projection
@@ -63,8 +63,6 @@ only.
   10-20); the frontend work recovered the synthetic panel's share.
 - Small items:
   - the remaining Jo-shaped hints in diagnostics;
-  - remaining zero-fill paths: `from_json` and `m[k].x += 1` on a missing key
-    still create values for fields without defaults;
   - methods follow-ups: members inherited across modules; static calls
     through a type value; `type of any` parents;
   - delete `restart/sloppy-frontend` and its publish-policy entry once the
@@ -107,6 +105,10 @@ only.
     Today it can't, and that's a clear error.
 19. Should `T?` fields default to `none` implicitly? Today they need an
     explicit `= none`, which the design implies.
+20. Tests: each `$test` runs in its own process, so a panic marks only that
+    test as aborted and the others still run. (The design says a failed
+    `$runtime_assert` stops the file.) OK? `dewy-core test --json` fields are
+    provisional.
 18. Printing details decided provisionally: minted values print with their
     type name (`Fault[code=7]`); ranges print as `[0..2]`/`[1,3..9]`; methods
     get unused warnings only on private types. OK?
