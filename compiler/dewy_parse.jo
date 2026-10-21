@@ -2069,6 +2069,9 @@ dw_iterable = (id: int, slice: bool = false, membership: bool = false) -> int:
 dw_loop_head = (id: int, combined: bool = false) -> int:
     let id = dw_unwrap(id)
     op = dw_op(id)
+    # (`as` binds more loosely than `in`: `loop c in text as array<uint8>` converts the header)
+    if (op == .kw_as or op == .kw_transmute) and dw_op(dw_child(id, 1)) == .kw_in:
+        fatal(dewy_syntax[id].pos, "`{dn_token_text(op)}` binds more loosely than the loop's `in`: parenthesize the converted source, as in `loop byte in (text as array<uint8>) \{ ... }`")
     n = mk(.lhead, dewy_syntax[id].pos)
     if op == .kw_in:
         nodes[n].op = 1
