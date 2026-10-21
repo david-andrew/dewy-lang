@@ -1,5 +1,4 @@
 # exit: 42
-# quick
 let calls:int64=0
 next=(v:int64):>int64=>{calls+=1 v}
 pick=(v:int64):>int64=>match next(v) {<0>=>10 <1>=>{calls+=10 20} <2>=>30 _=>{calls+=100 40}}

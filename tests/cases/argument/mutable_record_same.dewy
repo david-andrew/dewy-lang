@@ -1,4 +1,3 @@
-# quick
 R:type=[x:int64 y:int64 z:int64]
 change=(@a:R @b:R snapshot:R):>int64=>{a.x=10 b.y=a.x+1 return snapshot.x+snapshot.y+snapshot.z}
 main=()=>{let a=R[1 2 3] let saved=a let sum=change(@a @a a)
