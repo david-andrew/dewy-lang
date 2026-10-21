@@ -2222,6 +2222,28 @@ The [Ring example](../examples/ring.dewy) and
 [history program](../examples/history.dewy) use this interface across
 module imports without a separate iterator allocation.
 
+`loop x in xs` iterates the value `xs` has at loop entry. The body may change
+`xs`; the iteration does not see it, and no copy is made unless the body writes
+`xs`. `loop x in @xs` iterates the place live instead: each step reads the
+current length and element, so pushes and edits made by the body are seen. This
+is the worklist idiom:
+
+```dewy
+let order:array<int64> = [start]
+loop node in @order {
+    loop next in edges[node] {
+        if not seen[next] { seen[next] = true  order.push(next) }
+    }
+}
+```
+
+Changing the length of an array that a loop iterates by value (`push`, `pop`,
+`insert`, `remove`, `clear`, `extend`, `resize`, `truncate` on the same binding
+or field path in the body) is a compile error with both fixes: iterate `@xs` to
+see the changes, or bind a snapshot first (`let snapshot = xs` then
+`loop x in snapshot`). A live loop binds one name over a growable array named by
+a binding or field path, and cannot be part of a combined header.
+
 Use an explicit place binding to update stored array elements:
 
 ```dewy

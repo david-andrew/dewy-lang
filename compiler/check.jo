@@ -2637,6 +2637,7 @@ check_for = (s: int):
     if map_tidy_first(s): return
     if dewy_sequence_loop(s): return
     mark = scope_mark()
+    value_mark = value_loops.len()
     enter_loop()
     it = int(nodes[s].a)
     is_mut = has_flag(s, NF_MUT)
@@ -2728,6 +2729,7 @@ check_for = (s: int):
                 el = new_local(elname, et, pos)
                 locals[el].flags = i32(int(locals[el].flags) | LF_BYREF)
                 nodes[s].aux = 1
+                if k == .array and dewy_at(pos) and route_text(it) != "": value_loops.push(ValueLoop(cx, it, elname))
             nodes[s].sym = i32(el)
             nodes[s].c = i32(idx)
             nodes[s].d = i32(snap)
@@ -2767,9 +2769,47 @@ check_for = (s: int):
         else: fatal(nodes[it].pos, "cannot iterate over a value of type {dt(t)}")
     check_loop_enter(s)
     check_block(int(nodes[s].b), 0, false)
+    value_loops.truncate(value_mark)
     loop_serials.pop()
     check_loop_leave(s)
     scope_reset(mark)
+
+# Arrays a Dewy loop iterates by value (`loop x in xs`), while their bodies are
+# checked: the loop sees the value at entry, so changing the array's length in
+# the body is an error naming the two meanings the program could have wanted.
+struct ValueLoop:
+    context: int
+    route: int      # the checked source: a binding or a field path of one
+    name: int       # the element's name
+
+value_loops: ValueLoop[]
+
+route_text = (n: int) -> str:
+    k = nodes[n].kind
+    if k == .ident and (nodes[n].aux == i32(int(SK.local)) or nodes[n].aux == i32(int(SK.global))):
+        nm = name_of(int(nodes[n].name))
+        return if len(nm) > 0 and nm[0] != '$': nm else: ""
+    if k == .field:
+        base = route_text(int(nodes[n].a))
+        return if base == "": "" else: "{base}.{name_of(int(nodes[n].name))}"
+    ""
+
+same_route = (a: int, b: int) -> bool:
+    k = nodes[a].kind
+    if k != nodes[b].kind: return false
+    if k == .ident: return nodes[a].aux == nodes[b].aux and nodes[a].sym == nodes[b].sym
+    if k == .field: return nodes[a].name == nodes[b].name and same_route(int(nodes[a].a), int(nodes[b].a))
+    false
+
+value_loop_resize = (receiver: int, operation: str, pos: int):
+    i = value_loops.len() - 1
+    loop i >= 0:
+        v = value_loops[i]
+        if v.context == cx and same_route(v.route, receiver):
+            src = route_text(v.route)
+            el = if v.name != 0: name_of(v.name) else: "item"
+            fatal(pos, "`{operation}` changes the length of `{src}`, which `loop {el} in {src}` iterates by its value at loop entry, so the loop would not see the change: write `loop {el} in @{src}` to iterate the live array, or bind a snapshot first (`let snapshot = {src}` then `loop {el} in snapshot`)")
+        i -= 1
 
 const ASSIGN_OPS = 0
 

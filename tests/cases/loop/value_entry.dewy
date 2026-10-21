@@ -1,0 +1,17 @@
+# quick
+# `loop x in xs` iterates the value xs had at loop entry: the body may change
+# xs, and the iteration does not see it.
+main = () => {
+    let xs = [1 2 3]
+    loop x in xs {
+        xs[1] = 100
+        xs = [xs... x]
+        printl(x)
+    }
+    printl(xs)
+    # A snapshot binding lets the body grow the original.
+    let queue = [1 2]
+    let snapshot = queue
+    loop item in snapshot { queue.push(item * 10) }
+    printl(queue)
+}

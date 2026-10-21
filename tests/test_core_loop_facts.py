@@ -129,16 +129,27 @@ COMBINED_CALLBACK = '''first=(@xs:array<int64> ys:array<int64> step:<(@zs:array<
 }
 main=()=>{ let a:array<int64>=[1 2 3]; printl(first(@a [1 1 1] (@zs:array<int64>)=>{zs.clear()})) }
 '''
+# Resizing the array a loop iterates by value is rejected before any fact is needed.
+REJECTED = {
+    'push': (PUSH, '/loops.dewy:3:33: error: `push` changes the length of `xs`'),
+    'later': (LATER, '/loops.dewy:3:44: error: `pop` changes the length of `xs`'),
+}
 NEGATIVE = {
-    'push': (PUSH, ['/loops.dewy:3:49: error: cannot prove index is in bounds: missing upper bound$/',
-                    '/loops.dewy:3:33: note: xs.length may have changed at this push$/'], '6\n'),
-    'later': (LATER, ['/loops.dewy:3:37: error: cannot prove index is in bounds: missing upper bound$/',
-                      '/loops.dewy:3:5: note: xs.length may have changed at this loop$/'], None),
     'callback': (CALLBACK, ['/loops.dewy:3:48: error: cannot prove index is in bounds: missing upper bound$/',
                             '/loops.dewy:3:33: note: xs.length may have changed at this call$/'], None),
     'combined_callback': (COMBINED_CALLBACK, ['/loops.dewy:4:36: error: cannot prove index is in bounds: missing upper bound$/'],
                           None),
 }
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('name', list(REJECTED))
+def test_resizing_by_value_sources_is_rejected(compiler, tmp_path, name):
+    source, pattern = REJECTED[name]
+    result = run(compiler, tmp_path, source, 'check', True)
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert not match_patterns([pattern], output), output
 
 
 @pytest.mark.core_quick

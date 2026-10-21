@@ -27,7 +27,7 @@ enum IN:
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
     read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
     static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem, lend, loan_address, loan_load, loan_store, loan_length,
-    zeroed, relocate, take_slot
+    zeroed, relocate, take_slot, live_len
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big
@@ -47,6 +47,7 @@ intrinsics = [
     Intrinsic("$assert", .static_assert, false),
     Intrinsic("$runtime_assert", .runtime_assert, false),
     Intrinsic("__dewy_iter", .dewy_iter, false),
+    Intrinsic("__dewy_live_length", .live_len, false),
     Intrinsic("__dewy_iter_done", .dewy_iter_done, false),
     Intrinsic("__dewy_iter_value", .dewy_iter_value, false),
     Intrinsic("__dewy_iter_pair", .dewy_iter_pair, false),
@@ -5194,6 +5195,11 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             nodes[ix].b = i32(args[1])
             nodes[n] = nodes[ix]
         return check_expr(n, expected)
+    else if id == .live_len:
+        t = prune(arg_type(args, 0, 0))
+        if types[t].kind != .array: fatal(nodes[n].pos, "`loop item in @items` iterates a growable array live, not {dt(t)}; iterate its value with `loop item in items`")
+        nodes[n].aux = i32(int(IN.len))
+        r = T_INT
     else if id == .len or id == .arrcap:
         nargs_check(n, nargs, 1, 1, "len")
         t = arg_type(args, 0, 0)
@@ -5210,18 +5216,21 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         nargs_check(n, nargs, 2, 2, "push")
         t = arg_type(args, 0, 0)
         if types[t].kind != .array: fatal(nodes[n].pos, "push() needs an array, found {dt(t)}")
+        if value_loops.len() > 0: value_loop_resize(args[0], "push", nodes[n].pos)
         check_place(args[0], false)
         arg_type(args, 1, int(types[t].elem))
     else if id == .pop:
         nargs_check(n, nargs, 1, 1, "pop")
         t = arg_type(args, 0, 0)
         if types[t].kind != .array: fatal(nodes[n].pos, "pop() needs an array")
+        if value_loops.len() > 0: value_loop_resize(args[0], "pop", nodes[n].pos)
         check_place(args[0], false)
         r = int(types[t].elem)
     else if id == .insert:
         nargs_check(n, nargs, 3, 3, "insert")
         t = arg_type(args, 0, 0)
         if types[t].kind != .array: fatal(nodes[n].pos, "insert() needs an array")
+        if value_loops.len() > 0: value_loop_resize(args[0], "insert", nodes[n].pos)
         check_place(args[0], false)
         arg_type(args, 1, T_INT)
         arg_type(args, 2, int(types[t].elem))
@@ -5229,6 +5238,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         nargs_check(n, nargs, 2, 2, "remove")
         t = arg_type(args, 0, 0)
         if types[t].kind != .array: fatal(nodes[n].pos, "remove() needs an array")
+        if value_loops.len() > 0: value_loop_resize(args[0], "remove", nodes[n].pos)
         check_place(args[0], false)
         # (gems.remove(g): by value, as C#'s List.Remove; here by position)
         coerce_hint = if dewy_at(nodes[n].pos): " (remove takes a position. To take out things that are done: mark them in the loop (`a.gone = true`), then after it `xs.retain((a) => not a.gone)`; or `xs.retain((y) => y not=? x)` for what is equal to x)" else: " (remove takes a position. To take out things that are done, as Scratch's \"delete this clone\": mark them in the loop (`a.gone = true`), then after it `xs.retain((a): not a.gone)`; or `xs.retain((y): y != x)` for what is equal to x)"
@@ -5241,11 +5251,13 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if types[t].kind != .array:
             if types[t].kind == .str_ or is_int(t): fatal(nodes[n].pos, "clear() of the screen takes a color: `clear(rgb(1, 0, 0))`, or from hex digits `clear(hex(\"#ff0000\"))`")
             fatal(nodes[n].pos, "clear() needs an array")
+        if value_loops.len() > 0: value_loop_resize(args[0], "clear", nodes[n].pos)
         check_place(args[0], false)
     else if id == .extend:
         nargs_check(n, nargs, 2, 2, "extend")
         t = arg_type(args, 0, 0)
         if types[t].kind != .array: fatal(nodes[n].pos, "extend() needs an array")
+        if value_loops.len() > 0: value_loop_resize(args[0], "extend", nodes[n].pos)
         check_place(args[0], false)
         source = args[1]
         if dewy_set_literal(source) and nodes[kid(source, 0)].kind == .array and nkids(kid(source, 0)) == 0:
@@ -5270,6 +5282,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         nargs_check(n, nargs, 2, 2, "reserve/resize/truncate")
         t = arg_type(args, 0, 0)
         if types[t].kind != .array: fatal(nodes[n].pos, "this operation needs an array")
+        if value_loops.len() > 0 and id != .reserve: value_loop_resize(args[0], (if id == .resize: "resize" else if id == .truncate: "truncate" else: "set_length"), nodes[n].pos)
         check_place(args[0], false)
         arg_type(args, 1, T_INT)
         if refine_active and (id == .resize or id == .setlen) and ref_storage_contract(int(types[t].elem)):

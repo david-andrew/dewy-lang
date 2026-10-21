@@ -1,0 +1,39 @@
+# quick
+# `loop x in @xs` iterates the place live: it sees pushes and edits the body
+# makes, the worklist idiom.
+Graph:type = [edges:array<array<int64>>]
+State:type = [pending:array<int64>]
+main = () => {
+    let xs = [1 2 3]
+    loop x in @xs {
+        if x <? 3 { xs.push(x + 10) }
+        if x =? 1 { xs[2] = 30 }
+        printl(x)
+    }
+    printl(xs)
+    let g = Graph[[[1 2] [3] [3] []]]
+    let seen = [true false false false]
+    let order:array<int64> = [0]
+    loop node in @order {
+        loop next in g.edges[node] {
+            if not seen[next] {
+                seen[next] = true
+                order.push(next)
+            }
+        }
+    }
+    printl(order)
+    let state = State[[3]]
+    loop n in @state.pending {
+        if n >? 0 { state.pending.push(n - 1) }
+    }
+    printl(state.pending)
+    printl([loop x in @xs x * 2])
+    $outer
+    loop x in @xs {
+        if x >? 2 { break $outer }
+        printl(x)
+    }
+    let empty:array<int64> = []
+    loop x in @empty { printl(x) } else { printl("empty") }
+}
