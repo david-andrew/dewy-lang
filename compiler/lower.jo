@@ -1146,7 +1146,10 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
                 continue
         value_node = a
         if nodes[a].kind == .conv and nodes[a].aux == i32(int(CV.refinement)): value_node = int(nodes[a].a)
-        val = gen_expr(value_node)
+        parameter = if slots.len() == 0: i else: slots[i]
+        literal = nodes[value_node].kind == .lambda and files[pos_file(nodes[a].pos)].is_dewy and not has_flag(value_node, NF_GENERIC)
+        stack = literal and closure_env_shareable(int(nodes[value_node].sym)) and closure_borrow_param(callee, parameter)
+        val = if stack: gen_lambda(value_node, true) else: gen_expr(value_node)
         # A scalar can live in a local's mutable vreg. Capture its value before
         # a later argument reassigns that local, just as we retain managed data.
         if i + 1 < args.len() and vc(pt) != VC_AGG: val.v = freeze_scalar(val.v, pt)
@@ -1886,8 +1889,9 @@ stack_closure_targets: {int: int} = {}
 stack_closure_passed: {int: bool} = {}
 stack_closure_params: {int: bool} = {}
 
-# Fail closed: the parameter's private binding may only be invoked. In
-# particular, forwarding, aggregates, captures and return values are excluded.
+# Fail closed: a parameter may only be invoked or forwarded to another proven
+# invocation-only parameter. In-progress summaries are false, closing cycles.
+# Aggregates, captures, rebinding and return values remain excluded.
 closure_invoked_only = (n: int, l: int, called: bool = false) -> bool:
     if n == 0: return true
     k = nodes[n].kind
@@ -1901,7 +1905,9 @@ closure_invoked_only = (n: int, l: int, called: bool = false) -> bool:
         if not closure_invoked_only(int(nodes[n].c), l): return false
         if k != .partial and not closure_invoked_only(int(nodes[n].d), l): return false
     loop i in [0..nkids(n)):
-        if not closure_invoked_only(kid(n, i), l): return false
+        arg = kid(n, i)
+        forwarded = k == .call and nodes[n].aux == 0 and nodes[arg].kind == .ident and nodes[arg].aux == i32(int(SK.local)) and nodes[arg].sym == i32(l) and closure_borrow_param(int(nodes[n].sym), i)
+        if not closure_invoked_only(arg, l, forwarded): return false
     loop i in [0..nkids2(n)):
         if not closure_invoked_only(kid2(n, i), l): return false
     true
@@ -1909,12 +1915,16 @@ closure_invoked_only = (n: int, l: int, called: bool = false) -> bool:
 closure_borrow_param = (f: int, i: int) -> bool:
     if f <= 0 or i >= fns[f].params.len() or fns[f].cabi: return false
     d = int(fns[f].decl)
-    if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy or copy_consumes(f, i): return false
+    if d == 0 or copy_consumes(f, i): return false
     p = fns[f].params[i]
     if stack_closure_params.has(p): return stack_closure_params[p]
     stack_closure_params[p] = false
-    if int(locals[p].flags) & (LF_MUTPARAM | LF_CAPTURED | LF_ADDR | LF_EXPOSED) != 0: return false
+    if int(locals[p].flags) & (LF_MUTPARAM | LF_ASSIGNED | LF_CAPTURED | LF_ADDR | LF_EXPOSED) != 0: return false
     body = int(fns[f].body)
+    if not files[pos_file(nodes[d].pos)].is_dewy:
+        ok = closure_invoked_only(body, p)
+        stack_closure_params[p] = ok
+        return ok
     loop j in [0..nkids(body)):
         s = kid(body, j)
         if nodes[s].kind != .vardecl or nodes[s].aux2 != 1: break
@@ -6520,6 +6530,7 @@ gen_block_stmts = (b: int):
 begin_fn = (name: str, idx: int):
     ir_begin(name, idx)
     stack_closure_fn = -1
+    stack_closure_params.clear()
     math_word_regs.clear()
     math_word_limits.clear()
     math_word_updates.clear()
