@@ -26,7 +26,6 @@ GPT quota is limited: at most one Astra stream, at medium effort; Sol for review
 only.
 
 - **Refinement slice 4** (Astra, medium): joins, loops, consolidation of the bounds/numeric walkers onto facts.jo.
-- **Construction safety** (Opus): missing fields become errors, not zero-fill.
 
 ## Next
 
@@ -63,6 +62,8 @@ only.
   10-20); the frontend work recovered the synthetic panel's share.
 - Small items:
   - the remaining Jo-shaped hints in diagnostics;
+  - remaining zero-fill paths: `from_json` and `m[k].x += 1` on a missing key
+    still create values for fields without defaults;
   - methods follow-ups: members inherited across modules; static calls
     through a type value; `type of any` parents;
   - delete `restart/sloppy-frontend` and its publish-policy entry once the
@@ -103,6 +104,8 @@ only.
 14. Errors that reach `main`.
 17. Can a function nested inside a method change the object's members?
     Today it can't, and that's a clear error.
+19. Should `T?` fields default to `none` implicitly? Today they need an
+    explicit `= none`, which the design implies.
 18. Printing details decided provisionally: minted values print with their
     type name (`Fault[code=7]`); ranges print as `[0..2]`/`[1,3..9]`; methods
     get unused warnings only on private types. OK?
