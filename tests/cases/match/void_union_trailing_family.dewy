@@ -1,0 +1,11 @@
+# The same, when `is? error` tests a library result such as a file error.
+# modes: native native-release
+Oops:type=type of error & [message:string]
+discard=(name:string):>void|Oops=>{
+    let removed=p(name).unlink
+    if removed is? error return Oops["cannot remove {name}"]
+}
+main=()=>{
+    let failed=discard("no-such-file-for-this-case")
+    if failed is? Oops printl(failed.message)
+}
