@@ -938,6 +938,11 @@ dn_stmt = () -> int:
             dn_expect(.kw_import)
             parts.push(dn_node(.keyword, "import", keyword.start))
             parts.push(dn_expr(0))
+        else if symbol == .kw_import and dn_tokens[dn_at].symbol == .kw_from and not dn_tokens[dn_at].newline:
+            # (`import (a b) from p"x"`, the other order)
+            keyword = dn_take()
+            parts.push(dn_node(.keyword, "from", keyword.start))
+            parts.push(dn_expr(0))
         result = dn_node(.keyword_expr, "", token.start, parts)
     else: result = dn_expr(0)
     if dn_accept(.semi): result = dn_operator(.binary, .statement_end, result, 0)

@@ -2511,6 +2511,11 @@ import p"model.dewy" as model
 from p"helpers.dewy" import advance, fresh
 ```
 
+A selection lists names with commas or in parentheses, each optionally renamed
+(`import (advance fresh as new)`, `import advance as step, fresh` after `from
+p"helpers.dewy"`). The other order works too: `import (advance fresh) from
+p"helpers.dewy"`.
+
 Bare names search beside the importing file, then the bundled library folders;
 a path literal `p"..."` names a file explicitly. Within each folder, a Dewy importer prefers
 `.dewy` and falls back to `.jo`; a Jo importer prefers `.jo`. The importing file

@@ -2075,6 +2075,9 @@ dw_import = (id: int) -> int:
     pos = dewy_syntax[id].pos
     n = mk(.import_, pos)
     spec = dw_unwrap(dw_child(id, 1))
+    # (`import (a b) from p"x"` is `from p"x" import (a b)`)
+    reversed = dewy_syntax[dw_child(id, 0)].text == "import" and dw_nchildren(id) == 4 and dewy_syntax[dw_child(id, 2)].text == "from"
+    if reversed: spec = dw_unwrap(dw_child(id, 3))
     alias = ""
     if dw_op(spec) == .kw_as:
         alias = dw_name(dw_child(spec, 2))
@@ -2090,19 +2093,49 @@ dw_import = (id: int) -> int:
     nodes[n].sval = i32(intern(value))
     nodes[n].name = i32(intern(strip_ext(file_name(value))))
     if alias != "": nodes[n].name = i32(intern(alias))
-    if dewy_syntax[dw_child(id, 0)].text == "from":
+    if dewy_syntax[dw_child(id, 0)].text == "from" or reversed:
         if dw_nchildren(id) != 4: return dw_fail(id, "this import")
         nodes[n].aux = 2
-        selected = dw_unwrap(dw_child(id, 3))
+        selected = dw_unwrap(dw_child(id, if reversed: 1 else: 3))
         imported: int[]
-        if dw_op(selected) == .comma:
-            loop i in [1..dw_nchildren(selected)): imported.push(dw_import_name(dw_child(selected, i)))
-        else: imported.push(dw_import_name(selected))
+        # `a, b as c` and `(a b as c)`: names in order, each with an optional alias
+        words: int[]
+        dw_import_words(selected, words)
+        i = 0
+        loop i < words.len():
+            if words[i] < 0 or dw_name(words[i]) == "": return dw_fail(selected, "this imported name")
+            item = dw_expr(words[i])
+            if i + 1 < words.len() and words[i + 1] == -1:
+                if i + 2 >= words.len() or words[i + 2] < 0 or dw_name(words[i + 2]) == "": return dw_fail(selected, "this imported alias")
+                nodes[item].aux = i32(intern(dw_name(words[i + 2])))
+                i += 2
+            imported.push(item)
+            i += 1
+            if i < words.len():
+                if words[i] != -2: return dw_fail(selected, "this imported name")
+                i += 1
         loop item in imported:
             if nodes[item].kind != .ident: return dw_fail(selected, "this imported name")
         set_list(n, imported)
     else if dw_nchildren(id) != 2: return dw_fail(id, "this import alias")
     return n
+
+# The imported names of a selection in written order: names, -1 for `as`,
+# -2 between names (a comma, or the next element of a parenthesized list).
+dw_import_words = (id0: int, out: mut int[]):
+    id = dw_unwrap(id0)
+    if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "():":
+        loop i in 0.. and child in dw_children(id):
+            if i > 0: out.push(-2)
+            dw_import_words(child, out)
+        return
+    op = dw_op(id)
+    if op == .kw_as or op == .comma:
+        loop i in [1..dw_nchildren(id)):
+            if i > 1: out.push(if op == .kw_as: -1 else: -2)
+            dw_import_words(dw_child(id, i), out)
+        return
+    out.push(id)
 
 dw_import_name = (id: int) -> int:
     let id = dw_unwrap(id)
