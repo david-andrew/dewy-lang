@@ -853,7 +853,10 @@ loc_data = (pos: int) -> int:
     loc_last_off = str_data(loc_str(pos))
     loc_last_off
 
+# A library position names no line of the program: the backtrace shows the
+# program's call instead (`a // 0` fails in the caller, not in the library).
 loc_str = (pos: int) -> str:
+    if pos_in_lib(pos): return ""
     f = pos_file(pos)
     path = files[f].path
     s = rfind(path, "/")

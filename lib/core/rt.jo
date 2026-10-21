@@ -603,7 +603,9 @@ __exit_raw = (code: int):
 __panic = (msg: str):
     __owner_unwind()
     __write_err("panic: ")
-    __write_err(msg)
+    # (a check inside the library has no location of its own: "{loc}: ..." with loc "")
+    if len(msg) >= 2 and msg[0] == ':' and msg[1] == ' ': __write_err(msg[2..])
+    else: __write_err(msg)
     __write_err("\n")
     when not BOOTSTRAP:
         # (Windows: a debugger attached stops here: gdb and lldb have `break __panic`)
