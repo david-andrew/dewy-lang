@@ -379,7 +379,7 @@ fact_probe_function = (f: int) -> {int: bool}:
     fact_owner = f
     fact_terms = [FactTerm()]
     state = FactState()
-    if refine_active: refine_fact_entry(f, state)
+    if refine_active or refine_requests.len() > 0: refine_fact_entry(f, state)
     fact_capture(int(fns[f].body), state)
     fact_owner = 0
     fact_terms = []
@@ -1729,7 +1729,7 @@ facts_finalize = ():
         state = FactState()
         previous_policy = fact_policy
         if proof_active and proof_decls.has(int(fns[f].decl)): fact_policy = .RequireStatic
-        if refine_active: refine_fact_entry(f, state)
+        if refine_active or refine_requests.len() > 0: refine_fact_entry(f, state)
         result = fact_capture(int(fns[f].body), state)
         if result_active: result_exit(f, result, int(fns[f].body), state)
         if proof_active and proof_decls.has(int(fns[f].decl)): proof_exit(f, int(fns[f].body), state)

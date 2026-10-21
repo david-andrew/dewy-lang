@@ -2,6 +2,7 @@
 # frames and places belong to the evaluator, never to the checker or backend.
 # No fuel counter: general compile-time execution is trusted.
 use 'check.jo'
+use 'refine.jo'
 use 'ast.jo'
 use 'lex.jo'
 use 'types.jo'
@@ -300,6 +301,14 @@ ct_convert = (e: int, v: int) -> int:
             hi = if types[t].sign: (1 << (bits - 1)) - 1 else: (1 << bits) - 1
             r = min(hi, max(lo, r))
         return ct_int(t, r)
+    if cv == .refinement and ref_narrowing.has(e):
+        # (a proven integer conversion, uint8(n): the value must fit)
+        to = ref_narrowing[e]
+        fits = int_fits(x.i, to)
+        if not types[x.type].sign and x.i < 0: fits = false
+        if not fits: ct_fail(e, "integer overflow: value does not fit {dt(to)}")
+        x.type = t
+        return ct_add(x)
     if cv == .opt:
         if tkind(x.type) == .opt: x.type = t
         else: x = CTValue(type = t, i = 1, items = [v])

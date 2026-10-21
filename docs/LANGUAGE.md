@@ -596,12 +596,15 @@ Implicit conversions involving `int` preserve the value, checking narrowing at
 runtime (or diagnosing known constant failures). `as` and type calls use those
 same checks. Float-to-`int` truncates toward zero and rejects NaN and infinity;
 exact decimal and fraction conversions to integers also truncate toward zero,
-without rounding through a float. `int`-to-float retains the usual rounding. Explicit conversions
-between fixed widths (`uint64(x)`, `x as uint8`) keep their bits. An implicit narrowing between
-fixed widths (`let n:uint64 = xs.length`, `let b:int8 = w` after `if -128 <=? w <=? 127`, a
-`uint64` index or slice bound, an argument or result) is a proven conversion: the facts that
+without rounding through a float. `int`-to-float retains the usual rounding. Conversions keep the value:
+a narrowing between fixed widths, explicit (`uint64(x)`, `x as uint8`) or implicit
+(`let n:uint64 = xs.length`, `let b:int8 = w` after `if -128 <=? w <=? 127`, a
+`uint64` index or slice bound, an argument or result), is a proven conversion: the facts that
 prove a refinement prove it, an unproven one is checked when it runs (`value does not fit int8`),
-and a refuted one is a compile error (`w does not fit uint64`). Among overloads, a narrowing is
+and a refuted one is a compile error (`w does not fit uint64`). Keeping the bits has its own
+spelling: `x.wrap(uint8)` is the integer modulo 2^8 (two's complement for a signed target, and
+the low bits of an `int`), so `int64(-1).wrap(uint64)` is `18446744073709551615`;
+`x.bitcast(float64)` reads the bits of an integer or float as another type of the same width. Among overloads, a narrowing is
 the last resort. A comparison between two widths (`i:uint64 <? s.length`) compares in the left
 operand's width, the right operand taking the same proven conversion. Mutable arguments and
 containers require matching element types: an `int` local is not an `@int64` place. Two mutable arguments in one call
@@ -742,8 +745,8 @@ retains only common evidence. `$prototype` remains unsupported.
 Fixed-width integer types expose typed `.min` and `.max` constants, including
 the full `uint64` range; these also work through type aliases and generic type
 parameters. For example, `uint8.max` is 255 and `int64.min` is −9223372036854775808.
-`value transmute Type` reinterprets bits between equal-width machine integers
-and floats; for example, `float64(1.0) transmute uint64` is `4607182418800017408`.
+`value.bitcast(Type)` (also `value transmute Type`) reinterprets bits between equal-width
+machine integers and floats; for example, `float64(1.0).bitcast(uint64)` is `4607182418800017408`.
 It evaluates the source once, preserving signed zero and NaN payloads. The
 source has its own type: to reinterpret 32 bits, write a `uint32` or `float32`
 source explicitly. The destination does not change the width of a literal.

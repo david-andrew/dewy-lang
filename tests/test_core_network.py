@@ -16,7 +16,7 @@ TEXT = 'Dewy café🙂\0' + 'x' * 200
 ECHO = '''import net
 payload=():>array<uint8>=>{
     let data:array<uint8>=[]
-    loop i in [0..512) {data.push(int64(i) as uint8)}
+    loop i in [0..512) {data.push(int64(i).wrap(uint8))}
     return data
 }
 main=(args:array<string>):>int64=>{

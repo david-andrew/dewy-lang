@@ -115,8 +115,8 @@ pack=(n:Field):>Bytes32 & no_effects=>{
     }
     let o:Bytes32=[]
     loop i in [0..16) {
-        o[2*i]=(t[i] and 0xff) as uint8
-        o[2*i+1]=(t[i] >> 8) as uint8
+        o[2*i]=t[i].wrap(uint8)
+        o[2*i+1]=(t[i] >> 8).wrap(uint8)
     }
     return o
 }
