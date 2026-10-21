@@ -290,6 +290,11 @@ effect_overlap = (a: EffectAtom, b: EffectAtom) -> bool:
     if a.kind != b.kind: return false
     a.place.declaration == 0 or b.place.declaration == 0 or place_covers(a.place, b.place) or place_covers(b.place, a.place)
 
+effect_excluded = (row: EffectContract, atom: EffectAtom) -> bool:
+    loop exclusion in row.exclusions:
+        if effect_overlap(exclusion, atom): return true
+    false
+
 effect_allows = (contract: int, atom: EffectAtom) -> bool:
     if atom.kind == .remainder: return effect_rows_fit(atom.row, contract)
     row = effect_contracts[contract]
@@ -1027,6 +1032,12 @@ effect_witness = (f: int, event0: EffectEvent) -> str:
         if event.via == 0: break
         g = event.via_fn
         if g <= 0 or g >= effect_limit: break
+        # (the chain stops where it enters the library, whose helpers are its own)
+        gd = int(fns[g].decl)
+        if gd != 0 and pos_in_lib(nodes[gd].pos):
+            name = effect_name(g)
+            chain += if starts_with(name, "__"): " -> the library" else: " -> {name} (the library)"
+            break
         chain += " -> {effect_name(g)}"
         if seen.contains(g):
             chain += " (recursive component)"
@@ -1075,10 +1086,12 @@ effects_finalize = ():
             at = if event.via != 0: event.via else: event.witness
             if at == 0: at = d
             what = if atom.kind == .write: "mutation" else if atom.kind == .read: "read" else if atom.kind == .alloc: "allocation" else if atom.kind == .panic: "possible failure" else if atom.kind == .detach: "storage detach" else if atom.kind == .io: "I/O" else: "opaque operation or unproved implementation cost"
-            if event.atom.place.declaration != 0: what += " of '{effect_place_name(event.atom.place)}'"
+            if event.atom.place.declaration != 0 and not starts_with(effect_place_name(event.atom.place), "__"): what += " of '{effect_place_name(event.atom.place)}'"
             chain = effect_witness(f, event)
-            origin = if event.witness != 0: pos_str(nodes[event.witness].pos) else: pos_str(nodes[d].pos)
-            fatal(nodes[at].pos, "effect contract violation in '{effect_name(f)}': {what} exceeds the closed row (no_effects permits none); {chain}; witness at {origin}")
+            origin = if event.witness != 0 and not pos_in_lib(nodes[event.witness].pos): "; witness at {pos_str(nodes[event.witness].pos)}" else if event.witness != 0: "" else: "; witness at {pos_str(nodes[d].pos)}"
+            row = if contract != 0: effect_contracts[contract] else: EffectContract()
+            why = if contract == 0: "is forbidden by the effect policy" else if row.exclusions.len() > 0 and effect_excluded(row, atom): "exceeds the contract (its row excludes it)" else if row.atoms.len() == 0 and row.variables.len() == 0 and not row.open: "exceeds the closed row (no_effects permits none)" else: "exceeds the closed row (the contract does not permit it)"
+            fatal(nodes[at].pos, "effect contract violation in '{effect_name(f)}': {what} {why}; {chain}{origin}")
 
 # Facts request only summaries of calls they actually analyze. Ordinary code
 # with no refinement consumers pays neither an arena allocation nor a walk.
