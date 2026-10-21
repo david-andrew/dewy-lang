@@ -651,7 +651,12 @@ fixed-width integer by at least its width gives `0` for `<<` and unsigned `>>`,
 and the sign (`0` or `-1`) for signed `>>`: `uint64(1) << 64` is `0` and
 `int64(-2) >> 64` is `-1`.
 
-Comparisons use `=?`, `<?`, `>?`, `<=?` and `>=?`. Boolean expressions use `and`,
+Comparisons use `=?`, `<?`, `>?`, `<=?` and `>=?`. Comparisons chain in one
+direction: `0 <? x <? 10` is `0 <? x and x <? 10`, each operand evaluated once
+and later ones only while the chain holds. A chain rises (`<?`, `<=?`) or falls
+(`>?`, `>=?`), and `=?` fits either; mixing directions, or chaining `not =?`,
+`is?` or `in?`, is an error. A parenthesized comparison is a bool:
+`(a =? b) =? c` compares it with `c`. Boolean expressions use `and`,
 `or` and `not`. Literal coefficients such as `2x` and `2(x+1)` multiply; use `*`
 for general multiplication. A semicolon discards an expression's result.
 

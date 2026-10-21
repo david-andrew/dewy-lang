@@ -277,6 +277,7 @@ dc_expr = (minimum: int) -> int:
     coefficient = dw_integer_kind(dn_tokens[dn_at].kind) or dn_tokens[dn_at].kind == .source_real
     left = dc_atom()
     if left == 0: return 0
+    compared = false    # (left is a comparison this loop made)
     loop true:
         token = dn_tokens[dn_at]
         op = token.symbol
@@ -335,11 +336,15 @@ dc_expr = (minimum: int) -> int:
         if power == 0 or power < minimum: break
         if (op == .plus or op == .minus) and token.space and not dn_tokens[dn_at + 1].space: break
         if dc_binary_token(dn_token_uninvert(op)) == .eof and op != .slash and op != .floor and op != .percent and op != .caret: return 0
+        # (comparison chains take the reference grammar)
+        chained = dw_chain_way(dn_token_uninvert(op)) != 2 or dn_token_uninvert(op) == .not_eq
+        if chained and compared: return 0
         dn_at += 1
         if token.symbol == .kw_not: dn_at += 1
         right = dc_expr(if op == .caret: power else: power + 1)
         if right == 0: return 0
         left = dc_binary(op, left, right, pos)
+        compared = chained
         coefficient = false
     # These suffixes belong to this expression, but have not migrated yet.
     token = dn_tokens[dn_at]

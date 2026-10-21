@@ -4227,7 +4227,7 @@ cmp_error = (n: int, ta: int, tb: int):
     a = int(nodes[n].a)
     if tkind(ta) == .bool_ and is_numeric(tb) and nodes[a].kind == .binary:
         aop = nodes[a].op as Tok
-        if aop == .lt or aop == .le or aop == .gt or aop == .ge: why = if dewy_at(nodes[n].pos): " (`a <? x <? b` is written `a <? x and x <? b`, or `x in? [a..b]`)" else: " (`a < x < b` is written `a < x and x < b`, or `x in a..b`)"
+        if aop == .lt or aop == .le or aop == .gt or aop == .ge: why = if dewy_at(nodes[n].pos): " (a parenthesized comparison is a bool; the chain `a <? x <? b` goes without parentheses)" else: " (`a < x < b` is written `a < x and x < b`, or `x in a..b`)"
     # (the member compared with: the same type, or a number for a number)
     member = 0
     if is_union(prune(ta)):

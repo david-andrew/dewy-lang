@@ -1,0 +1,23 @@
+let calls:int64 = 0
+f = (v:int64):>int64 => { calls = calls + 1; return v }
+main = () => {
+    let x = 5
+    printl(0 <? x <? 10)
+    printl(0 <? x <? 5)
+    printl(10 >? x >=? 5)
+    printl(1 <=? x =? 5 <? 6)
+    printl(0 <? f(x) <? 10)
+    printl(calls)
+    printl(6 <? f(x) <? 10)
+    printl(calls)
+    printl(0 <? x <? f(3))
+    printl(calls)
+    let a = true
+    printl((a =? true) =? false)
+    printl(a =? true =? true)
+    let small:int64<i => 0 <? i <? 10> = 3
+    printl(small)
+    $assert 0 <? x <? 10
+    let p = [y=2]
+    printl(1 <? p.y <? 3)
+}

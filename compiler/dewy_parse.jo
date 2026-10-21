@@ -1544,6 +1544,8 @@ dw_expr = (id: int) -> int:
                 nodes[inverted].a = i32(n)
                 return inverted
             return n
+        if (op == .not_eq or dewy_syntax[dw_child(id, 0)].kind == .inverted_comparison) and dw_chain_link(dw_unwrap(left)):
+            fatal(pos, "`not` comparisons do not chain; join the comparisons with `and`")
         if dewy_syntax[dw_child(id, 0)].kind == .inverted_comparison:
             comparison = mk(.binary, pos)
             nodes[comparison].op = i32(int(dw_binary_token(op, id)))
@@ -1631,6 +1633,7 @@ dw_expr = (id: int) -> int:
             nodes[n].a = i32(dw_expr(left))
             nodes[n].b = i32(dw_expr(right))
             return n
+        if dw_chain_way(op) != 2 and dw_chain_link(dw_unwrap(left)): return dw_chain(id)
         n = mk(if op == .kw_and: NK.and_ else if op == .kw_or: NK.or_ else: NK.binary, pos)
         nodes[n].op = i32(int(dw_binary_token(op, id)))
         nodes[n].a = i32(dw_expr(left))
@@ -1638,6 +1641,91 @@ dw_expr = (id: int) -> int:
         return n
     if k == .flat and dw_op(id) == .comma: return dw_comma_fail(id)
     return dw_fail(id, "syntax '{dw_kind_name(k)}'")
+
+# Comparison chains (`0 <? x <? 10`): consecutive comparisons joined by `and`,
+# each operand evaluated once and in order, later ones only while the chain
+# holds. A chain rises (`<?` `<=?`) or falls (`>?` `>=?`); `=?` fits either.
+# 1 rising, -1 falling, 0 either, 2 not a chain link.
+dw_chain_way = (op: DewyToken) -> int:
+    if op == .lt or op == .le: return 1
+    if op == .gt or op == .ge: return -1
+    if op == .eq: return 0
+    2
+
+# An unparenthesized comparison: the left side of a longer chain.
+dw_chain_link = (id: int) -> bool:
+    dewy_syntax[id].kind == .binary and dw_chain_way(dw_op(id)) != 2
+
+# Read twice without changing anything: a name, a literal or a member of one.
+dw_chain_plain = (id0: int) -> bool:
+    id = dw_unwrap(id0)
+    k = dewy_syntax[id].kind
+    if k == .identifier or k == .integer or k == .source_integer or k == .real or k == .source_real or k == .boolean: return true
+    k == .binary and dw_op(id) == .dot and dw_chain_plain(dw_child(id, 1))
+
+dw_chain_count = 0
+
+dw_chain = (id: int) -> int:
+    pos = dewy_syntax[id].pos
+    operands: int[]
+    links: int[]
+    at = id
+    loop true:
+        if dewy_syntax[dw_child(at, 0)].kind == .inverted_comparison: fatal(dewy_syntax[at].pos, "`not` comparisons do not chain; join the comparisons with `and`")
+        links.insert(0, at)
+        operands.insert(0, dw_child(at, 2))
+        left = dw_unwrap(dw_child(at, 1))
+        if not dw_chain_link(left):
+            operands.insert(0, dw_child(at, 1))
+            break
+        at = left
+    way = 0
+    loop link in links:
+        w = dw_chain_way(dw_op(link))
+        if w == 0: continue
+        if way != 0 and w != way: fatal(dewy_syntax[link].pos, "a comparison chain goes one way: rising (`a <? b <=? c`) or falling (`a >? b >=? c`), with `=?` in either; join other comparisons with `and`")
+        way = w
+    statements: int[]
+    first = 0
+    if dw_chain_plain(operands[0]): first = dw_expr(operands[0])
+    else: first = dw_chain_temp(dw_expr(operands[0]), statements, pos)
+    chain = dw_chain_from(links, operands, 0, first)
+    if statements.len() == 0: return chain
+    statements.push(bc_stmt(chain, pos))
+    bc_block(statements, pos)
+
+# A temporary holding value, declared in statements; its name as a value.
+dw_chain_temp = (value: int, statements: mut int[], pos: int) -> int:
+    dw_chain_count += 1
+    name = "$chain{dw_chain_count}"
+    statements.push(bc_let(name, value, pos))
+    bc_ident(name, pos)
+
+dw_chain_from = (links: int[], operands: int[], i: int, left: int) -> int:
+    link = links[i]
+    pos = dewy_syntax[link].pos
+    comparison = mk(.binary, pos)
+    nodes[comparison].op = i32(int(dw_binary_token(dw_op(link), link)))
+    nodes[comparison].a = i32(left)
+    right = operands[i + 1]
+    if i + 1 == links.len():
+        nodes[comparison].b = i32(dw_expr(right))
+        return comparison
+    statements: int[]
+    next = 0
+    if dw_chain_plain(right):
+        nodes[comparison].b = i32(dw_expr(right))
+        next = dw_expr(right)
+    else:
+        value = dw_chain_temp(dw_expr(right), statements, pos)
+        nodes[comparison].b = i32(value)
+        next = bc_ident(name_of(int(nodes[value].name)), pos)
+    both = mk(.and_, pos)
+    nodes[both].a = i32(comparison)
+    nodes[both].b = i32(dw_chain_from(links, operands, i + 1, next))
+    if statements.len() == 0: return both
+    statements.push(bc_stmt(both, pos))
+    bc_block(statements, pos)
 
 dw_stmt = (id: int, top: bool = false) -> int:
     let id = dw_unwrap(id)
