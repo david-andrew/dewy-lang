@@ -1,0 +1,18 @@
+# quick
+# `is? error` (and an explicit `is? A or is? B` chain) narrows a local to those members.
+Oops:type = type of error & [m:string]
+Bad:type = type of error
+describe = (e:error):>string => match e {
+    x:Oops => "oops {x.m}"
+    _ => "other error"
+}
+pair = (e:Oops|Bad):>string => if e is? Oops "Oops" else "Bad"
+f = (r:int64|Oops|Bad):>void => {
+    if r is? error { printl(describe(r)) } else { printl(r+1) }
+    if r is? Oops or r is? Bad { printl(pair(r)) }
+}
+main = () => {
+    f(Oops["a"])
+    f(Bad)
+    f(41)
+}

@@ -9218,19 +9218,33 @@ narrow_some = (tests: int[]):
     if not local:
         key = path_key(a0)
         if len(key) == 0: return
-    ms = union_members(ut)
     sel: int[]
     loop t in tests:
         a = int(nodes[t].a)
         if local:
-            if nodes[a].kind != .ident or nodes[a].sym != nodes[a0].sym: return
+            # (a later test sees the variable narrowed by the earlier ones failing)
+            if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return
+            if narrow_root_local(int(nodes[a].sym)) != narrow_root_local(int(nodes[a0].sym)): return
         else if path_key(a) != key: return
-        m = ms[int(nodes[t].aux)]
+        at = prune(ntype(a))
+        if not is_union(at): return
+        m = union_members(at)[int(nodes[t].aux)]
         if not sel.contains(m): sel.push(m)
     if local: narrow_local(int(nodes[a0].sym), sel, nodes[a0].pos)
     else:
         path_narrows += 1
         narrow_expr(copy_path(a0), sel, nodes[a0].pos, intern(key))
+
+# the variable a narrowed alias local stands for (l itself when it is not one)
+narrow_root_local = (l0: int) -> int:
+    l = l0
+    loop int(locals[l].flags) & LF_ALIAS != 0:
+        al = int(locals[l].alias)
+        if nodes[al].kind != .conv and nodes[al].kind != .narrow: return l
+        inner = int(nodes[al].a)
+        if nodes[inner].kind != .ident or nodes[inner].aux != i32(int(SK.local)): return l
+        l = int(nodes[inner].sym)
+    l
 
 # the path (and paths inside it) may hold another value from here on: forget their narrowing
 path_forget = (key: str, same_type: int = 0):
