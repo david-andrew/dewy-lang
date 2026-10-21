@@ -538,6 +538,7 @@ and write `xs[i]`, with `i` evaluated once at the declaration. A local place can
 name an element, a dictionary entry (`@table[k]`) or a field (`@r.a`) of a
 local variable; each access checks the index or key at run time. Deeper routes
 go to an `@` parameter instead. `@` of a function value is still its handle.
+A function gives back a value: `return @a` is an error.
 
 Lengths retain their current `int64` type. An `int` index uses the ordinary bounds
 checks. `to_int(text)` returns `int | none`, parsing integers of arbitrary size.
