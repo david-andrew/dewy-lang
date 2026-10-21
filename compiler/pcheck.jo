@@ -98,6 +98,17 @@ pc_try = (start: int):
         if roots.len() < 128: return
         loop node in nodes:
             if node.kind == .lambda and node.pos > 0 and not pos_in_lib(node.pos): return
+        # Pending library instances have canonical identities already. Check their
+        # closure once so the continuing parent and every worker inherit it.
+        lib_cursor = start
+        lib_checked = 0
+        loop lib_cursor < fns.len():
+            if fns[lib_cursor].state == 0 and fns[lib_cursor].kind == FK_NORMAL and modules[int(fns[lib_cursor].mod)].is_prelude:
+                check_fn_body(lib_cursor)
+                lib_checked += 1
+            lib_cursor += 1
+        if env("SLOPPY_PAR_TIME") != none: eprint("pcheck: checked {lib_checked} pending library instances before fork")
+        if open_globals.len() != 0 or not pc_features(): return
         n = min(4, emit_workers())
         pc_workers = n
         reads: int[]
