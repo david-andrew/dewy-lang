@@ -4,6 +4,7 @@ use 'util.jo'
 use 'lex.jo'
 use 'ast.jo'
 use 'dewy_parse.jo'
+use 'proofs.jo'
 use 'dewy_tokens.jo'
 use 'dewy_direct.jo'
 
@@ -894,6 +895,7 @@ dewy_fast_file = (file: int) -> int[]:
         # declaration's temporary syntax before parsing the next declaration.
         dewy_syntax.truncate(2)
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a declaration")
+    if proof_pending: dn_error(dn_tokens[dn_at].start, "$proof requires a following function declaration")
     if marked != 0: fatal(nodes[marked].pos, "`$test` marks a module-level function: put it on the line just before one")
     dn_tokens = []
     dewy_syntax = []

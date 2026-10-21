@@ -587,6 +587,35 @@ bounded widening and narrowing fall back to unknown when analysis exhausts its
 budget. Assertions never supply assumed loop invariants. Calls preserve facts
 only when a settled effect summary rules out interference.
 
+`$proof` marks an erased procedure. Its fact-only result is checked at every
+normal exit, including bare returns:
+
+```dewy
+$proof
+ordered=(a:int64 b:int64<v => a <=? v> c:int64<v => b <=? v>):><a <=? c>=>{
+    $assert a <=? b
+    $assert b <=? c
+}
+```
+
+Proofs may contain static assertions, branches, bare returns and direct calls
+to other proofs; dependencies must be acyclic. Only direct statement calls are
+allowed, including imported and generic proofs. Arguments and conditions must
+be pure fact terms. Runtime calls, globals, loops, defaults, place parameters
+and unsafe assumptions are rejected. Preconditions and exit propositions must
+be statically proven; there is no runtime fallback. Definitions and calls erase
+after checking, while callers retain facts about the evaluated arguments.
+
+Result arms can attach facts to value parameters, for example
+`positive=(a:int64):>true & <a >? 0> | false & <a <=? 0>=>a >? 0`.
+Nominal union arms and optional arms support the same `T & <facts>` spelling;
+`void & <facts>` publishes an unconditional postcondition. Each normal exit
+must establish its arm's propositions. This initial subset requires static
+exit evidence and rejects place parameters and deferred cleanup. Facts become
+available when the caller tests the result's arm. Reassigning the result or a
+dependent argument cannot transfer old facts to the replacement. Joining paths
+retains only common evidence. `$prototype` remains unsupported.
+
 Fixed-width integer types expose typed `.min` and `.max` constants, including
 the full `uint64` range; these also work through type aliases and generic type
 parameters. For example, `uint8.max` is 255 and `int64.min` is −9223372036854775808.

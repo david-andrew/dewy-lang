@@ -183,7 +183,7 @@ DIRECTIVE_ERRORS = {
     'target': ('main = () => { printl"{$target}" }', '`$target` is part of the design'),
     'abstract': ('Tok:type = $abstract type of any & [x:int64]', '`$abstract` is part of the design'),
     'test': ('$test\nlet x = 1', '`$test` marks a module-level function'),
-    'proof': ('$proof\nf = () => 1', '`$proof` is part of the design'),
+    'proof': ('$proof\nf = () => 1', '$proof bodies allow only'),
     'prototype-in-block': ('main = () => { $prototype\nreturn 0 }', '`$prototype` is part of the design'),
     'unknown-label': ('main = () => { $foo\nreturn 0 }',
                       'a loop label must be followed by a loop (`$foo` is not a directive)'),

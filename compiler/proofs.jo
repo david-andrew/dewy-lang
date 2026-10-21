@@ -1,0 +1,309 @@
+# Erased procedures are checked in the finite fact domain, never executed.
+use 'ast.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'facts.jo'
+use 'refine.jo'
+use 'isolation.jo'
+use 'types.jo'
+use 'lex.jo'
+use 'util.jo'
+
+proof_active = false
+proof_pending = false
+proof_decls: {int: int} = {}
+proof_predicates: {int: int} = {}
+proof_calls: FactRequest[]
+
+# More restrictive than executable assertions: no globals, indexed access,
+# calls, or overloaded operators may disappear with an erased call/body.
+proof_term = (n: int, depth: int = 0):
+    if n == 0: return
+    if depth > 128: fatal(nodes[n].pos, "proof fact-term budget exhausted")
+    k = nodes[n].kind
+    if k == .int_lit or k == .bool_lit: return
+    if k == .ident and nodes[n].aux == i32(int(SK.local)): return
+    if k == .conv and (nodes[n].aux == i32(int(CV.refinement)) or nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))):
+        proof_term(int(nodes[n].a), depth + 1)
+        return
+    if k == .field and nodes[n].aux >= 0:
+        proof_term(int(nodes[n].a), depth + 1)
+        return
+    if k == .intrinsic and nodes[n].aux == i32(int(IN.len)):
+        proof_term(kid(n, 0), depth + 1)
+        return
+    if k == .not_ or k == .unary and nodes[n].aux == 0:
+        proof_term(int(nodes[n].a), depth + 1)
+        return
+    if k == .and_ or k == .or_ or k == .binary and nodes[n].aux == 0:
+        op = nodes[n].op as Tok
+        if k == .binary and not fact_comparison(op) and op != .plus and op != .minus and op != .star:
+            fatal(nodes[n].pos, "proof arguments and conditions require pure fact terms")
+        proof_term(int(nodes[n].a), depth + 1)
+        proof_term(int(nodes[n].b), depth + 1)
+        return
+    fatal(nodes[n].pos, "proof arguments and conditions require pure fact terms; runtime calls and globals cannot be erased")
+
+proof_walk = (n: int, body: bool, statement: bool = false):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .call and nodes[n].aux == 0 and nodes[n].sym > 0 and proof_decls.has(int(fns[int(nodes[n].sym)].decl)):
+        if not statement: fatal(nodes[n].pos, "a proof cannot be used as a value; use a direct statement call")
+        loop arg in kids(n): proof_term(arg)
+        return
+    if body:
+        if k == .block:
+            loop child in kids(n): proof_walk(child, true)
+            return
+        if k == .exprstmt:
+            proof_walk(int(nodes[n].a), true, true)
+            return
+        if k == .vardecl and nodes[n].aux2 == 1:
+            proof_term(int(nodes[n].b))
+            return
+        if k == .if_:
+            proof_term(int(nodes[n].a))
+            proof_walk(int(nodes[n].b), true)
+            proof_walk(int(nodes[n].c), true)
+            return
+        if k == .return_ and nodes[n].a == 0: return
+        if k == .intrinsic and nodes[n].aux == i32(int(IN.static_assert)):
+            if nkids(n) > 0: proof_term(kid(n, 0))
+            return
+        fatal(nodes[n].pos, "$proof bodies allow only assertions, branches, bare returns and proof calls")
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: proof_walk(int(nodes[n].a), false, k == .exprstmt)
+    if mask & 2 != 0: proof_walk(int(nodes[n].b), false)
+    if mask & 4 != 0: proof_walk(int(nodes[n].c), false)
+    if mask & 16 != 0:
+        loop child in kids(n): proof_walk(child, false)
+
+# Validate dependencies by declaration, including across generic instances.
+proof_visit = (decl: int, visiting: mut int[], done: mut int[]):
+    if contains(done, decl): return
+    if contains(visiting, decl): fatal(nodes[decl].pos, "cyclic proof dependency")
+    visiting.push(decl)
+    loop call in proof_calls:
+        if int(fns[call.owner].decl) != decl: continue
+        proof_visit(int(fns[int(nodes[call.node].sym)].decl), visiting, done)
+    visiting.pop()
+    done.push(decl)
+
+proof_prepare = ():
+    seen: {int: bool} = {}
+    loop call in proof_calls: seen[call.owner] = true
+    loop f in [1..fns.len()):
+        if proof_decls.has(int(fns[f].decl)): seen[f] = true
+    loop f, _ in seen:
+        if proof_decls.has(int(fns[f].decl)) and (f == main_fn or fns[f].export_name != ""):
+            fatal(nodes[int(fns[f].decl)].pos, "a proof cannot be a runtime entry point or export")
+        proof_walk(int(fns[f].body), proof_decls.has(int(fns[f].decl)))
+    visiting: int[]; done: int[]
+    loop f, _ in seen:
+        if proof_decls.has(int(fns[f].decl)): proof_visit(int(fns[f].decl), visiting, done)
+
+proof_predicate = (f: int) -> int:
+    ref_subst(proof_predicates[int(fns[f].decl)], fns[f].targs)
+
+proof_require = (predicate: int, values: int[], params: int[], n: int, s: mut FactState, what: str):
+    if not s.live: return
+    loop atom in ref_predicates[predicate]:
+        base = proof_atom_type(atom, params, nodes[n].pos)
+        a = ref_value(atom.a, 0, values, base, s)
+        b = ref_value(atom.b, 0, values, base, s)
+        truth = fact_compare(s, atom.op, a, b)
+        if truth == 0: fatal(nodes[n].pos, "proof {what} refuted")
+        if truth != 1: fatal(nodes[n].pos, "cannot prove proof {what}")
+
+proof_exit = (f: int, n: int, s: mut FactState):
+    proof_require(proof_predicate(f), refine_entry, fns[f].ptypes, n, s, "exit proposition")
+
+proof_call = (n: int, s: mut FactState):
+    previous_policy = fact_policy
+    fact_policy = .RequireStatic
+    f = int(nodes[n].sym)
+    values: int[]
+    loop i in 0.. and arg in kids(n):
+        value = arg
+        # Only the call boundary's own contract is discharged below. An
+        # explicit refined cast inside the operand still owes a static check.
+        if nodes[value].kind == .conv and nodes[value].aux == i32(int(CV.refinement)) and type_eq(int(nodes[value].aux2), fns[f].ptypes[i]): value = int(nodes[value].a)
+        values.push(fact_capture(value, s))
+    # Even in ordinary code unknown obligations cannot get a runtime fallback.
+    loop i in [0..values.len()):
+        t = prune(fns[f].ptypes[i])
+        if types[t].kind != .refined: continue
+        loop atom in ref_predicates[int(types[t].st)]:
+            a = ref_value(atom.a, values[i], values, int(types[t].elem), s)
+            b = ref_value(atom.b, values[i], values, int(types[t].elem), s)
+            truth = fact_compare(s, atom.op, a, b)
+            if fact_speculating == 0:
+                if truth == 0: fatal(nodes[n].pos, "proof precondition refuted")
+                if truth != 1: fatal(nodes[n].pos, "cannot prove proof precondition")
+        arg = kid(n, i)
+        if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)): fact_validated[arg] = true
+    loop atom in ref_predicates[proof_predicate(f)]:
+        base = proof_atom_type(atom, fns[f].ptypes, nodes[n].pos)
+        a = ref_value(atom.a, 0, values, base, s)
+        b = ref_value(atom.b, 0, values, base, s)
+        v = fact_new(s, fact_domain(T_BOOL), FactTerm(atom.op, a, b))
+        fact_assume(s, v, true)
+    if result_active: result_publish(f, 0, values, s)
+    fact_policy = previous_policy
+    if fact_speculating == 0: fact_validated[n] = true
+
+proof_erase = ():
+    loop call in proof_calls:
+        if not fact_validated.has(call.node):
+            fact_terms = [FactTerm()]
+            state = FactState()
+            proof_call(call.node, state)
+        nodes[call.node] = Node(kind = .block, pos = nodes[call.node].pos, type = i32(T_VOID))
+    # Lowering discovers functions from surviving references. Emptying bodies
+    # also prevents checked, unused proof instances from retaining runtime work.
+    loop f in [1..fns.len()):
+        if proof_decls.has(int(fns[f].decl)):
+            set_list(int(fns[f].body), [])
+
+# Declaration metadata stays sparse; conditional witnesses live only in demanded
+# states and refer to immutable results and evaluated arguments, never spellings.
+struct ResultClause:
+    member: int
+    predicate: int
+    boolean: int = 0 # 0: type arm, 1: false, 2: true
+
+struct ResultEvidence:
+    result: int
+    tag: int
+    predicate: int
+    values: int[]
+    types: int[]
+
+result_active = false
+result_syntax: {int: ResultClause[]} = {}
+result_contracts: {int: ResultClause[]} = {}
+result_boolean_masks: {int: int} = {}
+
+result_signature = (decl: int, params: int[], ret: int):
+    if not result_syntax.has(decl) and not result_boolean_masks.has(decl): return
+    if result_boolean_masks.has(decl) and representation_type(ret) != T_BOOL:
+        fatal(nodes[decl].pos, "boolean result arms currently require a boolean result")
+    clauses: ResultClause[]
+    loop clause in result_syntax.get(decl) ?? []:
+        atoms: RefAtom[]
+        ref_atoms(clause.predicate, 0, atoms)
+        loop atom in atoms: proof_atom_type(atom, params, nodes[decl].pos)
+        clauses.push(ResultClause(resolve_type(clause.member), ref_intern(atoms), clause.boolean))
+    # Until cleanup/place summaries support post-state arguments, reject them.
+    loop p in kids(decl):
+        if has_flag(p, NF_MUT): fatal(nodes[p].pos, "conditional result facts require value parameters")
+    result_contracts[decl] = clauses
+
+result_tag = (f: int, clause: ResultClause) -> int:
+    if clause.boolean != 0: return clause.boolean - 1
+    t = prune(subst(clause.member, fns[f].targs))
+    rt = prune(int(fns[f].ret))
+    if is_union(rt): return union_index(rt, t)
+    if types[rt].kind == .opt: return if types[t].kind == .none_lit: 0 else: 1
+    -1
+
+result_selector = (f: int, result: int, s: mut FactState) -> int:
+    if representation_type(int(fns[f].ret)) == T_BOOL: return result
+    selector = fact_project(s, result, -3, false, T_INT)
+    bound = fact_bound(s, selector)
+    rt = prune(int(fns[f].ret))
+    count = if is_union(rt): union_members(rt).len() else: 2
+    bound.lo = max(0, bound.lo)
+    bound.hi = min(count - 1, bound.hi)
+    fact_set_bound(s, selector, bound)
+    selector
+
+result_exit = (f: int, result: int, n: int, s: mut FactState):
+    if f <= 0 or not s.live or not result_contracts.has(int(fns[f].decl)): return
+    if fact_pending_defers != 0: fatal(nodes[n].pos, "result facts with deferred cleanup are not yet supported")
+    mask = result_boolean_masks.get(int(fns[f].decl)) ?? 3
+    if mask != 3 and fact_truth(s, result) != (if mask == 2: 1 else: 0):
+        fatal(nodes[n].pos, "cannot prove declared boolean result arm")
+    loop clause in result_contracts[int(fns[f].decl)]:
+        path = s
+        tag = result_tag(f, clause)
+        if tag >= 0:
+            selector = result_selector(f, result, path)
+            if representation_type(int(fns[f].ret)) == T_BOOL: fact_assume(path, selector, tag == 1)
+            else:
+                wanted = fact_constant(path, tag)
+                condition = fact_new(path, fact_domain(T_BOOL), FactTerm(.eq, selector, wanted))
+                fact_assume(path, condition, true)
+        predicate = ref_subst(clause.predicate, fns[f].targs)
+        proof_require(predicate, refine_entry, fns[f].ptypes, n, path, "result proposition")
+
+result_publish = (f: int, result: int, values: int[], s: mut FactState):
+    if not result_contracts.has(int(fns[f].decl)): return
+    mask = result_boolean_masks.get(int(fns[f].decl)) ?? 3
+    if mask != 3: fact_assume(s, result, mask == 2)
+    loop clause in result_contracts[int(fns[f].decl)]:
+        if s.conditional.len() >= 32: return
+        tag = result_tag(f, clause)
+        selector = if tag < 0: 0 else: result_selector(f, result, s)
+        s.conditional.push(ResultEvidence(selector, tag, ref_subst(clause.predicate, fns[f].targs), values, fns[f].ptypes))
+    result_activate(s)
+
+result_activate = (s: mut FactState):
+    loop evidence in s.conditional:
+        wanted = fact_constant(s, evidence.tag)
+        if evidence.tag >= 0:
+            bound = fact_bound(s, evidence.result)
+            if bound.nz and bound.lo == 0: bound.lo = 1
+            if fact_compare(s, .eq, evidence.result, wanted) != 1 and not (bound.lo == evidence.tag and bound.hi == evidence.tag): continue
+        loop atom in ref_predicates[evidence.predicate]:
+            base = T_INT
+            loop term in [atom.a, atom.b]:
+                if term.kind == 2: base = ref_projection_type(evidence.types[term.value], term.path, -1)
+            a = ref_value(atom.a, 0, evidence.values, base, s)
+            b = ref_value(atom.b, 0, evidence.values, base, s)
+            v = fact_new(s, fact_domain(T_BOOL), FactTerm(atom.op, a, b))
+            fact_assume(s, v, true)
+
+proof_reset = ():
+    proof_active = false
+    proof_pending = false
+    proof_decls = {}
+    proof_predicates = {}
+    proof_calls = []
+    result_active = false
+    result_syntax = {}
+    result_contracts = {}
+    result_boolean_masks = {}
+
+
+proof_atom_type = (atom: RefAtom, params: int[], pos: int) -> int:
+    base = 0
+    loop term in [atom.a, atom.b]:
+        if term.kind == 1 or term.kind == 4: continue
+        if term.kind != 2 or term.value >= params.len(): fatal(pos, "result propositions must refer to value parameters")
+        t = representation_type(ref_projection_type(params[term.value], term.path, pos))
+        if has_var(t): continue
+        if not is_int(t): fatal(pos, "result propositions require integer or length terms")
+        if base != 0 and not type_eq(base, t): fatal(pos, "result proposition requires matching integer representations")
+        base = t
+    if base == 0: return T_INT
+    loop term in [atom.a, atom.b]:
+        if term.kind != 1: continue
+        if term.unsigned and base != T_U64 or not term.unsigned and not int_fits(term.value, base):
+            fatal(pos, "result proposition bound is outside its integer representation")
+    base
+
+# Retire activated arm evidence as well as the delayed implication when the
+# result storage is replaced. Until facts carry per-clause provenance, dropping
+# the current state is conservative; declared storage contracts are reloaded.
+result_replaced = (value: int, at: int, s: mut FactState):
+    if s.conditional.len() == 0: return
+    replaced = false
+    loop evidence in s.conditional:
+        if evidence.result == value: replaced = true
+        loop projection in s.projections:
+            if projection.base == value and projection.value == evidence.result: replaced = true
+    if not replaced: return
+    s.conditional = []
+    fact_forget(s, at, .write, true)

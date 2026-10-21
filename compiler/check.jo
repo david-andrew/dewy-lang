@@ -17,6 +17,7 @@ use 'prelude.jo'
 use 'comptime.jo'
 use 'facts.jo'
 use 'refine.jo'
+use 'proofs.jo'
 use 'effects.jo'
 use 'ownership.jo'
 use 'reflection.jo'
@@ -1489,6 +1490,17 @@ fn_sig = (decl: int) -> FnSig:
     refine_self = 0
     if nodes[decl].a != 0: sig.ret = i32(resolve_type(int(nodes[decl].a)))
     else if has_flag(decl, NF_VOID): sig.ret = i32(T_VOID)
+    if result_active: result_signature(decl, sig.params, int(sig.ret))
+    if proof_active and proof_decls.has(decl):
+        if sig.ret != 0 and sig.ret != T_VOID: fatal(nodes[decl].pos, "$proof cannot return a value")
+        sig.ret = i32(T_VOID)
+        loop p in kids(decl):
+            if has_flag(p, NF_MUT) or nodes[p].b != 0: fatal(nodes[p].pos, "$proof forbids defaults and place parameters")
+        predicate = proof_decls[decl]
+        atoms: RefAtom[]
+        if predicate != 0: ref_atoms(predicate, 0, atoms)
+        loop atom in atoms: proof_atom_type(atom, sig.params, nodes[decl].pos)
+        proof_predicates[decl] = ref_intern(atoms)
     if refine_active:
         ref_validate_signature(sig.params, int(sig.ret), mm, nodes[decl].pos)
         if has_flag(decl, NF_EXTERN):
@@ -4690,6 +4702,7 @@ check_program = (main_path: str):
     ownership_reset()
     facts_reset()
     refine_reset()
+    proof_reset()
     effects_reset()
     if len(program_name) > 0: program_named = true
     if len(program_name) == 0:

@@ -11,6 +11,7 @@ use 'check.jo'
 use 'comptime.jo'
 use 'isolation.jo'
 use 'refine.jo'
+use 'proofs.jo'
 use 'places.jo'
 use 'effects.jo'
 use 'ownership.jo'
@@ -50,6 +51,7 @@ struct FactDifference:
     limit: int
 
 struct FactState:
+    conditional: ResultEvidence[]
     differences: FactDifference[]
     projections: FactProjection[]
     bindings: FactBinding[]
@@ -154,6 +156,10 @@ fact_queue = (n: int, cond: int, message: int):
         if nodes[value].kind == .ident:
             set_list(n, [])
             return
+    if proof_active and cx >= 0 and proof_decls.has(int(fns[int(ctxs[cx].inst)].decl)):
+        proof_term(cond)
+        fact_requests.push(FactRequest(n, int(ctxs[cx].inst)))
+        return
     if not fact_open(cond):
         # Even `effect() or true` must pass through comptime's effect checks.
         budget = 128
@@ -292,6 +298,7 @@ fact_store_route = (s: mut FactState, route: FactRoute, value0: int, at: int):
     p = fact_place(route.root)
     if p.declaration == 0: fact_forget(s, at, .write, true); return
     values = fact_route_values(s, route)
+    if result_active and values.len() > 0: result_replaced(values[values.len() - 1], at, s)
     value = value0
     i = route.selectors.len() - 1
     loop i >= 0:
@@ -546,6 +553,8 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
     if not a.live: return b
     if not b.live: return a
     s = FactState()
+    loop evidence in a.conditional:
+        if b.conditional.contains(evidence): s.conditional.push(evidence)
     # Keep immutable evaluations shared by both paths, including snapshots.
     loop i in [0..a.ids.len()):
         j = fact_slot(b, a.ids[i])
@@ -663,6 +672,9 @@ fact_condition = (n: int, entry: FactState) -> FactPaths:
     reason = fact_bound(yes, v)
     fact_assume(yes, v, true)
     fact_assume(no, v, false)
+    if result_active:
+        result_activate(yes)
+        result_activate(no)
     FactPaths(yes, no, reason)
 
 fact_unmodeled = (s: mut FactState, n: int, reason: FactReason) -> int:
@@ -826,6 +838,17 @@ fact_capture = (n: int, s: mut FactState) -> int:
     if k == .int_lit or k == .bool_lit:
         if not fact_scalar(ntype(n)): return fact_new(s, FactBound(reason = .unsupported, witness = n))
         return fact_constant(s, ref_encoded(nodes[n].ival, ntype(n)), n)
+    if result_active:
+        if k == .istype:
+            value = fact_capture(int(nodes[n].a), s)
+            if nodes[n].aux == -3: return fact_constant(s, 1)
+            tag = fact_project(s, value, -3, false, T_INT)
+            wanted = if nodes[n].aux >= 0: int(nodes[n].aux) else if nodes[n].aux == -2: 1 else: 0
+            other = fact_constant(s, wanted)
+            return fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, tag, other))
+        if k == .narrow or k == .unwrap:
+            value = fact_capture(int(nodes[n].a), s)
+            return fact_project(s, value, -4, false, ntype(n))
     if k == .ident: return fact_read(s, n)
     if k == .field and (nodes[n].aux >= 0 and tkind(ntype(int(nodes[n].a))) == .struct_ or nodes[n].aux == -2 and tkind(ntype(int(nodes[n].a))) == .tuple):
         base = fact_capture(int(nodes[n].a), s)
@@ -864,6 +887,10 @@ fact_capture = (n: int, s: mut FactState) -> int:
             if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(value, fact_constant(s, i), true, v))
         if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(value, -1, false, fact_constant(s, nkids(n))))
         return value
+    if result_active and k == .none_lit:
+        value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
+        s.projections.push(FactProjection(value, -3, false, fact_constant(s, 0)))
+        return value
     if k == .str_lit and nodes[n].aux == 0 or k == .float_lit or k == .none_lit or k == .null_lit: return 0
     if k == .addr: return fact_capture(int(nodes[n].a), s)
     if k == .lambda or k == .fnref or k == .partial:
@@ -896,6 +923,8 @@ fact_capture = (n: int, s: mut FactState) -> int:
         return r
     if k == .return_:
         r = fact_capture(int(nodes[n].a), s)
+        if proof_active and proof_decls.has(int(fns[fact_owner].decl)): proof_exit(fact_owner, n, s)
+        if result_active: result_exit(fact_owner, r, n, s)
         s.live = false
         return r
     if k == .break_ or k == .continue_:
@@ -964,6 +993,10 @@ fact_capture = (n: int, s: mut FactState) -> int:
         return fact_new(s, b, FactTerm(.kw_not, a, 0, n))
     if k == .binary:
         a = fact_capture(int(nodes[n].a), s)
+        if result_active and nodes[int(nodes[n].b)].kind == .none_lit and tkind(ntype(int(nodes[n].a))) == .opt:
+            tag = fact_project(s, a, -3, false, T_INT)
+            zero = fact_constant(s, 0)
+            return fact_new(s, fact_domain(T_BOOL), FactTerm(nodes[n].op as Tok, tag, zero))
         b = fact_capture(int(nodes[n].b), s)
         op = nodes[n].op as Tok
         if nodes[n].aux == 0 and fact_scalar(ntype(int(nodes[n].a))) and fact_scalar(ntype(int(nodes[n].b))) and fact_comparison(op):
@@ -980,6 +1013,12 @@ fact_capture = (n: int, s: mut FactState) -> int:
         return fact_unmodeled(s, n, .unsupported)
     if k == .conv:
         a = fact_capture(int(nodes[n].a), s)
+        if result_active and nodes[n].aux == i32(int(CV.opt)):
+            value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
+            if s.projections.len() + 2 < FACT_CAP:
+                s.projections.push(FactProjection(value, -3, false, fact_constant(s, 1)))
+                s.projections.push(FactProjection(value, -4, false, a))
+            return value
         if nodes[n].aux == i32(int(CV.refinement)):
             ref_check(n, a, ref_fact_current_entry(s), s)
             return a
@@ -1068,6 +1107,16 @@ fact_capture = (n: int, s: mut FactState) -> int:
             # Messages execute only on failure, never on this success edge.
             return 0
     if k == .call:
+        if result_active and nodes[n].aux == 3:
+            payload = fact_capture(kid(n, 0), s)
+            value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
+            if s.projections.len() + 2 < FACT_CAP:
+                s.projections.push(FactProjection(value, -3, false, fact_constant(s, int(nodes[n].aux2))))
+                s.projections.push(FactProjection(value, -4, false, payload))
+            return value
+        if proof_active and nodes[n].aux == 0 and nodes[n].sym > 0 and proof_decls.has(int(fns[int(nodes[n].sym)].decl)):
+            proof_call(n, s)
+            return 0
         fact_capture(int(nodes[n].a), s)
         values = fill(0, nkids(n))
         loop i in call_eval_order(n):
@@ -1095,6 +1144,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
             loop i in [0..values.len()):
                 if i < fns[f].params.len() and int(locals[fns[f].params[i]].flags) & LF_MUTPARAM != 0: values[i] = fact_capture(kid(n, i), s)
             ref_assume(int(fns[f].ret), result, values, s)
+            if result_active: result_publish(f, result, values, s)
         else if nodes[n].aux == 1:
             ft = prune(ntype(int(nodes[n].a)))
             if types[ft].kind == .fn_: ref_assume(int(types[ft].elem), result, values, s)
@@ -1128,11 +1178,19 @@ fact_capture = (n: int, s: mut FactState) -> int:
     return fact_new(s, FactBound(reason = .unsupported, witness = n))
 
 facts_finalize = ():
-    if loan_owners.len() == 0 and fact_requests.len() == 0 and refine_requests.len() == 0 and fact_policy == .RuntimeAllowed: return
+    if proof_active: proof_prepare()
+    if loan_owners.len() == 0 and fact_requests.len() == 0 and refine_requests.len() == 0 and proof_calls.len() == 0 and not proof_active and not result_active and fact_policy == .RuntimeAllowed: return
     demanded: {int: bool} = {}
     loop f, _ in loan_owners: demanded[f] = true
+    if proof_active:
+        loop call in proof_calls: demanded[call.owner] = true
+        loop f in [1..fns.len()):
+            if proof_decls.has(int(fns[f].decl)): demanded[f] = true
     loop request in fact_requests: demanded[request.owner] = true
     loop request in refine_requests: demanded[request.owner] = true
+    if result_active:
+        loop f in [1..fns.len()):
+            if result_contracts.has(int(fns[f].decl)): demanded[f] = true
     if fact_policy == .RequireStatic:
         loop f in [1..fns.len()):
             if fns[f].body != 0 and fns[f].state == 2 and not pos_in_lib(nodes[int(fns[f].body)].pos): demanded[f] = true
@@ -1141,8 +1199,13 @@ facts_finalize = ():
         fact_owner = f
         fact_terms = [FactTerm()]
         state = FactState()
+        previous_policy = fact_policy
+        if proof_active and proof_decls.has(int(fns[f].decl)): fact_policy = .RequireStatic
         if refine_active: refine_fact_entry(f, state)
-        fact_capture(int(fns[f].body), state)
+        result = fact_capture(int(fns[f].body), state)
+        if result_active: result_exit(f, result, int(fns[f].body), state)
+        if proof_active and proof_decls.has(int(fns[f].decl)): proof_exit(f, int(fns[f].body), state)
+        fact_policy = previous_policy
     fact_owner = 0
     # A conservative transfer must never silently lose an obligation (opaque
     # controls, deferred cleanup, or checked nodes absent from a published body).
@@ -1161,6 +1224,7 @@ facts_finalize = ():
     loop request in fact_requests: set_list(request.node, [])
     fact_requests = []
     fact_terms = []
+    if proof_active: proof_erase()
 
 # Harness-only policy; this is not a strict-lane surface or no-panic claim.
 facts_reset = ():

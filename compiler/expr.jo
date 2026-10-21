@@ -11,6 +11,7 @@ use 'types.jo'
 use 'check.jo'
 use 'facts.jo'
 use 'refine.jo'
+use 'proofs.jo'
 use 'effects.jo'
 use 'reflection.jo'
 use 'prelude.jo'
@@ -2312,6 +2313,9 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         nodes[n].a = i32(poly_fnref(closure, f))
         nodes[n].sym = 0
         nodes[n].aux = 1
+    if proof_active and proof_decls.has(decl):
+        if partial: fatal(nodes[n].pos, "a proof cannot be used as a value; use a direct statement call")
+        proof_calls.push(FactRequest(n, int(ctxs[cx].inst)))
     if partial:
         nodes[n].aux2 = 0
         return finish_partial(n, fns[f].ptypes, int(cd.sig.mutmask), int(fns[f].ret))
@@ -6290,6 +6294,9 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
             demand_prelude_name(parser)
             decls = []
             collect_fns(parser, decls)
+    if proof_active:
+        loop d in decls:
+            if proof_decls.has(d): fatal(nodes[n].pos, "a proof cannot be used as a value")
     et = callable_base(expected)
     if expected == 0: et = 0
     # Only inferred Dewy handles prefer a concrete program declaration.

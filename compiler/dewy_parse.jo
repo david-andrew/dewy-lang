@@ -9,6 +9,7 @@ use 'expr.jo'
 use 'check.jo'
 use 'dewy_tokens.jo'
 use 'refine.jo'
+use 'proofs.jo'
 use 'dewy_methods.jo'
 use 'effects.jo'
 use 'ownership.jo'
@@ -695,6 +696,8 @@ dw_effect_result = (id: int, entries: mut EffectSyntax[], empty: mut bool) -> in
     if dw_op(id) != .amp: return id
     # Scalar refinement intersection is still part of the return type.
     if dw_op(dw_grouped(dw_child(id, 2))) == .tilde: return id
+    right = dw_unwrap(dw_child(id, 2))
+    if dewy_syntax[right].kind == .block and dewy_syntax[right].text == "<>:": return id
     base = dw_effect_result(dw_child(id, 1), entries, empty)
     dw_effect_atom(dw_child(id, 2), entries, empty)
     base
@@ -950,10 +953,23 @@ dw_function = (id: int, name: str) -> int:
         if name == "main": return dw_fail(id, "a generic entry point")
         set_list2(n, type_params)
         add_flag(n, NF_GENERIC)
+    if proof_pending and result != 0 and dewy_syntax[dw_unwrap(result)].kind == .block and dewy_syntax[dw_unwrap(result)].text == "<>:":
+        predicate = 0
+        loop entry in dw_children(dw_unwrap(result)):
+            term = dw_ref_predicate(entry)
+            if predicate == 0: predicate = term
+            else:
+                both = mk(.and_, nodes[term].pos)
+                nodes[both].a = i32(predicate); nodes[both].b = i32(term)
+                predicate = both
+        if predicate == 0: fatal(nodes[n].pos, "proof result requires a proposition")
+        proof_decls[n] = predicate
+        add_flag(n, NF_VOID)
+        result = 0
     if result != 0:
         result = dw_effect_suffix(n, result)
         if dw_name(result) == "void": add_flag(n, NF_VOID)
-        else: nodes[n].a = i32(dw_type(result))
+        else: nodes[n].a = i32(dw_result_type(n, result))
     ps: int[]
     captures: int[]
     capture = false
@@ -2166,6 +2182,22 @@ dw_overload_members = (id: int, name: str, declarations: mut int[]):
 # Expand a static overload group directly into ordinary declarations. This keeps
 # overload selection, generic specialization and callable context in one checker.
 dw_top_declarations = (id: int) -> int[]:
+    tag = dw_unwrap(id)
+    if dewy_syntax[tag].kind == .metatag and dewy_syntax[tag].text == "proof":
+        if proof_pending: fatal(dewy_syntax[tag].pos, "duplicate $proof")
+        proof_pending = true
+        proof_active = true
+        refine_active = true
+        return []
+    pending = proof_pending
+    made = dw_top_declarations_inner(id)
+    if pending:
+        if made.len() != 1 or nodes[made[0]].kind != .fn_: fatal(dewy_syntax[id].pos, "$proof requires a function declaration")
+        if not proof_decls.has(made[0]): proof_decls[made[0]] = 0
+        proof_pending = false
+    made
+
+dw_top_declarations_inner = (id: int) -> int[]:
     declaration = dw_unwrap(id)
     if dw_op(declaration) == .statement_end: declaration = dw_unwrap(dw_child(declaration, 1))
     tag = declaration
@@ -2217,3 +2249,41 @@ ownership_tag = (row: int) -> int:
     if name == "__copy__": return 2
     if name == "__move__": return 3
     0
+
+# Facts qualify a result arm; they do not change its runtime representation.
+dw_result_type = (owner: int, id0: int) -> int:
+    id = dw_unwrap(id0)
+    if dw_op(id) == .pipe:
+        n = mk(.tunion, dewy_syntax[id].pos)
+        set_list(n, [dw_result_type(owner, dw_child(id, 1)), dw_result_type(owner, dw_child(id, 2))])
+        return n
+    if dw_op(id) == .amp:
+        facts = dw_unwrap(dw_child(id, 2))
+        if dewy_syntax[facts].kind == .block and dewy_syntax[facts].text == "<>:":
+            base = dw_unwrap(dw_child(id, 1))
+            member = dw_result_type(owner, base)
+            predicate = 0
+            loop entry in dw_children(facts):
+                term = dw_ref_predicate(entry)
+                if predicate == 0: predicate = term
+                else:
+                    both = mk(.and_, nodes[term].pos)
+                    nodes[both].a = i32(predicate); nodes[both].b = i32(term)
+                    predicate = both
+            if predicate == 0: fatal(dewy_syntax[facts].pos, "result facts require a proposition")
+            tag = 0
+            if dewy_syntax[base].kind == .boolean: tag = if dewy_syntax[base].text == "true": 2 else: 1
+            clauses = result_syntax.get(owner) ?? []
+            clauses.push(ResultClause(member, predicate, tag))
+            result_syntax[owner] = clauses
+            result_active = true
+            refine_active = true
+            return member
+    if dewy_syntax[id].kind == .boolean:
+        result_boolean_masks[owner] = (result_boolean_masks.get(owner) ?? 0) | (if dewy_syntax[id].text == "true": 2 else: 1)
+        result_active = true
+        refine_active = true
+        n = mk(.tname, dewy_syntax[id].pos)
+        nodes[n].name = i32(intern("bool"))
+        return n
+    dw_type(id)
