@@ -1,0 +1,25 @@
+let calls:int64 = 0
+pick = (i:int64):>int64 => { calls += 1; return i }
+main = () => {
+    let xs:array<int64> = [40 50 60]
+    let i = 1
+    let cursor = @xs[i]
+    i = 2
+    cursor += 2
+    let other = @xs[pick(0)]
+    other = other + 1
+    other += 1
+    printl"{xs} {calls}"
+    let r = [a=int64(1) b="x"]
+    let field = @r.a
+    field = 7
+    printl(r)
+    let table:dict<string int64> = ["a" -> 1]
+    let entry = @table["a"]
+    entry += 10
+    printl(table)
+    let snapshot = xs
+    let first = @xs[0]
+    first = 0
+    printl"{snapshot} {xs}"
+}

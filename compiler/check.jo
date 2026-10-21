@@ -3455,6 +3455,40 @@ check_binding_input = (s: int) -> int:
         t = prune(expected)
     t
 
+# `let cursor = @xs[i]`, `let entry = @table[k]`, `let f = @r.a`: a local name
+# for the element, entry or field itself, its key or index evaluated once.
+local_place_count = 0
+local_place_decl = (s: int) -> bool:
+    init = int(nodes[s].b)
+    if init == 0 or nodes[s].a != 0 or nodes[s].nlist > 0 or has_flag(s, NF_GLOBAL) or has_flag(s, NF_RDONLY): return false
+    if not has_flag(init, NF_MUT) or not files[pos_file(nodes[s].pos)].is_dewy: return false
+    k = nodes[init].kind
+    if k != .index and k != .field: return false
+    base = int(nodes[init].a)
+    if nodes[base].kind != .ident or k == .index and (nodes[init].b == 0 or nkids(init) != 1):
+        fatal(nodes[init].pos, "a local place names an element, entry or field of a variable (`let cursor = @xs[i]`, `let f = @r.a`); pass deeper routes to an `@` parameter instead")
+    # (`@r.f` of a function is its handle: a value, as `let g = @f`)
+    probe = clone(init)
+    if is_fn_type(check_expr(probe, 0)): return false
+    temp = 0
+    if k == .index:
+        key = int(nodes[init].b)
+        kk = nodes[key].kind
+        if kk != .int_lit and kk != .str_lit:
+            local_place_count += 1
+            temp = bc_let("$place{local_place_count}", key, nodes[key].pos)
+            add_flag(temp, NF_LOOPCOUNT)
+            check_vardecl(temp)
+            key = bc_ident("$place{local_place_count}", nodes[key].pos)
+            nodes[init].b = i32(key)
+            set_list(init, [key])
+    clear_flag(init, NF_MUT)
+    add_flag(s, NF_ALIASDECL)
+    check_vardecl(s)
+    # (the captured key is declared where the place is, in the same scope)
+    if temp != 0: nodes[s] = nodes[temp]
+    true
+
 check_vardecl = (s: int):
     if has_flag(s, NF_SOA):
         soa_alias(s)
@@ -3473,6 +3507,7 @@ check_vardecl = (s: int):
         nodes[s].kind = .block
         nodes[s].nlist = 0
         return
+    if local_place_decl(s): return
     if nodes[s].nlist > 0:
         if has_flag(s, NF_GLOBAL):
             loop binding in binding_leaves(kids(s)):
