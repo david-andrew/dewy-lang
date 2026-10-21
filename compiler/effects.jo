@@ -1103,6 +1103,11 @@ effect_scan_node = (f: int, n: int):
         shift = nodes[n].op == i32(int(Tok.shl)) or nodes[n].op == i32(int(Tok.shr))
         count_ok = effect_scalar(ntype(int(nodes[n].b))) or shift and effect_count_literal(int(nodes[n].b))
         supported = nodes[n].aux == 0 and effect_word_op(nodes[n].op as Tok) and effect_scalar(ntype(int(nodes[n].a))) and count_ok
+        # (word division and remainder: a zero divisor is a possible failure)
+        if not supported and nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent))) and effect_scalar(ntype(int(nodes[n].a))) and effect_scalar(ntype(int(nodes[n].b))):
+            supported = true
+            divisor = int(nodes[n].b)
+            if nodes[divisor].kind != .int_lit or nodes[divisor].ival == 0: effect_add(f, EffectEvent(EffectAtom(.panic), n))
         # (members of one literal union compare as words)
         if not supported and nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.eq)) or nodes[n].op == i32(int(Tok.ne))):
             supported = effect_simple_enum(ntype(int(nodes[n].a))) and effect_simple_enum(ntype(int(nodes[n].b)))

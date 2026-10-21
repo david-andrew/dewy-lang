@@ -1,0 +1,11 @@
+# quick
+$no_hidden_costs
+const WHEEL:int64=12
+const RATE:int64=60
+slot=(deadline:int64):>int64=>deadline%WHEEL
+seconds=(ticks:int64):>int64=>ticks//RATE
+main=():>int64=>{
+    $no_hidden_costs=false
+    printl("{slot(29)} {slot(-1)} {seconds(185)} {seconds(-1)}")
+    return 0
+}
