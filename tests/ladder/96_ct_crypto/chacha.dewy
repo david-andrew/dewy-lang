@@ -45,8 +45,8 @@ setup=(key:Key counter:uint32 nonce:Nonce):>State=>{
     return s
 }
 
-# Twenty rounds (ten column/diagonal double rounds), then the feed-forward.
-permute=(input:State):>State=>{
+# Twenty rounds: ten column/diagonal double rounds.
+rounds=(input:State):>State=>{
     let s=input
     loop round in [0..10) {
         quarter(@s 0 4 8 12)
@@ -58,6 +58,12 @@ permute=(input:State):>State=>{
         quarter(@s 2 7 8 13)
         quarter(@s 3 4 9 14)
     }
+    return s
+}
+
+# The block function: the rounds, then the feed-forward of the input.
+permute=(input:State):>State=>{
+    let s=rounds(input)
     loop i in [0..16) {
         s[i]+=input[i]
     }
@@ -94,6 +100,34 @@ xor_stream=(key:Key counter:uint32 nonce:Nonce data:array<uint8>):>array<uint8>=
         }
         state[12]+=1
         at+=BLOCK
+    }
+    return out
+}
+
+# HChaCha20 (draft-irtf-cfrg-xchacha section 2.2): a subkey from a key and a
+# 16-byte nonce, the first and last rows of the rounds without the feed-forward.
+NonceX:type=array<uint8 length=24>
+
+hchacha20=(key:Key nonce16:array<uint8>):>Key=>{
+    let s:State=[]
+    loop i in [0..4) {
+        s[i]=SIGMA[i]
+    }
+    let k=key as array<uint8>
+    loop i in [0..8) {
+        s[4+i]=load32(k 4*i)
+    }
+    loop i in [0..4) {
+        s[12+i]=load32(nonce16 4*i)
+    }
+    let r=rounds(s)
+    let out:array<uint8>=[]
+    loop i in [0 1 2 3 12 13 14 15] {
+        let w=r[i]
+        out.push((w and 255) as uint8)
+        out.push(((w >> 8) and 255) as uint8)
+        out.push(((w >> 16) and 255) as uint8)
+        out.push((w >> 24) as uint8)
     }
     return out
 }

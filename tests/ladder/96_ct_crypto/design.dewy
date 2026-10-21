@@ -1,17 +1,19 @@
 # Tier 4 / 96_ct_crypto / milestone 32
-# Acceptance: SHA-256, HMAC, HKDF, ChaCha20, Poly1305, ChaCha20-Poly1305 and X25519 written
-# branch-free and index-free on secrets; published vectors (FIPS 180-4, RFC 4231, 5869, 8439,
-# 7748), forgery rejection and a deterministic key-agreement-plus-AEAD workload; independent oracle.
+# Acceptance: SHA-256, HMAC, HKDF, ChaCha20, Poly1305, (X)ChaCha20-Poly1305, X25519 and a
+# replay-protected secure channel, written branch-free and index-free on secrets; published
+# vectors (FIPS 180-4, RFC 4231, 5869, 8439, 7748, XChaCha draft), forgery and replay
+# rejection, and a deterministic key-agreement-plus-AEAD workload; independent oracle.
 #
 # Constant time is a discipline here, not a checked property: Dewy cannot yet mark a value
 # secret or forbid secret-dependent branches and addresses (see ct.dewy).
 
 from p"hexcodec.dewy" import hex
 from p"sha2.dewy" import Sha256, sha256, hmac_sha256, hkdf
-from p"chacha.dewy" import Key, Nonce, block, xor_stream
+from p"chacha.dewy" import Key, Nonce, NonceX, block, xor_stream, hchacha20
 from p"poly.dewy" import Tag, OneTimeKey, poly1305
-from p"aead.dewy" import Sealed, Forged, seal, open, poly_key
+from p"aead.dewy" import Sealed, Forged, seal, open, poly_key, seal_x, open_x
 from p"curve.dewy" import Bytes32, x25519, public_key
+from p"channel.dewy" import Channel, Packet, Replayed, TooOld, HandshakeFailed, handshake
 from p"ct.dewy" import equal
 
 show=(label:string data:array<uint8>):>void=>printl("{label} {hex(data)}")
@@ -169,6 +171,80 @@ curve=():>void=>{
     show("x25519-iterate-1000" k)
 }
 
+extended_nonces=():>void=>{
+    let key:Key=0x"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    show("hchacha20-xchacha-2.2.1" hchacha20(key 0x"000000090000004a0000000031415927"))
+    let aead_key:Key=0x"808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"
+    let nonce:NonceX=0x"404142434445464748494a4b4c4d4e4f5051525354555657"
+    let aad=0x"50515253c0c1c2c3c4c5c6c7"
+    let plaintext=bytes("Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.")
+    let sealed=seal_x(aead_key nonce aad plaintext)
+    show("xchacha20poly1305-ciphertext" sealed.ciphertext)
+    show("xchacha20poly1305-tag" sealed.tag)
+    let opened=open_x(aead_key nonce aad sealed)
+    printl("xchacha20poly1305-open {if opened is? Forged false else opened =? plaintext}")
+    let other=nonce
+    other[23]=other[23] xor 1
+    printl("xchacha20poly1305-wrong-nonce {open_x(aead_key other aad sealed) is? Forged}")
+}
+
+# Two endpoints over a hostile network: reordering, duplicates, tampering and
+# stale replays. The receiver accepts each authentic record exactly once.
+channels=():>void=>{
+    let alice_secret:Bytes32=sha256(bytes("alice"))
+    let bob_secret:Bytes32=sha256(bytes("bob"))
+    let alice_public=public_key(alice_secret)
+    let bob_public=public_key(bob_secret)
+    let alice=handshake(alice_secret alice_public bob_public true)
+    let bob=handshake(bob_secret bob_public alice_public false)
+    if alice is? HandshakeFailed or bob is? HandshakeFailed {
+        printl("channel handshake failed")
+        return
+    }
+    let packets:array<Packet>=[loop i in [0..48) alice.send(bytes("message {i} from alice"))]
+    let transcript=Sha256()
+    let accepted=0
+    let replayed=0
+    let forged=0
+    let stale=0
+    let deliver=(packet:Packet $capture @bob $capture @transcript $capture @accepted $capture @replayed $capture @forged $capture @stale):>void=>{
+        match bob.receive(packet) {
+            text:array<uint8> => {
+                transcript.update(text)
+                accepted+=1
+            }
+            <Replayed> => {replayed+=1}
+            <TooOld> => {stale+=1}
+            _ => {forged+=1}
+        }
+    }
+    loop n in [0..48) {
+        let packet=packets[(n*29)%48]
+        if n%11 =? 5 {
+            let tampered=packet
+            tampered.sealed.ciphertext[0]=tampered.sealed.ciphertext[0] xor 0x20
+            deliver(tampered)
+        }
+        deliver(packet)
+        if n%7 =? 3 deliver(packet)
+    }
+    # Far ahead: the window slides past the first records, which become too old.
+    loop i in [48..120) {
+        deliver(alice.send(bytes("message {i} from alice")))
+    }
+    deliver(packets[0])
+    deliver(packets[47])
+    let lied=alice.send(bytes("forged sequence"))
+    lied.sequence=200
+    deliver(lied)
+    printl("channel accepted={accepted} replayed={replayed} forged={forged} stale={stale}")
+    show("channel-transcript" transcript.finish)
+    let reply=bob.send(bytes("hello alice"))
+    let heard=alice.receive(reply)
+    let text=if heard is? error none else heard as string | none
+    printl("channel reply {text ?? "rejected"}")
+}
+
 # Key agreement, key derivation and authenticated encryption together: a deterministic
 # message exchange whose transcript digest the oracle reproduces.
 workload=():>void=>{
@@ -231,6 +307,8 @@ main=():>int64=>{
     ciphers()
     aead()
     curve()
+    extended_nonces()
+    channels()
     workload()
     return 0
 }

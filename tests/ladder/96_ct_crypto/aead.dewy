@@ -5,7 +5,7 @@
 # verifies, so a forgery learns nothing but the single public verdict.
 
 from p"ct.dewy" import equal, store64
-from p"chacha.dewy" import Key, Nonce, block, xor_stream
+from p"chacha.dewy" import Key, Nonce, NonceX, block, xor_stream, hchacha20
 from p"poly.dewy" import Tag, OneTimeKey, poly1305_init
 
 Forged:type=type of error
@@ -44,4 +44,24 @@ open=(key:Key nonce:Nonce aad:array<uint8> sealed:Sealed):>array<uint8>|Forged=>
     let expected=tag_for(key nonce aad sealed.ciphertext)
     if not equal(expected as array<uint8> sealed.tag as array<uint8>) return Forged
     return xor_stream(key 1 nonce sealed.ciphertext)
+}
+
+# XChaCha20-Poly1305 (draft-irtf-cfrg-xchacha): a 24-byte nonce, long enough to
+# pick at random. HChaCha20 turns the first 16 nonce bytes into a subkey; the
+# last 8 become the ChaCha20 nonce.
+extended=(key:Key nonce:NonceX):>[key:Key nonce:Nonce]=>{
+    let n=nonce as array<uint8>
+    let subkey=hchacha20(key n[0..16))
+    let short:Nonce=[0 0 0 0 n[16..24)...]
+    return [key=subkey nonce=short]
+}
+
+seal_x=(key:Key nonce:NonceX aad:array<uint8> plaintext:array<uint8>):>Sealed=>{
+    let [key nonce]=extended(key nonce)
+    return seal(key nonce aad plaintext)
+}
+
+open_x=(key:Key nonce:NonceX aad:array<uint8> sealed:Sealed):>array<uint8>|Forged=>{
+    let [key nonce]=extended(key nonce)
+    return open(key nonce aad sealed)
 }

@@ -314,6 +314,46 @@ def x25519(k,u):
     if swap:x2,z2=x3,z3
     return (x2*pow(z2,P25519-2,P25519)%P25519).to_bytes(32,'little')
 BASE=(9).to_bytes(32,'little')
+def hchacha(key,nonce16):
+    # The block function's rounds without the feed-forward: subtract the input back out.
+    s=[0x61707865,0x3320646e,0x79622d32,0x6b206574]+[int.from_bytes(key[i:i+4],'little') for i in range(0,32,4)]
+    s+=[int.from_bytes(nonce16[i:i+4],'little') for i in range(0,16,4)]
+    out=chacha_block(key,s[12],nonce16[4:])
+    w=[(int.from_bytes(out[4*i:4*i+4],'little')-s[i])&0xffffffff for i in range(16)]
+    return b''.join(x.to_bytes(4,'little') for x in w[:4]+w[12:])
+def xseal(key,nonce,aad,pt):return aead_seal(hchacha(key,nonce[:16]),bytes(4)+nonce[16:],aad,pt)
+def channel_run():
+    sha=lambda b:hashlib.sha256(b).digest()
+    a_sec,b_sec=sha(b'alice'),sha(b'bob');a_pub,b_pub=x25519(a_sec,BASE),x25519(b_sec,BASE)
+    shared=x25519(a_sec,b_pub);keys=hkdf(b'',shared,b'dewy channel v1'+a_pub+b_pub,64)
+    a_send=keys[:32]
+    def packet(seq,text,key=a_send):
+        n=seq.to_bytes(8,'little');return [seq,*aead_seal(key,bytes(4)+n,n,text)]
+    packets=[packet(i,f'message {i} from alice'.encode()) for i in range(48)]
+    st=dict(highest=0,seen=0,accepted=0);count=dict(accepted=0,replayed=0,forged=0,stale=0);transcript=hashlib.sha256()
+    def deliver(p):
+        seq,ct,tag=p
+        if not(st['accepted']==0 or seq>st['highest']):
+            age=st['highest']-seq
+            if age>=64:count['stale']+=1;return
+            if (st['seen']>>age)&1:count['replayed']+=1;return
+        n=seq.to_bytes(8,'little')
+        if aead_seal(a_send,bytes(4)+n,n,chacha_xor(a_send,1,bytes(4)+n,ct))[1]!=tag:count['forged']+=1;return
+        if st['accepted']==0:st['highest'],st['seen']=seq,1
+        elif seq>st['highest']:
+            shift=seq-st['highest'];st['seen']=1 if shift>=64 else ((st['seen']<<shift)|1)&(2**64-1);st['highest']=seq
+        else:st['seen']|=1<<(st['highest']-seq)
+        st['accepted']+=1;count['accepted']+=1;transcript.update(chacha_xor(a_send,1,bytes(4)+n,ct))
+    for n in range(48):
+        p=packets[(n*29)%48]
+        if n%11==5:
+            ct=bytearray(p[1]);ct[0]^=0x20;deliver([p[0],bytes(ct),p[2]])
+        deliver(p)
+        if n%7==3:deliver(p)
+    for i in range(48,120):deliver(packet(i,f'message {i} from alice'.encode()))
+    deliver(packets[0]);deliver(packets[47])
+    lie=packet(120,b'forged sequence');lie[0]=200;deliver(lie)
+    return count,transcript.digest()
 def hkdf(salt,ikm,info,n):
     prk=hmac.new(salt or bytes(32),ikm,'sha256').digest();okm=t=b'';i=1
     while len(okm)<n:t=hmac.new(prk,t+info+bytes([i]),'sha256').digest();okm+=t;i+=1
@@ -337,6 +377,8 @@ PUBLISHED={
     'sha256-448':'248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1',
     'hmac-4231-2':'5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843',
     'hkdf-5869-1':'3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865',
+    'hchacha20-xchacha-2.2.1':'82413b4227b27bfed30e42508a877d73a0f9e4d58a74a853c12ec41326d3ecdc',
+    'xchacha20poly1305-tag':'c0875924c1c7987947deafd8780acf49',
 }
 class Stream:
     def __init__(self,seed):self.seed=seed;self.counter=0
@@ -390,6 +432,13 @@ def ct_crypto():
         k,u=x25519(k,u),k
         if i==1:show('x25519-iterate-1',k)
     show('x25519-iterate-1000',k)
+    show('hchacha20-xchacha-2.2.1',hchacha(bytes(range(32)),H('000000090000004a0000000031415927')))
+    ct,tag=xseal(akey,H('404142434445464748494a4b4c4d4e4f5051525354555657'),aad,SUNSCREEN)
+    show('xchacha20poly1305-ciphertext',ct);show('xchacha20poly1305-tag',tag)
+    lines+=['xchacha20poly1305-open true','xchacha20poly1305-wrong-nonce true']
+    count,digest=channel_run()
+    lines.append('channel accepted={accepted} replayed={replayed} forged={forged} stale={stale}'.format(**count))
+    show('channel-transcript',digest);lines.append('channel reply hello alice')
     rng=Stream(b'dewy tier 4 crypto workload');transcript=hashlib.sha256();sent=total=0
     for session in range(8):
         a=rng.next(32);b=rng.next(32);shared=x25519(a,x25519(b,BASE))
