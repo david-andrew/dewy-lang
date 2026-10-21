@@ -1,3 +1,9 @@
+use 'check.jo'
+use 'x64.jo'
+use 'ir.jo'
+use 'parse.jo'
+use 'ide.jo'
+use 'lower.jo'
 # Incremental compact-AST construction. A transaction retries the reference
 # grammar whenever a contextual or otherwise unmigrated form is reached.
 use 'util.jo'
@@ -6,6 +12,10 @@ use 'lex.jo'
 use 'dewy_tokens.jo'
 use 'dewy_parse.jo'
 use 'dewy_fast.jo'
+use 'par.jo'
+use 'pcheck.jo'
+use 'main.jo'
+use 'lazy_bodies.jo'
 
 # DEWY_FRONTEND=old selects the reference path; compare checks every migrated
 # value against a fresh legacy parse and projection before retaining its nodes.
@@ -13,6 +23,88 @@ use 'dewy_fast.jo'
 dc_enabled = true
 dc_compare = false
 dc_depth = 0
+
+# Full lexing retains source positions and names; only closed braced bodies are
+# deferred. The marker lives on the block so function instances keep its identity.
+const DC_LAZY_BODY = -314
+dc_lazy_tokens: {int: DewyLexeme[]}
+dc_lazy_on = false
+
+dc_lazy_allowed = (file: int) -> bool:
+    when BOOTSTRAP or TARGET != "linux" or ARCH != "x86_64":
+        return false
+    else:
+        if dc_eager or not dc_enabled or dc_compare or emit_workers() < 2 or shown_warnings.len() > 0: return false
+        if len(files[file].src) < 100000 and env("SLOPPY_EMIT_FORCE") == none: return false
+        if (env("DEWY_PCHECK") ?? "") == "0" or (env("DEWY_FUSED") ?? "") == "0": return false
+        if target_wasm or target_arm64 or target_windows or target_macos or opt_release or dbg_on or watch_build or repl_image or lower_only or host_ir or ra_stat or len(ra_dump) > 0 or not queue_emit or ide_on or errors_only or test_mode or check_all or len(stop_after) > 0: return false
+        true
+
+dc_lazy_body = () -> int:
+    if not dc_lazy_on or dn_tokens[dn_at].symbol != .lbrace: return 0
+    start = dn_at
+    at = start + 1
+    depth = 1
+    loop at < dn_tokens.len():
+        t = dn_tokens[at]
+        if t.symbol == .lbrace: depth += 1
+        if t.symbol == .rbrace: depth -= 1
+        if depth == 0:
+            b = mk(.block, mkpos(dn_file, dn_tokens[start].start))
+            nodes[b].aux2 = DC_LAZY_BODY
+            nodes[b].ival = start
+            dn_at = at + 1
+            dc_lazy_used = true
+            return b
+        # These can declare names/imports or affect whole-program analysis at
+        # parse time. Large/base literals may synthesize a bigint import.
+        if t.kind == .metatag or t.kind == .integer or t.kind == .based_string or t.symbol == .function or t.symbol == .kw_import or t.symbol == .kw_from or t.symbol == .coalesce: return 0
+        if t.kind == .source_integer and t.stop - t.start > 18: return 0
+        # Interpolations can hide declarations, bigint imports or parse warnings.
+        if t.kind == .quoted:
+            source = files[dn_file].src
+            loop i in [t.start..t.stop):
+                if source[i] == '{': return 0
+        at += 1
+    0
+
+dc_force_body = (d: int):
+    b = int(nodes[d].b)
+    if b == 0 or nodes[b].aux2 != DC_LAZY_BODY: return
+    saved_tokens = dn_tokens
+    saved_at = dn_at
+    saved_file = dn_file
+    saved_depth = dc_depth
+    saved_syntax = dewy_syntax
+    dn_file = pos_file(nodes[d].pos)
+    dn_tokens = dc_lazy_tokens[dn_file]
+    dn_at = int(nodes[b].ival)
+    dc_depth = 2
+    dewy_syntax = [DewySyntax(), DewySyntax(.inverted_comparison)]
+    node_start = nodes.len()
+    list_start = lists.len()
+    body = dc_body()
+    if body == 0:
+        nodes.truncate(node_start)
+        lists.truncate(list_start)
+        dn_at = int(nodes[b].ival)
+        dc_depth = 2
+        body = dw_block(dn_expr(0))
+    i = nodes.len() - 1
+    loop i >= node_start:
+        if nodes[i].kind == .loopx:
+            lowered = desugar_loopx(i)
+            nodes[i] = nodes[lowered]
+        i -= 1
+    prefix = kids(b)
+    loop st in kids(body): prefix.push(st)
+    set_list(body, prefix)
+    nodes[b] = nodes[body]
+    dn_tokens = saved_tokens
+    dn_at = saved_at
+    dn_file = saved_file
+    dc_depth = saved_depth
+    dewy_syntax = saved_syntax
 
 dc_binary_token = (op: DewyToken) -> Tok:
     match op:
@@ -541,7 +633,11 @@ dc_function = () -> int:
             nodes[n].a = i32(result)
     if not dn_accept(.function): return 0
     dc_depth -= 1
-    body = dc_body()
+    concrete = true
+    loop p in ps:
+        if nodes[p].a == 0: concrete = false
+    body = if concrete and nodes[n].a != 0: dc_lazy_body() else: 0
+    if body == 0: body = dc_body()
     if body == 0: return 0
     dn_accept(.semi)
     dc_depth -= 2

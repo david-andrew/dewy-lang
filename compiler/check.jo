@@ -1,8 +1,9 @@
+use 'lazy_bodies.jo'
+use 'frontend.jo'
 use 'pcheck.jo'
 use 'units.jo'
 use 'errors.jo'
 use 'watch.jo'
-use 'frontend.jo'
 # Semantic analysis: modules, scopes, declarations, function instances, statements.
 
 use 'util.jo'
@@ -1701,6 +1702,7 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
         fns[f].gdepth = fns[int(ctxs[cx].inst)].gdepth + 1
         if fns[f].gdepth > 500: fatal(use_pos, "the generic function '{name_of(int(nodes[decl].name))}' expands without end: generic functions call each other with ever new types (more than 500 deep)")
     loop i in [0..nkids(decl)): fns[f].ptypes.push(subst(sig.params[i], zt))
+    if sig.generic: source_force_body(decl)
     ensure_body(decl)
     if sig.ret != 0: fns[f].ret = i32(subst(int(sig.ret), zt))
     else if nodes[decl].b != 0 and syntactic_void(int(nodes[decl].b)): fns[f].ret = i32(T_VOID)
@@ -3742,6 +3744,7 @@ __check_fn_body = (f: int):
     if fns[f].state != 0: return
     fns[f].state = 1
     decl = int(fns[f].decl)
+    if decl != 0: source_force_body(decl)
     saved = cx
     ctxs.push(FnCtx(i32(f), -1, 0, false, 0, fns[f].mod, i32(sc_names.len())))
     cx = ctxs.len() - 1
@@ -4050,6 +4053,7 @@ check_pushers_first = ():
         loop d in m.decls:
             if nodes[d].kind == .vardecl and nodes[d].nlist == 0 and nodes[d].a == 0 and nodes[d].b != 0 and nodes[int(nodes[d].b)].kind == .array and nkids(int(nodes[d].b)) == 0: names[int(nodes[d].name)] = true
     if names.len() == 0: return
+    dc_force_all()
     loop m in modules:
         if m.is_prelude: continue
         loop d in m.decls:
@@ -4778,6 +4782,7 @@ check_program = (main_path: str):
         i += 1
     bind_from_imports()
     dewy_resolve_inherited()
+    if dewy_methods.len() > 0: dc_force_all()
     dewy_infer_methods()
     prepare_nominals()
     check_build_block()

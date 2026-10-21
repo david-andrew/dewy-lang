@@ -1,3 +1,4 @@
+use 'dewy_direct.jo'
 # Source-language dispatch. The C bootstrap substitutes bootstrap/frontend.jo.
 use 'util.jo'
 use 'ast.jo'
@@ -22,3 +23,5 @@ source_declarations = (file: int) -> int[]:
 # The prompt uses the same quote scanner, accepting an unfinished input.
 source_quote_end = (text: str, start: int, raw: bool) -> int:
     dn_quote_end(text, start, len(text), 0, raw, true)
+
+source_force_body = (decl: int): dc_force_body(decl)

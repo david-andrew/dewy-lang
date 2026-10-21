@@ -1,3 +1,5 @@
+use 'lazy_bodies.jo'
+use 'frontend.jo'
 use 'ir.jo'
 use 'x64.jo'
 use 'ide.jo'
@@ -111,20 +113,27 @@ pc_try = (start: int):
         if open_globals.len() != 0 or not pc_features(): return
         n = min(4, emit_workers())
         pc_workers = n
+        parses: int[]
         reads: int[]
         controls: int[]
         pc_pids = []
         pc_fds = []
         loop i in [0..roots.len()): pc_owner[roots[i]] = min(n - 1, i * n / roots.len())
         loop w in [0..n):
+            parsed = if dc_lazy_used: pc_pipe() else: 0
             summary = pc_pipe()
             control = pc_pipe(true)
             output = pc_pipe()
-            if summary < 0 or control < 0 or output < 0:
+            if parsed < 0 or summary < 0 or control < 0 or output < 0:
                 loop p in [summary, control, output]:
                     if p >= 0:
                         syscall(3, p & 0xFFFFFFFF)
                         syscall(3, p >> 32)
+                if dc_lazy_used:
+                    if parsed >= 0:
+                        syscall(3, parsed & 0xFFFFFFFF)
+                        syscall(3, parsed >> 32)
+                    parses.push(-1)
                 reads.push(-1)
                 controls.push(-1)
                 pc_fds.push(-1)
@@ -132,6 +141,8 @@ pc_try = (start: int):
                 continue
             pid = syscall(57)
             if pid == 0:
+                loop fd in parses: syscall(3, fd)
+                if dc_lazy_used: syscall(3, parsed & 0xFFFFFFFF)
                 loop fd in reads: syscall(3, fd)
                 loop fd in controls: syscall(3, fd)
                 loop fd in pc_fds: syscall(3, fd)
@@ -147,8 +158,14 @@ pc_try = (start: int):
                         syscall(33, nullfd, 2)
                         syscall(3, nullfd)
                 __olen = 0
-                pc_check(roots, summary >> 32, control & 0xFFFFFFFF)
+                pc_check(roots, summary >> 32, control & 0xFFFFFFFF, if dc_lazy_used: parsed >> 32 else: -1)
                 return
+            if dc_lazy_used:
+                syscall(3, parsed >> 32)
+                if pid < 0:
+                    syscall(3, parsed & 0xFFFFFFFF)
+                    parses.push(-1)
+                else: parses.push(parsed & 0xFFFFFFFF)
             syscall(3, summary >> 32)
             syscall(3, control & 0xFFFFFFFF)
             syscall(3, output >> 32)
@@ -164,6 +181,24 @@ pc_try = (start: int):
                 controls.push(control >> 32)
                 pc_fds.push(output & 0xFFFFFFFF)
             pc_pids.push(pid)
+        # A separate EOF-delimited parse summary keeps check diagnostics behind
+        # all partitions' parsing. Workers wait for one acknowledgement word.
+        if dc_lazy_used:
+            parsed = fz_read_all(parses)
+            parse_ok = true
+            loop w in [0..n):
+                if parses[w] >= 0: syscall(3, parses[w])
+                if parsed[w].len() != 8: parse_ok = false
+            if not parse_ok:
+                loop fd in controls:
+                    if fd >= 0: syscall(3, fd)
+                loop fd in reads:
+                    if fd >= 0: syscall(3, fd)
+                dc_replay()
+            if env("SLOPPY_PAR_TIME") != none: eprint("pcheck: parsed deferred bodies before checking")
+            ack: u8[]
+            pw(ack, 1)
+            loop fd in controls: pc_send(fd, ack)
         got = fz_read_all(reads)
         good = true
         loop w in [0..n):
@@ -179,6 +214,8 @@ pc_try = (start: int):
                 if pc_pids[w] > 0:
                     st = [0]
                     syscall(61, pc_pids[w], data(st), 0, 0)
+            pc_pids = []
+            pc_fds = []
             pc_owner = {}
             if env("SLOPPY_PAR_TIME") != none: eprint("pcheck: closed-state check rejected")
             return
@@ -195,7 +232,7 @@ pc_try = (start: int):
         pc_active = true
         if env("SLOPPY_PAR_TIME") != none: eprint("pcheck: {n} workers checked {roots.len()} roots")
 
-pc_check = (roots: int[], outfd: int, infd: int):
+pc_check = (roots: int[], outfd: int, infd: int, parsefd: int):
     if (env("DEWY_PCHECK_FAIL") ?? "") == "check": exit(1)
     f0 = fns.len()
     t0 = types.len()
@@ -208,6 +245,19 @@ pc_check = (roots: int[], outfd: int, infd: int):
     mine: int[]
     loop f in roots:
         if pc_owner[f] == pc_child: mine.push(f)
+    if parsefd >= 0:
+        loop f in mine: source_force_body(int(fns[f].decl))
+        ready: u8[]
+        pw(ready, 1)
+        __write_fd(parsefd, data(ready), ready.len())
+        syscall(3, parsefd)
+        ack: u8[] = fill(0, 8)
+        received = 0
+        loop received < 8:
+            size = syscall(0, infd, data(ack) + received, 8 - received)
+            if size == -4: continue
+            if size <= 0: exit(1)
+            received += size
     out: u8[]
     pw(out, mine.len())
     pc_collect = true

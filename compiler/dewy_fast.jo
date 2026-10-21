@@ -1,3 +1,4 @@
+use 'lazy_bodies.jo'
 # In-process Dewy frontend. Value expressions construct compact AST nodes;
 # unmigrated grammar uses the syntax projection. Unsupported syntax is an error.
 use 'util.jo'
@@ -937,6 +938,11 @@ dewy_fast_file = (file: int) -> int[]:
     dn_suspect_brace = -1
     dn_in_interpolation = 0
     dn_tokens = dn_lex(file, 0, len(files[file].src))
+    dc_lazy_on = dc_lazy_allowed(file)
+    if dc_lazy_on:
+        # Buffer even warnings preceding the first deferred declaration.
+        dc_lazy_used = true
+        dc_lazy_tokens[file] = dn_tokens
     dn_at = 0
     dn_angles = 0
     dn_depth = 0

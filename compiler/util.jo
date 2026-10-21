@@ -1,3 +1,5 @@
+use 'lazy_bodies.jo'
+use 'frontend.jo'
 use 'pcheck.jo'
 # Shared compiler utilities: string interning, source files, diagnostics.
 
@@ -195,6 +197,7 @@ pos_in_lib = (p: int) -> bool:
     f < files.len() and starts_with(files[f].path, lib_root)
 
 fatal = (p0: int, msg0: str):
+    dc_replay()
     p = p0
     msg = msg0
     k = err_trail.len() - 1
@@ -256,6 +259,10 @@ warn = (p: int, msg: str):
     if pc_collect:
         pc_warn_pos.push(p)
         pc_warn_text.push(msg)
+        return
+    if dc_lazy_used:
+        dc_warning_pos.push(p)
+        dc_warning_text.push(msg)
         return
     if fused_on:
         fz_note_text(5, p, msg)

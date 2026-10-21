@@ -1,3 +1,5 @@
+use 'lazy_bodies.jo'
+use 'frontend.jo'
 use 'effects.jo'
 # The Sloppy compiler.
 #   sloppy file.jo [args]     compile and run
@@ -399,6 +401,7 @@ compile = (path: str, out0: str) -> str:
     # (code made after lowering everything, except where code is patched in place as it is made)
     queue_emit = not watch_build and not repl_image and not lower_only
     check_program(path)
+    dc_flush_warnings()
     # (a run for the errors after the first: no more to find, and nothing is built)
     if errors_only: exit(error_exit)
     if target_wasm and not program_named: web_save_name_check()
@@ -650,6 +653,9 @@ open_in_browser = (path: str) -> bool:
 main = ():
     __copies_min = 0       # (SLOPPY_COPIES is for the program it runs, not the compiler's own copies)
     a = args()
+    if a.len() > 2 and a[1] == "--eager-bodies":
+        dc_eager = true
+        a = [a[0]] + a[2..]
     if a.len() >= 2 and (a[1] == "--version" or a[1] == "version"):
         print("dewy-core {DEWY_CORE_VERSION}")
         return
@@ -681,6 +687,9 @@ main = ():
         rest = [a[0]]
         loop i in [3..a.len()): rest.push(a[i])
         a = rest
+    if a.len() > 2 and a[1] == "--eager-bodies":
+        dc_eager = true
+        a = [a[0]] + a[2..]
     if a.len() >= 2 and (a[1] == "build" or a[1] == "check" or a[1] == "test" or a[1] == "run" or ends_with(a[1], ".jo") or ends_with(a[1], ".dewy")): more_errors = true
     lib_dir = find_lib_dir()
     lib_root = lib_dir
@@ -771,6 +780,7 @@ main = ():
             setup_target()
             init_types()
             check_program(path)
+            dc_flush_warnings()
             if errors_only: exit(error_exit)
             return
         # (and lowered without making code: some errors are found there, as a `loop mut` that

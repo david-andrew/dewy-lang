@@ -1,0 +1,38 @@
+# Diagnostic transaction shared with the bootstrap's eager frontend.
+use 'frontend.jo'
+use 'check.jo'
+use 'pcheck.jo'
+use 'util.jo'
+use 'ast.jo'
+
+dc_lazy_used = false
+dc_eager = false
+dc_warning_pos: int[]
+dc_warning_text: str[]
+
+dc_force_all = ():
+    if not dc_lazy_used: return
+    loop m in modules:
+        loop d in m.decls:
+            if nodes[d].kind == .fn_: source_force_body(d)
+
+# No diagnostic from a speculative parse/check may escape before replay. This
+# also covers errors in the serial prefix, before the workers can be started.
+dc_replay = ():
+    if not dc_lazy_used: return
+    if pc_child >= 0: exit(1)
+    pc_cancel()
+    a = args()
+    replay = [a[0], "--eager-bodies"]
+    loop i in [1..a.len()): replay.push(a[i])
+    __olen = 0
+    if not exec(exe_path(), replay):
+        eprint("error: could not restart eager parsing")
+        exit(2)
+
+dc_flush_warnings = ():
+    dc_lazy_used = false
+    loop i in [0..dc_warning_pos.len()): warn(dc_warning_pos[i], dc_warning_text[i])
+    dc_warning_pos = []
+    dc_warning_text = []
+
