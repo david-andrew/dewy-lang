@@ -29,7 +29,7 @@ GPT quota is limited: at most one Astra stream, at medium effort; Sol for review
 only.
 
 - Astra: callbacks round 2 (redundant snapshots, traversal inlining).
-- Opus: dogfooding round 2 (12 programs in new domains; round-1 leftovers).
+- Opus: fused workers: a load-independent critical-path gate, rebase.
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
 
@@ -142,7 +142,14 @@ only.
     - `loop [k @v] in dict` to update values in place;
     - strings: `is_empty`, prefix/suffix removal, `chars()` as graphemes;
       `any`/`all` without a predicate; `count(value)`;
-    - slicing past the end panics (Python clamps).
+    - slicing past the end panics (Python clamps);
+    - a documented stderr print (`eprintl`, or `print` with a target);
+    - comparing a union with one of its members (`back =? n`): `false`, not an
+      error?
+    - landed as a natural extension, revert if unwanted: `sqrt` of a quantity
+      halves even dimension powers (odd powers are an error).
+    - undocumented Jo helpers reach Dewy (`enumerate`, `zip`, `lines`,
+      `trim_start`): adopt or hide?
 15. Provisional file helpers: `copy_file`, `rename_file`, `make_dirs`,
     `walk_dir`, `glob`, `file_size`, `file_time`, `chmod`, `env`. Keep, rename
     or drop?
