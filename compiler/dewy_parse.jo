@@ -881,7 +881,17 @@ dw_effect_atom = (id0: int, entries: mut EffectSyntax[], empty: mut bool):
     kind = if name == "reads": EffectKind.read else: EffectKind.write
     entries.push(EffectSyntax(kind, dw_effect_path(dw_child(args, 0)), dewy_syntax[id].pos, negative))
 
+# (an effect row's syntax: no_effects, allocates, no ..., reads<...>, mutates<...>)
+dw_effect_syntax = (id0: int) -> bool:
+    id = dw_unwrap(id0)
+    name = dw_name(id)
+    name == "no_effects" or name == "allocates" or dw_op(id) == .kw_not or dw_op(id) == .type_apply and (dw_name(dw_child(id, 1)) == "reads" or dw_name(dw_child(id, 1)) == "mutates")
+
 dw_effect_result = (id: int, entries: mut EffectSyntax[], empty: mut bool) -> int:
+    # (`:>int64|Oops & no_effects`: `&` binds the row to the last alternative only)
+    if dw_op(id) == .pipe:
+        last = dw_unwrap(dw_child(id, 2))
+        if dw_op(last) == .amp and dw_effect_syntax(dw_child(last, 2)): fatal(dewy_syntax[last].pos, "effects describe the whole result: parenthesize the alternatives before them, `:>(A | B) & no_effects`")
     if dw_op(id) != .amp: return id
     # Scalar refinement intersection is still part of the return type.
     if dw_op(dw_grouped(dw_child(id, 2))) == .tilde: return id

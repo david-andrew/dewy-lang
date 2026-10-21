@@ -506,7 +506,8 @@ explicit: `mutates<x>` on a callback can become `mutates<y>` when invoked with
 `allocates` is bare; `allocates<Resource>` is invalid.
 
 The implementation-cost inventory supports wrapping fixed-width scalar work
-(including shifts), inline scalar records, bare handles, capture-free lambdas,
+(including shifts), inline scalar records and unions of them (`:>(int64 | Oops) &
+no_effects`; the parentheses are required), bare handles, capture-free lambdas,
 read-only array parameter borrowing, length/capacity inspection and scalar array
 iteration. Library bodies receive the same analysis as user functions. Intrinsic
 costs use resolved compiler identities. Dynamic growth, formatting, managed

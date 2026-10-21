@@ -555,6 +555,17 @@ effect_word_op = (op: Tok) -> bool:
 effect_plain = (t0: int, depth: int = 0) -> bool:
     t = representation_type(t0)
     if effect_scalar(t): return true
+    # (a union of plain members, `int64 | Oops`, is plain: a tag and a payload)
+    if depth <= 16 and tkind(t) == .enum_:
+        layout(t)
+        si = int(types[t].st)
+        if structs[si].drop_fn != 0: return false
+        loop v in [0..int(structs[si].nvariants)):
+            vi = int(structs[si].variants) + v
+            loop j in [0..int(variants[vi].nfields)):
+                fi = int(variants[vi].fields) + j
+                if fields[fi].boxed or not effect_plain(int(fields[fi].type), depth + 1): return false
+        return true
     if depth > 16 or tkind(t) != .struct_: return false
     layout(t)
     si = int(types[t].st)
@@ -883,6 +894,8 @@ effect_scan_node = (f: int, n: int):
     supported = false
     if k == .intrinsic: supported = effect_intrinsic_cost(nodes[n].aux as IN) >= 0
     else if k == .call and nodes[n].aux == 2: supported = effect_plain(ntype(n)) or ownership_scalar(ntype(n))
+    # (a plain member into a plain union: `return Oops` from `:>(int64|Oops)`)
+    else if k == .call and nodes[n].aux == 3: supported = effect_plain(ntype(n))
     else if k == .fnref or k == .lambda: supported = effect_bare(n)
     else if k == .for_: supported = tkind(ntype(int(nodes[n].a))) == .array and effect_scalar(telem(ntype(int(nodes[n].a)))) and not has_flag(n, NF_MUT)
     else if k == .int_lit or k == .bool_lit: supported = effect_scalar(ntype(n))
@@ -896,6 +909,7 @@ effect_scan_node = (f: int, n: int):
     else if k == .unary:
         supported = effect_scalar(ntype(n)) and (nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.tilde)))
     else if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_scalar(ntype(n)): supported = true
+
     else if k == .conv:
         supported = (effect_scalar(ntype(n)) and effect_scalar(ntype(int(nodes[n].a))) or is_fn_type(ntype(n)) and effect_bare(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)))
     if not supported: effect_opaque(f, n)

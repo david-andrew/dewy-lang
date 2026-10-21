@@ -1,0 +1,7 @@
+Oops = type of error
+f = (x:int64):>(int64|Oops) & no_effects => {
+    if x <? 0 return Oops
+    return x
+}
+printl(f(3))
+printl(f(-1))
