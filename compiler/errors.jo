@@ -179,6 +179,63 @@ forward_member = (n: int, receiver: int, t: int, expected: int) -> int:
     nodes[n] = nodes[bc_block([bc_let(name, receiver, pos), bc_stmt(chain, pos)], pos)]
     check_expr(n, 0)
 
+# A union or optional with an exception alternative and a value alternative.
+forwards_exceptions = (t0: int) -> bool:
+    t = prune(t0)
+    if not is_union(t) and tkind(t) != .opt: return false
+    exceptions = 0
+    loop member in value_members(t):
+        if member == T_NONE or exception_member(member): exceptions += 1
+    exceptions > 0 and exceptions < value_members(t).len()
+
+# `r.m(a)` with r forwarding: the receiver and then the arguments are
+# evaluated once; an exception or none receiver is the result, any other
+# alternative calls m. Only the receiver forwards, never arguments.
+forward_call = (n: int, name: int, args: int[], expected: int) -> int:
+    pos = nodes[n].pos
+    receiver = unnamed(args[0])
+    t = prune(ntype(receiver))
+    recv = "$receiver{n}"
+    add_flag(receiver, NF_CHECKED)
+    stmts = [bc_let(recv, receiver, pos)]
+    loop i in [1..args.len()):
+        a = args[i]
+        stmts.push(bc_let("$argument{n}_{i}", (if nodes[a].kind == .namedarg: int(nodes[a].a) else: a), pos))
+    members = value_members(t)
+    chain = 0
+    j = members.len() - 1
+    loop j >= 0:
+        member = members[j]
+        value = 0
+        if member == T_NONE: value = mk(.none_lit, pos)
+        else if exception_member(member): value = bc_ident(recv, pos)
+        else:
+            call_args = [bc_ident(recv, pos)]
+            loop i in [1..args.len()):
+                if nodes[args[i]].kind == .namedarg:
+                    named = mk(.namedarg, nodes[args[i]].pos)
+                    nodes[named].name = nodes[args[i]].name
+                    nodes[named].a = i32(bc_ident("$argument{n}_{i}", pos))
+                    call_args.push(named)
+                else: call_args.push(bc_ident("$argument{n}_{i}", pos))
+            value = bc_call(name_of(name), call_args, pos)
+        body = bc_block([bc_stmt(value, pos)], pos)
+        if chain == 0: chain = body
+        else:
+            condition = mk(.istype, pos)
+            nodes[condition].a = i32(bc_ident(recv, pos))
+            nodes[condition].b = i32(type_node_of(member, pos))
+            branch = mk(.if_, pos)
+            nodes[branch].a = i32(condition)
+            nodes[branch].b = i32(body)
+            nodes[branch].c = i32(chain)
+            nodes[branch].aux2 = -8  # explicit union join, not numeric branch promotion
+            chain = bc_block([bc_stmt(branch, pos)], pos)
+        j -= 1
+    stmts.push(bc_stmt(chain, pos))
+    nodes[n] = nodes[bc_block(stmts, pos)]
+    check_expr(n, expected)
+
 family_annotation = (t: int) -> bool:
     if not is_union(t) and tkind(t) != .opt: return false
     loop parent, family in nominal_families:

@@ -2086,6 +2086,9 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         # (f(e) with e a union and an overload of f for each of its members: chosen by what e holds)
         ud = union_dispatch(n, name, decls, args, expected)
         if ud >= 0: return ud
+        # (`lookup(id).scaled(2)`: an error or none receiver is the result as it is)
+        if ufcs and caller_dewy() and args.len() > 0 and nodes[unnamed(args[0])].type != 0 and forwards_exceptions(ntype(unnamed(args[0]))):
+            return forward_call(n, name, args, expected)
         if last_err_tie:
             last_err = ""
             last_err_pos = 0

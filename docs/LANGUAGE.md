@@ -1918,7 +1918,9 @@ Member reads on unions forward exception alternatives unchanged, including
 exceptions. Every ordinary alternative must provide the requested member. A
 narrowed concrete error exposes its payload normally. Arguments do not forward
 implicitly, and assignments through union routes require narrowing first.
-Forwarding method calls are not yet implemented.
+Method calls forward the same way: `lookup(id).scaled(2)` evaluates the receiver
+and then the arguments once, and gives the exception (or `none`) unchanged, or
+the call's result.
 
 `TextError` and `JsonError` belong to `error`, as do the file errors and
 `SpawnError` below. `main` still returns void or an integer exit code: handle

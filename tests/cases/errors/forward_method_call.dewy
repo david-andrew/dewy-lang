@@ -1,0 +1,14 @@
+E:type = type of error
+P:type = [x:int64]
+plus = (p:P n:int64):>int64 => p.x + n
+get = (i:int64):>P|E => if i >? 0 P[x=i] else E
+word = (i:int64):>string? => if i >? 0 "abc" else none
+let calls:int64 = 0
+arg = (n:int64):>int64 => { calls += 1; return n }
+main = () => {
+    printl"{get(3).plus(1)} {get(0).plus(1)}"
+    printl"{get(3).plus(n=arg(2))} {get(0).plus(arg(5))} {calls}"
+    printl"{word(1).upper()} {word(0).upper()}"
+    let r = get(0).plus(1)
+    printl(r is? E)
+}
