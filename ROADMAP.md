@@ -29,8 +29,8 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: dictionary layout and lookup speed (graph kernel, memory-bound).
-- Opus: reproducible builds across emission-worker counts.
+- Astra: effect rows slice 3 (shared invalidation facets and consumers).
+- Opus: trim the quick suite to budget.
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
 
@@ -75,9 +75,6 @@ only.
 - Quick suite over budget: trim `--quick` back toward ~25 s (move the slowest
   groups to the full suite).
 - Small items:
-  - reproducible builds: programs below the fused gate still compile to
-    different bytes at 1 vs N emission workers (the old emission path; forced
-    fused is stable);
   - `xs.swap` on refined arrays is rejected (goes through `data()`); indexed
     rewrite costs +62–93% on array_swap, so it needs a swap primitive;
   - maps fail their own index proofs under the strict policy;
@@ -193,6 +190,9 @@ Each tier-3 program's ladder note says which question holds it open.
   synthetic (33.9 M) before overhead.
 - x64 live-interval stream: no duplicated walk inside x64; realistic saving 1.9%
   synthetic / 0.5% self-build. Word-at-a-time emission: ~1%.
+- Dictionary 8-byte slots: graph default 1.56× → 1.83× C (dependent key reads).
+- Single-probe `d[k] += 1` (hand-expanded upper bound): dict_words 1.2× on long
+  runs; under the bar. Borrowed adjacency fetches are untested.
 - Triangular hash probing for graph: −0.3% instructions, default 7% slower.
   Graph is memory-bound (slot reads 43%, adjacency fetch/retain 24%); the next
   idea is contiguous adjacency storage/ownership.
