@@ -3352,6 +3352,11 @@ gen_intrinsic = (e: int) -> Val:
         at = prune(ntype(args[0]))
         et = int(types[at].elem)
         n = gen_expr(args[1]).v
+        if id == .truncate and files[pos_file(nodes[args[1]].pos)].is_dewy:
+            # (a count below zero keeps no elements and is a mistake, not `clear`)
+            iff(e_bin(.lts, VI, n, e_iconst(0)))
+            e_call_nr(rt("__panic"), [e_daddr(str_data("{loc_str(nodes[args[1]].pos)}: truncate keeps a count of elements, which cannot be negative"))], -1)
+            endc()
         pl = gen_place(args[0], true)
         arr_unique(pl, at)
         # (elements past an array's length are not zeroed: for elements that hold references

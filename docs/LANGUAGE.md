@@ -1227,7 +1227,8 @@ handle lookup is unnecessary.
 Arrays and records retain independent values when copied, including nested
 managed fields. Arrays support indexing, `.length`, and methods such as
 `.push(value)`, `.pop()`, `.pop(i)` (removes and returns the element at `i`),
-`.insert(value i)` (inserts before `i`), `.clear()` and `.truncate(count)`. `xs[1..3)` is an
+`.insert(value i)` (inserts before `i`), `.clear()` and `.truncate(count)` (a
+negative count panics). `xs[1..3)` is an
 exclusive-end slice; `xs[1..2]` includes index 2.
 
 A member call that needs no other arguments may omit its parentheses: `xs.pop`,
