@@ -34,7 +34,7 @@ def test_refinement_runtime_and_strict(compiler, tmp_path, release, source):
                                 env={**os.environ, 'DEWY_INTERNAL_FACT_POLICY': 'require-static'},
                                 capture_output=True, text=True)
         assert result.returncode != 0
-        assert 'refinement unknown:' in result.stderr and 'witness' in result.stderr, result.stderr
+        assert 'cannot prove refinement' in result.stderr and 'help:' in result.stderr, result.stderr
 
 
 @pytest.mark.core_quick

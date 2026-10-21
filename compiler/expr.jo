@@ -4930,7 +4930,8 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         # runtime/explicit captures are supported; proof-only captures await a
         # separate compile-time binding representation.
         if cx >= 0 and fns[int(ctxs[cx].inst)].caps.len() > captures_before and fact_open(args[0]):
-            fatal(nodes[n].pos, "assertion unknown: erased operand would introduce a runtime capture; witness at {pos_str(nodes[args[0]].pos)}")
+            err_notes.push((nodes[args[0]].pos, "note: an erased operand would introduce a runtime capture here"))
+            fatal(nodes[n].pos, "cannot prove assertion: unsupported erased operand; erased operand would introduce a runtime capture")
         fact_queue(n, args[0], if nargs == 2: args[1] else: 0)
     else if id == .print or id == .dewy_print:
         # (Dewy's print: no line break; its printl is the library's print)

@@ -221,4 +221,4 @@ main=()=>f(1)
 ])
 def test_erased_refinement_cast_needs_static_evidence(compiler, tmp_path, source):
     result = check(compiler, tmp_path, source + '\n')
-    assert result.returncode != 0 and 'refinement unknown' in result.stderr, result.stdout + result.stderr
+    assert result.returncode != 0 and 'cannot prove refinement' in result.stderr, result.stdout + result.stderr

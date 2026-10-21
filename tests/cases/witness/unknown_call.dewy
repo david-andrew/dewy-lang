@@ -1,0 +1,9 @@
+# quick
+grow=(@xs:array<int64>)=>{ xs.push(1) }
+pick=(@xs:array<int64> i:int64):>int64=>{
+    if i <? 0 or i >=? xs.length return 0
+    grow(@xs)
+    $assert i <? xs.length
+    return xs[i]
+}
+main=()=>{ let items:array<int64>=[1]; printl(pick(@items 0)) }

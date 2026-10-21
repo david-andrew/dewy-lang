@@ -1,0 +1,386 @@
+# Explanations of unproven obligations. Nothing here runs until a diagnostic
+# is about to be reported: dormant compilation builds no witness data. Notes
+# report retained evidence only (bounds, one tombstone per replaced route,
+# guard origins); a counterexample is always labeled a POSSIBLE witness.
+use 'ast.jo'
+use 'lex.jo'
+use 'types.jo'
+use 'util.jo'
+use 'expr.jo'
+use 'check.jo'
+use 'facts.jo'
+use 'refine.jo'
+
+struct WitSide:
+    value: int = 0
+    node: int = 0           # an ident place, for its tombstone
+    text: str = ""
+    length: bool = false    # the length of the array named by node
+    literal: bool = false
+
+# One note per span: a cause already shown at an event is not repeated.
+wit_note = (at: int, text: str):
+    if at > 0:
+        loop e in err_notes:
+            if e.0 == at: return
+    err_notes.push((at, "note: {text}"))
+
+# Repairs are current evidence or an explicit runtime check, never `$assert`.
+wit_help = (relation: str, runtime: bool = true):
+    want = if relation != "": "`{relation}`" else: "it"
+    if runtime: err_notes.push((-1, "help: establish {want} with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`"))
+    else: err_notes.push((-1, "help: establish {want} with a current guard or a stronger checked contract; erased proofs have no runtime fallback"))
+
+wit_op = (op: Tok) -> str:
+    if op == .lt: return "<?"
+    if op == .le: return "<=?"
+    if op == .gt: return ">?"
+    if op == .ge: return ">=?"
+    if op == .eq: return "=?"
+    "not=?"
+
+# The spelling of a simple place or literal; "" for anything else.
+wit_text = (e0: int, depth: int = 0) -> str:
+    e = e0
+    if e <= 0 or depth > 8: return ""
+    loop nodes[e].kind == .narrow or nodes[e].kind == .conv and (nodes[e].aux == i32(int(CV.int_)) or nodes[e].aux == i32(int(CV.none_)) or nodes[e].aux == i32(int(CV.refinement))):
+        e = int(nodes[e].a)
+    k = nodes[e].kind
+    if k == .ident and nodes[e].name != 0: return name_of(int(nodes[e].name))
+    if k == .int_lit and not has_flag(e, NF_U64): return "{nodes[e].ival}"
+    if k == .field and nodes[e].aux >= 0:
+        base = wit_text(int(nodes[e].a), depth + 1)
+        if base != "": return "{base}.{name_of(int(nodes[e].name))}"
+    if k == .intrinsic and nodes[e].aux == i32(int(IN.len)) and nkids(e) > 0:
+        base = wit_text(kid(e, 0), depth + 1)
+        if base != "": return "{base}.length"
+    if k == .index and nodes[e].b != 0:
+        base = wit_text(int(nodes[e].a), depth + 1)
+        index = wit_text(int(nodes[e].b), depth + 1)
+        if base != "" and index != "": return "{base}[{index}]"
+    ""
+
+# What happened at an invalidating event, as a noun.
+wit_event = (at: int) -> str:
+    if at <= 0: return "operation"
+    if nodes[at].kind == .exprstmt and nodes[at].a != 0: return wit_event(int(nodes[at].a))
+    k = nodes[at].kind
+    if k == .intrinsic:
+        loop i in intrinsics:
+            if i.id == (nodes[at].aux as IN) and i.arr: return i.name
+        return "operation"
+    if k == .call:
+        f = int(nodes[at].sym)
+        if nodes[at].aux == 0 and f > 0 and fns[f].decl != 0: return "call to {name_of(int(nodes[int(fns[f].decl)].name))}"
+        return "call"
+    if k == .assign: return "assignment"
+    if k == .while_ or k == .for_: return "loop"
+    if k == .if_ or k == .and_ or k == .or_: return "branch"
+    if k == .block: return "block's cleanup"
+    "statement"
+
+wit_reason = (b: FactBound) -> str:
+    if b.reason == .write: return "value changed by assignment"
+    if b.reason == .call: return "call invalidated a mutable or exposed root"
+    if b.reason == .callee: return "the callee's effects are not settled"
+    if b.reason == .join: return "a predecessor lacks the required evidence"
+    if b.reason == .loop_: return "loop may change the tested value"
+    if b.reason == .unsupported: return "unsupported symbolic operation"
+    if b.reason == .wrap: return "possible fixed-width wrap"
+    if b.reason == .budget: return "fact budget exhausted"
+    "missing scalar bound"
+
+# The retained event behind an unknown bound, at its own span.
+wit_cause = (b: FactBound, n: int):
+    w = b.witness
+    if w <= 0 or w == n or b.reason == .missing: return
+    what = wit_event(w)
+    if b.reason == .write: wit_note(nodes[w].pos, "the value was replaced by this {what}")
+    else if b.reason == .call: wit_note(nodes[w].pos, "this {what} may write a mutable or exposed root")
+    else if b.reason == .callee: wit_note(nodes[w].pos, "this {what} has no settled effect summary")
+    else if b.reason == .join: wit_note(nodes[w].pos, "a path into this {what} lacks the evidence")
+    else if b.reason == .loop_: wit_note(nodes[w].pos, "this loop may change the value")
+    else if b.reason == .unsupported: wit_note(nodes[w].pos, "this operation is outside the fact language")
+    else if b.reason == .wrap: wit_note(nodes[w].pos, "this fixed-width arithmetic may wrap")
+    else if b.reason == .budget and (nodes[w].kind == .while_ or nodes[w].kind == .for_): wit_note(nodes[w].pos, "the loop analysis budget ran out at this loop; what it changes is unknown")
+    else if b.reason == .budget: wit_note(nodes[w].pos, "the fact budget ran out here")
+
+# Function-level context: the generic instance being analyzed.
+wit_context = (contract: int):
+    if contract > 0: wit_note(contract, "the contract is declared here")
+    f = fact_owner
+    if f > 0 and f < fns.len() and fns[f].targs.len() > 0 and fns[f].use_pos > 0 and fns[f].decl != 0:
+        args = ""
+        loop i in 0.. and t in fns[f].targs:
+            if i > 0: args += " "
+            args += type_str(zonk(t), true)
+        wit_note(fns[f].use_pos, "in {name_of(int(nodes[int(fns[f].decl)].name))} with <{args}>, instantiated here")
+
+wit_projection = (s: FactState, base: int, selector: int) -> int:
+    if base == 0: return 0
+    loop p in s.projections:
+        if p.base == base and not p.element and p.selector == selector: return p.value
+    0
+
+# The tombstone of a side's place when it describes the side's CURRENT value:
+# (event, replaced value). The replaced value of a length is the old length.
+wit_tomb = (s: FactState, side: WitSide) -> (int, int):
+    e = side.node
+    if e <= 0 or nodes[e].kind != .ident: return (0, 0)
+    i = fact_binding(s, fact_place(e))
+    if i < 0 or s.bindings[i].event == 0: return (0, 0)
+    binding = s.bindings[i]
+    if not side.length:
+        if binding.value != side.value: return (0, 0)
+        return (binding.event, binding.prior)
+    if wit_projection(s, binding.value, -1) != side.value: return (0, 0)
+    (binding.event, wit_projection(s, binding.prior, -1))
+
+wit_value = (s: FactState, v: int, x: int) -> str:
+    t = if v > 0 and v < fact_terms.len(): representation_type(fact_terms[v].type) else: 0
+    if t == T_U64: return ""
+    if t == T_BOOL: return if x != 0: "true" else: "false"
+    "{x}"
+
+# Representation limits are not interesting evidence; only report real bounds.
+wit_known = (b: FactBound) -> str:
+    if b.lo == b.hi: return "is {b.lo}"
+    lo = b.lo > -(1 << 62)
+    hi = b.hi < (1 << 62)
+    if lo and hi: return "is between {b.lo} and {b.hi}"
+    if lo: return "is at least {b.lo}"
+    if hi: return "is at most {b.hi}"
+    ""
+
+wit_holds = (op: Tok, x: int, y: int) -> bool:
+    if op == .lt: return x < y
+    if op == .le: return x <= y
+    if op == .gt: return x > y
+    if op == .ge: return x >= y
+    if op == .eq: return x == y
+    x != y
+
+wit_candidates = (b: FactBound) -> int[]:
+    out: int[]
+    loop x in [0, 1, -1, b.lo, b.hi, b.lo + 1, b.hi - 1]:
+        if x < b.lo or x > b.hi or b.nz and x == 0 or out.contains(x): continue
+        out.push(x)
+    out
+
+# A valuation of the two sides that violates `a op b` and satisfies their
+# intervals and every direct difference row between them. Other constraints
+# are not solved, so this is only ever reported as a possible witness.
+wit_counterexample = (s: FactState, op: Tok, a: int, b: int) -> (bool, int, int):
+    if a == 0 or b == 0 or a == b: return (false, 0, 0)
+    loop x in wit_candidates(fact_bound(s, a)):
+        loop y in wit_candidates(fact_bound(s, b)):
+            if wit_holds(op, x, y): continue
+            ok = true
+            loop row in s.differences:
+                if row.a == a and row.b == b and (not fact_add_fits(x, -y) or x - y > row.limit): ok = false
+                if row.a == b and row.b == a and (not fact_add_fits(y, -x) or y - x > row.limit): ok = false
+            if ok: return (true, x, y)
+    (false, 0, 0)
+
+# The same evaluation, or two constants with one value (each literal capture
+# is its own term).
+wit_same = (s: FactState, u: int, v: int) -> bool:
+    if u == v: return true
+    x = fact_bound(s, u); y = fact_bound(s, v)
+    u != 0 and v != 0 and x.lo == x.hi and y.lo == y.hi and x.lo == y.lo
+
+# A guard that established `a op b` directly, or 0.
+wit_guard = (s: FactState, op: Tok, a: int, b: int) -> int:
+    loop row in s.differences:
+        if row.at <= 0: continue
+        if (op == .lt or op == .le) and wit_same(s, row.a, a) and wit_same(s, row.b, b) and row.limit <= (if op == .lt: -1 else: 0): return row.at
+        if (op == .gt or op == .ge) and wit_same(s, row.a, b) and wit_same(s, row.b, a) and row.limit <= (if op == .gt: -1 else: 0): return row.at
+    0
+
+# Stored atoms read `a < b`; show a constrained value before a literal bound.
+wit_orient = (op: Tok, a: WitSide, b: WitSide) -> (Tok, WitSide, WitSide):
+    if a.literal and not b.literal and (op == .lt or op == .le): return ((if op == .lt: Tok.gt else: Tok.ge), b, a)
+    (op, a, b)
+
+wit_relation_text = (op: Tok, a: WitSide, b: WitSide) -> str:
+    if a.text == "" or b.text == "": return ""
+    "{a.text} {wit_op(op)} {b.text}"
+
+wit_constant = (s: FactState, v: int) -> bool:
+    b = fact_bound(s, v)
+    v != 0 and b.lo == b.hi
+
+# Notes for one comparison obligation `a op b`: current values, a replaced
+# route and the stale fact it carried, the missing bound, a possible witness.
+# `s` holds the evidence; `cex` the state in which a possible witness is sought.
+wit_relation = (s: FactState, cex: FactState, op: Tok, a: WitSide, b: WitSide, refuted: bool, missing: str = "") -> str:
+    relation = wit_relation_text(op, a, b)
+    stale = false
+    loop side in [a, b]:
+        if side.text == "" or side.literal: continue
+        bound = fact_bound(s, side.value)
+        tomb = wit_tomb(s, side)
+        shown = if bound.lo == bound.hi: wit_value(s, side.value, bound.lo) else: ""
+        known = if shown != "": "is {shown}" else if bound.lo == bound.hi: "" else: wit_known(bound)
+        if tomb.0 != 0:
+            what = wit_event(tomb.0)
+            if shown != "": wit_note(nodes[tomb.0].pos, "{side.text} {known} after this {what}")
+            else: wit_note(nodes[tomb.0].pos, "{side.text} may have changed at this {what}")
+            if tomb.1 != 0 and not stale:
+                x = if side.value == a.value: tomb.1 else: a.value
+                y = if side.value == b.value: tomb.1 else: b.value
+                if fact_compare(s, op, x, y) == 1:
+                    stale = true
+                    fact = if relation != "": "`{relation}` fact" else: "fact"
+                    guard = wit_guard(s, op, x, y)
+                    wit_note((if guard > 0: nodes[guard].pos else: -1), "the earlier {fact} described the value before the {what}")
+        else if known != "": wit_note(-1, "{side.text} {known}")
+    if refuted or relation == "": return ""
+    which = missing
+    if which == "":
+        # `a < b` bounds a from above, unless a is the constant end.
+        upper = (op == .lt or op == .le) != wit_constant(s, a.value)
+        which = if op == .eq or op == .ne: "bound" else if upper: "upper bound" else: "lower bound"
+    wit_note(-1, "missing {which}: nothing establishes `{relation}` here")
+    found = wit_counterexample(cex, op, a.value, b.value)
+    if found.0:
+        shown = ""
+        if not a.literal: shown = "{a.text} = {wit_value(s, a.value, found.1)}"
+        if not b.literal:
+            if shown != "": shown += ", "
+            shown += "{b.text} = {wit_value(s, b.value, found.2)}"
+        if shown != "": wit_note(-1, "possible witness (consistent with the known bounds, not an observed execution): {shown}")
+    which
+
+# Unknown obligations: a reason, the retained cause, context and a repair.
+wit_unknown = (n: int, b: FactBound, what: str, contract: int = 0, relation: str = "", missing: str = "", runtime: bool = true):
+    wit_cause(b, n)
+    wit_context(contract)
+    wit_help(relation, runtime)
+    why = if b.reason == .missing and missing != "": "missing {missing}" else: wit_reason(b)
+    fatal(nodes[n].pos, "cannot prove {what}: {why}")
+
+wit_side = (value: int, node0: int) -> WitSide:
+    node = node0
+    loop node > 0 and (nodes[node].kind == .narrow or nodes[node].kind == .conv and (nodes[node].aux == i32(int(CV.int_)) or nodes[node].aux == i32(int(CV.none_)))): node = int(nodes[node].a)
+    side = WitSide(value, node, wit_text(node))
+    if node > 0 and nodes[node].kind == .int_lit: side.literal = true
+    if node > 0 and nodes[node].kind == .intrinsic and nodes[node].aux == i32(int(IN.len)) and nkids(node) > 0:
+        side.node = kid(node, 0)
+        side.length = true
+    side
+
+# `$assert` and the comparison it tests. `paths.no` is the violating state.
+wit_assertion = (cond: int, message: int, paths: FactPaths):
+    refuted = not paths.yes.live
+    s = paths.no
+    relation = ""
+    missing = ""
+    reason = paths.reason
+    c = cond
+    if paths.value > 0 and nodes[c].kind == .binary and fact_comparison(nodes[c].op as Tok):
+        term = fact_terms[paths.value]
+        if term.op == (nodes[c].op as Tok) and term.origin == c:
+            a = wit_side(term.a, int(nodes[c].a))
+            b = wit_side(term.b, int(nodes[c].b))
+            relation = wit_relation_text(term.op, a, b)
+            if refuted or reason.reason != .unsupported and reason.reason != .wrap and reason.reason != .budget: missing = wit_relation((if paths.entry.live: paths.entry else: s), s, term.op, a, b, refuted)
+    if refuted:
+        wit_context(0)
+        wit_help(relation)
+        assertion_refuted(cond, message)
+    wit_unknown(cond, reason, "assertion", 0, relation, missing)
+
+# A builtin index: refuted (some bound is false) or unknown (some is missing).
+wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int):
+    a = int(nodes[n].a)
+    base = wit_text(a)
+    i = wit_side(index, int(nodes[n].b))
+    zero = WitSide(fact_constant(s, 0), 0, "0", false, true)
+    size = WitSide(length, a, (if base != "": "{base}.length" else: ""), true)
+    relation = wit_relation_text(.lt, i, size)
+    if lo == 0 or hi == 0:
+        if lo == 0: wit_relation(s, s, .ge, i, zero, true)
+        else: wit_relation(s, s, .lt, i, size, true)
+        wit_context(0)
+        wit_help(relation)
+        fatal(nodes[n].pos, "index is not in bounds")
+    b = fact_bound(s, index)
+    if b.reason == .unsupported or b.reason == .wrap or b.reason == .budget or b.reason == .callee:
+        wit_unknown(n, b, "index is in bounds", 0, relation)
+    if lo != 1: wit_relation(s, s, .ge, i, zero, false, "lower bound")
+    if hi != 1:
+        wit_relation(s, s, .lt, i, size, false, "upper bound")
+
+        wit_cause(fact_bound(s, length), n)
+    wit_context(0)
+    wit_help(relation)
+    which = if lo != 1 and hi != 1: "lower and upper bounds" else if lo != 1: "lower bound" else: "upper bound"
+    fatal(nodes[n].pos, "cannot prove index is in bounds: missing {which}")
+
+wit_divisor = (n: int, s: FactState, divisor: int, zero: int, operand: int, refuted: bool):
+    side = wit_side(divisor, operand)
+    nil = WitSide(zero, 0, "0", false, true)
+    missing = wit_relation(s, s, .ne, side, nil, refuted)
+    wit_context(0)
+    if refuted:
+        wit_help(wit_relation_text(.ne, side, nil))
+        fatal(nodes[n].pos, "divisor refuted: zero")
+    wit_unknown(n, fact_bound(s, divisor), "divisor is nonzero", 0, wit_relation_text(.ne, side, nil), missing)
+
+wit_ref_text = (term: RefTerm, self: str) -> str:
+    text = ""
+    if term.kind == 0: text = self
+    else if term.kind == 1: return if term.unsigned: "" else: "{term.value}"
+    else if term.kind == 3: text = name_of(int(locals[term.value].name))
+    if text == "": return ""
+    loop selector in term.path: text += if selector == -1: ".length" else: ".{name_of(selector)}"
+    text
+
+wit_ref_side = (term: RefTerm, value: int, n: int, self: str) -> WitSide:
+    if term.kind == 0 and term.path.len() == 0:
+        side = wit_side(value, int(nodes[n].a))
+        if side.text == "": side.text = self
+        return side
+    WitSide(value, 0, wit_ref_text(term, self), false, term.kind == 1)
+
+# A refinement obligation at its use, with the contract's declaration span.
+wit_refinement = (n: int, t: int, atom: RefAtom, self: int, a: int, b: int, s: FactState, refuted: bool):
+    shown = wit_text(int(nodes[n].a))
+    if shown == "": shown = "the value"
+    x = wit_ref_side(atom.a, a, n, shown)
+    y = wit_ref_side(atom.b, b, n, shown)
+    op = atom.op
+    # Contracts are stored as `a < b`; show the constrained value first.
+    if atom.b.kind == 0 and atom.a.kind != 0 and (op == .lt or op == .le):
+        swap = x; x = y; y = swap
+        op = if op == .lt: Tok.gt else: Tok.ge
+    relation = wit_relation_text(op, x, y)
+    missing = wit_relation(s, s, op, x, y, refuted)
+    contract = ref_spans.get(int(types[t].st)) ?? 0
+    if refuted:
+        wit_context(contract)
+        wit_help(relation)
+        fatal(nodes[n].pos, "refinement refuted: {shown} violates the declared contract")
+    what = if relation != "": "refinement `{relation}`" else: "refinement"
+    wit_unknown(n, fact_bound(s, self), what, contract, relation, missing)
+
+wit_formal_text = (term: RefTerm, f: int, self: int) -> str:
+    index = if term.kind == 0: self else if term.kind == 2 or term.kind == 5: term.value else: -1
+    if term.kind == 1 or term.kind == 3: return wit_ref_text(term, "")
+    if f <= 0 or index < 0 or index >= fns[f].params.len(): return ""
+    text = name_of(int(locals[fns[f].params[index]].name))
+    loop selector in term.path: text += if selector == -1: ".length" else: ".{name_of(selector)}"
+    text
+
+# A `$proof` precondition or exit proposition, named by the proof's formals.
+wit_proof = (n: int, s: FactState, atom: RefAtom, a: int, b: int, f: int, self: int, refuted: bool, what: str):
+    o = wit_orient(atom.op, WitSide(a, 0, wit_formal_text(atom.a, f, self), false, atom.a.kind == 1), WitSide(b, 0, wit_formal_text(atom.b, f, self), false, atom.b.kind == 1))
+    relation = wit_relation_text(o.0, o.1, o.2)
+    missing = wit_relation(s, s, o.0, o.1, o.2, refuted)
+    contract = if f > 0 and fns[f].decl != 0: nodes[int(fns[f].decl)].pos else: 0
+    if refuted:
+        wit_context(contract)
+        wit_help(relation, false)
+        fatal(nodes[n].pos, "{what} refuted")
+    wit_unknown(n, fact_bound(s, if wit_constant(s, a): b else: a), what, contract, relation, missing, false)

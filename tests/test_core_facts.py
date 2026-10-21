@@ -44,9 +44,9 @@ def test_scalar_fact_check_diagnostics(compiler, name):
 @pytest.mark.core_quick
 @pytest.mark.parametrize('command', ['check', 'build'])
 @pytest.mark.parametrize('name,expected', [('guarded_division', None),
-                                          ('policy_unknown', 'divisor unknown: missing scalar bound'),
+                                          ('policy_unknown', 'cannot prove divisor is nonzero: missing bound'),
                                           ('policy_refuted', 'divisor refuted: zero'),
-                                          ('policy_math_result', 'division result unknown: possible fixed-width wrap')])
+                                          ('policy_math_result', 'cannot prove division result: possible fixed-width wrap')])
 def test_scalar_fact_internal_policy(compiler, tmp_path, command, name, expected):
     arguments = [compiler, command, CASES / f'{name}.dewy']
     if command == 'build':

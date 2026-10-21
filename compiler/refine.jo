@@ -9,6 +9,7 @@ use 'facts.jo'
 use 'lower.jo'
 use 'ir.jo'
 use 'util.jo'
+use 'witness.jo'
 
 struct RefTerm:
     kind: int = 0 # self, literal, formal ordinal, stable lexical declaration, type limit
@@ -22,6 +23,8 @@ struct RefAtom:
     b: RefTerm
 
 ref_predicates: RefAtom[][] = [[]]
+# Declaration spans for diagnostics only; never part of predicate identity.
+ref_spans: {int: int} = {}
 refine_active = false
 ref_addr_type = 0
 ref_addr_max = () -> int: if ptr_size == 4: 4294967295 else: 281474976710655
@@ -63,6 +66,11 @@ refine_reset = ():
     refine_self = 0
     refine_requests = []
     refine_owners = {}
+    ref_spans = {}
+
+ref_span_copy = (from: int, to: int):
+    if from != to and not ref_spans.has(to):
+        if let at = ref_spans.get(from): ref_spans[to] = at
 
 ref_term_less = (a: RefTerm, b: RefTerm) -> bool:
     if a.kind != b.kind: return a.kind < b.kind
@@ -90,6 +98,7 @@ ref_intern = (atoms0: RefAtom[]) -> int:
 
 mk_refined = (base0: int, predicate: int) -> int:
     base = prune(base0)
+    declared = predicate
     let predicate = predicate
     if types[base].kind == .refined:
         predicate = ref_intern(ref_predicates[int(types[base].st)] + ref_predicates[predicate])
@@ -104,6 +113,7 @@ mk_refined = (base0: int, predicate: int) -> int:
             if term.kind == 4: dependencies.push(term.value)
         normalized.push(atom)
     predicate = ref_intern(normalized)
+    ref_span_copy(declared, predicate)
     if not is_int(base) and types[base].kind != .array and not has_var(base): fatal(-1, "refinement requires an integer or array base")
     if not has_var(base) and is_int(base):
         loop atom in ref_predicates[predicate]:
@@ -235,7 +245,9 @@ resolve_refinement = (n: int) -> int:
             actual = ref_projection_type(root, term.path, nodes[n].pos)
             if not has_var(actual) and not is_int(actual): fatal(nodes[n].pos, "refinement comparisons require scalar or length projections")
             if not has_var(actual) and not has_var(expected) and not type_eq(actual, expected): fatal(nodes[n].pos, "dependent scalar refinement requires matching integer representations")
-    mk_refined(base, ref_intern(atoms))
+    predicate = ref_intern(atoms)
+    if not ref_spans.has(predicate): ref_spans[predicate] = nodes[n].pos
+    mk_refined(base, predicate)
 
 refine_storage = (n: int, fallback: int) -> int:
     if nodes[n].kind == .field:
@@ -326,12 +338,10 @@ ref_check = (n: int, self: int, args: int[], s: mut FactState):
         a = ref_value(atom.a, self, args, base, s)
         b = ref_value(atom.b, self, args, base, s)
         truth = fact_compare(s, atom.op, a, b)
-        if truth == 0: fatal(nodes[n].pos, "refinement refuted; witness: captured value violates declared contract")
+        if truth == 0: wit_refinement(n, t, atom, self, a, b, s, true)
         if truth < 0:
             proven = false
-            if fact_policy == .RequireStatic:
-                bound = fact_bound(s, self)
-                fact_unknown(n, bound, "refinement")
+            if fact_policy == .RequireStatic: wit_refinement(n, t, atom, self, a, b, s, false)
     # Keep metadata even when erased so calls can publish checked guarantees.
     nodes[n].ival = if proven: 1 else: 0
     fact_validated[n] = true
@@ -523,7 +533,9 @@ ref_subst = (predicate: int, args: int[], zonking: bool = false) -> int:
         if atom.a.kind == 4: atom.a.value = if zonking: zonk(atom.a.value) else: subst(atom.a.value, args)
         if atom.b.kind == 4: atom.b.value = if zonking: zonk(atom.b.value) else: subst(atom.b.value, args)
         atoms.push(atom)
-    ref_intern(atoms)
+    result = ref_intern(atoms)
+    ref_span_copy(predicate, result)
+    result
 
 # Wrapped element contracts and record fields retain storage authority.
 # Callable contracts inside an aggregate remain value types.

@@ -2148,9 +2148,13 @@ corresponding current projections. Reserve and element replacement preserve the
 containing length. Calls and nonlinear inference remain unsupported in erased
 symbolic operands. An erased assertion cannot introduce
 a new implicit closure capture; existing runtime captures remain usable.
-An unknown assertion reports the
-missing evidence or its invalidation witness. A false condition reports
-`assertion refuted`; failed closed evaluation reports the source operation and
+An unknown assertion reports `cannot prove assertion` with its reason
+(a missing bound, an invalidating call, assignment, resize or loop, a path
+lacking evidence, possible wrap, an unsupported operation or an exhausted
+budget). Notes point at the invalidating event and at the earlier guard whose
+fact described the replaced value, and may show a *possible* witness: values
+consistent with the known bounds, never a claim about a real execution. A false
+condition reports `assertion refuted`; failed closed evaluation reports the source operation and
 compile-time call chain. Ordinary division and bounds checks remain runtime
 checks; these facts do not change their optimization.
 It never becomes a runtime check. The directive owns the comma

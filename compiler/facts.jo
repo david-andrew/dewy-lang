@@ -15,9 +15,10 @@ use 'proofs.jo'
 use 'places.jo'
 use 'effects.jo'
 use 'ownership.jo'
+use 'witness.jo'
 
 enum FactPolicy: RuntimeAllowed, RequireStatic
-enum FactReason: missing, write, call, join, loop_, unsupported, wrap, budget
+enum FactReason: missing, write, call, join, loop_, unsupported, wrap, budget, callee
 
 struct FactBound:
     lo: int = -9223372036854775807 - 1
@@ -33,9 +34,13 @@ struct FactTerm:
     origin: int = 0
     type: int = 0
 
+# One tombstone per invalidated route: the event that last replaced the
+# place and the value it replaced. Witnesses only; never evidence.
 struct FactBinding:
     place: PlaceIdentity
     value: int
+    event: int = 0
+    prior: int = 0
 
 struct FactProjection:
     base: int
@@ -49,6 +54,7 @@ struct FactDifference:
     a: int
     b: int
     limit: int
+    at: int = 0
 
 struct FactState:
     conditional: ResultEvidence[]
@@ -148,7 +154,7 @@ fact_pure = (e: int, budget: mut int) -> int:
 
 fact_queue = (n: int, cond: int, message: int):
     if message != 0 and (nodes[message].kind != .str_lit or nodes[message].aux != 0):
-        fatal(nodes[message].pos, "assertion unknown: unsupported symbolic message; erased operands must be pure scalar fact terms")
+        fatal(nodes[message].pos, "cannot prove assertion: unsupported symbolic message; erased operands must be pure scalar fact terms")
     # Keep settled narrowing tests, but never erase an effectful tested value.
     if nodes[cond].kind == .istype and nodes[cond].aux == -3:
         value = int(nodes[cond].a)
@@ -171,7 +177,9 @@ fact_queue = (n: int, cond: int, message: int):
     bad = fact_pure(cond, budget)
     if budget < 0: fact_unknown(cond, FactBound(reason = .budget, witness = bad))
     if bad != 0:
-        fatal(nodes[bad].pos, "assertion unknown: unsupported symbolic operand; erased operands must be pure scalar fact terms; witness at {pos_str(nodes[bad].pos)}")
+        if bad != cond: wit_note(nodes[bad].pos, "this operand is outside the fact language")
+        wit_help("")
+        fatal(nodes[cond].pos, "cannot prove assertion: unsupported symbolic operand; erased operands must be pure scalar fact terms")
     owner = if cx >= 0: int(ctxs[cx].inst) else: 0
     fact_requests.push(FactRequest(n, owner))
 
@@ -218,6 +226,14 @@ fact_bind = (s: mut FactState, p: PlaceIdentity, v: int):
     i = fact_binding(s, p)
     if i >= 0: s.bindings[i].value = v
     else if s.bindings.len() < FACT_CAP: s.bindings.push(FactBinding(p, v))
+
+# A replacement keeps the replaced value as the route's single tombstone.
+fact_rebind = (s: mut FactState, p: PlaceIdentity, v: int, at: int, prior: int):
+    fact_bind(s, p, v)
+    i = fact_binding(s, p)
+    if i >= 0 and at != 0:
+        s.bindings[i].event = at
+        s.bindings[i].prior = prior
 
 # Aggregates have immutable evaluated identities too. A projection belongs to
 # that value, never to a source spelling; a store rebuilds the enclosing value.
@@ -306,7 +322,7 @@ fact_store_route = (s: mut FactState, route: FactRoute, value0: int, at: int):
         value = fact_replace(s, values[i], route.selectors[i], route.elements[i], value, t)
         i -= 1
     if fact_exposed(p): fact_forget(s, at, .write)
-    fact_bind(s, p, value)
+    fact_rebind(s, p, value, at, if values.len() > 0: values[0] else: 0)
 
 fact_store = (s: mut FactState, e: int, value: int, at: int):
     route = fact_route(e, s)
@@ -322,15 +338,18 @@ fact_forget = (s: mut FactState, at: int, reason: FactReason, all: bool = false)
         if not all and not fact_exposed(p): continue
         t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
         v = fact_new(s, fact_domain(t, reason, at), FactTerm(type = t))
-        s.bindings[i].value = v
+        s.bindings[i] = FactBinding(p, v, at, s.bindings[i].value)
 
 # A settled summary can preserve exposed roots across read-only calls.
 # Opaque/callback/hidden-helper effects still invalidate every exposed root.
 fact_call_effects = (n: int, s: mut FactState):
-    if nodes[n].aux != 0 or not effects_demand(int(nodes[n].sym)):
+    f = int(nodes[n].sym)
+    if nodes[n].aux != 0 or not effects_demand(f):
         fact_forget(s, n, .call)
         return
-    f = int(nodes[n].sym)
+    if fns[f].body != 0 and fns[f].state != 2:
+        fact_forget(s, n, .callee)
+        return
     events = effect_summaries[f].events
     loop event in events:
         if event.atom.kind == .opaque or event.atom.kind == .escape:
@@ -349,7 +368,7 @@ fact_call_effects = (n: int, s: mut FactState):
         i = fact_binding(s, p)
         if i >= 0:
             t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
-            s.bindings[i].value = fact_new(s, fact_domain(t, .call, n), FactTerm(type = t))
+            s.bindings[i] = FactBinding(p, fact_new(s, fact_domain(t, .call, n), FactTerm(type = t)), n, if s.bindings[i].event == n: s.bindings[i].prior else: s.bindings[i].value)
 
 fact_truth = (s: FactState, v: int) -> int:
     b = fact_bound(s, v)
@@ -357,18 +376,18 @@ fact_truth = (s: FactState, v: int) -> int:
     if b.nz or b.lo > 0 or b.hi < 0: return 1
     -1
 
-fact_difference = (s: mut FactState, a: int, b: int, limit: int):
+fact_difference = (s: mut FactState, a: int, b: int, limit: int, at: int = 0):
     if a == 0 or b == 0 or a == b: return
     incident_a = 0; incident_b = 0
     loop i in [0..s.differences.len()):
         row = s.differences[i]
         if row.a == a and row.b == b:
-            s.differences[i].limit = min(row.limit, limit)
+            if limit < row.limit: s.differences[i] = FactDifference(a, b, limit, at)
             return
         if row.a == a or row.b == a: incident_a += 1
         if row.a == b or row.b == b: incident_b += 1
     if s.differences.len() < 256 and incident_a < 8 and incident_b < 8:
-        s.differences.push(FactDifference(a, b, limit))
+        s.differences.push(FactDifference(a, b, limit, at))
 
 # Bounded single-source relaxation, never an all-pairs closure. Exhaustion
 # simply declines additional inference; every discovered path is still valid.
@@ -527,8 +546,8 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
     x = fact_bound(s, a)
     y = fact_bound(s, b)
     if op == .eq:
-        fact_difference(s, a, b, 0)
-        fact_difference(s, b, a, 0)
+        fact_difference(s, a, b, 0, t.origin)
+        fact_difference(s, b, a, 0, t.origin)
         lo = max(x.lo, y.lo)
         hi = min(x.hi, y.hi)
         x.lo = lo; y.lo = lo; x.hi = hi; y.hi = hi
@@ -538,7 +557,7 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
         if x.lo == 0 and x.hi == 0: y.nz = true
     else if op == .lt or op == .le:
         d = if op == .lt: 1 else: 0
-        fact_difference(s, a, b, -d)
+        fact_difference(s, a, b, -d, t.origin)
         if d == 1 and (y.hi == FACT_MIN or x.lo == FACT_MAX): s.live = false
         else:
             x.hi = min(x.hi, y.hi - d)
@@ -575,6 +594,7 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         v = binding.value
         if v != other: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at))
         fact_bind(s, binding.place, v)
+        if v == binding.value and b.bindings[j].event == binding.event: fact_rebind(s, binding.place, v, binding.event, binding.prior)
         left.push(binding.value); right.push(other); merged.push(v)
     # Match projections of merged aggregate values, including current lengths.
     cursor = 0
@@ -593,12 +613,12 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
     # Select rows from one predecessor, rename into the merge frame, and
     # require a proof from the other. Branch-local evaluations never escape.
     loop row in a.differences:
-        if fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(b, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit)
+        if fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(b, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
         aa = fact_rename(row.a, left, merged, s)
         bb = fact_rename(row.b, left, merged, s)
         ra = fact_rename(row.a, left, right, b)
         rb = fact_rename(row.b, left, right, b)
-        if aa != 0 and bb != 0 and fact_distance(b, ra, rb, row.limit): fact_difference(s, aa, bb, row.limit)
+        if aa != 0 and bb != 0 and fact_distance(b, ra, rb, row.limit): fact_difference(s, aa, bb, row.limit, row.at)
     s
 
 fact_rename = (v: int, before: int[], after: int[], shared: FactState) -> int:
@@ -608,50 +628,42 @@ fact_rename = (v: int, before: int[], after: int[], shared: FactState) -> int:
     if fact_slot(shared, v) >= 0: return v
     0
 
-fact_unknown = (n: int, b: FactBound, what: str = "assertion"):
-    why = "missing scalar bound"
-    if b.reason == .write: why = "value changed by assignment"
-    else if b.reason == .call: why = "call invalidated a mutable or exposed root"
-    else if b.reason == .join: why = "a predecessor lacks the required evidence"
-    else if b.reason == .loop_: why = "loop may change the tested value"
-    else if b.reason == .unsupported: why = "unsupported symbolic operation"
-    else if b.reason == .wrap: why = "possible fixed-width wrap"
-    else if b.reason == .budget: why = "scalar fact budget exhausted"
-    witness = if b.witness != 0: " at {pos_str(nodes[b.witness].pos)}" else: " at {pos_str(nodes[n].pos)}"
-    fatal(nodes[n].pos, "{what} unknown: {why}; witness{witness}")
+fact_unknown = (n: int, b: FactBound, what: str = "assertion", contract: int = 0): wit_unknown(n, b, what, contract)
 
 # Conservative loop fallback: pre-kill every syntactically changing route.
 # This is also used for iterators whose backedge transfer is not modeled.
-fact_changes = (n: int, s: mut FactState, at: int):
+fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     if n == 0: return
     k = nodes[n].kind
     if k == .assign:
         p = fact_place(int(nodes[n].a))
         if p.declaration != 0:
-            if fact_exposed(p): fact_forget(s, at, .loop_)
-            v = fact_new(s, fact_domain(ntype(int(nodes[n].a)), .loop_, at))
+            if fact_exposed(p): fact_forget(s, at, reason)
+            v = fact_new(s, fact_domain(ntype(int(nodes[n].a)), reason, at))
             fact_bind(s, p, v)
-        else: fact_forget(s, at, .loop_, true)
+        else: fact_forget(s, at, reason, true)
     if k == .intrinsic:
         id = nodes[n].aux as IN
         if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .extend or id == .resize or id == .truncate or id == .setlen:
             root = place_root(kid(n, 0))
             p = fact_place(root)
-            if p.declaration == 0: fact_forget(s, at, .loop_, true)
-            else: fact_bind(s, p, fact_new(s, fact_domain(ntype(root), .loop_, at), FactTerm(type = ntype(root))))
-    if k == .call or k == .intrinsic or k == .lambda or k == .partial: fact_forget(s, at, .loop_)
+            if p.declaration == 0: fact_forget(s, at, reason, true)
+            else: fact_bind(s, p, fact_new(s, fact_domain(ntype(root), reason, at), FactTerm(type = ntype(root))))
+    if k == .call or k == .intrinsic or k == .lambda or k == .partial: fact_forget(s, at, reason)
     mask = isolation_children(k)
-    if mask < 0: fact_forget(s, at, .loop_, true); return
-    if mask & 1 != 0: fact_changes(int(nodes[n].a), s, at)
-    if mask & 2 != 0: fact_changes(int(nodes[n].b), s, at)
-    if mask & 4 != 0: fact_changes(int(nodes[n].c), s, at)
+    if mask < 0: fact_forget(s, at, reason, true); return
+    if mask & 1 != 0: fact_changes(int(nodes[n].a), s, at, reason)
+    if mask & 2 != 0: fact_changes(int(nodes[n].b), s, at, reason)
+    if mask & 4 != 0: fact_changes(int(nodes[n].c), s, at, reason)
     if mask & 16 != 0:
-        loop c in kids(n): fact_changes(c, s, at)
+        loop c in kids(n): fact_changes(c, s, at, reason)
 
 struct FactPaths:
     yes: FactState
     no: FactState
     reason: FactBound
+    value: int = 0      # the captured comparison of a leaf condition
+    entry: FactState = FactState(live = false)  # its state before assumption, for `$assert` diagnostics
 
 # Split during evaluation: RHS effects see the appropriate LHS edge, and
 # success can only narrow the old captured value, not its replacement.
@@ -670,12 +682,13 @@ fact_condition = (n: int, entry: FactState) -> FactPaths:
     v = fact_capture(n, yes)
     no = yes
     reason = fact_bound(yes, v)
+    entry_state = if fact_query: yes else: FactState(live = false)
     fact_assume(yes, v, true)
     fact_assume(no, v, false)
     if result_active:
         result_activate(yes)
         result_activate(no)
-    FactPaths(yes, no, reason)
+    FactPaths(yes, no, reason, v, entry_state)
 
 fact_unmodeled = (s: mut FactState, n: int, reason: FactReason) -> int:
     b = fact_domain(ntype(n), reason, n)
@@ -718,8 +731,7 @@ fact_divisor = (s: mut FactState, n: int, a: int, b: int, modulo: bool):
     operand = if nodes[n].kind == .call: kid(n, 1) else: int(nodes[n].b)
     zero = fact_constant(s, ref_encoded(0, ntype(operand)))
     truth = fact_compare(s, .ne, b, zero)
-    if truth == 0: fatal(nodes[n].pos, "divisor refuted: zero")
-    if truth < 0: fact_unknown(n, fact_bound(s, b), "divisor")
+    if truth != 1: wit_divisor(n, s, b, zero, operand, truth == 0)
     # Fixed-width signed division wraps MIN/-1 in the existing lowerer.
     # Mathematical int currently has a separate representability obligation.
     if not modulo and prune(ntype(n)) == T_MATH_INT:
@@ -805,7 +817,7 @@ fact_while = (n: int, s: mut FactState):
         # Restart at top for every syntactically changing route, then validate
         # normally. Speculative obligation answers are never published.
         header = entry
-        fact_changes(n, header, n)
+        fact_changes(n, header, n, .budget)
     paths = fact_condition(int(nodes[n].a), header)
     edges = fact_loop_body(n, paths.yes)
     s = fact_join(paths.no, edges.exits, n)
@@ -876,8 +888,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
                 zero = fact_constant(s, 0)
                 lo = fact_compare(s, .le, zero, index)
                 hi = fact_compare(s, .lt, index, length)
-                if lo == 0 or hi == 0: fatal(nodes[n].pos, "index is not in bounds; length changed or index is outside the current value")
-                if lo != 1 or hi != 1: fact_unknown(n, fact_bound(s, length), "index")
+                if lo != 1 or hi != 1: wit_index(n, s, index, length, lo, hi)
             return fact_project(s, base, index, true, int(types[t].elem))
         return fact_unmodeled(s, n, .unsupported)
     if k == .array and nodes[n].aux == 0:
@@ -1097,8 +1108,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
             fact_query = true
             paths = fact_condition(kid(n, 0), s)
             fact_query = false
-            if paths.yes.live and paths.no.live: fact_unknown(kid(n, 0), paths.reason)
-            if not paths.yes.live: assertion_refuted(kid(n, 0), if nkids(n) > 1: kid(n, 1) else: 0)
+            if not paths.yes.live or paths.no.live: wit_assertion(kid(n, 0), (if nkids(n) > 1: kid(n, 1) else: 0), paths)
             return 0
         if id == .runtime_assert or id == .assert:
             paths = fact_condition(kid(n, 0), s)
@@ -1195,7 +1205,7 @@ facts_finalize = ():
         loop f in [1..fns.len()):
             if fns[f].body != 0 and fns[f].state == 2 and not pos_in_lib(nodes[int(fns[f].body)].pos): demanded[f] = true
     loop f, _ in demanded:
-        if f <= 0 or f >= isolation_limit or fns[f].state != 2: fatal(-1, "assertion unknown: unsettled checked body")
+        if f <= 0 or f >= isolation_limit or fns[f].state != 2: fatal(-1, "cannot prove assertion: unsettled checked body")
         fact_owner = f
         fact_terms = [FactTerm()]
         state = FactState()

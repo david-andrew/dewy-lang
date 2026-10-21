@@ -1,0 +1,9 @@
+forbidden=(@xs:array<int64>):>int64=>{
+    if xs.length =? 0 return 0
+    let i:int64=0
+    if i >=? xs.length return 0
+    xs.clear()
+    $assert xs[i] >=? 0
+    return 0
+}
+main=()=>{ let items:array<int64>=[1]; printl(forbidden(@items)) }

@@ -8,6 +8,7 @@ use 'isolation.jo'
 use 'types.jo'
 use 'lex.jo'
 use 'util.jo'
+use 'witness.jo'
 
 proof_active = false
 proof_pending = false
@@ -106,18 +107,17 @@ proof_prepare = ():
 proof_predicate = (f: int) -> int:
     ref_subst(proof_predicates[int(fns[f].decl)], fns[f].targs)
 
-proof_require = (predicate: int, values: int[], params: int[], n: int, s: mut FactState, what: str):
+proof_require = (predicate: int, values: int[], params: int[], n: int, s: mut FactState, what: str, f: int = 0):
     if not s.live: return
     loop atom in ref_predicates[predicate]:
         base = proof_atom_type(atom, params, nodes[n].pos)
         a = ref_value(atom.a, 0, values, base, s)
         b = ref_value(atom.b, 0, values, base, s)
         truth = fact_compare(s, atom.op, a, b)
-        if truth == 0: fatal(nodes[n].pos, "proof {what} refuted")
-        if truth != 1: fatal(nodes[n].pos, "cannot prove proof {what}")
+        if truth != 1: wit_proof(n, s, atom, a, b, f, -1, truth == 0, "proof {what}")
 
 proof_exit = (f: int, n: int, s: mut FactState):
-    proof_require(proof_predicate(f), refine_entry, fns[f].ptypes, n, s, "exit proposition")
+    proof_require(proof_predicate(f), refine_entry, fns[f].ptypes, n, s, "exit proposition", f)
 
 proof_call = (n: int, s: mut FactState):
     previous_policy = fact_policy
@@ -138,9 +138,7 @@ proof_call = (n: int, s: mut FactState):
             a = ref_value(atom.a, values[i], values, int(types[t].elem), s)
             b = ref_value(atom.b, values[i], values, int(types[t].elem), s)
             truth = fact_compare(s, atom.op, a, b)
-            if fact_speculating == 0:
-                if truth == 0: fatal(nodes[n].pos, "proof precondition refuted")
-                if truth != 1: fatal(nodes[n].pos, "cannot prove proof precondition")
+            if fact_speculating == 0 and truth != 1: wit_proof(n, s, atom, a, b, f, i, truth == 0, "proof precondition")
         arg = kid(n, i)
         if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)): fact_validated[arg] = true
     loop atom in ref_predicates[proof_predicate(f)]:
@@ -236,7 +234,7 @@ result_exit = (f: int, result: int, n: int, s: mut FactState):
                 condition = fact_new(path, fact_domain(T_BOOL), FactTerm(.eq, selector, wanted))
                 fact_assume(path, condition, true)
         predicate = ref_subst(clause.predicate, fns[f].targs)
-        proof_require(predicate, refine_entry, fns[f].ptypes, n, path, "result proposition")
+        proof_require(predicate, refine_entry, fns[f].ptypes, n, path, "result proposition", f)
 
 result_publish = (f: int, result: int, values: int[], s: mut FactState):
     if not result_contracts.has(int(fns[f].decl)): return

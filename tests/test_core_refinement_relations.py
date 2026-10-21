@@ -119,7 +119,7 @@ def test_strict_index_lane(compiler, tmp_path, stale, release):
     strict = subprocess.run(arguments, text=True, capture_output=True, timeout=30,
                             env={**os.environ, 'DEWY_INTERNAL_FACT_POLICY': 'require-static'})
     assert strict.returncode != 0, strict.stdout
-    assert ('index is not in bounds' if stale else 'index unknown') in strict.stderr, strict.stderr
+    assert ('index is not in bounds' if stale else 'cannot prove index is in bounds') in strict.stderr, strict.stderr
 
 
 @pytest.mark.core_quick

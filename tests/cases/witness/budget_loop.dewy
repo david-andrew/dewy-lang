@@ -1,0 +1,22 @@
+probe=(n:int64)=>{
+    let a:int64=0
+    loop a <? n {
+        let b:int64=0
+        loop b <? n {
+            let c:int64=0
+            loop c <? n {
+                let d:int64=0
+                loop d <? n {
+                    let e:int64=0
+                    loop e <? n { e+=1 }
+                    d+=1
+                }
+                c+=1
+            }
+            b+=1
+        }
+        a+=1
+    }
+    $assert a >=? 0
+}
+main=()=>probe(2)

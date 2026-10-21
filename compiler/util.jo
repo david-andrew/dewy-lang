@@ -184,6 +184,9 @@ err_trail_names: str[]
 err_trail_fns: int[]
 lib_root = ""
 
+# (extra notes for the next error, each a position (or -1) and its text: why a fact is unproven)
+err_notes: (int, str)[]
+
 pos_in_lib = (p: int) -> bool:
     if p <= 0 or len(lib_root) == 0: return false
     f = pos_file(p)
@@ -210,8 +213,11 @@ fatal = (p0: int, msg0: str):
         if err_trail[k] > 0 and not pos_in_lib(err_trail[k]) and not seen: notes.push(k)
         k -= 1
     if quiet_errors: stop(1)
+    extra = err_notes
+    err_notes = []
     if ide_on:
         loop n in notes: msg += " (in {trail_sig(n)}, called at {pos_str(err_trail[n])})"
+        loop e in extra: msg += "; {e.1}"
         ide_fatal(p, msg)
     if p < 0:
         eprint("error: {msg}")
@@ -222,6 +228,11 @@ fatal = (p0: int, msg0: str):
     loop n in notes:
         eprint("{pos_str(err_trail[n])}: note: in {trail_sig(n)}, called here")
         show_line(err_trail[n])
+    loop e in extra:
+        if e.0 > 0:
+            eprint("{pos_str(e.0)}: {e.1}")
+            show_line(e.0)
+        else: eprint("    {e.1}")
     if more_errors: next_error_run()
     stop(1)
 
