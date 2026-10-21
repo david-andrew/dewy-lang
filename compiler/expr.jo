@@ -995,6 +995,7 @@ check_place = (n: int, for_mut: bool):
                 rf |= LF_ASSIGNED
                 if cp_inner == 0: rf |= LF_RESIZED
                 locals[r].flags = i32(rf)
+            if const_views.len() > 0: const_view_write(r, nodes[n].pos)
             note_write(r, via_closure, nodes[n].pos)
             if ag >= 0: note_global_write(ag)
             return
@@ -7947,6 +7948,7 @@ check_expr = (n: int, expected: int) -> int:
             if n != assign_root:
                 locals[l].flags = locals[l].flags | i32(LF_READ)
                 locals[l0].flags = locals[l0].flags | i32(LF_READ)
+                if const_views.len() > 0: const_view_use(l0, nodes[n].pos)
             nodes[n].sym = i32(l)
             t = int(locals[l].type)
         else if sk == .global:

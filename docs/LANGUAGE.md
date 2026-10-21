@@ -361,6 +361,11 @@ editable[0]=0
 printl(saved) # [20 22]
 ```
 
+`const view = @route` (`@xs`, `@boxes[0]`, `@r.a`) is a read-only view of the
+stored value: writing the route's variable while the view is still to be used
+(later in the function, or again around a loop begun after the view) is an
+error at the write. Write after the view's last use, or use `.copy`.
+
 Constant expressions can also supply fixed-array lengths and `$assert`
 conditions. In these contexts ordinary checked functions execute at compile
 time, including recursion, local mutation, loops, records, arrays, strings,

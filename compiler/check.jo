@@ -1964,6 +1964,56 @@ capture_root = (l: int):
     locals[l].flags = i32(f)
     if f & LF_SHARED != 0: check_shareable(l, locals[l].pos)
 
+# `const view = @route`: the route's root may not be written while the view
+# is still to be used (later in order, or again around a loop begun after it).
+struct ConstView:
+    view: int
+    root: int
+    depth: int           # loop_serials.len() at the declaration
+    used: int[]          # serials of loops begun after it that use the view
+    write: int = 0       # a write not yet followed by a use
+
+const_views: ConstView[]
+
+# A captured or narrowed name's variable, as check_place resolves it.
+place_owner = (l: int) -> int:
+    r = l
+    loop true:
+        if int(locals[r].flags) & LF_CAPTURE != 0 and int(locals[r].flags) & LF_VALUECAP == 0: r = int(locals[r].outer)
+        else if narrowed_var(r) != 0: r = narrowed_var(r)
+        else: break
+    r
+
+const_view_declare = (l: int, init: int):
+    e = init
+    loop nodes[e].kind == .conv: e = int(nodes[e].a)
+    if not has_flag(e, NF_MUT): return
+    loop (nodes[e].kind == .field or nodes[e].kind == .index) and nodes[e].a != 0: e = int(nodes[e].a)
+    if nodes[e].kind != .ident or nodes[e].aux != i32(int(SK.local)): return
+    const_views.push(ConstView(l, place_owner(int(nodes[e].sym)), loop_serials.len(), []))
+
+const_view_write = (r: int, pos: int):
+    loop i in [0..const_views.len()):
+        if const_views[i].root != r: continue
+        v = const_views[i]
+        loop d in [v.depth..loop_serials.len()):
+            if v.used.contains(loop_serials[d]): const_view_conflict(v.view, pos, 0)
+        if v.write == 0: const_views[i].write = pos
+
+const_view_use = (l: int, pos: int):
+    loop i in [0..const_views.len()):
+        if const_views[i].view != l: continue
+        if const_views[i].write != 0: const_view_conflict(l, const_views[i].write, pos)
+        loop d in [const_views[i].depth..loop_serials.len()): const_views[i].used.push(loop_serials[d])
+
+const_view_conflict = (l: int, write: int, at: int):
+    nm = name_of(int(locals[l].name))
+    if at != 0: err_notes.push((at, "note: '{nm}' is used here, after the write"))
+    else: err_notes.push((-1, "note: the loop repeats a use of '{nm}' after the write"))
+    err_notes.push((locals[l].pos, "note: the view is declared here"))
+    err_notes.push((-1, "help: write after the view's last use, or take an independent snapshot with `.copy`"))
+    fatal(write, "this write conflicts with const view '{nm}', which is still in use")
+
 # root variable r is modified (inside a closure if via_closure)
 note_write = (r: int, via_closure: bool, pos: int):
     if files[pos_file(locals[r].pos)].is_dewy: return
@@ -3650,6 +3700,7 @@ check_vardecl = (s: int):
     if has_flag(s, NF_RDONLY):
         locals[l].flags = i32(LF_DECL | LF_CONST | LF_QUIET)
         locals[l].const_init = nodes[s].b
+        if nodes[s].b != 0 and files[pos_file(nodes[s].pos)].is_dewy: const_view_declare(l, int(nodes[s].b))
     if has_flag(s, NF_LOOPCOUNT): locals[l].flags = i32(LF_DECL | LF_QUIET)
     nodes[s].sym = i32(l)
     if ide_on and nodes[s].a == 0: ide_hint_local(s, l)
