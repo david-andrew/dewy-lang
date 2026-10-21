@@ -6064,15 +6064,16 @@ check_binary = (n: int, expected: int) -> int:
         coerce(a, ta)
         coerce(b, ta)
         tb = ta
-    # (x =? 'member' with x a literal union's optional: the literal is that member, then the optional compares)
+    # (x =? 'member' or x =? y with x a literal union's optional: the literal is that member,
+    # y is one already, and the optional compares)
     if (op == .eq or op == .ne) and str_sets.len() > 1:
-        if tkind(ta) == .opt and str_set_of(prune(telem(ta))) != 0 and nodes[kid_lit(b)].kind == .str_lit:
-            coerce(b, prune(telem(ta)))
+        if tkind(ta) == .opt and str_set_of(prune(telem(ta))) != 0 and (nodes[kid_lit(b)].kind == .str_lit or prune(telem(ta)) == tb):
+            if tb != prune(telem(ta)): coerce(b, prune(telem(ta)))
             nodes[n].b = i32(coerce(b, ta))
             b = int(nodes[n].b)
             tb = ta
-        else if tkind(tb) == .opt and str_set_of(prune(telem(tb))) != 0 and nodes[kid_lit(a)].kind == .str_lit:
-            coerce(a, prune(telem(tb)))
+        else if tkind(tb) == .opt and str_set_of(prune(telem(tb))) != 0 and (nodes[kid_lit(a)].kind == .str_lit or prune(telem(tb)) == ta):
+            if ta != prune(telem(tb)): coerce(a, prune(telem(tb)))
             nodes[n].a = i32(coerce(a, tb))
             a = int(nodes[n].a)
             ta = tb

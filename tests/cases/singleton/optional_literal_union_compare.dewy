@@ -11,4 +11,10 @@ main=()=>{
     printl(c =? '+')
     printl(c not=? 'and')
     printl(lookup("and") =? 'and')
+    printl(same(b '-'))
+    printl(same(none '-'))
+    printl(differ('+' c))
 }
+
+same=(a:Sym? b:Sym):>bool=>a =? b
+differ=(a:Sym b:Sym?):>bool=>a not=? b
