@@ -157,8 +157,8 @@ word_assign=(word:Symbol? source:array<uint8> at:int64 stop:int64):>Symbol?=>{
 
 const BASES="btqsodzxug"
 
-lex=(source:array<uint8> begin:int64=0 end:int64=-1):>array<Token>|LexError=>{
-    let stop=if end <? 0 source.length else end
+lex=(source:array<uint8> begin:int64=0 finish:int64=-1):>array<Token>|LexError=>{
+    let stop=if finish <? 0 source.length else finish
     let out:array<Token>=[]
     let i=begin
     let spaced=false
