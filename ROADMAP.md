@@ -9,7 +9,7 @@ what landed. Keep this file short.
 
 | Measure | Now (2026-10-20) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 72/82 (tiers 1–2: 63/63; tier 3: 9/19), 12 held open on decisions | all milestones |
+| Acceptance ladder, design surface | 74/82 (tiers 1–2: 63/63; tier 3: 11/19), 12 held open on decisions | all milestones |
 | Acceptance ladder, current dialect | 82/82 | stays green |
 | Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.24 G instructions (was 1.36 G on 10-20 morning) | ~0.40 G (250k root lines/s) |
 | Compiler self-build | 8.0 G instructions | seconds-scale edit loop |
@@ -25,6 +25,9 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
+- **Effects slice 2** (Astra, medium): callback contracts and rows.
+- **`x => …` lambdas and builtin `rational`** (Opus).
+- **µDewy site** (Opus): restore it as an archived static snapshot.
 
 ## Next
 
@@ -34,7 +37,8 @@ only.
     dependent optional result is compared with a literal. The remaining slices:
     joins/loops, checked proofs, diagnostics;
   - effect rows slices 2–6 (slice 1 landed; ~/dev/tmp/coord/effects-design.md);
-  - ownership: lifecycle hooks and drop, `$lend` checking, arenas, 6 slices
+  - ownership slices 2–6 (slice 1, drop hooks and moves, landed): custom
+    copy/move hooks, resource containers, `$lend`, arenas
     (~/dev/tmp/coord/ownership-design.md);
   - builtin `rational`;
   - single-parameter lambdas without parentheses (`x => …`, specified, not
