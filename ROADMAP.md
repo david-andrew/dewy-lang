@@ -17,7 +17,7 @@ what landed. Keep this file short.
 | Hello-world compile | 31 ms (147 M, all library) | ≤10 ms |
 | Compiler self-build | 9.35 G instructions (the compiler grew) | seconds-scale edit loop |
 | Game-tick kernel vs C -O2 (time) | 1.6× default and release (default was 6.3× before small-leaf inlining) | ~1× both |
-| Worst other kernels vs C (time, default) | literal callbacks 4.6×, callbacks 3.75×, params 1.75×, graph 1.7×, recursive_tree 1.4× | ≤1.2× |
+| Worst other kernels vs C (time, default) | literal callbacks 4.6×, callbacks 2.3×, params 1.75×, graph 1.7×, recursive_tree 1.4× | ≤1.2× |
 | Quick / full suite | 38 s / 6.6 min (load average 14–24; remeasure when quiet) | ≤30 s / ≤5 min |
 
 Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
@@ -29,8 +29,8 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: callbacks round 3 (named-callback caller snapshots, traversal).
-- Opus: partitioned checking pilot (throughput project 2).
+- Astra: partitioned checking (throughput project 2).
+- Opus: root lexer/parser (138 M serial before signatures).
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
 
@@ -49,14 +49,16 @@ only.
   only optimize+x64 (36%) runs in parallel today. 0.40 G single-threaded is not
   credible, so the target is now wall clock with 4 workers. Projects, in order:
   1. fused partition workers landed (critical path −11% at 4 workers);
-  2. partitioned checking with long-lived workers (modelled 90–110 ms);
+  2. partitioned checking: designed (~/dev/tmp/pcheck notes; −21–23% critical
+     path projected); a multi-day project with a result barrier;
   3. a toolchain-baked library image (question 22);
   4. checker name lookup by id plus a fused zonk (≤6%).
 - Runtime gaps:
   - float compare/negate selection;
   - outer-target SIMD (particles);
   - callbacks: stack environments plus bounded specialization landed;
-    literal-lambda code is 4.6×/2.8× C (was 36×), callbacks 3.75×/2.7× (was 13.6×).
+    literal-lambda code is 4.6×/2.8× C (was 36×), callbacks 2.3×/1.7× (was 13.6×);
+    traversal is now 57%; retry only with a materially new approach.
     Still the largest runtime gap.
 - Self-hosting pilot: translate `compiler/zip.jo` to Dewy. This needs
   `$target`, a pointer/host ABI subset and byte views. Hold the full port
