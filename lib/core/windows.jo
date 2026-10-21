@@ -68,6 +68,8 @@ when TARGET == "windows":
     @lib("kernel32.dll")
     extern CloseHandle = (h: *u8) -> i32
     @lib("kernel32.dll")
+    extern FlushFileBuffers = (h: *u8) -> i32
+    @lib("kernel32.dll")
     extern DeleteFileW = (name: *u16) -> i32
     @lib("kernel32.dll")
     extern GetFileAttributesW = (name: *u16) -> u32

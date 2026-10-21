@@ -2106,6 +2106,8 @@ A failure is `FileNotFound`, `FileAccessDenied`, `IsDirectory`, `FileExists` or
 `FileError` (any other failure), and `read_text` adds `InvalidUtf8`. All are
 `error`s, so `is? error`, `or_throw` and `match` handle them.
 
+Provisional path methods for durable stores (spellings unsettled): `sync`, `replace(target)` (atomic rename), `append_bytes(bytes)` and `read_at(offset count)`.
+
 The same operations exist as functions of a path's text: `read_text(path)`,
 `read_bytes`, `write_text(path text)`, `write_bytes`, `file_exists`, `is_file`,
 `is_directory`, `list_directory`, `make_directory`, `remove_directory` and

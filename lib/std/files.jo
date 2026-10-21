@@ -275,6 +275,85 @@ __fsys_unlink = (path: str) -> bool | __FileFailure:
         if r < 0: return __fsys_failure(r)
         return true
 
+# ---------------- durability (provisional surface) ----------------
+
+# Push a file's written data (or a directory's entries) to the disk.
+__fsys_sync = (path: str) -> bool | __FileFailure:
+    __fsys_begin()
+    when TARGET == "wasm":
+        if __fsys_kind(path) == 0: return __fsys_failure(-2)
+        return true
+    else when TARGET == "windows":
+        # (a directory's entries are durable once written: only files are flushed)
+        if __w32_is_dir(path): return true
+        h = CreateFileW(data(__wide(path)), u32(0x40000000), 7, null, 3, 0x80, null)    # GENERIC_WRITE, OPEN_EXISTING
+        if (h as int) == -1:
+            __w32_ferr()
+            return __file_failure()
+        ok = FlushFileBuffers(h) != 0
+        CloseHandle(h)
+        if ok: return true
+        __w32_ferr()
+        return __file_failure()
+    else:
+        fd = syscall(2, data(__zstr(path)), 0, 0)    # (read-only opens a directory too)
+        if fd < 0: return __fsys_failure(fd)
+        r = syscall(74, fd)                          # fsync
+        syscall(3, fd)
+        if r < 0: return __fsys_failure(r)
+        return true
+
+# Rename `from` to `to` in one step, replacing what is at `to`: a reader sees the old file or
+# the new one, never a mixture.
+__fsys_replace = (from: str, to: str) -> bool | __FileFailure:
+    __fsys_begin()
+    when TARGET == "wasm":
+        # (a web build's files have no rename: copied, then removed)
+        if let b = __fsys_read(from):
+            if not __fsys_write(to, str_from_bytes(b)): return __file_failure()
+            r = __wasm_fs(3, data(from), len(from))
+            if r < 0: return __fsys_failure(r)
+            return true
+        return __file_failure()
+    else:
+        if rename_file(from, to): return true
+        return __file_failure()
+
+__fsys_append_bytes = (path: str, b: u8[]) -> int | __FileFailure:
+    r = __fsys_append(path, str_from_bytes(b))
+    if r is int: return b.len()
+    r
+
+# Up to `count` bytes from byte `offset` on: fewer at the end of the file, none past it.
+__fsys_read_at = (path: str, offset: int, count: int) -> u8[] | __FileFailure:
+    __fsys_begin()
+    if offset < 0 or count < 0: return __fsys_failure(-22)
+    when TARGET == "wasm" or TARGET == "windows":
+        if let b = __fsys_read(path):
+            lo = min(offset, b.len())
+            hi = lo + min(count, b.len() - lo)
+            return b[lo..hi)
+        return __file_failure()
+    else:
+        fd = syscall(2, data(__zstr(path)), 0, 0)
+        if fd < 0: return __fsys_failure(fd)
+        defer syscall(3, fd)
+        # (a directory: a read of nothing says so; its size means nothing)
+        if syscall(17, fd, data(path), 0, 0) == -21: return __fsys_failure(-21)
+        size = syscall(8, fd, 0, 2)                  # (lseek to the end: the size)
+        if size < 0: return __fsys_failure(size)
+        n = 0
+        if offset < size: n = min(count, size - offset)
+        out = fill(u8(0), n)
+        got = 0
+        loop got < n:
+            r = syscall(17, fd, data(out) + got, n - got, offset + got)     # pread64
+            if r < 0: return __fsys_failure(r)
+            if r == 0: break
+            got += r
+        out.truncate(got)
+        return out
+
 # ---------------- functions of a path's text ----------------
 
 read_text = (path: str) -> str | __FileFailure | InvalidUtf8: __fsys_read_text(path)
@@ -302,3 +381,8 @@ write_bytes = (path: Path, b: u8[]) -> int | __FileFailure: __fsys_write_bytes(p
 mkdir = (path: Path) -> bool | __FileFailure: __fsys_mkdir(path.path)
 rmdir = (path: Path) -> bool | __FileFailure: __fsys_rmdir(path.path)
 unlink = (path: Path) -> bool | __FileFailure: __fsys_unlink(path.path)
+# (provisional: durability for logs and manifests)
+sync = (path: Path) -> bool | __FileFailure: __fsys_sync(path.path)
+replace = (path: Path, target: Path) -> bool | __FileFailure: __fsys_replace(path.path, target.path)
+append_bytes = (path: Path, b: u8[]) -> int | __FileFailure: __fsys_append_bytes(path.path, b)
+read_at = (path: Path, offset: int, count: int) -> u8[] | __FileFailure: __fsys_read_at(path.path, offset, count)
