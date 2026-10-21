@@ -305,15 +305,20 @@ remove[K, V] = (m: mut Map[K, V], k: K) -> bool:
                 m.slots[i] = __MapSlot(0, -1)
                 if m.gone.len() < m.__keys.len(): m.gone.resize(m.__keys.len())
                 m.gone[e] = true
-                zk: K
-                zv: V
-                m.__keys[e] = zk
-                m.vals[e] = zv
+                __release_at(m.__keys, e)
+                __release_at(m.vals, e)
                 m.ngone += 1
                 if m.ngone * 2 > m.__keys.len(): __map_compact(m)
                 return true
         i = (i + 1) & mask
     false
+
+# xs[i] lets go of what it held and is left zero bytes, which nothing reads until the place is
+# written again. The compiler makes no T for them, so T's contract need not admit zero; this
+# body serves compilers from before that.
+__release_at[T] = (xs: mut T[], i: int):
+    z: T
+    xs[i] = z
 
 # the gone entries taken out, and the slots made again
 __map_compact[K, V] = (m: mut Map[K, V]):

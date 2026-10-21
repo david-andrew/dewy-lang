@@ -3265,7 +3265,8 @@ check_assign = (s: int) -> int:
     if op == int(Tok.assign):
         rt = prune(check_expr(int(nodes[s].b), lt))
         if rt != lt and nodes[lhs].kind == .ident and (nodes[lhs].aux == i32(int(SK.local)) or nodes[lhs].aux == i32(int(SK.global))) and not can_coerce(last_checked, rt, lt): var_type_error(lhs, lt, rt, nodes[last_checked].pos)
-        nodes[s].b = i32(coerce(last_checked, lt))
+        # (release_call's zero bytes are no value of lt: nothing reads them)
+        if nodes[last_checked].kind != .intrinsic or nodes[last_checked].aux != i32(int(IN.zeroed)): nodes[s].b = i32(coerce(last_checked, lt))
         if (nodes[lhs].kind != .ident or nodes[lhs].aux == i32(int(SK.global))) and (path_narrows > 0 or is_union(lt) or tkind(lt) == .opt):
             key = path_key(lhs)
             path_forget(key, rt)

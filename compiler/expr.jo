@@ -24,7 +24,8 @@ enum IN:
     hash, alignof, unreachable, arrcap, fmt_struct, sqrt, vec_ctor, cfn_cast, wasm_call, callc, floor_,
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
     read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
-    static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem, lend, loan_address, loan_load, loan_store, loan_length
+    static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem, lend, loan_address, loan_load, loan_store, loan_length,
+    zeroed
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big
@@ -3309,6 +3310,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                     sig = fn_sig(d)
                     if sig.params.len() >= 1 and (sig.generic or can_coerce(args[0], at, sig.params[0])): takes = true
                 if not takes: return conversion(n, int(syms[universe[name]].ref), args)
+            else if sk == .fns and args.len() == 2 and name == release_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return release_call(n, args, expected)
             else if sk == .const_ or sk == .module: fatal(nodes[n].pos, "'{name_of(name)}' is not a function")
             else if sk == .builtin:
                 collect_fns(name, decls)
@@ -6707,6 +6709,11 @@ check_expr = (n: int, expected: int) -> int:
     if ex != 0: exk = types[ex].kind
     if nodes[n].kind == .array: dewy_classify_spread(n)
     k = nodes[n].kind
+    if k == .intrinsic and nodes[n].aux == i32(int(IN.zeroed)) and expected != 0:
+        # (release_call's zero bytes: of the type the place stores)
+        nodes[n].type = i32(expected)
+        add_flag(n, NF_CHECKED)
+        return expected
     if k == .call and nodes[n].aux2 == -1:
         literal_target = ex
         if exk == .opt: literal_target = prune(int(types[ex].elem))
@@ -8496,6 +8503,24 @@ bc_if = (c: int, then: int[], else_: int[], pos: int) -> int:
     if else_.len() > 0: nodes[n].c = i32(bc_block(else_, pos))
     add_flag(n, NF_STMT)
     n
+
+# The library's `__release_at(xs, i)` (lib/core/map.jo), when a call resolves to that
+# declaration: xs[i] = the zero bytes of its element type, an intrinsic that makes no checked
+# value, so the element's contract and defaults are not consulted. The store lets go of what
+# the element held. The declaration's own body serves earlier compilers.
+release_name = intern("__release_at")
+release_call = (n: int, args: int[], expected: int) -> int:
+    pos = nodes[n].pos
+    t = prune(check_expr(args[0], 0))
+    add_flag(args[0], NF_CHECKED)
+    if types[t].kind != .array: fatal(pos, "__release_at needs a growable array")
+    zero = mk(.intrinsic, pos)
+    nodes[zero].aux = i32(int(IN.zeroed))
+    target = mk(.index, pos)
+    nodes[target].a = i32(args[0])
+    nodes[target].b = i32(args[1])
+    nodes[n] = nodes[bc_block([bc_assign(target, zero, pos)], pos)]
+    check_expr(n, expected)
 
 # name: t (its zero value)
 bc_decl = (name: str, t: int, pos: int) -> int:

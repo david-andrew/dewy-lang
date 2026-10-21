@@ -3201,6 +3201,12 @@ gen_intrinsic = (e: int) -> Val:
         n = gen_expr(args[2]).v
         emit(.memcpy, VI, 0, d, s, n, 0)
         return V(-1, false)
+    if id == .zeroed:
+        t = ntype(e)
+        if vc(t) != VC_AGG: return V(zero_val(t), true)
+        z = e_slot(new_temp(t))
+        e_zero(z, tsize(t))
+        return V(z, true)
     if id == .memset:
         d = gen_expr(args[0]).v
         b = gen_expr(args[1]).v
