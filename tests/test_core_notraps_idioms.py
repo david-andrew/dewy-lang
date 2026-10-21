@@ -48,9 +48,47 @@ tick=(w:World):>int64=>{
 }
 main=():>int64=>tick(World[[1 2] 0])
 ''',
+    # A slice proves 0 <=? lo <=? hi <=? length and has hi-lo elements.
+    'slice_bounds': '''tail=(xs:array<int64>):>int64=>{
+    if xs.length <? 3 return 0
+    let a=xs[1..3)
+    let b=xs[..2]
+    let c=xs[2..]
+    let d=xs[..]
+    return a[1]+b[2]+c[0]+d[end]
+}
+main=():>int64=>tail([1 2 3])
+''',
+    # A loan's capacity is the length plus the reservation.
+    'loan_capacity': '''grow=():>int64=>{
+    let bytes:array<uint8>=[1 2 3 4]
+    $lend(@bytes reserve=2) {bytes.set_length(6)}
+    return bytes.length
+}
+main=():>int64=>grow()
+''',
 }
 
 REJECTED = {
+    'slice_past_end': ('''main=():>int64=>{
+    let xs:array<int64>=[1 2]
+    return xs[1..3).length
+}
+''', 'slice is not in bounds'),
+    'slice_reversed': ('''cut=(xs:array<int64> k:int64):>int64=>{
+    if k >? xs.length return 0
+    return xs[k..).length
+}
+main=():>int64=>cut([1] 1)
+''', 'cannot prove slice is in bounds: missing lower bound'),
+    'slice_after_shrink': ('''cut=(xs:array<int64>):>int64=>{
+    let ys=xs
+    if ys.length <? 2 return 0
+    ys.pop()
+    return ys[..1].length
+}
+main=():>int64=>cut([1 2])
+''', 'cannot prove slice is in bounds: missing upper bound'),
     'guard_without_exit': ('''peek=(xs:array<int64>):>int64=>{
     if xs.length =? 0 {printl"empty"}
     return xs[0]

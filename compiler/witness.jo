@@ -441,6 +441,33 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
     which = if lo != 1 and hi != 1: "lower and upper bounds" else if lo != 1: "lower bound" else: "upper bound"
     wit_fail(nodes[n].pos, "cannot prove {read} is in bounds: missing {which}")
 
+# A builtin slice `xs[lo..hi)`: 0 <=? lo <=? hi <=? xs.length, where an
+# omitted bound is 0 or the length and an inclusive end counts one more.
+wit_slice = (n: int, s: mut FactState, lo: int, hi: int, length: int, checks: int[]):
+    r = int(nodes[n].b)
+    base = wit_text(int(nodes[n].a))
+    start = if nodes[r].a != 0: wit_side(lo, int(nodes[r].a)) else: WitSide(lo, 0, "0", false, true)
+    stop = if nodes[r].b != 0: wit_side(hi, int(nodes[r].b)) else: WitSide(hi, 0, (if base != "": "{base}.length" else: ""), true)
+    if nodes[r].b != 0 and has_flag(r, NF_INCLUSIVE) and stop.text != "": stop.text = "{stop.text}+1"
+    zero = WitSide(fact_constant(s, 0), 0, "0", false, true)
+    size = WitSide(length, int(nodes[n].a), (if base != "": "{base}.length" else: ""), true)
+    pairs = [(zero, start), (start, stop), (stop, size)]
+    labels = ["lower bound", "ordered bounds", "upper bound"]
+    refuted = checks.contains(0)
+    relation = ""
+    missing: str[]
+    loop i in [0..3):
+        if checks[i] == 1 or refuted and checks[i] != 0: continue
+        relation = wit_relation_text(.le, pairs[i].0, pairs[i].1)
+        wit_relation(s, s, .le, pairs[i].0, pairs[i].1, refuted, labels[i])
+        missing.push(labels[i])
+    wit_context(0)
+    wit_help(relation)
+    if refuted:
+        wit_fail(nodes[n].pos, "slice is not in bounds")
+        return
+    wit_fail(nodes[n].pos, "cannot prove slice is in bounds: missing {join(missing, " and ")}")
+
 wit_divisor = (n: int, s: FactState, divisor: int, zero: int, operand: int, refuted: bool):
     side = wit_side(divisor, operand)
     nil = WitSide(zero, 0, "0", false, true)

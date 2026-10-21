@@ -1186,6 +1186,28 @@ fact_capture = (n: int, s: mut FactState) -> int:
             v = fact_capture(kid(n, i), s)
             if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(value, i, false, v))
         return value
+    # A slice reads its source, then its bounds, and has their difference as
+    # its length: 0 <=? lo <=? hi <=? length (an inclusive end is hi+1).
+    if k == .index and nodes[n].aux == 1 and nodes[nodes[n].b].kind == .range and not has_flag(int(nodes[n].b), NF_STEP):
+        r = int(nodes[n].b)
+        base = fact_capture(int(nodes[n].a), s)
+        t = representation_type(ntype(int(nodes[n].a)))
+        if types[t].kind != .array and types[t].kind != .fixed: return fact_unmodeled(s, n, .unsupported)
+        length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, base, -1, false, T_INT)
+        lo = if nodes[r].a != 0: fact_capture(int(nodes[r].a), s) else: fact_constant(s, 0)
+        hi = length
+        if nodes[r].b != 0:
+            hi = fact_capture(int(nodes[r].b), s)
+            if has_flag(r, NF_INCLUSIVE): hi = fact_arithmetic(s, int(nodes[r].b), .plus, hi, fact_constant(s, 1))
+        if fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query):
+            zero = fact_constant(s, 0)
+            checks = [fact_compare(s, .le, zero, lo), fact_compare(s, .le, lo, hi), fact_compare(s, .le, hi, length)]
+            if checks[0] != 1 or checks[1] != 1 or checks[2] != 1: wit_slice(n, s, lo, hi, length, checks)
+        value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
+        size = length
+        if nodes[r].a != 0 or nodes[r].b != 0: size = fact_arithmetic(s, (if nodes[r].b != 0: int(nodes[r].b) else: int(nodes[r].a)), .minus, hi, lo)
+        if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(value, -1, false, size))
+        return value
     if k == .index and nodes[n].b != 0:
         base = 0
         index = 0
@@ -1385,8 +1407,11 @@ fact_capture = (n: int, s: mut FactState) -> int:
             extra = fact_capture(kid(n, 1), s)
             base = fact_capture(kid(n, 0), s)
             length = fact_project(s, base, -1, false, T_INT)
-            limit = fact_arithmetic(s, n, .plus, length, extra)
-            if fact_speculating == 0 and fact_compare(s, .ge, extra, fact_constant(s, 0)) == 0:
+            # (typed by the reservation: the `$lend` block itself is not an integer)
+            limit = fact_arithmetic(s, kid(n, 1), .plus, length, extra)
+            # (the constant first: a by-value state argument is taken before later arguments run)
+            zero = fact_constant(s, 0)
+            if fact_speculating == 0 and fact_compare(s, .ge, extra, zero) == 0:
                 loan_error(n, "negative reservation")
             fact_loans.push(FactLoan(place_route(kid(n, 0)), limit))
             result = fact_capture(kid(n, 2), s)
@@ -1397,7 +1422,8 @@ fact_capture = (n: int, s: mut FactState) -> int:
             if fact_speculating == 0:
                 loop loan in fact_loans:
                     if loan.place == place_route(kid(n, 0)):
-                        lo = fact_compare(s, .ge, value, fact_constant(s, 0))
+                        zero = fact_constant(s, 0)
+                        lo = fact_compare(s, .ge, value, zero)
                         hi = fact_compare(s, .le, value, loan.capacity)
                         if lo == 0 or hi == 0: loan_error(n, "set_length exceeds the reserved capacity")
                         if fact_policy == .RequireStatic and (lo != 1 or hi != 1): fact_unknown(n, fact_bound(s, value), "loan capacity")
