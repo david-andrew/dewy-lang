@@ -2488,7 +2488,8 @@ its own uses its nearest ancestor's, as `as string` does), and function fields a
 left out. A string prints bare on its own and quoted, with its escapes, inside a
 structure (`["a\tb"]`). A present optional or a union shows its member; an
 absent optional prints `none`. A function handle shows its type's spelling,
-`"{@f}"` as `<(x:int64):>int64>`.
+`"{@f}"` as `<(x:int64):>int64>`, and so does a type: `printl(Point)`,
+`"{int64}"` and `int64 as string`.
 
 `format(value spec)` formats machine numbers or text, including inside an
 interpolation. The specification is an ordinary string and may be computed:

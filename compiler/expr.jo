@@ -4992,6 +4992,12 @@ fmt_part = (part: int, pos: int):
         # (print(xs.reverse()): Python's in-place methods give None)
         if why == "" and dewy_at(nodes[part].pos) and nodes[int(nodes[part].a)].kind != .ident: why = " (this gives nothing: a method that changes its object, as `xs.sort()` or `xs.reverse()`, gives no value; show the object afterwards, or make a new one with `xs.sorted()` or `xs.reversed()`)"
         fatal(nodes[int(nodes[part].a)].pos, "cannot format a value of type void{why}")
+    # (a type shown is its spelling: `"{int64}"`, `printl(Point)`)
+    if types[t].kind == .typeval and dewy_at(nodes[part].pos):
+        e = int(nodes[part].a)
+        nodes[e] = nodes[bc_str(type_str(int(types[t].elem), true), nodes[e].pos)]
+        check_expr(e, T_STR)
+        t = T_STR
     if types[t].kind == .typeval or types[t].kind == .module: fatal(nodes[int(nodes[part].a)].pos, "this is a type or module, not a value (a value of a type is made by calling it: `T()`)")
     if types[t].kind == .ptr or types[t].kind == .cfn: fatal(nodes[int(nodes[part].a)].pos, "a {dt(t)} is not printed: its address is `int(p as *u8)` (in hex, \"\{int(p as *u8):#x}\")")
     bt = mk_array(T_U8)
@@ -8773,6 +8779,10 @@ check_expr = (n: int, expected: int) -> int:
         finalize_literal(a)
         ft = prune(ntype(a))
         if tt == T_STR and dewy_at(nodes[n].pos) and not pos_in_lib(nodes[n].pos): bytes_text_warning(n, ft)
+        # (`int64 as string`: a type's spelling)
+        if tt == T_STR and types[ft].kind == .typeval and dewy_at(nodes[n].pos):
+            nodes[n] = nodes[bc_str(type_str(int(types[ft].elem), true), nodes[n].pos)]
+            return check_expr(n, T_STR)
         if has_var(ft) and unify(ft, tt):
             nodes[n] = nodes[a]
             last_checked = n
