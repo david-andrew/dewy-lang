@@ -1,0 +1,14 @@
+# quick
+# `int` record fields, optional fields, dictionary keys and big values write as decimal.
+Store:type = [next_id:int=1 ids:array<int>=[] best:int?=none]
+main = () => {
+    let s = Store()
+    s.ids.push(21)
+    s.best = 2^70
+    let text = to_json(s)
+    printl(text)
+    let back = from_json<Store>(text)
+    printl(back)
+    printl(to_json([3->4]))
+    printl(to_json([n=2^65 m=(-7)]))
+}

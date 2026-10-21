@@ -34,6 +34,7 @@ __floor_div_pow2 = (a: __dewy_int, shift: int) -> __dewy_int: a >> shift
 __floor_mod_pow2 = (a: __dewy_int, mask: __dewy_int) -> __dewy_int: a & mask
 
 __fmt = (buf: mut u8[], a: __dewy_int): __mi_format(buf, a)
+__json_write_value = (b: mut u8[], x: __dewy_int, indent: int, level: int): __mi_format(b, x)
 hash = (x: __dewy_int) -> u64: hash(u64(__mi_hash(x)))
 __fmt_spec = (buf: mut u8[], x: __dewy_int, spec: str): __mi_format_spec(buf, x, spec)
 __map_tag = (k: __dewy_int, h: u64) -> u64: h
