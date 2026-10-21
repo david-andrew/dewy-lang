@@ -240,8 +240,13 @@ dw_op = (id: int) -> DewyToken:
 dw_fail = (id: int, what: str) -> int:
     dw_fail_pos(dewy_syntax[id].pos, what)
 
+# (above 0: converting the expression of a string interpolation, `{...}` in a string)
+dw_in_interpolation = 0
+
 dw_fail_pos = (pos: int, what: str) -> int:
-    fatal(pos, "Dewy core experiment does not yet support {what}")
+    if dw_in_interpolation > 0:
+        fatal(pos, "Dewy does not yet support {what}, here inside a string interpolation: `\{...}` in a string holds an expression (write `\\\{` and `\\\}` for literal braces, or use a raw string `r\"...\"`; `format(value \".2f\")` formats a number)")
+    fatal(pos, "Dewy does not yet support {what}")
     0
 
 # Metatags the design defines that this compiler does not implement yet. Each
@@ -1227,7 +1232,9 @@ dw_expr = (id: int) -> int:
             else:
                 if dewy_syntax[child].kind != .block or dw_nchildren(child) != 1: return dw_fail(child, "this string interpolation")
                 part = mk(.pair, dewy_syntax[child].pos)
+                dw_in_interpolation += 1
                 nodes[part].a = i32(dw_expr(dw_child(child, 0)))
+                dw_in_interpolation -= 1
                 nodes[part].sval = -1
                 pieces.push(part)
         set_list(n, pieces)

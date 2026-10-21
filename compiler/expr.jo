@@ -5889,7 +5889,7 @@ check_binary = (n: int, expected: int) -> int:
                     break
         fatal(nodes[n].pos, "operator {tok_text(op)} is not defined for {dt(ta)} and {dt(tb)}{why}")
     if op == .slash and is_int(ta) and is_int(tb) and files[pos_file(nodes[n].pos)].is_dewy:
-        fatal(nodes[n].pos, "Dewy core experiment does not yet support integer /; use // or convert to float64")
+        fatal(nodes[n].pos, "Dewy does not yet support integer /; use // or convert to float64")
     # High unsigned Dewy literals go through typed lowering. The untyped fold
     # below uses signed division/shifts and would lose their unsigned meaning.
     wide_unsigned = (has_flag(a, NF_U64) or has_flag(b, NF_U64)) and files[pos_file(nodes[n].pos)].is_dewy

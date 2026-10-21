@@ -4726,7 +4726,8 @@ def lexer_span_helpers(compiler):
         parse[parse.index('enum DewyKind:'):parse.index('dw_kind_name =')],
         tokens[tokens.index('enum DewyToken:'):],
         'mkpos = (file: int, off: int) -> int: (file << 40) | off\n'
-        'fatal = (pos: int, message: str): panic(message)',
+        'fatal = (pos: int, message: str): panic(message)\n'
+        'err_notes: (int, str)[]',
         fast[fast.index('struct DewyLexeme:'):fast.index('dn_peek =')],
     ])
 

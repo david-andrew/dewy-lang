@@ -51,9 +51,28 @@ dn_init_words = ():
     dn_word_tokens = fill(DewyToken.none, names.len())
     loop word in words: dn_word_tokens[intern(word)] = dn_token_kind(word)
 
+# (above 0: parsing the expression of a string interpolation; at or above 0: the `{` that
+# began the outermost interpolation being scanned)
+dn_in_interpolation = 0
+dn_interpolation_open = -1
+DN_BRACE_HINT = "`\{...}` in a string holds an expression: write `\\\{` and `\\\}` for literal braces, or use a raw string `r\"...\"`"
+
 dn_error = (offset: int, message: str) -> int:
+    if dn_in_interpolation > 0: fatal(mkpos(dn_file, offset), "{message}, inside a string interpolation ({DN_BRACE_HINT}; `format(value \".2f\")` formats a number)")
     fatal(mkpos(dn_file, offset), message)
     0
+
+# (the first `"{"`-shaped brace of the file: an interpolation that begins with the quote that
+# began its string, where a literal brace was most likely meant)
+dn_suspect_brace = -1
+
+# an unterminated string or interpolation inside an interpolation: the brace that began it
+dn_unterminated = (start: int, message: str) -> int:
+    if dn_suspect_brace >= 0 and dn_suspect_brace < start and dn_suspect_brace != dn_interpolation_open:
+        err_notes.push((mkpos(dn_file, dn_suspect_brace), "note: this `\{` starts a string interpolation; for a literal brace write `\\\{`"))
+    if dn_interpolation_open >= 0 and dn_interpolation_open < start:
+        return dn_error(dn_interpolation_open, "unterminated string: this `\{` starts a string interpolation that does not end ({DN_BRACE_HINT})")
+    dn_error(start, message)
 
 dn_ident_start = (c: u8) -> bool: is_alpha(c) or c == '_' or c >= 128
 dn_ident_part = (c: u8) -> bool: dn_ident_start(c) or is_digit(c)
@@ -93,7 +112,7 @@ dn_interpolation_end = (source: str, start: int, stop: int, nesting: int, allow_
             if depth == 0: return i
         i += 1
     if allow_incomplete: return -1
-    dn_error(start, "unterminated string interpolation")
+    dn_unterminated(start, "unterminated string interpolation")
 
 # Skip a quoted token, including nested quoted strings inside interpolation.
 dn_quote_end = (source: str, start: int, stop: int, nesting: int = 0, raw: bool = false, allow_incomplete: bool = false) -> int:
@@ -103,6 +122,8 @@ dn_quote_end = (source: str, start: int, stop: int, nesting: int = 0, raw: bool 
     quote = source[start]
     width = dn_quote_width(source, start, stop)
     i = start + width
+    first_brace = -1
+    if nesting == 0: dn_interpolation_open = -1
     loop i < stop:
         c = source[i]
         if not raw and c == '\\': i += 2; continue
@@ -110,13 +131,17 @@ dn_quote_end = (source: str, start: int, stop: int, nesting: int = 0, raw: bool 
             if width == 1: return i + 1
             if i + 2 < stop and source[i + 1] == quote and source[i + 2] == quote: return i + 3
         if not raw and c == '{':
+            if first_brace < 0: first_brace = i
+            if nesting == 0: dn_interpolation_open = first_brace
+            if dn_suspect_brace < 0 and i + 1 < stop and source[i + 1] == quote: dn_suspect_brace = i
             end = dn_interpolation_end(source, i + 1, stop, nesting + 1, allow_incomplete)
             if end < 0: return -1
             i = end + 1
             continue
         i += 1
     if allow_incomplete: return -1
-    dn_error(start, "unterminated string")
+    if nesting == 0 and first_brace >= 0: return dn_unterminated(first_brace + 1, "unterminated string")
+    dn_unterminated(start, "unterminated string")
 
 dn_block_comment_error = (start: int) -> int:
     dn_error(start, "unterminated block comment: `#\{` needs a matching `\}#` (block comments nest)")
@@ -557,8 +582,10 @@ dn_string = (token: DewyLexeme, direct: bool = false) -> int:
             dn_at = 0
             dn_angles = 0
             dn_comma_stop = false
+            dn_in_interpolation += 1
             expression = if direct: dc_expr(0) else: dn_expr(0)
             if expression != 0 and dn_tokens[dn_at].kind != .eof: dn_error(dn_tokens[dn_at].start, "expected one interpolation expression")
+            dn_in_interpolation -= 1
             dn_tokens = saved_tokens
             dn_at = saved_at
             dn_angles = saved_angles
@@ -868,6 +895,8 @@ dewy_fast_file = (file: int) -> int[]:
     dc_enabled = (env("DEWY_FRONTEND") ?? "") != "old"
     dc_compare = (env("DEWY_FRONTEND") ?? "") == "compare"
     dn_file = file
+    dn_suspect_brace = -1
+    dn_in_interpolation = 0
     dn_tokens = dn_lex(file, 0, len(files[file].src))
     dn_at = 0
     dn_angles = 0
