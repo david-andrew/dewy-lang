@@ -9,7 +9,7 @@ what landed. Keep this file short.
 
 | Measure | Now (2026-10-20) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 77/82 (tiers 1–2: 63/63; tier 3: 14/19), 12 held open on decisions | all milestones |
+| Acceptance ladder, design surface | 79/82 (tiers 1–2: 63/63; tier 3: 16/19), 12 held open on decisions | all milestones |
 | Acceptance ladder, current dialect | 82/82 | stays green |
 | Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.24 G instructions (was 1.36 G on 10-20 morning) | ~0.40 G (250k root lines/s) |
 | Compiler self-build | 8.0 G instructions | seconds-scale edit loop |
@@ -25,6 +25,9 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
+- Astra: effect rows slice 4 (allocation and implicit operations; ladder 65, 94).
+- Opus: reject Jo type names; dependent-array result crash; `__floor_div` leak.
+
 ## Next
 
 - Tier-3 implementation (designed, no decisions needed):
@@ -32,13 +35,10 @@ only.
     an internal compiler error ("missing refinement entry snapshot") when a
     dependent optional result is compared with a literal. The remaining slices:
     joins/loops, checked proofs, diagnostics;
-  - effect rows slices 3–6 (1–2 landed; ~/dev/tmp/coord/effects-design.md);
-  - ownership slices 2–6 (slice 1, drop hooks and moves, landed): custom
-    copy/move hooks, resource containers, `$lend`, arenas
+  - effect rows slices 3, 5–6 (1–2 landed; ~/dev/tmp/coord/effects-design.md);
+  - ownership slices 2, 4–6 (1, drop hooks and moves, and 3, `$lend`, landed):
+    custom copy/move hooks, resource containers, arenas
     (~/dev/tmp/coord/ownership-design.md);
-  - Dewy still accepts the Jo type names `str`/`f64`/`i64` (one spelling: reject
-    them); an array of a dependent type as a function result crashes on
-    assignment; `x//y` on floats names the internal `__floor_div`.
 - Compile throughput, toward ~0.40 G. Budget in
   ~/dev/tmp/coord/throughput-budget.md. Open projects, roughly in order:
   - direct compact-AST construction: mostly landed (parse plus projection
