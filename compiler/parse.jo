@@ -2196,7 +2196,9 @@ desugar_loopx = (lx: int) -> int:
     # general form: snapshots and counters, advanced at the top of each iteration
     setup: int[]
     head: int[]
-    lx_lower_head(h, tag, setup, head, pos)
+    tail: int[]
+    lx_lower_head(h, tag, setup, head, tail, pos)
+    loop t in tail: head.push(t)
     loop_ = mk(.while_, pos)
     tr = mk(.bool_lit, pos)
     nodes[tr].ival = 1
@@ -2214,11 +2216,12 @@ desugar_loopx = (lx: int) -> int:
 lx_bcount = 0
 
 # statements that advance the iterators of h and break when the loop is over
-lx_lower_head = (h: int, tag: str, setup: mut int[], head: mut int[], pos: int):
+# (tail: statements after every binder and condition, still before the body)
+lx_lower_head = (h: int, tag: str, setup: mut int[], head: mut int[], tail: mut int[], pos: int):
     op = int(nodes[h].op)
     if op == 2:
-        lx_lower_head(int(nodes[h].a), tag, setup, head, pos)
-        lx_lower_head(int(nodes[h].b), tag, setup, head, pos)
+        lx_lower_head(int(nodes[h].a), tag, setup, head, tail, pos)
+        lx_lower_head(int(nodes[h].b), tag, setup, head, tail, pos)
         return
     if op == 4:
         head.push(lx_if(lx_not(int(nodes[h].a), pos), mk(.break_, pos), pos))
@@ -2231,7 +2234,7 @@ lx_lower_head = (h: int, tag: str, setup: mut int[], head: mut int[], pos: int):
         alive: int[]
         loop t in alts:
             if int(nodes[t].op) != 1: fatal(nodes[t].pos, "only loop variables (x in xs) can be combined with `or`")
-            alive.push(lx_binder(t, tag, setup, head, true, pos))
+            alive.push(lx_binder(t, tag, setup, head, tail, true, pos))
         cond = lx_not(lx_ident(name_of(alive[0]), pos), pos)
         loop i in [1..alive.len()):
             n = mk(.and_, pos)
@@ -2240,7 +2243,7 @@ lx_lower_head = (h: int, tag: str, setup: mut int[], head: mut int[], pos: int):
             cond = n
         head.push(lx_if(cond, mk(.break_, pos), pos))
         return
-    lx_binder(h, tag, setup, head, false, pos)
+    lx_binder(h, tag, setup, head, tail, false, pos)
 
 lx_or_terms = (h: int, out: mut int[]):
     if int(nodes[h].op) == 3:
@@ -2249,7 +2252,7 @@ lx_or_terms = (h: int, out: mut int[]):
     else: out.push(h)
 
 # one binder; returns the name of its "has a value" flag (optional binders) or 0
-lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], optional: bool, pos: int) -> int:
+lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], tail: mut int[], optional: bool, pos: int) -> int:
     lx_bcount += 1
     id = "{tag}_{lx_bcount}"
     v = int(nodes[kid(t, 0)].name)
@@ -2298,6 +2301,22 @@ lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], optional: bool
                 head.push(lx_if(lx_bin(.ge, lx_ident(cur, pos), lx_ident(end, pos), pos), mk(.break_, pos), pos))
                 head.push(lx_let(v, lx_ident(cur, pos), pos))
                 head.push(inc)
+            return 0
+        if nodes[it].b == 0 and not optional:
+            # Bind, then step once every other binder has passed its test, so
+            # the counter moves in lockstep with them (and a bounded one
+            # proves the step cannot wrap). An exhausted type stops the next
+            # iteration at this binder, just where stepping first would.
+            wrapped = "$range_wrapped" + id
+            previous = "$range_previous" + id
+            setup.push(lx_let(intern(wrapped), lx_bool(false, pos), pos))
+            message = mk(.str_lit, pos)
+            nodes[message].sval = i32(intern("range exhausted its integer type"))
+            head.push(lx_if(lx_ident(wrapped, pos), lx_expr_stmt(lx_call("$dewy_range_exhausted", [message], pos), pos), pos))
+            head.push(lx_let(v, lx_ident(cur, pos), pos))
+            tail.push(lx_let(intern(previous), lx_ident(cur, pos), pos))
+            tail.push(lx_assign(lx_ident(cur, pos), .pluseq, lx_int(1, pos), pos))
+            tail.push(lx_assign(lx_ident(wrapped, pos), .assign, lx_bin(.le, lx_ident(cur, pos), lx_ident(previous, pos), pos), pos))
             return 0
         first = "$range_first" + id
         setup.push(lx_let(intern(first), lx_bool(true, pos), pos))

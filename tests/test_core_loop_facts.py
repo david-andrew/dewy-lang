@@ -161,3 +161,70 @@ def test_resizing_bodies_keep_runtime_checks(compiler, tmp_path, name):
         assert ran.returncode != 0 and 'index' in ran.stderr, ran.stdout + ran.stderr
     else:
         assert ran.returncode == 0 and ran.stdout == expected, ran.stdout + ran.stderr
+
+
+# Lockstep counters: a combined loop's range binds, then steps after every
+# other binder, so it keeps the difference its entry gives it with each
+# hidden index; plain counters that step together do the same.
+LOCKSTEP = '''lockstep=(xs:array<int64> ys:array<int64>):>int64=>{
+    let t:int64=0
+    loop i in 0.. and x in xs and y in ys { t=t+ys[i]*x+xs[i] }
+    return t
+}
+later=(xs:array<int64> ys:array<int64>):>int64=>{
+    let t:int64=0
+    loop x in xs and y in ys and i in 0.. { t=t+ys[i]+xs[i] }
+    return t
+}
+manual=(ys:array<int64>):>int64=>{
+    let t:int64=0
+    let i:int64=0
+    let j:int64=0
+    loop j <? ys.length { t=t+ys[i]; i=i+1; j=j+1 }
+    return t
+}
+main=()=>{
+    let empty:array<int64>=[]
+    printl(lockstep([1 2 3] [4 5]))
+    printl(lockstep(empty [4 5]))
+    printl(later([1 2 3] [4 5]))
+    printl(manual([4 5 6]))
+}
+'''
+
+
+@pytest.mark.parametrize('strict', [False, True], ids=['ordinary', 'strict'])
+def test_lockstep_counters_prove_and_run(compiler, tmp_path, strict):
+    result = run(compiler, tmp_path, LOCKSTEP, 'build', strict)
+    assert result.returncode == 0, result.stdout + result.stderr
+    ran = subprocess.run([tmp_path / 'loops'], text=True, capture_output=True, timeout=30)
+    assert ran.returncode == 0 and ran.stdout == '17\n0\n12\n15\n', ran.stdout + ran.stderr
+
+
+def lockstep_case(body):
+    return ('f=(@xs:array<int64> @ys:array<int64>):>int64=>{\n    let t:int64=0\n    ' + body
+            + '\n    return t\n}\nmain=()=>{ let a:array<int64>=[1 2 3]; let b:array<int64>=[4 5]; printl(f(@a @b)) }\n')
+
+
+# An offset counter, a resize, a rebinding or unequal steps break the relation.
+LOCKSTEP_NEGATIVE = {
+    'offset': (lockstep_case('loop i in 1.. and x in xs and y in ys { t=t+ys[i] }'), '3:49'),
+    'resize': (lockstep_case('loop i in 0.. and x in xs and y in ys { ys.pop(); t=t+ys[i] }'), '3:59'),
+    'later_resize': (lockstep_case('loop i in 0.. and x in xs and y in ys { t=t+ys[i]; ys.pop() }'), '3:49'),
+    'rebound': (lockstep_case('loop i in 0.. and x in xs and y in ys { i=i+1; t=t+ys[i] }'), '3:56'),
+    'unequal': ('f=(@xs:array<int64> @ys:array<int64>):>int64=>{\n    let t:int64=0\n    let i:int64=0\n'
+                '    let j:int64=0\n    loop j <? ys.length { t=t+ys[i]; i=i+2; j=j+1 }\n    return t\n}\n'
+                'main=()=>{ let a:array<int64>=[1 2 3]; let b:array<int64>=[4 5]; printl(f(@a @b)) }\n', '5:31'),
+}
+
+
+@pytest.mark.parametrize('name', list(LOCKSTEP_NEGATIVE))
+def test_broken_lockstep_does_not_prove(compiler, tmp_path, name):
+    source, at = LOCKSTEP_NEGATIVE[name]
+    result = run(compiler, tmp_path, source, 'check', True)
+    output = result.stdout + result.stderr
+    assert result.returncode != 0 and f'/loops.dewy:{at}: error: cannot prove index is in bounds' in output, output
+    result = run(compiler, tmp_path, source, 'build', False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    ran = subprocess.run([tmp_path / 'loops'], text=True, capture_output=True, timeout=30)
+    assert ran.returncode != 0 and 'index' in ran.stderr, ran.stdout + ran.stderr

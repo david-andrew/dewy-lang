@@ -725,9 +725,47 @@ fact_add_fits = (a: int, b: int) -> bool:
     if b < 0: return a >= FACT_MIN - b
     true
 
+# The tightest bound on v that rows give through other terms' intervals
+# (v - t <= d with t <= hi, or the mirror), over a bounded single-source
+# search like fact_distance's.
+fact_relational = (s: FactState, v: int, upper: bool) -> int:
+    best = if upper: fact_bound(s, v).hi else: fact_bound(s, v).lo
+    terms = [v]
+    distances = [0]
+    cursor = 0
+    visits = 0
+    loop cursor < terms.len():
+        source = terms[cursor]
+        distance = distances[cursor]
+        cursor += 1
+        loop row in s.differences:
+            visits += 1
+            if visits > 256: return best
+            if (if upper: row.a else: row.b) != source or not fact_add_fits(distance, row.limit): continue
+            other = if upper: row.b else: row.a
+            value = distance + row.limit
+            o = fact_bound(s, other)
+            if upper and o.hi != FACT_MAX and fact_add_fits(o.hi, value): best = min(best, o.hi + value)
+            if not upper and o.lo != FACT_MIN and value != FACT_MIN and fact_add_fits(o.lo, -value): best = max(best, o.lo - value)
+            if not terms.contains(other) and terms.len() < 32:
+                terms.push(other)
+                distances.push(value)
+    best
+
 fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
     if ntype(n) == T_U64: return fact_unmodeled(s, n, .wrap)
     x = fact_bound(s, a); y = fact_bound(s, b)
+    if op != .star:
+        # An interval that may wrap can still be bounded through rows (a
+        # lockstep counter stepping after its partner's guard).
+        ylo = if op == .minus: (if y.hi == FACT_MAX: FACT_MIN else: -y.hi) else: y.lo
+        yhi = if op == .minus: (if y.lo == FACT_MIN: FACT_MAX else: -y.lo) else: y.hi
+        if not fact_add_fits(x.hi, yhi): x.hi = fact_relational(s, a, true)
+        if not fact_add_fits(x.lo, ylo): x.lo = fact_relational(s, a, false)
+        if op == .plus and not fact_add_fits(x.hi, y.hi): y.hi = fact_relational(s, b, true)
+        if op == .plus and not fact_add_fits(x.lo, y.lo): y.lo = fact_relational(s, b, false)
+        if op == .minus and not fact_add_fits(x.hi, yhi): y.lo = fact_relational(s, b, false)
+        if op == .minus and not fact_add_fits(x.lo, ylo): y.hi = fact_relational(s, b, true)
     if op == .star:
         if x.lo != x.hi and y.lo != y.hi: return fact_unmodeled(s, n, .unsupported)
         if math_word_overflow(2, x.lo, y.lo) or math_word_overflow(2, x.lo, y.hi) or math_word_overflow(2, x.hi, y.lo) or math_word_overflow(2, x.hi, y.hi): return fact_unmodeled(s, n, .wrap)
@@ -793,12 +831,27 @@ fact_loop_materialize = (entry: mut FactState, back: FactState, v: int, depth: i
 # initiation and preservation. Guards select rows; assertions never do.
 fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: int, widen: bool) -> FactState:
     changing: int[]
+    counters: int[]
     if back.live and entry.live:
-        loop binding in back.bindings:
+        loop i in [0..back.bindings.len()):
+            binding = back.bindings[i]
             original = fact_binding(entry, binding.place)
             if original < 0 or entry.bindings[original].value == binding.value: continue
             t = if binding.place.root == .local: int(locals[binding.place.declaration].type) else: int(globals[binding.place.declaration].type)
             if fact_scalar(t): changing.push(binding.value)
+            b = fact_bound(entry, entry.bindings[original].value)
+            if fact_scalar(t) and types[representation_type(t)].kind == .int_ and b.lo == b.hi: counters.push(i)
+    # Lockstep counters: two changing integers that start at constants keep
+    # the difference entry gives them when the backedge entails it too (a
+    # combined loop's range and hidden indices step together).
+    lockstep: FactDifference[]
+    if counters.len() <= 8:
+        loop i in counters:
+            x = fact_bound(entry, entry.bindings[fact_binding(entry, back.bindings[i].place)].value)
+            loop j in counters:
+                y = fact_bound(entry, entry.bindings[fact_binding(entry, back.bindings[j].place)].value)
+                if i == j or y.lo == FACT_MIN or not fact_add_fits(x.lo, -y.lo) or x.lo - y.lo == FACT_MIN: continue
+                if fact_entails(back, back.bindings[i].value, back.bindings[j].value, x.lo - y.lo): lockstep.push(FactDifference(i, j, x.lo - y.lo))
     carried: FactDifference[]
     if changing.len() > 0:
         loop row in back.differences:
@@ -855,6 +908,17 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
             fact_difference(s, other, v, row.limit, row.at)
             if o.lo != FACT_MIN and row.limit != FACT_MIN and fact_add_fits(o.lo, -row.limit): b.lo = max(b.lo, o.lo - row.limit)
         fact_set_bound(s, v, b)
+    loop row in lockstep:
+        p = fact_binding(s, back.bindings[row.a].place)
+        q = fact_binding(s, back.bindings[row.b].place)
+        if p < 0 or q < 0: continue
+        a = s.bindings[p].value; b = s.bindings[q].value
+        fact_difference(s, a, b, row.limit, at)
+        x = fact_bound(s, a); y = fact_bound(s, b)
+        if fact_add_fits(y.hi, row.limit): x.hi = min(x.hi, y.hi + row.limit)
+        if x.lo != FACT_MIN and fact_add_fits(x.lo, -row.limit): y.lo = max(y.lo, x.lo - row.limit)
+        fact_set_bound(s, a, x)
+        fact_set_bound(s, b, y)
     s
 
 # Nothing is known of v beyond its interval: no projections, no rows.
