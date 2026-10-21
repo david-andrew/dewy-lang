@@ -1,0 +1,16 @@
+# quick
+$runtime_checks=false
+# A square root reads its operand and writes nothing: facts survive it.
+shift_roots=(@xs:array<float64> squares:array<float64>):>void=>{
+    loop i in 0.. and sq in squares {
+        if i >=? xs.length break
+        let root=sqrt(sq)
+        xs[i]=xs[i]+root
+    }
+}
+main=():>int64=>{
+    let xs:array<float64>=[1.0 1.0 1.0]
+    shift_roots(@xs [4.0 9.0 16.0 25.0])
+    printl(xs)
+    return 0
+}

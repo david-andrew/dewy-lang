@@ -929,7 +929,7 @@ fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reaso
         j -= 1
 
 fact_reads_only = (id: IN) -> bool:
-    id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .static_assert or id == .runtime_assert or id == .assert or id == .panic or id == .unreachable
+    id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .static_assert or id == .runtime_assert or id == .assert or id == .panic or id == .unreachable or id == .sqrt
 
 # Conservative loop fallback: pre-kill every syntactically changing route.
 # This is also used for iterators whose backedge transfer is not modeled.
@@ -1886,6 +1886,10 @@ fact_capture = (n: int, s: mut FactState) -> int:
         if id == .loan_address or id == .loan_load or id == .loan_store:
             # Raw writes invalidate element facts; no address becomes evidence.
             if id == .loan_store: fact_forget(s, n, .write, true)
+            return fact_new(s, fact_domain(ntype(n)))
+        # (a float square root reads its operand and writes nothing)
+        if id == .sqrt:
+            loop c in kids(n): fact_capture(c, s)
             return fact_new(s, fact_domain(ntype(n)))
         if id == .len:
             base = fact_capture(kid(n, 0), s)
