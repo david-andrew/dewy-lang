@@ -3444,6 +3444,9 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             if lookup(intern(mn)) != 0: fatal(nodes[n].pos, "unknown function '{name_of(name)}' (it is {mn}'s: `{mn}.{name_of(name)}(...)`)")
         uh = unused_file_hint(name)
         if len(uh) > 0: fatal(nodes[n].pos, "unknown function '{name_of(name)}'{uh}")
+        # (Python's f-strings: f"hello {name}")
+        if name_of(name) == "f" and not ufcs and args.len() == 1 and nodes[args[0]].kind == .str_lit and dewy_at(nodes[n].pos):
+            fatal(nodes[n].pos, "unknown function 'f' (drop the f: every string interpolates, as in `\"hello \{name}\"`)")
         fatal(nodes[n].pos, "unknown function '{name_of(name)}'{private_hint(name)}{suggestion(name_of(name), surface_names(all, nodes[n].pos))}")
     resolve_fn_call(n, name, decls, args, expected, 0, ufcs)
 

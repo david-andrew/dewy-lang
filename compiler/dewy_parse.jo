@@ -539,7 +539,7 @@ dw_coalesce_arithmetic = (left: int, right: int):
     first = dw_unwrap(right)
     op = DewyToken.none
     rest = 0
-    loop true:
+    loop dewy_syntax[first].kind == .binary:
         o = dw_op(first)
         if o != .plus and o != .minus and o != .star and o != .slash and o != .floor and o != .percent: break
         op = o
