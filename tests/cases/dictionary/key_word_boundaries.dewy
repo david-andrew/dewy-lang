@@ -13,7 +13,7 @@ if saved[signed[i]] not=?[i] return 2
 if values.has(1) or values.has(-4294967295) return 3
 loop i in [0..4) {if not values.remove(signed[i]) return 4}
 loop i in [0..4) values[signed[i]]=[42]
-if values.keys() not=?[4294967295 4294967296 -4294967296 int64.min int64.max -1 0] return 5
+if [values.keys...] not=?[4294967295 4294967296 -4294967296 int64.min int64.max -1 0] return 5
 let unsigned:array<uint64>=[0 uint64.max uint64.max-1 4294967295 4294967296]
 let wide:dict<uint64 int64>=[]
 loop i in [0..unsigned.length) wide[unsigned[i]]=i

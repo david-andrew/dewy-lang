@@ -1647,10 +1647,12 @@ This also works for generic functions returning `T?` when `T` is optional.
 A bare `none` means the outer optional is absent; wrapping an already-typed
 optional value preserves it as a present payload.
 
-`values.keys()` and `values.values()` return arrays in insertion order, skipping
-removed entries. The arrays retain independent values: editing a returned array
-or one of its nested elements does not change the dictionary, and later dictionary
-edits do not change an earlier result.
+`values.keys` returns the keys as a set and `values.values` the values as an
+array, both in insertion order, skipping removed entries. A set has no positions:
+`[values.keys...]` collects the keys into an array to index or sort, and
+`loop key in values.keys` visits them without making the set. Both results are
+independent values: editing one does not change the dictionary, and later
+dictionary edits do not change an earlier result.
 
 Dictionary loops and unpacking retain an insertion-ordered snapshot of the live
 keys and values. Changing the source dictionary while iterating does not change

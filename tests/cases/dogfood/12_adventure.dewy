@@ -32,7 +32,7 @@ look = (w:World):>void => {
     printl("== {room.title} ==")
     printl(room.description)
     if room.items.length >? 0 { printl("You see: {room.items.join(", ")}") }
-    printl("Exits: {room.exits.keys().sorted().join(" ")}")
+    printl("Exits: {[room.exits.keys...].sorted().join(" ")}")
 }
 
 do_command = (@w:World line:string):>void => {

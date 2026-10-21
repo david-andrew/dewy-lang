@@ -4438,6 +4438,7 @@ shown_fn_name = (name: str) -> str:
     if name == "__dewy_find": return "find"
     if name == "__dewy_rfind": return "rfind"
     if name == "__dewy_insert": return "insert"
+    if name == "__dewy_keys": return "keys"
     name
 
 # the operator a library function implements, for diagnostics ("" when it is no operator)
@@ -4702,6 +4703,7 @@ dewy_member_name = (callee: int, rt: int, fname: int, args: int[]) -> int:
         if name == "pop" and args.len() == 1: return intern("remove")
         if name == "insert": return intern("__dewy_insert")
         if name == "remove": fatal(pos, "an array removes by position with pop: `{recv}.pop(i)`")
+    if name == "keys" and args.len() == 0 and is_map_type(rt): return intern("__dewy_keys")
     if k == .str_:
         if name == "find": return intern("__dewy_find")
         if name == "rfind": return intern("__dewy_rfind")
@@ -5164,7 +5166,13 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         else if is_dewy_range_type(t, "IntRange"):
             nodes[n] = nodes[bc_call("__dewy_range_iter", args, nodes[n].pos)]
         else if is_dewy_set_type(t):
-            nodes[n] = nodes[bc_call("__dewy_set_values", args, nodes[n].pos)]
+            # (loop k in d.keys: the dictionary's keys in order, without making the set)
+            src = args[0]
+            if nodes[src].kind == .call and nkids(src) == 1 and nodes[src].a == 0 and nodes[src].sym > 0 and int(nodes[src].sym) < fns.len() and fns[int(nodes[src].sym)].decl != 0 and name_of(int(nodes[int(fns[int(nodes[src].sym)].decl)].name)) == "__dewy_keys":
+                m = kid(src, 0)
+                add_flag(m, NF_CHECKED)
+                nodes[n] = nodes[bc_call("keys", [m], nodes[n].pos)]
+            else: nodes[n] = nodes[bc_call("__dewy_set_values", args, nodes[n].pos)]
         else if is_map_type(t) and not ownership_fact_type(t):
             # Combined loops index a retained dense entry list. Compact deleted
             # entries once, just as ordinary dictionary iteration does.
@@ -6026,6 +6034,12 @@ concat_piece = (n: int, text: bool, second: bool = false) -> str:
     if k == .ident: nm = name_of(int(nodes[n].name))
     else if k == .field and nodes[int(nodes[n].a)].kind == .ident: nm = name_of(int(nodes[int(nodes[n].a)].name)) + "." + name_of(int(nodes[n].name))
     else if k == .int_lit: nm = "{nodes[n].ival}"
+    else if k == .call and nkids(n) <= 1:
+        # (d.keys, as written, or as its library function: __dewy_keys(d))
+        c = int(nodes[n].a)
+        if nkids(n) == 0 and nodes[c].kind == .field and nodes[int(nodes[c].a)].kind == .ident: nm = name_of(int(nodes[int(nodes[c].a)].name)) + "." + name_of(int(nodes[c].name))
+        else if nkids(n) == 1 and nodes[c].kind == .ident and nodes[kid(n, 0)].kind == .ident: nm = name_of(int(nodes[kid(n, 0)].name)) + "." + shown_fn_name(name_of(int(nodes[c].name)))
+        else if nkids(n) == 1 and c == 0 and nodes[n].sym > 0 and int(nodes[n].sym) < fns.len() and fns[int(nodes[n].sym)].decl != 0 and nodes[kid(n, 0)].kind == .ident: nm = name_of(int(nodes[kid(n, 0)].name)) + "." + shown_fn_name(name_of(int(nodes[int(fns[int(nodes[n].sym)].decl)].name)))
     if len(nm) == 0 or nm[0] == '$' or nm[0] == '_': nm = if text and second: "y" else if text: "x" else if second: "ys" else: "xs"
     if text: "\{{nm}}" else: nm
 
@@ -8452,6 +8466,8 @@ check_expr = (n: int, expected: int) -> int:
         type_receiver_at = int(nodes[n].a)
         bt = prune(check_expr(int(nodes[n].a), 0))
         type_receiver_at = saved_receiver
+        if is_dewy_set_type(bt) and dewy_at(nodes[n].pos):
+            fatal(nodes[n].pos, "a set has no positions to index (`d.keys` is a set): `[{concat_piece(last_checked, false)}...]` collects its members into an array, and `in?` tests membership")
         nodes[n].a = i32(last_checked)
         dewy_index_ranges(n, bt)
         bk = types[bt].kind

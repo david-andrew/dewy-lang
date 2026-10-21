@@ -18,6 +18,16 @@ set[T] = (values: T[]) -> Set[T]: __dewy_make_set(values)
 set = (text: str) -> Set[str]: __dewy_make_set(graphemes(text))
 
 __dewy_set_values[T] = (s: Set[T]) -> T[]: s._entries.keys()
+# Dewy's `d.keys`: the keys as an insertion-ordered set
+__dewy_keys[K, V] = (m: Map[K, V]) -> Set[K]:
+    result: Set[K]
+    if m.len() > 0: result._entries.reserve(m.len())
+    ng = m.gone.len()
+    loop i in 0.. and key in m.__keys:
+        if i < ng and m.gone[i]: continue
+        result._entries.insert_if_absent(key, true)
+    result._tail = result._entries.__keys.len()
+    result
 # s.values: the members, a fresh array in first-seen order
 values[T] = (s: Set[T]) -> T[]: s._entries.keys()
 len[T] = (s: Set[T]) -> int: s._entries.len()

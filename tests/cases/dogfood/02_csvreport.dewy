@@ -75,7 +75,7 @@ main = ():>int => {
         groups[key].revenue += float64(units) * price
         groups[key].rows += 1
     }
-    let keys = groups.keys()
+    let keys = [groups.keys...]
     keys.sort(key=(k)=>groups[k].revenue reverse=true)
     printl("Summary by {opts.group}")
     printl(format("" "-<36"))

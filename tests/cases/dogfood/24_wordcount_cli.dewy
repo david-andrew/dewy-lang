@@ -97,7 +97,7 @@ run=(argv:array<string>):>int64=>{
         if config.verbose printl("reading {f} ({body.length} characters)")
         count_words(body config @counts)
     }
-    let ranked=counts.keys().sorted(key=(w)=>counts[w] reverse=true)
+    let ranked=[counts.keys...].sorted(key=(w)=>counts[w] reverse=true)
     loop w in ranked[..min(config.top ranked.length)) printl("{format(w "<8")} {counts[w]}")
     return 0
 }

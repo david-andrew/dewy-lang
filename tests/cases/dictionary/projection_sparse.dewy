@@ -2,6 +2,6 @@
 main=()=>{
 let values=[10->1 20->2 30->3 40->4 50->5]
 values.remove(20) values.remove(40) values[60]=6
-if values.keys() not=? [10 30 50 60] or values.values() not=? [1 3 5 6] return 1
+if [values.keys...] not=? [10 30 50 60] or values.values() not=? [1 3 5 6] return 1
 values[20]=22
-return if values.keys() =? [10 30 50 60 20] and values.values() =? [1 3 5 6 22] 42 else 2}
+return if [values.keys...] =? [10 30 50 60 20] and values.values() =? [1 3 5 6 22] 42 else 2}

@@ -61,7 +61,7 @@ main = () => {
     loop [level count] in by_level { printl("  {format(level "<6")} {count}") }
 
     printl("by service:")
-    loop service in by_service.keys().sorted() {
+    loop service in [by_service.keys...].sorted() {
         let list = by_service[service]
         let span = list[end].stamp - list[0].stamp
         printl("  {format(service "<5")} {list.length} entries over {duration_text(span)}")

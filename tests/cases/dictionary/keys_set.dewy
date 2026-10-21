@@ -1,0 +1,16 @@
+# quick
+main=():>void=>{
+    let d=["b"->2 "a"->1 "c"->3]
+    d.remove("a")
+    d["d"]=4
+    let keys=d.keys
+    printl(keys)
+    printl("b" in? keys and "a" not in? keys)
+    printl(keys.length)
+    keys.push("z")
+    printl(d.keys)
+    printl([d.keys...])
+    loop k in d.keys {print(k)}
+    printl("")
+    printl(d.keys =? set["d" "c" "b"])
+}
