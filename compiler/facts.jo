@@ -282,6 +282,7 @@ struct FactRoute:
     selectors: int[]
     elements: bool[]
     types: int[]
+    sites: int[]    # each selector's index node (0 for a field)
 
 # Capture target selectors once. Rebuilding ancestor values below is a pure
 # operation over those captured selectors, never a second syntax evaluation.
@@ -299,6 +300,7 @@ fact_route = (e: int, s: mut FactState, depth: int = 0) -> FactRoute:
         route.selectors.push(selector)
         route.elements.push(k == .index)
         route.types.push(refine_storage(e, ntype(e)))
+        route.sites.push(if k == .index: e else: 0)
         return route
     fact_capture(e, s)
     FactRoute()
@@ -310,10 +312,11 @@ fact_route_values = (s: mut FactState, route: FactRoute) -> int[]:
         values.push(fact_project(s, values[i], route.selectors[i], route.elements[i], route.types[i]))
     values
 
-fact_store_route = (s: mut FactState, route: FactRoute, value0: int, at: int):
+fact_store_route = (s: mut FactState, route: FactRoute, value0: int, at: int, bounds: bool = false):
     p = fact_place(route.root)
     if p.declaration == 0: fact_forget(s, at, .write, true); return
     values = fact_route_values(s, route)
+    if bounds and fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query): fact_route_bounds(s, route, values)
     if result_active and values.len() > 0: result_replaced(values[values.len() - 1], at, s)
     value = value0
     i = route.selectors.len() - 1
@@ -323,6 +326,20 @@ fact_store_route = (s: mut FactState, route: FactRoute, value0: int, at: int):
         i -= 1
     if fact_exposed(p): fact_forget(s, at, .write)
     fact_rebind(s, p, value, at, if values.len() > 0: values[0] else: 0)
+
+# A store's element selectors carry the obligation a load's do (fact_capture's index).
+fact_route_bounds = (s: mut FactState, route: FactRoute, values: int[]):
+    loop i in [0..route.selectors.len()):
+        n = route.sites[i]
+        if n == 0 or i >= values.len(): continue
+        t = representation_type(if i == 0: ntype(route.root) else: route.types[i - 1])
+        if types[t].kind != .array and types[t].kind != .fixed: continue
+        index = route.selectors[i]
+        length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, values[i], -1, false, T_INT)
+        zero = fact_constant(s, 0)
+        lo = fact_compare(s, .le, zero, index)
+        hi = fact_compare(s, .lt, index, length)
+        if lo != 1 or hi != 1: wit_index(n, s, index, length, lo, hi)
 
 fact_store = (s: mut FactState, e: int, value: int, at: int):
     route = fact_route(e, s)
@@ -971,7 +988,9 @@ fact_capture = (n: int, s: mut FactState) -> int:
             arithmetic_op = if op == .pluseq: Tok.plus else: Tok.minus
             r = fact_arithmetic(s, a, arithmetic_op, old, r)
         else if op != .assign or nodes[n].aux != 0: r = fact_new(s, fact_domain(ntype(a), .write, n))
-        fact_store(s, a, r, n)
+        # (a compound one's target was read above, with its obligations)
+        route = fact_route(a, s)
+        fact_store_route(s, route, r, n, op == .assign)
         return r
     if k == .if_:
         paths = fact_condition(int(nodes[n].a), s)
@@ -1108,7 +1127,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
                 if old.lo >= 0 and (delta < 0 or old.hi < FACT_MAX):
                     size = fact_new(s, FactBound(max(0, old.lo + delta), max(0, old.hi + delta)))
             if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(fresh, -1, false, size))
-            fact_store_route(s, route, fresh, n)
+            fact_store_route(s, route, fresh, n, true)
             return fact_new(s, fact_domain(ntype(n)))
         if id == .static_assert:
             if nkids(n) == 0 or fact_speculating > 0: return 0

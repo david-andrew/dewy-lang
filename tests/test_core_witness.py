@@ -40,6 +40,20 @@ DIVISOR = '''quotient=(n:int64 d:int64):>int64=>{
 main=()=>printl(quotient(12 3))
 '''
 
+STORE = '''put=(@xs:array<int64> i:int64)=>{
+    if i <? 0 return
+    xs[i]=99
+}
+main=()=>{ let items:array<int64>=[1]; put(@items 0); printl(items.length) }
+'''
+
+NESTED_STORE = '''grow=(@rows:array<array<int64>> i:int64)=>{
+    if i >=? rows.length return
+    rows[i].push(1)
+}
+main=()=>{ let rows:array<array<int64>>=[[1]]; grow(@rows 0); printl(rows.length) }
+'''
+
 CASES = [
     (STALE, ['/w.dewy:6:12: error: index is not in bounds$/', 'note: i is 0',
              '/w.dewy:5:5: note: xs.length is 0 after this clear$/',
@@ -54,6 +68,10 @@ CASES = [
                 'possible witness (consistent with the known bounds, not an observed execution): y = 0']),
     (DIVISOR, ['cannot prove divisor is nonzero: missing bound', 'note: d is at most 4',
                'possible witness (consistent with the known bounds, not an observed execution): d = 0']),
+    (STORE, ['/w.dewy:3:5: error: cannot prove index is in bounds: missing upper bound$/',
+             'note: missing upper bound: nothing establishes `i <? xs.length` here']),
+    (NESTED_STORE, ['/w.dewy:3:5: error: cannot prove index is in bounds: missing lower bound$/',
+                    'note: missing lower bound: nothing establishes `i >=? 0` here']),
 ]
 
 
@@ -67,7 +85,7 @@ def strict(compiler, path, command='check'):
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('command', ['check', 'build'])
-@pytest.mark.parametrize('index', range(len(CASES)), ids=['stale', 'resized', 'contract', 'divisor'])
+@pytest.mark.parametrize('index', range(len(CASES)), ids=['stale', 'resized', 'contract', 'divisor', 'store', 'nested_store'])
 def test_strict_witness_notes(compiler, tmp_path, index, command):
     source, patterns = CASES[index]
     path = tmp_path / 'w.dewy'
