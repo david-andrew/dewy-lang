@@ -2,6 +2,8 @@
 Entity:type=[inventory:array<int64>]
 
 mutate_inventory=(@entities:Pool<Entity> handles:array<Handle> count:int64):>void=>{
+    # (handles and slots are data: checked where they are used)
+    $runtime_checks
     loop i in [0..count) {
         let entity=i%64 let slot=(i//64)%32 let delta=i%7
         entities[handles[entity]].inventory[slot]+=delta+1

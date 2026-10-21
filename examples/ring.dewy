@@ -1,5 +1,7 @@
 # A bounded history, oldest entry first. Once full, push replaces the oldest
 # entry in constant time. Construct with new_ring<T>(capacity).
+# The head and length invariants live in these functions: indexes are checked.
+$runtime_checks
 Ring:type=<T>[capacity:int64 values:array<T> head:int64=0]
 
 new_ring=<T>(capacity:int64):>Ring<T>=>{
