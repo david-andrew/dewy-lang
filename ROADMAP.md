@@ -18,7 +18,7 @@ what landed. Keep this file short.
 | Compiler self-build | 9.35 G instructions (the compiler grew) | seconds-scale edit loop |
 | Game-tick kernel vs C -O2 (time) | 1.6× default and release (default was 6.3× before small-leaf inlining) | ~1× both |
 | Worst other kernels vs C (time, default) | literal callbacks 4.6×, callbacks 2.3×, params 1.75×, graph 1.7×, recursive_tree 1.4× | ≤1.2× |
-| Quick / full suite | 38 s / 6.6 min (load average 14–24; remeasure when quiet) | ≤30 s / ≤5 min |
+| Quick / full suite | 59.5 s at load 7–11 (quick set doubled: 301 cases, 864 tests) / not measured | ≤30 s / ≤5 min |
 
 Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 `python3 -m tools.core ladder` prints the scoreboard. Compile numbers come from
@@ -72,6 +72,8 @@ only.
   languages; a lexer module waits on question 24.
 - Recover the game-panel compile cost of mathematical `int` (+5.7%, accepted
   10-20); the frontend work recovered the synthetic panel's share.
+- Quick suite over budget: trim `--quick` back toward ~25 s (move the slowest
+  groups to the full suite).
 - Small items:
   - reproducible builds: programs below the fused gate still compile to
     different bytes at 1 vs N emission workers (the old emission path; forced
