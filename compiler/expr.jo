@@ -9006,6 +9006,10 @@ check_if = (n: int, ex: int) -> int:
     jumps = narrow_jumps.len()
     branch_expected = ex
     if nodes[n].aux2 == -8: branch_expected = 0
+    # `if flag [42] else xs`: a then-branch literal of literals is checked again
+    # at the other branch's type (kept unchecked here)
+    then_literal = 0
+    if branch_expected == 0 and nodes[n].aux2 != -8 and container_tail(b) and not container_tail(c) and literal_tree(block_tail(b)): then_literal = clone(block_tail(b))
     t1 = check_block(b, branch_expected, true)
     if narrow_changes.len() != changes: narrow_returned(changes, jumps, b)
     scope_reset(mark)
@@ -9050,15 +9054,36 @@ check_if = (n: int, ex: int) -> int:
         coerce(va, ex)
         coerce(vb, ex)
         return ex
+    if then_literal != 0 and not has_var(t2) and not type_eq(t1, t2) and (tkind(t2) == .array or tkind(t2) == .fixed or is_map_type(t2)):
+        nodes[va] = nodes[then_literal]
+        check_expr(va, t2)
+        nodes[b].type = i32(t2)
     join_types(va, vb, nodes[n].pos)
 
 # Does block b end in a container literal (array, dictionary or record)?
 container_tail = (b: int) -> bool:
     if b == 0 or nodes[b].kind != .block or nkids(b) == 0: return false
-    last = kid(b, nkids(b) - 1)
-    e = if nodes[last].kind == .exprstmt: int(nodes[last].a) else: last
-    k = nodes[e].kind
+    k = nodes[block_tail(b)].kind
     k == .array or k == .map_lit or k == .record_lit
+
+# the expression a nonempty block ends in
+block_tail = (b: int) -> int:
+    last = kid(b, nkids(b) - 1)
+    if nodes[last].kind == .exprstmt: int(nodes[last].a) else: last
+
+# (a literal made only of literals: checking it twice has no other effect)
+literal_tree = (e: int) -> bool:
+    k = nodes[e].kind
+    if k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit or k == .none_lit: return true
+    if k == .unary: return literal_tree(int(nodes[e].a))
+    if k == .map_lit:
+        loop pair in kids(e):
+            if not literal_tree(int(nodes[pair].a)) or not literal_tree(int(nodes[pair].b)): return false
+        return true
+    if k != .array or nodes[e].a != 0 or nodes[e].b != 0: return false
+    loop i in [0..nkids(e)):
+        if not literal_tree(kid(e, i)): return false
+    true
 
 # ---------------- ranges as values ----------------
 # a range used as a value is the array of its numbers: [0..n) is [0, 1, ... n-1]

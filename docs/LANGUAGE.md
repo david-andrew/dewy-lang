@@ -2537,7 +2537,8 @@ type for subsequent accesses. A literal builds the one union member it fits: a
 record literal the record whose fields it names (`return [name="ada"]` for
 `Customer|NotFound`), a dictionary literal the dictionary, an array literal the
 array. In `if flag xs else []`, a container literal in the `else` branch takes
-the type of the first branch. `??` also works after an optional has been narrowed
+the type of the first branch; in `if flag [42] else xs`, a then-branch literal made
+of literals takes the `else` branch's. `??` also works after an optional has been narrowed
 to its value, and its fallback remains lazy.
 
 `match` supports typed bindings, literals and `_` as a fallback. Any other bare
