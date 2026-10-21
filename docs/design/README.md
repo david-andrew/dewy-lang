@@ -1,6 +1,6 @@
 # Design notes
 
-Design specifications and explorations for Dewy semantics:
+David's standing [decisions](decisions.md). Design specifications and explorations for Dewy semantics:
 [value semantics](value_semantics.md), [match](match.md),
 [precedence](precedence.md), [no runtime traps](no_traps.md),
 [semantic contracts](semantic_contracts.md),

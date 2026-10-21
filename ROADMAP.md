@@ -9,14 +9,14 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 
 | Measure | Now (2026-10-21) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 82/94 (12 wait on open questions) | 94/94, then tier 4 |
+| Acceptance ladder, design surface | 86/99 (13 held on open questions) | all |
 | Acceptance ladder, current dialect | all non-held programs pass; held ones run | stays green |
 | Tier-4 flagship programs (1–5k lines each) | 5/7 written (game, KV store, crypto, notes service, Dewy frontend) | 7/7 |
 | Programs passing under no-traps (`DEWY_INTERNAL_FACT_POLICY=require-static`) | 43/115 ladder+examples; cases unmeasured | all, then flip the default |
 | Compile throughput, single thread, default build, per corpus (`speed --corpus`) | ~1.7k–3k est. lines/s (each program pays a ~0.16 G library floor) | 250k lines/s (200k minimum) |
 | Critical-path instructions at 4 workers (secondary) | synthetic 0.60 G | no regression |
 | Single-thread instructions, synthetic-22k (regression signal) | 1.17 G | ~0.09 G (250k lines/s) |
-| Hello-world compile | 31 ms | ≤10 ms |
+| Hello-world compile (guardrail) | 31 ms | ~50 ms |
 | Kernels vs C -O2 (time, default) | literal callbacks 4.6×, callbacks 2.3×, params 1.75×, graph 1.7×, game 1.6× | ≤1.2× |
 | Quick / full suite | ~17 s / ~4 min | ≤30 s / ≤5 min |
 
@@ -27,25 +27,27 @@ runner, never on the shared box. Kernels: `bench`.
 
 ## Now
 
-- Astra: concurrency stage 1, a work-stealing fork-join runtime and `parallel`.
-- Opus: no-traps solver idioms; flagship gaps (COW cliff, record callees,
-  optional literals); flagship gaps 2 (`no_effects`, copies, durable files).
-- Opus: `$runtime_checks`, `$prototype`, `$no_hidden_costs`, boolean metatags.
+- Astra: codegen for `parallel` regions (fork costs about a call; then the
+  work-stealing runtime).
+- Opus: no-traps solver idioms; `$runtime_checks`/`$prototype`/`$no_hidden_costs`
+  and boolean metatags; flagship gaps 2 (`no_effects`, copies, durable files).
+- Opus: the reference-following changes (`+`, initialization, `d.keys`,
+  conversions, declared rows) and context-adaptive decimal literals.
+- Opus: `$shadowable const` (prelude included) and the loop value/place split.
 
 ## Next
 
-1. **No traps by default** (Decided). Make the solver prove idioms (loop
-   indices, guards, short-circuit `and`, `.length` checks); fix the corpus with
-   real guards or `$runtime_checks`; then flip the default.
-2. **Tier-4 flagships:** a kernel/RTOS program under `$no_hidden_costs`, and an
-   ML training loop over tensors (question 7; device-agnostic).
-3. **Concurrency** ([design](docs/design/safety_and_concurrency.md)), staged:
-   fork-join runtime, then `Send`/`Sync` and parallel-loop obligations, then
-   task groups once spellings are decided.
-4. **Single-thread compile throughput:** re-plan around structural wins in the
-   checker, lowering and the default optimizer's budget, measured on
-   `speed --corpus`. Every program pays a ~0.16 G library floor; fresh compiles
-   only (question 22 leans no).
+1. **No traps by default:** prove idioms, fix the corpus (real guards or
+   `$runtime_checks`), then flip the default.
+2. **Concurrency** ([design](docs/design/safety_and_concurrency.md)): fork-join
+   codegen and runtime; `Send`/`Sync` and parallel obligations; `concurrent`/
+   `spawn` groups, `Canceled`, deadlines and `within`/`race` over a threads
+   backend; `Atomic<T>` and the `blocks` effect; device-agnostic throughout.
+3. **Tier-4 flagships:** a kernel/RTOS program under `$no_hidden_costs`; an ML
+   training loop (question 7).
+4. **Single-thread compile throughput** on `speed --corpus`: structural wins in
+   the checker, lowering and the default optimizer's budget. Every program pays
+   a ~0.16 G library floor today.
 5. **Self-hosting** ([readiness](docs/design/self_hosting.md)): after question 24,
    new leaf compiler modules start in Dewy.
 6. **Runtime gaps** (upper bound first): callback traversal, graph layout, float
@@ -54,41 +56,25 @@ runner, never on the shared box. Kernels: `bench`.
    (question 10); result-length facts for `make(n)`; runtime `type<T>` statics;
    effects slice 4 follow-ups; the `@obj.method()` source-text heuristic.
 
-## Decided (David)
+## Decided (David; full text in [docs/design/decisions.md](docs/design/decisions.md))
 
-- `int`: arbitrary precision with word storage where proven. `intN`/`uintN` wrap.
-- Decimal literals are exact unless annotated (e.g. `float64`).
-- Zero-argument calls may omit or include the parentheses.
-- A bare function name calls; `@fn` is the handle.
-- No traps by default (10-21; supersedes "ordinary code keeps runtime
-  checks"): every partial operation is proven, handled as a value
-  (`xs.get(i)` → `T | none`) or checked with `$runtime_assert`; unproven is a
-  compile error with a fix-it. `$runtime_checks` (module/function/block) is the
-  production opt-in: unproven obligations become reporting checks, listable via
-  `check --obligations` and an LSP hint. `$prototype` keeps its archived
-  semantics (runtime deferral with a `prototype:` warning per site).
-- Boolean metatags accept `$tag`, `$tag=true`, `$tag=false`.
-- Strict lane is `$no_hidden_costs`: a library-defined module bundle over
-  function rows (`& no allocates`, …) plus `$explicit_copies` semantics; forbids
-  hidden allocation, detach, implicit costly copies and `$runtime_checks`/
-  `$prototype`; `$no_hidden_costs=false` opts a scope out. `$realtime` is
-  reserved for a future stronger bundle (no blocks, bounded stack).
-- Compile speed: 250k lines/s single-threaded in the default build (200k
-  minimum), on representative code. Parallelism is a bonus.
-- Concurrency direction (docs/design/safety_and_concurrency.md, "Adopted
-  direction"): no coloured functions, groups-only spawn, level-triggered
-  `Canceled`, first failure cancels siblings, two lanes, deterministic
-  reductions, bounded channels, explicit atomic orders, no language actors.
-  The parallel loop is the keyword `parallel` (`parallel i in [0..10) {…}`,
-  `[parallel x in xs x*x]`).
-- GPU: tensor and `parallel` designs stay device-agnostic; device is placement
-  context, not a type change.
-- Inference keeps the most precise type it knows; only an explicit wider
-  annotation widens (literal unions; integers keep range facts).
-- `end` and `new` are reserved: `end` is the last index inside an index; `new`
-  inserts a singleton axis (NumPy `newaxis`): `xs[new ..]`, `xs[.. new]`.
-- Versions: the language stays 0.0.0; the extension gets patch bumps only, at
-  most one release a day.
+- `int` is arbitrary precision; `intN`/`uintN` wrap. Decimal literals are exact
+  unless the context is float64. Zero-argument calls may omit parentheses. A
+  bare function name calls; `@fn` is the handle.
+- No traps by default; `$runtime_checks` is the production opt-in; `$prototype`
+  is for development. Boolean metatags accept `$tag`, `=true`, `=false`.
+- The strict lane is `$no_hidden_costs` (library bundle); `$realtime` is reserved.
+- Compile target: 250k lines/s single-threaded, default build (200k minimum).
+  Fresh compiles only, no library image; hello-world ~50 ms guardrail.
+- Concurrency: the adopted direction; `parallel`; `concurrent {…}`/`spawn`;
+  `& no blocks`; `Canceled`; `Atomic<T>` with optional orders (provisional).
+- GPU: placement follows data; mixing devices is a compile error.
+- Follow the reference: no `+` concatenation; initialize before reading;
+  `d.keys` is a set; value-preserving conversions; declared rows are contracts.
+- `$shadowable const` at module top level; the prelude uses it.
+- Loops iterate the entry value; `loop x in @xs` iterates the place live.
+- Inference keeps precision; `end` and `new` are reserved.
+- Versions: language 0.0.0; extension patch bumps, at most one release a day.
 
 ## Open questions for David
 
@@ -98,8 +84,6 @@ reversible; reversible ones are implemented provisionally and flagged.
 3. Readonly/lifetime-bearing payload places beyond `$lend`.
 4. Allocation capabilities and allocation-failure policy. (76)
 5. Explicit `move` syntax.
-6. Concurrency spellings: the task-group form, `blocks`, `Canceled`, `Atomic`
-   orders (direction decided). (81–83)
 7. Multidimensional arrays: tensor syntax and broadcasting. (84)
 8. IEEE float policy. (85)
 9. Units: display (`as km`), affine units, calendar durations. (88)
@@ -116,20 +100,18 @@ reversible; reversible ones are implemented provisionally and flagged.
 19. Should `T?` fields default to `none` implicitly?
 20. Per-process `$test` isolation; provisional `test --json` fields.
 21. Rounding ties (rational to-even vs float half-away); `as rational`; NaN.
-22. Ship a prebuilt library image with the toolchain? (David leaning no: fresh only.)
-23. Dogfooding: decimal literals default to rational; `index_of` → `int|none`;
-    sibling minted literals; `main` returning `int|error`; `loop [k @v] in d`;
-    string helpers; slice clamping; a stderr print; union-member comparison;
-    `sqrt` of quantities (landed provisionally); exposed Jo helpers.
+23. Dogfooding leftovers: `index_of` → `int|none`; sibling minted literals;
+    `main` returning `int|error`; `loop [k @v] in d`; string helpers; slice
+    clamping; a stderr print; union-member comparison; `sqrt` of quantities
+    (provisional); exposed Jo helpers.
 24. Self-hosting surface: OS selection, build-mode flags, pointer types,
     `extern`/C bindings, tuples, byte-char literal, `import p"x"` splat vs
     namespace.
-25. Behavior vs the archived reference: `+` concatenation; reading an
-    uninitialized `let x:T`; bound `[1 2]` as `array<int>`; mutating a container
-    in its own loop; explicit `main()`; `d.keys` array vs set; unknown escapes;
-    user functions vs prelude overloads; `and=` evaluation; unproven narrowing
-    (runtime vs compile error); `uint64(x)` bit casts; top-level `count = 3`;
-    declared vs inferred effect rows for callers.
+25. Spellings to confirm (recommendations implemented provisionally):
+    raw-bit conversions, recommended `x.wrap(uint8)` (integers, modulo 2^N) and
+    `x.bitcast(float64)` (same-width reinterpretation); steerable loops,
+    recommended naming the iterator inline: `loop node in w=tree.walk() {
+    if leaf? node w.skip_children }`. Both reversible.
 26. Index-typed refinements ("below `a.length`"); Euclidean `%` (recommended:
     keep floored).
 
