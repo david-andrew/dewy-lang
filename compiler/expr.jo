@@ -6550,6 +6550,39 @@ check_lambda = (lam: int, expected: int) -> int:
         fns[f].decl = i32(declaration)
     t
 
+# Does declaration d accept every parameter of function type et (by value) and
+# give a result et's result accepts?
+fn_adapts = (d: int, et: int) -> bool:
+    sig = fn_sig(d)
+    if sig.generic or int(types[et].nargs) != nkids(d) or int(types[et].mutmask) != 0: return false
+    loop i in [0..nkids(d)):
+        if has_flag(kid(d, i), NF_MUT) or tkind(sig.params[i]) == .refined or not can_coerce(0, targ(et, i), sig.params[i]): return false
+    want = int(types[et].elem)
+    if want != 0 and tkind(want) == .refined: return false
+    want == 0 or tkind(want) == .void_ or sig.ret != 0 and can_coerce(0, int(sig.ret), want)
+
+# `(a b) => f(a b)` in place of `@f`, checked against the expected function type.
+fn_adapter = (n: int, et: int, expected: int) -> int:
+    pos = nodes[n].pos
+    params: int[]
+    args: int[]
+    loop i in [0..int(types[et].nargs)):
+        param = mk(.param, pos)
+        nodes[param].name = i32(intern("$arg{i}"))
+        nodes[param].a = i32(type_node_of(targ(et, i), pos))
+        params.push(param)
+        args.push(bc_ident("$arg{i}", pos))
+    callee = mk(.ident, pos)
+    nodes[callee].name = nodes[n].name
+    call = mk(.call, pos)
+    nodes[call].a = i32(callee)
+    set_list(call, args)
+    lam = mk(.lambda, pos)
+    set_list(lam, params)
+    nodes[lam].b = i32(bc_block([bc_stmt(call, pos)], pos))
+    nodes[n] = nodes[lam]
+    check_expr(n, expected)
+
 fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, closure: int = 0) -> int:
     decls: int[]
     if closure != 0: decls.push(poly_families[int(types[prune(ntype(closure))].st)].decl)
@@ -6615,6 +6648,19 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
             selected_binds = binds
         else if not sig.generic and decls.len() == 1: f = get_fn_inst(d, [], nodes[n].pos)
     if selected != 0: f = get_fn_inst(selected, selected_binds, nodes[n].pos)
+    # (a function whose parameters accept the expected ones and whose result
+    # fits the expected result stands in through a wrapper: `@f` with
+    # f:(x:int64|string):>uint64? where <(x:int64):>uint64?|E> is expected)
+    if explicit_types.len() == 0 and mod < 0 and closure == 0 and et != 0 and types[et].kind == .fn_ and files[pos_file(nodes[n].pos)].is_dewy:
+        fits = 0
+        if f != 0:
+            ret = int(fns[f].ret)
+            want = int(types[et].elem)
+            if want != 0 and ret != 0 and tkind(want) != .refined and not type_eq(prune(ret), prune(want)) and can_coerce(0, ret, want): fits = 1
+        else:
+            loop d in decls:
+                if fn_adapts(d, et): fits += 1
+        if fits == 1: return fn_adapter(n, et, expected)
     if f == 0:
         if explicit_types.len() > 0: fatal(nodes[n].pos, "no version of '{name_of(int(nodes[n].name))}' matches these type arguments and callable type")
         if et != 0 and types[et].kind == .fn_:

@@ -1,0 +1,13 @@
+TokenError:type = type of error
+TokenProtocol:type = type of any & [eat:<(src:string):>uint64? | TokenError>]
+ws = (src:string):>uint64? => if src.startswith(" ") 1 else none
+wide = (x:int64|string):>int64 => if x is? int64 x * 2 else 0
+main = () => {
+    let g:<(s:string):>uint64? | TokenError> = @ws
+    printl(g(" a"))
+    printl(g("a"))
+    let t = TokenProtocol[@ws]
+    printl(match t.eat(" x") { n:uint64 => n  <none> => 0  <TokenError> => 9 })
+    let h:<(x:int64):>int64> = @wide
+    printl(h(21))
+}
