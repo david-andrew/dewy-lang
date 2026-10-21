@@ -1182,16 +1182,50 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
         if not val.owned and (not dewy_entry or i + 1 < args.len()) and type_has_fn(pt) and not callback_arg_borrow(value_node, args, i, callee, parameter) and files[pos_file(nodes[a].pos)].is_dewy: val = own_at(a, val, pt)
         mut_snapshot = any_mut
         if copies_on and (copy_strict(a) or ownership_type(pt)): mut_snapshot = any_mut and shares_mut_root(a, args, mutmask)
-        if not val.owned and is_managed(pt) and (mut_snapshot or borrow_may_change(a, args, i, callee)): val = own_at(a, val, pt)
+        snapshot = false
+        if not val.owned and is_managed(pt) and (mut_snapshot or borrow_may_change(a, args, i, callee)):
+            val = own_at(a, val, pt)
+            snapshot = true
         # (a struct passed by its address, in memory that a `mut` argument of the same call
         # reaches, f(p, p.hs[0]): the callee writing p would change it, so a copy; or that the
         # callee changes by name)
-        else if not val.owned and vc(pt) == VC_AGG and ((any_mut and shares_mut_root(a, args, mutmask)) or borrow_may_change(a, args, i, callee)): val = own_at(a, val, pt)
+        else if not val.owned and vc(pt) == VC_AGG and ((any_mut and shares_mut_root(a, args, mutmask)) or borrow_may_change(a, args, i, callee)):
+            val = own_at(a, val, pt)
+            snapshot = true
         # Invocation-only callees cannot retain this stack environment. Keep
         # its captures alive through the statement, then destroy them directly.
         if stack: reg_temp_slot(val.slot, pt, int(nodes[value_node].sym))
-        else: borrow(val, pt)
+        else:
+            held = if tl_items.len() == 0: 0 else: tl_items[tl_items.len() - 1].len()
+            borrow(val, pt)
+            if snapshot and not ownership_type(pt) and tl_items.len() > 0 and tl_items[tl_items.len() - 1].len() == held + 1:
+                arg_snapshots.push(tl_items[tl_items.len() - 1][held])
         out.push(val.v)
+
+# A snapshot taken only to keep an argument stable while the callee runs. The
+# result is owned, so nothing refers to the snapshot once the call returns;
+# release it there rather than at the end of the statement. A snapshot kept
+# alive across a later mutating call in the same statement (`add(@p
+# Node[text(p t)])`) would make that call detach and copy p's buffers.
+arg_snapshots: TempItem[]
+
+release_arg_snapshots = (mark: int):
+    loop arg_snapshots.len() > mark:
+        it = arg_snapshots.pop()
+        j = tl_items.len() - 1
+        found = false
+        loop j >= 0 and not found:
+            k = tl_items[j].len() - 1
+            loop k >= 0 and not found:
+                x = tl_items[j][k]
+                if x.is_slot == it.is_slot and x.ref == it.ref:
+                    tl_items[j].remove(k)
+                    found = true
+                k -= 1
+            j -= 1
+        if not found: continue
+        if it.is_slot: drop_at(e_slot(it.ref), it.t)
+        else: release(it.ref, it.t)
 
 # (a is part of the same variable as one of the call's `mut` arguments)
 shares_mut_root = (a: int, args: int[], mutmask: int) -> bool:
@@ -1801,6 +1835,7 @@ gen_direct_call = (f: int, args: int[], order: int[] = [], call_node: int = 0) -
         rslot = new_temp(ret)
         argv.push(e_slot(rslot))
     mark = copy_backs.len()
+    snaps = arg_snapshots.len()
     call_args(args, fns[f].ptypes, inst_mutmask(f), argv, f, order)
     if refine_active: refine_gen_args(args, argv, if vc(ret) == VC_AGG: 1 else: 0)
     # Default builds can inline tiny checked helpers without expanding their
@@ -1816,6 +1851,7 @@ gen_direct_call = (f: int, args: int[], order: int[] = [], call_node: int = 0) -
     if target_lf < 0: target_lf = lf_of_inst(f)
     rv = if nr: e_call_nr(target_lf, argv, -1) else: e_call(target_lf, argv, ret_vt(ret))
     copy_back(mark)
+    release_arg_snapshots(snaps)
     finish_call(ret, rv, rslot)
 
 gen_closure_call = (callee: int, args: int[], order: int[] = []) -> Val:
@@ -1872,10 +1908,12 @@ gen_closure_call = (callee: int, args: int[], order: int[] = []) -> Val:
     pts: int[]
     loop i in [0..int(types[ft].nargs)): pts.push(targ(ft, i))
     mark = copy_backs.len()
+    snaps = arg_snapshots.len()
     call_args(args, pts, int(types[ft].mutmask), argv, order = order)
     if refine_active: refine_gen_args(args, argv, if vc(ret) == VC_AGG: 2 else: 1)
     rv = if known >= 0: e_call(lf_of_inst(known), argv, ret_vt(ret)) else: e_calli(fp, argv, ret_vt(ret), false)
     copy_back(mark)
+    release_arg_snapshots(snaps)
     finish_call(ret, rv, rslot)
 
 gen_cfn_call = (callee: int, args: int[]) -> Val:

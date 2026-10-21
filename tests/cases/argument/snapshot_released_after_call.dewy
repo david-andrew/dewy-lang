@@ -1,0 +1,20 @@
+# A read-only call inside the argument of a mutating call: its snapshot of `p`
+# ends with the inner call, so `add` pushes onto unshared storage.
+Node:type=[kind:string text:string="" start:int64]
+Parser:type=[source:array<uint8> at:int64=0 nodes:array<Node>=[Node["none" "" 0]]]
+add=(@p:Parser node:Node):>int64=>{
+    p.nodes.push(node)
+    return p.nodes.length-1
+}
+text=(p:Parser i:int64):>string=>(p.source[i..i+1) as string | none) ?? "?"
+step=(@p:Parser):>int64=>{
+    let i=p.at
+    p.at+=1
+    return add(@p Node["word" text(p i) i])
+}
+main=()=>{
+    let p=Parser[bytes("abc")]
+    loop i in [0..3) step(@p)
+    printl(p.nodes.length)
+    printl(p.nodes[3].text)
+}

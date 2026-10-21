@@ -157,10 +157,7 @@ string_node=(@p:Parser t:Token):>int64|ParseError=>{
     let width=quote_width(p.source opening t.stop)
     let i=opening+width
     let stop=t.stop-width
-    if raw {
-        let value=text_of(p.source i stop)
-        return add(@p Node["string" "" value t.start])
-    }
+    if raw return add(@p Node["string" "" text_of(p.source i stop) t.start])
     let parts:array<int64>=[]
     let data:array<uint8>=[]
     let chunk_start=i
@@ -449,10 +446,7 @@ continue_expression=(@p:Parser first:int64 minimum:int64):>int64|ParseError=>{
             let member=token(p)
             p.at+=1
             if member.kind not=? 'identifier' return fail(p member.start "expected a member name")
-            # (read the name before `add`: a by-value read of `p` beside `@p` in one
-            # call keeps a snapshot alive across the push, which then copies every node)
-            let word=text(p member)
-            let name=add(@p Node["identifier" "" word member.start])
+            let name=add(@p Node["identifier" "" text(p member) member.start])
             left=operator(@p "." left name)
             continue
         }
