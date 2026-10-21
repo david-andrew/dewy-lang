@@ -1,0 +1,14 @@
+# An optional literal union compares with a member literal: the literal is
+# that member, and an absent value equals no member.
+Sym:type = '+' | '-' | 'and'
+lookup=(text:string):>Sym?=>if text =? "plus" '+' else if text =? "and" 'and' else none
+main=()=>{
+    let b:Sym?='-'
+    printl(b =? '-')
+    printl(b not=? '+')
+    printl('-' =? b)
+    let c=lookup("nothing")
+    printl(c =? '+')
+    printl(c not=? 'and')
+    printl(lookup("and") =? 'and')
+}
