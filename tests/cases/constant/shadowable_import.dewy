@@ -1,0 +1,10 @@
+# quick
+# An importer's own declaration replaces a `$shadowable` import as a whole.
+from p"../../fixtures/shadowable/lib.dewy" import scale, limit, offset
+scale = (x:int64 y:int64):>int64 => x * y
+limit = 3
+main = () => {
+    printl(scale(2 3))
+    printl(limit)
+    printl(offset(1))
+}

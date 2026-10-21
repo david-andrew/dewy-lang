@@ -7,4 +7,4 @@ hash=(value:Outer):>uint64=>(value.id as uint64).hash()
 main=()=>{
 let a=Outer[7 Inner[20]] let b=Outer[7 Inner[22]]
 let values=[a->42]
-return if [a]=?[b] and hash([a])=?hash([b]) values[b] else 1}
+return if [a]=?[b] and [a].hash()=?[b].hash() values[b] else 1}

@@ -17,8 +17,8 @@ _integer = ((value:int):>int=>value)
 # Euclid on machine words while both parts are immediate words (below 2^62:
 # a wider bound would itself be a big constant), the big-integer gcd beyond.
 _gcd=(a:int b:int):>int=>{
-    let x=abs(a)
-    let y=abs(b)
+    let x=a.abs()
+    let y=b.abs()
     if x <=? 4611686018427387903 and y <=? 4611686018427387903 {
         let u:int64=x
         let v:int64=y

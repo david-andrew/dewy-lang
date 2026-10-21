@@ -381,6 +381,7 @@ dw_metatag_fail = (id: int) -> int:
     if name == "supported_targets": fatal(pos, "`${name}` is a module directive; put it at file scope")
     if dir_builtin(name): fatal(pos, "`${name}` is a setting: write it on a line of its own in a module, function body or block")
     if name == "test": fatal(pos, "`$test` goes alone on the line just before a module-level function declaration")
+    if name == "shadowable": fatal(pos, "`$shadowable` marks a module-level const: `$shadowable const name = ...` at the top of the file")
     if name == "expect" or name == "fail": fatal(pos, "`${name}` is a statement in a function: a test, or a helper a test calls")
     if dw_designed_directive(name): return dw_unimplemented(id, name)
     if name == "capture": fatal(pos, "`$capture` belongs in a parameter list before a name: `($capture @count) => ...`")
@@ -571,6 +572,13 @@ dw_operand_text = (id: int) -> str:
                 indices.push(inner)
         if base != "" and indices.len() > 0: return "{base}[{join(indices, " ")}]"
     ""
+
+# `$shadowable` before a module-level `const`
+dw_shadowable_tag = (id: int) -> int:
+    if id <= 0 or dewy_syntax[id].kind == .compact_stmt: return 0
+    let id = dw_unwrap(id)
+    if dewy_syntax[id].kind == .metatag and dewy_syntax[id].text == "shadowable": return id
+    0
 
 # `$test` or `$test(cases=…)`: a line of its own before a module function
 dw_test_tag = (id: int) -> int:
@@ -2802,7 +2810,7 @@ dw_block = (id: int, accumulator: int = 0, map: bool = false) -> int:
         loop i in 0.. and child in children:
             if dewy_syntax[child].kind == .metatag and dewy_syntax[child].text != "target":
                 if dewy_syntax[child].text == "supported_targets": dw_metatag_fail(child)
-                if dw_designed_directive(dewy_syntax[child].text) or dewy_syntax[child].text == "capture" or dewy_syntax[child].text == "include_bytes": dw_metatag_fail(child)
+                if dw_designed_directive(dewy_syntax[child].text) or dewy_syntax[child].text == "capture" or dewy_syntax[child].text == "include_bytes" or dewy_syntax[child].text == "shadowable": dw_metatag_fail(child)
                 if label != 0: dw_label_fail(label_pos, label)
                 label = intern(dewy_syntax[child].text)
                 label_pos = dewy_syntax[child].pos

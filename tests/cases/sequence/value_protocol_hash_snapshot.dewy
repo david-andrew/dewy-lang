@@ -7,9 +7,9 @@ if armed {armed=false current.clear()}
 return key.value as uint32
 }
 through=(values:array<Key>):>int64=>{
-let code=hash(values)
+let code=values.hash()
 let noise=[Key[99] Key[100]]
-return if noise.length=?2 and code=?hash([Key[20] Key[22]])
+return if noise.length=?2 and code=?[Key[20] Key[22]].hash()
 values[0].value+values[1].value else 1
 }
 main=()=>{

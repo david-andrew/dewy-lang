@@ -1118,7 +1118,6 @@ struct Cand:
     binds: int[]
     cost: int
     ok: bool
-    lit_cost: int = 0   # the part of cost literal arguments add (they take their type from the parameter)
 
 # the enum `.name` means where a value of type t is expected: t itself, or (t a union) the one
 # member enum with that variant
@@ -2141,7 +2140,6 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                     continue
                 r = arg_cost(a, pt, cd.binds)
                 if i == 0 and r >= 0: recv_fits = true
-                if phase == 1 and r > 0: cd.lit_cost += r
                 if r < 0:
                     ok = false
                     # (of the overloads, the one that got furthest is the one meant: m[k] = v
@@ -2212,15 +2210,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
     # over the standard library's; report real ties (the library's are settled by how many
     # arguments have exactly a parameter's type, then which comes first: min(x, 5) with x: i32
     # takes min(i32, i32), and min(a, b) with a: i8 and b: u8 still takes min(int, int))
-    # (in Dewy a literal argument takes its type from the parameter: the program's own
-    # `abs = (x:int64) => ...` takes abs(-1), though the literal is closer to the prelude's int)
-    user_first = caller_dewy()
     loop ci in 0.. and cd in cands:
-        if best >= 0 and user_first and decl_in_prelude(cd.decl) != decl_in_prelude(cands[best].decl):
-            bc = cands[best]
-            if decl_in_prelude(bc.decl) and cd.cost - cd.lit_cost <= bc.cost - bc.lit_cost: best = ci
-            else if decl_in_prelude(cd.decl) and cd.cost - cd.lit_cost < bc.cost - bc.lit_cost: best = ci
-            continue
         if best < 0 or cd.cost < cands[best].cost: best = ci
         else if cd.cost == cands[best].cost:
             bc = cands[best]
@@ -3324,6 +3314,30 @@ collect_fns = (name: int, out: mut int[]):
     collect_in(prelude, name, out)
     hide_private = false
 
+# A bare name in a Dewy module names one binding: the module's own declarations
+# of it (or its selected imports) shadow the shadowable ones it would otherwise
+# see, the prelude's included, as a whole family. Methods are reached through
+# their object, so a type's method does not shadow a function.
+collect_named = (name: int, mod: int, out: mut int[]):
+    if mod >= 0: collect_module(mod, name, out)
+    else: collect_fns(name, out)
+    m = if mod >= 0: mod else: cur_mod()
+    if m < 0 or modules[m].is_prelude or not files[int(modules[m].file)].is_dewy: return
+    s = modules[m].names.get(name) ?? 0
+    if s == 0 or syms[s].kind != .fns: return
+    own: int[]
+    o = s
+    loop o != 0:
+        d = int(syms[o].decl)
+        if d != 0 and not dewy_is_method(d): own.push(d)
+        o = int(syms[o].next)
+    if own.len() == 0: return
+    kept: int[]
+    loop d in out:
+        if own.contains(d) or dewy_is_method(d): kept.push(d)
+    out.clear()
+    loop d in kept: out.push(d)
+
 # Fold mathematical powers and floor operations before selecting their runtime
 # overload. Every intermediate is checked, including exponentiation by squaring.
 dewy_math_fold = (n: int, a: int, b: int, power: bool, modulo: bool) -> bool:
@@ -3581,8 +3595,10 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                     if ide_on: ide_builtin_ref(n, name)
                     return check_intrinsic(n, int(syms[s].ref) as IN, args, expected)
     surface_hidden.clear()
-    if mod_scope >= 0: collect_module(mod_scope, name, decls)
-    else: collect_fns(name, decls)
+    if ufcs:
+        if mod_scope >= 0: collect_module(mod_scope, name, decls)
+        else: collect_fns(name, decls)
+    else: collect_named(name, mod_scope, decls)
     if name == intern("to_int") and mod_scope < 0 and files[pos_file(nodes[n].pos)].is_dewy:
         own = false
         loop d in decls:
@@ -7468,8 +7484,7 @@ fn_adapter = (n: int, et: int, expected: int) -> int:
 fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, closure: int = 0) -> int:
     decls: int[]
     if closure != 0: decls.push(poly_families[int(types[prune(ntype(closure))].st)].decl)
-    else if mod >= 0: collect_module(mod, int(nodes[n].name), decls)
-    else: collect_fns(int(nodes[n].name), decls)
+    else: collect_named(int(nodes[n].name), mod, decls)
     if mod < 0 and closure == 0 and nodes[n].name == i32(intern("to_int")) and dewy_at(nodes[n].pos):
         own = false
         loop d in decls:
@@ -7618,8 +7633,7 @@ is_fn_type = (t: int) -> bool:
 # called with no arguments, 1 when one can, 2 when that call makes a function.
 bare_fns_call = (name: int, mod: int) -> int:
     decls: int[]
-    if mod >= 0: collect_module(mod, name, decls)
-    else: collect_fns(name, decls)
+    collect_named(name, mod, decls)
     loop d in decls:
         required = 0
         loop i in [0..nkids(d)):
@@ -7704,8 +7718,10 @@ dewy_partial = (n: int, expected: int) -> int:
     fitting: int[]
     if s != 0 and syms[s].kind == .fns:
         decls: int[]
-        if mod >= 0: collect_module(mod, int(nodes[callee].name), decls)
-        else: collect_fns(int(nodes[callee].name), decls)
+        if receiver:
+            if mod >= 0: collect_module(mod, int(nodes[callee].name), decls)
+            else: collect_fns(int(nodes[callee].name), decls)
+        else: collect_named(int(nodes[callee].name), mod, decls)
         # The one ordinary function of that name these arguments fit; the
         # program's own come before the prelude's.
         d = 0
@@ -8258,7 +8274,11 @@ check_expr = (n: int, expected: int) -> int:
                 cands = fn_names_for(bt)
                 # (Dewy's length of a library container or a sequence, as Heap and Pool: its `len`)
                 if files[pos_file(nodes[n].pos)].is_dewy and name_of(fname) == "length" and cands.contains(intern("len")) and receiver_fits("len", bt) and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
-                    nodes[n] = nodes[bc_call("len", [int(nodes[n].a)], nodes[n].pos)]
+                    # (a member: found through the object, as methods are, whatever `len` names here)
+                    method = mk(.field, nodes[n].pos)
+                    nodes[method].a = nodes[n].a
+                    nodes[method].name = i32(intern("len"))
+                    nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
                     return check_expr(n, expected)
                 loop c in cands:
                     if c != fname: continue

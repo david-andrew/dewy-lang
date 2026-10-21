@@ -1096,6 +1096,7 @@ dewy_fast_file = (file: int) -> int[]:
     dewy_syntax = [DewySyntax(), DewySyntax(.inverted_comparison)]
     declarations: int[]
     marked = 0
+    shadowable_pos = 0
     loop dn_tokens[dn_at].kind != .eof:
         before = dn_at
         syntax = dn_statement(true)
@@ -1106,7 +1107,17 @@ dewy_fast_file = (file: int) -> int[]:
             dewy_syntax.truncate(2)
             if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a declaration")
             continue
+        shadow_tag = dw_shadowable_tag(syntax)
+        if shadow_tag != 0:
+            if shadowable_pos != 0: fatal(dewy_syntax[shadow_tag].pos, "a second `$shadowable`: one marks the const just after it")
+            if dn_tokens[dn_at].symbol != .kw_const: fatal(dewy_syntax[shadow_tag].pos, "`$shadowable` marks a module-level const: `$shadowable const name = ...`")
+            shadowable_pos = dewy_syntax[shadow_tag].pos
+            dewy_syntax.truncate(2)
+            continue
         made = dw_top_declarations(syntax)
+        if shadowable_pos != 0:
+            loop declaration in made: shadowable_decls[declaration] = true
+            shadowable_pos = 0
         loop declaration in made: declarations.push(declaration)
         if marked != 0:
             dw_test_attach(marked, made)
@@ -1118,6 +1129,7 @@ dewy_fast_file = (file: int) -> int[]:
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a declaration")
     if proof_pending: dn_error(dn_tokens[dn_at].start, "$proof requires a following function declaration")
     if marked != 0: fatal(nodes[marked].pos, "`$test` marks a module-level function: put it on the line just before one")
+    if shadowable_pos != 0: fatal(shadowable_pos, "`$shadowable` marks a module-level const: put it just before one")
     dn_tokens = []
     dewy_syntax = []
     dw_finish_declarations(declarations)

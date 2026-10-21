@@ -7,4 +7,4 @@ __eq__=<T>(a:HashOnly<T> b:HashOnly<T>):>bool=>a.value.special_equal(b.value)
 hash=<T>(box:HashOnly<T>):>uint64=>(box.value as uint64).hash()
 main=()=>{
 if [Box<int64>[20]] not=?[Box<int64>[20]] return 1
-return if hash([HashOnly<int64>[22]])=?hash([HashOnly<int64>[22]]) 42 else 2}
+return if [HashOnly<int64>[22]].hash()=?[HashOnly<int64>[22]].hash() 42 else 2}

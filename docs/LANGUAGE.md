@@ -360,13 +360,29 @@ its expected callable type selects a member. Grouping existing function values
 or local closures is not yet supported; group members must be function literals
 at module level. `main` must have one entry-point definition.
 
-A program's function with a prelude function's name joins its overloads. When
-both fit a call, the program's wins unless it needs a costlier conversion of a
-non-literal argument: with `abs = (x:int64):>int64 => ...`, `abs(-1)` calls the
-program's `abs`.
+`$shadowable const` at module top level declares a const that inner scopes and
+importing modules may shadow: there a plain `name = ...` declares a new binding
+instead of being an error. The prelude is declared this way. Shadowing replaces
+the whole overload family: with `max = (a:int64 b:int64 c:int64):>int64 => ...`
+in a module, a bare `max(1 2)` there is an error, since none of the prelude's
+`max` overloads join the module's. Members are found through their value, so
+`(2.5).max(1.0)` and `xs.hash()` still reach the prelude's. To extend an
+operation for your own type, use its protocol (`hash`, `len`, `__add__`, …) or a
+method; a function selected by `from m import f` can be shadowed only if `m`
+declared it `$shadowable`, otherwise import it under another name.
+
+```dewy
+$shadowable const limit = 10
+main = () => {
+    limit = 3     # a new binding in this scope
+    printl(limit) # 3
+}
+```
 
 Use `let` to declare a local or deliberately shadow a name. Assignment updates a
-visible variable; otherwise it can introduce a new variable.
+visible variable; otherwise it can introduce a new variable. Assigning to a
+visible const or module function that is not `$shadowable` is an error that
+suggests `let`.
 
 `const` initializes a binding once each time its declaration runs. Its initializer
 may call ordinary runtime code. Reading it again retains that value, including
@@ -483,8 +499,8 @@ a function type whose parameters it accepts and whose result accepts its result:
 `@f` with `f=(x:int64|string):>uint64?` fits `<(x:int64):>uint64?|E>` (through a
 wrapper; refined and `@` parameters still need an exact match). A function value
 held in a variable adapts the same way (`apply(@h)`, `let g:<(x:int64):>int64> = @wide`). An inferred `@fn` handle
-selects a single concrete user function ahead of prelude functions with the same
-name; multiple concrete user overloads still require a callable type. Pass them to a typed callback
+names the visible family, so a module's own function shadows the prelude's;
+multiple concrete overloads still require a callable type. Pass them to a typed callback
 parameter or give a local a function type,
 for example `let twice:<(value:int64):>int64> = (* 2)`. A module declaration such
 as `twice = (* 2)` can infer its parameter type at calls, like other functions.

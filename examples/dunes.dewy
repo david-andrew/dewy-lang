@@ -211,7 +211,7 @@ draw=()=>{
         let p = SandParams(scene_view_proj() scene_shadow_vp() scene_camera() scene_sun() scene_sun_color() scene_sky_color()
             scene_fog_color() scene_fog() float32(elapsed()) scene_shadow_strength() shadow
             shadow_texel=float32(1.0 / float64(max(shadow.width 1))) shadow_taps=taps)
-        draw(sand_sh terrain p)
+        sand_sh.draw(terrain p)
     }
     )
     # the traveler: flowing robe, hood with glowing eyes, and a luminous scarf
@@ -264,7 +264,7 @@ draw=()=>{
     draw_mesh(beacon translation(bpos) rgb(1 0.9 0.7) emissive = k cast_shadow = false)
     # a pillar of light rises from the mountain: the goal is visible from everywhere
     let bs = float32(0.32 + 0.3 * k / 4.0)
-    draw_custom(()=>{draw(beam_sh light_pillar BeamParams(scene_view_proj() bpos scene_camera() bs float32(elapsed())))} additive=true)
+    draw_custom(()=>{beam_sh.draw(light_pillar BeamParams(scene_view_proj() bpos scene_camera() bs float32(elapsed())))} additive=true)
     # drifting sand
     let motes: array<Instance3D>
     loop i in 0.. and d in dust {

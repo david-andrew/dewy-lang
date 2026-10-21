@@ -25,7 +25,7 @@ update=(dt:float64):>void=>{
     if key_pressed(Key.r) {camera=orbit_camera(vec3(0 1 0) 24.0 0.0 0.38) orbit=true}
     time+=dt
     if orbit and not mouse_down(Mouse.left) and not mouse_down(Mouse.right) {camera.yaw+=0.15*dt}
-    update(@camera dt)
+    camera.update(dt)
 }
 
 draw=():>void=>{

@@ -1,0 +1,17 @@
+# quick
+# A `$shadowable const` gives way to a plain assignment in an inner scope.
+$shadowable const limit = 10
+$shadowable
+const step = 2
+main = () => {
+    printl(limit)
+    {
+        limit = 3
+        step = limit + 1
+        printl("{limit} {step}")
+    }
+    printl("{limit} {step}")
+    # The prelude's bindings are shadowable too.
+    max = 7
+    printl(max)
+}

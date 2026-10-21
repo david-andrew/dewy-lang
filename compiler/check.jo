@@ -223,6 +223,11 @@ new_sym = (name: int, kind: SK, r: int, decl: int) -> int:
 
 own_consts: bool[]            # by name: a constant of the program's own (not the library's)
 
+# `$shadowable const` (shadowable_decls) or the prelude, which is declared so as a
+# whole: an inner scope or an importing module may bind the name anew.
+decl_shadowable = (d: int) -> bool:
+    d != 0 and (shadowable_decls.has(d) or modules[int(nodes[d].mod)].is_prelude)
+
 scope_add_module = (m: int, name: int, kind: SK, r: int, decl: int) -> int:
     # (look the name up in place: holding a copy of the table would make the insert below copy it)
     found: int? = none
@@ -342,6 +347,15 @@ bind_from_imports = (start: int = 0):
             if ide_on:
                 if syms[s].kind == .fns and syms[s].decl != 0: ide_ref(nodes[id].pos, nm, IK_FN, nodes[int(syms[s].decl)].pos, 0, -int(syms[s].decl))
                 else: ide_sym_ref(id, s)
+            # (in Dewy a module's own declaration shadows a `$shadowable` import as a whole;
+            # other imported consts cannot be shadowed)
+            dewy_own = 0
+            if files[int(modules[m].file)].is_dewy:
+                if let ex = modules[m].names.get(alias):
+                    if syms[ex].decl != 0 and int(nodes[int(syms[ex].decl)].mod) == m: dewy_own = ex
+            if dewy_own != 0:
+                if decl_shadowable(int(syms[s].decl)): continue
+                fatal(nodes[id].pos, "cannot import '{name_of(alias)}': this module declares its own '{name_of(alias)}' (at {pos_str(nodes[int(syms[dewy_own].decl)].pos)}), and the imported one is not `$shadowable`; import it with another name: {name_of(nm)} as ...")
             if syms[s].kind == .fns:
                 if let ex = modules[m].names.get(alias):
                     if syms[ex].kind != .fns: fatal(nodes[id].pos, "cannot import '{name_of(alias)}': this module has a '{name_of(alias)}' (at {pos_str(nodes[int(syms[ex].decl)].pos)}); import it with another name: {name_of(nm)} as ...")
@@ -953,12 +967,16 @@ assign_to_decl = (s: int):
     lhs = int(nodes[s].a)
     if nodes[lhs].kind == .ident and files[pos_file(nodes[s].pos)].is_dewy:
         cs = lookup(int(nodes[lhs].name))
-        if cs != 0 and syms[cs].kind == .const_:
+        if cs != 0 and syms[cs].kind == .const_ and not decl_shadowable(int(syms[cs].decl)):
             fatal(nodes[lhs].pos, "cannot modify const '{name_of(int(nodes[lhs].name))}'; use let to declare a new binding")
+        # (a module's function is a const binding too: only a `$shadowable` one, as the
+        # prelude's are, is shadowed by a plain `name = ...`)
+        if cs != 0 and syms[cs].kind == .fns and syms[cs].decl != 0 and not decl_shadowable(int(syms[cs].decl)) and cx >= 0:
+            fatal(nodes[lhs].pos, "'{name_of(int(nodes[lhs].name))}' is a function ({pos_str(nodes[int(syms[cs].decl)].pos)}): it cannot be shadowed by assignment; use let to declare a new binding")
     if nodes[lhs].kind == .ident and cx >= 0 and int(nodes[lhs].name) < own_consts.len() and own_consts[int(nodes[lhs].name)]:
         # (MAX = 4 would make a variable hiding the program's constant MAX)
         cs = lookup(int(nodes[lhs].name))
-        if cs != 0 and syms[cs].kind == .const_ and syms[cs].decl != 0 and not decl_in_prelude(int(syms[cs].decl)):
+        if cs != 0 and syms[cs].kind == .const_ and syms[cs].decl != 0 and not decl_shadowable(int(syms[cs].decl)):
             cn = name_of(int(nodes[lhs].name))
             cp = nodes[int(syms[cs].decl)].pos
             if pos_in_lib(cp): fatal(nodes[lhs].pos, "'{cn}' is a constant of the library: it cannot change (`let {cn} = ...` makes a variable of that name)")

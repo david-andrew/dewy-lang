@@ -171,6 +171,10 @@ clone = (n: int) -> int:
     clear_flag(c, NF_CHECKED)
     c
 
+# Declarations marked `$shadowable const`: an inner scope or an importing module
+# may bind the name anew (a plain `name = ...` there declares): decl_shadowable
+shadowable_decls: {int: bool}
+
 # Members `x.len` a Dewy program wrote, as the frontends made them (not the checker's own
 # `.len()`, for `.length`): node -> its position, in case the node is made again
 dewy_len_members: {int: int}
