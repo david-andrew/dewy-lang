@@ -74,7 +74,8 @@ visit=(callback:Callback):>int64=>callback(3)+callback(4)
 forward=(callback:Callback):>int64=>visit(@callback)
 main=()=>{
  let n:int64=5
- let a=visit((x:int64):>int64=>x+n)
+ let named=(x:int64):>int64=>x+n
+ let a=visit(@named)
  let b=visit((x:int64):>int64=>x*n)
  let c=forward((x:int64):>int64=>x-n)
  printl"{a} {b} {c} {visit((x:int64):>int64=>x)}"

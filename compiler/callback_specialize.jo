@@ -124,6 +124,12 @@ callback_prepare = ():
         if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy: continue
         known: {int: int}
         callback_bindings(int(fns[f].body), known)
+        # Ordinary callers need the same immutable bindings as versions: their
+        # invocation-only arguments can borrow the already saved environment.
+        # Publish before any fused worker forks, never during lowering.
+        if known.len() > 0:
+            lf = lf_of_inst(f)
+            loop l, t in known: callback_targets[callback_key(lf, l)] = t
         callback_scan(int(fns[f].body), -f - 1, known, 0)
     stack_closure_params.clear()
 
