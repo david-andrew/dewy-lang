@@ -6033,6 +6033,7 @@ check_match = (m: int, expected: int) -> int:
     has_wild = false
     finite_seen = 0
     union_bool_seen = 0
+    opt_members: int[]
     dewy = files[pos_file(nodes[m].pos)].is_dewy
     seen: bool[]
     if types[st].kind == .enum_:
@@ -6094,6 +6095,30 @@ check_match = (m: int, expected: int) -> int:
                         nodes[e].type = i32(pt)
                         add_flag(e, NF_CHECKED)
                         value = e
+                else if types[st].kind == .opt and is_union(telem(st)) and (union_index(telem(st), pt) >= 0 or is_union(pt) and union_within(pt, telem(st))):
+                    # (x:A where the value is an (A | B)?: present, and holding an A)
+                    u = prune(telem(st))
+                    nodes[p].type = i32(pt)
+                    nodes[p].aux2 = 1
+                    ms = [pt]
+                    if is_union(pt): ms = union_members(pt)
+                    loop member in ms:
+                        if not opt_members.contains(member): opt_members.push(member)
+                    if opt_members.len() == union_members(u).len(): finite_seen |= 1
+                    if binding != 0:
+                        e = mk(.unwrap, nodes[p].pos)
+                        nodes[e].a = i32(value)
+                        nodes[e].type = i32(u)
+                        add_flag(e, NF_CHECKED)
+                        value = e
+                        if is_union(pt): wrap_conv(value, .union_, pt)
+                        else:
+                            nv = mk(.narrow, nodes[p].pos)
+                            nodes[nv].a = i32(e)
+                            nodes[nv].aux = i32(union_index(u, pt))
+                            nodes[nv].type = i32(pt)
+                            add_flag(nv, NF_CHECKED)
+                            value = nv
                 else: fatal(nodes[p].pos, "type pattern {type_str(pt, true)} is not a member of {type_str(st, true)}")
                 pk = nodes[p].kind
             if dewy and pk == .plit and is_union(st):

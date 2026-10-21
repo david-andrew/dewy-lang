@@ -1,0 +1,30 @@
+# quick
+# Type arms select members of an optional union, including family members and subsets.
+Value:type = type of any
+Num:type = type of Value & [n:int64]
+Str:type = type of Value & [s:string]
+get = (k:int64):>Value|none => if k =? 0 none else if k >? 5 Str["big"] else Num[k]
+show = (v:Value|none):>string => match v {
+    x:Num => "num {x.n}"
+    <none> => "none"
+    x:Str => "str {x.s}"
+    _ => "plain"
+}
+kind = (o:(int64|string)?):>string => match o {
+    n:int64 => "int {n+1}"
+    s:string => "string {s}"
+    <none> => "none"
+}
+main = () => {
+    loop k in [0 3 9] {
+        printl(show(get(k)))
+        let v = get(k)
+        match v {
+            x:Num|Str => printl("  value {x}")
+            _ => printl("  nothing")
+        }
+    }
+    printl(kind(41))
+    printl(kind("hi"))
+    printl(kind(none))
+}

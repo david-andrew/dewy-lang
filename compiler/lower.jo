@@ -2135,6 +2135,21 @@ gen_match_test = (p: int, st0: int, hidden_addr: int) -> int:
                 hit = e_bin(.eq, VI, tag, e_iconst(union_index(st, member)))
                 result = e_bin(.or_, VI, result, hit)
             return result
+        if nodes[p].aux2 == 1:
+            # (a member of an optional union: present, and holding it)
+            u = prune(telem(st))
+            pt = prune(ntype(p))
+            ms = [pt]
+            if is_union(pt): ms = union_members(pt)
+            result = vreg(VI)
+            e_mov(result, e_iconst(0))
+            iff(opt_has(hidden_addr, u))
+            tag = e_load(VI, hidden_addr, 0, 4)
+            hits = e_iconst(0)
+            loop member in ms: hits = e_bin(.or_, VI, hits, e_bin(.eq, VI, tag, e_iconst(union_index(u, member))))
+            e_mov(result, hits)
+            endc()
+            return result
         return opt_has(hidden_addr, telem(st))
     if k == .pvariant:
         si = int(types[st].st)
