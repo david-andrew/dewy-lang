@@ -226,6 +226,9 @@ when TARGET == "windows":
             __w32_err = GetStdHandle(u32(0xFFFFFFF4))
         h = __w32_out
         if fd == 2: h = __w32_err
+        __w32_write_handle(h, p, n)
+
+    __w32_write_handle = (h: *u8, p: *u8, n: int):
         w: u32[] = [0]
         off = 0
         loop off < n:
@@ -455,6 +458,73 @@ when TARGET == "windows":
         GetExitCodeProcess(proc, data(code))
         CloseHandle(proc)
         (int(code[0]), str_from_bytes(out))
+
+    # run test number index in a process of its own (this executable again): its exit code (-1: not
+    # started), its output and errors in the order written, and its output alone. As a forked POSIX
+    # test does, the child writes both into one pipe and copies its output into a second, whose
+    # handle it is given after the index ("3:handle") since a new process has no inherited fds
+    __w32_run_test = (exe: str, index: int, user_args: str[]) -> (int, str, str):
+        sa = fill(0, 3)
+        sa[0] = 24
+        sa[2] = 1                                       # bInheritHandle
+        pr: *u8[] = [null, null]
+        pw: *u8[] = [null, null]
+        if CreatePipe(data(pr), data(pw), data(sa) as *u8, u32(1 << 16)) == 0: return (-1, "", "")
+        if CreatePipe(data(pr) + 1, data(pw) + 1, data(sa) as *u8, u32(1 << 16)) == 0:
+            CloseHandle(pr[0])
+            CloseHandle(pw[0])
+            return (-1, "", "")
+        SetHandleInformation(pr[0], 1, 0)
+        SetHandleInformation(pr[1], 1, 0)
+        si = fill(0, 13)                                # STARTUPINFOW
+        si[0] = 104
+        (data(si) as *u32)[15] = u32(0x100)             # STARTF_USESTDHANDLES
+        si[10] = GetStdHandle(u32(0xFFFFFFF6)) as int   # (its input: this program's)
+        si[11] = pw[0] as int
+        si[12] = pw[0] as int
+        pi = fill(0, 3)
+        mirror = pw[1] as int
+        argv = [exe, "--dewy-internal-test", "{index}:{mirror}"] + user_args
+        wcmd = __wide(__w32_cmdline(argv))
+        wexe = __wide(exe)
+        started = CreateProcessW(data(wexe), data(wcmd), null, null, 1, u32(0x08000000), null, null, data(si) as *u8, data(pi) as *u8) != 0
+        CloseHandle(pw[0])
+        CloseHandle(pw[1])
+        if not started:
+            CloseHandle(pr[0])
+            CloseHandle(pr[1])
+            return (-1, "", "")
+        proc = pi[0] as *u8
+        CloseHandle(pi[1] as *u8)
+        both: u8[]
+        out: u8[]
+        open = [true, true]
+        avail: u32[] = [0]
+        got: u32[] = [0]
+        chunk = fill(u8(0), 65536)
+        loop open[0] or open[1]:
+            moved = false
+            loop i in [0..2):
+                if not open[i]: continue
+                # (fails once every writer has ended and everything written is read)
+                ok = PeekNamedPipe(pr[i], null, 0, null, data(avail), null) != 0
+                if ok and avail[0] == 0: continue
+                if ReadFile(pr[i], data(chunk), u32(65536), data(got), null) == 0 or got[0] == 0:
+                    if not ok:
+                        CloseHandle(pr[i])
+                        open[i] = false
+                    continue
+                moved = true
+                loop k in [0..int(got[0])):
+                    if i == 0: both.push(chunk[k])
+                    else: out.push(chunk[k])
+            # (neither pipe has anything: wait a little, or for the test to end)
+            if not moved and WaitForSingleObject(proc, 5) == 0: Sleep(1)
+        WaitForSingleObject(proc, u32(0xFFFFFFFF))
+        code: u32[] = [0]
+        GetExitCodeProcess(proc, data(code))
+        CloseHandle(proc)
+        (int(code[0]), str_from_bytes(both), str_from_bytes(out))
 
     __w32_run = (path: str, argv: str[], wait: bool) -> int:
         wcmd = __wide(__w32_cmdline(argv))

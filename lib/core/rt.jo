@@ -502,6 +502,7 @@ __write_fd = (fd: int, p: *u8, n: int):
         __wasm_write(fd, p, n)
     else when TARGET == "windows":
         __w32_write(fd, p, n)
+        if fd == 1 and __test_mirror >= 0: __w32_write_handle(__test_mirror as *u8, p, n)
     else:
         off = 0
         loop off < n:
@@ -510,7 +511,7 @@ __write_fd = (fd: int, p: *u8, n: int):
             off += r
         if fd == 1 and __test_mirror >= 0: __write_fd(__test_mirror, p, off)
 
-__test_mirror = -1              # (in a test's process: where its standard output is copied too)
+__test_mirror = -1              # (in a test's process: where its standard output is copied too; a handle on Windows)
 
 # read up to n bytes (0: the end, < 0: an error)
 # (debug web builds: the program's loops count this down, and at 0 the watchdog asks how long the

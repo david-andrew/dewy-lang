@@ -944,6 +944,13 @@ __test_run_begin = ():
         __test_selected = a[2]
         __test_args = a[3..]
         __test_child = true
+        when TARGET == "windows":
+            parts = split(a[2], ":")
+            if parts.len() == 2:
+                __test_selected = parts[0]
+                if let h = to_int(parts[1]):
+                    __test_mirror = h
+                    SetHandleInformation(h as *u8, 1, 0)   # (not passed on to what the test runs)
     else:
         loop i in [1..a.len()):
             if a[i] == "--json" and i == 1: __test_json = true
@@ -1006,12 +1013,10 @@ __test_begin = (name: str) -> bool:
             __test_record(name, code, output, stdout)
             return false
     else when TARGET == "windows":
-        exe = exe_path()
-        argv = [exe, "--dewy-internal-test", str(__test_index)] + args()
         __out_flush()
-        code, out = __w32_run_output(exe, argv, false, "")
-        if code < 0: out = "could not start the test process\n"
-        __test_record(name, code, out, out)
+        code, output, stdout = __w32_run_test(exe_path(), __test_index, args())
+        if code < 0: output = "could not start the test process\n"
+        __test_record(name, code, output, stdout)
         return false
     true
 
