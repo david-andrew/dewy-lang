@@ -84,7 +84,7 @@ them; no tests, or no matching names, is an error. Only tests declared in the
 selected file run; imported files supply code, not additional tests. Given a
 directory instead, `test` runs each `.dewy` file under it with a line starting
 `$test` (skipping hidden directories and `__dewycache__`), one line of marks per
-file, and adds up the results.
+file, and adds up the results. With no path, `test` tests the current directory.
 
 The VS Code extension also provides **Dewy: Test Current File**, a release variant,
 and **Run test** code lenses above each `$test`. These save open files and show

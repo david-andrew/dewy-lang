@@ -810,6 +810,8 @@ main = ():
             first += 1
         else: usage()
         first += 1
+    # (`dewy test` with no path tests the current directory)
+    if first >= a.len() and test_mode: a.push(".")
     if first >= a.len(): usage()
     if a[first] == "watch" or test_watch:
         if not test_watch: first += 1
