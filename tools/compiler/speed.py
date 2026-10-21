@@ -49,7 +49,7 @@ def generate_dewy(count: int) -> str:
     let total:float64=0.0
     let count=0
     loop j in [0..a) {{
-        let v=f64(j*{k})+b
+        let v=float64(j*{k})+b
         if v >? {k*10}.0 {{total+=v*0.5}}
         else if j%{k}=?0 {{total-=v/{k}.0}}
         else {{count+=1}}
@@ -59,14 +59,14 @@ def generate_dewy(count: int) -> str:
         else {{total+=sqrt(abs(it.x-it.y))}}
     }}
     let s="item {i}"
-    if s.length >? {k} {{total+=f64(s.length)}}
+    if s.length >? {k} {{total+=float64(s.length)}}
     loop count >? {k} {{
         count-={k+1}
         total*=1.0001
     }}
-    return total+f64(count)
+    return total+float64(count)
 }}''')
-    parts.append('let items:array<Item>=[]\nloop i in [0..100) {items.push(Item[x=f64(i) y=f64(i)*0.5 id=i])}\nlet acc:float64=0.0')
+    parts.append('let items:array<Item>=[]\nloop i in [0..100) {items.push(Item[x=float64(i) y=float64(i)*0.5 id=i])}\nlet acc:float64=0.0')
     parts.extend(f'acc+=work{i}({i%50} {i}.0 items)' for i in range(count))
     parts.append('printl"{acc}"')
     return '\n'.join(parts) + '\n'

@@ -3273,7 +3273,9 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                     et = get_struct_inst(ed, [])
                     if simple_enum(et): return enum_from_int(n, et, args[0])
                 fatal(nodes[n].pos, "use {name_of(name)}.variant(...) to construct an enum")
-            else if sk == .type_: return conversion(n, int(syms[s].ref), args)
+            else if sk == .type_:
+                jo_type_spelling(name, s, nodes[n].pos)
+                return conversion(n, int(syms[s].ref), args)
             else if sk == .fns and args.len() == 1 and nodes[args[0]].kind != .namedarg and universe.get(name) != none:
                 # (str(5) beside the program's str = (b: Big) -> str: the type's conversion, when
                 # no function of the name takes the value)
@@ -6802,7 +6804,9 @@ check_expr = (n: int, expected: int) -> int:
             d = int(syms[s].ref)
             if nkids2(d) > 0: t = mk_typeval(0)
             else: t = mk_typeval(resolve_alias(d, [], nodes[n].pos))
-        else if sk == .type_: t = mk_typeval(int(syms[s].ref))
+        else if sk == .type_:
+            jo_type_spelling(nm, s, nodes[n].pos)
+            t = mk_typeval(int(syms[s].ref))
         else if sk == .module: t = mk_modval(int(syms[s].ref))
         else if sk == .builtin: fatal(nodes[n].pos, "'{name_of(nm)}' must be called")
         else if sk == .reflected: fatal(nodes[n].pos, "field descriptors cannot escape into runtime storage; use .name or .type")

@@ -497,7 +497,8 @@ Arithmetic is arbitrary precision: word-sized values promote to a big integer
 when their exact result exceeds the signed 64-bit range. `int` has no `.min` or `.max` members.
 
 Explicit `int8` through `int64` and `uint8` through `uint64` retain wrapping
-arithmetic. Floating types are `float32` and `float64`. Literals in an explicit
+arithmetic. Floating types are `float32` and `float64`; text is `string`. The
+implementation's short names (`i64`, `u8`, `f64`, `str`, `byte`) are rejected. Literals in an explicit
 numeric context must fit that type exactly. A call parameter supplies that context
 to `if` and `match` branch values, just as a binding annotation does. In `=?`
 and `not=?`, array, record and dictionary literals take their element or field

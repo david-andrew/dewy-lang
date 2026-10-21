@@ -43,7 +43,7 @@ let invited = false # (connected by invite codes, not by address)
 serve = (dir: float64) => {
     ball = vec2(640 360)
     let a = random(-0.5 0.5)
-    vel = vec2(f32(cos(a) * dir) f32(sin(a))) * f32(BALL_SPEED)
+    vel = vec2(float32(cos(a) * dir) float32(sin(a))) * float32(BALL_SPEED)
 }
 
 host = () => {
@@ -107,7 +107,7 @@ state = () :> string => "s {ball.x} {ball.y} {left_y} {right_y} {score_l} {score
 read_state = (t: string) => {
     let w = split(t " ")
     if w.length <? 8 { return }
-    ball = vec2(f32(to_float(w[1]) ?? 0.0) f32(to_float(w[2]) ?? 0.0))
+    ball = vec2(float32(to_float(w[1]) ?? 0.0) float32(to_float(w[2]) ?? 0.0))
     left_y = to_float(w[3]) ?? left_y
     right_y = to_float(w[4]) ?? right_y
     score_l = to_int(w[5]) ?? score_l
@@ -195,27 +195,27 @@ update = (dt: float64) => {
         return
     }
     if screen not=? Screen.playing { return }
-    let move = f64(-input_axis().y)
+    let move = float64(-input_axis().y)
     # (a finger, or the mouse held down: the paddle goes to it)
     if mouse_down(Mouse.left) {
         let mine = if hosting left_y else right_y
-        move = clamp((mine - f64(mouse_pos().y)) / 30.0 -1.0 1.0)
+        move = clamp((mine - float64(mouse_pos().y)) / 30.0 -1.0 1.0)
     }
     if hosting {
         left_y = clamp(left_y - move * PADDLE_SPEED * dt PADDLE_H / 2.0 720.0 - PADDLE_H / 2.0)
         right_y = clamp(right_y - right_move * PADDLE_SPEED * dt PADDLE_H / 2.0 720.0 - PADDLE_H / 2.0)
-        ball += vel * f32(dt)
+        ball += vel * float32(dt)
         if ball.y <? 10 or ball.y >? 710 {
             vel.y = -vel.y
             ball.y = clamp(ball.y 10.0 710.0)
         }
-        if ball.x <? 60 and ball.x >? 30 and abs(f64(ball.y) - left_y) <? PADDLE_H / 2.0 and vel.x <? 0 {
+        if ball.x <? 60 and ball.x >? 30 and abs(float64(ball.y) - left_y) <? PADDLE_H / 2.0 and vel.x <? 0 {
             vel.x = -vel.x * 1.05
-            vel.y += f32((f64(ball.y) - left_y) * 4.0)
+            vel.y += float32((float64(ball.y) - left_y) * 4.0)
         }
-        if ball.x >? 1220 and ball.x <? 1250 and abs(f64(ball.y) - right_y) <? PADDLE_H / 2.0 and vel.x >? 0 {
+        if ball.x >? 1220 and ball.x <? 1250 and abs(float64(ball.y) - right_y) <? PADDLE_H / 2.0 and vel.x >? 0 {
             vel.x = -vel.x * 1.05
-            vel.y += f32((f64(ball.y) - right_y) * 4.0)
+            vel.y += float32((float64(ball.y) - right_y) * 4.0)
         }
         if ball.x <? -20 {
             score_r += 1
@@ -242,7 +242,7 @@ let BLUE = rgb(0.4 0.8 1.0)
 draw = () => {
     clear(rgb(0.05 0.06 0.09))
     if screen =? Screen.playing or screen =? Screen.over {
-        loop y in [0..18) { rect(638 f64(y) * 40 + 10 4 20 rgba(1 1 1 0.15)) }
+        loop y in [0..18) { rect(638 float64(y) * 40 + 10 4 20 rgba(1 1 1 0.15)) }
         rect(36 left_y - PADDLE_H / 2.0 16 PADDLE_H BLUE)
         rect(1228 right_y - PADDLE_H / 2.0 16 PADDLE_H rgb(1.0 0.6 0.3))
         circle(ball 10 WHITE)
@@ -341,8 +341,8 @@ draw_help = () => {
     text_centered("How to play together" vec2(640 80) 44 BLUE)
     let y:float64 = 150.0
     loop i in 0.. and h in HELP {
-        text_centered("{i + 1}" vec2(150 f32(y + 12.0)) 28 GOLD)
-        y += text_wrapped(h vec2(190 f32(y)) 900 22 WHITE) + 24.0
+        text_centered("{i + 1}" vec2(150 float32(y + 12.0)) 28 GOLD)
+        y += text_wrapped(h vec2(190 float32(y)) 900 22 WHITE) + 24.0
     }
     text_centered("A click or a tap: back" vec2(640 680) 20 GRAY)
 }

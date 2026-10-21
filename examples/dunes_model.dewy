@@ -58,14 +58,14 @@ sand_fs=(i: SandOut u: SandParams):>vec4=>{
         let lit: float32 = 0.0
         if u.shadow_taps <? 5.0 {
             loop k in [int32(0)..int32(4)) {
-                let d = sample(u.shadow_map sp.xy + vec2(f32(k%2)-0.5 f32(k//2)-0.5) * u.shadow_texel).x
+                let d = sample(u.shadow_map sp.xy + vec2(float32(k%2)-0.5 float32(k//2)-0.5) * u.shadow_texel).x
                 if sp.z - 0.003 <=? d {lit = lit + 1.0}
             }
             lit /= 4.0
         } else {
             loop x in [int32(-1)..int32(2)) {
                 loop y in [int32(-1)..int32(2)) {
-                    let d = sample(u.shadow_map sp.xy + vec2(f32(x) f32(y)) * u.shadow_texel).x
+                    let d = sample(u.shadow_map sp.xy + vec2(float32(x) float32(y)) * u.shadow_texel).x
                     if sp.z - 0.003 <=? d {lit = lit + 1.0}
                 }
             }
@@ -100,8 +100,8 @@ robe_indices=():>array<uint32>=>{
     let idx: array<uint32>
     loop r in [0..ROBE_RINGS - 1) {
         loop s in [0..ROBE_SEG) {
-            let a = u32(r * (ROBE_SEG + 1) + s)
-            let b = a + u32(ROBE_SEG + 1)
+            let a = uint32(r * (ROBE_SEG + 1) + s)
+            let b = a + uint32(ROBE_SEG + 1)
             idx.push(a)
             idx.push(b)
             idx.push(a + 1)
@@ -117,21 +117,21 @@ robe_indices=():>array<uint32>=>{
 robe_vertices=(time: float64 speed: float64):>array<Vertex3D>=>{
     let vs: array<Vertex3D>
     loop r in [0..ROBE_RINGS) {
-        let f = f64(r) / f64(ROBE_RINGS - 1) # 0 at the shoulders, 1 at the hem
+        let f = float64(r) / float64(ROBE_RINGS - 1) # 0 at the shoulders, 1 at the hem
         let y = 1.3 - f * 1.25
         let rad = 0.16 + 0.38 * pow(f 0.8)
         loop s in [0..ROBE_SEG + 1) {
-            let a = f64(s) / f64(ROBE_SEG) * TAU
+            let a = float64(s) / float64(ROBE_SEG) * TAU
             let wave = sin(a * 3.0 + time * 5.0) * 0.035 + sin(a * 5.0 - time * 7.0) * 0.02
             let rr = rad + wave * f * (1.0 + speed * 0.15)
             let x = sin(a) * rr
             let z = cos(a) * rr - speed * 0.05 * f * f
-            let n = normalize(vec3(f32(sin(a)) 0.35 f32(cos(a))))
-            let shade = f32(0.75 + 0.25 * (1.0 - f))
+            let n = normalize(vec3(float32(sin(a)) 0.35 float32(cos(a))))
+            let shade = float32(0.75 + 0.25 * (1.0 - f))
             # deep red cloth with a gold band along the hem
             let col = vec4(0.58 * shade 0.1 * shade 0.08 * shade 1)
             if r =? ROBE_RINGS - 2 {col = vec4(0.9 0.62 0.25 1)}
-            vs.push(Vertex3D(vec3(f32(x) f32(y + wave * f * 0.5) f32(z)) n vec2(f32(s) / f32(ROBE_SEG) f32(f)) col))
+            vs.push(Vertex3D(vec3(float32(x) float32(y + wave * f * 0.5) float32(z)) n vec2(float32(s) / float32(ROBE_SEG) float32(f)) col))
         }
     }
     vs
@@ -146,11 +146,11 @@ ribbon_vertices=(pts: array<vec3> width: float32 time: float64):>array<Vertex3D>
         let dir = normalize(next - prev + vec3(0 0.0001 0))
         let side = normalize(cross(dir vec3(0 1 0)) + vec3(0.0001 0 0))
         let n = normalize(cross(side dir))
-        let taper = f32(1.0 - 0.6 * f64(k) / f64(max(pts.length - 1 1)))
-        let glow = f32(0.65 + 0.35 * sin(f64(k) * 1.3 - time * 3.0))
+        let taper = float32(1.0 - 0.6 * float64(k) / float64(max(pts.length - 1 1)))
+        let glow = float32(0.65 + 0.35 * sin(float64(k) * 1.3 - time * 3.0))
         let c = vec4(glow glow glow 1)
-        vs.push(Vertex3D(pts[k] + side * (width * taper) n vec2(0 f32(k)) c))
-        vs.push(Vertex3D(pts[k] - side * (width * taper) n vec2(1 f32(k)) c))
+        vs.push(Vertex3D(pts[k] + side * (width * taper) n vec2(0 float32(k)) c))
+        vs.push(Vertex3D(pts[k] - side * (width * taper) n vec2(1 float32(k)) c))
     }
     vs
 
@@ -159,7 +159,7 @@ ribbon_vertices=(pts: array<vec3> width: float32 time: float64):>array<Vertex3D>
 ribbon_indices=(n: int64):>array<uint32>=>{
     let idx: array<uint32>
     loop k in [0..n - 1) {
-        let a = u32(k * 2)
+        let a = uint32(k * 2)
         loop t in [a a + 1 a + 2 a + 1 a + 3 a + 2 a a + 2 a + 1 a + 1 a + 2 a + 3] {idx.push(t)}
     }
     idx

@@ -10,7 +10,7 @@ from tests.support import compiler  # noqa: F401
 @pytest.mark.core_quick
 @pytest.mark.parametrize('literal', ['"plain"', 'r"raw {braces}"',
     '"line\\n\\u{1f642} {value+1}"', '"{value}{value*2}"',
-    '"nested {str(value)}"', '"fallback {values[end-1]}"',
+    '"nested {string(value)}"', '"fallback {values[end-1]}"',
     '"""first\n{value}\nlast"""'])
 def test_direct_string_identity(compiler, tmp_path, literal):
     source = tmp_path / 'strings.dewy'

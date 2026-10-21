@@ -235,7 +235,7 @@ def test_core_native_tests_diagnostics(compiler, tmp_path, text, error):
 
 def test_core_native_tests_contextual_keyword(compiler, tmp_path):
     source = tmp_path / 'tests.dewy'
-    source.write_text('test=(x:str)=>x.length\n$test\nordinary_name = () => {\n    $expect test("abc") =? 3\n    test"abcd";\n}\n')
+    source.write_text('test=(x:string)=>x.length\n$test\nordinary_name = () => {\n    $expect test("abc") =? 3\n    test"abcd";\n}\n')
     result = command(compiler, 'test', source)
     assert result.returncode == 0, result.stdout + result.stderr
 

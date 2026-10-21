@@ -51,7 +51,7 @@ main=(argv:array<string>)=>{
     if op=?"bigint-context" {printl"{big_echo(18446744073709551616)}" return}
     if op=?"bigint-word" {printl"{bigint(18446744073709551615)}" return}
     if op=?"bigint" {let n:BigInt=18446744073709551616 printl"{n}" return}
-    if op=?"float-nan" {let f=f64(x) printl"{int(f/f)}" return}
+    if op=?"float-nan" {let f=float64(x) printl"{int(f/f)}" return}
     if op=?"compound" {let v=x v+=y printl"{v}" return}
     if op=?"fixed-div" {printl"{int64(x)//int64(y)}" return}
     if op=?"fixed-narrow-pow" {printl"{int32(x)^int32(y)}" return}

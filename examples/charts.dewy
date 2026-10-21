@@ -24,7 +24,7 @@ main=():>void=>{
     counts.bars(["Mon" "Tue" "Wed" "Thu"] [12 19 15 24] "observed")
     let target:array<float32>=[16.0 16.0 16.0 16.0]
     counts.bars(["Mon" "Tue" "Wed" "Thu"] target "target" color=rgb(0.62 0.66 0.70))
-    let samples=[loop i in [0..81) f32(sin((i as float64)*TAU/40.0))]
+    let samples=[loop i in [0..81) float32(sin((i as float64)*TAU/40.0))]
     signal.line(samples "sin(t)" dash=5.0 width=2.5)
 }
 
