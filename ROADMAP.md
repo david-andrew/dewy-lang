@@ -29,7 +29,7 @@ only.
 - Astra: ownership slice 2 part 2 (resource containers, recursive/optional owners,
   field moves, closure copyability, generic hooks); part 1 (hooks, inheritance,
   inline aggregates, cleanup) landed.
-- Opus: x64 live-interval stream, measure-first pilot (compile throughput).
+- Opus: compile-throughput strategy study (library caching, parallelism).
 
 ## Next
 
@@ -44,7 +44,6 @@ only.
   each estimated (not measured):
   - shared optimizer walks landed (−33 M synthetic, −3% self-build); the rest
     of the optimizer is sub-percent tweaks;
-  - a finalized live-interval stream fed into x64 allocation: 35–50 M;
   - the lexer: 49 M against a 20 M target.
   These reach ~1.05 G; 0.40 G needs a bigger idea (per-line checking cost is
   ~17k instructions).
@@ -146,6 +145,8 @@ Each tier-3 program's ladder note says which question holds it open.
 - Direct null-trap lowering for managed/method params: 14.97 → 15.28 ms.
 - Overload-dispatch plan cache: 80% repeat rate, but repeats cost only 2.79% of
   synthetic (33.9 M) before overhead.
+- x64 live-interval stream: no duplicated walk inside x64; realistic saving 1.9%
+  synthetic / 0.5% self-build. Word-at-a-time emission: ~1%.
 - Triangular hash probing for graph: −0.3% instructions, default 7% slower.
   Graph is memory-bound (slot reads 43%, adjacency fetch/retain 24%); the next
   idea is contiguous adjacency storage/ownership.
