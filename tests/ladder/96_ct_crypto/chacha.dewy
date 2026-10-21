@@ -4,6 +4,8 @@
 # key and plaintext never select a code path or an address. Loop bounds depend
 # only on the message length, which is public.
 
+$explicit_copies
+
 from p"ct.dewy" import load32
 
 Key:type=array<uint8 length=32>
@@ -104,11 +106,12 @@ xor_stream=(key:Key counter:uint32 nonce:Nonce data:array<uint8>):>array<uint8>=
     return out
 }
 
-# HChaCha20 (draft-irtf-cfrg-xchacha section 2.2): a subkey from a key and a
-# 16-byte nonce, the first and last rows of the rounds without the feed-forward.
+# HChaCha20 (draft-irtf-cfrg-xchacha section 2.2): a subkey from a key and the
+# first 16 bytes of `nonce`, the first and last rows of the rounds without the
+# feed-forward.
 NonceX:type=array<uint8 length=24>
 
-hchacha20=(key:Key nonce16:array<uint8>):>Key=>{
+hchacha20=(key:Key nonce:array<uint8>):>Key=>{
     let s:State=[]
     loop i in [0..4) {
         s[i]=SIGMA[i]
@@ -118,7 +121,7 @@ hchacha20=(key:Key nonce16:array<uint8>):>Key=>{
         s[4+i]=load32(k 4*i)
     }
     loop i in [0..4) {
-        s[12+i]=load32(nonce16 4*i)
+        s[12+i]=load32(nonce 4*i)
     }
     let r=rounds(s)
     let out:array<uint8>=[]

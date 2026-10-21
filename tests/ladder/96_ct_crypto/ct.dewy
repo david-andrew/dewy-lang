@@ -10,6 +10,8 @@
 # The scalar helpers below carry `no_effects`, which the compiler does verify:
 # they are pure word arithmetic with no hidden allocation, check or call.
 
+$explicit_copies
+
 # All ones when `bit` is 1, zero when it is 0.
 mask32=(bit:uint32):>uint32 & no_effects=>0-bit
 mask64=(bit:uint64):>uint64 & no_effects=>0-bit

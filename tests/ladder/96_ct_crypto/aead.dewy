@@ -4,6 +4,8 @@
 # every byte whatever the contents. The plaintext is only produced after the tag
 # verifies, so a forgery learns nothing but the single public verdict.
 
+$explicit_copies
+
 from p"ct.dewy" import equal, store64
 from p"chacha.dewy" import Key, Nonce, NonceX, block, xor_stream, hchacha20
 from p"poly.dewy" import Tag, OneTimeKey, poly1305_init
@@ -37,7 +39,8 @@ tag_for=(key:Key nonce:Nonce aad:array<uint8> ciphertext:array<uint8>):>Tag=>{
 
 seal=(key:Key nonce:Nonce aad:array<uint8> plaintext:array<uint8>):>Sealed=>{
     let ciphertext=xor_stream(key 1 nonce plaintext)
-    return Sealed[ciphertext tag_for(key nonce aad ciphertext)]
+    let tag=tag_for(key nonce aad ciphertext)
+    return Sealed[ciphertext tag]
 }
 
 open=(key:Key nonce:Nonce aad:array<uint8> sealed:Sealed):>array<uint8>|Forged=>{
@@ -51,8 +54,11 @@ open=(key:Key nonce:Nonce aad:array<uint8> sealed:Sealed):>array<uint8>|Forged=>
 # last 8 become the ChaCha20 nonce.
 extended=(key:Key nonce:NonceX):>[key:Key nonce:Nonce]=>{
     let n=nonce as array<uint8>
-    let subkey=hchacha20(key n[0..16))
-    let short:Nonce=[0 0 0 0 n[16..24)...]
+    let subkey=hchacha20(key n)
+    let short:Nonce=[]
+    loop i in [0..8) {
+        short[4+i]=n[16+i]
+    }
     return [key=subkey nonce=short]
 }
 
