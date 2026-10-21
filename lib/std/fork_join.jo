@@ -1,0 +1,358 @@
+# Scoped work stealing. Only promoted continuations enter a deque; latent
+# continuations belong to their owner's stack until the owner's heartbeat.
+__fj_ctl: *int = null             # event epoch, parked workers, startup barrier
+__fj_workers = -1                   # -1 before lazy startup, 0 for serial
+__fj_deques: *int = null
+const __fj_CAP = 1024
+const __fj_WORDS = 1104
+# Deque: top at 0, bottom at 16 (separate cache lines), owner-only latent
+# head/tail at 32/33, heartbeat budget/deadline at 34/35, slots at 64.
+# Stack job: parallel entry, environment, lo, hi, payload, serial entry, done,
+# promoted, next latent, previous latent. A join keeps it and its captures live.
+struct __fj_Job:
+    fn: int
+    env: int
+    lo: int
+    hi: int
+    out: int
+    serial: int
+    done: int
+    promoted: int
+    next: int
+    prev: int
+
+when TARGET == "windows":
+    @lib("kernelbase.dll")
+    extern WaitOnAddress = (p: *u8, compare: *u8, size: int, ms: u32) -> i32
+    @lib("kernelbase.dll")
+    extern WakeByAddressAll = (p: *u8)
+    @lib("kernel32.dll")
+    extern CreateThread = (sec: *u8, stack: int, start: *u8, param: *u8, flags: u32, id: *u32) -> *u8
+
+    # (no allocation: a worker sleeps in here)
+    __futex_wait = (p: *int, v: int):
+        cmp = v
+        WaitOnAddress(p as *u8, (&cmp) as *u8, 8, u32(0xFFFFFFFF))
+    __futex_wake = (p: *int): WakeByAddressAll(p as *u8)
+
+    # a worker starts on a small stack of Windows' and moves to its own in __tstack_base (where
+    # __tid finds which worker it is), entering __w32_worker as if called
+    @cabi
+    __w32_thread_start = (id: int) -> int:
+        top = __tstack_base + (id << __TSTACK_SHIFT) - 16
+        (top as *int)[1] = 0
+        entry: cfn() = __w32_worker
+        __jump(entry as *u8, top + 8)
+        0
+
+    @cabi
+    __w32_worker = (): __worker_main(__tid())
+else when TARGET == "macos":
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("pthread_create")
+    extern __mac_pthread_create = (t: *u8, attr: *u8, start: *u8, arg: *u8) -> i32
+    # (macOS's futex: UL_COMPARE_AND_WAIT64, waking all with ULF_WAKE_ALL)
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("__ulock_wait")
+    extern __mac_ulock_wait = (op: u32, p: *u8, v: int, us: u32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("__ulock_wake")
+    extern __mac_ulock_wake = (op: u32, p: *u8, v: int) -> i32
+
+    __futex_wait = (p: *int, v: int): __mac_ulock_wait(u32(5), p as *u8, v, u32(0))
+    __futex_wake = (p: *int): __mac_ulock_wake(u32(5 | 0x100), p as *u8, 0)
+
+    # as on Windows: a worker starts on a stack of the system's and moves to its own
+    @cabi
+    __mac_thread_start = (id: *u8) -> *u8:
+        top = __tstack_base + ((id as int) << __TSTACK_SHIFT) - 16
+        entry: cfn() = __mac_worker
+        __jump(entry as *u8, top)
+        null
+
+    @cabi
+    __mac_worker = (): __worker_main(__tid())
+else:
+    __futex_wait = (p: *int, v: int): syscall(202, p, 128, v, 0)      # FUTEX_WAIT_PRIVATE
+    __futex_wake = (p: *int): syscall(202, p, 129, 0x7FFFFFFF)        # FUTEX_WAKE_PRIVATE (all)
+
+# All shared deque accesses use sequentially consistent primitives. In
+# particular bottom's decrement is fenced before top is read, and a thief
+# reads the slot before competing for top. Ring slots themselves are atomic:
+# a delayed losing thief may race a later wraparound without a data race.
+@noinline
+__fj_store = (p: *int, v: int):
+    # Only the owner writes bottom and its ring slots; thieves only read.
+    # An atomic RMW supplies the publication fence without a CAS retry loop.
+    __atomic_add(p, v - __atomic_add(p, 0))
+
+@noinline
+__fj_signal = ():
+    __atomic_add(__fj_ctl, 1)
+    if __atomic_add(__fj_ctl + 1, 0) != 0: __futex_wake(__fj_ctl)
+
+@noinline
+__fj_push = (q: *int, j: *int) -> bool:
+    b = __atomic_add(q + 16, 0)
+    if b - __atomic_add(q, 0) >= __fj_CAP: return false
+    __fj_store(q + 64 + (b & (__fj_CAP - 1)), j as int)
+    __fj_store(q + 16, b + 1)
+    __fj_signal()
+    true
+
+@noinline
+__fj_pop = (q: *int) -> *int:
+    b = __atomic_add(q + 16, 0) - 1
+    __fj_store(q + 16, b)
+    t = __atomic_add(q, 0)
+    if t > b:
+        __fj_store(q + 16, b + 1)
+        return null
+    j = __atomic_add(q + 64 + (b & (__fj_CAP - 1)), 0) as *int
+    if t == b:
+        if __atomic_cas(q, t, t + 1) != t: j = null
+        __fj_store(q + 16, b + 1)
+    j
+
+@noinline
+__fj_steal = (q: *int) -> *int:
+    t = __atomic_add(q, 0)
+    if t >= __atomic_add(q + 16, 0): return null
+    j = __atomic_add(q + 64 + (t & (__fj_CAP - 1)), 0) as *int
+    if __atomic_cas(q, t, t + 1) != t: return null
+    j
+
+@noinline
+__fj_take = (id: int) -> *int:
+    q = __fj_deques + id * __fj_WORDS
+    j = __fj_pop(q)
+    if j != null: return j
+    loop offset in [1..__fj_workers + 1):
+        victim = id + offset
+        if victim > __fj_workers: victim -= __fj_workers + 1
+        j = __fj_steal(__fj_deques + victim * __fj_WORDS)
+        if j != null: return j
+    null
+
+__fj_unlink = (q: *int, j: *int):
+    prev = j[9] as *int
+    next = j[8] as *int
+    if prev == null: q[32] = next as int
+    else: prev[8] = next as int
+    if next == null: q[33] = prev as int
+    else: next[9] = prev as int
+
+# Poll at fork/leaf boundaries, never inside a numerical inner loop. Time is
+# sampled at joins and every 64 fork/leaf boundaries. Promote the oldest (most
+# work), not the tiny leaf at which a heartbeat happened to arrive.
+@noinline
+__fj_tick = (q: *int):
+    q[34] -= 1
+    if q[34] > 0: return
+    q[34] = 64
+    now = time_ns()
+    if now < q[35]: return
+    q[35] = now + 50000
+    j = q[32] as *int
+    if j == null: return
+    # No thief may run j before its owner has marked and unlinked it.
+    b = __atomic_add(q + 16, 0)
+    if b - __atomic_add(q, 0) >= __fj_CAP: return
+    __fj_unlink(q, j)
+    j[7] = 1
+    __fj_push(q, j)
+
+@noinline
+__fj_link = (j: *int):
+    q = __fj_deques + __tid() * __fj_WORDS
+    q[36] += 1
+    j[6] = 0
+    j[7] = 0
+    j[8] = 0
+    j[9] = q[33]
+    if q[33] == 0: q[32] = j as int
+    else: (q[33] as *int)[8] = j as int
+    q[33] = j as int
+    __fj_tick(q)
+
+# The raw callback and environment are borrowed, not retained. The owning
+# activation cannot leave its join until every descendant has finished.
+@noinline
+__fj_execute = (j: *int):
+    promoted = j[7] != 0
+    if promoted: __fj_work(j, j[2], j[3])
+    else: __call_raw(j[5] as *u8, null, j as *u8)
+
+    if promoted:
+        # Last access to the stack job. Signal uses only pool storage: the
+        # owner can return immediately after observing this release.
+        __atomic_add(j + 6, 1)
+        __fj_signal()
+
+__fj_park = (epoch: int):
+    __atomic_add(__fj_ctl + 1, 1)
+    __futex_wait(__fj_ctl, epoch)
+    __atomic_add(__fj_ctl + 1, -1)
+
+@noinline
+__fj_join = (j: *int):
+    q = __fj_deques + __tid() * __fj_WORDS
+    q[34] = 0
+    __fj_tick(q)
+    q[36] -= 1
+    if j[7] == 0:
+        __fj_unlink(__fj_deques + __tid() * __fj_WORDS, j)
+        __fj_execute(j)
+        return
+    __fj_wait(j, __tid())
+
+# Workers and joiners use the same helping loop. Read the event epoch before
+# checking completion/work, so publication between that check and parking
+# makes futex wait return immediately instead of losing the wakeup.
+__fj_wait = (joined: *int, id: int):
+    loop true:
+        epoch = __atomic_add(__fj_ctl, 0)
+        if joined != null and __atomic_add(joined + 6, 0) != 0: return
+        other = __fj_take(id)
+        if other != null: __fj_execute(other)
+        else: __fj_park(epoch)
+
+# Every job has one native (ignored closure environment, job-address) ABI.
+# Its entry owns the typed payload; the deque and helping loop know no types.
+__fj_range_body: (*int) -> void = __fj_range_invoke
+__fj_range_invoke = (j: *int):
+    __call_raw(j[4] as *u8, j[1] as *u8, j[2] as *u8, j[3] as *u8)
+
+# The same fixed bisection handles ordinary ranges and promoted scalar tails.
+# Entries interpret an immutable payload; splitting only changes lo/hi. Thus
+# a wide scalar join can use every worker, not just one worker for its tail.
+@noinline
+__fj_work = (parent: *int, lo: int, hi: int):
+    job = __fj_Job(parent[0], parent[1], lo, hi, parent[4], parent[5], 0, 0, 0, 0)
+    j = (&job) as *int
+    if hi - lo <= 1:
+        __call_raw(j[0] as *u8, null, j as *u8)
+        return
+    mid = lo + (hi - lo) / 2
+    j[2] = mid
+    __fj_link(j)
+    __fj_work(parent, lo, mid)
+    __fj_join(j)
+
+__fj_range = (fn: *u8, env: *u8, lo: int, hi: int):
+    entry = ((&__fj_range_body) as *int)[0]
+    job = __fj_Job(entry, env as int, lo, hi, fn as int, entry, 0, 0, 0, 0)
+    __fj_work((&job) as *int, lo, hi)
+
+@cabi
+__worker_main = (id: int):
+    loop __atomic_add(__fj_ctl + 2, 0) == 0: __futex_wait(__fj_ctl + 2, 0)
+    __fj_wait(null, id)
+
+__fj_start = ():
+    __fj_workers = 0
+    when TARGET != "wasm":
+        n = cpu_count() - 1
+        if let t = env("SLOPPY_THREADS"): n = (to_int(t) ?? (n + 1)) - 1      # SLOPPY_THREADS caps the threads used
+        if n > __MAX_THREADS: n = __MAX_THREADS
+        if n < 1: return
+        __fj_ctl = __alloc(64) as *int
+        loop i in [0..8): __fj_ctl[i] = 0
+        __fj_deques = __os_pages((__MAX_THREADS + 1) * __fj_WORDS * 8) as *int
+        __rng_threads()
+        # one reserved region for all worker stacks (pages are only touched as needed)
+        size = __MAX_THREADS << __TSTACK_SHIFT
+        when TARGET == "windows":
+            # (what the workers call, looked up here first)
+            __futex_wake(__fj_ctl)
+            __futex_wait(__fj_ctl, 1)
+            base = VirtualAlloc(null, size, u32(0x2000), 4)               # MEM_RESERVE
+            if base == null: return
+            __tstack_base = base
+            start: cfn(int) -> int = __w32_thread_start
+            loop i in [0..n):
+                # (a worker's stack is committed whole: no guard pages to grow it)
+                if VirtualAlloc(base + (i << __TSTACK_SHIFT), 1 << __TSTACK_SHIFT, u32(0x1000), 4) == null: break
+                if CreateThread(null, 65536, start as *u8, (i + 1) as *u8, 0, null) == null: break
+                __fj_workers += 1
+        else when TARGET == "macos":
+            base = syscall(9, 0, size, 3, 0x22 | 0x4000, -1, 0)
+            if base < 0 and base > -4096: return
+            __tstack_base = base as *u8
+            start: cfn(*u8) -> *u8 = __mac_thread_start
+            th = [0]
+            loop i in [0..n):
+                if __mac_pthread_create(data(th) as *u8, null, start as *u8, (i + 1) as *u8) != 0: break
+                __fj_workers += 1
+        else:
+            base = syscall(9, 0, size, 3, 0x22 | 0x4000, -1, 0)       # MAP_PRIVATE|ANON|NORESERVE
+            if base < 0 and base > -4096: return
+            __tstack_base = base as *u8
+            entry: cfn(int) = __worker_main
+            loop i in [0..n):
+                top = __tstack_base + ((i + 1) << __TSTACK_SHIFT)
+                if __clone_thread(entry as *u8, i + 1, top) < 0: break
+                __fj_workers += 1
+
+        __atomic_add(__fj_ctl + 2, 1)
+        __futex_wake(__fj_ctl + 2)
+
+# Root entry/exit alone change process-wide allocator/output modes. Nested
+# joins help the same pool, including when entered by a helping main thread.
+@noinline
+__fj_enter = () -> bool:
+    if __fj_workers < 0: __fj_start()
+    if __mt_active or __fj_workers == 0: return false
+    __out_flush()
+    __out_direct = true
+    __rng_in_job = true
+    __mt_active = true
+    # Scope entry is the first heartbeat. Expose its oldest continuation
+    # before entering a body that might contain no further fork boundaries.
+    q = __fj_deques + __tid() * __fj_WORDS
+    q[34] = 0
+    q[35] = 0
+    true
+
+__fj_leave = (root: bool):
+    if not root: return
+    __mt_active = false
+    __rng_in_job = false
+    __out_direct = false
+
+# Bound the active fork frontier, not the user's recursion or numerical
+# size. Below it, scalar regions use their direct sequential version. A
+# completed serial subtree is a heartbeat boundary for its latent ancestors.
+@noinline
+__fj_split = () -> bool:
+    if __fj_workers < 0: __fj_start()
+    if __fj_workers == 0: return false
+    (__fj_deques + __tid() * __fj_WORDS)[36] < 8
+
+# Scalar-region ABI used by lowering. The first result is evaluated directly
+# by the caller; this latent stack job holds the remaining source-order slots.
+__fj_scalar = (j: *int, fn: *u8, env: *u8, first: int, count: int, out: *u8, serial: *u8):
+    j[0] = fn as int
+    j[1] = env as int
+    j[2] = first + 1
+    j[3] = first + count
+    j[4] = (out as int) - (first + 1) * 8
+    j[5] = serial as int
+    __fj_link(j)
+
+
+# Keep pool dispatch outside callback specialization: all collectors share
+# this one scheduler entry, while their range bodies remain specialized.
+@noinline
+__fj_run = (total: int, closure: *int):
+    root = __fj_enter()
+    if __fj_workers == 0:
+        was = __rng_in_job
+        __rng_in_job = true
+        __call_raw(closure[0] as *u8, closure[1] as *u8, null, total as *u8)
+        __rng_in_job = was
+    else if total == 1 or __par_serial:
+        __call_raw(closure[0] as *u8, closure[1] as *u8, null, total as *u8)
+    else:
+        __fj_range(closure[0] as *u8, closure[1] as *u8, 0, total)
+    __fj_leave(root)

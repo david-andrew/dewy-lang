@@ -1998,7 +1998,9 @@ does not reassociate reductions.
 
 Native programs use a persistent worker pool. `SLOPPY_THREADS=2` limits it to
 two threads including the caller; `SLOPPY_THREADS=1` runs on the caller. Nested
-operations currently run on the calling thread. Web builds run serially with
+operations share the same pool, and a caller waiting at a join helps run ready
+work. Forks stay local until a heartbeat exposes work to another worker; small
+scoped joins use direct calls on the sequential path. Web builds run serially with
 the same result order and copy semantics. Parallel work may always execute
 sequentially; its body must not wait for a sibling to signal it. The current
 checker does not yet prove this blocking restriction.

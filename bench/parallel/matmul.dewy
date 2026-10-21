@@ -6,7 +6,8 @@ tile=(a:array<float64> b:array<float64> n:int64 id:int64):>array<float64>=>{
     loop kk in [0..tiles) {loop i in [0..min(32 n-row)) {
         loop k in [kk*32..min((kk+1)*32 n)) {
             let v=a[(row+i)*n+k]
-            loop j in [0..min(32 n-col)) {out[i*32+j]+=v*b[k*n+col+j]}
+            let out_base=i*32 let b_base=k*n+col
+            loop j in [0..min(32 n-col)) {out[out_base+j]+=v*b[b_base+j]}
         }
     }}
     return out

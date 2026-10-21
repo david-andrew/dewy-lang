@@ -1,6 +1,11 @@
 from p"../harness.jo" import clock, size_argument
 row=(a:array<array<float64>> i:int64 n:int64):>array<float64>=>{
-    return [loop j in [0..n) if i =? 0 or i =? n-1 or j =? 0 or j =? n-1 a[i][j] else (a[i-1][j]+a[i+1][j]+a[i][j-1]+a[i][j+1])*0.25]
+    if i =? 0 or i =? n-1 return a[i]
+    let above=a[i-1] let center=a[i] let below=a[i+1]
+    assert(above.length =? n and center.length =? n and below.length =? n)
+    let out=center
+    loop j in [1..n-1) {out[j]=(above[j]+below[j]+center[j-1]+center[j+1])*0.25}
+    return out
 }
 main=(args:array<string>)=>{
     let n=size_argument(args 1024)

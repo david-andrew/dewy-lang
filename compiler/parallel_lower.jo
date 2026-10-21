@@ -18,7 +18,9 @@ struct ParallelRegion:
 
 # Function-local lowering state, reset by begin_fn (including fused workers).
 # Values are the joined scalar results, in source order.
+parallel_serial = false
 parallel_scalars: {int: int[]}
+parallel_owned: {int: int}
 
 parallel_prelude_call = (n: int, name: str) -> bool:
     if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return false
@@ -54,13 +56,20 @@ parallel_region = (n0: int) -> ParallelRegion:
     callback = kid(n, 1)
     if nodes[callback].kind != .lambda or has_flag(callback, NF_GENERIC): return ParallelRegion()
     f = int(nodes[callback].sym)
-    if fns[f].params.len() != 1 or is_managed(int(fns[f].ret)) or (vc(int(fns[f].ret)) != VC_INT and vc(int(fns[f].ret)) != VC_FLT): return ParallelRegion()
+    if fns[f].params.len() != 1 or ownership_type(int(fns[f].ret)) or (vc(int(fns[f].ret)) != VC_INT and vc(int(fns[f].ret)) != VC_FLT): return ParallelRegion()
     if ownership_callable_cap(int(fns[f].fntype)) != 0: return ParallelRegion()
     loop cap in fns[f].caps:
         inn = int(cap.inner)
         t = store_type(inn)
-        if is_managed(t) or vc(t) == VC_AGG or is_shared(inn): return ParallelRegion()
+        if ownership_type(t) or vc(t) == VC_AGG or is_shared(inn): return ParallelRegion()
     ParallelRegion(n, callback, first, count)
+
+# Register compiler-only runtime ABIs while checking the region, before the
+# checked program is frozen for emission. Ordinary bulk loops do not need them.
+parallel_prepare = (n: int):
+    if target_wasm or parallel_region(n).call == 0: return
+    runtime_fn("__fj_split")
+    runtime_fn("__fj_scalar")
 
 parallel_scalar_uses = (n: int, l: int, count: int) -> bool:
     if n == 0: return true
@@ -114,9 +123,29 @@ parallel_scalar_decl = (s: int, l: int) -> bool:
             t = store_type(inn)
             store_val(t, env, int(locals[inn].env_off), read_place(local_place(outer, false), t))
     results: int[]
+    result_type = ret_vt(int(fns[f].ret))
+    loop i in [0..region.count): results.push(vreg(result_type))
+    if not target_wasm and not parallel_serial and region.count > 1:
+        iff(e_call(rt("__fj_split"), [], VI))
+        root = e_call(rt("__fj_enter"), [], VI)
+        job = e_slot(new_slot(80, 8))
+        output = e_slot(new_slot(region.count * 8, 8))
+        e_call(rt("__fj_scalar"), [job, e_faddr(lf_helper(.parallel_job, 0, f)), env, e_iconst(region.first), e_iconst(region.count), e_addi(output, 8), e_faddr(lf_helper(.parallel_job, 1, f))], -1)
+        first_result = e_call(lf_of_inst(f), [env, e_iconst(region.first)], result_type)
+        e_mov(results[0], first_result)
+        e_call(rt("__fj_join"), [job], -1)
+        loop i in [1..region.count):
+            e_mov(results[i], load_val(int(fns[f].ret), output, i * 8))
+        e_call(rt("__fj_leave"), [root], -1)
+        els()
+    serial_body = if target_wasm or parallel_serial or region.count == 1: lf_of_inst(f) else: lf_helper(.parallel_serial, 0, f)
     loop i in [0..region.count):
-        results.push(e_call(lf_of_inst(f), [env, e_iconst(region.first + i)], ret_vt(int(fns[f].ret))))
+        e_mov(results[i], e_call(serial_body, [env, e_iconst(region.first + i)], result_type))
+    if not target_wasm and not parallel_serial and region.count > 1: endc()
     parallel_scalars[l] = results
+    if is_managed(int(fns[f].ret)):
+        parallel_owned[l] = int(fns[f].ret)
+        scope_add_local(l)
     true
 
 parallel_scalar_read = (n: int) -> int:
@@ -166,3 +195,30 @@ parallel_context_free = (n: int, seen: mut {int: bool}) -> bool:
     loop child in kids2(n):
         if not parallel_context_free(child, seen): return false
     true
+
+# A promoted job's native ABI is (ignored closure environment, job-address).
+# Its adapter owns the result representation, including narrow integers and
+# floats. Scheduling itself never needs to inspect the result type.
+parallel_job_helper = (f: int, serial: bool):
+    ps = helper_params(2)
+    job = ps[1]
+    env = e_load(VI, job, 8, 8)
+    first = e_load(VI, job, 16, 8)
+    limit = e_load(VI, job, 24, 8)
+    output = e_load(VI, job, 32, 8)
+    index = vreg(VI)
+    e_mov(index, first)
+    t = int(fns[f].ret)
+    body = if serial: lf_helper(.parallel_serial, 0, f) else: lf_of_inst(f)
+    blk()
+    done = ctl
+    lop()
+    brif_to(e_bin(.ges, VI, index, limit), done)
+    value = e_call(body, [env, index], ret_vt(t))
+    offset = e_bin(.mul, VI, index, e_iconst(8))
+    store_val(t, e_bin(.add, VI, output, offset), 0, value)
+    e_mov(index, e_addi(index, 1))
+    br_to(ctl)
+    endc()
+    endc()
+    e_ret(-1)

@@ -37,7 +37,7 @@ const VC_AGG = 3
 const LK_INST = 0
 const LK_HELPER = 1
 
-enum HK: drop, copy, move, arrrel, arruniq, arrcopy, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq, math_main, owner_boxcopy
+enum HK: drop, copy, move, arrrel, arruniq, arrcopy, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq, math_main, owner_boxcopy, parallel_serial, parallel_job
 
 struct LFunc:
     kind: int
@@ -67,6 +67,8 @@ entry_points: int[]
 # all addresses are computed by code.
 
 lf_of_inst = (f: int) -> int:
+    if parallel_serial and not modules[int(fns[f].mod)].is_prelude and fns[f].kind != FK_PARTIAL and fns[f].body != 0:
+        return lf_helper(.parallel_serial, 0, f)
     if let x = inst_lf.get(f):
         if fused_on and x >= fz_lf0: fz_note(0, x, f, 0, 0)
         return x
@@ -588,7 +590,11 @@ emit_scope_exit = (i: int):
     loop k >= 0:
         l = ls[k]
         t = store_type(l)
-        if locals[l].offset >= 0:
+        if parallel_owned.has(l):
+            loop value in parallel_scalars[l]:
+                release(value, parallel_owned[l])
+                e_mov(value, e_iconst(0))
+        else if locals[l].offset >= 0:
             a = e_slot(int(locals[l].offset))
             target = if tkind(t) == .fn_ or tkind(t) == .polyfn: stack_closure_target(l) else: -1
             if target >= 0: drop_stack_closure(a, target)
@@ -2058,6 +2064,9 @@ closure_borrow_param = (f: int, i: int) -> bool:
     if f <= 0 or i >= fns[f].params.len() or fns[f].cabi: return false
     d = int(fns[f].decl)
     if d == 0 or copy_consumes(f, i): return false
+    # The fork-join runtime borrows this closure's raw address only until its
+    # scoped join returns. AST address-taking cannot express that contract.
+    if i == 1 and modules[int(fns[f].mod)].is_prelude and name_of(int(nodes[d].name)) == "__parallel_run": return true
     p = fns[f].params[i]
     if stack_closure_params.has(p): return stack_closure_params[p]
     stack_closure_params[p] = false
@@ -6701,6 +6710,7 @@ gen_block_stmts = (b: int):
 begin_fn = (name: str, idx: int):
     ir_begin(name, idx)
     parallel_scalars.clear()
+    parallel_owned.clear()
     stack_closure_fn = -1
     stack_closure_params.clear()
     math_word_regs.clear()
@@ -6733,7 +6743,7 @@ lower_inst = (lf: int, f: int):
     cur_ret = int(fns[f].ret)
     ir.cabi = fns[f].cabi
     ir.noinline = fns[f].noinline
-    ir.export_name = fns[f].export_name
+    ir.export_name = if parallel_serial: "" else: fns[f].export_name
     if vc(cur_ret) == VC_AGG: sret_v = vreg(VI)
     if fns[f].has_env: env_v = vreg(VI)
     if fns[f].kind == FK_LAMBDA: env_layout(f)
@@ -6847,7 +6857,8 @@ lower_inst = (lf: int, f: int):
 lop_watch = false       # (loops in this function count down to the web page's watchdog)
 
 lower_function = (lf: int):
-    if lfuncs[lf].kind == LK_INST: pc_restore(lfuncs[lf].inst)
+    parallel_serial = lfuncs[lf].kind == LK_HELPER and lfuncs[lf].hkind == HK.parallel_serial
+    if lfuncs[lf].kind == LK_INST or parallel_serial: pc_restore(lfuncs[lf].inst)
     fact_storage_cache.clear()
     lpath_ids.clear()
     lpath_parents.truncate(1)
@@ -6864,7 +6875,9 @@ lower_function = (lf: int):
         fi = f.inst
         if fns[fi].kind == FK_PARTIAL: lower_partial_thunk(lf, fi)
         else: lower_inst(lf, fi)
+    else if parallel_serial: lower_inst(lf, f.inst)
     else: lower_helper(lf)
+    parallel_serial = false
     # drop statement markers that did not become zeroslots
     k = 0
     loop ins in ir.code:
@@ -7575,6 +7588,8 @@ lower_helper = (lf: int):
         boxuniq: helper_boxuniq(t)
         math_main: math_main(h.inst)
         owner_boxcopy: helper_owner_boxcopy(t)
+        parallel_serial: ice("serial region helper must lower as an instance")
+        parallel_job: parallel_job_helper(h.inst, h.htype != 0)
 
 # native FFI: a thunk that resolves the C function on first use and calls it
 # macOS: the C functions dyld puts in their slots when the program starts: (slot's offset in the

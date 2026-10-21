@@ -42,9 +42,10 @@ __repl_reply = (v: int):
 
 # (only the thread that forked is in the copy: a thread pool must be started again there)
 __repl_after_fork = ():
-    __pool_ctl = null
+    __fj_ctl = null
     __tstack_base = null
-    __pool_workers = 0
+    __fj_workers = -1
+    __fj_deques = null
 
 # ignore ctrl-c (SIGINT) or not: the prompt and the session ignore it; the input running stops
 __repl_sigint = (ignore: bool):

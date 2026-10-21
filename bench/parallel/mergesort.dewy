@@ -1,9 +1,5 @@
 from p"../harness.jo" import clock, size_argument
-sort=(a:array<int64> lo:int64 hi:int64 threaded:bool):>array<int64>=>{
-    if hi-lo <=? 1 return [loop i in [lo..hi) a[i]]
-    let mid=lo+(hi-lo)//2
-    let parts:array<array<int64>>=if threaded parallel_range(2 (i:int64)=>sort(a (if i =? 0 lo else mid) (if i =? 0 mid else hi) threaded)) else [sort(a lo mid false) sort(a mid hi false)]
-    let left=parts[0] let right=parts[1]
+merge=(left:array<int64> right:array<int64>):>array<int64>=>{
     let result:array<int64>=[] let i:int64=0 let j:int64=0
     loop i <? left.length and j <? right.length {
         if left[i] <=? right[j] {result.push(left[i]) i+=1} else {result.push(right[j]) j+=1}
@@ -11,6 +7,15 @@ sort=(a:array<int64> lo:int64 hi:int64 threaded:bool):>array<int64>=>{
     loop i <? left.length {result.push(left[i]) i+=1}
     loop j <? right.length {result.push(right[j]) j+=1}
     return result
+}
+sort=(a:array<int64> lo:int64 hi:int64 threaded:bool):>array<int64>=>{
+    if hi-lo <=? 1 return [loop i in [lo..hi) a[i]]
+    let mid=lo+(hi-lo)//2
+    if threaded {
+        let parts=parallel_range(2 (i:int64)=>sort(a (if i =? 0 lo else mid) (if i =? 0 mid else hi) threaded))
+        return merge(parts[0] parts[1])
+    }
+    return merge(sort(a lo mid false) sort(a mid hi false))
 }
 main=(args:array<string>)=>{
     let n=size_argument(args 262144)

@@ -22,8 +22,10 @@ order. Dewy kernels retain the existing `parallel_*` entry points so an older
 compiler can measure precisely the same source; syntax is covered separately.
 
 These comparisons include representation costs. Dewy mergesort returns arrays
-at each recursive node, while C uses two flat buffers. Dewy Jacobi returns row
-arrays each step; C swaps two flat grids. OpenMP fib and mergesort use explicit
+at each recursive node, while C uses two flat buffers. Dewy Jacobi copies and
+updates interior rows each step, sharing unchanged boundary rows; C swaps two
+flat grids. Matmul hoists tile-row and input-row index bases so the existing
+vectorizer can recognize the inner loop. OpenMP fib and mergesort use explicit
 serial cutoffs of 20 and 2048 respectively. Dewy has no user-selected scheduler
 cutoff. Fib's sequential path is naive recursion in both languages. Report these
 differences when interpreting the gap; do not attribute all of it to scheduling.

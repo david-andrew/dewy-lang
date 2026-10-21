@@ -39,11 +39,18 @@ main=()=>{printl"{fork(20)}" return 0}
     run = execute(output)
     assert run.returncode == 0, run.stderr
     assert run.stdout == '6765\n'
-    body = re.search(r'^fn f_fork_\d+ .*?(?=^fn |\Z)', ir, re.M | re.S).group()
-    assert not re.search(r'= (slot|load|store) ', body), body
-    calls = re.findall(r'^\s+v\d+ = call .*', body, re.M)
-    assert len(calls) == 2, body
-    assert all('b=1 ' in call for call in calls), body
+    # The native dispatcher retains a promotable stack job. Its sequential
+    # version must still be scalar direct recursion, with no environment ABI.
+    bodies = re.findall(r'^fn __h_parallel_serial_\d+ \(params 1, ret 0\):.*?(?=^fn |\Z)', ir, re.M | re.S)
+    assert bodies, ir
+    assert any(not re.search(r'= (slot|load|store) ', body)
+               and len(re.findall(r'^\s+v\d+ = call .*b=1 ', body, re.M)) == 2
+               for body in bodies), '\n'.join(bodies)
+    for workers in (1, 2):
+        run = execute(output, workers)
+        assert run.returncode == 0, run.stderr
+        assert run.stdout == '6765\n'
+
 
 
 @pytest.mark.parametrize('release', [False, True])

@@ -1,3 +1,4 @@
+use 'parallel_lower.jo'
 use 'string_domains.jo'
 use 'ownership.jo'
 use 'units.jo'
@@ -8438,6 +8439,8 @@ check_expr = (n: int, expected: int) -> int:
             return check_expr(n, expected)
         if nodes[n].aux2 == i32(AUX2_PARTIAL): return dewy_partial(n, expected)
         t = check_call(n, expected)
+        if nkids(n) == 2 and nodes[n].aux == 0 and nodes[n].sym > 0 and fns[int(nodes[n].sym)].parallel:
+            parallel_prepare(n)
     else if k == .typeapply:
         is_callee = n == callee_at
         base = int(nodes[n].a)
