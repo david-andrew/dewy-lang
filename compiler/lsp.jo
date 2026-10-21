@@ -1504,7 +1504,7 @@ no_items = "\{\"isIncomplete\":false,\"items\":[]\}"
 
 # the keywords to complete: the lexer's, and the words that are keywords where they start something
 comp_words = (dewy: bool = false) -> str[]:
-    if dewy: return ["let", "const", "if", "else", "loop", "in", "return", "break", "continue", "match", "true", "false", "none", "void", "import", "from", "as", "and", "or", "xor", "not", "of", "or_throw", "transmute", "type"]
+    if dewy: return ["let", "const", "if", "else", "loop", "in", "return", "break", "continue", "match", "true", "false", "none", "void", "import", "from", "as", "and", "or", "xor", "nand", "nor", "xnor", "not", "of", "or_throw", "transmute", "type"]
     out: str[]
     loop k, _ in keywords: out.push(k)
     loop k in ["type", "from", "soa"]: out.push(k)
@@ -1624,7 +1624,7 @@ on_completion = (id: int, params: int) -> int:
 # before it when either side of the space is an operator (`b + 1`, `x or_throw`). The index of
 # the argument the cursor (at b) is in, and its name when it is written name=value
 dewy_op_word = (w: str) -> bool:
-    w in ["and", "or", "xor", "not", "in", "as", "is?", "isnt?", "in?", "notin?", "if", "else", "of", "or_throw", "transmute"]
+    w in ["and", "or", "xor", "nand", "nor", "xnor", "not", "in", "as", "is?", "isnt?", "in?", "notin?", "if", "else", "of", "or_throw", "transmute"]
 
 dewy_op_byte = (c: u8) -> bool: find_byte("+-*/%^=<>?&|.:!~", c) >= 0
 

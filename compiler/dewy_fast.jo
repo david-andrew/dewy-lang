@@ -53,7 +53,7 @@ dn_init_words = ():
     dn_isnt_id = intern("isnt")
     dn_in_id = intern("in")
     dn_notin_id = intern("notin")
-    words = ["as", "and", "break", "const", "continue", "else", "from", "import", "if", "in", "let", "loop", "match", "not", "of", "or", "or_throw", "return", "test", "transmute", "xor"]
+    words = ["as", "and", "break", "const", "continue", "else", "from", "import", "if", "in", "let", "loop", "match", "not", "of", "or", "or_throw", "return", "test", "transmute", "xor", "nand", "nor", "xnor"]
     loop word in words: intern(word)
     dn_word_tokens = fill(DewyToken.none, names.len())
     loop word in words: dn_word_tokens[intern(word)] = dn_token_kind(word)
@@ -507,9 +507,9 @@ dn_power = (op: DewyToken) -> int:
         colon: 45
         kw_or_throw: 48
         kw_as, kw_transmute: 50
-        kw_or: 60
-        kw_xor: 65
-        kw_and: 70
+        kw_or, kw_nor: 60
+        kw_xor, kw_xnor: 65
+        kw_and, kw_nand: 70
         eq, not_eq, lt, not_lt, gt, not_gt, le, not_le, ge, not_ge, is_type, isnt_type, contains, not_contains, dot_eq, dot_not_eq, dot_lt, dot_not_lt, dot_gt, dot_not_gt, dot_le, dot_not_le, dot_ge, dot_not_ge: 80
         coalesce: 82
         pipe: 85
@@ -957,6 +957,10 @@ dn_expr = (minimum: int) -> int:
             else: parts = [0, left]
             parts.push(right)
             left = dn_op_node(.flat, .comma, pos_off(dewy_syntax[left].pos), parts)
+        # (`a nand b` is `not (a and b)`, as `nor` and `xnor` are of `or` and `xor`)
+        else if op == .kw_nand or op == .kw_nor or op == .kw_xnor:
+            base = if op == .kw_nand: DewyToken.kw_and else if op == .kw_nor: DewyToken.kw_or else: DewyToken.kw_xor
+            left = dn_op_node(.prefix, .kw_not, token.start, [0, dn_operator(.binary, base, left, right)])
         else: left = dn_operator(.binary, op, left, right)
     dn_depth -= 1
     left

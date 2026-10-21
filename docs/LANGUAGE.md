@@ -716,7 +716,8 @@ and later ones only while the chain holds. A chain rises (`<?`, `<=?`) or falls
 (`>?`, `>=?`), and `=?` fits either; mixing directions, or chaining `not =?`,
 `is?` or `in?`, is an error. A parenthesized comparison is a bool:
 `(a =? b) =? c` compares it with `c`. Boolean expressions use `and`,
-`or` and `not`. Literal coefficients such as `2x` and `2(x+1)` multiply; use `*`
+`or` and `not`; `a nand b` is `not (a and b)`, and `nor` and `xnor` negate `or`
+and `xor` the same way, at their precedence. Literal coefficients such as `2x` and `2(x+1)` multiply; use `*`
 for general multiplication. A semicolon attached to an expression, `f();`, discards its result; an unattached
 `;` (after a space or on its own line) is an error.
 

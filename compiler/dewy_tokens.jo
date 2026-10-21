@@ -17,7 +17,8 @@ enum DewyToken:
     dot_plus_assign, dot_minus_assign, dot_star_assign, dot_slash_assign, dot_percent_assign, dot_power_assign, dot_floor, dot_eq,
     dot_gt, dot_lt, dot_plus, dot_minus, dot_star, dot_slash, dot_percent, dot_caret,
     multiply_apply, call, broadcast_call, index, type_apply, range_apply, statement_end,
-    amp_assign, pipe_assign, and_assign, or_assign, xor_assign, kw_of, kw_or_throw
+    amp_assign, pipe_assign, and_assign, or_assign, xor_assign, kw_of, kw_or_throw,
+    kw_nand, kw_nor, kw_xnor
 
 dn_single_token = (c: u8) -> DewyToken:
     match c:
@@ -166,6 +167,8 @@ dn_token_kind = (text: str) -> DewyToken:
                 "not<?": return .not_lt
                 "notin?": return .not_contains
                 "not": return .kw_not
+                "nand": return .kw_nand
+                "nor": return .kw_nor
         'o':
             match text:
                 "or": return .kw_or
@@ -181,6 +184,7 @@ dn_token_kind = (text: str) -> DewyToken:
         'x':
             match text:
                 "xor": return .kw_xor
+                "xnor": return .kw_xnor
         '|':
             match text:
                 "|>": return .pipe_right
@@ -277,6 +281,9 @@ dn_token_text = (token: DewyToken) -> str:
         kw_or: "or"
         kw_xor: "xor"
         kw_and: "and"
+        kw_nand: "nand"
+        kw_nor: "nor"
+        kw_xnor: "xnor"
         kw_in: "in"
         dot_not_ge: ".not>=?"
         dot_not_le: ".not<=?"
