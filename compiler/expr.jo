@@ -269,6 +269,25 @@ check_integer_boundary = (n: int, from: int, to: int):
     if not types[from].sign and value < 0 and types[to].sign: fits = false
     if not fits: fatal(nodes[n].pos, "integer overflow in constant conversion to {dt(to)}")
 
+# An integer stored into a width that cannot hold every value of its own:
+# the proven conversion, a refinement of the source to the target's range
+# (proven from facts, or checked when the program runs), then the conversion.
+narrow_int = (n: int, from: int, to: int):
+    atoms: RefAtom[]
+    fbits = int(types[from].bits)
+    tbits = int(types[to].bits)
+    if types[from].sign and (not types[to].sign or tbits < fbits):
+        lo = if types[to].sign: -(1 << (tbits - 1)) else: 0
+        atoms.push(RefAtom(.le, RefTerm(1, lo), RefTerm()))
+    hi = if types[to].sign: (1 << (tbits - 1)) - 1 else if tbits < 64: (1 << tbits) - 1 else: -1
+    from_hi = if types[from].sign: (1 << (fbits - 1)) - 1 else if fbits < 64: (1 << fbits) - 1 else: -1
+    if hi >= 0 and (from_hi < 0 or hi < from_hi): atoms.push(RefAtom(.le, RefTerm(), RefTerm(1, hi)))
+    inner = nodes.len()
+    nodes.push(nodes[n])
+    refine_coerce(inner, mk_refined(from, ref_intern(atoms)))
+    ref_narrowing[inner] = to
+    nodes[n] = Node(kind = .conv, pos = nodes[inner].pos, a = i32(inner), aux = i32(int(CV.int_)), type = i32(to), flags = i32(NF_CHECKED))
+
 int_widens = (f: int, t: int) -> bool:
     if t == T_MATH_INT: return true
     if f == T_MATH_INT: return false
@@ -359,7 +378,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
         if dewy_bigint_literal_target(n, to): return true
         if nodes[n].kind == .int_lit and (tk == .int_ or tk == .float_): return true
         if nodes[n].kind == .float_lit and tk == .float_: return true
-    if fk == .int_ and tk == .int_: return from == T_MATH_INT or to == T_MATH_INT or int_widens(from, to)
+    if fk == .int_ and tk == .int_: return from == T_MATH_INT or to == T_MATH_INT or int_widens(from, to) or n != 0 and dewy_at(nodes[n].pos)
     if fk == .int_ and tk == .float_: return true
     if fk == .float_ and tk == .float_: return true
     if tk == .enum_ and not is_union(from) and is_union(to): return union_target(n, from, to) >= 0
@@ -595,6 +614,9 @@ coerce = (n: int, target: int) -> int:
                     art = if dt(to)[0] == 'i': "an" else: "a"
                     warn(nodes[n].pos, "this is worked out as a {dt(from)}, which wraps around past its range, before it becomes {art} {dt(to)}: `{dt(to)}({an}) {tok_text(bop)} ...` works in {dt(to)}")
             wrap_conv(n, .int_, to)
+            return n
+        if dewy_at(nodes[n].pos):
+            narrow_int(n, from, to)
             return n
         fatal(nodes[n].pos, "cannot implicitly convert {dt(from)} to {dt(to)} (use {dt(to)}(x) to convert explicitly)")
     if fk == .int_ and tk == .float_:
@@ -1194,6 +1216,8 @@ match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
                 return 5
             if (ak == .int_ and pk == .float_) or pk == .opt: return 2
             return 1
+        # (a narrowing is a proven conversion: the last resort among overloads)
+        if ak == .int_ and pk == .int_ and caller_dewy(): return 20
         return -1
     if ak == .var: return 0
     if is_union(pat): return match_union(pat, a, binds, depth)
@@ -6136,6 +6160,11 @@ check_binary = (n: int, expected: int) -> int:
                 if neg == (target_arm64 or target_wasm): v = -v
             nodes[n] = Node(kind = .float_lit, pos = nodes[n].pos, fval = v, flags = i32(NF_LITERAL | NF_CHECKED), type = i32(T_FLOAT))
             return T_FLOAT
+    if is_cmp and not is_lit(a) and not is_lit(b) and dewy_at(nodes[n].pos):
+        # (i:uint64 <? s.length: compared in the left operand's width, the right one's proven cast)
+        wa = prune(ntype(a))
+        wb = prune(ntype(b))
+        if tkind(wa) == .int_ and tkind(wb) == .int_ and wa != T_MATH_INT and wb != T_MATH_INT and num_join(wa, wb) == 0: coerce(b, wa)
     j = join_types(a, b, nodes[n].pos)
     if (op == .amp or op == .pipe or op == .caret) and not is_int(j): fatal(nodes[n].pos, "bitwise operators need integers")
     # (got / total * 100 with whole numbers: 3 / 4 is 0, so the percent is 0)

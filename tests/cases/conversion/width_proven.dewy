@@ -1,0 +1,35 @@
+# The reference's examples: a length into uint64, a uint64 index, a guarded narrowing
+first_over = (xs:array<int64> limit:int64):>uint64? => {
+    loop i in 0.. and i <? xs.length {
+        if xs[i] >? limit return i
+    }
+    return none
+}
+printl(first_over([1 5 9] 4))
+printl(first_over([1 2] 4))
+
+twice = (n:uint64):>uint64 => n * 2
+let xs = [10 20 30]
+let n:uint64 = xs.length
+printl(twice(xs.length) + n)
+
+let j:uint64 = 1
+printl(xs[j])
+printl(xs[j..])
+printl("hello"[j])
+
+clamp_byte = (w:int64):>int8 => {
+    if -128 <=? w <=? 127 return w
+    return 0
+}
+printl(clamp_byte(-7))
+printl(clamp_byte(300))
+
+scan = (s:string):>uint64 => {
+    let i:uint64 = 0
+    loop i <? s.length and s[i] not=? " " { i += 1 }
+    return i
+}
+printl(scan("ab cd"))
+let k:int64 = -1
+printl(k <? j)

@@ -526,8 +526,14 @@ Implicit conversions involving `int` preserve the value, checking narrowing at
 runtime (or diagnosing known constant failures). `as` and type calls use those
 same checks. Float-to-`int` truncates toward zero and rejects NaN and infinity;
 exact decimal and fraction conversions to integers also truncate toward zero,
-without rounding through a float. `int`-to-float retains the usual rounding. Existing conversions
-between explicit fixed widths retain their behavior. Mutable arguments and
+without rounding through a float. `int`-to-float retains the usual rounding. Explicit conversions
+between fixed widths (`uint64(x)`, `x as uint8`) keep their bits. An implicit narrowing between
+fixed widths (`let n:uint64 = xs.length`, `let b:int8 = w` after `if -128 <=? w <=? 127`, a
+`uint64` index or slice bound, an argument or result) is a proven conversion: the facts that
+prove a refinement prove it, an unproven one is checked when it runs (`value does not fit int8`),
+and a refuted one is a compile error (`w does not fit uint64`). Among overloads, a narrowing is
+the last resort. A comparison between two widths (`i:uint64 <? s.length`) compares in the left
+operand's width, the right operand taking the same proven conversion. Mutable arguments and
 containers require matching element types: an `int` local is not an `@int64` place. Two mutable arguments in one call
 must be disjoint: the same binding, a parent and its field/element, or possibly
 equal indices of one array are rejected. Distinct fields and distinct constant

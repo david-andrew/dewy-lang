@@ -458,6 +458,9 @@ wit_refinement = (n: int, t: int, atom: RefAtom, self: int, a: int, b: int, s: F
         swap = x; x = y; y = swap
         op = if op == .lt: Tok.gt else: Tok.ge
     relation = wit_relation_text(op, x, y)
+    if refuted and ref_narrowing.has(n):
+        wit_help(relation)
+        fatal(nodes[n].pos, "{shown} does not fit {dt(ref_narrowing[n])}")
     missing = wit_relation(s, s, op, x, y, refuted)
     contract = ref_spans.get(int(types[t].st)) ?? 0
     if refuted:
