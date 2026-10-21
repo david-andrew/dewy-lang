@@ -51,12 +51,6 @@ lx_counting = (code: Ins[], ends: int[]) -> CLoop[]:
         if ins.op != .loop: continue
         e = ends[i]
         if e < i + 4: continue
-        inner = false
-        loop p in [i + 1..e):
-            if code[p].op == .loop:
-                inner = true
-                break
-        if inner: continue
         br = code[e - 1]
         cmp = code[e - 2]
         inc = code[e - 3]
@@ -64,14 +58,16 @@ lx_counting = (code: Ins[], ends: int[]) -> CLoop[]:
         if cmp.op != .lts and cmp.op != .ltu: continue
         ctr = int(cmp.a)
         endv = int(cmp.b)
-        if inc.op != .add or int(inc.dst) != ctr or int(inc.a) != ctr or not lx_is_const(int(inc.b), 1): continue
-        # (nothing else changes the counter or the bound)
+        # (the increment defines the counter: the bound must be another vreg)
+        if endv == ctr or inc.op != .add or int(inc.dst) != ctr or int(inc.a) != ctr or not lx_is_const(int(inc.b), 1): continue
+        # (nothing else changes the counter or the bound, and no loop is nested)
         ok = true
         loop p in [i + 1..e - 3):
             ins2 = code[p]
-            if o_defines(ins2.op) and (int(ins2.dst) == ctr or int(ins2.dst) == endv): ok = false
-            if ins2.op == .zeroslots: ok = false
-        if lx_defined_in(code, endv, i + 1, e - 3): ok = false
+            op = ins2.op
+            if op == .loop or op == .zeroslots or (o_defines(op) and (int(ins2.dst) == ctr or int(ins2.dst) == endv)):
+                ok = false
+                break
         if ok: out.push(CLoop(i, e, ctr, endv, e - 3, cmp.op == .lts))
     out
 
@@ -307,6 +303,34 @@ struct VPlan:
     stores: bool[]
     indexes: int[]          # counter, or a checked counter + invariant offset
 
+# where each vreg first and last appears (defined or used), worked out on first need:
+# most loops fail their plan on an instruction kind before asking
+lx_first: int[]
+lx_last: int[]
+lx_span_ready = false
+lx_spans = (code: Ins[]):
+    if lx_span_ready: return
+    lx_span_ready = true
+    lx_first = fill(code.len(), ir.vtypes.len())
+    lx_last = fill(-1, ir.vtypes.len())
+    loop p in 0.. and ins in code:
+        d = ir_operands(ins)
+        if d >= 0:
+            if p < lx_first[d]: lx_first[d] = p
+            if p > lx_last[d]: lx_last[d] = p
+        loop operand_index in [0..ir_use_count):
+            let u = ir_use(operand_index)
+            if p < lx_first[u]: lx_first[u] = p
+            if p > lx_last[u]: lx_last[u] = p
+
+# does v appear only in L / after it?
+lx_within = (code: Ins[], v: int, L: CLoop) -> bool:
+    lx_spans(code)
+    lx_first[v] >= L.pl and lx_last[v] <= L.pe
+lx_after = (code: Ins[], v: int, L: CLoop) -> bool:
+    lx_spans(code)
+    lx_last[v] > L.pe
+
 lx_kind_of_mode = (c: int) -> int:
     size = c & 15
     if c & M_FLOAT != 0:
@@ -323,7 +347,7 @@ lx_in_check = (p: int, checks: LCheck[]) -> bool:
 # A single shifted-index calculation can disappear from the vector body
 # when only checked memory indexes use it. Other uses (including stored values)
 # must keep their scalar meaning and disqualify this narrow vector plan.
-lx_vec_index = (code: Ins[], L: CLoop, checks: LCheck[], p: int, first: int[], last: int[]) -> bool:
+lx_vec_index = (code: Ins[], L: CLoop, checks: LCheck[], p: int) -> bool:
     ins = code[p]
     if ins.op != .add and ins.op != .sub: return false
     d = int(ins.dst)
@@ -332,7 +356,7 @@ lx_vec_index = (code: Ins[], L: CLoop, checks: LCheck[], p: int, first: int[], l
     other = -1
     if a == L.ctr: other = b
     else if ins.op == .add and b == L.ctr: other = a
-    if other < 0 or first[d] < L.pl or last[d] > L.pe: return false
+    if other < 0 or not lx_within(code, d, L): return false
     if lx_defined_in(code, other, L.pl + 1, L.pe): return false
     checked = false
     loop ch in checks:
@@ -348,11 +372,21 @@ lx_vec_index = (code: Ins[], L: CLoop, checks: LCheck[], p: int, first: int[], l
             if mem_index(qi) != d or int(qi.a) == d or (qi.op == .store and int(qi.b) == d): return false
     true
 
-lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[], first: int[], last: int[]) -> VPlan:
+# the instructions a vector plan can take (outside the checks it drops)
+lx_vec_op = (op: Op) -> bool:
+    match op:
+        block, end, nop, fconst, load, store, sext32, zext32, fneg: true
+        add, sub, mul, and_, or_, xor, fadd, fsub, fmul, fdiv, fmin, fmax: true
+        _: false
+
+lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
     no = VPlan(false, 0, false, [], [], [], [])
     plan = VPlan(true, 0, false, [], [], [], [])
     lx_reds.clear()
     lx_red_ops.clear()
+    # (an instruction kind the plan never takes rules it out before anything is worked out)
+    loop p in [L.pl + 1..L.inc):
+        if not lx_vec_op(code[p].op) and not lx_in_check(p, checks): return no
     affine = false
     loop ch in checks:
         if ch.kind == 3: affine = true
@@ -364,12 +398,12 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[], first: int[], last: int[
         op = ins.op
         d = int(ins.dst)
         if op == .block or op == .end or op == .nop: continue
-        if affine and (op == .add or op == .sub) and lx_vec_index(code, L, checks, p, first, last):
+        if affine and (op == .add or op == .sub) and lx_vec_index(code, L, checks, p):
             indexes.push(d)
             continue
         if op == .fconst:
             # (a constant: in every lane)
-            if last[d] > L.pe: return no
+            if lx_after(code, d, L): return no
             kinds[d] = -1
             continue
         if op == .load or op == .store:
@@ -391,7 +425,7 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[], first: int[], last: int[
             plan.stores.push(op == .store)
             plan.indexes.push(ix)
             if op == .load:
-                if last[d] > L.pe or first[d] < L.pl: return no
+                if not lx_within(code, d, L): return no
                 kinds[d] = k
             else:
                 v = int(ins.b)
@@ -402,12 +436,12 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[], first: int[], last: int[
         if op == .sext32 or op == .zext32:
             # (keeps the low 32 bits: nothing to do in 32-bit lanes)
             if let uk = kinds.get(int(ins.a)):
-                if uk == 2 and last[d] <= L.pe and first[d] >= L.pl:
+                if uk == 2 and lx_within(code, d, L):
                     kinds[d] = 2
                     continue
             return no
         if op == .fneg:
-            if last[d] > L.pe or first[d] < L.pl: return no
+            if not lx_within(code, d, L): return no
             fk = if int(ins.ty) == VS: 0 else: 1
             if let uk = kinds.get(int(ins.a)):
                 if uk == fk or uk == -1:
@@ -427,7 +461,7 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[], first: int[], last: int[
         fl = op == .fadd or op == .fsub or op == .fmul or op == .fdiv or op == .fmin or op == .fmax
         il = op == .add or op == .sub or op == .mul or op == .and_ or op == .or_ or op == .xor
         if not fl and not il: return no
-        if last[d] > L.pe or first[d] < L.pl: return no
+        if not lx_within(code, d, L): return no
         k = -1
         lanes = 0
         loop u in [int(ins.a), int(ins.b)]:
@@ -688,19 +722,8 @@ loop_versioning = (vector_only: bool = false):
     if cl.len() == 0: return
     nv = ir.vtypes.len()
     lx_known = 0
-    lx_sync()
-    # where each vreg first and last appears (defined or used)
-    first = fill(code.len(), nv)
-    last = fill(-1, nv)
-    loop p in 0.. and ins in code:
-        d = ir_operands(ins)
-        if d >= 0:
-            if p < first[d]: first[d] = p
-            if p > last[d]: last[d] = p
-        loop operand_index in [0..ir_use_count):
-            let u = ir_use(operand_index)
-            if p < first[u]: first[u] = p
-            if p > last[u]: last[u] = p
+    synced = false
+    lx_span_ready = false
     out: Ins[]
     out.reserve(code.len() * 2)
     at = 0
@@ -708,10 +731,14 @@ loop_versioning = (vector_only: bool = false):
         if L.pe - L.pl > 400: continue
         checks = lx_checks(code, ends, L)
         plan = VPlan(false, 0, false, [], [], [], [])
-        if lx_vec_on: plan = lx_vec_plan(code, L, checks, first, last)
+        if lx_vec_on: plan = lx_vec_plan(code, L, checks)
         if vector_only and not plan.ok: continue
         # (one check costs about as much as testing for it in front: not worth a copy)
         if not plan.ok and checks.len() < 2: continue
+        if not synced:
+            # (o_regs as the identity, once a loop is to be copied)
+            synced = true
+            lx_sync()
         loop p in [at..L.pl): out.push(code[p])
         wrap = 0
         if checks.len() > 0:
@@ -771,9 +798,10 @@ loop_versioning = (vector_only: bool = false):
         lx_sync()
         renamed: int[]
         ren = fill(-1, nv)
+        lx_spans(code)
         loop p in [L.pl..L.pe]:
             d = int(code[p].dst)
-            if d >= 0 and d < nv and o_defines(code[p].op) and ren[d] < 0 and first[d] >= L.pl and last[d] <= L.pe and not is_kv(d) and d >= ir.nparams:
+            if d >= 0 and d < nv and o_defines(code[p].op) and ren[d] < 0 and lx_first[d] >= L.pl and lx_last[d] <= L.pe and not is_kv(d) and d >= ir.nparams:
                 ren[d] = vreg(vtype(d))
                 renamed.push(d)
         lx_sync()
