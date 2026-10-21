@@ -5706,8 +5706,11 @@ check_binary = (n: int, expected: int) -> int:
         if not a_literal and b_literal and binary_literal_context(b, ta, op): h = if tkind(ta) == .opt: telem(ta) else: ta
         tb = prune(check_expr(b, h))
     pending_decimal = (nodes[a].kind == .float_lit and nodes[a].sval != 0 and is_lit(a)) or (nodes[b].kind == .float_lit and nodes[b].sval != 0 and is_lit(b))
-    exact_operands = pending_decimal and (is_numeric(ta) or bundled_rational_type(ta) or bundled_bigint_type(ta)) and (is_numeric(tb) or bundled_rational_type(tb) or bundled_bigint_type(tb))
-    if exact_operands and not is_float(hint) and not (is_float(ta) and not is_lit(a)) and not (is_float(tb) and not is_lit(b)):
+    # (a quantity operand is exact or floating by its number: 0.5 * 2s stays exact)
+    na = if types[ta].kind == .quantity: quantity_base(ta) else: ta
+    nb = if types[tb].kind == .quantity: quantity_base(tb) else: tb
+    exact_operands = pending_decimal and (is_numeric(na) or bundled_rational_type(na) or bundled_bigint_type(na)) and (is_numeric(nb) or bundled_rational_type(nb) or bundled_bigint_type(nb))
+    if exact_operands and not is_float(hint) and not (is_float(na) and not is_lit(a)) and not (is_float(nb) and not is_lit(b)):
         if nodes[a].kind == .float_lit and nodes[a].sval != 0 and is_lit(a): ta = exact_decimal(a)
         if nodes[b].kind == .float_lit and nodes[b].sval != 0 and is_lit(b): tb = exact_decimal(b)
     if types[ta].kind == .quantity or types[tb].kind == .quantity: return quantity_binary(n, a, b, expected)

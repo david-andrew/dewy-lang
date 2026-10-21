@@ -183,6 +183,8 @@ quantity_constant_scale = (n: int) -> int:
         source = binding_const_init(nodes[n].aux as SK, int(nodes[n].sym), nodes[n].pos)
         if source != 0: return quantity_constant_scale(source)
     if nodes[n].kind == .int_lit and not has_flag(n, NF_U64) and nodes[n].ival != (-9223372036854775807 - 1): return quantity_scale(nodes[n].ival, 1)
+    # (an exact decimal literal, 0.001 in 0.001s)
+    if let parts = rational_constants.get(n): return quantity_scale(parts.0, parts.1)
     -1
 
 quantity_number = (n: int) -> int:
