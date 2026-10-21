@@ -1,0 +1,392 @@
+== health
+  HTTP/1.1 200 OK
+  Content-Type: application/json
+  Content-Length: 21
+
+  {"ok":true,"notes":0}
+== index page
+  HTTP/1.1 200 OK
+  Content-Type: text/html; charset=utf-8
+  ETag: "8f9385142a4a5618"
+  Content-Length: 224
+
+  <!doctype html>
+  <html lang="en">
+  <head><meta charset="utf-8"><title>Dewy Notes</title>
+  <link rel="stylesheet" href="/static/notes.css"></head>
+  <body><iframe src="/static/notes_ui.html" title="notes"></iframe></body>
+  </html>
+
+== cached stylesheet
+  HTTP/1.1 304 Not Modified
+  ETag: "96813d2ab8c46e56"
+
+
+== head of manifest
+  HTTP/1.1 200 OK
+  Content-Type: application/json
+  ETag: "374c4319c80d4f20"
+  Content-Length: 61
+
+
+== chunked create
+  HTTP/1.1 201 Created
+  Content-Type: application/json
+  ETag: "1.1"
+  Location: /api/notes/1
+  Content-Length: 109
+
+  {"id":1,"title":"Buy milk","body":"2 litres","tags":["home","errands"],"done":false,"revision":1,"updated":1}
+== wrong media type
+  HTTP/1.1 415 Unsupported Media Type
+  Content-Type: application/json
+  Content-Length: 50
+
+  {"error":"media","detail":"send application/json"}
+== malformed json
+  HTTP/1.1 400 Bad Request
+  Content-Type: application/json
+  Content-Length: 45
+
+  {"error":"json","detail":"invalid JSON body"}
+== invalid fields
+  HTTP/1.1 422 Unprocessable Content
+  Content-Type: application/json
+  Content-Length: 120
+
+  {"error":"invalid","detail":"title is required; more than 4 tags; tag 'not ok!' must be lowercase letters, digits or -"}
+== unicode create
+  HTTP/1.1 201 Created
+  Content-Type: application/json
+  ETag: "2.1"
+  Location: /api/notes/2
+  Content-Length: 116
+
+  {"id":2,"title":"Café plans ☕","body":"line one\nline two","tags":["food"],"done":false,"revision":1,"updated":2}
+== conditional get
+  HTTP/1.1 304 Not Modified
+  ETag: "1.1"
+
+
+== stale put
+  HTTP/1.1 412 Precondition Failed
+  Content-Type: application/json
+  Content-Length: 49
+
+  {"error":"stale","detail":"note 1 is at \"1.1\""}
+== patch done
+  HTTP/1.1 200 OK
+  Content-Type: application/json
+  ETag: "1.2"
+  Content-Length: 108
+
+  {"id":1,"title":"Buy milk","body":"2 litres","tags":["home","errands"],"done":true,"revision":2,"updated":3}
+== bad filter
+  HTTP/1.1 400 Bad Request
+  Content-Type: application/json
+  Content-Length: 55
+
+  {"error":"query","detail":"done must be true or false"}
+== unknown parameter
+  HTTP/1.1 400 Bad Request
+  Content-Type: application/json
+  Content-Length: 55
+
+  {"error":"query","detail":"unknown parameter 'colour'"}
+== missing note
+  HTTP/1.1 404 Not Found
+  Content-Type: application/json
+  Content-Length: 48
+
+  {"error":"missing","detail":"note 99 not found"}
+== zero id
+  HTTP/1.1 404 Not Found
+  Content-Type: application/json
+  Content-Length: 54
+
+  {"error":"route","detail":"no route for /api/notes/0"}
+== batch
+  HTTP/1.1 200 OK
+  Content-Type: application/json
+  Content-Length: 27
+
+  {"applied":3,"ids":[3,4,2]}
+== failed batch rolls back
+  HTTP/1.1 404 Not Found
+  Content-Type: application/json
+  Content-Length: 52
+
+  {"error":"batch","detail":"op 1: note 42 not found"}
+== list after batch
+  HTTP/1.1 200 OK
+  Content-Type: application/json
+  Content-Length: 269
+
+  {"total":4,"offset":1,"limit":2,"items":[{"id":2,"title":"Café plans ☕","body":"line one\nline two","tags":["food","paris"],"done":false,"revision":2,"updated":6},{"id":4,"title":"Plan trip","body":"","tags":["travel","work"],"done":false,"revision":1,"updated":5}]}
+== search
+  HTTP/1.1 200 OK
+  Content-Type: application/json
+  Content-Length: 145
+
+  {"total":1,"offset":0,"limit":10,"items":[{"id":4,"title":"Plan trip","body":"","tags":["travel","work"],"done":false,"revision":1,"updated":5}]}
+== tags
+  HTTP/1.1 200 OK
+  Content-Type: application/json
+  Content-Length: 200
+
+  {"tags":[{"name":"work","count":2},{"name":"errands","count":1},{"name":"food","count":1},{"name":"home","count":1},{"name":"paris","count":1},{"name":"travel","count":1},{"name":"urgent","count":1}]}
+== method not allowed
+  HTTP/1.1 405 Method Not Allowed
+  Content-Type: application/json
+  Allow: GET, HEAD
+  Content-Length: 50
+
+  {"error":"method","detail":"PATCH is not allowed"}
+== dot segments
+  HTTP/1.1 400 Bad Request
+  Content-Type: application/json
+  Content-Length: 56
+
+  {"error":"path","detail":"dot segments are not allowed"}
+== no route
+  HTTP/1.1 404 Not Found
+  Content-Type: application/json
+  Content-Length: 55
+
+  {"error":"route","detail":"no route for /nowhere here"}
+== pipelined
+  HTTP/1.1 200 OK
+  Content-Type: application/json
+  ETag: "2.2"
+  Content-Length: 124
+
+  {"id":2,"title":"Café plans ☕","body":"line one\nline two","tags":["food","paris"],"done":false,"revision":2,"updated":6}HTTP/1.1 200 OK
+  Content-Type: application/json
+  ETag: "2.3"
+  Content-Length: 120
+
+  {"id":2,"title":"Café plans","body":"line one\nline two","tags":["food","paris"],"done":false,"revision":3,"updated":7}HTTP/1.1 204 No Content
+  Connection: close
+
+
+== http/1.0 closes
+  HTTP/1.1 200 OK
+  Content-Type: application/json
+  Content-Length: 21
+  Connection: close
+
+  {"ok":true,"notes":3}
+== request line too long
+  HTTP/1.1 414 URI Too Long
+  Content-Type: application/json
+  Content-Length: 49
+  Connection: close
+
+  {"error":"http","detail":"request line too long"}
+== endless request line
+  HTTP/1.1 414 URI Too Long
+  Content-Type: application/json
+  Content-Length: 49
+  Connection: close
+
+  {"error":"http","detail":"request line too long"}
+== too many headers
+  HTTP/1.1 431 Request Header Fields Too Large
+  Content-Type: application/json
+  Content-Length: 44
+  Connection: close
+
+  {"error":"http","detail":"too many headers"}
+== header section too large
+  HTTP/1.1 431 Request Header Fields Too Large
+  Content-Type: application/json
+  Content-Length: 52
+  Connection: close
+
+  {"error":"http","detail":"header section too large"}
+== body too large
+  HTTP/1.1 413 Content Too Large
+  Content-Type: application/json
+  Content-Length: 51
+  Connection: close
+
+  {"error":"http","detail":"body exceeds 2048 bytes"}
+== chunked too large
+  HTTP/1.1 413 Content Too Large
+  Content-Type: application/json
+  Content-Length: 51
+  Connection: close
+
+  {"error":"http","detail":"body exceeds 2048 bytes"}
+== http/2
+  HTTP/1.1 505 HTTP Version Not Supported
+  Content-Type: application/json
+  Content-Length: 56
+  Connection: close
+
+  {"error":"http","detail":"unsupported version HTTP/2.0"}
+== bare LF
+  HTTP/1.1 400 Bad Request
+  Content-Type: application/json
+  Content-Length: 35
+  Connection: close
+
+  {"error":"http","detail":"bare LF"}
+== missing host
+  HTTP/1.1 400 Bad Request
+  Content-Type: application/json
+  Content-Length: 40
+  Connection: close
+
+  {"error":"http","detail":"missing host"}
+== conflicting lengths
+  HTTP/1.1 400 Bad Request
+  Content-Type: application/json
+  Content-Length: 47
+  Connection: close
+
+  {"error":"http","detail":"conflicting lengths"}
+== unknown coding
+  HTTP/1.1 501 Not Implemented
+  Content-Type: application/json
+  Content-Length: 48
+  Connection: close
+
+  {"error":"http","detail":"transfer coding gzip"}
+== folded header
+  HTTP/1.1 400 Bad Request
+  Content-Type: application/json
+  Content-Length: 41
+  Connection: close
+
+  {"error":"http","detail":"folded header"}
+== lowercase method
+  HTTP/1.1 400 Bad Request
+  Content-Type: application/json
+  Content-Length: 42
+  Connection: close
+
+  {"error":"http","detail":"invalid method"}
+== bad escape
+  HTTP/1.1 400 Bad Request
+  Content-Type: application/json
+  Content-Length: 50
+  Connection: close
+
+  {"error":"http","detail":"invalid percent escape"}
+== body not utf-8
+  HTTP/1.1 400 Bad Request
+  Content-Type: application/json
+  Content-Length: 45
+  Connection: close
+
+  {"error":"http","detail":"body is not UTF-8"}
+== truncated body
+  HTTP/1.1 400 Bad Request
+  Content-Type: application/json
+  Content-Length: 46
+  Connection: close
+
+  {"error":"http","detail":"incomplete request"}
+== stats
+  HTTP/1.1 200 OK
+  Content-Type: application/json
+  Content-Length: 37
+
+  {"requests":44,"errors":28,"notes":3}
+## boot
+  GET /api/notes?sort=title&limit=20 -> 200
+| ── Dewy Notes: 3 ───────────────────────────
+| filter: tag=any search=""
+| new: "" tags=""
+| >[x] #1 Buy milk             home errands
+|  [ ] #2 Café plans           food paris
+|  [ ] #4 Plan trip            travel work
+## create, then an invalid draft
+  POST /api/notes -> 201
+  GET /api/notes?sort=title&limit=20 -> 200
+  POST /api/notes -> 422
+| ── Dewy Notes: 4 ───────────────────────────
+| filter: tag=any search=""
+| new: "   " tags=""
+| >[x] #1 Buy milk             home errands
+|  [ ] #2 Café plans           food paris
+|  [ ] #5 Call the bank        money urgent
+|  [ ] #4 Plan trip            travel work
+| ! Cannot save: title is required
+## toggle and open
+  POST /api/notes -> 201
+  GET /api/notes?sort=title&limit=20 -> 200
+  PATCH /api/notes/2 -> 200
+  GET /api/notes?sort=title&limit=20 -> 200
+  GET /api/notes/2 -> 200
+| ── Dewy Notes: 5 ───────────────────────────
+| filter: tag=any search=""
+| new: "" tags=""
+|  [x] #1 Buy milk             home errands
+| >[x] #2 Café plans           food paris
+|  [ ] #5 Call the bank        money urgent
+|  [ ] #4 Plan trip            travel work
+|  [ ] #6 Water plants         home
+| ── #2 rev 4 ────────────────────────────────
+| Café plans
+|   line one
+|   line two
+| ! Saved #2 (rev 4)
+## filter by tag
+  GET /api/notes?sort=title&limit=20&tag=work -> 200
+| ── Dewy Notes: 1 ───────────────────────────
+| filter: tag=work search=""
+| new: "" tags=""
+| >[ ] #4 Plan trip            travel work
+| ! Saved #2 (rev 4)
+## search
+  GET /api/notes?sort=title&limit=20 -> 200
+  GET /api/notes?sort=title&limit=20&q=CAF%C3%89 -> 200
+| ── Dewy Notes: 1 ───────────────────────────
+| filter: tag=any search="CAFÉ"
+| new: "" tags=""
+| >[x] #2 Café plans           food paris
+| ! Saved #2 (rev 4)
+## stale rename, then retry
+  GET /api/notes?sort=title&limit=20 -> 200
+  GET /api/notes/1 -> 200
+  other client: 190 bytes back
+  PATCH /api/notes/1 -> 412
+  GET /api/notes?sort=title&limit=20 -> 200
+  PATCH /api/notes/1 -> 200
+  GET /api/notes?sort=title&limit=20 -> 200
+| ── Dewy Notes: 5 ───────────────────────────
+| filter: tag=any search=""
+| new: "" tags=""
+| >[x] #1 Buy oat milk         home errands
+|  [x] #2 Café plans           food paris
+|  [ ] #5 Call the bank        money urgent
+|  [ ] #4 Plan trip            travel work
+|  [ ] #6 Water plants         home
+| ── #1 rev 4 ────────────────────────────────
+| Buy oat milk
+|   skim
+| ! Saved #1 (rev 4)
+## delete, racing another client
+  other client: 27 bytes back
+  DELETE /api/notes/5 -> 404
+  GET /api/notes?sort=title&limit=20 -> 200
+  DELETE /api/notes/4 -> 204
+  GET /api/notes?sort=title&limit=20 -> 200
+| ── Dewy Notes: 3 ───────────────────────────
+| filter: tag=any search=""
+| new: "" tags=""
+|  [x] #1 Buy oat milk         home errands
+|  [x] #2 Café plans           food paris
+| >[ ] #6 Water plants         home
+| ── #1 rev 4 ────────────────────────────────
+| Buy oat milk
+|   skim
+| ! Deleted
+## server
+  HTTP/1.1 200 OK
+  Content-Type: application/json
+  Content-Length: 37
+
+  {"requests":69,"errors":31,"notes":3}
