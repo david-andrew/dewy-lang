@@ -1,0 +1,247 @@
+# Deterministic drivers: raw HTTP transcripts against a server connection,
+# and a scripted UI session whose calls travel as bytes through the same
+# server. Both run in-process, natively and in the wasm build.
+from p"http.dewy" import Response, HttpError
+from p"router.dewy" import Service
+from p"server.dewy" import Connection, feed, finish
+from p"client.dewy" import ApiCall, ClientConn, to_wire, receive_bytes
+from p"ui_model.dewy" import Ui, Event, Boot, TypeTitle, TypeTags, Submit, MoveCursor, Toggle, Open,
+    Rename, Remove, FilterTag, Search, ClearFilters, dispatch, receive
+from p"ui_view.dewy" import render
+
+# Raw transcripts ---------------------------------------------------------------
+
+show_bytes=(@out:array<string> data:array<uint8>):>void=>{
+    let text=data as string | none
+    if text is? none {
+        out.push("  <{data.length} bytes, not UTF-8>")
+        return
+    }
+    loop line in text.replace("\r\n" "\n").split("\n") {
+        out.push("  {line}".trim_end())
+    }
+}
+
+# One connection: deliver each chunk, then end the input.
+exchange=(@service:Service @out:array<string> label:string chunks:array<array<uint8>>):>void=>{
+    out.push("== {label}")
+    let conn=Connection()
+    let replies:array<uint8>=[]
+    loop chunk in chunks {
+        replies.extend(feed(@service @conn chunk))
+    }
+    replies.extend(finish(@service @conn))
+    show_bytes(@out replies)
+}
+
+request=(method:string target:string headers:array<string>=[] body:string=""):>array<uint8>=>{
+    let head="{method} {target} HTTP/1.1\r\nHost: notes.local\r\n"
+    loop h in headers head="{head}{h}\r\n"
+    if body.length >? 0 head="{head}Content-Length: {bytes(body).length}\r\n"
+    return bytes("{head}\r\n{body}")
+}
+
+json_request=(method:string target:string body:string headers:array<string>=[]):>array<uint8>=>{
+    return request(method target ["Content-Type: application/json" headers...] body)
+}
+
+# `count` pieces of nearly equal size, to exercise partial reads.
+pieces=(data:array<uint8> count:int64):>array<array<uint8>>=>{
+    let out:array<array<uint8>>=[]
+    let size=(data.length+count-1)//count
+    let start=0
+    loop start <? data.length {
+        let stop=min(start+size data.length)
+        out.push(data[start..stop))
+        start=stop
+    }
+    return out
+}
+
+concat=(parts:array<array<uint8>>):>array<uint8>=>{
+    let out:array<uint8>=[]
+    loop part in parts out.extend(part)
+    return out
+}
+
+wire_transcripts=(@service:Service):>array<string>=>{
+    let out:array<string>=[]
+    exchange(@service @out "health" [request("GET" "/api/health")])
+    exchange(@service @out "index page" [request("GET" "/")])
+    exchange(@service @out "cached stylesheet"
+        [request("GET" "/static/notes.css" [r'If-None-Match: "96813d2ab8c46e56"'])])
+    exchange(@service @out "head of manifest" [request("HEAD" "/static/manifest.json")])
+    let chunked="POST /api/notes HTTP/1.1\r\nHost: notes.local\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n"
+    let part1=r'{"title":"  Buy milk ","tags":["Home","errands","home"]'
+    let part2=r',"body":"2 litres"}'
+    let size1=format(bytes(part1).length "x")
+    let size2=format(bytes(part2).length "X")
+    exchange(@service @out "chunked create"
+        pieces(bytes("{chunked}{size1}\r\n{part1}\r\n{size2};ext=1\r\n{part2}\r\n0\r\nX-Trailer: 1\r\n\r\n") 4))
+    exchange(@service @out "wrong media type"
+        [request("POST" "/api/notes" ["Content-Type: text/plain"] "title=x")])
+    exchange(@service @out "malformed json" [json_request("POST" "/api/notes" r'{"title":')])
+    exchange(@service @out "invalid fields"
+        [json_request("POST" "/api/notes" r'{"title":"   ","tags":["ok","Not Ok!","a","b","c"]}')])
+    exchange(@service @out "unicode create"
+        [json_request("POST" "/api/notes" r'{"title":"Café plans ☕","body":"line one\nline two","tags":["food"]}')])
+    exchange(@service @out "conditional get" [request("GET" "/api/notes/1" [r'If-None-Match: "1.1"'])])
+    exchange(@service @out "stale put"
+        [json_request("PUT" "/api/notes/1" r'{"title":"Milk"}' [r'If-Match: "1.9"'])])
+    exchange(@service @out "patch done"
+        [json_request("PATCH" "/api/notes/1" r'{"done":true}' [r'If-Match: "1.1"'])])
+    exchange(@service @out "bad filter" [request("GET" "/api/notes?done=maybe")])
+    exchange(@service @out "unknown parameter" [request("GET" "/api/notes?colour=red")])
+    exchange(@service @out "missing note" [request("DELETE" "/api/notes/99")])
+    exchange(@service @out "zero id" [request("GET" "/api/notes/0")])
+    let batch=r'[{"op":"create","note":{"title":"Write report","tags":["work","urgent"]}},{"op":"create","note":{"title":"Plan trip","tags":["travel","work"]}},{"op":"patch","id":2,"patch":{"tags":["food","paris"]}}]'
+    exchange(@service @out "batch" [json_request("POST" "/api/notes/batch" batch)])
+    let failing=r'[{"op":"create","note":{"title":"Ghost"}},{"op":"delete","id":42}]'
+    exchange(@service @out "failed batch rolls back" [json_request("POST" "/api/notes/batch" failing)])
+    exchange(@service @out "list after batch" [request("GET" "/api/notes?sort=title&limit=2&offset=1")])
+    exchange(@service @out "search" [request("GET" "/api/notes?q=PLAN&tag=work")])
+    exchange(@service @out "tags" [request("GET" "/api/tags")])
+    exchange(@service @out "method not allowed" [request("PATCH" "/api/health")])
+    exchange(@service @out "dot segments" [request("GET" "/static/%2e%2e/secret")])
+    exchange(@service @out "no route" [request("GET" "/nowhere%20here")])
+    # Pipelining: three requests in one stream, split mid-message; the third
+    # closes the connection, so the fourth is never answered.
+    let stream=concat([
+        request("GET" "/api/notes/2")
+        json_request("PATCH" "/api/notes/2" r'{"title":"Café plans"}')
+        request("DELETE" "/api/notes/3" ["Connection: close"])
+        request("GET" "/api/health")
+    ])
+    exchange(@service @out "pipelined" pieces(stream 7))
+    exchange(@service @out "http/1.0 closes" [bytes("GET /api/health HTTP/1.0\r\n\r\nGET /api/health HTTP/1.0\r\n\r\n")])
+    # Framing failures: each closes its connection with one error response.
+    exchange(@service @out "request line too long" [bytes("GET /{"a" * 300} HTTP/1.1\r\n")])
+    exchange(@service @out "endless request line" [bytes("GET /{"b" * 400}")])
+    let many=[loop i in [0..20) "X-Header-{i}: {i}"]
+    exchange(@service @out "too many headers" [request("GET" "/api/health" many)])
+    exchange(@service @out "header section too large" [request("GET" "/api/health" ["X-Big: {"c" * 1100}"])])
+    exchange(@service @out "body too large"
+        [bytes("POST /api/notes HTTP/1.1\r\nHost: a\r\nContent-Type: application/json\r\nContent-Length: 99999\r\n\r\n")])
+    exchange(@service @out "chunked too large"
+        [bytes("POST /api/notes HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\nfff\r\n")])
+    exchange(@service @out "http/2" [bytes("GET / HTTP/2.0\r\nHost: a\r\n\r\n")])
+    exchange(@service @out "bare LF" [bytes("GET / HTTP/1.1\nHost: a\n\n")])
+    exchange(@service @out "missing host" [bytes("GET / HTTP/1.1\r\n\r\n")])
+    exchange(@service @out "conflicting lengths"
+        [bytes("POST /api/notes HTTP/1.1\r\nHost: a\r\nContent-Length: 2\r\nContent-Length: 3\r\n\r\n\{\}")])
+    exchange(@service @out "unknown coding"
+        [bytes("POST /api/notes HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip\r\n\r\n")])
+    exchange(@service @out "folded header" [bytes("GET / HTTP/1.1\r\nHost: a\r\n  folded\r\n\r\n")])
+    exchange(@service @out "lowercase method" [bytes("get / HTTP/1.1\r\nHost: a\r\n\r\n")])
+    exchange(@service @out "bad escape" [request("GET" "/api/notes?q=%zz")])
+    let invalid:array<uint8>=[0x7b 0xff 0x7d]
+    exchange(@service @out "body not utf-8"
+        [concat([bytes("PUT /api/notes/1 HTTP/1.1\r\nHost: a\r\nContent-Type: application/json\r\nContent-Length: 3\r\n\r\n") invalid])])
+    exchange(@service @out "truncated body"
+        [bytes("POST /api/notes HTTP/1.1\r\nHost: a\r\nContent-Type: application/json\r\nContent-Length: 10\r\n\r\n\{\}")])
+    exchange(@service @out "stats" [request("GET" "/api/stats")])
+    return out
+}
+
+# The UI session ------------------------------------------------------------------
+
+Session:type=[
+    service:Service
+    conn:Connection=Connection()
+    client:ClientConn=ClientConn()
+    ui:Ui=Ui()
+    log:array<string>=[]
+]
+
+# Deliver every queued call as bytes, in two pieces, and apply the answers.
+pump=(@session:Session):>void=>{
+    loop session.ui.outbox.length >? 0 {
+        let call=session.ui.outbox.pop(0)
+        let replies:array<uint8>=[]
+        loop piece in pieces(to_wire(call) 2) {
+            replies.extend(feed(@session.service @session.conn piece))
+        }
+        let responses=receive_bytes(@session.client replies)
+        if responses is? HttpError {
+            session.log.push("client framing error: {responses.detail}")
+            return
+        }
+        loop response in responses {
+            session.log.push("{call.method} {call.path} -> {response.status}")
+            receive(@session.ui call response)
+        }
+    }
+}
+
+step=(@session:Session @out:array<string> event:Event):>void=>{
+    dispatch(@session.ui event)
+    pump(@session)
+}
+
+screen=(session:Session @out:array<string> label:string):>void=>{
+    out.push("## {label}")
+    loop line in session.log out.push("  {line}")
+    loop line in render(session.ui) out.push("| {line}")
+}
+
+ui_session=(service:Service):>array<string>=>{
+    let out:array<string>=[]
+    let session=Session[service]
+    step(@session @out Boot)
+    screen(session @out "boot")
+    session.log=[]
+    step(@session @out TypeTitle["Call the bank"])
+    step(@session @out TypeTags["money Urgent"])
+    step(@session @out Submit)
+    step(@session @out TypeTitle["   "])
+    step(@session @out Submit)
+    screen(session @out "create, then an invalid draft")
+    session.log=[]
+    step(@session @out TypeTitle["Water plants"])
+    step(@session @out TypeTags["home"])
+    step(@session @out Submit)
+    step(@session @out MoveCursor[1])
+    step(@session @out Toggle)
+    step(@session @out Open)
+    screen(session @out "toggle and open")
+    session.log=[]
+    step(@session @out FilterTag["work"])
+    screen(session @out "filter by tag")
+    session.log=[]
+    step(@session @out ClearFilters)
+    step(@session @out Search["CAFÉ"])
+    screen(session @out "search")
+    session.log=[]
+    step(@session @out ClearFilters)
+    step(@session @out MoveCursor[-10])
+    step(@session @out Open)
+    # Another client edits the open note; the UI's revision is now stale.
+    let other=Connection()
+    let edit=bytes("PATCH /api/notes/1 HTTP/1.1\r\nHost: b\r\nContent-Type: application/json\r\nContent-Length: 15\r\n\r\n\{\"body\":\"skim\"\}")
+    let ignored=feed(@session.service @other edit)
+    session.log.push("other client: {ignored.length} bytes back")
+    step(@session @out Rename["Buy oat milk"])
+    step(@session @out Rename["Buy oat milk"])
+    screen(session @out "stale rename, then retry")
+    session.log=[]
+    step(@session @out MoveCursor[2])
+    # The note under the cursor is deleted elsewhere before the UI deletes it.
+    let gone=feed(@session.service @other bytes("DELETE /api/notes/5 HTTP/1.1\r\nHost: b\r\n\r\n"))
+    session.log.push("other client: {gone.length} bytes back")
+    step(@session @out Remove)
+    step(@session @out Remove)
+    screen(session @out "delete, racing another client")
+    session.log=[]
+    let stats=Connection()
+    let reply=feed(@session.service @stats bytes("GET /api/stats HTTP/1.1\r\nHost: a\r\n\r\n"))
+    out.push("## server")
+    show_bytes(@out reply)
+    return out
+}
+
+transcript=():>array<string>=>{
+    let service=Service()
+    let out=wire_transcripts(@service)
+    out.extend(ui_session(service))
+    return out
+}

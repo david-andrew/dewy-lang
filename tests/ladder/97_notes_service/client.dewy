@@ -1,0 +1,58 @@
+# The UI's side of HTTP: encode calls as request bytes and frame response
+# bytes back into responses. It shares only the wire format with the server.
+from p"http.dewy" import Response, Limits, Incomplete, HttpError, ResponseFrame, parse_response
+
+ApiCall:type=[
+    purpose:string
+    method:string
+    path:string
+    body:string=""
+    if_match:string=""
+]
+
+const HEX="0123456789ABCDEF"
+
+unreserved=(b:uint8):>bool=>{
+    if 0x61 <=? b <=? 0x7a or 0x41 <=? b <=? 0x5a or 0x30 <=? b <=? 0x39 return true
+    return b =? 0x2d or b =? 0x2e or b =? 0x5f or b =? 0x7e
+}
+
+# Percent-encode every byte outside the unreserved set.
+quote=(text:string):>string=>{
+    let out:array<uint8>=[]
+    let digits=bytes(HEX)
+    loop b in bytes(text) {
+        if unreserved(b) {
+            out.push(b)
+        } else {
+            out.push(0x25)
+            out.push(digits[int64(b >> 4)])
+            out.push(digits[int64(b & 15)])
+        }
+    }
+    return (out as string | none) ?? ""
+}
+
+to_wire=(call:ApiCall):>array<uint8>=>{
+    let head="{call.method} {call.path} HTTP/1.1\r\nHost: notes.local\r\nAccept: application/json\r\n"
+    if call.if_match.length >? 0 head="{head}If-Match: {call.if_match}\r\n"
+    if call.body.length >? 0 or call.method =? "POST" or call.method =? "PUT" or call.method =? "PATCH" {
+        head="{head}Content-Type: application/json\r\nContent-Length: {bytes(call.body).length}\r\n"
+    }
+    return bytes("{head}\r\n{call.body}")
+}
+
+ClientConn:type=[pending:array<uint8>=[] limits:Limits=Limits(body=8192)]
+
+# Responses completed by `data`, in order.
+receive_bytes=(@client:ClientConn data:array<uint8>):>array<Response>|HttpError=>{
+    client.pending.extend(data)
+    let out:array<Response>=[]
+    loop true {
+        let framed=parse_response(client.pending client.limits) or_throw
+        if framed is? Incomplete break
+        out.push(framed.response)
+        client.pending=client.pending[framed.consumed..]
+    }
+    return out
+}
