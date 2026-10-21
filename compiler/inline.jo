@@ -22,9 +22,17 @@ rel_by_index: int[]         # lfunc index -> position in rel_fns (-1: not collec
 # No callee optimization, call-graph ordering or repeated caller optimization.
 fast_fns: IrFn[]
 fast_by_index: int[]
+fast_loop_only: bool[]
 
 fast_inline_kind = (f: IrFn) -> int:
-    if f.cabi or f.noinline or len(f.export_name) > 0 or f.code.len() > 24 or f.slot_size.len() > 0: return 0
+    if f.cabi or f.noinline or len(f.export_name) > 0: return 0
+    # Small record leaves need expansion before SRA can keep caller state in
+    # registers. Bound their raw size and expand only at loop call sites.
+    record = f.slot_size.len() > 0
+    if f.code.len() > (if record: 96 else: 24): return 0
+    if record:
+        loop size in f.slot_size:
+            if size > 32: return 0
     calls = 0
     # A nonreturning failure path does not add a call to successful execution.
     # Retain it when expanding bounds-checked helpers, just as release does.
@@ -33,11 +41,15 @@ fast_inline_kind = (f: IrFn) -> int:
             if ins.c != 0 or calls != 0: return 0
             calls += 1
         if ins.op == .calli or ins.op == .callc or ins.op == .syscall or ins.op == .intr or ins.op == .loop or ins.op == .streq: return 0
+    if record:
+        if calls != 0: return 0
+        return 3
     1 + calls
 
 fast_inline_prepare = (fs: IrFn[]):
     fast_fns = []
     fast_by_index = []
+    fast_loop_only = []
     wrappers: int[]
     loop k in 0.. and f in fs:
         kind = fast_inline_kind(f)
@@ -48,6 +60,7 @@ fast_inline_prepare = (fs: IrFn[]):
         loop fast_by_index.len() <= f.fn_index: fast_by_index.push(-1)
         fast_by_index[f.fn_index] = fast_fns.len()
         fast_fns.push(f)
+        fast_loop_only.push(kind == 3)
     leaves = fast_fns.len()
     saved = ir
     loop k in wrappers:
@@ -57,7 +70,7 @@ fast_inline_prepare = (fs: IrFn[]):
             if ins.op != .call or ins.c != 0: continue
             if ins.imm >= fast_by_index.len(): break
             j = fast_by_index[int(ins.imm)]
-            if j >= 0 and j < leaves and int(ins.b) == fast_fns[j].nparams: leaf = j
+            if j >= 0 and j < leaves and not fast_loop_only[j] and int(ins.b) == fast_fns[j].nparams: leaf = j
         if leaf < 0: continue
         ir = f
         # k_vreg's register cache belongs to one function, including this
@@ -68,27 +81,36 @@ fast_inline_prepare = (fs: IrFn[]):
         loop fast_by_index.len() <= f.fn_index: fast_by_index.push(-1)
         fast_by_index[f.fn_index] = fast_fns.len()
         fast_fns.push(ir)
+        fast_loop_only.push(false)
     ir = saved
 
-fast_inline_target = (ins: Ins) -> int:
+fast_inline_target = (ins: Ins, in_loop: bool) -> int:
     if ins.op != .call or ins.c != 0 or ins.imm >= fast_by_index.len(): return -1
     j = fast_by_index[int(ins.imm)]
     if j < 0 or fast_fns[j].fn_index == ir.fn_index or int(ins.b) != fast_fns[j].nparams: return -1
+    if fast_loop_only[j] and not in_loop: return -1
     j
 
 fast_inline_into = ():
     if fast_fns.len() == 0: return
     found = false
     loop ins in ir.code:
-        if fast_inline_target(ins) >= 0:
+        if fast_inline_target(ins, true) >= 0:
             found = true
             break
     if not found: return
     out: Ins[]
     out.reserve(ir.code.len() * 2)
     old = ir.code
+    depth = 0
+    loop_depth = 0
     loop ins in old:
-        j = fast_inline_target(ins)
+        if ins.op == .block or ins.op == .loop or ins.op == .if_: depth += 1
+        if ins.op == .loop and loop_depth == 0: loop_depth = depth
+        if ins.op == .end:
+            if depth == loop_depth: loop_depth = 0
+            depth -= 1
+        j = fast_inline_target(ins, loop_depth > 0)
         if j >= 0: inline_call(ins, fast_fns[j], out)
         else: out.push(ins)
     ir.code = out
