@@ -1,0 +1,12 @@
+nonempty = string<length >? 0>
+first = (s:nonempty):>string => s[0..1)
+take = (text:string n:uint64<(<=? text.length)>):>string => text[0..n)
+pick = (text:string i:int64<(<? text.length)>):>string => text[i..i+1)
+main = () => {
+    printl(first("hi"))
+    let k:uint64 = 2
+    printl(take("héllo" k))
+    printl(pick("héllo" 1))
+    let w = "wörld"
+    printl(take(w 5))
+}

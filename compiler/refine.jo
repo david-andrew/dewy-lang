@@ -277,13 +277,13 @@ mk_refined = (base0: int, predicate: int) -> int:
             if term.kind == 4: dependencies.push(term.value)
         # (a length never reaches 2^63, so against a length `uint64.max` compares as the
         # largest int64: `length <=? uint64.max` holds for every array)
-        if types[base].kind == .array:
+        if types[base].kind == .array or types[base].kind == .str_:
             if atom.a.kind == 1 and atom.a.unsigned and atom.a.value < 0: atom.a = RefTerm(1, 9223372036854775807)
             if atom.b.kind == 1 and atom.b.unsigned and atom.b.value < 0: atom.b = RefTerm(1, 9223372036854775807)
         normalized.push(atom)
     predicate = ref_intern(normalized)
     ref_span_copy(declared, predicate)
-    if not is_int(base) and types[base].kind != .array and not has_var(base): fatal(-1, "refinement requires an integer or array base")
+    if not is_int(base) and types[base].kind != .array and not has_var(base) and not (types[base].kind == .str_ and ref_length_only(predicate)): fatal(-1, "refinement requires an integer, array or string base")
     if not has_var(base) and is_int(base):
         loop atom in ref_predicates[predicate]:
             loop term in [atom.a, atom.b]:
@@ -293,12 +293,19 @@ mk_refined = (base0: int, predicate: int) -> int:
     refine_active = true
     mk_type(TypeInfo(kind = .refined, elem = i32(base), st = i32(predicate)), dependencies)
 
+# A string is refined only by its length (`string<length >? 0>`).
+ref_length_only = (predicate: int) -> bool:
+    loop atom in ref_predicates[predicate]:
+        loop term in [atom.a, atom.b]:
+            if term.kind != 1 and (term.path.len() == 0 or term.path[term.path.len() - 1] != -1): return false
+    true
+
 ref_term = (n: int, binder: int) -> RefTerm:
     k = nodes[n].kind
     if k == .ident:
         name = int(nodes[n].name)
         if name == binder and binder != 0: return RefTerm()
-        if name_of(name) == "length" and tkind(refine_base_type) == .array: return RefTerm(path = [-1])
+        if name_of(name) == "length" and (tkind(refine_base_type) == .array or tkind(refine_base_type) == .str_): return RefTerm(path = [-1])
         loop i in [0..refine_fields.len()):
             if name == refine_fields[i]: return RefTerm(5, i)
         loop i in [0..refine_formals.len()):
@@ -403,7 +410,7 @@ resolve_refinement = (n: int) -> int:
     refine_base_type = base
     ref_atoms(int(nodes[n].b), binder, atoms)
     refine_base_type = previous_base
-    expected = if tkind(representation_type(base)) == .array: T_INT else: representation_type(base)
+    expected = if tkind(representation_type(base)) == .array or tkind(representation_type(base)) == .str_: T_INT else: representation_type(base)
     loop atom in atoms:
         loop term in [atom.a, atom.b]:
             if refine_fields.len() > 0 and term.kind == 2: fatal(nodes[n].pos, "record field refinement dependencies must name siblings or stable lexical bindings")
@@ -637,6 +644,7 @@ ref_ir_term = (term: RefTerm, self: int, args: int[], self_type: int, arg_types:
         t = representation_type(t)
         if selector == -1:
             if types[t].kind == .fixed: value = e_iconst(fixed_len(t))
+            else if types[t].kind == .str_: value = e_call(rt("__dewy_string_length"), [value], VI)
             else: value = arr_len(value)
             t = T_INT
         else:
@@ -707,7 +715,7 @@ ref_validate_signature = (params: int[], ret: int, mask: int, pos: int):
                 j = term.value
                 if j >= params.len(): fatal(pos, "missing refinement parameter")
                 if mask & (1 << j) != 0 and (i < params.len() or term.path.len() == 0): fatal(pos, "mutable refinement dependencies are only valid in projected postconditions")
-                a = if tkind(representation_type(t)) == .array: T_INT else: representation_type(t)
+                a = if tkind(representation_type(t)) == .array or tkind(representation_type(t)) == .str_: T_INT else: representation_type(t)
                 b = ref_projection_type(params[j], term.path, pos)
                 if not ref_repr_match(b, a, term.path): fatal(pos, "dependent scalar refinement requires matching integer representations")
     # Dependency cycles cannot define a self-justifying set of contracts.
@@ -816,7 +824,8 @@ ref_projection_type = (root: int, path: int[], pos: int) -> int:
     loop selector in path:
         if has_var(t): return t
         if selector == -1:
-            if tkind(t) != .array and tkind(t) != .fixed: fatal(pos, "refinement length requires an array")
+            if tkind(t) == .str_ and files[pos_file(pos)].is_dewy: runtime_fn("__dewy_string_length")
+            else if tkind(t) != .array and tkind(t) != .fixed: fatal(pos, "refinement length requires an array or a string")
             t = T_INT
         else:
             if tkind(t) != .struct_: fatal(pos, "refinement field requires a record")
@@ -871,7 +880,7 @@ ref_validate_record = (t: int, pos: int):
                         if not done[j]: ready = false
                         dep = int(fields[int(structs[si].fields) + j].type)
                         bound = ref_projection_type(dep, term.path, pos)
-                        expected = if tkind(representation_type(ft)) == .array: T_INT else: representation_type(ft)
+                        expected = if tkind(representation_type(ft)) == .array or tkind(representation_type(ft)) == .str_: T_INT else: representation_type(ft)
                         if not ref_repr_match(bound, expected, term.path): fatal(pos, "dependent field refinement requires matching integer representations")
             if ready: done[i] = true
     loop yes in done:

@@ -590,8 +590,10 @@ The lambda binder is local to its predicate. A parameter may use its own name
 (`d:int64<d >? 0>`); partial operators (`int64<(>? 0)>`), conjunctions,
 one-direction comparison chains, scalar exclusion (`int64 & ~0`), and membership in literal ranges are also
 supported. Bounds may use integer literals, fixed-width `.min`/`.max`, other
-scalar value parameters of the same representation, an array parameter's length
-(`i:uint64<(<? b.length)>`, also for `uint64`), or stable local bindings.
+scalar value parameters of the same representation, an array or string
+parameter's length (`i:uint64<(<? b.length)>`, `n:uint64<(<=? text.length)>`), or
+stable local bindings. A string is refined by its length in graphemes
+(`nonempty = string<length >? 0>`); an ASCII literal's length is known when compiling.
 Predicates cannot contain calls or arbitrary arithmetic.
 
 An integer literal in a type position is its singleton type, and a union of

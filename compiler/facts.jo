@@ -1061,6 +1061,16 @@ fact_capture = (n: int, s: mut FactState) -> int:
         # A uint64 constant is biased; its type lets a witness decode it.
         if representation_type(ntype(n)) == T_U64: return fact_new(s, FactBound(x, x, x != 0), FactTerm(origin = n, type = T_U64))
         return fact_constant(s, x, n)
+    # (an ASCII string literal's length is its byte count; "\r\n" is one grapheme)
+    if k == .str_lit and nodes[n].aux != 1 and representation_type(ntype(n)) == T_STR and nodes[n].sval >= 0:
+        text = name_of(int(nodes[n].sval))
+        ascii = true
+        loop c in text:
+            if c >= 128 or c == 13: ascii = false
+        if ascii:
+            value = fact_new(s, FactBound(), FactTerm(type = T_STR))
+            if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(value, -1, false, fact_constant(s, len(text))))
+            return value
     # An optional's or union's tag (-3: 0 for none, 1 for a value, or the
     # member) and payload (-4) are projections of its immutable evaluation.
     if k == .istype:
