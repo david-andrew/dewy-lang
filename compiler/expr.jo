@@ -6918,6 +6918,15 @@ check_shaped_match = (m: int, expected: int) -> int:
     nodes[m] = nodes[bc_block(stmts, pos)]
     check_expr(m, expected)
 
+# A bare name arm matches every value and binds it, shadowing what the name meant:
+# `_` is the idiom; any other name warns (`limit => ...` does not compare with limit)
+bare_arm_warning = (p: int, name: int):
+    s = lookup(name)
+    k = if s != 0: syms[s].kind else: SK.none_
+    w = name_of(name)
+    what = if k == .struct_ or k == .enum_ or k == .type_ or k == .alias_ or k == .builtin: ", shadowing the type '{w}': `<{w}>` matches the type" else if s != 0: ", shadowing the value '{w}' (an arm does not compare with it)" else: ""
+    warn(p, "the bare name '{w}' matches every value and binds it{what}; `_` is the catch-all, `{w}:T` binds with a type")
+
 check_match = (m: int, expected: int) -> int:
     if files[pos_file(nodes[m].pos)].is_dewy and shape_match_wanted(m): return check_shaped_match(m, expected)
     is_stmt = has_flag(m, NF_STMT)
@@ -6981,6 +6990,7 @@ check_match = (m: int, expected: int) -> int:
                 binding = int(nodes[p].name)
                 nodes[p].name = 0
                 if binding != 0: value = mk_ident_local(hidden, nodes[p].pos)
+                if pk == .pwild and binding != 0: bare_arm_warning(nodes[p].pos, binding)
             if pk == .ptype:
                 pt = prune(resolve_type(int(nodes[p].a)))
                 if type_eq(pt, st):

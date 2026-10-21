@@ -2536,7 +2536,9 @@ array. In `if flag xs else []`, a container literal in the `else` branch takes
 the type of the first branch. `??` also works after an optional has been narrowed
 to its value, and its fallback remains lazy.
 
-`match` supports typed bindings, literals and `_` as a fallback. An optional
+`match` supports typed bindings, literals and `_` as a fallback. Any other bare
+name arm also matches every value and binds it, with a warning: `limit => ...`
+shadows `limit` rather than comparing with it. An optional
 payload arm such as `n:int64` also narrows the original variable or field to
 `int64` inside that arm; the binding `n` is an independent value. A union is
 written `int64|string`; union matches must cover its members or have a fallback.
