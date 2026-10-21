@@ -89,7 +89,7 @@ select=(db:Database minimum:int64):>string=>{
     loop row in db.rows {
         if row.score >=? minimum selected.push(row)
     }
-    selected.sort_by((r:Row)=>r.id)
+    selected.sort(key=(r:Row)=>r.id)
     let result="rows"
     loop row in selected {
         result="{result} {row.id}:{row.name}:{row.score}"

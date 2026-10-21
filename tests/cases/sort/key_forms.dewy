@@ -1,0 +1,22 @@
+# quick
+# sort(key=…) takes a function handle, a closure (capturing or not) or a partial
+# operator; reverse=true sorts largest first. Both orders are stable.
+Row:type=[id:int64 name:string]
+by_name=(r:Row):>string=>r.name
+main=()=>{
+    let rows=[Row[3 "c"] Row[1 "b"] Row[2 "a"] Row[1 "a"]]
+    rows.sort(key=(r:Row)=>r.id)
+    printl("{rows}")
+    rows.sort(key=@by_name)
+    printl("{rows}")
+    rows.sort(key=(r)=>r.id reverse=true)
+    printl("{rows}")
+    let names:array<string>=["bb" "a" "ccc"]
+    names.sort(key=(.length))
+    printl("{names} {names.sorted(key=(s)=>s.length reverse=true)}")
+    let xs:array<int64>=[3 1 2]
+    xs.sort(reverse=true)
+    let offset=10
+    printl("{xs} {xs.sorted()} {xs.sorted(key=(x)=>(offset-x) % 3)}")
+    return 0
+}

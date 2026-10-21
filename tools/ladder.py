@@ -154,19 +154,8 @@ def load() -> dict:
 
 
 def dump(doc: dict):
-    # One program per line keeps the mapping readable and diffs small.
-    def block(items: dict, render) -> str:
-        return '{\n' + ',\n'.join(f'    {json.dumps(key, ensure_ascii=False)}: {render(value)}'
-                                  for key, value in items.items()) + '\n  }'
-    compact = lambda value: json.dumps(value, ensure_ascii=False)
-    parts = []
-    for key, value in doc.items():
-        if key in ('milestones', 'tiers', 'programs') and isinstance(value, dict):
-            text = block(value, compact)
-        else:
-            text = json.dumps(value, indent=2, ensure_ascii=False).replace('\n', '\n  ')
-        parts.append(f'  {json.dumps(key)}: {text}')
-    (LADDER / 'ladder.json').write_text('{\n' + ',\n'.join(parts) + '\n}\n')
+    # The layout ladder.json is kept in, so ratchet updates stay small diffs.
+    (LADDER / 'ladder.json').write_text(json.dumps(doc, indent=1) + '\n')
 
 
 def tiers(doc: dict) -> list[tuple[str, list[str]]]:

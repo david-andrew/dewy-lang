@@ -1,5 +1,5 @@
 # exit: 42
 Item:type=[score:float64 id:int64]
 main=()=>{let items=[Item[0.0 0] Item[-0.0 1] Item[-2.5 2] Item[1.5 3]]
-items.sort_by((item:Item):>float64=>item.score)
+items.sort(key=(item:Item):>float64=>item.score)
 return if items[0].id =? 2 and items[1].id =? 0 and items[2].id =? 1 and items[3].id =? 3 42 else 1}

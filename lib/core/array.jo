@@ -394,11 +394,14 @@ __merge_pass_lt[T] = (src: T[], dst: mut T[], w: int):
         lo += 2 * w
 
 # sort in place, smallest first (using <), or largest first; equal elements keep their order
-sort[T] = (xs: mut T[], descending: bool = false):
+sort[T] = (xs: mut T[], reverse: bool = false):
     # (largest first and still stable: equal elements reversed twice keep their order)
-    if descending: xs.reverse()
+    if reverse: xs.reverse()
     __merge_sort_lt(xs)
-    if descending: xs.reverse()
+    if reverse: xs.reverse()
+
+# sort in place by a key, Dewy's xs.sort(key=f reverse=true): as sort_by
+sort[T, K] = (xs: mut T[], key: (T) -> K, reverse: bool = false): xs.sort_by(key, reverse)
 
 # sort in place with a custom "less than" function (equal elements keep their order)
 sort_with[T] = (xs: mut T[], less: (T, T) -> bool):
@@ -488,9 +491,15 @@ __merge_keys[K] = (src: int[], dst: mut int[], keys: K[], width: int):
         lo += 2 * width
 
 # a sorted copy of xs
-sorted[T] = (xs: T[], descending: bool = false) -> T[]:
+sorted[T] = (xs: T[], reverse: bool = false) -> T[]:
     out = xs
-    out.sort(descending)
+    out.sort(reverse)
+    out
+
+# a copy of xs sorted by a key, Dewy's xs.sorted(key=f reverse=true)
+sorted[T, K] = (xs: T[], key: (T) -> K, reverse: bool = false) -> T[]:
+    out = xs
+    out.sort_by(key, reverse)
     out
 
 # a copy of xs sorted by a key

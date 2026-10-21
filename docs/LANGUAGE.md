@@ -1337,17 +1337,19 @@ members each time. Arbitrary removals and internal compaction keep the cursor
 valid, and copied sets retain independent cursor and member values.
 
 `values.sorted()` returns an independent sorted array; `values.sort()` updates
-the receiver. Use `sorted_by(key)` or `sort_by(key)` for records:
+the receiver. `reverse=true` sorts largest first, and `key=` sorts by a key
+function, such as a function handle, a closure or a partial operator:
 
 ```dewy
 Player:type=[name:string score:int64]
 by_score=(p:Player)=>p.score
 let players=[Player["Ada" 20] Player["Bea" 42] Player["Cal" 42]]
-let leaderboard=players.sorted_by(@by_score true)
+let leaderboard=players.sorted(key=@by_score reverse=true)
+players.sort(key=(p:Player)=>p.name.length)
 ```
 
-The optional `true` requests descending order. Equal keys retain their original
-order, so Bea stays ahead of Cal. The key is computed once per element when
+Both orders are stable: equal keys retain their original order, so Bea stays
+ahead of Cal. The key is computed once per element when
 sorting is needed, then cached while integer positions are sorted. Records and
 their managed fields keep ordinary independent-value behavior; modifying a
 record in `leaderboard` leaves `players` unchanged.
@@ -1355,7 +1357,7 @@ record in `leaderboard` leaves `players` unchanged.
 `values.sort_with(less)` takes a comparison function with two arguments for
 orderings that depend on both values. It is stable too: values for which neither
 argument compares less than the other retain their order. A comparator should
-define a consistent ordering; use `sort_by` when a cached key expresses it.
+define a consistent ordering; use `key=` when a cached key expresses it.
 
 `values.min_by(key)` and `values.max_by(key)` select one value without sorting.
 They evaluate the key once per element and choose the first of equal keys.

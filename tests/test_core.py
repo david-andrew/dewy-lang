@@ -106,8 +106,8 @@ more = (a: int, b: int) -> bool: key(b) < key(a)
         literal = ' '.join(map(str, values))
         statements += [f'let values_{size}:array<int64>=[{literal}]']
         if ordering == 'key':
-            statements += [f'printl(to_json(values_{size}.sorted_by(@key)))',
-                           f'printl(to_json(values_{size}.sorted_by(@key true)))']
+            statements += [f'printl(to_json(values_{size}.sorted(key=@key)))',
+                           f'printl(to_json(values_{size}.sorted(key=@key reverse=true)))']
         else:
             statements += [f'let ascending_{size}=values_{size}',
                            f'let descending_{size}=values_{size}',
