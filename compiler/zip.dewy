@@ -1,6 +1,10 @@
-# Self-hosting pilot: compiler/zip.jo in Dewy, with its helpers from elf.jo and
-# util.jo. Zip archives are deflated, as the PNG writer does, or stored when that
-# is no smaller. `zip out.zip file...` writes the named files.
+# Zip archives, deflated as the PNG writer does (stored when that is no smaller):
+# `dewy build --target wasm -o game.zip` writes the page as index.html in one, the
+# shape itch.io and similar sites take a web game in.
+#
+# The first module of the compiler written in Dewy. zip.jo is its frozen twin for
+# the compilers without the Dewy frontend (tools/compiler/build.py); the two keep
+# the same interface and write the same bytes (tests/test_selfhost_zip.py).
 
 from p"@lib/game/image.jo" import deflate
 
@@ -22,6 +26,7 @@ crc32=(b:array<uint8>):>int64=>{
     c xor 0xFFFFFFFF
 }
 
+# (elf.jo's: a Dewy module stays outside the implementation's import cycle)
 put16=(@b:array<uint8> v:int64):>void=>{
     b.push(uint8(v & 255))
     b.push(uint8((v >> 8) & 255))
@@ -32,20 +37,21 @@ put32=(@b:array<uint8> v:int64):>void=>{
     put16(@b v >> 16)
 }
 
-# files: the name in the archive and the contents
-write_zip=(path:string files:array<[name:string data:array<uint8>]>):>bool=>{
+# names[i] is the name in the archive of contents[i]
+write_zip=(path:string names:array<string> contents:array<array<uint8>>):>bool=>{
     let out:array<uint8>=[]
     let central:array<uint8>=[]
-    loop f in files {
+    loop i in [0..names.length) {
+        let data=contents[i]
         let off=out.length
-        let crc=crc32(f.data)
-        let packed=deflate(f.data)
+        let crc=crc32(data)
+        let packed=deflate(data)
         let method=8
-        if packed.length >=? f.data.length {
-            packed=f.data
+        if packed.length >=? data.length {
+            packed=data
             method=0
         }
-        let name=f.name as array<uint8>
+        let name=names[i] as array<uint8>
         let header=(sig:int64 at_central:bool):>array<uint8>=>{
             let h:array<uint8>=[]
             put32(@h sig)
@@ -57,7 +63,7 @@ write_zip=(path:string files:array<[name:string data:array<uint8>]>):>bool=>{
             put16(@h 0x21)                               # date: 1980-01-01
             put32(@h crc)
             put32(@h packed.length)
-            put32(@h f.data.length)
+            put32(@h data.length)
             put16(@h name.length)
             put16(@h 0)                                  # extra
             if at_central {
@@ -79,21 +85,10 @@ write_zip=(path:string files:array<[name:string data:array<uint8>]>):>bool=>{
     put32(@out 0x06054B50)
     put16(@out 0)
     put16(@out 0)
-    put16(@out files.length)
-    put16(@out files.length)
+    put16(@out names.length)
+    put16(@out names.length)
     put32(@out central.length)
     put32(@out cd_off)
     put16(@out 0)
     write_bytes(path out) is? int64
-}
-
-main=():>int64=>{
-    let arguments=args()
-    let files:array<[name:string data:array<uint8>]>=[]
-    loop i in [2..arguments.length) {
-        let data=read_bytes(arguments[i])
-        if not (data is? array<uint8>) {return 1}
-        files.push([name=arguments[i] data=data])
-    }
-    if write_zip(arguments[1] files) {0} else {1}
 }

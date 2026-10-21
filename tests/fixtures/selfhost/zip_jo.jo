@@ -1,11 +1,14 @@
-# The pilot's reference: the compiler's own zip.jo, with the same command line.
+# The compiler's frozen zip.jo, with the same command line as zip_dewy.dewy.
 use '../../../compiler/zip.jo'
 
 main = () -> int:
     a = args()
-    files: (str, u8[])[]
+    names: str[]
+    contents: u8[][]
     loop i in [2..a.len()):
-        if let b = read_bytes(a[i]): files.push((a[i], b))
+        if let b = read_bytes(a[i]):
+            names.push(a[i])
+            contents.push(b)
         else: return 1
-    if write_zip(a[1], files): return 0
+    if write_zip(a[1], names, contents): return 0
     1

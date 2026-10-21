@@ -2,7 +2,7 @@
 # Memory layout: [0,1024) unused | rodata | data (globals) | shadow stack (grows down) | heap
 
 use 'util.jo'
-use 'zip.jo'
+use 'zip.dewy'
 use 'ast.jo'
 use 'types.jo'
 use 'check.jo'
@@ -1121,7 +1121,7 @@ base64 = (b: u8[]) -> str:
 write_html = (path: str, wasm: u8[], title: str, icon: u8[]) -> bool:
     page = html_page(wasm, title, icon)
     # (game.zip: the page as index.html in a zip, for sites like itch.io)
-    if ends_with(path, ".zip"): return write_zip(path, [("index.html", bytes(page))])
+    if ends_with(path, ".zip"): return write_zip(path, ["index.html"], [bytes(page)])
     write_file(path, page)
 
 html_page = (wasm: u8[], title: str, icon: u8[]) -> str:

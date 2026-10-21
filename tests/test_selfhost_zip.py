@@ -1,4 +1,5 @@
-"""Self-hosting pilot: compiler/zip.jo translated to Dewy writes the same archives."""
+"""compiler/zip.dewy, the compiler's first Dewy module: it ships, and its frozen
+implementation-language twin compiler/zip.jo writes the same archives."""
 import random
 import subprocess
 import zipfile
@@ -37,7 +38,7 @@ def inputs(directory):
 @pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_selfhost_zip_matches_jo(compiler, tmp_path, release):
-    dewy = build(compiler, FIXTURES / 'zip.dewy', tmp_path / 'zip-dewy', release)
+    dewy = build(compiler, FIXTURES / 'zip_dewy.dewy', tmp_path / 'zip-dewy', release)
     jo = build(compiler, FIXTURES / 'zip_jo.jo', tmp_path / 'zip-jo', release)
     files = inputs(tmp_path)
     selections = [['one.txt'], ['empty.bin', 'notes.txt'], list(files)]
@@ -59,3 +60,22 @@ def test_selfhost_zip_matches_jo(compiler, tmp_path, release):
         if 'notes.txt' in names:
             assert methods['notes.txt'] == zipfile.ZIP_DEFLATED
             assert methods['empty.bin'] == zipfile.ZIP_STORED
+
+
+@pytest.mark.core_quick
+def test_selfhost_zip_ships_dewy(compiler, tmp_path):
+    # The compiler's table of its own source files names zip.dewy, never its twin
+    # (tools/compiler/build.py compiles the twin only on the way from C).
+    binary = compiler.read_bytes()
+    assert b'/compiler/zip.dewy\0' in binary
+    assert b'/compiler/zip.jo\0' not in binary
+    source = tmp_path / 'page.dewy'
+    source.write_text('main=()=>{printl"zipped" return 0}\n')
+    built = subprocess.run([compiler, 'build', source, '--target', 'wasm', '-o', tmp_path / 'game.zip'],
+                           capture_output=True, text=True, timeout=120)
+    assert built.returncode == 0, built.stdout + built.stderr
+    with zipfile.ZipFile(tmp_path / 'game.zip') as z:
+        assert z.testzip() is None
+        assert z.namelist() == ['index.html']
+        assert z.infolist()[0].compress_type == zipfile.ZIP_DEFLATED
+        assert b'<html' in z.read('index.html')

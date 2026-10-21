@@ -1,5 +1,5 @@
-# Zip archives (deflated, as the PNG writer does; stored when that is no smaller): `sloppy build --target wasm -o game.zip` writes the page
-# as index.html in one, the shape itch.io and similar sites take a web game in.
+# The frozen implementation-language twin of zip.dewy, for the compilers without the
+# Dewy frontend (tools/compiler/build.py). Change both, or neither.
 
 use 'util.jo'
 use 'elf.jo'
@@ -18,18 +18,20 @@ crc32 = (b: u8[]) -> int:
     loop x in b: c = crc_table[(c xor int(x)) & 255] xor (c >> 8)
     c xor 0xFFFFFFFF
 
-# files: (name in the archive, contents)
-write_zip = (path: str, files: (str, u8[])[]) -> bool:
+# names[i] is the name in the archive of contents[i]
+write_zip = (path: str, names: str[], contents: u8[][]) -> bool:
     out: u8[]
     central: u8[]
-    loop f in files:
+    loop i in [0..names.len()):
+        name = names[i]
+        data = contents[i]
         off = out.len()
-        crc = crc32(f.1)
-        packed = f.1
-        when not BOOTSTRAP: packed = deflate(f.1)      # (the C bootstrap's compiler does without)
+        crc = crc32(data)
+        packed = data
+        when not BOOTSTRAP: packed = deflate(data)      # (the C bootstrap's compiler does without)
         method = 8
-        if packed.len() >= f.1.len():
-            packed = f.1
+        if packed.len() >= data.len():
+            packed = data
             method = 0
         header = (sig: int, at_central: bool) -> u8[]:
             h: u8[]
@@ -42,8 +44,8 @@ write_zip = (path: str, files: (str, u8[])[]) -> bool:
             put16(h, 0x21)                                # date: 1980-01-01
             put32(h, crc)
             put32(h, packed.len())
-            put32(h, f.1.len())
-            put16(h, len(f.0))
+            put32(h, data.len())
+            put16(h, len(name))
             put16(h, 0)                                   # extra
             if at_central:
                 put16(h, 0)                               # comment
@@ -51,7 +53,7 @@ write_zip = (path: str, files: (str, u8[])[]) -> bool:
                 put16(h, 0)                               # internal attributes
                 put32(h, 0)                               # external attributes
                 put32(h, off)
-            loop c in f.0: h.push(c)
+            loop c in name: h.push(c)
             h
         append_bytes(out, header(0x04034B50, false))
         append_bytes(out, packed)
@@ -61,8 +63,8 @@ write_zip = (path: str, files: (str, u8[])[]) -> bool:
     put32(out, 0x06054B50)
     put16(out, 0)
     put16(out, 0)
-    put16(out, files.len())
-    put16(out, files.len())
+    put16(out, names.len())
+    put16(out, names.len())
     put32(out, central.len())
     put32(out, cd_off)
     put16(out, 0)

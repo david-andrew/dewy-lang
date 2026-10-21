@@ -14,9 +14,36 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 ORIGIN = ROOT / 'docs/origin'
 
+# The bootstrap chain, and the compiler modules written in Dewy:
+#   1. stage0/ (C) builds core-bootstrap from compiler/, with bootstrap/'s
+#      frontends in place of compiler/'s: it has no Dewy frontend.
+#   2. core-bootstrap builds dewy-core-bootstrap from compiler/: the first
+#      compiler with the Dewy frontend.
+#   3. dewy-core-bootstrap builds dewy-core from compiler/, which builds itself
+#      byte-identically (the fixed point). A --seed build is this step alone.
+# Steps 1 and 2 cannot read Dewy, so there every `use 'X.dewy'` in compiler/
+# names X.dewy's frozen implementation-language twin instead. Steps 3 on
+# compile the Dewy modules, so the compiler that ships runs them.
+FROZEN_TWINS = {'zip.dewy': 'zip.jo'}
+
 
 def identity(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def use_frozen_twins(compiler: Path) -> dict[Path, str]:
+    """Point compiler/'s imports of its Dewy modules at their twins; return the originals."""
+    originals = {}
+    for module, twin in FROZEN_TWINS.items():
+        line = f"use '{module}'\n"
+        importers = [path for path in sorted(compiler.glob('*.jo')) if line in path.read_text()]
+        if not importers:
+            raise RuntimeError(f'no compiler module uses {module}; update FROZEN_TWINS')
+        for path in importers:
+            text = path.read_text()
+            originals.setdefault(path, text)
+            path.write_text(text.replace(line, f"use '{twin}'\n"))
+    return originals
 
 
 def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False) -> Path:
@@ -53,23 +80,27 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False) ->
             shutil.copy2(ROOT / 'bootstrap' / name, output / 'compiler' / name)
         stage0 = output / 'stage0/sloppy0'
         seed = binary_dir / 'core-bootstrap'
+        first_core = binary_dir / 'dewy-core-bootstrap'
+        originals = use_frozen_twins(output / 'compiler')
         try:
             run(['make', '-s', '-C', str(output / 'stage0')], 'bootstrap-c.log')
             run([stage0, output / 'compiler/main.jo', '-o', seed], 'bootstrap-core.log')
         finally:
             for name in bootstrap_modules:
                 shutil.copy2(ROOT / 'compiler' / name, output / 'compiler' / name)
-        bootstrap_hashes = [identity(p) for p in (stage0, seed)]
+        try:
+            run([seed, 'build', output / 'compiler/main.jo', '-o', first_core], 'core-build.log')
+        finally:
+            for path, text in originals.items():
+                path.write_text(text)
+        bootstrap_hashes = [identity(p) for p in (stage0, seed, first_core)]
+        seed = first_core
     if seed is None:
         raise ValueError('provide --seed or --bootstrap')
     seed = seed.resolve(strict=True)
     binary = binary_dir / 'dewy-core'
-    run([seed, 'build', output / 'compiler/main.jo', '-o', binary], 'core-build.log')
-    if bootstrap:
-        first_core = binary_dir / 'dewy-core-bootstrap'
-        binary.rename(first_core)
-        bootstrap_hashes.append(identity(first_core))
-        run([first_core, 'build', output / 'compiler/main.jo', '-o', binary], 'self-build.log')
+    run([seed, 'build', output / 'compiler/main.jo', '-o', binary],
+        'self-build.log' if bootstrap else 'core-build.log')
     (output / 'build.json').write_text(json.dumps({
         'seed_sha256': identity(seed),
         'core_sha256': identity(binary),
