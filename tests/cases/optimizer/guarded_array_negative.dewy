@@ -1,0 +1,14 @@
+# exit: 101
+# quick
+let left:array<int64>=[]
+let right:array<int64>=[]
+sum=(stop:int64 shift:int64):>int64=>{
+    let total:int64=0
+    loop i in [0..stop) {total+=left[i+shift]+right[i+shift]}
+    return total
+}
+main=(args:array<string>):>int64=>{
+    left=[10 20 30]
+    right=[1 2 3]
+    return sum(8 -args.length)
+}

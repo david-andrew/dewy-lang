@@ -197,7 +197,7 @@ rel_finish = ():
 emit_now = (finish: bool):
     if finish: rel_finish()
     else if not opt_release and not dbg_on:
-        # Tiny leaves expand before the local pass; short raw float kernels
+        # Tiny leaves expand before the local pass; short array/float kernels
         # also get vectorization. Debug builds retain original local locations.
         kc_fn += 1
         if not watch_build and not repl_image: fast_inline_into()

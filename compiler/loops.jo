@@ -662,16 +662,17 @@ lx_vec_emit = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, out: mut In
     if not plan.avx_only: lx_vloop(code, L, checks, plan, bases, VX, out)
     out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
 
-# Default builds only consider short float loops with a vector plan. Bounds
+# Default builds only consider short array/float loops with a vector plan. Bounds
 # and overlap guards retain the scalar path when a whole loop is not safe.
 fast_vectorize = ():
     if not lx_vec_on or ir.code.len() > 400: return
-    floats = false
+    candidate = false
     has_loop = false
     loop ins in ir.code:
-        if ins.op == .fadd or ins.op == .fsub or ins.op == .fmul or ins.op == .fdiv or ins.op == .fneg: floats = true
+        if ins.op == .fadd or ins.op == .fsub or ins.op == .fmul or ins.op == .fdiv or ins.op == .fneg: candidate = true
+        if ins.op == .load and int(ins.c) & M_INDEX != 0: candidate = true
         if ins.op == .loop: has_loop = true
-    if floats and has_loop: loop_versioning(true)
+    if candidate and has_loop: loop_versioning(true)
 
 # version the counting loops of the current function that have checks to drop
 lx_dbg_read = false
