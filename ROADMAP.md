@@ -9,7 +9,7 @@ what landed. Keep this file short.
 
 | Measure | Now (2026-10-20) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 71/82 (tiers 1–2: 63/63; tier 3: 8/19), 12 held open on decisions | all milestones |
+| Acceptance ladder, design surface | 72/82 (tiers 1–2: 63/63; tier 3: 9/19), 12 held open on decisions | all milestones |
 | Acceptance ladder, current dialect | 82/82 | stays green |
 | Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.24 G instructions (was 1.36 G on 10-20 morning) | ~0.40 G (250k root lines/s) |
 | Compiler self-build | 8.0 G instructions | seconds-scale edit loop |
