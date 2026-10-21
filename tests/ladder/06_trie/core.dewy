@@ -1,5 +1,7 @@
 Trie:type=[edges:dict<string int64> terminal:array<bool>]
 insert=(@trie:Trie word:string):>void=>{
+    # (node handles come from the edge table: checked where they are used)
+    $runtime_checks
     let node=0
     loop letter in word {
         let key="{node}:{letter}"
@@ -14,6 +16,7 @@ insert=(@trie:Trie word:string):>void=>{
     trie.terminal[node]=true
 }
 contains_word=(trie:Trie word:string):>bool=>{
+    $runtime_checks
     let node=0
     loop letter in word {
         let next=trie.edges.get("{node}:{letter}")

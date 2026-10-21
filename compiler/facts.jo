@@ -1514,6 +1514,9 @@ fact_range = (n: int, s: mut FactState):
                     fact_difference(s, count, hi, extra - x.lo, n)
                     fact_difference(s, hi, count, x.lo - extra, n)
                 fact_counted_lengths(n, s, pushes, count)
+                return
+        # (an unknown count is still never negative: the pushes only grow it)
+        fact_counted_lengths(n, s, pushes, fact_new(s, FactBound(0, FACT_MAX)))
 
 # A stepped range `[first,second..end)`: the step's sign, when known, bounds
 # each value between first and end (the lowering stops before passing end).

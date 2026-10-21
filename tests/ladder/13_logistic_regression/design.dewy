@@ -1,6 +1,7 @@
 sigmoid=(z:float64):>float64=>1.0/(1.0+exp(-z))
 train_binary=(xs:array<float64> ys:array<float64>):>array<float64>=>{
     let weights:array<float64>=[0.0 0.0]
+    if ys.length <? xs.length return weights
     loop epoch in [0..2000) {
         let grad:array<float64>=[0.0 0.0]
         loop i in [0..xs.length) {

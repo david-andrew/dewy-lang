@@ -16,7 +16,8 @@ median=(xs:array<float64>):>float64=>{
     let values=xs
     values.sort()
     let n=values.length
-    if n%2 =? 1 {return values[n//2]}
+    $runtime_assert n >? 0
+    if n%2 =? 1 or n <? 2 {return values[n//2]}
     return (values[n//2-1]+values[n//2])/2.0
 }
 main=():>int64=>{

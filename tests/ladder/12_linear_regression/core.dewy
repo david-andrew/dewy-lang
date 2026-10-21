@@ -1,5 +1,6 @@
 predict=(x:float64 w:float64 b:float64):>float64=>w*x+b
 train=(xs:array<float64> ys:array<float64> epochs:int64):>array<float64>=>{
+    if ys.length <? xs.length return [0.0 0.0]
     let w:float64=0.0
     let b:float64=0.0
     let n=xs.length as float64

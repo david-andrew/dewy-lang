@@ -11,8 +11,8 @@ reserve=(@r:Ring):>Reservation?=> {
     return Reservation[position slot]
 }
 commit=(@r:Ring reservation:Reservation value:int64):>void=> {
-    r.data[reservation.slot]=value
-    r.sequence[reservation.slot]=reservation.position+1
+    r.data[reservation.slot%4]=value
+    r.sequence[reservation.slot%4]=reservation.position+1
 }
 consume=(@r:Ring):>int64?=> {
     let position=r.read

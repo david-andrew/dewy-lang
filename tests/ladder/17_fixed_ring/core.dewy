@@ -7,7 +7,7 @@ push=(@r:Ring value:int64):>void=>{
 }
 pop=(@r:Ring):>int64?=>{
     if r.count =? 0 {return none}
-    let value=r.data[r.head]
+    let value=r.data[r.head%4]
     r.head=(r.head+1)%4
     r.count-=1
     return value

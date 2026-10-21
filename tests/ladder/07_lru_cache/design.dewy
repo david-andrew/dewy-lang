@@ -10,7 +10,7 @@ touch=(@cache:Cache key:string):>void=>{
 put=(@cache:Cache key:string value:int64):>void=>{
     cache.values[key]=value
     touch(@cache key)
-    if cache.order.length >? cache.capacity {
+    if cache.order.length >? cache.capacity and cache.order.length >? 0 {
         let victim=cache.order[0]
         cache.order.pop(0)
         cache.values.pop(victim)

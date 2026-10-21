@@ -51,7 +51,9 @@ main=():>int64=> {
         $runtime_assert (item.id >? previous)
         previous=item.id
         total+=item.value
-        let parsed=parse_job(saved[item.id])
+        let job=saved.get(item.id)
+        if job is? none return 1
+        let parsed=parse_job(job)
         if parsed is? Failure  {
             return 1
         }

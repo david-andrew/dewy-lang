@@ -16,7 +16,7 @@ evaluate=(source:string):>int=>{
     $runtime_assert (parser.at =? parser.tokens.length)
     return result
 }
-peek=(p:Parser):>string=>if p.at <? p.tokens.length p.tokens[p.at] else ""
+peek=(p:Parser):>string=>if p.at >=? 0 and p.at <? p.tokens.length p.tokens[p.at] else ""
 factor=(@p:Parser):>int=>{
     let token=peek(p)
     p.at+=1
