@@ -74,8 +74,14 @@ effect_seen: int[]
 effect_stack: int[]
 effect_serial = 0
 effect_limit = 0
+# Element accesses charged a possible failure in the current graph (owner,
+# node), and those a facts probe of their owner's body proved in bounds.
+effect_bound_sites: (int, int)[]
+effect_bounds_proven: {int: bool} = {}
 
 effects_reset = ():
+    effect_bound_sites = []
+    effect_bounds_proven = {}
     loan_owners = {}
     effects_active = false
     effect_obligations = []
@@ -576,6 +582,8 @@ effect_plain = (t0: int, depth: int = 0) -> bool:
                 fi = int(variants[vi].fields) + j
                 if fields[fi].boxed or not effect_plain(int(fields[fi].type), depth + 1): return false
         return true
+    # (a fixed array of plain elements is inline storage with no lifecycle)
+    if depth <= 16 and tkind(t) == .fixed: return effect_plain(int(types[t].elem), depth + 1)
     if depth > 16 or tkind(t) != .struct_: return false
     layout(t)
     si = int(types[t].st)
@@ -684,6 +692,7 @@ effect_place_inventory = (n: int, depth: int = 0) -> bool:
     if n == 0 or depth > 32: return false
     k = nodes[n].kind
     if k == .addr: return effect_place_inventory(int(nodes[n].a), depth + 1)
+    if effect_fixed_index(n): return effect_place_inventory(int(nodes[n].a), depth + 1)
     if k == .field:
         t = prune(ntype(int(nodes[n].a)))
         if types[t].kind != .struct_ or nodes[n].aux < 0: return false
@@ -699,21 +708,140 @@ effect_place_inventory = (n: int, depth: int = 0) -> bool:
     if flags & LF_ALIAS != 0: return effect_place_inventory(int(locals[l].alias), depth + 1)
     flags & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF | LF_EXPOSED) == 0
 
+# `xs[i]`: one index. The checker keeps the written selector as the only kid
+# (a compound update reads a captured copy); scanning both is conservative.
+effect_single_index = (n: int) -> bool:
+    nodes[n].kind == .index and nodes[n].b != 0 and nkids(n) <= 1
+
+# An element of a fixed array is inline storage of the array: `xs[i]` with a
+# word index. Element routes are coarse (the whole array), never invented.
+effect_fixed_index = (n: int) -> bool:
+    if not effect_single_index(n): return false
+    t = representation_type(ntype(int(nodes[n].a)))
+    tkind(t) == .fixed and effect_plain(int(types[t].elem)) and effect_word(int(nodes[n].b))
+
+# A read-only element read: a fixed array's, or an array of words' (a
+# shared immutable view; reading it neither detaches nor allocates).
+effect_index_read = (n: int) -> bool:
+    if effect_fixed_index(n): return true
+    if not effect_single_index(n): return false
+    t = representation_type(ntype(int(nodes[n].a)))
+    tkind(t) == .array and effect_scalar(telem(t)) and effect_word(int(nodes[n].b))
+
+effect_route = (n: int, depth: int = 0) -> PlaceIdentity:
+    if depth > 32: return PlaceIdentity(.local, 0, 0)
+    k = nodes[n].kind
+    if k == .addr or effect_fixed_index(n): return effect_route(int(nodes[n].a), depth + 1)
+    if k == .field and tkind(ntype(int(nodes[n].a))) == .struct_: return place_project(effect_route(int(nodes[n].a), depth + 1), int(nodes[n].name))
+    if k == .field or k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ALIAS != 0: return place_route(n, depth)
+    place_scalar_root(n)
+
+# An element access can fail unless its index is proven in bounds: by the
+# checker (a constant into a fixed array, a generated in-bounds index), by an
+# unsigned index type covering a fixed array, or by the owner body's facts.
+effect_bounds = (f: int, n: int):
+    if has_flag(n, NF_INBOUNDS) or effect_bounds_proven.has(n): return
+    ix = int(nodes[n].b)
+    t = representation_type(ntype(int(nodes[n].a)))
+    if tkind(t) == .fixed:
+        if nodes[ix].kind == .int_lit and not has_flag(ix, NF_U64) and nodes[ix].ival >= 0 and nodes[ix].ival < fixed_len(t): return
+        it = prune(ntype(ix))
+        if types[it].kind == .int_ and not types[it].sign and int(types[it].bits) < 32 and (1 << int(types[it].bits)) <= fixed_len(t): return
+    effect_bound_sites.push((f, n))
+    effect_add(f, EffectEvent(EffectAtom(.panic), n))
+
+# The selectors a target place evaluates: element indices and their bounds.
+effect_target_parts = (f: int, n: int, depth: int = 0):
+    if n == 0 or depth > 32: return
+    k = nodes[n].kind
+    if effect_fixed_index(n):
+        effect_scan_node(f, int(nodes[n].b))
+        loop c in kids(n): effect_scan_node(f, c)
+        effect_bounds(f, n)
+    if k == .addr or k == .field or effect_fixed_index(n): effect_target_parts(f, int(nodes[n].a), depth + 1)
+
+# Semantic-integer counters proven to stay small immediates, by local: the
+# magnitude bound of a counted loop's counter over small bounds.
+effect_counters: {int: int} = {}
+
+# A semantic integer that provably stays a small immediate (no promotion, no
+# check): a nonnegative literal, a small counter, and sums, differences and
+# products of them. Its magnitude bound, or -1.
+effect_small = (n: int, depth: int = 0) -> int:
+    if n == 0 or depth > 8: return -1
+    k = nodes[n].kind
+    if k == .int_lit and is_int(ntype(n)) and not has_flag(n, NF_U64) and nodes[n].ival >= 0: return if nodes[n].ival < (1 << 31): nodes[n].ival else: -1
+    if k == .ident and nodes[n].aux == i32(int(SK.local)) and prune(ntype(n)) == T_MATH_INT: return effect_counters.get(int(nodes[n].sym)) ?? -1
+    # (a value-preserving integer conversion of a small value)
+    if k == .conv and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))) and is_int(ntype(n)): return effect_small(int(nodes[n].a), depth + 1)
+    if k != .binary or nodes[n].aux != 0 or prune(ntype(n)) != T_MATH_INT: return -1
+    op = nodes[n].op as Tok
+    if op != .plus and op != .minus and op != .star: return -1
+    a = effect_small(int(nodes[n].a), depth + 1)
+    b = effect_small(int(nodes[n].b), depth + 1)
+    if a < 0 or b < 0: return -1
+    r = if op == .star: a * b else: a + b
+    if r >= (1 << 40): return -1
+    r
+
+# A word operand, or a semantic integer that stays a small immediate.
+effect_word = (n: int) -> bool: effect_scalar(ntype(n)) or effect_small(n) >= 0
+
+# A counted loop over a word range: its bounds are evaluated once, and its
+# counter is a private word (or a small semantic integer, recorded).
+effect_range_loop = (n: int) -> bool:
+    it = int(nodes[n].a)
+    if nodes[it].kind != .range or nodes[n].sym <= 0: return false
+    l = int(nodes[n].sym)
+    small = prune(int(locals[l].type)) == T_MATH_INT
+    if not small and not effect_scalar(int(locals[l].type)): return false
+    if int(locals[l].flags) & (LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF | LF_ADDR | LF_EXPOSED) != 0: return false
+    bound = 0
+    loop c in [int(nodes[it].a), int(nodes[it].b), int(nodes[it].c)]:
+        if c == 0: continue
+        if small:
+            m = effect_small(c)
+            if m < 0: return false
+            bound = max(bound, m + 1)
+        else if not effect_scalar(ntype(c)) and not effect_count_literal(c): return false
+    if small: effect_counters[l] = bound
+    true
+
+# A fixed array literal is built in place: its elements, or zeros.
+effect_fixed_literal = (n: int) -> bool:
+    t = representation_type(ntype(n))
+    if nodes[n].kind != .array or nodes[n].b != 0 or tkind(t) != .fixed or not effect_plain(t): return false
+    loop c in kids(n):
+        if has_flag(c, NF_SPREAD): return false
+    true
+
+# Proven immutable startup constants need no external read: a literal word,
+# or a fixed array of literal words.
+effect_const_literal = (g: int) -> bool:
+    if globals[g].is_const:
+        init = int(globals[g].init)
+        return init != 0 and (nodes[init].kind == .int_lit or nodes[init].kind == .bool_lit)
+    if not readonly_global(g): return false
+    init = int(nodes[int(globals[g].decl)].b)
+    if init == 0: return false
+    if nodes[init].kind == .conv and nodes[init].aux == i32(int(CV.none_)): init = int(nodes[init].a)
+    if nodes[init].kind != .array or nodes[init].b != 0 or tkind(representation_type(int(globals[g].type))) != .fixed: return false
+    loop c in kids(init):
+        if nodes[c].kind != .int_lit and nodes[c].kind != .bool_lit or has_flag(c, NF_SPREAD): return false
+    true
+
 effect_access = (f: int, n: int, write: bool):
     if not (effect_plain(ntype(n)) or ownership_scalar(ntype(n))) or not effect_place_inventory(n): effect_opaque(f, n)
     if write and nodes[n].kind == .field:
         t = representation_type(ntype(int(nodes[n].a)))
         layout(t)
         if int(types[t].flags) & TF_BOXED != 0: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
-    p = effect_export(f, place_route(n))
+    p = effect_export(f, effect_route(n))
     if p.declaration == 0:
         effect_opaque(f, n)
         return
     if p.root == .local: return
-    # Only scalar, literal startup constants can erase an ambient read.
-    if p.root == .global and not write and globals[p.declaration].is_const:
-        init = int(globals[p.declaration].init)
-        if init != 0 and (nodes[init].kind == .int_lit or nodes[init].kind == .bool_lit): return
+    if p.root == .global and not write and effect_const_literal(p.declaration): return
     kind = if write: EffectKind.write else: EffectKind.read
     effect_add(f, EffectEvent(EffectAtom(kind, p), n))
 
@@ -835,7 +963,7 @@ effect_scan_node = (f: int, n: int):
         effect_plan_cost(f, n, cost)
         if nkids(n) > 0 and cost > 0 and isolation_intrinsic(nodes[n].aux as IN):
             effect_access(f, kid(n, 0), true)
-    if k == .array and (nkids(n) > 0 or nodes[n].b != 0): effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+    if k == .array and (nkids(n) > 0 or nodes[n].b != 0) and not effect_fixed_literal(n): effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
     if k == .str_lit and nkids(n) > 0: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
     if k == .lambda and nodes[n].sym > 0 and fns[int(nodes[n].sym)].caps.len() != 0:
         effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
@@ -882,6 +1010,7 @@ effect_scan_node = (f: int, n: int):
         if not effect_plain(int(fns[g].ret)) and not ownership_scalar(int(fns[g].ret)) and int(fns[g].ret) != T_VOID: effect_opaque(f, n)
         return
     if k == .assign:
+        effect_target_parts(f, int(nodes[n].a))
         effect_access(f, int(nodes[n].a), true)
         if nodes[n].op != i32(int(Tok.assign)):
             effect_access(f, int(nodes[n].a), false)
@@ -890,9 +1019,16 @@ effect_scan_node = (f: int, n: int):
         return
     if k == .ident and nodes[n].aux == i32(int(SK.local)):
         l = int(nodes[n].sym)
+        if effect_small(n) >= 0: return
         t = representation_type(ntype(n))
         if is_fn_type(t) and effect_bare(n): return
-        if tkind(t) == .array and effect_scalar(telem(t)) and int(locals[l].flags) & LF_PARAM != 0: return
+        if tkind(t) == .array and effect_scalar(telem(t)) and int(locals[l].flags) & LF_PARAM != 0:
+            if int(locals[l].flags) & LF_MUTPARAM == 0: return
+            # (a mutable parameter's storage is the caller's: reading it is a read of the formal)
+            p = effect_export(f, place_scalar_root(n))
+            if p.declaration != 0 and p.root == .formal:
+                effect_add(f, EffectEvent(EffectAtom(.read, p), n))
+                return
         if effect_scalar(t) and int(locals[l].flags) & LF_BYREF != 0:
             loop q in [1..effect_seen.len()):
                 if effect_seen[q] == f and nodes[q].kind == .for_ and nodes[q].sym == i32(l) and not has_flag(q, NF_MUT) and tkind(ntype(int(nodes[q].a))) == .array: return
@@ -901,6 +1037,16 @@ effect_scan_node = (f: int, n: int):
     if k == .ident or k == .field:
         effect_access(f, n, false)
         return
+    if k == .for_ and effect_range_loop(n):
+        loop c in [int(nodes[int(nodes[n].a)].a), int(nodes[int(nodes[n].a)].b), int(nodes[int(nodes[n].a)].c), int(nodes[n].b)]: effect_scan_node(f, c)
+        loop g in hidden: effect_summaries[f].edges.push(EffectEdge(g, n, []))
+        return
+    if effect_index_read(n):
+        effect_scan_node(f, int(nodes[n].a))
+        effect_scan_node(f, int(nodes[n].b))
+        loop c in kids(n): effect_scan_node(f, c)
+        effect_bounds(f, n)
+        return
     supported = false
     if k == .intrinsic: supported = effect_intrinsic_cost(nodes[n].aux as IN) >= 0
     else if k == .call and nodes[n].aux == 2: supported = effect_plain(ntype(n)) or ownership_scalar(ntype(n))
@@ -908,7 +1054,8 @@ effect_scan_node = (f: int, n: int):
     else if k == .call and nodes[n].aux == 3: supported = effect_plain(ntype(n))
     else if k == .fnref or k == .lambda: supported = effect_bare(n)
     else if k == .for_: supported = tkind(ntype(int(nodes[n].a))) == .array and effect_scalar(telem(ntype(int(nodes[n].a)))) and not has_flag(n, NF_MUT)
-    else if k == .int_lit or k == .bool_lit: supported = effect_scalar(ntype(n)) or effect_count_literal(n)
+    else if k == .int_lit or k == .bool_lit: supported = effect_scalar(ntype(n)) or effect_count_literal(n) or effect_small(n) >= 0
+    else if k == .array: supported = effect_fixed_literal(n)
     else if k == .block or k == .exprstmt or k == .return_ or k == .if_ or k == .and_ or k == .or_ or k == .not_ or k == .defer_: supported = true
     else if k == .vardecl:
         l = int(nodes[n].sym)
@@ -918,12 +1065,15 @@ effect_scan_node = (f: int, n: int):
         shift = nodes[n].op == i32(int(Tok.shl)) or nodes[n].op == i32(int(Tok.shr))
         count_ok = effect_scalar(ntype(int(nodes[n].b))) or shift and effect_count_literal(int(nodes[n].b))
         supported = nodes[n].aux == 0 and effect_word_op(nodes[n].op as Tok) and effect_scalar(ntype(int(nodes[n].a))) and count_ok
+        # (small semantic integers: arithmetic that cannot promote, comparisons)
+        if not supported and nodes[n].aux == 0 and effect_word(int(nodes[n].a)) and effect_word(int(nodes[n].b)):
+            supported = effect_small(n) >= 0 or (effect_word_op(nodes[n].op as Tok) and effect_scalar(ntype(n)))
     else if k == .unary:
         supported = effect_scalar(ntype(n)) and (nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.tilde)))
     else if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_scalar(ntype(n)): supported = true
 
     else if k == .conv:
-        supported = (effect_scalar(ntype(n)) and effect_scalar(ntype(int(nodes[n].a))) or is_fn_type(ntype(n)) and effect_bare(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)))
+        supported = (effect_scalar(ntype(n)) and effect_word(int(nodes[n].a)) or effect_small(n) >= 0 or is_fn_type(ntype(n)) and effect_bare(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)))
     if not supported: effect_opaque(f, n)
     # Hidden calls cannot be trusted by annotation or pathname. They remain
     # explicit dependencies for witnesses and legacy isolation even when this
@@ -1058,19 +1208,50 @@ effect_witness = (f: int, event0: EffectEvent) -> str:
         event = next
     chain
 
+# A declared contract, or main under the internal policy.
+effect_root = (f: int) -> bool:
+    d = int(fns[f].decl)
+    policy_root = effect_policy.prohibitions != 0 and f == main_fn
+    if d == 0 or (nodes[d].sval == 0 and not policy_root): return false
+    not (fns[f].kind == FK_LAMBDA and has_flag(d, NF_GENERIC) and fns[f].body == 0 and not fns[f].has_env)
+
+# Summaries first charge every unproven element access a possible failure.
+# One facts probe per owning body then discharges what its own facts prove,
+# and the graph is solved again. Probe answers depend only on callees' write
+# footprints, which discharging a failure cannot change.
+effect_settle_bounds = ():
+    effect_bound_sites = []
+    loop obligation in effect_obligations: effect_source_row(obligation.source)
+    loop f in [1..effect_limit):
+        if effect_root(f) and effect_summaries[f].index == 0: effect_visit(f)
+    sites = effect_bound_sites
+    effect_bound_sites = []
+    if sites.len() == 0: return
+    owners: {int: bool} = {}
+    proved = false
+    loop site in sites:
+        if owners.has(site.0): continue
+        owners[site.0] = true
+        found = fact_probe_function(site.0)
+        loop other in sites:
+            if other.0 == site.0 and (found.get(other.1) ?? false):
+                effect_bounds_proven[other.1] = true
+                proved = true
+    if proved: effect_graph_reset()
+
 effects_finalize = ():
     if not effects_active and effect_policy.prohibitions == 0: return
     effect_final = true
     effect_graph_reset()
+    effect_settle_bounds()
     loop obligation in effect_obligations:
         actual = effect_source_row(obligation.source)
         if not effect_rows_fit(actual, obligation.bound):
             fatal(nodes[obligation.source].pos, "cannot prove callable effect contract: a reaching source exceeds the inferred row")
     loop f in [1..effect_limit):
+        if not effect_root(f): continue
         d = int(fns[f].decl)
         policy_root = effect_policy.prohibitions != 0 and f == main_fn
-        if d == 0 or (nodes[d].sval == 0 and not policy_root): continue
-        if fns[f].kind == FK_LAMBDA and has_flag(d, NF_GENERIC) and fns[f].body == 0 and not fns[f].has_env: continue
         contract = if fns[f].kind == FK_LAMBDA and not has_flag(d, NF_GENERIC): callable_contract(int(fns[f].fntype)) else: effect_subst(int(decl_infos[decl_info(d)].sig.contract), fns[f].targs)
         if effect_summaries[f].index == 0: effect_visit(f)
         # A concrete prohibited cost is more informative than an earlier

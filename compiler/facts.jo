@@ -316,7 +316,8 @@ fact_store_route = (s: mut FactState, route: FactRoute, value0: int, at: int, bo
     p = fact_place(route.root)
     if p.declaration == 0: fact_forget(s, at, .write, true); return
     values = fact_route_values(s, route)
-    if bounds and fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query): fact_route_bounds(s, route, values)
+    if bounds and fact_speculating == 0 and fact_probe_on: fact_probe_route(s, route, values)
+    else if bounds and fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query): fact_route_bounds(s, route, values)
     if result_active and values.len() > 0: result_replaced(values[values.len() - 1], at, s)
     value = value0
     i = route.selectors.len() - 1
@@ -340,6 +341,50 @@ fact_route_bounds = (s: mut FactState, route: FactRoute, values: int[]):
         lo = fact_compare(s, .le, zero, index)
         hi = fact_compare(s, .lt, index, length)
         if lo != 1 or hi != 1: wit_index(n, s, index, length, lo, hi)
+
+# Effect verification asks which element accesses a body's own facts keep in
+# bounds. A probe records answers instead of reporting them: it is never a
+# strict obligation and never removes a runtime check.
+fact_probe_on = false
+fact_probe: {int: bool} = {}
+
+fact_probe_index = (n: int, s: mut FactState, index: int, length: int):
+    zero = fact_constant(s, 0)
+    ok = fact_compare(s, .le, zero, index) == 1 and fact_compare(s, .lt, index, length) == 1
+    if let old = fact_probe.get(n): ok = ok and old
+    fact_probe[n] = ok
+
+fact_probe_route = (s: mut FactState, route: FactRoute, values: int[]):
+    loop i in [0..route.selectors.len()):
+        n = route.sites[i]
+        if n == 0 or i >= values.len(): continue
+        t = representation_type(if i == 0: ntype(route.root) else: route.types[i - 1])
+        if types[t].kind != .array and types[t].kind != .fixed: continue
+        length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, values[i], -1, false, T_INT)
+        fact_probe_index(n, s, route.selectors[i], length)
+
+# Analyze f's body from an unknown entry (plus its checked parameter
+# refinements) and return the element accesses proven in bounds on every path
+# that reaches them. Nested runs are refused: the caller keeps its obligation.
+fact_probe_function = (f: int) -> {int: bool}:
+    fact_probe = {}
+    if fact_owner != 0 or fact_probe_on or f <= 0 or f >= fns.len() or fns[f].state != 2 or fns[f].body == 0: return fact_probe
+    saved_proof = proof_active
+    saved_result = result_active
+    proof_active = false
+    result_active = false
+    fact_probe_on = true
+    fact_owner = f
+    fact_terms = [FactTerm()]
+    state = FactState()
+    if refine_active: refine_fact_entry(f, state)
+    fact_capture(int(fns[f].body), state)
+    fact_owner = 0
+    fact_terms = []
+    fact_probe_on = false
+    proof_active = saved_proof
+    result_active = saved_result
+    fact_probe
 
 fact_store = (s: mut FactState, e: int, value: int, at: int):
     route = fact_route(e, s)
@@ -661,10 +706,13 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     if n == 0: return
     k = nodes[n].kind
     if k == .assign:
-        p = fact_place(int(nodes[n].a))
+        # (an element or field store havocs its whole root, not every place)
+        target = int(nodes[n].a)
+        root = if nodes[target].kind == .index or nodes[target].kind == .field: place_root(target) else: target
+        p = fact_place(root)
         if p.declaration != 0:
             if fact_exposed(p): fact_forget(s, at, reason)
-            v = fact_new(s, fact_domain(ntype(int(nodes[n].a)), reason, at))
+            v = fact_new(s, fact_domain(ntype(root), reason, at))
             fact_bind(s, p, v)
         else: fact_forget(s, at, reason, true)
     if k == .intrinsic:
@@ -1106,7 +1154,8 @@ fact_capture = (n: int, s: mut FactState) -> int:
         t = representation_type(ntype(int(nodes[n].a)))
         if types[t].kind == .array or types[t].kind == .fixed:
             length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, base, -1, false, T_INT)
-            if fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query):
+            if fact_speculating == 0 and fact_probe_on: fact_probe_index(n, s, index, length)
+            else if fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query):
                 zero = fact_constant(s, 0)
                 lo = fact_compare(s, .le, zero, index)
                 hi = fact_compare(s, .lt, index, length)

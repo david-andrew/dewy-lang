@@ -1,0 +1,4 @@
+# The same reads under a row that permits them.
+first=(@xs:array<int64>):>int64 & reads<xs>=>if xs.length >? 0 xs[0] else 0
+let a:array<int64>=[1 2 3]
+printl(first(@a))

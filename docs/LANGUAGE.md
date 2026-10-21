@@ -538,7 +538,11 @@ The implementation-cost inventory supports wrapping fixed-width scalar work
 (including shifts), inline scalar records and unions of them (`:>(int64 | Oops) &
 no_effects`; the parentheses are required), bare handles, capture-free lambdas,
 read-only array parameter borrowing, length/capacity inspection and scalar array
-iteration. Library bodies receive the same analysis as user functions. Intrinsic
+iteration, fixed arrays of such values (literals built in place, literal constant
+tables), counted loops over word ranges, and element reads and stores whose index
+is proven in bounds (a constant into a fixed array, or the function's own facts:
+`loop i in [0..16)`, a guard on `xs.length`). An unproven index is a possible
+failure. Reading a mutable parameter's elements reads that formal. Library bodies receive the same analysis as user functions. Intrinsic
 costs use resolved compiler identities. Dynamic growth, formatting, managed
 copies, closure construction and recursive boxes retain allocation costs;
 unknown storage conditions remain conservative. Defaults, defers and known drop

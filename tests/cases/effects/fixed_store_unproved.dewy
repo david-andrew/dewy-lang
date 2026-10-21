@@ -1,0 +1,9 @@
+# A store through an unbounded index can fail, and a mutable parameter's
+# element store is a mutation of it.
+Field:type=array<int64 length=16>
+put=(@a:Field i:int64):>void & mutates<a>=>{
+    a[i]=1
+}
+let x:Field=[]
+put(@x 3)
+printl(x[3])

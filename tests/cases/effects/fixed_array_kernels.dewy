@@ -1,0 +1,73 @@
+# Pure word kernels over fixed arrays carry `no_effects`: element reads and
+# writes whose indices the body's facts keep in bounds cannot fail, a fixed
+# array literal is built in place, and a literal constant table is no read.
+Field:type=array<int64 length=16>
+Wide:type=array<int64 length=31>
+const TABLE:array<uint32 length=4>=[3 5 7 11]
+
+add=(a:Field b:Field):>Field & no_effects=>{
+    let o:Field=[]
+    loop i in [0..16) {
+        o[i]=a[i]+b[i]
+    }
+    return o
+}
+
+carry=(@o:Field):>void & reads<o> & mutates<o>=>{
+    loop i in [0..16) {
+        let c=o[i] >> 16
+        if i <? 15 {
+            o[i+1]+=c
+        } else {
+            o[0]+=38*c
+        }
+        o[i]-=c << 16
+    }
+}
+
+mul=(a:Field b:Field):>Field & no_effects=>{
+    let t:Wide=[]
+    loop i in [0..16) {
+        loop j in [0..16) {
+            t[i+j]+=a[i]*b[j]
+        }
+    }
+    let o:Field=[]
+    loop i in [0..15) {
+        o[i]=t[i]+38*t[i+16]
+    }
+    o[15]=t[15]
+    carry(@o)
+    return o
+}
+
+spread=(bytes:array<uint8 length=8>):>Field & no_effects=>{
+    let o:Field=[]
+    loop i in [0..4) {
+        o[i]=(bytes[2*i] as int64)+((bytes[2*i+1] as int64) << 8)
+    }
+    return o
+}
+
+weight=(i:int64):>uint32 & no_effects=>if i >=? 0 and i <? 4 TABLE[i] else 0
+
+same=(a:array<uint8> b:array<uint8>):>bool & no_effects=>{
+    if a.length not=? b.length return false
+    let diff:uint8=0
+    loop i in [0..a.length) {
+        diff=diff or (a[i] xor b[i])
+    }
+    return diff =? 0
+}
+
+let x:Field=[]
+x[0]=70000
+x[3]=2
+let y=add(x x)
+printl(y[0] y[3])
+let z=mul(x x)
+printl(z[0] z[1] z[6])
+let packed:array<uint8 length=8>=[1 2 3 4 5 6 7 8]
+printl(spread(packed)[3])
+printl(weight(2) weight(9))
+printl(same([1 2 3] [1 2 3]) same([1 2] [1 3]))

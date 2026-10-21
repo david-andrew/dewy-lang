@@ -26,7 +26,7 @@ is_zero32=(x:uint32):>uint32 & no_effects=>((not x) and (x-1)) >> 31
 
 # Compare two byte strings of public length in time independent of their contents.
 # The lengths are public (a tag is always 16 bytes); only the final verdict leaves.
-equal=(a:array<uint8> b:array<uint8>):>bool=>{
+equal=(a:array<uint8> b:array<uint8>):>bool & no_effects=>{
     if a.length not=? b.length return false
     let diff:uint32=0
     loop i in [0..a.length) {

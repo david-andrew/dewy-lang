@@ -38,7 +38,7 @@ swap=(@p:Field @q:Field bit:int64):>void=>{
     }
 }
 
-add=(a:Field b:Field):>Field=>{
+add=(a:Field b:Field):>Field & no_effects=>{
     let o:Field=[]
     loop i in [0..16) {
         o[i]=a[i]+b[i]
@@ -46,7 +46,7 @@ add=(a:Field b:Field):>Field=>{
     return o
 }
 
-sub=(a:Field b:Field):>Field=>{
+sub=(a:Field b:Field):>Field & no_effects=>{
     let o:Field=[]
     loop i in [0..16) {
         o[i]=a[i]-b[i]
@@ -54,7 +54,7 @@ sub=(a:Field b:Field):>Field=>{
     return o
 }
 
-mul=(a:Field b:Field):>Field=>{
+mul=(a:Field b:Field):>Field & no_effects=>{
     let t:array<int64 length=31>=[]
     loop i in [0..16) {
         let ai=a[i]
@@ -72,10 +72,10 @@ mul=(a:Field b:Field):>Field=>{
     return o
 }
 
-square=(a:Field):>Field=>mul(a a)
+square=(a:Field):>Field & no_effects=>mul(a a)
 
 # a^(p-2) = 1/a: square-and-multiply over the public exponent 2^255 - 21.
-invert=(a:Field):>Field=>{
+invert=(a:Field):>Field & no_effects=>{
     let c=a
     loop bit in [253,252..0] {
         c=square(c)
@@ -86,7 +86,7 @@ invert=(a:Field):>Field=>{
     return c
 }
 
-unpack=(n:Bytes32):>Field=>{
+unpack=(n:Bytes32):>Field & no_effects=>{
     let o:Field=[]
     loop i in [0..16) {
         o[i]=(n[2*i] as int64)+((n[2*i+1] as int64) << 8)
@@ -96,7 +96,7 @@ unpack=(n:Bytes32):>Field=>{
 }
 
 # The canonical little-endian encoding: subtract p twice under a mask.
-pack=(n:Field):>Bytes32=>{
+pack=(n:Field):>Bytes32 & no_effects=>{
     let t=n
     carry(@t)
     carry(@t)
@@ -122,7 +122,7 @@ pack=(n:Field):>Bytes32=>{
 }
 
 # Clamp a 32-byte secret: clear the cofactor bits, set the top bit.
-clamp=(scalar:Bytes32):>Bytes32=>{
+clamp=(scalar:Bytes32):>Bytes32 & no_effects=>{
     let z=scalar
     z[31]=(z[31] and 127) or 64
     z[0]=z[0] and 248

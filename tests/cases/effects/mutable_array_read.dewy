@@ -1,0 +1,5 @@
+# A mutable parameter's storage is the caller's: reading its elements or its
+# length is a read of the formal, which `no_effects` rejects.
+first=(@xs:array<int64>):>int64 & no_effects=>if xs.length >? 0 xs[0] else 0
+let a:array<int64>=[1 2 3]
+printl(first(@a))
