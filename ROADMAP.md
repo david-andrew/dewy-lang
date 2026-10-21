@@ -32,8 +32,9 @@ only.
 - Astra: inferred scope regions (Goose idea 1).
 - Astra was paused (quota). The Sol parallel review found 2 diagnostic-order bugs,
   both fixed (9109989b), with guards extended.
-- Opus: design coverage, round 2. The 10-21 audit: 613 features, 401 work, 47
-  broken, 134 missing; round 1 fixed ~25.
+- Opus: design coverage, round 3. The 10-21 audit: 613 features, 401 work, 47
+  broken, 134 missing; rounds 1–2 fixed ~35 (widths, singleton unions, guards,
+  pipes, parameter kinds, `$breakpoint`).
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
 
@@ -186,7 +187,11 @@ only.
     - `d.keys` returns an array, not a set;
     - unknown escapes like `\N` are errors;
     - user functions join prelude overloads rather than shadowing them;
-    - `and=` on bools always evaluates its right side.
+    - `and=` on bools always evaluates its right side;
+    - an unproven implicit narrowing is checked at run time (per GOALS), but
+      the reference says it's a compile error;
+    - explicit `uint64(x)` and `as` between widths keep the bits; the reference
+      says they should be proven casts.
 26. From Goose: index-typed refinements ("below `a.length`" for a
     never-shrinking array) aimed at graph; and Euclidean `%` so `x % n` is
     always a valid index.
