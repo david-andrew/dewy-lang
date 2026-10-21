@@ -28,9 +28,7 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: ownership slice 2, closures and generic hooks. Landed: hooks,
-  inheritance, inline aggregates, fixed/growable resource containers, field
-  moves, optional and recursive owners.
+- Astra: stack closure environments and devirtualization (runtime).
 - Opus: dogfooding sweep (12 everyday programs; fix what breaks).
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
@@ -39,8 +37,11 @@ only.
 
 - Tier-3 implementation (designed, no decisions needed):
   - effect rows slices 3, 5–6 (1–2 and 4 landed; ~/dev/tmp/coord/effects-design.md);
-  - ownership slices 4–6 (1, 2 in flight, 3 `$lend`): allocator runtime,
-    escape promotion, integration
+  - ownership slices 4–6 (1–3 landed): allocator runtime, escape promotion,
+    integration; arena surface waits on question 4. Slice 2 leftovers, rejected
+    conservatively for now: generic closure literals capturing owners, partial
+    application of owners, escaping borrowed-owner closures, transfers through
+    outer hooks or boxed fields
     (~/dev/tmp/coord/ownership-design.md);
 - Compile throughput. Strategy: ~/dev/tmp/coord/throughput-strategy-2026-10-21.md.
   The root program is 86% of the work (46k instructions/line); library 13%;
