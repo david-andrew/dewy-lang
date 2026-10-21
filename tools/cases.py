@@ -197,6 +197,8 @@ class Runner:
     node: str | None = None
     builds: int = 0
     runs: int = 0
+    # Case path -> 'value' or 'void', once a build has settled how to call its main.
+    settled: dict = field(default_factory=dict)
 
     def flags(self, mode: str) -> list[str]:
         flags = ['--release'] if mode.endswith('-release') else []
@@ -283,27 +285,44 @@ class Runner:
         return [self.judge(case, mode, code, stdout, stderr)]
 
     def build_batch(self, cases: list[Case], mode: str, *, select: bool):
-        """Build cases as modules of one program; returns (command, cases, singles, failure)."""
+        """Build cases as modules of one program; returns (command, cases, singles, failure).
+
+        Each case is called in one of three forms: 'value' keeps main's result;
+        'guess' calls through a void-typed handle, so a wrong guess fails to
+        compile instead of dropping a result; 'void' is a direct call, used only
+        once main is known to have no result. The ownership check rejecting the
+        handle (owners need direct calls) runs after type checking, so it also
+        shows the handle's type matched. Settled forms carry over to other
+        batches and modes.
+        """
         cases = list(cases)
-        voids = {i for i, case in enumerate(cases) if returns_void(case.path.read_text())}
+        forms = [self.settled.get(case.path) or ('guess' if returns_void(case.path.read_text()) else 'value')
+                 for case in cases]
         singles = []
         while cases:
             work = self.directory('select' if select else 'batch')
-            source, lines = batch_source(cases, voids, select)
+            source, lines = batch_source(cases, forms, select)
             (work / 'batch.dewy').write_text(source)
             output = work / 'batch'
             built = self.build(work / 'batch.dewy', output, mode)
             if built.returncode == 0:
+                for case, form in zip(cases, forms):
+                    self.settled[case.path] = 'value' if form == 'value' else 'void'
                 return self.command(output, mode), cases, singles, None
             located = locate_error(built.stderr, work, cases, lines)
             if located is None:
                 return None, cases, singles, f'batch build failed in {work}:\n' + tail(built.stdout + built.stderr)
-            index, void = located
-            if void and index not in voids:
-                voids.add(index)
+            index, message, ours = located
+            if ours and forms[index] == 'guess':
+                forms[index] = 'void' if 'owners require direct calls' in message else 'value'
+            elif ours and forms[index] == 'value' and 'no type (void)' in message:
+                forms[index] = 'void'
+            else:
+                singles.append(cases.pop(index))
+                forms.pop(index)
                 continue
-            singles.append(cases.pop(index))
-            voids = {i - (i > index) for i in voids if i != index}
+            if forms[index] == 'void':
+                self.settled[cases[index].path] = 'void'
         return None, cases, singles, None
 
     def value_batch(self, cases: list[Case], mode: str) -> list[Outcome]:
@@ -354,19 +373,32 @@ class Runner:
         return outcomes
 
 
+MAIN = re.compile(r'^main\s*=\s*(?:<[^>]*>\s*)?\(\s*\)\s*(?::>\s*([\w<>]+))?\s*=>\s*(\S)', re.MULTILINE)
+
+
 def returns_void(source: str) -> bool:
-    """Guess whether main has no result; a wrong guess costs one rebuild."""
-    match = re.search(r'^main\s*=\s*(?:<[^>]*>\s*)?\(([^()]|\([^()]*\))*\)\s*(:>\s*([\w<>]+))?\s*=>\s*(\S)',
-                      source, re.MULTILINE)
+    """Guess whether main has no result; the batch verifies the guess."""
+    match = MAIN.search(source)
     if match is None:
         return False
-    if match[3]:
-        return match[3] == 'void'
-    body = source[match.start(4):]
-    return bool(re.match(r'(printl?\b|panic\b)', body))
+    if match[1]:
+        return match[1] == 'void'
+    if match[2] != '{':
+        return bool(re.match(r'(printl?\b|panic\b)', source[match.start(2):]))
+    depth, end = 0, len(source)
+    for position in range(match.start(2), len(source)):
+        depth += {'{': 1, '}': -1}.get(source[position], 0)
+        if depth == 0:
+            end = position
+            break
+    body = source[match.end(2):end]
+    # A value comes from `return <value>` or a trailing literal; anything else
+    # (a nested function's return, say) costs one rebuild when misjudged.
+    return re.search(r'\breturn[ \t]+[^\s}]', body) is None and \
+        re.search(r'(^|\s)-?\d+\s*$', body) is None
 
 
-def batch_source(cases: list[Case], voids: set[int], select: bool) -> tuple[str, dict[int, int]]:
+def batch_source(cases: list[Case], forms: list[str], select: bool) -> tuple[str, dict[int, int]]:
     lines = [f'from p"{case.path.as_posix()}" import (main as case_{i})' for i, case in enumerate(cases)]
     owners = {i + 1: i for i in range(len(cases))}
     if select:
@@ -376,16 +408,17 @@ def batch_source(cases: list[Case], voids: set[int], select: bool) -> tuple[str,
         lines.append('let selector=env("DEWY_CASE") ?? ""')
     else:
         lines.append('main=():>void=>{')
-    for i in range(len(cases)):
+    for i, form in enumerate(forms):
         owners[len(lines) + 1] = i
+        void = {'guess': f'let h_{i}:<():>void>=@case_{i} h_{i}()', 'void': f'case_{i}()'}.get(form)
         if select:
-            call = f'case_{i}() return' if i in voids else f'let r_{i}=case_{i}() exit(r_{i})'
+            call = f'{void} return' if void else f'let r_{i}=case_{i}() exit(r_{i})'
             lines.append(f'if selector =? "{i}" {{{call}}}')
         else:
             lines.append(f'printl"{MARK}B{i}"')
             owners[len(lines) + 1] = i
-            if i in voids:
-                lines.append(f'case_{i}() printl"{MARK}E{i}:0"')
+            if void:
+                lines.append(f'{void} printl"{MARK}E{i}:0"')
             else:
                 lines.append(f'let r_{i}=case_{i}() printl"{MARK}E{i}:{{r_{i}}}"')
     if select:
@@ -398,7 +431,7 @@ ERROR = re.compile(r'^(.+?):(\d+):\d+: error: (.*)$', re.MULTILINE)
 
 
 def locate_error(stderr: str, work: Path, cases: list[Case], owners: dict[int, int]):
-    """Attribute the first build error to one case: (index, needs-void-call) or None."""
+    """Attribute the first build error to one case: (index, message, in-the-batch-file) or None."""
     match = ERROR.search(stderr)
     if match is None:
         return None
@@ -406,10 +439,10 @@ def locate_error(stderr: str, work: Path, cases: list[Case], owners: dict[int, i
     path = (path if path.is_absolute() else work / path).resolve()
     if path == (work / 'batch.dewy').resolve():
         index = owners.get(int(match[2]))
-        return None if index is None else (index, 'no type (void)' in match[3])
+        return None if index is None else (index, match[3], True)
     for index, case in enumerate(cases):
         if path == case.path.resolve():
-            return index, False
+            return index, match[3], False
     return None
 
 

@@ -48,7 +48,20 @@ def test_core_case_batch_fallbacks(compiler, tmp_path, monkeypatch):
     write(root, 'rejects', '# modes: native\nmain=()=>{let x:int64="no" return 0}\n', err='type mismatch\n')
     write(root, 'arguments', '# modes: native native-release\n# args: a b\nmain=()=>{printl(args().length) return 0}\n',
           out='3\n')
+    # Guessed void, but main has a result: the guess must not drop the exit code.
+    write(root, 'hidden', '# exit: 5\nmain=()=>{let five=5 printl"hidden" five}\n', out='hidden\n')
+    write(root, 'owned', 'let drops:int64=0\nOwner=type of [value:int64\n    $__drop__\n    release=():>void=>{drops+=1}\n]\n'
+          'main=()=>{{let o=Owner[1]} printl"drops {drops}"}\n', out='drops 1\n')
     assert run(compiler, root, tmp_path, monkeypatch) == 0
+
+
+def test_core_case_void_guess():
+    assert cases.returns_void('main=()=>{printl"x"}\n')
+    assert cases.returns_void('main = ():>void => {\n    let f=()=>{return 1}\n}\n') is True
+    assert not cases.returns_void('main=()=>{printl"x" return 0}\n')
+    assert not cases.returns_void('main=()=>{\n    printl"x"\n    0\n}\n')
+    assert not cases.returns_void('main=():>int64=>{printl"x"}\n')
+    assert not cases.returns_void('main=(args:array<string>)=>{printl"x"}\n')
 
 
 def test_core_case_failures(compiler, tmp_path, monkeypatch, capsys):
