@@ -91,9 +91,43 @@ main=():>int64=>tick([1 2] [])
 }
 main=():>int64=>bump([1 2])
 ''',
+    # `x % n` with a positive n lies in [0, n) (the remainder has the divisor's
+    # sign); `n // 2` of a positive n is smaller than n.
+    'floor_remainder': '''Ring:type=[data:array<int64 length=4>=[0 0 0 0] head:int64=0 count:int64=0]
+push=(@r:Ring value:int64):>void=>{
+    let slot=(r.head+r.count)%4
+    r.data[slot]=value
+}
+wrap=(xs:array<int64> i:int64):>int64=>{
+    if xs.length =? 0 return 0
+    return xs[i%xs.length]
+}
+middle=(xs:array<int64>):>int64=>{
+    let n=xs.length
+    if n%2 =? 1 return xs[n//2]
+    return 0
+}
+main=():>int64=>{
+    let r=Ring[]
+    push(@r 3)
+    return wrap([1] 5)+middle([1])
+}
+''',
 }
 
 REJECTED = {
+    'remainder_too_wide': ('''pick=(xs:array<int64 length=3> i:int64):>int64=>xs[i%4]
+main=():>int64=>pick([1 2 3] 5)
+''', 'cannot prove index is in bounds: missing upper bound'),
+    'remainder_unknown_divisor': ('''pick=(xs:array<int64> i:int64 k:int64):>int64=>{
+    if k <? 1 return 0
+    return xs[i%k]
+}
+main=():>int64=>pick([1] 5 1)
+''', 'cannot prove index is in bounds: missing upper bound'),
+    'half_of_empty': ('''middle=(xs:array<int64>):>int64=>xs[xs.length//2]
+main=():>int64=>middle([1])
+''', 'cannot prove index is in bounds: missing upper bound'),
     'counted_pop': ('''bump=(values:array<int64>):>int64=>{
     let xs=values
     let k=-1

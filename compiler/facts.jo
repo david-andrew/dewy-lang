@@ -921,6 +921,50 @@ fact_divisor = (s: mut FactState, n: int, a: int, b: int, modulo: bool):
         if x.lo <= FACT_MIN and y.lo <= -1 and y.hi >= -1:
             fact_unknown(n, FactBound(reason = .wrap, witness = n), "division result")
 
+# Integer `//` and `%` by a positive divisor (kind 1, 2), or by a power of two
+# as a shift count or mask (3, 4). Dewy's remainder has the divisor's sign, so
+# `x % n` lies in [0, n) for any x; Jo's truncating forms agree when the
+# dividend is nonnegative. A nonnegative dividend bounds both results, and
+# halving a positive one makes it smaller.
+fact_floor = (s: mut FactState, n: int, kind: int, a: int, b: int, floor: bool) -> int:
+    x = fact_bound(s, a); y = fact_bound(s, b)
+    if x.lo < 1: x.lo = max(x.lo, fact_relational(s, a, false))
+    if kind == 3 or kind == 4:
+        if y.lo < 0 or y.hi > 62: return fact_unmodeled(s, n, .unsupported)
+    else if y.lo < 1: return fact_unmodeled(s, n, .unsupported)
+    if x.lo < 0 and (not floor or kind == 1 or kind == 3): return fact_unmodeled(s, n, .unsupported)
+    r = FactBound()
+    if kind == 2 or kind == 4:
+        r.lo = 0
+        r.hi = if kind == 2: y.hi - 1 else: y.hi
+        if x.lo >= 0: r.hi = min(r.hi, x.hi)
+    else if kind == 1:
+        r.lo = x.lo / y.hi
+        r.hi = x.hi / y.lo
+    else:
+        r.lo = x.lo >> y.hi
+        r.hi = x.hi >> y.lo
+    v = fact_new(s, r, FactTerm(.eof, a, b, n, ntype(n)))
+    fact_set_bound(s, v, r)
+    if kind == 2: fact_difference(s, v, b, -1, n)
+    if kind == 4: fact_difference(s, v, b, 0, n)
+    smaller = kind == 1 and x.lo >= 1 and y.lo >= 2 or kind == 3 and x.lo >= 1 and y.lo >= 1
+    if x.lo >= 0: fact_difference(s, v, a, (if smaller: -1 else: 0), n)
+    v
+
+# The builtin floor helper a Dewy `//` or `%` resolved to (fact_floor's kind), or 0.
+fact_floor_call = (n: int) -> int:
+    if nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return 0
+    f = int(nodes[n].sym)
+    if fns[f].decl == 0 or not pos_in_lib(nodes[int(fns[f].decl)].pos): return 0
+    if not fact_scalar(ntype(n)) or representation_type(ntype(n)) == T_U64: return 0
+    name = name_of(int(nodes[int(fns[f].decl)].name))
+    if name == "__floor_div": return 1
+    if name == "__floor_mod": return 2
+    if name == "__floor_div_pow2": return 3
+    if name == "__floor_mod_pow2": return 4
+    0
+
 # a - b <= limit, from rows or from the two intervals.
 fact_entails = (s: FactState, a: int, b: int, limit: int) -> bool:
     if fact_distance(s, a, b, limit): return true
@@ -1419,6 +1463,8 @@ fact_capture = (n: int, s: mut FactState) -> int:
         if nodes[n].aux == 0 and fact_scalar(ntype(n)) and (op == .plus or op == .minus or op == .star): return fact_arithmetic(s, n, op, a, b)
         if fact_speculating == 0 and fact_policy == .RequireStatic and nodes[n].aux == 0 and (op == .slash or op == .percent) and is_int(ntype(int(nodes[n].b))):
             fact_divisor(s, n, a, b, op == .percent)
+        if nodes[n].aux == 0 and (op == .slash or op == .percent) and fact_scalar(ntype(n)) and representation_type(ntype(n)) != T_U64 and fact_scalar(ntype(int(nodes[n].a))) and fact_scalar(ntype(int(nodes[n].b))):
+            return fact_floor(s, n, (if op == .slash: 1 else: 2), a, b, files[pos_file(nodes[n].pos)].is_dewy)
         if nodes[n].aux != 0: fact_forget(s, n, .call)
         return fact_unmodeled(s, n, .unsupported)
     if k == .conv:
@@ -1561,6 +1607,8 @@ fact_capture = (n: int, s: mut FactState) -> int:
                 if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(result, name, false, value))
             return result
         fact_call_effects(n, s)
+        floor = fact_floor_call(n)
+        if floor != 0: return fact_floor(s, n, floor, values[0], values[1], true)
         if ntype(n) == T_NEVER or nodes[n].aux == 0 and library_exit_call(n): s.live = false
         result = fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
         if nodes[n].aux == 0 and nodes[n].sym > 0:
