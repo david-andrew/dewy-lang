@@ -74,6 +74,14 @@ runner, never on the shared box. Kernels: `bench`.
 - `$shadowable const` at module top level; the prelude uses it.
 - Loops iterate the entry value; `loop x in @xs` iterates the place live.
 - Inference keeps precision; `end` and `new` are reserved.
+- Tensors: one `array`, shape in the type, dot broadcasting ([tensors](docs/design/tensors.md)).
+- Safety bundles ladder: `$prototype` → `$runtime_checks` → default →
+  `$explicit_copies` → `$no_hidden_costs` → `$explicit_allocation_failure`.
+- Allocation: implicit context allocator; OOM ends the process unless
+  `$explicit_allocation_failure`. Floats: strict IEEE; `$fast_math`,
+  `$no_nan`, `$no_inf`, `$finite_floats`.
+- FFI: `$extern`/`$export` metatags, `ptr<T>`, unsafe boundary; blocking `net`.
+  `$target` with canonical names; imports splat unless `as name`.
 - Versions: language 0.0.0; extension patch bumps, at most one release a day.
 
 ## Open questions for David
@@ -82,14 +90,10 @@ New questions carry a recommended answer, what it unblocks and whether it's
 reversible; reversible ones are implemented provisionally and flagged.
 
 3. Readonly/lifetime-bearing payload places beyond `$lend`.
-4. Allocation capabilities and allocation-failure policy. (76)
 5. Explicit `move` syntax.
-7. Multidimensional arrays: tensor syntax and broadcasting. (84)
-8. IEEE float policy. (85)
 9. Units: display (`as km`), affine units, calendar durations. (88)
 10. Invariant authority beyond scalar refinements (strict Map invariants).
 11. Finite-resource and denial-of-service guarantees.
-12. Portable sockets/FFI boundary. (92)
 13. Must lifecycle hooks preserve the abstract value? Can a move hook fail?
 14. Errors that reach `main`.
 15. Provisional file helpers (`copy_file`, `walk_dir`, `glob`, …): keep or rename?
@@ -104,9 +108,8 @@ reversible; reversible ones are implemented provisionally and flagged.
     `main` returning `int|error`; `loop [k @v] in d`; string helpers; slice
     clamping; a stderr print; union-member comparison; `sqrt` of quantities
     (provisional); exposed Jo helpers.
-24. Self-hosting surface: OS selection, build-mode flags, pointer types,
-    `extern`/C bindings, tuples, byte-char literal, `import p"x"` splat vs
-    namespace.
+24. Self-hosting leftovers: build-mode flags, tuple types, a byte-character
+    literal.
 25. Spellings to confirm (recommendations implemented provisionally):
     raw-bit conversions, recommended `x.wrap(uint8)` (integers, modulo 2^N) and
     `x.bitcast(float64)` (same-width reinterpretation); steerable loops,

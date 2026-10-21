@@ -64,3 +64,44 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   inserts a singleton axis (NumPy `newaxis`): `xs[new ..]`, `xs[.. new]`.
 - Versions: the language stays 0.0.0; the extension gets patch bumps only, at
   most one release a day.
+- Tensors (Q7): one `array` type with shape in the type
+  (`array<T length=[m n]>`, symbolic dims checked by the fact engine); no
+  `.shape`, `.length` is the source of truth; Julia/MATLAB dot broadcasting
+  (`a .* b`, `f.(xs)`) plus plain `a + b` (same shape) and `A * B` (matmul);
+  NumPy broadcast rules; orientation-free 1-D; contiguous N-d literals
+  (newline rows, blank-line blocks, standalone `;`); `m[i j]` indexing. Full
+  text: [tensors.md](tensors.md). Queued after concurrency stage 1.
+- Safety configuration: orthogonal boolean metatags plus purpose-named,
+  library-defined bundles. Docs present a loosest-to-strictest ladder:
+  `$prototype`, `$runtime_checks`, the default (no traps), `$explicit_copies`,
+  `$no_hidden_costs`, `$explicit_allocation_failure`. No numbered levels.
+- Allocation (Q4): an implicit pushed context allocator (Jai-style), heap by
+  default. Ordinary allocation is infallible; true OOM ends the process with a
+  report (an environmental failure, outside no-traps).
+  `$explicit_allocation_failure` (top level) makes every allocating function
+  return `T | OutOfMemory`. Under `$no_hidden_costs`, capacity is acquired
+  explicitly (an arena returns `Arena | OutOfMemory`); use proven within
+  acquired capacity can't fail (resource_exhaustion.md).
+- Floats (Q8): strict IEEE 754 by default (NaN, ±Inf, signed zero and
+  subnormals are values; no reassociation or FMA contraction; deterministic
+  reduction order; value-preserving float→int; sorting by totalOrder).
+  Orthogonal opt-ins: `$fast_math`, `$no_nan`, `$no_inf`, and the bundle
+  `$finite_floats`.
+- FFI (Q12/Q24): `$extern` is a body-position metatag with optional keyword
+  arguments (`=> $extern`, `=> $extern(name='Sleep' lib='kernel32')`). It
+  replaces the `extern` keyword, which is un-reserved. `$export` (provisional)
+  makes a function callable from C, Rust and Python. Calling `$extern` or
+  dereferencing a raw `ptr<T>` (provisional; `ptr<T>?` nullable) needs an
+  unsafe boundary. The goal is batteries-included Dewy with seamless,
+  bidirectional FFI (C, C++, Rust, Python, JS/wasm); header bindgen comes
+  later. A blocking-style `net` module returns `| NetError | Canceled`, over
+  FFI for now.
+- `$target` keeps its spelling. Canonical names with only the fields they need
+  (`x86_64`, `aarch64-linux`, `riscv64-freestanding`, `c-linux`, `aarch64-mac`,
+  `x86_64-windows`, `wasm32`, …; not LLVM triples), per the archived
+  status.md list. OS and arch are selected by compile-time conditions on
+  `$target`.
+- Imports (Q24, following the reference): `import p"x.dewy"` with no selection
+  splats the module's top-level bindings (collisions are errors);
+  `import p"x.dewy" as name` gives a namespace; selective imports pick names.
+
