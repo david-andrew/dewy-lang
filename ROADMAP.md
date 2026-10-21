@@ -28,10 +28,12 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: ownership slice 2, the rest (field moves, recursive/optional owners,
-  closure copyability, generic hooks). Landed: hooks, inheritance, inline
-  aggregates, fixed and growable resource containers.
-- Opus: fused partition workers pilot (compile wall clock).
+- Astra: ownership slice 2, closures and generic hooks. Landed: hooks,
+  inheritance, inline aggregates, fixed/growable resource containers, field
+  moves, optional and recursive owners.
+- Opus: dogfooding sweep (12 everyday programs; fix what breaks).
+- Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
+  needs a quiet machine to confirm.
 
 ## Next
 
