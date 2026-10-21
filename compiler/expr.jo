@@ -6006,6 +6006,12 @@ check_binary = (n: int, expected: int) -> int:
         if not is_lit(a) and not is_shift and is_numeric(ta): h = ta
         if not a_literal and b_literal and binary_literal_context(b, ta, op): h = if tkind(ta) == .opt: telem(ta) else: ta
         tb = prune(check_expr(b, h))
+    if (op == .eq or op == .ne) and types[ta].kind == .fixed and types[tb].kind == .fixed and fixed_len(ta) != fixed_len(tb) and type_eq(int(types[ta].elem), int(types[tb].elem)):
+        # (arrays of different exact lengths are unequal, compared as arrays)
+        ta = mk_array(int(types[ta].elem))
+        coerce(a, ta)
+        coerce(b, ta)
+        tb = ta
     if str_sets.len() > 1 and (str_set_of(ta) != 0 or str_set_of(tb) != 0):
         # (a set's word against a member literal or the same set: compared as words; else as text)
         same = ta == tb
