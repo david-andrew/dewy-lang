@@ -1,0 +1,39 @@
+# Count repeated generated words and sparse integer IDs, then scan keys/items.
+# Input strings are prepared outside the timed region; dictionary work is timed.
+from p"harness.dewy" import size_argument, clock, mix
+
+const VOCAB:int64=65536
+
+kernel = (words:array<string> count:int64):>int64 => {
+    let counts:dict<string int64>=[]
+    let ids:dict<int64 int64>=[]
+    let seed:int64=4242
+    let hits:int64=0
+    loop i in [0..count) {
+        seed=(seed*1103515245+12345)%2147483648
+        let index=(seed//32768)%VOCAB
+        let word=words[index]
+        let id=index*7919+13
+        if word in? counts {counts[word]+=1} else {counts[word]=1}
+        if id in? ids {ids[id]+=1} else {ids[id]=1}
+        if words[(index+1)%VOCAB] in? counts {hits+=1}
+        if (id+1) in? ids {hits+=1}
+    }
+    let result=hits
+    loop word in counts.keys() {result=mix(result counts[word])}
+    loop [word value] in counts {result=mix(result value+word.length as int64)}
+    loop id in ids.keys() {result=mix(result id%1000+ids[id])}
+    loop [id value] in ids {result=mix(result id%1000+value)}
+    return result
+}
+
+main = (args:array<string>):>int64 => {
+    let count=size_argument(args 2000000)
+    let words:array<string>=[]
+    loop i in [0..VOCAB) {words.push("word-{i}")}
+    let started=clock()
+    let result=kernel(words count)
+    let finished=clock()
+    printl"{result} {finished-started}"
+    return 0
+}
