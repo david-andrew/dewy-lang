@@ -6,6 +6,7 @@ use 'ast.jo'
 use 'types.jo'
 use 'util.jo'
 use 'lex.jo'
+use 'refine.jo'
 
 reflect_active = false
 
@@ -20,11 +21,53 @@ reflect_fields = (e: int) -> bool:
     callee = int(nodes[e].a)
     nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "fields" and lookup(int(nodes[callee].name)) == 0
 
+reflect_members = (e: int) -> bool:
+    if nodes[e].kind != .call or not dewy_at(nodes[e].pos): return false
+    callee = int(nodes[e].a)
+    nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "members" and lookup(int(nodes[callee].name)) == 0
+
+# the literal members of a type (its string sets and integer singletons), each
+# a checked literal whose type is its own singleton
+literal_members = (t0: int, pos: int, out: mut int[], singletons: mut int[]):
+    t = prune(t0)
+    if is_union(t):
+        loop m in union_members(t): literal_members(m, pos, out, singletons)
+        return
+    set = str_set_of(t)
+    if set != 0:
+        loop value in str_sets[set]:
+            n = bc_str(value, pos)
+            nodes[n].type = i32(T_STR)
+            add_flag(n, NF_CHECKED)
+            singletons.push(str_set_type([value]))
+            out.push(n)
+        return
+    known, values = int_intervals(t)
+    if not known or types[t].kind != .refined or values.len() > 64: fatal(pos, "members(U) needs a union of literals, found {dt(t)}")
+    loop k in [0..values.len() / 2):
+        loop v in [values[2 * k]..values[2 * k + 1]]:
+            n = bc_int(v, pos)
+            nodes[n].type = i32(T_INT)
+            add_flag(n, NF_CHECKED)
+            singletons.push(mk_refined(T_INT, ref_intern([RefAtom(.le, RefTerm(1, v), RefTerm()), RefAtom(.le, RefTerm(), RefTerm(1, v))])))
+            out.push(n)
+
 # Scope nodes carry either a field-table index or a checked constant value.
 reflect_sequence = (e: int, binder: int) -> int[]:
     let e = reflect_source(e)
     out: int[]
-    if reflect_fields(e):
+    if reflect_members(e):
+        if nkids(e) != 1: fatal(nodes[e].pos, "members(U) needs one type")
+        values: int[]
+        singletons: int[]
+        literal_members(expr_as_type(kid(e, 0)), nodes[e].pos, values, singletons)
+        loop i in 0.. and value in values:
+            scope = mk(.reflect_scope, nodes[e].pos)
+            nodes[scope].name = i32(binder)
+            nodes[scope].a = i32(value)
+            nodes[scope].aux2 = i32(singletons[i])
+            out.push(scope)
+    else if reflect_fields(e):
         if nkids(e) != 1: fatal(nodes[e].pos, "fields(T) needs one record type")
         t = prune(expr_as_type(kid(e, 0)))
         if tkind(t) != .struct_ or is_map_type(t): fatal(nodes[e].pos, "fields(T) needs a record type, found {dt(t)}")
@@ -55,7 +98,9 @@ reflect_bind = (s: int):
     else:
         initial = int(nodes[s].a)
         g = globals.len()
-        globals.push(Global(name = i32(name), type = i32(ntype(initial)), init = i32(initial), mod = i32(cur_mod()), is_const = true, state = 2))
+        # (a literal member is its own singleton: `return m` fits the union)
+        t = if nodes[s].aux2 != 0: int(nodes[s].aux2) else: ntype(initial)
+        globals.push(Global(name = i32(name), type = i32(t), init = i32(initial), mod = i32(cur_mod()), is_const = true, state = 2))
         push_scope_sym(name, new_sym(name, .const_, g, 0))
 
 reflect_name = (n: int):
@@ -98,8 +143,8 @@ reflect_jumps = (n: int) -> bool:
 
 reflect_loop = (s: int) -> bool:
     it = reflect_source(int(nodes[s].a))
-    if not reflect_fields(it): return false
-    if nkids(s) != 1 or has_flag(s, NF_MUT): fatal(nodes[s].pos, "fields(T) yields one immutable descriptor per iteration")
+    if not reflect_fields(it) and not reflect_members(it): return false
+    if nkids(s) != 1 or has_flag(s, NF_MUT): fatal(nodes[s].pos, "fields(T) and members(U) yield one immutable value per iteration")
     binder = int(nodes[kid(s, 0)].name)
     scopes = reflect_sequence(it, binder)
     pos = nodes[s].pos

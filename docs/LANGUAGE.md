@@ -587,7 +587,18 @@ integer singletons is an `int64` whose value set is its invariant: `s:-1|1`,
 obligation as any refinement. On an integer, `s is? 1` is the comparison
 `s =? 1`, `s is? -1|1` tests each member, and `n is? int64<(<? 100)>` tests the
 refinement. At most 24 values may be missing between a union's least and
-greatest members; literal type arguments (`Pool<42>`) are not supported yet.
+greatest members.
+
+A string literal in a type position is likewise its singleton, and a union of
+them is a string whose value set is its invariant:
+`BasePrefix:type = '0b' | '0t' | '0x'`. A member literal stores as it is, another
+literal is a compile error, and any other string is checked when the program
+runs. On a string, `head is? BasePrefix` compares it with each member. Literal
+unions mix with each other and with other types (`<1 | 2 | "fast" | "slow">`,
+`'auto' | int64`): `m is? 1` and `m is? "fast"` test the member and its value.
+`loop m in members(U)` unrolls over a literal union's members, each typed as its
+own singleton, so `if text =? m return m` returns a `U`. Literal unions are
+ordinary type arguments: `Box<'tokens'|'ast'>`, `array<'a'|'b'>`.
 
 A refuted obligation is a compile error. An unproven obligation becomes an
 ordinary runtime check that panics on failure; a proven obligation emits no
@@ -2529,7 +2540,9 @@ binds `small` when the refinement holds, and `<-1|1>` matches either value.
 Coverage is computed on value sets, so `a:int64<a <? 0>` and `b:int64<b >=? 0>`
 cover `int64`, while over `-1|0|1` the same guards with `>? 0` report
 `this match has no arm for 0`; an arm whose values earlier arms already match is
-unreachable.
+unreachable. String literal arms work the same way: over `'n' | 's' | 'e'`,
+`<'n'>` and `other:'s'|'e'` cover it, and over a mixed literal union the arms
+cover a literal member once each of its values has an arm.
 
 A type arm can group a subset of the union's members. For a value of type
 `int64|string|bool`, `part:int64|string=>...` binds an independent `int64|string`

@@ -6403,6 +6403,71 @@ refined_patterns = (arm: int, domain: int[], st: int):
             out.push(r)
     set_list(arm, out)
 
+# A string set type pattern (`<'n'|'s'>`, `other:'e'|'w'`) on a string: one
+# literal pattern per member; the first keeps the binding, typed as the set.
+str_set_patterns = (arm: int, st: int):
+    out: int[]
+    loop p in kids(arm):
+        pt = if nodes[p].kind == .ptype: prune(resolve_type(int(nodes[p].a))) else: 0
+        set = if pt != 0: str_set_of(pt) else: 0
+        if set == 0 or type_eq(pt, st) or is_union(st) and union_index(st, pt) >= 0:
+            out.push(p)
+            continue
+        loop k in 0.. and value in str_sets[set]:
+            q = mk(.plit, nodes[p].pos)
+            nodes[q].a = i32(bc_str(value, nodes[p].pos))
+            if k == 0:
+                nodes[q].name = nodes[p].name
+                nodes[q].type = i32(pt)
+            out.push(q)
+    set_list(arm, out)
+
+# A literal arm on a union's literal member (`<'fast'>`, `<1>` on
+# `1 | 2 | 'fast' | 'slow'`): the member is covered once each of its values is.
+union_literal_seen = (p: int, e: int, vi: int, pt: int, done: mut str[], seen: mut bool[]):
+    lit = kid_lit(e)
+    values: str[]
+    key = ""
+    set = str_set_of(pt)
+    if set != 0:
+        if nodes[lit].kind != .str_lit: return
+        key = "{vi}'{name_of(int(nodes[lit].sval))}"
+        loop value in str_sets[set]: values.push("{vi}'{value}")
+    else:
+        known, intervals = int_intervals(pt)
+        if not known or nodes[lit].kind != .int_lit: return
+        key = "{vi}#{nodes[lit].ival}"
+        loop k in [0..intervals.len() / 2):
+            if intervals[2 * k + 1] - intervals[2 * k] > 64: return
+            loop v in [intervals[2 * k]..intervals[2 * k + 1]]: values.push("{vi}#{v}")
+    if done.contains(key) or seen[vi]: fatal(nodes[p].pos, "this arm is unreachable: earlier arms already match every value it does")
+    done.push(key)
+    all = true
+    loop value in values:
+        if not done.contains(value): all = false
+    if all: seen[vi] = true
+
+# a union member as a missing arm names it: a literal member by its values not matched yet
+union_literal_missing = (vi: int, pt: int, done: str[]) -> str:
+    if types[prune(pt)].kind != .refined: return dt(pt)
+    set = str_set_of(pt)
+    text = ""
+    if set != 0:
+        loop value in str_sets[set]:
+            if done.contains("{vi}'{value}"): continue
+            if len(text) > 0: text += ", "
+            text += "'{value}'"
+        return text
+    known, intervals = int_intervals(pt)
+    if not known: return dt(pt)
+    loop k in [0..intervals.len() / 2):
+        if intervals[2 * k + 1] - intervals[2 * k] > 64: return dt(pt)
+        loop v in [intervals[2 * k]..intervals[2 * k + 1]]:
+            if done.contains("{vi}#{v}"): continue
+            if len(text) > 0: text += ", "
+            text += "{v}"
+    text
+
 check_match = (m: int, expected: int) -> int:
     is_stmt = has_flag(m, NF_STMT)
     check_expr(int(nodes[m].a), 0)
@@ -6427,11 +6492,16 @@ check_match = (m: int, expected: int) -> int:
     domain_known = false
     domain: int[]
     covered: int[]
+    str_domain = 0
+    str_covered: str[]
+    str_patterns = dewy and str_sets.len() > 1
+    union_lits: str[]
     if dewy and not is_union(st):
         declared = st
         # (a refined binding reads as its base: its declared type has the values)
         if nodes[sc].kind == .ident and nodes[sc].aux == i32(int(SK.local)) and type_eq(representation_type(int(locals[int(nodes[sc].sym)].type)), st): declared = int(locals[int(nodes[sc].sym)].type)
         domain_known, domain = int_intervals(declared)
+        str_domain = str_set_of(declared)
     narrows = (is_union(st) or types[st].kind == .opt) and nodes[sc].kind == .ident and nodes[sc].aux == i32(int(SK.local))
     # (a field path or a global: narrowed like `if x.f is T`)
     pkey = ""
@@ -6448,6 +6518,7 @@ check_match = (m: int, expected: int) -> int:
         finite_before = finite_seen
         if dewy and has_wild: fatal(nodes[arm].pos, "this arm is unreachable: an earlier arm already matches every value")
         if domain_known: refined_patterns(arm, domain, st)
+        if str_patterns: str_set_patterns(arm, st)
         loop k in [0..nkids(arm)):
             p = kid(arm, k)
             pk = nodes[p].kind
@@ -6522,11 +6593,12 @@ check_match = (m: int, expected: int) -> int:
                 vi = union_target(e, ntype(e), st)
                 if vi < 0: fatal(nodes[p].pos, "literal pattern is not a member of {type_str(st, true)}")
                 pt = union_members(st)[vi]
-                if not is_int(pt) and pt != T_BOOL and tkind(pt) != .str_:
+                if not is_int(representation_type(pt)) and pt != T_BOOL and tkind(representation_type(pt)) != .str_:
                     fatal(nodes[p].pos, "literal patterns need an integer, bool or string member")
                 coerce(e, pt)
                 nodes[p].aux2 = i32(vi)
                 arm_members.push(pt)
+                if types[pt].kind == .refined: union_literal_seen(p, e, vi, pt, union_lits, seen)
                 # A value pattern only covers part of a member. Both boolean
                 # literals together cover bool, allowing an exhaustive match.
                 if pt == T_BOOL:
@@ -6540,6 +6612,7 @@ check_match = (m: int, expected: int) -> int:
                     add_flag(narrowed, NF_CHECKED)
                     value = narrowed
             if binding != 0:
+                if pk == .plit and nodes[p].type != 0: nodes[value].type = nodes[p].type
                 d = mk(.vardecl, nodes[p].pos)
                 nodes[d].name = i32(binding)
                 nodes[d].b = i32(value)
@@ -6600,6 +6673,11 @@ check_match = (m: int, expected: int) -> int:
                 if st == T_BOOL and nodes[e].kind == .bool_lit:
                     finite_seen |= if nodes[e].ival != 0: 1 else: 2
                 check_expr(e, st)
+                if str_domain != 0 and nodes[e].kind == .str_lit:
+                    text = name_of(int(nodes[e].sval))
+                    if str_covered.contains(text): fatal(nodes[p].pos, "this arm is unreachable: an earlier arm already matches '{text}'")
+                    coerce(e, int(locals[int(nodes[sc].sym)].type))
+                    str_covered.push(text)
                 coerce(e, st)
                 if types[st].kind == .enum_ and nodes[e].kind == .dotname: seen[int(nodes[e].aux)] = true
                 if domain_known and nodes[kid_lit(e)].kind == .int_lit: arm_values += [nodes[kid_lit(e)].ival, nodes[kid_lit(e)].ival]
@@ -6669,6 +6747,12 @@ check_match = (m: int, expected: int) -> int:
         missing = interval_missing(domain, covered)
         if missing.len() == 0: exhaustive = true
         else if not is_stmt: fatal(nodes[m].pos, "this match has no arm for {interval_text(missing)} (add one, or a `_ => ...` arm for the rest)")
+    if not exhaustive and str_domain != 0:
+        missing: str[]
+        loop value in str_sets[str_domain]:
+            if not str_covered.contains(value): missing.push("'{value}'")
+        if missing.len() == 0: exhaustive = true
+        else if not is_stmt: fatal(nodes[m].pos, "this match has no arm for {join(missing, ", ")} (add one, or a `_ => ...` arm for the rest)")
     if not exhaustive and types[st].kind == .enum_:
         exhaustive = true
         loop s in seen:
@@ -6687,7 +6771,7 @@ check_match = (m: int, expected: int) -> int:
                 if s: continue
                 if len(miss) > 0: miss += ", "
                 # (a union's members by their type names: a family's parent is one of its own)
-                if dewy and structs[si].union_: miss += dt(struct_targ(si, vi))
+                if dewy and structs[si].union_: miss += union_literal_missing(vi, struct_targ(si, vi), union_lits)
                 else: miss += ".{name_of(int(variants[int(structs[si].variants) + vi].name))}"
             fatal(nodes[m].pos, "this match has no arm for {miss} (add one, or a {jd(nodes[m].pos, "`_:`", "`_ => ...`")} arm for the rest)")
         if dewy: fatal(nodes[m].pos, "match is not exhaustive (add a `_ => ...` arm or `else`)")
@@ -9521,6 +9605,27 @@ check_istype = (n: int) -> int:
         if ms.len() > 0:
             subj = is_subject(n, orig)
             return is_rewritten(n, orig, members_test(subj, ms, pos))
+    # x is? 'a', x is? BasePrefix on a string: x compared with each member
+    set = str_set_of(tt)
+    if set != 0 and not is_union(at) and representation_type(at) == T_STR:
+        subj = is_subject(n, orig)
+        c = 0
+        loop value in str_sets[set]:
+            same = bc_bin(.eq, copy_path(subj), bc_str(value, pos), pos)
+            c = if c == 0: same else: bc_logic(.or_, c, same, pos)
+        return is_rewritten(n, orig, c)
+    # x is? 1, x is? 'fast' on a union with an integer or string member: that member, then its value
+    if is_union(at) and types[tt].kind == .refined and union_index(at, tt) < 0:
+        loop m in union_members(at):
+            if type_eq(representation_type(m), representation_type(tt)):
+                subj = is_subject(n, orig)
+                held = mk(.istype, pos)
+                nodes[held].a = i32(copy_path(subj))
+                nodes[held].b = i32(type_node_of(m, pos))
+                value = mk(.istype, pos)
+                nodes[value].a = i32(copy_path(subj))
+                nodes[value].b = i32(type_node_of(tt, pos))
+                return is_rewritten(n, orig, bc_logic(.and_, held, value, pos))
     # x is? 1, x is? -1|1, x is? int64<(<? 100)>: the comparisons of the refinement
     if types[tt].kind == .refined and is_int(representation_type(tt)) and is_int(representation_type(at)) and not is_union(at):
         subj = is_subject(n, orig)

@@ -59,7 +59,40 @@ representation_deep = (t0: int) -> int:
         return mk_tuple(a)
     t
 
+# String literal sets (`'a'|'b'`): a refined string whose `bits` names its
+# sorted members here; it has no predicate atoms, so integer facts never see it.
+str_sets: str[][] = [[]]
+
+# (a set keeps its first spelling's order, which `members(U)` follows)
+str_set_type = (values: str[]) -> int:
+    id = 0
+    loop i in [1..str_sets.len()):
+        if id == 0 and str_sets[i].len() == values.len():
+            same = true
+            loop value in values:
+                if not str_sets[i].contains(value): same = false
+            if same: id = i
+    if id == 0:
+        str_sets.push(values)
+        id = str_sets.len() - 1
+    refine_active = true
+    mk_type(TypeInfo(kind = .refined, elem = i32(T_STR), bits = i32(id)), [])
+
+# the string set a type is, or 0
+str_set_of = (t0: int) -> int:
+    t = prune(t0)
+    if types[t].kind != .refined or prune(int(types[t].elem)) != T_STR: return 0
+    int(types[t].bits)
+
+str_set_text = (id: int) -> str:
+    text = ""
+    loop value in str_sets[id]:
+        if len(text) > 0: text += " | "
+        text += "'{value}'"
+    text
+
 refine_reset = ():
+    str_sets = [[]]
     ref_predicates = [[]]
     refine_active = false
     refine_fields = []
@@ -269,8 +302,40 @@ refine_storage = (n: int, fallback: int) -> int:
         if nodes[n].aux == i32(int(SK.global)): return int(globals[int(nodes[n].sym)].type)
     fallback
 
+# A string stored as a string set: a member literal or a smaller set as it is,
+# another literal is an error, and any other string is checked when it runs.
+str_set_coerce = (n: int, t: int) -> int:
+    id = int(types[t].bits)
+    source = str_set_of(ntype(n))
+    coerce(n, T_STR)
+    if source != 0:
+        inside = true
+        loop value in str_sets[source]:
+            if not str_sets[id].contains(value): inside = false
+        if inside: return n
+    e = kid_lit(n)
+    pos = nodes[n].pos
+    if nodes[e].kind == .str_lit and nodes[e].aux != 1:
+        text = name_of(int(nodes[e].sval))
+        if not str_sets[id].contains(text): fatal(pos, "'{text}' is not one of {str_set_text(id)}")
+        return n
+    inner = nodes.len()
+    nodes.push(nodes[n])
+    held = "__set{inner}"
+    member = 0
+    loop value in str_sets[id]:
+        same = bc_bin(.eq, bc_ident(held, pos), bc_str(value, pos), pos)
+        member = if member == 0: same else: bc_logic(.or_, member, same, pos)
+    missing = mk(.not_, pos)
+    nodes[missing].a = i32(member)
+    fail = bc_stmt(bc_call("panic", [bc_str("a string that is not one of {str_set_text(id)}", pos)], pos), pos)
+    nodes[n] = nodes[bc_block([bc_assign(bc_ident(held, pos), inner, pos), bc_if(missing, [fail], [], pos), bc_stmt(bc_ident(held, pos), pos)], pos)]
+    check_expr(n, T_STR)
+    n
+
 refine_coerce = (n: int, target: int) -> int:
     t = prune(target)
+    if str_set_of(t) != 0: return str_set_coerce(n, t)
     coerce(n, int(types[t].elem))
     if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.refinement)) and nodes[n].aux2 == i32(t): return n
     owner = if cx >= 0: int(ctxs[cx].inst) else: 0

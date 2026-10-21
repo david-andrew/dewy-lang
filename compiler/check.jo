@@ -3565,7 +3565,7 @@ check_vardecl = (s: int):
         if nodes[v].kind == .ident and nodes[v].aux == i32(int(SK.local)):
             pt = int(locals[int(nodes[v].sym)].type)
             known, _ = int_intervals(pt)
-            if int(locals[int(nodes[v].sym)].flags) & LF_PARAM != 0 and tkind(pt) == .refined and known:
+            if int(locals[int(nodes[v].sym)].flags) & LF_PARAM != 0 and tkind(pt) == .refined and (known or str_set_of(pt) != 0):
                 t = pt
                 nodes[s].b = i32(coerce(v, t))
     if t == 0: fatal(nodes[s].pos, "variable needs a type or a value")

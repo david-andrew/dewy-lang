@@ -1,0 +1,19 @@
+# Literal unions mix integers, strings and other types
+Mode:type = <1 | 2 | "fast" | "slow">
+describe = (m:Mode):>int64 =>
+    if m is? 1 10 else if m is? 2 20 else if m is? "fast" 30 else 40
+let m:Mode = "slow"
+printl(describe(m) + describe(2))
+name = (m:Mode):>string => match m {
+    n:1|2 => "number {n}"
+    s:'fast'|'slow' => "speed {s}"
+}
+printl(name(1))
+printl(name('fast'))
+Width:type = 'auto' | int64
+columns = (w:Width):>int64 => match w {
+    <'auto'> => 80
+    n:int64 => n
+}
+printl(columns('auto'))
+printl(columns(12))

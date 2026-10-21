@@ -815,7 +815,18 @@ type_str_in = (t0: int, dewy: bool) -> str:
     match ti.kind:
         effect: "Effect"
         callable: "{type_str(int(ti.elem), dewy)} & <effects>"
-        refined: "{type_str(int(ti.elem), dewy)}<refinement>"
+        refined:
+            if str_set_of(t) != 0: return str_set_text(int(ti.bits))
+            known, values = int_intervals(t)
+            if known and values.len() > 0 and values.len() <= 32:
+                text = ""
+                loop k in [0..values.len() / 2):
+                    if values[2 * k + 1] - values[2 * k] > 16: return "{type_str(int(ti.elem), dewy)}<refinement>"
+                    loop v in [values[2 * k]..values[2 * k + 1]]:
+                        if len(text) > 0: text += " | "
+                        text += "{v}"
+                return text
+            "{type_str(int(ti.elem), dewy)}<refinement>"
         quantity: "{type_str(int(ti.elem), dewy)} * {dimension_str(int(ti.st))}"
         dimension: dimension_str(int(ti.st))
         void_:

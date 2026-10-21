@@ -1,0 +1,13 @@
+# members(U) unrolls over a literal union; each member is its own singleton
+Dir:type = 'n' | 's' | 'e' | 'w'
+parse = (text:string):>Dir|none => {
+    loop m in members(Dir) if text =? m return m
+    return none
+}
+printl(parse("e"))
+printl(parse("x"))
+loop m in members(Dir) print"{m} "
+printl("")
+Sign:type = <-1|0|1>
+loop v in members(Sign) print"{v} "
+printl("")

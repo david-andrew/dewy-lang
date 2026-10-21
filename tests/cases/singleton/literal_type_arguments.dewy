@@ -1,0 +1,9 @@
+# A literal union is a type argument like any other type
+Box:type = <T>[value:T]
+let b:Box<'tokens'|'ast'> = [value='ast']
+printl(b.value)
+let c:Box<1|2|3> = [value=2]
+printl(c.value)
+first = <T>(xs:array<T>):>T => xs[0]
+let modes:array<'a'|'b'> = ['b' 'a']
+printl(first(modes))

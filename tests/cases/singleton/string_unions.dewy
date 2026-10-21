@@ -1,0 +1,29 @@
+# A union of string literals is a string whose value set is its invariant
+BasePrefix:type = '0b' | '0t' | '0x'
+classify = (text:string):>string => {
+    if text.length >=? 2 {
+        let head = text[..2)
+        if head is? BasePrefix { return head }
+    }
+    return "none"
+}
+printl(classify("0x1f"))
+printl(classify("12"))
+
+Dir:type = 'n' | 's' | 'e' | 'w'
+step = (d:Dir):>int64 => match d {
+    <'n'> => 1
+    <'s'> => -1
+    <'e'|'w'> => 0
+}
+axis = (d:Dir):>string => match d {
+    <'n'|'s'> => "vertical"
+    other:'e'|'w' => "horizontal {other}"
+}
+printl(step('s'))
+printl(axis('w'))
+let d:Dir = 'e'
+printl"{d} {d.length} {axis(d)}"
+text = "n"
+let checked:Dir = text
+printl(step(checked))

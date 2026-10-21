@@ -931,6 +931,55 @@ dw_int_singletons = (id0: int, out: mut int[]) -> bool:
     if not out.contains(nodes[e].ival): out.push(nodes[e].ival)
     true
 
+# The leaves of a `|` chain of types (through grouping)
+dw_pipe_leaves = (id0: int, out: mut int[]):
+    id = dw_grouped(dw_unwrap(id0))
+    if dw_op(id) == .pipe:
+        dw_pipe_leaves(dw_child(id, 1), out)
+        dw_pipe_leaves(dw_child(id, 2), out)
+    else: out.push(id)
+
+dw_int_leaf = (id: int) -> bool:
+    k = dewy_syntax[id].kind
+    dw_integer_kind(k) or k == .prefix and dw_op(id) == .minus and dw_integer_kind(dewy_syntax[dw_unwrap(dw_child(id, 1))].kind)
+
+# A type made of literals, alone or mixed with other types (`'a'|'b'`,
+# `<1 | 2 | "fast">`, `'auto' | int64`): the integer singletons become one
+# refined int64, the strings one string set, joined with the other members in a
+# union. 0 when the type names no literal.
+dw_literal_type = (id: int) -> int:
+    single = dw_grouped(dw_unwrap(id))
+    if dw_op(single) != .pipe and not dw_int_leaf(single) and dewy_syntax[single].kind != .string: return 0
+    leaves: int[]
+    dw_pipe_leaves(id, leaves)
+    any = false
+    loop leaf in leaves:
+        if dw_int_leaf(leaf) or dewy_syntax[leaf].kind == .string: any = true
+    if not any: return 0
+    pos = dewy_syntax[id].pos
+    ints: int[]
+    texts: str[]
+    others: int[]
+    loop leaf in leaves:
+        if dw_int_leaf(leaf): dw_int_singletons(leaf, ints)
+        else if dewy_syntax[leaf].kind == .string:
+            if not texts.contains(dewy_syntax[leaf].text): texts.push(dewy_syntax[leaf].text)
+        else: others.push(dw_type(leaf))
+    parts: int[]
+    if ints.len() > 0: parts.push(dw_int_singleton_type(ints, pos))
+    if texts.len() > 0:
+        n = mk(.tname, pos)
+        nodes[n].aux = -7
+        nodes[n].ival = str_set_type(texts)
+        parts.push(n)
+    parts += others
+    out = parts[0]
+    loop part in parts[1..]:
+        u = mk(.tunion, pos)
+        set_list(u, [out, part])
+        out = u
+    out
+
 dw_singleton_bound = (op: Tok, a: int, b: int, pos: int) -> int:
     e = mk(.binary, pos)
     nodes[e].op = i32(int(op))
@@ -1030,8 +1079,8 @@ dw_type = (id: int) -> int:
         nodes[n].a = i32(dw_type(dw_child(id, 1)))
         nodes[n].b = i32(if dw_op(id) == .caret: dw_expr(dw_child(id, 2)) else: dw_type(dw_child(id, 2)))
         return n
-    singletons: int[]
-    if dw_int_singletons(id, singletons): return dw_int_singleton_type(singletons, pos)
+    literal = dw_literal_type(id)
+    if literal != 0: return literal
     if dw_op(id) == .pipe:
         n = mk(.tunion, pos)
         set_list(n, [dw_type(dw_child(id, 1)), dw_type(dw_child(id, 2))])
@@ -1124,8 +1173,6 @@ dw_type = (id: int) -> int:
                 nodes[n].b = i32(dw_ref_predicate(entry))
                 base = n
             else:
-                literals: int[]
-                if dw_int_singletons(child, literals): return dw_fail(child, "a literal type argument in this type expression")
                 args.push(dw_type(child))
         if args.len() > 0:
             if nodes[base].kind != .tname or nkids(base) != 0: return dw_fail(id, "type arguments on this type expression")
@@ -2755,8 +2802,8 @@ ownership_tag = (row: int) -> int:
 # Facts qualify a result arm; they do not change its runtime representation.
 dw_result_type = (owner: int, id0: int) -> int:
     id = dw_unwrap(id0)
-    singletons: int[]
-    if dw_int_singletons(id, singletons): return dw_int_singleton_type(singletons, dewy_syntax[id].pos)
+    literal = dw_literal_type(id)
+    if literal != 0: return literal
     if dw_op(id) == .pipe:
         n = mk(.tunion, dewy_syntax[id].pos)
         set_list(n, [dw_result_type(owner, dw_child(id, 1)), dw_result_type(owner, dw_child(id, 2))])
