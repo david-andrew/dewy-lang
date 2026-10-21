@@ -453,7 +453,8 @@ called. Function types use angle brackets, for example `<(x:int64):>int64>`;
 parenthesized function type grouping is rejected. A function's handle also fits
 a function type whose parameters it accepts and whose result accepts its result:
 `@f` with `f=(x:int64|string):>uint64?` fits `<(x:int64):>uint64?|E>` (through a
-wrapper; refined and `@` parameters still need an exact match). An inferred `@fn` handle
+wrapper; refined and `@` parameters still need an exact match). A function value
+held in a variable adapts the same way (`apply(@h)`, `let g:<(x:int64):>int64> = @wide`). An inferred `@fn` handle
 selects a single concrete user function ahead of prelude functions with the same
 name; multiple concrete user overloads still require a callable type. Pass them to a typed callback
 parameter or give a local a function type,

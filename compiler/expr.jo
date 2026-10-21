@@ -394,7 +394,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if fk == .fixed and tk == .array: return type_eq(int(types[from].elem), int(types[to].elem))
     if tk == .array and is_nd(from): return type_eq(nd_elem(from), int(types[to].elem))
     if (fk == .callable or tk == .callable) and callable_fits(from, to): return true
-    if fk == .fn_ and tk == .fn_ and callable_fits(from, to): return true
+    if fk == .fn_ and tk == .fn_ and (callable_fits(from, to) or n != 0 and fn_value_adapts(n, from, to)): return true
     if fk == .array and tk == .fixed:
         if n != 0 and fixed_literal_ok(n, to): return true
         return n != 0 and nodes[n].kind != .array and type_eq(int(types[from].elem), int(types[to].elem))
@@ -567,6 +567,7 @@ coerce = (n: int, target: int) -> int:
         nodes.push(nodes[n])
         fn_value(n, to, closure = source)
         from = prune(ntype(n))
+    if types[from].kind == .fn_ and tk == .fn_ and not callable_fits(from, to) and fn_value_adapts(n, from, to): return fn_value_adapter(n, to)
     if dewy_bigint_literal_target(n, to):
         dewy_coerce_bigint_literal(n, to)
         return n
@@ -1734,6 +1735,8 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
         return -1
     if tkind(ntype(a)) == .polyfn and types[fp].kind == .fn_ and poly_matches(prune(ntype(a)), fp): return 0
     r = match_type(pat, ntype(a), binds, 0)
+    # (a function value through a wrapper: wider result, narrower parameters)
+    if r < 0 and types[fp].kind == .fn_ and tkind(ntype(a)) == .fn_ and not has_var(fp) and fn_value_adapts(a, prune(ntype(a)), fp): return 2
     if r < 0 and types[fp].kind == .array and is_nd(ntype(a)):
         # a 1-D T[,] (a row, a column) for a T[] parameter
         r = match_type(pat, mk_array(nd_elem(ntype(a))), binds, 0)
@@ -7348,6 +7351,43 @@ fn_adapts = (d: int, et: int) -> bool:
     want = int(types[et].elem)
     if want != 0 and tkind(want) == .refined: return false
     want == 0 or tkind(want) == .void_ or sig.ret != 0 and can_coerce(0, int(sig.ret), want)
+
+# A function value whose parameters accept function type `to`'s and whose
+# result `to`'s result accepts (by value, unrefined, of the program's own code).
+fn_value_adapts = (n: int, from: int, to: int) -> bool:
+    if not dewy_at(nodes[n].pos) or pos_in_lib(nodes[n].pos): return false
+    if types[from].nargs != types[to].nargs or types[from].mutmask != 0 or types[to].mutmask != 0: return false
+    loop i in [0..int(types[to].nargs)):
+        p = targ(from, i); q = targ(to, i)
+        if tkind(p) == .refined or tkind(q) == .refined or is_fn_type(p) or is_fn_type(q) or not can_coerce(0, q, p): return false
+    want = int(types[to].elem)
+    have = int(types[from].elem)
+    want != 0 and have != 0 and tkind(want) != .void_ and tkind(have) != .refined and tkind(want) != .refined and not is_fn_type(want) and can_coerce(0, have, want)
+
+# `{ let $f = value; (a b) => $f(a b) }`: the value once, called through a wrapper.
+fn_value_adapter = (n: int, to: int) -> int:
+    pos = nodes[n].pos
+    source = nodes.len()
+    nodes.push(nodes[n])
+    bc_count += 1
+    held = "$adapt{bc_count}"
+    params: int[]
+    args: int[]
+    loop i in [0..int(types[to].nargs)):
+        param = mk(.param, pos)
+        nodes[param].name = i32(intern("$arg{i}"))
+        nodes[param].a = i32(type_node_of(targ(to, i), pos))
+        params.push(param)
+        args.push(bc_ident("$arg{i}", pos))
+    call = mk(.call, pos)
+    nodes[call].a = i32(bc_ident(held, pos))
+    set_list(call, args)
+    lam = mk(.lambda, pos)
+    set_list(lam, params)
+    nodes[lam].b = i32(bc_block([bc_stmt(call, pos)], pos))
+    nodes[n] = nodes[bc_block([bc_let(held, source, pos), bc_stmt(lam, pos)], pos)]
+    check_expr(n, to)
+    n
 
 # `(a b) => f(a b)` in place of `@f`, checked against the expected function type.
 fn_adapter = (n: int, et: int, expected: int) -> int:

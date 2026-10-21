@@ -1,0 +1,19 @@
+E:type = type of error
+ws = (src:string):>uint64? => if src.startswith(" ") 1 else none
+apply = (f:<(s:string):>uint64? | E> s:string) => printl(f(s))
+call = (f:<(x:int64):>int64>) => printl(f(21))
+main = () => {
+    let h = @ws
+    apply(@h " a")
+    apply(@h "a")
+    let base = 10
+    let near = (s:string):>uint64? => if s.length >? 1 (base as uint64) else none
+    let g:<(s:string):>uint64? | E> = @near
+    printl(g("ab"))
+    let wide = (x:int64|string):>int64 => if x is? int64 x * 2 else 0
+    call(@wide)
+    let narrow:<(x:int64):>int64> = @wide
+    printl(narrow(4))
+    let fs:array<<(x:int64):>int64>> = [@wide]
+    printl(fs[0](5))
+}
