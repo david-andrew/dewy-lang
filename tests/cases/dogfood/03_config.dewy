@@ -1,0 +1,167 @@
+# A JSON-ish config parser and validator (hand-written parser).
+
+Value:type = type of any
+Num:type = type of Value & [n:float64]
+Str:type = type of Value & [s:string]
+Bool:type = type of Value & [b:bool]
+Null:type = type of Value
+List:type = type of Value & [items:array<Value>]
+Obj:type = type of Value & [keys:array<string> vals:array<Value>]
+
+ParseError:type = type of error & [message:string pos:int]
+
+Parser:type = [
+    text:array<string>
+    pos:int = 0
+    peek = ():>string => if pos <? text.length text[pos] else ""
+    skip_ws = ():>void => {
+        loop pos <? text.length and text[pos] in? [" " "\n" "\t" "\r"] { pos += 1 }
+    }
+]
+
+fail = (p:Parser msg:string):>ParseError => ParseError[msg p.pos]
+
+parse_value = (@p:Parser):>Value|ParseError => {
+    p.skip_ws()
+    let c = p.peek()
+    if c =? "\{" { return parse_object(@p) }
+    if c =? "[" { return parse_list(@p) }
+    if c =? "\"" {
+        let s = parse_string(@p) or_throw
+        return Str[s]
+    }
+    if c =? "t" or c =? "f" or c =? "n" { return parse_word(@p) }
+    return parse_number(@p)
+}
+
+parse_string = (@p:Parser):>string|ParseError => {
+    p.pos += 1
+    let out = ""
+    loop p.pos <? p.text.length {
+        let c = p.text[p.pos]
+        p.pos += 1
+        if c =? "\"" { return out }
+        if c =? "\\" {
+            let e = p.peek()
+            p.pos += 1
+            out += match e {
+                <"n"> => "\n"
+                <"t"> => "\t"
+                _ => e
+            }
+        } else {
+            out += c
+        }
+    }
+    return fail(p "unterminated string")
+}
+
+parse_word = (@p:Parser):>Value|ParseError => {
+    let table:array<[word:string v:Value]> = [[word="true" v=Bool[true]] [word="false" v=Bool[false]] [word="null" v=Null]]
+    loop [word v] in table {
+        if p.text[p.pos..min(p.pos+word.length p.text.length)).join("") =? word {
+            p.pos += word.length
+            return v
+        }
+    }
+    return fail(p "unexpected word")
+}
+
+parse_number = (@p:Parser):>Value|ParseError => {
+    let start = p.pos
+    loop p.pos <? p.text.length and p.text[p.pos] in? "+-0123456789.eE" { p.pos += 1 }
+    let raw = p.text[start..p.pos).join("")
+    let n = to_float(raw)
+    if n is? none { return fail(p "bad number '{raw}'") }
+    return Num[n]
+}
+
+parse_list = (@p:Parser):>Value|ParseError => {
+    p.pos += 1
+    let items:array<Value> = []
+    p.skip_ws()
+    if p.peek() =? "]" { p.pos += 1 return List[items] }
+    loop true {
+        items.push(parse_value(@p) or_throw)
+        p.skip_ws()
+        let c = p.peek()
+        p.pos += 1
+        if c =? "]" { return List[items] }
+        if c not=? "," { return fail(p "expected , or ]") }
+    }
+    return fail(p "unreachable")
+}
+
+parse_object = (@p:Parser):>Value|ParseError => {
+    p.pos += 1
+    let keys:array<string> = []
+    let vals:array<Value> = []
+    loop true {
+        p.skip_ws()
+        if p.peek() =? "\}" { p.pos += 1 return Obj[keys vals] }
+        if p.peek() not=? "\"" { return fail(p "expected key") }
+        keys.push(parse_string(@p) or_throw)
+        p.skip_ws()
+        if p.peek() not=? ":" { return fail(p "expected :") }
+        p.pos += 1
+        vals.push(parse_value(@p) or_throw)
+        p.skip_ws()
+        if p.peek() =? "," { p.pos += 1 }
+    }
+    return fail(p "unreachable")
+}
+
+show = (v:Value):>string => match v {
+    x:Num => string(x.n)
+    x:Str => "\"{x.s}\""
+    x:Bool => if x.b "true" else "false"
+    x:List => "[" + [loop i in x.items show(i)].join(", ") + "]"
+    x:Obj => "\{" + [loop [k v] in zip(x.keys x.vals) "{k}: {show(v)}"].join(", ") + "\}"
+    _ => "null"
+}
+
+lookup = (o:Obj key:string):>Value|none => {
+    loop [k v] in zip(o.keys o.vals) { if k =? key return v }
+    return none
+}
+
+validate = (cfg:Value):>array<string> => {
+    let problems:array<string> = []
+    if cfg isnt? Obj { return ["config must be an object"] }
+    let port = lookup(cfg "port")
+    if port is? none {
+        problems.push("missing port")
+        return problems
+    }
+    match port {
+        x:Num => if x.n <? 1 or x.n >? 65535 { problems.push("port out of range: {x.n}") }
+        _ => problems.push("port must be a number")
+    }
+    let name = lookup(cfg "name")
+    if name isnt? Str { problems.push("name must be a string") }
+    return problems
+}
+
+CONFIGS = [
+    r"""{"name": "server", "port": 8080, "debug": true, "tags": ["a", "b"], "limits": {"cpu": 2.5}}"""
+    r"""{"name": 42, "port": 70000}"""
+    r"""{"name": "x", "port": "eighty"}"""
+    r"""{"name": "x" "port": 1"""
+    r"""[1, 2, oops]"""
+]
+
+main = () => {
+    loop text in CONFIGS {
+        let p = Parser[graphemes(text)]
+        let v = parse_value(@p)
+        match v {
+            e:ParseError => printl("parse error at {e.pos}: {e.message}")
+            cfg:Value => {
+                printl(show(cfg))
+                let problems = validate(cfg)
+                if problems.length =? 0 { printl("  ok") }
+                loop problem in problems { printl("  invalid: {problem}") }
+            }
+        }
+    }
+}

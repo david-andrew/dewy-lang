@@ -1,0 +1,126 @@
+# Markdown-to-HTML converter for a subset: headings, lists, emphasis, code, links, paragraphs.
+
+escape_html = (text:string):>string =>
+    text.replace("&" "&amp;").replace("<" "&lt;").replace(">" "&gt;")
+
+# Inline formatting: **bold**, *italic*, `code`, [text](url)
+inline = (text:string):>string => {
+    let out = ""
+    let chars = graphemes(text)
+    let i = 0
+    let bold = false
+    let italic = false
+    loop i <? chars.length {
+        let c = chars[i]
+        if c =? "`" {
+            let close = i + 1
+            loop close <? chars.length and chars[close] not=? "`" { close += 1 }
+            if close <? chars.length {
+                out += "<code>" + escape_html(chars[i+1..close).join("")) + "</code>"
+                i = close + 1
+                continue
+            }
+        }
+        if c =? "*" and i + 1 <? chars.length and chars[i+1] =? "*" {
+            out += if bold "</strong>" else "<strong>"
+            bold = not bold
+            i += 2
+            continue
+        }
+        if c =? "*" {
+            out += if italic "</em>" else "<em>"
+            italic = not italic
+            i += 1
+            continue
+        }
+        if c =? "[" {
+            let rest = chars[i..].join("")
+            let link = rest.find(regex(r"^\[([^\]]+)\]\(([^)]+)\)"))
+            if link isnt? none {
+                out += "<a href=\"{link.groups[1]}\">{escape_html(link.groups[0])}</a>"
+                i += graphemes(link.text).length
+                continue
+            }
+        }
+        out += escape_html(c)
+        i += 1
+    }
+    if italic { out += "</em>" }
+    if bold { out += "</strong>" }
+    return out
+}
+
+convert = (markdown:string):>string => {
+    let html:array<string> = []
+    let paragraph:array<string> = []
+    let list_kind = ""
+
+    let flush_paragraph = ($capture @paragraph $capture @html) => {
+        if paragraph.length >? 0 {
+            html.push("<p>{inline(paragraph.join(" "))}</p>")
+            paragraph.clear()
+        }
+    }
+    let close_list = ($capture @list_kind $capture @html) => {
+        if list_kind not=? "" {
+            html.push("</{list_kind}>")
+            list_kind = ""
+        }
+    }
+
+    loop raw in markdown.split("\n") {
+        let line = raw.trim_end()
+        let heading = line.find(regex(r"^(#{1,6})\s+(.*)$"))
+        let bullet = line.find(regex(r"^\s*[-*]\s+(.*)$"))
+        let numbered = line.find(regex(r"^\s*\d+\.\s+(.*)$"))
+        if line.trim() =? "" {
+            flush_paragraph()
+            close_list()
+        } else if heading isnt? none {
+            flush_paragraph()
+            close_list()
+            let level = heading.groups[0].length
+            html.push("<h{level}>{inline(heading.groups[1])}</h{level}>")
+        } else if bullet isnt? none or numbered isnt? none {
+            flush_paragraph()
+            let kind = if bullet isnt? none "ul" else "ol"
+            let item = ""
+            if bullet isnt? none { item = bullet.groups[0] }
+            else if numbered isnt? none { item = numbered.groups[0] }
+            if list_kind not=? kind {
+                close_list()
+                html.push("<{kind}>")
+                list_kind = kind
+            }
+            html.push("  <li>{inline(item)}</li>")
+        } else {
+            close_list()
+            paragraph.push(line.trim())
+        }
+    }
+    flush_paragraph()
+    close_list()
+    return html.join("\n")
+}
+
+DOC = """# Dewy *dogfood* notes
+
+This is a **small** converter. It handles `code`, *emphasis*
+and [links](https://example.com/a?b=1&c=2).
+
+## Lists
+
+- first item
+- second with **bold**
+* third
+
+1. one
+2. two < three
+
+### Edge cases
+Unclosed *emphasis and a lone ` backtick.
+"""
+
+main = () => {
+    printl(convert(DOC))
+}

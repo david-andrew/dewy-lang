@@ -1,0 +1,17 @@
+  open alice: ok
+  open bob: ok
+  open carol: ok
+  alice -> bob 30: ok
+  bob -> carol 100: FAILED (bob needs $100.00 but has $55.50)
+  bob -> dave 1: FAILED (no account named dave)
+  alice -> carol -5: FAILED (invalid amount $-5.00)
+  alice -> carol 5: FAILED (account carol is frozen)
+Balances:
+  alice      $65.98  (4 transactions)
+  bob        $56.33  (3 transactions)
+  carol       $0.00  (0 transactions)
+Total: $122.31
+History of bob:
+  deposit      $25.50 -> $25.50
+  deposit      $30.00 -> $55.50
+  interest      $0.83 -> $56.33

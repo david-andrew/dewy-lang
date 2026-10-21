@@ -1,0 +1,63 @@
+# Priority-queue scheduler simulation with a small inheritance hierarchy.
+
+Job:type = type of any & [
+    name:string
+    priority:int64
+    work:int64
+    describe = ():>string => "{name} (p{priority}, {work} units left)"
+]
+CpuJob:type = type of Job & [threads:int64 = 1]
+IoJob:type = type of Job & [device:string]
+TimerJob:type = type of Job & [period:int64 runs:int64 = 0]
+
+QUANTUM = 3
+
+# One quantum of work. Returns the job's remaining state, or none when it finished.
+run_slice = (job:Job clock:int64):>Job|none => match job {
+    j:CpuJob => {
+        let done = min(j.work QUANTUM * j.threads)
+        printl("  t={clock}: cpu {j.name} x{j.threads} does {done}")
+        if j.work - done <=? 0 { return none }
+        return CpuJob[name=j.name priority=j.priority work=j.work-done threads=j.threads]
+    }
+    j:IoJob => {
+        printl("  t={clock}: io {j.name} waits on {j.device}")
+        if j.work <=? 1 { return none }
+        # waiting on a device lowers priority (higher number = later)
+        return IoJob[name=j.name priority=j.priority+1 work=j.work-1 device=j.device]
+    }
+    j:TimerJob => {
+        printl("  t={clock}: timer {j.name} fires (run {j.runs+1})")
+        if j.runs+1 >=? j.work { return none }
+        return TimerJob[name=j.name priority=j.priority work=j.work period=j.period runs=j.runs+1]
+    }
+    _ => none
+}
+
+main = () => {
+    let queue:Heap<Job> = []
+    let jobs:array<Job> = [
+        CpuJob[name="compile" priority=2 work=10 threads=2]
+        IoJob[name="backup" priority=1 work=3 device="disk0"]
+        TimerJob[name="heartbeat" priority=0 work=3 period=4]
+        CpuJob[name="render" priority=3 work=5]
+    ]
+    loop job in jobs { queue.push(job job.priority) }
+    printl("queued {queue.length} jobs")
+    let clock:int64 = 0
+    let finished:array<string> = []
+    loop queue.length >? 0 {
+        let job = queue.pop()
+        let next = run_slice(job clock)
+        clock += 1
+        if next is? none {
+            printl("  -> {job.name} finished at t={clock}")
+            finished.push(job.name)
+        } else {
+            printl("  -> requeue {next.describe()}")
+            queue.push(next next.priority)
+        }
+        if clock >? 50 { printl("too many steps") break }
+    }
+    printl("finish order: {finished.join(", ")}")
+}

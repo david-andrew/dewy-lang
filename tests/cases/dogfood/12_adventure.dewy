@@ -1,0 +1,121 @@
+# A small text adventure: dictionaries of rooms, a loop over input lines from a file.
+
+Room:type = [
+    title:string
+    description:string
+    exits:dict<string string>
+    items:array<string> = []
+    locked:string = ""     # the item needed to enter, if any
+]
+
+World:type = [
+    rooms:dict<string Room>
+    here:string
+    inventory:array<string> = []
+    moves:int = 0
+    done:bool = false
+]
+
+make_world = ():>World => {
+    let rooms:dict<string Room> = [
+        "hall" -> Room["Great Hall" "A drafty hall with a long table." ["north"->"library" "east"->"kitchen"] ["candle"]]
+        "kitchen" -> Room["Kitchen" "Pots hang from hooks. Something smells burnt." ["west"->"hall" "down"->"cellar"] ["knife" "bread"]]
+        "library" -> Room["Library" "Dusty shelves, a ladder, and a locked door to the east." ["south"->"hall" "east"->"vault"] ["key"]]
+        "cellar" -> Room["Cellar" "It is too dark to see much." ["up"->"kitchen"] ["wine"]]
+        "vault" -> Room["Vault" "Gold glitters everywhere. You win!" ["west"->"library"] [] "key"]
+    ]
+    return World[rooms "hall"]
+}
+
+look = (w:World):>void => {
+    let room = w.rooms[w.here]
+    printl("== {room.title} ==")
+    printl(room.description)
+    if room.items.length >? 0 { printl("You see: {room.items.join(", ")}") }
+    printl("Exits: {room.exits.keys().sorted().join(" ")}")
+}
+
+do_command = (@w:World line:string):>void => {
+    let words = line.lower().split(" ").filter((s)=>s.length >? 0)
+    if words.length =? 0 { return }
+    let verb = words[0]
+    let noun = if words.length >? 1 words[1] else ""
+    w.moves += 1
+    match verb {
+        <"look"> => look(w)
+        <"go"> => {
+            let room = w.rooms[w.here]
+            let target = room.exits.get(noun)
+            if target is? none {
+                printl("You can't go {noun} from here.")
+                return
+            }
+            let next = w.rooms[target]
+            if next.locked not=? "" and next.locked not in? w.inventory {
+                printl("The way {noun} is locked.")
+                return
+            }
+            w.here = target
+            look(w)
+            if w.here =? "vault" { w.done = true }
+        }
+        <"take"> => {
+            let items = w.rooms[w.here].items
+            let i = items.index_of(noun)
+            if i <? 0 {
+                printl("There is no {noun} here.")
+                return
+            }
+            w.rooms[w.here].items.pop(i)
+            w.inventory.push(noun)
+            printl("Taken: {noun}.")
+        }
+        <"drop"> => {
+            let i = w.inventory.index_of(noun)
+            if i <? 0 { printl("You don't have {noun}.") return }
+            w.inventory.pop(i)
+            w.rooms[w.here].items.push(noun)
+            printl("Dropped: {noun}.")
+        }
+        <"inventory"> => {
+            if w.inventory.length =? 0 { printl("You carry nothing.") }
+            else { printl("You carry: {w.inventory.join(", ")}") }
+        }
+        _ => printl("I don't understand '{verb}'.")
+    }
+}
+
+SCRIPT = """look
+take candle
+go west
+go north
+take book
+take key
+inventory
+go east
+"""
+
+main = ():>int => {
+    let path = "dewy_adventure_script.txt"
+    let argv = args()
+    if argv.length >? 1 {
+        path = argv[1]
+    } else {
+        if write_text(path SCRIPT) is? error { return 1 }
+    }
+    let script = read_text(path)
+    if script is? error {
+        printl("cannot read {path}")
+        return 1
+    }
+    let world = make_world()
+    loop line in script.split("\n") {
+        if line.trim() =? "" { continue }
+        printl("> {line}")
+        do_command(@world line)
+        if world.done { break }
+    }
+    printl("Game over after {world.moves} moves.")
+    if argv.length <=? 1 { remove_file(path) }
+    return 0
+}

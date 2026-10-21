@@ -1,0 +1,73 @@
+# Word frequency over a text file, with top-N output.
+
+SAMPLE = """The quick brown fox jumps over the lazy dog.
+The dog barks; the fox runs away!
+A quick reaction: the dog, the fox, and the bird.
+Nobody expects the Spanish Inquisition... or the fox.
+"""
+
+is_letter = (c:string):>bool => {
+    let lower = c.lower()
+    return (lower >=? "a" and lower <=? "z") or c =? "'"
+}
+
+tokenize = (text:string):>array<string> => {
+    let words:array<string> = []
+    let current = ""
+    loop c in text {
+        if is_letter(c) {
+            current = current + c.lower()
+        } else if current.length >? 0 {
+            words.push(current)
+            current = ""
+        }
+    }
+    if current.length >? 0 { words.push(current) }
+    return words
+}
+
+count_words = (words:array<string>):>dict<string int> => {
+    let counts:dict<string int> = []
+    loop w in words {
+        if w in? counts { counts[w] += 1 } else { counts[w] = 1 }
+    }
+    return counts
+}
+
+top_n = (counts:dict<string int> n:int):>array<[word:string count:int]> => {
+    let pairs = [loop [w c] in counts [word=w count=c]]
+    pairs.sort(key=(p)=>p.count reverse=true)
+    if pairs.length >? n { pairs.truncate(n) }
+    return pairs
+}
+
+main = ():>int => {
+    let path = "dewy_wordfreq_input.txt"
+    let argv = args()
+    let n = 5
+    if argv.length >? 1 {
+        n = to_int(argv[1]) ?? 5
+    }
+    let written = write_text(path SAMPLE)
+    if written is? error {
+        printl("could not write {path}")
+        return 1
+    }
+    let text = read_text(path)
+    if text is? error {
+        printl("could not read {path}: {text}")
+        return 1
+    }
+    let words = tokenize(text)
+    let counts = count_words(words)
+    printl("total words: {words.length}")
+    printl("unique words: {counts.length}")
+    printl("top {n}:")
+    loop [i entry] in top_n(counts n).enumerate() {
+        printl("{i+1}. {format(entry.word "<10")} {entry.count}")
+    }
+    let longest = words.max_by((w)=>w.length)
+    printl("longest word: {longest}")
+    remove_file(path)
+    return 0
+}

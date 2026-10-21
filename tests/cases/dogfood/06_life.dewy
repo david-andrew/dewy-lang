@@ -1,0 +1,89 @@
+# Conway's game of life printed to the terminal.
+
+Grid:type = [
+    width:int
+    height:int
+    cells:array<bool>
+
+    get = (x:int y:int):>bool => {
+        # wrap around the edges (a torus)
+        let xx = (x + width) % width
+        let yy = (y + height) % height
+        return cells[yy * width + xx]
+    }
+
+    neighbors = (x:int y:int):>int => {
+        let count = 0
+        loop dy in [-1..1] {
+            loop dx in [-1..1] {
+                if (dx not=? 0 or dy not=? 0) and get(x+dx y+dy) { count += 1 }
+            }
+        }
+        return count
+    }
+
+    population = ():>int => [loop c in cells if c 1].length
+]
+
+make_grid = (rows:array<string>):>Grid => {
+    let height = rows.length
+    let width = rows[0].length
+    let cells:array<bool> = []
+    loop row in rows {
+        loop ch in row { cells.push(ch =? "#") }
+    }
+    return Grid[width height cells]
+}
+
+step = (g:Grid):>Grid => {
+    let next:array<bool> = []
+    loop y in [0..g.height) {
+        loop x in [0..g.width) {
+            let n = g.neighbors(x y)
+            let alive = g.get(x y)
+            next.push(n =? 3 or (alive and n =? 2))
+        }
+    }
+    return Grid[g.width g.height next]
+}
+
+render = (g:Grid):>string => {
+    let lines:array<string> = []
+    loop y in [0..g.height) {
+        let line = ""
+        loop x in [0..g.width) {
+            line += if g.get(x y) "#" else "."
+        }
+        lines.push(line)
+    }
+    return lines.join("\n")
+}
+
+main = () => {
+    let grid = make_grid([
+        ".........."
+        "..#......."
+        "...#......"
+        ".###......"
+        ".........."
+        "......##.."
+        "......##.."
+        ".........."
+    ])
+    let seen:dict<string int> = []
+    loop gen in [0..12) {
+        let picture = render(grid)
+        if gen % 4 =? 0 {
+            printl("generation {gen} (population {grid.population}):")
+            printl(picture)
+            printl("")
+        }
+        if picture in? seen {
+            printl("cycle: generation {gen} repeats generation {seen[picture]}")
+            break
+        }
+        seen[picture] = gen
+        grid = step(grid)
+    }
+    printl("final population: {grid.population}")
+}

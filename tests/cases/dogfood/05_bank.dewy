@@ -1,0 +1,101 @@
+# Bank-account simulation using records, methods and errors.
+
+InsufficientFunds:type = type of error & [account:string needed:rational available:rational]
+AccountNotFound:type = type of error & [name:string]
+InvalidAmount:type = type of error & [amount:rational]
+Frozen:type = type of error & [account:string]
+
+Transaction:type = [kind:string amount:rational balance:rational]
+
+Account:type = [
+    owner:string
+    balance:rational = 0
+    frozen:bool = false
+    history:array<Transaction> = []
+
+    deposit = (amount:rational):>void|InvalidAmount|Frozen => {
+        if frozen { return Frozen[owner] }
+        if amount <=? 0 { return InvalidAmount[amount] }
+        balance += amount
+        history.push(Transaction["deposit" amount balance])
+    }
+
+    withdraw = (amount:rational):>void|InvalidAmount|InsufficientFunds|Frozen => {
+        if frozen { return Frozen[owner] }
+        if amount <=? 0 { return InvalidAmount[amount] }
+        if amount >? balance { return InsufficientFunds[owner amount balance] }
+        balance -= amount
+        history.push(Transaction["withdraw" amount balance])
+    }
+
+    apply_interest = (rate:rational):>void => {
+        let interest = (balance * rate * 100).round() / 100
+        if interest >? 0 {
+            balance += interest
+            history.push(Transaction["interest" interest balance])
+        }
+    }
+]
+
+Bank:type = [
+    accounts:dict<string Account> = []
+
+    open = (owner:string initial:rational):>void|InvalidAmount|Frozen => {
+        accounts[owner] = Account[owner]
+        if initial >? 0 { accounts[owner].deposit(initial) or_throw }
+    }
+
+    transfer = (src:string dst:string amount:rational):>void|AccountNotFound|InvalidAmount|InsufficientFunds|Frozen => {
+        if src not in? accounts { return AccountNotFound[src] }
+        if dst not in? accounts { return AccountNotFound[dst] }
+        accounts[src].withdraw(amount) or_throw
+        accounts[dst].deposit(amount) or_throw
+    }
+
+    total = ():>rational => {
+        let sum:rational = 0
+        loop [_ acct] in accounts { sum += acct.balance }
+        return sum
+    }
+]
+
+money = (x:rational):>string => "$" + format(x.to_float64() ",.2f")
+
+describe = (e:error):>string => match e {
+    x:InsufficientFunds => "{x.account} needs {money(x.needed)} but has {money(x.available)}"
+    x:AccountNotFound => "no account named {x.name}"
+    x:InvalidAmount => "invalid amount {money(x.amount)}"
+    x:Frozen => "account {x.account} is frozen"
+    _ => "unknown error"
+}
+
+report = (result:void|error label:string):>void => {
+    if result is? error {
+        printl("  {label}: FAILED ({describe(result)})")
+    } else {
+        printl("  {label}: ok")
+    }
+}
+
+main = () => {
+    let bank = Bank()
+    report(bank.open("alice" 100) "open alice")
+    report(bank.open("bob" 25.50) "open bob")
+    report(bank.open("carol" 0) "open carol")
+    report(bank.transfer("alice" "bob" 30) "alice -> bob 30")
+    report(bank.transfer("bob" "carol" 100) "bob -> carol 100")
+    report(bank.transfer("bob" "dave" 1) "bob -> dave 1")
+    report(bank.transfer("alice" "carol" (-5)) "alice -> carol -5")
+    bank.accounts["carol"].frozen = true
+    report(bank.transfer("alice" "carol" 5) "alice -> carol 5")
+    loop name in bank.accounts.keys() { bank.accounts[name].apply_interest(0.015) }
+    printl("Balances:")
+    loop [name acct] in bank.accounts {
+        printl("  {format(name "<6")} {format(money(acct.balance) ">10")}  ({acct.history.length} transactions)")
+    }
+    printl("Total: {money(bank.total())}")
+    printl("History of bob:")
+    loop t in bank.accounts["bob"].history {
+        printl("  {format(t.kind "<9")} {format(money(t.amount) ">9")} -> {money(t.balance)}")
+    }
+}

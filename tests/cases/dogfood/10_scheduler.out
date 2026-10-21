@@ -1,0 +1,22 @@
+queued 4 jobs
+  t=0: timer heartbeat fires (run 1)
+  -> requeue heartbeat (p0, 3 units left)
+  t=1: timer heartbeat fires (run 2)
+  -> requeue heartbeat (p0, 3 units left)
+  t=2: timer heartbeat fires (run 3)
+  -> heartbeat finished at t=3
+  t=3: io backup waits on disk0
+  -> requeue backup (p2, 2 units left)
+  t=4: cpu compile x2 does 6
+  -> requeue compile (p2, 4 units left)
+  t=5: io backup waits on disk0
+  -> requeue backup (p3, 1 units left)
+  t=6: cpu compile x2 does 4
+  -> compile finished at t=7
+  t=7: io backup waits on disk0
+  -> backup finished at t=8
+  t=8: cpu render x1 does 3
+  -> requeue render (p3, 2 units left)
+  t=9: cpu render x1 does 2
+  -> render finished at t=10
+finish order: heartbeat, compile, backup, render

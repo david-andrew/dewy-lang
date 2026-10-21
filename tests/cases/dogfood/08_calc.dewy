@@ -1,0 +1,161 @@
+# Tokenizer plus recursive-descent calculator for expressions.
+
+# Grammar:
+#   expr   := term (("+" | "-") term)*
+#   term   := factor (("*" | "/" | "%") factor)*
+#   factor := ("-" factor) | power
+#   power  := atom ("^" factor)?
+#   atom   := NUMBER | NAME | NAME "(" expr ")" | "(" expr ")"
+
+Token:type = [kind:string text:string pos:int]
+CalcError:type = type of error & [message:string pos:int]
+
+DIGITS = "0123456789"
+LETTERS = "abcdefghijklmnopqrstuvwxyz_"
+
+tokenize = (src:string):>array<Token>|CalcError => {
+    let tokens:array<Token> = []
+    let i = 0
+    let chars = graphemes(src)
+    loop i <? chars.length {
+        let c = chars[i]
+        if c =? " " {
+            i += 1
+        } else if c in? DIGITS or c =? "." {
+            let start = i
+            loop i <? chars.length and (chars[i] in? DIGITS or chars[i] =? ".") { i += 1 }
+            tokens.push(Token["num" chars[start..i).join("") start])
+        } else if c.lower() in? LETTERS {
+            let start = i
+            loop i <? chars.length and (chars[i].lower() in? LETTERS or chars[i] in? DIGITS) { i += 1 }
+            tokens.push(Token["name" chars[start..i).join("") start])
+        } else if c in? "+-*/%^()," {
+            tokens.push(Token["op" c i])
+            i += 1
+        } else {
+            return CalcError["unexpected character '{c}'" i]
+        }
+    }
+    tokens.push(Token["end" "" chars.length])
+    return tokens
+}
+
+Parser:type = [tokens:array<Token> at:int=0 vars:dict<string float64>=[]]
+
+peek = (p:Parser):>Token => p.tokens[p.at]
+advance = (@p:Parser):>Token => {
+    let t = p.tokens[p.at]
+    p.at += 1
+    return t
+}
+accept = (@p:Parser text:string):>bool => {
+    if peek(p).kind =? "op" and peek(p).text =? text {
+        p.at += 1
+        return true
+    }
+    return false
+}
+
+expr = (@p:Parser):>float64|CalcError => {
+    let value = term(@p) or_throw
+    loop true {
+        if accept(@p "+") { value += term(@p) or_throw }
+        else if accept(@p "-") { value -= term(@p) or_throw }
+        else { break }
+    }
+    return value
+}
+
+term = (@p:Parser):>float64|CalcError => {
+    let value = factor(@p) or_throw
+    loop true {
+        if accept(@p "*") { value *= factor(@p) or_throw }
+        else if accept(@p "/") {
+            let pos = peek(p).pos
+            let d = factor(@p) or_throw
+            if d =? 0.0 { return CalcError["division by zero" pos] }
+            value /= d
+        } else if accept(@p "%") {
+            let d = factor(@p) or_throw
+            value = value - d * (value / d).floor()
+        } else { break }
+    }
+    return value
+}
+
+factor = (@p:Parser):>float64|CalcError => {
+    if accept(@p "-") { return -(factor(@p) or_throw) }
+    let base = atom(@p) or_throw
+    if accept(@p "^") { return base ^ (factor(@p) or_throw) }
+    return base
+}
+
+call = (name:string arg:float64 pos:int):>float64|CalcError => match name {
+    <"sqrt"> => sqrt(arg)
+    <"abs"> => abs(arg)
+    <"floor"> => arg.floor()
+    _ => CalcError["unknown function {name}" pos]
+}
+
+atom = (@p:Parser):>float64|CalcError => {
+    let t = advance(@p)
+    if t.kind =? "num" {
+        let v = to_float(t.text)
+        if v is? none { return CalcError["bad number {t.text}" t.pos] }
+        return v
+    }
+    if t.kind =? "name" {
+        if accept(@p "(") {
+            let arg = expr(@p) or_throw
+            if not accept(@p ")") { return CalcError["expected )" peek(p).pos] }
+            return call(t.text arg t.pos) or_throw
+        }
+        let v = p.vars.get(t.text)
+        if v is? none { return CalcError["unknown variable {t.text}" t.pos] }
+        return v
+    }
+    if t.kind =? "op" and t.text =? "(" {
+        let v = expr(@p) or_throw
+        if not accept(@p ")") { return CalcError["expected )" peek(p).pos] }
+        return v
+    }
+    return CalcError["unexpected '{t.text}'" t.pos]
+}
+
+evaluate = (src:string vars:dict<string float64>):>float64|CalcError => {
+    let tokens = tokenize(src) or_throw
+    let p = Parser[tokens 0 vars]
+    let v = expr(@p) or_throw
+    if peek(p).kind not=? "end" { return CalcError["unexpected '{peek(p).text}'" peek(p).pos] }
+    return v
+}
+
+main = () => {
+    let vars:dict<string float64> = ["pi"->3.141592653589793 "x"->2.5]
+    let inputs = [
+        "1 + 2 * 3"
+        "(1 + 2) * 3"
+        "2 ^ 3 ^ 2"
+        "-2 ^ 2"
+        "10 / 4"
+        "7 % 3"
+        "sqrt(16) + abs(-3)"
+        "2 * pi * x"
+        "1 / (3 - 3)"
+        "1 + "
+        "foo(1)"
+        "3 $ 4"
+        "y * 2"
+        "(1 + 2"
+    ]
+    loop src in inputs {
+        let result = evaluate(src vars)
+        match result {
+            e:CalcError => {
+                printl("{src}")
+                printl("{" " * e.pos}^ error: {e.message}")
+            }
+            v:float64 => printl("{src} = {v}")
+        }
+    }
+}

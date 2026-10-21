@@ -1,0 +1,87 @@
+# Log analyzer: parse lines, durations between events, grouping by level and service.
+
+LOG = """2026-10-21 08:00:01 INFO  auth     user=alice action=login
+2026-10-21 08:00:05 INFO  web      GET /index.html 200 12ms
+2026-10-21 08:01:10 WARN  web      GET /slow 200 1530ms
+2026-10-21 08:02:00 ERROR db       connection reset (retry 1)
+2026-10-21 08:02:02 ERROR db       connection reset (retry 2)
+2026-10-21 08:02:07 INFO  db       reconnected
+2026-10-21 08:15:42 INFO  web      POST /api/items 201 48ms
+garbage line without structure
+2026-10-21 09:30:00 INFO  auth     user=alice action=logout
+2026-10-21 09:31:13 INFO  auth     user=bob action=login
+2026-10-21 10:00:00 WARN  web      GET /slow 200 2210ms
+2026-10-21 10:45:30 INFO  auth     user=bob action=logout
+"""
+
+Entry:type = [stamp:int64 time:string level:string service:string message:string]
+
+parse_line = (line:string):>Entry|none => {
+    let parts = line.split(" ").filter((p)=>p.length >? 0)
+    if parts.length <? 5 { return none }
+    let when = parse_date("{parts[0]} {parts[1]}" utc=true)
+    if when is? none { return none }
+    let stamp = int64(unix_time(when))
+    return Entry[stamp parts[1] parts[2] parts[3] parts[4..].join(" ")]
+}
+
+duration_text = (seconds:int64):>string => {
+    let h = seconds // 3600
+    let m = (seconds % 3600) // 60
+    let s = seconds % 60
+    if h >? 0 { return "{h}h{format(m "02")}m" }
+    if m >? 0 { return "{m}m{format(s "02")}s" }
+    return "{s}s"
+}
+
+field = (message:string key:string):>string|none => {
+    loop word in message.split(" ") {
+        if word.startswith(key + "=") { return word[key.length+1..] }
+    }
+    return none
+}
+
+main = () => {
+    let entries:array<Entry> = []
+    let bad = 0
+    loop line in LOG.trim().split("\n") {
+        let e = parse_line(line)
+        if e is? none { bad += 1 } else { entries.push(e) }
+    }
+    printl("parsed {entries.length} entries, {bad} malformed")
+
+    let by_level:dict<string int> = []
+    let by_service:dict<string array<Entry>> = []
+    loop e in entries {
+        by_level[e.level] = (by_level.get(e.level) ?? 0) + 1
+        if e.service not in? by_service { by_service[e.service] = [] }
+        by_service[e.service].push(e)
+    }
+    printl("by level:")
+    loop [level count] in by_level { printl("  {format(level "<6")} {count}") }
+
+    printl("by service:")
+    loop service in by_service.keys().sorted() {
+        let list = by_service[service]
+        let span = list[end].stamp - list[0].stamp
+        printl("  {format(service "<5")} {list.length} entries over {duration_text(span)}")
+    }
+
+    let slow = [loop e in entries if e.message.endswith("ms") and to_int(e.message.split(" ")[end][..end-2]) ?? 0 >? 1000 e]
+    printl("slow requests:")
+    loop e in slow { printl("  {e.time} {e.message}") }
+
+    let logins:dict<string int64> = []
+    printl("sessions:")
+    loop e in entries if e.service =? "auth" {
+        let user = field(e.message "user") ?? "?"
+        let action = field(e.message "action") ?? "?"
+        if action =? "login" { logins[user] = e.stamp }
+        else if action =? "logout" and user in? logins {
+            printl("  {user}: {duration_text(e.stamp - logins[user])}")
+        }
+    }
+    let first = entries[0].stamp
+    let last = entries[end].stamp
+    printl("log covers {duration_text(last - first)}")
+}

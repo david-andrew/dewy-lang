@@ -1,0 +1,99 @@
+# Matrix and statistics toolkit: mean, stddev, median, correlation, linear regression.
+
+mean = (xs:array<float64>):>float64 => {
+    let total:float64 = 0.0
+    loop x in xs { total += x }
+    return total / xs.length
+}
+
+variance = (xs:array<float64>):>float64 => {
+    let m = mean(xs)
+    let total:float64 = 0.0
+    loop x in xs { total += (x - m)^2 }
+    return total / (xs.length - 1)
+}
+
+stddev = (xs:array<float64>):>float64 => sqrt(variance(xs))
+
+median = (xs:array<float64>):>float64 => {
+    let s = xs.sorted()
+    let n = s.length
+    if n % 2 =? 1 { return s[n // 2] }
+    return (s[n//2 - 1] + s[n//2]) / 2
+}
+
+correlation = (xs:array<float64> ys:array<float64>):>float64 => {
+    let mx = mean(xs)
+    let my = mean(ys)
+    let sxy:float64 = 0.0
+    let sxx:float64 = 0.0
+    let syy:float64 = 0.0
+    loop [x y] in zip(xs ys) {
+        sxy += (x - mx) * (y - my)
+        sxx += (x - mx)^2
+        syy += (y - my)^2
+    }
+    return sxy / sqrt(sxx * syy)
+}
+
+Fit:type = [slope:float64 intercept:float64 r2:float64]
+
+linear_fit = (xs:array<float64> ys:array<float64>):>Fit => {
+    let mx = mean(xs)
+    let my = mean(ys)
+    let num:float64 = 0.0
+    let den:float64 = 0.0
+    loop i in [0..xs.length) {
+        num += (xs[i] - mx) * (ys[i] - my)
+        den += (xs[i] - mx)^2
+    }
+    let slope = num / den
+    let intercept = my - slope * mx
+    let r = correlation(xs ys)
+    return Fit[slope intercept r*r]
+}
+
+matmul = (a:array<array<float64>> b:array<array<float64>>):>array<array<float64>> => {
+    let n = a.length
+    let m = b[0].length
+    let k = b.length
+    let out:array<array<float64>> = [loop i in [0..n) [loop j in [0..m) 0.0]]
+    loop i in [0..n) {
+        loop j in [0..m) {
+            let s:float64 = 0.0
+            loop t in [0..k) { s += a[i][t] * b[t][j] }
+            out[i][j] = s
+        }
+    }
+    return out
+}
+
+transpose = (a:array<array<float64>>):>array<array<float64>> =>
+    [loop j in [0..a[0].length) [loop i in [0..a.length) a[i][j]]]
+
+show_matrix = (a:array<array<float64>>):>void => {
+    loop row in a {
+        printl("  " + [loop v in row format(v "8.2f")].join(" "))
+    }
+}
+
+main = () => {
+    let heights:array<float64> = [150.0 160.0 165.0 170.0 175.0 180.0 185.0]
+    let weights:array<float64> = [52.0 58.0 63.0 66.0 72.0 77.0 85.0]
+    printl("heights: mean={format(mean(heights) ".2f")} median={median(heights)} sd={format(stddev(heights) ".3f")}")
+    printl("weights: mean={format(mean(weights) ".2f")} median={median(weights)} sd={format(stddev(weights) ".3f")}")
+    printl("min/max weight: {weights.min()} / {weights.max()}")
+    printl("correlation: {format(correlation(heights weights) ".4f")}")
+    let fit = linear_fit(heights weights)
+    printl("fit: weight = {format(fit.slope ".3f")} * height + {format(fit.intercept ".2f")}  (r^2={format(fit.r2 ".4f")})")
+    loop h in [158.0 190.0] {
+        printl("  predicted weight at {h}: {format(fit.slope*h + fit.intercept ".1f")}")
+    }
+    let a:array<array<float64>> = [[1.0 2.0] [3.0 4.0] [5.0 6.0]]
+    let b:array<array<float64>> = [[7.0 8.0 9.0] [10.0 11.0 12.0]]
+    printl("A x B:")
+    show_matrix(matmul(a b))
+    printl("transpose(A):")
+    show_matrix(transpose(a))
+    printl("even median: {median([4.0 1.0 3.0 2.0])}")
+}

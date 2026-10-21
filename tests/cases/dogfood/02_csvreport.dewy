@@ -1,0 +1,93 @@
+# CSV-to-summary-report tool with argument handling.
+
+DATA = """date,region,product,units,price
+2026-01-03,North,Widget,12,2.50
+2026-01-04,South,Gadget,3,10.00
+2026-01-04,North,Gadget,1,10.00
+2026-01-05,East,Widget,7,2.50
+2026-01-06,South,Widget,20,2.25
+2026-01-07,East,Gizmo,2,99.99
+2026-01-07,North,Widget,bad,2.50
+"""
+
+Options:type = [group:string="region" top:int=3 verbose:bool=false]
+
+usage = ():>void => {
+    printl("usage: report [--group region|product] [--top N] [--verbose] [file]")
+}
+
+parse_args = (argv:array<string>):>Options|string => {
+    let opts = Options()
+    let i = 1
+    loop i <? argv.length {
+        let a = argv[i]
+        if a =? "--group" {
+            if i+1 >=? argv.length { return "--group needs a value" }
+            opts.group = argv[i+1]
+            i += 2
+        } else if a =? "--top" {
+            if i+1 >=? argv.length { return "--top needs a value" }
+            let n = to_int(argv[i+1])
+            if n is? none { return "--top expects a number, got '{argv[i+1]}'" }
+            opts.top = n
+            i += 2
+        } else if a =? "--verbose" {
+            opts.verbose = true
+            i += 1
+        } else {
+            return "unknown argument: {a}"
+        }
+    }
+    return opts
+}
+
+Totals:type = [units:int revenue:float64 rows:int]
+
+main = ():>int => {
+    let parsed = parse_args(args())
+    if parsed is? string {
+        printl("error: {parsed}")
+        usage()
+        return 2
+    }
+    let opts = parsed
+    let rows = csv_rows(DATA)
+    let header = rows[0]
+    let col = header.index_of(opts.group)
+    if col <? 0 {
+        printl("error: no column named {opts.group}")
+        return 2
+    }
+    let groups:dict<string Totals> = []
+    let skipped = 0
+    loop row in rows[1..] {
+        if row.length not=? header.length { continue }
+        let units = to_int(row[3])
+        let price = to_float(row[4])
+        if units is? none or price is? none {
+            skipped += 1
+            if opts.verbose { printl("skipping bad row: {row.join(",")}") }
+            continue
+        }
+        let key = row[col]
+        if key not in? groups { groups[key] = Totals[0 0.0 0] }
+        groups[key].units += units
+        groups[key].revenue += float64(units) * price
+        groups[key].rows += 1
+    }
+    let keys = groups.keys()
+    keys.sort(key=(k)=>groups[k].revenue reverse=true)
+    printl("Summary by {opts.group}")
+    printl(format("" "-<36"))
+    printl("{format(opts.group "<10")} {format("rows" ">5")} {format("units" ">7")} {format("revenue" ">12")}")
+    let grand:float64 = 0.0
+    loop k in keys[..min(opts.top keys.length)) {
+        let t = groups[k]
+        grand += t.revenue
+        printl("{format(k "<10")} {format(t.rows ">5")} {format(t.units ">7")} {format(t.revenue ">12.2f")}")
+    }
+    printl(format("" "-<36"))
+    printl("{format("total" "<10")} {format(grand ">26,.2f")}")
+    if skipped >? 0 { printl("({skipped} rows skipped)") }
+    return 0
+}
