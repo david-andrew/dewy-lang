@@ -1846,6 +1846,9 @@ finish_arg = (a: int, pt: int, is_mut: bool):
     if not has_flag(a, NF_CHECKED) or nodes[a].type == 0:
         check_expr(a, pt)
         add_flag(a, NF_CHECKED)
+    # (a written `@x` for a by-value parameter; `@f` of a function is its handle)
+    if not is_mut and has_flag(a, NF_MUT) and not is_fn_type(ntype(a)) and files[pos_file(nodes[a].pos)].is_dewy and written_at(a):
+        fatal(nodes[a].pos, "`@` passes a place, but this parameter takes a value: drop the `@`")
     if is_mut:
         check_place(a, true)
         if path_narrows > 0: path_forget(path_key(a))
@@ -1858,6 +1861,27 @@ finish_arg = (a: int, pt: int, is_mut: bool):
     refine_arg_target = prune(pt)
     coerce(a, pt)
     refine_arg_target = saved
+
+# Is place n written with a leading `@` (`@x`, `@r.a`, `@xs[i]`)? Receivers
+# are flagged as places without one.
+written_at = (n: int) -> bool:
+    e = n
+    loop (nodes[e].kind == .field or nodes[e].kind == .index) and nodes[e].a != 0: e = int(nodes[e].a)
+    if nodes[e].kind != .ident or pos_off(nodes[e].pos) <= 0 or src_char(nodes[e].pos - 1) != '@': return false
+    # (`@box.scaled()` partially applies a method: its `@` is the call's)
+    f = pos_file(nodes[e].pos)
+    src = files[f].src
+    o = pos_off(nodes[e].pos)
+    depth = 0
+    loop o < len(src):
+        c = src[o]
+        if c == '[': depth += 1
+        else if c == ']':
+            if depth == 0: break
+            depth -= 1
+        else if depth == 0 and not (is_ident_char(c) or c == '.' or c >= 128): break
+        o += 1
+    o >= len(src) or src[o] != '('
 
 default_arg = (decl: int, i: int, pt: int, given: int[] = [], captured: bool = false, targs: int[] = []) -> int:
     d = clone(int(nodes[kid(decl, i)].b))

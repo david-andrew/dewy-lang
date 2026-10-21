@@ -381,7 +381,8 @@ main=()=>{let value:int64=41 bump(@value) return value}
 
 References can name a field or array element: `bump(@point.x)`,
 `bump(@values[i])` or `bump(@points[i].x)`. An index expression evaluates once;
-other copies of the record or array retain their independent values.
+other copies of the record or array retain their independent values. `@value`
+for a parameter without `@` is an error (`@f` of a function is its handle).
 
 Closures capture snapshots of enclosing locals. Each closure can change its own
 private captures; later changes to the enclosing locals do not change those
