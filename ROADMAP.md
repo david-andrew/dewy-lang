@@ -29,7 +29,7 @@ GPT quota is limited: at most one Astra stream, at medium effort; Sol for review
 only.
 
 - Astra: stack closure environments and devirtualization (runtime).
-- Opus: idle.
+- Opus: dogfooding round 2 (12 programs in new domains; round-1 leftovers).
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
 
