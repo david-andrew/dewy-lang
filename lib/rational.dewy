@@ -50,6 +50,20 @@ rational = ((numerator denominator=1):>Rational=>_make(_integer(numerator) _inte
         return parsed
     })
 
+# `rational(x)` of a float: a finite float is exactly sign * mantissa * 2^exponent,
+# and that value is the result, unrounded. NaN and infinity have none, and are
+# rejected as the integer conversion rejects them.
+_from_float=(value:float64):>Rational=>{
+    let bits=f64_bits(value)
+    let exponent=((bits >> 52) and 2047) as int64
+    if exponent =? 2047 panic("rational of a NaN or infinite float")
+    let mantissa=(bits and 4503599627370495) as int64
+    if exponent =? 0 exponent=1 else mantissa=mantissa+4503599627370496
+    if mantissa =? 0 return Rational[]
+    if (bits >> 63) =? 1 mantissa=-mantissa
+    return _mul(Rational[mantissa 1] pow(Rational[2 1] exponent-1075))
+}
+
 parse_rational=(text:string):>Rational|none=>{
     let parts=text.split("/")
     if parts.length <? 1 or parts.length >? 2 return none
@@ -107,6 +121,15 @@ floor = ((value:Rational):>int=>value.numerator//value.denominator)
     & ((value:RationalWord):>int=>floor(_widen(value)))
 ceil = ((value:Rational):>int=>-((-value.numerator)//value.denominator))
     & ((value:RationalWord):>int=>ceil(_widen(value)))
+# The nearest integer; a half goes to the even one, as the float conversions round.
+round = ((value:Rational):>int=>{
+        let whole=value.numerator//value.denominator
+        let twice=(value.numerator-whole*value.denominator)*2
+        if twice <? value.denominator return whole
+        if twice >? value.denominator or whole%2 =? 1 return whole+1
+        return whole
+    })
+    & ((value:RationalWord):>int=>round(_widen(value)))
 # Toward zero: the integer conversion, `int(q)` and `q as int`.
 _truncate = ((value:Rational):>int=>if value.numerator <? 0 ceil(value) else floor(value))
     & ((value:RationalWord):>int=>_truncate(_widen(value)))
@@ -125,6 +148,10 @@ _narrow=(value:Rational):>RationalWord|Overflow=>{
     let d:int64=value.denominator
     return RationalWord[n d]
 }
+# `rational<int64>(value)` and `rational<int64>(numerator denominator)`: the
+# explicit narrowing, Overflow when a normalized part leaves int64.
+_word_rational = ((value:Rational):>RationalWord|Overflow=>_narrow(value))
+    & ((numerator:int denominator:int):>RationalWord|Overflow=>_narrow(_make(numerator denominator)))
 # Powers stop at the first factor that leaves the parts: coprime factors never
 # shrink again, so the result could not fit either.
 _word_pow=(base:RationalWord exponent:int64):>RationalWord|Overflow=>{

@@ -762,8 +762,8 @@ denominator is one, otherwise `numerator/denominator`.
 Arithmetic `+`, `-`, `*`, `/`, comparisons, and unary minus work with fractions,
 `BigInt`, and integers in either order. `//` returns an `int` floor quotient;
 `%` returns a `rational` remainder with the divisor's sign. `.divmod(other)`
-returns both. `.floor()` and `.ceil()` return `int`, and `int(q)` truncates
-toward zero; `.abs()`, `.reciprocal()` and `.pow(signed_exponent)` return
+returns both. `.floor()`, `.ceil()` and `.round()` return `int` (`.round()`
+takes a half to the even neighbour), and `int(q)` truncates toward zero; `.abs()`, `.reciprocal()` and `.pow(signed_exponent)` return
 fractions. Runtime division by zero, a zero denominator and negative powers of
 zero panic. Zero to the zeroth power is one. Copies are independent, and
 normalized values can be dictionary keys.
@@ -780,7 +780,9 @@ let step=(1/60).to_float32()
 let movement=vec2(step 2.0*step)
 ```
 
-Floating values cannot yet be converted back to `rational` directly. Inferred
+`rational(x)` of a `float32` or `float64` is the float's exact binary value
+(`rational(f)` with `f:float64=0.1` is `3602879701896397/36028797018963968`);
+NaN and infinity panic. Floats never become fractions implicitly. Inferred
 decimal bindings hold fractions; annotate an accumulator that will receive
 floating values with `float32` or `float64`.
 
@@ -789,7 +791,9 @@ Its `+`, `-`, `*`, `/`, `^` and negation return `rational<int64> | Overflow`,
 `Overflow` when the exact result does not fit the parts; handle it with `is?`
 or `match`. Comparisons and printing work as for `rational`. A word integer or a
 constant fraction initializes it (`let third:rational<int64>=1/3`), and it
-widens to `rational` or a float wherever one is expected.
+widens to `rational` or a float wherever one is expected. A runtime `rational`
+narrows explicitly: `rational<int64>(q)`, or `rational<int64>(numerator
+denominator)` like `rational(...)`, returns `rational<int64> | Overflow`.
 
 ```dewy
 main=():>int64=>{

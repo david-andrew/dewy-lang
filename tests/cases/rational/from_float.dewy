@@ -1,0 +1,16 @@
+# quick
+# `rational(x)` of a float is its exact binary value.
+main=():>int64=>{
+    let tenth:float64=0.1
+    let single:float32=0.1
+    printl("{rational(tenth)} {rational(single)}")
+    printl("{rational(-2.75 as float64)} {rational(0.0 as float64)} {rational(-0.0 as float64)}")
+    let tiny:float64=5e-324
+    printl(rational(tiny).denominator =? 2^1074)
+    let huge:float64=-3e300
+    let exact=rational(huge)
+    printl("{exact.denominator} {exact <? 0} {exact.to_float64() =? huge}")
+    let third=1/3
+    printl(rational(third.to_float64()) =? third)
+    return 0
+}

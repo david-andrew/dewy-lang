@@ -1,0 +1,17 @@
+# quick
+# `rational<int64>(value)`: the explicit narrowing gives Overflow when a part leaves int64.
+main=():>int64=>{
+    let q:rational=1/3
+    q+=1
+    let w=rational<int64>(q)
+    if w is? Overflow return 1
+    printl(w)
+    printl(rational<int64>(q^50) is? Overflow)
+    printl(rational<int64>(6 -4))
+    printl(rational<int64>(-9223372036854775808 -1) is? Overflow)
+    let n:int=5
+    printl(rational<int64>(n))
+    let back:rational=w
+    printl(back =? q)
+    return 0
+}

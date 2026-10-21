@@ -3169,7 +3169,13 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
     if not ufcs and mod_scope < 0 and name == intern("rational") and lookup(name) == 0 and files[pos_file(nodes[n].pos)].is_dewy:
         pos = nodes[n].pos
         ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
-        nodes[n].a = i32(bc_field(bc_ident("$dewy_rational", pos), "rational", pos))
+        fname = "rational"
+        # (of a float: its exact binary value)
+        if args.len() == 1 and nodes[args[0]].kind != .namedarg:
+            if tkind(check_expr(args[0], 0)) == .float_:
+                fname = "_from_float"
+                set_kid(n, 0, last_checked)
+        nodes[n].a = i32(bc_field(bc_ident("$dewy_rational", pos), fname, pos))
         return check_expr(n, expected)
     if not ufcs and mod_scope < 0 and args.len() == 2 and (name == intern("__floor_div") or name == intern("__floor_mod") or name == intern("__dewy_power") or name == intern("__dewy_divide")) and files[pos_file(nodes[n].pos)].is_dewy:
         if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
@@ -4360,6 +4366,12 @@ check_call = (n: int, expected: int) -> int:
     if ck == .typeapply:
         base = int(nodes[callee].a)
         name = int(nodes[base].name)
+        # `rational<int64>(value)`: the explicit narrowing, with Overflow in its result
+        if nodes[base].kind == .ident and name_of(name) == "rational" and lookup(name) == 0 and dewy_at(nodes[n].pos):
+            if bundled_word_rational_type(resolve_type(int(nodes[callee].c))):
+                pos = nodes[n].pos
+                nodes[n].a = i32(bc_field(bc_ident("$dewy_rational", pos), "_word_rational", pos))
+                return check_expr(n, expected)
         s = 0
         mod = -1
         if nodes[base].kind == .ident: s = lookup(name)
