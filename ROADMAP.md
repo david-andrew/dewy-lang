@@ -27,8 +27,7 @@ GPT quota is limited: at most one Astra stream, at medium effort; Sol for review
 only.
 
 - Astra: ownership slice 2 (copy/move hooks, resource containers, closure copyability).
-- Opus: suspected struct-assignment miscompile; map/set slot release; strict
-  index stores.
+- Opus: shared optimizer facts, measure-first pilot (compile throughput).
 
 ## Next
 
@@ -59,9 +58,9 @@ only.
 - Recover the game-panel compile cost of mathematical `int` (+5.7%, accepted
   10-20); the frontend work recovered the synthetic panel's share.
 - Small items:
-  - removing from a map/set whose refined element rejects zero (`Pos`) fails:
-    the library zeroes the freed slot (`lib/core/map.jo:309`); needs a
-    library-only dead-slot primitive;
+  - `xs.swap` on refined arrays is rejected (goes through `data()`); indexed
+    rewrite costs +62–93% on array_swap, so it needs a swap primitive;
+  - maps fail their own index proofs under the strict policy;
   - diagnostics spell `Set<…>` instead of `set<…>`; a failed overload can
     blame an unrelated candidate (GpuBuffer, Set); `.length` on a user type
     without one says "use `.length`";
