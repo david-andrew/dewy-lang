@@ -24,12 +24,14 @@ compile from source quickly enough to stay in the edit loop: a compiler build
 in seconds, not minutes. Fresh compilation is the model. A persistent cache is
 not the way the language stays fast.
 
-The rough compilation target is 250,000 lines per second for Dewy programs
-(clarified 2026-10-18). Measure fresh whole-program builds on representative
-sources, with hardware, build mode, source-counting method and included library
-work recorded. Report small-program latency separately from large-program
-throughput; generated padding and repeated trivial declarations do not establish
-useful application throughput.
+The compilation target is 250,000 lines per second for Dewy programs, single
+threaded, in the default build; 200,000 is the hard minimum (clarified
+2026-10-21). Parallel compilation is a bonus on top, not the target. Measure
+fresh whole-program builds on representative sources, with hardware, build
+mode, source-counting method and included library work recorded. Report
+small-program latency separately from large-program throughput; generated
+padding and repeated trivial declarations do not establish useful application
+throughput.
 
 Games are a primary customer. Dense data, a game loop, and interactive native
 and web programs should be natural to write. A straightforward program should
@@ -53,10 +55,18 @@ for that lane. An unproven copy, allocation, or panic is then a compile error,
 and the author writes an explicit copy, a view, or a move. A buffer proved
 unique is mutated in place. Game code never has to enter this mode.
 
-That stricter lane is where hidden exits and hidden cost become compile-time
-facts. On the ordinary path, a bounds failure may still be a runtime check
-until a program forbids it. Safety for systems work is the checked absence of
-those operations, not only a panic with a clear message.
+Runtime checks are opt-in. By default a program has no hidden traps: every
+partial operation, such as an index, a division or a narrowing, is proven safe
+from facts the compiler can see, handled as a value (`xs.get(i)` gives
+`T | none`), or checked explicitly with `$runtime_assert`. An obligation the
+compiler cannot prove is a compile error with a fix-it. A module, function or
+block that prefers checks says `$runtime_checks`: its unproven obligations
+become runtime checks that report the violated requirement and the observed
+values, and proven ones still vanish. `$prototype` defers every unproven
+obligation to runtime with a warning at each site, for development only. The
+stricter lane, `$no_hidden_costs`, also forbids hidden allocation, detach and
+costly copies, and admits neither opt-in. Safety for systems work is the checked
+absence of those operations, not only a panic with a clear message.
 
 ## Performance
 

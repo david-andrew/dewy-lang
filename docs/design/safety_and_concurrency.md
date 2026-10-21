@@ -210,3 +210,82 @@ Step 5 is the ergonomic and performance win, and it is where the partition-first
 - How layout (SoA/AoS, alignment, cache-line padding) is chosen as a representation of the same type, and where — at the partition, at the declaration, or by context.
 - What the scheduler context contains (pool, affinity, chunk size) and how a library kernel stays agnostic to it.
 - The shape of the “why was this copied / where is this shared” diagnostic, so the fast path is verifiable rather than assumed.
+
+## Adopted direction (2026-10-21)
+
+David accepted this direction on 2026-10-21. Decided spelling: the parallel loop
+is the keyword `parallel`, used like `loop`: `parallel i in [0..10) { … }`, and
+`[parallel x in xs x*x]`. Not yet decided: the task-group form, `blocks`,
+`Canceled` and the `Atomic` order spellings. Keep tensor and `parallel` designs
+device-agnostic: a GPU is placement/representation context, not a type change.
+
+
+### (a) The parallelism lane: asynchrony, which is free to run sequentially
+
+- **Keep partitions first.** Add one runtime: **work-stealing fork-join with heartbeat promotion** (Chase-Lev deques, one per worker, in a pool shared with the waiting lane).
+  - Non-experts never pick chunk sizes.
+  - Nesting composes; today's `parallel_*` runs nested calls serially.
+- **`parallel` loops and comprehensions** are the user surface. The obligations:
+  - the body writes only proven-disjoint partitions;
+  - reductions reorder only under a proven associative operator, otherwise they use a fixed tree, so results are **deterministic by default**;
+  - **the body's effect row must not block on anything a sibling could signal** (channels, queues, locks). Zig's undetectable `async`-instead-of-`concurrent` deadlock becomes a compile error, and the runtime may run any piece inline.
+- **Chunk boundaries are free cancellation points.** The scheduler checks at steal and promotion points, so CPU loops get no per-iteration checks (Kelley's Amdahl point).
+- **Per-worker regions** follow MaPLe: a child's allocations are released at the join.
+
+### (b) The waiting lane: guaranteed concurrency, Go ergonomics, no colours
+
+- **No `async`, no `await` and no `io` parameter.** Blocking is an inferred effect (`effects.md` already has internal `Block`, `Spawn` and `IO` categories). Any function may block.
+  - With the whole program in view, the compiler picks the representation per function: stackful by default, stackless where the target needs it (wasm).
+  - This reaches Zig's goal without Zig's plumbing.
+- **Implicit context.** The backend, cancel scope and deadline travel as an implicit context, like the allocator: no `ctx` or `io` in signatures, but rows still record blocking.
+  - `main` chooses the backend: threads first (like Zig `Threaded`), then M:N over io_uring, kqueue and IOCP.
+- **Task stacks.** Static stack bounds (from the resource-exhaustion design) give exactly-sized stacks, so spawning is cheap like Go's without growable stacks. Unbounded call graphs get reserved virtual stacks.
+  - A spawn without storage returns a value; it never traps.
+- **Structured only.** A task group is the only way to spawn. A "detached" task is a spawn into a longer-lived group that the caller passes explicitly, as with Trio nurseries.
+  - Joining the group returns its results, or the first failure, as values.
+  - The first failure cancels siblings by default. There are no panics to propagate.
+- **Cancellation is a value: `Canceled`, an `exception` alternative** on every blocking operation. It propagates with `or_throw`.
+  - **Level-triggered per scope.** Once a scope is cancelled, every later blocking operation inside it returns `Canceled` until the scope exits. Swallowing it is therefore harmless, which removes the need for Zig's `recancel` and its prose-only rules and assertion failures.
+  - Deadlines are cancel scopes, and a timeout is just another value (`T | Timeout`).
+  - Cleanup (`defer`, drop hooks) runs shielded, with a grace deadline.
+  - Threads use Zig's signal/`EINTR` acknowledgement; M:N backends cancel in the reactor.
+- **Channels are typed and bounded.** Capacity is explicit and there is no unbounded default, so backpressure stays visible.
+  - `Closed` and `Canceled` are values. Go's send-on-closed panic is impossible.
+  - **`select` is over operations** with exactly-one-commits semantics (Go and Concurrent ML), never over half-run futures. That rules out Rust's cancel-safety and futurelock problems.
+- **Sending is a move.** `Send`/`Sync` are inferred structurally, and almost all values qualify.
+- **No language-level actors.** An actor is a task plus a channel in the library.
+
+### (c) The expert lane: danger opt-in, with verified pieces
+
+- **`Atomic<T>`.** Every operation names its order: `relaxed`, `acquire`, `release`, `acq_rel` or `seq_cst`. There is no `consume`. Atomics belong to the trusted core. Users compose primitives instead of writing them.
+- **A standard library of model-checked primitives,** checked by a nightly model-checking gate (a loom/GenMC-style permutation explorer):
+  - `Spsc<T N>` (Rigtorp-style, with cached indices);
+  - bounded `Mpmc` (Vyukov);
+  - a Disruptor-style `Sequencer` for broadcast and batch publication;
+  - `Mutex<T>` without poisoning;
+  - `SeqLock<T>`, whose reads return a *value snapshot*, which is exactly Dewy semantics;
+  - `Snapshot<T>`, an RCU or epoch-reclaimed cell whose readers get immutable values and whose writers publish new versions.
+- **Layout as representation.** Cache-line padding and alignment are representation facts (crossbeam's 128-byte x86 rule), and partition collectors are padded automatically.
+- **Placement context.** Pinning, core sets, NUMA node, thread-per-core execution and `spin`/`spin_then_park`/`park` wait policies are scheduler context, never hard-coded in kernels.
+- **A hot-path contract.** A row such as `& no blocks & no allocates` (a new `blocks` spelling for the internal `Block` category), inside the strict lane's no-panic policy, proves a tick handler never locks, makes a syscall, allocates or panics. It is the most distinctive feature for HFT, audio and games.
+
+### Staged build order
+
+Each stage is measured on named kernels. Core scaling needs a dedicated machine, since the shared one allows only 4 workers.
+
+1. **Fork-join runtime replacing the current worker pool,** with nesting, heartbeat promotion and deterministic reductions.
+   - Kernels: naive `fib(32)` (spawn overhead, against `T1/Tseq`), parallel sum, blocked matmul 1024², 2D Jacobi stencil, parallel mergesort, `parallel_particles`.
+   - Baselines: C with OpenMP, Rust with rayon, Go goroutines with a WaitGroup.
+   - Gate: at least 0.9× rayon and OpenMP at every core count, and `T1/Tseq ≤ 1.1`.
+   - Measure first: ROADMAP records fork-based lowering at 0.88–1.00×.
+2. **Inferred `Send`/`Sync`, parallel `loop` obligations, and `Atomic<T>`/`CachePadded`.**
+   - Kernels: false-sharing counters against C; parallel histogram.
+3. **Task groups, `Canceled`, deadlines, and the threads backend.**
+   - Kernels: find-first with early exit (cancellation latency), racing two lookups, 10k-task fan-out with a deadline; against Go `context` and Zig `Threaded`.
+4. **The primitive library: SPSC, MPMC, channels, `select`, `Mutex`, `SeqLock`, `Snapshot`.**
+   - Kernels: SPSC throughput and round-trip nanoseconds against Rigtorp's queue and the Disruptor; MPMC against crossbeam; channel ping-pong against Go.
+5. **M:N runtime over io_uring and kqueue, with static-stack tasks.**
+   - Kernels: memory and spawn cost for 1M idle tasks; TCP echo and HTTP hello p50/p99 at 10k–100k connections against Go `net/http` and tokio.
+6. **Expert placement and the `no blocks` hot-path proof.**
+   - Kernel: a pinned tick-to-trade pipeline (feed → SPSC → strategy → SPSC → order), p50/p99.9 against C++.
+7. **wasm stackless lowering; deadlock and lock-order diagnostics.**
