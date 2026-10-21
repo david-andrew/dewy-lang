@@ -340,7 +340,7 @@ dw_expect = (id: int) -> int:
     nodes[report].a = i32(callee)
     said = dw_text("", pos)
     if message != 0: said = dw_expr(message)
-    set_list(report, [dw_text(pos_str(pos), pos), dw_text(described, pos), dw_text(shown, pos), said, dw_expect_notes(condition, pos)])
+    set_list(report, [dw_text(pos_str(pos), pos), dw_text(described, pos), dw_text(shown, pos), said, dw_expect_notes(condition, pos, described)])
     statement = mk(.exprstmt, pos)
     nodes[statement].a = i32(report)
     failed = mk(.block, pos)
@@ -363,7 +363,7 @@ dw_text = (text: str, pos: int) -> int:
 # A comparison's operands that are places (names, members, constant indices) are
 # shown with their values when it fails: `note: xs.length is 0`. Other operands
 # (calls) are not evaluated again.
-dw_expect_notes = (condition: int, pos: int) -> int:
+dw_expect_notes = (condition: int, pos: int, described: str = "") -> int:
     if condition == 0: return dw_text("", pos)
     let id = dw_unwrap(condition)
     op = dw_op(id)
@@ -371,8 +371,11 @@ dw_expect_notes = (condition: int, pos: int) -> int:
     n = mk(.str_lit, pos)
     nodes[n].aux = 1
     pieces: int[]
-    loop side in [dw_child(id, 1), dw_child(id, 2)]:
+    # (other operands than names and members, as written: `to_roman(40)`, `x+1`)
+    texts = dw_comparison_sides(described, op)
+    loop i in 0.. and side in [dw_child(id, 1), dw_child(id, 2)]:
         shown = dw_operand_text(side)
+        if shown == "" and not dw_literal_operand(side) and texts.len() == 2: shown = texts[i]
         if shown == "": continue
         lead = "note: "
         if pieces.len() > 0: lead = "\nnote: "
@@ -384,6 +387,49 @@ dw_expect_notes = (condition: int, pos: int) -> int:
     if pieces.len() == 0: return dw_text("", pos)
     set_list(n, pieces)
     n
+
+# a literal operand needs no note: its value is what is written
+dw_literal_operand = (id: int) -> bool:
+    let id = dw_unwrap(id)
+    k = dewy_syntax[id].kind
+    if dw_integer_kind(k) or k == .real or k == .source_real or k == .boolean or k == .string or k == .quoted or k == .rawquoted or k == .based_string: return true
+    if k == .identifier and dewy_syntax[id].text in ["none", "true", "false"]: return true
+    if dewy_syntax[id].kind == .prefix and dw_op(id) == .minus: return dw_literal_operand(dw_child(id, 1))
+    # ([2 5]: a literal array of literals)
+    if k == .block and dewy_syntax[id].text == "[]:":
+        loop child in dw_children(id):
+            if not dw_literal_operand(child): return false
+        return true
+    false
+
+# The two operands of a comparison as written, split at its operator outside
+# brackets and quotes ([] when the operator is not found once).
+dw_comparison_sides = (text: str, op: DewyToken) -> str[]:
+    spelled = dn_token_text(op)
+    depth = 0
+    quote: u8 = 0
+    at = -1
+    i = 0
+    loop i < len(text):
+        c = text[i]
+        if quote != 0:
+            if c == '\\': i += 1
+            else if c == quote: quote = 0
+        else if c == '"' or c == '\'': quote = c
+        else if c == '(' or c == '[' or c == '{': depth += 1
+        else if c == ')' or c == ']' or c == '}': depth -= 1
+        else if depth == 0 and i + len(spelled) <= len(text) and text[i..i + len(spelled)) == spelled:
+            # (`<?` inside `<=?`, `=?` inside `not=?`: the whole operator only)
+            before = if i > 0: text[i - 1] else: u8(' ')
+            negated = i >= 3 and text[i - 3..i) == "not"
+            if before != '<' and before != '>' and before != '=' and before != '.' and not negated:
+                if at >= 0: return []
+                at = i
+                i += len(spelled)
+                continue
+        i += 1
+    if at < 0: return []
+    [trim(text[0..at)), trim(text[at + len(spelled)..len(text)))]
 
 dw_operand_text = (id: int) -> str:
     let id = dw_unwrap(id)

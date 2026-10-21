@@ -58,8 +58,8 @@ commutes = (a:int64 b:int64) => $expect add(a b) =? add(b a)
 ```
 
 A failed expectation is reported on stderr (`expectation failed`, the source line
-with the condition underlined, the message, and the values of compared names and
-members) and returns from the function it is in; the code after an expectation
+with the condition underlined, the message, and the value of each compared
+operand that is not a literal, evaluated again) and returns from the function it is in; the code after an expectation
 may assume it, so `$expect value is? int64` narrows `value`. Expectations belong
 in functions that give no value: the test itself, or a helper it calls. A
 helper's failure returns from the helper, the test goes on, and the test fails.
