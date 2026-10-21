@@ -13,6 +13,14 @@ checkpoint tag after reviewing accepted costs.
 
 Counts come from perf_event_open (count_instructions.c), or from valgrind's
 cachegrind where hardware counters are unavailable (CI's virtual machines).
+
+--critical counts the critical path instead (the north-star gate): each
+compiler builds the wall panel with --workers emission workers, and every
+process is counted apart (count_critical.c); the compiler's own instructions
+plus its largest worker's approximate wall time under ideal parallelism, and
+unlike wall time do not depend on the machine's load. --wall also measures
+wall-clock milliseconds, reported only: pinned to one logical CPU per physical
+core where possible, runs interleaving base and candidate, median of --runs.
 """
 from __future__ import annotations
 
@@ -23,7 +31,9 @@ import json
 import os
 import random
 import re
+import resource
 import shutil
+import statistics
 import subprocess
 import sys
 import time
@@ -32,6 +42,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / '__dewycache__' / 'speed'
 COUNTER_SOURCE = Path(__file__).with_name('count_instructions.c')
+CRITICAL_SOURCE = Path(__file__).with_name('count_critical.c')
 GAME = 'examples/dunes.dewy'
 SYNTHETIC_FUNCTIONS = 1000
 STABLE = 1e-4          # two runs of one item must agree within 0.01%
@@ -108,7 +119,7 @@ def delta(base: int, candidate: int) -> float:
 
 def clean_env(**extra: str) -> dict:
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
-    env.update(SLOPPY_EMIT_WORKERS='1', **extra)
+    env.update({'SLOPPY_EMIT_WORKERS': '1', **extra})
     return env
 
 
@@ -296,6 +307,159 @@ def measure(counter: Counter, toolchain: Toolchain, source: str, flags: list[str
         return twice(toolchain.inputs / source)
 
 
+HELLO = 'printl"hello"\n'
+
+
+def wall_panel() -> list[tuple[str, str]]:
+    synthetic = panel(False)[1][1]
+    hello = CACHE / 'panel' / 'hello.dewy'
+    if not hello.exists() or hello.read_text() != HELLO:
+        hello.write_text(HELLO)
+    return [('synthetic-22k', synthetic), ('game', GAME), ('hello', str(hello))]
+
+
+def physical_cpus() -> list[int]:
+    """One allowed logical CPU per physical core (the first sibling), in order."""
+    allowed = sorted(os.sched_getaffinity(0))
+    chosen, seen = [], set()
+    for cpu in allowed:
+        siblings = Path(f'/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list')
+        try:
+            core = siblings.read_text().strip()
+        except OSError:
+            core = str(cpu)
+        if core not in seen:
+            seen.add(core)
+            chosen.append(cpu)
+    return chosen
+
+
+def stage_wall(toolchain: Toolchain, role: str) -> Path:
+    """A toolchain copied to a directory of its own, so runs can interleave."""
+    active = CACHE / 'panel' / f'wall-{role}'
+    marker = active / 'from'
+    if marker.exists() and marker.read_text() == str(toolchain.binary):
+        return active
+    shutil.rmtree(active, ignore_errors=True)
+    (active / 'bin').mkdir(parents=True)
+    shutil.copy2(toolchain.binary, active / 'bin/dewy-core')
+    shutil.copytree(toolchain.lib, active / 'lib')
+    marker.write_text(str(toolchain.binary))
+    return active
+
+
+def wall_once(active: Path, source: Path, workers: int, cpus: list[int]) -> tuple[float, float]:
+    """Wall and CPU milliseconds of one build."""
+    env = clean_env(DEWY_CORE_LIB=str(active / 'lib'), SLOPPY_EMIT_WORKERS=str(workers))
+    command = [str(active / 'bin/dewy-core'), 'build', str(source), '-o', str(active / 'program')]
+    before = resource.getrusage(resource.RUSAGE_CHILDREN)
+    started = time.perf_counter()
+    run = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True,
+                         preexec_fn=(lambda: os.sched_setaffinity(0, cpus)) if cpus else None)
+    wall = (time.perf_counter() - started) * 1000
+    after = resource.getrusage(resource.RUSAGE_CHILDREN)
+    if run.returncode:
+        raise CompileError(run.stdout + run.stderr)
+    cpu = (after.ru_utime + after.ru_stime - before.ru_utime - before.ru_stime) * 1000
+    return wall, cpu
+
+
+def critical_counter() -> Path:
+    source = CRITICAL_SOURCE.read_bytes()
+    binary = CACHE / f'count-critical-{hashlib.sha256(source).hexdigest()[:12]}'
+    if not binary.exists():
+        temporary = binary.with_suffix('.tmp')
+        subprocess.run([os.environ.get('CC', 'cc'), '-O2', '-Wall', '-Wextra', CRITICAL_SOURCE, '-o', temporary],
+                       check=True, capture_output=True, text=True)
+        temporary.replace(binary)
+    return binary
+
+
+def critical_result(stderr: str) -> tuple[int, int]:
+    """(critical path, total) instructions from count_critical's final JSON line."""
+    try:
+        row = json.loads(stderr.splitlines()[-1])
+        return int(row['critical']), int(row['total'])
+    except (ValueError, IndexError, KeyError, TypeError) as error:
+        raise ValueError('Missing critical-path instruction count') from error
+
+
+def critical_once(counter: Path, active: Path, source: Path, workers: int) -> tuple[int, int]:
+    env = clean_env(DEWY_CORE_LIB=str(active / 'lib'), SLOPPY_EMIT_WORKERS=str(workers))
+    run = subprocess.run([counter, active / 'bin/dewy-core', 'build', source, '-o', active / 'program'],
+                         cwd=ROOT, env=env, capture_output=True, text=True)
+    if run.returncode:
+        raise CompileError(run.stdout + run.stderr)
+    return critical_result(run.stderr)
+
+
+def critical_main(args, staged: dict[str, Path], labels: str, workers: list[int], limit: float) -> list:
+    """Critical-path instructions of the wall panel; returns failures."""
+    counter = critical_counter()
+    order = list(staged)
+    print('compile critical path, G instructions (own + largest worker; total in parentheses): ' + labels)
+    failures = []
+    for name, source in wall_panel():
+        path = Path(source) if Path(source).is_absolute() else ROOT / source
+        for n in workers:
+            # (the least of two: the compiler's own count varies a little with how its pipes are read)
+            got = {role: min(critical_once(counter, staged[role], path, n) for _ in range(2)) for role in order}
+            line = f'  {name:15} {n} worker{"s" if n != 1 else " "}'
+            if 'base' in got:
+                (old, old_total), (new, new_total) = got['base'], got['candidate']
+                change = round(delta(old, new), 2) + 0.0
+                over = change > limit
+                if over:
+                    failures.append((name, n, change))
+                line += (f'  {old / 1e9:7.4f} -> {new / 1e9:7.4f}  {change:+6.2f}%'
+                         f'   ({old_total / 1e9:.4f} -> {new_total / 1e9:.4f})' + ('  <-' if over else ''))
+            else:
+                line += f'  {got["candidate"][0] / 1e9:7.4f}   ({got["candidate"][1] / 1e9:.4f})'
+            print(line, flush=True)
+    return failures
+
+
+def wall_main(args, toolchains: dict[str, Toolchain]) -> int:
+    cpus = physical_cpus() if not args.no_pin else []
+    workers = [int(w) for w in args.workers.split(',')]
+    limit = 1.0 if args.limit is None else args.limit
+    staged = {role: stage_wall(toolchain, role) for role, toolchain in toolchains.items()}
+    order = list(staged)
+    labels = ' -> '.join(f'{role} {toolchains[role].label}' for role in order)
+    failures = critical_main(args, staged, labels, workers, limit)
+    for name, n, change in failures:
+        print(f'speed: {name} with {n} workers needs {change:+.2f}% critical-path instructions vs base '
+              f'(limit {limit}%)', file=sys.stderr)
+    if not args.wall:
+        return 1 if failures else 0
+    load = os.getloadavg()[0]
+    print(f'compile wall time, ms (median of {args.runs}, interleaved; '
+          + (f'pinned to CPUs {",".join(map(str, cpus))}' if cpus else 'unpinned')
+          + f'; load {load:.1f}; reported, not gated): ' + labels)
+    for name, source in wall_panel():
+        path = Path(source) if Path(source).is_absolute() else ROOT / source
+        for n in workers:
+            walls = {role: [] for role in order}
+            cpu = {role: [] for role in order}
+            for role in order:          # (warm the page cache)
+                wall_once(staged[role], path, n, cpus)
+            for k in range(args.runs):
+                for role in (order if k % 2 == 0 else order[::-1]):
+                    w, c = wall_once(staged[role], path, n, cpus)
+                    walls[role].append(w)
+                    cpu[role].append(c)
+            med = {role: statistics.median(walls[role]) for role in order}
+            line = f'  {name:15} {n} worker{"s" if n != 1 else " "}'
+            if 'base' in med:
+                change = round(delta(med['base'], med['candidate']), 1) + 0.0
+                line += (f'  {med["base"]:7.1f} -> {med["candidate"]:7.1f}  {change:+5.1f}%'
+                         f'   (cpu {statistics.median(cpu["base"]):6.1f} -> {statistics.median(cpu["candidate"]):6.1f})')
+            else:
+                line += f'  {med["candidate"]:7.1f}   (cpu {statistics.median(cpu["candidate"]):6.1f})'
+            print(line, flush=True)
+    return 1 if failures else 0
+
+
 def resolve(revision: str) -> str:
     return git('rev-parse', '--verify', f'{revision}^{{commit}}')
 
@@ -305,10 +469,33 @@ def main(argv: list[str], current: Path) -> int:
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     cli.add_argument('--base', default='HEAD~1', help='commit to compare with (default HEAD~1)')
     cli.add_argument('--checkpoint', metavar='TAG', help='also compare with this fixed revision, e.g. speed-checkpoint')
-    cli.add_argument('--limit', type=float, default=1.0, help='allowed increase in percent (default 1.0)')
+    cli.add_argument('--limit', type=float, default=None, help='allowed increase in percent (default 1.0)')
     cli.add_argument('--release', action='store_true', help='also measure release builds')
     cli.add_argument('--counter', choices=('auto', 'perf', 'valgrind'), default='auto')
+    cli.add_argument('--critical', action='store_true',
+                     help='count critical-path instructions (own + largest worker) at --workers')
+    cli.add_argument('--wall', action='store_true', help='--critical, and also report wall-clock time')
+    cli.add_argument('--workers', default='1,2,4', help='--critical/--wall: emission worker counts (default 1,2,4)')
+    cli.add_argument('--runs', type=int, default=7, help='--wall: runs per compiler (default 7)')
+    cli.add_argument('--no-pin', action='store_true', help='--wall: do not pin to one CPU per core')
     args = cli.parse_args(argv)
+    if args.wall or args.critical:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        with (CACHE / 'speed.lock').open('w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            toolchains = {}
+            if args.base is not None:
+                commit = resolve(args.base)
+                directory, built = base_compiler(commit, current)
+                if built:
+                    print(f'(built base compiler {commit[:10]})', file=sys.stderr, flush=True)
+                toolchains['base'] = Toolchain(commit[:10], directory / 'bin/dewy-core', directory / 'lib')
+            dirty = bool(git('status', '--porcelain', '--untracked-files=no'))
+            label = 'working tree' if dirty else git('rev-parse', '--short=10', 'HEAD')
+            toolchains['candidate'] = Toolchain(label, candidate_compiler(current), ROOT / 'lib')
+            return wall_main(args, toolchains)
+    if args.limit is None:
+        args.limit = 1.0
     started = time.perf_counter()
     CACHE.mkdir(parents=True, exist_ok=True)
     with (CACHE / 'speed.lock').open('w') as lock:

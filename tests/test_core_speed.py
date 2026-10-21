@@ -55,3 +55,9 @@ def test_bench_selection():
     for name in bench.COUNTS:
         assert (bench.BENCH / f'{name}.dewy').is_file()
         assert (bench.BENCH / f'{bench.C_SOURCE.get(name, name)}.c').is_file()
+
+
+def test_speed_critical_path_reads_final_line():
+    assert speed.critical_result('note\n{"own":5,"workers":[3,4],"critical":9,"total":12}\n') == (9, 12)
+    with pytest.raises(ValueError):
+        speed.critical_result('no count\n')
