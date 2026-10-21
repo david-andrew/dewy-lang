@@ -1,0 +1,19 @@
+# exit: 101
+A=type of [value:int64
+    $__drop__
+    release=():>void=>{printl"a"}
+]
+B=type of [value:int64
+    $__drop__
+    release=():>void=>{printl"b"}
+]
+C=type of [value:int64
+    $__drop__
+    release=():>void=>{printl"c"}
+]
+Whole=type of [a:A b:B c:C tail:int64
+    $__drop__
+    release=():>void=>{printl"whole"}
+]
+fail=():>int64=>panic("construction prefix")
+main=()=>{let whole=Whole[A[1] B[2] C[fail()] 4]}

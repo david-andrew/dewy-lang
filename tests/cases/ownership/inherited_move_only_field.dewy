@@ -1,0 +1,10 @@
+Leaf=type of [value:int64
+    $__drop__
+    release=():>void=>{}
+]
+Parent=type of [value:int64
+    $__copy__
+    duplicate=():>Parent=>Parent[value]
+]
+Child=type of Parent & [leaf:Leaf]
+main=()=>{let first=Child[1 Leaf[2]] let second=first.copy() printl(second.value)}

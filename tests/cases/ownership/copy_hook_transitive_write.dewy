@@ -1,0 +1,6 @@
+change=(@value:int64):>void=>{value=2}
+Owner=type of [value:int64
+    $__copy__
+    duplicate=():>Owner=>{change(@value) return Owner[value]}
+]
+main=()=>{let first=Owner[1] let second=first.copy() printl(second.value)}

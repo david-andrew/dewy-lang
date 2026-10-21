@@ -1,0 +1,19 @@
+# quick
+let copies:int64=0
+let drops:int64=0
+Leaf=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+    $__copy__
+    duplicate=():>Leaf=>{copies+=1 return Leaf[value+1]}
+]
+Envelope:type=[leaf:Leaf extra:int64]
+main=()=>{
+    {
+        let first=Envelope[Leaf[10] 20]
+        let second=first.copy()
+        assert(first.leaf.value=?10 and second.leaf.value=?11 and second.extra=?20)
+    }
+    assert(copies=?1 and drops=?2)
+    printl"ok"
+}

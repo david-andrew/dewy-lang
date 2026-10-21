@@ -33,7 +33,7 @@ const VC_AGG = 3
 const LK_INST = 0
 const LK_HELPER = 1
 
-enum HK: drop, copy, arrrel, arruniq, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq, math_main
+enum HK: drop, copy, move, arrrel, arruniq, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq, math_main
 
 struct LFunc:
     kind: int
@@ -389,7 +389,15 @@ borrow = (val: Val, t: int):
 
 own = (val: Val, t: int) -> Val:
     if val.owned: return val
-    if ownership_type(t): fatal(ir_pos, "cannot copy a move-only owner")
+    if ownership_type(t):
+        if not ownership_copyable(t): fatal(ir_pos, "cannot copy a move-only owner")
+        if let hook = ownership_copies.get(prune(t)): return owner_hook_result(hook, val.v, t)
+        slot = new_temp(t)
+        addr = e_slot(slot)
+        e_copy(addr, val.v, tsize(t))
+        copy_at(addr, t)
+        owner_register(slot, t)
+        return Val(addr, true, slot)
     if vc(t) == VC_AGG:
         s = new_temp(t)
         a = e_slot(s)
@@ -2044,7 +2052,11 @@ gen_value_block = (b: int, rs: int, rt_: int, rv: int = -1):
             stmt_begin()
             val = gen_owned(int(nodes[s].a))
             if rv >= 0: e_mov(rv, norm(val.v, rt_))
-            else: store_val(rt_, e_slot(rs), 0, val.v)
+            else:
+                store_val(rt_, e_slot(rs), 0, val.v)
+                if ownership_type(rt_):
+                    owner_forget_slot(val.slot)
+                    owner_register(rs, rt_)
             stmt_end()
             continue
         gen_stmt(s)
@@ -3523,6 +3535,10 @@ gen_conv = (e: int) -> Val:
     cv = nodes[e].aux as CV
     if cv == .refinement: return refine_gen(e)
     if cv == .explicit_copy:
+        if ownership_type(from):
+            value = gen_expr(a)
+            borrow(value, from)
+            return own(Val(value.v, false, -1), from)
         if not copies_on: return own(gen_expr(a), from)
         copy_explicit[a] = true
         value = gen_expr(a)
@@ -3828,6 +3844,7 @@ gen_expr_value = (e: int) -> Val:
             d = e_slot(s)
             e_zero(d, tsize(t))
             tracked = build_slot(s, t)
+            owner_fields: (int, int)[]
             loop i in call_eval_order(e):
                 a = kid(e, i)
                 if a == 0: continue
@@ -3836,6 +3853,9 @@ gen_expr_value = (e: int) -> Val:
                 if refine_active and nodes[a].kind == .conv and nodes[a].aux == i32(int(CV.refinement)): source = int(nodes[a].a)
                 val = gen_owned(source)
                 store_field(f, d, val.v)
+                if ownership_type(ntype(source)):
+                    owner_fields.push((val.slot, ntype(source)))
+                    building.push(BuildItem(true, val.slot, ntype(source)))
             if refine_active:
                 values: int[]
                 arg_types: int[]
@@ -3847,6 +3867,9 @@ gen_expr_value = (e: int) -> Val:
                 loop i in [0..nkids(e)):
                     a = kid(e, i)
                     if a != 0 and nodes[a].kind == .conv and nodes[a].aux == i32(int(CV.refinement)): ref_gen_check(a, values[i], values, arg_types)
+            loop field in owner_fields:
+                owner_forget_slot(field.0)
+                building.pop()
             if tracked: building.pop()
             return Val(e_slot(s), true, s)
         if aux == 3:
@@ -4506,6 +4529,8 @@ gen_return = (s: int):
     owner_result = -1
     if a != 0 and vc(rtp) != VC_VOID:
         stmt_begin()
+        if ownership_decls.len() != 0 and (ownership_hooks.get(int(fns[cur_fn].decl)) ?? 0) > 1:
+            owner_adopt_result(a)
         val = gen_owned(a)
         if ownership_type(rtp): owner_result = val.slot
         if vc(rtp) == VC_AGG: store_val(rtp, sret_v, 0, val.v)
@@ -6417,9 +6442,16 @@ helper_drop = (t: int, copy: bool):
     a = ps[0]
     k = types[t].kind
     if ownership_type(t):
-        if copy: ice("copy helper requested for move-only owner")
-        e_call(lf_of_inst(int(structs[int(types[t].st)].drop_fn)), [a], -1)
-        return e_ret(-1)
+        if copy:
+            if not ownership_copyable(t): ice("copy helper requested for move-only owner")
+            if let hook = ownership_copies.get(t):
+                result = e_slot(new_temp(t))
+                owner_hook_into(hook, a, t, result)
+                e_copy(a, result, tsize(t))
+                return e_ret(-1)
+        else:
+            hook = int(structs[int(types[t].st)].drop_fn)
+            if hook != 0: e_call(lf_of_inst(hook), [a], -1)
     if k == .fn_ or k == .polyfn or k == .callable:
         env = e_load(VI, a, ptr_size, ptr_size)
         if copy:
@@ -6464,10 +6496,12 @@ helper_drop = (t: int, copy: bool):
             else: drop_at(ea, et)
             fixed_loop_end(i)
     else:
-        loop fo in field_list(t):
+        fs = field_list(t)
+        loop i in [0..fs.len()):
+            fo = fs[if copy: i else: fs.len() - 1 - i]
             if not is_managed(fo.0): continue
             if copy: copy_at(e_addi(a, fo.1), fo.0)
-            else: drop_at(e_addi(a, fo.1), fo.0)
+            else: drop_embedded(e_addi(a, fo.1), fo.0)
     e_ret(-1)
 
 # a loop over the elements of fixed-size array type t: i counts 0..N (the body goes between)
@@ -7045,6 +7079,7 @@ lower_helper = (lf: int):
     match h.hkind:
         drop: helper_drop(t, false)
         copy: helper_drop(t, true)
+        move: helper_move(t)
         arrrel: helper_arrrel(t)
         arruniq: helper_arruniq(t)
         eq: helper_eq(t)
@@ -7135,3 +7170,32 @@ lower_extern_thunk = (lf: int, f: int):
     if fns[f].cvariadic > 0: ir.code[ir.code.len() - 1].imm = int(fns[f].cvariadic)
     if vc(ret) == VC_INT: r = norm(r, ret)
     e_ret(r)
+
+# Embedded values have no independent stack record: their complete enclosing
+# owner is the cleanup authority. Partial construction retains the field's
+# temporary owner until the enclosing object is complete.
+drop_embedded = (addr: int, t: int):
+    if not is_managed(t): return
+    if vc(t) == VC_INT: release(e_load(VI, addr, 0, ptr_size), t)
+    else: e_call(lf_helper(.drop, t, 0), [addr], -1)
+
+helper_move = (t: int):
+    ps = helper_params(2)
+    dest = ps[0]
+    source = ps[1]
+    if let hook = ownership_moves.get(t):
+        owner_hook_into(hook, source, t, dest)
+        # A custom move consumes the outer owner. Its borrowed receiver's
+        # fields still own their values unless transferred separately.
+        parent = prune(int(fns[hook].ret))
+        fs = field_list(parent)
+        loop i in [0..fs.len()):
+            field = fs[fs.len() - 1 - i]
+            drop_embedded(e_addi(source, field.1), field.0)
+    else:
+        loop field in field_list(t):
+            dst = e_addi(dest, field.1)
+            src = e_addi(source, field.1)
+            if ownership_type(field.0): e_call(lf_helper(.move, field.0, 0), [dst, src], -1)
+            else: e_copy(dst, src, tsize(field.0))
+    e_ret(-1)

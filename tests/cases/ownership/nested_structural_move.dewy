@@ -1,0 +1,15 @@
+# quick
+let moves:int64=0
+let drops:int64=0
+Leaf=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+    $__move__
+    transfer=():>Leaf=>{moves+=1 return Leaf[value+1]}
+]
+Envelope:type=[leaf:Leaf extra:int64]
+main=()=>{
+    {let first=Envelope[Leaf[10] 20] let second=first assert(second.leaf.value=?11)}
+    assert(moves=?1 and drops=?1)
+    printl"ok"
+}

@@ -959,6 +959,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
         return r
     if k == .return_:
         r = fact_capture(int(nodes[n].a), s)
+        if ownership_decls.len() != 0: r = fact_owner_value(int(nodes[n].a), r, s)
         if proof_active and proof_decls.has(int(fns[fact_owner].decl)): proof_exit(fact_owner, n, s)
         if result_active: result_exit(fact_owner, r, n, s)
         s.live = false
@@ -973,6 +974,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
         return 0
     if k == .vardecl:
         r = if nodes[n].b != 0: fact_capture(int(nodes[n].b), s) else: fact_constant(s, 0, n)
+        if ownership_decls.len() != 0: r = fact_owner_value(int(nodes[n].b), r, s)
         l = int(nodes[n].sym)
         if nkids(n) > 0 or l == 0: fact_forget(s, n, .write, true); return 0
         if has_flag(n, NF_GLOBAL): fact_bind(s, PlaceIdentity(.global, 0, l), r)
@@ -983,6 +985,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
         old = 0
         if nodes[n].op != i32(int(Tok.assign)): old = fact_capture(a, s)
         r = fact_capture(int(nodes[n].b), s)
+        if ownership_decls.len() != 0: r = fact_owner_value(int(nodes[n].b), r, s)
         op = nodes[n].op as Tok
         if nodes[n].aux == 0 and (op == .pluseq or op == .minuseq):
             arithmetic_op = if op == .pluseq: Tok.plus else: Tok.minus
@@ -1060,7 +1063,12 @@ fact_capture = (n: int, s: mut FactState) -> int:
         if nodes[n].aux == i32(int(CV.refinement)):
             ref_check(n, a, ref_fact_current_entry(s), s)
             return a
-        if nodes[n].aux == i32(int(CV.explicit_copy)) or nodes[n].aux == i32(int(CV.fixed2arr)): return a
+        if nodes[n].aux == i32(int(CV.explicit_copy)):
+            if ownership_decls.len() != 0 and ownership_fact_type(ntype(n)):
+                fact_forget(s, n, .call, true)
+                return fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
+            return a
+        if nodes[n].aux == i32(int(CV.fixed2arr)): return a
         b = fact_bound(s, a)
         if ntype(n) != ntype(int(nodes[n].a)) and (ntype(n) == T_U64 or ntype(int(nodes[n].a)) == T_U64): return fact_unmodeled(s, n, .wrap)
         if fact_scalar(ntype(n)) and fact_scalar(ntype(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))):
@@ -1160,6 +1168,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
             arg = kid(n, i)
             if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)): values[i] = fact_capture(int(nodes[arg].a), s)
             else: values[i] = fact_capture(arg, s)
+            if ownership_decls.len() != 0: values[i] = fact_owner_value(arg, values[i], s)
         loop i in [0..nkids(n)):
             arg = kid(n, i)
             if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)): ref_check(arg, values[i], values, s)
@@ -1689,3 +1698,13 @@ range_facts_end = (facts: (int, int, bool)):
     if facts.2:
         nonneg_locals.pop()
         nonneg_limits.pop()
+
+# An owning boundary may execute a non-value-preserving lifecycle hook.
+# Captured scalar results remain values; only the transferred aggregate loses
+# its identity, and hook effects invalidate facts about exposed storage.
+fact_owner_value = (n: int, value: int, s: mut FactState) -> int:
+    if n == 0 or not ownership_fact_type(ntype(n)): return value
+    k = nodes[n].kind
+    if k != .ident and k != .field: return value
+    fact_forget(s, n, .call, true)
+    fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))

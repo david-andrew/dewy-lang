@@ -292,7 +292,9 @@ copy_take = (e: int, value: Val, t: int) -> Val:
         if ownership_type(t): owner_forget_slot(int(locals[int(nodes[e].sym)].offset))
         s = new_temp(t)
         a = e_slot(s)
-        e_copy(a, value.v, tsize(t))
+        if ownership_type(t) and not owner_adoptions.has(e):
+            e_call(lf_helper(.move, t, 0), [a, value.v], -1)
+        else: e_copy(a, value.v, tsize(t))
         e_zero(place_addr(p, t), tsize(t))
         if ownership_type(t): owner_register(s, t)
         return Val(a, true, s)
@@ -313,6 +315,8 @@ copy_own = (e: int, value: Val, t: int) -> Val:
     if ownership_type(t):
         if value.owned: return value
         if nodes[e].kind == .ident and copy_movable(e): return copy_take(e, value, t)
+        if owner_adoptions.has(e): fatal(nodes[e].pos, "a hook result requires fresh construction or a proven last-use local")
+        if ownership_copyable(t): return own(value, t)
         if copy_proof_budget == 0: fatal(nodes[e].pos, "move proof budget exhausted; cannot copy a move-only owner")
         fatal(nodes[e].pos, "cannot copy a move-only owner: transfer requires a proven last use (later read, loop, alias or defer keeps it live)")
     if value.owned or not copy_strict(e) or not costly_copy(t): return own(value, t)

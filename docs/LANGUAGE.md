@@ -862,7 +862,7 @@ Ticket=type of [id:int64
 ]
 ```
 
-Such a record is move-only. Fresh construction creates an owner; a whole local
+Without a copy hook, such a record is move-only. Fresh construction creates an owner; a whole local
 can transfer at a proven last use, including into a direct function parameter
 or return value. A later read, an alias or a loop backedge can prevent that
 proof. `.copy()` cannot duplicate a drop-only owner. Every initialized owner
@@ -870,12 +870,25 @@ runs its hook once at lifetime end, including replacement, return, loop exits,
 compiler-controlled panic and process termination through `exit`. A construction
 that fails before completion does not run the incomplete value's hook.
 
-The scalar pilot requires primitive scalar fields and a proven no-failure drop
-summary. Scalar mutation and literal-string logging are supported; unknown calls
+Inline records may contain other owning records. Cleanup runs the outer hook
+first, then fields in reverse order. During construction, only completed fields
+are cleaned up on failure; the incomplete outer hook does not run. Structural
+copyability includes every field; synthesized moves recursively transfer fields.
+
+The current implementation requires inline record/scalar fields and a proven
+no-failure drop summary. Scalar mutation and literal-string logging are supported; unknown calls
 and potentially failing formatting are rejected. Hooks cannot be called or
-referenced directly. Custom copy/move hooks, inherited hooks, resource-bearing
-containers, captured or global owners, and foreign entry points with owners
-remain unsupported. Ordinary records and collections keep their existing value
+referenced directly. `$__copy__` and `$__move__` methods also take no explicit
+parameters and return the same nominal type. An explicit `.copy()` runs its
+hook even on a fresh temporary, which is then cleaned up separately.
+Copy borrows a readonly receiver;
+move consumes the source and skips its outer drop. Both currently require a
+proven no-failure summary. Hooks may change the abstract value: the compiler does
+not assume their results equal their inputs. Inherited roles run once on the
+parent portion, composing the child's added fields; a declared child
+role overrides that role. Recursive/optional owners, resource arrays and
+dictionaries, generic hook declarations, captured or global owners, and foreign
+entry points with owners remain unsupported. Moving individual owning fields remains unsupported. Ordinary records and collections keep their existing value
 and copy-on-write behavior.
 
 ```dewy

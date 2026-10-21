@@ -1,0 +1,7 @@
+let copied:int64=0
+Owner=type of [value:int64
+    $__copy__
+    duplicate=():>Owner=>{copied+=1 return Owner[value]}
+]
+quiet=():>int64 & no_effects=>{let result=Owner[1].copy() return result.value}
+main=()=>{quiet()}

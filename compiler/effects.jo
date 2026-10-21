@@ -36,6 +36,7 @@ struct EffectEvent:
     atom: EffectAtom
     witness: int
     via: int = 0
+    via_fn: int = 0
 struct EffectEdge:
     callee: int
     origin: int
@@ -599,14 +600,22 @@ effect_lower_intrinsic = (f: int, n: int):
         fatal(nodes[n].pos, "effect implementation plan introduced an unclassified intrinsic cost after verification")
 
 # Drop authority belongs to the owner even on early exits or failed later
-# construction. Current ownership supports scalar nominal records only;
-# unsupported aggregate/copy/move lifecycle facilities remain blockers.
-effect_cleanup = (f: int, t0: int, n: int, p: PlaceIdentity):
+# construction. Inline components contribute their own hook edges; unproved
+# indirect layouts remain blocked by the ownership planner.
+effect_cleanup = (f: int, t0: int, n: int, p: PlaceIdentity, depth: int = 0):
     t = representation_type(t0)
     if tkind(t) != .struct_: return
     layout(t)
-    g = int(structs[int(types[t].st)].drop_fn)
+    si = int(types[t].st)
+    g = int(structs[si].drop_fn)
     if g != 0: effect_summaries[f].edges.push(EffectEdge(g, n, [p]))
+    if ownership_decls.len() == 0: return
+    if depth > 32:
+        effect_opaque(f, n)
+        return
+    loop i in [0..int(structs[si].nfields)):
+        ft = int(fields[int(structs[si].fields) + i].type)
+        if ownership_type(ft): effect_cleanup(f, ft, n, p, depth + 1)
 
 
 effect_add = (f: int, event: EffectEvent) -> bool:
@@ -660,7 +669,7 @@ effect_place_inventory = (n: int, depth: int = 0) -> bool:
     flags & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF | LF_EXPOSED) == 0
 
 effect_access = (f: int, n: int, write: bool):
-    if not effect_plain(ntype(n)) or not effect_place_inventory(n): effect_opaque(f, n)
+    if not (effect_plain(ntype(n)) or ownership_scalar(ntype(n))) or not effect_place_inventory(n): effect_opaque(f, n)
     if write and nodes[n].kind == .field:
         t = representation_type(ntype(int(nodes[n].a)))
         layout(t)
@@ -785,6 +794,11 @@ effect_scan_node = (f: int, n: int):
         if nodes[n].aux == i32(int(SK.global)): effect_isolation_block(f, .global_, n)
         else if nodes[n].aux != i32(int(SK.local)): effect_isolation_block(f, .node, n)
         else if int(locals[int(nodes[n].sym)].flags) & (LF_CAPTURE | LF_ADDR) != 0: effect_isolation_block(f, .capture, n)
+    if ownership_decls.len() != 0:
+        source = 0
+        if k == .vardecl or k == .assign: source = int(nodes[n].b)
+        else if k == .return_ or k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)): source = int(nodes[n].a)
+        if source != 0: effect_owner_init(f, source, n)
     if k == .intrinsic:
         cost = effect_intrinsic_cost(nodes[n].aux as IN)
         effect_plan_cost(f, n, cost)
@@ -795,7 +809,7 @@ effect_scan_node = (f: int, n: int):
     if k == .lambda and nodes[n].sym > 0 and fns[int(nodes[n].sym)].caps.len() != 0:
         effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
     if k == .partial: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
-    if k == .conv and (nodes[n].aux == i32(int(CV.fixed2arr)) or nodes[n].aux == i32(int(CV.fn2clos)) or nodes[n].aux == i32(int(CV.explicit_copy)) and not effect_plain(ntype(n))):
+    if k == .conv and (nodes[n].aux == i32(int(CV.fixed2arr)) or nodes[n].aux == i32(int(CV.fn2clos)) or nodes[n].aux == i32(int(CV.explicit_copy)) and not effect_plain(ntype(n)) and not ownership_scalar(ntype(n))):
         effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
     if k == .call and nodes[n].aux == 2:
         effect_cleanup(f, ntype(n), n, PlaceIdentity(.local, f, n))
@@ -832,8 +846,9 @@ effect_scan_node = (f: int, n: int):
             else:
                 routes.push(PlaceIdentity(.local, 0, 0))
                 effect_scan_node(f, a)
+                if ownership_decls.len() != 0: effect_owner_init(f, a, n)
         effect_summaries[f].edges.push(EffectEdge(g, n, routes))
-        if not effect_plain(int(fns[g].ret)) and int(fns[g].ret) != T_VOID: effect_opaque(f, n)
+        if not effect_plain(int(fns[g].ret)) and not ownership_scalar(int(fns[g].ret)) and int(fns[g].ret) != T_VOID: effect_opaque(f, n)
         return
     if k == .assign:
         effect_access(f, int(nodes[n].a), true)
@@ -857,7 +872,7 @@ effect_scan_node = (f: int, n: int):
         return
     supported = false
     if k == .intrinsic: supported = effect_intrinsic_cost(nodes[n].aux as IN) >= 0
-    else if k == .call and nodes[n].aux == 2: supported = effect_plain(ntype(n))
+    else if k == .call and nodes[n].aux == 2: supported = effect_plain(ntype(n)) or ownership_scalar(ntype(n))
     else if k == .fnref or k == .lambda: supported = effect_bare(n)
     else if k == .for_: supported = tkind(ntype(int(nodes[n].a))) == .array and effect_scalar(telem(ntype(int(nodes[n].a)))) and not has_flag(n, NF_MUT)
     else if k == .int_lit or k == .bool_lit: supported = effect_scalar(ntype(n))
@@ -865,11 +880,12 @@ effect_scan_node = (f: int, n: int):
     else if k == .vardecl:
         l = int(nodes[n].sym)
         if effect_readonly_binding(n): return
-        supported = l > 0 and (effect_plain(int(locals[l].type)) or is_fn_type(int(locals[l].type)) and effect_bare(int(nodes[n].b))) and int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) == 0
+        supported = l > 0 and (effect_plain(int(locals[l].type)) or ownership_scalar(int(locals[l].type)) or is_fn_type(int(locals[l].type)) and effect_bare(int(nodes[n].b))) and int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) == 0
     else if k == .binary:
         supported = nodes[n].aux == 0 and effect_word_op(nodes[n].op as Tok) and effect_scalar(ntype(int(nodes[n].a))) and effect_scalar(ntype(int(nodes[n].b)))
     else if k == .unary:
         supported = effect_scalar(ntype(n)) and (nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.tilde)))
+    else if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_scalar(ntype(n)): supported = true
     else if k == .conv:
         supported = (effect_scalar(ntype(n)) and effect_scalar(ntype(int(nodes[n].a))) or is_fn_type(ntype(n)) and effect_bare(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)))
     if not supported: effect_opaque(f, n)
@@ -896,6 +912,7 @@ effect_scan_node = (f: int, n: int):
 effect_edge_event = (f: int, edge: EffectEdge, event0: EffectEvent) -> EffectEvent:
     event = event0
     event.via = edge.origin
+    event.via_fn = edge.callee
     p = event.atom.place
     base = place_base(p)
     if base.root == .formal:
@@ -938,7 +955,7 @@ effect_visit = (f: int):
             effect_opaque(f, int(fns[f].body))
             effect_isolation_block(f, .capture, int(fns[f].body))
         if fns[f].cabi: effect_opaque(f, d)
-        if not effect_plain(int(fns[f].ret)) and int(fns[f].ret) != T_VOID: effect_opaque(f, d)
+        if not effect_plain(int(fns[f].ret)) and not ownership_scalar(int(fns[f].ret)) and int(fns[f].ret) != T_VOID: effect_opaque(f, d)
         loop i in [0..fns[f].params.len()):
             l = fns[f].params[i]
             t = representation_type(int(locals[l].type))
@@ -984,7 +1001,7 @@ effect_witness = (f: int, event0: EffectEvent) -> str:
     seen = [f]
     loop depth in [0..8):
         if event.via == 0: break
-        g = int(nodes[event.via].sym)
+        g = event.via_fn
         if g <= 0 or g >= effect_limit: break
         chain += " -> {effect_name(g)}"
         if seen.contains(g):
@@ -1211,3 +1228,26 @@ loans_finalize = ():
             loan_visit(int(fns[f].body))
             if loan_generation == before: break
     loan_origins = {}
+
+# Owning boundaries must publish every optional hook edge before verification.
+# Last-use elision never grants permission to omit a hook's possible effects.
+effect_owner_init = (f: int, source: int, origin: int):
+    t = prune(ntype(source))
+    if not ownership_type(t): return
+    k = nodes[source].kind
+    move = nodes[origin].kind != .conv or nodes[origin].aux != i32(int(CV.explicit_copy))
+    if k != .ident and k != .field and move: return
+    p = if k == .ident or k == .field: effect_export(f, place_route(source)) else: PlaceIdentity(.local, f, source)
+    effect_owner_components(f, t, origin, p, move)
+
+effect_owner_components = (f: int, t: int, origin: int, p: PlaceIdentity, move: bool, depth: int = 0):
+    if depth > 32:
+        effect_opaque(f, origin)
+        return
+    if let hook = ownership_copies.get(t): effect_summaries[f].edges.push(EffectEdge(hook, origin, [p]))
+    if move:
+        if let hook = ownership_moves.get(t): effect_summaries[f].edges.push(EffectEdge(hook, origin, [p]))
+    si = int(types[prune(t)].st)
+    loop i in [0..int(structs[si].nfields)):
+        ft = int(fields[int(structs[si].fields) + i].type)
+        if ownership_type(ft): effect_owner_components(f, ft, origin, p, move, depth + 1)

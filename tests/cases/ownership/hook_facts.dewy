@@ -1,0 +1,12 @@
+let copied:int64=0
+Owner=type of [value:int64
+    $__copy__
+    duplicate=():>Owner=>{copied=1 return Owner[value]}
+]
+main=()=>{
+    let first=Owner[7]
+    copied=0
+    let second=first.copy()
+    $assert copied=?0
+    printl(first.value+second.value)
+}

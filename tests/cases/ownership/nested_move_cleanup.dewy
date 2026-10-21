@@ -1,0 +1,26 @@
+# quick
+let leaf_drops:int64=0
+let parent_drops:int64=0
+Leaf=type of [value:int64
+    $__drop__
+    release=():>void=>{leaf_drops+=1}
+    $__copy__
+    duplicate=():>Leaf=>Leaf[value]
+]
+Parent=type of [leaf:Leaf
+    $__drop__
+    release=():>void=>{parent_drops+=1}
+    $__move__
+    transfer=():>Parent=>Parent[leaf.copy()]
+]
+Child=type of Parent & [extra:Leaf]
+main=()=>{
+    {
+        let first=Child[Leaf[10] Leaf[20]]
+        let second=first
+        assert(second.leaf.value=?10 and second.extra.value=?20)
+        assert(leaf_drops=?1 and parent_drops=?0)
+    }
+    assert(leaf_drops=?3 and parent_drops=?1)
+    printl"ok"
+}

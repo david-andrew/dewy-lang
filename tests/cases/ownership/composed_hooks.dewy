@@ -1,0 +1,25 @@
+# quick
+let copies:int64=0
+let moves:int64=0
+let drops:int64=0
+Owner=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+    $__copy__
+    duplicate=():>Owner=>{copies+=1 return Owner[value]}
+    $__move__
+    transfer=():>Owner=>{moves+=1 return Owner[value]}
+]
+main=()=>{
+    {
+        let first=Owner[7]
+        let second=first.copy()
+        assert(first.value=?second.value)
+        let third=first
+        assert(third.value=?7)
+    }
+    assert(copies=?1)
+    assert(moves=?1)
+    assert(drops=?2)
+    printl"ok"
+}

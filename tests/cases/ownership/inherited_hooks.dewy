@@ -1,0 +1,25 @@
+# quick
+let copies:int64=0
+let moves:int64=0
+let drops:int64=0
+Parent=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+    $__copy__
+    duplicate=():>Parent=>{copies+=1 return Parent[value+1]}
+    $__move__
+    transfer=():>Parent=>{moves+=1 return Parent[value+2]}
+]
+Child=type of Parent & [extra:int64]
+Grandchild=type of Child & [last:int64]
+main=()=>{
+    {
+        let first=Grandchild[10 20 30]
+        let copied=first.copy()
+        assert(copied.value=?11 and copied.extra=?20 and copied.last=?30)
+        let moved=first
+        assert(moved.value=?12 and moved.extra=?20 and moved.last=?30)
+    }
+    assert(copies=?1 and moves=?1 and drops=?2)
+    printl"ok"
+}

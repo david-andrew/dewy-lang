@@ -1,0 +1,23 @@
+# quick
+let copies:int64=0
+let drops:int64=0
+Owner=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+    $__copy__
+    duplicate=():>Owner=>{copies+=1 return Owner[value+1]}
+]
+Child=type of Owner & [extra:int64]
+make=():>Child=>Child[10 20]
+main=()=>{
+    {
+        let first=make().copy()
+        assert(first.value=?11 and first.extra=?20)
+        assert(copies=?1 and drops=?1)
+        let second=Child[30 40].copy().copy()
+        assert(second.value=?32 and second.extra=?40)
+        assert(copies=?3 and drops=?3)
+    }
+    assert(drops=?5)
+    printl"ok"
+}

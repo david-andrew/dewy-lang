@@ -8,16 +8,23 @@ use 'check.jo'
 use 'effects.jo'
 use 'errors.jo'
 use 'expr.jo'
+use 'places.jo'
+use 'refine.jo'
 
 ownership_decls: {int: int}
 ownership_hooks: {int: int}
+ownership_copies: {int: int}
+ownership_moves: {int: int}
+ownership_nominals: {int: bool}
 
 ownership_declare = (decl: int, hook: int, role: int):
     if nkids(hook) != 1: fatal(nodes[hook].pos, "lifecycle hooks have no explicit parameters")
     if nkids2(decl) != 0 or nkids2(hook) != 0: fatal(nodes[hook].pos, "generic lifecycle hooks require aggregate ownership support")
-    if role != 1: fatal(nodes[hook].pos, "custom copy and move hooks require the next ownership slice")
-    if ownership_decls.has(decl): fatal(nodes[hook].pos, "duplicate $__drop__ hook")
-    ownership_decls[decl] = hook
+    key = decl * 4 + role
+    if ownership_decls.has(key):
+        name = if role == 1: "drop" else if role == 2: "copy" else: "move"
+        fatal(nodes[hook].pos, "duplicate $__{name}__ hook")
+    ownership_decls[key] = hook
     ownership_hooks[hook] = role
     add_flag(kid(hook, 0), NF_MUT)
 
@@ -27,7 +34,8 @@ ownership_finalize = ():
     loop decl, hook in ownership_decls:
         f = get_fn_inst(hook, [], nodes[hook].pos)
         check_fn_body(f)
-        if int(fns[f].ret) != T_VOID: fatal(nodes[hook].pos, "a $__drop__ hook must return void")
+        role = ownership_hooks[hook]
+        if role == 1 and int(fns[f].ret) != T_VOID: fatal(nodes[hook].pos, "a $__drop__ hook must return void")
         hooks.push(f)
         t = prune(fns[f].ptypes[0])
         if tkind(t) != .struct_: fatal(nodes[hook].pos, "a lifecycle receiver must be nominal")
@@ -35,9 +43,17 @@ ownership_finalize = ():
         si = int(types[t].st)
         loop i in [0..int(structs[si].nfields)):
             ft = int(fields[int(structs[si].fields) + i].type)
-            if not effect_scalar(ft) and tkind(ft) != .float_: fatal(nodes[hook].pos, "this ownership slice requires scalar record fields")
-        structs[si].drop_fn = i32(f)
+            if not ownership_inline(ft): fatal(nodes[hook].pos, "resource fields currently require an inline record layout")
+        if role != 1 and prune(int(fns[f].ret)) != t: fatal(nodes[hook].pos, "copy and move hooks must return the same nominal type")
+        if role == 1: structs[si].drop_fn = i32(f)
+        else if role == 2: ownership_copies[t] = f
+        else: ownership_moves[t] = f
         types[t].flags |= i32(TF_MANAGED)
+    loop child, parent in nominal_parent:
+        ownership_inherit(child)
+    ownership_contained.clear()
+    loop t in [1..types.len()):
+        if ownership_type(t): types[t].flags |= i32(TF_MANAGED)
     loop name in ["__owner_link", "__owner_unlink", "__owner_drop", "__owner_print", "__owner_start"]:
         f = runtime_fn(name)
         check_pending_functions(f)
@@ -46,16 +62,25 @@ ownership_finalize = ():
     effect_serial = 0
     effect_stack = []
     loop f in hooks:
-        if not effects_demand(f): fatal(nodes[int(fns[f].decl)].pos, "drop hook has no proven no-failure summary")
+        role = ownership_hooks[int(fns[f].decl)]
+        name = if role == 1: "drop" else if role == 2: "copy" else: "move"
+        if not effects_demand(f): fatal(nodes[int(fns[f].decl)].pos, "{name} hook has no proven no-failure summary")
         loop event in effect_summaries[f].events:
             k = event.atom.kind
-            if k == .opaque or k == .panic or k == .alloc or k == .block or k == .spawn:
-                fatal(nodes[int(fns[f].decl)].pos, "drop hook requires a proven no-failure summary: {effect_witness(f, event)}")
+            if k == .opaque or k == .panic or k == .alloc or k == .block or k == .spawn or k == .remainder or k == .detach or k == .escape:
+                fatal(nodes[int(fns[f].decl)].pos, "{name} hook requires a proven no-failure summary: {effect_witness(f, event)}")
+            if role == 2 and k == .write and place_base(event.atom.place).root == .formal:
+                fatal(nodes[int(fns[f].decl)].pos, "a copy hook requires a readonly receiver")
+
+ownership_nominal = (t0: int) -> bool:
+    if ownership_decls.len() == 0: return false
+    t = prune(t0)
+    types[t].kind == .struct_ and (structs[int(types[t].st)].drop_fn != 0 or ownership_copies.has(t) or ownership_moves.has(t))
 
 ownership_type = (t0: int) -> bool:
     if ownership_decls.len() == 0: return false
     t = prune(t0)
-    types[t].kind == .struct_ and structs[int(types[t].st)].drop_fn != 0
+    types[t].kind == .struct_ and ownership_contains(t)
 
 # The call plan records incoming owners separately from borrowed place inputs.
 # Synthetic Dewy parameter bindings adopt the incoming value without copying.
@@ -82,15 +107,17 @@ ownership_parameters = ():
             copy_inputs[p] = true
             copy_bindings[l] = true
 
-# Lowering adapter: sparse stack records, allocated only for scalar owners.
+# Lowering adapter: sparse stack records, allocated only for demanded owners.
 # Linking publishes successful initialization; unlinking consumes ownership.
 use 'lower.jo'
 use 'ir.jo'
 owner_records: {int: int}
+owner_adoptions: {int: bool}
 owner_init = -1
 
 owner_begin = ():
     owner_records.clear()
+    owner_adoptions.clear()
     owner_init = -1
     if ownership_decls.len() != 0: owner_init = emit(.nop, 0, 0, 0, 0, 0, 0)
 
@@ -133,7 +160,7 @@ owner_drop = (addr: int):
 ownership_contained: {int: bool}
 ownership_contains = (t0: int) -> bool:
     t = prune(t0)
-    if ownership_type(t): return true
+    if ownership_nominal(t): return true
     if let found = ownership_contained.get(t): return found
     ownership_contained[t] = false
     found = false
@@ -153,7 +180,10 @@ ownership_contains = (t0: int) -> bool:
                 v = int(structs[si].variants) + i
                 loop j in [0..int(variants[v].nfields)):
                     if ownership_contains(int(fields[int(variants[v].fields) + j].type)): found = true
-    ownership_contained[t] = found
+    # False is only the recursion guard, not a settled property: another
+    # path through the component may discover a resource after this visit.
+    if found: ownership_contained[t] = true
+    else: ownership_contained.remove(t)
     found
 
 ownership_validate_node = (n: int, f: int):
@@ -161,6 +191,8 @@ ownership_validate_node = (n: int, f: int):
     t = ntype(n)
     if t > 0 and ownership_contains(t) and not ownership_type(t):
         fatal(nodes[n].pos, "resource containers require aggregate ownership support")
+    if ownership_type(t) and not ownership_inline(t):
+        fatal(nodes[n].pos, "resource fields currently require an inline record layout")
     k = nodes[n].kind
     if k == .call and nodes[n].aux == 0 or k == .fnref:
         g = int(nodes[n].sym)
@@ -168,6 +200,11 @@ ownership_validate_node = (n: int, f: int):
             fatal(nodes[n].pos, "lifecycle hooks are compiler-only operations")
         if k == .fnref and g > 0 and ownership_functions.has(g):
             fatal(nodes[n].pos, "owners require direct calls; callable ownership is not supported yet")
+    if k == .call and nodes[n].aux == 2 and ownership_type(t):
+        si = int(types[prune(t)].st)
+        loop i in [0..int(structs[si].nfields)):
+            if ownership_type(int(fields[int(structs[si].fields) + i].type)) and (i >= nkids(n) or kid(n, i) == 0):
+                fatal(nodes[n].pos, "an owning field requires completed construction")
     if k == .vardecl and not has_flag(n, NF_GLOBAL) and nkids(n) == 0 and nodes[n].sym > 0 and ownership_type(int(locals[int(nodes[n].sym)].type)) and nodes[n].b == 0:
         fatal(nodes[n].pos, "an owner requires completed construction before registration")
     if k == .assign and ownership_type(ntype(int(nodes[n].a))):
@@ -179,7 +216,7 @@ ownership_validate_node = (n: int, f: int):
             fatal(nodes[n].pos, "cannot replace a borrowed owner")
     if k == .defer_ and ownership_functions.has(f):
         fatal(nodes[n].pos, "an owner with defer requires a unified defer unwind plan; transfer is not proven safe")
-    if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_type(ntype(n)):
+    if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_type(ntype(n)) and not ownership_copyable(ntype(n)):
         fatal(nodes[n].pos, "cannot copy a move-only owner: no $__copy__ hook")
     loop c in copy_children(n): ownership_validate_node(c, f)
 
@@ -188,8 +225,6 @@ ownership_validate = ():
     loop f, active in ownership_functions:
         if fns[f].cabi or len(fns[f].export_name) != 0:
             fatal(nodes[int(fns[f].decl)].pos, "foreign entry points with owners require per-foreign-thread cleanup storage")
-    loop child, parent in nominal_parent:
-        if parent != 0 and ownership_type(parent): fatal(nodes[int(structs[int(types[child].st)].decl)].pos, "inherited lifecycle hooks require aggregate ownership support")
     loop g in globals:
         if g.type > 0 and ownership_contains(int(g.type)):
             fatal(nodes[int(g.decl)].pos, "global owners require a program-lifetime cleanup plan")
@@ -219,6 +254,112 @@ ownership_literal_print = (n: int) -> bool:
 ownership_reset = ():
     ownership_decls.clear()
     ownership_hooks.clear()
+    ownership_copies.clear()
+    ownership_moves.clear()
+    ownership_nominals.clear()
     ownership_functions.clear()
     ownership_contained.clear()
     ownership_prints.clear()
+
+# A hook constructs directly into a fresh result slot. Its result is adopted;
+# routing it through ordinary copying would recursively invoke the same hook.
+owner_hook_result = (f: int, source: int, t: int) -> Val:
+    slot = new_temp(t)
+    addr = e_slot(slot)
+    owner_hook_into(f, source, t, addr)
+    owner_register(slot, t)
+    Val(addr, true, slot)
+
+# Fresh scalar-field results have no allocation/copy adapter. Hook calls are
+# inventoried separately; this does not certify a semantic copy as plain data.
+ownership_scalar = (t: int) -> bool:
+    if not ownership_type(t): return false
+    ownership_inline(t)
+
+ownership_inherit = (child: int):
+    parent = nominal_parent.get(child) ?? 0
+    if parent == 0: return
+    ownership_inherit(parent)
+    if not ownership_type(parent): return
+    layout(child)
+    si = int(types[child].st)
+    loop field in field_list(child):
+        if not ownership_inline(field.0):
+            fatal(nodes[int(structs[si].decl)].pos, "resource fields currently require an inline record layout")
+    if structs[si].drop_fn == 0: structs[si].drop_fn = structs[int(types[parent].st)].drop_fn
+    if not ownership_copies.has(child):
+        if let hook = ownership_copies.get(parent): ownership_copies[child] = hook
+    if not ownership_moves.has(child):
+        if let hook = ownership_moves.get(parent): ownership_moves[child] = hook
+    types[child].flags |= i32(TF_MANAGED)
+
+owner_hook_into = (f: int, source: int, t: int, dest: int):
+    e_call(lf_of_inst(f), [dest, source], -1)
+    # An inherited role builds only its declaring parent. Preserve the child's
+    # added fields and complete nominal identity at the owning boundary.
+    parent = prune(int(fns[f].ret))
+    first = int(structs[int(types[parent].st)].nfields)
+    fields_ = field_list(t)
+    loop i in [first..fields_.len()):
+        field = fields_[i]
+        dst = e_addi(dest, field.1)
+        src = e_addi(source, field.1)
+        if ownership_hooks[int(fns[f].decl)] == 3 and ownership_type(field.0):
+            e_call(lf_helper(.move, field.0, 0), [dst, src], -1)
+        else:
+            store_val(field.0, dest, field.1, load_val(field.0, source, field.1))
+            if ownership_hooks[int(fns[f].decl)] == 2: copy_at(dst, field.0)
+
+ownership_declared = (decl: int) -> bool:
+    ownership_decls.has(decl * 4 + 1) or ownership_decls.has(decl * 4 + 2) or ownership_decls.has(decl * 4 + 3)
+
+ownership_copyable = (t0: int) -> bool:
+    t = prune(t0)
+    first = 0
+    if let hook = ownership_copies.get(t):
+        parent = prune(int(fns[hook].ret))
+        first = int(structs[int(types[parent].st)].nfields)
+    else if structs[int(types[t].st)].drop_fn != 0: return false
+    fs = field_list(t)
+    loop i in [first..fs.len()):
+        if ownership_type(fs[i].0) and not ownership_copyable(fs[i].0): return false
+    true
+
+ownership_inline = (t0: int, depth: int = 0) -> bool:
+    t = prune(t0)
+    if effect_scalar(t) or tkind(t) == .float_: return true
+    if depth > 32 or tkind(t) != .struct_: return false
+    layout(t)
+    si = int(types[t].st)
+    loop i in [0..int(structs[si].nfields)):
+        field = fields[int(structs[si].fields) + i]
+        if field.boxed or not ownership_inline(int(field.type), depth + 1): return false
+    true
+
+# Fact checking can precede hook instantiation. Consult declarations rather
+# than the finalized lowering IDs, keeping ordinary COW values unchanged.
+ownership_fact_type = (t0: int, depth: int = 0) -> bool:
+    t = representation_type(t0)
+    if tkind(t) != .struct_: return false
+    if depth > 32: return true
+    si = int(types[t].st)
+    if ownership_declared(int(structs[si].decl)): return true
+    parent = nominal_parent.get(t) ?? 0
+    if parent != 0 and ownership_fact_type(parent, depth + 1): return true
+    layout(t)
+    loop i in [0..int(structs[si].nfields)):
+        if ownership_fact_type(int(fields[int(structs[si].fields) + i].type), depth + 1): return true
+    false
+
+# A hook constructs its result; returning a proved-dead local adopts that
+# construction rather than recursively invoking the same lifecycle role.
+owner_adopt_result = (n: int):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .if_:
+        owner_adopt_result(int(nodes[n].b))
+        owner_adopt_result(int(nodes[n].c))
+    else if k == .block and nkids(n) > 0:
+        owner_adopt_result(kid(n, nkids(n) - 1))
+    else if k == .exprstmt: owner_adopt_result(int(nodes[n].a))
+    else: owner_adoptions[n] = true

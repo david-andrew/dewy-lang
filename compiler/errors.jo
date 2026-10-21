@@ -6,6 +6,7 @@ use 'types.jo'
 use 'util.jo'
 use 'check.jo'
 use 'expr.jo'
+use 'ownership.jo'
 
 exception_type = 0
 error_type = 0
@@ -45,6 +46,7 @@ value_members = (t: int) -> int[]:
     [t]
 
 nominal_family = (t: int) -> int:
+    if ownership_nominals.has(t): return t
     if not nominal_ready or (t != exception_type and t != error_type and not nominal_parent.has(t)): return t
     if let found = nominal_families.get(t): return found
     members: int[]
@@ -71,8 +73,14 @@ nominal_resolve = (t: int):
     parent = resolve_type(int(nodes[d].a))
     ctxs.pop()
     cx = saved
-    if not nominal_types.contains(parent): fatal(nodes[d].pos, "type of currently requires exception, error, or a nominal descendant")
-    nominal_resolve(parent)
+    if not nominal_types.contains(parent):
+        if tkind(parent) != .struct_ or not ownership_declared(int(structs[int(types[parent].st)].decl)):
+            fatal(nodes[d].pos, "type of currently requires exception, error, or a nominal descendant")
+        ownership_nominals[parent] = true
+        ownership_nominals[t] = true
+    else:
+        nominal_resolve(parent)
+        if ownership_nominals.has(parent): ownership_nominals[t] = true
     nominal_parent[t] = parent
     nominal_resolving[t] = false
 
