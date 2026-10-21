@@ -175,7 +175,6 @@ DIRECTIVE_ERRORS = {
     'runtime-assert-refuted': ('main = () => { $runtime_assert 1 =? 2 }', 'assertion refuted'),
     'runtime-assert-bool': ('main = () => { $runtime_assert 3 }', 'expected bool'),
     'no-prelude-setting': ('$no_prelude = true', '`$no_prelude` is part of the design but not implemented yet'),
-    'lend': ('main = () => { let bytes = [1u8]\n$lend(bytes) { 1 } }', '`$lend` is part of the design'),
     'allocator': ('main = () => { let s = $allocator(@scratch) [1 2] }', '`$allocator` is part of the design'),
     'unsafe-assume': ('main = () => { $unsafe_assume 1 >? 0 }', '`$unsafe_assume` is part of the design'),
     'expect': ('main = () => { let y = $expect 1 >? 0, "x" }', '`$expect` is a statement'),

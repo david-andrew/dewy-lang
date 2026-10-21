@@ -65,6 +65,11 @@ struct FactLoop:
     back: FactState = FactState(live = false)
     exits: FactState = FactState(live = false)
 
+struct FactLoan:
+    place: PlaceIdentity
+    capacity: int
+fact_loans: FactLoan[]
+
 fact_loops: FactLoop[]
 fact_speculating = 0
 fact_pending_defers = 0
@@ -988,6 +993,35 @@ fact_capture = (n: int, s: mut FactState) -> int:
         return fact_new(s, FactBound(reason = .unsupported, witness = n))
     if k == .intrinsic:
         id = nodes[n].aux as IN
+        if id == .lend:
+            extra = fact_capture(kid(n, 1), s)
+            base = fact_capture(kid(n, 0), s)
+            length = fact_project(s, base, -1, false, T_INT)
+            limit = fact_arithmetic(s, n, .plus, length, extra)
+            if fact_speculating == 0 and fact_compare(s, .ge, extra, fact_constant(s, 0)) == 0:
+                loan_error(n, "negative reservation")
+            fact_loans.push(FactLoan(place_route(kid(n, 0)), limit))
+            result = fact_capture(kid(n, 2), s)
+            fact_loans.pop()
+            return result
+        if id == .loan_length:
+            value = fact_capture(kid(n, 1), s)
+            if fact_speculating == 0:
+                loop loan in fact_loans:
+                    if loan.place == place_route(kid(n, 0)):
+                        lo = fact_compare(s, .ge, value, fact_constant(s, 0))
+                        hi = fact_compare(s, .le, value, loan.capacity)
+                        if lo == 0 or hi == 0: loan_error(n, "set_length exceeds the reserved capacity")
+                        if fact_policy == .RequireStatic and (lo != 1 or hi != 1): fact_unknown(n, fact_bound(s, value), "loan capacity")
+            route = fact_route(kid(n, 0), s)
+            fresh = fact_new(s, FactBound(), FactTerm(type = ntype(kid(n, 0))))
+            s.projections.push(FactProjection(fresh, -1, false, value))
+            fact_store_route(s, route, fresh, n)
+            return 0
+        if id == .loan_address or id == .loan_load or id == .loan_store:
+            # Raw writes invalidate element facts; no address becomes evidence.
+            if id == .loan_store: fact_forget(s, n, .write, true)
+            return fact_new(s, fact_domain(ntype(n)))
         if id == .len:
             base = fact_capture(kid(n, 0), s)
             t = representation_type(ntype(kid(n, 0)))
@@ -1094,8 +1128,9 @@ fact_capture = (n: int, s: mut FactState) -> int:
     return fact_new(s, FactBound(reason = .unsupported, witness = n))
 
 facts_finalize = ():
-    if fact_requests.len() == 0 and refine_requests.len() == 0 and fact_policy == .RuntimeAllowed: return
+    if loan_owners.len() == 0 and fact_requests.len() == 0 and refine_requests.len() == 0 and fact_policy == .RuntimeAllowed: return
     demanded: {int: bool} = {}
+    loop f, _ in loan_owners: demanded[f] = true
     loop request in fact_requests: demanded[request.owner] = true
     loop request in refine_requests: demanded[request.owner] = true
     if fact_policy == .RequireStatic:

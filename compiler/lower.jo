@@ -1,3 +1,4 @@
+use 'places.jo'
 use 'facts.jo'
 use 'refine.jo'
 use 'units.jo'
@@ -2832,9 +2833,59 @@ data_writable = (e: int) -> bool:
     f & LF_PARAM == 0 or f & LF_MUTPARAM != 0
 
 # ---------------- intrinsics ----------------
+struct LoanCapacity:
+    place: PlaceIdentity
+    limit: int
+loan_capacities: LoanCapacity[]
+
 gen_intrinsic = (e: int) -> Val:
     id = nodes[e].aux as IN
     args = kids(e)
+    if id == .lend:
+        extra = gen_expr(args[1]).v
+        pl = gen_place(args[0], has_flag(e, NF_MUT))
+        at = ntype(args[0])
+        length = arr_len(read_place(pl, at))
+        limit = e_bin(.add, VI, length, extra)
+        iff(e_bin(.or_, VI, e_bin(.lts, VI, extra, e_iconst(0)), e_bin(.lts, VI, limit, length)))
+        e_call_nr(rt("__panic"), [e_daddr(str_data("invalid scoped loan reservation"))], -1)
+        endc()
+        if has_flag(e, NF_MUT):
+            arr_unique(pl, at)
+            sa = place_addr(pl, at)
+            e_call(rt("__arr_reserve"), [sa, e_iconst(1), limit], -1)
+            if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
+        loan_capacities.push(LoanCapacity(place_route(args[0]), limit))
+        result = gen_expr(args[2])
+        loan_capacities.pop()
+        return result
+    if id == .loan_address:
+        p = gen_borrowed(args[0]).v
+        r = vreg(VI)
+        e_mov(r, e_iconst(0))
+        iff(e_bin(.ne, VI, p, e_iconst(0)))
+        e_mov(r, e_addi(p, 24))
+        endc()
+        return V(r, false)
+    if id == .loan_load: return V(e_load(VI, gen_expr(args[0]).v, 0, 1), false)
+    if id == .loan_store:
+        value = gen_expr(args[0]).v
+        address = gen_expr(args[1]).v
+        e_store(address, 0, value, 1)
+        return V(-1, false)
+    if id == .loan_length:
+        length = gen_expr(args[1]).v
+        p = place_route(args[0])
+        loop loan in loan_capacities:
+            if loan.place == p:
+                iff(e_bin(.or_, VI, e_bin(.lts, VI, length, e_iconst(0)), e_bin(.gts, VI, length, loan.limit)))
+                e_call_nr(rt("__panic"), [e_daddr(str_data("scoped loan length exceeds reservation"))], -1)
+                endc()
+        address = gen_borrowed(args[0]).v
+        iff(e_bin(.ne, VI, address, e_iconst(0)))
+        hdr_store(address, 8, length)
+        endc()
+        return V(-1, false)
     if id == .len or id == .arrcap:
         at = prune(ntype(args[0]))
         if id == .len and types[at].kind == .fixed:

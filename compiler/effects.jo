@@ -57,6 +57,8 @@ struct EffectObligation:
     source: int
     bound: int
 
+loan_owners: {int: bool} = {}
+
 effect_obligations: EffectObligation[]
 effect_inference_busy = false
 effect_solving = false
@@ -73,6 +75,7 @@ effect_serial = 0
 effect_limit = 0
 
 effects_reset = ():
+    loan_owners = {}
     effects_active = false
     effect_obligations = []
     effect_inference_busy = false
@@ -941,3 +944,164 @@ effects_demand = (f: int) -> bool:
     if f <= 0 or f >= effect_limit: return false
     if effect_summaries[f].index == 0: effect_visit(f)
     effect_summaries[f].done
+
+# Scoped bytes share place normalization and transitive call footprints with
+# effects. This walk is demanded only for functions containing byte operations.
+struct ByteLoan:
+    node: int
+    place: PlaceIdentity
+    writable: bool
+    first_local: int
+    origin: int
+loan_stack: ByteLoan[]
+loan_origins: {int: int} = {}
+loan_ids: int[]
+loan_generation = 0
+loan_steps = 0
+
+loan_error = (n: int, reason: str):
+    fatal(nodes[n].pos, "scoped loan: {reason}")
+
+loan_owner = (n: int) -> int:
+    p = place_route(n)
+    loop i in [0..loan_stack.len()):
+        if place_covers(loan_stack[i].place, p) or place_covers(p, loan_stack[i].place): return i
+    -1
+
+loan_mark = (local: int, origins: int):
+    old = loan_origins.get(local) ?? 0
+    if old | origins != old:
+        loan_origins[local] = old | origins
+        loan_generation += 1
+
+loan_publish = (n: int, p: PlaceIdentity, origins: int):
+    loop loan in loan_stack:
+        if origins & loan.origin == 0: continue
+        if p.root != .local or p.parent != 0 or p.declaration < loan.first_local:
+            loan_error(n, "address cannot escape the scoped expression through a store")
+
+loan_call = (n: int):
+    if nodes[n].aux == 2: return
+    if nodes[n].aux != 0 or not effects_demand(int(nodes[n].sym)):
+        loan_error(n, "call has no checked nonescaping storage contract")
+    loop event in effect_summaries[int(nodes[n].sym)].events:
+        a = event.atom
+        if a.kind == .opaque or a.kind == .escape or a.kind == .remainder:
+            loan_error(n, "call may escape or invalidate loan storage")
+        p = a.place
+        base = place_base(p)
+        if base.root == .capture or base.root == .global: loan_error(n, "call may access nonlocal loan storage")
+        if base.root == .formal:
+            i = base.declaration - 1
+            if i >= 0 and i < nkids(n): p = place_append(place_route(kid(n, i)), p)
+        loop loan in loan_stack:
+            if p.declaration != 0 and (place_covers(p, loan.place) or place_covers(loan.place, p)):
+                loan_error(n, "call may access the active loan owner")
+
+loan_visit = (n: int) -> int:
+    if n == 0: return 0
+    loan_steps += 1
+    if loan_steps > 65536: loan_error(n, "address analysis budget exhausted")
+    k = nodes[n].kind
+    active = loan_stack.len() != 0
+    if k == .intrinsic:
+        id = nodes[n].aux as IN
+        if id == .lend:
+            owner = kid(n, 0)
+            if loan_owner(owner) >= 0: loan_error(n, "nested conflicting loan")
+            if loan_visit(kid(n, 1)) != 0: loan_error(n, "address-derived reservation")
+            p = place_route(owner)
+            if p.declaration == 0 or p.parent != 0: loan_error(n, "owner must have stable named storage")
+            if p.root == .local and int(locals[p.declaration].flags) & (LF_ALIAS | LF_EXPOSED | LF_SHARED | LF_CAPTURE | LF_MUTPARAM) != 0: loan_error(n, "owner has a conflicting alias or exposed storage view")
+            if not loan_ids.contains(n): loan_ids.push(n)
+            origin = -1
+            loop i in [0..min(8, loan_ids.len())):
+                if loan_ids[i] == n: origin = 1 << i
+            loan_stack.push(ByteLoan(n, p, has_flag(n, NF_MUT), int(nodes[n].ival), origin))
+            tainted = loan_visit(kid(n, 2))
+            loan_stack.pop()
+            if tainted & origin != 0: loan_error(n, "address cannot escape the scoped expression as its result")
+            return tainted
+        if id == .loan_address or id == .loan_length:
+            i = loan_owner(kid(n, 0))
+            if i < 0: loan_error(n, "byte operation requires an active owner loan")
+            if id == .loan_address: return loan_stack[i].origin
+            if not loan_stack[i].writable: loan_error(n, "set_length requires a writable loan")
+            if loan_visit(kid(n, 1)) != 0: loan_error(n, "address-derived length cannot be published")
+            return 0
+        if id == .loan_load or id == .loan_store:
+            if not active: loan_error(n, "raw byte operation requires a scoped loan")
+            if id == .loan_load:
+                if loan_visit(kid(n, 0)) == 0: loan_error(n, "raw load requires a loan-derived address")
+            else:
+                if loan_visit(kid(n, 0)) != 0: loan_error(n, "address cannot escape through a raw store")
+                origins = loan_visit(kid(n, 1))
+                if origins == 0: loan_error(n, "raw store requires a loan-derived address")
+                loop loan in loan_stack:
+                    if origins & loan.origin != 0 and not loan.writable: loan_error(n, "raw write through a readonly loan")
+            return 0
+        if active and id == .len and loan_owner(kid(n, 0)) >= 0: return 0
+    if k == .ident:
+        if active and loan_owner(n) >= 0: loan_error(n, "owner cannot be copied, resized, replaced or aliased during a loan")
+        p = place_route(n)
+        return if p.root == .local: loan_origins.get(p.declaration) ?? 0 else: 0
+    if active and (k == .lambda or k == .fnref or k == .partial): loan_error(n, "closure capture during a loan is not supported")
+    if k == .block:
+        result = 0
+        loop child in kids(n): result = loan_visit(child)
+        return result
+    if k == .vardecl:
+        tainted = loan_visit(int(nodes[n].b))
+        if tainted != 0:
+            p = PlaceIdentity((if has_flag(n, NF_GLOBAL): PlaceRoot.global else: PlaceRoot.local), 0, int(nodes[n].sym))
+            loan_publish(n, p, tainted)
+            loan_mark(p.declaration, tainted)
+        return 0
+    if k == .assign:
+        if active and place_base(place_route(int(nodes[n].a))).root != .local:
+            loan_error(n, "nonlocal replacement may invalidate loan storage")
+        tainted = loan_visit(int(nodes[n].b))
+        old = loan_visit(int(nodes[n].a))
+        if tainted | old != 0:
+            p = place_route(int(nodes[n].a))
+            loan_publish(n, p, tainted | old)
+            loan_mark(p.declaration, tainted | old)
+        return 0
+    if k == .return_:
+        if loan_visit(int(nodes[n].a)) != 0: loan_error(n, "address cannot escape through return")
+        return 0
+    if active and (k == .if_ or k == .while_ or k == .for_ or k == .match_ or k == .iflet or k == .and_ or k == .or_ or k == .coalesce):
+        if loan_visit(int(nodes[n].a)) != 0: loan_error(n, "address-derived control flow cannot publish loan bits")
+    mask = isolation_children(k)
+    tainted = 0
+    if mask >= 0:
+        if mask & 1 != 0: tainted = loan_visit(int(nodes[n].a)) | tainted
+        if mask & 2 != 0: tainted = loan_visit(int(nodes[n].b)) | tainted
+        if mask & 4 != 0: tainted = loan_visit(int(nodes[n].c)) | tainted
+        if mask & 16 != 0:
+            loop child in kids(n): tainted = loan_visit(child) | tainted
+    else if active: loan_error(n, "unsupported address transform")
+    if active and k == .call:
+        if tainted != 0: loan_error(n, "address cannot escape through a call or record field")
+        loan_call(n)
+    if active and k == .intrinsic:
+        if tainted != 0: loan_error(n, "intrinsic has no reviewed address-retention contract")
+        id = nodes[n].aux as IN
+        if id != .len and id != .runtime_assert and id != .static_assert and id != .assert:
+            loan_error(n, "intrinsic may invalidate loan storage")
+    if tainted != 0 and (k == .tuple or k == .array): loan_error(n, "address cannot escape through aggregate storage")
+    tainted
+
+loans_finalize = ():
+    loop f, _ in loan_owners:
+        loan_origins = {}
+        loan_ids = []
+        loan_generation = 0
+        loan_stack = []
+        loan_steps = 0
+        # Monotone place origins reach a fixed point across loop backedges.
+        loop true:
+            before = loan_generation
+            loan_visit(int(fns[f].body))
+            if loan_generation == before: break
+    loan_origins = {}

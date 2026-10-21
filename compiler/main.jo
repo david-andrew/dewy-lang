@@ -1,3 +1,4 @@
+use 'effects.jo'
 # The Sloppy compiler.
 #   sloppy file.jo [args]     compile and run
 #   sloppy build file.jo [-o out] [--target wasm] [--release]
@@ -401,6 +402,7 @@ compile = (path: str, out0: str) -> str:
     if lower_only: det_check_program()
     if repl_image: repl_set_main()
     isolation_reset()
+    loans_finalize()
     facts_finalize()
     copies_reset()
     if ownership_decls.len() != 0:

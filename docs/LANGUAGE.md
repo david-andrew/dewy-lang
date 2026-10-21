@@ -2135,7 +2135,26 @@ descriptors themselves cannot escape into runtime storage. Compile-time string
 operations include concatenation, slicing and ordinary checked string-library
 calls; interpolation and indirect/capturing calls remain unsupported.
 
-Other directives of the design (`$no_prelude`, `$lend`,
+`$lend(bytes) expression` lends a named `array<uint8>` read-only;
+`$lend(@bytes reserve=n) expression` lends it writable and reserves **n additional
+bytes**. Reservation is evaluated once, checked for negative values and length
+overflow, and writable storage detaches from COW snapshots before access.
+Inside the expression, `__load_i64__(bytes)` gives the unpinned storage address,
+`__load_u8__(address)` reads a byte, and `__store_u8__(value address)` writes one.
+`bytes.set_length(n)` requires a writable loan and checks `0 <= n <= entry_length
++ reservation`, regardless of spare geometric capacity. Known violations are
+rejected; otherwise the bound is checked at runtime, including release builds.
+Raw byte initialization and address bounds remain the caller's responsibility.
+
+Loan addresses and derived integers cannot escape through results, returns,
+stores, captures, aggregates or unreviewed calls. The owner cannot be copied,
+aliased, replaced or resized during the loan, except by `set_length`. Nested
+loans on different owners work; conflicting loans and exposed/shared owner
+views and mutable parameter owners are rejected. Address-controlled branches and closure construction inside
+loans currently reject conservatively. Raw writes require a writable address origin. Ordinary scalar results and early exits are supported; after
+the expression the owner is an ordinary value and is freed normally.
+
+Other directives of the design (`$no_prelude`,
 `$allocator`, `$expect`, `$unsafe_assume`, `$target`, …) are reported as not
 implemented yet where they appear.
 

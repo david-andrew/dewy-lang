@@ -260,6 +260,10 @@ dw_directive = (id: int) -> int:
     name = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
     if name == "expect" or name == "fail": fatal(pos, "`${name}` is a statement: it returns from its function when it fails, so it cannot give a value")
+    if name == "lend":
+        owner = dw_expr(dw_child(id, 0))
+        reservation = if dw_child(id, 1) != 0: dw_expr(dw_child(id, 1)) else: bc_int(0, pos)
+        return bc_call("$lend", [owner, reservation, dw_expr(dw_child(id, 2))], pos)
     if name != "assert" and name != "runtime_assert": return dw_unimplemented(id, name)
     condition = dw_child(id, 0)
     message = dw_child(id, 1)
