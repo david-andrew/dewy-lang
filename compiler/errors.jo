@@ -75,6 +75,9 @@ nominal_resolve = (t: int):
     cx = saved
     if not nominal_types.contains(parent):
         if tkind(parent) != .struct_ or not ownership_declared(int(structs[int(types[parent].st)].decl)):
+            if files[pos_file(nodes[d].pos)].is_dewy and tkind(parent) == .struct_:
+                pn = dt(parent)
+                fatal(nodes[d].pos, "`type of {pn}` needs a minted parent: start the family with `{pn}:type=type of any & [...]` (its fields and methods are inherited), or use `type of error` for errors")
             fatal(nodes[d].pos, "type of currently requires exception, error, or a nominal descendant")
         ownership_nominals[parent] = true
         ownership_nominals[t] = true

@@ -1,0 +1,8 @@
+Shape:type=type of any
+Circle:type=type of Shape & [r:float64]
+Square:type=type of Shape & [s:float64]
+area=(sh:Shape):>float64=>match sh {
+    c:Circle => 3.14*c.r*c.r
+    q:Square => q.s*q.s
+}
+main=()=>printl(area(Circle[1.0]))

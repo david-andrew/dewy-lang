@@ -6366,7 +6366,9 @@ check_match = (m: int, expected: int) -> int:
             loop vi in 0.. and s in seen:
                 if s: continue
                 if len(miss) > 0: miss += ", "
-                miss += ".{name_of(int(variants[int(structs[si].variants) + vi].name))}"
+                # (a union's members by their type names: a family's parent is one of its own)
+                if dewy and structs[si].union_: miss += dt(struct_targ(si, vi))
+                else: miss += ".{name_of(int(variants[int(structs[si].variants) + vi].name))}"
             fatal(nodes[m].pos, "this match has no arm for {miss} (add one, or a {jd(nodes[m].pos, "`_:`", "`_ => ...`")} arm for the rest)")
         if dewy: fatal(nodes[m].pos, "match is not exhaustive (add a `_ => ...` arm or `else`)")
         fatal(nodes[m].pos, "match expression is not exhaustive (add a `_:` arm)")
