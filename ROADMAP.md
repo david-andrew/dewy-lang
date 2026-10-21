@@ -14,7 +14,7 @@ what landed. Keep this file short.
 | Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.24 G instructions (was 1.36 G on 10-20 morning) | ~0.40 G (250k root lines/s) |
 | Compiler self-build | 8.0 G instructions | seconds-scale edit loop |
 | Game-tick kernel vs C -O2 (time) | 1.6× default and release (default was 6.3× before small-leaf inlining) | ~1× both |
-| Worst other kernels vs C (time, default) | shifted_arrays 2.7×, params 1.75×, graph 1.7× | ≤1.2× |
+| Worst other kernels vs C (time, default) | params 1.75×, graph 1.7×, string_equal 1.7× (shifted_arrays 2.7× → 0.46×) | ≤1.2× |
 | Quick / full suite | 38 s / 6.6 min (load average 14–24; remeasure when quiet) | ≤30 s / ≤5 min |
 
 Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
@@ -26,7 +26,7 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: default-build bounds checks (shifted_arrays 2.7× C default vs 0.48× release).
+- Astra: graph and string_equal runtime.
 - Opus: refinement slice 6 (witness diagnostics).
 
 ## Next
@@ -140,5 +140,6 @@ Each tier-3 program's ladder note says which question holds it open.
 - Readonly aggregate argument forwarding from loop snapshots: self-build −1.25%,
   no runtime change (under the 3% pilot bar).
 - Local check-traversal fixes beyond the two landed: four pilots each under 1%.
+- Direct null-trap lowering for managed/method params: 14.97 → 15.28 ms.
 - Fork-based parallel lowering: 0.88–1.00× latency. Lowering is only about 13%
   of a default build.
