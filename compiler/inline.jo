@@ -26,6 +26,10 @@ fast_loop_only: bool[]
 
 fast_inline_kind = (f: IrFn) -> int:
     if f.cabi or f.noinline or len(f.export_name) > 0: return 0
+    # The native string helper is a bounded comparison plus return. Expand
+    # only in loops: its machine body is larger than its two IR instructions.
+    # Debug builds retain the scalar runtime body instead of this intrinsic.
+    if f.code.len() == 2 and f.code[0].op == .streq and f.code[1].op == .ret: return 3
     # Small record leaves need expansion before SRA can keep caller state in
     # registers. Bound their raw size and expand only at loop call sites.
     record = f.slot_size.len() > 0
