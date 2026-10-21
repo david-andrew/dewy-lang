@@ -9,7 +9,7 @@ main = () => {
         power = (k:int64):>int64 => if k <=? 0 1 else base * power(k - 1)
         is_even = (k:int64):>bool => if k =? 0 true else is_odd(k - 1)
         is_odd = (k:int64):>bool => if k =? 0 false else is_even(k - 1)
-        repeat = <T>(item:T k:int64):>array<T> => if k <=? 0 [] else [item] + repeat(item k - 1)
+        repeat = <T>(item:T k:int64):>array<T> => if k <=? 0 [] else [item repeat(item k - 1)...]
         steps = 0
         count_down = (k:int64) => if k >? 0 { steps += 1  count_down(k - 1) }
     ]

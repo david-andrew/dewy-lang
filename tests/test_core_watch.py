@@ -417,7 +417,7 @@ def test_core_watch_derived_asset(compiler, tmp_path, imported, indirect):
         declaration = 'from p"assets/content.dewy" import ' + ('read' if indirect != 'direct' else 'content') + '\n'
     decoded = 'read(1)' if indirect != 'direct' else 'str_from_bytes(content)'
     save(source, declaration + f'let decoded={decoded}\n' + '''
-let label="asset="+decoded
+let label="asset={decoded}"
 let count:int64=0
 update=(dt:float64):>void=>{count+=1 if frame_number()%10 =? 0 printl"tick {count} {label} allocations={alloc_count()}" sleep(5ms)}
 draw=():>void=>clear(BLACK)

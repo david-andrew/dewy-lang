@@ -1918,9 +1918,9 @@ main = () -> int:
     if provider == 'dewy':
         (tmp_path / 'store.dewy').write_text('''Store:type=<T>[values:array<T>]
 trace=""
-at=(label:string value:int64):>int64=>{trace+=label return value}
-__index__=<T>(s:Store<T> i:int64):>T=>{trace+="g" return s.values[i]}
-__setindex__=<T>(@s:Store<T> i:int64 value:T):>void=>{trace+="s" s.values[i]=value}
+at=(label:string value:int64):>int64=>{trace="{trace}{label}" return value}
+__index__=<T>(s:Store<T> i:int64):>T=>{trace="{trace}g" return s.values[i]}
+__setindex__=<T>(@s:Store<T> i:int64 value:T):>void=>{trace="{trace}s" s.values[i]=value}
 reset=():>void=>{trace=""}
 events=():>string=>trace
 ''')
@@ -3854,11 +3854,11 @@ main=()=>{
         loop c in "é👩‍👩‍👧‍👦🇺🇸" {saved.push(c) c="changed"}
         if saved not=? ["é" "👩‍👩‍👧‍👦" "🇺🇸"] return 4
         let seen=""
-        loop c in input() {shared="replacement" seen+=c}
+        loop c in input() {shared="replacement" seen="{seen}{c}"}
         if calls not=? 1 or seen not=? "abc" return 5
         shared="abc"
         seen=""
-        loop a in input() and b in replace() {seen+=a+b}
+        loop a in input() and b in replace() {seen="{seen}{a}{b}"}
         if calls not=? 2 or seen not=? "a1b2" return 6
         let zipped=[loop a in "abc" and b in [1 2] a]
         if zipped not=? ["a" "b"] return 7

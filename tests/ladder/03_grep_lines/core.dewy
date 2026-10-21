@@ -14,8 +14,8 @@ find_lines=(text:string pattern:string):>array<string>=>{
 join_lines=(lines:array<string>):>string=>{
     let out=""
     loop line in lines {
-        if out.length >? 0 {out+="|"}
-        out+=line
+        if out.length >? 0 {out="{out}|"}
+        out="{out}{line}"
     }
     return out
 }

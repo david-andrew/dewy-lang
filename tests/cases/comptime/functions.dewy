@@ -19,10 +19,10 @@ compute=(n:int64):>int64=> {
         if i =? 2 { continue }
         total+=values[i]
     }
-    let pair=Pair[total "ab"+"cd"]
+    let pair=Pair[total "ab{n}"]
     let saved=pair
     pair.x+=1
-    $runtime_assert saved.text =? "abcd"
+    $runtime_assert saved.text =? "ab8"
     $runtime_assert values[0] =? 0
     let j=0
     loop j <? 3 { j+=1 }

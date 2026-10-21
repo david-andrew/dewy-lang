@@ -4,7 +4,7 @@
 import p"../../fixtures/objects/family_mid.dewy" as mid
 Leaf:type = type of mid.Mid & [
     extra:string = 'x'
-    bump = () => { level += 1  message = message + "!" }
+    bump = () => { level += 1  message = "{message}!" }
     shadow = (message:string):>string => { let tag = "local" return "{message} {tag} {describe}" }
     full = ():>string => "{rank} {describe} {extra}"
     named = ():>string => kind

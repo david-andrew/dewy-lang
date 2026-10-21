@@ -91,7 +91,7 @@ return if alloc_count()=?before 42 else 2}
     'abandoned-copy-back': MAKE + '''
 let rows:array<string>=[]
 Action:type=():>void
-mutate=(@text:string n:int64 callback:Action):>void=>{callback() text+="!"}
+mutate=(@text:string n:int64 callback:Action):>void=>{callback() text="{text}!"}
 nothing=():>void=>{}
 probe=()=>{mutate(@rows[0] {return 42; 1} @nothing) return 0}
 main=()=>{let before=alloc_count()

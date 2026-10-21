@@ -1,5 +1,5 @@
 Entry:type=[key:string value:string deleted:bool=false]
-append=(path:string entry:Entry):>int64|error=>append_file(path to_json(entry)+"\n")
+append=(path:string entry:Entry):>int64|error=>append_file(path "{to_json(entry)}\n")
 recover=(path:string):>dict<string string>=>{
     let state:dict<string string>=[]
     let loaded=read_text(path)

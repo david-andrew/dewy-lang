@@ -71,7 +71,7 @@ def oracle_cases():
         body += ['let contents:array<string>=[' + ' '.join(map(quote, expected)) + ']',
                  'loop i in [0..found.length) {',
                  'let actual=found[i].text',
-                 'loop group in found[i].groups {actual+="|"+group}',
+                 'loop group in found[i].groups {actual="{actual}|{group}"}',
                  'if actual not=?contents[i] return 5', '}', 'return 42']
         yield f'regex-oracle-{index}', 'main=()=>{\n' + '\n'.join(body) + '\n}'
 
@@ -100,7 +100,7 @@ let replace_word=(m:Match)=>m.groups[0].upper()
 if "ab ab ab".replace(regex("(ab) ?") @replace_word) not=?"ABABAB" return 5
 return 42}''',
         'regex-offsets': r'''main=()=>{
-let text="ab".repeat(200)+"aab" let r=regex("a+b")
+let text="{"ab".repeat(200)}aab" let r=regex("a+b")
 let first=text.find(r 390)
 if first is?none return 1
 if first.start not=?390 return 1
@@ -114,7 +114,7 @@ if last.start not=?403 return 4
 if "".find(regex("")1) isnt?none return 5
 return 42}''',
         'regex-malformed': r'''main=()=>{
-let text="x".repeat(300)+str_from_bytes([195 65] as array<uint8>)+"B".repeat(3)
+let text="{"x".repeat(300)}{str_from_bytes([195 65] as array<uint8>)}{"B".repeat(3)}"
 let found=text.find_all(regex("[A-Z]+"))
 if found.length not=?1 or found[0].start not=?301 or found[0].text not=?"ABBB" return 1
 return 42}''',

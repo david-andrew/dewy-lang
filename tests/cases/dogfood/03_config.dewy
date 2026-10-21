@@ -44,13 +44,14 @@ parse_string = (@p:Parser):>string|ParseError => {
         if c =? "\\" {
             let e = p.peek()
             p.pos += 1
-            out += match e {
+            let decoded = match e {
                 <"n"> => "\n"
                 <"t"> => "\t"
                 _ => e
             }
+            out = "{out}{decoded}"
         } else {
-            out += c
+            out = "{out}{c}"
         }
     }
     return fail(p "unterminated string")
@@ -115,8 +116,8 @@ show = (v:Value):>string => match v {
     x:Num => string(x.n)
     x:Str => "\"{x.s}\""
     x:Bool => if x.b "true" else "false"
-    x:List => "[" + [loop i in x.items show(i)].join(", ") + "]"
-    x:Obj => "\{" + [loop [k v] in zip(x.keys x.vals) "{k}: {show(v)}"].join(", ") + "\}"
+    x:List => "[{[loop i in x.items show(i)].join(", ")}]"
+    x:Obj => "\{{[loop [k v] in zip(x.keys x.vals) "{k}: {show(v)}"].join(", ")}\}"
     _ => "null"
 }
 

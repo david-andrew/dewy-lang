@@ -7,7 +7,7 @@ Base:type = type of error & [
 Payload:type = type of Base & [
     code:int64 = 42
     detail = ():>string => "{describe} ({code})"
-    bump = () => { code += 1  message = message + "!" }
+    bump = () => { code += 1  message = "{message}!" }
 ]
 Unit = type of error & [hint = ():>string => "a unit error"]
 show = (error:Base):>string => describe(error)

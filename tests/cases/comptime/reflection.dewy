@@ -12,7 +12,7 @@ sum=<T>(value:T):>int64=> {
 }
 names=<T>(value:T):>string=> {
     let text=""
-    loop f in fields(T) { text+=f.name+";" }
+    loop f in fields(T) { text="{text}{f.name};" }
     return text
 }
 control=<T>(value:T):>int64=> {
@@ -38,13 +38,13 @@ main=()=> {
     $runtime_assert TOTAL =? sum(Pair[20 22])
     $runtime_assert NAMES =? names(Pair[1 2])
     $runtime_assert control(Pair[10 32]) =? 32
-    copy.$field("ti"+"tle")="changed"
+    copy.$field("title")="changed"
     $runtime_assert value.title =? "hello"
     let generated=[loop name in ["first" "second"] $field(name)=name.length]
     $runtime_assert generated.first =? 5 and generated.second =? 6
-    let grid=[loop row in ["a" "b"] loop col in ["x" "y"] $field(row+col)=row+col]
+    let grid=[loop row in ["a" "b"] loop col in ["x" "y"] $field("{row}{col}")="{row}{col}"]
     $runtime_assert grid.ax =? "ax" and grid.by =? "by"
-    let literal=[$field("an"+"swer")=42]
+    let literal=[$field("answer")=42]
     $runtime_assert literal.answer =? 42
     printl("reflection agrees")
 }

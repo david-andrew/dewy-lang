@@ -1,8 +1,8 @@
 # exit: 42
 Box:type=[value:int64]
 let trace:string=""
-base=()=>{trace+="a" return Box[40]}
-exponent=()=>{trace+="b" return 2}
+base=()=>{trace="{trace}a" return Box[40]}
+exponent=()=>{trace="{trace}b" return 2}
 __pow__=(base:Box exponent:int64)=>Box[base.value+exponent]
 __xor__=(a:Box b:Box)=>Box[a.value xor b.value]
 main=()=>{let answer=base()^exponent()

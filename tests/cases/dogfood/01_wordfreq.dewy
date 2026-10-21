@@ -16,7 +16,7 @@ tokenize = (text:string):>array<string> => {
     let current = ""
     loop c in text {
         if is_letter(c) {
-            current = current + c.lower()
+            current = "{current}{c.lower()}"
         } else if current.length >? 0 {
             words.push(current)
             current = ""

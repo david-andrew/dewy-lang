@@ -3241,6 +3241,31 @@ append_assign = (s: int):
     else: nodes[spine[spine.len() - 2]].a = i32(rest)
     nodes[s].op = i32(int(Tok.pluseq))
 
+# Dewy's s = "{s}..." on a text variable: appended in place, as s += "..." would be in the
+# implementation language; the other copies all of s each time (a loop of them is quadratic).
+# The variable is read first either way, so only a local that nothing else can change while
+# the rest is evaluated (no closure shares it) is appended to.
+interp_appends: {int: bool} = {}
+
+interp_append_assign = (s: int):
+    lhs = int(nodes[s].a)
+    rhs = int(nodes[s].b)
+    if nodes[lhs].kind != .ident or nodes[rhs].kind != .str_lit or nodes[rhs].aux != 1 or nkids(rhs) < 2: return
+    first = kid(rhs, 0)
+    if nodes[first].kind != .pair or nodes[first].sval != -1: return
+    v = int(nodes[first].a)
+    if nodes[v].kind != .ident or nodes[v].name != nodes[lhs].name: return
+    sy = lookup(int(nodes[lhs].name))
+    if sy == 0 or syms[sy].kind != .local: return
+    l = int(syms[sy].ref)
+    if int(locals[l].flags) & (LF_CAPTURED | LF_SHARED | LF_BYREF | LF_CAPTURE | LF_ALIAS | LF_ELEMALIAS | LF_SOAELEM | LF_CONST) != 0: return
+    if prune(int(locals[l].type)) != T_STR: return
+    rest = kids(rhs)
+    rest.remove(0)
+    set_list(rhs, rest)
+    nodes[s].op = i32(int(Tok.pluseq))
+    interp_appends[s] = true
+
 # A checked receiver path that can be aliased without running a getter again.
 dewy_end_place = (n: int) -> bool:
     k = nodes[n].kind
@@ -3350,7 +3375,8 @@ check_assign = (s: int) -> int:
         if end_update != 0: return end_update
     if nodes[s].op == i32(int(Tok.assign)):
         unnarrow_assign(s)
-        append_assign(s)
+        if dewy_at(nodes[s].pos): interp_append_assign(s)
+        else: append_assign(s)
     sl = soa_alias_of(int(nodes[s].a))
     if sl != 0:
         # p = value in `loop mut p in ps`: ps[i] = value
@@ -3579,6 +3605,10 @@ check_assign = (s: int) -> int:
         return s
     l = prune(lt)
     if types[l].kind == .quantity and quantity_compound(s, l): return s
+    if op == int(Tok.pluseq) and (types[l].kind == .str_ or types[l].kind == .array or types[l].kind == .fixed) and not has_flag(s, NF_BROADCAST) and dewy_at(nodes[s].pos) and not interp_appends.has(s):
+        nm = concat_piece(lhs, false)
+        if types[l].kind == .str_: fatal(nodes[s].pos, "`+=` does not add text: `{nm} = \"\{{nm}}...\"` appends in place, and many pieces collect in an array and `join`")
+        fatal(nodes[s].pos, "`+=` does not join arrays (on arrays it is reserved for elementwise math): `{nm}.extend(ys)` appends ys and `{nm}.push(y)` one element; `.+=` adds element by element")
     if types[l].kind == .str_ and op == int(Tok.pluseq) and not has_flag(s, NF_BROADCAST):
         srt = prune(check_expr(int(nodes[s].b), T_STR))
         if nodes[lhs].kind == .ident and is_numeric(srt) and not can_coerce(last_checked, srt, T_STR): var_type_error(lhs, l, srt, nodes[s].pos)

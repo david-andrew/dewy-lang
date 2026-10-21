@@ -5,7 +5,7 @@ copy_fields=<T>(value:T)=>[loop f in fields(T) $field(f.name)=value.$field(f.nam
 describe=<T>(value:T):>string=> {
     let result=""
     loop field in fields(T)  {
-        result+="{field.name}={value.$field(field.name)};"
+        result="{result}{field.name}={value.$field(field.name)};"
     }
     return result
 }

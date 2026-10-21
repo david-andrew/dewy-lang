@@ -52,7 +52,7 @@ render = (g:Grid):>string => {
     loop y in [0..g.height) {
         let line = ""
         loop x in [0..g.width) {
-            line += if g.get(x y) "#" else "."
+            line = "{line}{if g.get(x y) "#" else "."}"
         }
         lines.push(line)
     }

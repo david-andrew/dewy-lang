@@ -24,7 +24,7 @@ main=():>int64=>{
     assert(tokens[4].text =? "*")
     assert(tokens[5].kind =? "number")
     let rebuilt=""
-    loop token in tokens {rebuilt+=token.text}
+    loop token in tokens {rebuilt="{rebuilt}{token.text}"}
     assert(rebuilt =? "12+(3*40)")
     assert(tokenize(" \t\n").length =? 0)
     printl(rebuilt)

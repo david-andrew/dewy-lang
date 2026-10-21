@@ -1648,7 +1648,7 @@ class Generator:
                 parts.append(self.expr(r.choice((I, I, U, F, B, S, AI)), d + 1))
             return Interp(S, tuple(p for p in parts if p != ''))
         if choice == 'concat':
-            return Bin(S, '+', self.expr(S, d), self.expr(S, d))
+            return Interp(S, (self.expr(S, d), self.expr(S, d)))
         if choice == 'convert':
             return Conv(S, self.expr(r.choice((I, U, F)), d))
         if choice == 'cond':

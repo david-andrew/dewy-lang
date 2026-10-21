@@ -1,6 +1,6 @@
 E:type=type of error & [message:string]
 f=(bad:bool):>string|E=>if bad E["bad".repeat(7)] else "ok".repeat(7)
-use=(a:array<string> b:string):>string=>a[0]+b
+use=(a:array<string> b:string):>string=>"{a[0]}{b}"
 work=(bad:bool):>int64|E=>{
     let outer=["outer".repeat(8)]
     if true {

@@ -429,7 +429,22 @@ ct_expr_impl = (e: int) -> int:
     if k == .float_lit: return ct_float(t, nodes[e].fval)
     if k == .none_lit: return ct_zero(t)
     if k == .str_lit:
-        if nodes[e].aux != 0: ct_fail(e, "string interpolation is not supported; concatenate compile-time strings")
+        if nodes[e].aux != 0:
+            # (Dewy joins text by interpolation: strings, machine integers and booleans here)
+            text = ""
+            loop part in kids(e):
+                if nodes[part].kind == .str_lit and nodes[part].aux == 0:
+                    text += name_of(int(nodes[part].sval))
+                    continue
+                if nodes[part].kind != .pair or nodes[part].sval != -1: ct_fail(e, "this string interpolation is not supported at compile time (text, machine integers and booleans are)")
+                pv = ct_values[ct_expr(int(nodes[part].a))]
+                if ct_frames[ct_frame].signal != 0: return ct_frames[ct_frame].result
+                pt = prune(pv.type)
+                if tkind(pt) == .str_: text += pv.s
+                else if pt == T_BOOL: text += if pv.i != 0: "true" else: "false"
+                else if is_int(pt) and pt != T_MATH_INT and (types[pt].sign or pv.i >= 0): text += "{pv.i}"
+                else: ct_fail(e, "this string interpolation is not supported at compile time (text, machine integers and booleans are)")
+            return ct_add(CTValue(type = t, s = text))
         return ct_add(CTValue(type = t, s = name_of(int(nodes[e].sval))))
     if k == .ident:
         if nodes[e].aux == i32(int(SK.global)): return ct_global(e, int(nodes[e].sym))

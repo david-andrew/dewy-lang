@@ -8,7 +8,7 @@ wrap=(text:string width:int64):>array<string>=> {
         }
         if line not=? ""  {
             if line.length+1+word.length <=? width  {
-                line+=" {word}"
+                line="{line} {word}"
                 continue
             }
             lines.push(line)
@@ -20,7 +20,7 @@ wrap=(text:string width:int64):>array<string>=> {
                 lines.push(fragment)
                 fragment=""
             }
-            fragment+=grapheme
+            fragment="{fragment}{grapheme}"
         }
         line=fragment
     }
@@ -34,9 +34,9 @@ join_lines=(lines:array<string>):>string=> {
     let first=true
     loop line in lines  {
         if not first  {
-            result+="|"
+            result="{result}|"
         }
-        result+=line
+        result="{result}{line}"
         first=false
     }
     return result

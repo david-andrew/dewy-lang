@@ -24,7 +24,7 @@ assert([parallel i in [5,3..0] i] =? [5 3 1])
 assert([parallel i in (0..4] i] =? [1 2 3 4])
 let values=[loop i in [0..129) [name="item {i}" data=[i i+1]]]
 let original=values
-parallel @value in values {value.name+="!" value.data[0]+=10}
+parallel @value in values {value.name="{value.name}!" value.data[0]+=10}
 parallel i in [0..129) {
     assert(values[i].name =? "item {i}!" and original[i].name =? "item {i}")
     assert(values[i].data[0] =? i+10 and original[i].data[0] =? i)

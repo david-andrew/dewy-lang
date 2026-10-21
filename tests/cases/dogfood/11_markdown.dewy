@@ -16,19 +16,19 @@ inline = (text:string):>string => {
             let close = i + 1
             loop close <? chars.length and chars[close] not=? "`" { close += 1 }
             if close <? chars.length {
-                out += "<code>" + escape_html(chars[i+1..close).join("")) + "</code>"
+                out = "{out}<code>{escape_html(chars[i+1..close).join(""))}</code>"
                 i = close + 1
                 continue
             }
         }
         if c =? "*" and i + 1 <? chars.length and chars[i+1] =? "*" {
-            out += if bold "</strong>" else "<strong>"
+            out = "{out}{if bold "</strong>" else "<strong>"}"
             bold = not bold
             i += 2
             continue
         }
         if c =? "*" {
-            out += if italic "</em>" else "<em>"
+            out = "{out}{if italic "</em>" else "<em>"}"
             italic = not italic
             i += 1
             continue
@@ -37,16 +37,16 @@ inline = (text:string):>string => {
             let rest = chars[i..].join("")
             let link = rest.find(regex(r"^\[([^\]]+)\]\(([^)]+)\)"))
             if link isnt? none {
-                out += "<a href=\"{link.groups[1]}\">{escape_html(link.groups[0])}</a>"
+                out = "{out}<a href=\"{link.groups[1]}\">{escape_html(link.groups[0])}</a>"
                 i += graphemes(link.text).length
                 continue
             }
         }
-        out += escape_html(c)
+        out = "{out}{escape_html(c)}"
         i += 1
     }
-    if italic { out += "</em>" }
-    if bold { out += "</strong>" }
+    if italic { out = "{out}</em>" }
+    if bold { out = "{out}</strong>" }
     return out
 }
 

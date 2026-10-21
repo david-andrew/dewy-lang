@@ -39,7 +39,7 @@ return 0
 }''',
     'managed-lifetimes': '''work=():>void=>{
 let values=parallel_range(257 (i:int64)=>[name="item {i}" items=[i i+1]])
-parallel_update(@values (p)=>{p.items.push(42) p.name+="!" return p})
+parallel_update(@values (p)=>{p.items.push(42) p.name="{p.name}!" return p})
 parallel_map(values (p)=>[p.items p.items]);
 }
 main=()=>{
@@ -53,11 +53,11 @@ return 0
 let words=["one" "two" "three"]
 let values=parallel_range(257 (i:int64)=>[name=words[i%3] items=[i i+1]])
 let saved=values
-parallel_update(@values (p)=>{p.items[0]+=42 p.name+="!" return p})
+parallel_update(@values (p)=>{p.items[0]+=42 p.name="{p.name}!" return p})
 let sums=parallel_map(values (p)=>sum(p.items))
 loop i in [0..values.length) {
     assert(saved[i].items =? [i i+1] and saved[i].name =? words[i%3])
-    assert(values[i].items =? [i+42 i+1] and values[i].name =? words[i%3]+"!")
+    assert(values[i].items =? [i+42 i+1] and values[i].name =? "{words[i%3]}!")
     assert(sums[i] =? 2*i+43)
 }
 assert(words =? ["one" "two" "three"])

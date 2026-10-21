@@ -1,0 +1,8 @@
+label=(name:string count:int64 on:bool):>string=>"{name}#{count}:{on}"
+const LABEL=label("lamp" 3 true)
+$assert LABEL =? "lamp#3:true"
+main=()=>{
+    let grid=[loop a in ["x" "y"] loop b in ["0" "1"] $field("{a}{b}")="{b}{a}"]
+    $runtime_assert LABEL =? label("lamp" 3 true)
+    printl("{grid.x0} {grid.y1} {LABEL}")
+}

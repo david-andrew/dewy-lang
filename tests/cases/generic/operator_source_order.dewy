@@ -1,7 +1,7 @@
 # exit: 42
 Score:type=[value:int64]
 trace=""
-mark=(label:string value:int64)=>{trace+=label return Score[value]}
+mark=(label:string value:int64)=>{trace="{trace}{label}" return Score[value]}
 __lt__=(a:Score b:Score)=>a.value <? b.value
 main=()=>{
 if not (mark("a" 42) >? mark("b" 20)) return 1

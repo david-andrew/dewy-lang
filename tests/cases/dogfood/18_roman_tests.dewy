@@ -7,7 +7,7 @@ to_roman=(n:int64):>string=>{
     let rest=n
     loop [value symbol] in NUMERALS {
         loop rest >=? value {
-            out+=symbol
+            out="{out}{symbol}"
             rest-=value
         }
     }

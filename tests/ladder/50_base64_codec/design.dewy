@@ -13,19 +13,19 @@ encode64=(input:array<uint8>):>string=> {
         if i+2 <? input.length  {
             c=input[i+2] as int64
         }
-        result+=alphabet[a//4]
-        result+=alphabet[(a%4)*16+b//16]
+        result="{result}{alphabet[a//4]}"
+        result="{result}{alphabet[(a%4)*16+b//16]}"
         if i+1 <? input.length  {
-            result+=alphabet[(b%16)*4+c//64]
+            result="{result}{alphabet[(b%16)*4+c//64]}"
         }
         else  {
-            result+="="
+            result="{result}="
         }
         if i+2 <? input.length  {
-            result+=alphabet[c%64]
+            result="{result}{alphabet[c%64]}"
         }
         else  {
-            result+="="
+            result="{result}="
         }
         i+=3
     }

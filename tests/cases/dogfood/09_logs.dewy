@@ -36,7 +36,7 @@ duration_text = (seconds:int64):>string => {
 
 field = (message:string key:string):>string|none => {
     loop word in message.split(" ") {
-        if word.startswith(key + "=") { return word[key.length+1..] }
+        if word.startswith("{key}=") { return word[key.length+1..] }
     }
     return none
 }

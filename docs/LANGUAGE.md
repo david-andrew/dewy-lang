@@ -1415,6 +1415,10 @@ so `let values:array<uint16>=[[]... set[]... 42]` works. Sets contribute their
 members in insertion order, skipping removed members. Arrays also accept sets
 in `.extend(values)`. Spread call arguments are not supported.
 
+`+` never joins arrays: `[xs... ys...]` combines them, `xs.extend(ys)` appends
+in place and `xs.push(y)` adds one element. On arrays `+` is reserved for
+elementwise math; the dotted `.+` adds element by element today.
+
 `out.extend(source[lo..hi))` appends a contiguous slice directly from the
 captured source, avoiding a temporary slice allocation when the source and
 destination have different roots. Bounds are checked before evaluating the
@@ -2475,8 +2479,9 @@ inferred independently. Constant arrays can also supply these iterations:
 `[loop name in ["x" "y"] $field(name) = 0]`. Nested record loops are supported;
 conditional record shapes and general generated declarations are not. Field
 descriptors themselves cannot escape into runtime storage. Compile-time string
-operations include concatenation, slicing and ordinary checked string-library
-calls; interpolation and indirect/capturing calls remain unsupported.
+operations include interpolation of text, machine integers and booleans
+(`$field("{row}{col}")`), slicing and ordinary checked string-library calls;
+indirect/capturing calls remain unsupported.
 
 `$lend(bytes) expression` lends a named `array<uint8>` read-only;
 `$lend(@bytes reserve=n) expression` lends it writable and reserves **n additional
@@ -2577,7 +2582,11 @@ the matching strategy without exponential backtracking; the precise performance
 depends on the pattern, input and whether preparation is included.
 
 Interpolation uses `{expression}` inside a string.
-Single or double quotes support escapes and interpolation. Unicode escapes use
+Single or double quotes support escapes and interpolation.
+`+` never joins text: two strings combine by interpolation, `"{left}{right}"`,
+and many pieces collect in an `array<string>` and `join` (`pieces.join` or
+`pieces.join(", ")`). `s = "{s}more"` on a local string appends in place, so
+building text in a loop stays linear; `s += x` is an error. Unicode escapes use
 four hexadecimal digits (`"\u00E9"`) or one to six inside braces
 (`"\u{1F642}"`); both name Unicode scalar values. Surrogates and values above
 `10FFFF` are errors. Braced escapes currently accept hex literals, not expressions.

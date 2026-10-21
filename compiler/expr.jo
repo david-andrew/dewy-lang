@@ -6015,6 +6015,29 @@ binary_literal_context = (n: int, t0: int, op: Tok) -> bool:
         return types[t].kind == .array or types[t].kind == .fixed
     false
 
+# Dewy's `+` never joins text or containers: interpolation or `join` for text, a spread literal
+# for containers (`+` on arrays is reserved for elementwise math)
+concat_piece = (n: int, text: bool, second: bool = false) -> str:
+    k = nodes[n].kind
+    if text and k == .str_lit and nodes[n].aux == 0 and nkids(n) == 0:
+        s = name_of(int(nodes[n].sval))
+        if find(s, "\"") < 0 and find(s, "\\") < 0 and find(s, "\{") < 0 and find(s, "}") < 0 and find(s, "\n") < 0: return s
+    nm = ""
+    if k == .ident: nm = name_of(int(nodes[n].name))
+    else if k == .field and nodes[int(nodes[n].a)].kind == .ident: nm = name_of(int(nodes[int(nodes[n].a)].name)) + "." + name_of(int(nodes[n].name))
+    else if k == .int_lit: nm = "{nodes[n].ival}"
+    if len(nm) == 0 or nm[0] == '$' or nm[0] == '_': nm = if text and second: "y" else if text: "x" else if second: "ys" else: "xs"
+    if text: "\{{nm}}" else: nm
+
+no_concat_error = (n: int, a: int, b: int, text: bool):
+    if text:
+        fatal(nodes[n].pos, "`+` does not join text: interpolate, `\"{concat_piece(a, true)}{concat_piece(b, true, true)}\"`, or join many pieces, `pieces.join`")
+    ka = tkind(ntype(a))
+    kb = tkind(ntype(b))
+    if not ((ka == .array or ka == .fixed) and (kb == .array or kb == .fixed)):
+        fatal(nodes[n].pos, "`+` is reserved for elementwise math on arrays, not yet defined: `.+` adds element by element (`xs .+ 1`), and a spread literal joins arrays, `[xs... ys...]`")
+    fatal(nodes[n].pos, "`+` does not join arrays (on arrays it is reserved for elementwise math): spread them into one, `[{concat_piece(a, false)}... {concat_piece(b, false, true)}...]`; `.+` adds element by element")
+
 check_binary = (n: int, expected: int) -> int:
     op = nodes[n].op as Tok
     if op == .dotop: return check_dotted(n, expected)
@@ -6262,6 +6285,8 @@ check_binary = (n: int, expected: int) -> int:
         return ta
     tka = types[ta].kind
     tkb = types[tb].kind
+    if op == .plus and dewy_at(nodes[n].pos) and (tka == .str_ or tkb == .str_ or tka == .array or tka == .fixed or tkb == .array or tkb == .fixed):
+        no_concat_error(n, a, b, tka == .str_ or tkb == .str_)
     if op == .plus and tka == .str_:
         if is_numeric(tb) or tkb == .bool_: fatal(nodes[b].pos, "cannot add this {dt(tb)} to text: put the value inside the string (\"...\{x}\") or convert it ({jd(nodes[b].pos, "str(x)", "string(x)")})")
         coerce(b, T_STR)

@@ -59,7 +59,7 @@ Bank:type = [
     }
 ]
 
-money = (x:rational):>string => "$" + format(x.to_float64() ",.2f")
+money = (x:rational):>string => "${format(x.to_float64() ",.2f")}"
 
 describe = (e:error):>string => match e {
     x:InsufficientFunds => "{x.account} needs {money(x.needed)} but has {money(x.available)}"
