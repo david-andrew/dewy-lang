@@ -31,8 +31,8 @@ only.
 
 - Astra: paused (quota). The Sol parallel review found 2 diagnostic-order bugs,
   both fixed (9109989b), with guards extended.
-- Opus: fact gaps (counter equality, `??`/`match` facts, spurious `__keys`
-  warning). Combined-loop facts landed (122cb41d).
+- Opus: design coverage, round 2. The 10-21 audit: 613 features, 401 work, 47
+  broken, 134 missing; round 1 fixed ~25.
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
 
@@ -168,6 +168,17 @@ only.
     `extern`/C-binding form, tuple types, a byte-character literal. Also: the
     design splats `import p"x"` without `as`, but the compiler and tests treat
     it as a namespace import. Which is right?
+25. Current behavior vs the archived reference (design coverage audit,
+    ~/dev/tmp/coord/design-coverage-2026-10-21.md). Which wins?
+    - `+` joins strings/arrays (the reference: never concatenates);
+    - `let x:T` with no value reads as zero (the reference: must be initialized);
+    - a bound `[1 2]` is `array<int>`, rejected where `array<int64>` is expected;
+    - mutating a container inside its own loop;
+    - an explicit `main()` call suppresses the automatic one;
+    - `d.keys` returns an array, not a set;
+    - unknown escapes like `\N` are errors;
+    - user functions join prelude overloads rather than shadowing them;
+    - `and=` on bools always evaluates its right side.
 15. Provisional file helpers: `copy_file`, `rename_file`, `make_dirs`,
     `walk_dir`, `glob`, `file_size`, `file_time`, `chmod`, `env`. Keep, rename
     or drop?
