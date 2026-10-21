@@ -20,7 +20,7 @@ def build_web(compiler, source, output, release):
     return output.with_suffix('.html')
 
 
-@pytest.mark.parametrize('program', ['97_notes_service'])
+@pytest.mark.parametrize('program', ['97_notes_service', '99_dewy_frontend'])
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_flagship_runs_on_wasm(compiler, tmp_path, program, release):
     node = shutil.which('node')

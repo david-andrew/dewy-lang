@@ -881,6 +881,615 @@ def notes_listen():
     return '\n'.join(out)
 
 
+
+# 99 Dewy frontend ------------------------------------------------------------------------------
+# Dewy's lexical rules and operator table (docs/LANGUAGE.md, docs/design/precedence.md and the
+# compiler's dn_power table), modelled directly over bytes.
+
+PUNCT = sorted(['(', ')', '[', ']', '{', '}', '<', '>', ':', '.', ',', ';', '=', '+', '-', '*', '/', '%', '@', '&',
+                '|', '^', '?', '!', '~', '>=?', '<=?', '//=', '<<=', '>>=', '...', '=>', ':>', '->', '=?', '>?',
+                '<?', '+=', '-=', '*=', '/=', '^=', '%=', '??', '//', '<<', '>>', '..', '|>', '<|',
+                '.not>=?', '.not<=?', '.not=?', '.not>?', '.not<?', '.>=?', '.<=?', './/=', '.+=', '.-=', '.*=',
+                './=', '.%=', '.^=', './/', '.=?', '.>?', '.<?', '.+', '.-', '.*', './', '.%', '.^', '&=', '|='],
+               key=len, reverse=True)
+WORDS = {'let', 'const', 'return', 'break', 'continue', 'import', 'from', 'else', 'if', 'loop', 'match', 'test',
+         'not', 'as', 'transmute', 'or', 'xor', 'and', 'in', 'of', 'or_throw', 'nand', 'nor', 'xnor'}
+INVERT = {'=?': 'not=?', '<?': 'not<?', '>?': 'not>?', '<=?': 'not<=?', '>=?': 'not>=?', 'in?': 'notin?'}
+ASSIGN = {'+=', '-=', '*=', '/=', '//=', '%=', '^=', '<<=', '>>=', '.+=', '.-=', '.*=', './=', './/=', '.%=', '.^=',
+          '&=', '|=', 'and=', 'or=', 'xor=', '='}
+POWER = {'->': 20, '<|': 24, '|>': 25, '=>': 30, ':>': 40, ':': 45, 'or_throw': 48, 'as': 50, 'transmute': 50,
+         'or': 60, 'nor': 60, 'xor': 65, 'xnor': 65, 'and': 70, 'nand': 70, '??': 82, '|': 85, '&': 90, 'in': 95,
+         '..': 100, ',': 105, '<<': 110, '>>': 110, '+': 120, '-': 120, '.+': 120, '.-': 120, '*': 130, '/': 130,
+         '//': 130, '%': 130, '.*': 130, './': 130, './/': 130, '.%': 130, '^': 140, '.^': 140}
+for _c in ['=?', '<?', '>?', '<=?', '>=?']:
+    for _form in (_c, 'not' + _c, '.' + _c, '.not' + _c):
+        POWER[_form] = 80
+POWER.update({'is?': 80, 'isnt?': 80, 'in?': 80, 'notin?': 80}, **{a: 10 for a in ASSIGN})
+
+
+class FrontError(Exception):
+    def __init__(self, stage, offset, message):
+        self.stage, self.offset, self.message = stage, offset, message
+
+
+def ident_start(c):
+    return chr(c).isascii() and (chr(c).isalpha() or c == 95) or c >= 128
+
+
+def ident_part(c):
+    return ident_start(c) or 48 <= c <= 57
+
+
+def block_end(src, i, stop):
+    i, depth = i + 2, 1
+    while i + 1 < stop:
+        if src[i:i + 2] == b'#{':
+            depth, i = depth + 1, i + 2
+        elif src[i:i + 2] == b'}#':
+            depth, i = depth - 1, i + 2
+            if depth == 0:
+                return i
+        else:
+            i += 1
+    return -1
+
+
+def quote_end(src, start, stop, nesting=0, raw=False):
+    if nesting >= 256:
+        raise FrontError('lex', start, 'string interpolation is nested too deeply')
+    q = src[start]
+    width = 3 if start + 2 < stop and src[start + 1] == q and src[start + 2] == q else 1
+    i = start + width
+    while i < stop:
+        c = src[i]
+        if not raw and c == 92:
+            i += 2
+            continue
+        if c == q:
+            if width == 1:
+                return i + 1
+            if i + 2 < stop and src[i + 1] == q and src[i + 2] == q:
+                return i + 3
+        if not raw and c == 123:
+            i = brace_end(src, i + 1, stop, nesting + 1) + 1
+            continue
+        i += 1
+    raise FrontError('lex', start, 'unterminated string')
+
+
+def brace_end(src, start, stop, nesting):
+    i, depth = start, 1
+    while i < stop:
+        c = src[i]
+        if src[i:i + 2] == b'#{':
+            e = block_end(src, i, stop)
+            if e < 0:
+                raise FrontError('lex', i, 'unterminated block comment')
+            i = e
+        elif c == 35:
+            while i < stop and src[i] != 10:
+                i += 1
+        elif c == 114 and i + 1 < stop and src[i + 1] in b'"\'' and (i == start or not ident_part(src[i - 1])):
+            i = quote_end(src, i + 1, stop, nesting, True)
+        elif c in b'"\'':
+            i = quote_end(src, i, stop, nesting)
+        else:
+            if c == 123:
+                depth += 1
+            elif c == 125:
+                depth -= 1
+                if depth == 0:
+                    return i
+            i += 1
+    raise FrontError('lex', start, 'unterminated string interpolation')
+
+
+def tokenize(src, begin=0, stop=None):
+    """Tokens as dicts: kind, sym (punctuation/keyword spelling or None), start, stop, space, newline."""
+    stop = len(src) if stop is None else stop
+    out, i, space, newline = [], begin, False, False
+    while i < stop:
+        c = src[i]
+        if c in b' \t\r\n':
+            space = True
+            while i < stop and src[i] in b' \t\r\n':
+                newline = newline or src[i] == 10
+                i += 1
+            continue
+        if src[i:i + 2] == b'#{':
+            e = block_end(src, i, stop)
+            if e < 0:
+                raise FrontError('lex', i, 'unterminated block comment: `#{` needs a matching `}#` (block comments nest)')
+            newline = newline or 10 in src[i:e]
+            space, i = True, e
+            continue
+        if c == 35:
+            while i < stop and src[i] != 10:
+                i += 1
+            space = True
+            continue
+        start, kind, sym = i, 'op', None
+        if c == 114 and i + 1 < stop and src[i + 1] in b'"\'':
+            i, kind = quote_end(src, i + 1, stop, 0, True), 'rawquoted'
+        elif ident_start(c):
+            while i < stop and ident_part(src[i]):
+                i += 1
+            kind, word = 'identifier', src[start:i].decode()
+            if word in ('true', 'false'):
+                kind = 'boolean'
+            if word in ('is', 'isnt', 'in', 'notin') and i < stop and src[i] == 63:
+                word, i, kind = word + '?', i + 1, 'op'
+            if kind != 'boolean' and (word in WORDS or kind == 'op'):
+                sym = word
+            if sym in ('and', 'or', 'xor') and i < stop and src[i] == 61 and src[i + 1:i + 2] not in (b'?', b'>', b'='):
+                sym, kind, i = sym + '=', 'op', i + 1
+        elif c == 36:
+            i += 1
+            while i < stop and (chr(src[i]).isascii() and (chr(src[i]).isalnum() or src[i] == 95)):
+                i += 1
+            if i == start + 1:
+                raise FrontError('lex', start, 'expected a name after $')
+            kind = 'metatag'
+        elif 48 <= c <= 57:
+            decimal, digits = True, start
+            if c == 48 and i + 1 < stop and src[i + 1] in b'btqsodzxug':
+                decimal, i = src[i + 1] == 100, i + 2
+                digits = i
+            if i < stop and src[i] in b'"\'':
+                i, kind = quote_end(src, i, stop), 'based_string'
+            else:
+                ok = (lambda b: 48 <= b <= 57 or b == 95) if decimal else (lambda b: chr(b).isascii() and (chr(b).isalnum() or b == 95))
+                while i < stop and ok(src[i]):
+                    i += 1
+                if i == digits:
+                    raise FrontError('lex', start, 'expected digits after the base prefix')
+                kind = 'source_integer' if decimal else 'integer'
+                digit = lambda b: 48 <= b <= 57
+                if decimal and i + 1 < stop and src[i] == 46 and digit(src[i + 1]):
+                    i += 1
+                    while i < stop and (digit(src[i]) or src[i] == 95):
+                        i += 1
+                    kind = 'source_real'
+                if decimal and i + 1 < stop and src[i] in b'eE' and (digit(src[i + 1]) or src[i + 1] in b'+-'):
+                    i += 1
+                    if i < stop and src[i] in b'+-':
+                        i += 1
+                    first = i
+                    while i < stop and (digit(src[i]) or src[i] == 95):
+                        i += 1
+                    if i == first:
+                        raise FrontError('lex', start, 'expected exponent digits')
+                    kind = 'source_real'
+        elif c in b'"\'':
+            i, kind = quote_end(src, i, stop), 'quoted'
+        else:
+            for text in PUNCT:
+                raw = text.encode()
+                if src[i:i + len(raw)] == raw and not (text == '>>=' and src[i + 3:i + 4] == b'>'):
+                    sym = text
+                    break
+            if sym is None:
+                raise FrontError('lex', start, 'unexpected character in Dewy source')
+            i += len(sym.encode())
+        out.append(dict(kind=kind, sym=sym, start=start, stop=i, space=space, newline=newline))
+        space = newline = False
+    out.append(dict(kind='eof', sym=None, start=stop, stop=stop, space=space, newline=newline))
+    return out
+
+
+ESCAPES = {'n': 10, 'r': 13, 't': 9, '0': 0, 'a': 7, 'b': 8, 'v': 11, 'f': 12, '\\': 92, '"': 34, "'": 39,
+           '{': 123, '}': 125}
+
+
+class Front:
+    """A Pratt parser over the token list; trees are nested lists and strings."""
+
+    def __init__(self, src, tokens):
+        self.src, self.toks, self.at, self.angles, self.comma_stop, self.inside = src, tokens, 0, 0, False, 0
+
+    def fail(self, offset, message):
+        if self.inside:
+            message += ', inside a string interpolation'
+        raise FrontError('parse', offset, message)
+
+    def tok(self, k=0):
+        return self.toks[self.at + k]
+
+    def text(self, t):
+        return self.src[t['start']:t['stop']].decode()
+
+    def can_start(self):
+        t = self.tok()
+        return t['kind'] != 'eof' and t['sym'] not in (')', ']', '}', '>', '>>', 'else', ';', ',')
+
+    def range_bound(self):
+        s = self.tok()['sym']
+        return self.can_start() and s not in ('{', 'let', 'const', 'return', 'break', 'continue', 'if', 'loop',
+                                              'match') and (POWER.get(s, 0) == 0 or s in ('+', '-'))
+
+    def expect(self, sym):
+        if self.tok()['sym'] != sym:
+            self.fail(self.tok()['start'], f"expected '{sym}'")
+        self.at += 1
+
+    def string(self, t):
+        src, raw = self.src, t['kind'] == 'rawquoted'
+        opening = t['start'] + 1 if raw else t['start']
+        q = src[opening]
+        width = 3 if opening + 2 < t['stop'] and src[opening + 1] == q and src[opening + 2] == q else 1
+        i, stop = opening + width, t['stop'] - width
+        if raw:
+            return ('str', src[i:stop].decode())
+        parts, data, interpolated = [], bytearray(), False
+        while i < stop:
+            c = src[i]
+            if c == 92:
+                i += 1
+                if i >= stop:
+                    self.fail(i, 'incomplete string escape')
+                e = chr(src[i])
+                if e == '\n':
+                    i += 1
+                elif e in 'uU':
+                    at, i = i, i + 1
+                    braced = i < stop and src[i] == 123
+                    i += braced
+                    first = i
+                    while i < stop and not (braced and src[i] == 125) and not (not braced and i - first == 4):
+                        if chr(src[i]) not in '0123456789abcdefABCDEF':
+                            self.fail(i, 'expected hexadecimal digits in Unicode escape')
+                        if i - first >= 6:
+                            self.fail(at, 'Unicode escape has too many digits')
+                        i += 1
+                    value = int(src[first:i], 16) if i > first else 0
+                    if braced:
+                        if i == first or i >= stop or src[i] != 125:
+                            self.fail(at, "expected 1–6 hex digits and '}' in Unicode escape")
+                        i += 1
+                    elif i - first != 4:
+                        self.fail(at, 'Unicode escape needs four hex digits')
+                    if value > 0x10FFFF or 0xD800 <= value <= 0xDFFF:
+                        self.fail(at, 'Unicode escape must name a scalar value, not a surrogate or out-of-range code point')
+                    data += chr(value).encode()
+                elif e in ESCAPES:
+                    data.append(ESCAPES[e])
+                    i += 1
+                else:
+                    self.fail(i, 'unsupported string escape')
+            elif c == 123:
+                interpolated = True
+                if data:
+                    parts.append(('str', data.decode('utf-8', 'replace')))
+                    data = bytearray()
+                close = brace_end(src, i + 1, stop, 0)
+                saved = (self.toks, self.at, self.angles, self.comma_stop)
+                try:
+                    inner = tokenize(src, i + 1, close)
+                except FrontError as error:
+                    self.fail(error.offset, error.message)
+                self.toks, self.at, self.angles, self.comma_stop = inner, 0, 0, False
+                self.inside += 1
+                value = self.expr(0)
+                if self.tok()['kind'] != 'eof':
+                    self.fail(self.tok()['start'], 'expected one interpolation expression')
+                self.inside -= 1
+                self.toks, self.at, self.angles, self.comma_stop = saved
+                parts.append(value)
+                i = close + 1
+            else:
+                data.append(c)
+                i += 1
+        if not interpolated:
+            return ('str', data.decode('utf-8', 'replace'))
+        if data:
+            parts.append(('str', data.decode('utf-8', 'replace')))
+        return ['interp', *parts]
+
+    def bracketed(self):
+        opening = self.tok()
+        self.at += 1
+        open_ = opening['sym']
+        if open_ == '(':
+            s = self.tok()['sym']
+            partial = s in ('=?', 'not=?', '<?', 'not<?', '>?', 'not>?', '<=?', 'not<=?', '>=?', 'not>=?', 'is?',
+                            'isnt?', 'in?', 'notin?', '.', 'as', 'transmute', '*', '/', '//', '%', '^')
+            if partial or (s == 'not' and self.tok(1)['sym'] in INVERT):
+                body = self.rest('_', 0)
+                self.expect(')')
+                return ['partial', body]
+        if open_ == '<':
+            self.angles += 1
+        close = {'(': ')', '[': ']', '<': '>'}.get(open_, '}')
+        kids, saved = [], self.comma_stop
+        self.comma_stop = False
+        while True:
+            t = self.tok()
+            if t['kind'] == 'eof':
+                self.fail(opening['start'], f"expected '{close}' before end of file")
+            s = t['sym']
+            if close == '>' and (s in ('>>', '>>=') or (s == '>?' and not t['space'])):
+                rest = self.src[t['start'] + 1:t['stop']].decode()
+                self.toks[self.at] = dict(t, sym=rest, start=t['start'] + 1)
+                break
+            if s == close:
+                self.at += 1
+                break
+            if ((open_ == '[' and s == ')') or (open_ == '(' and s == ']')) and len(kids) == 1 \
+                    and isinstance(kids[0], list) and kids[0][0] == '..':
+                close = s
+                self.at += 1
+                break
+            before = self.at
+            kids.append(self.statement())
+            if self.at == before:
+                self.fail(self.tok()['start'], 'expected a block element')
+        self.comma_stop = saved
+        if open_ == '<':
+            self.angles -= 1
+        return [open_ + close, *kids]
+
+    def flow(self):
+        arms = []
+        while True:
+            word = self.tok()['sym']
+            self.at += 1
+            condition = self.expr(0)
+            if not self.can_start():
+                nxt = self.tok()['sym']
+                hint = ' (comparisons end with `?`: `x >? y`, `x <=? y`)' if nxt in ('>', '<', '>=?', '<=?') else ''
+                self.fail(self.tok()['start'], f"expected a body after '{word}'{hint}")
+            arms.append([word, condition, self.expr(0)])
+            if self.tok()['sym'] != 'else':
+                break
+            self.at += 1
+            if self.tok()['sym'] in ('if', 'match'):
+                continue
+            arms.append(self.expr(0))
+            break
+        return ['flow', *arms]
+
+    def directive(self, t, form):
+        self.at += 1
+        name, nxt = self.text(t), self.tok()
+        if form == 3 or nxt['newline'] or not self.can_start():
+            if form == 1:
+                self.fail(t['start'], f'`{name}` needs a condition: `{name} condition` or `{name} condition, "message"`')
+            return [name, None, None]
+        saved, self.comma_stop = self.comma_stop, True
+        condition = message = None
+        if form == 1:
+            listed = nxt['sym'] == '(' and not nxt['space']
+            self.at += listed
+            condition = self.expr(0)
+            if self.tok()['sym'] == ',':
+                self.at += 1
+                message = self.expr(0)
+            if listed:
+                self.expect(')')
+        else:
+            message = self.expr(0)
+        self.comma_stop = saved
+        return [name, condition, message]
+
+    def atom(self):
+        t = self.tok()
+        s = t['sym']
+        if t['kind'] == 'eof':
+            self.fail(t['start'], 'expected an expression')
+        if t['kind'] == 'metatag':
+            form = {'$assert': 1, '$runtime_assert': 1, '$expect': 1, '$unsafe_assume': 1, '$fail': 2,
+                    '$breakpoint': 3}.get(self.text(t), 0)
+            if form:
+                return self.directive(t, form)
+        if s in ('(', '[', '{', '<'):
+            return self.bracketed()
+        if s in ('if', 'loop', 'match'):
+            return self.flow()
+        if s in ('let', 'const', 'return', 'break', 'continue', 'import', 'from'):
+            return self.statement()
+        self.at += 1
+        if t['kind'] in ('quoted', 'rawquoted'):
+            return self.string(t)
+        if s in ('~', '+', '-', '.+', '.-', '@', 'not'):
+            return [s, self.expr(160 if s == '@' else 75 if s == 'not' else 125)]
+        if s == '..':
+            return ['..', None, self.expr(101)] if self.range_bound() else '..'
+        word = self.text(t)
+        if word == 'type' and self.tok()['sym'] == 'of':
+            self.at += 1
+            return ['type of', self.expr(91)]
+        if t['kind'] == 'op':
+            prev = self.toks[self.at - 2]['sym'] if self.at >= 2 else None
+            adjacent = self.at >= 2 and not self.toks[self.at - 1]['space']
+            hint = ''
+            if word == '!':
+                hint = ' (`not x` negates, and `x not=? y` asks whether two values differ)'
+            elif word == '&' and prev == '&' and adjacent:
+                hint = ' (`and` joins conditions: `a and b`)'
+            elif word == '|' and prev == '|' and adjacent:
+                hint = ' (`or` joins conditions: `a or b`)'
+            elif word == '=' and prev in ('=', '=?') and adjacent:
+                hint = ' (`=?` compares: `x =? y`; `=` gives a value)'
+            elif word in ('>', '<', '>=', '<='):
+                hint = ' (comparisons end with `?`: `x >? y`, `x <=? y`)'
+            elif word == '*' and prev == '*' and adjacent:
+                hint = ' (`^` raises to a power: `x^2`)'
+            self.fail(t['start'], f"expected an expression, found '{word}'{hint}")
+        return ('num' if t['kind'] in ('source_integer', 'integer', 'source_real') else 'leaf', word)
+
+    def expr(self, minimum):
+        return self.rest(self.atom(), minimum)
+
+    def rest(self, left, minimum):
+        while True:
+            t = self.tok()
+            op = t['sym']
+            if t['kind'] == 'eof':
+                break
+            if t['newline'] and POWER.get(op, 0) == 0 and op != 'not':
+                break
+            if self.angles and (op in ('>>', '>>=', '>=') or (op == '>?' and not t['space'])):
+                break
+            if op == 'or_throw' and minimum <= 48 or op == '...' and minimum <= 170:
+                self.at += 1
+                left = [op, left]
+                continue
+            if not t['space'] and minimum <= 135 and isinstance(left, tuple) and left[0] == 'num' \
+                    and (t['kind'] == 'identifier' or op == '('):
+                left = ['mul', left, self.expr(136)]
+                continue
+            if op == '.' and minimum <= 170:
+                self.at += 1
+                if self.tok()['sym'] == '(' and not self.tok()['space']:
+                    left = ['bcall', left, self.bracketed()]
+                    continue
+                member = self.tok()
+                self.at += 1
+                if member['kind'] != 'identifier':
+                    self.fail(member['start'], 'expected a member name')
+                left = ['.', left, ('leaf', self.text(member))]
+                continue
+            if not t['space'] and op in ('(', '[') and minimum <= 170:
+                left = ['call' if op == '(' else 'index', left, self.bracketed()]
+                continue
+            if not t['space'] and t['kind'] in ('quoted', 'rawquoted') and minimum <= 170:
+                self.at += 1
+                left = ['call', left, self.string(t)]
+                continue
+            if not t['space'] and op == '<' and minimum <= 160:
+                left = ['tapp', left, self.bracketed()]
+                continue
+            if op == '?' and minimum <= 140:
+                self.at += 1
+                left = ['?', left]
+                continue
+            spaced_not = op == 'not' and self.tok(1)['sym'] in INVERT
+            if spaced_not:
+                op = INVERT[self.tok(1)['sym']]
+            if op == ',' and self.comma_stop:
+                break
+            strength = POWER.get(op, 0)
+            if strength == 0 or strength < minimum:
+                break
+            if op in ('+', '-') and t['space'] and not self.tok(1)['space']:
+                break
+            self.at += 1 + spaced_not
+            if op == '..':
+                left = ['..', left, self.expr(strength + 1) if self.range_bound() else None]
+                continue
+            right = self.expr(strength if op in ('=>', '^', '.^', '??', '<|') else strength + 1)
+            if op == ',':
+                left = left + [right] if isinstance(left, list) and left[0] == ',' else [',', left, right]
+            elif op in ('nand', 'nor', 'xnor'):
+                left = ['not', [{'nand': 'and', 'nor': 'or', 'xnor': 'xor'}[op], left, right]]
+            else:
+                left = [op, left, right]
+        return left
+
+    def statement(self):
+        t = self.tok()
+        s = t['sym']
+        if s in ('let', 'const', 'return', 'break', 'continue', 'import', 'from'):
+            self.at += 1
+            kids = []
+            if s not in ('break', 'continue'):
+                if s != 'return' or (self.can_start() and not self.tok()['newline']):
+                    kids.append(self.expr(0))
+            elif self.tok()['kind'] == 'metatag' and not self.tok()['newline']:
+                kids.append(self.atom())
+            if s == 'from':
+                self.expect('import')
+                kids.append(self.expr(0))
+            result = [s, *kids]
+        else:
+            result = self.expr(0)
+        if self.tok()['sym'] == ';' and not self.tok()['space']:
+            self.at += 1
+            result = [';', result, None]
+        return result
+
+    def parse(self):
+        roots = []
+        while self.tok()['kind'] != 'eof':
+            before = self.at
+            roots.append(self.statement())
+            if self.at == before:
+                self.fail(self.tok()['start'], 'expected a declaration')
+        return roots
+
+
+def count_nodes(node):
+    if node is None:
+        return 0
+    if isinstance(node, (str, tuple)):
+        return 1
+    return 1 + sum(count_nodes(k) for k in node[1:])
+
+
+def show_string(value):
+    out = ''
+    for ch in value:
+        out += {'"': '\\"', '\\': '\\\\', '\n': '\\n', '\t': '\\t'}.get(ch, ch if ord(ch) >= 32 else f'\\x{ord(ch):02x}')
+    return f'"{out}"'
+
+
+def sexpr(node):
+    if node is None:
+        return '_'
+    if isinstance(node, str):
+        return node
+    if isinstance(node, tuple):
+        return show_string(node[1]) if node[0] == 'str' else node[1]
+    head, kids = node[0], [sexpr(k) for k in node[1:]]
+    return f'({head} {" ".join(kids)})' if kids else f'({head})'
+
+
+TAGS = {'op': '', 'identifier': 'id', 'boolean': 'bool', 'quoted': 'str', 'rawquoted': 'raw', 'based_string': 'based',
+        'metatag': 'meta', 'source_integer': 'int', 'integer': 'radix', 'source_real': 'real'}
+
+
+@oracle('99_dewy_frontend')
+def dewy_frontend():
+    corpus = (ROOT / '99_dewy_frontend' / 'corpus.txt').read_text()
+    entries, out, tokens_seen, nodes_seen, errors = [], [], 0, 0, 0
+    for line in corpus.split('\n'):
+        if line.startswith('### '):
+            entries.append([line[4:], []])
+        elif entries:
+            entries[-1][1].append(line)
+    entries[-1][1] = '\n'.join(entries[-1][1]).rstrip().split('\n')
+    for name, lines in entries:
+        src = '\n'.join(lines).encode()
+        out.append(f'### {name}')
+        try:
+            toks = tokenize(src)
+            words = []
+            for t in toks[:-1]:
+                mark = '^' if t['newline'] else '_' if t['space'] else ''
+                text = src[t['start']:t['stop']].decode()
+                tag = TAGS[t['kind']]
+                label = text if not tag else f'kw:{text}' if t['kind'] == 'identifier' and t['sym'] else f'{tag}:{text}'
+                words.append(mark + label)
+            tokens_seen += len(toks) - 1
+            out.append('  tokens ' + ' '.join(words))
+            front = Front(src, toks)
+            roots = front.parse()
+            nodes_seen += sum(count_nodes(r) for r in roots)
+            out.extend(f'  tree {sexpr(r)}' for r in roots)
+        except FrontError as error:
+            errors += 1
+            start = src.rfind(b'\n', 0, error.offset) + 1
+            stop = src.find(b'\n', error.offset)
+            stop = len(src) if stop < 0 else stop
+            line = src[:error.offset].count(b'\n') + 1
+            column = len(src[start:error.offset].decode('utf-8', 'replace')) + 1
+            out.append(f'  {error.stage} error {line}:{column}: {error.message}')
+            out.append(f'  | {src[start:stop].decode()}')
+            out.append(f'  | {" " * (column - 1)}^')
+    out.append(f'entries {len(entries)}, tokens {tokens_seen}, nodes {nodes_seen}, errors {errors}')
+    return '\n'.join(out)
+
+
 if __name__ == '__main__':
     failed = False
     for name, make in ORACLES.items():

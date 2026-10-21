@@ -381,8 +381,7 @@ atom=(@p:Parser):>int64|ParseError=>{
         return add(@p Node["prefix" s "" t.start [operand]])
     }
     if s =? '..' {
-        let dots=add(@p Node["identifier" "" ".." t.start])
-        if not range_bound(p) return dots
+        if not range_bound(p) return add(@p Node["identifier" "" ".." t.start])
         let bound=expression(@p 101) or_throw
         return add(@p Node["range" ".." "" t.start [ABSENT bound]])
     }

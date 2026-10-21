@@ -1,0 +1,185 @@
+### arithmetic precedence
+  tokens int:1 _+ _int:2 _* _int:3 _- _int:4 _/ _int:5 _// _int:6 _% _int:7
+  tree (- (+ 1 (* 2 3)) (% (// (/ 4 5) 6) 7))
+### power is right-associative and binds above unary minus
+  tokens - int:2 ^ int:3 ^ int:2
+  tree (- (^ 2 (^ 3 2)))
+### literal coefficients
+  tokens int:2 id:x ^ int:2 _+ _int:3 ( id:x _+ _int:1 ) _- _real:0.5 id:y
+  tree (- (+ (mul 2 (^ x 2)) (mul 3 (() (+ x 1)))) (mul 0.5 y))
+### comparison chain and booleans
+  tokens int:0 _<=? _id:i _<? _id:n _kw:and _kw:not _id:done _kw:or _id:x _=? _id:y
+  tree (or (and (<? (<=? 0 i) n) (not done)) (=? x y))
+### spaced not inverts a comparison
+  tokens id:a _kw:not _=? _id:b _kw:and _id:c _kw:not _in? _id:items _kw:and _id:d _notin? _id:rest
+  tree (and (and (not=? a b) (notin? c items)) (notin? d rest))
+### word operators
+  tokens id:a _kw:nand _id:b _kw:xor _id:c _kw:nor _id:d _kw:xnor _id:e
+  tree (not (or (xor (not (and a b)) c) (not (xor d e))))
+### calls, members, indexing and adjacency
+  tokens id:f ( id:x _id:y ) . id:g [ id:i ] . id:h _( id:z )
+  tree (. (index (. (call f (() x y)) g) ([] i)) h)
+  tree (() z)
+### element lists keep unary minus
+  tokens [ int:1 _- int:2 _- _int:3 _id:x _- id:y ]
+  tree ([] 1 (- (- 2) 3) x (- y))
+### ranges and stepped ranges
+  tokens id:xs [ int:1 .. int:3 ) _+ _[ int:0 , int:2 .. int:10 ] _+ _[ .. id:n ] _+ _( int:0 .. int:3 ]
+  tree (+ (+ (+ (index xs ([) (.. 1 3))) ([] (.. (, 0 2) 10))) ([] (.. _ n))) ((] (.. 0 3)))
+### open range in an index
+  tokens id:xs [ id:end - int:2 .. ]
+  tree (index xs ([] (.. (- end 2) _)))
+### coalescing chains to the right
+  tokens id:a _?? _id:b _?? _id:c _+ _int:1
+  tree (?? a (?? b (+ c 1)))
+### pipes
+  tokens int:3 _|> _@ id:square _|> _@ id:inc
+  tree (|> (|> 3 (@ square)) (@ inc))
+### right pipe of a lambda
+  tokens @ id:inc _<| _@ id:square _<| _int:3
+  tree (<| (@ inc) (<| (@ square) 3))
+### lambdas and returns
+  tokens id:add _= _( id:a : id:int64 _id:b : id:int64 = int:2 ) :> id:int64 _=> _id:a _+ _id:b
+  tree (= add (=> (:> (() (: a int64) (= (: b int64) 2)) int64) (+ a b)))
+### one bare parameter
+  tokens id:apply ( id:x _=> _id:x _* _int:2 _int:21 )
+  tree (call apply (() (=> x (* x 2)) 21))
+### partial operators
+  tokens id:xs . id:sorted ( id:key = ( . id:score ) ) _+ _id:map ( ( * _int:2 ) _id:ys ) _+ _id:filter ( ( <? _id:limit ) _id:zs )
+  tree (+ (+ (call (. xs sorted) (() (= key (partial (. _ score))))) (call map (() (partial (* _ 2)) ys))) (call filter (() (partial (<? _ limit)) zs)))
+### inverted partial operator
+  tokens id:keep ( ( kw:not _=? _int:0 ) _id:values )
+  tree (call keep (() (partial (not=? _ 0)) values))
+### records and spreads
+  tokens kw:let _id:tuned : id:Settings _= _[ id:defaults ... _id:speed = int:12 _id:name = str:"fast" ]
+  tree (let (= (: tuned Settings) ([] (... defaults) (= speed 12) (= name "fast"))))
+### type application
+  tokens id:first < id:string > ( id:words ) _+ _id:Box < id:array < id:int64 >> [ [ ] ]
+  tree (+ (call (tapp first (<> string)) (() words)) (index (tapp Box (<> (tapp array (<> int64)))) ([] ([]))))
+### optional and union types
+  tokens kw:let _id:x : id:int64 | id:string ? _= _id:none
+  tree (let (= (: x (| int64 (? string))) none))
+### type of
+  tokens id:Token : id:type _= _id:type _kw:of _id:any _& _[ id:line : id:int64 ]
+  tree (= (: Token type) (& (type of any) ([] (: line int64))))
+### as and or_throw
+  tokens kw:let _id:n _= _id:parse ( id:text ) _kw:or_throw _* _int:2
+  tree (let (= n (* (or_throw (call parse (() text))) 2)))
+### as binds below the union
+  tokens kw:let _id:s _= _id:data _kw:as _id:string _| _id:none
+  tree (let (= s (as data (| string none))))
+### if expression chains
+  tokens kw:let _id:sign _= _kw:if _id:x _>? _int:0 _int:1 _kw:else _kw:if _id:x _<? _int:0 _- int:1 _kw:else _int:0
+  tree (let (= sign (flow (if (>? x 0) 1) (if (<? x 0) (- 1)) 0)))
+### loop with a body block
+  tokens kw:loop _id:i _kw:in _[ int:0 .. int:10 ) _{ _id:total _+= _id:i * id:i ; _}
+  tree (flow (loop (in i ([) (.. 0 10))) ({} (; (+= total (* i i)) _))))
+### match arms
+  tokens kw:let _id:size _= _kw:match _id:found _{ _id:n : id:int64 _=> _id:n _< id:none > _=> _int:0 _}
+  tree (let (= size (flow (match found ({} (=> (: n int64) n) (=> (<> none) 0))))))
+### assignments
+  tokens id:total _+= _int:1 ^id:count _//= _int:2 ^id:flags _and= _id:ready
+  tree (+= total 1)
+  tree (//= count 2)
+  tree (and= flags ready)
+### directives
+  tokens meta:$runtime_assert _id:n _>? _int:0 , _str:"n must be positive" ^meta:$assert ( id:a _<=? _id:b , _str:"ordered" )
+  tree ($runtime_assert (>? n 0) "n must be positive")
+  tree ($assert (<=? a b) "ordered")
+### labels and break
+  tokens meta:$rows ^kw:loop _id:row _kw:in _id:rows _{ _kw:break _meta:$rows _}
+  tree $rows
+  tree (flow (loop (in row rows) ({} (break $rows))))
+### strings and escapes
+  tokens str:"tab\there" _+ _str:'quote \"q\"' _+ _str:"\u00E9\u{1F642}"
+  tree (+ (+ "tab\there" "quote \"q\"") "é🙂")
+### interpolation with nested strings
+  tokens str:"total: {format(sum ".2f")} of {count} {if count >? 1 "items" else "item"}"
+  tree (interp "total: " (call format (() sum ".2f")) " of " count " " (flow (if (>? count 1) "items") "item"))
+### a conditional written the Python way inside an interpolation
+  tokens str:"{"items" if many else "item"}"
+  parse error 1:11: expected one interpolation expression, inside a string interpolation
+  | "{"items" if many else "item"}"
+  |           ^
+### raw and triple-quoted strings
+  tokens raw:r"C:\{path}" _+ _str:"""He said "go".""" _+ _raw:r'''\w+'''
+  tree (+ (+ "C:\\{path}" "He said \"go\".") "\\w+")
+### based numbers and based strings
+  tokens radix:0xFF _+ _radix:0b1010 _+ _radix:0o17 _+ _int:0d99 _+ _int:1_000_000 _+ _based:0x"ff00" _+ _real:6.02e23 _+ _real:1e-3
+  tree (+ (+ (+ (+ (+ (+ (+ 0xFF 0b1010) 0o17) 0d99) 1_000_000) 0x"ff00") 6.02e23) 1e-3)
+### paths and calls with string arguments
+  tokens id:p str:"assets/{name}.png" _+ _id:printl str:"done"
+  tree (+ (call p (interp "assets/" name ".png")) (call printl "done"))
+### comments are whitespace
+  tokens id:a _+ _id:b
+  tree (+ a b)
+### a multi-line comment separates like a line break
+  tokens id:a ^id:b
+  tree a
+  tree b
+### identifiers with Unicode
+  tokens id:café _+ _id:π * id:r ^ int:2 _+ _id:x₁
+  tree (+ (+ café (* π (^ r 2))) x₁)
+### dot operators
+  tokens id:a _.+ _id:b _.* _id:c _.=? _id:d
+  tree (.=? (.+ a (.* b c)) d)
+### references
+  tokens id:bump ( @ id:point . id:x ) _+ _@ id:items [ id:i ] . id:count
+  tree (+ (call bump (() (@ (. point x)))) (@ (. (index items ([] i)) count)))
+### functions as values
+  tokens kw:let _id:g _= _@ id:double
+  tree (let (= g (@ double)))
+### semicolon discards
+  tokens id:f ( ) ;
+  tree (; (call f (())) _)
+### comparison habit
+  tokens kw:if _id:x _> _int:3 _{ _id:y _}
+  parse error 1:6: expected a body after 'if' (comparisons end with `?`: `x >? y`, `x <=? y`)
+  | if x > 3 { y }
+  |      ^
+### bang habit
+  tokens ! id:ready
+  parse error 1:1: expected an expression, found '!' (`not x` negates, and `x not=? y` asks whether two values differ)
+  | !ready
+  | ^
+### unterminated string
+  lex error 1:1: unterminated string
+  | "never closed
+  | ^
+### unterminated interpolation
+  lex error 1:15: unterminated string
+  | "value: {x + 1"
+  |               ^
+### bad escape
+  tokens str:"bad \q escape"
+  parse error 1:7: unsupported string escape
+  | "bad \q escape"
+  |       ^
+### unterminated block comment
+  lex error 1:1: unterminated block comment: `#{` needs a matching `}#` (block comments nest)
+  | #{ open
+  | ^
+### unexpected character
+  lex error 1:3: unexpected character in Dewy source
+  | a ` b
+  |   ^
+### missing body
+  tokens kw:if _id:ready
+  parse error 1:9: expected a body after 'if'
+  | if ready
+  |         ^
+### missing closer
+  tokens [ int:1 _int:2 _int:3
+  parse error 1:1: expected ']' before end of file
+  | [1 2 3
+  | ^
+### base prefix without digits
+  lex error 1:1: expected digits after the base prefix
+  | 0x
+  | ^
+### directive needs a condition
+  tokens meta:$assert
+  parse error 1:1: `$assert` needs a condition: `$assert condition` or `$assert condition, "message"`
+  | $assert
+  | ^
+entries 53, tokens 459, nodes 448, errors 12
