@@ -270,14 +270,13 @@ wit_side = (value: int, node0: int) -> WitSide:
         side.length = true
     side
 
-# `$assert` and the comparison it tests. `paths.no` is the violating state.
-wit_assertion = (cond: int, message: int, paths: FactPaths):
-    refuted = not paths.yes.live
-    s = paths.no
+# The comparison a leaf condition tests: its relation and missing bound, after
+# notes on its operands. `paths.no` is the violating state.
+wit_comparison = (c: int, paths: FactPaths, refuted: bool) -> (str, str):
     relation = ""
     missing = ""
+    s = paths.no
     reason = paths.reason
-    c = cond
     if paths.value > 0 and nodes[c].kind == .binary and fact_comparison(nodes[c].op as Tok):
         term = fact_terms[paths.value]
         if term.op == (nodes[c].op as Tok) and term.origin == c:
@@ -285,6 +284,83 @@ wit_assertion = (cond: int, message: int, paths: FactPaths):
             b = wit_side(term.b, int(nodes[c].b))
             relation = wit_relation_text(term.op, a, b)
             if refuted or reason.reason != .unsupported and reason.reason != .wrap and reason.reason != .budget: missing = wit_relation((if paths.entry.live: paths.entry else: s), s, term.op, a, b, refuted)
+    (relation, missing)
+
+struct WitLeaf:
+    relation: str = ""
+    missing: str = ""
+    reason: FactBound = FactBound()
+    count: int = 0          # operands explained
+    unknown: bool = false   # the one described is unknown, not refuted
+
+# 1 when the wanted edge is the only live one, 0 when it is dead, -1 otherwise.
+wit_status = (p: FactPaths, want: bool) -> int:
+    wanted = if want: p.yes else: p.no
+    other = if want: p.no else: p.yes
+    if not wanted.live: return 0
+    if other.live: return -1
+    1
+
+# Name the operands of an `and`/`or` condition that fail it: when every
+# operand must hold, the first refuted one (else the first unknown); when one
+# suffices, each of them. Each is re-evaluated in the state its evaluation
+# sees, exactly as the obligation was.
+wit_connective = (n: int, entry: FactState, want: bool, refuted: bool, role: str) -> WitLeaf:
+    k = nodes[n].kind
+    if k == .not_: return wit_connective(int(nodes[n].a), entry, not want, refuted, role)
+    if k == .and_ or k == .or_:
+        operand = if k == .and_: "conjunct" else: "alternative"
+        a = fact_condition(int(nodes[n].a), entry)
+        rest = if k == .and_: a.yes else: a.no
+        if (k == .and_) == want:
+            first = wit_status(a, want)
+            if first == 0 or first == -1 and not refuted or not rest.live: return wit_connective(int(nodes[n].a), entry, want, refuted, operand)
+            return wit_connective(int(nodes[n].b), rest, want, refuted, operand)
+        left = wit_connective(int(nodes[n].a), entry, want, refuted, operand)
+        if not rest.live: return left
+        right = wit_connective(int(nodes[n].b), rest, want, refuted, operand)
+        # Establishing any one unknown alternative would suffice.
+        count = left.count + right.count
+        if left.count == 0 or right.unknown and not left.unknown:
+            right.count = count
+            return right
+        left.count = count
+        left
+    p = fact_condition(n, entry)
+    status = wit_status(p, want)
+    leaf = WitLeaf(reason = p.reason)
+    if status == 1 or not entry.live: return leaf
+    leaf.count = 1
+    leaf.unknown = (status == -1)
+    truth = if want: "false" else: "true"
+    if status == 0: wit_note(nodes[n].pos, "this {role} is always {truth}")
+    else if want: wit_note(nodes[n].pos, "this {role} is not proven")
+    else: wit_note(nodes[n].pos, "this {role} is not proven false")
+    if want:
+        found = wit_comparison(n, p, status == 0)
+        leaf.relation = found.0
+        leaf.missing = found.1
+    leaf
+
+# `$assert` and the condition it tests, evaluated from `entry`.
+wit_assertion = (cond: int, message: int, paths: FactPaths, entry: FactState):
+    refuted = not paths.yes.live
+    relation = ""
+    missing = ""
+    reason = paths.reason
+    k = nodes[cond].kind
+    if (k == .and_ or k == .or_ or k == .not_) and entry.live:
+        fact_query = true
+        leaf = wit_connective(cond, entry, true, refuted, "condition")
+        fact_query = false
+        if leaf.count == 1 or not refuted and leaf.unknown:
+            relation = leaf.relation
+            missing = leaf.missing
+            reason = leaf.reason
+    else:
+        found = wit_comparison(cond, paths, refuted)
+        relation = found.0
+        missing = found.1
     if refuted:
         wit_context(0)
         wit_help(relation)
