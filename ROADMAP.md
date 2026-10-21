@@ -26,7 +26,7 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: graph and string_equal runtime.
+- Astra: string_equal default (inline the bounded SIMD compare as release does).
 - Opus: refinement and container follow-ups (small items).
 
 ## Next
@@ -144,5 +144,8 @@ Each tier-3 program's ladder note says which question holds it open.
   no runtime change (under the 3% pilot bar).
 - Local check-traversal fixes beyond the two landed: four pilots each under 1%.
 - Direct null-trap lowering for managed/method params: 14.97 → 15.28 ms.
+- Triangular hash probing for graph: −0.3% instructions, default 7% slower.
+  Graph is memory-bound (slot reads 43%, adjacency fetch/retain 24%); the next
+  idea is contiguous adjacency storage/ownership.
 - Fork-based parallel lowering: 0.88–1.00× latency. Lowering is only about 13%
   of a default build.
