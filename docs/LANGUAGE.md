@@ -722,8 +722,9 @@ for general multiplication. A semicolon discards an expression's result.
 It binds above multiplication, literal coefficients and unary minus, so `2x^2`
 is `2*(x^2)` and `-2^2` is `-(2^2)`. Use `xor` for bitwise exclusive-or.
 Integer powers use a nonnegative `int64` exponent. `int` powers check each
-product; fixed-width powers retain wrapping multiplication; negative exponents panic with guidance
-to use an explicit rational or floating base. Float powers use the inherited
+product; fixed-width powers retain wrapping multiplication. A negative constant
+exponent gives a `rational`, `2^(-2)` is `1/4`; a negative runtime exponent panics
+with guidance to use an explicit rational or floating base. Float powers use the inherited
 floating math library. `BigInt` powers remain exact for nonnegative exponents;
 `rational` supports signed exponents. All these types define zero to the zero
 power as one.
