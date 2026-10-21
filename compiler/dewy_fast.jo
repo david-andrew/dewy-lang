@@ -37,9 +37,15 @@ dn_isnt_id = 0
 dn_in_id = 0
 dn_notin_id = 0
 dn_no_id = 0
+dn_end_id = 0
+dn_type_id = 0
+dn_none_id = 0
 
 dn_init_words = ():
     dn_no_id = intern("no")
+    dn_end_id = intern("end")
+    dn_type_id = intern("type")
+    dn_none_id = intern("none")
     dn_true_id = intern("true")
     dn_false_id = intern("false")
     dn_is_id = intern("is")
@@ -238,10 +244,11 @@ dn_lex_symbol = (source: *u8, at: int, stop: int) -> DewyToken:
     dn_single_token(source[at])
 
 # The hot punctuation path needs only two bounded byte loads and a table
-# lookup. A negative entry delegates longer spellings to the complete scanner.
-# Store width beside the token so scanning does not materialize token text.
+# lookup. A `none` entry delegates longer spellings (and errors) to the
+# complete scanner. Store width beside the token so scanning does not
+# materialize token text.
 dn_classes: u8[]
-dn_symbols: i32[]
+dn_symbols: DewyToken[]
 dn_symbol_widths: int[]
 dn_init_symbols = ():
     dn_classes = fill(u8(0), 256)
@@ -251,7 +258,8 @@ dn_init_symbols = ():
         if is_digit(u8(c)) or is_alpha(u8(c)) or c == '_': bits |= 8
         if c == ' ' or c == '\t' or c == '\r' or c == '\n': bits |= 16
         dn_classes[c] = u8(bits)
-    dn_symbols = fill(i32(0), 128 * 128)
+    dn_symbols = fill(DewyToken.none, 128 * 128)
+    longer = fill(false, 128 * 128)
     dn_symbol_widths = fill(0, int(DewyToken.kw_or_throw) + 1)
     loop i in [1..int(DewyToken.kw_or_throw) + 1):
         text = dn_token_text(DewyToken(i))
@@ -260,13 +268,16 @@ dn_init_symbols = ():
         if width == 0 or dn_ident_start(text[0]): continue
         first = int(text[0]) * 128
         if width == 1:
-            loop next in [0..128): dn_symbols[first + next] = i32(i)
+            token = DewyToken(i)
+            loop next in [0..128): dn_symbols[first + next] = token
     loop i in [1..int(DewyToken.kw_or_throw) + 1):
         text = dn_token_text(DewyToken(i))
         if len(text) < 2 or dn_ident_start(text[0]): continue
         slot = int(text[0]) * 128 + int(text[1])
-        if len(text) > 2: dn_symbols[slot] = -1
-        else if dn_symbols[slot] != -1: dn_symbols[slot] = i32(i)
+        if len(text) > 2:
+            longer[slot] = true
+            dn_symbols[slot] = .none
+        else if not longer[slot]: dn_symbols[slot] = DewyToken(i)
 
 dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLexeme[]:
     if intern_names and dn_word_tokens.len() == 0: dn_init_words()
@@ -281,7 +292,8 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
     symbols = data(dn_symbols)
     widths = data(dn_symbol_widths)
     out: DewyLexeme[]
-    out.resize((stop - begin) / 2 + 1)
+    capacity = (stop - begin) / 2 + 1
+    out.resize(capacity)
     slots = data(out)
     count = 0
     dn_block_comments = []
@@ -318,7 +330,6 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
         kind = DewyKind.op
         symbol = DewyToken.none
         name: i32 = 0
-        value = ""
         if c == 'r' and i + 1 < stop and (bytes[i + 1] == '"' or bytes[i + 1] == '\''):
             i = dn_quote_end(source, i + 1, stop, 0, true)
             kind = .rawquoted
@@ -348,6 +359,7 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
                     value += "?"
                     i += 1
                     kind = .op
+                if kind != .boolean: symbol = dn_token_kind(value)
         else if c == '$':
             i += 1
             loop i < stop and classes[bytes[i]] & 2 != 0: i += 1
@@ -385,15 +397,14 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
         else:
             next: u8 = 0
             if start + 1 < stop: next = bytes[start + 1]
-            code: i32 = -1
-            if c < 128 and next < 128: code = symbols[int(c) * 128 + int(next)]
-            if code < 0: symbol = dn_lex_symbol(bytes, start, stop)
-            else: symbol = DewyToken(code)
-            if symbol == .none: dn_error(start, "unexpected character in Dewy source")
+            if c < 128 and next < 128: symbol = symbols[int(c) * 128 + int(next)]
+            if symbol == .none:
+                symbol = dn_lex_symbol(bytes, start, stop)
+                if symbol == .none: dn_error(start, "unexpected character in Dewy source")
             i += widths[int(symbol)]
-        if not intern_names and symbol == .none and (kind == .op or kind == .identifier): symbol = dn_token_kind(value)
-        if count == out.len():
-            out.resize(out.len() * 2)
+        if count == capacity:
+            capacity *= 2
+            out.resize(capacity)
             slots = data(out)
         slots[count].kind = kind
         slots[count].name = name

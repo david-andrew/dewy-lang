@@ -83,9 +83,9 @@ dc_atom = () -> int:
         nodes[n].a = i32(e)
         return n
     if token.kind == .identifier and (op == .none or op == .kw_test):
-        text = name_of(int(token.name))
-        if text == "end" or text == "type": return 0
-        if text == "none": return mk(.none_lit, pos)
+        name = int(token.name)
+        if name == dn_end_id or name == dn_type_id: return 0
+        if name == dn_none_id: return mk(.none_lit, pos)
         n = mk(.ident, pos)
         nodes[n].name = dw_value_name(token.name, pos)
         return n
@@ -95,9 +95,13 @@ dc_atom = () -> int:
         nodes[n].ival = if int(token.name) == dn_true_id: 1 else: 0
         return n
     if token.kind == .source_integer:
-        text = dn_payload(token)
+        source = files[dn_file].src
+        bytes = source.data()
+        first = token.start
+        if first + 1 < token.stop and bytes[first] == '0' and bytes[first + 1] == 'd': first += 2
         value: u64 = 0
-        loop c in text:
+        loop k in [first..token.stop):
+            c = bytes[k]
             if c == '_': continue
             digit = u64(c - '0')
             if value > (u64(0x7FFFFFFFFFFFFFFF) - digit) / 10: return 0
@@ -107,6 +111,13 @@ dc_atom = () -> int:
         add_flag(n, NF_LITERAL)
         return n
     if token.kind == .source_real:
+        fast = dc_short_real(token)
+        if fast != none:
+            n = mk(.float_lit, pos)
+            nodes[n].fval = fast!
+            nodes[n].sval = i32(intern_sub(files[dn_file].src, token.start, token.stop - token.start))
+            add_flag(n, NF_LITERAL)
+            return n
         number = replace(dn_payload(token), "_", "")
         value = to_float(number)
         if value == none or value! - value! != 0.0: return 0
@@ -116,6 +127,56 @@ dc_atom = () -> int:
         add_flag(n, NF_LITERAL)
         return n
     0
+
+# A plain real literal (no base prefix or separators) whose significant digits
+# and exponent are exact doubles: one correctly rounded operation, as to_float's
+# own fast path computes, without materializing the literal's text.
+dc_short_real = (token: DewyLexeme) -> f64?:
+    source = files[dn_file].src
+    bytes = source.data()
+    k = token.start
+    stop = token.stop
+    if bytes[k] == '0' and k + 1 < stop and bytes[k + 1] == 'd': return none
+    mant: u64 = 0
+    digits = 0
+    zeros = 0
+    exp = 0
+    point = false
+    loop k < stop:
+        c = bytes[k]
+        if c == '.': point = true
+        else if c == 'e' or c == 'E': break
+        else if c < '0' or c > '9': return none
+        else if digits > 0 or c != '0':
+            if digits == 19: return none
+            mant = mant * 10 + u64(c - '0')
+            digits += 1
+            zeros = if c == '0': zeros + 1 else: 0
+            if point: exp -= 1
+        else if point: exp -= 1
+        k += 1
+    if k < stop:
+        k += 1
+        negative = false
+        if bytes[k] == '+' or bytes[k] == '-':
+            negative = bytes[k] == '-'
+            k += 1
+        e = 0
+        loop k < stop:
+            c = bytes[k]
+            if c < '0' or c > '9' or e > 1000: return none
+            e = e * 10 + int(c - '0')
+            k += 1
+        exp += if negative: -e else: e
+    if digits == 0: return 0.0
+    loop zeros > 0:
+        mant = mant / 10
+        digits -= 1
+        zeros -= 1
+        exp += 1
+    if digits > 15 or exp < -22 or exp > 22: return none
+    if exp >= 0: return f64(mant) * __pow10(exp)
+    f64(mant) / __pow10(-exp)
 
 dc_expr = (minimum: int) -> int:
     dc_depth += 1
