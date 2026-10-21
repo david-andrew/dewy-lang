@@ -1551,7 +1551,9 @@ inspect the set.
 
 `a | b`, `a & b`, `a-b` and `a xor b` compute union, intersection, difference and
 symmetric difference. Results keep surviving members from the left in order,
-then any new members from the right. Equality and hashing ignore insertion
+then any new members from the right. `s.values` is a fresh array of the members.
+For dictionaries, `d1 | d2` (or `d1 or d2`) keeps every entry of `d1` and adds
+`d2`'s new keys; a shared key keeps its position and takes `d2`'s value. Equality and hashing ignore insertion
 order, so sets can themselves be dictionary keys or set members. Copies remain
 independent, including managed members and iteration snapshots. Counted/zipped
 loops, comprehensions and unpacking use the same members and skip removed ones.

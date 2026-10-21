@@ -16,6 +16,8 @@ __dewy_make_set[T] = (values: T[]) -> Set[T]:
 set[T] = (values: T[]) -> Set[T]: __dewy_make_set(values)
 
 __dewy_set_values[T] = (s: Set[T]) -> T[]: s._entries.keys()
+# s.values: the members, a fresh array in first-seen order
+values[T] = (s: Set[T]) -> T[]: s._entries.keys()
 len[T] = (s: Set[T]) -> int: s._entries.len()
 is_empty[T] = (s: Set[T]) -> bool: s._entries.is_empty()
 contains[T] = (s: Set[T], value: T) -> bool: s._entries.has(value)
@@ -95,3 +97,10 @@ __dewy_fmt[T] = (buf: mut u8[], s: Set[T]):
     __dewy_fmt(buf, __dewy_set_values(s))
 
 __dewy_fmt_elem[T] = (buf: mut u8[], s: Set[T]): __dewy_fmt(buf, s)
+
+# d1 | d2 (d1 or d2): every entry of d1, then d2's new keys; a shared key keeps
+# d1's position and takes d2's value.
+(|)[K, V] = (a: Map[K, V], b: Map[K, V]) -> Map[K, V]:
+    result = a
+    loop key, value in b: result[key] = value
+    result
