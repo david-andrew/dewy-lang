@@ -1250,6 +1250,11 @@ argument is not lazy. Copies of the dictionary and inserted values remain
 independent. `values.reserve(count)` reserves capacity for a known entry count
 without adding entries or changing their order; arrays have `reserve` too.
 
+An in-place update such as `values[key] += 1`, `values[key].x = 5` or
+`values[key].push(v)` changes an existing entry; a missing key fails as
+`values[key]` does, and nothing is inserted. Count with
+`if key in? counts counts[key] += 1 else counts[key] = 1`.
+
 `values.pop(key)` removes an entry and returns its value; a missing key fails
 as `values[key]` does. `values.pop(key default=none)` returns the default for a
 missing key instead. `values.remove(key)` returns whether it removed an entry.
@@ -1611,7 +1616,8 @@ SLOPPY_THREADS=2 ./tools/dewy --release examples/parallel_particles.dewy
 `to_json(value)` writes a typed value directly to JSON. `from_json<T>(text)`
 reads it into a type and returns either that value or a `TextError` with a message,
 line and column. Record fields may arrive in any order; missing fields keep their
-declared defaults and unknown fields are skipped:
+declared defaults and unknown fields are skipped. A missing field without a
+default is a `TextError` naming it:
 
 ```dewy
 Settings:type=[player:uint64 volume:float64=0.5 fullscreen:bool=false]

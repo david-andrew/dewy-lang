@@ -1,0 +1,16 @@
+# A field without a default must be in the JSON: a missing one is a TextError
+# naming it (with its path), never an invented zero. Defaults still fill in.
+Inner:type=[a:int64 b:int64=2]
+Settings:type=[id:int64 volume:int64=5 inner:Inner]
+show=(text:string)=>{
+    let loaded=from_json<Settings>(text)
+    if loaded is? TextError printl(loaded.message) else printl("{loaded}")
+}
+main=()=>{
+    show(r'{"id":1,"inner":{"a":3}}')
+    show(r'{"volume":3,"inner":{"a":1}}')
+    show(r'{"id":3,"inner":{"b":1}}')
+    let items=from_json<array<Inner>>(r'[{"a":1},{"b":1}]')
+    if items is? TextError printl(items.message)
+    return 0
+}

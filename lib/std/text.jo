@@ -36,7 +36,7 @@ from_text[T] = (text: str) -> T | TextError:
     x
 
 # a value of type T from JSON: objects for structs (by field name: a field left out keeps its
-# default, one the struct does not have is skipped) and maps, lists for arrays, tuples and
+# default (a Dewy record's field without one must be there), one the struct does not have is skipped) and maps, lists for arrays, tuples and
 # vectors, null for none, an enum's variant by its name in quotes
 from_json[T] = (text: str) -> T | TextError:
     x: T
@@ -94,6 +94,12 @@ struct __TextIn:
 
 __tx_space = (r: mut __TextIn):
     loop r.i < len(r.s) and (r.s[r.i] == ' ' or r.s[r.i] == '\n' or r.s[r.i] == '\t' or r.s[r.i] == '\r'): r.i += 1
+
+# a record's field without a default was not in the text
+__tx_missing = (r: mut __TextIn, name: str):
+    if len(r.err) > 0: return
+    r.i = max(r.i - 1, 0)
+    __tx_fail(r, "missing field '{name}', which has no default")
 
 # a word just read is not what it should be: the mistake is there
 __tx_bad = (r: mut __TextIn, msg: str):

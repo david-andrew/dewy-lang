@@ -721,7 +721,10 @@ map_elem_place = (n: int):
     add_flag(mc, NF_MUT)
     args = [mc, key]
     pv = prune(vt)
-    if types[pv].kind == .struct_ and not is_map_type(pv):
+    # (Dewy: the key must be there, as for reading m[k]; nothing is invented for a missing one)
+    present = files[pos_file(pos)].is_dewy
+    if present: pass
+    else if types[pv].kind == .struct_ and not is_map_type(pv):
         # (a struct with default field values starts with them)
         si = int(types[pv].st)
         check_struct_fields(si)
@@ -733,7 +736,7 @@ map_elem_place = (n: int):
             struct_ctor_zero(d, pv, int(structs[si].decl))
             add_flag(d, NF_CHECKED)
             args.push(d)
-    call = bc_call("__map_entry", args, pos)
+    call = bc_call(if present: "__map_entry_present" else: "__map_entry", args, pos)
     check_expr(call, 0)
     call = last_checked
     f = mk(.field, pos)
@@ -3690,20 +3693,32 @@ read_code = (t: int, rn: str, xn: str, pos: int) -> int[]:
         check_struct_fields(si)
         st.push(rcall("__tx_open", rn, [], pos))
         chain = rcall("__tx_skip", rn, [], pos)
+        # (a Dewy record's field without a default must be in the text: nothing is invented for it)
+        dewy = files[pos_file(nodes[int(structs[si].decl)].pos)].is_dewy
+        required: int[]
         i = int(structs[si].nfields) - 1
         loop i >= 0:
             f = fields[int(structs[si].fields) + i]
+            fi = i
             i -= 1
             fk = tkind(int(f.type))
             if fk == .fn_ or fk == .cfn or fk == .ptr: continue        # (left as they are)
             fname = name_of(int(f.name))
             rd = rcall("__read", rn, [bc_field(bc_ident(xn, pos), fname, pos)], pos)
             # (the field's name kept while it is read: errors say where they are)
-            chain = bc_if(bc_call("__tx_name_is", [bc_ident(rn, pos), bc_str(fname, pos)], pos), [rd, rcall("__tx_at", rn, [bc_str(fname, pos)], pos)], [chain], pos)
+            body = [rd, rcall("__tx_at", rn, [bc_str(fname, pos)], pos)]
+            if dewy and int(f.defval) == 0:
+                required.insert(0, fi)
+                body.push(bc_assign(bc_ident("__seen{fi}", pos), bc_bool(true, pos), pos))
+            chain = bc_if(bc_call("__tx_name_is", [bc_ident(rn, pos), bc_str(fname, pos)], pos), body, [chain], pos)
+        loop fi in required: st.push(bc_let("__seen{fi}", bc_bool(false, pos), pos))
         w = mk(.while_, pos)
         nodes[w].a = i32(bc_call("__tx_field", [bc_ident(rn, pos)], pos))
         nodes[w].b = i32(bc_block([chain], pos))
         st.push(w)
+        loop fi in required:
+            fname = name_of(int(fields[int(structs[si].fields) + fi].name))
+            st.push(bc_if(bc_ident("__seen{fi}", pos), [], [rcall("__tx_missing", rn, [bc_str(fname, pos)], pos)], pos))
     else if k == .tuple:
         st.push(rcall("__tx_want", rn, [bc_int('(', pos)], pos))
         loop i in [0..int(types[t].nargs)):
@@ -7966,6 +7981,11 @@ part_spec = (n: int) -> int:
 bc_ident = (name: str, pos: int) -> int:
     n = mk(.ident, pos)
     nodes[n].name = i32(intern(name))
+    n
+
+bc_bool = (v: bool, pos: int) -> int:
+    n = mk(.bool_lit, pos)
+    if v: nodes[n].ival = 1
     n
 
 bc_int = (v: int, pos: int) -> int:

@@ -1,0 +1,11 @@
+# exit: 101
+# The counting idiom guards the key; an unguarded update of a missing key fails.
+main=()=>{
+    let counts:dict<string int64>=[]
+    loop word in ["a" "b" "a"] {
+        if word in? counts counts[word]+=1 else counts[word]=1
+    }
+    printl("{counts}")
+    counts["c"]+=1
+    return 0
+}
