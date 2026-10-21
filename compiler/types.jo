@@ -7,6 +7,7 @@ use 'ast.jo'
 use 'check.jo'
 use 'expr.jo'
 use 'units.jo'
+use 'errors.jo'
 use 'refine.jo'
 use 'effects.jo'
 
@@ -899,7 +900,16 @@ type_str_in = (t0: int, dewy: bool) -> str:
                 return "[" + join(parts, " ") + "]"
             if dewy and structs[si].union_:
                 parts: str[]
-                loop i in [0..int(structs[si].ntargs)): parts.push(type_str_postfix(struct_targ(si, i), true))
+                ms: int[]
+                loop i in [0..int(structs[si].ntargs)): ms.push(prune(struct_targ(si, i)))
+                # (`error` stands for its whole family: its members are not listed again)
+                loop m in ms:
+                    covered = false
+                    up = nominal_parent.get(m, 0)
+                    loop up != 0 and not covered:
+                        if ms.contains(up): covered = true
+                        up = nominal_parent.get(up, 0)
+                    if not covered: parts.push(type_str_postfix(m, true))
                 return join(parts, " | ")
             if structs[si].union_ or structs[si].soa_: return nm
             # (the bundled exact fraction is the builtin `rational`)
