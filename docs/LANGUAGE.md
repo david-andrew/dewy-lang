@@ -1945,7 +1945,14 @@ root of a family of its own, which is not an error: `Token:type=type of any &
 a `Token` parameter and keeps its identity there, for `is?` and `match`; a
 same-shaped type minted separately is a different type. These declarations are
 currently module-level and nongeneric; other nominal parents (`type of int64`)
-and general intersections are not yet supported.
+are not yet supported.
+
+`Name:type = A & B` intersects record types without minting: `Name` has the
+fields of both (and of any `& [fields...]`), a field on both sides takes the
+intersection of its types (`int64 | bool` and `bool` give `bool`; `string` and
+`int64` make the declaration an error), and a later default replaces an earlier
+one. A `Name` value passes where an `A` or a `B` is wanted, as those fields.
+Intersections are module-level declarations of plain (not minted) records.
 
 ```dewy
 Missing:type=type of error

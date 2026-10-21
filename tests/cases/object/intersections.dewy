@@ -1,0 +1,24 @@
+# A & B: a record with the fields of both; it passes where either is wanted
+Located:type = [line:int64 column:int64]
+Labeled:type = [label:string]
+LabeledLocation:type = Located & Labeled
+let p:LabeledLocation = [line=1 column=2 label="x"]
+printl(p)
+show = (l:Located):>string => "{l.line}:{l.column}"
+printl(show(p))
+name = (l:Labeled):>string => l.label
+printl(name(p))
+Defaulted:type = Located & [column:int64 = 0 extra:bool = false]
+let w:Defaulted = [line=3]
+printl(w)
+printl(show(w))
+T1:type = [a:int64|bool c:bool|none]
+T2:type = [a:bool]
+Both:type = T1 & T2
+let x:Both = [a=true c=none]
+printl(x)
+f = (t:T1):>string => "{t.a}"
+printl(f(x))
+Same:type = T2 & T2
+let y:Same = [a=false]
+printl(y)

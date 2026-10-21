@@ -366,6 +366,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
         if fs != 0 and tk == .str_ and n != 0: return true
     if fk == .refined or tk == .refined: return can_coerce(n, representation_type(from), representation_type(to))
     if refine_active and fk == .struct_ and tk == .struct_ and ref_record_conversion(from, to): return true
+    if fk == .struct_ and tk == .struct_ and intersection_parts.len() > 0 and intersection_within(from, to): return true
     if fk == .quantity or tk == .quantity:
         if fk == .var or tk == .var: return true
         if fk == .quantity and tk == .quantity:
@@ -436,6 +437,13 @@ str_set_within = (a: int, b: int) -> bool:
     loop value in str_sets[a]:
         if not str_sets[b].contains(value): return false
     true
+
+# is record `to` an operand of intersection `from` (or of one of its operands)?
+intersection_within = (from: int, to: int) -> bool:
+    if not structs[int(types[from].st)].resolved: check_struct_fields(int(types[from].st))
+    loop part in intersection_parts.get(from) ?? []:
+        if part == to or intersection_within(part, to): return true
+    false
 
 # a function of the program's own (not the prelude's) by this name
 program_fn_named = (name: int) -> bool:
@@ -600,6 +608,8 @@ coerce = (n: int, target: int) -> int:
         return n
     fk = types[from].kind
     if refine_active and fk == .struct_ and tk == .struct_ and ref_record_conversion(from, to): return ref_convert_record(n, to)
+    # (an intersection's value where one of its operand records is wanted: those fields)
+    if fk == .struct_ and tk == .struct_ and intersection_parts.len() > 0 and intersection_within(from, to): return ref_convert_record(n, to)
     if fk == .array and is_soa(to) and can_coerce(0, int(types[from].elem), soa_elem(to)):
         soa_from_array(n, to)
         return n

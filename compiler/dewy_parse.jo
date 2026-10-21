@@ -2084,6 +2084,8 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         dw_type_methods(n, rows, methods)
         return n
     inferred_refinement = initial != 0 and dw_op(initial) == .amp and dw_op(dw_grouped(dw_child(initial, 2))) == .tilde
+    if not inferred_refinement and annotation != 0 and dw_name(annotation) == "type" and initial != 0 and dw_op(dw_grouped(initial)) == .amp:
+        return dw_intersection(id, name, initial, top)
     if annotation == 0 and initial != 0 and dw_op(initial) == .type_apply:
         loop entry in dw_children(dw_child(initial, 2)):
             op = dw_op(dw_grouped(entry))
@@ -2131,6 +2133,41 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         if dw_const_number(value) or nodes[value].kind == .str_lit or nodes[value].kind == .none_lit: nodes[n].kind = .const_
         else: add_flag(n, NF_RDONLY)
     return n
+
+# `Name:type = A & B & [f:T]`: a record with the fields of each operand, merged
+# by name when the record is resolved (check_struct_fields); no nominal identity
+dw_intersection = (id: int, name: str, initial: int, top: bool) -> int:
+    if not top: return dw_fail(id, "a local intersection type; declare it at module level")
+    leaves: int[]
+    dw_amp_leaves(initial, leaves)
+    n = mk(.struct_, dewy_syntax[id].pos)
+    nodes[n].name = i32(intern(name))
+    components: int[]
+    fields: int[]
+    methods: int[]
+    rows: int[]
+    loop leaf in leaves:
+        if dewy_syntax[leaf].text == "[]:":
+            outer_siblings = dw_siblings
+            dw_siblings = {}
+            loop field in dw_children(leaf):
+                if ownership_tag(field) != 0: continue
+                rows.push(field)
+                if dw_method_row(field): methods.push(field)
+                else: fields.push(dw_param(field, .vardecl))
+            dw_siblings = outer_siblings
+        else: components.push(dw_type(leaf))
+    set_list(n, fields)
+    dw_type_methods(n, rows, methods)
+    struct_components[n] = components
+    n
+
+dw_amp_leaves = (id0: int, out: mut int[]):
+    id = dw_grouped(dw_unwrap(id0))
+    if dw_op(id) == .amp:
+        dw_amp_leaves(dw_child(id, 1), out)
+        dw_amp_leaves(dw_child(id, 2), out)
+    else: out.push(id)
 
 # The names a declaration's unpacking pattern binds.
 dw_bound_names = (bindings: int[]) -> int[]:

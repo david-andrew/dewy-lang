@@ -1369,6 +1369,55 @@ push_type_params = (decl: int, targs: int[]):
         if i < targs.len() and (nodes[kid2(decl, i)].aux == 1) != (tkind(targs[i]) == .effect): fatal(nodes[kid2(decl, i)].pos, "generic argument kind mismatch: expected Effect or value type")
         if i < targs.len(): push_scope_sym(int(nodes[kid2(decl, i)].name), new_sym(int(nodes[kid2(decl, i)].name), .type_, targs[i], 0))
 
+# Intersection records (`A & B & [f:T]`, dewy_parse's dw_intersection): their
+# declaration's operand types, and each record type's operand records, which a
+# value of it becomes field by field.
+struct_components: {int: int[]} = {}
+intersection_parts: {int: int[]} = {}
+
+# the fields of an intersection's operands, merged by name: a field on one side
+# is kept, one on both takes the intersection of its types (never: an error)
+intersection_fields = (si: int, d: int, own: int[]) -> Field[]:
+    out: Field[]
+    parts: int[]
+    loop c in struct_components.get(d) ?? []:
+        t = prune(resolve_type(c))
+        if types[t].kind != .struct_ or is_map_type(t): fatal(nodes[c].pos, "an intersection of records needs record types, found {dt(t)}")
+        if nominal_parent.has(t): fatal(nodes[c].pos, "an intersection with a minted type is not supported yet (`type of` makes one)")
+        parts.push(t)
+        csi = int(types[t].st)
+        check_struct_fields(csi)
+        loop i in [0..int(structs[csi].nfields)): intersection_merge(out, fields[int(structs[csi].fields) + i], nodes[d].pos)
+    intersection_parts[int(structs[si].type)] = parts
+    out
+
+intersection_merge = (out: mut Field[], field: Field, pos: int):
+    loop i in 0.. and f in out:
+        if f.name != field.name: continue
+        t = intersect_types(int(f.type), int(field.type))
+        if t == 0: fatal(pos, "this intersection has no values: field '{name_of(int(field.name))}' would be {dt(int(f.type))} & {dt(int(field.type))}")
+        out[i].type = i32(t)
+        if field.defval != 0: out[i].defval = field.defval
+        return
+    out.push(field)
+
+# a & b for field types: the same type, or the members both unions share; 0 for never
+intersect_types = (a0: int, b0: int) -> int:
+    a = prune(a0)
+    b = prune(b0)
+    if type_eq(a, b): return a
+    if is_union(a) and union_index(a, b) >= 0: return b
+    if is_union(b) and union_index(b, a) >= 0: return a
+    if is_union(a) and is_union(b):
+        both: int[]
+        loop m in union_members(a):
+            if union_index(b, m) >= 0: both.push(m)
+        if both.len() == 0: return 0
+        return mk_union(both)
+    if types[a].kind == .opt and type_eq(prune(int(types[a].elem)), b): return b
+    if types[b].kind == .opt and type_eq(prune(int(types[b].elem)), a): return a
+    0
+
 check_struct_fields = (si: int):
     if structs[si].resolved: return
     structs[si].resolved = true
@@ -1383,6 +1432,7 @@ check_struct_fields = (si: int):
     if nodes[d].kind == .struct_:
         n = nkids(d)
         inherited: Field[]
+        if struct_components.has(d): inherited = intersection_fields(si, d, [])
         parent = nominal_parent.get(int(structs[si].type), 0)
         if parent != 0:
             psi = int(types[parent].st)
@@ -1418,7 +1468,23 @@ check_struct_fields = (si: int):
                 fields[fi].type = i32(zonk(t))
             else: fatal(nodes[f].pos, "field needs a type")
             loop k in [0..inherited.len() + i):
-                if fields[int(structs[si].fields) + k].name == nodes[f].name: fatal(nodes[f].pos, "duplicate field '{name_of(int(nodes[f].name))}'")
+                if fields[int(structs[si].fields) + k].name == nodes[f].name:
+                    if k >= inherited.len() or not struct_components.has(d): fatal(nodes[f].pos, "duplicate field '{name_of(int(nodes[f].name))}'")
+                    # (an intersection's own field meets an operand's: the intersection of the two)
+                    t = intersect_types(int(fields[int(structs[si].fields) + k].type), int(fields[fi].type))
+                    if t == 0: fatal(nodes[f].pos, "this intersection has no values: field '{name_of(int(nodes[f].name))}' would be {dt(int(fields[int(structs[si].fields) + k].type))} & {dt(int(fields[fi].type))}")
+                    fields[int(structs[si].fields) + k].type = i32(t)
+                    if fields[fi].defval != 0: fields[int(structs[si].fields) + k].defval = fields[fi].defval
+                    fields[fi].name = 0
+        if struct_components.has(d):
+            # (own fields merged into an operand's leave their slots)
+            start = int(structs[si].fields)
+            kept = 0
+            loop i in [0..int(structs[si].nfields)):
+                if fields[start + i].name == 0: continue
+                fields[start + kept] = fields[start + i]
+                kept += 1
+            structs[si].nfields = i32(kept)
         refine_fields = old_fields
         if refine_active: ref_validate_record(int(structs[si].type), nodes[d].pos)
     else:
