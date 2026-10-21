@@ -14,7 +14,7 @@ what landed. Keep this file short.
 | Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.24 G instructions (was 1.36 G on 10-20 morning) | ~0.40 G (250k root lines/s) |
 | Compiler self-build | 8.0 G instructions | seconds-scale edit loop |
 | Game-tick kernel vs C -O2 (time) | 1.6× default and release (default was 6.3× before small-leaf inlining) | ~1× both |
-| Worst other kernels vs C (time, default) | params 1.75×, graph 1.7×, string_equal 1.7× (shifted_arrays 2.7× → 0.46×) | ≤1.2× |
+| Worst other kernels vs C (time, default) | params 1.75×, graph 1.7×, string_equal ~1.25×, recursive_tree 1.4× | ≤1.2× |
 | Quick / full suite | 38 s / 6.6 min (load average 14–24; remeasure when quiet) | ≤30 s / ≤5 min |
 
 Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
@@ -26,7 +26,7 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: string_equal default (inline the bounded SIMD compare as release does).
+- Astra: overload-dispatch plans pilot (compile throughput).
 - Opus: refinement and container follow-ups (small items).
 
 ## Next
@@ -36,16 +36,16 @@ only.
   - ownership slices 2, 4–6 (1, drop hooks and moves, and 3, `$lend`, landed):
     custom copy/move hooks, resource containers, arenas
     (~/dev/tmp/coord/ownership-design.md);
-- Compile throughput, toward ~0.40 G. Budget in
-  ~/dev/tmp/coord/throughput-budget.md. Open projects, roughly in order:
-  - direct compact-AST construction: mostly landed (parse plus projection
-    169 → 86 M); the rest is rare contextual forms, <0.15%; the lexer is 49 M
-    against a 20 M target;
-  - finalize checked-function results once, with shared proof summaries;
-  - shared optimizer facts;
-  - cheaper register-allocation intervals and encoding;
-  - better code generation for the compiler itself (aggregate SRA into
-    helpers, condition forwarding, fewer spills).
+- Compile throughput, toward ~0.40 G. Profile (10-21, 1.217 G): checking 371 M,
+  optimization 248 M, x64 211 M, lowering 185 M, parse 85 M, lexer 49 M, prelude
+  38 M (~/dev/tmp/coord/throughput-profile-2026-10-21.md). Structural projects,
+  each estimated (not measured):
+  - reusable typed overload-dispatch plans (`resolve_fn_call` is 109 M): 35–55 M;
+  - shared optimizer operand/control/use facts: 40–60 M;
+  - a finalized live-interval stream fed into x64 allocation: 35–50 M;
+  - the lexer: 49 M against a 20 M target.
+  These reach ~1.05 G; 0.40 G needs a bigger idea (per-line checking cost is
+  ~17k instructions).
 - Runtime gaps:
   - float compare/negate selection;
   - outer-target SIMD (particles);
