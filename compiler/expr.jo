@@ -1809,7 +1809,9 @@ finish_arg = (a: int, pt: int, is_mut: bool):
         ref_mutable_authority(a)
         storage = refine_storage(a, ntype(a))
         if ref_storage_contract(storage) or ref_storage_contract(pt):
-            if not type_eq(storage, pt): fatal(nodes[a].pos, "mutable refinement access requires an equivalent storage contract")
+            # (a totaldict's mutations keep every key: pop and clear are refused where they are called)
+            total = is_total_dict(storage) and type_eq(int(types[prune(storage)].elem), pt)
+            if not type_eq(storage, pt) and not total: fatal(nodes[a].pos, "mutable refinement access requires an equivalent storage contract")
     if is_mut and not has_flag(a, NF_MUT) and files[pos_file(nodes[a].pos)].is_dewy:
         fatal(nodes[a].pos, "a mutable argument needs `@` at the call site")
     if nodes[a].kind == .hole:
@@ -1822,6 +1824,7 @@ finish_arg = (a: int, pt: int, is_mut: bool):
         check_place(a, true)
         if path_narrows > 0: path_forget(path_key(a))
         actual = if refine_active: refine_storage(a, ntype(a)) else: ntype(a)
+        if refine_active and is_total_dict(actual): actual = int(types[prune(actual)].elem)
         if not type_eq(actual, pt) and not unify(actual, pt): fatal(nodes[a].pos, "{jd(nodes[a].pos, "`mut`", "an `@`")} argument must have type {dt(pt)} exactly, found {dt(ntype(a))}")
         add_flag(a, NF_MUT)
         return
@@ -4807,6 +4810,8 @@ check_call = (n: int, expected: int) -> int:
         recv = last_checked
         nodes[callee].a = i32(recv)
         fname = int(nodes[callee].name)
+        if refine_active and (name_of(fname) == "pop" or name_of(fname) == "clear") and is_total_dict(refine_storage(recv, 0)):
+            fatal(nodes[n].pos, "a totaldict keeps an entry for every key: it has no {name_of(fname)}")
         if str_sets.len() > 1 and str_set_of(rt) != 0 and not program_fn_named(fname):
             # (a string set's methods are its text's)
             coerce(recv, T_STR)
@@ -7672,6 +7677,7 @@ check_expr = (n: int, expected: int) -> int:
         if member != 0:
             ex = member
             exk = types[ex].kind
+    if k == .map_lit and refine_active and expected != 0 and is_total_dict(expected): total_literal_check(n, expected)
     if k == .propagate: return check_propagate(n, expected)
     if k == .unit_lit:
         return quantity_constant(n, nodes[n].ival, int(nodes[n].aux), int(nodes[n].aux2), expected)

@@ -1152,10 +1152,13 @@ dw_type = (id: int) -> int:
                 nodes[qualified].b = i32(dw_ref_predicate(constraint))
                 return qualified
         return n
-    if dw_op(id) == .type_apply and dw_name(dw_child(id, 1)) == "dict":
+    if dw_op(id) == .type_apply and (dw_name(dw_child(id, 1)) == "dict" or dw_name(dw_child(id, 1)) == "totaldict"):
         args = dw_child(id, 2)
         if dw_nchildren(args) != 2: return dw_fail(id, "dictionary type constraints")
         n = mk(.tmap, pos)
+        if dw_name(dw_child(id, 1)) == "totaldict":
+            refine_active = true
+            nodes[n].aux = 1
         nodes[n].a = i32(dw_type(dw_child(args, 0)))
         nodes[n].b = i32(dw_type(dw_child(args, 1)))
         return n

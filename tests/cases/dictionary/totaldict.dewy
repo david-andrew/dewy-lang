@@ -1,0 +1,16 @@
+# totaldict<K V>: an entry for every value of a finite key type
+BasePrefix:type = '0b' | '0o' | '0x'
+const RADIX:totaldict<BasePrefix int64> = ['0b' -> 2 '0o' -> 8 '0x' -> 16]
+radix_of = (base:BasePrefix):>int64 => RADIX[base]
+printl(radix_of('0o'))
+lookup = (table:totaldict<BasePrefix int64> base:BasePrefix):>int64 => table[base]
+printl(lookup(RADIX '0x'))
+printl(lookup(['0b' -> 2 '0o' -> 8 '0x' -> 16] '0b'))
+const WIDTHS:dict<BasePrefix int64> = ['0b' -> 1 '0o' -> 3 '0x' -> 4]
+printl(lookup(WIDTHS '0x'))
+let names:totaldict<-1|0|1 string> = [-1 -> "neg" 0 -> "zero" 1 -> "pos"]
+names[1] = "plus"
+printl(names)
+let copy:totaldict<-1|0|1 string> = names
+let plain:dict<-1|0|1 string> = copy
+printl(plain.length)

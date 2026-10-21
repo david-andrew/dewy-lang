@@ -1219,7 +1219,9 @@ resolve_type = (tn: int) -> int:
     if k == .tmap:
         s = prelude.get(intern("Map")) ?? 0
         if s == 0: fatal(nodes[tn].pos, "Map type is not available")
-        return get_struct_inst(int(syms[s].ref), [resolve_type(int(nodes[tn].a)), resolve_type(int(nodes[tn].b))])
+        mt = get_struct_inst(int(syms[s].ref), [resolve_type(int(nodes[tn].a)), resolve_type(int(nodes[tn].b))])
+        if nodes[tn].aux == 1: return total_dict_type(mt, nodes[tn].pos)
+        return mt
     if k == .ttuple:
         el: int[]
         loop i in [0..nkids(tn)): el.push(resolve_type(kid(tn, i)))

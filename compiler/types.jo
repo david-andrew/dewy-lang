@@ -817,6 +817,10 @@ type_str_in = (t0: int, dewy: bool) -> str:
         effect: "Effect"
         callable: "{type_str(int(ti.elem), dewy)} & <effects>"
         refined:
+            if ti.bits == -1:
+                m = prune(int(ti.elem))
+                if dewy: return "totaldict<{type_str(struct_targ(int(types[m].st), 0), dewy)} {type_str(struct_targ(int(types[m].st), 1), dewy)}>"
+                return "totaldict[{type_str(struct_targ(int(types[m].st), 0), dewy)}, {type_str(struct_targ(int(types[m].st), 1), dewy)}]"
             known, values = int_intervals(t)
             if known and values.len() > 0 and values.len() <= 32:
                 text = ""

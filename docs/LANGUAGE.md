@@ -1530,6 +1530,18 @@ An in-place update such as `values[key] += 1`, `values[key].x = 5` or
 as `values[key]` does. `values.pop(key default=none)` returns the default for a
 missing key instead. `values.remove(key)` returns whether it removed an entry.
 
+`totaldict<K V>` is a dictionary with an entry for every value of a finite key
+type (a union of literals). Its literal must list every key, and the error names
+the missing ones; it has no `pop` or `clear`. A `totaldict` parameter takes a
+literal, another `totaldict`, or a `const` dictionary whose literal has every
+key; a `dict<K V>` that may be partial does not pass:
+
+```dewy
+BasePrefix:type = '0b' | '0o' | '0x'
+const RADIX:totaldict<BasePrefix int64> = ['0b' -> 2 '0o' -> 8 '0x' -> 16]
+radix_of = (base:BasePrefix):>int64 => RADIX[base]
+```
+
 When `values.get(key)` is immediately tested against `none`, the compiler uses
 a presence lookup without constructing the optional value. `is?`, `isnt?`,
 `=?` and `not=?` keep their usual meaning, argument order and custom key callbacks.

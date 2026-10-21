@@ -423,12 +423,13 @@ dc_annotation = (boundary: int = 10) -> int:
             nodes[n].kind = .tarray
             nodes[n].name = 0
             nodes[n].a = i32(args[0])
-        else if name == "dict":
+        else if name == "dict" or name == "totaldict":
             if args.len() != 2: return 0
             nodes[n].kind = .tmap
             nodes[n].name = 0
             nodes[n].a = i32(args[0])
             nodes[n].b = i32(args[1])
+            if name == "totaldict": nodes[n].aux = 1
         else: set_list(n, args)
     loop dn_accept(.question):
         optional = mk(.topt, mkpos(dn_file, token.start))

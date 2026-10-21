@@ -1,0 +1,4 @@
+BasePrefix:type = '0b' | '0o' | '0x'
+let d:dict<BasePrefix int64> = ['0b' -> 2 '0o' -> 8 '0x' -> 16]
+lookup = (table:totaldict<BasePrefix int64> base:BasePrefix):>int64 => table[base]
+printl(lookup(d '0b'))

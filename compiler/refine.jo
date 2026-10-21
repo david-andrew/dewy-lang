@@ -110,6 +110,96 @@ str_set_of = (t0: int) -> int:
     if types[t].kind != .enum_: return 0
     int(structs[int(types[t].st)].lit_set)
 
+# totaldict<K V>: a dictionary with an entry for every value of its finite key
+# type. A refined Map (marked by bits -1, with no predicate) whose literal is
+# checked for every key, which refuses pop and clear, and which a dict that may
+# be partial does not become.
+total_literals: {int: bool} = {}
+
+total_dict_type = (map: int, pos: int) -> int:
+    if not total_dict_keys(struct_targ(int(types[prune(map)].st), 0)).0: fatal(pos, "totaldict needs a finite key type (a union of literals), found {dt(struct_targ(int(types[prune(map)].st), 0))}")
+    refine_active = true
+    mk_type(TypeInfo(kind = .refined, elem = i32(map), bits = -1), [])
+
+is_total_dict = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .refined and types[t].bits == -1
+
+# every value of a finite key type, as text (`'0b'`, `3`): (finite, values)
+total_dict_keys = (t0: int) -> (bool, str[]):
+    t = prune(t0)
+    out: str[]
+    if is_union(t):
+        loop m in union_members(t):
+            ok, values = total_dict_keys(m)
+            if not ok: return (false, out)
+            out += values
+        return (true, out)
+    set = str_set_of(t)
+    if set != 0:
+        loop value in str_sets[set]: out.push("'{value}'")
+        return (true, out)
+    if types[t].kind != .refined: return (false, out)
+    known, intervals = int_intervals(t)
+    if not known: return (false, out)
+    loop k in [0..intervals.len() / 2):
+        if intervals[2 * k + 1] - intervals[2 * k] > 4096: return (false, out)
+        loop v in [intervals[2 * k]..intervals[2 * k + 1]]: out.push("{v}")
+    (true, out)
+
+# a dictionary literal given for a totaldict: an entry for every key
+total_literal_check = (n: int, t: int):
+    _, keys = total_dict_keys(struct_targ(int(types[prune(int(types[prune(t)].elem))].st), 0))
+    given: str[]
+    loop pair in kids(n):
+        key = kid_lit(int(nodes[pair].a))
+        if nodes[key].kind == .str_lit: given.push("'{name_of(int(nodes[key].sval))}'")
+        else if nodes[key].kind == .int_lit: given.push("{nodes[key].ival}")
+        else if nodes[key].kind == .unary and nodes[kid_lit(int(nodes[key].a))].kind == .int_lit: given.push("{-nodes[kid_lit(int(nodes[key].a))].ival}")
+        else: fatal(nodes[int(nodes[pair].a)].pos, "a totaldict literal's keys are literals, so every key is seen to be there")
+    missing: str[]
+    loop key in keys:
+        if not given.contains(key): missing.push(key)
+    if missing.len() > 0: fatal(nodes[n].pos, "this totaldict has no entry for {join(missing, ", ")}")
+    total_literals[n] = true
+
+total_dict_coerce = (n: int, t: int) -> int:
+    base = int(types[prune(t)].elem)
+    if total_literals.has(n):
+        coerce(n, base)
+        return n
+    source = prune(refine_storage(n, ntype(n)))
+    if source == prune(t) or nodes[n].kind == .call and is_total_dict(call_result_type(n)) or total_const(n, t):
+        coerce(n, base)
+        return n
+    fatal(nodes[n].pos, "a {dt(representation_type(ntype(n)))} may be missing keys, so it is not a {dt(t)} (a totaldict is made from a literal with every key)")
+    n
+
+# a `const` dictionary whose literal has every key is total wherever it is used
+total_const = (n: int, t: int) -> bool:
+    if nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.global)): return false
+    g = globals[int(nodes[n].sym)]
+    decl = int(g.decl)
+    if decl == 0 or nodes[decl].kind != .vardecl or not has_flag(decl, NF_RDONLY): return false
+    init = int(nodes[decl].b)
+    if init == 0 or nodes[init].kind != .map_lit: return false
+    if not type_eq(representation_type(int(g.type)), int(types[prune(t)].elem)): return false
+    _, keys = total_dict_keys(struct_targ(int(types[prune(int(types[prune(t)].elem))].st), 0))
+    given: str[]
+    loop pair in kids(init):
+        key = kid_lit(int(nodes[pair].a))
+        if nodes[key].kind == .str_lit: given.push("'{name_of(int(nodes[key].sval))}'")
+        else if nodes[key].kind == .dotname and str_set_of(ntype(key)) != 0: given.push("'{str_sets[str_set_of(ntype(key))][int(nodes[key].aux)]}'")
+        else if nodes[key].kind == .int_lit: given.push("{nodes[key].ival}")
+    loop key in keys:
+        if not given.contains(key): return false
+    true
+
+call_result_type = (n: int) -> int:
+    f = int(nodes[n].sym)
+    if f <= 0 or f >= fns.len(): return 0
+    int(fns[f].ret)
+
 # member i of set id as a constant
 str_set_const = (id: int, i: int, pos: int) -> int:
     c = mk(.dotname, pos)
@@ -128,6 +218,7 @@ str_set_text = (id: int) -> str:
 
 refine_reset = ():
     str_sets = [[]]
+    total_literals = {}
     str_set_types = [0]
     literal_orders = {}
     ref_predicates = [[]]
@@ -408,6 +499,7 @@ str_set_text_of = (n: int):
 
 refine_coerce = (n: int, target: int) -> int:
     t = prune(target)
+    if types[t].bits == -1: return total_dict_coerce(n, t)
     coerce(n, int(types[t].elem))
     if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.refinement)) and nodes[n].aux2 == i32(t): return n
     owner = if cx >= 0: int(ctxs[cx].inst) else: 0
