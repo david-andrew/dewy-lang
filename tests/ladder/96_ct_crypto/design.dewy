@@ -1,0 +1,236 @@
+# Tier 4 / 96_ct_crypto / milestone 32
+# Acceptance: SHA-256, HMAC, HKDF, ChaCha20, Poly1305, ChaCha20-Poly1305 and X25519 written
+# branch-free and index-free on secrets; published vectors (FIPS 180-4, RFC 4231, 5869, 8439,
+# 7748), forgery rejection and a deterministic key-agreement-plus-AEAD workload; independent oracle.
+#
+# Constant time is a discipline here, not a checked property: Dewy cannot yet mark a value
+# secret or forbid secret-dependent branches and addresses (see ct.dewy).
+
+from p"hexcodec.dewy" import hex
+from p"sha2.dewy" import Sha256, sha256, hmac_sha256, hkdf
+from p"chacha.dewy" import Key, Nonce, block, xor_stream
+from p"poly.dewy" import Tag, OneTimeKey, poly1305
+from p"aead.dewy" import Sealed, Forged, seal, open, poly_key
+from p"curve.dewy" import Bytes32, x25519, public_key
+from p"ct.dewy" import equal
+
+show=(label:string data:array<uint8>):>void=>printl("{label} {hex(data)}")
+
+# A deterministic byte generator for the workload: SHA-256 in counter mode.
+Stream:type=[
+    seed:array<uint8>
+    counter:int64=0
+    next=(count:int64):>array<uint8>=>{
+        let out:array<uint8>=[]
+        loop out.length <? count {
+            let block=sha256([seed... bytes("/{counter}")...])
+            out.extend(block)
+            counter+=1
+        }
+        out.truncate(count)
+        return out
+    }
+]
+
+hashes=():>void=>{
+    show("sha256-abc" sha256(bytes("abc")))
+    show("sha256-empty" sha256([]))
+    show("sha256-448" sha256(bytes("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")))
+    show("sha256-896" sha256(bytes("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu")))
+    # One million 'a's, fed in uneven pieces so every buffering path runs.
+    let hasher=Sha256()
+    let piece:array<uint8>=[loop i in [0..1000) 97 as uint8]
+    let fed=0
+    let size=1
+    loop fed <? 1000000 {
+        let take=min(size 1000000-fed)
+        hasher.update(piece[0..min(take 1000)))
+        fed+=min(take 1000)
+        size=size%997+61
+    }
+    show("sha256-million-a" hasher.finish)
+    show("hmac-4231-1" hmac_sha256([loop i in [0..20) 0x0b as uint8] bytes("Hi There")))
+    show("hmac-4231-2" hmac_sha256(bytes("Jefe") bytes("what do ya want for nothing?")))
+    show("hmac-4231-6" hmac_sha256([loop i in [0..131) 0xaa as uint8] bytes("Test Using Larger Than Block-Size Key - Hash Key First")))
+    let okm=hkdf(0x"000102030405060708090a0b0c" [loop i in [0..22) 0x0b as uint8] 0x"f0f1f2f3f4f5f6f7f8f9" 42)
+    if okm is? error {
+        printl("hkdf-5869-1 failed")
+    } else {
+        show("hkdf-5869-1" okm)
+    }
+    let okm3=hkdf([] [loop i in [0..22) 0x0b as uint8] [] 42)
+    if okm3 is? error {
+        printl("hkdf-5869-3 failed")
+    } else {
+        show("hkdf-5869-3" okm3)
+    }
+    let too_long=hkdf([] bytes("ikm") [] 255*32+1)
+    printl("hkdf-limit {too_long is? error}")
+}
+
+ciphers=():>void=>{
+    let zero_key:Key=[]
+    let zero_nonce:Nonce=[]
+    show("chacha20-block-0" block(zero_key 0 zero_nonce))
+    show("chacha20-block-1" block(zero_key 1 zero_nonce))
+    let key:Key=0x"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    let block_nonce:Nonce=0x"000000090000004a00000000"
+    show("chacha20-block-8439" block(key 1 block_nonce))
+    let nonce:Nonce=0x"000000000000004a00000000"
+    let sunscreen=bytes("Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.")
+    let encrypted=xor_stream(key 1 nonce sunscreen)
+    show("chacha20-8439-2.4.2" encrypted)
+    printl("chacha20-roundtrip {xor_stream(key 1 nonce encrypted) =? sunscreen}")
+
+    let mac_key:OneTimeKey=0x"85d6be7857556d337f4452fe42d506a80103808afb0db2fd4abff6af4149f51b"
+    show("poly1305-8439-2.5.2" poly1305(mac_key bytes("Cryptographic Forum Research Group")))
+    # Accumulators that land at or just above p = 2^130-5 exercise the masked final reduction.
+    let r_one:OneTimeKey=0x"0100000000000000000000000000000000000000000000000000000000000000"
+    show("poly1305-wrap" poly1305(r_one 0x"ffffffffffffffffffffffffffffffff"))
+    let r_two:OneTimeKey=0x"0200000000000000000000000000000000000000000000000000000000000000"
+    show("poly1305-reduce" poly1305(r_two 0x"fffffffffffffffffffffffffffffffffbffffffffffffffffffffffffffffff"))
+    show("poly1305-carry" poly1305(r_one 0x"fffffffffffffffffffffffffffffffff0ffffffffffffffffffffffffffffff11000000000000000000000000000000"))
+    let s_max:OneTimeKey=0x"02000000000000000000000000000000ffffffffffffffffffffffffffffffff"
+    show("poly1305-pad" poly1305(s_max 0x"02000000000000000000000000000000"))
+
+    let poly_key_input:Key=0x"808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"
+    let poly_nonce:Nonce=0x"000000000001020304050607"
+    show("poly1305-keygen-8439-2.6.2" poly_key(poly_key_input poly_nonce))
+}
+
+aead=():>void=>{
+    let key:Key=0x"808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"
+    let nonce:Nonce=0x"070000004041424344454647"
+    let aad=0x"50515253c0c1c2c3c4c5c6c7"
+    let plaintext=bytes("Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.")
+    let sealed=seal(key nonce aad plaintext)
+    show("aead-8439-2.8.2-ciphertext" sealed.ciphertext)
+    show("aead-8439-2.8.2-tag" sealed.tag)
+    let opened=open(key nonce aad sealed)
+    printl("aead-open {if opened is? Forged false else opened =? plaintext}")
+
+    # Every single-bit change to the tag, the ciphertext's first and last bytes and the
+    # associated data must be rejected.
+    let rejected=0
+    let attempts=0
+    loop bit in [0..128) {
+        let forged=sealed
+        forged.tag[bit//8]=forged.tag[bit//8] xor ((1 << (bit%8)) as uint8)
+        attempts+=1
+        if open(key nonce aad forged) is? Forged rejected+=1
+    }
+    loop at in [0 sealed.ciphertext.length-1] {
+        loop bit in [0..8) {
+            let forged=sealed
+            forged.ciphertext[at]=forged.ciphertext[at] xor ((1 << bit) as uint8)
+            attempts+=1
+            if open(key nonce aad forged) is? Forged rejected+=1
+        }
+    }
+    loop at in [0..aad.length) {
+        let other=aad
+        other[at]=other[at] xor 0x80
+        attempts+=1
+        if open(key nonce other sealed) is? Forged rejected+=1
+    }
+    let truncated=sealed
+    truncated.ciphertext.pop()
+    attempts+=1
+    if open(key nonce aad truncated) is? Forged rejected+=1
+    let other_nonce=nonce
+    other_nonce[0]=8
+    attempts+=1
+    if open(key other_nonce aad sealed) is? Forged rejected+=1
+    printl("aead-forgeries {rejected}/{attempts}")
+    printl("ct-equal {equal(sealed.tag as array<uint8> sealed.tag as array<uint8>)} {equal([1 2 3] [1 2 4])} {equal([1 2] [1 2 3])}")
+}
+
+curve=():>void=>{
+    show("x25519-7748-1" x25519(0x"a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4" 0x"e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c"))
+    show("x25519-7748-2" x25519(0x"4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d" 0x"e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493"))
+    let alice:Bytes32=0x"77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a"
+    let bob:Bytes32=0x"5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb"
+    let alice_public=public_key(alice)
+    let bob_public=public_key(bob)
+    show("x25519-alice-public" alice_public)
+    show("x25519-bob-public" bob_public)
+    let shared=x25519(alice bob_public)
+    show("x25519-shared" shared)
+    printl("x25519-agree {shared =? x25519(bob alice_public)}")
+    # RFC 7748 5.2: iterate k, u <- x25519(k, u), k.
+    let k:Bytes32=0x"0900000000000000000000000000000000000000000000000000000000000000"
+    let u=k
+    loop i in [1..1000] {
+        let next=x25519(k u)
+        u=k
+        k=next
+        if i =? 1 show("x25519-iterate-1" k)
+    }
+    show("x25519-iterate-1000" k)
+}
+
+# Key agreement, key derivation and authenticated encryption together: a deterministic
+# message exchange whose transcript digest the oracle reproduces.
+workload=():>void=>{
+    let rng=Stream[bytes("dewy tier 4 crypto workload")]
+    let transcript=Sha256()
+    let sent=0
+    let bytes_sent=0
+    loop session in [0..8) {
+        let a:Bytes32=rng.next(32)
+        let b:Bytes32=rng.next(32)
+        let a_pub=public_key(a)
+        let b_pub=public_key(b)
+        let shared=x25519(a b_pub)
+        let check=x25519(b a_pub)
+        if not equal(shared as array<uint8> check as array<uint8>) {
+            printl("session {session}: key agreement failed")
+            return
+        }
+        let keys=hkdf(bytes("session {session}") shared as array<uint8> bytes("dewy aead") 44)
+        if keys is? error {
+            printl("session {session}: hkdf failed")
+            return
+        }
+        let key:Key=keys[0..32)
+        let base:array<uint8>=keys[32..44)
+        loop m in [0..24) {
+            let length=(session*131+m*37)%700
+            let message=rng.next(length)
+            let aad=rng.next(m%5)
+            let nonce:Nonce=base
+            nonce[11]=nonce[11] xor (m as uint8)
+            let sealed=seal(key nonce aad message)
+            let opened=open(key nonce aad sealed)
+            if opened is? Forged or opened not=? message {
+                printl("session {session} message {m}: round trip failed")
+                return
+            }
+            transcript.update(sealed.ciphertext)
+            transcript.update(sealed.tag as array<uint8>)
+            sent+=1
+            bytes_sent+=length
+        }
+    }
+    printl("workload messages {sent} bytes {bytes_sent}")
+    show("workload-transcript" transcript.finish)
+
+    # One mebibyte through the AEAD.
+    let big:array<uint8>=[loop i in [0..1048576) ((i*7+i//256) and 255) as uint8]
+    let key:Key=sha256(bytes("bulk key"))
+    let nonce:Nonce=0x"000000000000000000000001"
+    let sealed=seal(key nonce [] big)
+    show("bulk-ciphertext-sha256" sha256(sealed.ciphertext))
+    show("bulk-tag" sealed.tag)
+    let opened=open(key nonce [] sealed)
+    printl("bulk-open {if opened is? Forged false else opened =? big}")
+}
+
+main=():>int64=>{
+    hashes()
+    ciphers()
+    aead()
+    curve()
+    workload()
+    return 0
+}

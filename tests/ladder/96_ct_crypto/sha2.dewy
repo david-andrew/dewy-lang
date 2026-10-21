@@ -1,0 +1,173 @@
+# SHA-256 (FIPS 180-4), HMAC-SHA-256 (RFC 2104) and HKDF-SHA-256 (RFC 5869).
+#
+# SHA-256 is constant-time by construction: it uses only 32-bit additions,
+# rotations and bitwise logic, and its loops depend only on the message length,
+# which is public.
+
+from p"ct.dewy" import load32
+
+Words8:type=array<uint32 length=8>
+Schedule:type=array<uint32 length=64>
+
+# First 32 bits of the fractional parts of the cube roots of the first 64 primes.
+const K:Schedule=[
+    0x428a2f98 0x71374491 0xb5c0fbcf 0xe9b5dba5 0x3956c25b 0x59f111f1 0x923f82a4 0xab1c5ed5
+    0xd807aa98 0x12835b01 0x243185be 0x550c7dc3 0x72be5d74 0x80deb1fe 0x9bdc06a7 0xc19bf174
+    0xe49b69c1 0xefbe4786 0x0fc19dc6 0x240ca1cc 0x2de92c6f 0x4a7484aa 0x5cb0a9dc 0x76f988da
+    0x983e5152 0xa831c66d 0xb00327c8 0xbf597fc7 0xc6e00bf3 0xd5a79147 0x06ca6351 0x14292967
+    0x27b70a85 0x2e1b2138 0x4d2c6dfc 0x53380d13 0x650a7354 0x766a0abb 0x81c2c92e 0x92722c85
+    0xa2bfe8a1 0xa81a664b 0xc24b8b70 0xc76c51a3 0xd192e819 0xd6990624 0xf40e3585 0x106aa070
+    0x19a4c116 0x1e376c08 0x2748774c 0x34b0bcb5 0x391c0cb3 0x4ed8aa4a 0x5b9cca4f 0x682e6ff3
+    0x748f82ee 0x78a5636f 0x84c87814 0x8cc70208 0x90befffa 0xa4506ceb 0xbef9a3f7 0xc67178f2
+]
+
+# First 32 bits of the fractional parts of the square roots of the first 8 primes.
+const IV:Words8=[0x6a09e667 0xbb67ae85 0x3c6ef372 0xa54ff53a 0x510e527f 0x9b05688c 0x1f83d9ab 0x5be0cd19]
+
+const BLOCK:int64=64
+const DIGEST:int64=32
+
+rotr=(x:uint32 n:int64):>uint32 & no_effects=>(x >> n) or (x << (32-n))
+big_sigma0=(x:uint32):>uint32 & no_effects=>rotr(x 2) xor rotr(x 13) xor rotr(x 22)
+big_sigma1=(x:uint32):>uint32 & no_effects=>rotr(x 6) xor rotr(x 11) xor rotr(x 25)
+small_sigma0=(x:uint32):>uint32 & no_effects=>rotr(x 7) xor rotr(x 18) xor (x >> 3)
+small_sigma1=(x:uint32):>uint32 & no_effects=>rotr(x 17) xor rotr(x 19) xor (x >> 10)
+choose=(e:uint32 f:uint32 g:uint32):>uint32 & no_effects=>(e and f) xor ((not e) and g)
+majority=(a:uint32 b:uint32 c:uint32):>uint32 & no_effects=>(a and b) xor (a and c) xor (b and c)
+
+load32be=(b:array<uint8> at:int64):>uint32=>((b[at] as uint32) << 24) or ((b[at+1] as uint32) << 16) or ((b[at+2] as uint32) << 8) or (b[at+3] as uint32)
+
+# Fold one 64-byte block starting at `at` into the chaining value.
+compress=(@h:Words8 data:array<uint8> at:int64):>void=>{
+    let w:Schedule=[]
+    loop i in [0..16) {
+        w[i]=load32be(data at+4*i)
+    }
+    loop i in [16..64) {
+        w[i]=small_sigma1(w[i-2])+w[i-7]+small_sigma0(w[i-15])+w[i-16]
+    }
+    let [a b c d e f g z]=h
+    loop i in [0..64) {
+        let t1=z+big_sigma1(e)+choose(e f g)+K[i]+w[i]
+        let t2=big_sigma0(a)+majority(a b c)
+        z=g
+        g=f
+        f=e
+        e=d+t1
+        d=c
+        c=b
+        b=a
+        a=t1+t2
+    }
+    h[0]+=a
+    h[1]+=b
+    h[2]+=c
+    h[3]+=d
+    h[4]+=e
+    h[5]+=f
+    h[6]+=g
+    h[7]+=z
+}
+
+# An incremental hasher: feed any number of pieces, then `finish`.
+Sha256:type=[
+    h:Words8=IV
+    pending:array<uint8>=[]
+    length:uint64=0
+
+    update=(data:array<uint8>):>void=>{
+        length+=data.length as uint64
+        let at=0
+        # Top up a partial block first.
+        if pending.length >? 0 {
+            let take=min(BLOCK-pending.length data.length)
+            pending.extend(data[0..take))
+            at=take
+            if pending.length =? BLOCK {
+                compress(@h pending 0)
+                pending.clear()
+            }
+        }
+        # Whole blocks straight from the input, without copying them.
+        loop data.length-at >=? BLOCK {
+            compress(@h data at)
+            at+=BLOCK
+        }
+        if at <? data.length pending.extend(data[at..data.length))
+    }
+
+    finish=():>array<uint8>=>{
+        let bits=length*8
+        let tail=pending
+        tail.push(0x80)
+        loop tail.length%BLOCK not=? 56 {
+            tail.push(0)
+        }
+        loop i in [0..8) {
+            tail.push(((bits >> (56-8*i)) and 255) as uint8)
+        }
+        let state=h
+        let at=0
+        loop at <? tail.length {
+            compress(@state tail at)
+            at+=BLOCK
+        }
+        let out:array<uint8>=[]
+        loop word in state {
+            out.push((word >> 24) as uint8)
+            out.push(((word >> 16) and 255) as uint8)
+            out.push(((word >> 8) and 255) as uint8)
+            out.push((word and 255) as uint8)
+        }
+        return out
+    }
+]
+
+sha256=(data:array<uint8>):>array<uint8>=>{
+    let hasher=Sha256()
+    hasher.update(data)
+    return hasher.finish
+}
+
+# HMAC-SHA-256. The key is secret; its length is public.
+hmac_sha256=(key:array<uint8> message:array<uint8>):>array<uint8>=>{
+    let block_key=if key.length >? BLOCK sha256(key) else key
+    loop block_key.length <? BLOCK {
+        block_key.push(0)
+    }
+    let inner_pad:array<uint8>=[loop b in block_key b xor 0x36]
+    let outer_pad:array<uint8>=[loop b in block_key b xor 0x5c]
+    let inner=Sha256()
+    inner.update(inner_pad)
+    inner.update(message)
+    let outer=Sha256()
+    outer.update(outer_pad)
+    outer.update(inner.finish)
+    return outer.finish
+}
+
+# HKDF (RFC 5869): extract a pseudorandom key, then expand it to `length` bytes.
+hkdf_extract=(salt:array<uint8> ikm:array<uint8>):>array<uint8>=>{
+    let key=if salt.length =? 0 [loop i in [0..DIGEST) 0 as uint8] else salt
+    return hmac_sha256(key ikm)
+}
+
+HkdfTooLong:type=type of error & [requested:int64]
+
+hkdf_expand=(prk:array<uint8> info:array<uint8> length:int64):>array<uint8>|HkdfTooLong=>{
+    if length >? 255*DIGEST return HkdfTooLong[length]
+    let okm:array<uint8>=[]
+    let previous:array<uint8>=[]
+    let counter=1
+    loop okm.length <? length {
+        let input=[previous... info... (counter as uint8)]
+        previous=hmac_sha256(prk input)
+        okm.extend(previous)
+        counter+=1
+    }
+    okm.truncate(length)
+    return okm
+}
+
+hkdf=(salt:array<uint8> ikm:array<uint8> info:array<uint8> length:int64):>array<uint8>|HkdfTooLong=>
+    hkdf_expand(hkdf_extract(salt ikm) info length)

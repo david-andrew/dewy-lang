@@ -1,0 +1,165 @@
+# X25519 Diffie-Hellman (RFC 7748) over GF(2^255 - 19).
+#
+# A field element is sixteen signed 16-bit limbs held in 64-bit words, so a full
+# schoolbook product and its reduction fit without overflow. The Montgomery
+# ladder performs the same operations for every scalar bit; the bit only selects
+# which pair of points is "first" through a masked swap, never through a branch
+# or an index. Inversion uses a fixed addition chain (the exponent p-2 is public).
+
+Field:type=array<int64 length=16>
+Bytes32:type=array<uint8 length=32>
+
+const A24:Field=[0xdb41 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+
+# Propagate carries so every limb is back in [0, 2^16); the carry out of the
+# top limb wraps to limb 0 times 38 (2^256 = 38 mod p).
+carry=(@o:Field):>void=>{
+    loop i in [0..16) {
+        o[i]+=1 << 16
+        let c=o[i] >> 16
+        if i <? 15 {
+            o[i+1]+=c-1
+        } else {
+            o[0]+=38*(c-1)
+        }
+        o[i]-=c << 16
+    }
+}
+
+# Swap p and q when bit is 1, leave them when it is 0: the same work either way.
+swap=(@p:Field @q:Field bit:int64):>void=>{
+    let m=not (bit-1)
+    loop i in [0..16) {
+        let t=m and (p[i] xor q[i])
+        p[i]=p[i] xor t
+        q[i]=q[i] xor t
+    }
+}
+
+add=(a:Field b:Field):>Field=>{
+    let o:Field=[]
+    loop i in [0..16) {
+        o[i]=a[i]+b[i]
+    }
+    return o
+}
+
+sub=(a:Field b:Field):>Field=>{
+    let o:Field=[]
+    loop i in [0..16) {
+        o[i]=a[i]-b[i]
+    }
+    return o
+}
+
+mul=(a:Field b:Field):>Field=>{
+    let t:array<int64 length=31>=[]
+    loop i in [0..16) {
+        let ai=a[i]
+        loop j in [0..16) {
+            t[i+j]+=ai*b[j]
+        }
+    }
+    let o:Field=[]
+    loop i in [0..15) {
+        o[i]=t[i]+38*t[i+16]
+    }
+    o[15]=t[15]
+    carry(@o)
+    carry(@o)
+    return o
+}
+
+square=(a:Field):>Field=>mul(a a)
+
+# a^(p-2) = 1/a: square-and-multiply over the public exponent 2^255 - 21.
+invert=(a:Field):>Field=>{
+    let c=a
+    loop bit in [253,252..0] {
+        c=square(c)
+        if bit not=? 2 and bit not=? 4 {
+            c=mul(c a)
+        }
+    }
+    return c
+}
+
+unpack=(n:Bytes32):>Field=>{
+    let o:Field=[]
+    loop i in [0..16) {
+        o[i]=(n[2*i] as int64)+((n[2*i+1] as int64) << 8)
+    }
+    o[15]=o[15] and 0x7fff
+    return o
+}
+
+# The canonical little-endian encoding: subtract p twice under a mask.
+pack=(n:Field):>Bytes32=>{
+    let t=n
+    carry(@t)
+    carry(@t)
+    carry(@t)
+    loop pass in [0..2) {
+        let m:Field=[]
+        m[0]=t[0]-0xffed
+        loop i in [1..15) {
+            m[i]=t[i]-0xffff-((m[i-1] >> 16) and 1)
+            m[i-1]=m[i-1] and 0xffff
+        }
+        m[15]=t[15]-0x7fff-((m[14] >> 16) and 1)
+        let borrow=(m[15] >> 16) and 1
+        m[14]=m[14] and 0xffff
+        swap(@t @m 1-borrow)
+    }
+    let o:Bytes32=[]
+    loop i in [0..16) {
+        o[2*i]=(t[i] and 0xff) as uint8
+        o[2*i+1]=(t[i] >> 8) as uint8
+    }
+    return o
+}
+
+# Clamp a 32-byte secret: clear the cofactor bits, set the top bit.
+clamp=(scalar:Bytes32):>Bytes32=>{
+    let z=scalar
+    z[31]=(z[31] and 127) or 64
+    z[0]=z[0] and 248
+    return z
+}
+
+# scalar * point (u-coordinates only) by the Montgomery ladder of RFC 7748 5.
+x25519=(scalar:Bytes32 point:Bytes32):>Bytes32=>{
+    let k=clamp(scalar)
+    let x1=unpack(point)
+    let x2:Field=[]
+    let z2:Field=[]
+    let x3=x1
+    let z3:Field=[]
+    x2[0]=1
+    z3[0]=1
+    loop t in [254,253..0] {
+        let bit=((k[t >> 3] >> (t and 7)) and 1) as int64
+        swap(@x2 @x3 bit)
+        swap(@z2 @z3 bit)
+        let a=add(x2 z2)
+        let aa=square(a)
+        let b=sub(x2 z2)
+        let bb=square(b)
+        let e=sub(aa bb)
+        let c=add(x3 z3)
+        let d=sub(x3 z3)
+        let da=mul(d a)
+        let cb=mul(c b)
+        x3=square(add(da cb))
+        z3=mul(x1 square(sub(da cb)))
+        x2=mul(aa bb)
+        z2=mul(e add(aa mul(A24 e)))
+        swap(@x2 @x3 bit)
+        swap(@z2 @z3 bit)
+    }
+    return pack(mul(x2 invert(z2)))
+}
+
+const BASE:Bytes32=0x"0900000000000000000000000000000000000000000000000000000000000000"
+
+public_key=(secret:Bytes32):>Bytes32=>x25519(secret BASE)

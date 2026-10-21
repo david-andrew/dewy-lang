@@ -1,0 +1,179 @@
+# Poly1305 one-time authenticator (RFC 8439 section 2.5).
+#
+# The accumulator lives in five 26-bit limbs so every product of two limbs fits
+# a 64-bit word with room for the carries. Every block runs the same arithmetic;
+# the final reduction modulo 2^130-5 picks between h and h-p with a mask, never
+# with a branch, so the tag's timing does not depend on the key or the message.
+
+from p"ct.dewy" import load32, store32, mask64
+
+Limbs:type=array<uint64 length=5>
+OneTimeKey:type=array<uint8 length=32>
+Tag:type=array<uint8 length=16>
+
+const LIMB:uint64=0x3ffffff
+const BLOCK:int64=16
+
+Poly1305:type=[
+    r:Limbs=[]
+    h:Limbs=[]
+    pad:array<uint32 length=4>=[]
+    pending:array<uint8>=[]
+
+    # Absorb whole 16-byte blocks starting at `at`. `final_bit` is 1 << 24 for a
+    # full block (the 2^128 marker), 0 for the padded last block, which carries
+    # its marker byte in the data.
+    absorb=(data:array<uint8> at:int64 count:int64 final_bit:uint64):>void=>{
+        let [r0 r1 r2 r3 r4]=r
+        let s1=r1*5
+        let s2=r2*5
+        let s3=r3*5
+        let s4=r4*5
+        let [h0 h1 h2 h3 h4]=h
+        let offset=at
+        loop b in [0..count) {
+            h0+=(load32(data offset) as uint64) and LIMB
+            h1+=((load32(data offset+3) as uint64) >> 2) and LIMB
+            h2+=((load32(data offset+6) as uint64) >> 4) and LIMB
+            h3+=((load32(data offset+9) as uint64) >> 6) and LIMB
+            h4+=((load32(data offset+12) as uint64) >> 8) or final_bit
+
+            let d0=h0*r0+h1*s4+h2*s3+h3*s2+h4*s1
+            let d1=h0*r1+h1*r0+h2*s4+h3*s3+h4*s2
+            let d2=h0*r2+h1*r1+h2*r0+h3*s4+h4*s3
+            let d3=h0*r3+h1*r2+h2*r1+h3*r0+h4*s4
+            let d4=h0*r4+h1*r3+h2*r2+h3*r1+h4*r0
+
+            # Partial reduction: carry each limb into the next, folding the top
+            # carry back in times 5 (2^130 = 5 mod p).
+            let c=d0 >> 26
+            h0=d0 and LIMB
+            d1+=c
+            c=d1 >> 26
+            h1=d1 and LIMB
+            d2+=c
+            c=d2 >> 26
+            h2=d2 and LIMB
+            d3+=c
+            c=d3 >> 26
+            h3=d3 and LIMB
+            d4+=c
+            c=d4 >> 26
+            h4=d4 and LIMB
+            h0+=c*5
+            c=h0 >> 26
+            h0=h0 and LIMB
+            h1+=c
+            offset+=BLOCK
+        }
+        h=[h0 h1 h2 h3 h4]
+    }
+
+    update=(data:array<uint8>):>void=>{
+        let at=0
+        if pending.length >? 0 {
+            let take=min(BLOCK-pending.length data.length)
+            pending.extend(data[0..take))
+            at=take
+            if pending.length =? BLOCK {
+                absorb(pending 0 1 0x1000000)
+                pending.clear()
+            }
+        }
+        let whole=(data.length-at)//BLOCK
+        if whole >? 0 {
+            absorb(data at whole 0x1000000)
+            at+=whole*BLOCK
+        }
+        if at <? data.length pending.extend(data[at..data.length))
+    }
+
+    finish=():>Tag=>{
+        if pending.length >? 0 {
+            let last=pending
+            last.push(1)
+            loop last.length <? BLOCK {
+                last.push(0)
+            }
+            absorb(last 0 1 0)
+        }
+        let [h0 h1 h2 h3 h4]=h
+
+        # Full carry.
+        let c=h1 >> 26
+        h1=h1 and LIMB
+        h2+=c
+        c=h2 >> 26
+        h2=h2 and LIMB
+        h3+=c
+        c=h3 >> 26
+        h3=h3 and LIMB
+        h4+=c
+        c=h4 >> 26
+        h4=h4 and LIMB
+        h0+=c*5
+        c=h0 >> 26
+        h0=h0 and LIMB
+        h1+=c
+
+        # g = h + 5 - 2^130. If that did not borrow, h >= p and g is the result.
+        let g0=h0+5
+        c=g0 >> 26
+        g0=g0 and LIMB
+        let g1=h1+c
+        c=g1 >> 26
+        g1=g1 and LIMB
+        let g2=h2+c
+        c=g2 >> 26
+        g2=g2 and LIMB
+        let g3=h3+c
+        c=g3 >> 26
+        g3=g3 and LIMB
+        let g4=h4+c-(1 << 26)
+
+        # All ones when g4 did not borrow (keep g), zero when it did (keep h).
+        let keep_g=mask64((g4 >> 63) xor 1)
+        h0=(h0 and (not keep_g)) or (g0 and keep_g)
+        h1=(h1 and (not keep_g)) or (g1 and keep_g)
+        h2=(h2 and (not keep_g)) or (g2 and keep_g)
+        h3=(h3 and (not keep_g)) or (g3 and keep_g)
+        h4=(h4 and (not keep_g)) or (g4 and keep_g)
+
+        # h mod 2^128 as four 32-bit words, plus the pad s, mod 2^128.
+        let w0=(h0 or (h1 << 26)) and 0xffffffff
+        let w1=((h1 >> 6) or (h2 << 20)) and 0xffffffff
+        let w2=((h2 >> 12) or (h3 << 14)) and 0xffffffff
+        let w3=((h3 >> 18) or (h4 << 8)) and 0xffffffff
+        let f=w0+(pad[0] as uint64)
+        let out:array<uint8>=[]
+        store32(@out (f and 0xffffffff) as uint32)
+        f=w1+(pad[1] as uint64)+(f >> 32)
+        store32(@out (f and 0xffffffff) as uint32)
+        f=w2+(pad[2] as uint64)+(f >> 32)
+        store32(@out (f and 0xffffffff) as uint32)
+        f=w3+(pad[3] as uint64)+(f >> 32)
+        store32(@out (f and 0xffffffff) as uint32)
+        return out
+    }
+]
+
+# A fresh authenticator for a one-time key: r is clamped, s is the pad.
+poly1305_init=(key:OneTimeKey):>Poly1305=>{
+    let k=key as array<uint8>
+    let mac=Poly1305()
+    mac.r=[
+        (load32(k 0) as uint64) and 0x3ffffff
+        ((load32(k 3) as uint64) >> 2) and 0x3ffff03
+        ((load32(k 6) as uint64) >> 4) and 0x3ffc0ff
+        ((load32(k 9) as uint64) >> 6) and 0x3f03fff
+        ((load32(k 12) as uint64) >> 8) and 0x00fffff
+    ]
+    mac.pad=[load32(k 16) load32(k 20) load32(k 24) load32(k 28)]
+    return mac
+}
+
+poly1305=(key:OneTimeKey message:array<uint8>):>Tag=>{
+    let mac=poly1305_init(key)
+    mac.update(message)
+    return mac.finish
+}

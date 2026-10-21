@@ -1,0 +1,47 @@
+# ChaCha20-Poly1305 AEAD (RFC 8439 section 2.6-2.8).
+#
+# `open` computes the expected tag and compares it with `ct.equal`, which reads
+# every byte whatever the contents. The plaintext is only produced after the tag
+# verifies, so a forgery learns nothing but the single public verdict.
+
+from p"ct.dewy" import equal, store64
+from p"chacha.dewy" import Key, Nonce, block, xor_stream
+from p"poly.dewy" import Tag, OneTimeKey, poly1305_init
+
+Forged:type=type of error
+
+Sealed:type=[ciphertext:array<uint8> tag:Tag]
+
+# The one-time Poly1305 key: the first 32 bytes of keystream block 0.
+poly_key=(key:Key nonce:Nonce):>OneTimeKey=>{
+    let stream=block(key 0 nonce)
+    stream.truncate(32)
+    return stream
+}
+
+zeros_to_16=(n:int64):>array<uint8>=>[loop i in [0..(16-n%16)%16) 0 as uint8]
+
+# The authenticated transcript: aad, padding, ciphertext, padding, both lengths.
+tag_for=(key:Key nonce:Nonce aad:array<uint8> ciphertext:array<uint8>):>Tag=>{
+    let mac=poly1305_init(poly_key(key nonce))
+    mac.update(aad)
+    mac.update(zeros_to_16(aad.length))
+    mac.update(ciphertext)
+    mac.update(zeros_to_16(ciphertext.length))
+    let lengths:array<uint8>=[]
+    store64(@lengths aad.length as uint64)
+    store64(@lengths ciphertext.length as uint64)
+    mac.update(lengths)
+    return mac.finish
+}
+
+seal=(key:Key nonce:Nonce aad:array<uint8> plaintext:array<uint8>):>Sealed=>{
+    let ciphertext=xor_stream(key 1 nonce plaintext)
+    return Sealed[ciphertext tag_for(key nonce aad ciphertext)]
+}
+
+open=(key:Key nonce:Nonce aad:array<uint8> sealed:Sealed):>array<uint8>|Forged=>{
+    let expected=tag_for(key nonce aad sealed.ciphertext)
+    if not equal(expected as array<uint8> sealed.tag as array<uint8>) return Forged
+    return xor_stream(key 1 nonce sealed.ciphertext)
+}
