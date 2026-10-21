@@ -1588,6 +1588,7 @@ facts_finalize = ():
     fact_requests = []
     fact_terms = []
     if proof_active: proof_erase()
+    if wit_collected > 0: stop(1)
 
 # Harness-only policy; this is not a strict-lane surface or no-panic claim.
 facts_reset = ():
@@ -1598,7 +1599,8 @@ facts_reset = ():
     fact_query = false
     fact_policy = FactPolicy.RuntimeAllowed
     if let policy = env("DEWY_INTERNAL_FACT_POLICY"):
-        if policy == "require-static": fact_policy = .RequireStatic
+        if policy == "require-static" or policy == "require-static-all": fact_policy = .RequireStatic
+        wit_collect = policy == "require-static-all"
 
 positive_bounds_fn = -1
 positive_bounds: {int: int} = {}

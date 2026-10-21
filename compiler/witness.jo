@@ -19,6 +19,16 @@ struct WitSide:
     length: bool = false    # the length of the array named by node
     literal: bool = false
 
+# Harness-only (DEWY_INTERNAL_FACT_POLICY=require-static-all): report each
+# failed obligation and continue, so a measurement sees all of them.
+wit_collect = false
+wit_collected = 0
+wit_fail = (p: int, msg: str):
+    if not wit_collect: fatal(p, msg)
+    err_notes = []
+    eprint("{pos_str(p)}: error: {msg}")
+    wit_collected += 1
+
 # One note per span: a cause already shown at an event is not repeated.
 wit_note = (at: int, text: str):
     if at > 0:
@@ -292,7 +302,7 @@ wit_unknown = (n: int, b: FactBound, what: str, contract: int = 0, relation: str
     wit_context(contract)
     wit_help(relation, runtime)
     why = if b.reason == .missing and missing != "": "missing {missing}" else: wit_reason(b)
-    fatal(nodes[n].pos, "cannot prove {what}: {why}")
+    wit_fail(nodes[n].pos, "cannot prove {what}: {why}")
 
 wit_side = (value: int, node0: int) -> WitSide:
     node = node0
@@ -415,10 +425,12 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
         else: wit_relation(s, s, .lt, i, size, true)
         wit_context(0)
         wit_help(relation)
-        fatal(nodes[n].pos, "{read} is not in bounds")
+        wit_fail(nodes[n].pos, "{read} is not in bounds")
+        return
     b = fact_bound(s, index)
     if b.reason == .unsupported or b.reason == .wrap or b.reason == .budget or b.reason == .callee:
         wit_unknown(n, b, "{read} is in bounds", 0, relation)
+        return
     if lo != 1: wit_relation(s, s, .ge, i, zero, false, "lower bound")
     if hi != 1:
         wit_relation(s, s, .lt, i, size, false, "upper bound")
@@ -427,7 +439,7 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
     wit_context(0)
     wit_help(relation)
     which = if lo != 1 and hi != 1: "lower and upper bounds" else if lo != 1: "lower bound" else: "upper bound"
-    fatal(nodes[n].pos, "cannot prove {read} is in bounds: missing {which}")
+    wit_fail(nodes[n].pos, "cannot prove {read} is in bounds: missing {which}")
 
 wit_divisor = (n: int, s: FactState, divisor: int, zero: int, operand: int, refuted: bool):
     side = wit_side(divisor, operand)
@@ -436,7 +448,8 @@ wit_divisor = (n: int, s: FactState, divisor: int, zero: int, operand: int, refu
     wit_context(0)
     if refuted:
         wit_help(wit_relation_text(.ne, side, nil))
-        fatal(nodes[n].pos, "divisor refuted: zero")
+        wit_fail(nodes[n].pos, "divisor refuted: zero")
+        return
     wit_unknown(n, fact_bound(s, divisor), "divisor is nonzero", 0, wit_relation_text(.ne, side, nil), missing)
 
 wit_ref_text = (term: RefTerm, self: str) -> str:
@@ -469,13 +482,15 @@ wit_refinement = (n: int, t: int, atom: RefAtom, self: int, a: int, b: int, s: F
     relation = wit_relation_text(op, x, y)
     if refuted and ref_narrowing.has(n):
         wit_help(relation)
-        fatal(nodes[n].pos, "{shown} does not fit {dt(ref_narrowing[n])}")
+        wit_fail(nodes[n].pos, "{shown} does not fit {dt(ref_narrowing[n])}")
+        return
     missing = wit_relation(s, s, op, x, y, refuted)
     contract = ref_spans.get(int(types[t].st)) ?? 0
     if refuted:
         wit_context(contract)
         wit_help(relation)
-        fatal(nodes[n].pos, "refinement refuted: {shown} violates the declared contract")
+        wit_fail(nodes[n].pos, "refinement refuted: {shown} violates the declared contract")
+        return
     what = if relation != "": "refinement `{relation}`" else: "refinement"
     wit_unknown(n, fact_bound(s, self), what, contract, relation, missing)
 
@@ -496,5 +511,6 @@ wit_proof = (n: int, s: FactState, atom: RefAtom, a: int, b: int, f: int, self: 
     if refuted:
         wit_context(contract)
         wit_help(relation, false)
-        fatal(nodes[n].pos, "{what} refuted")
+        wit_fail(nodes[n].pos, "{what} refuted")
+        return
     wit_unknown(n, fact_bound(s, if wit_constant(s, a): b else: a), what, contract, relation, missing, false)
