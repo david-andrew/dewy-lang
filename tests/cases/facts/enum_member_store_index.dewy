@@ -1,0 +1,16 @@
+# quick
+$runtime_checks=false
+State:type='free'|'ready'
+Slot:type=[state:State count:int64]
+mark=(@slots:array<Slot length=4> i:int64):>void=>{
+    if i <? 0 or i >=? 4 return
+    slots[i].state='ready'
+    slots[i].count+=1
+}
+main=():>int64=>{
+    let slots:array<Slot length=4>=[[state='free' count=0] [state='free' count=0] [state='free' count=0] [state='free' count=0]]
+    mark(@slots 2)
+    mark(@slots 9)
+    printl("{slots[2].state} {slots[2].count} {slots[1].state}")
+    return 0
+}

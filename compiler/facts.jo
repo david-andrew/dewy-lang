@@ -1665,7 +1665,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
         value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
         s.projections.push(FactProjection(value, -3, false, fact_constant(s, 0)))
         return value
-    if k == .str_lit and nodes[n].aux == 0 or k == .float_lit or k == .none_lit or k == .null_lit: return 0
+    if k == .str_lit and nodes[n].aux == 0 or k == .float_lit or k == .none_lit or k == .null_lit or k == .dotname: return 0
     if k == .str_lit:
         # Interpolation evaluates each part in order, then calls its formatter,
         # which (like any opaque call) may write exposed roots.
