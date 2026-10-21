@@ -1,0 +1,29 @@
+# An object pattern matches the member with those fields and binds them
+Num:type = [sign:-1|1 limbs:array<int64>]
+size = (n:Num):>int64 => match n {
+    [sign:1 limbs] => limbs.length
+    [sign:-1 limbs] => -limbs.length
+}
+printl(size([sign=1 limbs=[1 2]]))
+printl(size([sign=-1 limbs=[3]]))
+
+Circle:type = [radius:int64]
+Rect:type = [w:int64 h:int64]
+Shape:type = Circle | Rect
+area = (s:Shape):>int64 => match s {
+    [radius] => 3 * radius * radius
+    [w h] => w * h
+}
+printl(area(Circle(2)))
+printl(area(Rect(3 4)))
+kind = (s:Shape):>string => match s {
+    [w:1 h] => "thin {h}"
+    <Rect> => "rect"
+    _ => "round"
+}
+printl(kind(Rect(1 9)))
+printl(kind(Rect(2 9)))
+printl(kind(Circle(1)))
+match Circle(5) {
+    [radius:5] => printl("five")
+}

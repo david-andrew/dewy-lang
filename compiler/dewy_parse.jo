@@ -2425,6 +2425,17 @@ dw_pattern = (id: int) -> int:
         p = mk(.pwild, pos)
         if name != "_": nodes[p].name = i32(intern(name))
         return p
+    # (`[sign:1 limbs]`: an object shape; `(a:int64 <string>)`: a sequence)
+    shape = dewy_syntax[id].kind == .block and dewy_syntax[id].text == "[]:"
+    if shape or dewy_syntax[id].kind == .block and dewy_syntax[id].text == "():" and dw_nchildren(id) >= 2:
+        p = mk(if shape: NK.pshape else: NK.pseq, pos)
+        parts: int[]
+        loop child in dw_children(id):
+            part = dw_pattern(child)
+            if shape and nodes[part].name == 0: return dw_fail(child, "an object pattern field without a name")
+            parts.push(part)
+        set_list(p, parts)
+        return p
     binding = ""
     if dw_op(id) == .colon:
         binding = dw_name(dw_child(id, 1))
@@ -2475,9 +2486,23 @@ dw_comma_fail = (id: int) -> int:
     fatal(dewy_syntax[id].pos, "Dewy separates arguments, parameters and elements with spaces, not commas: `add(1 2)`, `(a:int64 b:int64) => ...`, `[1 2 3]` (a comma steps a range, as in `[0,2..10]`)")
     0
 
+# the names a pattern binds
+dw_pattern_names = (p: int, out: mut int[]):
+    if nodes[p].kind == .pshape or nodes[p].kind == .pseq:
+        loop part in kids(p): dw_pattern_names(part, out)
+    else if nodes[p].name != 0: out.push(int(nodes[p].name))
+
 dw_match = (id: int, accumulator: int = 0, map: bool = false) -> int:
     n = mk(.match_, dewy_syntax[id].pos)
-    nodes[n].a = i32(dw_expr(dw_child(id, 1)))
+    scrutinee = dw_unwrap(dw_child(id, 1))
+    # (`match (x y) (a:int64 b:int64) => a + b`: a sequence of values, each read once)
+    if dewy_syntax[scrutinee].kind == .block and dewy_syntax[scrutinee].text == "():" and dw_nchildren(scrutinee) >= 2:
+        values = mk(.tuple, dewy_syntax[scrutinee].pos)
+        items: int[]
+        loop child in dw_children(scrutinee): items.push(dw_expr(child))
+        set_list(values, items)
+        nodes[n].a = i32(values)
+    else: nodes[n].a = i32(dw_expr(dw_child(id, 1)))
     body = dw_child(id, 2)
     arms = [body]
     if dewy_syntax[body].kind == .block and dewy_syntax[body].text == "{{}}:": arms = dw_children(body)
@@ -2488,7 +2513,9 @@ dw_match = (id: int, accumulator: int = 0, map: bool = false) -> int:
         pattern = dw_pattern(dw_child(source, 1))
         set_list(arm, [pattern])
         outer_siblings = dw_siblings
-        if nodes[pattern].name != 0: dw_shadow([int(nodes[pattern].name)])
+        bound: int[]
+        dw_pattern_names(pattern, bound)
+        if bound.len() > 0: dw_shadow(bound)
         nodes[arm].b = i32(dw_block(dw_child(source, 2), accumulator, map))
         dw_siblings = outer_siblings
         xs.push(arm)

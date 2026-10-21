@@ -1,0 +1,8 @@
+# Guards on an arbitrary-precision int compare the value itself
+describe = (n:int):>string => match n {
+    small:int<small <? 100> => "small {small}"
+    big:int => "big {big}"
+}
+printl(describe(5))
+printl(describe(2^80))
+printl(describe(-(2^80)))

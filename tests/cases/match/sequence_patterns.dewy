@@ -1,0 +1,15 @@
+# A sequence scrutinee is read once per value; a sequence pattern matches element by element
+x:int64 = 3
+y = "a"
+sum = match (x y) {
+    (a:int64 <string>) => a + 1
+}
+printl(sum)
+pair = (xs:array<int64>):>string => match xs {
+    (a b) => "two {a + b}"
+    (a <7> c) => "seven between {a} and {c}"
+    _ => "other {xs.length}"
+}
+printl(pair([1 2]))
+printl(pair([1 7 3]))
+printl(pair([1 2 3]))

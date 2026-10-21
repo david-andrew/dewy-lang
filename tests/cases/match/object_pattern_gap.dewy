@@ -1,0 +1,5 @@
+Num:type = [sign:-1|1 limbs:array<int64>]
+size = (n:Num):>int64 => match n {
+    [sign:1 limbs] => limbs.length
+}
+printl(size([sign=1 limbs=[1]]))

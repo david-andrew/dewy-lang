@@ -45,6 +45,7 @@ literal_members = (t0: int, pos: int, out: mut int[], singletons: mut int[]):
     known, values = int_intervals(t)
     if not known or types[t].kind != .refined or values.len() > 64: fatal(pos, "members(U) needs a union of literals, found {dt(t)}")
     loop k in [0..values.len() / 2):
+        if not small_span(values[2 * k], values[2 * k + 1], 64): fatal(pos, "members(U) needs a union of literals, found {dt(t)}")
         loop v in [values[2 * k]..values[2 * k + 1]]:
             n = bc_int(v, pos)
             nodes[n].type = i32(T_INT)
