@@ -678,8 +678,34 @@ dn_block = () -> int:
     dc_enabled = direct
     block
 
-dn_bracketed = () -> int:
-    opening = dn_take()
+dn_bracketed = () -> int: dn_bracketed_from(dn_take())
+
+# `name<<` opens two type-argument blocks when its `>>` closes on the same line;
+# otherwise (`x<<n`, `x<<(n + 1)`) it shifts
+dn_double_closes = () -> bool:
+    at = dn_at + 1
+    if at >= dn_tokens.len() or dn_tokens[at].space: return false
+    depth = 0
+    loop at < dn_tokens.len() and dn_tokens[at].kind != .eof and not dn_tokens[at].newline:
+        symbol = dn_tokens[at].symbol
+        if symbol == .lparen or symbol == .lbrack or symbol == .lbrace: depth += 1
+        else if symbol == .rparen or symbol == .rbrack or symbol == .rbrace:
+            depth -= 1
+            if depth < 0: return false
+        else if symbol == .shr and depth == 0 and not dn_tokens[at].space: return true
+        at += 1
+    false
+
+# `array<<(x:int64):>int64>>`: an adjacent `<<` opens two type-argument blocks
+dn_double_angle = () -> int:
+    outer = dn_tokens[dn_at]
+    outer.symbol = .langle
+    outer.stop = outer.start + 1
+    dn_tokens[dn_at].start += 1
+    dn_tokens[dn_at].symbol = .langle
+    dn_bracketed_from(outer)
+
+dn_bracketed_from = (opening: DewyLexeme) -> int:
     if opening.symbol == .lparen:
         op = dn_peek()
         if dn_partial_operator(op) or (op == .kw_not and dn_at + 1 < dn_tokens.len() and dn_token_invert(dn_tokens[dn_at + 1].symbol) != .none): return dn_partial(opening)
@@ -889,6 +915,9 @@ dn_expr = (minimum: int) -> int:
             continue
         if not token.space and op == .langle and minimum <= 160:
             left = dn_operator(.binary, .type_apply, left, dn_block())
+            continue
+        if not token.space and op == .shl and minimum <= 160 and dewy_syntax[left].kind == .identifier and dn_double_closes():
+            left = dn_operator(.binary, .type_apply, left, dn_double_angle())
             continue
         if op == .question and minimum <= 140:
             dn_at += 1

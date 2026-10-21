@@ -1,0 +1,11 @@
+# `<<` after a type name opens two type-argument blocks; elsewhere it shifts
+double = (x:int64):>int64 => x * 2
+handlers:array<<(x:int64):>int64>> = [@double]
+printl(handlers[0](21))
+mixed:array<<int64|string>> = [1 "a"]
+printl(mixed)
+x = 3
+n = 2
+printl(x<<n)
+printl(x<<(n + 1))
+printl(x<<4 >> 2)
