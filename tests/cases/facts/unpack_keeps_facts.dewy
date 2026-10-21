@@ -1,0 +1,11 @@
+# Unpacking stores, dictionary literals and zipped dictionary loops keep the
+# facts of everything they do not write.
+main=()=>{
+    let ws=[10 20 30]
+    let m=["a"->1 "b"->2]
+    let [first second]=[ws.length 2]
+    let total=0
+    loop [k v] in m and w in ws { total+=v*w }
+    $assert ws.length =? 3 and first =? 3 and second =? 2
+    printl(total ws[first-1])
+}

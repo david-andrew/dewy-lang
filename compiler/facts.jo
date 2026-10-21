@@ -329,6 +329,26 @@ fact_store_route = (s: mut FactState, route: FactRoute, value0: int, at: int, bo
     if fact_exposed(p): fact_forget(s, at, .write)
     fact_rebind(s, p, value, at, if values.len() > 0: values[0] else: 0)
 
+# Component i of an unpacked value of type t0: a tuple's field or an array's
+# element (a record's is not tracked by position).
+fact_component = (s: mut FactState, value: int, t0: int, i: int, ct: int) -> int:
+    t = representation_type(t0)
+    if tkind(t) == .tuple: return fact_project(s, value, i, false, ct)
+    if tkind(t) == .array or tkind(t) == .fixed: return fact_project(s, value, fact_constant(s, i), true, ct)
+    fact_new(s, fact_domain(ct))
+
+# An unpacking store `(a b) = value` writes each component's route.
+fact_store_pattern = (s: mut FactState, target: int, value: int, at: int, depth: int = 0):
+    k = nodes[target].kind
+    if k == .hole: return
+    if k == .tuple and depth < 32:
+        loop i in [0..nkids(target)):
+            c = kid(target, i)
+            if nodes[c].kind != .hole: fact_store_pattern(s, c, fact_component(s, value, ntype(target), i, ntype(c)), at, depth + 1)
+        return
+    route = fact_route(target, s)
+    fact_store_route(s, route, value, at, true)
+
 # A store's element selectors carry the obligation a load's do (fact_capture's index).
 fact_route_bounds = (s: mut FactState, route: FactRoute, values: int[]):
     loop i in [0..route.selectors.len()):
@@ -715,6 +735,10 @@ fact_field_node = (e: int) -> bool:
 # of the first array whose elements it writes. Everything at and below the
 # written element (or, with `resize`, the route's own value) is unknown.
 fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reason: FactReason):
+    if target != 0 and nodes[target].kind == .hole: return
+    if target != 0 and nodes[target].kind == .tuple:
+        loop c in kids(target): fact_change_route(s, c, resize, at, reason)
+        return
     chain: int[]
     e = target
     depth = 0
@@ -1526,6 +1550,15 @@ fact_capture = (n: int, s: mut FactState) -> int:
         r = if nodes[n].b != 0: fact_capture(int(nodes[n].b), s) else: fact_constant(s, 0, n)
         if ownership_decls.len() != 0: r = fact_owner_value(int(nodes[n].b), r, s)
         l = int(nodes[n].sym)
+        if nkids(n) > 0 and not has_flag(n, NF_GLOBAL):
+            # (unpacking: each name binds its component)
+            loop i in [0..nkids(n)):
+                c = kid(n, i)
+                if nodes[c].kind == .hole: continue
+                if nodes[c].sym <= 0 or has_flag(c, NF_GLOBAL): fact_forget(s, n, .write, true); return 0
+                cl = int(nodes[c].sym)
+                fact_bind(s, PlaceIdentity(.local, int(locals[cl].owner), cl), fact_component(s, r, ntype(int(nodes[n].b)), i, int(locals[cl].type)))
+            return r
         if nkids(n) > 0 or l == 0: fact_forget(s, n, .write, true); return 0
         if has_flag(n, NF_GLOBAL): fact_bind(s, PlaceIdentity(.global, 0, l), r)
         else if not (nodes[n].aux2 == 1 and int(locals[l].flags) & LF_PARAM != 0): fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), r)
@@ -1537,6 +1570,9 @@ fact_capture = (n: int, s: mut FactState) -> int:
         r = fact_capture(int(nodes[n].b), s)
         if ownership_decls.len() != 0: r = fact_owner_value(int(nodes[n].b), r, s)
         op = nodes[n].op as Tok
+        if nodes[a].kind == .tuple and op == .assign:
+            fact_store_pattern(s, a, r, n)
+            return r
         if nodes[n].aux == 0 and (op == .pluseq or op == .minuseq):
             arithmetic_op = if op == .pluseq: Tok.plus else: Tok.minus
             r = fact_arithmetic(s, a, arithmetic_op, old, r)
@@ -1792,6 +1828,13 @@ fact_capture = (n: int, s: mut FactState) -> int:
         # (an owned binding ends here; its hook may write exposed storage)
         if k == .iflet and ownership_decls.len() != 0: fact_forget(s, n, .call)
         return fact_new(s, result)
+    if k == .map_lit:
+        # (each entry is inserted by a call: an unknown callee's effects)
+        loop p in kids(n):
+            fact_capture(int(nodes[p].a), s)
+            fact_capture(int(nodes[p].b), s)
+            fact_forget(s, n, .call)
+        return fact_new(s, fact_domain(ntype(n)))
     if k == .match_:
         # Arms are tried in order: each sees its predecessors' pattern
         # operands and failed tags, and a matched arm knows its tag.
