@@ -4411,9 +4411,7 @@ dewy_len_check = (n: int, member: bool, t0: int, object: int):
     if not dewy_at(nodes[n].pos): return
     t = prune(t0)
     k = tkind(t)
-    # (and of the library's Jo containers, Heap and Pool; a Dewy record's own `len` is its protocol)
-    jo_lib = k == .struct_ and int(structs[int(types[t].st)].decl) != 0 and pos_in_lib(nodes[int(structs[int(types[t].st)].decl)].pos) and not files[pos_file(nodes[int(structs[int(types[t].st)].decl)].pos)].is_dewy
-    if k != .array and k != .fixed and k != .str_ and not is_map_type(t) and not is_dewy_set_type(t) and not jo_lib: return
+    if k != .array and k != .fixed and k != .str_ and not is_map_type(t) and not is_dewy_set_type(t): return
     if member:
         if (dewy_len_members.get(n) ?? -1) != nodes[n].pos: return
         fatal(nodes[n].pos, "Dewy's length is `.length`: write `{receiver_text(object)}.length`")
