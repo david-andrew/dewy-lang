@@ -19,7 +19,7 @@ dc_force_all = ():
 # No diagnostic from a speculative parse/check may escape before replay. This
 # also covers errors in the serial prefix, before the workers can be started.
 dc_replay = ():
-    if not dc_lazy_used: return
+    if not dc_lazy_used and not pc_reordered: return
     if pc_child >= 0: exit(1)
     pc_cancel()
     a = args()
@@ -32,6 +32,7 @@ dc_replay = ():
 
 dc_flush_warnings = ():
     dc_lazy_used = false
+    pc_reordered = false
     loop i in [0..dc_warning_pos.len()): warn(dc_warning_pos[i], dc_warning_text[i])
     dc_warning_pos = []
     dc_warning_text = []

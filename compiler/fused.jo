@@ -94,7 +94,7 @@ fz_ro: int[]                # emission constants: bits, local offset
 
 # 0 function (local lf, inst); 1 helper (local lf, kind, type, p); 2 string (local offset,
 # text); 3 global (local offset, global); 4 empty box (local offset, type); 5 warning (pos, text);
-# 6 raw constant (local offset, alignment, length, bytes)
+# 6 raw constant (local offset, alignment, length, bytes); 7 deterministic call (node)
 fz_note = (kind: int, local: int, a: int, b: int, c: int):
     fz_j.push(kind)
     fz_j.push(local)
@@ -215,6 +215,7 @@ fused_start = (pinit_lf: int) -> bool:
                         owner = next % pc_workers
                         next += 1
                     if owner == pc_child: mine.push(f)
+                if (env("DEWY_FUSED_FAIL_WORKER") ?? "") == "{pc_child}": exit(1)
                 fz_worker(mine, 0, mine.len(), pc_emit)
             pids = pc_pids
             fds = pc_fds
@@ -237,6 +238,7 @@ fused_start = (pinit_lf: int) -> bool:
                         syscall(33, nullfd, 2)
                         syscall(3, nullfd)
                 __olen = 0
+                if (env("DEWY_FUSED_FAIL_WORKER") ?? "") == "{w}": exit(1)
                 fz_worker(cands, cuts[w], cuts[w + 1], wfd)
             syscall(3, wfd)
             if pid < 0:
@@ -731,6 +733,8 @@ fz_replay = (lf: int) -> bool:
         else if kind == 5:
             warn(a, x.texts[t])
             t += 1
+        else if kind == 7:
+            det_check(int(nodes[a].sym), kids(a), nodes[a].pos)
         else if kind == 6:
             loop rodata.len() % a != 0: rodata.push(0)
             o = rodata.len()

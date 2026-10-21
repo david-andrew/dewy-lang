@@ -4058,7 +4058,10 @@ gen_expr_value = (e: int) -> Val:
             arithmetic = gen_constant_floor(e)
             if arithmetic >= 0: return V(arithmetic, false)
             if fns[int(nodes[e].sym)].parallel: race_check(int(nodes[e].sym), kids(e), nodes[e].pos)
-            if fns[int(nodes[e].sym)].deterministic: det_check(int(nodes[e].sym), kids(e), nodes[e].pos)
+            if fns[int(nodes[e].sym)].deterministic:
+                # Cache ownership follows reachable serial lowering, not worker candidates.
+                if fused_on: fz_note(7, 0, e, 0, 0)
+                else: det_check(int(nodes[e].sym), kids(e), nodes[e].pos)
             order: int[]
             if nodes[e].c != 0: order = call_eval_order(e)
             target = if ownership_prints.has(e): runtime_fn("__owner_print") else: int(nodes[e].sym)

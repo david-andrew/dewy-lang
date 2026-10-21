@@ -32,6 +32,7 @@ def build(compiler, source, output, workers, **extra):
     run = subprocess.run([compiler, 'build', source, '-o', output], cwd=output.parent, env=env,
                          capture_output=True, text=True, timeout=120)
     assert run.returncode == 0, run.stdout + run.stderr
+    assert run.stdout == "", run.stdout
     return output.read_bytes(), run.stderr
 
 
@@ -42,10 +43,11 @@ def check(compiler, source, directory, **extra):
         assert err == base_err, f'{workers} workers: diagnostics differ'
         assert got == base, f'{workers} workers: binary differs from one process'
     # (not vacuous: the fused workers made most functions)
-    _, timed = build(compiler, source, directory / 'timed', 4, SLOPPY_PAR_TIME='1', **extra)
-    fused = re.search(r'fused: 4 workers, \d+ functions, .*, (\d+) records, (\d+) valid', timed)
-    assert fused, 'the fused path did not run:\n' + timed
-    assert int(fused.group(2)) * 2 > int(fused.group(1)), fused.group(0)
+    for workers in (2, 4):
+        _, timed = build(compiler, source, directory / 'timed', workers, SLOPPY_PAR_TIME='1', **extra)
+        fused = re.search(rf'fused: {workers} workers, \d+ functions, .*, (\d+) records, (\d+) valid', timed)
+        assert fused, 'the fused path did not run:\n' + timed
+        assert int(fused.group(2)) * 2 > int(fused.group(1)), fused.group(0)
 
 
 def test_fused_root_heavy_program(compiler, tmp_path):

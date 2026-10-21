@@ -256,11 +256,13 @@ show_line = (p: int):
 # the editor's checks start over each time, so not there)
 warned: {str: bool} = {}
 warn = (p: int, msg: str):
+    # A prechecked library warning belongs after the pending roots. Replay there.
+    if pc_prechecking: dc_replay()
     if pc_collect:
         pc_warn_pos.push(p)
         pc_warn_text.push(msg)
         return
-    if dc_lazy_used:
+    if dc_lazy_used or pc_reordered:
         dc_warning_pos.push(p)
         dc_warning_text.push(msg)
         return

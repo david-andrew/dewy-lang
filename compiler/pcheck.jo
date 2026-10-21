@@ -25,6 +25,8 @@ use 'main.jo'
 use 'copies.jo'
 
 pc_tried = false
+pc_reordered = false
+pc_prechecking = false
 pc_prefix = 0
 pc_active = false
 pc_child = -1
@@ -81,7 +83,7 @@ pc_try = (start: int):
     else when TARGET != "linux" or ARCH != "x86_64":
         return
     else:
-        if pc_tried or not pc_root(start): return
+        if pc_tried or dc_eager or shown_warnings.len() > 0 or not pc_root(start): return
         pc_prefix += 1
         if pc_prefix <= 2: return
         pc_tried = true
@@ -102,6 +104,8 @@ pc_try = (start: int):
             if node.kind == .lambda and node.pos > 0 and not pos_in_lib(node.pos): return
         # Pending library instances have canonical identities already. Check their
         # closure once so the continuing parent and every worker inherit it.
+        pc_reordered = true
+        pc_prechecking = true
         lib_cursor = start
         lib_checked = 0
         loop lib_cursor < fns.len():
@@ -109,6 +113,7 @@ pc_try = (start: int):
                 check_fn_body(lib_cursor)
                 lib_checked += 1
             lib_cursor += 1
+        pc_prechecking = false
         if env("SLOPPY_PAR_TIME") != none: eprint("pcheck: checked {lib_checked} pending library instances before fork")
         if open_globals.len() != 0 or not pc_features(): return
         n = min(4, emit_workers())
@@ -241,7 +246,17 @@ pc_check = (roots: int[], outfd: int, infd: int, parsefd: int):
     e0 = embedded_files.len()
     ct0 = ct_values.len()
     gs: int[]
-    loop g in globals: gs.push(int(g.state))
+    reads0: bool[]
+    loop read in global_read: reads0.push(read)
+    loop g in globals:
+        gs.push(int(g.state))
+        gs.push(int(g.fn_written))
+    # Counts do not catch inference of an existing type variable or checking a
+    # foreign body. Layout caches are pure memoization; inference is not.
+    refs: i32[]
+    loop t in types: refs.push(t.ref)
+    signatures: (i32, i32, i32)[]
+    loop f in fns: signatures.push((f.state, f.ret, f.fntype))
     mine: int[]
     loop f in roots:
         if pc_owner[f] == pc_child: mine.push(f)
@@ -284,7 +299,15 @@ pc_check = (roots: int[], outfd: int, infd: int, parsefd: int):
     pc_collect = false
     if not pc_features() or open_globals.len() != 0: exit(1)
     loop g in [0..globals.len()):
-        if globals[g].state != i32(gs[g]): exit(1)
+        if globals[g].state != i32(gs[g * 2]) or int(globals[g].fn_written) != gs[g * 2 + 1]: exit(1)
+    if global_read.len() != reads0.len(): exit(1)
+    loop g in [0..global_read.len()):
+        if global_read[g] != reads0[g]: exit(1)
+    loop t in [0..types.len()):
+        if types[t].ref != refs[t]: exit(1)
+    loop f in [0..fns.len()):
+        if fns[f].ret != signatures[f].1 or fns[f].fntype != signatures[f].2: exit(1)
+        if (pc_owner.get(f) ?? -1) != pc_child and fns[f].state != signatures[f].0: exit(1)
     pw(out, fn_used.len())
     loop d, _ in fn_used: pw(out, d)
     pw(out, 0x5043484B)

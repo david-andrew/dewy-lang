@@ -67,6 +67,7 @@ emit_parallel = (q: IrFn[], fin: bool[]) -> bool:
             pid = syscall(57)
             if pid == 0:
                 syscall(3, rfd)
+                if (env("DEWY_EMIT_FAIL_WORKER") ?? "") == "{w}": exit(1)
                 par_worker(q, fin, cuts[w], cuts[w + 1], r0, wfd)
             syscall(3, wfd)
             if pid < 0:
