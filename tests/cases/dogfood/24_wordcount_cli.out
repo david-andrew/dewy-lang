@@ -1,0 +1,28 @@
+$ wc --config dogfood_wc.conf dogfood_input.txt
+runs     3
+fox      2
+dog      2
+quick    1
+exit 0
+$ wc
+usage error: no input files
+usage: wc [--config FILE] [--top N] FILE...
+exit 2
+$ wc --top x dogfood_input.txt
+usage error: --top needs a number, got 'x'
+usage: wc [--config FILE] [--top N] FILE...
+exit 2
+$ wc --config dogfood_wc.conf --top 2 dogfood_input.txt
+runs     3
+fox      2
+exit 0
+$ wc --config dogfood_bad.conf dogfood_input.txt
+dogfood_bad.conf:2: unknown key 'colour'
+exit 3
+$ wc --config dogfood_wc.conf missing.txt
+cannot read missing.txt
+exit 4
+$ wc --frob
+usage error: unknown option --frob
+usage: wc [--config FILE] [--top N] FILE...
+exit 2

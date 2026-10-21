@@ -1,0 +1,94 @@
+# Generic containers: a stack, a queue and an LRU cache.
+Stack:type=<T>[
+    items:array<T>=[]
+    push=(x:T):>void=>{items.push(x)}
+    pop=():>T|none=>{
+        if items.length =? 0 return none
+        return items.pop()
+    }
+    peek=():>T|none=>if items.length >? 0 items[end] else none
+    size=():>int64=>items.length
+    is_empty=():>bool=>items.length =? 0
+]
+
+Queue:type=<T>[
+    front:array<T>=[]
+    back:array<T>=[]
+    enqueue=(x:T):>void=>{back.push(x)}
+    dequeue=():>T|none=>{
+        if front.length =? 0 {
+            loop back.length >? 0 { front.push(back.pop()) }
+        }
+        if front.length =? 0 return none
+        return front.pop()
+    }
+    size=():>int64=>front.length+back.length
+]
+
+LRU:type=<K V>[
+    capacity:int64
+    entries:dict<K V>=[]
+    order:array<K>=[]
+    get=(key:K):>V|none=>{
+        let found=entries.get(key)
+        if found is? none return none
+        touch(key)
+        return found
+    }
+    put=(key:K value:V):>void=>{
+        if key in? entries {
+            entries[key]=value
+            touch(key)
+            return
+        }
+        if entries.length >=? capacity {
+            let oldest=order.pop(0)
+            entries.remove(oldest)
+        }
+        entries[key]=value
+        order.push(key)
+    }
+    touch=(key:K):>void=>{
+        let i=order.index_of(key)
+        if i >=? 0 {
+            order.pop(i)
+            order.push(key)
+        }
+    }
+]
+
+Point:type=[x:int64 y:int64]
+
+main=()=>{
+    # ints
+    let s=Stack<int64>[]
+    loop i in [1..5] s.push(i*i)
+    printl("stack size {s.size}, top {s.peek}")
+    let total=0
+    loop not s.is_empty {
+        let v=s.pop
+        if v isnt? none total+=v
+    }
+    printl("sum of squares: {total}")
+
+    # strings
+    let q=Queue<string>[]
+    loop word in ["alpha" "beta" "gamma"] q.enqueue(word)
+    printl("dequeued {q.dequeue()}")
+    q.enqueue("delta")
+    loop q.size >? 0 {
+        printl("  next: {q.dequeue() ?? "?"}")
+    }
+    printl("empty queue gives {q.dequeue()}")
+
+    # records
+    let cache=LRU<string Point>[capacity=2]
+    cache.put("a" Point[1 2])
+    cache.put("b" Point[3 4])
+    printl("a -> {cache.get("a")}")
+    cache.put("c" Point[5 6])
+    printl("b -> {cache.get("b")}")
+    printl("a -> {cache.get("a")}")
+    printl("c -> {cache.get("c")}")
+    printl("order {cache.order}")
+}

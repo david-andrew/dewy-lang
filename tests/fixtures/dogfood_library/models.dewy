@@ -1,0 +1,16 @@
+# Shared record types for the library system.
+Book:type=[
+    isbn:string
+    title:string
+    author:string
+    year:int64
+    copies:int64=1
+]
+
+Member:type=[
+    id:int64
+    name:string
+    borrowed:array<string>=[]
+]
+
+describe=(b:Book):>string=>"{b.title} by {b.author} ({b.year})"

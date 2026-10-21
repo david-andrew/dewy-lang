@@ -1,0 +1,83 @@
+# Event-sourced bank ledger: an immutable event log, folded into state.
+Event:type=type of any & [at:int64 account:string]
+Opened:type=type of Event & [owner:string]
+Deposited:type=type of Event & [amount:int64]
+Withdrew:type=type of Event & [amount:int64]
+Transferred:type=type of Event & [to:string amount:int64]
+Closed:type=type of Event
+
+Account:type=[owner:string balance:int64=0 open:bool=true history:int64=0]
+State:type=[accounts:dict<string Account>=[] rejected:array<string>=[]]
+
+apply=(s:State e:Event):>State=>{
+    let next=s
+    match e {
+        o:Opened => {next.accounts[o.account]=Account[owner=o.owner]}
+        d:Deposited => {
+            next.accounts[d.account].balance+=d.amount
+            next.accounts[d.account].history+=1
+        }
+        w:Withdrew => {
+            if next.accounts[w.account].balance <? w.amount {
+                next.rejected.push("t={w.at}: {w.account} overdraw {w.amount}")
+            } else {
+                next.accounts[w.account].balance-=w.amount
+                next.accounts[w.account].history+=1
+            }
+        }
+        t:Transferred => {
+            if next.accounts[t.account].balance <? t.amount {
+                next.rejected.push("t={t.at}: transfer {t.amount} from {t.account}")
+            } else {
+                next.accounts[t.account].balance-=t.amount
+                next.accounts[t.to].balance+=t.amount
+            }
+        }
+        c:Closed => {next.accounts[c.account].open=false}
+        _ => {}
+    }
+    return next
+}
+
+replay=(events:array<Event> until:int64=int64.max):>State=>{
+    let s=State[]
+    loop e in events {
+        if e.at >? until break
+        s=apply(s e)
+    }
+    return s
+}
+
+report=(title:string s:State):>void=>{
+    printl("== {title}")
+    loop [id acct] in s.accounts {
+        let status=if acct.open "open" else "closed"
+        printl("  {id} ({acct.owner}): {acct.balance} [{status}]")
+    }
+    loop r in s.rejected printl("  rejected {r}")
+}
+
+main=()=>{
+    const log:array<Event>=[
+        Opened[at=1 account="A1" owner="ann"]
+        Opened[at=2 account="B1" owner="bob"]
+        Deposited[at=3 account="A1" amount=500]
+        Withdrew[at=4 account="B1" amount=50]
+        Transferred[at=5 account="A1" to="B1" amount=200]
+        Deposited[at=6 account="B1" amount=25]
+        Withdrew[at=7 account="A1" amount=400]
+        Closed[at=8 account="A1"]
+    ]
+    report("final" replay(log))
+    report("as of t=5" replay(log 5))
+
+    let deposits=[loop e in log if e is? Deposited e.amount]
+    printl("total deposited: {sum(deposits)}")
+    let per_account:dict<string int64>=[]
+    loop e in log {
+        if per_account.get(e.account) is? none per_account[e.account]=0
+        per_account[e.account]+=1
+    }
+    printl("events per account: {per_account}")
+    printl("log still has {log.length} events")
+}

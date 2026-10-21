@@ -1,0 +1,46 @@
+# Projectile with quadratic air drag, using units.
+from units import m, kg, deg
+
+Speed:type=float64 * Length / Time
+Accel:type=float64 * Length / Time^2
+
+const g:Accel=9.81m/s^2
+
+State:type=[
+    x:float64 * Length
+    y:float64 * Length
+    vx:Speed
+    vy:Speed
+]
+
+simulate=(speed:Speed angle:float64 * Angle mass:float64 * Mass drag:float64 * Mass / Length dt:float64 * Time):>State=>{
+    let state=State[0.0m 0.0m speed*cos(angle) speed*sin(angle)]
+    let t:float64 * Time=0.0s
+    loop state.y >=? 0.0m {
+        let v=sqrt(state.vx*state.vx + state.vy*state.vy)
+        let ax=-(drag/mass)*v*state.vx
+        let ay=-g - (drag/mass)*v*state.vy
+        state.vx+=ax*dt
+        state.vy+=ay*dt
+        state.x+=state.vx*dt
+        state.y+=state.vy*dt
+        t+=dt
+    }
+    printl("  flight time {format(t/s ".2f")} s")
+    return state
+}
+
+main=()=>{
+    let launch:Speed=50.0m/s
+    let ball_mass:float64 * Mass=0.145kg
+    printl("No drag:")
+    let ideal=simulate(launch 45deg ball_mass 0.0kg/m 0.001s)
+    printl("  range {format(ideal.x/m ".1f")} m")
+    printl("With drag:")
+    let real=simulate(launch 45deg ball_mass 0.0013kg/m 0.001s)
+    printl("  range {format(real.x/m ".1f")} m")
+    let analytic=launch*launch/g
+    printl("Analytic no-drag range {format(analytic/m ".1f")} m")
+    let loss=(1.0 - real.x/ideal.x)*100.0
+    printl("Drag shortens the range by {format(loss ".0f")}%")
+}

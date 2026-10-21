@@ -1,0 +1,75 @@
+# A tiny template engine: {name} substitution, {{ and }} escapes, {name|filter},
+# and errors for unknown names or unclosed braces.
+TemplateError:type=type of error & [message:string column:int64]
+
+apply_filter=(value:string filter:string col:int64):>string|TemplateError=>{
+    if filter =? "" return value
+    if filter =? "upper" return value.upper()
+    if filter =? "lower" return value.lower()
+    if filter =? "trim" return value.trim()
+    if filter =? "title" {
+        let words=[loop w in value.split(" ") if w.length >? 0 w[0].upper()+w[1..].lower()]
+        return words.join(" ")
+    }
+    return TemplateError["unknown filter '{filter}'" col]
+}
+
+render=(template:string vars:dict<string string>):>string|TemplateError=>{
+    let out=""
+    let i=0
+    let n=template.length
+    loop i <? n {
+        let c=template[i]
+        if c =? "\{" {
+            if i+1 <? n and template[i+1] =? "\{" {
+                out+="\{"
+                i+=2
+                continue
+            }
+            let close=template.find("\}" i)
+            if close is? none return TemplateError["unclosed '\{'" i+1]
+            let inner=template[i+1..close).trim()
+            let parts=inner.split("|")
+            let name=parts[0].trim()
+            let filter=if parts.length >? 1 parts[1].trim() else ""
+            let value=vars.get(name)
+            if value is? none return TemplateError["unknown name '{name}'" i+1]
+            out+=apply_filter(value filter i+1) or_throw
+            i=close+1
+        } else if c =? "\}" {
+            if i+1 <? n and template[i+1] =? "\}" {
+                out+="\}"
+                i+=2
+                continue
+            }
+            return TemplateError["single '\}' (write '\}\}')" i+1]
+        } else {
+            out+=c
+            i+=1
+        }
+    }
+    return out
+}
+
+show=(template:string vars:dict<string string>):>void=>{
+    match render(template vars) {
+        text:string => printl(text)
+        e:TemplateError => {
+            printl("error at column {e.column}: {e.message}")
+            printl("  {template}")
+            printl("  {" " * (e.column-1)}^")
+        }
+    }
+}
+
+main=()=>{
+    let vars=["name"->"ada lovelace" "lang"->"Dewy" "city"->"  London  " "n"->"3"]
+    show(r"Hello, {name|title}! Welcome to {lang}." vars)
+    show(r"{lang|upper} has {n} new messages for {name|upper} in {city|trim}." vars)
+    show(r"Literal braces: {{name}} and {{ {lang} }}" vars)
+    show(r"Unicode: café {lang} 🙂 {n}" vars)
+    show(r"Missing: {nobody}" vars)
+    show(r"Unclosed: {name" vars)
+    show(r"Bad filter: {name|shout}" vars)
+    show(r"Stray: a } b" vars)
+}

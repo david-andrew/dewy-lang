@@ -1,0 +1,32 @@
+# A library catalog split over three modules with shared record types.
+import p"../../fixtures/dogfood_library/models.dewy" as models
+from p"../../fixtures/dogfood_library/catalog.dewy" import Catalog, new_catalog, add_book, find_by_author, available
+
+checkout=(@cat:Catalog @m:models.Member isbn:string):>bool=>{
+    if not available(cat isbn) return false
+    cat.books[isbn].copies -= 1
+    m.borrowed.push(isbn)
+    return true
+}
+
+main=()=>{
+    let cat=new_catalog()
+    add_book(@cat models.Book["111" "Dune" "Frank Herbert" 1965])
+    add_book(@cat models.Book["222" "Children of Dune" "Frank Herbert" 1976 2])
+    add_book(@cat models.Book["333" "Neuromancer" "William Gibson" 1984])
+    add_book(@cat models.Book["111" "Dune" "Frank Herbert" 1965])
+
+    printl("Catalog has {cat.books.length} titles")
+    loop b in find_by_author(cat "Frank Herbert") {
+        printl("  {models.describe(b)} x{b.copies}")
+    }
+
+    let alice=models.Member[1 "Alice"]
+    let bob:models.Member=[id=2 name="Bob"]
+    printl(checkout(@cat @alice "333"))
+    printl(checkout(@cat @bob "333"))
+    printl(checkout(@cat @bob "111"))
+    printl("{alice.name} has {alice.borrowed}")
+    printl("{bob.name} has {bob.borrowed}")
+    printl("Dune copies left: {cat.books["111"].copies}")
+}

@@ -1,0 +1,23 @@
+from p"models.dewy" import Book, describe
+
+Catalog:type=[books:dict<string Book>]
+
+new_catalog=():>Catalog=>Catalog[[]]
+
+add_book=(@c:Catalog b:Book):>void=>{
+    if b.isbn in? c.books {
+        c.books[b.isbn].copies += b.copies
+    } else {
+        c.books[b.isbn]=b
+    }
+}
+
+find_by_author=(c:Catalog author:string):>array<Book>=>{
+    [loop [_ b] in c.books if b.author =? author b]
+}
+
+available=(c:Catalog isbn:string):>bool=>{
+    let b=c.books.get(isbn)
+    if b is? none return false
+    return b.copies >? 0
+}

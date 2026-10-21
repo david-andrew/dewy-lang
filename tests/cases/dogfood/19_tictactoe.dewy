@@ -1,0 +1,85 @@
+# modes: native native-release
+# stdin: 5\n1\nx\n3\n4\n8\n9\n
+# Tic-tac-toe: a human (X, from stdin) against a minimax AI (O).
+LINES=[[0 1 2] [3 4 5] [6 7 8] [0 3 6] [1 4 7] [2 5 8] [0 4 8] [2 4 6]]
+
+Board:type=[cells:array<string>=[" " " " " " " " " " " " " " " " " "]]
+
+show=(b:Board):>void=>{
+    loop row in [0..3) {
+        let r=row*3
+        printl(" {b.cells[r]} | {b.cells[r+1]} | {b.cells[r+2]}")
+        if row <? 2 printl("---+---+---")
+    }
+}
+
+winner=(b:Board):>string|none=>{
+    loop line in LINES {
+        let [a c d]=line
+        if b.cells[a] not=? " " and b.cells[a] =? b.cells[c] and b.cells[c] =? b.cells[d] {
+            return b.cells[a]
+        }
+    }
+    return none
+}
+
+full=(b:Board):>bool=>" " not in? b.cells
+
+other=(p:string):>string=>if p =? "X" "O" else "X"
+
+# score from O's point of view: +10 win, -10 loss, 0 draw; prefer quick wins
+minimax=(b:Board player:string depth:int64):>int64=>{
+    let w=winner(b)
+    if w =? "O" return 10-depth
+    if w =? "X" return depth-10
+    if full(b) return 0
+    let best=if player =? "O" -1000 else 1000
+    loop i in [0..9) {
+        if b.cells[i] not=? " " continue
+        let next=b
+        next.cells[i]=player
+        let score=minimax(next other(player) depth+1)
+        if player =? "O" best=max(best score) else best=min(best score)
+    }
+    return best
+}
+
+best_move=(b:Board):>int64=>{
+    let best_score=-1000
+    let move=-1
+    loop i in [0..9) {
+        if b.cells[i] not=? " " continue
+        let next=b
+        next.cells[i]="O"
+        let s=minimax(next "X" 1)
+        if s >? best_score {
+            best_score=s
+            move=i
+        }
+    }
+    return move
+}
+
+main=()=>{
+    let board=Board[]
+    let turn="X"
+    loop winner(board) is? none and not full(board) {
+        if turn =? "X" {
+            let line=input("Your move (1-9): ")
+            let n=to_int(line.trim())
+            if n is? none or n <? 1 or n >? 9 or board.cells[n-1] not=? " " {
+                printl("invalid move '{line}'")
+                continue
+            }
+            board.cells[n-1]="X"
+        } else {
+            let m=best_move(board)
+            printl("AI plays {m+1}")
+            board.cells[m]="O"
+        }
+        show(board)
+        turn=other(turn)
+    }
+    let w=winner(board)
+    if w is? none printl("Draw!") else printl("{w} wins!")
+}
