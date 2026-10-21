@@ -37,7 +37,6 @@ def test_direct_flow_identity(compiler, tmp_path, release):
     assert images[0] == images[1]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('statement', ['if true {return 1}',
     'loop false and true {return 1}', 'loop i in [0 1] and j in [2 3] {return i+j}',
     'loop i in [0,2..10) {value+=i}', 'loop i in [0..3) {value+=i} else {value+=2}',

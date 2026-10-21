@@ -7,7 +7,6 @@ from tests.support import compiler, run_value_batch, build_exit_batch
 from tests.test_core_callback_specialization import CASES
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_named_callback_effect_order(compiler, tmp_path, release, target):
@@ -26,7 +25,6 @@ def test_named_callback_effect_order(compiler, tmp_path, release, target):
         assert value == '42', f'{name}: {diagnostic or value}'
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_named_callback_panic_order(compiler, tmp_path, release, target):

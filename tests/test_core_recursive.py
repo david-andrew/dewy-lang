@@ -602,7 +602,6 @@ draw=():>void=>clear(BLACK)
         watcher.close()
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('kind', ['optional', 'union'])
 def test_core_field_assignment_narrowing_is_order_independent(compiler, tmp_path, kind):
     if kind == 'optional':

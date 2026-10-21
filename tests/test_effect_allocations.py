@@ -24,7 +24,6 @@ main=():>int64=>0
     assert 'witness at ' in result.stderr and 'growth.dewy:1:' in result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['check', 'default', 'release'])
 def test_effect_readonly_and_library_body(compiler, tmp_path, mode):
     source = tmp_path / 'read.dewy'

@@ -19,7 +19,6 @@ def check(compiler, tmp_path, source):
     return subprocess.run([compiler, 'check', path], text=True, capture_output=True, timeout=30)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('source,diagnostic', [
     ('$proof\np=():><0 =? 0>=>{q()}\n$proof\nq=():><0 =? 0>=>{p()}\nmain=()=>p()', 'cyclic proof dependency'),
     (ORDERED + 'main=()=>{let x=ordered(0 1 2)}', 'cannot assign a value with no type (void)'),
@@ -43,7 +42,6 @@ def test_proof_negative_goldens(compiler, tmp_path, source, diagnostic):
     assert diagnostic in result.stderr, result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_checked_proof_erasure(compiler, tmp_path, release):
     source = tmp_path / 'proof.dewy'
@@ -67,7 +65,6 @@ main=():>int64=>{return f(1 2 3)-7}
     assert subprocess.run([output], timeout=10).returncode == 0
 
 
-@pytest.mark.core_quick
 def test_proof_fact_invalidation(compiler, tmp_path):
     result = check(compiler, tmp_path, ORDERED + '''f=(a:int64 b:int64<v=>a <=? v> c:int64<v=>b <=? v>)=>{
     ordered(a b c)
@@ -105,7 +102,6 @@ def test_conditional_result_facts(compiler, tmp_path, body, success):
         assert 'assertion' in result.stderr, result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_union_result_facts(compiler, tmp_path, release):
     source = tmp_path / 'union.dewy'
@@ -129,7 +125,6 @@ main=():>int64=>{return f(2)+f(-2)-1}
     assert subprocess.run([output], timeout=10).returncode == 0
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('source', [
     'bad=(a:int64):>true & <a >? 0> | false=>true\nmain=():>void=>{bad(1)}',
     'bad=(a:int64):>true & <a >? 0> | false=>{a=1; return true}\nmain=():>void=>{bad(1)}',
@@ -140,7 +135,6 @@ def test_conditional_exit_obligation(compiler, tmp_path, source):
     assert result.returncode != 0 and 'result proposition' in result.stderr, result.stdout + result.stderr
 
 
-@pytest.mark.core_quick
 def test_imported_generic_proof(compiler, tmp_path):
     (tmp_path / 'lemmas.dewy').write_text('''$proof
 ordered=<T>(a:T b:T<v=>a <=? v> c:T<v=>b <=? v>):><a <=? c>=>{
@@ -160,7 +154,6 @@ main=()=>{f(1 2 3); ordered<uint64>(9223372036854775808 9223372036854775809 1844
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('body,success', [
     ('let r=positive(a); if r is? Yes {$assert a >? 0}', True),
     ('let r=positive(a); if r is? Yes {} else {$assert a >? 0}', False),
@@ -177,7 +170,6 @@ f=(a:int64)=>{''' + body + '}\nmain=()=>f(4)\n')
         assert 'assertion' in result.stderr, result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('body,success', [
     ('let r=positive(a); if r not=? none {$assert a >? 0}', True),
     ('let r=positive(a); if r =? none {$assert a >? 0}', False),
@@ -204,7 +196,6 @@ def test_proof_and_result_boundaries(compiler, tmp_path, source, diagnostic):
     assert result.returncode != 0 and diagnostic in result.stderr, result.stdout + result.stderr
 
 
-@pytest.mark.core_quick
 def test_void_proof_result(compiler, tmp_path):
     result = check(compiler, tmp_path, '''$proof
 p=(a:int64<v=>v >? 0>):>void & <a >? 0>=>{}
@@ -214,7 +205,6 @@ main=()=>f(1)
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('source', [
     'positive=int64<i=>i >? 0>\n$proof\np=(a:int64):><a =? a>=>{}\nf=(a:int64)=>{p(a as positive)}\nmain=()=>f(1)',
     'positive=int64<i=>i >? 0>\n$proof\np=(a:int64):><a >? 0>=>{$assert (a as positive) >? 0}\nmain=()=>p(1)',

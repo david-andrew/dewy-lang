@@ -33,7 +33,6 @@ main=()=>{
     assert images[0] == images[1]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('depth', [0, 250, 252, 253, 254, 255, 256])
 def test_function_nesting_diagnostics(compiler, tmp_path, depth):
     source = tmp_path / 'nested.dewy'

@@ -10,7 +10,6 @@ from tests.support import ROOT, compiler  # noqa: F401
 CASES = ROOT / 'tests/cases/refinements'
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 @pytest.mark.parametrize('source', [
     'f=(x:int64):>int64<i => i >? 0>=>x\nmain=()=>printl(f(0))',
@@ -73,7 +72,6 @@ def test_refinement_rejections(compiler, tmp_path, source, diagnostic):
         assert ran.returncode != 0 and 'refinement failed' in ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('name', ['pilot', 'snapshot', 'generic', 'mutate', 'uint',
                                   'recursive', 'local', 'later_dependent'])
 def test_refinement_internal_static_positive(compiler, name):
@@ -83,7 +81,6 @@ def test_refinement_internal_static_positive(compiler, name):
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.core_quick
 def test_refinement_uint_zero_strict(compiler, tmp_path):
     path = tmp_path / 'zero.dewy'
     path.write_text('f=(x:uint64):>uint64=>{let z:uint64=0; return x//z}\nmain=()=>printl(f(2))')

@@ -156,7 +156,8 @@ main = () => {
 }
 
 
-@pytest.mark.parametrize('name', [pytest.param(name, marks=quick) for name in DIRECTIVE_RUNS])
+@pytest.mark.parametrize('name', [pytest.param(name, marks=quick if name == 'runtime-assert-forms' else ())
+                                  for name in DIRECTIVE_RUNS])
 def test_surface_directive_runs(compiler, tmp_path, name):
     source, expected, code = DIRECTIVE_RUNS[name]
     ran = run(compiler, tmp_path, source)

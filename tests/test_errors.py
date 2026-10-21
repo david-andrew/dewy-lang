@@ -9,7 +9,6 @@ from tests.test_core import compiler, run_value_batch
 FIXTURES = Path(__file__).parent / 'fixtures' / 'errors'
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_error_values(compiler, tmp_path, release, target):

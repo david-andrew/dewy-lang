@@ -48,7 +48,6 @@ def check(compiler, source, directory, **extra):
     assert int(fused.group(2)) * 2 > int(fused.group(1)), fused.group(0)
 
 
-@pytest.mark.core_quick
 def test_fused_root_heavy_program(compiler, tmp_path):
     source = tmp_path / 'synthetic.dewy'
     source.write_text(generate_dewy(600))
@@ -61,7 +60,6 @@ def test_fused_bench_kernel(compiler, tmp_path, name):
     check(compiler, prepare_source(name, tmp_path), tmp_path, SLOPPY_EMIT_FORCE='1')
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('name', EXAMPLES)
 def test_fused_example(compiler, tmp_path, name):
     check(compiler, ROOT / 'examples' / f'{name}.dewy', tmp_path, SLOPPY_EMIT_FORCE='1')

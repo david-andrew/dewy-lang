@@ -7,7 +7,6 @@ import pytest
 from tests.support import compiler  # noqa: F401
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('literal', ['"plain"', 'r"raw {braces}"',
     '"line\\n\\u{1f642} {value+1}"', '"{value}{value*2}"',
     '"nested {string(value)}"', '"fallback {values[end-1]}"',

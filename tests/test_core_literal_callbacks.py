@@ -98,7 +98,6 @@ main=()=>{make(42) return saved[0]()}''',
 }
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_literal_callback_boundaries(compiler, tmp_path, release, target):

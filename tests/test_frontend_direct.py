@@ -42,7 +42,6 @@ main=()=>{
     assert images[0] == images[1]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('expression', ['f(1 +)', '1e+', '1 + (2 *', '1[none]', 'type of 2'])
 def test_direct_expression_diagnostics(compiler, tmp_path, expression):
     source = tmp_path / 'invalid.dewy'

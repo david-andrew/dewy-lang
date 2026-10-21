@@ -11,7 +11,6 @@ from tests.support import ROOT, compiler  # noqa: F401
 CASES = ROOT / 'tests/cases/facts'
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_scalar_fact_erasure(compiler, tmp_path, release):
     source = tmp_path / 'erasure.dewy'
@@ -29,7 +28,6 @@ def test_scalar_fact_erasure(compiler, tmp_path, release):
     assert bodies[0] == bodies[1], 'symbolic assertions changed runtime IR'
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('name', ['unknown_parameter', 'write_after_guard', 'later_operand',
                                   'shared_capture', 'nonlinear', 'erased_call', 'join_one_sided',
                                   'mutable_alias', 'opaque_arm', 'erased_message', 'budget', 'wrap_unknown'])
@@ -41,7 +39,6 @@ def test_scalar_fact_check_diagnostics(compiler, name):
     assert not match_patterns(patterns, result.stdout + result.stderr), result.stdout + result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('command', ['check', 'build'])
 @pytest.mark.parametrize('name,expected', [('guarded_division', None),
                                           ('policy_unknown', 'cannot prove divisor is nonzero: missing bound'),

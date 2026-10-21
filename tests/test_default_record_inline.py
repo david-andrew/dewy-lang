@@ -32,7 +32,6 @@ def test_default_game_inline(compiler, tmp_path, debug):
     assert ran.stdout.split()[0] == '2096'
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_record_inline_checks_and_loop_scope(compiler, tmp_path, target):
     source = tmp_path / 'checked.dewy'

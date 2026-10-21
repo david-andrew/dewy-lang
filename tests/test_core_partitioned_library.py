@@ -1,14 +1,11 @@
 """Pending library bodies are inherited by partition workers, not checked again."""
 import re
 
-import pytest
-
 from tests.support import compiler
 from tests.test_core_fused_determinism import build, check, pytestmark
 from tools.compiler.speed import generate_dewy
 
 
-@pytest.mark.core_quick
 def test_partitioned_library_closure(compiler, tmp_path):
     source = tmp_path / 'library.dewy'
     # String interpolation and numeric operations need runtime instances, some

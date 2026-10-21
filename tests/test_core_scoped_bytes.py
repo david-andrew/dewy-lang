@@ -20,7 +20,6 @@ def run(compiler, tmp_path, source, command='check', release=False):
     return subprocess.run(args, capture_output=True, text=True, timeout=30)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('body', [
     '__load_i64__(bytes)',
     'return __load_i64__(bytes)',
@@ -50,7 +49,6 @@ def test_loan_escape_and_stability(compiler, tmp_path, body):
     assert 'loan' in result.stderr, result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_writable_snapshot_and_early_exits(compiler, tmp_path, release):
     source = '''probe=(stop:bool):>int64=>{
@@ -75,7 +73,6 @@ main=()=>{printl("{probe(false)} {probe(true)}")}
     assert result.stdout == '16 9\n'
 
 
-@pytest.mark.core_quick
 def test_disjoint_nested_and_loop_exits(compiler, tmp_path):
     source = '''main=()=>{
     let a:array<uint8>=[1]
@@ -117,7 +114,6 @@ def test_ladder_loan_backends(compiler, tmp_path, release, target):
     assert result.stdout == '1680 39\n'
 
 
-@pytest.mark.core_quick
 def test_hidden_alias_loan_rejected(compiler, tmp_path):
     source = '''let bytes:array<uint8>=[1 2]
 change=()=>{bytes=[9]}
@@ -142,7 +138,6 @@ main=()=>probe(3)
     assert 'scoped loan length exceeds reservation' in result.stderr, result.stderr
 
 
-@pytest.mark.core_quick
 def test_mixed_origins_do_not_upgrade_readonly(compiler, tmp_path):
     result = run(compiler, tmp_path, '''probe=(flag:bool)=>{
     let a:array<uint8>=[1]
@@ -161,7 +156,6 @@ main=()=>probe(true)
     assert result.returncode != 0 and 'readonly loan' in result.stderr, result.stderr
 
 
-@pytest.mark.core_quick
 def test_empty_loans(compiler, tmp_path):
     result = run(compiler, tmp_path, '''main=()=>{
     let bytes:array<uint8>=[]

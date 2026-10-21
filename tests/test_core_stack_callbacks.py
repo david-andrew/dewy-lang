@@ -117,7 +117,6 @@ def test_stack_callback_boundaries(compiler, tmp_path, release, target):
         assert code == '42', f'{name}: {diagnostic or code}'
 
 
-@pytest.mark.core_quick
 def test_known_callback_ir(compiler, tmp_path):
     """After inlining, only a stable propagated address changes call ABI."""
     import subprocess

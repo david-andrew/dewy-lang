@@ -6,7 +6,6 @@ import pytest
 from tests.support import compiler  # noqa: F401
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('body,success', [
     ('if a <? b and b <=? c {$assert a <? c}', True),
     ('if a >=? 0 and a <? 100 {$assert a*2 >=? a; $assert (a+2)*3 =? a*3+6}', True),
@@ -31,7 +30,6 @@ def test_difference_join(compiler, tmp_path, body, success):
         assert 'assertion' in result.stderr, result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('body,success', [
     ('let i:int64=0; loop i <? 10 {$assert i >=? 0; i+=1}; $assert i =? 10', True),
     ('let i:int64=0; loop i <? 0 {i=9}; $assert i =? 0', True),
@@ -62,7 +60,6 @@ def test_loop_invalidations(compiler, tmp_path, body):
     assert result.returncode != 0 and 'assertion' in result.stderr, result.stdout + result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True])
 def test_dependent_find(compiler, tmp_path, release):
     source = tmp_path / 'find.dewy'
@@ -87,7 +84,6 @@ main=():>int64=>{
     assert ran.returncode == 0, ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('callee,success', [
     ('read=(@x:int64):>int64=>x', True),
     ('read=(@x:int64):>int64=>{x=0; return x}', False),
@@ -100,7 +96,6 @@ def test_summary_transfer(compiler, tmp_path, callee, success):
     assert (result.returncode == 0) == success, result.stdout + result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('stale', [False, True])
 @pytest.mark.parametrize('release', [False, True])
 def test_strict_index_lane(compiler, tmp_path, stale, release):
@@ -122,7 +117,6 @@ def test_strict_index_lane(compiler, tmp_path, stale, release):
     assert ('index is not in bounds' if stale else 'cannot prove index is in bounds') in strict.stderr, strict.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('source', [
     '''xs:array<int64>=[1]
 Marker:type=[]

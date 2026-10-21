@@ -19,7 +19,6 @@ def compile_source(compiler, source, work, mode, env=None):
     return subprocess.run(args, capture_output=True, text=True, timeout=60, env=env)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['check', 'default', 'release'])
 @pytest.mark.parametrize('name,output', [('places', '8 8 42\n'), ('callable_forget', '42\n'), ('callable_return', '42\n'), ('ambient', '42\n')])
 def test_effect_rows_accept(compiler, tmp_path, mode, name, output):
@@ -30,7 +29,6 @@ def test_effect_rows_accept(compiler, tmp_path, mode, name, output):
         assert (ran.returncode, ran.stdout) == (0, output), ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['check', 'default', 'release'])
 @pytest.mark.parametrize('name', ['swapped', 'sibling', 'parent', 'recursive', 'alias_bad',
                                   'unreachable', 'cost', 'default', 'alias_edge', 'recursive_swapped', 'callable_row', 'boxed'])
@@ -50,7 +48,6 @@ def test_effect_rows_reject(compiler, tmp_path, mode, name):
     assert 'does not yet support' not in diagnostics
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['check', 'default', 'release'])
 @pytest.mark.parametrize('name', ['formatter', 'foreign', 'mutation'])
 @pytest.mark.parametrize('directory', ['ordinary', 'lib/core'])

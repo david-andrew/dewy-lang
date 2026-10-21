@@ -28,7 +28,6 @@ FLOWS = {
 }
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['check', 'default', 'release'])
 @pytest.mark.parametrize('flow', FLOWS)
 @pytest.mark.parametrize('forbidden', [False, True])
@@ -53,7 +52,6 @@ Holder:type=[f:<(x:int64):>int64>]
         assert ran.returncode == 2, ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['check', 'default', 'release'])
 @pytest.mark.parametrize('forbidden', [False, True])
 def test_imported_alias_and_resources(compiler, tmp_path, mode, forbidden):
@@ -102,7 +100,6 @@ def test_effect_kind_errors(compiler, tmp_path, declaration, message):
     assert message in result.stderr, result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('explicit_place', [False, True])
 def test_callback_place_is_not_nonlocal_remainder(compiler, tmp_path, explicit_place):
     permission = 'mutates<x> & ' if explicit_place else ''
@@ -118,7 +115,6 @@ def test_callback_place_is_not_nonlocal_remainder(compiler, tmp_path, explicit_p
         assert 'callback-place permissions cannot flow into E' in result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('forbidden', [False, True])
 def test_nested_callback_contravariance(compiler, tmp_path, forbidden):
     source = tmp_path / 'nested.dewy'
@@ -136,7 +132,6 @@ main=():>int64=>''' + ('with_any(@require_pure)' if forbidden else 'with_pure(@a
         assert subprocess.run([tmp_path / 'program'], timeout=10).returncode == 2
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('captured', [False, True])
 def test_closure_environment_inventory(compiler, tmp_path, captured):
     source = tmp_path / 'environment.dewy'
@@ -152,7 +147,6 @@ def test_closure_environment_inventory(compiler, tmp_path, captured):
         assert subprocess.run([tmp_path / 'program'], timeout=10).returncode == 2
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('constrained', [False, True])
 def test_reassignment_joins_declared_rows(compiler, tmp_path, constrained):
     source = tmp_path / 'reassign.dewy'
@@ -170,7 +164,6 @@ main=():>int64=>{let f=@pure; f=@bad; return '''
         assert subprocess.run([tmp_path / 'program'], timeout=10).returncode == 2
 
 
-@pytest.mark.core_quick
 def test_demanded_nested_handle_summary(compiler, tmp_path):
     source = tmp_path / 'nested_handle.dewy'
     source.write_text('''leaf=(x:int64):>int64=>x+1
@@ -183,7 +176,6 @@ main=():>int64=>invoke(@wrapper)
     assert subprocess.run([tmp_path / 'program'], timeout=10).returncode == 2
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['check', 'default', 'release'])
 def test_shared_row_unions_callbacks(compiler, tmp_path, mode):
     source = tmp_path / 'join.dewy'
@@ -201,7 +193,6 @@ main=():>int64=>twice(@first @second)
         assert subprocess.run([tmp_path / 'program'], timeout=10).returncode == 42
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('same_resource', [False, True])
 def test_qualified_resources_remain_nominal(compiler, tmp_path, same_resource):
     (tmp_path / 'resources.dewy').write_text('Filesystem:type=[]\n')
@@ -219,7 +210,6 @@ main=():>int64=>invoke(@reader)
         assert 'effect contract' in result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('aggregate', [False, True])
 def test_extern_cannot_forge_callback_contract(compiler, tmp_path, aggregate):
     (tmp_path / 'contracts.dewy').write_text('''Pure:type=<(x:int64):>int64 & no_effects>
@@ -237,7 +227,6 @@ Holder:type=[f:Pure]
     assert 'extern callable effect contracts require a checked implementation' in result.stderr
 
 
-@pytest.mark.core_quick
 def test_explicit_row_is_not_widened(compiler, tmp_path):
     source = tmp_path / 'explicit.dewy'
     source.write_text('''Filesystem:type=[]

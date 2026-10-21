@@ -80,7 +80,6 @@ def test_callback_cleanup(compiler, tmp_path, release, target):
         assert value == '42', f'{name}: {diagnostic or value}'
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_callback_later_argument_panic(compiler, tmp_path, release, target):

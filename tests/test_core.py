@@ -1165,7 +1165,6 @@ main = () -> int: lookup_probe(3)
     assert ' = daddr ' in probe[0] and ' = load ' in probe[0], probe[0]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 @pytest.mark.parametrize('subject', ['integer', 'enum', 'grouped-int'])
@@ -1241,7 +1240,6 @@ main = () -> int:
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 @pytest.mark.parametrize('kind,values', [
@@ -4234,7 +4232,6 @@ def test_core_web_pointer_lock_events():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_memory_equality_guard_pages(compiler, tmp_path, release):
     if platform.system() != 'Linux' or platform.machine().lower() not in ('x86_64', 'amd64'):
@@ -4273,7 +4270,6 @@ def test_core_memory_equality_guard_pages(compiler, tmp_path, release):
     assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_memory_equality_live_results(compiler, tmp_path, release):
     # More live comparison results than available integer registers: retaining
@@ -4303,7 +4299,6 @@ def test_core_memory_equality_live_results(compiler, tmp_path, release):
         assert any('push' in line and '%r11' in line for line in assembly.splitlines()), assembly
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_core_memory_equality_branches(compiler, tmp_path, release):
     source = tmp_path / 'branches.jo'
@@ -4351,7 +4346,6 @@ main = () -> int:
             assert not re.search(r'\bset(?:e|ne)\b', assembly), assembly
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_core_string_equality_guard_pages(compiler, tmp_path, release):
     if platform.system() != 'Linux' or platform.machine().lower() not in ('x86_64', 'amd64'):
@@ -4462,7 +4456,6 @@ def test_core_emission_words(compiler, tmp_path, release, target):
     assert ran.stdout.splitlines() == [*map(str, initial), 'patched', *map(str, expected)]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('offset', [-1, 5], ids=['before-buffer', 'past-buffer'])
 def test_core_emission_fixup_bounds(compiler, tmp_path, offset):
     source = tmp_path / 'bad-fixup.jo'
@@ -4480,7 +4473,6 @@ def test_core_emission_fixup_bounds(compiler, tmp_path, offset):
     assert 'panic:' in ran.stderr, ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_core_scaled_multiply(compiler, tmp_path, release):
     rng = random.Random(3549)
@@ -4532,7 +4524,6 @@ main = () -> int:
             assert not re.search(r'\bimul\b', assembly), assembly
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_core_integer_select_flags(compiler, tmp_path, release):
     # Dynamic comparisons prevent constant folding. Zero/large arms check that
@@ -4659,7 +4650,6 @@ main = () -> int:
     assert ran.returncode == 0, ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_core_short_copy_bounds_and_live_values(compiler, tmp_path, release):
     guarded = platform.system() == 'Linux' and platform.machine().lower() in ('x86_64', 'amd64')
@@ -4805,7 +4795,6 @@ def test_core_lexer_bounded_spans(compiler, tmp_path, release):
     assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('debug', [False, True], ids=['default', 'debug'])
 @pytest.mark.parametrize('method', [False, True], ids=['fields', 'method'])
 def test_core_parameter_view_frame(compiler, tmp_path, debug, method):
@@ -4899,7 +4888,6 @@ main = () -> int:
     assert 'out of bounds' in bad.stdout + bad.stderr, bad.stdout + bad.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_loop_endpoint_overflow(compiler, tmp_path, release, target):
@@ -4991,7 +4979,6 @@ main = () -> int:
             assert (ran.stdout + ran.stderr).startswith('0:\na:\n1:\na:\n'), (ran.stdout, ran.stderr)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_affine_loop_checks(compiler, tmp_path, release, target):
@@ -5081,7 +5068,6 @@ main = () -> int:
             assert (ran.stdout + ran.stderr).startswith('0:\na:\n1:\na:\n'), (ran.stdout, ran.stderr)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('float_type', ['f32', 'f64'])
@@ -5272,7 +5258,6 @@ main = () -> int:
             assert '3:' not in bad.stdout.splitlines(), bad.stdout + bad.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_core_encoded_word_buffers(compiler, tmp_path, release):
     directory = compiler.parent.parent / 'compiler'
@@ -5394,7 +5379,6 @@ main = ():
     assert ran.stdout.splitlines() == expected
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_integer_extension_boundaries(compiler, tmp_path, release, target):
@@ -5449,7 +5433,6 @@ def test_core_integer_extension_boundaries(compiler, tmp_path, release, target):
     assert ran.stdout.splitlines() == expected
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['default', 'release', 'debug'])
 def test_core_immediate_store_widths(compiler, tmp_path, mode):
     source = tmp_path / 'immediate-stores.jo'
@@ -5501,7 +5484,6 @@ main = ():
     assert ran.stdout.splitlines() == expected
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['default', 'release', 'debug'])
 def test_core_mixed_parameter_prologues(compiler, tmp_path, mode):
     definitions = ['@noinline\ntouch = (x: int) -> int: x * 3 + 1\n']
@@ -5655,7 +5637,6 @@ def test_core_text_case_guard_page(compiler, tmp_path, release):
     assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_swap_checked_helper_inlines(compiler, tmp_path, target):
     source = tmp_path / 'swap-inline.jo'
@@ -5756,7 +5737,6 @@ return 42
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target,flags', [
     ('native', []), ('native', ['--release']), ('native', ['-g']),
     ('wasm', []), ('wasm', ['--release']),
@@ -5814,7 +5794,6 @@ main = () -> int:
         assert ('value=-23:value=-10' if failure == 'multiple' else 'value=-23') in ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_grapheme_length_blocks(compiler, tmp_path, release, target):
@@ -5870,7 +5849,6 @@ def test_core_grapheme_length_blocks(compiler, tmp_path, release, target):
     assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('prefix', [0, 7, 8, 15, 16, 31, 32, 65])
 def test_core_grapheme_length_invalid_tail(compiler, tmp_path, prefix):
     source = tmp_path / 'invalid.dewy'
@@ -5890,7 +5868,6 @@ def test_core_grapheme_pages_reproducible():
     assert pack() == (DIRECTORY / 'grapheme_pages.bin').read_bytes()
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_grapheme_property_pages(compiler, tmp_path, release, target):
@@ -5949,7 +5926,6 @@ def test_core_grapheme_property_pages(compiler, tmp_path, release, target):
     assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 def test_core_grapheme_lookup_borrows_table(compiler, tmp_path):
     source = tmp_path / 'lookup.jo'
     source.write_text('main = () -> int: __grapheme_property_bits(0x301)\n')
@@ -5965,7 +5941,6 @@ def test_core_grapheme_lookup_borrows_table(compiler, tmp_path):
     assert not any(re.search(r'\bcall .*\bc=3\b', fn) for fn in functions), '\n'.join(functions)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_fixed_index_unsigned_domain(compiler, tmp_path, release, target):
@@ -6007,7 +5982,6 @@ main=()=>{
     assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('size,ty,index,value', [
     (255, 'uint8', 'index', '255'),
@@ -6029,7 +6003,6 @@ main=()=>{{let table:array<uint8 length={size}>=[] return read(table {value})}}
     assert ran.returncode != 0 and 'out of bounds' in ran.stderr, ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 def test_core_fixed_index_domain_ir(compiler, tmp_path):
     source = tmp_path / 'lookup.jo'
     source.write_text('''@noinline
@@ -6046,7 +6019,6 @@ main = () -> int:
     assert ' = load ' in functions[0] and 'call ' not in functions[0], functions[0]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [[], ['--release'], ['-g']], ids=['default', 'release', 'debug'])
 def test_core_cold_array_calls_preserve_live_values(compiler, tmp_path, flags):
     # Growth and shared-array detachment must preserve both integer and floating
@@ -6094,7 +6066,6 @@ main = () -> int:
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('flags', [[], ['--release'], ['-g']], ids=['default', 'release', 'debug'])
 def test_core_entry_guard_argument_and_return_conventions(compiler, tmp_path, flags):
     source = tmp_path / 'entry-guard.jo'
@@ -6146,7 +6117,6 @@ main = () -> int:
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target,flags,threads', [
     ('native', [], 1), ('native', ['--release'], 1), ('native', ['-g'], 1),
     ('native', ['--release'], 2), ('wasm', [], 1), ('wasm', ['--release'], 1),
@@ -6200,7 +6170,6 @@ return 42
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_core_array_byte_count_boundaries(compiler, tmp_path, target, release):
@@ -6240,7 +6209,6 @@ main = () -> int:
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 
 
-@pytest.mark.core_quick
 def test_core_element_view_call_ir(compiler, tmp_path):
     source = tmp_path / 'element-view.jo'
     source.write_text('''struct Row:
@@ -6270,7 +6238,6 @@ main = () -> int: view_probe([Row([20], 22)])
     assert ran.returncode == 42, ran.stdout + ran.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target,flags', [('native', []), ('native', ['--release']), ('native', ['-g']),
                                          ('wasm', []), ('wasm', ['--release'])])
 def test_core_nonreturning_helper_calls(compiler, tmp_path, target, flags):
@@ -6317,7 +6284,6 @@ main = () -> int:
     assert failed.returncode != 0 and 'custom limit 42' in failed.stderr, failed.stdout + failed.stderr
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_core_mask_comparison_boundaries(compiler, tmp_path, target, release):

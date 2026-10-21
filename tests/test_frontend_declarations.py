@@ -35,7 +35,6 @@ main=()=>{
     assert images[0] == images[1]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('declaration', ['const value', 'let value + 1',
     'let value[1]', 'let value:int64 + 1', 'let value:uint=1',
     'let value:array<int64>=[1 2]', 'let value:<(a:int64):>int64>=(a:int64)=>a',

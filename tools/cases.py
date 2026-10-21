@@ -11,6 +11,10 @@ Ordinary cases of one mode compile together as modules of a single program and
 run in one process; panicking cases share one build and run once each. A batch
 that fails is split, and a failure that only reproduces in the combined program
 is reported for all of its cases.
+
+Quick (`# quick`, pytest's core_quick) is a smoke suite: one or two per subsystem.
+Exhaustive variants, slow builds, determinism loops beyond one smoke case and
+dogfood programs belong in the full suite.
 """
 from __future__ import annotations
 

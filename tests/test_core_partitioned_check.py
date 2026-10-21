@@ -9,7 +9,6 @@ from tests.support import ROOT, compiler
 from tools.compiler.speed import generate_dewy
 
 
-@pytest.mark.core_quick
 def test_partitioned_roots(compiler, tmp_path):
     source = tmp_path / 'roots.dewy'
     # Diagnostics from different partitions must retain serial source order.
@@ -25,7 +24,6 @@ def test_partitioned_roots(compiler, tmp_path):
     assert 'unused_10' in err and 'unused_590' in err
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('failure', ['check', 'barrier', 'emit'])
 def test_partitioned_worker_failure(compiler, tmp_path, failure):
     source = tmp_path / 'failure.dewy'
@@ -36,7 +34,6 @@ def test_partitioned_worker_failure(compiler, tmp_path, failure):
     assert (got, err) == (base, errors)
 
 
-@pytest.mark.core_quick
 def test_partitioned_new_instance_falls_back(compiler, tmp_path):
     source = tmp_path / 'new-instance.dewy'
     source.write_text(generate_dewy(600).replace('let s="item 590"', 'printl"late {a}"\n    let s="item 590"'))
@@ -47,7 +44,6 @@ def test_partitioned_new_instance_falls_back(compiler, tmp_path):
     assert 'pcheck: closed-state check rejected' in timed
 
 
-@pytest.mark.core_quick
 def test_partitioned_error_order(compiler, tmp_path):
     source = tmp_path / 'errors.dewy'
     source.write_text(generate_dewy(600).replace('let s="item 20"', 'let s=not_a_name').replace('let s="item 590"', 'let s=another_missing_name'))

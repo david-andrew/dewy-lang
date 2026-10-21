@@ -8,7 +8,6 @@ from tests.support import compiler, run_value_batch
 FIXTURES = Path(__file__).parent / 'fixtures' / 'records_sra'
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_records_sra_values(compiler, tmp_path, release, target):
@@ -36,7 +35,6 @@ def test_records_sra_game_codegen(compiler, tmp_path):
     assert not re.search(r'\bcall[ic]? a=', simulate), simulate
 
 
-@pytest.mark.core_quick
 def test_records_sra_large_copy_codegen(compiler, tmp_path):
     import re
     import subprocess

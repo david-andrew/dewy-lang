@@ -42,7 +42,6 @@ def test_direct_statements(compiler, tmp_path, release):
     assert images[0] == images[1]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('statement', ['return 1 +', 'value += (2 *', 'break $missing',
                                        'value = [1; 2]', 'return', 'continue $missing'])
 def test_statement_diagnostics(compiler, tmp_path, statement):
@@ -57,7 +56,6 @@ def test_statement_diagnostics(compiler, tmp_path, statement):
     assert results[0] == results[1] == results[2]
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('body', ['return value+1', 'value+=1', 'value=1'])
 def test_statement_record_sibling_scope(compiler, tmp_path, body):
     source = tmp_path / 'sibling.dewy'

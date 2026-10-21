@@ -114,6 +114,7 @@ def test_bundled_library_unsaved_diagnostics(tmp_path, monkeypatch, extension):
         client.close()
 
 
+@pytest.mark.core_quick
 def test_unsaved_diagnostics_hover_and_definition(tmp_path):
     value = os.environ.get('DEWY_CORE_COMPILER')
     if not value:

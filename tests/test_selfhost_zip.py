@@ -35,7 +35,6 @@ def inputs(directory):
     return files
 
 
-@pytest.mark.core_quick
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_selfhost_zip_matches_jo(compiler, tmp_path, release):
     dewy = build(compiler, FIXTURES / 'zip_dewy.dewy', tmp_path / 'zip-dewy', release)
