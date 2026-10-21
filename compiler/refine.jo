@@ -275,6 +275,11 @@ mk_refined = (base0: int, predicate: int) -> int:
         atom.b = ref_resolve_limit(atom.b)
         loop term in [atom.a, atom.b]:
             if term.kind == 4: dependencies.push(term.value)
+        # (a length never reaches 2^63, so against a length `uint64.max` compares as the
+        # largest int64: `length <=? uint64.max` holds for every array)
+        if types[base].kind == .array:
+            if atom.a.kind == 1 and atom.a.unsigned and atom.a.value < 0: atom.a = RefTerm(1, 9223372036854775807)
+            if atom.b.kind == 1 and atom.b.unsigned and atom.b.value < 0: atom.b = RefTerm(1, 9223372036854775807)
         normalized.push(atom)
     predicate = ref_intern(normalized)
     ref_span_copy(declared, predicate)
