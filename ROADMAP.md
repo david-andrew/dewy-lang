@@ -9,11 +9,12 @@ what landed. Keep this file short.
 
 | Measure | Now (2026-10-20) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 81/82 (tiers 1–2: 63/63; tier 3: 18/19), 12 held open on decisions | all milestones |
+| Acceptance ladder, design surface | 82/82 (tiers 1–2: 63/63; tier 3: 19/19), 12 held open on decisions | all milestones |
 | Acceptance ladder, current dialect | 82/82 | stays green |
 | Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.24 G instructions (was 1.36 G on 10-20 morning) | ~0.40 G (250k root lines/s) |
 | Compiler self-build | 8.0 G instructions | seconds-scale edit loop |
-| Game-tick kernel vs C -O2 | ~2× instructions | ~1× |
+| Game-tick kernel vs C -O2 (time) | 6.3× default, 1.6× release | ~1× both |
+| Worst other kernels vs C (time, default) | shifted_arrays 2.7×, params 1.75×, graph 1.7× | ≤1.2× |
 | Quick / full suite | 38 s / 6.6 min (load average 14–24; remeasure when quiet) | ≤30 s / ≤5 min |
 
 Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
@@ -25,13 +26,13 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: refinement slice 5 (`$proof`; ladder 71).
+- Astra: default-build game kernel (6.3× C default vs 1.6× release).
 - Opus: small items below.
 
 ## Next
 
 - Tier-3 implementation (designed, no decisions needed):
-  - refinement slices 5–6 (1–4 landed): checked proofs, diagnostics;
+  - refinement slice 6 (1–5 landed): witness diagnostics;
   - effect rows slices 3, 5–6 (1–2 and 4 landed; ~/dev/tmp/coord/effects-design.md);
   - ownership slices 2, 4–6 (1, drop hooks and moves, and 3, `$lend`, landed):
     custom copy/move hooks, resource containers, arenas
