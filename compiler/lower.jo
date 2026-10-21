@@ -1373,14 +1373,14 @@ mut_alias_check = (args: int[], mutmask: int, callee: int):
                 sb = place_steps(b)
                 nested = steps_overlap(sa, sb) and not (bmut and sa.len() == sb.len())
             if nested or may_write_root(b, r):
-                fatal(nodes[b].pos, "{place_text(a)} is passed as a `mut` argument, so this argument cannot also hold or change '{nm}'{hint}")
+                fatal(nodes[b].pos, "{place_text(a)} is passed as {jd(nodes[b].pos, "a `mut` argument", "an `@` argument")}, so this argument cannot also hold or change '{nm}'{hint}")
         glob = nodes[r].aux == i32(int(SK.global))
         lf = 0
         if not glob: lf = int(locals[int(nodes[r].sym)].flags)
         mutparam = lf & LF_MUTPARAM != 0
         # (a variable a closure changes: the callee may be that closure, or call it)
         if lf & LF_SHARED != 0 and (callee <= 0 or fn_writes(callee).all):
-            fatal(nodes[a].pos, "'{nm}' is changed by a closure, which this call may run, so {place_text(a)} cannot be passed as a `mut` argument{hint}")
+            fatal(nodes[a].pos, "'{nm}' is changed by a closure, which this call may run, so {place_text(a)} cannot be passed as {jd(nodes[a].pos, "a `mut` argument", "an `@` argument")}{hint}")
         if glob or mutparam:
             who = "the function called"
             if callee > 0: who = "'{name_of(int(nodes[int(fns[callee].decl)].name))}'"
@@ -1389,9 +1389,20 @@ mut_alias_check = (args: int[], mutmask: int, callee: int):
             fw = FnWrites(false, [], [], [])
             if callee > 0: fw = fn_writes_named(callee)
             if glob and fw.globals.contains(int(nodes[r].sym)):
-                fatal(nodes[a].pos, "{who} may change the global '{nm}' (or call something that does), so {place_text(a)} cannot be passed to it as a `mut` argument{hint}")
-            if mutparam and in_arr and fw.globals.len() > 0:
-                fatal(nodes[a].pos, "{who} changes globals, and '{nm}' (a `mut` parameter) may be one of them, so {place_text(a)} cannot be passed to it as a `mut` argument{hint}")
+                fatal(nodes[a].pos, "{who} may change the global '{nm}' (or call something that does), so {place_text(a)} cannot be passed to it as {jd(nodes[a].pos, "a `mut` argument", "an `@` argument")}{hint}")
+            if mutparam and in_arr and param_may_alias(fw.globals, nodes[a].pos):
+                fatal(nodes[a].pos, "{who} changes globals, and '{nm}' ({jd(nodes[a].pos, "a `mut` parameter", "an `@` parameter")}) may be one of them, so {place_text(a)} cannot be passed to it as {jd(nodes[a].pos, "a `mut` argument", "an `@` argument")}{hint}")
+
+# Could a mutable parameter of code at pos be one of these globals? Dewy code
+# cannot name the implementation's private state (the allocator, diagnostics,
+# I/O status: `__` globals of implementation modules), so a Dewy parameter is
+# never one of those, however many library calls write them.
+param_may_alias = (written: int[], pos: int) -> bool:
+    if not files[pos_file(pos)].is_dewy: return written.len() > 0
+    loop g in written:
+        d = int(globals[g].decl)
+        if d == 0 or files[pos_file(nodes[d].pos)].is_dewy or not starts_with(name_of(int(globals[g].name)), "__"): return true
+    false
 
 # a place as written (xs[i].pos), for messages
 place_text = (n: int) -> str:
@@ -1409,7 +1420,10 @@ place_text = (n: int) -> str:
         i = "..."
         if nodes[b].kind == .ident: i = name_of(int(nodes[b].name))
         else if nodes[b].kind == .int_lit: i = "{nodes[b].ival}"
-        return "{place_text(int(nodes[n].a))}[{i}]"
+        # (a dictionary entry is stored in its values array: written as the dictionary's)
+        a = int(nodes[n].a)
+        if nodes[a].kind == .field and is_map_type(ntype(int(nodes[a].a))): return "{place_text(int(nodes[a].a))}[{i}]"
+        return "{place_text(a)}[{i}]"
     "..."
 
 # The variable a place belongs to: through fields, indexing, `!`, narrowing and the names that

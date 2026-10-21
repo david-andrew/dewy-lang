@@ -64,9 +64,7 @@ poll=(@host:Host wait:float64=0.0):>bool=>{
             host.peers.remove(event.peer)
         } else if event.peer in? host.peers {
             # One message carries one request; each peer keeps its own framing state.
-            let state=host.peers[event.peer]
-            let reply=feed(@host.service @state event.data)
-            host.peers[event.peer]=state
+            let reply=feed(@host.service @host.peers[event.peer] event.data)
             if reply.length >? 0 net.send(event.peer reply)
         }
     }

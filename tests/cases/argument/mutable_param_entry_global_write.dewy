@@ -1,0 +1,14 @@
+# A callee that changes a Dewy global may be changing the `@` parameter itself.
+S:type=[count:int64=0]
+let saved:dict<int64 S>=[]
+touch=(@s:S):>void=>{
+    s.count+=1
+    saved[0]=S()
+}
+Host:type=[peers:dict<int64 S>=[]]
+poll=(@h:Host k:int64):>void=>touch(@h.peers[k])
+main=()=>{
+    let h=Host()
+    h.peers[1]=S()
+    poll(@h 1)
+}

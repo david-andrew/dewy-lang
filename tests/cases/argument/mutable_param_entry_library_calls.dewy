@@ -1,0 +1,28 @@
+# A callee that reaches the library's private state (allocation, text case,
+# joining) and runs handlers stored in records changes no global a Dewy `@`
+# parameter can be, so an entry of that parameter's dictionary is a place argument.
+S:type=[count:int64=0 log:array<string>=[]]
+Handler:type=<(@s:S word:string):>int64>
+M:type=[name:string run:Handler]
+bump=(@s:S word:string):>int64=>{
+    s.count+=word.length
+    s.log.push(word.lower())
+    return s.count
+}
+table=():>array<M>=>[M["a" @bump]]
+feed=(@s:S word:string):>int64=>{
+    let names:array<string>=[]
+    loop m in table() names.push(m.name)
+    let total=0
+    loop m in table() total+=m.run(@s "{names.join(",")}{word}")
+    return total
+}
+Host:type=[peers:dict<int64 S>=[]]
+poll=(@h:Host k:int64 word:string):>int64=>feed(@h.peers[k] word)
+main=()=>{
+    let h=Host()
+    h.peers[1]=S()
+    poll(@h 1 "XY")
+    printl(poll(@h 1 "Z"))
+    printl(h.peers[1].log)
+}
