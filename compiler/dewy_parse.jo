@@ -1210,6 +1210,9 @@ dw_type_params = (id: int) -> int[]:
     if out.len() == 0: return [dw_fail(id, "an empty type parameter declaration")]
     out
 
+# (the name a refinement in a type names the refined value by: a match arm's or a field's)
+dw_pattern_binder: i32 = 0
+
 dw_param = (id: int, kind: NK) -> int:
     let id = id
     pos = dewy_syntax[id].pos
@@ -1238,7 +1241,12 @@ dw_param = (id: int, kind: NK) -> int:
         name = "$parameter{n}"
         set_list(n, dw_bindings(lhs))
     nodes[n].name = if pattern: i32(intern(name)) else: dw_name_id(lhs)
-    if annotation != 0: nodes[n].a = i32(dw_type(annotation))
+    if annotation != 0:
+        # (`bottom:int64<bottom >? 0>`: a field's refinement names the field's own value)
+        outer = dw_pattern_binder
+        if kind == .vardecl: dw_pattern_binder = nodes[n].name
+        nodes[n].a = i32(dw_type(annotation))
+        dw_pattern_binder = outer
     if initial != 0: nodes[n].b = i32(dw_expr(initial))
     if by_place: add_flag(n, NF_MUT)
     return n
@@ -2133,7 +2141,11 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         return n
     n = mk(.vardecl, dewy_syntax[id].pos)
     nodes[n].name = i32(intern(name))
-    if annotation != 0: nodes[n].a = i32(dw_type(annotation))
+    if annotation != 0:
+        outer = dw_pattern_binder
+        dw_pattern_binder = nodes[n].name
+        nodes[n].a = i32(dw_type(annotation))
+        dw_pattern_binder = outer
     if initial != 0: nodes[n].b = i32(dw_expr(initial))
     if not top: dw_shadow([int(nodes[n].name)])
     if constant:
@@ -2466,9 +2478,6 @@ dw_flow_stmt = (n: int) -> int:
     s = mk(.exprstmt, nodes[n].pos)
     nodes[s].a = i32(n)
     s
-
-dw_pattern_binder: i32 = 0
-
 
 dw_pattern = (id: int) -> int:
     let id = dw_unwrap(id)
