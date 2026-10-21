@@ -7432,6 +7432,8 @@ check_expr = (n: int, expected: int) -> int:
                 return t
             else:
                 if tkind(bt) == .tuple: fatal(nodes[n].pos, "a tuple's parts are `t.0`, `t.1` (an index in brackets is for arrays)")
+                if tkind(bt) == .opt and dewy_at(nodes[n].pos):
+                    fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}: it may be none (a member read through an optional is optional too). Check the value first, `if x isnt? none \{ ... }`, which narrows x inside, or give a fallback, `(x ?? default)[i]`")
                 fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}")
     else if k == .unary:
         if has_flag(n, NF_BROADCAST): return check_dotted(n, expected)
@@ -7694,6 +7696,9 @@ check_expr = (n: int, expected: int) -> int:
                 else: elt = if files[pos_file(nodes[n].pos)].is_dewy: T_MATH_INT else: T_INT
             # ([1, "two", 3]: an array holds one kind of value)
             coerce_hint = jd(nodes[n].pos, " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, make a struct or a union)", " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, use a record type or a union such as `array<int64|string>`)")
+            # ([Bool[true] Null]: siblings of a minted family are held as their parent)
+            if nominal_parent.get(prune(elt), 0) != 0 and dewy_at(nodes[n].pos):
+                coerce_hint = " (an array holds one kind of value, here {dt(elt)}, taken from the first element; for any member of its family, name the parent: `let values:array<{dt(nominal_parent[prune(elt)])}>=[...]`)"
             loop i in [0..nkids(n)):
                 c = kid(n, i)
                 if has_flag(c, NF_SPREAD): coerce(c, mk_array(elt))
