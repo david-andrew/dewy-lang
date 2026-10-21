@@ -109,6 +109,12 @@ only.
 - Function handles follow the design: a bare name calls; `@fn` is the handle.
 - From GOALS: ordinary code keeps runtime checks; static rejection of unproven
   facts is a strict-lane property.
+- Precision (10-21): inference keeps the most precise type it knows; only an
+  explicit wider annotation widens. This applies to literal unions and, where
+  it stays performant, to integers.
+- `end` and `new` are reserved (10-21). `end` is the last index inside an index
+  expression; `new` inserts a singleton axis (NumPy `newaxis`), e.g.
+  `xs[new ..]`, `xs[.. new]`.
 - Versions: the language stays 0.0.0; the extension gets patch bumps only, at
   most one release a day.
 
