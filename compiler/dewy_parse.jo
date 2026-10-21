@@ -1256,6 +1256,10 @@ dw_function = (id: int, name: str) -> int:
             captures.push(cap)
             capture = false
             continue
+        # (`(... amount:int64)`: a leading bare `...` makes every parameter keyword-only)
+        if dewy_syntax[p].kind == .identifier and dewy_syntax[p].text == "...":
+            keyword_only = true
+            continue
         kind = if keyword_only: 1 else: 0
         let p = p
         # (`value:int64 ...`: the positional run ends after this parameter)

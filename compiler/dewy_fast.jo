@@ -790,6 +790,10 @@ dn_atom = () -> int:
         following = dn_payload(dn_tokens[dn_at + 1])
         if following == "reads" or following == "mutates" or following == "allocates": symbol = .kw_not
     if token.kind == .eof: return dn_error(token.start, "expected an expression")
+    # (`(... amount:int64)`: a bare `...` opening a parameter list)
+    if symbol == .ellipsis and dn_at > 0 and dn_tokens[dn_at - 1].symbol == .lparen and dn_at + 1 < dn_tokens.len() and (dn_tokens[dn_at + 1].symbol == .rparen or dn_tokens[dn_at + 1].kind == .identifier and dn_at + 2 < dn_tokens.len() and dn_tokens[dn_at + 2].symbol == .colon):
+        dn_at += 1
+        return dn_node(.identifier, "...", token.start)
     if token.kind == .metatag:
         form = dn_directive_form(dn_payload(token))
         if form != 0: return dn_directive(token, form)
