@@ -8,8 +8,11 @@ Design specifications and explorations for Dewy semantics:
 [user-managed storage](user_managed_storage.md),
 [resource exhaustion](resource_exhaustion.md),
 [finite facts](finite_facts.md), [idiomatic facts](idiomatic_facts.md),
-[argument parsing and reflection](argparse_and_reflection.md) and a
-[numerical stress test](numerical_stress_test.md). Several were written against
+[argument parsing and reflection](argparse_and_reflection.md), a
+[numerical stress test](numerical_stress_test.md), and the accepted implementation
+designs for [refinements](refinement.md), [effect rows](effects.md),
+[ownership](ownership.md), [precision-preserving inference](precision_inference.md),
+[compile throughput](compile_throughput.md) and [self-hosting](self_hosting.md). Several were written against
 the pre-restart compiler and describe direction rather than current behavior.
 Older design essays and status records (`dewy/status.md`, the roadmap history,
 the Phase 1 documents) are in git tag `archive/master-pre-restart`.

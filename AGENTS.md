@@ -39,6 +39,7 @@ python3 -m tools.core --bootstrap test     # independent C bootstrap + full suit
      need nothing.
    - Per batch, before merging to the main line: the full suite, the
      independent bootstrap and a fixed-point check.
+   - Don't land on a red master CI unless the landing is the fix.
    - Nightly: fuzzing and cross-target runs.
 3. **The commit message is the record.**
    - Never add evidence JSON, timing logs, audit reports or status paragraphs
@@ -51,8 +52,11 @@ python3 -m tools.core --bootstrap test     # independent C bootstrap + full suit
    - Target an item near the top of a fresh profile, with a plausible gain of
      ≥3% on a north-star workload (or ≥1.5× on a named kernel), or a
      simplification.
-   - Time-box it. Stop after one failed pilot.
+   - Measure the upper bound before building anything.
+   - Time-box it. One failed pilot ends the idea family.
    - Do not polish sub-percent wins.
+   - Gate compile speed on load-independent critical-path instructions; take
+     wall-clock numbers only on a quiet pinned machine or a CI runner.
 5. **Stay in scope.**
    - Every task states its acceptance criteria, owned files, non-goals and
      budget.
@@ -62,10 +66,13 @@ python3 -m tools.core --bootstrap test     # independent C bootstrap + full suit
 6. **Surface and semantics belong to David.**
    - Implementing what the design docs already specify (docs/design, and
      `git show archive/master-pre-restart:site/reference/src/...`) is not a new
-     decision: just do it.
+     decision: just do it. Accepted designs live in docs/design (design is not
+     evidence).
    - Only genuinely new syntax, spellings, keywords, members, or changes to
      established semantics need his approval. Note them in your report; the
-     coordinator batches them.
+     coordinator batches them. Each question carries a recommended answer,
+     what it unblocks, and whether it's reversible; reversible ones are
+     implemented provisionally and flagged.
    - Natural extensions clearly implied by the design proceed, and get
      reported.
    - Internal representations are ours to choose.

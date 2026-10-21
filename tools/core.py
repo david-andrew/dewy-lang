@@ -232,6 +232,12 @@ def main(argv: list[str] | None = None) -> int:
     args = cli.parse_args(argv)
     if args.command == 'path' and args.arguments:
         cli.error('path takes no additional arguments')
+    if args.command == 'test' and any(a in ('-h', '--help') for a in args.arguments):
+        print('usage: python3 -m tools.core [--bootstrap] test [--quick] [-k WORDS] [pytest options]\n\n'
+              'Golden cases, then the acceptance ladder and site examples (full suite only), then pytest.\n'
+              '--quick runs the smoke suite; -k selects cases, ladder programs and tests by keyword;\n'
+              '--maxfail=0 reports every failure; other options go to pytest.')
+        return 0
     quick = args.command == 'test' and '--quick' in args.arguments
     if quick:
         if any(arg.startswith('-m') for arg in args.arguments):

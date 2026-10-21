@@ -1,245 +1,145 @@
 # Roadmap
 
-The single work queue. Owned by the coordinator; agents propose changes in
-their reports instead of editing it. [docs/GOALS.md](docs/GOALS.md) says what
-Dewy must become; this file says what we do next. Git history is the record of
-what landed. Keep this file short.
+The single work queue, owned by the coordinator. [docs/GOALS.md](docs/GOALS.md)
+says what Dewy must become; this file says what we do next. Git history is the
+record of what landed: no "landed" lines here. At most one ROADMAP-only commit a
+day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design/).
 
 ## North star
 
-| Measure | Now (2026-10-20) | Goal |
+| Measure | Now (2026-10-21) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 82/82 (tiers 1–2: 63/63; tier 3: 19/19), 12 held open on decisions | all milestones |
-| Acceptance ladder, current dialect | 82/82 | stays green |
-| Fresh compile, 22k-line synthetic, wall clock, 4 workers (i7-6700) | 175 ms before fused workers; remeasure when quiet | ≤88 ms (250k lines/s) |
-| Same, critical-path instructions at 4 workers (`speed --critical`, load-independent) | 0.60 G (0.90 G before fused workers; game 0.81 G, not partitioned) | ~0.35 G |
-| Same, single-thread instructions (guardrail) | 1.16 G (was 1.36 G on 10-20) | ~0.75 G; never regress |
-| Hello-world compile | 31 ms (147 M, all library) | ≤10 ms |
-| Compiler self-build | 9.35 G instructions (the compiler grew) | seconds-scale edit loop |
-| Game-tick kernel vs C -O2 (time) | 1.6× default and release (default was 6.3× before small-leaf inlining) | ~1× both |
-| Worst other kernels vs C (time, default) | literal callbacks 4.6×, callbacks 2.3×, params 1.75×, graph 1.7×, recursive_tree 1.4× | ≤1.2× |
-| Quick / full suite | ~17 s / ~4 min at load 5–8 (quick trimmed to smoke; case runner fixed) | ≤30 s / ≤5 min |
+| Acceptance ladder, design surface | 82/94 (12 wait on open questions) | 94/94, then tier 4 |
+| Acceptance ladder, current dialect | all non-held programs pass; held ones run | stays green |
+| Tier-4 flagship programs (1–5k lines each) | 1/7 (the game) | 7/7 |
+| Compile throughput, lines/s per corpus | corpus not yet built | 250k lines/s |
+| Critical-path instructions, synthetic-22k at 4 workers (regression signal only) | 0.60 G | no regression |
+| Single-thread instructions, synthetic-22k (guardrail) | 1.17 G | ~0.75 G (pending David) |
+| Hello-world compile | 31 ms | ≤10 ms |
+| Kernels vs C -O2 (time, default) | literal callbacks 4.6×, callbacks 2.3×, params 1.75×, graph 1.7×, game 1.6× | ≤1.2× |
+| Quick / full suite | ~17 s / ~4 min | ≤30 s / ≤5 min |
 
-Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
-`python3 -m tools.core ladder` prints the scoreboard. Compile numbers come from
-`python3 -m tools.core speed`; kernel numbers from `bench --instructions`.
+Ladder: `python3 -m tools.core ladder` (`tests/ladder/ladder.json`). Compile:
+`speed --critical` (load-independent; the gate). Wall clock only on a quiet,
+pinned machine or a CI runner, never on the shared box. Kernels: `bench`.
 
 ## Now
 
-GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
-only.
-
-- Astra: paused (quota). The Sol parallel review found 2 diagnostic-order bugs,
-  both fixed (9109989b), with guards extended.
-- Opus: design coverage, round 6. After round 5: 447 work, 21 broken (12 wait
-  on decisions), 114 missing, 31 superseded; compile creep partly recovered. The 10-21 audit: 613 features, 401 work, 47
-  broken, 134 missing; rounds 1–2 fixed ~35 (widths, singleton unions, guards,
-  pipes, parameter kinds, `$breakpoint`).
-- Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
-  needs a quiet machine to confirm.
+- Opus: `end` and `new` (reserve both; `new` axis insertion on nested arrays).
 
 ## Next
 
-- Tier-3 implementation (designed, no decisions needed):
-  - effect rows slices 3, 5–6 (1–2 and 4 landed; slice 3's consolidation pilot
-    regressed self-build +28%, so only its tests landed; ~/dev/tmp/coord/effects-design.md);
-  - ownership slices 4–6 (1–3 landed): allocator runtime, escape promotion,
-    integration; arena surface waits on question 4. Slice 2 leftovers, rejected
-    conservatively for now: generic closure literals capturing owners, partial
-    application of owners, escaping borrowed-owner closures, transfers through
-    outer hooks or boxed fields
-    (~/dev/tmp/coord/ownership-design.md);
-- Compile throughput. Strategy: ~/dev/tmp/coord/throughput-strategy-2026-10-21.md.
-  The root program is 86% of the work (46k instructions/line); library 13%;
-  only optimize+x64 (36%) runs in parallel today. 0.40 G single-threaded is not
-  credible, so the target is now wall clock with 4 workers. Projects, in order:
-  1. fused partition workers landed (critical path −11% at 4 workers);
-  2. partitioned checking: stages 1–2 landed (synthetic critical path
-     0.77 → 0.64 G). Game eligibility was piloted and rejected (+0%): game has
-     few roots, and workers discover new library instances. Next needs
-     canonical reconciliation of function instances;
-  3. a toolchain-baked library image (question 22);
-  4. checker name lookup by id plus a fused zonk (≤6%);
-  5. lazy function-body parsing landed (critical −5.1%).
-  Rejected: worker instance reconciliation (game +0%, synthetic −0.03%, a
-  2.2k-line program −24%, and dunes lost determinism on fallback). Game's
-  serial cost looks library-bound: question 22, or parallel library checking.
-- Ideas from Goose (~/dev/tmp/coord/goose-study.md), internal:
-  1. inferred scope regions: an upper-bound test (never free) gave at most 1.18×
-     (tree default); recursive_tree is 97.5% lookup. Rejected for now;
-  2. lambda-lifting: moot, since callback environments are already on the stack;
-  3. destination passing for fresh results (`xs.push(f())`);
-  4. bounds-check upgrades: call-site entry facts, a 2^48 length axiom,
-     hoisting through `@` parameters.
-- Runtime gaps:
-  - float compare/negate selection;
-  - outer-target SIMD (particles);
-  - callbacks: stack environments plus bounded specialization landed;
-    literal-lambda code is 4.6×/2.8× C (was 36×), callbacks 2.3×/1.7× (was 13.6×);
-    traversal is now 57%; retry only with a materially new approach.
-    Still the largest runtime gap.
-- Self-hosting. The zip pilot works: `zip.dewy` matches Jo's archives byte for
-  byte and its instruction counts (~/dev/tmp/coord/selfhost-readiness.md).
-  `$target` landed, and the shipped compiler now runs `compiler/zip.dewy`; the C
-  bootstrap builds its frozen `zip.jo` twin (`FROZEN_TWINS` in build.py). Next
-  modules must be import-cycle leaves with interfaces spellable in both
-  languages; a lexer module waits on question 24.
-- Recover the game-panel compile cost of mathematical `int` (+5.7%, accepted
-  10-20); the frontend work recovered the synthetic panel's share.
-- Small items:
-  - `xs.swap` on refined arrays is rejected (goes through `data()`); indexed
-    rewrite costs +62–93% on array_swap, so it needs a swap primitive;
-  - strict policy: map element access indexes `m.vals` with a library call's
-    result, and proving it needs Map invariants (question 10) or a trusted
-    library result rule. Combined loops (`x in xs and y in ys`) lack the
-    `k < length` fact for non-constant lengths (our analysis gap);
-  - strict 67/70 need result-length facts for functions like `make(n)`
-    (stop at `saved[0]`); likely needs design;
-  - static calls through runtime `type<T>` values (needs type values);
-  - effects slice 4 follow-ups: conditional capacity/uniqueness proofs,
-    complete late-operation verification.
+1. **Tier-4 flagships** (Opus writes them, design surface plus a core-dialect
+   twin where possible, added to the ladder). They drive the blocked pillars:
+   - a freestanding kernel/RTOS-style program in the strict lane;
+   - an ML training loop over tensors;
+   - a persistent KV or small SQL store;
+   - constant-time crypto (SHA-256 plus ChaCha20 or Poly1305);
+   - an HTTP server with a wasm UI;
+   - a compiler or lexer module;
+   - the game (existing flagship).
+2. **Compile-speed corpus.** Report lines/s per corpus: the compiler's own
+   sources (as they move to Dewy), the ladder and examples concatenated, the
+   game, and later the flagships. synthetic-22k stays as a regression signal.
+3. **Hard pillars, for Astra** (one stream): strict lane, concurrency, codegen
+   architecture, as David's answers arrive. Designs:
+   [refinement](docs/design/refinement.md), [effects](docs/design/effects.md)
+   (slices 3, 5–6), [ownership](docs/design/ownership.md) (slices 4–6).
+4. **Compile throughput** ([strategy](docs/design/compile_throughput.md)):
+   instance reconciliation so partitioned checking reaches real programs (game,
+   2–10k-line programs); a shipped library image (question 22); checker name
+   lookup by id.
+5. **Self-hosting** ([readiness](docs/design/self_hosting.md)): after question 24,
+   new leaf compiler modules start in Dewy, not Jo.
+6. **Runtime gaps** (measure the upper bound before any pilot): callback
+   traversal, graph memory layout (contiguous adjacency), float compare/negate
+   selection, outer-target SIMD, destination passing, bounds-check upgrades
+   (call-site entry facts, a 2^48 length axiom, hoisting through `@`).
+7. **Small items:** swap primitive for refined arrays; strict Map invariants
+   (question 10); result-length facts for `make(n)` (strict 67/70); static calls
+   through runtime `type<T>` values; effects slice 4 follow-ups; replace the
+   `@obj.method()` source-text heuristic with a node flag.
 
 ## Decided (David)
 
-- `int`: arbitrary precision with word storage where proven, by the fastest
-  route (checked int64 → bigint promotion → range analysis). `intN`/`uintN`
-  wrap.
+- `int`: arbitrary precision with word storage where proven. `intN`/`uintN` wrap.
 - Decimal literals are exact unless annotated (e.g. `float64`).
 - Zero-argument calls may omit or include the parentheses.
-- Function handles follow the design: a bare name calls; `@fn` is the handle.
-- From GOALS: ordinary code keeps runtime checks; static rejection of unproven
-  facts is a strict-lane property.
-- Precision (10-21): inference keeps the most precise type it knows; only an
-  explicit wider annotation widens. This applies to literal unions and, where
-  it stays performant, to integers.
-- `end` and `new` are reserved (10-21). `end` is the last index inside an index
-  expression; `new` inserts a singleton axis (NumPy `newaxis`), e.g.
-  `xs[new ..]`, `xs[.. new]`.
+- A bare function name calls; `@fn` is the handle.
+- Ordinary code keeps runtime checks; static rejection of unproven facts is a
+  strict-lane property.
+- Inference keeps the most precise type it knows; only an explicit wider
+  annotation widens (literal unions; integers keep range facts).
+- `end` and `new` are reserved: `end` is the last index inside an index; `new`
+  inserts a singleton axis (NumPy `newaxis`): `xs[new ..]`, `xs[.. new]`.
 - Versions: the language stays 0.0.0; the extension gets patch bumps only, at
   most one release a day.
 
-## Open questions for David (batched, not blocking)
+## Open questions for David
 
-1. The strict-lane opt-in surface: one profile directive, or effect rows plus a
-   module default? Are panic and detach named separately?
-2. Scope of `$prototype`.
+New questions carry a recommended answer, what it unblocks and whether it's
+reversible; reversible ones are implemented provisionally and flagged.
+
+1. Strict-lane opt-in surface; are panic and detach named separately? (64, 67, 70)
+2. Scope of `$prototype`. (72)
 3. Readonly/lifetime-bearing payload places beyond `$lend`.
-4. Allocation capabilities and allocation-failure policy.
+4. Allocation capabilities and allocation-failure policy. (76)
 5. Explicit `move` syntax.
-6. Structured concurrency: the partition/task surface, `Send`/`Sync`
-   spelling, atomics/memory orders, cancellation and locks.
-7. Multidimensional arrays: tensor syntax and broadcasting rules.
-8. IEEE float policy.
-9. Units: display (`as km`), affine units (Celsius point vs delta), calendar
-   durations.
-10. Invariant authority beyond scalar refinements.
+6. Structured concurrency: tasks/partitions, `Send`/`Sync`, atomics,
+   cancellation, locks. (81–83)
+7. Multidimensional arrays: tensor syntax and broadcasting. (84)
+8. IEEE float policy. (85)
+9. Units: display (`as km`), affine units, calendar durations. (88)
+10. Invariant authority beyond scalar refinements (strict Map invariants).
 11. Finite-resource and denial-of-service guarantees.
-12. The portable sockets/FFI boundary.
-13. Lifecycle hooks: must `$__copy__`/`$__move__` preserve the abstract value?
-    Can a move hook fail?
+12. Portable sockets/FFI boundary. (92)
+13. Must lifecycle hooks preserve the abstract value? Can a move hook fail?
 14. Errors that reach `main`.
-17. Can a function nested inside a method change the object's members?
-    Today it can't, and that's a clear error.
-19. Should `T?` fields default to `none` implicitly? Today they need an
-    explicit `= none`, which the design implies.
-20. Tests: each `$test` runs in its own process, so a panic marks only that
-    test as aborted and the others still run. (The design says a failed
-    `$runtime_assert` stops the file.) OK? `dewy-core test --json` fields are
-    provisional.
-21. Rounding ties: rational `.round()` rounds ties to even, while float
-    `.round()` rounds half away from zero. Which rule should both use? Also
-    `as rational`, and NaN → panic vs `| none`.
-18. Printing details decided provisionally: minted values print with their
-    type name (`Fault[code=7]`); ranges print as `[0..2]`/`[1,3..9]`; methods
-    get unused warnings only on private types. OK?
-16. Partial application of an overloaded function without a type annotation:
-    the version leaving the fewest parameters open wins (implemented
-    provisionally). OK?
-22. A library image built and shipped with the toolchain (keyed by compiler and
-    library hash, fresh fallback): hello 31 → ~5 ms, synthetic −3 to −13%. GOALS
-    says a persistent cache is not how Dewy stays fast; is a shipped image OK?
-23. From the dogfooding sweep (12 everyday programs, friction log in
-    ~/dev/tmp/dogfood/friction.md):
-    - decimal literals default to rational, so float code needs annotations
-      everywhere: let later float writes settle a decimal-literal local's type,
-      as later pushes settle an empty container's type?
-    - `index_of` returns -1; return `int|none` like `find`?
-    - infer the common parent for literals of sibling minted types?
-    - `main` returning `int|error` (print the error, exit 1); see also 14;
-    - `loop [k @v] in dict` to update values in place;
-    - strings: `is_empty`, prefix/suffix removal, `chars()` as graphemes;
-      `any`/`all` without a predicate; `count(value)`;
-    - slicing past the end panics (Python clamps);
-    - a documented stderr print (`eprintl`, or `print` with a target);
-    - comparing a union with one of its members (`back =? n`): `false`, not an
-      error?
-    - landed as a natural extension, revert if unwanted: `sqrt` of a quantity
-      halves even dimension powers (odd powers are an error).
-    - undocumented Jo helpers reach Dewy (`enumerate`, `zip`, `lines`,
-      `trim_start`): adopt or hide?
-24. Self-hosting surface (zip needed none; a real compiler module needs these):
-    OS selection (`$target` names only backends; Jo uses `TARGET=="windows"`),
-    build-mode flags (BOOTSTRAP/DEBUG/WATCH), a pointer type spelling, an
-    `extern`/C-binding form, tuple types, a byte-character literal. Also: the
-    design splats `import p"x"` without `as`, but the compiler and tests treat
-    it as a namespace import. Which is right?
-25. Current behavior vs the archived reference (design coverage audit,
-    ~/dev/tmp/coord/design-coverage-2026-10-21.md). Which wins?
-    - `+` joins strings/arrays (the reference: never concatenates);
-    - `let x:T` with no value reads as zero (the reference: must be initialized);
-    - a bound `[1 2]` is `array<int>`, rejected where `array<int64>` is expected;
-    - mutating a container inside its own loop;
-    - an explicit `main()` call suppresses the automatic one;
-    - `d.keys` returns an array, not a set;
-    - unknown escapes like `\N` are errors;
-    - user functions join prelude overloads rather than shadowing them;
-    - `and=` on bools always evaluates its right side;
-    - an unproven implicit narrowing is checked at run time (per GOALS), but
-      the reference says it's a compile error;
-    - explicit `uint64(x)` and `as` between widths keep the bits; the reference
-      says they should be proven casts;
-    - should a binding initialized from a match of string-literal arms widen to
-      `string` (as ints widen), or stay the literal union?
-    - the reference reserves `end`, but tests and ladder program 27 use it as a
-      name;
-    - top-level `count = 3` shadowing a prelude name: the reference says error
-      (suggest `let`); goldens rely on it declaring a binding;
-    - a `no mutates<R>` caller of a function declared `mutates<R>` is accepted
-      because effects are inferred from the body; should the declared row count?
-26. From Goose: index-typed refinements ("below `a.length`" for a
-    never-shrinking array) aimed at graph; and Euclidean `%` so `x % n` is
-    always a valid index.
-15. Provisional file helpers: `copy_file`, `rename_file`, `make_dirs`,
-    `walk_dir`, `glob`, `file_size`, `file_time`, `chmod`, `env`. Keep, rename
-    or drop?
+15. Provisional file helpers (`copy_file`, `walk_dir`, `glob`, …): keep or rename?
+16. Partial application of an overloaded function picks the fewest open
+    parameters (provisional).
+17. A function nested in a method can't change the object's members (today).
+18. Printing details (minted type names, range forms, unused-method warnings).
+19. Should `T?` fields default to `none` implicitly?
+20. Per-process `$test` isolation; provisional `test --json` fields.
+21. Rounding ties (rational to-even vs float half-away); `as rational`; NaN.
+22. Ship a prebuilt library image with the toolchain (hello 31 → ~5 ms)?
+23. Dogfooding: decimal literals default to rational; `index_of` → `int|none`;
+    sibling minted literals; `main` returning `int|error`; `loop [k @v] in d`;
+    string helpers; slice clamping; a stderr print; union-member comparison;
+    `sqrt` of quantities (landed provisionally); exposed Jo helpers.
+24. Self-hosting surface: OS selection, build-mode flags, pointer types,
+    `extern`/C bindings, tuples, byte-char literal, `import p"x"` splat vs
+    namespace.
+25. Behavior vs the archived reference: `+` concatenation; reading an
+    uninitialized `let x:T`; bound `[1 2]` as `array<int>`; mutating a container
+    in its own loop; explicit `main()`; `d.keys` array vs set; unknown escapes;
+    user functions vs prelude overloads; `and=` evaluation; unproven narrowing
+    (runtime vs compile error); `uint64(x)` bit casts; top-level `count = 3`;
+    declared vs inferred effect rows for callers.
+26. Index-typed refinements ("below `a.length`"); Euclidean `%` (recommended:
+    keep floored).
+27. Compile north star: relax single-thread to ~0.75 G and gate on 4-worker
+    critical path / wall clock.
 
-Each tier-3 program's ladder note says which question holds it open.
+Each held ladder program's note names the question that holds it.
 
-## Tried and rejected (don't retry without a materially new idea)
+## Tried and rejected (an idea family ends after one failed pilot)
 
 - Pooled/inline syntax children; reusable register scratch workspace.
-- Zero-cost cold-call register weighting: kernels regressed 38%.
-- An entry guard before the prologue.
-- Block-local liveness rescue and short register caches: recovered 4–8% of
-  spills.
-- Word-at-a-time name hash; paired SSE string equality.
-- Broad release inlining-cost adjustment.
-- Compact IR encoding: −0.3%.
-- Selective default passes: −10% compile, but kernels regressed 16–92%.
-- Readonly aggregate argument forwarding from loop snapshots: self-build −1.25%,
-  no runtime change (under the 3% pilot bar).
-- Local check-traversal fixes beyond the two landed: four pilots each under 1%.
-- Direct null-trap lowering for managed/method params: 14.97 → 15.28 ms.
-- Overload-dispatch plan cache: 80% repeat rate, but repeats cost only 2.79% of
-  synthetic (33.9 M) before overhead.
-- x64 live-interval stream: no duplicated walk inside x64; realistic saving 1.9%
-  synthetic / 0.5% self-build. Word-at-a-time emission: ~1%.
-- Dictionary 8-byte slots: graph default 1.56× → 1.83× C (dependent key reads).
-- Borrowed dictionary value fetches: graph 1.06×/1.03×.
-- Single-probe `d[k] += 1` (hand-expanded upper bound): dict_words 1.2× on long
-  runs; under the bar. Borrowed adjacency fetches are untested.
-- Triangular hash probing for graph: −0.3% instructions, default 7% slower.
-  Graph is memory-bound (slot reads 43%, adjacency fetch/retain 24%); the next
-  idea is contiguous adjacency storage/ownership.
-- Fork-based parallel lowering: 0.88–1.00× latency. Lowering is only about 13%
-  of a default build.
+- Zero-cost cold-call register weighting (kernels −38%); an entry guard before
+  the prologue; block-local liveness rescue and short register caches.
+- Word-at-a-time name hash; paired SSE string equality; word-at-a-time emission.
+- Broad release inlining-cost adjustment; selective default passes (kernels
+  regressed 16–92%); compact IR encoding (−0.3%).
+- Readonly aggregate argument forwarding from loop snapshots (−1.25%).
+- Local check-traversal fixes (four pilots under 1%); overload-dispatch plan
+  cache (2.79% ceiling); x64 live-interval stream (1.9% ceiling).
+- Fork-based parallel lowering alone (0.88–1.00×); worker instance
+  reconciliation as piloted (game +0%, lost determinism on fallback).
+- Effects slice 3 consolidation as piloted (+28% self-build).
+- Null-trap lowering for params; dictionary micro-pilots (8-byte slots,
+  single-probe updates, borrowed fetches, triangular probing). Graph is
+  memory-bound; only a layout change (contiguous adjacency) is left.
+- Inferred scope regions (1.18× upper bound); lambda-lifting (environments are
+  already on the stack).

@@ -363,8 +363,9 @@ def print_scoreboard(doc: dict, names: list[str], design: dict, core: dict):
     if len(tiers(doc)) > 1:
         scored = [n for n in names if not is_open(n)]
         opened = len(names) - len(scored)
-        print(f'Design total: {sum(design[n].ok for n in scored)}/{len(scored)}'
-              + (f', excluding {opened} open' if opened else ''))
+        # Held programs count against the total: they are unfinished work, not exclusions.
+        print(f'Design total: {sum(design[n].ok for n in scored)}/{len(names)}'
+              + (f' ({opened} held open on decisions)' if opened else ''))
 
     failing = [n for n in names if not design[n].ok and not is_open(n) and design[n].status != 'wrongly-accepted']
     accepted = [n for n in names if design[n].status == 'wrongly-accepted']
