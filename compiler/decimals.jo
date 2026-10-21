@@ -26,10 +26,13 @@ decimal_checked = false               # checking is over: a write found later re
 decimal_restarted = false             # a restart: the warnings the last run showed are not repeated
 decimal_pid = 0                       # the compiler's own process: forked workers leave the restart to it
 
-# (restarting is a re-exec, as eager-body replay is: Linux hosts)
+# This process's id, to tell forked emission/check workers from the compiler itself
+# (Windows forks none: any nonzero id will do).
 decimal_self = () -> int:
-    when BOOTSTRAP or TARGET != "linux" or ARCH != "x86_64":
-        return 0
+    when BOOTSTRAP:
+        return syscall(39)
+    else when TARGET == "windows" or TARGET == "wasm":
+        return 1
     else:
         return syscall(39)
 
@@ -98,6 +101,15 @@ decimal_restart = ():
     loop i in [1..a.len()):
         if not starts_with(a[i], DECIMAL_FLAG): replay.push(a[i])
     __olen = 0
-    if not exec(exe_path(), replay):
-        eprint("error: could not restart with float decimal bindings")
-        exit(2)
+    when TARGET == "windows":
+        # (a process cannot replace itself there: run the restart with this one's standard
+        # streams, then end with its exit code)
+        code, _ = run_program(exe_path(), replay[1..], true)
+        if code < 0:
+            eprint("error: could not restart with float decimal bindings")
+            exit(2)
+        exit(code)
+    else:
+        if not exec(exe_path(), replay):
+            eprint("error: could not restart with float decimal bindings")
+            exit(2)
