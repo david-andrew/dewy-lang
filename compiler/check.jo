@@ -2147,6 +2147,7 @@ value_capable = (s: int) -> bool:
     k = nodes[s].kind
     if k == .exprstmt: return true
     if (k == .if_ or k == .iflet) and nodes[s].c != 0: return true
+    if k == .if_ and nodes[s].c == 0 and is_chain_end(int(nodes[s].a)): return true
     false
 
 expand_when = (out: mut int[], s: int):

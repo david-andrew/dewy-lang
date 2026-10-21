@@ -8163,12 +8163,34 @@ check_swizzle = (n: int, bt: int) -> int:
     if len(s) == 3: return T_VEC3
     T_VEC4
 
+# A Dewy `is?` test ending an else-less if (checked or not).
+is_chain_end = (cond: int) -> bool:
+    nodes[cond].kind == .istype and files[pos_file(nodes[cond].pos)].is_dewy
+
 check_if = (n: int, ex: int) -> int:
     is_stmt = has_flag(n, NF_STMT)
     check_to(int(nodes[n].a), T_BOOL)
     cond = int(nodes[n].a)
     b = int(nodes[n].b)
     c = int(nodes[n].c)
+    # (`if v is? A x else if v is? B y` over A|B, ending a value: the last test
+    # always holds, as the earlier ones narrowed v, so its body is the value;
+    # otherwise the else-less `if` stays a statement)
+    if not is_stmt and c == 0 and is_chain_end(cond):
+        if nodes[cond].aux == -3 and nodes[int(nodes[cond].a)].kind == .ident:
+            t = check_block(b, ex, true)
+            if nodes[b].aux != 0:
+                v = block_value(b)
+                if ex != 0: coerce(v, ex)
+                else: finalize_literal(v)
+                t = ntype(v)
+            nodes[n] = nodes[b]
+            return t
+        if ex != 0 and tkind(ex) != .void_ and tkind(ex) != .var:
+            subject = if nodes[int(nodes[cond].a)].kind == .ident: "`{name_of(int(nodes[int(nodes[cond].a)].name))}`" else: "the value"
+            fatal(nodes[n].pos, "this `if` must give {a_type(ex)}, but it has no `else`: when {subject} is not {a_type(resolve_type(int(nodes[cond].b)))}, it gives nothing (add `else` with a value, or a test for each remaining type)")
+        is_stmt = true
+        add_flag(n, NF_STMT)
     if is_stmt:
         mark = scope_mark()
         before_b = locals.len()
