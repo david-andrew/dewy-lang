@@ -1,0 +1,20 @@
+# quick
+let drops:int64=0
+Key=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+    $__copy__
+    duplicate=():>Key=>Key[value+10]
+]
+main=()=>{
+    {
+        let original:dict<Key int64>=[Key[0]->20 Key[1]->22]
+        let copied=original.copy()
+        assert(copied.has(Key[10]) and copied.has(Key[11]))
+        assert(not copied.has(Key[0]))
+        assert(copied[Key[10]]+copied[Key[11]]=?42)
+        assert(original[Key[0]]=?20)
+    }
+    assert(drops=?10)
+    printl"ok"
+}

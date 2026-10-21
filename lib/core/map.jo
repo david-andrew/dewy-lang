@@ -170,6 +170,7 @@ reserve[K, V] = (m: mut Map[K, V], n: int):
 # a new entry (k is not in m; slot: the empty slot a probe for it ended at, or -1)
 __map_add[K, V] = (m: mut Map[K, V], k: K, v: V, h: u64, slot0: int = -1):
     n = m.__keys.len()
+    tag = __map_tag(k, h)
     slot = slot0
     if (n + 1) * 4 > m.slots.len() * 3 and m.ngone > 0:
         # (what is gone taken out first: there may be room then)
@@ -192,7 +193,7 @@ __map_add[K, V] = (m: mut Map[K, V], k: K, v: V, h: u64, slot0: int = -1):
         mask = m.slots.len() - 1
         i = int(h) & mask
         loop m.slots[i].entry != 0: i = (i + 1) & mask
-    m.slots[i] = __MapSlot(__map_tag(k, h), n + 1)
+    m.slots[i] = __MapSlot(tag, n + 1)
 
 ([])[K, V] = (m: Map[K, V], k: K) -> V:
     e = __map_find(m, k, k.hash())
@@ -328,8 +329,8 @@ __map_compact[K, V] = (m: mut Map[K, V]):
     loop e in [0..m.__keys.len()):
         if e < ng and m.gone[e]: continue
         if w != e:
-            m.__keys[w] = m.__keys[e]
-            m.vals[w] = m.vals[e]
+            __relocate_at(m.__keys, w, e)
+            __relocate_at(m.vals, w, e)
             m.hashes[w] = m.hashes[e]
         w += 1
     m.__keys.truncate(w)
@@ -409,3 +410,25 @@ __map_of[K, V] = (pairs: (K, V)[]) -> {K: V}:
     m: {K: V}
     loop p in pairs: m[p.0] = p.1
     m
+
+# Mechanical transfer into a vacant compaction slot. Earlier compilers keep
+# their copy/release implementation; current compilers transfer live markers.
+__relocate_at[T] = (xs: mut T[], dst: int, src: int):
+    xs[dst] = xs[src]
+    __release_at(xs, src)
+
+# Transfer a live value out, leaving a vacant slot for immediate removal.
+__take_at[T] = (xs: mut T[], i: int) -> T:
+    value = xs[i]
+    __release_at(xs, i)
+    value
+
+# Resource key copies may change their value. Insert each copied entry through
+# the ordinary hash/equality path rather than reuse the source's hash table.
+__map_copy_owners[K, V] = (m: Map[K, V]) -> Map[K, V]:
+    result: Map[K, V]
+    ng = m.gone.len()
+    loop i in 0.. and key in m.__keys:
+        if i < ng and __at(m.gone, i): continue
+        result[key] = __at(m.vals, i)
+    result

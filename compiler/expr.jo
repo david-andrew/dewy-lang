@@ -1,3 +1,4 @@
+use 'ownership.jo'
 use 'units.jo'
 use 'errors.jo'
 use 'poly_closure.jo'
@@ -25,7 +26,7 @@ enum IN:
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
     read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
     static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem, lend, loan_address, loan_load, loan_store, loan_length,
-    zeroed
+    zeroed, relocate, take_slot
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big
@@ -3310,6 +3311,8 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                     sig = fn_sig(d)
                     if sig.params.len() >= 1 and (sig.generic or can_coerce(args[0], at, sig.params[0])): takes = true
                 if not takes: return conversion(n, int(syms[universe[name]].ref), args)
+            else if sk == .fns and args.len() == 2 and name == take_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return take_call(n, args)
+            else if sk == .fns and args.len() == 3 and name == relocate_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return relocate_call(n, args)
             else if sk == .fns and args.len() == 2 and name == release_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return release_call(n, args, expected)
             else if sk == .const_ or sk == .module: fatal(nodes[n].pos, "'{name_of(name)}' is not a function")
             else if sk == .builtin:
@@ -4763,7 +4766,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             nodes[n] = nodes[bc_call("__dewy_range_iter", args, nodes[n].pos)]
         else if is_dewy_set_type(t):
             nodes[n] = nodes[bc_call("__dewy_set_values", args, nodes[n].pos)]
-        else if is_map_type(t):
+        else if is_map_type(t) and not ownership_fact_type(t):
             # Combined loops index a retained dense entry list. Compact deleted
             # entries once, just as ordinary dictionary iteration does.
             nodes[n] = nodes[bc_call("__map_entries", args, nodes[n].pos)]
@@ -9296,3 +9299,30 @@ check_iflet = (n: int, ex: int) -> int:
         coerce(vb, ex)
         return ex
     join_types(va, vb, nodes[n].pos)
+
+relocate_name = intern("__relocate_at")
+relocate_call = (n: int, args: int[]) -> int:
+    t = prune(check_expr(args[0], 0))
+    if tkind(t) != .array: fatal(nodes[n].pos, "relocation needs a growable array")
+    check_place(args[0], false)
+    check_expr(args[1], T_INT)
+    check_expr(args[2], T_INT)
+    nodes[n].kind = .intrinsic
+    nodes[n].aux = i32(int(IN.relocate))
+    nodes[n].a = 0
+    set_list(n, args)
+    nodes[n].type = i32(T_VOID)
+    T_VOID
+
+take_name = intern("__take_at")
+take_call = (n: int, args: int[]) -> int:
+    t = prune(check_expr(args[0], 0))
+    if tkind(t) != .array: fatal(nodes[n].pos, "slot transfer needs a growable array")
+    check_place(args[0], false)
+    check_expr(args[1], T_INT)
+    nodes[n].kind = .intrinsic
+    nodes[n].aux = i32(int(IN.take_slot))
+    nodes[n].a = 0
+    set_list(n, args)
+    nodes[n].type = i32(telem(t))
+    telem(t)

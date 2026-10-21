@@ -2500,7 +2500,7 @@ check_for = (s: int):
         nodes[s].a = i32(it)
         # (a map with entries removed has them still in place, marked gone: the loop goes over a
         # copy without them; a `loop mut` had the map itself made so, by map_tidy_first)
-        if is_map_type(t) and not is_mut:
+        if is_map_type(t) and not is_mut and not ownership_fact_type(t):
             add_flag(it, NF_CHECKED)
             lv = int(nodes[synth_call("__map_entries", [it], pos)].a)
             t = prune(check_expr(lv, 0))

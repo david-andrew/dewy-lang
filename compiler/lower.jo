@@ -33,7 +33,7 @@ const VC_AGG = 3
 const LK_INST = 0
 const LK_HELPER = 1
 
-enum HK: drop, copy, move, arrrel, arruniq, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq, math_main
+enum HK: drop, copy, move, arrrel, arruniq, arrcopy, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq, math_main
 
 struct LFunc:
     kind: int
@@ -355,6 +355,7 @@ copy_at = (addr: int, t0: int):
 # data arrays retain the normal COW path. This eager path is deliberately small:
 # it also works when a callback is invoked by a borrowed implementation-library API.
 copy_ref = (v: int, t: int) -> int:
+    if ownership_type(t): return e_call(lf_helper(.arrcopy, t, 0), [v], VI)
     retain(v, t)
     k = types[prune(t)].kind
     if (k == .array or k == .box) and type_has_fn(t):
@@ -377,7 +378,7 @@ reg_temp_vreg = (v: int, t: int):
 
 borrow = (val: Val, t: int):
     if not val.owned or not is_managed(t): return
-    if vc(t) == VC_AGG:
+    if vc(t) == VC_AGG or ownership_type(t):
         if val.slot < 0: ice("owned aggregate without slot")
         reg_temp_slot(val.slot, t)
     else:
@@ -391,7 +392,24 @@ own = (val: Val, t: int) -> Val:
     if val.owned: return val
     if ownership_type(t):
         if not ownership_copyable(t): fatal(ir_pos, "cannot copy a move-only owner")
+        if vc(t) == VC_INT: return owner_value(V(copy_ref(val.v, t), true), t)
         if let hook = ownership_copies.get(prune(t)): return owner_hook_result(hook, val.v, t)
+        if let copier = owner_map_copies.get(prune(t)):
+            slot = new_temp(t)
+            addr = e_slot(slot)
+            e_call(lf_of_inst(copier), [addr, val.v], -1)
+            owner_register(slot, t)
+            return Val(addr, true, slot)
+        if is_map_type(t):
+            slot = new_temp(t)
+            addr = e_slot(slot)
+            e_zero(addr, tsize(t))
+            owner_register(slot, t)
+            loop field in field_list(t):
+                child = own(Val(load_val(field.0, val.v, field.1), false, -1), field.0)
+                store_val(field.0, addr, field.1, child.v)
+                if ownership_type(field.0): owner_forget_slot(child.slot)
+            return Val(addr, true, slot)
         slot = new_temp(t)
         addr = e_slot(slot)
         e_copy(addr, val.v, tsize(t))
@@ -944,7 +962,7 @@ gen_place = (e: int, write: bool) -> Place:
                     iff(e_bin(.geu, VI, idx, fp.len))
                     e_call_nr(rt("__panic_bounds"), [idx, fp.len, e_daddr(loc_data(nodes[e].pos))], -1)
                     endc()
-                sz = tsize(int(types[bt].elem))
+                sz = owner_stride(int(types[bt].elem))
                 return Place(true, e_bin(.add, VI, e_addi(fp.arr, 24), e_bin(.mul, VI, idx, e_iconst(sz))))
             arr = 0
             idx = 0
@@ -965,7 +983,7 @@ gen_place = (e: int, write: bool) -> Place:
             if has_flag(e, NF_INBOUNDS): safety = 1
             if safety == 0: bounds_check(arr, idx, nodes[e].pos)
             else if safety == 2 and opt_release: null_check(arr, idx, nodes[e].pos)
-            sz = tsize(int(types[bt].elem))
+            sz = owner_stride(int(types[bt].elem))
             return Place(true, e_bin(.add, VI, e_addi(arr, 24), e_bin(.mul, VI, idx, e_iconst(sz))))
         if bk == .str_:
             idx = 0
@@ -1127,7 +1145,7 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
         if i + 1 < args.len() and vc(pt) != VC_AGG: val.v = freeze_scalar(val.v, pt)
         if not val.owned and (not dewy_entry or i + 1 < args.len()) and type_has_fn(pt) and files[pos_file(nodes[a].pos)].is_dewy: val = own_at(a, val, pt)
         mut_snapshot = any_mut
-        if copies_on and copy_strict(a): mut_snapshot = any_mut and shares_mut_root(a, args, mutmask)
+        if copies_on and (copy_strict(a) or ownership_type(pt)): mut_snapshot = any_mut and shares_mut_root(a, args, mutmask)
         if not val.owned and is_managed(pt) and (mut_snapshot or borrow_may_change(a, args, i, callee)): val = own_at(a, val, pt)
         # (a struct passed by its address, in memory that a `mut` argument of the same call
         # reaches, f(p, p.hs[0]): the callee writing p would change it, so a copy; or that the
@@ -1243,6 +1261,11 @@ borrow_may_change = (a: int, args: int[], i: int, callee: int) -> bool:
     # A mutable parameter may alias a caller's global. A read-only direct call
     # cannot replace it when it writes no globals and invokes no unknown code.
     # Keep the snapshot if a later argument can write the parameter itself.
+    resource = ownership_type(ntype(n))
+    # Owners cannot be global, captured, or exported. A readonly argument
+    # cannot be reached by the callee except through another actual; those
+    # aliases and later argument writes are checked above/by shares_mut_root.
+    if resource: return false
     if not opt_release or callee <= 0: return true
     w = fn_writes(callee)
     if w.all or w.globals.len() > 0: return true
@@ -2065,7 +2088,9 @@ gen_value_block = (b: int, rs: int, rt_: int, rv: int = -1):
 result_from_slot = (rs: int, t: int) -> Val:
     a = e_slot(rs)
     if vc(t) == VC_AGG: return Val(a, true, rs)
-    V(load_val(t, a, 0), true)
+    value = load_val(t, a, 0)
+    if ownership_type(t): return Val(value, true, rs)
+    V(value, true)
 
 # ---------------- match ----------------
 gen_match_test = (p: int, st0: int, hidden_addr: int) -> int:
@@ -2467,7 +2492,8 @@ gen_binary = (e: int) -> Val:
         # Built-in string equality invokes no user code. A plain right-hand
         # read cannot invalidate the left value, even through an indexed place.
         plain_string = aux == 2 and (op == .eq or op == .ne) and plain_read(b)
-        if not plain_string and place_var(a) != 0: keep_left = not unchanged_by(a, b)
+        plain_resource = aux == 1 and ownership_type(lt) and plain_read(b)
+        if not plain_string and not plain_resource and place_var(a) != 0: keep_left = not unchanged_by(a, b)
     if aux == 1:
         ad = 0
         # (a slice, xs[a..b) == ys: a new array, not a place to take the address of)
@@ -2502,7 +2528,8 @@ gen_binary = (e: int) -> Val:
         va = gen_left(a, lt, keep_left)
         vb = gen_borrowed(b).v
         et = int(types[lt].elem)
-        r = e_call(rt("__arr_concat"), [va, vb, e_iconst(tsize(et))], VI)
+        if ownership_type(et) and not ownership_copyable(et): fatal(nodes[e].pos, "cannot concatenate move-only owners; transfer with extend")
+        r = e_call(rt("__arr_concat"), [va, vb, e_iconst(owner_stride(et))], VI)
         if is_managed(et): retain_elems(r, et)
         return V(r, true)
     if aux == 4:
@@ -2668,7 +2695,10 @@ retain_elems = (arr: int, et: int):
     blk()
     lop()
     brif_to(e_bin(.ges, VI, i, n), ctl - 1)
-    copy_at(e_bin(.add, VI, e_addi(arr, 24), e_bin(.mul, VI, i, e_iconst(tsize(et)))), et)
+    ea = e_bin(.add, VI, e_addi(arr, 24), e_bin(.mul, VI, i, e_iconst(owner_stride(et))))
+    if ownership_type(et): iff(e_load(VI, ea, tsize(et), 1))
+    copy_at(ea, et)
+    if ownership_type(et): endc()
     e_mov(i, e_addi(i, 1))
     br_to(ctl)
     endc()
@@ -2916,12 +2946,41 @@ gen_intrinsic = (e: int) -> Val:
         e_mov(r, e_load(VI, p, off, 8))
         endc()
         return V(r, false)
+    if id == .take_slot:
+        at = ntype(args[0])
+        et = telem(at)
+        index = gen_expr(args[1]).v
+        pl = gen_place(args[0], true)
+        arr_unique(pl, at)
+        p = read_place(pl, at)
+        bounds_check(p, index, nodes[e].pos)
+        ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, index, e_iconst(owner_stride(et))))
+        slot = new_temp(et)
+        store_val(et, e_slot(slot), 0, load_val(et, ea, 0))
+        e_zero(ea, owner_stride(et))
+        return result_from_slot(slot, et)
+    if id == .relocate:
+        at = ntype(args[0])
+        et = telem(at)
+        dst = gen_expr(args[1]).v
+        src = gen_expr(args[2]).v
+        pl = gen_place(args[0], true)
+        arr_unique(pl, at)
+        p = read_place(pl, at)
+        da = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, dst, e_iconst(owner_stride(et))))
+        sa = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, src, e_iconst(owner_stride(et))))
+        iff(e_bin(.ne, VI, dst, src))
+        owner_element_drop(da, et)
+        e_copy(da, sa, owner_stride(et))
+        e_zero(sa, owner_stride(et))
+        endc()
+        return V(-1, false)
     if id == .push:
         at = prune(ntype(args[0]))
         et = int(types[at].elem)
-        esz = tsize(et)
+        esz = owner_stride(et)
         # xs.push(S(...)) with side-effect-free fields: build the element in place
-        in_place = is_plain_ctor(args[1])
+        in_place = not ownership_type(et) and is_plain_ctor(args[1])
         val = V(-1, false)
         if not in_place: val = gen_owned(args[1])
         pl = gen_place(args[0], true)
@@ -2973,6 +3032,8 @@ gen_intrinsic = (e: int) -> Val:
                 store_field(f, slotp, fv.v)
             return V(-1, false)
         store_val(et, slotp, 0, val.v)
+        owner_element_live(slotp, et)
+        if ownership_type(et): owner_forget_slot(val.slot)
         return V(-1, false)
     if id == .pop:
         at = prune(ntype(args[0]))
@@ -2986,12 +3047,12 @@ gen_intrinsic = (e: int) -> Val:
         endc()
         nn = e_bin(.sub, VI, n, e_iconst(1))
         hdr_store(p, 8, nn)
-        sz = tsize(et)
+        sz = owner_stride(et)
         ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, nn, e_iconst(sz)))
         if vc(et) == VC_AGG:
             s = new_temp(et)
             d = e_slot(s)
-            e_copy(d, ea, sz)
+            e_copy(d, ea, tsize(et))
             e_zero(ea, sz)
             return Val(d, true, s)
         v = load_val(et, ea, 0)
@@ -3005,14 +3066,16 @@ gen_intrinsic = (e: int) -> Val:
         pl = gen_place(args[0], true)
         arr_unique(pl, at)
         sa = place_addr(pl, at)
-        slotp = e_call(rt("__arr_insert_slot"), [sa, e_iconst(tsize(et)), idx], VI)
+        slotp = e_call(rt("__arr_insert_slot"), [sa, e_iconst(owner_stride(et)), idx], VI)
         if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
         store_val(et, slotp, 0, val.v)
+        owner_element_live(slotp, et)
+        if ownership_type(et): owner_forget_slot(val.slot)
         return V(-1, false)
     if id == .remove:
         at = prune(ntype(args[0]))
         et = int(types[at].elem)
-        sz = tsize(et)
+        sz = owner_stride(et)
         idx = gen_expr(args[1]).v
         pl = gen_place(args[0], true)
         arr_unique(pl, at)
@@ -3021,7 +3084,7 @@ gen_intrinsic = (e: int) -> Val:
         ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, idx, e_iconst(sz)))
         s = new_temp(et)
         d = e_slot(s)
-        e_copy(d, ea, sz)
+        e_copy(d, ea, tsize(et))
         sa = place_addr(pl, at)
         e_call(rt("__arr_remove_slot"), [sa, e_iconst(sz), idx], -1)
         if vc(et) == VC_AGG: return Val(d, true, s)
@@ -3041,9 +3104,9 @@ gen_intrinsic = (e: int) -> Val:
             blk()
             lop()
             brif_to(e_bin(.ges, VI, i, n), ctl - 1)
-            ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, i, e_iconst(tsize(et))))
-            drop_at(ea, et)
-            e_zero(ea, tsize(et))
+            ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, (if ownership_type(et): e_bin(.sub, VI, e_addi(n, -1), i) else: i), e_iconst(owner_stride(et))))
+            owner_element_drop(ea, et)
+            e_zero(ea, owner_stride(et))
             e_mov(i, e_addi(i, 1))
             br_to(ctl)
             endc()
@@ -3055,11 +3118,23 @@ gen_intrinsic = (e: int) -> Val:
         endc()
         endc()
         return V(-1, false)
+    if id == .extend and ownership_type(ntype(args[0])):
+        at = ntype(args[0])
+        et = telem(at)
+        source = gen_owned(args[1])
+        pl = gen_place(args[0], true)
+        sa = place_addr(pl, at)
+        e_call(rt("__arr_extend"), [sa, source.v, e_iconst(owner_stride(et))], VI)
+        iff(e_bin(.ne, VI, source.v, e_iconst(0)))
+        hdr_store(source.v, 8, e_iconst(0))
+        endc()
+        owner_drop(e_slot(source.slot))
+        return V(-1, false)
     if id == .extend:
         # append all of ys: one copy of the bytes, then retain managed elements
         at = prune(ntype(args[0]))
         et = int(types[at].elem)
-        esz = tsize(et)
+        esz = owner_stride(et)
         sliced = is_slice(args[1])
         if sliced:
             src_root = write_root(int(nodes[args[1]].a))
@@ -3122,7 +3197,7 @@ gen_intrinsic = (e: int) -> Val:
         pl = gen_place(args[0], true)
         arr_unique(pl, at)
         sa = place_addr(pl, at)
-        e_call(rt("__arr_reserve"), [sa, e_iconst(tsize(int(types[at].elem))), n], -1)
+        e_call(rt("__arr_reserve"), [sa, e_iconst(owner_stride(int(types[at].elem))), n], -1)
         if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
         return V(-1, false)
     if id == .resize or id == .truncate or id == .setlen:
@@ -3149,9 +3224,9 @@ gen_intrinsic = (e: int) -> Val:
             brif_to(e_bin(.les, VI, cur, n), ctl - 1)
             last = e_bin(.sub, VI, cur, e_iconst(1))
             hdr_store(p, 8, last)
-            ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, last, e_iconst(tsize(et))))
-            drop_at(ea, et)
-            e_zero(ea, tsize(et))
+            ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, last, e_iconst(owner_stride(et))))
+            owner_element_drop(ea, et)
+            e_zero(ea, owner_stride(et))
             br_to(ctl)
             endc()
             endc()
@@ -3164,7 +3239,7 @@ gen_intrinsic = (e: int) -> Val:
             endc()
             return V(-1, false)
         sa = place_addr(pl, at)
-        e_call(rt("__arr_resize"), [sa, e_iconst(tsize(et)), n], -1)
+        e_call(rt("__arr_resize"), [sa, e_iconst(owner_stride(et)), n], -1)
         if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
         return V(-1, false)
     if id == .arrdata:
@@ -3673,6 +3748,16 @@ gen_conv = (e: int) -> Val:
         endc()
         s = new_temp(to)
         d = e_slot(s)
+        if ownership_type(to):
+            et = telem(to)
+            held: int[]
+            loop i in [0..n):
+                ea = e_addi(src, 24 + i * owner_stride(et))
+                value = own(Val(load_val(et, ea, 0), false, -1), et)
+                store_val(et, d, i * tsize(et), value.v)
+                held.push(value.slot)
+            loop slot in held: owner_forget_slot(slot)
+            return Val(d, true, s)
         e_copy(d, e_addi(src, 24), tsize(to))
         if is_managed(to): copy_at(d, to)
         return Val(d, true, s)
@@ -3683,6 +3768,7 @@ gen_conv = (e: int) -> Val:
         esz = tsize(et)
         n = fixed_len(from)
         src = place_addr(gen_place(a, false), from)
+        if ownership_type(to): return owner_array_from_fixed(src, et, n, to)
         arr = vreg(VI)
         e_mov(arr, e_call(rt("__arr_filled"), [e_iconst(n), e_iconst(esz)], VI))
         e_copy(e_addi(arr, 24), src, n * esz)
@@ -3732,7 +3818,7 @@ never_value = (t: int) -> Val:
 
 gen_expr = (e: int) -> Val:
     value = gen_expr_value(e)
-    if ownership_type(ntype(e)) and value.owned: owner_register(value.slot, ntype(e))
+    if ownership_type(ntype(e)) and value.owned: return owner_value(value, ntype(e))
     value
 
 gen_expr_value = (e: int) -> Val:
@@ -3994,11 +4080,16 @@ gen_expr_value = (e: int) -> Val:
         e_zero(d, tsize(t))
         f = int(nodes[e].sym)
         tracked = build_slot(s, t)
+        if ownership_type(t): owner_register(s, t)
         loop i in [0..nkids(e)):
             p = kid(e, i)
-            kv = gen_borrowed(int(nodes[p].a)).v
-            vv = gen_borrowed(int(nodes[p].b)).v
-            e_call(lf_of_inst(f), [e_slot(s), kv, vv], -1)
+            key = int(nodes[p].a)
+            value = int(nodes[p].b)
+            kv = if copy_consumes(f, 1): gen_owned(key) else: gen_borrowed(key)
+            vv = if copy_consumes(f, 2): gen_owned(value) else: gen_borrowed(value)
+            if copy_consumes(f, 1) and ownership_type(ntype(key)): owner_forget_slot(kv.slot)
+            if copy_consumes(f, 2) and ownership_type(ntype(value)): owner_forget_slot(vv.slot)
+            e_call(lf_of_inst(f), [e_slot(s), kv.v, vv.v], -1)
         if tracked: building.pop()
         return Val(e_slot(s), true, s)
     if k == .tuple:
@@ -4075,9 +4166,16 @@ gen_slice = (e: int) -> Val:
     if types[bt].kind == .str_: return V(e_call(rt("__str_slice"), [p, lo, hi], VI), true)
     et = int(types[bt].elem)
     q = 0
+    if types[bt].kind == .fixed and ownership_type(bt):
+        # The ordinary helper checks bounds; resource elements then acquire
+        # their live markers in the growable representation.
+        raw = e_call(rt("__fixed_slice"), [p, e_iconst(fixed_len(bt)), lo, hi, e_iconst(tsize(et))], VI)
+        value = owner_array_from_fixed(e_addi(raw, 24), et, e_bin(.sub, VI, hi, lo), ntype(e), true)
+        e_call(rt("__free_obj"), [raw], -1)
+        return value
     if types[bt].kind == .fixed:
         q = e_call(rt("__fixed_slice"), [p, e_iconst(fixed_len(bt)), lo, hi, e_iconst(tsize(et))], VI)
-    else: q = e_call(rt("__arr_slice"), [p, lo, hi, e_iconst(tsize(et))], VI)
+    else: q = e_call(rt("__arr_slice"), [p, lo, hi, e_iconst(owner_stride(et))], VI)
     if is_managed(et): retain_elems(q, et)
     V(q, true)
 
@@ -4176,7 +4274,8 @@ gen_owner_fixed = (e: int, t: int, s: int) -> Val:
 gen_array = (e: int, t: int) -> Val:
     if types[prune(t)].kind == .fixed: return gen_fixed_array(e, prune(t))
     et = int(types[t].elem)
-    esz = tsize(et)
+    esz = owner_stride(et)
+    if ownership_type(t): return gen_owner_array(e, t)
     if nodes[e].b != 0:
         if copies_on: copy_components(e, et, "array repetition may duplicate its heap-bearing element")
         # fresh heap memory is zeroed, so [0; n] needs no fill loop
@@ -4611,14 +4710,18 @@ assign_to = (target: int, t: int, v: int):
         release(old, mk_box(int(fields[f].type)))
         return
     pl = gen_place(target, true)
-    if is_managed(t):
+    element = nodes[target].kind == .index and tkind(ntype(int(nodes[target].a))) == .array and ownership_type(t)
+    if element:
+        owner_element_drop(pl.v, t)
+    else if is_managed(t):
         if pl.math_opt: release(read_place(pl, t), t)
         else if pl.mem: drop_at(pl.v, t)
         else: release(pl.v, t)
     write_place(pl, t, v)
     if ownership_type(t):
         owner_forget(v)
-        owner_register(owner_address_slot(pl.v), t)
+        if element: owner_element_live(pl.v, t)
+        else: owner_register(owner_address_slot(pl.v), t)
 
 gen_assign = (s: int):
     a = int(nodes[s].a)
@@ -4653,6 +4756,12 @@ gen_assign = (s: int):
         else: write_place(pl, t, e_bin(.sub, VI, cur, d))
         return
     if nodes[s].op == i32(int(Tok.assign)):
+        rhs = int(nodes[s].b)
+        if ownership_type(t) and nodes[rhs].kind == .intrinsic and nodes[rhs].aux == i32(int(IN.zeroed)):
+            pl = gen_place(a, true)
+            owner_element_drop(pl.v, t)
+            e_zero(pl.v, owner_stride(t))
+            return
         if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and held_views.contains(int(nodes[a].sym)):
             # (a held view given another part: its address)
             e_mov(int(locals[int(nodes[a].sym)].vreg), held_value_addr(int(nodes[s].b)))
@@ -5538,7 +5647,7 @@ gen_comprehension_reserve = (s: int, count: int):
     pl = local_place(acc, true)
     iff(e_bin(.gts, VI, count, e_iconst(0)))
     sa = place_addr(pl, at)
-    e_call(rt("__arr_reserve"), [sa, e_iconst(tsize(int(types[at].elem))), count], -1)
+    e_call(rt("__arr_reserve"), [sa, e_iconst(owner_stride(int(types[at].elem))), count], -1)
     if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
     if has_flag(s, NF_INBOUNDS): hdr_store(read_place(pl, at), 8, count)
     endc()
@@ -5648,7 +5757,10 @@ gen_for = (s: int):
         # If the body writes the source, copying its selected range can be
         # cheaper than retaining the full array and forcing a whole-array detach.
         if sliced: sliced = unchanged_by(int(nodes[it].a), int(nodes[s].b))
-        borrowed = not type_has_fn(ct) and not sliced and not is_slice(it) and aux == 1 and (not dbg_on or copy_strict(s) or ownership_type(ct)) and unchanged_by(it, int(nodes[s].b))
+        resource_map = aux == 3 and is_map_type(ct) and ownership_type(ct)
+        if resource_map and not unchanged_by(it, int(nodes[s].b)):
+            fatal(nodes[s].pos, "resource dictionary iteration requires stable borrowed storage")
+        borrowed = resource_map or not type_has_fn(ct) and not sliced and not is_slice(it) and aux == 1 and (not dbg_on or copy_strict(s) or ownership_type(ct)) and unchanged_by(it, int(nodes[s].b))
         stmt_begin()
         if sliced:
             # Iteration needs a retained source and bounds, not a copied slice.
@@ -5688,7 +5800,7 @@ gen_for = (s: int):
             base_snap = e_addi(sv, 24)
             if slice_lo >= 0:
                 n_snap = e_bin(.sub, VI, slice_hi, slice_lo)
-                base_snap = e_bin(.add, VI, base_snap, e_bin(.mul, VI, slice_lo, e_iconst(tsize(int(types[ct].elem)))))
+                base_snap = e_bin(.add, VI, base_snap, e_bin(.mul, VI, slice_lo, e_iconst(owner_stride(int(types[ct].elem)))))
         gen_comprehension_reserve(s, n_snap)
     else if aux == 3 and not has_flag(s, NF_MUT):
         # The dense entry snapshot is immutable for this loop. Hoist its array
@@ -5747,7 +5859,7 @@ gen_for = (s: int):
     if aux == 1:
         et = T_U8
         if types[ct].kind == .array or is_fixed: et = int(types[ct].elem)
-        ea = e_bin(.add, VI, base_snap, e_bin(.mul, VI, i, e_iconst(tsize(et))))
+        ea = e_bin(.add, VI, base_snap, e_bin(.mul, VI, i, e_iconst(if is_fixed: tsize(et) else: owner_stride(et))))
         e_mov(int(locals[el].vreg), ea)
     else if aux == 3:
         si = int(types[ct].st)
@@ -5758,15 +5870,22 @@ gen_for = (s: int):
         sa = place_addr(local_place(snap, false), ct)
         keys = base_snap
         if keys == 0: keys = e_addi(e_load(VI, sa, int(fields[f0].offset), ptr_size), 24)
-        e_mov(int(locals[el].vreg), e_bin(.add, VI, keys, e_bin(.mul, VI, i, e_iconst(tsize(kt)))))
+        e_mov(int(locals[el].vreg), e_bin(.add, VI, keys, e_bin(.mul, VI, i, e_iconst(owner_stride(kt)))))
         vl = int(nodes[s].aux2)
         if vl != 0 and int(locals[vl].flags) & LF_BYREF != 0:
             vals = map_values
             if vals == 0: vals = e_addi(e_load(VI, sa, int(fields[f0 + 1].offset), ptr_size), 24)
-            e_mov(int(locals[vl].vreg), e_bin(.add, VI, vals, e_bin(.mul, VI, i, e_iconst(tsize(vt)))))
+            e_mov(int(locals[vl].vreg), e_bin(.add, VI, vals, e_bin(.mul, VI, i, e_iconst(owner_stride(vt)))))
     blk()
     cont = ctl
     loops.push(LoopInfo(brk, cont, scope_locals.len(), tl_items.len(), building.len()))
+    if aux == 3 and is_map_type(ct) and ownership_type(ct):
+        fs = field_list(ct)
+        sa = place_addr(local_place(snap, false), ct)
+        gone = e_load(VI, sa, fs[4].1, ptr_size)
+        iff(e_bin(.lts, VI, i, arr_len(gone)))
+        brif_to(e_load(VI, e_bin(.add, VI, e_addi(gone, 24), i), 0, 1), cont)
+        endc()
     gen_loop_body(int(nodes[s].b))
     loops.pop()
     endc()
@@ -6373,6 +6492,11 @@ lower_inst = (lf: int, f: int):
         if t == T_MATH_INT and fl & LF_ASSIGNED != 0: math_has_mutable = true
         if fl & (LF_CAPTURE | LF_ALIAS) != 0: continue
         if fl & LF_PARAM != 0:
+            if copy_inputs.has(l) and not files[pos_file(nodes[int(fns[f].decl)].pos)].is_dewy:
+                s = new_temp(t)
+                store_val(t, e_slot(s), 0, int(locals[l].vreg))
+                locals[l].offset = i32(s)
+                continue
             if fl & LF_ADDR != 0 and fl & LF_MUTPARAM == 0 and vc(t) != VC_AGG:
                 # address-taken scalar parameter: move to memory
                 s = new_slot(8, 8)
@@ -6384,7 +6508,7 @@ lower_inst = (lf: int, f: int):
             locals[l].vreg = i32(vreg(VI))
             continue
         t = store_type(l)
-        if vc(t) == VC_AGG or fl & LF_ADDR != 0:
+        if vc(t) == VC_AGG or fl & LF_ADDR != 0 or ownership_type(t):
             s = new_slot(tsize(t), talign(t))
             locals[l].offset = i32(s)
             if is_managed(t): e_zero(e_slot(s), tsize(t))
@@ -6392,6 +6516,9 @@ lower_inst = (lf: int, f: int):
         locals[l].vreg = i32(vreg(vt_of(t)))
         if is_managed(t): e_mov(int(locals[l].vreg), e_iconst(0))
     scope_push()
+    if ownership_decls.len() != 0 and fns[f].decl != 0 and not files[pos_file(nodes[int(fns[f].decl)].pos)].is_dewy:
+        loop p in fns[f].params:
+            if copy_inputs.has(p): scope_add_local(p)
     if fns[f].kind == FK_INIT:
         gen_block_stmts(body)
     else:
@@ -6488,7 +6615,10 @@ helper_drop = (t: int, copy: bool):
         else if k == .struct_:
             hook = int(structs[int(types[t].st)].drop_fn)
             if hook != 0: e_call(lf_of_inst(hook), [a], -1)
-    if k == .fn_ or k == .polyfn or k == .callable:
+    if k == .array:
+        if copy: copy_at(a, t)
+        else: release(e_load(VI, a, 0, ptr_size), t)
+    else if k == .fn_ or k == .polyfn or k == .callable:
         env = e_load(VI, a, ptr_size, ptr_size)
         if copy:
             iff(e_bin(.ne, VI, env, e_iconst(0)))
@@ -6569,7 +6699,7 @@ helper_arrrel = (t: int):
     blk()
     lop()
     brif_to(e_bin(.ges, VI, i, n), ctl - 1)
-    drop_at(e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, i, e_iconst(tsize(et)))), et)
+    owner_element_drop(e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, (if ownership_type(et): e_bin(.sub, VI, e_addi(n, -1), i) else: i), e_iconst(owner_stride(et)))), et)
     e_mov(i, e_addi(i, 1))
     br_to(ctl)
     endc()
@@ -6588,8 +6718,8 @@ helper_arruniq = (t: int):
     e_mov(r, p)
     iff(e_bin(.ne, VI, p, e_iconst(0)))
     iff(e_bin(.ne, VI, hdr_load(p, 0), e_iconst(1)))
-    e_mov(r, e_call(rt("__arr_clone"), [p, e_iconst(tsize(et))], VI))
-    if is_managed(et): retain_elems(r, et)
+    e_mov(r, e_call(rt("__arr_clone"), [p, e_iconst(owner_stride(et))], VI))
+    if is_managed(et) and ownership_copyable(et): retain_elems(r, et)
     endc()
     endc()
     e_ret(r)
@@ -6780,10 +6910,10 @@ helper_eq = (t: int):
             e_mov(r, e_iconst(1))
             br_to(fail)
             endc()
-        if bits_equal and tsize(et) < 8:
+        if bits_equal and owner_stride(et) < 8:
             # Emit the word loop here so the equality helper stays a leaf and
             # release builds can inline it. Finish with whole element loads.
-            bytes = e_bin(.mul, VI, na, e_iconst(tsize(et)))
+            bytes = e_bin(.mul, VI, na, e_iconst(owner_stride(et)))
             i = vreg(VI)
             e_mov(i, e_iconst(0))
             blk()
@@ -6800,7 +6930,7 @@ helper_eq = (t: int):
             lop()
             brif_to(e_bin(.ges, VI, i, bytes), ctl - 1)
             eq_member(et, e_bin(.add, VI, e_addi(pa, 24), i), e_bin(.add, VI, e_addi(pb, 24), i), fail)
-            e_mov(i, e_addi(i, tsize(et)))
+            e_mov(i, e_addi(i, owner_stride(et)))
             br_to(ctl)
             endc()
             endc()
@@ -6810,7 +6940,7 @@ helper_eq = (t: int):
             blk()
             lop()
             brif_to(e_bin(.ges, VI, i, na), ctl - 1)
-            off = e_bin(.mul, VI, i, e_iconst(tsize(et)))
+            off = e_bin(.mul, VI, i, e_iconst(owner_stride(et)))
             eq_member(et, e_bin(.add, VI, e_addi(pa, 24), off), e_bin(.add, VI, e_addi(pb, 24), off), fail)
             e_mov(i, e_addi(i, 1))
             br_to(ctl)
@@ -6937,7 +7067,7 @@ helper_hash = (t: int):
         blk()
         lop()
         brif_to(e_bin(.ges, VI, i, n), ctl - 1)
-        hash_member(h, et, e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, i, e_iconst(tsize(et)))))
+        hash_member(h, et, e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, i, e_iconst(owner_stride(et)))))
         e_mov(i, e_addi(i, 1))
         br_to(ctl)
         endc()
@@ -7119,6 +7249,7 @@ lower_helper = (lf: int):
         move: helper_move(t)
         arrrel: helper_arrrel(t)
         arruniq: helper_arruniq(t)
+        arrcopy: helper_owner_arrcopy(t)
         eq: helper_eq(t)
         hash: helper_hash(t)
         thunk: helper_thunk(h.inst)
@@ -7220,7 +7351,9 @@ helper_move = (t: int):
     ps = helper_params(2)
     dest = ps[0]
     source = ps[1]
-    if tkind(t) == .fixed:
+    if tkind(t) == .array:
+        e_copy(dest, source, tsize(t))
+    else if tkind(t) == .fixed:
         et = telem(t)
         i = fixed_loop_begin(t)
         dst = fixed_elem_addr(dest, i, et)
@@ -7244,3 +7377,84 @@ helper_move = (t: int):
             if ownership_type(field.0): e_call(lf_helper(.move, field.0, 0), [dst, src], -1)
             else: e_copy(dst, src, tsize(field.0))
     e_ret(-1)
+
+# Publish only successfully initialized elements. The array owns the prefix
+# during failures in later constructors; each pending element owns itself.
+gen_owner_array = (e: int, t: int) -> Val:
+    et = telem(t)
+    s = new_temp(t)
+    sa = e_slot(s)
+    e_zero(sa, tsize(t))
+    owner_register(s, t)
+    building.push(BuildItem(true, s, t))
+    if nodes[e].b != 0:
+        value = gen_owned(kid(e, 0))
+        n = gen_expr(int(nodes[e].b)).v
+        e_call(rt("__arr_reserve"), [sa, e_iconst(owner_stride(et)), n], -1)
+        i = vreg(VI)
+        e_mov(i, e_iconst(0))
+        blk()
+        lop()
+        brif_to(e_bin(.ges, VI, i, n), ctl - 1)
+        element = own(Val(value.v, false, -1), et)
+        dst = e_call(rt("__arr_push_slot"), [sa, e_iconst(owner_stride(et))], VI)
+        store_val(et, dst, 0, element.v)
+        owner_element_live(dst, et)
+        owner_forget_slot(element.slot)
+        e_mov(i, e_addi(i, 1))
+        br_to(ctl)
+        endc()
+        endc()
+        owner_drop(e_slot(value.slot))
+    else:
+        e_call(rt("__arr_reserve"), [sa, e_iconst(owner_stride(et)), e_iconst(nkids(e))], -1)
+        loop i in [0..nkids(e)):
+            value = gen_owned(kid(e, i))
+            dst = e_call(rt("__arr_push_slot"), [sa, e_iconst(owner_stride(et))], VI)
+            store_val(et, dst, 0, value.v)
+            owner_element_live(dst, et)
+            owner_forget_slot(value.slot)
+    building.pop()
+    result = e_load(VI, sa, 0, ptr_size)
+    owner_values[result] = s
+    Val(result, true, s)
+
+owner_array_from_fixed = (source: int, et: int, count: int, t: int, dynamic: bool = false) -> Val:
+    s = new_temp(t)
+    sa = e_slot(s)
+    e_zero(sa, tsize(t))
+    owner_register(s, t)
+    n = if dynamic: count else: e_iconst(count)
+    e_call(rt("__arr_reserve"), [sa, e_iconst(owner_stride(et)), n], -1)
+    i = vreg(VI)
+    e_mov(i, e_iconst(0))
+    blk()
+    lop()
+    brif_to(e_bin(.ges, VI, i, n), ctl - 1)
+    ea = e_bin(.add, VI, source, e_bin(.mul, VI, i, e_iconst(tsize(et))))
+    value = own(Val(load_val(et, ea, 0), false, -1), et)
+    dst = e_call(rt("__arr_push_slot"), [sa, e_iconst(owner_stride(et))], VI)
+    store_val(et, dst, 0, value.v)
+    owner_element_live(dst, et)
+    owner_forget_slot(value.slot)
+    e_mov(i, e_addi(i, 1))
+    br_to(ctl)
+    endc()
+    endc()
+    result = e_load(VI, sa, 0, ptr_size)
+    owner_values[result] = s
+    Val(result, true, s)
+
+# Eager resource snapshots never retain the source. Allocation may fail before
+# any new element exists; inline element copy hooks have no-failure summaries.
+helper_owner_arrcopy = (t: int):
+    ps = helper_params(1)
+    ir.ret = VI
+    et = telem(t)
+    r = vreg(VI)
+    e_mov(r, e_iconst(0))
+    iff(e_bin(.ne, VI, ps[0], e_iconst(0)))
+    e_mov(r, e_call(rt("__arr_copy"), [ps[0], e_iconst(owner_stride(et))], VI))
+    retain_elems(r, et)
+    endc()
+    e_ret(r)

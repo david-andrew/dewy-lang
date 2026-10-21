@@ -1,0 +1,22 @@
+# quick
+let moves:int64=0
+let drops:int64=0
+Owner=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+    $__move__
+    transfer=():>Owner=>{moves+=1 return Owner[value+10]}
+]
+main=()=>{
+    {
+        let m:dict<Owner Owner>=[Owner[0]->Owner[42]]
+        assert(moves=?0 and m.has(Owner[0]))
+        let key=Owner[1]
+        m[key]=Owner[43]
+        assert(moves=?1 and m.has(Owner[11]))
+        let popped=m.pop(Owner[0])
+        assert(popped.value=?42 and moves=?1)
+    }
+    assert(drops=?7)
+    printl"ok"
+}

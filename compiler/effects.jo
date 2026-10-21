@@ -604,6 +604,12 @@ effect_lower_intrinsic = (f: int, n: int):
 # indirect layouts remain blocked by the ownership planner.
 effect_cleanup = (f: int, t0: int, n: int, p: PlaceIdentity, depth: int = 0):
     t = representation_type(t0)
+    if depth > 32:
+        effect_opaque(f, n)
+        return
+    if tkind(t) == .array or tkind(t) == .fixed:
+        effect_cleanup(f, telem(t), n, p, depth + 1)
+        return
     if tkind(t) != .struct_: return
     layout(t)
     si = int(types[t].st)
@@ -1243,6 +1249,12 @@ effect_owner_init = (f: int, source: int, origin: int):
 effect_owner_components = (f: int, t: int, origin: int, p: PlaceIdentity, move: bool, depth: int = 0):
     if depth > 32:
         effect_opaque(f, origin)
+        return
+    if tkind(t) == .array or tkind(t) == .fixed:
+        effect_owner_components(f, telem(t), origin, p, move and tkind(t) == .fixed, depth + 1)
+        return
+    if let copier = owner_map_copies.get(t):
+        effect_summaries[f].edges.push(EffectEdge(copier, origin, [p]))
         return
     if let hook = ownership_copies.get(t): effect_summaries[f].edges.push(EffectEdge(hook, origin, [p]))
     if move:

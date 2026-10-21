@@ -47,6 +47,7 @@ copy_consumes = (f: int, i: int) -> bool:
 # This is also the escape check for sharing a read-only local snapshot.
 copy_escapes = (n: int, l: int, owning: bool = false) -> bool:
     if n == 0: return false
+    let owning = owning and (not ownership_type(int(locals[l].type)) or ownership_type(ntype(n)))
     k = nodes[n].kind
     if k == .ident:
         return owning and nodes[n].aux == i32(int(SK.local)) and nodes[n].sym == i32(l)
@@ -186,6 +187,7 @@ copy_live = (n: int, live: mut {int: bool}):
     if k == .ident and nodes[n].aux == i32(int(SK.local)):
         l = int(nodes[n].sym)
         skip = LF_PARAM | LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE | LF_CAPTURED | LF_EXPOSED
+        if copy_inputs.has(l): skip &= ~LF_PARAM
         if not live.has(l) and not copy_blocked.has(l) and int(locals[l].flags) & skip == 0:
             copy_moves[n] = true
         live[l] = true
@@ -292,7 +294,10 @@ copy_take = (e: int, value: Val, t: int) -> Val:
         if ownership_type(t): owner_forget_slot(int(locals[int(nodes[e].sym)].offset))
         s = new_temp(t)
         a = e_slot(s)
-        if ownership_type(t) and not owner_adoptions.has(e):
+        # Implementation-library forwarding adopts an already initialized API
+        # value. Re-running a semantic move here could change a dictionary key
+        # after its hash was computed, or change the value returned by pop.
+        if ownership_type(t) and not owner_adoptions.has(e) and not in_lib(nodes[e].pos):
             e_call(lf_helper(.move, t, 0), [a, value.v], -1)
         else: e_copy(a, value.v, tsize(t))
         e_zero(place_addr(p, t), tsize(t))
@@ -301,6 +306,9 @@ copy_take = (e: int, value: Val, t: int) -> Val:
     v = vreg(vt_of(t))
     e_mov(v, value.v)
     write_place(p, t, zero_val(t))
+    if ownership_type(t):
+        owner_forget_slot(int(locals[int(nodes[e].sym)].offset))
+        return owner_value(V(v, true), t)
     Val(v, true, -1)
 
 copy_movable = (e: int) -> bool:

@@ -1,0 +1,22 @@
+# quick
+let drops:int64=0
+let copies:int64=0
+Owner=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+    $__copy__
+    duplicate=():>Owner=>{copies+=1 return Owner[value]}
+]
+main=()=>{
+    {
+        let m:dict<Owner Owner>=[Owner[0]->Owner[10] Owner[1]->Owner[11]]
+        assert(copies=?0 and drops=?0)
+        let n=m.copy()
+        assert(copies=?4 and drops=?0)
+        let total:int64=0
+        loop [key value] in n {total+=key.value+value.value}
+        assert(total=?22)
+    }
+    assert(drops=?8 and copies=?4)
+    printl"ok"
+}

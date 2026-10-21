@@ -881,8 +881,18 @@ completed prefix when construction fails. Stable readonly iteration borrows the
 elements in both default and release builds. A move-only element makes its array
 move-only; nonempty owner arrays require explicit element construction.
 
-The current implementation requires inline record/scalar/fixed-array fields and a proven
-no-failure drop summary. Scalar mutation and literal-string logging are supported; unknown calls
+Growable arrays and dictionaries can also own inline resource elements. They
+copy live elements eagerly; copied dictionary keys are hashed and inserted again.
+Move-only elements make their container move-only. Growing a buffer and compacting dictionary entries relocate storage without
+calling copy or move hooks. `pop` transfers its result; replacement, removal and
+`clear` drop removed values exactly once. Vacant dictionary slots are not live
+values, even if their bytes are zero. Array cleanup visits live elements in
+reverse order. Stable readonly iteration borrows elements without copying.
+Resource arrays must construct new elements with `push` or `insert`, rather
+than expose uninitialized elements with `resize`.
+
+The current implementation requires inline record/scalar/fixed-array resource
+elements and a proven no-failure drop summary. Scalar mutation and literal-string logging are supported; unknown calls
 and potentially failing formatting are rejected. Hooks cannot be called or
 referenced directly. `$__copy__` and `$__move__` methods also take no explicit
 parameters and return the same nominal type. An explicit `.copy()` runs its

@@ -699,6 +699,15 @@ __arr_filled = (n: int, es: int) -> *u8:
 __copies_min = -1
 __copies_told = 0
 
+# Independent resource snapshot: allocation failure cannot strand a retained
+# reference to the source. Element hooks are applied by its typed helper.
+__arr_copy = (p: *u8, es: int) -> *u8:
+    n = (p as *int)[1]
+    q = __arr_new_raw(n, es)
+    (q as *int)[1] = n
+    mem_copy(q + 24, p + 24, n * es)
+    q
+
 __arr_clone = (p: *u8, es: int) -> *u8:
     h = p as *int
     n = h[1]

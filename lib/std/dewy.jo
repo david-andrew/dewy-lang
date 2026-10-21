@@ -30,7 +30,8 @@ __dewy_power = (base: f32, exponent: f32) -> f32: pow(base, exponent)
 # fails as `d[key]` does. `d.pop(key default=v)` gives v for a missing key (`default=none`:
 # the value is optional).
 pop[K, V] = (m: mut Map[K, V], k: K) -> V:
-    v = m[k]
+    entry = __map_entry_present(m, k)
+    v = __take_at(m.vals, entry)
     m.remove(k)
     v
 

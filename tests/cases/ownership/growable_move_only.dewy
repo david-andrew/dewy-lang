@@ -1,0 +1,24 @@
+# quick
+let drops:int64=0
+Owner=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+]
+identity=<T>(value:T):>T=>value
+main=()=>{
+    {
+        let a=[Owner[0] Owner[1] Owner[2]]
+        a.insert(Owner[3] 1)
+        let b=identity(a)
+        let total:int64=0
+        loop item in b {total+=item.value}
+        assert(total=?6 and drops=?0)
+        b.pop()
+        assert(drops=?1)
+        b.clear()
+        assert(drops=?4)
+        b.push(Owner[4])
+    }
+    assert(drops=?5)
+    printl"ok"
+}
