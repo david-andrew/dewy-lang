@@ -1,0 +1,9 @@
+Circle:type = [radius:int64]
+Rect:type = [w:int64 h:int64]
+Shape:type = Circle | Rect
+area = (s:Shape):>int64 => match s {
+    <Rect> => 1
+    [w h] => w * h
+    _ => 0
+}
+printl(area(Circle(2)))

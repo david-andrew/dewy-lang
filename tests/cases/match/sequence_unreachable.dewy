@@ -1,0 +1,9 @@
+Circle:type = [radius:int64]
+Rect:type = [w:int64 h:int64]
+Shape:type = Circle | Rect
+pair = (a:Shape b:int64):>string => match (a b) {
+    ([radius] _) => "circle"
+    ([radius] n) => "again"
+    _ => "rect"
+}
+printl(pair(Circle(1) 0))

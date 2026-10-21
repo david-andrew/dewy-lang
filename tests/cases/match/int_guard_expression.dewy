@@ -1,0 +1,7 @@
+# A guard on an int expression compares the value itself
+describe = (n:int):>string => match n * 2 {
+    small:int<small <? 100> => "small {small}"
+    big:int => "big {big}"
+}
+printl(describe(5))
+printl(describe(2^80))

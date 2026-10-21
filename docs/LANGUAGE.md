@@ -2571,8 +2571,12 @@ names and binds them: `[sign:1 limbs] => limbs.length` and
 `[sign:-1 limbs] => -limbs.length` together cover `[sign:-1|1 limbs:array<int64>]`.
 A sequence scrutinee is read once per value, `match (x y) (a:int64 <string>) => a`,
 and a sequence pattern on an array tests its length and each element:
-`(a <7> c) => ...`. On an `int`, a guard arm such as `small:int<small <? 100>`
-compares the value itself. A guard arm's bounds are facts in its body.
+`(a <7> c) => ...`; object and sequence patterns nest inside it. Over a sequence
+scrutinee, arms that cover each member of one value while matching the others
+whole cover the match. An object or sequence arm whose member or field values
+earlier arms already match is unreachable. On an `int` (a variable or any
+expression), a guard arm such as `small:int<small <? 100>` compares the value
+itself. A guard arm's bounds are facts in its body.
 
 A type arm can group a subset of the union's members. For a value of type
 `int64|string|bool`, `part:int64|string=>...` binds an independent `int64|string`

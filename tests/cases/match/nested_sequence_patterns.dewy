@@ -1,0 +1,33 @@
+# Object and sequence patterns nest inside sequence patterns; a sequence covering each member of one value is total
+Num:type = [sign:-1|1 limbs:array<int64>]
+first = (xs:array<Num>):>string => match xs {
+    ([sign:1 limbs] b) => "pos {limbs.length} then {b.sign}"
+    ([sign:-1 limbs] b) => "neg {limbs.length} then {b.sign}"
+    _ => "other"
+}
+printl(first([[sign=1 limbs=[1 2]] [sign=-1 limbs=[]]]))
+printl(first([[sign=-1 limbs=[1]] [sign=1 limbs=[3 4 5]]]))
+Circle:type = [radius:int64]
+Rect:type = [w:int64 h:int64]
+Shape:type = Circle | Rect
+pair = (a:Shape b:int64):>string => match (a b) {
+    ([radius:1] <0>) => "unit zero"
+    ([radius] n) => "circle {radius} {n}"
+    ([w h] _) => "rect"
+}
+printl(pair(Circle(1) 0))
+printl(pair(Circle(1) 2))
+printl(pair(Rect(1 2) 2))
+
+both = (a:Shape b:Shape):>string => match (a b) {
+    ([radius] [w h]) => "circle {radius} rect {w}x{h}"
+    ([radius:1] _) => "unit circle first"
+    _ => "other"
+}
+printl(both(Circle(2) Rect(3 4)))
+printl(both(Circle(1) Circle(4)))
+seqs = (xs:array<array<int64>>):>string => match xs {
+    ((a b) (c d)) => "{a}{b}{c}{d}"
+    _ => "other"
+}
+printl(seqs([[1 2] [3 4]]))

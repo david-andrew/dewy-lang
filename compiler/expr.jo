@@ -6577,13 +6577,27 @@ union_literal_missing = (vi: int, pt: int, done: str[]) -> str:
 shape_match_wanted = (m: int) -> bool:
     if nodes[int(nodes[m].a)].kind == .tuple: return true
     guarded = false
+    int_guarded = false
     loop arm in kids(m):
         loop p in kids(arm):
             k = nodes[p].kind
             if k == .pshape or k == .pseq: return true
-            if k == .ptype and nodes[int(nodes[p].a)].kind == .trefined: guarded = true
-    # (a guard on an `int` variable: its values reach past any word range)
-    guarded and plain_path(int(nodes[m].a)) and prune(check_expr(clone(int(nodes[m].a)), 0)) == T_MATH_INT
+            if k == .ptype and nodes[int(nodes[p].a)].kind == .trefined:
+                guarded = true
+                base = int(nodes[int(nodes[p].a)].a)
+                if nodes[base].kind == .tname and name_of(int(nodes[base].name)) == "__dewy_int": int_guarded = true
+    # (a guard on an `int`: its values reach past any word range; the scrutinee is
+    # checked on a copy, so one with a function literal inside is left alone)
+    sc = int(nodes[m].a)
+    guarded and (plain_path(sc) or int_guarded and not has_lambda(sc)) and prune(check_expr(clone(sc), 0)) == T_MATH_INT
+
+has_lambda = (n: int) -> bool:
+    if n == 0: return false
+    if nodes[n].kind == .lambda: return true
+    if has_lambda(int(nodes[n].a)) or has_lambda(int(nodes[n].b)): return true
+    loop k in kids(n):
+        if has_lambda(k): return true
+    false
 
 struct ShapeArm:
     cond: int      # the condition (0: always)
@@ -6738,6 +6752,20 @@ shape_values = (t: int, out: mut str[]):
         if not small_span(intervals[2 * k], intervals[2 * k + 1], 64): return
         loop v in [intervals[2 * k]..intervals[2 * k + 1]]: out.push("{v}")
 
+# an arm whose whole member, or whose field values, earlier arms already match
+shape_reachable = (arm: int, cover: ShapeArm, covered: int[], arms: ShapeArm[]):
+    member = if cover.field != 0: cover.record else: cover.member
+    if member <= 0: return
+    loop c in covered:
+        if type_eq(c, member) or is_union(c) and union_index(c, member) >= 0: fatal(nodes[arm].pos, "this arm is unreachable: earlier arms already match every {dt(member)}")
+    if cover.field == 0 or cover.values.len() == 0: return
+    have: str[]
+    loop a in arms:
+        if a.field == cover.field and type_eq(a.member, member): have += a.values
+    loop v in cover.values:
+        if not have.contains(v): return
+    fatal(nodes[arm].pos, "this arm is unreachable: earlier arms already match every value it does")
+
 check_shaped_match = (m: int, expected: int) -> int:
     is_stmt = has_flag(m, NF_STMT)
     pos = nodes[m].pos
@@ -6763,6 +6791,8 @@ check_shaped_match = (m: int, expected: int) -> int:
     total = false
     whole = subjects.len() == 1 and is_union(subject_types[0])
     covered: int[]
+    seq_covered: int[][]
+    loop _ in subjects: seq_covered.push([])
     loop arm in kids(m):
         if total: fatal(nodes[arm].pos, "this arm is unreachable: an earlier arm already matches every value")
         if nkids(arm) != 1: fatal(nodes[arm].pos, "an arm with an object or sequence pattern has one pattern")
@@ -6776,15 +6806,25 @@ check_shaped_match = (m: int, expected: int) -> int:
             else:
                 if nodes[p].kind != .pseq or nkids(p) != subjects.len(): fatal(nodes[p].pos, "this scrutinee is a sequence of {subjects.len()} values; its arms are `(p1 p2 ...)` with as many patterns")
                 all = true
+                partial = -1
+                each_cover: ShapeArm[]
                 loop i in 0.. and part in kids(p):
                     shape_pattern(part, subjects[i], subject_types[i], out)
                     each = ShapeArm()
                     shape_cover(part, subject_types[i], each)
-                    if each.member != -1: all = false
+                    each_cover.push(each)
+                    if each.member != -1:
+                        all = false
+                        partial = if partial == -1: i else: -2
                 if all: cover.member = -1
+                # (every value but one is matched whole: that one's member is covered there)
+                else if partial >= 0 and each_cover[partial].member > 0:
+                    if seq_covered[partial].contains(each_cover[partial].member): fatal(nodes[arm].pos, "this arm is unreachable: earlier arms already match every value it does")
+                    seq_covered[partial].push(each_cover[partial].member)
         else:
             shape_pattern(p, subjects[0], subject_types[0], out)
             shape_cover(p, subject_types[0], cover)
+            shape_reachable(arm, cover, covered, arms)
         if cover.member == -1: total = true
         else if cover.member != 0: covered.push(cover.member)
         out.member = cover.member
@@ -6792,6 +6832,14 @@ check_shaped_match = (m: int, expected: int) -> int:
         out.values = cover.values
         if cover.field != 0: out.member = cover.record
         arms.push(out)
+    # (a sequence whose arms cover each member of one value, the others matched whole)
+    if not total and subjects.len() > 1:
+        loop j in 0.. and st in subject_types:
+            if not is_union(st): continue
+            all = true
+            loop member in union_members(st):
+                if not seq_covered[j].contains(member): all = false
+            if all: total = true
     # members covered field by field: `[sign:1 ...]` and `[sign:-1 ...]` cover `[sign:-1|1 ...]`
     missing = ""
     if not total and (whole or subjects.len() == 1 and tkind(subject_types[0]) == .struct_):
