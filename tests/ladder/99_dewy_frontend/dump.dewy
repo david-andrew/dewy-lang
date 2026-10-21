@@ -1,0 +1,61 @@
+# Deterministic dumps: one line of tokens and one S-expression per statement.
+from p"lexer.dewy" import Token, text_of
+from p"parser.dewy" import Node, Parsed
+
+# Quoted text with the escapes a reader needs to see.
+quoted=(value:string):>string=>{
+    let out:array<uint8>=[0x22]
+    loop b in bytes(value) {
+        if b =? 0x22 or b =? 0x5c {
+            out.push(0x5c)
+            out.push(b)
+        } else if b =? 0x0a {
+            out.extend(bytes("\\n"))
+        } else if b =? 0x09 {
+            out.extend(bytes("\\t"))
+        } else if b <? 0x20 {
+            out.extend(bytes("\\x{format(b "02x")}"))
+        } else {
+            out.push(b)
+        }
+    }
+    out.push(0x22)
+    return (out as string | none) ?? "?"
+}
+
+const KIND_TAGS=["op"->"" "identifier"->"id" "boolean"->"bool" "quoted"->"str" "rawquoted"->"raw"
+    "based_string"->"based" "metatag"->"meta" "source_integer"->"int" "integer"->"radix"
+    "source_real"->"real" "eof"->"eof"]
+
+# `tag:text`, prefixed `_` after whitespace and `^` after a line break.
+token_line=(source:array<uint8> tokens:array<Token>):>string=>{
+    let parts:array<string>=[]
+    loop t in tokens {
+        if t.kind =? 'eof' break
+        let mark=if t.newline "^" else if t.space "_" else ""
+        let tag=KIND_TAGS[t.kind]
+        let word=text_of(source t.start t.stop)
+        let keyword=t.kind =? 'identifier' and t.symbol isnt? none
+        let label=if tag.length =? 0 word else if keyword "kw:{word}" else "{tag}:{word}"
+        parts.push("{mark}{label}")
+    }
+    return parts.join(" ")
+}
+
+sexpr=(nodes:array<Node> id:int64):>string=>{
+    if id =? 0 return "_"
+    let n=nodes[id]
+    let kids=[loop k in n.kids sexpr(nodes k)]
+    if n.kind in? ["identifier" "source_integer" "integer" "source_real" "boolean" "metatag" "based_string"] return n.text
+    if n.kind =? "string" or n.kind =? "chunk" return quoted(n.text)
+    let head=match n.kind {
+        <"interp">=>"interp"
+        <"flow">=>"flow"
+        <"partial">=>"partial"
+        _=>n.op
+    }
+    if kids.length =? 0 return "({head})"
+    return "({head} {kids.join(" ")})"
+}
+
+tree_lines=(parsed:Parsed):>array<string>=>[loop root in parsed.roots sexpr(parsed.nodes root)]

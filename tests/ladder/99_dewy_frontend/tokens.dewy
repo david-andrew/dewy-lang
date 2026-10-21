@@ -1,0 +1,108 @@
+# Token spellings of Dewy's own frontend (compiler/dewy_tokens.jo), as a
+# literal union: each symbol is one word at run time, and its text is its
+# spelling. Grammar dispatch compares symbols, never allocated strings.
+
+Symbol:type =
+    '(' | ')' | '[' | ']' | '\{' | '\}' | '<' | '>' | ':' | '.' | ',' | ';' | '=' | '+' | '-' |
+    '*' | '/' | '%' | '@' | '&' | '|' | '^' | '?' | '!' | '~' |
+    'not>=?' | 'not<=?' | 'not=?' | 'not>?' | 'not<?' | '>=?' | '<=?' |
+    '//=' | '<<=' | '>>=' | '...' | '=>' | ':>' | '->' | '=?' | '>?' | '<?' |
+    '+=' | '-=' | '*=' | '/=' | '^=' | '%=' | '??' | '//' | '<<' | '>>' | '..' | '|>' | '<|' |
+    '>=' | 'is?' | 'isnt?' | 'in?' | 'notin?' |
+    'let' | 'const' | 'return' | 'break' | 'continue' | 'import' | 'from' | 'else' | 'if' |
+    'loop' | 'match' | 'test' | 'not' | 'as' | 'transmute' | 'or' | 'xor' | 'and' | 'in' | 'of' |
+    'or_throw' | 'nand' | 'nor' | 'xnor' |
+    '.not>=?' | '.not<=?' | '.not=?' | '.not>?' | '.not<?' | '.>=?' | '.<=?' | './/=' |
+    '.+=' | '.-=' | '.*=' | './=' | '.%=' | '.^=' | './/' | '.=?' | '.>?' | '.<?' |
+    '.+' | '.-' | '.*' | './' | '.%' | '.^' |
+    '&=' | '|=' | 'and=' | 'or=' | 'xor='
+
+# Words that are symbols when written as names. (`is?` and friends take
+# their `?` in the lexer; `and=` and friends their `=`.)
+const WORDS=["let" "const" "return" "break" "continue" "import" "from" "else" "if" "loop"
+    "match" "test" "not" "as" "transmute" "or" "xor" "and" "in" "of" "or_throw" "nand" "nor" "xnor"]
+
+make_spellings=():>dict<string Symbol>=>{
+    let table:dict<string Symbol>=[]
+    loop s in members(Symbol) {table[s]=s}
+    return table
+}
+
+const SPELLINGS=make_spellings()
+
+spelling=(text:string):>Symbol?=>SPELLINGS.get(text)
+
+is_word=(text:string):>bool=>text in? WORDS
+
+# Punctuation spellings by their first byte, longest first, for maximal munch.
+make_punctuation=():>dict<uint8 array<string>>=>{
+    let table:dict<uint8 array<string>>=[]
+    loop s in members(Symbol) {
+        let raw=bytes(s)
+        let first=raw[0]
+        let letter=(0x61 <=? first <=? 0x7a) or (0x41 <=? first <=? 0x5a) or first =? 0x5f
+        if not letter {
+            if first not in? table table[first]=[]
+            table[first].push(s)
+        }
+    }
+    loop first in table.keys() {
+        table[first].sort(key=(s:string)=>-bytes(s).length)
+    }
+    return table
+}
+
+const PUNCTUATION=make_punctuation()
+
+# `not <?` written with a space is the same token as `not<?`.
+invert=(symbol:Symbol):>Symbol?=>match symbol {
+    <'=?'>=>'not=?'
+    <'<?'>=>'not<?'
+    <'>?'>=>'not>?'
+    <'<=?'>=>'not<=?'
+    <'>=?'>=>'not>=?'
+    <'in?'>=>'notin?'
+    _=>none
+}
+
+assignment=(symbol:Symbol):>bool=>symbol in? ['+=' '-=' '*=' '/=' '//=' '%=' '^=' '<<=' '>>='
+    '.+=' '.-=' '.*=' './=' './/=' '.%=' '.^=' '&=' '|=' 'and=' 'or=' 'xor=']
+
+comparison=(symbol:Symbol):>bool=>symbol in? ['=?' 'not=?' '<?' 'not<?' '>?' 'not>?' '<=?' 'not<=?'
+    '>=?' 'not>=?' 'is?' 'isnt?' 'in?' 'notin?' '.=?' '.not=?' '.<?' '.not<?' '.>?' '.not>?'
+    '.<=?' '.not<=?' '.>=?' '.not>=?']
+
+# Binding powers of the infix operators (dn_power in compiler/dewy_fast.jo);
+# zero means the symbol does not continue an expression.
+power=(symbol:Symbol?):>int64=>{
+    if symbol is? none return 0
+    if symbol =? '=' or assignment(symbol) return 10
+    if comparison(symbol) return 80
+    return match symbol {
+        <'->'>=>20
+        <'<|'>=>24
+        <'|>'>=>25
+        <'=>'>=>30
+        <':>'>=>40
+        <':'>=>45
+        <'or_throw'>=>48
+        <'as'|'transmute'>=>50
+        <'or'|'nor'>=>60
+        <'xor'|'xnor'>=>65
+        <'and'|'nand'>=>70
+        <'??'>=>82
+        <'|'>=>85
+        <'&'>=>90
+        <'in'>=>95
+        <'..'>=>100
+        <','>=>105
+        <'<<'|'>>'>=>110
+        <'+'|'-'|'.+'|'.-'>=>120
+        <'*'|'/'|'//'|'%'|'.*'|'./'|'.//'|'.%'>=>130
+        <'^'|'.^'>=>140
+        _=>0
+    }
+}
+
+# Operators that group to the right.
+right_assoc=(symbol:Symbol):>bool=>symbol in? ['=>' '^' '.^' '??' '<|']

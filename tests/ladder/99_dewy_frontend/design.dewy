@@ -1,0 +1,91 @@
+# Tier 4 / 99_dewy_frontend / milestone 34
+# Acceptance: Dewy's own lexer and Pratt expression parser, ported from the
+# compiler's frontend (compiler/dewy_tokens.jo, dewy_fast.jo) into Dewy
+# modules: deterministic token and syntax-tree dumps for a corpus of Dewy
+# snippets, with the frontend's diagnostics at line:column for malformed input.
+from p"lexer.dewy" import Token, LexError, lex
+from p"parser.dewy" import ParseError, Parsed, parse
+from p"dump.dewy" import token_line, tree_lines
+
+Entry:type=[name:string source:array<uint8>]
+
+# `### name` lines start entries; the lines up to the next one are its source.
+entries=(corpus:array<uint8>):>array<Entry>=>{
+    let out:array<Entry>=[]
+    let text=(corpus as string | none) ?? ""
+    let name=""
+    let lines:array<string>=[]
+    let started=false
+    loop line in text.split("\n") {
+        if line.startswith("### ") {
+            if started out.push(Entry[name bytes(lines.join("\n"))])
+            name=line[4..]
+            lines=[]
+            started=true
+        } else {
+            lines.push(line)
+        }
+    }
+    if started out.push(Entry[name bytes(lines.join("\n").trim_end())])
+    return out
+}
+
+# 1-based line and column (in characters) of a byte offset, with the line.
+Place:type=[line:int64 column:int64 text:string]
+
+place=(source:array<uint8> offset:int64):>Place=>{
+    let line=1
+    let start=0
+    loop i in [0..min(offset source.length)) {
+        if source[i] =? 0x0a {
+            line+=1
+            start=i+1
+        }
+    }
+    let stop=start
+    loop stop <? source.length and source[stop] not=? 0x0a {stop+=1}
+    let column=1
+    loop i in [start..min(offset source.length)) {
+        if source[i] & 0xc0 not=? 0x80 column+=1
+    }
+    let text=(source[start..stop) as string | none) ?? ""
+    return Place[line column text]
+}
+
+report=(source:array<uint8> stage:string offset:int64 message:string):>void=>{
+    let at=place(source offset)
+    printl("  {stage} error {at.line}:{at.column}: {message}")
+    printl("  | {at.text}")
+    printl("  | {" " * (at.column-1)}^")
+}
+
+Totals:type=[entries:int64=0 tokens:int64=0 nodes:int64=0 errors:int64=0]
+
+run=(entry:Entry @totals:Totals):>void=>{
+    totals.entries+=1
+    printl("### {entry.name}")
+    let tokens=lex(entry.source)
+    if tokens is? LexError {
+        totals.errors+=1
+        report(entry.source "lex" tokens.offset tokens.message)
+        return
+    }
+    totals.tokens+=tokens.length-1
+    printl("  tokens {token_line(entry.source tokens)}")
+    let parsed=parse(entry.source tokens)
+    if parsed is? ParseError {
+        totals.errors+=1
+        report(entry.source "parse" parsed.offset parsed.message)
+        return
+    }
+    totals.nodes+=parsed.nodes.length-1
+    loop tree in tree_lines(parsed) printl("  tree {tree}")
+}
+
+main=():>int64=>{
+    let corpus=$include_bytes(p"corpus.txt")
+    let totals=Totals()
+    loop entry in entries(corpus) run(entry @totals)
+    printl("entries {totals.entries}, tokens {totals.tokens}, nodes {totals.nodes}, errors {totals.errors}")
+    return 0
+}
