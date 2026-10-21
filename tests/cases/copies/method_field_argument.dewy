@@ -1,0 +1,42 @@
+# A method passing its own field to a read-only parameter shares it: the call
+# changes only a disjoint field (`@h`), or a method whose checked summary
+# writes only other fields of the receiver.
+$explicit_copies
+
+fold=(@h:array<uint32 length=2> data:array<uint8>):>void=>{
+    loop b in data {
+        h[0]+=b as uint32
+    }
+    h[1]+=1
+}
+
+Hasher:type=[
+    h:array<uint32 length=2>=[]
+    pending:array<uint8>=[]
+    absorb=(data:array<uint8>):>void=>{
+        loop b in data {
+            h[0]+=b as uint32
+        }
+    }
+    feed=(data:array<uint8>):>void=>{
+        pending.extend(data)
+        if pending.length >=? 4 {
+            fold(@h pending)
+            absorb(pending)
+            pending.clear()
+        }
+    }
+]
+
+total=(key:array<uint8>):>uint32=>{
+    let sum:uint32=0
+    loop i in [0..3) {
+        let piece=[key... (i as uint8)]
+        let hasher=Hasher()
+        hasher.feed(piece)
+        sum+=hasher.h[0]+hasher.h[1]
+    }
+    return sum
+}
+
+printl(total([1 2 3]))

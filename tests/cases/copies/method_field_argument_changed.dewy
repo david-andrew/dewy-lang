@@ -1,0 +1,21 @@
+# The callee changes the field it also reads: the argument needs a snapshot.
+$explicit_copies
+
+Buffer:type=[
+    total:int64=0
+    pending:array<uint8>=[]
+    drain=(data:array<uint8>):>void=>{
+        pending.clear()
+        loop b in data {
+            total+=b as int64
+        }
+    }
+    flush=():>void=>{
+        drain(pending)
+    }
+]
+
+let buffer=Buffer()
+buffer.pending.push(5)
+buffer.flush()
+printl(buffer.total)

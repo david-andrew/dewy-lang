@@ -1181,7 +1181,7 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
         if i + 1 < args.len() and vc(pt) != VC_AGG: val.v = freeze_scalar(val.v, pt)
         if not val.owned and (not dewy_entry or i + 1 < args.len()) and type_has_fn(pt) and not callback_arg_borrow(value_node, args, i, callee, parameter) and files[pos_file(nodes[a].pos)].is_dewy: val = own_at(a, val, pt)
         mut_snapshot = any_mut
-        if copies_on and (copy_strict(a) or ownership_type(pt)): mut_snapshot = any_mut and shares_mut_root(a, args, mutmask)
+        if copies_on and (copy_strict(a) or ownership_type(pt)): mut_snapshot = any_mut and shares_mut_root(a, args, mutmask, (if slots.len() == 0: callee else: -1))
         snapshot = false
         if not val.owned and is_managed(pt) and (mut_snapshot or borrow_may_change(a, args, i, callee)):
             val = own_at(a, val, pt)
@@ -1227,14 +1227,61 @@ release_arg_snapshots = (mark: int):
         if it.is_slot: drop_at(e_slot(it.ref), it.t)
         else: release(it.ref, it.t)
 
-# (a is part of the same variable as one of the call's `mut` arguments)
-shares_mut_root = (a: int, args: int[], mutmask: int) -> bool:
+# (a is part of the same variable as one of the call's `mut` arguments; for the
+# copy policy (callee 0 or more), unless their field paths part, or a checked
+# callee spares a's place inside that argument: a method passing its own field)
+shares_mut_root = (a: int, args: int[], mutmask: int, callee: int = -2) -> bool:
     ra = place_var(a)
     if ra == 0: return false
     loop j in 0.. and b in args:
         if mutmask & (1 << j) == 0: continue
         rb = place_var(b)
-        if rb != 0 and same_var(ra, rb): return true
+        if rb == 0 or not same_var(ra, rb): continue
+        if callee > -2 and (disjoint_fields(a, b) or mut_arg_spares(a, b, j, callee)): continue
+        return true
+    false
+
+# The callee's settled summary writes no place of formal j that overlaps a's
+# field path below the actual b (`absorb(pending ...)` writing only `h`).
+mut_arg_spares = (a: int, b: int, j: int, callee: int) -> bool:
+    if callee <= 0 or j >= fns[callee].params.len(): return false
+    sa = place_steps(a)
+    sb = place_steps(b)
+    if sa.len() <= sb.len(): return false
+    loop i in [0..sb.len()):
+        if nodes[sa[i]].kind != .field or nodes[sb[i]].kind != .field or nodes[sa[i]].aux != nodes[sb[i]].aux: return false
+    rest: int[]
+    loop i in [sb.len()..sa.len()):
+        x = sa[i]
+        if nodes[x].kind != .field or nodes[x].aux < 0 or tkind(ntype(int(nodes[x].a))) != .struct_ or boxed_field_of(x) >= 0: return false
+        rest.push(int(nodes[x].name))
+    if not effects_demand_late(callee): return false
+    loop event in effect_summaries[callee].events:
+        k = event.atom.kind
+        if k == .opaque or k == .remainder or k == .escape: return false
+        if k != .write: continue
+        base = place_base(event.atom.place)
+        if base.root == .capture or base.root == .local and base.declaration == 0: return false
+        if base.root != .formal or base.declaration - 1 != j: continue
+        path = place_path(event.atom.place)
+        n = min(path.len(), rest.len())
+        same = true
+        loop i in [0..n):
+            if path[i] != rest[i]: same = false
+        if same: return false
+    true
+
+# Two inline field paths from one variable that name different fields at some
+# step are different storage: a write through one cannot reach the other.
+disjoint_fields = (a: int, b: int) -> bool:
+    sa = place_steps(a)
+    sb = place_steps(b)
+    loop i in [0..min(sa.len(), sb.len())):
+        x = sa[i]
+        y = sb[i]
+        if nodes[x].kind != .field or nodes[y].kind != .field or nodes[x].aux < 0 or nodes[y].aux < 0: return false
+        if tkind(ntype(int(nodes[x].a))) != .struct_ or boxed_field_of(x) >= 0 or boxed_field_of(y) >= 0: return false
+        if nodes[x].aux != nodes[y].aux: return true
     false
 
 mwr_direct = false             # (may_write_root: only what the code itself does, not its calls)
@@ -1339,7 +1386,8 @@ borrow_may_change = (a: int, args: int[], i: int, callee: int) -> bool:
     # cannot be reached by the callee except through another actual; those
     # aliases and later argument writes are checked above/by shares_mut_root.
     if resource: return false
-    if not opt_release or callee <= 0: return true
+    # (the source copy policy cannot depend on the build: it consults writes always)
+    if not opt_release and not (copies_on and copy_strict(a)) or callee <= 0: return true
     w = fn_writes(callee)
     if w.all or w.globals.len() > 0: return true
     loop j in [i + 1..args.len()):
@@ -3372,7 +3420,12 @@ gen_intrinsic = (e: int) -> Val:
             # Finish a materialized slice's source snapshot before mutating
             # the destination. The owned slice itself survives this scope.
             if is_slice(args[1]): stmt_begin()
+            # (a whole source is only read, as a slice's is above: its elements
+            # are the copy extend makes, which spreading `[xs... ys...]` uses)
+            whole = copies_on and not is_slice(args[1]) and not costly_copy(et) and not copy_explicit.has(args[1])
+            if whole: copy_explicit[args[1]] = true
             ys = gen_owned(args[1])
+            if whole: copy_explicit.remove(args[1])
             if is_managed(et): cnt = arr_len(ys.v)
             if is_slice(args[1]): stmt_end()
         pl = gen_place(args[0], true)

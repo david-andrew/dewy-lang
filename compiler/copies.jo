@@ -25,6 +25,7 @@ copy_proof_budget = -1
 copy_fields: (int, str)[] # local and field path; negative liveness keys
 copy_capture_nodes: {int: int[]} # only the function currently being lowered
 copy_noenv: {int: bool}
+copy_borrowed: {int: bool} # analyzed parameter local whose snapshot binding stays borrowed
 
 copies_reset = ():
     copies_on = false
@@ -37,6 +38,7 @@ copies_reset = ():
     copy_inputs = {}
     copy_bindings = {}
     copy_noenv = {}
+    copy_borrowed = {}
     if copies_on: copies_parameters()
     ownership_parameters()
     ownership_validate()
@@ -72,12 +74,17 @@ copy_escapes = (n: int, l: int, owning: bool = false) -> bool:
         loop i in [0..nkids(n)):
             take = aux != 0 or copy_consumes(f, i) or costly_copy(ntype(n))
             if f > 0 and i < fns[f].params.len() and int(locals[fns[f].params[i]].flags) & LF_MUTPARAM != 0: take = false
+            # (a checked callee that keeps this parameter borrowed cannot return
+            # its storage without a copy of its own: `sha256(key)`)
+            if aux == 0 and f > 0 and i < fns[f].params.len() and copy_borrowed.has(fns[f].params[i]) and not copy_consumes(f, i): take = false
             if copy_escapes(kid(n, i), l, take): return true
         return false
     if k == .intrinsic:
         id = nodes[n].aux as IN
         loop i in [0..nkids(n)):
-            take = i > 0 and (id == .push or id == .insert or id == .extend)
+            take = i > 0 and (id == .push or id == .insert)
+            # (extend copies the source's elements, never adopts its storage)
+            if id == .extend and i == 1: take = costly_copy(telem(ntype(kid(n, 0))))
             if id == .fill and i == 0: take = true
             if copy_escapes(kid(n, i), l, take): return true
         return false
@@ -100,25 +107,31 @@ copies_parameters = ():
     loop n in nodes:
         if n.kind == .fnref or n.kind == .partial:
             if n.sym > 0: indirect[int(n.sym)] = true
-    changed = true
-    loop changed:
-        changed = false
-        loop f in [1..fns.len()):
-            body = int(fns[f].body)
-            if body == 0 or not copy_strict(body) or fns[f].kind != FK_NORMAL or fns[f].cabi or len(fns[f].export_name) > 0 or indirect.has(f): continue
-            loop i in [0..nkids(body)):
-                s = kid(body, i)
-                if nodes[s].kind != .vardecl or nodes[s].aux2 != 1: break
-                if nkids(s) > 0: continue
-                l = int(nodes[s].sym)
-                source = int(nodes[s].b)
-                if nodes[source].kind != .ident or nodes[source].aux != i32(int(SK.local)): continue
-                p = int(nodes[source].sym)
-                if copy_inputs.has(p) or not costly_copy(int(locals[l].type)): continue
-                if int(locals[l].flags) & (LF_ASSIGNED | LF_CAPTURED | LF_EXPOSED) != 0 or copy_escapes(body, l):
-                    copy_inputs[p] = true
-                    copy_bindings[l] = true
-                    changed = true
+    # Every analyzed parameter starts borrowed; consumption only grows, so the
+    # loop settles on the least set a direct flow into a result or owner forces.
+    loop round in [0..2):
+        changed = true
+        loop changed:
+            changed = false
+            loop f in [1..fns.len()):
+                body = int(fns[f].body)
+                if body == 0 or not copy_strict(body) or fns[f].kind != FK_NORMAL or fns[f].cabi or len(fns[f].export_name) > 0 or indirect.has(f): continue
+                loop i in [0..nkids(body)):
+                    s = kid(body, i)
+                    if nodes[s].kind != .vardecl or nodes[s].aux2 != 1: break
+                    if nkids(s) > 0: continue
+                    l = int(nodes[s].sym)
+                    source = int(nodes[s].b)
+                    if nodes[source].kind != .ident or nodes[source].aux != i32(int(SK.local)): continue
+                    p = int(nodes[source].sym)
+                    if copy_inputs.has(p) or not costly_copy(int(locals[l].type)): continue
+                    if round == 0:
+                        copy_borrowed[p] = true
+                        continue
+                    if int(locals[l].flags) & (LF_ASSIGNED | LF_CAPTURED | LF_EXPOSED) != 0 or copy_escapes(body, l):
+                        copy_inputs[p] = true
+                        copy_bindings[l] = true
+                        changed = true
 
 copy_strict = (e: int) -> bool:
     e > 0 and files[pos_file(nodes[e].pos)].explicit_copies > 0
@@ -268,7 +281,9 @@ copy_live = (n: int, live: mut {int: bool}):
         copy_kill_local(int(nodes[n].sym), live)
         copy_live(int(nodes[n].b), live)
         return
-    if (k == .while_ or k == .for_) and ownership_decls.len() != 0:
+    # Every local a loop mentions is live at its backedge; one declared in it
+    # starts fresh each iteration, so its last use can still transfer it.
+    if k == .while_ or k == .for_:
         copy_loop_after.push(live)
         copy_mentions(n, live)
         inner = live
@@ -282,7 +297,7 @@ copy_live = (n: int, live: mut {int: bool}):
         copy_loop_after.pop()
         copy_loop_back.pop()
         return
-    if k == .while_ or k == .for_ or k == .defer_:
+    if k == .defer_:
         copy_mentions(n, live)
         return
     if k == .if_:

@@ -4,6 +4,8 @@
 # rotations and bitwise logic, and its loops depend only on the message length,
 # which is public.
 
+$explicit_copies
+
 from p"ct.dewy" import load32
 
 Words8:type=array<uint32 length=8>
@@ -98,7 +100,7 @@ Sha256:type=[
 
     finish=():>array<uint8>=>{
         let bits=length*8
-        let tail=pending
+        let tail=pending.copy
         tail.push(0x80)
         loop tail.length%BLOCK not=? 56 {
             tail.push(0)
@@ -131,7 +133,7 @@ sha256=(data:array<uint8>):>array<uint8>=>{
 
 # HMAC-SHA-256. The key is secret; its length is public.
 hmac_sha256=(key:array<uint8> message:array<uint8>):>array<uint8>=>{
-    let block_key=if key.length >? BLOCK sha256(key) else key
+    let block_key=if key.length >? BLOCK sha256(key) else key.copy
     loop block_key.length <? BLOCK {
         block_key.push(0)
     }

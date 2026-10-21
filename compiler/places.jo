@@ -67,6 +67,15 @@ place_route = (e: int, depth: int = 0) -> PlaceIdentity:
             return place_route(int(locals[l].alias), depth + 1)
     place_scalar_root(e)
 
+# The selectors from a place's root down to it.
+place_path = (p0: PlaceIdentity) -> int[]:
+    out: int[]
+    p = p0
+    loop p.parent != 0:
+        out.insert(0, p.selector)
+        p = place_parents[p.parent]
+    out
+
 place_base = (p0: PlaceIdentity) -> PlaceIdentity:
     p = p0
     loop p.parent != 0: p = place_parents[p.parent]

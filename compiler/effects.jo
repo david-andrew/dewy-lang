@@ -582,8 +582,12 @@ effect_plain = (t0: int, depth: int = 0) -> bool:
                 fi = int(variants[vi].fields) + j
                 if fields[fi].boxed or not effect_plain(int(fields[fi].type), depth + 1): return false
         return true
-    # (a fixed array of plain elements is inline storage with no lifecycle)
+    # (a fixed array or tuple of plain elements is inline storage with no lifecycle)
     if depth <= 16 and tkind(t) == .fixed: return effect_plain(int(types[t].elem), depth + 1)
+    if depth <= 16 and tkind(t) == .tuple:
+        loop i in [0..int(types[t].nargs)):
+            if not effect_plain(targ(t, i), depth + 1): return false
+        return true
     if depth > 16 or tkind(t) != .struct_: return false
     layout(t)
     si = int(types[t].st)
@@ -1057,6 +1061,14 @@ effect_scan_node = (f: int, n: int):
     else if k == .int_lit or k == .bool_lit: supported = effect_scalar(ntype(n)) or effect_count_literal(n) or effect_small(n) >= 0
     else if k == .array: supported = effect_fixed_literal(n)
     else if k == .block or k == .exprstmt or k == .return_ or k == .if_ or k == .and_ or k == .or_ or k == .not_ or k == .defer_: supported = true
+    else if k == .tuple: supported = effect_plain(ntype(n))
+    else if k == .vardecl and nkids(n) > 0:
+        # (unpacking plain components into private locals)
+        supported = effect_plain(ntype(int(nodes[n].b))) and not has_flag(n, NF_GLOBAL)
+        loop c in kids(n):
+            if nodes[c].kind == .hole: continue
+            if has_flag(c, NF_GLOBAL) or nodes[c].sym <= 0: supported = false
+            else if int(locals[int(nodes[c].sym)].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) != 0: supported = false
     else if k == .vardecl:
         l = int(nodes[n].sym)
         if effect_readonly_binding(n): return
@@ -1292,6 +1304,13 @@ effects_demand = (f: int) -> bool:
     if f <= 0 or f >= effect_limit: return false
     if effect_summaries[f].index == 0: effect_visit(f)
     effect_summaries[f].done
+
+# Lowering consults summaries too. Cover nodes made since the arena was sized
+# before a fresh visit scans them; later functions remain unknown.
+effects_demand_late = (f: int) -> bool:
+    if effect_limit != 0:
+        loop effect_seen.len() < nodes.len(): effect_seen.push(0)
+    effects_demand(f)
 
 # Scoped bytes share place normalization and transitive call footprints with
 # effects. This walk is demanded only for functions containing byte operations.

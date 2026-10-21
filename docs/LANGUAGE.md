@@ -2457,8 +2457,9 @@ obligation.
 Write `.copy` for an independent snapshot, borrow a stable value for reading,
 or arrange a last-use transfer. The compiler transfers dead local values and
 unboxed record fields, distinguishes conditional return paths, borrows
-read-only arguments and iteration sources, and infers owning parameters for
-closed direct calls. Moves clear their old storage before cleanup. Loops,
+read-only arguments and iteration sources (including a method's own field when
+the call can change only other fields), reads `extend` and spread sources
+without copying them, and infers owning parameters for closed direct calls. Moves clear their old storage before cleanup. Loops,
 captured or exposed owners, live readers, and indirect calls retain conservative
 checks when these proofs do not apply. This directive does not forbid fresh
 allocation or panics, and is not a separate no-detach guarantee.
