@@ -41,6 +41,7 @@ use 'watch.jo'
 use 'new.jo'
 use 'fmt.jo'
 use 'par.jo'
+use 'fused.jo'
 use 'pkg.jo'
 
 const DEWY_CORE_VERSION = "0.0.0-dev"
@@ -298,6 +299,10 @@ emit_queued = ():
     emit_queue = []
     emit_queue_rel = []
     queue_emit = false
+    if fz_ready:
+        fz_ready = false
+        fz_emit(q)
+        return
     if not opt_release and not dbg_on: fast_inline_prepare(q)
     if not host_ir and emit_parallel(q, fin): return
     t0 = time()
@@ -446,6 +451,9 @@ compile = (path: str, out0: str) -> str:
         cs = prelude.get(intern("__cpu_avx2")) ?? 0
         if cs != 0 and syms[cs].kind == .global: global_addr_off(int(syms[cs].ref))
         else: lx_vec_on = false
+    # (worker processes lower, optimize and emit most functions: fused.jo)
+    fused_fork(pinit_lf)
+    tlow = time()
     i = 0
     loop true:
         loop i < lfuncs.len():
@@ -469,8 +477,14 @@ compile = (path: str, out0: str) -> str:
                     continue
                 if len(fns[fi].clib) == 0: fatal(nodes[int(fns[fi].decl)].pos, "extern functions need @lib(\"library.so\") on native targets")
                 extern_lib_check(fi)
+                # (fused.jo's programs: no source position of its own, not one left by whichever
+                # function came before)
+                if fz_layout: ir_pos = 0
                 lower_extern_thunk(i, fi)
                 emit_function()
+                i += 1
+                continue
+            if fz_ready and fz_replay(i):
                 i += 1
                 continue
             lower_function(i)
@@ -494,6 +508,7 @@ compile = (path: str, out0: str) -> str:
         else: emit_function()
         break
     if lower_only: return ""
+    if env("SLOPPY_PAR_TIME") != none: eprint("lower: {(time() - tlow) * 1000.0:.1} ms here")
     if watch_build and not watch_first:
         watch_lower_inits()
         watch_lower_migrate()

@@ -2,6 +2,7 @@
 
 use 'watch.jo'
 use 'ide.jo'
+use 'fused.jo'
 
 struct SrcFile:
     path: str
@@ -251,6 +252,9 @@ show_line = (p: int):
 # the editor's checks start over each time, so not there)
 warned: {str: bool} = {}
 warn = (p: int, msg: str):
+    if fused_on:
+        fz_note_text(5, p, msg)
+        return
     if ide_on:
         ide_warn(p, msg)
         return

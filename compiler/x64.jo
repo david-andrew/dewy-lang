@@ -9,6 +9,7 @@ use 'check.jo'
 use 'ast.jo'
 use 'elf.jo'
 use 'pe.jo'
+use 'fused.jo'
 
 x_int_fail: int[]
 x_int_fail_fn = 0
@@ -1348,13 +1349,16 @@ ro_new: (int, int)[]        # (offset, bits) of each constant ro_const added (pa
 
 # offset of an 8-byte constant in read-only data (shared between uses)
 ro_const = (bits: int) -> int:
-    if let o = ro_consts.get(bits): return o
+    if let o = ro_consts.get(bits):
+        if fused_on: fz_note_ro(bits, o)
+        return o
     loop rodata.len() % 8 != 0: rodata.push(0)
     o = rodata.len()
     ro_starts.push(o)
     loop k in [0..8): rodata.push(u8((bits >> (8 * k)) & 255))
     ro_consts[bits] = o
     ro_new.push((o, bits))
+    if fused_on: fz_note_ro(bits, o)
     o
 
 rel_fixup_lea = (r: int, kind: int, off: int):
@@ -2563,7 +2567,12 @@ x64_function = ():
     x_int_fail.clear()
     loop fn_addr.len() <= ir.fn_index: fn_addr.push(-1)
     loop fn_len.len() <= ir.fn_index: fn_len.push(0)
-    loop code.len() % 16 != 0: b(0xCC)
+    # (fused.jo's programs: 32, as cmp_branch_pad keeps a branch within a 32-byte region, so
+    # where a function's code moves by whole multiples of 32 alone, it is the same bytes
+    # wherever it is made)
+    align = 16
+    if fz_layout: align = 32
+    loop code.len() % align != 0: b(0xCC)
     fn_addr[ir.fn_index] = code.len()
     fn_start = code.len()
     analyze()
@@ -2955,8 +2964,13 @@ row_file = -1
 
 # (a row where the position changes; dwarf.jo leaves out those on the same line)
 line_row = (pos: int):
-    if pos == 0 or pos == row_pos: return
-    row_pos = pos
+    if pos == 0: return
+    # (fused.jo's programs: by source position, not by id, as ids for one position depend on
+    # what was lowered before)
+    at = pos
+    if fz_layout: at = ir_positions[pos]
+    if at == row_pos: return
+    row_pos = at
     line_rows.push(code.len())
     line_rows.push(pos)
 

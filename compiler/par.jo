@@ -18,6 +18,7 @@ use 'watch.jo'
 use 'lower.jo'
 use 'types.jo'
 use 'ast.jo'
+use 'fused.jo'
 
 # (SLOPPY_EMIT_WORKERS=n: how many; 1: none. SLOPPY_EMIT_FORCE=1: workers even for a small
 # program, for tests. SLOPPY_PAR_TIME=1: how long each part took)
@@ -222,7 +223,9 @@ pr_ints = (r: mut ParIn) -> int[]:
 
 par_join = (bytes_: u8[], r0: int):
     r = ParIn(bytes_)
-    loop code.len() % 16 != 0: code.push(0xCC)
+    align = 16
+    if fz_layout: align = 32
+    loop code.len() % align != 0: code.push(0xCC)
     base = code.len()
     nf = pr(r)
     loop _ in [0..nf):

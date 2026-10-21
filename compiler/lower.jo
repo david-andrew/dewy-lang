@@ -4,6 +4,7 @@ use 'refine.jo'
 use 'units.jo'
 use 'poly_closure.jo'
 use 'isolation.jo'
+use 'fused.jo'
 # Lowering: typed AST -> IR, including reference counting, copy-on-write and closures.
 use 'copies.jo'
 use 'ownership.jo'
@@ -64,18 +65,24 @@ entry_points: int[]
 # all addresses are computed by code.
 
 lf_of_inst = (f: int) -> int:
-    if let x = inst_lf.get(f): return x
+    if let x = inst_lf.get(f):
+        if fused_on and x >= fz_lf0: fz_note(0, x, f, 0, 0)
+        return x
     lfuncs.push(LFunc(LK_INST, f, .drop, 0, fns[f].sym))
     x = lfuncs.len() - 1
     inst_lf[f] = x
+    if fused_on: fz_note(0, x, f, 0, 0)
     x
 
 lf_helper = (hk: HK, t: int, p: int) -> int:
     key = "{int(hk)}:{t}:{p}"
-    if let x = helper_lf.get(key): return x
+    if let x = helper_lf.get(key):
+        if fused_on and x >= fz_lf0: fz_note(1, x, int(hk), t, p)
+        return x
     lfuncs.push(LFunc(LK_HELPER, p, hk, t, "__h_{hk}_{lfuncs.len()}"))
     x = lfuncs.len() - 1
     helper_lf[key] = x
+    if fused_on: fz_note(1, x, int(hk), t, p)
     x
 
 rt = (name: str) -> int: lf_of_inst(runtime_fn(name))
@@ -99,7 +106,9 @@ e_call_nr = (f: int, args: int[], rtype: int) -> int:
     -1
 
 str_data = (s: str) -> int:
-    if let o = str_off.get(s): return o
+    if let o = str_off.get(s):
+        if fused_on and o >= fz_r0: fz_note_text(2, o, s)
+        return o
     loop rodata.len() % 8 != 0: rodata.push(0)
     o = rodata.len()
     ro_starts.push(o)
@@ -111,13 +120,16 @@ str_data = (s: str) -> int:
     if len(s) > 0: mem_copy(data(rodata) + n, data(s), len(s))
     rodata.push(0)
     str_off[s] = o
+    if fused_on: fz_note_text(2, o, s)
     o
 
 push_i64 = (b: mut u8[], v: int):
     loop i in [0..8): b.push(u8((v >> (8 * i)) & 255))
 
 global_addr_off = (g: int) -> int:
-    if let o = global_off.get(g): return o
+    if let o = global_off.get(g):
+        if fused_on and o >= fz_d0: fz_note(3, o, g, 0, 0)
+        return o
     t = int(globals[g].type)
     al = talign(t)
     if al < 8: al = 8
@@ -127,6 +139,7 @@ global_addr_off = (g: int) -> int:
     if sz < 8: sz = 8
     data_size += sz
     global_off[g] = o
+    if fused_on: fz_note(3, o, g, 0, 0)
     o
 
 # ---------------- type helpers ----------------
@@ -244,7 +257,8 @@ opt_release = false
 # (where __mt_active is among the globals, for the code generator's CALL_RC_INC and CALL_RC_DEC)
 mt_active_off = -1
 note_mt_active = ():
-    if mt_active_off >= 0: return
+    # (a fused worker notes each function's use: fused.jo)
+    if mt_active_off >= 0 and not fused_on: return
     s = prelude.get(intern("__mt_active")) ?? 0
     if s == 0 or syms[s].kind != .global: ice("missing runtime global __mt_active")
     mt_active_off = global_addr_off(int(syms[s].ref))
@@ -654,7 +668,9 @@ box_dflt_data: {int: int} = {}
 # (the rodata offset of) the value an empty box of type t reads as
 box_dflt_off = (t0: int) -> int:
     t = prune(t0)
-    if let o = box_dflt_data.get(t): return o
+    if let o = box_dflt_data.get(t):
+        if fused_on and o >= fz_r0: fz_note(4, o, t, 0, 0)
+        return o
     loop rodata.len() % 8 != 0: rodata.push(0)
     o = rodata.len()
     ro_starts.push(o)
@@ -663,6 +679,7 @@ box_dflt_off = (t0: int) -> int:
     if v > 0:
         loop i in [0..4): rodata[o + i] = u8((v >> (8 * i)) & 255)
     box_dflt_data[t] = o
+    if fused_on: fz_note(4, o, t, 0, 0)
     o
 
 # the address of the value in box p (of a value of type t), or of the default when p is empty
@@ -829,7 +846,7 @@ loc_last_off = 0
 loc_data = (pos: int) -> int:
     f = pos_file(pos)
     l, c = line_col(pos)
-    if f == loc_last_file and l == loc_last_line: return loc_last_off
+    if f == loc_last_file and l == loc_last_line and not fused_on: return loc_last_off
     loc_last_file = f
     loc_last_line = l
     loc_last_off = str_data(loc_str(pos))
@@ -2355,6 +2372,7 @@ gen_match_lookup = (m: int, st: int, rs: int, rtp: int, vals: int[], arms: int[]
     ro_starts.push(offset)
     loop value in table:
         loop byte in [0..width): rodata.push(u8((value >> (8 * byte)) & 255))
+    if fused_on: fz_note_raw(offset, width)
     ha = e_slot(int(locals[int(nodes[m].sym)].offset))
     x = if types[st].kind == .enum_: e_load(VI, ha, 0, 4) else: load_val(st, ha, 0)
     index = e_bin(.sub, VI, x, e_iconst(lo))
@@ -4510,6 +4528,7 @@ const_array = (e: int, et: int) -> int:
             bits = nodes[c].ival
             if quantity_base(et) == T_MATH_INT: bits = bits << 1
         loop b in [0..sz): rodata.push(if b >= 8: u8(0) else: u8((bits >> (8 * b)) & 255))
+    if fused_on: fz_note_raw(o, 8)
     o
 
 # ---------------- conditions as branches ----------------
