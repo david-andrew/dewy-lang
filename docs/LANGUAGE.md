@@ -329,6 +329,11 @@ its expected callable type selects a member. Grouping existing function values
 or local closures is not yet supported; group members must be function literals
 at module level. `main` must have one entry-point definition.
 
+A program's function with a prelude function's name joins its overloads. When
+both fit a call, the program's wins unless it needs a costlier conversion of a
+non-literal argument: with `abs = (x:int64):>int64 => ...`, `abs(-1)` calls the
+program's `abs`.
+
 Use `let` to declare a local or deliberately shadow a name. Assignment updates a
 visible variable; otherwise it can introduce a new variable.
 

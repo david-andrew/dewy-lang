@@ -1031,6 +1031,7 @@ struct Cand:
     binds: int[]
     cost: int
     ok: bool
+    lit_cost: int = 0   # the part of cost literal arguments add (they take their type from the parameter)
 
 # the enum `.name` means where a value of type t is expected: t itself, or (t a union) the one
 # member enum with that variant
@@ -1987,6 +1988,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                     continue
                 r = arg_cost(a, pt, cd.binds)
                 if i == 0 and r >= 0: recv_fits = true
+                if phase == 1 and r > 0: cd.lit_cost += r
                 if r < 0:
                     ok = false
                     # (of the overloads, the one that got furthest is the one meant: m[k] = v
@@ -2057,7 +2059,15 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
     # over the standard library's; report real ties (the library's are settled by how many
     # arguments have exactly a parameter's type, then which comes first: min(x, 5) with x: i32
     # takes min(i32, i32), and min(a, b) with a: i8 and b: u8 still takes min(int, int))
+    # (in Dewy a literal argument takes its type from the parameter: the program's own
+    # `abs = (x:int64) => ...` takes abs(-1), though the literal is closer to the prelude's int)
+    user_first = caller_dewy()
     loop ci in 0.. and cd in cands:
+        if best >= 0 and user_first and decl_in_prelude(cd.decl) != decl_in_prelude(cands[best].decl):
+            bc = cands[best]
+            if decl_in_prelude(bc.decl) and cd.cost - cd.lit_cost <= bc.cost - bc.lit_cost: best = ci
+            else if decl_in_prelude(cd.decl) and cd.cost - cd.lit_cost < bc.cost - bc.lit_cost: best = ci
+            continue
         if best < 0 or cd.cost < cands[best].cost: best = ci
         else if cd.cost == cands[best].cost:
             bc = cands[best]
