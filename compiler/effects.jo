@@ -296,6 +296,8 @@ callable_contract = (t0: int) -> int:
 
 effect_overlap = (a: EffectAtom, b: EffectAtom) -> bool:
     if a.kind == .opaque or b.kind == .opaque: return true
+    # (I/O may wait on its device: `no blocks` excludes it)
+    if a.kind == .block and b.kind == .io or a.kind == .io and b.kind == .block: return true
     if a.kind != b.kind: return false
     a.place.declaration == 0 or b.place.declaration == 0 or place_covers(a.place, b.place) or place_covers(b.place, a.place)
 
@@ -1350,7 +1352,7 @@ effects_finalize = ():
             if (contract == 0 or effect_allows(contract, atom)) and not prohibited: continue
             at = if event.via != 0: event.via else: event.witness
             if at == 0: at = d
-            what = if atom.kind == .write: "mutation" else if atom.kind == .read: "read" else if atom.kind == .alloc: "allocation" else if atom.kind == .panic: "possible failure" else if atom.kind == .detach: "storage detach" else if atom.kind == .io: "I/O" else: "opaque operation or unproved implementation cost"
+            what = if atom.kind == .write: "mutation" else if atom.kind == .read: "read" else if atom.kind == .alloc: "allocation" else if atom.kind == .panic: "possible failure" else if atom.kind == .detach: "storage detach" else if atom.kind == .io: "I/O" else if atom.kind == .block: "blocking" else: "opaque operation or unproved implementation cost"
             if event.atom.place.declaration != 0 and not starts_with(effect_place_name(event.atom.place), "__"): what += " of '{effect_place_name(event.atom.place)}'"
             chain = effect_witness(f, event)
             origin = if event.witness != 0 and not pos_in_lib(nodes[event.witness].pos): "; witness at {pos_str(nodes[event.witness].pos)}" else if event.witness != 0: "" else: "; witness at {pos_str(nodes[d].pos)}"

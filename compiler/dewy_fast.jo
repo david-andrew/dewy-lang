@@ -901,7 +901,7 @@ dn_atom = () -> int:
     # Effect negation is contextual; ordinary bindings named `no` remain valid.
     if token.kind == .identifier and (token.name == i32(dn_no_id) or token.name == 0 and dn_payload(token) == "no") and dn_at + 1 < dn_tokens.len():
         following = dn_payload(dn_tokens[dn_at + 1])
-        if following == "reads" or following == "mutates" or following == "allocates": symbol = .kw_not
+        if following == "reads" or following == "mutates" or following == "allocates" or following == "blocks": symbol = .kw_not
     if token.kind == .eof: return dn_error(token.start, "expected an expression")
     # (`(... amount:int64)`: a bare `...` opening a parameter list)
     if symbol == .ellipsis and dn_at > 0 and dn_tokens[dn_at - 1].symbol == .lparen and dn_at + 1 < dn_tokens.len() and (dn_tokens[dn_at + 1].symbol == .rparen or dn_tokens[dn_at + 1].kind == .identifier and dn_at + 2 < dn_tokens.len() and dn_tokens[dn_at + 2].symbol == .colon):

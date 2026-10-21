@@ -1,0 +1,10 @@
+# quick
+Device:type=[]
+next=(@seed:uint64):>uint64 & no allocates & no blocks & no mutates<Device>=>{
+    seed=seed*6364136223846793005+1442695040888963407
+    return seed >> 33
+}
+main=()=>{
+    let seed:uint64=7
+    printl("{next(@seed)} {next(@seed)}")
+}

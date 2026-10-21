@@ -560,7 +560,10 @@ apply=<E:Effect>(f:Action<E> x:int64):>int64 & E=>f(x)
 explicit: `mutates<x>` on a callback can become `mutates<y>` when invoked with
 `@y`, but cannot be inferred into `E`. Negative-only rows such as
 `no mutates<Filesystem>` remain open while excluding the named nominal resource.
-`allocates` is bare; `allocates<Resource>` is invalid.
+`allocates` is bare; `allocates<Resource>` is invalid. `blocks` is inferred and
+only ever excluded: `& no blocks` rejects I/O and any operation the inventory
+cannot classify (waits, sleeps, foreign calls). In a row `no` reaches to the next
+`&`, so `& no allocates & no blocks` excludes both.
 
 The implementation-cost inventory supports wrapping fixed-width scalar work
 (including shifts), inline scalar records and unions of them (`:>(int64 | Oops) &

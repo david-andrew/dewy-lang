@@ -867,20 +867,35 @@ dw_effect_path = (id0: int) -> int[]:
     if name == "": fatal(dewy_syntax[id].pos, "effect row needs a place name")
     [intern(name)]
 
-dw_effect_atom = (id0: int, entries: mut EffectSyntax[], empty: mut bool):
+dw_effect_atom = (id0: int, entries: mut EffectSyntax[], empty: mut bool, negated: bool = false):
     id = dw_unwrap(id0)
+    # (`no allocates & no blocks`: in a row, `no` reaches only to the next `&`)
+    if dw_op(id) == .kw_not and not negated and dw_op(dw_unwrap(dw_child(id, 1))) == .amp:
+        chain = dw_unwrap(dw_child(id, 1))
+        dw_effect_atom(dw_child(chain, 1), entries, empty, true)
+        dw_effect_atom(dw_child(chain, 2), entries, empty)
+        return
+    if negated and dw_op(id) == .amp:
+        dw_effect_atom(dw_child(id, 1), entries, empty, true)
+        dw_effect_atom(dw_child(id, 2), entries, empty)
+        return
     if dw_name(id) == "no_effects":
         if empty or entries.len() != 0: fatal(dewy_syntax[id].pos, "no_effects cannot be combined with another effect permission")
         empty = true
         return
     if empty: fatal(dewy_syntax[id].pos, "no_effects cannot be combined with another effect permission")
-    negative = dw_op(id) == .kw_not
-    if negative: id = dw_unwrap(dw_child(id, 1))
+    negative = negated or dw_op(id) == .kw_not
+    if negative and not negated: id = dw_unwrap(dw_child(id, 1))
     if negative and (dw_name(id) == "reads" or dw_name(id) == "mutates"):
         entries.push(EffectSyntax(if dw_name(id) == "reads": EffectKind.read else: EffectKind.write, [], dewy_syntax[id].pos, true))
         return
     if dw_name(id) == "allocates":
         entries.push(EffectSyntax(.alloc, [], dewy_syntax[id].pos, negative))
+        return
+    # (`blocks` is inferred: a row only excludes it)
+    if dw_name(id) == "blocks":
+        if not negative: fatal(dewy_syntax[id].pos, "`blocks` is inferred, never granted: a row can only exclude it, `& no blocks`")
+        entries.push(EffectSyntax(.block, [], dewy_syntax[id].pos, true))
         return
     if dw_name(id) != "":
         entries.push(EffectSyntax(.opaque, [intern(dw_name(id))], dewy_syntax[id].pos, negative, true))
