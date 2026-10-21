@@ -4147,11 +4147,22 @@ cmp_error = (n: int, ta: int, tb: int):
     fatal(nodes[n].pos, "cannot compare {dt(ta)} with {dt(tb)}{why}")
 
 # "space" given where a Key goes: " (write `.space`)"
+# (an exact fraction where a float is wanted, or the other way, through arrays: decimal
+# literals such as 0.0 are fractions unless a floating type is written)
+rational_float_mismatch = (from0: int, to0: int) -> bool:
+    f = prune(from0)
+    t = prune(to0)
+    loop tkind(f) == .array and tkind(t) == .array:
+        f = prune(int(types[f].elem))
+        t = prune(int(types[t].elem))
+    (bundled_rational_type(f) and tkind(t) == .float_) or (tkind(f) == .float_ and bundled_rational_type(t))
+
 variant_hint = (a: int, t0: int) -> str:
     t = prune(t0)
     if nodes[a].type != 0:
         # (a color is a vec4; light and sky colors are vec3s)
         ft = prune(int(nodes[a].type))
+        if dewy_at(nodes[a].pos) and rational_float_mismatch(ft, t): return " (a decimal literal such as `0.5` is an exact rational: write the floating type where the value is made, as `let x:float64 = 0.5` or `let xs:array<float64> = [1.5 2.5]`)"
         c = "c"
         if nodes[a].kind == .ident: c = name_of(int(nodes[a].name))
         if type_eq(ft, T_VEC4) and type_eq(t, T_VEC3): return " (`{c}.rgb` is a color without its alpha)"
