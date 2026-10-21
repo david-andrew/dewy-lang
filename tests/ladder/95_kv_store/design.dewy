@@ -1,0 +1,142 @@
+# Tier 4 / 95_kv_store / milestone 31
+# Acceptance: a durable ordered key-value store in modules: B+ tree index, checksummed
+# write-ahead log with atomic multi-key transactions, recovery that drops torn and damaged
+# tails, two-slot manifest and crash-safe compaction; a SQL subset with a range planner; a
+# scripted session (stdin) checked against SQLite and a seeded crash-injection workload
+# checked against a model; independent oracle.
+#
+# Session commands besides SQL:
+#     .crash               lose the process; reopen from disk
+#     .tear N              the next append reaches the disk only N/1000 of the way, then crash
+#     .damage              flip a bit in the newest log record, then crash
+#     .compact             rewrite the live data into a new log generation
+#     .crash-compact STEP  crash a compaction before_manifest or before_cleanup
+#     .check               verify the index and compare it with a fresh replay of the log
+
+from p"btree.dewy" import Entry
+from p"wal.dewy" import damage_last
+from p"disk.dewy" import Disk, DiskError, Crashed, Fault, open_disk
+from p"store.dewy" import Store, Recovery, open_store
+from p"session.dewy" import Session
+from p"workload.dewy" import run_workload, fingerprint, Tally, WorkloadError
+
+describe=(r:Recovery):>string=>{
+    let tail=if r.truncated >? 0 "dropped" else "clean"
+    return "recovered keys={r.keys} tail={tail} removed={r.removed.length}"
+}
+
+# Remove every file in a scratch directory, and the directory itself.
+clear=(root:string):>void=>{
+    let dir=p(root)
+    if not dir.exists return
+    let names=dir.list
+    if names isnt? error {
+        loop name in names {
+            p"{root}/{name}".unlink;
+        }
+    }
+    dir.rmdir;
+}
+
+restart=(@session:Session):>void|DiskError=>{
+    let store=open_store(Disk[session.store.disk.root]) or_throw
+    session=Session[store]
+    printl(describe(store.recovery))
+}
+
+# Run one line of the session script.
+step=(@session:Session line:string):>void|DiskError=>{
+    let words=line.split(" ")
+    let command=words[0]
+    if command =? ".crash" {
+        restart(@session) or_throw
+    } else if command =? ".tear" {
+        let n=to_int(words[1]) ?? 500
+        session.store.disk.fault=Fault['append' thousandths=n]
+    } else if command =? ".damage" {
+        let disk=session.store.disk
+        let log=session.store.manifest.log
+        let image=disk.read(log) or_throw
+        damage_last(@image);
+        disk.write(log image) or_throw
+        restart(@session) or_throw
+    } else if command =? ".compact" {
+        let done=session.store.compact()
+        if done is? error {
+            printl("compaction failed")
+        } else {
+            printl("compacted keys={session.store.length()} generation={session.store.manifest.generation}")
+        }
+    } else if command =? ".crash-compact" {
+        session.store.disk.fault=if words[1] =? "before_cleanup" Fault['before_cleanup'] else Fault['before_manifest']
+        let done=session.store.compact()
+        printl(if done is? Crashed "crashed {done.step}" else "compaction finished")
+        restart(@session) or_throw
+    } else if command =? ".check" {
+        let problem=session.store.index.check()
+        let replayed=open_store(Disk[session.store.disk.root]) or_throw
+        let same=replayed.index.entries =? session.store.index.entries
+        printl(if problem.length =? 0 and same "check ok keys={session.store.length()}" else "check failed {problem}")
+    } else {
+        let result=session.execute(line)
+        match result {
+            text:string => printl(text)
+            failure:Crashed => {
+                printl("crashed during {failure.step}")
+                restart(@session) or_throw
+            }
+            _ => printl("disk error")
+        }
+    }
+}
+
+main=():>int64=>{
+    clear("kvdata")
+    clear("kvwork")
+    let disk=open_disk("kvdata")
+    if disk is? DiskError {
+        printl(disk.message)
+        return 1
+    }
+    let opened=open_store(disk)
+    if opened is? DiskError {
+        printl(opened.message)
+        return 1
+    }
+    let session=Session[opened]
+    loop true {
+        let line=read_line()
+        if line is? none break
+        if line.length =? 0 or line.startswith("--") continue
+        printl("> {line}")
+        let done=step(@session line)
+        if done is? DiskError {
+            printl(done.message)
+            return 1
+        }
+    }
+
+    let work=open_disk("kvwork")
+    if work is? DiskError return 1
+    let tally=run_workload("kvwork" 20261021 3000)
+    match tally {
+        failure:DiskError => {
+            printl(failure.message)
+            return 1
+        }
+        <WorkloadError> => {
+            printl("workload failed")
+            return 1
+        }
+        t:Tally => {
+            printl("workload steps={t.steps} commits={t.commits} rollbacks={t.rollbacks} torn={t.torn} crashes={t.crashes} damaged={t.damaged}")
+            printl("workload compactions={t.compactions} interrupted={t.interrupted} recoveries={t.recoveries} mismatches={t.mismatches}")
+        }
+    }
+    let final=open_store(Disk["kvwork"])
+    if final is? DiskError return 1
+    printl("workload keys={final.length()} fingerprint={fingerprint(final.index.entries)}")
+    clear("kvdata")
+    clear("kvwork")
+    return 0
+}

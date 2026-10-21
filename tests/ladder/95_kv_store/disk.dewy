@@ -1,0 +1,97 @@
+# The store's only window onto the file system, with crash injection.
+#
+# Every durable step the store takes goes through a Disk. A test arms a Fault;
+# when the store reaches the armed step the Disk performs only the part of the
+# write a power cut would leave behind and reports Crashed. The store gives up
+# at once (`or_throw`), exactly as a process killed at that instant would, and
+# the driver reopens the store from whatever is on disk.
+#
+# The file API offers whole-file writes and text appends only: there is no
+# fsync, no rename and no positional I/O, so this model assumes each completed
+# call is durable and that a crash can cut an append short at any byte.
+
+Crashed:type=type of error & [step:string]
+DiskError:type=type of error & [message:string]
+
+# Where the next crash happens. `append` lets only `thousandths`/1000 of the next
+# append's bytes reach the disk (always less than all of it); the compaction
+# steps crash just before that step starts.
+FaultKind:type='append' | 'before_manifest' | 'before_cleanup'
+Fault:type=[kind:FaultKind thousandths:int64<i => 0 <=? i <? 1000>=0]
+
+Disk:type=[
+    root:string
+    fault:Fault?=none
+    appends:int64=0
+    writes:int64=0
+
+    path=(name:string):>string=>"{root}/{name}"
+
+    # Crash here if the armed fault is this step.
+    step=(kind:FaultKind):>void|Crashed=>{
+        let armed=fault
+        if armed isnt? none and armed.kind =? kind and kind not=? 'append' {
+            fault=none
+            return Crashed["{kind}"]
+        }
+    }
+
+    append=(name:string text:string):>void|Crashed|DiskError=>{
+        let armed=fault
+        if armed isnt? none and armed.kind =? 'append' {
+            fault=none
+            # Only a prefix of the bytes reaches the disk.
+            let data=bytes(text)
+            let keep=data.length*armed.thousandths//1000
+            let prefix=data[0..keep)
+            let existing=read(name)
+            if existing is? error return DiskError["cannot reread {name}"]
+            let written=p(path(name)).write_bytes([existing... prefix...])
+            if written is? error return DiskError["cannot write {name}"]
+            return Crashed["append"]
+        }
+        let written=append_file(path(name) text)
+        if written is? error return DiskError["cannot append to {name}"]
+        appends+=1
+    }
+
+    write=(name:string data:array<uint8>):>void|DiskError=>{
+        let written=p(path(name)).write_bytes(data)
+        if written is? error return DiskError["cannot write {name}"]
+        writes+=1
+    }
+
+    # The bytes of a file; a missing file reads as empty.
+    read=(name:string):>array<uint8>|DiskError=>{
+        let file=p(path(name))
+        if not file.exists return []
+        let data=file.read_bytes
+        if data is? error return DiskError["cannot read {name}"]
+        return data
+    }
+
+    exists=(name:string):>bool=>p(path(name)).exists
+
+    remove=(name:string):>void|DiskError=>{
+        let file=p(path(name))
+        if not file.exists return
+        let removed=file.unlink
+        if removed is? error return DiskError["cannot remove {name}"]
+    }
+
+    list=():>array<string>|DiskError=>{
+        let names=p(root).list
+        if names is? error return DiskError["cannot list {root}"]
+        names.sort()
+        return names
+    }
+]
+
+open_disk=(root:string):>Disk|DiskError=>{
+    let dir=p(root)
+    if not dir.exists {
+        let made=dir.mkdir
+        if made is? error return DiskError["cannot create {root}"]
+    }
+    return Disk[root]
+}

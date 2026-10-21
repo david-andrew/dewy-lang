@@ -1,0 +1,80 @@
+-- a small catalogue
+INSERT INTO kv VALUES ('apple', 'red'), ('banana', 'yellow'), ('cherry', 'dark red')
+INSERT INTO kv VALUES ('date', 'brown'), ('elderberry', 'purple'), ('fig', 'green'), ('grape', 'green')
+SELECT * FROM kv
+SELECT key FROM kv WHERE value = 'green' ORDER BY key DESC
+SELECT COUNT(*) FROM kv WHERE key >= 'b' AND key < 'e'
+EXPLAIN SELECT * FROM kv WHERE key >= 'b' AND key < 'e'
+EXPLAIN SELECT * FROM kv WHERE key = 'fig' OR key = 'date'
+EXPLAIN SELECT key FROM kv WHERE key LIKE 'gr%' AND value <> 'x'
+EXPLAIN SELECT COUNT(*) FROM kv WHERE key BETWEEN 'c' AND 'f' AND key > 'cherry'
+EXPLAIN SELECT * FROM kv WHERE (key = 'kiwi') AND NOT value = 'x'
+INSERT INTO kv VALUES ('apple', 'green')
+INSERT INTO kv VALUES ('honeydew', 'pale'), ('honeydew', 'paler')
+REPLACE INTO kv VALUES ('apple', 'green'), ('quince', 'it''s gold')
+UPDATE kv SET value = 'ripe' WHERE value LIKE '%red'
+SELECT key, value FROM kv WHERE value != 'green' AND NOT key BETWEEN 'c' AND 'e'
+SELECT * FROM kv WHERE key LIKE '_i%' OR (value LIKE 'p%' AND key > 'd')
+select value, key from kv where key <= 'cherry' order by key desc limit 2;
+.crash
+SELECT * FROM kv LIMIT 3
+BEGIN
+DELETE FROM kv WHERE key < 'c'
+INSERT INTO kv VALUES ('kiwi', 'brown'), ('lemon', 'yellow')
+SELECT key FROM kv WHERE key < 'l'
+SELECT COUNT(*) FROM kv
+ROLLBACK
+SELECT COUNT(*) FROM kv
+BEGIN
+INSERT INTO kv VALUES ('kiwi', 'brown'), ('lemon', 'yellow'), ('mango', 'orange')
+DELETE FROM kv WHERE key = 'banana'
+.tear 400
+COMMIT
+SELECT COUNT(*) FROM kv
+SELECT * FROM kv WHERE key > 'h'
+BEGIN
+INSERT INTO kv VALUES ('kiwi', 'brown'), ('lemon', 'yellow'), ('mango', 'orange')
+DELETE FROM kv WHERE key = 'banana'
+INSERT INTO kv VALUES ('banana', 'green')
+COMMIT
+.check
+REPLACE INTO kv VALUES ('nectarine', 'peach'), ('orange', 'orange')
+.damage
+SELECT * FROM kv WHERE key >= 'm'
+DELETE FROM kv WHERE key = 'nothing'
+.damage
+SELECT COUNT(*) FROM kv
+.compact
+DELETE FROM kv WHERE value = 'green'
+SELECT COUNT(*) FROM kv
+.crash-compact before_manifest
+SELECT COUNT(*) FROM kv
+.crash-compact before_cleanup
+.check
+UPDATE kv SET value = 'sour' WHERE key = 'date'
+BEGIN
+UPDATE kv SET value = 'tart' WHERE key = 'date'
+SELECT value FROM kv WHERE key = 'date'
+.crash
+SELECT * FROM kv WHERE key = 'date'
+.damage
+SELECT * FROM kv WHERE key = 'date'
+.tear 999
+DELETE FROM kv WHERE key LIKE 'e%'
+SELECT key FROM kv WHERE key LIKE 'e%'
+COMMIT
+BEGIN
+BEGIN
+SELEKT * FROM kv
+SELECT * FROM fruit
+SELECT * FROM kv WHERE key = 'unterminated
+ROLLBACK
+.tear 0
+INSERT INTO kv VALUES ('papaya', 'orange')
+INSERT INTO kv VALUES ('papaya', 'orange')
+SELECT * FROM kv ORDER BY key DESC LIMIT 2
+.damage
+.damage
+.damage
+SELECT COUNT(*) FROM kv
+.check

@@ -2,13 +2,269 @@
 Never reads Dewy sources or output. Oracles are registered by program directory name.
 --write regenerates expected.out (and stdin.txt where a program reads one)."""
 from pathlib import Path
-import hashlib,hmac,sys
+import hashlib,hmac,re,sqlite3,sys
 ROOT=Path(__file__).parent
 ORACLES={}
 INPUTS={}
 def oracle(name):
     def register(f):ORACLES[name]=f;return f
     return register
+
+# ---------------------------------------------------------------- 95: durable key-value store
+# The scripted session runs against SQLite (the table, SQL semantics and transactions) plus a
+# model of what the store promises across crashes: a committed transaction survives a crash; an
+# open transaction and a torn append do not; damage to the newest log record loses exactly the
+# newest transaction in the live log; compaction makes the live data one snapshot transaction.
+KV_SCRIPT=r"""-- a small catalogue
+INSERT INTO kv VALUES ('apple', 'red'), ('banana', 'yellow'), ('cherry', 'dark red')
+INSERT INTO kv VALUES ('date', 'brown'), ('elderberry', 'purple'), ('fig', 'green'), ('grape', 'green')
+SELECT * FROM kv
+SELECT key FROM kv WHERE value = 'green' ORDER BY key DESC
+SELECT COUNT(*) FROM kv WHERE key >= 'b' AND key < 'e'
+EXPLAIN SELECT * FROM kv WHERE key >= 'b' AND key < 'e'
+EXPLAIN SELECT * FROM kv WHERE key = 'fig' OR key = 'date'
+EXPLAIN SELECT key FROM kv WHERE key LIKE 'gr%' AND value <> 'x'
+EXPLAIN SELECT COUNT(*) FROM kv WHERE key BETWEEN 'c' AND 'f' AND key > 'cherry'
+EXPLAIN SELECT * FROM kv WHERE (key = 'kiwi') AND NOT value = 'x'
+INSERT INTO kv VALUES ('apple', 'green')
+INSERT INTO kv VALUES ('honeydew', 'pale'), ('honeydew', 'paler')
+REPLACE INTO kv VALUES ('apple', 'green'), ('quince', 'it''s gold')
+UPDATE kv SET value = 'ripe' WHERE value LIKE '%red'
+SELECT key, value FROM kv WHERE value != 'green' AND NOT key BETWEEN 'c' AND 'e'
+SELECT * FROM kv WHERE key LIKE '_i%' OR (value LIKE 'p%' AND key > 'd')
+select value, key from kv where key <= 'cherry' order by key desc limit 2;
+.crash
+SELECT * FROM kv LIMIT 3
+BEGIN
+DELETE FROM kv WHERE key < 'c'
+INSERT INTO kv VALUES ('kiwi', 'brown'), ('lemon', 'yellow')
+SELECT key FROM kv WHERE key < 'l'
+SELECT COUNT(*) FROM kv
+ROLLBACK
+SELECT COUNT(*) FROM kv
+BEGIN
+INSERT INTO kv VALUES ('kiwi', 'brown'), ('lemon', 'yellow'), ('mango', 'orange')
+DELETE FROM kv WHERE key = 'banana'
+.tear 400
+COMMIT
+SELECT COUNT(*) FROM kv
+SELECT * FROM kv WHERE key > 'h'
+BEGIN
+INSERT INTO kv VALUES ('kiwi', 'brown'), ('lemon', 'yellow'), ('mango', 'orange')
+DELETE FROM kv WHERE key = 'banana'
+INSERT INTO kv VALUES ('banana', 'green')
+COMMIT
+.check
+REPLACE INTO kv VALUES ('nectarine', 'peach'), ('orange', 'orange')
+.damage
+SELECT * FROM kv WHERE key >= 'm'
+DELETE FROM kv WHERE key = 'nothing'
+.damage
+SELECT COUNT(*) FROM kv
+.compact
+DELETE FROM kv WHERE value = 'green'
+SELECT COUNT(*) FROM kv
+.crash-compact before_manifest
+SELECT COUNT(*) FROM kv
+.crash-compact before_cleanup
+.check
+UPDATE kv SET value = 'sour' WHERE key = 'date'
+BEGIN
+UPDATE kv SET value = 'tart' WHERE key = 'date'
+SELECT value FROM kv WHERE key = 'date'
+.crash
+SELECT * FROM kv WHERE key = 'date'
+.damage
+SELECT * FROM kv WHERE key = 'date'
+.tear 999
+DELETE FROM kv WHERE key LIKE 'e%'
+SELECT key FROM kv WHERE key LIKE 'e%'
+COMMIT
+BEGIN
+BEGIN
+SELEKT * FROM kv
+SELECT * FROM fruit
+SELECT * FROM kv WHERE key = 'unterminated
+ROLLBACK
+.tear 0
+INSERT INTO kv VALUES ('papaya', 'orange')
+INSERT INTO kv VALUES ('papaya', 'orange')
+SELECT * FROM kv ORDER BY key DESC LIMIT 2
+.damage
+.damage
+.damage
+SELECT COUNT(*) FROM kv
+.check
+"""
+INPUTS['95_kv_store']=lambda:KV_SCRIPT
+
+def kv_plan(where):
+    """The key range the store scans: top-level AND conjuncts on key narrow it."""
+    tokens=re.findall(r"'(?:[^']|'')*'|<=|>=|<>|!=|[A-Za-z_][A-Za-z_0-9]*|[()=<>]",where)
+    pos=0
+    def peek():return tokens[pos].upper() if pos<len(tokens) else ''
+    def take():
+        nonlocal pos;pos+=1;return tokens[pos-1]
+    def lit(t):return t[1:-1].replace("''","'")
+    def disj():
+        e=conj()
+        while peek()=='OR':take();e=('or',e,conj())
+        return e
+    def conj():
+        e=neg()
+        while peek()=='AND':take();e=('and',e,neg())
+        return e
+    def neg():
+        if peek()=='NOT':take();return ('not',neg())
+        if peek()=='(':take();e=disj();take();return e
+        col=take().lower();op=take().upper()
+        if op=='BETWEEN':
+            a=lit(take());take();b=lit(take())
+            return ('and',('cmp',col,'>=',a),('cmp',col,'<=',b))
+        return ('cmp',col,op,lit(take()))
+    tree=disj();low=high=None
+    def tighter(old,new,lower):
+        if old is None:return new
+        if (new[0]>old[0] if lower else new[0]<old[0]) or (new[0]==old[0] and not new[1]):return new
+        return old
+    def narrow(e):
+        nonlocal low,high
+        if e[0]=='and':narrow(e[1]);narrow(e[2]);return
+        if e[0]!='cmp' or e[1]!='key':return
+        _,_,op,text=e
+        if op=='LIKE':
+            prefix=re.match(r'[^%_]*',text).group(0)
+            if prefix and 32<=ord(prefix[-1])<126:
+                low=tighter(low,(prefix,True),True);high=tighter(high,(prefix[:-1]+chr(ord(prefix[-1])+1),False),False)
+        elif op=='=':low=tighter(low,(text,True),True);high=tighter(high,(text,True),False)
+        elif op in('>','>='):low=tighter(low,(text,op=='>='),True)
+        elif op in('<','<='):high=tighter(high,(text,op=='<='),False)
+    narrow(tree)
+    if low is None and high is None:return 'full scan'
+    if low and high and low[0]==high[0] and low[1] and high[1]:return f'point lookup {low[0]}'
+    a='-' if low is None else ('[' if low[1] else '(')+low[0]
+    b='-' if high is None else high[0]+(']' if high[1] else ')')
+    return f'range {a} .. {b}'
+
+def kv_session():
+    db=sqlite3.connect(':memory:',isolation_level=None)
+    db.execute('PRAGMA case_sensitive_like=ON')
+    db.execute('CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT)')
+    out=[];state=lambda:dict(db.execute('SELECT key,value FROM kv'))
+    history=[];generation=1;open_txn=False;txn_keys=set();begin_state=None;tear=None
+    def restore(d):
+        db.execute('DELETE FROM kv');db.executemany('INSERT INTO kv VALUES (?,?)',sorted(d.items()))
+    def restart(tail='clean',removed=0):
+        nonlocal open_txn,tear
+        if open_txn:db.execute('ROLLBACK');open_txn=False
+        tear=None
+        out.append(f'recovered keys={len(state())} tail={tail} removed={removed}')
+    def written_keys(sql):
+        # Keys a write statement touches, judged by SQLite itself on a savepoint.
+        before=state();db.execute('SAVEPOINT probe');db.execute(sql)
+        after=state();db.execute('ROLLBACK TO probe');db.execute('RELEASE probe')
+        return {k for k in set(before)|set(after) if before.get(k)!=after.get(k)},before
+    for line in KV_SCRIPT.splitlines():
+        if not line or line.startswith('--'):continue
+        out.append(f'> {line}')
+        words=line.split(' ');upper=line.upper().rstrip(';')
+        if words[0]=='.crash':restart()
+        elif words[0]=='.tear':tear=int(words[1])
+        elif words[0]=='.damage':
+            if history:restore(history.pop());restart('dropped')
+            else:restart()
+        elif words[0]=='.compact':
+            generation+=1;history=[{}];out.append(f'compacted keys={len(state())} generation={generation}')
+        elif words[0]=='.crash-compact':
+            out.append(f'crashed {words[1]}')
+            if words[1]=='before_cleanup':generation+=1;history=[{}]
+            restart(removed=1)
+        elif words[0]=='.check':out.append(f'check ok keys={len(state())}')
+        elif upper.startswith('EXPLAIN'):
+            m=re.search(r'\bWHERE\b(.*)$',line,re.I)
+            out.append(kv_plan(m.group(1)) if m else 'full scan')
+        elif upper=='BEGIN':
+            if open_txn:out.append('error: transaction already open')
+            else:db.execute('BEGIN');open_txn=True;txn_keys=set();begin_state=state();out.append('ok')
+        elif upper in('COMMIT','ROLLBACK'):
+            if not open_txn:out.append('error: no transaction');continue
+            if upper=='ROLLBACK' or not txn_keys:db.execute('ROLLBACK' if upper=='ROLLBACK' else 'COMMIT');open_txn=False;out.append('ok');continue
+            if tear is not None:
+                out.append('crashed during append');restart('dropped' if tear>0 else 'clean');continue
+            db.execute('COMMIT');open_txn=False;history.append(begin_state);out.append('ok')
+        else:
+            sql=line.rstrip(';')
+            try:
+                if upper.startswith('SELECT'):
+                    if 'ORDER BY' not in upper:
+                        m=re.search(r'\bLIMIT\b',sql,re.I)
+                        sql=sql[:m.start()]+'ORDER BY key '+sql[m.start():] if m else sql+' ORDER BY key'
+                    rows=db.execute(sql).fetchall()
+                    if 'COUNT(*)' in upper:out.append(str(rows[0][0]))
+                    else:out+=['|'.join(r) for r in rows]+[f'({len(rows)} rows)']
+                    continue
+                if upper.startswith('INSERT'):
+                    keys=re.findall(r"\('((?:[^']|'')*)'",sql);seen=set()
+                    dup=next((k for k in keys if k in seen or seen.add(k) or db.execute('SELECT 1 FROM kv WHERE key=?',(k.replace("''","'"),)).fetchone()),None)
+                    if dup is not None:out.append(f'error: duplicate key {dup}');continue
+                keys,before=written_keys(sql)
+                if open_txn:
+                    count=db.execute(sql).rowcount;txn_keys|=keys;out.append(f'ok {count}');continue
+                if keys and tear is not None:
+                    out.append('crashed during append');restart('dropped' if tear>0 else 'clean');continue
+                count=db.execute(sql).rowcount
+                if count>0:history.append(before)
+                out.append(f'ok {count}')
+            except sqlite3.Error as e:
+                text=str(e)
+                out.append('error: '+('no such table' if 'no such table' in text else 'unterminated string' if 'unrecognized token' in text else 'unknown statement'))
+    return out
+
+class Lcg:
+    def __init__(self,seed):self.state=seed
+    def next(self):self.state=(self.state*6364136223846793005+1442695040888963407)%2**64;return self.state>>33
+    def below(self,n):return self.next()%n
+def kv_workload(seed,steps):
+    rng=Lcg(seed);model={};undo=None
+    t=dict(steps=0,commits=0,rollbacks=0,torn=0,crashes=0,damaged=0,compactions=0,interrupted=0,recoveries=0)
+    def changes(count,step):
+        out=[]
+        for i in range(count):
+            key=f'w{rng.below(400)}'
+            out.append((key,None) if rng.below(4)==0 else (key,f's{step}.{i}'))
+        return out
+    for step in range(steps):
+        t['steps']+=1;action=rng.below(100)
+        if action<70:
+            count=1 if action<55 else 2+rng.below(5)
+            batch=changes(count,step)
+            if action>=55 and rng.below(8)==0:t['rollbacks']+=1;continue
+            undo=dict(model)
+            for k,v in batch:
+                if v is None:model.pop(k,None)
+                else:model[k]=v
+            t['commits']+=1
+        elif action<80:
+            changes(2+rng.below(4),step);rng.below(1000);t['torn']+=1;t['recoveries']+=1
+        elif action<88:t['crashes']+=1;t['recoveries']+=1
+        elif action<92:
+            if undo is None:t['crashes']+=1
+            else:model=undo;undo=None;t['damaged']+=1
+            t['recoveries']+=1
+        elif action<96:undo=None;t['compactions']+=1
+        else:
+            if rng.below(2)==1:undo=None
+            t['interrupted']+=1;t['recoveries']+=1
+    t['recoveries']+=1
+    h=0xcbf29ce484222325
+    for k in sorted(model):
+        for b in f'{k}={model[k]}\n'.encode():h=((h^b)*0x100000001b3)%2**64
+    return [f"workload steps={t['steps']} commits={t['commits']} rollbacks={t['rollbacks']} torn={t['torn']} crashes={t['crashes']} damaged={t['damaged']}",
+            f"workload compactions={t['compactions']} interrupted={t['interrupted']} recoveries={t['recoveries']} mismatches=0",
+            f'workload keys={len(model)} fingerprint={h:016x}']
+
+@oracle('95_kv_store')
+def kv_store():return '\n'.join(kv_session()+kv_workload(20261021,3000))
 
 # ---------------------------------------------------------------- 96: constant-time crypto
 # Straight transcriptions of the RFC algorithms over Python integers, checked against the

@@ -1,0 +1,452 @@
+# A small SQL dialect over the store's single table `kv(key TEXT PRIMARY KEY, value TEXT)`.
+#
+#     SELECT * | COUNT(*) | key[, value] FROM kv [WHERE cond] [ORDER BY key [ASC|DESC]] [LIMIT n]
+#     INSERT INTO kv VALUES ('k', 'v'), ...      fails on an existing key
+#     REPLACE INTO kv VALUES ('k', 'v'), ...     inserts or overwrites
+#     UPDATE kv SET value = 'v' [WHERE cond]
+#     DELETE FROM kv [WHERE cond]
+#     BEGIN | COMMIT | ROLLBACK
+#     EXPLAIN SELECT ...                         the key range the query will scan
+#
+# Conditions combine `column op 'text'` (=, !=, <>, <, <=, >, >=), `column LIKE
+# 'pattern'` (% and _, case-sensitive), `column BETWEEN 'a' AND 'b'`, AND, OR, NOT
+# and parentheses. Text compares bytewise, as SQLite's BINARY collation does.
+
+from p"btree.dewy" import Bound, Entry
+
+SqlError:type=type of error & [message:string]
+
+# ---------------------------------------------------------------- tokens
+
+TokenKind:type='word' | 'string' | 'number' | 'symbol' | 'end'
+Token:type=[kind:TokenKind text:string]
+
+is_word_start=(c:string):>bool=>("a" <=? c <=? "z") or ("A" <=? c <=? "Z") or c =? "_"
+is_digit=(c:string):>bool=>"0" <=? c <=? "9"
+
+lex=(source:string):>array<Token>|SqlError=>{
+    let chars=graphemes(source)
+    let tokens:array<Token>=[]
+    let i:int64=0
+    loop i <? chars.length {
+        let c=chars[i]
+        if c =? " " or c =? "\t" or c =? "\n" {
+            i+=1
+        } else if is_word_start(c) {
+            let start=i
+            loop i <? chars.length and (is_word_start(chars[i]) or is_digit(chars[i])) {
+                i+=1
+            }
+            tokens.push(Token['word' chars[start..i).join("")])
+        } else if is_digit(c) {
+            let start=i
+            loop i <? chars.length and is_digit(chars[i]) {
+                i+=1
+            }
+            tokens.push(Token['number' chars[start..i).join("")])
+        } else if c =? "'" {
+            # A quoted string; '' inside it is one quote.
+            let text:array<string>=[]
+            i+=1
+            let closed=false
+            loop i <? chars.length {
+                if chars[i] =? "'" {
+                    if i+1 <? chars.length and chars[i+1] =? "'" {
+                        text.push("'")
+                        i+=2
+                    } else {
+                        closed=true
+                        i+=1
+                        break
+                    }
+                } else {
+                    text.push(chars[i])
+                    i+=1
+                }
+            }
+            if not closed return SqlError["unterminated string"]
+            tokens.push(Token['string' text.join("")])
+        } else {
+            let pair=if i+1 <? chars.length "{c}{chars[i+1]}" else c
+            if pair in? ["<=" ">=" "<>" "!="] {
+                tokens.push(Token['symbol' pair])
+                i+=2
+            } else if c in? ["(" ")" "," "*" "=" "<" ">" ";"] {
+                tokens.push(Token['symbol' c])
+                i+=1
+            } else {
+                return SqlError["unexpected character {c}"]
+            }
+        }
+    }
+    tokens.push(Token['end' ""])
+    return tokens
+}
+
+# ---------------------------------------------------------------- syntax tree
+
+Column:type='key' | 'value'
+ExprKind:type='compare' | 'like' | 'and' | 'or' | 'not'
+Expr:type=[
+    kind:ExprKind
+    column:Column='key'
+    op:string=""
+    text:string=""
+    left:Expr?=none
+    right:Expr?=none
+]
+
+StatementKind:type='select' | 'count' | 'insert' | 'replace' | 'update' | 'delete' | 'begin' | 'commit' | 'rollback'
+Statement:type=[
+    kind:StatementKind
+    columns:array<Column>=[]
+    where:Expr?=none
+    descending:bool=false
+    limit:int64=-1
+    rows:array<Entry>=[]
+    value:string=""
+    explain:bool=false
+]
+
+# ---------------------------------------------------------------- parser
+
+Parser:type=[
+    tokens:array<Token>
+    at:int64=0
+
+    peek=():>Token=>tokens[at]
+
+    advance=():>Token=>{
+        let token=tokens[at]
+        if token.kind not=? 'end' at+=1
+        return token
+    }
+
+    # Is the next token this keyword (any case) or symbol?
+    sees=(text:string):>bool=>{
+        let token=tokens[at]
+        if token.kind =? 'word' return token.text.upper() =? text
+        return token.kind =? 'symbol' and token.text =? text
+    }
+
+    accept=(text:string):>bool=>{
+        if not sees(text) return false
+        advance()
+        return true
+    }
+
+    expect=(text:string):>void|SqlError=>{
+        if not accept(text) return SqlError["expected {text}"]
+    }
+
+    string_literal=():>string|SqlError=>{
+        let token=advance()
+        if token.kind not=? 'string' return SqlError["expected a string"]
+        return token.text
+    }
+
+    column=():>Column|SqlError=>{
+        if accept("KEY") return 'key'
+        if accept("VALUE") return 'value'
+        return SqlError["expected key or value"]
+    }
+
+    table=():>void|SqlError=>{
+        if not accept("KV") return SqlError["no such table"]
+    }
+
+    # expr := term (OR term)*
+    expression=():>Expr|SqlError=>{
+        let left=conjunction() or_throw
+        loop accept("OR") {
+            let right=conjunction() or_throw
+            left=Expr['or' left=left right=right]
+        }
+        return left
+    }
+
+    conjunction=():>Expr|SqlError=>{
+        let left=negation() or_throw
+        loop accept("AND") {
+            let right=negation() or_throw
+            left=Expr['and' left=left right=right]
+        }
+        return left
+    }
+
+    negation=():>Expr|SqlError=>{
+        if accept("NOT") {
+            let inner=negation() or_throw
+            return Expr['not' left=inner]
+        }
+        return primary()
+    }
+
+    primary=():>Expr|SqlError=>{
+        if accept("(") {
+            let inner=expression() or_throw
+            expect(")") or_throw
+            return inner
+        }
+        let column=column() or_throw
+        if accept("LIKE") {
+            let pattern=string_literal() or_throw
+            return Expr['like' column text=pattern]
+        }
+        if accept("BETWEEN") {
+            let low=string_literal() or_throw
+            expect("AND") or_throw
+            let high=string_literal() or_throw
+            return Expr['and' left=Expr['compare' column ">=" low] right=Expr['compare' column "<=" high]]
+        }
+        let token=advance()
+        if token.kind not=? 'symbol' or token.text not in? ["=" "!=" "<>" "<" "<=" ">" ">="] {
+            return SqlError["expected a comparison"]
+        }
+        let op=if token.text =? "<>" "!=" else token.text
+        let text=string_literal() or_throw
+        return Expr['compare' column op text]
+    }
+
+    # The optional WHERE clause, into the statement.
+    where_clause=(@statement:Statement):>void|SqlError=>{
+        if not accept("WHERE") return
+        statement.where=expression() or_throw
+    }
+
+    select=():>Statement|SqlError=>{
+        let statement=Statement['select']
+        if accept("COUNT") {
+            expect("(") or_throw
+            expect("*") or_throw
+            expect(")") or_throw
+            statement.kind='count'
+        } else if accept("*") {
+            statement.columns=['key' 'value']
+        } else {
+            statement.columns.push(column() or_throw)
+            loop accept(",") {
+                statement.columns.push(column() or_throw)
+            }
+        }
+        expect("FROM") or_throw
+        table() or_throw
+        where_clause(@statement) or_throw
+        if accept("ORDER") {
+            expect("BY") or_throw
+            expect("KEY") or_throw
+            if accept("DESC") {
+                statement.descending=true
+            } else {
+                accept("ASC");
+            }
+        }
+        if accept("LIMIT") {
+            let token=advance()
+            let n=to_int(token.text)
+            if token.kind not=? 'number' or n is? none or n >? 1000000 return SqlError["expected a row count"]
+            statement.limit=n
+        }
+        return statement
+    }
+
+    values=(kind:StatementKind):>Statement|SqlError=>{
+        expect("INTO") or_throw
+        table() or_throw
+        expect("VALUES") or_throw
+        let statement=Statement[kind]
+        loop true {
+            expect("(") or_throw
+            let key=string_literal() or_throw
+            expect(",") or_throw
+            let value=string_literal() or_throw
+            expect(")") or_throw
+            statement.rows.push(Entry[key value])
+            if not accept(",") break
+        }
+        return statement
+    }
+
+    statement=():>Statement|SqlError=>{
+        let result:Statement=Statement['begin']
+        if accept("EXPLAIN") {
+            expect("SELECT") or_throw
+            result=select() or_throw
+            result.explain=true
+        } else if accept("SELECT") {
+            result=select() or_throw
+        } else if accept("INSERT") {
+            result=values('insert') or_throw
+        } else if accept("REPLACE") {
+            result=values('replace') or_throw
+        } else if accept("UPDATE") {
+            table() or_throw
+            expect("SET") or_throw
+            expect("VALUE") or_throw
+            expect("=") or_throw
+            result=Statement['update' value=string_literal() or_throw]
+            where_clause(@result) or_throw
+        } else if accept("DELETE") {
+            expect("FROM") or_throw
+            table() or_throw
+            result=Statement['delete']
+            where_clause(@result) or_throw
+        } else if accept("BEGIN") {
+            result=Statement['begin']
+        } else if accept("COMMIT") {
+            result=Statement['commit']
+        } else if accept("ROLLBACK") {
+            result=Statement['rollback']
+        } else {
+            return SqlError["unknown statement"]
+        }
+        accept(";");
+        if peek().kind not=? 'end' return SqlError["unexpected {peek().text}"]
+        return result
+    }
+]
+
+parse=(source:string):>Statement|SqlError=>{
+    let tokens=lex(source) or_throw
+    let parser=Parser[tokens]
+    return parser.statement()
+}
+
+# ---------------------------------------------------------------- evaluation
+
+# LIKE with % (any run) and _ (one character), over UTF-8 bytes; the workloads
+# use ASCII text, where bytes and characters coincide.
+like=(text:string pattern:string):>bool=>{
+    let t=bytes(text)
+    let p=bytes(pattern)
+    let ti:int64=0
+    let pi:int64=0
+    let star:int64=-1
+    let mark:int64=0
+    loop ti <? t.length {
+        if pi <? p.length and (p[pi] =? 95 or (p[pi] not=? 37 and p[pi] =? t[ti])) {
+            ti+=1
+            pi+=1
+        } else if pi <? p.length and p[pi] =? 37 {
+            star=pi
+            mark=ti
+            pi+=1
+        } else if star >=? 0 {
+            pi=star+1
+            mark+=1
+            ti=mark
+        } else {
+            return false
+        }
+    }
+    loop pi <? p.length and p[pi] =? 37 {
+        pi+=1
+    }
+    return pi =? p.length
+}
+
+compare=(left:string op:string right:string):>bool=>match op {
+    <"="> => left =? right
+    <"!="> => left not=? right
+    <"<"> => left <? right
+    <"<="> => left <=? right
+    <">"> => left >? right
+    _ => left >=? right
+}
+
+matches=(e:Expr key:string value:string):>bool=>{
+    let subject=if e.column =? 'key' key else value
+    if e.kind =? 'compare' return compare(subject e.op e.text)
+    if e.kind =? 'like' return like(subject e.text)
+    let left=e.left
+    if left is? none return false
+    if e.kind =? 'not' return not matches(left key value)
+    let right=e.right
+    if right is? none return false
+    if e.kind =? 'and' return matches(left key value) and matches(right key value)
+    return matches(left key value) or matches(right key value)
+}
+
+# ---------------------------------------------------------------- planning
+
+# The key range a condition can possibly match. Only top-level AND conjuncts on the
+# key narrow it; the whole condition is still checked on every candidate row.
+Plan:type=[low:Bound?=none high:Bound?=none]
+
+tighter_low=(a:Bound? b:Bound):>Bound=>{
+    if a is? none return b
+    if b.key >? a.key or (b.key =? a.key and not b.inclusive) return b
+    return a
+}
+
+tighter_high=(a:Bound? b:Bound):>Bound=>{
+    if a is? none return b
+    if b.key <? a.key or (b.key =? a.key and not b.inclusive) return b
+    return a
+}
+
+# The smallest string above every string that starts with `prefix`, when the
+# prefix ends in a printable ASCII character that has a successor.
+prefix_end=(prefix:string):>string?=>{
+    let data=bytes(prefix)
+    if data.length =? 0 return none
+    let last=data[data.length-1]
+    if last <? 32 or last >=? 126 return none
+    data[data.length-1]=last+1
+    return data as string | none
+}
+
+wildcard_prefix=(pattern:string):>string=>{
+    let out:array<uint8>=[]
+    loop c in bytes(pattern) {
+        if c =? 37 or c =? 95 break
+        out.push(c)
+    }
+    let text=out as string | none
+    return text ?? ""
+}
+
+narrow=(@plan:Plan e:Expr):>void=>{
+    if e.kind =? 'and' {
+        let left=e.left
+        let right=e.right
+        if left isnt? none narrow(@plan left)
+        if right isnt? none narrow(@plan right)
+        return
+    }
+    if e.column not=? 'key' return
+    if e.kind =? 'like' {
+        let prefix=wildcard_prefix(e.text)
+        let limit=prefix_end(prefix)
+        if limit isnt? none {
+            plan.low=tighter_low(plan.low Bound[prefix true])
+            plan.high=tighter_high(plan.high Bound[limit false])
+        }
+        return
+    }
+    if e.kind not=? 'compare' return
+    if e.op =? "=" {
+        plan.low=tighter_low(plan.low Bound[e.text true])
+        plan.high=tighter_high(plan.high Bound[e.text true])
+    } else if e.op =? ">" or e.op =? ">=" {
+        plan.low=tighter_low(plan.low Bound[e.text e.op =? ">="])
+    } else if e.op =? "<" or e.op =? "<=" {
+        plan.high=tighter_high(plan.high Bound[e.text e.op =? "<="])
+    }
+}
+
+plan_for=(where:Expr?):>Plan=>{
+    let plan=Plan()
+    if where isnt? none narrow(@plan where)
+    return plan
+}
+
+describe_plan=(plan:Plan):>string=>{
+    let low=plan.low
+    let high=plan.high
+    if low is? none and high is? none return "full scan"
+    if low isnt? none and high isnt? none and low.key =? high.key and low.inclusive and high.inclusive return "point lookup {low.key}"
+    let start=if low is? none "-" else "{if low.inclusive "[" else "("}{low.key}"
+    let stop=if high is? none "-" else "{high.key}{if high.inclusive "]" else ")"}"
+    return "range {start} .. {stop}"
+}

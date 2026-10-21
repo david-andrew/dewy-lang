@@ -1,0 +1,197 @@
+> INSERT INTO kv VALUES ('apple', 'red'), ('banana', 'yellow'), ('cherry', 'dark red')
+ok 3
+> INSERT INTO kv VALUES ('date', 'brown'), ('elderberry', 'purple'), ('fig', 'green'), ('grape', 'green')
+ok 4
+> SELECT * FROM kv
+apple|red
+banana|yellow
+cherry|dark red
+date|brown
+elderberry|purple
+fig|green
+grape|green
+(7 rows)
+> SELECT key FROM kv WHERE value = 'green' ORDER BY key DESC
+grape
+fig
+(2 rows)
+> SELECT COUNT(*) FROM kv WHERE key >= 'b' AND key < 'e'
+3
+> EXPLAIN SELECT * FROM kv WHERE key >= 'b' AND key < 'e'
+range [b .. e)
+> EXPLAIN SELECT * FROM kv WHERE key = 'fig' OR key = 'date'
+full scan
+> EXPLAIN SELECT key FROM kv WHERE key LIKE 'gr%' AND value <> 'x'
+range [gr .. gs)
+> EXPLAIN SELECT COUNT(*) FROM kv WHERE key BETWEEN 'c' AND 'f' AND key > 'cherry'
+range (cherry .. f]
+> EXPLAIN SELECT * FROM kv WHERE (key = 'kiwi') AND NOT value = 'x'
+point lookup kiwi
+> INSERT INTO kv VALUES ('apple', 'green')
+error: duplicate key apple
+> INSERT INTO kv VALUES ('honeydew', 'pale'), ('honeydew', 'paler')
+error: duplicate key honeydew
+> REPLACE INTO kv VALUES ('apple', 'green'), ('quince', 'it''s gold')
+ok 2
+> UPDATE kv SET value = 'ripe' WHERE value LIKE '%red'
+ok 1
+> SELECT key, value FROM kv WHERE value != 'green' AND NOT key BETWEEN 'c' AND 'e'
+banana|yellow
+elderberry|purple
+quince|it's gold
+(3 rows)
+> SELECT * FROM kv WHERE key LIKE '_i%' OR (value LIKE 'p%' AND key > 'd')
+elderberry|purple
+fig|green
+(2 rows)
+> select value, key from kv where key <= 'cherry' order by key desc limit 2;
+ripe|cherry
+yellow|banana
+(2 rows)
+> .crash
+recovered keys=8 tail=clean removed=0
+> SELECT * FROM kv LIMIT 3
+apple|green
+banana|yellow
+cherry|ripe
+(3 rows)
+> BEGIN
+ok
+> DELETE FROM kv WHERE key < 'c'
+ok 2
+> INSERT INTO kv VALUES ('kiwi', 'brown'), ('lemon', 'yellow')
+ok 2
+> SELECT key FROM kv WHERE key < 'l'
+cherry
+date
+elderberry
+fig
+grape
+kiwi
+(6 rows)
+> SELECT COUNT(*) FROM kv
+8
+> ROLLBACK
+ok
+> SELECT COUNT(*) FROM kv
+8
+> BEGIN
+ok
+> INSERT INTO kv VALUES ('kiwi', 'brown'), ('lemon', 'yellow'), ('mango', 'orange')
+ok 3
+> DELETE FROM kv WHERE key = 'banana'
+ok 1
+> .tear 400
+> COMMIT
+crashed during append
+recovered keys=8 tail=dropped removed=0
+> SELECT COUNT(*) FROM kv
+8
+> SELECT * FROM kv WHERE key > 'h'
+quince|it's gold
+(1 rows)
+> BEGIN
+ok
+> INSERT INTO kv VALUES ('kiwi', 'brown'), ('lemon', 'yellow'), ('mango', 'orange')
+ok 3
+> DELETE FROM kv WHERE key = 'banana'
+ok 1
+> INSERT INTO kv VALUES ('banana', 'green')
+ok 1
+> COMMIT
+ok
+> .check
+check ok keys=11
+> REPLACE INTO kv VALUES ('nectarine', 'peach'), ('orange', 'orange')
+ok 2
+> .damage
+recovered keys=11 tail=dropped removed=0
+> SELECT * FROM kv WHERE key >= 'm'
+mango|orange
+quince|it's gold
+(2 rows)
+> DELETE FROM kv WHERE key = 'nothing'
+ok 0
+> .damage
+recovered keys=8 tail=dropped removed=0
+> SELECT COUNT(*) FROM kv
+8
+> .compact
+compacted keys=8 generation=2
+> DELETE FROM kv WHERE value = 'green'
+ok 3
+> SELECT COUNT(*) FROM kv
+5
+> .crash-compact before_manifest
+crashed before_manifest
+recovered keys=5 tail=clean removed=1
+> SELECT COUNT(*) FROM kv
+5
+> .crash-compact before_cleanup
+crashed before_cleanup
+recovered keys=5 tail=clean removed=1
+> .check
+check ok keys=5
+> UPDATE kv SET value = 'sour' WHERE key = 'date'
+ok 1
+> BEGIN
+ok
+> UPDATE kv SET value = 'tart' WHERE key = 'date'
+ok 1
+> SELECT value FROM kv WHERE key = 'date'
+tart
+(1 rows)
+> .crash
+recovered keys=5 tail=clean removed=0
+> SELECT * FROM kv WHERE key = 'date'
+date|sour
+(1 rows)
+> .damage
+recovered keys=5 tail=dropped removed=0
+> SELECT * FROM kv WHERE key = 'date'
+date|brown
+(1 rows)
+> .tear 999
+> DELETE FROM kv WHERE key LIKE 'e%'
+crashed during append
+recovered keys=5 tail=dropped removed=0
+> SELECT key FROM kv WHERE key LIKE 'e%'
+elderberry
+(1 rows)
+> COMMIT
+error: no transaction
+> BEGIN
+ok
+> BEGIN
+error: transaction already open
+> SELEKT * FROM kv
+error: unknown statement
+> SELECT * FROM fruit
+error: no such table
+> SELECT * FROM kv WHERE key = 'unterminated
+error: unterminated string
+> ROLLBACK
+ok
+> .tear 0
+> INSERT INTO kv VALUES ('papaya', 'orange')
+crashed during append
+recovered keys=5 tail=clean removed=0
+> INSERT INTO kv VALUES ('papaya', 'orange')
+ok 1
+> SELECT * FROM kv ORDER BY key DESC LIMIT 2
+quince|it's gold
+papaya|orange
+(2 rows)
+> .damage
+recovered keys=5 tail=dropped removed=0
+> .damage
+recovered keys=0 tail=dropped removed=0
+> .damage
+recovered keys=0 tail=clean removed=0
+> SELECT COUNT(*) FROM kv
+0
+> .check
+check ok keys=0
+workload steps=3000 commits=2046 rollbacks=52 torn=301 crashes=258 damaged=103
+workload compactions=118 interrupted=122 recoveries=785 mismatches=0
+workload keys=312 fingerprint=da0637bc153208b2

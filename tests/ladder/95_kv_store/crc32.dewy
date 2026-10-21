@@ -1,0 +1,36 @@
+# CRC-32 (IEEE 802.3, reflected polynomial 0xEDB88320), the checksum on every log
+# record and manifest. The 256-entry table is computed while compiling.
+
+table=():>array<uint32>=>{
+    let t:array<uint32>=[]
+    loop n in [0..256) {
+        let c=n as uint32
+        loop k in [0..8) {
+            c=if (c and 1) =? 1 0xedb88320 xor (c >> 1) else c >> 1
+        }
+        t.push(c)
+    }
+    return t
+}
+
+const TABLE=table()
+
+# Continue a running CRC over more bytes; start from 0.
+crc32_update=(crc:uint32 data:array<uint8>):>uint32=>{
+    let c=crc xor 0xffffffff
+    loop b in data {
+        c=TABLE[((c xor (b as uint32)) and 255) as int64] xor (c >> 8)
+    }
+    return c xor 0xffffffff
+}
+
+crc32=(data:array<uint8>):>uint32=>crc32_update(0 data)
+
+# The checksum of a byte range without copying it out.
+crc32_range=(data:array<uint8> start:int64 stop:int64):>uint32=>{
+    let c:uint32=0xffffffff
+    loop i in [start..stop) {
+        c=TABLE[((c xor (data[i] as uint32)) and 255) as int64] xor (c >> 8)
+    }
+    return c xor 0xffffffff
+}

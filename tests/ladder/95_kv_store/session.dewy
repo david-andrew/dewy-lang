@@ -1,0 +1,126 @@
+# Statement execution: autocommit by default, or an explicit transaction whose
+# writes stay in a private overlay until COMMIT makes them one durable batch.
+# Reads inside a transaction see its own uncommitted writes.
+
+from p"btree.dewy" import Bound, Entry, above, below
+from p"wal.dewy" import Change
+from p"store.dewy" import Store
+from p"disk.dewy" import Crashed, DiskError
+from p"sql.dewy" import Statement, SqlError, Column, Plan, parse, matches, plan_for, describe_plan
+
+Session:type=[
+    store:Store
+    # Uncommitted writes of the open transaction: a value, or none for a delete.
+    overlay:dict<string string?>=[]
+    open:bool=false
+
+    # The value a reader in this session sees.
+    lookup=(key:string):>string?=>{
+        let pending=overlay.get(key)
+        if pending isnt? none return pending
+        return store.get(key)
+    }
+
+    # Rows in the plan's key range as this session sees them, in key order.
+    visible=(plan:Plan):>array<Entry>=>{
+        let base=store.range(plan.low plan.high)
+        if overlay.length =? 0 return base
+        let merged:dict<string string>=[]
+        loop entry in base {
+            merged[entry.key]=entry.value
+        }
+        loop [key value] in overlay {
+            if not above(key plan.low) or not below(key plan.high) continue
+            if value is? none {
+                merged.remove(key);
+            } else {
+                merged[key]=value
+            }
+        }
+        let keys=merged.keys()
+        keys.sort()
+        return [loop key in keys Entry[key merged[key]]]
+    }
+
+    selected=(statement:Statement):>array<Entry>=>{
+        let candidates=visible(plan_for(statement.where))
+        let where=statement.where
+        let rows=if where is? none candidates else [loop e in candidates if matches(where e.key e.value) e]
+        if statement.descending rows=rows.reversed()
+        if statement.limit >=? 0 and rows.length >? statement.limit rows.truncate(statement.limit)
+        return rows
+    }
+
+    # Apply a statement's writes: into the overlay inside a transaction, or as one
+    # durable batch otherwise.
+    write=(changes:array<Change>):>void|Crashed|DiskError=>{
+        if open {
+            loop change in changes {
+                overlay[change.key]=if change.op =? 'put' change.value else none
+            }
+            return
+        }
+        store.commit(changes) or_throw
+    }
+
+    execute=(source:string):>string|Crashed|DiskError=>{
+        let parsed=parse(source)
+        if parsed is? SqlError return "error: {parsed.message}"
+        let statement=parsed
+        match statement.kind {
+            <'begin'> => {
+                if open return "error: transaction already open"
+                open=true
+                return "ok"
+            }
+            <'commit'> => {
+                if not open return "error: no transaction"
+                let changes=[loop [key value] in overlay if value is? none Change['del' key] else Change['put' key value]]
+                open=false
+                overlay=[]
+                store.commit(changes) or_throw
+                return "ok"
+            }
+            <'rollback'> => {
+                if not open return "error: no transaction"
+                open=false
+                overlay=[]
+                return "ok"
+            }
+            <'select'> => {
+                if statement.explain return describe_plan(plan_for(statement.where))
+                let rows=selected(statement)
+                let lines=[loop row in rows [loop c in statement.columns if c =? 'key' row.key else row.value].join("|")]
+                lines.push("({rows.length} rows)")
+                return lines.join("\n")
+            }
+            <'count'> => {
+                if statement.explain return describe_plan(plan_for(statement.where))
+                return "{selected(statement).length}"
+            }
+            <'insert'> => {
+                let seen:set<string>=set[]
+                loop row in statement.rows {
+                    if row.key in? seen or lookup(row.key) isnt? none return "error: duplicate key {row.key}"
+                    seen.push(row.key)
+                }
+                write([loop row in statement.rows Change['put' row.key row.value]]) or_throw
+                return "ok {statement.rows.length}"
+            }
+            <'replace'> => {
+                write([loop row in statement.rows Change['put' row.key row.value]]) or_throw
+                return "ok {statement.rows.length}"
+            }
+            <'update'> => {
+                let rows=selected(statement)
+                write([loop row in rows Change['put' row.key statement.value]]) or_throw
+                return "ok {rows.length}"
+            }
+            <'delete'> => {
+                let rows=selected(statement)
+                write([loop row in rows Change['del' row.key]]) or_throw
+                return "ok {rows.length}"
+            }
+        }
+    }
+]
