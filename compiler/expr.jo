@@ -2855,6 +2855,11 @@ variant_ctor = (n: int, et: int, vi: int, args: int[]) -> int:
     nodes[n].a = 0
     et
 
+# (Python's bytes.decode(): formatting bytes as text gives the numbers)
+bytes_text_warning = (n: int, ft: int):
+    if ft == mk_array(T_U8) or (tkind(ft) == .fixed and prune(int(types[ft].elem)) == T_U8):
+        warn(nodes[n].pos, "this formats the bytes as numbers, as in [104 105]; `bytes as string | none` decodes UTF-8 text, giving none when it is not valid")
+
 conversion = (n: int, to0: int, args: int[]) -> int:
     to = prune(to0)
     tk = types[to].kind
@@ -2870,6 +2875,10 @@ conversion = (n: int, to0: int, args: int[]) -> int:
     if tk == .vec: return check_vec_ctor(n, to, args)
     if args.len() != 1 or nodes[args[0]].kind == .namedarg: fatal(nodes[n].pos, "{dt(to0)}(...) takes one argument")
     if tk == .str_:
+        if dewy_at(nodes[n].pos) and not pos_in_lib(nodes[n].pos):
+            ft = prune(check_expr(args[0], 0))
+            add_flag(args[0], NF_CHECKED)
+            bytes_text_warning(n, ft)
         part = mk(.pair, nodes[n].pos)
         nodes[part].a = i32(args[0])
         nodes[part].sval = -1
@@ -7826,6 +7835,7 @@ check_expr = (n: int, expected: int) -> int:
         check_expr(a, 0)
         finalize_literal(a)
         ft = prune(ntype(a))
+        if tt == T_STR and dewy_at(nodes[n].pos) and not pos_in_lib(nodes[n].pos): bytes_text_warning(n, ft)
         if has_var(ft) and unify(ft, tt):
             nodes[n] = nodes[a]
             last_checked = n
