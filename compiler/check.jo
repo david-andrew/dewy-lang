@@ -3881,6 +3881,8 @@ __check_fn_body = (f: int):
             ln = name_of(int(locals[l].name))
             # (a variable the compiler made, as for a loop: said of what it holds)
             if len(ln) == 0 or starts_with(ln, "__"): fatal(locals[l].pos, "cannot infer the type of what this goes through: write the type where the array is made, as {jd(locals[l].pos, "`xs: int[] = []`", "`let xs:array<int64> = []`")}")
+            # (a comprehension whose body ends in a statement collects nothing)
+            if starts_with(ln, "$dewy_collection"): fatal(locals[l].pos, "this loop collects nothing: its body must end with the value to collect, as `[loop i in xs \{ i * 2 }]`")
             fatal(locals[l].pos, "cannot infer the type of '{ln}'; add a type annotation{empty_hint(ln, int(locals[l].type))}")
     copy_write_warnings(f)
     fns[f].state = 2
