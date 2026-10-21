@@ -2482,7 +2482,8 @@ declares `__as__ = ():>string` shows that text instead (a minted child without
 its own uses its nearest ancestor's, as `as string` does), and function fields are
 left out. A string prints bare on its own and quoted, with its escapes, inside a
 structure (`["a\tb"]`). A present optional or a union shows its member; an
-absent optional prints `none`.
+absent optional prints `none`. A function handle shows its type's spelling,
+`"{@f}"` as `<(x:int64):>int64>`.
 
 `format(value spec)` formats machine numbers or text, including inside an
 interpolation. The specification is an ordinary string and may be computed:

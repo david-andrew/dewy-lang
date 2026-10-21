@@ -3674,7 +3674,8 @@ gen_fmt_struct = (e: int) -> Val:
             else:
                 e_call(rt("__fmt_f32"), [ba, e_load(VS, va, 4 * i, 4 | M_FLOAT)], -1)
         lit(ba, ")")
-    else: lit(ba, "<fn>")
+    # (a function, which has no runtime value, shows as its type's spelling)
+    else: lit(ba, if dewy or ts_dewy: type_str(t, true) else: "<fn>")
     V(-1, false)
 
 lit = (ba: int, s: str): e_call(rt("__buf_append_str"), [ba, e_daddr(str_data(s))], -1)
