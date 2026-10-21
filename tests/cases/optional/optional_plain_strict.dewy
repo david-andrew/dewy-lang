@@ -1,0 +1,21 @@
+# quick
+$no_hidden_costs
+Slot:type=[used:bool value:int64]
+first_used=(slots:array<Slot length=4>):>int64|none=>{
+    let found:int64|none=none
+    loop i in [0..4) {
+        if slots[i].used and found is? none found=slots[i].value
+    }
+    return found
+}
+or_zero=(x:int64|none):>int64=>{
+    if x is? int64 return x
+    return 0
+}
+main=():>int64=>{
+    $no_hidden_costs=false
+    let slots:array<Slot length=4>=[[used=false value=1] [used=true value=7] [used=true value=9] [used=false value=2]]
+    let empty:array<Slot length=4>=[[used=false value=1] [used=false value=7] [used=false value=9] [used=false value=2]]
+    printl("{first_used(slots)} {first_used(empty)} {or_zero(first_used(slots))} {or_zero(none)}")
+    return 0
+}

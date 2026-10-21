@@ -585,6 +585,8 @@ effect_plain = (t0: int, depth: int = 0) -> bool:
                 fi = int(variants[vi].fields) + j
                 if fields[fi].boxed or not effect_plain(int(fields[fi].type), depth + 1): return false
         return true
+    # (an optional plain value is inline: a flag beside the payload)
+    if depth <= 16 and tkind(t) == .opt: return not math_optional(t) and effect_plain(int(types[t].elem), depth + 1)
     # (a fixed array or tuple of plain elements is inline storage with no lifecycle)
     if depth <= 16 and tkind(t) == .fixed: return effect_plain(int(types[t].elem), depth + 1)
     if depth <= 16 and tkind(t) == .tuple:
@@ -721,7 +723,11 @@ effect_place_inventory = (n: int, depth: int = 0) -> bool:
     if nodes[n].aux != i32(int(SK.local)): return false
     l = int(nodes[n].sym)
     flags = int(locals[l].flags)
-    if flags & LF_ALIAS != 0: return effect_place_inventory(int(locals[l].alias), depth + 1)
+    if flags & LF_ALIAS != 0:
+        alias = int(locals[l].alias)
+        # (a binding narrowed by `is?` names its payload: the test proved the tag)
+        if nodes[alias].kind == .unwrap: alias = int(nodes[alias].a)
+        return effect_place_inventory(alias, depth + 1)
     flags & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF | LF_EXPOSED) == 0
 
 # `xs[i]`: one index. The checker keeps the written selector as the only kid
@@ -749,6 +755,10 @@ effect_route = (n: int, depth: int = 0) -> PlaceIdentity:
     k = nodes[n].kind
     if k == .addr or effect_fixed_index(n): return effect_route(int(nodes[n].a), depth + 1)
     if k == .field and tkind(ntype(int(nodes[n].a))) == .struct_: return place_project(effect_route(int(nodes[n].a), depth + 1), int(nodes[n].name))
+    if k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ALIAS != 0:
+        # (a binding narrowed by `is?` reads the optional's or union's own storage)
+        alias = int(locals[int(nodes[n].sym)].alias)
+        if nodes[alias].kind == .unwrap: return effect_route(int(nodes[alias].a), depth + 1)
     if k == .field or k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ALIAS != 0: return place_route(n, depth)
     place_scalar_root(n)
 
@@ -1097,7 +1107,9 @@ effect_scan_node = (f: int, n: int):
         # (small semantic integers: arithmetic that cannot promote, comparisons)
         if not supported and nodes[n].aux == 0 and effect_word(int(nodes[n].a)) and effect_word(int(nodes[n].b)):
             supported = effect_small(n) >= 0 or (effect_word_op(nodes[n].op as Tok) and effect_scalar(ntype(n)))
-    else if k == .dotname: supported = effect_plain(ntype(n))
+    else if k == .dotname or k == .none_lit: supported = effect_plain(ntype(n))
+    # (an optional's or plain union's tag test, payload and fallback are inline reads)
+    else if k == .istype or k == .narrow or k == .coalesce: supported = effect_plain(ntype(int(nodes[n].a))) and (k == .istype or effect_plain(ntype(n)))
     else if k == .unary:
         supported = effect_scalar(ntype(n)) and (nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.tilde)))
     else if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_scalar(ntype(n)): supported = true
@@ -1107,6 +1119,8 @@ effect_scan_node = (f: int, n: int):
         if supported and not type_eq(ntype(int(nodes[n].a)), int(nodes[n].aux2)) and not effect_bounds_proven.has(n):
             effect_bound_sites.push((f, n))
             effect_add(f, EffectEvent(EffectAtom(.panic), n))
+    # (wrapping a plain value as an optional fills the flag and payload in place)
+    else if k == .conv and nodes[n].aux == i32(int(CV.opt)): supported = effect_plain(ntype(n)) and effect_plain(ntype(int(nodes[n].a)))
 
     else if k == .conv:
         supported = (effect_scalar(ntype(n)) and effect_word(int(nodes[n].a)) or effect_small(n) >= 0 or is_fn_type(ntype(n)) and effect_bare(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)))
