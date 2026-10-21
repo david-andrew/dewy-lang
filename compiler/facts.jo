@@ -581,10 +581,15 @@ fact_inverse = (op: Tok) -> Tok:
     if op == .gt: return .le
     .lt
 
-fact_set_bound = (s: mut FactState, v: int, b: FactBound):
+fact_set_bound = (s: mut FactState, v: int, b0: FactBound):
     i = fact_slot(s, v)
     if i < 0: return
+    b = b0
     if b.lo > b.hi or b.nz and b.lo == 0 and b.hi == 0: s.live = false
+    # Nonzero at an interval endpoint excludes it: `n not=? 0` with `n >=? 0`
+    # is `n >=? 1` (an early-returned empty length makes `xs[0]`, `xs[end]` safe).
+    else if b.nz and b.lo == 0: b.lo = 1
+    else if b.nz and b.hi == 0: b.hi = -1
     s.bounds[i] = b
 
 # Assume the CAPTURED Boolean, never reevaluate its syntax after later effects.
@@ -700,28 +705,67 @@ fact_rename = (v: int, before: int[], after: int[], shared: FactState) -> int:
 
 fact_unknown = (n: int, b: FactBound, what: str = "assertion", contract: int = 0): wit_unknown(n, b, what, contract)
 
+fact_field_node = (e: int) -> bool:
+    nodes[e].kind == .field and (nodes[e].aux >= 0 and tkind(ntype(int(nodes[e].a))) == .struct_ or nodes[e].aux == -2 and tkind(ntype(int(nodes[e].a))) == .tuple)
+
+# Pre-kill one changing route `root.f…[i]…`. Its root gets a fresh value that
+# keeps what the route cannot change: sibling fields along it, and the length
+# of the first array whose elements it writes. Everything at and below the
+# written element (or, with `resize`, the route's own value) is unknown.
+fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reason: FactReason):
+    chain: int[]
+    e = target
+    loop e != 0 and (fact_field_node(e) or nodes[e].kind == .index and nodes[e].b != 0):
+        chain.push(e)
+        e = int(nodes[e].a)
+    p = fact_place(e)
+    if e == 0 or nodes[e].kind != .ident or p.declaration == 0:
+        fact_forget(s, at, reason, true)
+        return
+    if fact_exposed(p): fact_forget(s, at, reason)
+    i = fact_binding(s, p)
+    old = if i >= 0: s.bindings[i].value else: 0
+    fresh = fact_new(s, fact_domain(ntype(e), reason, at), FactTerm(type = ntype(e)))
+    fact_bind(s, p, fresh)
+    j = chain.len() - 1
+    loop j >= 0 and old != 0 and fresh != 0:
+        c = chain[j]
+        if nodes[c].kind == .index:
+            t = representation_type(ntype(int(nodes[c].a)))
+            if types[t].kind != .array and types[t].kind != .fixed: return
+            # (an element write never resizes the array it indexes)
+            loop q in s.projections:
+                if q.base == old and not q.element and q.selector == -1:
+                    if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(fresh, -1, false, q.value))
+                    break
+            return
+        selector = if nodes[c].aux == -2: int(nodes[c].ival) else: int(nodes[c].name)
+        child = 0
+        count = s.projections.len()
+        loop k in [0..count):
+            q = s.projections[k]
+            if q.base != old or q.element: continue
+            if q.selector == selector: child = q.value
+            else if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(fresh, q.selector, false, q.value))
+        if j == 0 and resize or child == 0: return
+        t = refine_storage(c, ntype(c))
+        next = fact_new(s, fact_domain(t, reason, at), FactTerm(type = t))
+        if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(fresh, selector, false, next))
+        old = child
+        fresh = next
+        j -= 1
+
 # Conservative loop fallback: pre-kill every syntactically changing route.
 # This is also used for iterators whose backedge transfer is not modeled.
 fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     if n == 0: return
     k = nodes[n].kind
-    if k == .assign:
-        # (an element or field store havocs its whole root, not every place)
-        target = int(nodes[n].a)
-        root = if nodes[target].kind == .index or nodes[target].kind == .field: place_root(target) else: target
-        p = fact_place(root)
-        if p.declaration != 0:
-            if fact_exposed(p): fact_forget(s, at, reason)
-            v = fact_new(s, fact_domain(ntype(root), reason, at))
-            fact_bind(s, p, v)
-        else: fact_forget(s, at, reason, true)
+    # (an element or field store havocs only its route within its root: fact_change_route)
+    if k == .assign: fact_change_route(s, int(nodes[n].a), false, at, reason)
     if k == .intrinsic:
         id = nodes[n].aux as IN
         if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .extend or id == .resize or id == .truncate or id == .setlen:
-            root = place_root(kid(n, 0))
-            p = fact_place(root)
-            if p.declaration == 0: fact_forget(s, at, reason, true)
-            else: fact_bind(s, p, fact_new(s, fact_domain(ntype(root), reason, at), FactTerm(type = ntype(root))))
+            fact_change_route(s, kid(n, 0), true, at, reason)
     if k == .call or k == .intrinsic or k == .lambda or k == .partial: fact_forget(s, at, reason)
     mask = isolation_children(k)
     if mask < 0: fact_forget(s, at, reason, true); return
