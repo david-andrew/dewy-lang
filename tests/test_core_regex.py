@@ -58,10 +58,10 @@ def oracle_cases():
         array = lambda values: '[' + ' '.join(map(str, values)) + ']'
         body = [f'let text={quote(text)} let r=regex({quote(pattern)})',
                 'let found=text.find_all(r)',
-                f'if found.len() not=?{len(matches)} return 1',
+                f'if found.length not=?{len(matches)} return 1',
                 f'let starts:array<int64>={array(starts)}',
                 f'let ends:array<int64>={array(ends)}',
-                'loop i in [0..found.len()) {',
+                'loop i in [0..found.length) {',
                 'if found[i].start not=?starts[i] or found[i].end not=?ends[i] return 2',
                 '}',
                 f'if text.contains(r) not=?{str(bool(matches)).lower()} return 3',
@@ -69,7 +69,7 @@ def oracle_cases():
         # A compact table keeps large repeated-match tests inexpensive to compile.
         expected = ['|'.join([m.group(), *(g or '' for g in m.groups())]) for m in matches]
         body += ['let contents:array<string>=[' + ' '.join(map(quote, expected)) + ']',
-                 'loop i in [0..found.len()) {',
+                 'loop i in [0..found.length) {',
                  'let actual=found[i].text',
                  'loop group in found[i].groups {actual+="|"+group}',
                  'if actual not=?contents[i] return 5', '}', 'return 42']
@@ -116,7 +116,7 @@ return 42}''',
         'regex-malformed': r'''main=()=>{
 let text="x".repeat(300)+str_from_bytes([195 65] as array<uint8>)+"B".repeat(3)
 let found=text.find_all(regex("[A-Z]+"))
-if found.len() not=?1 or found[0].start not=?301 or found[0].text not=?"ABBB" return 1
+if found.length not=?1 or found[0].start not=?301 or found[0].text not=?"ABBB" return 1
 return 42}''',
         'regex-errors': r'''main=()=>{
 loop pattern in ["(" "[" "*" r"a{4,2}" "(?x)a"] {

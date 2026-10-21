@@ -1,0 +1,9 @@
+# A record field named len is its own, and so is a len function for a record.
+Series:type=[first:int64 count:int64]
+len=(s:Series)=>s.count
+main=()=>{
+    let r=[len=3]
+    printl(r.len)
+    printl(len(Series[40 2]))
+    printl("abc".length)
+}

@@ -275,8 +275,8 @@ draw = () => {
             if ui_button("Quit") { quit() }
         }
         ui_end()
-        if len(status) >? 0 { text_centered(status vec2(640 590) 22 GRAY) }
-        if len(why) >? 0 { text_wrapped(why vec2(240 620) 800 18 rgba(1 1 1 0.45) align = Align.center) }
+        if status.length >? 0 { text_centered(status vec2(640 590) 22 GRAY) }
+        if why.length >? 0 { text_wrapped(why vec2(240 620) 800 18 rgba(1 1 1 0.45) align = Align.center) }
     }
     if screen =? Screen.by_address {
         text_centered("Same network, by address" vec2(640 170) 44 BLUE)
@@ -318,7 +318,7 @@ draw_waiting = () => {
         return
     }
     text_centered("Waiting for the other player" vec2(640 200) 36)
-    if len(my_address) >? 0 {
+    if my_address.length >? 0 {
         text_centered("On their computer: Netpong, Same network, Join an address, and this address:" vec2(640 280) 24 GRAY)
         text_centered(my_address vec2(640 350) 48 GOLD)
         if hud_button(Rect(520 400 240 44) "Copy address") { set_clipboard(my_address) }
