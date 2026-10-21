@@ -67,7 +67,7 @@ ml_type = (t0: int, pos: int) -> str:
         return "S_{gl_name(structs[si].name)}_{si}"
     if k == .void_: return "void"
     if k == .fixed: return "array<{ml_type(int(types[t].elem), pos)}, {fixed_len(t)}>"
-    ml_err(pos, "type {type_str(t)} cannot be used in shaders (use numbers, bools, vectors, matrices, structs and Texture)")
+    ml_err(pos, "type {dt(t)} cannot be used in shaders (use numbers, bools, vectors, matrices, structs and Texture)")
     ""
 
 ml_struct = (t: int, pos: int):
@@ -172,7 +172,7 @@ ml_read = (t0: int, base: str, c: int, d: str, pos: int) -> str:
         layout(el)
         loop i in [0..fixed_len(t)): parts.push(ml_read(el, base, c + i * tsize(el), d, pos))
         return "{ty}\{{join(parts, ", ")}}"
-    ml_err(pos, "type {type_str(t)} cannot be read by a shader")
+    ml_err(pos, "type {dt(t)} cannot be read by a shader")
     ""
 
 # the uniforms (or a part of them) an expression stands for, if it does (base "" if not)
@@ -287,7 +287,7 @@ ml_stmt = (s: int, depth: int):
             # (another name for the uniforms, or a part of them: their address)
             r = MlRef()
             if nodes[s].b != 0: r = ml_ref(int(nodes[s].b))
-            if len(r.base) == 0 or r.c != 0 or len(r.d) != 0: ml_err(nodes[s].pos, "the uniforms ({type_str(t)}) can only be read in shader code")
+            if len(r.base) == 0 or r.c != 0 or len(r.d) != 0: ml_err(nodes[s].pos, "the uniforms ({dt(t)}) can only be read in shader code")
             ml_lref[l] = r.base
             return
         if is_gpu_buffer(t): ml_err(nodes[s].pos, "a GpuBuffer cannot be kept in a variable in shaders (use it where it is, e.g. u.particles[i])")
@@ -392,7 +392,7 @@ ml_zero = (t0: int, pos: int) -> str:
         if t == T_MAT4: return "float4x4(0.0f)"
         return "{ml_type(t, pos)}(0)"
     if k == .struct_ or k == .fixed: return "{ml_type(t, pos)}\{}"
-    ml_err(pos, "cannot zero-initialize {type_str(t)} in a shader")
+    ml_err(pos, "cannot zero-initialize {dt(t)} in a shader")
     ""
 
 # ---------------- expressions ----------------
@@ -435,7 +435,7 @@ ml_expr = (e: int) -> str:
         if len(r.base) > 0:
             if prune(r.t) == ml_utype:
                 if r.c == 0 and len(r.d) == 0: return r.base
-                ml_err(pos, "the uniforms ({type_str(t)}) can only be read in shader code")
+                ml_err(pos, "the uniforms ({dt(t)}) can only be read in shader code")
             return ml_read(r.t, r.base, r.c, r.d, pos)
     if k == .int_lit:
         if types[t].kind == .float_: return ml_float(f64(nodes[e].ival))
@@ -526,7 +526,7 @@ ml_expr = (e: int) -> str:
         else:
             loop i in [0..nkids(e)): parts.push(ml_expr(kid(e, i)))
         return "{ml_type(t, pos)}\{{join(parts, ", ")}}"
-    if k == .array: ml_err(pos, "growable arrays (T[]) cannot be used in shaders; use a fixed-size array T[N]")
+    if k == .array: ml_err(pos, "growable arrays ({tsd("T[]", "array<T>")}) cannot be used in shaders; use a fixed-size array {tsd("T[N]", "array<T length=N>")}")
     ml_err(pos, "unsupported expression in shader")
     ""
 
@@ -535,7 +535,7 @@ ml_compare = (op: Tok, t0: int, x: str, y: str, pos: int) -> str:
     t = prune(t0)
     o = gl_binop(op)
     if types[t].kind == .bool_:
-        if op != .eq and op != .ne: ml_err(pos, "bools can only be compared with == and !=")
+        if op != .eq and op != .ne: ml_err(pos, "bools can only be compared with {tsd("== and !=", "=? and not=?")}")
         return "({x} {o} {y})"
     if t == T_MAT4:
         r: str[]
@@ -930,14 +930,14 @@ ml_write = (t0: int, base: str, c: int, d: str, v: str, pre: str, pos: int):
         layout(el)
         loop i in [0..fixed_len(t)): ml_write(el, base, c + i * tsize(el), d, "({v})[{i}]", pre, pos)
         return
-    ml_err(pos, "type {type_str(t)} cannot be written into a GPU buffer")
+    ml_err(pos, "type {dt(t)} cannot be written into a GPU buffer")
 
 # atomic_op(b, i, v...): the element's old value (0 past the ends, where nothing is done)
 ml_atomic = (e: int, nm: str) -> str:
     pos = nodes[e].pos
     if ml_stage != "compute": ml_err(pos, "{nm}() can be used in compute programs only")
     et = prune(gpu_buffer_elem(ntype(kid(e, 0))))
-    if types[et].kind != .int_ or int(types[et].bits) != 32: ml_err(pos, "atomic operations work on GpuBuffer[i32] and GpuBuffer[u32]")
+    if types[et].kind != .int_ or int(types[et].bits) != 32: ml_err(pos, "atomic operations work on {tsd("GpuBuffer[i32] and GpuBuffer[u32]", "GpuBuffer<int32> and GpuBuffer<uint32>")}")
     sg = types[et].sign
     op = ""
     if nm == "atomic_compare_exchange": op = "cas"

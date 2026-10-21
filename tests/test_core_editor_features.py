@@ -108,9 +108,9 @@ def test_dewy_hover_fields_and_imports(project):
     text = hover_text(client, at(model, MODEL, 'x:float64'))
     assert text == '```dewy\n(field) x: float64\n```', text
     # An imported function's declaration is its header.
-    assert 'fresh = ():>World' in hover_text(client, at(game, GAME, 'fresh', 0, 1))
+    assert 'fresh=():>World' in hover_text(client, at(game, GAME, 'fresh', 0, 1))
     assert 'A fresh world.' in hover_text(client, at(game, GAME, 'fresh', 0, 1))
-    assert 'advance = (@world: World' in hover_text(client, at(game, GAME, 'advance', 0, 0))
+    assert 'advance=(@world:World' in hover_text(client, at(game, GAME, 'advance', 0, 0))
 
 
 def test_dewy_signature_help(project):
@@ -128,9 +128,9 @@ def test_dewy_signature_help(project):
 
     result = help_at(GAME.replace('advance(@world min(dt 0.05) 3.0)', 'advance(@world §min(dt 0.05) 3.0)'), '§')
     signature = result['signatures'][0]
-    assert signature['label'] == 'advance = (@world: World dt: float64 pointer: float64):>void'
+    assert signature['label'] == 'advance=(@world:World dt:float64 pointer:float64):>void'
     labels = [signature['label'][a:b] for a, b in (p['label'] for p in signature['parameters'])]
-    assert labels == ['@world: World', 'dt: float64', 'pointer: float64']
+    assert labels == ['@world:World', 'dt:float64', 'pointer:float64']
     assert result['activeParameter'] == 1
     assert 'A fresh' not in str(signature)
     # Spaces separate arguments; operators join the words of one argument.
@@ -140,7 +140,7 @@ def test_dewy_signature_help(project):
     assert result['activeParameter'] == 2
     # Nested calls answer for the innermost; named arguments for their parameter.
     result = help_at(GAME.replace('advance(@world min(dt 0.05) 3.0)', 'advance(@world min(dt §0.05) 3.0)'), '§')
-    assert result['signatures'][0]['label'].startswith('min = (')
+    assert result['signatures'][0]['label'].startswith('min=(')
     assert result['activeParameter'] == 1
     result = help_at(GAME.replace('advance(@world min(dt 0.05) 3.0)', 'advance(pointer=§'), '§')
     assert result['activeParameter'] == 2

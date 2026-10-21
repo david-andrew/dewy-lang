@@ -2824,7 +2824,7 @@ conversion = (n: int, to0: int, args: int[]) -> int:
             # (int('0') in single quotes, as character arithmetic writes it, is the code)
             w = name_of(int(nodes[a0].sval))
             if len(w) == 1 and w[0] >= '0' and w[0] <= '9':
-                fatal(nodes[n].pos, "{dt(to0)}(\"{w}\") would be the code of the character {w} ({int(w[0])}): `to_int(\"{w}\")` reads the number, and `u8('{w}')` is the code")
+                fatal(nodes[n].pos, "{dt(to0)}(\"{w}\") would be the code of the character {w} ({int(w[0])}): `to_int(\"{w}\")` reads the number, and `{jd(nodes[n].pos, "u8", "uint8")}('{w}')` is the code")
         charlike_to_int(args[0])
     if tk == .vec: return check_vec_ctor(n, to, args)
     if args.len() != 1 or nodes[args[0]].kind == .namedarg: fatal(nodes[n].pos, "{dt(to0)}(...) takes one argument")
@@ -2882,7 +2882,8 @@ conversion = (n: int, to0: int, args: int[]) -> int:
         if fk == .bool_: cv = int(CV.none_)
     if cv < 0:
         hint = ""
-        if fk == .str_ and tk == .int_: hint = " (`to_int(s)` reads a number from text: it gives {a_type(mk_opt(T_INT))}, none when the text is not one)"
+        read_int = if dewy_at(nodes[n].pos): T_MATH_INT else: T_INT
+        if fk == .str_ and tk == .int_: hint = " (`to_int(s)` reads a number from text: it gives {a_type(mk_opt(read_int))}, none when the text is not one)"
         if fk == .str_ and tk == .float_: hint = " (`to_float(s)` reads a number from text: it gives {a_type(mk_opt(T_FLOAT))}, none when the text is not one)"
         fatal(nodes[n].pos, "cannot convert {dt(ft)} to {dt(to)}{hint}")
     if type_eq(ft, to):
@@ -2958,6 +2959,20 @@ dewy_surface = (name: int, decl: int) -> int:
 
 # (a Jo library operation that Dewy spells another way whatever its arguments)
 dewy_renamed = (name: int) -> bool: name == intern("sort_by") or name == intern("sorted_by")
+
+# Suggested names as the source at pos spells them: Dewy's own words for the
+# implementation's builtin types and sequence length.
+surface_names = (names: int[], pos: int) -> int[]:
+    if not dewy_at(pos): return names
+    out: int[]
+    loop nm in names:
+        w = name_of(nm)
+        d = if w == "len": "length" else if w == "str": "string" else if w == "f64": "float64" else if w == "f32": "float32" else: ""
+        if d == "" and len(w) >= 2 and len(w) <= 3 and (w[0] == 'i' or w[0] == 'u') and is_digit(w[1]):
+            if w == "i8" or w == "i16" or w == "i32" or w == "i64": d = "int" + w[1..]
+            if w == "u8" or w == "u16" or w == "u32" or w == "u64": d = "uint" + w[1..]
+        out.push(if d != "": intern(d) else: nm)
+    out
 
 # (does code in Dewy (dewy) or Jo see the library declaration of symbol o? see dewy_surface)
 surface_sees = (o: int, dewy: bool) -> bool: syms[o].surface == 0 or (syms[o].surface == 1) == dewy
@@ -3329,8 +3344,8 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             if has_var(prune(ntype(args[0]))):
                 tsh = "this value (its type is not known yet)"
                 if types[t0].kind == .array: tsh = "an array"
-                fatal(nodes[n].pos, "no field or function '{name_of(name)}' for {tsh}{suggestion(name_of(name), cands)}")
-            fatal(nodes[n].pos, "no field or function '{name_of(name)}' for type {tsh}{suggestion(name_of(name), cands)}")
+                fatal(nodes[n].pos, "no field or function '{name_of(name)}' for {tsh}{suggestion(name_of(name), surface_names(cands, nodes[n].pos))}")
+            fatal(nodes[n].pos, "no field or function '{name_of(name)}' for type {tsh}{suggestion(name_of(name), surface_names(cands, nodes[n].pos))}")
         # a variable of the same name hides the function or type
         hs = lookup(name)
         if hs != 0 and syms[hs].kind == .local:
@@ -3361,7 +3376,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             if lookup(intern(mn)) != 0: fatal(nodes[n].pos, "unknown function '{name_of(name)}' (it is {mn}'s: `{mn}.{name_of(name)}(...)`)")
         uh = unused_file_hint(name)
         if len(uh) > 0: fatal(nodes[n].pos, "unknown function '{name_of(name)}'{uh}")
-        fatal(nodes[n].pos, "unknown function '{name_of(name)}'{private_hint(name)}{suggestion(name_of(name), all)}")
+        fatal(nodes[n].pos, "unknown function '{name_of(name)}'{private_hint(name)}{suggestion(name_of(name), surface_names(all, nodes[n].pos))}")
     resolve_fn_call(n, name, decls, args, expected)
 
 id_rgb = intern("rgb")
@@ -4148,7 +4163,7 @@ opt_cmp_error = (n: int, a: int, b: int, ta: int, tb: int):
             ln, c = line_col(at)
             where = " where line {ln} makes it"
         fatal(nodes[n].pos, "'{nm}' may be none (it is {a_type(tx)}), so it cannot be compared with {jd(nodes[n].pos, "<, >", "<?, >?")}: say what to use then{where} (`... ?? {dv}`), or {jd(nodes[n].pos, "`if let v = {nm}: ...`", "`if {nm} isnt? none \{ ... }`")}")
-    fatal(nodes[n].pos, "optionals can only be compared with == and !=")
+    fatal(nodes[n].pos, "optionals can only be compared with {op_text(.eq, nodes[n].pos)} and {op_text(.ne, nodes[n].pos)}")
 
 # (play(sfx_chime), input_axis * 400: a function's name where its result was meant)
 uncalled_hint = (n: int, want: int) -> str:
@@ -5601,7 +5616,7 @@ check_binary = (n: int, expected: int) -> int:
         fatal(nodes[n].pos, "cannot add a {dt(vt)} to text: put the value inside the string (\"v is \{v}\")")
     if is_vec(ta) or is_vec(tb): return check_vec_binary(n, op, ta, tb)
     if types[ta].kind == .fixed or types[tb].kind == .fixed:
-        if op != .eq and op != .ne: fatal(nodes[n].pos, "operator {tok_text(op)} is not defined for {dt(ta)} and {dt(tb)} (fixed-size arrays can be compared with == and !=)")
+        if op != .eq and op != .ne: fatal(nodes[n].pos, "operator {op_text(op, nodes[n].pos)} is not defined for {dt(ta)} and {dt(tb)} (fixed-size arrays can be compared with {op_text(.eq, nodes[n].pos)} and {op_text(.ne, nodes[n].pos)})")
         if types[ta].kind == .fixed: coerce(b, ta)
         else: coerce(a, tb)
         nodes[n].aux = 1
@@ -5710,10 +5725,12 @@ check_binary = (n: int, expected: int) -> int:
         if tka == .array or tkb == .array:
             if op != .eq and op != .ne:
                 why = ""
-                if (tka == .array and is_numeric(int(types[ta].elem))) or (tkb == .array and is_numeric(int(types[tb].elem))): why = " (for each element: .{tok_text(op)}, as in xs .{tok_text(op)} 2.0, gives bool[])"
-                fatal(nodes[n].pos, "arrays can only be compared with == and !={why}")
+                ot = op_text(op, nodes[n].pos)
+                if (tka == .array and is_numeric(int(types[ta].elem))) or (tkb == .array and is_numeric(int(types[tb].elem))): why = " (for each element: .{ot}, as in xs .{ot} 2.0, gives {dt(mk_array(T_BOOL))})"
+                fatal(nodes[n].pos, "arrays can only be compared with {op_text(.eq, nodes[n].pos)} and {op_text(.ne, nodes[n].pos)}{why}")
             if not can_coerce(b, tb, ta) and tkb != .array and tka == .array and is_numeric(int(types[ta].elem)) and (is_numeric(tb) or is_lit(b)):
-                fatal(nodes[n].pos, "an array compared with {dt(tb)}: for each element use .{tok_text(op)} (xs .{tok_text(op)} 2.0 gives bool[])")
+                ot = op_text(op, nodes[n].pos)
+                fatal(nodes[n].pos, "an array compared with {dt(tb)}: for each element use .{ot} (xs .{ot} 2.0 gives {dt(mk_array(T_BOOL))})")
             if not can_coerce(b, tb, ta): cmp_error(n, ta, tb)
             coerce(b, ta)
             nodes[n].aux = 1
@@ -5862,7 +5879,7 @@ check_vec_binary = (n: int, op: Tok, ta: int, tb: int) -> int:
         nodes[n].aux = 1
         nodes[n].type = i32(T_BOOL)
         return T_BOOL
-    if op != .plus and op != .minus and op != .star and op != .slash: fatal(nodes[n].pos, "operator {tok_text(op)} is not defined for vectors")
+    if op != .plus and op != .minus and op != .star and op != .slash: fatal(nodes[n].pos, "operator {op_text(op, nodes[n].pos)} is not defined for vectors")
     if is_vec(ta) and is_vec(tb):
         if ta == T_MAT4 and tb == T_MAT4:
             if op != .star: fatal(nodes[n].pos, "matrices only support *")
@@ -5877,7 +5894,7 @@ check_vec_binary = (n: int, op: Tok, ta: int, tb: int) -> int:
             # (a point on the ground, 2D, into 3D: x and z)
             g = ""
             if (ta == T_VEC3 and tb == T_VEC2) or (ta == T_VEC2 and tb == T_VEC3): g = " (a 2D vector into 3D, on the ground: `vec3(p.x, 0, p.y)`; or `vec3(p, 0)` for x and y)"
-            fatal(nodes[n].pos, "cannot apply {tok_text(op)} to {dt(ta)} and {dt(tb)}{g}")
+            fatal(nodes[n].pos, "cannot apply {op_text(op, nodes[n].pos)} to {dt(ta)} and {dt(tb)}{g}")
         nodes[n].aux = 9
         nodes[n].type = i32(ta)
         return ta
@@ -6666,7 +6683,7 @@ check_expr = (n: int, expected: int) -> int:
             if len(gl) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{gl}")
             uh = unused_file_hint(nm)
             if len(uh) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{uh}")
-            sug = suggestion(name_of(nm), visible_names())
+            sug = suggestion(name_of(nm), surface_names(visible_names(), nodes[n].pos))
             # (print(hello), window(Firefly, ...): words meant as text, a whole argument)
             if in_text_call(nodes[n].pos) and is_word_arg(nodes[n].pos, name_of(nm)) and not starts_with(sug, " (use "): fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (text goes in quotes: `\"{name_of(nm)}\"`){sug}")
             if len(name_of(nm)) > 1:
@@ -6981,7 +6998,7 @@ check_expr = (n: int, expected: int) -> int:
                         et = pushed_type(gn)
                         if len(et) == 0: et = "Thing"
                         fatal(nodes[n].pos, "the type of what '{gn}' holds is not known here (it starts empty): write it where '{gn}' is made, as {jd(nodes[n].pos, "`{gn}: {et}[] = []`", "`let {gn}:array<{et}> = []`")}")
-                fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}'{suggestion(name_of(fname), cands)}")
+                fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}'{suggestion(name_of(fname), surface_names(cands, nodes[n].pos))}")
     else if k == .dotname:
         if ide_sentinel != 0 and int(nodes[n].name) == ide_sentinel: ide_complete_variants(ex)
         et = ex

@@ -324,7 +324,7 @@ quantity_binary = (n: int, a: int, b: int, expected: int) -> int:
     else if op == .slash: dim = combine_dimensions(ad, bd, -1, nodes[n].pos)
     else if op == .plus or op == .minus or cmp:
         if ad != bd: quantity_mismatch(nodes[n].pos, ntype(a), ntype(b))
-    else: fatal(nodes[n].pos, "operator {tok_text(op)} is not defined for physical quantities")
+    else: fatal(nodes[n].pos, "operator {op_text(op, nodes[n].pos)} is not defined for physical quantities")
     if quantity_fold(n, a, b, dim, op, expected): return ntype(n)
     # Attaching/removing a canonical unit does not perform arithmetic at all.
     # In particular float * 1 must not survive as an otherwise unoptimized fmul.
@@ -398,7 +398,7 @@ quantity_unary = (n: int, expected: int) -> int:
     a = int(nodes[n].a)
     dim = quantity_dimension(ntype(a))
     op = nodes[n].op as Tok
-    if op != .minus and op != .plus: fatal(nodes[n].pos, "operator {tok_text(op)} is not defined for physical quantities")
+    if op != .minus and op != .plus: fatal(nodes[n].pos, "operator {op_text(op, nodes[n].pos)} is not defined for physical quantities")
     scale = quantity_constant_scale(a)
     if scale >= 0:
         q = quantity_scales[scale]
@@ -503,10 +503,10 @@ dewy_quantity_call = (n: int, name: int, a: int, expected: int) -> int:
             check_expr(ns, T_INT)
             return runtime_call(n, "__sleep_ns", [last_checked], T_VOID)
         if is_float(base): return runtime_call(n, "sleep", [quantity_float(number)], T_VOID)
-        fatal(nodes[a].pos, "sleep takes a time counted in an integer, Rational or float (found {dt(t)})")
+        fatal(nodes[a].pos, "sleep takes a time counted in an integer, rational or float (found {dt(t)})")
     if not is_quantity(t): return 0
     if quantity_dimension(t) != base_dimension(7): fatal(nodes[a].pos, "{fname} takes an angle, such as `{fname}(45°)` (found {dt(t)})")
     if bundled_rational_type(base): return rational_helper_call(n, "_{fname}_turns", number, expected)
     turns = quantity_float(number)
-    if turns == 0: fatal(nodes[a].pos, "{fname} takes an angle counted in an integer, Rational or float (found {dt(t)})")
+    if turns == 0: fatal(nodes[a].pos, "{fname} takes an angle counted in an integer, rational or float (found {dt(t)})")
     runtime_call(n, "__{fname}_turns", [turns], T_FLOAT)

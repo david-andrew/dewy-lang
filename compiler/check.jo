@@ -1246,7 +1246,7 @@ fixed_size = (n: int) -> int:
         v = ceval(e).i
     else: v = ceval(n).i
     if v < 1: fatal(nodes[n].pos, "the size of a fixed-size array must be at least 1 (found {v})")
-    if v > (1 << 28): fatal(nodes[n].pos, "fixed-size array too large ({v} elements; use T[] for big arrays)")
+    if v > (1 << 28): fatal(nodes[n].pos, "fixed-size array too large ({v} elements; use {jd(nodes[n].pos, "T[]", "array<T>")} for big arrays)")
     v
 
 mk_fixed_checked = (e: int, n: int, pos: int) -> int:
@@ -2378,6 +2378,18 @@ dewy_at = (pos: int) -> bool:
     pos > 0 and f < files.len() and files[f].is_dewy
 
 jd = (pos: int, jo: str, dewy: str) -> str: if dewy_at(pos): dewy else: jo
+
+# an operator as the source at pos spells it (Dewy's comparisons end in `?`)
+op_text = (op: Tok, pos: int) -> str:
+    if not dewy_at(pos): return tok_text(op)
+    match op:
+        lt: "<?"
+        le: "<=?"
+        gt: ">?"
+        ge: ">=?"
+        eq: "=?"
+        ne: "not=?"
+        _: tok_text(op)
 
 check_for = (s: int):
     if dewy_at(nodes[s].pos) and reflect_loop(s): return
@@ -4696,7 +4708,7 @@ check_program = (main_path: str):
     if not has_upd and not has_drw:
         loop gn in ["_process", "_physics_process", "_ready", "_draw", "_input", "Awake", "FixedUpdate", "LateUpdate", "OnGUI"]:
             if let gs = modules[mainm].names.get(intern(gn)):
-                if syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: a game is `update = (dt: f64): ...`, called each frame, and `draw = (): ...` after it; what runs once goes at the top level")
+                if syms[gs].decl != 0: callback_warn(gs, "nothing calls {gn}: a game is {jd(nodes[int(syms[gs].decl)].pos, "`update = (dt: f64): ...`", "`update=(dt:float64):>void=>\{...}`")}, called each frame, and {jd(nodes[int(syms[gs].decl)].pos, "`draw = (): ...`", "`draw=():>void=>\{...}`")} after it; what runs once goes at the top level")
     # (Draw = ():, updte = (dt: f64): a near miss of the name the game calls, and nothing runs)
     loop want in ["draw", "update"]:
         if modules[mainm].names.get(intern(want)) != none: continue
@@ -4970,7 +4982,7 @@ check_program = (main_path: str):
         loop d in modules[mainm].decls:
             if nodes[d].kind != .fn_ or fn_used.has(d) or has_flag(d, NF_EXTERN) or nodes[d].c != 0: continue
             fnm = name_of(int(nodes[d].name))
-            warn(nodes[d].pos, "nothing in this file runs: it only makes functions, and making {fnm} does not run it. Lines at the top of the file run when the program starts (`{fnm}()` there calls it); a game's `update = (dt: f64):` runs every frame, where `if key_pressed(.space): ...` checks a key. (A file that other files `use` is fine like this.)")
+            warn(nodes[d].pos, "nothing in this file runs: it only makes functions, and making {fnm} does not run it. Lines at the top of the file run when the program starts (`{fnm}()` there calls it); a game's {jd(nodes[d].pos, "`update = (dt: f64):` runs every frame, where `if key_pressed(.space): ...` checks a key. (A file that other files `use` is fine like this.)", "`update=(dt:float64):>void=>\{...}` runs every frame, where `if key_pressed(Key.space) ...` checks a key. (A file that other files import is fine like this.)")}")
             break
     if not ide_on and (not test_mode or check_all) and runs:
         # (a `$test` function: `dewy-core test` runs it)

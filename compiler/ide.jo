@@ -523,13 +523,13 @@ ide_dewy_type_node = (n: int) -> str:
         return name
     if k == .tarray:
         base = ide_dewy_type_node(int(nodes[n].a))
-        if nodes[n].aux >= 2: return base + "[,]"
+        if nodes[n].aux >= 2: return "NDArray<" + base + ">"
         if nodes[n].b != 0:
             size = int(nodes[n].b)
             text = "?"
             if nodes[size].kind == .int_lit: text = "{nodes[size].ival}"
             else if nodes[size].kind == .ident: text = name_of(int(nodes[size].name))
-            return base + "[" + text + "]"
+            return "array<" + base + " length=" + text + ">"
         return "array<" + base + ">"
     if k == .tmap: return "dict<" + ide_dewy_type_node(int(nodes[n].a)) + " " + ide_dewy_type_node(int(nodes[n].b)) + ">"
     if k == .tptr: return "*" + ide_dewy_type_node(int(nodes[n].a))
@@ -540,7 +540,7 @@ ide_dewy_type_node = (n: int) -> str:
     if k == .tunion or k == .ttuple or k == .trecord:
         parts: str[]
         loop child in kids(n):
-            if k == .trecord: parts.push(name_of(int(nodes[child].name)) + ": " + ide_dewy_type_node(int(nodes[child].a)))
+            if k == .trecord: parts.push(name_of(int(nodes[child].name)) + ":" + ide_dewy_type_node(int(nodes[child].a)))
             else: parts.push(ide_dewy_type_node(child))
         if k == .tunion: return parts.join(" | ")
         if k == .trecord: return "[" + parts.join(" ") + "]"
@@ -551,10 +551,11 @@ ide_dewy_type_node = (n: int) -> str:
             child = kid(n, i)
             prefix = ""
             if has_flag(child, NF_MUT): prefix = "@"
-            params.push(prefix + "arg{i}: " + ide_dewy_type_node(child))
+            label = if i < nkids2(n) and nodes[kid2(n, i)].name != 0: name_of(int(nodes[kid2(n, i)].name)) else: "_"
+            params.push(prefix + label + ":" + ide_dewy_type_node(child))
         result = "void"
         if nodes[n].a != 0: result = ide_dewy_type_node(int(nodes[n].a))
-        return "(" + params.join(" ") + "):>" + result
+        return "<(" + params.join(" ") + "):>" + result + ">"
     "?"
 
 ide_dewy_fn_header = (d: int) -> str:
@@ -562,14 +563,14 @@ ide_dewy_fn_header = (d: int) -> str:
     loop param in kids(d):
         text = name_of(int(nodes[param].name))
         if has_flag(param, NF_MUT): text = "@" + text
-        if nodes[param].a != 0: text += ": " + ide_dewy_type_node(int(nodes[param].a))
-        if nodes[param].b != 0: text += " = …"
+        if nodes[param].a != 0: text += ":" + ide_dewy_type_node(int(nodes[param].a))
+        if nodes[param].b != 0: text += "=…"
         params.push(text)
     generics: str[]
     loop param in kids2(d): generics.push(name_of(int(nodes[param].name)))
     prefix = ""
     if generics.len() > 0: prefix = "<" + generics.join(" ") + ">"
-    text = name_of(int(nodes[d].name)) + " = " + prefix + "(" + params.join(" ") + ")"
+    text = name_of(int(nodes[d].name)) + "=" + prefix + "(" + params.join(" ") + ")"
     if nodes[d].a != 0: text += ":>" + ide_dewy_type_node(int(nodes[d].a))
     else if has_flag(d, NF_VOID): text += ":>void"
     text
@@ -637,9 +638,10 @@ ide_fn_sig = (f: int) -> str:
         if i > 0: s += if dewy: " " else: ", "
         if i < nkids(d):
             if has_flag(kid(d, i), NF_MUT): s += if dewy: "@" else: "mut "
-            s += name_of(int(nodes[kid(d, i)].name)) + ": "
+            s += name_of(int(nodes[kid(d, i)].name)) + ":"
+            if not dewy: s += " "
         s += ide_type_str(zonk(fns[f].ptypes[i]))
-        if dewy and i < nkids(d) and nodes[kid(d, i)].b != 0: s += " = …"
+        if dewy and i < nkids(d) and nodes[kid(d, i)].b != 0: s += "=…"
     s += ")"
     r = zonk(int(fns[f].ret))
     if dewy: s += ":>" + ide_type_str(r)

@@ -3116,7 +3116,7 @@ def test_core_check_and_format_boundary(compiler, tmp_path):
     (('let score=20\nread=()=>score\nscore=40\nread()+2\nlet score=99\nread()\nscore\n'
      'identity=<T>(value:T):>T=>value\nidentity(42)\n'), ['42', '40', '99', '42'], []),
     ('repl_add=(x:int64 y:int64):>int64=>x+y\n:type repl_add\n:type [1 2]\n:type 40+2\n',
-     ['repl_add = (x: int64 y: int64):>int64', 'array<int>', 'int'], []),
+     ['repl_add=(x:int64 y:int64):>int64', 'array<int>', 'int'], []),
     (('{\n# A comment inside the final expression.\nlet x=20\nx+22\n}\n'
      'f=(x)=>{\nx+2\n}\nf(40)\n[loop i in [0..3) i*2]\n'
      'let text="""first\nan unmatched " inside triple quotes\nlast"""\ntext.length >? 10\n'

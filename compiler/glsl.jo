@@ -70,7 +70,7 @@ gl_type = (t0: int, pos: int) -> str:
         return "S_{gl_name(structs[si].name)}_{si}"
     if k == .void_: return "void"
     if k == .fixed: return "{gl_elem_type(int(types[t].elem), pos)}[{fixed_len(t)}]"
-    gl_err(pos, "type {type_str(t)} cannot be used in shaders (use numbers, bools, vectors, matrices, structs and Texture)")
+    gl_err(pos, "type {dt(t)} cannot be used in shaders (use numbers, bools, vectors, matrices, structs and Texture)")
     ""
 
 gl_struct = (t: int, pos: int):
@@ -320,7 +320,7 @@ gl_zero = (t0: int, pos: int) -> str:
         parts: str[]
         loop i in [0..fixed_len(t)): parts.push(z)
         return "{gl_type(t, pos)}({join(parts, ", ")})"
-    gl_err(pos, "cannot zero-initialize {type_str(t)} in a shader")
+    gl_err(pos, "cannot zero-initialize {dt(t)} in a shader")
     ""
 
 gl_binop = (op: Tok) -> str:
@@ -499,7 +499,7 @@ gl_expr = (e: int) -> str:
         else:
             loop i in [0..nkids(e)): parts.push(gl_wrap(gl_expr(kid(e, i)), et, nodes[e].pos))
         return "{gl_type(t, nodes[e].pos)}({join(parts, ", ")})"
-    if k == .array: gl_err(nodes[e].pos, "growable arrays (T[]) cannot be used in shaders; use a fixed-size array T[N]")
+    if k == .array: gl_err(nodes[e].pos, "growable arrays ({tsd("T[]", "array<T>")}) cannot be used in shaders; use a fixed-size array {tsd("T[N]", "array<T length=N>")}")
     gl_err(nodes[e].pos, "unsupported expression in shader")
     ""
 
@@ -672,7 +672,7 @@ gl_read = (t0: int, o: str, c: int, pos: int) -> str:
         layout(el)
         loop i in [0..fixed_len(t)): parts.push(gl_wrap(gl_read(el, o, c + i * tsize(el), pos), el, pos))
         return "{gl_type(t, pos)}({join(parts, ", ")})"
-    gl_err(pos, "type {type_str(t)} cannot be read from a GPU buffer")
+    gl_err(pos, "type {dt(t)} cannot be read from a GPU buffer")
     ""
 
 # ---------------- stage wrappers ----------------
@@ -689,7 +689,7 @@ gl_attrib_comps = (t: int, pos: int) -> int:
     tt = prune(t)
     if types[tt].kind == .float_ and int(types[tt].bits) == 32: return 1
     if types[tt].kind == .vec and tt != T_MAT4 and not types[tt].sign: return int(types[tt].bits)
-    gl_err(pos, "vertex attributes must be f32, vec2, vec3 or vec4 (found {type_str(tt)})")
+    gl_err(pos, "vertex attributes must be {tsd("f32", "float32")}, vec2, vec3 or vec4 (found {dt(tt)})")
     0
 
 uniform_kind = (t0: int, pos: int) -> str:
@@ -706,7 +706,7 @@ uniform_kind = (t0: int, pos: int) -> str:
         return "v{types[t].bits}"
     if k == .struct_ and is_lib_texture(int(types[t].st)): return "t"
     if is_gpu_buffer(t): return "B"
-    gl_err(pos, "uniform fields must be numbers, vectors, mat4 or Texture, or fixed-size arrays of them (found {type_str(t)})")
+    gl_err(pos, "uniform fields must be numbers, vectors, mat4 or Texture, or fixed-size arrays of them (found {dt(t)})")
     ""
 
 # the uniforms' layout entries for struct type t at byte offset base: ";name,kind,offset" (an

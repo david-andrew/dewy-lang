@@ -195,7 +195,7 @@ sv_type = (t0: int, pos: int) -> int:
         el = sv_type(int(types[t].elem), pos)
         n = sv_cu(fixed_len(t))
         return sv_type_key("a{el}x{fixed_len(t)}", 28, [el, n])
-    sv_err(pos, "type {type_str(t)} cannot be used in shaders (use numbers, bools, vectors, matrices, structs and Texture)")
+    sv_err(pos, "type {dt(t)} cannot be used in shaders (use numbers, bools, vectors, matrices, structs and Texture)")
     0
 
 sv_const = (ty: int, bits: int) -> int:
@@ -399,7 +399,7 @@ sv_read = (t0: int, base: int, c: int, d: int, pos: int) -> int:
         layout(el)
         loop i in [0..fixed_len(t)): parts.push(sv_read(el, base, c + i * tsize(el), d, pos))
         return sv_val(80, ty, parts)
-    sv_err(pos, "type {type_str(t)} cannot be read by a shader")
+    sv_err(pos, "type {dt(t)} cannot be read by a shader")
     0
 
 sv_field_offset = (si: int, name: str) -> int:
@@ -534,7 +534,7 @@ sv_stmt = (s: int):
             # (another name for the uniforms, or a part of them: their address)
             r = SvRef()
             if nodes[s].b != 0: r = sv_ref(int(nodes[s].b))
-            if r.base == 0 or r.c != 0 or r.d != 0: sv_err(nodes[s].pos, "the uniforms ({type_str(t)}) can only be read in shader code")
+            if r.base == 0 or r.c != 0 or r.d != 0: sv_err(nodes[s].pos, "the uniforms ({dt(t)}) can only be read in shader code")
             sv_lref[l] = r.base
             return
         ty = sv_type(t, nodes[s].pos)
@@ -905,7 +905,7 @@ sv_compare = (op: Tok, t0: int, a: int, b: int, pos: int) -> int:
     if types[t].kind == .bool_:
         if op == .eq: return sv_val(164, bo, [a, b])
         if op == .ne: return sv_val(165, bo, [a, b])
-        sv_err(pos, "bools can only be compared with == and !=")
+        sv_err(pos, "bools can only be compared with {tsd("== and !=", "=? and not=?")}")
     if t == T_MAT4:
         # (equal if every column is)
         r = 0
@@ -956,7 +956,7 @@ sv_expr = (e: int) -> int:
     if k == .ident or k == .field or k == .index or sv_is_gbuf_op(e, "[]"):
         r = sv_ref(e)
         if r.base != 0:
-            if prune(r.t) == sv_utype: sv_err(pos, "the uniforms ({type_str(t)}) can only be read in shader code")
+            if prune(r.t) == sv_utype: sv_err(pos, "the uniforms ({dt(t)}) can only be read in shader code")
             return sv_read(r.t, r.base, r.c, r.d, pos)
     if k == .int_lit:
         if types[t].kind == .float_: return sv_cf(f64(nodes[e].ival))
@@ -1058,7 +1058,7 @@ sv_expr = (e: int) -> int:
         else:
             loop i in [0..nkids(e)): parts.push(sv_expr(kid(e, i)))
         return sv_val(80, ty, parts)
-    if k == .array: sv_err(pos, "growable arrays (T[]) cannot be used in shaders; use a fixed-size array T[N]")
+    if k == .array: sv_err(pos, "growable arrays ({tsd("T[]", "array<T>")}) cannot be used in shaders; use a fixed-size array {tsd("T[N]", "array<T length=N>")}")
     sv_err(pos, "unsupported expression in shader")
     0
 
@@ -1476,7 +1476,7 @@ sv_write = (t0: int, base: int, c: int, d: int, v: int, pos: int):
         layout(el)
         loop i in [0..fixed_len(t)): sv_write(el, base, c + i * tsize(el), d, sv_val(81, sv_type(el, pos), [v, i]), pos)
         return
-    sv_err(pos, "type {type_str(t)} cannot be written into a GPU buffer")
+    sv_err(pos, "type {dt(t)} cannot be written into a GPU buffer")
 
 # atomic operations on an element of a GpuBuffer[i32] or GpuBuffer[u32]: (signed, unsigned) opcode
 sv_atomic_ops: {str: (int, int)} = {
@@ -1490,7 +1490,7 @@ sv_atomic = (e: int, nm: str, ops: (int, int)) -> int:
     pos = nodes[e].pos
     if sv_stage != "compute": sv_err(pos, "{nm}() can be used in compute programs only")
     et = prune(gpu_buffer_elem(ntype(kid(e, 0))))
-    if types[et].kind != .int_ or int(types[et].bits) != 32: sv_err(pos, "atomic operations work on GpuBuffer[i32] and GpuBuffer[u32]")
+    if types[et].kind != .int_ or int(types[et].bits) != 32: sv_err(pos, "atomic operations work on {tsd("GpuBuffer[i32] and GpuBuffer[u32]", "GpuBuffer<int32> and GpuBuffer<uint32>")}")
     u = sv_u32()
     b = sv_expr(kid(e, 0))
     i = sv_expr(kid(e, 1))
@@ -1563,7 +1563,7 @@ sv_subgroup = (e: int, nm: str) -> int:
         if it: op = 359 + b
         else if k == .bool_: op = 362 + b
     else: sv_err(pos, "{nm}() is not available in compute functions")
-    if op == 0: sv_err(pos, "{nm}() takes numbers or vectors here (found {type_str(t)})")
+    if op == 0: sv_err(pos, "{nm}() takes numbers or vectors here (found {dt(t)})")
     r = sv_val(op, ty, [sc, grp, x])
     if op == 349: return sv_narrow(r, t)
     r

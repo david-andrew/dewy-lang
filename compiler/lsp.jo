@@ -1182,7 +1182,7 @@ on_hover = (id: int, params: int) -> int:
         doc = dc.doc
         k = dc.kind
         if k == IK_FN and len(x.info) > 0 and ends_with(docs[d].path, ".dewy"):
-            code = dc.name + " = " + x.info
+            code = dc.name + "=" + x.info
         else if k == IK_FN and len(x.info) > 0:
             # the types it was used with (the result's when inferred; generic parameters')
             hdr = dc.snippet
@@ -1687,7 +1687,7 @@ dewy_arg_at = (text: str, m: u8[], a: int, b: int) -> (int, str):
     (index, name)
 
 # the parameters of a signature label (UTF-16 offsets [start, end] of each, and their names):
-# Dewy's are separated by spaces, (a: int64 @b: T c = …); the implementation language's by commas
+# Dewy's are separated by spaces, (a:int64 @b:T c=…); the implementation language's by commas
 sig_params = (label: str, dewy: bool) -> (str[], str[]):
     ps: str[]
     names: str[]
@@ -1780,7 +1780,7 @@ on_signature = (id: int, params: int) -> int:
     if dc.kind != IK_FN or len(dc.snippet) == 0: return lsp_reply(id, "null")
     label = dc.snippet
     # (the instance used here, as hover shows it: its parameters' types)
-    if dewy and starts_with(h.ref.info, "(") and len(dc.name) > 0: label = dc.name + " = " + h.ref.info
+    if dewy and starts_with(h.ref.info, "(") and len(dc.name) > 0: label = dc.name + "=" + h.ref.info
     sp = sig_params(label, dewy)
     ps = sp.0
     # x.f(a): the receiver is the first argument (m.f(a) of a module m is not)

@@ -780,7 +780,7 @@ layout = (t0: int):
 
 # a type followed by [] or ? or |: function types and unions need parentheses there
 type_str_postfix = (t: int, dewy: bool = false) -> str:
-    if tkind(t) == .fn_ or is_union(t): return "({type_str(t, dewy)})"
+    if tkind(t) == .fn_ and not dewy or is_union(t): return "({type_str(t, dewy)})"
     type_str(t, dewy)
 
 # (a type's text is cut short past 150 of its parts: types built from aliases of aliases,
@@ -791,6 +791,8 @@ ts_left = 0
 # Diagnostics name types the way the program being compiled spells them:
 # int64, float64, string and array<T> for Dewy; int, f64, str and T[] for Jo.
 ts_dewy = false
+# (text in the spelling of the program being compiled: Jo's, else Dewy's)
+tsd = (jo: str, dewy: str) -> str: if ts_dewy: dewy else: jo
 dt = (t: int) -> str: type_str(t, ts_dewy)
 
 type_str = (t0: int, dewy: bool = false) -> str:
@@ -855,15 +857,16 @@ type_str_in = (t0: int, dewy: bool) -> str:
             labels: str[]
             if dewy and ti.kind == .fn_ and ti.st != 0: labels = split(name_of(int(ti.st)), "\n")
             if ti.kind == .cfn: s = "cfn("
+            if dewy: s = "<("
             loop i in [0..int(ti.nargs)):
                 if i > 0: s += if dewy: " " else: ", "
                 if int(ti.mutmask) & (1 << i) != 0: s += if dewy: "@" else: "mut "
                 if dewy:
                     label = if i < labels.len() and labels[i] != "": labels[i] else: "_"
-                    s += label + ": "
+                    s += label + ":"
                 s += type_str(targ(t, i), dewy)
             s += ")"
-            if dewy: s += ":>" + type_str(int(ti.elem), dewy)
+            if dewy: s += ":>" + type_str(int(ti.elem), dewy) + ">"
             else if tkind(int(ti.elem)) != .void_: s += " -> " + type_str(int(ti.elem), dewy)
             else if ti.kind == .fn_: s += " -> void"
             s
@@ -881,7 +884,8 @@ type_str_in = (t0: int, dewy: bool) -> str:
                 parts: str[]
                 loop i in [0..int(structs[si].nfields)):
                     field = fields[int(structs[si].fields) + i]
-                    parts.push("{name_of(int(field.name))}: {type_str(int(field.type), dewy)}")
+                    sep = if dewy: ":" else: ": "
+                    parts.push(name_of(int(field.name)) + sep + type_str(int(field.type), dewy))
                 return "[" + join(parts, " ") + "]"
             if dewy and structs[si].union_:
                 parts: str[]
