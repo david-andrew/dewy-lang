@@ -1,0 +1,6 @@
+# A filter may skip iterations: its length is not the source's.
+main=()=>{
+    let values=[loop x in [10 20 12] if x >? 15 x]
+    $assert values.length =? 3
+    printl(values[0])
+}

@@ -1197,10 +1197,139 @@ fact_while = (n: int, s: mut FactState):
     edges = fact_loop_body(n, paths.yes)
     s = fact_join(paths.no, edges.exits, n)
 
+# A counted push: a local array the loop body pushes onto exactly once on
+# every completed iteration, with no other use of it there (no break or
+# continue), so after the loop its length is its entry length plus the
+# iteration count (a comprehension's accumulator, `out.push(f(x))`).
+fact_mentions = (n: int, l: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .ident: return nodes[n].aux == i32(int(SK.local)) and nodes[n].sym == i32(l)
+    mask = isolation_children(k)
+    if mask < 0: return k != .lambda
+    if mask & 1 != 0 and fact_mentions(int(nodes[n].a), l): return true
+    if mask & 2 != 0 and fact_mentions(int(nodes[n].b), l): return true
+    if mask & 4 != 0 and fact_mentions(int(nodes[n].c), l): return true
+    if mask & 16 != 0:
+        loop c in kids(n):
+            if fact_mentions(c, l): return true
+    false
+
+fact_labeled_exit = (n: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .break_ or k == .continue_: return nodes[n].name != 0
+    mask = isolation_children(k)
+    if mask < 0: return k != .lambda
+    if mask & 1 != 0 and fact_labeled_exit(int(nodes[n].a)): return true
+    if mask & 2 != 0 and fact_labeled_exit(int(nodes[n].b)): return true
+    if mask & 4 != 0 and fact_labeled_exit(int(nodes[n].c)): return true
+    if mask & 16 != 0:
+        loop c in kids(n):
+            if fact_labeled_exit(c): return true
+    false
+
+fact_push_receiver = (e: int) -> int:
+    if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)): return int(nodes[e].sym)
+    0
+
+# The pushes onto l on every path through n, or -1 when paths differ or l is
+# used otherwise.
+fact_push_count = (n: int, l: int) -> int:
+    if n == 0: return 0
+    k = nodes[n].kind
+    if k == .break_ or k == .continue_: return -1
+    if k == .lambda: return 0
+    if k == .intrinsic and nodes[n].aux == i32(int(IN.push)) and nkids(n) == 2 and fact_push_receiver(kid(n, 0)) == l:
+        return if fact_mentions(kid(n, 1), l): -1 else: 1
+    # (a nested loop may exit this one only through a labeled break or continue)
+    if k == .while_ or k == .for_: return if fact_mentions(n, l) or fact_labeled_exit(n): -1 else: 0
+    if k == .and_ or k == .or_ or k == .coalesce: return if fact_mentions(n, l): -1 else: 0
+    if k == .if_ or k == .iflet:
+        if fact_mentions(int(nodes[n].a), l): return -1
+        y = fact_push_count(int(nodes[n].b), l)
+        z = fact_push_count(int(nodes[n].c), l)
+        return if y == z: y else: -1
+    if k == .match_:
+        if fact_mentions(int(nodes[n].a), l): return -1
+        common = -2
+        exhaustive = false
+        loop arm in kids(n):
+            if fact_mentions(int(nodes[arm].a), l) or fact_mentions(int(nodes[arm].c), l): return -1
+            loop p in kids(arm):
+                if fact_mentions(p, l): return -1
+                if nodes[p].kind == .pwild and nodes[arm].a == 0 and nodes[arm].c == 0: exhaustive = true
+            c = fact_push_count(int(nodes[arm].b), l)
+            if c < 0 or common >= 0 and c != common: return -1
+            common = c
+        if common < 0: return 0
+        return if exhaustive or common == 0: common else: -1
+    if k == .ident: return if nodes[n].aux == i32(int(SK.local)) and nodes[n].sym == i32(l): -1 else: 0
+    mask = isolation_children(k)
+    if mask < 0: return -1
+    total = 0
+    parts: int[]
+    if mask & 1 != 0: parts.push(int(nodes[n].a))
+    if mask & 2 != 0: parts.push(int(nodes[n].b))
+    if mask & 4 != 0: parts.push(int(nodes[n].c))
+    if mask & 16 != 0: parts += kids(n)
+    loop c in parts:
+        x = fact_push_count(c, l)
+        if x < 0: return -1
+        total += x
+    total
+
+# Each counted-push local of loop n with its entry length.
+fact_counted_pushes = (n: int, s: mut FactState) -> (int, int)[]:
+    found: (int, int)[]
+    body = int(nodes[n].b)
+    candidates: int[]
+    fact_push_candidates(body, candidates)
+    loop l in candidates:
+        if int(locals[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM) != 0: continue
+        if tkind(representation_type(int(locals[l].type))) != .array: continue
+        if fact_mentions(int(nodes[n].a), l) or fact_push_count(body, l) != 1: continue
+        i = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
+        if i < 0: continue
+        found.push((l, fact_project(s, s.bindings[i].value, -1, false, T_INT)))
+    found
+
+fact_push_candidates = (n: int, out: mut int[]):
+    if n == 0 or out.len() >= 8: return
+    k = nodes[n].kind
+    if k == .intrinsic and nodes[n].aux == i32(int(IN.push)) and nkids(n) == 2:
+        l = fact_push_receiver(kid(n, 0))
+        if l > 0 and not out.contains(l): out.push(l)
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: fact_push_candidates(int(nodes[n].a), out)
+    if mask & 2 != 0: fact_push_candidates(int(nodes[n].b), out)
+    if mask & 4 != 0: fact_push_candidates(int(nodes[n].c), out)
+    if mask & 16 != 0:
+        loop c in kids(n): fact_push_candidates(c, out)
+
+# After the loop: each counted local's length is its entry length plus count.
+fact_counted_lengths = (n: int, s: mut FactState, pushes: (int, int)[], count: int):
+    if count == 0: return
+    c = fact_bound(s, count)
+    if c.lo < 0: return
+    loop entry in pushes:
+        i = fact_binding(s, PlaceIdentity(.local, int(locals[entry.0].owner), entry.0))
+        if i < 0: continue
+        e = fact_bound(s, entry.1)
+        lo = if fact_add_fits(e.lo, c.lo): e.lo + c.lo else: 0
+        hi = if fact_add_fits(e.hi, c.hi): e.hi + c.hi else: FACT_MAX
+        total = fact_new(s, FactBound(max(lo, 0), hi), FactTerm(.plus, entry.1, count, n, T_INT))
+        if e.lo == e.hi:
+            fact_difference(s, total, count, e.lo, n)
+            fact_difference(s, count, total, -e.lo, n)
+        if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(s.bindings[i].value, -1, false, total))
+
 fact_range = (n: int, s: mut FactState):
     iterator = int(nodes[n].a)
     lo = fact_capture(int(nodes[iterator].a), s)
     hi = fact_capture(int(nodes[iterator].b), s)
+    pushes = fact_counted_pushes(n, s)
     fact_changes(n, s, n)
     after = s
     body = s
@@ -1213,6 +1342,17 @@ fact_range = (n: int, s: mut FactState):
     if nodes[iterator].b != 0: fact_assume(body, upper, true)
     fact_loop_body(n, body)
     s = after
+    if pushes.len() > 0 and nodes[iterator].b != 0:
+        # (the iteration count, hi-lo or hi-lo+1, when the range is not reversed)
+        extra = if has_flag(iterator, NF_INCLUSIVE): 1 else: 0
+        x = fact_bound(s, lo); y = fact_bound(s, hi)
+        if fact_compare(s, .le, lo, hi) == 1 or extra == 1 and fact_compare(s, .le, lo, hi) >= 0 and x.lo == x.hi and y.lo == y.hi and y.lo + 1 >= x.lo:
+            if x.lo != FACT_MIN and y.lo != FACT_MIN and fact_add_fits(y.hi, -x.lo + extra) and fact_add_fits(y.lo, -x.hi + extra):
+                count = fact_new(s, FactBound(max(0, y.lo - x.hi + extra), y.hi - x.lo + extra), FactTerm(.minus, hi, lo, n, T_INT))
+                if x.lo == x.hi:
+                    fact_difference(s, count, hi, extra - x.lo, n)
+                    fact_difference(s, hi, count, x.lo - extra, n)
+                fact_counted_lengths(n, s, pushes, count)
 
 # Each iteration's hidden index lies in [0, length) of the source's entry
 # value; the source is a snapshot, so a body that resizes the original
@@ -1435,6 +1575,8 @@ fact_capture = (n: int, s: mut FactState) -> int:
         # (`loop @x in xs`, aux 2, cannot resize or replace xs: its length is read once too)
         indexed = k == .for_ and (nodes[n].aux == 1 or nodes[n].aux == 2) and nodes[n].c != 0 and files[pos_file(nodes[n].pos)].is_dewy
         if indexed: base = fact_capture(int(nodes[n].a), s)
+        pushes: (int, int)[]
+        if indexed: pushes = fact_counted_pushes(n, s)
         fact_changes(n, s, n)
         after = s
         body = s
@@ -1442,6 +1584,10 @@ fact_capture = (n: int, s: mut FactState) -> int:
         else: fact_capture(int(nodes[n].a), body)
         fact_loop_body(n, body)
         s = after
+        if pushes.len() > 0:
+            t = representation_type(ntype(int(nodes[n].a)))
+            count = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, base, -1, false, T_INT)
+            fact_counted_lengths(n, s, pushes, count)
         return 0
     if k == .not_:
         a = fact_capture(int(nodes[n].a), s)

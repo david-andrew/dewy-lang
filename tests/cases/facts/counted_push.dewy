@@ -1,0 +1,14 @@
+# A loop that pushes once per iteration knows the length it builds.
+scaled=(xs:array<int>):>array<int>=>{
+    let out:array<int>=[]
+    loop x in xs { out.push(x*2) }
+    $assert out.length =? xs.length
+    out
+}
+main=()=>{
+    let values=[loop x in [10 20 12] if x >? 15 x else x+1]
+    $assert values.length =? 3
+    let firsts=[loop i in [1..values.length] values[i-1]]
+    $assert firsts.length =? 3
+    printl(values[2] scaled(firsts).length)
+}
