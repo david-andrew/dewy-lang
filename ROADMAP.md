@@ -12,7 +12,7 @@ what landed. Keep this file short.
 | Acceptance ladder, design surface | 82/82 (tiers 1–2: 63/63; tier 3: 19/19), 12 held open on decisions | all milestones |
 | Acceptance ladder, current dialect | 82/82 | stays green |
 | Fresh compile, 22k-line synthetic, wall clock, 4 workers (i7-6700) | 175 ms before fused workers; remeasure when quiet | ≤88 ms (250k lines/s) |
-| Same, critical-path instructions at 4 workers (`speed --critical`, load-independent) | 0.64 G (0.90 G before fused workers; game 0.80 G, not yet partitioned) | ~0.35 G |
+| Same, critical-path instructions at 4 workers (`speed --critical`, load-independent) | 0.60 G (0.90 G before fused workers; game 0.81 G, not partitioned) | ~0.35 G |
 | Same, single-thread instructions (guardrail) | 1.16 G (was 1.36 G on 10-20) | ~0.75 G; never regress |
 | Hello-world compile | 31 ms (147 M, all library) | ≤10 ms |
 | Compiler self-build | 9.35 G instructions (the compiler grew) | seconds-scale edit loop |
@@ -29,8 +29,8 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: lazy function-body parsing round 2 (round 1: critical −5.5%, failed on
-  diagnostic order).
+- Astra: paused (quota); next after the Sol review of the parallel pipeline.
+- Sol: correctness review of fused/partitioned/lazy-parse determinism.
 - Opus: strict combined-loop facts.
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
@@ -57,8 +57,10 @@ only.
      canonical reconciliation of function instances;
   3. a toolchain-baked library image (question 22);
   4. checker name lookup by id plus a fused zonk (≤6%);
-  5. lazy function-body parsing in partition workers (~70 M off the serial path;
-     after 2). The root lexer and parser went 138 → 108 M.
+  5. lazy function-body parsing landed (critical −5.1%).
+  Rejected: worker instance reconciliation (game +0%, synthetic −0.03%, a
+  2.2k-line program −24%, and dunes lost determinism on fallback). Game's
+  serial cost looks library-bound: question 22, or parallel library checking.
 - Runtime gaps:
   - float compare/negate selection;
   - outer-target SIMD (particles);
@@ -191,6 +193,7 @@ Each tier-3 program's ladder note says which question holds it open.
 - x64 live-interval stream: no duplicated walk inside x64; realistic saving 1.9%
   synthetic / 0.5% self-build. Word-at-a-time emission: ~1%.
 - Dictionary 8-byte slots: graph default 1.56× → 1.83× C (dependent key reads).
+- Borrowed dictionary value fetches: graph 1.06×/1.03×.
 - Single-probe `d[k] += 1` (hand-expanded upper bound): dict_words 1.2× on long
   runs; under the bar. Borrowed adjacency fetches are untested.
 - Triangular hash probing for graph: −0.3% instructions, default 7% slower.
