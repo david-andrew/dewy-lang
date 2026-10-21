@@ -716,7 +716,8 @@ and later ones only while the chain holds. A chain rises (`<?`, `<=?`) or falls
 `is?` or `in?`, is an error. A parenthesized comparison is a bool:
 `(a =? b) =? c` compares it with `c`. Boolean expressions use `and`,
 `or` and `not`. Literal coefficients such as `2x` and `2(x+1)` multiply; use `*`
-for general multiplication. A semicolon discards an expression's result.
+for general multiplication. A semicolon attached to an expression, `f();`, discards its result; an unattached
+`;` (after a space or on its own line) is an error.
 
 `^` raises a value to a power and associates right: `2^3^2` is `2^(3^2)`.
 It binds above multiplication, literal coefficients and unary minus, so `2x^2`

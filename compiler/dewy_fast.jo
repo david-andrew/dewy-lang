@@ -461,6 +461,15 @@ dn_accept = (symbol: DewyToken) -> bool:
     dn_at += 1
     true
 
+# A statement's `;` is attached to it, `f();`: an unattached one (after a space or
+# on its own line) is reserved for array-dimension selection
+dn_accept_semi = () -> bool:
+    if dn_peek() != .semi: return false
+    token = dn_tokens[dn_at]
+    if token.space or token.newline: dn_error(token.start, "an unattached `;` is reserved for array-dimension selection: attach it to the statement it ends, `f();`, or leave it out")
+    dn_at += 1
+    true
+
 dn_expect = (symbol: DewyToken):
     if not dn_accept(symbol): dn_error(dn_tokens[dn_at].start, "expected '{dn_token_text(symbol)}'")
 
@@ -980,7 +989,7 @@ dn_stmt = () -> int:
             parts.push(dn_expr(0))
         result = dn_node(.keyword_expr, "", token.start, parts)
     else: result = dn_expr(0)
-    if dn_accept(.semi): result = dn_operator(.binary, .statement_end, result, 0)
+    if dn_accept_semi(): result = dn_operator(.binary, .statement_end, result, 0)
     result
 
 dewy_fast_file = (file: int) -> int[]:

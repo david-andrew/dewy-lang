@@ -463,7 +463,7 @@ dc_declaration = (constant: bool, bare: bool = false) -> int:
         value = int(nodes[n].b)
         if dw_const_number(value) or nodes[value].kind == .str_lit or nodes[value].kind == .none_lit: nodes[n].kind = .const_
         else: add_flag(n, NF_RDONLY)
-    dn_accept(.semi)
+    dn_accept_semi()
     n
 
 # A flow body is a statement block even when its braces are omitted. These
@@ -494,7 +494,7 @@ dc_body = () -> int:
             dc_depth = depth
             if value == 0: return 0
             at = mkpos(dn_file, dn_tokens[start].start)
-            if dn_accept(.semi):
+            if dn_accept_semi():
                 statement = mk(.assign, at)
                 nodes[statement].op = i32(int(Tok.assign))
                 nodes[statement].a = i32(mk(.hole, at))
@@ -645,7 +645,7 @@ dc_function = () -> int:
     body = if concrete and nodes[n].a != 0: dc_lazy_body() else: 0
     if body == 0: body = dc_body()
     if body == 0: return 0
-    dn_accept(.semi)
+    dn_accept_semi()
     dc_depth -= 2
     dw_finish_function(n, ps, body, name)
 
@@ -659,7 +659,7 @@ dc_statement = () -> int:
         n = dc_flow()
         if n == 0: return 0
         add_flag(n, NF_STMT)
-        dn_accept(.semi)
+        dn_accept_semi()
         return n
     if op == .kw_return:
         dn_at += 1
@@ -668,14 +668,14 @@ dc_statement = () -> int:
             value = dc_expr(0)
             if value == 0: return 0
             nodes[n].a = i32(value)
-        dn_accept(.semi)
+        dn_accept_semi()
         return n
     if op == .kw_break or op == .kw_continue:
         dn_at += 1
         n = mk(if op == .kw_break: NK.break_ else: NK.continue_, pos)
         if dn_tokens[dn_at].kind == .metatag and not dn_tokens[dn_at].newline:
             nodes[n].name = i32(intern(dn_payload(dn_take())))
-        dn_accept(.semi)
+        dn_accept_semi()
         return n
     if op == .kw_let or op == .kw_const:
         dn_at += 1
@@ -700,7 +700,7 @@ dc_statement = () -> int:
         nodes[n].sval = i32(intern(if op == .slash_assign: "__dewy_divide" else if op == .floor_assign: "__floor_div" else if op == .percent_assign: "__floor_mod" else: "__dewy_power"))
     nodes[n].a = i32(left)
     nodes[n].b = i32(right)
-    dn_accept(.semi)
+    dn_accept_semi()
     n
 
 dn_statement = (top: bool = false) -> int:
