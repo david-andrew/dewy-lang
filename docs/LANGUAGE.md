@@ -895,8 +895,10 @@ record type and its defaults, and so does a positional `[20]`, which gives the
 fields in order, as `Point(20)` would: in an annotation, an element of
 `array<Point>`, a dictionary value or an argument. A field without a default must
 be given, an optional one too (declare `next:Node?=none` to leave it out); leaving
-one out is an error naming the field. Without an expected type, named fields infer an
-anonymous record. Anonymous record types agree by field names and types, even
+one out is an error naming the field. When every field has a default, the type's
+bare name where a value goes constructs it, as `Origin()` would: `let p=Origin`.
+The name stays the type in `Origin[...]`, `Origin.member` and `is? Origin`.
+Without an expected type, named fields infer an anonymous record. Anonymous record types agree by field names and types, even
 when written in a different order. Their shape can also be written directly in
 an annotation:
 

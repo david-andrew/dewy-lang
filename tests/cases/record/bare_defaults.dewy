@@ -1,0 +1,18 @@
+# A record type whose every field has a default: its bare name is its construction.
+Settings:type=[speed:int64=12 name:string="ship"
+    doubled=():>int64=>speed*2
+]
+Token:type=type of any & [line:int64=7]
+show=(s:Settings)=>printl("{s.speed} {s.name}")
+main=()=>{
+    let s=Settings
+    printl(s.speed)
+    let t:Settings=Settings
+    show(t)
+    show(Settings)
+    let all=[Settings Settings[3]]
+    printl(all[1].speed)
+    printl(s is? Settings)
+    let k=Token
+    printl(k.line)
+}

@@ -4292,6 +4292,8 @@ check_expr_in_module = (n: int, m: int, expected: int = 0) -> int:
     t
 
 id_len = 0
+# (the object of `x.member` or `x[...]` being checked: a type there is the type)
+type_receiver_at = 0
 
 # A declared member wins over the synthesized value operation, including on
 # an alternative of a union. Leave those unions to ordinary member forwarding.
@@ -4506,7 +4508,10 @@ check_call = (n: int, expected: int) -> int:
         return variant_ctor(n, et, vi, args)
     if ck == .field:
         recv = int(nodes[callee].a)
+        saved_receiver = type_receiver_at
+        type_receiver_at = recv
         rt = prune(check_expr(recv, 0))
+        type_receiver_at = saved_receiver
         recv = last_checked
         nodes[callee].a = i32(recv)
         fname = int(nodes[callee].name)
@@ -6430,6 +6435,19 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
 
 # Whether a name or member read at n is a bare Dewy function use: not `@f`,
 # not a callee, not an assignment target.
+dewy_bare_type_value = (n: int, tt: int, is_callee: bool, expected: int) -> bool:
+    if is_callee or n == type_receiver_at or not dewy_at(nodes[n].pos) or types[tt].kind != .struct_: return false
+    if expected != 0 and tkind(expected) == .typeval: return false
+    if is_map_type(tt) or is_dewy_set_type(tt): return false
+    si = int(types[tt].st)
+    d = int(structs[si].decl)
+    # (the program's own types, by the names it wrote: the library's are built on as types)
+    if d == 0 or nodes[d].kind != .struct_ or pos_in_lib(nodes[d].pos) or starts_with(name_of(int(nodes[n].name)), "$"): return false
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        if fields[int(structs[si].fields) + i].defval == 0: return false
+    true
+
 dewy_bare_fn = (n: int, is_callee: bool) -> bool:
     if is_callee or has_flag(n, NF_MUT) or n == assign_root: return false
     if nodes[n].kind == .ident:
@@ -6880,6 +6898,16 @@ check_expr = (n: int, expected: int) -> int:
                 check_struct_fields(si)
                 if structs[si].nfields == 0:
                     return struct_ctor(n, tt, int(structs[si].decl), [], expected)
+            # (a record type whose every field has a default, named where a value goes, is its
+            # construction, as a function whose parameters all have defaults is called by its name;
+            # `E.member` and `E[...]` keep the type)
+            if dewy_bare_type_value(n, tt, is_callee, expected):
+                callee = mk(.ident, nodes[n].pos)
+                nodes[callee].name = i32(nm)
+                call = mk(.call, nodes[n].pos)
+                nodes[call].a = i32(callee)
+                nodes[n] = nodes[call]
+                return check_expr(n, expected)
     else if k == .field:
         if nodes[n].b != 0: reflect_name(n)
         if reflect_active and reflect_member(n): return ntype(n)
@@ -6908,7 +6936,10 @@ check_expr = (n: int, expected: int) -> int:
                 nodes[f].name = nodes[n].name
                 nodes[n] = Node(kind = .index, pos = nodes[n].pos, a = i32(f), b = nodes[a0].b)
                 return check_expr(n, expected)
+        saved_receiver = type_receiver_at
+        type_receiver_at = int(nodes[n].a)
         bt = prune(check_expr(int(nodes[n].a), 0))
+        type_receiver_at = saved_receiver
         nodes[n].a = i32(last_checked)
         fname = int(nodes[n].name)
         if name_of(fname) == "add" and is_dewy_set_type(bt) and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "sets insert with push: replace `.add(value)` with `.push(value)`")
@@ -7184,7 +7215,10 @@ check_expr = (n: int, expected: int) -> int:
             stmts.push(bc_stmt(ix, pos))
             nodes[n] = nodes[bc_block(stmts, pos)]
             return check_expr(n, expected)
+        saved_receiver = type_receiver_at
+        type_receiver_at = int(nodes[n].a)
         bt = prune(check_expr(int(nodes[n].a), 0))
+        type_receiver_at = saved_receiver
         nodes[n].a = i32(last_checked)
         dewy_index_ranges(n, bt)
         bk = types[bt].kind
