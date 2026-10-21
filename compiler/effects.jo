@@ -1086,7 +1086,7 @@ effect_scan_node = (f: int, n: int):
     else if k == .for_: supported = tkind(ntype(int(nodes[n].a))) == .array and effect_scalar(telem(ntype(int(nodes[n].a)))) and not has_flag(n, NF_MUT)
     else if k == .int_lit or k == .bool_lit: supported = effect_scalar(ntype(n)) or effect_count_literal(n) or effect_small(n) >= 0
     else if k == .array: supported = effect_fixed_literal(n)
-    else if k == .block or k == .exprstmt or k == .return_ or k == .if_ or k == .and_ or k == .or_ or k == .not_ or k == .defer_: supported = true
+    else if k == .block or k == .exprstmt or k == .return_ or k == .if_ or k == .and_ or k == .or_ or k == .not_ or k == .defer_ or k == .break_ or k == .continue_: supported = true
     else if k == .tuple: supported = effect_plain(ntype(n))
     else if k == .vardecl and nkids(n) > 0:
         # (unpacking plain components into private locals)
