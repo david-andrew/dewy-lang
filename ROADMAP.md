@@ -30,7 +30,7 @@ GPT quota is limited: at most one Astra stream, at medium effort; Sol for review
 only.
 
 - Astra: dictionary layout and lookup speed (graph kernel, memory-bound).
-- Opus: `zip.dewy` in the compiler with a frozen Jo copy for the bootstrap.
+- Opus: reproducible builds across emission-worker counts.
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
 
@@ -66,9 +66,10 @@ only.
     Still the largest runtime gap.
 - Self-hosting. The zip pilot works: `zip.dewy` matches Jo's archives byte for
   byte and its instruction counts (~/dev/tmp/coord/selfhost-readiness.md).
-  `$target` landed. Next: use `zip.dewy` inside the compiler, keeping a frozen Jo
-  copy for the bootstrap's first generation. Then a lexer module, after
-  question 24.
+  `$target` landed, and the shipped compiler now runs `compiler/zip.dewy`; the C
+  bootstrap builds its frozen `zip.jo` twin (`FROZEN_TWINS` in build.py). Next
+  modules must be import-cycle leaves with interfaces spellable in both
+  languages; a lexer module waits on question 24.
 - Recover the game-panel compile cost of mathematical `int` (+5.7%, accepted
   10-20); the frontend work recovered the synthetic panel's share.
 - Small items:
