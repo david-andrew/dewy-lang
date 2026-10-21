@@ -1,0 +1,20 @@
+let Point:type = [x:int64 y:int64 = 0]
+let Named:type = [name:string]
+let Oops:type = type of error & [message:string]
+pick = (i:int64):>Point | Named | Oops => {
+    if i =? 0 return [x=1]
+    if i =? 1 return [name="n"]
+    return [message="bad"]
+}
+loop i in [0 1 2] {
+    let r = pick(i)
+    if r is? Point printl"point {r.x} {r.y}"
+    else if r is? Named printl"named {r.name}"
+    else printl"oops {r.message}"
+}
+let maybe:array<int64>|string|none = [3 4]
+printl(maybe)
+let table:dict<string int64>|int64 = ["a"->1]
+printl(table)
+let empty:array<string>|int64 = []
+printl(empty)

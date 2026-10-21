@@ -2479,6 +2479,44 @@ dewy_record_target = (expected: int) -> int:
     if types[target].kind == .struct_ and not is_map_type(target): return target
     0
 
+# The one member of an expected union a literal builds, or 0 when none or
+# several could: a record literal takes the record whose fields it names
+# (every field without a default among them), a dictionary literal the
+# dictionary, any other array literal the array.
+literal_union_member = (n: int, expected: int) -> int:
+    u = prune(expected)
+    if u == 0: return 0
+    if types[u].kind == .opt: u = prune(int(types[u].elem))
+    if not is_union(u): return 0
+    k = nodes[n].kind
+    found = 0
+    loop m0 in union_members(u):
+        m = prune(m0)
+        mkind = types[m].kind
+        fits = false
+        if k == .record_lit:
+            if mkind == .struct_ and not is_map_type(m) and not structs[int(types[m].st)].union_:
+                si = int(types[m].st)
+                fits = true
+                loop entry in kids(n):
+                    named = false
+                    loop i in [0..int(structs[si].nfields)):
+                        if fields[int(structs[si].fields) + i].name == nodes[entry].name: named = true
+                    if not named: fits = false
+                loop i in [0..int(structs[si].nfields)):
+                    f = fields[int(structs[si].fields) + i]
+                    if f.defval != 0: continue
+                    given = false
+                    loop entry in kids(n):
+                        if nodes[entry].name == f.name: given = true
+                    if not given: fits = false
+        else if k == .map_lit: fits = is_map_type(m)
+        else: fits = mkind == .array or mkind == .fixed or nkids(n) == 0 and is_map_type(m)
+        if fits:
+            if found != 0: return 0
+            found = m
+    found
+
 # The object type a positional literal `[3 4]` builds, or 0: one declared in Dewy, expected
 # here, and a literal of plain items (no spread).
 dewy_positional_record = (n: int, expected: int) -> int:
@@ -6896,6 +6934,11 @@ check_expr = (n: int, expected: int) -> int:
     if k == .array and exk == .opt and (tkind(int(types[ex].elem)) == .array or tkind(int(types[ex].elem)) == .fixed):
         ex = prune(int(types[ex].elem))
         exk = types[ex].kind
+    if (k == .array or k == .map_lit or k == .record_lit) and ex != 0 and files[pos_file(nodes[n].pos)].is_dewy:
+        member = literal_union_member(n, ex)
+        if member != 0:
+            ex = member
+            exk = types[ex].kind
     if k == .propagate: return check_propagate(n, expected)
     if k == .unit_lit:
         return quantity_constant(n, nodes[n].ival, int(nodes[n].aux), int(nodes[n].aux2), expected)
@@ -8098,7 +8141,12 @@ check_if = (n: int, ex: int) -> int:
     first = narrow_restore(changes)
     narrow_by(cond, false)
     jumps = narrow_jumps.len()
-    t2 = check_block(c, branch_expected, true)
+    else_expected = branch_expected
+    # `if flag xs else []`: a container literal takes the other branch's type.
+    if else_expected == 0 and nodes[n].aux2 != -8 and container_tail(c) and t1 != T_NEVER and not has_var(t1):
+        tk = tkind(t1)
+        if tk == .array or tk == .fixed or tk == .struct_ or tk == .enum_ and is_union(t1): else_expected = t1
+    t2 = check_block(c, else_expected, true)
     if narrow_changes.len() != changes: narrow_returned(changes, jumps, c)
     scope_reset(mark)
     narrow_merge(first)
@@ -8132,6 +8180,14 @@ check_if = (n: int, ex: int) -> int:
         coerce(vb, ex)
         return ex
     join_types(va, vb, nodes[n].pos)
+
+# Does block b end in a container literal (array, dictionary or record)?
+container_tail = (b: int) -> bool:
+    if b == 0 or nodes[b].kind != .block or nkids(b) == 0: return false
+    last = kid(b, nkids(b) - 1)
+    e = if nodes[last].kind == .exprstmt: int(nodes[last].a) else: last
+    k = nodes[e].kind
+    k == .array or k == .map_lit or k == .record_lit
 
 # ---------------- ranges as values ----------------
 # a range used as a value is the array of its numbers: [0..n) is [0, 1, ... n-1]

@@ -1,0 +1,13 @@
+let Point:type = [x:int64 y:int64]
+main = () => {
+    let xs:array<int64> = [1 2 3]
+    let flag = xs.length >? 5
+    const a = if flag xs else []
+    const b = if flag xs else [7 8]
+    let p:Point = [x=1 y=2]
+    const q = if flag p else [x=5 y=6]
+    let d:dict<string uint8> = ["a"->1]
+    const e = if flag d else ["b"->2]
+    const f = if flag [1] else [2 3]
+    printl"{a} {b} {q.x} {e} {f}"
+}

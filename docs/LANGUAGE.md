@@ -2427,7 +2427,11 @@ invalidates refinements of its fields, including across block boundaries.
 An arm that returns does not invalidate refinements on paths that continue;
 writes on `break` and `continue` paths remain in effect at their destinations.
 Assigning a known member to an optional or union field establishes that member's
-type for subsequent accesses. `??` also works after an optional has been narrowed
+type for subsequent accesses. A literal builds the one union member it fits: a
+record literal the record whose fields it names (`return [name="ada"]` for
+`Customer|NotFound`), a dictionary literal the dictionary, an array literal the
+array. In `if flag xs else []`, a container literal in the `else` branch takes
+the type of the first branch. `??` also works after an optional has been narrowed
 to its value, and its fallback remains lazy.
 
 `match` supports typed bindings, literals and `_` as a fallback. An optional
