@@ -875,7 +875,13 @@ first, then fields in reverse order. During construction, only completed fields
 are cleaned up on failure; the incomplete outer hook does not run. Structural
 copyability includes every field; synthesized moves recursively transfer fields.
 
-The current implementation requires inline record/scalar fields and a proven
+Fixed arrays of owners copy eagerly through element hooks and transfer elements
+through move hooks. Cleanup runs in reverse element order, including only the
+completed prefix when construction fails. Stable readonly iteration borrows the
+elements in both default and release builds. A move-only element makes its array
+move-only; nonempty owner arrays require explicit element construction.
+
+The current implementation requires inline record/scalar/fixed-array fields and a proven
 no-failure drop summary. Scalar mutation and literal-string logging are supported; unknown calls
 and potentially failing formatting are rejected. Hooks cannot be called or
 referenced directly. `$__copy__` and `$__move__` methods also take no explicit
@@ -886,7 +892,7 @@ move consumes the source and skips its outer drop. Both currently require a
 proven no-failure summary. Hooks may change the abstract value: the compiler does
 not assume their results equal their inputs. Inherited roles run once on the
 parent portion, composing the child's added fields; a declared child
-role overrides that role. Recursive/optional owners, resource arrays and
+role overrides that role. Recursive/optional owners, growable resource arrays and
 dictionaries, generic hook declarations, captured or global owners, and foreign
 entry points with owners remain unsupported. Moving individual owning fields remains unsupported. Ordinary records and collections keep their existing value
 and copy-on-write behavior.

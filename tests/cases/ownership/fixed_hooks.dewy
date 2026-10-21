@@ -1,0 +1,26 @@
+# quick
+let drops:int64=0
+let copies:int64=0
+let moves:int64=0
+Owner=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+    $__copy__
+    duplicate=():>Owner=>{copies+=1 return Owner[value+1]}
+    $__move__
+    transfer=():>Owner=>{moves+=1 return Owner[value+10]}
+]
+Pair:type=array<Owner length=2>
+identity=<T>(value:T):>T=>value
+main=()=>{
+    {
+        let a:Pair=[Owner[0] Owner[1]]
+        let b=a.copy()
+        assert(a[0].value=?0 and b[0].value=?1)
+        let c=identity(a)
+        assert(c[0].value>=?10)
+    }
+    assert(copies=?2 and drops=?4)
+    assert(moves>=?2)
+    printl"ok"
+}

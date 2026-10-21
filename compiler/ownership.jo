@@ -80,7 +80,7 @@ ownership_nominal = (t0: int) -> bool:
 ownership_type = (t0: int) -> bool:
     if ownership_decls.len() == 0: return false
     t = prune(t0)
-    types[t].kind == .struct_ and ownership_contains(t)
+    (types[t].kind == .struct_ or types[t].kind == .fixed) and ownership_contains(t)
 
 # The call plan records incoming owners separately from borrowed place inputs.
 # Synthetic Dewy parameter bindings adopt the incoming value without copying.
@@ -194,6 +194,11 @@ ownership_validate_node = (n: int, f: int):
     if ownership_type(t) and not ownership_inline(t):
         fatal(nodes[n].pos, "resource fields currently require an inline record layout")
     k = nodes[n].kind
+    if k == .array and tkind(t) == .fixed and ownership_type(t):
+        if nkids(n) == 0 and fixed_len(t) > 0:
+            fatal(nodes[n].pos, "owning array elements require completed construction")
+        if nodes[n].b != 0 and fixed_len(t) > 1 and not ownership_copyable(telem(t)):
+            fatal(nodes[n].pos, "cannot repeat a move-only owner")
     if k == .call and nodes[n].aux == 0 or k == .fnref:
         g = int(nodes[n].sym)
         if g > 0 and ownership_hooks.has(int(fns[g].decl)):
@@ -315,6 +320,8 @@ ownership_declared = (decl: int) -> bool:
 
 ownership_copyable = (t0: int) -> bool:
     t = prune(t0)
+    if tkind(t) == .fixed: return ownership_copyable(telem(t))
+    if not ownership_type(t): return true
     first = 0
     if let hook = ownership_copies.get(t):
         parent = prune(int(fns[hook].ret))
@@ -328,7 +335,9 @@ ownership_copyable = (t0: int) -> bool:
 ownership_inline = (t0: int, depth: int = 0) -> bool:
     t = prune(t0)
     if effect_scalar(t) or tkind(t) == .float_: return true
-    if depth > 32 or tkind(t) != .struct_: return false
+    if depth > 32: return false
+    if tkind(t) == .fixed: return ownership_inline(telem(t), depth + 1)
+    if tkind(t) != .struct_: return false
     layout(t)
     si = int(types[t].st)
     loop i in [0..int(structs[si].nfields)):
@@ -340,8 +349,9 @@ ownership_inline = (t0: int, depth: int = 0) -> bool:
 # than the finalized lowering IDs, keeping ordinary COW values unchanged.
 ownership_fact_type = (t0: int, depth: int = 0) -> bool:
     t = representation_type(t0)
-    if tkind(t) != .struct_: return false
     if depth > 32: return true
+    if tkind(t) == .fixed: return ownership_fact_type(telem(t), depth + 1)
+    if tkind(t) != .struct_: return false
     si = int(types[t].st)
     if ownership_declared(int(structs[si].decl)): return true
     parent = nominal_parent.get(t) ?? 0

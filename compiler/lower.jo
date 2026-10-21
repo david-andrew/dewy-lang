@@ -4111,6 +4111,7 @@ gen_fixed_array = (e: int, t: int) -> Val:
     n = fixed_len(t)
     s = new_temp(t)
     d = e_slot(s)
+    if ownership_type(t): return gen_owner_fixed(e, t, s)
     if nodes[e].b != 0:
         if copies_on and n > 1: copy_components(e, et, "array repetition duplicates its heap-bearing element")
         val = gen_owned(kid(e, 0))
@@ -4137,6 +4138,40 @@ gen_fixed_array = (e: int, t: int) -> Val:
             store_val(et, d, i * esz, val.v)
         if tracked: building.pop()
     Val(e_slot(s), true, s)
+
+# Completed element temporaries remain the cleanup authorities until the
+# whole fixed array is constructed. Zero-filled storage is never a live owner.
+gen_owner_fixed = (e: int, t: int, s: int) -> Val:
+    et = telem(t)
+    d = e_slot(s)
+    held: int[]
+    if nodes[e].b != 0:
+        val = gen_owned(kid(e, 0))
+        if fixed_len(t) == 0:
+            drop_at(val.v, et)
+        else:
+            store_val(et, d, 0, val.v)
+            # Copy hooks are verified no-failure, so the remaining copies
+            # cannot interrupt this construction before ownership handoff.
+            if fixed_len(t) > 1:
+                i = fixed_loop_begin(t)
+                iff(e_bin(.ne, VI, i, e_iconst(0)))
+                ea = fixed_elem_addr(d, i, et)
+                e_copy(ea, d, tsize(et))
+                copy_at(ea, et)
+                endc()
+                fixed_loop_end(i)
+            owner_forget_slot(val.slot)
+    else:
+        loop i in [0..nkids(e)):
+            val = gen_owned(kid(e, i))
+            store_val(et, d, i * tsize(et), val.v)
+            held.push(val.slot)
+            building.push(BuildItem(true, val.slot, et))
+        loop slot in held:
+            owner_forget_slot(slot)
+            building.pop()
+    Val(d, true, s)
 
 gen_array = (e: int, t: int) -> Val:
     if types[prune(t)].kind == .fixed: return gen_fixed_array(e, prune(t))
@@ -5613,7 +5648,7 @@ gen_for = (s: int):
         # If the body writes the source, copying its selected range can be
         # cheaper than retaining the full array and forcing a whole-array detach.
         if sliced: sliced = unchanged_by(int(nodes[it].a), int(nodes[s].b))
-        borrowed = not type_has_fn(ct) and not sliced and not is_slice(it) and aux == 1 and (not dbg_on or copy_strict(s)) and unchanged_by(it, int(nodes[s].b))
+        borrowed = not type_has_fn(ct) and not sliced and not is_slice(it) and aux == 1 and (not dbg_on or copy_strict(s) or ownership_type(ct)) and unchanged_by(it, int(nodes[s].b))
         stmt_begin()
         if sliced:
             # Iteration needs a retained source and bounds, not a copied slice.
@@ -5632,6 +5667,7 @@ gen_for = (s: int):
         else:
             val = if borrowed: gen_borrowed(it) else: gen_owned(it)
             write_place(local_place(snap, true), ct, val.v)
+            if not borrowed and ownership_type(ct): owner_forget_slot(val.slot)
         stmt_end()
         if not borrowed and not sliced: scope_add_local(snap)
     ip = local_place(idx, true)
@@ -6449,7 +6485,7 @@ helper_drop = (t: int, copy: bool):
                 owner_hook_into(hook, a, t, result)
                 e_copy(a, result, tsize(t))
                 return e_ret(-1)
-        else:
+        else if k == .struct_:
             hook = int(structs[int(types[t].st)].drop_fn)
             if hook != 0: e_call(lf_of_inst(hook), [a], -1)
     if k == .fn_ or k == .polyfn or k == .callable:
@@ -6491,9 +6527,10 @@ helper_drop = (t: int, copy: bool):
         et = int(types[t].elem)
         if is_managed(et):
             i = fixed_loop_begin(t)
-            ea = fixed_elem_addr(a, i, et)
+            index = if copy: i else: e_bin(.sub, VI, e_iconst(fixed_len(t) - 1), i)
+            ea = fixed_elem_addr(a, index, et)
             if copy: copy_at(ea, et)
-            else: drop_at(ea, et)
+            else: drop_embedded(ea, et)
             fixed_loop_end(i)
     else:
         fs = field_list(t)
@@ -7183,7 +7220,15 @@ helper_move = (t: int):
     ps = helper_params(2)
     dest = ps[0]
     source = ps[1]
-    if let hook = ownership_moves.get(t):
+    if tkind(t) == .fixed:
+        et = telem(t)
+        i = fixed_loop_begin(t)
+        dst = fixed_elem_addr(dest, i, et)
+        src = fixed_elem_addr(source, i, et)
+        if ownership_type(et): e_call(lf_helper(.move, et, 0), [dst, src], -1)
+        else: e_copy(dst, src, tsize(et))
+        fixed_loop_end(i)
+    else if let hook = ownership_moves.get(t):
         owner_hook_into(hook, source, t, dest)
         # A custom move consumes the outer owner. Its borrowed receiver's
         # fields still own their values unless transferred separately.

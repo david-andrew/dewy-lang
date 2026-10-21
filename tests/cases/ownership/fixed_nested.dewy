@@ -1,0 +1,18 @@
+# quick
+let drops:int64=0
+Owner=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+]
+Row:type=array<Owner length=2>
+Matrix:type=array<Row length=2>
+Box:type=[matrix:Matrix]
+main=()=>{
+    {
+        let first=Box[[[Owner[0] Owner[1]] [Owner[2] Owner[3]]]]
+        let second=first
+        assert(second.matrix[1][1].value=?3)
+    }
+    assert(drops=?4)
+    printl"ok"
+}
