@@ -1,0 +1,11 @@
+# A string converts to an optional literal union exactly as to the union.
+Sym:type='+' | '-' | '*'
+show=(s:Sym?):>string=>if s is? none "none" else "{s}"
+main=()=>{
+    printl(show('-'))
+    printl(show(none))
+    let text="*"
+    printl(show(text))
+    let member:Sym='+'
+    printl(show(member))
+}

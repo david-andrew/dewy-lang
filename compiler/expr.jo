@@ -434,6 +434,9 @@ str_set_coerced = (n: int, to: int) -> bool:
         if not fits: str_set_text_of(n)
     false
 
+# a plain string or a string set (not yet optional)
+str_text_or_set = (t: int) -> bool: prune(t) == T_STR or str_set_of(t) != 0
+
 str_set_within = (a: int, b: int) -> bool:
     loop value in str_sets[a]:
         if not str_sets[b].contains(value): return false
@@ -1667,6 +1670,10 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
         return -1
     sp = if pk == .param and binds[int(types[p].id)] != 0: prune(binds[int(types[p].id)]) else: p
     if str_sets.len() > 1 and nodes[a].type != 0 and types[sp].kind == .str_ and str_set_of(ntype(a)) != 0: return 1
+    if str_sets.len() > 1 and types[sp].kind == .opt and str_set_of(int(types[sp].elem)) != 0 and (nodes[a].kind == .str_lit or nodes[a].type != 0 and str_text_or_set(ntype(a))):
+        # (a string for an optional string set: as for the set, then wrapped)
+        r = arg_cost(a, int(types[sp].elem), binds)
+        return if r < 0: -1 else: r + 2
     if str_sets.len() > 1 and str_set_of(sp) != 0 and (nodes[a].type != 0 or nodes[a].kind == .str_lit):
         # (a member literal fits a string set; another string is checked when it runs)
         p = sp
