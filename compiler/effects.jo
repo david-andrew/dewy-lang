@@ -606,6 +606,7 @@ effect_plain = (t0: int, depth: int = 0) -> bool:
 effect_intrinsic_cost = (id: IN) -> int:
     if id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .zeroed: return 0
     if id == .hash: return 0 # resolved value hooks are separate call edges
+    if id == .static_assert: return 0 # erased
     if id == .push or id == .insert or id == .reserve or id == .resize or id == .extend or id == .fill:
         return (1 << int(EffectKind.alloc)) | (1 << int(EffectKind.detach)) | (1 << int(EffectKind.panic))
     if id == .pop or id == .remove or id == .clear or id == .truncate:
@@ -965,6 +966,8 @@ effect_scan_node = (f: int, n: int):
         if k == .vardecl or k == .assign: source = int(nodes[n].b)
         else if k == .return_ or k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)): source = int(nodes[n].a)
         if source != 0: effect_owner_init(f, source, n)
+    # (`$assert` is erased: proven at compile time, its operands never run)
+    if k == .intrinsic and nodes[n].aux == i32(int(IN.static_assert)): return
     if k == .intrinsic:
         cost = effect_intrinsic_cost(nodes[n].aux as IN)
         effect_plan_cost(f, n, cost)
@@ -1086,6 +1089,12 @@ effect_scan_node = (f: int, n: int):
     else if k == .unary:
         supported = effect_scalar(ntype(n)) and (nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.tilde)))
     else if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_scalar(ntype(n)): supported = true
+    else if k == .conv and nodes[n].aux == i32(int(CV.refinement)):
+        # A proven refinement check is erased; an unproven one may fail.
+        supported = effect_plain(ntype(n))
+        if supported and not type_eq(ntype(int(nodes[n].a)), int(nodes[n].aux2)) and not effect_bounds_proven.has(n):
+            effect_bound_sites.push((f, n))
+            effect_add(f, EffectEvent(EffectAtom(.panic), n))
 
     else if k == .conv:
         supported = (effect_scalar(ntype(n)) and effect_word(int(nodes[n].a)) or effect_small(n) >= 0 or is_fn_type(ntype(n)) and effect_bare(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)))

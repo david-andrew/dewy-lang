@@ -1,0 +1,8 @@
+# A refined parameter whose checks are proven, and an erased `$assert`, cost nothing.
+mix=(a:int64 gain:int64<i => i >=? 0 and i <=? 4>):>int64 & no_effects=>(a*gain)
+scale=(x:int64):>int64 & no_effects=>{
+    if x <? 0 or x >? 4 return 0
+    $assert x <=? 4
+    return mix(3 x)+mix(1 2)
+}
+printl(scale(3))

@@ -1,0 +1,4 @@
+# An unproven refinement check can fail: `no_effects` rejects it.
+mix=(a:int64 gain:int64<i => i >=? 0 and i <=? 4>):>int64 & no_effects=>(a*gain)
+scale=(x:int64):>int64 & no_effects=>mix(3 x)
+printl(scale(3))

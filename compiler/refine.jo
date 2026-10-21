@@ -597,6 +597,7 @@ ref_check = (n: int, self: int, args: int[], s: mut FactState):
             if fact_policy == .RequireStatic: wit_refinement(n, t, atom, self, a, b, s, false)
     # Keep metadata even when erased so calls can publish checked guarantees.
     nodes[n].ival = if proven: 1 else: 0
+    if fact_probe_on: fact_probe[n] = proven and (fact_probe.get(n) ?? true)
     fact_validated[n] = true
     ref_assume(t, self, args, s)
 
