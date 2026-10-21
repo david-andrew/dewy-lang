@@ -31,9 +31,8 @@ only.
 
 - Astra: paused (quota). The Sol parallel review found 2 diagnostic-order bugs,
   both fixed (9109989b), with guards extended.
-- Opus: design coverage, round 5 (broken items first). Coverage is ~68% working
-  (419/613) after round 4; synthetic compile has crept +0.9% across rounds 1–4.
-  Was: round 3. The 10-21 audit: 613 features, 401 work, 47
+- Opus: design coverage, round 6. After round 5: 447 work, 21 broken (12 wait
+  on decisions), 114 missing, 31 superseded; compile creep partly recovered. The 10-21 audit: 613 features, 401 work, 47
   broken, 134 missing; rounds 1–2 fixed ~35 (widths, singleton unions, guards,
   pipes, parameter kinds, `$breakpoint`).
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
@@ -196,7 +195,11 @@ only.
     - should a binding initialized from a match of string-literal arms widen to
       `string` (as ints widen), or stay the literal union?
     - the reference reserves `end`, but tests and ladder program 27 use it as a
-      name.
+      name;
+    - top-level `count = 3` shadowing a prelude name: the reference says error
+      (suggest `let`); goldens rely on it declaring a binding;
+    - a `no mutates<R>` caller of a function declared `mutates<R>` is accepted
+      because effects are inferred from the body; should the declared row count?
 26. From Goose: index-typed refinements ("below `a.length`" for a
     never-shrinking array) aimed at graph; and Euclidean `%` so `x % n` is
     always a valid index.
