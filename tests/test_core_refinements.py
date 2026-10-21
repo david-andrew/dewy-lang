@@ -15,7 +15,7 @@ CASES = ROOT / 'tests/cases/refinements'
     'f=(x:int64):>int64<i => i >? 0>=>x\nmain=()=>printl(f(0))',
     'f=(x:int8<i => i >? 0>):>int8<i => i >? 0>=>x+1\nmain=()=>printl(f(127))',
     'f=(x:uint64):>uint64<i => i <? uint64.max>=>x\nmain=()=>printl(f(18446744073709551615))',
-    'change=(@x:int64):>int64=>{x=0;return 1}\nf=(x:int64 y:int64<i => i >? x>):>int64=>y\nmain=()=>{let x:int64=7;let r=f(x change(@x));printl(r)}',
+    'change=(@x:int64):>int64=>{let old=x;x=0;return old-6}\nf=(x:int64 y:int64<i => i >? x>):>int64=>y\nmain=()=>{let x:int64=7;let r=f(x change(@x));printl(r)}',
     'value=(x:int64):>int64=>x\nmain=()=>{const limit=value(10);let a:int64<i => i <? limit>=7;if a >? 0 {const limit=value(3);let b:int64<i => i <? limit>=7;printl(b)}}',
 ])
 def test_refinement_runtime_and_strict(compiler, tmp_path, release, source):
