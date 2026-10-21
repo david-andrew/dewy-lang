@@ -594,6 +594,7 @@ division and `%` gives a remainder with the divisor’s sign (or zero). These
 operators support `int`, signed `int64` and unsigned `uint64`, preserving the full
 unsigned range; narrower operands retain the existing integer widening rules.
 Integer `/` produces an exact fraction; `/` with a floating operand uses floating math.
+`//` and `%` reject floating operands; `(a / b).floor()` floors a float quotient.
 `int` division of the minimum stored word by −1 overflows; its remainder is zero.
 Mathematical shifts reject negative counts. A right shift of at least 64 bits
 returns the sign continuation (zero or −1); a left shift that cannot fit fails,

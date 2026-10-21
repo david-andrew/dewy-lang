@@ -3139,6 +3139,11 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
         if power: finalize_literal(a)
         else: join_types(a, b, nodes[n].pos)
         if dewy_math_fold(n, a, b, power, modulo): return T_MATH_INT
+    # (`//` and `%` are integer and exact operations; floats have no floor quotient)
+    if not power and (is_float(ntype(a)) or is_float(ntype(b))):
+        ft = if is_float(ntype(a)): ntype(a) else: ntype(b)
+        if modulo: fatal(nodes[n].pos, "`%` is not defined for {dt(ft)}: the remainder is an integer and exact-number operation")
+        fatal(nodes[n].pos, "`//` is not defined for {dt(ft)}: floor division is an integer and exact-number operation; `(a / b).floor()` rounds a float quotient down")
     # Only built-in arithmetic may replace a literal divisor with a shift or
     # mask. Custom protocols receive the original operand, including 1 or 2^k.
     helper = name
