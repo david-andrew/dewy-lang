@@ -964,6 +964,8 @@ check_place = (n: int, for_mut: bool):
             fd = int(fns[int(nodes[n].sym)].decl)
             fnm = name_of(int(nodes[fd].name))
             fm = int(nodes[fd].mod)
+        if dewy_at(nodes[n].pos) and fnm == "__dewy_string_index": fatal(nodes[n].pos, "a string cannot be changed in place: make a new one")
+        if dewy_at(nodes[n].pos) and starts_with(fnm, "__"): fatal(nodes[n].pos, "this is a copy, so changing it changes nothing")
         if len(fnm) > 0:
             setter = ""
             if lookup(intern("set_{fnm}")) != 0 or (fm >= 0 and modules[fm].names.get(intern("set_{fnm}")) != none): setter = ": `set_{fnm}(...)` changes it"
@@ -7531,6 +7533,7 @@ check_expr = (n: int, expected: int) -> int:
             key = int(nodes[kid(n, i)].a)
             if nodes[key].kind == .ident and lookup(int(nodes[key].name)) == 0:
                 kn = name_of(int(nodes[key].name))
+                if dewy_at(nodes[key].pos): fatal(nodes[key].pos, "unknown name '{kn}' (a dictionary's keys are values: `[\"{kn}\" -> ...]`; for named fields, a record: `[{kn}=...]`)")
                 fatal(nodes[key].pos, "unknown name '{kn}' (a map's keys are values: `\{\"{kn}\": ...}`; for named fields, declare `struct Name:` with them and make one with `Name({kn} = ...)`)")
         ms = prelude.get(intern("Map")) ?? 0
         if ms == 0: fatal(nodes[n].pos, "Map is not available")
