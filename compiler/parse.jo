@@ -2276,8 +2276,30 @@ lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], optional: bool
     if nodes[it].kind == .range:
         if has_flag(it, NF_STEP): fatal(nodes[it].pos, "stepped ranges are only supported in single loops for now")
         cur = "$range" + id
-        first = "$range_first" + id
         setup.push(lx_let(intern(cur), int(nodes[it].a), pos))
+        if nodes[it].b != 0 and not optional:
+            # Test, bind, then step: the step needs `cur <? end`, so it
+            # cannot wrap, and the binding carries the end as a fact.
+            end = "$range_end" + id
+            setup.push(lx_let(intern(end), int(nodes[it].b), pos))
+            inc = lx_assign(lx_ident(cur, pos), .pluseq, lx_int(1, pos), pos)
+            if has_flag(it, NF_INCLUSIVE):
+                # The endpoint may be the integer maximum: stop after it
+                # instead of stepping past it.
+                done = "$range_done" + id
+                setup.push(lx_let(intern(done), lx_bool(false, pos), pos))
+                head.push(lx_if(lx_ident(done, pos), mk(.break_, pos), pos))
+                head.push(lx_if(lx_bin(.gt, lx_ident(cur, pos), lx_ident(end, pos), pos), mk(.break_, pos), pos))
+                head.push(lx_let(v, lx_ident(cur, pos), pos))
+                step = lx_if(lx_bin(.lt, lx_ident(cur, pos), lx_ident(end, pos), pos), inc, pos)
+                nodes[step].c = i32(lx_block([lx_assign(lx_ident(done, pos), .assign, lx_bool(true, pos), pos)], pos))
+                head.push(step)
+            else:
+                head.push(lx_if(lx_bin(.ge, lx_ident(cur, pos), lx_ident(end, pos), pos), mk(.break_, pos), pos))
+                head.push(lx_let(v, lx_ident(cur, pos), pos))
+                head.push(inc)
+            return 0
+        first = "$range_first" + id
         setup.push(lx_let(intern(first), lx_bool(true, pos), pos))
         advance: int[]
         cond = 0
@@ -2321,8 +2343,8 @@ lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], optional: bool
     seq = "__s" + id
     k = "__k" + id
     setup.push(lx_let(intern(seq), it, pos))
-    setup.push(lx_let(intern(k), lx_int(-1, pos), pos))
-    head.push(lx_assign(lx_ident(k, pos), .pluseq, lx_int(1, pos), pos))
+    setup.push(lx_let(intern(k), lx_int((if optional: 0 else: -1), pos), pos))
+    if not optional: head.push(lx_assign(lx_ident(k, pos), .pluseq, lx_int(1, pos), pos))
     done = lx_bin(.ge, lx_ident(k, pos), lx_len(lx_ident(seq, pos), pos), pos)
     value = lx_index(lx_ident(seq, pos), lx_ident(k, pos), pos)
     if files[pos_file(pos)].is_dewy:
@@ -2343,6 +2365,8 @@ lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], optional: bool
         return 0
     head.push(lx_let(has, lx_not(done, pos), pos))
     head.push(lx_let(v, lx_opt_value(has, value, pos), pos))
+    # An exhausted side stays put, so a step always follows `k <? length`.
+    head.push(lx_if(lx_ident(name_of(has), pos), lx_assign(lx_ident(k, pos), .pluseq, lx_int(1, pos), pos), pos))
     has
 
 # if has: value else: none

@@ -627,7 +627,7 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
                 left.push(p.value); right.push(q.value); merged.push(v)
                 break
         cursor += 1
-    # Select rows from one predecessor, rename into the merge frame, and
+    # Select rows from either predecessor, rename into the merge frame, and
     # require a proof from the other. Branch-local evaluations never escape.
     loop row in a.differences:
         if fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(b, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
@@ -636,6 +636,14 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         ra = fact_rename(row.a, left, right, b)
         rb = fact_rename(row.b, left, right, b)
         if aa != 0 and bb != 0 and fact_distance(b, ra, rb, row.limit): fact_difference(s, aa, bb, row.limit, row.at)
+    # (a tighter row on one side can replace the row the other side shares)
+    loop row in b.differences:
+        if fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(a, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
+        aa = fact_rename(row.a, right, merged, s)
+        bb = fact_rename(row.b, right, merged, s)
+        ra = fact_rename(row.a, right, left, a)
+        rb = fact_rename(row.b, right, left, a)
+        if aa != 0 and bb != 0 and fact_distance(a, ra, rb, row.limit): fact_difference(s, aa, bb, row.limit, row.at)
     s
 
 fact_rename = (v: int, before: int[], after: int[], shared: FactState) -> int:
@@ -756,9 +764,47 @@ fact_divisor = (s: mut FactState, n: int, a: int, b: int, modulo: bool):
         if x.lo <= FACT_MIN and y.lo <= -1 and y.hi >= -1:
             fact_unknown(n, FactBound(reason = .wrap, witness = n), "division result")
 
-# Only intervals are candidates at a changing loop header. Relational guards
-# are established anew by each condition; no assertion supplies an invariant.
-fact_loop_header = (entry: FactState, back: FactState, old: FactState, at: int, widen: bool) -> FactState:
+# a - b <= limit, from rows or from the two intervals.
+fact_entails = (s: FactState, a: int, b: int, limit: int) -> bool:
+    if fact_distance(s, a, b, limit): return true
+    x = fact_bound(s, a); y = fact_bound(s, b)
+    y.lo != FACT_MIN and fact_add_fits(x.hi, -y.lo) and x.hi - y.lo <= limit
+
+# A non-element projection of an immutable entry value (a snapshot's length,
+# say) first read in the body names the same evaluation at entry. Copy it
+# there at its domain, so backedge rows about it can be checked against entry.
+fact_loop_materialize = (entry: mut FactState, back: FactState, v: int, depth: int = 0) -> bool:
+    if fact_slot(entry, v) >= 0: return true
+    if depth > 2 or entry.ids.len() >= FACT_CAP or entry.projections.len() >= FACT_CAP: return false
+    loop p in back.projections:
+        if p.value != v or p.element: continue
+        if not fact_loop_materialize(entry, back, p.base, depth + 1): return false
+        b = fact_domain(fact_terms[v].type)
+        if p.selector == -1: b = FactBound(0, (if ptr_size == 4: 4294967295 else: FACT_MAX))
+        entry.ids.push(v); entry.bounds.push(b)
+        entry.projections.push(p)
+        return true
+    false
+
+# Intervals are candidates at a changing loop header, and so are backedge rows
+# relating a changing scalar to an immutable evaluation (`k <? s.length` after
+# a combined loop's guard). A row is kept only when entry entails it too; the
+# header settles only when the same rows return, so each kept row holds on
+# initiation and preservation. Guards select rows; assertions never do.
+fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: int, widen: bool) -> FactState:
+    changing: int[]
+    if back.live and entry.live:
+        loop binding in back.bindings:
+            original = fact_binding(entry, binding.place)
+            if original < 0 or entry.bindings[original].value == binding.value: continue
+            t = if binding.place.root == .local: int(locals[binding.place.declaration].type) else: int(globals[binding.place.declaration].type)
+            if fact_scalar(t): changing.push(binding.value)
+    carried: FactDifference[]
+    if changing.len() > 0:
+        loop row in back.differences:
+            upper = changing.contains(row.a)
+            if not upper and not changing.contains(row.b): continue
+            if fact_loop_materialize(entry, back, if upper: row.b else: row.a): carried.push(row)
     joined = fact_join(entry, back, at)
     s = FactState(live = joined.live)
     loop binding in joined.bindings:
@@ -785,7 +831,48 @@ fact_loop_header = (entry: FactState, back: FactState, old: FactState, at: int, 
         if fact_slot(s, entry.ids[i]) < 0: s.ids.push(entry.ids[i]); s.bounds.push(entry.bounds[i])
     s.projections = entry.projections
     s.differences = entry.differences
+    loop row in carried:
+        upper = changing.contains(row.a)
+        value = if upper: row.a else: row.b
+        other = if upper: row.b else: row.a
+        found = -1
+        loop i in [0..back.bindings.len()):
+            if back.bindings[i].value == value: found = i; break
+        if found < 0: continue
+        e = fact_binding(entry, back.bindings[found].place)
+        h = fact_binding(s, back.bindings[found].place)
+        if e < 0 or h < 0 or fact_slot(s, other) < 0: continue
+        start = entry.bindings[e].value
+        v = s.bindings[h].value
+        if upper and not fact_entails(entry, start, other, row.limit): continue
+        if not upper and not fact_entails(entry, other, start, row.limit): continue
+        o = fact_bound(s, other)
+        b = fact_bound(s, v)
+        if upper:
+            fact_difference(s, v, other, row.limit, row.at)
+            if fact_add_fits(o.hi, row.limit): b.hi = min(b.hi, o.hi + row.limit)
+        else:
+            fact_difference(s, other, v, row.limit, row.at)
+            if o.lo != FACT_MIN and row.limit != FACT_MIN and fact_add_fits(o.lo, -row.limit): b.lo = max(b.lo, o.lo - row.limit)
+        fact_set_bound(s, v, b)
     s
+
+# Nothing is known of v beyond its interval: no projections, no rows.
+fact_top = (s: FactState, v: int) -> bool:
+    loop p in s.projections:
+        if p.base == v: return false
+    loop row in s.differences:
+        if row.a == v or row.b == v: return false
+    true
+
+# The value b's frame gives a's binding value v (stable identities map to
+# themselves).
+fact_loop_rename = (a: FactState, b: FactState, v: int) -> int:
+    loop binding in a.bindings:
+        if binding.value != v: continue
+        i = fact_binding(b, binding.place)
+        return if i >= 0: b.bindings[i].value else: 0
+    v
 
 fact_loop_stable = (a: FactState, b: FactState) -> bool:
     loop binding in a.bindings:
@@ -795,9 +882,19 @@ fact_loop_stable = (a: FactState, b: FactState) -> bool:
         y = fact_bound(b, b.bindings[i].value)
         if x.lo != y.lo or x.hi != y.hi or x.nz != y.nz: return false
         # Aggregate identity carries its projections; an equal top interval
-        # alone is not evidence that a changed aggregate has stabilized.
+        # alone is not evidence that a changed aggregate has stabilized. Two
+        # header aggregates with no projections or rows are both top.
         t = if binding.place.root == .local: int(locals[binding.place.declaration].type) else: int(globals[binding.place.declaration].type)
-        if not fact_scalar(t) and binding.value != b.bindings[i].value: return false
+        if not fact_scalar(t) and binding.value != b.bindings[i].value and not (fact_top(a, binding.value) and fact_top(b, b.bindings[i].value)): return false
+    # Carried rows must return unchanged, renamed into the next frame.
+    if a.differences.len() != b.differences.len(): return false
+    loop row in a.differences:
+        x = fact_loop_rename(a, b, row.a)
+        y = fact_loop_rename(a, b, row.b)
+        found = false
+        loop other in b.differences:
+            if other.a == x and other.b == y and other.limit == row.limit: found = true; break
+        if not found: return false
     true
 
 fact_loop_body = (n: int, body: mut FactState) -> FactLoop:
@@ -855,6 +952,20 @@ fact_range = (n: int, s: mut FactState):
     if nodes[iterator].b != 0: fact_assume(body, upper, true)
     fact_loop_body(n, body)
     s = after
+
+# Each iteration's hidden index lies in [0, length) of the source's entry
+# value; the source is a snapshot, so a body that resizes the original
+# rebinds that place and the length stays the snapshot's.
+fact_loop_index = (n: int, base: int, s: mut FactState):
+    t = representation_type(ntype(int(nodes[n].a)))
+    if types[t].kind != .array and types[t].kind != .fixed: return
+    length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, base, -1, false, T_INT)
+    l = int(nodes[n].c)
+    hi = fact_bound(s, length).hi
+    v = fact_new(s, FactBound(0, (if hi > FACT_MIN: hi - 1 else: hi), reason = .loop_, witness = n), FactTerm(type = int(locals[l].type)))
+    fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), v)
+    fact_difference(s, v, length, -1, n)
+    fact_set_bound(s, v, fact_bound(s, v))
 
 fact_capture = (n: int, s: mut FactState) -> int:
     if n == 0 or not s.live: return 0
@@ -1020,10 +1131,15 @@ fact_capture = (n: int, s: mut FactState) -> int:
         fact_range(n, s)
         return 0
     if k == .while_ or k == .for_:
+        # An indexed array loop evaluates its source once, before the loop.
+        base = 0
+        indexed = k == .for_ and nodes[n].aux == 1 and nodes[n].c != 0 and files[pos_file(nodes[n].pos)].is_dewy
+        if indexed: base = fact_capture(int(nodes[n].a), s)
         fact_changes(n, s, n)
         after = s
         body = s
-        fact_capture(int(nodes[n].a), body)
+        if indexed: fact_loop_index(n, base, body)
+        else: fact_capture(int(nodes[n].a), body)
         fact_loop_body(n, body)
         s = after
         return 0
@@ -1137,6 +1253,11 @@ fact_capture = (n: int, s: mut FactState) -> int:
             if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(fresh, -1, false, size))
             fact_store_route(s, route, fresh, n, true)
             return fact_new(s, fact_domain(ntype(n)))
+        if id == .panic or id == .unreachable:
+            # Never returns: its message is evaluated, then the path ends.
+            loop c in kids(n): fact_capture(c, s)
+            s.live = false
+            return 0
         if id == .static_assert:
             if nkids(n) == 0 or fact_speculating > 0: return 0
             fact_validated[n] = true
