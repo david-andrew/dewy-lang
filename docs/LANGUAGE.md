@@ -2524,7 +2524,9 @@ width counts grapheme clusters; it does not truncate. Use a string slice to
 truncate explicitly. Invalid specs or options for the wrong value type panic.
 
 Use `bytes(text)` for explicit UTF-8 bytes; binary literals such as `0x"ff00"`
-also produce bytes. `$include_bytes(p"asset.png") as image` embeds an asset at
+also produce bytes. `bytes as string | none` decodes UTF-8, giving `none` for
+invalid input; plain `bytes as string` is an error, since nothing proves the
+bytes valid. `$include_bytes(p"asset.png") as image` embeds an asset at
 compile time, including for web builds.
 
 `Type?` holds a value or `none`. `is?` narrows optional and union values:

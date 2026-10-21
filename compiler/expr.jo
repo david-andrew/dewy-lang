@@ -8780,7 +8780,9 @@ check_expr = (n: int, expected: int) -> int:
         check_expr(a, 0)
         finalize_literal(a)
         ft = prune(ntype(a))
-        if tt == T_STR and dewy_at(nodes[n].pos) and not pos_in_lib(nodes[n].pos): bytes_text_warning(n, ft)
+        # (`bytes as string` claims valid UTF-8, which runtime bytes cannot prove)
+        if tt == T_STR and dewy_at(nodes[n].pos) and not pos_in_lib(nodes[n].pos) and (ft == mk_array(T_U8) or tkind(ft) == .fixed and prune(int(types[ft].elem)) == T_U8):
+            fatal(nodes[n].pos, "`bytes as string` needs a proof that the bytes are valid UTF-8: `bytes as string | none` decodes them, giving none when they are not valid")
         # (`int64 as string`: a type's spelling)
         if tt == T_STR and types[ft].kind == .typeval and dewy_at(nodes[n].pos):
             nodes[n] = nodes[bc_str(type_str(int(types[ft].elem), true), nodes[n].pos)]
