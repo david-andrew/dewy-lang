@@ -1,3 +1,4 @@
+use 'pcheck.jo'
 # Shared compiler utilities: string interning, source files, diagnostics.
 
 use 'watch.jo'
@@ -252,6 +253,10 @@ show_line = (p: int):
 # the editor's checks start over each time, so not there)
 warned: {str: bool} = {}
 warn = (p: int, msg: str):
+    if pc_collect:
+        pc_warn_pos.push(p)
+        pc_warn_text.push(msg)
+        return
     if fused_on:
         fz_note_text(5, p, msg)
         return

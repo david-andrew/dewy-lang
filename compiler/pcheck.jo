@@ -1,0 +1,313 @@
+use 'ir.jo'
+use 'x64.jo'
+use 'ide.jo'
+use 'comptime.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'util.jo'
+use 'expr.jo'
+use 'par.jo'
+use 'lower.jo'
+use 'effects.jo'
+use 'refine.jo'
+use 'proofs.jo'
+use 'facts.jo'
+use 'ownership.jo'
+use 'poly_closure.jo'
+# Closed-state root checking. Workers retain their checked trees through fused emission.
+# Until instance/type reconciliation is implemented, any shared-state discovery rejects
+# the whole speculative check, before the parent changes its untouched trees.
+use 'check.jo'
+use 'fused.jo'
+use 'main.jo'
+use 'copies.jo'
+
+pc_tried = false
+pc_prefix = 0
+pc_active = false
+pc_child = -1
+pc_emit = -1
+pc_workers = 0
+pc_pids: int[]
+pc_fds: int[]
+pc_owner: {int: int}
+pc_missing: {int: bool}
+pc_weights: {int: int}
+pc_smalls: {int: bool}
+pc_collect = false
+pc_warn_pos: int[]
+pc_warn_text: str[]
+
+pc_features = () -> bool:
+    if fact_policy != .RuntimeAllowed or effects_active or effect_policy.prohibitions != 0 or refine_active or proof_active or result_active or ownership_decls.len() != 0 or loan_owners.len() != 0 or fact_requests.len() != 0 or refine_requests.len() != 0 or proof_calls.len() != 0 or poly_families.len() > 1: return false
+    loop file in files:
+        if file.explicit_copies > 0: return false
+    loop f in fns:
+        if f.kind == FK_LAMBDA or f.kind == FK_PARTIAL or f.parallel or f.deterministic: return false
+    true
+
+pc_root = (f: int) -> bool:
+    f > 0 and fns[f].state == 0 and fns[f].kind == FK_NORMAL and fns[f].decl != 0 and not modules[int(fns[f].mod)].is_prelude and not has_flag(int(fns[f].decl), NF_EXTERN)
+
+pc_pipe = (control: bool = false) -> int:
+    p = [0]
+    if control:
+        # A reply can race a dead worker: use send(MSG_NOSIGNAL), not a pipe write.
+        if syscall(53, 1, 1 | 0x80000, 0, data(p)) != 0: return -1
+    else:
+        if syscall(293, data(p), 0x80000) != 0: return -1
+    p[0]
+
+pc_send = (fd: int, b: u8[]):
+    sent = 0
+    loop sent < b.len():
+        n = syscall(44, fd, data(b) + sent, b.len() - sent, 0x4000, 0, 0)
+        if n == -4: continue
+        if n <= 0: return  # its missing emission will be lowered by the parent
+        sent += n
+
+pc_restore = (f: int):
+    if not pc_missing.has(f): return
+    pc_missing.remove(f)
+    fns[f].state = 0
+    check_fn_body(f)
+
+# Called at the serial check cursor, after a small prefix has populated shared instances.
+pc_try = (start: int):
+    when BOOTSTRAP:
+        return
+    else when TARGET != "linux" or ARCH != "x86_64":
+        return
+    else:
+        if pc_tried or not pc_root(start): return
+        pc_prefix += 1
+        if pc_prefix <= 2: return
+        pc_tried = true
+        if emit_workers() < 2 or (env("DEWY_PCHECK") ?? "") == "0" or (env("DEWY_FUSED") ?? "") == "0": return
+        if target_wasm or target_arm64 or target_windows or target_macos or opt_release or dbg_on or watch_build or repl_image or lower_only or host_ir or ra_stat or len(ra_dump) > 0 or not queue_emit or ide_on or errors_only or test_mode or check_all: return
+        if open_globals.len() != 0 or not pc_features(): return
+        roots: int[]
+        other_pending = false
+        loop f in [start..fns.len()):
+            if not pc_root(f) and fns[f].state == 0: other_pending = true
+            if pc_root(f):
+                if other_pending: return
+                if fns[f].ret == 0 or has_var(int(fns[f].ret)): return
+                roots.push(f)
+        # Enough work to pay for the barrier; the normal fused gate must also pass.
+        if roots.len() < 128: return
+        loop node in nodes:
+            if node.kind == .lambda and node.pos > 0 and not pos_in_lib(node.pos): return
+        n = min(4, emit_workers())
+        pc_workers = n
+        reads: int[]
+        controls: int[]
+        pc_pids = []
+        pc_fds = []
+        loop i in [0..roots.len()): pc_owner[roots[i]] = min(n - 1, i * n / roots.len())
+        loop w in [0..n):
+            summary = pc_pipe()
+            control = pc_pipe(true)
+            output = pc_pipe()
+            if summary < 0 or control < 0 or output < 0:
+                loop p in [summary, control, output]:
+                    if p >= 0:
+                        syscall(3, p & 0xFFFFFFFF)
+                        syscall(3, p >> 32)
+                reads.push(-1)
+                controls.push(-1)
+                pc_fds.push(-1)
+                pc_pids.push(-1)
+                continue
+            pid = syscall(57)
+            if pid == 0:
+                loop fd in reads: syscall(3, fd)
+                loop fd in controls: syscall(3, fd)
+                loop fd in pc_fds: syscall(3, fd)
+                syscall(3, summary & 0xFFFFFFFF)
+                syscall(3, control >> 32)
+                syscall(3, output & 0xFFFFFFFF)
+                pc_child = w
+                pc_emit = output >> 32
+                if env("DEWY_FUSED_TRACE") == none:
+                    nullfd = syscall(2, data("/dev/null"), 1, 0)
+                    if nullfd >= 0:
+                        syscall(33, nullfd, 1)
+                        syscall(33, nullfd, 2)
+                        syscall(3, nullfd)
+                __olen = 0
+                pc_check(roots, summary >> 32, control & 0xFFFFFFFF)
+                return
+            syscall(3, summary >> 32)
+            syscall(3, control & 0xFFFFFFFF)
+            syscall(3, output >> 32)
+            if pid < 0:
+                syscall(3, summary & 0xFFFFFFFF)
+                syscall(3, control >> 32)
+                syscall(3, output & 0xFFFFFFFF)
+                reads.push(-1)
+                controls.push(-1)
+                pc_fds.push(-1)
+            else:
+                reads.push(summary & 0xFFFFFFFF)
+                controls.push(control >> 32)
+                pc_fds.push(output & 0xFFFFFFFF)
+            pc_pids.push(pid)
+        got = fz_read_all(reads)
+        good = true
+        loop w in [0..n):
+            if reads[w] >= 0: syscall(3, reads[w])
+            if got[w].len() < 8: good = false
+            else:
+                r = ParIn(got[w], got[w].len() - 8)
+                if pr(r) != 0x5043484B: good = false
+        if not good:
+            loop w in [0..n):
+                if controls[w] >= 0: syscall(3, controls[w])
+                if pc_fds[w] >= 0: syscall(3, pc_fds[w])
+                if pc_pids[w] > 0:
+                    st = [0]
+                    syscall(61, pc_pids[w], data(st), 0, 0)
+            pc_owner = {}
+            if env("SLOPPY_PAR_TIME") != none: eprint("pcheck: closed-state check rejected")
+            return
+        # Broadcast in partition order, which is also serial root order.
+        merged: u8[]
+        pw(merged, n)
+        loop b in got:
+            pw(merged, b.len())
+            append_bytes(merged, b)
+        loop fd in controls:
+            pc_send(fd, merged)
+            syscall(3, fd)
+        pc_merge(merged)
+        pc_active = true
+        if env("SLOPPY_PAR_TIME") != none: eprint("pcheck: {n} workers checked {roots.len()} roots")
+
+pc_check = (roots: int[], outfd: int, infd: int):
+    if (env("DEWY_PCHECK_FAIL") ?? "") == "check": exit(1)
+    f0 = fns.len()
+    t0 = types.len()
+    g0 = globals.len()
+    m0 = modules.len()
+    e0 = embedded_files.len()
+    ct0 = ct_values.len()
+    gs: int[]
+    loop g in globals: gs.push(int(g.state))
+    mine: int[]
+    loop f in roots:
+        if pc_owner[f] == pc_child: mine.push(f)
+    out: u8[]
+    pw(out, mine.len())
+    pc_collect = true
+    loop f in mine:
+        pc_warn_pos = []
+        pc_warn_text = []
+        check_fn_body(f)
+        wr = fn_writes_direct(f)
+        rz = fn_resizes_direct(f)
+        if fns.len() != f0 or types.len() != t0 or globals.len() != g0 or modules.len() != m0 or embedded_files.len() != e0 or ct_values.len() != ct0 or not fns[f].no_user_globals or wr.mentions.len() != 0 or not pc_tree(int(fns[f].body)): exit(1)
+        pw(out, f)
+        pw(out, fz_weight(f))
+        pw(out, int(fz_small(f)))
+        pw(out, int(fns[f].no_indexes))
+        pw(out, int(wr.all))
+        pw_ints(out, wr.globals)
+        pw_ints(out, wr.calls)
+        pw_ints(out, wr.mentions)
+        pw_ints(out, rz)
+        pw(out, pc_warn_pos.len())
+        loop i in [0..pc_warn_pos.len()):
+            pw(out, pc_warn_pos[i])
+            fz_put_str(out, pc_warn_text[i])
+    pc_collect = false
+    if not pc_features() or open_globals.len() != 0: exit(1)
+    loop g in [0..globals.len()):
+        if globals[g].state != i32(gs[g]): exit(1)
+    pw(out, fn_used.len())
+    loop d, _ in fn_used: pw(out, d)
+    pw(out, 0x5043484B)
+    barrier_fail = (env("DEWY_PCHECK_FAIL") ?? "") == "barrier"
+    if barrier_fail: syscall(3, infd)
+    __write_fd(outfd, data(out), out.len())
+    syscall(3, outfd)
+    if barrier_fail: exit(1)
+    merged = par_read(infd)
+    syscall(3, infd)
+    if merged.len() == 0: exit(1)
+    pc_merge(merged)
+    pc_active = true
+
+pc_merge = (b: u8[]):
+    r = ParIn(b)
+    count = pr(r)
+    loop _ in [0..count):
+        length = pr(r)
+        end = r.i + length
+        nr = pr(r)
+        loop _ in [0..nr):
+            f = pr(r)
+            pc_weights[f] = pr(r)
+            pc_smalls[f] = pr(r) != 0
+            no_indexes = pr(r) != 0
+            all = pr(r) != 0
+            gs = pr_ints(r)
+            calls = pr_ints(r)
+            mentions = pr_ints(r)
+            fw_direct[f] = FnWrites(all, gs, calls, mentions)
+            fr_direct[f] = pr_ints(r)
+            nw = pr(r)
+            loop _ in [0..nw):
+                pos = pr(r)
+                msg = fz_get_str(r)
+                if pc_child < 0: warn(pos, msg)
+            if fns[f].state != 2:
+                pc_missing[f] = true
+                fns[f].state = 2
+                fns[f].no_indexes = no_indexes
+                fns[f].no_user_globals = true
+        used = pr(r)
+        loop _ in [0..used): fn_used[pr(r)] = true
+        r.i = end
+
+# The first stage transports only scalar/array control flow and ordinary direct calls.
+# Other checker products can carry side tables or declaration changes, and remain serial.
+pc_tree = (n: int) -> bool:
+    if n == 0: return true
+    k = nodes[n].kind
+    if k != .block and k != .vardecl and k != .assign and k != .exprstmt and k != .while_ and k != .for_ and k != .return_ and k != .break_ and k != .continue_ and k != .if_ and k != .int_lit and k != .float_lit and k != .str_lit and k != .bool_lit and k != .ident and k != .field and k != .call and k != .index and k != .unary and k != .binary and k != .and_ and k != .or_ and k != .not_ and k != .range and k != .conv and k != .intrinsic and k != .tname and k != .tarray and k != .array: return false
+    if k == .binary and nodes[n].aux != 0: return false
+    if k == .call and nodes[n].aux != 0: return false
+    if k == .intrinsic and nodes[n].aux != i32(int(IN.len)) and nodes[n].aux != i32(int(IN.sqrt)): return false
+    if k == .conv:
+        cv = nodes[n].aux as CV
+        if cv != .int_ and cv != .int2float and cv != .float2int and cv != .float_: return false
+    if not pc_tree(int(nodes[n].a)) or not pc_tree(int(nodes[n].b)): return false
+    if k != .for_:
+        if not pc_tree(int(nodes[n].c)) or not pc_tree(int(nodes[n].d)): return false
+    loop i in [0..nkids(n)):
+        if not pc_tree(kid(n, i)): return false
+    loop i in [0..nkids2(n)):
+        if not pc_tree(kid2(n, i)): return false
+    true
+
+pc_cancel = ():
+    when BOOTSTRAP or TARGET != "linux" or ARCH != "x86_64":
+        return
+    else:
+        if pc_child >= 0: exit(1)
+        loop pid in pc_pids:
+            if pid > 0: syscall(62, pid, 15)
+        loop fd in pc_fds:
+            if fd >= 0: syscall(3, fd)
+        loop pid in pc_pids:
+            if pid > 0:
+                st = [0]
+                syscall(61, pid, data(st), 0, 0)
+        pc_active = false
+
+pc_finish = ():
+    if not pc_active or pc_features(): return
+    pc_cancel()
+    # Restore in the original check order, before any whole-program walk.
+    loop f in [1..fns.len()): pc_restore(f)

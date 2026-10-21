@@ -1,3 +1,4 @@
+use 'pcheck.jo'
 use 'places.jo'
 use 'facts.jo'
 use 'refine.jo'
@@ -6708,6 +6709,7 @@ lower_inst = (lf: int, f: int):
 lop_watch = false       # (loops in this function count down to the web page's watchdog)
 
 lower_function = (lf: int):
+    if lfuncs[lf].kind == LK_INST: pc_restore(lfuncs[lf].inst)
     fact_storage_cache.clear()
     lpath_ids.clear()
     lpath_parents.truncate(1)

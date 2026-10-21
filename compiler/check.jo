@@ -1,3 +1,4 @@
+use 'pcheck.jo'
 use 'units.jo'
 use 'errors.jo'
 use 'watch.jo'
@@ -3691,6 +3692,7 @@ check_stmt = (s: int):
 
 # (a generic instance's body: an error in the library's code is reported at the program's call)
 check_fn_body = (f: int):
+    if pc_missing.has(f): pc_restore(f)
     if fns[f].state != 0: return
     if fns[f].targs.len() == 0 or fns[f].decl == 0:
         # (an ordinary function's body: not part of the generic instance that led to it)
@@ -4718,6 +4720,7 @@ prepare_value_helpers = () -> bool:
 check_pending_functions = (start: int) -> int:
     k = start
     loop k < fns.len() or prepare_value_helpers():
+        pc_try(k)
         if fns[k].state == 0 and (fns[k].kind == FK_NORMAL or fns[k].kind == FK_INIT) and k != 0:
             if fns[k].kind == FK_INIT:
                 m = int(fns[k].mod)
@@ -5039,6 +5042,7 @@ check_program = (main_path: str):
                 export_fns.push(get_fn_inst(d, [], nodes[d].pos))
                 more = true
         if not more: break
+    pc_finish()
     if poly_families.len() > 1: poly_finish_warnings()
     if open_globals.len() > 0: settle_open_globals()
     # (make_world written and never called: nothing runs it. A file of definitions alone, with
@@ -5116,6 +5120,7 @@ check_program = (main_path: str):
     zonk_tree(int(fns[prelude_init].body))
     # Close declared promises after every checked helper has been discovered,
     # including check-only callers and unreachable checked declarations.
+    pc_finish()
     if not errors_only:
         ownership_finalize()
         effects_finalize()

@@ -1,3 +1,4 @@
+use 'pcheck.jo'
 # Fused partition workers (x86-64 Linux, default builds). After whole-program finalization,
 # worker processes (fork: copies of the checked program) each lower, optimize and emit a share
 # of the checked functions, and send back each function's machine code with a journal of what
@@ -132,11 +133,11 @@ fz_extern = (f: int) -> bool:
     d = int(fns[f].decl)
     d != 0 and has_flag(d, NF_EXTERN)
 
-fz_weight = (f: int) -> int: 8 + fns[f].locals.len() * 4 + nkids(int(fns[f].body)) * 8
+fz_weight = (f: int) -> int: pc_weights.get(f) ?? (8 + fns[f].locals.len() * 4 + nkids(int(fns[f].body)) * 8)
 
 # (a function small enough that it may be a leaf fast_inline_into expands: lowered by every
 # worker whose functions call it)
-fz_small = (f: int) -> bool: nkids(int(fns[f].body)) <= 8 and fns[f].locals.len() <= 12
+fz_small = (f: int) -> bool: pc_smalls.get(f) ?? (nkids(int(fns[f].body)) <= 8 and fns[f].locals.len() <= 12)
 
 fz_pinit = 0
 fz_ready = false            # (worker results to replay and join)
@@ -147,6 +148,13 @@ fz_ready = false            # (worker results to replay and join)
 fz_layout = false
 
 fused_fork = (pinit_lf: int) -> bool:
+    ready = fused_start(pinit_lf)
+    # A checking child must never proceed to the parent's executable writer.
+    if pc_child >= 0: exit(1)
+    if pc_active and not ready: pc_cancel()
+    ready
+
+fused_start = (pinit_lf: int) -> bool:
     fz_ready = false
     fz_layout = false
     when BOOTSTRAP:
@@ -175,7 +183,8 @@ fused_fork = (pinit_lf: int) -> bool:
         fz_layout = forced or root / 20000 >= 2
         if not fz_layout or (env("DEWY_FUSED") ?? "") == "0": return false
         n = emit_workers()
-        if not forced: n = min(n, root / 20000)
+        if pc_active: n = pc_workers
+        else if not forced: n = min(n, root / 20000)
         if n < 2 or cands.len() < n: return false
         # (closure layouts are settled by whichever function needs one first: settle them here)
         loop f in [1..fns.len()):
@@ -196,7 +205,20 @@ fused_fork = (pinit_lf: int) -> bool:
         ta = time()
         pids: int[]
         fds: int[]
-        loop w in [0..cuts.len() - 1):
+        if pc_active:
+            if pc_child >= 0:
+                mine: int[]
+                next = 0
+                loop f in cands:
+                    owner = pc_owner.get(f) ?? -1
+                    if owner < 0:
+                        owner = next % pc_workers
+                        next += 1
+                    if owner == pc_child: mine.push(f)
+                fz_worker(mine, 0, mine.len(), pc_emit)
+            pids = pc_pids
+            fds = pc_fds
+        loop w in [0..if pc_active: 0 else: cuts.len() - 1):
             pfd = [0]
             if syscall(293, data(pfd), 0x80000) != 0:
                 pids.push(-1)
@@ -289,7 +311,7 @@ fused_fork = (pinit_lf: int) -> bool:
             valid = 0
             loop r in fz_recs:
                 if r.valid: valid += 1
-            eprint("fused: {cuts.len() - 1} workers, {cands.len()} functions, fork {(tb - ta) * 1000.0:.1} ms, waiting and reading {(tc - tb) * 1000.0:.1} ms, parsing {(time() - tc) * 1000.0:.1} ms, {fz_recs.len()} records, {valid} valid")
+            eprint("fused: {pids.len()} workers, {cands.len()} functions, fork {(tb - ta) * 1000.0:.1} ms, waiting and reading {(tc - tb) * 1000.0:.1} ms, parsing {(time() - tc) * 1000.0:.1} ms, {fz_recs.len()} records, {valid} valid")
         true
 
 # everything the pipes give until each is closed, read as it comes
