@@ -25,7 +25,7 @@ core where possible, runs interleaving base and candidate, median of --runs.
 from __future__ import annotations
 
 import argparse
-import fcntl
+from tools.filelock import lock_exclusive
 import hashlib
 import json
 import os
@@ -482,7 +482,7 @@ def main(argv: list[str], current: Path) -> int:
     if args.wall or args.critical:
         CACHE.mkdir(parents=True, exist_ok=True)
         with (CACHE / 'speed.lock').open('w') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            lock_exclusive(lock)
             toolchains = {}
             if args.base is not None:
                 commit = resolve(args.base)
@@ -499,7 +499,7 @@ def main(argv: list[str], current: Path) -> int:
     started = time.perf_counter()
     CACHE.mkdir(parents=True, exist_ok=True)
     with (CACHE / 'speed.lock').open('w') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        lock_exclusive(lock)
         counter = Counter(args.counter)
         candidate = Toolchain('candidate', candidate_compiler(current), ROOT / 'lib')
         references = {}

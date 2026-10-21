@@ -184,12 +184,12 @@ def rejection(name: str, source: Path, checked: subprocess.CompletedProcess, exp
 def port_lock():
     """Networking programs use fixed loopback ports; serialize them machine-wide."""
     try:
-        import fcntl
+        from tools.filelock import lock_exclusive
     except ImportError:
         yield
         return
     with open(Path(tempfile.gettempdir()) / 'dewy-ladder-ports.lock', 'w') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        lock_exclusive(lock)
         yield
 
 

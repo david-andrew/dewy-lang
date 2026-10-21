@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
+from tools.filelock import lock_exclusive
 import hashlib
 import json
 import os
@@ -120,7 +120,7 @@ def toolchain(*, bootstrap: bool = False, cache: Path = CACHE, root: Path = ROOT
     # Serialize cache publication/builds. Running commands retain an immutable
     # toolchain directory when another invocation rebuilds newer sources.
     with (cache / 'build.lock').open('w') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        lock_exclusive(lock)
         stamp = source_stamp(root)
         state, seed = cached_state(cache)
         if (not bootstrap and seed is not None and state.get('source_stamp') == stamp

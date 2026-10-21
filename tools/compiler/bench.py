@@ -14,7 +14,7 @@ build, or prints another checksum.
 from __future__ import annotations
 
 import argparse
-import fcntl
+from tools.filelock import lock_exclusive
 import os
 import shutil
 import statistics
@@ -97,7 +97,7 @@ def instructions(args, names: list[str], compiler: Path) -> int:
     if args.baseline:
         commit = speed.resolve(args.baseline)
         with (speed.CACHE / 'speed.lock').open('w') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            lock_exclusive(lock)
             directory, built = speed.base_compiler(commit, compiler)
         if built:
             print(f'(built base compiler {commit[:10]})', file=sys.stderr, flush=True)
