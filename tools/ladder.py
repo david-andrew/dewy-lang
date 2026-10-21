@@ -10,7 +10,10 @@ program whose ladder.json entry has `expect.kind = "compile-error"` must be
 rejected instead: its design passes only when `check` fails with a semantic
 diagnostic matching `expect.diagnostic` (at `expect.line`, when given).
 Unsupported-feature and parse errors are not rejections, and acceptance is
-reported as "wrongly accepted". Programs marked `open` depend on an open design
+reported as "wrongly accepted". A program with `expect.kind = "tests"` also
+runs its `$test` functions (`dewy-core test --json`): its design passes only
+when the per-test results, counts, exit status, a failed test's output and
+message match `expected-tests.json`, as well as main's output. Programs marked `open` depend on an open design
 question: they run and are listed, but never count toward the design totals or
 the ratchet. The command fails when a core version fails or a design program
 listed in ladder.json's "design_passing" ratchet stops passing.
@@ -72,6 +75,10 @@ def rejects(entry: dict) -> bool:
     return entry.get('expect', {}).get('kind') == 'compile-error'
 
 
+def scores_tests(entry: dict | None) -> bool:
+    return entry is not None and entry.get('expect', {}).get('kind') == 'tests'
+
+
 def has_core(name: str) -> bool:
     return (LADDER / name / 'core.dewy').exists()
 
@@ -111,7 +118,44 @@ def evaluate(compiler: Path, directory: Path, version: str, scratch: Path, env: 
     if ran.stdout != expected:
         return Result(directory.name, version, False, True,
                       f'printed {ran.stdout.strip()[:120]!r}, expected {expected.strip()[:120]!r}')
+    if version == 'design' and scores_tests(entry):
+        tested = step([str(compiler), 'test', '--release', '--json', str(source)], RUN_TIMEOUT)
+        problem = test_mismatch(tested, json.loads((directory / 'expected-tests.json').read_text()), ran.stdout)
+        if problem:
+            return Result(directory.name, version, False, True, problem)
     return Result(directory.name, version, True, True)
+
+
+def test_mismatch(tested: subprocess.CompletedProcess, want: dict, ordinary: str) -> str:
+    """How `dewy-core test --json` results differ from expected-tests.json ('' when they agree)."""
+    tests, summary = {}, None
+    for line in tested.stdout.splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            return f'test output is not JSON: {line[:120]!r} {first_error(tested.stderr)}'.strip()
+        if 'test' in item:
+            tests[item['test']] = item
+        else:
+            summary = item
+    if summary is None:
+        return f'tests did not finish (exit {tested.returncode}): {first_error(tested.stderr + tested.stdout)}'
+    statuses = {name: item['status'] for name, item in tests.items()}
+    if list(statuses.items()) != list(want['cases'].items()):
+        return f'test results {statuses}, expected {want["cases"]}'
+    for key in ('passed', 'failed'):
+        if summary.get(key) != want[key]:
+            return f'{summary.get(key)} {key}, expected {want[key]}'
+    if tested.returncode != want['exit']:
+        return f'tests exited {tested.returncode}, expected {want["exit"]}'
+    failed = [item for item in tests.values() if item['status'] != 'pass']
+    if 'failure_stdout' in want and any(item.get('stdout') != want['failure_stdout'] for item in failed):
+        return f'a failed test printed {[item.get("stdout") for item in failed]}, expected {want["failure_stdout"]!r}'
+    if 'message_contains' in want and any(want['message_contains'] not in item.get('output', '') for item in failed):
+        return f'a failed test does not report {want["message_contains"]!r}'
+    if 'ordinary_stdout' in want and ordinary != want['ordinary_stdout']:
+        return f'main printed {ordinary!r}, expected {want["ordinary_stdout"]!r}'
+    return ''
 
 
 def rejection(name: str, source: Path, checked: subprocess.CompletedProcess, expect: dict) -> Result:
@@ -184,6 +228,9 @@ def validate(doc: dict) -> list[str]:
                 re.compile(entry['expect']['diagnostic'])
             except (KeyError, re.error):
                 problems.append(f'{name} needs expect.diagnostic, a regular expression')
+        elif scores_tests(entry):
+            if not (LADDER / name / 'expected-tests.json').exists():
+                problems.append(f'{name} lacks expected-tests.json')
         elif entry.get('expect', {}).get('kind', 'stdout') != 'stdout':
             problems.append(f'{name} has an unknown expect.kind')
         if entry.get('open') and name in doc['design_passing']:

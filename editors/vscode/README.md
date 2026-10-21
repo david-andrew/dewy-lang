@@ -27,8 +27,8 @@ Dewy is young and changes quickly; this extension tracks the compiler in the rep
 - **Quick fixes** the compiler suggests: `@f` for a function value, Dewy member spellings
   (`startswith`, `xs.pop(i)`), misspelled names, `@` for updating loop elements.
 - **Format Document** with the compiler's formatter.
-- **Run, test and debug**: code lenses above `main` (Run, Debug) and `test "…"` blocks
-  (Run test, Run all tests), editor title buttons, and debugging with CodeLLDB.
+- **Run, test and debug**: code lenses above `main` (Run, Debug) and `$test`
+  functions (Run test, Run all tests), editor title buttons, and debugging with CodeLLDB.
 - **Syntax highlighting** for the current surface: directives (`$assert`), `@` handles and
   places, units (`300ms`), `or_throw`, `=?`/`<?`/`is?` operators, angle-bracket types, string
   interpolation, raw and path strings, based numbers, byte literals and nestable `#{ … }#`
@@ -66,7 +66,7 @@ highlighting only.
 
 - **Dewy: Run Current File**, **Dewy: Debug Current File**
 - **Dewy: Test Current File**, **… in Release Mode**, **Dewy: Watch Tests in Current File**:
-  run the file's `test "…" { … }` blocks in a task terminal. Watching reruns them after saved
+  run the file's `$test` functions in a task terminal. Watching reruns them after saved
   edits to the file, its imports or embedded assets.
 - **Dewy: Restart Language Server**
 

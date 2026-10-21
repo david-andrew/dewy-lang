@@ -504,8 +504,11 @@ __write_fd = (fd: int, p: *u8, n: int):
         off = 0
         loop off < n:
             r = syscall(1, fd, p + off, n - off)
-            if r <= 0: return
+            if r <= 0: break
             off += r
+        if fd == 1 and __test_mirror >= 0: __write_fd(__test_mirror, p, off)
+
+__test_mirror = -1              # (in a test's process: where its standard output is copied too)
 
 # read up to n bytes (0: the end, < 0: an error)
 # (debug web builds: the program's loops count this down, and at 0 the watchdog asks how long the
@@ -592,12 +595,7 @@ __exit = (code: int):
         syscall(231, code)
 
 __panic = (msg: str):
-    # (in a test of `sloppy test`: its failure, told under its name)
-    if __test_child:
-        __out_flush()
-        __write_fd(1, data("FAILED\n"), 7)
-        __write_err("    ")
-    else: __write_err("panic: ")
+    __write_err("panic: ")
     __write_err(msg)
     __write_err("\n")
     when not BOOTSTRAP:

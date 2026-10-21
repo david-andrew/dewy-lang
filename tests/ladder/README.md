@@ -9,6 +9,7 @@ Map it to its ROADMAP.md milestone in `ladder.json`, with a one-line acceptance 
   The design passes only when `check` fails with an error whose message matches REGEX (case-insensitive) at line N of `design.dewy` (`line` is optional).
   Unsupported-feature errors ("not implemented yet", "does not yet support", "unknown directive") and parse errors are not rejections, and a successful check is reported as wrongly accepted.
   Such programs have no `expected.out` and usually no `core.dewy`.
+- **Test results.** `"expect": {"kind": "tests"}` also runs the design's `$test` functions with `dewy-core test --json` and compares each test's status, the counts, the exit status, a failed test's output (`failure_stdout`, `message_contains`) and main's output (`ordinary_stdout`) with `expected-tests.json`.
 - **Open programs.** When acceptance depends on an unsettled design question, add `"open": QUESTION`.
   The program still runs and is listed with its question, but it is excluded from the design counts and can't enter `design_passing`; a passing open program is only an executable control.
   Remove `open` once the question is settled and the program exercises the answer.

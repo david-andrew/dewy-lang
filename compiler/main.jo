@@ -43,7 +43,7 @@ use 'pkg.jo'
 const DEWY_CORE_VERSION = "0.0.0-dev"
 
 usage = (status: int = 2):
-    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target native|wasm] [--release] [--time]\n       dewy-core check file.dewy\n       dewy-core test [--watch] [--release] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core repl\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.")
+    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target native|wasm] [--release] [--time]\n       dewy-core check file.dewy\n       dewy-core test [--watch] [--release] [--json] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core repl\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.")
     exit(status)
 
 find_lib_dir = () -> str:
@@ -393,7 +393,7 @@ compile = (path: str, out0: str) -> str:
     queue_emit = not watch_build and not repl_image and not lower_only
     check_program(path)
     # (a run for the errors after the first: no more to find, and nothing is built)
-    if errors_only: exit(1)
+    if errors_only: exit(error_exit)
     if target_wasm and not program_named: web_save_name_check()
     # (functions left unchecked after errors in them cannot be lowered)
     if lower_only and ide_skip.len() > 0: return ""
@@ -749,19 +749,21 @@ main = ():
             setup_target()
             init_types()
             check_program(path)
-            if errors_only: exit(1)
+            if errors_only: exit(error_exit)
             return
         # (and lowered without making code: some errors are found there, as a `loop mut` that
         # resizes its array, a data race, a shader's)
         lower_only = true
         compile(path, "")
-        if errors_only: exit(1)
+        if errors_only: exit(error_exit)
         return
     first = 1
     test_watch = false
+    test_json = false
     if a[1] == "run": first = 2          # (sloppy run game.jo is sloppy game.jo)
     if a[1] == "test":
         test_mode = true
+        error_exit = 102
         first = 2
     # options for running come before the file (what follows it goes to the program)
     loop first < a.len() and starts_with(a[first], "--"):
@@ -769,6 +771,7 @@ main = ():
         if x == "--web": cli_target = "wasm"
         else if x == "--release": cli_release = true
         else if x == "--watch" and test_mode: test_watch = true
+        else if x == "--json" and test_mode: test_json = true
         else if x == "--time": timing = true
         else if x == "--target" and first + 1 < a.len():
             cli_target = a[first + 1]
@@ -788,11 +791,16 @@ main = ():
     if a[first] == "test":
         if a.len() < first + 2: usage()
         test_mode = true
+        error_exit = 102
         first += 1
     if test_mode: cli_target = "native"  # tests run natively even for web games
     when TARGET == "windows":
         if test_mode: __test_process_group()
     path = os_path(a[first])
+    if test_mode and is_dir(path):
+        words: str[]
+        loop i in [first + 1..a.len()): words.push(a[i])
+        exit(test_directory(path, words, test_json))
     if not file_exists(path) and not ends_with(path, ".jo") and not ends_with(path, ".dewy") and find(path, "/") < 0:
         near = ""
         loop c in ["run", "build", "watch", "test", "check", "fmt", "add", "new", "lsp", "update", "help", "version", "repl"]:
@@ -820,7 +828,7 @@ main = ():
     tmp = out
     if not target_windows and not target_wasm and cli_target != "wasm" and cli_target != "web" and cli_target != "windows": tmp = "{cache}/{base}.{time_ns()}.new"
     built = compile(path, tmp)
-    if len(built) == 0: exit(1)
+    if len(built) == 0: exit(error_exit)
     if built == tmp and tmp != out and not target_wasm:
         if rename_file(tmp, out): built = out
     if target_wasm:
@@ -831,10 +839,114 @@ main = ():
         exit(0)
     # (args()[0] is the program as it was named: the source file)
     run_args = [path]
+    if test_json: run_args.push("--json")
     loop i in [first + 1..a.len()): run_args.push(a[i])
     exec(built, run_args)
     eprint("dewy-core: failed to run {built}")
     exit(1)
+
+# dewy-core test directory: each .dewy file under it with a line starting `$test` (not in hidden
+# directories or __dewycache__) tested in a process of its own, one line per file, then the
+# failures' output and the counts. The status is the failures (at most 100), or 101 when a test
+# aborted, 102 when a file did not build.
+test_directory = (dir: str, words: str[], json: bool) -> int:
+    files: str[]
+    test_files(dir, files)
+    files.sort()
+    passed = 0
+    failed = 0
+    aborted = false
+    broken = false
+    failures: str[]
+    loop f in files:
+        args = ["test"]
+        if cli_release: args.push("--release")
+        args = args + ["--json", f] + words
+        ran = run_program(exe_path(), args)
+        marks = ""
+        filed = 0
+        ran_tests = 0
+        loop line in split(ran.1, "\n"):
+            if len(line) == 0: continue
+            name = json_text(line, "test")
+            if name == none:
+                # (the file's summary: none when its tests' names do not match the words)
+                if json and ran_tests > 0: print(line[..len(line) - 1) + ",\"file\":{json_quote(f)}\}")
+                continue
+            ran_tests += 1
+            if json: print(line)
+            status = json_text(line, "status") ?? ""
+            if status == "pass":
+                passed += 1
+                marks += "."
+            else:
+                failed += 1
+                filed += 1
+                marks += "F"
+                failures.push("{f}: {name!}")
+                failures.push(json_text(line, "output") ?? "")
+        if ran.0 == 101: aborted = true
+        if ran.0 == 102 or ran.0 < 0:
+            broken = true
+            marks += "(did not build)"
+        else if ran_tests == 0: continue
+        if not json: print("{f} {marks}")
+    if passed + failed == 0 and not broken:
+        if words.len() > 0: eprint("no test's name under {dir} has any of {join(words, ", ")} in it")
+        else: eprint("no tests under {dir}: a test is a function marked `$test` on the line before it")
+        return 1
+    status = min(failed, 100)
+    if aborted: status = 101
+    if broken: status = 102
+    if json:
+        print("\{\"passed\":{passed},\"failed\":{failed},\"files\":{files.len()},\"exit\":{status}\}")
+        return status
+    i = 0
+    loop i + 1 < failures.len():
+        print("--- FAIL {failures[i]}")
+        write(failures[i + 1])
+        if len(failures[i + 1]) > 0 and not ends_with(failures[i + 1], "\n"): print("")
+        i += 2
+    summary = "{passed} passed"
+    if failed > 0: summary = "{failed} failed, " + summary
+    print(summary)
+    status
+
+test_files = (dir: str, found: mut str[]):
+    loop name in list_dir(dir):
+        if starts_with(name, ".") or name == "__dewycache__": continue
+        p = "{dir}/{name}"
+        if is_dir(p): test_files(p, found)
+        else if ends_with(name, ".dewy"):
+            if let text = read_file(p):
+                loop line in split(text, "\n"):
+                    if starts_with(line, "$test"):
+                        found.push(p)
+                        break
+
+# the string value of "key" in a line of JSON, as dewy-core test --json writes it
+json_text = (line: str, key: str) -> str?:
+    at = find(line, "\"{key}\":\"")
+    if at < 0: return none
+    i = at + len(key) + 4
+    buf: u8[]
+    loop i < len(line) and line[i] != '"':
+        c = line[i]
+        if c == '\\' and i + 1 < len(line):
+            i += 1
+            e = line[i]
+            if e == 'n': c = '\n'
+            else if e == 't': c = '\t'
+            else if e == 'r': c = '\r'
+            else if e == 'u' and i + 4 < len(line):
+                c = u8(to_int("0x" + line[i + 1..i + 5)) ?? 63)
+                i += 4
+            else: c = e
+        buf.push(c)
+        i += 1
+    str_from_bytes(buf)
+
+json_quote = (s: str) -> str: __test_jq(s)
 
 # (@lib("libc.so.6") in a Windows build: the program fails when it calls the function)
 extern_lib_check = (fi: int):

@@ -1,0 +1,13 @@
+# quick
+# A failed expectation returns from the function it is in; its caller goes on.
+check = (xs:array<int64>):>void => {
+    $expect xs.length >? 0, "nonempty input"
+    printl("checked {xs[0]}")
+}
+main = () => {
+    let empty:array<int64> = []
+    check(empty)
+    check([7])
+    printl("main continued")
+    return 0
+}

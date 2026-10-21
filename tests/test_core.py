@@ -3561,7 +3561,7 @@ def test_core_game_starter_tests(compiler, tmp_path, flags, kind, count):
     result = subprocess.run([compiler, 'test', *flags, template], env=env, capture_output=True,
                             text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert f'{count} test' in result.stdout
+    assert result.stdout.endswith(f'\n{count} passed\n'), result.stdout
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
@@ -3616,26 +3616,28 @@ def test_core_arcade_starter_saved_score(compiler, tmp_path, flags):
     template = Path(__file__).resolve().parents[1] / 'lib/new/dewy/arcade.dewy'
     source = tmp_path / 'score-test.dewy'
     source.write_text(template.read_text() + '''
-test "save round" {
+$test
+save_round = () => {
     best=0
     game.score=7
     crash()
-    assert(best=?7 and screen=?Screen.over and load_data("best")??""=?"7")
+    $expect best=?7 and screen=?Screen.over and load_data("best")??""=?"7"
     game.score=3
     crash()
-    assert(best=?7 and load_data("best")??""=?"7")
+    $expect best=?7 and load_data("best")??""=?"7"
     start()
-    assert(screen=?Screen.playing and game.score=?0 and not game.over and best=?7)
+    $expect screen=?Screen.playing and game.score=?0 and not game.over and best=?7
 }
-test "load round" {assert(best=?7)}
+$test
+load_round = () => $expect best=?7
 ''')
     env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'SLOPPY_THREADS': '2',
            'SLOPPY_SAVE_DIR': str(tmp_path / 'saves')}
-    for name in ['save round', 'load round']:
+    for name in ['save_round', 'load_round']:
         result = subprocess.run([compiler, 'test', *flags, source, name], env=env,
                                 capture_output=True, text=True, timeout=30, check=False)
         assert result.returncode == 0, result.stdout + result.stderr
-        assert '1 test passed' in result.stdout
+        assert '\n1 passed (' in result.stdout
 
 
 @pytest.mark.parametrize('flags', [[], ['--release']])
@@ -3643,24 +3645,26 @@ def test_core_story_starter_saved_reading(compiler, tmp_path, flags):
     template = Path(__file__).resolve().parents[1] / 'lib/new/dewy/story.dewy'
     source = tmp_path / 'reading-test.dewy'
     source.write_text(template.read_text() + '''
-test "save reading" {
+$test
+save_reading = () => {
     reading=fresh()
     advance(@reading)
-    assert(reading.step.speaker=?"Mira" and reading.shown["mira"]=?"left")
+    $expect reading.step.speaker=?"Mira" and reading.shown["mira"]=?"left"
     on_quit()
 }
-test "load reading" {
-    assert(reading.step.speaker=?"Mira" and reading.step.text=?"You came! I wasn't sure you would.")
-    assert(reading.shown["mira"]=?"left" and reading.background=?SCENES["square"])
+$test
+load_reading = () => {
+    $expect reading.step.speaker=?"Mira" and reading.step.text=?"You came! I wasn't sure you would."
+    $expect reading.shown["mira"]=?"left" and reading.background=?SCENES["square"]
 }
 ''')
     env = {**os.environ, 'DISPLAY': '', 'WAYLAND_DISPLAY': '', 'SLOPPY_THREADS': '2',
            'SLOPPY_SAVE_DIR': str(tmp_path / 'saves')}
-    for name in ['save reading', 'load reading']:
+    for name in ['save_reading', 'load_reading']:
         result = subprocess.run([compiler, 'test', *flags, source, name], env=env,
                                 capture_output=True, text=True, timeout=30, check=False)
         assert result.returncode == 0, result.stdout + result.stderr
-        assert '1 test passed' in result.stdout
+        assert '\n1 passed (' in result.stdout
 
 
 def test_core_new_existing_directory(compiler, tmp_path):

@@ -5,7 +5,7 @@ native/web backends and libraries, forked from Sloppy (see
 [`origin/ORIGIN.md`](origin/ORIGIN.md)). It is an experimental subset of Dewy;
 start with the [language guide and executable tour](LANGUAGE.md).
 
-Projects can use native `test "description" { assert(...) }` blocks and run them
+Projects mark test functions with `$test` (checked by `$expect`) and run them
 with `./tools/dewy test file.dewy [name filters...]`; see the
 [project testing guide](LANGUAGE.md#test-a-project). `./tools/dewy test --watch
 file.dewy` reruns them after edits, including changes to imports and embedded

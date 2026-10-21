@@ -105,24 +105,26 @@ collect = (@coins: array<Coin> at: vec2 dt: float64) :> int64 => {
     return count
 }
 
-test "landing and jumping keep the previous player value" {
+$test
+landing_and_jumping_keep_the_previous_player_value = () => {
     let map = make_level()
     let at = markers("@")[0]
     let p = spawn(at)
     loop i in [0..30) p = tick(p map at Pad[] 1.0/120.0).player
-    assert(p.on_ground)
+    $expect p.on_ground
     let before = p
     let step = tick(p map at Pad[pressed = true held = true] 1.0/120.0)
-    assert(step.jumped and step.player.vel.y<?0.0)
-    assert(p=?before and p.on_ground)
+    $expect step.jumped and step.player.vel.y<?0.0
+    $expect p=?before and p.on_ground
 }
 
-test "coins are collected once and saved coins stay unchanged" {
+$test
+coins_are_collected_once_and_saved_coins_stay_unchanged = () => {
     let coins = [Coin[pos = vec2(20 20)] Coin[pos = vec2(100 20)]]
     let before = coins
-    assert(collect(@coins vec2(20 20) 0.01)=?1)
-    assert(collect(@coins vec2(20 20) 0.01)=?0)
-    assert(coins[0].taken and not coins[1].taken and not before[0].taken)
+    $expect collect(@coins vec2(20 20) 0.01)=?1
+    $expect collect(@coins vec2(20 20) 0.01)=?0
+    $expect coins[0].taken and not coins[1].taken and not before[0].taken
 }
 
 # Presentation and live game state.

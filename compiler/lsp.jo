@@ -1504,7 +1504,7 @@ no_items = "\{\"isIncomplete\":false,\"items\":[]\}"
 
 # the keywords to complete: the lexer's, and the words that are keywords where they start something
 comp_words = (dewy: bool = false) -> str[]:
-    if dewy: return ["let", "const", "if", "else", "loop", "in", "return", "break", "continue", "match", "test", "true", "false", "none", "void", "import", "from", "as", "and", "or", "xor", "not", "of", "or_throw", "transmute", "type"]
+    if dewy: return ["let", "const", "if", "else", "loop", "in", "return", "break", "continue", "match", "true", "false", "none", "void", "import", "from", "as", "and", "or", "xor", "not", "of", "or_throw", "transmute", "type"]
     out: str[]
     loop k, _ in keywords: out.push(k)
     loop k in ["type", "from", "soa"]: out.push(k)
@@ -1572,7 +1572,7 @@ on_completion = (id: int, params: int) -> int:
     if a > 0 and text[a - 1] == '$' and ends_with(docs[d].path, ".dewy"):
         # (the directives this compiler implements)
         dv: str[]
-        loop w in ["assert", "runtime_assert", "capture", "include_bytes"]: dv.push("\{\"label\":{jq(w)},\"kind\":14,\"detail\":\"directive\"\}")
+        loop w in ["assert", "runtime_assert", "expect", "fail", "test", "capture", "include_bytes"]: dv.push("\{\"label\":{jq(w)},\"kind\":14,\"detail\":\"directive\"\}")
         return lsp_reply(id, "\{\"isIncomplete\":false,\"items\":[{join(dv, ",")}]\}")
     if member and a > 1 and text[a - 2] == '.': return lsp_reply(id, no_items)     # a range: 0..
     if not member and len(prefix) > 0 and is_digit(prefix[0]): return lsp_reply(id, no_items)
@@ -2068,13 +2068,6 @@ symbols_in = (lines_: str[], from: int, to: int, ind: int) -> str[]:
             continue
         col = indent_of(raw)
         e = block_end(lines_, i, ind)
-        if sy_dewy and starts_with(t, "test") and starts_with(trim(t[4..]), "\""):
-            # test "name" { ... }: the name is its string
-            q = trim(t[4..])
-            qe = find_byte(q, '"', 1)
-            if qe > 0: out.push(sym_json("test " + q[..qe + 1), 24, i, col, e, []))
-            i = e + 1
-            continue
         if sy_dewy:
             word = ident_prefix(t)
             constant = word == "const" or word == "local_const"
@@ -2257,18 +2250,32 @@ lens_json = (line: int, title: str, command: str, args: str) -> str:
 on_code_lens = (id: int, params: int) -> int:
     d = text_params_doc(params)
     if d < 0 or not ends_with(docs[d].path, ".dewy"): return lsp_reply(id, "[]")
-    out: str[]
+    lenses: (int, str)[]
     u = jq(docs[d].uri)
     tests = 0
+    # (a `$test` line: the function on the next line is a test, run by its name)
+    text_lines = split(docs[d].text, "\n")
+    loop i in 0.. and line in text_lines:
+        t = trim(line)
+        if not starts_with(t, "$test") or (len(t) > 5 and t[5] != '(' and t[5] != ' ' and t[5] != '\r'): continue
+        j = i + 1
+        loop j < text_lines.len() and (len(trim(text_lines[j])) == 0 or trim(text_lines[j])[0] == '#'): j += 1
+        if j >= text_lines.len(): continue
+        decl = trim(text_lines[j])
+        word = ident_prefix(decl)
+        if word == "let" or word == "const": decl = trim(decl[len(word)..])
+        name = ident_prefix(decl)
+        if len(name) == 0: continue
+        if tests == 0: lenses.push((i, lens_json(i, "Run all tests", "dewy.core.test", u)))
+        lenses.push((i, lens_json(i, "Run test", "dewy.core.runTest", "{u},{jq(name)}")))
+        tests += 1
     loop y in ws_symbols_of(docs[d].path, docs[d].text):
-        if y.kind == 24 and starts_with(y.name, "test \""):
-            name = y.name[6..len(y.name) - 1)
-            if tests == 0: out.push(lens_json(y.line, "Run all tests", "dewy.core.test", u))
-            out.push(lens_json(y.line, "Run test", "dewy.core.runTest", "{u},{jq(name)}"))
-            tests += 1
-        else if y.kind == 12 and y.name == "main" and len(y.container) == 0:
-            out.push(lens_json(y.line, "Run", "dewy.core.run", u))
-            out.push(lens_json(y.line, "Debug", "dewy.core.debug", u))
+        if y.kind == 12 and y.name == "main" and len(y.container) == 0:
+            lenses.push((y.line, lens_json(y.line, "Run", "dewy.core.run", u)))
+            lenses.push((y.line, lens_json(y.line, "Debug", "dewy.core.debug", u)))
+    lenses.sort_by((l: (int, str)): l.0)
+    out: str[]
+    loop l in lenses: out.push(l.1)
     lsp_reply(id, "[{join(out, ",")}]")
 
 # Language-specific layout as one edit of the current buffer.

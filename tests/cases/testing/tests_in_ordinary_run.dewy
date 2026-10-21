@@ -1,0 +1,14 @@
+# quick
+# `$test` functions are ordinary functions: an ordinary run keeps main and
+# reports nothing about them.
+let CASES:array<int64> = [1 2]
+square = (x:int64) => x * x
+$test
+squares = () => $expect square(3) =? 9
+$test(cases=CASES)
+positive = (x:int64) => $expect square(x) >? 0
+main = () => {
+    squares()
+    printl("{square(4)}")
+    return 0
+}

@@ -189,7 +189,8 @@ def scope_of(grammar, line, text):
     ('let counts=["apple"->3 "pear"->5]', '->', 'keyword.operator.mapping'),
     ('let r=xs |> sorted', '|>', 'keyword.operator.pipe'),
     ('let value:(int64|string)?=none', '?', 'keyword.operator.type'),
-    ('test "adds numbers" {', 'test', 'keyword.other.test'),
+    ('$test(cases=(1 2))', '$test', 'keyword.other.directive'),
+    ('    $expect add(1 2) =? 3, "sum"', '$expect', 'keyword.other.directive'),
     ('let x=a//b', '//', 'keyword.operator.arithmetic'),
     ('let x=a.*b', '.*', 'keyword.operator.arithmetic'),
 ])

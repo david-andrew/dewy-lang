@@ -160,11 +160,14 @@ call_args_text = (p: int) -> str:
 
 # the end of compiling: the process ends (in the interactive prompt, back to it: repl.jo)
 stop = (code: int):
+    status = code
+    if status == 1: status = error_exit
     when not BOOTSTRAP:
-        if code != 0: watch_save_failed_inputs()
+        if status != 0: watch_save_failed_inputs()
         __repl_unwind()
-    exit(code)
+    exit(status)
 
+error_exit = 1              # (the exit status for errors: dewy-core test's is 102, a module that did not build)
 quiet_errors = false        # (an error only stops: sloppy fmt in the language server)
 # (sloppy build/run/check/test: after an error in a function, this program again without that
 # function's body, for the next error; errors_only: such a run, which only checks)

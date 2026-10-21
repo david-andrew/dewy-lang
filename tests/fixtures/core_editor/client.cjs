@@ -200,13 +200,13 @@ async function change(text, predicate) {
         assert.equal(fields.items.find((item) => item.label === 'x').kind, 4); // VS Code Field
         assert.equal(fields.items.find((item) => item.label === 'y').detail, 'int');
         // Signature help, rename, semantic tokens, inlay hints, quick fixes, symbols and lenses.
-        await change('scale=(value:int64 factor:int64):>int64=>value*factor\nmain=():>int64=>{\n    let doubled=scale(21 2)\n    return doubled\n}\ntest "scales" { assert(scale(1 2) =? 2) }', (ds) => ds.length === 0);
+        await change('scale=(value:int64 factor:int64):>int64=>value*factor\nmain=():>int64=>{\n    let doubled=scale(21 2)\n    return doubled\n}\n$test\nscales=()=>$expect scale(1 2) =? 2', (ds) => ds.length === 0);
         const help = await providers.signature.provideSignatureHelp(document, new Position(2, 25));
         assert.equal(help.signatures[0].label, 'scale = (value: int64 factor: int64):>int64');
         assert.equal(help.activeParameter, 1);
         assert.deepEqual(help.signatures[0].parameters.map((p) => p.label), [[9, 21], [22, 35]]);
         const renamed = await providers.rename.provideRenameEdits(document, new Position(2, 18), 'times');
-        assert.deepEqual(renamed.edits.map((e) => [e.range.start.line, e.newText]).sort(), [[0, 'times'], [2, 'times'], [5, 'times']]);
+        assert.deepEqual(renamed.edits.map((e) => [e.range.start.line, e.newText]).sort(), [[0, 'times'], [2, 'times'], [6, 'times']]);
         assert(await providers.rename.prepareRename(document, new Position(2, 18)));
         await assert.rejects(providers.rename.provideRenameEdits(document, new Position(2, 18), 'doubled'), /declared already/);
         const tokens = await providers.semantic.provideDocumentSemanticTokens(document);

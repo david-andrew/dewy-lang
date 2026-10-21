@@ -197,6 +197,7 @@ target_arm64 = false          # (Linux on arm64: compiler/arm64.jo)
 target_macos = false          # (macOS on arm64: compiler/arm64.jo, compiler/macho.jo)
 main_fn = 0
 test_mode = false        # `sloppy test`: run the main file's test blocks instead of main()
+expectation_ifs: {int: bool} = {}   # Dewy's `$expect`s: `if not condition { report; return }`
 check_all = false        # (sloppy check: the tests and the game loop both checked; nothing runs)
 test_decls: int[]
 update_fn = 0
@@ -3469,6 +3470,7 @@ check_stmt = (s: int):
         add_flag(s, NF_STMT)
         check_expr(s, 0)
         if last_checked != s: nodes[s] = nodes[last_checked]
+        if expectation_ifs.has(s): expectation_refuted(s)
     else if k == .while_:
         mark = scope_mark()
         enter_loop()
@@ -4168,6 +4170,13 @@ static_truth = (e: int) -> int:
     if not v.known: return -1
     if v.i != 0: 1 else: 0
 
+# (an expectation the compiler refutes still builds: the test fails when it runs; `$expect false`
+# is written to fail)
+expectation_refuted = (s: int):
+    c = int(nodes[s].a)
+    if nodes[c].kind == .not_ and nodes[int(nodes[c].a)].kind == .bool_lit: return
+    if static_truth(c) == 1: warn(nodes[s].pos, "this expectation always fails")
+
 assertion_refuted = (cond: int, message: int):
     why = "this condition is always false"
     if message != 0 and nodes[message].kind == .str_lit and nodes[message].aux == 0: why = name_of(int(nodes[message].sval))
@@ -4454,6 +4463,15 @@ unpack_array = (e: int, t: int, n: int, pos: int) -> int:
     last_checked = c
     r
 
+# if __test_begin(name): body; __test_end()   (the body in a process of its own, where it can be)
+test_entry = (name: int, body: int[], pos: int) -> int:
+    block = mk(.block, pos)
+    set_list(block, body + [synth_call("__test_end", [], pos)])
+    ifn = mk(.if_, pos)
+    nodes[ifn].a = i32(bc_call("__test_begin", [name], pos))
+    nodes[ifn].b = i32(block)
+    ifn
+
 synth_call = (name: str, args: int[], pos: int) -> int:
     c = mk(.call, pos)
     id = mk(.ident, pos)
@@ -4680,30 +4698,46 @@ check_program = (main_path: str):
         loop nm, gs in modules[mainm].names:
             if starts_with(name_of(nm), "test_") and syms[gs].kind == .fns and len(pyt) == 0: pyt = name_of(nm)
         if ends_with(main_path, ".dewy"):
-            if len(pyt) > 0: fatal(nodes[int(syms[modules[mainm].names[intern(pyt)]].decl)].pos, "'{pyt}' is a function, not a test: write `test \"{pyt[5..]}\" {{ assert(...) }}`")
-            fatal(-1, "no tests in {main_path}: write `test \"adds\" {{ assert(add(1 2) =? 3) }}`")
+            if len(pyt) > 0: fatal(nodes[int(syms[modules[mainm].names[intern(pyt)]].decl)].pos, "'{pyt}' is a function, not a test: put `$test` on the line before it")
+            fatal(-1, "no tests in {main_path}: a test is a function marked `$test` on the line before it (`$test` then `let adds = () => $expect add(1 2) =? 3`)")
         if len(pyt) > 0: fatal(nodes[int(syms[modules[mainm].names[intern(pyt)]].decl)].pos, "'{pyt}' is a function, not a test: a test is written `test \"{pyt[5..]}\":` with its lines below it (`assert(...)` in them)")
         fatal(-1, "no tests in {main_path}: a test is written `test \"adds\":` with its lines below it, as `assert(add(1, 2) == 3)`")
     if test_mode:
         # top-level code runs first (it may set up globals), then each test in order
         if not check_all: skip_main = true
+        count = 0
+        computed: int[]
         loop d in test_decls:
+            pos = nodes[d].pos
             nm = name_of(int(nodes[d].sval))
-            if not files[pos_file(nodes[d].pos)].is_dewy and len(nm) >= 2 and nm[0] == '"': nm = nm[1..len(nm) - 1)
-            # if __test_begin(name): body; __test_end()   (the body in a process of its own, where it can be)
+            if nodes[d].aux == 1:
+                # (Dewy's `$test` function: called once, or once per case as name[i])
+                if nodes[d].a != 0:
+                    # (a computed array of cases: each element, by its index at run time)
+                    cases = int(nodes[d].a)
+                    index = "$test_case{d}"
+                    arg = bc_call("__test_case", [cases, bc_ident(index, pos)], pos)
+                    name = bc_call("__test_case_name", [synth_str(nm, pos), bc_ident(index, pos)], pos)
+                    modules[mainm].inits.push(bc_loop(index, bc_call("__test_count", [clone(cases)], pos), [test_entry(name, [synth_call(nm, [arg], pos)], pos)], pos))
+                    computed.push(clone(cases))
+                    continue
+                if nkids(d) == 0:
+                    modules[mainm].inits.push(test_entry(synth_str(nm, pos), [synth_call(nm, [], pos)], pos))
+                    count += 1
+                    continue
+                loop k in 0.. and case in kids(d):
+                    modules[mainm].inits.push(test_entry(synth_str("{nm}[{k}]", nodes[case].pos), [synth_call(nm, kids(case), nodes[case].pos)], nodes[case].pos))
+                    count += 1
+                continue
+            if not files[pos_file(pos)].is_dewy and len(nm) >= 2 and nm[0] == '"': nm = nm[1..len(nm) - 1)
             body = int(nodes[d].b)
-            kids: int[]
-            loop i in [0..nkids(body)): kids.push(kid(body, i))
-            kids.push(synth_call("__test_end", [], nodes[d].pos))
-            set_list(body, kids)
-            cond = int(nodes[synth_call("__test_begin", [synth_str(nm, nodes[d].pos)], nodes[d].pos)].a)
-            ifn = mk(.if_, nodes[d].pos)
-            nodes[ifn].a = i32(cond)
-            nodes[ifn].b = i32(body)
-            modules[mainm].inits.push(ifn)
+            modules[mainm].inits.push(test_entry(synth_str(nm, pos), kids(body), pos))
+            count += 1
         cnt = mk(.int_lit, 0)
-        nodes[cnt].ival = test_decls.len()
-        modules[mainm].inits.push(synth_call("__test_done", [cnt], 0))
+        nodes[cnt].ival = count
+        total = cnt
+        loop cases in computed: total = bc_bin(.plus, total, bc_call("__test_count", [cases], 0), 0)
+        modules[mainm].inits.push(synth_call("__test_done", [total], 0))
     # (sloppy check: the tests, and the game loop's update and draw too)
     if (not test_mode or check_all) and (has_upd or has_drw):
         user_main = false
@@ -4906,8 +4940,12 @@ check_program = (main_path: str):
             warn(nodes[d].pos, "nothing in this file runs: it only makes functions, and making {fnm} does not run it. Lines at the top of the file run when the program starts (`{fnm}()` there calls it); a game's `update = (dt: f64):` runs every frame, where `if key_pressed(.space): ...` checks a key. (A file that other files `use` is fine like this.)")
             break
     if not ide_on and (not test_mode or check_all) and runs:
+        # (a `$test` function: `dewy-core test` runs it)
+        tested: {int: bool} = {}
         loop d in modules[mainm].decls:
-            if nodes[d].kind != .fn_ or fn_used.has(d) or has_flag(d, NF_EXTERN) or nodes[d].c != 0: continue
+            if nodes[d].kind == .test_ and nodes[d].aux == 1: tested[int(nodes[d].name)] = true
+        loop d in modules[mainm].decls:
+            if nodes[d].kind != .fn_ or fn_used.has(d) or has_flag(d, NF_EXTERN) or nodes[d].c != 0 or tested.has(int(nodes[d].name)): continue
             dn = name_of(int(nodes[d].name))
             if dn == "main" or dn == "update" or dn == "draw" or starts_with(dn, "_") or starts_with(dn, "(") or starts_with(dn, "op_"): continue
             # (a method is a member of its type, there for whoever uses the type: only a private

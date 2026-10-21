@@ -32,17 +32,19 @@ advance=(@field:Field feed:float32 remove:float32):>void=>{
     field.steps+=1
 }
 
-test "unseeded field stays uniform" {
+$test
+unseeded_field_stays_uniform = () => {
     let field=fresh(8 6)
     advance(@field 0.035 0.062)
-    assert(field.a.data =? fill(1.0 as float32 48))
-    assert(field.b.data =? fill(0.0 as float32 48) and field.steps =? 1)
+    $expect field.a.data =? fill(1.0 as float32 48)
+    $expect field.b.data =? fill(0.0 as float32 48) and field.steps =? 1
 }
 
-test "painting and evolution preserve a saved field" {
+$test
+painting_and_evolution_preserve_a_saved_field = () => {
     let field=fresh(8 6) let saved=field
     paint(@field 4 3 1)
     advance(@field 0.035 0.062)
-    assert(field.b[3 4] >? 0.25 and field.b[0 0] =? 0.0)
-    assert(saved.b.data =? fill(0.0 as float32 48) and saved.steps =? 0)
+    $expect field.b[3 4] >? 0.25 and field.b[0 0] =? 0.0
+    $expect saved.b.data =? fill(0.0 as float32 48) and saved.steps =? 0
 }

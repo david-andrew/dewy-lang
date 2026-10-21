@@ -44,12 +44,12 @@ let world=fresh()
 step=(dt:float64):>void=>{
     advance(@world min(dt 0.05) 3.0)
 }
-test "fresh world" {
-    assert(world.score =? 0)
-}
-test "steps" {
+$test
+fresh_world=()=>$expect world.score =? 0
+$test
+steps=()=>{
     step(0.1)
-    assert(world.score =? 1)
+    $expect world.score =? 1
 }
 main=():>int64=>{
     step(0.1)
@@ -272,15 +272,15 @@ def test_dewy_symbols_and_code_lenses(project):
     game = root / 'game.dewy'
     symbols = client.request('textDocument/documentSymbol', {'textDocument': {'uri': game.as_uri()}})
     assert [(s['name'], s['kind']) for s in symbols] == [
-        ('world', 13), ('step', 12), ('test "fresh world"', 24), ('test "steps"', 24), ('main', 12)]
+        ('world', 13), ('step', 12), ('fresh_world', 12), ('steps', 12), ('main', 12)]
     lenses = client.request('textDocument/codeLens', {'textDocument': {'uri': game.as_uri()}})
     found = [(lens['range']['start']['line'], lens['command']['title'], lens['command']['command'],
               lens['command']['arguments']) for lens in lenses]
     uri = game.as_uri()
     assert found == [
         (5, 'Run all tests', 'dewy.core.test', [uri]),
-        (5, 'Run test', 'dewy.core.runTest', [uri, 'fresh world']),
-        (8, 'Run test', 'dewy.core.runTest', [uri, 'steps']),
+        (5, 'Run test', 'dewy.core.runTest', [uri, 'fresh_world']),
+        (7, 'Run test', 'dewy.core.runTest', [uri, 'steps']),
         (12, 'Run', 'dewy.core.run', [uri]),
         (12, 'Debug', 'dewy.core.debug', [uri]),
     ]

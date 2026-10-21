@@ -3,9 +3,7 @@
 exit = (code: int):
     # (a test that ends the program: it did not reach its end)
     if __test_child:
-        __out_flush()
-        __write_fd(1, data("FAILED\n"), 7)
-        __write_err("    the test called exit({code}) before its end\n")
+        __write_err("the test called exit({code}) before its end\n")
         __exit(101)
     when BOOTSTRAP:
         __out_flush()
@@ -887,18 +885,29 @@ temp_dir = () -> str:
             if len(t) > 0: return t
         "/tmp"
 
-# ---------------- `sloppy test` support ----------------
+# ---------------- `dewy-core test` support ----------------
 # Each native test runs in its own process. POSIX forks the initialized program;
 # Windows starts this executable again, selecting one test by declaration index.
+# What a test prints is collected and shown only when it fails. Each test gives
+# a mark as it ends (. passed, F failed), then the failures' output, then counts;
+# `--json` gives a JSON object per test and one for the summary instead. The exit
+# status is the number of failures (at most 100), or 101 when a test aborted (a
+# panic or failed $runtime_assert: its process ended).
 __tests_run = 0
 __tests_failed = 0
+__tests_aborted = 0
 __test_t0 = 0.0
 __test_child = false
-__testing = false                   # (a sloppy test run: window() opens nothing)
+__testing = false                   # (a test run: window() opens nothing)
 __test_args: str[]                  # original user arguments in a re-executed test
+__test_words: str[]                 # names to select tests by (a test runs if its name has one)
+__test_json = false
 __test_selected = ""
 __test_index = 0
+__test_current = ""
+__test_failures: str[]              # the failed tests' names and their output, in pairs
 __test_job: *u8 = null
+__expect_failures = 0               # expectations that failed in this process
 __test_process_group = ():
     when TARGET == "windows":
         if __test_job != null: return
@@ -919,75 +928,198 @@ __test_run_begin = ():
         __test_selected = a[2]
         __test_args = a[3..]
         __test_child = true
+    else:
+        loop i in [1..a.len()):
+            if a[i] == "--json" and i == 1: __test_json = true
+            else: __test_words.push(a[i])
     when TARGET == "windows":
         if not __test_child: __test_process_group()
 
-# true where the test's code is to run (the child; or here). `sloppy test file.jo words`:
+# a failed `$expect` (or `$fail`): counted, and reported on stderr; the function it is in returns
+__expect_fail = (at: str, condition: str, shown: str, message: str, notes: str):
+    __expect_failures += 1
+    __out_flush()
+    what = message
+    if len(what) == 0: what = condition
+    if len(what) == 0: what = "$fail"
+    eprint("{at}: expectation failed: {what}")
+    if len(shown) > 0: eprint(shown)
+    if len(notes) > 0: eprint(notes)
+
+# "name[i]": a case's name
+__test_case_name = (name: str, i: int) -> str: "{name}[{i}]"
+__test_count[T] = (cases: T[]) -> int: cases.len()
+__test_case[T] = (cases: T[], i: int) -> T: cases[i]
+
+# true where the test's code is to run (the child; or here). `dewy-core test file words`:
 # only the tests whose names have one of the words in them
 __test_begin = (name: str) -> bool:
     __test_index += 1
     if __test_child: return __test_selected == str(__test_index)
-    a = args()
-    if a.len() > 1:
+    if __test_words.len() > 0:
         found = false
-        loop i in [1..a.len()):
-            if find(name, a[i]) >= 0: found = true
+        loop w in __test_words:
+            if find(name, w) >= 0: found = true
         if not found: return false
-    write("test {name} ... ")
     __test_t0 = time()
+    __test_current = name
     when TARGET == "linux" or TARGET == "macos":
         __out_flush()
+        # (its output and errors into one pipe, in the order written; its output copied into another)
+        both = [0]
+        outs = [0]
+        if syscall(293, data(both), 0x80000) != 0 or syscall(293, data(outs), 0x80000) != 0: panic("could not make pipes for the test's output")   # pipe2(O_CLOEXEC)
         pid = syscall(57)
         if pid == 0:
+            syscall(33, both[0] >> 32, 1)            # dup2
+            syscall(33, both[0] >> 32, 2)
+            __test_mirror = outs[0] >> 32
             __test_child = true
+            __expect_failures = 0
             return true
+        syscall(3, both[0] >> 32)
+        syscall(3, outs[0] >> 32)
+        output, stdout = __test_collect(both[0] & 0xFFFFFFFF, outs[0] & 0xFFFFFFFF, pid > 0)
         if pid > 0:
             st = [0]
-            syscall(61, pid, data(st), 0, 0)
-            __tests_run += 1
-            if st[0] & 0xFFFF == 0: print("ok ({(time() - __test_t0) * 1000:.1} ms)")
-            else:
-                # (a panic, 101, has said FAILED and why already)
-                if st[0] & 0xFFFF != 101 << 8: print("FAILED")
-                __tests_failed += 1
+            loop true:
+                if syscall(61, pid, data(st), 0, 0) != -4: break    # wait4 (EINTR: again)
+            status = st[0] & 0xFFFF
+            code = (status >> 8) & 255
+            if status & 127 != 0: code = 128 + (status & 127)      # (ended by a signal)
+            __test_record(name, code, output, stdout)
             return false
     else when TARGET == "windows":
         exe = exe_path()
-        argv = [exe, "--dewy-internal-test", str(__test_index)] + a
+        argv = [exe, "--dewy-internal-test", str(__test_index)] + args()
         __out_flush()
-        code = __w32_run_output(exe, argv, true, "").0
-        __tests_run += 1
-        if code == 0: print("ok ({(time() - __test_t0) * 1000:.1} ms)")
-        else:
-            if code != 101: print("FAILED")
-            if code < 0: eprint("    could not start the test process")
-            __tests_failed += 1
+        code, out = __w32_run_output(exe, argv, false, "")
+        if code < 0: out = "could not start the test process\n"
+        __test_record(name, code, out, out)
         return false
     true
+
+# what a test wrote until it ended: its output and errors in the order written (for showing),
+# and its output alone
+__test_collect = (both_fd: int, out_fd: int, running: bool) -> (str, str):
+    both: u8[]
+    out: u8[]
+    if not running:
+        syscall(3, both_fd)
+        syscall(3, out_fd)
+        return ("", "")
+    fds = [both_fd | (1 << 32), out_fd | (1 << 32)]  # pollfd: fd, events POLLIN
+    open = 2
+    chunk = fill(u8(0), 65536)
+    loop open > 0:
+        loop i in [0..2): fds[i] = fds[i] & 0xFFFFFFFFFFFF
+        r = syscall(7, data(fds), 2, -1)
+        if r == -4: continue                         # (EINTR: again)
+        if r < 0: break
+        loop i in [0..2):
+            fd = fds[i] & 0xFFFFFFFF
+            if fd == 0xFFFFFFFF or (fds[i] >> 48) & 0xFFFF == 0: continue
+            n = syscall(0, fd, data(chunk), 65536)
+            if n == -4: continue
+            if n <= 0:
+                syscall(3, fd)
+                fds[i] = 0xFFFFFFFF | (1 << 32)      # (fd -1: polled no more)
+                open -= 1
+                continue
+            loop k in [0..n):
+                if i == 0: both.push(chunk[k])
+                else: out.push(chunk[k])
+    (str_from_bytes(both), str_from_bytes(out))
 
 __test_end = ():
     if __test_child:
         __out_flush()
+        if __expect_failures > 0: __exit(1)
         __exit(0)
+    failed = 0
+    if __expect_failures > 0: failed = 1
+    __test_record(__test_current, failed, "", "")
+    __expect_failures = 0
+
+# a test's result: 0 passed, 1 an expectation failed, anything else aborted
+__test_record = (name: str, code: int, output: str, stdout: str):
     __tests_run += 1
-    print("ok ({(time() - __test_t0) * 1000:.1} ms)")
+    status = "pass"
+    if code != 0:
+        __tests_failed += 1
+        status = "fail"
+        if code != 1:
+            __tests_aborted += 1
+            status = "abort"
+        __test_failures.push(name)
+        __test_failures.push(output)
+    if __test_json:
+        line = "\{\"test\":{__test_jq(name)},\"status\":\"{status}\",\"ms\":{(time() - __test_t0) * 1000:.1}"
+        if code != 0: line += ",\"output\":{__test_jq(output)},\"stdout\":{__test_jq(stdout)}"
+        if code != 0 and code != 1: line += ",\"exit\":{code}"
+        print(line + "\}")
+        return
+    mark = "F"
+    if code == 0: mark = "."
+    if __stdout_tty():
+        if code == 0: mark = "\x1b[32m.\x1b[0m"
+        else: mark = "\x1b[31mF\x1b[0m"
+    write(mark)
+    __out_flush()
 
 __test_done = (n: int):
     if __test_child: panic("selected test was not reached")
-    a = args()
-    if a.len() > 1 and __tests_run == 0:
+    if __test_words.len() > 0 and __tests_run == 0:
         words = ""
-        loop i in [1..a.len()):
-            if i > 1: words = words + ", "
-            words = words + "'" + a[i] + "'"
-        eprint("no test's name has {words} in it (of {n} tests)")
+        loop i in 0.. and w in __test_words:
+            if i > 0: words = words + ", "
+            words = words + "'" + w + "'"
+        if __test_json: print("\{\"passed\":0,\"failed\":0,\"aborted\":0,\"not_run\":{n},\"exit\":1,\"error\":{__test_jq("no test's name has {words} in it")}\}")
+        else: eprint("no test's name has {words} in it (of {n} tests)")
         exit(1)
-    if __tests_failed > 0:
-        print("{__tests_run - __tests_failed} passed, {__tests_failed} failed")
-        exit(1)
-    if __tests_run < n: print("{__tests(__tests_run)} passed ({n - __tests_run} not run: their names do not match)")
-    else: print("{__tests(n)} passed")
+    passed = __tests_run - __tests_failed
+    code = min(__tests_failed, 100)
+    if __tests_aborted > 0: code = 101
+    if __test_json:
+        print("\{\"passed\":{passed},\"failed\":{__tests_failed},\"aborted\":{__tests_aborted},\"not_run\":{n - __tests_run},\"exit\":{code}\}")
+        exit(code)
+    if __tests_run > 0: print("")
+    i = 0
+    loop i + 1 < __test_failures.len():
+        print("--- FAIL {__test_failures[i]}")
+        out = __test_failures[i + 1]
+        if len(out) > 0:
+            write(out)
+            if out[len(out) - 1] != '\n': print("")
+        i += 2
+    summary = "{passed} passed"
+    if __tests_failed > 0: summary = "{__tests_failed} failed, " + summary
+    if __tests_aborted > 0: summary += " ({__tests_aborted} aborted)"
+    if __tests_run < n: summary += " ({n - __tests_run} not run: their names do not match)"
+    print(summary)
+    exit(code)
 
-__tests = (n: int) -> str:
-    if n == 1: return "1 test"
-    "{n} tests"
+# a string as JSON
+__test_jq = (s: str) -> str:
+    buf: u8[]
+    buf.push('"')
+    loop c in s:
+        if c == '"' or c == '\\':
+            buf.push('\\')
+            buf.push(c)
+        else if c == '\n':
+            buf.push('\\')
+            buf.push('n')
+        else if c == '\t':
+            buf.push('\\')
+            buf.push('t')
+        else if c == '\r':
+            buf.push('\\')
+            buf.push('r')
+        else if c < 32:
+            loop d in "\\u00": buf.push(d)
+            buf.push("0123456789abcdef"[c >> 4])
+            buf.push("0123456789abcdef"[c & 15])
+        else: buf.push(c)
+    buf.push('"')
+    str_from_bytes(buf)

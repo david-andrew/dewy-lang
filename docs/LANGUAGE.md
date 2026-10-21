@@ -34,30 +34,61 @@ standalone build.
 
 ## Test a project
 
-Declare tests at the top level alongside your code, or import the code into a
-separate test file:
+A test is an ordinary function marked `$test` on the line before it. `$expect
+condition` (or `$expect condition, "message"`) states what it checks:
 
 ```dewy
 add = (a: int64 b: int64) => a+b
 
-test "adds numbers" {
-    assert(add(20 22) =? 42)
-}
+$test
+adds_numbers = () => $expect add(20 22) =? 42
+
+$test(cases=(1 2 -3))
+adds_zero = (x:int64) => $expect add(x 0) =? x, "{x} changed"
+
+$test(cases=[[a=1 b=2] [a=(-3) b=4]])
+commutes = (a:int64 b:int64) => $expect add(a b) =? add(b a)
 ```
 
 ```sh
 ./tools/dewy test examples/paddle_tests.dewy
 ./tools/dewy test --release examples/paddle_tests.dewy bounce
 ./tools/dewy test --watch examples/paddle_tests.dewy bounce
+./tools/dewy test --json examples/paddle_tests.dewy
 ```
 
-The standalone compiler accepts the same `test` command. It compiles the selected
-file once and runs its test blocks in declaration order. Optional words after the
-filename select test names containing any of those words. A failed test, no tests,
-or no matching names produces a nonzero exit status. Names must be constant strings.
+A failed expectation is reported on stderr (`expectation failed`, the source line
+with the condition underlined, the message, and the values of compared names and
+members) and returns from the function it is in; the code after an expectation
+may assume it, so `$expect value is? int64` narrows `value`. Expectations belong
+in functions that give no value: the test itself, or a helper it calls. A
+helper's failure returns from the helper, the test goes on, and the test fails.
+`$fail "message"` always fails. An expectation the compiler refutes is a warning;
+the test fails when it runs.
+
+`cases=` runs the test once per case, named `name[index]`: each value of a tuple
+or array literal is the one argument, an object literal's fields are passed by
+name, and a module constant array is looped over. A test with parameters needs
+cases; one without parameters cannot have them.
+
+`test` builds the selected file with a generated entry that calls each test (per
+case) in declaration order; `main` and game callbacks do not run, and windows stay
+closed. Each test prints `.` when it passes and `F` when it fails. What a test prints is
+collected and shown only when it fails, under `--- FAIL name[case]`, then the
+counts (`1 failed, 10 passed`). The exit status is the number of failed tests (at
+most 100), 101 when a test aborted (a panic, a failed `$runtime_assert` or an
+`exit`), and 102 when the file does not build. `--json` prints one JSON object
+per test (`test`, `status`, and for a failure its `output` and `stdout`) and a
+summary. Optional words after the filename select test names containing any of
+them; no tests, or no matching names, is an error. Only tests declared in the
+selected file run; imported files supply code, not additional tests. Given a
+directory instead, `test` runs each `.dewy` file under it with a line starting
+`$test` (skipping hidden directories and `__dewycache__`), one line of marks per
+file, and adds up the results.
+
 The VS Code extension also provides **Dewy: Test Current File**, a release variant,
-and **Run test** code lenses above each test. These save open files and show results in a
-task terminal; the editor's task commands can stop or rerun them.
+and **Run test** code lenses above each `$test`. These save open files and show
+results in a task terminal; the editor's task commands can stop or rerun them.
 
 `test --watch` reruns the selected tests when the source, an imported module or
 an embedded asset changes. It waits for another edit after failed tests or a
@@ -66,19 +97,17 @@ test build, including `--release` when requested. Enter `r` to rerun manually or
 `q` to quit. **Dewy: Watch Tests in Current File** starts this workflow in
 a VS Code task; save edits to trigger a rerun and terminate the task to stop it.
 
-On native hosts, each test runs in a separate child process: assertions and
-panics fail that test, later tests still run, and changes to globals stay local to
-that test. Linux and macOS fork after top-level initialization. Windows starts
-the executable again for each test, so top-level initialization repeats in each
-child. Filesystem and
-other external effects remain shared. Tests run natively, skip `main` and game
-callbacks, and suppress windows opened through `window`. Only tests declared in
-the selected file run; imported files supply code, not additional tests.
+On native hosts, each test runs in a separate child process, so a test that aborts
+does not stop the others, and changes to globals stay local to that test. Linux
+and macOS fork after top-level initialization. Windows starts the executable
+again for each test, so top-level initialization repeats in each child (and a
+test's stderr is not collected there). Filesystem and other external effects
+remain shared.
 
-Normal runs and builds omit test bodies; `check` checks the selected file's tests
-as well as its program. Test blocks do not accept `return`; put reusable logic in
-ordinary functions. The compiler repository's Python validation gate remains
-`python3 -m tools.core test`.
+Test functions are checked and compiled like any other function, and an ordinary
+run or build keeps the module's own `main`. `check` checks the selected file's
+tests as well as its program. The compiler repository's Python validation gate
+remains `python3 -m tools.core test`.
 
 ## Run, check and build
 

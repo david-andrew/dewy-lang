@@ -76,22 +76,24 @@ choose = (@reading: Reading index: int64) :> void => {
     advance(@reading)
 }
 
-test "a resumed line keeps its scene and characters" {
+$test
+a_resumed_line_keeps_its_scene_and_characters = () => {
     let reading = fresh()
     advance(@reading)
-    assert(reading.step.speaker=?"Mira" and reading.shown["mira"]=?"left")
+    $expect reading.step.speaker=?"Mira" and reading.shown["mira"]=?"left"
     let loaded = resume(reading.bookmark)
-    assert(loaded.step=?reading.step and loaded.background=?reading.background and loaded.shown=?reading.shown)
+    $expect loaded.step=?reading.step and loaded.background=?reading.background and loaded.shown=?reading.shown
 }
 
-test "the two choices lead to different replies" {
+$test
+the_two_choices_lead_to_different_replies = () => {
     let reading = fresh()
     loop reading.step.kind not=?StoryKind.choice { advance(@reading) }
     let other = reading
     choose(@reading 0)
     choose(@other 1)
-    assert(reading.step.speaker=?"Mira" and other.step.speaker=?"Ren")
-    assert(reading.script.vars.get("mira")??0=?1 and other.script.vars.get("ren")??0=?1)
+    $expect reading.step.speaker=?"Mira" and other.step.speaker=?"Ren"
+    $expect reading.script.vars.get("mira")??0=?1 and other.script.vars.get("ren")??0=?1
 }
 
 # Presentation and live game state.

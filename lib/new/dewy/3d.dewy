@@ -35,13 +35,14 @@ shot_target = (targets: array<Orb> origin: vec3 direction: vec3 time: float64 bl
     return best
 }
 
-test "shots choose the nearest visible orb" {
+$test
+shots_choose_the_nearest_visible_orb = () => {
     let targets = [Orb[pos = vec3(0 0 -8)] Orb[pos = vec3(0 0 -4)] Orb[pos = vec3(0 0 4)]]
     let forward = view_direction(0.0 0.0)
-    assert(shot_target(targets vec3(0 0 0) forward 0.0 100.0)=?1)
-    assert(shot_target(targets vec3(0 0 0) forward 0.0 3.0)=?-1)
+    $expect shot_target(targets vec3(0 0 0) forward 0.0 100.0)=?1
+    $expect shot_target(targets vec3(0 0 0) forward 0.0 3.0)=?-1
     targets[1].pop = 0.1
-    assert(shot_target(targets vec3(0 0 0) forward 0.0 100.0)=?0)
+    $expect shot_target(targets vec3(0 0 0) forward 0.0 100.0)=?0
 }
 
 # Presentation and live game state.

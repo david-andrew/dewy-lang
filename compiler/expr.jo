@@ -736,7 +736,9 @@ map_elem_place = (n: int):
             struct_ctor_zero(d, pv, int(structs[si].decl))
             add_flag(d, NF_CHECKED)
             args.push(d)
-    call = bc_call(if present: "__map_entry_present" else: "__map_entry", args, pos)
+    entry = "__map_entry"
+    if present: entry = "__map_entry_present"
+    call = bc_call(entry, args, pos)
     check_expr(call, 0)
     call = last_checked
     f = mk(.field, pos)

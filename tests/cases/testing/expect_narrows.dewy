@@ -1,0 +1,16 @@
+# The code after an expectation may assume it: `is?` narrows, as after a guard.
+twice = (value:int64?):>void => {
+    $expect value is? int64
+    printl("{value * 2}")
+}
+fail_first = (n:int64):>void => {
+    if n >? 1 $fail "too large"
+    printl("{n} is small")
+}
+main = () => {
+    twice(21)
+    twice(none)
+    fail_first(1)
+    fail_first(2)
+    return 0
+}

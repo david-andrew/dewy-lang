@@ -12,8 +12,8 @@ process.env.PATH = (process.env.PATH || '').split(path.delimiter)
 const compilerLink = path.join(directory, 'compiler with spaces');
 fs.symlinkSync(compiler, compilerLink);
 const source = path.join(directory, 'tests & $literal.dewy');
-fs.writeFileSync(source, 'test "old disk version" { assert(false) }');
-let body = 'test "saved version" { assert(true) }';
+fs.writeFileSync(source, '$test\nold_disk_version = () => $expect false');
+let body = '$test\nsaved_version = () => $expect true';
 let setting = compilerLink;
 let save = true;
 let taskError = false;
@@ -82,7 +82,7 @@ const vscode = {
     save = true;
     await run();
     assert.equal(results.at(-1).status, 0, results.at(-1).stderr);
-    assert.match(results.at(-1).stdout, /test saved version .*ok/);
+    assert.match(results.at(-1).stdout, /^1 passed$/m);
     assert.equal(tasks.at(-1).scope, folder);
     assert.equal(tasks.at(-1).group, vscode.TaskGroup.Test);
     assert.deepEqual(tasks.at(-1).execution.args, ['test', source]);
@@ -95,21 +95,21 @@ const vscode = {
     assert.deepEqual(tasks.at(-1).execution.args, ['test', '--watch', source]);
     assert.match(tasks.at(-1).name, /Watch tests/);
     // Code lenses name the file and one test; the run command runs the program.
-    await commands.get('dewy.core.runTest')(document.uri, 'saved version');
+    await commands.get('dewy.core.runTest')(document.uri, 'saved_version');
     assert.equal(results.at(-1).status, 0, results.at(-1).stderr);
-    assert.deepEqual(tasks.at(-1).execution.args, ['test', source, 'saved version']);
-    assert.match(results.at(-1).stdout, /test saved version .*ok/);
+    assert.deepEqual(tasks.at(-1).execution.args, ['test', source, 'saved_version']);
+    assert.match(results.at(-1).stdout, /^1 passed$/m);
     body = 'main=():>int64=>{\n    printl("ran")\n    return 0\n}';
     await commands.get('dewy.core.run')(document.uri);
     assert.deepEqual(tasks.at(-1).execution.args, ['run', source]);
     assert.equal(tasks.at(-1).group, undefined);
     assert.equal(results.at(-1).stdout.trim(), 'ran');
-    body = 'test "fails" { assert(false) }\ntest "still runs" { assert(true) }';
+    body = '$test\nfails = () => $expect false\n$test\nstill_runs = () => $expect true';
     await run();
     assert.notEqual(results.at(-1).status, 0);
-    assert.match(results.at(-1).stdout, /test still runs .*ok/);
+    assert.match(results.at(-1).stdout, /^1 failed, 1 passed$/m);
     vscode.workspace.getWorkspaceFolder = () => undefined;
-    body = 'test "standalone file" { assert(true) }';
+    body = '$test\nstandalone_file = () => $expect true';
     await run();
     assert.equal(tasks.at(-1).scope, vscode.TaskScope.Workspace);
     assert.equal(results.at(-1).status, 0, results.at(-1).stderr);

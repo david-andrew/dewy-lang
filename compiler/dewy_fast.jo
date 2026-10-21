@@ -825,12 +825,9 @@ dn_stmt = () -> int:
     result = 0
     # Contextual keyword: ordinary bindings/calls named `test` still work.
     if symbol == .kw_test and dn_tokens[dn_at + 1].space and (dn_tokens[dn_at + 1].kind == .quoted or dn_tokens[dn_at + 1].kind == .rawquoted) and not dn_tokens[dn_at + 1].newline:
-        dn_at += 1
-        name = dn_string(dn_take())
-        if dewy_syntax[name].kind != .string: return dn_error(token.start, "a test name must be a constant string")
-        if dn_peek() != .lbrace: return dn_error(dn_tokens[dn_at].start, "expected '{{' after the test name")
-        result = dn_node(.keyword_expr, "", token.start, [dn_node(.keyword, word, token.start), name, dn_block()])
-    else if (symbol == .kw_let or symbol == .kw_const or symbol == .kw_return or symbol == .kw_break or symbol == .kw_continue or symbol == .kw_import or symbol == .kw_from):
+        # (the test block of other languages: a Dewy test is a function marked `$test`)
+        return dn_error(token.start, "a test is a function marked `$test` on the line before it: `$test` then `let adds_numbers = () => $expect add(20 22) =? 42`")
+    if (symbol == .kw_let or symbol == .kw_const or symbol == .kw_return or symbol == .kw_break or symbol == .kw_continue or symbol == .kw_import or symbol == .kw_from):
         dn_at += 1
         parts = [dn_node(.keyword, word, token.start)]
         if symbol != .kw_break and symbol != .kw_continue:
@@ -858,14 +855,28 @@ dewy_fast_file = (file: int) -> int[]:
     dn_depth = 0
     dewy_syntax = [DewySyntax(), DewySyntax(.inverted_comparison)]
     declarations: int[]
+    marked = 0
     loop dn_tokens[dn_at].kind != .eof:
         before = dn_at
         syntax = dn_statement(true)
-        loop declaration in dw_top_declarations(syntax): declarations.push(declaration)
+        tag = dw_test_tag(syntax)
+        if tag != 0:
+            if marked != 0: fatal(dewy_syntax[tag].pos, "a second `$test` line: one marks the function just after it")
+            marked = dw_test_spec(tag)
+            dewy_syntax.truncate(2)
+            if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a declaration")
+            continue
+        made = dw_top_declarations(syntax)
+        loop declaration in made: declarations.push(declaration)
+        if marked != 0:
+            dw_test_attach(marked, made)
+            declarations.push(marked)
+            marked = 0
         # Projection owns the retained data in the compact AST. Discard each
         # declaration's temporary syntax before parsing the next declaration.
         dewy_syntax.truncate(2)
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a declaration")
+    if marked != 0: fatal(nodes[marked].pos, "`$test` marks a module-level function: put it on the line just before one")
     dn_tokens = []
     dewy_syntax = []
     dw_finish_declarations(declarations)

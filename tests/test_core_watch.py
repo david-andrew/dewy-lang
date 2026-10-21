@@ -116,27 +116,33 @@ let count=0
 main=()=>panic("must not run main")
 update=(dt:float64):>void=>panic("must not update")
 draw=():>void=>panic("must not draw")
-test "selected answer" { count+=1 assert(count =? 1) assert(answer() =? 42) }
-test "excluded" { panic("must not run excluded test") }
+$test
+selected_answer = () => {
+    count+=1
+    $expect count =? 1
+    $expect answer() =? 42
+}
+$test
+excluded = () => panic("must not run excluded test")
 '''
     save(source, program)
     save(helper, 'answer=()=>42')
     watcher = Watch(compiler, source, options=['test', '--watch', *flags], filters=['selected'])
     try:
         watcher.expect('saving a file reruns tests')
-        watcher.expect(r'1 test passed \(1 not run')
+        watcher.expect(r'1 passed \(1 not run')
         save(helper, 'answer=()=>43')
-        watcher.expect('0 passed, 1 failed')
+        watcher.expect('1 failed, 0 passed')
         save(helper, 'answer=()=>missing_answer')
         watcher.expect("unknown name 'missing_answer'")
         watcher.expect('waiting for changes')
         save(helper, 'answer=()=>42')
-        watcher.expect(r'1 test passed \(1 not run')
-        save(source, program + '\ntest "selected again" { assert(count =? 0) }\n')
-        watcher.expect(r'2 tests passed \(1 not run')
+        watcher.expect(r'1 passed \(1 not run')
+        save(source, program + '\n$test\nselected_again = () => $expect count =? 0\n')
+        watcher.expect(r'2 passed \(1 not run')
         watcher.process.stdin.write(b'r\n')
         watcher.process.stdin.flush()
-        watcher.expect(r'2 tests passed \(1 not run')
+        watcher.expect(r'2 passed \(1 not run')
     finally:
         watcher.close()
 
@@ -154,9 +160,9 @@ def test_core_watch_tests_cancel_child(compiler, tmp_path, stop):
 ''')
     source = tmp_path / 'tests.dewy'
     save(source, '''from p"process.jo" import pid
-test "waiting" {
+$test
+waiting = () => {
     write_text("child.pid" "{pid()}")
-    eprint"child is waiting"
     loop true { sleep(50ms) }
 }
 ''')
@@ -185,7 +191,11 @@ test "waiting" {
     watcher = Watch(compiler, source, options=['test', '--watch'])
     child = None
     try:
-        watcher.expect('child is waiting')
+        # (what a test prints is shown only when it fails: its pid file says it is waiting)
+        deadline = time.monotonic() + 10
+        while not (tmp_path / 'child.pid').exists() or not (tmp_path / 'child.pid').read_text():
+            assert time.monotonic() < deadline, 'the test did not start'
+            time.sleep(0.05)
         child = int((tmp_path / 'child.pid').read_text())
         assert running(child)
         if stop == 'quit':
@@ -332,7 +342,8 @@ def test_core_watch_missing_input(compiler, tmp_path, kind, directory_exists, te
         dependency = directory / 'helper.dewy'
         contents = 'label=()=>"recovered input"'
     if testing:
-        save(source, source.read_text().replace('main=()=>', 'test "dependency" {') + '}')
+        # (a failed test shows what it printed)
+        save(source, source.read_text().replace('main=()=>', '$test\ndependency=()=>{') + '\n$fail}')
     watcher = Watch(compiler, source, options=['test', '--watch'] if testing else ['watch'])
     try:
         watcher.expect('waiting for changes')

@@ -234,7 +234,7 @@ dw_fail_pos = (pos: int, what: str) -> int:
 # Metatags the design defines that this compiler does not implement yet. Each
 # is reported where it is written rather than as a generic syntax error.
 dw_designed_directive = (name: str) -> bool:
-    name in ["abstract", "allocator", "breakpoint", "expect", "fail", "field", "lend", "no_prelude", "proof", "prototype", "prototype_warnings", "supported_targets", "target", "test", "unsafe_assume", "__copy__", "__drop__", "__move__"]
+    name in ["abstract", "allocator", "breakpoint", "field", "lend", "no_prelude", "proof", "prototype", "prototype_warnings", "supported_targets", "target", "unsafe_assume", "__copy__", "__drop__", "__move__"]
 
 dw_unimplemented = (id: int, name: str) -> int:
     fatal(dewy_syntax[id].pos, "`${name}` is part of the design but not implemented yet")
@@ -245,6 +245,8 @@ dw_metatag_fail = (id: int) -> int:
     name = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
     if name == "explicit_copies": fatal(pos, "`$explicit_copies` is a module directive; put it at file scope")
+    if name == "test": fatal(pos, "`$test` goes alone on the line just before a module-level function declaration")
+    if name == "expect" or name == "fail": fatal(pos, "`${name}` is a statement in a function: a test, or a helper a test calls")
     if dw_designed_directive(name): return dw_unimplemented(id, name)
     if name == "capture": fatal(pos, "`$capture` belongs in a parameter list before a name: `($capture @count) => ...`")
     if name == "include_bytes": fatal(pos, "`$include_bytes` takes one path literal: `$include_bytes(p\"asset.png\") as image`")
@@ -256,6 +258,7 @@ dw_metatag_fail = (id: int) -> int:
 dw_directive = (id: int) -> int:
     name = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
+    if name == "expect" or name == "fail": fatal(pos, "`${name}` is a statement: it returns from its function when it fails, so it cannot give a value")
     if name != "assert" and name != "runtime_assert": return dw_unimplemented(id, name)
     condition = dw_child(id, 0)
     message = dw_child(id, 1)
@@ -273,6 +276,173 @@ dw_directive = (id: int) -> int:
     nodes[call].a = i32(callee)
     set_list(call, args)
     call
+
+# ---- tests: `$test`, `$expect`, `$fail` ----
+
+# What the function being parsed gives: 0 outside any function, 1 nothing (or not
+# said), 2 a value. Expectations return from their function when they fail.
+dw_fn_result = 0
+
+# `$expect condition [, message]` and `$fail [message]`: when the condition is
+# false (always, for `$fail`), report it, count it and return from the function:
+# `if not condition { __expect_fail(…) return }`. The code after an expectation
+# may assume it, as after any guard that returns.
+dw_expect = (id: int) -> int:
+    name = dewy_syntax[id].text
+    pos = dewy_syntax[id].pos
+    if dw_fn_result == 0: fatal(pos, "`${name}` belongs in a function: a test, or a helper a test calls")
+    if dw_fn_result == 2: fatal(pos, "`${name}` returns from its function when it fails, and this function gives a value: expectations live in `void` functions (a test, or a helper it calls); return the value to the test that checks it")
+    condition = dw_child(id, 0)
+    message = dw_child(id, 1)
+    text = dw_child(id, 2)
+    described = ""
+    if text != 0: described = join(words(dewy_syntax[text].text), " ")
+    where = pos
+    shown = ""
+    if condition != 0:
+        where = dewy_syntax[dw_unwrap(condition)].pos
+        line = source_line(where)
+        l, c = line_col(where)
+        if len(line) > 0:
+            caret = ""
+            loop i in [0..c - 1):
+                if i < len(line) and line[i] == '\t': caret += "\t"
+                else: caret += " "
+            width = max(1, min(len(described), len(line) - (c - 1)))
+            caret += "^"
+            loop i in [1..width): caret += "~"
+            shown = "    {line}\n    {caret}"
+    report = mk(.call, pos)
+    callee = mk(.ident, pos)
+    nodes[callee].name = i32(intern("__expect_fail"))
+    nodes[report].a = i32(callee)
+    said = dw_text("", pos)
+    if message != 0: said = dw_expr(message)
+    set_list(report, [dw_text(pos_str(pos), pos), dw_text(described, pos), dw_text(shown, pos), said, dw_expect_notes(condition, pos)])
+    statement = mk(.exprstmt, pos)
+    nodes[statement].a = i32(report)
+    failed = mk(.block, pos)
+    set_list(failed, [statement, mk(.return_, pos)])
+    if condition == 0: return failed
+    n = mk(.if_, pos)
+    negated = mk(.not_, pos)
+    nodes[negated].a = i32(dw_expr(condition))
+    nodes[n].a = i32(negated)
+    nodes[n].b = i32(failed)
+    add_flag(n, NF_STMT)
+    expectation_ifs[n] = true
+    n
+
+dw_text = (text: str, pos: int) -> int:
+    n = mk(.str_lit, pos)
+    nodes[n].sval = i32(intern(text))
+    n
+
+# A comparison's operands that are places (names, members, constant indices) are
+# shown with their values when it fails: `note: xs.length is 0`. Other operands
+# (calls) are not evaluated again.
+dw_expect_notes = (condition: int, pos: int) -> int:
+    if condition == 0: return dw_text("", pos)
+    let id = dw_unwrap(condition)
+    op = dw_op(id)
+    if not (op == .eq or op == .not_eq or op == .lt or op == .le or op == .gt or op == .ge) or dw_nchildren(id) != 3: return dw_text("", pos)
+    n = mk(.str_lit, pos)
+    nodes[n].aux = 1
+    pieces: int[]
+    loop side in [dw_child(id, 1), dw_child(id, 2)]:
+        shown = dw_operand_text(side)
+        if shown == "": continue
+        lead = "note: "
+        if pieces.len() > 0: lead = "\nnote: "
+        pieces.push(dw_text("{lead}{shown} is ", pos))
+        part = mk(.pair, pos)
+        nodes[part].a = i32(dw_expr(side))
+        nodes[part].sval = -1
+        pieces.push(part)
+    if pieces.len() == 0: return dw_text("", pos)
+    set_list(n, pieces)
+    n
+
+dw_operand_text = (id: int) -> str:
+    let id = dw_unwrap(id)
+    if dewy_syntax[id].kind == .identifier:
+        text = dewy_syntax[id].text
+        if text == "none": return ""
+        return text
+    op = dw_op(id)
+    if op == .dot and dw_nchildren(id) == 3 and dewy_syntax[dw_child(id, 2)].kind == .identifier:
+        base = dw_operand_text(dw_child(id, 1))
+        if base != "": return "{base}.{dewy_syntax[dw_child(id, 2)].text}"
+    if op == .index and dw_nchildren(id) == 3:
+        base = dw_operand_text(dw_child(id, 1))
+        indices: str[]
+        loop index in dw_children(dw_child(id, 2)):
+            let index = dw_unwrap(index)
+            if dw_integer_kind(dewy_syntax[index].kind): indices.push(dewy_syntax[index].text)
+            else:
+                inner = dw_operand_text(index)
+                if inner == "": return ""
+                indices.push(inner)
+        if base != "" and indices.len() > 0: return "{base}[{join(indices, " ")}]"
+    ""
+
+# `$test` or `$test(cases=…)`: a line of its own before a module function
+dw_test_tag = (id: int) -> int:
+    if id <= 0 or dewy_syntax[id].kind == .compact_stmt: return 0
+    let id = dw_unwrap(id)
+    if dewy_syntax[id].kind == .metatag and dewy_syntax[id].text == "test": return id
+    if dn_token_call(dw_op(id)) and dw_nchildren(id) == 3:
+        callee = dw_unwrap(dw_child(id, 1))
+        if dewy_syntax[callee].kind == .metatag and dewy_syntax[callee].text == "test": return id
+    0
+
+# The test a `$test` line declares, its function still to come: one block of
+# arguments per case (positional values, or an object's fields by name), or for a
+# computed array, the array (`a`); `ival` 1 when cases are given.
+dw_test_spec = (id: int) -> int:
+    pos = dewy_syntax[id].pos
+    n = mk(.test_, pos)
+    nodes[n].aux = 1
+    if dewy_syntax[id].kind == .metatag: return n
+    usage = "`$test` takes its cases as `$test(cases=(1 2 3))` or `$test(cases=[[a=1 b=2] [a=3 b=4]])`"
+    items = dw_children(dw_child(id, 2))
+    if items.len() != 1: fatal(pos, usage)
+    item = dw_unwrap(items[0])
+    if dw_op(item) != .assign or dw_name(dw_child(item, 1)) != "cases": fatal(dewy_syntax[item].pos, usage)
+    nodes[n].ival = 1
+    value = dw_unwrap(dw_child(item, 2))
+    if dewy_syntax[value].kind != .block or (dewy_syntax[value].text != "():" and dewy_syntax[value].text != "[]:"):
+        nodes[n].a = i32(dw_expr(value))
+        return n
+    cases: int[]
+    loop element in dw_children(value):
+        let element = dw_unwrap(element)
+        args: int[]
+        fields = dw_children(element)
+        named = dewy_syntax[element].kind == .block and dewy_syntax[element].text == "[]:" and fields.len() > 0
+        loop field in fields:
+            if dw_op(dw_unwrap(field)) != .assign: named = false
+        if named:
+            loop field in fields: args.push(dw_record_entry(dw_unwrap(field)))
+        else: args.push(dw_expr(element))
+        case = mk(.block, dewy_syntax[element].pos)
+        set_list(case, args)
+        cases.push(case)
+    if cases.len() == 0: fatal(dewy_syntax[value].pos, "`$test(cases=…)` needs at least one case")
+    set_list(n, cases)
+    n
+
+# The function a `$test` line marks: it names the test, and its parameters must
+# take the cases (or there are none, and no cases).
+dw_test_attach = (marked: int, declarations: int[]):
+    pos = nodes[marked].pos
+    if declarations.len() == 0 or nodes[declarations[0]].kind != .fn_: fatal(pos, "`$test` marks a module-level function: put it on the line just before one (`$test` then `let adds = () => $expect add(1 2) =? 3`)")
+    f = declarations[0]
+    nodes[marked].name = nodes[f].name
+    nodes[marked].sval = nodes[f].name
+    cased = nodes[marked].ival == 1
+    if nkids(f) > 0 and not cased: fatal(pos, "the test '{name_of(int(nodes[f].name))}' takes parameters: give it cases, `$test(cases=…)`")
+    if nkids(f) == 0 and cased: fatal(pos, "the test '{name_of(int(nodes[f].name))}' takes no parameters, so it cannot be given cases")
 
 # The syntax parser has already recognized the digits and base. Accumulate with
 # an explicit limit so neither overflow nor a high unsigned bit changes a value.
@@ -784,7 +954,11 @@ dw_function = (id: int, name: str) -> int:
             set_list(caplist, captures)
             nodes[n].d = i32(caplist)
         else: set_list2(n, captures)
+    outer_result = dw_fn_result
+    dw_fn_result = 1
+    if result != 0 and dw_name(result) != "void": dw_fn_result = 2
     body = dw_block(dw_child(id, 2))
+    dw_fn_result = outer_result
     dw_siblings = outer_siblings
     dw_finish_function(n, ps, body, name)
 
@@ -1222,15 +1396,9 @@ dw_stmt = (id: int, top: bool = false) -> int:
             nodes[n].b = nodes[s].a
             return n
         return s
+    if k == .directive and (dewy_syntax[id].text == "expect" or dewy_syntax[id].text == "fail"): return dw_expect(id)
     if k == .keyword_expr:
         word = dewy_syntax[dw_child(id, 0)].text
-        if word == "test":
-            if not top: return dw_fail(id, "a test block inside another block; declare tests at the top level")
-            n = mk(.test_, pos)
-            nodes[n].sval = i32(intern(dewy_syntax[dw_child(id, 1)].text))
-            nodes[n].b = i32(dw_block(dw_child(id, 2)))
-            add_flag(n, NF_TERMINATED)
-            return n
         if word == "from" or word == "import":
             if not top: return dw_fail(id, "local imports")
             return dw_import(id)
