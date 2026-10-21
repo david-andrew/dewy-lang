@@ -1,0 +1,160 @@
+# The kernel proper: boot, one scheduler tick, and the interpretation of one
+# program word for the running task. All of it runs without allocation,
+# blocking or unproven failure: every index into a table is guarded or ranged.
+
+$no_hidden_costs
+
+from p"defs.dewy" import Kernel, Op, NTASK, NCODE, NIRQ, QUANTUM, HOLD, NONE
+from p"trace.dewy" import record
+from p"sched.dewy" import make_ready, pick
+from p"timer.dewy" import clear_wheel, arm, expire
+from p"memory.dewy" import init_pool, alloc_block, free_block, reclaim, bump, reset_arena
+from p"sync.dewy" import lock, unlock, abandon, send, recv
+from p"irq.dewy" import service
+
+boot=(@k:Kernel):>void & no allocates & no blocks=>{
+    k.now=0
+    k.current=NONE
+    k.seq=0
+    loop m in [0..4) {
+        k.mutexes[m].owner=NONE
+    }
+    clear_wheel(@k)
+    init_pool(@k)
+    loop t in [0..NTASK) {
+        k.tasks[t].wait_on=NONE
+        k.tasks[t].timer_next=NONE
+        loop h in [0..HOLD) {
+            k.tasks[t].held[h]=NONE
+        }
+    }
+}
+
+# Admit a task whose program occupies code[entry, entry+size).
+admit=(@k:Kernel prio:int64 entry:int64 size:int64):>int64 & no allocates & no blocks=>{
+    let t=k.ntasks
+    if t <? 0 or t >=? NTASK return NONE
+    k.tasks[t].base=prio
+    k.tasks[t].eff=prio
+    k.tasks[t].entry=entry
+    k.tasks[t].size=size
+    k.ntasks=t+1
+    make_ready(@k t)
+    return t
+}
+
+finish=(@k:Kernel t:int64):>void & no allocates & no blocks=>{
+    if t <? 0 or t >=? NTASK return
+    k.tasks[t].state='done'
+    record(@k 'exit' t k.tasks[t].ran 0)
+    reclaim(@k t)
+    abandon(@k t)
+}
+
+# The word at the task's program counter, if it is inside its program.
+fetch=(k:Kernel t:int64):>(Op|none) & no allocates & no blocks=>{
+    if t <? 0 or t >=? NTASK return none
+    let pc=k.tasks[t].pc
+    if pc <? 0 or pc >=? k.tasks[t].size return none
+    let at=k.tasks[t].entry+pc
+    if at <? 0 or at >=? NCODE return none
+    return k.code[at]
+}
+
+# Run one word of task t. A word that blocks leaves pc on itself; the waker
+# advances it.
+step=(@k:Kernel t:int64):>void & no allocates & no blocks=>{
+    if t <? 0 or t >=? NTASK return
+    k.tasks[t].ran+=1
+    let word=fetch(k t)
+    if word is? none {
+        finish(@k t)
+        return
+    }
+    let op=word.kind
+    let a=word.a
+    let next=true
+    if op =? 'work' {
+        if k.tasks[t].left <=? 0 k.tasks[t].left=a
+        k.tasks[t].left-=1
+        next=k.tasks[t].left <=? 0
+    } else if op =? 'sleep' {
+        k.tasks[t].state='sleeping'
+        arm(@k t k.now+a)
+        record(@k 'sleep' t k.now+a 0)
+    } else if op =? 'lock' {
+        next=lock(@k t a)
+    } else if op =? 'unlock' {
+        unlock(@k t a)
+    } else if op =? 'send' {
+        let value=if word.use_reg k.tasks[t].reg+word.b else word.b
+        next=send(@k t a value)
+    } else if op =? 'recv' {
+        next=recv(@k t a)
+    } else if op =? 'alloc' {
+        alloc_block(@k t)
+    } else if op =? 'free' {
+        free_block(@k t)
+    } else if op =? 'bump' {
+        bump(@k t a)
+    } else if op =? 'reset' {
+        reset_arena(@k t)
+    } else if op =? 'yield' {
+        make_ready(@k t)
+        record(@k 'yield' t 0 0)
+    } else if op =? 'mask' {
+        if a >=? 0 and a <? NIRQ k.masked[a]=true
+        record(@k 'mask' t a 0)
+    } else if op =? 'unmask' {
+        if a >=? 0 and a <? NIRQ k.masked[a]=false
+        record(@k 'unmask' t a 0)
+    } else if op =? 'wait' {
+        if k.tasks[t].signaled {
+            k.tasks[t].signaled=false
+            record(@k 'wait' t 0 0)
+        } else {
+            k.tasks[t].state='wait'
+            record(@k 'block_wait' t 0 0)
+            next=false
+        }
+    } else if op =? 'repeat' {
+        if k.tasks[t].loops <? word.b {
+            k.tasks[t].loops+=1
+            k.tasks[t].pc=a
+            next=false
+        } else {
+            k.tasks[t].loops=0
+        }
+    } else if op =? 'exit' {
+        finish(@k t)
+        return
+    }
+    if next k.tasks[t].pc+=1
+    # A task still on the CPU uses up its turn; then equals go first.
+    if k.tasks[t].state =? 'ready' {
+        k.tasks[t].slice+=1
+        if k.tasks[t].slice >=? QUANTUM make_ready(@k t)
+    }
+}
+
+# One tick: timers, interrupts, the scheduling decision and one word.
+tick=(@k:Kernel):>void & no allocates & no blocks=>{
+    expire(@k)
+    service(@k)
+    let next=pick(@k)
+    if next not=? k.current {
+        if next =? NONE {
+            record(@k 'idle' k.current 0 0)
+        } else {
+            record(@k 'switch' k.current next 0)
+            k.stats.switches+=1
+        }
+        k.current=next
+    }
+    if next =? NONE {
+        k.stats.idle+=1
+    } else {
+        step(@k next)
+    }
+    k.now+=1
+}

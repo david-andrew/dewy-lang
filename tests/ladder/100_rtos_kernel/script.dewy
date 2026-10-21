@@ -1,0 +1,123 @@
+# The deterministic event script: task programs, interrupt vectors, the
+# interrupt schedule and the run length. Parsing happens on the host before
+# the kernel boots, so it may allocate; the kernel only sees fixed tables.
+
+$runtime_checks=false
+
+from p"defs.dewy" import Op, OpKind, Action
+
+TaskSpec:type=[name:string prio:int64 ops:array<Op>]
+VectorSpec:type=[line:int64 action:Action target:string value:int64]
+IrqSpec:type=[tick:int64 line:int64]
+Script:type=[tasks:array<TaskSpec> vectors:array<VectorSpec> irqs:array<IrqSpec> run:int64]
+ScriptError:type=[line:int64 message:string]
+
+words=(text:string):>array<string>=>[loop w in text.split(" ") if w.length >? 0 w]
+
+number=(word:string line:int64):>int64|ScriptError=>{
+    let n=to_int(word)
+    if n is? none return ScriptError[line "expected a number, found '{word}'"]
+    if n <? -1000000 or n >? 1000000 return ScriptError[line "{word} is out of range"]
+    return int64(n)
+}
+
+# The operand of word i, as a number.
+operand=(ws:array<string> i:int64 line:int64):>int64|ScriptError=>{
+    let w=ws.get(i)
+    if w is? none return ScriptError[line "'{ws.join(" ")}' needs operand {i}"]
+    return number(w line)
+}
+
+op_kind=(word:string):>OpKind|none=>{
+    loop kind in members(OpKind) {
+        if word =? kind return kind
+    }
+    return none
+}
+
+parse_op=(ws:array<string> line:int64):>Op|ScriptError=>{
+    let head=ws.get(0) ?? ""
+    let kind=op_kind(head)
+    if kind is? none return ScriptError[line "unknown operation '{head}'"]
+    let arity=match kind {
+        <'work' | 'sleep' | 'lock' | 'unlock' | 'recv' | 'bump' | 'mask' | 'unmask'> => 1
+        <'send' | 'repeat'> => 2
+        _ => 0
+    }
+    if kind =? 'send' and ws.get(2) =? "reg" {
+        let box=operand(ws 1 line)
+        if box is? ScriptError return box
+        let extra=if ws.length >? 3 operand(ws 3 line) else 0
+        if extra is? ScriptError return extra
+        return [kind=kind a=box b=extra use_reg=true]
+    }
+    if ws.length not=? arity+1 return ScriptError[line "'{head}' takes {arity} operands"]
+    let a:int64=0
+    let b:int64=0
+    if arity >=? 1 {
+        let x=operand(ws 1 line)
+        if x is? ScriptError return x
+        a=x
+    }
+    if arity >=? 2 {
+        let y=operand(ws 2 line)
+        if y is? ScriptError return y
+        b=y
+    }
+    return [kind=kind a=a b=b use_reg=false]
+}
+
+parse_vector=(ws:array<string> line:int64):>VectorSpec|ScriptError=>{
+    if ws.length <? 4 return ScriptError[line "vector LINE post BOX VALUE | vector LINE signal TASK"]
+    let irq=operand(ws 1 line)
+    if irq is? ScriptError return irq
+    let what=ws.get(2) ?? ""
+    if what =? "signal" return [line=irq action='signal' target=ws.get(3) ?? "" value=0]
+    if what =? "post" {
+        let value=operand(ws 4 line)
+        if value is? ScriptError return value
+        return [line=irq action='post' target=ws.get(3) ?? "" value=value]
+    }
+    return ScriptError[line "unknown vector action '{what}'"]
+}
+
+parse_script=(lines:array<string>):>Script|ScriptError=>{
+    let script:Script=[tasks=[] vectors=[] irqs=[] run=0]
+    loop i in 0.. and raw in lines {
+        let n=i+1
+        let text=raw.split("#").get(0) ?? ""
+        let ws=words(text)
+        if ws.length =? 0 continue
+        let head=ws.get(0) ?? ""
+        if raw.startswith(" ") {
+            if script.tasks.length =? 0 return ScriptError[n "an operation outside a task"]
+            let op=parse_op(ws n)
+            if op is? ScriptError return op
+            script.tasks[end].ops.push(op)
+        } else if head =? "task" {
+            if ws.length not=? 3 return ScriptError[n "task NAME PRIORITY"]
+            let prio=operand(ws 2 n)
+            if prio is? ScriptError return prio
+            script.tasks.push([name=ws.get(1) ?? "" prio=prio ops=[]])
+        } else if head =? "vector" {
+            let v=parse_vector(ws n)
+            if v is? ScriptError return v
+            script.vectors.push(v)
+        } else if head =? "irq" {
+            if ws.length not=? 3 return ScriptError[n "irq TICK LINE"]
+            let at=operand(ws 1 n)
+            if at is? ScriptError return at
+            let irq=operand(ws 2 n)
+            if irq is? ScriptError return irq
+            script.irqs.push([tick=at line=irq])
+        } else if head =? "run" {
+            if ws.length not=? 2 return ScriptError[n "run TICKS"]
+            let ticks=operand(ws 1 n)
+            if ticks is? ScriptError return ticks
+            script.run=ticks
+        } else {
+            return ScriptError[n "unknown directive '{head}'"]
+        }
+    }
+    return script
+}

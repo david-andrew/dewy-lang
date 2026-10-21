@@ -1,0 +1,111 @@
+# Eight tasks in three phases: a priority-inheritance chain over two mutexes,
+# an interrupt-driven sensor pipeline through three mailboxes, and storage
+# pressure on the block pool, the bump arena and a bounded mailbox.
+#
+# Operations: work N, sleep N, lock M, unlock M, send BOX VALUE,
+# send BOX reg [ADD], recv BOX, alloc, free, bump WORDS, reset, yield,
+# mask LINE, unmask LINE, wait, repeat TO TIMES, exit.
+
+task logger 1
+    lock 0
+    work 8
+    unlock 0
+    recv 2
+    bump 8
+    repeat 3 2
+    reset
+    exit
+task bulk 2
+    sleep 14
+    lock 1
+    work 1
+    lock 0
+    work 1
+    unlock 0
+    unlock 1
+    sleep 40
+    bump 30
+    bump 30
+    bump 30
+    yield
+    work 2
+    exit
+task control 6
+    sleep 5
+    lock 1
+    work 1
+    unlock 1
+    sleep 12
+    lock 1
+    work 1
+    unlock 1
+    mask 1
+    work 3
+    unmask 1
+    wait
+    alloc
+    alloc
+    free
+    free
+    free
+    unlock 3
+    exit
+task sensor 4
+    recv 1
+    send 0 reg 1
+    repeat 0 4
+    wait
+    exit
+task filter 3
+    recv 0
+    work 2
+    lock 0
+    send 2 reg 100
+    unlock 0
+    repeat 0 4
+    exit
+task spinner 2
+    sleep 60
+    work 3
+    yield
+    repeat 1 3
+    exit
+task burst 1
+    sleep 70
+    send 3 1
+    send 3 2
+    send 3 3
+    send 3 4
+    send 3 5
+    send 3 6
+    alloc
+    alloc
+    alloc
+    alloc
+    alloc
+    exit
+task drain 1
+    sleep 5
+    recv 3
+    work 1
+    repeat 1 5
+    exit
+
+vector 0 signal control
+vector 1 post 1 50
+vector 2 post 1 70
+vector 3 signal sensor
+
+irq 30 1
+irq 31 2
+irq 32 1
+irq 32 2
+irq 33 2
+irq 34 2
+irq 35 2
+irq 36 2
+irq 37 3
+irq 45 0
+irq 50 1
+irq 62 0
+run 170

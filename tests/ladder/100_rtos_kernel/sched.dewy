@@ -1,0 +1,85 @@
+# Scheduling: readiness, priority selection with FIFO order among equals, and
+# priority inheritance through mutex wait chains.
+
+$no_hidden_costs
+
+from p"defs.dewy" import Kernel, NTASK, NMUTEX, NONE
+from p"trace.dewy" import record
+
+valid_task=(k:Kernel t:int64):>bool & no allocates & no blocks=>t >=? 0 and t <? k.ntasks and t <? NTASK
+
+# A task joins the back of its priority's line with a fresh turn.
+make_ready=(@k:Kernel t:int64):>void & no allocates & no blocks=>{
+    if t <? 0 or t >=? NTASK return
+    k.tasks[t].state='ready'
+    k.tasks[t].ready_seq=k.seq
+    k.tasks[t].slice=0
+    k.seq+=1
+}
+
+# The ready task with the highest effective priority; among equals, the one
+# that has waited longest.
+pick=(@k:Kernel):>int64 & no allocates & no blocks=>{
+    let best=NONE
+    let best_eff:int64=-1
+    let best_seq:int64=0
+    loop t in [0..NTASK) {
+        if t >=? k.ntasks break
+        if k.tasks[t].state not=? 'ready' continue
+        let eff=k.tasks[t].eff
+        if best =? NONE or eff >? best_eff or eff =? best_eff and k.tasks[t].ready_seq <? best_seq {
+            best=t
+            best_eff=eff
+            best_seq=k.tasks[t].ready_seq
+        }
+    }
+    return best
+}
+
+# The waiter to wake for a mutex or mailbox: highest effective priority, then
+# the earliest to block.
+first_waiter=(@k:Kernel state_lock:bool state_send:bool state_recv:bool object:int64):>int64 & no allocates & no blocks=>{
+    let best=NONE
+    let best_eff:int64=-1
+    let best_seq:int64=0
+    loop t in [0..NTASK) {
+        if t >=? k.ntasks break
+        let s=k.tasks[t].state
+        let waiting=state_lock and s =? 'lock' or state_send and s =? 'send' or state_recv and s =? 'recv'
+        if not waiting or k.tasks[t].wait_on not=? object continue
+        let eff=k.tasks[t].eff
+        if best =? NONE or eff >? best_eff or eff =? best_eff and k.tasks[t].wait_seq <? best_seq {
+            best=t
+            best_eff=eff
+            best_seq=k.tasks[t].wait_seq
+        }
+    }
+    return best
+}
+
+# Effective priorities from scratch: each owner runs at least at the priority
+# of every task blocked on a mutex it holds, transitively. NTASK rounds reach
+# the end of any wait chain. Changes are traced in task order.
+inherit=(@k:Kernel):>void & no allocates & no blocks=>{
+    let old:array<int64 length=8>=[0 0 0 0 0 0 0 0]
+    loop t in [0..NTASK) {
+        old[t]=k.tasks[t].eff
+        k.tasks[t].eff=k.tasks[t].base
+    }
+    loop round in [0..NTASK) {
+        loop w in [0..NTASK) {
+            if w >=? k.ntasks or k.tasks[w].state not=? 'lock' continue
+            let m=k.tasks[w].wait_on
+            if m <? 0 or m >=? NMUTEX continue
+            let o=k.mutexes[m].owner
+            if o <? 0 or o >=? NTASK continue
+            if k.tasks[w].eff >? k.tasks[o].eff k.tasks[o].eff=k.tasks[w].eff
+        }
+    }
+    loop t in [0..NTASK) {
+        if k.tasks[t].eff not=? old[t] {
+            if k.tasks[t].eff >? old[t] k.stats.boosts+=1
+            record(@k 'prio' t old[t] k.tasks[t].eff)
+        }
+    }
+}

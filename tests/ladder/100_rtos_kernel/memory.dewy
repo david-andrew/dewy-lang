@@ -1,0 +1,84 @@
+# Storage without a heap: a pool of fixed-size blocks on an intrusive LIFO
+# free list, and a bump arena that is reset as a whole.
+
+$no_hidden_costs
+
+from p"defs.dewy" import Kernel, NTASK, NBLOCK, HOLD, ARENA, NONE
+from p"trace.dewy" import record
+
+init_pool=(@k:Kernel):>void & no allocates & no blocks=>{
+    # Block 0 is handed out first: each block links to the next.
+    loop b in [0..NBLOCK) {
+        k.pool.next[b]=if b+1 <? NBLOCK b+1 else NONE
+    }
+    k.pool.free=0
+    k.pool.available=NBLOCK
+}
+
+alloc_block=(@k:Kernel t:int64):>void & no allocates & no blocks=>{
+    if t <? 0 or t >=? NTASK return
+    let b=k.pool.free
+    let n=k.tasks[t].nheld
+    if b <? 0 or b >=? NBLOCK or n <? 0 or n >=? HOLD {
+        record(@k 'alloc_fail' t k.pool.available 0)
+        return
+    }
+    k.pool.free=k.pool.next[b]
+    k.pool.next[b]=NONE
+    k.pool.available-=1
+    k.tasks[t].held[n]=b
+    k.tasks[t].nheld=n+1
+    record(@k 'alloc' t b 0)
+}
+
+release_block=(@k:Kernel b:int64):>void & no allocates & no blocks=>{
+    if b <? 0 or b >=? NBLOCK return
+    k.pool.next[b]=k.pool.free
+    k.pool.free=b
+    k.pool.available+=1
+}
+
+# The most recently allocated block a task holds goes back to the pool.
+free_block=(@k:Kernel t:int64):>void & no allocates & no blocks=>{
+    if t <? 0 or t >=? NTASK return
+    let n=k.tasks[t].nheld
+    if n <=? 0 or n >? HOLD {
+        record(@k 'free_none' t 0 0)
+        return
+    }
+    let b=k.tasks[t].held[n-1]
+    k.tasks[t].held[n-1]=NONE
+    k.tasks[t].nheld=n-1
+    release_block(@k b)
+    record(@k 'free' t b 0)
+}
+
+# Every block an exiting task still holds, newest first.
+reclaim=(@k:Kernel t:int64):>void & no allocates & no blocks=>{
+    if t <? 0 or t >=? NTASK return
+    loop i in [0..HOLD) {
+        let n=k.tasks[t].nheld
+        if n <=? 0 or n >? HOLD break
+        let b=k.tasks[t].held[n-1]
+        k.tasks[t].held[n-1]=NONE
+        k.tasks[t].nheld=n-1
+        release_block(@k b)
+        record(@k 'reclaim' t b 0)
+    }
+}
+
+bump=(@k:Kernel t:int64 words:int64):>void & no allocates & no blocks=>{
+    if words <=? 0 or words >? ARENA - k.arena.top {
+        record(@k 'arena_full' t words k.arena.top)
+        return
+    }
+    let offset=k.arena.top
+    k.arena.top+=words
+    if k.arena.top >? k.arena.peak k.arena.peak=k.arena.top
+    record(@k 'bump' t words offset)
+}
+
+reset_arena=(@k:Kernel t:int64):>void & no allocates & no blocks=>{
+    k.arena.top=0
+    record(@k 'reset' t 0 0)
+}

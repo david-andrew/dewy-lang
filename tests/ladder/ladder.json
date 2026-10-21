@@ -33,7 +33,9 @@
   "31": "Flagship: durable key-value store and query layer",
   "32": "Flagship: constant-time cryptography",
   "33": "Web services with a wasm UI",
-  "34": "Self-hosting compiler modules"
+  "34": "Self-hosting compiler modules",
+  "35": "Flagship: freestanding kernel in the strict lane",
+  "36": "Flagship: ML training over tensors"
  },
  "tiers": {
   "1\u20132": [
@@ -46,7 +48,7 @@
   ],
   "4": [
    31,
-   34
+   36
   ]
  },
  "programs": {
@@ -432,6 +434,10 @@
   "99_dewy_frontend": {
    "milestone": 34,
    "note": "Dewy's own lexer and Pratt parser (ported from compiler/dewy_fast.jo) as Dewy modules: token and syntax-tree dumps for a 53-entry corpus, with the frontend's diagnostics at line:column. Also runs as wasm."
+  },
+  "100_rtos_kernel": {
+   "milestone": 35,
+   "note": "RTOS kernel (tier-4 flagship) in $no_hidden_costs modules with & no allocates & no blocks entry points and no runtime checks: fixed TCBs, priority scheduling with FIFO turns and time slices, mutexes with transitive priority inheritance, bounded mailboxes with blocked senders/receivers, a hashed timer wheel, a LIFO block pool, a bump arena and maskable latched interrupt lines, driven by a stdin event script. Hosted simulation; the bare-metal image (a $target, extern timer and device pointers) is held on question 24."
   }
  },
  "design_passing": [
@@ -444,6 +450,7 @@
   "07_lru_cache",
   "08_matrix_ops",
   "09_ode_rk4",
+  "100_rtos_kernel",
   "10_statistics",
   "11_units_physics",
   "12_linear_regression",

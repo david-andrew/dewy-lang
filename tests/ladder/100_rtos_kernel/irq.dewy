@@ -1,0 +1,54 @@
+# The interrupt model: lines latch as pending, tasks mask and unmask them,
+# and the kernel runs each unmasked pending line's vector, lowest line first,
+# before scheduling. Handlers never block: a post to a full mailbox is an
+# overrun, and a signal to a task that is not waiting is latched.
+
+$no_hidden_costs
+
+from p"defs.dewy" import Kernel, NTASK, NIRQ, NONE
+from p"trace.dewy" import record
+from p"sched.dewy" import make_ready
+from p"sync.dewy" import deliver
+
+raise_line=(@k:Kernel line:int64):>void & no allocates & no blocks=>{
+    if line <? 0 or line >=? NIRQ return
+    k.pending[line]=true
+    record(@k 'irq' line (if k.masked[line] 1 else 0) 0)
+}
+
+handle=(@k:Kernel line:int64):>void & no allocates & no blocks=>{
+    if line <? 0 or line >=? NIRQ return
+    let v=k.vectors[line]
+    k.stats.irqs+=1
+    if v.action =? 'post' {
+        let d=deliver(@k v.target v.value)
+        if not d.ok {
+            k.stats.overruns+=1
+            record(@k 'overrun' line v.target v.value)
+        } else if d.to =? NONE {
+            record(@k 'isr_post' line v.target v.value)
+        } else {
+            record(@k 'isr_deliver' line d.to v.value)
+        }
+    } else if v.action =? 'signal' {
+        let t=v.target
+        if t <? 0 or t >=? NTASK return
+        if k.tasks[t].state =? 'wait' {
+            k.tasks[t].pc+=1
+            make_ready(@k t)
+            record(@k 'isr_wake' line t 0)
+        } else {
+            k.tasks[t].signaled=true
+            record(@k 'isr_signal' line t 0)
+        }
+    }
+}
+
+service=(@k:Kernel):>void & no allocates & no blocks=>{
+    loop line in [0..NIRQ) {
+        if k.pending[line] and not k.masked[line] {
+            k.pending[line]=false
+            handle(@k line)
+        }
+    }
+}

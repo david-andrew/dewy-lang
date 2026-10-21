@@ -1,0 +1,166 @@
+# Mutexes with priority inheritance and bounded mailboxes. A blocked task
+# keeps its program counter on the blocking word; the waker completes that
+# word for it, so a woken task resumes after the call that blocked.
+
+$no_hidden_costs
+
+from p"defs.dewy" import Kernel, NTASK, NMUTEX, NBOX, BOXCAP, NONE
+from p"trace.dewy" import record
+from p"sched.dewy" import make_ready, first_waiter, inherit
+
+# Block the running task on an object, behind earlier waiters.
+block=(@k:Kernel t:int64 on:int64):>void & no allocates & no blocks=>{
+    if t <? 0 or t >=? NTASK return
+    k.tasks[t].wait_on=on
+    k.tasks[t].wait_seq=k.seq
+    k.seq+=1
+}
+
+# Finish the blocking word of a woken task and put it back in line.
+resume=(@k:Kernel t:int64):>void & no allocates & no blocks=>{
+    if t <? 0 or t >=? NTASK return
+    k.tasks[t].pc+=1
+    k.tasks[t].wait_on=NONE
+    make_ready(@k t)
+}
+
+# `lock m`: true when the task holds the mutex and continues.
+lock=(@k:Kernel t:int64 m:int64):>bool & no allocates & no blocks=>{
+    if t <? 0 or t >=? NTASK or m <? 0 or m >=? NMUTEX {
+        record(@k 'fault' t m 0)
+        k.stats.faults+=1
+        return true
+    }
+    let owner=k.mutexes[m].owner
+    if owner =? NONE {
+        k.mutexes[m].owner=t
+        record(@k 'lock' t m 0)
+        return true
+    }
+    if owner =? t {
+        record(@k 'fault' t m 1)
+        k.stats.faults+=1
+        return true
+    }
+    k.tasks[t].state='lock'
+    block(@k t m)
+    record(@k 'block_lock' t m owner)
+    inherit(@k)
+    return false
+}
+
+# Release a mutex the task owns: the best waiter becomes the owner at once.
+release=(@k:Kernel t:int64 m:int64):>void & no allocates & no blocks=>{
+    if m <? 0 or m >=? NMUTEX return
+    let next=first_waiter(@k true false false m)
+    if next =? NONE {
+        k.mutexes[m].owner=NONE
+        record(@k 'unlock' t m 0)
+    } else {
+        k.mutexes[m].owner=next
+        resume(@k next)
+        record(@k 'handoff' t m next)
+    }
+    inherit(@k)
+}
+
+unlock=(@k:Kernel t:int64 m:int64):>void & no allocates & no blocks=>{
+    if m <? 0 or m >=? NMUTEX or k.mutexes[m].owner not=? t {
+        record(@k 'bad_unlock' t m 0)
+        k.stats.faults+=1
+        return
+    }
+    release(@k t m)
+}
+
+# Every mutex an exiting task holds, in mutex order.
+abandon=(@k:Kernel t:int64):>void & no allocates & no blocks=>{
+    loop m in [0..NMUTEX) {
+        if k.mutexes[m].owner =? t release(@k t m)
+    }
+}
+
+enqueue=(@k:Kernel b:int64 value:int64):>bool & no allocates & no blocks=>{
+    if b <? 0 or b >=? NBOX return false
+    let count=k.boxes[b].count
+    if count <? 0 or count >=? BOXCAP return false
+    let head=k.boxes[b].head
+    if head <? 0 return false
+    k.boxes[b].items[(head+count)%BOXCAP]=value
+    k.boxes[b].count=count+1
+    if count+1 >? k.boxes[b].peak k.boxes[b].peak=count+1
+    return true
+}
+
+dequeue=(@k:Kernel b:int64):>(int64|none) & no allocates & no blocks=>{
+    if b <? 0 or b >=? NBOX return none
+    let count=k.boxes[b].count
+    if count <=? 0 return none
+    let head=k.boxes[b].head
+    if head <? 0 return none
+    let value=k.boxes[b].items[head%BOXCAP]
+    k.boxes[b].head=(head+1)%BOXCAP
+    k.boxes[b].count=count-1
+    return value
+}
+
+# Hand a message to the best waiting receiver, or queue it. The receiver, or
+# NONE when queued; false in `ok` when the box is full.
+Delivery:type=[ok:bool to:int64]
+
+deliver=(@k:Kernel b:int64 value:int64):>Delivery & no allocates & no blocks=>{
+    let r=first_waiter(@k false false true b)
+    if r >=? 0 and r <? NTASK {
+        k.tasks[r].reg=value
+        resume(@k r)
+        return [ok=true to=r]
+    }
+    return [ok=enqueue(@k b value) to=NONE]
+}
+
+# `send b value`: true when the task continues; false when it blocked on a
+# full mailbox, holding its message.
+send=(@k:Kernel t:int64 b:int64 value:int64):>bool & no allocates & no blocks=>{
+    if t <? 0 or t >=? NTASK or b <? 0 or b >=? NBOX {
+        record(@k 'fault' t b 2)
+        k.stats.faults+=1
+        return true
+    }
+    let d=deliver(@k b value)
+    if d.ok {
+        if d.to =? NONE record(@k 'send' t b value) else record(@k 'deliver' t d.to value)
+        return true
+    }
+    k.tasks[t].state='send'
+    k.tasks[t].outgoing=value
+    block(@k t b)
+    record(@k 'block_send' t b value)
+    return false
+}
+
+# `recv b`: true when the task took a message and continues. Taking one makes
+# room for the best blocked sender's message.
+recv=(@k:Kernel t:int64 b:int64):>bool & no allocates & no blocks=>{
+    if t <? 0 or t >=? NTASK or b <? 0 or b >=? NBOX {
+        record(@k 'fault' t b 3)
+        k.stats.faults+=1
+        return true
+    }
+    let got=dequeue(@k b)
+    if got is? none {
+        k.tasks[t].state='recv'
+        block(@k t b)
+        record(@k 'block_recv' t b 0)
+        return false
+    }
+    k.tasks[t].reg=got
+    record(@k 'recv' t b got)
+    let s=first_waiter(@k false true false b)
+    if s >=? 0 and s <? NTASK {
+        if enqueue(@k b k.tasks[s].outgoing) {
+            resume(@k s)
+            record(@k 'unblock_send' s b k.tasks[s].outgoing)
+        }
+    }
+    return true
+}

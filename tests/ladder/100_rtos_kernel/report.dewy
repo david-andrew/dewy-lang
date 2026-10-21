@@ -1,0 +1,55 @@
+# Host-side formatting of trace events.
+
+$runtime_checks=false
+
+from p"defs.dewy" import Event, NONE
+
+pad=(text:string width:int64):>string=>{
+    let fill=width-text.length
+    if fill <=? 0 return text
+    return "{text}{" ".repeat(fill)}"
+}
+
+describe=(e:Event names:array<string>):>string=>{
+    let who=(t:int64):>string=>if t =? NONE "-" else names.get(t) ?? "task{t}"
+    let a=who(e.a)
+    return match e.kind {
+        <'wake'> => "{a} wakes (timer)"
+        <'irq'> => if e.b =? 1 "irq {e.a} raised while masked" else "irq {e.a} raised"
+        <'isr_post'> => "isr {e.a}: posts {e.c} to box {e.b}"
+        <'isr_deliver'> => "isr {e.a}: hands {e.c} to {who(e.b)}"
+        <'overrun'> => "isr {e.a}: box {e.b} full, {e.c} lost"
+        <'isr_signal'> => "isr {e.a}: signal latched for {who(e.b)}"
+        <'isr_wake'> => "isr {e.a}: wakes {who(e.b)}"
+        <'switch'> => "switch {a} -> {who(e.b)}"
+        <'idle'> => "idle after {a}"
+        <'sleep'> => "{a} sleeps until {e.b}"
+        <'lock'> => "{a} locks m{e.b}"
+        <'block_lock'> => "{a} blocks on m{e.b} held by {who(e.c)}"
+        <'prio'> => "{a} priority {e.b} -> {e.c}"
+        <'unlock'> => "{a} unlocks m{e.b}"
+        <'handoff'> => "{a} hands m{e.b} to {who(e.c)}"
+        <'bad_unlock'> => "{a} fault: unlocks m{e.b} it does not hold"
+        <'send'> => "{a} sends {e.c} to box {e.b}"
+        <'deliver'> => "{a} hands {e.c} to {who(e.b)}"
+        <'block_send'> => "{a} blocks sending {e.c} to full box {e.b}"
+        <'recv'> => "{a} receives {e.c} from box {e.b}"
+        <'block_recv'> => "{a} waits on empty box {e.b}"
+        <'unblock_send'> => "{a} unblocked: {e.c} queued in box {e.b}"
+        <'alloc'> => "{a} allocates block {e.b}"
+        <'alloc_fail'> => "{a} allocation fails ({e.b} free)"
+        <'free'> => "{a} frees block {e.b}"
+        <'free_none'> => "{a} frees nothing"
+        <'bump'> => "{a} bumps {e.b} words at {e.c}"
+        <'arena_full'> => "{a} arena full: {e.b} words at {e.c}"
+        <'reset'> => "{a} resets the arena"
+        <'yield'> => "{a} yields"
+        <'mask'> => "{a} masks irq {e.b}"
+        <'unmask'> => "{a} unmasks irq {e.b}"
+        <'wait'> => "{a} takes a latched signal"
+        <'block_wait'> => "{a} waits for a signal"
+        <'exit'> => "{a} exits after {e.b} ticks"
+        <'reclaim'> => "{a} reclaims block {e.b}"
+        <'fault'> => "{a} fault {e.c} on object {e.b}"
+    }
+}

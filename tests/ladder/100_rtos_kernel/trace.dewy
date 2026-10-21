@@ -1,0 +1,27 @@
+# The trace ring: kernel paths record events into fixed storage and the host
+# drains them between ticks. Recording never allocates, blocks or fails; a
+# full ring counts what it dropped.
+
+$no_hidden_costs
+
+from p"defs.dewy" import Kernel, Event, EvKind, LOGCAP
+
+record=(@k:Kernel kind:EvKind a:int64 b:int64 c:int64):>void & no allocates & no blocks=>{
+    if k.log.count <? 0 or k.log.count >=? LOGCAP {
+        k.log.dropped+=1
+        return
+    }
+    let slot=(k.log.head+k.log.count)%LOGCAP
+    k.log.items[slot]=[tick=k.now kind=kind a=a b=b c=c]
+    k.log.count+=1
+}
+
+# The oldest event, removed from the ring.
+take=(@k:Kernel):>(Event|none) & no allocates & no blocks=>{
+    if k.log.count <=? 0 return none
+    let slot=k.log.head%LOGCAP
+    let event=k.log.items[slot]
+    k.log.head=(slot+1)%LOGCAP
+    k.log.count-=1
+    return event
+}

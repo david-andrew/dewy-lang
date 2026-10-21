@@ -1,0 +1,189 @@
+boot: 8 tasks, 76 program words, run 170 ticks
+0    switch - -> control
+0    control sleeps until 5
+1    switch control -> sensor
+1    sensor waits on empty box 1
+2    switch sensor -> filter
+2    filter waits on empty box 0
+3    switch filter -> bulk
+3    bulk sleeps until 17
+4    switch bulk -> spinner
+4    spinner sleeps until 64
+5    control wakes (timer)
+5    switch spinner -> control
+5    control locks m1
+7    control unlocks m1
+8    control sleeps until 20
+9    switch control -> logger
+9    logger locks m0
+12   switch logger -> burst
+12   burst sleeps until 82
+13   switch burst -> drain
+13   drain sleeps until 18
+14   switch drain -> logger
+17   bulk wakes (timer)
+17   switch logger -> bulk
+17   bulk locks m1
+18   drain wakes (timer)
+19   bulk blocks on m0 held by logger
+19   logger priority 1 -> 2
+20   control wakes (timer)
+20   switch bulk -> control
+20   control blocks on m1 held by bulk
+20   logger priority 2 -> 6
+20   bulk priority 2 -> 6
+21   switch control -> logger
+24   logger hands m0 to bulk
+24   logger priority 6 -> 1
+25   switch logger -> bulk
+26   bulk unlocks m0
+27   bulk hands m1 to control
+27   bulk priority 6 -> 2
+28   switch bulk -> control
+29   control unlocks m1
+30   irq 1 raised
+30   isr 1: hands 50 to sensor
+30   control masks irq 1
+31   irq 2 raised
+31   isr 2: posts 70 to box 1
+32   irq 1 raised while masked
+32   irq 2 raised
+32   isr 2: posts 70 to box 1
+33   irq 2 raised
+33   isr 2: posts 70 to box 1
+34   irq 2 raised
+34   isr 2: posts 70 to box 1
+34   control unmasks irq 1
+35   irq 2 raised
+35   isr 1: box 1 full, 50 lost
+35   isr 2: box 1 full, 70 lost
+35   control waits for a signal
+36   irq 2 raised
+36   isr 2: box 1 full, 70 lost
+36   switch control -> sensor
+36   sensor hands 51 to filter
+37   irq 3 raised
+37   isr 3: signal latched for sensor
+38   sensor receives 70 from box 1
+39   sensor sends 71 to box 0
+41   sensor receives 70 from box 1
+42   sensor sends 71 to box 0
+44   sensor receives 70 from box 1
+45   irq 0 raised
+45   isr 0: wakes control
+45   switch sensor -> control
+45   control allocates block 0
+46   control allocates block 1
+47   control frees block 1
+48   control frees block 0
+49   control frees nothing
+50   irq 1 raised
+50   isr 1: posts 50 to box 1
+50   control fault: unlocks m3 it does not hold
+51   control exits after 21 ticks
+52   switch control -> sensor
+52   sensor sends 71 to box 0
+54   sensor receives 70 from box 1
+55   sensor sends 71 to box 0
+57   sensor takes a latched signal
+58   sensor exits after 17 ticks
+59   switch sensor -> filter
+61   filter locks m0
+62   irq 0 raised
+62   isr 0: signal latched for control
+62   filter sends 151 to box 2
+63   filter unlocks m0
+64   spinner wakes (timer)
+65   filter receives 71 from box 0
+68   filter locks m0
+69   filter sends 171 to box 2
+70   filter unlocks m0
+72   filter receives 71 from box 0
+75   filter locks m0
+76   filter sends 171 to box 2
+77   filter unlocks m0
+79   filter receives 71 from box 0
+82   burst wakes (timer)
+82   filter locks m0
+83   filter sends 171 to box 2
+84   filter unlocks m0
+86   filter receives 71 from box 0
+89   filter locks m0
+90   filter blocks sending 171 to full box 2
+91   switch filter -> bulk
+91   bulk sleeps until 131
+92   switch bulk -> spinner
+95   spinner yields
+100  spinner yields
+105  spinner yields
+110  spinner yields
+112  spinner exits after 22 ticks
+113  switch spinner -> drain
+113  drain waits on empty box 3
+114  switch drain -> logger
+114  logger receives 151 from box 2
+114  filter unblocked: 171 queued in box 2
+115  switch logger -> filter
+115  filter unlocks m0
+117  filter exits after 36 ticks
+118  switch filter -> logger
+118  logger bumps 8 words at 0
+119  switch logger -> burst
+119  burst hands 1 to drain
+120  burst sends 2 to box 3
+121  burst sends 3 to box 3
+122  switch burst -> logger
+123  logger receives 171 from box 2
+124  logger bumps 8 words at 8
+125  switch logger -> drain
+127  drain receives 2 from box 3
+128  switch drain -> burst
+128  burst sends 4 to box 3
+129  burst sends 5 to box 3
+130  burst sends 6 to box 3
+131  bulk wakes (timer)
+131  switch burst -> bulk
+131  bulk bumps 30 words at 16
+132  bulk arena full: 30 words at 46
+133  bulk arena full: 30 words at 46
+134  bulk yields
+137  bulk exits after 15 ticks
+138  switch bulk -> logger
+139  logger receives 171 from box 2
+140  logger bumps 8 words at 46
+141  switch logger -> drain
+143  drain receives 3 from box 3
+144  switch drain -> burst
+144  burst allocates block 0
+145  burst allocates block 1
+146  burst allocates block 2
+147  switch burst -> logger
+148  logger resets the arena
+149  logger exits after 21 ticks
+150  switch logger -> drain
+152  drain receives 4 from box 3
+153  switch drain -> burst
+153  burst allocates block 3
+154  burst allocation fails (4 free)
+155  burst exits after 13 ticks
+155  burst reclaims block 3
+155  burst reclaims block 2
+155  burst reclaims block 1
+155  burst reclaims block 0
+156  switch burst -> drain
+158  drain receives 5 from box 3
+161  drain receives 6 from box 3
+164  drain exits after 20 ticks
+165  idle after drain
+summary at tick 170
+  task     state     prio eff  ran
+  logger   done      1    1    21
+  bulk     done      2    2    15
+  control  done      6    6    21
+  sensor   done      4    4    17
+  filter   done      3    3    36
+  spinner  done      2    2    22
+  burst    done      1    1    13
+  drain    done      1    1    20
+switches 37, idle 5, interrupts 12, overruns 3, boosts 3, faults 1
+pool 8/8 free, arena peak 54/64, mailbox peaks 4 4 4 4, trace dropped 0

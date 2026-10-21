@@ -1,0 +1,57 @@
+# A hashed timer wheel: WHEEL slots, each a FIFO list threaded through the
+# sleeping tasks' control blocks. Arming is O(1); a tick visits one slot and
+# fires the entries whose deadline has come, leaving later laps in place.
+
+$no_hidden_costs
+
+from p"defs.dewy" import Kernel, NTASK, WHEEL, NONE
+from p"trace.dewy" import record
+from p"sched.dewy" import make_ready
+
+clear_wheel=(@k:Kernel):>void & no allocates & no blocks=>{
+    loop s in [0..WHEEL) {
+        k.wheel.head[s]=NONE
+        k.wheel.tail[s]=NONE
+    }
+}
+
+arm=(@k:Kernel t:int64 deadline:int64):>void & no allocates & no blocks=>{
+    if t <? 0 or t >=? NTASK or deadline <? 0 return
+    let s=deadline%WHEEL
+    k.tasks[t].deadline=deadline
+    k.tasks[t].timer_next=NONE
+    let last=k.wheel.tail[s]
+    if last <? 0 or last >=? NTASK {
+        k.wheel.head[s]=t
+    } else {
+        k.tasks[last].timer_next=t
+    }
+    k.wheel.tail[s]=t
+}
+
+# Fire this tick's slot. The walk is bounded by NTASK links even if a list
+# were damaged, so a tick always ends.
+expire=(@k:Kernel):>void & no allocates & no blocks=>{
+    if k.now <? 0 return
+    let s=k.now%WHEEL
+    let prev=NONE
+    let t=k.wheel.head[s]
+    loop step in [0..NTASK) {
+        if t <? 0 or t >=? NTASK break
+        let next=k.tasks[t].timer_next
+        if k.tasks[t].deadline =? k.now and k.tasks[t].state =? 'sleeping' {
+            if prev <? 0 or prev >=? NTASK {
+                k.wheel.head[s]=next
+            } else {
+                k.tasks[prev].timer_next=next
+            }
+            if k.wheel.tail[s] =? t k.wheel.tail[s]=prev
+            k.tasks[t].timer_next=NONE
+            make_ready(@k t)
+            record(@k 'wake' t 0 0)
+        } else {
+            prev=t
+        }
+        t=next
+    }
+}
