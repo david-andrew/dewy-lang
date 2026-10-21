@@ -65,6 +65,7 @@ struct FactState:
     ids: int[]
     bounds: FactBound[]
     live: bool = true
+    full: bool = false
 
 struct FactRequest:
     node: int
@@ -205,12 +206,71 @@ fact_bound = (s: FactState, v: int) -> FactBound:
     s.bounds[i]
 
 fact_new = (s: mut FactState, b: FactBound, term: FactTerm = FactTerm()) -> int:
+    if s.ids.len() >= FACT_CAP and not s.full: fact_compact(s)
     if s.ids.len() >= FACT_CAP: return 0
     v = fact_terms.len()
     fact_terms.push(term)
     s.ids.push(v)
     s.bounds.push(b)
     v
+
+# A full state drops the values nothing current reaches: bindings and their
+# tombstones, result evidence, entry snapshots, loans and the newest values,
+# and what their projections and terms reach. A dropped value is unknown from
+# then on: it loses its facts, never gains one.
+fact_compact = (s: mut FactState):
+    keep: {int: bool} = {}
+    work: int[]
+    loop b in s.bindings:
+        work.push(b.value)
+        work.push(b.prior)
+    loop c in s.conditional:
+        work.push(c.result)
+        work += c.values
+    work += refine_entry
+    loop loan in fact_loans: work.push(loan.capacity)
+    # (the newest values: operands of the expression being evaluated)
+    loop j in [max(0, s.ids.len() - 32)..s.ids.len()): work.push(s.ids[j])
+    # (terms are followed two levels: an accumulator's chain of sums is not
+    # kept whole)
+    depth = fill(0, work.len())
+    i = 0
+    loop i < work.len():
+        v = work[i]
+        d = depth[i]
+        i += 1
+        if v <= 0 or v >= fact_terms.len() or keep.has(v): continue
+        keep[v] = true
+        if d < 2:
+            work.push(fact_terms[v].a)
+            work.push(fact_terms[v].b)
+            depth.push(d + 1)
+            depth.push(d + 1)
+        loop p in s.projections:
+            if p.base != v: continue
+            work.push(p.value)
+            depth.push(d)
+            if p.element:
+                work.push(p.selector)
+                depth.push(d)
+    ids: int[]
+    bounds: FactBound[]
+    loop j in [0..s.ids.len()):
+        if keep.has(s.ids[j]):
+            ids.push(s.ids[j])
+            bounds.push(s.bounds[j])
+    projections: FactProjection[]
+    loop p in s.projections:
+        if keep.has(p.base) and keep.has(p.value): projections.push(p)
+    differences: FactDifference[]
+    loop row in s.differences:
+        if keep.has(row.a) and keep.has(row.b): differences.push(row)
+    s.ids = ids
+    s.bounds = bounds
+    s.projections = projections
+    s.differences = differences
+    # (too little freed: stop compacting this state rather than thrash)
+    s.full = ids.len() > FACT_CAP - FACT_CAP / 8
 
 fact_constant = (s: mut FactState, x: int, at: int = 0) -> int:
     fact_new(s, FactBound(x, x, x != 0), FactTerm(origin = at))
