@@ -5067,6 +5067,26 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
     else if id == .sqrt:
         nargs_check(n, nargs, 1, 1, "sqrt")
         t = arg_type(args, 0, 0)
+        # (the root of a quantity halves its dimension's powers: sqrt of an area is a length)
+        if is_quantity(t) and dewy_at(nodes[n].pos):
+            dim = quantity_dimension(t)
+            powers: int[]
+            loop i in [0..8):
+                p = quantity_dimensions[dim][i]
+                if p % 2 != 0: fatal(nodes[n].pos, "sqrt of {dt(t)}: {dimension_str(dim)} has an odd power, so its root is not a quantity of whole powers (divide by a unit for a plain number first, as in `sqrt(x/m)`)")
+                powers.push(p / 2)
+            number = quantity_number(args[0])
+            base = quantity_base(t)
+            if types[base].kind != .float_:
+                coerce(number, T_FLOAT)
+                base = T_FLOAT
+            args[0] = number
+            set_list(n, args)
+            nodes[n].type = i32(base)
+            add_flag(n, NF_CHECKED)
+            wrap_conv(n, .none_, mk_quantity(base, intern_dimension(powers)))
+            last_checked = n
+            return ntype(n)
         if is_lit(args[0]) or types[t].kind == .int_ or bundled_rational_type(t):
             coerce(args[0], T_FLOAT)
             t = T_FLOAT

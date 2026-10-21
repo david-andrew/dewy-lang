@@ -693,7 +693,8 @@ exact scale to that representation.
 
 Addition, subtraction, and comparisons require identical dimensions.
 Multiplication/division combine dimensions; powers require a constant integer
-exponent. Divide by a unit to get a dimensionless count in that unit.
+exponent, and `sqrt` halves even powers (`sqrt(v*v)` of a speed is a speed).
+Divide by a unit to get a dimensionless count in that unit.
 Annotations, generic functions, overloads, arrays, records, and conversions
 preserve dimensions. Ordinary conversions cannot add or remove a dimension;
 `transmute` can explicitly change it while preserving the numeric representation.
