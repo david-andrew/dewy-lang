@@ -424,6 +424,9 @@ ref_validate_signature = (params: int[], ret: int, mask: int, pos: int):
         if ref_nested_formals(t): fatal(pos, "dependent element contracts require instantiated storage authority")
     result = prune(ret)
     loop types[result].kind == .opt: result = prune(int(types[result].elem))
+    # (an element contract on formals would escape into the caller's storage,
+    # where no call binds them)
+    if ref_nested_formals(result): fatal(pos, "a result's element contract cannot depend on parameters")
     all = params + [result]
     loop i in [0..all.len()):
         t = prune(all[i])

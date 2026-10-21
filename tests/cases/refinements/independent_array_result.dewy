@@ -1,0 +1,10 @@
+positive=int64<i => i >? 0>
+make=():>array<positive>=>[1 2]
+main=()=>{
+ let xs=make()
+ xs[0]=5
+ xs=make()
+ let ys:array<positive>=make()
+ ys[1]=ys[0]
+ printl("{xs} {ys}")
+}
