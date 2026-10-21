@@ -40,6 +40,20 @@ representation_type = (t0: int) -> int:
     if types[t].kind == .refined: return prune(int(types[t].elem))
     t
 
+# t with every refinement inside it dropped, as a reader sees it: formatting writes a value out
+# and never stores into it, so an array of refined elements reads as an array of their base
+representation_deep = (t0: int) -> int:
+    t = representation_type(t0)
+    k = types[t].kind
+    if k == .array: return mk_array(representation_deep(int(types[t].elem)))
+    if k == .fixed: return mk_fixed(representation_deep(int(types[t].elem)), fixed_len(t))
+    if k == .opt: return mk_opt(representation_deep(int(types[t].elem)))
+    if k == .tuple:
+        a: int[]
+        loop i in [0..int(types[t].nargs)): a.push(representation_deep(targ(t, i)))
+        return mk_tuple(a)
+    t
+
 refine_reset = ():
     ref_predicates = [[]]
     refine_active = false

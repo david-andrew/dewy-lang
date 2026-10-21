@@ -5259,6 +5259,9 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         # fixed-size array into the T[] the library's overload takes)
         writer = "__fmt"
         if elem: writer = "__dewy_fmt"
+        # (refined elements are written as their base: the library's overloads take the base)
+        plain = representation_deep(t)
+        if not type_eq(plain, t): wrap_conv(args[1], .none_, plain)
         c = bc_call(writer, args, pos)
         nodes[n] = nodes[c]
         return check_expr(n, expected)
