@@ -2178,6 +2178,13 @@ check_block = (b: int, expected: int, want_value: bool) -> int:
 
 # the value expression of a value block
 block_value = (b: int) -> int: int(nodes[kid(b, nkids(b) - 1)].a)
+
+# A union with a void member (`:>void | E`): a bare return or the end of the body gives it.
+union_has_void = (t: int) -> bool:
+    if not is_union(t): return false
+    loop m in union_members(t):
+        if tkind(m) == .void_: return true
+    false
 set_block_value = (b: int, e: int): nodes[kid(b, nkids(b) - 1)].a = i32(e)
 
 # loop p in ps (ps a soa array): loop i in [0..len(ps)): p = ps[i]
@@ -2821,6 +2828,16 @@ pool_update_read = (n: int) -> bool:
         b = int(nodes[n].b)
         return pool_update_scalar(n) and pool_update_scalar(a) and pool_update_scalar(b) and pool_update_read(a) and pool_update_read(b)
     false
+
+# a `:>void | E` body that runs off its end gives its void member: a final bare return
+void_arm_end = (body: int, r: int) -> bool:
+    if not union_has_void(r): return false
+    ret = mk(.return_, nodes[body].pos)
+    check_stmt(ret)
+    items = kids(body)
+    items.push(ret)
+    set_list(body, items)
+    true
 
 pool_library_fn = (f: int) -> bool:
     if f <= 0: return false
@@ -3617,6 +3634,10 @@ check_stmt = (s: int):
         else:
             rt = prune(ret)
             if tkind(rt) == .var: unify(rt, T_VOID)
+            else if union_has_void(rt):
+                # (a bare return in a `:>void | E` function gives its void member)
+                check_expr(bc_block([], nodes[s].pos), rt)
+                nodes[s].a = i32(coerce(last_checked, rt))
             else if tkind(rt) != .void_: fatal(nodes[s].pos, "missing return value (function returns {dt(rt)})")
     else if k == .break_ or k == .continue_:
         if ctxs[cx].loop_depth == 0:
@@ -3754,6 +3775,7 @@ __check_fn_body = (f: int):
             if fns[f].aux_void and tkind(int(fns[f].ret)) != .void_: fatal(nodes[decl].pos, "recursive function '{name_of(int(nodes[decl].name))}' returns a value; add an explicit return type ({jd(nodes[decl].pos, "`-> Type`", "`:>Type`")})")
         else if want:
             if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
+            else if bt != T_NEVER and not (n > 0 and stmt_terminates(kid(body, n - 1))) and void_arm_end(body, r): pass
             else if bt != T_NEVER and not (n > 0 and stmt_terminates(kid(body, n - 1))):
                 p = nodes[body].pos
                 if decl != 0: p = nodes[decl].pos
@@ -3972,10 +3994,10 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
             else: unify(r, T_VOID)
         else if types[r].kind == .void_: nodes[body].aux = 0
         else if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
-        else if bt != T_NEVER: fatal(nodes[body].pos, "lambda must return a value of type {dt(r)}")
+        else if bt != T_NEVER and not void_arm_end(body, r): fatal(nodes[body].pos, "lambda must return a value of type {dt(r)}")
     else if want:
         if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
-        else if bt != T_NEVER: fatal(nodes[body].pos, "lambda must return a value of type {dt(r)}")
+        else if bt != T_NEVER and not void_arm_end(body, r): fatal(nodes[body].pos, "lambda must return a value of type {dt(r)}")
     else: nodes[body].aux = 0
     fns[f].ret = ctxs[cx].ret
     fns[f].state = 2

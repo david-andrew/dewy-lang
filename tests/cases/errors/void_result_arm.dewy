@@ -1,0 +1,29 @@
+# quick
+# A `:>void | E` function gives its void member at a bare return or the end of its body.
+Oops:type = type of error & [code:int64]
+check = (x:int64):>void|Oops => {
+    if x <? 0 { return Oops[x] }
+    if x =? 0 { return }
+    printl("checked {x}")
+}
+both = (a:int64 b:int64):>void|Oops => {
+    check(a) or_throw
+    check(b) or_throw
+    printl("both fine")
+}
+maybe = (x:int64):>void|Oops => {
+    if x >? 9 { check(-x) or_throw }
+}
+show = (r:void|Oops):>void => {
+    if r is? Oops { printl("oops {r.code}") } else { printl("ok") }
+}
+main = () => {
+    show(check(0))
+    show(both(1 2))
+    show(both(3 (-4)))
+    show(maybe(1))
+    show(maybe(10))
+    let f = (x:int64):>void|Oops => { if x >? 1 { return Oops[x] } }
+    show(f(1))
+    show(f(2))
+}
