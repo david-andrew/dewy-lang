@@ -4145,8 +4145,15 @@ cmp_error = (n: int, ta: int, tb: int):
     if tkind(ta) == .bool_ and is_numeric(tb) and nodes[a].kind == .binary:
         aop = nodes[a].op as Tok
         if aop == .lt or aop == .le or aop == .gt or aop == .ge: why = if dewy_at(nodes[n].pos): " (`a <? x <? b` is written `a <? x and x <? b`, or `x in? [a..b]`)" else: " (`a < x < b` is written `a < x and x < b`, or `x in a..b`)"
-    if len(why) == 0 and is_union(prune(ta)) and union_index(prune(ta), prune(tb)) >= 0:
-        why = if dewy_at(nodes[n].pos): " (find out which it holds first: `x is? {dt(tb)} and x =? value`)" else: " (find out which it holds first: `x is {dt(tb)} and x == value`)"
+    # (the member compared with: the same type, or a number for a number)
+    member = 0
+    if is_union(prune(ta)):
+        if union_index(prune(ta), prune(tb)) >= 0: member = prune(tb)
+        else if is_numeric(tb):
+            loop m in union_members(ta):
+                if member == 0 and is_numeric(m): member = m
+    if len(why) == 0 and member != 0:
+        why = if dewy_at(nodes[n].pos): " (find out which it holds first: `x is? {dt(member)} and x =? value`)" else: " (find out which it holds first: `x is {dt(member)} and x == value`)"
     if len(why) == 0 and tkind(ta) == .opt and type_eq(prune(int(types[prune(ta)].elem)), prune(tb)):
         # (env("X") != "": the optional may be none)
         why = if dewy_at(nodes[n].pos): " (it may be none: `(x ?? default) =? value` compares its value, or a default when there is none; `if x isnt? none \{ }` narrows it)" else: " (it may be none: `(x ?? default) == value` compares its value, or a default when there is none; `if let v = x:` names the value)"
@@ -4155,7 +4162,7 @@ cmp_error = (n: int, ta: int, tb: int):
     if len(why) == 0 and ((tkind(ta) == .str_ and is_numeric(tb)) or (is_numeric(ta) and tkind(tb) == .str_)):
         why = " (text is not a number, even with digits in it: `to_int(s) ?? 0` or `to_float(s) ?? 0.0` reads one, and `input_int(...)` asks for one)"
     # (n == 1 with n an enum: C's and JavaScript's numbered names)
-    if len(why) == 0 and tkind(ta) == .enum_ and is_int(tb): why = if dewy_at(nodes[n].pos): " (`x =? .name` asks which it is)" else: " (`x == .name` asks which it is; `int(x)` is its number, counting from 0)"
+    if len(why) == 0 and tkind(ta) == .enum_ and not is_union(ta) and is_int(tb): why = if dewy_at(nodes[n].pos): " (`x =? .name` asks which it is)" else: " (`x == .name` asks which it is; `int(x)` is its number, counting from 0)"
     fatal(nodes[n].pos, "cannot compare {dt(ta)} with {dt(tb)}{why}")
 
 # "space" given where a Key goes: " (write `.space`)"
