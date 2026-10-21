@@ -1774,8 +1774,13 @@ record updates and an exact large-ID round trip.
 `type of error` mints a distinct nominal error type. A unit error is written
 with its name; add `& [fields...]` for a payload, constructed like a record.
 `type of exception` and children of minted exception types are also supported,
-including inherited fields. These declarations are currently module-level and
-nongeneric; other nominal parents and general intersections are not yet supported.
+including inherited fields. `type of any` (alone, or `& [fields...]`) mints the
+root of a family of its own, which is not an error: `Token:type=type of any &
+[line:int64]`, then `Name:type=type of Token & [text:string]`. A `Name` satisfies
+a `Token` parameter and keeps its identity there, for `is?` and `match`; a
+same-shaped type minted separately is a different type. These declarations are
+currently module-level and nongeneric; other nominal parents (`type of int64`)
+and general intersections are not yet supported.
 
 ```dewy
 Missing:type=type of error

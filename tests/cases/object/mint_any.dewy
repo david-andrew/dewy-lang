@@ -1,0 +1,22 @@
+# quick
+# `type of any` mints a family root of its own: distinct from a same-shaped type, with
+# children that satisfy it, keep their identity in its storage and reach its members.
+Token:type = type of any & [line:int64 = 0  where = ():>string => "line {line}"]
+Space:type = type of Token
+Name:type = type of Token & [text:string  hi = ():>string => "{text} at {where}"]
+Punct:type = type of any & [text:string]
+Mark:type = type of any
+describe = (t:Token):>string => {
+    if t is? Name return "name {t.text}"
+    if t is? Space return "space"
+    return "token"
+}
+main = () => {
+    let n = Name(text='x' line=3)
+    let s = Space()
+    printl"{n.hi} {describe(n)} {describe(s)} {describe(Token(line=1))} {s.where}"
+    let ts:array<Token> = [n s]
+    printl(ts)
+    let u:Name|Punct = Punct(text='!')
+    printl"{u is? Punct} {u is? Name} {Mark}"
+}

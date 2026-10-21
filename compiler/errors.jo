@@ -60,6 +60,11 @@ nominal_resolve = (t: int):
     if nominal_resolving.get(t, false): fatal(nodes[int(structs[int(types[t].st)].decl)].pos, "nominal ancestry contains a cycle")
     nominal_resolving[t] = true
     d = int(structs[int(types[t].st)].decl)
+    # (type of any: the root of a family of its own, minted under nothing)
+    if mint_of_any(d):
+        nominal_parent[t] = 0
+        nominal_resolving[t] = false
+        return
     saved = cx
     ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "nominal")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(sc_names.len())))
     cx = ctxs.len() - 1
@@ -70,6 +75,10 @@ nominal_resolve = (t: int):
     nominal_resolve(parent)
     nominal_parent[t] = parent
     nominal_resolving[t] = false
+
+mint_of_any = (d: int) -> bool:
+    p = int(nodes[d].a)
+    nodes[p].kind == .tname and name_of(int(nodes[p].name)) == "any" and nkids(p) == 0 and files[pos_file(nodes[d].pos)].is_dewy
 
 prepare_nominals = ():
     loop m in modules:

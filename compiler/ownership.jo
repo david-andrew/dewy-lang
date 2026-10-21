@@ -189,7 +189,7 @@ ownership_validate = ():
         if fns[f].cabi or len(fns[f].export_name) != 0:
             fatal(nodes[int(fns[f].decl)].pos, "foreign entry points with owners require per-foreign-thread cleanup storage")
     loop child, parent in nominal_parent:
-        if ownership_type(parent): fatal(nodes[int(structs[int(types[child].st)].decl)].pos, "inherited lifecycle hooks require aggregate ownership support")
+        if parent != 0 and ownership_type(parent): fatal(nodes[int(structs[int(types[child].st)].decl)].pos, "inherited lifecycle hooks require aggregate ownership support")
     loop g in globals:
         if g.type > 0 and ownership_contains(int(g.type)):
             fatal(nodes[int(g.decl)].pos, "global owners require a program-lifetime cleanup plan")
