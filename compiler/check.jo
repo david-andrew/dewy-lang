@@ -2172,6 +2172,12 @@ unused_value = (raw: Node, t: int):
             warn(raw.pos, "this value is not used: it changes nothing")
 
 # ---------------- statements ----------------
+# (the library's exit(code): the program ends there)
+library_exit_call = (e: int) -> bool:
+    if nodes[e].kind != .call or nodes[e].sym <= 0 or int(nodes[e].sym) >= fns.len(): return false
+    d = int(fns[int(nodes[e].sym)].decl)
+    d != 0 and name_of(int(nodes[d].name)) == "exit" and pos_in_lib(nodes[d].pos)
+
 stmt_terminates = (s: int) -> bool:
     if s == 0: return false
     k = nodes[s].kind
@@ -2181,10 +2187,7 @@ stmt_terminates = (s: int) -> bool:
     if k == .exprstmt:
         e = int(nodes[s].a)
         if int(nodes[e].type) == T_NEVER: return true
-        # (the library's exit(code): the program ends there)
-        if nodes[e].kind == .call and nodes[e].sym > 0 and int(nodes[e].sym) < fns.len():
-            d = int(fns[int(nodes[e].sym)].decl)
-            if d != 0 and name_of(int(nodes[d].name)) == "exit" and pos_in_lib(nodes[d].pos): return true
+        if library_exit_call(e): return true
         if nodes[e].kind == .match_:
             all = true
             wild = false

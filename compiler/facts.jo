@@ -1385,7 +1385,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
                 if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(result, name, false, value))
             return result
         fact_call_effects(n, s)
-        if ntype(n) == T_NEVER: s.live = false
+        if ntype(n) == T_NEVER or nodes[n].aux == 0 and library_exit_call(n): s.live = false
         result = fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
         if nodes[n].aux == 0 and nodes[n].sym > 0:
             f = int(nodes[n].sym)
