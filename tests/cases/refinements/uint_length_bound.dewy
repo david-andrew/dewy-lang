@@ -1,0 +1,9 @@
+get=(b:array<int64> i:uint64<(<? b.length)>):>int64=>b[i]
+use=(xs:array<int64> k:uint64)=>printl(get(xs k))
+main=()=>{
+    let xs:array<int64> = [10 20 30]
+    printl(get(xs 2))
+    let k:uint64 = 1
+    printl(get(xs k))
+    use(xs 0)
+}

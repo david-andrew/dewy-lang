@@ -413,7 +413,7 @@ resolve_refinement = (n: int) -> int:
             if root == 0: continue
             actual = ref_projection_type(root, term.path, nodes[n].pos)
             if not has_var(actual) and not is_int(actual): fatal(nodes[n].pos, "refinement comparisons require scalar or length projections")
-            if not has_var(actual) and not has_var(expected) and not type_eq(actual, expected): fatal(nodes[n].pos, "dependent scalar refinement requires matching integer representations")
+            if not ref_repr_match(actual, expected, term.path): fatal(nodes[n].pos, "dependent scalar refinement requires matching integer representations")
     predicate = ref_intern(atoms)
     if not ref_spans.has(predicate): ref_spans[predicate] = nodes[n].pos
     mk_refined(base, predicate)
@@ -550,7 +550,14 @@ ref_value = (term: RefTerm, self: int, args: int[], base: int, s: mut FactState)
         e = mk_ident_local(term.value, locals[term.value].pos)
         value = fact_read(s, e)
     else if term.kind != 0: fatal(-1, "unresolved generic refinement bound")
-    ref_project(term, value, s)
+    value = ref_project(term, value, s)
+    if value != 0 and term.path.len() > 0 and term.path[term.path.len() - 1] == -1 and representation_type(base) == T_U64:
+        # A length bounding a uint64: its interval in the biased order.
+        b = fact_bound(s, value)
+        lo = max(b.lo, 0)
+        hi = if b.hi < lo: lo else: b.hi
+        value = fact_new(s, FactBound(lo xor FACT_MIN, hi xor FACT_MIN, (lo xor FACT_MIN) != 0), FactTerm(type = T_U64))
+    value
 
 ref_assume = (t0: int, self: int, args: int[], s: mut FactState):
     t = prune(t0)
@@ -702,7 +709,7 @@ ref_validate_signature = (params: int[], ret: int, mask: int, pos: int):
                 if mask & (1 << j) != 0 and (i < params.len() or term.path.len() == 0): fatal(pos, "mutable refinement dependencies are only valid in projected postconditions")
                 a = if tkind(representation_type(t)) == .array: T_INT else: representation_type(t)
                 b = ref_projection_type(params[j], term.path, pos)
-                if not has_var(a) and not has_var(b) and not type_eq(a, b): fatal(pos, "dependent scalar refinement requires matching integer representations")
+                if not ref_repr_match(b, a, term.path): fatal(pos, "dependent scalar refinement requires matching integer representations")
     # Dependency cycles cannot define a self-justifying set of contracts.
     done = fill(false, params.len())
     loop _ in [0..params.len()):
@@ -797,6 +804,12 @@ ref_storage_contract = (t0: int, seen: int[] = []) -> bool:
             if ref_storage_contract(int(fields[int(structs[si].fields) + i].type), seen): return true
     false
 
+# A length (an int64 fact, never negative) may bound a uint64: its facts are
+# mirrored into the biased uint64 order (ref_value).
+ref_repr_match = (actual: int, expected: int, path: int[]) -> bool:
+    if has_var(actual) or has_var(expected) or type_eq(actual, expected): return true
+    expected == T_U64 and path.len() > 0 and path[path.len() - 1] == -1
+
 # Resolve a projection against its concrete binder before publishing a contract.
 ref_projection_type = (root: int, path: int[], pos: int) -> int:
     t = representation_type(root)
@@ -859,7 +872,7 @@ ref_validate_record = (t: int, pos: int):
                         dep = int(fields[int(structs[si].fields) + j].type)
                         bound = ref_projection_type(dep, term.path, pos)
                         expected = if tkind(representation_type(ft)) == .array: T_INT else: representation_type(ft)
-                        if not has_var(bound) and not has_var(expected) and not type_eq(bound, expected): fatal(pos, "dependent field refinement requires matching integer representations")
+                        if not ref_repr_match(bound, expected, term.path): fatal(pos, "dependent field refinement requires matching integer representations")
             if ready: done[i] = true
     loop yes in done:
         if not yes: fatal(pos, "cyclic dependent field refinements")
