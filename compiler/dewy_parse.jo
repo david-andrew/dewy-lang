@@ -1921,6 +1921,8 @@ dw_pattern = (id: int) -> int:
     let id = dw_unwrap(id)
     pos = dewy_syntax[id].pos
     name = dw_name(id)
+    # (`else` is a keyword of the flow chain, not a name to bind)
+    if name == "else": fatal(pos, "`else` follows the arms, outside the braces: `match v \{...} else ...`; as an arm, `_ => ...` matches everything left")
     if name != "":
         p = mk(.pwild, pos)
         if name != "_": nodes[p].name = i32(intern(name))

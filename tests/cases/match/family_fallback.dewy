@@ -1,0 +1,15 @@
+Token:type=type of any & [line:int64]
+Name:type=type of Token & [text:string]
+Num:type=type of Token & [value:int64]
+outside=(t:Token):>string=>match t {
+    n:Name=>"name {n.text}"
+} else "other"
+inside=(t:Token):>string=>match t {
+    n:Name=>"name {n.text}"
+    _=>"other"
+}
+main=()=>{
+    printl(outside(Name[1 "x"]))
+    printl(outside(Num[2 5]))
+    printl(inside(Num[2 5]))
+}
