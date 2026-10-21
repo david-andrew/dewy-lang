@@ -326,11 +326,9 @@ wit_connective = (n: int, entry: FactState, want: bool, refuted: bool, role: str
         right = wit_connective(int(nodes[n].b), rest, want, refuted, operand)
         # Establishing any one unknown alternative would suffice.
         count = left.count + right.count
-        if left.count == 0 or right.unknown and not left.unknown:
-            right.count = count
-            return right
+        if left.count == 0 or right.unknown and not left.unknown: left = right
         left.count = count
-        left
+        return left
     p = fact_condition(n, entry)
     status = wit_status(p, want)
     leaf = WitLeaf(reason = p.reason)
