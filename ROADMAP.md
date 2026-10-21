@@ -27,12 +27,11 @@ GPT quota is limited: at most one Astra stream, at medium effort; Sol for review
 only.
 
 - Astra: graph and string_equal runtime.
-- Opus: refinement slice 6 (witness diagnostics).
+- Opus: refinement and container follow-ups (small items).
 
 ## Next
 
 - Tier-3 implementation (designed, no decisions needed):
-  - refinement slice 6 (1–5 landed): witness diagnostics;
   - effect rows slices 3, 5–6 (1–2 and 4 landed; ~/dev/tmp/coord/effects-design.md);
   - ownership slices 2, 4–6 (1, drop hooks and moves, and 3, `$lend`, landed):
     custom copy/move hooks, resource containers, arenas
@@ -66,6 +65,10 @@ only.
   - diagnostics spell `Set<…>` instead of `set<…>`; a failed overload can
     blame an unrelated candidate (GpuBuffer, Set); `.length` on a user type
     without one says "use `.length`";
+  - refinement follow-ups: a call argument (`printl(take(z))`) drops facts, so
+    a refuted contract only fails at run time; `.copy()` doesn't carry length
+    facts (strict 67/70 stop there); witnesses for `and`/`or` conditions; the
+    hint inside `$proof` suggests `$runtime_assert`;
   - static calls through runtime `type<T>` values (needs type values);
   - effects slice 4 follow-ups: conditional capacity/uniqueness proofs,
     complete late-operation verification.
