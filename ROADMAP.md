@@ -27,7 +27,7 @@ GPT quota is limited: at most one Astra stream, at medium effort; Sol for review
 only.
 
 - Astra: default-build game kernel (6.3× C default vs 1.6× release).
-- Opus: small items below.
+- Opus: refinement slice 6 (witness diagnostics).
 
 ## Next
 
@@ -60,13 +60,12 @@ only.
 - Recover the game-panel compile cost of mathematical `int` (+5.7%, accepted
   10-20); the frontend work recovered the synthetic panel's share.
 - Small items:
-  - diagnostics show type parameters as `$0` (`Set<$0>`); `x.push(1)` on an
-    `int64` blames `Set`'s push;
-  - `match` with `else` over a minted family warns the arm is unused;
-  - `dict<string array<Nat>>` fails on unchecked zero initialization
-    (`lib/core/map.jo:331`);
-  - `xs.len()` compiles in Dewy (one spelling: `.length`);
-  - `let e = E` with all fields defaulted is rejected (the design constructs);
+  - removing from a map/set whose refined element rejects zero (`Pos`) fails:
+    the library zeroes the freed slot (`lib/core/map.jo:309`); needs a
+    library-only dead-slot primitive;
+  - diagnostics spell `Set<…>` instead of `set<…>`; a failed overload can
+    blame an unrelated candidate (GpuBuffer, Set); `.length` on a user type
+    without one says "use `.length`";
   - static calls through runtime `type<T>` values (needs type values);
   - effects slice 4 follow-ups: conditional capacity/uniqueness proofs,
     complete late-operation verification.
