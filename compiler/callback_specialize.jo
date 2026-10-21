@@ -126,3 +126,19 @@ callback_prepare = ():
         callback_bindings(int(fns[f].body), known)
         callback_scan(int(fns[f].body), -f - 1, known, 0)
     stack_closure_params.clear()
+
+# A known immutable callback's environment needs no independent state copy.
+# Borrow only across inert later reads and into invocation-only parameters;
+# effectful arguments keep the ordinary eager snapshot and lifetime pin.
+callback_arg_borrow = (n0: int, args: int[], i: int, callee: int, parameter: int) -> bool:
+    n = n0
+    if nodes[n].kind == .fnref and nodes[n].aux == 2: n = int(nodes[n].a)
+    if nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.local)): return false
+    target = callback_local(int(nodes[n].sym))
+    if target < 0 or not closure_env_shareable(target): return false
+    if not closure_borrow_param(callee, parameter): return false
+    loop j in [i + 1..args.len()):
+        later = args[j]
+        if nodes[later].kind == .fnref and nodes[later].aux == 2: later = int(nodes[later].a)
+        if not plain_read(later): return false
+    true

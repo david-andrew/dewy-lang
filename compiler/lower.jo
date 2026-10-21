@@ -201,6 +201,7 @@ struct TempItem:
     ref: int
     t: int
     cond: bool
+    stack_target: int = -1
 
 struct LoopInfo:
     brk: int
@@ -371,9 +372,9 @@ copy_ref = (v: int, t: int) -> int:
 # ---------------- temps ----------------
 new_temp = (t: int) -> int: new_slot(tsize(t), talign(t))
 
-reg_temp_slot = (s: int, t: int):
+reg_temp_slot = (s: int, t: int, stack_target: int = -1):
     if not is_managed(t) or tl_items.len() == 0: return
-    tl_items[tl_items.len() - 1].push(TempItem(true, s, t, cond_depth > tl_cond[tl_cond.len() - 1]))
+    tl_items[tl_items.len() - 1].push(TempItem(true, s, t, cond_depth > tl_cond[tl_cond.len() - 1], stack_target))
 
 reg_temp_vreg = (v: int, t: int):
     if not is_managed(t) or tl_items.len() == 0: return
@@ -463,7 +464,8 @@ stmt_end = ():
         it = items[i]
         if it.is_slot:
             a = e_slot(it.ref)
-            drop_at(a, it.t)
+            if it.stack_target >= 0: drop_stack_closure(a, it.stack_target)
+            else: drop_at(a, it.t)
             if it.cond: e_zero(a, tsize(it.t))
         else:
             release(it.ref, it.t)
@@ -498,7 +500,9 @@ drop_held = (items: int, built: int):
         k = tl_items[j].len() - 1
         loop k >= 0:
             it = tl_items[j][k]
-            if it.is_slot: drop_at(e_slot(it.ref), it.t)
+            if it.is_slot:
+                if it.stack_target >= 0: drop_stack_closure(e_slot(it.ref), it.stack_target)
+                else: drop_at(e_slot(it.ref), it.t)
             else: release(it.ref, it.t)
             k -= 1
         j -= 1
@@ -1154,7 +1158,7 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
         # A scalar can live in a local's mutable vreg. Capture its value before
         # a later argument reassigns that local, just as we retain managed data.
         if i + 1 < args.len() and vc(pt) != VC_AGG: val.v = freeze_scalar(val.v, pt)
-        if not val.owned and (not dewy_entry or i + 1 < args.len()) and type_has_fn(pt) and files[pos_file(nodes[a].pos)].is_dewy: val = own_at(a, val, pt)
+        if not val.owned and (not dewy_entry or i + 1 < args.len()) and type_has_fn(pt) and not callback_arg_borrow(value_node, args, i, callee, parameter) and files[pos_file(nodes[a].pos)].is_dewy: val = own_at(a, val, pt)
         mut_snapshot = any_mut
         if copies_on and (copy_strict(a) or ownership_type(pt)): mut_snapshot = any_mut and shares_mut_root(a, args, mutmask)
         if not val.owned and is_managed(pt) and (mut_snapshot or borrow_may_change(a, args, i, callee)): val = own_at(a, val, pt)
@@ -1162,7 +1166,10 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
         # reaches, f(p, p.hs[0]): the callee writing p would change it, so a copy; or that the
         # callee changes by name)
         else if not val.owned and vc(pt) == VC_AGG and ((any_mut and shares_mut_root(a, args, mutmask)) or borrow_may_change(a, args, i, callee)): val = own_at(a, val, pt)
-        borrow(val, pt)
+        # Invocation-only callees cannot retain this stack environment. Keep
+        # its captures alive through the statement, then destroy them directly.
+        if stack: reg_temp_slot(val.slot, pt, int(nodes[value_node].sym))
+        else: borrow(val, pt)
         out.push(val.v)
 
 # (a is part of the same variable as one of the call's `mut` arguments)

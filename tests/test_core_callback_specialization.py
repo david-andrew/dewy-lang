@@ -108,7 +108,10 @@ def test_callback_specialization_resolves_body(compiler, tmp_path, release):
     if not versions:
         # Release can inline both specialized loops and prune their bodies.
         assert release and not any(f.startswith('f_visit_') for f in ran.stdout.split('fn ')), ran.stdout
-        main = next(f for f in ran.stdout.split('fn ') if f.startswith('f_main_'))
+        # Once cleanup disappears, main can also inline into its ABI wrapper.
+        main = next((f for f in ran.stdout.split('fn ') if f.startswith('f_main_')), None)
+        if main is None:
+            main = next(f for f in ran.stdout.split('fn ') if f.startswith('__h_math_main_'))
         # Environment destruction can still use a void indirect drop helper.
         assert not any('calli ' in line and 'ty=0' in line for line in main.splitlines())
     assert all('calli ' not in f for f in versions)
