@@ -358,6 +358,12 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if from == T_NEVER: return true
     fk = types[from].kind
     tk = types[to].kind
+    if str_sets.len() > 1:
+        fs = str_set_of(from)
+        ts = str_set_of(to)
+        # (by type alone, as library overloads are chosen, a set is not its text)
+        if ts != 0 and (fk == .str_ and n != 0 or fs != 0 and str_set_within(fs, ts)): return true
+        if fs != 0 and tk == .str_ and n != 0: return true
     if fk == .refined or tk == .refined: return can_coerce(n, representation_type(from), representation_type(to))
     if refine_active and fk == .struct_ and tk == .struct_ and ref_record_conversion(from, to): return true
     if fk == .quantity or tk == .quantity:
@@ -398,6 +404,45 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
         return can_coerce(n, from, int(types[to].elem))
     if fk == .null_ and (tk == .ptr or tk == .cfn): return true
     if fk == .ptr and tk == .ptr and (to == T_RAWPTR or from == T_RAWPTR): return true
+    false
+
+# n coerced to `to` where a string set is on either side: true when done (a
+# string or set into a set; a set into a string), and a set going where only
+# its text fits (an optional string, a union with a string) is made text first
+str_set_coerced = (n: int, to: int) -> bool:
+    from = prune(ntype(n))
+    if from == to: return false
+    if str_set_of(to) != 0:
+        if types[from].kind == .str_ or str_set_of(from) != 0:
+            str_set_coerce(n, to)
+            return true
+        return false
+    fs = str_set_of(from)
+    if fs == 0: return false
+    tk = types[to].kind
+    if tk == .str_:
+        str_set_text_of(n)
+        return true
+    if tk == .opt and types[prune(int(types[to].elem))].kind == .str_: str_set_text_of(n)
+    else if is_union(to) and union_index(to, from) < 0:
+        fits = false
+        loop m in union_members(to):
+            ms = str_set_of(m)
+            if ms != 0 and str_set_within(fs, ms): fits = true
+        if not fits: str_set_text_of(n)
+    false
+
+str_set_within = (a: int, b: int) -> bool:
+    loop value in str_sets[a]:
+        if not str_sets[b].contains(value): return false
+    true
+
+# a function of the program's own (not the prelude's) by this name
+program_fn_named = (name: int) -> bool:
+    own: int[]
+    collect_fns(name, own)
+    loop d in own:
+        if not decl_in_prelude(d): return true
     false
 
 # every member of union a is one of union b's
@@ -452,6 +497,7 @@ coerce = (n: int, target: int) -> int:
         nodes[n].type = i32(target)
         return n
     if effects_active and callable_contract(target) != 0: nodes[n].type = i32(effect_infer_callable(n, target))
+    if str_sets.len() > 1 and str_set_coerced(n, prune(target)): return n
     from = prune(ntype(n))
     to = prune(target)
     if from == 0: ice("unchecked expression at {pos_str(nodes[n].pos)}")
@@ -1603,6 +1649,20 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
         # a member value passed for a union parameter
         if union_target(a, ntype(a), p) >= 0: return 1
         return -1
+    sp = if pk == .param and binds[int(types[p].id)] != 0: prune(binds[int(types[p].id)]) else: p
+    if str_sets.len() > 1 and nodes[a].type != 0 and types[sp].kind == .str_ and str_set_of(ntype(a)) != 0: return 1
+    if str_sets.len() > 1 and str_set_of(sp) != 0 and (nodes[a].type != 0 or nodes[a].kind == .str_lit):
+        # (a member literal fits a string set; another string is checked when it runs)
+        p = sp
+        ps = str_set_of(p)
+        if nodes[a].kind == .str_lit and nodes[a].aux != 1: return if str_sets[ps].contains(name_of(int(nodes[a].sval))): 0 else: -1
+        at = prune(ntype(a))
+        if at == p: return 0
+        if str_set_of(at) != 0: return if str_set_within(str_set_of(at), ps): 1 else: -1
+        if at != T_STR: return -1
+        e = kid_lit(a)
+        if nodes[e].kind == .str_lit and nodes[e].aux != 1: return if str_sets[ps].contains(name_of(int(nodes[e].sval))): 0 else: -1
+        return 2
     if is_lit(a):
         # Prefer the literal's default integer width/sign, but only among types
         # that can represent it; Dewy literals prefer mathematical int.
@@ -4747,6 +4807,10 @@ check_call = (n: int, expected: int) -> int:
         recv = last_checked
         nodes[callee].a = i32(recv)
         fname = int(nodes[callee].name)
+        if str_sets.len() > 1 and str_set_of(rt) != 0 and not program_fn_named(fname):
+            # (a string set's methods are its text's)
+            coerce(recv, T_STR)
+            rt = T_STR
         if synthetic_copy(rt, fname, nodes[n].pos):
             nargs_check(n, args.len(), 0, 0, ".copy")
             return check_copy(n, recv, rt)
@@ -5554,7 +5618,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             return check_expr(n, 0)
         bt = mk_array(T_U8)
         k = types[t].kind
-        own = is_union(t) or k == .tuple
+        own = is_union(t) or k == .tuple or str_set_of(t) != 0
         if k == .struct_:
             conv = as_conversion(t, T_STR)
             if conv != 0:
@@ -5914,6 +5978,25 @@ check_binary = (n: int, expected: int) -> int:
         if not is_lit(a) and not is_shift and is_numeric(ta): h = ta
         if not a_literal and b_literal and binary_literal_context(b, ta, op): h = if tkind(ta) == .opt: telem(ta) else: ta
         tb = prune(check_expr(b, h))
+    if str_sets.len() > 1 and (str_set_of(ta) != 0 or str_set_of(tb) != 0):
+        # (a set's word against a member literal or the same set: compared as words; else as text)
+        same = ta == tb
+        if (op == .eq or op == .ne) and not same:
+            if str_set_of(ta) != 0 and nodes[kid_lit(b)].kind == .str_lit:
+                coerce(b, ta)
+                tb = ta
+                same = true
+            else if str_set_of(tb) != 0 and nodes[kid_lit(a)].kind == .str_lit:
+                coerce(a, tb)
+                ta = tb
+                same = true
+        if not same or op != .eq and op != .ne:
+            if str_set_of(ta) != 0:
+                coerce(a, T_STR)
+                ta = T_STR
+            if str_set_of(tb) != 0:
+                coerce(b, T_STR)
+                tb = T_STR
     pending_decimal = (nodes[a].kind == .float_lit and nodes[a].sval != 0 and is_lit(a)) or (nodes[b].kind == .float_lit and nodes[b].sval != 0 and is_lit(b))
     # (a quantity operand is exact or floating by its number: 0.5 * 2s stays exact)
     na = if types[ta].kind == .quantity: quantity_base(ta) else: ta
@@ -6410,7 +6493,7 @@ str_set_patterns = (arm: int, st: int):
     loop p in kids(arm):
         pt = if nodes[p].kind == .ptype: prune(resolve_type(int(nodes[p].a))) else: 0
         set = if pt != 0: str_set_of(pt) else: 0
-        if set == 0 or type_eq(pt, st) or is_union(st) and union_index(st, pt) >= 0:
+        if set == 0 or type_eq(pt, st) and str_set_of(st) == 0 or is_union(st) and union_index(st, pt) >= 0:
             out.push(p)
             continue
         loop k in 0.. and value in str_sets[set]:
@@ -6430,8 +6513,8 @@ union_literal_seen = (p: int, e: int, vi: int, pt: int, done: mut str[], seen: m
     key = ""
     set = str_set_of(pt)
     if set != 0:
-        if nodes[lit].kind != .str_lit: return
-        key = "{vi}'{name_of(int(nodes[lit].sval))}"
+        if nodes[lit].kind != .dotname: return
+        key = "{vi}'{str_sets[set][int(nodes[lit].aux)]}"
         loop value in str_sets[set]: values.push("{vi}'{value}")
     else:
         known, intervals = int_intervals(pt)
@@ -6452,8 +6535,8 @@ small_span = (lo: int, hi: int, limit: int) -> bool: lo >= -(1 << 40) and hi <= 
 
 # a union member as a missing arm names it: a literal member by its values not matched yet
 union_literal_missing = (vi: int, pt: int, done: str[]) -> str:
-    if types[prune(pt)].kind != .refined: return dt(pt)
     set = str_set_of(pt)
+    if types[prune(pt)].kind != .refined and set == 0: return dt(pt)
     text = ""
     if set != 0:
         loop value in str_sets[set]:
@@ -6879,12 +6962,12 @@ check_match = (m: int, expected: int) -> int:
                 vi = union_target(e, ntype(e), st)
                 if vi < 0: fatal(nodes[p].pos, "literal pattern is not a member of {type_str(st, true)}")
                 pt = union_members(st)[vi]
-                if not is_int(representation_type(pt)) and pt != T_BOOL and tkind(representation_type(pt)) != .str_:
+                if not is_int(representation_type(pt)) and pt != T_BOOL and tkind(representation_type(pt)) != .str_ and str_set_of(pt) == 0:
                     fatal(nodes[p].pos, "literal patterns need an integer, bool or string member")
                 coerce(e, pt)
                 nodes[p].aux2 = i32(vi)
                 arm_members.push(pt)
-                if types[pt].kind == .refined: union_literal_seen(p, e, vi, pt, union_lits, seen)
+                if types[pt].kind == .refined or str_set_of(pt) != 0: union_literal_seen(p, e, vi, pt, union_lits, seen)
                 # A value pattern only covers part of a member. Both boolean
                 # literals together cover bool, allowing an exhaustive match.
                 if pt == T_BOOL:
@@ -6898,7 +6981,7 @@ check_match = (m: int, expected: int) -> int:
                     add_flag(narrowed, NF_CHECKED)
                     value = narrowed
             if binding != 0:
-                if pk == .plit and nodes[p].type != 0: nodes[value].type = nodes[p].type
+                if pk == .plit and nodes[p].type != 0 and str_set_of(ntype(value)) == 0: nodes[value].type = nodes[p].type
                 d = mk(.vardecl, nodes[p].pos)
                 nodes[d].name = i32(binding)
                 nodes[d].b = i32(value)
@@ -6959,12 +7042,11 @@ check_match = (m: int, expected: int) -> int:
                 if st == T_BOOL and nodes[e].kind == .bool_lit:
                     finite_seen |= if nodes[e].ival != 0: 1 else: 2
                 check_expr(e, st)
-                if str_domain != 0 and nodes[e].kind == .str_lit:
-                    text = name_of(int(nodes[e].sval))
-                    if str_covered.contains(text): fatal(nodes[p].pos, "this arm is unreachable: an earlier arm already matches '{text}'")
-                    coerce(e, int(locals[int(nodes[sc].sym)].type))
-                    str_covered.push(text)
                 coerce(e, st)
+                if str_domain != 0 and nodes[e].kind == .dotname:
+                    text = str_sets[str_domain][int(nodes[e].aux)]
+                    if str_covered.contains(text): fatal(nodes[p].pos, "this arm is unreachable: an earlier arm already matches '{text}'")
+                    str_covered.push(text)
                 if types[st].kind == .enum_ and nodes[e].kind == .dotname: seen[int(nodes[e].aux)] = true
                 if domain_known and nodes[kid_lit(e)].kind == .int_lit: arm_values += [nodes[kid_lit(e)].ival, nodes[kid_lit(e)].ival]
                 continue
@@ -7809,6 +7891,9 @@ check_expr = (n: int, expected: int) -> int:
         type_receiver_at = saved_receiver
         nodes[n].a = i32(last_checked)
         fname = int(nodes[n].name)
+        if str_sets.len() > 1 and str_set_of(bt) != 0:
+            coerce(int(nodes[n].a), T_STR)
+            bt = T_STR
         if name_of(fname) == "add" and is_dewy_set_type(bt) and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "sets insert with push: replace `.add(value)` with `.push(value)`")
         if synthetic_copy(bt, fname, nodes[n].pos): return check_copy(n, int(nodes[n].a), bt)
         if (is_union(bt) or tkind(bt) == .opt) and files[pos_file(nodes[n].pos)].is_dewy:
@@ -9892,18 +9977,21 @@ check_istype = (n: int) -> int:
             subj = is_subject(n, orig)
             return is_rewritten(n, orig, members_test(subj, ms, pos))
     # x is? 'a', x is? BasePrefix on a string: x compared with each member
+    # (on a set's word: its words for the members both have)
     set = str_set_of(tt)
-    if set != 0 and not is_union(at) and representation_type(at) == T_STR:
+    if set != 0 and not is_union(at) and (at == T_STR or str_set_of(at) != 0):
         subj = is_subject(n, orig)
         c = 0
         loop value in str_sets[set]:
+            if at != T_STR and not str_sets[str_set_of(at)].contains(value): continue
             same = bc_bin(.eq, copy_path(subj), bc_str(value, pos), pos)
             c = if c == 0: same else: bc_logic(.or_, c, same, pos)
+        if c == 0: c = bc_bool(false, pos)
         return is_rewritten(n, orig, c)
     # x is? 1, x is? 'fast' on a union with an integer or string member: that member, then its value
-    if is_union(at) and types[tt].kind == .refined and union_index(at, tt) < 0:
+    if is_union(at) and (types[tt].kind == .refined or set != 0) and union_index(at, tt) < 0:
         loop m in union_members(at):
-            if type_eq(representation_type(m), representation_type(tt)):
+            if type_eq(representation_type(m), representation_type(tt)) or set != 0 and str_set_of(m) != 0:
                 subj = is_subject(n, orig)
                 held = mk(.istype, pos)
                 nodes[held].a = i32(copy_path(subj))

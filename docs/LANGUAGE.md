@@ -590,14 +590,17 @@ refinement. At most 24 values may be missing between a union's least and
 greatest members.
 
 A string literal in a type position is likewise its singleton, and a union of
-them is a string whose value set is its invariant:
-`BasePrefix:type = '0b' | '0t' | '0x'`. A member literal stores as it is, another
-literal is a compile error, and any other string is checked when the program
-runs. On a string, `head is? BasePrefix` compares it with each member. Literal
-unions mix with each other and with other types (`<1 | 2 | "fast" | "slow">`,
-`'auto' | int64`): `m is? 1` and `m is? "fast"` test the member and its value.
-`loop m in members(U)` unrolls over a literal union's members, each typed as its
-own singleton, so `if text =? m return m` returns a `U`. Literal unions are
+them is an enumeration: `BasePrefix:type = '0b' | '0t' | '0x'`. Its value is one
+word at run time, so `p =? '0x'`, `p is? '0x'` and `match` compare words, and
+its text appears only where it meets a string (printing, interpolation, a
+`string` parameter, string methods such as `p.upper()`). A member literal stores
+as it is, another literal is a compile error, and any other string is checked
+when the program runs. On a string, `head is? BasePrefix` compares it with each
+member. Literal unions mix with each other and with other types
+(`<1 | 2 | "fast" | "slow">`, `'auto' | int64`): `m is? 1` and `m is? "fast"`
+test the member and its value. `loop m in members(U)` unrolls over a literal
+union's members in the order the union was written, each typed as its own
+singleton, so `if text =? m return m` returns a `U`. Literal unions are
 ordinary type arguments: `Box<'tokens'|'ast'>`, `array<'a'|'b'>`.
 
 A refuted obligation is a compile error. An unproven obligation becomes an

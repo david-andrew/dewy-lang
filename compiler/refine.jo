@@ -59,11 +59,13 @@ representation_deep = (t0: int) -> int:
         return mk_tuple(a)
     t
 
-# String literal sets (`'a'|'b'`): a refined string whose `bits` names its
-# sorted members here; it has no predicate atoms, so integer facts never see it.
+# String literal sets (`'a'|'b'`): an enum whose variant i is member i, so a
+# value is one word at run time (the member's index); `=?`, `is?` and `match`
+# compare that word, and the text is made only where the value meets a string.
 str_sets: str[][] = [[]]
+str_set_types: int[] = [0]
 
-# (a set keeps its first spelling's order, which `members(U)` follows)
+# (a set keeps its first spelling's order)
 str_set_type = (values: str[]) -> int:
     id = 0
     loop i in [1..str_sets.len()):
@@ -74,9 +76,21 @@ str_set_type = (values: str[]) -> int:
             if same: id = i
     if id == 0:
         str_sets.push(values)
+        str_set_types.push(0)
         id = str_sets.len() - 1
-    refine_active = true
-    mk_type(TypeInfo(kind = .refined, elem = i32(T_STR), bits = i32(id)), [])
+    if str_set_types[id] != 0: return str_set_types[id]
+    si = StructInfo(decl = 0, name = str_set_text(id), resolved = true)
+    si.lit_set = i32(id)
+    si.variants = i32(variants.len())
+    si.nvariants = i32(values.len())
+    loop i in 0.. and value in str_sets[id]:
+        variants.push(Variant(name = i32(intern(value)), fields = i32(fields.len()), nfields = 0, tag = i32(i), value = i))
+    idx = structs.len()
+    structs.push(si)
+    types.push(TypeInfo(kind = .enum_, st = i32(idx)))
+    structs[idx].type = i32(types.len() - 1)
+    str_set_types[id] = types.len() - 1
+    types.len() - 1
 
 # The written order of a literal union's members (`#1`, `'fast`), by the members
 # as a set: interned types forget it, and `members(U)` follows it. (the first
@@ -93,8 +107,17 @@ literal_order_note = (written: str[]):
 # the string set a type is, or 0
 str_set_of = (t0: int) -> int:
     t = prune(t0)
-    if types[t].kind != .refined or prune(int(types[t].elem)) != T_STR: return 0
-    int(types[t].bits)
+    if types[t].kind != .enum_: return 0
+    int(structs[int(types[t].st)].lit_set)
+
+# member i of set id as a constant
+str_set_const = (id: int, i: int, pos: int) -> int:
+    c = mk(.dotname, pos)
+    nodes[c].name = i32(intern(str_sets[id][i]))
+    nodes[c].aux = i32(i)
+    nodes[c].type = i32(str_set_types[id])
+    add_flag(c, NF_CHECKED)
+    c
 
 str_set_text = (id: int) -> str:
     text = ""
@@ -105,6 +128,7 @@ str_set_text = (id: int) -> str:
 
 refine_reset = ():
     str_sets = [[]]
+    str_set_types = [0]
     literal_orders = {}
     ref_predicates = [[]]
     refine_active = false
@@ -315,40 +339,75 @@ refine_storage = (n: int, fallback: int) -> int:
         if nodes[n].aux == i32(int(SK.global)): return int(globals[int(nodes[n].sym)].type)
     fallback
 
-# A string stored as a string set: a member literal or a smaller set as it is,
-# another literal is an error, and any other string is checked when it runs.
+# A string stored as a string set: a member literal is its word, another
+# literal an error, and any other string is looked up when it runs (a string
+# that is not a member panics). A set's value in a smaller or larger set is
+# mapped member by member.
 str_set_coerce = (n: int, t: int) -> int:
-    id = int(types[t].bits)
+    id = str_set_of(t)
     source = str_set_of(ntype(n))
-    coerce(n, T_STR)
-    if source != 0:
-        inside = true
-        loop value in str_sets[source]:
-            if not str_sets[id].contains(value): inside = false
-        if inside: return n
-    e = kid_lit(n)
     pos = nodes[n].pos
+    if source == id: return n
+    if source != 0:
+        if nodes[n].kind == .dotname:
+            text = str_sets[source][int(nodes[n].aux)]
+            k = str_sets[id].index_of(text)
+            if k < 0: fatal(pos, "'{text}' is not one of {str_set_text(id)}")
+            nodes[n] = nodes[str_set_const(id, k, pos)]
+            return n
+        str_set_text_of(n)
+    else: coerce(n, T_STR)
+    e = kid_lit(n)
     if nodes[e].kind == .str_lit and nodes[e].aux != 1:
         text = name_of(int(nodes[e].sval))
-        if not str_sets[id].contains(text): fatal(pos, "'{text}' is not one of {str_set_text(id)}")
+        k = str_sets[id].index_of(text)
+        if k < 0: fatal(pos, "'{text}' is not one of {str_set_text(id)}")
+        nodes[n] = nodes[str_set_const(id, k, pos)]
         return n
     inner = nodes.len()
     nodes.push(nodes[n])
     held = "__set{inner}"
-    member = 0
-    loop value in str_sets[id]:
-        same = bc_bin(.eq, bc_ident(held, pos), bc_str(value, pos), pos)
-        member = if member == 0: same else: bc_logic(.or_, member, same, pos)
-    missing = mk(.not_, pos)
-    nodes[missing].a = i32(member)
-    fail = bc_stmt(bc_call("panic", [bc_str("a string that is not one of {str_set_text(id)}", pos)], pos), pos)
-    nodes[n] = nodes[bc_block([bc_assign(bc_ident(held, pos), inner, pos), bc_if(missing, [fail], [], pos), bc_stmt(bc_ident(held, pos), pos)], pos)]
-    check_expr(n, T_STR)
+    out = bc_call("panic", [bc_str("a string that is not one of {str_set_text(id)}", pos)], pos)
+    k = str_sets[id].len() - 1
+    loop k >= 0:
+        same = bc_bin(.eq, bc_ident(held, pos), bc_str(str_sets[id][k], pos), pos)
+        out = str_set_choice(same, str_set_const(id, k, pos), out, pos)
+        k -= 1
+    nodes[n] = nodes[bc_block([bc_assign(bc_ident(held, pos), inner, pos), bc_stmt(out, pos)], pos)]
+    check_expr(n, t)
     n
+
+# if c a else b, as a value
+str_set_choice = (c: int, a: int, b: int, pos: int) -> int:
+    n = mk(.if_, pos)
+    nodes[n].a = i32(c)
+    nodes[n].b = i32(bc_block([bc_stmt(a, pos)], pos))
+    nodes[n].c = i32(bc_block([bc_stmt(b, pos)], pos))
+    n
+
+# A set's value where a string is wanted: its member's text
+str_set_text_of = (n: int):
+    id = str_set_of(ntype(n))
+    pos = nodes[n].pos
+    if nodes[n].kind == .dotname:
+        nodes[n] = nodes[bc_str(str_sets[id][int(nodes[n].aux)], pos)]
+        check_expr(n, T_STR)
+        return
+    inner = nodes.len()
+    nodes.push(nodes[n])
+    held = "__set{inner}"
+    k = str_sets[id].len() - 1
+    out = bc_str(str_sets[id][k], pos)
+    k -= 1
+    loop k >= 0:
+        same = bc_bin(.eq, bc_ident(held, pos), str_set_const(id, k, pos), pos)
+        out = str_set_choice(same, bc_str(str_sets[id][k], pos), out, pos)
+        k -= 1
+    nodes[n] = nodes[bc_block([bc_assign(bc_ident(held, pos), inner, pos), bc_stmt(out, pos)], pos)]
+    check_expr(n, T_STR)
 
 refine_coerce = (n: int, target: int) -> int:
     t = prune(target)
-    if str_set_of(t) != 0: return str_set_coerce(n, t)
     coerce(n, int(types[t].elem))
     if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.refinement)) and nodes[n].aux2 == i32(t): return n
     owner = if cx >= 0: int(ctxs[cx].inst) else: 0

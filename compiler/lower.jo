@@ -3652,7 +3652,9 @@ gen_fmt_struct = (e: int) -> Val:
                 fi += 1
                 endc()
                 continue
-            lit(ba, name_of(int(variants[vi].name)))
+            # (a string set's member is its text, quoted inside a structure as a string is)
+            if structs[si].lit_set != 0 and dewy and int(nodes[e].aux2) & 1 != 0: lit(ba, __test_jq(name_of(int(variants[vi].name))))
+            else: lit(ba, name_of(int(variants[vi].name)))
             if nf > 0:
                 lit(ba, "(")
                 loop j in [0..nf):

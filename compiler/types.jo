@@ -75,6 +75,7 @@ struct StructInfo:
     soa_: bool       # soa T[]: a struct with an array for each field of T (type argument 0)
     record_: bool    # anonymous Dewy record; fields are the shape and types are its arguments
     boxes_done: bool # which of its fields are boxed is known (decide_boxes)
+    lit_set: i32     # a string literal set (`'a'|'b'`, refine.jo's str_sets): variant i is member i
 
 types: TypeInfo[] = [TypeInfo()]
 type_args: i32[]
@@ -816,7 +817,6 @@ type_str_in = (t0: int, dewy: bool) -> str:
         effect: "Effect"
         callable: "{type_str(int(ti.elem), dewy)} & <effects>"
         refined:
-            if str_set_of(t) != 0: return str_set_text(int(ti.bits))
             known, values = int_intervals(t)
             if known and values.len() > 0 and values.len() <= 32:
                 text = ""
@@ -900,6 +900,7 @@ type_str_in = (t0: int, dewy: bool) -> str:
             s + ")"
         struct_, enum_:
             si = int(ti.st)
+            if structs[si].lit_set != 0: return str_set_text(int(structs[si].lit_set))
             nm = structs[si].name
             if structs[si].record_:
                 check_struct_fields(si)

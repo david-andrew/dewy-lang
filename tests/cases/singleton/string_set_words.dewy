@@ -1,0 +1,27 @@
+# A string literal union is one word; its text appears where it meets a string
+BasePrefix:type = '0b' | '0t' | '0x'
+let radix:dict<BasePrefix int64> = ['0b' -> 2 '0t' -> 3 '0x' -> 16]
+printl(radix)
+printl(radix['0x'])
+let p:BasePrefix = '0t'
+printl(radix[p])
+let modes:array<'a'|'b'> = ['b' 'a']
+printl(modes)
+printl(modes[0] =? 'b')
+printl(p =? '0t')
+printl(p.upper())
+text = "0x"
+printl(text =? p)
+let q:BasePrefix = text
+printl(q =? p)
+printl(q is? '0x')
+w = "{q}{p}"
+printl(w.length)
+printl(p + "!")
+loop m in members(BasePrefix) if m =? p printl"found {m}"
+opt:BasePrefix|none = none
+printl(opt)
+opt = '0b'
+printl(opt)
+f = (s:string):>int64 => s.length
+printl(f(p))
