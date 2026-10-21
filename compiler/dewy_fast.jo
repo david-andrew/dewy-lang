@@ -242,6 +242,9 @@ dn_lex_symbol = (source: *u8, at: int, stop: int) -> DewyToken:
             if dn_matches(source, at, stop, "^="): return .power_assign
         '|':
             if dn_matches(source, at, stop, "|>"): return .pipe_right
+            if dn_matches(source, at, stop, "|="): return .pipe_assign
+        '&':
+            if dn_matches(source, at, stop, "&="): return .amp_assign
     dn_single_token(source[at])
 
 # The hot punctuation path needs only two bounded byte loads and a table
@@ -343,6 +346,11 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
                 name = i32(id)
                 if id < dn_word_tokens.len(): symbol = dn_word_tokens[id]
                 if id == dn_true_id or id == dn_false_id: kind = .boolean
+                combined = dn_word_assign(symbol, bytes, i, stop)
+                if combined != .none:
+                    symbol = combined
+                    kind = .op
+                    i += 1
                 if i < stop and bytes[i] == '?':
                     query = DewyToken.none
                     if id == dn_is_id: query = .is_type
@@ -361,6 +369,11 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
                     i += 1
                     kind = .op
                 if kind != .boolean: symbol = dn_token_kind(value)
+                combined = dn_word_assign(symbol, bytes, i, stop)
+                if combined != .none:
+                    symbol = combined
+                    kind = .op
+                    i += 1
         else if c == '$':
             i += 1
             loop i < stop and classes[bytes[i]] & 2 != 0: i += 1
@@ -476,7 +489,7 @@ dn_operator = (kind: DewyKind, op: DewyToken, left: int, right: int) -> int:
 # boundary between values ends an element; applications use adjacent brackets.
 dn_power = (op: DewyToken) -> int:
     match op:
-        assign, plus_assign, minus_assign, star_assign, slash_assign, power_assign, floor_assign, percent_assign, shl_assign, shr_assign, dot_plus_assign, dot_minus_assign, dot_star_assign, dot_slash_assign, dot_power_assign, dot_floor_assign, dot_percent_assign: 10
+        assign, plus_assign, minus_assign, star_assign, slash_assign, power_assign, floor_assign, percent_assign, shl_assign, shr_assign, amp_assign, pipe_assign, and_assign, or_assign, xor_assign, dot_plus_assign, dot_minus_assign, dot_star_assign, dot_slash_assign, dot_power_assign, dot_floor_assign, dot_percent_assign: 10
         arrow: 20
         function: 30
         returns: 40

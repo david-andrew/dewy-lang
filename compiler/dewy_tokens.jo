@@ -16,7 +16,8 @@ enum DewyToken:
     dot_not_ge, dot_not_le, dot_not_eq, dot_not_gt, dot_not_lt, dot_ge, dot_le, dot_floor_assign,
     dot_plus_assign, dot_minus_assign, dot_star_assign, dot_slash_assign, dot_percent_assign, dot_power_assign, dot_floor, dot_eq,
     dot_gt, dot_lt, dot_plus, dot_minus, dot_star, dot_slash, dot_percent, dot_caret,
-    multiply_apply, call, broadcast_call, index, type_apply, range_apply, statement_end, kw_of, kw_or_throw
+    multiply_apply, call, broadcast_call, index, type_apply, range_apply, statement_end,
+    amp_assign, pipe_assign, and_assign, or_assign, xor_assign, kw_of, kw_or_throw
 
 dn_single_token = (c: u8) -> DewyToken:
     match c:
@@ -183,6 +184,10 @@ dn_token_kind = (text: str) -> DewyToken:
         '|':
             match text:
                 "|>": return .pipe_right
+                "|=": return .pipe_assign
+        '&':
+            match text:
+                "&=": return .amp_assign
     .none
 
 dn_token_text = (token: DewyToken) -> str:
@@ -241,6 +246,11 @@ dn_token_text = (token: DewyToken) -> str:
         shr: ">>"
         range: ".."
         pipe_right: "|>"
+        amp_assign: "&="
+        pipe_assign: "|="
+        and_assign: "and="
+        or_assign: "or="
+        xor_assign: "xor="
         pipe_left: "<|"
         angle_assign: ">="
         is_type: "is?"
@@ -366,8 +376,18 @@ dn_token_uninvert = (token: DewyToken) -> DewyToken:
 
 dn_token_assignment = (token: DewyToken) -> bool:
     match token:
-        plus_assign, minus_assign, star_assign, slash_assign, floor_assign, percent_assign, power_assign, shl_assign, shr_assign, dot_plus_assign, dot_minus_assign, dot_star_assign, dot_slash_assign, dot_floor_assign, dot_percent_assign, dot_power_assign: true
+        plus_assign, minus_assign, star_assign, slash_assign, floor_assign, percent_assign, power_assign, shl_assign, shr_assign, dot_plus_assign, dot_minus_assign, dot_star_assign, dot_slash_assign, dot_floor_assign, dot_percent_assign, dot_power_assign, amp_assign, pipe_assign, and_assign, or_assign, xor_assign: true
         _: false
 
 dn_token_statement = (token: DewyToken) -> bool:
     token == .statement_end or token == .assign or dn_token_assignment(token)
+
+# `and=` `or=` `xor=`: a word operator directly followed by `=` (not `=?` or `=>`).
+dn_word_assign = (word: DewyToken, bytes: *u8, at: int, stop: int) -> DewyToken:
+    if at >= stop or bytes[at] != '=': return .none
+    if at + 1 < stop and (bytes[at + 1] == '?' or bytes[at + 1] == '>' or bytes[at + 1] == '='): return .none
+    if word == .kw_and: return .and_assign
+    if word == .kw_or: return .or_assign
+    if word == .kw_xor: return .xor_assign
+    .none
+

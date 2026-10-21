@@ -694,7 +694,7 @@ dc_statement = () -> int:
     if scalar != .none:
         add_flag(n, NF_BROADCAST)
         op = scalar
-    nodes[n].op = i32(int(if op == .assign: Tok.assign else if op == .plus_assign: Tok.pluseq else if op == .minus_assign: Tok.minuseq else if op == .slash_assign or op == .floor_assign: Tok.slasheq else if op == .percent_assign: Tok.percenteq else if op == .power_assign: Tok.careteq else if op == .shl_assign: Tok.shleq else if op == .shr_assign: Tok.shreq else: Tok.stareq))
+    nodes[n].op = i32(int(dn_assign_tok(op)))
     if op == .slash_assign or op == .floor_assign or op == .percent_assign or op == .power_assign:
         nodes[n].sval = i32(intern(if op == .slash_assign: "__dewy_divide" else if op == .floor_assign: "__floor_div" else if op == .percent_assign: "__floor_mod" else: "__dewy_power"))
     nodes[n].a = i32(left)

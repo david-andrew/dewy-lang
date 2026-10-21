@@ -1247,6 +1247,21 @@ dw_finish_function = (n: int, parameters: int[], body: int, name: str) -> int:
     nodes[n].b = i32(body)
     return n
 
+# The compact operator of a combined assignment token.
+dn_assign_tok = (op: DewyToken) -> Tok:
+    match op:
+        assign: .assign
+        plus_assign: .pluseq
+        minus_assign: .minuseq
+        slash_assign, floor_assign: .slasheq
+        percent_assign: .percenteq
+        power_assign, xor_assign: .careteq
+        shl_assign: .shleq
+        shr_assign: .shreq
+        amp_assign, and_assign: .ampeq
+        pipe_assign, or_assign: .pipeeq
+        _: .stareq
+
 dw_binary_token = (op: DewyToken, id: int) -> Tok:
     match op:
         plus: .plus
@@ -1781,7 +1796,7 @@ dw_stmt = (id: int, top: bool = false) -> int:
         if scalar_op != .none:
             add_flag(n, NF_BROADCAST)
             op = scalar_op
-        nodes[n].op = i32(int(if op == .plus_assign: Tok.pluseq else if op == .minus_assign: Tok.minuseq else if op == .slash_assign or op == .floor_assign: Tok.slasheq else if op == .percent_assign: Tok.percenteq else if op == .power_assign: Tok.careteq else if op == .shl_assign: Tok.shleq else if op == .shr_assign: Tok.shreq else: Tok.stareq))
+        nodes[n].op = i32(int(dn_assign_tok(op)))
         if (op == .slash_assign or op == .floor_assign or op == .percent_assign or op == .power_assign):
             nodes[n].sval = i32(intern(if op == .slash_assign: "__dewy_divide" else if op == .floor_assign: "__floor_div" else if op == .percent_assign: "__floor_mod" else: "__dewy_power"))
         nodes[n].a = i32(dw_expr(dw_child(id, 1)))
