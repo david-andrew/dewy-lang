@@ -29,7 +29,7 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: partitioned checking stage 3 (game eligibility).
+- Astra: dictionary layout and lookup speed (graph kernel, memory-bound).
 - Opus: `zip.dewy` in the compiler with a frozen Jo copy for the bootstrap.
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
@@ -50,8 +50,9 @@ only.
   credible, so the target is now wall clock with 4 workers. Projects, in order:
   1. fused partition workers landed (critical path −11% at 4 workers);
   2. partitioned checking: stages 1–2 landed (synthetic critical path
-     0.77 → 0.64 G); stage 3: game eligibility, smaller programs, broader
-     features;
+     0.77 → 0.64 G). Game eligibility was piloted and rejected (+0%): game has
+     few roots, and workers discover new library instances. Next needs
+     canonical reconciliation of function instances;
   3. a toolchain-baked library image (question 22);
   4. checker name lookup by id plus a fused zonk (≤6%);
   5. lazy function-body parsing in partition workers (~70 M off the serial path;
