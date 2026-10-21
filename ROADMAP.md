@@ -12,8 +12,8 @@ what landed. Keep this file short.
 | Acceptance ladder, design surface | 82/82 (tiers 1–2: 63/63; tier 3: 19/19), 12 held open on decisions | all milestones |
 | Acceptance ladder, current dialect | 82/82 | stays green |
 | Fresh compile, 22k-line synthetic, wall clock, 4 workers (i7-6700) | 175 ms before fused workers; remeasure when quiet | ≤88 ms (250k lines/s) |
-| Same, critical-path instructions at 4 workers (`speed --critical`, load-independent) | 0.80 G (was 0.90 G before fused workers) | ~0.35 G |
-| Same, single-thread instructions (guardrail) | 1.19 G (was 1.36 G on 10-20) | ~0.75 G; never regress |
+| Same, critical-path instructions at 4 workers (`speed --critical`, load-independent) | 0.77 G (0.90 G before fused workers) | ~0.35 G |
+| Same, single-thread instructions (guardrail) | 1.16 G (was 1.36 G on 10-20) | ~0.75 G; never regress |
 | Hello-world compile | 31 ms (147 M, all library) | ≤10 ms |
 | Compiler self-build | 9.35 G instructions (the compiler grew) | seconds-scale edit loop |
 | Game-tick kernel vs C -O2 (time) | 1.6× default and release (default was 6.3× before small-leaf inlining) | ~1× both |
@@ -30,7 +30,7 @@ GPT quota is limited: at most one Astra stream, at medium effort; Sol for review
 only.
 
 - Astra: partitioned checking (throughput project 2).
-- Opus: root lexer/parser (138 M serial before signatures).
+- Opus: self-hosting readiness (zip.jo pilot prerequisites).
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
 
@@ -52,7 +52,9 @@ only.
   2. partitioned checking: designed (~/dev/tmp/pcheck notes; −21–23% critical
      path projected); a multi-day project with a result barrier;
   3. a toolchain-baked library image (question 22);
-  4. checker name lookup by id plus a fused zonk (≤6%).
+  4. checker name lookup by id plus a fused zonk (≤6%);
+  5. lazy function-body parsing in partition workers (~70 M off the serial path;
+     after 2). The root lexer and parser went 138 → 108 M.
 - Runtime gaps:
   - float compare/negate selection;
   - outer-target SIMD (particles);
