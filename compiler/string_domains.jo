@@ -1,0 +1,154 @@
+# Inferred strings keep string storage. Only finite-domain consumers ask for
+# the joined literal writes; annotations never enter this table. Empty means
+# open, and stays open. Interned text ids avoid singleton type interning.
+use 'check.jo'
+use 'ast.jo'
+use 'lex.jo'
+use 'util.jo'
+use 'types.jo'
+use 'refine.jo'
+use 'expr.jo'
+
+string_domains: {int: int[]} = {}
+string_domain_matches: (int, int)[]
+string_domain_sequences: (int, int)[]
+string_domain_sequence_fns: int[]
+string_domain_conversions: (int, int, int)[]
+string_domain_captures: {int: int} = {}
+
+string_domain_declare = (binding: int, value: int):
+    if value != 0 and nodes[value].kind == .str_lit and nodes[value].aux != 1:
+        string_domains[binding] = [int(nodes[value].sval)]
+
+string_domain_binding = (n: int) -> int:
+    if nodes[n].kind != .ident: return 0
+    if nodes[n].aux == i32(int(SK.global)): return -int(nodes[n].sym) - 1
+    if nodes[n].aux != i32(int(SK.local)): return 0
+    l = int(nodes[n].sym)
+    loop true:
+        if int(locals[l].flags) & LF_CAPTURE != 0 and int(locals[l].flags) & LF_VALUECAP == 0: l = int(locals[l].outer)
+        else if narrowed_var(l) != 0: l = narrowed_var(l)
+        else: break
+    g = alias_global(l)
+    if g >= 0: return -g - 1
+    l
+
+string_domain_write = (lhs: int, value: int):
+    binding = string_domain_binding(lhs)
+    if not string_domains.has(binding): return
+    if value == 0 or nodes[value].kind != .str_lit or nodes[value].aux == 1:
+        string_domains[binding] = []
+        return
+    values = string_domains[binding]
+    if values.len() == 0: return
+    values.push(int(nodes[value].sval))
+    string_domains[binding] = values
+
+string_domain_match = (m: int) -> bool:
+    binding = string_domain_binding(int(nodes[m].a))
+    if not string_domains.has(binding): return false
+    string_domain_matches.push((m, binding))
+    true
+
+# A closure can write a captured binding after its consumer was checked. Close
+# requests after all checked functions, including module initializers, settle.
+# This visits only demands and their writes, never syntax trees or all bindings.
+string_domains_finish = ():
+    loop request in string_domain_matches:
+        m = request.0
+        binding = request.1
+        values = string_domain_values(binding)
+        if values.len() == 0: fatal(nodes[m].pos, "match is not exhaustive (inferred string domain is open; add `else`)")
+        covered: int[]
+        loop arm in kids(m):
+            loop p in kids(arm):
+                if nodes[p].kind == .plit and nodes[int(nodes[p].a)].kind == .str_lit:
+                    covered.push(int(nodes[int(nodes[p].a)].sval))
+        missing: str[]
+        loop value in values:
+            if not covered.contains(value):
+                text = "'{name_of(value)}'"
+                if not missing.contains(text): missing.push(text)
+        if missing.len() > 0: fatal(nodes[m].pos, "this match has no arm for {join(missing, ", ")} (add one, or `else`)")
+
+# Value captures own their later writes but can start with any value of the
+# outer binding. Capture links point to older bindings, so no fixed point is
+# needed. A nonliteral write opens either domain conservatively.
+string_domain_capture = (inner: int, outer: int):
+    root = outer
+    loop int(locals[root].flags) & LF_CAPTURE != 0 and int(locals[root].flags) & LF_VALUECAP == 0: root = int(locals[root].outer)
+    if not string_domains.has(root): return
+    string_domains[inner] = string_domains[root]
+    string_domain_captures[inner] = root
+
+string_domain_values = (binding: int) -> int[]:
+    values = string_domains[binding]
+    if values.len() == 0: return values
+    if string_domain_captures.has(binding):
+        source = string_domain_values(string_domain_captures[binding])
+        if source.len() == 0: return source
+        values += source
+    values
+
+string_domain_conversion = (n: int, set: int):
+    binding = string_domain_binding(n)
+    if string_domains.has(binding): string_domain_conversions.push((nodes[n].pos, binding, set))
+
+# The sequence's element storage is string, just like the inferred binding.
+# Populate its literal array once every checked write is known. Type-based
+# members(U) continues to use compile-time singleton specialization.
+string_domain_members = (n: int) -> bool:
+    if nkids(n) != 1: return false
+    arg = kid(n, 0)
+    if nodes[arg].kind != .ident: return false
+    sym = lookup(int(nodes[arg].name))
+    if sym == 0 or (syms[sym].kind != .local and syms[sym].kind != .global): return false
+    check_expr(arg, 0)
+    binding = string_domain_binding(last_checked)
+    if not string_domains.has(binding): fatal(nodes[n].pos, "members(value) needs an inferred finite string domain")
+    pos = nodes[n].pos
+    t = mk_array(T_STR)
+    array = mk(.array, pos)
+    nodes[array].type = i32(t)
+    add_flag(array, NF_CHECKED)
+    ret = mk(.return_, pos)
+    nodes[ret].a = i32(array)
+    nodes[ret].type = i32(T_NEVER)
+    body = bc_block([ret], pos)
+    nodes[body].type = i32(T_NEVER)
+    f = new_inst(FK_NORMAL, cur_mod(), "members")
+    fns[f].body = i32(body)
+    fns[f].ret = i32(t)
+    fns[f].fntype = i32(mk_fn([], t, 0))
+    # Compile-time evaluation must not observe the unfinished array.
+    fns[f].state = 1
+    fns[f].noinline = true
+    nodes[n] = Node(kind = .call, pos = pos, sym = i32(f), type = i32(t), flags = i32(NF_CHECKED))
+    string_domain_sequences.push((array, binding))
+    string_domain_sequence_fns.push(f)
+    true
+
+string_domains_materialize = ():
+    loop request in string_domain_conversions:
+        pos = request.0
+        binding = request.1
+        set = request.2
+        loop value in string_domain_values(binding):
+            if not str_sets[set].contains(name_of(value)): fatal(pos, "inferred string domain contains '{name_of(value)}', which is not one of {str_set_text(set)}")
+    loop request in string_domain_sequences:
+        n = request.0
+        binding = request.1
+        values = string_domain_values(binding)
+        if values.len() == 0: fatal(nodes[n].pos, "members(value) needs a finite string domain; a nonliteral write leaves it open")
+        seen: int[]
+        items: int[]
+        loop value in values:
+            if seen.contains(value): continue
+            seen.push(value)
+            item = mk(.str_lit, nodes[n].pos)
+            nodes[item].sval = i32(value)
+            nodes[item].type = i32(T_STR)
+            add_flag(item, NF_CHECKED)
+            items.push(item)
+        set_list(n, items)
+    loop f in string_domain_sequence_fns: fns[f].state = 2

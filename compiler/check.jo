@@ -23,6 +23,7 @@ use 'proofs.jo'
 use 'effects.jo'
 use 'ownership.jo'
 use 'reflection.jo'
+use 'string_domains.jo'
 use 'dewy_methods.jo'
 
 enum SK: none_, local, global, fns, struct_, enum_, const_, module, type_, builtin, alias_, reflected
@@ -1940,6 +1941,7 @@ capture_in = (c: int, l: int) -> int:
         capture_root(r)
     locals.push(Local(name = locals[l].name, type = locals[l].type, owner = i32(inst), flags = i32(flags), pos = locals[l].pos, outer = i32(outer)))
     inner = locals.len() - 1
+    if flags & LF_VALUECAP != 0 and locals[inner].type == i32(T_STR): string_domain_capture(inner, outer)
     fns[inst].caps.push(Capture(i32(outer), i32(inner)))
     fns[inst].locals.push(inner)
     inner
@@ -2147,6 +2149,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
         if tkind(t) == .null_: fatal(nodes[d].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(nodes[d].pos, "`{name_of(int(globals[g].name))}: Enemy? = none`", "`let {name_of(int(globals[g].name))}:Enemy? = none`")}")
         if tkind(t) == .typeval or tkind(t) == .module: fatal(nodes[d].pos, "'{name_of(int(globals[g].name))}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
         globals[g].type = i32(t)
+        if t == T_STR and nodes[d].a == 0 and dewy_at(nodes[d].pos): string_domain_declare(-g - 1, int(nodes[d].b))
         # Exact quantity constants have no runtime storage or initialization.
         if has_flag(d, NF_RDONLY) and is_quantity(t) and quantity_constant_scale(int(nodes[d].b)) >= 0:
             globals[g].is_const = true
@@ -3430,6 +3433,8 @@ check_assign = (s: int) -> int:
         lt = refine_storage(lhs, lt)
         replacement = ref_field_store(s, lt)
         if replacement != 0: return replacement
+    if lt == T_STR and string_domains.len() > 0:
+        string_domain_write(lhs, if op == int(Tok.assign): int(nodes[s].b) else: 0)
     if op == int(Tok.assign):
         rt = prune(check_expr(int(nodes[s].b), lt))
         if rt != lt and nodes[lhs].kind == .ident and (nodes[lhs].aux == i32(int(SK.local)) or nodes[lhs].aux == i32(int(SK.global))) and not can_coerce(last_checked, rt, lt): var_type_error(lhs, lt, rt, nodes[last_checked].pos)
@@ -3697,6 +3702,7 @@ check_vardecl = (s: int):
     l = new_local(int(nodes[s].name), t, nodes[s].pos)
     if nodes[s].b != 0 and quat_nodes.has(int(nodes[s].b)): quat_locals[l] = true
     locals[l].flags = i32(LF_DECL)
+    if t == T_STR and nodes[s].a == 0 and dewy_at(nodes[s].pos): string_domain_declare(l, int(nodes[s].b))
     if has_flag(s, NF_RDONLY):
         locals[l].flags = i32(LF_DECL | LF_CONST | LF_QUIET)
         locals[l].const_init = nodes[s].b
@@ -5244,6 +5250,8 @@ check_program = (main_path: str):
                 more = true
         if not more: break
     pc_finish()
+    string_domains_finish()
+    string_domains_materialize()
     if poly_families.len() > 1: poly_finish_warnings()
     if open_globals.len() > 0: settle_open_globals()
     # (make_world written and never called: nothing runs it. A file of definitions alone, with
@@ -5322,6 +5330,8 @@ check_program = (main_path: str):
     # Close declared promises after every checked helper has been discovered,
     # including check-only callers and unreachable checked declarations.
     pc_finish()
+    string_domains_finish()
+    string_domains_materialize()
     if not errors_only:
         ownership_finalize()
         effects_finalize()

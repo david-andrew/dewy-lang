@@ -250,6 +250,24 @@ One bare parameter name may omit the parentheses: `x=>x+1`, as in
 always the parameter, even when a type has that spelling; annotated parameters
 and result types need the parenthesized form, `(x:int64):>int64=>x+1`.
 
+Unannotated string bindings retain the finite domain of all their literal
+writes, including later writes, loop iterations and shared closure writes.
+A match without `else` must cover that entire domain, even when it precedes
+some writes. Shadowed bindings and private closure writes have separate domains.
+A nonliteral write or writable escape conservatively widens the domain to
+`string`. An annotation fixes the type: `let mode:string="fast"` stays general.
+String operations and character iteration work normally. A conversion to a
+literal union (including a dictionary key) rejects a known domain containing
+values outside that union. `members(mode)` returns an `array<string>` containing
+the distinct values in an inferred finite domain, in first checked-write order;
+later writes participate. Type-based `members(U)` retains its compile-time
+specialization. Value domains settle after checking, so `members(mode)` cannot
+supply compile-time record field names while the enclosing code is checked.
+
+Integer literals still infer mathematical `int`; precision is carried as range
+facts, not a smaller storage type. Thus `let count=0; count+=1` and
+`let value=5; value=300` keep ordinary mathematical integer behavior.
+
 Types can be inferred, including generic functions. `:>` writes a result type;
 use `:>void` for a function with no result. Named arguments such as `add(b=2 a=40)`
 are supported. Explicit arguments evaluate in written order, then omitted

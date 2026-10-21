@@ -1,3 +1,4 @@
+use 'string_domains.jo'
 use 'ownership.jo'
 use 'units.jo'
 use 'errors.jo'
@@ -996,11 +997,13 @@ check_place = (n: int, for_mut: bool):
                 if cp_inner == 0: rf |= LF_RESIZED
                 locals[r].flags = i32(rf)
             if const_views.len() > 0: const_view_write(r, nodes[n].pos)
+            if for_mut and string_domains.len() > 0 and ntype(n) == T_STR: string_domain_write(n, 0)
             note_write(r, via_closure, nodes[n].pos)
             if ag >= 0: note_global_write(ag)
             return
         if nodes[n].aux == i32(int(SK.global)):
             if readonly_global(int(nodes[n].sym)): place_fatal(nodes[n].pos, "cannot modify const '{name_of(int(nodes[n].name))}'")
+            if for_mut and string_domains.len() > 0 and ntype(n) == T_STR: string_domain_write(n, 0)
             note_global_write(int(nodes[n].sym))
             return
         fatal(nodes[n].pos, "cannot assign to '{name_of(int(nodes[n].name))}'")
@@ -1067,6 +1070,7 @@ check_place = (n: int, for_mut: bool):
 # owning bindings out of read-only view optimizations, and make copied private
 # closure environments independent even when their only write is through a pointer.
 note_storage_access = (n: int):
+    if string_domains.len() > 0 and ntype(n) == T_STR: string_domain_write(n, 0)
     k = nodes[n].kind
     if k == .field or k == .index or k == .unwrap or k == .narrow:
         note_storage_access(int(nodes[n].a))
@@ -4795,6 +4799,7 @@ breakpoint_call = (n: int) -> int:
 check_call = (n: int, expected: int) -> int:
     if reflect_fields(n): fatal(nodes[n].pos, "fields(T) is a compile-time sequence; iterate over it with `loop field in fields(T)`")
     callee = int(nodes[n].a)
+    if nodes[callee].name == i32(id_members) and nodes[callee].kind == .ident and lookup(id_members) == 0 and string_domain_members(n): return ntype(n)
     if id_breakpoint == 0: id_breakpoint = intern("$breakpoint")
     if nodes[callee].kind == .ident and int(nodes[callee].name) == id_breakpoint and nkids(n) == 0:
         breakpoint_call(n)
@@ -7264,6 +7269,7 @@ check_match = (m: int, expected: int) -> int:
         exhaustive = true
         loop s in seen:
             if not s: exhaustive = false
+    if not exhaustive and dewy and st == T_STR and string_domain_match(m): exhaustive = true
     nodes[m].aux2 = i32(int(exhaustive))
     # (an enum's or a union's match names each of its variants, or has `_:`; a statement too, so
     # that a state added later is not left out quietly)

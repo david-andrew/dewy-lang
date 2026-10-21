@@ -1,6 +1,7 @@
 # Scalar contracts are immutable type metadata. Evaluated values and proof
 # answers belong to facts.jo and never participate in interning.
 use 'ast.jo'
+use 'string_domains.jo'
 use 'lex.jo'
 use 'types.jo'
 use 'check.jo'
@@ -451,6 +452,7 @@ str_set_coerce = (n: int, t: int) -> int:
     source = str_set_of(ntype(n))
     pos = nodes[n].pos
     if source == id: return n
+    if source == 0 and string_domains.len() > 0: string_domain_conversion(n, id)
     if source != 0:
         if nodes[n].kind == .dotname:
             text = str_sets[source][int(nodes[n].aux)]

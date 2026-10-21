@@ -1,5 +1,6 @@
 # Type-derived sequences specialize ordinary checked code; no source generation.
 use 'check.jo'
+use 'string_domains.jo'
 use 'expr.jo'
 use 'comptime.jo'
 use 'ast.jo'
@@ -21,7 +22,9 @@ id_members = 0
 reflect_fields = (e: int) -> bool:
     if nodes[e].kind != .call: return false
     callee = int(nodes[e].a)
-    if id_fields == 0: id_fields = intern("fields")
+    if id_fields == 0:
+        id_fields = intern("fields")
+        id_members = intern("members")
     nodes[callee].kind == .ident and int(nodes[callee].name) == id_fields and dewy_at(nodes[e].pos) and lookup(id_fields) == 0
 
 reflect_members = (e: int) -> bool:
@@ -169,6 +172,7 @@ reflect_loop = (s: int) -> bool:
     it = reflect_source(int(nodes[s].a))
     if not reflect_fields(it) and not reflect_members(it): return false
     if nkids(s) != 1 or has_flag(s, NF_MUT): fatal(nodes[s].pos, "fields(T) and members(U) yield one immutable value per iteration")
+    if reflect_members(it) and string_domain_members(it): return false
     binder = int(nodes[kid(s, 0)].name)
     scopes = reflect_sequence(it, binder)
     pos = nodes[s].pos

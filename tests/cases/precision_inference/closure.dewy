@@ -1,0 +1,7 @@
+# exit: 42
+main=()=>{
+    let mode="fast"
+    let update=($capture @mode)=>{mode="slow"}
+    update()
+    return match mode {<"fast">=>0 <"slow">=>42}
+}

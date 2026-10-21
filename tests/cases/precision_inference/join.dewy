@@ -1,0 +1,9 @@
+# quick
+# exit: 42
+main=()=>{
+    let mode="fast"
+    let answer=match mode {<"fast">=>40 <"slow">=>0}
+    loop i in [0..2) {mode="slow"}
+    let second=match mode {<"fast">=>0 <"slow">=>2}
+    return answer+second
+}
