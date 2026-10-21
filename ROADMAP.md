@@ -18,7 +18,7 @@ what landed. Keep this file short.
 | Compiler self-build | 9.35 G instructions (the compiler grew) | seconds-scale edit loop |
 | Game-tick kernel vs C -O2 (time) | 1.6× default and release (default was 6.3× before small-leaf inlining) | ~1× both |
 | Worst other kernels vs C (time, default) | literal callbacks 4.6×, callbacks 2.3×, params 1.75×, graph 1.7×, recursive_tree 1.4× | ≤1.2× |
-| Quick / full suite | 59.5 s at load 7–11 (quick set doubled: 301 cases, 864 tests) / not measured | ≤30 s / ≤5 min |
+| Quick / full suite | ~17 s / ~4 min at load 5–8 (quick trimmed to smoke; case runner fixed) | ≤30 s / ≤5 min |
 
 Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 `python3 -m tools.core ladder` prints the scoreboard. Compile numbers come from
@@ -29,15 +29,17 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: effect rows slice 3 (shared invalidation facets and consumers).
-- Opus: trim the quick suite to budget.
+- Astra: lazy function-body parsing round 2 (round 1: critical −5.5%, failed on
+  diagnostic order).
+- Opus: strict combined-loop facts.
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
 
 ## Next
 
 - Tier-3 implementation (designed, no decisions needed):
-  - effect rows slices 3, 5–6 (1–2 and 4 landed; ~/dev/tmp/coord/effects-design.md);
+  - effect rows slices 3, 5–6 (1–2 and 4 landed; slice 3's consolidation pilot
+    regressed self-build +28%, so only its tests landed; ~/dev/tmp/coord/effects-design.md);
   - ownership slices 4–6 (1–3 landed): allocator runtime, escape promotion,
     integration; arena surface waits on question 4. Slice 2 leftovers, rejected
     conservatively for now: generic closure literals capturing owners, partial
@@ -72,15 +74,13 @@ only.
   languages; a lexer module waits on question 24.
 - Recover the game-panel compile cost of mathematical `int` (+5.7%, accepted
   10-20); the frontend work recovered the synthetic panel's share.
-- Quick suite over budget: trim `--quick` back toward ~25 s (move the slowest
-  groups to the full suite).
 - Small items:
   - `xs.swap` on refined arrays is rejected (goes through `data()`); indexed
     rewrite costs +62–93% on array_swap, so it needs a swap primitive;
-  - maps fail their own index proofs under the strict policy;
-  - diagnostics spell `Set<…>` instead of `set<…>`; a failed overload can
-    blame an unrelated candidate (GpuBuffer, Set); `.length` on a user type
-    without one says "use `.length`";
+  - strict policy: map element access indexes `m.vals` with a library call's
+    result, and proving it needs Map invariants (question 10) or a trusted
+    library result rule. Combined loops (`x in xs and y in ys`) lack the
+    `k < length` fact for non-constant lengths (our analysis gap);
   - strict 67/70 need result-length facts for functions like `make(n)`
     (stop at `saved[0]`); likely needs design;
   - static calls through runtime `type<T>` values (needs type values);
