@@ -9055,7 +9055,7 @@ check_istype = (n: int) -> int:
         else: fatal(nodes[int(nodes[n].b)].pos, "a {dt(at)} is either a {dt(int(types[at].elem))} or none, never a {dt(tt)}")
         nodes[n].aux2 = i32(map_presence_fn(int(nodes[n].a)))
     else if type_eq(at, tt) or (is_union(tt) and union_index(tt, at) >= 0): nodes[n].aux = -3      # (already narrowed to it, say): always true
-    else: fatal(nodes[n].pos, "{jd(nodes[n].pos, "`is`", "`is?`")} tests which type a union (A | B) or optional value holds; this is always a {dt(at)}")
+    else: fatal(nodes[n].pos, "{jd(nodes[n].pos, "`is`", "`is?`")} tests which type a union (A | B) or optional value holds; this is always {a_type(at)}")
 
     T_BOOL
 
