@@ -29,7 +29,8 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: paused (quota). The Sol parallel review found 2 diagnostic-order bugs,
+- Astra: inferred scope regions (Goose idea 1).
+- Astra was paused (quota). The Sol parallel review found 2 diagnostic-order bugs,
   both fixed (9109989b), with guards extended.
 - Opus: design coverage, round 2. The 10-21 audit: 613 features, 401 work, 47
   broken, 134 missing; round 1 fixed ~25.
@@ -62,6 +63,13 @@ only.
   Rejected: worker instance reconciliation (game +0%, synthetic −0.03%, a
   2.2k-line program −24%, and dunes lost determinism on fallback). Game's
   serial cost looks library-bound: question 22, or parallel library checking.
+- Ideas from Goose (~/dev/tmp/coord/goose-study.md), internal:
+  1. compiler-inferred scope regions: non-escaping data bump-allocated and freed
+     at scope exit; heap fallback (recursive_tree; first arena-runtime user);
+  2. lambda-lifting non-escaping callables (profile first: callbacks 4.6×/2.3×);
+  3. destination passing for fresh results (`xs.push(f())`);
+  4. bounds-check upgrades: call-site entry facts, a 2^48 length axiom,
+     hoisting through `@` parameters.
 - Runtime gaps:
   - float compare/negate selection;
   - outer-target SIMD (particles);
@@ -179,6 +187,9 @@ only.
     - unknown escapes like `\N` are errors;
     - user functions join prelude overloads rather than shadowing them;
     - `and=` on bools always evaluates its right side.
+26. From Goose: index-typed refinements ("below `a.length`" for a
+    never-shrinking array) aimed at graph; and Euclidean `%` so `x % n` is
+    always a valid index.
 15. Provisional file helpers: `copy_file`, `rename_file`, `make_dirs`,
     `walk_dir`, `glob`, `file_size`, `file_time`, `chmod`, `env`. Keep, rename
     or drop?
