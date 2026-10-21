@@ -6,6 +6,7 @@ use 'pcheck.jo'
 use 'watch.jo'
 use 'ide.jo'
 use 'fused.jo'
+use 'decimals.jo'
 
 struct SrcFile:
     path: str
@@ -197,6 +198,7 @@ pos_in_lib = (p: int) -> bool:
 
 fatal = (p0: int, msg0: str):
     dc_replay()
+    decimal_restart()
     p = p0
     msg = msg0
     k = err_trail.len() - 1
@@ -275,7 +277,7 @@ warn = (p: int, msg: str):
     if warned.has(key): return
     warned[key] = true
     wk = "w{p}.{len(msg)}"
-    if errors_only and shown_warnings.contains(wk): return
+    if (errors_only or decimal_restarted) and shown_warnings.contains(wk): return
     shown_warnings.push(wk)
     eprint("{pos_str(p)}: warning: {msg}")
 

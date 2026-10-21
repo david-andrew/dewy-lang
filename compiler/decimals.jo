@@ -1,0 +1,103 @@
+# Decimal literals adapt to their context: exact unless next to a float operand, in a float
+# parameter or field (both decided where the literal is checked), or the unannotated binding
+# it initializes is later written a float. That last context is known only after the
+# binding's first uses are checked, so it is found lazily: a float write to such a binding,
+# which would be a type error, restarts the compilation with the binding's declaration
+# marked float64 (the same mechanism as eager-body replay). Programs without such a write pay
+# nothing beyond a map lookup per decimal binding.
+use 'check.jo'
+use 'ast.jo'
+use 'util.jo'
+use 'expr.jo'
+use 'types.jo'
+use 'pcheck.jo'
+use 'lazy_bodies.jo'
+use 'ide.jo'
+use 'main.jo'
+use 'units.jo'
+
+const DECIMAL_FLAG = "--float-decimals="
+decimal_floats: {str: bool} = {}      # declarations ("path|offset") made float64 by a restart
+decimal_locals: {int: int} = {}       # local -> its declaration's position
+decimal_globals: {int: int} = {}      # global -> its declaration's position
+decimal_target = 0                    # the declaration position of the binding being assigned
+decimal_pending = false               # a binding was found to be written a float: restart
+decimal_checked = false               # checking is over: a write found later restarts at once
+decimal_restarted = false             # a restart: the warnings the last run showed are not repeated
+decimal_pid = 0                       # the compiler's own process: forked workers leave the restart to it
+
+# (restarting is a re-exec, as eager-body replay is: Linux hosts)
+decimal_self = () -> int:
+    when BOOTSTRAP or TARGET != "linux" or ARCH != "x86_64":
+        return 0
+    else:
+        return syscall(39)
+
+decimal_key = (pos: int) -> str: "{files[pos_file(pos)].path}|{pos_off(pos)}"
+
+# main: `--float-decimals=a|1,b|2` from an earlier run
+decimal_flag = (arg: str) -> bool:
+    if not starts_with(arg, DECIMAL_FLAG): return false
+    parts = split(arg[len(DECIMAL_FLAG)..], ";")
+    loop key in split(parts[0], ","):
+        if len(key) > 0: decimal_floats[key] = true
+    if parts.len() > 1:
+        loop w in split(parts[1], ","):
+            if len(w) > 0: shown_warnings.push(w)
+    decimal_restarted = true
+    true
+
+# The type of an unannotated binding whose literal initializer defaulted to t.
+decimal_binding_type = (pos: int, t: int) -> int:
+    if decimal_floats.len() == 0 or not bundled_rational_type(t) or not dewy_at(pos): return t
+    if decimal_floats.has(decimal_key(pos)): return T_FLOAT
+    t
+
+decimal_local = (l: int, pos: int, t: int):
+    if bundled_rational_type(t) and dewy_at(pos): decimal_locals[l] = pos
+
+decimal_global = (g: int, pos: int, t: int):
+    if bundled_rational_type(t) and dewy_at(pos): decimal_globals[g] = pos
+
+# check_assign: the binding an assignment writes, when it was made by a decimal literal
+decimal_assign_begin = (s: int) -> int:
+    saved = decimal_target
+    decimal_target = 0
+    if decimal_locals.len() == 0 and decimal_globals.len() == 0: return saved
+    lhs = int(nodes[s].a)
+    if nodes[lhs].kind != .ident: return saved
+    sy = lookup(int(nodes[lhs].name))
+    if sy == 0: return saved
+    if syms[sy].kind == .local: decimal_target = decimal_locals.get(int(syms[sy].ref)) ?? 0
+    else if syms[sy].kind == .global: decimal_target = decimal_globals.get(int(syms[sy].ref)) ?? 0
+    saved
+
+# A float written to the binding: from the start it is a float64. Checking goes on, to
+# find the others in the same run (the caller leaves this write unconverted); the
+# compilation restarts when checking ends, or at an error, before anything is emitted.
+decimal_float_write = (from: int, to: int) -> bool:
+    if decimal_target == 0 or tkind(prune(from)) != .float_ or not bundled_rational_type(prune(to)): return false
+    if ide_on or repl_image or watch_build or errors_only or decimal_pid == 0: return false
+    key = decimal_key(decimal_target)
+    if decimal_floats.has(key): return false
+    # (a forked worker gives up its part; the compiler redoes it, and restarts)
+    if decimal_self() != decimal_pid: exit(1)
+    decimal_floats[key] = true
+    decimal_pending = true
+    if decimal_checked: decimal_restart()
+    true
+
+decimal_restart = ():
+    if not decimal_pending: return
+    if pc_child >= 0 or decimal_self() != decimal_pid: exit(1)
+    pc_cancel()
+    keys: str[]
+    loop k, _ in decimal_floats: keys.push(k)
+    a = args()
+    replay = [a[0], DECIMAL_FLAG + join(keys, ",") + ";" + join(shown_warnings, ",")]
+    loop i in [1..a.len()):
+        if not starts_with(a[i], DECIMAL_FLAG): replay.push(a[i])
+    __olen = 0
+    if not exec(exe_path(), replay):
+        eprint("error: could not restart with float decimal bindings")
+        exit(2)

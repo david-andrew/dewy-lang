@@ -1,0 +1,25 @@
+# quick
+scale=(v:float64):>float64=>v*2.0
+P:type=[w:float64]
+let elapsed=0.0
+tick=(dt:float64):>void=>{elapsed+=dt}
+main=()=>{
+    let f:float64=1.5
+    let acc=0.0
+    acc+=f
+    acc+=0.25
+    printl(acc)
+    let b=0.1
+    b=f*2.0
+    printl(b)
+    printl(scale(0.25))
+    printl(P[0.5].w)
+    printl(0.1*f)
+    tick(0.5) tick(0.25)
+    printl(elapsed)
+    let exact=0.1
+    exact+=0.2
+    printl(exact =? 0.3)
+    printl(0.1+0.2 =? 0.3)
+    printl(exact)
+}

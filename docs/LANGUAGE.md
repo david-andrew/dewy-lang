@@ -919,9 +919,11 @@ integers or `BigInt` values with `/` gives a `rational`, including mixed
 signed/unsigned words, and the full-width values are preserved. `4/2` is still
 a fraction value, formatted as `2`. Use `//` for a whole-number quotient.
 Floating operands retain floating division. Decimal literals are exact
-fractions by default: `0.1 + 0.2 =? 0.3` is true, `1.0/2` is `1/2`, and `1.25e2`
-is `125`. A float annotation or floating operand gives literals a floating
-context (`let x:float64=0.1`). An integer promotes to `rational` wherever one is
+fractions unless their context is floating: `0.1 + 0.2 =? 0.3` is true, `1.0/2` is
+`1/2`, and `1.25e2` is `125`. A float annotation, a floating operand beside the
+literal, a `float64` parameter or field, or a later float written to the
+unannotated binding the literal initializes makes it a `float64` when compiling:
+`let acc=0.0` followed by `acc+=dt` with `dt:float64` declares a `float64`. An integer promotes to `rational` wherever one is
 expected: arguments, results, record fields and container elements.
 Constant fractions and decimal literals are reduced at compilation; a constant
 zero divisor of `/` is a compile error.
@@ -964,8 +966,8 @@ let movement=vec2(step 2.0*step)
 `rational(x)` of a `float32` or `float64` is the float's exact binary value
 (`rational(f)` with `f:float64=0.1` is `3602879701896397/36028797018963968`);
 NaN and infinity panic. Floats never become fractions implicitly. Inferred
-decimal bindings hold fractions; annotate an accumulator that will receive
-floating values with `float32` or `float64`.
+decimal bindings hold fractions unless a float is written to them later, which
+makes them `float64` from the start; annotate `float32` explicitly.
 
 `rational<int64>` is the explicit fixed-width form: normalized `int64` parts.
 Its `+`, `-`, `*`, `/`, `^` and negation return `rational<int64> | Overflow`,

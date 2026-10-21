@@ -1,7 +1,7 @@
 close=(x:float64 y:float64):>bool=>abs(x-y) <? 1e-9
 residual=(matrix:NDArray<float64> x:array<float64> b:array<float64>):>float64=>{
     let predicted=matrix*x
-    let total:float64=0.0
+    let total=0.0
     loop i in [0..b.length) {
         total+=abs(predicted[i]-b[i])
     }

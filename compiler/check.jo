@@ -3,6 +3,7 @@ use 'frontend.jo'
 use 'pcheck.jo'
 use 'units.jo'
 use 'definite.jo'
+use 'decimals.jo'
 use 'errors.jo'
 use 'watch.jo'
 # Semantic analysis: modules, scopes, declarations, function instances, statements.
@@ -2155,8 +2156,9 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
             else:
                 t = et
                 if has_flag(int(nodes[d].b), NF_LITERAL):
-                    t = lit_default(int(nodes[d].b))
+                    t = decimal_binding_type(nodes[d].pos, lit_default(int(nodes[d].b)))
                     nodes[d].b = i32(coerce(int(nodes[d].b), t))
+                    decimal_global(g, nodes[d].pos, t)
         t = zonk(t)
         if t == 0: fatal(nodes[d].pos, "global needs a type or a value")
         if has_var(prune(t)):
@@ -2913,6 +2915,7 @@ compound_checked = (s: int, left: int, right: int, target: int) -> int:
     n = compound_value(s, left, right)
     result = prune(check_expr(n, 0))
     t = prune(target)
+    if decimal_target != 0 and decimal_float_write(result, t): return last_checked
     # Built-in compound arithmetic keeps the destination's fixed width,
     # just as += does, even when a library helper computes in 64 bits.
     if nodes[s].sval != 0 and ((is_int(t) and is_int(result)) or (is_float(t) and is_float(result))):
@@ -3371,6 +3374,12 @@ dewy_selection_update = (s: int, matrix: bool = false) -> int:
     block
 
 check_assign = (s: int) -> int:
+    saved = decimal_assign_begin(s)
+    r = __check_assign(s)
+    decimal_target = saved
+    r
+
+__check_assign = (s: int) -> int:
     if files[pos_file(nodes[s].pos)].is_dewy:
         end_update = dewy_end_assign(s)
         if end_update != 0: return end_update
@@ -3571,6 +3580,7 @@ check_assign = (s: int) -> int:
         string_domain_write(lhs, if op == int(Tok.assign): int(nodes[s].b) else: 0)
     if op == int(Tok.assign):
         rt = prune(check_expr(int(nodes[s].b), lt))
+        if decimal_target != 0 and decimal_float_write(rt, lt): return s
         if rt != lt and nodes[lhs].kind == .ident and (nodes[lhs].aux == i32(int(SK.local)) or nodes[lhs].aux == i32(int(SK.global))) and not can_coerce(last_checked, rt, lt): var_type_error(lhs, lt, rt, nodes[last_checked].pos)
         # (release_call's zero bytes are no value of lt: nothing reads them)
         if nodes[last_checked].kind != .intrinsic or nodes[last_checked].aux != i32(int(IN.zeroed)): nodes[s].b = i32(coerce(last_checked, lt))
@@ -3805,6 +3815,7 @@ check_vardecl = (s: int):
         t = resolve_type(int(nodes[s].a))
         refine_self = previous_self
     no_value = nodes[s].b == 0
+    literal_init = false
     if refine_active and types[prune(t)].kind == .refined and nodes[s].b == 0: nodes[s].b = i32(struct_default(t, nodes[s].pos))
     nm = name_of(int(nodes[s].name))
     # (Dewy's `let x:T` without a value: given one on every path before it is read)
@@ -3818,7 +3829,8 @@ check_vardecl = (s: int):
         else:
             t = et
             if has_flag(int(nodes[s].b), NF_LITERAL):
-                t = lit_default(int(nodes[s].b))
+                t = decimal_binding_type(nodes[s].pos, lit_default(int(nodes[s].b)))
+                literal_init = true
                 nodes[s].b = i32(coerce(int(nodes[s].b), t))
             if tkind(t) == .none_lit: fatal(nodes[s].pos, "cannot infer the type of '{nm}' from 'none'; add a type: {nm}: T? = none")
     if effects_active and nodes[s].a == 0 and type_has_fn(t):
@@ -3841,6 +3853,7 @@ check_vardecl = (s: int):
     if tk == .null_: fatal(nodes[s].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(nodes[s].pos, "`{nm}: Enemy? = none`", "`let {nm}:Enemy? = none`")}")
     if tk == .typeval or tk == .module: fatal(nodes[s].pos, "'{nm}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
     l = new_local(int(nodes[s].name), t, nodes[s].pos)
+    if literal_init: decimal_local(l, nodes[s].pos, t)
     if nodes[s].b != 0 and quat_nodes.has(int(nodes[s].b)): quat_locals[l] = true
     locals[l].flags = i32(LF_DECL)
     if t == T_STR and nodes[s].a == 0 and dewy_at(nodes[s].pos): string_domain_declare(l, int(nodes[s].b))

@@ -1,14 +1,14 @@
 # Matrix and statistics toolkit: mean, stddev, median, correlation, linear regression.
 
 mean = (xs:array<float64>):>float64 => {
-    let total:float64 = 0.0
+    let total = 0.0
     loop x in xs { total += x }
     return total / xs.length
 }
 
 variance = (xs:array<float64>):>float64 => {
     let m = mean(xs)
-    let total:float64 = 0.0
+    let total = 0.0
     loop x in xs { total += (x - m)^2 }
     return total / (xs.length - 1)
 }
@@ -25,9 +25,9 @@ median = (xs:array<float64>):>float64 => {
 correlation = (xs:array<float64> ys:array<float64>):>float64 => {
     let mx = mean(xs)
     let my = mean(ys)
-    let sxy:float64 = 0.0
-    let sxx:float64 = 0.0
-    let syy:float64 = 0.0
+    let sxy = 0.0
+    let sxx = 0.0
+    let syy = 0.0
     loop [x y] in zip(xs ys) {
         sxy += (x - mx) * (y - my)
         sxx += (x - mx)^2
@@ -41,8 +41,8 @@ Fit:type = [slope:float64 intercept:float64 r2:float64]
 linear_fit = (xs:array<float64> ys:array<float64>):>Fit => {
     let mx = mean(xs)
     let my = mean(ys)
-    let num:float64 = 0.0
-    let den:float64 = 0.0
+    let num = 0.0
+    let den = 0.0
     loop i in [0..xs.length) {
         num += (xs[i] - mx) * (ys[i] - my)
         den += (xs[i] - mx)^2
@@ -60,7 +60,7 @@ matmul = (a:array<array<float64>> b:array<array<float64>>):>array<array<float64>
     let out:array<array<float64>> = [loop i in [0..n) [loop j in [0..m) 0.0]]
     loop i in [0..n) {
         loop j in [0..m) {
-            let s:float64 = 0.0
+            let s = 0.0
             loop t in [0..k) { s += a[i][t] * b[t][j] }
             out[i][j] = s
         }
