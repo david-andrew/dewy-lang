@@ -1,4 +1,5 @@
-# Closed direct-place contracts. Absence of a declaration never means purity.
+# Interned callback contracts and demanded place/row inference.
+# Absence of a declaration never means purity.
 # The arena, graph and cost inventory are demanded only by explicit contracts
 # (or the internal policy). Ordinary isolation keeps its weaker legacy meaning.
 use 'ast.jo'
@@ -12,17 +13,25 @@ use 'isolation.jo'
 use 'refine.jo'
 use 'facts.jo'
 use 'ownership.jo'
+use 'ir.jo'
+use 'copies.jo'
 
-enum EffectKind: read, write, alloc, detach, costly_copy, panic, io, block, spawn, escape, opaque
+enum EffectKind: read, write, alloc, detach, costly_copy, panic, io, block, spawn, escape, opaque, remainder
 struct EffectAtom:
     kind: EffectKind
     place: PlaceIdentity = PlaceIdentity(.local, 0, 0)
+    row: int = 0
 struct EffectSyntax:
     kind: EffectKind
     path: int[]
     pos: int
+    negative: bool = false
+    variable: bool = false
 struct EffectContract:
     atoms: EffectAtom[]
+    exclusions: EffectAtom[]
+    variables: int[]
+    open: bool = false
 struct EffectEvent:
     atom: EffectAtom
     witness: int
@@ -44,6 +53,15 @@ struct EffectPolicy:
     prohibitions: int
     require_static: bool
 
+struct EffectObligation:
+    source: int
+    bound: int
+
+effect_obligations: EffectObligation[]
+effect_inference_busy = false
+effect_solving = false
+effect_final = false
+
 effect_policy = EffectPolicy()
 effects_active = false
 effect_syntax: EffectSyntax[][] = [[]]
@@ -56,6 +74,10 @@ effect_limit = 0
 
 effects_reset = ():
     effects_active = false
+    effect_obligations = []
+    effect_inference_busy = false
+    effect_solving = false
+    effect_final = false
     effect_policy = EffectPolicy()
     if let policy = env("DEWY_INTERNAL_EFFECT_POLICY"):
         if policy == "scalar-no-effects":
@@ -70,26 +92,81 @@ effects_reset = ():
     effect_limit = 0
     place_parents = [PlaceIdentity(.local, 0, 0)]
 
-effect_intern = (atoms: EffectAtom[]) -> int:
-    # Rows are small bounded sets; equality is independent of declaration order.
+effect_intern = (atoms0: EffectAtom[], exclusions0: EffectAtom[] = [], variables0: int[] = [], open: bool = false) -> int:
+    atoms: EffectAtom[]
+    exclusions: EffectAtom[]
+    variables: int[]
+    loop a in atoms0:
+        if not atoms.contains(a): atoms.push(a)
+    loop a in exclusions0:
+        if not exclusions.contains(a): exclusions.push(a)
+    loop v in variables0:
+        if not variables.contains(v): variables.push(v)
     loop i in [1..effect_contracts.len()):
-        old = effect_contracts[i].atoms
-        if old.len() != atoms.len(): continue
+        old = effect_contracts[i]
+        if old.open != open or old.atoms.len() != atoms.len() or old.exclusions.len() != exclusions.len() or old.variables.len() != variables.len(): continue
         same = true
         loop a in atoms:
-            if not old.contains(a): same = false
+            if not old.atoms.contains(a): same = false
+        loop a in exclusions:
+            if not old.exclusions.contains(a): same = false
+        loop v in variables:
+            if not old.variables.contains(v): same = false
         if same: return i
-    effect_contracts.push(EffectContract(atoms))
+    effect_contracts.push(EffectContract(atoms, exclusions, variables, open))
     effect_contracts.len() - 1
+
+# Rows occupy kind-checked specialization slots, never runtime values.
+effect_type = (contract: int) -> int:
+    mk_type(TypeInfo(kind = .effect, st = i32(contract)), effect_contracts[contract].variables)
+
+effect_subst = (contract: int, args: int[], zoning: bool = false) -> int:
+    if contract == 0: return 0
+    row = effect_contracts[contract]
+    if row.variables.len() == 0: return contract
+    atoms = row.atoms
+    exclusions = row.exclusions
+    variables: int[]
+    open = row.open
+    loop v in row.variables:
+        t = if zoning: zonk(v) else: subst(v, args)
+        if tkind(t) == .effect:
+            r = effect_contracts[int(types[t].st)]
+            atoms += r.atoms
+            exclusions += r.exclusions
+            variables += r.variables
+            open = open or r.open
+        else: variables.push(t)
+    effect_intern(atoms, exclusions, variables, open)
 
 effect_contract = (decl: int, params: int[], labels: int[], mask: int) -> int:
     syntax = int(nodes[decl].sval)
     if syntax == 0: return 0
     atoms: EffectAtom[]
+    exclusions: EffectAtom[]
+    variables: int[]
+    positive = effect_syntax[syntax].len() == 0
+    inherited_open = false
     loop entry in effect_syntax[syntax]:
+        if not entry.negative: positive = true
+        if entry.variable:
+            sym = lookup(entry.path[0])
+            if sym == 0 or syms[sym].kind != .type_ or tkind(int(syms[sym].ref)) != .effect: fatal(entry.pos, "effect row requires an Effect binder")
+            row = effect_contracts[int(types[int(syms[sym].ref)].st)]
+            atoms += row.atoms
+            exclusions += row.exclusions
+            variables += row.variables
+            inherited_open = inherited_open or row.open
+            continue
+        if entry.path.len() == 0:
+            atom = EffectAtom(entry.kind)
+            if entry.negative: exclusions.push(atom)
+            else: atoms.push(atom)
+            continue
         name = entry.path[0]
         p = PlaceIdentity(.local, 0, 0)
         t = 0
+        projection_start = 1
         loop i in [0..labels.len()):
             if labels[i] != name: continue
             if mask & (1 << i) == 0: fatal(entry.pos, "effect place '{name_of(name)}' must be an @ parameter")
@@ -97,12 +174,22 @@ effect_contract = (decl: int, params: int[], labels: int[], mask: int) -> int:
             t = params[i]
         if p.declaration == 0:
             s = lookup(name)
-            if s == 0 or (syms[s].kind != .global and syms[s].kind != .const_): fatal(entry.pos, "unknown effect place '{name_of(name)}'")
-            g = int(syms[s].ref)
-            ensure_global(g, entry.pos)
-            p = PlaceIdentity(.global, 0, g)
-            t = int(globals[g].type)
-        loop i in [1..entry.path.len()):
+            if s != 0 and syms[s].kind == .module and entry.path.len() > 1:
+                s = module_lookup(int(syms[s].ref), entry.path[1])
+                projection_start = 2
+            if s != 0 and syms[s].kind == .alias_:
+                rt = resolve_alias(int(syms[s].ref), [], entry.pos)
+                if tkind(rt) != .struct_ and tkind(rt) != .enum_: fatal(entry.pos, "effect resource requires nominal identity")
+                p = PlaceIdentity(.resource, 0, int(structs[int(types[rt].st)].decl))
+            else if s != 0 and (syms[s].kind == .struct_ or syms[s].kind == .enum_):
+                p = PlaceIdentity(.resource, 0, int(syms[s].ref))
+            else if s == 0 or (syms[s].kind != .global and syms[s].kind != .const_): fatal(entry.pos, "unknown effect place '{name_of(name)}'")
+            if p.declaration == 0:
+                g = int(syms[s].ref)
+                ensure_global(g, entry.pos)
+                p = PlaceIdentity(.global, 0, g)
+                t = int(globals[g].type)
+        loop i in [projection_start..entry.path.len()):
             t = representation_type(t)
             if tkind(t) != .struct_: fatal(entry.pos, "effect projection needs a record field")
             si = int(types[t].st)
@@ -118,9 +205,53 @@ effect_contract = (decl: int, params: int[], labels: int[], mask: int) -> int:
             p = place_project(p, entry.path[i])
             if p.declaration == 0: fatal(entry.pos, "effect place exceeds projection budget")
         atom = EffectAtom(entry.kind, p)
-        if not atoms.contains(atom): atoms.push(atom)
+        if entry.negative: exclusions.push(atom)
+        else if not atoms.contains(atom): atoms.push(atom)
         if atoms.len() > 32: fatal(entry.pos, "effect row exceeds region budget")
-    effect_intern(atoms)
+    loop a in atoms:
+        loop e in exclusions:
+            if effect_overlap(a, e): fatal(nodes[decl].pos, "contradictory effect permission and exclusion")
+    effect_intern(atoms, exclusions, variables, not positive or inherited_open)
+
+effect_argument = (tn: int) -> int:
+    if nodes[tn].kind == .tname and nodes[tn].aux == -8: return effect_type(effect_contract(tn, [], [], 0))
+    if nodes[tn].kind == .tname:
+        sym = lookup(int(nodes[tn].name))
+        if sym != 0 and syms[sym].kind == .type_ and tkind(int(syms[sym].ref)) == .effect: return int(syms[sym].ref)
+    fatal(nodes[tn].pos, "generic argument kind mismatch: expected Effect row")
+    0
+
+# An unchecked external implementation cannot manufacture callable guarantees,
+# including when an alias or aggregate hides the qualifying wrapper.
+effect_qualified_type = (t0: int, seen: mut int[]) -> bool:
+    t = prune(t0)
+    if t == 0 or seen.contains(t): return false
+    if seen.len() >= 64: return true
+    seen.push(t)
+    k = types[t].kind
+    if k == .callable: return true
+    if k == .array or k == .fixed or k == .opt or k == .ptr or k == .refined: return effect_qualified_type(telem(t), seen)
+    if k == .fn_ or k == .cfn or k == .tuple:
+        if effect_qualified_type(telem(t), seen): return true
+        loop i in [0..int(types[t].nargs)):
+            if effect_qualified_type(targ(t, i), seen): return true
+    if k == .struct_ or k == .enum_:
+        si = int(types[t].st)
+        check_struct_fields(si)
+        loop i in [0..int(structs[si].nfields)):
+            if effect_qualified_type(int(fields[int(structs[si].fields) + i].type), seen): return true
+        loop i in [0..int(structs[si].nvariants)):
+            v = int(structs[si].variants) + i
+            loop j in [0..int(variants[v].nfields)):
+                if effect_qualified_type(int(fields[int(variants[v].fields) + j].type), seen): return true
+    false
+
+effect_generic_argument = (tn: int) -> int:
+    if nodes[tn].kind == .tname:
+        if nodes[tn].aux == -8: return effect_argument(tn)
+        sym = lookup(int(nodes[tn].name))
+        if sym != 0 and syms[sym].kind == .type_ and tkind(int(syms[sym].ref)) == .effect: return int(syms[sym].ref)
+    resolve_type(tn)
 
 effect_decl_contract = (decl: int, params: int[]) -> int:
     if decl == 0 or nodes[decl].sval == 0: return 0
@@ -134,7 +265,7 @@ effect_decl_contract = (decl: int, params: int[]) -> int:
 
 mk_callable_contract = (base: int, contract: int) -> int:
     if contract == 0: return base
-    mk_type(TypeInfo(kind = .callable, elem = i32(base), st = i32(contract)), [])
+    mk_type(TypeInfo(kind = .callable, elem = i32(base), st = i32(contract)), effect_contracts[contract].variables)
 
 callable_base = (t0: int) -> int:
     t = prune(t0)
@@ -146,19 +277,259 @@ callable_contract = (t0: int) -> int:
     if types[t].kind == .callable: return int(types[t].st)
     0
 
+effect_overlap = (a: EffectAtom, b: EffectAtom) -> bool:
+    if a.kind == .opaque or b.kind == .opaque: return true
+    if a.kind != b.kind: return false
+    a.place.declaration == 0 or b.place.declaration == 0 or place_covers(a.place, b.place) or place_covers(b.place, a.place)
+
 effect_allows = (contract: int, atom: EffectAtom) -> bool:
-    loop permission in effect_contracts[contract].atoms:
-        if permission.kind == atom.kind and place_covers(permission.place, atom.place): return true
+    if atom.kind == .remainder: return effect_rows_fit(atom.row, contract)
+    row = effect_contracts[contract]
+    loop exclusion in row.exclusions:
+        if effect_overlap(exclusion, atom): return false
+    if row.open: return true
+    loop permission in row.atoms:
+        if permission.kind == atom.kind and (permission.place.declaration == 0 or place_covers(permission.place, atom.place)): return true
     false
 
-effect_contract_fits = (from: int, to: int) -> bool:
-    dest = callable_contract(to)
+effect_rows_fit = (source: int, dest: int) -> bool:
     if dest == 0: return true
-    source = callable_contract(from)
     if source == 0: return false
-    loop atom in effect_contracts[source].atoms:
+    sr = effect_contracts[source]
+    dr = effect_contracts[dest]
+    if sr.open and not dr.open: return false
+    loop ex in dr.exclusions:
+        if sr.open and not sr.exclusions.contains(ex): return false
+    loop atom in sr.atoms:
         if not effect_allows(dest, atom): return false
+    loop v in sr.variables:
+        if not dr.variables.contains(v): return false
     true
+
+effect_contract_fits = (from: int, to: int) -> bool:
+    effect_rows_fit(callable_contract(from), callable_contract(to))
+
+# Explicit callback-place permissions are checked here, before extracting E.
+# A foreign formal ordinal can never enter a nonlocal row substitution.
+effect_match = (source: int, dest: int, binds: mut int[]) -> bool:
+    if dest == 0: return true
+    if source == 0: return false
+    dr = effect_contracts[dest]
+    if dr.variables.len() == 0: return effect_rows_fit(source, dest)
+    if dr.variables.len() != 1: return false
+    sr = effect_contracts[source]
+    rest: EffectAtom[]
+    exclusions: EffectAtom[]
+    loop a in sr.atoms:
+        if effect_allows(dest, a): continue
+        if place_base(a.place).root == .formal: return false
+        loop ex in dr.exclusions:
+            if effect_overlap(a, ex): return false
+        rest.push(a)
+    loop ex in sr.exclusions:
+        if place_base(ex.place).root != .formal: exclusions.push(ex)
+    t = effect_type(effect_intern(rest, exclusions, sr.variables, sr.open))
+    v = dr.variables[0]
+    if tkind(v) == .param:
+        slot = int(types[v].id)
+        if slot < binds.len() and binds[slot] != 0 and tkind(binds[slot]) == .effect:
+            binds[slot] = effect_type(effect_join(int(types[binds[slot]].st), int(types[t].st)))
+            return true
+    match_type(v, t, binds, 1) >= 0
+
+# Compatibility is speculative during checking, then rechecked against every
+# reaching source at the helper fixed point. No declaration is rewritten.
+effect_top = () -> int: effect_intern([EffectAtom(.opaque)])
+
+effect_join = (left: int, right: int) -> int:
+    a = effect_contracts[left]
+    b = effect_contracts[right]
+    exclusions: EffectAtom[]
+    loop e in a.exclusions + b.exclusions:
+        bound = effect_intern([], [e], [], true)
+        if effect_rows_fit(left, bound) and effect_rows_fit(right, bound): exclusions.push(e)
+    effect_intern(a.atoms + b.atoms, exclusions, a.variables + b.variables, a.open or b.open)
+
+effect_prepare_node = (n: int, seen: mut int[], depth: int):
+    if n == 0 or depth > 32: return
+    k = nodes[n].kind
+    if (k == .call and nodes[n].aux == 0) or k == .fnref: effect_prepare(int(nodes[n].sym), seen, depth + 1)
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: effect_prepare_node(int(nodes[n].a), seen, depth + 1)
+    if mask & 2 != 0: effect_prepare_node(int(nodes[n].b), seen, depth + 1)
+    if mask & 4 != 0: effect_prepare_node(int(nodes[n].c), seen, depth + 1)
+    if mask & 16 != 0:
+        loop c in kids(n): effect_prepare_node(c, seen, depth + 1)
+
+effect_prepare = (f: int, seen: mut int[], depth: int):
+    if f <= 0 or f >= fns.len() or depth > 32 or seen.contains(f): return
+    seen.push(f)
+    if fns[f].state == 0: check_fn_body(f)
+    if fns[f].state == 2: effect_prepare_node(int(fns[f].body), seen, depth + 1)
+
+effect_graph_reset = ():
+    effect_limit = fns.len()
+    effect_summaries = fill(EffectSummary(), effect_limit)
+    effect_seen = fill(0, nodes.len())
+    effect_stack = []
+    effect_serial = 0
+
+effect_function_row = (f: int) -> int:
+    if f <= 0 or f >= fns.len(): return effect_top()
+    if not effect_final and not effect_solving:
+        if effect_inference_busy: return effect_top()
+        effect_inference_busy = true
+        seen: int[]
+        effect_prepare(f, seen, 0)
+        effect_inference_busy = false
+        effect_graph_reset()
+    if f >= effect_limit: return effect_top()
+    if effect_summaries[f].index == 0:
+        previous = effect_solving
+        effect_solving = true
+        effect_visit(f)
+        effect_solving = previous
+    if not effect_summaries[f].done: return effect_top()
+    atoms: EffectAtom[]
+    loop event in effect_summaries[f].events:
+        atom = event.atom
+        base = place_base(atom.place)
+        if base.root == .formal:
+            if base.owner != f: return effect_top()
+            atom.place = place_append(PlaceIdentity(.formal, 0, base.declaration), atom.place)
+        atoms.push(atom)
+    effect_intern(atoms)
+
+# Collect result expressions without interpreting loop locals as syntax nodes.
+effect_returns = (n: int, out: mut int[]):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .return_:
+        value_leaves(int(nodes[n].a), out)
+        return
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: effect_returns(int(nodes[n].a), out)
+    if mask & 2 != 0: effect_returns(int(nodes[n].b), out)
+    if mask & 4 != 0: effect_returns(int(nodes[n].c), out)
+    if mask & 16 != 0:
+        loop c in kids(n): effect_returns(c, out)
+
+# Projection selectors are field ordinals; -1 joins all array elements. Joining
+# every assignment is intentionally flow-insensitive, including later writes.
+effect_source_row = (n: int, path: int[] = [], depth: int = 0) -> int:
+    if n == 0 or depth > 16: return effect_top()
+    k = nodes[n].kind
+    if k == .conv:
+        inner = int(nodes[n].a)
+        return effect_source_row(inner, path, depth + 1)
+    if path.len() == 0 and callable_contract(ntype(n)) != 0: return callable_contract(ntype(n))
+    if path.len() == 0 and (k == .fnref or k == .lambda and not has_flag(n, NF_GENERIC)): return effect_function_row(int(nodes[n].sym))
+    if k == .field: return effect_source_row(int(nodes[n].a), [int(nodes[n].aux)] + path, depth + 1)
+    if k == .index: return effect_source_row(int(nodes[n].a), [-1] + path, depth + 1)
+    if k == .ident and nodes[n].aux == i32(int(SK.local)):
+        l = int(nodes[n].sym)
+        if int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_EXPOSED | LF_ADDR | LF_SHARED | LF_ALIAS) != 0:
+            return effect_top()
+        if int(locals[l].flags) & LF_PARAM != 0: return effect_top()
+        row = 0
+        loop q in [1..nodes.len()):
+            rhs = 0
+            rest = path
+            if nodes[q].kind == .vardecl and not has_flag(q, NF_GLOBAL) and nodes[q].sym == i32(l): rhs = int(nodes[q].b)
+            if nodes[q].kind == .assign:
+                target = int(nodes[q].a)
+                selectors: int[]
+                loop nodes[target].kind == .field or nodes[target].kind == .index:
+                    selectors.insert(0, if nodes[target].kind == .field: int(nodes[target].aux) else: -1)
+                    target = int(nodes[target].a)
+                if nodes[target].kind == .ident and nodes[target].aux == i32(int(SK.local)) and nodes[target].sym == i32(l):
+                    overlap = true
+                    loop i in [0..min(selectors.len(), path.len())):
+                        if selectors[i] != path[i]: overlap = false
+                    if overlap:
+                        if selectors.len() > path.len(): return effect_top()
+                        rhs = int(nodes[q].b)
+                        rest = path[selectors.len()..]
+            if rhs == 0: continue
+            # Unchecked later assignments are covered by the final obligation.
+            if not effect_final and nodes[rhs].type == 0: continue
+            r = effect_source_row(rhs, rest, depth + 1)
+            row = if row == 0: r else: effect_join(row, r)
+        return if row == 0: effect_top() else: row
+    if path.len() > 0:
+        rest = path[1..]
+        if k == .array and path[0] == -1:
+            row = 0
+            loop child in kids(n):
+                r = effect_source_row(child, rest, depth + 1)
+                row = if row == 0: r else: effect_join(row, r)
+            return if row == 0: effect_top() else: row
+        if k == .call and nodes[n].aux == 2 and path[0] >= 0 and path[0] < nkids(n): return effect_source_row(kid(n, path[0]), rest, depth + 1)
+    if k == .call and nodes[n].aux == 0:
+        f = int(nodes[n].sym)
+        if f <= 0 or f >= fns.len(): return effect_top()
+        if not effect_final and fns[f].state == 0: check_fn_body(f)
+        if fns[f].state != 2: return effect_top()
+        leaves: int[]
+        effect_returns(int(fns[f].body), leaves)
+        value_leaves(int(fns[f].body), leaves)
+        row = 0
+        loop leaf in leaves:
+            r = effect_source_row(leaf, path, depth + 1)
+            row = if row == 0: r else: effect_join(row, r)
+        return if row == 0: effect_top() else: row
+    if path.len() == 0 and k == .partial:
+        source = if nodes[n].aux == 0: effect_function_row(int(nodes[n].sym)) else: effect_source_row(int(nodes[n].a), [], depth + 1)
+        row = effect_contracts[source]
+        atoms: EffectAtom[]
+        loop a0 in row.atoms:
+            a = a0
+            base = place_base(a.place)
+            if base.root == .formal:
+                slot = base.declaration - 1
+                if slot < 0 or slot >= nkids(n): return effect_top()
+                if nodes[kid(n, slot)].kind != .hole: return effect_top()
+                ordinal = 0
+                loop i in [0..slot + 1):
+                    if nodes[kid(n, i)].kind == .hole: ordinal += 1
+                a.place = place_append(PlaceIdentity(.formal, 0, ordinal), a.place)
+            atoms.push(a)
+        # Open bounds with bound formal exclusions need a route substitution.
+        if row.open or row.exclusions.len() != 0: return effect_top()
+        return effect_intern(atoms)
+    if k == .if_ or k == .block or k == .exprstmt:
+        leaves: int[]
+        value_leaves(n, leaves)
+        if leaves.len() == 1 and leaves[0] == n: return effect_top()
+        row = 0
+        loop leaf in leaves:
+            r = effect_source_row(leaf, path, depth + 1)
+            row = if row == 0: r else: effect_join(row, r)
+        return if row == 0: effect_top() else: row
+    effect_top()
+
+# Unannotated mutable storage carries source provenance rather than freezing
+# the initializer's upper bound. Declared fields/signatures keep their bounds.
+effect_storage_type = (t: int) -> int:
+    k = tkind(t)
+    if k == .callable: return callable_base(t)
+    if k == .array: return mk_array(effect_storage_type(telem(t)))
+    if k == .opt: return mk_opt(effect_storage_type(telem(t)))
+    if k == .fixed: return mk_fixed(effect_storage_type(telem(t)), fixed_len(t))
+    t
+
+effect_infer_callable = (n: int, expected: int) -> int:
+    t = ntype(n)
+    if callable_contract(expected) == 0 or callable_contract(t) != 0 or not is_fn_type(t): return t
+    # Freeze the expression before its checked conversion changes its type.
+    source = nodes.len()
+    nodes.push(nodes[n])
+    row = effect_source_row(source)
+    effect_obligations.push(EffectObligation(source, row))
+    mk_callable_contract(t, row)
+
 
 # The inventory is shared by check and both lowering paths. Wrapping word
 # add/sub/mul/bit operations, comparisons, Boolean control and scalar frame
@@ -242,6 +613,92 @@ effect_isolation_block = (f: int, reason: IsolationReason, n: int):
 
 # One full collection even after a blocker. Legacy isolation reuses the
 # conservative blocker and direct edges from this scan, never a row permission.
+# A bounded backward proof for storage costs only. An invocation contract does
+# not prove that copying an arbitrary environment is free. Join every source;
+# lost provenance, recursion or an exposed entry point remains unknown.
+effect_bare = (n: int, depth: int = 0) -> bool:
+    if n == 0 or depth > 16: return false
+    k = nodes[n].kind
+    if k == .conv: return effect_bare(int(nodes[n].a), depth + 1)
+    if k == .lambda and not has_flag(n, NF_GENERIC): return nodes[n].sym > 0 and fns[int(nodes[n].sym)].caps.len() == 0
+    if k == .fnref: return nodes[n].aux != 1 and nodes[n].aux != 2 and nodes[n].sym > 0 and not fns[int(nodes[n].sym)].has_env
+    if k != .ident or nodes[n].aux != i32(int(SK.local)): return false
+    l = int(nodes[n].sym)
+    flags = int(locals[l].flags)
+    if flags & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_EXPOSED) != 0: return false
+    if flags & LF_PARAM != 0:
+        owner = int(locals[l].owner)
+        slot = -1
+        loop i in [0..fns[owner].params.len()):
+            if fns[owner].params[i] == l: slot = i
+        if slot < 0 or fns[owner].cabi or len(fns[owner].export_name) != 0: return false
+        found = false
+        loop q in [1..nodes.len()):
+            if nodes[q].kind == .fnref and nodes[q].sym == i32(owner): return false
+            if nodes[q].kind != .call or nodes[q].aux != 0 or nodes[q].sym != i32(owner): continue
+            if slot >= nkids(q) or not effect_bare(kid(q, slot), depth + 1): return false
+            found = true
+        return found
+    found = false
+    loop q in [1..nodes.len()):
+        if nodes[q].kind == .vardecl and not has_flag(q, NF_GLOBAL) and nodes[q].sym == i32(l):
+            if not effect_bare(int(nodes[q].b), depth + 1): return false
+            found = true
+        if nodes[q].kind == .assign and place_scalar_root(int(nodes[q].a)) == PlaceIdentity(.local, int(locals[l].owner), l):
+            if not effect_bare(int(nodes[q].b), depth + 1): return false
+    found
+
+effect_readonly_binding = (n: int) -> bool:
+    if nodes[n].kind != .vardecl or nodes[n].aux2 != 1: return false
+    if dbg_on and (not copies_on or not copy_strict(n)): return false
+    l = int(nodes[n].sym)
+    a = int(nodes[n].b)
+    if a == 0 or nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return false
+    p = int(nodes[a].sym)
+    if int(locals[p].flags) & LF_PARAM == 0 or int(locals[p].flags) & (LF_MUTPARAM | LF_ADDR | LF_CAPTURE | LF_CAPTURED) != 0: return false
+    if locals[p].owner != locals[l].owner or locals[p].name != locals[l].name or not type_eq(int(locals[p].type), int(locals[l].type)): return false
+    if copies_on and copy_bindings.has(l): return false
+    if int(locals[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_EXPOSED | LF_SHARED) != 0: return false
+    t = representation_type(int(locals[l].type))
+    if tkind(t) == .array and effect_scalar(telem(t)): return true
+    is_fn_type(t) and effect_bare(a)
+
+effect_indirect = (f: int, n: int):
+    callee = int(nodes[n].a)
+    contract = callable_contract(ntype(callee))
+    if contract == 0 and (effects_active or effect_policy.prohibitions != 0): contract = effect_source_row(callee)
+    effect_scan_node(f, callee)
+    ft = callable_base(ntype(callee))
+    loop i in [0..nkids(n)):
+        a = kid(n, i)
+        if int(types[ft].mutmask) & (1 << i) == 0: effect_scan_node(f, a)
+        else if not effect_place_inventory(a): effect_opaque(f, a)
+    if contract == 0:
+        effect_opaque(f, n)
+        return
+    row = effect_contracts[contract]
+    if row.variables.len() != 0: effect_opaque(f, n)
+    if row.open:
+        # Preserve proven nonlocal exclusions instead of turning an open bound
+        # into an unconstrained opaque call. Formal exclusions need remapping.
+        exclusions: EffectAtom[]
+        loop ex in row.exclusions:
+            if place_base(ex.place).root != .formal: exclusions.push(ex)
+        remainder = effect_intern([], exclusions, [], true)
+        effect_add(f, EffectEvent(EffectAtom(.remainder, row = remainder), n))
+    loop atom0 in row.atoms:
+        atom = atom0
+        base = place_base(atom.place)
+        if base.root == .formal:
+            i = base.declaration - 1
+            if i < 0 or i >= nkids(n): atom = EffectAtom(.opaque)
+            else:
+                actual = effect_export(f, place_route(kid(n, i)))
+                atom.place = place_append(actual, atom.place)
+                if atom.place.declaration == 0: atom = EffectAtom(.opaque)
+                else if atom.place.root == .local: continue
+        effect_add(f, EffectEvent(atom, n))
+
 effect_scan_node = (f: int, n: int):
     if n == 0: return
     if effect_seen[n] == f: return
@@ -260,6 +717,9 @@ effect_scan_node = (f: int, n: int):
     if ownership_literal_print(n):
         effect_add(f, EffectEvent(EffectAtom(.io), n))
         effect_isolation_block(f, .node, n)
+        return
+    if k == .call and nodes[n].aux == 1:
+        effect_indirect(f, n)
         return
     if k == .call and nodes[n].aux == 0:
         g = int(nodes[n].sym)
@@ -291,21 +751,34 @@ effect_scan_node = (f: int, n: int):
             if not effect_word_op(compound_op(int(nodes[n].op)) as Tok): effect_opaque(f, n)
         effect_scan_node(f, int(nodes[n].b))
         return
+    if k == .ident and nodes[n].aux == i32(int(SK.local)):
+        l = int(nodes[n].sym)
+        t = representation_type(ntype(n))
+        if is_fn_type(t) and effect_bare(n): return
+        if tkind(t) == .array and effect_scalar(telem(t)) and int(locals[l].flags) & LF_PARAM != 0: return
+        if effect_scalar(t) and int(locals[l].flags) & LF_BYREF != 0:
+            loop q in [1..effect_seen.len()):
+                if effect_seen[q] == f and nodes[q].kind == .for_ and nodes[q].sym == i32(l) and not has_flag(q, NF_MUT) and tkind(ntype(int(nodes[q].a))) == .array: return
+        loop q in kids(int(fns[f].body)):
+            if nodes[q].kind == .vardecl and not has_flag(q, NF_GLOBAL) and nodes[q].sym == i32(l) and effect_readonly_binding(q): return
     if k == .ident or k == .field:
         effect_access(f, n, false)
         return
     supported = false
-    if k == .int_lit or k == .bool_lit: supported = effect_scalar(ntype(n))
+    if k == .fnref or k == .lambda: supported = effect_bare(n)
+    else if k == .for_: supported = tkind(ntype(int(nodes[n].a))) == .array and effect_scalar(telem(ntype(int(nodes[n].a)))) and not has_flag(n, NF_MUT)
+    else if k == .int_lit or k == .bool_lit: supported = effect_scalar(ntype(n))
     else if k == .block or k == .exprstmt or k == .return_ or k == .if_ or k == .and_ or k == .or_ or k == .not_: supported = true
     else if k == .vardecl:
         l = int(nodes[n].sym)
-        supported = l > 0 and effect_scalar(int(locals[l].type)) and int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) == 0
+        if effect_readonly_binding(n): return
+        supported = l > 0 and (effect_scalar(int(locals[l].type)) or is_fn_type(int(locals[l].type)) and effect_bare(int(nodes[n].b))) and int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) == 0
     else if k == .binary:
         supported = nodes[n].aux == 0 and effect_word_op(nodes[n].op as Tok) and effect_scalar(ntype(int(nodes[n].a))) and effect_scalar(ntype(int(nodes[n].b)))
     else if k == .unary:
         supported = effect_scalar(ntype(n)) and (nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.tilde)))
     else if k == .conv:
-        supported = effect_scalar(ntype(n)) and effect_scalar(ntype(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)))
+        supported = (effect_scalar(ntype(n)) and effect_scalar(ntype(int(nodes[n].a))) or is_fn_type(ntype(n)) and effect_bare(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)))
     if not supported: effect_opaque(f, n)
     # Hidden calls cannot be trusted by annotation or pathname. They remain
     # explicit dependencies for witnesses and legacy isolation even when this
@@ -348,7 +821,7 @@ effect_propagate = (f: int) -> bool:
         events = effect_summaries[g].events
         loop event in events:
             e = effect_edge_event(f, edge, event)
-            if e.atom.kind != .opaque and e.atom.place.root == .local: continue
+            if (e.atom.kind == .read or e.atom.kind == .write) and e.atom.place.declaration != 0 and e.atom.place.root == .local: continue
             if effect_add(f, e): changed = true
     changed
 
@@ -362,14 +835,15 @@ effect_visit = (f: int):
         effect_opaque(f, d)
         effect_isolation_block(f, .unavailable, d)
     else:
-        if fns[f].has_env or fns[f].caps.len() != 0:
+        if fns[f].caps.len() != 0 or fns[f].kind == FK_PARTIAL:
             effect_opaque(f, int(fns[f].body))
             effect_isolation_block(f, .capture, int(fns[f].body))
         if fns[f].cabi: effect_opaque(f, d)
         if not effect_scalar(int(fns[f].ret)) and int(fns[f].ret) != T_VOID: effect_opaque(f, d)
         loop i in [0..fns[f].params.len()):
             l = fns[f].params[i]
-            if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_scalar(int(locals[l].type)): effect_opaque(f, d)
+            t = representation_type(int(locals[l].type))
+            if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_scalar(t) and not is_fn_type(t) and not (tkind(t) == .array and effect_scalar(telem(t))): effect_opaque(f, d)
         effect_scan_node(f, int(fns[f].body))
     loop edge in effect_summaries[f].edges:
         g = edge.callee
@@ -428,14 +902,18 @@ effect_witness = (f: int, event0: EffectEvent) -> str:
 
 effects_finalize = ():
     if not effects_active and effect_policy.prohibitions == 0: return
-    effect_limit = fns.len()
-    effect_summaries = fill(EffectSummary(), effect_limit)
-    effect_seen = fill(0, nodes.len())
+    effect_final = true
+    effect_graph_reset()
+    loop obligation in effect_obligations:
+        actual = effect_source_row(obligation.source)
+        if not effect_rows_fit(actual, obligation.bound):
+            fatal(nodes[obligation.source].pos, "cannot prove callable effect contract: a reaching source exceeds the inferred row")
     loop f in [1..effect_limit):
         d = int(fns[f].decl)
         policy_root = effect_policy.prohibitions != 0 and f == main_fn
         if d == 0 or (nodes[d].sval == 0 and not policy_root): continue
-        contract = if fns[f].kind == FK_LAMBDA: callable_contract(int(fns[f].fntype)) else: int(decl_infos[decl_info(d)].sig.contract)
+        if fns[f].kind == FK_LAMBDA and has_flag(d, NF_GENERIC) and fns[f].body == 0 and not fns[f].has_env: continue
+        contract = if fns[f].kind == FK_LAMBDA and not has_flag(d, NF_GENERIC): callable_contract(int(fns[f].fntype)) else: effect_subst(int(decl_infos[decl_info(d)].sig.contract), fns[f].targs)
         if effect_summaries[f].index == 0: effect_visit(f)
         loop event in effect_summaries[f].events:
             atom = event.atom
@@ -455,6 +933,7 @@ effects_finalize = ():
 # Facts request only summaries of calls they actually analyze. Ordinary code
 # with no refinement consumers pays neither an arena allocation nor a walk.
 effects_demand = (f: int) -> bool:
+    effect_final = true
     if effect_limit == 0:
         effect_limit = fns.len()
         effect_summaries = fill(EffectSummary(), effect_limit)

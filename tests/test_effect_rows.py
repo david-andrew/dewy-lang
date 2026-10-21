@@ -33,7 +33,7 @@ def test_effect_rows_accept(compiler, tmp_path, mode, name, output):
 @pytest.mark.core_quick
 @pytest.mark.parametrize('mode', ['check', 'default', 'release'])
 @pytest.mark.parametrize('name', ['swapped', 'sibling', 'parent', 'recursive', 'alias_bad',
-                                  'unreachable', 'cost', 'default', 'alias_edge', 'recursive_swapped', 'callable_row', 'boxed', 'lambda', 'callable_recover', 'callable_indirect', 'callable_field'])
+                                  'unreachable', 'cost', 'default', 'alias_edge', 'recursive_swapped', 'callable_row', 'boxed'])
 def test_effect_rows_reject(compiler, tmp_path, mode, name):
     result = compile_source(compiler, FIXTURES / f'{name}.dewy', tmp_path, mode)
     assert result.returncode != 0
@@ -93,3 +93,14 @@ def test_effect_rows_check_without_lowering(compiler, tmp_path):
     result = compile_source(compiler, FIXTURES / 'unreachable.dewy', tmp_path, 'check', env)
     assert result.returncode != 0
     assert 'effect contract violation' in result.stderr, result.stderr
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('mode', ['check', 'default', 'release'])
+@pytest.mark.parametrize('name', ['callable_indirect', 'callable_field', 'lambda', 'callable_recover'])
+def test_contracted_indirect_calls(compiler, tmp_path, mode, name):
+    result = compile_source(compiler, FIXTURES / f'{name}.dewy', tmp_path, mode)
+    assert result.returncode == 0, result.stdout + result.stderr
+    if mode != 'check':
+        ran = subprocess.run([tmp_path / 'program'], timeout=10)
+        assert ran.returncode == (0 if name in ('lambda', 'callable_recover') else 2)

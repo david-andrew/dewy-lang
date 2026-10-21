@@ -424,6 +424,7 @@ coerce = (n: int, target: int) -> int:
         charlike_to_int(n)
         nodes[n].type = i32(target)
         return n
+    if effects_active and callable_contract(target) != 0: nodes[n].type = i32(effect_infer_callable(n, target))
     from = prune(ntype(n))
     to = prune(target)
     if from == 0: ice("unchecked expression at {pos_str(nodes[n].pos)}")
@@ -1139,6 +1140,10 @@ save_call_order = (n: int, given: int[], final: int[]):
 match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
     pat = prune(pat0)
     a = prune(a0)
+    if types[pat].kind == .callable:
+        if not effect_match(callable_contract(a), callable_contract(pat), binds): return -1
+        return match_type(callable_base(pat), callable_base(a), binds, depth)
+    if types[a].kind == .callable: a = callable_base(a)
     if refine_active:
         pat = representation_type(pat)
         a = representation_type(a)
@@ -1262,7 +1267,7 @@ subst_partial = (pat0: int, binds: mut int[]) -> int:
         if binds[id] == 0: binds[id] = mk_var()
         return binds[id]
     if k == .array: return mk_array(subst_partial(int(types[pat].elem), binds))
-    if k == .callable: return mk_callable_contract(subst_partial(int(types[pat].elem), binds), int(types[pat].st))
+    if k == .callable: return mk_callable_contract(subst_partial(int(types[pat].elem), binds), effect_subst(int(types[pat].st), binds))
     if k == .refined: return mk_refined(subst_partial(int(types[pat].elem), binds), ref_subst(int(types[pat].st), binds))
     if k == .quantity: return mk_quantity(subst_partial(int(types[pat].elem), binds), int(types[pat].st))
     if k == .fixed: return mk_fixed(subst_partial(int(types[pat].elem), binds), fixed_len(pat))
@@ -1365,6 +1370,7 @@ branch_arg_cost = (a: int, pat: int, binds: mut int[], hidden: int[] = []) -> in
     0
 
 arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
+    if effects_active and nodes[a].type != 0 and callable_contract(pat) != 0: nodes[a].type = i32(effect_infer_callable(a, pat))
     p = representation_type(pat)
     pk = types[p].kind
     target = p
@@ -1400,7 +1406,7 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
             return -1
         if k == .hole: return 0
         if k == .ident or k == .field or k == .typeapply:
-            if pk == .fn_: return 0
+            if pk == .fn_ or pk == .callable: return 0
             if pk == .cfn: return 0             # (a @cabi function for C: checked when given)
             if pk == .param: return 3        # a function passed to a generic parameter
             return -1
@@ -1408,6 +1414,7 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
             if pk == .param:
                 if nkids(a) > 0 and nodes[kid(a, 0)].a != 0: return 3
                 return -1
+            if pk == .callable: p = callable_base(p); pk = types[p].kind
             if pk != .fn_ or int(types[p].nargs) != nkids(a): return -1
             if has_flag(a, NF_GENERIC): return 0
             # (a parameter the lambda gives a type must have that type)
@@ -2178,12 +2185,19 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             if match_type(int(cd.sig.ret), expected, rb, 0) >= 0:
                 cd.binds = rb
                 pt = subst_partial(cd.sig.params[i], cd.binds)
+        # Shared E is a join over callbacks, not a bound frozen by the first
+        # argument. Keep its rigid binder in the checking hint until matching.
+        row = callable_contract(cd.sig.params[i])
+        if row != 0 and effect_contracts[row].variables.len() != 0: pt = mk_callable_contract(callable_base(pt), row)
         check_expr(a, pt)
         add_flag(a, NF_CHECKED)
-        match_type(cd.sig.params[i], ntype(a), cd.binds, 0)
+        matched = match_type(cd.sig.params[i], ntype(a), cd.binds, 0)
+        if matched < 0 and callable_contract(cd.sig.params[i]) != 0: fatal(nodes[a].pos, "cannot prove callable effect contract; callback-place permissions cannot flow into E")
     if not partial and expected != 0 and cd.sig.ret != 0:
         rb = cd.binds
         if match_type(int(cd.sig.ret), expected, rb, 0) >= 0: cd.binds = rb
+    loop i in [0..targs_here.len()):
+        if not type_eq(cd.binds[i], targs_here[i]): fatal(nodes[n].pos, "callback effects exceed the explicit generic argument")
     # (show = false, an untyped parameter, left out: its type is its default's)
     loop i in [0..np):
         if cd.args[i] != 0: continue
@@ -2309,7 +2323,7 @@ value_call = (n: int, callee: int, args: int[], expected: int = 0) -> int:
     if types[ft].kind == .polyfn:
         d = poly_families[int(types[ft].st)].decl
         return resolve_fn_call(n, intern("lambda"), [d], args, expected, callee)
-    if types[ft].kind == .callable: fatal(nodes[n].pos, "cannot prove indirect callable effects in the direct-place pilot")
+    ft = callable_base(ft)
     if types[ft].kind != .fn_ and types[ft].kind != .cfn: fatal(nodes[n].pos, "cannot call a value of type {dt(ft)}")
     na = int(types[ft].nargs)
     if args.len() != na: fatal(nodes[n].pos, "function value expects {na} argument(s), got {args.len()}")
@@ -4353,7 +4367,7 @@ check_call = (n: int, expected: int) -> int:
                 s = module_lookup(mod, name)
         if s != 0 and syms[s].kind == .fns:
             targs: int[]
-            loop arg in kids(callee): targs.push(resolve_type(arg))
+            loop arg in kids(callee): targs.push(effect_generic_argument(arg))
             saved = call_targs
             call_targs = targs
             nodes[n].a = i32(base)
@@ -4365,7 +4379,7 @@ check_call = (n: int, expected: int) -> int:
             check_expr(base, 0)
             if tkind(ntype(base)) == .polyfn:
                 explicit: int[]
-                loop arg in kids(callee): explicit.push(resolve_type(arg))
+                loop arg in kids(callee): explicit.push(effect_generic_argument(arg))
                 saved = call_targs
                 call_targs = explicit
                 r = value_call(n, base, args, expected)
@@ -6174,9 +6188,17 @@ check_lambda = (lam: int, expected: int) -> int:
     t = mk_fn(zp, int(fns[f].ret), mm, if et != 0: int(types[et].st) else: decl_fn_labels(lam))
     if nodes[lam].sval != 0:
         t = mk_callable_contract(t, effect_decl_contract(lam, zp))
-    if callable_contract(expected) != 0 and not effect_contract_fits(t, expected): fatal(nodes[lam].pos, "cannot prove callable effect contract")
+    nodes[lam].type = i32(t)
+    if effects_active: t = effect_infer_callable(lam, expected)
+    if callable_contract(expected) != 0 and not has_var(expected) and not effect_contract_fits(t, expected): fatal(nodes[lam].pos, "cannot prove callable effect contract")
     nodes[lam].type = i32(t)
     fns[f].fntype = i32(t)
+    if nodes[lam].sval != 0:
+        # The expression can be wrapped/rewritten by later conversions. Keep
+        # the declaration immutable so final verification cannot lose its row.
+        declaration = nodes.len()
+        nodes.push(nodes[lam])
+        fns[f].decl = i32(declaration)
     t
 
 fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, closure: int = 0) -> int:
@@ -6226,6 +6248,8 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
                 if match_type(int(sig.ret), int(types[et].elem), rb, 0) >= 0: binds = rb
             loop b in binds:
                 if b == 0: ok = false
+            loop i in [0..explicit_types.len()):
+                if not type_eq(binds[i], explicit_types[i]): ok = false
             if not ok: continue
             f = get_fn_inst(d, binds, nodes[n].pos)
             break
@@ -6263,8 +6287,10 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
         if not fns[f].cabi: fatal(nodes[n].pos, "'{name_of(int(nodes[n].name))}' must be marked @cabi to be used as a C function pointer")
         t = mk_cfn(fns[f].ptypes, int(fns[f].ret))
         nodes[n].aux = 1
-    if nodes[d].sval != 0: t = mk_callable_contract(t, int(fn_sig(d).contract))
-    if callable_contract(expected) != 0 and not effect_contract_fits(t, expected): fatal(nodes[n].pos, "cannot prove callable effect contract")
+    if nodes[d].sval != 0: t = mk_callable_contract(t, effect_subst(int(fn_sig(d).contract), fns[f].targs))
+    nodes[n].type = i32(t)
+    if effects_active: t = effect_infer_callable(n, expected)
+    if callable_contract(expected) != 0 and not has_var(expected) and not effect_contract_fits(t, expected): fatal(nodes[n].pos, "cannot prove callable effect contract")
     nodes[n].type = i32(t)
     t
 
@@ -6986,7 +7012,7 @@ check_expr = (n: int, expected: int) -> int:
             return bare_call(n, expected)
         if s != 0 and syms[s].kind == .fns:
             targs: int[]
-            loop arg in kids(n): targs.push(resolve_type(arg))
+            loop arg in kids(n): targs.push(effect_generic_argument(arg))
             nodes[n].name = i32(name)
             t = fn_value(n, expected, targs, mod)
             if ide_on: ide_fn_ref(nodes[base].pos, name, int(nodes[n].sym))
@@ -6996,7 +7022,7 @@ check_expr = (n: int, expected: int) -> int:
             check_expr(base, 0)
             if tkind(ntype(base)) != .polyfn: fatal(nodes[n].pos, "type arguments require a generic callable")
             targs: int[]
-            loop arg in kids(n): targs.push(resolve_type(arg))
+            loop arg in kids(n): targs.push(effect_generic_argument(arg))
             t = fn_value(n, expected, targs, closure = base)
         else: t = mk_typeval(resolve_type(int(nodes[n].c)))
     else if k == .index:
@@ -7620,6 +7646,7 @@ check_expr = (n: int, expected: int) -> int:
     else: fatal(nodes[n].pos, "invalid expression")
     if refine_active and types[t].kind == .refined: t = int(types[t].elem)
     nodes[n].type = i32(t)
+    if effects_active: t = effect_infer_callable(n, expected); nodes[n].type = i32(t)
     add_flag(n, NF_CHECKED)
     last_checked = n
     t
@@ -8549,7 +8576,10 @@ callable_fits = (from0: int, to0: int) -> bool:
     loop i in [0..int(types[from].nargs)):
         if types[from].mutmask & i32(1 << i) != 0:
             if not type_eq(targ(from, i), targ(to, i)): return false
+        else if is_fn_type(targ(to, i)) and is_fn_type(targ(from, i)):
+            if not callable_fits(targ(to, i), targ(from, i)): return false
         else if not refine_implies(targ(to, i), targ(from, i)): return false
+    if is_fn_type(int(types[from].elem)) and is_fn_type(int(types[to].elem)): return callable_fits(int(types[from].elem), int(types[to].elem))
     prune(int(types[from].elem)) == T_NEVER or refine_implies(int(types[from].elem), int(types[to].elem))
 
 is_nd = (t0: int) -> bool:

@@ -16,6 +16,7 @@ use 'ast.jo'
 use 'types.jo'
 use 'check.jo'
 use 'expr.jo'
+use 'effects.jo'
 use 'ir.jo'
 use 'glsl.jo'
 use 'spirv.jo'
@@ -1745,7 +1746,7 @@ gen_direct_call = (f: int, args: int[], order: int[] = []) -> Val:
     finish_call(ret, rv, rslot)
 
 gen_closure_call = (callee: int, args: int[], order: int[] = []) -> Val:
-    ft = prune(ntype(callee))
+    ft = callable_base(ntype(callee))
     ret = int(types[ft].elem)
     source = callee
     selected = nodes[callee].kind == .fnref and nodes[callee].aux == 2
@@ -1804,7 +1805,7 @@ gen_closure_call = (callee: int, args: int[], order: int[] = []) -> Val:
     finish_call(ret, rv, rslot)
 
 gen_cfn_call = (callee: int, args: int[]) -> Val:
-    ft = prune(ntype(callee))
+    ft = callable_base(ntype(callee))
     ret = int(types[ft].elem)
     fp = gen_expr(callee).v
     argv: int[]
@@ -6361,7 +6362,7 @@ helper_drop = (t: int, copy: bool):
         if copy: ice("copy helper requested for move-only owner")
         e_call(lf_of_inst(int(structs[int(types[t].st)].drop_fn)), [a], -1)
         return e_ret(-1)
-    if k == .fn_ or k == .polyfn:
+    if k == .fn_ or k == .polyfn or k == .callable:
         env = e_load(VI, a, ptr_size, ptr_size)
         if copy:
             iff(e_bin(.ne, VI, env, e_iconst(0)))
@@ -6743,7 +6744,7 @@ eq_member = (t0: int, a: int, b: int, fail: int):
     if c == VC_FLT:
         brif_to(e_bin(.fne, vt_of(t), load_val(t, a, 0), load_val(t, b, 0)), fail)
         return
-    if k == .fn_ or k == .polyfn:
+    if k == .fn_ or k == .polyfn or k == .callable:
         brif_to(e_bin(.ne, VI, e_load(VI, a, 0, ptr_size), e_load(VI, b, 0, ptr_size)), fail)
         return
     r = e_call(lf_helper(.eq, t, 0), [a, b], VI)
@@ -6853,7 +6854,7 @@ hash_member = (h: int, t0: int, a: int):
     else if t == T_MATH_INT: x = e_call(rt("__mi_hash"), [load_val(t, a, 0)], VI)
     else if c == VC_INT and k != .array: x = load_val(t, a, 0)
     else if c == VC_FLT: x = hash_float(load_val(t, a, 0), vt_of(t))
-    else if k == .fn_ or k == .polyfn: x = e_load(VI, a, 0, ptr_size)
+    else if k == .fn_ or k == .polyfn or k == .callable: x = e_load(VI, a, 0, ptr_size)
     else if (c == VC_AGG or k == .array) and helper_hash_differs(t): x = e_call(lf_helper(.hash, t, 0), [a], VI)
     else: return
     hash_mix(h, x)

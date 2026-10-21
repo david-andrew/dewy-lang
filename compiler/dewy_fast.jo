@@ -35,8 +35,10 @@ dn_is_id = 0
 dn_isnt_id = 0
 dn_in_id = 0
 dn_notin_id = 0
+dn_no_id = 0
 
 dn_init_words = ():
+    dn_no_id = intern("no")
     dn_true_id = intern("true")
     dn_false_id = intern("false")
     dn_is_id = intern("is")
@@ -708,6 +710,10 @@ dn_directive = (token: DewyLexeme, form: int) -> int:
 dn_atom = () -> int:
     token = dn_tokens[dn_at]
     symbol = token.symbol
+    # Effect negation is contextual; ordinary bindings named `no` remain valid.
+    if token.kind == .identifier and (token.name == i32(dn_no_id) or token.name == 0 and dn_payload(token) == "no") and dn_at + 1 < dn_tokens.len():
+        following = dn_payload(dn_tokens[dn_at + 1])
+        if following == "reads" or following == "mutates" or following == "allocates": symbol = .kw_not
     if token.kind == .eof: return dn_error(token.start, "expected an expression")
     if token.kind == .metatag:
         form = dn_directive_form(dn_payload(token))

@@ -657,13 +657,24 @@ dw_effect_atom = (id0: int, entries: mut EffectSyntax[], empty: mut bool):
         empty = true
         return
     if empty: fatal(dewy_syntax[id].pos, "no_effects cannot be combined with another effect permission")
+    negative = dw_op(id) == .kw_not
+    if negative: id = dw_unwrap(dw_child(id, 1))
+    if negative and (dw_name(id) == "reads" or dw_name(id) == "mutates"):
+        entries.push(EffectSyntax(if dw_name(id) == "reads": EffectKind.read else: EffectKind.write, [], dewy_syntax[id].pos, true))
+        return
+    if dw_name(id) == "allocates":
+        entries.push(EffectSyntax(.alloc, [], dewy_syntax[id].pos, negative))
+        return
+    if dw_name(id) != "":
+        entries.push(EffectSyntax(.opaque, [intern(dw_name(id))], dewy_syntax[id].pos, negative, true))
+        return
     if dw_op(id) != .type_apply: fatal(dewy_syntax[id].pos, "effect pilot requires reads<place>, mutates<place>, or no_effects")
     name = dw_name(dw_child(id, 1))
     if name != "reads" and name != "mutates": fatal(dewy_syntax[id].pos, "effect pilot requires reads<place>, mutates<place>, or no_effects")
     args = dw_child(id, 2)
     if dw_nchildren(args) != 1: fatal(dewy_syntax[id].pos, "effect permission needs exactly one place")
     kind = if name == "reads": EffectKind.read else: EffectKind.write
-    entries.push(EffectSyntax(kind, dw_effect_path(dw_child(args, 0)), dewy_syntax[id].pos))
+    entries.push(EffectSyntax(kind, dw_effect_path(dw_child(args, 0)), dewy_syntax[id].pos, negative))
 
 dw_effect_result = (id: int, entries: mut EffectSyntax[], empty: mut bool) -> int:
     if dw_op(id) != .amp: return id
@@ -706,6 +717,16 @@ dw_type = (id: int) -> int:
     pos = dewy_syntax[id].pos
     if dewy_syntax[id].kind == .metatag: return dw_metatag_fail(id)
     name = dw_name(id)
+    if name == "no_effects" or name == "allocates" or dw_op(id) == .kw_not or dw_op(id) == .type_apply and (dw_name(dw_child(id, 1)) == "reads" or dw_name(dw_child(id, 1)) == "mutates"):
+        entries: EffectSyntax[]
+        empty = false
+        dw_effect_atom(id, entries, empty)
+        effect_syntax.push(entries)
+        n = mk(.tname, pos)
+        nodes[n].aux = -8
+        nodes[n].sval = i32(effect_syntax.len() - 1)
+        effects_active = true
+        return n
     if name != "":
         if name == "uint": return dw_fail(id, "unbounded uint is not yet supported; use an explicit fixed width")
         name = dw_type_name(name)
@@ -846,12 +867,16 @@ dw_type_params = (id: int) -> int[]:
     out: int[]
     seen: str[]
     loop child in dw_children(id):
-        name = dw_name(child)
+        binder = child
+        row = dw_op(child) == .colon and dw_name(dw_child(child, 2)) == "Effect"
+        if row: binder = dw_child(child, 1)
+        name = dw_name(binder)
         if name == "" or name == "of": return [dw_fail(child, "constrained type parameters; use plain type parameter names")]
         if seen.contains(name): fatal(dewy_syntax[child].pos, "duplicate type parameter '{name}'")
         seen.push(name)
         n = mk(.ident, dewy_syntax[child].pos)
-        nodes[n].name = dw_name_id(child)
+        nodes[n].name = dw_name_id(binder)
+        if row: nodes[n].aux = 1
         out.push(n)
     if out.len() == 0: return [dw_fail(id, "an empty type parameter declaration")]
     out
@@ -1570,6 +1595,7 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         if (dw_op(initial) == .index or dw_op(initial) == .call) and dewy_syntax[dw_child(initial, 1)].text == "<>:":
             type_params = dw_type_params(dw_child(initial, 1))
             initial = dw_child(initial, 2)
+        if type_params.len() > 0 and dewy_syntax[initial].text == "():" and dw_nchildren(initial) == 1: initial = dw_child(initial, 0)
         if dewy_syntax[initial].text != "[]:":
             n = mk(.typealias, dewy_syntax[id].pos)
             nodes[n].name = i32(intern(name))

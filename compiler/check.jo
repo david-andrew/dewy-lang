@@ -1066,6 +1066,7 @@ resolve_type = (tn: int) -> int:
     if ide_on and (k == .tarray or k == .tmap) and nodes[tn].pos > 0 and files[pos_file(nodes[tn].pos)].is_dewy:
         ide_ref(nodes[tn].pos, intern(if k == .tarray: "array" else: "dict"), IK_TYPE, 0, 0, 0)
     if k == .tname:
+        if nodes[tn].aux == -8: fatal(nodes[tn].pos, "Effect row is not a value type")
         nm = int(nodes[tn].name)
         s = 0
         if nodes[tn].sval != 0:
@@ -1098,9 +1099,13 @@ resolve_type = (tn: int) -> int:
         if ide_on: ide_sym_ref(tn, s)
         if sk == .alias_:
             targs: int[]
-            loop i in [0..nkids(tn)): targs.push(resolve_type(kid(tn, i)))
+            d = int(syms[s].ref)
+            loop i in [0..nkids(tn)):
+                if i < nkids2(d) and nodes[kid2(d, i)].aux == 1: targs.push(effect_argument(kid(tn, i)))
+                else: targs.push(resolve_type(kid(tn, i)))
             return nominal_family(resolve_alias(int(syms[s].ref), targs, nodes[tn].pos))
         if sk == .type_:
+            if tkind(int(syms[s].ref)) == .effect: fatal(nodes[tn].pos, "Effect row is not a value type")
             if nodes[tn].nlist > 0:
                 if fixed_size_arg(tn): return mk_fixed_checked(int(syms[s].ref), fixed_size(kid(tn, 0)), nodes[tn].pos)
                 fatal(nodes[tn].pos, "type '{name_of(nm)}' takes no type arguments")
@@ -1275,7 +1280,8 @@ subst = (t0: int, targs: int[]) -> int:
         if id < targs.len() and targs[id] != 0: return targs[id]
         return t
     if k == .var: return t
-    if k == .callable: return mk_callable_contract(subst(int(types[t].elem), targs), int(types[t].st))
+    if k == .effect: return effect_type(effect_subst(int(types[t].st), targs))
+    if k == .callable: return mk_callable_contract(subst(int(types[t].elem), targs), effect_subst(int(types[t].st), targs))
     if k == .refined: return mk_refined(subst(int(types[t].elem), targs), ref_subst(int(types[t].st), targs))
     if k == .quantity: return mk_quantity(subst(int(types[t].elem), targs), int(types[t].st))
     if k == .array: return mk_array(subst(int(types[t].elem), targs))
@@ -1297,6 +1303,7 @@ subst = (t0: int, targs: int[]) -> int:
 
 push_type_params = (decl: int, targs: int[]):
     loop i in [0..nkids2(decl)):
+        if i < targs.len() and (nodes[kid2(decl, i)].aux == 1) != (tkind(targs[i]) == .effect): fatal(nodes[kid2(decl, i)].pos, "generic argument kind mismatch: expected Effect or value type")
         if i < targs.len(): push_scope_sym(int(nodes[kid2(decl, i)].name), new_sym(int(nodes[kid2(decl, i)].name), .type_, targs[i], 0))
 
 check_struct_fields = (si: int):
@@ -1409,7 +1416,9 @@ fn_sig = (decl: int) -> FnSig:
     ntp = nkids2(decl)
     loop i in [0..ntp):
         nm = int(nodes[kid2(decl, i)].name)
-        push_scope_sym(nm, new_sym(nm, .type_, mk_param(i), 0))
+        pt = mk_param(i)
+        if nodes[kid2(decl, i)].aux == 1: pt = effect_type(effect_intern([], [], [pt]))
+        push_scope_sym(nm, new_sym(nm, .type_, pt, 0))
     old_formals = refine_formals
     old_self = refine_self
     refine_formals = []
@@ -1435,6 +1444,9 @@ fn_sig = (decl: int) -> FnSig:
         if has_flag(decl, NF_EXTERN):
             loop t in sig.params + [int(sig.ret)]:
                 if ref_storage_contract(t): fatal(nodes[decl].pos, "extern refinement contracts require a checked implementation")
+    if effects_active and has_flag(decl, NF_EXTERN):
+        seen: int[]
+        if effect_qualified_type(int(sig.ret), seen): fatal(nodes[decl].pos, "extern callable effect contracts require a checked implementation")
     if nodes[decl].sval != 0: sig.contract = i32(effect_decl_contract(decl, sig.params))
     scope_reset(mark)
     ctxs.pop()
@@ -3385,6 +3397,11 @@ check_vardecl = (s: int):
                 t = lit_default(int(nodes[s].b))
                 nodes[s].b = i32(coerce(int(nodes[s].b), t))
             if tkind(t) == .none_lit: fatal(nodes[s].pos, "cannot infer the type of '{nm}' from 'none'; add a type: {nm}: T? = none")
+    if effects_active and nodes[s].a == 0 and type_has_fn(t):
+        storage = effect_storage_type(t)
+        if storage != t:
+            wrap_conv(int(nodes[s].b), .none_, storage)
+            t = storage
     if t == 0: fatal(nodes[s].pos, "variable needs a type or a value")
     tk = tkind(t)
     if tk == .void_: fatal(nodes[s].pos, "cannot assign a value with no type (void) to '{nm}'{void_rec_hint(int(nodes[s].b))}")

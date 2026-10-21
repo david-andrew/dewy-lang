@@ -461,15 +461,35 @@ value parameters do not export place effects. Existing disjointness rules for
 mutable arguments still apply. Omitted rows are inferred when a checked contract
 needs them; an unannotated or external function is never assumed pure.
 
-This direct-place pilot certifies empty implementation costs only for supported
-wrapping fixed-width scalar operations, scalar frame places and their direct
-callees. Allocation, aggregates passed by value, formatting, division, unknown
-externs and other unclassified operations cannot satisfy a closed row.
-Declarations are checked even when no caller reaches them. Callable types retain
-declared rows; a conversion may forget a guarantee, but cannot recover it from an
-unconstrained handle. Calls through constrained handles currently reject
-conservatively. Row variables, exclusions, allocation permissions and the public
-strict profile are not implemented by this pilot.
+Callable types retain rows through variables, containers, results and checked
+conversions. Parameters are contravariant and results covariant. Omitted callback
+rows are inferred on demand; reassignment joins every possible source, including
+later assignments. Losing provenance or exceeding the bounded analysis keeps
+behavior unknown. Recovering a forgotten guarantee requires another checked conversion; an
+unconstrained callback parameter alone cannot establish one.
+
+Row parameters have kind `Effect`, separate from value types. Aliases can mix
+type and row binders and preserve them across imports:
+
+```dewy
+Action:type=<E:Effect>(<(x:int64):>int64 & E>)
+apply=<E:Effect>(f:Action<E> x:int64):>int64 & E=>f(x)
+```
+
+`E` carries only the nonlocal remainder. Callback-place permissions remain
+explicit: `mutates<x>` on a callback can become `mutates<y>` when invoked with
+`@y`, but cannot be inferred into `E`. Negative-only rows such as
+`no mutates<Filesystem>` remain open while excluding the named nominal resource.
+`allocates` is bare; `allocates<Resource>` is invalid.
+
+The implementation-cost inventory supports wrapping fixed-width scalar work,
+scalar frame places, bare handles, capture-free lambdas, read-only array parameter
+borrowing and scalar array iteration. Unknown environments and environment
+copies, dynamic storage operations, formatting, division and other unclassified
+operations remain conservative; an allocation permission alone does not certify
+them. Declarations and inferred callback conversions are verified after helper
+discovery, including unreachable checked declarations. Broader storage proofs and
+the public strict profile remain unimplemented.
 
 `int` is the mathematical integer type, distinct from `int64` in signatures,
 containers and generic arguments. Unannotated integer literals default to `int`.
