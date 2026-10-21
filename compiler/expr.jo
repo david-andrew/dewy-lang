@@ -848,7 +848,9 @@ map_elem_place = (n: int):
     nodes[f].name = i32(intern("vals"))
     check_expr(f, 0)
     f = last_checked
-    nodes[n] = Node(kind = .index, pos = pos, a = i32(f), b = i32(call), type = i32(vt), flags = i32(NF_CHECKED | NF_INBOUNDS))
+    # (a refined value reads as its base, as an array element does; stores into it are checked)
+    rt = if refine_active: representation_type(vt) else: vt
+    nodes[n] = Node(kind = .index, pos = pos, a = i32(f), b = i32(call), type = i32(rt), flags = i32(NF_CHECKED | NF_INBOUNDS))
 
 is_map_type = (t: int) -> bool: types[prune(t)].kind == .struct_ and structs[int(types[prune(t)].st)].name == "Map"
 
@@ -1152,6 +1154,9 @@ match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
         if not effect_match(callable_contract(a), callable_contract(pat), binds): return -1
         return match_type(callable_base(pat), callable_base(a), binds, depth)
     if types[a].kind == .callable: a = callable_base(a)
+    # (inside a container a type parameter takes the elements' refinement too: array<Pos> is
+    # array<T> with T a Pos, not an int64, so the instance stores and returns Pos values)
+    whole = a
     if refine_active:
         pat = representation_type(pat)
         a = representation_type(a)
@@ -1161,7 +1166,7 @@ match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
     if pk == .param:
         id = int(types[pat].id)
         if binds[id] == 0:
-            binds[id] = a
+            binds[id] = if depth > 0: whole else: a
             if depth == 0: return 3
             return 0
         if type_eq(binds[id], a): return 0

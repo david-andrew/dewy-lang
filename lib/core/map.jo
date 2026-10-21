@@ -327,9 +327,9 @@ __map_compact[K, V] = (m: mut Map[K, V]):
             m.vals[w] = m.vals[e]
             m.hashes[w] = m.hashes[e]
         w += 1
-    m.__keys.resize(w)
-    m.vals.resize(w)
-    m.hashes.resize(w)
+    m.__keys.truncate(w)
+    m.vals.truncate(w)
+    m.hashes.truncate(w)
     m.gone.clear()
     m.ngone = 0
     __map_rehash(m, m.slots.len())
