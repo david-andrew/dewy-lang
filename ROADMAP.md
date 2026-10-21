@@ -11,8 +11,8 @@ what landed. Keep this file short.
 |---|---|---|
 | Acceptance ladder, design surface | 82/82 (tiers 1–2: 63/63; tier 3: 19/19), 12 held open on decisions | all milestones |
 | Acceptance ladder, current dialect | 82/82 | stays green |
-| Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.24 G instructions (was 1.36 G on 10-20 morning) | ~0.40 G (250k root lines/s) |
-| Compiler self-build | 8.0 G instructions | seconds-scale edit loop |
+| Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.19 G instructions (was 1.36 G on 10-20 morning) | ~0.40 G (250k root lines/s) |
+| Compiler self-build | 9.35 G instructions (the compiler grew) | seconds-scale edit loop |
 | Game-tick kernel vs C -O2 (time) | 1.6× default and release (default was 6.3× before small-leaf inlining) | ~1× both |
 | Worst other kernels vs C (time, default) | params 1.75×, graph 1.7×, string_equal ~1.25×, recursive_tree 1.4× | ≤1.2× |
 | Quick / full suite | 38 s / 6.6 min (load average 14–24; remeasure when quiet) | ≤30 s / ≤5 min |
@@ -29,7 +29,7 @@ only.
 - Astra: ownership slice 2 part 2 (resource containers, recursive/optional owners,
   field moves, closure copyability, generic hooks); part 1 (hooks, inheritance,
   inline aggregates, cleanup) landed.
-- Opus: shared optimizer facts, measure-first pilot (compile throughput).
+- Opus: x64 live-interval stream, measure-first pilot (compile throughput).
 
 ## Next
 
@@ -42,7 +42,8 @@ only.
   optimization 248 M, x64 211 M, lowering 185 M, parse 85 M, lexer 49 M, prelude
   38 M (~/dev/tmp/coord/throughput-profile-2026-10-21.md). Structural projects,
   each estimated (not measured):
-  - shared optimizer operand/control/use facts: 40–60 M;
+  - shared optimizer walks landed (−33 M synthetic, −3% self-build); the rest
+    of the optimizer is sub-percent tweaks;
   - a finalized live-interval stream fed into x64 allocation: 35–50 M;
   - the lexer: 49 M against a 20 M target.
   These reach ~1.05 G; 0.40 G needs a bigger idea (per-line checking cost is
