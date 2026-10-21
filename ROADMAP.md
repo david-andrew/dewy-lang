@@ -26,7 +26,7 @@ GPT quota is limited: at most one Astra stream, at medium effort; Sol for review
 only.
 
 - Astra: effect rows slice 4 (allocation and implicit operations; ladder 65, 94).
-- Opus: reject Jo type names; dependent-array result crash; `__floor_div` leak.
+- Opus: small items below (printing, methods follow-ups).
 
 ## Next
 
@@ -63,6 +63,7 @@ only.
   10-20); the frontend work recovered the synthetic panel's share.
 - Small items:
   - the remaining Jo-shaped hints in diagnostics;
+  - printing an array of refined arrays fails (`__dewy_fmt` type mismatch);
   - methods follow-ups: members inherited across modules; static calls
     through a type value; `type of any` parents;
   - delete `restart/sloppy-frontend` and its publish-policy entry once the
