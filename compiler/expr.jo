@@ -2686,7 +2686,13 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
                 match_type(pat, ntype(a), binds, 0)
             scope_reset(mark)
             loop i in [0..ntp):
-                if binds[i] == 0: fatal(nodes[n].pos, "cannot infer type parameter '{name_of(int(nodes[kid2(decl, i)].name))}' of {name_of(int(nodes[decl].name))}")
+                if binds[i] == 0:
+                    sn = name_of(int(nodes[decl].name))
+                    more = ""
+                    if ntp > 1: more = " ..."
+                    how = ""
+                    if dewy_at(nodes[n].pos): how = " (nothing given says what it is: name it, as in `{sn}<int64{more}>[...]`, or annotate the variable)"
+                    fatal(nodes[n].pos, "cannot infer type parameter '{name_of(int(nodes[kid2(decl, i)].name))}' of {sn}{how}")
             t = get_struct_inst(decl, binds)
     si = int(types[prune(t)].st)
     check_struct_fields(si)
