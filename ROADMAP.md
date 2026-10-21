@@ -29,7 +29,7 @@ GPT quota is limited: at most one Astra stream, at medium effort; Sol for review
 only.
 
 - Astra: stack closure environments and devirtualization (runtime).
-- Opus: dogfooding sweep (12 everyday programs; fix what breaks).
+- Opus: idle.
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
 
@@ -130,6 +130,18 @@ only.
 22. A library image built and shipped with the toolchain (keyed by compiler and
     library hash, fresh fallback): hello 31 → ~5 ms, synthetic −3 to −13%. GOALS
     says a persistent cache is not how Dewy stays fast; is a shipped image OK?
+23. From the dogfooding sweep (12 everyday programs, friction log in
+    ~/dev/tmp/dogfood/friction.md):
+    - decimal literals default to rational, so float code needs annotations
+      everywhere: let later float writes settle a decimal-literal local's type,
+      as later pushes settle an empty container's type?
+    - `index_of` returns -1; return `int|none` like `find`?
+    - infer the common parent for literals of sibling minted types?
+    - `main` returning `int|error` (print the error, exit 1); see also 14;
+    - `loop [k @v] in dict` to update values in place;
+    - strings: `is_empty`, prefix/suffix removal, `chars()` as graphemes;
+      `any`/`all` without a predicate; `count(value)`;
+    - slicing past the end panics (Python clamps).
 15. Provisional file helpers: `copy_file`, `rename_file`, `make_dirs`,
     `walk_dir`, `glob`, `file_size`, `file_time`, `chmod`, `env`. Keep, rename
     or drop?
