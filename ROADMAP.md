@@ -31,7 +31,9 @@ only.
 
 - Astra: paused (quota). The Sol parallel review found 2 diagnostic-order bugs,
   both fixed (9109989b), with guards extended.
-- Opus: design coverage, round 3. The 10-21 audit: 613 features, 401 work, 47
+- Opus: design coverage, round 5 (broken items first). Coverage is ~68% working
+  (419/613) after round 4; synthetic compile has crept +0.9% across rounds 1–4.
+  Was: round 3. The 10-21 audit: 613 features, 401 work, 47
   broken, 134 missing; rounds 1–2 fixed ~35 (widths, singleton unions, guards,
   pipes, parameter kinds, `$breakpoint`).
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
@@ -190,7 +192,11 @@ only.
     - an unproven implicit narrowing is checked at run time (per GOALS), but
       the reference says it's a compile error;
     - explicit `uint64(x)` and `as` between widths keep the bits; the reference
-      says they should be proven casts.
+      says they should be proven casts;
+    - should a binding initialized from a match of string-literal arms widen to
+      `string` (as ints widen), or stay the literal union?
+    - the reference reserves `end`, but tests and ladder program 27 use it as a
+      name.
 26. From Goose: index-typed refinements ("below `a.length`" for a
     never-shrinking array) aimed at graph; and Euclidean `%` so `x % n` is
     always a valid index.
