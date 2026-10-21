@@ -97,7 +97,7 @@ const ROBE_SEG = 24
 const ROBE_RINGS = 7
 
 robe_indices=():>array<uint32>=>{
-    let idx: array<uint32>
+    let idx: array<uint32> = []
     loop r in [0..ROBE_RINGS - 1) {
         loop s in [0..ROBE_SEG) {
             let a = uint32(r * (ROBE_SEG + 1) + s)
@@ -115,7 +115,7 @@ robe_indices=():>array<uint32>=>{
 # a bell-shaped robe whose hem ripples and trails behind when moving (local space, +z forward)
 }
 robe_vertices=(time: float64 speed: float64):>array<Vertex3D>=>{
-    let vs: array<Vertex3D>
+    let vs: array<Vertex3D> = []
     loop r in [0..ROBE_RINGS) {
         let f = float64(r) / float64(ROBE_RINGS - 1) # 0 at the shoulders, 1 at the hem
         let y = 1.3 - f * 1.25
@@ -139,7 +139,7 @@ robe_vertices=(time: float64 speed: float64):>array<Vertex3D>=>{
 # a ribbon through the scarf's chain of points; brightness pulses along it like woven glyphs
 }
 ribbon_vertices=(pts: array<vec3> width: float32 time: float64):>array<Vertex3D>=>{
-    let vs: array<Vertex3D>
+    let vs: array<Vertex3D> = []
     loop k in [0..pts.length) {
         let prev = pts[max(k - 1 0)]
         let next = pts[min(k + 1 pts.length - 1)]
@@ -157,7 +157,7 @@ ribbon_vertices=(pts: array<vec3> width: float32 time: float64):>array<Vertex3D>
 # both windings: cloth is seen from both sides
 }
 ribbon_indices=(n: int64):>array<uint32>=>{
-    let idx: array<uint32>
+    let idx: array<uint32> = []
     loop k in [0..n - 1) {
         let a = uint32(k * 2)
         loop t in [a a + 1 a + 2 a + 1 a + 3 a + 2 a a + 2 a + 1 a + 1 a + 2 a + 3] {idx.push(t)}

@@ -27,7 +27,7 @@ def test_runtime_store(compiler, tmp_path, source, release):
 
 
 @pytest.mark.parametrize('source,diagnostic', [
-    ('R:type=[score:int64<i => i >? 0>]\nmain=()=>{let r:R;printl(r.score)}', 'refinement refuted'),
+    ('R:type=[score:int64<i => i >? 0>]\nmain=()=>{let r:R;printl(r.score)}', 'is read before it is given a value'),
     ('f=(@x:int64)=>{x=0}\nR:type=[score:int64<i => i >? 0>]\nmain=()=>{let r=R[1];f(@r.score)}', 'mutable refinement'),
     ('f=(@x:int64)=>{x=0}\nmain=()=>{let xs:array<int64<i => i >? 0>>=[1];f(@xs[0])}', 'mutable refinement'),
     ('main=()=>{let xs:array<int64<i => i >? 0>>=[0];printl(xs.length)}', 'refinement refuted'),

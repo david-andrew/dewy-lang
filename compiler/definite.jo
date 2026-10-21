@@ -1,0 +1,158 @@
+# Definite assignment: a Dewy `let x:T` written without a value must be given one on
+# every path before it is read; there is no zero value to read. Checking records such
+# declarations; only a function that has one is walked again, after its body is checked.
+use 'check.jo'
+use 'ast.jo'
+use 'util.jo'
+use 'expr.jo'
+use 'types.jo'
+use 'lex.jo'
+
+struct DaState:
+    unset: int[]          # locals declared without a value and not yet given one
+    done: bool = false    # this path has ended (return, break, continue, never)
+
+da_decls: int[]           # vardecl nodes (checked: sym is the local)
+da_breaks: DaState[][]    # per enclosing `loop true`: the states its breaks leave with
+da_names: {int: int} = {} # local -> its vardecl node
+
+da_record = (s: int):
+    da_decls.push(s)
+
+da_join = (x: DaState, y: DaState) -> DaState:
+    if x.done: return y
+    if y.done: return x
+    u = x.unset
+    loop l in y.unset:
+        if not u.contains(l): u.push(l)
+    DaState(unset = u)
+
+da_remove = (st: mut DaState, l: int):
+    i = st.unset.index_of(l)
+    if i >= 0: st.unset.remove(i)
+
+da_check_fn = (body: int, mark: int):
+    if da_decls.len() <= mark: return
+    loop i in [mark..da_decls.len()):
+        d = da_decls[i]
+        if nodes[d].sym > 0: da_names[int(nodes[d].sym)] = d
+    st = DaState()
+    da_breaks = []
+    st = da_walk(body, st)
+    da_decls.truncate(mark)
+
+# (a closure's captured name stands for the enclosing function's variable)
+da_root = (l0: int) -> int:
+    l = l0
+    loop int(locals[l].flags) & LF_CAPTURE != 0 and locals[l].outer > 0 and int(locals[l].outer) != l: l = int(locals[l].outer)
+    l
+
+da_read = (n: int, st: DaState):
+    if st.done or st.unset.len() == 0: return
+    l = da_root(int(nodes[n].sym))
+    if not st.unset.contains(l): return
+    nm = name_of(int(locals[l].name))
+    d = da_names.get(l) ?? 0
+    ty = if d != 0 and nodes[d].a != 0: dt(int(locals[l].type)) else: "T"
+    err_notes.push((locals[l].pos, "note: '{nm}' is declared here without a value"))
+    fatal(nodes[n].pos, "'{nm}' is read before it is given a value on every path: give it one where it is declared (`let {nm}:{ty} = ...`), or assign it on each path before this read")
+
+da_walk_all = (xs: int[], st0: DaState) -> DaState:
+    st = st0
+    loop x in xs: st = da_walk(x, st)
+    st
+
+da_walk = (n: int, st0: DaState) -> DaState:
+    if n <= 0: return st0
+    st = st0
+    k = nodes[n].kind
+    if k == .ident:
+        if nodes[n].aux == i32(int(SK.local)) and nodes[n].sym > 0: da_read(n, st)
+        return st
+    if k == .lambda:
+        # (a closure captures what it reads when it is made)
+        da_walk(int(nodes[n].b), st)
+        return st
+    if k == .fn_ or k == .defer_ or k == .typealias or k == .struct_ or k == .enum_: return st
+    if k == .block:
+        loop s in kids(n):
+            st = da_walk(s, st)
+            if stmt_terminates(s): st.done = true
+        return st
+    if k == .vardecl:
+        if nodes[n].nlist > 0: return da_walk(int(nodes[n].b), st)
+        st = da_walk(int(nodes[n].b), st)
+        if da_names.has(int(nodes[n].sym)) and da_names[int(nodes[n].sym)] == n and not st.done: st.unset.push(int(nodes[n].sym))
+        return st
+    if k == .assign:
+        lhs = int(nodes[n].a)
+        if nodes[n].op == i32(int(Tok.assign)) and nodes[lhs].kind == .ident and nodes[lhs].aux == i32(int(SK.local)):
+            st = da_walk(int(nodes[n].b), st)
+            da_remove(st, da_root(int(nodes[lhs].sym)))
+            return st
+        if nodes[n].op == i32(int(Tok.assign)) and nodes[lhs].kind == .tuple:
+            st = da_walk(int(nodes[n].b), st)
+            da_unpacked(lhs, st)
+            return st
+        st = da_walk(lhs, st)
+        return da_walk(int(nodes[n].b), st)
+    if k == .if_ or k == .iflet:
+        st = da_walk(int(nodes[n].a), st)
+        t = da_walk(int(nodes[n].b), st)
+        e = if nodes[n].c != 0: da_walk(int(nodes[n].c), st) else: st
+        return da_join(t, e)
+    if k == .and_ or k == .or_ or k == .coalesce:
+        st = da_walk(int(nodes[n].a), st)
+        da_walk(int(nodes[n].b), st)
+        return st
+    if k == .while_:
+        st = da_walk(int(nodes[n].a), st)
+        c = int(nodes[n].a)
+        forever = nodes[c].kind == .bool_lit and nodes[c].ival != 0
+        da_breaks.push([])
+        da_walk(int(nodes[n].b), st)
+        exits = da_breaks.pop()
+        if not forever: return st
+        out = DaState(done = true)
+        loop x in exits: out = da_join(out, x)
+        return out
+    if k == .for_:
+        st = da_walk(int(nodes[n].a), st)
+        da_breaks.push([])
+        da_walk(int(nodes[n].b), st)
+        da_breaks.pop()
+        return st
+    if k == .match_:
+        st = da_walk(int(nodes[n].a), st)
+        arms = kids(n)
+        if arms.len() == 0: return st
+        out = DaState(done = true)
+        loop arm in arms: out = da_join(out, da_walk(arm, st))
+        return out
+    if k == .return_ or k == .continue_:
+        st = da_walk(int(nodes[n].a), st)
+        st.done = true
+        return st
+    if k == .break_:
+        if da_breaks.len() > 0 and nodes[n].name == 0:
+            exits = da_breaks.pop()
+            exits.push(st)
+            da_breaks.push(exits)
+        else if da_breaks.len() > 0:
+            # (a labelled break may leave an outer loop: no state is known to reach past it)
+            loop i in [0..da_breaks.len()):
+                exits = da_breaks[i]
+                exits.push(st)
+                da_breaks[i] = exits
+        st.done = true
+        return st
+    # (other fields hold local numbers or counts in some kinds: an unvisited read is
+    # only a check not made)
+    st = da_walk(int(nodes[n].a), st)
+    st = da_walk(int(nodes[n].b), st)
+    da_walk_all(kids(n), st)
+
+da_unpacked = (t: int, st: mut DaState):
+    loop x in kids(t):
+        if nodes[x].kind == .ident and nodes[x].aux == i32(int(SK.local)): da_remove(st, da_root(int(nodes[x].sym)))
+        else if nodes[x].kind == .tuple: da_unpacked(x, st)

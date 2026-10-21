@@ -14,9 +14,9 @@ let yaw:float64 = 0.0 # camera orbit angle around the traveler (0: looking north
 let heading = PI
 let grounded = true
 let energy:float64 = 1.0
-let scarf: array<vec3>
+let scarf: array<vec3> = []
 let scarf_len = 6
-let glyphs: array<Glyph>
+let glyphs: array<Glyph> = []
 let collected = 0
 let won = false
 let won_t:float64 = 0.0
@@ -37,7 +37,7 @@ let banner_mesh = mesh(ribbon_vertices(fill(vec3(0 0 0) 12) 0.25 0.0) ribbon_ind
 let light_pillar = cylinder_mesh(3.0 420.0 32)
 let beam_sh = make_shader(shader(@beam_vs @beam_fs))
 let footprint = cylinder_mesh(0.09 0.03 10)
-let steps: array<vec3>
+let steps: array<vec3> = []
 let step_side:float64 = 1.0
 let last_step = vec3(0 0 0)
 let moved:float64 = 0.0
@@ -45,8 +45,8 @@ let pillar = cylinder_mesh(0.7 7.0 10)
 let block = cube_mesh(1.0)
 let ring = sphere_mesh(0.45 20 10)
 let beacon = sphere_mesh(3.0 24 12)
-let ruins: array<Instance3D>
-let stones: array<Instance3D>
+let ruins: array<Instance3D> = []
+let stones: array<Instance3D> = []
 loop c in [0..9) {
     let cx = random(-120.0 120.0)
     let cz = random(-100.0 130.0)
@@ -80,14 +80,14 @@ loop k in [0..12) {
     let z = sin(a) * r * 0.8 + 10.0
     glyphs.push(Glyph(vec3(float32(x) float32(dune_height(x z) + 2.2) float32(z))))
 }
-let posts: array<vec3>
+let posts: array<vec3> = []
 loop k in [0..14) {
     let x = random(-110.0 110.0)
     let z = random(-90.0 140.0)
     posts.push(vec3(float32(x) float32(dune_height(x z) - 0.5) float32(z)))
 }
 let post_mesh = cylinder_mesh(0.08 3.4 8)
-let dust: array<vec3>
+let dust: array<vec3> = []
 loop k in [0..400) {dust.push(vec3(float32(random(-30.0 30.0)) float32(random(0.0 10.0)) float32(random(-30.0 30.0))))}
 
 let wind_snd = tone(220.0 4.0 Wave.noise 0.05 1.5 1.5)
@@ -234,7 +234,7 @@ draw=()=>{
     }
     loop i in 0.. and bp in posts {
         draw_mesh(post_mesh translation(bp) rgb(0.35 0.22 0.18))
-        let pts: array<vec3>
+        let pts: array<vec3> = []
         loop k in [0..12) {
             let f = float64(k) * 0.28
             let w = sin(t * 3.0 + float64(i) + float64(k) * 0.6) * 0.18 * float64(k) / 12.0
@@ -244,7 +244,7 @@ draw=()=>{
         draw_mesh(banner_mesh mat4() rgb(0.66 0.12 0.09) emissive = 0.15 cast_shadow = false)
     # footprints
     }
-    let prints: array<Instance3D>
+    let prints: array<Instance3D> = []
     loop sp_ in steps {
         prints.push(instance(translation(sp_ + vec3(0 float32(ground(float64(sp_.x) float64(sp_.z)) - float64(sp_.y) - 0.025) 0)) * scaling(vec3(1 1 1.5)) rgb(0.86 0.62 0.44)))
     }
@@ -266,7 +266,7 @@ draw=()=>{
     let bs = float32(0.32 + 0.3 * k / 4.0)
     draw_custom(()=>{beam_sh.draw(light_pillar BeamParams(scene_view_proj() bpos scene_camera() bs float32(elapsed())))} additive=true)
     # drifting sand
-    let motes: array<Instance3D>
+    let motes: array<Instance3D> = []
     loop i in 0.. and d in dust {
         let p = vec3(d.x + float32(mod(t * 3.0 + float64(i) 60.0)) - 30.0 d.y d.z) + vec3(pos.x float32(ground(float64(pos.x) float64(pos.z))) pos.z)
         motes.push(instance(translation(p) * scaling(vec3(0.05 0.05 0.05)) rgb(1 0.9 0.75)))

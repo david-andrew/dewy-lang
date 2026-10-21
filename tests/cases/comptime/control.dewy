@@ -6,9 +6,9 @@ fallible_loop=(n:int64):>int64|Bad=> {
 }
 read=(n:int64):>int64=>match fallible_loop(n) { value:int64=>value <Bad>=>-1 }
 compute=(n:int64):>array<int64>=> {
-    let zero:int64
-    let empty:array<int64>
-    let record:[x:int64 text:string]
+    let zero:int64=0
+    let empty:array<int64>=[]
+    let record:[x:int64 text:string]=[x=0 text=""]
     let total:int64=0
     $outer
     loop i in [0..n) {

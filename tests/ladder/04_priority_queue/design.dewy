@@ -1,7 +1,7 @@
 from heap import Heap
 Event:type=[name:string time:int64]
 run_events=(events:array<Event>):>array<string>=>{
-    let pending:Heap<Event>
+    let pending=Heap<Event>()
     loop event in events {
         pending.push(event event.time as float64)
     }
@@ -16,7 +16,7 @@ main=():>int64=>{
     let events=[Event["flush" 30] Event["read" 5] Event["write" 10]]
     let ordered=run_events(events)
     $runtime_assert (ordered =? ["read" "write" "flush"])
-    let pending:Heap<int64>
+    let pending=Heap<int64>()
     pending.push(8 8.0)
     pending.push(2 2.0)
     let saved=pending

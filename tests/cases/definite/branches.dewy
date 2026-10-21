@@ -1,0 +1,43 @@
+# quick
+f=(c:bool):>int64=>{
+    let x:int64
+    if c { x=1 } else { x=2 }
+    let y:int64
+    loop true { y=x+1 if y >? 0 {break} }
+    let z:int64
+    if c { z=5 } else { return 0 }
+    let w:int64
+    match c { <true> => {w=1} <false> => {w=2} }
+    let [a b]=[1 2]
+    let q:int64
+    [q b]=[3 4]
+    return x+y+z+w+q
+}
+main=()=>{
+    printl(f(true))
+    main2()
+}
+later=(c:bool):>string=>{
+    let text:string
+    let pick=(t:string)=>"[{t}]"
+    if c { text="yes" } else { text="no" }
+    let shown=()=>text
+    return pick(shown())
+}
+first_even=(xs:array<int64>):>int64=>{
+    let found:int64
+    loop i in [0..xs.length) {
+        if xs[i]%2 =? 0 {
+            found=xs[i]
+            return found
+        }
+    }
+    found=-1
+    return found
+}
+main2=()=>{
+    printl(later(true))
+    printl(later(false))
+    printl(first_even([3 5 8 9]))
+    printl(first_even([1]))
+}

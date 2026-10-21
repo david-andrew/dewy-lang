@@ -2,6 +2,7 @@ use 'lazy_bodies.jo'
 use 'frontend.jo'
 use 'pcheck.jo'
 use 'units.jo'
+use 'definite.jo'
 use 'errors.jo'
 use 'watch.jo'
 # Semantic analysis: modules, scopes, declarations, function instances, statements.
@@ -3803,8 +3804,11 @@ check_vardecl = (s: int):
         refine_self = int(nodes[s].name)
         t = resolve_type(int(nodes[s].a))
         refine_self = previous_self
+    no_value = nodes[s].b == 0
     if refine_active and types[prune(t)].kind == .refined and nodes[s].b == 0: nodes[s].b = i32(struct_default(t, nodes[s].pos))
     nm = name_of(int(nodes[s].name))
+    # (Dewy's `let x:T` without a value: given one on every path before it is read)
+    unset = no_value and t != 0 and dewy_at(nodes[s].pos) and len(nm) > 0 and nm[0] != '$' and nm[0] != '_' and not has_flag(s, NF_RDONLY)
     # (x: T, a struct with default field values: it starts with them, as T() would)
     if nodes[s].b == 0 and t != 0: nodes[s].b = i32(struct_default(t, nodes[s].pos))
     if nodes[s].b != 0:
@@ -3846,6 +3850,7 @@ check_vardecl = (s: int):
         if nodes[s].b != 0 and files[pos_file(nodes[s].pos)].is_dewy: const_view_declare(l, int(nodes[s].b))
     if has_flag(s, NF_LOOPCOUNT): locals[l].flags = i32(LF_DECL | LF_QUIET)
     nodes[s].sym = i32(l)
+    if unset: da_record(s)
     if ide_on and nodes[s].a == 0: ide_hint_local(s, l)
 
 # `return @a`: a place goes only to an `@` parameter or a local place binding;
@@ -4075,6 +4080,7 @@ __check_fn_body = (f: int):
     ctxs.push(FnCtx(i32(f), -1, 0, false, 0, fns[f].mod, i32(sc_names.len())))
     cx = ctxs.len() - 1
     mark = scope_mark()
+    da_mark = da_decls.len()
     if decl != 0 and nodes[decl].kind == .fn_:
         push_type_params(decl, fns[f].targs)
         loop i in [0..fns[f].ptypes.len()):
@@ -4176,6 +4182,7 @@ __check_fn_body = (f: int):
             if starts_with(ln, "$dewy_collection"): fatal(locals[l].pos, "this loop collects nothing: its body must end with the value to collect, as `[loop i in xs \{ i * 2 }]`")
             fatal(locals[l].pos, "cannot infer the type of '{ln}'; add a type annotation{empty_hint(ln, int(locals[l].type))}")
     copy_write_warnings(f)
+    if da_decls.len() > da_mark: da_check_fn(body, da_mark)
     fns[f].state = 2
     scope_reset(mark)
     ctxs.pop()

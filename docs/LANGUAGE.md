@@ -384,6 +384,13 @@ visible variable; otherwise it can introduce a new variable. Assigning to a
 visible const or module function that is not `$shadowable` is an error that
 suggests `let`.
 
+`let x:T` without a value declares a local that has none yet: every path must
+assign it before it is read, so `let x:int64` then `if c {x=1} else {x=2}` is
+fine, while reading it after only one arm, after a loop that might not run, or
+from a closure made before the assignment is an error. There is no zero value to
+read: write `let xs:array<int64> = []` or `let n:int64 = 0`. Paths that return,
+break or continue do not count. Module-level bindings are not checked yet.
+
 `const` initializes a binding once each time its declaration runs. Its initializer
 may call ordinary runtime code. Reading it again retains that value, including
 independent array/record snapshots; an unused initializer still runs. You cannot
