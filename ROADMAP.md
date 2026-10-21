@@ -13,7 +13,7 @@ what landed. Keep this file short.
 | Acceptance ladder, current dialect | 82/82 | stays green |
 | Fresh compile, 22k-line synthetic Dewy (+37k library lines) | 1.24 G instructions (was 1.36 G on 10-20 morning) | ~0.40 G (250k root lines/s) |
 | Compiler self-build | 8.0 G instructions | seconds-scale edit loop |
-| Game-tick kernel vs C -O2 (time) | 6.3× default, 1.6× release | ~1× both |
+| Game-tick kernel vs C -O2 (time) | 1.6× default and release (default was 6.3× before small-leaf inlining) | ~1× both |
 | Worst other kernels vs C (time, default) | shifted_arrays 2.7×, params 1.75×, graph 1.7× | ≤1.2× |
 | Quick / full suite | 38 s / 6.6 min (load average 14–24; remeasure when quiet) | ≤30 s / ≤5 min |
 
@@ -26,7 +26,7 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: default-build game kernel (6.3× C default vs 1.6× release).
+- Astra: default-build bounds checks (shifted_arrays 2.7× C default vs 0.48× release).
 - Opus: refinement slice 6 (witness diagnostics).
 
 ## Next
