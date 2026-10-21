@@ -1212,6 +1212,7 @@ dw_type_params = (id: int) -> int[]:
         if row: binder = dw_child(child, 1)
         name = dw_name(binder)
         if name == "" or name == "of": return [dw_fail(child, "constrained type parameters; use plain type parameter names")]
+        dw_word_operator_name(name, binder)
         if seen.contains(name): fatal(dewy_syntax[child].pos, "duplicate type parameter '{name}'")
         seen.push(name)
         n = mk(.ident, dewy_syntax[child].pos)
