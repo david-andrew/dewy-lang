@@ -116,6 +116,8 @@ find = (s: str, r: Regex, from: int = 0) -> Match?:
     if not __re_search(vm, s, max(from, 0)): return none
     __re_match(s, r.groups, vm.found)
 
+__dewy_find = (s: str, r: Regex, from: int = 0) -> Match?: find(s, r, from)
+
 # every match in s, from left to right, not overlapping
 find_all = (s: str, r: Regex) -> Match[]:
     out: Match[]

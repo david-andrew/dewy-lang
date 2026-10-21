@@ -2302,6 +2302,9 @@ and supported Latin, Greek and Cyrillic letters. For example, `upper("café")`
 is `"CAFÉ"`. Unmapped characters and malformed UTF-8 bytes are preserved;
 these byte-oriented transformations do not perform grapheme validation.
 `text.startswith(prefix)` and `text.endswith(suffix)` test the ends of a string.
+`text.find(part)` and `text.rfind(part)` give the grapheme position of the first or
+last occurrence, as indexing counts, or `none`; `text.find(part start)` searches from
+grapheme `start`.
 
 `regex(pattern)` prepares a reusable regular expression. `text.find(pattern)`
 returns `Match|none`; `find_all` returns nonoverlapping matches, `contains` tests

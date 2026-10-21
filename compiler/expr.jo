@@ -2154,10 +2154,10 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         if len(ot) > 0 and (starts_with(last_err, "too many") or starts_with(last_err, "missing")):
             an = "{args.len()} arguments"
             if args.len() == 1: an = "1 argument"
-            fatal(nodes[n].pos, "no version of '{name_of(name)}' takes {an}{ot}")
+            fatal(nodes[n].pos, "no version of '{shown_fn_name(name_of(name))}' takes {an}{ot}")
         what = "({ts})"
         if find(ts, "?") >= 0: what = "these arguments"
-        fatal(nodes[n].pos, "no version of '{name_of(name)}' takes {what}{sep}{last_err}{ot}")
+        fatal(nodes[n].pos, "no version of '{shown_fn_name(name_of(name))}' takes {what}{sep}{last_err}{ot}")
     cd = cands[best]
     decl = cd.decl
     # (draw() inside draw: as a way to draw it again, it calls itself without end)
@@ -4158,6 +4158,13 @@ cmp_error = (n: int, ta: int, tb: int):
     fatal(nodes[n].pos, "cannot compare {dt(ta)} with {dt(tb)}{why}")
 
 # "space" given where a Key goes: " (write `.space`)"
+# the member a Dewy program wrote, for a library function standing for it
+shown_fn_name = (name: str) -> str:
+    if name == "__dewy_find": return "find"
+    if name == "__dewy_rfind": return "rfind"
+    if name == "__dewy_insert": return "insert"
+    name
+
 # the operator a library function implements, for diagnostics ("" when it is no operator)
 dewy_operator_fn_text = (name: str) -> str:
     if name == "__floor_mod" or name == "__floor_mod_pow2": return "%"
@@ -4398,6 +4405,8 @@ dewy_member_name = (callee: int, rt: int, fname: int, args: int[]) -> int:
         if name == "insert": return intern("__dewy_insert")
         if name == "remove": fatal(pos, "an array removes by position with pop: `{recv}.pop(i)`")
     if k == .str_:
+        if name == "find": return intern("__dewy_find")
+        if name == "rfind": return intern("__dewy_rfind")
         if name == "startswith": return intern("starts_with")
         if name == "endswith": return intern("ends_with")
         if name == "starts_with" or name == "ends_with": fatal(pos, "write `{recv}.{replace(name, "_", "")}(...)`")
