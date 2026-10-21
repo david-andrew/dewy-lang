@@ -664,10 +664,27 @@ ref_gen_check = (n: int, self: int, args: int[], arg_types: int[]):
     if nodes[n].ival == 1: return
     t = zonk(int(nodes[n].aux2))
     unsigned = is_int(representation_type(t)) and not types[representation_type(t)].sign
-    message = "refinement failed"
-    if let width = ref_narrowing.get(n): message = "integer overflow: value does not fit {dt(width)}"
+    shown = wit_text(int(nodes[n].a))
+    if shown == "": shown = "the value"
     loop atom in ref_predicates[int(types[t].st)]:
         a = ref_ir_term(atom.a, self, args, int(types[t].elem), arg_types); b = ref_ir_term(atom.b, self, args, int(types[t].elem), arg_types)
+        # The failure names the violated requirement and the observed values,
+        # the constrained value first (contracts are stored as `a < b`).
+        left = wit_ref_text(atom.a, shown); right = wit_ref_text(atom.b, shown)
+        # (a bound from another parameter's entry value has no name here)
+        if left == "": left = "the bound"
+        if right == "": right = "the bound"
+        seen_left = if atom.a.kind == 1: "" else: left
+        seen_right = if atom.b.kind == 1: "" else: right
+        first = a; second = b
+        relation = atom.op
+        if atom.b.kind == 0 and atom.a.kind != 0 and (relation == .lt or relation == .le):
+            text = left; left = right; right = text
+            text = seen_left; seen_left = seen_right; seen_right = text
+            first = b; second = a
+            relation = if relation == .lt: Tok.gt else: Tok.ge
+        message = "refinement failed: `{left} {wit_op(relation)} {right}`"
+        if let width = ref_narrowing.get(n): message = "integer overflow: value does not fit {dt(width)}"
         op = if atom.op == .lt: Op.lts else if atom.op == .le: Op.les else: Op.ne
         if unsigned and atom.op != .ne:
             # Bias both operands for an exact unsigned comparison on every target.
@@ -675,7 +692,7 @@ ref_gen_check = (n: int, self: int, args: int[], arg_types: int[]):
             b = e_bin(.xor, VI, b, e_iconst(FACT_MIN))
         condition = e_bin(op, VI, a, b)
         iff(e_bin(.eq, VI, condition, e_iconst(0)))
-        e_call_nr(rt("__assert_fail"), [e_daddr(str_data(message)), e_daddr(loc_data(nodes[n].pos))], -1)
+        e_call_nr(rt("__requirement_fail"), [e_daddr(str_data(message)), e_daddr(loc_data(nodes[n].pos)), e_daddr(str_data(seen_left)), first, e_daddr(str_data(seen_right)), second], -1)
         endc()
 
 refine_gen = (n: int) -> Val:

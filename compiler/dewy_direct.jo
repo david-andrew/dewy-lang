@@ -16,6 +16,7 @@ use 'par.jo'
 use 'pcheck.jo'
 use 'main.jo'
 use 'lazy_bodies.jo'
+use 'directives.jo'
 
 # DEWY_FRONTEND=old selects the reference path; compare checks every migrated
 # value against a fresh legacy parse and projection before retaining its nodes.
@@ -96,6 +97,7 @@ dc_force_body = (d: int):
             lowered = desugar_loopx(i)
             nodes[i] = nodes[lowered]
         i -= 1
+    dir_apply_rows(node_start)
     prefix = kids(b)
     loop st in kids(body): prefix.push(st)
     set_list(body, prefix)

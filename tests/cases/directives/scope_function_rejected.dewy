@@ -1,0 +1,6 @@
+loose=(xs:array<int64> i:int64):>int64=>xs[i]
+strict=(xs:array<int64> i:int64):>int64=>{
+    $runtime_checks=false
+    return xs[i]
+}
+main=()=>printl(loose([1 2] 1) + strict([1 2] 0))

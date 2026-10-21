@@ -1,0 +1,12 @@
+# exit: 101
+# `$prototype` defers an unproven narrowing to a runtime check (with a
+# `prototype:` warning while compiling).
+$prototype
+small=(x:int64):>int8=>{
+    let y:int8=x
+    return y
+}
+main=(argv:array<string>)=>{
+    printl(small(100))
+    printl(small(argv.length * 300))
+}

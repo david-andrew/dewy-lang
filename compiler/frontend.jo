@@ -5,6 +5,8 @@ use 'ast.jo'
 use 'parse.jo'
 use 'dewy_parse.jo'
 use 'dewy_fast.jo'
+use 'directives.jo'
+use 'dewy_directives.jo'
 
 source_declarations = (file: int) -> int[]:
     if files[file].is_dewy:
@@ -17,6 +19,7 @@ source_declarations = (file: int) -> int[]:
                 lowered = desugar_loopx(i)
                 nodes[i] = nodes[lowered]
             i -= 1
+        dir_apply_rows(first)
         return decls
     parse_file(file)
 

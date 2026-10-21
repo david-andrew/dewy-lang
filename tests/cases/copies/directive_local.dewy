@@ -1,4 +1,16 @@
-main=()=>{
+# `$explicit_copies` in a function body holds for that function only.
+loose=(xs:array<int64>):>int64=>{
+    let ys=xs
+    ys[0]=1
+    return xs[0]+ys[0]
+}
+strict=(xs:array<int64>):>int64=>{
     $explicit_copies
-    return 0
+    let ys=xs
+    ys[0]=1
+    return xs[0]+ys[0]
+}
+main=()=>{
+    let xs:array<int64>=[5]
+    printl("{loose(xs)} {strict(xs)}")
 }

@@ -1,0 +1,9 @@
+# exit: 101
+# An unproven index under `$runtime_checks` is checked; a failure reports the
+# index and the length it was checked against.
+$runtime_checks
+at=(xs:array<int64> i:int64):>int64=>xs[i]
+main=()=>{
+    printl(at([1 2 3] 1))
+    printl(at([1 2 3] 5))
+}

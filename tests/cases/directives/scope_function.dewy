@@ -1,0 +1,13 @@
+# quick
+# A setting in a function body holds for that function only: `guarded` proves
+# its index, `loose` keeps a runtime check outside the strict function.
+guarded=(xs:array<int64> i:int64):>int64=>{
+    $runtime_checks=false
+    if i >=? 0 and i <? xs.length return xs[i]
+    return -1
+}
+loose=(xs:array<int64> i:int64):>int64=>xs[i]
+main=()=>{
+    let xs:array<int64>=[10 20 30]
+    printl("{guarded(xs 1)} {guarded(xs 7)} {loose(xs 2)}")
+}

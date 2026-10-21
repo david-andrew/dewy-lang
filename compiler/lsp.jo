@@ -502,6 +502,7 @@ struct Diag:
     off: int
     msg: str
     warning: bool
+    info: bool = false   # (a hint: a `$runtime_checks` obligation that is checked at run time)
 
 struct Hint:
     file: int
@@ -878,14 +879,14 @@ take_lines = (r: mut Result, lines_: str[]):
             r.hints.push(Hint(p.0, p.1, f[2]))
         else if k == "C" and f.len() >= 4:
             r.comps.push([f[1], f[2], f[3]])
-        else if (k == "E" or k == "W") and f.len() >= 3:
+        else if (k == "E" or k == "W" or k == "I") and f.len() >= 3:
             path = ""
             off = 0
             if f[1] != "-1":
                 p = remap(fmap, f[1])
                 if p.0 >= 0 and p.0 < r.paths.len(): path = r.paths[p.0]
                 off = p.1
-            r.diags.push(Diag(path, off, f[2], k == "W"))
+            r.diags.push(Diag(path, off, f[2], k != "E", k == "I"))
             if k == "E" and f.len() >= 4 and f[3] != "-1": r.skips.push(f[3])
 
 remap = (fmap: int[], s: str) -> (int, int):
@@ -1063,7 +1064,7 @@ publish = (d: int):
     by_path: {str: str[]} = {}
     loop x0 in r.diags:
         x = x0
-        if len(x.path) == 0 or x.path == empty_main: x = Diag(docs[d].path, 0, x.msg, x.warning)
+        if len(x.path) == 0 or x.path == empty_main: x = Diag(docs[d].path, 0, x.msg, x.warning, x.info)
         text = text_of(x.path)
         ls = line_starts_of(text)
         a = x.off
@@ -1072,6 +1073,7 @@ publish = (d: int):
         if b == a and a < len(text) and text[a] != '\n': b = a + 1
         sev = 1
         if x.warning: sev = 2
+        if x.info: sev = 3
         item = "\{\"range\":\{\"start\":{jpos(lpos_of(text, ls, a))},\"end\":{jpos(lpos_of(text, ls, b))}\},\"severity\":{sev},\"source\":\"dewy-core\",\"message\":{jq(x.msg)}\}"
         lst = by_path.get(x.path) ?? []
         lst.push(item)

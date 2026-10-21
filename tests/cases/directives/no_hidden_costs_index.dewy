@@ -1,0 +1,10 @@
+# The bundle in a block: its obligations must be proven.
+main=(argv:array<string>)=>{
+    let xs:array<int64>=[1 2 3]
+    let i=argv.length
+    printl(xs[i])
+    {
+        $no_hidden_costs
+        printl(xs[i])
+    }
+}

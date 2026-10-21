@@ -653,6 +653,16 @@ __div_zero = (loc: str):
 __assert_fail = (msg: str, loc: str):
     __panic("{loc}: {msg}")
 
+# A runtime-checked requirement failed: what it required and what was observed.
+__requirement_fail = (requirement: str, loc: str, left: str, a: int, right: str, b: int):
+    observed = ""
+    if len(left) > 0: observed = "{left} was {a}"
+    if len(right) > 0:
+        if len(observed) > 0: observed = observed + " and "
+        observed = observed + "{right} was {b}"
+    if len(observed) == 0: __panic("{loc}: {requirement}")
+    __panic("{loc}: {requirement} (observed: {observed})")
+
 __print_str = (s: str):
     __out(data(s), len(s), false)
     __out(data("\n"), 1, true)

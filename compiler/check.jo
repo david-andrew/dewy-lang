@@ -25,6 +25,7 @@ use 'ownership.jo'
 use 'reflection.jo'
 use 'string_domains.jo'
 use 'dewy_methods.jo'
+use 'directives.jo'
 
 enum SK: none_, local, global, fns, struct_, enum_, const_, module, type_, builtin, alias_, reflected
 
@@ -4604,7 +4605,7 @@ runtime_names = ["__alloc", "__free", "__panic", "__panic_bounds", "__panic_slic
     "__str_cmp", "__str_slice", "__str_append", "__buf_finish", "__buf_append_str", "__arr_resize", "__arr_repeat", "__arr_filled",
     "__print_str", "__str_from_bytes", "__assert_fail", "__hash_bytes", "__str_hash", "__div_zero", "__rc_inc", "__rc_dec",
     "__arr_extend", "__arr_extend_raw", "__rc_dec_test", "__out_flush", "__end_flush", "__box_new", "__box_free", "__box_clone", "__box_defer", "__box_next"]
-optional_runtime = ["__c_str", "__mat4_mul", "__mat4_mul_vec4", "__fmt_i32", "__fmt_f32", "__ffi_resolve", "__panic_narrow", "__ffi_missing", "__mac_syscall"]
+optional_runtime = ["__requirement_fail", "__c_str", "__mat4_mul", "__mat4_mul_vec4", "__fmt_i32", "__fmt_f32", "__ffi_resolve", "__panic_narrow", "__ffi_missing", "__mac_syscall"]
 runtime_insts: {str: int} = {}
 
 runtime_fn = (name: str) -> int:
@@ -4955,6 +4956,7 @@ check_program = (main_path: str):
     refine_reset()
     proof_reset()
     effects_reset()
+    directives_reset()
     if len(program_name) > 0: program_named = true
     if len(program_name) == 0:
         program_name = main_path

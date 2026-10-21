@@ -1,8 +1,8 @@
 # Tier 3 / 64_strict_audio / milestone 21
 # Acceptance: 64 allocation-free fixed-buffer audio blocks; no hidden copy, detach or panic in the kernel.
-# OPEN: Module strict-lane directive and the distinct no-panic/no-detach vocabulary are unspecified; no_effects alone does not certify the full lane.
+# OPEN: The effect inventory still counts a refined scalar parameter and an erased `$assert` as opaque, so the kernel rows fail.
 # This executable projection does not establish the OPEN obligation.
-$explicit_copies
+$no_hidden_costs
 mix=(a:int64 b:int64 gain:int64<i => i >=? 0 and i <=? 4>):>int64 & no_effects=>{
     return (a+b)*gain
 }
@@ -34,6 +34,7 @@ clamp=(x:int64):>int64 & no_effects=>{
     return x
 }
 main=():>int64=>{
+    $no_hidden_costs=false
     let checksum:int64=0
     loop frame in [0..64) {
         checksum+=block(frame)

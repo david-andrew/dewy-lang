@@ -1,0 +1,13 @@
+# quick
+# The strict lane for the module; `main` opts out to print.
+$no_hidden_costs
+clamp=(x:int64):>int64=>{
+    if x <? -100 return -100
+    if x >? 100 return 100
+    return x
+}
+mix=(a:int64 b:int64 gain:int64):>int64=>clamp((a+b)*gain)
+main=()=>{
+    $no_hidden_costs=false
+    printl("{mix(30 40 2)} {mix(-7 3 1)}")
+}

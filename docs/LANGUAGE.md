@@ -2449,9 +2449,9 @@ Declared `copy` members take precedence. The operation preserves ordinary
 value semantics, including private closure state, and may share COW storage
 until a write or transfer a fresh result instead of duplicating it.
 
-`$explicit_copies` at file scope rejects unproven implicit costly copies in
-that module, including imported modules and unused checked function bodies.
-It can be set once; `$explicit_copies = false` keeps the ordinary COW policy.
+`$explicit_copies` rejects unproven implicit costly copies in the module,
+function or block it is written in (see "Directives"), including unused checked
+function bodies; `$explicit_copies = false` keeps the ordinary COW policy.
 Costly values include dynamic arrays, records/containers with mutable heap
 payloads, and closure environments. Scalars, fixed inline storage and shared
 immutable strings are exempt. Stable read-only record snapshots can share
@@ -2698,6 +2698,64 @@ comparison is false. Bounded signed-word stepped literals and stored `IntRange`
 values check the stride as well as the bounds, without constructing an array.
 Custom containers can provide a `contains(container, needle):>bool` overload;
 a callable field named `contains` is not used by membership.
+
+## Directives
+
+A setting is a metatag on a line of its own: `$name` or `$name=true` turns it
+on and `$name=false` turns it off. It holds throughout the scope it is written
+in, wherever in that scope: the module at file level, a function in its body,
+or any other block. An inner scope may change it again. A scope sets each
+setting at most once, and the value must be a literal `true` or `false`.
+
+An obligation is a fact an operation needs: an index in bounds, a nonzero
+divisor, a value that fits a narrower integer, an argument meeting a refined
+parameter. A proven obligation has no runtime check. These settings decide what
+an unproven one does:
+
+- `$runtime_checks=false`: it is a compile error with the reason and a fix
+  (no hidden traps). This becomes the default in a later release; until then
+  the default is a runtime check.
+- `$runtime_checks`: it compiles to a runtime check, with no warning. A failing
+  check names the requirement and the values it saw, as
+  ``refinement failed: `d not=? 0` (observed: d was 0)`` or
+  `index 5 out of bounds (length 3)`, and exits with status 101. Proven checks
+  still vanish.
+- `$prototype`: as `$runtime_checks`, with a `prototype: …` warning at each
+  site while compiling, for development. `$prototype_warnings=false` silences
+  the warnings. Obligations of `$proof` functions and `$assert` are never
+  deferred.
+
+`dewy check --obligations file.dewy` lists every unproven obligation that
+compiles to a runtime check, one per line, with the setting responsible
+(`$runtime_checks`, `$prototype`, or `default`). The editor shows sites in
+`$runtime_checks` scopes as information hints.
+
+`$explicit_copies` (described with `.copy` above) is a setting like these, for
+a module, a function or a block.
+
+A bundle is one metatag for several settings, defined at module level:
+
+```dewy
+$careful = {
+    $explicit_copies
+    $runtime_checks=false
+}
+```
+
+Writing `$careful` holds every setting in the bundle throughout that scope.
+Inside it, a setting that contradicts the bundle is an error; `$careful=false`
+opts a nested scope out of the whole bundle first. `$default_row = <effect row>`
+in a bundle gives each function declared in its scope without an effect row
+of its own that row (see "Functions and values").
+
+The library defines `$no_hidden_costs`, the strict lane (lib/directives.dewy):
+`$explicit_copies`, `$runtime_checks=false`, `$prototype=false` and
+`$default_row = no allocates`. Code in it has no hidden allocation (a detach
+allocates), no implicit costly copy and no runtime check, and it cannot use
+`$runtime_checks` or `$prototype`. A function that needs more opts out with
+`$no_hidden_costs=false` in its body, or declares a row of its own. The effect
+inventory is still partial (see "Functions and values"): an operation it does
+not classify is rejected there. `$realtime` is reserved for a stronger future bundle.
 
 ## Modules and games
 

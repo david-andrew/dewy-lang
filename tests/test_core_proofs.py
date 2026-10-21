@@ -34,7 +34,8 @@ def check(compiler, tmp_path, source):
     ('$proof\np=(@a:int64):><a =? a>=>{}\nmain=()=>{let a:int64=1; p(@a)}', 'defaults and place parameters'),
     ('$proof\np=():><0 =? 0>=>{printl("runtime")}\nmain=()=>p()', 'bodies allow only'),
     ('let global:int64=1\n$proof\np=():><0 =? 0>=>{$assert global >? 0}\nmain=()=>p()', 'globals cannot be erased'),
-    ('$prototype\nmain=()=>{}', '$prototype` is part of the design but not implemented yet'),
+    # `$prototype` cannot defer a proof's obligations: erased proofs have no runtime check.
+    ('$prototype\n' + ORDERED + 'f=(a:int64 b:int64)=>ordered(a b b)\nmain=()=>f(1 2)', 'cannot prove proof precondition'),
 ])
 def test_proof_negative_goldens(compiler, tmp_path, source, diagnostic):
     result = check(compiler, tmp_path, source + '\n')

@@ -13,6 +13,8 @@ use 'proofs.jo'
 use 'dewy_methods.jo'
 use 'effects.jo'
 use 'ownership.jo'
+use 'dewy_directives.jo'
+use 'directives.jo'
 
 # Compact tags shared by lexical tokens and syntax nodes. Names are needed
 # only for formatter/diagnostic text.
@@ -253,7 +255,7 @@ dw_fail_pos = (pos: int, what: str) -> int:
 # Metatags the design defines that this compiler does not implement yet. Each
 # is reported where it is written rather than as a generic syntax error.
 dw_designed_directive = (name: str) -> bool:
-    name in ["abstract", "allocator", "field", "lend", "no_prelude", "proof", "prototype", "prototype_warnings", "unsafe_assume", "__copy__", "__drop__", "__move__"]
+    name in ["abstract", "allocator", "field", "lend", "no_prelude", "proof", "unsafe_assume", "__copy__", "__drop__", "__move__"]
 
 # `$target`: the backend being compiled for, by the design's names (x64 is x86_64,
 # arm64 is arm, WebAssembly is wasm32; riscv and c name backends this compiler lacks).
@@ -376,7 +378,8 @@ dw_unimplemented = (id: int, name: str) -> int:
 dw_metatag_fail = (id: int) -> int:
     name = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
-    if name == "explicit_copies" or name == "supported_targets": fatal(pos, "`${name}` is a module directive; put it at file scope")
+    if name == "supported_targets": fatal(pos, "`${name}` is a module directive; put it at file scope")
+    if dir_builtin(name): fatal(pos, "`${name}` is a setting: write it on a line of its own in a module, function body or block")
     if name == "test": fatal(pos, "`$test` goes alone on the line just before a module-level function declaration")
     if name == "expect" or name == "fail": fatal(pos, "`${name}` is a statement in a function: a test, or a helper a test calls")
     if dw_designed_directive(name): return dw_unimplemented(id, name)
@@ -2791,13 +2794,13 @@ dw_block = (id: int, accumulator: int = 0, map: bool = false) -> int:
     if scoped: outer_siblings = dw_siblings
     statements: int[]
     if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "{{}}:":
-        children = dw_target_splice(dw_children(id))
+        children = dw_dir_block(id, dw_target_splice(dw_children(id)))
         label = 0
         label_pos = 0
         loop i in 0.. and child in children:
             if dewy_syntax[child].kind == .metatag and dewy_syntax[child].text != "target":
                 if dewy_syntax[child].text == "supported_targets": dw_metatag_fail(child)
-                if dw_designed_directive(dewy_syntax[child].text) or dewy_syntax[child].text == "capture" or dewy_syntax[child].text == "include_bytes" or dewy_syntax[child].text == "explicit_copies": dw_metatag_fail(child)
+                if dw_designed_directive(dewy_syntax[child].text) or dewy_syntax[child].text == "capture" or dewy_syntax[child].text == "include_bytes": dw_metatag_fail(child)
                 if label != 0: dw_label_fail(label_pos, label)
                 label = intern(dewy_syntax[child].text)
                 label_pos = dewy_syntax[child].pos
@@ -2980,17 +2983,10 @@ dw_top_declarations_inner = (id: int) -> int[]:
             loop made in dw_top_declarations(item): spliced.push(made)
         return spliced
     tag = declaration
-    enabled = 1
     if dw_op(declaration) == .assign: tag = dw_unwrap(dw_child(declaration, 1))
-    if dewy_syntax[tag].kind == .metatag and dewy_syntax[tag].text == "explicit_copies":
-        if tag != declaration:
-            value = dw_unwrap(dw_child(declaration, 2))
-            if dewy_syntax[value].kind != .boolean: fatal(dewy_syntax[value].pos, "`$explicit_copies` takes a literal true or false")
-            if dewy_syntax[value].text == "false": enabled = -1
+    if dewy_syntax[tag].kind == .metatag:
         file = pos_file(dewy_syntax[tag].pos)
-        if files[file].explicit_copies != 0: fatal(dewy_syntax[tag].pos, "`$explicit_copies` may be set only once per module")
-        files[file].explicit_copies = enabled
-        return []
+        if dw_dir_statement(declaration, dir_module_start(file), dir_module_end(file), true): return []
     if dewy_syntax[tag].kind == .metatag and dewy_syntax[tag].text == "supported_targets":
         dw_supported_targets(tag, declaration)
         return []

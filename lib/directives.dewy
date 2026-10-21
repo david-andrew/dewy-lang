@@ -1,0 +1,14 @@
+# Directive bundles (docs/LANGUAGE.md, "Directives"): one metatag for several
+# settings, held throughout the module, function body or block it is written
+# in. `$name=false` opts a nested scope out of all of them.
+
+# The strict lane: no hidden allocation, detach or costly copy, and no runtime
+# checks. Every obligation is proven or handled as a value, implicit costly
+# copies are errors, and a function without an effect row of its own gets
+# `no allocates` (a detach allocates).
+$no_hidden_costs = {
+    $explicit_copies
+    $runtime_checks=false
+    $prototype=false
+    $default_row = no allocates
+}

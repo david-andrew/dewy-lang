@@ -11,6 +11,7 @@ use 'expr.jo'
 use 'ir.jo'
 use 'ownership.jo'
 use 'poly_closure.jo'
+use 'directives.jo'
 
 copies_on = false
 copy_costs: {int: int}
@@ -29,8 +30,7 @@ copy_borrowed: {int: bool} # analyzed parameter local whose snapshot binding sta
 
 copies_reset = ():
     copies_on = false
-    loop file in files:
-        if file.explicit_copies > 0: copies_on = true
+    if dir_copies_any: copies_on = true
     copy_costs = {}
     copy_moves = {}
     copy_blocked = {}
@@ -134,7 +134,7 @@ copies_parameters = ():
                         changed = true
 
 copy_strict = (e: int) -> bool:
-    e > 0 and files[pos_file(nodes[e].pos)].explicit_copies > 0
+    e > 0 and dir_copies_any and dir_explicit_copies(nodes[e].pos)
 
 costly_copy = (t0: int) -> bool:
     t = prune(t0)

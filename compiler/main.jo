@@ -44,11 +44,12 @@ use 'fmt.jo'
 use 'par.jo'
 use 'fused.jo'
 use 'pkg.jo'
+use 'directives.jo'
 
 const DEWY_CORE_VERSION = "0.0.0-dev"
 
 usage = (status: int = 2):
-    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target native|wasm] [--release] [--time]\n       dewy-core check file.dewy\n       dewy-core test [--watch] [--release] [--json] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core repl\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.")
+    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target native|wasm] [--release] [--time]\n       dewy-core check [--obligations] file.dewy\n       dewy-core test [--watch] [--release] [--json] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core repl\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.")
     exit(status)
 
 find_lib_dir = () -> str:
@@ -412,6 +413,7 @@ compile = (path: str, out0: str) -> str:
     isolation_reset()
     loans_finalize()
     facts_finalize()
+    directives_after_facts()
     copies_reset()
     if ownership_decls.len() != 0:
         # Initialize thread bookkeeping before construction can acquire a resource.
@@ -769,6 +771,12 @@ main = ():
     pkg_fetch = true
     if a[1] == "check":
         # type check only
+        if a.len() > 3 and a[2] == "--obligations":
+            dir_obligations = true
+            a = [a[0], a[1]] + a[3..]
+        else if a.len() > 3 and a[3] == "--obligations":
+            dir_obligations = true
+            a = [a[0], a[1], a[2]] + a[4..]
         if a.len() < 3: usage()
         if let s = env("SLOPPY_STOP"): stop_after = s
         path = os_path(a[2])
@@ -788,6 +796,7 @@ main = ():
         lower_only = true
         compile(path, "")
         if errors_only: exit(error_exit)
+        if dir_obligations: dir_print_obligations()
         return
     first = 1
     test_watch = false

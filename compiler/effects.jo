@@ -15,6 +15,7 @@ use 'facts.jo'
 use 'ownership.jo'
 use 'ir.jo'
 use 'copies.jo'
+use 'directives.jo'
 
 enum EffectKind: read, write, alloc, detach, costly_copy, panic, io, block, spawn, escape, opaque, remainder
 struct EffectAtom:
@@ -1291,7 +1292,7 @@ effects_finalize = ():
             origin = if event.witness != 0 and not pos_in_lib(nodes[event.witness].pos): "; witness at {pos_str(nodes[event.witness].pos)}" else if event.witness != 0: "" else: "; witness at {pos_str(nodes[d].pos)}"
             row = if contract != 0: effect_contracts[contract] else: EffectContract()
             why = if contract == 0: "is forbidden by the effect policy" else if row.exclusions.len() > 0 and effect_excluded(row, atom): "exceeds the contract (its row excludes it)" else if row.atoms.len() == 0 and row.variables.len() == 0 and not row.open: "exceeds the closed row (no_effects permits none)" else: "exceeds the closed row (the contract does not permit it)"
-            fatal(nodes[at].pos, "effect contract violation in '{effect_name(f)}': {what} {why}; {chain}{origin}")
+            fatal(nodes[at].pos, "effect contract violation in '{effect_name(f)}': {what} {why}; {chain}{origin}{dir_row_origin(d)}")
 
 # Facts request only summaries of calls they actually analyze. Ordinary code
 # with no refinement consumers pays neither an arena allocation nor a walk.

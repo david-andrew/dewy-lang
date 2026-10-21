@@ -23,6 +23,7 @@ use 'check.jo'
 use 'fused.jo'
 use 'main.jo'
 use 'copies.jo'
+use 'directives.jo'
 
 pc_tried = false
 pc_reordered = false
@@ -44,8 +45,7 @@ pc_warn_text: str[]
 
 pc_features = () -> bool:
     if fact_policy != .RuntimeAllowed or effects_active or effect_policy.prohibitions != 0 or refine_active or proof_active or result_active or ownership_decls.len() != 0 or loan_owners.len() != 0 or fact_requests.len() != 0 or refine_requests.len() != 0 or proof_calls.len() != 0 or poly_families.len() > 1: return false
-    loop file in files:
-        if file.explicit_copies > 0: return false
+    if dir_copies_any or dir_rows_any: return false
     loop f in fns:
         if f.kind == FK_LAMBDA or f.kind == FK_PARTIAL or f.parallel or f.deterministic: return false
     true

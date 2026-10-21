@@ -11,6 +11,7 @@ use 'check.jo'
 use 'facts.jo'
 use 'refine.jo'
 use 'proofs.jo'
+use 'directives.jo'
 
 struct WitSide:
     value: int = 0
@@ -302,6 +303,7 @@ wit_unknown = (n: int, b: FactBound, what: str, contract: int = 0, relation: str
     wit_context(contract)
     wit_help(relation, runtime)
     why = if b.reason == .missing and missing != "": "missing {missing}" else: wit_reason(b)
+    if dir_defer(n, "cannot prove {what}: {why}", runtime and what != "assertion"): return
     wit_fail(nodes[n].pos, "cannot prove {what}: {why}")
 
 wit_side = (value: int, node0: int) -> WitSide:
@@ -425,6 +427,7 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
         else: wit_relation(s, s, .lt, i, size, true)
         wit_context(0)
         wit_help(relation)
+        if dir_defer(n, "{read} is not in bounds", true): return
         wit_fail(nodes[n].pos, "{read} is not in bounds")
         return
     b = fact_bound(s, index)
@@ -439,6 +442,7 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
     wit_context(0)
     wit_help(relation)
     which = if lo != 1 and hi != 1: "lower and upper bounds" else if lo != 1: "lower bound" else: "upper bound"
+    if dir_defer(n, "cannot prove {read} is in bounds: missing {which}", true): return
     wit_fail(nodes[n].pos, "cannot prove {read} is in bounds: missing {which}")
 
 # A builtin slice `xs[lo..hi)`: 0 <=? lo <=? hi <=? xs.length, where an
@@ -464,8 +468,10 @@ wit_slice = (n: int, s: mut FactState, lo: int, hi: int, length: int, checks: in
     wit_context(0)
     wit_help(relation)
     if refuted:
+        if dir_defer(n, "slice is not in bounds", true): return
         wit_fail(nodes[n].pos, "slice is not in bounds")
         return
+    if dir_defer(n, "cannot prove slice is in bounds: missing {join(missing, " and ")}", true): return
     wit_fail(nodes[n].pos, "cannot prove slice is in bounds: missing {join(missing, " and ")}")
 
 wit_divisor = (n: int, s: FactState, divisor: int, zero: int, operand: int, refuted: bool):
@@ -475,6 +481,7 @@ wit_divisor = (n: int, s: FactState, divisor: int, zero: int, operand: int, refu
     wit_context(0)
     if refuted:
         wit_help(wit_relation_text(.ne, side, nil))
+        if dir_defer(n, "divisor refuted: zero", true): return
         wit_fail(nodes[n].pos, "divisor refuted: zero")
         return
     wit_unknown(n, fact_bound(s, divisor), "divisor is nonzero", 0, wit_relation_text(.ne, side, nil), missing)

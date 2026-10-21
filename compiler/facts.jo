@@ -16,6 +16,7 @@ use 'places.jo'
 use 'effects.jo'
 use 'ownership.jo'
 use 'witness.jo'
+use 'directives.jo'
 
 enum FactPolicy: RuntimeAllowed, RequireStatic
 enum FactReason: missing, write, call, join, loop_, unsupported, wrap, budget, callee
@@ -340,6 +341,7 @@ fact_route_bounds = (s: mut FactState, route: FactRoute, values: int[]):
         zero = fact_constant(s, 0)
         lo = fact_compare(s, .le, zero, index)
         hi = fact_compare(s, .lt, index, length)
+        dir_index(n, lo == 1 and hi == 1)
         if lo != 1 or hi != 1: wit_index(n, s, index, length, lo, hi)
 
 # Effect verification asks which element accesses a body's own facts keep in
@@ -1312,6 +1314,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
                 zero = fact_constant(s, 0)
                 lo = fact_compare(s, .le, zero, index)
                 hi = fact_compare(s, .lt, index, length)
+                dir_index(n, lo == 1 and hi == 1)
                 if lo != 1 or hi != 1: wit_index(n, s, index, length, lo, hi)
             return fact_project(s, base, index, true, int(types[t].elem))
         return fact_unmodeled(s, n, .unsupported)

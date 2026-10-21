@@ -1,0 +1,276 @@
+# Scoped settings written as metatags: `$name`, `$name=true`, `$name=false`.
+# A setting holds throughout the scope it is written in (a module, a function
+# body or another block), position ranges standing for scopes. A bundle
+# (lib/directives.dewy) is one metatag for several settings, held throughout
+# its scope; `$bundle=false` opts a nested scope out of all of them.
+# Nothing here costs anything until a program writes one of these settings.
+use 'ast.jo'
+use 'util.jo'
+use 'facts.jo'
+use 'effects.jo'
+use 'proofs.jo'
+use 'ide.jo'
+use 'check.jo'
+
+struct DirScope:
+    start: int
+    end: int
+    setting: int
+    value: int        # 1 on, 0 off, -1 the default (a bundle's opt-out); a row: its syntax
+    bundle: int = 0   # the bundle that set it; 0 when written directly
+    at: int = 0
+
+struct DirBundle:
+    name: int
+    settings: int[]
+    values: int[]
+    row: int = 0      # effect_syntax index of the row its functions default to
+    at: int = 0
+
+struct DirSite:
+    at: int
+    what: str
+    policy: int
+
+# How an unproven obligation compiles at a site.
+const DIR_STATIC = 0       # a compile error: no hidden trap
+const DIR_RUNTIME = 1      # `$runtime_checks`: a runtime check
+const DIR_PROTOTYPE = 2    # `$prototype`: a runtime check and a warning
+const DIR_IMPLICIT = 3     # the default, while it is still runtime checks
+# The policy outside `$runtime_checks`/`$prototype` scopes. DIR_STATIC makes
+# no traps the default.
+const DIR_DEFAULT = 3
+
+dir_scopes: DirScope[]
+dir_bundles: DirBundle[]
+dir_sites: DirSite[]
+dir_proven: {int: bool}        # index node -> proven at every visit
+dir_row_scopes: {int: int}     # function declaration -> the scope giving its row
+dir_obligations = false        # `check --obligations`
+dir_forced = false             # this module turned the static analysis on
+dir_prior_static = false       # and it was on before (an internal policy)
+dir_copies_any = false
+dir_rows_any = false
+dir_bundles_loaded = false
+
+dir_name_runtime = 0
+dir_name_prototype = 0
+dir_name_warnings = 0
+dir_name_copies = 0
+dir_name_row = 0
+
+directives_reset = ():
+    dir_scopes = []
+    dir_bundles = []
+    dir_sites = []
+    dir_proven = {}
+    dir_row_scopes = {}
+    dir_forced = false
+    dir_prior_static = false
+    dir_copies_any = false
+    dir_rows_any = false
+    dir_bundles_loaded = false
+    dir_name_runtime = 0
+    if DIR_DEFAULT == DIR_STATIC: fact_policy = .RequireStatic
+    if dir_obligations: dir_force()
+
+# (names are interned on first use: an ordinary program interns none)
+dir_names = ():
+    if dir_name_runtime != 0: return
+    dir_name_runtime = intern("runtime_checks")
+    dir_name_prototype = intern("prototype")
+    dir_name_warnings = intern("prototype_warnings")
+    dir_name_copies = intern("explicit_copies")
+    dir_name_row = intern("default_row")
+
+# The builtin boolean settings.
+dir_builtin = (name: str) -> bool:
+    name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies"
+
+dir_bundle_index = (name: int) -> int:
+    loop i in [0..dir_bundles.len()):
+        if dir_bundles[i].name == name: return i
+    -1
+
+# Unproven obligations are analyzed when some scope needs them decided.
+dir_force = ():
+    if dir_forced: return
+    dir_forced = true
+    dir_prior_static = fact_policy == .RequireStatic
+    fact_policy = .RequireStatic
+
+dir_module_start = (file: int) -> int: file << 40
+dir_module_end = (file: int) -> int: (file << 40) | 0xFFFFFFFFFF
+
+# The innermost scope of a setting at a position (-1: none). A setting written
+# directly wins over a bundle's at the same scope.
+dir_find = (setting: int, p: int, skip: int = -1) -> int:
+    best = -1
+    loop i in [0..dir_scopes.len()):
+        if i == skip: continue
+        s = dir_scopes[i]
+        if s.setting != setting or p < s.start or p > s.end: continue
+        if best >= 0:
+            b = dir_scopes[best]
+            if s.start < b.start: continue
+            if s.start == b.start and s.bundle != 0 and b.bundle == 0: continue
+        best = i
+    best
+
+dir_value = (setting: int, p: int) -> int:
+    if dir_scopes.len() == 0: return -1
+    i = dir_find(setting, p)
+    if i < 0: return -1
+    dir_scopes[i].value
+
+dir_spelled = (s: DirScope) -> str:
+    v = if s.value == 1: "" else if s.value == 0: "=false" else: "=default"
+    "`${name_of(s.setting)}{v}`"
+
+# A setting written directly inside a bundle's scope cannot undo the bundle.
+dir_conflict = (i: int):
+    s = dir_scopes[i]
+    if s.bundle != 0: return
+    o = dir_find(s.setting, s.start, i)
+    if o < 0: return
+    outer = dir_scopes[o]
+    if outer.end < s.end: return
+    if outer.bundle == 0 and outer.start == s.start:
+        where = if s.start == dir_module_start(pos_file(s.start)): "module" else: "scope"
+        fatal(s.at, "`${name_of(s.setting)}` may be set only once per {where}")
+    if outer.bundle == 0 or outer.value == -1 or outer.value == s.value: return
+    b = name_of(outer.bundle)
+    fatal(s.at, "{dir_spelled(s)} is not allowed inside `${b}`, which sets {dir_spelled(outer)}; opt this scope out first with `${b}=false`")
+
+dir_push = (s: DirScope):
+    dir_scopes.push(s)
+    if s.setting == dir_name_copies and s.value == 1: dir_copies_any = true
+    if s.setting == dir_name_row and s.value > 0: dir_rows_any = true
+    if s.setting == dir_name_runtime and s.value == 0 or s.setting == dir_name_prototype and s.value == 1: dir_force()
+    if s.setting == dir_name_runtime and s.value == 1 and ide_on: dir_force()
+    if s.bundle == 0:
+        dir_conflict(dir_scopes.len() - 1)
+        return
+    # (a bundle written after a setting it governs: check that setting again)
+    loop i in [0..dir_scopes.len() - 1):
+        if dir_scopes[i].bundle == 0 and dir_scopes[i].start >= s.start and dir_scopes[i].end <= s.end: dir_conflict(i)
+
+# `$realtime` and the bundles: a scope for each of a bundle's settings.
+dir_set = (name: int, value: int, start: int, end: int, at: int):
+    dir_names()
+    text = name_of(name)
+    if text == "realtime": fatal(at, "`$realtime` is reserved for a future bundle stronger than `$no_hidden_costs` (no blocking, a bounded stack); use `$no_hidden_costs`")
+    if dir_builtin(text):
+        dir_push(DirScope(start, end, name, value, 0, at))
+        return
+    b = dir_bundle_index(name)
+    if b < 0: fatal(at, "unknown directive `${text}`")
+    bundle = dir_bundles[b]
+    dir_push(DirScope(start, end, name, value, 0, at))
+    loop i in [0..bundle.settings.len()):
+        dir_push(DirScope(start, end, bundle.settings[i], (if value == 1: bundle.values[i] else: -1), name, at))
+    if bundle.row != 0: dir_push(DirScope(start, end, dir_name_row, (if value == 1: bundle.row else: -1), name, at))
+
+# How an unproven obligation at p compiles: the innermost of `$runtime_checks`
+# and `$prototype` decides.
+dir_policy = (p: int) -> int:
+    r = -1
+    q = -1
+    if dir_scopes.len() > 0:
+        r = dir_find(dir_name_runtime, p)
+        q = dir_find(dir_name_prototype, p)
+    rv = if r >= 0: dir_scopes[r].value else: -1
+    qv = if q >= 0: dir_scopes[q].value else: -1
+    if qv == 1 and (rv == -1 or dir_scopes[q].start >= dir_scopes[r].start): return DIR_PROTOTYPE
+    if rv == 1: return DIR_RUNTIME
+    if rv == 0: return DIR_STATIC
+    if qv == 1: return DIR_PROTOTYPE
+    if DIR_DEFAULT == DIR_STATIC: return DIR_STATIC
+    static = if dir_forced: dir_prior_static else: fact_policy == .RequireStatic
+    if static: DIR_STATIC else: DIR_IMPLICIT
+
+# The decision for an unproven (or refuted) obligation the analysis reports:
+# true when its scope defers it to a runtime check, which lowering keeps.
+dir_defer = (n: int, what: str, deferrable: bool) -> bool:
+    # (an `$assert` condition, and what it reads, must be proven)
+    if not deferrable or n <= 0 or fact_query: return false
+    # (erased proofs have no runtime fallback)
+    if proof_active and fact_owner > 0 and fact_owner < fns.len() and proof_decls.has(int(fns[fact_owner].decl)): return false
+    p = nodes[n].pos
+    policy = dir_policy(p)
+    if policy == DIR_STATIC: return false
+    err_notes = []
+    dir_sites.push(DirSite(p, what, policy))
+    if policy == DIR_PROTOTYPE and dir_value(dir_name_warnings, p) != 0: warn(p, "prototype: {what}; it is checked at run time")
+    if ide_on and policy == DIR_RUNTIME:
+        hint = "runtime check: " + dir_obligation_text(what)
+        ide_emit("I\t{ide_pos_str(p)}\t{ide_esc(hint)}")
+    true
+
+dir_obligation_text = (what: str) -> str:
+    if starts_with(what, "cannot prove "): return what[13..]
+    what
+
+# Every analyzed visit of an index must prove it before its check is dropped.
+dir_index = (n: int, proven: bool):
+    if fact_speculating > 0: return
+    if not proven: dir_proven[n] = false
+    else if not dir_proven.has(n): dir_proven[n] = true
+
+# After the analysis: proven indexes lose their checks; the listing.
+directives_after_facts = ():
+    loop n, proven in dir_proven:
+        if proven: add_flag(n, NF_INBOUNDS)
+    dir_proven = {}
+
+dir_policy_name = (policy: int) -> str:
+    if policy == DIR_RUNTIME: return "$runtime_checks"
+    if policy == DIR_PROTOTYPE: return "$prototype"
+    "default"
+
+# `check --obligations`: each unproven obligation that compiles to a runtime
+# check, in source order, with the setting that made it one.
+dir_print_obligations = ():
+    order: int[]
+    loop i in [0..dir_sites.len()):
+        if pos_in_lib(dir_sites[i].at): continue
+        seen = false
+        loop j in order:
+            if dir_sites[j].at == dir_sites[i].at and dir_sites[j].what == dir_sites[i].what: seen = true
+        if not seen: order.push(i)
+    # (insertion sort: a handful of sites)
+    loop i in [1..order.len()):
+        j = i
+        loop j > 0 and dir_sites[order[j - 1]].at > dir_sites[order[j]].at:
+            t = order[j]
+            order[j] = order[j - 1]
+            order[j - 1] = t
+            j -= 1
+    loop i in order:
+        s = dir_sites[i]
+        print("{pos_str(s.at)}: runtime check: {dir_obligation_text(s.what)} ({dir_policy_name(s.policy)})")
+
+# `$explicit_copies`, written for the module, a function or a block.
+dir_explicit_copies = (p: int) -> bool:
+    if not dir_copies_any: return false
+    dir_value(dir_name_copies, p) == 1
+
+# A declared function without an effect row takes its scope's default row.
+dir_apply_rows = (first: int):
+    if not dir_rows_any: return
+    loop f in [first..nodes.len()):
+        if nodes[f].kind != .fn_ or nodes[f].sval != 0: continue
+        body = int(nodes[f].b)
+        p = if body != 0: nodes[body].pos else: nodes[f].pos
+        i = dir_find(dir_name_row, p)
+        if i < 0 or dir_scopes[i].value <= 0: continue
+        nodes[f].sval = i32(dir_scopes[i].value)
+        dir_row_scopes[f] = i
+        effects_active = true
+
+# Where a function's row came from, for an effect diagnostic.
+dir_row_origin = (d: int) -> str:
+    i = dir_row_scopes.get(d) ?? -1
+    if i < 0: return ""
+    b = name_of(dir_scopes[i].bundle)
+    "; `${b}` gives functions without a row of their own this one (opt a function out with `${b}=false` in its body)"
