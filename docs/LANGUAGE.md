@@ -757,6 +757,33 @@ harmonic sums, dice probabilities and exact time steps.
 
 ## Records and collections
 
+A scalar nominal record can declare a compiler-only `$__drop__` method with
+no explicit parameters and a `void` result:
+
+```dewy
+let released:int64=0
+Ticket=type of [id:int64
+    $__drop__
+    release=():>void=>{released+=id}
+]
+```
+
+Such a record is move-only. Fresh construction creates an owner; a whole local
+can transfer at a proven last use, including into a direct function parameter
+or return value. A later read, an alias or a loop backedge can prevent that
+proof. `.copy()` cannot duplicate a drop-only owner. Every initialized owner
+runs its hook once at lifetime end, including replacement, return, loop exits,
+compiler-controlled panic and process termination through `exit`. A construction
+that fails before completion does not run the incomplete value's hook.
+
+The scalar pilot requires primitive scalar fields and a proven no-failure drop
+summary. Scalar mutation and literal-string logging are supported; unknown calls
+and potentially failing formatting are rejected. Hooks cannot be called or
+referenced directly. Custom copy/move hooks, inherited hooks, resource-bearing
+containers, captured or global owners, and foreign entry points with owners
+remain unsupported. Ordinary records and collections keep their existing value
+and copy-on-write behavior.
+
 ```dewy
 Point:type=[x:int64 y:int64=22]
 main=()=>{

@@ -1,0 +1,28 @@
+# quick
+let drops:int64=0
+Owner=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+]
+consume=(owner:Owner):>int64=>owner.value
+conditional=(flag:bool)=>{
+    let owner=Owner[1]
+    if flag {consume(owner)}
+    owner=Owner[2]
+}
+main=()=>{
+    let owner=Owner[1]
+    let moved=owner
+    owner=Owner[2]
+    assert(consume(moved)=?1)
+    assert(drops=?1)
+    owner=owner
+    assert(drops=?1)
+    assert(consume(owner)=?2)
+    assert(drops=?2)
+    conditional(true)
+    assert(drops=?4)
+    conditional(false)
+    assert(drops=?6)
+    printl"ok"
+}

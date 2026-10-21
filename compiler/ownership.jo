@@ -1,0 +1,224 @@
+# Nominal lifecycle metadata. No ownership walk or summary demand for ordinary
+# programs; hook identity is deliberately separate from structural equality.
+use 'util.jo'
+use 'copies.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'effects.jo'
+use 'errors.jo'
+use 'expr.jo'
+
+ownership_decls: {int: int}
+ownership_hooks: {int: int}
+
+ownership_declare = (decl: int, hook: int, role: int):
+    if nkids(hook) != 1: fatal(nodes[hook].pos, "lifecycle hooks have no explicit parameters")
+    if nkids2(decl) != 0 or nkids2(hook) != 0: fatal(nodes[hook].pos, "generic lifecycle hooks require aggregate ownership support")
+    if role != 1: fatal(nodes[hook].pos, "custom copy and move hooks require the next ownership slice")
+    if ownership_decls.has(decl): fatal(nodes[hook].pos, "duplicate $__drop__ hook")
+    ownership_decls[decl] = hook
+    ownership_hooks[hook] = role
+    add_flag(kid(hook, 0), NF_MUT)
+
+ownership_finalize = ():
+    if ownership_decls.len() == 0: return
+    hooks: int[]
+    loop decl, hook in ownership_decls:
+        f = get_fn_inst(hook, [], nodes[hook].pos)
+        check_fn_body(f)
+        if int(fns[f].ret) != T_VOID: fatal(nodes[hook].pos, "a $__drop__ hook must return void")
+        hooks.push(f)
+        t = prune(fns[f].ptypes[0])
+        if tkind(t) != .struct_: fatal(nodes[hook].pos, "a lifecycle receiver must be nominal")
+        layout(t)
+        si = int(types[t].st)
+        loop i in [0..int(structs[si].nfields)):
+            ft = int(fields[int(structs[si].fields) + i].type)
+            if not effect_scalar(ft) and tkind(ft) != .float_: fatal(nodes[hook].pos, "this ownership slice requires scalar record fields")
+        structs[si].drop_fn = i32(f)
+        types[t].flags |= i32(TF_MANAGED)
+    loop name in ["__owner_link", "__owner_unlink", "__owner_drop", "__owner_print", "__owner_start"]:
+        f = runtime_fn(name)
+        check_pending_functions(f)
+    # Hook instantiation can extend a previously demanded refinement graph.
+    effect_limit = 0
+    effect_serial = 0
+    effect_stack = []
+    loop f in hooks:
+        if not effects_demand(f): fatal(nodes[int(fns[f].decl)].pos, "drop hook has no proven no-failure summary")
+        loop event in effect_summaries[f].events:
+            k = event.atom.kind
+            if k == .opaque or k == .panic or k == .alloc or k == .block or k == .spawn:
+                fatal(nodes[int(fns[f].decl)].pos, "drop hook requires a proven no-failure summary: {effect_witness(f, event)}")
+
+ownership_type = (t0: int) -> bool:
+    if ownership_decls.len() == 0: return false
+    t = prune(t0)
+    types[t].kind == .struct_ and structs[int(types[t].st)].drop_fn != 0
+
+# The call plan records incoming owners separately from borrowed place inputs.
+# Synthetic Dewy parameter bindings adopt the incoming value without copying.
+ownership_functions: {int: bool}
+ownership_parameters = ():
+    if ownership_decls.len() == 0: return
+    loop f in [1..fns.len()):
+        body = int(fns[f].body)
+        loop l in fns[f].locals:
+            if ownership_type(int(locals[l].type)): ownership_functions[f] = true
+        if body == 0: continue
+        loop i in [0..nkids(body)):
+            s = kid(body, i)
+            if nodes[s].kind != .vardecl or nodes[s].aux2 != 1: break
+            if nkids(s) > 0: continue
+            l = int(nodes[s].sym)
+            if not ownership_type(int(locals[l].type)): continue
+            source = int(nodes[s].b)
+            if nodes[source].kind != .ident: continue
+            p = int(nodes[source].sym)
+            if int(locals[p].flags) & LF_MUTPARAM != 0: continue
+            if fns[f].cabi or fns[f].has_env or len(fns[f].export_name) != 0:
+                fatal(nodes[s].pos, "owning parameters require a closed direct call")
+            copy_inputs[p] = true
+            copy_bindings[l] = true
+
+# Lowering adapter: sparse stack records, allocated only for scalar owners.
+# Linking publishes successful initialization; unlinking consumes ownership.
+use 'lower.jo'
+use 'ir.jo'
+owner_records: {int: int}
+owner_init = -1
+
+owner_begin = ():
+    owner_records.clear()
+    owner_init = -1
+    if ownership_decls.len() != 0: owner_init = emit(.nop, 0, 0, 0, 0, 0, 0)
+
+owner_end = ():
+    if owner_init < 0 or owner_records.len() == 0: return
+    start = ir.args.len()
+    loop slot, record in owner_records: ir.args.push(i32(record * 2))
+    ir.code[owner_init] = Ins(.zeroslots, 0, 0, i32(start), i32(owner_records.len()), 0, 0)
+
+owner_record = (slot: int) -> int:
+    if slot < 0: ice("owner without local storage")
+    if let record = owner_records.get(slot): return record
+    record = new_slot(32, 8)
+    owner_records[slot] = record
+    record
+
+owner_register = (slot: int, t: int):
+    record = owner_record(slot)
+    e_call(rt("__owner_link"), [e_slot(record), e_slot(slot), e_faddr(lf_helper(.drop, t, 0))], -1)
+
+owner_forget_slot = (slot: int):
+    record = owner_record(slot)
+    e_call(rt("__owner_unlink"), [e_slot(record)], -1)
+
+owner_address_slot = (addr: int) -> int:
+    i = ir.code.len() - 1
+    loop i >= 0:
+        ins = ir.code[i]
+        if ins.op == .slot and int(ins.dst) == addr: return int(ins.a)
+        i -= 1
+    ice("owner address is not a whole local")
+    -1
+
+owner_forget = (addr: int): owner_forget_slot(owner_address_slot(addr))
+
+owner_drop = (addr: int):
+    record = owner_record(owner_address_slot(addr))
+    e_call(rt("__owner_drop"), [e_slot(record)], -1)
+
+ownership_contained: {int: bool}
+ownership_contains = (t0: int) -> bool:
+    t = prune(t0)
+    if ownership_type(t): return true
+    if let found = ownership_contained.get(t): return found
+    ownership_contained[t] = false
+    found = false
+    k = tkind(t)
+    if k == .array or k == .fixed or k == .opt or k == .box: found = ownership_contains(telem(t))
+    else if k == .tuple:
+        loop i in [0..int(types[t].nargs)):
+            if ownership_contains(targ(t, i)): found = true
+    else if k == .struct_ or k == .enum_:
+        layout(t)
+        si = int(types[t].st)
+        if k == .struct_:
+            loop i in [0..int(structs[si].nfields)):
+                if ownership_contains(int(fields[int(structs[si].fields) + i].type)): found = true
+        else:
+            loop i in [0..int(structs[si].nvariants)):
+                v = int(structs[si].variants) + i
+                loop j in [0..int(variants[v].nfields)):
+                    if ownership_contains(int(fields[int(variants[v].fields) + j].type)): found = true
+    ownership_contained[t] = found
+    found
+
+ownership_validate_node = (n: int, f: int):
+    if n == 0: return
+    t = ntype(n)
+    if t > 0 and ownership_contains(t) and not ownership_type(t):
+        fatal(nodes[n].pos, "resource containers require aggregate ownership support")
+    k = nodes[n].kind
+    if k == .call and nodes[n].aux == 0 or k == .fnref:
+        g = int(nodes[n].sym)
+        if g > 0 and ownership_hooks.has(int(fns[g].decl)):
+            fatal(nodes[n].pos, "lifecycle hooks are compiler-only operations")
+        if k == .fnref and g > 0 and ownership_functions.has(g):
+            fatal(nodes[n].pos, "owners require direct calls; callable ownership is not supported yet")
+    if k == .vardecl and not has_flag(n, NF_GLOBAL) and nkids(n) == 0 and nodes[n].sym > 0 and ownership_type(int(locals[int(nodes[n].sym)].type)) and nodes[n].b == 0:
+        fatal(nodes[n].pos, "an owner requires completed construction before registration")
+    if k == .assign and ownership_type(ntype(int(nodes[n].a))):
+        target = int(nodes[n].a)
+        if nodes[target].kind != .ident or nodes[target].aux != i32(int(SK.local)):
+            fatal(nodes[n].pos, "owner replacement requires a whole local")
+        l = int(nodes[target].sym)
+        if int(locals[l].flags) & (LF_MUTPARAM | LF_ALIAS | LF_BYREF) != 0:
+            fatal(nodes[n].pos, "cannot replace a borrowed owner")
+    if k == .defer_ and ownership_functions.has(f):
+        fatal(nodes[n].pos, "an owner with defer requires a unified defer unwind plan; transfer is not proven safe")
+    if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_type(ntype(n)):
+        fatal(nodes[n].pos, "cannot copy a move-only owner: no $__copy__ hook")
+    loop c in copy_children(n): ownership_validate_node(c, f)
+
+ownership_validate = ():
+    if ownership_decls.len() == 0: return
+    loop f, active in ownership_functions:
+        if fns[f].cabi or len(fns[f].export_name) != 0:
+            fatal(nodes[int(fns[f].decl)].pos, "foreign entry points with owners require per-foreign-thread cleanup storage")
+    loop child, parent in nominal_parent:
+        if ownership_type(parent): fatal(nodes[int(structs[int(types[child].st)].decl)].pos, "inherited lifecycle hooks require aggregate ownership support")
+    loop g in globals:
+        if g.type > 0 and ownership_contains(int(g.type)):
+            fatal(nodes[int(g.decl)].pos, "global owners require a program-lifetime cleanup plan")
+    loop f in [1..fns.len()):
+        loop l in fns[f].locals:
+            t = int(locals[l].type)
+            if not ownership_contains(t): continue
+            if not ownership_type(t): fatal(locals[l].pos, "resource containers require aggregate ownership support")
+            if int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED) != 0:
+                fatal(locals[l].pos, "captured owners require closure ownership support")
+        ownership_validate_node(int(fns[f].body), f)
+
+# The literal-only diagnostic path has no allocation or language failure. It
+# flushes earlier output, then uses the runtime's best-effort raw write. Dynamic
+# formatting remains subject to the ordinary conservative failure summary.
+ownership_prints: {int: bool}
+ownership_literal_print = (n: int) -> bool:
+    if ownership_decls.len() == 0 or nodes[n].kind != .call or nodes[n].aux != 0 or nkids(n) != 1: return false
+    printer = runtime_insts.get("__print_str") ?? 0
+    if printer == 0 or int(nodes[n].sym) != printer: return false
+    a = kid(n, 0)
+    if nodes[a].kind != .str_lit or nodes[a].aux != 0: return false
+    ownership_prints[n] = true
+    true
+
+
+ownership_reset = ():
+    ownership_decls.clear()
+    ownership_hooks.clear()
+    ownership_functions.clear()
+    ownership_contained.clear()
+    ownership_prints.clear()

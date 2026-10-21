@@ -1,0 +1,64 @@
+# quick
+# Tier 3 / 77_owner_cleanup / milestone 24
+# Acceptance: Move last-use owners and release actual resources exactly once on return, break and continue; do not assert elidable copy-hook counts.
+let released:int64=0
+Ticket=type of [id:int64
+    $__drop__
+    release=():>void=>{
+        released+=id
+    }
+]
+consume=(ticket:Ticket):>int64=>{
+    return ticket.id*2
+}
+normal=(n:int64):>int64=>{
+    let ticket=Ticket[n]
+    return consume(ticket)
+}
+early=(n:int64):>int64=>{
+    let ticket=Ticket[n]
+    if n >? 0 return ticket.id
+    return -ticket.id
+}
+break_path=():>int64=>{
+    loop i in [1..5) {
+        let ticket=Ticket[i]
+        if i =? 3 break
+    }
+    return 0
+}
+continue_path=():>int64=>{
+    let total:int64=0
+    loop i in [1..5) {
+        let ticket=Ticket[i]
+        if i%2 =? 0 continue
+        total+=ticket.id
+    }
+    return total
+}
+main=():>int64=>{
+    let total:int64=0
+    loop n in [1..9) {
+        total+=normal(n)
+    }
+    $runtime_assert released =? 36
+    $runtime_assert early(9) =? 9
+    $runtime_assert released =? 45
+    break_path()
+    $runtime_assert released =? 51
+    $runtime_assert continue_path() =? 4
+    $runtime_assert released =? 61
+    $runtime_assert normal(0) =? 0
+    $runtime_assert released =? 61
+    $runtime_assert total =? 72
+    $runtime_assert early(0) =? 0
+    $runtime_assert released =? 61
+    $runtime_assert early(-1) =? 1
+    $runtime_assert released =? 60
+    $runtime_assert total =? 72
+    $runtime_assert released+total =? 132
+    $runtime_assert normal(1) =? 2
+    $runtime_assert released =? 61
+    printl("{total} {released}")
+    return 0
+}

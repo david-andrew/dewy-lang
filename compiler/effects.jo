@@ -11,6 +11,7 @@ use 'places.jo'
 use 'isolation.jo'
 use 'refine.jo'
 use 'facts.jo'
+use 'ownership.jo'
 
 enum EffectKind: read, write, alloc, detach, costly_copy, panic, io, block, spawn, escape, opaque
 struct EffectAtom:
@@ -256,6 +257,10 @@ effect_scan_node = (f: int, n: int):
         if nodes[n].aux == i32(int(SK.global)): effect_isolation_block(f, .global_, n)
         else if nodes[n].aux != i32(int(SK.local)): effect_isolation_block(f, .node, n)
         else if int(locals[int(nodes[n].sym)].flags) & (LF_CAPTURE | LF_ADDR) != 0: effect_isolation_block(f, .capture, n)
+    if ownership_literal_print(n):
+        effect_add(f, EffectEvent(EffectAtom(.io), n))
+        effect_isolation_block(f, .node, n)
+        return
     if k == .call and nodes[n].aux == 0:
         g = int(nodes[n].sym)
         routes: PlaceIdentity[]

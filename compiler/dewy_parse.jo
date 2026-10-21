@@ -11,6 +11,7 @@ use 'dewy_tokens.jo'
 use 'refine.jo'
 use 'dewy_methods.jo'
 use 'effects.jo'
+use 'ownership.jo'
 
 # Compact tags shared by lexical tokens and syntax nodes. Names are needed
 # only for formatter/diagnostic text.
@@ -1531,7 +1532,11 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         if annotation != 0 and dw_name(annotation) != "type": return dw_fail(id, "a nominal declaration with a non-type annotation")
         n = mk(.struct_, dewy_syntax[id].pos)
         nodes[n].name = i32(intern(name))
-        nodes[n].a = i32(dw_type(dw_child(mint, 1)))
+        base = dw_grouped(dw_child(mint, 1))
+        if dewy_syntax[base].text == "[]:":
+            if structure != 0: return dw_fail(base, "an inline nominal base with added fields")
+            structure = base
+        else: nodes[n].a = i32(dw_type(base))
         fields: int[]
         methods: int[]
         rows: int[]
@@ -1541,6 +1546,7 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
             outer_siblings = dw_siblings
             dw_siblings = {}
             loop field in rows:
+                if ownership_tag(field) != 0: continue
                 if dw_method_row(field): methods.push(field)
                 else: fields.push(dw_param(field, .vardecl))
             dw_siblings = outer_siblings
@@ -1576,6 +1582,7 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         outer_siblings = dw_siblings
         dw_siblings = {}
         loop field in dw_children(initial):
+            if ownership_tag(field) != 0: continue
             if dw_method_row(field): methods.push(field)
             else: fields.push(dw_param(field, .vardecl))
         dw_siblings = outer_siblings
@@ -1621,7 +1628,14 @@ dw_type_methods = (struct_: int, rows: int[], methods: int[]):
     loop name in row_names: members[name] = receiver
     type_params = kids2(struct_)
     decls: int[]
+    hook = 0
     loop row in rows:
+        tag = ownership_tag(row)
+        if tag != 0:
+            if hook != 0: fatal(dewy_syntax[row].pos, "a lifecycle tag must precede one method")
+            hook = tag
+            continue
+        if hook != 0 and not methods.contains(row): fatal(dewy_syntax[row].pos, "a lifecycle tag requires a method")
         if not methods.contains(row):
             decls.push(0)
             continue
@@ -1654,8 +1668,12 @@ dw_type_methods = (struct_: int, rows: int[], methods: int[]):
             set_list2(fn_, params + own)
             add_flag(fn_, NF_GENERIC)
         dw_add_receiver(fn_, receiver, object_type)
+        if hook != 0:
+            ownership_declare(struct_, fn_, hook)
+            hook = 0
         dw_pending_decls.push(fn_)
         decls.push(fn_)
+    if hook != 0: fatal(nodes[struct_].pos, "a lifecycle tag requires a method")
     group = dewy_method_group(row_names, decls, inherited)
     types_here[int(nodes[struct_].name)] = group
     dw_type_members[file] = types_here
@@ -2128,3 +2146,12 @@ dw_with_methods = (declaration: int) -> int[]:
     loop method in dw_pending_decls: declarations.push(method)
     dw_pending_decls = []
     declarations
+
+ownership_tag = (row: int) -> int:
+    n = dw_unwrap(row)
+    if dewy_syntax[n].kind != .metatag: return 0
+    name = dewy_syntax[n].text
+    if name == "__drop__": return 1
+    if name == "__copy__": return 2
+    if name == "__move__": return 3
+    0

@@ -4,10 +4,12 @@ use 'lower.jo'
 use 'isolation.jo'
 use 'util.jo'
 use 'ast.jo'
+use 'lex.jo'
 use 'check.jo'
 use 'types.jo'
 use 'expr.jo'
 use 'ir.jo'
+use 'ownership.jo'
 
 copies_on = false
 copy_costs: {int: int}
@@ -16,6 +18,9 @@ copy_blocked: {int: bool}
 copy_explicit: {int: bool}
 copy_inputs: {int: bool} # owned ABI: actual parameter local -> true
 copy_bindings: {int: bool} # synthetic local initialized by ownership transfer
+copy_loop_after: {int: bool}[]
+copy_loop_back: {int: bool}[]
+copy_proof_budget = -1
 copy_noenv: {int: bool}
 
 copies_reset = ():
@@ -30,6 +35,9 @@ copies_reset = ():
     copy_bindings = {}
     copy_noenv = {}
     if copies_on: copies_parameters()
+    ownership_parameters()
+    ownership_validate()
+    if ownership_decls.len() != 0: copies_on = true
 
 copy_consumes = (f: int, i: int) -> bool:
     f > 0 and i < fns[f].params.len() and copy_inputs.has(fns[f].params[i])
@@ -165,7 +173,15 @@ copy_mentions = (n: int, live: mut {int: bool}):
 
 copy_live = (n: int, live: mut {int: bool}):
     if n == 0: return
+    if copy_proof_budget == 0: return
+    if copy_proof_budget > 0: copy_proof_budget -= 1
     k = nodes[n].kind
+    if (k == .break_ or k == .continue_) and copy_loop_after.len() > 0:
+        depth = copy_loop_after.len() - 1 - int(nodes[n].ival)
+        edge = if k == .break_: copy_loop_after[depth] else: copy_loop_back[depth]
+        live.clear()
+        loop l, used in edge: live[l] = used
+        return
     if k == .return_: live.clear()
     if k == .ident and nodes[n].aux == i32(int(SK.local)):
         l = int(nodes[n].sym)
@@ -173,6 +189,32 @@ copy_live = (n: int, live: mut {int: bool}):
         if not live.has(l) and not copy_blocked.has(l) and int(locals[l].flags) & skip == 0:
             copy_moves[n] = true
         live[l] = true
+        return
+    if k == .assign and nodes[n].op == i32(int(Tok.assign)) and nodes[n].aux == 0:
+        target = int(nodes[n].a)
+        if nodes[target].kind == .ident and nodes[target].aux == i32(int(SK.local)):
+            # Replacement kills the old value; evaluate its RHS against the
+            # incoming state so self-assignment still captures before dropping.
+            live.remove(int(nodes[target].sym))
+            copy_live(int(nodes[n].b), live)
+            return
+    if k == .vardecl:
+        live.remove(int(nodes[n].sym))
+        copy_live(int(nodes[n].b), live)
+        return
+    if (k == .while_ or k == .for_) and ownership_decls.len() != 0:
+        copy_loop_after.push(live)
+        copy_mentions(n, live)
+        copy_loop_back.push(live)
+        inner = live
+        copy_loop_locals(n, inner)
+        cs = copy_children(n)
+        i = cs.len() - 1
+        loop i >= 0:
+            copy_live(cs[i], inner)
+            i -= 1
+        copy_loop_after.pop()
+        copy_loop_back.pop()
         return
     if k == .while_ or k == .for_ or k == .defer_:
         copy_mentions(n, live)
@@ -213,15 +255,19 @@ copies_prepare = (f: int):
     copy_moves.clear()
     copy_blocked.clear()
     copy_noenv.clear()
+    copy_loop_after = []
+    copy_loop_back = []
+    copy_proof_budget = if ownership_functions.has(f): 4096 else: -1
     if not copies_on: return
     body = int(fns[f].body)
-    if body == 0 or not copy_strict(body): return
+    if body == 0 or (not copy_strict(body) and not ownership_functions.has(f)): return
     loop l in fns[f].locals:
         if int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
             copy_mentions(int(locals[l].alias), copy_blocked)
     copy_deferred(body)
     live: {int: bool}
     copy_live(body, live)
+    if copy_proof_budget == 0: copy_moves.clear()
 
 copy_deferred = (n: int):
     if n == 0: return
@@ -243,10 +289,12 @@ copy_deferred = (n: int):
 copy_take = (e: int, value: Val, t: int) -> Val:
     p = gen_place(e, false)
     if vc(t) == VC_AGG:
+        if ownership_type(t): owner_forget_slot(int(locals[int(nodes[e].sym)].offset))
         s = new_temp(t)
         a = e_slot(s)
         e_copy(a, value.v, tsize(t))
         e_zero(place_addr(p, t), tsize(t))
+        if ownership_type(t): owner_register(s, t)
         return Val(a, true, s)
     v = vreg(vt_of(t))
     e_mov(v, value.v)
@@ -262,6 +310,11 @@ copy_movable = (e: int) -> bool:
     n == e or vc(ntype(n)) == VC_AGG
 
 copy_own = (e: int, value: Val, t: int) -> Val:
+    if ownership_type(t):
+        if value.owned: return value
+        if nodes[e].kind == .ident and copy_movable(e): return copy_take(e, value, t)
+        if copy_proof_budget == 0: fatal(nodes[e].pos, "move proof budget exhausted; cannot copy a move-only owner")
+        fatal(nodes[e].pos, "cannot copy a move-only owner: transfer requires a proven last use (later read, loop, alias or defer keeps it live)")
     if value.owned or not copy_strict(e) or not costly_copy(t): return own(value, t)
     # A literal may be placed in read-only data, then promoted on its first
     # write. That implementation choice is not a source-level duplication.
@@ -319,3 +372,9 @@ copy_shared_global = (s: int, g: int) -> bool:
     value = own(gen_expr(e), ntype(e))
     store_val(int(globals[g].type), e_gaddr(global_addr_off(g)), 0, value.v)
     true
+
+# Locals freshly constructed within a loop do not cross its backedge.
+copy_loop_locals = (n: int, live: mut {int: bool}):
+    if n == 0: return
+    if nodes[n].kind == .vardecl: live.remove(int(nodes[n].sym))
+    loop c in copy_children(n): copy_loop_locals(c, live)

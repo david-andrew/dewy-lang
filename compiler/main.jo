@@ -19,6 +19,7 @@ use 'ir.jo'
 use 'lower.jo'
 use 'isolation.jo'
 use 'copies.jo'
+use 'ownership.jo'
 use 'opt.jo'
 use 'inline.jo'
 use 'loops.jo'
@@ -402,6 +403,9 @@ compile = (path: str, out0: str) -> str:
     isolation_reset()
     facts_finalize()
     copies_reset()
+    if ownership_decls.len() != 0:
+        # Initialize thread bookkeeping before construction can acquire a resource.
+        init_fns.insert(1, runtime_fn("__owner_start"))
     find_unique_globals(not watch_build and not repl_image and not lower_only)
     t1 = time()
     roots: int[]
@@ -411,7 +415,7 @@ compile = (path: str, out0: str) -> str:
     if copies_on:
         loop f in [1..fns.len()):
             body = int(fns[f].body)
-            if body != 0 and copy_strict(body): lf_of_inst(f)
+            if body != 0 and (copy_strict(body) or ownership_functions.has(f)): lf_of_inst(f)
     # exports from user code are always kept; library exports only when their module is used
     exp_done = fill(false, export_fns.len())
     used_mods: {int: bool} = {}

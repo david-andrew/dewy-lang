@@ -55,7 +55,9 @@ __tid = () -> int:
 # per-thread allocator state: [heap_cur, heap_end, live count, free list heads (64 size classes),
 # large blocks freed for reuse (a list), the bytes in that list, boxes waiting to be dropped (a
 # list, its length and capacity), a box being dropped]
-const __TS_WORDS = 76
+const __TS_WORDS = 78
+const __TS_OWNERS = 76
+const __TS_DROPPING = 77
 const __TS_BIG = 67
 const __TS_BOXES = 69
 const __BIG_KEEP = 64 << 20            # (native: at most this much is kept; a web page keeps all)
@@ -587,6 +589,10 @@ __write_err = (s: str):
 
 # (a leaf, which inlining counts on: exit() and panics write out what print collected first)
 __exit = (code: int):
+    __owner_unwind()
+    __exit_raw(code)
+
+__exit_raw = (code: int):
     when TARGET == "wasm":
         __wasm_exit(code)
     else when TARGET == "windows":
@@ -595,6 +601,7 @@ __exit = (code: int):
         syscall(231, code)
 
 __panic = (msg: str):
+    __owner_unwind()
     __write_err("panic: ")
     __write_err(msg)
     __write_err("\n")
@@ -978,3 +985,55 @@ __buf_finish = (b: *u8) -> str:
     mem_copy(q + 24, b + 24, n)
     __free(b)
     q as str
+
+# Intrusive stack-owned cleanup records: next, live, value address, dispatcher.
+# The list itself never allocates. Unlink before invoking user cleanup.
+@noinline
+__owner_link = (r: *int, value: *u8, drop: *u8):
+    if r[1] != 0: return
+    t = __ts()
+    r[0] = t[__TS_OWNERS]
+    r[2] = value as int
+    r[3] = drop as int
+    r[1] = 1
+    t[__TS_OWNERS] = r as int
+
+@noinline
+__owner_unlink = (r: *int):
+    if r[1] == 0: return
+    link = __ts() + __TS_OWNERS
+    loop link[0] != 0:
+        item = link[0] as *int
+        if item == r:
+            link[0] = r[0]
+            r[1] = 0
+            return
+        link = item
+
+@noinline
+__owner_drop = (r: *int):
+    if r[1] == 0: return
+    __owner_unlink(r)
+    t = __ts()
+    t[__TS_DROPPING] = 1
+    when not BOOTSTRAP:
+        __call_raw(r[3] as *u8, r[2] as *u8)
+    t[__TS_DROPPING] = 0
+
+@noinline
+__owner_unwind = ():
+    if __tstate == null: return
+    t = __ts()
+    # A checked drop failing is an invariant violation, never a second unwind.
+    if t[__TS_DROPPING] != 0: __exit_raw(101)
+    loop t[__TS_OWNERS] != 0:
+        __owner_drop(t[__TS_OWNERS] as *int)
+
+__owner_print = (s: str):
+    __out_flush()
+    __write_fd(1, data(s), len(s))
+    __write_fd(1, data("\n"), 1)
+
+__owner_start = ():
+    __ts()
+    pass

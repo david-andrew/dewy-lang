@@ -8,6 +8,7 @@ use 'util.jo'
 use 'ast.jo'
 use 'check.jo'
 use 'expr.jo'
+use 'ownership.jo'
 
 struct DewyMethod:
     decl: int
@@ -79,7 +80,7 @@ dewy_infer_methods = ():
             if dewy_methods[i].reads: continue
             decl = dewy_methods[i].decl
             receiver = int(nodes[kid(decl, 0)].name)
-            reads = dewy_reads(int(nodes[decl].b), receiver, i)
+            reads = ownership_hooks.has(decl) or dewy_reads(int(nodes[decl].b), receiver, i)
             loop param in kids(decl):
                 if dewy_reads(int(nodes[param].b), receiver, i): reads = true
             if reads:

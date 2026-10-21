@@ -5,6 +5,7 @@ use 'poly_closure.jo'
 use 'isolation.jo'
 # Lowering: typed AST -> IR, including reference counting, copy-on-write and closures.
 use 'copies.jo'
+use 'ownership.jo'
 # Ownership rules: function parameters are borrowed; results of calls and constructors are
 # owned. Owned temporaries used in borrowing positions are released at the end of the
 # statement. Copying a borrowed value into storage retains it.
@@ -332,6 +333,9 @@ release_call = (v: int, t: int):
 drop_at = (addr: int, t0: int):
     t = quantity_base(t0)
     if not is_managed(t): return
+    if ownership_type(t):
+        owner_drop(addr)
+        return
     if vc(t) == VC_INT:
         release(e_load(VI, addr, 0, ptr_size), t)
         return
@@ -383,6 +387,7 @@ borrow = (val: Val, t: int):
 
 own = (val: Val, t: int) -> Val:
     if val.owned: return val
+    if ownership_type(t): fatal(ir_pos, "cannot copy a move-only owner")
     if vc(t) == VC_AGG:
         s = new_temp(t)
         a = e_slot(s)
@@ -503,7 +508,9 @@ scope_push = ():
 scope_add_local = (l: int):
     if scope_locals.len() == 0: return
     f = int(locals[l].flags)
-    if not is_managed(store_type(l)) or f & (LF_PARAM | LF_CAPTURE | LF_ALIAS | LF_BYREF) != 0: return
+    if not is_managed(store_type(l)) or f & (LF_CAPTURE | LF_ALIAS | LF_BYREF) != 0: return
+    if f & LF_PARAM != 0 and not copy_inputs.has(l): return
+    if ownership_type(store_type(l)): owner_register(int(locals[l].offset), store_type(l))
     scope_locals[scope_locals.len() - 1].push(l)
 
 emit_scope_exit = (i: int):
@@ -1728,6 +1735,10 @@ gen_direct_call = (f: int, args: int[], order: int[] = []) -> Val:
     # failure path. Release keeps its measured whole-function inlining policy.
     # Still unwind lowering's pending copy-back records; their unreachable
     # instructions are discarded by control-flow cleanup.
+    if ownership_decls.len() != 0:
+        base = if vc(ret) == VC_AGG: 1 else: 0
+        loop i in [0..fns[f].ptypes.len()):
+            if copy_consumes(f, i) and ownership_type(fns[f].ptypes[i]): owner_forget(argv[base + i])
     nr = not opt_release and not dbg_on and prune(ret) == T_NEVER
     rv = if nr: e_call_nr(lf_of_inst(f), argv, -1) else: e_call(lf_of_inst(f), argv, ret_vt(ret))
     copy_back(mark)
@@ -3650,6 +3661,11 @@ never_value = (t: int) -> Val:
     V(e_iconst(0), false)
 
 gen_expr = (e: int) -> Val:
+    value = gen_expr_value(e)
+    if ownership_type(ntype(e)) and value.owned: owner_register(value.slot, ntype(e))
+    value
+
+gen_expr_value = (e: int) -> Val:
     t = prune(ntype(e))
     k = nodes[e].kind
     # (a call that never comes back, as panic(...), where a value is wanted: "a" + panic("x"))
@@ -3740,7 +3756,8 @@ gen_expr = (e: int) -> Val:
             if fns[int(nodes[e].sym)].deterministic: det_check(int(nodes[e].sym), kids(e), nodes[e].pos)
             order: int[]
             if nodes[e].c != 0: order = call_eval_order(e)
-            r = gen_direct_call(int(nodes[e].sym), kids(e), order)
+            target = if ownership_prints.has(e): runtime_fn("__owner_print") else: int(nodes[e].sym)
+            r = gen_direct_call(target, kids(e), order)
             if vc(t) == VC_VOID: return V(-1, false)
             return r
         if aux == 1:
@@ -4432,9 +4449,11 @@ gen_return = (s: int):
     rtp = prune(cur_ret)
     a = int(nodes[s].a)
     rv = -1
+    owner_result = -1
     if a != 0 and vc(rtp) != VC_VOID:
         stmt_begin()
         val = gen_owned(a)
+        if ownership_type(rtp): owner_result = val.slot
         if vc(rtp) == VC_AGG: store_val(rtp, sret_v, 0, val.v)
         else:
             rv = vreg(vt_of(rtp))
@@ -4450,6 +4469,7 @@ gen_return = (s: int):
     loop i >= 0:
         emit_scope_exit(i)
         i -= 1
+    if owner_result >= 0: owner_forget_slot(owner_result)
     if vc(rtp) == VC_AGG: e_ret(sret_v)
     else: e_ret(rv)
 
@@ -4482,6 +4502,9 @@ assign_to = (target: int, t: int, v: int):
         else if pl.mem: drop_at(pl.v, t)
         else: release(pl.v, t)
     write_place(pl, t, v)
+    if ownership_type(t):
+        owner_forget(v)
+        owner_register(owner_address_slot(pl.v), t)
 
 gen_assign = (s: int):
     a = int(nodes[s].a)
@@ -4609,6 +4632,7 @@ gen_vardecl = (s: int):
         if stack: stack_closure_targets[l] = if has_flag(iv, NF_GENERIC): poly_families[int(nodes[iv].aux)].envfn else: int(nodes[iv].sym)
         val = if stack: gen_lambda(iv, true) else: gen_owned(iv)
         write_place(pl, t, val.v)
+        if ownership_type(t): owner_forget_slot(val.slot)
     else:
         if pl.mem: e_zero(pl.v, tsize(t))
         else: e_mov(pl.v, zero_val(t))
@@ -4791,10 +4815,14 @@ find_views = (f: int):
 
 # a parameter whose parts can be views: a value in memory the function cannot change
 hv_root = (l: int) -> bool:
+    if copy_inputs.has(l): return false
     fl = int(locals[l].flags)
     fl & (LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_SHARED) == 0 and vc(int(locals[l].type)) == VC_AGG and is_managed(int(locals[l].type)) and not type_has_fn(int(locals[l].type))
 
 hv_give = (l: int, v: int):
+    if ownership_type(int(locals[l].type)):
+        hv_bad[l] = true
+        return
     fl = int(locals[l].flags)
     # (a match's own variable is LF_ADDR: the match reads it in memory)
     ok = v != 0 and fl & (LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM | LF_EXPOSED) == 0 and (fl & LF_ADDR == 0 or locals[l].name == 0)
@@ -6164,6 +6192,7 @@ begin_fn = (name: str, idx: int):
 
 lower_inst = (lf: int, f: int):
     begin_fn(fns[f].sym, lf)
+    owner_begin()
     if fns[f].decl != 0:
         ir_set_pos(nodes[int(fns[f].decl)].pos)
         ir.decl_pos = ir_pos
@@ -6268,6 +6297,7 @@ lower_inst = (lf: int, f: int):
     if vc(cur_ret) == VC_AGG: e_ret(sret_v)
     else if vc(cur_ret) == VC_VOID: e_ret(-1)
     else: e_trap()
+    owner_end()
     if dbg_on:
         loop l in fns[f].params: ir.dbg_locals.push(l)
         loop l in fns[f].locals:
@@ -6332,6 +6362,10 @@ helper_drop = (t: int, copy: bool):
     ps = helper_params(1)
     a = ps[0]
     k = types[t].kind
+    if ownership_type(t):
+        if copy: ice("copy helper requested for move-only owner")
+        e_call(lf_of_inst(int(structs[int(types[t].st)].drop_fn)), [a], -1)
+        return e_ret(-1)
     if k == .fn_ or k == .polyfn:
         env = e_load(VI, a, ptr_size, ptr_size)
         if copy:

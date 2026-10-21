@@ -13,6 +13,7 @@ use 'isolation.jo'
 use 'refine.jo'
 use 'places.jo'
 use 'effects.jo'
+use 'ownership.jo'
 
 enum FactPolicy: RuntimeAllowed, RequireStatic
 enum FactReason: missing, write, call, join, loop_, unsupported, wrap, budget
@@ -879,7 +880,12 @@ fact_capture = (n: int, s: mut FactState) -> int:
             if nodes[c].kind == .defer_:
                 defers.push(int(nodes[c].a))
                 fact_pending_defers += 1
-            else: r = fact_capture(c, s)
+            else:
+                r = fact_capture(c, s)
+                # A statement can finish a temporary or lexical owner whose
+                # hook writes exposed storage. Until lifecycle edges carry
+                # precise footprints, never export those facts across cleanup.
+                if ownership_decls.len() != 0: fact_forget(s, c, .call)
         loop i in [0..defers.len()): fact_capture(defers[defers.len() - 1 - i], s)
         fact_pending_defers = pending
         return r

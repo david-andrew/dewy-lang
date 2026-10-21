@@ -18,6 +18,7 @@ use 'comptime.jo'
 use 'facts.jo'
 use 'refine.jo'
 use 'effects.jo'
+use 'ownership.jo'
 use 'reflection.jo'
 use 'dewy_methods.jo'
 
@@ -4602,6 +4603,7 @@ check_pending_functions = (start: int) -> int:
     k
 
 check_program = (main_path: str):
+    ownership_reset()
     facts_reset()
     refine_reset()
     effects_reset()
@@ -4974,4 +4976,6 @@ check_program = (main_path: str):
     zonk_tree(int(fns[prelude_init].body))
     # Close declared promises after every checked helper has been discovered,
     # including check-only callers and unreachable checked declarations.
-    if not errors_only: effects_finalize()
+    if not errors_only:
+        ownership_finalize()
+        effects_finalize()

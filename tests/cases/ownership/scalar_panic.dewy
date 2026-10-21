@@ -1,0 +1,20 @@
+# quick
+# exit: 101
+Owner=type of [value:int64
+    $__drop__
+    release=():>void=>{
+        if value=?0 printl"drop zero"
+        else if value=?1 printl"drop one"
+        else printl"drop two"
+    }
+]
+fail=():>int64=>{panic("owner panic")}
+inner=()=>{
+    let first=Owner[1]
+    let second=Owner[2]
+    let incomplete=Owner[fail()]
+}
+main=()=>{
+    let zero=Owner[0]
+    inner()
+}

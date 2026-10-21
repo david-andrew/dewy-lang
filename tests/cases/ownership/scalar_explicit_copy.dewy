@@ -1,0 +1,7 @@
+let drops:int64=0
+Owner=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+]
+consume=(value:Owner):>int64=>value.value
+main=()=>{let a=Owner[1] let b=a.copy() consume(b)}

@@ -1,0 +1,7 @@
+let drops:int64=0
+Owner=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+]
+consume=(value:Owner):>int64=>value.value
+main=()=>{let owner=Owner[1] const view=@owner let duplicate=owner printl(view.value) consume(duplicate)}

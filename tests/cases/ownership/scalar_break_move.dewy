@@ -1,0 +1,17 @@
+# quick
+let drops:int64=0
+Owner=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+]
+consume=(owner:Owner):>int64=>owner.value
+main=()=>{
+    let owner=Owner[42]
+    loop i in [0..4) {
+        if i <? 2 continue
+        assert(consume(owner)=?42)
+        break
+    }
+    assert(drops=?1)
+    printl"ok"
+}
