@@ -2718,9 +2718,11 @@ dw_parallel = (arm: int, collect: bool) -> int:
         set_list(fn_, [param])
         nodes[fn_].b = i32(body)
     call = bc_call(if mutable: "parallel_update" else if collect: "__dewy_parallel_collect" else: "__dewy_parallel_each", [source, fn_], pos)
-    if collect: return call
+    region = mk(.parallel_region, pos)
+    nodes[region].a = i32(call)
+    if collect: return region
     statement = mk(.exprstmt, pos)
-    nodes[statement].a = i32(call)
+    nodes[statement].a = i32(region)
     statement
 
 dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:

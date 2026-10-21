@@ -8974,6 +8974,9 @@ check_expr = (n: int, expected: int) -> int:
             if is_union(ft) and union_index(ft, tt) >= 0: why = if dewy_at(nodes[n].pos): " (a union is not cast: inside `if x is? {dt(tt)} \{ }` (or after `x is? {dt(tt)} and`), x is one)" else: " (a union is not cast: after `if x is {dt(tt)}:` (or in `x is {dt(tt)} and ...`), x is one)"
             fatal(nodes[n].pos, "cannot cast {dt(ft)} to {dt(tt)}{why}")
         t = tt
+    else if k == .parallel_region:
+        t = check_expr(int(nodes[n].a), expected)
+        nodes[n].a = i32(last_checked)
     else if k == .range: return check_range_value(n, expected)
     else if k == .addr:
         at = check_expr(int(nodes[n].a), 0)

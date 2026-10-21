@@ -27,6 +27,7 @@ use 'msl.jo'
 use 'pe.jo'
 use 'math_lower.jo'
 use 'callback_specialize.jo'
+use 'parallel_lower.jo'
 
 const VC_VOID = 0
 const VC_INT = 1
@@ -2023,11 +2024,20 @@ stack_closure_params: {int: bool} = {}
 
 # Fail closed: a parameter may only be invoked or forwarded to another proven
 # invocation-only parameter. In-progress summaries are false, closing cycles.
-# Aggregates, captures, rebinding and return values remain excluded.
+# Aggregates, escaping captures, rebinding and return values remain excluded.
 closure_invoked_only = (n: int, l: int, called: bool = false) -> bool:
     if n == 0: return true
     k = nodes[n].kind
-    if k == .lambda or k == .fn_: return true
+    if k == .fn_: return true
+    if k == .lambda:
+        f = int(nodes[n].sym)
+        if f <= 0 or has_flag(n, NF_GENERIC): return false
+        loop cap in fns[f].caps:
+            if cap.outer != i32(l): continue
+            inn = int(cap.inner)
+            if not called or int(locals[inn].flags) & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_SHARED) != 0: return false
+            if not closure_invoked_only(int(fns[f].body), inn): return false
+        return true
     if k == .ident: return called or nodes[n].aux != i32(int(SK.local)) or nodes[n].sym != i32(l)
     a = int(nodes[n].a)
     direct = k == .call and nodes[n].aux == 1
@@ -2038,7 +2048,7 @@ closure_invoked_only = (n: int, l: int, called: bool = false) -> bool:
         if k != .partial and not closure_invoked_only(int(nodes[n].d), l): return false
     loop i in [0..nkids(n)):
         arg = kid(n, i)
-        forwarded = k == .call and nodes[n].aux == 0 and nodes[arg].kind == .ident and nodes[arg].aux == i32(int(SK.local)) and nodes[arg].sym == i32(l) and closure_borrow_param(int(nodes[n].sym), i)
+        forwarded = k == .call and nodes[n].aux == 0 and (nodes[arg].kind == .lambda or nodes[arg].kind == .ident and nodes[arg].aux == i32(int(SK.local)) and nodes[arg].sym == i32(l)) and closure_borrow_param(int(nodes[n].sym), i)
         if not closure_invoked_only(arg, l, forwarded): return false
     loop i in [0..nkids2(n)):
         if not closure_invoked_only(kid2(n, i), l): return false
@@ -2051,7 +2061,7 @@ closure_borrow_param = (f: int, i: int) -> bool:
     p = fns[f].params[i]
     if stack_closure_params.has(p): return stack_closure_params[p]
     stack_closure_params[p] = false
-    if int(locals[p].flags) & (LF_MUTPARAM | LF_ASSIGNED | LF_CAPTURED | LF_ADDR | LF_EXPOSED) != 0: return false
+    if int(locals[p].flags) & (LF_MUTPARAM | LF_ASSIGNED | LF_ADDR | LF_EXPOSED) != 0: return false
     body = int(fns[f].body)
     if not files[pos_file(nodes[d].pos)].is_dewy:
         ok = closure_invoked_only(body, p)
@@ -2063,7 +2073,7 @@ closure_borrow_param = (f: int, i: int) -> bool:
         iv = int(nodes[s].b)
         if iv == 0 or nodes[iv].kind != .ident or nodes[iv].aux != i32(int(SK.local)) or nodes[iv].sym != i32(p): continue
         l = int(nodes[s].sym)
-        if int(locals[l].flags) & (LF_ASSIGNED | LF_CAPTURED | LF_ADDR | LF_EXPOSED | LF_SHARED) != 0: return false
+        if int(locals[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_SHARED) != 0: return false
         ok = closure_invoked_only(body, l)
         stack_closure_params[p] = ok
         return ok
@@ -4139,7 +4149,10 @@ gen_expr_value = (e: int) -> Val:
         e_zero(d, tsize(t))
         e_store(d, 0, e_iconst(int(nodes[e].aux)), 4)
         return Val(d, true, s)
+    if k == .parallel_region: return gen_expr(int(nodes[e].a))
     if k == .index:
+        scalar = parallel_scalar_read(e)
+        if scalar >= 0: return V(scalar, false)
         if nodes[e].aux == 1: return gen_slice(e)
         p = gen_place(e, false)
         return V(read_place(p, t), false)
@@ -5113,6 +5126,7 @@ gen_vardecl = (s: int):
         return
     l = int(nodes[s].sym)
     t = int(locals[l].type)
+    if parallel_scalar_decl(s, l): return
     if copies_on and copy_bindings.has(l) and nodes[s].aux2 == 1:
         write_place(local_place(l, true), t, gen_expr(int(nodes[s].b)).v)
         scope_add_local(l)
@@ -6686,6 +6700,7 @@ gen_block_stmts = (b: int):
 # ---------------- functions ----------------
 begin_fn = (name: str, idx: int):
     ir_begin(name, idx)
+    parallel_scalars.clear()
     stack_closure_fn = -1
     stack_closure_params.clear()
     math_word_regs.clear()

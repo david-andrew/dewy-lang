@@ -1,0 +1,168 @@
+# Scoped parallel regions survive checking. A small fixed collector whose only
+# uses are constant element reads needs neither a collection ABI nor a job on
+# the sequential path. Other regions retain the ordinary library lowering.
+use 'lower.jo'
+use 'ast.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'types.jo'
+use 'util.jo'
+use 'ir.jo'
+use 'ownership.jo'
+
+struct ParallelRegion:
+    call: int
+    callback: int
+    first: int
+    count: int
+
+# Function-local lowering state, reset by begin_fn (including fused workers).
+# Values are the joined scalar results, in source order.
+parallel_scalars: {int: int[]}
+
+parallel_prelude_call = (n: int, name: str) -> bool:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return false
+    f = int(nodes[n].sym)
+    d = int(fns[f].decl)
+    d != 0 and modules[int(fns[f].mod)].is_prelude and name_of(int(nodes[d].name)) == name
+
+parallel_region = (n0: int) -> ParallelRegion:
+    n = n0
+    if nodes[n].kind == .parallel_region: n = int(nodes[n].a)
+    if nkids(n) != 2: return ParallelRegion()
+    first = 0
+    count = -1
+    source = kid(n, 0)
+    if parallel_prelude_call(n, "parallel_range"):
+        if nodes[source].kind == .int_lit: count = nodes[source].ival
+    else if parallel_prelude_call(n, "__dewy_parallel_collect"):
+        if not parallel_prelude_call(source, "__dewy_range") or nkids(source) != 5: return ParallelRegion()
+        a = kid(source, 0)
+        second = kid(source, 1)
+        if nodes[second].kind != .int_lit: return ParallelRegion()
+        b = kid(source, 2)
+        step = kid(source, 3)
+        inclusive = kid(source, 4)
+        if nodes[a].kind != .int_lit or nodes[b].kind != .int_lit or nodes[step].kind != .bool_lit or nodes[step].ival != 0 or nodes[inclusive].kind != .bool_lit: return ParallelRegion()
+        first = nodes[a].ival
+        last = nodes[b].ival
+        # Bound arithmetic before subtraction: no overflow in compile-time shape.
+        if first < -1048576 or first > 1048576 or last < first or last > first + 8: return ParallelRegion()
+        count = last - first + nodes[inclusive].ival
+    else: return ParallelRegion()
+    if count < 1 or count > 8: return ParallelRegion()
+    callback = kid(n, 1)
+    if nodes[callback].kind != .lambda or has_flag(callback, NF_GENERIC): return ParallelRegion()
+    f = int(nodes[callback].sym)
+    if fns[f].params.len() != 1 or is_managed(int(fns[f].ret)) or (vc(int(fns[f].ret)) != VC_INT and vc(int(fns[f].ret)) != VC_FLT): return ParallelRegion()
+    if ownership_callable_cap(int(fns[f].fntype)) != 0: return ParallelRegion()
+    loop cap in fns[f].caps:
+        inn = int(cap.inner)
+        t = store_type(inn)
+        if is_managed(t) or vc(t) == VC_AGG or is_shared(inn): return ParallelRegion()
+    ParallelRegion(n, callback, first, count)
+
+parallel_scalar_uses = (n: int, l: int, count: int) -> bool:
+    if n == 0: return true
+    k = nodes[n].kind
+    if k == .lambda or k == .fn_: return true # LF_CAPTURED is rejected at entry
+    if k == .ident: return nodes[n].aux != i32(int(SK.local)) or nodes[n].sym != i32(l)
+    if k == .index and nodes[n].aux == 0:
+        a = int(nodes[n].a)
+        b = int(nodes[n].b)
+        if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and nodes[a].sym == i32(l):
+            return nodes[b].kind == .int_lit and nodes[b].ival >= 0 and nodes[b].ival < count
+    # A write/address cannot use scalar read substitution for its target.
+    if k == .assign or k == .addr:
+        root = place_var(int(nodes[n].a))
+        if root != 0 and nodes[root].aux == i32(int(SK.local)) and nodes[root].sym == i32(l): return false
+    if not parallel_scalar_uses(int(nodes[n].a), l, count): return false
+    if not parallel_scalar_uses(int(nodes[n].b), l, count): return false
+    if k != .for_:
+        if not parallel_scalar_uses(int(nodes[n].c), l, count): return false
+        if k != .partial and not parallel_scalar_uses(int(nodes[n].d), l, count): return false
+    loop child in kids(n):
+        if not parallel_scalar_uses(child, l, count): return false
+    loop child in kids2(n):
+        if not parallel_scalar_uses(child, l, count): return false
+    true
+
+parallel_scalar_decl = (s: int, l: int) -> bool:
+    iv = int(nodes[s].b)
+    if iv == 0 or (nodes[iv].kind != .call and nodes[iv].kind != .parallel_region): return false
+    if int(locals[l].flags) & (LF_ASSIGNED | LF_CAPTURED | LF_ADDR | LF_EXPOSED | LF_SHARED | LF_ALIAS | LF_BYREF) != 0: return false
+    region = parallel_region(iv)
+    if region.call == 0: return false
+    if not parallel_scalar_uses(int(fns[cur_fn].body), l, region.count): return false
+    seen: {int: bool}
+    if not parallel_context_free(region.callback, seen): return false
+    race_check(int(nodes[region.call].sym), kids(region.call), nodes[region.call].pos)
+    f = int(nodes[region.callback].sym)
+    # Preserve the activation owning the region. In particular, recursive
+    # forks must inline their body into the parent, not expand the parent into
+    # the body and leave an environment-passing recursive cycle behind.
+    ir.noinline = true
+    env_layout(f)
+    # This environment is only passed directly to the checked body. No closure
+    # value is constructed/copied, so no heap header or refcount is needed.
+    env = e_iconst(0)
+    if fns[f].caps.len() > 0:
+        env = e_slot(new_slot(int(fns[f].env_size), 8))
+        loop cap in fns[f].caps:
+            inn = int(cap.inner)
+            outer = int(cap.outer)
+            t = store_type(inn)
+            store_val(t, env, int(locals[inn].env_off), read_place(local_place(outer, false), t))
+    results: int[]
+    loop i in [0..region.count):
+        results.push(e_call(lf_of_inst(f), [env, e_iconst(region.first + i)], ret_vt(int(fns[f].ret))))
+    parallel_scalars[l] = results
+    true
+
+parallel_scalar_read = (n: int) -> int:
+    if parallel_scalars.len() == 0 or nodes[n].aux != 0: return -1
+    a = int(nodes[n].a)
+    b = int(nodes[n].b)
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)) or nodes[b].kind != .int_lit: return -1
+    l = int(nodes[a].sym)
+    if not parallel_scalars.has(l): return -1
+    parallel_scalars[l][int(nodes[b].ival)]
+
+# The legacy scheduler gives random() a separate stream. Keep that boundary
+# unless the transitive body is known not to observe it. Unknown callback calls
+# and large graphs conservatively retain the library path. This visited set is
+# private to one query: optimistic cycle edges cannot publish a false summary.
+parallel_context_fn = (f: int, seen: mut {int: bool}) -> bool:
+    if seen.has(f): return true
+    if seen.len() >= 128: return false
+    seen[f] = true
+    d = int(fns[f].decl)
+    if d == 0 or has_flag(d, NF_EXTERN): return false
+    if modules[int(fns[f].mod)].is_prelude:
+        name = name_of(int(nodes[d].name))
+        if name == "random" or name == "random_int" or name == "seed_random": return false
+        if name == "parallel_range" or name == "__dewy_parallel_collect" or name == "__dewy_parallel_each" or name == "parallel_map" or name == "parallel_update": return true
+    parallel_context_free(int(fns[f].body), seen)
+
+parallel_context_free = (n: int, seen: mut {int: bool}) -> bool:
+    if n == 0: return true
+    # Equality/hash and formatting may invoke user code through generated
+    # helpers even when the checked expression is not a call node.
+    loop called in value_helper_calls(n):
+        if not parallel_context_fn(called, seen): return false
+    k = nodes[n].kind
+    if k == .pair and nodes[n].sym > 0 and not parallel_context_fn(int(nodes[n].sym), seen): return false
+    if k == .lambda: return parallel_context_fn(int(nodes[n].sym), seen)
+    if k == .call:
+        if nodes[n].aux == 1 or nodes[n].aux == 4: return false
+        if nodes[n].aux == 0 and not parallel_context_fn(int(nodes[n].sym), seen): return false
+    if not parallel_context_free(int(nodes[n].a), seen): return false
+    if not parallel_context_free(int(nodes[n].b), seen): return false
+    if k != .for_:
+        if not parallel_context_free(int(nodes[n].c), seen): return false
+        if k != .partial and not parallel_context_free(int(nodes[n].d), seen): return false
+    loop child in kids(n):
+        if not parallel_context_free(child, seen): return false
+    loop child in kids2(n):
+        if not parallel_context_free(child, seen): return false
+    true
