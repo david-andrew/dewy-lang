@@ -494,7 +494,7 @@ let count:int64=0
 main=():>void=>window("Shader reload" 64 64)
 update=(dt:float64):>void=>{count+=1 sleep(5ms)}
 draw=():>void=>{
-clear(BLACK) draw(program triangle U(1))
+clear(BLACK) program.draw(triangle U(1))
 if count%10 =? 0 {
 let pixels=screenshot().pixels
 let index=(32*64+32)*4
