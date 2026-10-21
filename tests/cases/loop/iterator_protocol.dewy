@@ -1,0 +1,28 @@
+# quick
+# A value whose type has a `next` method (the next element, or none) is an
+# iterator, and a loop calls `next` until it gives none.
+Countdown:type = [
+    left:int64
+    next = ():>int64|none => {
+        if left <=? 0 return none
+        left -= 1
+        return left + 1
+    }
+    skip = ():>void => { left -= 1 }
+]
+main = () => {
+    loop n in Countdown[3] { printl(n) }
+    printl([loop n in Countdown[4] n * n])
+    $outer
+    loop n in Countdown[9] {
+        if n =? 7 continue
+        if n <? 5 break $outer
+        printl(n)
+    }
+    # Naming the iterator lets the body steer it.
+    loop n in c=Countdown[6] {
+        if n =? 5 { c.skip }
+        printl(n)
+    }
+    loop n in Countdown[0] { printl(n) } else { printl("empty") }
+}

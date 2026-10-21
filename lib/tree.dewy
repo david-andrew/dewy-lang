@@ -1,0 +1,40 @@
+# A tree of values kept in arrays: node i holds values[i], and children[i]
+# lists the positions of its children in order. `walk` visits the nodes depth
+# first, each before its children; the walk is a steerable iterator, whose
+# `skip_children` leaves out the children of the node it gave last:
+#
+#     loop name in w=tree.walk() { if name =? "drafts" w.skip_children }
+Tree:type = <T>[
+    values:array<T>=[]
+    children:array<array<int64>>=[]
+    roots:array<int64>=[]
+    # Adds a value under the node at `parent` (none: a new root); gives its position.
+    add = (value:T parent:int64|none=none):>int64 => {
+        let at = values.length
+        values.push(value)
+        children.push([])
+        if parent is? none { roots.push(at) } else { children[parent].push(at) }
+        return at
+    }
+    walk = ():>TreeWalk<T> => TreeWalk<T>[tree=[values children roots] pending=[loop i in [0..roots.length) roots[roots.length - 1 - i]]]
+]
+
+# The iterator `Tree.walk` makes: `next` gives the next value or none.
+TreeWalk:type = <T>[
+    tree:Tree<T>
+    pending:array<int64>
+    current:int64=-1
+    skipping:bool=false
+    next = ():>T|none => {
+        if current >=? 0 and not skipping {
+            let below = tree.children[current]
+            loop i in [0..below.length) { pending.push(below[below.length - 1 - i]) }
+        }
+        skipping = false
+        if pending.length =? 0 return none
+        current = pending.pop()
+        return tree.values[current]
+    }
+    # Leaves out the children of the node `next` gave last.
+    skip_children = ():>void => { skipping = true }
+]

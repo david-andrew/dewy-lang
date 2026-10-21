@@ -1,0 +1,18 @@
+# quick
+# The bundled tree's walk is a steerable iterator: `skip_children` leaves out
+# the children of the node it gave last.
+from tree import Tree
+main = () => {
+    let files:Tree<string> = []
+    let root = files.add("home")
+    let drafts = files.add("drafts" root)
+    files.add("old.txt" drafts)
+    files.add("older.txt" drafts)
+    let notes = files.add("notes" root)
+    files.add("todo.txt" notes)
+    printl([loop name in files.walk() name])
+    loop name in w=files.walk() {
+        if name =? "drafts" { w.skip_children }
+        printl(name)
+    }
+}

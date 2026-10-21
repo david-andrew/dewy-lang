@@ -2534,6 +2534,53 @@ dewy_cursor_loop = (s: int) -> bool:
 
 # Indexed user containers use their existing len / [] operations. Retain the
 # input value and length once, then reuse the ordinary counted-loop lowering.
+# The iterator protocol: a value whose type has a `next` method, giving the next
+# element or none, is iterated by calling it until none. `loop x in it=source`
+# names the iterator, so the body can call its other methods to steer it (a tree
+# walk's `skip_children`). The loop becomes `let it=source` and a `loop true`
+# whose body starts by taking the next element.
+dewy_iterator_type = (t: int) -> bool:
+    if types[t].kind != .struct_ or is_map_type(t) or is_map_entries_type(t) or is_dewy_cursor_iter(t): return false
+    members = dewy_decl_members.get(int(structs[int(types[t].st)].decl)) ?? {}
+    (members.get(intern("next")) ?? -1) >= 0
+
+dewy_iterator_loop = (s: int) -> bool:
+    it = int(nodes[s].a)
+    named = dewy_named_iterators.get(it) ?? 0
+    pos = nodes[s].pos
+    if nodes[it].kind == .range or not dewy_at(pos) or not dewy_iterator_type(prune(ntype(it))):
+        if named != 0: fatal(pos, "`loop … in {name_of(named)}=…` names an iterator: a value whose type has a `next` method giving the next element or none")
+        return false
+    if has_flag(s, NF_MUT): fatal(pos, "an iterator yields values; `loop @item in items` needs stored array elements")
+    if nkids(s) != 1: fatal(pos, "an iterator loop binds one value; unpack it in the body")
+    iterator = if named != 0: name_of(named) else: "__iterator{bc_count}"
+    step = "__step{bc_count}"
+    bc_count += 1
+    add_flag(it, NF_CHECKED)
+    receiver = bc_ident(iterator, pos)
+    add_flag(receiver, NF_MUT)
+    taken = bc_let(step, bc_method(receiver, "next", [], pos), pos)
+    finished = mk(.istype, pos)
+    nodes[finished].a = i32(bc_ident(step, pos))
+    none_type = mk(.tname, pos)
+    nodes[none_type].name = i32(intern("none"))
+    nodes[finished].b = i32(none_type)
+    binder = kid(s, 0)
+    element = mk(.vardecl, nodes[binder].pos)
+    if nodes[binder].kind == .tuple: set_list(element, kids(binder))
+    else:
+        nodes[element].name = nodes[binder].name
+        nodes[element].a = nodes[binder].a
+    nodes[element].b = i32(bc_ident(step, pos))
+    body = lx_block([taken, lx_if(finished, mk(.break_, pos), pos), element] + kids(int(nodes[s].b)), pos)
+    steps = mk(.while_, pos)
+    nodes[steps].a = i32(bc_bool(true, pos))
+    nodes[steps].b = i32(body)
+    nodes[steps].sval = nodes[s].sval
+    nodes[s] = nodes[lx_block([bc_let(iterator, it, pos), steps], pos)]
+    check_stmt(s)
+    true
+
 dewy_sequence_loop = (s: int) -> bool:
     it = int(nodes[s].a)
     if nodes[it].kind == .range: return false
@@ -2635,6 +2682,7 @@ check_for = (s: int):
     dewy_nested_loop_bindings(s)
     if dewy_cursor_loop(s): return
     if map_tidy_first(s): return
+    if dewy_iterator_loop(s): return
     if dewy_sequence_loop(s): return
     mark = scope_mark()
     value_mark = value_loops.len()

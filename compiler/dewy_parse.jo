@@ -2537,11 +2537,26 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
     if (op == .kw_as or op == .kw_transmute) and dw_op(dw_child(id, 1)) == .kw_in:
         fatal(dewy_syntax[id].pos, "`{dn_token_text(op)}` binds more loosely than the loop's `in`: parenthesize the converted source, as in `loop byte in (text as array<uint8>) \{ ... }`")
     n = mk(.lhead, dewy_syntax[id].pos)
+    # `loop node in walk=tree.walk()` names the iterator, so the body can steer it
+    header = id
+    source_id = 0
+    iterator = 0
+    if op == .assign and dw_op(dw_child(id, 1)) == .kw_in:
+        header = dw_unwrap(dw_child(id, 1))
+        named = dw_unwrap(dw_child(header, 2))
+        if dw_name(named) == "" or dewy_syntax[named].kind != .identifier: return dw_fail(named, "an iterator name other than a plain name (`loop item in it=source`)")
+        if combined: return dw_fail(id, "a named iterator in a combined loop; name it in a loop of its own")
+        dw_reserved_name(dw_name(named), named)
+        iterator = int(dw_name_id(named))
+        source_id = dw_child(id, 2)
+        op = .kw_in
     if op == .kw_in:
+        if source_id == 0: source_id = dw_child(header, 2)
         nodes[n].op = 1
-        binder = dw_unwrap(dw_child(id, 1))
+        binder = dw_unwrap(dw_child(header, 1))
         if dw_op(binder) == .at:
             if combined: return dw_fail(binder, "a mutable binding in a combined loop; use a separate loop @item in items")
+            if iterator != 0: return dw_fail(binder, "a mutable binding over a named iterator; an iterator yields values")
             add_flag(n, NF_MUT)
             binder = dw_unwrap(dw_child(binder, 1))
         binders: int[]
@@ -2565,9 +2580,11 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
             binders.push(dw_expr(binder))
         set_list(n, binders)
         dw_shadow(dw_bound_names(binders))
+        if iterator != 0: dw_shadow([iterator])
         inside = dw_siblings
         dw_siblings = before
-        source = dw_unwrap(dw_child(id, 2))
+        source = dw_unwrap(source_id)
+        if dw_op(source) == .at and iterator != 0: return dw_fail(source, "a named live loop; an iterator is named over an iterator value, not a place")
         if dw_op(source) == .at:
             if combined: return dw_fail(source, "live iteration (`in @items`) in a combined loop; use `loop item in @items` alone")
             if has_flag(n, NF_MUT): fatal(dewy_syntax[id].pos, "`loop @item in @items` combines two places: iterate the live array by value (`loop item in @items`) or edit its elements in place (`loop @item in items`)")
@@ -2575,7 +2592,8 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
             live = dw_live_loop(n, binders[0], dw_child(source, 1))
             dw_siblings = inside
             return live
-        it = if has_flag(n, NF_MUT): dw_expr(dw_child(id, 2)) else: dw_iterable(dw_child(id, 2))
+        it = if has_flag(n, NF_MUT) or iterator != 0: dw_expr(source_id) else: dw_iterable(source_id)
+        if iterator != 0: dewy_named_iterators[it] = iterator
         dw_siblings = inside
         if has_flag(n, NF_MUT):
             # Element aliases reuse this route. Indexed/call routes need a captured
