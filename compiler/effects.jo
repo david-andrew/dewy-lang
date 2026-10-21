@@ -552,6 +552,11 @@ effect_scalar = (t0: int) -> bool:
     t = representation_type(t0)
     types[t].kind == .bool_ or types[t].kind == .int_ and t != T_MATH_INT
 
+# A word-sized `int` literal is a constant: a shift count such as the `3` in
+# `x >> 3` lowers to an immediate, with no promotion or check.
+effect_count_literal = (n: int) -> bool:
+    nodes[n].kind == .int_lit and prune(ntype(n)) == T_MATH_INT and nodes[n].ival >= 0 and not has_flag(n, NF_U64)
+
 effect_word_op = (op: Tok) -> bool:
     op == .plus or op == .minus or op == .star or op == .amp or op == .pipe or op == .caret or op == .kw_xor or op == .shl or op == .shr or op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
 
@@ -903,14 +908,16 @@ effect_scan_node = (f: int, n: int):
     else if k == .call and nodes[n].aux == 3: supported = effect_plain(ntype(n))
     else if k == .fnref or k == .lambda: supported = effect_bare(n)
     else if k == .for_: supported = tkind(ntype(int(nodes[n].a))) == .array and effect_scalar(telem(ntype(int(nodes[n].a)))) and not has_flag(n, NF_MUT)
-    else if k == .int_lit or k == .bool_lit: supported = effect_scalar(ntype(n))
+    else if k == .int_lit or k == .bool_lit: supported = effect_scalar(ntype(n)) or effect_count_literal(n)
     else if k == .block or k == .exprstmt or k == .return_ or k == .if_ or k == .and_ or k == .or_ or k == .not_ or k == .defer_: supported = true
     else if k == .vardecl:
         l = int(nodes[n].sym)
         if effect_readonly_binding(n): return
         supported = l > 0 and (effect_plain(int(locals[l].type)) or ownership_scalar(int(locals[l].type)) or is_fn_type(int(locals[l].type)) and effect_bare(int(nodes[n].b))) and int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) == 0
     else if k == .binary:
-        supported = nodes[n].aux == 0 and effect_word_op(nodes[n].op as Tok) and effect_scalar(ntype(int(nodes[n].a))) and effect_scalar(ntype(int(nodes[n].b)))
+        shift = nodes[n].op == i32(int(Tok.shl)) or nodes[n].op == i32(int(Tok.shr))
+        count_ok = effect_scalar(ntype(int(nodes[n].b))) or shift and effect_count_literal(int(nodes[n].b))
+        supported = nodes[n].aux == 0 and effect_word_op(nodes[n].op as Tok) and effect_scalar(ntype(int(nodes[n].a))) and count_ok
     else if k == .unary:
         supported = effect_scalar(ntype(n)) and (nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.tilde)))
     else if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_scalar(ntype(n)): supported = true

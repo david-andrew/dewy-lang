@@ -1,0 +1,9 @@
+# A literal shift count is wrapping word work: `no_effects` certifies it.
+right=(x:uint32):>uint32 & no_effects=>x >> 3
+left=(x:uint64):>uint64 & no_effects=>(x << 60) >> 58
+rotate=(x:uint32):>uint32 & no_effects=>(x << 7) or (x >> 25)
+main=()=>{
+    printl(right(64))
+    printl(left(3))
+    printl(rotate(2147483649))
+}
