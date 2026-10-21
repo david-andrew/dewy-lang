@@ -68,7 +68,8 @@ const NF_U64 = 2097152        # an integer literal above the i64 range (written 
 const NF_VOID = 4194304       # a function written `-> void` (it returns nothing, whatever its body says)
 const NF_ALIASDECL = 8388608  # a vardecl whose name stands for the place b (`mut x in xs` in a combined loop)
 const NF_LAZY = 16777216      # a library function's body not parsed yet: tokens from ival in lazy_toks[aux] (parse.jo)
-const NF_LOOPCOUNT = 33554432 # a vardecl a combined loop is rewritten with (`i in 0..`): never warned as unused
+const NF_LOOPCOUNT = 33554432 # a vardecl a combined loop is rewritten with (`i in 0..`): never warned as unused;
+                              # a field: a library member a loop's lowering reads (a map's keys), never warned as the library's own
 const NF_COMPREHENSION = 67108864 # block: first declaration is the collection accumulator
 const NF_RECORD = 134217728 # anonymous structural record declaration
 const NF_INDEX_CAPTURED = 268435456 # compound custom-index update already captured its indices

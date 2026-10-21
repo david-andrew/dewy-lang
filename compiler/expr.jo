@@ -4895,13 +4895,14 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
                 add_flag(args[0], NF_MUT)
             nodes[n] = nodes[bc_call(name, [args[0]], pos)]
         else if id == .dewy_iter_done:
-            length = if tkind(t) == .struct_: bc_method(args[0], "len", [], pos) else: bc_call("len", [args[0]], pos)
+            # (an entry list's length is its key array's, which the value reads)
+            length = if is_map_entries_type(t): bc_call("len", [bc_map_keys(args[0], pos)], pos) else if tkind(t) == .struct_: bc_method(args[0], "len", [], pos) else: bc_call("len", [args[0]], pos)
             nodes[n] = nodes[bc_bin(.ge, args[1], length, pos)]
         else if (is_map_type(t) or is_map_entries_type(t)) and id == .dewy_iter_pair:
             nodes[n] = nodes[bc_call("__map_pair_at", args, pos)]
         else:
             ix = mk(.index, pos)
-            nodes[ix].a = i32(if is_map_type(t) or is_map_entries_type(t): bc_field(args[0], "__keys", pos) else: args[0])
+            nodes[ix].a = i32(if is_map_type(t) or is_map_entries_type(t): bc_map_keys(args[0], pos) else: args[0])
             nodes[ix].b = i32(args[1])
             nodes[n] = nodes[ix]
         return check_expr(n, expected)
@@ -7086,7 +7087,7 @@ check_expr = (n: int, expected: int) -> int:
         a0 = int(nodes[n].a)
         is_callee = n == callee_at
         # (c.__peer in a program: a library's own field, which may change or go in any version)
-        if starts_with(name_of(int(nodes[n].name)), "__") and not pos_in_lib(nodes[n].pos) and not ide_on:
+        if starts_with(name_of(int(nodes[n].name)), "__") and not pos_in_lib(nodes[n].pos) and not ide_on and not has_flag(n, NF_LOOPCOUNT):
             lt = prune(check_expr(a0, 0))
             nodes[n].a = i32(last_checked)
             a0 = last_checked
@@ -8640,6 +8641,13 @@ bc_field = (recv: int, name: str, pos: int) -> int:
     f = mk(.field, pos)
     nodes[f].a = i32(recv)
     nodes[f].name = i32(intern(name))
+    f
+
+# A map's key array, read by a loop's lowering: the library's own member,
+# but never the program's, so never warned about.
+bc_map_keys = (recv: int, pos: int) -> int:
+    f = bc_field(recv, "__keys", pos)
+    add_flag(f, NF_LOOPCOUNT)
     f
 
 bc_let = (name: str, v: int, pos: int) -> int:

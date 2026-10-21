@@ -313,3 +313,46 @@ def test_optional_path_writes_kill_facts(compiler, tmp_path, name):
     assert result.returncode == 0, result.stdout + result.stderr
     ran = subprocess.run([tmp_path / 'loops'], text=True, capture_output=True, timeout=30)
     assert (ran.returncode != 0 and 'index' in ran.stderr) == fails, ran.stdout + ran.stderr
+
+
+# A map loop's lowering reads the library's key array; that never surfaces
+# in the program's diagnostics, and its bounds prove like an array's.
+MAPS = '''
+either=(m:dict<string int64> xs:array<int64>):>int64=>{
+    let t:int64=0
+    loop k in m or x in xs { t=t+1 }
+    return t
+}
+both=(m:dict<string int64> xs:array<int64>):>int64=>{
+    let t:int64=0
+    loop k in m and x in xs { t=t+x }
+    return t
+}
+counted=(m:dict<string int64>):>int64=>{
+    let t:int64=0
+    loop i in 0.. and k in m { t=t+i }
+    return t
+}
+main=()=>{
+    let m:dict<string int64>=["a"->1 "b"->2]
+    printl(either(m [4 5 6]))
+    printl(both(m [4 5 6]))
+    printl(counted(m))
+}
+'''
+
+
+@pytest.mark.parametrize('strict', [False, True], ids=['ordinary', 'strict'])
+def test_map_loops_stay_quiet_and_prove(compiler, tmp_path, strict):
+    result = run(compiler, tmp_path, MAPS, 'build', strict)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0 and 'warning' not in output, output
+    ran = subprocess.run([tmp_path / 'loops'], text=True, capture_output=True, timeout=30)
+    assert ran.returncode == 0 and ran.stdout == '3\n9\n1\n', ran.stdout + ran.stderr
+
+
+def test_program_reading_map_keys_is_warned(compiler, tmp_path):
+    source = 'main=()=>{\n    let m:dict<string int64>=["a"->1]\n    let e=m.__keys\n    printl(e.length)\n}\n'
+    result = run(compiler, tmp_path, source, 'check', False)
+    output = result.stdout + result.stderr
+    assert "/loops.dewy:3:11: warning: __keys is Map's own, inside the library" in output, output
