@@ -53,7 +53,7 @@ function activate(context, vscode, splitArguments) {
                 // overrides resolve to the matching toolchain's formatters.
                 const info = await execFile(compiler, ['--print-lib'], options);
                 const lib = info.stdout.trim();
-                const formatter = path.resolve(cwd, lib, 'debug', 'sloppy_lldb.py');
+                const formatter = path.resolve(cwd, lib, 'debug', 'dewy_lldb.py');
                 if (!lib || !fs.existsSync(formatter)) throw new Error('The toolchain has no LLDB value formatter.');
                 const initCommands = [`command script import ${JSON.stringify(formatter)}`];
                 if (config.stopOnPanic !== false) initCommands.push('breakpoint set -n __panic');

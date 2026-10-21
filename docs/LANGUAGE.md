@@ -130,6 +130,10 @@ builds as well as release builds.
 `--release` adds broader inlining and further loop optimization.
 Use `-g` without `--release` for native variable debugging; it preserves local
 variable locations instead of running the default local optimization pass.
+Types carry their Dewy spellings, and `lib/debug/dewy_gdb.py` (gdb `source`) or
+`dewy_lldb.py` (lldb `command script import`) show values as `"{[value]}"`
+prints them: `int` as its number, strings quoted, arrays, records, optionals,
+unions and dictionaries as their literals.
 
 `dewy-core new coin-race online` creates a playable two-player game in
 `coin-race/coin-race.dewy`, with practice mode, rollback networking and invite

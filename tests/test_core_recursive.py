@@ -565,14 +565,14 @@ main=()=>probe()
     built = subprocess.run([compiler, 'build', source, '-g', '-o', binary],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
-    printer = compiler.parent.parent / 'lib/debug/sloppy_gdb.py'
+    printer = compiler.parent.parent / 'lib/debug/dewy_gdb.py'
     ran = subprocess.run(['gdb', '--batch', '-nx', '-ex', f'source {printer}',
                           '-ex', f'break {source}:4', '-ex', 'run',
                           '-ex', 'printf "child=%ld\n", node.next->value.value.value',
                           '-ex', 'print node', str(binary)], capture_output=True, text=True, timeout=30)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert 'child=22' in ran.stdout, ran.stdout + ran.stderr
-    assert 'next = none' in ran.stdout, ran.stdout + ran.stderr
+    assert 'next=[value=22 next=none]' in ran.stdout, ran.stdout + ran.stderr
 
 
 def test_core_recursive_watch_layout(compiler, tmp_path):

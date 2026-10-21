@@ -3,7 +3,7 @@
 # parameters and variables with their types, and where each variable is while its code runs
 # (x64.jo's dbg_function: a register, the frame, a constant). With it gdb and lldb show the Sloppy
 # source (`break game.jo:31`, `list`, `bt`, stepping by line) and the variables (`info locals`,
-# `print p.x`; lib/debug/ has printers for strings, arrays and optionals), and perf and other
+# `print p.x`; lib/debug/ has printers showing Dewy values), and perf and other
 # profilers attribute samples to lines. Function names are also in .symtab (elf.jo).
 
 use 'util.jo'
@@ -67,8 +67,14 @@ cstr = (out: mut u8[], s: str):
 # the .debug_abbrev, .debug_info and .debug_line sections for code at text_addr
 dw_data_addr = 0            # where the globals' data starts (set before dwarf_sections)
 
+# A Dewy program's types carry their Dewy spellings (`int` is the tagged
+# integer, `int64` the word): lib/debug's printers read them.
+dw_dewy = false
+dw_name = (t: int) -> str: type_str(t, dw_dewy)
+
 dwarf_sections = (text_addr: int, text_len: int, main_path: str, version: str) -> (str, u8[])[]:
     if line_rows.len() == 0: return []
+    dw_dewy = ends_with(main_path, ".dewy")
     dir = os_path(cwd())
     abs = (p: str) -> str:
         if is_abs_path(p): return p
@@ -477,7 +483,7 @@ dw_type_die = (t0: int):
             vi = int(structs[si].variants) + ((DW_VARIANT - t0) & 255)
             poff = int(structs[si].payload_off)
             dw_tb.push(5)
-            cstr(dw_tb, "{type_str(t)}.{names[int(variants[vi].name)]}")
+            cstr(dw_tb, "{dw_name(t)}.{names[int(variants[vi].name)]}")
             put32(dw_tb, tsize(t) - poff)
             loop i in [0..int(variants[vi].nfields)):
                 fi = int(variants[vi].fields) + i
@@ -518,7 +524,7 @@ dw_type_die = (t0: int):
             else: dw_ref(0, e)
             dw_tb.push(8)
             dw_tb.push(0)
-        else if t0 <= DW_HDR: dw_header("{type_str(DW_HDR - t0)}[] header", DW_FLEX - (DW_HDR - t0))
+        else if t0 <= DW_HDR: dw_header("{dw_name(DW_HDR - t0)}[] header", DW_FLEX - (DW_HDR - t0))
         else if t0 <= DW_BOXP:
             dw_tb.push(3)
             dw_tb.push(8)
@@ -527,7 +533,7 @@ dw_type_die = (t0: int):
             # [rc][value] (lib/debug's printers show the value, or the default for none)
             e = DW_BOX - t0
             dw_tb.push(5)
-            cstr(dw_tb, "{type_str(e)} box")
+            cstr(dw_tb, "{dw_name(e)} box")
             put32(dw_tb, 8 + tsize(e))
             dw_member("rc", DW_LONG, 0)
             dw_member("value", e, 8)
@@ -536,24 +542,29 @@ dw_type_die = (t0: int):
     t = prune(t0)
     k = types[t].kind
     size = tsize(t)
-    if k == .int_:
+    if k == .int_ and dw_dewy and t == T_MATH_INT:
+        # (the tagged `int`: a name over its word, which debuggers keep)
+        dw_tb.push(4)
+        cstr(dw_tb, "int")
+        dw_ref(0, T_INT)
+    else if k == .int_:
         enc = 0x07
         if types[t].sign: enc = 0x05
-        dw_base_type(type_str(t), enc, size)
+        dw_base_type(dw_name(t), enc, size)
     else if k == .bool_: dw_base_type("bool", 0x02, 1)
-    else if k == .float_: dw_base_type(type_str(t), 0x04, size)
+    else if k == .float_: dw_base_type(dw_name(t), 0x04, size)
     else if k == .str_:
         dw_tb.push(4)
-        cstr(dw_tb, "str")
+        cstr(dw_tb, if dw_dewy: "string" else: "str")
         dw_ref(0, DW_STRPTR)
     else if k == .array:
         dw_tb.push(4)
-        cstr(dw_tb, type_str(t))
+        cstr(dw_tb, dw_name(t))
         dw_ref(0, DW_PTR - int(types[t].elem))
     else if k == .box:
         # (a boxed field: named as its type is, a pointer to the box)
         dw_tb.push(4)
-        cstr(dw_tb, type_str(t))
+        cstr(dw_tb, dw_name(t))
         dw_ref(0, DW_BOXP - int(types[t].elem))
     else if k == .ptr:
         e = int(types[t].elem)
@@ -570,7 +581,7 @@ dw_type_die = (t0: int):
     else if k == .struct_:
         si = int(types[t].st)
         dw_tb.push(5)
-        cstr(dw_tb, type_str(t))
+        cstr(dw_tb, dw_name(t))
         put32(dw_tb, size)
         loop i in [0..int(structs[si].nfields)):
             fi = int(structs[si].fields) + i
@@ -580,7 +591,7 @@ dw_type_die = (t0: int):
         si = int(types[t].st)
         if structs[si].simple_enum:
             dw_tb.push(10)
-            cstr(dw_tb, type_str(t))
+            cstr(dw_tb, dw_name(t))
             dw_tb.push(u8(size))
             loop v in [0..int(structs[si].nvariants)):
                 vi = int(structs[si].variants) + v
@@ -590,7 +601,7 @@ dw_type_die = (t0: int):
             dw_tb.push(0)
         else:
             dw_tb.push(5)
-            cstr(dw_tb, type_str(t))
+            cstr(dw_tb, dw_name(t))
             put32(dw_tb, size)
             dw_member("tag", DW_TAGS - t, 0)
             # (each variant's fields, where they are: lib/debug's printers show the tag's)
@@ -600,7 +611,7 @@ dw_type_die = (t0: int):
             dw_tb.push(0)
     else if k == .tuple:
         dw_tb.push(5)
-        cstr(dw_tb, type_str(t))
+        cstr(dw_tb, dw_name(t))
         put32(dw_tb, size)
         off = 0
         loop i in [0..int(types[t].nargs)):
@@ -614,7 +625,7 @@ dw_type_die = (t0: int):
         e = T_F32
         if types[t].sign: e = T_I32
         dw_tb.push(5)
-        cstr(dw_tb, type_str(t))
+        cstr(dw_tb, dw_name(t))
         put32(dw_tb, size)
         if n <= 4:
             loop i in [0..n): dw_member(["x", "y", "z", "w"][i], e, 4 * i)
@@ -624,14 +635,14 @@ dw_type_die = (t0: int):
     else if k == .opt:
         e = int(types[t].elem)
         dw_tb.push(5)
-        cstr(dw_tb, type_str(t))
+        cstr(dw_tb, dw_name(t))
         put32(dw_tb, size)
         dw_member("value", e, 0)
         dw_member("has", T_BOOL, tsize(e))
         dw_tb.push(0)
     else if k == .fn_:
         dw_tb.push(5)
-        cstr(dw_tb, type_str(t))
+        cstr(dw_tb, dw_name(t))
         put32(dw_tb, 16)
         dw_member("code", DW_VOIDP, 0)
         dw_member("env", DW_VOIDP, 8)
@@ -645,7 +656,7 @@ dw_type_die = (t0: int):
     else:
         # (what a debugger cannot show: its bytes, as a struct without fields)
         dw_tb.push(17)
-        cstr(dw_tb, type_str(t))
+        cstr(dw_tb, dw_name(t))
         put32(dw_tb, size)
 
 dw_breg = (e: mut u8[], r: int, off: int):

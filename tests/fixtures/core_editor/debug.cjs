@@ -80,7 +80,7 @@ const resolve = (c = config) => provider.resolveDebugConfigurationWithSubstitute
         assert.deepEqual(built.args, ['two words', '', '$literal']);
         assert.deepEqual(built.env, { GREETING: 'hello' });
         assert.equal(built.cwd, directory);
-        assert(built.initCommands.some((line) => line.includes('sloppy_lldb.py')));
+        assert(built.initCommands.some((line) => line.includes('dewy_lldb.py')));
         assert(built.initCommands.some((line) => line.includes('__panic')));
         assert.equal(cp.spawnSync(built.program).status, 42);
         const lib = cp.execFileSync(compiler, ['--print-lib'], { encoding: 'utf8' }).trim();
