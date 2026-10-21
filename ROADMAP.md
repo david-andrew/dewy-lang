@@ -30,7 +30,7 @@ GPT quota is limited: at most one Astra stream, at medium effort; Sol for review
 only.
 
 - Astra: partitioned checking stage 2.
-- Opus: self-hosting readiness (zip.jo pilot prerequisites).
+- Opus: `zip.dewy` in the compiler with a frozen Jo copy for the bootstrap.
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
 
@@ -63,11 +63,11 @@ only.
     literal-lambda code is 4.6×/2.8× C (was 36×), callbacks 2.3×/1.7× (was 13.6×);
     traversal is now 57%; retry only with a materially new approach.
     Still the largest runtime gap.
-- Self-hosting pilot: translate `compiler/zip.jo` to Dewy. This needs
-  `$target`, a pointer/host ABI subset and byte views. Hold the full port
-  (5–10 engineer-weeks) until the zip pilot works without private syntax and a
-  lexer/IR kernel matches Jo in results and speed. Bootstrap afterwards:
-  C → stage0 → frozen Jo compiler → Dewy compiler.
+- Self-hosting. The zip pilot works: `zip.dewy` matches Jo's archives byte for
+  byte and its instruction counts (~/dev/tmp/coord/selfhost-readiness.md).
+  `$target` landed. Next: use `zip.dewy` inside the compiler, keeping a frozen Jo
+  copy for the bootstrap's first generation. Then a lexer module, after
+  question 24.
 - Recover the game-panel compile cost of mathematical `int` (+5.7%, accepted
   10-20); the frontend work recovered the synthetic panel's share.
 - Small items:
@@ -155,6 +155,12 @@ only.
       halves even dimension powers (odd powers are an error).
     - undocumented Jo helpers reach Dewy (`enumerate`, `zip`, `lines`,
       `trim_start`): adopt or hide?
+24. Self-hosting surface (zip needed none; a real compiler module needs these):
+    OS selection (`$target` names only backends; Jo uses `TARGET=="windows"`),
+    build-mode flags (BOOTSTRAP/DEBUG/WATCH), a pointer type spelling, an
+    `extern`/C-binding form, tuple types, a byte-character literal. Also: the
+    design splats `import p"x"` without `as`, but the compiler and tests treat
+    it as a namespace import. Which is right?
 15. Provisional file helpers: `copy_file`, `rename_file`, `make_dirs`,
     `walk_dir`, `glob`, `file_size`, `file_time`, `chmod`, `env`. Keep, rename
     or drop?
