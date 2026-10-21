@@ -10,6 +10,7 @@ use 'expr.jo'
 use 'check.jo'
 use 'facts.jo'
 use 'refine.jo'
+use 'proofs.jo'
 
 struct WitSide:
     value: int = 0
@@ -26,9 +27,13 @@ wit_note = (at: int, text: str):
     err_notes.push((at, "note: {text}"))
 
 # Repairs are current evidence or an explicit runtime check, never `$assert`.
+# Inside an erased proof, evidence comes only from its preconditions, guards
+# and other proofs.
 wit_help = (relation: str, runtime: bool = true):
     want = if relation != "": "`{relation}`" else: "it"
-    if runtime: err_notes.push((-1, "help: establish {want} with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`"))
+    if proof_active and fact_owner > 0 and fact_owner < fns.len() and proof_decls.has(int(fns[fact_owner].decl)):
+        err_notes.push((-1, "help: establish {want} with a stronger proof precondition, a call to another proof or a current guard; erased proofs cannot check at run time"))
+    else if runtime: err_notes.push((-1, "help: establish {want} with a current guard or a stronger checked contract, or check it at run time with `$runtime_assert`"))
     else: err_notes.push((-1, "help: establish {want} with a current guard or a stronger checked contract; erased proofs have no runtime fallback"))
 
 wit_op = (op: Tok) -> str:
