@@ -568,6 +568,14 @@ supported. Bounds may use integer literals, fixed-width `.min`/`.max`, other
 scalar value parameters of the same representation, or stable local bindings.
 Predicates cannot contain calls or arbitrary arithmetic.
 
+An integer literal in a type position is its singleton type, and a union of
+integer singletons is an `int64` whose value set is its invariant: `s:-1|1`,
+`:>-1|0|1`, `Sign:type = <-1|1>`, `answer:42`. Storing into one is the same
+obligation as any refinement. On an integer, `s is? 1` is the comparison
+`s =? 1`, `s is? -1|1` tests each member, and `n is? int64<(<? 100)>` tests the
+refinement. At most 24 values may be missing between a union's least and
+greatest members; literal type arguments (`Pool<42>`) are not supported yet.
+
 A refuted obligation is a compile error. An unproven obligation becomes an
 ordinary runtime check that panics on failure; a proven obligation emits no
 check. Annotated local initialization and replacement, arguments, and results
@@ -2493,6 +2501,13 @@ variable or field is also narrowed inside that arm. Literals use the same member
 type selection as assignment: with `int64|uint8`, `<42>` selects `int64`, while a
 `uint8` value needs a `uint8` arm. A literal covers only its value, so other values
 of that type still need an arm. `<true>` and `<false>` together cover `bool`.
+
+On a fixed-width integer, a refined type arm is a guard: `small:int64<small <? 100>`
+binds `small` when the refinement holds, and `<-1|1>` matches either value.
+Coverage is computed on value sets, so `a:int64<a <? 0>` and `b:int64<b >=? 0>`
+cover `int64`, while over `-1|0|1` the same guards with `>? 0` report
+`this match has no arm for 0`; an arm whose values earlier arms already match is
+unreachable.
 
 A type arm can group a subset of the union's members. For a value of type
 `int64|string|bool`, `part:int64|string=>...` binds an independent `int64|string`

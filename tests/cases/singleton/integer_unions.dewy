@@ -1,0 +1,22 @@
+# A union of integer singletons is a word whose value set is its invariant
+Sign:type = <-1|1>
+flip = (s:Sign):>Sign => -s
+printl(flip(-1))
+
+classify = (s:-1|0|1):>string => if s is? 1 "positive" else if s is? -1 "negative" else "zero"
+printl(classify(0))
+printl(classify(-1))
+
+unit = (n:int64):>-1|1 => {
+    if n is? -1|1 return n
+    return 1
+}
+printl(unit(-1))
+printl(unit(7))
+
+size = (n:int64):>string => if n is? int64<(<? 100)> "small" else "large"
+printl(size(5))
+printl(size(500))
+
+let answer:42 = 42
+printl(answer)

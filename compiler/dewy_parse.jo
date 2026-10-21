@@ -918,6 +918,65 @@ dw_type_name = (name: str) -> str:
     else if name == "int": return "__dewy_int"
     name
 
+# `-1|0|1`, `x:5`: integer singletons in a type position
+dw_int_singletons = (id0: int, out: mut int[]) -> bool:
+    id = dw_grouped(dw_unwrap(id0))
+    k = dewy_syntax[id].kind
+    if dw_op(id) == .pipe: return dw_int_singletons(dw_child(id, 1), out) and dw_int_singletons(dw_child(id, 2), out)
+    literal = dw_integer_kind(k) or k == .prefix and dw_op(id) == .minus and dw_integer_kind(dewy_syntax[dw_unwrap(dw_child(id, 1))].kind)
+    if not literal: return false
+    e = dw_expr(id)
+    if nodes[e].kind != .int_lit or has_flag(e, NF_U64): return dw_fail(id, "an integer singleton outside int64") != 0
+    if not out.contains(nodes[e].ival): out.push(nodes[e].ival)
+    true
+
+dw_singleton_bound = (op: Tok, a: int, b: int, pos: int) -> int:
+    e = mk(.binary, pos)
+    nodes[e].op = i32(int(op))
+    nodes[e].a = i32(a)
+    nodes[e].b = i32(b)
+    e
+
+dw_singleton_and = (a: int, b: int, pos: int) -> int:
+    e = mk(.and_, pos)
+    nodes[e].a = i32(a)
+    nodes[e].b = i32(b)
+    e
+
+dw_singleton_value = (binder: int, pos: int) -> int:
+    e = mk(.ident, pos)
+    nodes[e].name = i32(binder)
+    e
+
+dw_singleton_int = (v: int, pos: int) -> int:
+    e = mk(.int_lit, pos)
+    nodes[e].ival = v
+    add_flag(e, NF_LITERAL)
+    e
+
+# A union of integer singletons is an int64 whose value set is its invariant:
+# `lo <= v <= hi` and `v != g` for each gap g.
+dw_int_singleton_type = (values: int[], pos: int) -> int:
+    lo = values[0]
+    hi = values[0]
+    loop v in values:
+        lo = min(lo, v)
+        hi = max(hi, v)
+    if hi - lo - values.len() + 1 > 24 or hi - lo < 0: fatal(pos, "an integer singleton union with more than 24 missing values between its least and greatest members")
+    binder = intern("$singleton")
+    predicate = dw_singleton_bound(.le, dw_singleton_int(lo, pos), dw_singleton_value(binder, pos), pos)
+    predicate = dw_singleton_and(predicate, dw_singleton_bound(.le, dw_singleton_value(binder, pos), dw_singleton_int(hi, pos), pos), pos)
+    loop g in [lo..hi]:
+        if not values.contains(g): predicate = dw_singleton_and(predicate, dw_singleton_bound(.ne, dw_singleton_value(binder, pos), dw_singleton_int(g, pos), pos), pos)
+    base = mk(.tname, pos)
+    nodes[base].name = i32(intern("i64"))
+    n = mk(.trefined, pos)
+    nodes[n].a = i32(base)
+    nodes[n].name = i32(binder)
+    nodes[n].b = i32(predicate)
+    refine_active = true
+    n
+
 dw_type = (id: int) -> int:
     let id = dw_unwrap(id)
     pos = dewy_syntax[id].pos
@@ -970,6 +1029,8 @@ dw_type = (id: int) -> int:
         nodes[n].a = i32(dw_type(dw_child(id, 1)))
         nodes[n].b = i32(if dw_op(id) == .caret: dw_expr(dw_child(id, 2)) else: dw_type(dw_child(id, 2)))
         return n
+    singletons: int[]
+    if dw_int_singletons(id, singletons): return dw_int_singleton_type(singletons, pos)
     if dw_op(id) == .pipe:
         n = mk(.tunion, pos)
         set_list(n, [dw_type(dw_child(id, 1)), dw_type(dw_child(id, 2))])
@@ -1058,9 +1119,13 @@ dw_type = (id: int) -> int:
                     if dw_name(parameter) == "": return dw_fail(parameter, "refinement lambda needs one value binder")
                     nodes[n].name = dw_name_id(parameter)
                     entry = dw_child(entry, 2)
+                else if dw_pattern_binder != 0: nodes[n].name = dw_pattern_binder
                 nodes[n].b = i32(dw_ref_predicate(entry))
                 base = n
-            else: args.push(dw_type(child))
+            else:
+                literals: int[]
+                if dw_int_singletons(child, literals): return dw_fail(child, "a literal type argument in this type expression")
+                args.push(dw_type(child))
         if args.len() > 0:
             if nodes[base].kind != .tname or nkids(base) != 0: return dw_fail(id, "type arguments on this type expression")
             set_list(base, args)
@@ -2269,6 +2334,8 @@ dw_flow_stmt = (n: int) -> int:
     nodes[s].a = i32(n)
     s
 
+dw_pattern_binder: i32 = 0
+
 dw_pattern = (id: int) -> int:
     let id = dw_unwrap(id)
     pos = dewy_syntax[id].pos
@@ -2291,7 +2358,10 @@ dw_pattern = (id: int) -> int:
     literal = dw_integer_kind(k) or k == .string or k == .boolean or dw_name(id) == "none"
     if dw_op(id) == .minus: literal = dw_integer_kind(dewy_syntax[dw_unwrap(dw_child(id, 1))].kind)
     p = mk(if literal: NK.plit else: NK.ptype, pos)
+    # (`small:int64<small <? 100>`: the arm's binding names the refined value)
+    if binding != "" and binding != "_": dw_pattern_binder = i32(intern(binding))
     nodes[p].a = i32(if literal: dw_expr(id) else: dw_type(id))
+    dw_pattern_binder = 0
     if binding != "" and binding != "_": nodes[p].name = i32(intern(binding))
     p
 
@@ -2653,6 +2723,8 @@ ownership_tag = (row: int) -> int:
 # Facts qualify a result arm; they do not change its runtime representation.
 dw_result_type = (owner: int, id0: int) -> int:
     id = dw_unwrap(id0)
+    singletons: int[]
+    if dw_int_singletons(id, singletons): return dw_int_singleton_type(singletons, dewy_syntax[id].pos)
     if dw_op(id) == .pipe:
         n = mk(.tunion, dewy_syntax[id].pos)
         set_list(n, [dw_result_type(owner, dw_child(id, 1)), dw_result_type(owner, dw_child(id, 2))])

@@ -6232,6 +6232,131 @@ check_vec_binary = (n: int, op: Tok, ta: int, tb: int) -> int:
     tb
 
 # ---------------- match ----------------
+# The values a signed integer type admits, as sorted inclusive intervals
+# [lo0 hi0 lo1 hi1 ...]: its own range, narrowed by a refinement of constant bounds.
+int_intervals = (t0: int) -> (bool, int[]):
+    t = prune(t0)
+    base = representation_type(t)
+    nothing: int[]
+    if not is_int(base) or base == T_MATH_INT or not types[base].sign: return (false, nothing)
+    bits = int(types[base].bits)
+    lo = if bits >= 64: FACT_MIN else: -(1 << (bits - 1))
+    hi = if bits >= 64: FACT_MAX else: (1 << (bits - 1)) - 1
+    gaps: int[]
+    if types[t].kind == .refined:
+        loop atom in ref_predicates[int(types[t].st)]:
+            if atom.a.path.len() > 0 or atom.b.path.len() > 0: return (false, nothing)
+            if atom.a.kind == 1 and atom.b.kind == 0:
+                v = atom.a.value
+                if atom.op == .le: lo = max(lo, v)
+                else if atom.op == .lt:
+                    if v == FACT_MAX: return (true, nothing)
+                    lo = max(lo, v + 1)
+                else if atom.op == .ne: gaps.push(v)
+                else: return (false, nothing)
+            else if atom.a.kind == 0 and atom.b.kind == 1:
+                v = atom.b.value
+                if atom.op == .le: hi = min(hi, v)
+                else if atom.op == .lt:
+                    if v == FACT_MIN: return (true, nothing)
+                    hi = min(hi, v - 1)
+                else if atom.op == .ne: gaps.push(v)
+                else: return (false, nothing)
+            else: return (false, nothing)
+    out: int[]
+    if lo > hi: return (true, out)
+    gaps.sort()
+    start = lo
+    loop g in gaps:
+        if g < start or g > hi: continue
+        if g > start: out += [start, g - 1]
+        if g == hi: return (true, out)
+        start = g + 1
+    out += [start, hi]
+    (true, out)
+
+# a and b as sorted interval lists: their intersection
+interval_meet = (a: int[], b: int[]) -> int[]:
+    out: int[]
+    i = 0
+    j = 0
+    loop i < a.len() and j < b.len():
+        lo = max(a[i], b[j])
+        hi = min(a[i + 1], b[j + 1])
+        if lo <= hi: out += [lo, hi]
+        if a[i + 1] < b[j + 1]: i += 2
+        else: j += 2
+    out
+
+# the parts of `want` not covered by any interval in `have` (unsorted, possibly overlapping)
+interval_missing = (want: int[], have0: int[]) -> int[]:
+    have: int[]
+    loop k in [0..have0.len() / 2):
+        at = 0
+        loop at < have.len() and have[at] <= have0[2 * k]: at += 2
+        have.insert(at, have0[2 * k + 1])
+        have.insert(at, have0[2 * k])
+    out: int[]
+    loop k in [0..want.len() / 2):
+        cur = want[2 * k]
+        hi = want[2 * k + 1]
+        done = false
+        loop h in [0..have.len() / 2):
+            if done or have[2 * h + 1] < cur: continue
+            if have[2 * h] > hi: break
+            if have[2 * h] > cur: out += [cur, have[2 * h] - 1]
+            if have[2 * h + 1] >= hi: done = true
+            else: cur = have[2 * h + 1] + 1
+        if not done: out += [cur, hi]
+    out
+
+# a literal behind the conversions checking gave it
+kid_lit = (e0: int) -> int:
+    e = e0
+    loop nodes[e].kind == .conv: e = int(nodes[e].a)
+    e
+
+# intervals xs (unsorted) each met with the sorted domain
+interval_meet_all = (xs: int[], domain: int[]) -> int[]:
+    out: int[]
+    loop k in [0..xs.len() / 2): out += interval_meet([xs[2 * k], xs[2 * k + 1]], domain)
+    out
+
+interval_text = (xs: int[]) -> str:
+    text = ""
+    loop k in [0..min(xs.len() / 2, 4)):
+        if len(text) > 0: text += ", "
+        if xs[2 * k] == xs[2 * k + 1]: text += "{xs[2 * k]}"
+        else if xs[2 * k] == FACT_MIN: text += "values up to {xs[2 * k + 1]}"
+        else if xs[2 * k + 1] == FACT_MAX: text += "values from {xs[2 * k]}"
+        else: text += "{xs[2 * k]} through {xs[2 * k + 1]}"
+    if xs.len() > 8: text += ", ..."
+    text
+
+# A refined integer type pattern on an integer scrutinee (`<-1|1>`,
+# `small:int64<small <? 100>`): range patterns over the values it admits.
+refined_patterns = (arm: int, domain: int[], st: int):
+    out: int[]
+    loop p in kids(arm):
+        if nodes[p].kind != .ptype:
+            out.push(p)
+            continue
+        pt = prune(resolve_type(int(nodes[p].a)))
+        known, values = int_intervals(pt)
+        if types[pt].kind != .refined or not known:
+            out.push(p)
+            continue
+        values = interval_meet(values, domain)
+        if values.len() == 0: fatal(nodes[p].pos, "this arm is unreachable: no {dt(st)} is a {type_str(pt, true)}")
+        loop k in [0..values.len() / 2):
+            r = mk(.prange, nodes[p].pos)
+            nodes[r].a = i32(bc_int(values[2 * k], nodes[p].pos))
+            nodes[r].b = i32(bc_int(values[2 * k + 1], nodes[p].pos))
+            add_flag(r, NF_INCLUSIVE)
+            if k == 0: nodes[r].name = nodes[p].name
+            out.push(r)
+    set_list(arm, out)
+
 check_match = (m: int, expected: int) -> int:
     is_stmt = has_flag(m, NF_STMT)
     check_expr(int(nodes[m].a), 0)
@@ -6253,6 +6378,14 @@ check_match = (m: int, expected: int) -> int:
         check_struct_fields(int(types[st].st))
         seen = fill(false, int(structs[int(types[st].st)].nvariants))
     sc = int(nodes[m].a)
+    domain_known = false
+    domain: int[]
+    covered: int[]
+    if dewy and not is_union(st):
+        declared = st
+        # (a refined binding reads as its base: its declared type has the values)
+        if nodes[sc].kind == .ident and nodes[sc].aux == i32(int(SK.local)) and type_eq(representation_type(int(locals[int(nodes[sc].sym)].type)), st): declared = int(locals[int(nodes[sc].sym)].type)
+        domain_known, domain = int_intervals(declared)
     narrows = (is_union(st) or types[st].kind == .opt) and nodes[sc].kind == .ident and nodes[sc].aux == i32(int(SK.local))
     # (a field path or a global: narrowed like `if x.f is T`)
     pkey = ""
@@ -6263,10 +6396,12 @@ check_match = (m: int, expected: int) -> int:
         amark = scope_mark()
         changes = narrow_changes.len()
         arm_members: int[]
+        arm_values: int[]
         arm_wild = false
         seen_before = seen
         finite_before = finite_seen
         if dewy and has_wild: fatal(nodes[arm].pos, "this arm is unreachable: an earlier arm already matches every value")
+        if domain_known: refined_patterns(arm, domain, st)
         loop k in [0..nkids(arm)):
             p = kid(arm, k)
             pk = nodes[p].kind
@@ -6274,7 +6409,7 @@ check_match = (m: int, expected: int) -> int:
             # once-evaluated scrutinee. Type patterns reuse union tag dispatch.
             binding = 0
             value = 0
-            if dewy and (pk == .ptype or pk == .plit or pk == .pwild):
+            if dewy and (pk == .ptype or pk == .plit or pk == .pwild or pk == .prange):
                 binding = int(nodes[p].name)
                 nodes[p].name = 0
                 if binding != 0: value = mk_ident_local(hidden, nodes[p].pos)
@@ -6421,13 +6556,19 @@ check_match = (m: int, expected: int) -> int:
                 check_expr(e, st)
                 coerce(e, st)
                 if types[st].kind == .enum_ and nodes[e].kind == .dotname: seen[int(nodes[e].aux)] = true
+                if domain_known and nodes[kid_lit(e)].kind == .int_lit: arm_values += [nodes[kid_lit(e)].ival, nodes[kid_lit(e)].ival]
                 continue
             if pk == .prange:
-                if not is_int(st): fatal(nodes[p].pos, "range patterns need an integer value")
+                if not is_int(representation_type(st)): fatal(nodes[p].pos, "range patterns need an integer value")
                 check_to(int(nodes[p].a), st)
                 check_to(int(nodes[p].b), st)
+                if domain_known and has_flag(p, NF_INCLUSIVE) and nodes[kid_lit(int(nodes[p].a))].kind == .int_lit and nodes[kid_lit(int(nodes[p].b))].kind == .int_lit:
+                    arm_values += [nodes[kid_lit(int(nodes[p].a))].ival, nodes[kid_lit(int(nodes[p].b))].ival]
                 continue
             fatal(nodes[p].pos, "invalid pattern")
+        if dewy and domain_known and arm_values.len() > 0 and not arm_wild:
+            if interval_missing(interval_meet_all(arm_values, domain), covered).len() == 0: fatal(nodes[arm].pos, "this arm is unreachable: earlier arms already match every value it does")
+            covered += arm_values
         if narrows:
             # match x: T: ...   x is a T in the arm (T, U: ... a T | U; _: the members not matched yet)
             if arm_wild:
@@ -6478,6 +6619,10 @@ check_match = (m: int, expected: int) -> int:
     scope_reset(mark)
     narrow_merge(changed)
     exhaustive = has_wild or finite_seen == 3
+    if not exhaustive and domain_known and covered.len() > 0:
+        missing = interval_missing(domain, covered)
+        if missing.len() == 0: exhaustive = true
+        else if not is_stmt: fatal(nodes[m].pos, "this match has no arm for {interval_text(missing)} (add one, or a `_ => ...` arm for the rest)")
     if not exhaustive and types[st].kind == .enum_:
         exhaustive = true
         loop s in seen:
@@ -9330,6 +9475,17 @@ check_istype = (n: int) -> int:
         if ms.len() > 0:
             subj = is_subject(n, orig)
             return is_rewritten(n, orig, members_test(subj, ms, pos))
+    # x is? 1, x is? -1|1, x is? int64<(<? 100)>: the comparisons of the refinement
+    if types[tt].kind == .refined and is_int(representation_type(tt)) and is_int(representation_type(at)) and not is_union(at):
+        subj = is_subject(n, orig)
+        c = 0
+        loop atom in ref_predicates[int(types[tt].st)]:
+            check = bc_bin(atom.op, ref_is_term(atom.a, subj, pos), ref_is_term(atom.b, subj, pos), pos)
+            c = if c == 0: check else: bc_logic(.and_, c, check, pos)
+        if c == 0:
+            c = mk(.bool_lit, pos)
+            nodes[c].ival = 1
+        return is_rewritten(n, orig, c)
     if is_union(at):
         vi = union_index(at, tt)
         if vi < 0: fatal(nodes[int(nodes[n].b)].pos, "{dt(tt)} is not one of the types of {dt(at)}")
@@ -9346,6 +9502,13 @@ check_istype = (n: int) -> int:
 
 # what `x is ...` tests again: x itself (a variable or field path), or else its value put in a
 # variable of its own (computed once)
+ref_is_term = (term: RefTerm, subj: int, pos: int) -> int:
+    if term.kind == 0 and term.path.len() == 0: return copy_path(subj)
+    if term.kind != 1: fatal(pos, "`is?` tests a refinement whose bounds are constants")
+    e = bc_int(term.value, pos)
+    if term.unsigned: add_flag(e, NF_U64)
+    e
+
 is_subject = (n: int, orig: int) -> int:
     if orig != 0: return orig
     add_flag(int(nodes[n].a), NF_CHECKED)

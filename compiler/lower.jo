@@ -2289,7 +2289,7 @@ gen_match_test = (p: int, st0: int, hidden_addr: int) -> int:
         v = gen_expr(a).v
         return e_bin(.eq, VI, load_val(st, hidden_addr, 0), v)
     if k == .prange:
-        sg = types[st].kind == .int_ and types[st].sign
+        sg = types[representation_type(st)].kind == .int_ and types[representation_type(st)].sign
         x = load_val(st, hidden_addr, 0)
         lo = gen_expr(int(nodes[p].a)).v
         hi = gen_expr(int(nodes[p].b)).v

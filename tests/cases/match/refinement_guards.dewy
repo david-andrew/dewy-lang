@@ -1,0 +1,27 @@
+# Refinement guards and singletons as match arms; coverage is on value sets
+describe = (v:int64):>string => match v {
+    <42>                      => "the answer"
+    small:int64<small <? 100> => "small {small}"
+    _                         => "large"
+}
+printl(describe(42))
+printl(describe(7))
+printl(describe(700))
+
+sign = (n:int64):>string => match n {
+    <int64<(<? 0)>>  => "negative"
+    <int64<(>=? 0)>> => "nonnegative"
+}
+printl(sign(-3))
+printl(sign(3))
+
+Sign:type = <-1|1>
+arrow = (s:Sign):>string => match s { <1> => "up"  <-1> => "down" }
+printl(arrow(-1))
+
+kind = (x:-1|0|1):>string => match x {
+    <-1|1> => "unit"
+    <0>    => "zero"
+}
+printl(kind(0))
+printl(kind(1))

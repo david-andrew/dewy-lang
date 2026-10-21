@@ -3559,6 +3559,15 @@ check_vardecl = (s: int):
         if storage != t:
             wrap_conv(int(nodes[s].b), .none_, storage)
             t = storage
+    # (a value parameter's binding keeps its integer refinement: `s:-1|1` stays one)
+    if nodes[s].aux2 == 1 and nodes[s].a == 0 and refine_active and nodes[s].b != 0:
+        v = int(nodes[s].b)
+        if nodes[v].kind == .ident and nodes[v].aux == i32(int(SK.local)):
+            pt = int(locals[int(nodes[v].sym)].type)
+            known, _ = int_intervals(pt)
+            if int(locals[int(nodes[v].sym)].flags) & LF_PARAM != 0 and tkind(pt) == .refined and known:
+                t = pt
+                nodes[s].b = i32(coerce(v, t))
     if t == 0: fatal(nodes[s].pos, "variable needs a type or a value")
     tk = tkind(t)
     if tk == .void_: fatal(nodes[s].pos, "cannot assign a value with no type (void) to '{nm}'{void_rec_hint(int(nodes[s].b))}")
