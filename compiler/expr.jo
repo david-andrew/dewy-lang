@@ -1673,6 +1673,19 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
         e = kid_lit(a)
         if nodes[e].kind == .str_lit and nodes[e].aux != 1: return if str_sets[ps].contains(name_of(int(nodes[e].sval))): 0 else: -1
         return 2
+    if is_lit(a) and types[prune(pat)].kind == .refined and refine_active:
+        # (a literal for a refined integer parameter, `d:0` or `d:int64 & ~0`: the overload
+        # whose values hold it, ahead of a plain integer one)
+        v = 0
+        lit = true
+        if nodes[a].kind == .int_lit and not has_flag(a, NF_U64): v = nodes[a].ival
+        else if nodes[a].kind == .unary and nodes[a].op == i32(int(Tok.minus)) and nodes[int(nodes[a].a)].kind == .int_lit: v = -nodes[int(nodes[a].a)].ival
+        else: lit = false
+        known, intervals = int_intervals(pat)
+        if lit and known:
+            loop k in [0..intervals.len() / 2):
+                if v >= intervals[2 * k] and v <= intervals[2 * k + 1]: return 0
+            return -1
     if is_lit(a):
         # Prefer the literal's default integer width/sign, but only among types
         # that can represent it; Dewy literals prefer mathematical int.

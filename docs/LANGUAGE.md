@@ -598,7 +598,11 @@ as it is, another literal is a compile error, and any other string is checked
 when the program runs. On a string, `head is? BasePrefix` compares it with each
 member. Literal unions mix with each other and with other types
 (`<1 | 2 | "fast" | "slow">`, `'auto' | int64`): `m is? 1` and `m is? "fast"`
-test the member and its value. `loop m in members(U)` unrolls over a literal
+test the member and its value. A literal-typed parameter specializes an overload: `((n:int64 d:0):>DivZero => ...)
+& ((n:int64 d:int64 & ~0):>int64 => n // d)` sends a literal argument to the method
+whose values hold it, ahead of a plain integer method, and the call has that
+method's result type; `(mode:'loud' ...)` and `(mode:'quiet' ...)` do the same for
+strings. `loop m in members(U)` unrolls over a literal
 union's members in the order the union was written, each typed as its own
 singleton, so `if text =? m return m` returns a `U`. Literal unions are
 ordinary type arguments: `Box<'tokens'|'ast'>`, `array<'a'|'b'>`.

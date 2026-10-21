@@ -1,0 +1,13 @@
+# A literal-typed parameter specializes an overload; each call has the chosen method's result type
+DivZero:type = type of error
+safe_div = ((n:int64 d:0):>DivZero => DivZero) & ((n:int64 d:int64 & ~0):>int64 => n // d)
+let q = safe_div(6 3)
+let e = safe_div(6 0)
+if e is? DivZero printl(q + 1)
+sign = ((n:0):>string => "zero") & ((n:-1):>string => "minus one") & ((n:int64):>string => "other {n}")
+printl(sign(0))
+printl(sign(-1))
+printl(sign(5))
+greet = ((mode:'loud' name:string):>string => "HI {name}") & ((mode:'quiet' name:string):>string => "hi {name}")
+printl(greet('loud' "a"))
+printl(greet('quiet' "b"))
