@@ -6237,6 +6237,7 @@ check_match = (m: int, expected: int) -> int:
         arm_wild = false
         seen_before = seen
         finite_before = finite_seen
+        if dewy and has_wild: fatal(nodes[arm].pos, "this arm is unreachable: an earlier arm already matches every value")
         loop k in [0..nkids(arm)):
             p = kid(arm, k)
             pk = nodes[p].kind
@@ -6346,6 +6347,7 @@ check_match = (m: int, expected: int) -> int:
                 vi = find_variant(si, int(nodes[p].name))
                 if vi < 0: fatal(nodes[p].pos, "{dt(st)} has no variant '{name_of(int(nodes[p].name))}'{variant_hint_for(st, name_of(int(nodes[p].name)))}")
                 nodes[p].aux2 = i32(vi)
+                if dewy and structs[si].union_ and seen[vi]: fatal(nodes[p].pos, "this arm is unreachable: earlier arms already match every {dt(struct_targ(si, vi))}")
                 seen[vi] = true
                 v = int(structs[si].variants) + vi
                 if structs[si].union_: arm_members.push(int(fields[int(variants[v].fields)].type))

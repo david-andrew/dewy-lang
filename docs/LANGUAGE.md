@@ -2460,6 +2460,8 @@ to its value, and its fallback remains lazy.
 payload arm such as `n:int64` also narrows the original variable or field to
 `int64` inside that arm; the binding `n` is an independent value. A union is
 written `int64|string`; union matches must cover its members or have a fallback.
+An arm after a catch-all, or one whose member earlier arms already cover, is
+unreachable and an error.
 Literal arms also work directly on unions:
 
 ```dewy

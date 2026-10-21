@@ -11,6 +11,7 @@ main=()=>{
     printl(choose(if c 42 else 43))
     printl(choose(if c x+0 else y+1))
     let n="outer"
-    printl(choose(match x {n:int64=>n _=>42}))
+    let u:int64|string=x
+    printl(choose(match u {n:int64=>n _=>42}))
     printl(choose(if c {let n:int64=42; n} else 42))
 }
