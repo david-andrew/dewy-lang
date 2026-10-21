@@ -231,6 +231,8 @@ validated on the Linux compiler host.
 
 Arguments and array elements are separated by whitespace. Calls use adjacent
 parentheses. A function's final expression is its result; `return` exits early.
+A function declared `:>never` never returns: every path ends in `exit(...)`, a
+panic or an endless loop, and a call to it ends its branch like `exit` does.
 
 ```dewy
 twice=(x)=>x+x

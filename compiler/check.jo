@@ -3678,6 +3678,7 @@ check_stmt = (s: int):
         inst = int(ctxs[cx].inst)
         if fns[inst].kind == FK_INIT and ctxs[cx].parent < 0: fatal(nodes[s].pos, "'return' outside of a function")
         ret = int(ctxs[cx].ret)
+        if not ctxs[cx].infer_ret and prune(ret) == T_NEVER and files[pos_file(nodes[s].pos)].is_dewy: fatal(nodes[s].pos, "a function giving `never` does not return")
         if nodes[s].a != 0:
             if ctxs[cx].infer_ret and tkind(ret) == .var:
                 t = check_expr(int(nodes[s].a), 0)
@@ -3835,6 +3836,8 @@ __check_fn_body = (f: int):
             fns[f].ret = i32(zonk(int(ctxs[cx].ret)))
             if ide_on and decl != 0 and nodes[decl].kind == .fn_ and ide_indexed(pos_file(nodes[decl].pos)): ide_hint_fns.push(f)
             if fns[f].aux_void and tkind(int(fns[f].ret)) != .void_: fatal(nodes[decl].pos, "recursive function '{name_of(int(nodes[decl].name))}' returns a value; add an explicit return type ({jd(nodes[decl].pos, "`-> Type`", "`:>Type`")})")
+        else if r == T_NEVER and decl != 0 and files[pos_file(nodes[decl].pos)].is_dewy and bt != T_NEVER and not (n > 0 and stmt_terminates(kid(body, n - 1))):
+            fatal(nodes[decl].pos, "a function giving `never` must not finish: end each path with `exit(...)`, a panic or an endless loop")
         else if want:
             if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
             else if bt != T_NEVER and not (n > 0 and stmt_terminates(kid(body, n - 1))) and void_arm_end(body, r): pass
@@ -4464,7 +4467,7 @@ add_universe = ():
         ("int8", T_I8), ("int16", T_I16), ("int32", T_I32), ("int64", T_INT),
         ("uint8", T_U8), ("uint16", T_U16), ("uint32", T_U32), ("uint64", T_U64),
         ("float32", T_F32), ("float64", T_FLOAT), ("string", T_STR),
-        ("bool", T_BOOL), ("str", T_STR), ("void", T_VOID), ("vec2", T_VEC2), ("vec3", T_VEC3), ("vec4", T_VEC4),
+        ("bool", T_BOOL), ("str", T_STR), ("void", T_VOID), ("never", T_NEVER), ("vec2", T_VEC2), ("vec3", T_VEC3), ("vec4", T_VEC4),
         ("mat4", T_MAT4), ("ivec2", T_IVEC2), ("ivec3", T_IVEC3), ("ivec4", T_IVEC4)]
     loop t in tys:
         nm = intern(t.0)
