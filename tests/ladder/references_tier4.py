@@ -1,4 +1,4 @@
-"""Independent stdlib-only oracles for ladder tier 4 (flagship programs, 95 onward).
+"""Independent stdlib-only oracles for the tier-4 flagships 95-96 (key-value store, constant-time crypto).
 Never reads Dewy sources or output. Oracles are registered by program directory name.
 --write regenerates expected.out (and stdin.txt where a program reads one)."""
 from pathlib import Path
@@ -458,8 +458,8 @@ def ct_crypto():
     return '\n'.join(lines)
 
 if __name__=='__main__':
-    programs=sorted(q.name for q in ROOT.iterdir() if q.is_dir() and q.name[:2].isdigit() and int(q.name[:2])>=95)
-    assert sorted(ORACLES)==programs,'every tier-4 program needs an oracle'
+    programs=sorted(q.name for q in ROOT.iterdir() if q.is_dir() and q.name[:2].isdigit() and 95<=int(q.name[:2])<=96)
+    assert sorted(ORACLES)==programs,'every program 95-96 needs an oracle'
     selected=[a for a in sys.argv[1:] if not a.startswith('--')]
     files={}
     for name in programs:

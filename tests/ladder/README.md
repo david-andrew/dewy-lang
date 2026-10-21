@@ -1,7 +1,7 @@
 # Acceptance ladder
 
 To add a program, create `NN_name/` with `design.dewy` (the intended design surface) and, where today's dialect can express it, `core.dewy` (which must pass).
-Add an independent stdlib-only oracle to `references.py` (tier 1, programs 01–31), `references_tier2.py` (32–63), `references_tier3.py` (64–94) or `references_tier4.py` (95 onward, tier-4 flagships registered by directory name; their modules sit beside `design.dewy`) and run it with `--write` to produce `expected.out`.
+Add an independent stdlib-only oracle to `references.py` (tier 1, programs 01–31), `references_tier2.py` (32–63), `references_tier3.py` (64–94), `references_tier4.py` (95–96) or `references_tier4b.py` (97–99); tier-4 flagships register oracles by directory name and keep their modules beside `design.dewy`, and run it with `--write` to produce `expected.out`.
 Map it to its ROADMAP.md milestone in `ladder.json`, with a one-line acceptance statement as `note`; `python3 -m tools.core ladder` prints the scoreboard and `--update-ratchet` records design passes.
 
 - **Input.** A `stdin.txt` beside the sources is fed to both versions; otherwise stdin is empty.
