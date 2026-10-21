@@ -78,6 +78,18 @@ str_set_type = (values: str[]) -> int:
     refine_active = true
     mk_type(TypeInfo(kind = .refined, elem = i32(T_STR), bits = i32(id)), [])
 
+# The written order of a literal union's members (`#1`, `'fast`), by the members
+# as a set: interned types forget it, and `members(U)` follows it. (the first
+# spelling of a set keeps its order, as `str_sets` do)
+literal_orders: {str: str[]} = {}
+
+literal_order_key = (keys: str[]) -> str: join(keys.sorted(), "\x00")
+
+literal_order_note = (written: str[]):
+    if written.len() < 2: return
+    key = literal_order_key(written)
+    if not literal_orders.has(key): literal_orders[key] = written
+
 # the string set a type is, or 0
 str_set_of = (t0: int) -> int:
     t = prune(t0)
@@ -93,6 +105,7 @@ str_set_text = (id: int) -> str:
 
 refine_reset = ():
     str_sets = [[]]
+    literal_orders = {}
     ref_predicates = [[]]
     refine_active = false
     refine_fields = []

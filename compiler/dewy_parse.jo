@@ -960,11 +960,18 @@ dw_literal_type = (id: int) -> int:
     ints: int[]
     texts: str[]
     others: int[]
+    written: str[]
     loop leaf in leaves:
-        if dw_int_leaf(leaf): dw_int_singletons(leaf, ints)
+        if dw_int_leaf(leaf):
+            before = ints.len()
+            dw_int_singletons(leaf, ints)
+            if ints.len() > before: written.push("#{ints[before]}")
         else if dewy_syntax[leaf].kind == .string:
-            if not texts.contains(dewy_syntax[leaf].text): texts.push(dewy_syntax[leaf].text)
+            if not texts.contains(dewy_syntax[leaf].text):
+                texts.push(dewy_syntax[leaf].text)
+                written.push("'{dewy_syntax[leaf].text}")
         else: others.push(dw_type(leaf))
+    literal_order_note(written)
     parts: int[]
     if ints.len() > 0: parts.push(dw_int_singleton_type(ints, pos))
     if texts.len() > 0:
