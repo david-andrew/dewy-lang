@@ -468,6 +468,75 @@ fact_probe_function = (f: int) -> {int: bool}:
     result_active = saved_result
     fact_probe
 
+# A callee's return summary: the interval of an array result's length, or of
+# a word result, over every return of an erased speculative run of its body
+# from an unknown entry (with its parameter refinements). Speculation reports
+# nothing and validates nothing; recursion and an exhausted run give unknown.
+struct FactSummary:
+    length: FactBound
+    value: FactBound
+    seen: bool = false
+
+fact_summaries: {int: FactSummary} = {}
+fact_summary_owner = 0
+fact_summary_acc = FactSummary()
+
+fact_summary_record = (s: mut FactState, r: int):
+    t = representation_type(int(fns[fact_summary_owner].ret))
+    length = FactBound()
+    value = FactBound()
+    if r != 0 and tkind(t) == .array: length = fact_bound(s, fact_project(s, r, -1, false, T_INT))
+    else if r != 0: value = fact_bound(s, r)
+    if fact_summary_acc.seen:
+        length = fact_hull(fact_summary_acc.length, length, 0)
+        value = fact_hull(fact_summary_acc.value, value, 0)
+    fact_summary_acc = FactSummary(length, value, true)
+
+fact_summary = (f: int) -> FactSummary:
+    if let known = fact_summaries.get(f): return known
+    unknown = FactSummary(FactBound(), FactBound())
+    d = int(fns[f].decl)
+    t = representation_type(int(fns[f].ret))
+    if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or fns[f].caps.len() != 0 or d != 0 and has_flag(d, NF_EXTERN): return unknown
+    if tkind(t) != .array and not (fact_scalar(t) and is_int(t)): return unknown
+    fact_summaries[f] = unknown
+    saved = (fact_owner, fact_summary_owner, fact_speculating, fact_loop_steps, fact_loop_exhausted, proof_active, result_active, fact_pending_defers, fact_probe_on, fact_query)
+    saved_entry = refine_entry
+    saved_loops = fact_loops
+    saved_acc = fact_summary_acc
+    fact_owner = f
+    fact_summary_owner = f
+    fact_speculating += 1
+    fact_loop_steps = 0
+    fact_loop_exhausted = false
+    proof_active = false
+    result_active = false
+    fact_pending_defers = 0
+    fact_probe_on = false
+    fact_query = false
+    fact_loops = []
+    fact_summary_acc = FactSummary()
+    state = FactState()
+    if refine_active: refine_fact_entry(f, state)
+    r = fact_capture(int(fns[f].body), state)
+    if state.live: fact_summary_record(state, r)
+    result = if fact_loop_exhausted or not fact_summary_acc.seen: unknown else: fact_summary_acc
+    fact_owner = saved.0
+    fact_summary_owner = saved.1
+    fact_speculating = saved.2
+    fact_loop_steps = saved.3
+    fact_loop_exhausted = saved.4
+    proof_active = saved.5
+    result_active = saved.6
+    fact_pending_defers = saved.7
+    fact_probe_on = saved.8
+    fact_query = saved.9
+    refine_entry = saved_entry
+    fact_loops = saved_loops
+    fact_summary_acc = saved_acc
+    fact_summaries[f] = result
+    result
+
 fact_store = (s: mut FactState, e: int, value: int, at: int):
     route = fact_route(e, s)
     fact_store_route(s, route, value, at)
@@ -1629,6 +1698,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
         if ownership_decls.len() != 0: r = fact_owner_value(int(nodes[n].a), r, s)
         if proof_active and proof_decls.has(int(fns[fact_owner].decl)): proof_exit(fact_owner, n, s)
         if result_active: result_exit(fact_owner, r, n, s)
+        if fact_summary_owner != 0 and fact_summary_owner == fact_owner: fact_summary_record(s, r)
         s.live = false
         return r
     if k == .break_ or k == .continue_:
@@ -1898,6 +1968,15 @@ fact_capture = (n: int, s: mut FactState) -> int:
                 if i < fns[f].params.len() and int(locals[fns[f].params[i]].flags) & LF_MUTPARAM != 0: values[i] = fact_capture(kid(n, i), s)
             ref_assume(int(fns[f].ret), result, values, s)
             if result_active: result_publish(f, result, values, s)
+            summary = fact_summary(f)
+            if summary.seen:
+                if tkind(representation_type(int(fns[f].ret))) == .array:
+                    length = fact_project(s, result, -1, false, T_INT)
+                    b = fact_bound(s, length)
+                    fact_set_bound(s, length, FactBound(max(b.lo, summary.length.lo), min(b.hi, summary.length.hi)))
+                else:
+                    b = fact_bound(s, result)
+                    fact_set_bound(s, result, FactBound(max(b.lo, summary.value.lo), min(b.hi, summary.value.hi), b.nz or summary.value.nz))
         else if nodes[n].aux == 1:
             ft = prune(ntype(int(nodes[n].a)))
             if types[ft].kind == .fn_: ref_assume(int(types[ft].elem), result, values, s)
@@ -2043,6 +2122,8 @@ facts_finalize = ():
 # Harness-only policy; this is not a strict-lane surface or no-panic claim.
 facts_reset = ():
     fact_owner = 0
+    fact_summaries = {}
+    fact_summary_owner = 0
     fact_requests = []
     fact_divisors = {}
     fact_validated = {}
