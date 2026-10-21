@@ -21,12 +21,12 @@ simulate=(start:Ball frames:int64):>Ball=>{
 }
 main=():>int64=>{
     let initial=Ball[1.0 4.0]
-    let end=simulate(initial 100)
-    assert(end.x =? 9.0)
-    assert(end.hits =? 5)
-    assert(end.velocity =? -4.0)
-    assert(simulate(initial 100) =? end)
+    let final=simulate(initial 100)
+    assert(final.x =? 9.0)
+    assert(final.hits =? 5)
+    assert(final.velocity =? -4.0)
+    assert(simulate(initial 100) =? final)
     assert(simulate(initial 0) =? initial)
-    printl("{end.x} {end.velocity} {end.hits}")
+    printl("{final.x} {final.velocity} {final.hits}")
     return 0
 }

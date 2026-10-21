@@ -1,7 +1,7 @@
 # exit: 42
-count=<T>(start:T end:T):>int64=>{
+count=<T>(start:T stop:T):>int64=>{
 let result:int64=0
-loop i in [start..end] {result+=1 if result >? 4 panic("range did not stop")}
+loop i in [start..stop] {result+=1 if result >? 4 panic("range did not stop")}
 return result
 }
 main=()=>{

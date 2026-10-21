@@ -41,12 +41,26 @@ dn_no_id = 0
 dn_end_id = 0
 dn_type_id = 0
 dn_none_id = 0
+dn_new_id = 0
+dn_void_id = 0
+dn_extern_id = 0
+dn_intrinsic_id = 0
+
+# Reserved words cannot be bound; the reference grammar reports them.
+dn_reserved_words: bool[]
+dn_reserved = (name: int) -> bool: name < dn_reserved_words.len() and dn_reserved_words[name]
 
 dn_init_words = ():
     dn_no_id = intern("no")
     dn_end_id = intern("end")
     dn_type_id = intern("type")
     dn_none_id = intern("none")
+    dn_new_id = intern("new")
+    dn_void_id = intern("void")
+    dn_extern_id = intern("extern")
+    dn_intrinsic_id = intern("intrinsic")
+    dn_reserved_words = fill(false, names.len())
+    loop word in [dn_end_id, dn_new_id, dn_none_id, dn_void_id, dn_extern_id, dn_intrinsic_id]: dn_reserved_words[word] = true
     dn_true_id = intern("true")
     dn_false_id = intern("false")
     dn_is_id = intern("is")

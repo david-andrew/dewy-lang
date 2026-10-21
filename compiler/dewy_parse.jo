@@ -214,6 +214,7 @@ dw_row_names = (rows: int[]) -> int[]:
         if dw_op(lhs) == .colon: lhs = dw_child(lhs, 1)
         if dw_op(lhs) == .at: lhs = dw_child(lhs, 1)
         name = dw_name_id(lhs)
+        dw_reserved_name(dw_name(lhs), lhs)
         if name != 0: out.push(int(name))
     out
 
@@ -1556,13 +1557,15 @@ dw_expr = (id: int) -> int:
         return n
     if k == .identifier:
         if text == "none": return mk(.none_lit, pos)
-        if text == "end" and dw_index_context.len() > 0:
+        if text == "end":
+            if dw_index_context.len() == 0: fatal(pos, "`end` is the last index inside brackets, as in `xs[end]` or `xs[1..end]`; outside them, use `xs.length - 1`")
             ix = dw_index_context[dw_index_context.len() - 1]
             base = "$index_end{ix}"
             nodes[ix].sval = i32(intern(base))
             axis = int(nodes[ix].aux2)
             name = if axis == 0: base else: "{base}_{axis}"
             return comp_ident(intern(name), pos)
+        if text == "new": fatal(pos, "`new` inserts an axis as an entry inside brackets, as in `xs[new]` or `xs[.. new]`")
         return dw_value_ident(dw_name_id(id), pos)
     if dw_integer_kind(k):
         if let value = dw_unsigned(text, id):
@@ -1787,16 +1790,27 @@ dw_expr = (id: int) -> int:
             if not bracket and nodes[callee].kind == .field: add_flag(int(nodes[callee].a), NF_MUT)
             if not bracket: dewy_defer_callee(callee)
             args: int[]
+            new_axis = false
             if bracket: dw_index_context.push(n)
             if dewy_syntax[right].kind != .block: args.push(dw_expr(right))
             else if bracket and xs.len() == 1 and (dw_op(xs[0]) == .range_apply or dw_name(xs[0]) == ".."):
-                args.push(dw_iterable(right, true))
+                if dw_new_range_at(xs[0]):
+                    if dewy_syntax[right].text != "[]:": return dw_fail(right, "`new` with an exclusive bracket")
+                    args = dw_new_range(xs[0])
+                    new_axis = true
+                else: args.push(dw_iterable(right, true))
             else:
                 if dewy_syntax[right].text == "[):": return dw_fail(right, "an exclusive index without a range")
                 loop child in xs:
                     # Temporary parse cursor: each axis gives contextual end its own name.
                     if bracket: nodes[n].aux2 = i32(args.len())
-                    if dw_op(child) == .assign:
+                    if bracket and dw_name(child) == "new":
+                        args.push(bc_ident("$new", dewy_syntax[child].pos))
+                        new_axis = true
+                    else if bracket and dw_new_range_at(child):
+                        loop entry in dw_new_range(child): args.push(entry)
+                        new_axis = true
+                    else if dw_op(child) == .assign:
                         a = mk(.namedarg, dewy_syntax[child].pos)
                         nodes[a].name = dw_name_id(dw_child(child, 1))
                         nodes[a].a = i32(dw_expr(dw_child(child, 2)))
@@ -1806,6 +1820,7 @@ dw_expr = (id: int) -> int:
             if bracket:
                 dw_index_context.pop()
                 nodes[n].aux2 = 0
+            if new_axis: nodes[n].kind = .new_axis
             set_list(n, args)
             if bracket and args.len() == 1: nodes[n].b = i32(args[0])
             return n
@@ -2012,6 +2027,7 @@ dw_binding_items = (id: int, seen: mut {str: bool}) -> int[]:
             continue
         name = dw_name(child)
         if name == "": return [dw_fail(child, "this unpacking target; use names or nested brackets")]
+        dw_reserved_name(name, child)
         if name != "_" and seen.has(name): fatal(dewy_syntax[child].pos, "duplicate unpacking name '{name}'")
         seen[name] = true
         n = mk(if name == "_": NK.hole else: NK.ident, dewy_syntax[child].pos)
@@ -2035,6 +2051,25 @@ dw_const_number = (n: int) -> bool:
 dw_word_operator_name = (name: str, at: int):
     if name == "and" or name == "or" or name == "not" or name == "xor" or name == "nand" or name == "nor" or name == "xnor" or name == "in" or name == "as" or name == "transmute":
         fatal(dewy_syntax[at].pos, "`{name}` is a word operator, not a name: choose another name")
+    dw_reserved_name(name, at)
+
+dw_reserved_name = (name: str, at: int):
+    if at > 0: dewy_reserved_name(name, dewy_syntax[at].pos)
+
+# Words with a fixed meaning cannot be bound: variables, constants, functions,
+# parameters, fields, methods, loop and pattern names, and import aliases.
+dewy_reserved_name = (name: str, pos: int):
+    if len(name) < 3: return
+    c = name[0]
+    if c != 'e' and c != 'n' and c != 'v' and c != 'i': return
+    role = ""
+    if name == "end": role = "inside brackets it is the last index, as in `xs[end]`"
+    else if name == "new": role = "inside brackets it inserts an axis, as in `xs[new]`"
+    else if name == "none": role = "it is the empty value"
+    else if name == "void": role = "it is the type of no value"
+    else if name == "extern" or name == "intrinsic": role = "it is kept for declarations the compiler or a foreign library provides"
+    if role == "": return
+    fatal(pos, "'{name}' is reserved, not a name: {role} (use `{name}_`)")
 
 dw_declare = (id: int, constant: bool, top: bool) -> int:
     let id = dw_unwrap(id)
@@ -2303,6 +2338,7 @@ dw_import = (id: int) -> int:
     if dw_op(spec) == .kw_as:
         alias = dw_name(dw_child(spec, 2))
         if alias == "": return dw_fail(spec, "this module alias")
+        dw_reserved_name(alias, dw_child(spec, 2))
         spec = dw_unwrap(dw_child(spec, 1))
     value = dw_name(spec)
     if value == "":
@@ -2328,6 +2364,7 @@ dw_import = (id: int) -> int:
             item = dw_expr(words[i])
             if i + 1 < words.len() and words[i + 1] == -1:
                 if i + 2 >= words.len() or words[i + 2] < 0 or dw_name(words[i + 2]) == "": return dw_fail(selected, "this imported alias")
+                dw_reserved_name(dw_name(words[i + 2]), words[i + 2])
                 nodes[item].aux = i32(intern(dw_name(words[i + 2])))
                 i += 2
             imported.push(item)
@@ -2366,6 +2403,7 @@ dw_import_name = (id: int) -> int:
     if dw_op(id) == .kw_as:
         alias = dw_name(dw_child(id, 2))
         if alias == "": return dw_fail(id, "this imported alias; group each aliased name")
+        dw_reserved_name(alias, dw_child(id, 2))
         id = dw_child(id, 1)
     if dw_name(id) == "": return dw_fail(id, "this imported name")
     n = dw_expr(id)
@@ -2378,6 +2416,28 @@ dw_membership = (id: int) -> int:
     r = dw_iterable(id, true, true)
     if nodes[r].kind == .range and (has_flag(r, NF_STEP) or has_flag(r, NF_EXCL_FIRST)): return dw_range_value(r)
     r
+
+# `new ..`, `.. new` and `new .. new` read as ranges; inside brackets they are
+# the entries `new`, a whole axis, and `new`. Empty when id is no such range.
+dw_new_range_at = (id0: int) -> bool:
+    id = dw_unwrap(id0)
+    if dw_op(id) != .range_apply: return false
+    size = dw_nchildren(id)
+    size >= 3 and (dw_name(dw_child(id, 1)) == "new" or dw_name(dw_child(id, size - 1)) == "new")
+
+dw_new_range = (id0: int) -> int[]:
+    out: int[]
+    id = dw_unwrap(id0)
+    size = dw_nchildren(id)
+    first = dw_name(dw_child(id, 1))
+    last = dw_name(dw_child(id, size - 1))
+    if (first != "new" and first != "..") or (last != "new" and last != "..") or size > 4:
+        fatal(dewy_syntax[id].pos, "`new` is an index entry, not a range endpoint: write `xs[new ..]` or `xs[.. new]`, and bracket a range next to it, as in `xs[new [1..end]]`")
+    pos = dewy_syntax[id].pos
+    if first == "new": out.push(bc_ident("$new", pos))
+    out.push(mk(.range, pos))
+    if last == "new": out.push(bc_ident("$new", pos))
+    out
 
 dw_iterable = (id: int, slice: bool = false, membership: bool = false) -> int:
     let id = dw_unwrap(id)
@@ -2453,6 +2513,7 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
             if dw_name(binder) == "":
                 if dw_op(binder) == .comma: fatal(dewy_syntax[binder].pos, "several loop names go in brackets: `loop [key value] in pairs \{ ... }`")
                 return dw_fail(binder, "this loop binding")
+            dw_reserved_name(dw_name(binder), binder)
             dw_shadow([int(dw_name_id(binder))])
             binders.push(dw_expr(binder))
         set_list(n, binders)
@@ -2565,7 +2626,9 @@ dw_comma_fail = (id: int) -> int:
 dw_pattern_names = (p: int, out: mut int[]):
     if nodes[p].kind == .pshape or nodes[p].kind == .pseq:
         loop part in kids(p): dw_pattern_names(part, out)
-    else if nodes[p].name != 0: out.push(int(nodes[p].name))
+    else if nodes[p].name != 0:
+        dewy_reserved_name(name_of(int(nodes[p].name)), nodes[p].pos)
+        out.push(int(nodes[p].name))
 
 dw_match = (id: int, accumulator: int = 0, map: bool = false) -> int:
     n = mk(.match_, dewy_syntax[id].pos)
@@ -2868,6 +2931,7 @@ dw_top_declarations_inner = (id: int) -> int[]:
         if word == "let" or word == "const": declaration = dw_unwrap(dw_child(declaration, 1))
     if dw_op(declaration) == .assign:
         name = dw_name(dw_child(declaration, 1))
+        dw_reserved_name(name, dw_child(declaration, 1))
         initial = dw_grouped(dw_child(declaration, 2))
         if name != "" and dw_op(initial) == .type_apply:
             loop entry in dw_children(dw_child(initial, 2)):

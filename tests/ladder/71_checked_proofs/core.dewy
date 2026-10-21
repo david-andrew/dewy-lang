@@ -1,10 +1,10 @@
 # Current-dialect algorithm projection; does not establish removed design contracts.
 # Tier 3 / 71_checked_proofs / milestone 22
 # Acceptance: Check and erase proof calls; retain transitive result facts at callers.
-width=(start:int64 end:int64):>int64=>{
-    $runtime_assert start <=? end
-    $runtime_assert end >=? 0
-    return end-start
+width=(start:int64 stop:int64):>int64=>{
+    $runtime_assert start <=? stop
+    $runtime_assert stop >=? 0
+    return stop-start
 }
 chain=(a:int64):>int64=>{
     let b=a+1

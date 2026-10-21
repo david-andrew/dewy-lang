@@ -893,12 +893,12 @@ def test_core_integer_ranges(compiler, tmp_path, target, release, form):
     (tmp_path / 'cases.txt').write_text('\n'.join(cases))
     source = tmp_path / 'ranges.dewy'
     source.write_text('''from bigint import bigint
-emit=<T>(a:T b:T end:T inclusive:bool):>void=>{
+emit=<T>(a:T b:T stop:T inclusive:bool):>void=>{
 let count:int64=0
 if inclusive {
-    loop i in [a,b..end] {if count >=? 32 panic("loop did not terminate") printl(i) count+=1}
+    loop i in [a,b..stop] {if count >=? 32 panic("loop did not terminate") printl(i) count+=1}
 } else {
-    loop i in [a,b..end) {if count >=? 32 panic("loop did not terminate") printl(i) count+=1}
+    loop i in [a,b..stop) {if count >=? 32 panic("loop did not terminate") printl(i) count+=1}
 }
 printl"end"
 }
@@ -908,23 +908,23 @@ if input is? none panic("invalid test data")
 loop line in input.split("\\n") {
     let fields=line.split("|") let inclusive=fields[4] =? "1"
     if fields[0] =? "s" {
-        let a=bigint(fields[1]).to_int64() let b=bigint(fields[2]).to_int64() let end=bigint(fields[3]).to_int64()
-        if a is? none or b is? none or end is? none panic("invalid signed bounds")
-        emit<int64>(a b end inclusive)
+        let a=bigint(fields[1]).to_int64() let b=bigint(fields[2]).to_int64() let stop=bigint(fields[3]).to_int64()
+        if a is? none or b is? none or stop is? none panic("invalid signed bounds")
+        emit<int64>(a b stop inclusive)
     } else {
-        let a=bigint(fields[1]).to_uint64() let b=bigint(fields[2]).to_uint64() let end=bigint(fields[3]).to_uint64()
-        if a is? none or b is? none or end is? none panic("invalid unsigned bounds")
-        emit<uint64>(a b end inclusive)
+        let a=bigint(fields[1]).to_uint64() let b=bigint(fields[2]).to_uint64() let stop=bigint(fields[3]).to_uint64()
+        if a is? none or b is? none or stop is? none panic("invalid unsigned bounds")
+        emit<uint64>(a b stop inclusive)
     }
 }
 }
 ''')
     if form.startswith('stored-'):
         source.write_text(source.read_text()
-                          .replace('loop i in [a,b..end] {', 'let r=[a,b..end] loop i in r {')
-                          .replace('loop i in [a,b..end) {', 'let r=[a,b..end) loop i in r {')
-                          .replace('count+=1}', 'count+=1} printl(a in? r) printl(b in? r) printl(end in? r) printl(0 in? r)')
-                          .replace('emit<uint64>(a b end inclusive)', 'panic("stored inputs must be signed")'))
+                          .replace('loop i in [a,b..stop] {', 'let r=[a,b..stop] loop i in r {')
+                          .replace('loop i in [a,b..stop) {', 'let r=[a,b..stop) loop i in r {')
+                          .replace('count+=1}', 'count+=1} printl(a in? r) printl(b in? r) printl(stop in? r) printl(0 in? r)')
+                          .replace('emit<uint64>(a b stop inclusive)', 'panic("stored inputs must be signed")'))
     if form.endswith('unit'):
         source.write_text(source.read_text().replace('a,b..', 'a..'))
     if form.startswith('stored-open-'):

@@ -1413,9 +1413,26 @@ from an annotation, function parameter, or return type, as other record literals
 Inside an index or slice, `end` is the receiver's last index: `xs[end]`,
 `xs[end-2..end]` and `xs[end,end-2..0]`. Nested brackets use their own receiver.
 The receiver and its last index are evaluated once before the index expression;
-strings count grapheme clusters. These forms also support array and custom
+strings count grapheme clusters, and a custom container's `end` is its `len` minus one.
+`xs[end]` compiles exactly as `xs[xs.length - 1]`, so whatever proves one proves
+the other. These forms also support array and custom
 container updates. Ordinary array updates capture indices before the right-hand
 side, then locate the destination again if that side resizes the array.
+
+`new` inside brackets inserts an axis of length one, as NumPy's `newaxis` does,
+on arrays, nested arrays and strings: `xs[new]` (or `xs[new ..]`) is `[xs]`,
+and `xs[.. new]` wraps each element, `[[x0] [x1] ...]`. With more axes, spell
+a whole axis `[..]` and place `new` where the axis goes: for `m = [[1 2] [3 4]]`,
+`m[.. new]` is `[[[1 2]] [[3 4]]]` and `m[[..] [..] new]` is
+`[[[1] [2]] [[3] [4]]]`. Indices and slices can sit beside it, `m[end new]` is
+`[[3 4]]` and `m[[..] 0 new]` is `[[1] [3]]`, each `end` counting its own
+axis. Axes after the last entry are kept whole. The result is a new nested
+array; `new` on an NDArray is not supported yet, and the selection cannot be
+assigned to.
+
+`end`, `new`, `none`, `void`, `extern` and `intrinsic` are reserved: none of
+them can name a variable, function, parameter, field, method, loop or pattern
+binding, or import alias.
 
 Array literals take their element type from a function parameter, including
 nested arrays and optional array parameters. For example,

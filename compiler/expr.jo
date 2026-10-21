@@ -8342,6 +8342,18 @@ check_expr = (n: int, expected: int) -> int:
             source_type = prune(check_expr(clone(source), 0))
             source_kind = types[source_type].kind
             stable = (source_kind == .array or source_kind == .str_ or source_kind == .fixed) and pool_update_read(last_checked) and dewy_end_arithmetic(int(nodes[n].b), int(nodes[n].sval))
+            if stable and not ide_on:
+                # A stable receiver's length can be read where `end` is written:
+                # `xs[end]` is then exactly `xs[xs.length - 1]`, with no binding.
+                # (The editor keeps the binding so that `end` hovers as a name.)
+                end_names = [int(nodes[n].sval)]
+                end_base = name_of(int(nodes[n].sval))
+                loop axis in [1..max(nkids(n), 1)): end_names.push(intern("{end_base}_{axis}"))
+                nodes[n].sval = 0
+                dewy_end_substitute(int(nodes[n].b), end_names, source, pos)
+                loop x in kids(n):
+                    if x != int(nodes[n].b): dewy_end_substitute(x, end_names, source, pos)
+                return check_expr(n, expected)
             stmts: int[]
             end_source = clone(source)
             if not stable:
@@ -8660,6 +8672,7 @@ check_expr = (n: int, expected: int) -> int:
     else if k == .record_loop:
         reflect_record(n)
         return check_expr(n, expected)
+    else if k == .new_axis: return dewy_new_axis(n, expected)
     else if k == .record_lit:
         loop entry in kids(n):
             if nodes[entry].kind == .namedarg: reflect_name(entry)
@@ -9603,8 +9616,130 @@ dewy_index_end_bindings = (index: int, source: int, source_type: int) -> int[]:
         out.push(bc_let(name, value, pos))
     out
 
+dewy_end_substitute = (e: int, names: int[], source: int, pos: int):
+    if e == 0: return
+    if nodes[e].kind == .ident and names.contains(int(nodes[e].name)):
+        nodes[e] = nodes[dewy_index_end(clone(source), nodes[e].pos)]
+        return
+    loop c in [int(nodes[e].a), int(nodes[e].b), int(nodes[e].c), int(nodes[e].d)]: dewy_end_substitute(c, names, source, pos)
+    loop c in kids(e):
+        if c != int(nodes[e].b): dewy_end_substitute(c, names, source, pos)
+
 dewy_index_end = (source: int, pos: int) -> int:
     bc_bin(.minus, bc_method(source, "len", [], pos), bc_int(1, pos), pos)
+
+# `xs[new ..]`, `xs[.. new]`: NumPy's newaxis on nested arrays. Each `new`
+# wraps the selection so far in a one-element array; `..` maps over an axis,
+# an index selects into it and a range slices it, all from the outside in.
+# Axes after the last entry are untouched. `end` is the last index of the
+# array at its own depth. Entries are evaluated once, in order, unless they
+# are plain arithmetic, which may repeat for every element.
+dewy_new_axis = (n: int, expected: int) -> int:
+    pos = nodes[n].pos
+    entries = kids(n)
+    base = if nodes[n].sval != 0: name_of(int(nodes[n].sval)) else: ""
+    receiver = int(nodes[n].a)
+    t = prune(check_expr(clone(receiver), 0))
+    if is_nd(t): fatal(pos, "`new` does not insert axes into an NDArray yet; it works on arrays, nested arrays and strings")
+    depth = dewy_axis_depth(t)
+    if depth == 0: fatal(pos, "`new` inserts an axis into an array or a string, not {dt(t)}")
+    axes = 0
+    loop e in entries:
+        if not dewy_axis_new(e): axes += 1
+    if axes > depth: fatal(pos, "{axes} axes selected next to `new`, but {dt(t)} has {depth}")
+    source = "$new_source{bc_count}"
+    bc_count += 1
+    stmts = [bc_let(source, receiver, pos)]
+    pinned: int[]
+    loop i in 0.. and e in entries:
+        if dewy_axis_new(e) or dewy_axis_full(e): pinned.push(e)
+        else: pinned.push(dewy_axis_pin(e, dewy_axis_end_name(base, i), stmts, pos))
+    stmts.push(bc_stmt(dewy_axis_build(pinned, 0, source, base, pos), pos))
+    nodes[n] = nodes[bc_block(stmts, pos)]
+    check_expr(n, expected)
+
+dewy_axis_new = (e: int) -> bool: nodes[e].kind == .ident and name_of(int(nodes[e].name)) == "$new"
+
+dewy_axis_full = (e: int) -> bool:
+    nodes[e].kind == .range and nodes[e].a == 0 and nodes[e].b == 0 and not has_flag(e, NF_STEP)
+
+dewy_axis_end_name = (base: str, i: int) -> str:
+    if base == "" or i == 0: return base
+    "{base}_{i}"
+
+# axes reachable by indexing: a string's graphemes are strings again
+dewy_axis_depth = (t0: int) -> int:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .str_: return 1000000
+    if k == .array or k == .fixed: return 1 + dewy_axis_depth(int(types[t].elem))
+    0
+
+dewy_axis_mentions = (e: int, name: int) -> bool:
+    if e == 0 or name == 0: return false
+    if nodes[e].kind == .ident and nodes[e].name == i32(name): return true
+    loop c in [int(nodes[e].a), int(nodes[e].b), int(nodes[e].c), int(nodes[e].d)]:
+        if dewy_axis_mentions(c, name): return true
+    loop c in kids(e):
+        if dewy_axis_mentions(c, name): return true
+    false
+
+dewy_axis_pin = (e: int, end_name: str, stmts: mut int[], pos: int) -> int:
+    if e == 0: return 0
+    name = if end_name == "": 0 else: intern(end_name)
+    if dewy_end_arithmetic(e, name): return e
+    if nodes[e].kind == .range:
+        nodes[e].a = i32(dewy_axis_pin(int(nodes[e].a), end_name, stmts, pos))
+        nodes[e].b = i32(dewy_axis_pin(int(nodes[e].b), end_name, stmts, pos))
+        nodes[e].c = i32(dewy_axis_pin(int(nodes[e].c), end_name, stmts, pos))
+        return e
+    if dewy_axis_mentions(e, name): fatal(nodes[e].pos, "next to `new`, an index using `end` may only combine it with literals and local values")
+    value = "$new_index{bc_count}"
+    bc_count += 1
+    stmts.push(bc_let(value, e, pos))
+    bc_ident(value, pos)
+
+dewy_axis_build = (entries: int[], i: int, source: str, base: str, pos: int) -> int:
+    if i == entries.len(): return bc_ident(source, pos)
+    e = entries[i]
+    if dewy_axis_new(e):
+        wrap = mk(.array, pos)
+        set_list(wrap, [dewy_axis_build(entries, i + 1, source, base, pos)])
+        return wrap
+    if dewy_axis_full(e): return dewy_axis_collect(entries, i + 1, source, base, pos)
+    stmts: int[]
+    end_name = dewy_axis_end_name(base, i)
+    if end_name != "" and dewy_axis_mentions(e, intern(end_name)):
+        stmts.push(bc_let(end_name, dewy_index_end(bc_ident(source, pos), pos), pos))
+    selected = mk(.index, pos)
+    nodes[selected].a = i32(bc_ident(source, pos))
+    nodes[selected].b = i32(e)
+    set_list(selected, [e])
+    result = selected
+    if nodes[e].kind == .range or i + 1 < entries.len():
+        part = "$new_part{bc_count}"
+        bc_count += 1
+        stmts.push(bc_let(part, selected, pos))
+        result = if nodes[e].kind == .range: dewy_axis_collect(entries, i + 1, part, base, pos) else: dewy_axis_build(entries, i + 1, part, base, pos)
+    if stmts.len() == 0: return result
+    stmts.push(bc_stmt(result, pos))
+    bc_block(stmts, pos)
+
+# [loop item in source <the rest of the entries applied to item>]
+dewy_axis_collect = (entries: int[], i: int, source: str, base: str, pos: int) -> int:
+    collection = "$dewy_collection_{nodes.len()}"
+    item = "$new_item{bc_count}"
+    bc_count += 1
+    each = mk(.for_, pos)
+    set_list(each, [bc_ident(item, pos)])
+    nodes[each].a = i32(bc_call("__dewy_iter", [bc_ident(source, pos)], pos))
+    receiver = bc_ident(collection, pos)
+    add_flag(receiver, NF_MUT)
+    push = bc_method(receiver, "push", [dewy_axis_build(entries, i, item, base, pos)], pos)
+    nodes[each].b = i32(bc_block([bc_stmt(push, pos)], pos))
+    block = bc_block([bc_let(collection, mk(.array, pos), pos), each, bc_stmt(bc_ident(collection, pos), pos)], pos)
+    add_flag(block, NF_COMPREHENSION)
+    block
 
 # A stepped slice computes its default endpoint from the captured receiver's
 # size. Calls retain normal left-to-right operand evaluation and value snapshots.

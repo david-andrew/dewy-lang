@@ -3,8 +3,8 @@ main=()=>{
 let low:int8=-128 let second:int8=0 let high:int8=127
 let signed:array<int64>=[]
 loop i in [low,second..high] {signed.push(i as int64)}
-let a:uint8=255 let b:uint8=253 let end:uint8=249
+let a:uint8=255 let b:uint8=253 let stop:uint8=249
 let unsigned:array<int64>=[]
-loop i in [a,b..end] {unsigned.push(i as int64)}
+loop i in [a,b..stop] {unsigned.push(i as int64)}
 return if signed =? [-128 0] and unsigned =? [255 253 251 249] 42 else 1
 }

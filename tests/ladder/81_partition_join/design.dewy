@@ -2,7 +2,7 @@
 # Acceptance: Fork owned disjoint partitions, join in source order, and prove coverage including an uneven tail.
 # OPEN: Scoped fork-join, partition proof syntax and scheduler context are unspecified; sequential value projection only.
 # This executable projection does not establish the OPEN obligation.
-Partition:type=[begin:int64 end:int64 values:array<int64>]
+Partition:type=[begin:int64 stop:int64 values:array<int64>]
 split=(xs:array<int64> width:int64<i => i >? 0>):>array<Partition>=>{
     let parts:array<Partition>=[]
     let start:int64=0
@@ -24,11 +24,11 @@ join=(parts:array<Partition>):>array<int64>=>{
     let cursor:int64=0
     loop part in parts {
         $runtime_assert part.begin =? cursor
-        $runtime_assert part.end-part.begin =? part.values.length
+        $runtime_assert part.stop-part.begin =? part.values.length
         loop value in part.values {
             result.push(value)
         }
-        cursor=part.end
+        cursor=part.stop
     }
     return result
 }
@@ -56,7 +56,7 @@ main=():>int64=>{
     $runtime_assert join([]).length =? 0
     $runtime_assert source.length =? 65
     $runtime_assert parts[0].begin =? 0
-    $runtime_assert parts[8].end =? 65
+    $runtime_assert parts[8].stop =? 65
     printl("{checksum} {parts.length}")
     return 0
 }

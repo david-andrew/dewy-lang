@@ -35,7 +35,8 @@ enum NK:
     trefined,      # a: base type, b: pure predicate, name: optional self binder
     typeapply,      # Dewy f<T> / Type<T>: a is the base, c the type syntax, kids the type arguments
     pshape,         # Dewy object pattern [f g:T h:1]: kids are field patterns named by their fields
-    pseq            # Dewy sequence pattern (p q r): kids are the element patterns
+    pseq,           # Dewy sequence pattern (p q r): kids are the element patterns
+    new_axis        # Dewy xs[new ..]: a is the receiver, kids the entries (`new` is the ident $new)
 
 # Generic lambdas retain type parameters in kids2, as module functions do.
 # Their explicit captures use a child block so cloning preserves both lists.

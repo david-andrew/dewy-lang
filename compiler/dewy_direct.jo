@@ -176,7 +176,7 @@ dc_atom = () -> int:
         return n
     if token.kind == .identifier and (op == .none or op == .kw_test):
         name = int(token.name)
-        if name == dn_end_id or name == dn_type_id: return 0
+        if name == dn_end_id or name == dn_new_id or name == dn_type_id: return 0
         if name == dn_none_id: return mk(.none_lit, pos)
         n = mk(.ident, pos)
         nodes[n].name = dw_value_name(token.name, pos)
@@ -443,6 +443,7 @@ dc_annotation = (boundary: int = 10) -> int:
 dc_declaration = (constant: bool, bare: bool = false) -> int:
     token = dn_tokens[dn_at]
     if token.kind != .identifier or (token.symbol != .none and token.symbol != .kw_test): return 0
+    if dn_reserved(int(token.name)): return 0
     dn_at += 1
     n = mk(.vardecl, mkpos(dn_file, token.start))
     nodes[n].name = token.name
@@ -545,7 +546,7 @@ dc_flow = () -> int:
     if token.symbol == .kw_loop:
         binder = dn_tokens[dn_at]
         head = mk(.lhead, mkpos(dn_file, binder.start))
-        if binder.kind == .identifier and binder.symbol == .none and dn_tokens[dn_at + 1].symbol == .kw_in:
+        if binder.kind == .identifier and binder.symbol == .none and dn_tokens[dn_at + 1].symbol == .kw_in and not dn_reserved(int(binder.name)):
             dn_at += 2
             value = mk(.ident, mkpos(dn_file, binder.start))
             nodes[value].name = dw_value_name(binder.name, nodes[value].pos)
@@ -596,7 +597,7 @@ dc_flow = () -> int:
 # tree. A contextual signature or body retries the full declaration grammar.
 dc_function = () -> int:
     token = dn_tokens[dn_at]
-    if token.kind != .identifier or (token.symbol != .none and token.symbol != .kw_test): return 0
+    if token.kind != .identifier or (token.symbol != .none and token.symbol != .kw_test) or dn_reserved(int(token.name)): return 0
     if dn_tokens[dn_at + 1].symbol != .assign or dn_tokens[dn_at + 2].symbol != .lparen: return 0
     opening = dn_tokens[dn_at + 2]
     # Account for the enclosing assignment, signature and parameter grammar.
@@ -611,7 +612,7 @@ dc_function = () -> int:
         first = dn_tokens[dn_at]
         by_place = dn_accept(.at)
         parameter = dn_tokens[dn_at]
-        if parameter.kind != .identifier or (parameter.symbol != .none and parameter.symbol != .kw_test): return 0
+        if parameter.kind != .identifier or (parameter.symbol != .none and parameter.symbol != .kw_test) or dn_reserved(int(parameter.name)): return 0
         dn_at += 1
         p = mk(.param, mkpos(dn_file, first.start))
         nodes[p].name = parameter.name
@@ -687,6 +688,8 @@ dc_statement = () -> int:
     if left == 0: return 0
     op = dn_peek()
     if op != .assign and not dn_token_assignment(op): return 0
+    # (`none = 1`, `void = 1`: a reserved word cannot be bound)
+    if op == .assign and (nodes[left].kind == .none_lit or nodes[left].kind == .ident and dn_reserved(int(nodes[left].name))): return 0
     dn_at += 1
     right = dc_expr(11)
     if right == 0: return 0
