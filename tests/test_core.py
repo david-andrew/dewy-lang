@@ -1113,7 +1113,7 @@ def test_core_bounded_remainder_ir(compiler, tmp_path, target, release):
     # Inspect every possible owner, including the tagged-int entry wrapper.
     # An uninlined probe or an empty main must not hide another owner's signed
     # recurrence; runtime helpers are deliberately outside this set.
-    owners = re.findall(r'^fn (?:f_probe_|f_main_|h_math_main)[^\n]*\n.*?(?=^fn |\Z)',
+    owners = re.findall(r'^fn (?:f_probe_|f_main_|__h_math_main)[^\n]*\n.*?(?=^fn |\Z)',
                         output, re.M | re.S)
     assert owners, 'bounded recurrence was not emitted'
     assert any(re.search(r' = (mulhu|remu) ', body) for body in owners), \
