@@ -792,6 +792,9 @@ fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reaso
         fresh = next
         j -= 1
 
+fact_reads_only = (id: IN) -> bool:
+    id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .static_assert or id == .runtime_assert or id == .assert or id == .panic or id == .unreachable
+
 # Conservative loop fallback: pre-kill every syntactically changing route.
 # This is also used for iterators whose backedge transfer is not modeled.
 fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
@@ -803,7 +806,12 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
         id = nodes[n].aux as IN
         if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .extend or id == .resize or id == .truncate or id == .setlen:
             fact_change_route(s, kid(n, 0), true, at, reason)
-    if k == .call or k == .intrinsic or k == .lambda or k == .partial: fact_forget(s, at, reason)
+    # (a direct call havocs what its summary writes; reading lengths and
+    # erased or failing assertions write nothing; a record is built in place)
+    if k == .call and nodes[n].aux == 0: fact_call_effects(n, s)
+    else if k == .call and nodes[n].aux == 2: s = s
+    else if k == .intrinsic and fact_reads_only(nodes[n].aux as IN): s = s
+    else if k == .call or k == .intrinsic or k == .lambda or k == .partial: fact_forget(s, at, reason)
     mask = isolation_children(k)
     if mask < 0: fact_forget(s, at, reason, true); return
     if mask & 1 != 0: fact_changes(int(nodes[n].a), s, at, reason)
@@ -1378,6 +1386,31 @@ fact_range = (n: int, s: mut FactState):
                     fact_difference(s, hi, count, x.lo - extra, n)
                 fact_counted_lengths(n, s, pushes, count)
 
+# A stepped range `[first,second..end)`: the step's sign, when known, bounds
+# each value between first and end (the lowering stops before passing end).
+fact_stepped = (n: int, s: mut FactState):
+    iterator = int(nodes[n].a)
+    first = fact_capture(int(nodes[iterator].a), s)
+    second = fact_capture(int(nodes[iterator].c), s)
+    end = if nodes[iterator].b != 0: fact_capture(int(nodes[iterator].b), s) else: 0
+    up = fact_compare(s, .lt, first, second) == 1
+    down = fact_compare(s, .lt, second, first) == 1
+    fact_changes(n, s, n)
+    after = s
+    body = s
+    l = int(nodes[n].sym)
+    v = fact_new(body, fact_domain(int(locals[l].type)))
+    fact_bind(body, PlaceIdentity(.local, int(locals[l].owner), l), v)
+    inclusive = has_flag(iterator, NF_INCLUSIVE)
+    if up or down:
+        near = if up: FactTerm(.ge, v, first) else: FactTerm(.le, v, first)
+        fact_assume(body, fact_new(body, fact_domain(T_BOOL), near), true)
+        if end != 0:
+            far = if up: FactTerm((if inclusive: Tok.le else: Tok.lt), v, end) else: FactTerm((if inclusive: Tok.ge else: Tok.gt), v, end)
+            fact_assume(body, fact_new(body, fact_domain(T_BOOL), far), true)
+    fact_loop_body(n, body)
+    s = after
+
 # Each iteration's hidden index lies in [0, length) of the source's entry
 # value; the source is a snapshot, so a body that resizes the original
 # rebinds that place and the length stays the snapshot's.
@@ -1604,6 +1637,9 @@ fact_capture = (n: int, s: mut FactState) -> int:
         return 0
     if k == .for_ and nodes[n].aux == 0 and not has_flag(int(nodes[n].a), NF_STEP):
         fact_range(n, s)
+        return 0
+    if k == .for_ and nodes[n].aux == 0 and nodes[int(nodes[n].a)].kind == .range and nodes[int(nodes[n].a)].c != 0:
+        fact_stepped(n, s)
         return 0
     if k == .while_ or k == .for_:
         # An indexed array loop evaluates its source once, before the loop.
