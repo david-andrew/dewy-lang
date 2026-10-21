@@ -1,0 +1,354 @@
+# HTTP/1.1 messages over bytes: incremental request framing with explicit
+# limits, chunked bodies, percent-decoding, and response encoding/parsing.
+# Network input is bytes, so framing never assumes valid UTF-8; only a complete
+# body or a decoded target is converted to text, and invalid text is a 400.
+
+const CR:uint8=13
+const LF:uint8=10
+const SP:uint8=32
+const TAB:uint8=9
+const COLON:uint8=58
+const PERCENT:uint8=37
+const PLUS:uint8=43
+const SEMI:uint8=59
+
+Limits:type=[
+    request_line:int64=256
+    header_bytes:int64=1024
+    headers:int64=16
+    body:int64=2048
+]
+
+Header:type=[name:string value:string]
+
+Request:type=[
+    method:string
+    target:string
+    path:string
+    query:dict<string string>
+    version:string
+    headers:array<Header>
+    body:string
+]
+
+Response:type=[status:int64 headers:array<Header>=[] body:string=""]
+
+# A request or response that cannot be framed; `status` is what the server answers.
+HttpError:type=type of error & [status:int64 detail:string]
+
+# More bytes are needed before the next message can be framed.
+Incomplete:type=type of any
+
+Framed:type=[request:Request consumed:int64]
+ResponseFrame:type=[response:Response consumed:int64]
+
+reason=(status:int64):>string=>match status {
+    <200>=>"OK"
+    <201>=>"Created"
+    <204>=>"No Content"
+    <304>=>"Not Modified"
+    <400>=>"Bad Request"
+    <404>=>"Not Found"
+    <405>=>"Method Not Allowed"
+    <409>=>"Conflict"
+    <412>=>"Precondition Failed"
+    <413>=>"Content Too Large"
+    <414>=>"URI Too Long"
+    <415>=>"Unsupported Media Type"
+    <422>=>"Unprocessable Content"
+    <431>=>"Request Header Fields Too Large"
+    <501>=>"Not Implemented"
+    <505>=>"HTTP Version Not Supported"
+    _=>"Unknown"
+}
+
+bad=(status:int64 detail:string):>HttpError=>HttpError[status detail]
+
+# Header names compare case-insensitively; they are stored lowercased.
+header=(headers:array<Header> name:string):>string?=>{
+    loop h in headers {
+        if h.name =? name return h.value
+    }
+    return none
+}
+
+# The index of the first LF at or after `start`, or -1.
+find_lf=(data:array<uint8> start:int64):>int64=>{
+    let i=start
+    loop i <? data.length {
+        if data[i] =? LF return i
+        i+=1
+    }
+    return -1
+}
+
+# A line ends in CRLF; a bare LF is rejected rather than guessed at.
+line_text=(data:array<uint8> start:int64 lf:int64):>string|HttpError=>{
+    if lf =? start or data[lf-1] not=? CR return bad(400 "bare LF")
+    let text=data[start..lf-1) as string | none
+    if text is? none return bad(400 "invalid UTF-8 in head")
+    return text
+}
+
+is_token_byte=(b:uint8):>bool=>{
+    if 0x61 <=? b <=? 0x7a return true    # a-z
+    if 0x41 <=? b <=? 0x5a return true    # A-Z
+    if 0x30 <=? b <=? 0x39 return true    # 0-9
+    return b =? 0x2d or b =? 0x5f         # - _
+}
+
+is_method=(text:string):>bool=>{
+    if text.length =? 0 return false
+    loop b in bytes(text) {
+        if not (0x41 <=? b <=? 0x5a) return false
+    }
+    return true
+}
+
+hex_value=(b:uint8):>int64=>{
+    if 0x30 <=? b <=? 0x39 return int64(b)-0x30
+    if 0x61 <=? b <=? 0x66 return int64(b)-0x61+10
+    if 0x41 <=? b <=? 0x46 return int64(b)-0x41+10
+    return -1
+}
+
+# %XX and (in queries) `+` decoding; the result must be UTF-8.
+percent_decode=(text:string plus_space:bool):>string|HttpError=>{
+    let raw=bytes(text)
+    let out:array<uint8>=[]
+    let i=0
+    loop i <? raw.length {
+        let b=raw[i]
+        if b =? PERCENT {
+            if i+2 >=? raw.length return bad(400 "truncated percent escape")
+            let hi=hex_value(raw[i+1])
+            let lo=hex_value(raw[i+2])
+            if hi <? 0 or lo <? 0 return bad(400 "invalid percent escape")
+            out.push(uint8(hi*16+lo))
+            i+=3
+        } else if b =? PLUS and plus_space {
+            out.push(SP)
+            i+=1
+        } else {
+            out.push(b)
+            i+=1
+        }
+    }
+    let decoded=out as string | none
+    if decoded is? none return bad(400 "invalid UTF-8 in target")
+    return decoded
+}
+
+parse_query=(text:string):>dict<string string>|HttpError=>{
+    let query:dict<string string>=[]
+    if text.length =? 0 return query
+    loop pair in text.split("&") {
+        if pair.length =? 0 continue
+        let eq=pair.find("=")
+        let key_text=if eq is? none pair else pair[0..eq)
+        let value_text=if eq is? none "" else pair[eq+1..]
+        let key=percent_decode(key_text true) or_throw
+        let value=percent_decode(value_text true) or_throw
+        query[key]=value
+    }
+    return query
+}
+
+trim_ows=(text:string):>string=>{
+    let start=0
+    let stop=text.length
+    loop start <? stop and (text[start] =? " " or text[start] =? "\t") {start+=1}
+    loop stop >? start and (text[stop-1] =? " " or text[stop-1] =? "\t") {stop-=1}
+    return text[start..stop)
+}
+
+parse_header=(line:string):>Header|HttpError=>{
+    if line.startswith(" ") or line.startswith("\t") return bad(400 "folded header")
+    let colon=line.find(":")
+    if colon is? none or colon =? 0 return bad(400 "malformed header")
+    let name=line[0..colon)
+    loop b in bytes(name) {
+        if not is_token_byte(b) return bad(400 "invalid header name")
+    }
+    return Header[name.lower() trim_ows(line[colon+1..])]
+}
+
+parse_decimal=(text:string limit:int64):>int64|HttpError=>{
+    if text.length =? 0 return bad(400 "empty length")
+    let value=0
+    loop b in bytes(text) {
+        if not (0x30 <=? b <=? 0x39) return bad(400 "invalid length")
+        value=value*10+(int64(b)-0x30)
+        if value >? limit return bad(413 "body exceeds {limit} bytes")
+    }
+    return int64(value)
+}
+
+# Head lines between the request line and the blank line.
+Head:type=[lines:array<string> stop:int64]
+
+read_head=(data:array<uint8> start:int64 limits:Limits):>Head|Incomplete|HttpError=>{
+    let lines:array<string>=[]
+    let at=start
+    loop true {
+        let lf=find_lf(data at)
+        if lf <? 0 {
+            if data.length-start >? limits.header_bytes return bad(431 "header section too large")
+            return Incomplete
+        }
+        if lf+1-start >? limits.header_bytes return bad(431 "header section too large")
+        let line=line_text(data at lf) or_throw
+        at=lf+1
+        if line.length =? 0 return Head[lines at]
+        lines.push(line)
+        if lines.length >? limits.headers return bad(431 "too many headers")
+    }
+    return Incomplete
+}
+
+Body:type=[text:string stop:int64]
+
+decode_text=(data:array<uint8>):>string|HttpError=>{
+    let text=data as string | none
+    if text is? none return bad(400 "body is not UTF-8")
+    return text
+}
+
+# Chunked transfer coding: hex sizes, CRLF-framed data, a zero chunk, an
+# optional trailer section that is read and discarded.
+read_chunked=(data:array<uint8> start:int64 limits:Limits):>Body|Incomplete|HttpError=>{
+    let out:array<uint8>=[]
+    let at=start
+    loop true {
+        let lf=find_lf(data at)
+        if lf <? 0 return Incomplete
+        let size_line=line_text(data at lf) or_throw
+        let semi=size_line.find(";")
+        let digits=if semi is? none size_line else size_line[0..semi)
+        if digits.length =? 0 or digits.length >? 6 return bad(400 "invalid chunk size")
+        let size=0
+        loop b in bytes(digits) {
+            let v=hex_value(b)
+            if v <? 0 return bad(400 "invalid chunk size")
+            size=size*16+v
+        }
+        if out.length+size >? limits.body return bad(413 "body exceeds {limits.body} bytes")
+        at=lf+1
+        if size =? 0 {
+            let trailer=read_head(data at limits) or_throw
+            if trailer is? Incomplete return Incomplete
+            let text=decode_text(out) or_throw
+            return Body[text trailer.stop]
+        }
+        if at+size+2 >? data.length return Incomplete
+        if data[at+size] not=? CR or data[at+size+1] not=? LF return bad(400 "chunk not terminated")
+        out.extend(data[at..at+size))
+        at+=size+2
+    }
+    return Incomplete
+}
+
+# Frame one request at the front of `data`. Every limit is checked before the
+# bytes it guards are buffered further, so a peer cannot grow memory without bound.
+frame=(data:array<uint8> limits:Limits):>Framed|Incomplete|HttpError=>{
+    let lf=find_lf(data 0)
+    if lf <? 0 {
+        if data.length >? limits.request_line+2 return bad(414 "request line too long")
+        return Incomplete
+    }
+    if lf-1 >? limits.request_line return bad(414 "request line too long")
+    let line=line_text(data 0 lf) or_throw
+    let parts=line.split(" ")
+    if parts.length not=? 3 return bad(400 "malformed request line")
+    let [method target version]=parts
+    if not is_method(method) return bad(400 "invalid method")
+    if not version.startswith("HTTP/") return bad(400 "malformed request line")
+    if version not=? "HTTP/1.1" and version not=? "HTTP/1.0" return bad(505 "unsupported version {version}")
+    if not target.startswith("/") return bad(400 "target must be absolute")
+    let head=read_head(data lf+1 limits) or_throw
+    if head is? Incomplete return Incomplete
+    let headers:array<Header>=[]
+    loop text in head.lines {
+        headers.push(parse_header(text) or_throw)
+    }
+    if version =? "HTTP/1.1" and header(headers "host") is? none return bad(400 "missing host")
+    let encoding=header(headers "transfer-encoding")
+    let length:int64?=none
+    loop h in headers {
+        if h.name =? "content-length" {
+            let n=parse_decimal(h.value limits.body) or_throw
+            if length isnt? none and length not=? n return bad(400 "conflicting lengths")
+            length=n
+        }
+    }
+    let body=Body["" head.stop]
+    if encoding isnt? none {
+        if length isnt? none return bad(400 "length with transfer coding")
+        if encoding.lower() not=? "chunked" return bad(501 "transfer coding {encoding}")
+        let chunked=read_chunked(data head.stop limits) or_throw
+        if chunked is? Incomplete return Incomplete
+        body=chunked
+    } else if length isnt? none {
+        if head.stop+length >? data.length return Incomplete
+        let text=decode_text(data[head.stop..head.stop+length)) or_throw
+        body=Body[text head.stop+length]
+    }
+    let question=target.find("?")
+    let raw_path=if question is? none target else target[0..question)
+    let path=percent_decode(raw_path false) or_throw
+    let query=parse_query(if question is? none "" else target[question+1..]) or_throw
+    let request=Request[method target path query version headers body.text]
+    return Framed[request body.stop]
+}
+
+# Whether the connection stays open after answering `request`.
+keeps_alive=(request:Request):>bool=>{
+    let connection=(header(request.headers "connection") ?? "").lower()
+    if request.version =? "HTTP/1.0" return connection =? "keep-alive"
+    return connection not=? "close"
+}
+
+append_text=(@out:array<uint8> text:string):>void=>{
+    out.extend(bytes(text))
+}
+
+# Serialize a response. 204 and 304 carry no body and no length; a HEAD
+# response carries the length of the body it leaves out.
+encode=(response:Response head_only:bool=false close:bool=false):>array<uint8>=>{
+    let out:array<uint8>=[]
+    append_text(@out "HTTP/1.1 {response.status} {reason(response.status)}\r\n")
+    loop h in response.headers {
+        append_text(@out "{h.name}: {h.value}\r\n")
+    }
+    let empty=response.status =? 204 or response.status =? 304
+    let body=bytes(response.body)
+    if not empty append_text(@out "Content-Length: {body.length}\r\n")
+    if close append_text(@out "Connection: close\r\n")
+    append_text(@out "\r\n")
+    if not empty and not head_only out.extend(body)
+    return out
+}
+
+# The client side: frame one response (Content-Length or no body).
+parse_response=(data:array<uint8> limits:Limits):>ResponseFrame|Incomplete|HttpError=>{
+    let lf=find_lf(data 0)
+    if lf <? 0 return Incomplete
+    let line=line_text(data 0 lf) or_throw
+    let parts=line.split(" ")
+    if parts.length <? 3 or parts[0] not=? "HTTP/1.1" return bad(400 "malformed status line")
+    let status=parse_decimal(parts[1] 999) or_throw
+    let head=read_head(data lf+1 limits) or_throw
+    if head is? Incomplete return Incomplete
+    let headers:array<Header>=[]
+    loop text in head.lines {
+        headers.push(parse_header(text) or_throw)
+    }
+    let length_text=header(headers "content-length")
+    if length_text is? none {
+        return ResponseFrame[Response[status headers ""] head.stop]
+    }
+    let length=parse_decimal(length_text limits.body) or_throw
+    if head.stop+length >? data.length return Incomplete
+    let text=decode_text(data[head.stop..head.stop+length)) or_throw
+    return ResponseFrame[Response[status headers text] head.stop+length]
+}

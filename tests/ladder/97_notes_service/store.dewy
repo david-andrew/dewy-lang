@@ -1,0 +1,243 @@
+# The notes store: typed records, validation, revisions and listing.
+# The store is an ordinary value: a batch edits a copy and commits it whole,
+# so a failed batch leaves the caller's store exactly as it was.
+
+Note:type=[
+    id:int64
+    title:string
+    body:string
+    tags:array<string>
+    done:bool
+    revision:int64
+    updated:int64
+]
+
+# What a client sends to create or replace a note.
+NoteInput:type=[title:string body:string="" tags:array<string>=[] done:bool=false]
+
+# A partial update: absent fields keep their value.
+NotePatch:type=[title:string?=none body:string?=none tags:array<string>?=none done:bool?=none]
+
+Store:type=[
+    notes:dict<int64 Note>=[]
+    next_id:int64=1
+    clock:int64=0
+]
+
+Invalid:type=type of error & [problems:array<string>]
+NotFound:type=type of error & [id:int64]
+Stale:type=type of error & [id:int64 current:string]
+
+const MAX_TITLE:int64=40
+const MAX_BODY:int64=400
+const MAX_TAGS:int64=4
+const MAX_TAG:int64=12
+
+etag=(note:Note):>string=>"\"{note.id}.{note.revision}\""
+
+tag_problem=(tag:string):>string?=>{
+    if tag.length =? 0 return "empty tag"
+    if tag.length >? MAX_TAG return "tag '{tag}' is longer than {MAX_TAG}"
+    loop b in bytes(tag) {
+        let ok=(0x61 <=? b <=? 0x7a) or (0x30 <=? b <=? 0x39) or b =? 0x2d
+        if not ok return "tag '{tag}' must be lowercase letters, digits or -"
+    }
+    return none
+}
+
+# Normalized tags: trimmed, lowercased, first occurrence kept.
+normalize_tags=(tags:array<string>):>array<string>=>{
+    let seen:set<string>=set[]
+    let out:array<string>=[]
+    loop raw in tags {
+        let tag=raw.trim().lower()
+        if tag not in? seen {
+            seen.push(tag)
+            out.push(tag)
+        }
+    }
+    return out
+}
+
+check=(title:string body:string tags:array<string>):>array<string>=>{
+    let problems:array<string>=[]
+    if title.length =? 0 problems.push("title is required")
+    if title.length >? MAX_TITLE problems.push("title is longer than {MAX_TITLE}")
+    if body.length >? MAX_BODY problems.push("body is longer than {MAX_BODY}")
+    if tags.length >? MAX_TAGS problems.push("more than {MAX_TAGS} tags")
+    loop tag in tags {
+        let problem=tag_problem(tag)
+        if problem isnt? none problems.push(problem)
+    }
+    return problems
+}
+
+tick=(@store:Store):>int64=>{
+    store.clock+=1
+    return store.clock
+}
+
+create=(@store:Store input:NoteInput):>Note|Invalid=>{
+    let title=input.title.trim()
+    let tags=normalize_tags(input.tags)
+    let problems=check(title input.body tags)
+    if problems.length >? 0 return Invalid[problems]
+    let note=Note[store.next_id title input.body tags input.done 1 tick(@store)]
+    store.notes[note.id]=note
+    store.next_id+=1
+    return note
+}
+
+get=(store:Store id:int64):>Note|NotFound=>{
+    let found=store.notes.get(id)
+    if found is? none return NotFound[id]
+    return found
+}
+
+# `expected` is an If-Match value; empty means unconditional.
+precondition=(note:Note expected:string):>void|Stale=>{
+    if expected.length >? 0 and expected not=? "*" and expected not=? etag(note) {
+        return Stale[note.id etag(note)]
+    }
+}
+
+replace=(@store:Store id:int64 input:NoteInput expected:string=""):>Note|NotFound|Invalid|Stale=>{
+    let note=get(store id) or_throw
+    precondition(note expected) or_throw
+    let title=input.title.trim()
+    let tags=normalize_tags(input.tags)
+    let problems=check(title input.body tags)
+    if problems.length >? 0 return Invalid[problems]
+    let updated=Note[id title input.body tags input.done note.revision+1 tick(@store)]
+    store.notes[id]=updated
+    return updated
+}
+
+patch=(@store:Store id:int64 change:NotePatch expected:string=""):>Note|NotFound|Invalid|Stale=>{
+    let note=get(store id) or_throw
+    precondition(note expected) or_throw
+    let title=if change.title isnt? none change.title.trim() else note.title
+    let body=change.body ?? note.body
+    let tags=if change.tags isnt? none normalize_tags(change.tags) else note.tags
+    let problems=check(title body tags)
+    if problems.length >? 0 return Invalid[problems]
+    let updated=Note[id title body tags change.done ?? note.done note.revision+1 tick(@store)]
+    store.notes[id]=updated
+    return updated
+}
+
+remove=(@store:Store id:int64 expected:string=""):>void|NotFound|Stale=>{
+    let note=get(store id) or_throw
+    precondition(note expected) or_throw
+    store.notes.remove(id)
+    store.clock+=1
+}
+
+# Listing ------------------------------------------------------------------
+
+Filter:type=[
+    tag:string=""
+    done:bool?=none
+    text:string=""
+    sort:string="id"
+    limit:int64=10
+    offset:int64=0
+]
+
+Page:type=[total:int64 offset:int64 limit:int64 items:array<Note>]
+
+matches=(note:Note filter:Filter):>bool=>{
+    if filter.tag.length >? 0 and filter.tag not in? note.tags return false
+    if filter.done isnt? none and note.done not=? filter.done return false
+    if filter.text.length >? 0 {
+        let needle=filter.text.lower()
+        if needle not in? note.title.lower() and needle not in? note.body.lower() return false
+    }
+    return true
+}
+
+by_title=(note:Note):>string=>note.title.lower()
+by_updated=(note:Note):>int64=>-note.updated
+
+list=(store:Store filter:Filter):>Page=>{
+    let selected=[loop note in store.notes.values() if matches(note filter) note]
+    if filter.sort =? "title" {
+        selected.sort(key=@by_title)
+    } else if filter.sort =? "updated" {
+        selected.sort(key=@by_updated)
+    }
+    let start=min(filter.offset selected.length)
+    let stop=min(start+filter.limit selected.length)
+    return Page[selected.length filter.offset filter.limit selected[start..stop)]
+}
+
+TagCount:type=[name:string count:int64]
+
+by_count=(t:TagCount):>int64=>-t.count
+by_name=(t:TagCount):>string=>t.name
+
+tag_counts=(store:Store):>array<TagCount>=>{
+    let counts:dict<string int64>=[]
+    loop note in store.notes.values() {
+        loop tag in note.tags {
+            if tag in? counts counts[tag]+=1 else counts[tag]=1
+        }
+    }
+    let out=[loop [name count] in counts TagCount[name count]]
+    out.sort(key=@by_name)
+    out.sort(key=@by_count)
+    return out
+}
+
+# Batches ------------------------------------------------------------------
+
+BatchOp:type=[op:string id:int64=0 note:NoteInput?=none patch:NotePatch?=none]
+BatchResult:type=[applied:int64 ids:array<int64>]
+BatchFailed:type=type of error & [index:int64 status:int64 detail:string]
+
+describe=(failure:Invalid|NotFound|Stale):>string=>match failure {
+    i:Invalid=>i.problems.join("; ")
+    n:NotFound=>"note {n.id} not found"
+    s:Stale=>"note {s.id} is at {s.current}"
+}
+
+status_of=(failure:Invalid|NotFound|Stale):>int64=>match failure {
+    <Invalid>=>422
+    <NotFound>=>404
+    <Stale>=>412
+}
+
+apply_one=(@store:Store op:BatchOp):>int64|Invalid|NotFound|Stale=>{
+    if op.op =? "create" {
+        if op.note is? none return Invalid[["create needs a note"]]
+        let note=create(@store op.note) or_throw
+        return note.id
+    }
+    if op.op =? "patch" {
+        if op.patch is? none return Invalid[["patch needs a patch"]]
+        let note=patch(@store op.id op.patch) or_throw
+        return note.id
+    }
+    if op.op =? "delete" {
+        remove(@store op.id) or_throw
+        return op.id
+    }
+    return Invalid[["unknown op '{op.op}'"]]
+}
+
+# All or nothing: the ops run against a copy that replaces the store only
+# when every op succeeds.
+apply_batch=(@store:Store ops:array<BatchOp>):>BatchResult|BatchFailed=>{
+    let draft=store
+    let ids:array<int64>=[]
+    loop i in 0.. and op in ops {
+        let outcome=apply_one(@draft op)
+        if outcome is? int64 {
+            ids.push(outcome)
+        } else {
+            return BatchFailed[i status_of(outcome) describe(outcome)]
+        }
+    }
+    store=draft
+    return BatchResult[ids.length ids]
+}

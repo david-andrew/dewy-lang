@@ -1,0 +1,43 @@
+# Static files the server answers from memory. The UI page loads the wasm
+# build of ui_app.dewy, which the toolchain writes as notes_ui.html.
+
+Asset:type=[path:string content_type:string body:string]
+
+const INDEX_HTML=r"""<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Dewy Notes</title>
+<link rel="stylesheet" href="/static/notes.css"></head>
+<body><iframe src="/static/notes_ui.html" title="notes"></iframe></body>
+</html>
+"""
+
+const NOTES_CSS=r"""body { margin: 0; background: #0b1622; }
+iframe { border: 0; width: 100vw; height: 100vh; }
+"""
+
+const MANIFEST=r"""{"name":"Dewy Notes","start_url":"/","display":"standalone"}
+"""
+
+assets=():>array<Asset>=>[
+    Asset["/" "text/html; charset=utf-8" INDEX_HTML]
+    Asset["/static/notes.css" "text/css" NOTES_CSS]
+    Asset["/static/manifest.json" "application/json" MANIFEST]
+]
+
+# FNV-1a over the UTF-8 bytes, as a strong validator for If-None-Match.
+fnv1a=(text:string):>uint64=>{
+    let hash:uint64=14695981039346656037
+    loop b in bytes(text) {
+        hash=(hash xor uint64(b))*1099511628211
+    }
+    return hash
+}
+
+asset_etag=(asset:Asset):>string=>"\"{format(fnv1a(asset.body) "016x")}\""
+
+find_asset=(path:string):>Asset?=>{
+    loop asset in assets() {
+        if asset.path =? path return asset
+    }
+    return none
+}
