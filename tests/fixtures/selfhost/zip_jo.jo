@@ -1,0 +1,11 @@
+# The pilot's reference: the compiler's own zip.jo, with the same command line.
+use '../../../compiler/zip.jo'
+
+main = () -> int:
+    a = args()
+    files: (str, u8[])[]
+    loop i in [2..a.len()):
+        if let b = read_bytes(a[i]): files.push((a[i], b))
+        else: return 1
+    if write_zip(a[1], files): return 0
+    1

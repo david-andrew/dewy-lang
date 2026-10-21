@@ -1,0 +1,99 @@
+# Self-hosting pilot: compiler/zip.jo in Dewy, with its helpers from elf.jo and
+# util.jo. Zip archives are deflated, as the PNG writer does, or stored when that
+# is no smaller. `zip out.zip file...` writes the named files.
+
+from p"@lib/game/image.jo" import deflate
+
+let crc_table:array<int64>=[]
+
+crc32=(b:array<uint8>):>int64=>{
+    if crc_table.length =? 0 {
+        loop n in [0..256) {
+            let c:int64=n
+            loop k in [0..8) {
+                if c & 1 not=? 0 {c = 0xEDB88320 xor (c >> 1)}
+                else {c = c >> 1}
+            }
+            crc_table.push(c)
+        }
+    }
+    let c:int64=0xFFFFFFFF
+    loop x in b {c = crc_table[(c xor int64(x)) & 255] xor (c >> 8)}
+    c xor 0xFFFFFFFF
+}
+
+put16=(@b:array<uint8> v:int64):>void=>{
+    b.push(uint8(v & 255))
+    b.push(uint8((v >> 8) & 255))
+}
+
+put32=(@b:array<uint8> v:int64):>void=>{
+    put16(@b v)
+    put16(@b v >> 16)
+}
+
+# files: the name in the archive and the contents
+write_zip=(path:string files:array<[name:string data:array<uint8>]>):>bool=>{
+    let out:array<uint8>=[]
+    let central:array<uint8>=[]
+    loop f in files {
+        let off=out.length
+        let crc=crc32(f.data)
+        let packed=deflate(f.data)
+        let method=8
+        if packed.length >=? f.data.length {
+            packed=f.data
+            method=0
+        }
+        let name=f.name as array<uint8>
+        let header=(sig:int64 at_central:bool):>array<uint8>=>{
+            let h:array<uint8>=[]
+            put32(@h sig)
+            if at_central {put16(@h 20)}                # made by
+            put16(@h 20)                                 # version needed
+            put16(@h 0x800)                              # flags: names are UTF-8
+            put16(@h method)                             # 8: deflated, 0: stored
+            put16(@h 0)                                  # time
+            put16(@h 0x21)                               # date: 1980-01-01
+            put32(@h crc)
+            put32(@h packed.length)
+            put32(@h f.data.length)
+            put16(@h name.length)
+            put16(@h 0)                                  # extra
+            if at_central {
+                put16(@h 0)                              # comment
+                put16(@h 0)                              # disk
+                put16(@h 0)                              # internal attributes
+                put32(@h 0)                              # external attributes
+                put32(@h off)
+            }
+            h.extend(name)
+            h
+        }
+        out.extend(header(0x04034B50 false))
+        out.extend(packed)
+        central.extend(header(0x02014B50 true))
+    }
+    let cd_off=out.length
+    out.extend(central)
+    put32(@out 0x06054B50)
+    put16(@out 0)
+    put16(@out 0)
+    put16(@out files.length)
+    put16(@out files.length)
+    put32(@out central.length)
+    put32(@out cd_off)
+    put16(@out 0)
+    write_bytes(path out) is? int64
+}
+
+main=():>int64=>{
+    let arguments=args()
+    let files:array<[name:string data:array<uint8>]>=[]
+    loop i in [2..arguments.length) {
+        let data=read_bytes(arguments[i])
+        if not (data is? array<uint8>) {return 1}
+        files.push([name=arguments[i] data=data])
+    }
+    if write_zip(arguments[1] files) {0} else {1}
+}
