@@ -67,9 +67,54 @@ main=():>int64=>tail([1 2 3])
 }
 main=():>int64=>grow()
 ''',
+    # Writing elements in place (`loop @x in xs`, or a counted loop's element
+    # store) keeps the length, so the hidden index and the counter stay bounded.
+    'mutable_element_loop': '''Item:type=[parts:array<int64> hp:int64]
+tick=(values:array<int64> items:array<Item>):>int64=>{
+    let xs=values
+    let ys=items
+    loop @value in xs {value+=1}
+    loop @item in ys {item.hp-=1}
+    return xs.length+ys.length
+}
+main=():>int64=>tick([1 2] [])
+''',
+    'counted_element_writes': '''bump=(values:array<int64>):>int64=>{
+    let xs=values
+    let k=-1
+    loop true {
+        k+=1
+        if k >=? xs.length break
+        xs[k]+=1
+    }
+    return xs.length
+}
+main=():>int64=>bump([1 2])
+''',
 }
 
 REJECTED = {
+    'counted_pop': ('''bump=(values:array<int64>):>int64=>{
+    let xs=values
+    let k=-1
+    loop true {
+        k+=1
+        if k >=? xs.length break
+        xs.pop()
+        xs[k]+=1
+    }
+    return xs.length
+}
+main=():>int64=>bump([1 2])
+''', 'cannot prove index is in bounds'),
+    'element_of_element': ('''Item:type=[parts:array<int64> hp:int64]
+tick=(items:array<Item>):>int64=>{
+    let ys=items
+    loop @item in ys {item.parts[0]+=1}
+    return 0
+}
+main=():>int64=>tick([])
+''', 'cannot prove index is in bounds: missing upper bound'),
     'slice_past_end': ('''main=():>int64=>{
     let xs:array<int64>=[1 2]
     return xs[1..3).length

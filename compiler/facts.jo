@@ -715,16 +715,24 @@ fact_field_node = (e: int) -> bool:
 fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reason: FactReason):
     chain: int[]
     e = target
-    loop e != 0 and (fact_field_node(e) or nodes[e].kind == .index and nodes[e].b != 0):
-        chain.push(e)
-        e = int(nodes[e].a)
+    depth = 0
+    loop e != 0 and depth < 32:
+        depth += 1
+        if fact_field_node(e) or nodes[e].kind == .index and nodes[e].b != 0:
+            chain.push(e)
+            e = int(nodes[e].a)
+        # (an element alias, `loop @x in xs`, writes the place it names)
+        else if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)) and int(locals[int(nodes[e].sym)].flags) & LF_ALIAS != 0 and locals[int(nodes[e].sym)].alias != 0:
+            e = int(locals[int(nodes[e].sym)].alias)
+        else: break
     p = fact_place(e)
     if e == 0 or nodes[e].kind != .ident or p.declaration == 0:
         fact_forget(s, at, reason, true)
         return
-    if fact_exposed(p): fact_forget(s, at, reason)
+    # (the root's own prior value first: forgetting exposed roots replaces it)
     i = fact_binding(s, p)
     old = if i >= 0: s.bindings[i].value else: 0
+    if fact_exposed(p): fact_forget(s, at, reason)
     fresh = fact_new(s, fact_domain(ntype(e), reason, at), FactTerm(type = ntype(e)))
     fact_bind(s, p, fresh)
     j = chain.len() - 1
@@ -734,21 +742,24 @@ fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reaso
             t = representation_type(ntype(int(nodes[c].a)))
             if types[t].kind != .array and types[t].kind != .fixed: return
             # (an element write never resizes the array it indexes)
-            loop q in s.projections:
-                if q.base == old and not q.element and q.selector == -1:
-                    if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(fresh, -1, false, q.value))
-                    break
+            if types[t].kind == .fixed: return
+            # (the length of the old value is an evaluation too, even if unread so far)
+            length = fact_project(s, old, -1, false, T_INT)
+            if length != 0 and s.projections.len() < FACT_CAP: s.projections.push(FactProjection(fresh, -1, false, length))
             return
         selector = if nodes[c].aux == -2: int(nodes[c].ival) else: int(nodes[c].name)
         child = 0
-        count = s.projections.len()
-        loop k in [0..count):
-            q = s.projections[k]
+        kept: FactProjection[]
+        loop q in s.projections:
             if q.base != old or q.element: continue
             if q.selector == selector: child = q.value
-            else if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(fresh, q.selector, false, q.value))
-        if j == 0 and resize or child == 0: return
+            else: kept.push(FactProjection(fresh, q.selector, false, q.value))
+        loop q in kept:
+            if s.projections.len() < FACT_CAP: s.projections.push(q)
+        if j == 0 and resize: return
         t = refine_storage(c, ntype(c))
+        if child == 0: child = fact_project(s, old, selector, false, t)
+        if child == 0: return
         next = fact_new(s, fact_domain(t, reason, at), FactTerm(type = t))
         if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(fresh, selector, false, next))
         old = child
@@ -992,6 +1003,14 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
         if fact_slot(s, entry.ids[i]) < 0: s.ids.push(entry.ids[i]); s.bounds.push(entry.bounds[i])
     s.projections = entry.projections
     s.differences = entry.differences
+    # A changing aggregate keeps the lengths and fields entry and backedge
+    # share (an element write leaves its length); stability re-validates them.
+    loop i in [0..joined.bindings.len()):
+        h = fact_binding(s, joined.bindings[i].place)
+        if h < 0 or s.bindings[h].value == joined.bindings[i].value: continue
+        loop p in joined.projections:
+            if p.base != joined.bindings[i].value or p.element or fact_slot(entry, p.value) < 0: continue
+            if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(s.bindings[h].value, p.selector, false, p.value))
     loop row in carried:
         upper = changing.contains(row.a)
         value = if upper: row.a else: row.b
@@ -1046,6 +1065,30 @@ fact_loop_rename = (a: FactState, b: FactState, v: int) -> int:
         return if i >= 0: b.bindings[i].value else: 0
     v
 
+# Two header aggregates whose contents changed (an element written each
+# iteration) are settled when they carry the same non-element projections:
+# the same evaluated lengths and fields, and nothing else known.
+fact_same_shape = (a: FactState, b: FactState, x: int, y: int) -> bool:
+    count = 0
+    loop p in a.projections:
+        if p.base != x: continue
+        if p.element: return false
+        count += 1
+        found = false
+        loop q in b.projections:
+            if q.base == y and not q.element and q.selector == p.selector:
+                found = q.value == p.value
+                break
+        if not found: return false
+    loop q in b.projections:
+        if q.base == y: count -= 1
+    if count != 0: return false
+    loop row in a.differences:
+        if row.a == x or row.b == x: return false
+    loop row in b.differences:
+        if row.a == y or row.b == y: return false
+    true
+
 fact_loop_stable = (a: FactState, b: FactState) -> bool:
     loop binding in a.bindings:
         i = fact_binding(b, binding.place)
@@ -1057,7 +1100,7 @@ fact_loop_stable = (a: FactState, b: FactState) -> bool:
         # alone is not evidence that a changed aggregate has stabilized. Two
         # header aggregates with no projections or rows are both top.
         t = if binding.place.root == .local: int(locals[binding.place.declaration].type) else: int(globals[binding.place.declaration].type)
-        if not fact_scalar(t) and binding.value != b.bindings[i].value and not (fact_top(a, binding.value) and fact_top(b, b.bindings[i].value)): return false
+        if not fact_scalar(t) and binding.value != b.bindings[i].value and not (fact_top(a, binding.value) and fact_top(b, b.bindings[i].value)) and not fact_same_shape(a, b, binding.value, b.bindings[i].value): return false
     # Carried rows must return unchanged, renamed into the next frame.
     if a.differences.len() != b.differences.len(): return false
     loop row in a.differences:
@@ -1342,7 +1385,8 @@ fact_capture = (n: int, s: mut FactState) -> int:
     if k == .while_ or k == .for_:
         # An indexed array loop evaluates its source once, before the loop.
         base = 0
-        indexed = k == .for_ and nodes[n].aux == 1 and nodes[n].c != 0 and files[pos_file(nodes[n].pos)].is_dewy
+        # (`loop @x in xs`, aux 2, cannot resize or replace xs: its length is read once too)
+        indexed = k == .for_ and (nodes[n].aux == 1 or nodes[n].aux == 2) and nodes[n].c != 0 and files[pos_file(nodes[n].pos)].is_dewy
         if indexed: base = fact_capture(int(nodes[n].a), s)
         fact_changes(n, s, n)
         after = s
