@@ -27,7 +27,8 @@ GPT quota is limited: at most one Astra stream, at medium effort; Sol for review
 only.
 
 - Astra: ownership slice 2 (copy/move hooks, resource containers, closure copyability).
-- Opus: refinement and container follow-ups (small items).
+- Opus: suspected struct-assignment miscompile; map/set slot release; strict
+  index stores.
 
 ## Next
 
@@ -64,10 +65,8 @@ only.
   - diagnostics spell `Set<…>` instead of `set<…>`; a failed overload can
     blame an unrelated candidate (GpuBuffer, Set); `.length` on a user type
     without one says "use `.length`";
-  - refinement follow-ups: a call argument (`printl(take(z))`) drops facts, so
-    a refuted contract only fails at run time; `.copy()` doesn't carry length
-    facts (strict 67/70 stop there); witnesses for `and`/`or` conditions; the
-    hint inside `$proof` suggests `$runtime_assert`;
+  - strict 67/70 need result-length facts for functions like `make(n)`
+    (stop at `saved[0]`); likely needs design;
   - static calls through runtime `type<T>` values (needs type values);
   - effects slice 4 follow-ups: conditional capacity/uniqueness proofs,
     complete late-operation verification.
