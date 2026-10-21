@@ -674,6 +674,9 @@ dn_bracketed = () -> int:
             close = dn_peek()
             dn_at += 1
             break
+        # ([0..n as int64): `as` binds more loosely than `..`, so it took the whole range)
+        if opening.symbol == .lbrack and dn_peek() == .rparen and children.len() == 1 and (dw_op(children[0]) == .kw_as or dw_op(children[0]) == .kw_transmute) and dw_op(dw_child(children[0], 1)) == .range_apply:
+            return dn_error(dn_tokens[dn_at].start, "expected an expression, found ')': `{dn_token_text(dw_op(children[0]))}` binds more loosely than `..`, so here it converts the whole range; parenthesize the bound, as in `[0..(n as int64))`")
         before = dn_at
         children.push(if opening.symbol == .lbrace: dn_statement() else: dn_stmt())
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a block element")
