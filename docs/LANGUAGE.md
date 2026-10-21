@@ -2262,7 +2262,7 @@ loans currently reject conservatively. Raw writes require a writable address ori
 the expression the owner is an ordinary value and is freed normally.
 
 Other directives of the design (`$no_prelude`,
-`$allocator`, `$expect`, `$unsafe_assume`, `$target`, …) are reported as not
+`$allocator`, `$expect`, `$unsafe_assume`, …) are reported as not
 implemented yet where they appear.
 
 `value.copy` requests an independent value. It evaluates the receiver once
@@ -2499,6 +2499,28 @@ active toolchain's library directory and also works with selected imports.
 Import cycles containing a Dewy (`.dewy`) module are rejected, with the import
 path through the cycle in the diagnostic. This includes cycles that pass through
 Jo implementation libraries; cycles made entirely of Jo modules remain allowed.
+
+`$target` is the compile-time name of the backend being compiled for: `x86_64`,
+`arm` (64-bit ARM) or `wasm32`; `riscv` and `c` name backends this compiler does
+not have yet. A condition made only of `$target` compared with string literals
+(`=?`, `not =?`, `in?` and `not in?` a literal list, joined by `not`, `and` and
+`or`) is decided while compiling. Its `if` compiles only the live arm and splices
+that arm's body into the enclosing scope, so imports and declarations there bind
+as if written outside. The other arms are never checked, so they may name
+modules or functions that exist only for another target. A misspelled target
+name is an error. Elsewhere `$target` is an ordinary string.
+
+```dewy
+$supported_targets = ["x86_64" "arm" "wasm32"]
+if $target =? "wasm32" {
+    import p"web_audio.dewy" as audio
+} else {
+    import p"native_audio.dewy" as audio
+}
+```
+
+`$supported_targets` lists the targets a module accepts, once at file scope;
+compiling it for any other target is an error.
 
 Start a game with the built-in template, then edit it while it runs:
 

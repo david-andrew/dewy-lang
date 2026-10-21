@@ -252,7 +252,120 @@ dw_fail_pos = (pos: int, what: str) -> int:
 # Metatags the design defines that this compiler does not implement yet. Each
 # is reported where it is written rather than as a generic syntax error.
 dw_designed_directive = (name: str) -> bool:
-    name in ["abstract", "allocator", "breakpoint", "field", "lend", "no_prelude", "proof", "prototype", "prototype_warnings", "supported_targets", "target", "unsafe_assume", "__copy__", "__drop__", "__move__"]
+    name in ["abstract", "allocator", "breakpoint", "field", "lend", "no_prelude", "proof", "prototype", "prototype_warnings", "unsafe_assume", "__copy__", "__drop__", "__move__"]
+
+# `$target`: the backend being compiled for, by the design's names (x64 is x86_64,
+# arm64 is arm, WebAssembly is wasm32; riscv and c name backends this compiler lacks).
+dw_target_name = () -> str:
+    if target_wasm: return "wasm32"
+    if target_arm64: return "arm"
+    "x86_64"
+
+dw_target_names = () -> str[]: ["x86_64", "riscv", "arm", "c", "wasm32"]
+
+dw_is_target = (id: int) -> bool:
+    let id = dw_unwrap(id)
+    dewy_syntax[id].kind == .metatag and dewy_syntax[id].text == "target"
+
+# A target name written as a string literal, checked against the known backends.
+dw_target_literal = (id: int) -> str?:
+    let id = dw_unwrap(id)
+    if dewy_syntax[id].kind != .string: return none
+    name = dewy_syntax[id].text
+    if not (name in dw_target_names()): fatal(dewy_syntax[id].pos, "unknown target \"{name}\": `$target` is one of {join(dw_target_names(), ", ")}")
+    name
+
+# A condition made only of `$target` compared with string literals (`=?`, `not =?`,
+# and `in?`/`not in?` a literal list), joined by `not`, `and` and `or`, folds here:
+# 1 true, 0 false, -1 any other condition (an ordinary runtime test).
+dw_target_condition = (id0: int) -> int:
+    id = dw_unwrap(id0)
+    kind = dewy_syntax[id].kind
+    if kind == .block and dewy_syntax[id].text == "():" and dw_nchildren(id) == 1: return dw_target_condition(dw_child(id, 0))
+    op = dw_op(id)
+    if kind == .prefix and op == .kw_not:
+        inner = dw_target_condition(dw_child(id, 1))
+        return if inner < 0: -1 else: 1 - inner
+    if kind != .binary: return -1
+    if op == .kw_and or op == .kw_or:
+        left = dw_target_condition(dw_child(id, 1))
+        if left < 0: return -1
+        right = dw_target_condition(dw_child(id, 2))
+        if right < 0: return -1
+        return if op == .kw_and: left & right else: left | right
+    inverted = dewy_syntax[dw_child(id, 0)].kind == .inverted_comparison or op == .not_eq or op == .not_contains
+    left = dw_child(id, 1)
+    right = dw_child(id, 2)
+    found = false
+    if op == .eq or op == .not_eq:
+        if dw_is_target(right):
+            right = left
+            left = dw_child(id, 2)
+        if not dw_is_target(left): return -1
+        name = dw_target_literal(right) ?? ""
+        if len(name) == 0: return -1
+        found = name == dw_target_name()
+    else if op == .contains or op == .not_contains:
+        if not dw_is_target(left): return -1
+        list = dw_unwrap(right)
+        if dewy_syntax[list].kind != .block or dewy_syntax[list].text != "[]:": return -1
+        loop entry in dw_children(list):
+            name = dw_target_literal(entry) ?? ""
+            if len(name) == 0: return -1
+            if name == dw_target_name(): found = true
+    else: return -1
+    if inverted: found = not found
+    if found: 1 else: 0
+
+# An `if` chain whose every condition is a folded `$target` test: the syntax of the
+# compiled arm's body (0 when no arm is compiled), or -1. The other arms are never
+# lowered or checked, so they may name declarations and imports of other targets.
+dw_target_live = (id0: int) -> int:
+    id = dw_unwrap(id0)
+    if dewy_syntax[id].kind != .flow: return -1
+    items = dw_children(id)
+    loop arm in items:
+        if dewy_syntax[arm].kind != .keyword_expr: return arm
+        if dewy_syntax[dw_child(arm, 0)].text != "if" or dw_nchildren(arm) != 3: return -1
+        fold = dw_target_condition(dw_child(arm, 1))
+        if fold < 0: return -1
+        if fold == 1: return dw_child(arm, 2)
+    0
+
+# Statements with each `$target` chain replaced by its compiled arm's statements,
+# which bind in the enclosing scope.
+dw_target_splice = (items: int[]) -> int[]:
+    out: int[]
+    loop item in items:
+        live = dw_target_live(item)
+        if live < 0:
+            out.push(item)
+            continue
+        if live == 0: continue
+        body = dw_unwrap(live)
+        inner = [live]
+        if dewy_syntax[body].kind == .block and dewy_syntax[body].text == "{{}}:": inner = dw_children(body)
+        loop statement in dw_target_splice(inner): out.push(statement)
+    out
+
+# `$supported_targets = ["x86_64" ...]`: the backends a module accepts.
+dw_targets_listed: {int: bool} = {}   # files that set it
+dw_supported_targets = (tag: int, declaration: int):
+    pos = dewy_syntax[tag].pos
+    if tag == declaration: fatal(pos, "`$supported_targets` lists the module's targets: `$supported_targets = [\"x86_64\" \"wasm32\"]`")
+    list = dw_unwrap(dw_child(declaration, 2))
+    if dewy_syntax[list].kind != .block or dewy_syntax[list].text != "[]:": fatal(dewy_syntax[list].pos, "`$supported_targets` takes a literal list of target names: `[\"x86_64\" \"wasm32\"]`")
+    names: str[]
+    loop entry in dw_children(list):
+        name = dw_target_literal(entry) ?? ""
+        if len(name) == 0: fatal(dewy_syntax[entry].pos, "`$supported_targets` lists target names as string literals")
+        names.push(name)
+    file = pos_file(pos)
+    if dw_targets_listed.has(file): fatal(pos, "`$supported_targets` may be set only once per module")
+    dw_targets_listed[file] = true
+    if not (dw_target_name() in names):
+        listed = if names.len() == 0: "no target" else: join(names, ", ")
+        fatal(pos, "this module supports {listed}, not {dw_target_name()}, the target being compiled for")
 
 dw_unimplemented = (id: int, name: str) -> int:
     fatal(dewy_syntax[id].pos, "`${name}` is part of the design but not implemented yet")
@@ -262,7 +375,7 @@ dw_unimplemented = (id: int, name: str) -> int:
 dw_metatag_fail = (id: int) -> int:
     name = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
-    if name == "explicit_copies": fatal(pos, "`$explicit_copies` is a module directive; put it at file scope")
+    if name == "explicit_copies" or name == "supported_targets": fatal(pos, "`${name}` is a module directive; put it at file scope")
     if name == "test": fatal(pos, "`$test` goes alone on the line just before a module-level function declaration")
     if name == "expect" or name == "fail": fatal(pos, "`${name}` is a statement in a function: a test, or a helper a test calls")
     if dw_designed_directive(name): return dw_unimplemented(id, name)
@@ -1255,7 +1368,11 @@ dw_expr = (id: int) -> int:
         return dewy_syntax[id].child_left
     if k == .based_string: return dw_binary(id)
     if k == .directive: return dw_directive(id)
-    if k == .metatag: return dw_metatag_fail(id)
+    if k == .metatag:
+        if text != "target": return dw_metatag_fail(id)
+        n = mk(.str_lit, pos)
+        nodes[n].sval = i32(intern(dw_target_name()))
+        return n
     if k == .identifier:
         if text == "none": return mk(.none_lit, pos)
         if text == "end" and dw_index_context.len() > 0:
@@ -2113,6 +2230,12 @@ dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
         return n
     if word != "if" and word != "loop": return dw_block(arm, accumulator, map)
     if dw_nchildren(arm) != 3: return dw_fail(arm, "this flow arm")
+    if word == "if":
+        fold = dw_target_condition(dw_child(arm, 1))
+        if fold == 1: return dw_block(dw_child(arm, 2), accumulator, map)
+        if fold == 0:
+            if at + 1 < items.len(): return dw_flow(id, at + 1, accumulator, map)
+            return mk(.block, dewy_syntax[arm].pos)
     n = mk(if word == "if": NK.if_ else: NK.while_, dewy_syntax[arm].pos)
     outer_siblings = dw_siblings
     if word == "loop":
@@ -2151,11 +2274,12 @@ dw_block = (id: int, accumulator: int = 0, map: bool = false) -> int:
     if scoped: outer_siblings = dw_siblings
     statements: int[]
     if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "{{}}:":
-        children = dw_children(id)
+        children = dw_target_splice(dw_children(id))
         label = 0
         label_pos = 0
         loop i in 0.. and child in children:
-            if dewy_syntax[child].kind == .metatag:
+            if dewy_syntax[child].kind == .metatag and dewy_syntax[child].text != "target":
+                if dewy_syntax[child].text == "supported_targets": dw_metatag_fail(child)
                 if dw_designed_directive(dewy_syntax[child].text) or dewy_syntax[child].text == "capture" or dewy_syntax[child].text == "include_bytes" or dewy_syntax[child].text == "explicit_copies": dw_metatag_fail(child)
                 if label != 0: dw_label_fail(label_pos, label)
                 label = intern(dewy_syntax[child].text)
@@ -2329,6 +2453,11 @@ dw_top_declarations = (id: int) -> int[]:
 dw_top_declarations_inner = (id: int) -> int[]:
     declaration = dw_unwrap(id)
     if dw_op(declaration) == .statement_end: declaration = dw_unwrap(dw_child(declaration, 1))
+    if dw_target_live(declaration) >= 0:
+        spliced: int[]
+        loop item in dw_target_splice([declaration]):
+            loop made in dw_top_declarations(item): spliced.push(made)
+        return spliced
     tag = declaration
     enabled = 1
     if dw_op(declaration) == .assign: tag = dw_unwrap(dw_child(declaration, 1))
@@ -2340,6 +2469,9 @@ dw_top_declarations_inner = (id: int) -> int[]:
         file = pos_file(dewy_syntax[tag].pos)
         if files[file].explicit_copies != 0: fatal(dewy_syntax[tag].pos, "`$explicit_copies` may be set only once per module")
         files[file].explicit_copies = enabled
+        return []
+    if dewy_syntax[tag].kind == .metatag and dewy_syntax[tag].text == "supported_targets":
+        dw_supported_targets(tag, declaration)
         return []
     if dewy_syntax[declaration].kind == .keyword_expr:
         word = dewy_syntax[dw_child(declaration, 0)].text

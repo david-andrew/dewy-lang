@@ -1,0 +1,31 @@
+# quick
+# modes: web web-release
+# A `$target` test folds while compiling: dead arms are never checked, and the
+# live arm's imports and declarations bind in the enclosing scope.
+if $target =? "wasm32" {
+    import p"../../fixtures/target/web_note.dewy" as notes
+    width=()=>32
+} else if $target in? ["x86_64" "arm"] {
+    import p"../../fixtures/target/native_note.dewy" as notes
+    width=()=>64
+} else {
+    import p"../../fixtures/target/no_such_module.dewy" as notes
+    width=()=>missing_width
+}
+
+main=()=>{
+    if $target not =? "wasm32" and not ($target =? "c") {
+        let place="native"
+    } else {
+        let place="web"
+    }
+    printl(place)
+    printl(notes.note())
+    printl(width())
+    let bits=if $target in? ["riscv" "c"] {undefined_bits()} else {width()*2}
+    printl(bits)
+    if $target not in? ["x86_64" "arm" "wasm32"] {undefined_call()}
+    let on_web=$target =? "wasm32"
+    printl(on_web)
+    printl($target.length >? 2)
+}
