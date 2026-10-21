@@ -1,5 +1,6 @@
-# Demanded scalar facts. Places name storage; values name immutable evaluations.
-# No optimization consumes this pilot. In particular, isolation is not purity.
+use 'math_lower.jo'
+# Finite value facts and the cheap lowering domain. Places name storage;
+# values name immutable evaluations. Isolation alone never establishes purity.
 use 'ast.jo'
 use 'lex.jo'
 use 'types.jo'
@@ -11,6 +12,7 @@ use 'comptime.jo'
 use 'isolation.jo'
 use 'refine.jo'
 use 'places.jo'
+use 'effects.jo'
 
 enum FactPolicy: RuntimeAllowed, RequireStatic
 enum FactReason: missing, write, call, join, loop_, unsupported, wrap, budget
@@ -39,7 +41,15 @@ struct FactProjection:
     element: bool
     value: int
 
+# Sparse mathematical difference constraints: a - b <= limit. Endpoints are
+# immutable evaluations, so writes retire routes without rewriting old facts.
+struct FactDifference:
+    a: int
+    b: int
+    limit: int
+
 struct FactState:
+    differences: FactDifference[]
     projections: FactProjection[]
     bindings: FactBinding[]
     ids: int[]
@@ -49,6 +59,16 @@ struct FactState:
 struct FactRequest:
     node: int
     owner: int
+
+struct FactLoop:
+    back: FactState = FactState(live = false)
+    exits: FactState = FactState(live = false)
+
+fact_loops: FactLoop[]
+fact_speculating = 0
+fact_pending_defers = 0
+fact_loop_steps = 0
+fact_loop_exhausted = false
 
 fact_divisors: {int: int} = {}
 fact_requests: FactRequest[]
@@ -291,10 +311,141 @@ fact_forget = (s: mut FactState, at: int, reason: FactReason, all: bool = false)
         v = fact_new(s, fact_domain(t, reason, at), FactTerm(type = t))
         s.bindings[i].value = v
 
+# A settled summary can preserve exposed roots across read-only calls.
+# Opaque/callback/hidden-helper effects still invalidate every exposed root.
+fact_call_effects = (n: int, s: mut FactState):
+    if nodes[n].aux != 0 or not effects_demand(int(nodes[n].sym)):
+        fact_forget(s, n, .call)
+        return
+    f = int(nodes[n].sym)
+    events = effect_summaries[f].events
+    loop event in events:
+        if event.atom.kind == .opaque or event.atom.kind == .escape:
+            fact_forget(s, n, .call)
+            return
+    loop event in events:
+        if event.atom.kind != .write: continue
+        p = place_base(event.atom.place)
+        if p.root == .formal:
+            i = p.declaration - 1
+            if i < 0 or i >= nkids(n): fact_forget(s, n, .call); return
+            p = place_base(place_route(kid(n, i)))
+        if p.declaration == 0: fact_forget(s, n, .call); return
+        # Alias overlap is conservative until its provenance is represented.
+        if fact_exposed(p): fact_forget(s, n, .call)
+        i = fact_binding(s, p)
+        if i >= 0:
+            t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
+            s.bindings[i].value = fact_new(s, fact_domain(t, .call, n), FactTerm(type = t))
+
 fact_truth = (s: FactState, v: int) -> int:
     b = fact_bound(s, v)
     if b.lo == 0 and b.hi == 0: return 0
     if b.nz or b.lo > 0 or b.hi < 0: return 1
+    -1
+
+fact_difference = (s: mut FactState, a: int, b: int, limit: int):
+    if a == 0 or b == 0 or a == b: return
+    incident_a = 0; incident_b = 0
+    loop i in [0..s.differences.len()):
+        row = s.differences[i]
+        if row.a == a and row.b == b:
+            s.differences[i].limit = min(row.limit, limit)
+            return
+        if row.a == a or row.b == a: incident_a += 1
+        if row.a == b or row.b == b: incident_b += 1
+    if s.differences.len() < 256 and incident_a < 8 and incident_b < 8:
+        s.differences.push(FactDifference(a, b, limit))
+
+# Bounded single-source relaxation, never an all-pairs closure. Exhaustion
+# simply declines additional inference; every discovered path is still valid.
+fact_distance = (s: FactState, a: int, b: int, limit: int) -> bool:
+    if a == 0 or b == 0: return false
+    if a == b: return limit >= 0
+    terms = [b]
+    distances = [0]
+    pending = [0]
+    cursor = 0
+    visits = 0
+    loop cursor < pending.len() and visits < 256:
+        index = pending[cursor]
+        cursor += 1
+        source = terms[index]
+        distance = distances[index]
+        loop row in s.differences:
+            visits += 1
+            if visits > 256: return false
+            if row.b != source or not fact_add_fits(distance, row.limit): continue
+            value = distance + row.limit
+            if row.a == a and value <= limit: return true
+            slot = -1
+            loop i in [0..terms.len()):
+                if terms[i] == row.a: slot = i; break
+            if slot < 0:
+                if terms.len() >= 32: continue
+                slot = terms.len()
+                terms.push(row.a)
+                distances.push(value)
+                pending.push(slot)
+            else if value < distances[slot]:
+                distances[slot] = value
+                pending.push(slot)
+    false
+
+# Selected affine rows share a single symbolic root. Normalize only on query,
+# with a 32-node budget; unrelated roots and nonlinear products stay unknown.
+struct FactAffine:
+    root: int = 0
+    scale: int = 0
+    offset: int = 0
+    valid: bool = true
+
+fact_affine = (s: FactState, v: int, budget: mut int) -> FactAffine:
+    budget -= 1
+    if v == 0 or budget < 0: return FactAffine(valid = false)
+    bound = fact_bound(s, v)
+    if bound.lo == bound.hi: return FactAffine(offset = bound.lo)
+    t = fact_terms[v]
+    if t.op != .plus and t.op != .minus and t.op != .star: return FactAffine(v, 1)
+    a = fact_affine(s, t.a, budget)
+    b = fact_affine(s, t.b, budget)
+    if not a.valid or not b.valid: return FactAffine(valid = false)
+    if t.op == .star:
+        if a.root == 0:
+            swap = a; a = b; b = swap
+        if b.root != 0 or math_word_overflow(2, a.scale, b.offset) or math_word_overflow(2, a.offset, b.offset): return FactAffine(valid = false)
+        return FactAffine(a.root, a.scale * b.offset, a.offset * b.offset)
+    if a.root != 0 and b.root != 0 and a.root != b.root: return FactAffine(valid = false)
+    if t.op == .minus:
+        if b.scale == FACT_MIN or b.offset == FACT_MIN: return FactAffine(valid = false)
+        b.scale = -b.scale; b.offset = -b.offset
+    if not fact_add_fits(a.scale, b.scale) or not fact_add_fits(a.offset, b.offset): return FactAffine(valid = false)
+    FactAffine((if a.root != 0: a.root else: b.root), a.scale + b.scale, a.offset + b.offset)
+
+fact_affine_compare = (s: FactState, op: Tok, av: int, bv: int) -> int:
+    budget = 32
+    a = fact_affine(s, av, budget)
+    b = fact_affine(s, bv, budget)
+    if not a.valid or not b.valid or a.root != b.root: return -1
+    if b.scale == FACT_MIN or b.offset == FACT_MIN: return -1
+    if not fact_add_fits(a.scale, -b.scale) or not fact_add_fits(a.offset, -b.offset): return -1
+    scale = a.scale - b.scale
+    offset = a.offset - b.offset
+    domain = if a.root == 0: FactBound(0, 0) else: fact_bound(s, a.root)
+    if math_word_overflow(2, domain.lo, scale) or math_word_overflow(2, domain.hi, scale): return -1
+    low = min(domain.lo * scale, domain.hi * scale)
+    high = max(domain.lo * scale, domain.hi * scale)
+    if not fact_add_fits(low, offset) or not fact_add_fits(high, offset): return -1
+    low += offset; high += offset
+    if op == .lt:
+        if high < 0: return 1
+        if low >= 0: return 0
+    if op == .le:
+        if high <= 0: return 1
+        if low > 0: return 0
+    if op == .eq:
+        if low == 0 and high == 0: return 1
+        if high < 0 or low > 0: return 0
     -1
 
 fact_compare = (s: FactState, op: Tok, a: int, b: int) -> int:
@@ -310,7 +461,13 @@ fact_compare = (s: FactState, op: Tok, a: int, b: int) -> int:
         r = fact_compare(s, .eq, a, b)
         return if r < 0: -1 else: 1 - r
     if a != 0 and a == b: return if op == .lt: 0 else: 1
+    if op == .lt and fact_distance(s, a, b, -1): return 1
+    if op == .lt and fact_distance(s, b, a, 0): return 0
+    if op == .le and fact_distance(s, a, b, 0): return 1
+    if op == .le and fact_distance(s, b, a, -1): return 0
     if op == .eq:
+        if fact_distance(s, a, b, 0) and fact_distance(s, b, a, 0): return 1
+        if fact_distance(s, a, b, -1) or fact_distance(s, b, a, -1): return 0
         if x.hi < y.lo or y.hi < x.lo: return 0
         if x.nz and y.lo == 0 and y.hi == 0 or y.nz and x.lo == 0 and x.hi == 0: return 0
         if x.lo == x.hi and y.lo == y.hi: return int(x.lo == y.lo)
@@ -320,7 +477,7 @@ fact_compare = (s: FactState, op: Tok, a: int, b: int) -> int:
     if op == .le:
         if x.hi <= y.lo: return 1
         if x.lo > y.hi: return 0
-    -1
+    fact_affine_compare(s, op, a, b)
 
 fact_inverse = (op: Tok) -> Tok:
     if op == .eq: return .ne
@@ -357,6 +514,8 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
     x = fact_bound(s, a)
     y = fact_bound(s, b)
     if op == .eq:
+        fact_difference(s, a, b, 0)
+        fact_difference(s, b, a, 0)
         lo = max(x.lo, y.lo)
         hi = min(x.hi, y.hi)
         x.lo = lo; y.lo = lo; x.hi = hi; y.hi = hi
@@ -366,6 +525,7 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
         if x.lo == 0 and x.hi == 0: y.nz = true
     else if op == .lt or op == .le:
         d = if op == .lt: 1 else: 0
+        fact_difference(s, a, b, -d)
         if d == 1 and (y.hi == FACT_MIN or x.lo == FACT_MAX): s.live = false
         else:
             x.hi = min(x.hi, y.hi - d)
@@ -374,7 +534,7 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
     fact_set_bound(s, b, y)
 
 fact_hull = (a: FactBound, b: FactBound, at: int) -> FactBound:
-    FactBound(min(a.lo, b.lo), max(a.hi, b.hi), (a.nz or a.lo > 0 or a.hi < 0) and (b.nz or b.lo > 0 or b.hi < 0), .join, at)
+    FactBound(min(a.lo, b.lo), max(a.hi, b.hi), (a.nz or a.lo > 0 or a.hi < 0) and (b.nz or b.lo > 0 or b.hi < 0), (if at != 0 and (nodes[at].kind == .while_ or nodes[at].kind == .for_): FactReason.loop_ else: FactReason.join), at)
 
 fact_join = (a: FactState, b: FactState, at: int) -> FactState:
     if not a.live: return b
@@ -390,6 +550,9 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         if fact_slot(s, p.base) < 0 or fact_slot(s, p.value) < 0: continue
         loop q in b.projections:
             if p == q: s.projections.push(p); break
+    left: int[]
+    right: int[]
+    merged: int[]
     loop binding in a.bindings:
         j = fact_binding(b, binding.place)
         if j < 0: continue
@@ -397,7 +560,38 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         v = binding.value
         if v != other: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at))
         fact_bind(s, binding.place, v)
+        left.push(binding.value); right.push(other); merged.push(v)
+    # Match projections of merged aggregate values, including current lengths.
+    cursor = 0
+    loop cursor < merged.len() and merged.len() < FACT_CAP:
+        loop p in a.projections:
+            if p.base != left[cursor] or p.element: continue
+            loop q in b.projections:
+                if q.base != right[cursor] or q.element or q.selector != p.selector: continue
+                if merged.len() >= FACT_CAP: break
+                v = p.value
+                if v != q.value: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, q.value), at))
+                if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(merged[cursor], p.selector, false, v))
+                left.push(p.value); right.push(q.value); merged.push(v)
+                break
+        cursor += 1
+    # Select rows from one predecessor, rename into the merge frame, and
+    # require a proof from the other. Branch-local evaluations never escape.
+    loop row in a.differences:
+        if fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(b, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit)
+        aa = fact_rename(row.a, left, merged, s)
+        bb = fact_rename(row.b, left, merged, s)
+        ra = fact_rename(row.a, left, right, b)
+        rb = fact_rename(row.b, left, right, b)
+        if aa != 0 and bb != 0 and fact_distance(b, ra, rb, row.limit): fact_difference(s, aa, bb, row.limit)
     s
+
+fact_rename = (v: int, before: int[], after: int[], shared: FactState) -> int:
+    loop offset in [0..before.len()):
+        i = before.len() - 1 - offset
+        if before[i] == v: return after[i]
+    if fact_slot(shared, v) >= 0: return v
+    0
 
 fact_unknown = (n: int, b: FactBound, what: str = "assertion"):
     why = "missing scalar bound"
@@ -411,8 +605,8 @@ fact_unknown = (n: int, b: FactBound, what: str = "assertion"):
     witness = if b.witness != 0: " at {pos_str(nodes[b.witness].pos)}" else: " at {pos_str(nodes[n].pos)}"
     fatal(nodes[n].pos, "{what} unknown: {why}; witness{witness}")
 
-# Loop speculation is deliberately absent: pre-kill every changing route on
-# entry, validate one arbitrary iteration, and export none of its new evidence.
+# Conservative loop fallback: pre-kill every syntactically changing route.
+# This is also used for iterators whose backedge transfer is not modeled.
 fact_changes = (n: int, s: mut FactState, at: int):
     if n == 0: return
     k = nodes[n].kind
@@ -478,6 +672,13 @@ fact_add_fits = (a: int, b: int) -> bool:
 fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
     if ntype(n) == T_U64: return fact_unmodeled(s, n, .wrap)
     x = fact_bound(s, a); y = fact_bound(s, b)
+    if op == .star:
+        if x.lo != x.hi and y.lo != y.hi: return fact_unmodeled(s, n, .unsupported)
+        if math_word_overflow(2, x.lo, y.lo) or math_word_overflow(2, x.lo, y.hi) or math_word_overflow(2, x.hi, y.lo) or math_word_overflow(2, x.hi, y.hi): return fact_unmodeled(s, n, .wrap)
+        lo = min(min(x.lo * y.lo, x.lo * y.hi), min(x.hi * y.lo, x.hi * y.hi))
+        hi = max(max(x.lo * y.lo, x.lo * y.hi), max(x.hi * y.lo, x.hi * y.hi))
+        if not sa_fits(lo, ntype(n)) or not sa_fits(hi, ntype(n)): return fact_unmodeled(s, n, .wrap)
+        return fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0), FactTerm(op, a, b, n, ntype(n)))
     if op == .minus:
         if y.lo == FACT_MIN: return fact_unmodeled(s, n, .wrap)
         lo = -y.hi
@@ -486,7 +687,14 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
     if not fact_add_fits(x.lo, y.lo) or not fact_add_fits(x.hi, y.hi): return fact_unmodeled(s, n, .wrap)
     lo = x.lo + y.lo; hi = x.hi + y.hi
     if not sa_fits(lo, ntype(n)) or not sa_fits(hi, ntype(n)): return fact_unmodeled(s, n, .wrap)
-    fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0))
+    value = fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0), FactTerm(op, a, b, n, ntype(n)))
+    if y.lo == y.hi and y.lo != FACT_MIN:
+        fact_difference(s, value, a, y.lo)
+        fact_difference(s, a, value, -y.lo)
+    if op == .plus and x.lo == x.hi and x.lo != FACT_MIN:
+        fact_difference(s, value, b, x.lo)
+        fact_difference(s, b, value, -x.lo)
+    value
 
 fact_divisor = (s: mut FactState, n: int, a: int, b: int, modulo: bool):
     operand = if nodes[n].kind == .call: kid(n, 1) else: int(nodes[n].b)
@@ -501,8 +709,113 @@ fact_divisor = (s: mut FactState, n: int, a: int, b: int, modulo: bool):
         if x.lo <= FACT_MIN and y.lo <= -1 and y.hi >= -1:
             fact_unknown(n, FactBound(reason = .wrap, witness = n), "division result")
 
+# Only intervals are candidates at a changing loop header. Relational guards
+# are established anew by each condition; no assertion supplies an invariant.
+fact_loop_header = (entry: FactState, back: FactState, old: FactState, at: int, widen: bool) -> FactState:
+    joined = fact_join(entry, back, at)
+    s = FactState(live = joined.live)
+    loop binding in joined.bindings:
+        v = binding.value
+        bound = fact_bound(joined, v)
+        bound.reason = .loop_; bound.witness = at
+        previous = fact_binding(old, binding.place)
+        t = if binding.place.root == .local: int(locals[binding.place.declaration].type) else: int(globals[binding.place.declaration].type)
+        if widen and previous >= 0:
+            before = fact_bound(old, old.bindings[previous].value)
+            domain = fact_domain(t, .loop_, at)
+            if bound.lo < before.lo: bound.lo = domain.lo
+            if bound.hi > before.hi: bound.hi = domain.hi
+        # Stable values keep their immutable identities and projection facts.
+        original = fact_binding(entry, binding.place)
+        if original >= 0 and entry.bindings[original].value == v:
+            if fact_slot(s, v) < 0: s.ids.push(v); s.bounds.push(bound)
+            fact_bind(s, binding.place, v)
+        else: fact_bind(s, binding.place, fact_new(s, bound, FactTerm(type = t)))
+    # Retain immutable entry snapshots needed by result contracts. Changing
+    # storage never aliases these identities at the loop header.
+    loop i in [0..entry.ids.len()):
+        if s.ids.len() >= FACT_CAP: break
+        if fact_slot(s, entry.ids[i]) < 0: s.ids.push(entry.ids[i]); s.bounds.push(entry.bounds[i])
+    s.projections = entry.projections
+    s.differences = entry.differences
+    s
+
+fact_loop_stable = (a: FactState, b: FactState) -> bool:
+    loop binding in a.bindings:
+        i = fact_binding(b, binding.place)
+        if i < 0: return false
+        x = fact_bound(a, binding.value)
+        y = fact_bound(b, b.bindings[i].value)
+        if x.lo != y.lo or x.hi != y.hi or x.nz != y.nz: return false
+        # Aggregate identity carries its projections; an equal top interval
+        # alone is not evidence that a changed aggregate has stabilized.
+        t = if binding.place.root == .local: int(locals[binding.place.declaration].type) else: int(globals[binding.place.declaration].type)
+        if not fact_scalar(t) and binding.value != b.bindings[i].value: return false
+    true
+
+fact_loop_body = (n: int, body: mut FactState) -> FactLoop:
+    fact_loops.push(FactLoop())
+    fact_capture(int(nodes[n].b), body)
+    edges = fact_loops.pop()
+    edges.back = fact_join(edges.back, body, n)
+    edges
+
+fact_while = (n: int, s: mut FactState):
+    outer = fact_speculating
+    entry = s
+    header = s
+    settled = false
+    fact_speculating += 1
+    loop iteration in [0..8):
+        if fact_loop_exhausted: break
+        paths = fact_condition(int(nodes[n].a), header)
+        edges = fact_loop_body(n, paths.yes)
+        next = fact_loop_header(entry, edges.back, header, n, iteration >= 2)
+        settled = fact_loop_stable(header, next)
+        header = next
+        if settled: break
+    if settled and not fact_loop_exhausted:
+        loop iteration in [0..3):
+            paths = fact_condition(int(nodes[n].a), header)
+            edges = fact_loop_body(n, paths.yes)
+            next = fact_loop_header(entry, edges.back, header, n, false)
+            same = fact_loop_stable(header, next)
+            header = next
+            if same or fact_loop_exhausted: break
+    fact_speculating = outer
+    if not settled or fact_loop_exhausted:
+        # Restart at top for every syntactically changing route, then validate
+        # normally. Speculative obligation answers are never published.
+        header = entry
+        fact_changes(n, header, n)
+    paths = fact_condition(int(nodes[n].a), header)
+    edges = fact_loop_body(n, paths.yes)
+    s = fact_join(paths.no, edges.exits, n)
+
+fact_range = (n: int, s: mut FactState):
+    iterator = int(nodes[n].a)
+    lo = fact_capture(int(nodes[iterator].a), s)
+    hi = fact_capture(int(nodes[iterator].b), s)
+    fact_changes(n, s, n)
+    after = s
+    body = s
+    l = int(nodes[n].sym)
+    v = fact_new(body, fact_domain(int(locals[l].type)))
+    fact_bind(body, PlaceIdentity(.local, int(locals[l].owner), l), v)
+    lower = fact_new(body, fact_domain(T_BOOL), FactTerm(.ge, v, lo))
+    upper = fact_new(body, fact_domain(T_BOOL), FactTerm((if has_flag(iterator, NF_INCLUSIVE): Tok.le else: Tok.lt), v, hi))
+    fact_assume(body, lower, true)
+    if nodes[iterator].b != 0: fact_assume(body, upper, true)
+    fact_loop_body(n, body)
+    s = after
+
 fact_capture = (n: int, s: mut FactState) -> int:
     if n == 0 or not s.live: return 0
+    if fact_speculating > 0:
+        fact_loop_steps += 1
+        if fact_loop_steps > 4096:
+            fact_loop_exhausted = true
+            return 0
     k = nodes[n].kind
     if k == .int_lit or k == .bool_lit:
         if not fact_scalar(ntype(n)): return fact_new(s, FactBound(reason = .unsupported, witness = n))
@@ -530,7 +843,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
         t = representation_type(ntype(int(nodes[n].a)))
         if types[t].kind == .array or types[t].kind == .fixed:
             length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, base, -1, false, T_INT)
-            if fact_policy == .RequireStatic or fact_query:
+            if fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query):
                 zero = fact_constant(s, 0)
                 lo = fact_compare(s, .le, zero, index)
                 hi = fact_compare(s, .lt, index, length)
@@ -561,16 +874,25 @@ fact_capture = (n: int, s: mut FactState) -> int:
     if k == .block:
         r = 0
         defers: int[]
+        pending = fact_pending_defers
         loop c in kids(n):
-            if nodes[c].kind == .defer_: defers.push(int(nodes[c].a))
+            if nodes[c].kind == .defer_:
+                defers.push(int(nodes[c].a))
+                fact_pending_defers += 1
             else: r = fact_capture(c, s)
         loop i in [0..defers.len()): fact_capture(defers[defers.len() - 1 - i], s)
+        fact_pending_defers = pending
         return r
     if k == .return_:
         r = fact_capture(int(nodes[n].a), s)
         s.live = false
         return r
     if k == .break_ or k == .continue_:
+        if fact_pending_defers > 0: fact_forget(s, n, .write, true)
+        level = fact_loops.len() - 1 - int(nodes[n].ival)
+        if level >= 0:
+            if k == .break_: fact_loops[level].exits = fact_join(fact_loops[level].exits, s, n)
+            else: fact_loops[level].back = fact_join(fact_loops[level].back, s, n)
         s.live = false
         return 0
     if k == .vardecl:
@@ -608,15 +930,20 @@ fact_capture = (n: int, s: mut FactState) -> int:
         if not paths.no.live: result = FactBound(1, 1, true)
         s = fact_join(paths.yes, paths.no, n)
         return fact_new(s, result)
+    if (k == .while_ or k == .for_) and fact_loops.len() == 0 and fact_speculating == 0:
+        fact_loop_steps = 0; fact_loop_exhausted = false
+    if k == .while_ and nodes[n].aux == 0:
+        fact_while(n, s)
+        return 0
+    if k == .for_ and nodes[n].aux == 0 and not has_flag(int(nodes[n].a), NF_STEP):
+        fact_range(n, s)
+        return 0
     if k == .while_ or k == .for_:
         fact_changes(n, s, n)
         after = s
         body = s
-        if k == .while_ and nodes[n].aux == 0:
-            paths = fact_condition(int(nodes[n].a), body)
-            body = paths.yes
-        else: fact_capture(int(nodes[n].a), body)
-        fact_capture(int(nodes[n].b), body)
+        fact_capture(int(nodes[n].a), body)
+        fact_loop_body(n, body)
         s = after
         return 0
     if k == .not_:
@@ -635,8 +962,8 @@ fact_capture = (n: int, s: mut FactState) -> int:
             result = fact_domain(T_BOOL, reason.reason, reason.witness)
             if truth >= 0: result = FactBound(truth, truth, truth != 0)
             return fact_new(s, result, FactTerm(op, a, b, n))
-        if nodes[n].aux == 0 and fact_scalar(ntype(n)) and (op == .plus or op == .minus): return fact_arithmetic(s, n, op, a, b)
-        if fact_policy == .RequireStatic and nodes[n].aux == 0 and (op == .slash or op == .percent) and is_int(ntype(int(nodes[n].b))):
+        if nodes[n].aux == 0 and fact_scalar(ntype(n)) and (op == .plus or op == .minus or op == .star): return fact_arithmetic(s, n, op, a, b)
+        if fact_speculating == 0 and fact_policy == .RequireStatic and nodes[n].aux == 0 and (op == .slash or op == .percent) and is_int(ntype(int(nodes[n].b))):
             fact_divisor(s, n, a, b, op == .percent)
         if nodes[n].aux != 0: fact_forget(s, n, .call)
         return fact_unmodeled(s, n, .unsupported)
@@ -686,7 +1013,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
             fact_store_route(s, route, fresh, n)
             return fact_new(s, fact_domain(ntype(n)))
         if id == .static_assert:
-            if nkids(n) == 0: return 0
+            if nkids(n) == 0 or fact_speculating > 0: return 0
             fact_validated[n] = true
             fact_query = true
             paths = fact_condition(kid(n, 0), s)
@@ -696,7 +1023,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
             return 0
         if id == .runtime_assert or id == .assert:
             paths = fact_condition(kid(n, 0), s)
-            if id == .runtime_assert and not paths.yes.live: assertion_refuted(kid(n, 0), 0)
+            if fact_speculating == 0 and id == .runtime_assert and not paths.yes.live: assertion_refuted(kid(n, 0), 0)
             s = paths.yes
             # Messages execute only on failure, never on this success edge.
             return 0
@@ -710,7 +1037,8 @@ fact_capture = (n: int, s: mut FactState) -> int:
         loop i in [0..nkids(n)):
             arg = kid(n, i)
             if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)): ref_check(arg, values[i], values, s)
-        if let obligation = fact_divisors.get(n): fact_divisor(s, n, values[0], values[1], obligation == 2)
+        if fact_speculating == 0:
+            if let obligation = fact_divisors.get(n): fact_divisor(s, n, values[0], values[1], obligation == 2)
         if nodes[n].aux == 2:
             result = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
             si = int(types[representation_type(ntype(n))].st)
@@ -719,7 +1047,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
                 value = if kid(n, i) == 0: fact_constant(s, 0) else: values[i]
                 if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(result, name, false, value))
             return result
-        fact_forget(s, n, .call)
+        fact_call_effects(n, s)
         if ntype(n) == T_NEVER: s.live = false
         result = fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
         if nodes[n].aux == 0 and nodes[n].sym > 0:
@@ -803,3 +1131,419 @@ facts_reset = ():
     fact_policy = FactPolicy.RuntimeAllowed
     if let policy = env("DEWY_INTERNAL_FACT_POLICY"):
         if policy == "require-static": fact_policy = .RequireStatic
+
+positive_bounds_fn = -1
+positive_bounds: {int: int} = {}
+
+# Upper bound of a nonnegative integer expression, or -1 when unknown.
+# Arithmetic must fit in int64: wrapping a positive product can make it negative.
+# During write collection, do not use local bounds (no circular assumptions).
+positive_bound = (n: int, use_locals: bool) -> int:
+    if n == 0: return -1
+    t = prune(ntype(n))
+    if types[t].kind != .int_: return -1
+    if not types[t].sign and int(types[t].bits) < 64: return (1 << int(types[t].bits)) - 1
+    if t != T_INT and t != T_MATH_INT: return -1
+    k = nodes[n].kind
+    if k == .int_lit:
+        if has_flag(n, NF_U64) or nodes[n].ival < 0: return -1
+        return nodes[n].ival
+    if k == .ident and nodes[n].aux == i32(int(SK.local)) and use_locals:
+        if let limit = math_word_limits.get(int(nodes[n].sym)): return limit
+        loop i in [0..nonneg_locals.len()):
+            if nonneg_locals[i] == int(nodes[n].sym): return nonneg_limits[i]
+        l = int(nodes[n].sym)
+        fl = int(locals[l].flags)
+        if fl & LF_DECL == 0 or fl & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_SOAELEM | LF_ELEMALIAS | LF_QUIET) != 0: return -1
+        if positive_bounds_fn != cur_fn:
+            positive_bounds_fn = cur_fn
+            positive_bounds.clear()
+            math_prepare_writes()
+        return positive_bounds.get(l) ?? -1
+    if k == .conv and nodes[n].aux == i32(int(CV.int_)):
+        return positive_bound(int(nodes[n].a), use_locals)
+    if k == .intrinsic and nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1:
+        t = prune(ntype(kid(n, 0)))
+        if types[t].kind == .array: return 9223372036854775807 / max(1, tsize(telem(t))) - 1
+    modulus = positive_modulus(n)
+    if modulus > 0: return modulus - 1
+    if k != .binary or nodes[n].aux != 0: return -1
+    op = nodes[n].op as Tok
+    if op == .amp:
+        a = positive_bound(int(nodes[n].a), use_locals)
+        b = positive_bound(int(nodes[n].b), use_locals)
+        if a >= 0 and b >= 0: return min(a, b)
+        return max(a, b)
+    if op != .plus and op != .star: return -1
+    a = positive_bound(int(nodes[n].a), use_locals)
+    b = positive_bound(int(nodes[n].b), use_locals)
+    if a < 0 or b < 0: return -1
+    if op == .plus:
+        if a > 9223372036854775807 - b: return -1
+        return a + b
+    if b == 0: return 0
+    if a > 9223372036854775807 / b: return -1
+    a * b
+
+positive_local_write = (l: int, bound: int):
+    if l <= 0 or int(locals[l].owner) != cur_fn: return
+    fl = int(locals[l].flags)
+    skip = LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_SOAELEM | LF_ELEMALIAS | LF_QUIET
+    if fl & LF_DECL == 0 or fl & skip != 0 or (prune(int(locals[l].type)) != T_INT and prune(int(locals[l].type)) != T_MATH_INT): return
+    old = positive_bounds.get(l) ?? bound
+    if old < 0 or bound < 0: positive_bounds[l] = -1
+    else: positive_bounds[l] = max(old, bound)
+
+positive_target_write = (n: int, bound: int):
+    if nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.local)):
+        positive_local_write(int(nodes[n].sym), bound)
+    else if nodes[n].kind == .tuple:
+        loop i in [0..nkids(n)): positive_target_write(kid(n, i), -1)
+
+positive_write = (n: int):
+    k = nodes[n].kind
+    if k == .vardecl and not has_flag(n, NF_GLOBAL):
+        if nkids(n) == 0:
+            b = int(nodes[n].b)
+            positive_local_write(int(nodes[n].sym), if b == 0: 0 else: positive_bound(b, false))
+        else:
+            loop i in [0..nkids(n)): positive_local_write(int(nodes[kid(n, i)].sym), -1)
+    if k == .assign:
+        bound = -1
+        if nodes[n].op == i32(int(Tok.assign)) and nodes[n].aux == 0: bound = positive_bound(int(nodes[n].b), false)
+        positive_target_write(int(nodes[n].a), bound)
+
+
+# Storage summaries are collected once per loop, including its condition.
+# Outer loops reuse inner inventories; lowering retains all pointer/uniqueness
+# prerequisites independently of numeric bounds. Cache lifetime is one function.
+struct FactStorage:
+    bases: int[]
+    kill: int[]
+    escape: int[]
+    written: int[]
+    calls: bool
+    opaque: bool
+fact_storage_cache: {int: FactStorage} = {}
+
+fact_storage_loop = (n: int) -> FactStorage:
+    if let cached = fact_storage_cache.get(n): return cached
+    saved = FactStorage(fp_bases, fp_kill, fp_escape, fp_written, fp_calls, fp_lambda)
+    fp_bases = []; fp_kill = []; fp_escape = []; fp_written = []
+    fp_calls = false; fp_lambda = false
+    fact_storage_scan(int(nodes[n].b), 0)
+    if nodes[n].kind == .while_: fact_storage_scan(int(nodes[n].a), 0)
+    result = FactStorage(fp_bases, fp_kill, fp_escape, fp_written, fp_calls, fp_lambda)
+    fact_storage_cache[n] = result
+    fp_bases = saved.bases; fp_kill = saved.kill
+    fp_escape = saved.escape; fp_written = saved.written
+    fp_calls = saved.calls; fp_lambda = saved.opaque
+    result
+
+# ctx: 0 the value is used (copied, passed), 1 it is only indexed or measured
+fact_storage_scan = (n: int, ctx: int):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .for_ or k == .while_:
+        summary = fact_storage_loop(n)
+        loop v in summary.bases: fp_bases.push(v)
+        loop v in summary.kill: fp_kill.push(v)
+        loop v in summary.escape: fp_escape.push(v)
+        loop v in summary.written: fp_written.push(v)
+        fp_calls = fp_calls or summary.calls or not ambient_storage_stable(n)
+        fp_lambda = fp_lambda or summary.opaque
+        if k == .for_:
+            if has_flag(n, NF_MUT):
+                key = lpath_key(int(nodes[n].a))
+                if key != 0: fp_kill.push(key)
+            fact_storage_scan(int(nodes[n].a), 0)
+        return
+    # An unclassified operation may also affect its local actuals. Merely
+    # marking ambient calls would still allow caching a private local array.
+    mask = isolation_children(k)
+    if mask < 0 or k == .intrinsic and not isolation_intrinsic(nodes[n].aux as IN):
+        fp_lambda = true
+        return
+    if not ambient_storage_stable(n): fp_calls = true
+    if k == .lambda:
+        fp_lambda = true
+        return
+    if k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ELEMALIAS != 0:
+        # (x of `mut x in xs` in a combined loop: writing x writes xs, which the body does not show)
+        key = lpath_key(int(nodes[int(locals[int(nodes[n].sym)].alias)].a))
+        if key != 0: fp_kill.push(key)
+        return
+    if k == .ident or k == .field:
+        key = lpath_key(n)
+        if key != 0:
+            if ctx == 0: fp_escape.push(key)
+            if k == .field: fact_storage_scan(int(nodes[n].a), 1)
+            return
+        if k == .field: fact_storage_scan(int(nodes[n].a), 0)
+        return
+    if k == .index:
+        base = int(nodes[n].a)
+        if lpath_key(base) != 0 and tkind(ntype(base)) == .array: fp_bases.push(base)
+        # A slice retains its source while its bounds run; writes in those
+        # bounds must still detach, including when the slice is inside a loop.
+        fact_storage_scan(base, if nodes[n].aux == 1: 0 else: 1)
+        fact_storage_scan(int(nodes[n].b), 0)
+        loop i in [0..nkids(n)): fact_storage_scan(kid(n, i), 0)
+        return
+    if k == .assign:
+        fact_storage_target(int(nodes[n].a))
+        fact_storage_scan(int(nodes[n].b), 0)
+        return
+    # (a pointer to a variable, or to an array's elements, may write it: data() also makes the
+    # array one of its own first, which may move it)
+    if k == .addr or (k == .cast or k == .conv) and raw_view(n):
+        key = lpath_key(int(nodes[n].a))
+        if key != 0: fp_kill.push(key)
+        fact_storage_scan(int(nodes[n].a), 1)
+        return
+    if k == .intrinsic and nkids(n) > 0:
+        id = nodes[n].aux as IN
+        if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend or id == .arrdata:
+            key = lpath_key(kid(n, 0))
+            if key != 0: fp_kill.push(key)
+            fact_storage_scan(kid(n, 0), 1)
+            loop i in [1..nkids(n)): fact_storage_scan(kid(n, i), 0)
+            return
+        if id == .len or id == .arrcap:
+            fact_storage_scan(kid(n, 0), 1)
+            return
+    if k == .call:
+        mm = checked_call_mutmask(n)
+        loop i in [0..nkids(n)):
+            if mm & (1 << i) != 0:
+                key = lpath_key(kid(n, i))
+                if key != 0: fp_kill.push(key)
+                # (`@xs[i]` writes an element, like an assignment to it: xs must be made unique)
+                else: fact_storage_target(kid(n, i))
+    if k == .for_ and has_flag(n, NF_MUT):
+        # (loop mut x in p may make p a copy of its own)
+        key = lpath_key(int(nodes[n].a))
+        if key != 0: fp_kill.push(key)
+    if mask & 1 != 0: fact_storage_scan(int(nodes[n].a), 0)
+    if mask & 2 != 0: fact_storage_scan(int(nodes[n].b), 0)
+    if mask & 4 != 0: fact_storage_scan(int(nodes[n].c), 0)
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)): fact_storage_scan(kid(n, i), 0)
+    if mask & 32 != 0:
+        loop i in [0..nkids2(n)): fact_storage_scan(kid2(n, i), 0)
+
+# an assignment target: the arrays along it have elements written; a path itself is replaced
+fact_storage_target = (t: int):
+    if not ambient_storage_stable(t): fp_calls = true
+    k = nodes[t].kind
+    # (an element alias's array: written)
+    r = t
+    loop nodes[r].kind == .field: r = int(nodes[r].a)
+    if nodes[r].kind == .ident and nodes[r].aux == i32(int(SK.local)) and int(locals[int(nodes[r].sym)].flags) & LF_ELEMALIAS != 0:
+        fact_storage_scan(r, 0)
+        return
+    if k == .index:
+        base = int(nodes[t].a)
+        key = lpath_key(base)
+        if key != 0:
+            fp_written.push(key)
+            if tkind(ntype(base)) == .array: fp_bases.push(base)
+            fact_storage_scan(base, 1)
+        else: fact_storage_target(base)
+        fact_storage_scan(int(nodes[t].b), 0)
+        loop i in [0..nkids(t)): fact_storage_scan(kid(t, i), 0)
+        return
+    key = lpath_key(t)
+    if key != 0:
+        fp_kill.push(key)
+        if k == .field: fact_storage_scan(int(nodes[t].a), 1)
+        return
+    if k == .field:
+        fact_storage_target(int(nodes[t].a))
+        return
+    fact_storage_scan(t, 0)
+
+
+# Cheap lowering facts share this module; full relational states stay demanded.
+# bounds: the length is fixed, and an empty (null) A never enters the loop.
+len_of_local: {int: int}        # local n -> local A when n := A.len() and neither ever changes
+safe_index: (int, int, bool)[]  # (array local, loop variable local, keep its null check)
+nonneg_locals: int[]            # loop variables of ranges that start at a value >= 0
+nonneg_limits: int[]            # matching constant upper limits, or -1
+# A loop's control counter stays in range, but its user-visible variable can
+# be reassigned, passed by reference, or changed by a closure in the body.
+stable_loop_index = (l: int) -> bool:
+    if l < 0: return false
+    fl = int(locals[l].flags)
+    fl & (LF_ASSIGNED | LF_ALIAS | LF_CAPTURE | LF_BYREF | LF_ADDR) == 0 and not is_shared(l)
+
+# e is an integer expression that is never negative
+# The step-1 int/int64 boundary changes semantic type but preserves every bit
+# and value. Existing index/length proofs can look through just that boundary.
+# This is representation-specific: step 2 must prove a word representation first.
+word_integer_value = (n0: int) -> int:
+    n = n0
+    loop nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int_)):
+        inner = int(nodes[n].a)
+        source = prune(ntype(inner))
+        target = prune(ntype(n))
+        if not ((source == T_INT and target == T_MATH_INT) or (source == T_MATH_INT and target == T_INT)): break
+        n = inner
+    n
+
+is_nonneg = (e0: int) -> bool:
+    e = word_integer_value(e0)
+    if e == 0: return false
+    k = nodes[e].kind
+    if k == .int_lit: return nodes[e].ival >= 0
+    if k == .ident and nodes[e].aux == i32(int(SK.local)): return nonneg_locals.contains(int(nodes[e].sym))
+    if k == .intrinsic and (nodes[e].aux as IN) == .len: return true
+    # Positive operands alone do not prove a word-sized sum/product is
+    # nonnegative: it can overflow. Keep the check without a range proof.
+    false
+
+# A, if e is A.len() / len(A) for an array local A that is never modified, else -1
+fixed_array_len = (e0: int) -> int:
+    e = word_integer_value(e0)
+    if e == 0 or nodes[e].kind != .intrinsic or (nodes[e].aux as IN) != .len or nkids(e) != 1: return -1
+    a = kid(e, 0)
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return -1
+    ak = types[prune(ntype(a))].kind
+    if ak != .array and ak != .str_: return -1          # (a str's length changes only when it is assigned)
+    l = int(nodes[a].sym)
+    if not fixed_array_local(l): return -1
+    l
+
+# the length of array local l cannot change during this function
+fixed_array_local = (l: int) -> bool:
+    # element writes keep the length; writing the variable itself (or a mut parameter, which
+    # could be the caller's global) may not
+    fl = int(locals[l].flags)
+    if fl & (LF_RESIZED | LF_ALIAS | LF_BYREF) != 0 or is_shared(l): return false
+    if fl & LF_MUTPARAM != 0 and not ambient_length_stable(cur_fn): return false
+    true
+
+array_len_expr: {int: int}      # array local A -> E when A := [x; E] and A is never resized
+
+# x and y always have the same value: literals, unchanging locals and + - * of those
+same_value = (x: int, y: int) -> bool:
+    if x == 0 or y == 0 or nodes[x].kind != nodes[y].kind: return false
+    k = nodes[x].kind
+    if k == .int_lit: return nodes[x].ival == nodes[y].ival
+    if k == .ident:
+        if nodes[x].aux != i32(int(SK.local)) or nodes[y].aux != i32(int(SK.local)) or nodes[x].sym != nodes[y].sym: return false
+        return int(locals[int(nodes[x].sym)].flags) & LF_ASSIGNED == 0
+    if k == .binary:
+        op = nodes[x].op as Tok
+        if nodes[y].op != nodes[x].op or (op != .plus and op != .minus and op != .star): return false
+        return same_value(int(nodes[x].a), int(nodes[y].a)) and same_value(int(nodes[x].b), int(nodes[y].b))
+    if k == .intrinsic:
+        a = fixed_array_len(x)
+        return a >= 0 and a == fixed_array_len(y)
+    false
+
+# A bounded ascending range with a nonnegative start never yields a negative
+# index. For steps, require ordered literal starts; dynamic/descending steps
+# keep their ordinary checks until there is a stronger proof.
+nonnegative_range = (it: int) -> bool:
+    if nodes[it].b == 0 or not is_nonneg(int(nodes[it].a)): return false
+    if not has_flag(it, NF_STEP): return true
+    a = int(nodes[it].a)
+    b = int(nodes[it].c)
+    nodes[a].kind == .int_lit and nodes[b].kind == .int_lit and nodes[b].ival > nodes[a].ival
+
+# the array locals whose length bounds the range `it`
+range_bounds_arrays = (it: int) -> int[]:
+    out: int[]
+    if not nonnegative_range(it) or has_flag(it, NF_INCLUSIVE): return out
+    hi = word_integer_value(int(nodes[it].b))
+    if hi == 0: return out
+    a = fixed_array_len(hi)
+    if a >= 0: out.push(a)
+    if nodes[hi].kind == .ident and nodes[hi].aux == i32(int(SK.local)):
+        n = int(nodes[hi].sym)
+        if int(locals[n].flags) & LF_ASSIGNED == 0:
+            if let b = len_of_local.get(n):
+                if fixed_array_local(b): out.push(b)
+    loop arr, e in array_len_expr:
+        if int(locals[arr].owner) == cur_fn and fixed_array_local(arr) and same_value(hi, e): out.push(arr)
+    out
+
+# 0: needs a bounds check, 1: in bounds, 2: in bounds but keep the null check (other
+# accesses to the array in the loop are checked and can build on it)
+index_safety = (arr: int, idx0: int) -> int:
+    idx = word_integer_value(idx0)
+    if safe_index.len() == 0: return 0
+    if nodes[arr].kind != .ident or nodes[idx].kind != .ident: return 0
+    if nodes[arr].aux != i32(int(SK.local)) or nodes[idx].aux != i32(int(SK.local)): return 0
+    a = int(nodes[arr].sym)
+    j = int(nodes[idx].sym)
+    loop p in safe_index:
+        if p.0 == a and p.1 == j:
+            if p.2: return 2
+            return 1
+    0
+
+# does the loop body index array local a with anything but the loop variables in `ok`
+# (this loop's, and those of nested loops that are in bounds for a too)?
+other_index_of = (n: int, a: int, ok: int[], seen: mut bool[]) -> bool:
+    if n <= 0 or n >= seen.len() or seen[n]: return false
+    seen[n] = true
+    k = nodes[n].kind
+    if k == .index:
+        b = int(nodes[n].a)
+        if nodes[b].kind == .ident and nodes[b].aux == i32(int(SK.local)) and int(nodes[b].sym) == a:
+            ix = word_integer_value(int(nodes[n].b))
+            if not (nodes[ix].kind == .ident and nodes[ix].aux == i32(int(SK.local)) and ok.contains(int(nodes[ix].sym))): return true
+    if k == .for_:
+        inner = ok
+        it = int(nodes[n].a)
+        if int(nodes[n].aux) == 0 and stable_loop_index(int(nodes[n].sym)) and range_bounds_arrays(it).contains(a): inner.push(int(nodes[n].sym))
+        return other_index_of(it, a, ok, seen) or other_index_of(int(nodes[n].b), a, inner, seen)
+    loop c in [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]:
+        if other_index_of(c, a, ok, seen): return true
+    loop i in [0..nkids(n)):
+        if other_index_of(kid(n, i), a, ok, seen): return true
+    loop i in [0..nkids2(n)):
+        if other_index_of(kid2(n, i), a, ok, seen): return true
+    false
+
+# Share range facts between unit and stepped loops. Array paths can still be
+# hoisted when the counter is mutable, but only stable indices prove bounds.
+range_facts_begin = (s: int, l: int) -> (int, int, bool):
+    safe_arrs: int[]
+    nonneg = false
+    bound = 0
+    if nodes[s].aux == 0 and stable_loop_index(l):
+        it = int(nodes[s].a)
+        nonneg = nonnegative_range(it)
+        if nonneg:
+            safe_arrs = range_bounds_arrays(it)
+            if not has_flag(it, NF_INCLUSIVE):
+                hi = word_integer_value(int(nodes[it].b))
+                if nodes[hi].kind == .intrinsic and (nodes[hi].aux as IN) == .len and nkids(hi) == 1: bound = kid(hi, 0)
+    if nonneg:
+        nonneg_locals.push(l)
+        hi = int(nodes[int(nodes[s].a)].b)
+        limit = -1
+        if nodes[hi].kind == .int_lit and not has_flag(hi, NF_U64) and nodes[hi].ival > 0:
+            limit = nodes[hi].ival
+            if not has_flag(int(nodes[s].a), NF_INCLUSIVE): limit -= 1
+        if limit < 0 and bound != 0 and tkind(ntype(bound)) == .array:
+            limit = 9223372036854775807 / max(1, tsize(telem(ntype(bound)))) - 1
+        nonneg_limits.push(limit)
+    nfp = fp_begin(s, l, bound, 0)
+    loop sa in safe_arrs:
+        seen = fill(false, nodes.len())
+        ok = [l]
+        loop p in safe_index:
+            if p.0 == sa: ok.push(p.1)
+        safe_index.push((sa, l, other_index_of(int(nodes[s].b), sa, ok, seen)))
+    (nfp, safe_arrs.len(), nonneg)
+
+range_facts_end = (facts: (int, int, bool)):
+    loop _ in [0..facts.1): safe_index.pop()
+    fp_end(facts.0)
+    if facts.2:
+        nonneg_locals.pop()
+        nonneg_limits.pop()

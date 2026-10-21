@@ -1,3 +1,4 @@
+use '../../../compiler/facts.jo'
 # Internal boundary cases that valid source syntax cannot construct.
 use '../../../compiler/ast.jo'
 use '../../../compiler/check.jo'
@@ -77,7 +78,7 @@ main = ():
     assert(not ambient_sharing_stable(intrinsic))
     loop unknown in [int(fns[unknown_node].body), intrinsic]:
         fp_lambda = false
-        fp_scan(unknown, 0)
+        fact_storage_scan(unknown, 0)
         assert(fp_lambda)
         uq_lambda = false
         uq_scan(unknown, 0)

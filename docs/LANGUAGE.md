@@ -516,6 +516,14 @@ unsupported. Parameter-dependent contracts nested inside element types, and
 projected mutable postconditions with deferred cleanup, are conservatively
 rejected. There is no public strict-lane spelling.
 
+Static evidence can follow transitive integer comparisons, constant-offset
+addition, subtraction and literal scaling when their intermediates fit, and facts supported by
+both sides of a branch. Range loops use their captured endpoints. While-loop
+invariants are validated across entry, condition effects, continues and exits;
+bounded widening and narrowing fall back to unknown when analysis exhausts its
+budget. Assertions never supply assumed loop invariants. Calls preserve facts
+only when a settled effect summary rules out interference.
+
 Fixed-width integer types expose typed `.min` and `.max` constants, including
 the full `uint64` range; these also work through type aliases and generic type
 parameters. For example, `uint8.max` is 255 and `int64.min` is −9223372036854775808.

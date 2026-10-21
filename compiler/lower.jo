@@ -1,3 +1,4 @@
+use 'facts.jo'
 use 'refine.jo'
 use 'units.jo'
 use 'poly_closure.jo'
@@ -1541,103 +1542,6 @@ positive_modulus = (n: int) -> int:
         if nodes[b].ival == 9223372036854775807: return 0
         return nodes[b].ival + 1
     nodes[b].ival
-
-positive_bounds_fn = -1
-positive_bounds: {int: int} = {}
-
-# Upper bound of a nonnegative integer expression, or -1 when unknown.
-# Arithmetic must fit in int64: wrapping a positive product can make it negative.
-# During write collection, do not use local bounds (no circular assumptions).
-positive_bound = (n: int, use_locals: bool) -> int:
-    if n == 0: return -1
-    t = prune(ntype(n))
-    if types[t].kind != .int_: return -1
-    if not types[t].sign and int(types[t].bits) < 64: return (1 << int(types[t].bits)) - 1
-    if t != T_INT and t != T_MATH_INT: return -1
-    k = nodes[n].kind
-    if k == .int_lit:
-        if has_flag(n, NF_U64) or nodes[n].ival < 0: return -1
-        return nodes[n].ival
-    if k == .ident and nodes[n].aux == i32(int(SK.local)) and use_locals:
-        if let limit = math_word_limits.get(int(nodes[n].sym)): return limit
-        loop i in [0..nonneg_locals.len()):
-            if nonneg_locals[i] == int(nodes[n].sym): return nonneg_limits[i]
-        l = int(nodes[n].sym)
-        fl = int(locals[l].flags)
-        if fl & LF_DECL == 0 or fl & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_SOAELEM | LF_ELEMALIAS | LF_QUIET) != 0: return -1
-        if positive_bounds_fn != cur_fn:
-            positive_bounds_fn = cur_fn
-            positive_bounds.clear()
-            if math_has_mutable: math_prepare_writes()
-            else: positive_writes(int(fns[cur_fn].body))
-        return positive_bounds.get(l) ?? -1
-    if k == .conv and nodes[n].aux == i32(int(CV.int_)):
-        return positive_bound(int(nodes[n].a), use_locals)
-    if k == .intrinsic and nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1:
-        t = prune(ntype(kid(n, 0)))
-        if types[t].kind == .array: return 9223372036854775807 / max(1, tsize(telem(t))) - 1
-    modulus = positive_modulus(n)
-    if modulus > 0: return modulus - 1
-    if k != .binary or nodes[n].aux != 0: return -1
-    op = nodes[n].op as Tok
-    if op == .amp:
-        a = positive_bound(int(nodes[n].a), use_locals)
-        b = positive_bound(int(nodes[n].b), use_locals)
-        if a >= 0 and b >= 0: return min(a, b)
-        return max(a, b)
-    if op != .plus and op != .star: return -1
-    a = positive_bound(int(nodes[n].a), use_locals)
-    b = positive_bound(int(nodes[n].b), use_locals)
-    if a < 0 or b < 0: return -1
-    if op == .plus:
-        if a > 9223372036854775807 - b: return -1
-        return a + b
-    if b == 0: return 0
-    if a > 9223372036854775807 / b: return -1
-    a * b
-
-positive_local_write = (l: int, bound: int):
-    if l <= 0 or int(locals[l].owner) != cur_fn: return
-    fl = int(locals[l].flags)
-    skip = LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_SOAELEM | LF_ELEMALIAS | LF_QUIET
-    if fl & LF_DECL == 0 or fl & skip != 0 or (prune(int(locals[l].type)) != T_INT and prune(int(locals[l].type)) != T_MATH_INT): return
-    old = positive_bounds.get(l) ?? bound
-    if old < 0 or bound < 0: positive_bounds[l] = -1
-    else: positive_bounds[l] = max(old, bound)
-
-positive_target_write = (n: int, bound: int):
-    if nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.local)):
-        positive_local_write(int(nodes[n].sym), bound)
-    else if nodes[n].kind == .tuple:
-        loop i in [0..nkids(n)): positive_target_write(kid(n, i), -1)
-
-positive_write = (n: int):
-    k = nodes[n].kind
-    if k == .vardecl and not has_flag(n, NF_GLOBAL):
-        if nkids(n) == 0:
-            b = int(nodes[n].b)
-            positive_local_write(int(nodes[n].sym), if b == 0: 0 else: positive_bound(b, false))
-        else:
-            loop i in [0..nkids(n)): positive_local_write(int(nodes[kid(n, i)].sym), -1)
-    if k == .assign:
-        bound = -1
-        if nodes[n].op == i32(int(Tok.assign)) and nodes[n].aux == 0: bound = positive_bound(int(nodes[n].b), false)
-        positive_target_write(int(nodes[n].a), bound)
-
-# All writes must independently establish a bound. Address-taken and captured
-# locals are excluded above, so a call cannot silently invalidate the result.
-positive_writes = (n: int):
-    if n == 0: return
-    k = nodes[n].kind
-    if k == .lambda or k == .fn_: return
-    positive_write(n)
-    positive_writes(int(nodes[n].a))
-    positive_writes(int(nodes[n].b))
-    if k != .for_:
-        positive_writes(int(nodes[n].c))
-        if k != .partial: positive_writes(int(nodes[n].d))
-    loop i in [0..nkids(n)): positive_writes(kid(n, i))
-    loop i in [0..nkids2(n)): positive_writes(kid2(n, i))
 
 gen_positive_mod = (n: int) -> int:
     if prune(ntype(n)) == T_MATH_INT: return -1
@@ -5277,189 +5181,6 @@ lm_resizing_call = (n: int, g: int) -> int:
 # ---- bounds checks that cannot fail ----
 # In `for j in K..A.len()` (K a non-negative literal; the bound may also be a variable declared
 # as `n := A.len()` and never changed) where A is never modified in the function, A[j] is in
-# bounds: the length is fixed, and an empty (null) A never enters the loop.
-len_of_local: {int: int}        # local n -> local A when n := A.len() and neither ever changes
-safe_index: (int, int, bool)[]  # (array local, loop variable local, keep its null check)
-nonneg_locals: int[]            # loop variables of ranges that start at a value >= 0
-nonneg_limits: int[]            # matching constant upper limits, or -1
-# A loop's control counter stays in range, but its user-visible variable can
-# be reassigned, passed by reference, or changed by a closure in the body.
-stable_loop_index = (l: int) -> bool:
-    if l < 0: return false
-    fl = int(locals[l].flags)
-    fl & (LF_ASSIGNED | LF_ALIAS | LF_CAPTURE | LF_BYREF | LF_ADDR) == 0 and not is_shared(l)
-
-# e is an integer expression that is never negative
-# The step-1 int/int64 boundary changes semantic type but preserves every bit
-# and value. Existing index/length proofs can look through just that boundary.
-# This is representation-specific: step 2 must prove a word representation first.
-word_integer_value = (n0: int) -> int:
-    n = n0
-    loop nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.int_)):
-        inner = int(nodes[n].a)
-        source = prune(ntype(inner))
-        target = prune(ntype(n))
-        if not ((source == T_INT and target == T_MATH_INT) or (source == T_MATH_INT and target == T_INT)): break
-        n = inner
-    n
-
-is_nonneg = (e0: int) -> bool:
-    e = word_integer_value(e0)
-    if e == 0: return false
-    k = nodes[e].kind
-    if k == .int_lit: return nodes[e].ival >= 0
-    if k == .ident and nodes[e].aux == i32(int(SK.local)): return nonneg_locals.contains(int(nodes[e].sym))
-    if k == .intrinsic and (nodes[e].aux as IN) == .len: return true
-    # Positive operands alone do not prove a word-sized sum/product is
-    # nonnegative: it can overflow. Keep the check without a range proof.
-    false
-
-# A, if e is A.len() / len(A) for an array local A that is never modified, else -1
-fixed_array_len = (e0: int) -> int:
-    e = word_integer_value(e0)
-    if e == 0 or nodes[e].kind != .intrinsic or (nodes[e].aux as IN) != .len or nkids(e) != 1: return -1
-    a = kid(e, 0)
-    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return -1
-    ak = types[prune(ntype(a))].kind
-    if ak != .array and ak != .str_: return -1          # (a str's length changes only when it is assigned)
-    l = int(nodes[a].sym)
-    if not fixed_array_local(l): return -1
-    l
-
-# the length of array local l cannot change during this function
-fixed_array_local = (l: int) -> bool:
-    # element writes keep the length; writing the variable itself (or a mut parameter, which
-    # could be the caller's global) may not
-    fl = int(locals[l].flags)
-    if fl & (LF_RESIZED | LF_ALIAS | LF_BYREF) != 0 or is_shared(l): return false
-    if fl & LF_MUTPARAM != 0 and not ambient_length_stable(cur_fn): return false
-    true
-
-array_len_expr: {int: int}      # array local A -> E when A := [x; E] and A is never resized
-
-# x and y always have the same value: literals, unchanging locals and + - * of those
-same_value = (x: int, y: int) -> bool:
-    if x == 0 or y == 0 or nodes[x].kind != nodes[y].kind: return false
-    k = nodes[x].kind
-    if k == .int_lit: return nodes[x].ival == nodes[y].ival
-    if k == .ident:
-        if nodes[x].aux != i32(int(SK.local)) or nodes[y].aux != i32(int(SK.local)) or nodes[x].sym != nodes[y].sym: return false
-        return int(locals[int(nodes[x].sym)].flags) & LF_ASSIGNED == 0
-    if k == .binary:
-        op = nodes[x].op as Tok
-        if nodes[y].op != nodes[x].op or (op != .plus and op != .minus and op != .star): return false
-        return same_value(int(nodes[x].a), int(nodes[y].a)) and same_value(int(nodes[x].b), int(nodes[y].b))
-    if k == .intrinsic:
-        a = fixed_array_len(x)
-        return a >= 0 and a == fixed_array_len(y)
-    false
-
-# A bounded ascending range with a nonnegative start never yields a negative
-# index. For steps, require ordered literal starts; dynamic/descending steps
-# keep their ordinary checks until there is a stronger proof.
-nonnegative_range = (it: int) -> bool:
-    if nodes[it].b == 0 or not is_nonneg(int(nodes[it].a)): return false
-    if not has_flag(it, NF_STEP): return true
-    a = int(nodes[it].a)
-    b = int(nodes[it].c)
-    nodes[a].kind == .int_lit and nodes[b].kind == .int_lit and nodes[b].ival > nodes[a].ival
-
-# the array locals whose length bounds the range `it`
-range_bounds_arrays = (it: int) -> int[]:
-    out: int[]
-    if not nonnegative_range(it) or has_flag(it, NF_INCLUSIVE): return out
-    hi = word_integer_value(int(nodes[it].b))
-    if hi == 0: return out
-    a = fixed_array_len(hi)
-    if a >= 0: out.push(a)
-    if nodes[hi].kind == .ident and nodes[hi].aux == i32(int(SK.local)):
-        n = int(nodes[hi].sym)
-        if int(locals[n].flags) & LF_ASSIGNED == 0:
-            if let b = len_of_local.get(n):
-                if fixed_array_local(b): out.push(b)
-    loop arr, e in array_len_expr:
-        if int(locals[arr].owner) == cur_fn and fixed_array_local(arr) and same_value(hi, e): out.push(arr)
-    out
-
-# 0: needs a bounds check, 1: in bounds, 2: in bounds but keep the null check (other
-# accesses to the array in the loop are checked and can build on it)
-index_safety = (arr: int, idx0: int) -> int:
-    idx = word_integer_value(idx0)
-    if safe_index.len() == 0: return 0
-    if nodes[arr].kind != .ident or nodes[idx].kind != .ident: return 0
-    if nodes[arr].aux != i32(int(SK.local)) or nodes[idx].aux != i32(int(SK.local)): return 0
-    a = int(nodes[arr].sym)
-    j = int(nodes[idx].sym)
-    loop p in safe_index:
-        if p.0 == a and p.1 == j:
-            if p.2: return 2
-            return 1
-    0
-
-# does the loop body index array local a with anything but the loop variables in `ok`
-# (this loop's, and those of nested loops that are in bounds for a too)?
-other_index_of = (n: int, a: int, ok: int[], seen: mut bool[]) -> bool:
-    if n <= 0 or n >= seen.len() or seen[n]: return false
-    seen[n] = true
-    k = nodes[n].kind
-    if k == .index:
-        b = int(nodes[n].a)
-        if nodes[b].kind == .ident and nodes[b].aux == i32(int(SK.local)) and int(nodes[b].sym) == a:
-            ix = word_integer_value(int(nodes[n].b))
-            if not (nodes[ix].kind == .ident and nodes[ix].aux == i32(int(SK.local)) and ok.contains(int(nodes[ix].sym))): return true
-    if k == .for_:
-        inner = ok
-        it = int(nodes[n].a)
-        if int(nodes[n].aux) == 0 and stable_loop_index(int(nodes[n].sym)) and range_bounds_arrays(it).contains(a): inner.push(int(nodes[n].sym))
-        return other_index_of(it, a, ok, seen) or other_index_of(int(nodes[n].b), a, inner, seen)
-    loop c in [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]:
-        if other_index_of(c, a, ok, seen): return true
-    loop i in [0..nkids(n)):
-        if other_index_of(kid(n, i), a, ok, seen): return true
-    loop i in [0..nkids2(n)):
-        if other_index_of(kid2(n, i), a, ok, seen): return true
-    false
-
-# Share range facts between unit and stepped loops. Array paths can still be
-# hoisted when the counter is mutable, but only stable indices prove bounds.
-range_facts_begin = (s: int, l: int) -> (int, int, bool):
-    safe_arrs: int[]
-    nonneg = false
-    bound = 0
-    if nodes[s].aux == 0 and stable_loop_index(l):
-        it = int(nodes[s].a)
-        nonneg = nonnegative_range(it)
-        if nonneg:
-            safe_arrs = range_bounds_arrays(it)
-            if not has_flag(it, NF_INCLUSIVE):
-                hi = word_integer_value(int(nodes[it].b))
-                if nodes[hi].kind == .intrinsic and (nodes[hi].aux as IN) == .len and nkids(hi) == 1: bound = kid(hi, 0)
-    if nonneg:
-        nonneg_locals.push(l)
-        hi = int(nodes[int(nodes[s].a)].b)
-        limit = -1
-        if nodes[hi].kind == .int_lit and not has_flag(hi, NF_U64) and nodes[hi].ival > 0:
-            limit = nodes[hi].ival
-            if not has_flag(int(nodes[s].a), NF_INCLUSIVE): limit -= 1
-        if limit < 0 and bound != 0 and tkind(ntype(bound)) == .array:
-            limit = 9223372036854775807 / max(1, tsize(telem(ntype(bound)))) - 1
-        nonneg_limits.push(limit)
-    nfp = fp_begin(s, l, bound, 0)
-    loop sa in safe_arrs:
-        seen = fill(false, nodes.len())
-        ok = [l]
-        loop p in safe_index:
-            if p.0 == sa: ok.push(p.1)
-        safe_index.push((sa, l, other_index_of(int(nodes[s].b), sa, ok, seen)))
-    (nfp, safe_arrs.len(), nonneg)
-
-range_facts_end = (facts: (int, int, bool)):
-    loop _ in [0..facts.1): safe_index.pop()
-    fp_end(facts.0)
-    if facts.2:
-        nonneg_locals.pop()
-        nonneg_limits.pop()
-
 gen_loop_body = (b: int):
     scope_push()
     gen_block_stmts(b)
@@ -5993,84 +5714,6 @@ path_within = (p: int, k: int) -> bool:
         path = lpath_parents[path]
     false
 
-# ctx: 0 the value is used (copied, passed), 1 it is only indexed or measured
-fp_scan = (n: int, ctx: int):
-    if n == 0: return
-    k = nodes[n].kind
-    # An unclassified operation may also affect its local actuals. Merely
-    # marking ambient calls would still allow caching a private local array.
-    mask = isolation_children(k)
-    if mask < 0 or k == .intrinsic and not isolation_intrinsic(nodes[n].aux as IN):
-        fp_lambda = true
-        return
-    if not ambient_storage_stable(n): fp_calls = true
-    if k == .lambda:
-        fp_lambda = true
-        return
-    if k == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ELEMALIAS != 0:
-        # (x of `mut x in xs` in a combined loop: writing x writes xs, which the body does not show)
-        key = lpath_key(int(nodes[int(locals[int(nodes[n].sym)].alias)].a))
-        if key != 0: fp_kill.push(key)
-        return
-    if k == .ident or k == .field:
-        key = lpath_key(n)
-        if key != 0:
-            if ctx == 0: fp_escape.push(key)
-            if k == .field: fp_scan(int(nodes[n].a), 1)
-            return
-        if k == .field: fp_scan(int(nodes[n].a), 0)
-        return
-    if k == .index:
-        base = int(nodes[n].a)
-        if lpath_key(base) != 0 and tkind(ntype(base)) == .array: fp_bases.push(base)
-        # A slice retains its source while its bounds run; writes in those
-        # bounds must still detach, including when the slice is inside a loop.
-        fp_scan(base, if nodes[n].aux == 1: 0 else: 1)
-        fp_scan(int(nodes[n].b), 0)
-        loop i in [0..nkids(n)): fp_scan(kid(n, i), 0)
-        return
-    if k == .assign:
-        fp_target(int(nodes[n].a))
-        fp_scan(int(nodes[n].b), 0)
-        return
-    # (a pointer to a variable, or to an array's elements, may write it: data() also makes the
-    # array one of its own first, which may move it)
-    if k == .addr or (k == .cast or k == .conv) and raw_view(n):
-        key = lpath_key(int(nodes[n].a))
-        if key != 0: fp_kill.push(key)
-        fp_scan(int(nodes[n].a), 1)
-        return
-    if k == .intrinsic and nkids(n) > 0:
-        id = nodes[n].aux as IN
-        if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend or id == .arrdata:
-            key = lpath_key(kid(n, 0))
-            if key != 0: fp_kill.push(key)
-            fp_scan(kid(n, 0), 1)
-            loop i in [1..nkids(n)): fp_scan(kid(n, i), 0)
-            return
-        if id == .len or id == .arrcap:
-            fp_scan(kid(n, 0), 1)
-            return
-    if k == .call:
-        mm = checked_call_mutmask(n)
-        loop i in [0..nkids(n)):
-            if mm & (1 << i) != 0:
-                key = lpath_key(kid(n, i))
-                if key != 0: fp_kill.push(key)
-                # (`@xs[i]` writes an element, like an assignment to it: xs must be made unique)
-                else: fp_target(kid(n, i))
-    if k == .for_ and has_flag(n, NF_MUT):
-        # (loop mut x in p may make p a copy of its own)
-        key = lpath_key(int(nodes[n].a))
-        if key != 0: fp_kill.push(key)
-    if mask & 1 != 0: fp_scan(int(nodes[n].a), 0)
-    if mask & 2 != 0: fp_scan(int(nodes[n].b), 0)
-    if mask & 4 != 0: fp_scan(int(nodes[n].c), 0)
-    if mask & 16 != 0:
-        loop i in [0..nkids(n)): fp_scan(kid(n, i), 0)
-    if mask & 32 != 0:
-        loop i in [0..nkids2(n)): fp_scan(kid2(n, i), 0)
-
 # where loop body n changes how many elements path `key` has, or replaces it, by itself (not
 # through what it calls): 0 if it does not. (`loop mut` writes the elements in place: a body
 # adding or removing them would skip or repeat elements.)
@@ -6103,50 +5746,17 @@ lm_change_at = (n: int, key: int) -> int:
         if r == 0: r = lm_change_at(kid2(n, i), key)
     r
 
-# an assignment target: the arrays along it have elements written; a path itself is replaced
-fp_target = (t: int):
-    if not ambient_storage_stable(t): fp_calls = true
-    k = nodes[t].kind
-    # (an element alias's array: written)
-    r = t
-    loop nodes[r].kind == .field: r = int(nodes[r].a)
-    if nodes[r].kind == .ident and nodes[r].aux == i32(int(SK.local)) and int(locals[int(nodes[r].sym)].flags) & LF_ELEMALIAS != 0:
-        fp_scan(r, 0)
-        return
-    if k == .index:
-        base = int(nodes[t].a)
-        key = lpath_key(base)
-        if key != 0:
-            fp_written.push(key)
-            if tkind(ntype(base)) == .array: fp_bases.push(base)
-            fp_scan(base, 1)
-        else: fp_target(base)
-        fp_scan(int(nodes[t].b), 0)
-        loop i in [0..nkids(t)): fp_scan(kid(t, i), 0)
-        return
-    key = lpath_key(t)
-    if key != 0:
-        fp_kill.push(key)
-        if k == .field: fp_scan(int(nodes[t].a), 1)
-        return
-    if k == .field:
-        fp_target(int(nodes[t].a))
-        return
-    fp_scan(t, 0)
-
 # the paths of loop s (with variable l) fixed during it; returns how many were added
 # (place: the array of a `loop mut x in place`, whose elements the loop writes)
 fp_begin = (s: int, l: int, bound: int, place: int) -> int:
     if place == 0 and fns[cur_fn].no_indexes: return 0
-    fp_bases.clear()
-    fp_kill.clear()
-    fp_escape.clear()
-    fp_written.clear()
-    fp_calls = false
-    fp_lambda = false
-    fp_scan(int(nodes[s].b), 0)
-    # (a while loop's condition runs in the loop too)
-    if nodes[s].kind == .while_: fp_scan(int(nodes[s].a), 0)
+    summary = fact_storage_loop(s)
+    fp_bases = summary.bases
+    fp_kill = summary.kill
+    fp_escape = summary.escape
+    fp_written = summary.written
+    fp_calls = summary.calls
+    fp_lambda = summary.opaque
     if place != 0 and lpath_key(place) != 0 and tkind(ntype(place)) == .array:
         fp_bases.push(place)
         fp_written.push(lpath_key(place))
@@ -6666,6 +6276,7 @@ lower_inst = (lf: int, f: int):
 lop_watch = false       # (loops in this function count down to the web page's watchdog)
 
 lower_function = (lf: int):
+    fact_storage_cache.clear()
     lpath_ids.clear()
     lpath_parents.truncate(1)
     f = lfuncs[lf]

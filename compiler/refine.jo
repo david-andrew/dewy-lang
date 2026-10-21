@@ -295,6 +295,9 @@ ref_assume = (t0: int, self: int, args: int[], s: mut FactState):
         fact_assume(s, v, true)
 
 ref_check = (n: int, self: int, args: int[], s: mut FactState):
+    if fact_speculating > 0:
+        ref_assume(zonk(int(nodes[n].aux2)), self, args, s)
+        return
     t = zonk(int(nodes[n].aux2))
     nodes[n].aux2 = i32(t)
     if not s.live: return

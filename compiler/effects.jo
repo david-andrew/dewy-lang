@@ -446,3 +446,14 @@ effects_finalize = ():
             chain = effect_witness(f, event)
             origin = if event.witness != 0: pos_str(nodes[event.witness].pos) else: pos_str(nodes[d].pos)
             fatal(nodes[at].pos, "effect contract violation in '{effect_name(f)}': {what} exceeds the closed row (no_effects permits none); {chain}; witness at {origin}")
+
+# Facts request only summaries of calls they actually analyze. Ordinary code
+# with no refinement consumers pays neither an arena allocation nor a walk.
+effects_demand = (f: int) -> bool:
+    if effect_limit == 0:
+        effect_limit = fns.len()
+        effect_summaries = fill(EffectSummary(), effect_limit)
+        effect_seen = fill(0, nodes.len())
+    if f <= 0 or f >= effect_limit: return false
+    if effect_summaries[f].index == 0: effect_visit(f)
+    effect_summaries[f].done
