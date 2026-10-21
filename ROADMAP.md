@@ -28,7 +28,7 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: stack closure environments and devirtualization (runtime).
+- Astra: literal-lambda callbacks on the stack; allocator fast path.
 - Opus: dogfooding round 2 (12 programs in new domains; round-1 leftovers).
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
@@ -55,8 +55,8 @@ only.
 - Runtime gaps:
   - float compare/negate selection;
   - outer-target SIMD (particles);
-  - stack closure environments with devirtualization (the callback kernel
-    spends 35% in allocation and free).
+  - stack closure environments: invocation-only local callbacks landed
+    (callbacks kernel 2.2–2.3×); literal lambdas and forwarding next.
 - Self-hosting pilot: translate `compiler/zip.jo` to Dewy. This needs
   `$target`, a pointer/host ABI subset and byte views. Hold the full port
   (5–10 engineer-weeks) until the zip pilot works without private syntax and a
