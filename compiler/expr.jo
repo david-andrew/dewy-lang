@@ -4627,9 +4627,51 @@ is_unchecked_at = (n: int) -> bool:
     if id_at == 0: id_at = intern("__at")
     int(nodes[callee].name) == id_at and modules[cur_mod()].is_prelude
 
+# `$breakpoint`: the site, and each live binding of the function as `name = value`
+breakpoint_call = (n: int) -> int:
+    pos = nodes[n].pos
+    line, _ = line_col(pos)
+    path = files[pos_file(pos)].path
+    slash = rfind(path, "/")
+    if slash >= 0: path = path[slash + 1..]
+    pieces: int[]
+    floor = if cx >= 0: int(ctxs[cx].floor) else: 0
+    loop i in [floor..sc_names.len()):
+        nm = sc_names[i]
+        if sc_top[nm] != i or syms[sc_syms[i]].kind != .local: continue
+        text = name_of(nm)
+        if len(text) == 0 or text[0] == '$' or text[0] == '_' or find(text, "$") >= 0: continue
+        l = int(syms[sc_syms[i]].ref)
+        t = prune(int(locals[l].type))
+        k = tkind(t)
+        locals[l].flags = i32(int(locals[l].flags) | LF_READ)
+        if t == T_RANGE or k == .typeval or k == .module or k == .polyfn: continue
+        if k == .fn_ or k == .callable or k == .cfn: continue
+        prefix = if pieces.len() > 0: "\n  " else: "  "
+        if k == .ptr or k == .var:
+            pieces.push(bc_str("{prefix}{text} : {dt(t)}", pos))
+            continue
+        quote = if k == .str_: "\"" else: ""
+        pieces.push(bc_str("{prefix}{text} = {quote}", pos))
+        part = mk(.pair, pos)
+        nodes[part].a = i32(mk_ident_local(l, pos))
+        nodes[part].sval = -1
+        pieces.push(part)
+        if len(quote) > 0: pieces.push(bc_str(quote, pos))
+    snapshot = mk(.str_lit, pos)
+    if pieces.len() > 0:
+        nodes[snapshot].aux = 1
+        set_list(snapshot, pieces)
+    else: nodes[snapshot].sval = i32(intern(""))
+    nodes[n] = nodes[bc_call("__dewy_breakpoint", [bc_str("{path}:{line}", pos), snapshot], pos)]
+    n
+
 check_call = (n: int, expected: int) -> int:
     if reflect_fields(n): fatal(nodes[n].pos, "fields(T) is a compile-time sequence; iterate over it with `loop field in fields(T)`")
     callee = int(nodes[n].a)
+    if nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "$breakpoint" and nkids(n) == 0:
+        breakpoint_call(n)
+        return check_expr(n, expected)
     if nodes[callee].kind == .field:
         if nodes[callee].b != 0: reflect_name(callee)
         if reflect_active: reflect_member(callee)

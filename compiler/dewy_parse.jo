@@ -252,7 +252,7 @@ dw_fail_pos = (pos: int, what: str) -> int:
 # Metatags the design defines that this compiler does not implement yet. Each
 # is reported where it is written rather than as a generic syntax error.
 dw_designed_directive = (name: str) -> bool:
-    name in ["abstract", "allocator", "breakpoint", "field", "lend", "no_prelude", "proof", "prototype", "prototype_warnings", "unsafe_assume", "__copy__", "__drop__", "__move__"]
+    name in ["abstract", "allocator", "field", "lend", "no_prelude", "proof", "prototype", "prototype_warnings", "unsafe_assume", "__copy__", "__drop__", "__move__"]
 
 # `$target`: the backend being compiled for, by the design's names (x64 is x86_64,
 # arm64 is arm, WebAssembly is wasm32; riscv and c name backends this compiler lacks).
@@ -394,6 +394,7 @@ dw_directive = (id: int) -> int:
         owner = dw_expr(dw_child(id, 0))
         reservation = if dw_child(id, 1) != 0: dw_expr(dw_child(id, 1)) else: bc_int(0, pos)
         return bc_call("$lend", [owner, reservation, dw_expr(dw_child(id, 2))], pos)
+    if name == "breakpoint": return bc_call("$breakpoint", [], pos)
     if name != "assert" and name != "runtime_assert": return dw_unimplemented(id, name)
     condition = dw_child(id, 0)
     message = dw_child(id, 1)

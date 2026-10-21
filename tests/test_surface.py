@@ -180,7 +180,6 @@ DIRECTIVE_ERRORS = {
     'unsafe-assume': ('main = () => { $unsafe_assume 1 >? 0 }', '`$unsafe_assume` is part of the design'),
     'expect': ('main = () => { let y = $expect 1 >? 0, "x" }', '`$expect` is a statement'),
     'fail': ('$fail "nope"', '`$fail` belongs in a function'),
-    'breakpoint': ('main = () => { $breakpoint }', '`$breakpoint` is part of the design'),
     'abstract': ('Tok:type = $abstract type of any & [x:int64]', '`$abstract` is part of the design'),
     'test': ('$test\nlet x = 1', '`$test` marks a module-level function'),
     'proof': ('$proof\nf = () => 1', '$proof bodies allow only'),

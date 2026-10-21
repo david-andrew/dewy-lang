@@ -500,6 +500,22 @@ eprint = (s: str):
     __write_fd(2, data(s), len(s))
     __write_fd(2, data("\n"), 1)
 
+# `$breakpoint`: the site and the live bindings on standard error, then a prompt
+# reading commands from standard input until one continues (or the input ends)
+__dewy_breakpoint = (site: str, snapshot: str):
+    eprint("── breakpoint at {site} ──")
+    if len(snapshot) > 0: eprint(snapshot)
+    loop true:
+        __out_flush()
+        __write_fd(2, data(">>> "), 4)
+        line = read_line()
+        if line == none: return
+        command = trim(line!)
+        if command == "" or command == "\\c": return
+        if command == "\\q": exit(130)
+        if command == "\\h": eprint("\\c or an empty line: continue    \\q: quit (status 130)    \\h: these commands")
+        else: eprint("a compiled program cannot evaluate an expression yet (\\c continues, \\h lists the commands)")
+
 # (a file or a directory)
 __wasm_has = (path: str) -> bool:
     when TARGET == "wasm":

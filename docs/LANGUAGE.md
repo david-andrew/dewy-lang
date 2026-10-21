@@ -2240,6 +2240,15 @@ stored ranges and strings. Active labels must be unique within a function;
 a label can be reused after its loop ends. A closure cannot exit its caller's
 loop. Unlabeled exits still target the nearest loop.
 
+`$breakpoint` is a statement that prints `── breakpoint at file.dewy:LINE ──` and
+the function's live bindings (`name = value`, strings quoted; functions, types,
+ranges and hidden bindings are left out) to standard error, then reads commands
+from standard input at a `>>> ` prompt: `\c` or an empty line continues, `\q`
+quits with status 130, `\h` lists the commands, and anything else is refused (a
+compiled program cannot evaluate an expression yet). The end of input continues.
+At the top level it shows only local bindings, and it does not yet trap into an
+attached debugger.
+
 Assertions are directives with their own argument grammar:
 `$runtime_assert condition` or `$runtime_assert condition, "message"` checks
 the condition when the program runs; a failure reports the condition (or the

@@ -1,0 +1,12 @@
+# stdin: \h\nsum\n\n
+# modes: native
+# `$breakpoint` shows the live bindings, then reads commands until one continues
+describe = (hits:array<int64> label:string) => {
+    let total = 9
+    let maybe:int64? = none
+    $breakpoint
+    printl"after {total} {label}"
+}
+describe([3 4] "run")
+$breakpoint
+printl"done"
