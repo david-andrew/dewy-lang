@@ -987,6 +987,23 @@ mk_union = (ms0: int[]) -> int:
             loop x in ms:
                 if type_eq(x, m): dup = true
             if not dup: ms.push(m)
+    # Literal string sets join into one set: `Damage | 'none'` with
+    # `Damage = 'torn' | 'checksum'` is the set of all three.
+    if str_sets.len() > 2:
+        sets = 0
+        loop m in ms:
+            if str_set_of(m) != 0: sets += 1
+        if sets > 1:
+            texts: str[]
+            rest: int[]
+            loop m in ms:
+                set = str_set_of(m)
+                if set == 0: rest.push(m)
+                else:
+                    loop text in str_sets[set]:
+                        if not texts.contains(text): texts.push(text)
+            rest.push(str_set_type(texts))
+            ms = rest
     # sort by type id (few members: insertion sort)
     loop i in [1..ms.len()):
         j = i

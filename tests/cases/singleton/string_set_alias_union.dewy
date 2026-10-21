@@ -1,0 +1,16 @@
+# A literal-union alias joined with more literals is one set of all of them.
+Damage:type='torn' | 'checksum'
+Outcome:type=Damage | 'clean'
+Scan:type=[damage:Damage | 'none'='none']
+describe=(o:Outcome):>string=>match o {
+    <'clean'> => "intact"
+    d:Damage => "damaged ({d})"
+}
+main=()=>{
+    let s=Scan()
+    printl(s.damage)
+    s.damage='torn'
+    printl(s.damage)
+    printl(describe('clean'))
+    printl(describe('checksum'))
+}
