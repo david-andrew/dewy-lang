@@ -116,6 +116,15 @@ check_propagate = (n: int, expected: int) -> int:
     loop t in members:
         if not exception_member(t): continue
         if not can_coerce(0, t, int(ctxs[cx].ret)):
+            # (an optional result with errors: `none` is an exception too, so
+            # keeping the optional takes a match that forwards only the errors)
+            errors = ""
+            loop m in members:
+                if m != T_NONE and exception_member(m):
+                    if errors != "": errors += " "
+                    errors += "failure:{dt(m)} => return failure"
+            if t == T_NONE and errors != "" and dewy_at(pos):
+                fatal(pos, "or_throw cannot propagate none: it forwards every exception alternative, and `none` is one (`T?` is `T | none`), but the declared return type is {dt(int(ctxs[cx].ret))}; to forward only the errors and keep the optional, match the value: `match value \{ {errors} ... }`")
             fatal(pos, "or_throw cannot propagate {dt(t)}: the declared return type is {dt(int(ctxs[cx].ret))}")
         exceptions.push(t)
     if exceptions.len() == 0:

@@ -1,0 +1,11 @@
+# `or_throw` forwards every exception alternative, `none` included: on an
+# optional result with errors, a function that cannot return none is told how
+# to forward only the errors and keep the optional.
+Oops:type=type of error & [code:int64]
+lookup=(x:int64):>int64?|Oops=>if x <? 0 Oops[x] else if x =? 0 none else x*10
+use=(x:int64):>int64|Oops=>{
+    let found=lookup(x) or_throw
+    if found is? none return 0
+    return found+1
+}
+printl(use(3))
