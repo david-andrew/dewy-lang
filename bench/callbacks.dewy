@@ -1,0 +1,29 @@
+# Small each/filter-style traversals with fresh capturing callbacks.
+from p"harness.dewy" import size_argument, clock
+Predicate:type=(x:int64):>bool
+Transform:type=(x:int64):>int64
+visit=(values:array<int64> accept:Predicate transform:Transform):>int64=>{
+    let total:int64=0
+    loop value in values {if accept(value) {total+=transform(value)}}
+    return total
+}
+kernel=(values:array<int64> count:int64):>int64=>{
+    let total:int64=0
+    loop i in [0..count) {
+        let bias=i%127
+        let threshold=i%8
+        let accept=(x:int64):>bool=>x>?threshold
+        let transform=(x:int64):>int64=>x*3+bias
+        total+=visit(values @accept @transform)
+    }
+    return total
+}
+main=(args:array<string>):>int64=>{
+    let count=size_argument(args 1000000)
+    let values:array<int64>=[1 3 5 7]
+    let start=clock()
+    let result=kernel(values count)
+    let stop=clock()
+    printl"{result} {stop-start}"
+    return 0
+}
