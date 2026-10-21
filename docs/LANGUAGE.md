@@ -598,7 +598,7 @@ Integer powers use a nonnegative `int64` exponent. `int` powers check each
 product; fixed-width powers retain wrapping multiplication; negative exponents panic with guidance
 to use an explicit rational or floating base. Float powers use the inherited
 floating math library. `BigInt` powers remain exact for nonnegative exponents;
-`Rational` supports signed exponents. All these types define zero to the zero
+`rational` supports signed exponents. All these types define zero to the zero
 power as one.
 
 Compound updates `//=`, `%=`, `/=` and `^=` use the same operations as their
@@ -628,7 +628,7 @@ The base dimensions are `Time`, `Length`, `Mass`, `Current`, `Temperature`,
 `Amount`, `Luminosity`, and `Angle`. Values use canonical seconds, metres,
 kilograms, amperes, kelvins, moles, candelas, and whole turns. Unit scales are
 exact: `3km =? 3000m`, `300ms =? 3s/10`, and `90deg =? turn/4`; `°` also
-spells degrees. Fractions use `Rational`, and quantities also support machine
+spells degrees. Fractions use `rational`, and quantities also support machine
 integers, checked `int`, `BigInt`, `float32`, and `float64`. A floating annotation rounds an
 exact scale to that representation.
 
@@ -702,44 +702,51 @@ The inherited `big` module is a separate approximate-number library for idle gam
 ## Exact fractions
 
 ```dewy
-from rational import Rational, rational, parse_rational
+from rational import parse_rational
+kelvin=(celsius:rational):>rational=>celsius+273.15
 main=():>void=>{
     let half=1/2
     printl"{half+1/3}"  # 5/6
     printl"{(2/3)^(-3)}"  # 27/8
+    printl"{kelvin(20)}"  # 5863/20
     printl"{rational("-7/3").floor()}"  # -3
 }
 ```
 
-Dividing two machine integers or `BigInt` values with `/` constructs a `Rational`
-without an explicit import. This includes mixed signed/unsigned words, and the
-full-width values are preserved. `4/2` is still a fraction value, formatted as
-`2`. Use `//` for a whole-number quotient. Floating operands retain floating
-division. Decimal literals are exact fractions by default: `0.1 + 0.2 =? 0.3`
-is true, `1.0/2` is `1/2`, and `1.25e2` is `125`. A float annotation or
-floating operand gives literals a floating context (`let x:float64=0.1`).
-Fraction support is loaded only when needed after
-operand types are known. Import `Rational` when naming its type.
+`rational` is the exact fraction type, built in like `int`. Dividing two
+integers or `BigInt` values with `/` gives a `rational`, including mixed
+signed/unsigned words, and the full-width values are preserved. `4/2` is still
+a fraction value, formatted as `2`. Use `//` for a whole-number quotient.
+Floating operands retain floating division. Decimal literals are exact
+fractions by default: `0.1 + 0.2 =? 0.3` is true, `1.0/2` is `1/2`, and `1.25e2`
+is `125`. A float annotation or floating operand gives literals a floating
+context (`let x:float64=0.1`). An integer promotes to `rational` wherever one is
+expected: arguments, results, record fields and container elements.
+Constant fractions and decimal literals are reduced at compilation; a constant
+zero divisor of `/` is a compile error.
 
-`rational(numerator denominator)` accepts machine integers, `BigInt` values, or
-decimal integer text for its parts; the denominator defaults to one. A single string accepts an integer or `numerator/denominator`.
-`parse_rational(text)` returns `Rational|none` for invalid input, including a zero
-denominator. Decimal points and whitespace inside the string are not accepted.
+`rational(numerator denominator)` accepts integers, `BigInt` values, or
+decimal integer text for its parts; the denominator defaults to one. A single
+string accepts an integer or `numerator/denominator`. `parse_rational(text)`
+(imported from `rational`) returns `rational|none` for invalid input, including
+a zero denominator. Decimal points and whitespace inside the string are not
+accepted.
 
-Values keep a positive denominator and coprime `BigInt` parts. Zero is `0/1`.
-Division and the constructor normalize signs and common factors. Use them to construct values;
-read `.numerator` and `.denominator` without assigning noncanonical parts directly.
-`Rational[]` defaults to zero. Interpolation prints an integer when the denominator
-is one, otherwise `numerator/denominator`.
+Values keep a positive denominator and coprime `int` parts. Zero is `0/1`.
+A part is a machine word while it fits and grows into a big integer beyond, so
+arithmetic never overflows. Division and the constructor normalize signs and
+common factors. Read `.numerator` and `.denominator` without assigning
+noncanonical parts directly. Interpolation prints an integer when the
+denominator is one, otherwise `numerator/denominator`.
 
 Arithmetic `+`, `-`, `*`, `/`, comparisons, and unary minus work with fractions,
-`BigInt`, and signed/unsigned machine words in either order. `//` returns a
-`BigInt` floor quotient; `%` returns a `Rational` remainder with the divisor's
-sign. `.divmod(other)` returns both. `.floor()` and `.ceil()` return `BigInt`;
-`.abs()`, `.reciprocal()` and `.pow(signed_exponent)` return fractions. Division
-by zero, a zero denominator and negative powers of zero panic. Zero to the zeroth
-power is one. Copies are independent, and normalized values can be dictionary
-keys.
+`BigInt`, and integers in either order. `//` returns an `int` floor quotient;
+`%` returns a `rational` remainder with the divisor's sign. `.divmod(other)`
+returns both. `.floor()` and `.ceil()` return `int`, and `int(q)` truncates
+toward zero; `.abs()`, `.reciprocal()` and `.pow(signed_exponent)` return
+fractions. Runtime division by zero, a zero denominator and negative powers of
+zero panic. Zero to the zeroth power is one. Copies are independent, and
+normalized values can be dictionary keys.
 
 `.to_float32()` and `.to_float64()` round the exact ratio once, to nearest with
 ties to even. They handle very large parts without first rounding the numerator
@@ -753,9 +760,28 @@ let step=(1/60).to_float32()
 let movement=vec2(step 2.0*step)
 ```
 
-Floating values cannot yet be converted back to `Rational` directly. Inferred
+Floating values cannot yet be converted back to `rational` directly. Inferred
 decimal bindings hold fractions; annotate an accumulator that will receive
 floating values with `float32` or `float64`.
+
+`rational<int64>` is the explicit fixed-width form: normalized `int64` parts.
+Its `+`, `-`, `*`, `/`, `^` and negation return `rational<int64> | Overflow`,
+`Overflow` when the exact result does not fit the parts; handle it with `is?`
+or `match`. Comparisons and printing work as for `rational`. A word integer or a
+constant fraction initializes it (`let third:rational<int64>=1/3`), and it
+widens to `rational` or a float wherever one is expected.
+
+```dewy
+main=():>int64=>{
+    let total:rational<int64>=0
+    loop i in [0..30) {
+        let next=total+1/3
+        if next is? Overflow return 1
+        total=next
+    }
+    return if total =? 10 42 else 2
+}
+```
 
 [The exact-fraction example](../examples/exact_rationals.dewy) computes
 harmonic sums, dice probabilities and exact time steps.

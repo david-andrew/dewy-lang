@@ -27,13 +27,6 @@ __mi_unsigned = (value: u64) -> __dewy_int:
     if value <= u64(9223372036854775807): return __mi_word(int(value))
     __mi_pack(__bi.bigint(value))
 
-__mi_ratio_int = (numerator: __bi.BigInt, denominator: __bi.BigInt) -> __dewy_int:
-    parts = __bi.divmod(numerator, denominator)
-    quotient = parts.quotient
-    if parts.remainder._sign != 0 and numerator._sign != denominator._sign:
-        quotient = __bi.__add__(quotient, __bi.bigint(1))
-    __mi_pack(quotient)
-
 __mi_slow = (a: __dewy_int, b: __dewy_int, operation: int) -> __dewy_int:
     x = __mi_big(a)
     y = __mi_big(b)

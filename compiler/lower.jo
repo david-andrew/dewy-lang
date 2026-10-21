@@ -3472,11 +3472,6 @@ gen_conv = (e: int) -> Val:
     if cv == .none_ or cv == .quantity_const or cv == .ptr: return gen_expr(a)
     if cv == .big2math: return math_call("__mi_pack", [gen_borrowed(a).v])
     if cv == .math2big: return math_call("__mi_big", [gen_borrowed(a).v], to)
-    if cv == .rational2math:
-        value = gen_borrowed(a).v
-        layout(from)
-        denominator = int(structs[int(types[from].st)].fields) + 1
-        return math_call("__mi_ratio_int", [value, e_addi(value, int(fields[denominator].offset))])
     if cv == .int_:
         if from == T_MATH_INT and math_proven_word(a):
             v = math_word_expr(a)

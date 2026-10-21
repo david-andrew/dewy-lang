@@ -26,7 +26,7 @@ enum IN:
     static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
-enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big, rational2math
+enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big
 
 struct Intrinsic:
     name: str
@@ -107,6 +107,40 @@ decimal_type = (pos: int) -> int:
     decimal_cached_type = telem(check_expr(ty, 0))
     decimal_cached_type
 
+word_rational_cached_type = 0
+
+word_rational_type = (pos: int) -> int:
+    if word_rational_cached_type != 0: return word_rational_cached_type
+    ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
+    ty = bc_field(bc_ident("$dewy_rational", pos), "RationalWord", pos)
+    word_rational_cached_type = telem(check_expr(ty, 0))
+    word_rational_cached_type
+
+# Rationals folded at compilation, by node: their normalized word parts.
+rational_constants: {int: (int, int)}
+
+# Does the value n of type from fit rational<int64> exactly, for every value?
+word_rational_source = (n: int, from0: int) -> bool:
+    from = prune(from0)
+    if rational_constants.has(n): return true
+    if not is_int(from): return false
+    known, value = integer_constant(n)
+    if known: return value >= 0 or types[from].sign or from == T_MATH_INT
+    if from == T_MATH_INT: return false
+    int_widens(from, T_INT)
+
+# (node n, replaced by the bundled rational module's fname applied to its old content)
+rational_wrap = (n: int, fname: str, to: int) -> int:
+    source = nodes.len()
+    nodes.push(nodes[n])
+    add_flag(source, NF_CHECKED)
+    pos = nodes[n].pos
+    ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
+    nodes[n] = Node(kind = .call, pos = pos, a = i32(bc_field(bc_ident("$dewy_rational", pos), fname, pos)))
+    set_list(n, [source])
+    check_expr(n, to)
+    n
+
 decimal_part = (digits: str, pos: int) -> int:
     ensure_bundled_import("bigint.dewy", "$dewy_decimal_bigint", pos)
     negative = len(digits) > 0 and digits[0] == '-'
@@ -133,6 +167,31 @@ decimal_part = (digits: str, pos: int) -> int:
     set_list(result, [sign, magnitude])
     result
 
+# The normalized constant numerator/denominator (denominator nonzero, both
+# above the minimum word) as a direct construction: no runtime reduction.
+rational_constant_parts = (numerator: int, denominator: int) -> (int, int):
+    let numerator = numerator
+    let denominator = denominator
+    if denominator < 0:
+        numerator = -numerator
+        denominator = -denominator
+    common = quantity_gcd(numerator, denominator)
+    if common > 1:
+        numerator = numerator / common
+        denominator = denominator / common
+    if numerator == 0: denominator = 1
+    (numerator, denominator)
+
+rational_constant = (numerator: int, denominator: int, pos: int, word: bool = false) -> int:
+    parts = rational_constant_parts(numerator, denominator)
+    ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
+    decimal_type(pos)
+    type_name = if word: "RationalWord" else: "Rational"
+    result = mk(.call, pos)
+    nodes[result].a = i32(bc_field(bc_ident("$dewy_rational", pos), type_name, pos))
+    set_list(result, [bc_int(parts.0, pos), bc_int(parts.1, pos)])
+    result
+
 exact_decimal = (n: int) -> int:
     pos = nodes[n].pos
     text = lower(name_of(int(nodes[n].sval)))
@@ -150,6 +209,19 @@ exact_decimal = (n: int) -> int:
     denominator = "1"
     if exponent > 0: digits += repeat("0", exponent)
     else if exponent < 0: denominator += repeat("0", -exponent)
+    # Word-sized decimals fold to their reduced fraction at compilation.
+    magnitude = digits
+    negative = len(magnitude) > 0 and magnitude[0] == '-'
+    if len(magnitude) > 0 and (magnitude[0] == '-' or magnitude[0] == '+'): magnitude = magnitude[1..]
+    loop len(magnitude) > 1 and magnitude[0] == '0': magnitude = magnitude[1..]
+    if len(magnitude) <= 18 and len(denominator) <= 19:
+        if let top = to_int(magnitude):
+            if let bottom = to_int(denominator):
+                signed = if negative: -top else: top
+                nodes[n] = nodes[rational_constant(signed, bottom, pos)]
+                t = check_expr(n, 0)
+                rational_constants[n] = rational_constant_parts(signed, bottom)
+                return t
     ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
     decimal_type(pos)
     numerator = decimal_part(digits, pos)
@@ -250,6 +322,12 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if from == T_MATH_INT and (math_rep_type(to) or (n != 0 and bundled_bigint_type(to))): return true
     if to == T_MATH_INT and (math_rep_type(from) or (n != 0 and bundled_bigint_type(from))): return true
     if n != 0 and is_float(to) and bundled_rational_type(from): return true
+    # An integer promotes to the exact rational with the same value.
+    if n != 0 and is_int(from) and bundled_rational_type(to): return true
+    # rational<int64> widens to rational and rounds into a float context; a
+    # value enters it only when it always fits (a word, a folded constant).
+    if n != 0 and bundled_word_rational_type(from) and (bundled_rational_type(to) or is_float(to)): return true
+    if n != 0 and bundled_word_rational_type(to) and word_rational_source(n, from): return true
     if from == T_NEVER: return true
     fk = types[from].kind
     tk = types[to].kind
@@ -368,6 +446,23 @@ coerce = (n: int, target: int) -> int:
         return n
     if types[from].kind == .quantity and tk == .quantity:
         return quantity_coerce(n, to)
+    if bundled_word_rational_type(from) and bundled_rational_type(to): return rational_wrap(n, "_widen", to)
+    if bundled_word_rational_type(from) and tk == .float_:
+        convert = if to == T_F32: "_word_float32" else: "_word_float64"
+        return rational_wrap(n, convert, to)
+    if bundled_word_rational_type(to) and word_rational_source(n, from):
+        pos = nodes[n].pos
+        ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
+        if let parts = rational_constants.get(n):
+            nodes[n] = nodes[rational_constant(parts.0, parts.1, pos, true)]
+        else:
+            source = nodes.len()
+            nodes.push(nodes[n])
+            add_flag(source, NF_CHECKED)
+            nodes[n] = Node(kind = .call, pos = pos, a = i32(bc_field(bc_ident("$dewy_rational", pos), "RationalWord", pos)))
+            set_list(n, [source, bc_int(1, pos)])
+        check_expr(n, to)
+        return n
     if tk == .struct_ and is_int(from) and bundled_rational_type(to):
         source = nodes.len()
         nodes.push(nodes[n])
@@ -1276,6 +1371,10 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
     if pk == .param and binds[int(types[p].id)] != 0: target = prune(binds[int(types[p].id)])
     if nodes[a].kind == .float_lit and nodes[a].sval != 0 and bundled_rational_type(target): return 0
     if is_float(target) and nodes[a].type != 0 and bundled_rational_type(ntype(a)): return 10
+    if bundled_rational_type(target) and (nodes[a].kind == .int_lit or (nodes[a].type != 0 and is_int(ntype(a)))): return 10
+    if nodes[a].type != 0 and bundled_word_rational_type(ntype(a)) and (bundled_rational_type(target) or is_float(target)): return 10
+    # (a constant beside a word fraction takes its form, as a literal beside a word integer does)
+    if bundled_word_rational_type(target) and nodes[a].type != 0 and word_rational_source(a, ntype(a)): return 5
     if not is_lit(a) and nodes[a].type != 0 and ntype(a) == T_MATH_INT and bundled_bigint_type(target): return 1
     if ctx_dependent(a):
         if oversized_literal(a):
@@ -2723,8 +2822,11 @@ conversion = (n: int, to0: int, args: int[]) -> int:
     check_expr(a, if tk == .float_ and nodes[a].kind == .float_lit: to else: 0)
     ft = prune(ntype(a))
     if tk == .int_ and nodes[a].kind == .float_lit and nodes[a].sval != 0: ft = exact_decimal(a)
-    if tk == .int_ and bundled_rational_type(ft):
-        wrap_conv(a, .rational2math, T_MATH_INT)
+    if tk == .int_ and (bundled_rational_type(ft) or bundled_word_rational_type(ft)):
+        source = nodes.len()
+        nodes.push(nodes[a])
+        add_flag(source, NF_CHECKED)
+        rational_helper_call(a, "_truncate", source, T_MATH_INT)
         if to != T_MATH_INT: coerce(a, to)
         nodes[n] = nodes[a]
         return to
@@ -2968,6 +3070,15 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
         tb = prune(ntype(b))
         pos = nodes[n].pos
         if (is_int(ta) or bundled_bigint_type(ta)) and (is_int(tb) or bundled_bigint_type(tb)):
+            known_b, divisor = integer_constant(b)
+            if known_b and divisor == 0: fatal(nodes[b].pos, "division by zero: the divisor of `/` is the constant 0")
+            known_a, dividend = integer_constant(a)
+            minimum = -9223372036854775807 - 1
+            if known_a and known_b and dividend != minimum and divisor != minimum and (dividend >= 0 or types[ta].sign) and (divisor >= 0 or types[tb].sign):
+                nodes[n] = nodes[rational_constant(dividend, divisor, pos)]
+                t = check_expr(n, expected)
+                rational_constants[n] = rational_constant_parts(dividend, divisor)
+                return t
             # Resolve exact arithmetic only after the operand types are known;
             # ordinary floating division does not load either exact library.
             ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
@@ -3037,6 +3148,12 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             check_expr(args[0], 0)
             ide_complete_members(ntype(args[0]))
         ide_complete_names()
+    # `rational(...)`: the builtin exact type's constructor, unless a binding shadows it.
+    if not ufcs and mod_scope < 0 and name == intern("rational") and lookup(name) == 0 and files[pos_file(nodes[n].pos)].is_dewy:
+        pos = nodes[n].pos
+        ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
+        nodes[n].a = i32(bc_field(bc_ident("$dewy_rational", pos), "rational", pos))
+        return check_expr(n, expected)
     if not ufcs and mod_scope < 0 and args.len() == 2 and (name == intern("__floor_div") or name == intern("__floor_mod") or name == intern("__dewy_power") or name == intern("__dewy_divide")) and files[pos_file(nodes[n].pos)].is_dewy:
         if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
             return dewy_arithmetic_call(n, name, args, expected)

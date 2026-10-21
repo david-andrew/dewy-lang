@@ -357,8 +357,17 @@ w_assets: str[]             # files named in declarations (watched, as the sourc
 # Follow statically resolved calls made by an initializer. Merely creating a
 # closure does not execute its body. Each specialization is scanned once per
 # initializer, including mutually recursive helpers; indirect calls stay opaque.
+# (the nodes on the current path: a checked `loop c in s` over a string links
+# back into itself, so the walk stops where it would revisit its own path)
+wk_path: {int: bool}
 wk_init_scan = (n: int, m: int, h0: int, refs: mut int[], seen: mut int[]) -> int:
-    if n <= 0 or n >= nodes.len(): return h0
+    if n <= 0 or n >= nodes.len() or wk_path.has(n): return h0
+    wk_path[n] = true
+    r = wk_init_scan_node(n, m, h0, refs, seen)
+    wk_path.remove(n)
+    r
+
+wk_init_scan_node = (n: int, m: int, h0: int, refs: mut int[], seen: mut int[]) -> int:
     h = h0
     k = nodes[n].kind
     if k == .lambda or k == .fnref and nodes[n].aux != 2: return h

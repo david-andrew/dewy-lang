@@ -1,0 +1,30 @@
+# quick
+# `rational` is builtin: integers promote to it, parts grow beyond words.
+Point:type=[kelvin:rational]
+half=(x:rational):>rational=>x/2
+whole=(n:int64):>rational=>n
+main=():>int64=>{
+    let p=Point[273]
+    printl("{p.kelvin} {half(3)} {half(p.kelvin)} {whole(-4)} {half(0.5)}")
+    let values:array<rational>=[1 1/2 0.25]
+    printl(values)
+    let q:rational=2/3
+    printl("{q+1} {1-q} {q*3} {3/q} {-q} {q^2} {q^(-2)}")
+    printl("{q <? 1} {1 >? q} {q =? 4/6} {q not=? 2} {q >=? 2/3}")
+    let big=q^80
+    printl(big)
+    printl(big*(3/2)^80)
+    let neg=-7/2
+    printl("{int(neg)} {neg.floor()} {neg.ceil()} {int(7/2)}")
+    let f:float64=q
+    printl("{f} {(1/3).to_float32()}")
+    printl("{rational(6 -4)} {rational("10/4")} {rational(3)}")
+    let total:rational=0
+    loop d in [1..11) {
+        total+=1/d
+    }
+    printl(total)
+    let wide:int=9223372036854775807
+    printl((wide+1)/2 + 1/2)
+    return 0
+}

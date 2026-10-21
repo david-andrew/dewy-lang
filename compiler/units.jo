@@ -420,6 +420,13 @@ quantity_compound = (s: int, target: int) -> bool:
     nodes[s].b = i32(quantity_number(coerce(last_checked, target)))
     true
 
+bundled_word_rational_type = (t0: int) -> bool:
+    t = prune(t0)
+    if types[t].kind != .struct_: return false
+    si = int(types[t].st)
+    d = int(structs[si].decl)
+    d != 0 and structs[si].name == "RationalWord" and files[pos_file(nodes[d].pos)].path == lib_dir + "/rational.dewy"
+
 bundled_rational_type = (t0: int) -> bool:
     t = prune(t0)
     if types[t].kind != .struct_: return false

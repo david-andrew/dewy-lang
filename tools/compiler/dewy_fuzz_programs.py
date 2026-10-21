@@ -58,7 +58,7 @@ class Ty:
 
 I, U, F, B, S = (Ty(k) for k in ('int64', 'uint64', 'float64', 'bool', 'string'))
 INT = Ty('int')  # mathematical integer: Python's unbounded integers are the oracle
-Q = Ty('Rational')
+Q = Ty('rational')
 VOID, RANGE, HIDDEN = Ty('void'), Ty('range'), Ty('hidden')
 FN = Ty('fn', (I,), I)  # (int64):>int64 closures with private state
 AI, AS, AF = Ty('array', (I,)), Ty('array', (S,)), Ty('array', (F,))
@@ -808,8 +808,6 @@ class Program(Node):
 
     def render(self, typed=False):
         parts = ['Item:type=[id:int64 tags:array<int64> label:string]', 'Bad:type=type of error & [code:int64]']
-        if any(getattr(node, 'ty', None) == Q for node in walk(self)):
-            parts.insert(0, 'from rational import Rational')
         parts += [render(f) for f in self.functions]
         parts.append('main=():>void=>{\n' + block(self.body) + '\n}')
         return '\n'.join(parts) + '\n'

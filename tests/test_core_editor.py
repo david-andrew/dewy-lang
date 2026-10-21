@@ -361,7 +361,7 @@ def test_vscode_core_test_tasks(tmp_path):
     ('', 'let value=uint8.max return if value >? 0 42 else 1', 'max', 'uint8'),
     ('Byte:type=uint8\n', 'let value=Byte.min return if value =? 0 42 else 1', 'min', 'uint8'),
     ('', 'let value:uint64=42 return value as int64', 'value', 'uint64'),
-    ('', 'let value=1/2 return if value =? 1/2 42 else 1', 'value', 'Rational'),
+    ('', 'let value=1/2 return if value =? 1/2 42 else 1', 'value', 'rational'),
     ('from bigint import BigInt\n', 'let value:BigInt=123456789012345678901234567890 return if value >? 1 42 else 1', 'value', 'BigInt'),
     ('', 'let value:array<string>=["answer"] return value.length', 'value', 'array<string>'),
     ('', 'let value=zeros(2 3) return size(value)', 'value', 'NDArray<float64>'),
@@ -398,7 +398,7 @@ def test_vscode_core_test_tasks(tmp_path):
     ('', 'const value=[20 22] return value[0]', 'value', '(constant)'),
     ('const value=[20 22]\n', 'return value[0]', 'value', '(constant)'),
     ('', 'let value:Pool<array<int64>>=[] return value.items.length', 'value', 'Pool<array<int64>>'),
-    ('twice=(x)=>x+x\n', 'return if twice(21.0) =? 42.0 42 else 1', 'twice', 'twice = (x: Rational):>Rational'),
+    ('twice=(x)=>x+x\n', 'return if twice(21.0) =? 42.0 42 else 1', 'twice', 'twice = (x: rational):>rational'),
     ('from p"support.jo" import answer\n', 'return answer(40)', 'answer', 'answer = (x: int64 n: int64 = …):>int64'),
 ])
 def test_dewy_hover_type_spelling(tmp_path, declarations, body, name, expected):
@@ -431,8 +431,8 @@ def test_dewy_hover_type_spelling(tmp_path, declarations, body, name, expected):
     ('main=()=>{let value=float64.§ return 42}', {}, ['min', 'max']),
     ('main=()=>{let answer:int64=42 return ans§}', {'answer': 'int64', 'printl': None}, ['struct', 'mut', 'while']),
     ('main=()=>{let point=[x=42 y=2] return point.§}', {'x': 'int', 'y': 'int'}, ['struct']),
-    ('main=()=>{let ratio=1/2 ratio.§}', {'numerator': 'BigInt', 'denominator': 'BigInt'}, []),
-    ('main=()=>{let ratio=1/2 rat§}', {'ratio': 'Rational'}, ['$dewy_rational']),
+    ('main=()=>{let ratio=1/2 ratio.§}', {'numerator': 'int', 'denominator': 'int'}, []),
+    ('main=()=>{let ratio=1/2 rat§}', {'ratio': 'rational'}, ['$dewy_rational']),
     ('from bigint import BigInt\nmain=()=>{let huge:BigInt=18446744073709551616 hu§}', {'huge': 'BigInt'}, ['__dewy$bigint', '$dewy_bigint']),
     ('main=()=>{let point=[x=42] point.§', {'x': 'int'}, []),
     ('main=()=>{let value:in§=42 return value}', {'int': 'type', 'int64': 'type', 'string': 'type', 'array': 'array<Element>'}, ['i64', 'str', 'struct']),

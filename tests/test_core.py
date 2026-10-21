@@ -3112,7 +3112,7 @@ def test_core_check_and_format_boundary(compiler, tmp_path):
 @pytest.mark.parametrize(('text', 'expected', 'errors'), [
     (('1+2\nlet xs=[20 22]\nlet saved=xs\nxs[0]=99\nsaved[0]+saved[1]\n'
      'Point:type=[x:int64 y:int64]\nlet point=Point[20 22]\npoint.x=40\npoint.x+point.y\n'
-     '1/2+1/3\n:type 1/2\n'), ['3', '42', '62', '5/6', 'Rational'], []),
+     '1/2+1/3\n:type 1/2\n'), ['3', '42', '62', '5/6', 'rational'], []),
     (('let score=20\nread=()=>score\nscore=40\nread()+2\nlet score=99\nread()\nscore\n'
      'identity=<T>(value:T):>T=>value\nidentity(42)\n'), ['42', '40', '99', '42'], []),
     ('repl_add=(x:int64 y:int64):>int64=>x+y\n:type repl_add\n:type [1 2]\n:type 40+2\n',
@@ -4120,11 +4120,13 @@ def test_core_exact_division_module_initialization(compiler, tmp_path, target, r
 let base=seed+1
 printl"rational"
 rational=(a b):>int64=>a+b+base
+Rational:type=[numerator:int=0 denominator:int=1]
 ''')
     (tmp_path / 'helper.dewy').write_text('const offset=1\n')
+    # (a runtime divisor calls the library's `rational`; a constant folds to its `Rational`)
     bodies = {
-        'body': 'main=()=>1/2-offset',
-        'global': 'let ratio=1/2\nmain=()=>ratio-offset',
+        'body': 'two=():>int64=>2\nmain=()=>1/two()-offset',
+        'global': 'two=():>int64=>2\nlet ratio=1/two()\nmain=()=>ratio-offset',
         'unused-constant': 'const unused=1/2\nmain=()=>42',
     }
     source = tmp_path / 'main.dewy'

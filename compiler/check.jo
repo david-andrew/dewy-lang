@@ -1076,6 +1076,11 @@ resolve_type = (tn: int) -> int:
         else:
             if ide_sentinel != 0 and nm == ide_sentinel: ide_complete_types()
             s = lookup(nm)
+            # `rational`: the builtin exact type (the bundled library's), unless a type shadows it.
+            if name_of(nm) == "rational" and (s == 0 or syms[s].kind == .fns) and files[pos_file(nodes[tn].pos)].is_dewy:
+                if nkids(tn) == 0: return decimal_type(nodes[tn].pos)
+                if nkids(tn) == 1 and resolve_type(kid(tn, 0)) == T_INT: return word_rational_type(nodes[tn].pos)
+                fatal(nodes[tn].pos, "`rational` is the exact type and `rational<int64>` its one fixed-width form")
         if s == 0:
             if name_of(nm) == "none": return T_NONE
             # (push = (h: mut Heap[T], x: T): a generic function names its type parameters)

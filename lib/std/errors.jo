@@ -17,6 +17,10 @@ struct FileError:
 @nominal(error)
 struct InvalidUtf8:
     pass
+# A fixed-width result that does not fit its parts (rational<int64> arithmetic).
+@nominal(error)
+struct Overflow:
+    pass
 
 type __FileFailure = FileNotFound | FileAccessDenied | IsDirectory | FileExists | FileError
 

@@ -266,7 +266,6 @@ ct_convert = (e: int, v: int) -> int:
     cv = nodes[e].aux as CV
     if cv == .math2big: return ct_math_runtime("__mi_big", [ct_math_rep(v)], e)
     if cv == .big2math: return ct_math_unpack(ct_math_runtime("__mi_pack", [v], e))
-    if cv == .rational2math: return ct_math_unpack(ct_math_runtime("__mi_ratio_int", x.items, e))
     if cv == .none_ and x.type == T_MATH_INT and math_rep_type(t): return ct_math_rep(v)
     if cv == .none_ and t == T_MATH_INT and math_rep_type(x.type): return ct_math_unpack(v)
     if cv == .int_:
