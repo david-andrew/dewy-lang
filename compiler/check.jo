@@ -332,6 +332,7 @@ bind_from_imports = (start: int = 0):
                 if not modules[im].is_prelude:
                     loop k, v in modules[im].names: cands.push(k)
                 fatal(nodes[id].pos, "'{name_of(int(nodes[d].sval))}' has no '{name_of(nm)}'{suggestion(name_of(nm), cands)}")
+            if files[int(modules[m].file)].is_dewy: rational_one_spelling(im, nm, nodes[id].pos, "drop `{name_of(nm)}` from the import and ")
             if ide_on:
                 if syms[s].kind == .fns and syms[s].decl != 0: ide_ref(nodes[id].pos, nm, IK_FN, nodes[int(syms[s].decl)].pos, 0, -int(syms[s].decl))
                 else: ide_sym_ref(id, s)
@@ -348,6 +349,13 @@ bind_from_imports = (start: int = 0):
                     if syms[ex].decl != 0: where = "at {pos_str(nodes[int(syms[ex].decl)].pos)}"
                     fatal(nodes[id].pos, "cannot import '{name_of(alias)}': this module has a '{name_of(alias)}' ({where}); import it with another name: {name_of(nm)} as ...")
                 modules[m].names[alias] = new_sym(alias, syms[s].kind, int(syms[s].ref), int(syms[s].decl))
+
+# The bundled exact fraction's types are the builtin `rational` and
+# `rational<int64>`: their library names are not a second spelling.
+rational_one_spelling = (im: int, nm: int, pos: int, how: str):
+    if files[int(modules[im].file)].path != lib_dir + "/rational.dewy": return
+    builtin = if name_of(nm) == "Rational": "rational" else if name_of(nm) == "RationalWord": "rational<int64>" else: ""
+    if builtin != "": fatal(pos, "the exact fraction type is the builtin `{builtin}`: {how}write `{builtin}`")
 
 # look up a name from the current context
 lookup = (name: int) -> int:
@@ -1074,6 +1082,7 @@ resolve_type = (tn: int) -> int:
             if ms != 0 and syms[ms].kind == .reflected and name_of(nm) == "type": return int(fields[int(syms[ms].ref)].type)
             if ms == 0 or syms[ms].kind != .module: fatal(nodes[tn].pos, "unknown module '{name_of(int(nodes[tn].sval))}'")
             s = module_lookup(int(syms[ms].ref), nm)
+            if name_of(int(nodes[tn].sval))[0] != '$' and files[pos_file(nodes[tn].pos)].is_dewy: rational_one_spelling(int(syms[ms].ref), nm, nodes[tn].pos, "")
         else:
             if ide_sentinel != 0 and nm == ide_sentinel: ide_complete_types()
             s = lookup(nm)

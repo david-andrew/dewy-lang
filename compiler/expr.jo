@@ -6796,6 +6796,9 @@ check_expr = (n: int, expected: int) -> int:
         if bk == .module:
             m = int(types[bt].mod)
             s = module_lookup(m, fname)
+            qualifier = int(nodes[n].a)
+            if nodes[qualifier].kind != .ident or name_of(int(nodes[qualifier].name))[0] != '$':
+                if dewy_at(nodes[n].pos): rational_one_spelling(m, fname, nodes[n].pos, "")
             if s == 0:
                 if name_of(fname) == "path" and not dewy_at(nodes[n].pos): fatal(nodes[n].pos, "paths are plain functions: `join_path(a, b)`, `file_name(p)`, `dir_name(p)`, `extension(p)`, `file_exists(p)`")
                 fatal(nodes[n].pos, "module '{name_of(int(modules[m].name))}' has no member '{name_of(fname)}'")
