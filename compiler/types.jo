@@ -794,6 +794,9 @@ ts_dewy = false
 # (text in the spelling of the program being compiled: Jo's, else Dewy's)
 tsd = (jo: str, dewy: str) -> str: if ts_dewy: dewy else: jo
 dt = (t: int) -> str: type_str(t, ts_dewy)
+# (the names of the type parameters of the declaration whose types are being shown: a
+# parameter that has none shows as T, U, ... by its place)
+ts_params: int[]
 
 type_str = (t0: int, dewy: bool = false) -> str:
     if ts_depth == 0: ts_left = 150
@@ -847,7 +850,11 @@ type_str_in = (t0: int, dewy: bool) -> str:
         range: "range"
         none_lit: "none"
         var: "?T{ti.id}"
-        param: "${ti.id}"
+        param:
+            k = int(ti.id)
+            if k < ts_params.len() and ts_params[k] != 0: return name_of(ts_params[k])
+            if k < 6: return "TUVWXY"[k..k + 1)
+            "T{k}"
         module: "module"
         typeval: "type"
         vec:

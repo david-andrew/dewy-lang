@@ -1872,7 +1872,7 @@ call_targs: int[]              # type arguments written at the call being resolv
 cur_assign = 0                 # the assignment whose target is being checked (`x = ...`, `x += ...`)
 early_set: {int: bool} = {}    # globals top-level code assigns above their own line
 
-resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0) -> int:
+resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0, ufcs: bool = false) -> int:
     # (this call's own type arguments: a call among its arguments has none, from_text[S](f(x)))
     targs_here = call_targs
     call_targs = []
@@ -1886,6 +1886,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
     last_err = ""
     last_err_pos = 0          # (where the argument it is about is: the error points there)
     last_err_arg = 0          # (which argument, from 1)
+    recv_fits = false         # (some candidate takes the object of x.f(...), whatever else fails)
     best = -1
     # (an argument that is a number of a known type, the first such, rules out before anything is
     # made for them the overloads whose parameter there is a number type it cannot become: abs(x)
@@ -1923,12 +1924,16 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             err = map_args(pnames, hasdef, args, cd.args)
             if len(err) > 0:
                 if last_err_arg == 0: last_err = err
+                if ufcs and not recv_fits and np > 0 and nodes[unnamed(args[0])].type != 0:
+                    rb = fill(0, int(cd.sig.ntp))
+                    if match_type(cd.sig.params[0], ntype(unnamed(args[0])), rb, 0) >= 0: recv_fits = true
                 continue
         cd.binds = fill(0, int(cd.sig.ntp))
         if targs_here.len() > 0:
             # f[T](...): the declared type parameters, given
             if nkids2(d) != targs_here.len():
                 if last_err_arg == 0: last_err = "'{name_of(name)}' takes {nkids2(d)} type argument(s), given {targs_here.len()}"
+                recv_fits = true
                 continue
             loop i in 0.. and t in targs_here: cd.binds[i] = t
         cost = 0
@@ -1946,6 +1951,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                 if int(cd.sig.mutmask) & (1 << i) != 0 and not ctx_dependent(a):
                     r = match_type(pt, ntype(a), cd.binds, 0)
                     ok2 = r >= 0
+                    if i == 0 and ok2: recv_fits = true
                     if ok2:
                         ptx = subst(pt, cd.binds)
                         actual = ntype(a)
@@ -1958,11 +1964,12 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                         last_err_arg = i + 1
                         mutable = "mut parameters"
                         if caller_dewy(): mutable = "`@` parameters"
-                        last_err = "argument {i + 1} must have type {dt(subst(pt, cd.binds))} ({mutable} need an exact match)"
+                        last_err = "argument {i + 1} must have type {sig_dt(cd.decl, subst(pt, cd.binds))} ({mutable} need an exact match)"
                         break
                     cost += r
                     continue
                 r = arg_cost(a, pt, cd.binds)
+                if i == 0 and r >= 0: recv_fits = true
                 if r < 0:
                     ok = false
                     # (of the overloads, the one that got furthest is the one meant: m[k] = v
@@ -1981,11 +1988,11 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                     a = cd.args[fi]
                     last_err_arg = i + 1
                     ptx = subst(cd.sig.params[fi], cd.binds)
-                    if nodes[a].type != 0: last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' expects {dt(ptx)}, found {dt(ntype(a))}{variant_hint(a, ptx)}"
+                    if nodes[a].type != 0: last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' expects {sig_dt(d, ptx)}, found {dt(ntype(a))}{variant_hint(a, ptx)}"
                     else if nodes[a].kind == .dotname and tkind(ptx) == .enum_:
                         vn = int(nodes[a].name)
                         last_err = "{dt(ptx)} has no variant '{name_of(vn)}'{variant_hint_for(ptx, name_of(vn))}"
-                    else: last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' has the wrong type (expects {dt(ptx)})"
+                    else: last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' has the wrong type (expects {sig_dt(d, ptx)})"
                     last_err += uncalled_hint(a, ptx)
                     fnm = name_of(int(nodes[int(cd.decl)].name))
                     # (text("Score:", score, pos): Scratch's join, or Python's print, pieces in a row)
@@ -2101,6 +2108,9 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                 # (xs = [] then xs.add(5): its type, not known yet, is no help)
                 fatal(nodes[n].pos, "no '{name_of(name)}' for a list (use {hh})")
             if len(hh) > 0 and (types[t0].kind == .array or types[t0].kind == .str_): fatal(nodes[n].pos, "no '{name_of(name)}' for {dt(t0)} (use {hh})")
+        # (x.push(1) with x an int64: no function of the name takes such an object, so it has no such member)
+        if ufcs and not recv_fits and last_err_arg == 1 and caller_dewy() and nodes[unnamed(args[0])].type != 0:
+            fatal(nodes[n].pos, "{dt(ntype(unnamed(args[0])))} has no member '{name_of(name)}'")
         if decls.len() > 1:
             # (when none fits, the program's own function is the one meant: its error is the one shown)
             own: int[]
@@ -3396,7 +3406,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
         uh = unused_file_hint(name)
         if len(uh) > 0: fatal(nodes[n].pos, "unknown function '{name_of(name)}'{uh}")
         fatal(nodes[n].pos, "unknown function '{name_of(name)}'{private_hint(name)}{suggestion(name_of(name), surface_names(all, nodes[n].pos))}")
-    resolve_fn_call(n, name, decls, args, expected)
+    resolve_fn_call(n, name, decls, args, expected, 0, ufcs)
 
 id_rgb = intern("rgb")
 id_rgba = intern("rgba")
@@ -3839,6 +3849,27 @@ call_text = (d: int) -> str:
 # (a declaration as a Dewy program sees it: its Dewy name, `@` for a mutable parameter and Dewy
 # types, whitespace between parameters, whichever language declares it)
 dewy_call_text = (d: int) -> str:
+    saved = ts_params
+    ts_params = type_param_names(d)
+    s = dewy_call_text_in(d)
+    ts_params = saved
+    s
+
+# (a generic declaration's type parameters by their names, for its signature's types)
+type_param_names = (d: int) -> int[]:
+    out: int[]
+    loop i in [0..nkids2(d)): out.push(int(nodes[kid2(d, i)].name))
+    out
+
+# (a type of declaration d's signature, as a diagnostic shows it)
+sig_dt = (d: int, t: int) -> str:
+    saved = ts_params
+    ts_params = type_param_names(d)
+    s = dt(t)
+    ts_params = saved
+    s
+
+dewy_call_text_in = (d: int) -> str:
     nm = int(nodes[d].name)
     alt = ide_dewy_alt(nm)
     sig = fn_sig(d)
@@ -3858,11 +3889,6 @@ dewy_call_text = (d: int) -> str:
         s += pn
         if i < sig.params.len() and sig.params[i] != 0: s += ":{dt(sig.params[i])}"
     s += ")"
-    # (a generic declaration's type parameters by their names)
-    i = nkids2(d) - 1
-    loop i >= 0:
-        s = replace(s, "${i}", name_of(int(nodes[kid2(d, i)].name)))
-        i -= 1
     s
 
 # ---------------- reading values from text (lib/std/text.jo) ----------------
