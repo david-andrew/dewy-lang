@@ -5309,6 +5309,9 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if nargs == 2: arg_type(args, 1, T_STR)
         # A runtime assertion whose condition is known to fail is an error.
         if id == .runtime_assert and static_truth(args[0]) == 0: assertion_refuted(args[0], 0)
+        # Execution continues only where the condition held: narrow as after
+        # `if not cond return` (`$runtime_assert r isnt? Oops`).
+        if id == .runtime_assert: narrow_by(args[0], true)
     else if id == .static_assert:
         nargs_check(n, nargs, 1, 2, "$assert")
         captures_before = if cx >= 0: fns[int(ctxs[cx].inst)].caps.len() else: 0

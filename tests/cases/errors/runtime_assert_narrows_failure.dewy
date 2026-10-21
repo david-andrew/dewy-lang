@@ -1,0 +1,7 @@
+# exit: 101
+# A failed assertion stops before the narrowed name is used.
+Oops:type=type of error & [code:int64]
+parse=(x:int64):>int64|Oops=>if x >? 0 x else Oops[x]
+let r=parse(-2)
+$runtime_assert r isnt? Oops
+printl(r+1)

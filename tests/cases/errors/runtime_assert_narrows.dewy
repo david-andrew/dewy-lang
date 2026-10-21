@@ -1,0 +1,18 @@
+# Execution continues past `$runtime_assert` only where its condition held,
+# so a type test narrows the value for the rest of the block, as `if` does.
+Oops:type=type of error & [code:int64]
+parse=(x:int64):>int64|Oops=>if x >? 0 x else Oops[x]
+both=():>int64=>{
+    let a=parse(3)
+    let b=parse(4)
+    $runtime_assert a isnt? Oops and b isnt? Oops
+    return a*b
+}
+member=():>int64=>{
+    let r=parse(5)
+    $runtime_assert r is? int64
+    r+=1
+    return r
+}
+printl(both())
+printl(member())

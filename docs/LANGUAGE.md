@@ -2362,7 +2362,9 @@ attached debugger.
 Assertions are directives with their own argument grammar:
 `$runtime_assert condition` or `$runtime_assert condition, "message"` checks
 the condition when the program runs; a failure reports the condition (or the
-message, which may interpolate values) and exits with status 101.
+message, which may interpolate values) and exits with status 101. Its type
+tests narrow for the rest of the block, as after `if not condition return`:
+after `$runtime_assert r isnt? Oops`, `r` is its other members.
 `$assert condition [, "message"]` must be proven while compiling. The compiler
 uses constant facts and settled type tests, then executes ordinary checked code
 for closed compile-time requests. For runtime scalar values, it also uses
