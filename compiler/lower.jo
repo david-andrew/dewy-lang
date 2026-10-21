@@ -333,6 +333,9 @@ release_call = (v: int, t: int):
     else: e_call(rt("__rc_dec"), [v], -1)
 
 drop_at = (addr: int, t0: int):
+    if ownership_type(t0):
+        owner_drop(addr)
+        return
     t = quantity_base(t0)
     if not is_managed(t): return
     if ownership_type(t):
@@ -753,6 +756,7 @@ is_shared = (l: int) -> bool: int(locals[share_root(l)].flags) & LF_SHARED != 0
 # the type of what the variable's storage holds: the value, or the cell
 store_type = (l: int) -> int:
     t = int(locals[l].type)
+    if int(locals[l].flags) & LF_OWNERBORROW != 0: return mk_ptr(t)
     if is_shared(l): return mk_array(t)
     t
 
@@ -775,6 +779,7 @@ new_cell = (l: int):
 
 local_place = (l: int, write: bool) -> Place:
     f = int(locals[l].flags)
+    if f & LF_OWNERBORROW != 0: return Place(true, e_load(VI, env_v, int(locals[l].env_off), ptr_size))
     if f & LF_ALIAS != 0: return gen_place(int(locals[l].alias), write)
     if is_shared(l): return Place(true, e_addi(read_place(cell_place(l), store_type(l)), 24))
     if f & LF_CAPTURE != 0: return Place(true, e_addi(env_v, int(locals[l].env_off)))
@@ -1857,7 +1862,7 @@ env_layout = (f: int):
     if fns[f].kind == FK_LAMBDA and fns[f].target != 0:
         poly_env_layout(int(fns[f].target))
         return
-    off = 24
+    off = if ownership_callable_cap(int(fns[f].fntype)) != 0: 32 else: 24
     loop cap in fns[f].caps:
         inn = int(cap.inner)
         if is_shared(inn): check_cell_type(inn)
@@ -1924,7 +1929,7 @@ stack_closure_local = (l: int) -> bool:
         skip = LF_CONST | LF_PARAM | LF_MUTPARAM | LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_SHARED
         loop candidate in fns[cur_fn].locals:
             if int(locals[candidate].flags) & skip != 0: continue
-            if tkind(int(locals[candidate].type)) == .fn_ or tkind(int(locals[candidate].type)) == .polyfn: stack_closure_locals[candidate] = true
+            if is_fn_type(int(locals[candidate].type)) or tkind(int(locals[candidate].type)) == .polyfn: stack_closure_locals[candidate] = true
         if stack_closure_locals.len() > 0: stack_closure_uses(int(fns[cur_fn].body))
     stack_closure_locals.get(l) ?? false
 
@@ -1933,6 +1938,8 @@ gen_lambda = (e: int, stack: bool = false) -> Val:
     generic = has_flag(e, NF_GENERIC)
     if generic: f = poly_families[int(nodes[e].aux)].envfn
     env_layout(f)
+    if ownership_callable_cap(int(fns[f].fntype)) >= 3 and not stack:
+        fatal(nodes[e].pos, "borrowed owner captures require a nonescaping directly invoked local closure")
     s = new_slot(closure_size(), ptr_size)
     a = e_slot(s)
     e_store(a, 0, (if generic: e_iconst(0) else: e_faddr(lf_of_inst(f))), ptr_size)
@@ -1947,19 +1954,35 @@ gen_lambda = (e: int, stack: bool = false) -> Val:
     drop_kind = if stack: HK.stackenvdrop else: HK.envdrop
     hdr_store(env, 8, e_faddr(lf_helper(drop_kind, 0, f)))
     # The stack proof excludes all value copies; only invocation may borrow it.
-    hdr_store(env, 16, e_faddr(lf_helper(.envcopy, 0, f)))
+    resource = ownership_callable_cap(int(fns[f].fntype)) != 0
+    if resource and not ownership_copyable(int(fns[f].fntype)):
+        hdr_store(env, 16, e_iconst(0))
+    else: hdr_store(env, 16, e_faddr(lf_helper(.envcopy, 0, f)))
+    if resource:
+        hdr_store(env, 24, e_iconst(0))
+        owner_register(s, ntype(e))
+    ids: int[]
+    if copies_on: ids = copy_capture_ids(e)
+    index = 0
     loop cap in fns[f].caps:
         outer = int(cap.outer)
         inn = int(cap.inner)
+        if int(locals[inn].flags) & LF_OWNERBORROW != 0:
+            store_val(store_type(inn), env, int(locals[inn].env_off), place_addr(local_place(outer, false), int(locals[outer].type)))
+            index += 1
+            if resource: hdr_store(env, 24, e_iconst(index))
+            continue
         if is_shared(inn) and int(locals[inn].flags) & LF_VALUECAP == 0:
             # An explicit shared capture holds the original cell.
             st = store_type(outer)
             c = read_place(cell_place(outer), st)
             retain(c, st)
             store_val(st, env, int(locals[inn].env_off), c)
+            index += 1
+            if resource: hdr_store(env, 24, e_iconst(index))
             continue
         t = int(locals[outer].type)
-        id = mk_ident_local(outer, nodes[e].pos)
+        id = if copies_on: ids[index] else: mk_ident_local(outer, nodes[e].pos)
         val = own_at(id, gen_expr(id), t)
         if is_shared(inn):
             # A nested explicit capture may share this private snapshot. Give
@@ -1968,6 +1991,10 @@ gen_lambda = (e: int, stack: bool = false) -> Val:
             store_val(t, cell, 24, val.v)
             store_val(store_type(inn), env, int(locals[inn].env_off), cell)
         else: store_val(t, env, int(locals[inn].env_off), val.v)
+        if resource:
+            if ownership_type(t): owner_forget_slot(val.slot)
+            hdr_store(env, 24, e_iconst(index + 1))
+        index += 1
     Val(e_slot(s), true, s)
 
 gen_fnref = (e: int) -> Val:
@@ -7208,10 +7235,15 @@ helper_envdrop = (f: int, heap: bool = true):
             drop_at(e_addi(env, offs[i]), ntype(kid(e, i)))
     else:
         env_layout(f)
-        loop cap in fns[f].caps:
-            inn = int(cap.inner)
+        resource = ownership_callable_cap(int(fns[f].fntype)) != 0
+        loop i in [0..fns[f].caps.len()):
+            index = fns[f].caps.len() - 1 - i
+            inn = int(fns[f].caps[index].inner)
             t = store_type(inn)
-            if is_managed(t): drop_at(e_addi(env, int(locals[inn].env_off)), t)
+            if is_managed(t):
+                if resource: iff(e_bin(.gtu, VI, e_load(VI, env, 24, 8), e_iconst(index)))
+                drop_embedded(e_addi(env, int(locals[inn].env_off)), t)
+                if resource: endc()
     if heap: e_call(rt("__free"), [env], -1)
     e_ret(-1)
 
@@ -7230,10 +7262,12 @@ helper_envcopy = (f: int):
         loop cap in fns[f].caps:
             inn = int(cap.inner)
             flags = int(locals[inn].flags)
-            if flags & LF_VALUECAP != 0 and (flags & (LF_ASSIGNED | LF_EXPOSED) != 0 or is_shared(inn) or type_has_fn(int(locals[inn].type))): mutable = true
+            if flags & LF_VALUECAP != 0 and (flags & (LF_ASSIGNED | LF_EXPOSED) != 0 or is_shared(inn) or type_has_fn(int(locals[inn].type)) or ownership_type(int(locals[inn].type))): mutable = true
         if not mutable:
             retain(src, T_STR)
             return e_ret(src)
+    if ownership_callable_cap(int(fns[f].fntype)) != 0:
+        return helper_owner_envcopy(f, src)
     env = e_call(rt("__alloc"), [e_iconst(int(fns[f].env_size))], VI)
     e_copy(env, src, int(fns[f].env_size))
     hdr_store(env, 0, e_iconst(1))
@@ -7368,7 +7402,7 @@ helper_move = (t: int):
     ps = helper_params(2)
     dest = ps[0]
     source = ps[1]
-    if tkind(t) == .array or tkind(t) == .box:
+    if tkind(t) == .array or tkind(t) == .box or is_fn_type(t):
         e_copy(dest, source, tsize(t))
     else if tkind(t) == .opt:
         inner = telem(t)
@@ -7515,3 +7549,26 @@ helper_owner_boxcopy = (t: int):
     endc()
     owner_end()
     e_ret(result)
+
+helper_owner_envcopy = (f: int, src: int):
+    owner_begin()
+    t = int(fns[f].fntype)
+    env = e_call(rt("__alloc"), [e_iconst(int(fns[f].env_size))], VI)
+    e_copy(env, src, 24)
+    hdr_store(env, 0, e_iconst(1))
+    hdr_store(env, 24, e_iconst(0))
+    slot = new_temp(t)
+    e_zero(e_slot(slot), tsize(t))
+    e_store(e_slot(slot), ptr_size, env, ptr_size)
+    owner_register(slot, t)
+    loop i in [0..fns[f].caps.len()):
+        inn = int(fns[f].caps[i].inner)
+        ct = store_type(inn)
+        off = int(locals[inn].env_off)
+        value = own(Val(load_val(ct, src, off), false, -1), ct)
+        store_val(ct, env, off, value.v)
+        if ownership_type(ct): owner_forget_slot(value.slot)
+        hdr_store(env, 24, e_iconst(i + 1))
+    owner_forget_slot(slot)
+    owner_end()
+    e_ret(env)

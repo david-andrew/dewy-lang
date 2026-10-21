@@ -316,7 +316,7 @@ zonk = (t0: int) -> int:
     t = prune(t0)
     if t == 0 or not has_var(t) or types[t].kind == .var or types[t].kind == .param: return t
     k = types[t].kind
-    if k == .callable: return mk_callable_contract(zonk(int(types[t].elem)), effect_subst(int(types[t].st), [], true))
+    if k == .callable: return mk_callable_contract(zonk(int(types[t].elem)), effect_subst(int(types[t].st), [], true), int(types[t].bits))
     if k == .effect: return effect_type(effect_subst(int(types[t].st), [], true))
     if k == .refined: return mk_refined(zonk(int(types[t].elem)), ref_subst(int(types[t].st), [], true))
     if k == .quantity: return mk_quantity(zonk(int(types[t].elem)), int(types[t].st))

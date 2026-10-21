@@ -267,9 +267,13 @@ effect_decl_contract = (decl: int, params: int[]) -> int:
         if has_flag(p, NF_MUT): mask |= 1 << i
     effect_contract(decl, params, labels, mask)
 
-mk_callable_contract = (base: int, contract: int) -> int:
-    if contract == 0: return base
-    mk_type(TypeInfo(kind = .callable, elem = i32(base), st = i32(contract)), effect_contracts[contract].variables)
+mk_callable_contract = (base: int, contract: int, capability: int = 0) -> int:
+    cap = capability
+    if types[prune(base)].kind == .callable: cap = max(cap, int(types[prune(base)].bits))
+    if contract == 0 and cap == 0: return base
+    variables: int[]
+    if contract != 0: variables = effect_contracts[contract].variables
+    mk_type(TypeInfo(kind = .callable, elem = i32(callable_base(base)), st = i32(contract), bits = i32(cap)), variables)
 
 callable_base = (t0: int) -> int:
     t = prune(t0)

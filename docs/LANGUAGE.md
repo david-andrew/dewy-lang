@@ -913,10 +913,22 @@ move consumes the source and skips its outer drop. Both currently require a
 proven no-failure summary. Hooks may change the abstract value: the compiler does
 not assume their results equal their inputs. Inherited roles run once on the
 parent portion, composing the child's added fields; a declared child
-role overrides that role. Recursive/optional owners, growable resource arrays and
-dictionaries, generic hook declarations, captured or global owners, and foreign
-entry points with owners remain unsupported. Moving individual owning fields remains unsupported. Ordinary records and collections keep their existing value
-and copy-on-write behavior.
+role overrides that role. Generic records instantiate their declared hooks for
+each concrete type; structural generic records compose their fields' hooks.
+Generic functions cannot implicitly duplicate a move-only type argument.
+Global owners and foreign entry points with owners remain unsupported.
+Ordinary records and collections keep their existing value and copy-on-write behavior.
+
+A snapshot closure capture copies its value or transfers it at a proven last
+use. A move-only capture makes the closure move-only, including when stored in
+a record or array or passed through a generic function. Copying a copyable
+closure runs its captures' copy hooks; cleanup drops owned captures once, in
+reverse order. Callable conversions cannot erase these ownership restrictions.
+An explicit `$capture @owner` borrows the owner's place without taking ownership.
+Borrowed owner captures currently require a local closure used only by direct
+calls; copying or escaping such a closure is conservatively rejected. Generic
+closure literals with owner captures and partial application of owners remain
+unsupported; ordinary generic functions and nongeneric closure literals work.
 
 ```dewy
 Point:type=[x:int64 y:int64=22]

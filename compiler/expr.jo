@@ -542,6 +542,7 @@ coerce = (n: int, target: int) -> int:
         wrap_conv(n, .fixed2arr, to)
         return n
     if fk == .callable or tk == .callable:
+        if ownership_callable_cap(from) > ownership_callable_cap(to): fatal(nodes[n].pos, "callable conversion would erase capture ownership")
         if not callable_fits(from, to): fatal(nodes[n].pos, "cannot prove callable effect contract")
         wrap_conv(n, .none_, to)
         return n
@@ -1155,7 +1156,7 @@ match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int:
     if types[pat].kind == .callable:
         if not effect_match(callable_contract(a), callable_contract(pat), binds): return -1
         return match_type(callable_base(pat), callable_base(a), binds, depth)
-    if types[a].kind == .callable: a = callable_base(a)
+    if types[a].kind == .callable and types[pat].kind != .param: a = callable_base(a)
     # (inside a container a type parameter takes the elements' refinement too: array<Pos> is
     # array<T> with T a Pos, not an int64, so the instance stores and returns Pos values)
     whole = a
@@ -1282,7 +1283,7 @@ subst_partial = (pat0: int, binds: mut int[]) -> int:
         if binds[id] == 0: binds[id] = mk_var()
         return binds[id]
     if k == .array: return mk_array(subst_partial(int(types[pat].elem), binds))
-    if k == .callable: return mk_callable_contract(subst_partial(int(types[pat].elem), binds), effect_subst(int(types[pat].st), binds))
+    if k == .callable: return mk_callable_contract(subst_partial(int(types[pat].elem), binds), effect_subst(int(types[pat].st), binds), int(types[pat].bits))
     if k == .refined: return mk_refined(subst_partial(int(types[pat].elem), binds), ref_subst(int(types[pat].st), binds))
     if k == .quantity: return mk_quantity(subst_partial(int(types[pat].elem), binds), int(types[pat].st))
     if k == .fixed: return mk_fixed(subst_partial(int(types[pat].elem), binds), fixed_len(pat))
@@ -6330,6 +6331,7 @@ check_lambda = (lam: int, expected: int) -> int:
     nodes[lam].type = i32(t)
     if effects_active: t = effect_infer_callable(lam, expected)
     if callable_contract(expected) != 0 and not has_var(expected) and not effect_contract_fits(t, expected): fatal(nodes[lam].pos, "cannot prove callable effect contract")
+    t = ownership_lambda_type(t, f)
     nodes[lam].type = i32(t)
     fns[f].fntype = i32(t)
     if nodes[lam].sval != 0:
@@ -8769,6 +8771,7 @@ callable_shape_eq = (a0: int, b0: int) -> bool:
     callable_shape_eq(int(types[a].elem), int(types[b].elem))
 
 callable_fits = (from0: int, to0: int) -> bool:
+    if ownership_callable_cap(from0) > ownership_callable_cap(to0): return false
     if not effect_contract_fits(from0, to0): return false
     from = callable_base(from0)
     to = callable_base(to0)

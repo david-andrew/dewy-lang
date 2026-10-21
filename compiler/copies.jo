@@ -10,6 +10,7 @@ use 'types.jo'
 use 'expr.jo'
 use 'ir.jo'
 use 'ownership.jo'
+use 'poly_closure.jo'
 
 copies_on = false
 copy_costs: {int: int}
@@ -22,6 +23,7 @@ copy_loop_after: {int: bool}[]
 copy_loop_back: {int: bool}[]
 copy_proof_budget = -1
 copy_fields: (int, str)[] # local and field path; negative liveness keys
+copy_capture_nodes: {int: int[]} # only the function currently being lowered
 copy_noenv: {int: bool}
 
 copies_reset = ():
@@ -169,6 +171,11 @@ copy_children = (n: int) -> int[]:
 
 copy_mentions = (n: int, live: mut {int: bool}):
     if n == 0: return
+    if nodes[n].kind == .lambda:
+        f = int(nodes[n].sym)
+        if has_flag(n, NF_GENERIC): f = poly_families[int(nodes[n].aux)].envfn
+        loop cap in fns[f].caps: live[int(cap.outer)] = true
+        return
     if nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.local)):
         live[int(nodes[n].sym)] = true
     loop c in copy_children(n): copy_mentions(c, live)
@@ -223,6 +230,13 @@ copy_live = (n: int, live: mut {int: bool}):
         live.clear()
         loop l, used in edge: live[l] = used
         return
+    if k == .lambda:
+        ids = copy_capture_ids(n)
+        i = ids.len() - 1
+        loop i >= 0:
+            copy_live(ids[i], live)
+            i -= 1
+        return
     if k == .return_: live.clear()
     if k == .field:
         key = copy_field(n)
@@ -237,6 +251,7 @@ copy_live = (n: int, live: mut {int: bool}):
         l = int(nodes[n].sym)
         skip = LF_PARAM | LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE | LF_CAPTURED | LF_EXPOSED
         if copy_inputs.has(l): skip &= ~LF_PARAM
+        if ownership_type(int(locals[l].type)) and not is_shared(l) and int(locals[l].flags) & LF_ADDR == 0: skip &= ~LF_CAPTURED
         if not copy_local_live(l, live) and not copy_blocked.has(l) and int(locals[l].flags) & skip == 0:
             copy_moves[n] = true
         live[l] = true
@@ -304,6 +319,7 @@ copy_live = (n: int, live: mut {int: bool}):
 
 copies_prepare = (f: int):
     copy_moves.clear()
+    copy_capture_nodes.clear()
     copy_fields = []
     copy_blocked.clear()
     copy_noenv.clear()
@@ -450,3 +466,12 @@ copy_loop_locals = (n: int, live: mut {int: bool}):
     if n == 0: return
     if nodes[n].kind == .vardecl: copy_kill_local(int(nodes[n].sym), live)
     loop c in copy_children(n): copy_loop_locals(c, live)
+
+copy_capture_ids = (n: int) -> int[]:
+    if let ids = copy_capture_nodes.get(n): return ids
+    f = int(nodes[n].sym)
+    if has_flag(n, NF_GENERIC): f = poly_families[int(nodes[n].aux)].envfn
+    ids: int[]
+    loop cap in fns[f].caps: ids.push(mk_ident_local(int(cap.outer), nodes[n].pos))
+    copy_capture_nodes[n] = ids
+    ids

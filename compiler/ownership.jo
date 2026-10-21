@@ -21,7 +21,7 @@ owner_map_copies: {int: int}
 
 ownership_declare = (decl: int, hook: int, role: int):
     if nkids(hook) != 1: fatal(nodes[hook].pos, "lifecycle hooks have no explicit parameters")
-    if nkids2(decl) != 0 or nkids2(hook) != 0: fatal(nodes[hook].pos, "generic lifecycle hooks require aggregate ownership support")
+    if nkids2(hook) != nkids2(decl): fatal(nodes[hook].pos, "lifecycle hooks cannot declare additional type parameters")
     key = decl * 4 + role
     if ownership_decls.has(key):
         name = if role == 1: "drop" else if role == 2: "copy" else: "move"
@@ -30,27 +30,49 @@ ownership_declare = (decl: int, hook: int, role: int):
     ownership_hooks[hook] = role
     add_flag(kid(hook, 0), NF_MUT)
 
+ownership_finalize_hook = (f: int):
+    hook = int(fns[f].decl)
+    check_fn_body(f)
+    role = ownership_hooks[hook]
+    if role == 1 and int(fns[f].ret) != T_VOID: fatal(nodes[hook].pos, "a $__drop__ hook must return void")
+    t = prune(fns[f].ptypes[0])
+    if tkind(t) != .struct_: fatal(nodes[hook].pos, "a lifecycle receiver must be nominal")
+    layout(t)
+    si = int(types[t].st)
+    loop i in [0..int(structs[si].nfields)):
+        ft = field_store_type(int(structs[si].fields) + i)
+        if not ownership_layout(ft): fatal(nodes[hook].pos, "resource fields currently require an inline record layout")
+    if role != 1 and prune(int(fns[f].ret)) != t: fatal(nodes[hook].pos, "copy and move hooks must return the same nominal type")
+    if role == 1: structs[si].drop_fn = i32(f)
+    else if role == 2: ownership_copies[t] = f
+    else: ownership_moves[t] = f
+    types[t].flags |= i32(TF_MANAGED)
+
 ownership_finalize = ():
     if ownership_decls.len() == 0: return
     hooks: int[]
-    loop decl, hook in ownership_decls:
-        f = get_fn_inst(hook, [], nodes[hook].pos)
-        check_fn_body(f)
-        role = ownership_hooks[hook]
-        if role == 1 and int(fns[f].ret) != T_VOID: fatal(nodes[hook].pos, "a $__drop__ hook must return void")
-        hooks.push(f)
-        t = prune(fns[f].ptypes[0])
-        if tkind(t) != .struct_: fatal(nodes[hook].pos, "a lifecycle receiver must be nominal")
-        layout(t)
+    loop key, hook in ownership_decls:
+        if nkids2(hook) == 0: hooks.push(get_fn_inst(hook, [], nodes[hook].pos))
+    # Instantiation may discover further concrete records in hook bodies.
+    next_hook = 0
+    next_type = 1
+    loop next_hook < hooks.len() or next_type < types.len():
+        if next_hook < hooks.len():
+            ownership_finalize_hook(hooks[next_hook])
+            next_hook += 1
+            continue
+        t = next_type
+        next_type += 1
+        if types[t].kind != .struct_ or has_var(t): continue
         si = int(types[t].st)
-        loop i in [0..int(structs[si].nfields)):
-            ft = field_store_type(int(structs[si].fields) + i)
-            if not ownership_layout(ft): fatal(nodes[hook].pos, "resource fields currently require an inline record layout")
-        if role != 1 and prune(int(fns[f].ret)) != t: fatal(nodes[hook].pos, "copy and move hooks must return the same nominal type")
-        if role == 1: structs[si].drop_fn = i32(f)
-        else if role == 2: ownership_copies[t] = f
-        else: ownership_moves[t] = f
-        types[t].flags |= i32(TF_MANAGED)
+        decl = int(structs[si].decl)
+        if decl == 0 or nkids2(decl) == 0: continue
+        args: int[]
+        loop i in [0..int(structs[si].ntargs)): args.push(struct_targ(si, i))
+        loop role in [1..4):
+            if let hook = ownership_decls.get(decl * 4 + role):
+                f = get_fn_inst(hook, args, nodes[hook].pos)
+                if not hooks.contains(f): hooks.push(f)
     loop child, parent in nominal_parent:
         ownership_inherit(child)
     ownership_contained.clear()
@@ -93,6 +115,7 @@ ownership_nominal = (t0: int) -> bool:
 ownership_type = (t0: int) -> bool:
     if ownership_decls.len() == 0: return false
     t = prune(t0)
+    if ownership_callable_cap(t) != 0: return true
     (types[t].kind == .struct_ or types[t].kind == .fixed or types[t].kind == .array or types[t].kind == .opt or types[t].kind == .box) and ownership_contains(t)
 
 # The call plan records incoming owners separately from borrowed place inputs.
@@ -260,6 +283,7 @@ owner_drop = (addr: int):
 ownership_contained: {int: bool}
 ownership_contains = (t0: int) -> bool:
     t = prune(t0)
+    if ownership_callable_cap(t) != 0: return true
     if ownership_nominal(t): return true
     if let found = ownership_contained.get(t): return found
     ownership_contained[t] = false
@@ -294,6 +318,12 @@ ownership_validate_node = (n: int, f: int):
     if ownership_type(t) and not ownership_layout(t):
         fatal(nodes[n].pos, "resource fields currently require an inline record layout")
     k = nodes[n].kind
+    if k == .partial:
+        if nodes[n].a != 0 and ownership_type(ntype(int(nodes[n].a))):
+            fatal(nodes[n].pos, "partial application of owners requires a consuming callback plan; use a function literal")
+        loop i in [0..nkids(n)):
+            if ownership_type(ntype(kid(n, i))):
+                fatal(nodes[n].pos, "partial application of owners requires a consuming callback plan; use a function literal")
     if k == .array and tkind(t) == .fixed and ownership_type(t):
         if nkids(n) == 0 and fixed_len(t) > 0:
             fatal(nodes[n].pos, "owning array elements require completed construction")
@@ -321,7 +351,7 @@ ownership_validate_node = (n: int, f: int):
         target = int(nodes[n].a)
         if nodes[target].kind == .ident and nodes[target].aux == i32(int(SK.local)):
             l = int(nodes[target].sym)
-            if int(locals[l].flags) & (LF_MUTPARAM | LF_ALIAS | LF_BYREF) != 0:
+            if int(locals[l].flags) & (LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE) != 0:
                 fatal(nodes[n].pos, "cannot replace a borrowed owner")
         else if nodes[target].kind != .index or tkind(ntype(int(nodes[target].a))) != .array:
             fatal(nodes[n].pos, "owner replacement requires a whole local or growable array element")
@@ -344,7 +374,9 @@ ownership_validate = ():
             t = int(locals[l].type)
             if not ownership_contains(t): continue
             if not ownership_type(t): fatal(locals[l].pos, "resource containers require aggregate ownership support")
-            if int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED) != 0:
+            if int(locals[l].flags) & LF_CAPTURE != 0 and ownership_callable_cap(int(fns[f].fntype)) == 0:
+                fatal(locals[l].pos, "this callable requires a checked ownership capability")
+            if int(locals[l].flags) & LF_SHARED != 0:
                 fatal(locals[l].pos, "captured owners require closure ownership support")
         ownership_validate_node(int(fns[f].body), f)
 
@@ -427,6 +459,7 @@ ownership_declared = (decl: int) -> bool:
 
 ownership_copyable = (t0: int, seen: int[] = []) -> bool:
     t = prune(t0)
+    if ownership_callable_cap(t) != 0: return ownership_callable_cap(t) == 1 or ownership_callable_cap(t) == 3
     if seen.contains(t): return true
     let seen = seen
     seen.push(t)
@@ -444,6 +477,7 @@ ownership_copyable = (t0: int, seen: int[] = []) -> bool:
 
 ownership_inline = (t0: int, depth: int = 0) -> bool:
     t = prune(t0)
+    if ownership_callable_cap(t) != 0: return true
     if effect_scalar(t) or tkind(t) == .float_: return true
     if depth > 32: return false
     if tkind(t) == .fixed or tkind(t) == .opt: return ownership_inline(telem(t), depth + 1)
@@ -459,6 +493,7 @@ ownership_inline = (t0: int, depth: int = 0) -> bool:
 # than the finalized lowering IDs, keeping ordinary COW values unchanged.
 ownership_fact_type = (t0: int, depth: int = 0) -> bool:
     t = representation_type(t0)
+    if ownership_callable_cap(t) != 0: return true
     if depth > 32: return true
     if tkind(t) == .fixed or tkind(t) == .array or tkind(t) == .opt or tkind(t) == .box: return ownership_fact_type(telem(t), depth + 1)
     if tkind(t) != .struct_: return false
@@ -498,6 +533,7 @@ ownership_layout = (t0: int, depth: int = 0, seen: int[] = []) -> bool:
         if ownership_type(telem(t)): return ownership_inline(telem(t))
         return ownership_layout(telem(t), depth + 1, seen)
     if k == .fixed: return ownership_inline(telem(t), depth + 1)
+    if ownership_callable_cap(t) != 0: return true
     if k == .str_ or effect_scalar(t) or k == .float_: return true
     if k != .struct_: return false
     loop field in field_list(t):
@@ -505,3 +541,57 @@ ownership_layout = (t0: int, depth: int = 0, seen: int[] = []) -> bool:
         if not is_map_type(t) and (fk == .array or fk == .str_): return false
         if not ownership_layout(field.0, depth + 1, seen): return false
     true
+
+# Callable capability: 0 ordinary, 1 owning/copyable, 2 owning/move-only.
+# Adding 2 marks a nonescaping borrowed owner capture.
+# It is part of type identity, never the function signature or environment ABI.
+ownership_callable_cap = (t0: int) -> int:
+    t = prune(t0)
+    if types[t].kind == .callable: return int(types[t].bits)
+    0
+
+ownership_decl_copyable = (t0: int, seen: int[] = []) -> bool:
+    t = prune(t0)
+    if ownership_callable_cap(t) != 0: return ownership_callable_cap(t) == 1 or ownership_callable_cap(t) == 3
+    if seen.contains(t): return true
+    let seen = seen
+    seen.push(t)
+    k = tkind(t)
+    if k == .array or k == .fixed or k == .box or k == .opt: return ownership_decl_copyable(telem(t), seen)
+    if k != .struct_: return true
+    si = int(types[t].st)
+    decl = int(structs[si].decl)
+    if ownership_decls.has(decl * 4 + 2): return true
+    parent = nominal_parent.get(t) ?? 0
+    copy_parent = parent
+    loop copy_parent != 0:
+        pd = int(structs[int(types[copy_parent].st)].decl)
+        if ownership_decls.has(pd * 4 + 2): break
+        copy_parent = nominal_parent.get(copy_parent) ?? 0
+    first = 0
+    if copy_parent != 0:
+        layout(copy_parent)
+        first = int(structs[int(types[copy_parent].st)].nfields)
+    else:
+        if ownership_decls.has(decl * 4 + 1): return false
+        if parent != 0 and not ownership_decl_copyable(parent, seen): return false
+    fs = field_list(t)
+    loop i in [first..fs.len()):
+        if not ownership_decl_copyable(fs[i].0, seen): return false
+    true
+
+ownership_lambda_type = (t: int, f: int) -> int:
+    if ownership_decls.len() == 0: return t
+    capability = 0
+    borrowed = false
+    loop capture in fns[f].caps:
+        l = int(capture.inner)
+        if int(locals[l].flags) & LF_OWNERBORROW != 0: borrowed = true
+        if int(locals[l].flags) & LF_VALUECAP == 0: continue
+        ct = int(locals[l].type)
+        if ownership_callable_cap(ct) != 0 or ownership_fact_type(ct):
+            capability = max(capability, if ownership_decl_copyable(ct): 1 else: 2)
+            if ownership_callable_cap(ct) >= 3: borrowed = true
+    if borrowed: capability = max(1, capability) + 2
+    if capability == 0: return t
+    mk_callable_contract(t, callable_contract(t), capability)
