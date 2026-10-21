@@ -992,7 +992,9 @@ dw_param = (id: int, kind: NK) -> int:
     if dewy_syntax[dw_unwrap(lhs)].kind == .metatag: return dw_metatag_fail(dw_unwrap(lhs))
     name = dw_name(lhs)
     pattern = kind == .param and dewy_syntax[lhs].kind == .block and dewy_syntax[lhs].text == "[]:"
-    if name == "" and not pattern: return dw_fail(lhs, "this parameter or field")
+    if name == "" and not pattern:
+        if dw_has_comma(id): return dw_comma_fail(lhs)
+        return dw_fail(lhs, "this parameter or field")
     if pattern and by_place: return dw_fail(lhs, "unpacking a mutable parameter; use a named @ parameter")
     n = mk(kind, pos)
     if pattern:
@@ -1153,6 +1155,8 @@ dw_binary_token = (op: DewyToken, id: int) -> Tok:
         kw_xor: .caret
         _:
             if op == .colon and dw_in_interpolation == 0: fatal(dewy_syntax[id].pos, "`:` gives a type here (`x:int64`), not a value: a slice is a range in the brackets, `xs[1..3)`, and a dictionary entry is `key -> value`")
+            # (Python's `for x in xs` and `if x in xs`)
+            if op == .kw_in and dw_in_interpolation == 0: fatal(dewy_syntax[id].pos, "`in` names a loop's values, as in `loop item in items \{ ... }`; membership is `in?`, as in `if x in? xs \{ ... }`")
             dw_fail(id, "operator '{dn_token_text(op)}'")
             .eof
 
@@ -1515,6 +1519,7 @@ dw_expr = (id: int) -> int:
         nodes[n].a = i32(dw_expr(left))
         nodes[n].b = i32(if op == .contains: dw_membership(right) else: dw_expr(right))
         return n
+    if k == .flat and dw_op(id) == .comma: return dw_comma_fail(id)
     return dw_fail(id, "syntax '{dw_kind_name(k)}'")
 
 dw_stmt = (id: int, top: bool = false) -> int:
@@ -1654,7 +1659,15 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         if not top: dw_shadow(dw_bound_names(kids(n)))
         return n
     name = dw_name(lhs)
-    if name == "": return dw_fail(lhs, "this declaration")
+    if name == "":
+        word = dw_leftmost_name(lhs)
+        # (or the word just before: `def main():` is `def` then `main(): ...`)
+        at = pos_off(dewy_syntax[lhs].pos)
+        src = files[pos_file(dewy_syntax[lhs].pos)].src
+        loop w in ["def ", "function ", "fn ", "func "]:
+            if at >= len(w) and src[at - len(w)..at) == w: word = trim(w)
+        if word == "def" or word == "function" or word == "fn" or word == "func": fatal(dewy_syntax[lhs].pos, "a function is a value bound to its name: `main = () => \{ ... }`, `add = (a:int64 b:int64) => a + b`")
+        return dw_fail(lhs, "this declaration")
     if not top and initial != 0 and dw_overload_group(initial):
         return dw_fail(initial, "a local overload group; declare it at module level")
     if initial != 0 and dw_op(initial) == .function:
@@ -1960,7 +1973,9 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
                 set_list(pattern, binders)
                 binders = [pattern]
         else:
-            if dw_name(binder) == "": return dw_fail(binder, "this loop binding")
+            if dw_name(binder) == "":
+                if dw_op(binder) == .comma: fatal(dewy_syntax[binder].pos, "several loop names go in brackets: `loop [key value] in pairs \{ ... }`")
+                return dw_fail(binder, "this loop binding")
             dw_shadow([int(dw_name_id(binder))])
             binders.push(dw_expr(binder))
         set_list(n, binders)
@@ -2031,6 +2046,29 @@ dw_arm_fail = (source: int) -> int:
     if (op == .assign or dn_token_assignment(op)) and dw_op(dw_child(source, 1)) == .function:
         fatal(dewy_syntax[source].pos, "an arm whose body assigns needs braces, `pattern => \{target = value}`: `=` binds more loosely than `=>`, so without them the whole arm is the assignment's target")
     dw_fail(source, "a match arm without =>")
+
+# (a comma outside brackets anywhere in this tree)
+dw_has_comma = (id: int) -> bool:
+    let id = dw_unwrap(id)
+    if dw_op(id) == .comma: return true
+    k = dewy_syntax[id].kind
+    if k != .binary and k != .prefix and k != .postfix and k != .flat: return false
+    loop i in [1..dw_nchildren(id)):
+        c = dw_child(id, i)
+        if c != 0 and dw_has_comma(c): return true
+    false
+
+# (`def main():`: the first word of a juxtaposition or call)
+dw_leftmost_name = (id: int) -> str:
+    let id = dw_unwrap(id)
+    loop dewy_syntax[id].kind == .binary or dewy_syntax[id].kind == .postfix:
+        id = dw_unwrap(dw_child(id, 1))
+    dw_name(id)
+
+# (Python's and C's `f(1, 2)`, `[1, 2]` and `(a, b)`)
+dw_comma_fail = (id: int) -> int:
+    fatal(dewy_syntax[id].pos, "Dewy separates arguments, parameters and elements with spaces, not commas: `add(1 2)`, `(a:int64 b:int64) => ...`, `[1 2 3]` (a comma steps a range, as in `[0,2..10]`)")
+    0
 
 dw_match = (id: int, accumulator: int = 0, map: bool = false) -> int:
     n = mk(.match_, dewy_syntax[id].pos)

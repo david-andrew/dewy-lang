@@ -691,7 +691,12 @@ dn_flow = () -> int:
         keyword = dn_take()
         key = dn_node(.keyword, dn_token_text(keyword.symbol), keyword.start)
         condition = if keyword.symbol == .kw_loop: dn_expr(0) else: dn_value(0)
-        if not dn_can_start(): dn_error(dn_tokens[dn_at].start, "expected a body after '{dn_token_text(keyword.symbol)}'")
+        if not dn_can_start():
+            next = dn_peek()
+            habit = ""
+            if next == .gt or next == .lt or next == .rangle or next == .ge or next == .le: habit = " (comparisons end with `?`: `x >? y`, `x <=? y`)"
+            else if dw_op(condition) == .colon: habit = " (a condition takes no colon: its body goes in braces, `{dn_token_text(keyword.symbol)} x >? 3 \{ ... }`)"
+            dn_error(dn_tokens[dn_at].start, "expected a body after '{dn_token_text(keyword.symbol)}'{habit}")
         body = dn_expr(0)
         arms.push(dn_node(.keyword_expr, "", keyword.start, [key, condition, body]))
         if not dn_accept(.kw_else): break
@@ -784,8 +789,23 @@ dn_atom = () -> int:
         # (xs[1:], xs[::-1]: Python's slices)
         after_colon = symbol == .colon or dn_at >= 2 and dn_tokens[dn_at - 2].symbol == .colon
         if after_colon and (symbol == .colon or symbol == .rbrack): return dn_error(token.start, "expected an expression, found '{text}' (a slice is a range in the brackets: `xs[1..]`, `xs[..n)`, `xs[a..b)`; `xs.reversed()` reverses; `:` gives a type)")
-        return dn_error(token.start, "expected an expression, found '{text}'")
+        habit = dn_operator_habit(text)
+        return dn_error(token.start, "expected an expression, found '{text}'{habit}")
     dn_node(token.kind, text, token.start, name = token.name)
+
+# Other languages' operators, where the expression stopped at `text`: `!x`,
+# `a && b`, `a == b`, `x > 3`, `i++`.
+dn_operator_habit = (text: str) -> str:
+    previous = if dn_at >= 2: dn_tokens[dn_at - 2].symbol else: DewyToken.none
+    adjacent = dn_at >= 2 and not dn_tokens[dn_at - 1].space
+    if text == "!": return " (`not x` negates, and `x not=? y` asks whether two values differ)"
+    if text == "&" and previous == .amp and adjacent: return " (`and` joins conditions: `a and b`)"
+    if text == "|" and previous == .pipe and adjacent: return " (`or` joins conditions: `a or b`)"
+    if text == "=" and (previous == .assign or previous == .eq) and adjacent: return " (`=?` compares: `x =? y`; `=` gives a value)"
+    if text == ">" or text == "<" or text == ">=" or text == "<=": return " (comparisons end with `?`: `x >? y`, `x <=? y`)"
+    if previous == .plus and dn_at >= 3 and dn_tokens[dn_at - 3].symbol == .plus: return " (`x += 1` adds one)"
+    if previous == .minus and dn_at >= 3 and dn_tokens[dn_at - 3].symbol == .minus: return " (`x -= 1` takes one away)"
+    ""
 
 dn_expr = (minimum: int) -> int:
     dn_depth += 1
