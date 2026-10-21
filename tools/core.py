@@ -198,6 +198,11 @@ def test(binary: Path, arguments: list[str], quick: bool) -> int:
             selected += len(programs)
             if programs:
                 failed = ladder.run(binary, keyword=keyword, workers=count or 1, scoreboard=False) != 0 or failed
+        if not quick and not keyword and not (failed and not every):
+            # The website's published examples (a few seconds): language changes must not break them.
+            site = subprocess.call([sys.executable, str(ROOT / 'site/scripts/check_dewy_examples.py'),
+                                    '--compiler', str(binary), '--scratch', str(CACHE / 'site-examples')], cwd=ROOT)
+            failed = site != 0 or failed
         if failed and not every:
             return 1
     python = ROOT / '.venv/bin/python'
