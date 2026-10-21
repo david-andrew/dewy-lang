@@ -1,0 +1,6 @@
+total=(m:dict<string int64> xs:array<int64>):>int64=>{
+    let t:int64=0
+    loop [k v] in m and x in xs { t=t+v+x }
+    return t
+}
+main=()=>{ printl(total(["a"->1] [1 2])) }

@@ -44,6 +44,24 @@ wit_op = (op: Tok) -> str:
     if op == .eq: return "=?"
     "not=?"
 
+# A name the loop lowering made up (its snapshot, position, flags and range
+# counters): never shown to the user.
+wit_hidden_name = (name: str) -> bool:
+    if starts_with(name, "$"): return true
+    loop prefix in ["__s", "__k", "__ix", "__each", "__has"]:
+        if starts_with(name, prefix) and name.len() > prefix.len():
+            c = name[prefix.len()]
+            if c >= '0' and c <= '9': return true
+    false
+
+# A read the loop lowering made: an index whose base or position is hidden.
+wit_hidden_read = (n: int) -> bool:
+    loop side in [int(nodes[n].a), int(nodes[n].b)]:
+        e = side
+        loop e > 0 and (nodes[e].kind == .narrow or nodes[e].kind == .conv): e = int(nodes[e].a)
+        if e > 0 and nodes[e].kind == .ident and nodes[e].name != 0 and wit_hidden_name(name_of(int(nodes[e].name))): return true
+    false
+
 # The spelling of a simple place or literal; "" for anything else.
 wit_text = (e0: int, depth: int = 0) -> str:
     e = e0
@@ -51,7 +69,9 @@ wit_text = (e0: int, depth: int = 0) -> str:
     loop nodes[e].kind == .narrow or nodes[e].kind == .conv and (nodes[e].aux == i32(int(CV.int_)) or nodes[e].aux == i32(int(CV.none_)) or nodes[e].aux == i32(int(CV.refinement))):
         e = int(nodes[e].a)
     k = nodes[e].kind
-    if k == .ident and nodes[e].name != 0: return name_of(int(nodes[e].name))
+    if k == .ident and nodes[e].name != 0:
+        name = name_of(int(nodes[e].name))
+        return if wit_hidden_name(name): "" else: name
     if k == .int_lit and not has_flag(e, NF_U64): return "{nodes[e].ival}"
     if k == .field and nodes[e].aux >= 0:
         base = wit_text(int(nodes[e].a), depth + 1)
@@ -374,6 +394,9 @@ wit_assertion = (cond: int, message: int, paths: FactPaths, entry: FactState):
 wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int):
     a = int(nodes[n].a)
     base = wit_text(a)
+    # A loop's own element read is described as such, never by its lowering.
+    read = "index"
+    if wit_hidden_read(n): read = if base != "": "the loop's read of `{base}`" else: "the loop's element read"
     i = wit_side(index, int(nodes[n].b))
     zero = WitSide(fact_constant(s, 0), 0, "0", false, true)
     size = WitSide(length, a, (if base != "": "{base}.length" else: ""), true)
@@ -383,10 +406,10 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
         else: wit_relation(s, s, .lt, i, size, true)
         wit_context(0)
         wit_help(relation)
-        fatal(nodes[n].pos, "index is not in bounds")
+        fatal(nodes[n].pos, "{read} is not in bounds")
     b = fact_bound(s, index)
     if b.reason == .unsupported or b.reason == .wrap or b.reason == .budget or b.reason == .callee:
-        wit_unknown(n, b, "index is in bounds", 0, relation)
+        wit_unknown(n, b, "{read} is in bounds", 0, relation)
     if lo != 1: wit_relation(s, s, .ge, i, zero, false, "lower bound")
     if hi != 1:
         wit_relation(s, s, .lt, i, size, false, "upper bound")
@@ -395,7 +418,7 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
     wit_context(0)
     wit_help(relation)
     which = if lo != 1 and hi != 1: "lower and upper bounds" else if lo != 1: "lower bound" else: "upper bound"
-    fatal(nodes[n].pos, "cannot prove index is in bounds: missing {which}")
+    fatal(nodes[n].pos, "cannot prove {read} is in bounds: missing {which}")
 
 wit_divisor = (n: int, s: FactState, divisor: int, zero: int, operand: int, refuted: bool):
     side = wit_side(divisor, operand)
