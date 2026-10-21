@@ -1518,7 +1518,8 @@ if 7 not in? visited {visited.push(7) printl"first visit"}
 `set<T>` supplies the element type for an empty literal or narrower numeric
 members. Function parameters provide the same context. `set[loop ...]` and
 `set[values...]` also work, with arrays or sets as spread operands. For example,
-`set[existing... "new"]` preserves the first occurrence of each member, and
+`set[existing... "new"]` preserves the first occurrence of each member,
+`set(values)` makes the set of an array's elements, and
 `[existing...]` collects a set's members into an array. `push` adds a member.
 Adding an existing member leaves its position unchanged. `remove(value)`
 returns whether it removed a member, while `clear()` and `reserve(count)` work

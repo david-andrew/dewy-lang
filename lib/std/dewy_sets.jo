@@ -12,6 +12,9 @@ __dewy_make_set[T] = (values: T[]) -> Set[T]:
     result._tail = result._entries.__keys.len()
     result
 
+# set(values): the set of an array's elements, in first-occurrence order
+set[T] = (values: T[]) -> Set[T]: __dewy_make_set(values)
+
 __dewy_set_values[T] = (s: Set[T]) -> T[]: s._entries.keys()
 len[T] = (s: Set[T]) -> int: s._entries.len()
 is_empty[T] = (s: Set[T]) -> bool: s._entries.is_empty()
