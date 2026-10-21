@@ -26,15 +26,12 @@ GPT quota is limited: at most one Astra stream, at medium effort; Sol for review
 only.
 
 - Astra: refinement slice 5 (`$proof`; ladder 71).
-- Opus: small items below (printing, methods follow-ups).
+- Opus: small items below.
 
 ## Next
 
 - Tier-3 implementation (designed, no decisions needed):
-  - refinement slices 5–6 (1–4 landed): checked proofs, diagnostics. Also a bug:
-    an internal compiler error ("missing refinement entry snapshot") when a
-    dependent optional result is compared with a literal. The remaining slices:
-    joins/loops, checked proofs, diagnostics;
+  - refinement slices 5–6 (1–4 landed): checked proofs, diagnostics;
   - effect rows slices 3, 5–6 (1–2 and 4 landed; ~/dev/tmp/coord/effects-design.md);
   - ownership slices 2, 4–6 (1, drop hooks and moves, and 3, `$lend`, landed):
     custom copy/move hooks, resource containers, arenas
@@ -62,12 +59,16 @@ only.
 - Recover the game-panel compile cost of mathematical `int` (+5.7%, accepted
   10-20); the frontend work recovered the synthetic panel's share.
 - Small items:
-  - the remaining Jo-shaped hints in diagnostics;
-  - printing an array of refined arrays fails (`__dewy_fmt` type mismatch);
-  - methods follow-ups: members inherited across modules; static calls
-    through a type value; `type of any` parents;
-  - delete `restart/sloppy-frontend` and its publish-policy entry once the
-    bigint task lands.
+  - diagnostics show type parameters as `$0` (`Set<$0>`); `x.push(1)` on an
+    `int64` blames `Set`'s push;
+  - `match` with `else` over a minted family warns the arm is unused;
+  - `dict<string array<Nat>>` fails on unchecked zero initialization
+    (`lib/core/map.jo:331`);
+  - `xs.len()` compiles in Dewy (one spelling: `.length`);
+  - `let e = E` with all fields defaulted is rejected (the design constructs);
+  - static calls through runtime `type<T>` values (needs type values);
+  - effects slice 4 follow-ups: conditional capacity/uniqueness proofs,
+    complete late-operation verification.
 
 ## Decided (David)
 
