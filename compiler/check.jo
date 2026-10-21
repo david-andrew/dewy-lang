@@ -618,7 +618,12 @@ DEWY_HABITS = ["float", "`float64` (and `to_float(s)` for text)", "double", "`fl
     "os", "the plain functions: `read_text`, `list_directory`, `run`, `env`, and paths, `p\"dir/file\"`",
     "isinstance", "`x is? T` (which member of a union x holds)", "Number", "`to_float(s)` (none when it is not a number) or `float64(x)`",
     "list_files", "`list_directory(path)`", "list_dir", "`list_directory(path)`",
-    "copy", "nothing: `ys = xs` copies (arrays and records are values)", "clone", "nothing: `ys = xs` copies (arrays and records are values)", "deep_copy", "nothing: `ys = xs` copies (arrays and records are values)"]
+    "copy", "nothing: `ys = xs` copies (arrays and records are values)", "clone", "nothing: `ys = xs` copies (arrays and records are values)", "deep_copy", "nothing: `ys = xs` copies (arrays and records are values)",
+    "ljust", "`format(s \"<10\")`", "rjust", "`format(s \">10\")`", "center", "`format(s \"^10\")`", "zfill", "`format(n \"05\")`",
+    "removeprefix", "a slice after checking `s.startswith(p)`: `s[p.length..]`", "removesuffix", "a slice after checking `s.endswith(p)`: `s[..s.length - p.length)`",
+    "isEmpty", "`.length =? 0`", "isdigit", "a regular expression, `s.matches(regex(r\"\\d+\"))`, or `to_int(s) isnt? none`", "isalpha", "a regular expression: `s.matches(regex(r\"[a-zA-Z]+\"))`",
+    "isspace", "`s.trim() =? \"\"`", "ord", "`bytes(c)[0]` (the first UTF-8 byte; `chr(n)` goes back)", "setdefault", "`if k not in? m \{m[k] = v}`",
+    "str", "`string(x)`", "float", "`float64(x)`, or `to_float(s)` for text", "items", "`loop [key value] in m \{ ... }`"]
 
 DEWY_MAP_HABITS = ["size", "`m.length`", "length", "`m.length`", "has_key", "`m.has(k)` or `k in? m`", "containsKey", "`m.has(k)` or `k in? m`",
     "items", "`loop [key value] in m \{ ... }`", "forEach", "`loop [key value] in m \{ ... }`"]

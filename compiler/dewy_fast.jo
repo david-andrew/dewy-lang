@@ -777,7 +777,11 @@ dn_atom = () -> int:
     text = dn_payload(token)
     if text == "type" and dn_accept(.kw_of):
         return dn_op_node(.prefix, .kw_of, token.start, [0, dn_expr(91)])
-    if token.kind == .op: return dn_error(token.start, "expected an expression, found '{text}'")
+    if token.kind == .op:
+        # (xs[1:], xs[::-1]: Python's slices)
+        after_colon = symbol == .colon or dn_at >= 2 and dn_tokens[dn_at - 2].symbol == .colon
+        if after_colon and (symbol == .colon or symbol == .rbrack): return dn_error(token.start, "expected an expression, found '{text}' (a slice is a range in the brackets: `xs[1..]`, `xs[..n)`, `xs[a..b)`; `xs.reversed()` reverses; `:` gives a type)")
+        return dn_error(token.start, "expected an expression, found '{text}'")
     dn_node(token.kind, text, token.start, name = token.name)
 
 dn_expr = (minimum: int) -> int:

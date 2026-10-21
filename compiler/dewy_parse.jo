@@ -1082,6 +1082,7 @@ dw_binary_token = (op: DewyToken, id: int) -> Tok:
         kw_or, pipe: .pipe
         kw_xor: .caret
         _:
+            if op == .colon and dw_in_interpolation == 0: fatal(dewy_syntax[id].pos, "`:` gives a type here (`x:int64`), not a value: a slice is a range in the brackets, `xs[1..3)`, and a dictionary entry is `key -> value`")
             dw_fail(id, "operator '{dn_token_text(op)}'")
             .eof
 

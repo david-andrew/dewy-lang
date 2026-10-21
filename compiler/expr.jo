@@ -2119,6 +2119,17 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         # (x.push(1) with x an int64: no function of the name takes such an object, so it has no such member)
         if ufcs and not recv_fits and last_err_arg == 1 and caller_dewy() and nodes[unnamed(args[0])].type != 0:
             fatal(nodes[n].pos, "{dt(ntype(unnamed(args[0])))} has no member '{name_of(name)}'")
+        # (an operator the library implements with a function: told as the operator)
+        opn = dewy_operator_fn_text(name_of(name))
+        if len(opn) > 0 and caller_dewy():
+            ots = ""
+            loop i in 0.. and a0 in args:
+                if i > 0: ots += " and "
+                ots += if nodes[unnamed(a0)].type != 0: dt(ntype(unnamed(a0))) else: "?"
+            oh = ""
+            if opn == "%" and args.len() > 0 and nodes[unnamed(args[0])].type != 0 and tkind(prune(ntype(unnamed(args[0])))) == .str_:
+                oh = " (text is formatted by interpolation, `\"{{count}} items\"`, or `format(value \".2f\")`)"
+            fatal(nodes[n].pos, "`{opn}` does not work on {ots}{oh}")
         if decls.len() > 1:
             # (when none fits, the program's own function is the one meant: its error is the one shown)
             own: int[]
@@ -4147,6 +4158,14 @@ cmp_error = (n: int, ta: int, tb: int):
     fatal(nodes[n].pos, "cannot compare {dt(ta)} with {dt(tb)}{why}")
 
 # "space" given where a Key goes: " (write `.space`)"
+# the operator a library function implements, for diagnostics ("" when it is no operator)
+dewy_operator_fn_text = (name: str) -> str:
+    if name == "__floor_mod" or name == "__floor_mod_pow2": return "%"
+    if name == "__floor_div" or name == "__floor_div_pow2": return "//"
+    if name == "__dewy_power": return "^"
+    if name == "__dewy_divide": return "/"
+    ""
+
 # (an exact fraction where a float is wanted, or the other way, through arrays: decimal
 # literals such as 0.0 are fractions unless a floating type is written)
 rational_float_mismatch = (from0: int, to0: int) -> bool:
