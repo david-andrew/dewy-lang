@@ -1,0 +1,13 @@
+Row:type=[id:int64 revision:int64]
+Database:type=[primary:Row secondary:Row generation:int64]
+revise=(@row:Row revision:int64):>void & mutates<row.revision>=>{row.revision=revision}
+commit=(@db:Database revision:int64):>void & mutates<db.secondary.revision>=>{
+    revise(@db.secondary revision)
+}
+main=():>int64=>{
+    let db=Database[Row[7 1] Row[8 1] 99]
+    let snapshot=db
+    commit(@db 2)
+    printl"{db.primary.revision} {db.secondary.revision} {snapshot.secondary.revision} {db.generation}"
+    return 0
+}

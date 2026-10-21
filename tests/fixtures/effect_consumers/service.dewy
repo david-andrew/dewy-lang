@@ -1,0 +1,12 @@
+Metrics:type=[accepted:int64 rejected:int64]
+Service:type=[metrics:Metrics epoch:int64]
+record=(@count:int64):>void & reads<count> & mutates<count>=>{count+=1}
+accept=(@service:Service):>void & reads<service.metrics.accepted> & mutates<service.metrics.accepted>=>{
+    record(@service.metrics.accepted)
+}
+main=():>int64=>{
+    let service=Service[Metrics[8 2] 42]
+    accept(@service)
+    printl"{service.metrics.accepted} {service.metrics.rejected} {service.epoch}"
+    return 0
+}
