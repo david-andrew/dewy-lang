@@ -3314,8 +3314,9 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
         if indexed and not has_flag(args[0], NF_CHECKED):
             check_expr(args[0], 0)
             add_flag(args[0], NF_CHECKED)
-        tm = module_of_type(ntype(args[0]))
-        if tm >= 0: collect_module(tm, name, decls)
+        tms = method_modules(ntype(args[0]))
+        loop tm in tms: collect_module(tm, name, decls)
+        tm = if tms.len() > 0: tms[0] else: -1
         if indexed:
             protocol = intern(if name == intern("[]"): "__index__" else: "__setindex__")
             if mod_scope >= 0: collect_module(mod_scope, protocol, decls)
@@ -4217,8 +4218,8 @@ member_call_without_arguments = (t: int, name: int) -> bool:
         id = intrinsics[ii].id
         return id == .len or id == .arrcap or id == .pop or id == .clear or id == .arrdata
     tables = [modules[cur_mod()].names, prelude]
-    tm = module_of_type(t)
-    if tm >= 0 and tm != cur_mod(): tables.push(modules[tm].names)
+    loop tm in method_modules(t):
+        if tm != cur_mod(): tables.push(modules[tm].names)
     loop table in tables:
         if not table.has(name): continue
         s = table[name]
@@ -4278,8 +4279,7 @@ synthetic_copy = (t: int, name: int, pos: int) -> bool:
     # Uniform-call methods are user declarations too.
     decls: int[]
     collect_fns(name, decls)
-    m = module_of_type(t)
-    if m >= 0: collect_module(m, name, decls)
+    loop m in method_modules(t): collect_module(m, name, decls)
     loop d in decls:
         if nkids(d) == 0: continue
         sig = fn_sig(d)

@@ -1,0 +1,20 @@
+# quick
+# Methods of a minted type reach, by bare name, the members it inherits from parents
+# declared in other modules (or later in its own), and its values have their methods.
+import p"../../fixtures/objects/family_mid.dewy" as mid
+Leaf:type = type of mid.Mid & [
+    extra:string = 'x'
+    bump = () => { level += 1  message = message + "!" }
+    shadow = (message:string):>string => { let tag = "local" return "{message} {tag} {describe}" }
+    full = ():>string => "{rank} {describe} {extra}"
+    named = ():>string => kind
+]
+Later:type = type of Early & [n:int64 = 0  both = ():>string => "{n} {early}"]
+Early:type = type of error & [early = ():>string => "early"]
+kind = ():>string => "module kind"
+main = () => {
+    let l = Leaf(message='m')
+    l.bump
+    printl"{l.full} | {l.shadow('arg')} | {l.named} | {l.rank} | {l}"
+    printl"{Later().both} {l.describe()} {l.tag} {Leaf.tag}"
+}

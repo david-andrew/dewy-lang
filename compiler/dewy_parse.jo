@@ -149,22 +149,30 @@ dw_receiver_field = (receiver: int, name: i32, pos: int) -> int:
     n
 
 dw_value_ident = (name: i32, pos: int) -> int:
+    deferred = 0
     if dw_siblings.len() > 0:
-        if let receiver = dw_siblings.get(int(name)): return dw_receiver_field(receiver, name, pos)
+        if let receiver = dw_siblings.get(int(name)):
+            if receiver != 0: return dw_receiver_field(receiver, name, pos)
+        else: deferred = dw_siblings.get(dewy_inherited_key()) ?? 0
     n = mk(.ident, pos)
     nodes[n].name = dw_value_name(name, pos)
+    if deferred != 0: dewy_defer_name(deferred, n, int(name))
     n
 
 # Names bound from here on hide the members of the same name.
+# (with members still unknown, inherited from another module, they are hidden as 0)
 dw_shadow = (names: int[]):
     if dw_siblings.len() == 0: return
-    hidden = false
+    deferred = dw_siblings.has(dewy_inherited_key())
+    hidden = deferred
     loop name in names:
         if dw_siblings.has(name): hidden = true
     if not hidden: return
     visible: {int: int} = {}
     loop name, receiver in dw_siblings:
         if not names.contains(name): visible[name] = receiver
+    if deferred:
+        loop name in names: visible[name] = 0
     dw_siblings = visible
 
 # The direct expression frontend builds compact nodes before any method is known:
@@ -174,14 +182,17 @@ dw_rewrite_members = (n: int):
     k = nodes[n].kind
     if k == .ident:
         if let receiver = dw_siblings.get(int(nodes[n].name)):
+            if receiver == 0: return
             field = dw_receiver_field(receiver, nodes[n].name, nodes[n].pos)
             nodes[field].flags = nodes[n].flags
             nodes[n] = nodes[field]
+        else if let type_decl = dw_siblings.get(dewy_inherited_key()): dewy_defer_name(type_decl, n, int(nodes[n].name))
         return
     dw_rewrite_members(int(nodes[n].a))
     if k == .field: return
     # A member call's receiver may be a place, as the direct frontend marks it.
     if k == .call and nodes[int(nodes[n].a)].kind == .field: add_flag(int(nodes[int(nodes[n].a)].a), NF_MUT)
+    if k == .call: dewy_defer_callee(int(nodes[n].a))
     dw_rewrite_members(int(nodes[n].b))
     loop child in kids(n): dw_rewrite_members(child)
 
@@ -1373,6 +1384,7 @@ dw_expr = (id: int) -> int:
             nodes[n].a = i32(dw_expr(left))
             callee = int(nodes[n].a)
             if not bracket and nodes[callee].kind == .field: add_flag(int(nodes[callee].a), NF_MUT)
+            if not bracket: dewy_defer_callee(callee)
             args: int[]
             if bracket: dw_index_context.push(n)
             if dewy_syntax[right].kind != .block: args.push(dw_expr(right))
@@ -1647,8 +1659,9 @@ dw_bound_names = (bindings: int[]) -> int[]:
 # A type's methods become module functions of the same name taking the instance first
 # (`s.width` is `width(s)` by the uniform call syntax); no function is stored in the
 # object. A generic type's methods take its type parameters first.
-# A minted type's methods also reach the members it inherits from a parent declared
-# earlier in this module.
+# A minted type's methods also reach the members it inherits: from a parent declared
+# earlier in this module as they are read, from any other once every module is
+# (dewy_resolve_inherited).
 dw_type_members: {int: {int: {int: int}}} = {}   # file -> type name -> its members (dewy_method_group)
 
 dw_type_methods = (struct_: int, rows: int[], methods: int[]):
@@ -1658,9 +1671,19 @@ dw_type_methods = (struct_: int, rows: int[], methods: int[]):
     parent = int(nodes[struct_].a)
     file = pos_file(nodes[struct_].pos)
     types_here = dw_type_members.get(file) ?? {}
-    if parent != 0 and nodes[parent].kind == .tname: inherited = types_here.get(int(nodes[parent].name)) ?? {}
+    deferred = false
+    if parent != 0 and nodes[parent].kind == .tname:
+        parent_name = int(nodes[parent].name)
+        if let known = types_here.get(parent_name):
+            inherited = known
+            deferred = dewy_deferred_here(file, parent_name)
+        else: deferred = name_of(parent_name) not in ["error", "exception", "any"]
+    else if parent != 0: deferred = true
     members: {int: int} = {}
     loop name, member in inherited: members[name] = receiver
+    if deferred:
+        members[dewy_inherited_key()] = struct_
+        dewy_defer_type(struct_, file)
     loop name in row_names: members[name] = receiver
     type_params = kids2(struct_)
     decls: int[]
@@ -1710,7 +1733,10 @@ dw_type_methods = (struct_: int, rows: int[], methods: int[]):
         dw_pending_decls.push(fn_)
         decls.push(fn_)
     if hook != 0: fatal(nodes[struct_].pos, "a lifecycle tag requires a method")
+    first = dewy_methods.len()
     group = dewy_method_group(row_names, decls, inherited)
+    dewy_decl_members[struct_] = group
+    dewy_decl_methods[struct_] = [first, dewy_methods.len()]
     types_here[int(nodes[struct_].name)] = group
     dw_type_members[file] = types_here
     if methods.len() > 0: dewy_type_members[struct_] = group

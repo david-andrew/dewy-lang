@@ -9,6 +9,8 @@ use 'ast.jo'
 use 'check.jo'
 use 'expr.jo'
 use 'ownership.jo'
+use 'errors.jo'
+use 'types.jo'
 
 struct DewyMethod:
     decl: int
@@ -22,6 +24,90 @@ dewy_methods_inferred = 0
 dewy_receivers: {int: int[]} = {}   # function name -> declarations taking an argument first
 dewy_module_of_file: {int: int} = {}
 dewy_reachable: {int: {int: bool}} = {}   # module -> the modules it can name types from
+
+# A minted type whose parent is in another module (or declared later) learns what it
+# inherits only once every module is read. Bare names its methods leave unresolved
+# are kept; those naming an inherited member then become that member of the object.
+dewy_decl_members: {int: {int: int}} = {}   # a type's declaration -> its members
+dewy_decl_methods: {int: int[]} = {}         # a type's declaration -> its own methods' [first, end)
+dewy_deferred: {int: int[]} = {}             # such a type's declaration -> the names left
+dewy_deferred_order: int[]
+dewy_deferred_names: {int: int} = {}         # a name's node -> the name written
+dewy_deferred_callees: {int: bool} = {}      # names called, whose object may be a place
+dewy_deferred_files: {int: {int: bool}} = {} # file -> names of its types read so
+
+dewy_inherited_key = () -> int: intern("$inherited")
+
+dewy_defer_type = (decl: int, file: int):
+    if not dewy_deferred.has(decl):
+        dewy_deferred[decl] = []
+        dewy_deferred_order.push(decl)
+    here = dewy_deferred_files.get(file) ?? {}
+    here[int(nodes[decl].name)] = true
+    dewy_deferred_files[file] = here
+
+dewy_deferred_here = (file: int, name: int) -> bool:
+    if let here = dewy_deferred_files.get(file): return here.has(name)
+    false
+
+dewy_defer_name = (decl: int, n: int, name: int):
+    left = dewy_deferred[decl]
+    left.push(n)
+    dewy_deferred[decl] = left
+    dewy_deferred_names[n] = name
+
+dewy_defer_callee = (n: int):
+    if dewy_deferred_names.has(n): dewy_deferred_callees[n] = true
+
+dewy_resolve_inherited = ():
+    if dewy_deferred_order.len() == 0: return
+    done: {int: bool} = {}
+    loop decl in dewy_deferred_order: dewy_inherit(decl, done)
+    dewy_deferred_order = []
+    dewy_deferred = {}
+    dewy_deferred_names = {}
+    dewy_deferred_callees = {}
+
+# The members of the type declared by decl, with those it inherits.
+dewy_inherit = (decl: int, done: mut {int: bool}) -> {int: int}:
+    own = dewy_decl_members.get(decl) ?? {}
+    if not dewy_deferred.has(decl) or done.has(decl): return own
+    done[decl] = true
+    members: {int: int} = {}
+    parent = dewy_parent_decl(decl)
+    if parent != 0:
+        loop name, member in dewy_inherit(parent, done): members[name] = member
+    loop name, member in own: members[name] = member
+    dewy_decl_members[decl] = members
+    if dewy_type_members.has(decl): dewy_type_members[decl] = members
+    if let range = dewy_decl_methods.get(decl):
+        loop i in [range[0]..range[1]): dewy_methods[i].members = members
+    receiver = intern("$self")
+    loop n in dewy_deferred[decl]:
+        name = dewy_deferred_names[n]
+        if not members.has(name): continue
+        base = mk(.ident, nodes[n].pos)
+        nodes[base].name = i32(receiver)
+        if dewy_deferred_callees.has(n): add_flag(base, NF_MUT)
+        field = mk(.field, nodes[n].pos)
+        nodes[field].a = i32(base)
+        nodes[field].name = i32(name)
+        nodes[field].flags = nodes[n].flags
+        nodes[n] = nodes[field]
+    members
+
+# The declaration of the type decl is minted under (0: none, or not a record type).
+dewy_parent_decl = (decl: int) -> int:
+    p = int(nodes[decl].a)
+    if p == 0 or mint_of_any(decl): return 0
+    saved = cx
+    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[decl].mod), "nominal")), -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(sc_names.len())))
+    cx = ctxs.len() - 1
+    t = prune(resolve_type(p))
+    ctxs.pop()
+    cx = saved
+    if types[t].kind != .struct_: return 0
+    int(structs[int(types[t].st)].decl)
 
 dewy_is_method = (decl: int) -> bool:
     nkids(decl) > 0 and starts_with(name_of(int(nodes[kid(decl, 0)].name)), "$self")

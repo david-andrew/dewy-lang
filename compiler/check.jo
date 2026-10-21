@@ -748,8 +748,8 @@ method_names = (recv: int) -> int[]:
     out: int[]
     rt = prune(recv)
     tables = [modules[cur_mod()].names, prelude]
-    tm = module_of_type(rt)
-    if tm >= 0 and tm != cur_mod(): tables.push(modules[tm].names)
+    loop tm in method_modules(rt):
+        if tm != cur_mod(): tables.push(modules[tm].names)
     loop tbl in tables:
         loop k, s0 in tbl:
             s = s0
@@ -1433,6 +1433,17 @@ module_of_type = (t0: int) -> int:
     k = types[t].kind
     if (k == .struct_ or k == .enum_) and types[t].st != 0 or (k == .struct_ or k == .enum_): return int(nodes[int(structs[int(types[t].st)].decl)].mod)
     -1
+
+# The modules whose functions are methods of t: its own, then those of the types it is
+# minted under (a minted child has its parents' methods, wherever they were declared)
+method_modules = (t0: int) -> int[]:
+    out: int[]
+    t = prune(t0)
+    loop t != 0:
+        m = module_of_type(t)
+        if m >= 0 and not out.contains(m): out.push(m)
+        t = nominal_parent.get(t, 0)
+    out
 
 # ---------------- functions ----------------
 decl_info = (decl: int) -> int:
@@ -4701,6 +4712,7 @@ check_program = (main_path: str):
         if not prelude_pending.has(i): register_module(i)
         i += 1
     bind_from_imports()
+    dewy_resolve_inherited()
     dewy_infer_methods()
     prepare_nominals()
     check_build_block()
