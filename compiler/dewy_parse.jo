@@ -487,6 +487,30 @@ dw_alphabet = (text: str, id: int) -> str:
         _: dw_fail(id, "this numeric base")
     alphabet
 
+# `count ?? 0 + 1` is `count ?? (0 + 1)`: arithmetic binds more tightly than
+# `??`. A literal fallback followed by arithmetic usually meant the other tree.
+dw_coalesce_arithmetic = (left: int, right: int):
+    first = dw_unwrap(right)
+    op = DewyToken.none
+    rest = 0
+    loop true:
+        o = dw_op(first)
+        if o != .plus and o != .minus and o != .star and o != .slash and o != .floor and o != .percent: break
+        op = o
+        rest = dw_child(first, 2)
+        first = dw_unwrap(dw_child(first, 1))
+    if op == .none: return
+    k = dewy_syntax[first].kind
+    if not dw_integer_kind(k) and k != .real and k != .source_real: return
+    name = dw_operand_text(left)
+    if name == "": name = "value"
+    lit = dewy_syntax[first].text
+    r = dw_unwrap(rest)
+    rk = dewy_syntax[r].kind
+    tail = if rk == .identifier or dw_integer_kind(rk) or rk == .real or rk == .source_real: dewy_syntax[r].text else: "..."
+    sym = dn_token_text(op)
+    warn(dewy_syntax[right].pos, "arithmetic binds more tightly than `??`, so this fallback includes `{lit} {sym} {tail}`, not just `{lit}`: write `({name} ?? {lit}) {sym} {tail}` to use the chosen value, or `{name} ?? ({lit} {sym} {tail})` to keep this meaning")
+
 dw_integer_kind = (kind: DewyKind) -> bool:
     kind == .integer or kind == .source_integer
 
@@ -1435,6 +1459,7 @@ dw_expr = (id: int) -> int:
             if bracket and args.len() == 1: nodes[n].b = i32(args[0])
             return n
         if op == .coalesce:
+            dw_coalesce_arithmetic(left, right)
             n = mk(.coalesce, pos)
             nodes[n].a = i32(dw_expr(left))
             nodes[n].b = i32(dw_expr(right))

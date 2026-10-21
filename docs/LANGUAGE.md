@@ -1978,7 +1978,9 @@ collections are present values. Chains associate right, so
 `first ?? second ?? default` picks the first present value. A final optional
 fallback keeps the result optional. Arithmetic binds more tightly than `??`,
 while comparisons and boolean operators bind less tightly:
-`to_int(text) ?? 0 >? 10` compares the selected number with 10.
+`to_int(text) ?? 0 >? 10` compares the selected number with 10. Since
+`count ?? 0 + 1` is `count ?? (0 + 1)`, a literal fallback followed by
+arithmetic draws a warning; parenthesize either way to say which is meant.
 
 ```dewy
 let address = env("JOIN") ?? "localhost"
