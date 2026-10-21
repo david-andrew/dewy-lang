@@ -1,7 +1,8 @@
 # The manifest names the live log. Two slots alternate: generation g is written to
 # slot g % 2, so the previous generation's slot is untouched while the new one is
-# written. On open the valid slot with the highest generation wins; a slot torn
-# mid-write fails its checksum and the other slot still names a complete log.
+# written. On open the valid slot with the highest generation wins. A slot is
+# replaced atomically (Disk.write); its checksum still rejects a damaged one, and
+# the other slot then names a complete log.
 
 from p"crc32.dewy" import crc32
 from p"disk.dewy" import Disk, DiskError
