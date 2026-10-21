@@ -239,6 +239,11 @@ combine=(a b=a)=>a+b
 main=()=>add(twice(20))
 ```
 
+One bare parameter name may omit the parentheses: `x=>x+1`, as in
+`apply(x=>x*2 21)`, where the lambda ends at the next argument. The name is
+always the parameter, even when a type has that spelling; annotated parameters
+and result types need the parenthesized form, `(x:int64):>int64=>x+1`.
+
 Types can be inferred, including generic functions. `:>` writes a result type;
 use `:>void` for a function with no result. Named arguments such as `add(b=2 a=40)`
 are supported. Explicit arguments evaluate in written order, then omitted

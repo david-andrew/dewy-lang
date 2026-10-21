@@ -899,7 +899,11 @@ dw_function = (id: int, name: str) -> int:
     if dw_op(params) == .call and dewy_syntax[dw_child(params, 1)].text == "<>:":
         type_params = dw_type_params(dw_child(params, 1))
         params = dw_child(params, 2)
-    if dewy_syntax[params].kind != .block or dewy_syntax[params].text != "():": return dw_fail(params, "this parameter list")
+    # One bare parameter name may omit the parentheses: `x => x + 1`.
+    bare = dewy_syntax[params].kind == .identifier and result == 0 and type_params.len() == 0
+    if dw_op(params) == .colon or (dewy_syntax[params].kind == .identifier and not bare):
+        fatal(dewy_syntax[params].pos, "only one bare parameter name may omit the parentheses; write an annotated or typed signature as `(x:int64) => ...`")
+    if not bare and (dewy_syntax[params].kind != .block or dewy_syntax[params].text != "():"): return dw_fail(params, "this parameter list")
     n = mk(if name == "": NK.lambda else: NK.fn_, dewy_syntax[id].pos)
     nodes[n].name = i32(intern(name))
     if type_params.len() > 0:
@@ -914,7 +918,9 @@ dw_function = (id: int, name: str) -> int:
     captures: int[]
     capture = false
     bound: {int: bool} = {}
-    loop p in dw_children(params):
+    rows = [params]
+    if not bare: rows = dw_children(params)
+    loop p in rows:
         if dewy_syntax[p].kind == .metatag:
             if dewy_syntax[p].text != "capture":
                 if dw_designed_directive(dewy_syntax[p].text): return dw_metatag_fail(p)

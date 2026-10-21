@@ -1,0 +1,17 @@
+# quick
+# One bare parameter name may omit the parentheses: `x => x + 1`.
+apply=(f:<(x:int64):>int64> v:int64):>int64=>f(v)
+T:type=[n:int64]
+main=():>int64=>{
+    let inc:<(x:int64):>int64> = x => x + 1
+    printl(inc(4))
+    printl(apply(x => x * 2 21))          # the lambda ends at the next argument
+    printl(apply(x => x * 3 + 1 5))
+    printl(apply(n => { let m = n + 1  return m * m } 2))
+    printl(apply(T => T - 1 10))          # a bare name is always the parameter, even a type's
+    let words = ["ccc" "a" "bb"]
+    words.sort(key=w => w.length)
+    printl(words)
+    printl(apply(_ => 7 0))
+    return 0
+}
