@@ -2473,6 +2473,11 @@ strings, blocks and comments.
 `#` begins a line comment; `#{` and `}#` delimit a block comment, which nests and
 may span lines. Comment markers inside strings are string contents.
 
+A name has one spelling however it is written: subscript digits are `_` and the
+digits (`x₁₂`, `x₁_2` and `x_12` are one name), superscript digits are `‾` and the
+digits (`x¹²` is `x‾12`), and the micro sign `µ` is Greek `μ`. Letter
+decorations (`xᵢ`) stay distinct from `x_i`.
+
 ```dewy
 #{ outer
    #{ nested }#
