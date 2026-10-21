@@ -14,6 +14,8 @@ __dewy_make_set[T] = (values: T[]) -> Set[T]:
 
 # set(values): the set of an array's elements, in first-occurrence order
 set[T] = (values: T[]) -> Set[T]: __dewy_make_set(values)
+# set"0123": the set of a string's graphemes
+set = (text: str) -> Set[str]: __dewy_make_set(graphemes(text))
 
 __dewy_set_values[T] = (s: Set[T]) -> T[]: s._entries.keys()
 # s.values: the members, a fresh array in first-seen order
