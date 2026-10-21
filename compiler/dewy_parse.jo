@@ -1231,6 +1231,9 @@ dw_function = (id: int, name: str) -> int:
     bound: {int: bool} = {}
     rows = [params]
     if not bare: rows = dw_children(params)
+    keyword_only = false
+    any_kind = false
+    kinds: int[]
     loop p in rows:
         if dewy_syntax[p].kind == .metatag:
             if dewy_syntax[p].text != "capture":
@@ -1252,6 +1255,22 @@ dw_function = (id: int, name: str) -> int:
             captures.push(cap)
             capture = false
             continue
+        kind = if keyword_only: 1 else: 0
+        let p = p
+        # (`value:int64 ...`: the positional run ends after this parameter)
+        if dw_op(p) == .colon and dewy_syntax[dw_unwrap(dw_child(p, 2))].kind == .postfix and dw_op(dw_unwrap(dw_child(p, 2))) == .ellipsis:
+            typed = dw_child(dw_unwrap(dw_child(p, 2)), 1)
+            if dewy_syntax[p].child_mode != 0: dewy_syntax[p].child_right = typed
+            else: dewy_syntax[p].children[2] = typed
+            keyword_only = true
+        else if dewy_syntax[p].kind == .postfix and dw_op(p) == .ellipsis and dw_op(dw_child(p, 1)) == .colon:
+            p = dw_child(p, 1)
+            keyword_only = true
+        else if dewy_syntax[p].kind == .block and dewy_syntax[p].text == "<>:" and dw_nchildren(p) == 1 and dw_op(dw_child(p, 0)) == .colon:
+            p = dw_child(p, 0)
+            kind = 2
+        if kind != 0: any_kind = true
+        kinds.push(kind)
         param = dw_param(p, .param)
         let bound_nodes = if nkids(param) > 0: binding_leaves(kids(param)) else: [param]
         loop binding in bound_nodes:
@@ -1261,6 +1280,7 @@ dw_function = (id: int, name: str) -> int:
             bound[nm] = true
         ps.push(param)
     if capture: return dw_fail(params, "$capture without a local name")
+    if any_kind: dewy_param_kinds[n] = kinds
     outer_siblings = dw_siblings
     if dw_siblings.len() > 0 and bound.len() > 0:
         hidden: int[]
@@ -2341,6 +2361,7 @@ dw_flow_stmt = (n: int) -> int:
     s
 
 dw_pattern_binder: i32 = 0
+
 
 dw_pattern = (id: int) -> int:
     let id = dw_unwrap(id)

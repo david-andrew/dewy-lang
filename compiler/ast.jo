@@ -173,3 +173,7 @@ dewy_len_members: {int: int}
 id_dewy_len = intern("len")
 dewy_note_member = (n: int):
     if int(nodes[n].name) == id_dewy_len: dewy_len_members[n] = nodes[n].pos
+
+# per Dewy function node: its parameters' kinds, 1 keyword-only (after `...`),
+# 2 position-only (`<v:T>`), for map_args
+dewy_param_kinds: {int: int[]} = {}

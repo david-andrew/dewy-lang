@@ -1114,7 +1114,8 @@ exact_args = (cd: Cand) -> int:
     k
 
 # map call args to parameter slots; returns error message ("" on success)
-map_args = (pnames: int[], has_default: bool[], args: int[], out: mut int[]) -> str:
+# kinds: per parameter, 1 keyword-only (after `...`), 2 position-only (`<v:T>`)
+map_args = (pnames: int[], has_default: bool[], args: int[], out: mut int[], kinds: int[] = []) -> str:
     np = pnames.len()
     out.clear()
     out.resize(np)
@@ -1124,6 +1125,7 @@ map_args = (pnames: int[], has_default: bool[], args: int[], out: mut int[]) -> 
             k = -1
             loop j in [0..np):
                 if pnames[j] == int(nodes[a].name): k = j
+            if k >= 0 and k < kinds.len() and kinds[k] == 2: return "parameter '{name_of(pnames[k])}' is position-only: pass it without its name"
             if k < 0:
                 an = name_of(int(nodes[a].name))
                 if (an == "key" or an == "reverse") and not caller_dewy(): return "no parameter named '{an}' (by a key: `max_by(xs, (x): len(x))`, `min_by`, `sorted_by(xs, (x): x.age)`, `sort_by`; `descending = true` sorts largest first)"
@@ -1132,6 +1134,7 @@ map_args = (pnames: int[], has_default: bool[], args: int[], out: mut int[]) -> 
             out[k] = int(nodes[a].a)
         else:
             loop pos < np and out[pos] != 0: pos += 1
+            if pos < np and pos < kinds.len() and kinds[pos] == 1: return "too many positional arguments: '{name_of(pnames[pos])}' takes its name (`{name_of(pnames[pos])}=...`)"
             if pos >= np: return "too many arguments (expected {np})"
             out[pos] = a
             pos += 1
@@ -1951,7 +1954,8 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             if p0 != a0t and (pk0 == .vec or pk0 == .int_ or pk0 == .float_) and not can_coerce(0, a0t, p0): continue
         cd = Cand(decl = d, sig = decl_infos[di].sig)
         np = nkids(d)
-        if positional and args.len() == np:
+        kinds = dewy_param_kinds.get(d) ?? []
+        if positional and args.len() == np and kinds.len() == 0:
             cd.args = args
         else:
             pnames: int[]
@@ -1959,7 +1963,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             loop i in [0..np):
                 pnames.push(int(nodes[kid(d, i)].name))
                 hasdef.push(nodes[kid(d, i)].b != 0)
-            err = map_args(pnames, hasdef, args, cd.args)
+            err = map_args(pnames, hasdef, args, cd.args, kinds)
             if len(err) > 0:
                 if last_err_arg == 0: last_err = err
                 if ufcs and not recv_fits and np > 0 and nodes[unnamed(args[0])].type != 0:
@@ -2753,7 +2757,7 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
                 pnames.push(int(nodes[kid(decl, i)].name))
                 hasdef.push(true)
             mapped: int[]
-            err = map_args(pnames, hasdef, args, mapped)
+            err = map_args(pnames, hasdef, args, mapped, dewy_param_kinds.get(decl) ?? [])
             if len(err) > 0: fatal(nodes[n].pos, err)
             loop i in [0..nkids(decl)):
                 a = mapped[i]
