@@ -12,7 +12,7 @@ what landed. Keep this file short.
 | Acceptance ladder, design surface | 82/82 (tiers 1–2: 63/63; tier 3: 19/19), 12 held open on decisions | all milestones |
 | Acceptance ladder, current dialect | 82/82 | stays green |
 | Fresh compile, 22k-line synthetic, wall clock, 4 workers (i7-6700) | 175 ms before fused workers; remeasure when quiet | ≤88 ms (250k lines/s) |
-| Same, critical-path instructions at 4 workers (`speed --critical`, load-independent) | 0.68 G (0.90 G before fused workers; game 0.80 G, not yet partitioned) | ~0.35 G |
+| Same, critical-path instructions at 4 workers (`speed --critical`, load-independent) | 0.64 G (0.90 G before fused workers; game 0.80 G, not yet partitioned) | ~0.35 G |
 | Same, single-thread instructions (guardrail) | 1.16 G (was 1.36 G on 10-20) | ~0.75 G; never regress |
 | Hello-world compile | 31 ms (147 M, all library) | ≤10 ms |
 | Compiler self-build | 9.35 G instructions (the compiler grew) | seconds-scale edit loop |
@@ -29,7 +29,7 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: partitioned checking stage 2.
+- Astra: partitioned checking stage 3 (game eligibility).
 - Opus: `zip.dewy` in the compiler with a frozen Jo copy for the bootstrap.
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
@@ -49,9 +49,9 @@ only.
   only optimize+x64 (36%) runs in parallel today. 0.40 G single-threaded is not
   credible, so the target is now wall clock with 4 workers. Projects, in order:
   1. fused partition workers landed (critical path −11% at 4 workers);
-  2. partitioned checking: stage 1 landed (synthetic critical path −11.7%);
-     stage 2: check the library once (total work at 4 workers is +25%), game
-     eligibility, broader features;
+  2. partitioned checking: stages 1–2 landed (synthetic critical path
+     0.77 → 0.64 G); stage 3: game eligibility, smaller programs, broader
+     features;
   3. a toolchain-baked library image (question 22);
   4. checker name lookup by id plus a fused zonk (≤6%);
   5. lazy function-body parsing in partition workers (~70 M off the serial path;
@@ -71,6 +71,9 @@ only.
 - Recover the game-panel compile cost of mathematical `int` (+5.7%, accepted
   10-20); the frontend work recovered the synthetic panel's share.
 - Small items:
+  - reproducible builds: programs below the fused gate still compile to
+    different bytes at 1 vs N emission workers (the old emission path; forced
+    fused is stable);
   - `xs.swap` on refined arrays is rejected (goes through `data()`); indexed
     rewrite costs +62–93% on array_swap, so it needs a swap primitive;
   - maps fail their own index proofs under the strict policy;
