@@ -9077,7 +9077,8 @@ check_if = (n: int, ex: int) -> int:
                 t = ntype(v)
             nodes[n] = nodes[b]
             return t
-        if ex != 0 and tkind(ex) != .void_ and tkind(ex) != .var:
+        # (a result that may be void, `:>void|Oops`, lets the test fall through)
+        if ex != 0 and tkind(ex) != .void_ and tkind(ex) != .var and not union_has_void(ex):
             subject = if nodes[int(nodes[cond].a)].kind == .ident: "`{name_of(int(nodes[int(nodes[cond].a)].name))}`" else: "the value"
             fatal(nodes[n].pos, "this `if` must give {a_type(ex)}, but it has no `else`: when {subject} is not {a_type(resolve_type(int(nodes[cond].b)))}, it gives nothing (add `else` with a value, or a test for each remaining type)")
         is_stmt = true

@@ -1,0 +1,11 @@
+# A final else-less `is?` test in a `:>void | E` function falls through to void.
+Oops:type=type of error & [message:string]
+check=(x:int64|Oops):>void|Oops=>{
+    let y=x
+    if y is? Oops return Oops["wrapped: {y.message}"]
+}
+main=()=>{
+    printl(check(5) is? Oops)
+    let failed=check(Oops["bad"])
+    if failed is? Oops printl(failed.message)
+}
