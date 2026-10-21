@@ -16,7 +16,7 @@ what landed. Keep this file short.
 | Hello-world compile | 31 ms (147 M, all library) | ≤10 ms |
 | Compiler self-build | 9.35 G instructions (the compiler grew) | seconds-scale edit loop |
 | Game-tick kernel vs C -O2 (time) | 1.6× default and release (default was 6.3× before small-leaf inlining) | ~1× both |
-| Worst other kernels vs C (time, default) | params 1.75×, graph 1.7×, string_equal ~1.25×, recursive_tree 1.4× | ≤1.2× |
+| Worst other kernels vs C (time, default) | literal callbacks 38×, callbacks 10×, params 1.75×, graph 1.7×, recursive_tree 1.4× | ≤1.2× |
 | Quick / full suite | 38 s / 6.6 min (load average 14–24; remeasure when quiet) | ≤30 s / ≤5 min |
 
 Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
@@ -28,7 +28,7 @@ Ladder milestones (1–30) and their programs are in `tests/ladder/ladder.json`;
 GPT quota is limited: at most one Astra stream, at medium effort; Sol for reviews
 only.
 
-- Astra: literal-lambda callbacks on the stack; allocator fast path.
+- Astra: specialize higher-order calls on known lambdas (callbacks 10–38× C).
 - Opus: dogfooding round 2 (12 programs in new domains; round-1 leftovers).
 - Held: fused partition workers (wt/fused); gates pass, the wall-clock gain
   needs a quiet machine to confirm.
@@ -55,8 +55,9 @@ only.
 - Runtime gaps:
   - float compare/negate selection;
   - outer-target SIMD (particles);
-  - stack closure environments: invocation-only local callbacks landed
-    (callbacks kernel 2.2–2.3×); literal lambdas and forwarding next.
+  - callbacks: stack environments landed (2.2× and 1.9×), but literal-lambda
+    code is still 29–38× C and the callbacks kernel 8–10× C. This is the largest
+    runtime gap.
 - Self-hosting pilot: translate `compiler/zip.jo` to Dewy. This needs
   `$target`, a pointer/host ABI subset and byte views. Hold the full port
   (5–10 engineer-weeks) until the zip pilot works without private syntax and a
