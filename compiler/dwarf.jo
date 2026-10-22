@@ -7,6 +7,7 @@
 # profilers attribute samples to lines. Function names are also in .symtab (elf.jo).
 
 use 'util.jo'
+use 'leb128.dewy'
 use 'ir.jo'
 use 'elf.jo'
 use 'x64.jo'
@@ -37,26 +38,6 @@ const DW_FLEX = -2000000        # an array of e of unknown length
 const DW_PTR = -3000000         # a pointer to the header of an array of e
 const DW_TAGS = -4000000        # the tags of enum t
 const DW_VARIANT = -5000000     # - (DW_VARIANT + 256 t + v): the fields of variant v of enum t
-
-uleb = (out: mut u8[], v0: int):
-    if v0 >= 0 and v0 < 128:
-        out.push(u8(v0))
-        return
-    v = v0
-    loop v >= 128:
-        out.push(u8((v & 127) | 128))
-        v = v >> 7
-    out.push(u8(v))
-
-sleb = (out: mut u8[], v0: int):
-    v = v0
-    loop true:
-        byte = v & 127
-        v = v >> 7
-        if (v == 0 and byte & 64 == 0) or (v == -1 and byte & 64 != 0):
-            out.push(u8(byte))
-            return
-        out.push(u8(byte | 128))
 
 cstr = (out: mut u8[], s: str):
     n = out.len()

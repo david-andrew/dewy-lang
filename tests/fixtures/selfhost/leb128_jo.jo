@@ -1,0 +1,16 @@
+# The compiler's frozen leb128.jo, with the same command line as leb128_dewy.dewy.
+use '../../../compiler/leb128.jo'
+
+main = ():
+    a = args()
+    loop i in [1..a.len()):
+        v = to_int(a[i]) ?? 0
+        u: u8[]
+        s: u8[]
+        uleb(mut u, v)
+        sleb(mut s, v)
+        line = ""
+        loop b in u: line = line + "{b} "
+        line = line + "| "
+        loop b in s: line = line + "{b} "
+        print(line)

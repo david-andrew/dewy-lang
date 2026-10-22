@@ -2,6 +2,7 @@
 # Memory layout: [0,1024) unused | rodata | data (globals) | shadow stack (grows down) | heap
 
 use 'util.jo'
+use 'leb128.dewy'
 use 'zip.dewy'
 use 'ast.jo'
 use 'types.jo'
@@ -24,26 +25,6 @@ wasm_collect = ():
     wf_present[ir.fn_index] = true
 
 # ---------------- encoding helpers ----------------
-uleb = (o: mut u8[], v0: int):
-    v = v0
-    loop true:
-        byte = v & 0x7F
-        v = v >> 7
-        if v == 0:
-            o.push(u8(byte))
-            return
-        o.push(u8(byte | 0x80))
-
-sleb = (o: mut u8[], v0: int):
-    v = v0
-    loop true:
-        byte = v & 0x7F
-        v = v >> 7
-        if (v == 0 and byte & 0x40 == 0) or (v == -1 and byte & 0x40 != 0):
-            o.push(u8(byte))
-            return
-        o.push(u8(byte | 0x80))
-
 wstr = (o: mut u8[], s: str):
     uleb(o, len(s))
     loop c in s: o.push(c)

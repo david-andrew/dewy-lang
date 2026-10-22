@@ -1,0 +1,34 @@
+# LEB128, the variable-length integers of WebAssembly, DWARF and Mach-O's binding opcodes:
+# seven bits a byte, low bits first, the top bit set on every byte but the last.
+#
+# A module of the compiler written in Dewy. leb128.jo is its frozen twin for the
+# compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
+# interface and write the same bytes (tests/test_selfhost_leb128.py).
+
+# unsigned (a negative v writes its low byte alone)
+uleb=(@out:array<uint8> v0:int64):>void=>{
+    if v0 >=? 0 and v0 <? 128 {
+        out.push(uint8(v0))
+        return
+    }
+    let v=v0
+    loop v >=? 128 {
+        out.push(uint8((v & 127) | 128))
+        v=v >> 7
+    }
+    out.push(uint8(v & 255))
+}
+
+# signed: two's complement, the sign in the last byte's bit 6
+sleb=(@out:array<uint8> v0:int64):>void=>{
+    let v=v0
+    loop true {
+        let byte=v & 127
+        v=v >> 7
+        if (v =? 0 and byte & 64 =? 0) or (v =? -1 and byte & 64 not=? 0) {
+            out.push(uint8(byte))
+            return
+        }
+        out.push(uint8(byte | 128))
+    }
+}

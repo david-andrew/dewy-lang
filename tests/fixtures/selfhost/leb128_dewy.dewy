@@ -1,0 +1,17 @@
+# The compiler's leb128.dewy: `leb128 n...` prints each n's unsigned then signed encoding.
+from p"../../../compiler/leb128.dewy" import uleb, sleb
+
+main=():>void=>{
+    let arguments=args()
+    loop i in [1..arguments.length) {
+        let v=int64(to_int(arguments[i]) ?? 0)
+        let u:array<uint8>=[]
+        let s:array<uint8>=[]
+        uleb(@u v)
+        sleb(@s v)
+        loop b in u {print"{b} "}
+        print"| "
+        loop b in s {print"{b} "}
+        printl""
+    }
+}

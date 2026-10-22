@@ -12,6 +12,7 @@
 # requires of every program it runs.
 
 use 'util.jo'
+use 'leb128.dewy'
 use 'elf.jo'
 use 'lower.jo'
 use 'x64.jo'
@@ -50,16 +51,6 @@ mpname = (b: mut u8[], s: str, n: int):
     loop i in [0..n):
         if i < len(s): b.push(s[i])
         else: b.push(0)
-muleb = (b: mut u8[], v0: int):
-    v = v0
-    loop true:
-        c = v & 127
-        v = v >> 7
-        if v != 0: b.push(u8(c | 128))
-        else:
-            b.push(u8(c))
-            return
-
 # a segment load command (with nsect sections to follow)
 mseg = (b: mut u8[], name: str, vmaddr: int, vmsize: int, fileoff: int, filesize: int, prot: int, nsect: int):
     mp32(b, 0x19)                               # LC_SEGMENT_64
@@ -134,7 +125,7 @@ write_macho = (path: str, text: u8[], entry_off: int, ro: u8[], info: u8[], data
         binds.push(0)
         binds.push(u8(0x50 | 1))                 # BIND_OPCODE_SET_TYPE_IMM (pointer)
         binds.push(u8(0x70 | 2))                 # BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB: __DATA
-        muleb(binds, imp.0)
+        uleb(binds, imp.0)
         binds.push(u8(0x90))                     # BIND_OPCODE_DO_BIND
     binds.push(0)                                # BIND_OPCODE_DONE
     loop binds.len() % 8 != 0: binds.push(0)

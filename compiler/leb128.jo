@@ -1,0 +1,24 @@
+# The frozen implementation-language twin of leb128.dewy, for the compilers without the
+# Dewy frontend (tools/compiler/build.py). Change both, or neither.
+
+# unsigned (a negative v writes its low byte alone)
+uleb = (out: mut u8[], v0: int):
+    if v0 >= 0 and v0 < 128:
+        out.push(u8(v0))
+        return
+    v = v0
+    loop v >= 128:
+        out.push(u8((v & 127) | 128))
+        v = v >> 7
+    out.push(u8(v))
+
+# signed: two's complement, the sign in the last byte's bit 6
+sleb = (out: mut u8[], v0: int):
+    v = v0
+    loop true:
+        byte = v & 127
+        v = v >> 7
+        if (v == 0 and byte & 64 == 0) or (v == -1 and byte & 64 != 0):
+            out.push(u8(byte))
+            return
+        out.push(u8(byte | 128))
