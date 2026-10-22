@@ -1,0 +1,9 @@
+# modes: native native-release
+Counter:type=[n:int64 $sync=false]
+main=()=>{
+    let c=Counter[n=41]
+    concurrent {
+        let a=spawn c.n+1
+    }
+    printl(a)
+}

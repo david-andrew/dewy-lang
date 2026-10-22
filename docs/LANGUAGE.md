@@ -2202,6 +2202,14 @@ unions compose automatically; raw-storage handles and escaping places do not.
 A proven disjoint scoped partition is checked separately. Atomic handles have
 shared identity and can cross tasks.
 
+A type opts out with a row: `Counter:type=[n:int64 $send=false]` cannot be
+moved into a task (captured, bound or returned), and `$sync=false` keeps it out
+of storage that tasks share, such as a module-level binding a `parallel` body
+reads. A bare `$send` or `$sync` row claims the property. A claim the structure
+already gives needs nothing; one the compiler cannot verify (a raw `ptr<T>`
+field, say) needs the unsafe boundary: `$unsafe` on a line of its own before the
+type, or as another of its rows.
+
 `atomic(0)` makes an `Atomic<int64>` shared counter. Payloads are fixed-width
 integers; `atomic<T>(value)` selects another width. `load`, `store`, `add`,
 `compare_swap`, and the existing `get`, `set`, and `set_max` operations accept an

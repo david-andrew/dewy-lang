@@ -14,8 +14,20 @@ use 'util.jo'
 use 'refine.jo'
 use 'ownership.jo'
 use 'errors.jo'
+use 'ffi.jo'
 
 concurrency_calls: int[]
+# A type's transfer rows (`$send=false`, `$sync=false`, claims `$send`/`$sync`,
+# `$unsafe`), by its declaration; written by the Dewy parser, usually empty.
+TRANSFER_SEND_OFF = 1
+TRANSFER_SYNC_OFF = 2
+TRANSFER_SEND_CLAIM = 4
+TRANSFER_SYNC_CLAIM = 8
+TRANSFER_UNSAFE = 16
+transfer_tags: {int: int} = {}
+transfer_claim_pos: {int: int} = {}
+transfer_claims_checked: {int: bool} = {}
+concurrency_reason = ""
 concurrency_tasks: int[]
 concurrency_runtime_needed = false
 concurrency_thread_module = -1
@@ -51,14 +63,65 @@ concurrency_transfer = (t0: int, seen: mut {int: bool}, sync: bool = false) -> b
             if not concurrency_transfer(targ(t, i), seen, sync): return false
     if k == .struct_ or k == .enum_:
         si = int(types[t].st)
-        check_struct_fields(si)
-        loop i in [0..int(structs[si].nfields)):
-            if not concurrency_transfer(int(fields[int(structs[si].fields) + i].type), seen, sync): return false
-        loop j in [0..int(structs[si].nvariants)):
-            v = int(structs[si].variants) + j
-            loop i in [0..int(variants[v].nfields)):
-                if not concurrency_transfer(int(fields[int(variants[v].fields) + i].type), seen, sync): return false
+        tags = 0
+        if transfer_tags.len() > 0: tags = transfer_tags.get(int(structs[si].decl)) ?? 0
+        if tags != 0:
+            off = TRANSFER_SEND_OFF
+            claim = TRANSFER_SEND_CLAIM
+            property = "Send"
+            if sync:
+                off = TRANSFER_SYNC_OFF
+                claim = TRANSFER_SYNC_CLAIM
+                property = "Sync"
+            if tags & off != 0:
+                concurrency_reason = "{dt(t)} opts out of {property} with `$send=false`"
+                if sync: concurrency_reason = "{dt(t)} opts out of {property} with `$sync=false`"
+                return false
+            if tags & claim != 0:
+                concurrency_claim_check(si)
+                return true
+        return concurrency_fields(si, seen, sync)
     k != .var and k != .param
+
+concurrency_fields = (si: int, seen: mut {int: bool}, sync: bool) -> bool:
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        if not concurrency_transfer(int(fields[int(structs[si].fields) + i].type), seen, sync): return false
+    loop j in [0..int(structs[si].nvariants)):
+        v = int(structs[si].variants) + j
+        loop i in [0..int(variants[v].nfields)):
+            if not concurrency_transfer(int(fields[int(variants[v].fields) + i].type), seen, sync): return false
+    true
+
+# A claimed Send or Sync is believed; one the structure does not already give
+# needs the unsafe boundary (`$unsafe` before the type, or among its rows).
+# Checked once per claiming type: O(its fields' types).
+concurrency_claim_check = (si: int):
+    d = int(structs[si].decl)
+    if transfer_claims_checked.has(d): return
+    transfer_claims_checked[d] = true
+    tags = transfer_tags[d]
+    pos = transfer_claim_pos.get(d) ?? nodes[d].pos
+    if tags & TRANSFER_UNSAFE != 0 or ffi_unsafe_at(pos): return
+    seen: {int: bool}
+    if tags & TRANSFER_SEND_CLAIM != 0 and not concurrency_fields(si, seen, false):
+        fatal(pos, "`$send` claims Send for {name_of(int(nodes[d].name))}, which the compiler cannot verify (a field holds raw storage or a callable); claiming it needs an unsafe boundary: write `$unsafe` on a line of its own before the type, or among its rows")
+    seen2: {int: bool}
+    if tags & TRANSFER_SYNC_CLAIM != 0 and not concurrency_fields(si, seen2, true):
+        fatal(pos, "`$sync` claims Sync for {name_of(int(nodes[d].name))}, which the compiler cannot verify (a field holds raw storage or a callable); claiming it needs an unsafe boundary: write `$unsafe` on a line of its own before the type, or among its rows")
+
+# Every claiming type is checked, sent or not: O(structs) only when a claim exists.
+concurrency_claims_finalize = ():
+    if transfer_claim_pos.len() == 0: return
+    loop si in [1..structs.len()):
+        d = int(structs[si].decl)
+        if d != 0 and transfer_claim_pos.has(d): concurrency_claim_check(si)
+
+concurrency_why = () -> str:
+    reason = concurrency_reason
+    concurrency_reason = ""
+    if len(reason) == 0: return ""
+    " ({reason})"
 
 # Settled waiting answers, by function. A query that finds no wait settles every
 # function it visited (all their callees were visited too); one that finds a wait
@@ -106,7 +169,7 @@ concurrency_blocks_node = (n: int, seen: mut {int: bool}, sharing: bool = false)
     k = nodes[n].kind
     if sharing and k == .ident and nodes[n].aux == i32(int(SK.global)):
         held: {int: bool}
-        if not concurrency_transfer(ntype(n), held, true): fatal(nodes[n].pos, "shared global does not satisfy inferred Sync")
+        if not concurrency_transfer(ntype(n), held, true): fatal(nodes[n].pos, "shared global does not satisfy inferred Sync{concurrency_why()}")
     if ownership_literal_print(n): return true
     if k == .lambda or k == .fnref or k == .partial: return false
     if k == .parallel_region: return concurrency_blocks_node(int(nodes[n].a), seen, sharing)
@@ -149,14 +212,16 @@ concurrency_callback = (a: int, waiting: bool = false):
         loop arg in kids(a):
             if nodes[arg].kind == .hole: continue
             seen: {int: bool}
-            if not concurrency_transfer(ntype(arg), seen): fatal(nodes[arg].pos, "bound task argument does not satisfy inferred Send/Sync")
+            if not concurrency_transfer(ntype(arg), seen): fatal(nodes[arg].pos, "bound task argument does not satisfy inferred Send/Sync{concurrency_why()}")
     loop cap in fns[f].caps:
         t = int(locals[int(cap.outer)].type)
         seen: {int: bool}
         if (waiting or int(locals[int(cap.inner)].flags) & LF_PARTBORROW == 0) and (int(locals[int(cap.inner)].flags) & LF_ADDR != 0 or not concurrency_transfer(t, seen)):
+            why = concurrency_why()
+            if len(why) > 0: fatal(nodes[a].pos, "task capture does not satisfy inferred Send{why}")
             fatal(nodes[a].pos, "task capture does not satisfy inferred Send/Sync: a place or non-atomic raw-storage handle cannot cross tasks")
     seen: {int: bool}
-    if not concurrency_transfer(int(fns[f].ret), seen): fatal(nodes[a].pos, "task result does not satisfy inferred Send")
+    if not concurrency_transfer(int(fns[f].ret), seen): fatal(nodes[a].pos, "task result does not satisfy inferred Send{concurrency_why()}")
     if not waiting:
         called: {int: bool}
         if concurrency_blocks(f, called, true): fatal(nodes[a].pos, "parallel body may block; use `concurrent` for waiting work (the two-lane rule)")
@@ -204,7 +269,7 @@ concurrency_finalize = ():
             if tkind(ntype(a)) == .fn_: concurrency_callback(a)
             else:
                 seen: {int: bool}
-                if not concurrency_transfer(ntype(a), seen): fatal(nodes[a].pos, "parallel input does not satisfy inferred Send")
+                if not concurrency_transfer(ntype(a), seen): fatal(nodes[a].pos, "parallel input does not satisfy inferred Send{concurrency_why()}")
 
 concurrency_atomic_validate = (n: int):
     f = int(nodes[n].sym)

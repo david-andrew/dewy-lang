@@ -1,0 +1,9 @@
+# modes: native native-release
+Plain:type=[n:int64 $send $sync]
+main=()=>{
+    let r=Plain[n=7]
+    concurrent {
+        let a=spawn r.n
+    }
+    printl(a)
+}

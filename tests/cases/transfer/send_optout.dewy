@@ -1,0 +1,10 @@
+# modes: native native-release
+# `$send=false` opts a type out of Send: it cannot be captured by a task.
+Counter:type=[n:int64 $send=false]
+main=()=>{
+    let c=Counter[n=1]
+    concurrent {
+        let a=spawn c.n+1
+    }
+    printl(a)
+}

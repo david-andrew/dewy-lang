@@ -1,0 +1,7 @@
+# modes: native native-release
+Config:type=[scale:int64 $sync=false]
+let config=Config[scale=2]
+main=()=>{
+    let xs=[parallel i in [0..4) i*config.scale]
+    printl(xs)
+}

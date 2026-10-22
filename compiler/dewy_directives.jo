@@ -12,7 +12,7 @@ use 'isolation.jo'
 # Metatags the compiler gives a meaning of its own; any other `$name` in a
 # source may be a bundle (or a loop label), so the bundles are read first.
 dw_dir_known = (name: str) -> bool:
-    name in ["assert", "runtime_assert", "expect", "fail", "breakpoint", "lend", "test", "proof", "capture", "include_bytes", "clamp", "target", "build", "supported_targets", "field", "unsafe_assume", "abstract", "allocator", "no_prelude", "runtime_checks", "prototype", "prototype_warnings", "explicit_copies", "fast_math", "no_nan", "no_inf", "unsafe", "extern", "intrinsic", "export", "realtime", "explicit_allocation_failure", "__copy__", "__drop__", "__move__"]
+    name in ["assert", "runtime_assert", "expect", "fail", "breakpoint", "lend", "test", "proof", "capture", "include_bytes", "clamp", "target", "build", "supported_targets", "field", "unsafe_assume", "abstract", "allocator", "no_prelude", "runtime_checks", "prototype", "prototype_warnings", "explicit_copies", "fast_math", "no_nan", "no_inf", "unsafe", "extern", "intrinsic", "export", "realtime", "explicit_allocation_failure", "__copy__", "__drop__", "__move__", "send", "sync"]
 
 dw_dir_ident = (c: u8) -> bool:
     c >= 'a' and c <= 'z' or c >= 'A' and c <= 'Z' or c >= '0' and c <= '9' or c == '_'

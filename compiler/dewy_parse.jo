@@ -20,6 +20,7 @@ use 'dewy_directives.jo'
 use 'dewy_ffi.jo'
 use 'directives.jo'
 use 'targets.jo'
+use 'concurrency.jo'
 
 # Compact tags shared by lexical tokens and syntax nodes. Names are needed
 # only for formatter/diagnostic text.
@@ -2470,7 +2471,7 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
             outer_siblings = dw_siblings
             dw_siblings = {}
             loop field in rows:
-                if ownership_tag(field) != 0: continue
+                if ownership_tag(field) != 0 or dw_transfer_row(n, field): continue
                 if dw_method_row(field): methods.push(field)
                 else: fields.push(dw_param(field, .vardecl))
             dw_siblings = outer_siblings
@@ -2509,7 +2510,7 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         outer_siblings = dw_siblings
         dw_siblings = {}
         loop field in dw_children(initial):
-            if ownership_tag(field) != 0: continue
+            if ownership_tag(field) != 0 or dw_transfer_row(n, field): continue
             if dw_method_row(field): methods.push(field)
             else: fields.push(dw_param(field, .vardecl))
         dw_siblings = outer_siblings
@@ -3445,6 +3446,29 @@ dw_with_methods = (declaration: int) -> int[]:
     loop method in dw_pending_decls: declarations.push(method)
     dw_pending_decls = []
     declarations
+
+# `$send=false` / `$sync=false` opt a type out of Send / Sync; `$send` and
+# `$sync` claim them, and `$unsafe` among the rows is the claim's boundary
+# (compiler/concurrency.jo).
+dw_transfer_row = (decl: int, row: int) -> bool:
+    parts = dw_dir_parts(row)
+    tag = parts.0
+    if tag == 0: return false
+    name = dewy_syntax[tag].text
+    if name != "send" and name != "sync" and name != "unsafe": return false
+    on = dw_dir_boolean(name, parts.1) == 1
+    bit = 0
+    if name == "unsafe":
+        if on: bit = TRANSFER_UNSAFE
+    else if name == "send":
+        bit = TRANSFER_SEND_OFF
+        if on: bit = TRANSFER_SEND_CLAIM
+    else:
+        bit = TRANSFER_SYNC_OFF
+        if on: bit = TRANSFER_SYNC_CLAIM
+    transfer_tags[decl] = (transfer_tags.get(decl) ?? 0) | bit
+    if bit == TRANSFER_SEND_CLAIM or bit == TRANSFER_SYNC_CLAIM: transfer_claim_pos[decl] = dewy_syntax[tag].pos
+    true
 
 ownership_tag = (row: int) -> int:
     n = dw_unwrap(row)

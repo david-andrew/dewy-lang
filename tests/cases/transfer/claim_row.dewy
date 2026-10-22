@@ -1,0 +1,13 @@
+# modes: native native-release
+Raw:type=[
+    p:ptr<int64>?
+    $unsafe
+    $send
+]
+main=()=>{
+    let r=Raw[p=none]
+    concurrent {
+        let a=spawn r.p =? none
+    }
+    printl(a)
+}
