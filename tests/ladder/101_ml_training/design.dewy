@@ -7,9 +7,9 @@
 # confusion matrix and probe predictions match an independent float-exact
 # oracle.
 #
-# HELD (question 7): tensor syntax and broadcasting are not settled. This is
-# the design surface as the decisions describe it; core.dewy is the passing
-# twin over today's arrays and `parallel`.
+# Tensors as decided (question 7, docs/design/tensors.md): one array type with
+# the shape in the type, dot broadcasting and `new` axes; core.dewy is the twin
+# over flat arrays and `parallel`.
 
 $runtime_checks=false
 
@@ -21,14 +21,14 @@ const HIDDEN:int64=12
 const NOISE:float64=0.8
 
 # Inputs as rows, one-hot targets beside them.
-features=(data:array<Sample>):>NDArray<float64>=>{
+features=(data:array<Sample>):>array<float64 length=[data.length 2]>=>{
     let x=zeros(data.length 2)
     loop i in 0.. and s in data {
         x[i [..]]=[s.x0 s.x1]
     }
     return x
 }
-onehot=(data:array<Sample>):>NDArray<float64>=>{
+onehot=(data:array<Sample>):>array<float64 length=[data.length CLASSES]>=>{
     let t=zeros(data.length CLASSES)
     loop i in 0.. and s in data {
         t[i s.label]=1.0
@@ -36,12 +36,16 @@ onehot=(data:array<Sample>):>NDArray<float64>=>{
     return t
 }
 
-glorot=(@r:Rng rows:int64 cols:int64):>NDArray<float64>=>{
+glorot=(@r:Rng rows:int64 cols:int64):>array<float64 length=[rows cols]>=>{
     let limit=sqrt(6.0/float64(rows+cols))
     return reshape([loop i in [0..rows*cols) (2.0*uniform(@r)-1.0)*limit] rows cols)
 }
 
-Model:type=[w1:NDArray<float64> b1:NDArray<float64> w2:NDArray<float64> b2:NDArray<float64> w3:NDArray<float64> b3:NDArray<float64>]
+Model:type=[
+    w1:array<float64 length=[2 HIDDEN]> b1:array<float64 length=[HIDDEN]>
+    w2:array<float64 length=[HIDDEN HIDDEN]> b2:array<float64 length=[HIDDEN]>
+    w3:array<float64 length=[HIDDEN CLASSES]> b3:array<float64 length=[CLASSES]>
+]
 
 init=(@r:Rng):>Model=>{
     let w1=glorot(@r 2 HIDDEN)
@@ -50,11 +54,12 @@ init=(@r:Rng):>Model=>{
     return [w1=w1 b1=zeros(HIDDEN) w2=w2 b2=zeros(HIDDEN) w3=w3 b3=zeros(CLASSES)]
 }
 
-Activations:type=[h1:NDArray<float64> h2:NDArray<float64> y:NDArray<float64>]
+# The layers of a batch of n rows.
+Activations:type=[h1:array<float64 length=[n HIDDEN]> h2:array<float64 length=[n HIDDEN]> y:array<float64 length=[n CLASSES]>]
 
 # A batch of rows through the network: each bias row broadcasts over the
 # batch through a `new` leading axis.
-forward=(m:Model x:NDArray<float64>):>Activations=>{
+forward=(m:Model x:array<float64 length=[n 2]>):>Activations=>{
     let h1=max.(x*m.w1 .+ m.b1[new ..] 0.0)
     let h2=max.(h1*m.w2 .+ m.b2[new ..] 0.0)
     let y=h2*m.w3 .+ m.b3[new ..]
@@ -62,14 +67,14 @@ forward=(m:Model x:NDArray<float64>):>Activations=>{
 }
 
 # Column sums: a row of ones times the matrix.
-column_sums=(a:NDArray<float64>):>NDArray<float64>=>(ones(1 rows(a))*a)[0 [..]]
+column_sums=(a:array<float64 length=[n k]>):>array<float64 length=[k]>=>(ones(1 n)*a)[0 [..]]
 
 Grads:type=Model
 
 # Gradients of the mean half squared error over the batch. Masks come from
 # the activations: a unit passes gradient where it was positive.
-backward=(m:Model x:NDArray<float64> t:NDArray<float64> a:Activations):>Grads=>{
-    let n=float64(rows(x))
+backward=(m:Model x:array<float64 length=[batch 2]> t:array<float64 length=[batch CLASSES]> a:Activations):>Grads=>{
+    let n=float64(batch)
     let dy=a.y .- t
     let dz2=(dy*transpose(m.w3)) .* (a.h2 .>? 0.0)
     let dz1=(dz2*transpose(m.w2)) .* (a.h1 .>? 0.0)
@@ -85,7 +90,8 @@ Adam:type=[m:Model v:Model decay1:float64 decay2:float64]
 # Zero moments shaped like the model.
 still=(m:Model):>Model=>[w1=m.w1 .* 0.0 b1=m.b1 .* 0.0 w2=m.w2 .* 0.0 b2=m.b2 .* 0.0 w3=m.w3 .* 0.0 b3=m.b3 .* 0.0]
 
-adam_step=(@p:NDArray<float64> @mo:NDArray<float64> @ve:NDArray<float64> g:NDArray<float64> decay1:float64 decay2:float64):>void=>{
+# Weights and biases alike: any shape, the same for the four arrays.
+adam_step=<A>(@p:A @mo:A @ve:A g:A decay1:float64 decay2:float64):>void=>{
     mo=0.9 .* mo .+ (1.0-0.9) .* g
     ve=0.999 .* ve .+ (1.0-0.999) .* (g .* g)
     p .-= 0.01 .* (mo ./ (1.0-decay1)) ./ (sqrt.(ve ./ (1.0-decay2)) .+ 0.00000001)
@@ -103,10 +109,10 @@ train_step=(@m:Model @opt:Adam g:Grads):>void=>{
 }
 
 # Row-wise argmax: the first index of each row's largest value.
-predict=(y:NDArray<float64>):>array<int64>=>[loop r in [0..rows(y)) {
+predict=(y:array<float64 length=[n classes]>):>array<int64>=>[loop r in [0..n) {
     let row=y[r [..]]
     let best:int64=0
-    loop k in [0..cols(y)) {
+    loop k in [0..classes) {
         if row[k] >? row[best] best=k
     }
     best
@@ -129,13 +135,13 @@ main=():>void=>{
         let order=shuffled(@rng train.length)
         let loss:float64=0.0
         let correct:int64=0
-        loop start in [0,BATCH..train.length) {
-            let picked=order[start..start+BATCH)
+        loop start in [0,BATCH..order.length) {
+            let picked=order[$clamp start..start+BATCH)
             let xb=x[picked [..]]
             let tb=t[picked [..]]
             let a=forward(m xb)
             loss+=sum(0.5 .* (a.y .- tb) .^ 2)
-            let hits=predict(a.y) .=? [loop i in picked train[i].label]
+            let hits=predict(a.y) .=? predict(tb)
             correct+=[loop hit in hits if hit hit].length
             train_step(@m @opt backward(m xb tb a))
         }
@@ -148,19 +154,21 @@ main=():>void=>{
     let i=0
     loop batch in guesses {
         loop guess in batch {
-            counts[test[i].label guess]+=1
+            let s=test.get(i)
+            if s is? Sample counts[s.label guess]+=1
             i+=1
         }
     }
-    printl("test {sum([loop c in [0..CLASSES) counts[c c]])}/{test.length}")
+    let right=[loop c in [0..CLASSES) counts[c c]]
+    printl("test {sum(right)}/{test.length}")
     loop c in [0..CLASSES) {
         printl("  class {c}: {[loop p in [0..CLASSES) string(counts[c p])].join(" ")}")
     }
-    let probes=[(-1.0) (-1.0); 1.0 (-1.0); 0.0 0.0; 0.5 0.5]
+    let probes:array<float64 length=[4 2]>=[(-1.0) (-1.0); 1.0 (-1.0); 0.0 0.0; 0.5 0.5]
     let y=forward(m probes.to(device)).y
     let classes=predict(y)
-    loop r in [0..rows(probes)) {
+    loop r in 0.. and guess in classes {
         let shown=[loop k in [0..CLASSES) format(y[r k] ".3f")]
-        printl("probe ({format(probes[r 0] ".1f")}, {format(probes[r 1] ".1f")}) -> {shown.join(" ")} class {classes[r]}")
+        printl("probe ({format(probes[r 0] ".1f")}, {format(probes[r 1] ".1f")}) -> {shown.join(" ")} class {guess}")
     }
 }
