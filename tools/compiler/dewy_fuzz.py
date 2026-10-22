@@ -8,7 +8,7 @@ reordered independent statements, an outlined helper and a loop rewritten as a
 comprehension. The Python oracle supplies the expected stdout. Programs compile
 together as modules of one program per mode (native and web, default and
 release); a failure is rebuilt alone to confirm it, then shrunk. Minimized
-failures go to ~/dev/tmp/dewy-fuzz-failures/ (outside the repository).
+failures go to build/dewy-fuzz-failures/ (untracked).
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from tools.compiler import dewy_fuzz_programs as gen
 
 MODES = ('native', 'native-release', 'web', 'web-release')
 MARK = '@@dewy-fuzz@@'
-FAILURES = Path.home() / 'dev' / 'tmp' / 'dewy-fuzz-failures'
+FAILURES = Path(__file__).resolve().parents[2] / 'build' / 'dewy-fuzz-failures'
 SCRATCH = Path.home() / 'dev' / 'tmp' / 'dewy-fuzz-work'
 RUN_TIMEOUT = 20
 

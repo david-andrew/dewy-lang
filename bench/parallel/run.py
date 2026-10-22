@@ -2,7 +2,7 @@
 """Pinned, interleaved fork-join kernels against GCC/OpenMP.
 
 Use --previous with a pre-change compiler to reproduce the upper-bound probe.
-Artifacts live outside the checkout. Timing output is evidence, not a gate on
+Artifacts go under build/ (untracked). Timing output is evidence, not a gate on
 shared machines; --instructions also reports load-independent process counts.
 """
 from __future__ import annotations
@@ -43,7 +43,7 @@ def main() -> int:
     parser.add_argument('--gate', action='store_true',
                         help='fail below 0.9x OpenMP or above 1.1x sequential time')
     parser.add_argument('--work', type=Path,
-                        default=Path.home() / 'dev/tmp/astra-forkjoin/bench')
+                        default=ROOT / 'build/forkjoin-bench')
     args = parser.parse_args()
     if args.runs < 1 or any(n < 1 or n > 4 for n in args.workers):
         parser.error('positive run counts and 1–4 workers required')

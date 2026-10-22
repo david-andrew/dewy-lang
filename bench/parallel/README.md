@@ -10,7 +10,7 @@ The runner pins to distinct physical cores, interleaves Dewy and GCC `-O3`
 OpenMP runs, checks matching results, and reports load. `--previous PATH` adds
 an older compiler. `--small --runs 1 --workers 1 2` checks all kernel checksums
 quickly. `--gate` exits unsuccessfully below 0.9× OpenMP at any requested worker count
-or above 1.1× the sequential time; use it on a quiet host. Artifacts stay under `~/dev/tmp/astra-forkjoin/bench` by default.
+or above 1.1× the sequential time; use it on a quiet host. Artifacts stay under `build/forkjoin-bench` by default.
 An extra argument to a kernel selects its sequential implementation; worker
 count comes from `SLOPPY_THREADS` or `OMP_NUM_THREADS`.
 

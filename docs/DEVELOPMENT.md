@@ -102,7 +102,7 @@ python3 -m tools.core fuzz --seed 259 --print                      # one program
 - `tools/compiler/dewy_fuzz.py` compiles a batch of programs as modules of one
   program in each mode (native and web, default and release), runs it once and
   compares each program's output with the oracle. A failure is confirmed alone,
-  shrunk, and written to `~/dev/tmp/dewy-fuzz-failures/<kind>-seed<N>/`
+  shrunk, and written to `build/dewy-fuzz-failures/<kind>-seed<N>/`
   (`--failures DIR` elsewhere) with the program, expected and actual output.
 - To add a feature: a node with `render` and `eval`, a `Generator.block_<feature>`
   listed in `FEATURES`; variants and shrinking need nothing more. Programs the
