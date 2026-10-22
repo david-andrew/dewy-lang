@@ -91,12 +91,12 @@ when TARGET == "windows":
         # (code of the interactive prompt's inputs is the program's too: lib/std/repl.jo)
         if (rip < 0x400000 or rip >= 0x400000 + __w32_image_size()) and (rip < __repl_lo or rip >= __repl_hi): return 0          # EXCEPTION_CONTINUE_SEARCH
         if code != 0x80000001 and code != 0xC00000FD and code != 0xC0000005 and code != 0xC0000094 and code != 0xC0000095 and code != 0xC000001D and code != 0xC0000096: return 0
-        what = "crashed (exception 0x{code:x})"
+        what = "crashed (exception 0x{__hex_text(code)})"
         if code == 0x80000001 or code == 0xC00000FD: what = "stack overflow (a function calls itself without end, or too deeply?)"
         else if code == 0xC0000005:
             a = ((rec + 40) as *int)[0]
             if a < rsp + 4096 and a > rsp - (1 << 20): what = "stack overflow (a function calls itself without end, or too deeply?)"
-            else: what = "crashed: memory access at 0x{a:x} (a bad pointer, in code using raw pointers or C?)"
+            else: what = "crashed: memory access at 0x{__hex_text(a)} (a bad pointer, in code using raw pointers or C?)"
         else if code == 0xC0000094 or code == 0xC0000095: what = "arithmetic error"
         else if code == 0xC000001D or code == 0xC0000096: what = "illegal instruction"
         __write_err("panic: {what}\n")
@@ -131,10 +131,10 @@ else when TARGET == "macos":
         if sig == 11 or sig == 10:
             a = ((info + 24) as *int)[0]
             if a < rsp + 4096 and a > rsp - (1 << 20): what = "stack overflow (a function calls itself without end, or too deeply?)"
-            else: what = "crashed: memory access at 0x{a:x} (a bad pointer, in code using raw pointers or C?)"
+            else: what = "crashed: memory access at 0x{__hex_text(a)} (a bad pointer, in code using raw pointers or C?)"
         else if sig == 8: what = "arithmetic error"
         else if sig == 4: what = "illegal instruction"
-        if env("SLOPPY_CRASH_DETAIL") != none: what = "{what} [signal {sig}, address 0x{((info + 24) as *int)[0]:x}, sp 0x{rsp:x}, pc 0x{rip:x}, thread {__tid()}]"
+        if env("SLOPPY_CRASH_DETAIL") != none: what = "{what} [signal {sig}, address 0x{__hex_text(((info + 24) as *int)[0])}, sp 0x{__hex_text(rsp)}, pc 0x{__hex_text(rip)}, thread {__tid()}]"
         __write_err("panic: {what}\n")
         __backtrace_from(rbp, rip)
         __exit(101)
@@ -177,12 +177,23 @@ else when TARGET != "wasm":
         if sig == 11 or sig == 7:
             a = addr[0]
             if a < rsp + 4096 and a > rsp - (1 << 20): what = "stack overflow (a function calls itself without end, or too deeply?)"
-            else: what = "crashed: memory access at 0x{a:x} (a bad pointer, in code using raw pointers or C?)"
+            else: what = "crashed: memory access at 0x{__hex_text(a)} (a bad pointer, in code using raw pointers or C?)"
         else if sig == 8: what = "arithmetic error"
         else if sig == 4: what = "illegal instruction"
         __write_err("panic: {what}\n")
         __backtrace_from(rbp, rip)
         __exit(101)
+
+# what "{x:x}" writes, without the general formatter (spec parsing and floats): every native
+# program has a crash handler
+__hex_text = (x: int) -> str:
+    b: u8[]
+    u = u64(x)
+    if x < 0:
+        __buf_byte(b, '-')
+        u = u64(0) - u
+    __fmt_hex(b, u, 0, false)
+    str_from_bytes(b)
 
 __u16_at = (b: u8[], o: int) -> int: int(b[o]) | (int(b[o + 1]) << 8)
 __u32_at = (b: u8[], o: int) -> int: __u16_at(b, o) | (__u16_at(b, o + 2) << 16)
