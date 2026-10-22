@@ -58,10 +58,6 @@ struct FactDifference:
     limit: int
     at: int = 0
 
-struct FactPair:
-    a: int
-    b: int
-
 struct FactIndexes:
     slots: int[]
     roots: int[]
@@ -71,9 +67,10 @@ struct FactIndexes:
     projection_value: int[]
     projection_next: int[]
     difference_index: int[]
-    incident: int[]
-    difference_head: int[]
-    difference_tail: int[]
+    # (one record per value a row touches: incident rows, then the head and
+    # tail of its row chains by b (direction 0) and by a (direction 1))
+    difference_value: int[]
+    difference_record: int[]
     difference_next: int[]
 
 fact_empty_index = [FactIndexes()]
@@ -101,14 +98,18 @@ struct FactLoan:
     place: PlaceIdentity
     capacity: int
 struct FactSliceEdges:
-    heads: {int: int}
+    heads: int[]
     nodes: int[]
     next: int[]
 
+# A slice's nodes in one open-address index: node -> FACT_MEMBER | FACT_VALUE | FACT_ACTIVE.
+const FACT_MEMBER = 1
+const FACT_VALUE = 2
+const FACT_ACTIVE = 4
 struct FactSlice:
-    members: {int: bool}
-    values: {int: bool}
-    active: {int: bool}
+    flags: int[]
+
+fact_slice_flags = (n: int) -> int: max(0, fact_index_get(fact_slice.flags, n))
 
 fact_slice = FactSlice()
 fact_slice_cache: {int: FactSlice} = {}
@@ -237,7 +238,12 @@ fact_domain = (t0: int, reason: FactReason = .missing, at: int = 0) -> FactBound
     r
 
 fact_slot = (s: FactState, v: int) -> int:
-    if s.index[0].slots.len() != 0: return fact_index_get(s.index[0].slots, v)
+    # (a hashed index may be shared with a longer ancestor: an entry counts
+    # only when it still names v's position)
+    if s.index[0].slots.len() != 0:
+        i = fact_index_get(s.index[0].slots, v)
+        if i >= 0 and i < s.ids.len() and s.ids[i] == v: return i
+        return -1
     lo = 0; hi = s.ids.len()
     loop lo < hi:
         mid = (lo + hi) / 2
@@ -278,6 +284,12 @@ fact_index_get = (index: int[], key: int) -> int:
         slot = (slot + 1) & mask
     -1
 
+# (an empty index sized to take n entries without growing)
+fact_index_sized = (n: int) -> int[]:
+    slots = 8
+    loop slots < n * 2 + 2: slots *= 2
+    fill(0, slots * 2 + 1)
+
 fact_index_put = (index: mut int[], key: int, value: int):
     if index.len() == 0: index = fill(0, 17)
     if (index[0] + 1) * 4 >= index.len():
@@ -311,6 +323,7 @@ fact_projection_key = (base: int, selector: int, element: bool) -> int:
 # state occupies O(V+P+D), including the copy-on-write index box.
 fact_add_value = (s: mut FactState, v: int, b: FactBound):
     if s.index[0].slots.len() == 0 and s.ids.len() > 0 and v < s.ids[s.ids.len() - 1]:
+        s.index[0].slots = fact_index_sized(s.ids.len() * 2)
         loop i in [0..s.ids.len()): fact_index_put(s.index[0].slots, s.ids[i], i)
     if s.index[0].slots.len() != 0: fact_index_put(s.index[0].slots, v, s.ids.len())
     s.ids.push(v)
@@ -330,17 +343,42 @@ fact_add_projection = (s: mut FactState, p: FactProjection):
     s.index[0].projection_next.push(-1)
     s.projections.push(p)
 
+const FACT_RECORD = 5
+
+# (v's row record, made on its first row; counts the row)
+fact_difference_touch = (s: mut FactState, v: int) -> int:
+    r = fact_index_get(s.index[0].difference_value, v)
+    if r < 0:
+        r = s.index[0].difference_record.len() / FACT_RECORD
+        fact_index_put(s.index[0].difference_value, v, r)
+        s.index[0].difference_record += [0, -1, -1, -1, -1]
+    s.index[0].difference_record[r * FACT_RECORD] += 1
+    r
+
+# Rows touching v, or -1 when none does.
+fact_incident = (s: FactState, v: int) -> int:
+    r = fact_index_get(s.index[0].difference_value, v)
+    if r < 0: return -1
+    s.index[0].difference_record[r * FACT_RECORD]
+
+# The first row from v (direction 0: rows by b; 1: rows by a), or -1.
+fact_difference_head = (s: FactState, v: int, direction: int) -> int:
+    r = fact_index_get(s.index[0].difference_value, v)
+    if r < 0: return -1
+    s.index[0].difference_record[r * FACT_RECORD + 1 + direction * 2]
+
 fact_add_difference = (s: mut FactState, row: FactDifference):
     i = s.differences.len()
     fact_index_put(s.index[0].difference_index, fact_pair_key(row.a, row.b), i)
-    fact_index_put(s.index[0].incident, row.a, (max(0, fact_index_get(s.index[0].incident, row.a))) + 1)
-    fact_index_put(s.index[0].incident, row.b, (max(0, fact_index_get(s.index[0].incident, row.b))) + 1)
+    ra = fact_difference_touch(s, row.a)
+    rb = fact_difference_touch(s, row.b)
     loop direction in [0..2):
-        key = ((if direction == 0: row.b else: row.a) << 1) | direction
-        tail = fact_index_get(s.index[0].difference_tail, key)
+        r = if direction == 0: rb else: ra
+        at = r * FACT_RECORD + 1 + direction * 2
+        tail = s.index[0].difference_record[at + 1]
         if tail >= 0: s.index[0].difference_next[tail * 2 + direction] = i
-        else: fact_index_put(s.index[0].difference_head, key, i)
-        fact_index_put(s.index[0].difference_tail, key, i)
+        else: s.index[0].difference_record[at] = i
+        s.index[0].difference_record[at + 1] = i
         s.index[0].difference_next.push(-1)
     s.differences.push(row)
 
@@ -353,7 +391,7 @@ fact_reindex = (s: mut FactState):
     s.projections = []; s.index[0].projection_index = []; s.index[0].projection_head = []; s.index[0].projection_tail = []; s.index[0].projection_next = []; s.index[0].projection_value = []
     loop p in projections: fact_add_projection(s, p)
     differences = s.differences
-    s.differences = []; s.index[0].difference_index = []; s.index[0].incident = []; s.index[0].difference_head = []; s.index[0].difference_tail = []; s.index[0].difference_next = []
+    s.differences = []; s.index[0].difference_index = []; s.index[0].difference_value = []; s.index[0].difference_record = []; s.index[0].difference_next = []
     loop row in differences: fact_add_difference(s, row)
 
 # A full state drops the values nothing current reaches: bindings and their
@@ -778,7 +816,7 @@ fact_difference = (s: mut FactState, a: int, b: int, limit: int, at: int = 0):
     if i >= 0:
         if limit < s.differences[i].limit: s.differences[i] = FactDifference(a, b, limit, at)
         return
-    if s.differences.len() < 256 and (max(0, fact_index_get(s.index[0].incident, a))) < 8 and (max(0, fact_index_get(s.index[0].incident, b))) < 8:
+    if s.differences.len() < 256 and max(0, fact_incident(s, a)) < 8 and max(0, fact_incident(s, b)) < 8:
         fact_add_difference(s, FactDifference(a, b, limit, at))
 
 # Bounded single-source relaxation, never an all-pairs closure. Exhaustion
@@ -788,10 +826,11 @@ fact_distance = (s: FactState, a: int, b: int, limit: int) -> bool:
     if a == b: return limit >= 0
     direct = fact_index_get(s.index[0].difference_index, fact_pair_key(a, b))
     if direct >= 0 and s.differences[direct].limit <= limit: return true
+    # (no row leaves b: the relaxation below would find nothing)
+    if fact_difference_head(s, b, 0) < 0: return false
     terms = [b]
     distances = [0]
     pending = [0]
-    slots: {int: int} = {b: 0}
     cursor = 0
     visits = 0
     loop cursor < pending.len() and visits < 256:
@@ -800,7 +839,7 @@ fact_distance = (s: FactState, a: int, b: int, limit: int) -> bool:
         source = terms[index]
         distance = distances[index]
         previous = -1
-        ri = fact_index_get(s.index[0].difference_head, source << 1)
+        ri = fact_difference_head(s, source, 0)
         loop ri >= 0:
             row = s.differences[ri]
             # Charge the original ordered scan's budget, including skipped rows.
@@ -811,11 +850,13 @@ fact_distance = (s: FactState, a: int, b: int, limit: int) -> bool:
             if not fact_add_fits(distance, row.limit): continue
             value = distance + row.limit
             if row.a == a and value <= limit: return true
-            slot = slots.get(row.a) ?? -1
+            # (at most 32 terms: a scan beats hashing)
+            slot = -1
+            loop t in [0..terms.len()):
+                if terms[t] == row.a: slot = t; break
             if slot < 0:
                 if terms.len() >= 32: continue
                 slot = terms.len()
-                slots[row.a] = slot
                 terms.push(row.a)
                 distances.push(value)
                 pending.push(slot)
@@ -993,10 +1034,11 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         loop i in [0..s.bounds.len()): s.bounds[i] = fact_hull(a.bounds[i], b.bounds[i], at)
         return s
     s = FactState()
-    evidence_index: {ResultEvidence: bool} = {}
-    loop evidence in b.conditional: evidence_index[evidence] = true
-    loop evidence in a.conditional:
-        if evidence_index.has(evidence): s.conditional.push(evidence)
+    if a.conditional.len() > 0 and b.conditional.len() > 0:
+        evidence_index: {ResultEvidence: bool} = {}
+        loop evidence in b.conditional: evidence_index[evidence] = true
+        loop evidence in a.conditional:
+            if evidence_index.has(evidence): s.conditional.push(evidence)
     # Keep immutable evaluations shared by both paths, including snapshots.
     if a.ids == b.ids:
         s.ids = a.ids
@@ -1004,9 +1046,25 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         s.bounds = a.bounds
         loop i in [0..s.bounds.len()): s.bounds[i] = fact_hull(a.bounds[i], b.bounds[i], at)
     else:
-        loop i in [0..a.ids.len()):
-            j = fact_slot(b, a.ids[i])
-            if j >= 0: fact_add_value(s, a.ids[i], fact_hull(a.bounds[i], b.bounds[j], at))
+        # Both paths usually extend one entry frame with their own values: the
+        # shared values are then a's prefix, kept with a's index. O(V).
+        k = 0
+        common = min(a.ids.len(), b.ids.len())
+        loop k < common and a.ids[k] == b.ids[k]: k += 1
+        prefix = true
+        loop i in [k..a.ids.len()):
+            if fact_slot(b, a.ids[i]) >= 0: prefix = false; break
+        if prefix:
+            s.ids = a.ids
+            s.ids.truncate(k)
+            s.bounds = a.bounds
+            s.bounds.truncate(k)
+            s.index[0].slots = a.index[0].slots
+            loop i in [0..k): s.bounds[i] = fact_hull(a.bounds[i], b.bounds[i], at)
+        else:
+            loop i in [0..a.ids.len()):
+                j = fact_slot(b, a.ids[i])
+                if j >= 0: fact_add_value(s, a.ids[i], fact_hull(a.bounds[i], b.bounds[j], at))
     if a.projections == b.projections and a.ids == b.ids:
         s.projections = a.projections
         s.index[0].projection_index = a.index[0].projection_index
@@ -1015,26 +1073,33 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         s.index[0].projection_next = a.index[0].projection_next
         s.index[0].projection_value = a.index[0].projection_value
     else:
-        projections: {FactProjection: bool} = {}
-        loop p in b.projections: projections[p] = true
+        # (b holds p when p is on b's chain for p.base: every projection is chained)
         loop p in a.projections:
-            if fact_slot(s, p.base) >= 0 and fact_slot(s, p.value) >= 0 and projections.has(p): fact_add_projection(s, p)
+            if fact_slot(s, p.base) < 0 or fact_slot(s, p.value) < 0: continue
+            qi = fact_index_get(b.index[0].projection_head, p.base)
+            loop qi >= 0:
+                if b.projections[qi] == p: break
+                qi = b.index[0].projection_next[qi]
+            if qi >= 0: fact_add_projection(s, p)
     left: int[]
     right: int[]
     merged: int[]
-    pairs: {FactPair: int} = {}
+    # (merged value pairs: a scan while few, then an open-address index;
+    # values are below 2^31)
+    pairs: int[]
     loop binding in a.bindings:
         j = fact_binding(b, binding.place)
         if j < 0: continue
         other = b.bindings[j].value
         v = binding.value
-        pair = FactPair(v, other)
-        if let prior = pairs.get(pair): v = merged[prior]
+        pair = fact_pair_key(v, other)
+        prior = fact_pair_find(left, right, pairs, v, other)
+        if prior >= 0: v = merged[prior]
         else if v != other: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at))
         fact_bind(s, binding.place, v)
         if v == binding.value and b.bindings[j].event == binding.event: fact_rebind(s, binding.place, v, binding.event, binding.prior)
-        if not pairs.has(pair):
-            pairs[pair] = merged.len()
+        if prior < 0:
+            fact_pair_add(left, right, pairs, pair)
             left.push(binding.value); right.push(other); merged.push(v)
     # Match projections of merged aggregate values, including current lengths.
     # (each side's non-element projections chained by base value, in order:
@@ -1051,42 +1116,69 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
             q = b.projections[qi]
             if merged.len() >= FACT_CAP: break
             v = p.value
-            pair = FactPair(v, q.value)
-            if let prior = pairs.get(pair): v = merged[prior]
+            pair = fact_pair_key(v, q.value)
+            prior = fact_pair_find(left, right, pairs, v, q.value)
+            if prior >= 0: v = merged[prior]
             else if v != q.value: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, q.value), at))
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(merged[cursor], p.selector, false, v))
-            if not pairs.has(pair):
-                pairs[pair] = merged.len()
+            if prior < 0:
+                fact_pair_add(left, right, pairs, pair)
                 left.push(p.value); right.push(q.value); merged.push(v)
         cursor += 1
-    left_merge: {int: int} = {}; right_merge: {int: int} = {}
-    left_right: {int: int} = {}; right_left: {int: int} = {}
-    loop i in [0..merged.len()):
-        left_merge[left[i]] = merged[i]; right_merge[right[i]] = merged[i]
-        left_right[left[i]] = right[i]; right_left[right[i]] = left[i]
+    if a.differences.len() == 0 and b.differences.len() == 0: return s
+    # (renamings: the last pair naming a value wins)
+    left_merge: int[]; right_merge: int[]
+    left_right: int[]; right_left: int[]
+    if merged.len() > 32:
+        loop i in [0..merged.len()):
+            fact_index_put(left_merge, left[i], merged[i]); fact_index_put(right_merge, right[i], merged[i])
+            fact_index_put(left_right, left[i], right[i]); fact_index_put(right_left, right[i], left[i])
     # Select rows from either predecessor, rename into the merge frame, and
     # require a proof from the other. Branch-local evaluations never escape.
     loop row in a.differences:
         if fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(b, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
-        aa = fact_rename(row.a, left_merge, s)
-        bb = fact_rename(row.b, left_merge, s)
-        ra = fact_rename(row.a, left_right, b)
-        rb = fact_rename(row.b, left_right, b)
+        aa = fact_rename(row.a, left, merged, left_merge, s)
+        bb = fact_rename(row.b, left, merged, left_merge, s)
+        ra = fact_rename(row.a, left, right, left_right, b)
+        rb = fact_rename(row.b, left, right, left_right, b)
         if aa != 0 and bb != 0 and fact_distance(b, ra, rb, row.limit): fact_difference(s, aa, bb, row.limit, row.at)
     # (a tighter row on one side can replace the row the other side shares)
     loop row in b.differences:
         if fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(a, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
-        aa = fact_rename(row.a, right_merge, s)
-        bb = fact_rename(row.b, right_merge, s)
-        ra = fact_rename(row.a, right_left, a)
-        rb = fact_rename(row.b, right_left, a)
+        aa = fact_rename(row.a, right, merged, right_merge, s)
+        bb = fact_rename(row.b, right, merged, right_merge, s)
+        ra = fact_rename(row.a, right, left, right_left, a)
+        rb = fact_rename(row.b, right, left, right_left, a)
         if aa != 0 and bb != 0 and fact_distance(a, ra, rb, row.limit): fact_difference(s, aa, bb, row.limit, row.at)
     s
 
-fact_rename = (v: int, renamed: {int: int}, shared: FactState) -> int:
-    if let value = renamed.get(v): return value
+# v renamed through the last i with from[i] == v (an index once there are many).
+fact_rename = (v: int, from: int[], to: int[], index: int[], shared: FactState) -> int:
+    if index.len() != 0:
+        value = fact_index_get(index, v)
+        if value >= 0: return value
+    else:
+        i = from.len() - 1
+        loop i >= 0:
+            if from[i] == v: return to[i]
+            i -= 1
     if fact_slot(shared, v) >= 0: return v
     0
+
+# The first merged pair (v, other): a scan over at most 32, then indexed.
+fact_pair_find = (left: int[], right: int[], index: int[], v: int, other: int) -> int:
+    if index.len() != 0: return fact_index_get(index, fact_pair_key(v, other))
+    loop i in [0..left.len()):
+        if left[i] == v and right[i] == other: return i
+    -1
+
+fact_pair_add = (left: int[], right: int[], index: mut int[], pair: int):
+    if index.len() == 0 and left.len() >= 32:
+        index = fact_index_sized(64)
+        loop i in [0..left.len()):
+            key = fact_pair_key(left[i], right[i])
+            if fact_index_get(index, key) < 0: fact_index_put(index, key, i)
+    if index.len() != 0: fact_index_put(index, pair, left.len())
 
 fact_unknown = (n: int, b: FactBound, what: str = "assertion", contract: int = 0): wit_unknown(n, b, what, contract)
 
@@ -1165,7 +1257,7 @@ fact_reads_only = (id: IN) -> bool:
 # This is also used for iterators whose backedge transfer is not modeled.
 fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     if n == 0: return
-    if fact_slice.members.has(n) and not fact_slice.active.has(n): return
+    if fact_slice_flags(n) & (FACT_MEMBER | FACT_ACTIVE) == FACT_MEMBER: return
     k = nodes[n].kind
     # (an element or field store havocs only its route within its root: fact_change_route)
     if k == .assign: fact_change_route(s, int(nodes[n].a), false, at, reason)
@@ -1260,7 +1352,7 @@ fact_relational = (s: FactState, v: int, upper: bool) -> int:
         distance = distances[cursor]
         cursor += 1
         previous = -1
-        ri = fact_index_get(s.index[0].difference_head, (source << 1) | int(upper))
+        ri = fact_difference_head(s, source, int(upper))
         loop ri >= 0:
             row = s.differences[ri]
             visits += ri - previous
@@ -1529,7 +1621,7 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
 
 # Nothing is known of v beyond its interval: no projections, no rows.
 fact_top = (s: FactState, v: int) -> bool:
-    fact_index_get(s.index[0].projection_head, v) < 0 and fact_index_get(s.index[0].incident, v) < 0
+    fact_index_get(s.index[0].projection_head, v) < 0 and fact_incident(s, v) < 0
 
 # Two header aggregates whose contents changed (an element written each
 # iteration) are settled when they carry the same non-element projections:
@@ -1548,7 +1640,7 @@ fact_same_shape = (a: FactState, b: FactState, x: int, y: int) -> bool:
     loop qi >= 0:
         count -= 1
         qi = b.index[0].projection_next[qi]
-    count == 0 and fact_index_get(a.index[0].incident, x) < 0 and fact_index_get(b.index[0].incident, y) < 0
+    count == 0 and fact_incident(a, x) < 0 and fact_incident(b, y) < 0
 
 fact_loop_stable = (a: FactState, b: FactState) -> bool:
     loop binding in a.bindings:
@@ -1897,9 +1989,52 @@ fact_slice_children = (n: int) -> int[]:
     out
 
 fact_slice_edge = (edges: mut FactSliceEdges, key: int, node: int):
-    edges.next.push(edges.heads.get(key) ?? -1)
-    edges.heads[key] = edges.nodes.len()
+    edges.next.push(fact_index_get(edges.heads, key))
+    fact_index_put(edges.heads, key, edges.nodes.len())
     edges.nodes.push(node)
+
+# Node-indexed scratch for building one slice: flags and the head of each
+# node's parent-edge chain, valid where the stamp is the current generation.
+# Membership costs O(1) without hashing; only the finished slice is indexed.
+fact_mark_gen = 0
+fact_mark_stamp: int[]
+fact_mark_flags: int[]
+fact_mark_head: int[]
+fact_mark_touched: int[]
+
+fact_mark_begin = ():
+    if fact_mark_stamp.len() < nodes.len():
+        fact_mark_stamp = fill(0, nodes.len() * 2 + 64)
+        fact_mark_flags = fill(0, fact_mark_stamp.len())
+        fact_mark_head = fill(0, fact_mark_stamp.len())
+        fact_mark_gen = 0
+    fact_mark_gen += 1
+    fact_mark_touched = []
+
+fact_mark_of = (n: int) -> int:
+    if fact_mark_stamp[n] != fact_mark_gen: return 0
+    fact_mark_flags[n]
+
+fact_mark_touch = (n: int):
+    if fact_mark_stamp[n] == fact_mark_gen: return
+    fact_mark_stamp[n] = fact_mark_gen
+    fact_mark_flags[n] = 0
+    fact_mark_head[n] = -1
+    fact_mark_touched.push(n)
+
+fact_mark_set = (n: int, flags: int):
+    fact_mark_touch(n)
+    fact_mark_flags[n] = flags
+
+fact_mark_parent = (n: int) -> int:
+    if fact_mark_stamp[n] != fact_mark_gen: return -1
+    fact_mark_head[n]
+
+fact_slice_parent = (parents: mut FactSliceEdges, child: int, node: int):
+    fact_mark_touch(child)
+    parents.next.push(fact_mark_head[child])
+    fact_mark_head[child] = parents.nodes.len()
+    parents.nodes.push(node)
 
 fact_slice_writer = (writers: mut FactSliceEdges, p: PlaceIdentity, n: int):
     if p.declaration == 0: return
@@ -1917,10 +2052,12 @@ fact_slice_target = (writers: mut FactSliceEdges, n: int, at: int):
 fact_slice_prepare = (f: int, summary: bool = false):
     key = (f << 4) | int(summary) | (int(fact_probe_on) << 1) | (int(fact_policy == .RequireStatic) << 2) | (int(result_active or proof_active) << 3)
     if let cached = fact_slice_cache.get(key): fact_slice = cached; return
-    slice = FactSlice()
+    # (O(body nodes + edges) for the slice: node-indexed scratch marks, an
+    # expected O(1) index for writers and for the finished slice)
+    fact_mark_begin()
     parents = FactSliceEdges()
     writers = FactSliceEdges()
-    roots: {int: bool} = {}
+    roots: int[]
     exposed_writes: int[]
     opaque_writes: int[]
     work = [int(fns[f].body)]
@@ -1930,13 +2067,13 @@ fact_slice_prepare = (f: int, summary: bool = false):
     cursor = 0
     loop cursor < work.len():
         n = work[cursor]; cursor += 1
-        if n == 0 or slice.members.has(n): continue
-        slice.members[n] = true
+        if n == 0 or fact_mark_of(n) & FACT_MEMBER != 0: continue
+        fact_mark_set(n, FACT_MEMBER)
         k = nodes[n].kind
         children = fact_slice_children(n)
         loop c in children:
             if c == 0: continue
-            fact_slice_edge(parents, c, n)
+            fact_slice_parent(parents, c, n)
             work.push(c)
         if k == .vardecl:
             if ownership_decls.len() != 0 and nodes[n].b != 0 and ownership_fact_type(ntype(int(nodes[n].b))): active.push(n)
@@ -2018,9 +2155,11 @@ fact_slice_prepare = (f: int, summary: bool = false):
     loop cursor < values.len() or acursor < active.len():
         if acursor < active.len():
             n = active[acursor]; acursor += 1
-            if n == 0 or slice.active.has(n): continue
-            slice.active[n] = true
-            edge = parents.heads.get(n) ?? -1
+            if n == 0: continue
+            mark = fact_mark_of(n)
+            if mark & FACT_ACTIVE != 0: continue
+            fact_mark_set(n, mark | FACT_ACTIVE)
+            edge = fact_mark_parent(n)
             loop edge >= 0:
                 active.push(parents.nodes[edge])
                 edge = parents.next[edge]
@@ -2032,16 +2171,18 @@ fact_slice_prepare = (f: int, summary: bool = false):
                         loop p in kids(arm): values.push(p)
             continue
         n = values[cursor]; cursor += 1
-        if n == 0 or slice.values.has(n): continue
-        slice.values[n] = true
+        if n == 0: continue
+        mark = fact_mark_of(n)
+        if mark & FACT_VALUE != 0: continue
+        fact_mark_set(n, mark | FACT_VALUE)
         active.push(n)
         k = nodes[n].kind
         if k == .ident:
             p = fact_place(n)
             root = fact_root_key(p)
-            if not roots.has(root):
-                roots[root] = true
-                edge = writers.heads.get(root) ?? -1
+            if fact_index_get(roots, root) < 0:
+                fact_index_put(roots, root, 0)
+                edge = fact_index_get(writers.heads, root)
                 loop edge >= 0:
                     definition = writers.nodes[edge]
                     edge = writers.next[edge]
@@ -2071,8 +2212,11 @@ fact_slice_prepare = (f: int, summary: bool = false):
             if dependent: values += fact_slice_children(n)
         else if k == .intrinsic and (nodes[n].aux == i32(int(IN.push)) or nodes[n].aux == i32(int(IN.pop)) or nodes[n].aux == i32(int(IN.clear)) or nodes[n].aux == i32(int(IN.reserve)) or nodes[n].aux == i32(int(IN.insert)) or nodes[n].aux == i32(int(IN.remove))): values.push(kid(n, 0))
         else: values += fact_slice_children(n)
-    fact_slice = slice
-    fact_slice_cache[key] = slice
+    flags = fact_index_sized(fact_mark_touched.len())
+    loop n in fact_mark_touched:
+        if fact_mark_flags[n] != 0: fact_index_put(flags, n, fact_mark_flags[n])
+    fact_slice = FactSlice(flags)
+    fact_slice_cache[key] = fact_slice
 
 # Undemanded values still execute their effectful descendants. Ordinary calls
 # apply the same settled write summary without requesting a numeric return
@@ -2108,11 +2252,12 @@ fact_capture = (n: int, s: mut FactState) -> int:
         if fact_loop_steps > 4096:
             fact_loop_exhausted = true
             return 0
-    if fact_slice.members.has(n):
-        if not fact_slice.active.has(n): return 0
+    mark = fact_slice_flags(n)
+    if mark & FACT_MEMBER != 0:
+        if mark & FACT_ACTIVE == 0: return 0
         k = nodes[n].kind
         control = k == .index or k == .block or k == .if_ or k == .iflet or k == .match_ or k == .while_ or k == .for_ or k == .return_ or k == .break_ or k == .continue_ or k == .and_ or k == .or_ or k == .coalesce
-        if not control and not fact_slice.values.has(n): return fact_slice_capture(n, s)
+        if not control and mark & FACT_VALUE == 0: return fact_slice_capture(n, s)
     k = nodes[n].kind
     if k == .int_lit or k == .bool_lit:
         if not fact_scalar(ntype(n)): return fact_new(s, FactBound(reason = .unsupported, witness = n))
