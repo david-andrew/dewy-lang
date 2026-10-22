@@ -311,6 +311,15 @@ ml_at: int[]
 ml_bump = ():
     ml_gen += 1
 
+# demand_prelude_name, once per name: after its first call for a name it has nothing left to do
+# for it (its units are parsed and registered, or it has none; the math runtimes are loaded)
+demanded: bool[]
+demand_name = (name: int):
+    if name < demanded.len() and demanded[name]: return
+    if demanded.len() <= name: demanded.resize(name * 2 + 64)
+    demanded[name] = true
+    demand_prelude_name(name)
+
 module_lookup = (m: int, name: int) -> int:
     if name < ml_at.len() and ml_at[name] == ml_gen and ml_mod[name] == m: return ml_sym[name]
     s = module_lookup_now(m, name)
@@ -326,7 +335,7 @@ module_lookup = (m: int, name: int) -> int:
     s
 
 module_lookup_now = (m: int, name: int) -> int:
-    demand_prelude_name(name)
+    demand_name(name)
     user = m >= 0 and not modules[m].is_prelude
     if m >= 0:
         if modules[m].is_prelude:
@@ -379,7 +388,7 @@ bind_from_imports = (start: int = 0):
                 if ide_on: ide_alias_of[alias] = nm
             s = 0
             if modules[im].is_prelude:
-                demand_prelude_name(nm)
+                demand_name(nm)
                 s = prelude.get(nm) ?? 0
             else: s = modules[im].names.get(nm) ?? 0
             if s == 0 or syms[s].kind == .module:
@@ -961,7 +970,7 @@ method_names = (recv: int) -> int[]:
 # same visible tables; an unrelated name must not demand its signatures.
 # O(visible method modules + overloads of name), with indexed name lookup.
 method_name_for = (recv: int, name: int) -> bool:
-    demand_prelude_name(name)
+    demand_name(name)
     rt = prune(recv)
     tables = [modules[cur_mod()].names, prelude]
     loop tm in method_modules(rt):
@@ -5018,7 +5027,7 @@ runtime_ffi_done = false
 
 runtime_demand = (name: str):
     if runtime_insts.has(name): return
-    demand_prelude_name(intern(name))
+    demand_name(intern(name))
     if prelude.get(intern(name)) != none: runtime_fn(name)
 
 # (new instances since the last call: an extern among them brings in what its thunk calls)
@@ -5035,7 +5044,7 @@ runtime_ffi_demand = () -> bool:
 
 runtime_fn = (name: str) -> int:
     if let f = runtime_insts.get(name): return f
-    demand_prelude_name(intern(name))
+    demand_name(intern(name))
     s = prelude.get(intern(name)) ?? 0
     if s == 0 or syms[s].kind != .fns: ice("missing runtime function {name}")
     f = get_fn_inst(int(syms[s].decl), [], nodes[int(syms[s].decl)].pos)
@@ -5045,6 +5054,7 @@ runtime_fn = (name: str) -> int:
 
 add_universe = ():
     ml_bump()
+    demanded = []
     exception_builtins()
     tys = [("__dewy_int", T_MATH_INT), ("int", T_INT), ("i8", T_I8), ("i16", T_I16), ("i32", T_I32), ("i64", T_INT), ("u8", T_U8), ("byte", T_U8),
         ("u16", T_U16), ("u32", T_U32), ("u64", T_U64), ("f64", T_FLOAT), ("f32", T_F32),
