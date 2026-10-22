@@ -259,18 +259,18 @@ NATIVE_DIAGNOSTICS = {
     'optional-condition': ('f = (xs:array<int64>):>int64? => none\nmain = () => { if f([1]) { printl"x" } }',
                            '`x isnt? none` asks'),
     'collection-condition': ('main = () => { let xs = [1]\nif xs { printl"x" } }', '`xs.length >? 0`'),
-    'optional-arithmetic': ('f = (x:int64?) => x + 1\nmain = () => f(1)', 'or check it first: `if x isnt? none { ... }`'),
-    'optional-order': ('f = (x:int64?) => x <? 1\nmain = () => f(1)', 'compared with <?, >?'),
-    'union-arithmetic': ('f = (x:int64|string) => x + 1\nmain = () => f(1)', '`if x is? int64 { ... }`'),
+    'optional-arithmetic': ('f = (x:int64?) => x + 1\nmain = ():>void => { f(1) }', 'or check it first: `if x isnt? none { ... }`'),
+    'optional-order': ('f = (x:int64?) => x <? 1\nmain = ():>void => { f(1) }', 'compared with <?, >?'),
+    'union-arithmetic': ('f = (x:int64|string) => x + 1\nmain = ():>void => { f(1) }', '`if x is? int64 { ... }`'),
     'record-operator': ('P:type=[a:int64]\nmain = () => { let p = P[1]\nlet q = p + p }', '`__add__=(a:P b:P):>P=>...`'),
     'text-plus-number': ('main = () => { let s = "a" + 1 }', 'interpolate, `"a{1}"`'),
     'empty-array': ('main = () => { let m = [] }', '`let m:array<int64> = []`'),
     'real-to-integer': ('main = () => { let x:float64 = 1.5\nlet y:int64 = x }', 'int64(x) makes it a whole number'),
-    'union-cast': ('f = (x:int64|string):>int64 => x as int64\nmain = () => f(1)', 'inside `if x is? int64 { }`'),
+    'union-cast': ('f = (x:int64|string):>int64 => x as int64\nmain = ():>void => { f(1) }', 'inside `if x is? int64 { }`'),
     'array-habit': ('main = () => { let xs = [1 2]\nprintl"{xs.size()}" }', "no 'size' for array<int> (use `.length`)"),
     'dict-habit': ('main = () => { let d:dict<string int64> = ["a"->1]\nprintl"{d.size()}" }', '(use `m.length`)'),
     'type-habit': ('main = () => { let x:float = 1.0 }', "unknown type 'float' (use `float64`"),
-    'function-habit': ('f = (x:int64) => { let y = toString(x) }\nmain = () => f(1)', '(use `string(x)`)'),
+    'function-habit': ('f = (x:int64) => { let y = toString(x) }\nmain = ():>void => { f(1) }', '(use `string(x)`)'),
 }
 
 
