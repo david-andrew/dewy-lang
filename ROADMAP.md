@@ -94,20 +94,18 @@ runner, never on the shared box. Kernels: `bench`.
 - Invariants with trusted-validator brands; resources via practical limits.
 - `wrap<uint8>(x)`; `f transmute uint64`; `mod(a b kind=…)`; iterator control
   via `let w=…` and `loop x in @w`; `loop i in 0.. and x in xs` (no `enumerate`).
+- `@(m.method)` places from handles; sibling literals keep positional types;
+  uniform precision (string unions, int ranges); `main` optional, runs once.
 - `$build` record; `Path` file methods; inferred `Send`/`Sync` with
   `$send=false` opt-outs; escapes; short-circuit `and=`/`or=`.
 - Versions: language 0.0.0; extension patch bumps, at most one release a day.
 
 ## Open questions for David
 
-New questions carry a recommended answer, what it unblocks and whether it's
-reversible; reversible ones are implemented provisionally and flagged.
-
-3. Readonly/lifetime-bearing (scoped handle) places beyond `$lend`. (With David.)
-23. Inferring the common parent for sibling minted literals. (With David.)
-25. Whether a binding from a match of string-literal arms keeps the literal
-    union. (With David.)
-- Deferred until real code needs them: index-typed refinements.
+The open-question pass is complete (2026-10-21). New questions carry a
+recommended answer, what it unblocks and whether it's reversible; reversible
+ones are implemented provisionally and flagged. Deferred until real code needs
+them: index-typed refinements.
 
 Each held ladder program's note names the question that holds it.
 

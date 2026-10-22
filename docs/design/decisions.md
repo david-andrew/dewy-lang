@@ -190,4 +190,31 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
 - Escapes: an unknown escape of a letter or digit (`\N`) is an error; any ASCII
   punctuation may be escaped to itself (`\}`, `\{`, `\'`, `\"`, `\\`).
 - `and=`/`or=` short-circuit: `a and= f()` means `a = a and f()`.
+- Places from handles (round 6): `lock` is a method; under the whole-route `@`
+  rule `@shared.lock` is the method handle, and `@(m.method)` takes the place a
+  method returns (grouping makes the call happen). Legal only when the method
+  is declared to return a place; `@` of an ordinary temporary stays an error.
+  Derived places are checked lexically (no lifetime annotations); replacing or
+  releasing the handle while such a place is live is a compile error; the guard
+  releases after the place's last use (`let a=@(shared.lock)`; `a.balance+=10`;
+  `saved=@a` is an error).
+- Common parent: literals of sibling types infer the most precise type:
+  `[Circle[...] Square[...]]` is the positional `[Circle Square]`, accepted where
+  `array<Shape>` is expected. After writes the binding's type becomes the
+  covering element type `array<Circle|Square>`; flow-sensitive facts keep exact
+  statically known contents and length (`shapes[2]` is a `Circle` after a known
+  push) and fade when knowledge runs out (loops, a small position cap).
+- Uniform precision: an unannotated binding's type covers every value written.
+  Strings are discrete literal unions (`'quiet'|'normal'|'verbose'`); ints are
+  ranges (`1..2`, which equals `1|2`); `n+=1` widens the covering set; an
+  unbounded written set (loops, `count+=1`, `mode="{mode}!"`) widens to the base
+  type. This supersedes "ints widen to the base type".
+- `main` is optional: without it a file runs top to bottom as a script; with it,
+  `main` runs automatically exactly once; an explicit top-level `main()` call is
+  an error (recursion inside `main` is fine).
+- `transmute` (`f transmute uint64`) is Dewy's original spelling, restored in
+  place of `bitcast`.
+- The open-question pass is complete (2026-10-21). Anything not covered follows
+  the provisional-default rule: a recommendation plus reversibility,
+  implemented provisionally and flagged.
 
