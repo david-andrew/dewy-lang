@@ -55,3 +55,8 @@ not grounds to weaken the gate.
 String domains are collected lazily during checking and materialized only when a
 consumer (exhaustive match, `members`, finite keys) needs them; storage stays a
 string. An eager finite-set representation was too costly.
+
+Round 6 (integers as ranges): unannotated `int` bindings collect literal writes
+and once-run literal `+=`/`-=` deltas the same lazy way, settled only for an
+exhaustive match or a literal-union conversion (at most 256 values, 8 deltas;
+past that, or for any other write, the set is open and the type is `int`).

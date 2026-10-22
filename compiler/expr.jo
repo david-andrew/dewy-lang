@@ -1034,12 +1034,14 @@ check_place = (n: int, for_mut: bool):
                 locals[r].flags = i32(rf)
             if const_views.len() > 0: const_view_write(r, nodes[n].pos)
             if for_mut and string_domains.len() > 0 and ntype(n) == T_STR: string_domain_write(n, 0)
+            if for_mut and ntype(n) == T_MATH_INT: int_domain_write(n, 0, -1)
             note_write(r, via_closure, nodes[n].pos)
             if ag >= 0: note_global_write(ag)
             return
         if nodes[n].aux == i32(int(SK.global)):
             if readonly_global(int(nodes[n].sym)): place_fatal(nodes[n].pos, "cannot modify const '{name_of(int(nodes[n].name))}'")
             if for_mut and string_domains.len() > 0 and ntype(n) == T_STR: string_domain_write(n, 0)
+            if for_mut and ntype(n) == T_MATH_INT: int_domain_write(n, 0, -1)
             note_global_write(int(nodes[n].sym))
             return
         fatal(nodes[n].pos, "cannot assign to '{name_of(int(nodes[n].name))}'")
@@ -1107,6 +1109,7 @@ check_place = (n: int, for_mut: bool):
 # closure environments independent even when their only write is through a pointer.
 note_storage_access = (n: int):
     if string_domains.len() > 0 and ntype(n) == T_STR: string_domain_write(n, 0)
+    if ntype(n) == T_MATH_INT: int_domain_write(n, 0, -1)
     k = nodes[n].kind
     if k == .field or k == .index or k == .unwrap or k == .narrow:
         note_storage_access(int(nodes[n].a))
@@ -7669,6 +7672,7 @@ check_match = (m: int, expected: int) -> int:
     str_domain = 0
     str_covered: str[]
     str_patterns = dewy and str_sets.len() > 1
+    int_dom = dewy and st == T_MATH_INT
     union_lits: str[]
     if dewy and not is_union(st):
         declared = st
@@ -7854,19 +7858,20 @@ check_match = (m: int, expected: int) -> int:
                     if str_covered.contains(text): fatal(nodes[p].pos, "this arm is unreachable: an earlier arm already matches '{text}'")
                     str_covered.push(text)
                 if types[st].kind == .enum_ and nodes[e].kind == .dotname: seen[int(nodes[e].aux)] = true
-                if domain_known and nodes[kid_lit(e)].kind == .int_lit: arm_values += [nodes[kid_lit(e)].ival, nodes[kid_lit(e)].ival]
+                if (domain_known or int_dom) and nodes[kid_lit(e)].kind == .int_lit: arm_values += [nodes[kid_lit(e)].ival, nodes[kid_lit(e)].ival]
                 continue
             if pk == .prange:
                 if not is_int(representation_type(st)): fatal(nodes[p].pos, "range patterns need an integer value")
                 check_to(int(nodes[p].a), st)
                 check_to(int(nodes[p].b), st)
-                if domain_known and has_flag(p, NF_INCLUSIVE) and nodes[kid_lit(int(nodes[p].a))].kind == .int_lit and nodes[kid_lit(int(nodes[p].b))].kind == .int_lit:
+                if (domain_known or int_dom) and has_flag(p, NF_INCLUSIVE) and nodes[kid_lit(int(nodes[p].a))].kind == .int_lit and nodes[kid_lit(int(nodes[p].b))].kind == .int_lit:
                     arm_values += [nodes[kid_lit(int(nodes[p].a))].ival, nodes[kid_lit(int(nodes[p].b))].ival]
                 continue
             fatal(nodes[p].pos, "invalid pattern")
         if dewy and domain_known and arm_values.len() > 0 and not arm_wild:
             if interval_missing(interval_meet_all(arm_values, domain), covered).len() == 0: fatal(nodes[arm].pos, "this arm is unreachable: earlier arms already match every value it does")
             covered += arm_values
+        else if int_dom and not arm_wild: covered += arm_values
         if narrows:
             # match x: T: ...   x is a T in the arm (T, U: ... a T | U; _: the members not matched yet)
             if arm_wild:
@@ -7932,6 +7937,7 @@ check_match = (m: int, expected: int) -> int:
         loop s in seen:
             if not s: exhaustive = false
     if not exhaustive and dewy and st == T_STR and string_domain_match(m): exhaustive = true
+    if not exhaustive and dewy and st == T_MATH_INT and int_domain_match(m, covered): exhaustive = true
     nodes[m].aux2 = i32(int(exhaustive))
     # (an enum's or a union's match names each of its variants, or has `_:`; a statement too, so
     # that a state added later is not left out quietly)

@@ -1,0 +1,6 @@
+run=(loud:bool)=>{
+    let mode=if loud "loud" else "quiet"
+    mode="{mode}!"
+    return match mode {<"loud">=>0 <"quiet">=>1}
+}
+main=()=>exit(run(true))

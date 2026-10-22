@@ -2199,6 +2199,7 @@ capture_in = (c: int, l: int) -> int:
     locals.push(Local(name = locals[l].name, type = locals[l].type, owner = i32(inst), flags = i32(flags), pos = locals[l].pos, outer = i32(outer)))
     inner = locals.len() - 1
     if flags & LF_VALUECAP != 0 and locals[inner].type == i32(T_STR): string_domain_capture(inner, outer)
+    if flags & LF_VALUECAP != 0 and locals[inner].type == i32(T_MATH_INT): int_domain_capture(inner, outer)
     fns[inst].caps.push(Capture(i32(outer), i32(inner)))
     fns[inst].locals.push(inner)
     inner
@@ -2410,6 +2411,7 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
         if tkind(t) == .typeval or tkind(t) == .module: fatal(nodes[d].pos, "'{name_of(int(globals[g].name))}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
         globals[g].type = i32(t)
         if t == T_STR and nodes[d].a == 0 and dewy_at(nodes[d].pos): string_domain_declare(-g - 1, int(nodes[d].b))
+        else if t == T_MATH_INT and nodes[d].a == 0 and dewy_at(nodes[d].pos): int_domain_declare(-g - 1, int(nodes[d].b))
         # Exact quantity constants have no runtime storage or initialization.
         if has_flag(d, NF_RDONLY) and is_quantity(t) and quantity_constant_scale(int(nodes[d].b)) >= 0:
             globals[g].is_const = true
@@ -3711,6 +3713,8 @@ __check_assign = (s: int) -> int:
             tt = check_expr(tp, 0)
             set_kid(lhs, i, last_checked)
             check_place(last_checked, false)
+            if string_domains.len() > 0 and tt == T_STR: string_domain_write(last_checked, 0)
+            if tt == T_MATH_INT and dewy_at(nodes[s].pos): int_domain_write(last_checked, 0, -1)
             if not can_coerce(0, targ(t, i), tt) and not type_eq(targ(t, i), tt): fatal(nodes[tp].pos, "cannot assign {dt(targ(t, i))} to {dt(tt)}")
         if refine_active:
             contracted = false
@@ -3877,6 +3881,7 @@ __check_assign = (s: int) -> int:
         if replacement != 0: return replacement
     if lt == T_STR and string_domains.len() > 0:
         string_domain_write(lhs, if op == int(Tok.assign): int(nodes[s].b) else: 0)
+    if lt == T_MATH_INT and dewy_at(nodes[s].pos): int_domain_write(lhs, int(nodes[s].b), if op == int(Tok.assign): 0 else: op)
     if op == int(Tok.assign):
         rt = prune(check_expr(int(nodes[s].b), lt))
         if decimal_target != 0 and decimal_float_write(rt, lt): return s
@@ -4159,6 +4164,7 @@ check_vardecl = (s: int):
     if nodes[s].b != 0 and quat_nodes.has(int(nodes[s].b)): quat_locals[l] = true
     locals[l].flags = i32(LF_DECL)
     if t == T_STR and nodes[s].a == 0 and dewy_at(nodes[s].pos): string_domain_declare(l, int(nodes[s].b))
+    else if t == T_MATH_INT and nodes[s].a == 0 and dewy_at(nodes[s].pos): int_domain_declare(l, int(nodes[s].b))
     if has_flag(s, NF_RDONLY):
         locals[l].flags = i32(LF_DECL | LF_CONST | LF_QUIET)
         locals[l].const_init = nodes[s].b
@@ -5967,6 +5973,7 @@ check_program = (main_path: str):
     pc_finish()
     string_domains_finish()
     string_domains_materialize()
+    int_domains_finish()
     if poly_families.len() > 1: poly_finish_warnings()
     if open_globals.len() > 0: settle_open_globals()
     # (make_world written and never called: nothing runs it. A file of definitions alone, with
@@ -6054,6 +6061,7 @@ check_program = (main_path: str):
     pc_finish()
     string_domains_finish()
     string_domains_materialize()
+    int_domains_finish()
     if not errors_only:
         icb = ic_switch(IC_OWNERSHIP, IC_SHARED)
         ownership_finalize()

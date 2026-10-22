@@ -522,6 +522,7 @@ refine_coerce = (n: int, target: int) -> int:
     if ref_has_formals(t) and t != refine_arg_target and not ref_signature_has(owner, t): return n
     wrap_conv(n, .refinement, int(types[t].elem))
     nodes[n].aux2 = i32(t)
+    if dewy_at(nodes[n].pos): int_domain_conversion(n, t)
     refine_requests.push(FactRequest(n, owner))
     refine_owners[owner] = true
     n
@@ -583,6 +584,12 @@ ref_check = (n: int, self: int, args: int[], s: mut FactState):
     t = zonk(int(nodes[n].aux2))
     nodes[n].aux2 = i32(t)
     if not s.live: return
+    # (a binding whose every written value the type holds: string_domains.jo)
+    if int_domain_proven.has(n):
+        nodes[n].ival = 1
+        fact_validated[n] = true
+        ref_assume(t, self, args, s)
+        return
     base = int(types[t].elem)
     proven = true
     loop atom in ref_predicates[int(types[t].st)]:

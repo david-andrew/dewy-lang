@@ -1,0 +1,7 @@
+# quick
+run=(loud:bool)=>{
+    let mode=if loud "loud" else "quiet"
+    if not loud {mode="normal"}
+    return match mode {<"loud">=>"L" <"quiet">=>"Q" <"normal">=>"N"}
+}
+main=()=>printl"{run(true)}{run(false)}"

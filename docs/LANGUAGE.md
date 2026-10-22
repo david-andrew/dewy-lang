@@ -252,6 +252,7 @@ and result types need the parenthesized form, `(x:int64):>int64=>x+1`.
 
 Unannotated string bindings retain the finite domain of all their literal
 writes, including later writes, loop iterations and shared closure writes.
+A conditional of literals (`if loud "loud" else "quiet"`) writes each of them.
 A match without `else` must cover that entire domain, even when it precedes
 some writes. Shadowed bindings and private closure writes have separate domains.
 A nonliteral write or writable escape conservatively widens the domain to
@@ -264,9 +265,16 @@ later writes participate. Type-based `members(U)` retains its compile-time
 specialization. Value domains settle after checking, so `members(mode)` cannot
 supply compile-time record field names while the enclosing code is checked.
 
-Integer literals still infer mathematical `int`; precision is carried as range
-facts, not a smaller storage type. Thus `let count=0; count+=1` and
-`let value=5; value=300` keep ordinary mathematical integer behavior.
+Integers follow the same rule as ranges: an unannotated `int` binding's type
+covers every value written to it, so `let n=1` then `n=2` holds `1..2`
+(the same as `1|2`). Literal writes, conditionals of literals, shared closure
+writes and a `+=`/`-=` of a literal that runs at most once (in the declaring
+function, outside any loop the declaration is not in) each widen the set; a
+match without `else` must cover it, and a conversion to a literal union such as
+`1|2|3` is proven when the set fits. Any other write (`count+=1` in a loop,
+`n=m`, passing `@n`) leaves the set unbounded, which is plain `int`. Storage
+stays mathematical `int` either way: `let count=0; count+=1` and
+`let value=5; value=300` keep ordinary integer behavior.
 
 Types can be inferred, including generic functions. `:>` writes a result type;
 use `:>void` for a function with no result. Named arguments such as `add(b=2 a=40)`

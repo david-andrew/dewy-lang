@@ -1,0 +1,20 @@
+# quick
+# An unannotated integer's type covers every value written to it: literal
+# writes, conditional literals, a compound write that runs once, closures.
+run=()=>{
+    let n=1
+    n+=1
+    let name=match n {<1>=>"one" <2>=>"two"}
+    let k=if name =? "two" -1 else 5
+    let size=0
+    let grow=($capture @size)=>{size=3}
+    grow()
+    size-=1
+    let parts=match k {<-1>=>"minus" <5>=>"five"}
+    let shape=match size {<-1>=>"below" <0>=>"none" <2>=>"two" <3>=>"three"}
+    let level=1
+    level=4
+    let other=match level {<1>=>0 <4>=>4}
+    printl"{name} {parts} {shape} {other}"
+}
+main=()=>run()

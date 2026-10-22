@@ -8,6 +8,7 @@ use 'util.jo'
 use 'types.jo'
 use 'refine.jo'
 use 'expr.jo'
+use 'facts.jo'
 
 string_domains: {int: int[]} = {}
 string_domain_matches: (int, int)[]
@@ -19,6 +20,9 @@ string_domain_captures: {int: int} = {}
 string_domain_declare = (binding: int, value: int):
     if value != 0 and nodes[value].kind == .str_lit and nodes[value].aux != 1:
         string_domains[binding] = [int(nodes[value].sval)]
+        return
+    values: int[]
+    if domain_literals(value, true, values): string_domains[binding] = values
 
 string_domain_binding = (n: int) -> int:
     if nodes[n].kind != .ident: return 0
@@ -36,12 +40,15 @@ string_domain_binding = (n: int) -> int:
 string_domain_write = (lhs: int, value: int):
     binding = string_domain_binding(lhs)
     if not string_domains.has(binding): return
-    if value == 0 or nodes[value].kind != .str_lit or nodes[value].aux == 1:
-        string_domains[binding] = []
-        return
     values = string_domains[binding]
     if values.len() == 0: return
-    values.push(int(nodes[value].sval))
+    if value != 0 and nodes[value].kind == .str_lit and nodes[value].aux != 1:
+        values.push(int(nodes[value].sval))
+        string_domains[binding] = values
+        return
+    if not domain_literals(value, true, values):
+        string_domains[binding] = []
+        return
     string_domains[binding] = values
 
 string_domain_match = (m: int) -> bool:
@@ -152,3 +159,216 @@ string_domains_materialize = ():
             items.push(item)
         set_list(n, items)
     loop f in string_domain_sequence_fns: fns[f].state = 2
+
+# Literal leaves of a written value: a literal, or a conditional choosing
+# between them (`if verbose 'loud' else 'quiet'`), through the conversions and
+# single-value blocks checking adds. Strings give text ids, integers values.
+domain_leaf = (n0: int) -> int:
+    n = n0
+    loop n != 0:
+        k = nodes[n].kind
+        if k == .conv or k == .exprstmt: n = int(nodes[n].a)
+        else if k == .block and nkids(n) == 1 and not has_flag(n, NF_COMPREHENSION): n = kid(n, 0)
+        else: break
+    n
+
+domain_literals = (n0: int, text: bool, out: mut int[], depth: int = 0) -> bool:
+    n = domain_leaf(n0)
+    if n == 0: return false
+    k = nodes[n].kind
+    if text and k == .str_lit and nodes[n].aux != 1:
+        out.push(int(nodes[n].sval))
+        return true
+    if not text:
+        if k == .int_lit and not oversized_literal(n):
+            out.push(nodes[n].ival)
+            return true
+        if k == .unary and nodes[n].op == i32(int(Tok.minus)):
+            v = domain_leaf(int(nodes[n].a))
+            if nodes[v].kind == .int_lit and not oversized_literal(v) and nodes[v].ival > FACT_MIN:
+                out.push(-nodes[v].ival)
+                return true
+    if k == .if_ and nodes[n].c != 0 and depth < 8:
+        return domain_literals(int(nodes[n].b), text, out, depth + 1) and domain_literals(int(nodes[n].c), text, out, depth + 1)
+    false
+
+# Unannotated integer bindings: the covering set of every written value, as
+# literal points plus the deltas of compound writes that run at most once per
+# binding lifetime (same function, no loop between declaration and write).
+# Checking appends O(1) records to a flat log; only consumers (exhaustive
+# matches, refinement conversions) settle it, in one O(log) pass, with each
+# demanded set capped at INT_DOMAIN_CAP values (O(points * 2^deltas) bounded).
+INT_DOMAIN_CAP = 256
+INT_DECL = 0
+INT_POINT = 1
+INT_OPEN = 2
+INT_DELTA = 3
+INT_CAPTURE = 4
+int_log: int[]
+
+int_record = (binding: int, kind: int, a: int, b: int):
+    int_log.push(binding)
+    int_log.push(kind)
+    int_log.push(a)
+    int_log.push(b)
+int_domain_matches: (int, int, int[])[]
+int_domain_conversions: (int, int, int)[]
+int_domain_proven: {int: bool} = {}
+
+int_site = () -> int: if cx >= 0: int(ctxs[cx].inst) * 4096 + min(int(ctxs[cx].loop_depth), 4095) else: -1
+
+int_domain_declare = (binding: int, value: int):
+    site = -1
+    if binding >= 0: site = int_site()
+    leaf = domain_leaf(value)
+    if leaf != 0 and nodes[leaf].kind == .int_lit and not oversized_literal(leaf):
+        int_record(binding, INT_DECL, site, 0)
+        int_record(binding, INT_POINT, nodes[leaf].ival, 0)
+        return
+    values: int[]
+    if not domain_literals(value, false, values): return
+    int_record(binding, INT_DECL, site, 0)
+    loop v in values: int_record(binding, INT_POINT, v, 0)
+
+# op: 0 for `=`, else the compound token. A write the set cannot follow opens it.
+int_domain_write = (lhs: int, value: int, op: int):
+    binding = string_domain_binding(lhs)
+    if binding == 0: return
+    values: int[]
+    if op == 0 and domain_literals(value, false, values):
+        loop v in values: int_record(binding, INT_POINT, v, 0)
+        return
+    if (op == int(Tok.pluseq) or op == int(Tok.minuseq)) and binding > 0 and domain_literals(value, false, values) and values.len() == 1:
+        delta = values[0]
+        if op == int(Tok.minuseq): delta = -delta
+        int_record(binding, INT_DELTA, delta, int_site())
+        return
+    int_record(binding, INT_OPEN, 0, 0)
+
+int_domain_capture = (inner: int, outer: int):
+    root = outer
+    loop int(locals[root].flags) & LF_CAPTURE != 0 and int(locals[root].flags) & LF_VALUECAP == 0: root = int(locals[root].outer)
+    int_record(inner, INT_CAPTURE, root, 0)
+
+struct IntDomain:
+    site: int = -2
+    open: bool = false
+    points: int[]
+    deltas: int[]
+    source: int = 0
+
+int_domain_states: {int: IntDomain} = {}
+
+# One pass over the log for the demanded bindings (and the bindings their
+# value captures start from): O(log + demanded work).
+int_domain_settle = ():
+    demanded: {int: bool} = {}
+    loop request in int_domain_matches: demanded[request.1] = true
+    loop request in int_domain_conversions: demanded[request.1] = true
+    i = int_log.len() - 4
+    loop i >= 0:
+        if int_log[i + 1] == INT_CAPTURE and demanded.has(int_log[i]): demanded[int_log[i + 2]] = true
+        i -= 4
+    i = 0
+    loop i < int_log.len():
+        b = int_log[i]
+        if demanded.has(b):
+            kind = int_log[i + 1]
+            if kind == INT_DECL:
+                d = IntDomain()
+                d.site = int_log[i + 2]
+                int_domain_states[b] = d
+            else if kind == INT_CAPTURE:
+                if int_domain_states.has(int_log[i + 2]):
+                    d = IntDomain()
+                    d.source = int_log[i + 2]
+                    d.site = -1
+                    int_domain_states[b] = d
+            else if int_domain_states.has(b):
+                d = int_domain_states[b]
+                if kind == INT_POINT: d.points.push(int_log[i + 2])
+                else if kind == INT_OPEN: d.open = true
+                else if kind == INT_DELTA:
+                    if d.site < 0 or d.site != int_log[i + 3] or d.deltas.len() >= 8: d.open = true
+                    else: d.deltas.push(int_log[i + 2])
+                int_domain_states[b] = d
+        i += 4
+
+# The settled covering set, as sorted disjoint inclusive intervals; empty when open.
+int_domain_intervals = (binding: int, depth: int = 0) -> int[]:
+    nothing: int[]
+    if not int_domain_states.has(binding) or depth > 64: return nothing
+    d = int_domain_states[binding]
+    if d.open: return nothing
+    points = d.points
+    if d.source != 0:
+        source = int_domain_intervals(d.source, depth + 1)
+        if source.len() == 0: return nothing
+        loop k in [0..source.len() / 2):
+            if source[2 * k + 1] - source[2 * k] >= INT_DOMAIN_CAP: return nothing
+            loop v in [source[2 * k]..source[2 * k + 1] + 1): points.push(v)
+    if points.len() == 0: return nothing
+    seen: {int: bool}
+    set: int[]
+    loop p in points:
+        if not seen.has(p):
+            seen[p] = true
+            set.push(p)
+    loop delta in d.deltas:
+        grown: int[]
+        loop p in set:
+            q = p + delta
+            if (delta > 0 and q < p) or (delta < 0 and q > p): return nothing
+            if not seen.has(q):
+                seen[q] = true
+                grown.push(q)
+        set += grown
+        if set.len() > INT_DOMAIN_CAP: return nothing
+    set.sort()
+    out: int[]
+    loop v in set:
+        if out.len() > 0 and out[out.len() - 1] + 1 == v: out[out.len() - 1] = v
+        else: out += [v, v]
+    out
+
+int_domain_text = (xs: int[]) -> str:
+    text = ""
+    loop k in [0..xs.len() / 2):
+        if len(text) > 0: text += "|"
+        if xs[2 * k] == xs[2 * k + 1]: text += "{xs[2 * k]}"
+        else: text += "{xs[2 * k]}..{xs[2 * k + 1]}"
+    text
+
+# Deferred to int_domains_finish: later writes still join the set.
+int_domain_match = (m: int, covered: int[]) -> bool:
+    binding = string_domain_binding(int(nodes[m].a))
+    if binding == 0: return false
+    int_domain_matches.push((m, binding, covered))
+    true
+
+int_domain_conversion = (n: int, target: int):
+    e = n
+    loop nodes[e].kind == .conv: e = int(nodes[e].a)
+    if nodes[e].kind != .ident or representation_type(ntype(e)) != T_MATH_INT: return
+    binding = string_domain_binding(e)
+    if binding != 0: int_domain_conversions.push((n, binding, target))
+
+int_domains_finish = ():
+    if int_domain_matches.len() == 0 and int_domain_conversions.len() == 0: return
+    int_domain_settle()
+    loop request in int_domain_matches:
+        m = request.0
+        if not int_domain_states.has(request.1): fatal(nodes[m].pos, "match is not exhaustive (add a `_ => ...` arm or `else`)")
+        domain = int_domain_intervals(request.1)
+        if domain.len() == 0: fatal(nodes[m].pos, "match is not exhaustive (the integer's written values are not a bounded set; add `else`)")
+        missing = interval_missing(domain, request.2)
+        if missing.len() > 0: fatal(nodes[m].pos, "this match has no arm for {interval_text(missing)} (the integer holds {int_domain_text(domain)}; add one, or `else`)")
+    loop request in int_domain_conversions:
+        domain = int_domain_intervals(request.1)
+        if domain.len() == 0: continue
+        known, allowed = int_intervals(request.2)
+        if known and interval_missing(domain, allowed).len() == 0: int_domain_proven[request.0] = true
+    int_log = []
+    int_domain_matches = []
+    int_domain_conversions = []
+    int_domain_states = {}
