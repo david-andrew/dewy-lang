@@ -2496,6 +2496,26 @@ spelling yet for the JavaScript that supplies it.
 the Dewy side. `p[i]` reads and writes the `i`th `T` from `p`, `p + n` is `n`
 elements on, and `p as ptr<U>` reinterprets it. A C function's result is the
 claim of its declaration: one declared `ptr<T>` must not return null.
+`xs.ptr` (provisional spelling) is the pointer to an array's elements, for C to
+read or fill; it is valid until the array next changes length or is replaced.
+
+A pointer at the C boundary points to data with C's layout: fixed-width
+numbers, bools, pointers, and records of them. Such a record is a C struct: its
+fields in order, each at its natural alignment, so C fills one in place:
+
+```dewy
+TimeVal:type=[seconds:int64 microseconds:int64]
+gettimeofday=(now:ptr<TimeVal> zone:ptr<uint8>?):>int32 => $extern
+main=():>void=>{
+    $unsafe
+    let now:array<TimeVal>=[TimeVal[0 0]]
+    gettimeofday(now.ptr none)
+    printl(now[0].seconds)
+}
+```
+
+A record holding a string, an array or another managed value has no C layout,
+and a pointer to one is rejected in an `$extern` signature.
 
 Calling a `$extern` function, or naming it as a value, and reading or writing
 through a `ptr<T>` need an unsafe boundary: the setting `$unsafe` on a line of
@@ -2512,7 +2532,9 @@ pid=():>int32 => {
 ```
 
 A foreign call is opaque to effect rows: a function declared `& no_effects`, or
-any closed row, cannot call one. A row written on the `$extern` declaration
+any closed row, cannot call one. It may block, so a `parallel` body cannot call
+one either; tasks can. On Linux, a program with tasks that calls C loads C's
+library on its main thread before its first task. A row written on the `$extern` declaration
 itself (`labs=(x:int64):>int64 & no_effects => $extern`) is trusted instead, as
 part of the unsafe claim.
 

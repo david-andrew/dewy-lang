@@ -1,0 +1,19 @@
+# modes: native native-release
+# A record of fixed-width fields has C's layout: C fills one in place through
+# `xs.ptr`, the pointer to an array's elements.
+TimeVal:type=[seconds:int64 microseconds:int64]
+Pair:type=[small:uint8 wide:uint32]
+gettimeofday=(now:ptr<TimeVal> zone:ptr<uint8>?):>int32 => $extern
+memcpy=(destination:ptr<uint8> source:ptr<uint8> count:uint64):>ptr<uint8> => $extern
+
+main=():>void=>{
+    $unsafe
+    let now:array<TimeVal>=[TimeVal[0 0]]
+    printl(gettimeofday(now.ptr none))
+    printl(now[0].seconds >? 1000000000 and now[0].microseconds <? 1000000)
+    # (uint32 after uint8: three bytes of padding, as in C)
+    let raw:array<uint8>=[7 0 0 0 1 2 0 0]
+    let pairs:array<Pair>=[Pair[0 0]]
+    memcpy(pairs.ptr as ptr<uint8> raw.ptr 8)
+    printl(pairs[0].small pairs[0].wide)
+}

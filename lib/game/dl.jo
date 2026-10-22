@@ -447,10 +447,15 @@ __run_end_fns = ():
 # resolve a C function for `@lib(...) extern fn` declarations (called on first use)
 # (Windows programs: lib/core/windows.jo)
 when TARGET != "windows":
+    # (tasks may resolve C functions at the same time: one at a time)
+    __ffi_lock = 0
     __ffi_resolve = (lib: str, name: str) -> *u8:
+        __task_lock(&__ffi_lock)
         h = __lib_handle(lib)
+        p: *u8 = null
+        if h != null: p = dl_sym(h, name)
+        __task_unlock(&__ffi_lock)
         if h == null: panic("cannot load library {lib} (needed for {name}): {dl_error()}")
-        p = dl_sym(h, name)
         if p == null: panic("function {name} not found in {lib}")
         p
 
@@ -471,3 +476,9 @@ when TARGET != "windows":
 
     # true if the library can be loaded on this system
     lib_available = (lib: str) -> bool: __lib_handle(lib) != null
+
+# (Linux: a program with tasks that calls C loads C's library first, on its main thread: C's
+# start sets up the thread it runs on (its thread pointer, the exit notification), and the
+# tasks, which share the main thread's, are made after it)
+__ffi_start = ():
+    when TARGET == "linux": dl_init()

@@ -3,6 +3,7 @@ use 'partition.jo'
 use 'lazy_bodies.jo'
 use 'frontend.jo'
 use 'effects.jo'
+use 'concurrency.jo'
 use 'targets.jo'
 use 'icount.jo'
 # The Sloppy compiler.
@@ -431,6 +432,7 @@ compile = (path: str, out0: str) -> str:
     if ownership_decls.len() != 0:
         # Initialize thread bookkeeping before construction can acquire a resource.
         init_fns.insert(1, runtime_fn("__owner_start"))
+    if concurrency_ffi_start != 0: init_fns.insert(1, concurrency_ffi_start)
     find_unique_globals(not watch_build and not repl_image and not lower_only)
     if not dbg_on and not watch_build and not repl_image and not lower_only: callback_prepare()
     t1 = time()

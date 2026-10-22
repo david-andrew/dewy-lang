@@ -21,6 +21,14 @@ concurrency_runtime_needed = false
 concurrency_thread_module = -1
 concurrency_task_module = -1
 concurrency_task_core_module = -1
+concurrency_ffi_start = 0
+
+# Whether the checked program calls a C function (a task program only: O(functions) once).
+concurrency_calls_c = () -> bool:
+    loop f in [1..fns.len()):
+        d = int(fns[f].decl)
+        if d != 0 and has_flag(d, NF_EXTERN) and len(fns[f].clib) > 0: return true
+    false
 
 concurrency_builtin_type = (t0: int, name: str) -> bool:
     t = representation_type(t0)
@@ -172,6 +180,11 @@ concurrency_finalize = ():
     # (lowering shields cleanup and checks cancellation in task programs: their runtime, checked now)
     if concurrency_runtime_needed:
         loop name in ["__task_shield_enter", "__task_shield_leave", "__task_canceled"]: check_pending_functions(runtime_fn(name))
+        # (C functions loaded through the system's ld.so: C's library starts on the main thread,
+        # before any task, compiler/main.jo)
+        if not target_wasm and not target_windows and not target_macos and concurrency_calls_c():
+            concurrency_ffi_start = runtime_fn("__ffi_start")
+            check_pending_functions(concurrency_ffi_start)
     if concurrency_tasks.len() > 0 and (target_wasm or target_windows or target_macos):
         fatal(nodes[concurrency_tasks[0]].pos, "the threads task backend currently requires Linux; parallel computation remains portable")
     loop n in concurrency_tasks:

@@ -8746,6 +8746,13 @@ check_field_expr = (n: int, expected: int) -> int:
         nodes[method].name = i32(intern("len"))
         nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
         return check_expr(n, expected)
+    # (Dewy's `xs.ptr`: where an array's elements are, a ptr<T> for C (provisional spelling))
+    if bk == .array and fname == id_dewy_ptr and files[pos_file(nodes[n].pos)].is_dewy:
+        method = mk(.field, nodes[n].pos)
+        nodes[method].a = nodes[n].a
+        nodes[method].name = i32(intern("data"))
+        nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
+        return check_expr(n, expected)
     if bk == .module:
         m = int(types[bt].mod)
         s = module_lookup(m, fname)

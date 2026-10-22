@@ -48,8 +48,12 @@ ffi_check_type = (t0: int, pos: int, extern_: bool, param: bool):
     k = types[t].kind
     side = if extern_: "a `$extern` function" else: "a `$export` function"
     if t == T_MATH_INT: fatal(pos, "`int` cannot cross the C boundary (its size is not fixed): {side} uses int32, int64, uint8, … instead")
-    if k == .int_ or k == .float_ or k == .bool_ or k == .ptr or k == .cfn: return
+    if k == .ptr:
+        ffi_check_pointee(int(types[t].elem), pos)
+        return
+    if k == .int_ or k == .float_ or k == .bool_ or k == .cfn: return
     if k == .opt and tkind(int(types[t].elem)) == .ptr:
+        ffi_check_pointee(int(types[prune(int(types[t].elem))].elem), pos)
         if extern_: return
         fatal(pos, "`$export` takes and returns `ptr<T>` but not yet `ptr<T>?`: C callers would see an optional's layout")
     if k == .str_ and extern_ and param: return
@@ -57,3 +61,30 @@ ffi_check_type = (t0: int, pos: int, extern_: bool, param: bool):
     if k == .str_ and extern_: fatal(pos, "a C function cannot return a string: declare its result as `ptr<uint8>` and copy the bytes it points to")
     more = if extern_: ", `ptr<T>?`, strings (a `char *`) and function types (C function pointers)" else: ""
     fatal(pos, "{what} cannot cross the C boundary: {side} takes and returns fixed-width numbers, bools, `ptr<T>`{more}")
+
+# What a ptr<T> at the C boundary points to has C's layout: a fixed-width number, bool or
+# pointer, or a record of those (and of such records), its fields in order, each at its
+# natural alignment (compiler/types.jo, layout) -- a C struct.
+ffi_check_pointee = (t0: int, pos: int):
+    seen: {int: bool}
+    why = ffi_c_layout(t0, seen)
+    if why != "": fatal(pos, "{dt(t0)} has no C layout ({why}): a pointer for C points to fixed-width numbers, bools, pointers, or records of them")
+
+ffi_c_layout = (t0: int, seen: mut {int: bool}) -> str:
+    t = prune(t0)
+    if seen.has(t): return ""
+    seen[t] = true
+    k = types[t].kind
+    if t == T_MATH_INT: return "`int` has no fixed size"
+    if k == .int_ or k == .float_ or k == .bool_ or k == .ptr or k == .cfn or k == .void_: return ""
+    if k == .opt and tkind(int(types[t].elem)) == .ptr: return ""
+    if k == .fixed: return ffi_c_layout(int(types[t].elem), seen)
+    if k == .struct_:
+        si = int(types[t].st)
+        check_struct_fields(si)
+        loop i in [0..int(structs[si].nfields)):
+            fi = int(structs[si].fields) + i
+            why = ffi_c_layout(int(fields[fi].type), seen)
+            if why != "": return "its field '{name_of(int(fields[fi].name))}': {why}"
+        return ""
+    "{dt(t)} is managed by Dewy"
