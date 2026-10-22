@@ -31,6 +31,7 @@ enum Op:
     checked_add, checked_sub, checked_mul # signed word result, imm = nonreturning overflow helper
     overflow_add, overflow_sub, overflow_mul # bool: signed arithmetic overflow
     streq           # compare runtime strings a and b, including nil (x86-64 only)
+    findb           # dst = the first k in [b, c) whose byte a[k] is one of imm's four (packed, low byte first), or c (x86-64 only)
 
 const VI = 0
 const VF = 1
@@ -384,7 +385,7 @@ ir_operands = (ins: Ins) -> int:
         memcpy, memset, vop:
             ir_use_count = 3
             return -1
-        select, memeq:
+        select, memeq, findb:
             ir_use_count = 3
             return d
         load:

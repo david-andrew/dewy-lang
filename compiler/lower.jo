@@ -6850,6 +6850,20 @@ begin_fn = (name: str, idx: int):
     sret_v = -1
     env_v = -1
 
+find_ids: int[]
+# (the bytes Op.findb looks for, packed, for a runtime function so made (lib/core/str.jo); -1:
+# not one)
+find_bytes_set = (name: int) -> int:
+    if find_ids.len() == 0:
+        loop nm in ["__find_delim", "__find_newline", "__find_line_delim", "__find_line_delim4", "__find_line_delim8"]: find_ids.push(intern(nm))
+    delims = 0x0A | (0x22 << 8) | (0x23 << 16) | (0x27 << 24)
+    if name == find_ids[0]: return delims
+    if name == find_ids[1]: return 0x0A0A0A0A
+    if name == find_ids[2]: return delims | (1 << 32)
+    if name == find_ids[3]: return delims | (1 << 32) | (4 << 33)
+    if name == find_ids[4]: return delims | (1 << 32) | (8 << 33)
+    -1
+
 lower_inst = (lf: int, f: int):
     begin_fn(lfuncs[lf].name, lf)
     owner_begin()
@@ -6876,6 +6890,15 @@ lower_inst = (lf: int, f: int):
     partition_begin(f)
     if refine_active: refine_gen_entry(f)
     ir.ret = ret_vt(cur_ret)
+    if fns[f].decl != 0 and not target_arm64 and not target_wasm and not dbg_on and modules[int(fns[f].mod)].is_prelude:
+        # (the declaration scanner's searches, lib/core/str.jo: sixteen bytes at a time)
+        set = find_bytes_set(int(nodes[int(fns[f].decl)].name))
+        if set >= 0:
+            ir.raw_mem = true
+            result = vreg(VI)
+            emit(.findb, VI, result, 0, 1, 2, set)
+            e_ret(result)
+            return
     if (f == runtime_memeq or f == runtime_streq) and not target_arm64 and not target_wasm and not dbg_on:
         # Ordinary scalar body remains available to the bootstrap, debugger and
         # other targets. Select only the exact private runtime instances.

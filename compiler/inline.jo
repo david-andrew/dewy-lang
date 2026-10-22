@@ -210,7 +210,7 @@ remap = (c0: Ins, callee: IrFn, vm: int[], sm: int[]) -> Ins:
             c.a = i32(vm[a])
             c.b = i32(vm[bb])
             if c.op == .store and int(c.c) & M_INDEX != 0: c.dst = i32(vm[int(c.dst)])
-        memcpy, memset, select, vop, memeq:
+        memcpy, memset, select, vop, memeq, findb:
             c.a = i32(vm[a])
             c.b = i32(vm[bb])
             c.c = i32(vm[int(c.c)])

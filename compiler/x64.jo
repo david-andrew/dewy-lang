@@ -366,7 +366,7 @@ call_like = (ins: Ins) -> bool:
     if op == .intr and ins.imm >= 2: return true
     if op == .call and ins.c == 1 and not dbg_on: return false      # never returns (a panic: with -g, where its caller's variables must be readable)
     if op == .call and ins.c >= CALL_IF_SHARED and ins.c <= CALL_RC_DEC and not target_wasm: return false     # (through a stub keeping every register)
-    if op == .call or op == .calli or op == .callc or op == .syscall or op == .memcpy or op == .memset: return true
+    if op == .call or op == .calli or op == .callc or op == .syscall or op == .memcpy or op == .memset or op == .findb: return true
     if op == .copy or op == .zero: return ins.imm > INLINE_COPY
     false
 
@@ -1696,6 +1696,129 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
         b(0x41); b(0x5B)                       # pop r11
     st(d, RAX)
 
+# The first k in [i, n) whose byte p[k] is one of four (set: packed, low byte first), or n:
+# sixteen bytes at a time (pcmpeqb against each, pmovmskb, bsf), then byte by byte. With bit 32
+# of set, byte 0 (a line end) counts only before a line indented by at most w columns (bits
+# 33..39: w; w = 0 also takes a tab for indentation): compiler/scan.jo's search for the next line
+# that is not part of a body. Allocation treats it as a call (call_like): it uses rax, rcx, rdx,
+# xmm0-xmm9 and its destination.
+emit_findb = (d: int, p: int, i: int, n: int, set0: int):
+    if vloc[d] == LOC_NONE: return
+    lines = set0 & (1 << 32) != 0
+    w = (set0 >> 33) & 127
+    set = set0 & 0xFFFFFFFF
+    mask = dreg(d, R11)
+    saved = vloc[d] < 0
+    if saved:
+        b(0x41); b(0x53)                       # push r11 (spilled destination)
+    ld(RAX, i)
+    ld(RCX, p)
+    ld(RDX, n)
+    op_rr(0x01, true, RAX, RCX)                # add rcx, rax: the address of byte k
+    mov_imm(mask, set)
+    sse_rr(0x66, 0x6E, 2, mask)                # movd xmm2, mask
+    sse_rr(0x66, 0x60, 2, 2)                   # punpcklbw: each byte twice
+    sse_rr(0x66, 0x61, 2, 2)                   # punpcklwd: four times
+    loop k in [0..4):
+        sse_rr(0x66, 0x70, 4 + k, 2)           # pshufd xmm4+k, xmm2: byte k in all sixteen
+        b(k * 0x55)
+    if lines:
+        mov_imm(mask, 0x0920)                  # space, tab
+        sse_rr(0x66, 0x6E, 2, mask)
+        sse_rr(0x66, 0x60, 2, 2)
+        sse_rr(0x66, 0x61, 2, 2)
+        sse_rr(0x66, 0x70, 8, 2)
+        b(0)
+        sse_rr(0x66, 0x70, 9, 2)
+        b(0x55)
+    nop_pad((16 - code.len() % 16) % 16)
+    top = code.len()
+    lea(mask, RAX, if lines: 17 + w else: 16)
+    op_rr(0x39, true, RDX, mask)               # cmp mask, rdx
+    tail = jcc32(CC_G)
+    sse_rm(0xF3, 0x6F, 0, RCX, 0)              # movdqu xmm0, [rcx]
+    sse_rr(0x66, 0x6F, 1, 0)                   # movdqa xmm1, xmm0
+    sse_rr(0x66, 0x74, 1, 4)                   # pcmpeqb xmm1, xmm4
+    if lines:
+        # xmm3: the w + 1 bytes after each are indentation (spaces; at w = 0 a tab too)
+        sse_rm(0xF3, 0x6F, 3, RCX, 1)          # movdqu xmm3, [rcx + 1]
+        if w == 0:
+            sse_rr(0x66, 0x6F, 2, 3)
+            sse_rr(0x66, 0x74, 2, 9)
+        sse_rr(0x66, 0x74, 3, 8)
+        if w == 0: sse_rr(0x66, 0xEB, 3, 2)    # por
+        loop off in [2..w + 2):
+            sse_rm(0xF3, 0x6F, 2, RCX, off)
+            sse_rr(0x66, 0x74, 2, 8)
+            sse_rr(0x66, 0xDB, 3, 2)           # pand
+        sse_rr(0x66, 0xDF, 3, 1)               # pandn: line ends before others
+        sse_rr(0x66, 0x6F, 1, 3)
+    loop k in [1..3):
+        sse_rr(0x66, 0x6F, 3, 0)
+        sse_rr(0x66, 0x74, 3, 4 + k)
+        sse_rr(0x66, 0xEB, 1, 3)               # por xmm1, xmm3
+    sse_rr(0x66, 0x74, 0, 7)
+    sse_rr(0x66, 0xEB, 0, 1)
+    sse_rr(0x66, 0xD7, mask, 0)                # pmovmskb mask, xmm0
+    op_rr(0x85, false, mask, mask)             # test
+    found = jcc32(CC_NE)
+    lea(RAX, RAX, 16)
+    lea(RCX, RCX, 16)
+    jmp_back(top)
+    patch_here(found)
+    rex(false, mask, 0, mask, false)
+    b(0x0F); b(0xBC); modrr(mask, mask)        # bsf mask, mask
+    op_rr(0x01, true, mask, RAX)               # add rax, mask
+    done = jmp32()
+    patch_here(tail)
+    bytes_top = code.len()
+    op_rr(0x39, true, RDX, RAX)                # cmp rax, rdx
+    ends: int[]
+    at_end = jcc32(CC_GE)
+    load_sized(mask, RCX, 0, 1, false)
+    first = 0
+    skips: int[]
+    if lines:
+        # a line end: found unless the w + 1 bytes after it are there and indentation
+        first = 1
+        rex(false, 0, 0, mask, false)
+        b(0x83); modrr(7, mask); b(set & 255)
+        other = jcc32(CC_NE)
+        lea(mask, RAX, w + 1)
+        op_rr(0x39, true, RDX, mask)
+        ends.push(jcc32(CC_GE))                # (fewer bytes left)
+        found_here: int[]
+        loop off in [1..w + 2):
+            load_sized(mask, RCX, off, 1, false)
+            rex(false, 0, 0, mask, false)
+            b(0x83); modrr(7, mask); b(0x20)
+            if w == 0:
+                is_space = jcc32(CC_E)
+                rex(false, 0, 0, mask, false)
+                b(0x83); modrr(7, mask); b(0x09)
+                found_here.push(jcc32(CC_NE))
+                patch_here(is_space)
+            else: found_here.push(jcc32(CC_NE))
+        skips.push(jmp32())                    # indented: not one
+        loop f in found_here: ends.push(f)
+        patch_here(other)
+        load_sized(mask, RCX, 0, 1, false)
+    loop k in [first..4):
+        rex(false, 0, 0, mask, false)
+        b(0x83); modrr(7, mask); b((set >> (8 * k)) & 255)     # cmp mask, byte k
+        ends.push(jcc32(CC_E))
+    loop sk in skips: patch_here(sk)
+    lea(RAX, RAX, 1)
+    lea(RCX, RCX, 1)
+    jmp_back(bytes_top)
+    patch_here(at_end)
+    mov_rr(RAX, RDX)                           # (n, also when i was past it)
+    loop e in ends: patch_here(e)
+    patch_here(done)
+    if saved:
+        b(0x41); b(0x5B)                       # pop r11
+    st(d, RAX)
+
 # fused compare + branch: next instruction consumes the flag
 fused_cc = -1
 fuse_skip = -1             # an instruction folded into the branch after it
@@ -2145,6 +2268,8 @@ emit_ins = (pos: int, ins: Ins):
             st(d, r)
         memeq, streq:
             emit_memeq(d, a, bb, int(ins.c), false, op == .streq)
+        findb:
+            emit_findb(d, a, bb, int(ins.c), int(ins.imm))
         copy:
             size = int(ins.imm)
             if size <= INLINE_COPY:

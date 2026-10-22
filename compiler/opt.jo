@@ -49,7 +49,7 @@ o_rewrite = (ins: mut Ins):
             ins.a = o_regs[a].repl
         ret:
             if a >= 0: ins.a = o_regs[a].repl
-        memcpy, memset, select, vop, memeq:
+        memcpy, memset, select, vop, memeq, findb:
             ins.a = o_regs[a].repl
             ins.b = o_regs[bb].repl
             ins.c = o_regs[int(ins.c)].repl

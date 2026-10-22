@@ -2835,6 +2835,56 @@ parse_file = (file: int) -> int[]:
     toks = []
     decls
 
+# The top-level declarations in src[start..end) of file (a unit of compiler/scan.jo's index: it
+# starts a line that is not indented), function bodies left for later as in a library file
+parse_span = (file: int, start: int, end: int) -> int[]:
+    if id_void == 0:
+        id_void = intern("void")
+        id_cfn = intern("cfn")
+        id_end = intern("end")
+        id_type = intern("type")
+        id_soa = intern("soa")
+        id_from = intern("from")
+    saved_toks = toks
+    saved_ti = ti
+    saved_file = p_file
+    saved_src = p_src
+    saved_base = p_base
+    saved_nt = p_no_tuple
+    saved_m = p_matrix
+    saved_h = p_header
+    saved_lazy = p_lazy
+    saved_top = p_top_decl
+    p_file = file
+    p_src = files[file].src
+    lx_lazy = true
+    toks = lex(file, p_src, start, end)
+    lx_lazy = false
+    ti = 0
+    p_base = 0
+    p_no_tuple = false
+    p_matrix = 0
+    p_header = false
+    p_lazy = true
+    p_top_decl = false
+    decls: int[]
+    skip_newlines()
+    loop pk() != .eof:
+        d = parse_toplevel()
+        if d != 0: decls.push(d)
+        skip_newlines()
+    toks = saved_toks
+    ti = saved_ti
+    p_file = saved_file
+    p_src = saved_src
+    p_base = saved_base
+    p_no_tuple = saved_nt
+    p_matrix = saved_m
+    p_header = saved_h
+    p_lazy = saved_lazy
+    p_top_decl = saved_top
+    decls
+
 # the body of function declaration d, parsed now if it was left for later
 ensure_body = (d: int):
     b = int(nodes[d].b)

@@ -179,6 +179,10 @@ ic_lines_report = ():
         n = code_lines(files[f].src, 0, len(files[f].src))
         if len(lib_root) > 0 and starts_with(files[f].path, lib_root): library += n
         else: root += n
+    for_u = 0
+    loop for_u < pl_units.len():
+        library += code_lines(files[pl_units[for_u]].src, pl_units[for_u + 1], pl_units[for_u + 2])
+        for_u += 3
     reached = 0
     for_i = 0
     loop for_i < pl_reached.len():

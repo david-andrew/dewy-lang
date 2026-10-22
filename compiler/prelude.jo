@@ -1,56 +1,215 @@
-# Demand loading for the optional game prelude. Core/std remain eager: their
-# declarations define the language's builtins and implicit native runtime.
+# Demand loading for the prelude (lib/core, lib/std, lib/game). Each file is indexed by a fresh
+# scan (scan.jo): its top-level units (a declaration with its attributes, or a `when` block), their
+# spans and the names they declare. Nothing else of a unit is lexed or parsed until one of its names
+# is asked for (demand_prelude_name, from every lookup); then every unit declaring that name is
+# parsed and registered, in module and file order, so an overload family is whole before one of
+# it is chosen. Units that are not plain declarations (statements, imports) and nominal types
+# (closed before checking: errors.jo) are parsed at once; exports once their module is in use (with
+# its first unit asked for). Interactive sessions, and a game's library when the program has an
+# update or draw, are parsed whole.
 use 'check.jo'
 use 'icount.jo'
 use 'util.jo'
 use 'ast.jo'
 use 'frontend.jo'
 use 'parse.jo'
+use 'scan.jo'
 use 'ide.jo'
 use 'main.jo'
 
-prelude_index: {str: str[]}
-prelude_pending: {int: bool}
-prelude_names: {int: int[]}
 prelude_game_hint = false
+prelude_lazy = false
+pu_mod: int[]                   # unit -> its module
+pu_done: bool[]                 # unit -> parsed
+pm_exports: {int: int[]}        # module -> its units with exports: parsed once it is in use
+# the names the index found, by their bytes (open addressing): each entry's first sight, its hash,
+# and the units declaring it (in module and file order), parsed once the name is asked for
+pn_slots: int[]
+pn_file: int[]
+pn_at: int[]
+pn_len: int[]
+pn_hash: int[]
+pn_post: int[]                  # entry -> its first posting (a unit, then the next posting), or -1
+pn_last: int[]
+post_unit: int[]
+post_next: int[]
+pn_done: bool[]
+pn_pending = 0
+pn_seen: bool[]                 # by name: looked for in the index already
+prelude_new_decls: int[]        # declarations parsed on demand, in that order (dewy_methods.jo)
 
-read_prelude_index = ():
-    # Interactive sessions need future names and complete completion lists.
-    if ide_on or repl_image or watch_build or prelude_game_hint: return
-    if let src = read_file(lib_dir + "/prelude.index"):
-        loop line in split(src, "\n"):
-            fields_ = split(line, " ")
-            if fields_.len() >= 3: prelude_index[fields_[0]] = fields_
+# Whether the prelude is indexed: interactive sessions need future names and complete completion
+# lists, and so parse it all
+prelude_lazy_setup = ():
+    prelude_lazy = not (ide_on or repl_image or watch_build)
 
-defer_prelude = (path: str, entry: str[]) -> bool:
+# Index the prelude file at path as a module of its own; false: load it whole (load_module)
+defer_prelude = (path: str, sub: str) -> bool:
+    if not prelude_lazy or (sub == "game" and prelude_game_hint): return false
     src = read_source(path)
     if src == none: return false
-    # An edited or third-party library is always parsed normally. The index is
-    # an optimization, never the authority for the library's exported names.
-    if (to_int(entry[1]) ?? 0) != source_digest(src!): return false
-    d = lib_dir + "/game"
+    slash = rfind(path, "/")
+    d = path[..slash)
     fi = files.len()
     files.push(SrcFile(path, d, src!))
     mi = modules.len()
-    modules.push(Module(name = i32(intern(strip_ext(entry[0]))), file = i32(fi), dir = d, is_prelude = true))
+    modules.push(Module(name = i32(intern(strip_ext(path[slash + 1..]))), file = i32(fi), dir = d, is_prelude = true))
     module_by_path[module_path_key(path)] = mi
-    prelude_pending[mi] = true
-    loop i in [2..entry.len()):
-        nm = intern(entry[i])
-        owners = prelude_names.get(nm) ?? []
-        owners.push(mi)
-        prelude_names[nm] = owners
+    icb = ic_switch(IC_LOAD, IC_LIB)
+    r = scan_source(src!)
+    eager: int[]
+    loop u in [r.0..r.1):
+        pu_mod.push(mi)
+        pu_done.push(false)
+        if su_flags[u] & (SU_EAGER | SU_NOMINAL) != 0: eager.push(u)
+        else:
+            # (exports join once their module is in use: with its first unit asked for)
+            if su_flags[u] & SU_EXPORT != 0:
+                xs = pm_exports.get(mi) ?? []
+                xs.push(u)
+                pm_exports[mi] = xs
+            p = data(src!)
+            loop x in [su_name0[u]..su_name0[u + 1]):
+                e = pn_entry(fi, p, su_name_at[x], su_name_len[x])
+                if pn_last[e] < 0 or post_unit[pn_last[e]] != u:
+                    post_unit.push(u)
+                    post_next.push(-1)
+                    k = post_unit.len() - 1
+                    if pn_last[e] < 0: pn_post[e] = k
+                    else: post_next[pn_last[e]] = k
+                    pn_last[e] = k
+    modules[mi].decls = prelude_parse_units(eager)
+    ic_restore(icb)
     true
 
-parse_prelude_module = (m: int):
-    if not prelude_pending.has(m): return
-    prelude_pending.remove(m)
+# The index entry of the name at p[at..at + n) of file f, made if it is new
+pn_entry = (f: int, p: *u8, at: int, n: int) -> int:
+    if pn_slots.len() == 0: pn_slots = fill(0, 1 << 13)
+    h = hash_bytes(p + at, n)
+    mask = pn_slots.len() - 1
+    i = h & mask
+    loop true:
+        e = pn_slots[i]
+        if e == 0: break
+        e -= 1
+        if pn_hash[e] == h and pn_len[e] == n and __mem_eq(data(files[pn_file[e]].src) + pn_at[e], p + at, n): return e
+        i = (i + 1) & mask
+    e = pn_hash.len()
+    pn_file.push(f)
+    pn_at.push(at)
+    pn_len.push(n)
+    pn_hash.push(h)
+    pn_post.push(-1)
+    pn_last.push(-1)
+    pn_done.push(false)
+    pn_pending += 1
+    pn_slots[i] = e + 1
+    if pn_hash.len() * 2 > pn_slots.len():
+        # (grown: every entry placed again)
+        pn_slots = fill(0, pn_slots.len() * 2)
+        mask = pn_slots.len() - 1
+        loop k in [0..pn_hash.len()):
+            j = pn_hash[k] & mask
+            loop pn_slots[j] != 0: j = (j + 1) & mask
+            pn_slots[j] = k + 1
+    e
+
+# The entry of an interned name, or -1 (looked for once per name)
+pn_find = (name: int) -> int:
+    if pn_pending == 0: return -1
+    if name < pn_seen.len() and pn_seen[name]: return -1
+    loop pn_seen.len() <= name: pn_seen.push(false)
+    pn_seen[name] = true
+    if pn_slots.len() == 0: return -1
+    s = names[name]
+    n = len(s)
+    h = hash_bytes(data(s), n)
+    mask = pn_slots.len() - 1
+    i = h & mask
+    loop true:
+        e = pn_slots[i]
+        if e == 0: return -1
+        e -= 1
+        if pn_hash[e] == h and pn_len[e] == n and __mem_eq(data(files[pn_file[e]].src) + pn_at[e], data(s), n): return e
+        i = (i + 1) & mask
+    -1
+
+# Parse units (of one module, in file order); their declarations
+prelude_parse_units = (us: int[]) -> int[]:
+    out: int[]
+    loop u in us:
+        if pu_done[u]: continue
+        pu_done[u] = true
+        m = pu_mod[u]
+        f = int(modules[m].file)
+        if pl_on:
+            pl_units.push(f)
+            pl_units.push(su_start[u])
+            pl_units.push(su_end[u])
+        loop d in parse_span(f, su_start[u], su_end[u]): out.push(d)
+    out
+
+# The units declaring name, parsed and registered (with their modules' other declarations, in
+# file order)
+prelude_demand_units = (name: int):
+    e = pn_find(name)
+    if e >= 0: prelude_demand_entry(e)
+
+prelude_demand_entry = (e: int):
+    if pn_done[e]: return
+    pn_done[e] = true
+    pn_pending -= 1
+    us: int[]
+    k0 = pn_post[e]
+    loop k0 >= 0:
+        us.push(post_unit[k0])
+        k0 = post_next[k0]
     icb = ic_switch(IC_LOAD, IC_LIB)
-    p_lazy = true
-    if pl_on: pl_files.push(int(modules[m].file))
-    modules[m].decls = source_declarations(int(modules[m].file))
-    p_lazy = false
+    k = 0
+    loop k < us.len():
+        m = pu_mod[us[k]]
+        group: int[]
+        loop k < us.len() and pu_mod[us[k]] == m:
+            group.push(us[k])
+            k += 1
+        if let xs = pm_exports.get(m):
+            pm_exports.remove(m)
+            loop x in xs:
+                if not pu_done[x] and not group.contains(x): group.push(x)
+            # (in file order)
+            loop a in [1..group.len()):
+                v = group[a]
+                b = a
+                loop b > 0 and group[b - 1] > v:
+                    group[b] = group[b - 1]
+                    b -= 1
+                group[b] = v
+        decls = prelude_parse_units(group)
+        if decls.len() == 0: continue
+        loop d in decls: prelude_new_decls.push(d)
+        # (the module's declarations stay in file order)
+        loop d in decls:
+            i = modules[m].decls.len()
+            modules[m].decls.push(d)
+            loop i > 0 and nodes[modules[m].decls[i - 1]].pos > nodes[d].pos:
+                modules[m].decls[i] = modules[m].decls[i - 1]
+                i -= 1
+            modules[m].decls[i] = d
+        ic_restore(icb)
+        if m < registered.len() and registered[m]: register_decls(m, decls)
+        icb = ic_switch(IC_LOAD, IC_LIB)
     ic_restore(icb)
+
+# Every unit still unparsed (a diagnostic listing every name, an explicit import of a whole module)
+prelude_demand_all = ():
+    loop e in [0..pn_hash.len()): prelude_demand_entry(e)
+
+# Names the compiler reads from the prelude map directly (prelude.get(intern("...")) and
+# rt_global): registered with their modules from the start (tests/test_prelude_loading.py keeps
+# this list whole)
+prelude_known = ["Map", "NDArray", "Missing", "Console", "Set", "__crash_install", "__c_threads", "__cpu_avx2", "__loop_budget", "__mt_active"]
+prelude_known_names = ():
+    loop nm in prelude_known: demand_prelude_name(intern(nm))
 
 math_runtime_loaded = false
 math_eval_loaded = false
@@ -80,11 +239,9 @@ demand_prelude_name = (name: int):
         bind_from_imports(first_import)
         if module_ctx.len() > 0: setup_module_contexts(init_fns[0])
         late_module_imports = true
-    if let owners = prelude_names.get(name):
-        prelude_names.remove(name)
-        # Register all overload owners before selecting one. Registration and
-        # later lazy body checks can demand further names, reaching a fixed point.
-        loop m in owners: register_module(m)
+    # (all overload owners before one is selected; registration and later lazy body checks can
+    # demand further names, reaching a fixed point)
+    if pn_pending > 0: prelude_demand_units(name)
 
 # Deferred declarations retain the eager prelude's module/within-file order.
 prelude_decl_before = (a: int, b: int) -> bool:

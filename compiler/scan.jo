@@ -1,0 +1,302 @@
+# Fresh declaration index of a library source: its top-level units (a declaration with its
+# attributes, or a `when` block with its branches), their spans and the names they declare.
+# No tokens: a sixteen-bytes-at-a-time search (lib/core/str.jo's __find_line_delim, Op.findb)
+# goes from one line that is not indented to the next, stopping only at quotes and comments, and
+# only the first words of such a line (or of a declaration line in a `when` branch) are read.
+# Strings may span lines (lx_skip_str's rules), so every quote outside a comment is followed to its
+# end. Cost: the scanned bytes, the quotes and comments, the units and their names.
+use 'util.jo'
+
+const SU_EAGER = 1          # not a plain declaration (a statement, an import): parsed with its module
+const SU_NOMINAL = 2        # @nominal: declared before any function is checked
+const SU_EXPORT = 4         # @export: kept once its module is in use
+const SU_WHEN = 8           # a `when` block: its branches' declarations are its names
+
+su_start: int[]
+su_end: int[]
+su_flags: int[]
+su_name0: int[]             # (the unit's names: [su_name0[u]..su_name0[u + 1]) of the two below)
+su_name_at: int[]           # (where a name is in the source, and its length: not interned until asked for)
+su_name_len: int[]
+
+sc_p: *u8 = null
+sc_n = 0
+
+# (bytes of a name: letters, digits, '_')
+sc_cls: u8[]
+sc_ident_char = (c: u8) -> bool: sc_cls[int(c)] != 0
+
+# past the string whose quote is at i0, as lx_skip_str reads it; -1 if it does not end
+sc_skip_str = (i0: int, raw: bool) -> int:
+    p = sc_p
+    n = sc_n
+    q = p[i0]
+    triple = q == '"' and i0 + 2 < n and p[i0 + 1] == '"' and p[i0 + 2] == '"'
+    i = i0 + 1
+    if triple: i = i0 + 3
+    depth = 0
+    loop i < n:
+        c = p[i]
+        if depth == 0:
+            if c == '\\' and not raw:
+                i += 2
+                continue
+            if triple:
+                if c == '"' and i + 2 < n and p[i + 1] == '"' and p[i + 2] == '"': return i + 3
+            else if c == q: return i + 1
+            if not raw and c == '{{':
+                if i + 1 < n and p[i + 1] == '{{':
+                    i += 2
+                    continue
+                depth = 1
+        else:
+            if c == '{{': depth += 1
+            else if c == '}}': depth -= 1
+            else if c == '"' or c == '\'':
+                e = sc_skip_str(i, false)
+                if e < 0: return -1
+                i = e
+                continue
+        i += 1
+    -1
+
+# the '\n' ending the line that goes on at i (past strings, which may span lines), or the end
+sc_line_end = (i0: int) -> int:
+    p = sc_p
+    n = sc_n
+    i = i0
+    loop true:
+        i = __find_delim(p, i, n)
+        if i >= n: return n
+        ch = p[i]
+        if ch == '\n': return i
+        if ch == '#': return __find_newline(p, i, n)
+        raw = i > 0 and p[i - 1] == 'r' and (i < 2 or not sc_ident_char(p[i - 2]))
+        i = sc_skip_str(i, raw)
+        if i < 0: return n
+    n
+
+sc_word_is = (j: int, w: str) -> bool:
+    k = len(w)
+    if j + k > sc_n: return false
+    p = sc_p + j
+    q = data(w)
+    loop t in [0..k):
+        if p[t] != q[t]: return false
+    j + k >= sc_n or sc_cls[int(p[k])] == 0
+
+sc_spaces = (j0: int) -> int:
+    j = j0
+    loop j < sc_n and (sc_p[j] == ' ' or sc_p[j] == '\t'): j += 1
+    j
+
+sc_ident_end = (j0: int) -> int:
+    p = sc_p
+    n = sc_n
+    j = j0
+    loop j < n and sc_cls[int(p[j])] != 0: j += 1
+    j
+
+# past a bracketed group starting at j ('[' or '('), on this line; -1 when it does not close here
+sc_group_end = (j0: int) -> int:
+    depth = 0
+    j = j0
+    loop j < sc_n and sc_p[j] != '\n':
+        c = sc_p[j]
+        if c == '[' or c == '(': depth += 1
+        else if c == ']' or c == ')':
+            depth -= 1
+            if depth == 0: return j + 1
+        j += 1
+    -1
+
+sc_unit = -1
+sc_attr_open = false
+sc_src = ""
+
+sc_name = (src: str, a: int, b: int):
+    if b > a:
+        su_name_at.push(a)
+        su_name_len.push(b - a)
+
+# The declaration (or attributes) on the line at j: its names into the current unit; whether
+# the line held attributes alone (the declaration is on a later line)
+sc_classify = (src: str, j0: int) -> bool:
+    j = j0
+    p = sc_p
+    attrs = false
+    loop j < sc_n and p[j] == '@':
+        e = sc_ident_end(j + 1)
+        if sc_word_is(j + 1, "nominal"): su_flags[sc_unit] |= SU_NOMINAL
+        if sc_word_is(j + 1, "export"): su_flags[sc_unit] |= SU_EXPORT
+        j = e
+        if j < sc_n and p[j] == '(':
+            g = sc_group_end(j)
+            if g < 0:
+                su_flags[sc_unit] |= SU_EAGER
+                return false
+            j = g
+        j = sc_spaces(j)
+        attrs = true
+    if j >= sc_n or p[j] == '\n' or p[j] == '#' or p[j] == '\r': return attrs
+    # (keywords by their first letter: most lines start with a name)
+    c0 = p[j]
+    if c0 == 'w' and sc_word_is(j, "when"):
+        su_flags[sc_unit] |= SU_WHEN
+        return false
+    if (c0 == 'c' and sc_word_is(j, "const")) or (c0 == 's' and sc_word_is(j, "struct")) or (c0 == 'e' and (sc_word_is(j, "enum") or sc_word_is(j, "extern"))):
+        k = sc_spaces(sc_ident_end(j))
+        sc_name(src, k, sc_ident_end(k))
+        return false
+    if c0 == 't' and sc_word_is(j, "type"):
+        k = sc_spaces(sc_ident_end(j))
+        e = sc_ident_end(k)
+        a = sc_spaces(e)
+        if e > k and a < sc_n and (p[a] == '=' or p[a] == '['):
+            sc_name(src, k, e)
+            return false
+    if p[j] == '(':
+        # an operator's declaration: ([]=)[K, V] = ...
+        k = j + 1
+        loop k < sc_n and p[k] != ')' and p[k] != '\n': k += 1
+        if k < sc_n and p[k] == ')':
+            sc_name(src, j + 1, k)
+            return false
+        su_flags[sc_unit] |= SU_EAGER
+        return false
+    if sc_ident_char(p[j]) and not (p[j] >= '0' and p[j] <= '9'):
+        # name [= | : | [T] =], or a, b = ...
+        first = su_name_at.len()
+        k = j
+        loop true:
+            e = sc_ident_end(k)
+            sc_name(src, k, e)
+            k = sc_spaces(e)
+            if k < sc_n and p[k] == '[':
+                g = sc_group_end(k)
+                if g < 0: break
+                k = sc_spaces(g)
+            if k < sc_n and p[k] == ',':
+                k = sc_spaces(k + 1)
+                if k < sc_n and sc_ident_char(p[k]): continue
+                break
+            if k < sc_n and ((p[k] == '=' and (k + 1 >= sc_n or p[k + 1] != '=')) or p[k] == ':'):
+                if (c0 == 'u' and sc_word_is(j, "use")) or (c0 == 'f' and sc_word_is(j, "from")) or (c0 == 'i' and sc_word_is(j, "import")): break
+                return false
+            break
+        su_name_at.truncate(first)
+        su_name_len.truncate(first)
+    su_flags[sc_unit] |= SU_EAGER
+    false
+
+sc_open = (at: int):
+    if sc_unit >= 0: su_end[sc_unit] = at
+    su_start.push(at)
+    su_end.push(sc_n)
+    su_flags.push(0)
+    su_name0.push(su_name_at.len())
+    sc_unit = su_start.len() - 1
+
+# Index src: its units are su_start.len() before the call .. after it (su_name0 gets the closing
+# entry too: a unit's names end where the next one's begin). The search goes from one line that is
+# not indented to the next (__find_line_delim), following strings and comments; only a `when`
+# unit's lines are each looked at, for its branches' declarations.
+scan_source = (src: str) -> (int, int):
+    if sc_cls.len() == 0:
+        sc_cls = fill(u8(0), 256)
+        loop c in [0..256):
+            if (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_': sc_cls[c] = 1
+    sc_src = src
+    sc_p = data(src)
+    sc_n = len(src)
+    p = sc_p
+    n = sc_n
+    u0 = su_start.len()
+    if su_name0.len() > u0: su_name0.truncate(u0)
+    sc_unit = -1
+    sc_attr_open = false
+    i = 0
+    loop i < n:
+        # i: the start of a line that is not indented (or a blank one, or a comment's)
+        c = p[i]
+        if c == '\n':
+            i += 1
+            continue
+        if c == ' ' or c == '\t' or c == '\r' or c == '#':
+            # (an indented line here: the file's first, or one after a comment line)
+            i = sc_next_line(i, 0)
+            continue
+        if sc_unit >= 0 and su_flags[sc_unit] & SU_WHEN != 0 and c == 'e' and sc_word_is(i, "else"):
+            i = sc_when_lines(i)
+            continue
+        if c == ')' or c == ']' or c == '}':
+            if sc_unit >= 0: su_flags[sc_unit] |= SU_EAGER
+            i = sc_next_line(i, 0)
+            continue
+        if sc_attr_open: sc_attr_open = false
+        else: sc_open(i)
+        sc_attr_open = sc_classify(src, i)
+        if su_flags[sc_unit] & SU_WHEN != 0: i = sc_when_lines(i)
+        else: i = sc_next_line(i, 0)
+    if sc_unit >= 0: su_end[sc_unit] = n
+    su_name0.push(su_name_at.len())
+    (u0, su_start.len())
+
+# The lines of a `when` unit from its header (or an `else` of it) at i: the declarations of its
+# branches (at each branch's indentation; a nested `when` opens one more) name the unit. Lines
+# deeper than the innermost branch are skipped in bulk where its indentation is 4 or 8. Returns
+# where the next line that is not indented starts.
+sc_when_lines = (i0: int) -> int:
+    p = sc_p
+    n = sc_n
+    branch: int[] = [-1]
+    i = sc_line_end(i0) + 1
+    loop i < n:
+        j = i
+        ind = 0
+        loop j < n and (p[j] == ' ' or p[j] == '\t' or p[j] == '\r'):
+            if p[j] == ' ': ind += 1
+            else if p[j] == '\t': ind = (ind + 4) & ~3
+            j += 1
+        if j >= n: return n
+        c = p[j]
+        if c == '\n' or c == '#':
+            i = __find_newline(p, j, n) + 1
+            continue
+        if ind == 0: return i
+        loop branch.len() > 0 and branch[branch.len() - 1] >= 0 and ind < branch[branch.len() - 1]: branch.pop()
+        w = -1
+        if branch.len() > 0:
+            top = branch.len() - 1
+            if branch[top] < 0: branch[top] = ind
+            if ind == branch[top]:
+                if sc_word_is(j, "when") or sc_word_is(j, "else"): branch.push(-1)
+                else:
+                    f = su_flags[sc_unit]
+                    sc_classify(sc_src, j)
+                    # (a statement in a branch: the unit is still a `when`, kept whole)
+                    su_flags[sc_unit] = su_flags[sc_unit] | (f & SU_WHEN)
+            w = branch[branch.len() - 1]
+        i = sc_next_line(j, w)
+    n
+
+# from i, inside a line, past strings and comments to the start of the next line indented by at
+# most w columns (0, 4 or 8; any other w: the next line)
+sc_next_line = (i0: int, w: int) -> int:
+    if w != 0 and w != 4 and w != 8: return sc_line_end(i0) + 1
+    p = sc_p
+    n = sc_n
+    i = i0
+    loop true:
+        if w == 0: i = __find_line_delim(p, i, n)
+        else if w == 4: i = __find_line_delim4(p, i, n)
+        else: i = __find_line_delim8(p, i, n)
+        if i >= n: return n
+        ch = p[i]
+        if ch == '\n': return i + 1
+        if ch == '#': i = __find_newline(p, i, n)
+        else:
+            raw = i > 0 and p[i - 1] == 'r' and (i < 2 or not sc_ident_char(p[i - 2]))
+            i = sc_skip_str(i, raw)
+            if i < 0: return n
+    n

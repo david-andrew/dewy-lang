@@ -3383,6 +3383,7 @@ hide_lib_only = false
 
 collect_module = (m: int, name: int, out: mut int[]):
     if m < 0: return
+    demand_prelude_name(name)
     if modules[m].is_prelude: collect_in(prelude, name, out)
     else:
         collect_in(modules[m].names, name, out)
@@ -3394,6 +3395,7 @@ collect_module = (m: int, name: int, out: mut int[]):
         hide_private = false
 
 collect_fns = (name: int, out: mut int[]):
+    demand_prelude_name(name)
     m = cur_mod()
     collect_module(m, name, out)
     hide_private = m >= 0 and not modules[m].is_prelude
@@ -4582,6 +4584,7 @@ variant_hint_for = (t: int, name: str) -> str:
 
 # (`title` for `.title`: a variant of an enum, written without its dot; the program's enums first)
 bare_variant_hint = (nm: int) -> str:
+    prelude_demand_all()
     found = ""
     loop m in modules:
         loop d in m.decls:
@@ -4824,6 +4827,7 @@ member_call_without_arguments = (t: int, name: int) -> bool:
     if ii >= 0 and intrinsics[ii].arr and (tk == .array or tk == .str_):
         id = intrinsics[ii].id
         return id == .len or id == .arrcap or id == .pop or id == .clear or id == .arrdata
+    demand_prelude_name(name)
     tables = [modules[cur_mod()].names, prelude]
     loop tm in method_modules(t):
         if tm != cur_mod(): tables.push(modules[tm].names)
@@ -4854,6 +4858,7 @@ receiver_fits = (name: str, t0: int) -> bool:
     loop it in intrinsics:
         if it.name == name and (not it.arr or k == .array or k == .fixed or k == .str_): return true
     nm = intern(name)
+    demand_prelude_name(nm)
     tables = [modules[cur_mod()].names, prelude]
     loop tm in method_modules(t):
         if tm != cur_mod(): tables.push(modules[tm].names)

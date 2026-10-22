@@ -1,5 +1,6 @@
 """Demand-loaded declarations retain eager lookup, initialization and runtime roots."""
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -16,18 +17,32 @@ def run(command, **kwargs):
 
 
 @pytest.fixture(scope='module')
-def indexer(compiler, tmp_path_factory):
-    binary = tmp_path_factory.mktemp('prelude-index') / 'index'
-    run([compiler, 'build', ROOT / 'tools/compiler/prelude_index.jo', '-o', binary])
+def scan_check(compiler, tmp_path_factory):
+    binary = tmp_path_factory.mktemp('scan-check') / 'scan_check'
+    run([compiler, 'build', ROOT / 'tools/compiler/scan_check.jo', '-o', binary])
     return binary
 
 
-def test_prelude_index_current(indexer):
-    assert run([indexer, ROOT / 'lib']).stdout == (ROOT / 'lib/prelude.index').read_text()
+def test_declaration_index_matches_parser(scan_check):
+    """Each library file's scanned names and units are what the parser finds in it."""
+    run([scan_check, ROOT / 'lib'])
 
 
-@pytest.mark.parametrize('index', ['current', 'stale', 'missing'])
-def test_prelude_transitive_order(compiler, indexer, tmp_path, index):
+def test_prelude_known_names_listed():
+    """Names the compiler reads from the prelude map directly are registered from the start."""
+    listed = re.search(r'prelude_known = \[([^\]]*)\]', (ROOT / 'compiler/prelude.jo').read_text())
+    known = set(re.findall(r'"([^"]+)"', listed.group(1)))
+    used = set()
+    for path in (ROOT / 'compiler').glob('*.jo'):
+        if path.name == 'prelude.jo':
+            continue
+        text = path.read_text()
+        used |= set(re.findall(r'prelude\.get\(intern\("([^"]+)"\)\)', text))
+        used |= set(re.findall(r'rt_global\("([^"]+)"\)', text))
+    assert used <= known, sorted(used - known)
+
+
+def test_prelude_transitive_order(compiler, tmp_path):
     library = tmp_path / 'lib'
     shutil.copytree(ROOT / 'lib', library)
     # Request the later module first, then the earlier one through a lazy body.
@@ -39,22 +54,14 @@ __demand_note = (s: str) -> int:
     1
 demand_pick = (n: int) -> int: 10 + n
 ''')
-    later = library / 'game/01_demand.jo'
-    later.write_text('''__demand_second = __demand_note("b")
+    (library / 'game/01_demand.jo').write_text('''__demand_second = __demand_note("b")
 demand_pick = (n: f64) -> int: 99
 demand_result = () -> str:
     assert(__demand_first + __demand_second == 2)
     __demand_order
 ''')
-    manifest = library / 'prelude.index'
-    manifest.write_text(run([indexer, library]).stdout)
-    if index == 'missing':
-        manifest.unlink()
-    if index == 'stale':
-        later.write_text(later.read_text().replace('demand_result', 'changed_result'))
     source = tmp_path / 'main.dewy'
-    result_name = 'changed_result' if index == 'stale' else 'demand_result'
-    source.write_text('printl("{' + result_name + '()} {demand_pick(2)}")\n')
+    source.write_text('printl("{demand_result()} {demand_pick(2)}")\n')
     binary = tmp_path / 'program'
     env = dict(os.environ, DEWY_CORE_LIB=str(library))
     run([compiler, 'build', source, '-o', binary], env=env)

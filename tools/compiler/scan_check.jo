@@ -1,0 +1,75 @@
+# The declaration index (compiler/scan.jo) against the parser, over a library directory:
+# every file's scanned names are the names its declarations make, and its units, parsed one
+# by one, are the declarations parsing the whole file gives (kinds, names, positions).
+# python3 -m tools.core run tools/compiler/scan_check.jo /absolute/path/to/lib
+use '../../compiler/check.jo'
+use '../../compiler/util.jo'
+use '../../compiler/ast.jo'
+use '../../compiler/types.jo'
+use '../../compiler/scan.jo'
+use '../../compiler/parse.jo'
+
+index_names = (decls: int[], out: mut str[]):
+    loop d in decls:
+        if nodes[d].kind == .when_:
+            loop b in [int(nodes[d].b), int(nodes[d].c)]:
+                if b != 0: index_names(kids(b), out)
+        else if nodes[d].kind == .assign:
+            lhs = int(nodes[d].a)
+            if nodes[lhs].kind == .ident: index_names([lhs], out)
+            else if nodes[lhs].kind == .tuple: index_names(kids(lhs), out)
+        else if nodes[d].kind == .vardecl and nkids(d) > 0:
+            index_names(kids(d), out)
+        else if nodes[d].kind != .import_ and nodes[d].name != 0:
+            nm = name_of(int(nodes[d].name))
+            if not out.contains(nm): out.push(nm)
+
+shape = (decls: int[]) -> str[]:
+    out: str[]
+    loop d in decls: out.push("{nodes[d].kind} {name_of(int(nodes[d].name))} {nodes[d].pos}")
+    out
+
+main = () -> int:
+    argv = args()
+    if argv.len() < 2: return 2
+    lib = argv[1]
+    init_types()
+    bad = 0
+    loop sub in ["core", "std", "game"]:
+        paths = list_dir("{lib}/{sub}")
+        paths.sort()
+        loop path in paths:
+            if not ends_with(path, ".jo"): continue
+            full = "{lib}/{sub}/{path}"
+            src = read_file(full) ?? ""
+            files.push(SrcFile(full, "{lib}/{sub}", src))
+            f = files.len() - 1
+            p_lazy = true
+            whole = parse_file(f)
+            parsed: str[]
+            index_names(whole, parsed)
+            r = scan_source(src)
+            scanned: str[]
+            eager = false
+            pieces: int[]
+            loop u in [r.0..r.1):
+                if su_flags[u] & SU_EAGER != 0: eager = true
+                loop x in [su_name0[u]..su_name0[u + 1]):
+                    nm = src[su_name_at[x]..su_name_at[x] + su_name_len[x])
+                    if not scanned.contains(nm): scanned.push(nm)
+                loop d in parse_span(f, su_start[u], su_end[u]): pieces.push(d)
+            p_lazy = false
+            parsed.sort()
+            scanned.sort()
+            if parsed != scanned:
+                bad += 1
+                print("{sub}/{path}: names differ")
+                loop nm in parsed:
+                    if not scanned.contains(nm): print("  not scanned: {nm}")
+                loop nm in scanned:
+                    if not parsed.contains(nm): print("  not declared: {nm}")
+            if shape(whole) != shape(pieces):
+                bad += 1
+                print("{sub}/{path}: units parse to other declarations")
+    if bad > 0: return 1
+    0

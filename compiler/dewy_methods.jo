@@ -4,6 +4,7 @@
 # grows a member, places one with `@`, or calls a method that does, takes its
 # receiver as a place: it must be called on a variable or field. This is decided
 # from the bodies before checking, so every call sees the final signature.
+use 'prelude.jo'
 use 'util.jo'
 use 'ast.jo'
 use 'check.jo'
@@ -127,6 +128,20 @@ dewy_method_group = (names: int[], decls: int[], inherited: {int: int} = {}) -> 
     loop i in [first..dewy_methods.len()): dewy_methods[i].members = members
     members
 
+# (the prelude's declarations of name, parsed now if they were not, are candidates too: with
+# every declaration the prelude has parsed since the candidates were listed)
+dewy_seen_new = 0
+dewy_demand_receivers = (name: int):
+    demand_prelude_name(name)
+    loop dewy_seen_new < prelude_new_decls.len():
+        d = prelude_new_decls[dewy_seen_new]
+        dewy_seen_new += 1
+        if nodes[d].kind != .fn_ or nkids(d) == 0: continue
+        nm = int(nodes[d].name)
+        ds = dewy_receivers.get(nm) ?? []
+        ds.push(d)
+        dewy_receivers[nm] = ds
+
 # A least fixed point: a method changes its object if its body does, given what the
 # methods found so far do (so mutual recursion settles).
 dewy_infer_methods = ():
@@ -142,6 +157,7 @@ dewy_infer_methods = ():
             ds = dewy_receivers.get(name) ?? []
             ds.push(d)
             dewy_receivers[name] = ds
+    dewy_seen_new = prelude_new_decls.len()
     loop true:
         progress = false
         loop i in [dewy_methods_inferred..dewy_methods.len()):
@@ -242,6 +258,7 @@ dewy_member_changes = (base: int, name: int, receiver: int, i: int) -> bool:
         id = intrinsics[ii].id
         if id != .len and id != .arrcap and id != .slice: return true
     m = dewy_module_of_file.get(pos_file(nodes[dewy_methods[i].decl].pos)) ?? -1
+    dewy_demand_receivers(name)
     if let ds = dewy_receivers.get(name):
         loop d in ds:
             if m >= 0:
