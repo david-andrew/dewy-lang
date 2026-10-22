@@ -57,8 +57,12 @@ python3 -m tools.core --bootstrap test     # independent C bootstrap + full suit
      optional optimizations only: a decided capability continues with a
      diagnosed redesign.
    - Do not polish sub-percent wins.
-   - Gate compile speed on load-independent critical-path instructions; take
-     wall-clock numbers only on a quiet pinned machine or a CI runner.
+   - Gate compile speed on load-independent instruction counts, including the
+     flagship panel; take wall-clock numbers only on a quiet pinned machine or a
+     CI runner.
+   - A new analysis or pass is demand-driven (it runs only where an obligation
+     or use exists), uses indexed state, states its complexity, and shows its
+     cost on the flagship panel before landing.
 5. **Stay in scope.**
    - Every task states its acceptance criteria, owned files, non-goals and
      budget.
