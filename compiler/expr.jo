@@ -252,7 +252,10 @@ wrap_conv = (n: int, cv: CV, to: int):
 # Values already fixed to a scalar type can still be compile-time constants.
 # This deliberately excludes calls and reads, whose effects must remain visible.
 integer_constant = (n: int) -> (bool, int):
-    if nodes[n].kind == .int_lit: return (true, nodes[n].ival)
+    if nodes[n].kind == .int_lit:
+        # (an `int` literal above the i64 range holds only its low word: not a word constant)
+        if has_flag(n, NF_U64) and prune(ntype(n)) == T_MATH_INT: return (false, 0)
+        return (true, nodes[n].ival)
     if nodes[n].kind != .conv or nodes[n].aux != i32(int(CV.int_)): return (false, 0)
     known, value = integer_constant(int(nodes[n].a))
     if not known: return (false, 0)
