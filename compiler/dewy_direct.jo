@@ -320,6 +320,8 @@ dc_expr = (minimum: int) -> int:
             coefficient = false
             continue
         if not token.space and (token.kind == .quoted or token.kind == .rawquoted) and minimum <= 170:
+            # (`b'a'`, `b"abc"`: byte literals take the reference grammar)
+            if nodes[left].kind == .ident and name_of(int(nodes[left].name)) == "b": return 0
             dn_at += 1
             arg = dn_string(token, true)
             if arg == 0: return 0

@@ -1,0 +1,17 @@
+# quick
+# `b'a'` is a uint8 and `b"abc"` an array<uint8> of the text's UTF-8 bytes.
+const HASH:uint8=b'#'
+escape=(c:uint8):>int64=>match c {
+    <b'n'>=>10
+    <b'\\'>=>int64(c)
+    _=>-1
+}
+main=()=>{
+    let c=b'a'
+    let s=b"abc"
+    let x:uint8=c
+    let y:array<uint8>=s
+    printl"{c} {s} {b""} {b'\n'} {b"é"} {s.length}"
+    printl"{x + 1} {y[1]} {b'(' =? 40} {HASH}"
+    printl"{escape(b'n')} {escape(b'\\')} {escape(b'x')} {b't' in? b"btx"}"
+}

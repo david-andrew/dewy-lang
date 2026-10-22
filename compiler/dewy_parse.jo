@@ -992,6 +992,10 @@ dw_int_singletons = (id0: int, out: mut int[]) -> bool:
     id = dw_grouped(dw_unwrap(id0))
     k = dewy_syntax[id].kind
     if dw_op(id) == .pipe: return dw_int_singletons(dw_child(id, 1), out) and dw_int_singletons(dw_child(id, 2), out)
+    byte = dw_byte_char(id)
+    if byte >= 0:
+        if not out.contains(byte): out.push(byte)
+        return true
     literal = dw_integer_kind(k) or k == .prefix and dw_op(id) == .minus and dw_integer_kind(dewy_syntax[dw_unwrap(dw_child(id, 1))].kind)
     if not literal: return false
     e = dw_expr(id)
@@ -1009,7 +1013,7 @@ dw_pipe_leaves = (id0: int, out: mut int[]):
 
 dw_int_leaf = (id: int) -> bool:
     k = dewy_syntax[id].kind
-    dw_integer_kind(k) or k == .prefix and dw_op(id) == .minus and dw_integer_kind(dewy_syntax[dw_unwrap(dw_child(id, 1))].kind)
+    dw_byte_char(id) >= 0 or dw_integer_kind(k) or k == .prefix and dw_op(id) == .minus and dw_integer_kind(dewy_syntax[dw_unwrap(dw_child(id, 1))].kind)
 
 # A type made of literals, alone or mixed with other types (`'a'|'b'`,
 # `<1 | 2 | "fast">`, `'auto' | int64`): the integer singletons become one
@@ -1841,6 +1845,8 @@ dw_expr = (id: int) -> int:
             nodes[n].b = i32(dw_type(right))
             if op == .kw_transmute: nodes[n].aux2 = 1
             return n
+        if op == .call and dewy_syntax[left].kind == .identifier and dewy_syntax[left].text == "b" and (dewy_syntax[right].kind == .string or dewy_syntax[right].kind == .interpolated_string):
+            return dw_byte_literal(right)
         if dn_token_call(op) or op == .index:
             xs = dw_children(right)
             bracket = dewy_syntax[right].kind == .block and dewy_syntax[right].text in ["[]:", "[):"]
@@ -1907,6 +1913,41 @@ dw_expr = (id: int) -> int:
         return n
     if k == .flat and dw_op(id) == .comma: return dw_comma_fail(id)
     return dw_fail(id, "syntax '{dw_kind_name(k)}'")
+
+# The byte of a `b'a'` literal, or -1 when id is no such literal.
+dw_byte_char = (id: int) -> int:
+    if dw_op(id) != .call or dewy_syntax[id].kind != .binary: return -1
+    left = dw_child(id, 1)
+    right = dw_child(id, 2)
+    if dewy_syntax[left].kind != .identifier or dewy_syntax[left].text != "b" or dewy_syntax[right].kind != .string: return -1
+    pos = dewy_syntax[right].pos
+    if files[pos_file(pos)].src[pos_off(pos)] != '\'' or len(dewy_syntax[right].text) != 1: return -1
+    int(dewy_syntax[right].text[0])
+
+# `b'a'` is a `uint8`, `b"abc"` an `array<uint8>` of the text's UTF-8 bytes.
+dw_byte_literal = (id: int) -> int:
+    pos = dewy_syntax[id].pos
+    if dewy_syntax[id].kind != .string: fatal(pos, "a byte literal is not interpolated: write `\\\{` for a brace, or convert text, as in `bytes(\"...\")`")
+    text = dewy_syntax[id].text
+    single = files[pos_file(pos)].src[pos_off(pos)] == '\''
+    u8 = mk(.tname, pos)
+    nodes[u8].name = i32(intern("u8"))
+    if single:
+        if len(text) != 1: fatal(pos, "`b'...'` is one byte, and this holds {len(text)} (`b\"...\"` is an array of bytes)")
+        n = mk(.cast, pos)
+        nodes[n].a = i32(bc_int(int(text[0]), pos))
+        nodes[n].b = i32(u8)
+        return n
+    elements: int[]
+    loop c in text: elements.push(bc_int(int(c), pos))
+    values = mk(.array, pos)
+    set_list(values, elements)
+    t = mk(.tarray, pos)
+    nodes[t].a = i32(u8)
+    n = mk(.cast, pos)
+    nodes[n].a = i32(values)
+    nodes[n].b = i32(t)
+    n
 
 # Comparison chains (`0 <? x <? 10`): consecutive comparisons joined by `and`,
 # each operand evaluated once and in order, later ones only while the chain
@@ -2709,6 +2750,12 @@ dw_pattern = (id: int) -> int:
     k = dewy_syntax[id].kind
     literal = dw_integer_kind(k) or k == .string or k == .boolean or dw_name(id) == "none"
     if dw_op(id) == .minus: literal = dw_integer_kind(dewy_syntax[dw_unwrap(dw_child(id, 1))].kind)
+    byte = dw_byte_char(id)
+    if byte >= 0:
+        p = mk(.plit, pos)
+        nodes[p].a = i32(bc_int(byte, pos))
+        if binding != "" and binding != "_": nodes[p].name = i32(intern(binding))
+        return p
     p = mk(if literal: NK.plit else: NK.ptype, pos)
     # (`small:int64<small <? 100>`: the arm's binding names the refined value)
     if binding != "" and binding != "_": dw_pattern_binder = i32(intern(binding))

@@ -73,9 +73,9 @@ operator=(@p:Parser op:string left:int64 right:int64):>int64=>{
 # Strings ---------------------------------------------------------------------
 
 hex=(c:uint8):>int64=>{
-    if 0x30 <=? c <=? 0x39 return int64(c)-0x30
-    if 0x61 <=? c <=? 0x66 return int64(c)-0x61+10
-    if 0x41 <=? c <=? 0x46 return int64(c)-0x41+10
+    if b'0' <=? c <=? b'9' return int64(c-b'0')
+    if b'a' <=? c <=? b'f' return int64(c-b'a')+10
+    if b'A' <=? c <=? b'F' return int64(c-b'A')+10
     return -1
 }
 
@@ -102,12 +102,12 @@ Escape:type=[scalar:int64 next:int64]
 # `\uXXXX` or `\u{X…}`: `at` is the `u`.
 unicode_escape=(p:Parser at:int64 stop:int64):>Escape|ParseError=>{
     let i=at+1
-    let braced=i <? stop and p.source[i] =? 0x7b
+    let braced=i <? stop and p.source[i] =? b'\{'
     if braced i+=1
     let first=i
     let value=0
     loop i <? stop {
-        if braced and p.source[i] =? 0x7d break
+        if braced and p.source[i] =? b'\}' break
         if not braced and i-first =? 4 break
         let digit=hex(p.source[i])
         if digit <? 0 return fail(p i "expected hexadecimal digits in Unicode escape")
@@ -116,7 +116,7 @@ unicode_escape=(p:Parser at:int64 stop:int64):>Escape|ParseError=>{
         i+=1
     }
     if braced {
-        if i =? first or i >=? stop or p.source[i] not=? 0x7d return fail(p at "expected 1–6 hex digits and '\}' in Unicode escape")
+        if i =? first or i >=? stop or p.source[i] not=? b'\}' return fail(p at "expected 1–6 hex digits and '\}' in Unicode escape")
         i+=1
     } else if i-first not=? 4 {
         return fail(p at "Unicode escape needs four hex digits")
@@ -133,19 +133,19 @@ chunk=(@p:Parser data:array<uint8> start:int64):>int64=>{
 }
 
 escape_byte=(c:uint8):>int64=>match c {
-    <0x6e>=>10
-    <0x72>=>13
-    <0x74>=>9
-    <0x30>=>0
-    <0x61>=>7
-    <0x62>=>8
-    <0x76>=>11
-    <0x66>=>12
-    <0x5c>=>0x5c
-    <0x22>=>0x22
-    <0x27>=>0x27
-    <0x7b>=>0x7b
-    <0x7d>=>0x7d
+    <b'n'>=>10
+    <b'r'>=>13
+    <b't'>=>9
+    <b'0'>=>0
+    <b'a'>=>7
+    <b'b'>=>8
+    <b'v'>=>11
+    <b'f'>=>12
+    <b'\\'>=>int64(c)
+    <b'"'>=>int64(c)
+    <b'\''>=>int64(c)
+    <b'\{'>=>int64(c)
+    <b'\}'>=>int64(c)
     _=>-1
 }
 
@@ -164,15 +164,15 @@ string_node=(@p:Parser t:Token):>int64|ParseError=>{
     let interpolated=false
     loop i <? stop {
         let c=p.source[i]
-        if c =? 0x5c {
+        if c =? b'\\' {
             i+=1
             if i >=? stop return fail(p i "incomplete string escape")
             let e=p.source[i]
-            if e =? 0x0a {
+            if e =? b'\n' {
                 i+=1
                 continue
             }
-            if e =? 0x75 or e =? 0x55 {
+            if e =? b'u' or e =? b'U' {
                 let scalar=unicode_escape(p i stop) or_throw
                 utf8(@data scalar.scalar)
                 i=scalar.next
@@ -184,7 +184,7 @@ string_node=(@p:Parser t:Token):>int64|ParseError=>{
             i+=1
             continue
         }
-        if c =? 0x7b {
+        if c =? b'\{' {
             interpolated=true
             if data.length >? 0 {
                 parts.push(chunk(@p data chunk_start))

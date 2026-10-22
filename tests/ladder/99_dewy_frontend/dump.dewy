@@ -4,22 +4,22 @@ from p"parser.dewy" import Node, Parsed
 
 # Quoted text with the escapes a reader needs to see.
 quoted=(value:string):>string=>{
-    let out:array<uint8>=[0x22]
+    let out:array<uint8>=[b'"']
     loop b in bytes(value) {
-        if b =? 0x22 or b =? 0x5c {
-            out.push(0x5c)
+        if b =? b'"' or b =? b'\\' {
+            out.push(b'\\')
             out.push(b)
-        } else if b =? 0x0a {
+        } else if b =? b'\n' {
             out.extend(bytes("\\n"))
-        } else if b =? 0x09 {
+        } else if b =? b'\t' {
             out.extend(bytes("\\t"))
-        } else if b <? 0x20 {
+        } else if b <? b' ' {
             out.extend(bytes("\\x{format(b "02x")}"))
         } else {
             out.push(b)
         }
     }
-    out.push(0x22)
+    out.push(b'"')
     return (out as string | none) ?? "?"
 }
 

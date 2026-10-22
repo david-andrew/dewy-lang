@@ -11,23 +11,16 @@ Token:type=[kind:Kind symbol:Symbol?=none start:int64 stop:int64 space:bool=fals
 
 LexError:type=type of error & [offset:int64 message:string]
 
-const HASH:uint8=0x23
-const LBRACE:uint8=0x7b
-const RBRACE:uint8=0x7d
-const BACKSLASH:uint8=0x5c
-const DQUOTE:uint8=0x22
-const SQUOTE:uint8=0x27
-const NEWLINE:uint8=0x0a
 const MAX_NESTING:int64=256
 
-is_digit=(c:uint8):>bool=>0x30 <=? c <=? 0x39
-is_alpha=(c:uint8):>bool=>(0x61 <=? c <=? 0x7a) or (0x41 <=? c <=? 0x5a)
-ident_start=(c:uint8):>bool=>is_alpha(c) or c =? 0x5f or c >=? 0x80
+is_digit=(c:uint8):>bool=>b'0' <=? c <=? b'9'
+is_alpha=(c:uint8):>bool=>(b'a' <=? c <=? b'z') or (b'A' <=? c <=? b'Z')
+ident_start=(c:uint8):>bool=>is_alpha(c) or c =? b'_' or c >=? 0x80
 ident_part=(c:uint8):>bool=>ident_start(c) or is_digit(c)
 # (`$name` and the ASCII run of a name)
-ascii_part=(c:uint8):>bool=>is_alpha(c) or is_digit(c) or c =? 0x5f
-is_space=(c:uint8):>bool=>c =? 0x20 or c =? 0x09 or c =? 0x0d or c =? 0x0a
-is_quote=(c:uint8):>bool=>c =? DQUOTE or c =? SQUOTE
+ascii_part=(c:uint8):>bool=>is_alpha(c) or is_digit(c) or c =? b'_'
+is_space=(c:uint8):>bool=>c =? b' ' or c =? b'\t' or c =? b'\r' or c =? b'\n'
+is_quote=(c:uint8):>bool=>c =? b'"' or c =? b'\''
 
 text_of=(source:array<uint8> start:int64 stop:int64):>string=>{
     return (source[start..stop) as string | none) ?? "\u{FFFD}"
@@ -46,10 +39,10 @@ block_comment_end=(source:array<uint8> start:int64 stop:int64):>int64=>{
     let i=start+2
     let depth=1
     loop i+1 <? stop {
-        if source[i] =? HASH and source[i+1] =? LBRACE {
+        if source[i] =? b'#' and source[i+1] =? b'\{' {
             depth+=1
             i+=2
-        } else if source[i] =? RBRACE and source[i+1] =? HASH {
+        } else if source[i] =? b'\}' and source[i+1] =? b'#' {
             depth-=1
             i+=2
             if depth =? 0 return i
@@ -66,17 +59,17 @@ interpolation_end=(source:array<uint8> start:int64 stop:int64 nesting:int64):>in
     let depth=1
     loop i <? stop {
         let c=source[i]
-        if c =? HASH and i+1 <? stop and source[i+1] =? LBRACE {
+        if c =? b'#' and i+1 <? stop and source[i+1] =? b'\{' {
             let e=block_comment_end(source i stop)
             if e <? 0 return lex_error(i "unterminated block comment")
             i=e
             continue
         }
-        if c =? HASH {
-            loop i <? stop and source[i] not=? NEWLINE {i+=1}
+        if c =? b'#' {
+            loop i <? stop and source[i] not=? b'\n' {i+=1}
             continue
         }
-        if c =? 0x72 and i+1 <? stop and is_quote(source[i+1]) and (i =? start or not ident_part(source[i-1])) {
+        if c =? b'r' and i+1 <? stop and is_quote(source[i+1]) and (i =? start or not ident_part(source[i-1])) {
             i=quote_end(source i+1 stop nesting true) or_throw
             continue
         }
@@ -84,9 +77,9 @@ interpolation_end=(source:array<uint8> start:int64 stop:int64 nesting:int64):>in
             i=quote_end(source i stop nesting false) or_throw
             continue
         }
-        if c =? LBRACE {
+        if c =? b'\{' {
             depth+=1
-        } else if c =? RBRACE {
+        } else if c =? b'\}' {
             depth-=1
             if depth =? 0 return i
         }
@@ -103,7 +96,7 @@ quote_end=(source:array<uint8> start:int64 stop:int64 nesting:int64=0 raw:bool=f
     let i=start+width
     loop i <? stop {
         let c=source[i]
-        if not raw and c =? BACKSLASH {
+        if not raw and c =? b'\\' {
             i+=2
             continue
         }
@@ -111,7 +104,7 @@ quote_end=(source:array<uint8> start:int64 stop:int64 nesting:int64=0 raw:bool=f
             if width =? 1 return i+1
             if i+2 <? stop and source[i+1] =? quote and source[i+2] =? quote return i+3
         }
-        if not raw and c =? LBRACE {
+        if not raw and c =? b'\{' {
             let e=interpolation_end(source i+1 stop nesting+1) or_throw
             i=e+1
             continue
@@ -139,7 +132,7 @@ punctuation=(source:array<uint8> at:int64 stop:int64):>Symbol?=>{
             }
         }
         if not same continue
-        if text =? ">>=" and at+3 <? stop and source[at+3] =? 0x3e continue
+        if text =? ">>=" and at+3 <? stop and source[at+3] =? b'>' continue
         return spelling(text)
     }
     return none
@@ -147,15 +140,13 @@ punctuation=(source:array<uint8> at:int64 stop:int64):>Symbol?=>{
 
 # `and=`, `or=`, `xor=`: a word operator directly followed by `=` (not `=?`, `=>` or `==`).
 word_assign=(word:Symbol? source:array<uint8> at:int64 stop:int64):>Symbol?=>{
-    if word is? none or at >=? stop or source[at] not=? 0x3d return none
-    if at+1 <? stop and (source[at+1] =? 0x3f or source[at+1] =? 0x3e or source[at+1] =? 0x3d) return none
+    if word is? none or at >=? stop or source[at] not=? b'=' return none
+    if at+1 <? stop and (source[at+1] =? b'?' or source[at+1] =? b'>' or source[at+1] =? b'=') return none
     if word =? 'and' return 'and='
     if word =? 'or' return 'or='
     if word =? 'xor' return 'xor='
     return none
 }
-
-const BASES="btqsodzxug"
 
 lex=(source:array<uint8> begin:int64=0 finish:int64=-1):>array<Token>|LexError=>{
     let stop=if finish <? 0 source.length else finish
@@ -163,37 +154,37 @@ lex=(source:array<uint8> begin:int64=0 finish:int64=-1):>array<Token>|LexError=>
     let i=begin
     let spaced=false
     let newline=false
-    let bases=bytes(BASES)
+    let bases=b"btqsodzxug"
     loop i <? stop {
         let c=source[i]
         if is_space(c) {
             spaced=true
             loop i <? stop and is_space(source[i]) {
-                if source[i] =? NEWLINE newline=true
+                if source[i] =? b'\n' newline=true
                 i+=1
             }
             continue
         }
-        if c =? HASH and i+1 <? stop and source[i+1] =? LBRACE {
+        if c =? b'#' and i+1 <? stop and source[i+1] =? b'\{' {
             let e=block_comment_end(source i stop)
             if e <? 0 return lex_error(i "unterminated block comment: `#\{` needs a matching `\}#` (block comments nest)")
             # (a comment over several lines separates like a line break)
             loop k in [i..e) {
-                if source[k] =? NEWLINE newline=true
+                if source[k] =? b'\n' newline=true
             }
             spaced=true
             i=e
             continue
         }
-        if c =? HASH {
-            loop i <? stop and source[i] not=? NEWLINE {i+=1}
+        if c =? b'#' {
+            loop i <? stop and source[i] not=? b'\n' {i+=1}
             spaced=true
             continue
         }
         let start=i
         let kind:Kind='op'
         let symbol:Symbol?=none
-        if c =? 0x72 and i+1 <? stop and is_quote(source[i+1]) {
+        if c =? b'r' and i+1 <? stop and is_quote(source[i+1]) {
             i=quote_end(source i+1 stop 0 true) or_throw
             kind='rawquoted'
         } else if ident_start(c) {
@@ -202,7 +193,7 @@ lex=(source:array<uint8> begin:int64=0 finish:int64=-1):>array<Token>|LexError=>
             kind='identifier'
             let value=text_of(source start i)
             if value =? "true" or value =? "false" kind='boolean'
-            if value in? ["is" "isnt" "in" "notin"] and i <? stop and source[i] =? 0x3f {
+            if value in? ["is" "isnt" "in" "notin"] and i <? stop and source[i] =? b'?' {
                 value="{value}?"
                 i+=1
                 kind='op'
@@ -214,7 +205,7 @@ lex=(source:array<uint8> begin:int64=0 finish:int64=-1):>array<Token>|LexError=>
                 kind='op'
                 i+=1
             }
-        } else if c =? 0x24 {
+        } else if c =? b'$' {
             i+=1
             loop i <? stop and ascii_part(source[i]) {i+=1}
             if i =? start+1 return lex_error(start "expected a name after $")
@@ -222,8 +213,8 @@ lex=(source:array<uint8> begin:int64=0 finish:int64=-1):>array<Token>|LexError=>
         } else if is_digit(c) {
             let decimal=true
             let digits=start
-            if c =? 0x30 and i+1 <? stop and source[i+1] in? bases {
-                decimal=source[i+1] =? 0x64
+            if c =? b'0' and i+1 <? stop and source[i+1] in? bases {
+                decimal=source[i+1] =? b'd'
                 i+=2
                 digits=i
             }
@@ -231,20 +222,20 @@ lex=(source:array<uint8> begin:int64=0 finish:int64=-1):>array<Token>|LexError=>
                 i=quote_end(source i stop) or_throw
                 kind='based_string'
             } else {
-                loop i <? stop and (is_digit(source[i]) or source[i] =? 0x5f or (not decimal and ascii_part(source[i]))) {i+=1}
+                loop i <? stop and (is_digit(source[i]) or source[i] =? b'_' or (not decimal and ascii_part(source[i]))) {i+=1}
                 if i =? digits return lex_error(start "expected digits after the base prefix")
                 kind=if decimal 'source_integer' else 'integer'
-                if decimal and i+1 <? stop and source[i] =? 0x2e and is_digit(source[i+1]) {
+                if decimal and i+1 <? stop and source[i] =? b'.' and is_digit(source[i+1]) {
                     i+=1
-                    loop i <? stop and (is_digit(source[i]) or source[i] =? 0x5f) {i+=1}
+                    loop i <? stop and (is_digit(source[i]) or source[i] =? b'_') {i+=1}
                     kind='source_real'
                 }
-                if decimal and i+1 <? stop and (source[i] =? 0x65 or source[i] =? 0x45)
-                    and (is_digit(source[i+1]) or source[i+1] =? 0x2b or source[i+1] =? 0x2d) {
+                if decimal and i+1 <? stop and (source[i] =? b'e' or source[i] =? b'E')
+                    and (is_digit(source[i+1]) or source[i+1] =? b'+' or source[i+1] =? b'-') {
                     i+=1
-                    if i <? stop and (source[i] =? 0x2b or source[i] =? 0x2d) i+=1
+                    if i <? stop and (source[i] =? b'+' or source[i] =? b'-') i+=1
                     let first=i
-                    loop i <? stop and (is_digit(source[i]) or source[i] =? 0x5f) {i+=1}
+                    loop i <? stop and (is_digit(source[i]) or source[i] =? b'_') {i+=1}
                     if i =? first return lex_error(start "expected exponent digits")
                     kind='source_real'
                 }
