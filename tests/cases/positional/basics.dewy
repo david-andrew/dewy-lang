@@ -1,0 +1,21 @@
+# quick
+# `[int64 string]` is an array with a type per position: a constant index reads
+# that position's type, any other index the union of them.
+const SECOND=1
+Entry:type=[int64 string]
+name_of=(e:Entry):>string=>e[1]
+at=(t:[int64 string] i:int64):>int64|string|none=>{
+    if 0 <=? i <? t.length return t[i]
+    return none
+}
+main=()=>{
+    let t:[int64 string]=[1 "a"]
+    printl"{t[0] + 1} {t[1]} {t[SECOND]} {t} {t.length}"
+    printl"{at(t 0)} {at(t 1)} {at(t 2)} {at(t 1) is? string}"
+    let [n s]=t
+    printl"{n} {s}"
+    let es:array<Entry>=[[2 "b"] [3 "c"]]
+    printl"{name_of(es[1])} {name_of([4 "d"])}"
+    t[0]=5
+    printl"{t} {t =? [5 "a"]} {t =? [5 "b"]}"
+}

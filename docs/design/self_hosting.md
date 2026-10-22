@@ -28,7 +28,7 @@ that the code generator is not the obstacle. The obstacles are surface and boots
 | Jo | Dewy today | Class |
 |---|---|---|
 | global `int[]`, ranges, `xor`/`>>`/`&`, hex | works; `int` -> explicit `int64` (Jo `int` wraps, Dewy `int` promotes) | A |
-| tuple `(str, u8[])[]`, `f.0`/`f.1` | no tuple types, values or `.0`; use the record `[name data]` | A rewrite; tuples are **c** |
+| tuple `(str, u8[])[]`, `f.0`/`f.1` | `array<[string array<uint8>]>`, `f[0]`/`f[1]` (an array type with a type per position; round 4) | A |
 | `when not BOOTSTRAP:` | dropped: stage0 never compiles Dewy, so the gate is meaningless here | see `$target` |
 | closure capturing loop locals | works (snapshots) | A |
 | `mut u8[]` | `@b:array<uint8>` / `put16(@h v)`, also across Jo<->Dewy | A |
@@ -49,7 +49,7 @@ that the code generator is not the obstacle. The obstacles are surface and boots
 | Payload-free `enum` (557 variants): typed `const` tags today; designed nominal families | A / b |
 | Byte-character literals (`'('`, 1194 uses): numeric `0x28` today | A; literal **c** |
 | Path import without selection: the design splats it, the implementation (and tests) qualify it as `stem.name` | **a/c**: contradicts current behaviour, so David decides |
-| Tuples crossing languages: Dewy cannot spell Jo `(str, u8[])`, so it cannot call Jo `write_zip` | **c** |
+| Tuples crossing languages: Jo `(str, u8[])` is Dewy's `[string array<uint8>]` both ways (round 4: no separate tuple concept) | **a**, implemented |
 
 ## Mixed-language transition (FFI / host ABI)
 

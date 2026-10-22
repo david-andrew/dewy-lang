@@ -417,7 +417,9 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
     base = wit_text(a)
     # A loop's own element read is described as such, never by its lowering.
     read = "index"
-    if wit_hidden_read(n): read = if base != "": "the loop's read of `{base}`" else: "the loop's element read"
+    # (`pair[i]` of a `[int64 string]` reads a fixed array of its positions)
+    positions = nodes[a].kind == .ident and starts_with(name_of(int(nodes[a].name)), "$position_values")
+    if wit_hidden_read(n) and not positions: read = if base != "": "the loop's read of `{base}`" else: "the loop's element read"
     i = wit_side(index, int(nodes[n].b))
     zero = WitSide(fact_constant(s, 0), 0, "0", false, true)
     size = WitSide(length, a, (if base != "": "{base}.length" else: ""), true)

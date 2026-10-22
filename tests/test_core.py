@@ -4154,9 +4154,9 @@ Rational:type=[numerator:int=0 denominator:int=1]
 
 @pytest.mark.parametrize(('expression', 'diagnostic'), [
     ('pair[0]+pair[1].length', None),
-    ('pair[-1]', 'tuple index out of range'),
-    ('pair[2]', 'tuple index out of range'),
-    ('pair[i]', 'tuple index must be an integer literal'),
+    ('pair[-1]', 'index -1 is outside this [int64 string]'),
+    ('pair[2]', 'index 2 is outside this [int64 string]'),
+    ('if pair[i] =? 39 42 else 0', None),
 ])
 def test_core_tuple_interop(compiler, tmp_path, expression, diagnostic):
     (tmp_path / 'helper.jo').write_text('pair = () -> (int, str): (39, "abc")')

@@ -1569,6 +1569,14 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
                 target = prune(int(types[target].elem))
                 cost = 2
             tk = types[target].kind
+            # (`[1 "a"]` for a `[int64 string]`: each value fits its position)
+            if tk == .tuple:
+                if nkids(a) != int(types[target].nargs) or array_has_spread(a): return -1
+                loop i in [0..nkids(a)):
+                    r = arg_cost(kid(a, i), targ(target, i), binds)
+                    if r < 0: return -1
+                    cost += r
+                return cost
             if tk == .array or (tk == .fixed and (fixed_literal_ok(a, target) or array_has_spread(a))):
                 et = int(types[target].elem)
                 # Settle a generic element from the first typed value before
@@ -3533,6 +3541,59 @@ number_literal_tree = (n: int) -> bool:
     if k == .unary: return number_literal_tree(int(nodes[n].a))
     if k == .binary: return number_literal_tree(int(nodes[n].a)) and number_literal_tree(int(nodes[n].b))
     false
+
+# `pair[i]` of a `[int64 string]`: a constant position reads that position's
+# element, with its own type; any other index the union of the element types,
+# from a fixed array of them, so its bounds are proven as an array index's are.
+dewy_position_index = (n: int, bt: int, expected: int) -> int:
+    pos = nodes[n].pos
+    b = int(nodes[n].b)
+    count = int(types[bt].nargs)
+    if b == 0 or nkids(n) != 1 or nodes[b].kind == .range or nodes[b].kind == .namedarg: fatal(pos, "an array with a type per position takes one index (`pair[0]`); unpack it to take its parts (`let [a b] = pair`)")
+    known = false
+    at = 0
+    if nodes[b].kind == .int_lit and not has_flag(b, NF_U64):
+        known = true
+        at = nodes[b].ival
+    else if nodes[b].kind == .ident:
+        s = lookup(int(nodes[b].name))
+        if s != 0:
+            init = binding_const_init(syms[s].kind, int(syms[s].ref), pos)
+            if init != 0 and nodes[init].kind == .int_lit and not has_flag(init, NF_U64):
+                known = true
+                at = nodes[init].ival
+    if known:
+        if at < 0 or at >= count: fatal(nodes[b].pos, "index {at} is outside this {dt(bt)}: its positions are 0 to {count - 1}")
+        nodes[n].kind = .field
+        nodes[n].aux = -2
+        nodes[n].ival = at
+        nodes[n].b = 0
+        set_list(n, [])
+        return check_expr(n, expected)
+    members: int[]
+    loop i in [0..count): members.push(targ(bt, i))
+    source = "$positions{n}"
+    elements = "$position_values{n}"
+    reads: int[]
+    loop i in [0..count):
+        f = mk(.field, pos)
+        nodes[f].a = i32(bc_ident(source, pos))
+        nodes[f].aux = -2
+        nodes[f].ival = i
+        reads.push(f)
+    values = mk(.array, pos)
+    set_list(values, reads)
+    shape = mk(.tname, pos)
+    nodes[shape].aux = -7
+    nodes[shape].ival = mk_fixed(mk_union(members), count)
+    declared = bc_let(elements, values, pos)
+    nodes[declared].a = i32(shape)
+    read = mk(.index, pos)
+    nodes[read].a = i32(bc_ident(elements, pos))
+    nodes[read].b = i32(b)
+    set_list(read, [b])
+    nodes[n] = nodes[bc_block([bc_let(source, int(nodes[n].a), pos), declared, bc_stmt(read, pos)], pos)]
+    check_expr(n, expected)
 
 # `a.rem(b kind=...)`, and `round` of a float (ties to even, or `ties=...`):
 # Dewy's numbers library (lib/numbers.dewy), unless the program has its own.
@@ -6124,7 +6185,7 @@ binary_literal_context = (n: int, t0: int, op: Tok) -> bool:
     if nodes[n].kind == .map_lit: return is_map_type(t)
     if nodes[n].kind == .array:
         if nkids(n) == 0 and (is_map_type(t) or dewy_record_target(t) != 0): return true
-        return types[t].kind == .array or types[t].kind == .fixed
+        return types[t].kind == .array or types[t].kind == .fixed or types[t].kind == .tuple and nkids(n) == int(types[t].nargs)
     false
 
 # Dewy's `+` never joins text or containers: interpolation or `join` for text, a spread literal
@@ -8413,6 +8474,15 @@ check_expr = (n: int, expected: int) -> int:
                         if al >= 0:
                             nodes[n] = nodes[mk_ident_local(al, nodes[n].pos)]
                             t = int(locals[al].type)
+            # (`pair.length` of a `[int64 string]`: its number of positions)
+            if t == 0 and bk == .tuple and (fname == id_dewy_len or name_of(fname) == "length") and files[pos_file(nodes[n].pos)].is_dewy:
+                receiver = int(nodes[n].a)
+                add_flag(receiver, NF_CHECKED)
+                count = bc_int(int(types[bt].nargs), nodes[n].pos)
+                # (a receiver that could do something still runs)
+                if nodes[receiver].kind != .ident: count = bc_block([bc_stmt(receiver, nodes[n].pos), bc_stmt(count, nodes[n].pos)], nodes[n].pos)
+                nodes[n] = nodes[count]
+                return check_expr(n, expected)
             if t == 0:
                 if bk == .opt:
                     et = prune(int(types[bt].elem))
@@ -8629,14 +8699,7 @@ check_expr = (n: int, expected: int) -> int:
                 last_checked = n
                 return t
             return check_expr(n, expected)
-        if bk == .tuple and files[pos_file(nodes[n].pos)].is_dewy:
-            if b == 0 or nodes[b].kind != .int_lit: fatal(nodes[n].pos, "a tuple index must be an integer literal")
-            nodes[n].kind = .field
-            nodes[n].aux = -2
-            nodes[n].ival = nodes[b].ival
-            nodes[n].b = 0
-            set_list(n, [])
-            return check_expr(n, expected)
+        if bk == .tuple and files[pos_file(nodes[n].pos)].is_dewy: return dewy_position_index(n, bt, expected)
         if bk == .typeval: t = mk_typeval(expr_as_type(n))
         else if b != 0 and nodes[b].kind != .range and is_soa(bt): return check_soa_index(n, expected)
         else if bk == .struct_ and is_part_index(n, bt):
@@ -8926,6 +8989,15 @@ check_expr = (n: int, expected: int) -> int:
         if nkids(n) == 0 and ex != 0 and is_map_type(ex) and files[pos_file(nodes[n].pos)].is_dewy:
             nodes[n].kind = .map_lit
             return check_expr(n, expected)
+        # (`[1 "a"]` where a `[int64 string]` goes: a value per position)
+        if ex != 0 and exk == .tuple and nodes[n].b == 0 and files[pos_file(nodes[n].pos)].is_dewy:
+            spread = false
+            loop c in kids(n):
+                if has_flag(c, NF_SPREAD): spread = true
+            if not spread and nkids(n) != int(types[ex].nargs): fatal(nodes[n].pos, "{dt(ex)} has {int(types[ex].nargs)} positions, and this array gives {nkids(n)} values")
+            if not spread:
+                nodes[n].kind = .tuple
+                return check_expr(n, expected)
         et = 0
         if ex != 0 and exk == .array: et = int(types[ex].elem)
         if nodes[n].b != 0:

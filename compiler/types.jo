@@ -897,11 +897,12 @@ type_str_in = (t0: int, dewy: bool) -> str:
             else if ti.kind == .fn_: s += " -> void"
             s
         tuple:
-            s = "("
+            # (Dewy's `[int64 string]`: an array with a type per position)
+            s = if dewy: "[" else: "("
             loop i in [0..int(ti.nargs)):
-                if i > 0: s += ", "
+                if i > 0: s += (if dewy: " " else: ", ")
                 s += type_str(targ(t, i), dewy)
-            s + ")"
+            s + (if dewy: "]" else: ")")
         struct_, enum_:
             si = int(ti.st)
             if structs[si].lit_set != 0: return str_set_text(int(structs[si].lit_set))

@@ -3789,15 +3789,15 @@ gen_fmt_struct = (e: int) -> Val:
         if not dewy: lit(ba, ")")
         else if shown > 0 or name == "": lit(ba, "]")
     else if k == .tuple:
-        lit(ba, "(")
-        # (Dewy writes a tuple as `(1 "a")`, as `cases=(...)` does)
+        # (Dewy writes an array with a type per position as an array, `[1 "a"]`)
+        lit(ba, (if dewy: "[" else: "("))
         tsep = ", "
         if dewy: tsep = " "
         loop i in [0..int(types[t].nargs)):
             if i > 0: lit(ba, tsep)
             fmt_field(ba, int(nodes[kid2(e, fi)].sym), targ(t, i), e_addi(va, tuple_off(t, i)))
             fi += 1
-        lit(ba, ")")
+        lit(ba, (if dewy: "]" else: ")"))
     else if k == .enum_:
         si = int(types[t].st)
         layout(t)

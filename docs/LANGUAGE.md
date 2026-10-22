@@ -1415,6 +1415,14 @@ currently supported.
 In a fixed-array context, `[]` initializes every element to its zero value;
 otherwise a literal must supply exactly the declared number of elements.
 
+`[int64 string]` is a fixed-length array with a type per position, Dewy's form
+of a tuple: `let entry:[int64 string]=[7 "seven"]`. A constant index reads that
+position with its own type (`entry[0]` is an `int64`, `entry[1]` a `string`);
+any other index gives the union of the element types (`int64|string`) and is
+proven in bounds like an array index. `.length` is the number of positions,
+and `let [n name]=entry` unpacks it. It prints as an array, `[7 "seven"]`, and
+is how implementation-language tuples such as `(str, u8[])` appear in Dewy.
+
 An ordinary `array<T>` remains growable. Assigning or passing one to a fixed-array
 value checks its exact length at runtime and copies the elements. An empty
 growable array therefore fails that check. Converting back creates a growable array.

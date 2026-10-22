@@ -1128,6 +1128,12 @@ dw_type = (id: int) -> int:
         nodes[n].name = if name == dewy_syntax[id].text: dw_name_id(id) else: i32(intern(name))
         return n
     if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "[]:":
+        if dw_positional_types(id):
+            n = mk(.ttuple, pos)
+            elements: int[]
+            loop child in dw_children(id): elements.push(dw_type(child))
+            set_list(n, elements)
+            return n
         n = mk(.trecord, pos)
         fields: int[]
         loop child in dw_children(id):
@@ -1261,6 +1267,15 @@ dw_type = (id: int) -> int:
             set_list(base, args)
         return base
     return dw_fail(id, "this type expression")
+
+# `[int64 string]`: an array of fixed length with a type per position (no
+# entry names a field)
+dw_positional_types = (id: int) -> bool:
+    if dw_nchildren(id) == 0: return false
+    loop child in dw_children(id):
+        op = dw_op(child)
+        if op == .colon or op == .assign or op == .arrow or ownership_tag(child) != 0 or dewy_syntax[dw_unwrap(child)].kind == .metatag: return false
+    true
 
 # Type parameters use the existing compact specialization machinery. Constraints
 # are not silently ignored: this slice accepts only distinct parameter names.
@@ -2277,7 +2292,7 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
             type_params = dw_type_params(dw_child(initial, 1))
             initial = dw_child(initial, 2)
         if type_params.len() > 0 and dewy_syntax[initial].text == "():" and dw_nchildren(initial) == 1: initial = dw_child(initial, 0)
-        if dewy_syntax[initial].text != "[]:":
+        if dewy_syntax[initial].text != "[]:" or dw_positional_types(initial):
             n = mk(.typealias, dewy_syntax[id].pos)
             nodes[n].name = i32(intern(name))
             nodes[n].a = i32(dw_type(initial))
@@ -2558,7 +2573,7 @@ dw_clamp_slice = (n: int, right: int, xs: int[]) -> int:
     nodes[count].name = i32(intern("length"))
     stmts = [bc_let(source, int(nodes[n].a), pos), bc_let(length, count, pos)]
     if nodes[n].sval != 0: stmts.push(bc_let(name_of(int(nodes[n].sval)), bc_bin(.minus, bc_ident(length, pos), bc_int(1, pos), pos), pos))
-    stmts.push(bc_let(lo, if nodes[r].a != 0: int(nodes[r].a) else: bc_int(0, pos), pos))
+    stmts.push(bc_let(lo, (if nodes[r].a != 0: int(nodes[r].a) else: bc_int(0, pos)), pos))
     stmts.push(bc_if(bc_bin(.lt, bc_ident(lo, pos), bc_int(0, pos), pos), [bc_assign(bc_ident(lo, pos), bc_int(0, pos), pos)], [], pos))
     stmts.push(bc_if(bc_bin(.gt, bc_ident(lo, pos), bc_ident(length, pos), pos), [bc_assign(bc_ident(lo, pos), bc_ident(length, pos), pos)], [], pos))
     stop = bc_ident(length, pos)
