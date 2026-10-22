@@ -1,4 +1,5 @@
 use 'pcheck.jo'
+use 'icount.jo'
 use 'places.jo'
 use 'facts.jo'
 use 'refine.jo'
@@ -6875,7 +6876,10 @@ lower_inst = (lf: int, f: int):
         locals[l].flags &= i32(~LF_PARAM)
         param_view_decl(s, l)
     find_views(f)
-    if copies_on: copies_prepare(f)
+    if copies_on:
+        icb = ic_phase(IC_OWNERSHIP)
+        copies_prepare(f)
+        ic_restore(icb)
     # locals
     loop l in fns[f].locals:
         fl = int(locals[l].flags)

@@ -2241,7 +2241,7 @@ facts_finalize = ():
             if fns[f].body != 0 and fns[f].state == 2 and not pos_in_lib(nodes[int(fns[f].body)].pos): demanded[f] = true
     loop f, _ in demanded:
         if f <= 0 or f >= isolation_limit or fns[f].state != 2: fatal(-1, "cannot prove assertion: unsettled checked body")
-        icb = ic_fn(IC_ANALYZE, f)
+        icb = ic_fn(IC_FACTS, f)
         fact_owner = f
         fact_terms = [FactTerm()]
         state = FactState()

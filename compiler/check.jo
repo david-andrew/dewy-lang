@@ -5644,8 +5644,11 @@ check_program = (main_path: str):
     string_domains_finish()
     string_domains_materialize()
     if not errors_only:
+        icb = ic_switch(IC_OWNERSHIP, IC_SHARED)
         ownership_finalize()
+        ic_switch(IC_EFFECTS, IC_SHARED)
         effects_finalize()
+        ic_restore(icb)
 
 # ---------------- Dewy's main ----------------
 # Dewy's main gives back void or the errors that reach it (`void | E`, declared or

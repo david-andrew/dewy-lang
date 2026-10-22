@@ -400,12 +400,14 @@ compile = (path: str, out0: str) -> str:
     if lower_only and ide_skip.len() > 0: return ""
     if lower_only: det_check_program()
     if repl_image: repl_set_main()
-    ic_switch(IC_ANALYZE, IC_SHARED)
+    ic_switch(IC_OWNERSHIP, IC_SHARED)
     isolation_reset()
     loans_finalize()
     partition_finalize()
+    ic_switch(IC_FACTS, IC_SHARED)
     facts_finalize()
     directives_after_facts()
+    ic_switch(IC_OWNERSHIP, IC_SHARED)
     copies_reset()
     if ownership_decls.len() != 0:
         # Initialize thread bookkeeping before construction can acquire a resource.

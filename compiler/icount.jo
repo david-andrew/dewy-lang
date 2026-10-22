@@ -8,10 +8,13 @@ use 'ast.jo'
 
 const IC_LOAD = 0
 const IC_CHECK = 1
-const IC_ANALYZE = 2
-const IC_LOWER = 3
-const IC_EMIT = 4
-const IC_OTHER = 5
+const IC_FACTS = 2
+const IC_EFFECTS = 3
+const IC_OWNERSHIP = 4
+const IC_LOWER = 5
+const IC_EMIT = 6
+const IC_OTHER = 7
+const IC_PHASES = 8
 const IC_SHARED = 0
 const IC_ROOT = 1
 const IC_LIB = 2
@@ -47,7 +50,7 @@ ic_start = ():
         if fd < 0: return
         ic_fd = fd
         ic_on = true
-        ic_counts = fill(0, 18)
+        ic_counts = fill(0, IC_PHASES * 3)
         ic_last = ic_read()
 
 # Charge what ran since the last switch to the current bucket; continue in
@@ -97,20 +100,25 @@ ic_mod = (phase: int, m: int) -> int:
     if not ic_on: return 0
     ic_switch(phase, ic_side_mod(m))
 
+# (an analysis nested in another phase's work, for the same side)
+ic_phase = (phase: int) -> int:
+    if not ic_on: return 0
+    ic_switch(phase, ic_bucket % 3)
+
 ic_report = ():
     if not ic_on: return
     ic_restore(ic_bucket)
-    names = ["load", "check", "analyze", "lower", "emit", "other"]
+    names = ["load", "check", "facts", "effects", "ownership", "lower", "emit", "other"]
     sides = ["shared", "root", "library"]
     total = 0
     side_total = fill(0, 3)
-    loop i in [0..18):
+    loop i in [0..IC_PHASES * 3):
         total += ic_counts[i]
         side_total[i % 3] += ic_counts[i]
     parts = ""
     loop s in [0..3):
         row = ""
-        loop p in [0..6):
+        loop p in [0..IC_PHASES):
             c = ic_counts[p * 3 + s]
             if c != 0: row = row + " {names[p]} {c}"
         parts = parts + "; {sides[s]} {side_total[s]}:{row}"

@@ -3,6 +3,7 @@
 # The arena, graph and cost inventory are demanded only by explicit contracts
 # (or the internal policy). Ordinary isolation keeps its weaker legacy meaning.
 use 'ast.jo'
+use 'icount.jo'
 use 'util.jo'
 use 'lex.jo'
 use 'types.jo'
@@ -1448,7 +1449,10 @@ effects_demand = (f: int) -> bool:
         effect_summaries = fill(EffectSummary(), effect_limit)
         effect_seen = fill(0, nodes.len())
     if f <= 0 or f >= effect_limit: return false
-    if effect_summaries[f].index == 0: effect_visit(f)
+    if effect_summaries[f].index == 0:
+        icb = ic_phase(IC_EFFECTS)
+        effect_visit(f)
+        ic_restore(icb)
     effect_summaries[f].done
 
 # Lowering consults summaries too. Cover nodes made since the arena was sized

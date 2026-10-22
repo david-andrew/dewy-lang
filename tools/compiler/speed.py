@@ -353,18 +353,12 @@ def time_run(toolchain: Toolchain, source: str) -> str:
 
 def yardstick(toolchain: Toolchain, counts: dict[str, int]) -> None:
     """The candidate's latency and throughput, from its gated counts and one `build --time` per item."""
-    def millions(n: int | None) -> str:
-        return f'{n / 1e6:9.1f}' if n is not None else f'{"-":>9}'
-
     print(f'compile yardstick ({toolchain.label}): est. ms and lines/s are instructions at {IPS / 1e9:.1f} G/s, the '
           'reference machine\'s compiler rate (compile_throughput.md), a load-independent proxy, not wall time; '
-          'lines are root source lines (non-blank, non-comment; local imports included); root, library and shared '
-          'instructions come from build --time (library: lib/, generic instances included)')
-    print(f'  {"":30}{"lines":>7}{"G inst":>9}{"est ms":>8}{"lines/s":>9}{"root M":>9}{"lib M":>9}{"shared M":>9}'
-          f'{"root k/line":>12}{"lib lines":>10}')
+          'lines are root source lines (non-blank, non-comment; local imports included); the split into root, '
+          'library (lib/, generic instances included) and shared work, and into phases, comes from build --time')
     rows = [(name, source) for name, source, flags in panel(False) if name not in ('self-build', 'game')]
-    sums = {'lines': 0, 'inst': 0, 'root': 0, 'library': 0, 'shared': 0}
-    phases: dict[str, int] = {}
+    found = {}
     for name, source in rows:
         path = Path(source) if Path(source).is_absolute() else ROOT / source
         lines, physical = speed_corpus.root_counts(path)
@@ -373,31 +367,44 @@ def yardstick(toolchain: Toolchain, counts: dict[str, int]) -> None:
         except CompileError:
             print(f'  {name:30}(cannot build)')
             continue
-        split = speed_corpus.instruction_split(report) or {}
-        library_lines = speed_corpus.library_lines(report, physical)
-        inst = counts[name]
-        side = {key: split.get(key, {}).get('total') for key in ('root', 'library', 'shared')}
-        per_line = f'{side["root"] / lines / 1e3:12.1f}' if side['root'] is not None and lines else f'{"-":>12}'
-        print(f'  {name:30}{lines:7}{inst / 1e9:9.4f}{inst / IPS * 1e3:8.1f}{lines / (inst / IPS):9.0f}'
-              f'{millions(side["root"])}{millions(side["library"])}{millions(side["shared"])}{per_line}'
-              f'{library_lines:10}', flush=True)
+        found[name] = (lines, counts[name], speed_corpus.instruction_split(report) or {},
+                       speed_corpus.library_lines(report, physical))
+    phases = ('load', 'check', 'facts', 'effects', 'ownership', 'lower', 'emit')
+    print(f'  latency {"":22}{"G inst":>9}{"est ms":>8}{"root M":>9}{"lib M":>9}{"shared M":>9}{"lib lines":>10}'
+          '   library M by phase')
+    for name, (lines, inst, split, library_lines) in found.items():
+        if name.startswith('flagship ') or name.startswith('synthetic'):
+            continue
+        sides = ''.join(f'{split[k]["total"] / 1e6:9.1f}' if k in split else f'{"-":>9}'
+                        for k in ('root', 'library', 'shared'))
+        detail = ', '.join(f'{k} {v / 1e6:.1f}' for k, v in split.get('library', {}).items() if k != 'total')
+        print(f'    {name:28}{inst / 1e9:9.4f}{inst / IPS * 1e3:8.1f}{sides}{library_lines:10}   {detail}', flush=True)
+    floor = found.get('hello', (0, 0))[1]
+    print(f'  throughput {"":19}{"lines":>6}{"G inst":>8}{"est ms":>7}{"lines/s":>8}{"k/line":>7}{">hello":>7}'
+          f'   root k/line: ' + ' '.join(f'{p[:5]:>6}' for p in phases) + f'{"lib M":>8}')
+    total = {'lines': 0, 'inst': 0, 'library': 0}
+    root_phases = {p: 0 for p in phases}
+
+    def row(name: str, lines: int, inst: int, root: dict, library: int, count: int) -> None:
+        above = (inst - count * floor) / lines / 1e3
+        print(f'    {name:28}{lines:6}{inst / 1e9:8.4f}{inst / IPS * 1e3:7.1f}{lines / (inst / IPS):8.0f}'
+              f'{inst / lines / 1e3:7.1f}{above:7.1f}   {"":12}' + ' '.join(f'{root.get(p, 0) / lines / 1e3:6.1f}' for p in phases)
+              + f'{library / 1e6:8.1f}', flush=True)
+    flagships = 0
+    for name, (lines, inst, split, _) in found.items():
+        if not (name.startswith('flagship ') or name.startswith('synthetic')) or not lines:
+            continue
+        root, library = split.get('root', {}), split.get('library', {}).get('total', 0)
+        row(name, lines, inst, root, library, 1)
         if name.startswith('flagship '):
-            sums['lines'] += lines
-            sums['inst'] += inst
-            for key in ('root', 'library', 'shared'):
-                sums[key] += side[key] or 0
-            for phase, n in split.get('root', {}).items():
-                if phase != 'total':
-                    phases[phase] = phases.get(phase, 0) + n
-        if name == 'hello' and 'library' in split:
-            print('    hello library M: ' + ', '.join(f'{phase} {n / 1e6:.1f}' for phase, n in split['library'].items()
-                                                    if phase != 'total'))
-    if sums['lines']:
-        lines, inst = sums['lines'], sums['inst']
-        print(f'  {"flagships (sum)":30}{lines:7}{inst / 1e9:9.4f}{inst / IPS * 1e3:8.1f}{lines / (inst / IPS):9.0f}'
-              f'{millions(sums["root"])}{millions(sums["library"])}{millions(sums["shared"])}'
-              f'{sums["root"] / lines / 1e3:12.1f}')
-        print('    flagship root M: ' + ', '.join(f'{phase} {n / 1e6:.1f}' for phase, n in phases.items()))
+            flagships += 1
+            total['lines'] += lines
+            total['inst'] += inst
+            total['library'] += library
+            for p in phases:
+                root_phases[p] += root.get(p, 0)
+    if total['lines']:
+        row('flagships (sum)', total['lines'], total['inst'], root_phases, total['library'], flagships)
 
 
 def physical_cpus() -> list[int]:
