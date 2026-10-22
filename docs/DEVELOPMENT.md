@@ -238,8 +238,9 @@ generated programs.
 - `compiler/dewy_fast.jo` lexes and parses Dewy inside the compiler process;
   `compiler/dewy_parse.jo` projects the syntax tree into the compact AST.
 - `compiler/` contains checking, lowering, code generation and tools, written in
-  the inherited implementation language (`.jo`), except `zip.dewy`, the first
-  module written in Dewy.
+  the inherited implementation language (`.jo`), except the modules written in
+  Dewy (`*.dewy`: `zip.dewy`, `spelling.dewy`). A Dewy module is a leaf: it uses
+  the library but no compiler module, and each `.jo` module calling it uses it.
 - `lib/` contains containers, platform support, graphics, input, audio and other
   libraries. Dewy programs can import `.jo` library modules directly.
 - `stage0/` is the small independent C bootstrap. It implements a smaller
@@ -247,7 +248,8 @@ generated programs.
   Dewy frontend while it builds the first compiler generation. That compiler
   builds the complete compiler, which builds itself again. The two builds
   without a Dewy frontend compile each Dewy module's frozen `.jo` twin instead
-  (`zip.jo` for `zip.dewy`; `FROZEN_TWINS` in `tools/compiler/build.py`).
+  (`zip.jo` for `zip.dewy`; `FROZEN_TWINS` in `tools/compiler/build.py`). A
+  differential test keeps each pair giving the same results.
 
 Build hashes identify provenance; byte-identical executables are not required.
 Runtime tuning variables inherited from Sloppy keep their `SLOPPY_*` names for now.

@@ -1,0 +1,32 @@
+# The frozen implementation-language twin of spelling.dewy, for the compilers without the
+# Dewy frontend (tools/compiler/build.py). Change both, or neither.
+
+# edit distance where swapping two neighbors counts once (optimal string alignment)
+edit_distance = (a: str, b: str, limit: int) -> int:
+    n = len(a)
+    m = len(b)
+    if abs(n - m) > limit: return limit + 1
+    pp = fill(0, m + 1)
+    prev = fill(0, m + 1)
+    cur = fill(0, m + 1)
+    loop j in [0..m + 1): prev[j] = j
+    loop i in [1..n + 1):
+        cur[0] = i
+        best = i
+        loop j in [1..m + 1):
+            c = 1
+            if fold_case(a[i - 1]) == fold_case(b[j - 1]): c = 0
+            v = min(min(prev[j] + 1, cur[j - 1] + 1), prev[j - 1] + c)
+            if i > 1 and j > 1 and fold_case(a[i - 1]) == fold_case(b[j - 2]) and fold_case(a[i - 2]) == fold_case(b[j - 1]): v = min(v, pp[j - 2] + 1)
+            cur[j] = v
+            if v < best: best = v
+        if best > limit: return limit + 1
+        tmp = pp
+        pp = prev
+        prev = cur
+        cur = tmp
+    prev[m]
+
+fold_case = (c: u8) -> u8:
+    if c >= 'A' and c <= 'Z': return c + 32
+    c

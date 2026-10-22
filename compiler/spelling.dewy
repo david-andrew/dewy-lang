@@ -1,0 +1,40 @@
+# How near one name is to another, for the checker's "did you mean" hints.
+#
+# A module of the compiler written in Dewy. spelling.jo is its frozen twin for the
+# compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
+# interface and give the same answers (tests/test_selfhost_spelling.py).
+
+# ASCII case folding: 'A'..'Z' to 'a'..'z'
+fold_case=(c:uint8):>uint8=>if c >=? b'A' and c <=? b'Z' c+32 else c
+
+# edit distance where swapping two neighbors counts once (optimal string alignment);
+# letters compare ignoring case; past limit, the answer is only some number above it
+edit_distance=(a:string b:string limit:int64):>int64=>{
+    let x=a as array<uint8>
+    let y=b as array<uint8>
+    let n=x.length
+    let m=y.length
+    if abs(n-m) >? limit {return limit+1}
+    let pp:array<int64>=[loop j in [0..m] 0]
+    let prev:array<int64>=[loop j in [0..m] j]
+    let cur:array<int64>=[loop j in [0..m] 0]
+    loop i in [1..n] {
+        cur[0]=i
+        let best=i
+        loop j in [1..m] {
+            let c:int64=if fold_case(x[i-1]) =? fold_case(y[j-1]) 0 else 1
+            let v=min(min(prev[j]+1 cur[j-1]+1) prev[j-1]+c)
+            if i >? 1 and j >? 1 and fold_case(x[i-1]) =? fold_case(y[j-2]) and fold_case(x[i-2]) =? fold_case(y[j-1]) {
+                v=min(v pp[j-2]+1)
+            }
+            cur[j]=v
+            if v <? best {best=v}
+        }
+        if best >? limit {return limit+1}
+        let tmp=pp
+        pp=prev
+        prev=cur
+        cur=tmp
+    }
+    prev[m]
+}

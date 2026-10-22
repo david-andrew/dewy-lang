@@ -3,6 +3,7 @@ use 'partition.jo'
 use 'lazy_bodies.jo'
 use 'frontend.jo'
 use 'pcheck.jo'
+use 'spelling.dewy'
 use 'units.jo'
 use 'definite.jo'
 use 'decimals.jo'
@@ -590,32 +591,6 @@ lookup = (name: int) -> int:
     module_lookup(m, name)
 
 # ---------------- "did you mean" ----------------
-# edit distance where swapping two neighbors counts once (optimal string alignment)
-edit_distance = (a: str, b: str, limit: int) -> int:
-    n = len(a)
-    m = len(b)
-    if abs(n - m) > limit: return limit + 1
-    pp = fill(0, m + 1)
-    prev = fill(0, m + 1)
-    cur = fill(0, m + 1)
-    loop j in [0..m + 1): prev[j] = j
-    loop i in [1..n + 1):
-        cur[0] = i
-        best = i
-        loop j in [1..m + 1):
-            c = 1
-            if fold_case(a[i - 1]) == fold_case(b[j - 1]): c = 0
-            v = min(min(prev[j] + 1, cur[j - 1] + 1), prev[j - 1] + c)
-            if i > 1 and j > 1 and fold_case(a[i - 1]) == fold_case(b[j - 2]) and fold_case(a[i - 2]) == fold_case(b[j - 1]): v = min(v, pp[j - 2] + 1)
-            cur[j] = v
-            if v < best: best = v
-        if best > limit: return limit + 1
-        tmp = pp
-        pp = prev
-        prev = cur
-        cur = tmp
-    prev[m]
-
 # the closest of the candidate names (" (did you mean 'x'?)"), or ""; ties go to the longest
 # common prefix, and a short name that starts the misspelling (len / lenght) counts as close
 # (recv: the type whose member was asked for; a habit that names a member, `.length`, is
@@ -931,10 +906,6 @@ gone_local_hint = (nm: int, at: int) -> str:
             return " (the '{name_of(nm)}' made on line {ln} belongs to {fname}; for both to use it, give it its first value at the top level, outside the functions)"
         l -= 1
     ""
-
-fold_case = (c: u8) -> u8:
-    if c >= 'A' and c <= 'Z': return c + 32
-    c
 
 # names visible from the current scope: locals, the module, the standard library, built-ins
 visible_names = () -> int[]:

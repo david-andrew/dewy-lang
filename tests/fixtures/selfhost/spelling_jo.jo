@@ -1,0 +1,12 @@
+# The compiler's frozen spelling.jo, with the same command line as spelling_dewy.dewy.
+use '../../../compiler/spelling.jo'
+
+main = ():
+    words = args()
+    loop limit in [0..4):
+        loop i in [1..words.len()):
+            loop j in [1..words.len()): print(edit_distance(words[i], words[j], limit))
+    loop i in [1..words.len()):
+        line = ""
+        loop c in words[i]: line = line + "{fold_case(c)} "
+        print(line)

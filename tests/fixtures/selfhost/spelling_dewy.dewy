@@ -1,0 +1,16 @@
+# The compiler's spelling.dewy: `spelling word...` prints, for each limit 0 to 3 and each
+# ordered pair of words, edit_distance(first second limit); then each word folded.
+from p"../../../compiler/spelling.dewy" import edit_distance, fold_case
+
+main=():>void=>{
+    let words=args()
+    loop limit in [0..3] {
+        loop i in [1..words.length) {
+            loop j in [1..words.length) {printl(edit_distance(words[i] words[j] limit))}
+        }
+    }
+    loop i in [1..words.length) {
+        loop c in (words[i] as array<uint8>) {print"{fold_case(c)} "}
+        printl""
+    }
+}
