@@ -1054,7 +1054,7 @@ when TARGET != "wasm" and TARGET != "macos":
 
     __vk_make_instance = () -> str:
         if not lib_available("libvulkan.so.1"): return "no Vulkan loader (libvulkan) found"
-        app = VkApplicationInfo(stype = 0, app_name = data(__zstr(__win_title)), engine_name = data("Sloppy"), api_version = u32(VK_API_1_3))
+        app = VkApplicationInfo(stype = 0, app_name = data(__zstr(__win_title)), engine_name = data("Dewy"), api_version = u32(VK_API_1_3))
         # (every window system's surface extension the loader has: a window may come later)
         have = __vk_instance_exts()
         names: str[]

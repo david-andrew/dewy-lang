@@ -356,7 +356,7 @@ parse_type_primary = () -> int:
     if (k == .newline or k == .indent) and ti >= 2 and toks[ti - 1].kind == .colon and toks[ti - 2].kind == .ident:
         fname = tok_src(ti - 2)
         if fname == "update": fatal(toks[ti - 2].pos, "a function is written `update = (dt: f64):` and its lines below it")
-        if fname == "forever" or fname == "repeat": fatal(toks[ti - 2].pos, "`{fname}` is not a Sloppy word: in a game, `update = (dt: f64):` runs every frame, as a forever loop does (and `draw = ():` draws); put the lines there. To repeat something 10 times: `loop i in [1..10]:`")
+        if fname == "forever" or fname == "repeat": fatal(toks[ti - 2].pos, "`{fname}` is not a Dewy word: in a game, `update = (dt: f64):` runs every frame, as a forever loop does (and `draw = ():` draws); put the lines there. To repeat something 10 times: `loop i in [1..10]:`")
         fatal(toks[ti - 2].pos, "a function is written `{fname} = ():` and its lines below it")
     fatal(pos, "expected a type, found {tok_name(k)}")
     0
@@ -787,7 +787,7 @@ parse_primary = () -> int:
     if (k == .lt or k == .gt or k == .le or k == .ge or k == .eq or k == .ne) and t >= 1 and (toks[t - 1].kind == .kw_and or toks[t - 1].kind == .kw_or):
         fatal(pos, "after `{tok_src(t - 1)}`, write the whole comparison again: `score > 10 and score < 20`")
     # (play(s, when = 0.1): a word Sloppy keeps for itself, as an argument's or a variable's name)
-    if nk_is(t, .assign) and keywords.get(tok_src(t)) != none: fatal(pos, "'{tok_src(t)}' is a word Sloppy keeps for itself, so it cannot name an argument or a variable (call it something else)")
+    if nk_is(t, .assign) and keywords.get(tok_src(t)) != none: fatal(pos, "'{tok_src(t)}' is a word Dewy keeps for itself, so it cannot name an argument or a variable (call it something else)")
     fatal(pos, "expected an expression, found {tok_name(k)}")
     0
 

@@ -210,7 +210,7 @@ pkg_resolve_all = (main_path: str):
         commit = locked.get(key) ?? ""
         if len(commit) == 0:
             if not pkg_fetch:
-                pkg_errs[p.name] = "package '{p.name}' is not fetched yet (`sloppy build` fetches it)"
+                pkg_errs[p.name] = "package '{p.name}' is not fetched yet (`dewy-core build` fetches it)"
                 continue
             commit = pkg_resolve(url, p.ref)
             if len(commit) == 0:
@@ -223,7 +223,7 @@ pkg_resolve_all = (main_path: str):
         dir = "{pkg_cache()}/{pkg_dir_name(url)}@{commit[..min(len(commit), 12))}"
         if not file_exists(dir + "/.sloppy-fetched"):
             if not pkg_fetch:
-                pkg_errs[p.name] = "package '{p.name}' is not fetched yet (`sloppy build` fetches it)"
+                pkg_errs[p.name] = "package '{p.name}' is not fetched yet (`dewy-core build` fetches it)"
                 continue
             eprint("fetching {p.name} ({url} at {commit[..min(len(commit), 12))})")
             if not pkg_get(url, commit, dir):
@@ -233,7 +233,7 @@ pkg_resolve_all = (main_path: str):
         pkg_scan_main(p.name, dir)
     if changed and pkg_fetch:
         pins.sort()
-        write_file(lock_path, "# the commits of the packages in this program's build block (sloppy build writes this: keep it\n# with the program; delete a line to take the newest commit again)\n" + join(pins, "\n") + "\n")
+        write_file(lock_path, "# the commits of the packages in this program's build block (dewy-core build writes this: keep it\n# with the program; delete a line to take the newest commit again)\n" + join(pins, "\n") + "\n")
 
 # a package's own packages: those in the build blocks of the files at its root
 pkg_scan_main = (name: str, dir: str):
@@ -253,10 +253,10 @@ pkg_main = (name: str, dir: str) -> str?:
     if n == 1: return "{dir}/{only}"
     none
 
-# sloppy add <url or directory> [name] [file.jo]: the package in the program's build block, pinned
+# dewy-core add <url or directory> [name] [file.jo]: the package in the program's build block, pinned
 pkg_add_main = (a: str[]):
     if a.len() < 3:
-        eprint("usage: sloppy add <git URL or directory> [name] [file.jo]   (a package, in the build block of file.jo: the .jo file here, if there is one)")
+        eprint("usage: dewy-core add <git URL or directory> [name] [file.jo]   (a package, in the build block of file.jo: the .jo file here, if there is one)")
         exit(2)
     src = a[2]
     name = ""
@@ -277,12 +277,12 @@ pkg_add_main = (a: str[]):
         loop f in list_dir("."):
             if ends_with(f, ".jo"): found.push(f)
         if found.len() != 1:
-            eprint("error: say which program to add it to: sloppy add {src} {name} game.jo")
+            eprint("error: say which program to add it to: dewy-core add {src} {name} game.jo")
             exit(1)
         file = found[0]
     text = read_file(file) ?? ""
     if find(text, "\n    {name} = package(") >= 0 or find(text, "\n\t{name} = package(") >= 0:
-        eprint("error: {file} has a package named '{name}' already (give it another name: sloppy add {src} other_name)")
+        eprint("error: {file} has a package named '{name}' already (give it another name: dewy-core add {src} other_name)")
         exit(1)
     # (the file's own line ends: \r\n on Windows)
     nl = "\n"

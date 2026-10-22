@@ -108,7 +108,7 @@ write_macho = (path: str, text: u8[], entry_off: int, ro: u8[], info: u8[], data
     # (sloppy watch: the region for the game's code kept free by a segment of nothing, which the
     # loader replaces; __LINKEDIT, which dyld wants last, after it)
     if watch:
-        if link_addr > MACHO_WATCH_AT: ice("sloppy watch on macOS: the program is too big for the region at {MACHO_WATCH_AT:x}")
+        if link_addr > MACHO_WATCH_AT: ice("dewy-core watch on macOS: the program is too big for the region at {MACHO_WATCH_AT:x}")
         link_addr = MACHO_WATCH_AT + MACHO_WATCH_SIZE
     # the libraries (dylib ordinals from 1) and the binds into the data segment (index 2)
     libs: str[] = ["/usr/lib/libSystem.B.dylib"]
@@ -422,7 +422,7 @@ mw_slot = (name: str, data_addr: int) -> int:
     if data_addr == 0: return 0
     loop imp in mac_imports:
         if imp.2 == name: return imp.0
-    ice("sloppy watch on macOS: the program does not use {name}")
+    ice("dewy-core watch on macOS: the program does not use {name}")
     0
 
 macho_watch_loader = (data_addr: int, blob_addr: int, blob_len: int, entry: int) -> u8[]:
@@ -554,7 +554,7 @@ macos_bundle = (app: str, name: str, icon: u8[]) -> str:
     <key>CFBundleExecutable</key>
     <string>{xml_text(exe)}</string>
     <key>CFBundleIdentifier</key>
-    <string>org.sloppy-lang.{id}</string>
+    <string>org.dewy-lang.{id}</string>
     <key>CFBundleName</key>
     <string>{xml_text(title)}</string>
     <key>CFBundleDisplayName</key>

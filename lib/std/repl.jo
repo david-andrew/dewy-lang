@@ -74,7 +74,7 @@ __repl_serve = (region: int, size: int):
             r = syscall(9, region, size, 7, 0x22 | 0x4000 | 0x100000, -1, 0)     # MAP_FIXED_NOREPLACE
             ok = r == region
         if not ok:
-            eprint("sloppy: no room for the prompt's code near {region:x} (the system gave {r:x})")
+            eprint("dewy-core: no room for the prompt's code near {region:x} (the system gave {r:x})")
             __repl_reply(-1)
             exit(1)
         __repl_reply(r)

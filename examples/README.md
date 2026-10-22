@@ -135,11 +135,10 @@ python3 -m tools.core run examples/exact_rationals.dewy
 ```
 
 `paddle.dewy` is a playable mouse-controlled paddle game. Its model and drawing
-code are Dewy. The pinned Sloppy platform library supplies the window, input,
+code are Dewy. The platform library supplies the window, input,
 font, renderer, native frame loop, and WebAssembly browser host.
 
-`physics.dewy` is a larger interactive playground adapted from the pinned Sloppy
-physics example: a 57-body scene with a box pyramid, pinned bridge, rope and
+`physics.dewy` is a larger interactive playground: a 57-body scene with a box pyramid, pinned bridge, rope and
 wrecking ball. Left-drag a body, right-click to add a box, press B or middle-click
 to add a ball, and R to reset. `physics_scene.dewy` contains scene construction
 and simulation; the repository-owned `physics` library supplies collision and
@@ -151,8 +150,7 @@ zoom, Space to pause automatic orbit, R to reset and Escape to quit. Terrain
 callbacks, placement, camera control and drawing are Dewy; `forest_model.dewy`
 keeps deterministic scene construction separate from the window.
 
-[`dunes.dewy`](dunes.dewy) is a playable desert journey adapted from Sloppy's
-MIT-licensed Dunes example. Walk with WASD/arrows or the left stick, jump with
+[`dunes.dewy`](dunes.dewy) is a playable desert journey. Walk with WASD/arrows or the left stick, jump with
 Space/gamepad A, and hold it while falling to glide. Q/E, right-drag or the right
 stick turn the camera. Collect glyphs to lengthen your scarf and head toward the
 beacon. Terrain, animated cloth, custom sand/shadow and beam shaders, input,
@@ -217,7 +215,7 @@ The physics model gate checks gravity, dragging, joint/body removal and independ
 world copies on both targets and in both modes. The browser was also exercised
 with mouse/keyboard input and no console errors. A 1,200-step native release
 simulation of the 57-body scene took a median 178.32 ms versus 178.64 ms for the
-corresponding pinned Sloppy example, compiled with the same owned core and
+equivalent reference implementation, compiled with the same owned core and
 libraries. Seven alternating measured runs agreed on the position checksum;
 setup and drawing were excluded. This demonstrates that the Dewy frontend adds
 no measurable simulation cost for this workload, not a general physics benchmark.
@@ -238,7 +236,7 @@ input. Shader validation needs EGL/GLES3 libraries; CI installs them when absent
 
 ## Multiplayer
 
-[`netpong.dewy`](netpong.dewy) adapts Sloppy's two-player game, including its input,
+[`netpong.dewy`](netpong.dewy) is a two-player game, including its input,
 invite screens and network library. The host simulates the ball and paddles;
 the joining player sends movement and receives game state 30 times a second.
 The winning state is sent immediately. Start two native instances in separate

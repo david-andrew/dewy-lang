@@ -145,7 +145,7 @@ dwarf_sections = (text_addr: int, text_len: int, main_path: str, version: str) -
     # each variable is while its code runs
     cu: u8[]
     uleb(cu, 1)
-    cstr(cu, "sloppy {version}")    # DW_AT_producer
+    cstr(cu, "dewy-core {version}")    # DW_AT_producer
     put16(cu, 0x0002)               # DW_AT_language: DW_LANG_C (the closest a debugger knows)
     cstr(cu, abs(main_path))        # DW_AT_name
     cstr(cu, dir)                   # DW_AT_comp_dir

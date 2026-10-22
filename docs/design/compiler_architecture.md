@@ -61,7 +61,7 @@ universal bound on arbitrary comptime, exact sets or rational arithmetic.
 B0/evidence measure **50,160 instructions/root node**, including check 15,530,
 analysis 8,971, lower 6,510, optimizer 6,712 and codegen 7,165; load is 5,272.
 Those are historical root-normalized costs, not measurements under the new metric.
-Sloppy's ~5k is a comparison, not evidence for Dewy's replacement costs.
+The ~5k of the earlier compact compiler is a comparison, not evidence for Dewy's replacement costs.
 
 Let m=N/root-nodes on a fixed, matched closure. The table retains untouched
 historical costs explicitly; m=2.5 illustrates arithmetic, not a newly measured
