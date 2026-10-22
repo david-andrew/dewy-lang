@@ -24,7 +24,8 @@ ORIGIN = ROOT / 'docs/origin'
 # Steps 1 and 2 cannot read Dewy, so there every `use 'X.dewy'` in compiler/
 # names X.dewy's frozen implementation-language twin instead. Steps 3 on
 # compile the Dewy modules, so the compiler that ships runs them.
-FROZEN_TWINS = {'zip.dewy': 'zip.jo', 'spelling.dewy': 'spelling.jo', 'leb128.dewy': 'leb128.jo'}
+FROZEN_TWINS = {'zip.dewy': 'zip.jo', 'spelling.dewy': 'spelling.jo', 'leb128.dewy': 'leb128.jo',
+               'base64.dewy': 'base64.jo'}
 
 
 def identity(path: Path) -> str:

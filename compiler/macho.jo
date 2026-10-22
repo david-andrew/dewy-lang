@@ -13,6 +13,7 @@
 
 use 'util.jo'
 use 'leb128.dewy'
+use 'base64.dewy'
 use 'elf.jo'
 use 'lower.jo'
 use 'x64.jo'
@@ -577,8 +578,8 @@ macos_bundle = (app: str, name: str, icon: u8[]) -> str:
     sealed2 = ""
     if len(icon_key) > 0:
         ic = icns(icon)
-        sealed = "\n\t\t<key>Resources/icon.icns</key>\n\t\t<data>{b64(sha1(ic))}</data>"
-        sealed2 = "\n\t\t<key>Resources/icon.icns</key>\n\t\t<dict>\n\t\t\t<key>hash2</key>\n\t\t\t<data>{b64(sha256(ic, 0, ic.len()))}</data>\n\t\t</dict>"
+        sealed = "\n\t\t<key>Resources/icon.icns</key>\n\t\t<data>{base64(sha1(ic))}</data>"
+        sealed2 = "\n\t\t<key>Resources/icon.icns</key>\n\t\t<dict>\n\t\t\t<key>hash2</key>\n\t\t\t<data>{base64(sha256(ic, 0, ic.len()))}</data>\n\t\t</dict>"
     res = CODE_RESOURCES_HEAD + "<key>files</key>\n\t<dict>{sealed}\n\t</dict>\n\t<key>files2</key>\n\t<dict>{sealed2}\n\t</dict>\n\t" + CODE_RESOURCES_RULES
     if not mkdir("{app}/Contents/_CodeSignature") or not write_file("{app}/Contents/_CodeSignature/CodeResources", res): return ""
     macho_plist = bytes(plist)
@@ -694,24 +695,6 @@ CODE_RESOURCES_RULES = """<key>rules</key>
 </dict>
 </plist>
 """
-
-# (base64, for plist <data>; the C bootstrap's compiler has no library one)
-b64 = (b: u8[]) -> str:
-    al = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-    out: u8[]
-    i = 0
-    loop i < b.len():
-        n = int(b[i]) << 16
-        if i + 1 < b.len(): n = n | (int(b[i + 1]) << 8)
-        if i + 2 < b.len(): n = n | int(b[i + 2])
-        out.push(al[(n >> 18) & 63])
-        out.push(al[(n >> 12) & 63])
-        if i + 1 < b.len(): out.push(al[(n >> 6) & 63])
-        else: out.push('=')
-        if i + 2 < b.len(): out.push(al[n & 63])
-        else: out.push('=')
-        i += 3
-    str_from_bytes(out)
 
 # ---------------- SHA-1 (CodeResources' "files": the older hash it keeps beside SHA-256) ----------------
 sha1 = (b: u8[]) -> u8[]:

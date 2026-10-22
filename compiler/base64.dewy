@@ -1,0 +1,37 @@
+# Base64 (A-Z a-z 0-9 + /, padded with =): the web build's page carries its
+# WebAssembly module and icon in it, and a macOS bundle's code signature its hashes.
+#
+# A module of the compiler written in Dewy. base64.jo is its frozen twin for the
+# compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
+# interface and write the same text (tests/test_selfhost_base64.py).
+
+base64=(b:array<uint8>):>string=>{
+    let table=b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    let n=b.length
+    let out:array<uint8>=[]
+    out.reserve(n * 4 // 3 + 4)
+    let i=0
+    loop i + 2 <? n {
+        let v=(int64(b[i]) << 16) | (int64(b[i + 1]) << 8) | int64(b[i + 2])
+        out.push(table[(v >> 18) & 63])
+        out.push(table[(v >> 12) & 63])
+        out.push(table[(v >> 6) & 63])
+        out.push(table[v & 63])
+        i+=3
+    }
+    if n - i =? 1 {
+        let v=int64(b[i]) << 16
+        out.push(table[(v >> 18) & 63])
+        out.push(table[(v >> 12) & 63])
+        out.push(b'=')
+        out.push(b'=')
+    } else if n - i =? 2 {
+        let v=(int64(b[i]) << 16) | (int64(b[i + 1]) << 8)
+        out.push(table[(v >> 18) & 63])
+        out.push(table[(v >> 12) & 63])
+        out.push(table[(v >> 6) & 63])
+        out.push(b'=')
+    }
+    # (the alphabet is ASCII, so this always decodes)
+    (out as string | none) ?? ""
+}

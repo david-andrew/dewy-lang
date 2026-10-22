@@ -1,0 +1,9 @@
+# The compiler's frozen base64.jo, with the same command line as base64_dewy.dewy.
+use '../../../compiler/base64.jo'
+
+main = () -> int:
+    a = args()
+    loop i in [1..a.len()):
+        if let b = read_bytes(a[i]): print(base64(b))
+        else: return 1
+    0

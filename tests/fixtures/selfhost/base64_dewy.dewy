@@ -1,0 +1,11 @@
+# The compiler's base64.dewy: `base64 file...` prints each file's bytes in base64.
+from p"../../../compiler/base64.dewy" import base64
+
+main=():>void=>{
+    let arguments=args()
+    loop i in [1..arguments.length) {
+        let data=read_bytes(arguments[i])
+        if not (data is? array<uint8>) {exit(1)}
+        printl(base64(data))
+    }
+}

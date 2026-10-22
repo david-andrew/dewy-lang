@@ -1,0 +1,29 @@
+# The frozen implementation-language twin of base64.dewy, for the compilers without the
+# Dewy frontend (tools/compiler/build.py). Change both, or neither.
+
+base64 = (b: u8[]) -> str:
+    tbl_ = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    out: u8[]
+    out.reserve(b.len() * 4 / 3 + 4)
+    i = 0
+    n = b.len()
+    loop i + 2 < n:
+        v = (int(b[i]) << 16) | (int(b[i + 1]) << 8) | int(b[i + 2])
+        out.push(tbl_[(v >> 18) & 63])
+        out.push(tbl_[(v >> 12) & 63])
+        out.push(tbl_[(v >> 6) & 63])
+        out.push(tbl_[v & 63])
+        i += 3
+    if n - i == 1:
+        v = int(b[i]) << 16
+        out.push(tbl_[(v >> 18) & 63])
+        out.push(tbl_[(v >> 12) & 63])
+        out.push('=')
+        out.push('=')
+    else if n - i == 2:
+        v = (int(b[i]) << 16) | (int(b[i + 1]) << 8)
+        out.push(tbl_[(v >> 18) & 63])
+        out.push(tbl_[(v >> 12) & 63])
+        out.push(tbl_[(v >> 6) & 63])
+        out.push('=')
+    str_from_bytes(out)

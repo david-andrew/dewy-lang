@@ -3,6 +3,7 @@
 
 use 'util.jo'
 use 'leb128.dewy'
+use 'base64.dewy'
 use 'zip.dewy'
 use 'ast.jo'
 use 'types.jo'
@@ -1086,33 +1087,6 @@ w_line_section = (out: mut u8[], code_at: int, body_at: int[], body_sites: int[]
     section(out, 0, s)
 
 # ---------------- HTML packaging ----------------
-base64 = (b: u8[]) -> str:
-    tbl_ = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-    out: u8[]
-    out.reserve(b.len() * 4 / 3 + 4)
-    i = 0
-    n = b.len()
-    loop i + 2 < n:
-        v = (int(b[i]) << 16) | (int(b[i + 1]) << 8) | int(b[i + 2])
-        out.push(tbl_[(v >> 18) & 63])
-        out.push(tbl_[(v >> 12) & 63])
-        out.push(tbl_[(v >> 6) & 63])
-        out.push(tbl_[v & 63])
-        i += 3
-    if n - i == 1:
-        v = int(b[i]) << 16
-        out.push(tbl_[(v >> 18) & 63])
-        out.push(tbl_[(v >> 12) & 63])
-        out.push('=')
-        out.push('=')
-    else if n - i == 2:
-        v = (int(b[i]) << 16) | (int(b[i + 1]) << 8)
-        out.push(tbl_[(v >> 18) & 63])
-        out.push(tbl_[(v >> 12) & 63])
-        out.push(tbl_[(v >> 6) & 63])
-        out.push('=')
-    str_from_bytes(out)
-
 write_html = (path: str, wasm: u8[], title: str, icon: u8[]) -> bool:
     page = html_page(wasm, title, icon)
     # (game.zip: the page as index.html in a zip, for sites like itch.io)
