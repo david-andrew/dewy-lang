@@ -3134,7 +3134,9 @@ compound_value = (s: int, left: int, right: int) -> int:
         n = bc_call(name_of(int(nodes[s].sval)), [left, right], nodes[s].pos)
         if has_flag(s, NF_BROADCAST): add_flag(n, NF_BROADCAST)
         return n
-    n = mk(.binary, nodes[s].pos)
+    # (Dewy's `and=`/`or=`: the logical operator, short-circuiting on booleans)
+    logical = nodes[s].aux2 == 1 and not has_flag(s, NF_BROADCAST)
+    n = mk(if not logical: NK.binary else if nodes[s].op == i32(int(Tok.ampeq)): NK.and_ else: NK.or_, nodes[s].pos)
     nodes[n].op = i32(compound_op(int(nodes[s].op)))
     if has_flag(s, NF_BROADCAST):
         nodes[n].aux = i32(tok_text(nodes[n].op as Tok)[0])
@@ -3869,7 +3871,7 @@ __check_assign = (s: int) -> int:
         nodes[s].b = i32(coerce(last_checked, T_INT))
         nodes[s].aux = 3
         return s
-    if l == T_MATH_INT or nodes[s].sval != 0 or has_flag(s, NF_BROADCAST) or (not is_numeric(l) and types[l].kind != .bool_) or nodes[lhs].kind == .index or nodes[lhs].kind == .field:
+    if l == T_MATH_INT or nodes[s].sval != 0 or has_flag(s, NF_BROADCAST) or (not is_numeric(l) and types[l].kind != .bool_) or nodes[lhs].kind == .index or nodes[lhs].kind == .field or nodes[s].aux2 == 1 and types[l].kind == .bool_:
         # Helper calls, overloads and vectors: x = operation(x, y). Capture
         # indices before reading x, including names the right side may change.
         # Reacquire indexed/field storage after the RHS: it can resize an array.

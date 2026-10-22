@@ -710,6 +710,7 @@ dc_statement = () -> int:
         add_flag(n, NF_BROADCAST)
         op = scalar
     nodes[n].op = i32(int(dn_assign_tok(op)))
+    if op == .and_assign or op == .or_assign: nodes[n].aux2 = 1
     if op == .slash_assign or op == .floor_assign or op == .percent_assign or op == .power_assign:
         nodes[n].sval = i32(intern(if op == .slash_assign: "__dewy_divide" else if op == .floor_assign: "__floor_div" else if op == .percent_assign: "__floor_mod" else: "__dewy_power"))
     nodes[n].a = i32(left)

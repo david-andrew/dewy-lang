@@ -1,0 +1,22 @@
+# quick
+# `a and= f()` is `a = a and f()`: on booleans f runs only when it can change a.
+let calls=0
+yes=():>bool=>{calls+=1 return true}
+main=()=>{
+    let a=false
+    a and= yes()
+    let b=true
+    b or= yes()
+    printl("{a} {b} {calls}")
+    a or= yes()
+    b and= yes()
+    printl("{a} {b} {calls}")
+    let flags:array<bool>=[true false]
+    flags[1] or= yes()
+    flags[0] and= false
+    printl("{flags} {calls}")
+    let bits:int64=12
+    bits and= 10
+    bits or= 1
+    printl(bits)
+}

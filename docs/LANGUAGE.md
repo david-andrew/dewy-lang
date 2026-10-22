@@ -987,6 +987,8 @@ for negative values, so `bigint(-3) >> 1` is `-2`. Shifting beyond all magnitude
 bits yields `0` for nonnegative values or `-1` for negative ones. Negative shift
 counts panic. Shift compound assignments (`<<=`, `>>=`) work too, as do
 `&=`, `|=`, `and=`, `or=` and `xor=` (on integers, booleans and sets).
+`a and= f()` means `a = a and f()`, so on booleans `and=`/`or=` short-circuit:
+`f()` runs only when it can change `a`.
 
 `^` (also `.pow(nonnegative_exponent)`), `.abs()` and `.gcd(other)` operate exactly;
 `gcd(0, 0)` is zero and `0.pow(0)` is one. Division by zero and negative powers
