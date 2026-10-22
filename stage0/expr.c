@@ -26,6 +26,7 @@ static struct { const char *name; int id; bool arr_domain; } intrinsics[] = {
   {"insert", IN_INSERT, true}, {"remove", IN_REMOVE, true}, {"clear", IN_CLEAR, true},
   {"reserve", IN_RESERVE, true}, {"resize", IN_RESIZE, true}, {"truncate", IN_TRUNCATE, true},
   {"data", IN_ARRDATA, true},
+  {"__permutable_data", IN_ARRDATA, false},
   {"syscall", IN_SYSCALL, false}, {"mem_copy", IN_MEMCPY, false}, {"mem_set", IN_MEMSET, false},
   {"size_of", IN_SIZEOF, false}, {"align_of", IN_ALIGNOF, false}, {"panic", IN_PANIC, false},
   {"assert", IN_ASSERT, false}, {"print", IN_PRINT, false}, {"embed", IN_EMBED, false},

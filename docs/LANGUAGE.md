@@ -762,7 +762,8 @@ A field may depend on a sibling, as in `[low:int64 high:int64<i => i >=? low>]`;
 a field's (or a `let`'s) own name in its refinement is its value, `high:int64<high >=? low>`;
 a dependent write checks a private candidate before replacing the record.
 Missing initialization must satisfy the contract too. Fixed-width increments
-retain runtime checks when overflow cannot be ruled out.
+retain runtime checks when overflow cannot be ruled out. `xs.swap(i j)` keeps an
+element refinement without a proof per element.
 
 `array<int64 length <? 10>` is a dynamic array with a checked length contract;
 `array<int64 length=10>` remains a fixed-size array. Length-changing operations

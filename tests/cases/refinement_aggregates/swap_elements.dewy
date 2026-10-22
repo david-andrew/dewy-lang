@@ -1,0 +1,11 @@
+# Swapping two elements keeps an element refinement: no proof per element.
+$runtime_checks=false
+Positive:type=int64<v => v >? 0>
+main=()=>{
+    let xs:array<Positive>=[3 1 2]
+    xs.swap(0 2)
+    let ys=xs
+    ys.swap(0 1)
+    printl(xs)
+    printl(ys)
+}

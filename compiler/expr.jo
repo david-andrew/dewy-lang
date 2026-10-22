@@ -35,7 +35,7 @@ enum IN:
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
     read_fields, default_init, offset_unit, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
     static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem, lend, loan_address, loan_load, loan_store, loan_length,
-    zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration, wrap_bits, arena_result
+    zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration, wrap_bits, arena_result, arrdata_permute
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big, set_text, promote
@@ -70,6 +70,7 @@ intrinsics = [
     Intrinsic("clear", .clear, true), Intrinsic("reserve", .reserve, true), Intrinsic("resize", .resize, true),
     Intrinsic("extend", .extend, true),
     Intrinsic("truncate", .truncate, true), Intrinsic("data", .arrdata, true),
+    Intrinsic("__permutable_data", .arrdata_permute, false),
     Intrinsic("fill", .fill, false), Intrinsic("syscall", .syscall, false), Intrinsic("mem_copy", .memcpy, false), Intrinsic("mem_set", .memset, false),
     Intrinsic("size_of", .sizeof, false), Intrinsic("align_of", .alignof, false), Intrinsic("panic", .panic, false),
     Intrinsic("assert", .assert, false), Intrinsic("print", .print, false), Intrinsic("embed", .embed, false), Intrinsic("embed_dir", .embed_dir, false),
@@ -5573,6 +5574,14 @@ is_value_collection_type = (t: int) -> bool:
 
 check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
     let args = args
+    let id = id
+    # `__permutable_data(xs)`: data() for code that only moves elements between slots (the
+    # library's swap and reorderings), so an element's refinement holds without a proof per
+    # element: refined storage is not refused
+    permute = id == .arrdata_permute
+    if permute:
+        if not pos_in_lib(nodes[n].pos): fatal(nodes[n].pos, "__permutable_data is the library's")
+        id = .arrdata
     nodes[n].kind = .intrinsic
     nodes[n].aux = i32(int(id))
     set_list(n, args)
@@ -5782,7 +5791,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if types[t].kind == .str_: r = T_RAWPTR
         else if types[t].kind == .array: r = mk_ptr(int(types[t].elem))
         else: fatal(nodes[n].pos, "data() needs an array or string")
-        if refine_active and ref_storage_contract(t): fatal(nodes[n].pos, "mutable refinement access through raw data is not supported")
+        if not permute and refine_active and ref_storage_contract(t): fatal(nodes[n].pos, "mutable refinement access through raw data is not supported")
         note_storage_access(args[0])
     else if id == .syscall:
         if nargs < 1 or nargs > 7: fatal(nodes[n].pos, "syscall takes 1 to 7 arguments")
