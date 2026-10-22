@@ -179,7 +179,39 @@ global_addr_off = (g: int) -> int:
     o
 
 # ---------------- type helpers ----------------
+# Representation plans belong to one lowering invocation. Only demanded types
+# acquire entries; epochs avoid a types-by-functions clearing pass. Lazy helper
+# discovery may append types, and a later lowering (watch/replay included) never
+# reuses a previous invocation's classification.
+struct LowerTypePlan:
+    epoch: int
+    value_class: int
+    vtype: int
+
+lower_types: LowerTypePlan[]
+lower_epoch = 0
+lower_planning = false
+
+lower_type_plan = (t0: int) -> *LowerTypePlan:
+    if t0 >= lower_types.len(): lower_types.resize(max(t0 + 1, lower_types.len() * 2))
+    plan = &lower_types[t0]
+    if plan.epoch == lower_epoch: return plan
+    t = quantity_base(t0)
+    k = types[t].kind
+    c = VC_INT
+    v = VI
+    if k == .void_ or k == .typeval or k == .module: c = VC_VOID
+    else if k == .float_:
+        c = VC_FLT
+        v = if int(types[t].bits) == 32: VS else: VF
+    else if is_aggregate(t): c = VC_AGG
+    plan.value_class = c
+    plan.vtype = v
+    plan.epoch = lower_epoch
+    plan
+
 vc = (t0: int) -> int:
+    if lower_planning: return lower_type_plan(t0).value_class
     t = quantity_base(t0)
     k = types[t].kind
     if k == .void_ or k == .typeval or k == .module: return VC_VOID
@@ -188,6 +220,7 @@ vc = (t0: int) -> int:
     VC_INT
 
 vt_of = (t0: int) -> int:
+    if lower_planning: return lower_type_plan(t0).vtype
     t = quantity_base(t0)
     if types[t].kind == .float_:
         if int(types[t].bits) == 32: return VS
@@ -7034,6 +7067,8 @@ lower_inst = (lf: int, f: int):
 lop_watch = false       # (loops in this function count down to the web page's watchdog)
 
 lower_function = (lf: int):
+    lower_epoch += 1
+    lower_planning = true
     parallel_serial = lfuncs[lf].kind == LK_HELPER and (lfuncs[lf].hkind == HK.parallel_serial or lfuncs[lf].hkind == HK.partition and lfuncs[lf].htype == 1)
     partition_mode = lfuncs[lf].kind == LK_HELPER and lfuncs[lf].hkind == HK.partition
     if lfuncs[lf].kind == LK_INST or parallel_serial or partition_mode: pc_restore(lfuncs[lf].inst)
@@ -7064,6 +7099,7 @@ lower_function = (lf: int):
             ir.code[k] = ins
             k += 1
     ir.code.truncate(k)
+    lower_planning = false
 
 # ---------------- generated helper functions ----------------
 lower_partial_thunk = (lf: int, th: int):
