@@ -1,0 +1,10 @@
+# Two functions write one decimal global: an exact value first, a float later.
+let level=0.0
+reset=():>void=>{level=0.5}
+raise=(by:float64):>void=>{level+=by}
+current=()=>level
+main=()=>{
+    reset()
+    raise(0.25)
+    printl(current())
+}

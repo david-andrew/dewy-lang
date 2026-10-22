@@ -4217,10 +4217,11 @@ zonk_collect_writes = false
 __check_fn_body = (f: int):
     if fns[f].state != 0: return
     icb = ic_fn(IC_CHECK, f)
-    __check_fn_body_now(f)
+    if decimal_wants(f): decimal_check_body(f)
+    else: check_body_now(f)
     ic_restore(icb)
 
-__check_fn_body_now = (f: int):
+check_body_now = (f: int):
     fns[f].state = 1
     decl = int(fns[f].decl)
     if decl != 0:
@@ -5231,27 +5232,32 @@ check_pending_functions = (start: int) -> int:
         pc_try(k)
         if fns[k].state == 0 and (fns[k].kind == FK_NORMAL or fns[k].kind == FK_INIT) and k != 0:
             if fns[k].kind == FK_INIT:
-                m = int(fns[k].mod)
-                icb = ic_mod(IC_CHECK, m)
-                entered = enter_module_context(m)
-                cx = module_ctx[m]
-                fns[k].state = 1
-                mark = scope_mark()
-                ctxs[cx].floor = i32(sc_names.len())
-                body = int(fns[k].body)
-                loop j in [0..nkids(body)): check_stmt(kid(body, j))
-                scope_reset(mark)
-                zonk_tree(body)
-                loop l in fns[k].locals: locals[l].type = i32(zonk(int(locals[l].type)))
-                copy_write_warnings(k)
-                fns[k].ret = i32(T_VOID)
-                fns[k].state = 2
-                leave_module_context(m, entered)
-                cx = -1
+                icb = ic_mod(IC_CHECK, int(fns[k].mod))
+                if decimal_wants(k): decimal_check_body(k)
+                else: check_init_now(k)
                 ic_restore(icb)
             else: check_fn_body(k)
         k += 1
     k
+
+# a module's top-level code
+check_init_now = (k: int):
+    m = int(fns[k].mod)
+    entered = enter_module_context(m)
+    cx = module_ctx[m]
+    fns[k].state = 1
+    mark = scope_mark()
+    ctxs[cx].floor = i32(sc_names.len())
+    body = int(fns[k].body)
+    loop j in [0..nkids(body)): check_stmt(kid(body, j))
+    scope_reset(mark)
+    zonk_tree(body)
+    loop l in fns[k].locals: locals[l].type = i32(zonk(int(locals[l].type)))
+    copy_write_warnings(k)
+    fns[k].ret = i32(T_VOID)
+    fns[k].state = 2
+    leave_module_context(m, entered)
+    cx = -1
 
 check_program = (main_path: str):
     console_type_id = -1
@@ -5490,6 +5496,7 @@ check_program = (main_path: str):
         if not modules[m].is_prelude: init_fns.push(int(modules[m].init_fn))
     cx = -1
     check_pushers_first()
+    decimal_writers_first()
     # (a struct or enum of the program's whose values hold one another without end, a: A, is an
     # error used or not)
     loop m in order:

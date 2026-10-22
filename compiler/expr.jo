@@ -1,6 +1,7 @@
 use 'parallel_lower.jo'
 use 'partition.jo'
 use 'string_domains.jo'
+use 'decimals.jo'
 use 'ownership.jo'
 use 'units.jo'
 use 'errors.jo'
@@ -8368,6 +8369,7 @@ check_expr = (n: int, expected: int) -> int:
                         fatal(nodes[n].pos, "'{name_of(nm)}' is used before line {ln} gives it its value (the program runs from the top down)")
             nodes[n].sym = i32(g)
             t = int(globals[g].type)
+            if decimal_globals.len() > 0: decimal_use(g)
             if path_narrows > 0 and n != no_narrow_at:
                 al = path_alias(n)
                 if al >= 0:

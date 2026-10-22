@@ -1,0 +1,21 @@
+# A decimal binding read before a float is written to it is a float64 from the start.
+best_of=(xs:array<float64>)=>{
+    let best=0.0
+    loop x in xs { if x >? best { best=x } }
+    best
+}
+scale=(v:float64):>float64=>v*2.0
+main=()=>{
+    printl(best_of([1.5 3.25 2.0]))
+    let f:float64=1.25
+    let a=0.0
+    printl(scale(a))
+    a=f
+    printl(a)
+    let lo=100.0
+    loop x in [0.5 0.25] { if float64(x) <? lo { lo=float64(x) } }
+    let m:float64=lo
+    printl(m)
+    let half=0.5
+    printl(half+0.25 =? 0.75)
+}

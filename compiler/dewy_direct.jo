@@ -1,4 +1,5 @@
 use 'check.jo'
+use 'decimals.jo'
 use 'x64.jo'
 use 'ir.jo'
 use 'parse.jo'
@@ -468,6 +469,7 @@ dc_declaration = (constant: bool, bare: bool = false) -> int:
         value = int(nodes[n].b)
         if dw_const_number(value) or nodes[value].kind == .str_lit or nodes[value].kind == .none_lit: nodes[n].kind = .const_
         else: add_flag(n, NF_RDONLY)
+    decimal_let(n)
     dn_accept_semi()
     n
 

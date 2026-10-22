@@ -1,0 +1,11 @@
+# A script's top-level accumulator, read by a function checked before the float write.
+let total=0.0
+show=()=>printl(total)
+let xs:array<float64>=[1.5 2.5]
+let scaled=total*2
+loop x in xs { total+=x }
+show()
+printl(scaled)
+let exact=0.1
+exact+=0.2
+printl(exact)

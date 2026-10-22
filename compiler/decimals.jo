@@ -1,115 +1,404 @@
 # Decimal literals adapt to their context: exact unless next to a float operand, in a float
 # parameter or field (both decided where the literal is checked), or the unannotated binding
-# it initializes is later written a float. That last context is known only after the
-# binding's first uses are checked, so it is found lazily: a float write to such a binding,
-# which would be a type error, restarts the compilation with the binding's declaration
-# marked float64 (the same mechanism as eager-body replay). Programs without such a write pay
-# nothing beyond a map lookup per decimal binding.
+# it initializes is written a float anywhere in its scope. That last context is known only
+# once the binding's writes are checked, so a body (a function's, or top-level code) that
+# declares such a binding keeps a copy of its unchecked nodes, as do the functions checked
+# while it is: a float write to the binding marks the declaration float64, and they are all
+# checked again from their copies, in the same compilation (build, check, editor, prompt and
+# watch alike). Functions and top-level code that write a decimal global are checked first,
+# and again when a later one finds it float. When code that saw the binding exact cannot be
+# checked again, the float write is the usual type error. Programs whose parsers saw no
+# decimal binding pay a counter test per checked function.
 use 'check.jo'
 use 'ast.jo'
 use 'util.jo'
 use 'expr.jo'
 use 'types.jo'
-use 'pcheck.jo'
-use 'lazy_bodies.jo'
 use 'ide.jo'
-use 'main.jo'
 use 'units.jo'
+use 'facts.jo'
+use 'refine.jo'
+use 'proofs.jo'
+use 'frontend.jo'
+use 'lazy_bodies.jo'
+use 'pcheck.jo'
 
-const DECIMAL_FLAG = "--float-decimals="
-decimal_floats: {str: bool} = {}      # declarations ("path|offset") made float64 by a restart
-decimal_locals: {int: int} = {}       # local -> its declaration's position
-decimal_globals: {int: int} = {}      # global -> its declaration's position
-decimal_target = 0                    # the declaration position of the binding being assigned
-decimal_pending = false               # a binding was found to be written a float: restart
-decimal_checked = false               # checking is over: a write found later restarts at once
-decimal_restarted = false             # a restart: the warnings the last run showed are not repeated
-decimal_pid = 0                       # the compiler's own process: forked workers leave the restart to it
+decimal_floats: {int: bool} = {}        # declarations (positions) written a float: float64
+decimal_locals: {int: int} = {}         # local -> its declaration's position
+decimal_local_fns: {int: int} = {}      # local -> the function whose body declares it
+decimal_globals: {int: int} = {}        # global -> its declaration's position
+decimal_global_inits: {int: int} = {}   # global -> its literal initializer, unchecked
+decimal_users: {int: int[]} = {}        # global -> bodies (function, or top-level code) that used it exact
+decimal_target = 0                      # the declaration position of the binding being assigned
+decimal_target_ref = 0                  # ... its local, or -1 - its global
+decimal_frame = 0                       # the function whose body check can start over (0: none)
+decimal_again = false                   # ... and must
+decimal_frame_mark = 0                  # ... its first nested copy in decimal_nested
+decimal_nested: int[]                   # copies of functions checked inside such a check
+decimal_modules: {int: bool} = {}       # modules declaring a decimal global
+decimal_writers: {int: bool} = {}       # function declarations that write a decimal global
+decimal_phase = false                   # checking them first: their copies are kept
+decimal_kept: {int: int} = {}           # (phase) function -> its copy
+decimal_stale: int[]                    # (phase) checked functions that used a global now float
 
-# This process's id, to tell forked emission/check workers from the compiler itself
-# (Windows forks none: any nonzero id will do).
-decimal_self = () -> int:
-    when BOOTSTRAP:
-        return syscall(39)
-    else when TARGET == "windows" or TARGET == "wasm":
-        return 1
-    else:
-        return syscall(39)
+# Copies of unchecked bodies: node records and list slots, restored in place (node ids, and
+# what the parsers keyed by them, stay valid).
+struct DecimalCopy:
+    owner: int
+    ids: int
+    ids_end: int
+    slots: int
+    slots_end: int
+    lo: int
+    hi: int
+    globals: int
+    globals_end: int
+decimal_copies: DecimalCopy[]
+decimal_copy_marks: DecimalMarks[]
+decimal_saved_fns: FnInst[]
+dsn_ids: int[]
+dsn_nodes: Node[]
+dsn_slots: int[]
+dsn_vals: i32[]
+dsn_globals: int[]
+dsn_global_recs: Global[]
+dsn_lo = 0
+dsn_hi = 0
 
-decimal_key = (pos: int) -> str: "{files[pos_file(pos)].path}|{pos_off(pos)}"
+# The parsers, for each declaration: one that a decimal literal initializes, unannotated, is
+# counted (none in the program: no body is looked at).
+decimal_lets = 0
+decimal_let = (n: int):
+    if nodes[n].kind == .vardecl and nodes[n].a == 0 and nodes[n].b != 0 and not has_flag(n, NF_RDONLY) and decimal_literal_tree(int(nodes[n].b)): decimal_lets += 1
 
-# main: `--float-decimals=a|1,b|2` from an earlier run
-decimal_flag = (arg: str) -> bool:
-    if not starts_with(arg, DECIMAL_FLAG): return false
-    parts = split(arg[len(DECIMAL_FLAG)..], ";")
-    loop key in split(parts[0], ","):
-        if len(key) > 0: decimal_floats[key] = true
-    if parts.len() > 1:
-        loop w in split(parts[1], ","):
-            if len(w) > 0: shown_warnings.push(w)
-    decimal_restarted = true
-    true
+# an unannotated, assignable binding that a decimal literal initializes, among the
+# statements of n (not inside expressions: a lambda's own such binding keeps its exact type)
+decimal_binding_in = (n: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .vardecl: return nodes[n].a == 0 and nodes[n].b != 0 and nodes[n].nlist == 0 and not has_flag(n, NF_RDONLY) and decimal_literal_tree(int(nodes[n].b))
+    if k != .block and k != .if_ and k != .iflet and k != .while_ and k != .for_ and k != .exprstmt and k != .match_ and k != .arm and k != .defer_ and k != .when_: return false
+    if decimal_binding_in(int(nodes[n].a)) or decimal_binding_in(int(nodes[n].b)) or decimal_binding_in(int(nodes[n].c)) or decimal_binding_in(int(nodes[n].d)): return true
+    loop i in [0..nkids(n)):
+        if decimal_binding_in(kid(n, i)): return true
+    loop i in [0..nkids2(n)):
+        if decimal_binding_in(kid2(n, i)): return true
+    false
+
+# __check_fn_body: whether f's body check keeps a copy to start over from
+decimal_wants = (f: int) -> bool:
+    k = int(fns[f].kind)
+    # (top-level code: a script's accumulator)
+    if k == FK_INIT: return decimal_lets > 0 and fns[f].body != 0 and files[pos_file(nodes[int(fns[f].body)].pos)].is_dewy and (decimal_modules.has(int(fns[f].mod)) or decimal_binding_in(int(fns[f].body)))
+    if k != FK_NORMAL: return false
+    if decimal_frame != 0 and fns[f].body != 0: return true
+    d = int(fns[f].decl)
+    if d == 0 or nodes[d].kind != .fn_ or has_flag(d, NF_EXTERN): return false
+    if decimal_writers.len() > 0 and decimal_writers.has(d): return true
+    if not files[pos_file(nodes[d].pos)].is_dewy: return false
+    source_force_body(d)
+    if decimal_lets == 0: return false
+    decimal_binding_in(int(fns[f].body))
+
+decimal_save = (n: int):
+    if n == 0: return
+    dsn_ids.push(n)
+    dsn_nodes.push(nodes[n])
+    p = nodes[n].pos
+    if p > 0 and pos_file(p) == pos_file(dsn_lo):
+        if p < dsn_lo: dsn_lo = p
+        if p > dsn_hi: dsn_hi = p
+    decimal_save(int(nodes[n].a))
+    decimal_save(int(nodes[n].b))
+    decimal_save(int(nodes[n].c))
+    decimal_save(int(nodes[n].d))
+    s = int(nodes[n].list)
+    loop i in [0..int(nodes[n].nlist)):
+        dsn_slots.push(s + i)
+        dsn_vals.push(lists[s + i])
+        decimal_save(int(lists[s + i]))
+    s2 = int(nodes[n].list2)
+    loop i in [0..int(nodes[n].nlist2)):
+        dsn_slots.push(s2 + i)
+        dsn_vals.push(lists[s2 + i])
+        decimal_save(int(lists[s2 + i]))
+
+decimal_copy = (f: int) -> int:
+    d = int(fns[f].decl)
+    b = int(fns[f].body)
+    dsn_lo = nodes[b].pos
+    if d != 0: dsn_lo = nodes[d].pos
+    dsn_hi = dsn_lo
+    ids = dsn_ids.len()
+    slots = dsn_slots.len()
+    if d != 0:
+        loop i in [0..nkids(d)): decimal_save(kid(d, i))
+    decimal_save(b)
+    # (top-level code declares globals: their checked state goes back too)
+    gl = dsn_globals.len()
+    if fns[f].kind == i32(FK_INIT):
+        here: {int: bool} = {}
+        loop i in [ids..dsn_ids.len()): here[dsn_ids[i]] = true
+        loop g in [1..globals.len()):
+            if here.has(int(globals[g].decl)):
+                dsn_globals.push(g)
+                dsn_global_recs.push(globals[g])
+    decimal_copies.push(DecimalCopy(f, ids, dsn_ids.len(), slots, dsn_slots.len(), dsn_lo, dsn_hi, gl, dsn_globals.len()))
+    decimal_saved_fns.push(fns[f])
+    decimal_copy_marks.push(decimal_marks())
+    decimal_copies.len() - 1
+
+# (copy c and the ones after it)
+decimal_drop = (c: int):
+    if c < 0 or c >= decimal_copies.len(): return
+    dsn_ids.truncate(decimal_copies[c].ids)
+    dsn_nodes.truncate(decimal_copies[c].ids)
+    dsn_slots.truncate(decimal_copies[c].slots)
+    dsn_vals.truncate(decimal_copies[c].slots)
+    dsn_globals.truncate(decimal_copies[c].globals)
+    dsn_global_recs.truncate(decimal_copies[c].globals)
+    decimal_copies.truncate(c)
+    decimal_saved_fns.truncate(c)
+    decimal_copy_marks.truncate(c)
+
+struct DecimalMarks:
+    fns: int
+    locals: int
+    facts: int
+    refines: int
+    proofs: int
+    refs: int
+    hint_fns: int
+
+decimal_marks = () -> DecimalMarks:
+    DecimalMarks(fns.len(), locals.len(), fact_requests.len(), refine_requests.len(), proof_calls.len(), ide_refs.len(), ide_hint_fns.len())
+
+# (what checking the body made: its lambdas' instances and the locals of both)
+decimal_made_here = (owner: int, f: int, m: DecimalMarks, inside: {int: bool}) -> bool:
+    if owner == f: return true
+    if owner < m.fns or owner >= fns.len(): return false
+    k = int(fns[owner].kind)
+    (k == FK_LAMBDA or k == FK_PARTIAL) and inside.has(int(fns[owner].decl))
+
+decimal_requests = (rs: FactRequest[], from: int, f: int, m: DecimalMarks, inside: {int: bool}) -> FactRequest[]:
+    if rs.len() <= from: return rs
+    out = rs[..from)
+    loop i in [from..rs.len()):
+        if not decimal_made_here(rs[i].owner, f, m, inside): out.push(rs[i])
+    out
+
+# Back to the unchecked body; what its first check recorded is forgotten.
+decimal_restore = (c: int, m: DecimalMarks):
+    cp = decimal_copies[c]
+    f = cp.owner
+    inside: {int: bool} = {}
+    loop i in [cp.ids..cp.ids_end):
+        nodes[dsn_ids[i]] = dsn_nodes[i]
+        inside[dsn_ids[i]] = true
+    loop j in [cp.slots..cp.slots_end): lists[dsn_slots[j]] = dsn_vals[j]
+    loop j in [cp.globals..cp.globals_end): globals[dsn_globals[j]] = dsn_global_recs[j]
+    fact_requests = decimal_requests(fact_requests, m.facts, f, m, inside)
+    refine_requests = decimal_requests(refine_requests, m.refines, f, m, inside)
+    proof_calls = decimal_requests(proof_calls, m.proofs, f, m, inside)
+    # (its locals, to the editor's index and the unused-name warnings: none)
+    loop l in [m.locals..locals.len()):
+        if decimal_made_here(int(locals[l].owner), f, m, inside): locals[l].name = i32(0)
+    if ide_on:
+        if ide_refs.len() > m.refs:
+            refs = ide_refs[..m.refs)
+            loop i in [m.refs..ide_refs.len()):
+                p = ide_refs[i].pos
+                if pos_file(p) != pos_file(cp.lo) or p < cp.lo or p > cp.hi: refs.push(ide_refs[i])
+            ide_refs = refs
+        if ide_hint_fns.len() > m.hint_fns:
+            hf = ide_hint_fns[..m.hint_fns)
+            loop i in [m.hint_fns..ide_hint_fns.len()):
+                if ide_hint_fns[i] != f: hf.push(ide_hint_fns[i])
+            ide_hint_fns = hf
+    fns[f] = decimal_saved_fns[c]
+
+# __check_fn_body for a body that may start over
+# __check_fn_body for a body that may start over. Functions checked while it is checked keep
+# copies too: starting over checks them again (their types may depend on the binding).
+decimal_check_body = (f: int):
+    saved_frame = decimal_frame
+    saved_again = decimal_again
+    saved_mark = decimal_frame_mark
+    c = decimal_copy(f)
+    if saved_frame != 0: decimal_nested.push(c)
+    if decimal_phase: decimal_kept[f] = c
+    reset: int[]
+    loop true:
+        m = decimal_marks()
+        decimal_copy_marks[c] = m
+        decimal_frame = f
+        decimal_frame_mark = decimal_nested.len()
+        decimal_again = false
+        if fns[f].kind == i32(FK_INIT): check_init_now(f)
+        else: check_body_now(f)
+        if not decimal_again: break
+        i = decimal_nested.len() - 1
+        loop i >= decimal_frame_mark:
+            n = decimal_nested[i]
+            decimal_restore(n, decimal_copy_marks[n])
+            reset.push(decimal_copies[n].owner)
+            i -= 1
+        decimal_nested.truncate(decimal_frame_mark)
+        decimal_restore(c, m)
+    decimal_frame = saved_frame
+    decimal_again = saved_again
+    decimal_frame_mark = saved_mark
+    loop g in reset:
+        if fns[g].state == 0: check_fn_body(g)
+    if saved_frame == 0 and not decimal_phase:
+        decimal_drop(c)
+        decimal_nested = []
+
+# the function whose body the code being checked is in (lambdas: the enclosing one; a global's
+# initializer: its module's top-level code)
+decimal_root = () -> int:
+    c = cx
+    if c < 0: return -1
+    loop ctxs[c].parent >= 0: c = int(ctxs[c].parent)
+    inst = int(ctxs[c].inst)
+    if inst <= 0: return -1
+    inst
 
 # The type of an unannotated binding whose literal initializer defaulted to t.
 decimal_binding_type = (pos: int, t: int) -> int:
     if decimal_floats.len() == 0 or not bundled_rational_type(t) or not dewy_at(pos): return t
-    if decimal_floats.has(decimal_key(pos)): return T_FLOAT
+    if decimal_floats.has(pos): return T_FLOAT
     t
 
 decimal_local = (l: int, pos: int, t: int):
-    if bundled_rational_type(t) and dewy_at(pos): decimal_locals[l] = pos
+    if bundled_rational_type(t) and dewy_at(pos):
+        decimal_locals[l] = pos
+        decimal_local_fns[l] = decimal_root()
 
 decimal_global = (g: int, pos: int, t: int):
-    if bundled_rational_type(t) and dewy_at(pos): decimal_globals[g] = pos
+    if bundled_rational_type(t) and dewy_at(pos) and decimal_global_inits.has(g): decimal_globals[g] = pos
 
-# check_assign: the binding an assignment writes, when it was made by a decimal literal
+# a use of a decimal global while it is exact: who would check again if it became float
+decimal_use = (g: int):
+    if not decimal_globals.has(g) or decimal_floats.has(decimal_globals[g]): return
+    r = decimal_root()
+    users = decimal_users.get(g) ?? []
+    if users.contains(r): return
+    users.push(r)
+    decimal_users[g] = users
+
+# check_assign: the binding an assignment writes, when a decimal literal may have made it
+# (a global's first use may be this assignment: its declaration is looked up at the write)
 decimal_assign_begin = (s: int) -> int:
     saved = decimal_target
     decimal_target = 0
-    if decimal_locals.len() == 0 and decimal_globals.len() == 0: return saved
+    if decimal_locals.len() == 0 and decimal_global_inits.len() == 0: return saved
     lhs = int(nodes[s].a)
     if nodes[lhs].kind != .ident: return saved
     sy = lookup(int(nodes[lhs].name))
     if sy == 0: return saved
-    if syms[sy].kind == .local: decimal_target = decimal_locals.get(int(syms[sy].ref)) ?? 0
-    else if syms[sy].kind == .global: decimal_target = decimal_globals.get(int(syms[sy].ref)) ?? 0
+    if syms[sy].kind == .local:
+        l = int(syms[sy].ref)
+        decimal_target = decimal_locals.get(l) ?? 0
+        decimal_target_ref = l
+    else if syms[sy].kind == .global and decimal_global_inits.has(int(syms[sy].ref)):
+        decimal_target = -1
+        decimal_target_ref = -1 - int(syms[sy].ref)
     saved
 
-# A float written to the binding: from the start it is a float64. Checking goes on, to
-# find the others in the same run (the caller leaves this write unconverted); the
-# compilation restarts when checking ends, or at an error, before anything is emitted.
+# A float written to the binding: it is a float64 from its declaration on. The body check
+# goes on (the caller leaves this write unconverted, and later code sees a float64), then
+# starts over. False when the code that saw it exact cannot be checked again: the write is
+# then the usual type error.
 decimal_float_write = (from: int, to: int) -> bool:
     if decimal_target == 0 or tkind(prune(from)) != .float_ or not bundled_rational_type(prune(to)): return false
-    if ide_on or repl_image or watch_build or errors_only or decimal_pid == 0: return false
-    key = decimal_key(decimal_target)
-    if decimal_floats.has(key): return false
-    # (a forked worker gives up its part; the compiler redoes it, and restarts)
-    if decimal_self() != decimal_pid: exit(1)
-    decimal_floats[key] = true
-    decimal_pending = true
-    if decimal_checked: decimal_restart()
+    if decimal_frame == 0 or decimal_root() != decimal_frame: return false
+    if decimal_target_ref >= 0:
+        l = decimal_target_ref
+        if (decimal_local_fns.get(l) ?? 0) != decimal_frame: return false
+        decimal_floats[decimal_target] = true
+        locals[l].type = i32(T_FLOAT)
+        decimal_again = true
+        return true
+    g = -1 - decimal_target_ref
+    if not decimal_globals.has(g): return false
+    pos = decimal_globals[g]
+    users = decimal_users.get(g) ?? []
+    loop u in users:
+        if u != decimal_frame and not (decimal_phase and decimal_kept.has(u)) and not decimal_nested_in_frame(u): return false
+    # (a forked check worker gives up its part: the compiler checks it again itself)
+    if pc_child >= 0: exit(1)
+    decimal_floats[pos] = true
+    loop u in users:
+        if u != decimal_frame and not decimal_nested_in_frame(u) and not decimal_stale.contains(u): decimal_stale.push(u)
+    d = int(globals[g].decl)
+    nodes[d].b = i32(clone(decimal_global_inits[g]))
+    clear_flag(d, NF_CHECKED)
+    globals[g].state = 0
+    ensure_global(g, nodes[d].pos)
+    decimal_again = true
     true
 
-decimal_restart = ():
-    if not decimal_pending: return
-    if pc_child >= 0 or decimal_self() != decimal_pid: exit(1)
-    pc_cancel()
-    keys: str[]
-    loop k, _ in decimal_floats: keys.push(k)
-    a = args()
-    replay = [a[0], DECIMAL_FLAG + join(keys, ",") + ";" + join(shown_warnings, ",")]
-    loop i in [1..a.len()):
-        if not starts_with(a[i], DECIMAL_FLAG): replay.push(a[i])
-    __olen = 0
-    when TARGET == "windows":
-        # (a process cannot replace itself there: run the restart with this one's standard
-        # streams, then end with its exit code)
-        code, _ = run_program(exe_path(), replay[1..], true)
-        if code < 0:
-            eprint("error: could not restart with float decimal bindings")
-            exit(2)
-        exit(code)
-    else:
-        if not exec(exe_path(), replay):
-            eprint("error: could not restart with float decimal bindings")
-            exit(2)
+# f was checked inside the current check, which starts over: so will it
+decimal_nested_in_frame = (f: int) -> bool:
+    loop i in [decimal_frame_mark..decimal_nested.len()):
+        if decimal_copies[decimal_nested[i]].owner == f: return true
+    false
+
+# (a global made by a decimal literal and written in a function: that function is checked
+# first, so the global's type is settled before the code that reads it is checked)
+decimal_writers_first = ():
+    names: {int: bool} = {}
+    loop m in modules:
+        if m.is_prelude: continue
+        loop d in m.decls:
+            if nodes[d].kind == .vardecl and nodes[d].nlist == 0 and nodes[d].a == 0 and nodes[d].b != 0 and not has_flag(d, NF_RDONLY) and dewy_at(nodes[d].pos) and decimal_literal_tree(int(nodes[d].b)):
+                g = int(nodes[d].sym)
+                if g > 0 and globals[g].state == 0 and int(globals[g].decl) == d:
+                    names[int(nodes[d].name)] = true
+                    decimal_global_inits[g] = clone(int(nodes[d].b))
+                    decimal_modules[int(globals[g].mod)] = true
+    if names.len() == 0: return
+    dc_force_all()
+    writers: int[]
+    loop m in modules:
+        if m.is_prelude: continue
+        loop d in m.decls:
+            if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and nodes[d].b != 0 and decimal_writes(int(nodes[d].b), names) and not fn_sig(d).generic:
+                decimal_writers[d] = true
+                writers.push(d)
+    # (and top-level code writing one: a script's accumulator, before the functions that read it)
+    inits: int[]
+    loop mi in [0..modules.len()):
+        if decimal_modules.has(mi) and decimal_writes(int(fns[int(modules[mi].init_fn)].body), names): inits.push(int(modules[mi].init_fn))
+    if writers.len() == 0 and inits.len() == 0: return
+    decimal_phase = true
+    loop d in writers:
+        f = get_fn_inst(d, [], nodes[d].pos)
+        if fns[f].state == 0: check_fn_body(f)
+    loop f in inits:
+        if fns[f].state == 0: decimal_check_body(f)
+    loop decimal_stale.len() > 0:
+        f = decimal_stale.pop()
+        if f <= 0 or fns[f].state != 2 or not decimal_kept.has(f): continue
+        c = decimal_kept[f]
+        decimal_restore(c, decimal_copy_marks[c])
+        if fns[f].kind == i32(FK_INIT): decimal_check_body(f)
+        else: check_fn_body(f)
+    decimal_phase = false
+    decimal_kept = {}
+    loop decimal_copies.len() > 0: decimal_drop(decimal_copies.len() - 1)
+
+decimal_writes = (n: int, names: {int: bool}) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .assign:
+        lhs = int(nodes[n].a)
+        if lhs != 0 and nodes[lhs].kind == .ident and names.has(int(nodes[lhs].name)): return true
+    if k == .int_lit or k == .float_lit or k == .str_lit or k == .ident: return false
+    if decimal_writes(int(nodes[n].a), names) or decimal_writes(int(nodes[n].b), names) or decimal_writes(int(nodes[n].c), names) or decimal_writes(int(nodes[n].d), names): return true
+    loop i in [0..nkids(n)):
+        if decimal_writes(kid(n, i), names): return true
+    loop i in [0..nkids2(n)):
+        if decimal_writes(kid2(n, i), names): return true
+    false

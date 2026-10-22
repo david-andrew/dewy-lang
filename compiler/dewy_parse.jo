@@ -7,6 +7,7 @@ use 'lex.jo'
 use 'parse.jo'
 use 'expr.jo'
 use 'check.jo'
+use 'decimals.jo'
 use 'dewy_tokens.jo'
 use 'refine.jo'
 use 'proofs.jo'
@@ -2331,6 +2332,7 @@ dw_declare = (id: int, constant: bool, top: bool) -> int:
         value = int(nodes[n].b)
         if dw_const_number(value) or nodes[value].kind == .str_lit or nodes[value].kind == .none_lit: nodes[n].kind = .const_
         else: add_flag(n, NF_RDONLY)
+    decimal_let(n)
     return n
 
 # `Name:type = A & B & [f:T]`: a record with the fields of each operand, merged
