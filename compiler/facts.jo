@@ -438,6 +438,12 @@ fact_probe_index = (n: int, s: mut FactState, index: int, length: int):
     if let old = fact_probe.get(n): ok = ok and old
     fact_probe[n] = ok
 
+fact_probe_divisor = (n: int, s: mut FactState, divisor: int, operand: int):
+    zero = fact_constant(s, ref_encoded(0, ntype(operand)))
+    ok = fact_compare(s, .ne, divisor, zero) == 1
+    if let old = fact_probe.get(n): ok = ok and old
+    fact_probe[n] = ok
+
 fact_probe_route = (s: mut FactState, route: FactRoute, values: int[]):
     loop i in [0..route.selectors.len()):
         n = route.sites[i]
@@ -1824,6 +1830,8 @@ fact_capture = (n: int, s: mut FactState) -> int:
         if nodes[n].aux == 0 and fact_scalar(ntype(n)) and (op == .plus or op == .minus or op == .star): return fact_arithmetic(s, n, op, a, b)
         if fact_speculating == 0 and fact_policy == .RequireStatic and nodes[n].aux == 0 and (op == .slash or op == .percent) and is_int(ntype(int(nodes[n].b))):
             fact_divisor(s, n, a, b, op == .percent)
+        if fact_speculating == 0 and fact_probe_on and nodes[n].aux == 0 and (op == .slash or op == .percent) and is_int(ntype(int(nodes[n].b))):
+            fact_probe_divisor(n, s, b, int(nodes[n].b))
         if nodes[n].aux == 0 and (op == .slash or op == .percent) and fact_scalar(ntype(n)) and representation_type(ntype(n)) != T_U64 and fact_scalar(ntype(int(nodes[n].a))) and fact_scalar(ntype(int(nodes[n].b))):
             return fact_floor(s, n, (if op == .slash: 1 else: 2), a, b, files[pos_file(nodes[n].pos)].is_dewy)
         if nodes[n].aux != 0: fact_forget(s, n, .call)
@@ -1963,6 +1971,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
             if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)): ref_check(arg, values[i], values, s)
         if fact_speculating == 0:
             if let obligation = fact_divisors.get(n): fact_divisor(s, n, values[0], values[1], obligation == 2)
+            if fact_probe_on and nkids(n) == 2 and (fact_floor_call(n) == 1 or fact_floor_call(n) == 2): fact_probe_divisor(n, s, values[1], kid(n, 1))
         if nodes[n].aux == 2:
             result = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
             si = int(types[representation_type(ntype(n))].st)

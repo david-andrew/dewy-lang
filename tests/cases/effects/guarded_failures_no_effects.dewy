@@ -1,0 +1,13 @@
+# quick
+# Guards discharge an operation's possible failure under a closed row: a
+# divisor proven nonzero, a remainder by a constant, an index proven in bounds.
+slot=(deadline:int64 wheel:int64):>int64 & no_effects=>{
+    if wheel <=? 0 or deadline <? 0 return -1
+    return deadline%wheel + deadline//wheel
+}
+minutes=(seconds:int64):>int64 & no_effects=>seconds//60 + seconds%7
+pick=(xs:array<int64 length=4> i:int64):>int64 & no_effects=>{
+    if i <? 0 or i >=? 4 return 0
+    return xs[i]
+}
+main=()=>printl("{slot(29 12)} {slot(1 0)} {minutes(185)} {pick([5 6 7 8] 2)} {pick([5 6 7 8] 4)}")

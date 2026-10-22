@@ -804,6 +804,12 @@ effect_bounds = (f: int, n: int):
         if nodes[ix].kind == .int_lit and not has_flag(ix, NF_U64) and nodes[ix].ival >= 0 and nodes[ix].ival < fixed_len(t): return
         it = prune(ntype(ix))
         if types[it].kind == .int_ and not types[it].sign and int(types[it].bits) < 32 and (1 << int(types[it].bits)) <= fixed_len(t): return
+    effect_failure(f, n)
+
+# A possible failure at n (an index, a divisor, a refinement check) unless the
+# owner body's facts discharge it; the facts probe answers each site.
+effect_failure = (f: int, n: int):
+    if effect_bounds_proven.has(n): return
     effect_bound_sites.push((f, n))
     effect_add(f, EffectEvent(EffectAtom(.panic), n))
 
@@ -1049,6 +1055,12 @@ effect_scan_node = (f: int, n: int):
     if k == .call and nodes[n].aux == 1:
         effect_indirect(f, n)
         return
+    # (a builtin floor `//` or `%` on words is the inline word operation; only
+    # a divisor not proven nonzero can fail)
+    if k == .call and nodes[n].aux == 0 and effect_scalar(ntype(n)) and fact_floor_call(n) != 0:
+        loop c in kids(n): effect_scan_node(f, c)
+        if fact_floor_call(n) <= 2: effect_failure(f, n)
+        return
     if k == .call and nodes[n].aux == 0:
         g = int(nodes[n].sym)
         routes: PlaceIdentity[]
@@ -1141,7 +1153,7 @@ effect_scan_node = (f: int, n: int):
         if not supported and nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent))) and effect_scalar(ntype(int(nodes[n].a))) and effect_scalar(ntype(int(nodes[n].b))):
             supported = true
             divisor = int(nodes[n].b)
-            if nodes[divisor].kind != .int_lit or nodes[divisor].ival == 0: effect_add(f, EffectEvent(EffectAtom(.panic), n))
+            if nodes[divisor].kind != .int_lit or nodes[divisor].ival == 0: effect_failure(f, n)
         # (members of one literal union compare as words)
         if not supported and nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.eq)) or nodes[n].op == i32(int(Tok.ne))):
             supported = effect_simple_enum(ntype(int(nodes[n].a))) and effect_simple_enum(ntype(int(nodes[n].b)))
@@ -1167,9 +1179,7 @@ effect_scan_node = (f: int, n: int):
     else if k == .conv and nodes[n].aux == i32(int(CV.refinement)):
         # A proven refinement check is erased; an unproven one may fail.
         supported = effect_plain(ntype(n))
-        if supported and not type_eq(ntype(int(nodes[n].a)), int(nodes[n].aux2)) and not effect_bounds_proven.has(n):
-            effect_bound_sites.push((f, n))
-            effect_add(f, EffectEvent(EffectAtom(.panic), n))
+        if supported and not type_eq(ntype(int(nodes[n].a)), int(nodes[n].aux2)): effect_failure(f, n)
     # (wrapping a plain value as an optional fills the flag and payload in place)
     else if k == .conv and nodes[n].aux == i32(int(CV.opt)): supported = effect_plain(ntype(n)) and effect_plain(ntype(int(nodes[n].a)))
 
