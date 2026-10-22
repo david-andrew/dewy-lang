@@ -331,6 +331,25 @@ __merge_pass[T] = (src: T[], dst: mut T[], w: int, less: (T, T) -> bool):
     a.2 < b.2
 
 __less[T] = (a: T, b: T) -> bool: a < b
+
+# Sorting order: `<`, except that floats sort by IEEE 754 totalOrder (-NaN, -inf, the
+# negative numbers, -0.0, 0.0, the positive numbers, inf, NaN): a float's bits, the
+# magnitude flipped when negative, order as signed integers.
+__sort_lt[T] = (a: T, b: T) -> bool: a < b
+__sort_lt = (a: f64, b: f64) -> bool: __total_key(a) < __total_key(b)
+__sort_lt = (a: f32, b: f32) -> bool: __total_key(a) < __total_key(b)
+__total_key = (x: f64) -> int:
+    k = int(x as u64)
+    if k < 0: return k xor 0x7FFFFFFFFFFFFFFF
+    k
+__total_key = (x: f32) -> int:
+    k = int(x as i32)
+    if k < 0: return k xor 0x7FFFFFFF
+    k
+__from_total_key = (k: int) -> f64:
+    b = k
+    if b < 0: b = b xor 0x7FFFFFFFFFFFFFFF
+    (b as u64) as f64
 __more[T] = (a: T, b: T) -> bool: b < a
 
 # (sort's own copy of the above with < itself, not a function value: one call fewer per compare)
@@ -393,6 +412,27 @@ __merge_pass_lt[T] = (src: T[], dst: mut T[], w: int):
                 k += 1
         lo += 2 * w
 
+# floats sort by IEEE totalOrder: the order keys are sorted as integers, then turned back
+sort = (xs: mut f64[], reverse: bool = false):
+    n = xs.len()
+    if n < 2: return
+    keys = fill(0, n)
+    loop i in [0..n): keys[i] = __total_key(xs[i])
+    __merge_sort_lt(keys)
+    if reverse: keys.reverse()
+    loop i in [0..n): xs[i] = __from_total_key(keys[i])
+sort = (xs: mut f32[], reverse: bool = false):
+    n = xs.len()
+    if n < 2: return
+    keys = fill(0, n)
+    loop i in [0..n): keys[i] = __total_key(xs[i])
+    __merge_sort_lt(keys)
+    if reverse: keys.reverse()
+    loop i in [0..n):
+        k = keys[i]
+        if k < 0: k = k xor 0x7FFFFFFF
+        xs[i] = (k as i32) as f32
+
 # sort in place, smallest first (using <), or largest first; equal elements keep their order
 sort[T] = (xs: mut T[], reverse: bool = false):
     # (largest first and still stable: equal elements reversed twice keep their order)
@@ -441,7 +481,7 @@ __merge_sort_keys[K] = (idx: mut int[], keys: K[]):
         loop i < hi:
             at = idx[i]
             j = i
-            loop j > lo and keys[at] < keys[idx[j - 1]]:
+            loop j > lo and __sort_lt(keys[at], keys[idx[j - 1]]):
                 idx[j] = idx[j - 1]
                 j -= 1
             idx[j] = at
@@ -467,13 +507,13 @@ __merge_keys[K] = (src: int[], dst: mut int[], keys: K[], width: int):
         i = lo
         j = mid
         out = lo
-        if mid >= hi or not (keys[src[mid]] < keys[src[mid - 1]]):
+        if mid >= hi or not __sort_lt(keys[src[mid]], keys[src[mid - 1]]):
             loop out < hi:
                 dst[out] = src[out]
                 out += 1
         else:
             loop i < mid and j < hi:
-                if keys[src[j]] < keys[src[i]]:
+                if __sort_lt(keys[src[j]], keys[src[i]]):
                     dst[out] = src[j]
                     j += 1
                 else:

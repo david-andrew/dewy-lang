@@ -290,6 +290,13 @@ ct_convert = (e: int, v: int) -> int:
         if t == T_MATH_INT and not (x.f >= -9223372036854775808.0 and x.f < 9223372036854775808.0):
             return ct_math_unpack(ct_math_runtime("__mi_from_float", [v], e))
         bits = int(types[t].bits)
+        if t != T_MATH_INT and dewy_at(nodes[e].pos):
+            sg = types[t].sign
+            lo = if sg and bits == 64: -9223372036854775809.0 else if sg: -f64(1 << (bits - 1)) - 1.0 else: -1.0
+            hi = if bits == 64 and not sg: 18446744073709551616.0 else if bits == 64: 9223372036854775808.0 else if sg: f64(1 << (bits - 1)) else: f64(1 << bits)
+            # (-2^63 - 1 rounds to -2^63, which fits: the lower test is inclusive there)
+            fits = x.f < hi and (if sg and bits == 64: x.f >= lo else: x.f > lo)
+            if not fits: ct_fail(e, "{x.f} does not fit {dt(t)}")
         if bits == 64 and not types[t].sign:
             r = 0
             if x.f >= 9223372036854775808.0: r = int(x.f - 9223372036854775808.0) xor (-9223372036854775807 - 1)

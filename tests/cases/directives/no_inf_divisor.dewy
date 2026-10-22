@@ -1,0 +1,8 @@
+# A divisor that may be zero gives an infinity: `$no_inf` needs it proven
+# nonzero.
+scale=(x:float64 by:float64):>float64=>{
+    $no_inf
+    $runtime_checks=false
+    return x/by
+}
+main=()=>printl(scale(1.0 2.0))

@@ -46,6 +46,7 @@ use 'watch.jo'
 use 'new.jo'
 use 'fmt.jo'
 use 'par.jo'
+use 'floats.jo'
 use 'fused.jo'
 use 'pkg.jo'
 use 'directives.jo'
@@ -424,6 +425,7 @@ compile = (path: str, out0: str) -> str:
     ic_switch(IC_FACTS, IC_SHARED)
     facts_finalize()
     directives_after_facts()
+    floats_after_facts()
     ic_switch(IC_OWNERSHIP, IC_SHARED)
     copies_reset()
     if ownership_decls.len() != 0:

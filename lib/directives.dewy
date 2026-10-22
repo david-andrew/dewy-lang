@@ -12,3 +12,11 @@ $no_hidden_costs = {
     $prototype=false
     $default_row = no allocates
 }
+
+# Floats that are always finite: no operation in the scope may produce a NaN
+# or an infinity unless it is proven not to (or checked, under
+# `$runtime_checks`).
+$finite_floats = {
+    $no_nan
+    $no_inf
+}

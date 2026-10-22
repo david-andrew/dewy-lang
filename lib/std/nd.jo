@@ -521,22 +521,6 @@ min = (xs: f64[]) -> f64:
         if x < m: m = x
     m
 
-# (floats: NaN after every number, in either order; the numbers in order, equal ones as they were)
-sort = (xs: mut f64[], descending: bool = false):
-    nan = 0
-    loop x in xs:
-        if x != x: nan += 1
-    if nan == 0:
-        sort[f64](xs, descending)
-        return
-    nums: f64[]
-    nans: f64[]
-    loop x in xs:
-        if x != x: nans.push(x)
-        else: nums.push(x)
-    sort[f64](nums, descending)
-    xs = nums + nans
-
 # the average (0 for none)
 mean = (xs: f64[]) -> f64: sum(xs) / f64(max(xs.len(), 1))
 mean = (xs: int[]) -> f64: f64(sum(xs)) / f64(max(xs.len(), 1))
@@ -853,13 +837,22 @@ __swap_rows = (m: mut f64[], n: int, a: int, b: int):
     ap = data(a.data)
     bp = data(b.data)
     # Keep the same per-element accumulation order while reusing the active
-    # output row and a cache-sized block of the right operand.
-    some_rows = (lo: int, hi: int): __nd_product_rows(op, ap, bp, ac, bc, lo, hi)
+    # output row and a cache-sized block of the right operand. A zero factor's
+    # products are skipped only when b is finite: 0 * inf and 0 * NaN are NaN.
+    skip = __nd_finite(b.data)
+    some_rows = (lo: int, hi: int): __nd_product_rows(op, ap, bp, ac, bc, lo, hi, skip)
     if ar > 1 and ar * ac * bc >= 1 << 18: __parallel_run(ar, some_rows)
     else: some_rows(0, ar)
     NDArray(out, shape)
 
-__nd_product_rows[T] = (c: *T, a: *T, b: *T, m: int, p: int, lo: int, hi: int):
+# (x - x is zero for every number, and NaN for an infinity or NaN)
+__nd_finite[T] = (xs: T[]) -> bool:
+    zero = T(0)
+    loop x in xs:
+        if x - x != zero: return false
+    true
+
+__nd_product_rows[T] = (c: *T, a: *T, b: *T, m: int, p: int, lo: int, hi: int, skip: bool):
     zero = T(0)
     jb = 0
     loop jb < p:
@@ -876,13 +869,12 @@ __nd_product_rows[T] = (c: *T, a: *T, b: *T, m: int, p: int, lo: int, hi: int):
                     x1 = left[k + 1]
                     x2 = left[k + 2]
                     x3 = left[k + 3]
-                    # Preserve the existing zero-factor shortcut, including
-                    # its behavior with nonfinite values in the other operand.
+                    # (zero factors skip their products when b is finite)
                     b0 = b + k * p
                     b1 = b0 + p
                     b2 = b1 + p
                     b3 = b2 + p
-                    if x0 == zero or x1 == zero or x2 == zero or x3 == zero:
+                    if skip and (x0 == zero or x1 == zero or x2 == zero or x3 == zero):
                         if x0 != zero:
                             loop j in [jb..je): row[j] += x0 * b0[j]
                         if x1 != zero:
@@ -897,7 +889,7 @@ __nd_product_rows[T] = (c: *T, a: *T, b: *T, m: int, p: int, lo: int, hi: int):
                     k += 4
                 loop k < ke:
                     x = left[k]
-                    if x != zero:
+                    if x != zero or not skip:
                         other = b + k * p
                         loop j in [jb..je): row[j] += x * other[j]
                     k += 1

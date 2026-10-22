@@ -1,0 +1,25 @@
+# Under `$finite_floats` (`$no_nan` and `$no_inf`), operations proven not to
+# produce NaN or infinity run unchecked; the others are checked where they run.
+$finite_floats
+half=(x:float64):>float64=>x*0.5+1.0
+ratio=(a:float64 b:float64):>float64=>{
+    if 1.0 <=? b and -1e300 <? a <? 1e300 return a/b
+    return 0.0
+}
+root=(x:float64):>float64=>if x >=? 0.0 sqrt(x) else 0.0
+total=(xs:array<float64>):>float64=>{
+    let acc=0.0
+    loop x in xs {
+        acc+=x
+    }
+    return acc
+}
+main=()=>{
+    printl"{half(3.0)} {ratio(1.0 4.0)} {root(9.0)} {total([1.0 2.5])}"
+    let loose={
+        $finite_floats=false
+        let zero:float64=0.0
+        zero/zero
+    }
+    printl"{loose =? loose}"
+}

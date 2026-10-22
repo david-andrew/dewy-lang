@@ -1,0 +1,10 @@
+# A matrix product is the sum of its products in order: 0 * inf is NaN, even
+# where zero factors are otherwise skipped.
+main=()=>{
+    let zero:float64=0.0
+    let one:float64=1.0
+    let inf=one/zero
+    let identity=reshape([one zero zero one] 2 2)
+    printl"{(identity*reshape([one 2.0*one inf 3.0*one] 2 2)).data}"
+    printl"{(identity*reshape([one 2.0*one 4.0*one 3.0*one] 2 2)).data}"
+}

@@ -1,0 +1,11 @@
+# `$fast_math` permits reassociation and contraction; strict IEEE stays the
+# default elsewhere. (The backends reassociate nothing yet: results match.)
+dot=(a:array<float64> b:array<float64>):>float64=>{
+    $fast_math
+    let total=0.0
+    loop i in [0..a.length) {
+        total+=a[i]*b[i]
+    }
+    return total
+}
+main=()=>printl(dot([1.0 2.0 3.0] [4.0 5.0 6.0]))

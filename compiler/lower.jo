@@ -31,6 +31,7 @@ use 'math_lower.jo'
 use 'callback_specialize.jo'
 use 'parallel_lower.jo'
 use 'partition.jo'
+use 'floats.jo'
 
 const VC_VOID = 0
 const VC_INT = 1
@@ -4164,6 +4165,11 @@ gen_conv = (e: int) -> Val:
         if types[to].kind == .int_:
             bits = int(types[to].bits)
             sg = types[to].sign
+        # (Dewy keeps the value: NaN and out-of-range values are checked, not saturated)
+        if dewy_at(nodes[e].pos) and float_int_guard(e, v, ft, to):
+            if bits == 64 and not sg: return V(float_to_u64(v, ft), false)
+            emit(.f2i, ft, d, v, 0, 0, 0)
+            return V(norm(d, to), false)
         if bits == 64 and not sg:
             # at 2^63 and above (no i64 holds them): convert v - 2^63 and set the top bit
             two63 = e_fconst(9223372036854775808.0, ft)
@@ -4304,6 +4310,7 @@ never_value = (t: int) -> Val:
 
 gen_expr = (e: int) -> Val:
     value = gen_expr_value(e)
+    if ff_checks_any: float_check(e, value.v, ntype(e))
     if ownership_type(ntype(e)) and value.owned: return owner_value(value, ntype(e))
     value
 
@@ -5296,7 +5303,9 @@ gen_assign = (s: int):
         ty = vt_of(t)
         q = e_un(.ftrunc, ty, e_bin(.fdiv, ty, cur, rhs))
         r = e_bin(.fsub, ty, cur, e_bin(.fmul, ty, q, rhs))
-    else if vc(t) == VC_FLT: r = e_bin(float_op(op), vt_of(t), cur, rhs)
+    else if vc(t) == VC_FLT:
+        r = e_bin(float_op(op), vt_of(t), cur, rhs)
+        if ff_checks_any: float_check(s, r, t)
     else:
         sg = types[t].kind == .int_ and types[t].sign
         if op == .slash or op == .percent:

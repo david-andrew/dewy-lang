@@ -1,0 +1,13 @@
+# Where unproven obligations are compile errors, `$no_nan` needs a proof:
+# a - b is inf - inf when both are infinite.
+$no_nan
+difference=(a:float64 b:float64):>float64=>{
+    $runtime_checks=false
+    return a-b
+}
+bounded=(a:float64 b:float64):>float64=>{
+    $runtime_checks=false
+    if -1e300 <? a <? 1e300 return a-b
+    return 0.0
+}
+main=()=>printl(difference(1.0 2.0)+bounded(1.0 2.0))

@@ -156,7 +156,8 @@ def test_int_values(int_program, op, x, y, expected):
 def test_int_overflow(int_program, op, x, y):
     result = run(int_program, op, x, y)
     assert result.returncode != 0, result.stdout
-    assert 'integer overflow' in result.stdout + result.stderr
+    expected = 'nan does not convert to int' if op == 'float-nan' else 'integer overflow'
+    assert expected in result.stdout + result.stderr
 
 
 @pytest.mark.parametrize('expression', ['uint8(int(256))'])

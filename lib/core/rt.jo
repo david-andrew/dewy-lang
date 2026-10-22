@@ -660,6 +660,13 @@ __panic_nofn = (loc: str, what: str):
 __panic_narrow = (loc: str):
     __panic("{loc}: this variable no longer holds the type `is` found (a closure changed it)")
 
+# A float converted to an integer type that has no value for it (NaN, an infinity, out of range).
+# (the value is described, not formatted: float formatting is not a runtime dependency)
+__float_int_fail = (x: f64, target: str, loc: str):
+    if x != x: __panic("{loc}: NaN does not fit {target}")
+    if x - x != 0.0: __panic("{loc}: " + (if x > 0.0: "inf" else: "-inf") + " does not fit {target}")
+    __panic("{loc}: the float is " + (if x > 0.0: "above" else: "below") + " the {target} range")
+
 __div_zero = (loc: str):
     __panic("{loc}: division by zero")
 

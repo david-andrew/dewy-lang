@@ -602,7 +602,10 @@ types from the typed operand on either side. Mixed `int`/fixed-width arithmetic
 uses `int`; a literal beside a fixed-width operand can take that operand's type.
 Implicit conversions involving `int` preserve the value, checking narrowing at
 runtime (or diagnosing known constant failures). `as` and type calls use those
-same checks. Float-to-`int` truncates toward zero and rejects NaN and infinity;
+same checks. Float-to-integer conversions (`int(f)`, `int64(f)`, `f as uint8`)
+truncate toward zero and keep the value: NaN, an infinity or a value outside the
+target's range fails a check (`the float is above the int64 range`; a constant one is a
+compile error) and never saturates;
 exact decimal and fraction conversions to integers also truncate toward zero,
 without rounding through a float. `int`-to-float retains the usual rounding. Conversions keep the value:
 a narrowing between fixed widths, explicit (`uint64(x)`, `x as uint8`) or implicit
@@ -622,6 +625,46 @@ indices are accepted. An `@` parameter may be its caller's global or captured
 variable, so passing it together with one is rejected too; distinct `@`
 parameters of one function are disjoint, and writing one keeps what is known
 of the others.
+
+Floats are strict IEEE 754 binary32 and binary64. NaN, the infinities, signed
+zero and subnormals are ordinary values, not traps: `1.0/0.0` is `inf`, `0.0/0.0`
+is NaN, `-0.0 =? 0.0` is true while `1.0/-0.0` is `-inf`, and NaN is unequal to
+everything, itself included. Results round to nearest, ties to even, and
+arithmetic is never reassociated or contracted into fused multiply-adds, so a
+float expression gives the same result on every CPU target and optimization
+level (only the sign and payload of a NaN may differ).
+Reductions run in a fixed order: `sum` of a float array adds pairwise halves,
+`loop` accumulations add left to right, matrix products add each element's
+products in order, and parallel work never reassociates (see "Parallel CPU
+work"). Sorting floats (`sort`, `sorted`, float `key=`) uses IEEE
+totalOrder: −NaN, −∞, the negative numbers, −0.0, 0.0, the positive numbers,
+∞, NaN. `floor`, `ceil`, `trunc` and `round` keep the sign of a zero result
+(`ceil(-0.5)` is `-0.0`), and `sign` returns a zero or NaN unchanged.
+
+Four settings (see "Directives") change the float policy of a scope.
+`$fast_math` permits reassociation and contraction (the backends do neither
+yet, so it currently changes no result). `$no_nan` makes every float operation
+in its scope that could produce a NaN (`∞-∞`, `0*∞`, `0/0`, `∞/∞`, `sqrt` or
+`log` of a negative number, `sin` of an infinity, `pow`) an obligation, and
+`$no_inf` does the same for infinities (an overflowing `+`, `-`, `*` or `/`, a
+possibly zero divisor, `log(0)`, `exp`, `pow`, a `float32` narrowing, a large
+`int` converted). `$finite_floats` (lib/directives.dewy) is both. Values that
+enter the scope (parameters, fields, elements, call results) are taken to obey
+it. Guards on locals and constant operands prove most obligations:
+
+```dewy
+$finite_floats
+ratio=(a:float64 b:float64):>float64=>{
+    if 1.0 <=? b and -1e300 <? a <? 1e300 return a/b   # proven: no check
+    return 0.0
+}
+average=(total:float64 n:float64):>float64=>total/n   # unproven
+```
+
+An unproven one follows the obligation settings like any other: a runtime
+check of the result (“produced an infinity under `$no_inf`”, exit 101) under
+`$runtime_checks` and today's default, a compile error under
+`$runtime_checks=false`.
 
 `let cursor = @xs[i]` declares a local place: reads and writes of `cursor` read
 and write `xs[i]`, with `i` evaluated once at the declaration. A local place can
@@ -3064,7 +3107,9 @@ compiles to a runtime check, one per line, with the setting responsible
 `$runtime_checks` scopes as information hints.
 
 `$explicit_copies` (described with `.copy` above) is a setting like these, for
-a module, a function or a block.
+a module, a function or a block. So are the float settings `$fast_math`,
+`$no_nan` and `$no_inf`, and the library bundle `$finite_floats` (both of the
+latter), described with the numeric types.
 
 A bundle is one metatag for several settings, defined at module level:
 

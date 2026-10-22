@@ -1,0 +1,16 @@
+# quick
+# Strict IEEE 754: NaN, infinities, signed zero and subnormals are values.
+main=()=>{
+    let zero:float64=0.0
+    let one:float64=1.0
+    let nz=-zero
+    let inf=one/zero
+    let nan=abs(zero/zero)
+    printl"{nz} {nz =? zero} {one/nz} {inf} {-inf}"
+    printl"{nan =? nan} {nan not=? nan} {nan <? one} {nan >=? one} {inf-inf =? nan}"
+    let tiny:float64=5e-324
+    let big:float64=1.7976931348623157e308
+    printl"{tiny} {tiny/2.0} {tiny*4.0} {big*2.0} {big+1.0 =? big}"
+    let small:float32=1e-45
+    printl"{small} {small/float32(2.0)} {float32(big)}"
+}

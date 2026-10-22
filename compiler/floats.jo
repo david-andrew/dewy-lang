@@ -1,0 +1,529 @@
+# IEEE 754 float policy (docs/design/decisions.md, "Floats (Q8)").
+#
+# Strict IEEE is the default and costs nothing here: NaN, infinities, signed
+# zero and subnormals are values, and nothing reassociates or contracts float
+# arithmetic. What this file adds:
+# - float-to-integer conversions keep the value: NaN and out-of-range values
+#   are checked (a Dewy conversion never saturates);
+# - `$no_nan` and `$no_inf` (and the `$finite_floats` bundle): inside their
+#   scope, an operation that could create a NaN (IEEE "invalid") or an
+#   infinity (IEEE "overflow" or "division by zero") from operands that are
+#   neither is an obligation, proven by a small interval analysis or deferred
+#   to a runtime check by the scope's policy (`dir_defer`).
+# The analysis runs only over the functions whose bodies lie in such a scope:
+# a program that writes neither setting never reaches it.
+use 'util.jo'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'expr.jo'
+use 'check.jo'
+use 'ir.jo'
+use 'lower.jo'
+use 'directives.jo'
+use 'isolation.jo'
+
+# ---------------- float-to-integer conversions ----------------
+
+# Checks that float v (of IR type ft) truncates to a value of integer type
+# `to`: NaN and values outside the range fail at run time. Always handles the
+# conversion (true); the caller then truncates, knowing the value fits.
+float_int_guard = (e: int, v: int, ft: int, to: int) -> bool:
+    if ff_int_proven.has(e): return true
+    bits = 64
+    sg = true
+    if types[to].kind == .int_:
+        bits = int(types[to].bits)
+        sg = types[to].sign
+    w = if ft == VS: e_un(.f2f, VF, v) else: v
+    # (trunc keeps x when lo < x < hi; NaN fails both comparisons)
+    low = 0
+    if sg and bits == 64: low = e_bin(.fge, VF, w, e_fconst(-9223372036854775808.0, VF))
+    else if sg: low = e_bin(.fgt, VF, w, e_fconst(-f64(1 << (bits - 1)) - 1.0, VF))
+    else: low = e_bin(.fgt, VF, w, e_fconst(-1.0, VF))
+    top = if bits == 64 and not sg: 18446744073709551616.0 else if bits == 64: 9223372036854775808.0 else if sg: f64(1 << (bits - 1)) else: f64(1 << bits)
+    high = e_bin(.flt, VF, w, e_fconst(top, VF))
+    iff(e_bin(.eq, VI, e_bin(.and_, VI, low, high), e_iconst(0)))
+    e_call_nr(rt("__float_int_fail"), [w, e_daddr(str_data(dt(to))), e_daddr(loc_data(nodes[e].pos))], -1)
+    endc()
+    true
+
+# A float known to be in [0, 2^64) truncated to uint64: values from 2^63 have no
+# int64, so v - 2^63 is converted and the top bit set.
+float_to_u64 = (v: int, ft: int) -> int:
+    d = vreg(VI)
+    two63 = e_fconst(9223372036854775808.0, ft)
+    iff(e_bin(.fge, ft, v, two63))
+    t = vreg(VI)
+    emit(.f2i, ft, t, e_bin(.fsub, ft, v, two63), 0, 0, 0)
+    e_mov(d, e_bin(.xor, VI, t, e_iconst(-9223372036854775807 - 1)))
+    els()
+    emit(.f2i, ft, d, v, 0, 0, 0)
+    endc()
+    d
+
+# ---------------- `$no_nan` and `$no_inf` ----------------
+#
+# Inside the scope, floats are free of NaN (`$no_nan`) or infinities
+# (`$no_inf`). Values that enter it (parameters, fields, elements, call
+# results) are taken to obey it; each operation in it that could produce one
+# from such values is an obligation:
+#   NaN (IEEE invalid): inf - inf, 0 * inf, 0/0, inf/inf, sqrt or log of a
+#     negative number, sin/cos/tan of an infinity, asin/acos beyond [-1, 1], pow;
+#   infinity (IEEE overflow, division by zero): a sum, difference, product or
+#     quotient beyond the largest float, x/0, log(0), exp, pow, a float64
+#     narrowed to float32 or a large `int` converted.
+# The proof is a forward interval analysis over the function body, one pass:
+# exact float bounds (rounding is monotone, so an operation on interval ends
+# bounds its rounded results), guards on unaliased locals refine them in their
+# branch, and a loop forgets the locals it assigns. An unproven obligation goes
+# to `dir_defer` like every other: a runtime check of the result where the
+# scope's policy defers it, else a compile error. Cost: O(nodes) of the
+# functions in these scopes, plus O(scopes) per operation for the policy
+# lookup; nothing at all without the settings (`dir_floats_any`).
+
+const FF_NAN = 1
+const FF_INF = 2
+const FF_MAX = 1.7976931348623157e308
+
+struct FR:
+    lo: f64
+    hi: f64
+
+ff_checks: {int: int} = {}      # node -> the result checks lowering adds (FF_NAN | FF_INF)
+ff_checks_any = false
+ff_int_proven: {int: bool} = {} # float-to-integer conversion node -> its value is proven in range
+ff_env: {int: FR} = {}          # tracked local -> its bounds here
+ff_files: {int: bool} = {}      # files holding a float scope
+ff_owners: {int: bool} = {}     # functions a float scope is written in
+ff_assume = 0                   # the settings at the function body: what entering values obey
+
+floats_reset = ():
+    ff_checks = {}
+    ff_checks_any = false
+    ff_int_proven = {}
+
+ff_mode_at = (p: int) -> int:
+    m = 0
+    if dir_value(dir_name_no_nan, p) == 1: m = m | FF_NAN
+    if dir_value(dir_name_no_inf, p) == 1: m = m | FF_INF
+    m
+
+ff_top = () -> FR:
+    if ff_assume & FF_INF != 0: return FR(-FF_MAX, FF_MAX)
+    FR(-INF, INF)
+
+ff_hull = (a: FR, b: FR) -> FR: FR(min(a.lo, b.lo), max(a.hi, b.hi))
+ff_has = (a: FR, x: f64) -> bool: a.lo <= x and x <= a.hi
+ff_may_inf = (a: FR) -> bool: a.lo == -INF or a.hi == INF
+ff_may_zero = (a: FR) -> bool: ff_has(a, 0.0)
+# (the finite values of a: the ends an infinity can be approached from)
+ff_finite = (a: FR) -> FR: FR(max(a.lo, -FF_MAX), min(a.hi, FF_MAX))
+# (an end computed from infinite ends can be NaN: it then bounds nothing)
+ff_end = (x: f64, fallback: f64) -> f64: if x != x: fallback else: x
+
+# A local whose value the walk can follow: not captured, aliased or written
+# through a reference.
+ff_tracked = (l: int) -> bool:
+    l > 0 and int(locals[l].flags) & (LF_CAPTURED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_ELEMALIAS | LF_SOAELEM | LF_CAPTURE) == 0
+
+ff_local = (n: int) -> int:
+    if n <= 0 or nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.local)): return 0
+    l = int(nodes[n].sym)
+    if not ff_tracked(l): return 0
+    l
+
+ff_get = (n: int) -> FR:
+    l = ff_local(n)
+    if l > 0:
+        if let r = ff_env.get(l): return r
+    ff_top()
+
+# An obligation at n: `what` could produce NaN or infinity (the `kind`).
+ff_obligation = (n: int, kind: int, what: str):
+    p = nodes[n].pos
+    tag = if kind == FF_NAN: "no_nan" else: "no_inf"
+    if dir_defer(n, "cannot prove {what} under `${tag}`", true):
+        ff_checks[n] = (ff_checks.get(n) ?? 0) | kind
+        ff_checks_any = true
+        return
+    err_notes.push((-1, "help: bound the operands with a guard (`if b not=? 0.0`, `if x <? 1e300`), or opt this scope out with `${tag}=false`"))
+    fatal(p, "cannot prove {what} under `${tag}`")
+
+# Bounds of a op b, with the obligations of the settings in force at n.
+ff_arith = (n: int, op: Tok, a: FR, b: FR) -> FR:
+    m = ff_mode_at(nodes[n].pos)
+    sym = if op == .plus: "+" else if op == .minus: "-" else if op == .star: "*" else: "/"
+    if op == .minus: return ff_arith_signed(n, m, sym, a, FR(-b.hi, -b.lo), .plus)
+    ff_arith_signed(n, m, sym, a, b, op)
+
+ff_arith_signed = (n: int, m: int, sym: str, a: FR, b: FR, op: Tok) -> FR:
+    nan = false
+    inf = false
+    r = FR(-INF, INF)
+    if op == .plus:
+        nan = a.hi == INF and b.lo == -INF or a.lo == -INF and b.hi == INF
+        fa = ff_finite(a)
+        fb = ff_finite(b)
+        lo = fa.lo + fb.lo
+        hi = fa.hi + fb.hi
+        inf = lo == -INF or hi == INF
+        r = FR(ff_end(a.lo + b.lo, -INF), ff_end(a.hi + b.hi, INF))
+    else if op == .star:
+        nan = ff_may_zero(a) and ff_may_inf(b) or ff_may_inf(a) and ff_may_zero(b)
+        fa = ff_finite(a)
+        fb = ff_finite(b)
+        p1 = fa.lo * fb.lo
+        p2 = fa.lo * fb.hi
+        p3 = fa.hi * fb.lo
+        p4 = fa.hi * fb.hi
+        inf = max(max(p1, p2), max(p3, p4)) == INF or min(min(p1, p2), min(p3, p4)) == -INF
+        q1 = ff_end(a.lo * b.lo, INF)
+        q2 = ff_end(a.lo * b.hi, INF)
+        q3 = ff_end(a.hi * b.lo, INF)
+        q4 = ff_end(a.hi * b.hi, INF)
+        r = FR(min(min(ff_end(a.lo * b.lo, -INF), ff_end(a.lo * b.hi, -INF)), min(ff_end(a.hi * b.lo, -INF), ff_end(a.hi * b.hi, -INF))), max(max(q1, q2), max(q3, q4)))
+    else:
+        nan = ff_may_zero(a) and ff_may_zero(b) or ff_may_inf(a) and ff_may_inf(b)
+        if ff_may_zero(b):
+            inf = true
+        else:
+            fa = ff_finite(a)
+            fb = ff_finite(b)
+            # (b keeps one sign: the quotient's extremes are at the ends)
+            p1 = fa.lo / fb.lo
+            p2 = fa.lo / fb.hi
+            p3 = fa.hi / fb.lo
+            p4 = fa.hi / fb.hi
+            inf = max(max(p1, p2), max(p3, p4)) == INF or min(min(p1, p2), min(p3, p4)) == -INF
+            q1 = a.lo / b.lo
+            q2 = a.lo / b.hi
+            q3 = a.hi / b.lo
+            q4 = a.hi / b.hi
+            r = FR(min(min(ff_end(q1, -INF), ff_end(q2, -INF)), min(ff_end(q3, -INF), ff_end(q4, -INF))), max(max(ff_end(q1, INF), ff_end(q2, INF)), max(ff_end(q3, INF), ff_end(q4, INF))))
+    if nan and m & FF_NAN != 0: ff_obligation(n, FF_NAN, "`{sym}` produces no NaN")
+    if inf and m & FF_INF != 0:
+        what = if sym == "/" and ff_may_zero(b): "the divisor is nonzero" else: "`{sym}` does not overflow"
+        ff_obligation(n, FF_INF, what)
+    # (a checked or proven result obeys the settings)
+    if m & FF_INF != 0: r = ff_finite(r)
+    r
+
+# A call of a bundled math function: its obligations and bounds.
+ff_math = (n: int, name: str, args: FR[]) -> FR:
+    m = ff_mode_at(nodes[n].pos)
+    x = if args.len() > 0: args[0] else: ff_top()
+    nan = false
+    inf = false
+    r = ff_top()
+    if name == "log" or name == "log2" or name == "log10":
+        nan = x.lo < 0.0
+        inf = ff_may_zero(x)
+    else if name == "exp":
+        inf = x.hi > 709.0
+        r = FR(0.0, if inf: INF else: 1.0e308)
+    else if name == "sin" or name == "cos":
+        nan = ff_may_inf(x)
+        r = FR(-1.0, 1.0)
+    else if name == "tan":
+        nan = ff_may_inf(x)
+    else if name == "asin" or name == "acos":
+        nan = x.lo < -1.0 or x.hi > 1.0
+        r = FR(-4.0, 4.0)
+    else if name == "pow":
+        nan = true
+        inf = true
+    else if name == "tanh":
+        r = FR(-1.0, 1.0)
+    else: return ff_top()
+    if nan and m & FF_NAN != 0: ff_obligation(n, FF_NAN, "`{name}` produces no NaN")
+    if inf and m & FF_INF != 0: ff_obligation(n, FF_INF, "`{name}` produces no infinity")
+    if m & FF_INF != 0: r = ff_finite(r)
+    r
+
+# The bounds of n's value (when it is a float), visiting everything it evaluates.
+ff_eval = (n: int) -> FR:
+    if n <= 0: return ff_top()
+    k = nodes[n].kind
+    t = ntype(n)
+    if k == .float_lit: return FR(nodes[n].fval, nodes[n].fval)
+    if k == .int_lit:
+        if t > 0 and is_float(t): return FR(f64(nodes[n].ival), f64(nodes[n].ival))
+        return ff_top()
+    if k == .ident: return ff_get(n)
+    if k == .unary:
+        a = ff_eval(int(nodes[n].a))
+        if nodes[n].op == i32(int(Tok.minus)) and t > 0 and is_float(t): return FR(-a.hi, -a.lo)
+        return ff_top()
+    if k == .binary:
+        op = nodes[n].op as Tok
+        a = ff_eval(int(nodes[n].a))
+        b = ff_eval(int(nodes[n].b))
+        if nodes[n].aux == 0 and t > 0 and is_float(t) and (op == .plus or op == .minus or op == .star or op == .slash): return ff_arith(n, op, a, b)
+        if nodes[n].aux == 0 and t > 0 and is_float(t) and op == .caret: return ff_math(n, "pow", [a, b])
+        return ff_top()
+    if k == .conv: return ff_conv(n)
+    if k == .intrinsic and nkids(n) > 0 and (nodes[n].aux == i32(int(IN.sqrt)) or nodes[n].aux == i32(int(IN.fabs))):
+        a = ff_eval(kid(n, 0))
+        if nodes[n].aux == i32(int(IN.fabs)):
+            if a.lo >= 0.0: return a
+            return FR(0.0, max(-a.lo, a.hi))
+        m = ff_mode_at(nodes[n].pos)
+        if a.lo < 0.0 and m & FF_NAN != 0: ff_obligation(n, FF_NAN, "the square root's operand is not negative")
+        return FR(0.0, ff_end(sqrt(max(a.hi, 0.0)), INF))
+    if k == .call and nodes[n].sym > 0 and t > 0 and is_float(t):
+        args: FR[]
+        loop c in kids(n): args.push(ff_eval(c))
+        ff_eval(int(nodes[n].a))
+        decl = int(fns[int(nodes[n].sym)].decl)
+        if decl > 0 and pos_in_lib(nodes[decl].pos): return ff_math(n, name_of(int(nodes[decl].name)), args)
+        return ff_top()
+    if k == .vardecl:
+        r = ff_eval(int(nodes[n].b))
+        l = int(nodes[n].sym)
+        if nkids(n) == 0 and not has_flag(n, NF_GLOBAL) and ff_tracked(l) and t >= 0:
+            lt = int(locals[l].type)
+            if lt > 0 and is_float(lt): ff_env[l] = r
+        return r
+    if k == .assign: return ff_assign(n)
+    if k == .if_:
+        cond = int(nodes[n].a)
+        ff_eval(cond)
+        before = ff_env
+        ff_refine(cond, true)
+        y = ff_eval(int(nodes[n].b))
+        after_yes = ff_env
+        ff_env = before
+        ff_refine(cond, false)
+        z = ff_eval(int(nodes[n].c))
+        ff_join(after_yes)
+        return ff_hull(y, z)
+    if k == .while_ or k == .for_:
+        # (the loop runs any number of times: what it assigns is unknown in it and after it)
+        ff_forget_assigned(n)
+        ff_children(n)
+        ff_forget_assigned(n)
+        return ff_top()
+    if k == .block:
+        r = ff_top()
+        loop c in kids(n): r = ff_eval(c)
+        return r
+    if k == .exprstmt or k == .return_: return ff_eval(int(nodes[n].a))
+    if k == .addr:
+        # (a place lent out, `@x`: what it holds afterwards is unknown)
+        l = ff_local(int(nodes[n].a))
+        if l > 0: ff_env.remove(l)
+    mask = isolation_children(k)
+    if mask < 0 or k == .lambda:
+        ff_env = {}
+        return ff_top()
+    if k == .and_ or k == .or_ or k == .coalesce or k == .match_ or k == .iflet or k == .arm:
+        # (evaluated on some paths only: what they assign is unknown after them)
+        ff_forget_assigned(n)
+        ff_children(n)
+        ff_forget_assigned(n)
+        return ff_top()
+    ff_children(n)
+    ff_top()
+
+ff_children = (n: int):
+    mask = isolation_children(nodes[n].kind)
+    if mask <= 0: return
+    if mask & 1 != 0: ff_eval(int(nodes[n].a))
+    if mask & 2 != 0: ff_eval(int(nodes[n].b))
+    if mask & 4 != 0: ff_eval(int(nodes[n].c))
+    if mask & 16 != 0:
+        loop c in kids(n): ff_eval(c)
+
+ff_assign = (n: int) -> FR:
+    target = int(nodes[n].a)
+    op = nodes[n].op as Tok
+    t = ntype(target)
+    float = t > 0 and is_float(t)
+    r = ff_top()
+    if op == .assign:
+        if ff_local(target) == 0: ff_eval(target)
+        r = ff_eval(int(nodes[n].b))
+    else:
+        old = ff_eval(target)
+        b = ff_eval(int(nodes[n].b))
+        if float and nodes[n].aux == 0:
+            arith = if op == .pluseq: Tok.plus else if op == .minuseq: Tok.minus else if op == .stareq: Tok.star else if op == .slasheq: Tok.slash else: Tok.eof
+            if arith != .eof: r = ff_arith(n, arith, old, b)
+    l = ff_local(target)
+    if l > 0:
+        if float: ff_env[l] = r
+        else: ff_env.remove(l)
+    r
+
+# Every tracked local assigned inside n forgets its bounds.
+ff_forget_assigned = (n: int):
+    if n <= 0 or ff_env.len() == 0: return
+    k = nodes[n].kind
+    if k == .assign:
+        l = ff_local(int(nodes[n].a))
+        if l > 0: ff_env.remove(l)
+    mask = isolation_children(k)
+    if mask <= 0: return
+    if mask & 1 != 0: ff_forget_assigned(int(nodes[n].a))
+    if mask & 2 != 0: ff_forget_assigned(int(nodes[n].b))
+    if mask & 4 != 0: ff_forget_assigned(int(nodes[n].c))
+    if mask & 16 != 0:
+        loop c in kids(n): ff_forget_assigned(c)
+
+# After an if: each local keeps the hull of its bounds on both paths.
+ff_join = (other: {int: FR}):
+    joined: {int: FR} = {}
+    loop l, r in ff_env:
+        if let o = other.get(l): joined[l] = ff_hull(r, o)
+    ff_env = joined
+
+# The bounds a condition gives its locals where it is `holds` (a comparison
+# with a constant, `and` of such; a false comparison may also mean NaN, which
+# the bounds of a NaN-free scope need not cover).
+ff_refine = (c: int, holds: bool):
+    if c <= 0: return
+    k = nodes[c].kind
+    if k == .and_ and holds:
+        ff_refine(int(nodes[c].a), true)
+        ff_refine(int(nodes[c].b), true)
+        return
+    if k == .or_ and not holds:
+        ff_refine(int(nodes[c].a), false)
+        ff_refine(int(nodes[c].b), false)
+        return
+    if k == .not_:
+        ff_refine(int(nodes[c].a), not holds)
+        return
+    if k != .binary: return
+    op = nodes[c].op as Tok
+    if not holds:
+        # (not (x < c) is x >= c, or NaN: the bounds hold for the numbers)
+        op = if op == .lt: Tok.ge else if op == .le: Tok.gt else if op == .gt: Tok.le else if op == .ge: Tok.lt else if op == .eq: Tok.ne else if op == .ne: Tok.eq else: Tok.eof
+    a = int(nodes[c].a)
+    b = int(nodes[c].b)
+    ff_bound(a, op, ff_eval_pure(b))
+    flipped = if op == .lt: Tok.gt else if op == .le: Tok.ge else if op == .gt: Tok.lt else if op == .ge: Tok.le else: op
+    ff_bound(b, flipped, ff_eval_pure(a))
+
+# (bounds of an operand already evaluated: constants and tracked locals only)
+ff_eval_pure = (n: int) -> FR:
+    k = nodes[n].kind
+    if k == .float_lit: return FR(nodes[n].fval, nodes[n].fval)
+    if k == .int_lit: return FR(f64(nodes[n].ival), f64(nodes[n].ival))
+    if k == .unary and nodes[n].op == i32(int(Tok.minus)):
+        a = ff_eval_pure(int(nodes[n].a))
+        return FR(-a.hi, -a.lo)
+    if k == .conv: return ff_eval_pure(int(nodes[n].a))
+    l = ff_local(n)
+    if l > 0:
+        if let r = ff_env.get(l): return r
+    FR(-INF, INF)
+
+# x op other: x's new bounds, when x is a tracked float local.
+ff_bound = (x0: int, op: Tok, other: FR):
+    x = x0
+    loop x > 0 and nodes[x].kind == .conv and nodes[x].aux == i32(int(CV.float_)): x = int(nodes[x].a)
+    l = ff_local(x)
+    if l == 0: return
+    lt = int(locals[l].type)
+    if lt <= 0 or not is_float(lt): return
+    r = ff_env.get(l) ?? ff_top()
+    if op == .lt or op == .le: r.hi = min(r.hi, other.hi)
+    else if op == .gt or op == .ge: r.lo = max(r.lo, other.lo)
+    else if op == .eq:
+        r.lo = max(r.lo, other.lo)
+        r.hi = min(r.hi, other.hi)
+    else if op == .ne and other.lo == 0.0 and other.hi == 0.0:
+        # (x not=? 0.0: the nearest numbers to zero are the smallest subnormals)
+        if r.lo == 0.0: r.lo = 5e-324
+        else if r.hi == 0.0: r.hi = -5e-324
+        else: return
+    else: return
+    if r.lo > r.hi: return
+    ff_env[l] = r
+
+# A conversion: float widths, integers to floats, floats to integers.
+ff_conv = (n: int) -> FR:
+    a = int(nodes[n].a)
+    x = ff_eval(a)
+    cv = nodes[n].aux
+    to = ntype(n)
+    if cv == i32(int(CV.float_)):
+        if to > 0 and types[prune(to)].kind == .float_ and int(types[prune(to)].bits) == 32:
+            m = ff_mode_at(nodes[n].pos)
+            # (from 2^128 - 2^103 on, a float64 rounds to a float32 infinity)
+            limit = 3.4028235677973366e38
+            if (x.lo < -limit or x.hi > limit) and m & FF_INF != 0: ff_obligation(n, FF_INF, "the value fits float32")
+        return x
+    if cv == i32(int(CV.int2float)):
+        if ntype(a) == T_MATH_INT:
+            m = ff_mode_at(nodes[n].pos)
+            if m & FF_INF != 0: ff_obligation(n, FF_INF, "the `int` fits a float")
+            return ff_top()
+        return FR(-18446744073709551616.0, 18446744073709551616.0)
+    if cv == i32(int(CV.float2int)) and to != T_MATH_INT:
+        # (a proven range drops the conversion's runtime check)
+        tt = prune(to)
+        bits = int(types[tt].bits)
+        sg = types[tt].sign
+        lo = if sg: -f64(1 << (bits - 1)) else: 0.0
+        hi = if sg: f64(1 << (bits - 1)) else: f64(1 << (bits - 1)) * 2.0
+        if bits == 64 and sg: lo = -9223372036854775808.0
+        if x.lo >= lo and x.hi < hi: ff_int_proven[n] = true
+        return ff_top()
+    ff_top()
+
+# After checking: walk the functions in `$no_nan`/`$no_inf` scopes.
+floats_after_facts = ():
+    floats_reset()
+    if not dir_floats_any: return
+    ff_files = {}
+    ff_owners = {}
+    loop s in dir_scopes:
+        if (s.setting == dir_name_no_nan or s.setting == dir_name_no_inf) and s.value == 1:
+            ff_files[pos_file(s.start)] = true
+            # (a block setting: the function it is written in)
+            ff_owners[ff_owner_at(s.start)] = true
+    loop f in [1..fns.len()):
+        body = int(fns[f].body)
+        if body == 0 or fns[f].state != 2: continue
+        p = nodes[body].pos
+        if pos_in_lib(p) or not ff_files.has(pos_file(p)): continue
+        ff_assume = ff_mode_at(p)
+        if ff_assume == 0 and not ff_owners.has(f): continue
+        ff_env = {}
+        loop l in fns[f].params:
+            if ff_tracked(l) and int(locals[l].type) > 0 and is_float(int(locals[l].type)): ff_env[l] = ff_top()
+        ff_eval(body)
+    ff_env = {}
+
+# The innermost function whose body starts at or before p, in p's file.
+ff_owner_at = (p: int) -> int:
+    best = 0
+    at = -1
+    loop f in [1..fns.len()):
+        body = int(fns[f].body)
+        if body == 0: continue
+        q = nodes[body].pos
+        if pos_file(q) == pos_file(p) and q <= p and q > at:
+            best = f
+            at = q
+    best
+
+# Lowering: the runtime check of a deferred obligation, on the result v.
+float_check = (e: int, v: int, t: int):
+    kinds = ff_checks.get(e) ?? 0
+    if kinds == 0: return
+    ty = vt_of(t)
+    if ty != VF and ty != VS: return
+    if kinds & FF_NAN != 0:
+        iff(e_bin(.fne, ty, v, v))
+        e_call_nr(rt("__assert_fail"), [e_daddr(str_data("produced NaN under `$no_nan`")), e_daddr(loc_data(nodes[e].pos))], -1)
+        endc()
+    if kinds & FF_INF != 0:
+        # (v - v is NaN for an infinity, and for NaN)
+        d = e_bin(.fsub, ty, v, v)
+        iff(e_bin(.and_, VI, e_bin(.feq, ty, v, v), e_bin(.fne, ty, d, d)))
+        e_call_nr(rt("__assert_fail"), [e_daddr(str_data("produced an infinity under `$no_inf`")), e_daddr(loc_data(nodes[e].pos))], -1)
+        endc()

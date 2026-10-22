@@ -7,11 +7,12 @@ use 'effects.jo'
 use 'directives.jo'
 use 'dewy_parse.jo'
 use 'dewy_fast.jo'
+use 'isolation.jo'
 
 # Metatags the compiler gives a meaning of its own; any other `$name` in a
 # source may be a bundle (or a loop label), so the bundles are read first.
 dw_dir_known = (name: str) -> bool:
-    name in ["assert", "runtime_assert", "expect", "fail", "breakpoint", "lend", "test", "proof", "capture", "include_bytes", "clamp", "target", "supported_targets", "field", "unsafe_assume", "abstract", "allocator", "no_prelude", "runtime_checks", "prototype", "prototype_warnings", "explicit_copies", "realtime", "__copy__", "__drop__", "__move__"]
+    name in ["assert", "runtime_assert", "expect", "fail", "breakpoint", "lend", "test", "proof", "capture", "include_bytes", "clamp", "target", "supported_targets", "field", "unsafe_assume", "abstract", "allocator", "no_prelude", "runtime_checks", "prototype", "prototype_warnings", "explicit_copies", "fast_math", "no_nan", "no_inf", "realtime", "__copy__", "__drop__", "__move__"]
 
 dw_dir_ident = (c: u8) -> bool:
     c >= 'a' and c <= 'z' or c >= 'A' and c <= 'Z' or c >= '0' and c <= '9' or c == '_'
@@ -95,9 +96,26 @@ dw_dir_statement = (statement: int, start: int, end: int, module: bool) -> bool:
 dw_dir_last = (id: int) -> int:
     if id <= 0: return 0
     last = dewy_syntax[id].pos
+    # (a compact statement or expression holds its syntax as nodes)
+    k = dewy_syntax[id].kind
+    if k == .compact_stmt or k == .compact_expr: return max(last, dw_dir_node_last(dewy_syntax[id].child_left))
     loop i in [0..dw_nchildren(id)):
         p = dw_dir_last(dw_child(id, i))
         if p > last: last = p
+    last
+
+dw_dir_node_last = (n: int) -> int:
+    if n <= 0 or n >= nodes.len(): return 0
+    last = nodes[n].pos
+    mask = isolation_children(nodes[n].kind)
+    if mask < 0: mask = 1 | 2 | 4 | 16
+    if mask & 1 != 0: last = max(last, dw_dir_node_last(int(nodes[n].a)))
+    if mask & 2 != 0: last = max(last, dw_dir_node_last(int(nodes[n].b)))
+    if mask & 4 != 0: last = max(last, dw_dir_node_last(int(nodes[n].c)))
+    if mask & 16 != 0:
+        loop c in kids(n): last = max(last, dw_dir_node_last(c))
+    # (a position in another file is not this scope's)
+    if pos_file(last) != pos_file(nodes[n].pos): return nodes[n].pos
     last
 
 # A block's settings hold throughout the block, wherever they are written.

@@ -6144,7 +6144,10 @@ let cancellation=reshape([float64(1e16) 1.0 (-1e16) 1.0 3.0] 1 5)*reshape([float
 assert(cancellation[0 0] =? 4.0)
 let zero=reshape([float64(0.0) (-0.0) 0.0 0.0 0.0] 1 5)
 let nonfinite=reshape([INF NAN INF NAN INF] 5 1)
-assert((zero*nonfinite)[0 0] =? 0.0)
+let strict=(zero*nonfinite)[0 0]
+assert(strict not=? strict)
+let finite=reshape([float64(2.0) 3.0 4.0 5.0 6.0] 5 1)
+assert((zero*finite)[0 0] =? 0.0)
 exit(42)
 }
 ''')

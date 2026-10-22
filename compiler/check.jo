@@ -5031,6 +5031,7 @@ runtime_names = ["__alloc", "__free", "__panic", "__panic_bounds", "__panic_slic
     "__print_str", "__str_from_bytes", "__assert_fail", "__hash_bytes", "__str_hash", "__div_zero", "__rc_inc", "__rc_dec",
     "__arr_extend", "__arr_extend_raw", "__rc_dec_test", "__out_flush", "__end_flush", "__box_new", "__box_free", "__box_clone", "__box_defer", "__box_next"]
 optional_runtime = ["__requirement_fail", "__panic_narrow", "__mac_syscall"]
+float_int_demanded = false     # (a float-to-integer conversion needs __float_int_fail)
 runtime_insts: {str: int} = {}
 # Runtime pieces with closures of their own are checked only once something needs them: the
 # C-call thunks' once an extern is instantiated, vector formatting's and matrix products' where
@@ -5697,6 +5698,7 @@ check_program = (main_path: str):
     runtime_memeq = runtime_fn("__mem_eq")
     runtime_streq = runtime_fn("__str_eq")
     loop nm in optional_runtime: runtime_demand(nm)
+    if float_int_demanded: runtime_demand("__float_int_fail")
     # (@cabi functions set __c_threads: lib/core/rt.jo)
     if let ct = prelude.get(intern("__c_threads")):
         if syms[ct].kind == .global: ensure_global(int(syms[ct].ref), 0)

@@ -74,7 +74,7 @@ __mi_float = (a: __dewy_int) -> f64:
     __bi.to_float64(__mi_payload(a)[0])
 
 __mi_from_float = (x: f64) -> __dewy_int:
-    if x != x or x - x != 0.0: __int_overflow()
+    if x != x or x - x != 0.0: panic("{x} does not convert to int")
     if x >= -9223372036854775808.0 and x < 9223372036854775808.0: return __mi_word(int(x))
     bits = f64_bits(x)
     exponent = int((bits >> 52) & 2047) - 1023 - 52

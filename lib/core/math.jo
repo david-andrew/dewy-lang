@@ -77,10 +77,11 @@ clamp = (x: i8, lo: i8, hi: i8) -> i8: if x < lo: lo else if x > hi: hi else: x
 clamp = (x: u8, lo: u8, hi: u8) -> u8: if x < lo: lo else if x > hi: hi else: x
 clamp = (x: u64, lo: u64, hi: u64) -> u64: if x < lo: lo else if x > hi: hi else: x
 
+# (a zero keeps its sign and NaN stays NaN)
 sign = (x: f64) -> f64:
     if x > 0.0: return 1.0
     if x < 0.0: return -1.0
-    0.0
+    x
 sign = (x: int) -> int:
     if x > 0: return 1
     if x < 0: return -1
@@ -90,11 +91,15 @@ floor = (x: f64) -> f64:
     if x != x or x >= 4503599627370496.0 or x <= -4503599627370496.0: return x
     i = f64(int(x))
     if i > x: return i - 1.0
+    # (a zero result keeps the sign of x: floor(-0.0) is -0.0)
+    if i == 0.0: return x * 0.0
     i
 ceil = (x: f64) -> f64:
     if x != x or x >= 4503599627370496.0 or x <= -4503599627370496.0: return x
     i = f64(int(x))
     if i < x: return i + 1.0
+    # (ceil(-0.5) is -0.0)
+    if i == 0.0: return x * 0.0
     i
 # the nearest whole number; halves go away from zero (round(2.5) is 3.0, round(-2.5) is -3.0;
 # Python's round goes to the even one, 2)
@@ -106,7 +111,9 @@ round = (x: f64) -> f64:
     t
 trunc = (x: f64) -> f64:
     if x != x or x >= 4503599627370496.0 or x <= -4503599627370496.0: return x
-    f64(int(x))
+    i = f64(int(x))
+    if i == 0.0: return x * 0.0
+    i
 fract = (x: f64) -> f64: x - floor(x)
 mod = (x: f64, y: f64) -> f64: x - y * floor(x / y)
 mod = (x: int, y: int) -> int:

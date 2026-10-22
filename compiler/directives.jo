@@ -51,6 +51,7 @@ dir_forced = false             # this module turned the static analysis on
 dir_prior_static = false       # and it was on before (an internal policy)
 dir_copies_any = false
 dir_rows_any = false
+dir_floats_any = false         # some scope sets `$no_nan` or `$no_inf` (compiler/floats.jo)
 dir_bundles_loaded = false
 
 dir_name_runtime = 0
@@ -58,6 +59,8 @@ dir_name_prototype = 0
 dir_name_warnings = 0
 dir_name_copies = 0
 dir_name_row = 0
+dir_name_no_nan = 0
+dir_name_no_inf = 0
 
 directives_reset = ():
     dir_scopes = []
@@ -69,6 +72,7 @@ directives_reset = ():
     dir_prior_static = false
     dir_copies_any = false
     dir_rows_any = false
+    dir_floats_any = false
     dir_bundles_loaded = false
     dir_name_runtime = 0
     if DIR_DEFAULT == DIR_STATIC: fact_policy = .RequireStatic
@@ -82,10 +86,13 @@ dir_names = ():
     dir_name_warnings = intern("prototype_warnings")
     dir_name_copies = intern("explicit_copies")
     dir_name_row = intern("default_row")
+    dir_name_no_nan = intern("no_nan")
+    dir_name_no_inf = intern("no_inf")
 
-# The builtin boolean settings.
+# The builtin boolean settings. (`$fast_math` permits reassociation and FMA
+# contraction; the backends do neither yet, so it changes no code.)
 dir_builtin = (name: str) -> bool:
-    name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies"
+    name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies" or name == "fast_math" or name == "no_nan" or name == "no_inf"
 
 dir_bundle_index = (name: int) -> int:
     loop i in [0..dir_bundles.len()):
@@ -146,6 +153,7 @@ dir_push = (s: DirScope):
     dir_scopes.push(s)
     if s.setting == dir_name_copies and s.value == 1: dir_copies_any = true
     if s.setting == dir_name_row and s.value > 0: dir_rows_any = true
+    if (s.setting == dir_name_no_nan or s.setting == dir_name_no_inf) and s.value == 1: dir_floats_any = true
     if s.setting == dir_name_runtime and s.value == 0 or s.setting == dir_name_prototype and s.value == 1: dir_force()
     if s.setting == dir_name_runtime and s.value == 1 and ide_on: dir_force()
     if s.bundle == 0:

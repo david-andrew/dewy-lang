@@ -3228,7 +3228,10 @@ conversion = (n: int, to0: int, args: int[]) -> int:
     if tk == .int_:
         if fk == .int_: check_integer_boundary(a, ft, to)
         if fk == .int_ or fk == .bool_: cv = int(CV.int_)
-        else if fk == .float_: cv = int(CV.float2int)
+        else if fk == .float_:
+            cv = int(CV.float2int)
+            # (a checked conversion's failure report: demanded by its first use)
+            if to != T_MATH_INT and dewy_at(nodes[n].pos): float_int_demanded = true
         else if fk == .enum_ and simple_enum(ft): cv = int(CV.int_)
         else if fk == .ptr: cv = int(CV.ptr)
     else if tk == .float_:
