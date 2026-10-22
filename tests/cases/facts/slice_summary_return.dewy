@@ -1,0 +1,11 @@
+# A return inside an iterator contributes to the callee's length summary.
+make=(flag:bool):>array<int64>=>{
+    loop i in [0..3) {if flag return [9]}
+    return [1 2]
+}
+checked=(flag:bool)=>{
+    let xs=make(flag)
+    $assert xs.length >=? 1
+    $assert xs.length <=? 2
+}
+main=()=>{checked(true); checked(false)}

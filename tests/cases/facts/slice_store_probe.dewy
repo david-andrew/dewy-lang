@@ -1,0 +1,9 @@
+store=(i:int64):>array<int64 length=4> & no_effects=>{
+    let xs:array<int64 length=4>=[0 0 0 0]
+    if i >=? 0 and i <? 4 xs[i]=7
+    return xs
+}
+main=()=>{
+    let xs=store(2)
+    $runtime_assert xs[2] =? 7
+}

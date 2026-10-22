@@ -1,0 +1,11 @@
+# quick
+# An unused result does not make its argument's write disappear.
+overwrite=(@x:int64):>int64=>{x=0; return 7}
+constant=(_ignored:int64):>int64=>3
+checked=()=>{
+    let x:int64=5
+    let unused=constant(overwrite(@x))
+    $assert x =? 5
+    printl(unused)
+}
+main=()=>checked()

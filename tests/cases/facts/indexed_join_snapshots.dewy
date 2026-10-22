@@ -1,0 +1,15 @@
+Pair:type=[a:int64 b:int64]
+checked=(flag:bool)=>{
+    let x=Pair[1 2]
+    let saved=x
+    if flag {x.a=3} else {x.a=4}
+    let y=x
+    if flag {x.b=8; y.b=9} else {x.b=10; y.b=11}
+    $assert saved.a =? 1
+    $assert saved.b =? 2
+    $assert x.a >=? 3
+    $assert y.a <=? 4
+    $assert x.b >=? 8
+    $assert y.b >=? 9
+}
+main=()=>{checked(true); checked(false)}

@@ -1,0 +1,32 @@
+# Dependent counters must retain their invariant after eager loop widening.
+like=(text:string pattern:string):>bool=>{
+    let t=bytes(text)
+    let p=bytes(pattern)
+    let ti:int64=0
+    let pi:int64=0
+    let star:int64=-1
+    let mark:int64=0
+    loop ti <? t.length {
+        $assert pi >=? 0
+        if pi <? p.length and (p[pi] =? 95 or (p[pi] not=? 37 and p[pi] =? t[ti])) {
+            ti+=1
+            pi+=1
+        } else if pi <? p.length and p[pi] =? 37 {
+            star=pi
+            mark=ti
+            pi+=1
+        } else if star >=? 0 {
+            pi=star+1
+            mark+=1
+            ti=mark
+        } else {
+            return false
+        }
+    }
+    loop pi <? p.length and p[pi] =? 37 {
+        pi+=1
+    }
+    return pi =? p.length
+}
+
+main=()=>{assert(like("abc" "a%c")); assert(not like("abc" "d%")) }
