@@ -25,6 +25,7 @@ use 'prelude.jo'
 use 'ide.jo'
 use 'dewy_methods.jo'
 use 'ffi.jo'
+use 'isolation.jo'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -1201,7 +1202,7 @@ ctx_dependent = (a: int) -> bool:
     if k == .lambda or k == .none_lit or k == .hole: return true
     if k == .record_lit: return true
     if (k == .if_ or k == .match_) and int(nd.flags) & NF_CHECKED == 0 and files[pos_file(nd.pos)].is_dewy: return true
-    if k == .block and int(nd.flags) & NF_COMPREHENSION != 0: return true
+    if k == .block and int(nd.flags) & NF_COMPREHENSION != 0: return int(nd.flags) & NF_CHECKED == 0
     if k == .array:
         if nd.nlist == 0: return nd.b == 0
         # Dewy array literals take their element type from the selected call.
@@ -1821,6 +1822,36 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
         if r >= 0: return r + 2
     r
 
+# Check unchecked comprehension arguments whose elements need no context, so
+# overload selection sees their own element type. O(argument syntax).
+comprehension_settle = (args: int[]) -> bool:
+    settled = false
+    loop a0 in args:
+        a = unnamed(a0)
+        if nodes[a].kind != .block or not has_flag(a, NF_COMPREHENSION) or has_flag(a, NF_CHECKED) or nkids(a) != 3: continue
+        if not dewy_at(nodes[a].pos) or not comprehension_self_typed(kid(a, 1)): continue
+        check_expr(a, 0)
+        add_flag(a, NF_CHECKED)
+        settled = true
+    settled
+
+# Whether a subtree has no value that takes its type from where it goes.
+comprehension_self_typed = (n: int) -> bool:
+    if n == 0: return true
+    k = nodes[n].kind
+    if k == .lambda or k == .none_lit or k == .dotname or k == .record_lit or k == .hole or k == .map_lit or k == .fnref: return false
+    if k == .array and nkids(n) == 0: return false
+    if k == .call and nodes[int(nodes[n].a)].kind == .dotname: return false
+    mask = isolation_children(k)
+    if mask < 0: return false
+    if mask & 1 != 0 and not comprehension_self_typed(int(nodes[n].a)): return false
+    if mask & 2 != 0 and not comprehension_self_typed(int(nodes[n].b)): return false
+    if mask & 4 != 0 and not comprehension_self_typed(int(nodes[n].c)): return false
+    if mask & 16 != 0:
+        loop c in kids(n):
+            if not comprehension_self_typed(c): return false
+    true
+
 check_args_untyped = (args: int[]):
     loop a0 in args:
         a = unnamed(a0)
@@ -2313,6 +2344,11 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             if nfit == 1: cands.push(first)
             cands.push(cd)
         nfit += 1
+    # (`sum([loop i in [0..5) i])`: a comprehension fits `f64[]` by converting
+    # each element, and `T[]` as it is; when both fit, type it on its own first)
+    if nfit > 1 and comprehension_settle(args):
+        call_targs = targs_here
+        return resolve_fn_call(n, name, decls, args, expected, closure, ufcs)
     if nfit == 0 and rejected.len() > 0:
         texts: str[]
         loop r in rejected:

@@ -1,0 +1,9 @@
+# quick
+# A comprehension argument that fits both `f64[]` (by converting each element)
+# and `T[]` is typed on its own first: integers sum as integers.
+let n=4
+let fs:array<float64>=[0.5 1.5]
+printl(sum([loop i in [0..5) i*2]))
+printl(sum([loop i in [0..n) i]))
+printl(sum([loop x in fs x*2]))
+printl(sum([loop x in fs x]) =? sum(fs))
