@@ -4650,31 +4650,54 @@ settle_open_globals = ():
 zonk_indexes = 0
 zonk_user_globals = 0
 
-zonk_tree = (n: int):
-    if n == 0: return
-    if nodes[n].type != 0: nodes[n].type = i32(zonk(int(nodes[n].type)))
-    k = nodes[n].kind
-    if k == .index: zonk_indexes += 1
-    if k == .ident:
-        if nodes[n].aux == i32(int(SK.global)):
-            if not modules[int(globals[int(nodes[n].sym)].mod)].is_prelude: zonk_user_globals += 1
-        else if nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ALIAS != 0:
-            # Narrowed locals may hide a reference to global storage.
-            zonk_user_globals += 1
-    # Unlike zonking, the write walk stops at function templates. Keep the
-    # fallback for a body containing one instead of recording its children.
-    if k == .fn_: zonk_collect_writes = false
-    if zonk_collect_writes:
-        if k == .vardecl or k == .assign or k == .for_ or k == .while_ or k == .lambda or k == .return_ or k == .break_ or k == .continue_: zonk_write_sites.push(n)
-    if k == .lambda: return
-    zonk_tree(int(nodes[n].a))
-    zonk_tree(int(nodes[n].b))
-    if k != .for_:
-        zonk_tree(int(nodes[n].c))
-        if k != .partial: zonk_tree(int(nodes[n].d))
-    loop i in [0..nkids(n)): zonk_tree(kid(n, i))
-    loop i in [0..nkids2(n)): zonk_tree(kid2(n, i))
-    if zonk_collect_writes and (k == .for_ or k == .while_): zonk_write_sites.push(-n)
+# (pre-order, as a recursive walk would go: a, b, c, d, the lists; a for/while's -n marks the
+# end of its children. Only a type with variables in it can change, and only those are zonked.)
+zonk_stack: int[]
+zonk_tree = (root: int):
+    if root == 0: return
+    base = zonk_stack.len()
+    zonk_stack.push(root)
+    loop zonk_stack.len() > base:
+        n = zonk_stack.pop()
+        if n < 0:
+            if zonk_collect_writes: zonk_write_sites.push(n)
+            continue
+        # (one read of the node: its fields after are the copy's)
+        nd = nodes[n]
+        t = int(nd.type)
+        if t != 0 and has_var(t): nodes[n].type = i32(zonk(t))
+        k = nd.kind
+        if k == .index: zonk_indexes += 1
+        if k == .ident:
+            if nd.aux == i32(int(SK.global)):
+                if not modules[int(globals[int(nd.sym)].mod)].is_prelude: zonk_user_globals += 1
+            else if nd.aux == i32(int(SK.local)) and int(locals[int(nd.sym)].flags) & LF_ALIAS != 0:
+                # Narrowed locals may hide a reference to global storage.
+                zonk_user_globals += 1
+        # Unlike zonking, the write walk stops at function templates. Keep the
+        # fallback for a body containing one instead of recording its children.
+        if k == .fn_: zonk_collect_writes = false
+        if zonk_collect_writes:
+            if k == .vardecl or k == .assign or k == .for_ or k == .while_ or k == .lambda or k == .return_ or k == .break_ or k == .continue_: zonk_write_sites.push(n)
+        if k == .lambda: continue
+        if k == .for_ or k == .while_: zonk_stack.push(-n)
+        l = int(nd.list2)
+        i = int(nd.nlist2) - 1
+        loop i >= 0:
+            x = int(lists[l + i])
+            if x != 0: zonk_stack.push(x)
+            i -= 1
+        l = int(nd.list)
+        i = int(nd.nlist) - 1
+        loop i >= 0:
+            x = int(lists[l + i])
+            if x != 0: zonk_stack.push(x)
+            i -= 1
+        if k != .for_:
+            if k != .partial and nd.d != 0: zonk_stack.push(int(nd.d))
+            if nd.c != 0: zonk_stack.push(int(nd.c))
+        if nd.b != 0: zonk_stack.push(int(nd.b))
+        if nd.a != 0: zonk_stack.push(int(nd.a))
 
 # ---------------- compile-time evaluation ----------------
 struct CVal:
