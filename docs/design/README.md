@@ -12,7 +12,7 @@ David's standing [decisions](decisions.md). Design specifications and exploratio
 [numerical stress test](numerical_stress_test.md), and the accepted implementation
 designs for [refinements](refinement.md), [effect rows](effects.md),
 [ownership](ownership.md), [precision-preserving inference](precision_inference.md),
-[compile throughput](compile_throughput.md) and [self-hosting](self_hosting.md), [tensors](tensors.md) and [time](time.md). Several were written against
+[compile throughput](compile_throughput.md) and [self-hosting](self_hosting.md), [tensors](tensors.md), [time](time.md) and the [compiler architecture](compiler_architecture.md). Several were written against
 the pre-restart compiler and describe direction rather than current behavior.
 Older design essays and status records (`dewy/status.md`, the roadmap history,
 the Phase 1 documents) are in git tag `archive/master-pre-restart`.
