@@ -5664,7 +5664,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         return check_expr(n, expected)
     else if id == .live_len:
         t = prune(arg_type(args, 0, 0))
-        if types[t].kind != .array: fatal(nodes[n].pos, "`loop item in @items` iterates a growable array live, not {dt(t)}; iterate its value with `loop item in items`")
+        if types[t].kind != .array: fatal(nodes[n].pos, "`loop item in @items` iterates a growable array or a bound iterator live, not {dt(t)}; iterate its value with `loop item in items`")
         nodes[n].aux = i32(int(IN.len))
         r = T_INT
     else if id == .len or id == .arrcap:

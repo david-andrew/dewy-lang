@@ -2767,32 +2767,32 @@ dewy_cursor_loop = (s: int) -> bool:
     check_stmt(s)
     true
 
-# Indexed user containers use their existing len / [] operations. Retain the
-# input value and length once, then reuse the ordinary counted-loop lowering.
 # The iterator protocol: a value whose type has a `next` method, giving the next
-# element or none, is iterated by calling it until none. `loop x in it=source`
-# names the iterator, so the body can call its other methods to steer it (a tree
-# walk's `skip_children`). The loop becomes `let it=source` and a `loop true`
-# whose body starts by taking the next element.
+# element or none, is iterated by calling it until none. `loop x in it` steps a
+# copy of the iterator (its value at loop entry); `loop x in @it` steps the bound
+# iterator in place, so the body can call its other methods to steer it (a tree
+# walk's `skip_children`). The loop becomes a `loop true` whose body starts by
+# taking the next element.
 dewy_iterator_type = (t: int) -> bool:
     if types[t].kind != .struct_ or is_map_type(t) or is_map_entries_type(t) or is_dewy_cursor_iter(t): return false
     members = dewy_decl_members.get(int(structs[int(types[t].st)].decl)) ?? {}
     (members.get(intern("next")) ?? -1) >= 0
 
-dewy_iterator_loop = (s: int) -> bool:
+dewy_iterator_loop = (s: int, place: int = 0) -> bool:
     it = int(nodes[s].a)
-    named = dewy_named_iterators.get(it) ?? 0
     pos = nodes[s].pos
-    if nodes[it].kind == .range or not dewy_at(pos) or not dewy_iterator_type(prune(ntype(it))):
-        if named != 0: fatal(pos, "`loop … in {name_of(named)}=…` names an iterator: a value whose type has a `next` method giving the next element or none")
-        return false
+    if place == 0 and (nodes[it].kind == .range or not dewy_at(pos) or not dewy_iterator_type(prune(ntype(it)))): return false
     if has_flag(s, NF_MUT): fatal(pos, "an iterator yields values; `loop @item in items` needs stored array elements")
     if nkids(s) != 1: fatal(pos, "an iterator loop binds one value; unpack it in the body")
-    iterator = if named != 0: name_of(named) else: "__iterator{bc_count}"
     step = "__step{bc_count}"
+    setup: int[]
+    receiver = place
+    if place == 0:
+        iterator = "__iterator{bc_count}"
+        add_flag(it, NF_CHECKED)
+        setup.push(bc_let(iterator, it, pos))
+        receiver = bc_ident(iterator, pos)
     bc_count += 1
-    add_flag(it, NF_CHECKED)
-    receiver = bc_ident(iterator, pos)
     add_flag(receiver, NF_MUT)
     taken = bc_let(step, bc_method(receiver, "next", [], pos), pos)
     finished = mk(.istype, pos)
@@ -2812,10 +2812,57 @@ dewy_iterator_loop = (s: int) -> bool:
     nodes[steps].a = i32(bc_bool(true, pos))
     nodes[steps].b = i32(body)
     nodes[steps].sval = nodes[s].sval
-    nodes[s] = nodes[lx_block([bc_let(iterator, it, pos), steps], pos)]
+    setup.push(steps)
+    nodes[s] = nodes[lx_block(setup, pos)]
     check_stmt(s)
     true
 
+# `loop item in @place` (dw_live_loop): an iterator steps in place
+# (dewy_iterator_loop); an array is iterated live, a position counter checked
+# against its current length each time and the element read at the body's start,
+# so pushes and edits made by the body are seen (worklists).
+check_live_loop = (s: int):
+    it = int(nodes[s].a)
+    pos = nodes[s].pos
+    # (unchecked copies of the place, for the loop's own reads)
+    length_place = clone(it)
+    element_place = clone(it)
+    t = prune(check_expr(it, 0))
+    if dewy_iterator_type(t):
+        dewy_iterator_loop(s, length_place)
+        return
+    if types[t].kind != .array: fatal(nodes[it].pos, "`loop item in @items` iterates a growable array or a bound iterator live, not {dt(t)}; iterate its value with `loop item in items`")
+    binder = kid(s, 0)
+    counter = "$dewy_live_{nodes.len()}"
+    range = mk(.range, pos)
+    nodes[range].a = i32(bc_int(0, pos))
+    add_flag(range, NF_INCLUSIVE)
+    first = mk(.lhead, pos)
+    nodes[first].op = 1
+    set_list(first, [bc_ident(counter, pos)])
+    nodes[first].a = i32(range)
+    second = mk(.lhead, pos)
+    nodes[second].op = 4
+    nodes[second].a = i32(bc_bin(.lt, bc_ident(counter, pos), bc_call("__dewy_live_length", [length_place], pos), pos))
+    both = mk(.lhead, pos)
+    nodes[both].op = 2
+    nodes[both].a = i32(first)
+    nodes[both].b = i32(second)
+    element = mk(.index, pos)
+    nodes[element].a = i32(element_place)
+    nodes[element].b = i32(bc_ident(counter, pos))
+    decl = mk(.vardecl, nodes[binder].pos)
+    nodes[decl].name = nodes[binder].name
+    nodes[decl].b = i32(element)
+    lx = mk(.loopx, pos)
+    nodes[lx].sval = nodes[s].sval
+    nodes[lx].a = i32(both)
+    nodes[lx].b = i32(lx_block([decl] + kids(int(nodes[s].b)), pos))
+    nodes[s] = nodes[desugar_loopx(lx)]
+    check_stmt(s)
+
+# Indexed user containers use their existing len / [] operations. Retain the
+# input value and length once, then reuse the ordinary counted-loop lowering.
 dewy_sequence_loop = (s: int) -> bool:
     it = int(nodes[s].a)
     if nodes[it].kind == .range: return false
@@ -2906,6 +2953,9 @@ op_text = (op: Tok, pos: int) -> str:
         _: tok_text(op)
 
 check_for = (s: int):
+    if dewy_live_sources.has(int(nodes[s].a)) and dewy_at(nodes[s].pos):
+        check_live_loop(s)
+        return
     if dewy_at(nodes[s].pos) and reflect_loop(s): return
     if has_flag(s, NF_MUT) and files[pos_file(nodes[s].pos)].is_dewy:
         source_type = prune(check_expr(int(nodes[s].a), 0))

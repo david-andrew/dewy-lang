@@ -2586,25 +2586,27 @@ The [Ring example](../examples/ring.dewy) and
 module imports without a separate iterator allocation.
 
 *Provisional:* a value whose type has a `next` method, giving the next element
-or `none`, is an iterator; a loop calls `next` until it gives `none`. Naming the
-iterator in the header, `loop x in it=source`, binds it for the body, which can
-then call its other methods to steer the traversal. The bundled `tree` module's
-walk visits a tree depth first, each node before its children, and its
-`skip_children` leaves out the children of the node it gave last:
+or `none`, is an iterator; a loop calls `next` until it gives `none`.
+`loop x in it` steps a copy of the iterator. To steer the traversal, bind the
+iterator and loop over its place: `loop x in @it` steps the bound iterator
+itself, so the body can call its other methods (`it.seek(i)`, say). The bundled
+`tree` module's walk visits a tree depth first, each node before its children,
+and its `skip_children` leaves out the children of the node it gave last:
 
 ```dewy
 from tree import Tree
 let files:Tree<string> = []
 let home = files.add("home")
 files.add("old.txt" files.add("drafts" home))
-loop name in w=files.walk() {
+let w = files.walk
+loop name in @w {
     if name =? "drafts" { w.skip_children }
     printl(name)   # home, drafts
 }
 ```
 
 An iterator loop binds one value (unpack it in the body) and is not part of a
-combined header yet. The spelling of named iterators may change.
+combined header yet.
 
 `loop x in xs` iterates the value `xs` has at loop entry. The body may change
 `xs`; the iteration does not see it, and no copy is made unless the body writes

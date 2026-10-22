@@ -177,8 +177,8 @@ clone = (n: int) -> int:
 # may bind the name anew (a plain `name = ...` there declares): decl_shadowable
 shadowable_decls: {int: bool}
 
-# `loop item in it=source`: the source's node -> the iterator's name (dewy_iterator_loop)
-dewy_named_iterators: {int: int}
+# `loop item in @place`: the place's node, iterated live (check_live_loop)
+dewy_live_sources: {int: bool}
 
 # Members `x.len` a Dewy program wrote, as the frontends made them (not the checker's own
 # `.len()`, for `.length`): node -> its position, in case the node is made again

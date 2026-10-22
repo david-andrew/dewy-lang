@@ -3,7 +3,8 @@
 # first, each before its children; the walk is a steerable iterator, whose
 # `skip_children` leaves out the children of the node it gave last:
 #
-#     loop name in w=tree.walk() { if name =? "drafts" w.skip_children }
+#     let w = tree.walk
+#     loop name in @w { if name =? "drafts" w.skip_children }
 Tree:type = <T>[
     values:array<T>=[]
     children:array<array<int64>>=[]

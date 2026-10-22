@@ -19,10 +19,13 @@ main = () => {
         if n <? 5 break $outer
         printl(n)
     }
-    # Naming the iterator lets the body steer it.
-    loop n in c=Countdown[6] {
+    # Looping over a bound iterator's place lets the body steer it.
+    let c=Countdown[6]
+    loop n in @c {
         if n =? 5 { c.skip }
         printl(n)
     }
     loop n in Countdown[0] { printl(n) } else { printl("empty") }
+    let d=Countdown[0]
+    loop n in @d { printl(n) } else { printl("still empty") }
 }

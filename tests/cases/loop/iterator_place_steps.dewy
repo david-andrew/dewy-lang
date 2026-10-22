@@ -1,0 +1,26 @@
+# quick
+# `loop x in @it` steps the bound iterator in place: the body can steer it, and
+# the loop leaves it where it stopped; `loop x in it` steps a copy.
+Countdown:type=[
+    left:int64
+    next=():>int64|none=>{
+        if left <=? 0 return none
+        left-=1
+        return left+1
+    }
+    skip=(n:int64):>void=>{left-=n}
+]
+main=()=>{
+    let c=Countdown[10]
+    loop n in @c {
+        printl(n)
+        if n =? 8 { c.skip(3) }
+        if n =? 3 break
+    }
+    printl("left {c.left}")
+    loop n in c { if n =? 1 printl("copy reached 1") }
+    printl("still {c.left}")
+    let queue=[1 2]
+    loop x in @queue { if x <? 4 queue.push(x+2) }
+    printl(queue)
+}

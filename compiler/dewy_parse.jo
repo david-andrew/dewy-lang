@@ -2682,40 +2682,19 @@ dw_iterable = (id: int, slice: bool = false, membership: bool = false) -> int:
         if not slice: return bc_call("__dewy_iter", [dw_range_value(n)], dewy_syntax[id].pos)
     return n
 
-# `loop item in @items` iterates the place live: a position counter checked
-# against the current length each time, the element read at the body's start,
-# so pushes and edits made by the body are seen (worklists).
-# The body's first statement, made by the head: dw_flow puts it in the body.
-dw_live_prefix = 0
-
+# `loop item in @items` iterates the place live: an array's current length and
+# element at each step (worklists), or an iterator bound by name, stepped in
+# place so the body can steer it (`let w=tree.walk` then `loop node in @w`).
+# Which one the place's type decides (check_live_loop).
 dw_live_loop = (n: int, binder: int, place: int) -> int:
-    pos = nodes[n].pos
-    root = dw_expr(place)
+    source = dw_expr(place)
+    root = source
     loop nodes[root].kind == .field: root = int(nodes[root].a)
-    if nodes[root].kind != .ident: return dw_fail(place, "live iteration over this expression; use an array binding or a field of one, `loop item in @items`")
-    counter = "$dewy_live_{nodes.len()}"
-    range = mk(.range, pos)
-    nodes[range].a = i32(bc_int(0, pos))
-    add_flag(range, NF_INCLUSIVE)
-    first = mk(.lhead, pos)
-    nodes[first].op = 1
-    set_list(first, [bc_ident(counter, pos)])
-    nodes[first].a = i32(range)
-    second = mk(.lhead, pos)
-    nodes[second].op = 4
-    nodes[second].a = i32(bc_bin(.lt, bc_ident(counter, pos), bc_call("__dewy_live_length", [dw_expr(place)], pos), pos))
-    both = mk(.lhead, pos)
-    nodes[both].op = 2
-    nodes[both].a = i32(first)
-    nodes[both].b = i32(second)
-    element = mk(.index, pos)
-    nodes[element].a = i32(dw_expr(place))
-    nodes[element].b = i32(bc_ident(counter, pos))
-    decl = mk(.vardecl, nodes[binder].pos)
-    nodes[decl].name = nodes[binder].name
-    nodes[decl].b = i32(element)
-    dw_live_prefix = decl
-    both
+    if nodes[root].kind != .ident: return dw_fail(place, "live iteration over this expression; use an array or iterator binding or a field of one, `loop item in @items`")
+    set_list(n, [binder])
+    nodes[n].a = i32(source)
+    dewy_live_sources[source] = true
+    n
 
 dw_loop_head = (id: int, combined: bool = false) -> int:
     let id = dw_unwrap(id)
@@ -2724,26 +2703,19 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
     if (op == .kw_as or op == .kw_transmute) and dw_op(dw_child(id, 1)) == .kw_in:
         fatal(dewy_syntax[id].pos, "`{dn_token_text(op)}` binds more loosely than the loop's `in`: parenthesize the converted source, as in `loop byte in (text as array<uint8>) \{ ... }`")
     n = mk(.lhead, dewy_syntax[id].pos)
-    # `loop node in walk=tree.walk()` names the iterator, so the body can steer it
     header = id
-    source_id = 0
-    iterator = 0
+    # (`loop node in w=tree.walk()`: the iterator is bound first, then its place iterated)
     if op == .assign and dw_op(dw_child(id, 1)) == .kw_in:
-        header = dw_unwrap(dw_child(id, 1))
-        named = dw_unwrap(dw_child(header, 2))
-        if dw_name(named) == "" or dewy_syntax[named].kind != .identifier: return dw_fail(named, "an iterator name other than a plain name (`loop item in it=source`)")
-        if combined: return dw_fail(id, "a named iterator in a combined loop; name it in a loop of its own")
-        dw_reserved_name(dw_name(named), named)
-        iterator = int(dw_name_id(named))
-        source_id = dw_child(id, 2)
-        op = .kw_in
+        named = dw_unwrap(dw_child(dw_unwrap(dw_child(id, 1)), 2))
+        it_name = dw_name(named)
+        if it_name == "": it_name = "it"
+        fatal(dewy_syntax[id].pos, "bind the iterator first, then loop over its place so the body can steer it: `let {it_name}=source` then `loop item in @{it_name} \{ ... }`")
     if op == .kw_in:
-        if source_id == 0: source_id = dw_child(header, 2)
+        source_id = dw_child(header, 2)
         nodes[n].op = 1
         binder = dw_unwrap(dw_child(header, 1))
         if dw_op(binder) == .at:
             if combined: return dw_fail(binder, "a mutable binding in a combined loop; use a separate loop @item in items")
-            if iterator != 0: return dw_fail(binder, "a mutable binding over a named iterator; an iterator yields values")
             add_flag(n, NF_MUT)
             binder = dw_unwrap(dw_child(binder, 1))
         binders: int[]
@@ -2767,11 +2739,9 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
             binders.push(dw_expr(binder))
         set_list(n, binders)
         dw_shadow(dw_bound_names(binders))
-        if iterator != 0: dw_shadow([iterator])
         inside = dw_siblings
         dw_siblings = before
         source = dw_unwrap(source_id)
-        if dw_op(source) == .at and iterator != 0: return dw_fail(source, "a named live loop; an iterator is named over an iterator value, not a place")
         if dw_op(source) == .at:
             if combined: return dw_fail(source, "live iteration (`in @items`) in a combined loop; use `loop item in @items` alone")
             if has_flag(n, NF_MUT): fatal(dewy_syntax[id].pos, "`loop @item in @items` combines two places: iterate the live array by value (`loop item in @items`) or edit its elements in place (`loop @item in items`)")
@@ -2779,8 +2749,7 @@ dw_loop_head = (id: int, combined: bool = false) -> int:
             live = dw_live_loop(n, binders[0], dw_child(source, 1))
             dw_siblings = inside
             return live
-        it = if has_flag(n, NF_MUT) or iterator != 0: dw_expr(source_id) else: dw_iterable(source_id)
-        if iterator != 0: dewy_named_iterators[it] = iterator
+        it = if has_flag(n, NF_MUT): dw_expr(source_id) else: dw_iterable(source_id)
         dw_siblings = inside
         if has_flag(n, NF_MUT):
             # Element aliases reuse this route. Indexed/call routes need a captured
@@ -3022,11 +2991,8 @@ dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
             return mk(.block, dewy_syntax[arm].pos)
     n = mk(if word == "if": NK.if_ else: NK.while_, dewy_syntax[arm].pos)
     outer_siblings = dw_siblings
-    prefix = 0
     if word == "loop":
         head = dw_loop_head(dw_child(arm, 1))
-        prefix = dw_live_prefix
-        dw_live_prefix = 0
         if at + 1 < items.len():
             nodes[n].kind = .loopx
             nodes[n].a = i32(head)
@@ -3041,7 +3007,6 @@ dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
             nodes[n].a = i32(head)
     else: nodes[n].a = i32(dw_expr(dw_child(arm, 1)))
     nodes[n].b = i32(dw_block(dw_child(arm, 2), accumulator, map))
-    if prefix != 0: set_list(int(nodes[n].b), [prefix] + kids(int(nodes[n].b)))
     dw_siblings = outer_siblings
     if at + 1 < items.len():
         rest = dw_flow(id, at + 1, accumulator, map)

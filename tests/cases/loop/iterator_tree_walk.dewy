@@ -11,7 +11,8 @@ main = () => {
     let notes = files.add("notes" root)
     files.add("todo.txt" notes)
     printl([loop name in files.walk() name])
-    loop name in w=files.walk() {
+    let w=files.walk
+    loop name in @w {
         if name =? "drafts" { w.skip_children }
         printl(name)
     }
