@@ -243,7 +243,7 @@ decl_shadowable = (d: int) -> bool:
     d != 0 and (shadowable_decls.has(d) or modules[int(nodes[d].mod)].is_prelude)
 
 scope_add_module = (m: int, name: int, kind: SK, r: int, decl: int) -> int:
-    ml_bump()
+    ml_bump_name(name)
     # (look the name up in place: holding a copy of the table would make the insert below copy it)
     found: int? = none
     if modules[m].is_prelude: found = prelude.get(name)
@@ -301,15 +301,28 @@ scope_reset = (mark: int):
     sc_syms.truncate(mark)
     sc_prev.truncate(mark)
 
-# module_lookup's last answer for each name (the module asked from, the binding, and the
-# generation it was found in). Any new module-level binding or import starts a new generation;
-# the universe is complete before checking starts. The editor does without.
-ml_gen = 1
+# What a name reaches at module level changes only with a binding of that name or with the
+# module structure (imports; the universe, complete before checking starts). Each change takes
+# the next tick: ml_stamp(name) is the tick as of which name's answers stand, and an answer kept
+# with the stamp it was found under holds while the stamp is the same. The editor does without.
+ml_tick = 1
+ml_struct = 1
+ml_name_tick: int[]
+ml_bump = ():
+    ml_tick += 1
+    ml_struct = ml_tick
+ml_bump_name = (name: int):
+    ml_tick += 1
+    if ml_name_tick.len() <= name: ml_name_tick.resize(name * 2 + 64)
+    ml_name_tick[name] = ml_tick
+ml_stamp = (name: int) -> int:
+    if name < ml_name_tick.len() and ml_name_tick[name] > ml_struct: return ml_name_tick[name]
+    ml_struct
+
+# module_lookup's last answer for each name: the module asked from, the binding, and its stamp
 ml_sym: int[]
 ml_mod: int[]
 ml_at: int[]
-ml_bump = ():
-    ml_gen += 1
 
 # demand_prelude_name, once per name: after its first call for a name it has nothing left to do
 # for it (its units are parsed and registered, or it has none; the math runtimes are loaded)
@@ -321,7 +334,7 @@ demand_name = (name: int):
     demand_prelude_name(name)
 
 module_lookup = (m: int, name: int) -> int:
-    if name < ml_at.len() and ml_at[name] == ml_gen and ml_mod[name] == m: return ml_sym[name]
+    if name < ml_at.len() and ml_at[name] == ml_stamp(name) and ml_mod[name] == m: return ml_sym[name]
     s = module_lookup_now(m, name)
     if not ide_on:
         if ml_at.len() <= name:
@@ -329,7 +342,7 @@ module_lookup = (m: int, name: int) -> int:
             ml_at.resize(grown)
             ml_mod.resize(grown)
             ml_sym.resize(grown)
-        ml_at[name] = ml_gen
+        ml_at[name] = ml_stamp(name)
         ml_mod[name] = m
         ml_sym[name] = s
     s
@@ -426,7 +439,7 @@ bind_from_imports = (start: int = 0):
                     where = "at {pos_str(nodes[d].pos)}"
                     if syms[ex].decl != 0: where = "at {pos_str(nodes[int(syms[ex].decl)].pos)}"
                     fatal(nodes[id].pos, "cannot import '{name_of(alias)}': this module has a '{name_of(alias)}' ({where}); import it with another name: {name_of(nm)} as ...")
-                ml_bump()
+                ml_bump_name(alias)
                 modules[m].names[alias] = new_sym(alias, syms[s].kind, int(syms[s].ref), int(syms[s].decl))
 
 # The module a binding belongs to: where its declaration is (an imported binding
@@ -500,7 +513,7 @@ dewy_import_clash = (m: int, name: int, s: int, owned: (int, int)[], d: int, pos
 # Bind an import's declarations of `name` (owned, as (ref, decl)) in module m,
 # replacing any binding there.
 bind_imported = (m: int, name: int, kind: SK, owned: (int, int)[]):
-    ml_bump()
+    ml_bump_name(name)
     loop i in [0..owned.len()):
         o = owned[i]
         if i == 0: modules[m].names[name] = new_sym(name, kind, o.0, o.1)

@@ -236,7 +236,7 @@ repl_compile = (text: str, n: int) -> ReplOut:
         if k == .fn_ or k == .struct_ or k == .enum_ or k == .typealias or k == .const_ or k == .vardecl and nodes[d].nlist == 0:
             nm = int(nodes[d].name)
             if modules[m].names.get(nm) != none:
-                ml_bump()
+                ml_bump_name(nm)
                 modules[m].names.remove(nm)
     n0 = modules[m].inits.len()
     modules[m].decls.extend(decls)

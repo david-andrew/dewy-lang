@@ -3463,7 +3463,36 @@ collect_fns = (name: int, out: mut int[]):
 # of it (or its selected imports) shadow the shadowable ones it would otherwise
 # see, the prelude's included, as a whole family. Methods are reached through
 # their object, so a type's method does not shadow a function.
+# collect_named's families, by name and the module asked from and checked in, with the
+# spellings they hide, kept while the name's stamp stands (ml_stamp)
+struct FamilyKey:
+    name: int
+    mod: int
+    cur: int
+
+struct Family:
+    gen: int
+    decls: int[]
+    hidden: int[]
+
+families: {FamilyKey: Family} = {}
+
 collect_named = (name: int, mod: int, out: mut int[]):
+    if out.len() > 0 or ide_on:
+        collect_named_now(name, mod, out)
+        return
+    key = FamilyKey(name, mod, cur_mod())
+    if let f = families.get(key):
+        if f.gen == ml_stamp(name):
+            loop d in f.decls: out.push(d)
+            loop d in f.hidden: surface_hidden.push(d)
+            return
+    gen = ml_stamp(name)
+    hidden_mark = surface_hidden.len()
+    collect_named_now(name, mod, out)
+    if ml_stamp(name) == gen: families[key] = Family(gen, out, surface_hidden[hidden_mark..])
+
+collect_named_now = (name: int, mod: int, out: mut int[]):
     if mod >= 0: collect_module(mod, name, out)
     else: collect_fns(name, out)
     m = if mod >= 0: mod else: cur_mod()
@@ -5317,7 +5346,7 @@ check_call = (n: int, expected: int) -> int:
     value_call(n, callee, args, expected)
 
 # resolve_by_types' choices (a formatting function for each value type a string puts in, say):
-# by name, module and settled argument types, kept while no binding or import changes (ml_gen).
+# by name, module and settled argument types, kept while the name's stamp stands (ml_stamp).
 # A hit makes the same instance request and leaves the same hidden spellings as the search.
 struct ByTypesKey:
     name: int
@@ -5341,9 +5370,10 @@ resolve_by_types = (name: int, ts: int[], pos: int, required: bool) -> int:
     key = ByTypesKey(name, cur_mod(), ts)
     if settled:
         if let c = by_types_seen.get(key):
-            if c.gen == ml_gen:
+            if c.gen == ml_stamp(name):
                 loop d in c.hidden: surface_hidden.push(d)
                 return get_fn_inst(c.decl, c.binds, pos)
+    gen = ml_stamp(name)
     hidden_mark = surface_hidden.len()
     decls: int[]
     collect_fns(name, decls)
@@ -5354,7 +5384,7 @@ resolve_by_types = (name: int, ts: int[], pos: int, required: bool) -> int:
     if not choose_from_types(name, decls, ts, pos, required): return 0
     decl = by_types_decl
     binds = by_types_binds
-    if settled: by_types_seen[key] = ByTypesChoice(ml_gen, decl, binds, surface_hidden[hidden_mark..])
+    if settled and ml_stamp(name) == gen: by_types_seen[key] = ByTypesChoice(gen, decl, binds, surface_hidden[hidden_mark..])
     get_fn_inst(decl, binds, pos)
 
 resolve_from_types = (name: int, decls: int[], ts: int[], pos: int, required: bool) -> int:
