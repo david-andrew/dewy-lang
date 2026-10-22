@@ -5308,16 +5308,54 @@ check_call = (n: int, expected: int) -> int:
     check_expr(callee, 0)
     value_call(n, callee, args, expected)
 
+# resolve_by_types' choices (a formatting function for each value type a string puts in, say):
+# by name, module and settled argument types, kept while no binding or import changes (ml_gen).
+# A hit makes the same instance request and leaves the same hidden spellings as the search.
+struct ByTypesKey:
+    name: int
+    mod: int
+    ts: int[]
+
+struct ByTypesChoice:
+    gen: int
+    decl: int
+    binds: int[]
+    hidden: int[]
+
+by_types_seen: {ByTypesKey: ByTypesChoice} = {}
+by_types_decl = 0
+by_types_binds: int[]
+
 resolve_by_types = (name: int, ts: int[], pos: int, required: bool) -> int:
+    settled = not ide_on
+    loop t in ts:
+        if has_var(t): settled = false
+    key = ByTypesKey(name, cur_mod(), ts)
+    if settled:
+        if let c = by_types_seen.get(key):
+            if c.gen == ml_gen:
+                loop d in c.hidden: surface_hidden.push(d)
+                return get_fn_inst(c.decl, c.binds, pos)
+    hidden_mark = surface_hidden.len()
     decls: int[]
     collect_fns(name, decls)
     collect_in(prelude, name, decls)
     if ts.len() > 0:
         tm = module_of_type(ts[ts.len() - 1])
         if tm >= 0: collect_module(tm, name, decls)
-    resolve_from_types(name, decls, ts, pos, required)
+    if not choose_from_types(name, decls, ts, pos, required): return 0
+    decl = by_types_decl
+    binds = by_types_binds
+    if settled: by_types_seen[key] = ByTypesChoice(ml_gen, decl, binds, surface_hidden[hidden_mark..])
+    get_fn_inst(decl, binds, pos)
 
 resolve_from_types = (name: int, decls: int[], ts: int[], pos: int, required: bool) -> int:
+    if not choose_from_types(name, decls, ts, pos, required): return 0
+    get_fn_inst(by_types_decl, by_types_binds, pos)
+
+# (the cheapest of decls for arguments of types ts: by_types_decl and its by_types_binds; false
+# when none fits and none is required)
+choose_from_types = (name: int, decls: int[], ts: int[], pos: int, required: bool) -> bool:
     best = -1
     bestcost = 1 << 30
     bestb: int[]
@@ -5342,11 +5380,13 @@ resolve_from_types = (name: int, decls: int[], ts: int[], pos: int, required: bo
             bestb = binds
             bestgen = sig.ntp > 0
     if best < 0:
-        if not required: return 0
+        if not required: return false
         last = "()"
         if ts.len() > 0: last = dt(ts[ts.len() - 1])
         fatal(pos, "no function '{name_of(name)}' accepting {last}")
-    get_fn_inst(decls[best], bestb, pos)
+    by_types_decl = decls[best]
+    by_types_binds = bestb
+    true
 
 # ---------------- intrinsics ----------------
 arg_type = (args: int[], i: int, expected: int) -> int:
