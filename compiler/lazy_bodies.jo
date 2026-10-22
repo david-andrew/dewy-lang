@@ -7,14 +7,26 @@ use 'ast.jo'
 
 dc_lazy_used = false
 dc_eager = false
+dc_lib_lazy_files: {int: bool}     # library files whose function bodies wait (dewy_direct.jo)
+# A waiting library body not lexed yet: its block is marked so, from its `{` (ival) to the end of
+# its `}` (dc_lazy_span_end, by block)
+const DC_LAZY_SPAN = -315
+dc_lazy_span_end: {int: int}
 dc_warning_pos: int[]
 dc_warning_text: str[]
 
 dc_force_all = ():
     if not dc_lazy_used: return
     loop m in modules:
+        if dc_lib_lazy_files.has(int(m.file)): continue
         loop d in m.decls:
             if nodes[d].kind == .fn_: source_force_body(d)
+
+# A library module's waiting bodies, all parsed now
+dc_force_module = (m: int):
+    if not dc_lib_lazy_files.has(int(modules[m].file)): return
+    loop d in modules[m].decls:
+        if nodes[d].kind == .fn_: source_force_body(d)
 
 # No diagnostic from a speculative parse/check may escape before replay. This
 # also covers errors in the serial prefix, before the workers can be started.

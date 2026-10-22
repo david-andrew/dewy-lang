@@ -356,6 +356,7 @@ decimal_writers_first = ():
                 g = int(nodes[d].sym)
                 if g > 0 and globals[g].state == 0 and int(globals[g].decl) == d:
                     names[int(nodes[d].name)] = true
+                    dc_force_module(int(globals[g].mod))
                     decimal_global_inits[g] = clone(int(nodes[d].b))
                     decimal_modules[int(globals[g].mod)] = true
     if names.len() == 0: return

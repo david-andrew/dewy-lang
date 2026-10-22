@@ -4809,10 +4809,12 @@ calls_named = (n: int, name: str) -> bool:
 # type of what it pushes is known where enemies is read)
 check_pushers_first = ():
     names: {int: bool}
-    loop m in modules:
-        if m.is_prelude: continue
-        loop d in m.decls:
-            if nodes[d].kind == .vardecl and nodes[d].nlist == 0 and nodes[d].a == 0 and nodes[d].b != 0 and nodes[int(nodes[d].b)].kind == .array and nkids(int(nodes[d].b)) == 0: names[int(nodes[d].name)] = true
+    loop mi in [0..modules.len()):
+        if modules[mi].is_prelude: continue
+        loop d in modules[mi].decls:
+            if nodes[d].kind == .vardecl and nodes[d].nlist == 0 and nodes[d].a == 0 and nodes[d].b != 0 and nodes[int(nodes[d].b)].kind == .array and nkids(int(nodes[d].b)) == 0:
+                names[int(nodes[d].name)] = true
+                dc_force_module(mi)
     if names.len() == 0: return
     dc_force_all()
     loop m in modules:

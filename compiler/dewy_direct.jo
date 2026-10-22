@@ -21,6 +21,8 @@ use 'par.jo'
 use 'pcheck.jo'
 use 'main.jo'
 use 'lazy_bodies.jo'
+use 'prelude.jo'
+use 'icount.jo'
 use 'directives.jo'
 
 # DEWY_FRONTEND=old selects the reference path; compare checks every migrated
@@ -38,6 +40,14 @@ dc_range_top = false       # (the first entry of an index: it may end at a slice
 const DC_LAZY_BODY = -314
 dc_lazy_tokens: {int: DewyLexeme[]}
 dc_lazy_on = false
+# An imported library module's function bodies wait to be parsed until checking asks for them:
+# only the reached ones are (dc_force_body). Nothing waits on them before checking (unlike a
+# program's own deferred bodies, no replay, partition or whole-program force needs them; a
+# library global that its own functions fill first forces its module: dc_force_module).
+dc_lib_lazy = false
+
+dc_lib_lazy_allowed = (file: int) -> bool:
+    prelude_lazy and not dc_compare and dc_enabled and len(lib_root) > 0 and starts_with(files[file].path, lib_root)
 
 dc_lazy_allowed = (file: int) -> bool:
     when BOOTSTRAP or TARGET != "linux" or ARCH != "x86_64":
@@ -50,7 +60,15 @@ dc_lazy_allowed = (file: int) -> bool:
         true
 
 dc_lazy_body = () -> int:
-    if not dc_lazy_on or dn_tokens[dn_at].symbol != .lbrace: return 0
+    if dn_tokens[dn_at].kind == .lazy_body:
+        t = dn_tokens[dn_at]
+        b = mk(.block, mkpos(dn_file, t.start))
+        nodes[b].aux2 = DC_LAZY_SPAN
+        nodes[b].ival = t.start
+        dc_lazy_span_end[b] = t.stop
+        dn_at += 1
+        return b
+    if not (dc_lazy_on or dc_lib_lazy) or dn_tokens[dn_at].symbol != .lbrace: return 0
     start = dn_at
     at = start + 1
     depth = 1
@@ -63,7 +81,7 @@ dc_lazy_body = () -> int:
             nodes[b].aux2 = DC_LAZY_BODY
             nodes[b].ival = start
             dn_at = at + 1
-            dc_lazy_used = true
+            if dc_lazy_on: dc_lazy_used = true
             return b
         # These can declare names/imports or affect whole-program analysis at
         # parse time. Large/base literals may synthesize a bigint import.
@@ -77,17 +95,63 @@ dc_lazy_body = () -> int:
         at += 1
     0
 
+# The lazy_body tokens of the declaration at dn_at, lexed (it parses another way, or its body
+# does not wait): up to the first that ends a line
+dn_lazy_left = false
+dn_expand_lazy = ():
+    if not dn_lazy_left: return
+    k = dn_at
+    loop k < dn_tokens.len() and dn_tokens[k].kind != .lazy_body: k += 1
+    if k == dn_tokens.len():
+        dn_lazy_left = false
+        return
+    out: DewyLexeme[]
+    loop j in [0..k): out.push(dn_tokens[j])
+    saved_comments = dn_block_comments
+    loop k < dn_tokens.len():
+        t = dn_tokens[k]
+        k += 1
+        if t.kind != .lazy_body:
+            out.push(t)
+            continue
+        inner = dn_lex(dn_file, t.start, t.stop)
+        loop j in [0..inner.len() - 1):
+            x = inner[j]
+            if j == 0:
+                x.space = t.space
+                x.newline = t.newline
+            out.push(x)
+        if k >= dn_tokens.len() or dn_tokens[k].newline: break
+    loop k < dn_tokens.len():
+        out.push(dn_tokens[k])
+        k += 1
+    dn_block_comments = saved_comments
+    dn_tokens = out
+
 dc_force_body = (d: int):
     b = int(nodes[d].b)
-    if b == 0 or nodes[b].aux2 != DC_LAZY_BODY: return
+    if b == 0 or (nodes[b].aux2 != DC_LAZY_BODY and nodes[b].aux2 != DC_LAZY_SPAN): return
+    # (frontend work, whoever asks for the body first)
+    icl = ic_mod(IC_LOAD, int(nodes[d].mod))
     saved_tokens = dn_tokens
     saved_at = dn_at
     saved_file = dn_file
     saved_depth = dc_depth
     saved_syntax = dewy_syntax
+    saved_lib = dc_lib_lazy
+    saved_left = dn_lazy_left
+    dc_lib_lazy = false
+    dn_lazy_left = false
     dn_file = pos_file(nodes[d].pos)
-    dn_tokens = dc_lazy_tokens[dn_file]
-    dn_at = int(nodes[b].ival)
+    first = int(nodes[b].ival)
+    if nodes[b].aux2 == DC_LAZY_SPAN:
+        saved_comments = dn_block_comments
+        dn_tokens = dn_lex(dn_file, first, dc_lazy_span_end[b])
+        dn_block_comments = saved_comments
+        dc_lazy_span_end.remove(b)
+        first = 0
+    else: dn_tokens = dc_lazy_tokens[dn_file]
+    dn_at = first
     dc_depth = 2
     dewy_syntax = [DewySyntax(), DewySyntax(.inverted_comparison)]
     node_start = nodes.len()
@@ -96,7 +160,7 @@ dc_force_body = (d: int):
     if body == 0:
         nodes.truncate(node_start)
         lists.truncate(list_start)
-        dn_at = int(nodes[b].ival)
+        dn_at = first
         dc_depth = 2
         body = dw_block(dn_expr(0))
     i = nodes.len() - 1
@@ -115,6 +179,9 @@ dc_force_body = (d: int):
     dn_file = saved_file
     dc_depth = saved_depth
     dewy_syntax = saved_syntax
+    dc_lib_lazy = saved_lib
+    dn_lazy_left = saved_left
+    ic_restore(icl)
 
 dc_binary_token = (op: DewyToken) -> Tok:
     match op:
@@ -1126,7 +1193,8 @@ dc_function_literal = (name_id: i32, opening: DewyLexeme) -> int:
     concrete = true
     loop p in ps:
         if nodes[p].a == 0: concrete = false
-    body = if concrete and nodes[n].a != 0: dc_lazy_body() else: 0
+    body = if concrete and (nodes[n].a != 0 or dn_tokens[dn_at].kind == .lazy_body and has_flag(n, NF_VOID)): dc_lazy_body() else: 0
+    if body == 0 and dn_tokens[dn_at].kind == .lazy_body: dn_expand_lazy()
     if body == 0:
         dc_defer_result = if nodes[n].a != 0: 2 else: 1
         body = dc_body()
@@ -1229,6 +1297,7 @@ dn_statement = (top: bool = false) -> int:
         dn_at = start
         nodes.truncate(node_start)
         lists.truncate(list_start)
+        dn_expand_lazy()
         return dn_stmt()
     if dc_compare:
         stop = dn_at

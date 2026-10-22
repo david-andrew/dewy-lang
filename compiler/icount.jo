@@ -5,6 +5,7 @@ use 'check.jo'
 use 'lower.jo'
 use 'util.jo'
 use 'ast.jo'
+use 'lazy_bodies.jo'
 
 const IC_LOAD = 0
 const IC_CHECK = 1
@@ -193,6 +194,9 @@ ic_lines_report = ():
         if nodes[i].kind == .block and has_flag(i, NF_LAZY):
             f = pos_file(nodes[i].pos)
             if f >= 0 and f < files.len(): unasked += code_lines(files[f].src, int(nodes[i].ival), int(nodes[i].ival) + int(nodes[i].aux))
+    loop b, stop in dc_lazy_span_end:
+        f = pos_file(nodes[b].pos)
+        if f >= 0 and f < files.len(): unasked += code_lines(files[f].src, int(nodes[b].ival), stop)
     made: {int: int} = {}
     loop d in pl_inst_decls: made[d] = (made.get(d) ?? 0) + 1
     inst_lines = 0
