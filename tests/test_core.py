@@ -19,7 +19,7 @@ import pytest
 
 from tests.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tests import support
-from tests.support import build_case_batch, build_exit_batch, case_source, run_value_batch, Scripts, target_name
+from tests.support import build_case_batch, build_exit_batch, case_source, exit_main, run_value_batch, Scripts, target_name
 from tests.support import compiler  # noqa: F401 (fixture)
 from tools.compiler.bench import CHECKSUMS_1000, prepare_source
 
@@ -1103,7 +1103,7 @@ printl(digest(a-b)) printl(digest(a xor b)) printl(a =? b)
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_bounded_remainder_ir(compiler, tmp_path, target, release):
     source = tmp_path / 'bounded.dewy'
-    source.write_text(case_source('numeric/bounded_remainder'))
+    source.write_text(exit_main(case_source('numeric/bounded_remainder')))
     flags = ['--ir', *(['--release'] if release else []), *(['--target', 'wasm32'] if target == 'wasm' else [])]
     built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'bounded', *flags],
                            capture_output=True, text=True, timeout=30, check=False)
@@ -1113,7 +1113,7 @@ def test_core_bounded_remainder_ir(compiler, tmp_path, target, release):
     # Inspect every possible owner, including the tagged-int entry wrapper.
     # An uninlined probe or an empty main must not hide another owner's signed
     # recurrence; runtime helpers are deliberately outside this set.
-    owners = re.findall(r'^fn (?:f_probe_|f_main_|__h_math_main)[^\n]*\n.*?(?=^fn |\Z)',
+    owners = re.findall(r'^fn (?:f_probe_|f_entry_|f_main_|__h_math_main)[^\n]*\n.*?(?=^fn |\Z)',
                         output, re.M | re.S)
     assert owners, 'bounded recurrence was not emitted'
     assert any(re.search(r' = (mulhu|remu) ', body) for body in owners), \
@@ -1960,7 +1960,7 @@ def test_core_operator_imports(compiler, tmp_path, name, imports, target, releas
     declarations, body = case_source(name).split('main=', 1)
     (tmp_path / 'operators.dewy').write_text(declarations)
     source = tmp_path / 'main.dewy'
-    source.write_text(f'from p"operators.dewy" import {imports}\nmain={body}')
+    source.write_text(f'from p"operators.dewy" import {imports}\nmain=():>void=>exit(entry()) entry={body}')
     binary = tmp_path / 'operators'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -2473,7 +2473,7 @@ def test_core_imports(compiler, tmp_path, extension, style):
         'name-alias': (f'from p"helper.{extension}" import twice as double', 'double(21)'),
     }
     declaration, expression = forms[style]
-    source.write_text(f'{declaration}\nmain=():>void=>{expression}')
+    source.write_text(f'{declaration}\nmain=():>void=>exit({expression})')
     binary = tmp_path / 'main'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)

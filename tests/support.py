@@ -5,6 +5,7 @@ serve tests that generate programs or check more than output and exit codes.
 """
 import os
 import platform
+import re
 import shutil
 import subprocess
 from html.parser import HTMLParser
@@ -27,6 +28,12 @@ def target_name(mode):
 def case_source(name):
     """The source of the golden case tests/cases/<name>.dewy."""
     return (ROOT / 'tests' / 'cases' / f'{name}.dewy').read_text()
+
+
+def exit_main(source):
+    """A golden case's int-returning main (cases run it in batches) as a standalone program:
+    main exits with what the original returned."""
+    return re.sub(r'^main=\(\)(?::>\w+)?=>', 'main=():>void=>exit(entry()) entry=()=>', source, count=1, flags=re.M)
 
 
 @pytest.fixture(scope='module')
