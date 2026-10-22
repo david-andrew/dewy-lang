@@ -96,3 +96,39 @@ print("chain {ir.code.len()} {ir.code[1].op == Op.slot}")
     for body in functions[3:]:
         assert 'slot a=' in body and 'load a=' in body, body
     assert 'chain 4003 true' in ran.stdout, ran.stdout[-1000:]
+
+
+def test_optimizer_input_operand_contract(compiler, tmp_path):
+    """Fused metadata must agree with the IR's operand ABI for every opcode."""
+    root = Path(__file__).resolve().parents[1]
+    source = tmp_path / 'operand-contract.jo'
+    source.write_text(f"use '{root}/compiler/ir.jo'\nuse '{root}/compiler/opt.jo'\n" + '''
+loop k in [0..int(Op.findb) + 1):
+    op = Op(k)
+    if op == .block or op == .loop or op == .if_ or op == .else_ or op == .end: continue
+    loop indexed in [0, M_INDEX]:
+        ir_begin("operands", 0)
+        ir.nparams = 16
+        ir.vtypes = fill(i8(VI), 16)
+        ir.args = [i32(0), i32(5), i32(6), i32(0), i32(0)]
+        mode = if op == .load or op == .store: 8 | indexed else: 3
+        ins = Ins(op, VI, 4, 1, 2, i32(mode), 0)
+        expected = fill(false, 16)
+        ir_operands(ins)
+        loop u in [0..ir_use_count): expected[ir_use(u)] = true
+        ir.code = [ins, Ins(.ret, 0, 0, 0, 0, 0, 0)]
+        optimize()
+        loop v in [0..16):
+            first = if expected[v]: 0 else if v == 0: 1 else: 2147483647
+            last = if v == 0: 1 else if expected[v]: 0 else: -1
+            if int(o_regs[v].first) != first or int(o_lastuse[v]) != last:
+                print("mismatch {k} {indexed} {v}: {o_regs[v].first}/{o_lastuse[v]} != {first}/{last}")
+print("operands ok")
+''')
+    binary = tmp_path / 'operand-contract'
+    built = subprocess.run([compiler, 'build', source, '-o', binary],
+                           capture_output=True, text=True, timeout=60)
+    assert built.returncode == 0, built.stdout + built.stderr
+    ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert ran.returncode == 0, ran.stderr
+    assert ran.stdout == 'operands ok\n', ran.stdout
