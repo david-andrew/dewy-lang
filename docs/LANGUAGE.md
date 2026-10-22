@@ -3385,8 +3385,8 @@ in, wherever in that scope: the module at file level, a function in its body,
 or any other block. An inner scope may change it again. A scope sets each
 setting at most once, and the value must be a literal `true` or `false`.
 
-An obligation is a fact an operation needs: an index in bounds, a nonzero
-divisor, a value that fits a narrower integer, an argument meeting a refined
+An obligation is a fact an operation needs: an index or slice in bounds (a
+string's counted in graphemes, as `text.length` counts), a nonzero divisor, a value that fits a narrower integer, an argument meeting a refined
 parameter. A proven obligation has no runtime check. These settings decide what
 an unproven one does:
 

@@ -1684,6 +1684,55 @@ fact_floor_call = (n: int) -> int:
     if name == "__floor_mod_pow2": return 4
     0
 
+# Dewy strings index and slice by grapheme: `text.length`, `text[i]` and
+# `text[a..b)` reach the facts pass as calls of the library's grapheme helpers
+# (1, 2 and 3 here). Their length is the string value's length projection, as
+# an array's is; the index and the slice are obligations, as an array's are.
+fact_name_string_length = 0
+fact_name_string_index = 0
+fact_name_string_slice = 0
+fact_string_call = (n: int) -> int:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return 0
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return 0
+    if fact_name_string_length == 0:
+        fact_name_string_length = intern("__dewy_string_length")
+        fact_name_string_index = intern("__dewy_string_index")
+        fact_name_string_slice = intern("__dewy_string_slice")
+    name = int(nodes[d].name)
+    k = if name == fact_name_string_length and nkids(n) == 1: 1 else if name == fact_name_string_index and nkids(n) == 2: 2 else if name == fact_name_string_slice and nkids(n) == 5: 3 else: 0
+    if k == 0 or not pos_in_lib(nodes[d].pos): return 0
+    k
+
+fact_string_index = (n: int, s: mut FactState, index: int, length: int):
+    if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
+    zero = fact_constant(s, 0)
+    lo = fact_compare(s, .le, zero, index)
+    hi = fact_compare(s, .lt, index, length)
+    if fact_probe_on: fact_probe_record(n, lo == 1 and hi == 1)
+    else if lo != 1 or hi != 1: wit_index(n, s, index, length, lo, hi, kid(n, 0), kid(n, 1))
+
+# `text[a..b)`: 0 <=? a <=? b <=? text.length (an inclusive end counts one
+# more, an open end is the length); the slice's length is their difference.
+fact_string_slice = (n: int, s: mut FactState, values: int[], length: int) -> int:
+    inclusive = nodes[kid(n, 3)].kind == .bool_lit and nodes[kid(n, 3)].ival != 0
+    stop = nodes[kid(n, 4)].kind != .bool_lit or nodes[kid(n, 4)].ival != 0
+    lo = values[1]
+    hi = length
+    if stop:
+        hi = values[2]
+        if inclusive: hi = fact_arithmetic(s, kid(n, 2), .plus, hi, fact_constant(s, 1))
+    if fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query):
+        zero = fact_constant(s, 0)
+        checks = [fact_compare(s, .le, zero, lo), fact_compare(s, .le, lo, hi), fact_compare(s, .le, hi, length)]
+        if fact_probe_on: fact_probe_record(n, checks[0] == 1 and checks[1] == 1 and checks[2] == 1)
+        else if checks[0] != 1 or checks[1] != 1 or checks[2] != 1:
+            wit_slice_at(n, s, lo, hi, length, checks, kid(n, 0), kid(n, 1), (if stop: kid(n, 2) else: 0), inclusive)
+    value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
+    size = fact_arithmetic(s, kid(n, if stop: 2 else: 1), .minus, hi, lo)
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, -1, false, size))
+    value
+
 # a - b <= limit, from rows or from the two intervals.
 fact_entails = (s: FactState, a: int, b: int, limit: int) -> bool:
     if fact_distance(s, a, b, limit): return true
@@ -2303,6 +2352,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         else if k == .call:
             if ntype(n) == T_NEVER or nodes[n].aux == 0 and library_exit_call(n): active.push(n)
             if result_active or proof_active or fact_divisors.has(n): values.push(n)
+            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_string_call(n) >= 2: values.push(n)
             else if fact_probe_on and fact_floor_call(n) != 0:
                 values.push(n)
                 probe_only = true
@@ -2402,7 +2452,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         if k == .block:
             if nkids(n) > 0: values.push(kid(n, nkids(n) - 1))
         else if k == .for_ or k == .while_: values.push(int(nodes[n].a))
-        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and fact_floor_call(n) == 0 and types[prune(int(fns[int(nodes[n].sym)].ret))].kind != .refined:
+        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and types[prune(int(fns[int(nodes[n].sym)].ret))].kind != .refined:
             # Ordinary summaries start from unknown formals: their return
             # facts do not depend on the actual values. Argument obligations
             # and effects remain separate roots of this slice.
@@ -2898,6 +2948,13 @@ fact_capture = (n: int, s: mut FactState) -> int:
                 proven = fact_divisor(s, n, values[0], values[1], obligation == 2)
                 if floor_probe: fact_probe_record(n, proven)
             else if floor_probe: fact_probe_divisor(n, s, values[1], kid(n, 1))
+        string = fact_string_call(n)
+        if string != 0:
+            length = fact_project(s, values[0], -1, false, T_INT)
+            if string == 1: return length
+            if string == 3: return fact_string_slice(n, s, values, length)
+            fact_string_index(n, s, values[1], length)
+            return fact_new(s, fact_domain(ntype(n)), FactTerm(type = ntype(n)))
         if nodes[n].aux == 2:
             result = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
             si = int(types[representation_type(ntype(n))].st)

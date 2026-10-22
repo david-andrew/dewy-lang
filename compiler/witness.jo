@@ -413,15 +413,15 @@ wit_assertion = (cond: int, message: int, paths: FactPaths, entry: FactState):
     wit_unknown(cond, reason, "assertion", 0, relation, missing)
 
 # A builtin index: refuted (some bound is false) or unknown (some is missing).
-wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int):
-    a = int(nodes[n].a)
+wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int, base_node: int = -1, index_node: int = -1):
+    a = if base_node >= 0: base_node else: int(nodes[n].a)
     base = wit_text(a)
     # A loop's own element read is described as such, never by its lowering.
     read = "index"
     # (`pair[i]` of a `[int64 string]` reads a fixed array of its positions)
     positions = nodes[a].kind == .ident and starts_with(name_of(int(nodes[a].name)), "$position_values")
     if wit_hidden_read(n) and not positions: read = if base != "": "the loop's read of `{base}`" else: "the loop's element read"
-    i = wit_side(index, int(nodes[n].b))
+    i = wit_side(index, if index_node >= 0: index_node else: int(nodes[n].b))
     zero = WitSide(fact_constant(s, 0), 0, "0", false, true)
     size = WitSide(length, a, (if base != "": "{base}.length" else: ""), true)
     relation = wit_relation_text(.lt, i, size)
@@ -452,12 +452,16 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
 # omitted bound is 0 or the length and an inclusive end counts one more.
 wit_slice = (n: int, s: mut FactState, lo: int, hi: int, length: int, checks: int[]):
     r = int(nodes[n].b)
-    base = wit_text(int(nodes[n].a))
-    start = if nodes[r].a != 0: wit_side(lo, int(nodes[r].a)) else: WitSide(lo, 0, "0", false, true)
-    stop = if nodes[r].b != 0: wit_side(hi, int(nodes[r].b)) else: WitSide(hi, 0, (if base != "": "{base}.length" else: ""), true)
-    if nodes[r].b != 0 and has_flag(r, NF_INCLUSIVE) and stop.text != "": stop.text = "{stop.text}+1"
+    wit_slice_at(n, s, lo, hi, length, checks, int(nodes[n].a), int(nodes[r].a), int(nodes[r].b), has_flag(r, NF_INCLUSIVE))
+
+# (the slice's receiver and bound expressions, 0 for an omitted bound)
+wit_slice_at = (n: int, s: mut FactState, lo: int, hi: int, length: int, checks: int[], receiver: int, lo_node: int, hi_node: int, inclusive: bool):
+    base = wit_text(receiver)
+    start = if lo_node != 0: wit_side(lo, lo_node) else: WitSide(lo, 0, "0", false, true)
+    stop = if hi_node != 0: wit_side(hi, hi_node) else: WitSide(hi, 0, (if base != "": "{base}.length" else: ""), true)
+    if hi_node != 0 and inclusive and stop.text != "": stop.text = "{stop.text}+1"
     zero = WitSide(fact_constant(s, 0), 0, "0", false, true)
-    size = WitSide(length, int(nodes[n].a), (if base != "": "{base}.length" else: ""), true)
+    size = WitSide(length, receiver, (if base != "": "{base}.length" else: ""), true)
     pairs = [(zero, start), (start, stop), (stop, size)]
     labels = ["lower bound", "ordered bounds", "upper bound"]
     refuted = checks.contains(0)
