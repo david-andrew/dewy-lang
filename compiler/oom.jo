@@ -1,0 +1,113 @@
+# Explicit allocation failure (docs/design/decisions.md, Q4; docs/LANGUAGE.md, "Allocation
+# failure"). Under `$explicit_allocation_failure`, written at the top of a module, each of the
+# module's functions that may allocate returns `T | OutOfMemory`. Ordinary allocation stays
+# infallible elsewhere: a refusal with no such function running ends the process.
+#
+# The projection (dewy_parse.jo) gives such a function `f` a frame: `f` becomes
+#     f = (params) => {
+#         if __setjmp(__oom_frame()) not=? 0 { __oom_caught()  return OutOfMemory }
+#         defer __oom_release()
+#         __eaf_f(params)
+#     }
+# and its own body becomes `__eaf_f`. A refusal while the body runs (lib/core/rt.jo,
+# __out_of_memory; lib/std/oom.jo) drops the resource owners made since the frame began,
+# restores the context allocator and returns to the frame, which returns OutOfMemory. The
+# frame keeps no locals across the return, so nothing it holds is stale. Values the
+# interrupted calls held are not freed (the memory is the program's until it ends).
+use 'util.jo'
+use 'ast.jo'
+use 'expr.jo'
+use 'check.jo'
+use 'arena.jo'
+use 'ownership.jo'
+use 'targets.jo'
+
+oom_files: {int: bool} = {}
+
+# `$explicit_allocation_failure` at the top of the module in file `file`.
+oom_module = (file: int, pos: int):
+    if oom_files.has(file): fatal(pos, "`$explicit_allocation_failure` is already set for this module")
+    oom_files[file] = true
+    runtime_switch_on("__EXPLICIT_OOM")
+
+oom_active = (pos: int) -> bool: oom_files.len() > 0 and oom_files.has(pos_file(pos))
+
+# Types whose values allocate nothing: fixed-width numbers and flags.
+oom_fixed_type = (t: int) -> bool:
+    if t == 0 or (nodes[t].kind != .ident and nodes[t].kind != .tname): return false
+    name_of(int(nodes[t].name)) in ["int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float32", "float64", "bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64"]
+
+# (a body that may allocate: anything but fixed-width arithmetic, comparisons, control flow
+# and locals; a call may allocate, as may `int` arithmetic, which grows into big integers)
+oom_body_allocates = (n: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .ident or k == .int_lit or k == .float_lit or k == .bool_lit or k == .break_ or k == .continue_: return false
+    if k == .vardecl:
+        # (a value parameter's own binding, dewy_parse.jo dw_finish_function, has its type)
+        if nodes[n].aux2 == 1: return false
+        if nodes[n].a == 0 or not oom_fixed_type(int(nodes[n].a)): return true
+        return oom_body_allocates(int(nodes[n].b))
+    simple = k == .binary or k == .unary or k == .not_ or k == .and_ or k == .or_ or k == .if_ or k == .while_ or k == .block or k == .exprstmt or k == .assign or k == .return_
+    if not simple: return true
+    if oom_body_allocates(int(nodes[n].a)) or oom_body_allocates(int(nodes[n].b)) or oom_body_allocates(int(nodes[n].c)): return true
+    if k == .block:
+        loop child in kids(n):
+            if oom_body_allocates(child): return true
+    false
+
+oom_allocates = (n: int) -> bool:
+    loop p in kids(n):
+        if not oom_fixed_type(int(nodes[p].a)): return true
+    if not has_flag(n, NF_VOID) and not oom_fixed_type(int(nodes[n].a)): return true
+    oom_body_allocates(int(nodes[n].b))
+
+# The declarations a module function projects to: itself, or its frame and its body.
+oom_declarations = (n: int) -> int[]:
+    # (lifecycle hooks are proven not to allocate or fail: ownership.jo)
+    if not oom_active(nodes[n].pos) or nodes[n].kind != .fn_ or ownership_hooks.has(n) or not oom_allocates(n): return [n]
+    pos = nodes[n].pos
+    name = name_of(int(nodes[n].name))
+    inner = "__eaf_{name}"
+    w = mk(.fn_, pos)
+    nodes[w].name = nodes[n].name
+    nodes[n].name = i32(intern(inner))
+    if nkids2(n) > 0 and has_flag(n, NF_GENERIC):
+        type_params: int[]
+        loop tp in kids2(n): type_params.push(clone(tp))
+        set_list2(w, type_params)
+        add_flag(w, NF_GENERIC)
+    params: int[]
+    args: int[]
+    loop p in kids(n):
+        if nkids(p) > 0: fatal(nodes[p].pos, "under `$explicit_allocation_failure`, a parameter that unpacks its argument is not supported yet: unpack it in the body")
+        params.push(clone(p))
+        arg = mk(.ident, nodes[p].pos)
+        nodes[arg].name = nodes[p].name
+        nodes[arg].aux2 = 1
+        if has_flag(p, NF_MUT): add_flag(arg, NF_MUT)
+        args.push(arg)
+    set_list(w, params)
+    if let kinds = dewy_param_kinds.get(n): dewy_param_kinds[w] = kinds
+    failed = mk(.return_, pos)
+    nodes[failed].a = i32(bc_ident("OutOfMemory", pos))
+    call = bc_stmt(bc_call(inner, args, pos), pos)
+    body = 0
+    if target_wasm:
+        # (WebAssembly cannot return to a frame: a refusal there ends the program, and the
+        # function keeps its result type, so the program means the same everywhere)
+        body = bc_block([bc_if(bc_call("__oom_unsupported", [], pos), [failed], [], pos), call], pos)
+    else:
+        frame = bc_call("__setjmp", [bc_call("__oom_frame", [], pos)], pos)
+        check = bc_if(bc_bin(.ne, frame, bc_int(0, pos), pos), [bc_stmt(bc_call("__oom_caught", [], pos), pos), failed], [], pos)
+        release = mk(.defer_, pos)
+        nodes[release].a = i32(bc_stmt(bc_call("__oom_release", [], pos), pos))
+        body = bc_block([check, release, call], pos)
+    nodes[w].b = i32(body)
+    [w, n]
+
+oom_wrap_all = (made: int[]) -> int[]:
+    out: int[]
+    loop d in made:
+        loop e in oom_declarations(d): out.push(e)
+    out

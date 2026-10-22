@@ -18,6 +18,7 @@ use 'ir.jo'
 use 'copies.jo'
 use 'directives.jo'
 use 'concurrency.jo'
+use 'arena.jo'
 
 enum EffectKind: read, write, alloc, detach, costly_copy, panic, io, block, spawn, escape, opaque, remainder
 struct EffectAtom:
@@ -723,6 +724,8 @@ effect_plain = (t0: int, depth: int = 0) -> bool:
     effect_plain_type(t, depth)
 
 effect_plain_type = (t: int, depth: int = 0) -> bool:
+    # (an Arena is a handle: copying, reading or dropping one allocates nothing, arena.jo)
+    if arena_fns.len() > 0 and arena_handle(t): return true
     # (a union of plain members, `int64 | Oops`, is plain: a tag and a payload)
     if depth <= 16 and tkind(t) == .enum_:
         layout(t)
@@ -835,6 +838,8 @@ effect_restamp = (f: int):
     loop old in effect_summaries[f].events: effect_event_index[EffectEventKey(effect_stamps, old.atom)] = true
 
 effect_add = (f: int, event: EffectEvent) -> bool:
+    # (allocation proven within an arena's acquired capacity is not hidden: arena.jo)
+    if arena_fns.len() > 0 and arena_capacity_exempt(event): return false
     covered = effect_place_atom(event.atom)
     root = if covered: place_base(event.atom.place) else: event.atom.place
     if effect_summaries[f].stamp == 0:
@@ -1641,7 +1646,8 @@ effects_finalize = ():
             origin = if event.witness != 0 and not pos_in_lib(nodes[event.witness].pos): "; witness at {pos_str(nodes[event.witness].pos)}" else if event.witness != 0: "" else: "; witness at {pos_str(nodes[d].pos)}"
             row = if contract != 0: effect_contracts[contract] else: EffectContract()
             why = if contract == 0: "is forbidden by the effect policy" else if row.exclusions.len() > 0 and effect_excluded(row, atom): "exceeds the contract (its row excludes it)" else if row.atoms.len() == 0 and row.variables.len() == 0 and not row.open: "exceeds the closed row (no_effects permits none)" else: "exceeds the closed row (the contract does not permit it)"
-            fatal(nodes[at].pos, "effect contract violation in '{effect_name(f)}': {what} {why}; {chain}{origin}{dir_row_origin(d)}")
+            hint = if arena_fns.len() > 0 and event.witness > 0: arena_capacity_hint(event.witness) else: ""
+            fatal(nodes[at].pos, "effect contract violation in '{effect_name(f)}': {what} {why}; {chain}{origin}{hint}{dir_row_origin(d)}")
 
 # Facts request only summaries of calls they actually analyze. Ordinary code
 # with no refinement consumers pays neither an arena allocation nor a walk.

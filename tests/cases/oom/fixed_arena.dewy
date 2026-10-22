@@ -1,0 +1,24 @@
+# quick
+# modes: native native-release
+# Under $explicit_allocation_failure a function that may allocate returns T | OutOfMemory:
+# a fixed-capacity arena refusing an allocation makes it return OutOfMemory.
+$explicit_allocation_failure
+fill=(@a:Arena n:int64):>int64=>{
+    let s=$allocator(@a) {
+        let xs:array<int64>=[]
+        loop i in [0..n) { xs.push(i) }
+        xs.length
+    }
+    a.reset()
+    s
+}
+main=()=>{
+    let a=arena(65536) or_throw
+    printl("{fill(@a 10) or_throw}")
+    let r=fill(@a 100000)
+    if r is? OutOfMemory { printl("refused") }
+    a.reset()
+    let big=arena(1 << 60)
+    if big is? OutOfMemory { printl("no such arena") }
+    printl("{fill(@a 1000) or_throw}")
+}

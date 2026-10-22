@@ -1,0 +1,12 @@
+# exit: 1
+# modes: native native-release
+# Without $explicit_allocation_failure a refused allocation ends the program.
+main=()=>{
+    let a=arena(4096) or_throw
+    let n=$allocator(@a) {
+        let ys:array<int64>=[]
+        loop i in [0..100000) { ys.push(i) }
+        ys.length
+    }
+    printl("{n}")
+}

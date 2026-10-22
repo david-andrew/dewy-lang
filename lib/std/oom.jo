@@ -1,0 +1,57 @@
+# Explicit allocation failure (`$explicit_allocation_failure`, compiler/oom.jo). A function of
+# a module under it that may allocate returns `T | OutOfMemory`: it is compiled as a frame
+# around its body, and an allocation the system (or a fixed-capacity arena) refuses while
+# the body runs makes it return OutOfMemory. Each thread keeps a stack of its running
+# frames; the refusal (rt.jo, __out_of_memory) drops the resource owners made since the
+# innermost frame began, restores its context allocator and returns to it.
+# A frame: the machine's saved registers (__setjmp: 24 words), the owners chain and the
+# context allocator when it began.
+const __OOM_FRAME = 28
+const __OOM_DEPTH = 65536
+
+# (the wrapper's frame: __setjmp(__oom_frame()) is 0 when it begins, 1 when the body failed)
+__oom_frame = () -> *u8:
+    t = __ts()
+    s = t[__TS_OOM] as *int
+    if s == null:
+        # (outside the allocator, which is what fails)
+        s = __os_raw_pages(8 + __OOM_DEPTH * __OOM_FRAME * 8) as *int
+        t[__TS_OOM] = s as int
+    d = s[0]
+    if d == __OOM_DEPTH: panic("functions under $explicit_allocation_failure nest more than {__OOM_DEPTH} deep")
+    s[0] = d + 1
+    f = s + 1 + d * __OOM_FRAME
+    f[24] = t[__TS_OWNERS]
+    f[25] = t[__TS_ARENA]
+    f as *u8
+
+# (the body returned)
+__oom_release = ():
+    s = __ts()[__TS_OOM] as *int
+    s[0] -= 1
+
+# (the body failed: back in the wrapper, its frame is the innermost)
+__oom_caught = ():
+    t = __ts()
+    s = t[__TS_OOM] as *int
+    f = s + 1 + (s[0] - 1) * __OOM_FRAME
+    t[__TS_ARENA] = f[25]
+    s[0] -= 1
+
+# (WebAssembly: no frame to return to; false, opaquely, so the result type stays)
+@noinline
+__oom_unsupported = () -> bool: __tstate == null and __main_sp < 0
+
+# An allocation was refused: when a frame is running on this thread, unwind to it.
+__oom_throw = ():
+    when TARGET == "wasm":
+        return
+    t = __ts()
+    s = t[__TS_OOM] as *int
+    if s == null or s[0] == 0: return
+    f = s + 1 + (s[0] - 1) * __OOM_FRAME
+    # (resource owners made since the frame began are dropped, newest first, before their
+    # stack frames are left behind)
+    loop t[__TS_OWNERS] != 0 and t[__TS_OWNERS] != f[24]:
+        __owner_drop(t[__TS_OWNERS] as *int)
+    __longjmp(f as *u8, 1)

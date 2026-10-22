@@ -3012,9 +3012,40 @@ trusted not to keep what it is given; starting threads or tasks is not. An `Aren
 arena, and dropping one gives its memory back. Debug builds fill reset storage
 with `0xdb`.
 
+`arena(bytes)` makes an arena with its whole capacity acquired at once; it
+gives `Arena | OutOfMemory`, the latter when the system refuses the memory. It
+never takes more: an allocation past its capacity is refused. A fixed arena
+starts every `$allocator` expression empty. Under `$no_hidden_costs` this is
+how allocation is made explicit: inside `$allocator(@a) expression`, where `a`
+is a local made by `arena(n)` with a constant `n`, allocation is allowed when
+the compiler proves it fits `n` bytes (array literals of known length, in loops
+over constant ranges); anything else is reported with the reason.
+
+```dewy
+$no_hidden_costs
+count=():>int64 | OutOfMemory=>{
+    let a=arena(4096) or_throw
+    let n=$allocator(@a) {
+        let xs:array<int64>=[1 2 3]
+        xs.length
+    }
+    n
+}
+```
+
+Ordinary allocation is infallible: when the system refuses memory the program
+ends with a report. `$explicit_allocation_failure`, written alone at the top of
+a module, makes each of its functions that may allocate return
+`T | OutOfMemory` (functions over fixed-width numbers only keep their result).
+A refusal while such a function runs, from the system or from a fixed arena,
+drops the resource owners made since it began and makes it return
+`OutOfMemory`; memory the interrupted work held is not freed. An `OutOfMemory`
+reaching `main` prints `error: OutOfMemory`. WebAssembly cannot return to the
+function, so a refusal there still ends the program.
+
 Other directives of the design (`$no_prelude`,
-`$expect`, `$unsafe_assume`, `$explicit_allocation_failure`, …) are reported
-as not implemented yet where they appear.
+`$expect`, `$unsafe_assume`, …) are reported as not implemented yet where they
+appear.
 
 `value.copy` requests an independent value. It evaluates the receiver once
 and supports arrays, records, dictionaries, sets, strings, closures and

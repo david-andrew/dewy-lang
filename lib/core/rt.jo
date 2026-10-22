@@ -55,11 +55,12 @@ __tid = () -> int:
 # per-thread allocator state: [heap_cur, heap_end, live count, free list heads (64 size classes),
 # large blocks freed for reuse (a list), the bytes in that list, boxes waiting to be dropped (a
 # list, its length and capacity), a box being dropped, the context allocator]
-const __TS_WORDS = 80
+const __TS_WORDS = 81
 const __TS_OWNERS = 76
 const __TS_DROPPING = 77
 const __TS_FILE_CODE = 78     # (while tasks run: this thread's or task's last file error)
 const __TS_ARENA = 79         # (the context allocator: an arena's control words, or 0 for the heap)
+const __TS_OOM = 80           # (`$explicit_allocation_failure`: this thread's failure frames, lib/std/oom.jo)
 # Task stacks (lib/std/tasks.jo sets them when tasks start): a task's thread state is its slot's
 const __TASK_SLOTS = 16384
 const __TASK_SHIFT = 23
@@ -199,6 +200,10 @@ __os_list_remove = (p: *u8) -> bool:
     kept
 
 __out_of_memory = ():
+    # (a function of a module under `$explicit_allocation_failure` that is running returns
+    # OutOfMemory instead)
+    when __EXPLICIT_OOM:
+        __oom_throw()
     __write_err("fatal: out of memory\n")
     __exit(1)
 
@@ -451,6 +456,7 @@ __mem_eq = (a: *u8, b: *u8, n: int) -> bool:
 # (true only in programs that use `$allocator`, and poisoning only in their debug builds:
 # compiler/arena.jo, arena_switch_runtime)
 const __ARENAS = false
+const __EXPLICIT_OOM = false
 const __ARENA_POISON = false
 
 # ---------------- boxes ----------------

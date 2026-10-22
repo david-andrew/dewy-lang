@@ -1,0 +1,18 @@
+# exit: 1
+# modes: native native-release
+# OutOfMemory reaching main is reported by name.
+$explicit_allocation_failure
+fill=(@a:Arena n:int64):>int64=>{
+    let s=$allocator(@a) {
+        let xs:array<int64>=[]
+        loop i in [0..n) { xs.push(i) }
+        xs.length
+    }
+    a.reset()
+    s
+}
+main=()=>{
+    let a=arena(4096) or_throw
+    let n=fill(@a 100000) or_throw
+    printl("{n}")
+}

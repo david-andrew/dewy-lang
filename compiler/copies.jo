@@ -12,6 +12,7 @@ use 'ir.jo'
 use 'ownership.jo'
 use 'poly_closure.jo'
 use 'directives.jo'
+use 'arena.jo'
 
 copies_on = false
 copy_costs: {int: int}
@@ -139,6 +140,10 @@ copy_strict = (e: int) -> bool:
 costly_copy = (t0: int) -> bool:
     t = prune(t0)
     if copy_costs.has(t): return copy_costs[t] != 2
+    # (an Arena's copy is another arena, sharing nothing it will use: lib/std/arena.jo)
+    if arena_handle(t):
+        copy_costs[t] = 2
+        return false
     copy_costs[t] = 1 # a recursive heap graph is conservatively costly
     k = tkind(t)
     costly = k == .array or k == .fn_ or k == .polyfn or k == .box

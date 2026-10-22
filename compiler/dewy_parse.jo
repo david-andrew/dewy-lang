@@ -7,6 +7,7 @@ use 'lex.jo'
 use 'parse.jo'
 use 'expr.jo'
 use 'arena.jo'
+use 'oom.jo'
 use 'check.jo'
 use 'decimals.jo'
 use 'dewy_tokens.jo'
@@ -260,7 +261,7 @@ dw_fail_pos = (pos: int, what: str) -> int:
 # Metatags the design defines that this compiler does not implement yet. Each
 # is reported where it is written rather than as a generic syntax error.
 dw_designed_directive = (name: str) -> bool:
-    name in ["abstract", "explicit_allocation_failure", "field", "lend", "no_prelude", "proof", "unsafe_assume", "__copy__", "__drop__", "__move__"]
+    name in ["abstract", "field", "lend", "no_prelude", "proof", "unsafe_assume", "__copy__", "__drop__", "__move__"]
 
 # `$target`: the full name of the target being compiled for (docs/LANGUAGE.md,
 # "Targets"). A name has only the fields it needs: the processor (or `c`, `wasm32`),
@@ -430,7 +431,7 @@ dw_unimplemented = (id: int, name: str) -> int:
 dw_metatag_fail = (id: int) -> int:
     name = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
-    if name == "supported_targets": fatal(pos, "`${name}` is a module directive; put it at file scope")
+    if name == "supported_targets" or name == "explicit_allocation_failure": fatal(pos, "`${name}` is a module directive; put it at file scope")
     if dir_builtin(name): fatal(pos, "`${name}` is a setting: write it on a line of its own in a module, function body or block")
     if name == "test": fatal(pos, "`$test` goes alone on the line just before a module-level function declaration")
     if name == "shadowable": fatal(pos, "`$shadowable` marks a module-level const: `$shadowable const name = ...` at the top of the file")
@@ -455,8 +456,13 @@ dw_allocator = (id: int) -> int:
     dw_allocators += 1
     context = "__arena_context{dw_allocators}"
     value = "__arena_value{dw_allocators}"
-    bc_block([bc_let(context, bc_call("__arena_enter", [dw_expr(arena)], pos), pos), bc_let(value, dw_expr(dw_child(id, 2)), pos),
-        bc_stmt(bc_call("__arena_leave", [bc_ident(context, pos)], pos), pos), bc_stmt(bc_call("$allocator_result", [bc_ident(value, pos), bc_bool(dw_copy_result(dw_child(id, 2)), pos)], pos), pos)], pos)
+    body = dw_expr(dw_child(id, 2))
+    arena_no_return(body)
+    # (the value itself, even a function: a closure is reported as what cannot leave)
+    result = bc_ident(value, pos)
+    nodes[result].aux2 = 1
+    bc_block([bc_let(context, bc_call("__arena_enter", [dw_expr(arena)], pos), pos), bc_let(value, body, pos),
+        bc_stmt(bc_call("__arena_leave", [bc_ident(context, pos)], pos), pos), bc_stmt(bc_call("$allocator_result", [result, bc_bool(dw_copy_result(dw_child(id, 2)), pos)], pos), pos)], pos)
 
 # (an expression whose value is written `....copy()`: the copy out of the arena is asked for,
 # as `$explicit_copies` wants)
@@ -3189,6 +3195,7 @@ dw_flow = (id: int, at: int, accumulator: int = 0, map: bool = false) -> int:
     return n
 
 dw_label_fail = (pos: int, label: int):
+    if name_of(label) == "explicit_allocation_failure": fatal(pos, "`$explicit_allocation_failure` is a module directive; put it at file scope, at the top")
     fatal(pos, "a loop label must be followed by a loop (`${name_of(label)}` is not a directive)")
 
 dw_block = (id: int, accumulator: int = 0, map: bool = false) -> int:
@@ -3395,6 +3402,10 @@ dw_top_declarations_inner = (id: int) -> int[]:
         return spliced
     tag = declaration
     if dw_op(declaration) == .assign: tag = dw_unwrap(dw_child(declaration, 1))
+    if dewy_syntax[tag].kind == .metatag and dewy_syntax[tag].text == "explicit_allocation_failure":
+        if tag != declaration: fatal(dewy_syntax[tag].pos, "`$explicit_allocation_failure` stands alone at the top of a module")
+        oom_module(pos_file(dewy_syntax[tag].pos), dewy_syntax[tag].pos)
+        return []
     if dewy_syntax[tag].kind == .metatag:
         file = pos_file(dewy_syntax[tag].pos)
         if dw_dir_statement(declaration, dir_module_start(file), dir_module_end(file), true): return []

@@ -5,6 +5,7 @@ use 'util.jo'
 use 'lex.jo'
 use 'ast.jo'
 use 'dewy_parse.jo'
+use 'oom.jo'
 use 'proofs.jo'
 use 'dewy_tokens.jo'
 use 'dewy_direct.jo'
@@ -1297,6 +1298,7 @@ dewy_fast_file = (file: int) -> int[]:
             dewy_syntax.truncate(2)
             continue
         made = dw_top_declarations(syntax)
+        if oom_files.len() > 0: made = oom_wrap_all(made)
         if shadowable_pos != 0:
             loop declaration in made: shadowable_decls[declaration] = true
             shadowable_pos = 0

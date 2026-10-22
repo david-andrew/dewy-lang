@@ -1,0 +1,25 @@
+# modes: native native-release
+# Resource owners made before a refusal are dropped exactly once.
+$explicit_allocation_failure
+let drops:int64=0
+Guard=type of [id:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+]
+fill=(@a:Arena n:int64):>int64=>{
+    let g=Guard[n]
+    let s=$allocator(@a) {
+        let xs:array<int64>=[]
+        loop i in [0..n) { xs.push(i) }
+        xs.length
+    }
+    a.reset()
+    s+g.id
+}
+main=()=>{
+    let a=arena(65536) or_throw
+    let ok=fill(@a 10) or_throw
+    let failed=fill(@a 100000)
+    a.reset()
+    printl("{ok} {failed is? OutOfMemory} {drops}")
+}

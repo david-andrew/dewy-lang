@@ -1,0 +1,12 @@
+# Functions that cannot allocate keep their result; the others are handled.
+$explicit_allocation_failure
+square=(x:int64):>int64=>x*x
+build=(n:int64):>array<int64>=>{
+    let xs:array<int64>=[]
+    loop i in [0..n) { xs.push(square(i)) }
+    xs
+}
+main=()=>{
+    let xs=build(4) or_throw
+    printl("{xs} {square(5)}")
+}

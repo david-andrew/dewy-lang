@@ -29,29 +29,45 @@ use 'directives.jo'
 arena_fns: {int: bool} = {}
 arena_runtime_ready = false
 arena_lambda_depth = 0       # (the escape check is inside a closure's body)
+arena_proofs_done = false    # (capacity proofs, below)
+arena_proven: {int: bool} = {}       # allocation sites inside proven expressions, and their scopes' calls
+arena_proven_machinery: {int: bool} = {}   # nodes of proven expressions and their arenas' acquisition
+arena_proof_nodes: int[]
+arena_unproven: {int: str} = {}      # nodes of expressions without a proof, and why
+arena_proof_sites: int[]
 
-arena_enabled = false
+# Runtime constants (lib/core/rt.jo) a program's features switch on: `when` branches the
+# runtime compiles only for programs that need them. Set while the modules are projected,
+# applied once they are registered, before any body is checked.
+runtime_switches: str[]
 
-# The runtime's allocator consults the context allocator only in programs that use arenas:
-# its `when __ARENAS:` branches (lib/core/rt.jo) are switched on before any body is checked.
-arena_enable = ():
-    arena_enabled = true
+runtime_switch_on = (name: str):
+    if not runtime_switches.contains(name): runtime_switches.push(name)
 
-# (once the modules are registered, before bodies are checked)
-arena_switch_runtime = ():
-    loop name in ["__ARENAS", "__ARENA_POISON"]:
+runtime_switch = ():
+    loop name in runtime_switches:
         id = intern(name)
         demand_name(id)
         s = prelude.get(id) ?? 0
         if s == 0 or syms[s].kind != .const_: ice("missing runtime constant {name}")
         value = int(nodes[int(syms[s].decl)].b)
         if nodes[value].kind != .bool_lit: ice("runtime constant {name} is not a literal")
-        if name == "__ARENAS" or not release_build: nodes[value].ival = 1
+        nodes[value].ival = 1
+
+# The runtime's allocator consults the context allocator only in programs that use arenas
+# (`when __ARENAS:`); their debug builds poison reset storage.
+arena_enable = ():
+    runtime_switch_on("__ARENAS")
+    if not release_build: runtime_switch_on("__ARENA_POISON")
 
 arena_reset = ():
     arena_fns = {}
     arena_runtime_ready = false
-    arena_enabled = false
+    runtime_switches = []
+    arena_proofs_done = false
+    arena_proven = {}
+    arena_proven_machinery = {}
+    arena_unproven = {}
     arena_lambda_depth = 0
 
 # What can leave a scope: values whose storage promotion can rebuild. Closures keep their
@@ -79,12 +95,27 @@ arena_unpromotable = (t0: int, depth: int = 0) -> str:
                 if why != "": return why
     ""
 
+# (the projected expression: a `return` in it, outside its closures, would leave before its
+# value is copied out)
+arena_no_return = (n: int):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .lambda or k == .fn_: return
+    if k == .return_: fatal(nodes[n].pos, "`return` inside an `$allocator` expression would leave it before its value is copied out of the arena: make the value the expression's result, and return after it")
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: arena_no_return(int(nodes[n].a))
+    if mask & 2 != 0: arena_no_return(int(nodes[n].b))
+    if mask & 4 != 0: arena_no_return(int(nodes[n].c))
+    if mask & 16 != 0:
+        loop child in kids(n): arena_no_return(child)
+
 # `$allocator_result(v)`: the scope's value, promoted to the enclosing allocator.
 # Under `$explicit_copies` the copy out is a costly copy like any other (strings included:
 # their bytes leave the arena), so the expression's value says so: `... .copy()`.
 arena_check_result = (n: int, value: int, t: int, asked: bool) -> int:
     why = arena_unpromotable(t)
-    if why != "": fatal(nodes[n].pos, "the value of an `$allocator` expression leaves its arena, and {why} cannot be copied out of it yet: return plain data (records, arrays, strings, numbers)")
+    if why != "": fatal(nodes[n].pos, "the value of an `$allocator` expression is copied out of its arena, and {why} cannot be copied yet: give plain data (records, arrays, strings, numbers) as its value, and make the closure or owner after the expression")
     if not asked and is_managed(t) and dir_explicit_copies(nodes[n].pos):
         fatal(nodes[n].pos, "under `$explicit_copies`, the value of an `$allocator` expression is copied out of its arena: end the expression with `.copy()` to ask for the copy")
     if not arena_runtime_ready:
@@ -436,7 +467,12 @@ arena_summary = (n: int, f: int):
 arena_call = (n: int):
     aux = int(nodes[n].aux)
     if aux == 2 or aux == 3: return
-    if aux != 0 or nodes[n].sym <= 0: arena_error(n, "a call through a function value has no checked summary of what it keeps")
+    if aux == 1:
+        # (a function value held by a local of the expression was made in it, its body
+        # checked with it: function values from outside it are rejected where they are read)
+        callee = int(nodes[n].a)
+        if nodes[callee].kind == .ident and not arena_root(callee).outside: return
+    if aux != 0 or nodes[n].sym <= 0: arena_error(n, "a call through a function value made outside the expression has no checked summary of what it keeps")
     f = int(nodes[n].sym)
     # (an `@place` argument: the callee may write it, as the expression would)
     loop i in [0..nkids(n)):
@@ -529,3 +565,223 @@ arena_finalize = ():
     loop f, _ in arena_fns:
         arena_stack = []
         arena_visit(int(fns[f].body))
+
+# ---------------- capacity proofs ----------------
+# Under `$no_hidden_costs` capacity is acquired explicitly: `arena(bytes)` takes its whole
+# capacity when it is made (`Arena | OutOfMemory`), and an allocation inside
+# `$allocator(@that) expression` is not hidden when the expression is proven to fit it: the
+# effect summaries (effects.jo, effect_add) then skip its allocation sites. A fixed arena
+# starts every expression empty (lib/std/arena.jo, __arena_enter): nothing an earlier
+# expression made outlives it, which the escape check proves. The proof: the lent place is
+# a local initialized from `arena(constant)`, and the expression's own allocation sites,
+# array literals of known length (in loops over constant ranges, times their trips), add up
+# to at most the capacity. Any other allocation is no proof: its site keeps its cost, and the
+# strict lane reports it as usual. Demanded by the first allocation event (only programs
+# with allocator expressions have any), O(the nodes of the functions holding them).
+
+arena_capacity_exempt = (event: EffectEvent) -> bool:
+    if not arena_proofs_done:
+        arena_proofs_done = true
+        arena_prove_all()
+    # (`arena(bytes)` acquires capacity explicitly: its refusal is its result, OutOfMemory)
+    if event.via != 0:
+        if event.via_fn > 0 and arena_acquisition(event.via_fn): return true
+        return arena_proven.has(event.via)
+    if event.atom.kind == .alloc: return arena_proven.has(event.witness)
+    (event.atom.kind == .opaque or event.atom.kind == .remainder) and arena_proven_machinery.has(event.witness)
+
+arena_acquisition = (g: int) -> bool:
+    d = int(fns[g].decl)
+    d != 0 and name_of(int(nodes[d].name)) == "arena" and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/arena.jo"
+
+arena_prove_all = ():
+    arena_enter_decl = int(fns[runtime_fn("__arena_enter")].decl)
+    loop f, _ in arena_fns:
+        if f > 0 and f < fns.len() and fns[f].state == 2: arena_prove_in(f, int(fns[f].body), int(fns[f].body))
+
+arena_prove_in = (f: int, body: int, n: int):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .lambda: return
+    if k == .block and arena_scope_start(n) != 0:
+        arena_prove_scope(body, n)
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: arena_prove_in(f, body, int(nodes[n].a))
+    if mask & 2 != 0: arena_prove_in(f, body, int(nodes[n].b))
+    if mask & 4 != 0: arena_prove_in(f, body, int(nodes[n].c))
+    if mask & 16 != 0:
+        loop child in kids(n): arena_prove_in(f, body, child)
+
+# The capacity of the fixed arena held by local l: its declaration in the function's body
+# initializes it from `arena(constant)`; else -1.
+arena_fixed_capacity = (body: int, l: int) -> int:
+    d = arena_find_decl(body, l)
+    if d == 0: return -1
+    e = int(nodes[d].b)
+    loop depth in [0..16):
+        if e == 0: return -1
+        k = nodes[e].kind
+        if k == .conv or k == .unwrap or k == .narrow or k == .exprstmt: e = int(nodes[e].a)
+        else if k == .block and nkids(e) > 1 and nodes[kid(e, 0)].kind == .vardecl:
+            # (`arena(n) or_throw`, errors.jo: `{ let v=arena(n)  if v is? OutOfMemory return v  v }`)
+            last = kid(e, nkids(e) - 1)
+            if nodes[last].kind == .exprstmt: last = int(nodes[last].a)
+            if nodes[last].kind != .ident or nodes[last].name != nodes[kid(e, 0)].name: return -1
+            e = int(nodes[kid(e, 0)].b)
+        else if k == .call and nodes[e].aux == 0 and nodes[e].sym > 0:
+            g = int(fns[int(nodes[e].sym)].decl)
+            if g == 0 or name_of(int(nodes[g].name)) != "arena" or not pos_in_lib(nodes[g].pos) or nkids(e) != 1: return -1
+            size = kid(e, 0)
+            if nodes[size].kind == .conv: size = int(nodes[size].a)
+            if nodes[size].kind != .int_lit: return -1
+            return int(nodes[size].ival)
+        else: return -1
+    -1
+
+arena_find_decl = (n: int, l: int) -> int:
+    if n == 0: return 0
+    k = nodes[n].kind
+    if k == .vardecl and nodes[n].sym == i32(l): return n
+    if k == .lambda: return 0
+    mask = isolation_children(k)
+    if mask < 0: return 0
+    found = 0
+    if mask & 1 != 0: found = arena_find_decl(int(nodes[n].a), l)
+    if found == 0 and mask & 2 != 0: found = arena_find_decl(int(nodes[n].b), l)
+    if found == 0 and mask & 4 != 0: found = arena_find_decl(int(nodes[n].c), l)
+    if found == 0 and mask & 16 != 0:
+        loop child in kids(n):
+            found = arena_find_decl(child, l)
+            if found != 0: break
+    found
+
+arena_prove_scope = (body: int, b: int):
+    d = arena_scope_start(b)
+    place = kid(int(nodes[d].b), 0)
+    lent = arena_root(place)
+    value = int(nodes[kid(b, 1)].b)
+    capacity = if lent.local == 0: -1 else: arena_fixed_capacity(body, lent.local)
+    if capacity < 0:
+        arena_unprove(value, "its arena's capacity is not known here: lend a local made by `arena(bytes)` with a constant size")
+        return
+    arena_proof_sites = []
+    arena_proof_nodes = []
+    need = arena_bound(value, 1)
+    if need < 0:
+        arena_unprove(value, "its allocation is not bounded (only array literals of known length count, in loops over constant ranges)")
+        return
+    if need > capacity:
+        arena_unprove(value, "it may take {need} bytes of its arena's {capacity}")
+        return
+    loop site in arena_proof_sites: arena_proven[site] = true
+    # (inside, the expression's other costs are its own storage's: counts and bounds; its
+    # allocation is the proof's. The acquisition `arena(n) or_throw` forwards its failure.)
+    loop node in arena_proof_nodes: arena_proven_machinery[node] = true
+    acquisition = arena_find_decl(body, lent.local)
+    arena_mark_subtree(acquisition)
+    # (the expression's own entry and exit: a fixed arena's enter only empties it)
+    arena_proven[int(nodes[d].b)] = true
+    leave = kid(b, 2)
+    if nodes[leave].kind == .exprstmt: leave = int(nodes[leave].a)
+    arena_proven[leave] = true
+    result = kid(b, 3)
+    if nodes[result].kind == .exprstmt: result = int(nodes[result].a)
+    if not is_managed(ntype(result)): arena_mark_subtree(result)
+
+arena_unprove = (n: int, why: str):
+    arena_proof_nodes = []
+    arena_collect(n)
+    loop node in arena_proof_nodes: arena_unproven[node] = why
+
+# (for a diagnostic of the strict lane: an allocation inside an `$allocator` expression)
+arena_capacity_hint = (witness: int) -> str:
+    if arena_unproven.len() == 0: return ""
+    if let why = arena_unproven.get(witness): return "; it is inside an `$allocator` expression not proven to fit its arena: {why}"
+    ""
+
+arena_collect = (n: int):
+    if n == 0 or nodes[n].kind == .lambda: return
+    arena_proof_nodes.push(n)
+    mask = isolation_children(nodes[n].kind)
+    if mask < 0: return
+    if mask & 1 != 0: arena_collect(int(nodes[n].a))
+    if mask & 2 != 0: arena_collect(int(nodes[n].b))
+    if mask & 4 != 0: arena_collect(int(nodes[n].c))
+    if mask & 16 != 0:
+        loop child in kids(n): arena_collect(child)
+
+arena_mark_subtree = (n: int):
+    if n == 0 or nodes[n].kind == .lambda: return
+    arena_proven_machinery[n] = true
+    mask = isolation_children(nodes[n].kind)
+    if mask < 0: return
+    if mask & 1 != 0: arena_mark_subtree(int(nodes[n].a))
+    if mask & 2 != 0: arena_mark_subtree(int(nodes[n].b))
+    if mask & 4 != 0: arena_mark_subtree(int(nodes[n].c))
+    if mask & 16 != 0:
+        loop child in kids(n): arena_mark_subtree(child)
+
+# An upper bound of the bytes the expression's own sites take from the context allocator,
+# each run `times` times; -1 when unknown.
+arena_bound = (n: int, times: int) -> int:
+    if n == 0: return 0
+    k = nodes[n].kind
+    if k == .lambda or k == .map_lit or k == .matrix: return -1
+    arena_proof_nodes.push(n)
+    # (operations that may allocate past what the proof counts: growth, detaching a shared
+    # buffer on a write, joined text, boxes)
+    if k == .intrinsic:
+        id = nodes[n].aux as IN
+        if arena_mutators(id) or id == .slice or id == .dewy_set or id == .dewy_fmt or id == .fmt_struct: return -1
+    if k == .assign and nodes[int(nodes[n].a)].kind == .index: return -1
+    if k == .str_lit and nodes[n].aux == 1: return -1
+    if k == .call and (nodes[n].aux == 2 or nodes[n].aux == 3) and is_managed(ntype(n)): return -1
+    total = 0
+    if k == .array:
+        t = prune(ntype(n))
+        if tkind(t) != .array: return -1
+        loop c in kids(n):
+            if has_flag(c, NF_SPREAD): return -1
+        count = nkids(n)
+        if count > 0:
+            total = times * ((24 + count * owner_stride(telem(t)) + 31) & ~15)
+            arena_proof_sites.push(n)
+    if k == .block and arena_scope_start(n) != 0:
+        # (a nested expression's value is copied into this arena)
+        if is_managed(ntype(kid(n, 3))): return -1
+        return 0
+    if k == .while_: return if arena_bound(int(nodes[n].b), 1) == 0 and arena_bound(int(nodes[n].a), 1) == 0: 0 else: -1
+    if k == .for_:
+        sites = arena_proof_sites.len()
+        inner = arena_bound(int(nodes[n].b), 1)
+        if inner < 0: return -1
+        if inner == 0: return arena_bound(int(nodes[n].a), times)
+        trips = arena_trips(int(nodes[n].a))
+        if trips < 0: return -1
+        arena_proof_sites.truncate(sites)
+        inner = arena_bound(int(nodes[n].b), times * trips)
+        if inner < 0: return -1
+        return inner + max(0, arena_bound(int(nodes[n].a), times))
+    mask = isolation_children(k)
+    if mask < 0: return -1
+    parts: int[]
+    if mask & 1 != 0: parts.push(int(nodes[n].a))
+    if mask & 2 != 0: parts.push(int(nodes[n].b))
+    if mask & 4 != 0: parts.push(int(nodes[n].c))
+    if mask & 16 != 0:
+        loop child in kids(n): parts.push(child)
+    loop p in parts:
+        b = arena_bound(p, times)
+        if b < 0: return -1
+        total += b
+    total
+
+# (a range of int literals: an upper bound of its trips; else -1)
+arena_trips = (range: int) -> int:
+    if nodes[range].kind != .range: return -1
+    a = int(nodes[range].a)
+    b = int(nodes[range].b)
+    if a == 0 or b == 0 or nodes[a].kind != .int_lit or nodes[b].kind != .int_lit: return -1
+    if nodes[range].c != 0: return -1
+    max(0, int(nodes[b].ival) - int(nodes[a].ival) + 1)

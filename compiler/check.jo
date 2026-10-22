@@ -5684,7 +5684,7 @@ check_program = (main_path: str):
         register_module(i)
         ic_restore(icb)
         i += 1
-    if arena_enabled: arena_switch_runtime()
+    if runtime_switches.len() > 0: runtime_switch()
     bind_from_imports()
     dewy_resolve_inherited()
     if dewy_methods.len() > 0: dc_force_all()
@@ -6106,11 +6106,15 @@ dewy_main_result = (decl: int, rt: int):
     stmts = [bc_let(result, bc_call("main", [], pos), pos)]
     loop i in 0.. and k in main_exit_kinds:
         message = mk(.str_lit, pos)
-        nodes[message].aux = 1
-        part = mk(.pair, pos)
-        nodes[part].a = i32(bc_ident(result, pos))
-        nodes[part].sval = -1
-        set_list(message, [part])
+        if tkind(k) == .struct_ and structs[int(types[prune(k)].st)].nfields == 0:
+            # (an error with nothing to say, as OutOfMemory: its name)
+            nodes[message].sval = i32(intern(type_str(k)))
+        else:
+            nodes[message].aux = 1
+            part = mk(.pair, pos)
+            nodes[part].a = i32(bc_ident(result, pos))
+            nodes[part].sval = -1
+            set_list(message, [part])
         code = if main_exit_pinned[i]: bc_field(bc_ident(result, pos), "exit_code", pos) else: bc_int(main_exit_codes[i], pos)
         ret = mk(.return_, pos)
         nodes[ret].a = i32(bc_call("__main_failed", [message, code], pos))

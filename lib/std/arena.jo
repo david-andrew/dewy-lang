@@ -9,15 +9,38 @@ struct Arena:
     # (the control words and the chunks, made on first use; dropping the arena frees them)
     __chunks: u8[][]
 
+# An arena with all its capacity acquired now: `bytes` for its blocks, or OutOfMemory when the
+# system refuses them. It never takes more: an allocation past its capacity is refused (an
+# OutOfMemory under `$explicit_allocation_failure`, else the end of the program).
+arena = (bytes: int) -> (Arena | OutOfMemory):
+    list = __arena_fixed(bytes)
+    if list == null: return OutOfMemory
+    Arena(list as u8[][])
+
 # Give back everything allocated from the arena: no value made in it is still reachable.
 reset = (a: mut Arena):
-    if __arena_shared(a): a.__chunks = []
+    if __arena_shared(a): __arena_detach(a)
     __arena_reset(a.__chunks as *u8)
+
+# (a copy that is lent or reset gets storage of its own: a fixed arena's is its capacity again)
+__arena_detach = (a: mut Arena):
+    p = a.__chunks as *u8
+    capacity = __arena_capacity(p)
+    if capacity < 0:
+        a.__chunks = []
+        return
+    list = __arena_fixed(capacity)
+    if list == null: __out_of_memory()
+    a.__chunks = list as u8[][]
 
 # (the projection of `$allocator(@arena) expression`, dewy_parse.jo: the arena becomes the
 # context allocator; what it replaced is given back to __arena_leave)
 __arena_enter = (a: mut Arena) -> int:
-    if a.__chunks as *u8 == null or __arena_shared(a): a.__chunks = __arena_new() as u8[][]
+    if __arena_shared(a): __arena_detach(a)
+    if a.__chunks as *u8 == null: a.__chunks = __arena_new() as u8[][]
+    # (a fixed arena starts every expression empty, its whole capacity free: nothing an
+    # earlier expression made is reachable, compiler/arena.jo proves)
+    if __arena_capacity(a.__chunks as *u8) >= 0: __arena_reset(a.__chunks as *u8)
     t = __ts()
     previous = t[__TS_ARENA]
     t[__TS_ARENA] = __arena_control(a.__chunks as *u8)
@@ -33,7 +56,8 @@ __arena_shared = (a: Arena) -> bool:
 # ---------------- the runtime ----------------
 # An arena hands out memory by bumping a cursor through chunks it takes from the heap. It is
 # a u8[][] the Arena value owns, so dropping it gives every chunk back: element 0 holds the
-# control words, [cursor, end, the list itself, generation, next chunk size], and the others
+# control words, [cursor, end, the list itself, generation, next chunk size, capacity (-1:
+# growable)], and the others
 # are the chunks, oldest first. Chunks grow geometrically, so the list's fixed capacity is
 # never reached before memory is. (lib/core/rt.jo calls __arena_alloc and __arena_grow, in
 # programs that use `$allocator` only.)
@@ -86,7 +110,7 @@ __arena_box_new = (size: int) -> *u8:
 @noinline
 __arena_refill = (c: *int, n: int) -> int:
     list = c[2] as *int
-    if list[1] == list[2]: __out_of_memory()
+    if list[1] == list[2] or c[5] >= 0: __out_of_memory()
     size = c[4]
     if size < __ARENA_FIRST: size = __ARENA_FIRST
     if size < n: size = n
@@ -104,11 +128,58 @@ __arena_new = () -> *u8:
     list[0] = 1
     list[1] = 1
     list[2] = __ARENA_CHUNKS
-    control = __arena_bytes(40)
-    mem_set((control + 3) as *u8, 0, 40)
+    control = __arena_bytes(48)
+    mem_set((control + 3) as *u8, 0, 48)
     ((list + 3) as **u8)[0] = control as *u8
     (control + 3)[2] = list as int
+    (control + 3)[5] = -1
     list as *u8
+
+# A fixed arena's list: its one chunk, `bytes` long, taken from the system now; null when the
+# system refuses it.
+__arena_fixed = (bytes0: int) -> *u8:
+    bytes = max(0, bytes0)
+    if bytes > 1 << 46: return null
+    total = (bytes + 16 + 24 + 65535) & ~65535
+    h = __arena_try_pages(total) as *int
+    if h == null: return null
+    # (a large block of the heap's, as __alloc_slow makes them: freeing it gives it back)
+    h[0] = total
+    h[1] = -1
+    __ts()[2] += 1
+    chunk = h + 2
+    chunk[0] = 1
+    chunk[1] = bytes
+    chunk[2] = bytes
+    list = __arena_new() as *int
+    c = ((((list + 3) as **u8)[0]) + 24) as *int
+    ((list + 3) as **u8)[1] = chunk as *u8
+    list[1] = 2
+    c[0] = chunk as int + 24
+    c[1] = chunk as int + 24 + bytes
+    c[5] = bytes
+    list as *u8
+
+# (fresh pages, or null when the system refuses them)
+__arena_try_pages = (size: int) -> *u8:
+    when TARGET == "linux":
+        p = syscall(9, 0, size, 3, 0x22, -1, 0)
+        if p < 0 and p > -4096: return null
+        __os_list_add(p as *u8, size)
+        return p as *u8
+    else when TARGET == "wasm":
+        pages = (size + 65535) / 65536
+        p = __wasm_grow(pages)
+        if p < 0: return null
+        return (p * 65536) as *u8
+    else:
+        return __os_pages(size)
+
+# (a fixed arena's capacity, or -1 for a growable one or none)
+__arena_capacity = (list: *u8) -> int:
+    if list == null: return -1
+    c = (((list + 24) as **u8)[0] + 24) as *int
+    c[5]
 
 # the control words of an arena's list
 __arena_control = (list: *u8) -> int: ((list + 24) as **u8)[0] as int + 24
