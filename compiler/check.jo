@@ -116,6 +116,7 @@ struct Global:
     init: i32
     addr: i32
     fn_written: bool    # some function (not top-level code) changes it
+    init_written: bool = false    # top-level code changes it after its declaration
 
 struct Capture:
     outer: i32
@@ -2329,6 +2330,7 @@ setup_module_contexts = (prelude_init: int):
 note_global_write = (g: int):
     if globals[g].fn_written or cx < 0: return
     if fns[int(ctxs[cx].inst)].kind != i32(FK_INIT): globals[g].fn_written = true
+    else: globals[g].init_written = true
 
 # the global a narrowed name's place (g.f narrowed by `is`) belongs to, or -1
 alias_global = (l: int) -> int:
