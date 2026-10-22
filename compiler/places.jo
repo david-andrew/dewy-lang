@@ -35,12 +35,18 @@ place_scalar_root = (e: int) -> PlaceIdentity:
 
 # Projection parents are interned only on demand. Zero means unknown, never a
 # fresh invented root. Field selectors are declaration names, not byte offsets.
+# Hash-indexed: O(1) expected per intern (a linear scan made it O(P^2)).
 place_parents: PlaceIdentity[] = [PlaceIdentity(.local, 0, 0)]
+place_index: {PlaceIdentity: int} = {}
+
+places_reset = ():
+    place_parents = [PlaceIdentity(.local, 0, 0)]
+    place_index = {}
 
 place_intern = (p: PlaceIdentity) -> int:
-    loop i in [1..place_parents.len()):
-        if place_parents[i] == p: return i
+    if let i = place_index.get(p): return i
     place_parents.push(p)
+    place_index[p] = place_parents.len() - 1
     place_parents.len() - 1
 
 place_project = (p: PlaceIdentity, field: int) -> PlaceIdentity:

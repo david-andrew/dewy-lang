@@ -51,6 +51,24 @@ struct EffectSummary:
     edges: EffectEdge[]
     isolation: IsolationReason
     isolation_witness: int
+    stamp: int = 0
+    # Capped at the region budget with an opaque event: no later add changes it.
+    capped: bool = false
+    # First edge per (callee, actuals): later duplicates translate to the same
+    # atoms, which the row already absorbed. Computed once per function.
+    unique: int[]
+    unique_ready: bool = false
+    # Modification tick, and the tick at which its last propagation began.
+    changed_at: int = 0
+    propagated_at: int = 0
+# Indexed event state: (function stamp, atom) -> present. A widened row takes
+# a fresh stamp, so its stale keys simply stop matching. O(1) expected per add.
+struct EffectEventKey:
+    stamp: int
+    atom: EffectAtom
+struct EffectEdgeKey:
+    callee: int
+    actuals: PlaceIdentity[]
 # No public strict spelling. The closed pilot inventories every reserved cost.
 struct EffectPolicy:
     prohibitions: int
@@ -75,6 +93,23 @@ effect_contracts: EffectContract[] = [EffectContract()]
 effect_summaries: EffectSummary[]
 effect_seen: int[]
 effect_stack: int[]
+effect_event_index: {EffectEventKey: bool} = {}
+effect_stamps = 0
+effect_ticks = 0
+# for_ nodes marked by the current graph, by loop variable (was an all-nodes scan).
+effect_for_marks: {int: int[]} = {}
+# Post-check node site indexes, replacing whole-AST scans: writes by local
+# (declarations, assignments through field/index selectors), scalar writes by
+# the local their root resolves to, and direct calls/references by function.
+# Ascending linked lists, used once checking is final (matching nodes no
+# longer change in place) and rebuilt in one O(nodes) pass whenever nodes or
+# locals grew; a query is then O(its sites).
+effect_ix_nodes = 0
+effect_ix_locals = 0
+effect_ix_heads: {int: int}[] = [{}, {}, {}]
+effect_ix_next: int[][] = [[], [], []]
+# effect_plain answers by representation type, for top-level queries.
+effect_plain_cache: {int: bool} = {}
 effect_serial = 0
 effect_limit = 0
 # Element accesses charged a possible failure in the current graph (owner,
@@ -104,7 +139,12 @@ effects_reset = ():
     effect_stack = []
     effect_serial = 0
     effect_limit = 0
-    place_parents = [PlaceIdentity(.local, 0, 0)]
+    effect_event_index = {}
+    effect_for_marks = {}
+    effect_plain_cache = {}
+    effect_ix_nodes = 0
+    effect_ix_locals = 0
+    places_reset()
 
 effect_intern = (atoms0: EffectAtom[], exclusions0: EffectAtom[] = [], variables0: int[] = [], open: bool = false) -> int:
     atoms: EffectAtom[]
@@ -397,6 +437,9 @@ effect_graph_reset = ():
     effect_limit = fns.len()
     effect_summaries = fill(EffectSummary(), effect_limit)
     effect_seen = fill(0, nodes.len())
+    effect_event_index = {}
+    effect_for_marks = {}
+    effect_plain_cache = {}
     effect_stack = []
     effect_serial = 0
 
@@ -441,6 +484,83 @@ effect_returns = (n: int, out: mut int[]):
     if mask & 16 != 0:
         loop c in kids(n): effect_returns(c, out)
 
+# The local an assignment target writes through field/index selectors, or 0.
+effect_write_root = (q: int) -> int:
+    target = int(nodes[q].a)
+    loop nodes[target].kind == .field or nodes[target].kind == .index: target = int(nodes[target].a)
+    if nodes[target].kind == .ident and nodes[target].aux == i32(int(SK.local)): return int(nodes[target].sym)
+    0
+
+# Node q's key in site index `kind` (0 writes, 1 scalar writes, 2 uses), or 0.
+effect_site_key = (kind: int, q: int) -> int:
+    k = nodes[q].kind
+    if kind == 2: return if (k == .call and nodes[q].aux == 0 or k == .fnref) and nodes[q].sym > 0: int(nodes[q].sym) else: 0
+    if k == .vardecl: return if has_flag(q, NF_GLOBAL) or nodes[q].sym <= 0: 0 else: int(nodes[q].sym)
+    if k != .assign: return 0
+    if kind == 0: return effect_write_root(q)
+    p = place_scalar_root(int(nodes[q].a))
+    if p.root != .local: return 0
+    p.declaration
+
+effect_index_build = ():
+    if effect_ix_nodes == nodes.len() and effect_ix_locals == locals.len(): return
+    effect_ix_nodes = nodes.len()
+    effect_ix_locals = locals.len()
+    writes: {int: int} = {}
+    scalar: {int: int} = {}
+    uses: {int: int} = {}
+    writes_next = fill(0, nodes.len())
+    scalar_next = fill(0, nodes.len())
+    uses_next = fill(0, nodes.len())
+    q = nodes.len() - 1
+    loop q >= 1:
+        k = nodes[q].kind
+        if k == .vardecl or k == .assign:
+            w = effect_site_key(0, q)
+            if w != 0:
+                writes_next[q] = writes.get(w) ?? 0
+                writes[w] = q
+            c = effect_site_key(1, q)
+            if c != 0:
+                scalar_next[q] = scalar.get(c) ?? 0
+                scalar[c] = q
+        else if k == .call or k == .fnref:
+            u = effect_site_key(2, q)
+            if u != 0:
+                uses_next[q] = uses.get(u) ?? 0
+                uses[u] = q
+        q -= 1
+    effect_ix_heads = [writes, scalar, uses]
+    effect_ix_next = [writes_next, scalar_next, uses_next]
+
+# Candidate nodes in ascending order; callers still test each one in full.
+# While checking is open, nodes change in place: scan them all.
+effect_sites = (kind: int, key: int) -> int[]:
+    out: int[]
+    if key <= 0:
+        loop q in [1..nodes.len()): out.push(q)
+        return out
+    if not effect_final:
+        if kind == 2:
+            loop q in [1..nodes.len()):
+                k = nodes[q].kind
+                if (k == .call or k == .fnref) and effect_site_key(kind, q) == key: out.push(q)
+            return out
+        loop q in [1..nodes.len()):
+            k = nodes[q].kind
+            if (k == .vardecl or k == .assign) and effect_site_key(kind, q) == key: out.push(q)
+        return out
+    effect_index_build()
+    q = effect_ix_heads[kind].get(key) ?? 0
+    loop q != 0:
+        out.push(q)
+        q = effect_ix_next[kind][q]
+    out
+
+effect_write_sites = (l: int) -> int[]: effect_sites(0, l)
+effect_scalar_sites = (l: int) -> int[]: effect_sites(1, l)
+effect_use_sites = (f: int) -> int[]: effect_sites(2, f)
+
 # Projection selectors are field ordinals; -1 joins all array elements. Joining
 # every assignment is intentionally flow-insensitive, including later writes.
 effect_source_row = (n: int, path: int[] = [], depth: int = 0) -> int:
@@ -459,7 +579,7 @@ effect_source_row = (n: int, path: int[] = [], depth: int = 0) -> int:
             return effect_top()
         if int(locals[l].flags) & LF_PARAM != 0: return effect_top()
         row = 0
-        loop q in [1..nodes.len()):
+        loop q in effect_write_sites(l):
             rhs = 0
             rest = path
             if nodes[q].kind == .vardecl and not has_flag(q, NF_GLOBAL) and nodes[q].sym == i32(l): rhs = int(nodes[q].b)
@@ -577,6 +697,16 @@ effect_word_op = (op: Tok) -> bool:
 effect_plain = (t0: int, depth: int = 0) -> bool:
     t = representation_type(t0)
     if effect_scalar(t): return true
+    if depth == 0:
+        k = tkind(t)
+        if k == .struct_ or k == .enum_ or k == .tuple or k == .fixed or k == .opt:
+            if let known = effect_plain_cache.get(t): return known
+            answer = effect_plain_type(t)
+            effect_plain_cache[t] = answer
+            return answer
+    effect_plain_type(t, depth)
+
+effect_plain_type = (t: int, depth: int = 0) -> bool:
     # (a union of plain members, `int64 | Oops`, is plain: a tag and a payload)
     if depth <= 16 and tkind(t) == .enum_:
         layout(t)
@@ -681,13 +811,24 @@ effect_cleanup = (f: int, t0: int, n: int, p: PlaceIdentity, depth: int = 0):
 # A place atom of a read or write: the kinds a summary may widen to a root.
 effect_place_atom = (a: EffectAtom) -> bool: (a.kind == .read or a.kind == .write) and a.place.declaration != 0
 
+effect_restamp = (f: int):
+    effect_ticks += 1
+    effect_summaries[f].changed_at = effect_ticks
+    effect_stamps += 1
+    effect_summaries[f].stamp = effect_stamps
+    loop old in effect_summaries[f].events: effect_event_index[EffectEventKey(effect_stamps, old.atom)] = true
+
 effect_add = (f: int, event: EffectEvent) -> bool:
     covered = effect_place_atom(event.atom)
     root = if covered: place_base(event.atom.place) else: event.atom.place
-    loop old in effect_summaries[f].events:
-        if old.atom == event.atom: return false
-        # (a whole-root event already covers its fields)
-        if covered and old.atom.kind == event.atom.kind and old.atom.place == root: return false
+    if effect_summaries[f].stamp == 0:
+        effect_stamps += 1
+        effect_summaries[f].stamp = effect_stamps
+    stamp = effect_summaries[f].stamp
+    if effect_event_index.has(EffectEventKey(stamp, event.atom)): return false
+    if effect_summaries[f].capped: return false
+    # (a whole-root event already covers its fields)
+    if covered and effect_event_index.has(EffectEventKey(stamp, EffectAtom(event.atom.kind, root))): return false
     if effect_summaries[f].events.len() >= 32:
         # Past the budget every place event widens to its whole root, still an
         # upper bound: a kernel touching many fields of one record stays exact
@@ -705,17 +846,25 @@ effect_add = (f: int, event: EffectEvent) -> bool:
         loop k in kept:
             if k.atom == wide.atom:
                 effect_summaries[f].events = kept
+                effect_restamp(f)
                 return true
         if kept.len() < 32:
             kept.push(wide)
             effect_summaries[f].events = kept
+            effect_restamp(f)
             return true
         effect_summaries[f].events = kept
+        effect_restamp(f)
+        effect_summaries[f].capped = true
         loop old in effect_summaries[f].events:
             if old.atom.kind == .opaque: return false
         effect_summaries[f].events.push(EffectEvent(EffectAtom(.opaque), event.witness, event.via))
+        effect_event_index[EffectEventKey(effect_summaries[f].stamp, EffectAtom(.opaque))] = true
         return true
     effect_summaries[f].events.push(event)
+    effect_event_index[EffectEventKey(stamp, event.atom)] = true
+    effect_ticks += 1
+    effect_summaries[f].changed_at = effect_ticks
     true
 
 effect_opaque = (f: int, n: int): effect_add(f, EffectEvent(EffectAtom(.opaque), n))
@@ -941,14 +1090,14 @@ effect_bare = (n: int, depth: int = 0) -> bool:
             if fns[owner].params[i] == l: slot = i
         if slot < 0 or fns[owner].cabi or len(fns[owner].export_name) != 0: return false
         found = false
-        loop q in [1..nodes.len()):
+        loop q in effect_use_sites(owner):
             if nodes[q].kind == .fnref and nodes[q].sym == i32(owner): return false
             if nodes[q].kind != .call or nodes[q].aux != 0 or nodes[q].sym != i32(owner): continue
             if slot >= nkids(q) or not effect_bare(kid(q, slot), depth + 1): return false
             found = true
         return found
     found = false
-    loop q in [1..nodes.len()):
+    loop q in effect_scalar_sites(l):
         if nodes[q].kind == .vardecl and not has_flag(q, NF_GLOBAL) and nodes[q].sym == i32(l):
             if not effect_bare(int(nodes[q].b), depth + 1): return false
             found = true
@@ -1012,6 +1161,11 @@ effect_scan_node = (f: int, n: int):
     if effect_seen[n] == f: return
     effect_seen[n] = f
     k = nodes[n].kind
+    if k == .for_:
+        marks = effect_for_marks.get(int(nodes[n].sym)) ?? []
+        if not marks.contains(n):
+            marks.push(n)
+            effect_for_marks[int(nodes[n].sym)] = marks
     # These shortened place walks omit evaluated-root visits. Keep the legacy
     # adapter conservative rather than accidentally proving a global/alias pure.
     if k == .field or k == .assign: effect_isolation_block(f, .node, n)
@@ -1127,7 +1281,7 @@ effect_scan_node = (f: int, n: int):
                 effect_add(f, EffectEvent(EffectAtom(.read, p), n))
                 return
         if effect_scalar(t) and int(locals[l].flags) & LF_BYREF != 0:
-            loop q in [1..effect_seen.len()):
+            loop q in effect_for_marks.get(l) ?? []:
                 if effect_seen[q] == f and nodes[q].kind == .for_ and nodes[q].sym == i32(l) and not has_flag(q, NF_MUT) and tkind(ntype(int(nodes[q].a))) == .array: return
         loop q in kids(int(fns[f].body)):
             if nodes[q].kind == .vardecl and not has_flag(q, NF_GLOBAL) and nodes[q].sym == i32(l) and effect_readonly_binding(q): return
@@ -1259,9 +1413,36 @@ effect_declared_row = (g: int) -> int:
     effect_declared[g] = c
     c
 
+effect_unique_edges = (f: int):
+    seen: {EffectEdgeKey: bool} = {}
+    unique: int[]
+    edges = effect_summaries[f].edges
+    loop i in [0..edges.len()):
+        key = EffectEdgeKey(edges[i].callee, edges[i].actuals)
+        if seen.has(key): continue
+        seen[key] = true
+        unique.push(i)
+    effect_summaries[f].unique = unique
+    effect_summaries[f].unique_ready = true
+
+# Re-propagating f is a no-op when no callee changed since f's last pass:
+# every re-offered atom is already present, covered by its root, or capped.
+effect_stale = (f: int) -> bool:
+    if effect_summaries[f].propagated_at == 0: return true
+    since = effect_summaries[f].propagated_at
+    loop i in effect_summaries[f].unique:
+        g = effect_summaries[f].edges[i].callee
+        if g > 0 and g < effect_limit and effect_summaries[g].changed_at > since: return true
+    false
+
 effect_propagate = (f: int) -> bool:
+    if not effect_summaries[f].unique_ready: effect_unique_edges(f)
+    if not effect_stale(f): return false
+    effect_ticks += 1
+    effect_summaries[f].propagated_at = effect_ticks
     changed = false
-    loop edge in effect_summaries[f].edges:
+    loop index in effect_summaries[f].unique:
+        edge = effect_summaries[f].edges[index]
         g = edge.callee
         if g <= 0 or g >= effect_limit:
             if effect_add(f, EffectEvent(EffectAtom(.opaque), edge.origin)): changed = true
@@ -1318,6 +1499,7 @@ effect_visit = (f: int):
     loop effect_stack[start] != f: start -= 1
     # Substitute on EVERY edge, including backedges, until this component is
     # settled. Bounded region sets/projection depth ensure monotone termination.
+    # (a member whose callees did not change since its last pass is skipped)
     loop true:
         changed = false
         loop i in [start..effect_stack.len()):
@@ -1449,6 +1631,9 @@ effects_demand = (f: int) -> bool:
         effect_limit = fns.len()
         effect_summaries = fill(EffectSummary(), effect_limit)
         effect_seen = fill(0, nodes.len())
+        effect_event_index = {}
+        effect_for_marks = {}
+        effect_plain_cache = {}
     if f <= 0 or f >= effect_limit: return false
     if effect_summaries[f].index == 0:
         icb = ic_phase(IC_EFFECTS)
