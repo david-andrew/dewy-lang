@@ -104,4 +104,41 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
 - Imports (Q24, following the reference): `import p"x.dewy"` with no selection
   splats the module's top-level bindings (collisions are errors);
   `import p"x.dewy" as name` gives a namespace; selective imports pick names.
+- Spelling policy (round 4): Dewy does not religiously enforce one spelling per
+  operation. An extra spelling is allowed when it is well justified (e.g. a short
+  form for a very common operation); unjustified aliases are avoided.
+- Search results: `index_of` and `find` return `int | Missing`. `Missing` is a
+  specific exception value, not `none` or -1.
+- `main` returns `void | errors`. The error set is inferred unless annotated (an
+  annotation fixes the order and documents it); no main special case. Scripts
+  needing a code call `exit(n)`. Success exits 0. An error reaching `main` is
+  printed and exits with a code assigned 1, 2, 3, … in the declaration order of
+  the error kinds, below 126. An error type may pin its code with an `exit_code`
+  member. `dewy build --exit-codes` prints the table.
+- Console: the prelude `console` object has `print`/`printl` and `info`
+  (stdout), `warn`/`error` (stderr, coloured on a terminal) and `debug`
+  (stderr, compiled out of release). Prelude `print`/`printl` are `$shadowable
+  const` aliases of `console.print`/`console.printl`. The general form is
+  `print(x file=stream)`, with `stdout`/`stderr` in the prelude; no
+  `eprint`/`eprintl`. Colour only when the stream is a TTY; respect `NO_COLOR`
+  and `FORCE_COLOR`/`CLICOLOR_FORCE`; program override, e.g.
+  `console.color='auto'|'always'|'never'`.
+- Slices follow no-traps: `xs[a..b)` must be proven in bounds. Explicit clamping
+  is an in-index metatag, `xs[$clamp a..b)` (Python-style truncation).
+- Helpers: adopt `is_empty`, prefix/suffix removal, graphemes as the default
+  `chars`, `count(value)`, `lines`, `trim_start`/`trim_end`. `any`/`all` without
+  a predicate apply only to `array<bool>` (idiom: `all(xs .>? 0)`). Drop `zip`
+  (compound loops and `[A B]` cover it).
+- `T?` fields default to `none` implicitly.
+- Comparing a union with one of its members (`back =? n`) is plain true/false.
+- No separate tuple concept: `[int64 string]` is an array type with per-position
+  element types; a const array is a "tuple".
+- Byte literals: `b'a'` is a `uint8`, `b"abc"` a byte array.
+- `%` stays floored, with no mode metatag; alternatives are explicit, e.g.
+  `a.rem(b kind='euclid')` (exact spelling to propose).
+- Rounding: human-oriented types (rational, decimal, int division results)
+  round half away from zero (`round(2.5)=3`, `round(-2.5)=-3`); floats follow
+  IEEE ties-to-even. Both take `ties=` to override.
+- Lifecycle hooks: copy and move hooks preserve the abstract value; move hooks
+  cannot fail. No explicit `move` syntax for now.
 

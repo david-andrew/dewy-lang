@@ -82,6 +82,13 @@ runner, never on the shared box. Kernels: `bench`.
   `$no_nan`, `$no_inf`, `$finite_floats`.
 - FFI: `$extern`/`$export` metatags, `ptr<T>`, unsafe boundary; blocking `net`.
   `$target` with canonical names; imports splat unless `as name`.
+- `index_of`/`find` → `int | Missing`; `main` returns `void | errors` with
+  sequential exit codes; `console` object; `print(x file=stderr)`.
+- Slices proven or `xs[$clamp a..b)`; helpers adopted, `zip` dropped;
+  `T?` fields default to `none`; tuples are per-position arrays; `b'a'`.
+- Floored `%`; human types round half away from zero, floats IEEE (`ties=`).
+- Hooks preserve value; move hooks can't fail; no `move` syntax yet.
+- Spelling: extra spellings allowed when well justified; no unjustified aliases.
 - Versions: language 0.0.0; extension patch bumps, at most one release a day.
 
 ## Open questions for David
@@ -90,33 +97,25 @@ New questions carry a recommended answer, what it unblocks and whether it's
 reversible; reversible ones are implemented provisionally and flagged.
 
 3. Readonly/lifetime-bearing payload places beyond `$lend`.
-5. Explicit `move` syntax.
 9. Units: display (`as km`), affine units, calendar durations. (88)
 10. Invariant authority beyond scalar refinements (strict Map invariants).
 11. Finite-resource and denial-of-service guarantees.
-13. Must lifecycle hooks preserve the abstract value? Can a move hook fail?
-14. Errors that reach `main`.
 15. Provisional file helpers (`copy_file`, `walk_dir`, `glob`, …): keep or rename?
 16. Partial application of an overloaded function picks the fewest open
     parameters (provisional).
 17. A function nested in a method can't change the object's members (today).
 18. Printing details (minted type names, range forms, unused-method warnings).
-19. Should `T?` fields default to `none` implicitly?
 20. Per-process `$test` isolation; provisional `test --json` fields.
-21. Rounding ties (rational to-even vs float half-away); `as rational`; NaN.
-23. Dogfooding leftovers: `index_of` → `int|none`; sibling minted literals;
-    `main` returning `int|error`; `loop [k @v] in d`; string helpers; slice
-    clamping; a stderr print; union-member comparison; `sqrt` of quantities
-    (provisional); exposed Jo helpers.
-24. Self-hosting leftovers: build-mode flags, tuple types, a byte-character
-    literal.
+23. Dogfooding leftovers: sibling minted literals; `loop [k @v] in d`;
+    `sqrt` of quantities (provisional).
+24. Self-hosting leftovers: build-mode flags.
 25. Spellings to confirm (recommendations implemented provisionally):
     raw-bit conversions, recommended `x.wrap(uint8)` (integers, modulo 2^N) and
     `x.bitcast(float64)` (same-width reinterpretation); steerable loops,
     recommended naming the iterator inline: `loop node in w=tree.walk() {
     if leaf? node w.skip_children }`. Both reversible.
-26. Index-typed refinements ("below `a.length`"); Euclidean `%` (recommended:
-    keep floored).
+26. Index-typed refinements ("below `a.length`"); the `rem` alternatives
+    spelling (recommended: `a.rem(b kind='euclid')`).
 
 Each held ladder program's note names the question that holds it.
 
