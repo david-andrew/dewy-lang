@@ -23,6 +23,7 @@ use 'reflection.jo'
 use 'prelude.jo'
 use 'ide.jo'
 use 'dewy_methods.jo'
+use 'ffi.jo'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -8110,7 +8111,7 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
         nodes[n].aux = 2
     t = mk_fn(fns[f].ptypes, int(fns[f].ret), mm, if et != 0 and types[et].kind == .fn_: int(types[et].st) else: decl_fn_labels(d))
     if et != 0 and types[et].kind == .cfn:
-        if not fns[f].cabi: fatal(nodes[n].pos, "'{name_of(int(nodes[n].name))}' must be marked @cabi to be used as a C function pointer")
+        if not fns[f].cabi: fatal(nodes[n].pos, "'{name_of(int(nodes[n].name))}' must be marked {jd(nodes[n].pos, "@cabi", "`$export`")} to be used as a C function pointer")
         t = mk_cfn(fns[f].ptypes, int(fns[f].ret))
         nodes[n].aux = 1
     if nodes[d].sval != 0: t = mk_callable_contract(t, effect_subst(int(fn_sig(d).contract), fns[f].targs))
@@ -8785,7 +8786,9 @@ check_field_expr = (n: int, expected: int) -> int:
         if ide_on: ide_ref(nodes[n].pos, fname, IK_FIELD, 0, t, 0)
     else:
         st = bt
-        if bk == .ptr: st = prune(int(types[bt].elem))
+        if bk == .ptr:
+            ffi_deref(nodes[n].pos, bt)
+            st = prune(int(types[bt].elem))
         if types[st].kind == .struct_:
             si = int(types[st].st)
             check_struct_fields(si)
@@ -9033,6 +9036,7 @@ check_index_expr = (n: int, expected: int) -> int:
             check_to(b, T_INT)
             t = T_U8
         else if bk == .ptr:
+            ffi_deref(nodes[n].pos, bt)
             check_to(b, T_INT)
             t = int(types[bt].elem)
         else if bk == .vec:

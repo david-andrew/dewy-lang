@@ -1488,9 +1488,12 @@ effect_visit = (f: int):
     effect_summaries[f].low = effect_serial
     effect_stack.push(f)
     d = int(fns[f].decl)
-    if effect_blocks_demanded and concurrency_fn_blocks(f): effect_add(f, EffectEvent(EffectAtom(.block), d))
+    # (a foreign function is opaque unless it declares a closed row, which is
+    # trusted: the claim its unsafe callers rely on)
+    trusted = d != 0 and has_flag(d, NF_EXTERN) and effect_declared_row(f) != 0
+    if effect_blocks_demanded and not trusted and concurrency_fn_blocks(f): effect_add(f, EffectEvent(EffectAtom(.block), d))
     if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)):
-        effect_opaque(f, d)
+        if not trusted: effect_opaque(f, d)
         effect_isolation_block(f, .unavailable, d)
     else:
         if fns[f].caps.len() != 0 or fns[f].kind == FK_PARTIAL:

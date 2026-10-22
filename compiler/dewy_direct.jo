@@ -428,6 +428,11 @@ dc_annotation = (boundary: int = 10) -> int:
             nodes[n].kind = .tarray
             nodes[n].name = 0
             nodes[n].a = i32(args[0])
+        else if name == "ptr":
+            if args.len() != 1: return 0
+            nodes[n].kind = .tptr
+            nodes[n].name = 0
+            nodes[n].a = i32(args[0])
         else if name == "dict" or name == "totaldict":
             if args.len() != 2: return 0
             nodes[n].kind = .tmap

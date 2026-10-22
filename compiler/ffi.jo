@@ -1,0 +1,59 @@
+# Dewy's foreign-function boundary, checker side (docs/LANGUAGE.md, "Foreign
+# functions"). Calling a `$extern` function or dereferencing a raw `ptr<T>`
+# from Dewy source needs an unsafe boundary: a `$unsafe` setting in force at
+# the site (compiler/directives.jo). Jo sources are trusted as before.
+# Nothing here runs until a program uses an extern or a pointer from Dewy.
+use 'util.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'directives.jo'
+
+ffi_unsafe_name = 0
+
+# Whether a `$unsafe` setting holds at a Dewy source position.
+ffi_unsafe_at = (pos: int) -> bool:
+    if dir_scopes.len() == 0: return false
+    if ffi_unsafe_name == 0: ffi_unsafe_name = intern("unsafe")
+    dir_value(ffi_unsafe_name, pos) == 1
+
+ffi_require_unsafe = (pos: int, what: str, why: str):
+    if pos <= 0 or not files[pos_file(pos)].is_dewy or ffi_unsafe_at(pos): return
+    fatal(pos, "{what} needs an unsafe boundary ({why}): write `$unsafe` on a line of its own in the enclosing block or function body")
+
+# A use of a function declaration: an extern needs `$unsafe` in Dewy code.
+ffi_extern_use = (decl: int, use_pos: int):
+    if not has_flag(decl, NF_EXTERN) or use_pos <= 0 or not files[pos_file(use_pos)].is_dewy: return
+    if pos_file(use_pos) == pos_file(nodes[decl].pos) and use_pos == nodes[decl].pos: return
+    ffi_require_unsafe(use_pos, "using the foreign function '{name_of(int(nodes[decl].name))}'", "the compiler cannot check what it does")
+
+# Reading or writing through a raw pointer.
+ffi_deref = (pos: int, t: int):
+    if pos <= 0 or not files[pos_file(pos)].is_dewy: return
+    ffi_require_unsafe(pos, "dereferencing a raw {dt(t)}", "the compiler cannot check that it points to live memory of that type")
+
+# What crosses the C boundary from a Dewy signature: fixed-width numbers, bools,
+# raw pointers (`ptr<T>?` as a nullable one), strings into C (a `char *`) and
+# function types (C function pointers, given `$export` functions).
+ffi_check_signature = (f: int, decl: int):
+    if not files[pos_file(nodes[decl].pos)].is_dewy: return
+    extern_ = has_flag(decl, NF_EXTERN)
+    loop i in 0.. and t in fns[f].ptypes:
+        p = kid(decl, i)
+        ffi_check_type(t, nodes[p].pos, extern_, true)
+    if int(fns[f].ret) != T_VOID: ffi_check_type(int(fns[f].ret), nodes[decl].pos, extern_, false)
+
+ffi_check_type = (t0: int, pos: int, extern_: bool, param: bool):
+    t = prune(t0)
+    k = types[t].kind
+    side = if extern_: "a `$extern` function" else: "a `$export` function"
+    if t == T_MATH_INT: fatal(pos, "`int` cannot cross the C boundary (its size is not fixed): {side} uses int32, int64, uint8, … instead")
+    if k == .int_ or k == .float_ or k == .bool_ or k == .ptr or k == .cfn: return
+    if k == .opt and tkind(int(types[t].elem)) == .ptr:
+        if extern_: return
+        fatal(pos, "`$export` takes and returns `ptr<T>` but not yet `ptr<T>?`: C callers would see an optional's layout")
+    if k == .str_ and extern_ and param: return
+    what = dt(t)
+    if k == .str_ and extern_: fatal(pos, "a C function cannot return a string: declare its result as `ptr<uint8>` and copy the bytes it points to")
+    more = if extern_: ", `ptr<T>?`, strings (a `char *`) and function types (C function pointers)" else: ""
+    fatal(pos, "{what} cannot cross the C boundary: {side} takes and returns fixed-width numbers, bools, `ptr<T>`{more}")

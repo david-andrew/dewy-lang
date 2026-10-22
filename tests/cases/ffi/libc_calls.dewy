@@ -1,0 +1,23 @@
+# modes: native native-release
+# C library functions declared in Dewy: no `lib=` means the C library.
+strlen=(s:ptr<uint8>):>uint64 => $extern
+getpid=():>int32 => $extern
+labs=(x:int64):>int64 => $extern(name='labs' lib='c')
+absolute=(x:int64):>int64 => $extern(name='labs')
+atoi=(text:string):>int32 => $extern
+getenv=(name:string):>ptr<uint8>? => $extern
+
+pid=():>int32 => {
+    $unsafe
+    getpid()
+}
+
+main=():>void=>{
+    $unsafe
+    let word:array<uint8>=[104 105 33 0]
+    printl(strlen(data(word)))
+    printl(pid() >? 0)
+    printl(labs(-5) absolute(-7))
+    printl(atoi("1234") + 1)
+    printl(getenv("DEWY_SURELY_UNSET_VARIABLE") is? none)
+}

@@ -90,9 +90,10 @@ dir_names = ():
     dir_name_no_inf = intern("no_inf")
 
 # The builtin boolean settings. (`$fast_math` permits reassociation and FMA
-# contraction; the backends do neither yet, so it changes no code.)
+# contraction; the backends do neither yet, so it changes no code. `$unsafe` is
+# the unsafe boundary: compiler/ffi.jo.)
 dir_builtin = (name: str) -> bool:
-    name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies" or name == "fast_math" or name == "no_nan" or name == "no_inf"
+    name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies" or name == "fast_math" or name == "no_nan" or name == "no_inf" or name == "unsafe"
 
 dir_bundle_index = (name: int) -> int:
     loop i in [0..dir_bundles.len()):

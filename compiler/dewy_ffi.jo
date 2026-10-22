@@ -1,0 +1,146 @@
+# Dewy spellings of the foreign-function interface (docs/LANGUAGE.md, "Foreign
+# functions"), lowered onto the extern machinery Jo's `extern`, `@lib`,
+# `@symbol` and `@export` already use (compiler/check.jo, lower_extern_thunk):
+#   strlen = (s:ptr<uint8>):>uint64 => $extern
+#   sleep_ms = (ms:uint32):>void => $extern(name='Sleep' lib='kernel32')
+#   sqrt = (x:float64):>float64 => $intrinsic
+#   $export            (or $export(name='c_name')) before a module function
+use 'util.jo'
+use 'ast.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'dewy_parse.jo'
+use 'dewy_tokens.jo'
+
+# The FFI metatag a function body is: "extern", "intrinsic", or "".
+dw_ffi_body = (body0: int) -> str:
+    if body0 <= 0: return ""
+    body = dw_unwrap(body0)
+    if dewy_syntax[body].kind == .metatag:
+        t = dewy_syntax[body].text
+        if t == "extern" or t == "intrinsic" or t == "export": return t
+        return ""
+    if dn_token_call(dw_op(body)):
+        tag = dw_unwrap(dw_child(body, 1))
+        if dewy_syntax[tag].kind == .metatag and (dewy_syntax[tag].text == "extern" or dewy_syntax[tag].text == "intrinsic" or dewy_syntax[tag].text == "export"): return dewy_syntax[tag].text
+    ""
+
+# `$tag(key='text' ...)`: keyword arguments with literal strings, each at most once.
+dw_ffi_options = (id0: int, tag: str, allowed: str[]) -> {str: str}:
+    out: {str: str} = {}
+    id = dw_unwrap(id0)
+    if dewy_syntax[id].kind == .metatag: return out
+    loop arg0 in dw_children(dw_child(id, 2)):
+        arg = dw_unwrap(arg0)
+        key = if dw_op(arg) == .assign: dw_name(dw_child(arg, 1)) else: ""
+        listed = join(allowed, "=, ") + "="
+        if key == "" or not (key in allowed): fatal(dewy_syntax[arg].pos, "`${tag}` takes keyword arguments: {listed}")
+        value = dw_unwrap(dw_child(arg, 2))
+        text = dw_ffi_literal(value)
+        if text == none: fatal(dewy_syntax[value].pos, "`${tag}({key}=...)` takes a string literal")
+        if out.has(key): fatal(dewy_syntax[arg].pos, "`{key}=` is given twice")
+        if len(text!) == 0: fatal(dewy_syntax[value].pos, "`{key}=` needs a name")
+        out[key] = text!
+    out
+
+# A plain string literal's text (none for any other expression).
+dw_ffi_literal = (id: int) -> str?:
+    k = dewy_syntax[id].kind
+    if k == .string: return dewy_syntax[id].text
+    if k == .compact_expr:
+        n = dewy_syntax[id].child_left
+        if n > 0 and nodes[n].kind == .str_lit and nodes[n].aux == 0: return name_of(int(nodes[n].sval))
+        return none
+    if k == .quoted or k == .rawquoted or k == .interpolated_string:
+        n = dw_expr(id)
+        if nodes[n].kind == .str_lit and nodes[n].aux == 0: return name_of(int(nodes[n].sval))
+    none
+
+# The library file a `lib=` name stands for on the target being compiled for.
+# None, or 'c', is the C library; 'm' its math library; another bare name is the
+# system's usual file name for it. A name with a dot or slash is a file name.
+dw_ffi_library = (lib: str) -> str:
+    if find(lib, ".") >= 0 or find(lib, "/") >= 0: return lib
+    if lib == "" or lib == "c" or lib == "m":
+        if target_windows: return "msvcrt.dll"
+        if target_macos: return "/usr/lib/libSystem.B.dylib"
+        if lib == "m": return "libm.so.6"
+        return "libc.so.6"
+    if target_windows: return lib + ".dll"
+    if target_macos: return "lib" + lib + ".dylib"
+    "lib" + lib + ".so"
+
+dw_ffi_attr = (name: str, value: int, pos: int) -> int:
+    at = mk(.ident, pos)
+    nodes[at].name = i32(intern(name))
+    nodes[at].a = i32(value)
+    at
+
+dw_ffi_attach = (n: int, attrs: int[]):
+    ab = if nodes[n].c != 0: int(nodes[n].c) else: mk(.block, nodes[n].pos)
+    set_list(ab, kids(ab) + attrs)
+    nodes[n].c = i32(ab)
+
+# A function type in a C function's signature is a C function pointer.
+dw_ffi_c_types = (t: int):
+    if t == 0: return
+    if nodes[t].kind == .tfn: add_flag(t, NF_CABI)
+    else if nodes[t].kind == .topt: dw_ffi_c_types(int(nodes[t].a))
+
+# `name = (params):>R => $extern(...)`: a declaration without a body.
+dw_extern_finish = (n: int, parameters: int[], body: int, name: str) -> int:
+    pos = nodes[n].pos
+    if name == "": fatal(pos, "`$extern` declares a module-level function: `strlen = (s:ptr<uint8>):>uint64 => $extern`")
+    if has_flag(n, NF_GENERIC): fatal(pos, "a `$extern` function cannot be generic: C has one signature per symbol")
+    if nodes[n].a == 0 and not has_flag(n, NF_VOID): fatal(pos, "a `$extern` function states its result type, `:>int32` or `:>void`: there is no body to infer it from")
+    options = dw_ffi_options(body, "extern", ["name", "lib"])
+    loop p in parameters:
+        if has_flag(p, NF_MUT): fatal(nodes[p].pos, "a C function takes values, not `@` places: pass a `ptr<T>`")
+        if nodes[p].b != 0: fatal(nodes[p].pos, "a `$extern` parameter has no default: C gives every argument")
+        if nodes[p].a == 0: fatal(nodes[p].pos, "a `$extern` parameter states its type: C has one signature per symbol")
+        if nkids(p) > 0: fatal(nodes[p].pos, "a `$extern` parameter is one name")
+        dw_ffi_c_types(int(nodes[p].a))
+    dw_ffi_c_types(int(nodes[n].a))
+    add_flag(n, NF_EXTERN)
+    set_list(n, parameters)
+    attrs: int[]
+    if not target_wasm or options.has("lib"): attrs.push(dw_ffi_attr("lib", bc_str(dw_ffi_library(options.get("lib") ?? ""), pos), pos))
+    if let symbol = options.get("name"): attrs.push(dw_ffi_attr("symbol", bc_str(symbol, pos), pos))
+    dw_ffi_attach(n, attrs)
+    n
+
+# `name = (params):>R => $intrinsic`: the compiler provides it, so the
+# declaration states its name only; it binds nothing new.
+dw_intrinsic_check = (body: int, name: str, pos: int):
+    if dewy_syntax[dw_unwrap(body)].kind != .metatag: fatal(pos, "`$intrinsic` takes no arguments")
+    if name == "": fatal(pos, "`$intrinsic` names a module-level function the compiler provides")
+    if intrinsic_of(intern(name)) < 0: fatal(pos, "'{name}' is not a function the compiler provides, so it cannot be `$intrinsic`: give it a body, or `$extern` for a C function")
+
+# `$export` / `$export(name='c_name')` before a module function: callable from C
+# (with the C calling convention; its name is the symbol where the target has one).
+dw_export_pos = 0
+dw_export_name = ""
+
+dw_export_tag = (id: int) -> bool:
+    dw_ffi_body(id) == "export"
+
+dw_export_begin = (id0: int):
+    id = dw_unwrap(id0)
+    if dw_export_pos != 0: fatal(dewy_syntax[id].pos, "a second `$export`: one marks the function just after it")
+    dw_export_pos = dewy_syntax[id].pos
+    options = dw_ffi_options(id, "export", ["name"])
+    dw_export_name = options.get("name") ?? ""
+
+dw_export_attach = (made: int[]):
+    pos = dw_export_pos
+    dw_export_pos = 0
+    if made.len() != 1 or nodes[made[0]].kind != .fn_ or has_flag(made[0], NF_EXTERN): fatal(pos, "`$export` marks a module-level function with a body: put it on the line just before one")
+    n = made[0]
+    if has_flag(n, NF_GENERIC): fatal(pos, "an `$export` function cannot be generic: C has one signature per symbol")
+    if name_of(int(nodes[n].name)) == "main": fatal(pos, "`main` is the program's entry point, not an `$export` function")
+    loop p in kids(n):
+        if has_flag(p, NF_MUT): fatal(nodes[p].pos, "an `$export` function takes values, not `@` places: take a `ptr<T>`")
+        if nodes[p].a == 0: fatal(nodes[p].pos, "an `$export` parameter states its type: C has one signature per symbol")
+    if nodes[n].a == 0 and not has_flag(n, NF_VOID): fatal(pos, "an `$export` function states its result type, `:>int32` or `:>void`")
+    symbol = if dw_export_name != "": dw_export_name else: name_of(int(nodes[n].name))
+    dw_ffi_attach(n, [dw_ffi_attr("export", bc_str(symbol, pos), pos)])

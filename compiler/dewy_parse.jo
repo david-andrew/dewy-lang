@@ -15,6 +15,7 @@ use 'dewy_methods.jo'
 use 'effects.jo'
 use 'ownership.jo'
 use 'dewy_directives.jo'
+use 'dewy_ffi.jo'
 use 'directives.jo'
 use 'targets.jo'
 
@@ -1232,6 +1233,13 @@ dw_type = (id: int) -> int:
                 nodes[qualified].b = i32(dw_ref_predicate(constraint))
                 return qualified
         return n
+    # `ptr<T>`: a raw pointer for the C boundary (compiler/ffi.jo); `ptr<T>?` may be null
+    if dw_op(id) == .type_apply and dw_name(dw_child(id, 1)) == "ptr":
+        args = dw_child(id, 2)
+        if dw_nchildren(args) != 1: return dw_fail(id, "a pointer type other than ptr<T>")
+        n = mk(.tptr, pos)
+        nodes[n].a = i32(dw_type(dw_child(args, 0)))
+        return n
     if dw_op(id) == .type_apply and (dw_name(dw_child(id, 1)) == "dict" or dw_name(dw_child(id, 1)) == "totaldict"):
         args = dw_child(id, 2)
         if dw_nchildren(args) != 2: return dw_fail(id, "dictionary type constraints")
@@ -1453,6 +1461,13 @@ dw_function = (id: int, name: str) -> int:
             set_list(caplist, captures)
             nodes[n].d = i32(caplist)
         else: set_list2(n, captures)
+    ffi = dw_ffi_body(dw_child(id, 2))
+    if ffi != "":
+        dw_siblings = outer_siblings
+        if ffi == "extern" and captures.len() == 0: return dw_extern_finish(n, ps, dw_child(id, 2), name)
+        if ffi == "export": fatal(nodes[n].pos, "`$export` goes on the line just before the function it marks")
+        if ffi == "intrinsic": dw_intrinsic_check(dw_child(id, 2), name, nodes[n].pos)
+        fatal(nodes[n].pos, "`${ffi}` declares a module-level function")
     outer_result = dw_fn_result
     dw_fn_result = 1
     if result != 0 and dw_name(result) != "void": dw_fn_result = 2
@@ -2200,13 +2215,12 @@ dw_reserved_name = (name: str, at: int):
 dewy_reserved_name = (name: str, pos: int):
     if len(name) < 3: return
     c = name[0]
-    if c != 'e' and c != 'n' and c != 'v' and c != 'i': return
+    if c != 'e' and c != 'n' and c != 'v': return
     role = ""
     if name == "end": role = "inside brackets it is the last index, as in `xs[end]`"
     else if name == "new": role = "inside brackets it inserts an axis, as in `xs[new]`"
     else if name == "none": role = "it is the empty value"
     else if name == "void": role = "it is the type of no value"
-    else if name == "extern" or name == "intrinsic": role = "it is kept for declarations the compiler or a foreign library provides"
     if role == "": return
     fatal(pos, "'{name}' is reserved, not a name: {role} (use `{name}_`)")
 
@@ -3218,8 +3232,13 @@ dw_top_declarations = (id: int) -> int[]:
         proof_active = true
         refine_active = true
         return []
+    if dw_export_tag(tag):
+        dw_export_begin(tag)
+        return []
+    exported = dw_export_pos != 0
     pending = proof_pending
     made = dw_top_declarations_inner(id)
+    if exported: dw_export_attach(made)
     if pending:
         if made.len() != 1 or nodes[made[0]].kind != .fn_: fatal(dewy_syntax[id].pos, "$proof requires a function declaration")
         if not proof_decls.has(made[0]): proof_decls[made[0]] = 0
@@ -3262,7 +3281,11 @@ dw_top_declarations_inner = (id: int) -> int[]:
             declarations: int[]
             dw_overload_members(initial, name, declarations)
             return declarations
-        if name != "" and dw_op(initial) == .function: return [dw_function(initial, name)]
+        if name != "" and dw_op(initial) == .function:
+            if dw_ffi_body(dw_child(initial, 2)) == "intrinsic":
+                dw_intrinsic_check(dw_child(initial, 2), name, dewy_syntax[initial].pos)
+                return []
+            return [dw_function(initial, name)]
     dw_with_methods(dw_stmt(id, true))
 
 # A declaration followed by the module functions its type's methods became.

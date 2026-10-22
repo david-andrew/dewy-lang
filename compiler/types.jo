@@ -860,7 +860,9 @@ type_str_in = (t0: int, dewy: bool) -> str:
         fixed:
             if dewy: return "array<{type_str(int(ti.elem), dewy)} length={ti.bits}>"
             "{type_str_postfix(int(ti.elem), dewy)}[{ti.bits}]"
-        ptr: "*{type_str(int(ti.elem), dewy)}"
+        ptr:
+            if dewy: return "ptr<{type_str(int(ti.elem), dewy)}>"
+            "*{type_str(int(ti.elem), dewy)}"
         opt:
             # (a bare none, whose other type is not known yet)
             if dewy and tkind(int(ti.elem)) == .var: return "none"

@@ -1600,9 +1600,10 @@ axis. Axes after the last entry are kept whole. The result is a new nested
 array; `new` on an NDArray is not supported yet, and the selection cannot be
 assigned to.
 
-`end`, `new`, `none`, `void`, `extern` and `intrinsic` are reserved: none of
-them can name a variable, function, parameter, field, method, loop or pattern
-binding, or import alias.
+`end`, `new`, `none` and `void` are reserved: none of them can name a
+variable, function, parameter, field, method, loop or pattern binding, or import
+alias. (`extern` and `intrinsic` are ordinary names; the forms are the `$extern`
+and `$intrinsic` metatags, under "Foreign functions".)
 
 Array literals take their element type from a function parameter, including
 nested arrays and optional array parameters. For example,
@@ -2423,6 +2424,74 @@ paths of its files and those made with `mkdir`. Processes are `SpawnError` there
 On Windows, `run` works and `run_silent`, `spawn` and `capture` are not available
 yet (`SpawnError`).
 
+## Foreign functions
+
+A function whose body is the metatag `$extern` is a C function. Its signature is
+the C one: fixed-width numbers, `bool`, raw pointers `ptr<T>`, and as
+parameters also strings (passed as a zero-terminated `char *`) and function types
+(C function pointers). `int` is rejected, since its size is not fixed. Optional
+keyword arguments give the C name and the library:
+
+```dewy
+strlen=(s:ptr<uint8>):>uint64 => $extern
+getenv=(name:string):>ptr<uint8>? => $extern
+sleep_ms=(ms:uint32):>void => $extern(name='Sleep' lib='kernel32')
+```
+
+Without `lib=`, or with `lib='c'`, the function is in the C library
+(`libc.so.6`, `libSystem` or `msvcrt.dll`); `lib='m'` is the math library. Another
+bare name is the system's usual file for it (`kernel32.dll`, `libz.so`,
+`libz.dylib`), and a name with a dot or a slash is used as written
+(`lib='libsqlite3.so.0'`). The library is loaded when the function is first
+called. A web build imports it from the page under its Dewy name; Dewy has no
+spelling yet for the JavaScript that supplies it.
+
+`ptr<T>` is a raw pointer, never null; `ptr<T>?` may be null, which is `none` on
+the Dewy side. `p[i]` reads and writes the `i`th `T` from `p`, `p + n` is `n`
+elements on, and `p as ptr<U>` reinterprets it. A C function's result is the
+claim of its declaration: one declared `ptr<T>` must not return null.
+
+Calling a `$extern` function, or naming it as a value, and reading or writing
+through a `ptr<T>` need an unsafe boundary: the setting `$unsafe` on a line of
+its own in an enclosing block, function body or module. The compiler cannot
+check what foreign code does, so the boundary marks where a person must. No
+bundle may hold `$unsafe`. A safe wrapper confines it:
+
+```dewy
+getpid=():>int32 => $extern
+pid=():>int32 => {
+    $unsafe
+    getpid()
+}
+```
+
+A foreign call is opaque to effect rows: a function declared `& no_effects`, or
+any closed row, cannot call one. A row written on the `$extern` declaration
+itself (`labs=(x:int64):>int64 & no_effects => $extern`) is trusted instead, as
+part of the unsafe claim.
+
+`$export` on the line before a module function gives it the C calling
+convention, so C can call it through a function pointer; `$export(name='sym')`
+names its symbol where the target exports one (WebAssembly builds export it to
+the page). `@f` passes it where a C function type is expected:
+
+```dewy
+qsort=(base:ptr<int32> count:uint64 size:uint64 compare:<(a:ptr<int32> b:ptr<int32>):>int32>):>void => $extern
+
+$export
+ascending=(a:ptr<int32> b:ptr<int32>):>int32 => {
+    $unsafe
+    return if a[0] <? b[0] -1 else if a[0] >? b[0] 1 else 0
+}
+```
+
+An exported function takes and returns the same kinds of values, but not yet
+`ptr<T>?`. Native executables do not export symbols yet, so C reaches an
+exported function only through a pointer that Dewy gives it.
+
+A function whose body is `$intrinsic` states one the compiler provides
+(`sqrt=(x:float64):>float64 => $intrinsic`); any other name is an error.
+
 ## Loops, text and optional values
 
 `printl(x)` writes a value and a line break; `print(x)` writes it without one.
@@ -3109,7 +3178,8 @@ compiles to a runtime check, one per line, with the setting responsible
 `$explicit_copies` (described with `.copy` above) is a setting like these, for
 a module, a function or a block. So are the float settings `$fast_math`,
 `$no_nan` and `$no_inf`, and the library bundle `$finite_floats` (both of the
-latter), described with the numeric types.
+latter), described with the numeric types. `$unsafe`, the unsafe boundary, is one too
+(see "Foreign functions"), though no bundle may hold it.
 
 A bundle is one metatag for several settings, defined at module level:
 

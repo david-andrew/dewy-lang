@@ -1,0 +1,10 @@
+# modes: native
+# `$unsafe` holds in the block it is written in, not after it.
+getpid=():>int32 => $extern
+main=():>void=>{
+    if true {
+        $unsafe
+        printl(getpid() >? 0)
+    }
+    printl(getpid())
+}

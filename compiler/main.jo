@@ -1024,7 +1024,7 @@ extern_lib_check = (fi: int):
     else if not target_windows and ends_with(lc, ".dll"): other = "a Linux or macOS program loads .so or .dylib libraries"
     else if target_macos and find(lc, ".so") >= 0: other = "a macOS program loads .dylib libraries (/usr/lib/libSystem.B.dylib has the C library)"
     else if not target_macos and not target_windows and ends_with(lc, ".dylib"): other = "a Linux program loads .so libraries (libc.so.6 has the C library)"
-    if len(other) > 0: warn(nodes[d].pos, "@lib(\"{cl}\") is another system's library: {other}; `when TARGET == \"windows\":` gives each system its own @lib (as it is, the program stops when it calls {name_of(int(nodes[d].name))})")
+    if len(other) > 0: warn(nodes[d].pos, "{jd(nodes[d].pos, "@lib(\"{cl}\")", "lib='{cl}'")} is another system's library: {other}; {jd(nodes[d].pos, "`when TARGET == \"windows\":` gives each system its own @lib", "`if $target.os =? \"windows\" \{...}` gives each system its own declaration")} (as it is, the program stops when it calls {name_of(int(nodes[d].name))})")
 
 # (an FNV-1a hash of a path, as 8 hex digits)
 path_hash = (p: str) -> str:

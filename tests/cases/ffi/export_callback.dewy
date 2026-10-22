@@ -1,0 +1,26 @@
+# modes: native native-release
+# An `$export` function has the C calling convention: C's qsort calls it back.
+qsort=(base:ptr<int32> count:uint64 size:uint64 compare:<(a:ptr<int32> b:ptr<int32>):>int32>):>void => $extern
+
+$export
+ascending=(a:ptr<int32> b:ptr<int32>):>int32 => {
+    $unsafe
+    return if a[0] <? b[0] -1 else if a[0] >? b[0] 1 else 0
+}
+
+$export(name='dewy_descending')
+descending=(a:ptr<int32> b:ptr<int32>):>int32 => {
+    $unsafe
+    return if a[0] >? b[0] -1 else if a[0] <? b[0] 1 else 0
+}
+
+main=():>void=>{
+    $unsafe
+    let xs:array<int32>=[5 -3 9 1 0]
+    qsort(data(xs) 5 4 @ascending)
+    printl(xs)
+    qsort(data(xs) 5 4 @descending)
+    printl(xs)
+    # (still an ordinary function from Dewy)
+    printl(descending(data(xs) data(xs)))
+}

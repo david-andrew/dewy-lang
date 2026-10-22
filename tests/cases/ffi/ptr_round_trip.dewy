@@ -1,0 +1,27 @@
+# modes: native native-release
+# Raw pointers from C: write and read through them, offset and reinterpret
+# them, and hand a nullable one back.
+malloc=(size:uint64):>ptr<uint8>? => $extern
+free=(p:ptr<uint8>?):>void => $extern
+memset=(p:ptr<uint8> value:int32 n:uint64):>ptr<uint8> => $extern
+strlen=(s:ptr<uint8>):>uint64 => $extern
+
+main=():>void=>{
+    $unsafe
+    let block=malloc(32)
+    if block is? none {
+        printl("out of memory")
+        return
+    }
+    let p:ptr<uint8>=block
+    memset(p 0 32)
+    loop i in [0..5) { p[i]=uint8(97+i) }
+    printl(strlen(p))
+    let tail=p + 2
+    printl(tail[0] strlen(tail))
+    let words=p as ptr<uint32>
+    words[2]=0x01020304
+    printl(p[8] p[11])
+    free(block)
+    free(none)
+}

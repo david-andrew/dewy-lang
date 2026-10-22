@@ -1,0 +1,13 @@
+# modes: native
+# A row on a foreign function is trusted; without one it is opaque.
+labs=(x:int64):>int64 & no_effects => $extern
+getpid=():>int32 => $extern
+quiet=(x:int64):>int64 & no_effects => {
+    $unsafe
+    labs(x) + 1
+}
+noisy=():>int64 & no_effects => {
+    $unsafe
+    int64(getpid())
+}
+main=():>void=>printl(quiet(-4) noisy())

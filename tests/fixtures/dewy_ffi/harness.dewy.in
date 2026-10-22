@@ -1,0 +1,36 @@
+apply_twice=(f:<(x:int32):>int32> x:int32):>int32 => $extern(lib=LIBRARY)
+fold=(xs:ptr<int64> n:int32 step:<(acc:int64 x:int64):>int64> start:int64):>int64 => $extern(lib=LIBRARY)
+greeting=():>ptr<uint8> => $extern(lib=LIBRARY)
+find=(xs:ptr<int64> n:int32 value:int64):>ptr<int64>? => $extern(lib=LIBRARY)
+scale=(out:ptr<float64> n:int32 by:float64):>void => $extern(lib=LIBRARY)
+is_null=(p:ptr<uint8>?):>int32 => $extern(lib=LIBRARY)
+c_string_length=(s:ptr<uint8>):>uint64 => $extern(name='strlen')
+
+$export
+add_one=(x:int32):>int32 => x + 1
+
+$export(name='dewy_weighted')
+weighted=(acc:int64 x:int64):>int64 => acc * 10 + x
+
+main=():>void=>{
+    $unsafe
+    printl(apply_twice(@add_one 40))
+    let xs:array<int64>=[1 2 3 4]
+    printl(fold(data(xs) 4 @weighted 0))
+    let text=greeting()
+    let n=c_string_length(text)
+    let bytes:array<uint8>=[]
+    loop i in [0..int64(n)) { bytes.push(text[i]) }
+    printl(bytes.length text[0] text[int64(n) - 1])
+    let found=find(data(xs) 4 3)
+    if found isnt? none {
+        let at:ptr<int64>=found
+        at[0]=30
+    }
+    printl(xs)
+    printl(find(data(xs) 4 99) is? none)
+    let ys:array<float64>=[1.5 2.0]
+    scale(data(ys) 2 4.0)
+    printl(ys)
+    printl(is_null(none) is_null(text))
+}

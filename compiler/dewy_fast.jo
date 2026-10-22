@@ -9,6 +9,7 @@ use 'proofs.jo'
 use 'dewy_tokens.jo'
 use 'dewy_direct.jo'
 use 'dewy_directives.jo'
+use 'dewy_ffi.jo'
 
 struct DewyLexeme:
     kind: DewyKind
@@ -44,8 +45,6 @@ dn_type_id = 0
 dn_none_id = 0
 dn_new_id = 0
 dn_void_id = 0
-dn_extern_id = 0
-dn_intrinsic_id = 0
 
 # Reserved words cannot be bound; the reference grammar reports them.
 dn_reserved_words: bool[]
@@ -58,10 +57,8 @@ dn_init_words = ():
     dn_none_id = intern("none")
     dn_new_id = intern("new")
     dn_void_id = intern("void")
-    dn_extern_id = intern("extern")
-    dn_intrinsic_id = intern("intrinsic")
     dn_reserved_words = fill(false, names.len())
-    loop word in [dn_end_id, dn_new_id, dn_none_id, dn_void_id, dn_extern_id, dn_intrinsic_id]: dn_reserved_words[word] = true
+    loop word in [dn_end_id, dn_new_id, dn_none_id, dn_void_id]: dn_reserved_words[word] = true
     dn_true_id = intern("true")
     dn_false_id = intern("false")
     dn_is_id = intern("is")
@@ -1151,6 +1148,7 @@ dewy_fast_file = (file: int) -> int[]:
         dewy_syntax.truncate(2)
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a declaration")
     if proof_pending: dn_error(dn_tokens[dn_at].start, "$proof requires a following function declaration")
+    if dw_export_pos != 0: fatal(dw_export_pos, "`$export` marks a module-level function: put it on the line just before one")
     if marked != 0: fatal(nodes[marked].pos, "`$test` marks a module-level function: put it on the line just before one")
     if shadowable_pos != 0: fatal(shadowable_pos, "`$shadowable` marks a module-level const: put it just before one")
     dn_tokens = []
