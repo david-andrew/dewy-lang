@@ -333,10 +333,10 @@ def test_core_recursive_deep_drop(compiler, tmp_path, target, release):
 
 
 @pytest.mark.parametrize('source, message', [
-    ('Bad:type=[next:Bad]\nmain=()=>0', 'no finite value'),
-    ('Node:type=[value:int64 next:Node?=none]\nmain=()=>{const n=Node[1 Node[2]] if n.next is?none return 0 n.next.value=3 return 0}', 'cannot modify const'),
-    ('Node:type=[value:int64 next:Node?=none]\nmain=()=>{let n:Node?=Node[1] loop n is?Node {n=none return n.value} return 0}', 'none'),
-    ('A:type=[b:B]\nB:type=[a:A]\nmain=()=>0', 'no finite value'),
+    ('Bad:type=[next:Bad]\nmain=():>void=>exit(entry()) entry=()=>0', 'no finite value'),
+    ('Node:type=[value:int64 next:Node?=none]\nmain=():>void=>exit(entry()) entry=()=>{const n=Node[1 Node[2]] if n.next is?none return 0 n.next.value=3 return 0}', 'cannot modify const'),
+    ('Node:type=[value:int64 next:Node?=none]\nmain=():>void=>exit(entry()) entry=()=>{let n:Node?=Node[1] loop n is?Node {n=none return n.value} return 0}', 'none'),
+    ('A:type=[b:B]\nB:type=[a:A]\nmain=():>void=>exit(entry()) entry=()=>0', 'no finite value'),
     ('struct Node:\n    next: Node?\nextern use_node = (n: *Node)\nmain = ():\n    n: Node\n    use_node(&n)\n', 'cannot cross the C ABI'),
     ('''Node:type=[value:int64]
 f=(input:Node? change:bool):>int64=>{
@@ -344,14 +344,14 @@ let x=input
 if x is?none return 0
 if change {x=none}
 return x.value}
-main=()=>{return f(Node[42] true)}''', 'none'),
+main=():>void=>exit(entry()) entry=()=>{return f(Node[42] true)}''', 'none'),
     ('''Node:type=[value:int64]
 f=(input:Node? change:bool):>int64=>{
 let x=input
 if x is?none return 0
 loop true {if change {x=none break} break}
 return x.value}
-main=()=>{return f(Node[42] true)}''', 'none'),
+main=():>void=>exit(entry()) entry=()=>{return f(Node[42] true)}''', 'none'),
     ('''Node:type=[value:int64]
 f=(input:Node? change:bool):>int64=>{
 let x=input
@@ -359,40 +359,40 @@ if x is?none return 0
 {x=none}
 if change {x=none} else {return x.value}
 return 0}
-main=()=>{return f(Node[42] false)}''', 'none'),
+main=():>void=>exit(entry()) entry=()=>{return f(Node[42] false)}''', 'none'),
     ('''Node:type=[value:int64]
 f=(input:Node? change:bool):>int64=>{
 let x=input
 if x is?none return 0
 if change {x=none} else {}
 return x.value}
-main=()=>{return f(Node[42] true)}''', 'none'),
+main=():>void=>exit(entry()) entry=()=>{return f(Node[42] true)}''', 'none'),
     ('''Node:type=[value:int64]
 f=(input:Node? choice:int64):>int64=>{
 let x=input
 if x is?none return 0
 let ignored=match choice {<0>=>{x=none 10} _=>20}
 return x.value}
-main=()=>{return f(Node[42] 0)}''', 'none'),
+main=():>void=>exit(entry()) entry=()=>{return f(Node[42] 0)}''', 'none'),
     # local-else
     ('''Node:type=[value:int64]
 f=(input:Node?):>int64=>{let x=input
 if x is?none {return 0} else {x=none}
 return x.value}
-main=()=>f(Node[42])''', 'check it with `is?none`'),
+main=():>void=>exit(entry()) entry=()=>f(Node[42])''', 'check it with `is?none`'),
     # local-then
     ('''Node:type=[value:int64]
 f=(input:Node?):>int64=>{let x=input
 if x is?Node {x=none} else {return 0}
 return x.value}
-main=()=>f(Node[42])''', 'may be none'),
+main=():>void=>exit(entry()) entry=()=>f(Node[42])''', 'may be none'),
     # field-else
     ('''Node:type=[value:int64]
 Box:type=[child:Node?]
 f=(input:Box):>int64=>{let x=input
 if x.child is?none {return 0} else {x.child=none}
 return x.child.value}
-main=()=>f(Box[Node[42]])''', 'may be none'),
+main=():>void=>exit(entry()) entry=()=>f(Box[Node[42]])''', 'may be none'),
     # field-block
     ('''Node:type=[value:int64]
 Box:type=[child:Node?]
@@ -400,7 +400,7 @@ f=(input:Box):>int64=>{let x=input
 if x.child is?none return 0
 {x.child=none}
 return x.child.value}
-main=()=>f(Box[Node[42]])''', 'may be none'),
+main=():>void=>exit(entry()) entry=()=>f(Box[Node[42]])''', 'may be none'),
     # parent-block
     ('''Node:type=[value:int64]
 Box:type=[child:Node?]
@@ -408,7 +408,7 @@ f=(input:Box):>int64=>{let x=input
 if x.child is?none return 0
 {x=Box[none]}
 return x.child.value}
-main=()=>f(Box[Node[42]])''', 'may be none'),
+main=():>void=>exit(entry()) entry=()=>f(Box[Node[42]])''', 'may be none'),
     # field-join
     ('''Node:type=[value:int64]
 Box:type=[child:Node?]
@@ -416,7 +416,7 @@ f=(input:Box change:bool):>int64=>{let x=input
 if x.child is?none return 0
 if change {x.child=none} else {}
 return x.child.value}
-main=()=>f(Box[Node[42]] true)''', 'may be none'),
+main=():>void=>exit(entry()) entry=()=>f(Box[Node[42]] true)''', 'may be none'),
     # nested-parent-block
     ('''Node:type=[value:int64 next:Node?=none]
 Box:type=[child:Node?]
@@ -425,20 +425,20 @@ if x.child is?none return 0
 if x.child.next is?none return 0
 {x.child=Node[42]}
 return x.child.next.value}
-main=()=>f(Box[Node[1 Node[42]]])''', 'may be none'),
+main=():>void=>exit(entry()) entry=()=>f(Box[Node[1 Node[42]]])''', 'may be none'),
     # local-union
     ('''A:type=[value:int64]
 B:type=[text:string]
 f=(input:A|B):>int64=>{let x=input
 if x is?B {return 0} else {x=B["changed"]}
 return x.value}
-main=()=>f(A[42])''', 'has no field'),
+main=():>void=>exit(entry()) entry=()=>f(A[42])''', 'has no field'),
     # branch-local-escape
     ('''Node:type=[value:int64]
 f=(input:Node?):>int64=>{let x=input
 if x is?none {return 0} else {let hidden=42}
 return hidden}
-main=()=>f(Node[42])''', "unknown name 'hidden'"),
+main=():>void=>exit(entry()) entry=()=>f(Node[42])''', "unknown name 'hidden'"),
 
     # returning-labeled-break
     ('''Node:type=[value:int64]
@@ -448,7 +448,7 @@ $outer loop true {
 if change {loop true {x=none break $outer} return 1}
 break}
 return x.value}
-main=()=>f(Node[42] true)''', 'may be none'),
+main=():>void=>exit(entry()) entry=()=>f(Node[42] true)''', 'may be none'),
     # returning-labeled-continue
     ('''Node:type=[value:int64]
 f=(input:Node? change:bool):>int64=>{let x=input
@@ -456,7 +456,7 @@ if x is?none return 0
 $outer loop i in [0..2) {
 if change {loop true {x=none continue $outer} return 1}}
 return x.value}
-main=()=>f(Node[42] true)''', 'may be none'),
+main=():>void=>exit(entry()) entry=()=>f(Node[42] true)''', 'may be none'),
     # returning-prior-invalid
     ('''Node:type=[value:int64]
 f=(input:Node? change:bool):>int64=>{let x=input
@@ -464,7 +464,7 @@ if x is?none return 0
 {x=none}
 if change {return 1}
 return x.value}
-main=()=>f(Node[42] false)''', 'may be none'),
+main=():>void=>exit(entry()) entry=()=>f(Node[42] false)''', 'may be none'),
 
 ])
 def test_core_recursive_layout_diagnostics(compiler, tmp_path, source, message):
@@ -559,7 +559,7 @@ probe=()=>{
 let node=Node[20 Node[22]]
 printl(node.value)
 return 0}
-main=()=>probe()
+main=():>void=>exit(entry()) entry=()=>probe()
 ''')
     binary = tmp_path / 'debug'
     built = subprocess.run([compiler, 'build', source, '-g', '-o', binary],
@@ -620,7 +620,7 @@ prime=(b:Box)=>{if b.child is?B return 0 return b.child.value}
     # Each build is a fresh compiler process. A combined value batch could
     # conceal the bug by checking another function's field guard first.
     for order in ('none', 'before', 'after'):
-        source = prefix + 'main=()=>{let x=Box[' + initial + ']\n'
+        source = prefix + 'main=():>void=>exit(entry()) entry=()=>{let x=Box[' + initial + ']\n'
         if order == 'before':
             source += 'prime(x)\n'
         source += 'x.child=' + value + '\n'

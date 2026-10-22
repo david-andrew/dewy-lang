@@ -106,7 +106,7 @@ def test_strict_index_lane(compiler, tmp_path, stale, release):
     actuals = '@xs' if stale else 'xs 0'
     source = tmp_path / 'index.dewy'
     source.write_text(f'forbidden=({params}):>int64=>{{{body}}}\n'
-                      f'main=()=>{{let xs:array<int64>=[1]; forbidden({actuals})}}\n')
+                      f'main=():>void=>exit(entry()) entry=()=>{{let xs:array<int64>=[1]; forbidden({actuals})}}\n')
     arguments = [compiler, 'build', source, '-o', tmp_path / 'program',
                  *(['--release'] if release else [])]
     ordinary = subprocess.run(arguments, text=True, capture_output=True, timeout=30)

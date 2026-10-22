@@ -58,7 +58,7 @@ def test_region_order_and_fallbacks(compiler, tmp_path, release):
     output, _ = build(compiler, tmp_path, '''
 emit=(x:int64):>int64=>{printl"{x}" return x}
 make=():>array<int64>=>[parallel i in [0..2) i+10]
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
  let values=[parallel i in [3..5) emit(i)]
  printl"{values[1]} {values[0]}"
  let escaped=make()
@@ -78,7 +78,7 @@ main=()=>{
 
 def test_region_panic(compiler, tmp_path):
     output, _ = build(compiler, tmp_path, '''
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
  let values=[parallel i in [0..2) {if i =? 1 panic("region failure") i}]
  printl"{values[0]+values[1]}"
  return 0
@@ -96,7 +96,7 @@ Callback:type=(i:int64):>int64
 invoke=(f:Callback):>int64=>f(3)
 forward=(f:Callback):>int64=>invoke((i:int64):>int64=>f(i)+f(i+1))
 escape=(f:Callback):>Callback=>(i:int64):>int64=>f(i)+1
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
  let value:int64=7
  assert(forward((i:int64):>int64=>value+i) =? 21)
  let saved=escape((i:int64):>int64=>value+i)
@@ -115,7 +115,7 @@ main=()=>{
 def test_region_random_stream_isolation(compiler, tmp_path):
     output, _ = build(compiler, tmp_path, '''
 draw_value=(i:int64):>float64=>random()+float64(i)
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
  seed_random(17)
  let expected=random()
  seed_random(17)
@@ -135,7 +135,7 @@ def test_region_hidden_callback_context(compiler, tmp_path):
 Item:type=[value:int64]
 __eq__=(a:Item b:Item):>bool=>{random() return a.value =? b.value}
 observe=(i:int64):>bool=>[Item[i]] =? [Item[i]]
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
  seed_random(17)
  let expected=random()
  seed_random(17)

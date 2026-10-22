@@ -18,7 +18,7 @@ step=(above:array<float64> center:array<float64> below:array<float64>):>array<fl
  }
  return out
 }
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
  loop n in [2..35) {
   let a=[loop i in [0..n) (i*i) as float64]
   let b=step(a a a)
@@ -42,7 +42,7 @@ main=()=>{
 def test_stencil_control_flow_keeps_scalar_meaning(compiler, tmp_path, control):
     source = tmp_path / 'control.dewy'
     source.write_text('''
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
  let a=[loop i in [0..32) i as int64]
  let out=[loop i in [0..32) 0 as int64]
  loop j in [1..31) {

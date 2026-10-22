@@ -31,7 +31,7 @@ tree=(n:int64 offset:int64):>TYPE=>{
  let parts=[parallel i in [0..2) tree(n-1 offset*2+i)]
  return parts[0]-parts[1]*TYPE(0.5)
 }
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
  loop round in [0..4) {
   let values=[parallel i in [0..17) [parallel j in [0..5) tree(12 i*5+j)]]
   loop i in [0..17) {loop j in [0..5) {printl"{values[i][j]}"}}
@@ -56,7 +56,7 @@ def test_panic_in_nested_job(compiler, tmp_path, managed):
             'printl"{parts[0]+parts[1]}"')
     binary = build(compiler, tmp_path, '''
 fib=(n:int64):>int64=>{if n <? 2 return n return fib(n-1)+fib(n-2)}
-main=()=>{BODY return 0}
+main=():>void=>exit(entry()) entry=()=>{BODY return 0}
 '''.replace('BODY', body))
     for workers in (1, 2):
         result = run(binary, workers)
@@ -95,7 +95,7 @@ main = () -> int:
 def test_scalar_job_result_width(compiler, tmp_path, scalar):
     expression = 'i-5' if scalar.startswith('int') else 'i+128'
     binary = build(compiler, tmp_path, '''
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
  let values=[parallel i in [0..8) TYPE(EXPR)]
  printl"{values[0]} {values[3]} {values[7]}"
  return 0
@@ -155,7 +155,7 @@ work=():>void=>{
  assert(input =? [10 20 30])
  assert(output =? [16 20 30])
 }
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
  work()
  let before=alloc_count()
  loop i in [0..12) {work()}

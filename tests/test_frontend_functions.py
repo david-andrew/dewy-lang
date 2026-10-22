@@ -14,7 +14,7 @@ def test_direct_module_function(compiler, tmp_path, release):
     source.write_text('''increment=(@value:int64):>void=>{value+=1}
 add=(value:int64 extra:int64=1):>int64=>value+extra
 length=(values:array<int64>):>int64=>values.length
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
     let value:int64=40
     increment(@value)
     return add(value)

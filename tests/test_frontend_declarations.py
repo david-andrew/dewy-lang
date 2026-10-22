@@ -13,7 +13,7 @@ def test_direct_declarations(compiler, tmp_path, release):
     source = tmp_path / 'declarations.dewy'
     source.write_text('''const base=40
 let global:int64=1
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
     let result:int64=base+global
     const extra=1
     let local:int64=result+extra

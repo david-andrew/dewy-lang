@@ -13,7 +13,7 @@ def test_direct_expression_identity(compiler, tmp_path, release):
     source = tmp_path / 'expressions.dewy'
     source.write_text('''Point:type=[x:int64 y:int64]
 twice=(x:int64):>int64=>x*2
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
     let point=Point[10 11]
     let values=[1 2 3]
     let callback=(x:int64):>int64=>x+1

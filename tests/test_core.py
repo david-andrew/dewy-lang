@@ -255,7 +255,7 @@ def test_core_json_scanning(compiler, tmp_path, target, release):
 def test_core_generated_binding_warnings(compiler, tmp_path, release, unused):
     source = tmp_path / 'warnings.dewy'
     binding = 'let forgotten=23' if unused else ''
-    source.write_text('Point:type=[x:int64 y:int64]\nmain=()=>{\n'
+    source.write_text('Point:type=[x:int64 y:int64]\nmain=():>void=>exit(entry()) entry=()=>{\n'
                       'let base=Point[1 2]\nlet result=[base... x=20 x=40 y=2]\n'
                       + binding + '\nreturn result.x+result.y}\n')
     flags = ['--release'] if release else []
@@ -301,8 +301,8 @@ def test_core_copy_warning_dewy_syntax(compiler, tmp_path, scope):
     body = 'item.hp-=5 return xs[0].hp'
     source = tmp_path / 'copy.dewy'
     source.write_text('Item:type=[hp:int64]\n' +
-                      (bindings + f'main=()=>{{{body}}}' if scope == 'global'
-                       else f'main=()=>{{{bindings}{body}}}'))
+                      (bindings + f'main=():>void=>exit(entry()) entry=()=>{{{body}}}' if scope == 'global'
+                       else f'main=():>void=>exit(entry()) entry=()=>{{{bindings}{body}}}'))
     checked = subprocess.run([compiler, 'check', source], capture_output=True, text=True,
                              timeout=30, check=False)
     assert checked.returncode == 0, checked.stdout + checked.stderr
@@ -323,7 +323,7 @@ let total=result.left+result.right
 printl"{total}"
 return total
 }
-main=()=>probe()
+main=():>void=>exit(entry()) entry=()=>probe()
 ''')
     binary = tmp_path / 'program'
     built = subprocess.run([compiler, 'build', source, '-g', '-o', binary],
@@ -621,7 +621,7 @@ def test_core_magnitude_reference(compiler, tmp_path, target, release):
     rows = '\n'.join('[' + ' '.join(str(bits(v)) for v in values) + ']' for values in cases)
     source = tmp_path / 'magnitudes.dewy'
     source.write_text('let rows:array<array<uint64>>=[\n' + rows + '''\n]
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
 loop words in rows {
 let values=[loop word in words f64_from_bits(word)]
 let pair=if values.length =? 2 hypot(values[0] values[1]) else 0.0
@@ -766,7 +766,7 @@ fractional=(value=fraction)=>value*7
     source = tmp_path / 'main.dewy'
     source.write_text('''from bigint import bigint
 from constants import amount, read, fractional
-main=()=>if amount+1 =? read() and read(bigint(18446744073709551616)) =? bigint(18446744073709551617)
+main=():>void=>exit(entry()) entry=()=>if amount+1 =? read() and read(bigint(18446744073709551616)) =? bigint(18446744073709551617)
 and fractional() =? amount 42 else 1
 ''')
     binary = tmp_path / 'modules'
@@ -1126,7 +1126,7 @@ def test_core_bounded_remainder_ir(compiler, tmp_path, target, release):
 def test_core_constant_floor_ir(compiler, tmp_path, target):
     source = tmp_path / 'constant.dewy'
     source.write_text('''probe=(a:int64):>int64=>a%3+a//3+a%8+a//8
-main=()=>probe(-7)
+main=():>void=>exit(entry()) entry=()=>probe(-7)
 ''')
     built = subprocess.run([compiler, 'build', source, '--ir', '--target', target_name(target),
                             '-o', tmp_path / 'constant'],
@@ -1323,7 +1323,7 @@ walk=(n:int64):>int64=>{
     loop i in [0..n) {if i<?2 {total+=i; continue} total+=walk(i-2)}
     total+1
 }
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
     let a=0 let b=1
     loop n in [0..15) {
         if fib(n) not=?a or fib_float(n) not=?(a as float64) return 1
@@ -1604,7 +1604,7 @@ def test_core_compiler_hosts(compiler, tmp_path, host):
         if runner := shutil.which('qemu-aarch64'):
             source = tmp_path / 'values.dewy'
             source.write_text('''from bigint import BigInt
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
 let original=[20 21] let changed=original
 loop @item in changed {item+=1}
 assert(original =? [20 21] and changed =? [21 22])
@@ -1813,7 +1813,7 @@ identity[T] = (value: T) -> T: value
     source.write_text('''import p"support.dewy" as a
 import p"other.jo" as b
 from p"support.dewy" import (Box as Package), wrap
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
     let one:a.Box<int64>=a.Box<int64>[20]
     let two=b.Box<int64>(22)
     let nested:b.Nested<string>=[value=["one"]]
@@ -1872,7 +1872,7 @@ events = () -> str: trace
 ''')
     source = tmp_path / 'main.dewy'
     source.write_text('''from p"store.jo" import Store, at, events, reset
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
     let root=[Store<array<int64>>[values=[[1 2]]]]
     let original=root
     root[at("a" 0)][at("b" 0)][at("c" 1)]+=at("r" 40)
@@ -1993,7 +1993,7 @@ def test_core_ring_example(compiler, tmp_path, case, target, release):
         source.write_text((examples / 'history.dewy').read_text())
     elif case == 'iteration':
         source.write_text('''from p"ring.dewy" import new_ring
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
 let ring=new_ring<int64>(4) loop i in [0..6) ring.push(i)
 let saved=ring let sum=0 let both=0 let either=0
 loop x in ring and y in [20 22] both+=x+y
@@ -2006,7 +2006,7 @@ and tripled =? [6 9 12 15] and saved[0] =? 2 and ring[0] =? 99 42 else 1
 ''')
     elif case == 'managed-values':
         source.write_text('''from p"ring.dewy" import new_ring
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
 let ring=new_ring<array<string>>(2)
 loop i in [0..7) {ring.push(["{i}"])}
 let snapshot=ring
@@ -2024,7 +2024,7 @@ return if empty.len() =? 1 and empty[0] =? 42 42 else 4
         action = {'capacity': 'new_ring<int64>(0)',
                   'negative-index': 'ring[-1]', 'past-end': 'ring[1]'}[case]
         source.write_text(f'from p"ring.dewy" import new_ring\n'
-                          f'main=()=>{{let ring=new_ring<int64>(2) ring.push(42) {action} return 0}}')
+                          f'main=():>void=>exit(entry()) entry=()=>{{let ring=new_ring<int64>(2) ring.push(42) {action} return 0}}')
     binary = tmp_path / 'ring'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -2075,7 +2075,7 @@ erase=():>int64=>{pool.remove(h) return 22}
         setup = 'h=pool.add([20])'
         update = 'pool[h][0]+=erase()'
     source = tmp_path / 'invalid.dewy'
-    source.write_text(declarations + f'main=()=>{{{setup} {update} return 0}}')
+    source.write_text(declarations + f'main=():>void=>exit(entry()) entry=()=>{{{setup} {update} return 0}}')
     binary = tmp_path / 'invalid'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -2370,7 +2370,7 @@ mapped=<T>(a:array<T>):>array<T>=>[loop x in a x*2.5+1.0]
 fused=<T>(a:array<T> b:array<T>):>array<T>=>a .* 2.0 .+ b .* 0.5 .+ 1.0
 negated=<T>(a:array<T>):>array<T>=>.-a
 negloop=<T>(a:array<T>):>array<T>=>[loop x in a -x]
-main=(argv:array<string>)=>{
+main=(argv:array<string>):>void=>exit(entry(argv)) entry=(argv:array<string>)=>{
 let words64:array<uint64>=[0 0x8000000000000000 0x7ff0000000000000 0xfff0000000000000 0x7ff8000000000042 0xfff8000000000017 1 0x3ff4000000000000]
 let words32:array<uint32>=[0 0x80000000 0x7f800000 0xff800000 0x7fc00042 0xffc00017 1 0x3fa00000]
 loop n in [0..20) {
@@ -2490,7 +2490,7 @@ def test_core_imported_dependent_default(compiler, tmp_path, extension):
     source = tmp_path / 'main.dewy'
     source.write_text(f'''from p"helper.{extension}" import combine
 let offset:int64=99
-main=()=>{{let value:int64=20 return combine(value)}}''')
+main=():>void=>exit(entry()) entry=()=>{{let value:int64=20 return combine(value)}}''')
     binary = tmp_path / 'main'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)
@@ -2507,7 +2507,7 @@ sum=(point:[x:Count y:Count])=>point.x+point.y
     source = tmp_path / 'main.dewy'
     source.write_text('''from p"helper.dewy" import make, sum
 Count:type=string
-main=()=>{let point:[x:int64 y:int64]=make()
+main=():>void=>exit(entry()) entry=()=>{let point:[x:int64 y:int64]=make()
 return if sum([y=22 x=20]) =? 42 point.x+point.y else 1}
 ''')
     binary = tmp_path / 'main'
@@ -2526,7 +2526,7 @@ def test_core_imported_record_brackets(compiler, tmp_path, extension):
     source = tmp_path / 'main.dewy'
     source.write_text(f'''import p"helper.{extension}" as geometry
 from p"helper.{extension}" import Point
-main=()=>{{let p=geometry.Point[20 22] let q=Point[y=22 x=20] return p.x+q.y}}''')
+main=():>void=>exit(entry()) entry=()=>{{let p=geometry.Point[20 22] let q=Point[y=22 x=20] return p.x+q.y}}''')
     binary = tmp_path / 'main'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)
@@ -2772,7 +2772,7 @@ assert(saved.steps =? 0)
 let before=field paint(@field -100 -100 2) assert(field =? before)
 return field
 }
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
 let result=simulate() let before=alloc_count()
 loop i in [0..20) {let trial=simulate() assert(trial.steps =? 8)}
 assert(alloc_count() =? before)
@@ -2823,7 +2823,7 @@ def test_core_forest_model(compiler, tmp_path, target, release):
     shutil.copy2(model, tmp_path)
     source = tmp_path / 'forest_test.dewy'
     source.write_text('''from p"forest_model.dewy" import fresh_forest, hill, ground_color
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
     let forest=fresh_forest()
     if forest.trunks.length not=? 300 or forest.crowns.length not=? 300 return 1
     let original=forest
@@ -2901,7 +2901,7 @@ fetch=(tex:Texture uv:vec2):>vec4=>sample(tex uv)
 fragment=(i:Output u:Uniform):>vec4=>fetch(u.surface.tex i.uv)*u.surface.tint
 """
         pair = '@vertex @fragment'
-    body += f"""main=()=>{{let source=shader({pair})
+    body += f"""main=():>void=>exit(entry()) entry=()=>{{let source=shader({pair})
 write_text("shader.vert" source.vs); write_text("shader.frag" source.fs); return 0}}
 """
     source = tmp_path / 'shaders.dewy'
@@ -2924,7 +2924,7 @@ def test_core_dunes_model(compiler, tmp_path, target, release):
     shutil.copy2(model, tmp_path / model.name)
     source = tmp_path / 'dunes-model.dewy'
     source.write_text("""from p"dunes_model.dewy" import dune_height, robe_vertices, robe_indices, ribbon_vertices, ribbon_indices
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
 let cloth=robe_vertices(0.0 0.0) let indices=robe_indices()
 if cloth.length not=? 175 or indices.length not=? 864 return 1
 loop index in indices {if (index as int64) >=? cloth.length return 2}
@@ -3835,7 +3835,7 @@ let shared="abc"
 input=()=>{calls+=1 return shared}
 replace=()=>{shared="changed" return "12"}
 first=(text:string):>string=>{loop c in text return c return ""}
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
     let before=alloc_count()
     {
         let large=repeat("a" 20000)
@@ -3911,7 +3911,7 @@ def test_core_embedded_png(compiler, tmp_path, release, target):
                       + chunk(b'IEND', b''))
     source = tmp_path / 'image.dewy'
     source.write_text('''$include_bytes(p"pixel.png") as pixel
-main=()=>{let image=load_image(pixel)
+main=():>void=>exit(entry()) entry=()=>{let image=load_image(pixel)
 return if image.width =? 1 and image.height =? 1 and image.pixels.length =? 4 image.pixels[0] as int64 else 1}
 ''')
     binary = tmp_path / 'image'
@@ -3948,7 +3948,7 @@ def test_core_physics_scene(compiler, tmp_path, target, release):
     source = tmp_path / 'physics_test.dewy'
     source.write_text('''import physics as dynamics
 from p"physics_scene.dewy" import fresh, advance, add_ball
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
     let scene=fresh()
     if scene.world.bodies().length not=? 57 return 1
     let original=scene
@@ -3992,7 +3992,7 @@ def test_core_library_import(compiler, tmp_path, style):
     source = tmp_path / 'import_test.dewy'
     declaration, name = ('import physics as dynamics', 'dynamics.World') if style == 'namespace' else (
         'from physics import World as Space', 'Space')
-    source.write_text(f'{declaration}\nmain=()=>{{let world={name}[] return world.iterations+34}}')
+    source.write_text(f'{declaration}\nmain=():>void=>exit(entry()) entry=()=>{{let world={name}[] return world.iterations+34}}')
     binary = tmp_path / 'import_test'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)
@@ -4054,7 +4054,7 @@ conditional_runtime = () -> int:
     source = tmp_path / 'main.dewy'
     expression = 'conditional_invalid()' if use_invalid else (
         'conditional_pick()+conditional_tail()+conditional_runtime()')
-    source.write_text(f'main=()=>{expression}\n')
+    source.write_text(f'main=():>void=>exit(entry()) entry=()=>{expression}\n')
     binary = tmp_path / 'program'
     flags = ['--release'] if release else []
     env = {**os.environ, 'DEWY_CORE_LIB': str(library)}
@@ -4160,7 +4160,7 @@ Rational:type=[numerator:int=0 denominator:int=1]
 def test_core_tuple_interop(compiler, tmp_path, expression, diagnostic):
     (tmp_path / 'helper.jo').write_text('pair = () -> (int, str): (39, "abc")')
     source = tmp_path / 'tuple.dewy'
-    source.write_text(f'import p"helper.jo" as helper\nmain=()=>{{let pair=helper.pair() let i:int64=0 return {expression}}}')
+    source.write_text(f'import p"helper.jo" as helper\nmain=():>void=>exit(entry()) entry=()=>{{let pair=helper.pair() let i:int64=0 return {expression}}}')
     binary = tmp_path / 'tuple'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)
@@ -4182,10 +4182,10 @@ nested = () -> ((int, str), int[]): ((39, "abc"), [0])
 pairs = () -> (str, int[])[]: [("a", [20, 1]), ("b", [2, 19])]''')
     source = tmp_path / 'unpack.dewy'
     if mismatch:
-        program = ('main=()=>{let [[first second] [_]]=[[42] [0]] return first+second}' if nested else
+        program = ('main=():>void=>exit(entry()) entry=()=>{let [[first second] [_]]=[[42] [0]] return first+second}' if nested else
                    'main=():>void=>{let [first second]=[42] exit(first+second)}')
     else:
-        program = ('''main=()=>{let [[count text] [extra]]=helper.nested()
+        program = ('''main=():>void=>exit(entry()) entry=()=>{let [[count text] [extra]]=helper.nested()
 let total:int64=0
 loop [key [x y]] in helper.pairs() {total+=x+y}
 loop i in [0..2) and [key [x y]] in helper.pairs() {total+=x+y}
@@ -4194,11 +4194,11 @@ return count+text.length+extra}''' if nested else
                    'main=():>void=>{let [count:float64 text:string]=helper.pair() exit((if count is?float64 (count as int64)+text.length else 1))}')
     if parameter:
         if mismatch:
-            program = ('sum=([[first second] [_]]:array<array<int64>>):>int64=>first+second\nmain=()=>sum([[42] [0]])' if nested else
-                       'sum=([first second]:array<int64>):>int64=>first+second\nmain=()=>sum([42])')
+            program = ('sum=([[first second] [_]]:array<array<int64>>):>int64=>first+second\nmain=():>void=>exit(entry()) entry=()=>sum([[42] [0]])' if nested else
+                       'sum=([first second]:array<int64>):>int64=>first+second\nmain=():>void=>exit(entry()) entry=()=>sum([42])')
         else:
-            program = ('sum=([[count text] [extra]])=>count+text.length+extra\nmain=()=>sum(helper.nested())' if nested else
-                       'sum=([count:float64 text:string])=>if count is?float64 (count as int64)+text.length else 1\nmain=()=>sum(helper.pair())')
+            program = ('sum=([[count text] [extra]])=>count+text.length+extra\nmain=():>void=>exit(entry()) entry=()=>sum(helper.nested())' if nested else
+                       'sum=([count:float64 text:string])=>if count is?float64 (count as int64)+text.length else 1\nmain=():>void=>exit(entry()) entry=()=>sum(helper.pair())')
     source.write_text('import p"helper.jo" as helper\n' + program)
     binary = tmp_path / 'unpack'
     node = shutil.which('node')
@@ -4803,7 +4803,7 @@ def test_core_parameter_view_frame(compiler, tmp_path, debug, method):
 read_score=(row:Row):>int64=>row.values[0]+row.bias
 parameter_frame_probe=(row:Row):>int64=>EXPRESSION
 let callback=@parameter_frame_probe
-main=()=>callback(Row[[20] 22])
+main=():>void=>exit(entry()) entry=()=>callback(Row[[20] 22])
 '''.replace('EXPRESSION', expression))
     binary = tmp_path / 'parameter-frame'
     built = subprocess.run([compiler, 'build', source, '--ir', *(['-g'] if debug else []), '-o', binary],
@@ -5708,7 +5708,7 @@ def test_core_integer_parse_boundaries(compiler, tmp_path, target, release):
     literals = ' '.join(json.dumps(text, ensure_ascii=False) for text in texts)
     results = ' '.join('none' if value is None else str(value) for value in answers)
     source = tmp_path / 'integers.dewy'
-    source.write_text(f'''main=()=>{{
+    source.write_text(f'''main=():>void=>exit(entry()) entry=()=>{{
 let texts=[{literals}]
 let expected:array<int?>=[{results}]
 loop i in [0..texts.length) {{
@@ -5948,7 +5948,7 @@ def test_core_fixed_index_unsigned_domain(compiler, tmp_path, release, target):
 read16=(table:array<uint8 length=65536> index:uint16)=>(table[index] as int64)
 read_widen=(table:array<uint8 length=256> index:uint8)=>(table[(index as int16) as int64] as int64)
 read_wrap=(table:array<uint8 length=256> index:int16)=>(table[index.wrap(uint8)] as int64)
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
  let small:array<uint8 length=256>=[]
  loop i in [0..256) {small[i]=i as uint8}
  let large:array<uint8 length=65536>=[]
@@ -5991,7 +5991,7 @@ main=()=>{
 def test_core_fixed_index_domain_keeps_checks(compiler, tmp_path, release, size, ty, index, value):
     source = tmp_path / 'bounds.dewy'
     source.write_text(f'''read=(table:array<uint8 length={size}> index:{ty})=>(table[{index}] as int64)
-main=()=>{{let table:array<uint8 length={size}>=[] return read(table {value})}}
+main=():>void=>exit(entry()) entry=()=>{{let table:array<uint8 length={size}>=[] return read(table {value})}}
 ''')
     binary = tmp_path / 'bounds'
     built = subprocess.run([compiler, 'build', source, '-o', binary,

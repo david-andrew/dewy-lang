@@ -34,7 +34,7 @@ def test_core_c_variadic_arguments(compiler, tmp_path, variadic_library, mode):
     binding.write_text((FIXTURES / 'variadic.jo.in').read_text().replace(
         'LIBRARY', json.dumps(str(variadic_library))))
     source = tmp_path / 'probe.dewy'
-    source.write_text('from p"binding.jo" import run_probe\nmain=()=>run_probe()\n')
+    source.write_text('from p"binding.jo" import run_probe\nmain=():>void=>exit(entry()) entry=()=>run_probe()\n')
     binary = tmp_path / 'probe'
     flags = {'default': [], 'release': ['--release'], 'debug': ['-g']}[mode]
     built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],

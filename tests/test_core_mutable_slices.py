@@ -17,7 +17,7 @@ swap=(@a:array<int64> @b:array<int64>):>void=>{
 def test_mutable_adjacent_slices(compiler, tmp_path, release):
     source = tmp_path / 'slices.dewy'
     source.write_text(SWAP + '''
-main=()=>{
+main=():>void=>exit(entry()) entry=()=>{
  let a:array<int64>=[1 2 3 4]
  let saved=a
  let mid:int64=2

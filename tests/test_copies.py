@@ -24,7 +24,7 @@ bad=():>int64=>{
 }
 ''')
     source = tmp_path / 'main.dewy'
-    source.write_text('import p"strict.dewy" as strict\nmain=()=>0\n')
+    source.write_text('import p"strict.dewy" as strict\nmain=():>void=>exit(entry()) entry=()=>0\n')
     for action in ('check', 'build'):
         args = [compiler, action, source]
         if action == 'build':
