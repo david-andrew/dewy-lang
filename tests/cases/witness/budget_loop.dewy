@@ -8,7 +8,11 @@ probe=(n:int64)=>{
                 let d:int64=0
                 loop d <? n {
                     let e:int64=0
-                    loop e <? n { e+=1 }
+                    loop e <? n {
+                        let f:int64=0
+                        loop f <? n { f+=1 }
+                        e+=1
+                    }
                     d+=1
                 }
                 c+=1

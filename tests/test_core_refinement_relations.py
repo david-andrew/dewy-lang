@@ -130,8 +130,9 @@ main=()=>{let xs:array<int64>=[1]; probe(@xs)}
 ''',
     'let y:int64=1\nprobe=(@x:int64 flag:bool)=>{if x >? 0 {loop flag {y=0; $assert x >? 0}}}\n'
     'main=()=>{let x:int64=1; probe(@x false)}\n',
-    'probe=(flag:bool)=>{let i:int64=0;' + 'loop flag {' * 7 +
-    'i=-1;' + '}' * 7 + '$assert i =? 0}\nmain=()=>probe(false)\n',
+    # (six nested counters exhaust the loop budget; an exhausted loop proves nothing)
+    'probe=(n:int64)=>{' + ''.join(f'let {v}:int64=0;loop {v} <? n {{' for v in 'abcdef') +
+    'f+=1}' + ''.join(f'{v}+=1}}' for v in 'edcba') + '$assert a >=? 0}\nmain=()=>probe(2)\n',
 ])
 def test_loop_hidden_and_exhausted(compiler, tmp_path, source):
     path = tmp_path / 'hidden.dewy'

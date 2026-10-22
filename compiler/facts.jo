@@ -354,7 +354,9 @@ fact_difference_touch = (s: mut FactState, v: int) -> int:
     if r < 0:
         r = s.index[0].difference_record.len() / FACT_RECORD
         fact_index_put(s.index[0].difference_value, v, r)
-        s.index[0].difference_record += [0, -1, -1, -1, -1]
+        # (pushed one by one: `+=` would copy the whole record list)
+        s.index[0].difference_record.push(0)
+        loop _ in [0..4): s.index[0].difference_record.push(-1)
     s.index[0].difference_record[r * FACT_RECORD] += 1
     r
 
@@ -458,13 +460,99 @@ fact_compact = (s: mut FactState):
     # (too little freed: stop compacting this state rather than thrash)
     s.full = ids.len() > FACT_CAP - FACT_CAP / 8
 
+# A scope's end drops the values it made that nothing live reaches: every
+# value made before the scope began stays (an enclosing expression may hold
+# it), as do the scope's result and whatever bindings, evidence and kept
+# values reach through projections (and terms, two levels). Only a sizeable
+# saving rebuilds the state. O(V + P + D), stamps instead of a hash set.
+fact_stamp: int[]
+fact_stamp_gen = 0
+fact_collect = (s: mut FactState, boundary: int, result: int):
+    fresh = 0
+    loop v in s.ids:
+        if v >= boundary: fresh += 1
+    if fresh < 16: return
+    if fact_stamp.len() < fact_terms.len(): fact_stamp += fill(0, fact_terms.len() - fact_stamp.len() + 1024)
+    fact_stamp_gen += 1
+    gen = fact_stamp_gen
+    work: int[]
+    depth: int[]
+    work.push(result)
+    loop b in s.bindings:
+        work.push(b.value)
+        work.push(b.prior)
+    loop c in s.conditional:
+        work.push(c.result)
+        work += c.values
+    work += refine_entry
+    loop loan in fact_loans: work.push(loan.capacity)
+    work += fact_summary_entry
+    depth = fill(0, work.len())
+    kept = 0
+    i = 0
+    loop i < work.len():
+        v = work[i]
+        d = depth[i]
+        i += 1
+        if v <= 0 or v >= fact_terms.len() or fact_stamp[v] == gen: continue
+        fact_stamp[v] = gen
+        if v >= boundary: kept += 1
+        if d < 2:
+            work.push(fact_terms[v].a)
+            work.push(fact_terms[v].b)
+            depth.push(d + 1)
+            depth.push(d + 1)
+        pi = fact_index_get(s.index[0].projection_head, v)
+        loop pi >= 0:
+            p = s.projections[pi]
+            pi = s.index[0].projection_next[pi]
+            work.push(p.value)
+            depth.push(d)
+            if p.element:
+                work.push(p.selector)
+                depth.push(d)
+        # (a row relates its endpoints: a temporary between two live values,
+        # `i+1 <? n`, still says something about them)
+        loop direction in [0..2):
+            ri = fact_difference_head(s, v, direction)
+            loop ri >= 0:
+                row = s.differences[ri]
+                ri = s.index[0].difference_next[ri * 2 + direction]
+                work.push(if direction == 0: row.a else: row.b)
+                depth.push(0)
+    total = 0
+    loop v in s.ids:
+        if fact_stamp[v] == gen: total += 1
+    if (s.ids.len() - total) * 4 < s.ids.len(): return
+    ids: int[]
+    bounds: FactBound[]
+    loop j in [0..s.ids.len()):
+        if fact_stamp[s.ids[j]] == gen:
+            ids.push(s.ids[j])
+            bounds.push(s.bounds[j])
+    projections: FactProjection[]
+    loop p in s.projections:
+        if p.base > 0 and p.base < fact_terms.len() and fact_stamp[p.base] == gen and p.value > 0 and p.value < fact_terms.len() and fact_stamp[p.value] == gen: projections.push(p)
+    differences: FactDifference[]
+    loop row in s.differences:
+        if fact_stamp[row.a] == gen and fact_stamp[row.b] == gen: differences.push(row)
+    s.ids = ids
+    s.bounds = bounds
+    s.projections = projections
+    s.differences = differences
+    fact_reindex(s)
+
 fact_constant = (s: mut FactState, x: int, at: int = 0) -> int:
     fact_new(s, FactBound(x, x, x != 0), FactTerm(origin = at))
 
 fact_place = (e: int) -> PlaceIdentity: place_scalar_root(e)
 
+# (a join's root index may be shared with a predecessor holding more
+# bindings: an entry counts only when it still names p's position)
 fact_binding = (s: FactState, p: PlaceIdentity) -> int:
-    fact_index_get(s.index[0].roots, fact_root_key(p))
+    i = fact_index_get(s.index[0].roots, fact_root_key(p))
+    if i >= 0 and i < s.bindings.len() and s.bindings[i].place == p: return i
+    -1
 
 fact_bind = (s: mut FactState, p: PlaceIdentity, v: int):
     if p.declaration == 0: return
@@ -901,6 +989,11 @@ fact_disjoint = (p: PlaceIdentity, q: PlaceIdentity) -> bool:
     f = int(locals[a].owner)
     f > 0 and f < fns.len() and fns[f].decl != 0 and files[pos_file(nodes[int(fns[f].decl)].pos)].is_dewy
 
+fact_exposed_bound = (s: FactState) -> bool:
+    loop binding in s.bindings:
+        if fact_exposed(binding.place): return true
+    false
+
 # A write through an exposed place p forgets every exposed root but those
 # disjoint from p.
 fact_forget = (s: mut FactState, at: int, reason: FactReason, all: bool = false, written: PlaceIdentity = PlaceIdentity(.local, 0, 0)):
@@ -931,6 +1024,14 @@ fact_call_effects = (n: int, s: mut FactState):
         fact_forget(s, n, .call)
         return
     if fact_probe_on and nodes[n].aux == 0: fact_probe_note(f)
+    # (a return summary's run does not settle callee effect rows for itself:
+    # a callee not yet settled forgets every exposed root, as an opaque call)
+    if fact_summary_owner != 0 and nodes[n].aux == 0 and f > 0 and f < effect_summaries.len() and not effect_summaries[f].done:
+        fact_forget(s, n, .call)
+        return
+    # (a call can change only exposed roots and its place arguments: with
+    # neither bound here, its effect row has nothing to tell this state)
+    if nodes[n].aux == 0 and checked_call_mutmask(n) == 0 and not fact_exposed_bound(s): return
     if nodes[n].aux != 0 or not effects_demand(f):
         fact_forget(s, n, .call)
         return
@@ -1174,7 +1275,18 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
     fact_set_bound(s, b, y)
 
 fact_hull = (a: FactBound, b: FactBound, at: int) -> FactBound:
-    FactBound(min(a.lo, b.lo), max(a.hi, b.hi), (a.nz or a.lo > 0 or a.hi < 0) and (b.nz or b.lo > 0 or b.hi < 0), (if at != 0 and (nodes[at].kind == .while_ or nodes[at].kind == .for_): FactReason.loop_ else: FactReason.join), at)
+    FactBound(min(a.lo, b.lo), max(a.hi, b.hi), (a.nz or a.lo > 0 or a.hi < 0) and (b.nz or b.lo > 0 or b.hi < 0), fact_hull_reason(at), at)
+
+fact_hull_reason = (at: int) -> FactReason:
+    if at != 0 and (nodes[at].kind == .while_ or nodes[at].kind == .for_): FactReason.loop_ else: FactReason.join
+
+# Every value's interval hulled at once: the reason is the join point's.
+fact_hull_all = (s: mut FactState, a: FactState, b: FactState, count: int, at: int):
+    reason = fact_hull_reason(at)
+    loop i in [0..count):
+        x = a.bounds[i]
+        y = b.bounds[i]
+        s.bounds[i] = FactBound(min(x.lo, y.lo), max(x.hi, y.hi), (x.nz or x.lo > 0 or x.hi < 0) and (y.nz or y.lo > 0 or y.hi < 0), reason, at)
 
 fact_join = (a: FactState, b: FactState, at: int) -> FactState:
     if not a.live: return b
@@ -1184,7 +1296,7 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
     if a.ids == b.ids and a.bindings == b.bindings and a.projections == b.projections and a.differences == b.differences and a.conditional == b.conditional:
         s = a
         s.full = false
-        loop i in [0..s.bounds.len()): s.bounds[i] = fact_hull(a.bounds[i], b.bounds[i], at)
+        fact_hull_all(s, a, b, s.bounds.len(), at)
         return s
     s = FactState()
     if a.conditional.len() > 0 and b.conditional.len() > 0:
@@ -1193,11 +1305,12 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         loop evidence in a.conditional:
             if evidence_index.has(evidence): s.conditional.push(evidence)
     # Keep immutable evaluations shared by both paths, including snapshots.
+    shared = true
     if a.ids == b.ids:
         s.ids = a.ids
         s.index[0].slots = a.index[0].slots
         s.bounds = a.bounds
-        loop i in [0..s.bounds.len()): s.bounds[i] = fact_hull(a.bounds[i], b.bounds[i], at)
+        fact_hull_all(s, a, b, s.bounds.len(), at)
     else:
         # Both paths usually extend one entry frame with their own values: the
         # shared values are then a's prefix, kept with a's index. O(V).
@@ -1213,18 +1326,32 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
             s.bounds = a.bounds
             s.bounds.truncate(k)
             s.index[0].slots = a.index[0].slots
-            loop i in [0..k): s.bounds[i] = fact_hull(a.bounds[i], b.bounds[i], at)
+            fact_hull_all(s, a, b, k, at)
         else:
+            shared = false
             loop i in [0..a.ids.len()):
                 j = fact_slot(b, a.ids[i])
                 if j >= 0: fact_add_value(s, a.ids[i], fact_hull(a.bounds[i], b.bounds[j], at))
-    if a.projections == b.projections and a.ids == b.ids:
-        s.projections = a.projections
-        s.index[0].projection_index = a.index[0].projection_index
-        s.index[0].projection_head = a.index[0].projection_head
-        s.index[0].projection_tail = a.index[0].projection_tail
-        s.index[0].projection_next = a.index[0].projection_next
-        s.index[0].projection_value = a.index[0].projection_value
+    # When one path's projections are the other's first ones (the other path
+    # only added projections), the shared projections are exactly the shorter
+    # list: keep it with its index. O(P) comparisons, no hashing.
+    kp = 0
+    common_projections = min(a.projections.len(), b.projections.len())
+    loop kp < common_projections and a.projections[kp] == b.projections[kp]: kp += 1
+    from = -1
+    if shared and (kp == a.projections.len() or kp == b.projections.len()):
+        from = if kp == b.projections.len(): 1 else: 0
+        shorter = if from == 1: b.projections else: a.projections
+        loop p in shorter:
+            if fact_slot(s, p.base) < 0 or fact_slot(s, p.value) < 0: from = -1; break
+    if from >= 0:
+        source = if from == 1: b else: a
+        s.projections = source.projections
+        s.index[0].projection_index = source.index[0].projection_index
+        s.index[0].projection_head = source.index[0].projection_head
+        s.index[0].projection_tail = source.index[0].projection_tail
+        s.index[0].projection_next = source.index[0].projection_next
+        s.index[0].projection_value = source.index[0].projection_value
     else:
         # (b holds p when p is on b's chain for p.base: every projection is chained)
         loop p in a.projections:
@@ -1240,7 +1367,32 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
     # (merged value pairs: a scan while few, then an open-address index;
     # values are below 2^31)
     pairs: int[]
-    loop binding in a.bindings:
+    # Both paths keep their common ancestor's bindings in its order (a place
+    # is appended when first bound): the aligned positions merge in place,
+    # keeping a's positions and so a's root index. O(1) each, no hashing
+    # unless the values differ.
+    aligned = 0
+    common = min(a.bindings.len(), b.bindings.len())
+    loop aligned < common and a.bindings[aligned].place == b.bindings[aligned].place: aligned += 1
+    s.bindings = a.bindings
+    s.bindings.truncate(aligned)
+    s.index[0].roots = a.index[0].roots
+    loop i in [0..aligned):
+        binding = a.bindings[i]
+        other = b.bindings[i].value
+        v = binding.value
+        pair = fact_pair_key(v, other)
+        prior = fact_pair_find(left, right, pairs, v, other)
+        if prior >= 0: v = merged[prior]
+        else if v != other: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, other), at))
+        # (the tombstone survives when both paths share it)
+        r = if v == binding.value and b.bindings[i].event == binding.event and binding.event != 0: binding else: FactBinding(binding.place, v)
+        if r != binding: s.bindings[i] = r
+        if prior < 0:
+            fact_pair_add(left, right, pairs, pair)
+            left.push(binding.value); right.push(other); merged.push(v)
+    loop ai in [aligned..a.bindings.len()):
+        binding = a.bindings[ai]
         j = fact_binding(b, binding.place)
         if j < 0: continue
         other = b.bindings[j].value
@@ -1943,6 +2095,8 @@ fact_while = (n: int, s: mut FactState):
     fact_speculating += 1
     # Eager interval widening converges quickly; a fourth round lets
     # dependencies between changing counters settle before validation.
+    paths = FactPaths(FactState(live = false), FactState(live = false), FactBound())
+    edges = FactLoop()
     loop iteration in [0..4):
         if fact_loop_exhausted: break
         paths = fact_condition(int(nodes[n].a), header)
@@ -1952,13 +2106,18 @@ fact_while = (n: int, s: mut FactState):
         header = next
         if settled: break
     if settled and not fact_loop_exhausted:
-        loop iteration in [0..1):
-            paths = fact_condition(int(nodes[n].a), header)
-            edges = fact_loop_body(n, paths.yes)
-            next = fact_loop_header(entry, edges.back, header, n, false)
-            same = fact_loop_stable(header, next)
-            header = next
-            if same or fact_loop_exhausted: break
+        # A settled round's header equals the one it ran with, so its
+        # backedge is what a run with the settled header gives: narrow from
+        # it rather than walking the body again.
+        next = fact_loop_header(entry, edges.back, header, n, false)
+        same = fact_loop_stable(header, next)
+        header = next
+        # (inside an enclosing loop's speculation nothing is published: a
+        # header that narrowing left unchanged exits as the settled round did)
+        if same and outer > 0:
+            fact_speculating = outer
+            s = fact_join(paths.no, edges.exits, n)
+            return
     fact_speculating = outer
     if not settled or fact_loop_exhausted:
         # Restart at top for every syntactically changing route, then validate
@@ -2230,7 +2389,8 @@ fact_slice_children = (n: int) -> int[]:
     if mask & 1 != 0: out.push(int(nodes[n].a))
     if mask & 2 != 0: out.push(int(nodes[n].b))
     if mask & 4 != 0: out.push(int(nodes[n].c))
-    if mask & 16 != 0: out += kids(n)
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)): out.push(kid(n, i))
     out
 
 fact_slice_edge = (edges: mut FactSliceEdges, key: int, node: int):
@@ -2440,7 +2600,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                     else: values.push(definition)
             if not any_root:
                 any_root = true
-                values += opaque_writes
+                loop w in opaque_writes: values.push(w)
             if not any_exposed and p.declaration != 0 and fact_exposed(p):
                 any_exposed = true
                 loop write in exposed_writes:
@@ -2459,13 +2619,16 @@ fact_slice_prepare = (f: int, summary: bool = false):
             dependent = false
             loop arg in kids(n):
                 if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)): dependent = true
-            if dependent: values += fact_slice_children(n)
+            if dependent:
+                loop c in fact_slice_children(n): values.push(c)
             else if tkind(representation_type(int(fns[int(nodes[n].sym)].ret))) == .array:
                 # (an array result's length may follow an array actual's: fact_summary)
                 loop arg in kids(n):
                     if tkind(representation_type(ntype(arg))) == .array or tkind(representation_type(ntype(arg))) == .fixed: values.push(arg)
         else if k == .intrinsic and (nodes[n].aux == i32(int(IN.push)) or nodes[n].aux == i32(int(IN.pop)) or nodes[n].aux == i32(int(IN.clear)) or nodes[n].aux == i32(int(IN.reserve)) or nodes[n].aux == i32(int(IN.insert)) or nodes[n].aux == i32(int(IN.remove))): values.push(kid(n, 0))
-        else: values += fact_slice_children(n)
+        else:
+            # (pushed one by one: `+=` copies the whole worklist each time)
+            loop c in fact_slice_children(n): values.push(c)
     flags = fact_index_sized(fact_mark_touched.len())
     loop n in fact_mark_touched:
         if fact_mark_flags[n] != 0: fact_index_put(flags, n, fact_mark_flags[n])
@@ -2498,6 +2661,66 @@ fact_slice_capture = (n: int, s: mut FactState) -> int:
         return 0
     loop c in fact_slice_children(n): fact_capture(c, s)
     return 0
+
+fact_bounded_index = (n: int) -> bool:
+    t = types[representation_type(ntype(int(nodes[n].a)))].kind
+    t == .array or t == .fixed
+
+# Whether a body holds something the facts pass decides: an index or slice,
+# a division, a refinement or narrowing, an assertion, a loan, a string
+# position. A syntactic walk of every operand (a place's route included), so
+# it cannot miss what the transfer would visit. O(body nodes).
+fact_obliged = (n: int) -> bool:
+    if n <= 0 or n >= nodes.len(): return false
+    k = nodes[n].kind
+    if k == .lambda: return false
+    # (an index the compiler made in bounds, as a loop's element read, is none)
+    if k == .index and not has_flag(n, NF_INBOUNDS) and fact_bounded_index(n): return true
+    if k == .binary and nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent))): return true
+    if k == .conv and nodes[n].aux == i32(int(CV.refinement)): return true
+    if k == .call and (fact_divisors.has(n) or fact_floor_call(n) != 0 or fact_string_call(n) >= 2): return true
+    if k == .intrinsic:
+        id = nodes[n].aux as IN
+        if id == .static_assert or id == .runtime_assert or id == .assert or id == .lend or id == .loan_length or id == .loan_store or id == .loan_address or id == .loan_load: return true
+    if k == .ident and nodes[n].aux == i32(int(SK.local)):
+        l = int(nodes[n].sym)
+        if l > 0 and int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0 and fact_obliged(int(locals[l].alias)): return true
+    if fact_obliged(int(nodes[n].a)) or fact_obliged(int(nodes[n].b)): return true
+    if k != .for_:
+        if fact_obliged(int(nodes[n].c)): return true
+        if k != .partial and fact_obliged(int(nodes[n].d)): return true
+    loop i in [0..nkids(n)):
+        if fact_obliged(kid(n, i)): return true
+    loop i in [0..nkids2(n)):
+        if fact_obliged(kid2(n, i)): return true
+    false
+
+# A block's own declarations go out of scope at its end: nothing can name
+# them again, so their bindings leave the state (their values stay until a
+# compaction finds nothing reaching them). The state then grows with the live
+# places, not with every declaration a body ever made: joins, calls and loops
+# visit bindings. O(bindings bound inside the block).
+fact_scope_exit = (s: mut FactState, n: int, first: int):
+    owner = 0
+    declared: int[]
+    loop c in kids(n):
+        if nodes[c].kind != .vardecl or has_flag(c, NF_GLOBAL): continue
+        if nkids(c) == 0:
+            if nodes[c].sym != 0: declared.push(int(nodes[c].sym))
+        else:
+            loop d in kids(c):
+                if nodes[d].sym != 0 and not has_flag(d, NF_GLOBAL): declared.push(int(nodes[d].sym))
+    if declared.len() == 0: return
+    kept: FactBinding[]
+    loop i in [first..s.bindings.len()):
+        b = s.bindings[i]
+        if b.place.root == .local and declared.contains(b.place.declaration) and int(locals[b.place.declaration].flags) & (LF_CAPTURED | LF_SHARED) == 0: continue
+        kept.push(b)
+    if kept.len() == s.bindings.len() - first: return
+    s.bindings.truncate(first)
+    loop b in kept:
+        fact_index_put(s.index[0].roots, fact_root_key(b.place), s.bindings.len())
+        s.bindings.push(b)
 
 fact_capture = (n: int, s: mut FactState) -> int:
     if n == 0 or not s.live: return 0
@@ -2650,6 +2873,8 @@ fact_capture = (n: int, s: mut FactState) -> int:
         r = 0
         defers: int[]
         pending = fact_pending_defers
+        first = s.bindings.len()
+        boundary = fact_terms.len()
         loop c in kids(n):
             if nodes[c].kind == .defer_:
                 defers.push(int(nodes[c].a))
@@ -2662,6 +2887,8 @@ fact_capture = (n: int, s: mut FactState) -> int:
                 if ownership_decls.len() != 0: fact_forget(s, c, .call)
         loop i in [0..defers.len()): fact_capture(defers[defers.len() - 1 - i], s)
         fact_pending_defers = pending
+        if s.live and s.bindings.len() > first: fact_scope_exit(s, n, first)
+        if s.live and s.ids.len() > 64: fact_collect(s, boundary, r)
         return r
     if k == .return_:
         r = fact_capture(int(nodes[n].a), s)
@@ -3128,6 +3355,12 @@ facts_finalize = ():
         state = FactState()
         previous_policy = fact_policy
         if proof_active and proof_decls.has(int(fns[f].decl)): fact_policy = .RequireStatic
+        # (a body with no partial operation, assertion or contract has
+        # nothing to decide: its loops and calls are not walked for it)
+        if not result_active and not (proof_active and proof_decls.has(int(fns[f].decl))) and ownership_decls.len() == 0 and not loan_owners.has(f) and not fact_obliged(int(fns[f].body)):
+            fact_policy = previous_policy
+            ic_restore(icb)
+            continue
         if refine_active or refine_requests.len() > 0: refine_fact_entry(f, state)
         fact_slice_prepare(f)
         result = fact_capture(int(fns[f].body), state)
