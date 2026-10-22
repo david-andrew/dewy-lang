@@ -1416,6 +1416,56 @@ fact_while = (n: int, s: mut FactState):
     edges = fact_loop_body(n, paths.yes)
     s = fact_join(paths.no, edges.exits, n)
 
+# A comprehension that fills a fixed-size array of plain elements in place:
+# `let acc=[]`, one range or array loop whose body is straight-line
+# declarations ending in one push onto acc, then acc. Its push, or 0.
+fact_fixed_comprehension = (b: int, to: int) -> int:
+    if nodes[b].kind != .block or not has_flag(b, NF_COMPREHENSION) or nkids(b) != 3 or not files[pos_file(nodes[b].pos)].is_dewy: return 0
+    t = representation_type(to)
+    if tkind(t) != .fixed or is_managed(int(types[t].elem)) or ownership_type(int(types[t].elem)): return 0
+    decl = kid(b, 0)
+    loop_ = kid(b, 1)
+    last = kid(b, 2)
+    if nodes[decl].kind != .vardecl or nodes[decl].sym <= 0 or nkids(decl) != 0 or nodes[loop_].kind != .for_ or nodes[last].kind != .exprstmt: return 0
+    acc = int(nodes[decl].sym)
+    init = int(nodes[decl].b)
+    if init == 0 or nodes[init].kind != .array or nkids(init) != 0 or nodes[init].b != 0: return 0
+    if not type_eq(telem(int(locals[acc].type)), int(types[t].elem)): return 0
+    result = int(nodes[last].a)
+    if nodes[result].kind != .ident or nodes[result].sym != i32(acc): return 0
+    if nodes[loop_].aux == 0:
+        it = int(nodes[loop_].a)
+        if nodes[it].kind != .range or nodes[it].b == 0 or has_flag(it, NF_STEP): return 0
+    else if nodes[loop_].aux == 1:
+        k = tkind(ntype(int(nodes[loop_].a)))
+        if k != .array and k != .fixed: return 0
+    else: return 0
+    if fact_mentions(int(nodes[loop_].a), acc): return 0
+    body = int(nodes[loop_].b)
+    nb = nkids(body)
+    if nb == 0 or nodes[kid(body, nb - 1)].kind != .exprstmt: return 0
+    loop i in [0..nb - 1):
+        item = kid(body, i)
+        if nodes[item].kind != .vardecl or not comprehension_value(int(nodes[item].b)) or fact_mentions(int(nodes[item].b), acc): return 0
+    push = int(nodes[kid(body, nb - 1)].a)
+    if nodes[push].kind != .intrinsic or nodes[push].aux != i32(int(IN.push)) or nkids(push) != 2: return 0
+    receiver = kid(push, 0)
+    if nodes[receiver].kind != .ident or nodes[receiver].sym != i32(acc) or not comprehension_value(kid(push, 1)) or fact_mentions(kid(push, 1), acc): return 0
+    push
+
+# Its loop runs exactly the fixed length's times: a range from 0 to that
+# constant, or an array loop over a fixed array of that length.
+fact_fixed_comprehension_exact = (b: int, to: int) -> bool:
+    n = fixed_len(representation_type(to))
+    loop_ = kid(b, 1)
+    if nodes[loop_].aux == 1: return tkind(representation_type(ntype(int(nodes[loop_].a)))) == .fixed and fixed_len(representation_type(ntype(int(nodes[loop_].a)))) == n
+    it = int(nodes[loop_].a)
+    known_lo, lo = integer_constant(int(nodes[it].a))
+    known_hi, hi = integer_constant(int(nodes[it].b))
+    if not known_lo or not known_hi: return false
+    if has_flag(it, NF_INCLUSIVE): hi += 1
+    lo == 0 and hi == n
+
 # A counted push: a local array the loop body pushes onto exactly once on
 # every completed iteration, with no other use of it there (no break or
 # continue), so after the loop its length is its entry length plus the

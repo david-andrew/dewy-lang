@@ -61,9 +61,8 @@ first_waiter=(@k:Kernel state_lock:bool state_send:bool state_recv:bool object:i
 # of every task blocked on a mutex it holds, transitively. NTASK rounds reach
 # the end of any wait chain. Changes are traced in task order.
 inherit=(@k:Kernel):>void & no allocates & no blocks=>{
-    let old:array<int64 length=8>=[0 0 0 0 0 0 0 0]
+    let old:array<int64 length=8>=[loop t in [0..NTASK) k.tasks[t].eff]
     loop t in [0..NTASK) {
-        old[t]=k.tasks[t].eff
         k.tasks[t].eff=k.tasks[t].base
     }
     loop round in [0..NTASK) {

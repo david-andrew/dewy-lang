@@ -1055,6 +1055,26 @@ effect_scan_node = (f: int, n: int):
     if k == .call and nodes[n].aux == 1:
         effect_indirect(f, n)
         return
+    # (a comprehension into a fixed array of plain elements fills it in place:
+    # a counted range loop and its element values; a count not proven to be
+    # the length may fail)
+    if k == .conv and nodes[n].aux == i32(int(CV.arr2fixed)) and fact_fixed_comprehension(int(nodes[n].a), ntype(n)) != 0:
+        b = int(nodes[n].a)
+        loop_ = kid(b, 1)
+        push = fact_fixed_comprehension(b, ntype(n))
+        if nodes[loop_].aux != 0 or not effect_range_loop(loop_):
+            effect_opaque(f, n)
+            return
+        inner: int[]
+        if isolation_effect(loop_, inner) != .none_: effect_isolation_block(f, .node, loop_)
+        loop g in inner: effect_summaries[f].edges.push(EffectEdge(g, loop_, []))
+        it = int(nodes[loop_].a)
+        loop c in [int(nodes[it].a), int(nodes[it].b), int(nodes[it].c)]: effect_scan_node(f, c)
+        body = int(nodes[loop_].b)
+        loop i in [0..nkids(body) - 1): effect_scan_node(f, kid(body, i))
+        effect_scan_node(f, kid(push, 1))
+        if not fact_fixed_comprehension_exact(b, ntype(n)): effect_failure(f, n)
+        return
     # (a builtin floor `//` or `%` on words is the inline word operation; only
     # a divisor not proven nonzero can fail)
     if k == .call and nodes[n].aux == 0 and effect_scalar(ntype(n)) and fact_floor_call(n) != 0:

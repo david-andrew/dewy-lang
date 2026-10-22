@@ -1,0 +1,6 @@
+# A comprehension whose count may differ from the fixed length can fail.
+firsts=(n:int64):>int64 & no_effects=>{
+    let xs:array<int64 length=4>=[loop i in [0..n) i]
+    return xs[0]
+}
+main=()=>printl(firsts(4))

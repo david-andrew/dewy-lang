@@ -3168,7 +3168,7 @@ struct LoanCapacity:
 loan_capacities: LoanCapacity[]
 
 gen_intrinsic = (e: int) -> Val:
-    if effects_active or effect_policy.prohibitions != 0: effect_lower_intrinsic(cur_fn, e)
+    if (effects_active or effect_policy.prohibitions != 0) and e != fixed_fill_push: effect_lower_intrinsic(cur_fn, e)
     id = nodes[e].aux as IN
     args = kids(e)
     if partition_mode and id == .len and args.len() == 1:
@@ -3264,6 +3264,17 @@ gen_intrinsic = (e: int) -> Val:
         e_copy(da, sa, owner_stride(et))
         e_zero(sa, owner_stride(et))
         endc()
+        return V(-1, false)
+    if id == .push and fixed_fill_push == e:
+        # (a fixed comprehension's element goes straight to its next slot)
+        et = int(types[representation_type(fixed_fill_type)].elem)
+        val = gen_owned(args[1])
+        if not fixed_fill_exact:
+            iff(e_bin(.ges, VI, fixed_fill_count, e_iconst(fixed_len(representation_type(fixed_fill_type)))))
+            e_call_nr(rt("__panic"), [e_daddr(str_data("fixed-size array needs {fixed_len(representation_type(fixed_fill_type))} elements"))], -1)
+            endc()
+        store_val(et, e_bin(.add, VI, e_slot(fixed_fill_slot), e_bin(.mul, VI, fixed_fill_count, e_iconst(tsize(et)))), 0, val.v)
+        e_mov(fixed_fill_count, e_addi(fixed_fill_count, 1))
         return V(-1, false)
     if id == .push:
         at = prune(ntype(args[0]))
@@ -4049,6 +4060,8 @@ gen_conv = (e: int) -> Val:
             endc()
         return Val(d, true, s)
     if cv == .arr2fixed:
+        push = fact_fixed_comprehension(a, to)
+        if push != 0: return gen_fixed_comprehension(a, push, to)
         if copies_on: copy_components(e, to, "the fixed array contains heap payloads that must be copied")
         # Check the shape once, then copy the value into inline storage.
         src = gen_borrowed(a).v
@@ -5914,6 +5927,35 @@ bounded_open_for = (s: int) -> int:
     nodes[result].a = i32(range)
     nodes[result].b = i32(block)
     result
+
+# A comprehension into a fixed-size array of plain elements fills the array's
+# own storage: its accumulator stays empty, and a count it does not reach (or
+# would pass) is the length mismatch the copy would report.
+fixed_fill_push = 0
+fixed_fill_slot = 0
+fixed_fill_count = 0
+fixed_fill_type = 0
+fixed_fill_exact = false
+
+gen_fixed_comprehension = (b: int, push: int, to: int) -> Val:
+    n = fixed_len(representation_type(to))
+    s = new_temp(to)
+    e_zero(e_slot(s), tsize(to))
+    saved = (fixed_fill_push, fixed_fill_slot, fixed_fill_count, fixed_fill_type, fixed_fill_exact)
+    count = vreg(VI)
+    e_mov(count, e_iconst(0))
+    exact = fact_fixed_comprehension_exact(b, to)
+    fixed_fill_push = push; fixed_fill_slot = s; fixed_fill_count = count; fixed_fill_type = to; fixed_fill_exact = exact
+    scope_push()
+    gen_stmt(kid(b, 0))
+    gen_stmt(kid(b, 1))
+    scope_pop()
+    fixed_fill_push = saved.0; fixed_fill_slot = saved.1; fixed_fill_count = saved.2; fixed_fill_type = saved.3; fixed_fill_exact = saved.4
+    if not exact:
+        iff(e_bin(.ne, VI, count, e_iconst(n)))
+        e_call_nr(rt("__panic"), [e_daddr(str_data("fixed-size array needs {n} elements"))], -1)
+        endc()
+    Val(e_slot(s), true, s)
 
 # Straight-line Dewy comprehensions own an unnameable accumulator and append
 # one result per iteration. Reserve once from a range bound or array snapshot.

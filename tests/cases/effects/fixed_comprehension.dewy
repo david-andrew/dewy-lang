@@ -1,0 +1,24 @@
+# quick
+# A comprehension fills a fixed-size array in place: no allocation, and a
+# range from 0 to the length cannot miss or pass it.
+$no_hidden_costs
+const N:int64=4
+const W:int64=8
+Cell:type=[v:int64 w:int64]
+scaled=(k:int64 base:array<int64 length=4>):>array<int64 length=4>=>[loop i in [0..N) base[i]*k]
+cells=(k:int64):>array<Cell length=4>=>{
+    let out:array<Cell length=4>=[loop i in [0..N) [v=i w=i*k]]
+    return out
+}
+squares=(k:int64):>int64 & no_effects=>{
+    let xs:array<int64 length=8>=[loop i in [0..W) i*k]
+    let s:int64=0
+    loop i in [0..8) { s+=xs[i] }
+    return s
+}
+main=():>int64=>{
+    $no_hidden_costs=false
+    let c=cells(3)
+    printl("{scaled(2 [1 2 3 4])} {c[3].w} {squares(2)}")
+    return 0
+}

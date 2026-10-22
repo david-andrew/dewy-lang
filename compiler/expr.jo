@@ -9139,6 +9139,9 @@ check_expr = (n: int, expected: int) -> int:
     else if k == .block:
         if has_flag(n, NF_COMPREHENSION) and ex != 0 and exk == .array:
             nodes[kid(n, 0)].a = i32(type_node_of(ex, nodes[n].pos))
+        # (into a fixed-size array: its elements have the fixed array's element type)
+        else if has_flag(n, NF_COMPREHENSION) and ex != 0 and exk == .fixed and nodes[kid(n, 0)].kind == .vardecl and nodes[kid(n, 0)].a == 0:
+            nodes[kid(n, 0)].a = i32(type_node_of(mk_array(int(types[representation_type(ex)].elem)), nodes[n].pos))
         t = check_block(n, expected, true)
     else if k == .matrix: return check_matrix(n, expected)
     else: fatal(nodes[n].pos, "invalid expression")

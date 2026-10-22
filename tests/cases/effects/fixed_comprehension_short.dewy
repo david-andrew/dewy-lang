@@ -1,0 +1,10 @@
+# exit: 101
+# An in-place comprehension that stops short reports the missing elements.
+firsts=(n:int64):>int64=>{
+    let xs:array<int64 length=4>=[loop i in [0..n) i+10]
+    return xs[3]
+}
+main=()=>{
+    printl(firsts(4))
+    printl(firsts(2))
+}
