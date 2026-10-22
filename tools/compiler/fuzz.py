@@ -1,4 +1,4 @@
-"""Bounded differential checks of Sloppy-generated programs on Dewy's shared backend.
+"""Bounded differential checks of generated programs on Dewy's shared backend.
 
 This exercises the implementation-language frontend, optimizer and code generators;
 it does not claim coverage of Dewy source parsing. No background work is scheduled.

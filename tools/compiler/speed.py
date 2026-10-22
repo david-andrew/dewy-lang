@@ -69,7 +69,7 @@ ACCEPT = re.compile(r'^speed: accept\s+(\S.*)$', re.MULTILINE)
 
 
 def generate_dewy(count: int) -> str:
-    """Synthetic program (same algorithm and constants as Sloppy's genbench.py)."""
+    """Synthetic program (same algorithm and constants as the original generator)."""
     rng = random.Random(1)
     parts = ['Item:type=[x:float64 y:float64 id:int64]']
     for i in range(count):

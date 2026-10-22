@@ -2349,7 +2349,7 @@ x_compare_fused = (pos: int, ins: *Ins) -> bool:
     if pos + 1 < ir.code.len() and v_live[d].nuse == 1:
         nx = ir.code[pos + 1]
         # Compare first at the select, then preserve its flags through
-        # the operand moves. Adapted from Sloppy f9ba5a464f0171b3.
+        # the operand moves.
         if nx.op == .select and int(nx.a) == d and is_icmp(op) and int(nx.b) != d and int(nx.c) != d:
             sel_fused = pos + 1
             sel_ca = a
