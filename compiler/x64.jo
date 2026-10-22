@@ -337,16 +337,22 @@ const LOC_NONE = -4
 const LOC_GLOBAL = -5
 const LOC_FCONST = -6        # a float constant: read from read-only data where used (vcval: its bits)
 const RIPREL = 99            # pseudo base register for rip-relative addressing
-vgkind: int[]
-vgoff: int[]
+vgkind_storage: int[]
+vgkind: *int
+vgoff_storage: int[]
+vgoff: *int
 const XMM = 16
 const INF_POS = 1 << 60
 
-vloc: int[]
+vloc_storage: int[]
+vloc: *int
 vspill: int[]
-vcval: int[]
-vslot: int[]
-vsoff: int[]
+vcval_storage: int[]
+vcval: *int
+vslot_storage: int[]
+vslot: *int
+vsoff_storage: int[]
+vsoff: *int
 slot_off: int[]
 frame_size = 0
 callee_off: int[]          # save offset per register (0 = not used)
@@ -359,13 +365,16 @@ callee_pool = [RBX, 12, 13, 14, 15]
 is_callee = [false, false, false, true, false, false, false, false, false, false, false, false, true, true, true, true]
 caller_pool = [RSI, RDI, R8, R9, R10, R11]
 
-vsave: bool[]              # in a caller-saved register, saved/restored around calls
+vsave_storage: bool[]
+vsave: *bool              # in a caller-saved register, saved/restored around calls
 dbg_keep: bool[]           # (sloppy build -g) a variable's: not in a register a call changes
 save_list: int[]
 # The final IR's use plan is built once in analyze, after all rewriting.
 # Allocation, frame layout, fusion and emission consume these same records.
-v_live: IrUsePlan[]
-v_start: int[]             # final instruction position -> first allocation candidate
+v_live_storage: IrUsePlan[]
+v_live: *IrUsePlan
+v_start_storage: int[]
+v_start: *int             # final instruction position -> first allocation candidate
 call_pos: int[]
 call_w: int[]              # per call: its weight by loop depth
 loop_s: int[]
@@ -421,17 +430,33 @@ vop_operand = (x: int, v: int, splat: bool, n: int, scratch: int):
 
 analyze = (plan_starts: bool = false):
     nv = ir.vtypes.len()
-    v_live = fill(IrUsePlan(), nv)
-    vloc = fill(LOC_SPILL, nv)
-    vcval = fill(0, nv)
-    vslot = fill(-1, nv)
-    vsoff = fill(0, nv)
-    vgkind = fill(0, nv)
-    vgoff = fill(0, nv)
-    call_pos = []
-    call_w = []
-    loop_s = []
-    loop_e = []
+    # Private backend scratch, borrowed until the next analyze. Grow only at a
+    # new high-water mark; no pointer escapes into an IR or output fragment.
+    # O(vregs) initialization, with address/constant payloads written on demand.
+    if v_live_storage.len() < nv: v_live_storage.resize(nv)
+    if vloc_storage.len() < nv: vloc_storage.resize(nv)
+    if vcval_storage.len() < nv: vcval_storage.resize(nv)
+    if vslot_storage.len() < nv: vslot_storage.resize(nv)
+    if vsoff_storage.len() < nv: vsoff_storage.resize(nv)
+    if vgkind_storage.len() < nv: vgkind_storage.resize(nv)
+    if vgoff_storage.len() < nv: vgoff_storage.resize(nv)
+    if vsave_storage.len() < nv: vsave_storage.resize(nv)
+    v_live = data(v_live_storage)
+    vloc = data(vloc_storage)
+    vcval = data(vcval_storage)
+    vslot = data(vslot_storage)
+    vsoff = data(vsoff_storage)
+    vgkind = data(vgkind_storage)
+    vgoff = data(vgoff_storage)
+    vsave = data(vsave_storage)
+    loop v in [0..nv):
+        v_live[v] = IrUsePlan()
+        vloc[v] = LOC_SPILL
+        vsave[v] = false
+    call_pos.clear()
+    call_w.clear()
+    loop_s.clear()
+    loop_e.clear()
     kinds: int[]
     starts: int[]
     loop p in [0..ir.nparams):
@@ -471,10 +496,11 @@ analyze = (plan_starts: bool = false):
                 else if op == .slot:
                     vloc[d] = LOC_SLOT
                     vslot[d] = int(ins.a)
+                    vsoff[d] = 0
                 else if op == .gaddr or op == .daddr:
                     vloc[d] = LOC_GLOBAL
                     vgoff[d] = int(ins.imm)
-                    if op == .gaddr: vgkind[d] = 1
+                    vgkind[d] = if op == .gaddr: 1 else: 0
                 else if op == .add and vloc[int(ins.a)] == LOC_SLOT and vloc[int(ins.b)] == LOC_CONST and v_live[int(ins.a)].ndef == 1 and v_live[int(ins.b)].ndef == 1:
                     vloc[d] = LOC_SLOT
                     vslot[d] = vslot[int(ins.a)]
@@ -520,7 +546,11 @@ analyze = (plan_starts: bool = false):
             v_live[v].nuse += 1
     # Publish the demanded allocation index while finalizing use summaries,
     # preserving the old vreg order. ARM64/no-allocation callers need no index.
-    if plan_starts: v_start = fill(-1, ir.code.len() + 1)
+    if plan_starts:
+        n = ir.code.len() + 1
+        if v_start_storage.len() < n: v_start_storage.resize(n)
+        v_start = data(v_start_storage)
+        loop pos in [0..n): v_start[pos] = -1
     # Loop summaries are already in start order. Complexity is
     # O(vregs * log(loops) + visited loop summaries); count actual revisits.
     nl = loop_s.len()
@@ -609,7 +639,6 @@ ra_remove = (active: *int, byreg: *int, n: int, reg: int) -> int:
 allocate = ():
     nv = ir.vtypes.len()
     callee_off = fill(0, 16)
-    vsave = fill(false, nv)
     if not ra_on:
         loop v in [0..nv):
             if vloc[v] != LOC_CONST and vloc[v] != LOC_FCONST and vloc[v] != LOC_SLOT and vloc[v] != LOC_GLOBAL: vloc[v] = LOC_SPILL
@@ -786,7 +815,6 @@ ra_cross_w = (s: int, e: int) -> int:
 allocate_release = ():
     nv = ir.vtypes.len()
     callee_off = fill(0, 16)
-    vsave = fill(false, nv)
     n = ir.code.len() + 1
     ra_cw = fill(0, call_pos.len() + 1)
     loop k in [0..call_pos.len()): ra_cw[k + 1] = ra_cw[k] + call_w[k]
@@ -3031,7 +3059,7 @@ dbg_function = (start: int, body: int, dwreg: int[], fp_base: int, fp_dw: int, f
             off = slot_off[int(locals[l].offset)]
         else:
             v = int(locals[l].vreg)
-            if v >= 0 and v < vloc.len():
+            if v >= 0 and v < ir.vtypes.len():
                 # (the vreg holds the variable's address: by reference, a mut parameter, a struct parameter)
                 at = fl & LF_BYREF != 0 or fl & LF_PARAM != 0 and (fl & LF_MUTPARAM != 0 or vc(int(locals[l].type)) == VC_AGG)
                 s0 = live_start(v)
