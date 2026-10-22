@@ -5850,7 +5850,8 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             loop v in [0..int(structs[si].nvariants)):
                 vi = int(structs[si].variants) + v
                 loop i in [0..int(variants[vi].nfields)): fts.push(int(fields[int(variants[vi].fields) + i].type))
-        else if k == .fn_ or k == .vec: pass
+        else if k == .vec: runtime_demand(if types[t].sign: "__fmt_i32" else: "__fmt_f32")
+        else if k == .fn_: pass
         else: fatal(nodes[n].pos, "cannot format a value of type {dt(t)}")
         refs: int[]
         # (a union shows just its value: quoted inside a container, as a string would be)
@@ -6816,10 +6817,12 @@ check_vec_binary = (n: int, op: Tok, ta: int, tb: int) -> int:
     if is_vec(ta) and is_vec(tb):
         if ta == T_MAT4 and tb == T_MAT4:
             if op != .star: fatal(nodes[n].pos, "matrices only support *")
+            runtime_demand("__mat4_mul")
             nodes[n].aux = 7
             nodes[n].type = i32(T_MAT4)
             return T_MAT4
         if ta == T_MAT4 and tb == T_VEC4 and op == .star:
+            runtime_demand("__mat4_mul_vec4")
             nodes[n].aux = 8
             nodes[n].type = i32(T_VEC4)
             return T_VEC4

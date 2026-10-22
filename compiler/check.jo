@@ -4930,8 +4930,30 @@ runtime_names = ["__alloc", "__free", "__panic", "__panic_bounds", "__panic_slic
     "__str_cmp", "__str_slice", "__str_append", "__buf_finish", "__buf_append_str", "__arr_resize", "__arr_repeat", "__arr_filled",
     "__print_str", "__str_from_bytes", "__assert_fail", "__hash_bytes", "__str_hash", "__div_zero", "__rc_inc", "__rc_dec",
     "__arr_extend", "__arr_extend_raw", "__rc_dec_test", "__out_flush", "__end_flush", "__box_new", "__box_free", "__box_clone", "__box_defer", "__box_next"]
-optional_runtime = ["__requirement_fail", "__c_str", "__mat4_mul", "__mat4_mul_vec4", "__fmt_i32", "__fmt_f32", "__ffi_resolve", "__panic_narrow", "__ffi_missing", "__mac_syscall"]
+optional_runtime = ["__requirement_fail", "__panic_narrow", "__mac_syscall"]
 runtime_insts: {str: int} = {}
+# Runtime pieces with closures of their own are checked only once something needs them: the
+# C-call thunks' once an extern is instantiated, vector formatting's and matrix products' where
+# the checker meets them (expr.jo). Hello pays for neither.
+runtime_ffi_scan = 1
+runtime_ffi_done = false
+
+runtime_demand = (name: str):
+    if runtime_insts.has(name): return
+    demand_prelude_name(intern(name))
+    if prelude.get(intern(name)) != none: runtime_fn(name)
+
+# (new instances since the last call: an extern among them brings in what its thunk calls)
+runtime_ffi_demand = () -> bool:
+    if runtime_ffi_done: return false
+    loop runtime_ffi_scan < fns.len():
+        d = int(fns[runtime_ffi_scan].decl)
+        runtime_ffi_scan += 1
+        if d != 0 and has_flag(d, NF_EXTERN):
+            runtime_ffi_done = true
+            loop nm in ["__c_str", "__ffi_resolve", "__ffi_missing"]: runtime_demand(nm)
+            return true
+    false
 
 runtime_fn = (name: str) -> int:
     if let f = runtime_insts.get(name): return f
@@ -5559,9 +5581,7 @@ check_program = (main_path: str):
     loop nm in runtime_names: runtime_fn(nm)
     runtime_memeq = runtime_fn("__mem_eq")
     runtime_streq = runtime_fn("__str_eq")
-    loop nm in optional_runtime:
-        demand_prelude_name(intern(nm))
-        if prelude.get(intern(nm)) != none: runtime_fn(nm)
+    loop nm in optional_runtime: runtime_demand(nm)
     # (@cabi functions set __c_threads: lib/core/rt.jo)
     if let ct = prelude.get(intern("__c_threads")):
         if syms[ct].kind == .global: ensure_global(int(syms[ct].ref), 0)
@@ -5580,6 +5600,7 @@ check_program = (main_path: str):
     exp_added: bool[] = fill(false, export_decls.len())
     loop true:
         k = check_pending_functions(k)
+        if runtime_ffi_demand(): continue
         used: {int: bool} = {}
         loop fi in [1..fns.len()):
             if fns[fi].state == 2 and fns[fi].decl != 0: used[int(nodes[int(fns[fi].decl)].mod)] = true
@@ -5619,6 +5640,7 @@ check_program = (main_path: str):
     # module. Finish its queued bodies before lowering any initialization.
     if k < fns.len():
         k = check_pending_functions(k)
+        if runtime_ffi_demand(): k = check_pending_functions(k)
         if open_globals.len() > 0: settle_open_globals()
     if late_module_imports:
         dfs_state = fill(false, modules.len())
