@@ -129,6 +129,35 @@ str_data = (s: str) -> int:
     if fused_on: fz_note_text(2, o, s)
     o
 
+# A string set's texts as one read-only block: each member's offset from the
+# block's start, then the members as static strings (str_data's layout). The
+# block refers only within itself, so it moves as a whole. (fused.jo's layout:
+# a block per use, the same bytes however the functions are shared out)
+set_text_tables: {int: int} = {}
+set_text_table = (id: int) -> int:
+    if not fz_layout:
+        if let o = set_text_tables.get(id): return o
+    loop rodata.len() % 8 != 0: rodata.push(0)
+    o = rodata.len()
+    ro_starts.push(o)
+    texts = str_sets[id]
+    at = 8 * texts.len()
+    loop text in texts:
+        push_i64(rodata, at)
+        at += (24 + len(text) + 1 + 7) / 8 * 8
+    loop text in texts:
+        push_i64(rodata, -1)
+        push_i64(rodata, len(text))
+        push_i64(rodata, len(text) + 1)
+        n = rodata.len()
+        rodata.resize(n + len(text))
+        if len(text) > 0: mem_copy(data(rodata) + n, data(text), len(text))
+        rodata.push(0)
+        loop rodata.len() % 8 != 0: rodata.push(0)
+    if fused_on: fz_note_raw(o, 8)
+    set_text_tables[id] = o
+    o
+
 push_i64 = (b: mut u8[], v: int):
     loop i in [0..8): b.push(u8((v >> (8 * i)) & 255))
 
@@ -3942,6 +3971,12 @@ gen_conv = (e: int) -> Val:
         copy_explicit.remove(a)
         return own(value, from)
     if cv == .none_ or cv == .quantity_const or cv == .ptr: return gen_expr(a)
+    if cv == .set_text:
+        # (a string set's member text: the table's offset of it, from the table)
+        member = gen_expr(a).v
+        table = e_daddr(set_text_table(int(nodes[e].aux2)))
+        rel = e_load(VI, e_bin(.add, VI, table, e_bin(.mul, VI, member, e_iconst(8))), 0, 8)
+        return V(e_bin(.add, VI, table, rel), false)
     if cv == .big2math: return math_call("__mi_pack", [gen_borrowed(a).v])
     if cv == .math2big: return math_call("__mi_big", [gen_borrowed(a).v], to)
     if cv == .int_:

@@ -1203,6 +1203,7 @@ effect_scan_node = (f: int, n: int):
         if supported and not type_eq(ntype(int(nodes[n].a)), int(nodes[n].aux2)): effect_failure(f, n)
     # (wrapping a plain value as an optional fills the flag and payload in place)
     else if k == .conv and nodes[n].aux == i32(int(CV.opt)): supported = effect_plain(ntype(n)) and effect_plain(ntype(int(nodes[n].a)))
+    else if k == .conv and nodes[n].aux == i32(int(CV.set_text)): supported = true
 
     else if k == .conv:
         supported = (effect_scalar(ntype(n)) and effect_word(int(nodes[n].a)) or effect_small(n) >= 0 or is_fn_type(ntype(n)) and effect_bare(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)))

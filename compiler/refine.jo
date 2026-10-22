@@ -498,18 +498,16 @@ str_set_text_of = (n: int):
         nodes[n] = nodes[bc_str(str_sets[id][int(nodes[n].aux)], pos)]
         check_expr(n, T_STR)
         return
+    # (any other value: its member's text from the set's table, lower.jo's set_text_table)
     inner = nodes.len()
     nodes.push(nodes[n])
-    held = "__set{inner}"
-    k = str_sets[id].len() - 1
-    out = bc_str(str_sets[id][k], pos)
-    k -= 1
-    loop k >= 0:
-        same = bc_bin(.eq, bc_ident(held, pos), str_set_const(id, k, pos), pos)
-        out = str_set_choice(same, bc_str(str_sets[id][k], pos), out, pos)
-        k -= 1
-    nodes[n] = nodes[bc_block([bc_assign(bc_ident(held, pos), inner, pos), bc_stmt(out, pos)], pos)]
-    check_expr(n, T_STR)
+    c = mk(.conv, pos)
+    nodes[c].a = i32(inner)
+    nodes[c].aux = i32(int(CV.set_text))
+    nodes[c].aux2 = i32(id)
+    nodes[c].type = i32(T_STR)
+    add_flag(c, NF_CHECKED)
+    nodes[n] = nodes[c]
 
 refine_coerce = (n: int, target: int) -> int:
     t = prune(target)

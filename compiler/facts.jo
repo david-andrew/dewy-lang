@@ -1974,6 +1974,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
                 return fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
             return a
         if nodes[n].aux == i32(int(CV.fixed2arr)): return a
+        if nodes[n].aux == i32(int(CV.set_text)): return fact_new(s, FactBound(), FactTerm(type = ntype(n)))
         b = fact_bound(s, a)
         if ntype(n) != ntype(int(nodes[n].a)) and (ntype(n) == T_U64 or ntype(int(nodes[n].a)) == T_U64):
             # (a value both types hold converts exactly: decode or encode its interval)
