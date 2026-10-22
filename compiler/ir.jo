@@ -87,6 +87,18 @@ struct IrFn:
     decl_pos: int     # the line of its declaration (an index into ir_positions; 0: none)
     dbg_locals: int[] # (debug information: its parameters, then its other variables)
 
+# Final-IR use summaries: indexed by vreg, built only after the optimizer has
+# finished rewriting operands. Instruction operands remain in Ins and call
+# operands in IrFn.args; no duplicated operand arrays or stale optimizer cache.
+# All native backend consumers share the counts, intervals and allocation chain.
+struct IrUsePlan:
+    first: int = 1 << 60
+    last: int = -1
+    ndef: int = 0
+    nuse: int = 0
+    weight: int = 0
+    next_start: int = -1
+
 dbg_on = false        # debug information for debuggers: where variables are (sloppy build)
 checked_flags = true # native overflow checks may overwrite an input; wasm must keep both
 mulh_ok = true        # the target has mulhs (x86-64 and arm64; not WebAssembly)
@@ -259,6 +271,43 @@ const CALL_IF_SHARED = 3
 const CALL_RC_INC = 4
 # f(x) dropping a reference to x, freeing it with the last: inline while more than one is left
 const CALL_RC_DEC = 5
+
+# Fixed-arity calls append evaluated operands directly to the shared IR span.
+e_call0 = (f: int, rtype: int) -> int:
+    start = ir.args.len()
+    e_call_span(f, start, 0, rtype)
+
+e_call1 = (f: int, a0: int, rtype: int) -> int:
+    start = ir.args.len()
+    ir.args.push(i32(a0))
+    e_call_span(f, start, 1, rtype)
+
+e_call2 = (f: int, a0: int, a1: int, rtype: int) -> int:
+    start = ir.args.len()
+    ir.args.push(i32(a0))
+    ir.args.push(i32(a1))
+    e_call_span(f, start, 2, rtype)
+
+e_call3 = (f: int, a0: int, a1: int, a2: int, rtype: int) -> int:
+    start = ir.args.len()
+    ir.args.push(i32(a0))
+    ir.args.push(i32(a1))
+    ir.args.push(i32(a2))
+    e_call_span(f, start, 3, rtype)
+
+e_call4 = (f: int, a0: int, a1: int, a2: int, a3: int, rtype: int) -> int:
+    start = ir.args.len()
+    ir.args.push(i32(a0))
+    ir.args.push(i32(a1))
+    ir.args.push(i32(a2))
+    ir.args.push(i32(a3))
+    e_call_span(f, start, 4, rtype)
+
+e_call_span = (f: int, start: int, n: int, rtype: int) -> int:
+    d = -1
+    if rtype >= 0: d = vreg(rtype)
+    emit(.call, rtype, d, start, n, 0, f)
+    d
 
 e_call = (f: int, args: int[], rt: int) -> int:
     start = ir.args.len()

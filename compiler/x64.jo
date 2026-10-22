@@ -362,15 +362,10 @@ caller_pool = [RSI, RDI, R8, R9, R10, R11]
 vsave: bool[]              # in a caller-saved register, saved/restored around calls
 dbg_keep: bool[]           # (sloppy build -g) a variable's: not in a register a call changes
 save_list: int[]
-# The interval and cost fields are read together during analysis and allocation.
-# Keep them in one allocation and one indexed record rather than five arrays.
-struct LiveReg:
-    first: int = INF_POS
-    last: int = -1
-    ndef: int = 0
-    nuse: int = 0
-    weight: int = 0          # uses/definitions weighted by loop depth
-v_live: LiveReg[]
+# The final IR's use plan is built once in analyze, after all rewriting.
+# Allocation, frame layout, fusion and emission consume these same records.
+v_live: IrUsePlan[]
+v_start: int[]             # final instruction position -> first allocation candidate
 call_pos: int[]
 call_w: int[]              # per call: its weight by loop depth
 loop_s: int[]
@@ -424,9 +419,9 @@ vop_operand = (x: int, v: int, splat: bool, n: int, scratch: int):
             sse_rm(0xF3, 0x10, 15, base, disp + 8)                       # movss
             sse_rr(0, 0x16, x, 15)                                       # movlhps x, xmm15
 
-analyze = ():
+analyze = (plan_starts: bool = false):
     nv = ir.vtypes.len()
-    v_live = fill(LiveReg(), nv)
+    v_live = fill(IrUsePlan(), nv)
     vloc = fill(LOC_SPILL, nv)
     vcval = fill(0, nv)
     vslot = fill(-1, nv)
@@ -523,14 +518,25 @@ analyze = ():
             dbg_keep[v] = true
             v_live[v].last = ir.code.len()
             v_live[v].nuse += 1
-    # a vreg defined more than once can't stay a constant/address
-    loop v in [0..nv):
-        if v_live[v].ndef != 1 and (vloc[v] == LOC_CONST or vloc[v] == LOC_FCONST or vloc[v] == LOC_SLOT or vloc[v] == LOC_GLOBAL): vloc[v] = LOC_SPILL
-    # Loop summaries are already in start order; no sort or temporary lists.
+    # Publish the demanded allocation index while finalizing use summaries,
+    # preserving the old vreg order. ARM64/no-allocation callers need no index.
+    if plan_starts: v_start = fill(-1, ir.code.len() + 1)
+    # Loop summaries are already in start order. Complexity is
+    # O(vregs * log(loops) + visited loop summaries); count actual revisits.
     nl = loop_s.len()
-    # O(vregs * log(loops) + visited loop summaries); report actual revisits
-    # under SLOPPY_RASTAT=v rather than assuming propagation is constant-cost.
-    # extend intervals of values live around loops
+    loop v in [0..nv):
+        live = &v_live[v]
+        loc = vloc[v]
+        # A vreg defined more than once cannot stay a constant/address.
+        if live.ndef != 1:
+            loc = LOC_SPILL
+            vloc[v] = loc
+        if plan_starts and loc == LOC_SPILL:
+            if live.last < 0 or (live.nuse == 0 and v >= ir.nparams): vloc[v] = LOC_NONE
+            else:
+                live.next_start = v_start[live.first]
+                v_start[live.first] = v
+    if nl == 0: return
     loop v in [0..nv):
         if v_live[v].last < 0: continue
         f = live_start(v)
@@ -608,21 +614,7 @@ allocate = ():
         loop v in [0..nv):
             if vloc[v] != LOC_CONST and vloc[v] != LOC_FCONST and vloc[v] != LOC_SLOT and vloc[v] != LOC_GLOBAL: vloc[v] = LOC_SPILL
         return
-    # bucket vregs by interval start
     n = ir.code.len() + 1
-    head = fill(-1, n)
-    nxt = fill(-1, nv)
-    loop v in [0..nv):
-        if vloc[v] == LOC_CONST or vloc[v] == LOC_FCONST or vloc[v] == LOC_SLOT or vloc[v] == LOC_GLOBAL: continue
-        if v_live[v].last < 0:
-            vloc[v] = LOC_NONE
-            continue
-        if v_live[v].nuse == 0 and v >= ir.nparams:
-            vloc[v] = LOC_NONE
-            continue
-        f = v_live[v].first
-        nxt[v] = head[f]
-        head[f] = v
     # At most eleven GPRs and thirteen vector registers can be occupied.
     # Membership is indexed by physical register, never by the vreg population.
     free = 0x7FFCFFC8
@@ -633,7 +625,7 @@ allocate = ():
     call_next = 0
     loop pos in [0..n):
         loop call_next < call_pos.len() and call_pos[call_next] <= pos: call_next += 1
-        v = head[pos]
+        v = v_start[pos]
         if v >= 0 and min_end < pos:
             # expire old intervals
             min_end = INF_POS
@@ -724,7 +716,7 @@ allocate = ():
                 if v_live[v].last < min_end: min_end = v_live[v].last
                 if reg < XMM and is_callee[reg]: callee_off[reg] = 1
             else: vloc[v] = LOC_SPILL
-            v = nxt[v]
+            v = v_live[v].next_start
 
 # release builds: two passes of linear scan. First the integer values living across calls
 # in loops or several of them (not counting those on rarely taken paths) get the callee-saved
@@ -796,20 +788,12 @@ allocate_release = ():
     callee_off = fill(0, 16)
     vsave = fill(false, nv)
     n = ir.code.len() + 1
-    head = fill(-1, n)
-    nxt = fill(-1, nv)
     ra_cw = fill(0, call_pos.len() + 1)
     loop k in [0..call_pos.len()): ra_cw[k + 1] = ra_cw[k] + call_w[k]
     cross = fill(0, nv)
     loop v in [0..nv):
-        if vloc[v] == LOC_CONST or vloc[v] == LOC_FCONST or vloc[v] == LOC_SLOT or vloc[v] == LOC_GLOBAL: continue
-        if v_live[v].last < 0 or (v_live[v].nuse == 0 and v >= ir.nparams):
-            vloc[v] = LOC_NONE
-            continue
+        if vloc[v] != LOC_SPILL: continue
         cross[v] = ra_cross_w(live_start(v), v_live[v].last)
-        f = v_live[v].first
-        nxt[v] = head[f]
-        head[f] = v
     ra_words = (n + 1) / 64 + 1
     ra_occ = fill(0, 32 * ra_words)
     # pass 1: integer values living across calls, into callee-saved registers (in order of
@@ -820,7 +804,7 @@ allocate_release = ():
     nactive = 0
     free = 0xF008                 # callee-saved GPRs
     loop pos in [0..n):
-        v = head[pos]
+        v = v_start[pos]
         if v < 0: continue
         k = 0
         if ra_stat: ra_expire_visits += nactive
@@ -864,7 +848,7 @@ allocate_release = ():
                     active[nactive] = v
                     nactive += 1
                     if ra_stat: ra_peak_gpr = max(ra_peak_gpr, nactive)
-            v = nxt[v]
+            v = v_live[v].next_start
     loop v in [0..nv):
         if placed[v]:
             ra_take(vloc[v], live_start(v) + 1, v_live[v].last + 1)
@@ -875,7 +859,7 @@ allocate_release = ():
     nactive = 0
     min_end = INF_POS
     loop pos in [0..n):
-        v = head[pos]
+        v = v_start[pos]
         if v >= 0 and min_end < pos:
             min_end = INF_POS
             k = 0
@@ -895,7 +879,7 @@ allocate_release = ():
                     k += 1
         loop v >= 0:
             if placed[v]:
-                v = nxt[v]
+                v = v_live[v].next_start
                 continue
             s = live_start(v) + 1
             e = v_live[v].last + 1
@@ -968,7 +952,7 @@ allocate_release = ():
                 if v_live[v].last < min_end: min_end = v_live[v].last
                 if reg < XMM and is_callee[reg]: callee_off[reg] = 1
             else: vloc[v] = LOC_SPILL
-            v = nxt[v]
+            v = v_live[v].next_start
     if len(ra_dump) > 0 and ir.name == ra_dump:
         loop v in [0..nv):
             if v_live[v].last < 0: continue
@@ -2798,8 +2782,9 @@ x64_function = ():
         ra_spill_visits = 0
         ra_peak_gpr = 0
         ra_peak_xmm = 0
-    analyze()
-    if opt_release and ra_prio and not dbg_on and (len(ra_only) == 0 or ir.name == ra_only): allocate_release()
+    priority = opt_release and ra_prio and not dbg_on and (len(ra_only) == 0 or ir.name == ra_only)
+    analyze(ra_on or priority)
+    if priority: allocate_release()
     else: allocate()
     layout_frame()
     xctl = []
