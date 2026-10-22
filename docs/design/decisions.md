@@ -41,6 +41,9 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   or syscalls over arrays and scalars is GPU-eligible. Designs stay
   device-agnostic; nothing to build yet.
 - No library image: fresh compiles only. Hello-world is a ~50 ms guardrail.
+  Library floor (confirmed 2026-10-21): lazy loading only. Parse and check only
+  the declarations and the bodies a program reaches; no precomputed library
+  summaries and no images.
 - Decimal literals adapt to context: exact unless next to a float64 operand, in
   a float64 parameter or field, or the binding is later written a float; then
   float64 at compile time (`0.1+0.2 =? 0.3` stays true).
