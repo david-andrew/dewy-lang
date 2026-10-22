@@ -2341,6 +2341,8 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                 loop ai in 0.. and a0 in args:
                     if ai > 0: ats += ", "
                     if nodes[unnamed(a0)].type != 0: ats += dt(ntype(unnamed(a0)))
+                if nodes[n].aux2 == i32(AUX2_PARTIAL) and dewy_at(nodes[n].pos):
+                    fatal(nodes[n].pos, "ambiguous partial application of '{name_of(name)}': more than one overload takes these arguments (candidates at {pos_str(nodes[cands[best].decl].pos)} and {pos_str(nodes[cd.decl].pos)}); annotate the binding with the callable type it should have, as in `let f:<(b:string):>string>=@{name_of(name)}(...)`")
                 fatal(nodes[n].pos, "ambiguous call to '{name_of(name)}({ats})': candidates at {pos_str(nodes[cands[best].decl].pos)} and {pos_str(nodes[cd.decl].pos)}")
     if best < 0:
         # (f(e) with e a union and an overload of f for each of its members: chosen by what e holds)
