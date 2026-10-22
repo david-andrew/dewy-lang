@@ -223,6 +223,15 @@ def candidate_compiler(current: Path) -> Path:
     return output
 
 
+def base_tests(revision: str, output: Path) -> None:
+    """The base commit's own panel sources (tests/ladder), so flagship rows compare like for like."""
+    if (output / 'tests/ladder').exists():
+        return
+    (output / 'tests').mkdir(parents=True, exist_ok=True)
+    archive = subprocess.run(['git', 'archive', revision, 'tests/ladder'], cwd=ROOT, capture_output=True, check=True)
+    subprocess.run(['tar', '-x', '-C', str(output)], input=archive.stdout, check=True)
+
+
 def base_compiler(revision: str, current: Path) -> tuple[Path, bool]:
     """A commit's fixed-point compiler with its compiler/, lib/ and examples/, cached by hash."""
     bases = CACHE / 'base'
@@ -230,6 +239,7 @@ def base_compiler(revision: str, current: Path) -> tuple[Path, bool]:
     binary = output / 'bin/dewy-core'
     if binary.exists():
         os.utime(output)
+        base_tests(revision, output)
         return output, False
     bases.mkdir(parents=True, exist_ok=True)
     work = CACHE / f'work-{revision[:12]}-{time.time_ns()}'
@@ -255,6 +265,7 @@ def base_compiler(revision: str, current: Path) -> tuple[Path, bool]:
         first.unlink()
         for name in ('compiler', 'lib', 'examples'):
             shutil.copytree(tree / name, work / name)
+        base_tests(revision, work)
     finally:
         subprocess.run(['git', 'worktree', 'remove', '--force', tree], cwd=ROOT, capture_output=True)
         shutil.rmtree(tree, ignore_errors=True)
