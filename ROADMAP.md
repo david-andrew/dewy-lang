@@ -7,19 +7,17 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 
 ## North star
 
-| Measure | Now (2026-10-21) | Goal |
+| Measure | Now (2026-10-22) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 91/101 (10 decided, awaiting implementation) | all |
-| Acceptance ladder, current dialect | all non-held programs pass; held ones run | stays green |
-| Tier-4 flagship programs (1–5k lines each) | 5/7 written (game, KV store, crypto, notes service, Dewy frontend) | 7/7 |
-| Programs passing under no-traps (`DEWY_INTERNAL_FACT_POLICY=require-static`) | 63/120 ladder+examples (per directory); cases ~1342/1694 | all, then flip the default |
-| Compile latency, hello world / median ladder program | ~65 ms (load ~20; library floor: 75 files, 38k lines) | hello ~50 ms guardrail |
-| Compile throughput, single thread, default build, flagships (library separate) | 13–37k lines/s | Track A: median ≥50k; north star 200–250k |
-| Critical-path instructions at 4 workers (secondary) | synthetic 0.60 G | no regression |
-| Single-thread instructions, synthetic-22k (regression signal) | 1.17 G | ~0.09 G (250k lines/s) |
-| Hello-world compile (guardrail) | ~22 ms (0.14 G) | ≤20 ms |
+| Acceptance ladder, design surface | 92/101 (9 decided, awaiting implementation) | all |
+| Tier-4 flagship programs (1–5k lines each) | 7/7 written; 4 design versions pass, 3 partly held | all pass |
+| Programs passing under no-traps (`require-static`) | ladder 92/175, examples 17/29 | all, then flip the default |
+| Compile throughput, single thread, default build, every processed line (`speed --corpus`) | flagships 134k lines/s (104–197k); user-only 13.6k | 200–250k on every flagship |
+| Instructions per processed node (all phases) | 6.2k (check 2.1k, lower+codegen 1.8k, optimizer 0.9k) | ~3.2k |
+| Library fan-out (library + instance lines per user line) | 8.9 | down (closure diet) |
+| Hello-world compile | 22.4 ms (instruction-derived) | ≤20 ms |
 | Kernels vs C -O2 (time, default) | literal callbacks 4.6×, callbacks 2.3×, params 1.75×, graph 1.7×, game 1.6× | ≤1.2× |
-| Quick / full suite | ~17 s / ~4 min | ≤30 s / ≤5 min |
+| Quick / full suite | ~20 s / ~4 min | ≤30 s / ≤5 min |
 
 Ladder: `python3 -m tools.core ladder` (`tests/ladder/ladder.json`). Compile:
 `speed --corpus` and `speed` (single-thread instructions; the gate);
@@ -28,21 +26,22 @@ runner, never on the shared box. Kernels: `bench`.
 
 ## Next
 
-1. **Compile speed** (the biggest gap). Do less work: parse and check only what
-   is reached (lazy library declarations and bodies, demand-driven checking),
-   and a cheaper checker per node. Report latency (hello, median ladder program)
-   and throughput (flagships; later the compiler's own Dewy) separately; gate on
-   the flagship corpus as well as synthetic, so fact work can't creep in unseen.
-2. **The decided-but-unimplemented frontier** (10 ladder programs): concurrency
-   stages 2–3 (81–83); IEEE policy (85); offset units (88); allocator and arenas
+1. **Compile speed** (decisions.md: every processed line counts; 200–250k
+   lines/s single-thread on every flagship). Migration per the adopted
+   [architecture](docs/design/compiler_architecture.md), cuts in order:
+   C check unit cost; A closure diet (fan-out, hello ≤20 ms); 6+G lower/codegen
+   per IR op; 8 optimizer per IR op; 2 call footprints; 4+9 near-free index and
+   frontend. Each cut lands only with measured flagship progress; Dewy leaf
+   modules where possible (B3).
+2. **The decided-but-unimplemented frontier** (9 ladder programs): concurrency
+   stages 2–3 (81–83, integrating); IEEE policy (85); allocator and arenas
    (76); a blocking `net` module (92, 98); tensors (84, 101; after concurrency).
 3. **Round 5/6 follow-through:** `wrap<T>(x)` and infix `transmute` (no
    `.wrap`/`.bitcast`); iterator control via `loop x in @w`; escapes; short-
    circuit `and=`/`or=`; ambiguous-partial error; closure `@` capture; `$build`;
    `Path` methods; optional `main`; `@(m.method)` handle places; uniform
    precision (string unions, int ranges); sibling-literal positional types.
-4. **Decimal adaptation in-compile** (replace the restart, which is disabled in
-   the editor, REPL and watch).
+4. **Decimal follow-ups:** REPL top-level statements, lambda-only bindings.
 5. **No traps by default:** prove idioms, fix the corpus, then flip the default.
 6. **Self-hosting** ([readiness](docs/design/self_hosting.md)): new leaf compiler
    modules start in Dewy.
