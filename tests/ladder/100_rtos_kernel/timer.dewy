@@ -32,7 +32,6 @@ arm=(@k:Kernel t:int64 deadline:int64):>void & no allocates & no blocks=>{
 # Fire this tick's slot. The walk is bounded by NTASK links even if a list
 # were damaged, so a tick always ends.
 expire=(@k:Kernel):>void & no allocates & no blocks=>{
-    if k.now <? 0 return
     let s=k.now%WHEEL
     let prev=NONE
     let t=k.wheel.head[s]

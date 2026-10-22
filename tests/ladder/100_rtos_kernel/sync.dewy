@@ -85,7 +85,6 @@ enqueue=(@k:Kernel b:int64 value:int64):>bool & no allocates & no blocks=>{
     let count=k.boxes[b].count
     if count <? 0 or count >=? BOXCAP return false
     let head=k.boxes[b].head
-    if head <? 0 return false
     k.boxes[b].items[(head+count)%BOXCAP]=value
     k.boxes[b].count=count+1
     if count+1 >? k.boxes[b].peak k.boxes[b].peak=count+1
@@ -97,7 +96,6 @@ dequeue=(@k:Kernel b:int64):>(int64|none) & no allocates & no blocks=>{
     let count=k.boxes[b].count
     if count <=? 0 return none
     let head=k.boxes[b].head
-    if head <? 0 return none
     let value=k.boxes[b].items[head%BOXCAP]
     k.boxes[b].head=(head+1)%BOXCAP
     k.boxes[b].count=count-1
