@@ -35,14 +35,32 @@ data_fix: (int, int, int)[]  # (position of rel32, kind 0=rodata 1=data, offset)
 int_arg_regs = [RDI, RSI, RDX, RCX, R8, R9]
 
 b = (x: int): code.push(u8(x & 255))
+# Reserve a complete encoding once. The compiler's byte array has the runtime
+# header (references, length, capacity); keep COW semantics on the slow path.
+# No pointer survives this write or another reservation. All supported hosts
+# are little endian and permit unaligned integer stores.
+x_bytes = (n: int) -> *u8:
+    slot = &code as **u8
+    p = slot[0]
+    old = code.len()
+    if p == null or (p as *int)[0] != 1:
+        __arr_make_unique(slot, 1)
+        p = slot[0]
+    if p == null or (p as *int)[2] < old + n:
+        __arr_grow(slot, 1, old + n)
+        p = slot[0]
+    (p as *int)[1] = old + n
+    p + 24 + old
+
+b16 = (x: int): (x_bytes(2) as *u16)[0] = u16(x)
+b24 = (x: int):
+    p = x_bytes(3)
+    (p as *u16)[0] = u16(x)
+    p[2] = u8(x >> 16)
 b32 = (x: int):
-    b(x)
-    b(x >> 8)
-    b(x >> 16)
-    b(x >> 24)
+    (x_bytes(4) as *u32)[0] = u32(x)
 b64 = (x: int):
-    b32(x)
-    b32(x >> 32)
+    (x_bytes(8) as *int)[0] = x
 patch32 = (pos: int, v: int):
     code[pos] = u8(v & 255)
     code[pos + 1] = u8((v >> 8) & 255)
@@ -243,7 +261,7 @@ vop2 = (op: int, k: int, x: int, y: int):
         # pmulld (SSE4.1: the vectorizer only uses it in 256-bit code, this is for completeness)
         b(0x66)
         rex(false, x, 0, y, false)
-        b(0x0F); b(0x38); b(0x40)
+        b24(0x40380F)
         modrr(x, y)
         return
     pre = 0
@@ -1110,67 +1128,81 @@ addr_reg = (v: int, scratch: int) -> (int, int):
     (reg_of(v, scratch), 0)
 
 # ---------------- parallel moves ----------------
-# moves of values into registers: dst register <- vreg
+# A demanded call/prologue move plan has at most fourteen ABI registers plus
+# one indirect target. Sources are captured once, so prologues never copy or
+# temporarily rewrite the function's allocation. Pending membership is a mask;
+# cycle breaking visits the same stable order without allocating/removing lists.
 struct PMove:
     dst: int
     v: int
+    src: int
 
-src_reg = (v: int) -> int:
-    l = vloc[v]
-    if l >= 0: return l
-    -1
+pmoves: PMove[] = fill(PMove(), 16)
+pm_count = 0
 
-emit_parallel = (moves: PMove[]):
-    pending = moves
-    # register to register moves first (with cycle breaking via the stack)
+pmove_src = (dst: int, v: int, src: int):
+    m = &pmoves[pm_count]
+    m.dst = dst
+    m.v = v
+    m.src = src
+    pm_count += 1
+
+pmove = (dst: int, v: int): pmove_src(dst, v, vloc[v])
+
+emit_moves = (mask: int):
+    pending = mask
+    # O(R^3) worst case including cycle recursion, R <= 15; independent of
+    # virtual-register population. No move is reclassified after publication.
     loop true:
         progress = false
         any_reg = false
-        k = 0
-        loop k < pending.len():
-            m = pending[k]
-            s = src_reg(m.v)
-            if s < 0 or s == m.dst:
-                k += 1
-                continue
+        loop k in [0..pm_count):
+            if pending & (1 << k) == 0: continue
+            m = &pmoves[k]
+            src = m.src
+            if src < 0 or src == m.dst: continue
             any_reg = true
             blocked = false
-            loop o in pending:
-                if src_reg(o.v) == m.dst and o.dst != m.dst: blocked = true
+            loop j in [0..pm_count):
+                if pending & (1 << j) == 0: continue
+                o = &pmoves[j]
+                if o.src == m.dst and o.dst != m.dst: blocked = true
             if not blocked:
-                if is_xmm(m.dst): movsd_rr(m.dst - XMM, s - XMM, VF)
-                else: mov_rr(m.dst, s)
-                pending.remove(k)
+                if is_xmm(m.dst): movsd_rr(m.dst - XMM, src - XMM, VF)
+                else: mov_rr(m.dst, src)
+                pending &= ~(1 << k)
                 progress = true
-            else: k += 1
         if not any_reg: break
         if not progress:
-            # cycle: save one source on the stack, redirect its readers
-            loop i in 0.. and m in pending:
-                s = src_reg(m.v)
-                if s >= 0 and s != m.dst:
-                    if is_xmm(s):
-                        movq_rx(RAX, s - XMM)
+            # Save one source, emit the remaining graph, then finish the cycle.
+            loop k in [0..pm_count):
+                if pending & (1 << k) == 0: continue
+                m = &pmoves[k]
+                src = m.src
+                if src >= 0 and src != m.dst:
+                    if is_xmm(src):
+                        movq_rx(RAX, src - XMM)
                         b(0x50)
                     else:
-                        rex(false, 0, 0, s, false)
-                        b(0x50 + (s & 7))
-                    # pop into destination after everything else
-                    cyc_dst = m.dst
-                    pending.remove(i)
-                    emit_parallel(pending)
-                    if is_xmm(cyc_dst):
+                        rex(false, 0, 0, src, false)
+                        b(0x50 + (src & 7))
+                    dst = m.dst
+                    emit_moves(pending & ~(1 << k))
+                    if is_xmm(dst):
                         b(0x58)
-                        movq_xr(cyc_dst - XMM, RAX)
+                        movq_xr(dst - XMM, RAX)
                     else:
-                        rex(false, 0, 0, cyc_dst, false)
-                        b(0x58 + (cyc_dst & 7))
+                        rex(false, 0, 0, dst, false)
+                        b(0x58 + (dst & 7))
                     return
-    # remaining: sources in memory, constants, slot addresses (or already in place)
-    loop m in pending:
-        if src_reg(m.v) == m.dst: continue
+    loop k in [0..pm_count):
+        if pending & (1 << k) == 0: continue
+        m = &pmoves[k]
+        if m.src == m.dst: continue
         if is_xmm(m.dst): lds(m.dst - XMM, m.v, vtype(m.v))
         else: ld(m.dst, m.v)
+
+emit_parallel = (): emit_moves((1 << pm_count) - 1)
 
 # ---------------- function body ----------------
 struct XCtl:
@@ -1228,60 +1260,51 @@ emit_prologue = ():
             b32(frame_size)        # sub rsp, frame
         loop r in [0..16):
             if callee_off[r] != 0: mov_mr(RBP, callee_off[r], r)
-    # incoming parameters
+    # Spill incoming registers before moving any; capture register sources in
+    # the bounded move plan. Stack parameters are read in a second linear scan.
     ni = 0
     nf = 0
-    stack_k = 0
-    moves: PMove[]
-    stack_params: (int, int)[]
-    reg_spills: (int, int)[]
+    pm_count = 0
     loop p in [0..ir.nparams):
         ty = vtype(p)
         src = -1
         if ty == VI:
-            if ni < 6:
-                src = int_arg_regs[ni]
-                ni += 1
+            if ni < 6: src = int_arg_regs[ni]
+            ni += 1
         else:
-            if nf < 8:
-                src = XMM + nf
-                nf += 1
-        if src < 0:
-            stack_params.push((p, 16 + 8 * stack_k))
-            stack_k += 1
-            continue
-        l = vloc[p]
-        if l == LOC_NONE: continue
-        if l == LOC_SPILL: reg_spills.push((p, src))
-        else: moves.push(PMove(l, p))
-        # record the incoming register as the temporary source location
-        pin_src.push((p, src))
-    # spills first (they read incoming registers)
-    loop rs in reg_spills:
-        if is_xmm(rs.1):
-            if vtype(rs.0) == VS: sse_rm(0xF3, 0x11, rs.1 - XMM, RBP, vspill[rs.0])
-            else: sse_rm(0xF2, 0x11, rs.1 - XMM, RBP, vspill[rs.0])
-        else: mov_mr(RBP, vspill[rs.0], rs.1)
-    # register moves: sources are the incoming registers
-    saved = vloc
-    loop ps in pin_src: vloc[ps.0] = ps.1
-    real: PMove[]
-    loop m in moves: real.push(m)
-    emit_parallel(real)
-    vloc = saved
-    pin_src.clear()
-    loop sp in stack_params:
-        p = sp.0
-        l = vloc[p]
-        if l == LOC_NONE: continue
-        if vtype(p) == VI:
-            mov_rm(RAX, RBP, sp.1)
+            if nf < 8: src = XMM + nf
+            nf += 1
+        if src < 0: continue
+        loc = vloc[p]
+        if loc == LOC_NONE: continue
+        if loc == LOC_SPILL:
+            if is_xmm(src):
+                if ty == VS: sse_rm(0xF3, 0x11, src - XMM, RBP, vspill[p])
+                else: sse_rm(0xF2, 0x11, src - XMM, RBP, vspill[p])
+            else: mov_mr(RBP, vspill[p], src)
+        else: pmove_src(loc, p, src)
+    emit_parallel()
+    if ni <= 6 and nf <= 8: return
+    ni = 0
+    nf = 0
+    stack_k = 0
+    loop p in [0..ir.nparams):
+        ty = vtype(p)
+        if ty == VI:
+            ni += 1
+            if ni <= 6: continue
+        else:
+            nf += 1
+            if nf <= 8: continue
+        off = 16 + 8 * stack_k
+        stack_k += 1
+        if vloc[p] == LOC_NONE: continue
+        if ty == VI:
+            mov_rm(RAX, RBP, off)
             st(p, RAX)
         else:
-            sse_rm(0xF2, 0x10, 0, RBP, sp.1)
-            sts(p, 0, vtype(p))
-
-pin_src: (int, int)[]
+            sse_rm(0xF2, 0x10, 0, RBP, off)
+            sts(p, 0, ty)
 
 emit_epilogue = ():
     loop r in [0..16):
@@ -1294,63 +1317,68 @@ emit_epilogue = ():
 emit_call_args = (start: int, n: int, extra: int, extra_dst: int):
     ni = 0
     nf = 0
-    stack_args: int[]
-    moves: PMove[]
+    nstack = 0
+    pm_count = 0
     loop k in [0..n):
         v = int(ir.args[start + k])
-        ty = vtype(v)
-        if ty == VI:
-            if ni < 6:
-                moves.push(PMove(int_arg_regs[ni], v))
-                ni += 1
+        if vtype(v) == VI:
+            ni += 1
+            if ni <= 6:
+                pmove(int_arg_regs[ni - 1], v)
                 continue
         else:
-            if nf < 8:
-                moves.push(PMove(XMM + nf, v))
-                nf += 1
+            nf += 1
+            if nf <= 8:
+                pmove(XMM + nf - 1, v)
                 continue
-        stack_args.push(v)
-    if extra >= 0: moves.push(PMove(extra_dst, extra))
-    pad = (stack_args.len() % 2) * 8
+        nstack += 1
+    if extra >= 0: pmove(extra_dst, extra)
+    pad = (nstack % 2) * 8
     if pad > 0:
         rex(true, 0, 0, RSP, false)
         b(0x83)
         modrr(5, RSP)
         b(8)
-    i = stack_args.len() - 1
-    loop i >= 0:
-        v = stack_args[i]
-        if vtype(v) == VI: ld(RAX, v)
-        else:
-            lds(0, v, vtype(v))
-            movq_rx(RAX, 0)
-        b(0x50)
-        i -= 1
-    emit_parallel(moves)
-    call_stack_bytes = pad + stack_args.len() * 8
+    if nstack > 0:
+        # Reverse the existing operand span, counting down each register class;
+        # this is exactly the old stack-argument order, without a temporary list.
+        i = n - 1
+        loop i >= 0:
+            v = int(ir.args[start + i])
+            i -= 1
+            if vtype(v) == VI:
+                ni -= 1
+                if ni < 6: continue
+                ld(RAX, v)
+            else:
+                nf -= 1
+                if nf < 8: continue
+                lds(0, v, vtype(v))
+                movq_rx(RAX, 0)
+            b(0x50)
+    emit_parallel()
+    call_stack_bytes = pad + nstack * 8
 
-# a call of a C function on Windows: the first four arguments in rcx, rdx, r8, r9 or xmm0-3 by
-# position, the rest on the stack above 32 bytes the callee may use ("shadow space")
+# Win64 uses four argument positions, then the existing span on the stack.
+const WIN_ARG_REGS = [RCX, RDX, 8, 9]
+const SYSCALL_REGS = [RAX, RDI, RSI, RDX, R10, R8, R9]
 emit_call_args_win64 = (start: int, n: int, extra: int, extra_dst: int):
-    regs = [RCX, RDX, 8, 9]
-    stack_args: int[]
-    moves: PMove[]
-    loop k in [0..n):
+    pm_count = 0
+    loop k in [0..min(n, 4)):
         v = int(ir.args[start + k])
-        if k < 4:
-            if vtype(v) == VI: moves.push(PMove(regs[k], v))
-            else: moves.push(PMove(XMM + k, v))
-        else: stack_args.push(v)
-    if extra >= 0: moves.push(PMove(extra_dst, extra))
-    pad = (stack_args.len() % 2) * 8
+        if vtype(v) == VI: pmove(WIN_ARG_REGS[k], v)
+        else: pmove(XMM + k, v)
+    if extra >= 0: pmove(extra_dst, extra)
+    nstack = max(0, n - 4)
+    pad = (nstack % 2) * 8
     if pad > 0:
         rex(true, 0, 0, RSP, false)
         b(0x83)
         modrr(5, RSP)
         b(8)
-    i = stack_args.len() - 1
-    loop i >= 0:
-        v = stack_args[i]
+    i = n - 1
+    loop i >= 4:
+        v = int(ir.args[start + i])
         if vtype(v) == VI: ld(RAX, v)
         else:
             lds(0, v, vtype(v))
@@ -1361,12 +1389,10 @@ emit_call_args_win64 = (start: int, n: int, extra: int, extra_dst: int):
     b(0x83)
     modrr(5, RSP)
     b(32)
-    emit_parallel(moves)
-    # (a float among the first four also goes in the integer register: C functions taking
-    # varargs (printf...) read it from there)
+    emit_parallel()
     loop k in [0..min(n, 4)):
-        if vtype(int(ir.args[start + k])) != VI: movq_rx(regs[k], k)
-    call_stack_bytes = pad + stack_args.len() * 8 + 32
+        if vtype(int(ir.args[start + k])) != VI: movq_rx(WIN_ARG_REGS[k], k)
+    call_stack_bytes = pad + nstack * 8 + 32
 
 pop_call_stack = ():
     if call_stack_bytes > 0:
@@ -1615,7 +1641,7 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
     mask = dreg(d, R11)
     saved = vloc[d] < 0
     if saved:
-        b(0x41); b(0x53)                       # push r11 (spilled destination)
+        b16(0x5341)                       # push r11 (spilled destination)
     ld(RAX, a)
     ld(RCX, bb)
     unequal: int[]
@@ -1643,10 +1669,10 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
         lea(RCX, RCX, 24)
     else: ld(RDX, count)
     cmp_branch_pad(10)
-    b(0x48); b(0x83); b(0xFA); b(0)            # cmp rdx, 0
+    b24(0xFA8348); b(0)            # cmp rdx, 0
     empty = jcc32(14)                          # jle: portable n <= 0 behavior
     cmp_branch_pad(10)
-    b(0x48); b(0x83); b(0xFA); b(16)
+    b24(0xFA8348); b(16)
     short = jcc32(12)                          # jl: fewer than 16 bytes
     nop_pad((16 - code.len() % 16) % 16)
     vector_loop = code.len()
@@ -1659,7 +1685,7 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
     b(0x81); modrr(7, mask); b32(65535)
     unequal.push(jcc32(5))
     cmp_branch_pad(10)
-    b(0x48); b(0x83); b(0xFA); b(32)
+    b24(0xFA8348); b(32)
     tail = jcc32(14)
     lea(RAX, RAX, 16)
     lea(RCX, RCX, 16)
@@ -1682,7 +1708,7 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
     # overlapping bytes are harmless, including equal head and tail addresses.
     loop width in [8, 4, 2]:
         cmp_branch_pad(10)
-        b(0x48); b(0x83); b(0xFA); b(width)
+        b24(0xFA8348); b(width)
         smaller = jcc32(12)
         load_sized(mask, RAX, 0, width, false)
         cmp_branch_pad(10)
@@ -1722,7 +1748,7 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
         patch_here(done)
         loop fix in unequal: patch_here(fix)
         if saved:
-            b(0x41); b(0x5B)
+            b16(0x5B41)
         return
     setcc(4)
     done_result = jmp32()
@@ -1735,7 +1761,7 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
     patch_here(done_result)
     patch_here(done_false)
     if saved:
-        b(0x41); b(0x5B)                       # pop r11
+        b16(0x5B41)                       # pop r11
     st(d, RAX)
 
 # The first k in [i, n) whose byte p[k] is one of four (set: packed, low byte first), or n:
@@ -1752,7 +1778,7 @@ emit_findb = (d: int, p: int, i: int, n: int, set0: int):
     mask = dreg(d, R11)
     saved = vloc[d] < 0
     if saved:
-        b(0x41); b(0x53)                       # push r11 (spilled destination)
+        b16(0x5341)                       # push r11 (spilled destination)
     ld(RAX, i)
     ld(RCX, p)
     ld(RDX, n)
@@ -1809,7 +1835,7 @@ emit_findb = (d: int, p: int, i: int, n: int, set0: int):
     jmp_back(top)
     patch_here(found)
     rex(false, mask, 0, mask, false)
-    b(0x0F); b(0xBC); modrr(mask, mask)        # bsf mask, mask
+    b16(0xBC0F); modrr(mask, mask)        # bsf mask, mask
     op_rr(0x01, true, mask, RAX)               # add rax, mask
     done = jmp32()
     patch_here(tail)
@@ -1858,7 +1884,7 @@ emit_findb = (d: int, p: int, i: int, n: int, set0: int):
     loop e in ends: patch_here(e)
     patch_here(done)
     if saved:
-        b(0x41); b(0x5B)                       # pop r11
+        b16(0x5B41)                       # pop r11
     st(d, RAX)
 
 # fused compare + branch: next instruction consumes the flag
@@ -2128,15 +2154,15 @@ emit_ins = (pos: int, ins: Ins):
         feq, fne, flt, fle, fgt, fge:
             cc = fcmp_flags(ins)
             if cc == 100:
-                b(0x0F); b(0x94); b(0xC0)        # sete al
-                b(0x0F); b(0x9B); b(0xC1)        # setnp cl
-                b(0x20); b(0xC8)                  # and al, cl
-                b(0x0F); b(0xB6); b(0xC0)
+                b24(0xC0940F)        # sete al
+                b24(0xC19B0F)        # setnp cl
+                b16(0xC820)                  # and al, cl
+                b24(0xC0B60F)
             else if cc == 101:
-                b(0x0F); b(0x95); b(0xC0)        # setne al
-                b(0x0F); b(0x9A); b(0xC1)        # setp cl
-                b(0x08); b(0xC8)                  # or al, cl
-                b(0x0F); b(0xB6); b(0xC0)
+                b24(0xC0950F)        # setne al
+                b24(0xC19A0F)        # setp cl
+                b16(0xC808)                  # or al, cl
+                b24(0xC0B60F)
             else: setcc(cc)
             st(d, RAX)
         sext8, sext16, sext32, zext8, zext16, zext32:
@@ -2172,17 +2198,17 @@ emit_ins = (pos: int, ins: Ins):
             ty = int(ins.ty)
             ld(RAX, a)
             xzero(0)
-            b(0x48); b(0x85); b(0xC0)          # test rax, rax
+            b24(0xC08548)          # test rax, rax
             j1 = jcc32(0x8)                     # js
-            b(fpre(ty)); b(0x48); b(0x0F); b(0x2A); b(0xC0)    # cvtsi2sd xmm0, rax
+            b(fpre(ty)); b24(0x2A0F48); b(0xC0)    # cvtsi2sd xmm0, rax
             j2 = jmp32()
             patch_here(j1)
             mov_rr(RCX, RAX)
-            b(0x48); b(0xD1); b(0xE9)          # shr rcx, 1
-            b(0x83); b(0xE0); b(0x01)          # and eax, 1
-            b(0x48); b(0x09); b(0xC1)          # or rcx, rax
-            b(fpre(ty)); b(0x48); b(0x0F); b(0x2A); b(0xC1)    # cvtsi2sd xmm0, rcx
-            b(fpre(ty)); b(0x0F); b(0x58); b(0xC0)             # addsd xmm0, xmm0
+            b24(0xE9D148)          # shr rcx, 1
+            b24(0x01E083)          # and eax, 1
+            b24(0xC10948)          # or rcx, rax
+            b(fpre(ty)); b24(0x2A0F48); b(0xC1)    # cvtsi2sd xmm0, rcx
+            b(fpre(ty)); b24(0xC0580F)             # addsd xmm0, xmm0
             patch_here(j2)
             sts(d, 0, ty)
         f2i:
@@ -2328,14 +2354,17 @@ emit_ins = (pos: int, ins: Ins):
                         store_sized(db, dd + k, RAX, w)
                         k += w
             else:
-                emit_parallel([PMove(RDI, a), PMove(RSI, bb)])
+                pm_count = 0
+                pmove(RDI, a)
+                pmove(RSI, bb)
+                emit_parallel()
                 mov_imm(RCX, size)
-                b(0xF3); b(0xA4)          # rep movsb
+                b16(0xA4F3)          # rep movsb
         zero:
             size = int(ins.imm)
             if size <= INLINE_COPY:
                 db, dd = addr_reg(a, RDX)
-                b(0x31); b(0xC0)          # xor eax, eax
+                b16(0xC031)          # xor eax, eax
                 k = 0
                 if size >= 16: sse_rr(0x66, 0xEF, XMM + 15, XMM + 15)      # pxor
                 loop k + 16 <= size:
@@ -2348,8 +2377,8 @@ emit_ins = (pos: int, ins: Ins):
             else:
                 ld(RDI, a)
                 mov_imm(RCX, size)
-                b(0x31); b(0xC0)
-                b(0xF3); b(0xAA)          # rep stosb
+                b16(0xC031)
+                b16(0xAAF3)          # rep stosb
         vld:
             if vloc[d] == LOC_NONE: return
             ty = int(ins.ty)
@@ -2430,7 +2459,7 @@ emit_ins = (pos: int, ins: Ins):
                 else:
                     b(0x66)
                     rex(vk == 3, x, 0, r, false)
-                    b(0x0F); b(0x6E)                     # movd / movq xmm, r
+                    b16(0x6E0F)                     # movd / movq xmm, r
                     modrr(x, r)
                     if vk == 2:
                         sse_rr(0x66, 0x70, x, x)          # pshufd x, x, 0
@@ -2438,7 +2467,7 @@ emit_ins = (pos: int, ins: Ins):
                     else: sse_rr(0x66, 0x6C, x, x)        # punpcklqdq x, x
             sts(d, x, ty)
         vzu:
-            b(0xC5); b(0xF8); b(0x77)                    # vzeroupper
+            b24(0x77F8C5)                    # vzeroupper
         vop:
             # packed float vector arithmetic, memory to memory (xmm0, xmm1, xmm15 are scratch)
             let code = int(ins.imm)
@@ -2454,15 +2483,21 @@ emit_ins = (pos: int, ins: Ins):
                     sse_rr(0, 0x12, 15, 0)                               # movhlps xmm15, xmm0
                     sse_rm(0xF3, 0x11, 15, db, dd + 8)                   # movss: lane 2
         memcpy:
-            moves = [PMove(RDI, a), PMove(RSI, bb), PMove(RCX, int(ins.c))]
-            emit_parallel(moves)
-            b(0xF3); b(0xA4)
+            pm_count = 0
+            pmove(RDI, a)
+            pmove(RSI, bb)
+            pmove(RCX, int(ins.c))
+            emit_parallel()
+            b16(0xA4F3)
         memset:
-            moves = [PMove(RDI, a), PMove(RAX, bb), PMove(RCX, int(ins.c))]
-            emit_parallel(moves)
-            b(0xF3); b(0xAA)
+            pm_count = 0
+            pmove(RDI, a)
+            pmove(RAX, bb)
+            pmove(RCX, int(ins.c))
+            emit_parallel()
+            b16(0xAAF3)
         zeroslots:
-            b(0x31); b(0xC0)
+            b16(0xC031)
             loop k in [0..bb):
                 item = int(ir.args[a + k])
                 if item & 1 == 1:
@@ -2481,13 +2516,13 @@ emit_ins = (pos: int, ins: Ins):
                 # x itself, in rax, when it is 0 or its refcount is 1; else f(x) through a stub
                 # that keeps every register (so this is no call to the register allocator)
                 ld(RAX, int(ir.args[a]))
-                b(0x48); b(0x85); b(0xC0)                 # test rax, rax
-                b(0x74); b(0)                             # jz done
+                b24(0xC08548)                 # test rax, rax
+                b16(0x0074)                             # jz done
                 skip0 = code.len() - 1
-                b(0x48); b(0x83); b(0x38); b(1)           # cmp qword [rax], 1
-                b(0x74); b(0)                             # je done
+                b24(0x388348); b(1)           # cmp qword [rax], 1
+                b16(0x0074)                             # je done
                 skip1 = code.len() - 1
-                b(0x48); b(0x8D); b(0x0D); b32(0)         # lea rcx, [rip + f]
+                b24(0x0D8D48); b32(0)         # lea rcx, [rip + f]
                 call_fix.push((code.len() - 4, int(ins.imm)))
                 b(0xE8)
                 b32(0)
@@ -2500,34 +2535,34 @@ emit_ins = (pos: int, ins: Ins):
                 # through the stub keeping every register when threads run (atomically there) or
                 # for the last reference (freeing)
                 ld(RAX, int(ir.args[a]))
-                b(0x48); b(0x85); b(0xC0)                 # test rax, rax
-                b(0x74); b(0)                             # jz done
+                b24(0xC08548)                 # test rax, rax
+                b16(0x0074)                             # jz done
                 done0 = code.len() - 1
-                b(0x48); b(0x83); b(0x38)                 # cmp qword [rax], ...
+                b24(0x388348)                 # cmp qword [rax], ...
                 slow0 = -1
                 done1 = -1
                 if ins.c == CALL_RC_INC:
                     b(0)                                  # ... 0
-                    b(0x7E); b(0)                         # jle done (immortal)
+                    b16(0x007E)                         # jle done (immortal)
                     done1 = code.len() - 1
                 else:
                     b(1)                                  # ... 1
-                    b(0x7C); b(0)                         # jl done (immortal)
+                    b16(0x007C)                         # jl done (immortal)
                     done1 = code.len() - 1
-                    b(0x74); b(0)                         # je slow (the last)
+                    b16(0x0074)                         # je slow (the last)
                     slow0 = code.len() - 1
                 rel_fixup_lea(RCX, 1, mt_active_off)      # lea rcx, [rip + __mt_active]
-                b(0x80); b(0x39); b(0)                    # cmp byte [rcx], 0
-                b(0x75); b(0)                             # jne slow
+                b24(0x003980)                    # cmp byte [rcx], 0
+                b16(0x0075)                             # jne slow
                 slow1 = code.len() - 1
-                b(0x48); b(0xFF)
+                b16(0xFF48)
                 if ins.c == CALL_RC_INC: b(0x00)          # inc qword [rax]
                 else: b(0x08)                             # dec qword [rax]
-                b(0xEB); b(0)                             # jmp done
+                b16(0x00EB)                             # jmp done
                 done2 = code.len() - 1
                 if slow0 >= 0: code[slow0] = u8(code.len() - slow0 - 1)
                 code[slow1] = u8(code.len() - slow1 - 1)
-                b(0x48); b(0x8D); b(0x0D); b32(0)         # lea rcx, [rip + f]
+                b24(0x0D8D48); b32(0)         # lea rcx, [rip + f]
                 call_fix.push((code.len() - 4, int(ins.imm)))
                 b(0xE8)
                 b32(0)
@@ -2554,16 +2589,15 @@ emit_ins = (pos: int, ins: Ins):
                         if vtype(int(ir.args[a + k])) != VI: nvec += 1
                     b(0xB8)                       # mov eax, nvec
                     b32(min(nvec, 8))
-            b(0x41); b(0xFF); b(0xD3)     # call r11
+            b24(0xD3FF41)     # call r11
             call_site(ins)
             pop_call_stack()
             store_result(ins)
         syscall:
-            regs = [RAX, RDI, RSI, RDX, R10, R8, R9]
-            moves: PMove[]
-            loop k in [0..bb): moves.push(PMove(regs[k], int(ir.args[a + k])))
-            emit_parallel(moves)
-            b(0x0F); b(0x05)
+            pm_count = 0
+            loop k in [0..bb): pmove(SYSCALL_REGS[k], int(ir.args[a + k]))
+            emit_parallel()
+            b16(0x050F)
             st(d, RAX)
         intr:
             if ins.imm == 1:
@@ -2637,12 +2671,12 @@ emit_ins = (pos: int, ins: Ins):
         brtable:
             # bounds check, then jump into a table of 5-byte jmp instructions
             ld(RAX, a)
-            b(0x48); b(0x81); modrr(7, RAX); b32(bb)          # cmp rax, n
+            b16(0x8148); modrr(7, RAX); b32(bb)          # cmp rax, n
             branch_target_jcc(int(ins.imm), CC_AE)
-            b(0x48); b(0x8D); b(0x0C); b(0x80)                # lea rcx, [rax + rax*4]
-            b(0x48); b(0x8D); b(0x05); b32(5)                 # lea rax, [rip + 5]
-            b(0x48); b(0x01); b(0xC8)                         # add rax, rcx
-            b(0xFF); b(0xE0)                                  # jmp rax
+            b24(0x0C8D48); b(0x80)                # lea rcx, [rax + rax*4]
+            b24(0x058D48); b32(5)                 # lea rax, [rip + 5]
+            b24(0xC80148)                         # add rax, rcx
+            b16(0xE0FF)                                  # jmp rax
             loop k in [0..bb): branch_target_fix(int(ir.args[int(ins.c) + k]))
         ret:
             if a >= 0:
@@ -2650,7 +2684,7 @@ emit_ins = (pos: int, ins: Ins):
                 if ty == VI: ld(RAX, a)
                 else: lds(0, a, ty)
             emit_epilogue()
-        trap: b(0x0F); b(0x0B)
+        trap: b16(0x0B0F)
         select:
             # d = a != 0 ? b : c (integers): rax = c; test a; cmovne rax, b
             cc = CC_NE
@@ -2977,7 +3011,7 @@ win_virtual_alloc = (at: int, size: int, kind: int):
     b(0x83)
     modrr(5, RSP)
     b(32)
-    b(0xFF); b(0x15); b32(0)                  # call [rip + VirtualAlloc]
+    b16(0x15FF); b32(0)                  # call [rip + VirtualAlloc]
     data_fix.push((code.len() - 4, 1, pe_iat_off(3)))
     rex(true, 0, 0, RSP, false)               # add rsp, 32
     b(0x83)
@@ -3000,12 +3034,12 @@ x64_entry_win = (inits: int[], main_lf: int) -> int:
         # lib/std/watch.jo it is there)
         win_virtual_alloc(WATCH_CODE_AT, WATCH_CODE_SIZE, 0x2000)          # MEM_RESERVE
         mov_imm(RCX, WATCH_CODE_AT)
-        b(0x48); b(0x39); b(0xC8)             # cmp rax, rcx
-        b(0x75); b(0)                         # jne over the rest
+        b24(0xC83948)             # cmp rax, rcx
+        b16(0x0075)                         # jne over the rest
         j = code.len()
         win_virtual_alloc(WATCH_CODE_AT, 4096, 0x1000)                     # MEM_COMMIT
-        b(0x48); b(0x85); b(0xC0)             # test rax, rax
-        b(0x74); b(0)                         # je over the mark
+        b24(0xC08548)             # test rax, rax
+        b16(0x0074)                         # je over the mark
         k = code.len()
         mov_imm(RDX, 0x6A6F74776174636B)
         mov_mr(RAX, 0, RDX)
@@ -3015,7 +3049,7 @@ x64_entry_win = (inits: int[], main_lf: int) -> int:
         b(0xE8)
         b32(0)
         call_fix.push((code.len() - 4, f))
-    b(0x31); b(0xDB)                          # xor ebx, ebx (the exit code)
+    b16(0xDB31)                          # xor ebx, ebx (the exit code)
     if main_lf >= 0:
         b(0xE8)
         b32(0)
@@ -3030,7 +3064,7 @@ x64_entry_win = (inits: int[], main_lf: int) -> int:
     b(0x83)
     modrr(5, RSP)
     b(32)
-    b(0xFF); b(0x15); b32(0)                  # call [rip + ExitProcess]
+    b16(0x15FF); b32(0)                  # call [rip + ExitProcess]
     data_fix.push((code.len() - 4, 1, pe_iat_off(0)))
     b(0xCC)
     elf_syms.push(("_start", start, code.len() - start))
@@ -3113,10 +3147,10 @@ x64_entry = (inits: int[], main_lf: int) -> int:
         mov_imm(8, -1)
         mov_imm(9, 0)
         mov_imm(RAX, 9)
-        b(0x0F); b(0x05)                      # mmap
+        b16(0x050F)                      # mmap
         mov_imm(RCX, WATCH_CODE_AT)
-        b(0x48); b(0x39); b(0xC8)             # cmp rax, rcx
-        b(0x75); b(0)                         # jne over the mark
+        b24(0xC83948)             # cmp rax, rcx
+        b16(0x0075)                         # jne over the mark
         j = code.len()
         mov_imm(RDX, 0x6A6F74776174636B)
         mov_mr(RAX, 0, RDX)
@@ -3125,7 +3159,7 @@ x64_entry = (inits: int[], main_lf: int) -> int:
         b(0xE8)
         b32(0)
         call_fix.push((code.len() - 4, f))
-    b(0x31); b(0xDB)                          # xor ebx, ebx (the exit code)
+    b16(0xDB31)                          # xor ebx, ebx (the exit code)
     if main_lf >= 0:
         b(0xE8)
         b32(0)
@@ -3137,7 +3171,7 @@ x64_entry = (inits: int[], main_lf: int) -> int:
         call_fix.push((code.len() - 4, entry_end_lf))
     mov_rr(RDI, RBX)
     mov_imm(RAX, 231)
-    b(0x0F); b(0x05)                          # exit_group
+    b16(0x050F)                          # exit_group
     # (the entry point: debuggers stop unwinding here)
     elf_syms.push(("_start", start, code.len() - start))
     start
@@ -3250,7 +3284,7 @@ x64_stubs = ():
     mov_mr(RDI, 48, RAX)
     mov_rm(RAX, RSP, 0)
     mov_mr(RDI, 56, RAX)
-    b(0x31); b(0xC0)                     # xor eax, eax
+    b16(0xC031)                     # xor eax, eax
     b(0xC3)
     # longjmp(rdi = buf, rsi = value)
     loop code.len() % 16 != 0: b(0xCC)
@@ -3265,7 +3299,7 @@ x64_stubs = ():
     loop code.len() % 16 != 0: b(0xCC)
     stub_addr[4] = code.len()
     mov_rr(RSP, RSI)
-    b(0x31); b(0xD2)                     # xor edx, edx
+    b16(0xD231)                     # xor edx, edx
     rex(false, 0, 0, RDI, false)
     b(0xFF)
     modrr(4, RDI)                          # jmp rdi
