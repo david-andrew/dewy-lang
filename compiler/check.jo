@@ -2185,7 +2185,9 @@ capture_in = (c: int, l: int) -> int:
         flags |= LF_PARTBORROW
         partition_active = true
         locals[outer].flags |= i32(LF_CAPTURED)
-    else if ownership_decls.len() != 0 and ownership_fact_type(int(locals[outer].type)):
+    else if (ownership_decls.len() != 0 and ownership_fact_type(int(locals[outer].type))) or (int(locals[outer].flags) & LF_MUTPARAM != 0 and starts_with(name_of(int(locals[outer].name)), "$self")):
+        # (a method's receiver captured by place, `$capture @count`: the closure
+        # cannot outlive the method, dewy_methods.jo)
         flags |= LF_OWNERBORROW
         locals[outer].flags |= i32(LF_ADDR | LF_CAPTURED)
     else:

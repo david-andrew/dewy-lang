@@ -1510,7 +1510,21 @@ dw_function = (id: int, name: str) -> int:
             nm = dw_name(target)
             if nm == "" or nm == "_": return dw_fail(p, "a capture other than an enclosing local name")
             cap = dw_expr(target)
-            if nodes[cap].kind != .ident: fatal(dewy_syntax[target].pos, "'{nm}' is a member of this object, which the method already reaches by name; `$capture` takes an enclosing local")
+            # (`$capture @count` in a method: the closure writes the object's member
+            # through the receiver's place; dewy_methods.jo admits writes to it only)
+            if nodes[cap].kind == .field and dw_op(p) == .at and nodes[int(nodes[cap].a)].kind == .ident and starts_with(name_of(int(nodes[int(nodes[cap].a)].name)), "$self"):
+                receiver = int(nodes[cap].a)
+                members = dewy_member_captures.get(n) ?? []
+                if members.contains(int(nodes[cap].name)): fatal(nodes[cap].pos, "duplicate parameter binding '{nm}'")
+                members.push(int(nodes[cap].name))
+                dewy_member_captures[n] = members
+                if not bound.has(int(nodes[receiver].name)):
+                    add_flag(receiver, NF_MUT)
+                    bound[int(nodes[receiver].name)] = true
+                    captures.push(receiver)
+                capture = false
+                continue
+            if nodes[cap].kind != .ident: fatal(dewy_syntax[target].pos, "'{nm}' is a member of this object, which the method already reaches by name; `$capture` takes an enclosing local (`$capture @{nm}` lets a closure change it)")
             if dw_op(p) == .at: add_flag(cap, NF_MUT)
             if bound.has(int(nodes[cap].name)): fatal(nodes[cap].pos, "duplicate parameter binding '{nm}'")
             bound[int(nodes[cap].name)] = true

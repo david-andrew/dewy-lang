@@ -496,6 +496,13 @@ or loop element place cannot escape through a shared capture; copy its value
 into a local first. Shared cells that could hold functions are rejected to
 avoid reference cycles. Module globals retain their module-wide identity.
 
+Inside a method, a closure reads the object's members as a snapshot and
+changes one only through an explicit capture of that member:
+`let hit = ($capture @hits) => { hits += 1 }` changes the object's `hits`,
+while writing a member it did not capture is an error naming the fix. Such a
+closure holds the caller's object, so it stays in the method: it is bound with
+`let` and called there (`@hit` and returning it are errors).
+
 Ordinary callback parameters receive independent values. To advance a caller's
 counter, accept `@counter` and pass `@counter`, just as for other mutable values.
 Records and collections containing closures also preserve independent copies.

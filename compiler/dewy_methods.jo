@@ -174,6 +174,7 @@ dewy_infer_methods = ():
     loop i in [dewy_methods_inferred..dewy_methods.len()):
         if dewy_methods[i].state == 3: add_flag(kid(dewy_methods[i].decl, 0), NF_MUT)
         else: dewy_methods[i].state = 2
+        if dewy_member_captures.len() > 0: dewy_member_closures(int(nodes[dewy_methods[i].decl].b))
     # A method is static unless it reaches a member other than a static method:
     # a least fixed point again, so static methods may call one another.
     loop true:
@@ -270,9 +271,62 @@ dewy_member_changes = (base: int, name: int, receiver: int, i: int) -> bool:
                     if dewy_methods[j].decl == d and dewy_method_changes(j): return true
     false
 
-dewy_change_found = (n: int, nested: bool) -> bool:
-    if nested: fatal(nodes[n].pos, "a function inside a method cannot change the object's members yet (it would change its own copy); change them in the method itself")
+# Members a closure captured by place (`$capture @count`), by lambda node, and
+# those of the closure being walked.
+dewy_member_captures: {int: int[]} = {}
+dewy_allowed_members: int[]
+
+dewy_change_found = (n: int, nested: bool, member: int = 0) -> bool:
+    if nested and (member == 0 or not dewy_allowed_members.contains(member)):
+        if member != 0: fatal(nodes[n].pos, "a function inside a method changes the object's member '{name_of(member)}' only through an explicit capture: `($capture @{name_of(member)}) => ...`")
+        fatal(nodes[n].pos, "a function inside a method cannot change the object itself (it would change its own copy); change it in the method, or capture the members it changes: `($capture @name) => ...`")
     true
+
+# A closure that captured members by place holds the caller's object: it is
+# bound with `let` and only called in the method (a bare name calls; `@f` would
+# let it escape). O(method body), only for methods with such closures.
+dewy_member_closures = (body: int):
+    names: int[]
+    dewy_member_closure_names(body, 0, names)
+    if names.len() > 0: dewy_member_closure_handles(body, names)
+
+dewy_member_closure_names = (n: int, parent: int, names: mut int[]):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .lambda and dewy_member_captures.has(n):
+        if parent == 0 or nodes[parent].kind != .vardecl or int(nodes[parent].b) != n: fatal(nodes[n].pos, "a closure that changes the object's members runs inside the method: bind it with `let` and call it there")
+        names.push(int(nodes[parent].name))
+    dewy_member_closure_names(int(nodes[n].a), n, names)
+    dewy_member_closure_names(int(nodes[n].b), n, names)
+    dewy_member_closure_names(int(nodes[n].c), n, names)
+    dewy_member_closure_names(int(nodes[n].d), n, names)
+    loop child in kids(n): dewy_member_closure_names(child, n, names)
+
+dewy_member_closure_handles = (n: int, names: int[]):
+    if n == 0: return
+    k = nodes[n].kind
+    escapes = k == .ident and has_flag(n, NF_MUT) and names.contains(int(nodes[n].name))
+    if k == .call and nodes[n].aux2 == i32(AUX2_PARTIAL) and nodes[int(nodes[n].a)].kind == .ident and names.contains(int(nodes[int(nodes[n].a)].name)): escapes = true
+    if escapes:
+        named = n
+        if k == .call: named = int(nodes[n].a)
+        fatal(nodes[n].pos, "'{name_of(int(nodes[named].name))}' changes the object's members, so it cannot leave the method: call it there")
+    dewy_member_closure_handles(int(nodes[n].a), names)
+    dewy_member_closure_handles(int(nodes[n].b), names)
+    dewy_member_closure_handles(int(nodes[n].c), names)
+    dewy_member_closure_handles(int(nodes[n].d), names)
+    loop child in kids(n): dewy_member_closure_handles(child, names)
+
+# The object's member a route from the receiver starts with (0 for the object itself).
+dewy_route_member = (n: int, receiver: int) -> int:
+    let n = n
+    member = 0
+    loop n != 0 and (nodes[n].kind == .field or nodes[n].kind == .index):
+        if nodes[n].kind == .field: member = int(nodes[n].name)
+        else: member = 0
+        if nodes[int(nodes[n].a)].kind == .ident and int(nodes[int(nodes[n].a)].name) == receiver: return member
+        n = int(nodes[n].a)
+    0
 
 # Whether n changes the object reached through `receiver`. `nested` is set inside a
 # function written in the method's body, whose captured copy of the object is its own.
@@ -281,27 +335,33 @@ dewy_changes = (n: int, receiver: int, i: int, nested: bool) -> bool:
     k = nodes[n].kind
     found = false
     inner = nested or k == .lambda
+    if k == .lambda:
+        saved = dewy_allowed_members
+        dewy_allowed_members = dewy_member_captures.get(n) ?? []
+        found = dewy_changes_within(n, receiver, i, true) or dewy_allowed_members.len() > 0
+        dewy_allowed_members = saved
+        return found
     if k == .assign:
         target = int(nodes[n].a)
         targets = if nodes[target].kind == .tuple: binding_leaves(kids(target)) else: [target]
         loop t in targets:
-            if dewy_reaches(t, receiver): found = dewy_change_found(n, nested)
+            if dewy_reaches(t, receiver): found = dewy_change_found(n, nested, dewy_route_member(t, receiver))
     if (k == .for_ or k == .lhead) and has_flag(n, NF_MUT) and dewy_reaches(int(nodes[n].a), receiver):
-        found = dewy_change_found(n, nested)
+        found = dewy_change_found(n, nested, dewy_route_member(int(nodes[n].a), receiver))
     if k == .call and nodes[int(nodes[n].a)].kind == .field:
         callee = int(nodes[n].a)
         base = int(nodes[callee].a)
         if dewy_reaches(base, receiver) and dewy_member_changes(base, int(nodes[callee].name), receiver, i):
-            found = dewy_change_found(n, nested)
+            found = dewy_change_found(n, nested, dewy_route_member(base, receiver))
         # The receiver of a member call is marked as a possible place; judged above.
         if dewy_changes_within(base, receiver, i, inner): found = true
         loop arg in kids(n):
             if dewy_changes(arg, receiver, i, inner): found = true
         return found
     if k == .field and nodes[n].name != 0 and dewy_reaches(int(nodes[n].a), receiver):
-        if dewy_member_changes(int(nodes[n].a), int(nodes[n].name), receiver, i): found = dewy_change_found(n, nested)
+        if dewy_member_changes(int(nodes[n].a), int(nodes[n].name), receiver, i): found = dewy_change_found(n, nested, dewy_route_member(int(nodes[n].a), receiver))
     if has_flag(n, NF_MUT) and (k == .ident or k == .field or k == .index) and dewy_reaches(n, receiver):
-        found = dewy_change_found(n, nested)
+        found = dewy_change_found(n, nested, dewy_route_member(n, receiver))
     if dewy_changes_within(n, receiver, i, inner): found = true
     found
 

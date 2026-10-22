@@ -1,0 +1,12 @@
+Counter = type of [
+    n:int64 = 0
+    make = () => {
+        let f = ($capture @n) => { n += 1 }
+        return @f
+    }
+]
+main=()=>{
+    let c = Counter[]
+    let g = c.make
+    g()
+}

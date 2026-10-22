@@ -1,0 +1,13 @@
+Counter = type of [
+    n:int64 = 0
+    total:int64 = 0
+    bump = () => {
+        let f = ($capture @n) => { total += 1 }
+        f()
+    }
+]
+main=()=>{
+    let c = Counter[]
+    c.bump
+    printl(c.n)
+}

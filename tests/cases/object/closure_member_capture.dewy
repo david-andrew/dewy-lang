@@ -1,0 +1,19 @@
+# quick
+# A closure inside a method changes the members it captures with `@`.
+Tally = type of [
+    hits:int64 = 0
+    misses:int64 = 0
+    names:array<string> = []
+    record = (xs:array<int64>) => {
+        let hit = ($capture @hits $capture @names) => {
+            hits += 1
+            names.push("h{hits}")
+        }
+        loop x in xs { if x >? 0 hit() else misses += 1 }
+    }
+]
+main=()=>{
+    let t = Tally[]
+    t.record([1 -2 3])
+    printl"{t.hits} {t.misses} {t.names}"
+}
