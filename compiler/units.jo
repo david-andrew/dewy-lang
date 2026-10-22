@@ -181,7 +181,7 @@ quantity_constant = (n: int, num: int, den: int, dim: int, expected: int) -> int
         a = mk(.float_lit, pos)
         nodes[a].fval = f64(value.numerator) / f64(value.denominator)
         check_expr(a, hint)
-    else if value.denominator == 1:
+    else if value.denominator == 1 and not bundled_rational_type(hint):
         a = bc_int(value.numerator, pos)
         check_expr(a, if is_int(hint): hint else: 0)
     else:
@@ -237,7 +237,7 @@ quantity_constant_fits = (n: int, target: int) -> bool:
     if scale < 0: return false
     base = quantity_base(target)
     q = quantity_scales[scale]
-    if is_float(base): return true
+    if is_float(base) or bundled_rational_type(base): return true
     is_int(base) and q.denominator == 1 and int_fits(q.numerator, base)
 
 quantity_coerce = (n: int, target: int) -> int:
@@ -245,7 +245,7 @@ quantity_coerce = (n: int, target: int) -> int:
     if quantity_dimension(source) != quantity_dimension(target): quantity_mismatch(nodes[n].pos, source, target)
     if type_eq(source, target): return n
     constant = quantity_constant_scale(n)
-    if constant >= 0 and is_numeric(quantity_base(target)):
+    if constant >= 0 and (is_numeric(quantity_base(target)) or bundled_rational_type(quantity_base(target))):
         scale = quantity_scales[constant]
         if scale.denominator != 1 and is_int(quantity_base(target)): fatal(nodes[n].pos, "fractional quantity cannot convert to {dt(target)}")
         quantity_constant(n, scale.numerator, scale.denominator, quantity_dimension(target), target)
@@ -734,10 +734,11 @@ quantity_offset_product = (n: int, a: int, b: int, op: Tok, expected: int) -> in
     bq = is_quantity(tb)
     if aq and not bq: return quantity_become(n, quantity_scaled(a, b, op, true, pos), quantity_tag(ta))
     if bq and not aq and op == .star: return quantity_become(n, quantity_scaled(b, a, op, false, pos), quantity_tag(tb))
-    if op == .slash and aq and bq and quantity_dimension(ta) == quantity_dimension(tb) and not quantity_is_delta(tb) and quantity_tags[quantity_tag(tb)].origin != 0:
+    if op == .slash and aq and bq and quantity_dimension(ta) == quantity_dimension(tb) and not quantity_is_delta(tb):
         u = quantity_units[quantity_tags[quantity_tag(tb)].origin]
         top = a
-        if not quantity_is_delta(ta):
+        if not quantity_is_delta(ta) and u.onum == 0: quantity_retag(a, 0)
+        else if not quantity_is_delta(ta):
             quantity_retag(a, 0)
             top = bc_bin(.minus, a, quantity_offset_constant(u.onum, u.oden, quantity_dimension(ta), ta, pos), pos)
             top = quantity_internal_check(top)

@@ -1,62 +1,48 @@
 # Tier 3 / 88_temperature_points / milestone 28
 # Acceptance: Temperature point-minus-point and point-plus-delta, exact C/F/K conversions and requested display units.
-# OPEN: Offset scale declarations and point/delta arithmetic are provisional; display-unit selection x as km is provisional. Wrappers are exact controls only.
-# This executable projection does not establish the OPEN obligation.
-# Canonical kelvin represented by exact rationals; no invented offset-unit API.
-Point:type=[kelvin:rational]
-Delta:type=[kelvin:rational]
-from_celsius=(c:rational):>Point=>{
-    return Point[c+273.15]
-}
-from_fahrenheit=(f:rational):>Point=>{
-    return from_celsius((f-32)*5/9)
-}
-difference=(a:Point b:Point):>Delta=>{
-    return Delta[a.kelvin-b.kelvin]
-}
-shift=(p:Point d:Delta):>Point=>{
-    return Point[p.kelvin+d.kelvin]
-}
-celsius=(p:Point):>rational=>p.kelvin-273.15
-fahrenheit=(p:Point):>rational=>celsius(p)*9/5+32
+from units import K, °C, °F
 main=():>int64=>{
-    let freezing=from_celsius(0)
-    let boiling=from_celsius(100)
-    let delta=difference(boiling freezing)
-    $runtime_assert freezing.kelvin =? 273.15
-    $runtime_assert boiling.kelvin =? 373.15
-    $runtime_assert delta.kelvin =? 100
-    $runtime_assert from_fahrenheit(32).kelvin =? freezing.kelvin
-    $runtime_assert from_fahrenheit(212).kelvin =? boiling.kelvin
-    $runtime_assert shift(freezing delta).kelvin =? boiling.kelvin
-    $runtime_assert fahrenheit(from_celsius(-40)) =? -40
-    $runtime_assert celsius(from_fahrenheit(-40)) =? -40
-    $runtime_assert fahrenheit(from_celsius(20)) =? 68
+    let freezing=0°C
+    let boiling=100°C
+    let delta=boiling-freezing
+    $runtime_assert freezing/K =? 273.15
+    $runtime_assert boiling/K =? 373.15
+    $runtime_assert delta/K =? 100
+    $runtime_assert 32°F =? freezing
+    $runtime_assert 212°F =? boiling
+    $runtime_assert freezing+delta =? boiling
+    $runtime_assert (-40°C)/°F =? -40
+    $runtime_assert (-40°F)/°C =? -40
+    $runtime_assert 20°C/°F =? 68
+    $runtime_assert "{boiling} {boiling as °F} {boiling as K} {delta} {delta as °F}" =? "100°C 212°F 7463/20 K 100°C 180°F"
     let checksum:rational=0
     loop c in [-20..41) {
-        let p=from_celsius(c)
-        let f=fahrenheit(p)
-        $runtime_assert from_fahrenheit(f).kelvin =? p.kelvin
-        checksum+=p.kelvin
+        let p=c*°C
+        let f=p/°F
+        $runtime_assert f*°F =? p
+        checksum+=p/K
     }
-    let saved=freezing.copy()
-    freezing.kelvin=0
-    $runtime_assert saved.kelvin =? 273.15
-    $runtime_assert difference(boiling saved).kelvin =? 100
-    $runtime_assert difference(saved boiling).kelvin =? -100
-    $runtime_assert shift(saved Delta[0]).kelvin =? saved.kelvin
-    $runtime_assert shift(saved Delta[1]).kelvin =? 274.15
-    $runtime_assert celsius(from_celsius(0)) =? 0
-    $runtime_assert fahrenheit(from_fahrenheit(0)) =? 0
-    $runtime_assert celsius(from_celsius(100)) =? 100
-    $runtime_assert fahrenheit(from_celsius(100)) =? 212
-    $runtime_assert fahrenheit(saved) =? 32
-    $runtime_assert difference(saved saved).kelvin =? 0
-    $runtime_assert shift(saved Delta[-1]).kelvin =? 272.15
-    $runtime_assert from_fahrenheit(68).kelvin =? 293.15
-    $runtime_assert shift(saved Delta[100]).kelvin =? boiling.kelvin
-    $runtime_assert celsius(boiling) =? 100
-    $runtime_assert celsius(Point[0]) =? -273.15
-    printl("{delta.kelvin} {checksum}")
+    # A literal added to or taken from a point is a difference; so is a converted one.
+    let start=20°C
+    $runtime_assert start+20°C =? 40°C
+    $runtime_assert start-20°C =? freezing
+    $runtime_assert "{20°C as °F} {start+(20°C as °F)} {(start+20°C-start) as °F}" =? "68°F 40°C 36°F"
+    let saved=freezing
+    freezing=0K
+    $runtime_assert saved/K =? 273.15
+    $runtime_assert boiling-saved =? 100K
+    $runtime_assert saved-boiling =? -100K
+    $runtime_assert saved+1K =? 274.15K
+    $runtime_assert saved+1°C =? 1°C
+    $runtime_assert (saved as °F)/°F =? 32
+    $runtime_assert saved-saved =? 0K
+    $runtime_assert freezing/°C =? -273.15
+    $runtime_assert 68°F =? 293.15K
+    $runtime_assert saved+delta =? boiling
+    let warm=start
+    warm+=5°C
+    warm-=start
+    $runtime_assert "{warm} {start*2} {-start}" =? "5°C 40°C -20°C"
+    printl("{delta/K} {checksum}")
     return 0
 }
