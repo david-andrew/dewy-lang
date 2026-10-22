@@ -108,6 +108,19 @@ setup_target = ():
     target_arm64 = tgt == "aarch64-linux" or target_macos
     if target_wasm: ptr_size = 4
 
+# (a game's update or draw, as the checker finds it: a top-level `name =` or `let name =`, at
+# the start of a line; a method call such as hasher.update(...) is not one)
+declares_top = (src: str, name: str) -> bool:
+    at = find(src, name)
+    loop at >= 0:
+        b = at
+        if b >= 4 and src[b - 1] == ' ' and src[b - 4] == 'l' and src[b - 3] == 'e' and src[b - 2] == 't': b -= 4
+        e = at + len(name)
+        loop e < len(src) and src[e] == ' ': e += 1
+        if (b == 0 or src[b - 1] == '\n') and e < len(src) and src[e] == '=' and (e + 1 >= len(src) or src[e + 1] != '='): return true
+        at = find(src, name, at + len(name))
+    false
+
 # (a quick read of the main file's build block before anything is checked; check_build_block
 # reports its mistakes)
 scan_build_block = (path: str):
@@ -115,7 +128,7 @@ scan_build_block = (path: str):
     # Games reach most of the game prelude. Avoid indexing/hashing it only to
     # load it all again. False positives merely choose eager loading; names
     # discovered later still work through ordinary demand loading.
-    prelude_game_hint = find(src, "draw") >= 0 or find(src, "update") >= 0
+    prelude_game_hint = declares_top(src, "update") or declares_top(src, "draw")
     # find a top-level `build:` line, then read its indented lines
     at = pkg_block_at(src)
     # (the packages it names: where they are, fetched if need be)
