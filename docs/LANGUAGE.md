@@ -1520,6 +1520,15 @@ destination; both arrays retain independent value semantics. Self-appends keep
 the slice-copy path so appending a small selection does not force a copy of the
 entire source. Matrix slice reads use the same bulk append path for each row.
 
+`xs.is_empty` tests for no elements, `xs.count(value)` counts the elements equal
+to a value and `xs.count(f)` those a predicate accepts; `xs.any(f)` and
+`xs.all(f)` test a predicate. Without a predicate, `any` and `all` apply only to
+an array of bools (`all(flags)`; the idiom for numbers is a comparison per
+element, `all(xs .>? 0)`, part of the planned elementwise operators). There is no
+`zip` or `enumerate`: a compound loop walks several sources in step,
+`loop x in xs and y in ys {...}`, and `loop i in 0.. and x in xs {...}` counts
+alongside (`[loop x in xs and y in ys [x y]]` collects pairs).
+
 Records compose similarly: `let tuned:Settings=[defaults... speed=12]`.
 Later fields or record spreads replace earlier fields with the same name.
 Every operand still runs once in source order, including overwritten values;
@@ -2708,7 +2717,13 @@ return independent strings using the core's current simple mappings for ASCII
 and supported Latin, Greek and Cyrillic letters. For example, `upper("café")`
 is `"CAFÉ"`. Unmapped characters and malformed UTF-8 bytes are preserved;
 these byte-oriented transformations do not perform grapheme validation.
-`text.startswith(prefix)` and `text.endswith(suffix)` test the ends of a string.
+`text.startswith(prefix)` and `text.endswith(suffix)` test the ends of a string;
+`text.remove_prefix(prefix)` and `text.remove_suffix(suffix)` give the text without
+that end when it has it (once), and the text unchanged otherwise.
+`text.trim_start` and `text.trim_end` drop whitespace from one end (`trim` both),
+`text.lines` gives the lines without their breaks (a final break adds no empty
+line), `text.chars` its graphemes (as `graphemes(text)`), `text.count(part)` the
+nonoverlapping occurrences and `text.is_empty` whether it has none.
 `text.find(part)` and `text.rfind(part)` give the grapheme position of the first or
 last occurrence, as indexing counts, or `Missing`; `text.find(part start)` searches from
 grapheme `start`. `xs.index_of(x)` gives the first position of `x` in an array, or

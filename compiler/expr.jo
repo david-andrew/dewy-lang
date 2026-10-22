@@ -3277,7 +3277,9 @@ dewy_surface_table = () -> {int: str}:
             ("join_path", "`p\"\{a}/\{b}\"`: a path interpolates as its text"),
             ("sort_by", "`xs.sort(key=f)` sorts by a key (`reverse=true` for largest first)"),
             ("sorted_by", "`xs.sorted(key=f)` gives a copy sorted by a key (`reverse=true` for largest first)"),
-            ("eprint", "`printl(x file=stderr)` writes to standard error, and `console.error(x)` in red on a terminal")]:
+            ("eprint", "`printl(x file=stderr)` writes to standard error, and `console.error(x)` in red on a terminal"),
+            ("zip", "loop over both at once, `loop x in xs and y in ys \{...}`, or pair them in a comprehension, `[loop x in xs and y in ys [x y]]`"),
+            ("enumerate", "count alongside, `loop i in 0.. and x in xs \{...}`")]:
             dewy_surface_hints[intern(entry.0)] = entry.1
     dewy_surface_hints
 
@@ -3293,7 +3295,7 @@ dewy_surface = (name: int, decl: int) -> int:
     0
 
 # (a Jo library operation that Dewy spells another way whatever its arguments)
-dewy_renamed = (name: int) -> bool: name == intern("sort_by") or name == intern("sorted_by") or name == intern("eprint")
+dewy_renamed = (name: int) -> bool: name == intern("sort_by") or name == intern("sorted_by") or name == intern("eprint") or name == intern("zip") or name == intern("enumerate")
 
 # Suggested names as the source at pos spells them: Dewy's own words for the
 # implementation's builtin types and sequence length.
@@ -3666,7 +3668,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
         return check_expr(n, expected)
     if mod_scope < 0 and args.len() >= 1 and files[pos_file(nodes[n].pos)].is_dewy and dewy_numbers_call(n, name, args, ufcs): return check_expr(n, expected)
     # (`find(text part)` and `index_of(xs x)` written as calls: Dewy's searches, giving Missing)
-    if not ufcs and mod_scope < 0 and args.len() >= 2 and (name == intern("find") or name == intern("rfind") or name == intern("index_of")) and files[pos_file(nodes[n].pos)].is_dewy and nodes[args[0]].kind != .namedarg:
+    if not ufcs and mod_scope < 0 and args.len() >= 1 and (name == id_find or name == id_rfind or name == id_index_of or name == id_chars) and (args.len() >= 2 or name == id_chars) and files[pos_file(nodes[n].pos)].is_dewy and nodes[args[0]].kind != .namedarg:
         s = lookup(name)
         if s != 0 and syms[s].kind == .fns and decl_in_prelude(int(syms[s].decl)):
             a0 = args[0]
@@ -3674,8 +3676,9 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                 check_expr(a0, 0)
                 add_flag(a0, NF_CHECKED)
             k0 = tkind(prune(ntype(a0)))
-            if k0 == .str_ and name != intern("index_of"): return call_by_name(n, intern("__dewy_{name_of(name)}"), mod_scope, args, expected, false)
-            if k0 == .array and name == intern("index_of") and args.len() == 2: return call_by_name(n, intern("__dewy_index_of"), mod_scope, args, expected, false)
+            if k0 == .str_ and name == id_chars: return call_by_name(n, intern("graphemes"), mod_scope, args, expected, false)
+            if k0 == .str_ and name != id_index_of and name != id_chars: return call_by_name(n, intern("__dewy_{name_of(name)}"), mod_scope, args, expected, false)
+            if k0 == .array and name == id_index_of and args.len() == 2: return call_by_name(n, intern("__dewy_index_of"), mod_scope, args, expected, false)
     if not ufcs and mod_scope < 0 and args.len() == 2 and (name == intern("__floor_div") or name == intern("__floor_mod") or name == intern("__dewy_power") or name == intern("__dewy_divide")) and files[pos_file(nodes[n].pos)].is_dewy:
         if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
             return dewy_arithmetic_call(n, name, args, expected)
@@ -4622,10 +4625,13 @@ missing_type = () -> int:
     get_struct_inst(int(syms[s].decl), [])
 
 # (the prelude's Console, the type of `console`; 0 before the library is loaded)
+console_type_id = -1
 console_type = () -> int:
+    if console_type_id >= 0: return console_type_id
     s = prelude.get(intern("Console")) ?? 0
     if s == 0 or syms[s].kind != .struct_: return 0
-    get_struct_inst(int(syms[s].decl), [])
+    console_type_id = get_struct_inst(int(syms[s].decl), [])
+    console_type_id
 
 # `console.printl(x)` and the rest: print and printl as written, info as printl;
 # warn and error on standard error, yellow and red where colour is on; debug on
@@ -4932,8 +4938,11 @@ dewy_member_name = (callee: int, rt: int, fname: int, args: int[]) -> int:
         if name == "insert": return intern("__dewy_insert")
         if name == "remove": fatal(pos, "an array removes by position with pop: `{recv}.pop(i)`")
         if name == "index_of" and args.len() == 1: return intern("__dewy_index_of")
+        if (name == "any" or name == "all") and args.len() == 0 and prune(int(types[rt].elem)) != T_BOOL:
+            fatal(pos, "{name} without a predicate is for an array of bools, `{name}(flags)`: give it one, `{recv}.{name}(x => x >? 0)`")
     if name == "keys" and args.len() == 0 and is_map_type(rt): return intern("__dewy_keys")
     if k == .str_:
+        if name == "chars" and args.len() == 0: return intern("graphemes")
         if name == "find": return intern("__dewy_find")
         if name == "rfind": return intern("__dewy_rfind")
         if name == "startswith": return intern("starts_with")

@@ -1,0 +1,15 @@
+# quick
+# Array helpers: count(value), any/all of bools or with a predicate, compound loops for zip.
+main=()=>{
+    let xs=[3 1 4 1 5]
+    printl(xs.count(1))
+    printl(xs.count(x => x >? 2))
+    printl([true false].any)
+    printl(all([true false]))
+    printl(all(xs .>? 0))
+    printl(xs.any(x => x >? 4))
+    printl(xs.is_empty)
+    let names=["a" "b" "c"]
+    printl([loop x in xs and n in names "{n}{x}"])
+    loop i in 0.. and n in names printl("{i}:{n}")
+}

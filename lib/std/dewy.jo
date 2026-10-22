@@ -51,3 +51,32 @@ __dewy_index_of[T] = (xs: T[], x: T) -> int | Missing:
     loop i in 0.. and e in xs:
         if e == x: return i
     Missing()
+
+# Dewy's helpers (docs/LANGUAGE.md, "Loops, text and optional values").
+# `xs.count(value)`: how many elements are value (`xs.count(f)` counts those f accepts)
+count[T] = (xs: T[], value: T) -> int:
+    n = 0
+    loop x in xs:
+        if x == value: n += 1
+    n
+
+# `any(flags)` and `all(flags)` without a predicate: only of an array of bools
+# (`all(xs .>? 0)`); with one, any element (`xs.any(f)`)
+any = (xs: bool[]) -> bool:
+    loop x in xs:
+        if x: return true
+    false
+all = (xs: bool[]) -> bool:
+    loop x in xs:
+        if not x: return false
+    true
+
+is_empty = (s: str) -> bool: len(s) == 0
+
+# text without a prefix or suffix it has, else the text as it is (once, not repeatedly)
+remove_prefix = (s: str, prefix: str) -> str:
+    if starts_with(s, prefix): return s[len(prefix)..]
+    s
+remove_suffix = (s: str, suffix: str) -> str:
+    if ends_with(s, suffix): return s[..len(s) - len(suffix))
+    s
