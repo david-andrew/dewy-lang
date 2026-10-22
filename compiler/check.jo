@@ -5794,7 +5794,7 @@ check_program = (main_path: str):
         loop st in modules[mainm].inits:
             if calls_named(st, "main"):
                 # (Dewy runs a program's main by itself, exactly once)
-                if files[int(modules[mainm].file)].is_dewy and syms[s].kind == .fns: fatal(nodes[st].pos, "main runs by itself, once, after the file's top-level statements: remove this call (a file without main runs top to bottom as a script)")
+                if files[int(modules[mainm].file)].is_dewy and syms[s].kind == .fns and nodes[st].pos > 0 and not pos_in_lib(nodes[st].pos): fatal(nodes[st].pos, "main runs by itself, once, after the file's top-level statements: remove this call (a file without main runs top to bottom as a script)")
                 calls_main = true
         if syms[s].kind == .fns and not skip_main and not calls_main:
             main_fn = get_fn_inst(int(syms[s].decl), [], 0)
