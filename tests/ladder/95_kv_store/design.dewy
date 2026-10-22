@@ -30,7 +30,7 @@ clear=(root:string):>void=>{
     let dir=p(root)
     if not dir.exists return
     let names=dir.list
-    if names isnt? error {
+    if names isnt? (error|Canceled) {
         loop name in names {
             p"{root}/{name}".unlink;
         }
@@ -62,7 +62,7 @@ step=(@session:Session line:string):>void|DiskError=>{
         restart(@session) or_throw
     } else if command =? ".compact" {
         let done=session.store.compact()
-        if done is? error {
+        if done is? (error|Canceled) {
             printl("compaction failed")
         } else {
             printl("compacted keys={session.store.length()} generation={session.store.manifest.generation}")
@@ -107,6 +107,7 @@ main=():>void=>{
     loop true {
         let line=read_line()
         if line is? none break
+        if line is? Canceled exit(1)
         if line.length =? 0 or line.startswith("--") continue
         printl("> {line}")
         let done=step(@session line)

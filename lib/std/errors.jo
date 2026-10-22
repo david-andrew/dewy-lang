@@ -27,10 +27,11 @@ struct Missing:
 struct Overflow:
     pass
 
-type __FileFailure = FileNotFound | FileAccessDenied | IsDirectory | FileExists | FileError
+type __FileFailure = FileNotFound | FileAccessDenied | IsDirectory | FileExists | FileError | Canceled
 
 __file_failure = () -> __FileFailure:
-    code = __file_error_code
+    if __task_canceled(): return Canceled
+    code = __task_file_code()
     if code == 2: return FileNotFound()
     if code == 13 or code == 1: return FileAccessDenied()
     if code == 21: return IsDirectory()

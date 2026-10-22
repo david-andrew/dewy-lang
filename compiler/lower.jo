@@ -5,6 +5,7 @@ use 'facts.jo'
 use 'refine.jo'
 use 'units.jo'
 use 'poly_closure.jo'
+import 'concurrency.jo' as concurrency
 use 'isolation.jo'
 use 'fused.jo'
 # Lowering: typed AST -> IR, including reference counting, copy-on-write and closures.
@@ -607,6 +608,7 @@ emit_scope_exit = (i: int):
         d = ds[k]
         saved = scope_defers[i]
         scope_defers[i] = ds[..k)
+        if concurrency.concurrency_runtime_needed: e_call(rt("__task_shield_enter"), [], -1)
         if nodes[d].kind == .block:
             scope_push()
             gen_block_stmts(d)
@@ -614,6 +616,7 @@ emit_scope_exit = (i: int):
             scope_locals.pop()
             scope_defers.pop()
         else: gen_stmt(d)
+        if concurrency.concurrency_runtime_needed: e_call(rt("__task_shield_leave"), [], -1)
         scope_defers[i] = saved
         k -= 1
     ls = scope_locals[i]
@@ -3587,13 +3590,13 @@ gen_intrinsic = (e: int) -> Val:
         e_call(rt("__arr_resize"), [sa, e_iconst(owner_stride(et)), n], -1)
         if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
         return V(-1, false)
-    if id == .arrdata:
+    if id == .arrdata or id == .task_data:
         # a raw pointer into a variable's array may be written through: give the variable its own
         # copy first (a literal, or a shared one, must not change)
         a0 = args[0]
         at = prune(ntype(a0))
         p = 0
-        if types[at].kind == .array and data_writable(a0):
+        if id == .arrdata and types[at].kind == .array and data_writable(a0):
             pl = gen_place(a0, true)
             arr_unique(pl, at)
             # gen_place also detaches containing arrays and evaluates indexes.
@@ -3616,6 +3619,30 @@ gen_intrinsic = (e: int) -> Val:
         if target_macos:
             loop vs.len() < 7: vs.push(e_iconst(0))
             return V(e_call(rt("__mac_syscall"), vs, VI), false)
+        interruptible = false
+        if concurrency.concurrency_runtime_needed and nodes[args[0]].kind == .int_lit and files[pos_file(nodes[e].pos)].path != lib_dir + "/std/tasks.jo" and files[pos_file(nodes[e].pos)].path != lib_dir + "/std/fork_join.jo":
+            number = nodes[args[0]].ival
+            interruptible = number in [0, 1, 2, 7, 16, 17, 19, 20, 35, 42, 43, 44, 45, 46, 47, 61, 74, 75, 202, 288]
+        if interruptible:
+            result = vreg(VI)
+            e_mov(result, e_iconst(-125))
+            blk()
+            done = ctl
+            lop()
+            retry = ctl
+            brif_to(e_call(rt("__task_canceled"), [], VI), done)
+            start = ir.args.len()
+            loop v in vs: ir.args.push(i32(v))
+            raw = vreg(VI)
+            emit(.syscall, VI, raw, i32(start), i32(vs.len()), 0, 0)
+            brif_to(e_bin(.eq, VI, raw, e_iconst(-4)), retry)
+            # Completed syscalls may transfer a descriptor or reap a process.
+            # Let the public boundary account for that result before reporting
+            # cancellation; only EINTR retries consult the scope here.
+            e_mov(result, raw)
+            endc()
+            endc()
+            return V(result, false)
         start = ir.args.len()
         loop v in vs: ir.args.push(i32(v))
         d = vreg(VI)
@@ -4280,6 +4307,12 @@ gen_expr_value = (e: int) -> Val:
             if nodes[e].c != 0: order = call_eval_order(e)
             target = if ownership_prints.has(e): runtime_fn("__owner_print") else: int(nodes[e].sym)
             r = gen_direct_call(target, kids(e), order, e)
+            if ownership_prints.has(e) and is_union(t):
+                slot = new_temp(t)
+                value = e_slot(slot)
+                e_zero(value, tsize(t))
+                e_store(value, 0, e_iconst(union_index(t, T_VOID)), 4)
+                return Val(value, true, slot)
             if vc(t) == VC_VOID: return V(-1, false)
             return r
         if aux == 1:
@@ -7995,3 +8028,4 @@ helper_owner_envcopy = (f: int, src: int):
     owner_forget_slot(slot)
     owner_end()
     e_ret(env)
+

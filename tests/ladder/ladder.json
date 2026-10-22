@@ -349,18 +349,25 @@
   },
   "81_partition_join": {
    "milestone": 25,
-   "note": "Fork owned disjoint partitions, join in source order, and prove coverage including an uneven tail.",
-   "open": "Decided (concurrency direction, 2026-10-21): parallel, concurrent/spawn groups, inferred Send/Sync. Awaiting implementation (concurrency stages 2-3)."
+   "note": "Fork owned disjoint partitions, join in source order, and prove coverage including an uneven tail."
   },
   "82_overlap_race": {
    "milestone": 25,
    "note": "Compile-time reject concurrent writes to overlapping ranges; accept adjacent partitions.",
-   "open": "Decided (concurrency direction, 2026-10-21): parallel/concurrent spellings exist; the rejected concurrent source needs stage 2-3 checks. Awaiting implementation."
+   "expect": {
+    "kind": "compile-error",
+    "diagnostic": "proven-disjoint scoped fork",
+    "line": 6
+   }
   },
   "83_transfer_properties": {
    "milestone": 25,
    "note": "Derive structural task-transfer properties; reject an Rc-like non-atomic handle crossing tasks.",
-   "open": "Decided (2026-10-21): Send/Sync inferred structurally, $send=false/$sync=false opt-outs. Awaiting implementation (concurrency stage 2)."
+   "expect": {
+    "kind": "compile-error",
+    "diagnostic": "inferred Send",
+    "line": 5
+   }
   },
   "84_tensor_broadcast": {
    "milestone": 26,
@@ -525,6 +532,9 @@
   "78_reject_resource_copy",
   "79_scoped_byte_loan",
   "80_reject_loan_escape",
+  "81_partition_join",
+  "82_overlap_race",
+  "83_transfer_properties",
   "86_exact_energy",
   "87_big_arithmetic",
   "88_temperature_points",

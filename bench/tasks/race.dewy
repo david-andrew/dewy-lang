@@ -1,0 +1,16 @@
+from p"../harness.jo" import clock, size_argument
+main=(args:array<string>)=>{
+ let n=size_argument(args 100)
+ let left="lookup-left.txt"
+ let right="lookup-right.txt"
+ if write_text(left "found") is? exception exit(1)
+ if write_text(right "found") is? exception exit(1)
+ let start=clock()
+ loop i in [0..n) {
+  let result=race(@read_text(left) @read_text(right))
+  assert(result is? string and result =? "found")
+ }
+ let elapsed=clock()-start
+ remove_file(left) remove_file(right)
+ printl"{n} {elapsed} 0"
+}

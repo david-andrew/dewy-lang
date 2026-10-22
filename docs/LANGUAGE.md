@@ -2105,8 +2105,83 @@ operations share the same pool, and a caller waiting at a join helps run ready
 work. Forks stay local until a heartbeat exposes work to another worker; small
 scoped joins use direct calls on the sequential path. Web builds run serially with
 the same result order and copy semantics. Parallel work may always execute
-sequentially; its body must not wait for a sibling to signal it. The current
-checker does not yet prove this blocking restriction.
+sequentially. Its body must be proven nonblocking: sleeps, blocking I/O,
+waiting joins, and unclassified foreign calls are rejected, including through
+called functions. Use the waiting lane for these operations. This conservative
+rule prevents waiting for a sibling that the scheduler may run inline.
+
+`blocks` is inferred; a function can exclude it with `:>T & no blocks`.
+`Send` and `Sync` are structural compiler facts. Scalars, arrays, records and
+unions compose automatically; raw-storage handles and escaping places do not.
+A proven disjoint scoped partition is checked separately. Atomic handles have
+shared identity and can cross tasks.
+
+`atomic(0)` makes an `Atomic<int64>` shared counter. Payloads are fixed-width
+integers; `atomic<T>(value)` selects another width. `load`, `store`, `add`,
+`compare_swap`, and the existing `get`, `set`, and `set_max` operations accept an
+optional compile-time `MemoryOrder` literal: `'relaxed'`, `'acquire'`,
+`'release'`, `'acq_rel'`, or `'seq_cst'` (the default). Loads reject release
+orders; stores reject acquire orders. `add` returns the new value. The current
+native backend implements every order with sequentially consistent instructions,
+which is stronger than requested. For example:
+
+```dewy
+let hits=atomic(0)
+parallel i in [0..1000) {hits.add(1 'relaxed')}
+assert(hits.load'acquire' =? 1000)
+```
+
+Private synchronized handles need explicit factory values: `atomic(...)`,
+`concurrent`, or `spawn`. Zero-filled fixed arrays, omitted fields, and array
+growth cannot manufacture these handles; empty containers remain valid.
+
+`CachePadded<T>` has a `value:T` payload and a padded representation: its stride
+includes a spare cache line and rounds to 128 bytes. The payload keeps its
+natural alignment. Padding a handle pads the handle, not its separate allocation.
+
+Waiting work uses a structured task group on the Linux threads backend:
+
+```dewy
+work=(n:int64)=>n*2
+concurrent {
+    let a=spawn work(21)
+    let b=spawn work(20)
+}
+# a and b are available here: their results, or Canceled / OutOfMemory.
+```
+
+The closing brace joins every child. As an expression, `concurrent { ... }`
+returns `true` on success or the first exception returned by a child. The first
+failure cancels its siblings; joining still waits for their cleanup. Returning
+early from the body cancels and joins its children. `concurrent g { ... }` names
+a `TaskGroup`; pass it explicitly to helpers that use `spawn(g) expression`.
+`cancel(g)` cancels that group and its descendants. Captures and results must
+satisfy inferred transfer properties. A task cannot read an unsynchronized
+mutable global while its parent runs; capture a value or use an atomic handle.
+
+`Canceled` is an exception value, with US spelling (`Cancelled` produces a
+fix-it diagnostic). Cancellation is level-triggered: every later blocking
+operation in that scope returns `Canceled`. `sleep`, file and stdin operations,
+and process waits include it in their result type; console output (`print`,
+`printl`, `console.*`) is not a cancellation point. Use `or_throw` to
+propagate it, or handle it explicitly. For optional streaming results, check
+`none` (EOF) before checking `Canceled`. Owned process helpers cancel and reap
+their child; cancellation of `child.wait` leaves that child owned by its caller.
+
+`within(2s @get(url))` establishes a deadline scope and returns `Timeout` when
+its own deadline expires; parent cancellation remains `Canceled`.
+`race(@first_lookup(key) @second_lookup(key))` returns the first completed result
+and cancels and joins the other task. Neither helper leaves a task detached.
+Backend state, cancellation, and deadlines travel implicitly through calls.
+CPU work cooperates with cancellation by checking a blocking operation such as
+`sleep(0ns)`; an arbitrary computation is not forcibly terminated. Cleanup
+(`defer` and drop hooks) is shielded, with a 100 ms grace deadline.
+
+Thread/slot admission failure returns `OutOfMemory`. Ordinary heap allocation
+retains the language's environmental resource-failure policy. Other targets
+currently diagnose waiting-lane tasks; portable `parallel` remains available.
+`Canceled` reaching `main` is an error like any other: it is reported and exits
+with its kind's code.
 
 Use parallel work for substantial independent calculations; scheduling and atomic
 reference counts can cost more than a small callback saves. Keep drawing and

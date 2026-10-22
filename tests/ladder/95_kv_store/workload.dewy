@@ -108,7 +108,7 @@ run_workload=(root:string seed:uint64 steps:int64):>Tally|WorkloadError|DiskErro
             }
             let before=model
             let done=store.commit(changes)
-            if done is? error return WorkloadError["commit failed at step {step}"]
+            if done is? (error|Canceled) return WorkloadError["commit failed at step {step}"]
             apply_model(@model changes)
             undo=before
             tally.commits+=1
@@ -139,7 +139,7 @@ run_workload=(root:string seed:uint64 steps:int64):>Tally|WorkloadError|DiskErro
             reopen(@store @tally model) or_throw
         } else if action <? 96 {
             let done=store.compact()
-            if done is? error return WorkloadError["compaction failed at step {step}"]
+            if done is? (error|Canceled) return WorkloadError["compaction failed at step {step}"]
             undo=none
             tally.compactions+=1
         } else {

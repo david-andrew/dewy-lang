@@ -46,11 +46,11 @@ main=():>void=> {
         }
         let path="crash.wal"
         let written=write_bytes(path prefix)
-        if written is? error  {
+        if written is? (error|Canceled)  {
             exit(1)
         }
         let loaded=read_bytes(path)
-        if loaded is? error  {
+        if loaded is? (error|Canceled)  {
             exit(2)
         }
         let state=recover(loaded)
@@ -74,7 +74,7 @@ main=():>void=> {
     assert(recovered.get(1) =? 10)
     assert(recovered.get(2) =? 20)
     let removed=remove_file("crash.wal")
-    if removed is? error  {
+    if removed is? (error|Canceled)  {
         exit(3)
     }
     printl("{cases} {total} {full.length}")

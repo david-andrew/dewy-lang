@@ -8,7 +8,7 @@ store_path = ():>string => "dewy_todo_demo.json"
 
 load = (path:string):>Store => {
     let text = read_text(path)
-    if text is? error { return Store() }
+    if text is? (error|Canceled) { return Store() }
     let parsed = from_json<Store>(text)
     if parsed is? TextError {
         printl("warning: ignoring corrupt store: {parsed.message}")
@@ -19,7 +19,7 @@ load = (path:string):>Store => {
 
 save = (path:string store:Store):>void => {
     let result = write_text(path to_json(store 2))
-    if result is? error { printl("error: could not save to {path}") }
+    if result is? (error|Canceled) { printl("error: could not save to {path}") }
 }
 
 find = (store:Store id:int):>int|none => {

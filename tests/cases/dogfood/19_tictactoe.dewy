@@ -66,6 +66,7 @@ main=()=>{
     loop winner(board) is? none and not full(board) {
         if turn =? "X" {
             let line=input("Your move (1-9): ")
+            if line is? Canceled exit(1)
             let n=to_int(line.trim())
             if n is? none or n <? 1 or n >? 9 or board.cells[n-1] not=? " " {
                 printl("invalid move '{line}'")

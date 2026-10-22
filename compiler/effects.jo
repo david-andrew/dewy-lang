@@ -17,6 +17,7 @@ use 'ownership.jo'
 use 'ir.jo'
 use 'copies.jo'
 use 'directives.jo'
+use 'concurrency.jo'
 
 enum EffectKind: read, write, alloc, detach, costly_copy, panic, io, block, spawn, escape, opaque, remainder
 struct EffectAtom:
@@ -115,9 +116,16 @@ effect_limit = 0
 # Element accesses charged a possible failure in the current graph (owner,
 # node), and those a facts probe of their owner's body proved in bounds.
 effect_bound_sites: (int, int)[]
+# Waiting is inferred only where a row excludes it: a program that writes `no blocks`
+# (parallel bodies ask concurrency.jo directly)
+effect_blocks_demanded = false
 effect_bounds_proven: {int: bool} = {}
 
 effects_reset = ():
+    concurrency_calls = []
+    concurrency_tasks = []
+    concurrency_runtime_needed = false
+    concurrency_block_memo = {}
     effect_bound_sites = []
     effect_bounds_proven = {}
     effect_declared = {}
@@ -351,6 +359,8 @@ effect_allows = (contract: int, atom: EffectAtom) -> bool:
     if atom.kind == .remainder: return effect_rows_fit(atom.row, contract)
     row = effect_contracts[contract]
     loop exclusion in row.exclusions:
+        # Waiting is classified separately from residual implementation costs.
+        if atom.kind == .opaque and exclusion.kind == .block: continue
         if effect_overlap(exclusion, atom): return false
     if row.open: return true
     loop permission in row.atoms:
@@ -366,6 +376,7 @@ effect_rows_fit = (source: int, dest: int) -> bool:
     loop ex in dr.exclusions:
         if sr.open and not sr.exclusions.contains(ex): return false
     loop atom in sr.atoms:
+        if atom.kind == .opaque and dr.exclusions.contains(EffectAtom(.block)) and not sr.exclusions.contains(EffectAtom(.block)): return false
         if not effect_allows(dest, atom): return false
     loop v in sr.variables:
         if not dr.variables.contains(v): return false
@@ -467,7 +478,9 @@ effect_function_row = (f: int) -> int:
             if base.owner != f: return effect_top()
             atom.place = place_append(PlaceIdentity(.formal, 0, base.declaration), atom.place)
         atoms.push(atom)
-    effect_intern(atoms)
+    exclusions: EffectAtom[]
+    if effect_blocks_demanded and not concurrency_fn_blocks(f): exclusions.push(EffectAtom(.block))
+    effect_intern(atoms, exclusions)
 
 # Collect result expressions without interpreting loop locals as syntax nodes.
 effect_returns = (n: int, out: mut int[]):
@@ -642,8 +655,10 @@ effect_source_row = (n: int, path: int[] = [], depth: int = 0) -> int:
                 a.place = place_append(PlaceIdentity(.formal, 0, ordinal), a.place)
             atoms.push(a)
         # Open bounds with bound formal exclusions need a route substitution.
-        if row.open or row.exclusions.len() != 0: return effect_top()
-        return effect_intern(atoms)
+        if row.open: return effect_top()
+        loop exclusion in row.exclusions:
+            if place_base(exclusion.place).root == .formal: return effect_top()
+        return effect_intern(atoms, row.exclusions)
     if k == .if_ or k == .block or k == .exprstmt:
         leaves: int[]
         value_leaves(n, leaves)
@@ -1473,6 +1488,7 @@ effect_visit = (f: int):
     effect_summaries[f].low = effect_serial
     effect_stack.push(f)
     d = int(fns[f].decl)
+    if effect_blocks_demanded and concurrency_fn_blocks(f): effect_add(f, EffectEvent(EffectAtom(.block), d))
     if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)):
         effect_opaque(f, d)
         effect_isolation_block(f, .unavailable, d)
@@ -1615,7 +1631,7 @@ effects_finalize = ():
             if (contract == 0 or effect_allows(contract, atom)) and not prohibited: continue
             at = if event.via != 0: event.via else: event.witness
             if at == 0: at = d
-            what = if atom.kind == .write: "mutation" else if atom.kind == .read: "read" else if atom.kind == .alloc: "allocation" else if atom.kind == .panic: "possible failure" else if atom.kind == .detach: "storage detach" else if atom.kind == .io: "I/O" else if atom.kind == .block: "blocking" else if atom.kind == .costly_copy: "costly copy" else if atom.kind == .escape: "escape" else if atom.kind == .spawn: "spawn" else: "opaque operation or unproved implementation cost"
+            what = if atom.kind == .write: "mutation" else if atom.kind == .read: "read" else if atom.kind == .alloc: "allocation" else if atom.kind == .panic: "possible failure" else if atom.kind == .detach: "storage detach" else if atom.kind == .io: "I/O" else if atom.kind == .block: "blocking operation" else if atom.kind == .costly_copy: "costly copy" else if atom.kind == .escape: "escape" else if atom.kind == .spawn: "spawn" else: "opaque operation or unproved implementation cost"
             if event.atom.place.declaration != 0 and not starts_with(effect_place_name(event.atom.place), "__"): what += " of '{effect_place_name(event.atom.place)}'"
             chain = effect_witness(f, event)
             origin = if event.witness != 0 and not pos_in_lib(nodes[event.witness].pos): "; witness at {pos_str(nodes[event.witness].pos)}" else if event.witness != 0: "" else: "; witness at {pos_str(nodes[d].pos)}"

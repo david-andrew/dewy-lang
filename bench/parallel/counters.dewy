@@ -1,0 +1,14 @@
+from p"../harness.jo" import clock, size_argument
+from p"counters.jo" import __counter_cells
+main=(args:array<string>)=>{
+ let n=size_argument(args 1000000)
+ let padded=args.length >? 2
+ let counters=__counter_cells(padded)
+ let start=clock()
+ parallel i in [0..4) {
+  loop j in [0..n) {counters[i].add(1 'relaxed')}
+ }
+ let checksum:int64=0
+ loop cell in counters {checksum+=cell.load()}
+ printl"{checksum} {clock()-start}"
+}

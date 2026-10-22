@@ -18,7 +18,7 @@ enum DewyToken:
     dot_gt, dot_lt, dot_plus, dot_minus, dot_star, dot_slash, dot_percent, dot_caret,
     multiply_apply, call, broadcast_call, index, type_apply, range_apply, statement_end,
     amp_assign, pipe_assign, and_assign, or_assign, xor_assign, kw_of, kw_or_throw,
-    kw_nand, kw_nor, kw_xnor, kw_parallel
+    kw_nand, kw_nor, kw_xnor, kw_parallel, kw_concurrent, kw_spawn
 
 dn_single_token = (c: u8) -> DewyToken:
     match c:
@@ -50,6 +50,8 @@ dn_single_token = (c: u8) -> DewyToken:
     return .none
 
 dn_token_kind = (text: str) -> DewyToken:
+    if text == "concurrent": return .kw_concurrent
+    if text == "spawn": return .kw_spawn
     if len(text) == 0: return .none
     if len(text) == 1: return dn_single_token(text[0])
     match text[0]:
@@ -276,6 +278,8 @@ dn_token_text = (token: DewyToken) -> str:
         kw_if: "if"
         kw_loop: "loop"
         kw_parallel: "parallel"
+        kw_concurrent: "concurrent"
+        kw_spawn: "spawn"
         kw_match: "match"
         kw_test: "test"
         kw_not: "not"

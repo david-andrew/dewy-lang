@@ -8,20 +8,20 @@ main=():>void=>{
     printl(append_file(log "two\n"))
     printl(append_file(log ""))
     let text=read_text(log)
-    if text is? error exit(1)
+    if text is? (error|Canceled) exit(1)
     printl(text.split("\n"))
     printl(append_file(dir "x") is? IsDirectory)
-    printl(record(log "three") is? error)
+    printl(record(log "three") is? (error|Canceled))
     printl(record(dir "three") is? IsDirectory)
     let after=read_text(log)
-    if after is? error exit(2)
+    if after is? (error|Canceled) exit(2)
     printl(after.split("\n"))
     printl(remove_file(log))
     printl(remove_directory(dir))
 }
 
 # A function that propagates a file error to its caller.
-record=(path:string line:string):>int64|error=>{
+record=(path:string line:string):>int64|error|Canceled=>{
     let n=append_file(path "{line}\n") or_throw
     return n
 }

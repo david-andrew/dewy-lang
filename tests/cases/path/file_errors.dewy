@@ -1,6 +1,6 @@
 # Failures are error values: the missing file, a directory where a file is wanted, a
 # directory already there, one not empty, and bytes that are not UTF-8.
-describe=(outcome:string|int64|bool|array<uint8>|array<string>|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError|InvalidUtf8):>string=>{
+describe=(outcome:string|int64|bool|array<uint8>|array<string>|FileNotFound|FileAccessDenied|IsDirectory|FileExists|FileError|InvalidUtf8|Canceled):>string=>{
     if outcome is? FileNotFound return "FileNotFound"
     if outcome is? FileAccessDenied return "FileAccessDenied"
     if outcome is? IsDirectory return "IsDirectory"
@@ -13,7 +13,7 @@ main=():>void=>{
     let dir=p"case_path_errors"
     let missing=p"{dir}/missing.txt"
     printl(missing.read_text is? FileNotFound)
-    printl(missing.read_bytes is? error)
+    printl(missing.read_bytes is? (error|Canceled))
     printl(missing.unlink is? FileNotFound)
     printl(missing.list is? FileNotFound)
     printl(dir.mkdir)

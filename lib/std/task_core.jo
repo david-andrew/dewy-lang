@@ -1,0 +1,101 @@
+# The part of tasks other library code asks about: the running task's slot, its
+# random stream and cleanup shield, its file error code, and whether it is canceled.
+# Loaded on demand, as lib/std/tasks.jo (groups, spawn, within, race), which sets it
+# up, and lib/std/task_input.jo (cancelable standard input and file opening) are;
+# what every program's runtime reads (the task stacks) is in lib/core/rt.jo.
+
+# A group's scope; tasks.jo makes and joins them.
+struct TaskGroup:
+    __state: int[]
+    __p: *__TaskScope
+
+struct __TaskScope:
+    parent: TaskGroup
+    jobs: int[][]
+    addresses: *__TaskJob[]
+    lock: int
+    canceled: int
+    deadline: int
+    pending: int
+    closed: bool
+    failed: bool
+    first: exception = none
+    owner: int
+
+struct __TaskJob:
+    run: () -> void
+    group: TaskGroup
+    alive: int = 1
+    tid: int
+    slot: int
+
+# Context is separate from the backend stack. The first backend reserves
+# virtual stacks and uses a stack-range lookup, avoiding platform TLS in the
+# compiler's freestanding executables. Slots are reused only after kernel exit.
+struct __TaskContext:
+    scope: TaskGroup
+    job: int[]
+    address: *__TaskJob
+    rng: Rng
+    shield: int
+    grace: int
+
+__task_contexts: __TaskContext[]
+
+__task_context = () -> *__TaskContext:
+    if __task_contexts.len() == 0: return null
+    __task_data(__task_contexts) + __task_slot() + 1
+
+__task_scope_canceled = (g: TaskGroup) -> bool:
+    let current = g
+    loop current.__state.len() != 0:
+        p = current.__p
+        if __atomic_add(&p.canceled, 0) != 0: return true
+        if p.deadline != 0 and time_ns() >= p.deadline:
+            __atomic_cas(&p.canceled, 0, 2)
+            return true
+        current = p.parent
+    false
+
+# the running task's slot (-1: not on a task's stack)
+__task_slot = () -> int:
+    if __task_stacks == null: return -1
+    sp = __stack_ptr()
+    if sp < __task_stacks or sp >= __task_stacks + (__TASK_SLOTS << __TASK_SHIFT): return -1
+    (sp - __task_stacks) >> __TASK_SHIFT
+
+__task_canceled = () -> bool:
+    c = __task_context()
+    if c == null: return false
+    if c.shield != 0: return c.grace != 0 and time_ns() >= c.grace
+    __task_scope_canceled(__task_context().scope)
+
+# Cleanup runs shielded, with a 100 ms grace deadline.
+__task_shield_enter = () -> void:
+    c = __task_context()
+    if c == null: return
+    if c.shield == 0: c.grace = time_ns() + 100000000
+    c.shield += 1
+
+__task_shield_leave = () -> void:
+    c = __task_context()
+    if c == null: return
+    c.shield -= 1
+    if c.shield == 0: c.grace = 0
+
+__task_file_code = () -> int:
+    if __task_stacks != null: return __ts()[__TS_FILE_CODE]
+    __file_error_code
+
+__task_file_begin = () -> void:
+    if __task_stacks != null: __ts()[__TS_FILE_CODE] = 0
+    else: __file_error_code = 0
+
+__task_lock = (p: *int):
+    loop __atomic_cas(p, 0, 1) != 0: pass
+__task_unlock = (p: *int) -> void: __atomic_cas(p, 1, 0)
+
+__task_pause = ():
+    when TARGET == "linux":
+        ts = (0, 1000000)
+        syscall(35, &ts, 0)

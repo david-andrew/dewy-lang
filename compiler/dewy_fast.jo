@@ -68,7 +68,7 @@ dn_init_words = ():
     dn_isnt_id = intern("isnt")
     dn_in_id = intern("in")
     dn_notin_id = intern("notin")
-    words = ["as", "and", "break", "const", "continue", "else", "from", "import", "if", "in", "let", "loop", "parallel", "match", "not", "of", "or", "or_throw", "return", "test", "transmute", "xor", "nand", "nor", "xnor"]
+    words = ["as", "and", "break", "const", "continue", "else", "from", "import", "if", "in", "let", "loop", "parallel", "concurrent", "spawn", "match", "not", "of", "or", "or_throw", "return", "test", "transmute", "xor", "nand", "nor", "xnor"]
     loop word in words: intern(word)
     dn_word_tokens = fill(DewyToken.none, names.len())
     loop word in words: dn_word_tokens[intern(word)] = dn_token_kind(word)
@@ -928,6 +928,28 @@ dn_atom = () -> int:
         bound = dn_expr(101)
         return dn_op_node(.flat, .range_apply, token.start, [0, dots, bound])
     text = dn_payload(token)
+    if symbol == .kw_concurrent:
+        group = 0
+        if dn_peek() != .lbrace:
+            token = dn_take()
+            if token.kind != .identifier: return dn_error(token.start, "concurrent needs a group name or a braced body")
+            group = dn_node(.identifier, dn_payload(token), token.start, name = token.name)
+        if dn_peek() != .lbrace: return dn_error(dn_tokens[dn_at].start, "concurrent needs a braced body")
+        body = dn_block()
+        return dn_node(.directive, "concurrent", token.start, [group, body])
+    if symbol == .kw_spawn and (dn_peek() == .assign or dn_peek() == .colon): return dn_node(.identifier, text, token.start)
+    if symbol == .kw_spawn:
+        group = 0
+        if dn_peek() == .lparen and not dn_tokens[dn_at].space:
+            arguments = dn_block()
+            # The established process API is still an ordinary completed call.
+            # Task spawning has an expression after its one group argument.
+            if dw_nchildren(arguments) != 1 or not dn_can_start() or dn_tokens[dn_at].newline or dn_power(dn_peek()) > 0 or dn_peek() == .kw_return or dn_peek() == .kw_let or dn_peek() == .kw_const or dn_peek() == .kw_break or dn_peek() == .kw_continue:
+                callee = dn_node(.identifier, "spawn", token.start)
+                return dn_operator(.binary, .call, callee, arguments)
+            group = dw_child(arguments, 0)
+        value = dn_expr(0)
+        return dn_node(.directive, "spawn", token.start, [group, value])
     if text == "type" and dn_accept(.kw_of):
         return dn_op_node(.prefix, .kw_of, token.start, [0, dn_expr(91)])
     if token.kind == .op:

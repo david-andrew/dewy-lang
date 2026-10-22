@@ -1,0 +1,9 @@
+# The benchmark's trusted setup constructs shared atomic views into one owner.
+# CachePadded contributes only layout; the measured operation is the same add.
+__counter_cells = (padded: bool) -> Atomic[int][]:
+    stride = if padded: size_of(CachePadded[int]) / 8 else: 1
+    cells = fill(0, 4 * stride)
+    p = data(cells)
+    out: Atomic[int][]
+    loop i in [0..4): out.push(Atomic[int](cells, p + i * stride))
+    out

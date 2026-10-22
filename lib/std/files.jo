@@ -100,12 +100,13 @@ with_suffix = (path: Path, new_suffix: str) -> Path: with_name(path, stem(path) 
 
 # (the failure a -errno result names, kept as the last one, as Linux gives them)
 __fsys_failure = (r: int) -> __FileFailure:
+    if __task_canceled(): return Canceled
     __ferr(r)
     __file_failure()
 
 # (each operation starts with no failure kept, so one it does not explain is a FileError)
 __fsys_begin = ():
-    __file_error_code = 0
+    __task_file_begin()
 
 # A file's bytes; none when it cannot be read, with why kept for __file_failure.
 __fsys_read = (path: str) -> u8[]?:
@@ -125,7 +126,9 @@ __fsys_read = (path: str) -> u8[]?:
         buf.truncate(n)
         return buf
     else:
-        if let s = read_file(path): return bytes(s)
+        if let s = read_file(path):
+            if __task_canceled(): return none
+            return bytes(s)
         return none
 
 # Write (or replace) a file; false when it cannot be, with why kept.
@@ -173,31 +176,36 @@ __fsys_kind = (path: str) -> int:
         return 3
 
 __fsys_read_bytes = (path: str) -> u8[] | __FileFailure:
+    if __task_canceled(): return Canceled
     if let b = __fsys_read(path): return b
     __file_failure()
 
 __fsys_read_text = (path: str) -> str | __FileFailure | InvalidUtf8:
+    if __task_canceled(): return Canceled
     if let b = __fsys_read(path):
         if let text = __dewy_decode_utf8(b): return text
         return InvalidUtf8()
     __file_failure()
 
 __fsys_write_text = (path: str, text: str) -> int | __FileFailure:
+    if __task_canceled(): return Canceled
     if __fsys_write(path, text): return len(text)
     __file_failure()
 
 __fsys_write_bytes = (path: str, b: u8[]) -> int | __FileFailure:
+    if __task_canceled(): return Canceled
     if __fsys_write(path, str_from_bytes(b)): return b.len()
     __file_failure()
 
 __fsys_append = (path: str, text: str) -> int | __FileFailure:
+    if __task_canceled(): return Canceled
     __fsys_begin()
     when TARGET == "wasm":
         # (a web build's files have no append: what is there, then all of it written back)
         old = ""
         if let b = __fsys_read(path): old = str_from_bytes(b)
         else:
-            if __file_error_code != 2: return __file_failure()
+            if __task_file_code() != 2: return __file_failure()
         if __fsys_write(path, old + text): return len(text)
         return __file_failure()
     else:
@@ -206,6 +214,7 @@ __fsys_append = (path: str, text: str) -> int | __FileFailure:
 
 # A directory's entries (without . and ..), in the order the system gives them.
 __fsys_list = (path: str) -> str[] | __FileFailure:
+    if __task_canceled(): return Canceled
     __fsys_begin()
     when TARGET == "wasm":
         buf = fill(u8(0), 4096)
@@ -225,11 +234,12 @@ __fsys_list = (path: str) -> str[] | __FileFailure:
             if kind == 0: return __fsys_failure(-2)
             if kind != 2: return __fsys_failure(-20)
         names = list_dir(path)
-        if names.len() == 0 and __file_error_code != 0: return __file_failure()
+        if names.len() == 0 and __task_file_code() != 0: return __file_failure()
         return names
 
 # Make a directory (FileExists when something is there already).
 __fsys_mkdir = (path: str) -> bool | __FileFailure:
+    if __task_canceled(): return Canceled
     __fsys_begin()
     when TARGET == "wasm":
         r = __wasm_fs(1, data(path), len(path))
@@ -246,6 +256,7 @@ __fsys_mkdir = (path: str) -> bool | __FileFailure:
 
 # Remove an empty directory.
 __fsys_rmdir = (path: str) -> bool | __FileFailure:
+    if __task_canceled(): return Canceled
     __fsys_begin()
     when TARGET == "wasm":
         r = __wasm_fs(2, data(path), len(path))
@@ -261,6 +272,7 @@ __fsys_rmdir = (path: str) -> bool | __FileFailure:
 
 # Remove a file (IsDirectory for a directory).
 __fsys_unlink = (path: str) -> bool | __FileFailure:
+    if __task_canceled(): return Canceled
     __fsys_begin()
     when TARGET == "wasm":
         r = __wasm_fs(3, data(path), len(path))
@@ -279,6 +291,7 @@ __fsys_unlink = (path: str) -> bool | __FileFailure:
 
 # Push a file's written data (or a directory's entries) to the disk.
 __fsys_sync = (path: str) -> bool | __FileFailure:
+    if __task_canceled(): return Canceled
     __fsys_begin()
     when TARGET == "wasm":
         if __fsys_kind(path) == 0: return __fsys_failure(-2)
@@ -306,6 +319,7 @@ __fsys_sync = (path: str) -> bool | __FileFailure:
 # Rename `from` to `to` in one step, replacing what is at `to`: a reader sees the old file or
 # the new one, never a mixture.
 __fsys_replace = (from: str, to: str) -> bool | __FileFailure:
+    if __task_canceled(): return Canceled
     __fsys_begin()
     when TARGET == "wasm":
         # (a web build's files have no rename: copied, then removed)
@@ -320,12 +334,14 @@ __fsys_replace = (from: str, to: str) -> bool | __FileFailure:
         return __file_failure()
 
 __fsys_append_bytes = (path: str, b: u8[]) -> int | __FileFailure:
+    if __task_canceled(): return Canceled
     r = __fsys_append(path, str_from_bytes(b))
     if r is int: return b.len()
     r
 
 # Up to `count` bytes from byte `offset` on: fewer at the end of the file, none past it.
 __fsys_read_at = (path: str, offset: int, count: int) -> u8[] | __FileFailure:
+    if __task_canceled(): return Canceled
     __fsys_begin()
     if offset < 0 or count < 0: return __fsys_failure(-22)
     when TARGET == "wasm" or TARGET == "windows":
@@ -386,3 +402,10 @@ sync = (path: Path) -> bool | __FileFailure: __fsys_sync(path.path)
 replace = (path: Path, target: Path) -> bool | __FileFailure: __fsys_replace(path.path, target.path)
 append_bytes = (path: Path, b: u8[]) -> int | __FileFailure: __fsys_append_bytes(path.path, b)
 read_at = (path: Path, offset: int, count: int) -> u8[] | __FileFailure: __fsys_read_at(path.path, offset, count)
+
+# reading from an open file in a canceled task gives Canceled
+read_bytes = (f: mut File, n: int) -> (u8[] | Canceled):
+    if __task_canceled(): return Canceled
+    result = read_bytes(f, n)
+    if __task_canceled(): return Canceled
+    result

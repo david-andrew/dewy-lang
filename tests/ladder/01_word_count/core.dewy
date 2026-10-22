@@ -18,7 +18,7 @@ main=():>void=>{
     let argv=args()
     if argv.length >? 1 {
         let loaded=read_text(argv[1])
-        if loaded is? error {exit(1)}
+        if loaded is? (error|Canceled) {exit(1)}
         input=loaded
     }
     let result=count_text(input)

@@ -115,6 +115,7 @@ table_index: {int: int} = {}
 table_funcs: int[]
 data_base = 0
 stack_top = 0
+max_frame = 0
 
 tbl = (lf: int) -> int:
     if let i = table_index.get(lf): return i
@@ -845,11 +846,21 @@ wasm_body = (f: IrFn) -> u8[]:
         slot_offs[s] = off
         off += int(f.slot_size[s])
     cur_frame = align_up(off, 16)
+    max_frame = max(max_frame, cur_frame)
     uleb(wb, groups.len())
     loop g in groups:
         uleb(wb, g.0)
         wb.push(u8(g.1))
     if cur_frame > 0:
+        # Never let a large frame or deep recursion overwrite globals/rodata.
+        op(0x23)
+        uleb(wb, 0)
+        i32c(align_up(data_base + data_size, 16) + cur_frame)
+        op(0x49)             # i32.lt_u: insufficient space before subtraction
+        op(0x04)
+        op(0x40)
+        op(0x00)             # unreachable: resource exhaustion
+        op(0x0B)
         op(0x23)
         uleb(wb, 0)          # global.get $sp
         i32c(cur_frame)
@@ -887,8 +898,7 @@ wasm_module = (inits: int[], main_lf: int, frame_lf: int) -> u8[]:
         if len(wfuncs[lf].export_name) > 0: exp_lfs.push(lf)
     adapter_base = start_index + 1
     data_base = align_up(RO_BASE + rodata.len(), 16)
-    stack_top = align_up(data_base + data_size + STACK_SIZE, 16)
-    pages = (stack_top + 65535) / 65536 + 1
+    max_frame = 0
     # bodies (this also registers table entries and signatures)
     bodies: u8[][]
     body_sites: int[][]
@@ -897,6 +907,10 @@ wasm_module = (inits: int[], main_lf: int, frame_lf: int) -> u8[]:
         bodies.push(wasm_body(wfuncs[lf]))
         body_sites.push(w_sites)
         body_names.push(sym_name(wfuncs[lf].name))
+    # Reserve the largest frame plus the ordinary nesting budget. The frame
+    # maximum is collected during emission, without another IR traversal.
+    stack_top = align_up(data_base + data_size + max_frame + STACK_SIZE, 16)
+    pages = (stack_top + 65535) / 65536 + 1
     # entry function: initializers then main
     eb: u8[] = [0]
     if main_code: eb = [1, 1, 0x7E]          # (a local: main's result)

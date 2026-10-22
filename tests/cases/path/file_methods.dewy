@@ -8,22 +8,22 @@ main=():>void=>{
     printl(notes.write_text("héllo\nworld\n"))
     printl"{notes.exists} {notes.is_file} {notes.is_dir}"
     let text=notes.read_text
-    if text is? error exit(1)
+    if text is? (error|Canceled) exit(1)
     printl(text.split("\n")[0])
     let data=p"{dir}/data.bin"
     printl(data.write_bytes([uint8(0) 1 254 255]))
     let loaded=data.read_bytes
-    if loaded is? error exit(2)
+    if loaded is? (error|Canceled) exit(2)
     printl(loaded)
     let names=dir.list
-    if names is? error exit(3)
+    if names is? (error|Canceled) exit(3)
     names.sort
     printl(names)
     printl(notes.unlink)
     printl(data.unlink)
     printl(notes.exists)
     let left=dir.list
-    if left is? error exit(4)
+    if left is? (error|Canceled) exit(4)
     printl(left.length)
     printl(dir.rmdir)
     printl(dir.exists)

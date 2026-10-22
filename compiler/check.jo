@@ -1,3 +1,4 @@
+use 'concurrency.jo'
 use 'partition.jo'
 use 'lazy_bodies.jo'
 use 'frontend.jo'
@@ -134,6 +135,7 @@ struct FnInst:
     state: i32
     kind: i32
     has_env: bool
+    task_api: bool     # checked waiting-lane spawn boundaries
     caps: Capture[]
     env_size: i32
     mod: i32
@@ -144,6 +146,7 @@ struct FnInst:
     cabi: bool
     deterministic: bool # callback results should depend only on their state and inputs
     parallel: bool      # @parallel: the functions it is given run on many threads at once
+    atomic_api: bool    # bundled atomic entry points need literal-order validation
     write_sites: int[]  # finalization events for integer write proofs
     writes_ready: bool
     no_indexes: bool    # finalized normal body has no indexing; init/lambda bodies stay unknown
@@ -1311,6 +1314,7 @@ resolve_type = (tn: int) -> int:
             tn_s = name_of(nm)
             if len(tn_s) <= 2 and tn_s[0] >= 'A' and tn_s[0] <= 'Z' and cx >= 0 and fns.len() > int(ctxs[cx].inst):
                 fatal(nodes[tn].pos, jd(nodes[tn].pos, "unknown type '{tn_s}' (a generic function names its type parameters after its name: `f[{tn_s}] = (x: {tn_s}) -> {tn_s}: ...`; a generic struct, `struct Heap[{tn_s}]:`)", "unknown type '{tn_s}' (a generic function declares its type parameters first: `f = <{tn_s}>(x:{tn_s}):>{tn_s} => ...`; a generic record, `Heap:type = <{tn_s}>[items:array<{tn_s}>]`)"))
+            if name_of(nm) == "Cancelled": fatal(nodes[tn].pos, "unknown type `Cancelled`; use `Canceled` (US spelling)")
             fatal(nodes[tn].pos, "unknown type '{name_of(nm)}'{suggestion(name_of(nm), type_names())}")
         sk = syms[s].kind
         # (str = (b: Big) -> str: a function of the program's named as a type, its `str` there
@@ -1481,6 +1485,9 @@ resolve_alias = (d: int, targs: int[], use_pos: int) -> int:
     nm = name_of(int(nodes[d].name))
     if targs.len() != ntp: fatal(use_pos, "type '{nm}' expects {ntp} type argument(s), got {targs.len()}")
     if ntp == 0 and nodes[d].type != 0: return int(nodes[d].type)
+    if nodes[d].aux == -7:
+        nodes[d].type = i32(str_set_type(["relaxed", "acquire", "release", "acq_rel", "seq_cst"]))
+        return int(nodes[d].type)
     if nodes[d].aux == 1: fatal(nodes[d].pos, "type '{nm}' is defined in terms of itself")
     nodes[d].aux = 1
     saved = cx
@@ -1910,6 +1917,8 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
                 return f
     f = new_inst(FK_NORMAL, int(nodes[decl].mod), sanitize(name_of(int(nodes[decl].name))))
     fns[f].decl = i32(decl)
+    fns[f].atomic_api = int(nodes[decl].mod) == concurrency_thread_module
+    fns[f].task_api = int(nodes[decl].mod) == concurrency_task_module and name_of(int(nodes[decl].name)) in ["__task_spawn", "within", "race"]
     fns[f].use_pos = use_pos
     if cx >= 0: fns[f].made_in = ctxs[cx].inst
     zt: int[]
@@ -2451,6 +2460,7 @@ expand_when = (out: mut int[], s: int):
     loop i in [0..nkids(blk)): expand_when(out, kid(blk, i))
 
 check_block = (b: int, expected: int, want_value: bool) -> int:
+    transparent = nodes[b].aux == 5 and not want_value
     has_when = false
     loop i in [0..nkids(b)):
         if nodes[kid(b, i)].kind == .when_: has_when = true
@@ -2486,7 +2496,8 @@ check_block = (b: int, expected: int, want_value: bool) -> int:
     # matches overloads exactly)
     if want_value and result != 0 and int(types[result].flags) & TF_HAS_VAR != 0: result = zonk(result)
     nodes[b].type = i32(result)
-    scope_reset(mark)
+    if transparent: nodes[b].aux = 5
+    else: scope_reset(mark)
     result
 
 # the value expression of a value block
@@ -4985,6 +4996,12 @@ add_universe = ():
     ref_addr_type = mk_refined(T_INT, ref_intern(addr_atoms))
     universe[intern("addr")] = new_sym(intern("addr"), .type_, ref_addr_type, 0)
     refine_active = active
+    # Register the order domain lazily. An unused builtin must not enable
+    # finite-string-domain analysis for every ordinary program.
+    order = mk(.typealias, 0)
+    nodes[order].name = i32(intern("MemoryOrder"))
+    nodes[order].aux = -7
+    universe[intern("MemoryOrder")] = new_sym(intern("MemoryOrder"), .alias_, order, order)
     tv = mk(.str_lit, 0)
     tgt = "linux"
     if target_wasm: tgt = "wasm"
@@ -5020,14 +5037,22 @@ load_prelude = ():
     # all .jo files in lib/core, lib/std and lib/game are loaded into the shared prelude scope
     # (lib/core must stay compilable by the C bootstrap compiler; lib/std need not)
     prelude_lazy_setup()
+    concurrency_thread_module = -1
+    concurrency_task_module = -1
+    concurrency_task_core_module = -1
     loop sub in ["core", "std", "game"]:
         names_ = list_dir("{lib_dir}/{sub}")
         names_.sort()
         loop n in names_:
             if not ends_with(n, ".jo"): continue
             path = "{lib_dir}/{sub}/{n}"
-            if defer_prelude(path, sub): continue
-            load_module(path, true, -1)
+            m = -1
+            if defer_prelude(path, sub): m = modules.len() - 1
+            else: m = load_module(path, true, -1)
+            if sub == "std":
+                if n == "thread.jo": concurrency_thread_module = m
+                if n == "tasks.jo": concurrency_task_module = m
+                if n == "task_core.jo": concurrency_task_core_module = m
     prelude_known_names()
     # Keep existing fixed-width overloads first for widening ties. Separate from
     # the seed-scanned prelude: old seeds do not know the mathematical type.
@@ -5702,6 +5727,7 @@ check_program = (main_path: str):
         icb = ic_switch(IC_OWNERSHIP, IC_SHARED)
         ownership_finalize()
         ic_switch(IC_EFFECTS, IC_SHARED)
+        concurrency_finalize()
         effects_finalize()
         ic_restore(icb)
 

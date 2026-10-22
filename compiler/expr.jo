@@ -1,3 +1,4 @@
+use 'concurrency.jo'
 use 'parallel_lower.jo'
 use 'partition.jo'
 use 'string_domains.jo'
@@ -30,7 +31,7 @@ enum IN:
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
     read_fields, default_init, offset_unit, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
     static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem, lend, loan_address, loan_load, loan_store, loan_length,
-    zeroed, relocate, take_slot, live_len
+    zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big, set_text
@@ -74,7 +75,7 @@ intrinsics = [
     Intrinsic("__atomic_cas", .atomic_cas, false), Intrinsic("__stack_ptr", .stack_ptr, false),
     Intrinsic("__cpu_features", .cpu_features, false), Intrinsic("__code_sync", .code_sync, false), Intrinsic("compute", .compute, false), Intrinsic("__compute_spirv", .compute_spirv, false), Intrinsic("__compute_textures", .compute_textures, false),
     Intrinsic("__read_fields", .read_fields, false), Intrinsic("__default_init", .default_init, false),
-    Intrinsic("__json_fields", .json_fields, false),
+    Intrinsic("__json_fields", .json_fields, false), Intrinsic("__task_report", .task_report, false), Intrinsic("__task_data", .task_data, false), Intrinsic("__task_nanoseconds", .task_duration, false),
 ]
 
 last_checked = 0
@@ -771,6 +772,7 @@ fixed_literal_ok = (n: int, to: int) -> bool:
 # make array literal n (already checked as T[]) the fixed-size array type `to`
 fixed_literal = (n: int, to: int):
     et = int(types[prune(to)].elem)
+    if nkids(n) == 0 and fixed_len(to) > 0: concurrency_require_zero(n, et)
     if refine_active and nkids(n) == 0 and fixed_len(to) > 0 and ref_storage_contract(et):
         value = struct_default(et, nodes[n].pos)
         if value != 0:
@@ -2899,6 +2901,13 @@ struct_ctor_zero = (n: int, st_type: int, decl: int) -> int:
     struct_ctor(n, st_type, decl, [], st_type)
 
 struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> int:
+    if decl != 0 and dewy_at(nodes[n].pos):
+        module = int(nodes[decl].mod)
+        if module == concurrency_thread_module and name_of(int(nodes[decl].name)) == "Atomic":
+            fatal(nodes[n].pos, "construct Atomic with atomic(value); its storage is private")
+        if module == concurrency_task_module or module == concurrency_task_core_module:
+            name = name_of(int(nodes[decl].name))
+            if name == "Task" or name == "TaskGroup": fatal(nodes[n].pos, "task handles are created by concurrent and spawn; their storage is private")
     fills_zero = ctor_fills_zero
     ctor_fills_zero = false
     t = st_type
@@ -3010,6 +3019,7 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
         if a == 0:
             dv = int(fields[fi].defval)
             if dv != 0 and not dependent and default_is_zero(dv, int(fields[fi].type)):
+                concurrency_require_zero(n, int(fields[fi].type))
                 # (filled in place with zeros, not built aside and copied in)
                 fin.push(0)
                 continue
@@ -3040,6 +3050,7 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
                 fin.push(d)
             else:
                 d = struct_default(int(fields[fi].type), nodes[n].pos)
+                if d == 0: concurrency_require_zero(n, int(fields[fi].type))
                 if dependent and d != 0:
                     d = capture_value(d, representation_type(int(fields[fi].type)), statements)
                     finish_arg(d, int(fields[fi].type), false)
@@ -3302,7 +3313,15 @@ dewy_surface_table = () -> {int: str}:
 
 # (for a library declaration of the name: 1 when only Dewy sees it, 2 when only Jo does, 0 both;
 # the Jo library's are those of a path's text, `read_bytes(f: File n)` stays both's)
+# (Dewy's cancelable spellings of these: lib/std/task_input.jo's, and files.jo's read_bytes)
+task_surface_names: {int: bool}
 dewy_surface = (name: int, decl: int) -> int:
+    if task_surface_names.len() == 0:
+        loop word in ["read_line", "read_stdin", "input", "input_int", "input_float", "open_file", "read_bytes"]: task_surface_names[intern(word)] = true
+    if task_surface_names.has(name):
+        path = files[pos_file(nodes[decl].pos)].path
+        if path == lib_dir + "/std/task_input.jo" or path == lib_dir + "/std/files.jo": return 1
+        if path == lib_dir + "/core/os.jo": return 2
     if not dewy_surface_table().has(name): return 0
     if dewy_renamed(name): return 2
     if files[pos_file(nodes[decl].pos)].path == lib_dir + "/std/files.jo": return 1
@@ -5389,6 +5408,12 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
     nodes[n].a = 0
     nargs = args.len()
     r = T_VOID
+    if id == .task_duration:
+        nargs_check(n, nargs, 1, 1, "__task_nanoseconds")
+        return task_duration_value(n, args[0])
+    if id == .task_report:
+        nargs_check(n, nargs, 2, 2, "__task_report")
+        return concurrency_report(n, args)
     if id == .lend:
         nargs_check(n, nargs, 3, 3, "$lend")
         if has_flag(args[0], NF_MUT): add_flag(n, NF_MUT)
@@ -5568,8 +5593,15 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if value_loops.len() > 0 and id != .reserve: value_loop_resize(args[0], (if id == .resize: "resize" else if id == .truncate: "truncate" else: "set_length"), nodes[n].pos)
         check_place(args[0], false)
         arg_type(args, 1, T_INT)
+        if id == .resize or id == .setlen: concurrency_require_zero(n, int(types[t].elem))
         if refine_active and (id == .resize or id == .setlen) and ref_storage_contract(int(types[t].elem)):
             fatal(nodes[n].pos, "refined elements cannot be created by unchecked zero initialization")
+    else if id == .task_data:
+        nargs_check(n, nargs, 1, 1, "__task_data")
+        if not pos_in_lib(nodes[n].pos): fatal(nodes[n].pos, "shared raw storage is private to the trusted task runtime")
+        t = arg_type(args, 0, 0)
+        if tkind(t) != .array: fatal(nodes[n].pos, "task storage must be an array")
+        r = mk_ptr(telem(t))
     else if id == .arrdata:
         nargs_check(n, nargs, 1, 1, "data")
         t = arg_type(args, 0, 0)
@@ -8345,6 +8377,7 @@ check_expr = (n: int, expected: int) -> int:
                 if len(vh) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{vh}")
             # ("I have {i}plans": a tag as Ren'Py's, in braces that put a value in the text)
             if braced_alone(nodes[n].pos, len(name_of(nm))): fatal(nodes[n].pos, "unknown name '{name_of(nm)}': `\{{name_of(nm)}}` in a string puts in the value of {name_of(nm)}; for the braces in the text (a tag), write `\{\{{name_of(nm)}}}}}`, or make it a raw string, r\"...\"")
+            if name_of(nm) == "Cancelled": fatal(nodes[n].pos, "unknown name `Cancelled`; use `Canceled` (US spelling)")
             fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{private_hint(nm)}{sug}")
         sk = syms[s].kind
         if ide_on and sk != .fns: ide_sym_ref(n, s)
@@ -8461,6 +8494,7 @@ check_expr = (n: int, expected: int) -> int:
             add_flag(a0, NF_CHECKED)
             if types[lt].kind == .struct_:
                 sd = int(structs[int(types[lt].st)].decl)
+                if (concurrency_builtin_type(lt, "Atomic") or concurrency_builtin_type(lt, "Task") or concurrency_builtin_type(lt, "TaskGroup")) and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "shared concurrency storage is private; use its checked operations")
                 if sd != 0 and pos_in_lib(nodes[sd].pos): warn(nodes[n].pos, "{name_of(int(nodes[n].name))} is {structs[int(types[lt].st)].name}'s own, inside the library: it may change or go in any version (if something here is missing, it is worth asking for)")
         sl = soa_alias_of(a0)
         if sl != 0:
@@ -8721,7 +8755,13 @@ check_expr = (n: int, expected: int) -> int:
             return check_expr(n, expected)
         if nodes[n].aux2 == i32(AUX2_PARTIAL): return dewy_partial(n, expected)
         t = check_call(n, expected)
+        if nodes[n].aux == 0 and nodes[n].sym > 0:
+            if fns[int(nodes[n].sym)].atomic_api: concurrency_atomic_call(n)
+            if fns[int(nodes[n].sym)].task_api:
+                concurrency_tasks.push(n)
+                concurrency_runtime_needed = true
         if nkids(n) == 2 and nodes[n].aux == 0 and nodes[n].sym > 0 and fns[int(nodes[n].sym)].parallel:
+            concurrency_calls.push(n)
             parallel_prepare(n)
     else if k == .typeapply:
         is_callee = n == callee_at

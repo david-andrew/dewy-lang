@@ -56,10 +56,11 @@ main=():>void=>{printl"{fork(20)}"}
 @pytest.mark.parametrize('release', [False, True])
 def test_region_order_and_fallbacks(compiler, tmp_path, release):
     output, _ = build(compiler, tmp_path, '''
-emit=(x:int64):>int64=>{printl"{x}" return x}
+emit=(x:int64):>int64=>x
 make=():>array<int64>=>[parallel i in [0..2) i+10]
 main=():>void=>exit(entry()) entry=()=>{
  let values=[parallel i in [3..5) emit(i)]
+ loop value in values {printl"{value}"}
  printl"{values[1]} {values[0]}"
  let escaped=make()
  assert(escaped =? [10 11])

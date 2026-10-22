@@ -102,7 +102,7 @@ ownership_finalize = ():
         if not effects_demand(f): fatal(nodes[int(fns[f].decl)].pos, "{name} hook has no proven no-failure summary")
         loop event in effect_summaries[f].events:
             k = event.atom.kind
-            if k == .opaque or k == .panic or k == .alloc or k == .block or k == .spawn or k == .remainder or k == .detach or k == .escape:
+            if k == .opaque or k == .panic or k == .alloc or k == .spawn or k == .remainder or k == .detach or k == .escape:
                 fatal(nodes[int(fns[f].decl)].pos, "{name} hook requires a proven no-failure summary: {effect_witness(f, event)}")
             if role == 2 and k == .write and place_base(event.atom.place).root == .formal:
                 fatal(nodes[int(fns[f].decl)].pos, "a copy hook requires a readonly receiver")
@@ -272,13 +272,14 @@ owner_element_drop = (addr: int, et: int):
     else: drop_embedded(addr, et)
 
 owner_drop = (addr: int):
+    # (cleanup in a task runs shielded from cancellation, as deferred code does)
+    if concurrency.concurrency_runtime_needed: e_call(rt("__task_shield_enter"), [], -1)
     slot = owner_address_slot(addr)
     if let parts = owner_parts.get(slot):
         loop i in [0..parts.len()):
             e_call(rt("__owner_drop"), [e_slot(parts[parts.len() - 1 - i].1)], -1)
-        return
-    record = owner_record(slot)
-    e_call(rt("__owner_drop"), [e_slot(record)], -1)
+    else: e_call(rt("__owner_drop"), [e_slot(owner_record(slot))], -1)
+    if concurrency.concurrency_runtime_needed: e_call(rt("__task_shield_leave"), [], -1)
 
 ownership_contained: {int: bool}
 ownership_contains = (t0: int) -> bool:

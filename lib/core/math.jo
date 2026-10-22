@@ -831,6 +831,8 @@ __rng_threads = ():
 
 # random f64 in [0, 1)
 random = () -> f64:
+    when not BOOTSTRAP:
+        if __task_slot() >= 0: return next_float(__task_context().rng)
     t = __tid()
     if (t != 0 or __rng_in_job) and t * 4 < __thread_rngs.len(): return next_float(__thread_rngs[t * 4])
     if not __rng_ready: __rng_start()
@@ -845,6 +847,8 @@ random_normal = (mean: f64 = 0.0, sd: f64 = 1.0) -> f64:
 # a random whole number from lo up to hi, hi left out (as in [lo..hi)): random_int(0, xs.len())
 # picks a position, and a die is random_int(1, 7)
 random_int = (lo: int, hi: int) -> int:
+    when not BOOTSTRAP:
+        if __task_slot() >= 0: return next_int(__task_context().rng, lo, hi)
     t = __tid()
     if (t != 0 or __rng_in_job) and t * 4 < __thread_rngs.len(): return next_int(__thread_rngs[t * 4], lo, hi)
     if not __rng_ready: __rng_start()

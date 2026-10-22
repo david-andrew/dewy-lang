@@ -91,7 +91,14 @@ __zstr = (s: str) -> str:
 # why the last file operation that failed did, in words: "no such file or directory",
 # "permission denied", "it is a directory", "the disk is full"... ("" when none has failed):
 #   if not write_file(p, text): eprint("cannot write {p}: {file_error()}")
-file_error = () -> str: __file_err
+file_error = () -> str:
+    when not BOOTSTRAP:
+        # (while tasks run, each thread and task keeps its own, by code)
+        if __task_stacks != null:
+            e = __ts()[__TS_FILE_CODE]
+            if e == 0: return ""
+            return __file_message(e)
+    __file_err
 
 __file_err = ""
 __file_error_code = 0
@@ -100,27 +107,34 @@ __file_error_code = 0
 __ferr = (r: int) -> bool:
     if r >= 0: return true
     e = -r
+    when not BOOTSTRAP:
+        if __task_stacks != null:
+            __ts()[__TS_FILE_CODE] = e
+            return false
     __file_error_code = e
-    m = "error {e}"
-    if e == 2: m = "no such file or directory"
-    else if e == 13: m = "permission denied"
-    else if e == 1: m = "not permitted"
-    else if e == 17: m = "it is already there"
-    else if e == 20: m = "a part of the path is not a directory"
-    else if e == 21: m = "it is a directory"
-    else if e == 28: m = "the disk is full"
-    else if e == 30: m = "the file system is read-only"
-    else if e == 39: m = "the directory is not empty"
-    else if e == 36: m = "the name is too long"
-    else if e == 24: m = "too many files are open"
-    else if e == 18: m = "it is on another disk (copy_file, then delete_file, moves it there)"
-    else if e == 16: m = "it is in use"
-    else if e == 26: m = "it is a program that is running"
-    else if e == 40: m = "too many links in the path"
-    else if e == 5: m = "the disk could not be read or written"
-    else if e == 122: m = "the disk quota is used up"
-    __file_err = m
+    __file_err = __file_message(e)
     false
+
+# an error number in words
+__file_message = (e: int) -> str:
+    if e == 2: return "no such file or directory"
+    if e == 13: return "permission denied"
+    if e == 1: return "not permitted"
+    if e == 17: return "it is already there"
+    if e == 20: return "a part of the path is not a directory"
+    if e == 21: return "it is a directory"
+    if e == 28: return "the disk is full"
+    if e == 30: return "the file system is read-only"
+    if e == 39: return "the directory is not empty"
+    if e == 36: return "the name is too long"
+    if e == 24: return "too many files are open"
+    if e == 18: return "it is on another disk (copy_file, then delete_file, moves it there)"
+    if e == 16: return "it is in use"
+    if e == 26: return "it is a program that is running"
+    if e == 40: return "too many links in the path"
+    if e == 5: return "the disk could not be read or written"
+    if e == 122: return "the disk quota is used up"
+    "error {e}"
 
 __ferr_none = (r: int) -> str?:
     __ferr(r)

@@ -1,0 +1,301 @@
+# Transfer facts and the waiting effect are independent of the scheduler and
+# placement. Demand walks use a query-local visited set: a recursive backedge
+# must never publish an optimistic nonblocking summary for another query.
+# Each query visits its reachable types/functions and AST edges once, with
+# indexed membership: expected O(V + E) time and O(V) auxiliary storage.
+use 'check.jo'
+use 'types.jo'
+use 'effects.jo'
+use 'lower.jo'
+use 'isolation.jo'
+use 'expr.jo'
+use 'ast.jo'
+use 'util.jo'
+use 'refine.jo'
+use 'ownership.jo'
+use 'errors.jo'
+
+concurrency_calls: int[]
+concurrency_tasks: int[]
+concurrency_runtime_needed = false
+concurrency_thread_module = -1
+concurrency_task_module = -1
+concurrency_task_core_module = -1
+
+concurrency_builtin_type = (t0: int, name: str) -> bool:
+    t = representation_type(t0)
+    if tkind(t) != .struct_: return false
+    d = int(structs[int(types[t].st)].decl)
+    d != 0 and name_of(int(nodes[d].name)) == name and files[pos_file(nodes[d].pos)].path == lib_dir + (if name == "Task": "/std/tasks.jo" else if name == "TaskGroup": "/std/task_core.jo" else: "/std/thread.jo")
+
+# Raw storage and unknown callable environments cannot cross safely. All
+# ordinary values compose, including arrays, recursive products and unions.
+concurrency_transfer = (t0: int, seen: mut {int: bool}, sync: bool = false) -> bool:
+    t = representation_type(t0)
+    if seen.has(t): return true
+    seen[t] = true
+    k = tkind(t)
+    if concurrency_builtin_type(t, "Atomic") or concurrency_builtin_type(t, "TaskGroup") or concurrency_builtin_type(t, "Task"): return true
+    if k == .ptr or k == .fn_ or k == .cfn or k == .polyfn: return false
+    if k == .array or k == .fixed or k == .opt or k == .box: return concurrency_transfer(telem(t), seen, sync)
+    if k == .tuple:
+        loop i in [0..int(types[t].nargs)):
+            if not concurrency_transfer(targ(t, i), seen, sync): return false
+    if k == .struct_ or k == .enum_:
+        si = int(types[t].st)
+        check_struct_fields(si)
+        loop i in [0..int(structs[si].nfields)):
+            if not concurrency_transfer(int(fields[int(structs[si].fields) + i].type), seen, sync): return false
+        loop j in [0..int(structs[si].nvariants)):
+            v = int(structs[si].variants) + j
+            loop i in [0..int(variants[v].nfields)):
+                if not concurrency_transfer(int(fields[int(variants[v].fields) + i].type), seen, sync): return false
+    k != .var and k != .param
+
+# Settled waiting answers, by function. A query that finds no wait settles every
+# function it visited (all their callees were visited too); one that finds a wait
+# settles only its root. Effects asks once per function, so the whole program
+# costs O(V + E) for nonblocking code instead of a walk per function.
+concurrency_block_memo: {int: bool}
+
+concurrency_fn_blocks = (f: int) -> bool:
+    if concurrency_block_memo.has(f): return concurrency_block_memo[f]
+    seen: {int: bool}
+    r = concurrency_blocks(f, seen)
+    if r: concurrency_block_memo[f] = true
+    else:
+        loop g in seen.keys(): concurrency_block_memo[g] = false
+    r
+
+concurrency_blocks = (f: int, seen: mut {int: bool}, sharing: bool = false) -> bool:
+    if f <= 0 or f >= fns.len(): return true
+    if not sharing and concurrency_block_memo.has(f): return concurrency_block_memo[f]
+    if seen.has(f): return false
+    seen[f] = true
+    d = int(fns[f].decl)
+    if d == 0: return true
+    if modules[int(fns[f].mod)].is_prelude:
+        name = name_of(int(nodes[d].name))
+        # Blocking public boundaries. Fork-join is safe inline and is not a
+        # waiting-lane join. Its checked callbacks supply the obligations.
+        if fns[f].parallel: return false
+        if files[pos_file(nodes[d].pos)].path == lib_dir + "/std/tasks.jo": return true
+        if name == "sleep" or name == "__sleep_ns" or name == "read_file" or name == "write_file" or name == "read_line" or name == "read_stdin" or name == "print" or name == "printl" or name == "__print_str" or name == "write" or name == "flush" or name == "__task_join" or name == "__group_join": return true
+        # Runtime internals are trusted nonblocking unless classified here;
+        # raw syscalls/foreign code in user modules remain conservative.
+        if files[pos_file(nodes[d].pos)].path == lib_dir + "/std/thread.jo": return false
+        # (the running task's state; its input operations wait)
+        if files[pos_file(nodes[d].pos)].path == lib_dir + "/std/task_core.jo" and name in ["__task_slot", "__task_context", "__task_scope_canceled", "__task_canceled", "__task_shield_enter", "__task_shield_leave", "__task_file_code", "__task_file_begin", "__task_lock", "__task_unlock"]: return false
+        if starts_with(name, "__fj_"): return false
+        if files[pos_file(nodes[d].pos)].path == lib_dir + "/core/rt.jo": return false
+        if name == "panic": return false
+    if has_flag(d, NF_EXTERN): return true
+    if fns[f].body == 0: return true
+    concurrency_blocks_node(int(fns[f].body), seen, sharing)
+
+concurrency_blocks_node = (n: int, seen: mut {int: bool}, sharing: bool = false) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if sharing and k == .ident and nodes[n].aux == i32(int(SK.global)):
+        held: {int: bool}
+        if not concurrency_transfer(ntype(n), held, true): fatal(nodes[n].pos, "shared global does not satisfy inferred Sync")
+    if ownership_literal_print(n): return true
+    if k == .lambda or k == .fnref or k == .partial: return false
+    if k == .parallel_region: return concurrency_blocks_node(int(nodes[n].a), seen, sharing)
+    if k == .call:
+        if nodes[n].aux == 0 and concurrency_blocks(int(nodes[n].sym), seen, sharing): return true
+        if nodes[n].aux == 1 or nodes[n].aux == 4:
+            contract = callable_contract(ntype(int(nodes[n].a)))
+            if contract == 0:
+                contract = effect_source_row(int(nodes[n].a))
+            if contract == 0 or effect_allows(contract, EffectAtom(.block)) or effect_contracts[contract].atoms.contains(EffectAtom(.opaque)): return true
+    if k == .intrinsic and nodes[n].aux == i32(int(IN.syscall)):
+        # Clocks and process/affinity queries cannot wait on another task.
+        op = if nkids(n) > 0: kid(n, 0) else: 0
+        number = if op != 0 and nodes[op].kind == .int_lit: nodes[op].ival else: -1
+        if number != 39 and number != 60 and number != 186 and number != 204 and number != 228: return true
+    loop f in value_helper_calls(n):
+        if concurrency_blocks(f, seen, sharing): return true
+    if k == .pair and nodes[n].sym > 0 and concurrency_blocks(int(nodes[n].sym), seen, sharing): return true
+    mask = isolation_children(k)
+    if mask < 0: return false
+    if mask & 1 != 0 and concurrency_blocks_node(int(nodes[n].a), seen, sharing): return true
+    if mask & 2 != 0 and concurrency_blocks_node(int(nodes[n].b), seen, sharing): return true
+    if mask & 4 != 0 and concurrency_blocks_node(int(nodes[n].c), seen, sharing): return true
+    if mask & 16 != 0:
+        loop c in kids(n):
+            if concurrency_blocks_node(c, seen, sharing): return true
+    if mask & 32 != 0:
+        loop c in kids2(n):
+            if concurrency_blocks_node(c, seen, sharing): return true
+    false
+
+concurrency_callback = (a: int, waiting: bool = false):
+    if nodes[a].kind == .conv:
+        concurrency_callback(int(nodes[a].a), waiting)
+        return
+    f = int(nodes[a].sym)
+    if nodes[a].kind != .lambda and nodes[a].kind != .fnref and nodes[a].kind != .partial: return
+    if f <= 0: return
+    if nodes[a].kind == .partial:
+        loop arg in kids(a):
+            if nodes[arg].kind == .hole: continue
+            seen: {int: bool}
+            if not concurrency_transfer(ntype(arg), seen): fatal(nodes[arg].pos, "bound task argument does not satisfy inferred Send/Sync")
+    loop cap in fns[f].caps:
+        t = int(locals[int(cap.outer)].type)
+        seen: {int: bool}
+        if (waiting or int(locals[int(cap.inner)].flags) & LF_PARTBORROW == 0) and (int(locals[int(cap.inner)].flags) & LF_ADDR != 0 or not concurrency_transfer(t, seen)):
+            fatal(nodes[a].pos, "task capture does not satisfy inferred Send/Sync: a place or non-atomic raw-storage handle cannot cross tasks")
+    seen: {int: bool}
+    if not concurrency_transfer(int(fns[f].ret), seen): fatal(nodes[a].pos, "task result does not satisfy inferred Send")
+    if not waiting:
+        called: {int: bool}
+        if concurrency_blocks(f, called, true): fatal(nodes[a].pos, "parallel body may block; use `concurrent` for waiting work (the two-lane rule)")
+
+concurrency_atomic_call = (n: int):
+    if nodes[n].aux != 0 or nodes[n].sym <= 0: return
+    f = int(nodes[n].sym)
+    if not modules[int(fns[f].mod)].is_prelude: return
+    d = int(fns[f].decl)
+    if d == 0: return
+    name = name_of(int(nodes[d].name))
+    factory = name == "atomic"
+    if not factory and (nkids(n) == 0 or not concurrency_builtin_type(ntype(kid(n, 0)), "Atomic")): return
+    if in_lib(nodes[n].pos) or files[pos_file(nodes[d].pos)].path != lib_dir + "/std/thread.jo": return
+    if factory and fns[f].targs.len() > 0:
+        t = representation_type(fns[f].targs[0])
+        if tkind(t) != .int_ or t == T_MATH_INT: fatal(nodes[n].pos, "Atomic<T> requires a fixed-width integer payload; use int64 for a counter")
+    if nkids(n) > 0 and concurrency_builtin_type(ntype(kid(n, 0)), "Atomic"): concurrency_atomic_validate(n)
+
+concurrency_finalize = ():
+    # (lowering shields cleanup and checks cancellation in task programs: their runtime, checked now)
+    if concurrency_runtime_needed:
+        loop name in ["__task_shield_enter", "__task_shield_leave", "__task_canceled"]: check_pending_functions(runtime_fn(name))
+    if concurrency_tasks.len() > 0 and (target_wasm or target_windows or target_macos):
+        fatal(nodes[concurrency_tasks[0]].pos, "the threads task backend currently requires Linux; parallel computation remains portable")
+    loop n in concurrency_tasks:
+        if in_lib(nodes[n].pos): continue
+        loop callback in kids(n):
+            if tkind(ntype(callback)) != .fn_: continue
+            concurrency_callback(callback, true)
+            race_arg(callback, "spawn")
+            visited: {int: bool}
+            callee = callback
+            loop nodes[callee].kind == .conv: callee = int(nodes[callee].a)
+            concurrency_task_globals(int(nodes[callee].sym), visited)
+    loop n in concurrency_calls:
+        if in_lib(nodes[n].pos): continue
+        f = int(nodes[n].sym)
+        loop a in kids(n):
+            if tkind(ntype(a)) == .fn_: concurrency_callback(a)
+            else:
+                seen: {int: bool}
+                if not concurrency_transfer(ntype(a), seen): fatal(nodes[a].pos, "parallel input does not satisfy inferred Send")
+
+concurrency_atomic_validate = (n: int):
+    f = int(nodes[n].sym)
+    name = name_of(int(nodes[int(fns[f].decl)].name))
+    order = kid(n, nkids(n) - 1)
+    if nodes[order].kind != .str_lit: fatal(nodes[order].pos, "MemoryOrder must be a compile-time literal")
+    value = name_of(int(nodes[order].sval))
+    if value != "relaxed" and value != "acquire" and value != "release" and value != "acq_rel" and value != "seq_cst": fatal(nodes[order].pos, "MemoryOrder must be 'relaxed', 'acquire', 'release', 'acq_rel', or 'seq_cst'")
+    if (name == "load" or name == "get") and (value == "release" or value == "acq_rel"): fatal(nodes[order].pos, "an atomic load cannot use release or acq_rel order")
+    if (name == "store" or name == "set") and (value == "acquire" or value == "acq_rel"): fatal(nodes[order].pos, "an atomic store cannot use acquire or acq_rel order")
+
+# A generic task result keeps its concrete exception alternatives. Report one
+# selected alternative to the group's first-failure cell without erasing data.
+concurrency_report = (n: int, args: int[]) -> int:
+    pos = nodes[n].pos
+    check_expr(args[0], 0)
+    group = last_checked
+    add_flag(group, NF_CHECKED)
+    t = check_expr(args[1], 0)
+    value = last_checked
+    add_flag(value, NF_CHECKED)
+    gn = "$report_group{n}"
+    vn = "$report_value{n}"
+    statements = [bc_let(gn, group, pos), bc_let(vn, value, pos)]
+    members = value_members(t)
+    loop member in members:
+        if not exception_member(member): continue
+        actual = if member == T_NONE: mk(.none_lit, pos) else: bc_ident(vn, pos)
+        call = bc_stmt(bc_call("__task_fail", [bc_ident(gn, pos), actual], pos), pos)
+        if members.len() == 1: statements.push(call)
+        else:
+            condition = mk(.istype, pos)
+            nodes[condition].a = i32(bc_ident(vn, pos))
+            nodes[condition].b = i32(type_node_of(member, pos))
+            branch = mk(.if_, pos)
+            nodes[branch].a = i32(condition)
+            nodes[branch].b = i32(bc_block([call], pos))
+            add_flag(branch, NF_STMT)
+            statements.push(branch)
+    statements.push(bc_stmt(bc_block([], pos), pos))
+    nodes[n] = nodes[bc_block(statements, pos)]
+    check_expr(n, T_VOID)
+
+# A waiting parent can continue changing globals while its children run.
+# Explicit synchronized identities are shared; other data travels as captures.
+concurrency_task_globals = (f: int, seen: mut {int: bool}):
+    if f <= 0 or f >= fns.len() or seen.has(f): return
+    seen[f] = true
+    if modules[int(fns[f].mod)].is_prelude: return
+    concurrency_task_globals_node(int(fns[f].body), seen)
+
+concurrency_task_globals_node = (n: int, seen: mut {int: bool}):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .ident and nodes[n].aux == i32(int(SK.global)):
+        t = ntype(n)
+        if not globals[int(nodes[n].sym)].is_const and not concurrency_builtin_type(t, "Atomic") and not concurrency_builtin_type(t, "TaskGroup"):
+            fatal(nodes[n].pos, "a task cannot read an unsynchronized global while its parent runs; capture a value or use Atomic")
+    if k == .call and nodes[n].aux == 0: concurrency_task_globals(int(nodes[n].sym), seen)
+    loop f in value_helper_calls(n): concurrency_task_globals(f, seen)
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: concurrency_task_globals_node(int(nodes[n].a), seen)
+    if mask & 2 != 0: concurrency_task_globals_node(int(nodes[n].b), seen)
+    if mask & 4 != 0: concurrency_task_globals_node(int(nodes[n].c), seen)
+    if mask & 16 != 0:
+        loop child in kids(n): concurrency_task_globals_node(child, seen)
+    if mask & 32 != 0:
+        loop child in kids2(n): concurrency_task_globals_node(child, seen)
+
+# Zero-fill must not fabricate an identity whose private storage needs a factory.
+# Only complete root queries are memoized; recursive backedges stay query-local.
+concurrency_zero_types: {int: bool}
+concurrency_zeroable = (t0: int, seen: mut {int: bool}) -> bool:
+    t = representation_type(t0)
+    if seen.has(t): return true
+    seen[t] = true
+    k = tkind(t)
+    if concurrency_builtin_type(t, "Atomic") or concurrency_builtin_type(t, "TaskGroup") or concurrency_builtin_type(t, "Task"): return false
+    if k == .fixed: return fixed_len(t) == 0 or concurrency_zeroable(telem(t), seen)
+    if k == .box: return concurrency_zeroable(telem(t), seen)
+    if k == .tuple:
+        loop i in [0..int(types[t].nargs)):
+            if not concurrency_zeroable(targ(t, i), seen): return false
+    if k == .struct_ or k == .enum_:
+        si = int(types[t].st)
+        check_struct_fields(si)
+        loop i in [0..int(structs[si].nfields)):
+            if not concurrency_zeroable(int(fields[int(structs[si].fields) + i].type), seen): return false
+        loop j in [0..int(structs[si].nvariants)):
+            v = int(structs[si].variants) + j
+            loop i in [0..int(variants[v].nfields)):
+                if not concurrency_zeroable(int(fields[int(variants[v].fields) + i].type), seen): return false
+    # An empty dynamic container or none does not manufacture an element.
+    true
+
+concurrency_require_zero = (n: int, t0: int):
+    if not dewy_at(nodes[n].pos): return
+    t = representation_type(t0)
+    k = tkind(t)
+    if k != .fixed and k != .tuple and k != .struct_ and k != .enum_ and k != .box: return
+    valid = concurrency_zero_types.get(t)
+    if valid == none:
+        seen: {int: bool}
+        valid = concurrency_zeroable(t, seen)
+        concurrency_zero_types[t] = valid!
+    if not valid!: fatal(nodes[n].pos, "zero initialization cannot create private synchronized handles; supply atomic(value) or a task-group result explicitly")

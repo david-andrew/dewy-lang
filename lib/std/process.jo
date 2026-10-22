@@ -23,9 +23,10 @@ struct Output:
 stdout_text = (output: Output) -> str?: __dewy_decode_utf8(output.stdout)
 stderr_text = (output: Output) -> str?: __dewy_decode_utf8(output.stderr)
 
-wait = (child: Child) -> int: __proc_wait(child.pid)
+wait = (child: Child) -> int | Canceled: __proc_wait(child.pid)
 
-run = (program: str, args: str[]) -> int | SpawnError:
+run = (program: str, args: str[]) -> int | SpawnError | Canceled:
+    if __task_canceled(): return Canceled
     when TARGET == "wasm":
         return SpawnError()
     else when TARGET == "windows":
@@ -36,9 +37,12 @@ run = (program: str, args: str[]) -> int | SpawnError:
     else:
         pid = __proc_start(program, args, -1, -1)
         if pid < 0: return SpawnError()
-        return __proc_wait(pid)
+        status = __proc_wait(pid)
+        if status is Canceled: __proc_cancel_owned(pid)
+        return status
 
-run_silent = (program: str, args: str[]) -> int | SpawnError:
+run_silent = (program: str, args: str[]) -> int | SpawnError | Canceled:
+    if __task_canceled(): return Canceled
     when TARGET == "wasm" or TARGET == "windows":
         return SpawnError()
     else:
@@ -47,9 +51,12 @@ run_silent = (program: str, args: str[]) -> int | SpawnError:
         pid = __proc_start(program, args, null_fd, null_fd)
         syscall(3, null_fd)
         if pid < 0: return SpawnError()
-        return __proc_wait(pid)
+        status = __proc_wait(pid)
+        if status is Canceled: __proc_cancel_owned(pid)
+        return status
 
-spawn = (program: str, args: str[]) -> Child | SpawnError:
+spawn = (program: str, args: str[]) -> Child | SpawnError | Canceled:
+    if __task_canceled(): return Canceled
     when TARGET == "wasm" or TARGET == "windows":
         return SpawnError()
     else:
@@ -58,7 +65,8 @@ spawn = (program: str, args: str[]) -> Child | SpawnError:
         return Child(pid = pid)
 
 # Both pipes are drained as they fill, so a child writing much to either cannot block.
-capture = (program: str, args: str[]) -> Output | SpawnError:
+capture = (program: str, args: str[]) -> Output | SpawnError | Canceled:
+    if __task_canceled(): return Canceled
     when TARGET == "wasm" or TARGET == "windows":
         return SpawnError()
     else:
@@ -83,6 +91,9 @@ capture = (program: str, args: str[]) -> Output | SpawnError:
             return SpawnError()
         __proc_drain(out_read, err_read, out, err)
         status = __proc_wait(pid)
+        if status is Canceled:
+            __proc_cancel_owned(pid)
+            return Canceled
         return Output(status = status, stdout = out, stderr = err)
 
 # fork and exec: the child's pid, or -1. Its stdout and stderr are out_fd and err_fd unless
@@ -100,13 +111,15 @@ __proc_start = (program: str, args: str[], out_fd: int, err_fd: int) -> int:
     pid
 
 # The status of a child, once it has ended: its exit code, or 128 + the signal that ended it.
-__proc_wait = (pid: int) -> int:
+__proc_wait = (pid: int) -> int | Canceled:
+    if __task_canceled(): return Canceled
     when TARGET == "wasm" or TARGET == "windows":
         return -1
     else:
         status = [0]
         r = -4
         loop r == -4: r = syscall(61, pid, data(status), 0, 0)      # wait4 (EINTR: again)
+        if r == -125: return Canceled
         if r < 0: return -1
         st = status[0] & 0xFFFF
         if st & 127 != 0: return 128 + (st & 127)
@@ -136,3 +149,11 @@ __proc_read = (fd: int, into: mut u8[]) -> bool:
     r = syscall(0, fd, data(into) + n, 65536)
     into.resize(n + max(r, 0))
     r > 0 or r == -4
+
+# Helpers owning a child reap it before cancellation escapes their scope.
+__proc_cancel_owned = (pid: int):
+    when TARGET == "linux":
+        syscall(62, pid, 9)
+        __task_shield_enter()
+        __proc_wait(pid)
+        __task_shield_leave()

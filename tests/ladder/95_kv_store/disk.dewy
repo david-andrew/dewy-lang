@@ -46,16 +46,16 @@ Disk:type=[
             let keep=data.length*armed.thousandths//1000
             let prefix=data[0..keep)
             let existing=read(name)
-            if existing is? error return DiskError["cannot reread {name}"]
+            if existing is? (error|Canceled) return DiskError["cannot reread {name}"]
             let written=p(path(name)).write_bytes([existing... prefix...])
-            if written is? error return DiskError["cannot write {name}"]
+            if written is? (error|Canceled) return DiskError["cannot write {name}"]
             return Crashed["append"]
         }
         let file=p(path(name))
         let written=file.append_bytes(bytes(text))
-        if written is? error return DiskError["cannot append to {name}"]
+        if written is? (error|Canceled) return DiskError["cannot append to {name}"]
         let synced=file.sync
-        if synced is? error return DiskError["cannot sync {name}"]
+        if synced is? (error|Canceled) return DiskError["cannot sync {name}"]
         appends+=1
     }
 
@@ -64,13 +64,13 @@ Disk:type=[
     write=(name:string data:array<uint8>):>void|DiskError=>{
         let side=p(path("{name}.tmp"))
         let written=side.write_bytes(data)
-        if written is? error return DiskError["cannot write {name}"]
+        if written is? (error|Canceled) return DiskError["cannot write {name}"]
         let synced=side.sync
-        if synced is? error return DiskError["cannot sync {name}"]
+        if synced is? (error|Canceled) return DiskError["cannot sync {name}"]
         let renamed=side.replace(p(path(name)))
-        if renamed is? error return DiskError["cannot replace {name}"]
+        if renamed is? (error|Canceled) return DiskError["cannot replace {name}"]
         let settled=p(root).sync
-        if settled is? error return DiskError["cannot sync {root}"]
+        if settled is? (error|Canceled) return DiskError["cannot sync {root}"]
         writes+=1
     }
 
@@ -79,7 +79,7 @@ Disk:type=[
         let file=p(path(name))
         if not file.exists return []
         let data=file.read_bytes
-        if data is? error return DiskError["cannot read {name}"]
+        if data is? (error|Canceled) return DiskError["cannot read {name}"]
         return data
     }
 
@@ -89,12 +89,12 @@ Disk:type=[
         let file=p(path(name))
         if not file.exists return
         let removed=file.unlink
-        if removed is? error return DiskError["cannot remove {name}"]
+        if removed is? (error|Canceled) return DiskError["cannot remove {name}"]
     }
 
     list=():>array<string>|DiskError=>{
         let names=p(root).list
-        if names is? error return DiskError["cannot list {root}"]
+        if names is? (error|Canceled) return DiskError["cannot list {root}"]
         names.sort()
         return names
     }
@@ -104,7 +104,7 @@ open_disk=(root:string):>Disk|DiskError=>{
     let dir=p(root)
     if not dir.exists {
         let made=dir.mkdir
-        if made is? error return DiskError["cannot create {root}"]
+        if made is? (error|Canceled) return DiskError["cannot create {root}"]
     }
     return Disk[root]
 }

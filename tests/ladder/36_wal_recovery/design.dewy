@@ -46,11 +46,11 @@ main=():>void=> {
         }
         let path=p"crash.wal"
         let written=path.write_bytes(prefix)
-        if written is? error  {
+        if written is? (error|Canceled)  {
             exit(1)
         }
         let loaded=path.read_bytes
-        if loaded is? error  {
+        if loaded is? (error|Canceled)  {
             exit(2)
         }
         let state=recover(loaded)
@@ -74,7 +74,7 @@ main=():>void=> {
     $runtime_assert (recovered.get(1) =? 10)
     $runtime_assert (recovered.get(2) =? 20)
     let removed=p"crash.wal".unlink
-    if removed is? error  {
+    if removed is? (error|Canceled)  {
         exit(3)
     }
     printl("{cases} {total} {full.length}")

@@ -11,18 +11,21 @@ main=():>void=>{
             printl(output.stdout.length)
         }
         <SpawnError> => exit(1)
+        <Canceled> => exit(1)
     }
     # More than a pipe holds on both streams at once: both are drained as they fill.
     let big=capture("/bin/sh" ["-c" "i=0; while [ $i -lt 3000 ]; do echo 0123456789abcdef0123456789abcdef; echo fedcba9876543210 1>&2; i=$((i+1)); done"])
-    if big is? SpawnError exit(2)
+    if big is? (SpawnError|Canceled) exit(2)
     printl"{big.status} {big.stdout.length} {big.stderr.length}"
     let binary=capture("/bin/sh" ["-c" "printf '\\377'"])
-    if binary is? SpawnError exit(3)
+    if binary is? (SpawnError|Canceled) exit(3)
     printl(binary.stdout_text is? none)
-    printl(capture("/nonexistent/program" []).status)
+    let missing=capture("/nonexistent/program" [])
+    if missing is? Canceled exit(3)
+    printl(missing.status)
     let first=spawn("/bin/sh" ["-c" "exit 7"])
     let second=spawn("/bin/sh" ["-c" "kill -9 $$"])
-    if first is? SpawnError or second is? SpawnError exit(4)
+    if first is? (SpawnError|Canceled) or second is? (SpawnError|Canceled) exit(4)
     printl(second.wait)
     printl(first.wait)
 }

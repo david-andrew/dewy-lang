@@ -1,3 +1,4 @@
+use 'concurrency.jo'
 # Type representation: all types live in `types` and are referred to by index.
 # Concrete types are interned (equal types have equal ids); types containing
 # inference variables are not, and are compared structurally.
@@ -729,6 +730,9 @@ layout = (t0: int):
         structs[si].resolving = false
         endless_check(si)
         size = align_up(off, al)
+        # Padding is a layout fact; retain the payload's natural alignment.
+        # An extra line also isolates payloads at an unaligned array base.
+        if structs[si].decl != 0 and nodes[int(structs[si].decl)].name == i32(intern("CachePadded")) and concurrency_builtin_type(t, "CachePadded"): size = align_up(size + 127, 128)
     else if k == .enum_:
         si = int(types[t].st)
         check_struct_fields(si)

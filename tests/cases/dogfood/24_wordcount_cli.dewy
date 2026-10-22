@@ -76,7 +76,7 @@ run=(argv:array<string>):>int64=>{
     }
     let config_path=opts.config ?? env("WC_CONFIG") ?? "app.conf"
     let text=read_text(config_path)
-    if text is? error {
+    if text is? (error|Canceled) {
         printl("cannot read config {config_path}")
         return EXIT_IO
     }
@@ -90,7 +90,7 @@ run=(argv:array<string>):>int64=>{
     let counts:dict<string int64>=[]
     loop f in opts.files {
         let body=read_text(f)
-        if body is? error {
+        if body is? (error|Canceled) {
             printl("cannot read {f}")
             return EXIT_IO
         }

@@ -9,25 +9,39 @@ from tests.support import compiler
 PROGRAM = r'''
 main=(args:array<string>):>void=>exit(entry(args)) entry=(args:array<string>):>int64=>{
 if args[1]=?"stdin" {
-    write(read_stdin())
-    return if read_stdin()=?"" and read_line() is?none 0 else 1
+    let all=read_stdin()
+    if all is? Canceled return 6
+    write(all)
+    let tail=read_stdin()
+    return if tail is? string and tail=?"" and read_line() is?none 0 else 1
 }
 if args[1]=?"after-line" {
     let line=read_line()
     if line is?none return 2
-    write(line) write("|") write(read_stdin())
+    if line is?Canceled return 6
+    let tail=read_stdin()
+    if tail is?Canceled return 6
+    write(line) write("|") write(tail)
     return if read_line() is?none 0 else 3
 }
 let opened=open_file(args[1])
 if opened is?none return 4
+if opened is?Canceled return 6
 let f=opened
-if args.length>?2 {write(str_from_bytes(f.read_bytes(3))) write("|")}
+if args.length>?2 {
+ let data=f.read_bytes(3)
+ if data is?Canceled return 6
+ write(str_from_bytes(data)) write("|")
+}
 loop true {
     let line=f.read_line()
     if line is?none break
+    if line is?Canceled return 6
     write(line) write("\n")
 }
-if f.read_bytes(1).length not=?0 or f.read_line() isnt?none return 5
+let last=f.read_bytes(1)
+if last is?Canceled return 6
+if last.length not=?0 or f.read_line() isnt?none return 5
 f.close()
 return 0}
 '''

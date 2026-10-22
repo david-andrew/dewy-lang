@@ -1,0 +1,9 @@
+# A deliberately non-atomic shared-storage handle, confined to its owner.
+struct LocalHandle:
+    storage: int[]
+    p: *int
+local_handle = () -> LocalHandle:
+    storage = [0]
+    p = data(storage)
+    LocalHandle(storage, p)
+read = (h: LocalHandle) -> int: h.p[0]

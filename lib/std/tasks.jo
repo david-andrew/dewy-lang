@@ -1,0 +1,306 @@
+# Structured waiting-lane tasks. TaskGroup is scheduler-independent; native
+# threads are one implementation of its context and lifetime contract.
+struct Task[T]:
+    __result: (T | Canceled | OutOfMemory)[]
+    __p: *(T | Canceled | OutOfMemory)
+    __ready: Atomic[int]
+
+__task_slots: *int = null
+__task_slot_lock = 0
+__task_next_slot = 0
+
+__task_initialize = () -> bool:
+    if __task_contexts.len() != 0: return true
+    when TARGET != "linux": return false
+    else:
+        # Initialization runs on the owner before its first child can start.
+        __ts()
+        __rng_threads()
+        n = __TASK_SLOTS << __TASK_SHIFT
+        p = syscall(9, 0, n, 3, 0x22 | 0x4000, -1, 0)
+        if p < 0 and p > -4096: return false
+        __task_stacks = p as *u8
+        __task_states = __os_pages(__TASK_SLOTS * __TS_WORDS * 8) as *int
+        __task_slots = __os_pages(__TASK_SLOTS * 8) as *int
+        if not __task_install_interrupt():
+            syscall(11, __task_stacks, n)
+            __os_free_pages(__task_states as *u8, __TASK_SLOTS * __TS_WORDS * 8)
+            __os_free_pages(__task_slots as *u8, __TASK_SLOTS * 8)
+            __task_stacks = null
+            __task_states = null
+            __task_slots = null
+            return false
+        __task_contexts.resize(__TASK_SLOTS + 1)
+        __c_threads = true
+        __out_flush()
+        __out_direct = true
+        __mt_active = true
+        true
+
+__task_new_group = (deadline: int = 0) -> TaskGroup:
+    if not __task_initialize(): return TaskGroup()
+    state = fill(0, (size_of(__TaskScope) + 7) / 8)
+    p = __task_data(state) as *__TaskScope
+    p.parent = __task_context().scope
+    p.deadline = deadline
+    p.owner = syscall(186)
+    TaskGroup(state, p)
+
+__task_enter = (g: TaskGroup) -> TaskGroup:
+    c = __task_context()
+    if c == null: return TaskGroup()
+    previous = c.scope
+    c.scope = g
+    previous
+
+__task_restore = (previous: TaskGroup):
+    c = __task_context()
+    if c != null: c.scope = previous
+
+cancel = (g: TaskGroup) -> void:
+    if g.__state.len() == 0: return
+    __atomic_cas(&g.__p.canceled, 0, 1)
+    __task_interrupt_group(g)
+
+__task_fail = (g: TaskGroup, failure: exception):
+    if g.__state.len() == 0: return
+    p = g.__p
+    __task_lock(&p.lock)
+    if not p.failed:
+        p.first = failure
+        p.failed = true
+        __atomic_cas(&p.canceled, 0, 1)
+    __task_unlock(&p.lock)
+    __task_interrupt_group(g)
+
+__task_claim_slot = () -> int:
+    __task_lock(&__task_slot_lock)
+    loop k in [0..__TASK_SLOTS):
+        i = (__task_next_slot + k) % __TASK_SLOTS
+        if __task_slots[i] == 0:
+            __task_slots[i] = 1
+            __task_next_slot = (i + 1) % __TASK_SLOTS
+            __task_unlock(&__task_slot_lock)
+            return i
+    __task_unlock(&__task_slot_lock)
+    -1
+
+@cabi
+__task_worker = (slot: int) -> void:
+    c = __task_data(__task_contexts) + slot + 1
+    p = c.address
+    # Linux clears this word at actual thread exit, after the last use of the
+    # stack. A completion flag before returning is insufficient for reuse.
+    syscall(218, &p.alive)
+    __atomic_cas(&p.tid, 0, syscall(186))
+    c.scope = p.group
+    c.rng = rng(__rng_seed + slot * 1000003)
+    __task_states[slot * __TS_WORDS + __TS_FILE_CODE] = 0
+    p.run()
+    c.scope = TaskGroup()
+    g = p.group.__p
+    __task_lock(&g.lock)
+    g.pending -= 1
+    __task_unlock(&g.lock)
+    syscall(202, &g.pending, 129, 0x7FFFFFFF)
+
+__task_launch = (g: TaskGroup, f: () -> void) -> bool:
+    if g.__state.len() == 0: return false
+    p = g.__p
+    __task_lock(&p.lock)
+    if p.closed:
+        __task_unlock(&p.lock)
+        return false
+    slot = __task_claim_slot()
+    if slot < 0:
+        __task_unlock(&p.lock)
+        return false
+    job = fill(0, (size_of(__TaskJob) + 7) / 8)
+    j = __task_data(job) as *__TaskJob
+    j.run = f
+    j.group = g
+    j.alive = 1
+    j.slot = slot
+    c = __task_data(__task_contexts) + slot + 1
+    c.job = job
+    c.address = j
+    entry: cfn(int) = __task_worker
+    top = __task_stacks + ((slot + 1) << __TASK_SHIFT)
+    # The low page is a guard; reserved virtual stacks commit on demand.
+    guarded = syscall(10, top - (1 << __TASK_SHIFT), 4096, 0) == 0
+    p.pending += 1
+    id = if guarded: __clone_thread(entry as *u8, slot, top) else: -1
+    if id < 0:
+        p.pending -= 1
+        j.run = __task_noop
+        j.group = TaskGroup()
+        c.job = []
+        __task_lock(&__task_slot_lock)
+        __task_slots[slot] = 0
+        __task_unlock(&__task_slot_lock)
+        __task_unlock(&p.lock)
+        return false
+    p.jobs.push(job)
+    p.addresses.push(c.address)
+    __task_unlock(&p.lock)
+    true
+
+__task_spawn[T] = (g: TaskGroup, f: () -> T) -> Task[T]:
+    if __task_scope_canceled(g): return Task[T]()
+    storage: (T | Canceled | OutOfMemory)[] = [Canceled]
+    result = Task[T](storage, __task_data(storage), atomic(0))
+    runner = () -> void:
+        if not __task_canceled():
+            result.__p[0] = f()
+            __task_report(g, result.__p[0])
+        result.__ready.store(1)
+    if not __task_launch(g, runner):
+        result.__p[0] = OutOfMemory
+        __task_fail(g, OutOfMemory)
+        result.__ready.store(1)
+    result
+
+__task_join = (g: TaskGroup) -> (bool | exception):
+    if g.__state.len() == 0: return OutOfMemory
+    p = g.__p
+    loop:
+        __task_lock(&p.lock)
+        pending = p.pending
+        done = pending == 0
+        if done: p.closed = true
+        __task_unlock(&p.lock)
+        if done: break
+        if __task_scope_canceled(g): cancel(g)
+        __task_wait(&p.pending, pending, true)
+    # Every worker has finished its callback. Wait for the kernel's exit
+    # acknowledgement before clearing closures or releasing any stack slot.
+    loop j in p.addresses:
+        loop __atomic_add(&j.alive, 0) != 0: __task_wait(&j.alive, 1, false)
+        slot = j.slot
+        j.run = __task_noop
+        j.group = TaskGroup()
+        (__task_data(__task_contexts) + slot + 1).job = []
+        syscall(28, __task_stacks + (slot << __TASK_SHIFT) + 4096, (1 << __TASK_SHIFT) - 4096, 4)
+        __task_lock(&__task_slot_lock)
+        __task_slots[slot] = 0
+        __task_unlock(&__task_slot_lock)
+    p.jobs.clear()
+    p.addresses.clear()
+    canceled = __task_scope_canceled(g)
+    p.parent = TaskGroup()
+    if p.failed:
+        first = p.first
+        p.first = none
+        return first
+    if canceled: return Canceled
+    return true
+
+__task_result[T] = (task: Task[T]) -> (T | Canceled | OutOfMemory):
+    if task.__result.len() == 0: return Canceled
+    loop task.__ready.load() == 0:
+        if __task_canceled(): return Canceled
+        __task_pause()
+    task.__p[0]
+
+__task_sleep_ns = (ns: int) -> (void | Canceled):
+    end = time_ns() + max(ns, 0)
+    loop:
+        if __task_canceled(): return Canceled
+        left = end - time_ns()
+        if left <= 0: return
+        __sleep_ns(min(left, 1000000))
+
+__task_cleanup = (g: TaskGroup, previous: TaskGroup):
+    if g.__state.len() != 0 and not g.__p.closed:
+        cancel(g)
+        __task_join(g)
+    __task_restore(previous)
+
+__task_noop = () -> void: pass
+
+__task_seconds = (seconds: f64) -> int: int(seconds * 1000000000.0)
+__task_sleep_seconds = (seconds: f64) -> (void | Canceled): __task_sleep_ns(__task_seconds(seconds))
+__task_deadline = (ns: int) -> int:
+    now = time_ns()
+    if ns <= 0: return now
+    if ns > 0x7FFFFFFFFFFFFFFF - now: return 0x7FFFFFFFFFFFFFFF
+    now + ns
+
+within[D, T] = (duration: D, f: () -> T) -> (T | Timeout | Canceled | OutOfMemory):
+    g = __task_new_group(__task_deadline(__task_nanoseconds(duration)))
+    previous = __task_enter(g)
+    task = __task_spawn(g, f)
+    __task_join(g)
+    __task_restore(previous)
+    if g.__state.len() != 0 and __atomic_add(&g.__p.canceled, 0) == 2: return Timeout
+    __task_result(task)
+
+race[A, B] = (first: () -> A, second: () -> B) -> (A | B | Canceled | OutOfMemory):
+    g = __task_new_group()
+    previous = __task_enter(g)
+    winner = atomic(-1)
+    a = __task_spawn(g, ():
+        value: (A | Canceled) = first()
+        if winner.compare_swap(-1, 0): cancel(g)
+        value
+    )
+    b = __task_spawn(g, ():
+        value: (B | Canceled) = second()
+        if winner.compare_swap(-1, 1): cancel(g)
+        value
+    )
+    __task_join(g)
+    __task_restore(previous)
+    if winner.load() == 0: return __task_result(a)
+    if winner.load() == 1: return __task_result(b)
+    if __task_scope_canceled(g): return Canceled
+    OutOfMemory
+
+# The signal handler only returns. No allocator, locks or user callbacks run
+# on its signal stack. Repeated acknowledgement closes the check/syscall race.
+@cabi
+__task_interrupt = (signal: int) -> void: pass
+
+__task_install_interrupt = () -> bool:
+    when TARGET != "linux": return false
+    else:
+        trampoline = syscall(9, 0, 4096, 3, 0x22, -1, 0)
+        if trampoline < 0 and trampoline > -4096: return false
+        when ARCH == "arm64":
+            words = trampoline as *u32
+            words[0] = u32(0xD2801168)   # mov x8, #139 (rt_sigreturn)
+            words[1] = u32(0xD4000001)   # svc #0
+            __code_sync(trampoline as *u8, 8)
+        else:
+            bytes = trampoline as *u8
+            loop i in 0.. and b in [u8(0xB8), u8(15), u8(0), u8(0), u8(0), u8(0x0F), u8(0x05)]: bytes[i] = b
+        if syscall(10, trampoline, 4096, 5) < 0:
+            syscall(11, trampoline, 4096)
+            return false
+        handler: cfn(int) = __task_interrupt
+        action = [handler as int, 0x04000000, trampoline, 0]
+        if syscall(13, 12, data(action), 0, 8) != 0:
+            syscall(11, trampoline, 4096)
+            return false
+        true
+
+__task_interrupt_group = (g: TaskGroup) -> void:
+    when TARGET == "linux":
+        p = g.__p
+        __task_lock(&p.lock)
+        if not p.closed:
+            pid = syscall(39)
+            syscall(234, pid, p.owner, 12)
+            loop job in p.addresses:
+                tid = __atomic_add(&job.tid, 0)
+                if tid != 0 and __atomic_add(&job.alive, 0) != 0: syscall(234, pid, tid, 12)
+        __task_unlock(&p.lock)
+
+# Wake on completion; the timeout also notices a deadline when no task finishes.
+# Kernel clear_tid wakes a shared futex, whereas group state uses private waits.
+__task_wait = (address: *int, expected: int, private: bool):
+    when TARGET == "linux":
+        timeout = (0, 1000000)
+        syscall(202, address, (if private: 128 else: 0), expected, &timeout)
+    else: __task_pause()
+

@@ -8,18 +8,18 @@ main=():>void=>{
     printl(write_text(file "42"))
     printl"{file_exists(file)} {is_file(file)} {is_directory(file)}"
     let text=read_text(file)
-    if text is? error exit(1)
+    if text is? (error|Canceled) exit(1)
     printl(text)
     printl(write_bytes(file [uint8(52) 50 10]))
     let data=read_bytes(file)
-    if data is? error exit(2)
+    if data is? (error|Canceled) exit(2)
     printl(data)
     let line=first_line(file)
-    if line is? error exit(4)
+    if line is? (error|Canceled) exit(4)
     printl(line)
     printl(first_line("{dir}/missing.txt") is? FileNotFound)
     let entries=list_directory(dir)
-    if entries is? error exit(3)
+    if entries is? (error|Canceled) exit(3)
     printl(entries)
     printl(remove_file(file))
     printl(remove_file(file) is? FileNotFound)
@@ -29,7 +29,7 @@ main=():>void=>{
 }
 
 # A function that propagates a file error to its caller.
-first_line=(path:string):>string|error=>{
+first_line=(path:string):>string|error|Canceled=>{
     let text=read_text(path) or_throw
     return text.split("\n")[0]
 }

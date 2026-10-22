@@ -55,9 +55,15 @@ __tid = () -> int:
 # per-thread allocator state: [heap_cur, heap_end, live count, free list heads (64 size classes),
 # large blocks freed for reuse (a list), the bytes in that list, boxes waiting to be dropped (a
 # list, its length and capacity), a box being dropped]
-const __TS_WORDS = 78
+const __TS_WORDS = 79
 const __TS_OWNERS = 76
 const __TS_DROPPING = 77
+const __TS_FILE_CODE = 78     # (while tasks run: this thread's or task's last file error)
+# Task stacks (lib/std/tasks.jo sets them when tasks start): a task's thread state is its slot's
+const __TASK_SLOTS = 16384
+const __TASK_SHIFT = 23
+__task_stacks: *u8 = null
+__task_states: *int = null
 const __TS_BIG = 67
 const __TS_BOXES = 69
 const __BIG_KEEP = 64 << 20            # (native: at most this much is kept; a web page keeps all)
@@ -82,6 +88,11 @@ __ts_by_stack = () -> *int:
         sp = __stack_ptr()
         if __tstack_base != null and sp >= __tstack_base and sp < __tstack_base + (__MAX_THREADS << __TSTACK_SHIFT):
             return __tstate + (((sp - __tstack_base) >> __TSTACK_SHIFT) + 1) * __TS_WORDS
+        when not BOOTSTRAP:
+            # (a task's stack: its slot's state)
+            if __task_stacks != null:
+                i = (sp - __task_stacks) >> __TASK_SHIFT
+                if i >= 0 and i < __TASK_SLOTS: return __task_states + i * __TS_WORDS
         a = sp as int
         # (the main thread's stack: from where it was when the program began, down by up to 120 MB)
         if a <= __main_sp + 65536 and a > __main_sp - (120 << 20): return __tstate
@@ -507,6 +518,8 @@ __write_fd = (fd: int, p: *u8, n: int):
         off = 0
         loop off < n:
             r = syscall(1, fd, p + off, n - off)
+            # (a task's cancellation signal interrupts the wait; output is no cancellation point)
+            if r == -4: continue
             if r <= 0: break
             off += r
         if fd == 1 and __test_mirror >= 0: __write_fd(__test_mirror, p, off)

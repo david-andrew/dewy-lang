@@ -1,0 +1,13 @@
+from p"../harness.jo" import clock, size_argument
+main=(args:array<string>)=>{
+ let n=size_argument(args 1000000)
+ let values=[loop i in [0..n) (i*17)%64]
+ let bins=[loop i in [0..64) atomic(0)]
+ let start=clock()
+ parallel x in values {bins[x].add(1 'relaxed')}
+ let counts=[loop bin in bins bin.load()]
+ assert(sum(counts) =? n)
+ let checksum:int64=0
+ loop i in [0..64) {checksum+=counts[i]*(i+1)}
+ printl"{checksum} {clock()-start}"
+}

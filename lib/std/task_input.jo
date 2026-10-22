@@ -1,0 +1,64 @@
+# Cancelable standard input and file opening, as Dewy sees them: each returns
+# Canceled in a canceled task. Loaded only for a program that names one of them.
+__task_stdin_lock = 0
+__task_input_line = () -> (str | Canceled)?:
+    loop __atomic_cas(&__task_stdin_lock, 0, 1) != 0:
+        if __task_canceled(): return Canceled
+        __task_pause()
+    defer __task_unlock(&__task_stdin_lock)
+    if __task_canceled(): return Canceled
+    result = read_line()
+    if __task_canceled(): return Canceled
+    result
+
+read_line = () -> (str | Canceled)?: __task_input_line()
+read_stdin = () -> (str | Canceled):
+    loop __atomic_cas(&__task_stdin_lock, 0, 1) != 0:
+        if __task_canceled(): return Canceled
+        __task_pause()
+    defer __task_unlock(&__task_stdin_lock)
+    if __task_canceled(): return Canceled
+    result = read_stdin()
+    if __task_canceled(): return Canceled
+    result
+
+input = (prompt: str = "") -> (str | Canceled):
+    write(prompt)
+    result = __task_input_line()
+    if result is Canceled: return Canceled
+    if result is str: return result
+    ""
+
+input_int = (prompt: str = "") -> (int | Canceled):
+    loop:
+        write(prompt)
+        result = __task_input_line()
+        if result is Canceled: return Canceled
+        if result is str:
+            if let value = to_int(trim(result)): return value
+        else: panic("the input ended before a whole number came")
+
+input_float = (prompt: str = "") -> (f64 | Canceled):
+    loop:
+        write(prompt)
+        result = __task_input_line()
+        if result is Canceled: return Canceled
+        if result is str:
+            if let value = to_float(trim(result)): return value
+        else: panic("the input ended before a number came")
+
+# Streaming handles retain their established close discipline. Cancellation is
+# reported separately from EOF; an open completed during cancellation is closed.
+open_file = (path: str) -> (File | Canceled)?:
+    if __task_canceled(): return Canceled
+    result = open_file(path)
+    if __task_canceled():
+        if let file = result: close(file)
+        return Canceled
+    result
+
+read_line = (f: mut File) -> (str | Canceled)?:
+    if __task_canceled(): return Canceled
+    result = read_line(f)
+    if __task_canceled(): return Canceled
+    result

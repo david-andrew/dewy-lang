@@ -89,6 +89,7 @@ main=():>void=>{
     loop true {
         let line=read_line()
         if line is? none break
+        if line is? Canceled exit(1)
         lines.push(line)
     }
     let script=parse_script(lines)

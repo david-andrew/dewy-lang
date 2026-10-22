@@ -928,6 +928,7 @@ dw_effect_atom = (id0: int, entries: mut EffectSyntax[], empty: mut bool, negate
     if dw_name(id) == "blocks":
         if not negative: fatal(dewy_syntax[id].pos, "`blocks` is inferred, never granted: a row can only exclude it, `& no blocks`")
         entries.push(EffectSyntax(.block, [], dewy_syntax[id].pos, true))
+        effect_blocks_demanded = true
         return
     if dw_name(id) != "":
         entries.push(EffectSyntax(.opaque, [intern(dw_name(id))], dewy_syntax[id].pos, negative, true))
@@ -944,7 +945,7 @@ dw_effect_atom = (id0: int, entries: mut EffectSyntax[], empty: mut bool, negate
 dw_effect_syntax = (id0: int) -> bool:
     id = dw_unwrap(id0)
     name = dw_name(id)
-    name == "no_effects" or name == "allocates" or dw_op(id) == .kw_not or dw_op(id) == .type_apply and (dw_name(dw_child(id, 1)) == "reads" or dw_name(dw_child(id, 1)) == "mutates")
+    name == "no_effects" or name == "allocates" or name == "blocks" or dw_op(id) == .kw_not or dw_op(id) == .type_apply and (dw_name(dw_child(id, 1)) == "reads" or dw_name(dw_child(id, 1)) == "mutates")
 
 dw_effect_result = (id: int, entries: mut EffectSyntax[], empty: mut bool) -> int:
     # (`:>int64|Oops & no_effects`: `&` binds the row to the last alternative only)
@@ -1112,7 +1113,7 @@ dw_type = (id: int) -> int:
     pos = dewy_syntax[id].pos
     if dewy_syntax[id].kind == .metatag: return dw_metatag_fail(id)
     name = dw_name(id)
-    if name == "no_effects" or name == "allocates" or dw_op(id) == .kw_not or dw_op(id) == .type_apply and (dw_name(dw_child(id, 1)) == "reads" or dw_name(dw_child(id, 1)) == "mutates"):
+    if name == "no_effects" or name == "allocates" or name == "blocks" or dw_op(id) == .kw_not or dw_op(id) == .type_apply and (dw_name(dw_child(id, 1)) == "reads" or dw_name(dw_child(id, 1)) == "mutates"):
         entries: EffectSyntax[]
         empty = false
         dw_effect_atom(id, entries, empty)
@@ -1627,6 +1628,8 @@ dw_expr = (id: int) -> int:
         if dw_siblings.len() > 0: dw_rewrite_members(dewy_syntax[id].child_left)
         return dewy_syntax[id].child_left
     if k == .based_string: return dw_binary(id)
+    if k == .directive and text == "spawn": return dw_spawn(id)
+    if k == .directive and text == "concurrent": return dw_concurrent(id, false)
     if k == .directive: return dw_directive(id)
     if k == .metatag:
         if text != "target": return dw_metatag_fail(id)
@@ -1634,6 +1637,7 @@ dw_expr = (id: int) -> int:
         nodes[n].sval = i32(intern(dw_target_name()))
         return n
     if k == .identifier:
+        if text == "Cancelled": fatal(pos, "unknown name `Cancelled`; use `Canceled` (US spelling)")
         if text == "none": return mk(.none_lit, pos)
         if text == "end":
             if dw_index_context.len() == 0: fatal(pos, "`end` is the last index inside brackets, as in `xs[end]` or `xs[1..end]`; outside them, use `xs.length - 1`")
@@ -2088,6 +2092,7 @@ dw_stmt = (id: int, top: bool = false) -> int:
             nodes[n].b = nodes[s].a
             return n
         return s
+    if k == .directive and dewy_syntax[id].text == "concurrent": return dw_concurrent(id, true)
     if k == .directive and (dewy_syntax[id].text == "expect" or dewy_syntax[id].text == "fail"): return dw_expect(id)
     if k == .keyword_expr:
         word = dewy_syntax[dw_child(id, 0)].text
@@ -3315,3 +3320,51 @@ dw_result_type = (owner: int, id0: int) -> int:
         nodes[n].name = i32(intern("bool"))
         return n
     dw_type(id)
+
+# Spawned bindings are resolved at the joining brace. Their task storage stays
+# hidden, and ordinary bindings become visible in the enclosing statement scope.
+dw_task_groups: str[]
+dw_spawn = (id: int) -> int:
+    pos = dewy_syntax[id].pos
+    group = dw_child(id, 0)
+    g = 0
+    if group != 0: g = dw_expr(group)
+    else:
+        if dw_task_groups.len() == 0: fatal(pos, "spawn needs an enclosing concurrent group, or an explicit spawn(group)")
+        g = bc_ident(dw_task_groups[dw_task_groups.len() - 1], pos)
+    value = dw_expr(dw_child(id, 1))
+    body = bc_block([bc_stmt(value, pos)], pos)
+    fn_ = mk(.lambda, pos)
+    nodes[fn_].b = i32(body)
+    call = bc_call("__task_spawn", [g, fn_], pos)
+    nodes[call].aux2 = 17
+    call
+
+dw_concurrent = (id: int, transparent: bool) -> int:
+    pos = dewy_syntax[id].pos
+    group = dw_child(id, 0)
+    name = if group == 0: "$group{id}" else: dw_name(group)
+    previous = "$context{id}"
+    outcome = "$joined{id}"
+    dw_task_groups.push(name)
+    body = dw_block(dw_child(id, 1))
+    dw_task_groups.pop()
+    statements = [bc_let(name, bc_call("__task_new_group", [], pos), pos), bc_let(previous, bc_call("__task_enter", [bc_ident(name, pos)], pos), pos)]
+    cleanup = mk(.defer_, pos)
+    nodes[cleanup].a = i32(bc_stmt(bc_call("__task_cleanup", [bc_ident(name, pos), bc_ident(previous, pos)], pos), pos))
+    statements.push(cleanup)
+    results: int[]
+    loop statement in kids(body):
+        if nodes[statement].kind == .vardecl and nodes[int(nodes[statement].b)].kind == .call and nodes[int(nodes[statement].b)].aux2 == 17:
+            original = name_of(int(nodes[statement].name))
+            token = "$task{statement}"
+            nodes[statement].name = i32(intern(token))
+            results.push(bc_let(original, bc_call("__task_result", [bc_ident(token, nodes[statement].pos)], nodes[statement].pos), nodes[statement].pos))
+        statements.push(statement)
+    statements.push(bc_let(outcome, bc_call("__task_join", [bc_ident(name, pos)], pos), pos))
+    statements.push(bc_stmt(bc_call("__task_restore", [bc_ident(previous, pos)], pos), pos))
+    loop result in results: statements.push(result)
+    if not transparent: statements.push(bc_stmt(bc_ident(outcome, pos), pos))
+    block = bc_block(statements, pos)
+    if transparent: nodes[block].aux = 5
+    block

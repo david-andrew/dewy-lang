@@ -1,0 +1,22 @@
+from p"../harness.jo" import clock, size_argument
+scan=(g:TaskGroup values:array<int64> first:int64 last:int64 wanted:int64 found:Atomic<int64> signaled:Atomic<int64>):>int64|Canceled=>{
+ loop i in [first..last) {
+  if values[i] =? wanted {found.store(i) signaled.store(clock()) cancel(g) return i}
+  if i%1024 =? 0 {sleep(0ns) or_throw}
+ }
+ return -1
+}
+main=(args:array<string>)=>{
+ let n=size_argument(args 1000000)
+ let values=[loop i in [0..n) i*17]
+ let found=atomic(-1)
+ let signaled=atomic(0)
+ let start=clock()
+ concurrent g {
+  spawn(g) scan(g values 0 n//2 (n//4)*17 found signaled)
+  spawn(g) scan(g values n//2 n (n//4)*17 found signaled)
+ }
+ let finish=clock()
+ assert(found.load() =? n//4)
+ printl"{found.load()} {finish-start} {finish-signaled.load()}"
+}

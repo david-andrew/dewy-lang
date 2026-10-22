@@ -17,7 +17,7 @@ nominal_resolving: {int: bool}
 nominal_families: {int: int}
 
 exception_builtins = ():
-    loop name in ["exception", "error"]:
+    loop name in ["exception", "error", "Canceled", "Timeout", "OutOfMemory"]:
         d = mk(.struct_, 0)
         nodes[d].name = i32(intern(name))
         t = get_struct_inst(d, [])
@@ -25,9 +25,10 @@ exception_builtins = ():
         universe[intern(name)] = new_sym(intern(name), .type_, t, d)
         nominal_types.push(t)
         if name == "exception": exception_type = t
-        else:
+        else if name == "error":
             error_type = t
             nominal_parent[t] = exception_type
+        else: nominal_parent[t] = exception_type
 
 nominal_descends = (t: int, parent: int) -> bool:
     current = t

@@ -1,62 +1,12 @@
-# Tier 3 / 82_overlap_race / milestone 25
-# Acceptance: Compile-time reject concurrent writes to overlapping ranges; accept adjacent partitions.
-# OPEN: No task/partition spelling exists to encode the rejected concurrent source. This source is the deterministic overlap oracle, not a negative compiler test; pending-rejection contract is in ladder.json.
-# This executable projection does not establish the OPEN obligation.
-Range:type=[start:int64 finish:int64]
-overlap=(a:Range b:Range):>bool=>{
-    if a.start >=? a.finish or b.start >=? b.finish return false
-    return a.start <? b.finish and b.start <? a.finish
+# Reject overlapping writes in a scoped fork, before executing either child.
+walk=(@a:array<int64>):>void=>{
+ let n=a.length
+ if n <? 2 return
+ let mid=n//2
+ let joined=parallel_range(2 ($capture @a i:int64):>int64=>{
+  if i =? 0 {walk(@a[..mid+1))}
+  else {walk(@a[mid..])}
+  return 0
+ })
 }
-valid=(r:Range n:int64):>bool=>{
-    return r.start >=? 0 and r.finish >=? r.start and r.finish <=? n
-}
-write=(@xs:array<int64> r:Range value:int64):>void=>{
-    $runtime_assert valid(r xs.length)
-    loop i in [r.start..r.finish) {
-        xs[i]=value
-    }
-}
-main=():>void=>{
-    let a=Range[0 4]
-    let b=Range[4 8]
-    let bad=Range[3 7]
-    $runtime_assert not overlap(a b)
-    $runtime_assert overlap(a bad)
-    $runtime_assert overlap(b bad)
-    $runtime_assert valid(a 8)
-    $runtime_assert valid(b 8)
-    $runtime_assert valid(bad 8)
-    $runtime_assert not valid(Range[-1 3] 8)
-    $runtime_assert not valid(Range[0 9] 8)
-    $runtime_assert not valid(Range[4 3] 8)
-    let xs:array<int64>=[0 0 0 0 0 0 0 0]
-    write(@xs a 1)
-    write(@xs b 2)
-    $runtime_assert xs =? [1 1 1 1 2 2 2 2]
-    let saved=xs.copy()
-    write(@xs bad 9)
-    $runtime_assert xs =? [1 1 1 9 9 9 9 2]
-    $runtime_assert saved =? [1 1 1 1 2 2 2 2]
-    let count:int64=0
-    loop start in [0..8) {
-        loop finish in [start..9) {
-            let r=Range[start finish]
-            if overlap(a r) count+=1
-        }
-    }
-    $runtime_assert not overlap(Range[0 0] Range[0 0])
-    $runtime_assert not overlap(Range[0 3] Range[3 6])
-    $runtime_assert overlap(Range[0 3] Range[2 6])
-    $runtime_assert overlap(Range[2 6] Range[0 3])
-    $runtime_assert overlap(Range[1 4] Range[1 4])
-    $runtime_assert not overlap(Range[1 1] a)
-    $runtime_assert not overlap(a Range[2 2])
-    $runtime_assert not overlap(Range[2 2] Range[1 4])
-    $runtime_assert valid(Range[8 8] 8)
-    $runtime_assert valid(Range[0 0] 0)
-    $runtime_assert not valid(Range[1 1] 0)
-    $runtime_assert not overlap(Range[8 9] b)
-    $runtime_assert overlap(Range[7 9] b)
-    $runtime_assert overlap(b Range[7 9])
-    printl("{count}")
-}
+main=()=>{let xs:array<int64>=[1 2 3 4] walk(@xs)}

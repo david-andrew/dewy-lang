@@ -49,12 +49,12 @@ main = ():>void => {
         n = to_int(argv[1]) ?? 5
     }
     let written = write_text(path SAMPLE)
-    if written is? error {
+    if written is? (error|Canceled) {
         printl("could not write {path}")
         exit(1)
     }
     let text = read_text(path)
-    if text is? error {
+    if text is? (error|Canceled) {
         printl("could not read {path}: {text}")
         exit(1)
     }

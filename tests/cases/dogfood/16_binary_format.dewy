@@ -89,12 +89,12 @@ main=():>void=>{
     let blob=encode(records)
     printl("encoded {blob.length} bytes, crc {format(get_u32_le(blob blob.length-4) "08x")}")
     let path=p"dogfood_records.bin"
-    if path.write_bytes(blob) is? error {
+    if path.write_bytes(blob) is? (error|Canceled) {
         printl("cannot write {path}")
         exit(1)
     }
     let back=path.read_bytes()
-    if back is? error {
+    if back is? (error|Canceled) {
         printl("cannot read {path}")
         exit(1)
     }

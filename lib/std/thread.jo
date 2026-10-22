@@ -120,53 +120,61 @@ __dewy_parallel_each = (r: IntRange, f: (int) -> void):
     )
 
 # ---------------- atomics ----------------
-# A whole number threads change together: parallel code may change it (and no other variable),
-# as a count of work done or a flag that tells the other threads to stop. Copies of an Atomic
-# are the same number.
-#   found = atomic(-1)
-#   parallel_range(n, (i: int) -> int:
-#       if found.get() >= 0: return 0          # another thread found it: skip the rest
-#       if is_answer(i): found.compare_swap(-1, i)
-#       0
-#   )
-struct Atomic:
+# Shared identity is explicit. The allocation owns the cell, copied handles
+# retain it, and every access (including loads) is atomic. Backends may use a
+# stronger order than requested; these portable primitives are seq_cst.
+struct Atomic[T]:
     __cell: int[]
     __p: *int
 
-atomic = (v: int = 0) -> Atomic:
-    cell = fill(v, 1)
-    # (the pointer is taken while the array is this one's alone: copies share it from then on)
+struct CachePadded[T]:
+    value: T
+
+atomic[T] = (v: T) -> Atomic[T]:
+    cell = fill(v as int, 1)
     p = data(cell)
-    Atomic(cell, p)
+    Atomic[T](cell, p)
 
-# its value now
-get = (a: Atomic) -> int:
-    when TARGET == "wasm": return a.__p[0]
-    else: return __atomic_add(a.__p, 0)
+atomic = (v: int = 0) -> Atomic[int]:
+    cell = fill(v, 1)
+    p = data(cell)
+    Atomic[int](cell, p)
 
-# add v (negative: subtract) and give the value after
-add = (a: Atomic, v: int) -> int:
+load[T] = (a: Atomic[T], order: str = "seq_cst") -> T:
+    when TARGET == "wasm": return a.__p[0] as T
+    else: return __atomic_add(a.__p, 0) as T
+
+get[T] = (a: Atomic[T], order: str = "seq_cst") -> T: load(a, order)
+
+# Add and return the new value, preserving the established atomic API.
+add[T] = (a: Atomic[T], v: T, order: str = "seq_cst") -> T:
     when TARGET == "wasm":
-        a.__p[0] += v
-        return a.__p[0]
-    else: return __atomic_add(a.__p, v) + v
+        a.__p[0] += (v as int)
+        return a.__p[0] as T
+    else:
+        when size_of(T) == 8:
+            return (__atomic_add(a.__p, (v as int)) + (v as int)) as T
+        else:
+            loop:
+                old = __atomic_add(a.__p, 0)
+                next = ((old as T) + v) as T
+                if __atomic_cas(a.__p, old, next as int) == old: return next
 
-# set it to v
-set = (a: Atomic, v: int):
+store[T] = (a: Atomic[T], v: T, order: str = "seq_cst"):
     loop:
-        old = get(a)
+        old = load(a)
         if compare_swap(a, old, v): return
 
-# set it to v if it is `expected` (true), or leave it (false): one thread wins
-compare_swap = (a: Atomic, expected: int, v: int) -> bool:
-    when TARGET == "wasm":
-        if a.__p[0] != expected: return false
-        a.__p[0] = v
-        return true
-    else: return __atomic_cas(a.__p, expected, v) == expected
+set[T] = (a: Atomic[T], v: T, order: str = "seq_cst"): store(a, v, order)
 
-# make it at least v (the largest of what the threads give)
-set_max = (a: Atomic, v: int):
+compare_swap[T] = (a: Atomic[T], expected: T, v: T, order: str = "seq_cst") -> bool:
+    when TARGET == "wasm":
+        if a.__p[0] != (expected as int): return false
+        a.__p[0] = v as int
+        return true
+    else: return __atomic_cas(a.__p, (expected as int), (v as int)) == (expected as int)
+
+set_max[T] = (a: Atomic[T], v: T, order: str = "seq_cst"):
     loop:
-        old = get(a)
+        old = load(a)
         if old >= v or compare_swap(a, old, v): return

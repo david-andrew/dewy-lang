@@ -375,6 +375,11 @@ def time_report(toolchain: Toolchain, source: str) -> str:
     path = Path(source) if Path(source).is_absolute() else ROOT / source
     run = subprocess.run([active / 'bin/dewy-core', 'build', path, '--time', '-o', CACHE / 'panel' / 'program'],
                          cwd=ROOT, env=clean_env(DEWY_CORE_LIB=str(active / 'lib')), capture_output=True, text=True)
+    if run.returncode and toolchain.inputs is not None and not Path(source).is_absolute():
+        # (a base that cannot build this checkout's source reports on its own copy, as the panel measures it)
+        run = subprocess.run([active / 'bin/dewy-core', 'build', toolchain.inputs / source, '--time', '-o',
+                              CACHE / 'panel' / 'program'],
+                             cwd=ROOT, env=clean_env(DEWY_CORE_LIB=str(active / 'lib')), capture_output=True, text=True)
     if run.returncode:
         raise CompileError(run.stdout + run.stderr)
     return run.stderr

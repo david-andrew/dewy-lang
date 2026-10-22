@@ -12,6 +12,6 @@ main=():>void=>{
     printl(run("/bin/sh" ["-c" "printf 'shared stdout\\n'"]))
     printl(run_silent("/bin/sh" ["-c" "echo hidden; echo hidden 1>&2; exit 4"]))
     let status=run("/bin/sh" ["-c" "exit 9"])
-    if status is? SpawnError exit(1)
+    if status is? (SpawnError|Canceled) exit(1)
     printl(status+1)
 }

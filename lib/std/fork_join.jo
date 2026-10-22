@@ -301,6 +301,7 @@ __fj_start = ():
 # joins help the same pool, including when entered by a helping main thread.
 @noinline
 __fj_enter = () -> bool:
+    if __task_slot() >= 0: return false
     if __fj_workers < 0: __fj_start()
     if __mt_active or __fj_workers == 0: return false
     __out_flush()
@@ -316,6 +317,7 @@ __fj_enter = () -> bool:
 
 __fj_leave = (root: bool):
     if not root: return
+    if __task_stacks != null: return
     __mt_active = false
     __rng_in_job = false
     __out_direct = false
@@ -325,6 +327,7 @@ __fj_leave = (root: bool):
 # completed serial subtree is a heartbeat boundary for its latent ancestors.
 @noinline
 __fj_split = () -> bool:
+    if __task_slot() >= 0: return false
     if __fj_workers < 0: __fj_start()
     if __fj_workers == 0: return false
     (__fj_deques + __tid() * __fj_WORDS)[36] < 8
@@ -345,6 +348,9 @@ __fj_scalar = (j: *int, fn: *u8, env: *u8, first: int, count: int, out: *u8, ser
 # this one scheduler entry, while their range bodies remain specialized.
 @noinline
 __fj_run = (total: int, closure: *int):
+    if __task_slot() >= 0:
+        __call_raw(closure[0] as *u8, closure[1] as *u8, null, total as *u8)
+        return
     root = __fj_enter()
     if __fj_workers == 0:
         was = __rng_in_job
