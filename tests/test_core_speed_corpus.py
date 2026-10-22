@@ -14,12 +14,13 @@ def test_source_lines_skip_blanks_and_comments():
     assert corpus.source_lines('') == 0
 
 
-def test_library_lines_from_time_output():
-    stderr = ('check 1 ms\nsources: 74 files, 31 Dewy lines (857 bytes), 37819 implementation lines (1495141 bytes)\n')
-    assert corpus.library_lines(stderr, 31) == 37819
-    assert corpus.library_lines(stderr, 11) == 37839
-    with pytest.raises(ValueError):
-        corpus.library_lines('no counts', 0)
+def test_processed_counts_from_time_output():
+    stderr = ('nodes: root 7, library 36643, shared 28\n'
+              'lines: root 1, library 4828, instance 12; 3 instances; library parsed 13105, bodies reached 2273 of 10550\n')
+    assert corpus.processed(stderr) == {'root': 1, 'library': 4828, 'instance': 12, 'instances': 3,
+                                        'all': 4841, 'nodes': 36678}
+    assert corpus.processed('nodes: root 7, library 1, shared 2\n') is None
+    assert corpus.processed('no counts') is None
 
 
 def test_root_files_follow_relative_imports_only(tmp_path):

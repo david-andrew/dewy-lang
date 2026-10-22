@@ -340,8 +340,19 @@ def wall_panel() -> list[tuple[str, str]]:
     return [('synthetic-22k', synthetic), ('game', GAME), ('hello', hello_source())]
 
 
+_reports: dict[tuple[str, str], str] = {}
+
+
 def time_run(toolchain: Toolchain, source: str) -> str:
-    """`build --time`'s report for one source: phases, source counts and the instruction split."""
+    """`build --time`'s report for one source: phases, source counts and the instruction split (kept: the
+    yardstick, the cost model and the throughput gate read the same runs)."""
+    key = (str(toolchain.binary), source)
+    if key not in _reports:
+        _reports[key] = time_report(toolchain, source)
+    return _reports[key]
+
+
+def time_report(toolchain: Toolchain, source: str) -> str:
     active = stage(toolchain)
     path = Path(source) if Path(source).is_absolute() else ROOT / source
     run = subprocess.run([active / 'bin/dewy-core', 'build', path, '--time', '-o', CACHE / 'panel' / 'program'],
@@ -351,58 +362,66 @@ def time_run(toolchain: Toolchain, source: str) -> str:
     return run.stderr
 
 
-# Track B0's cost model: each phase's instructions (root, library and shared work alike) per root
-# syntax node on the flagship panel, against David's budgets (250k lines/s at ~20 nodes a line and
-# 6.3 G instructions/s is ~1.2k instructions a node). (row, build --time phases, budget per node)
-PHASE_BUDGETS = [('lex+parse', ('load',), 150), ('resolve+check', ('check',), 350),
+# Track B0's cost model: each phase's instructions per processed syntax node (every node the compile made:
+# the program's, the reached library's and the instances') on the flagship panel, against budgets. The goal is
+# 250k processed lines/s at IPS, 25.2k instructions a line; the flagships make ~8 nodes a processed line
+# (NODES_PER_LINE, measured when the metric changed), so ~3.15k instructions a node. A phase's budget per
+# line splits that by phase. (row, build --time phases, budget per processed line)
+GOAL_LINES_PER_SECOND = 250_000
+NODES_PER_LINE = 8
+PHASE_BUDGETS = [('lex+parse', ('load',), 3000), ('resolve+check', ('check',), 7000),
                  ('facts', ('facts',), None), ('effects', ('effects',), None),
-                 ('facts+effects', ('facts', 'effects'), 200), ('ownership', ('ownership',), None),
-                 ('lower+codegen', ('lower', 'codegen', 'other'), 450), ('optimizer', ('optimize',), 50)]
-NODES = re.compile(r'^nodes: root (\d+)', re.MULTILINE)
+                 ('facts+effects', ('facts', 'effects'), 4000), ('ownership', ('ownership',), None),
+                 ('lower+codegen', ('lower', 'codegen', 'other'), 9000), ('optimizer', ('optimize',), 1000)]
+HELLO_BUDGET_MS = 20.0
+HELLO_GATED = False     # report only while hello is over budget; gate it once it is under
 
 
-def phase_totals(toolchain: Toolchain, sources: list[str]) -> tuple[dict[str, int], int] | None:
-    """Each build --time phase's instructions, all sides, summed over sources, and their root nodes;
-    None for a compiler without the phase split."""
+def phase_totals(toolchain: Toolchain, sources: list[str]) -> tuple[dict[str, int], int, int | None] | None:
+    """Each build --time phase's instructions (root, library and shared work alike), summed over sources, with
+    their processed nodes and processed lines (None where the compiler does not count them); None for a
+    compiler without the phase split."""
     totals: dict[str, int] = {}
-    nodes = 0
+    nodes, lines = 0, 0
     for source in sources:
         report = time_run(toolchain, source)
         split = speed_corpus.instruction_split(report)
-        found = NODES.search(report)
-        if not split or not found or not any('optimize' in side for side in split.values()):
+        count = speed_corpus.node_total(report)
+        if not split or count is None or not any('optimize' in side for side in split.values()):
             return None
-        nodes += int(found.group(1))
-        for name, side in split.items():
+        nodes += count
+        found = speed_corpus.processed(report)
+        lines = lines + found['all'] if found and lines is not None else None
+        for side in split.values():
             for phase, n in side.items():
                 if phase != 'total':
                     totals[phase] = totals.get(phase, 0) + n
-                    if name == 'root':
-                        totals['root ' + phase] = totals.get('root ' + phase, 0) + n
-    return totals, nodes
+    return totals, nodes, lines
 
 
 def cost_model(candidate: Toolchain, base: Toolchain | None, limit: float) -> list[tuple[str, float]]:
-    """The flagship panel's instructions per root node by phase, against the budgets; returns the phases
+    """The flagship panel's instructions per processed node by phase, against the budgets; returns the phases
     that grew more than `limit` percent over the base's."""
     sources = [source for name, source, _ in panel(False) if name.startswith('flagship ')]
-    lines = sum(speed_corpus.root_counts(ROOT / source)[0] for source in sources)
     new = phase_totals(candidate, sources)
     old = phase_totals(base, sources) if base is not None else None
     if new is None:
         print('  (no phase split: build --time needs Linux x86-64 hardware counters)')
         return []
-    totals, nodes = new
-    print(f'cost model, flagship panel ({len(sources)} programs, {lines} lines, {nodes} root nodes, '
-          f'{nodes / lines:.1f} nodes/line; instructions per root node, all work included)'
+    totals, nodes, lines = new
+    if lines is None:
+        print('  (this compiler does not count processed lines)')
+        return []
+    per_node = IPS / GOAL_LINES_PER_SECOND / NODES_PER_LINE
+    print(f'cost model, flagship panel ({len(sources)} programs, {lines} processed lines, {nodes} processed nodes, '
+          f'{nodes / lines:.1f} nodes/line; instructions per processed node, library and instance work included)'
           + ('' if old else ': no base phase split, not gated'))
-    print(f'  {"phase":16}{"budget":>8}{"now":>8}{"x budget":>9}{"k/line":>8}{"root":>8}' + (f'{"base":>8}{"change":>9}' if old else ''))
+    print(f'  {"phase":16}{"budget":>8}{"now":>8}{"x budget":>9}{"k/line":>8}' + (f'{"base":>8}{"change":>9}' if old else ''))
     failures = []
     for row, parts, budget in PHASE_BUDGETS:
         n = sum(totals.get(p, 0) for p in parts)
-        ratio = f'{n / nodes / budget:8.1f}x' if budget else ' ' * 9
-        own = sum(totals.get('root ' + p, 0) for p in parts)
-        line = f'  {row:16}{budget or "-":>8}{n / nodes:8.0f}{ratio}{n / lines / 1e3:8.1f}{own / nodes:8.0f}'
+        ratio = f'{n / nodes / (budget / NODES_PER_LINE):8.1f}x' if budget else ' ' * 9
+        line = f'  {row:16}{round(budget / NODES_PER_LINE) if budget else "-":>8}{n / nodes:8.0f}{ratio}{n / lines / 1e3:8.1f}'
         if old:
             b = sum(old[0].get(p, 0) for p in parts)
             change = round(delta(b, n), 2) + 0.0 if b else 0.0
@@ -412,67 +431,115 @@ def cost_model(candidate: Toolchain, base: Toolchain | None, limit: float) -> li
                 failures.append((row, change))
                 line += ' <-'
         print(line, flush=True)
-    total = sum(n for phase, n in totals.items() if not phase.startswith('root '))
-    own = sum(n for phase, n in totals.items() if phase.startswith('root '))
-    print(f'  {"total":16}{1200:>8}{total / nodes:8.0f}{total / nodes / 1200:8.1f}x{total / lines / 1e3:8.1f}{own / nodes:8.0f}')
-    print('  (now: every instruction, library and shared work included, per root node; root: the root\'s own work only)')
+    total = sum(totals.values())
+    print(f'  {"total":16}{per_node:8.0f}{total / nodes:8.0f}{total / nodes / per_node:8.1f}x{total / lines / 1e3:8.1f}')
+    print('  (budget: 250k processed lines/s at the reference rate, split by phase at 8 nodes a line)')
     return failures
 
 
-def yardstick(toolchain: Toolchain, counts: dict[str, int]) -> None:
-    """The candidate's latency and throughput, from its gated counts and one `build --time` per item."""
+def processed_report(toolchain: Toolchain, source: str) -> dict | None:
+    return speed_corpus.processed(time_run(toolchain, source))
+
+
+def yardstick(toolchain: Toolchain, counts: dict[str, int]) -> list[str]:
+    """The candidate's latency and throughput, from its gated counts and one `build --time` per item; returns
+    the hello gate's failure message, if it is gated and over."""
     print(f'compile yardstick ({toolchain.label}): est. ms and lines/s are instructions at {IPS / 1e9:.1f} G/s, the '
-          'reference machine\'s compiler rate (compile_throughput.md), a load-independent proxy, not wall time; '
-          'lines are root source lines (non-blank, non-comment; local imports included); the split into root, '
-          'library (lib/, generic instances included) and shared work, and into phases, comes from build --time')
+          'reference machine\'s single-thread compiler rate (compile_throughput.md), a load-independent proxy, not '
+          'wall time. Throughput counts every processed line (code lines, comments and blanks left out): the '
+          'program\'s ("user"), the library\'s that the compile reached (lazy bodies nobody asked for left out) and '
+          'each generic instance\'s declaration once per instance. Fan-out = library + instance lines. The split '
+          'into root, library (lib/, generic instances included) and shared work, and into phases, comes from '
+          'build --time')
     rows = [(name, source) for name, source, flags in panel(False) if name not in ('self-build', 'game')]
     found = {}
     for name, source in rows:
-        path = Path(source) if Path(source).is_absolute() else ROOT / source
-        lines, physical = speed_corpus.root_counts(path)
         try:
             report = time_run(toolchain, source)
         except CompileError:
             print(f'  {name:30}(cannot build)')
             continue
-        found[name] = (lines, counts[name], speed_corpus.instruction_split(report) or {},
-                       speed_corpus.library_lines(report, physical))
+        found[name] = (counts[name], speed_corpus.instruction_split(report) or {}, speed_corpus.processed(report))
     phases = ('load', 'check', 'facts', 'effects', 'ownership', 'lower', 'optimize', 'codegen')
-    print(f'  latency {"":22}{"G inst":>9}{"est ms":>8}{"root M":>9}{"lib M":>9}{"shared M":>9}{"lib lines":>10}'
+    print(f'  latency {"":22}{"G inst":>9}{"est ms":>8}{"root M":>9}{"lib M":>9}{"shared M":>9}{"lib lines":>10}{"inst lines":>11}'
           '   library M by phase')
-    for name, (lines, inst, split, library_lines) in found.items():
+    failures = []
+    for name, (inst, split, lines) in found.items():
         if name.startswith('flagship ') or name.startswith('synthetic'):
             continue
         sides = ''.join(f'{split[k]["total"] / 1e6:9.1f}' if k in split else f'{"-":>9}'
                         for k in ('root', 'library', 'shared'))
         detail = ', '.join(f'{k} {v / 1e6:.1f}' for k, v in split.get('library', {}).items() if k != 'total')
-        print(f'    {name:28}{inst / 1e9:9.4f}{inst / IPS * 1e3:8.1f}{sides}{library_lines:10}   {detail}', flush=True)
-    floor = found.get('hello', (0, 0))[1]
-    print(f'  throughput {"":19}{"lines":>6}{"G inst":>8}{"est ms":>7}{"lines/s":>8}{"k/line":>7}{">hello":>7}'
-          f'   root k/line: ' + ' '.join(f'{p[:5]:>6}' for p in phases) + f'{"lib M":>8}')
-    total = {'lines': 0, 'inst': 0, 'library': 0}
-    root_phases = {p: 0 for p in phases}
+        fan = f'{lines["library"]:10}{lines["instance"]:11}' if lines else f'{"-":>10}{"-":>11}'
+        print(f'    {name:28}{inst / 1e9:9.4f}{inst / IPS * 1e3:8.1f}{sides}{fan}   {detail}', flush=True)
+        if name == 'hello':
+            ms = inst / IPS * 1e3
+            over = ms > HELLO_BUDGET_MS
+            print(f'    hello latency {ms:.1f} ms against the {HELLO_BUDGET_MS:.0f} ms budget: '
+                  + ('within' if not over else 'over, gated' if HELLO_GATED else 'over (reported, not gated yet)'))
+            if over and HELLO_GATED:
+                failures.append(f'hello latency is {ms:.1f} ms (budget {HELLO_BUDGET_MS:.0f} ms)')
+    floor = found.get('hello', (0,))[0]
+    print(f'  throughput {"":10}{"user":>6}{"all":>7}{"lib":>7}{"inst":>6}{"G inst":>8}{"est ms":>7}{"lines/s":>9}{"user/s":>8}'
+          f'{"k/line":>7}{">hello":>7}   k inst per processed line: ' + ' '.join(f'{p[:5]:>6}' for p in phases))
+    total = {'user': 0, 'all': 0, 'library': 0, 'instance': 0, 'inst': 0}
+    by_phase = {p: 0 for p in phases}
 
-    def row(name: str, lines: int, inst: int, root: dict, library: int, count: int) -> None:
-        above = (inst - count * floor) / lines / 1e3
-        print(f'    {name:28}{lines:6}{inst / 1e9:8.4f}{inst / IPS * 1e3:7.1f}{lines / (inst / IPS):8.0f}'
-              f'{inst / lines / 1e3:7.1f}{above:7.1f}   {"":12}' + ' '.join(f'{root.get(p, 0) / lines / 1e3:6.1f}' for p in phases)
-              + f'{library / 1e6:8.1f}', flush=True)
+    def row(name: str, lines: dict, inst: int, phased: dict, count: int) -> None:
+        above = (inst - count * floor) / lines['all'] / 1e3
+        seconds = inst / IPS
+        print(f'    {name:20}{lines["root"]:6}{lines["all"]:7}{lines["library"]:7}{lines["instance"]:6}{inst / 1e9:8.4f}'
+              f'{seconds * 1e3:7.1f}{lines["all"] / seconds:9.0f}{lines["root"] / seconds:8.0f}'
+              f'{inst / lines["all"] / 1e3:7.1f}{above:7.1f}   {"":25}'
+              + ' '.join(f'{phased.get(p, 0) / lines["all"] / 1e3:6.1f}' for p in phases), flush=True)
     flagships = 0
-    for name, (lines, inst, split, _) in found.items():
-        if not (name.startswith('flagship ') or name.startswith('synthetic')) or not lines:
+    for name, (inst, split, lines) in found.items():
+        if not (name.startswith('flagship ') or name.startswith('synthetic')):
             continue
-        root, library = split.get('root', {}), split.get('library', {}).get('total', 0)
-        row(name, lines, inst, root, library, 1)
+        if not lines:
+            print(f'    {name:20}(this compiler does not count processed lines)')
+            continue
+        phased = {p: sum(side.get(p, 0) for side in split.values()) for p in phases}
+        row(name.replace('flagship ', ''), lines, inst, phased, 1)
         if name.startswith('flagship '):
             flagships += 1
-            total['lines'] += lines
             total['inst'] += inst
-            total['library'] += library
+            for key in ('all', 'library', 'instance'):
+                total[key] += lines[key]
+            total['user'] += lines['root']
             for p in phases:
-                root_phases[p] += root.get(p, 0)
-    if total['lines']:
-        row('flagships (sum)', total['lines'], total['inst'], root_phases, total['library'], flagships)
+                by_phase[p] += phased[p]
+    if flagships:
+        row('flagships (sum)', {'root': total['user'], 'all': total['all'], 'library': total['library'],
+                                'instance': total['instance']}, total['inst'], by_phase, flagships)
+        print(f'    flagship fan-out {(total["library"] + total["instance"]) / total["user"]:.1f} library + instance lines '
+              f'per user line; goal {GOAL_LINES_PER_SECOND // 1000}k processed lines/s single-thread')
+    return failures
+
+
+def throughput_gate(candidate: Toolchain, base: Toolchain | None, counts: dict[str, int],
+                    base_counts: dict[str, int], limit: float) -> list[str]:
+    """The flagship panel's all-lines throughput against the base's: a drop of more than `limit` percent in
+    processed lines per instruction fails unless the panel also got cheaper (a fan-out cut that pays for
+    itself). A base that does not count lines cannot be compared."""
+    names = [name for name, _, _ in panel(False) if name.startswith('flagship ')]
+    sources = {name: source for name, source, _ in panel(False)}
+    new_lines = [processed_report(candidate, sources[n]) for n in names]
+    if base is None or any(x is None for x in new_lines):
+        return []
+    old_lines = [processed_report(base, sources[n]) for n in names]
+    if any(x is None for x in old_lines) or any(n not in base_counts for n in names):
+        print('throughput gate: the base does not count processed lines; not gated this time')
+        return []
+    new_inst, old_inst = sum(counts[n] for n in names), sum(base_counts[n] for n in names)
+    new_rate = sum(x['all'] for x in new_lines) / new_inst * IPS
+    old_rate = sum(x['all'] for x in old_lines) / old_inst * IPS
+    change = round(delta(old_rate, new_rate), 2) + 0.0
+    cheaper = new_inst < old_inst
+    over = change < -limit and not cheaper
+    print(f'throughput gate, flagships (all processed lines/s at {IPS / 1e9:.1f} G/s): {old_rate:.0f} -> {new_rate:.0f}  '
+          f'{change:+.2f}% (instructions {delta(old_inst, new_inst):+.2f}%)' + (' <-' if over else ''))
+    return [f'flagship all-lines throughput needs {-change:+.2f}% processed lines/s vs base (limit {limit}%) and the panel got no cheaper'] if over else []
 
 
 def physical_cpus() -> list[int]:
@@ -606,13 +673,17 @@ def corpus_critical(counter: Path, staged: dict[str, Path], programs: list[Path]
     return table
 
 
-def corpus_library_lines(active: Path, program: Path, physical: int) -> int:
+def corpus_processed(active: Path, program: Path) -> dict:
+    """The lines and nodes `build --time` says the candidate processed compiling the program."""
     env = clean_env(DEWY_CORE_LIB=str(active / 'lib'))
     run = subprocess.run([active / 'bin/dewy-core', 'build', program, '--time', '-o', active / 'program'],
                          cwd=ROOT, env=env, capture_output=True, text=True)
     if run.returncode:
         raise CompileError(run.stdout + run.stderr)
-    return speed_corpus.library_lines(run.stderr, physical)
+    found = speed_corpus.processed(run.stderr)
+    if found is None:
+        raise RuntimeError(f'{program}: the candidate does not count processed lines')
+    return found
 
 
 def corpus_wall(staged: dict[str, Path], programs: list[Path], n: int, runs: int, cpus: list[int]) -> dict:
@@ -646,11 +717,14 @@ def corpus_main(args, staged: dict[str, Path], labels: str, limit: float) -> lis
         if not kept:
             print(f'  {name}: no program every compiler can build')
             continue
-        counts = [speed_corpus.root_counts(program) for program in programs if program in kept]
-        lines = sum(source for source, _ in counts)
-        library = sum(corpus_library_lines(staged['candidate'], program, physical)
-                      for program, (_, physical) in zip(kept, counts))
-        print(f'  {name}: {len(kept)} programs, {lines} root lines, {library} library lines loaded (summed over compiles)')
+        found = [corpus_processed(staged['candidate'], program) for program in kept]
+        user = sum(item['root'] for item in found)
+        lines = sum(item['all'] for item in found)
+        library = sum(item['library'] for item in found)
+        instance = sum(item['instance'] for item in found)
+        print(f'  {name}: {len(kept)} programs, {lines} processed lines ({user} user, {library} library reached, '
+              f'{instance} generic instance; fan-out {(library + instance) / user:.1f} per user line; '
+              f'{sum(item["nodes"] for item in found)} nodes; summed over compiles)')
         total = {role: {n: sum(table[program][role][n] for program in kept) for n in CORPUS_WORKERS} for role in order}
         walls = {n: corpus_wall(staged, kept, n, args.runs, cpus) for n in CORPUS_WORKERS} if args.wall else {}
         for n in CORPUS_WORKERS:
@@ -666,14 +740,14 @@ def corpus_main(args, staged: dict[str, Path], labels: str, limit: float) -> lis
             else:
                 line += f'{new / 1e9:8.4f}'
             net = new - len(kept) * floor['candidate'][n]
-            line += f'   {new / lines / 1e3:7.1f} k inst/line ({net / lines / 1e3:.1f} net of hello)'
+            line += f'   {new / lines / 1e3:7.1f} k inst/processed line ({net / lines / 1e3:.1f} net of hello)'
             if args.wall:
                 ms = walls[n]
-                line += f'   {lines / ms["candidate"] * 1e3:9.0f} lines/s'
+                line += f'   {lines / ms["candidate"] * 1e3:9.0f} lines/s ({user / ms["candidate"] * 1e3:.0f} user)'
                 if 'base' in ms:
                     line += f' (base {lines / ms["base"] * 1e3:.0f})'
-            else:
-                line += f'   est. {lines / (new / IPS):9.0f} lines/s' if n == max(CORPUS_WORKERS) else ''
+            elif n == 1:
+                line += f'   est. {lines / (new / IPS):9.0f} lines/s ({user / (new / IPS):.0f} user)'
             print(line.rstrip(), flush=True)
     return failures
 
@@ -790,12 +864,15 @@ def main(argv: list[str], current: Path) -> int:
         notes: list[str] = []
         failures = []
         counts = {}
+        base_counts = {}
         for name, source, flags in panel(args.release):
             new = measure(counter, candidate, source, flags, notes)
             counts[name] = new
             line = f'  {name:26}'
             for role, (revision, _, toolchain) in references.items():
                 old = measure(counter, toolchain, source, flags, notes)
+                if role == 'base':
+                    base_counts[name] = old
                 change = round(delta(old, new), 2) + 0.0
                 over = change > args.limit
                 if over:
@@ -805,20 +882,23 @@ def main(argv: list[str], current: Path) -> int:
             print(line.rstrip(), flush=True)
         for note in dict.fromkeys(notes):
             print(f'  ({note})')
-        yardstick(candidate, counts)
+        hello_failures = yardstick(candidate, counts)
         base_toolchain = references['base'][2]
+        throughput_failures = throughput_gate(candidate, base_toolchain, counts, base_counts, args.limit)
         for row, change in cost_model(candidate, base_toolchain, args.limit):
             failures.append(('base', f'phase {row} (flagships)', change))
         print(f'  ({time.perf_counter() - started:.0f} s)')
     base_failures = [f for f in failures if f[0] == 'base']
     other_failures = [f for f in failures if f[0] != 'base']
-    if base_failures and reasons:
+    if (base_failures or throughput_failures) and reasons:
         print('speed: base regression accepted: ' + '; '.join(reasons))
-        base_failures = []
+        base_failures, throughput_failures = [], []
     remaining = base_failures + other_failures
     for role, name, change in remaining:
         print(f'speed: {name} needs {change:+.2f}% instructions vs {role} (limit {args.limit}%)', file=sys.stderr)
-    if remaining:
+    for message in throughput_failures + hello_failures:
+        print(f'speed: {message}', file=sys.stderr)
+    if remaining or throughput_failures:
         print('speed: add a line `speed: accept <reason>` to the commit message when the cost is intended',
               file=sys.stderr)
-    return 1 if remaining else 0
+    return 1 if remaining or throughput_failures or hello_failures else 0

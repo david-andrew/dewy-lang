@@ -118,13 +118,28 @@ def root_counts(entry: Path) -> tuple[int, int]:
     return sum(map(source_lines, texts)), sum(map(physical_lines, texts))
 
 
-def library_lines(time_stderr: str, root_physical: int) -> int:
-    """Lines of library the compile loaded, from `build --time`'s sources line: its implementation (.jo)
-    lines plus its Dewy lines beyond the root files' (physical lines: comments and unused bodies included)."""
-    found = re.search(r'(\d+) Dewy lines .*?(\d+) implementation lines', time_stderr)
-    if not found:
-        raise ValueError('Missing sources line in --time output')
-    return int(found.group(2)) + max(0, int(found.group(1)) - root_physical)
+LINES = re.compile(r'^lines: root (\d+), library (\d+), instance (\d+); (\d+) instances', re.MULTILINE)
+NODES = re.compile(r'^nodes: root (\d+), library (\d+), shared (\d+)', re.MULTILINE)
+
+
+def node_total(time_stderr: str) -> int | None:
+    """Every syntax node the compile made (root, library and shared), or None."""
+    found = NODES.search(time_stderr)
+    return sum(map(int, found.groups())) if found else None
+
+
+def processed(time_stderr: str) -> dict[str, int] | None:
+    """What `build --time` says the compile processed, or None (a compiler without the counts):
+    root (the program's own code lines), library (the code lines of the library files it parsed, less the
+    lazy bodies nobody asked for), instance (the code lines of each generic instance's declaration, once per
+    instance), instances, and nodes (every syntax node made: root, library and shared). Total throughput
+    counts all three line kinds; the fan-out is library + instance."""
+    lines, nodes = LINES.search(time_stderr), node_total(time_stderr)
+    if not lines or nodes is None:
+        return None
+    root, library, instance, instances = map(int, lines.groups())
+    return {'root': root, 'library': library, 'instance': instance, 'instances': instances,
+            'all': root + library + instance, 'nodes': nodes}
 
 
 INSTRUCTION_SPLIT = re.compile(r'^instructions: (\d+)((?:; \w+ \d+:[^;\n]*)*)$', re.MULTILINE)
