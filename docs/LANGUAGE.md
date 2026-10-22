@@ -389,7 +389,10 @@ assign it before it is read, so `let x:int64` then `if c {x=1} else {x=2}` is
 fine, while reading it after only one arm, after a loop that might not run, or
 from a closure made before the assignment is an error. There is no zero value to
 read: write `let xs:array<int64> = []` or `let n:int64 = 0`. Paths that return,
-break or continue do not count. Module-level bindings are not checked yet.
+break or continue do not count. At module level, `let config:Config` without a
+value must be given one by the top-level statements or by `main` before any
+read, including reads in the functions `main` calls (or takes a handle to)
+before the assignment; a function `main` calls may make the assignment.
 
 `const` initializes a binding once each time its declaration runs. Its initializer
 may call ordinary runtime code. Reading it again retains that value, including
@@ -1858,7 +1861,8 @@ inspect the set.
 
 `a | b`, `a & b`, `a-b` and `a xor b` compute union, intersection, difference and
 symmetric difference. Results keep surviving members from the left in order,
-then any new members from the right. `s.values` is a fresh array of the members.
+then any new members from the right. `s.values` is a fresh array of the members,
+and `s.sorted` (with `reverse=` and `key=` as for arrays) an array of them in order.
 For dictionaries, `d1 | d2` (or `d1 or d2`) keeps every entry of `d1` and adds
 `d2`'s new keys; a shared key keeps its position and takes `d2`'s value. Equality and hashing ignore insertion
 order, so sets can themselves be dictionary keys or set members. Copies remain

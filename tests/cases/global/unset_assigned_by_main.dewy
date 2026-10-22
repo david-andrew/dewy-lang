@@ -1,0 +1,11 @@
+# quick
+# A module-level `let g:T` with no value is fine when main gives it one before
+# any read, including reads in the functions it calls afterwards.
+let greeting:string
+let count:int64
+show=():>void=>printl("{greeting} x{count}")
+main=()=>{
+    greeting="hello"
+    if args().length >? 99 { count=2 } else { count=3 }
+    show()
+}

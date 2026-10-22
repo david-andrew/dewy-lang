@@ -1,0 +1,14 @@
+# quick
+# A function main calls may give the global its value; what is called after
+# it may read it.
+let config:string
+let level:int64
+setup=():>void=>{
+    config="ready"
+    level=2
+}
+run=():>void=>printl("{config} {level}")
+main=()=>{
+    setup()
+    run()
+}

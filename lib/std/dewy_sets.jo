@@ -31,6 +31,9 @@ __dewy_keys[K, V] = (m: Map[K, V]) -> Set[K]:
 # s.values: the members, a fresh array in first-seen order
 values[T] = (s: Set[T]) -> T[]: s._entries.keys()
 len[T] = (s: Set[T]) -> int: s._entries.len()
+# s.sorted: the members in order, as an array (a set has no positions)
+sorted[T] = (s: Set[T], reverse: bool = false) -> T[]: sorted(s._entries.keys(), reverse)
+sorted[T, K] = (s: Set[T], key: (T) -> K, reverse: bool = false) -> T[]: sorted(s._entries.keys(), key, reverse)
 is_empty[T] = (s: Set[T]) -> bool: s._entries.is_empty()
 contains[T] = (s: Set[T], value: T) -> bool: s._entries.has(value)
 has[T] = (s: Set[T], value: T) -> bool: s._entries.has(value)

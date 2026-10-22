@@ -102,7 +102,7 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False) ->
     try:
         run([seed, 'build', output / 'compiler/main.jo', '-o', binary],
             'self-build.log' if bootstrap else 'core-build.log')
-    except RuntimeError:
+    except RuntimeError as direct:
         if bootstrap:
             raise
         # An older seed may not read the Dewy modules (or the library they
@@ -112,6 +112,8 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False) ->
         originals = use_frozen_twins(output / 'compiler')
         try:
             run([seed, 'build', output / 'compiler/main.jo', '-o', interim], 'interim-build.log')
+        except RuntimeError:
+            raise direct from None
         finally:
             for path, text in originals.items():
                 path.write_text(text)

@@ -7,6 +7,7 @@ use 'util.jo'
 use 'expr.jo'
 use 'types.jo'
 use 'lex.jo'
+use 'isolation.jo'
 
 struct DaState:
     unset: int[]          # locals declared without a value and not yet given one
@@ -15,6 +16,19 @@ struct DaState:
 da_decls: int[]           # vardecl nodes (checked: sym is the local)
 da_breaks: DaState[][]    # per enclosing `loop true`: the states its breaks leave with
 da_names: {int: int} = {} # local -> its vardecl node
+# (module-level globals without a value: dg_check_program, below)
+struct DgSummary:
+    reads: int[]          # globals it may read before giving them a value (as -g-1)
+    assigns: int[]        # globals it gives a value on every path (as -g-1)
+dg_globals: int[]          # the globals declared without a value
+dg_active = false
+dg_exits = false           # (collecting the states the walked function returns with)
+dg_exit_states: DaState[]
+dg_collecting = false      # (summarizing a function: reads are recorded, not errors)
+dg_sink: int[]
+dg_summaries: {int: DgSummary}
+dg_progress: {int: bool}
+dg_mention_memo: {int: int[]}
 
 da_record = (s: int):
     da_decls.push(s)
@@ -68,10 +82,21 @@ da_walk = (n: int, st0: DaState) -> DaState:
     k = nodes[n].kind
     if k == .ident:
         if nodes[n].aux == i32(int(SK.local)) and nodes[n].sym > 0: da_read(n, st)
+        else if dg_active and nodes[n].aux == i32(int(SK.global)): dg_read(n, int(nodes[n].sym), st, "")
         return st
     if k == .lambda:
         # (a closure captures what it reads when it is made)
+        exits = dg_exits
+        dg_exits = false
         da_walk(int(nodes[n].b), st)
+        dg_exits = exits
+        if dg_active and not has_flag(n, NF_GENERIC): dg_through(n, int(nodes[n].sym), st, "makes a function that reads", false)
+        return st
+    if dg_active and ((k == .call and nodes[n].aux == 0) or k == .fnref or k == .partial):
+        st = da_walk(int(nodes[n].a), st)
+        st = da_walk_all(kids(n), st)
+        f = if k == .partial: int(nodes[n].d) else: int(nodes[n].sym)
+        dg_through(n, f, st, if k == .call: "calls a function that reads" else: "takes a function that reads", k == .call)
         return st
     if k == .fn_ or k == .defer_ or k == .typealias or k == .struct_ or k == .enum_: return st
     if k == .block:
@@ -89,6 +114,10 @@ da_walk = (n: int, st0: DaState) -> DaState:
         if nodes[n].op == i32(int(Tok.assign)) and nodes[lhs].kind == .ident and nodes[lhs].aux == i32(int(SK.local)):
             st = da_walk(int(nodes[n].b), st)
             da_remove(st, da_root(int(nodes[lhs].sym)))
+            return st
+        if dg_active and nodes[n].op == i32(int(Tok.assign)) and nodes[lhs].kind == .ident and nodes[lhs].aux == i32(int(SK.global)):
+            st = da_walk(int(nodes[n].b), st)
+            da_remove(st, -int(nodes[lhs].sym) - 1)
             return st
         if nodes[n].op == i32(int(Tok.assign)) and nodes[lhs].kind == .tuple:
             st = da_walk(int(nodes[n].b), st)
@@ -131,6 +160,7 @@ da_walk = (n: int, st0: DaState) -> DaState:
         return out
     if k == .return_ or k == .continue_:
         st = da_walk(int(nodes[n].a), st)
+        if k == .return_ and dg_exits and not st.done: dg_exit_states.push(st)
         st.done = true
         return st
     if k == .break_:
@@ -156,3 +186,136 @@ da_unpacked = (t: int, st: mut DaState):
     loop x in kids(t):
         if nodes[x].kind == .ident and nodes[x].aux == i32(int(SK.local)): da_remove(st, da_root(int(nodes[x].sym)))
         else if nodes[x].kind == .tuple: da_unpacked(x, st)
+
+# ---------------- module-level `let g:T` without a value ----------------
+# Dewy allows one when it is given a value before any read: by the top-level
+# statements, or by `main` before it reads it or calls (or makes a handle to)
+# anything that does. Unassigned globals are in the walk's unset set as -g-1.
+# Demand-driven: nothing runs unless such a global exists; each function's
+# transitive read set is computed once (a walk of the bodies it reaches).
+
+dg_record = (g: int):
+    if not dg_globals.contains(g): dg_globals.push(g)
+
+dg_read = (n: int, g: int, st: DaState, how: str):
+    if st.done or not st.unset.contains(-g - 1): return
+    if dg_collecting:
+        if not dg_sink.contains(-g - 1): dg_sink.push(-g - 1)
+        return
+    nm = name_of(int(globals[g].name))
+    d = int(globals[g].decl)
+    if d != 0: err_notes.push((nodes[d].pos, "note: '{nm}' is declared here without a value"))
+    what = if how == "": "'{nm}' is read" else: "this {how} '{nm}'"
+    fatal(nodes[n].pos, "{what} before it is given a value: give it one where it is declared, or assign it at the top level or in main before this")
+
+# A call, or a function value made (that may run later): what f may read must
+# have a value here; after a call, what f assigns on every path has one.
+dg_through = (n: int, f: int, st: mut DaState, how: str, call: bool):
+    if f <= 0 or f >= fns.len() or st.done or st.unset.len() == 0: return
+    sm = dg_summary(f)
+    loop u in sm.reads: dg_read(n, -u - 1, st, how)
+    if call:
+        loop u in sm.assigns: da_remove(st, u)
+
+# f's effect on the globals, from a walk of its body with all of them unset.
+# (a function reached again while being summarized may read any of them)
+dg_summary = (f: int) -> DgSummary:
+    if let sm = dg_summaries.get(f): return sm
+    mentioned = dg_mentions(f)
+    if mentioned.len() == 0 or fns[f].body == 0:
+        dg_summaries[f] = DgSummary(reads = [], assigns = [])
+        return dg_summaries[f]
+    # (reached again while being summarized: it may read any it mentions)
+    if dg_progress.has(f): return DgSummary(reads = mentioned, assigns = [])
+    all: int[]
+    loop g in dg_globals: all.push(-g - 1)
+    dg_progress[f] = true
+    saved_collecting = dg_collecting
+    saved_sink = dg_sink
+    saved_exits = dg_exits
+    saved_states = dg_exit_states
+    saved_breaks = da_breaks
+    dg_collecting = true
+    dg_sink = []
+    dg_exits = true
+    dg_exit_states = []
+    da_breaks = []
+    out = da_walk(int(fns[f].body), DaState(unset = all))
+    loop x in dg_exit_states: out = da_join(out, x)
+    assigns: int[]
+    if not out.done:
+        loop u in all:
+            if not out.unset.contains(u): assigns.push(u)
+    sm = DgSummary(reads = dg_sink, assigns = assigns)
+    dg_collecting = saved_collecting
+    dg_sink = saved_sink
+    dg_exits = saved_exits
+    dg_exit_states = saved_states
+    da_breaks = saved_breaks
+    dg_progress.remove(f)
+    dg_summaries[f] = sm
+    sm
+
+# the recorded globals f's code may touch (as -g-1): its body, the functions it
+# calls or makes, transitively; a superset of what it reads
+dg_mentions = (f: int) -> int[]:
+    if let r = dg_mention_memo.get(f): return r
+    seen: {int: bool}
+    out: int[]
+    dg_collect_fn(f, seen, out)
+    dg_mention_memo[f] = out
+    out
+
+dg_collect_fn = (f: int, seen: mut {int: bool}, out: mut int[]):
+    if f <= 0 or f >= fns.len() or seen.has(f): return
+    seen[f] = true
+    dg_collect(int(fns[f].body), seen, out)
+
+dg_collect = (n: int, seen: mut {int: bool}, out: mut int[]):
+    if n <= 0: return
+    k = nodes[n].kind
+    if k == .ident:
+        if nodes[n].aux == i32(int(SK.global)):
+            g = int(nodes[n].sym)
+            if dg_globals.contains(g) and not out.contains(-g - 1): out.push(-g - 1)
+        return
+    if (k == .call and nodes[n].aux == 0) or k == .fnref or (k == .lambda and not has_flag(n, NF_GENERIC)): dg_collect_fn(int(nodes[n].sym), seen, out)
+    if k == .partial: dg_collect_fn(int(nodes[n].d), seen, out)
+    mask = isolation_children(k)
+    if mask < 0:
+        dg_collect(int(nodes[n].a), seen, out)
+        dg_collect(int(nodes[n].b), seen, out)
+        loop c in kids(n): dg_collect(c, seen, out)
+        return
+    if mask & 1 != 0: dg_collect(int(nodes[n].a), seen, out)
+    if mask & 2 != 0: dg_collect(int(nodes[n].b), seen, out)
+    if mask & 4 != 0: dg_collect(int(nodes[n].c), seen, out)
+    if mask & 16 != 0:
+        loop c in kids(n): dg_collect(c, seen, out)
+    if mask & 32 != 0:
+        loop c in kids2(n): dg_collect(c, seen, out)
+
+# After checking: the top-level statements (each module's, in order) and then
+# main must give each global a value before it is read. What main may leave
+# unassigned must not be read by what runs after it (a game's update and draw).
+dg_check_program = (inits: int[], main: int, later: int[]):
+    if dg_globals.len() == 0: return
+    dg_active = true
+    st = DaState()
+    loop g in dg_globals: st.unset.push(-g - 1)
+    loop f in inits:
+        if f <= 0 or fns[f].body == 0: continue
+        da_breaks = []
+        after = da_walk(int(fns[f].body), st)
+        if not after.done: st = after
+    if main > 0 and fns[main].body != 0:
+        da_breaks = []
+        dg_exits = true
+        dg_exit_states = []
+        out = da_walk(int(fns[main].body), DaState(unset = st.unset))
+        dg_exits = false
+        loop x in dg_exit_states: out = da_join(out, x)
+        st = if out.done: DaState() else: out
+    loop f in later:
+        if f > 0: dg_through(int(fns[f].body), f, st, "runs after main and reads", false)
+    dg_active = false

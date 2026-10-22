@@ -1,0 +1,14 @@
+# quick
+# A set has no positions: `sorted` gives its members in order as an array.
+by_length=(text:string):>int64=>text.length
+main=()=>{
+    let s=set[3 1 2 1]
+    let xs=s.sorted
+    xs.push(0)
+    printl(xs)
+    printl(sorted(s))
+    printl(s.sorted(reverse=true))
+    let words=set["ccc" "a" "bb"]
+    printl(words.sorted(key=@by_length))
+    printl(s)
+}

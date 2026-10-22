@@ -2378,6 +2378,8 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
         if refine_active and types[prune(t)].kind == .refined and nodes[d].b == 0: nodes[d].b = i32(struct_default(t, nodes[d].pos))
         # (x: T, a struct with default field values: it starts with them)
         if nodes[d].b == 0 and t != 0: nodes[d].b = i32(struct_default(t, nodes[d].pos))
+        # (Dewy's `let g:T` with no value: given one before any read, dg_check_program)
+        if nodes[d].b == 0 and dewy_at(nodes[d].pos): dg_record(g)
         if nodes[d].b != 0:
             et = check_expr(int(nodes[d].b), t)
             nodes[d].b = i32(last_checked)
@@ -5890,6 +5892,12 @@ check_program = (main_path: str):
         if test_start != 0: init_fns.push(test_start)
         loop m in order:
             if not modules[m].is_prelude: init_fns.push(int(modules[m].init_fn))
+    if dg_globals.len() > 0 and not test_mode:
+        later: int[]
+        if update_fn > 0: later.push(update_fn)
+        if draw_fn > 0: later.push(draw_fn)
+        loop f in export_fns: later.push(f)
+        dg_check_program(init_fns, main_fn, later)
     loop ci, at in draw_to_at:
         if not back_to_screen.has(ci): warn(at, "after draw_to, drawing goes into that picture to the end of the frame, and the screen shows nothing: `draw_to_screen()` comes back to the screen (then `draw_target(rt)` shows the picture)")
     # (nothing runs at all: one word for the whole file, as a module or a program not finished)
