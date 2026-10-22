@@ -109,5 +109,4 @@ WebAssembly builds.
 
 ## License
 
-GPL-3.0. The language client and debug workflow adapt MIT-licensed code from Sloppy; see
-THIRD_PARTY_NOTICES.md.
+This extension is licensed under GPL-3.0; see LICENSE.

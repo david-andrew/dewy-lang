@@ -1,5 +1,3 @@
-// Adapted from Sloppy's debug-provider workflow at d113c79.
-// Copyright (c) 2026 David Samson. MIT; see THIRD_PARTY_NOTICES.md.
 const cp = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');

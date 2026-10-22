@@ -1,5 +1,3 @@
-// Adapted from Sloppy's dependency-free LSP client at 235e19a.
-// Copyright (c) 2026 David Samson. MIT; see THIRD_PARTY_NOTICES.md.
 const cp = require('child_process');
 const { compilerFor, processCommand } = require('./compiler');
 
