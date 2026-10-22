@@ -1831,13 +1831,15 @@ new_inst = (kind: int, m: int, base: str) -> int:
 
 has_value_return = (n: int) -> bool:
     if n == 0: return false
-    k = nodes[n].kind
-    if k == .return_: return nodes[n].a != 0
+    nd = nodes[n]
+    k = nd.kind
+    if k == .return_: return nd.a != 0
     if k == .lambda: return false
-    if has_value_return(int(nodes[n].a)) or has_value_return(int(nodes[n].b)): return true
-    if k != .for_ and has_value_return(int(nodes[n].c)): return true
-    loop i in [0..nkids(n)):
-        if has_value_return(kid(n, i)): return true
+    if nd.a != 0 and has_value_return(int(nd.a)): return true
+    if nd.b != 0 and has_value_return(int(nd.b)): return true
+    if k != .for_ and nd.c != 0 and has_value_return(int(nd.c)): return true
+    loop i in [0..int(nd.nlist)):
+        if has_value_return(int(lists[int(nd.list) + i])): return true
     false
 
 # The type of a value the body `b` of the function `name` ends with that does not call it, nor

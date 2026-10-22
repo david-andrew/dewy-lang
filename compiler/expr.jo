@@ -1154,27 +1154,34 @@ oversized_literal = (a: int) -> bool:
     nodes[a].kind == .call and nodes[a].aux2 == -1
 
 ctx_dependent = (a: int) -> bool:
-    if oversized_literal(a): return true
-    k = nodes[a].kind
-    if dewy_set_literal(a): return true
-    if k == .ident or k == .field or k == .typeapply: return has_flag(a, NF_FNREF_ARG)
-    if k == .dotname: return nodes[a].type == 0        # (E.v is a dotname already typed)
-    if k == .call and nodes[a].type == 0 and nodes[int(nodes[a].a)].kind == .dotname: return true     # .v(args)
+    # (one read of the node; oversized_literal and dewy_set_literal, as they would answer)
+    nd = nodes[a]
+    k = nd.kind
+    if k == .unary and nd.op == i32(int(Tok.minus)) and oversized_literal(int(nd.a)): return true
+    if k == .call:
+        if nd.aux2 == -1: return true
+        if nd.type == 0:
+            callee = nodes[int(nd.a)].kind
+            if nd.nlist == 1 and callee == .ident and name_of(int(nodes[int(nd.a)].name)) == "__dewy_set": return true
+            if callee == .dotname: return true     # .v(args)
+        return false
+    if k == .ident or k == .field or k == .typeapply: return int(nd.flags) & NF_FNREF_ARG != 0
+    if k == .dotname: return nd.type == 0        # (E.v is a dotname already typed)
     if k == .lambda or k == .none_lit or k == .hole: return true
     if k == .record_lit: return true
-    if (k == .if_ or k == .match_) and not has_flag(a, NF_CHECKED) and files[pos_file(nodes[a].pos)].is_dewy: return true
-    if k == .block and has_flag(a, NF_COMPREHENSION): return true
+    if (k == .if_ or k == .match_) and int(nd.flags) & NF_CHECKED == 0 and files[pos_file(nd.pos)].is_dewy: return true
+    if k == .block and int(nd.flags) & NF_COMPREHENSION != 0: return true
     if k == .array:
-        if nkids(a) == 0: return nodes[a].b == 0
+        if nd.nlist == 0: return nd.b == 0
         # Dewy array literals take their element type from the selected call.
         # Check their children first, but do not freeze the array at int[] just
         # because its numeric literals have not received a parameter type yet.
-        if nodes[a].type == 0 and not has_flag(a, NF_CHECKED) and files[pos_file(nodes[a].pos)].is_dewy: return true
+        if nd.type == 0 and int(nd.flags) & NF_CHECKED == 0 and files[pos_file(nd.pos)].is_dewy: return true
         # ([.key(.space), .button(.a)]: its elements take their type from the parameter's)
-        loop e in kids(a):
-            if ctx_dependent(e): return true
+        loop i in [0..int(nd.nlist)):
+            if ctx_dependent(int(lists[int(nd.list) + i])): return true
         return false
-    if k == .map_lit: return nkids(a) == 0 or (nodes[a].type == 0 and not has_flag(a, NF_CHECKED) and files[pos_file(nodes[a].pos)].is_dewy)
+    if k == .map_lit: return nd.nlist == 0 or (nd.type == 0 and int(nd.flags) & NF_CHECKED == 0 and files[pos_file(nd.pos)].is_dewy)
     false
 
 unnamed = (a: int) -> int:
