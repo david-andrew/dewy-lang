@@ -8256,20 +8256,201 @@ mk_ident_local = (l: int, pos: int) -> int:
 check_expr = (n: int, expected: int) -> int:
     last_checked = n
     if nodes[n].type != 0 and has_flag(n, NF_CHECKED): return ntype(n)
-    t = 0
+    # (the commonest kinds in frames of their own; the rest below)
+    k = nodes[n].kind
+    if k == .ident: return check_ident_expr(n, expected)
+    if k == .int_lit: return check_int_expr(n, expected)
+    if k == .binary: return ce_finish(n, check_binary(n, expected), expected)
+    if k == .call: return check_call_expr(n, expected)
+    check_expr_other(n, expected)
+
+# (the expected type as checking reads it: a refinement's representation)
+ce_expected = (expected: int) -> int:
+    if expected == 0: return 0
     ex = prune(expected)
     if refine_active: ex = representation_type(ex)
-    if expected == 0: ex = 0
+    ex
+
+# (an expression's type, recorded once its kind is checked)
+ce_finish = (n: int, t0: int, expected: int) -> int:
+    t = t0
+    if refine_active and types[t].kind == .refined: t = int(types[t].elem)
+    nodes[n].type = i32(t)
+    if effects_active: t = effect_infer_callable(n, expected); nodes[n].type = i32(t)
+    add_flag(n, NF_CHECKED)
+    last_checked = n
+    t
+
+check_int_expr = (n: int, expected: int) -> int:
+    ex = ce_expected(expected)
     exk = TK.void_
     if ex != 0: exk = types[ex].kind
-    if nodes[n].kind == .array: dewy_classify_spread(n)
-    k = nodes[n].kind
-    if k == .intrinsic and nodes[n].aux == i32(int(IN.zeroed)) and expected != 0:
-        # (release_call's zero bytes: of the type the place stores)
-        nodes[n].type = i32(expected)
-        add_flag(n, NF_CHECKED)
-        return expected
-    if k == .call and nodes[n].aux2 == -1:
+    t = 0
+    add_flag(n, NF_LITERAL)
+    nodes[n].type = i32(lit_default(n))
+    if ex != 0 and exk == .int_:
+        coerce(n, ex)
+        t = ex
+    else if ex != 0 and exk == .float_:
+        coerce(n, ex)
+        t = ex
+    else if ex != 0 and exk == .opt and is_numeric(int(types[ex].elem)):
+        coerce(n, prune(int(types[ex].elem)))
+        t = ntype(n)
+    else:
+        t = lit_default(n)
+    ce_finish(n, t, expected)
+
+check_ident_expr = (n: int, expected: int) -> int:
+    ex = ce_expected(expected)
+    exk = TK.void_
+    if ex != 0: exk = types[ex].kind
+    t = 0
+    nm = int(nodes[n].name)
+    is_callee = n == callee_at
+    if ide_sentinel != 0 and nm == ide_sentinel: ide_complete_names()
+    s = lookup(nm)
+    if s == 0:
+        if ex != 0 and exk == .enum_:
+            loop v in variant_names(ex):
+                if v == nm: fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (the {dt(ex)} is written `.{name_of(nm)}`)")
+        # (score += 1 with Score = 0 above: its capitals)
+        capsug = suggestion(name_of(nm), visible_names())
+        if find(capsug, "capital letters") >= 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{capsug}")
+        if cur_assign != 0 and nodes[cur_assign].a == i32(n) and nodes[cur_assign].op != i32(int(Tok.assign)): fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (to change it, it needs a value first: `{name_of(nm)} = 0`, at the top of the file to keep it from one frame to the next)")
+        # (score = score + 1: the same, written out)
+        if cur_assign != 0 and nodes[int(nodes[cur_assign].a)].kind == .ident and int(nodes[int(nodes[cur_assign].a)].name) == nm: fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (to change it, it needs a value first: `{name_of(nm)} = 0`, at the top of the file to keep it from one frame to the next)")
+        ph = phaser_hint(name_of(nm), member_after(nodes[n].pos, len(name_of(nm))))
+        if len(ph) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{ph}")
+        # (load_texture(cat1.png): a file's name, without its quotes)
+        fx = file_ext_after(nodes[n].pos, len(name_of(nm)))
+        if len(fx) > 0: fatal(nodes[n].pos, "{name_of(nm)}{fx} looks like a file's name: put it in quotes, `\"{name_of(nm)}{fx}\"`")
+        # (as the name is written: macOS and Windows find lib/physics.jo for Physics too)
+        if len(lib_root) > 0 and name_of(nm) == lower(name_of(nm)) and file_exists("{lib_root}/{name_of(nm)}.jo"): fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (a module of the library: `import {name_of(nm)}` at the top of the file)")
+        gl = gone_local_hint(nm, nodes[n].pos)
+        if len(gl) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{gl}")
+        uh = unused_file_hint(nm)
+        if len(uh) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{uh}")
+        sug = suggestion(name_of(nm), surface_names(visible_names(), nodes[n].pos))
+        # (print(hello), window(Firefly, ...): words meant as text, a whole argument)
+        if in_text_call(nodes[n].pos) and is_word_arg(nodes[n].pos, name_of(nm)) and not starts_with(sug, " (use "): fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (text goes in quotes: `\"{name_of(nm)}\"`){sug}")
+        if len(name_of(nm)) > 1:
+            vh = bare_variant_hint(nm)
+            if len(vh) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{vh}")
+        # ("I have {i}plans": a tag as Ren'Py's, in braces that put a value in the text)
+        if braced_alone(nodes[n].pos, len(name_of(nm))): fatal(nodes[n].pos, "unknown name '{name_of(nm)}': `\{{name_of(nm)}}` in a string puts in the value of {name_of(nm)}; for the braces in the text (a tag), write `\{\{{name_of(nm)}}}}}`, or make it a raw string, r\"...\"")
+        if name_of(nm) == "Cancelled": fatal(nodes[n].pos, "unknown name `Cancelled`; use `Canceled` (US spelling)")
+        fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{private_hint(nm)}{sug}")
+    sk = syms[s].kind
+    if ide_on and sk != .fns: ide_sym_ref(n, s)
+    nodes[n].aux = i32(int(sk))
+    if sk == .local:
+        l0 = int(syms[s].ref)
+        # (assigned another type after being narrowed: the variable itself)
+        loop int(locals[l0].flags) & LF_UNNARROWED != 0: l0 = narrowed_var(l0)
+        l = 0
+        if int(locals[l0].owner) != int(ctxs[cx].inst) and narrowed_var(l0) != 0: l = capture_narrowed(l0, nodes[n].pos)
+        else: l = capture_local(l0)
+        if n != assign_root:
+            locals[l].flags = locals[l].flags | i32(LF_READ)
+            locals[l0].flags = locals[l0].flags | i32(LF_READ)
+            if const_views.len() > 0: const_view_use(l0, nodes[n].pos)
+        nodes[n].sym = i32(l)
+        t = int(locals[l].type)
+    else if sk == .global:
+        g = int(syms[s].ref)
+        ensure_global(g, nodes[n].pos)
+        if globals[g].is_const and is_quantity(int(globals[g].type)):
+            q = quantity_scales[quantity_constant_scale(int(globals[g].init))]
+            hint = expected
+            if nodes[int(globals[g].decl)].a != 0: hint = int(globals[g].type)
+            quantity_constant(n, q.numerator, q.denominator, quantity_dimension(int(globals[g].type)), hint)
+            return quantity_retag(n, quantity_tag(int(globals[g].type)))
+        if n != assign_root:
+            loop global_read.len() <= g: global_read.push(false)
+            global_read[g] = true
+        # (top-level code runs in order: above the line that sets it, a global is still zero)
+        if globals[g].decl != 0 and nodes[int(globals[g].decl)].pos > nodes[n].pos and ctxs[cx].parent < 0 and fns[int(ctxs[cx].inst)].kind == FK_INIT and not test_mode:
+            dp = nodes[int(globals[g].decl)].pos
+            if pos_file(dp) == pos_file(nodes[n].pos) and not early_set.has(g):
+                # (set above its line, as `runs = 3` in a block before `runs = 0`: read after that)
+                if cur_assign != 0 and nodes[cur_assign].a == i32(n) and nodes[cur_assign].op == i32(int(Tok.assign)): early_set[g] = true
+                else:
+                    ln, c = line_col(dp)
+                    fatal(nodes[n].pos, "'{name_of(nm)}' is used before line {ln} gives it its value (the program runs from the top down)")
+        nodes[n].sym = i32(g)
+        t = int(globals[g].type)
+        if decimal_globals.len() > 0: decimal_use(g)
+        if path_narrows > 0 and n != no_narrow_at:
+            al = path_alias(n)
+            if al >= 0:
+                nodes[n] = nodes[mk_ident_local(al, nodes[n].pos)]
+                t = int(locals[al].type)
+    else if sk == .const_:
+        g = int(syms[s].ref)
+        if globals[g].decl != 0: ensure_global(g, nodes[n].pos)
+        v = clone(int(globals[g].init))
+        p = nodes[n].pos
+        nodes[n] = nodes[v]
+        nodes[n].pos = p
+        declared = globals[g].type != 0 and globals[g].decl != 0 and nodes[int(globals[g].decl)].a != 0 and not has_var(prune(int(globals[g].type)))
+        check_expr(n, if declared: int(globals[g].type) else: expected)
+        if declared: coerce(n, int(globals[g].type))
+        last_checked = n
+        return ntype(n)
+    else if sk == .fns:
+        fpos = nodes[n].pos
+        if dewy_bare_fn(n, is_callee):
+            ex_fn = expected != 0 and is_fn_type(ex)
+            calls = bare_fns_call(nm, -1)
+            if ex_fn and calls != 2: bare_fn_error(n, name_of(nm), false)
+            if calls == 0: bare_fn_error(n, name_of(nm), true)
+            return bare_call(n, expected)
+        t = fn_value(n, expected)
+        if ide_on: ide_fn_ref(fpos, nm, int(nodes[n].sym))
+        last_checked = n
+        return t
+    else if sk == .struct_ or sk == .enum_:
+        d = int(syms[s].ref)
+        if nkids2(d) > 0: t = mk_typeval(0)
+        else: t = mk_typeval(get_struct_inst(d, []))
+    else if sk == .alias_:
+        d = int(syms[s].ref)
+        if nkids2(d) > 0: t = mk_typeval(0)
+        else: t = mk_typeval(resolve_alias(d, [], nodes[n].pos))
+    else if sk == .type_:
+        jo_type_spelling(nm, s, nodes[n].pos)
+        t = mk_typeval(int(syms[s].ref))
+    else if sk == .module: t = mk_modval(int(syms[s].ref))
+    else if sk == .builtin: fatal(nodes[n].pos, "'{name_of(nm)}' must be called")
+    else if sk == .reflected: fatal(nodes[n].pos, "field descriptors cannot escape into runtime storage; use .name or .type")
+    else: fatal(nodes[n].pos, "invalid use of '{name_of(nm)}'")
+    if (sk == .local or sk == .global) and is_fn_type(t) and dewy_bare_fn(n, is_callee) and not (sk == .local and in_generic_instance()): return bare_fn_value(n, t, name_of(nm), expected)
+    if tkind(t) == .typeval:
+        tt = telem(t)
+        if nominal_parent.has(tt) and tt != error_type:
+            si = int(types[tt].st)
+            check_struct_fields(si)
+            if structs[si].nfields == 0:
+                return struct_ctor(n, tt, int(structs[si].decl), [], expected)
+        # (a record type whose every field has a default, named where a value goes, is its
+        # construction, as a function whose parameters all have defaults is called by its name;
+        # `E.member` and `E[...]` keep the type)
+        if dewy_bare_type_value(n, tt, is_callee, expected):
+            callee = mk(.ident, nodes[n].pos)
+            nodes[callee].name = i32(nm)
+            call = mk(.call, nodes[n].pos)
+            nodes[call].a = i32(callee)
+            nodes[n] = nodes[call]
+            return check_expr(n, expected)
+    ce_finish(n, t, expected)
+
+check_call_expr = (n: int, expected: int) -> int:
+    ex = ce_expected(expected)
+    exk = TK.void_
+    if ex != 0: exk = types[ex].kind
+    t = 0
+    if nodes[n].aux2 == -1:
         literal_target = ex
         if exk == .opt: literal_target = prune(int(types[ex].elem))
         if literal_target == 0 or literal_target == T_MATH_INT:
@@ -8283,6 +8464,41 @@ check_expr = (n: int, expected: int) -> int:
                 fatal(nodes[n].pos, "integer literal does not fit in {dt(literal_target)}")
             fatal(nodes[n].pos, "integer literal does not fit in int's interim int64 representation; use an explicit BigInt annotation")
         nodes[n].aux2 = 0
+    if has_flag(n, NF_BROADCAST): return check_dotted(n, expected)
+    if is_unchecked_at(n):
+        # __at(xs, i) in the core library: xs[i] where the library knows i is in bounds
+        args = kids(n)
+        nodes[n].kind = .index
+        nodes[n].a = i32(args[0])
+        nodes[n].b = i32(args[1])
+        add_flag(n, NF_INBOUNDS)
+        return check_expr(n, expected)
+    if nodes[n].aux2 == i32(AUX2_PARTIAL): return dewy_partial(n, expected)
+    t = check_call(n, expected)
+    if nodes[n].aux == 0 and nodes[n].sym > 0:
+        if fns[int(nodes[n].sym)].atomic_api: concurrency_atomic_call(n)
+        if fns[int(nodes[n].sym)].task_api:
+            concurrency_tasks.push(n)
+            concurrency_runtime_needed = true
+    if nkids(n) == 2 and nodes[n].aux == 0 and nodes[n].sym > 0 and fns[int(nodes[n].sym)].parallel:
+        concurrency_calls.push(n)
+        parallel_prepare(n)
+    ce_finish(n, t, expected)
+
+check_expr_other = (n: int, expected: int) -> int:
+    t = 0
+    ex = prune(expected)
+    if refine_active: ex = representation_type(ex)
+    if expected == 0: ex = 0
+    exk = TK.void_
+    if ex != 0: exk = types[ex].kind
+    if nodes[n].kind == .array: dewy_classify_spread(n)
+    k = nodes[n].kind
+    if k == .intrinsic and nodes[n].aux == i32(int(IN.zeroed)) and expected != 0:
+        # (release_call's zero bytes: of the type the place stores)
+        nodes[n].type = i32(expected)
+        add_flag(n, NF_CHECKED)
+        return expected
     if k == .array and exk == .opt and (tkind(int(types[ex].elem)) == .array or tkind(int(types[ex].elem)) == .fixed):
         ex = prune(int(types[ex].elem))
         exk = types[ex].kind
@@ -8295,21 +8511,7 @@ check_expr = (n: int, expected: int) -> int:
     if k == .propagate: return check_propagate(n, expected)
     if k == .unit_lit:
         return quantity_constant(n, nodes[n].ival, int(nodes[n].aux), int(nodes[n].aux2), expected)
-    if k == .int_lit:
-        add_flag(n, NF_LITERAL)
-        nodes[n].type = i32(lit_default(n))
-        if ex != 0 and exk == .int_:
-            coerce(n, ex)
-            t = ex
-        else if ex != 0 and exk == .float_:
-            coerce(n, ex)
-            t = ex
-        else if ex != 0 and exk == .opt and is_numeric(int(types[ex].elem)):
-            coerce(n, prune(int(types[ex].elem)))
-            t = ntype(n)
-        else:
-            t = lit_default(n)
-    else if k == .float_lit:
+    if k == .float_lit:
         if ex != 0 and exk == .float_:
             if nodes[n].sval != 0 and nodes[n].fval - nodes[n].fval != 0.0: fatal(nodes[n].pos, "real literal exceeds float64")
             clear_flag(n, NF_LITERAL)
@@ -8343,144 +8545,6 @@ check_expr = (n: int, expected: int) -> int:
     else if k == .null_lit:
         if ex != 0 and (exk == .ptr or exk == .cfn): t = ex
         else: t = T_NULL
-    else if k == .ident:
-        nm = int(nodes[n].name)
-        is_callee = n == callee_at
-        if ide_sentinel != 0 and nm == ide_sentinel: ide_complete_names()
-        s = lookup(nm)
-        if s == 0:
-            if ex != 0 and exk == .enum_:
-                loop v in variant_names(ex):
-                    if v == nm: fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (the {dt(ex)} is written `.{name_of(nm)}`)")
-            # (score += 1 with Score = 0 above: its capitals)
-            capsug = suggestion(name_of(nm), visible_names())
-            if find(capsug, "capital letters") >= 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{capsug}")
-            if cur_assign != 0 and nodes[cur_assign].a == i32(n) and nodes[cur_assign].op != i32(int(Tok.assign)): fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (to change it, it needs a value first: `{name_of(nm)} = 0`, at the top of the file to keep it from one frame to the next)")
-            # (score = score + 1: the same, written out)
-            if cur_assign != 0 and nodes[int(nodes[cur_assign].a)].kind == .ident and int(nodes[int(nodes[cur_assign].a)].name) == nm: fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (to change it, it needs a value first: `{name_of(nm)} = 0`, at the top of the file to keep it from one frame to the next)")
-            ph = phaser_hint(name_of(nm), member_after(nodes[n].pos, len(name_of(nm))))
-            if len(ph) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{ph}")
-            # (load_texture(cat1.png): a file's name, without its quotes)
-            fx = file_ext_after(nodes[n].pos, len(name_of(nm)))
-            if len(fx) > 0: fatal(nodes[n].pos, "{name_of(nm)}{fx} looks like a file's name: put it in quotes, `\"{name_of(nm)}{fx}\"`")
-            # (as the name is written: macOS and Windows find lib/physics.jo for Physics too)
-            if len(lib_root) > 0 and name_of(nm) == lower(name_of(nm)) and file_exists("{lib_root}/{name_of(nm)}.jo"): fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (a module of the library: `import {name_of(nm)}` at the top of the file)")
-            gl = gone_local_hint(nm, nodes[n].pos)
-            if len(gl) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{gl}")
-            uh = unused_file_hint(nm)
-            if len(uh) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{uh}")
-            sug = suggestion(name_of(nm), surface_names(visible_names(), nodes[n].pos))
-            # (print(hello), window(Firefly, ...): words meant as text, a whole argument)
-            if in_text_call(nodes[n].pos) and is_word_arg(nodes[n].pos, name_of(nm)) and not starts_with(sug, " (use "): fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (text goes in quotes: `\"{name_of(nm)}\"`){sug}")
-            if len(name_of(nm)) > 1:
-                vh = bare_variant_hint(nm)
-                if len(vh) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{vh}")
-            # ("I have {i}plans": a tag as Ren'Py's, in braces that put a value in the text)
-            if braced_alone(nodes[n].pos, len(name_of(nm))): fatal(nodes[n].pos, "unknown name '{name_of(nm)}': `\{{name_of(nm)}}` in a string puts in the value of {name_of(nm)}; for the braces in the text (a tag), write `\{\{{name_of(nm)}}}}}`, or make it a raw string, r\"...\"")
-            if name_of(nm) == "Cancelled": fatal(nodes[n].pos, "unknown name `Cancelled`; use `Canceled` (US spelling)")
-            fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{private_hint(nm)}{sug}")
-        sk = syms[s].kind
-        if ide_on and sk != .fns: ide_sym_ref(n, s)
-        nodes[n].aux = i32(int(sk))
-        if sk == .local:
-            l0 = int(syms[s].ref)
-            # (assigned another type after being narrowed: the variable itself)
-            loop int(locals[l0].flags) & LF_UNNARROWED != 0: l0 = narrowed_var(l0)
-            l = 0
-            if int(locals[l0].owner) != int(ctxs[cx].inst) and narrowed_var(l0) != 0: l = capture_narrowed(l0, nodes[n].pos)
-            else: l = capture_local(l0)
-            if n != assign_root:
-                locals[l].flags = locals[l].flags | i32(LF_READ)
-                locals[l0].flags = locals[l0].flags | i32(LF_READ)
-                if const_views.len() > 0: const_view_use(l0, nodes[n].pos)
-            nodes[n].sym = i32(l)
-            t = int(locals[l].type)
-        else if sk == .global:
-            g = int(syms[s].ref)
-            ensure_global(g, nodes[n].pos)
-            if globals[g].is_const and is_quantity(int(globals[g].type)):
-                q = quantity_scales[quantity_constant_scale(int(globals[g].init))]
-                hint = expected
-                if nodes[int(globals[g].decl)].a != 0: hint = int(globals[g].type)
-                quantity_constant(n, q.numerator, q.denominator, quantity_dimension(int(globals[g].type)), hint)
-                return quantity_retag(n, quantity_tag(int(globals[g].type)))
-            if n != assign_root:
-                loop global_read.len() <= g: global_read.push(false)
-                global_read[g] = true
-            # (top-level code runs in order: above the line that sets it, a global is still zero)
-            if globals[g].decl != 0 and nodes[int(globals[g].decl)].pos > nodes[n].pos and ctxs[cx].parent < 0 and fns[int(ctxs[cx].inst)].kind == FK_INIT and not test_mode:
-                dp = nodes[int(globals[g].decl)].pos
-                if pos_file(dp) == pos_file(nodes[n].pos) and not early_set.has(g):
-                    # (set above its line, as `runs = 3` in a block before `runs = 0`: read after that)
-                    if cur_assign != 0 and nodes[cur_assign].a == i32(n) and nodes[cur_assign].op == i32(int(Tok.assign)): early_set[g] = true
-                    else:
-                        ln, c = line_col(dp)
-                        fatal(nodes[n].pos, "'{name_of(nm)}' is used before line {ln} gives it its value (the program runs from the top down)")
-            nodes[n].sym = i32(g)
-            t = int(globals[g].type)
-            if decimal_globals.len() > 0: decimal_use(g)
-            if path_narrows > 0 and n != no_narrow_at:
-                al = path_alias(n)
-                if al >= 0:
-                    nodes[n] = nodes[mk_ident_local(al, nodes[n].pos)]
-                    t = int(locals[al].type)
-        else if sk == .const_:
-            g = int(syms[s].ref)
-            if globals[g].decl != 0: ensure_global(g, nodes[n].pos)
-            v = clone(int(globals[g].init))
-            p = nodes[n].pos
-            nodes[n] = nodes[v]
-            nodes[n].pos = p
-            declared = globals[g].type != 0 and globals[g].decl != 0 and nodes[int(globals[g].decl)].a != 0 and not has_var(prune(int(globals[g].type)))
-            check_expr(n, if declared: int(globals[g].type) else: expected)
-            if declared: coerce(n, int(globals[g].type))
-            last_checked = n
-            return ntype(n)
-        else if sk == .fns:
-            fpos = nodes[n].pos
-            if dewy_bare_fn(n, is_callee):
-                ex_fn = expected != 0 and is_fn_type(ex)
-                calls = bare_fns_call(nm, -1)
-                if ex_fn and calls != 2: bare_fn_error(n, name_of(nm), false)
-                if calls == 0: bare_fn_error(n, name_of(nm), true)
-                return bare_call(n, expected)
-            t = fn_value(n, expected)
-            if ide_on: ide_fn_ref(fpos, nm, int(nodes[n].sym))
-            last_checked = n
-            return t
-        else if sk == .struct_ or sk == .enum_:
-            d = int(syms[s].ref)
-            if nkids2(d) > 0: t = mk_typeval(0)
-            else: t = mk_typeval(get_struct_inst(d, []))
-        else if sk == .alias_:
-            d = int(syms[s].ref)
-            if nkids2(d) > 0: t = mk_typeval(0)
-            else: t = mk_typeval(resolve_alias(d, [], nodes[n].pos))
-        else if sk == .type_:
-            jo_type_spelling(nm, s, nodes[n].pos)
-            t = mk_typeval(int(syms[s].ref))
-        else if sk == .module: t = mk_modval(int(syms[s].ref))
-        else if sk == .builtin: fatal(nodes[n].pos, "'{name_of(nm)}' must be called")
-        else if sk == .reflected: fatal(nodes[n].pos, "field descriptors cannot escape into runtime storage; use .name or .type")
-        else: fatal(nodes[n].pos, "invalid use of '{name_of(nm)}'")
-        if (sk == .local or sk == .global) and is_fn_type(t) and dewy_bare_fn(n, is_callee) and not (sk == .local and in_generic_instance()): return bare_fn_value(n, t, name_of(nm), expected)
-        if tkind(t) == .typeval:
-            tt = telem(t)
-            if nominal_parent.has(tt) and tt != error_type:
-                si = int(types[tt].st)
-                check_struct_fields(si)
-                if structs[si].nfields == 0:
-                    return struct_ctor(n, tt, int(structs[si].decl), [], expected)
-            # (a record type whose every field has a default, named where a value goes, is its
-            # construction, as a function whose parameters all have defaults is called by its name;
-            # `E.member` and `E[...]` keep the type)
-            if dewy_bare_type_value(n, tt, is_callee, expected):
-                callee = mk(.ident, nodes[n].pos)
-                nodes[callee].name = i32(nm)
-                call = mk(.call, nodes[n].pos)
-                nodes[call].a = i32(callee)
-                nodes[n] = nodes[call]
-                return check_expr(n, expected)
     else if k == .field:
         if nodes[n].b != 0: reflect_name(n)
         if reflect_active and reflect_member(n): return ntype(n)
@@ -8743,26 +8807,6 @@ check_expr = (n: int, expected: int) -> int:
         if ide_on: ide_variant_ref(nodes[n].pos, int(nodes[n].name), et, vi)
         nodes[n].aux = i32(vi)
         t = et
-    else if k == .call:
-        if has_flag(n, NF_BROADCAST): return check_dotted(n, expected)
-        if is_unchecked_at(n):
-            # __at(xs, i) in the core library: xs[i] where the library knows i is in bounds
-            args = kids(n)
-            nodes[n].kind = .index
-            nodes[n].a = i32(args[0])
-            nodes[n].b = i32(args[1])
-            add_flag(n, NF_INBOUNDS)
-            return check_expr(n, expected)
-        if nodes[n].aux2 == i32(AUX2_PARTIAL): return dewy_partial(n, expected)
-        t = check_call(n, expected)
-        if nodes[n].aux == 0 and nodes[n].sym > 0:
-            if fns[int(nodes[n].sym)].atomic_api: concurrency_atomic_call(n)
-            if fns[int(nodes[n].sym)].task_api:
-                concurrency_tasks.push(n)
-                concurrency_runtime_needed = true
-        if nkids(n) == 2 and nodes[n].aux == 0 and nodes[n].sym > 0 and fns[int(nodes[n].sym)].parallel:
-            concurrency_calls.push(n)
-            parallel_prepare(n)
     else if k == .typeapply:
         is_callee = n == callee_at
         base = int(nodes[n].a)
@@ -8996,7 +9040,6 @@ check_expr = (n: int, expected: int) -> int:
         else if nodes[n].op == i32(int(Tok.plus)):
             if not is_numeric(at) and not is_vec(at): fatal(nodes[n].pos, "unary '+' needs a number")
         t = at
-    else if k == .binary: t = check_binary(n, expected)
     else if k == .and_ or k == .or_:
         # on integers, and/or are bitwise
         h = 0
