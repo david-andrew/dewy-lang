@@ -32,7 +32,7 @@ def test_conversions_keep_the_value_and_keys_are_a_set():
             gen.Print(gen.Method(gen.SI, d, 'keys')), gen.Print(gen.Collect(gen.AI, gen.Method(gen.SI, d, 'keys'))))
     program = gen.fill_asserts(gen.Program((), body))
     source = program.source()
-    assert 'uint64(int64(3))' in source and 'n.wrap(uint64)' in source and '.wrap(int64)' in source
+    assert 'uint64(int64(3))' in source and 'wrap<uint64>(n)' in source and 'wrap<int64>(' in source
     assert program.outcome() == ('3\n18446744073709551615\nset[-3]\n[-3]\n', 0)
     assert gen.Program((), body).outcome()[1] == 101  # unsettled, the unfit conversion is checked
 

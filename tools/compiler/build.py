@@ -99,8 +99,23 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False) ->
         raise ValueError('provide --seed or --bootstrap')
     seed = seed.resolve(strict=True)
     binary = binary_dir / 'dewy-core'
-    run([seed, 'build', output / 'compiler/main.jo', '-o', binary],
-        'self-build.log' if bootstrap else 'core-build.log')
+    try:
+        run([seed, 'build', output / 'compiler/main.jo', '-o', binary],
+            'self-build.log' if bootstrap else 'core-build.log')
+    except RuntimeError:
+        if bootstrap:
+            raise
+        # An older seed may not read the Dewy modules (or the library they
+        # reach) as the sources now write them: build through their twins,
+        # then let that compiler build the sources as they are.
+        interim = binary_dir / 'dewy-core-interim'
+        originals = use_frozen_twins(output / 'compiler')
+        try:
+            run([seed, 'build', output / 'compiler/main.jo', '-o', interim], 'interim-build.log')
+        finally:
+            for path, text in originals.items():
+                path.write_text(text)
+        run([interim, 'build', output / 'compiler/main.jo', '-o', binary], 'core-build.log')
     (output / 'build.json').write_text(json.dumps({
         'seed_sha256': identity(seed),
         'core_sha256': identity(binary),

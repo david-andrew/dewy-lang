@@ -55,9 +55,9 @@ rational = ((numerator denominator=1):>Rational=>_make(_integer(numerator) _inte
 # rejected as the integer conversion rejects them.
 _from_float=(value:float64):>Rational=>{
     let bits=f64_bits(value)
-    let exponent=((bits >> 52) and 2047).wrap(int64)
+    let exponent=wrap<int64>((bits >> 52) and 2047)
     if exponent =? 2047 panic("rational of a NaN or infinite float")
-    let mantissa=(bits and 4503599627370495).wrap(int64)
+    let mantissa=wrap<int64>(bits and 4503599627370495)
     if exponent =? 0 exponent=1 else mantissa=mantissa+4503599627370496
     if mantissa =? 0 return Rational[]
     if (bits >> 63) =? 1 mantissa=-mantissa
@@ -157,7 +157,7 @@ _word_rational = ((value:Rational):>RationalWord|Overflow=>_narrow(value))
 # shrink again, so the result could not fit either.
 _word_pow=(base:RationalWord exponent:int64):>RationalWord|Overflow=>{
     let value=_widen(base)
-    let remaining=exponent.wrap(uint64)
+    let remaining=wrap<uint64>(exponent)
     if exponent <? 0 {value=reciprocal(value) remaining=0-remaining}
     let result=Rational[1 1]
     loop remaining >? 0 {
@@ -200,11 +200,11 @@ to_float32=(value:Rational):>float32=>{
     }
     let top:BigInt=n
     let bottom:BigInt=d
-    return f32_from_bits(_ratio_float_bits(top._sign <? 0 top._limbs bottom._limbs 23 8).wrap(uint32))
+    return f32_from_bits(wrap<uint32>(_ratio_float_bits(top._sign <? 0 top._limbs bottom._limbs 23 8)))
 }
 
 pow=(value:Rational exponent:int64):>Rational=>{
-    let remaining=exponent.wrap(uint64)
+    let remaining=wrap<uint64>(exponent)
     if exponent <? 0 {value=reciprocal(value) remaining=0-remaining}
     let result=Rational[1 1]
     # Powers of the same reduced fraction remain coprime: no repeated GCD.

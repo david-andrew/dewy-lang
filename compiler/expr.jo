@@ -32,7 +32,7 @@ enum IN:
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
     read_fields, default_init, offset_unit, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
     static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem, lend, loan_address, loan_load, loan_store, loan_length,
-    zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration
+    zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration, wrap_bits
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big, set_text
@@ -53,6 +53,7 @@ intrinsics = [
     Intrinsic("$runtime_assert", .runtime_assert, false),
     Intrinsic("__dewy_iter", .dewy_iter, false),
     Intrinsic("__dewy_live_length", .live_len, false),
+    Intrinsic("wrap", .wrap_bits, false),
     Intrinsic("__dewy_iter_done", .dewy_iter_done, false),
     Intrinsic("__dewy_iter_value", .dewy_iter_value, false),
     Intrinsic("__dewy_iter_pair", .dewy_iter_pair, false),
@@ -3297,32 +3298,24 @@ conversion = (n: int, to0: int, args: int[]) -> int:
     nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(a), aux = i32(cv), type = i32(to), flags = i32(NF_CHECKED))
     to
 
-# Conversions keep the value; raw bits have their own spellings. `x.wrap(uint8)` is the
-# integer modulo 2^8 (two's complement for a signed target); `x.bitcast(float64)` reads the
-# same bits as another type of the same width.
-dewy_bits_conversion = (n: int, recv: int, wrap: bool, target: int, ft0: int) -> int:
-    what = if wrap: "wrap" else: "bitcast"
-    tv = prune(check_expr(target, 0))
-    example = if wrap: "uint8" else: "float64"
-    if types[tv].kind != .typeval: fatal(nodes[target].pos, "`.{what}` takes a type: `x.{what}({example})`")
-    to = prune(int(types[tv].elem))
-    ft = prune(ft0)
+# Conversions keep the value; raw bits have their own spellings. `wrap<uint8>(x)` (the
+# compiler's `wrap`, a builtin a program may shadow) is the integer modulo 2^8 (two's
+# complement for a signed target); `x transmute float64` reads the same bits as another
+# type of the same width.
+dewy_wrap_call = (n: int, callee: int, args: int[]) -> int:
     pos = nodes[n].pos
-    if wrap:
-        if not is_int(ft) or not is_int(to) or to == T_MATH_INT:
-            fatal(pos, "`.wrap` takes an integer modulo 2^N into a fixed-width integer type (found {dt(ft)} to {dt(to)}); `.bitcast` reads a value's bits as another type of the same width")
-        v = recv
-        if ft == T_MATH_INT:
-            v = bc_call("__mi_low_word", [recv], pos)
-            check_expr(v, 0)
-            v = last_checked
-        nodes[n] = Node(kind = .conv, pos = pos, a = i32(v), aux = i32(int(CV.int_)), type = i32(to), flags = i32(NF_CHECKED))
-        last_checked = n
-        return to
-    if ft == T_MATH_INT or to == T_MATH_INT: fatal(pos, "`.bitcast` needs fixed-width types: `int` has no fixed bit representation (`x.wrap(uint64)` takes its low 64 bits)")
-    if not is_numeric(ft) or not is_numeric(to) or tsize(ft) != tsize(to):
-        fatal(pos, "`.bitcast` reads the bits of an integer or float as another of the same width (found {dt(ft)} to {dt(to)})")
-    nodes[n] = Node(kind = .cast, pos = pos, a = i32(recv), aux2 = 1, type = i32(to), flags = i32(NF_CHECKED))
+    if nkids(callee) != 1 or args.len() != 1 or nodes[args[0]].kind == .namedarg:
+        fatal(pos, "`wrap` takes one fixed-width integer type and one integer: `wrap<uint8>(x)`")
+    to = prune(effect_generic_argument(kid(callee, 0)))
+    ft = prune(check_expr(args[0], 0))
+    v = last_checked
+    if not is_int(ft) or not is_int(to) or to == T_MATH_INT:
+        fatal(pos, "`wrap<T>(x)` takes an integer modulo 2^N into a fixed-width integer type T (found {dt(ft)} to {dt(to)}); `x transmute T` reads a value's bits as another type of the same width")
+    if ft == T_MATH_INT:
+        v = bc_call("__mi_low_word", [v], pos)
+        check_expr(v, 0)
+        v = last_checked
+    nodes[n] = Node(kind = .conv, pos = pos, a = i32(v), aux = i32(int(CV.int_)), type = i32(to), flags = i32(NF_CHECKED))
     last_checked = n
     to
 
@@ -5263,6 +5256,7 @@ check_call = (n: int, expected: int) -> int:
             if types[mt].kind == .module:
                 mod = int(types[mt].mod)
                 s = module_lookup(mod, name)
+        if s != 0 and syms[s].kind == .builtin and int(syms[s].ref) == int(IN.wrap_bits) and dewy_at(nodes[n].pos): return dewy_wrap_call(n, callee, args)
         if s != 0 and syms[s].kind == .fns:
             targs: int[]
             loop arg in kids(callee): targs.push(effect_generic_argument(arg))
@@ -5366,7 +5360,7 @@ check_call = (n: int, expected: int) -> int:
                     check_expr(callee, 0)
                     return value_call(n, callee, args, expected)
         if (name_of(fname) == "wrap" or name_of(fname) == "bitcast") and args.len() == 1 and (is_numeric(rt) or rt == T_MATH_INT) and dewy_at(nodes[n].pos):
-            return dewy_bits_conversion(n, recv, name_of(fname) == "wrap", args[0], rt)
+            fatal(nodes[n].pos, "numbers have no `.{name_of(fname)}` member: `wrap<uint8>(x)` keeps the low bits of an integer, and `x transmute float64` reads its bits as another type of the same width")
         if files[pos_file(nodes[n].pos)].is_dewy: fname = dewy_member_name(callee, rt, fname, args)
         # uniform call syntax
         add_flag(recv, NF_CHECKED)
@@ -5928,6 +5922,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         arg_type(args, 0, T_STR)
         r = mk_array(T_U8)
     else if id == .argv: r = T_RAWPTR
+    else if id == .wrap_bits: fatal(nodes[n].pos, "`wrap` names its fixed-width target type: `wrap<uint8>(x)` keeps the low 8 bits of x")
     else if id == .offset_unit:
         nargs_check(n, nargs, 3, 3, "__offset_unit")
         if nodes[args[0]].kind != .str_lit: fatal(nodes[args[0]].pos, "an offset unit's symbol is a string literal")
