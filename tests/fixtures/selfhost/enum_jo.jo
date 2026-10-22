@@ -1,0 +1,28 @@
+# Jo code switching on enum_phase.dewy's Phase (or, with its use line changed, its twin's).
+use 'enum_phase.dewy'
+
+struct Job:
+    name: str
+    at: Phase = .parse
+
+describe = (p: Phase) -> str:
+    match p:
+        lex: return "lexing"
+        parse: return "parsing"
+        check: return "checking"
+        emit: return "emitting"
+
+main = ():
+    p: Phase = .lex
+    counts = fill(0, 4)
+    loop i in [0..6):
+        print("{describe(p)} {p} {int(p)}")
+        counts[int(p)] += 1
+        p = next_phase(p)
+    print("{counts}")
+    j = Job(name = "a")
+    print("{j.at} {Phase(3)} {Phase(0) == Phase.lex} {j.at != .lex}")
+    table: Phase[] = [.emit, .check]
+    seen: {Phase: int} = {}
+    loop q in table: seen[q] = int(q)
+    print("{seen[Phase.emit]} {seen[.check]}")

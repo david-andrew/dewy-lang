@@ -1,0 +1,9 @@
+# A Dewy enumeration (a union of string literals) that Jo code takes as its own enum.
+Phase:type = 'lex' | 'parse' | 'check' | 'emit'
+
+next_phase=(p:Phase):>Phase=>match p {
+    <'lex'> => 'parse'
+    <'parse'> => 'check'
+    <'check'> => 'emit'
+    _ => 'lex'
+}

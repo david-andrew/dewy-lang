@@ -42,3 +42,36 @@ def test_twins_define_only_the_dewy_names():
         dewy = top_level((COMPILER / module).read_text(), r'^(?:let\s+)?([A-Za-z_]\w*)\s*[:=]')
         jo = top_level((COMPILER / twin).read_text(), r'^([A-Za-z_]\w*)\s*[:=]')
         assert jo <= dewy, f'{twin} defines {sorted(jo - dewy)}, which {module} does not'
+
+
+def dewy_enumerations(text):
+    """`Name:type = 'a' | 'b'`: each union of string literals, its members as written."""
+    out = {}
+    for m in re.finditer(r"^(?:let\s+)?([A-Za-z_]\w*)\s*:\s*type\s*=\s*('[^'\n]*'(?:\s*\|\s*'[^'\n]*')*)\s*$", text, re.M):
+        out[m.group(1)] = re.findall(r"'([^']*)'", m.group(2))
+    return out
+
+
+def jo_enums(text):
+    """`enum Name:` and its indented members, in order."""
+    out = {}
+    for m in re.finditer(r'^enum\s+([A-Za-z_]\w*)\s*:[ \t]*\n((?:[ \t]+\S.*\n?)+)', text, re.M):
+        out[m.group(1)] = re.findall(r'[A-Za-z_]\w*', re.sub(r'#.*', '', m.group(2)))
+    return out
+
+
+@pytest.mark.core_quick
+def test_twins_number_enumerations_alike():
+    # (Jo code takes a Dewy enumeration as an enum, its members numbered as written: the
+    # twin's enum lists them in the same order, so int(x) and Name(i) agree)
+    for module, twin in FROZEN_TWINS.items():
+        enumerations = dewy_enumerations((COMPILER / module).read_text())
+        enums = jo_enums((COMPILER / twin).read_text())
+        for name, members in enumerations.items():
+            assert enums.get(name) == members, f'{twin} needs `enum {name}:` with {members} in order'
+
+
+def test_enumeration_patterns():
+    fixtures = Path(__file__).resolve().parent / 'fixtures/selfhost'
+    assert dewy_enumerations((fixtures / 'enum_phase.dewy').read_text()) == {'Phase': ['lex', 'parse', 'check', 'emit']}
+    assert jo_enums((fixtures / 'enum_phase.jo').read_text()) == {'Phase': ['lex', 'parse', 'check', 'emit']}

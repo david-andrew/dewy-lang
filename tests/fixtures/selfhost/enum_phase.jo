@@ -1,0 +1,10 @@
+# enum_phase.dewy's twin, as a frozen twin would write it: the same members in the same order.
+enum Phase:
+    lex, parse, check, emit
+
+next_phase = (p: Phase) -> Phase:
+    match p:
+        lex: return .parse
+        parse: return .check
+        check: return .emit
+        emit: return .lex

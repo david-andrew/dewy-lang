@@ -3954,6 +3954,10 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                     et = get_struct_inst(ed, [])
                     if simple_enum(et): return enum_from_int(n, et, args[0])
                 fatal(nodes[n].pos, "use {name_of(name)}.variant(...) to construct an enum")
+            # (Phase(2) in Jo, Phase a Dewy union of string literals: its member at that
+            # position, as for a Jo enum, so Jo code takes a Dewy enumeration as its own)
+            else if sk == .alias_ and not dewy_at(nodes[n].pos) and nkids2(int(syms[s].ref)) == 0 and args.len() == 1 and nodes[args[0]].kind != .namedarg and str_set_of(resolve_alias(int(syms[s].ref), [], nodes[n].pos)) != 0:
+                return enum_from_int(n, prune(resolve_alias(int(syms[s].ref), [], nodes[n].pos)), args[0])
             else if sk == .type_:
                 jo_type_spelling(name, s, nodes[n].pos)
                 return conversion(n, int(syms[s].ref), args)
