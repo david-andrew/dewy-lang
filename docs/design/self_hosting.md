@@ -44,10 +44,10 @@ that the code generator is not the obstacle. The obstacles are surface and boots
 | `$target` / `$supported_targets` (modules-and-imports.md "Targets") | **a**, implemented |
 | OS axis: `TARGET == "windows"` x44, macos, linux. The design's `$target` names only backends | **c** |
 | Build-mode flags `BOOTSTRAP`/`DEBUG`/`WATCH`/`PROGRAM_NAME`: no spelling | **c** |
-| Pointer type spelling (87 `*u8` types). `ptr<uint8>` is unknown; the interop page only says "typed forms of µDewy memory intrinsics" | **c** |
-| `extern` + `@lib`/`@symbol`: `extern` is reserved with no form; a Jo shim works (as test_core_ffi does) | **c** |
+| Pointer type spelling (87 `*u8` types): `ptr<T>`, `p[i]`, `p + n`, `p as ptr<U>` under `$unsafe` (LANGUAGE.md "Foreign functions") | **a**, implemented |
+| `extern` + `@lib`/`@symbol`: `=> $extern(name=... lib=...)` | **a**, implemented |
 | Payload-free `enum` (557 variants): typed `const` tags today; designed nominal families | A / b |
-| Byte-character literals (`'('`, 1194 uses): numeric `0x28` today | A; literal **c** |
+| Byte-character literals (`'('`, 1194 uses): `b'('` | **a**, implemented |
 | Path import without selection: the design splats it, the implementation (and tests) qualify it as `stem.name` | **a/c**: contradicts current behaviour, so David decides |
 | Tuples crossing languages: Jo `(str, u8[])` is Dewy's `[string array<uint8>]` both ways (round 4: no separate tuple concept) | **a**, implemented |
 
@@ -61,7 +61,7 @@ across the languages is an ordinary call.
 - **Jo -> Dewy**: `use 'lib.dewy'` (verified: Jo calls a Dewy `put16` through `mut`).
 - **Type mapping**: `mut` <-> `@`; `T[]` <-> `array<T>`; `u8` <-> `uint8`; Jo `int` takes
   `int64`; `str` <-> `string` (Dewy indexes graphemes, so pass bytes on hot paths).
-- **C**: Jo-only `extern`, so Dewy reaches C through a Jo shim.
+- **C**: `$extern` in either language.
 - **Bootstrap blocker for Dewy inside the compiler**: generation 1 (stage0 ->
   `core-bootstrap`) has no Dewy frontend (`bootstrap/frontend.jo`), and it builds generation
   2 from `compiler/`. So `use 'zip.dewy'` in wasm.jo would break `--bootstrap` unless a Jo
@@ -83,3 +83,24 @@ across the languages is an ordinary call.
   error.
 - **Tests**: `tests/cases/target/*` (native and web), plus `tests/test_target_names.py`
   (x86_64, wasm32 and arm64 under qemu).
+
+## Leaves shipped (B3)
+
+`zip.dewy` (the web build's archive), `spelling.dewy` (the checker's "did you mean"
+distance) and `leb128.dewy` (the one LEB128 encoder of the wasm, DWARF and Mach-O
+writers, formerly three). Rules, enforced by `tests/test_selfhost_twins.py`: every
+`compiler/*.dewy` has its `FROZEN_TWINS` entry; it imports only the library, never a
+compiler module; its twin defines no name it lacks; each `.jo` module calling it
+`use`s it (Dewy names reach only their importers, unlike Jo's shared namespace). Each
+pair has a differential test (`tests/test_selfhost_*.py`) against an independent
+Python oracle in default and release builds. Compiler output stayed byte-identical
+(734 builds: examples and ladder, native, `--release`, `-g`, wasm32, aarch64-mac,
+x86_64-windows).
+
+Gaps met on the way: `loop {` needs `loop true {`; `loop c in s as array<uint8>`
+needs parentheses; `bytes as string ?? ""` is reported as an unsupported type
+expression rather than asking for `(bytes as string | none) ?? ""`; no 1-D
+`fill(v n)` (a comprehension stands in); Dewy can take a Jo `enum` imported from Jo
+but declares none of its own for Jo code to switch on (string-literal unions are
+words, not tags); a leaf cannot read the compiler's state, so the stateful halves of
+`line_col` and `hash_bytes` stay in Jo.
