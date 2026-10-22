@@ -6503,6 +6503,15 @@ check_binary = (n: int, expected: int) -> int:
         if not is_lit(a) and not is_shift and is_numeric(ta): h = ta
         if not a_literal and b_literal and binary_literal_context(b, ta, op): h = if tkind(ta) == .opt: telem(ta) else: ta
         tb = prune(check_expr(b, h))
+    # (two plain numbers, neither a written fraction nor a character: none of the cases below
+    # applies to them, so straight to the arithmetic)
+    if not is_shift and ta != T_MATH_INT and tb != T_MATH_INT:
+        fka = types[ta].kind
+        fkb = types[tb].kind
+        if (fka == .int_ or fka == .float_) and (fkb == .int_ or fkb == .float_) and not (op == .eq and fka == .float_):
+            ak = nodes[a].kind
+            bk2 = nodes[b].kind
+            if ak != .float_lit and bk2 != .float_lit and ak != .str_lit and bk2 != .str_lit: return binary_numeric(n, op, a, b, ta, tb, is_cmp)
     if (op == .eq or op == .ne) and types[ta].kind == .fixed and types[tb].kind == .fixed and fixed_len(ta) != fixed_len(tb) and type_eq(int(types[ta].elem), int(types[tb].elem)):
         # (arrays of different exact lengths are unequal, compared as arrays)
         ta = mk_array(int(types[ta].elem))
@@ -6784,6 +6793,10 @@ check_binary = (n: int, expected: int) -> int:
                     why = " ('{fnm}' gives nothing back (printing is not giving back): end it with the value it should give, and write {jd(nodes[n].pos, "`-> int`", "`:>int64`")} after its parameters)"
                     break
         fatal(nodes[n].pos, "operator {tok_text(op)} is not defined for {dt(ta)} and {dt(tb)}{why}")
+    binary_numeric(n, op, a, b, ta, tb, is_cmp)
+
+# (check_binary's end for numbers: division, literal folding, the joined type)
+binary_numeric = (n: int, op: Tok, a: int, b: int, ta: int, tb: int, is_cmp: bool) -> int:
     if op == .slash and is_int(ta) and is_int(tb) and files[pos_file(nodes[n].pos)].is_dewy:
         fatal(nodes[n].pos, "Dewy does not yet support integer /; use // or convert to float64")
     # High unsigned Dewy literals go through typed lowering. The untyped fold
@@ -6863,6 +6876,7 @@ check_binary = (n: int, expected: int) -> int:
     if is_cmp: nodes[n].type = i32(T_BOOL)
     else: nodes[n].type = i32(j)
     ntype(n)
+
 
 # (q1 * q2 for quaternions, which are vec4s: * multiplies their parts one by one, which is no
 # rotation; values from quat_* functions, and variables made from them, are known to be ones)
