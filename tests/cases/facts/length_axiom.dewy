@@ -1,0 +1,18 @@
+# quick
+# Every length is below 2^48, so a length plus one or plus another length
+# cannot wrap, and neither can an index one past a guarded position.
+grown=(xs:array<int64> ys:array<int64>):>int64=>{
+    let n=xs.length+1
+    $assert n >? xs.length
+    let both=xs.length+ys.length
+    $assert both >=? 0
+    return n+both
+}
+next_index=(xs:array<int64> i:int64):>int64=>{
+    if i <? 0 or i >=? xs.length return -1
+    let j=i+1
+    $assert j >? i
+    $assert j <=? xs.length
+    return j
+}
+main=()=>printl("{grown([1 2 3] [4 5])} {next_index([1 2 3] 2)} {next_index([1 2 3] 3)}")

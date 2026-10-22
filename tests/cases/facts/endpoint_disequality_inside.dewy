@@ -1,0 +1,7 @@
+# A constant inside an interval narrows nothing.
+pick=(i:int64):>int64=>{
+    if i <? 0 or i >? 4 return 0
+    if i not=? 2 { $assert i <? 4 }
+    return i
+}
+main=()=>printl(pick(1))

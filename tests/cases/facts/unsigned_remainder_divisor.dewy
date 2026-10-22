@@ -1,0 +1,6 @@
+bucket=(hash:uint64 n:uint64):>uint64=>{
+    let r=hash%n
+    $assert r <? n
+    return r
+}
+main=()=>printl(bucket(17 5))

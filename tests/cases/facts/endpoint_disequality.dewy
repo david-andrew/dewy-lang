@@ -1,0 +1,22 @@
+# quick
+# A constant at the end of an interval moves that end inward: `x not=? max`
+# leaves room for x+1, and a found-or-NONE result past `not=? NONE` indexes.
+const NONE:int64=-1
+find=(xs:array<int64 length=4> v:int64):>int64=>{
+    loop i in [0..4) {
+        if xs[i] =? v return i
+    }
+    return NONE
+}
+step=(x:int64):>int64=>{
+    if x =? 9223372036854775807 return x
+    let y=x+1
+    $assert y >? x
+    return y
+}
+lookup=(xs:array<int64 length=4> names:array<int64 length=4> v:int64):>int64=>{
+    let at=find(xs v)
+    if at not=? NONE return names[at]
+    return 0
+}
+main=()=>printl("{step(3)} {step(9223372036854775807)} {lookup([5 6 7 8] [50 60 70 80] 7)} {lookup([5 6 7 8] [50 60 70 80] 9)}")

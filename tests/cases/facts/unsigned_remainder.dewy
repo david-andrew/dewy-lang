@@ -1,0 +1,24 @@
+# quick
+# uint64 `%` and `//` are modelled on the unsigned order: a remainder lies
+# below its divisor and the dividend, a quotient is at most the dividend,
+# and a uint64 that int64 holds converts with its range.
+slot=(hash:uint64 table:array<int64 length=8>):>int64=>{
+    let r=hash%8
+    $assert r <? 8
+    return table[int64(r)]
+}
+bucket=(hash:uint64 n:uint64):>uint64=>{
+    if n =? 0 return 0
+    let r=hash%n
+    $assert r <? n
+    $assert r <=? hash
+    let q=hash//n
+    $assert q <=? hash
+    return r
+}
+half=(x:uint64):>uint64=>{
+    let h=x//2
+    $assert h <=? x
+    return h
+}
+main=()=>printl("{slot(13 [0 10 20 30 40 50 60 70])} {bucket(17 5)} {bucket(17 0)} {half(9)} {bucket(18446744073709551615 10)}")
