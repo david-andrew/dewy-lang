@@ -281,7 +281,8 @@ struct AvailableValue:
     version_a: i32
     version_b: i32
 
-ht_entries: AvailableValue[]
+ht_storage: AvailableValue[]
+ht_entries: *AvailableValue
 ht_mask = 0
 o_epoch = 0
 o_gen = 0              # memory generation for integer data
@@ -293,27 +294,30 @@ struct OptScope:
     open: bool
     export_prefix: bool
 
-o_scope_info: OptScope[] # by scope serial
+o_scope_storage: OptScope[] # by scope serial
+o_scope_info: *OptScope
 o_scopes: int[]         # open scopes, innermost last
 
 ht_setup = (n: int):
     size = 64
     loop size < n * 4: size *= 2
-    if ht_entries.len() < size: ht_entries.resize(size)
+    if ht_storage.len() < size: ht_storage.resize(size)
+    ht_entries = data(ht_storage)
     ht_mask = size - 1
     o_epoch += 1
     o_gen = 0
     o_genf = 1 << 40
     o_genh = 2 << 40
-    o_scope_info.clear()
+    o_scope_storage.clear()
     o_scopes.clear()
     o_scope_open()
 
 o_scope_open = (export_prefix: bool = false):
     parent = -1
     if o_scopes.len() > 0: parent = o_scopes[o_scopes.len() - 1]
-    o_scope_info.push(OptScope(o_nbr, i32(parent), true, export_prefix))
-    o_scopes.push(o_scope_info.len() - 1)
+    o_scope_storage.push(OptScope(o_nbr, i32(parent), true, export_prefix))
+    o_scope_info = data(o_scope_storage)
+    o_scopes.push(o_scope_storage.len() - 1)
 
 o_scope_close = ():
     o_scope_info[o_scopes.pop()].open = false
@@ -362,7 +366,7 @@ ht_put_gen = (k1: int, k2: int, k3: int, v: int, gen: int, va: int, vb: int):
 load_key1 = (ty: int, mode: int, addr: int) -> int: int(Op.load) | (ty << 8) | ((mode & 4095) << 12) | (addr << 24)
 
 ht_insert = (i: int, k1: int, k2: int, k3: int, v: int, gen: int, va: int, vb: int):
-    # Replace the complete entry through one checked array access.
+    # The probe returns an index masked to the current table capacity.
     scope = i32(o_scopes[o_scopes.len() - 1])
     ht_entries[i] = AvailableValue(k1, k2, k3, i32(v), scope, o_nbr, gen, o_epoch, i32(va), i32(vb))
 
@@ -454,8 +458,228 @@ def_is = (v: int, op: Op) -> bool:
 
 o_fits32 = (v: int) -> bool: v >= -2147483648 and v <= 2147483647
 
-o_emit = (ins0: Ins):
+o_emit = (ins: Ins): o_transfer(ins, false)
+
+# Only single-definition values have facts. Direct indexing avoids hashing the
+# same condition at every branch; both truth values keep their own scope, just
+# as separate available-expression keys did.
+fact_known = (c: int, truth: int) -> bool:
+    if not o_cse or not stable(c): return false
+    index = c * 2 + truth
+    scope = int(o_fact_scope[index])
+    if scope < 0: return false
+    loop not o_scope_info[scope].open:
+        if not o_scope_info[scope].export_prefix or o_fact_nbr[index] != o_scope_info[scope].branches: return false
+        scope = int(o_scope_info[scope].parent)
+        if scope < 0: return false
+    true
+
+add_fact = (c: int, truth: int):
+    if not o_cse or not stable(c): return
+    index = c * 2 + truth
+    o_fact_scope[index] = i32(o_scopes[o_scopes.len() - 1])
+    o_fact_nbr[index] = o_nbr
+
+fact_false = (c: int) -> bool: fact_known(c, 0)
+add_fact_false = (c: int): add_fact(c, 0)
+fact_true = (c: int) -> bool: fact_known(c, 1)
+add_fact_true = (c: int): add_fact(c, 1)
+
+# simplify one instruction, appending the result to o_out
+# One opcode-directed forward transfer. Only scalar arithmetic enters folding;
+# memory/call/vector/control operations go directly from rewriting to CSE/emission.
+# Replacement operations are revisited locally, never by a whole-function sweep.
+# The walk is O(input operations + emitted strength-reduction operations), apart
+# from the separately bounded copy-lifetime queries and CSE hash probes.
+o_transfer = (ins0: Ins, simplify: bool):
     ins = ins0
+    loop simplify:
+        op = ins.op
+        match op:
+            iconst: pass
+            mov, neg, not_, sext8, sext16, sext32, zext8, zext16, zext32:
+                ins.a = o_regs[int(ins.a)].repl
+            checked_add, checked_sub, checked_mul, overflow_add, overflow_sub, overflow_mul, add, sub, mul, divs, divu, rems, remu, and_, or_, xor, shl, shrs, shru, eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu:
+                ins.a = o_regs[int(ins.a)].repl
+                ins.b = o_regs[int(ins.b)].repl
+            select:
+                ins.a = o_regs[int(ins.a)].repl
+                ins.b = o_regs[int(ins.b)].repl
+                ins.c = o_regs[int(ins.c)].repl
+            calli: o_rewrite(ins)
+            _:
+                o_rewrite(ins)
+                break
+        # Inlining and store forwarding can expose the address behind a closure
+        # invocation. A stable function address uses the ordinary direct-call ABI.
+        if op == .calli:
+            fp = int(ins.c)
+            at = int(o_regs[fp].defpos)
+            if stable(fp) and at >= 0 and ir.code[at].op == .faddr:
+                ins.op = .call
+                ins.imm = ir.code[at].imm
+                ins.c = 0
+                op = .call
+            break
+        d = int(ins.dst)
+        a = int(ins.a)
+        bb = int(ins.b)
+        if op == .checked_add or op == .checked_sub or op == .checked_mul:
+            raw = if op == .checked_add: Op.add else if op == .checked_sub: Op.sub else: Op.mul
+            if is_k(a) and is_k(bb):
+                operation = if op == .checked_add: 0 else if op == .checked_sub: 1 else: 2
+                if math_word_overflow(operation, o_regs[a].cval, o_regs[bb].cval):
+                    fatal(ir_positions[int(ins.pos)], "integer overflow in constant expression (int64 representation of mathematical int)")
+                ok, value = fold(raw, o_regs[a].cval, o_regs[bb].cval)
+                ins = Ins(.iconst, VI, i32(d), 0, 0, 0, value)
+                continue
+            if is_k(bb) and ((raw != .mul and o_regs[bb].cval == 0) or (raw == .mul and (o_regs[bb].cval == 0 or o_regs[bb].cval == 1))):
+                ins.op = raw
+                continue
+            break
+        if op == .iconst:
+            if stable(d):
+                o_regs[d].constant = true
+                o_regs[d].cval = ins.imm
+            break
+        if op == .mov:
+            if o_can_alias(d, a):
+                o_regs[d].repl = i32(a)
+                if o_regs[a].constant:
+                    o_regs[d].constant = true
+                    o_regs[d].cval = o_regs[a].cval
+                return
+            if is_k(a) and vtype(d) == VI:
+                ins = Ins(.iconst, VI, i32(d), 0, 0, 0, o_regs[a].cval)
+                break
+            break
+        if int(ins.ty) != VI or d < 0:
+            break
+        # Inlining can make a previously dynamic scalar choice constant. Its
+        # inputs were already evaluated, so replacing the selection by a move
+        # preserves their effects; ordinary dead-code removal handles pure inputs.
+        if op == .select:
+            if bb == int(ins.c) or is_k(a) or fact_true(a) or fact_false(a):
+                yes = bb == int(ins.c) or (is_k(a) and o_regs[a].cval != 0) or fact_true(a)
+                value = if yes: bb else: int(ins.c)
+                ins = Ins(.mov, VI, i32(d), i32(value), 0, 0, 0)
+                continue
+            break
+        # The bounded memory comparison already produces a canonical boolean.
+        # Inlined bool returns otherwise carry an unnecessary ABI byte extension.
+        if op == .zext8 and stable(a) and (o_regs[a].dop == i32(int(Op.memeq)) or o_regs[a].dop == i32(int(Op.streq))):
+            ins = Ins(.mov, VI, i32(d), i32(a), 0, 0, 0)
+            continue
+        # unary integer ops
+        if op == .neg or op == .not_ or op == .sext8 or op == .sext16 or op == .sext32 or op == .zext8 or op == .zext16 or op == .zext32:
+            if is_k(a):
+                ok, v = fold_un(op, o_regs[a].cval)
+                if ok:
+                    ins = Ins(.iconst, VI, i32(d), 0, 0, 0, v)
+                    continue
+            break
+        # binary integer ops
+        if is_k(a) and is_k(bb):
+            ok, v = fold(op, o_regs[a].cval, o_regs[bb].cval)
+            if ok:
+                ins = Ins(.iconst, VI, i32(d), 0, 0, 0, v)
+                continue
+        if is_k(a) and not is_k(bb):
+            if commutes(op):
+                ins.a = i32(bb)
+                ins.b = i32(a)
+            else if mirror(op) != op:
+                ins.op = mirror(op)
+                ins.a = i32(bb)
+                ins.b = i32(a)
+            op = ins.op
+            a = int(ins.a)
+            bb = int(ins.b)
+        if not is_k(bb):
+            break
+        k = o_regs[bb].cval
+        # A nonnegative constant mask bounds its result in [0, mask]. Relational
+        # comparisons are monotone on that interval, in both signed and unsigned
+        # order. Equal endpoints prove the whole comparison; equality is excluded.
+        if op == .lts or op == .les or op == .gts or op == .ges or op == .ltu or op == .leu or op == .gtu or op == .geu:
+            if def_is(a, .and_) and is_k(int(o_regs[a].db)):
+                limit = o_regs[int(o_regs[a].db)].cval
+                if limit >= 0:
+                    lo = fold(op, 0, k)
+                    hi = fold(op, limit, k)
+                    if lo.1 == hi.1:
+                        ins = Ins(.iconst, VI, i32(d), 0, 0, 0, lo.1)
+                        continue
+        # identities: result is a
+        if (k == 0 and (op == .add or op == .sub or op == .or_ or op == .xor or op == .shl or op == .shrs or op == .shru)) or (k == 1 and (op == .mul or op == .divs or op == .divu)):
+            ins = Ins(.mov, VI, i32(d), i32(a), 0, 0, 0)
+            continue
+        if k == 0 and (op == .mul or op == .and_):
+            ins = Ins(.iconst, VI, i32(d), 0, 0, 0, 0)
+            continue
+        if op == .add and def_is(a, .add) and o_regs[int(o_regs[a].db)].constant:
+            o_bin(.add, d, int(o_regs[a].da), o_kconst(k + o_regs[int(o_regs[a].db)].cval))
+            return
+        sh = log2_exact(k)
+        if sh > 0:
+            if op == .mul:
+                o_bin(.shl, d, a, o_kconst(sh))
+                return
+            if op == .divu:
+                o_bin(.shru, d, a, o_kconst(sh))
+                return
+            if op == .remu:
+                o_bin(.and_, d, a, o_kconst(k - 1))
+                return
+            if op == .divs or op == .rems:
+                # round toward zero: add (2^sh - 1) to negative dividends before shifting
+                t1 = o_bin(.shrs, o_tmp(), a, o_kconst(63))
+                t2 = o_bin(.shru, o_tmp(), t1, o_kconst(64 - sh))
+                t3 = o_bin(.add, o_tmp(), a, t2)
+                if op == .divs:
+                    o_bin(.shrs, d, t3, o_kconst(sh))
+                else:
+                    t4 = o_bin(.and_, o_tmp(), t3, o_kconst(-k))
+                    o_bin(.sub, d, a, t4)
+                return
+        if (op == .divs or op == .rems) and k > 1 and sh <= 0 and mulh_ok:
+            # by any other constant: a multiply by a "magic" number, its high half, a shift, and a
+            # one added to negative dividends (Hacker's Delight 10-1), as C compilers do
+            mag, s = div_magic(k)
+            q = o_bin(.mulhs, o_tmp(), a, o_kconst(mag))
+            if mag < 0: q = o_bin(.add, o_tmp(), q, a)
+            if s > 0: q = o_bin(.shrs, o_tmp(), q, o_kconst(s))
+            neg = o_bin(.shru, o_tmp(), a, o_kconst(63))
+            if op == .divs:
+                o_bin(.add, d, q, neg)
+            else:
+                qq = o_bin(.add, o_tmp(), q, neg)
+                t = o_bin(.mul, o_tmp(), qq, o_kconst(k))
+                o_bin(.sub, d, a, t)
+            return
+        if (op == .divu or op == .remu) and k > 1 and sh <= 0 and mulh_ok:
+            # unsigned: the high half of a multiply by a magic number, and a shift (with an add when
+            # the number needs 65 bits: Hacker's Delight 10-8)
+            mag, s, add = divu_magic(u64(k))
+            # (the last step writes the quotient straight into d, as the signed one does)
+            qd = d
+            if op == .remu: qd = o_tmp()
+            t = o_bin(.mulhu, o_tmp(), a, o_kconst(int(mag)))
+            if add:
+                q1 = o_bin(.sub, o_tmp(), a, t)
+                q2 = o_bin(.shru, o_tmp(), q1, o_kconst(1))
+                if s > 1:
+                    q3 = o_bin(.add, o_tmp(), q2, t)
+                    o_bin(.shru, qd, q3, o_kconst(s - 1))
+                else: o_bin(.add, qd, q2, t)
+            else:
+                o_bin(.shru, qd, t, o_kconst(s))
+            if op == .remu:
+                q = int(o_regs[qd].repl)
+                m = o_bin(.mul, o_tmp(), q, o_kconst(k))
+                o_bin(.sub, d, a, m)
+            return
+        break
     op = ins.op
     if op == .br or op == .brif or op == .brtable: o_nbr += 1
     if o_cse and (op == .load or op == .store):
@@ -502,7 +726,9 @@ o_emit = (ins0: Ins):
                         o_regs[d].constant = true
                         o_regs[d].cval = o_regs[e].cval
                     return
-                o_push(Ins(.mov, i32(vtype(d)), i32(d), i32(e), 0, 0, 0))
+                o_regs[d].ver += 1
+                o_regs[e].nuse += 1
+                o_out.push(Ins(.mov, i32(vtype(d)), i32(d), i32(e), 0, 0, 0))
                 return
             if stable(d):
                 ht_insert(slot, k1, k2, k3, d, gen, va, vb)
@@ -511,6 +737,13 @@ o_emit = (ins0: Ins):
                 o_regs[d].db = ins.b
                 o_regs[d].dva = o_regs[int(ins.a)].ver
                 o_regs[d].dvb = o_regs[int(ins.b)].ver
+            # CSE already decoded these operands. Account for the surviving
+            # operation here instead of decoding it again through o_push.
+            o_regs[d].ver += 1
+            if arity > 0: o_regs[int(ins.a)].nuse += 1
+            if arity > 1: o_regs[int(ins.b)].nuse += 1
+            o_out.push(ins)
+            return
         else if op == .store:
             mode = int(ins.c)
             kill_mem(mode)
@@ -524,6 +757,11 @@ o_emit = (ins0: Ins):
                 vix = int(o_regs[ix].ver)
             if (mode & 15 == 8 or mode & M_FLOAT != 0) and stable(v):
                 ht_put_gen(load_key1(int(ins.ty), mode, a), ix, ins.imm, v, mem_gen(mode), int(o_regs[a].ver), vix)
+            o_regs[a].nuse += 1
+            o_regs[v].nuse += 1
+            if mode & M_INDEX != 0: o_regs[ix].nuse += 1
+            o_out.push(ins)
+            return
         else if op == .assume:
             a = int(ins.a)
             if ins.imm == A_RC1:
@@ -535,218 +773,6 @@ o_emit = (ins0: Ins):
     # expressions: subsequent stores must still perform a new comparison.
     if (op == .memeq or op == .streq) and stable(int(ins.dst)): o_regs[int(ins.dst)].dop = i32(int(op))
     o_push(ins)
-
-# Only single-definition values have facts. Direct indexing avoids hashing the
-# same condition at every branch; both truth values keep their own scope, just
-# as separate available-expression keys did.
-fact_known = (c: int, truth: int) -> bool:
-    if not o_cse or not stable(c): return false
-    index = c * 2 + truth
-    scope = int(o_fact_scope[index])
-    if scope < 0: return false
-    loop not o_scope_info[scope].open:
-        if not o_scope_info[scope].export_prefix or o_fact_nbr[index] != o_scope_info[scope].branches: return false
-        scope = int(o_scope_info[scope].parent)
-        if scope < 0: return false
-    true
-
-add_fact = (c: int, truth: int):
-    if not o_cse or not stable(c): return
-    index = c * 2 + truth
-    o_fact_scope[index] = i32(o_scopes[o_scopes.len() - 1])
-    o_fact_nbr[index] = o_nbr
-
-fact_false = (c: int) -> bool: fact_known(c, 0)
-add_fact_false = (c: int): add_fact(c, 0)
-fact_true = (c: int) -> bool: fact_known(c, 1)
-add_fact_true = (c: int): add_fact(c, 1)
-
-# simplify one instruction, appending the result to o_out
-o_simplify = (ins0: Ins, pos: int):
-    ins = ins0
-    o_rewrite(ins)
-    op = ins.op
-    # Inlining and store forwarding can expose the address behind a closure
-    # invocation. A stable function address uses the ordinary direct-call ABI.
-    if op == .calli:
-        fp = int(ins.c)
-        at = int(o_regs[fp].defpos)
-        if stable(fp) and at >= 0 and ir.code[at].op == .faddr:
-            ins.op = .call
-            ins.imm = ir.code[at].imm
-            ins.c = 0
-            op = .call
-    d = int(ins.dst)
-    a = int(ins.a)
-    bb = int(ins.b)
-    if op == .checked_add or op == .checked_sub or op == .checked_mul:
-        raw = if op == .checked_add: Op.add else if op == .checked_sub: Op.sub else: Op.mul
-        if is_k(a) and is_k(bb):
-            operation = if op == .checked_add: 0 else if op == .checked_sub: 1 else: 2
-            if math_word_overflow(operation, o_regs[a].cval, o_regs[bb].cval):
-                fatal(ir_positions[int(ins.pos)], "integer overflow in constant expression (int64 representation of mathematical int)")
-            ok, value = fold(raw, o_regs[a].cval, o_regs[bb].cval)
-            o_simplify(Ins(.iconst, VI, i32(d), 0, 0, 0, value), pos)
-            return
-        if is_k(bb) and ((raw != .mul and o_regs[bb].cval == 0) or (raw == .mul and (o_regs[bb].cval == 0 or o_regs[bb].cval == 1))):
-            ins.op = raw
-            o_simplify(ins, pos)
-            return
-        o_emit(ins)
-        return
-    if op == .iconst:
-        if stable(d):
-            o_regs[d].constant = true
-            o_regs[d].cval = ins.imm
-        o_emit(ins)
-        return
-    if op == .mov:
-        if o_can_alias(d, a):
-            o_regs[d].repl = i32(a)
-            if o_regs[a].constant:
-                o_regs[d].constant = true
-                o_regs[d].cval = o_regs[a].cval
-            return
-        if is_k(a) and vtype(d) == VI:
-            o_emit(Ins(.iconst, VI, i32(d), 0, 0, 0, o_regs[a].cval))
-            return
-        o_emit(ins)
-        return
-    if int(ins.ty) != VI or d < 0:
-        o_emit(ins)
-        return
-    # Inlining can make a previously dynamic scalar choice constant. Its
-    # inputs were already evaluated, so replacing the selection by a move
-    # preserves their effects; ordinary dead-code removal handles pure inputs.
-    if op == .select:
-        if bb == int(ins.c) or is_k(a) or fact_true(a) or fact_false(a):
-            yes = bb == int(ins.c) or (is_k(a) and o_regs[a].cval != 0) or fact_true(a)
-            value = if yes: bb else: int(ins.c)
-            o_simplify(Ins(.mov, VI, i32(d), i32(value), 0, 0, 0), pos)
-            return
-        o_emit(ins)
-        return
-    # The bounded memory comparison already produces a canonical boolean.
-    # Inlined bool returns otherwise carry an unnecessary ABI byte extension.
-    if op == .zext8 and stable(a) and (o_regs[a].dop == i32(int(Op.memeq)) or o_regs[a].dop == i32(int(Op.streq))):
-        o_simplify(Ins(.mov, VI, i32(d), i32(a), 0, 0, 0), pos)
-        return
-    # unary integer ops
-    if op == .neg or op == .not_ or op == .sext8 or op == .sext16 or op == .sext32 or op == .zext8 or op == .zext16 or op == .zext32:
-        if is_k(a):
-            ok, v = fold_un(op, o_regs[a].cval)
-            if ok:
-                o_simplify(Ins(.iconst, VI, i32(d), 0, 0, 0, v), pos)
-                return
-        o_emit(ins)
-        return
-    r = fold(op, 0, 1)
-    if not r.0 and op != .divu and op != .remu:
-        o_emit(ins)
-        return
-    # binary integer ops
-    if is_k(a) and is_k(bb):
-        ok, v = fold(op, o_regs[a].cval, o_regs[bb].cval)
-        if ok:
-            o_simplify(Ins(.iconst, VI, i32(d), 0, 0, 0, v), pos)
-            return
-    if is_k(a) and not is_k(bb):
-        if commutes(op):
-            ins.a = i32(bb)
-            ins.b = i32(a)
-        else if mirror(op) != op:
-            ins.op = mirror(op)
-            ins.a = i32(bb)
-            ins.b = i32(a)
-        op = ins.op
-        a = int(ins.a)
-        bb = int(ins.b)
-    if not is_k(bb):
-        o_emit(ins)
-        return
-    k = o_regs[bb].cval
-    # A nonnegative constant mask bounds its result in [0, mask]. Relational
-    # comparisons are monotone on that interval, in both signed and unsigned
-    # order. Equal endpoints prove the whole comparison; equality is excluded.
-    if op == .lts or op == .les or op == .gts or op == .ges or op == .ltu or op == .leu or op == .gtu or op == .geu:
-        if def_is(a, .and_) and is_k(int(o_regs[a].db)):
-            limit = o_regs[int(o_regs[a].db)].cval
-            if limit >= 0:
-                lo = fold(op, 0, k)
-                hi = fold(op, limit, k)
-                if lo.1 == hi.1:
-                    o_simplify(Ins(.iconst, VI, i32(d), 0, 0, 0, lo.1), pos)
-                    return
-    # identities: result is a
-    if (k == 0 and (op == .add or op == .sub or op == .or_ or op == .xor or op == .shl or op == .shrs or op == .shru)) or (k == 1 and (op == .mul or op == .divs or op == .divu)):
-        o_simplify(Ins(.mov, VI, i32(d), i32(a), 0, 0, 0), pos)
-        return
-    if k == 0 and (op == .mul or op == .and_):
-        o_simplify(Ins(.iconst, VI, i32(d), 0, 0, 0, 0), pos)
-        return
-    if op == .add and def_is(a, .add) and o_regs[int(o_regs[a].db)].constant:
-        o_bin(.add, d, int(o_regs[a].da), o_kconst(k + o_regs[int(o_regs[a].db)].cval))
-        return
-    sh = log2_exact(k)
-    if sh > 0:
-        if op == .mul:
-            o_bin(.shl, d, a, o_kconst(sh))
-            return
-        if op == .divu:
-            o_bin(.shru, d, a, o_kconst(sh))
-            return
-        if op == .remu:
-            o_bin(.and_, d, a, o_kconst(k - 1))
-            return
-        if op == .divs or op == .rems:
-            # round toward zero: add (2^sh - 1) to negative dividends before shifting
-            t1 = o_bin(.shrs, o_tmp(), a, o_kconst(63))
-            t2 = o_bin(.shru, o_tmp(), t1, o_kconst(64 - sh))
-            t3 = o_bin(.add, o_tmp(), a, t2)
-            if op == .divs:
-                o_bin(.shrs, d, t3, o_kconst(sh))
-            else:
-                t4 = o_bin(.and_, o_tmp(), t3, o_kconst(-k))
-                o_bin(.sub, d, a, t4)
-            return
-    if (op == .divs or op == .rems) and k > 1 and sh <= 0 and mulh_ok:
-        # by any other constant: a multiply by a "magic" number, its high half, a shift, and a
-        # one added to negative dividends (Hacker's Delight 10-1), as C compilers do
-        mag, s = div_magic(k)
-        q = o_bin(.mulhs, o_tmp(), a, o_kconst(mag))
-        if mag < 0: q = o_bin(.add, o_tmp(), q, a)
-        if s > 0: q = o_bin(.shrs, o_tmp(), q, o_kconst(s))
-        neg = o_bin(.shru, o_tmp(), a, o_kconst(63))
-        if op == .divs:
-            o_bin(.add, d, q, neg)
-        else:
-            qq = o_bin(.add, o_tmp(), q, neg)
-            t = o_bin(.mul, o_tmp(), qq, o_kconst(k))
-            o_bin(.sub, d, a, t)
-        return
-    if (op == .divu or op == .remu) and k > 1 and sh <= 0 and mulh_ok:
-        # unsigned: the high half of a multiply by a magic number, and a shift (with an add when
-        # the number needs 65 bits: Hacker's Delight 10-8)
-        mag, s, add = divu_magic(u64(k))
-        # (the last step writes the quotient straight into d, as the signed one does)
-        qd = d
-        if op == .remu: qd = o_tmp()
-        t = o_bin(.mulhu, o_tmp(), a, o_kconst(int(mag)))
-        if add:
-            q1 = o_bin(.sub, o_tmp(), a, t)
-            q2 = o_bin(.shru, o_tmp(), q1, o_kconst(1))
-            if s > 1:
-                q3 = o_bin(.add, o_tmp(), q2, t)
-                o_bin(.shru, qd, q3, o_kconst(s - 1))
-            else: o_bin(.add, qd, q2, t)
-        else:
-            o_bin(.shru, qd, t, o_kconst(s))
-        if op == .remu:
-            q = int(o_regs[qd].repl)
-            m = o_bin(.mul, o_tmp(), q, o_kconst(k))
-            o_bin(.sub, d, a, m)
-        return
-    o_emit(ins)
 
 # the magic number, shift and whether an add is needed, for dividing an unsigned 64-bit integer
 # by d (d >= 2) (Hacker's Delight 10-2)
@@ -876,31 +902,64 @@ o_copy_forward = ():
 # Mixed-width accesses, incompatible lane kinds, and escaping addresses retain
 # memory storage. Address discovery also selects lane widths, without another
 # full optimization pass. Larger records stay in memory to bound register pressure.
-sra_kind: int[]        # per slot lane (4 per slot): 0 untyped bits, 1 float, 2 integer
-sra_sl: int[]          # per vreg: the slot it is an address in (-1: none) ...
-sra_soff: int[]        # ... and the offset
-sra_ok: bool[]         # per slot: becomes registers
-sra_lane: int[]        # per slot lane: its vreg
+# One function-local indexed workspace, shared by discovery, escape validation
+# and rewriting. Its storage is reused, but no pointer escapes an optimization.
+struct SraValue:
+    defpos: int = -1
+    ndef: int
+    slot: int = -1
+    offset: int
+    constant: bool
+    kval: int
+
+struct SraSlot:
+    width: int = 8
+    ok: bool
+
+struct SraLane:
+    kind: int              # 0 untyped bits, 1 float, 2 integer
+    reg: int = -1
+
+sra_value_storage: SraValue[]
+sra_slot_storage: SraSlot[]
+sra_lane_storage: SraLane[]
+sra_values: *SraValue
+sra_slots: *SraSlot
+sra_lanes: *SraLane
 sra_nv = 0
-sra_widths: int[]      # per slot: 1/2 for narrow scalars, 4/8 for aggregates
+
+sra_workspace = (nv: int, ns: int):
+    if sra_value_storage.len() < nv: sra_value_storage.resize(nv)
+    if sra_slot_storage.len() < ns: sra_slot_storage.resize(ns)
+    if sra_lane_storage.len() < ns * 4: sra_lane_storage.resize(ns * 4)
+    sra_values = data(sra_value_storage)
+    sra_slots = data(sra_slot_storage)
+    sra_lanes = data(sra_lane_storage)
+    loop v in [0..nv): sra_values[v] = SraValue()
+    loop slot in [0..ns):
+        size = int(ir.slot_size[slot])
+        width = 8
+        if size == 1 or size == 2: width = size
+        else if size % 8 != 0: width = 4
+        sra_slots[slot] = SraSlot(width, false)
 
 sra_shift = (width: int) -> int: if width == 8: 3 else: width >> 1
 
 # May this byte range be used as lanes of kind k (0: just bits, copied)?
 sra_lane_use = (s: int, off: int, bytes: int, k: int) -> bool:
-    width = sra_widths[s]
+    width = sra_slots[s].width
     if int(ir.slot_size[s]) >> sra_shift(width) > 4: return false
     if k == 1 and width < 4: return false
     if off < 0 or off & (width - 1) != 0 or bytes & (width - 1) != 0 or off + bytes > int(ir.slot_size[s]): return false
     loop i in [0..(bytes >> sra_shift(width))):
         j = s * 4 + (off >> sra_shift(width)) + i
         if k != 0:
-            if sra_kind[j] != 0 and sra_kind[j] != k: return false
-            sra_kind[j] = k
+            if sra_lanes[j].kind != 0 and sra_lanes[j].kind != k: return false
+            sra_lanes[j].kind = k
     true
 
-sra_is_p = (v: int) -> bool: v >= 0 and v < sra_nv and sra_sl[v] >= 0 and sra_ok[sra_sl[v]]
-sra_lane_of = (v: int, i: int) -> int: sra_lane[sra_sl[v] * 4 + (sra_soff[v] >> sra_shift(sra_widths[sra_sl[v]])) + i]
+sra_is_p = (v: int) -> bool: v >= 0 and v < sra_nv and sra_values[v].slot >= 0 and sra_slots[sra_values[v].slot].ok
+sra_lane_of = (v: int, i: int) -> int: sra_lanes[sra_values[v].slot * 4 + (sra_values[v].offset >> sra_shift(sra_slots[sra_values[v].slot].width)) + i].reg
 
 # A lane as vreg type ty, preserving bits between equal-width float/integer lanes.
 sra_as_ty = (out: mut Ins[], x: int, ty: int) -> int:
@@ -910,125 +969,192 @@ sra_as_ty = (out: mut Ins[], x: int, ty: int) -> int:
     else: out.push(Ins(.f2bits, i32(vtype(x)), i32(t), i32(x), 0, 0, 0))
     t
 
+# Resolve only address definitions that have a use. The chain follows strictly
+# earlier definitions, so it is acyclic; each candidate is memoized once. The
+# explicit stack avoids compiler-stack growth for long address chains.
+sra_chain: int[]
+sra_resolve_address = (value: int) -> int:
+    sra_chain.clear()
+    v = value
+    loop sra_values[v].slot == -2:
+        pos = sra_values[v].defpos
+        if sra_values[v].ndef != 1:
+            sra_values[v].slot = -1
+            break
+        ins = ir.code[pos]
+        a = int(ins.a)
+        if sra_values[a].defpos >= pos:
+            sra_values[v].slot = -1
+            break
+        if ins.op == .add:
+            b = int(ins.b)
+            if not is_kv(b) and not (sra_values[b].constant and sra_values[b].ndef == 1 and sra_values[b].defpos < pos):
+                sra_values[v].slot = -1
+                break
+        sra_chain.push(v)
+        v = a
+    loop sra_chain.len() > 0:
+        d = sra_chain.pop()
+        ins = ir.code[sra_values[d].defpos]
+        a = int(ins.a)
+        sra_values[d].slot = sra_values[a].slot
+        if sra_values[a].slot >= 0:
+            offset = sra_values[a].offset
+            if ins.op == .add:
+                b = int(ins.b)
+                offset += if is_kv(b): kv_of(b) else: sra_values[b].kval
+            sra_values[d].offset = offset
+    sra_values[value].slot
+
+# Keep the overwhelmingly common cached query separate from chain resolution.
+sra_address = (value: int) -> int:
+    slot = sra_values[value].slot
+    if slot == -2: return sra_resolve_address(value)
+    slot
+
+# O(N + U + A + M + output): one definition index, one use walk, and a
+# worklist containing only M slot-memory operations. Address resolution visits
+# each of A demanded definitions once. The final rewrite runs only on success.
 o_sra = ():
     ns = ir.slot_size.len()
     if ns == 0: return
     code = ir.code
     nv = ir.vtypes.len()
     sra_nv = nv
-    # addresses in slots: (slot, offset) of vregs defined once as a slot address or an
-    # address in one plus a constant
-    ndef = fill(0, nv)
-    loop ins in code:
+    sra_workspace(nv, ns)
+    roots: int[]
+    loop pos in 0.. and ins in code:
         d = int(ins.dst)
-        if d >= 0 and o_defines(ins.op): ndef[d] += 1
-    kconst = fill(false, nv)
-    kval = fill(0, nv)
-    addressed = fill(false, ns)
-    sl = fill(-1, nv)
-    soff = fill(0, nv)
-    sra_widths = fill(8, ns)
-    loop s in [0..ns):
-        size = int(ir.slot_size[s])
-        if size == 1 or size == 2: sra_widths[s] = size
-        else if size % 8 != 0: sra_widths[s] = 4
+        op = ins.op
+        if d < 0 or not o_defines(op): continue
+        sra_values[d].ndef += 1
+        sra_values[d].defpos = pos
+        if op == .slot: roots.push(pos)
+        else if op == .mov or op == .add: sra_values[d].slot = -2
+        if op == .iconst:
+            sra_values[d].constant = true
+            sra_values[d].kval = ins.imm
     any = false
-    loop ins in code:
+    loop pos in roots:
+        ins = code[pos]
         d = int(ins.dst)
+        slot = int(ins.a)
+        if sra_values[d].ndef == 1 and int(ir.slot_size[slot]) <= 32:
+            sra_values[d].slot = slot
+            sra_slots[slot].ok = true
+            any = true
+        else: sra_values[d].slot = -1
+    if not any: return
+    pending: int[]
+    loop pos in 0.. and ins in code:
         op = ins.op
         a = int(ins.a)
         b = int(ins.b)
         c = int(ins.c)
-        if op == .iconst and ndef[d] == 1:
-            kconst[d] = true
-            kval[d] = ins.imm
-        else if op == .slot and ndef[d] == 1 and int(ir.slot_size[int(ins.a)]) <= 32:
-            sl[d] = int(ins.a)
-            addressed[int(ins.a)] = true
-            any = true
-        else if op == .mov and d >= 0 and ndef[d] == 1 and sl[int(ins.a)] >= 0:
-            # (another name for it, as an inlined function's parameter)
-            sl[d] = sl[int(ins.a)]
-            soff[d] = soff[int(ins.a)]
-        else if op == .add and d >= 0 and ndef[d] == 1 and sl[int(ins.a)] >= 0:
-            b = int(ins.b)
-            if is_kv(b) or kconst[b]:
-                k = if is_kv(b): kv_of(b) else: kval[b]
-                sl[d] = sl[int(ins.a)]
-                soff[d] = soff[int(ins.a)] + k
-        else if op == .vop:
-            if a >= 0 and sl[a] >= 0: sra_widths[sl[a]] = 4
-            if b >= 0 and sl[b] >= 0: sra_widths[sl[b]] = 4
-            if c >= 0 and sl[c] >= 0: sra_widths[sl[c]] = 4
-        else if op == .load or op == .store:
-            if a >= 0 and sl[a] >= 0 and sra_widths[sl[a]] == 8 and c & 15 != 8: sra_widths[sl[a]] = 4
-        else if op == .copy or op == .zero:
-            if a >= 0 and sl[a] >= 0 and sra_widths[sl[a]] == 8 and (soff[a] % 8 != 0 or ins.imm % 8 != 0): sra_widths[sl[a]] = 4
-            if op == .copy and b >= 0 and sl[b] >= 0 and sra_widths[sl[b]] == 8 and (soff[b] % 8 != 0 or ins.imm % 8 != 0): sra_widths[sl[b]] = 4
-    if not any: return
+        match op:
+            slot, zeroslots: continue
+            mov, add:
+                if sra_address(int(ins.dst)) >= 0: continue
+            load:
+                sa = sra_address(a)
+                if sa >= 0:
+                    if sra_values[a].defpos < pos and sra_slots[sa].width == 8 and c & 15 != 8: sra_slots[sa].width = 4
+                    if c & M_INDEX == 0:
+                        pending.push(pos)
+                        continue
+            store:
+                sa = sra_address(a)
+                sb = sra_address(b)
+                if sb >= 0: sra_slots[sb].ok = false
+                if c & M_INDEX != 0:
+                    sd = sra_address(int(ins.dst))
+                    if sd >= 0: sra_slots[sd].ok = false
+                if sa >= 0:
+                    if sra_values[a].defpos < pos and sra_slots[sa].width == 8 and c & 15 != 8: sra_slots[sa].width = 4
+                    pending.push(pos)
+                continue
+            vop:
+                sa = sra_address(a)
+                sb = sra_address(b)
+                sc = sra_address(c)
+                if sa >= 0 and sra_values[a].defpos < pos: sra_slots[sa].width = 4
+                if sb >= 0 and sra_values[b].defpos < pos: sra_slots[sb].width = 4
+                if sc >= 0 and sra_values[c].defpos < pos: sra_slots[sc].width = 4
+                if sa >= 0 or sb >= 0 or sc >= 0: pending.push(pos)
+                continue
+            copy, zero:
+                sa = sra_address(a)
+                sb = if op == .copy: sra_address(b) else: -1
+                if sa >= 0 and sra_values[a].defpos < pos and sra_slots[sa].width == 8 and (sra_values[a].offset % 8 != 0 or ins.imm % 8 != 0): sra_slots[sa].width = 4
+                if sb >= 0 and sra_values[b].defpos < pos and sra_slots[sb].width == 8 and (sra_values[b].offset % 8 != 0 or ins.imm % 8 != 0): sra_slots[sb].width = 4
+                if sa >= 0 or sb >= 0: pending.push(pos)
+                continue
+            _: pass
+        ir_operands(ins)
+        loop k in [0..ir_use_count):
+            slot = sra_address(ir_use(k))
+            if slot >= 0: sra_slots[slot].ok = false
     # Lanes keep their observed numeric kind; copy-only lanes contain integer bits.
-    ok = addressed
+    any = false
     loop s in [0..ns):
-        if int(ir.slot_size[s]) & (sra_widths[s] - 1) != 0 or int(ir.slot_size[s]) >> sra_shift(sra_widths[s]) > 4: ok[s] = false
-    sra_kind = fill(0, ns * 4)
-    loop ins in code:
+        if int(ir.slot_size[s]) & (sra_slots[s].width - 1) != 0 or int(ir.slot_size[s]) >> sra_shift(sra_slots[s].width) > 4: sra_slots[s].ok = false
+        if sra_slots[s].ok: any = true
+    if not any: return
+    loop lane in [0..ns * 4): sra_lanes[lane] = SraLane()
+    loop pos in pending:
+        ins = code[pos]
         op = ins.op
         a = int(ins.a)
         b = int(ins.b)
         c = int(ins.c)
         # every use of a slot address must be one of these
-        if op == .load and a >= 0 and sl[a] >= 0 and c & M_INDEX == 0:
-            if c & 15 != sra_widths[sl[a]] or not sra_lane_use(sl[a], soff[a] + ins.imm, c & 15, if c & M_FLOAT != 0: 1 else: 2): ok[sl[a]] = false
+        if op == .load and a >= 0 and sra_values[a].slot >= 0 and c & M_INDEX == 0:
+            if c & 15 != sra_slots[sra_values[a].slot].width or not sra_lane_use(sra_values[a].slot, sra_values[a].offset + ins.imm, c & 15, if c & M_FLOAT != 0: 1 else: 2): sra_slots[sra_values[a].slot].ok = false
             continue
         if op == .store:
-            if b >= 0 and sl[b] >= 0: ok[sl[b]] = false
-            if c & M_INDEX != 0 and int(ins.dst) >= 0 and sl[int(ins.dst)] >= 0: ok[sl[int(ins.dst)]] = false
-            if a >= 0 and sl[a] >= 0:
-                if c & M_INDEX != 0 or c & 15 != sra_widths[sl[a]] or not sra_lane_use(sl[a], soff[a] + ins.imm, c & 15, if c & M_FLOAT != 0: 1 else: 2): ok[sl[a]] = false
+            if b >= 0 and sra_values[b].slot >= 0: sra_slots[sra_values[b].slot].ok = false
+            if c & M_INDEX != 0 and int(ins.dst) >= 0 and sra_values[int(ins.dst)].slot >= 0: sra_slots[sra_values[int(ins.dst)].slot].ok = false
+            if a >= 0 and sra_values[a].slot >= 0:
+                if c & M_INDEX != 0 or c & 15 != sra_slots[sra_values[a].slot].width or not sra_lane_use(sra_values[a].slot, sra_values[a].offset + ins.imm, c & 15, if c & M_FLOAT != 0: 1 else: 2): sra_slots[sra_values[a].slot].ok = false
             continue
         if op == .vop:
             n = (ins.imm >> 4) & 7
-            if a >= 0 and sl[a] >= 0 and not sra_lane_use(sl[a], soff[a], 4 * n, 1): ok[sl[a]] = false
+            if a >= 0 and sra_values[a].slot >= 0 and not sra_lane_use(sra_values[a].slot, sra_values[a].offset, 4 * n, 1): sra_slots[sra_values[a].slot].ok = false
             if ins.imm & VOP_SPLAT_B != 0:
-                if b >= 0 and sl[b] >= 0: ok[sl[b]] = false
-            else if b >= 0 and sl[b] >= 0 and not sra_lane_use(sl[b], soff[b], 4 * n, 1): ok[sl[b]] = false
+                if b >= 0 and sra_values[b].slot >= 0: sra_slots[sra_values[b].slot].ok = false
+            else if b >= 0 and sra_values[b].slot >= 0 and not sra_lane_use(sra_values[b].slot, sra_values[b].offset, 4 * n, 1): sra_slots[sra_values[b].slot].ok = false
             if ins.imm & VOP_SPLAT_C != 0:
-                if c >= 0 and sl[c] >= 0: ok[sl[c]] = false
-            else if c >= 0 and sl[c] >= 0 and not sra_lane_use(sl[c], soff[c], 4 * n, 1): ok[sl[c]] = false
+                if c >= 0 and sra_values[c].slot >= 0: sra_slots[sra_values[c].slot].ok = false
+            else if c >= 0 and sra_values[c].slot >= 0 and not sra_lane_use(sra_values[c].slot, sra_values[c].offset, 4 * n, 1): sra_slots[sra_values[c].slot].ok = false
             continue
         if op == .copy:
             # Keep one side in memory when copy endpoints use different lane widths.
-            if a >= 0 and b >= 0 and sl[a] >= 0 and sl[b] >= 0 and sra_widths[sl[a]] != sra_widths[sl[b]]:
-                if sra_widths[sl[a]] > sra_widths[sl[b]]: ok[sl[a]] = false
-                else: ok[sl[b]] = false
-            if a >= 0 and sl[a] >= 0 and not sra_lane_use(sl[a], soff[a], int(ins.imm), 0): ok[sl[a]] = false
-            if b >= 0 and sl[b] >= 0 and not sra_lane_use(sl[b], soff[b], int(ins.imm), 0): ok[sl[b]] = false
+            if a >= 0 and b >= 0 and sra_values[a].slot >= 0 and sra_values[b].slot >= 0 and sra_slots[sra_values[a].slot].width != sra_slots[sra_values[b].slot].width:
+                if sra_slots[sra_values[a].slot].width > sra_slots[sra_values[b].slot].width: sra_slots[sra_values[a].slot].ok = false
+                else: sra_slots[sra_values[b].slot].ok = false
+            if a >= 0 and sra_values[a].slot >= 0 and not sra_lane_use(sra_values[a].slot, sra_values[a].offset, int(ins.imm), 0): sra_slots[sra_values[a].slot].ok = false
+            if b >= 0 and sra_values[b].slot >= 0 and not sra_lane_use(sra_values[b].slot, sra_values[b].offset, int(ins.imm), 0): sra_slots[sra_values[b].slot].ok = false
             continue
         if op == .zero:
-            if a >= 0 and sl[a] >= 0 and not sra_lane_use(sl[a], soff[a], int(ins.imm), 0): ok[sl[a]] = false
+            if a >= 0 and sra_values[a].slot >= 0 and not sra_lane_use(sra_values[a].slot, sra_values[a].offset, int(ins.imm), 0): sra_slots[sra_values[a].slot].ok = false
             continue
-        if (op == .add or op == .mov) and int(ins.dst) >= 0 and sl[int(ins.dst)] >= 0: continue
+        if (op == .add or op == .mov) and int(ins.dst) >= 0 and sra_values[int(ins.dst)].slot >= 0: continue
         if op == .slot: continue
         if op == .zeroslots: continue
         ir_operands(ins)
         loop operand_index in [0..ir_use_count):
             let u = ir_use(operand_index)
-            if sl[u] >= 0: ok[sl[u]] = false
+            if sra_values[u].slot >= 0: sra_slots[sra_values[u].slot].ok = false
     # a register per lane
-    lane = fill(-1, ns * 4)
     any = false
     loop s in [0..ns):
-        if not ok[s]: continue
-        loop i in [0..(int(ir.slot_size[s]) >> sra_shift(sra_widths[s]))):
-            ty = if sra_kind[s * 4 + i] == 1: (if sra_widths[s] == 8: VF else: VS) else: VI
-            lane[s * 4 + i] = vreg(ty)
+        if not sra_slots[s].ok: continue
+        loop i in [0..(int(ir.slot_size[s]) >> sra_shift(sra_slots[s].width))):
+            ty = if sra_lanes[s * 4 + i].kind == 1: (if sra_slots[s].width == 8: VF else: VS) else: VI
+            sra_lanes[s * 4 + i].reg = vreg(ty)
             any = true
     if not any: return
     # rewrite
-    sra_sl = sl
-    sra_soff = soff
-    sra_ok = ok
-    sra_lane = lane
     out: Ins[]
     out.reserve(code.len() + code.len() / 4)
     loop ins in code:
@@ -1039,7 +1165,7 @@ o_sra = ():
         d = int(ins.dst)
         if (op == .slot or op == .add or op == .mov) and sra_is_p(d): continue
         if op == .load and sra_is_p(a):
-            width = sra_widths[sl[a]]
+            width = sra_slots[sra_values[a].slot].width
             ty = if width == 8: VF else: VS
             x = sra_lane_of(a, int((ins.imm >> sra_shift(width))))
             if c & M_FLOAT != 0: out.push(Ins(.mov, i32(ty), i32(d), i32(sra_as_ty(out, x, ty)), 0, 0, 0))
@@ -1050,7 +1176,7 @@ o_sra = ():
                 out.push(Ins(conv, VI, i32(d), i32(sra_as_ty(out, x, VI)), 0, 0, 0))
             continue
         if op == .store and sra_is_p(a):
-            x = sra_lane_of(a, int((ins.imm >> sra_shift(sra_widths[sl[a]]))))
+            x = sra_lane_of(a, int((ins.imm >> sra_shift(sra_slots[sra_values[a].slot].width))))
             out.push(Ins(.mov, i32(vtype(x)), i32(x), i32(sra_as_ty(out, b, vtype(x))), 0, 0, 0))
             continue
         if op == .vop and (sra_is_p(a) or (ins.imm & VOP_SPLAT_B == 0 and sra_is_p(b)) or (ins.imm & VOP_SPLAT_C == 0 and sra_is_p(c))):
@@ -1079,7 +1205,7 @@ o_sra = ():
                 else: out.push(Ins(.store, VS, 0, i32(a), i32(r), i32(4 | M_FLOAT), 4 * i))
             continue
         if op == .copy and (sra_is_p(a) or sra_is_p(b)):
-            width = sra_widths[sl[if sra_is_p(a): a else: b]]
+            width = sra_slots[sra_values[if sra_is_p(a): a else: b].slot].width
             n = int((ins.imm >> sra_shift(width)))
             xs: int[]
             loop i in [0..n):
@@ -1101,7 +1227,7 @@ o_sra = ():
                     out.push(Ins(.store, i32(vtype(xs[i])), 0, i32(a), i32(xs[i]), i32(m), width * i))
             continue
         if op == .zero and sra_is_p(a):
-            loop i in [0..int((ins.imm >> sra_shift(sra_widths[sl[a]])))):
+            loop i in [0..int((ins.imm >> sra_shift(sra_slots[sra_values[a].slot].width)))):
                 t = sra_lane_of(a, i)
                 if vtype(t) != VI:
                     out.push(Ins(.fconst, i32(vtype(t)), i32(t), 0, 0, 0, 0))
@@ -1112,10 +1238,10 @@ o_sra = ():
             # (lanes of slots cleared here start at zero)
             loop k in [0..b):
                 item = int(ir.args[a + k])
-                if item & 1 == 0 and ok[item >> 1]:
+                if item & 1 == 0 and sra_slots[item >> 1].ok:
                     s = item >> 1
-                    loop i in [0..(int(ir.slot_size[s]) >> sra_shift(sra_widths[s]))):
-                        t = lane[s * 4 + i]
+                    loop i in [0..(int(ir.slot_size[s]) >> sra_shift(sra_slots[s].width))):
+                        t = sra_lanes[s * 4 + i].reg
                         if vtype(t) != VI: out.push(Ins(.fconst, i32(vtype(t)), i32(t), 0, 0, 0, 0))
                         else: out.push(Ins(.mov, VI, i32(t), i32(k_vreg(0)), 0, 0, 0))
     ir.code = out
@@ -1333,7 +1459,7 @@ optimize = ():
             target = ctl.len() - 1 - int(ins.imm)
             if target >= 0 and ctl[target].kind == 3: ctl[target].condition = c
             # (after it, in this construct, the condition is false)
-            o_simplify(ins, pos)
+            o_transfer(ins, true)
             add_fact_false(c)
             continue
         if op == .zeroslots:
@@ -1343,7 +1469,7 @@ optimize = ():
                 if item & 1 == 1: o_regs[item >> 1].ver += 1
             o_out.push(ins)
             continue
-        o_simplify(ins, pos)
+        o_transfer(ins, true)
     # backward: drop pure instructions whose results are unused (o_push counted the uses)
     i = o_out.len() - 1
     loop i >= 0:
