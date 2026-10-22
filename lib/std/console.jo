@@ -1,5 +1,18 @@
-# Dewy's console: colour on the standard streams, and what a program's main gives
-# back when an error reaches it.
+# Dewy's console: `console.print`/`printl`/`info` on standard output, `warn`/`error`
+# on standard error (coloured on a terminal) and `debug` on standard error (left out
+# of release builds); `print(x file=stderr)` for either stream. The checker turns the
+# calls into its print intrinsic, which formats as Dewy does; these are the streams.
+
+# a standard stream, for print's `file=`
+struct Stream:
+    fd: int
+stdout = Stream(1)
+stderr = Stream(2)
+
+# console.color: 'auto' (colour on a terminal), 'always' or 'never'
+struct Console:
+    color: str
+console = Console("auto")
 
 # standard error is a terminal (not a file or a pipe)
 __stderr_tty = () -> bool:
@@ -18,10 +31,9 @@ __stderr_tty = () -> bool:
 
 # Colour on stream fd (1 or 2): the program's console.color first ('always', 'never'),
 # then NO_COLOR, then FORCE_COLOR or CLICOLOR_FORCE, then whether it is a terminal.
-__console_color_mode = "auto"
 __console_colored = (fd: int) -> bool:
-    if __console_color_mode == "always": return true
-    if __console_color_mode == "never": return false
+    if console.color == "always": return true
+    if console.color == "never": return false
     if len(env("NO_COLOR") ?? "") > 0: return false
     force = env("FORCE_COLOR") ?? ""
     if len(force) == 0: force = env("CLICOLOR_FORCE") ?? ""
@@ -34,6 +46,11 @@ __console_line = (fd: int, s: str, color: str):
     if len(color) > 0 and __console_colored(fd):
         __console_write(fd, "\x1b[{color}m{s}\x1b[0m\n")
     else: __console_write(fd, s + "\n")
+
+# print's text on a stream (`print(x file=stream)`), with a line break or not
+__console_put = (stream: Stream, s: str, newline: bool):
+    if newline: __console_write(stream.fd, s + "\n")
+    else: __console_write(stream.fd, s)
 
 __console_write = (fd: int, s: str):
     if fd == 1: write(s)

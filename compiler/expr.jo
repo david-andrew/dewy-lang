@@ -3276,7 +3276,8 @@ dewy_surface_table = () -> {int: str}:
             ("without_extension", "`p(path).with_suffix(\"\")`"),
             ("join_path", "`p\"\{a}/\{b}\"`: a path interpolates as its text"),
             ("sort_by", "`xs.sort(key=f)` sorts by a key (`reverse=true` for largest first)"),
-            ("sorted_by", "`xs.sorted(key=f)` gives a copy sorted by a key (`reverse=true` for largest first)")]:
+            ("sorted_by", "`xs.sorted(key=f)` gives a copy sorted by a key (`reverse=true` for largest first)"),
+            ("eprint", "`printl(x file=stderr)` writes to standard error, and `console.error(x)` in red on a terminal")]:
             dewy_surface_hints[intern(entry.0)] = entry.1
     dewy_surface_hints
 
@@ -3292,7 +3293,7 @@ dewy_surface = (name: int, decl: int) -> int:
     0
 
 # (a Jo library operation that Dewy spells another way whatever its arguments)
-dewy_renamed = (name: int) -> bool: name == intern("sort_by") or name == intern("sorted_by")
+dewy_renamed = (name: int) -> bool: name == intern("sort_by") or name == intern("sorted_by") or name == intern("eprint")
 
 # Suggested names as the source at pos spells them: Dewy's own words for the
 # implementation's builtin types and sequence length.
@@ -4620,6 +4621,45 @@ missing_type = () -> int:
     if s == 0 or syms[s].kind != .struct_: return 0
     get_struct_inst(int(syms[s].decl), [])
 
+# (the prelude's Console, the type of `console`; 0 before the library is loaded)
+console_type = () -> int:
+    s = prelude.get(intern("Console")) ?? 0
+    if s == 0 or syms[s].kind != .struct_: return 0
+    get_struct_inst(int(syms[s].decl), [])
+
+# `console.printl(x)` and the rest: print and printl as written, info as printl;
+# warn and error on standard error, yellow and red where colour is on; debug on
+# standard error, and nothing in a release build (its arguments not evaluated)
+dewy_console_call = (n: int, member: str, args: int[], expected: int) -> int:
+    pos = nodes[n].pos
+    if member == "print" or member == "printl" or member == "info":
+        printer = "print"
+        if member == "print": printer = "__dewy_print"
+        nodes[n].a = i32(bc_ident(printer, pos))
+        set_list(n, args)
+        return check_expr(n, expected)
+    color = ""
+    if member == "warn": color = "33"
+    else if member == "error": color = "31"
+    else if member != "debug": fatal(pos, "console has print, printl, info, warn, error and debug (and the field color), not '{member}'")
+    if member == "debug" and release_build:
+        nodes[n] = nodes[bc_block([], pos)]
+        return check_expr(n, expected)
+    text = mk(.str_lit, pos)
+    nodes[text].aux = 1
+    parts: int[]
+    loop i in 0.. and a in args:
+        if nodes[a].kind == .namedarg: fatal(nodes[a].pos, "console.{member} takes no named arguments (`print(x file=stderr)` chooses a stream)")
+        if i > 0: parts.push(bc_str(" ", pos))
+        part = mk(.pair, pos)
+        nodes[part].a = i32(a)
+        nodes[part].sval = -1
+        parts.push(part)
+    set_list(text, parts)
+    if args.len() == 1 and nodes[args[0]].kind == .str_lit and nodes[args[0]].aux == 0: text = args[0]
+    nodes[n] = nodes[bc_call("__console_line", [bc_int(2, pos), text, bc_str(color, pos)], pos)]
+    check_expr(n, expected)
+
 # the member a Dewy program wrote, for a library function standing for it
 shown_fn_name = (name: str) -> str:
     if name == "__dewy_find": return "find"
@@ -5105,6 +5145,7 @@ check_call = (n: int, expected: int) -> int:
             return check_copy(n, recv, rt)
         if ide_sentinel != 0 and fname == ide_sentinel: ide_complete_members(rt)
         rk = types[rt].kind
+        if rk == .struct_ and dewy_at(nodes[n].pos) and rt == console_type(): return dewy_console_call(n, name_of(fname), args, expected)
         if rk == .module: return call_by_name(n, fname, int(types[rt].mod), args, expected, false)
         if rk == .typeval:
             tt = prune(int(types[rt].elem))
@@ -5561,8 +5602,16 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         s = mk(.str_lit, nodes[n].pos)
         nodes[s].aux = 1
         parts: int[]
-        loop i in 0.. and a in args:
-            if nodes[a].kind == .namedarg: fatal(nodes[a].pos, "print() does not take named arguments (`write(s)` prints without a line break; print puts a space between its values)")
+        # (Dewy's `print(x file=stderr)`: the stream it goes to)
+        stream = 0
+        values: int[]
+        loop a in args:
+            if nodes[a].kind == .namedarg and dewy_at(nodes[a].pos) and name_of(int(nodes[a].name)) == "file" and stream == 0: stream = int(nodes[a].a)
+            else: values.push(a)
+        loop i in 0.. and a in values:
+            if nodes[a].kind == .namedarg:
+                if dewy_at(nodes[a].pos): fatal(nodes[a].pos, "print's only named argument is `file=`, the stream: `print(x file=stderr)`")
+                fatal(nodes[a].pos, "print() does not take named arguments (`write(s)` prints without a line break; print puts a space between its values)")
             if i > 0:
                 sp = mk(.str_lit, nodes[n].pos)
                 nodes[sp].sval = i32(intern(" "))
@@ -5572,7 +5621,11 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             nodes[part].sval = -1
             parts.push(part)
         set_list(s, parts)
-        if nargs == 1 and nodes[args[0]].kind == .str_lit and nodes[args[0]].aux == 0: s = args[0]
+        if values.len() == 1 and nodes[values[0]].kind == .str_lit and nodes[values[0]].aux == 0: s = values[0]
+        if stream != 0:
+            put = bc_call("__console_put", [stream, s, bc_bool(id == .print, nodes[n].pos)], nodes[n].pos)
+            nodes[n] = nodes[put]
+            return check_expr(n, expected)
         check_expr(s, 0)
         nodes[n].kind = .call
         nodes[n].aux = 0

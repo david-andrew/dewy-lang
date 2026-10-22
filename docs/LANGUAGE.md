@@ -2299,6 +2299,23 @@ yet (`SpawnError`).
 ## Loops, text and optional values
 
 `printl(x)` writes a value and a line break; `print(x)` writes it without one.
+They are the prelude's shadowable names for `console.printl` and `console.print`.
+`print(x file=stderr)` (and `printl`) writes to another stream: `stdout` and
+`stderr` are in the prelude. The prelude `console` also has `info` (as
+`printl`), `warn` and `error` (standard error, yellow and red on a terminal) and
+`debug` (standard error; left out of release builds, its arguments unevaluated):
+
+```dewy
+console.info("loaded {3} files")
+console.warn("cache is stale")
+printl("plain text on standard error" file=stderr)
+console.debug("only in debug builds")
+```
+
+Colour is used only when the stream is a terminal. `NO_COLOR` (set and nonempty)
+turns it off; otherwise `FORCE_COLOR` or `CLICOLOR_FORCE` (nonempty, not `0`)
+turns it on. A program overrides both with `console.color='always'`, `'never'`
+or `'auto'` (the default).
 
 Optional types use `T?`, including generic types such as `array<uint16>?`
 and nested `array<array<uint16>?>?`. `none` represents an absent value.

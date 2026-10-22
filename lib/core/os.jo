@@ -1002,7 +1002,7 @@ __test_begin = (name: str) -> bool:
             return true
         syscall(3, both[0] >> 32)
         syscall(3, outs[0] >> 32)
-        output, stdout = __test_collect(both[0] & 0xFFFFFFFF, outs[0] & 0xFFFFFFFF, pid > 0)
+        output, out_only = __test_collect(both[0] & 0xFFFFFFFF, outs[0] & 0xFFFFFFFF, pid > 0)
         if pid > 0:
             st = [0]
             loop true:
@@ -1010,13 +1010,13 @@ __test_begin = (name: str) -> bool:
             status = st[0] & 0xFFFF
             code = (status >> 8) & 255
             if status & 127 != 0: code = 128 + (status & 127)      # (ended by a signal)
-            __test_record(name, code, output, stdout)
+            __test_record(name, code, output, out_only)
             return false
     else when TARGET == "windows":
         __out_flush()
-        code, output, stdout = __w32_run_test(exe_path(), __test_index, args())
+        code, output, out_only = __w32_run_test(exe_path(), __test_index, args())
         if code < 0: output = "could not start the test process\n"
-        __test_record(name, code, output, stdout)
+        __test_record(name, code, output, out_only)
         return false
     true
 
@@ -1063,7 +1063,7 @@ __test_end = ():
     __expect_failures = 0
 
 # a test's result: 0 passed, 1 an expectation failed, anything else aborted
-__test_record = (name: str, code: int, output: str, stdout: str):
+__test_record = (name: str, code: int, output: str, out_only: str):
     __tests_run += 1
     status = "pass"
     if code != 0:
@@ -1076,7 +1076,7 @@ __test_record = (name: str, code: int, output: str, stdout: str):
         __test_failures.push(output)
     if __test_json:
         line = "\{\"test\":{__test_jq(name)},\"status\":\"{status}\",\"ms\":{(time() - __test_t0) * 1000:.1}"
-        if code != 0: line += ",\"output\":{__test_jq(output)},\"stdout\":{__test_jq(stdout)}"
+        if code != 0: line += ",\"output\":{__test_jq(output)},\"stdout\":{__test_jq(out_only)}"
         if code != 0 and code != 1: line += ",\"exit\":{code}"
         print(line + "\}")
         return

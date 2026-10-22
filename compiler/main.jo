@@ -358,6 +358,7 @@ compile = (path: str, out0: str) -> str:
     scan_build_block(path)
     if cli_release: opt_release = true
     if lower_only: opt_release = false
+    release_build = opt_release
     setup_target()
     if host_ir:
         if target_wasm or target_arm64 or target_windows or watch_build or repl_image or lower_only:
