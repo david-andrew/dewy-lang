@@ -243,6 +243,7 @@ decl_shadowable = (d: int) -> bool:
     d != 0 and (shadowable_decls.has(d) or modules[int(nodes[d].mod)].is_prelude)
 
 scope_add_module = (m: int, name: int, kind: SK, r: int, decl: int) -> int:
+    ml_bump()
     # (look the name up in place: holding a copy of the table would make the insert below copy it)
     found: int? = none
     if modules[m].is_prelude: found = prelude.get(name)
@@ -300,7 +301,32 @@ scope_reset = (mark: int):
     sc_syms.truncate(mark)
     sc_prev.truncate(mark)
 
+# module_lookup's last answer for each name (the module asked from, the binding, and the
+# generation it was found in). Any new module-level binding or import starts a new generation;
+# the universe is complete before checking starts. The editor does without.
+ml_gen = 1
+ml_sym: int[]
+ml_mod: int[]
+ml_at: int[]
+ml_bump = ():
+    ml_gen += 1
+
 module_lookup = (m: int, name: int) -> int:
+    if name < ml_at.len() and ml_at[name] == ml_gen and ml_mod[name] == m: return ml_sym[name]
+    s = module_lookup_now(m, name)
+    if not ide_on:
+        if ml_at.len() <= name:
+            grown = name * 2 + 64
+            loop ml_at.len() < grown:
+                ml_at.push(0)
+                ml_mod.push(0)
+                ml_sym.push(0)
+        ml_at[name] = ml_gen
+        ml_mod[name] = m
+        ml_sym[name] = s
+    s
+
+module_lookup_now = (m: int, name: int) -> int:
     demand_prelude_name(name)
     user = m >= 0 and not modules[m].is_prelude
     if m >= 0:
@@ -392,6 +418,7 @@ bind_from_imports = (start: int = 0):
                     where = "at {pos_str(nodes[d].pos)}"
                     if syms[ex].decl != 0: where = "at {pos_str(nodes[int(syms[ex].decl)].pos)}"
                     fatal(nodes[id].pos, "cannot import '{name_of(alias)}': this module has a '{name_of(alias)}' ({where}); import it with another name: {name_of(nm)} as ...")
+                ml_bump()
                 modules[m].names[alias] = new_sym(alias, syms[s].kind, int(syms[s].ref), int(syms[s].decl))
 
 # The module a binding belongs to: where its declaration is (an imported binding
@@ -465,6 +492,7 @@ dewy_import_clash = (m: int, name: int, s: int, owned: (int, int)[], d: int, pos
 # Bind an import's declarations of `name` (owned, as (ref, decl)) in module m,
 # replacing any binding there.
 bind_imported = (m: int, name: int, kind: SK, owned: (int, int)[]):
+    ml_bump()
     loop i in [0..owned.len()):
         o = owned[i]
         if i == 0: modules[m].names[name] = new_sym(name, kind, o.0, o.1)
@@ -1237,6 +1265,7 @@ register_decls = (m: int, decls: int[]):
             im = load_module(path, false, nodes[d].pos)
             modules[m].imports.push((im, nodes[d].pos))
             if nodes[d].aux == 1:
+                ml_bump()
                 modules[m].uses.push(im)
                 register_module(im)
             else if nodes[d].aux == 2 or nodes[d].aux == 3:
@@ -5014,6 +5043,7 @@ runtime_fn = (name: str) -> int:
     f
 
 add_universe = ():
+    ml_bump()
     exception_builtins()
     tys = [("__dewy_int", T_MATH_INT), ("int", T_INT), ("i8", T_I8), ("i16", T_I16), ("i32", T_I32), ("i64", T_INT), ("u8", T_U8), ("byte", T_U8),
         ("u16", T_U16), ("u32", T_U32), ("u64", T_U64), ("f64", T_FLOAT), ("f32", T_F32),
@@ -5066,6 +5096,7 @@ add_universe = ():
         universe[nm] = new_sym(nm, .const_, globals.len() - 1, 0)
     register_quantity_names()
     register_intrinsics()
+    ml_bump()
 
 load_prelude = ():
     # all .jo files in lib/core, lib/std and lib/game are loaded into the shared prelude scope
