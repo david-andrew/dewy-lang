@@ -254,25 +254,29 @@ if $target.os =? "windows" {
     const __READ:int32=1
     const __WRITE:int32=4
 
-    __close=(fd:int64):>void=>{__close_c(int32(fd))}
-    __bind=(fd:int64 address:ptr<uint8> length:int32):>int32=>__bind_c(int32(fd) address uint32(length))
-    __listen=(fd:int64 backlog:int32):>int32=>__listen_c(int32(fd) backlog)
-    __connect=(fd:int64 address:ptr<uint8> length:int32):>int32=>__connect_c(int32(fd) address uint32(length))
-    __name=(fd:int64 address:ptr<uint8> length:ptr<int32>):>int32=>__name_c(int32(fd) address length)
-    __receive=(fd:int64 data:ptr<uint8> length:int64):>int64=>__recv_c(int32(fd) data uint64(length) 0)
+    # A handle the system gave is a C int. Any other (a TcpStream made by hand)
+    # names no descriptor: -1, which every call refuses as a bad descriptor.
+    __fd=(handle:int64):>int32=>if handle >=? 0 and handle <=? 2147483647 int32(handle) else -1
+
+    __close=(fd:int64):>void=>{__close_c(__fd(fd))}
+    __bind=(fd:int64 address:ptr<uint8> length:int32):>int32=>__bind_c(__fd(fd) address uint32(length))
+    __listen=(fd:int64 backlog:int32):>int32=>__listen_c(__fd(fd) backlog)
+    __connect=(fd:int64 address:ptr<uint8> length:int32):>int32=>__connect_c(__fd(fd) address uint32(length))
+    __name=(fd:int64 address:ptr<uint8> length:ptr<int32>):>int32=>__name_c(__fd(fd) address length)
+    __receive=(fd:int64 data:ptr<uint8> length:int64):>int64=>__recv_c(__fd(fd) data uint64(length) 0)
     __poll_one=(fd:int64 events:int32 timeout:int32):>int32=>{
-        let fds:array<__PollFd>=[__PollFd[int32(fd) wrap<int16>(events) 0]]
+        let fds:array<__PollFd>=[__PollFd[__fd(fd) wrap<int16>(events) 0]]
         if __poll(fds.ptr 1 timeout) <=? 0 return 0
         return int32(fds[0].revents)
     }
     __reuse_address=(fd:int64):>void=>{
         let on:array<int32>=[1]
-        __setsockopt(int32(fd) __SOL_SOCKET __SO_REUSEADDR on.ptr 4)
+        __setsockopt(__fd(fd) __SOL_SOCKET __SO_REUSEADDR on.ptr 4)
     }
     __socket_error=(fd:int64):>int32=>{
         let code:array<int32>=[0]
         let length:array<uint32>=[4]
-        if __getsockopt(int32(fd) __SOL_SOCKET __SO_ERROR code.ptr length.ptr) not=? 0 return __last_error()
+        if __getsockopt(__fd(fd) __SOL_SOCKET __SO_ERROR code.ptr length.ptr) not=? 0 return __last_error()
         return code[0]
     }
 
@@ -294,13 +298,13 @@ if $target.os =? "windows" {
             return int64(fd)
         }
         __accept=(fd:int64):>int64=>{
-            let got=__accept_c(int32(fd) none none)
+            let got=__accept_c(__fd(fd) none none)
             if got <? 0 return -1
             let on:array<int32>=[1]
             __setsockopt(got __SOL_SOCKET 0x1022 on.ptr 4)
             return int64(got)
         }
-        __send=(fd:int64 data:ptr<uint8> length:int64):>int64=>__send_c(int32(fd) data uint64(length) 0)
+        __send=(fd:int64 data:ptr<uint8> length:int64):>int64=>__send_c(__fd(fd) data uint64(length) 0)
         __again=(code:int32):>bool=>code =? 35 or code =? 4
         __in_progress=(code:int32):>bool=>code =? 36 or code =? 4
         __describe=(code:int32):>string=>{
@@ -326,8 +330,8 @@ if $target.os =? "windows" {
         __family_field=(family:int32 size:int64):>uint16=>wrap<uint16>(family)
         # Nonblocking, closed on exec. Sends never raise SIGPIPE.
         __open=(family:int32):>int64=>int64(__socket(family 1 | 0x800 | 0x80000 6))
-        __accept=(fd:int64):>int64=>int64(__accept4(int32(fd) none none 0x800 | 0x80000))
-        __send=(fd:int64 data:ptr<uint8> length:int64):>int64=>__send_c(int32(fd) data uint64(length) 0x4000)
+        __accept=(fd:int64):>int64=>int64(__accept4(__fd(fd) none none 0x800 | 0x80000))
+        __send=(fd:int64 data:ptr<uint8> length:int64):>int64=>__send_c(__fd(fd) data uint64(length) 0x4000)
         __again=(code:int32):>bool=>code =? 11 or code =? 4
         __in_progress=(code:int32):>bool=>code =? 115 or code =? 4
         __describe=(code:int32):>string=>{
@@ -353,6 +357,6 @@ __prepare=(handle:int64):>void=>{
     if $target.os =? "windows" {
         __setsockopt(handle 6 1 on.ptr 4)
     } else {
-        __setsockopt(int32(handle) 6 1 on.ptr 4)
+        __setsockopt(__fd(handle) 6 1 on.ptr 4)
     }
 }
