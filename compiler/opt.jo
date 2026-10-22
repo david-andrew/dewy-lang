@@ -33,11 +33,35 @@ o_simplify_kind = (op: Op) -> int:
         calli: 7
         _: 0
 
+# The control class also serves the forward and cleanup cursors. Ordinary
+# operations take one direct edge rather than redispatching every control opcode.
+o_control_kind = (op: Op) -> int:
+    match op:
+        nop: 1
+        block: 2
+        loop: 3
+        if_: 4
+        else_: 5
+        end: 6
+        br: 7
+        brif: 8
+        brtable: 9
+        ret: 10
+        trap: 11
+        call: 12
+        mov: 13
+        copy: 14
+        zeroslots: 15
+        _: 0
+
 o_make_decode = () -> int[]:
     result: int[]
     loop i in [0..int(Op.findb) + 1):
         op = i as Op
         flags = int(o_defines_classify(op)) | (int(o_pure_classify(op)) << 1) | (int(kills_memory_classify(op)) << 2) | (int(o_retargetable_classify(op)) << 3)
+        control = o_control_kind(op)
+        special = control >= 1 and control <= 6 or control == 8 or control == 15
+        flags = flags | (control << 20) | (int(special) << 24)
         result.push(flags | ((cse_arity_classify(op, 0) + 1) << 4) | (o_rewrite_mask(op) << 8) | (o_simplify_kind(op) << 16))
     result
 
@@ -207,11 +231,124 @@ o_out: *Ins
 o_count = 0
 o_capacity = 0
 
+# The forward writer builds the output CFG once. Cleanup consumes its indexed
+# constructs and dead ranges after DCE; it never rediscovers reachability.
+# O(emitted operations + branch-table entries) time and O(emitted operations)
+# reusable scratch. Only control operations visit the CFG writer.
+struct OptFlow:
+    kind: Op
+    parent: int
+    start: int
+    exit: bool
+    terminated: bool
+
+o_flow_storage: OptFlow[]
+o_flow: *OptFlow
+o_flow_at_storage: i32[]
+o_flow_at: *i32
+o_flow_count = 0
+o_flow_top = -1
+o_flow_level = -1
+o_flow_open_storage: i32[]
+o_flow_open: *i32
+o_flow_dead = false
+o_flow_depth = 0
+o_dead_start = 0
+o_dead_first: int[]
+o_dead_limit: int[]
+
+o_flow_begin = ():
+    if o_flow_storage.len() < ir.code.len(): o_flow_storage.resize(ir.code.len())
+    o_flow = data(o_flow_storage)
+    if o_flow_open_storage.len() < ir.code.len(): o_flow_open_storage.resize(ir.code.len())
+    o_flow_open = data(o_flow_open_storage)
+    o_flow_level = -1
+    o_flow_at_storage.resize(o_capacity)
+    o_flow_at = data(o_flow_at_storage)
+    o_flow_count = 0
+    o_flow_top = -1
+    o_flow_dead = false
+    o_flow_depth = 0
+    o_dead_first.clear()
+    o_dead_limit.clear()
+
+o_flow_exit = (distance: int):
+    level = o_flow_level - distance
+    if level < 0: return
+    target = int(o_flow_open[level])
+    if o_flow[target].kind != .loop: o_flow[target].exit = true
+
+o_flow_end_dead = ():
+    if o_dead_start < o_count:
+        o_dead_first.push(o_dead_start)
+        o_dead_limit.push(o_count)
+
+# Callers select control operations; data emission never enters this path.
+o_flow_emit = (ins: *Ins):
+    if o_count == o_capacity: o_grow_output()
+    control = (o_decode[int(ins.op)] >> 20) & 15
+    if o_flow_dead:
+        if control >= 2 and control <= 4:
+            o_flow_depth += 1
+            return
+        if control == 5 or control == 6:
+            if o_flow_depth > 0:
+                if control == 6: o_flow_depth -= 1
+                return
+            o_flow_end_dead()
+        else: return
+    if control >= 2 and control <= 4:
+        index = o_flow_count
+        o_flow_count += 1
+        o_flow[index] = OptFlow(ins.op, o_flow_top, o_count, false, false)
+        o_flow_top = index
+        o_flow_level += 1
+        o_flow_open[o_flow_level] = i32(index)
+        o_flow_at[o_count] = i32(index)
+    else if control == 5:
+        o_flow[o_flow_top].exit = o_flow[o_flow_top].exit or not o_flow_dead
+        o_flow[o_flow_top].kind = .else_
+        o_flow_dead = false
+    else if control == 6:
+        o_flow_dead = o_flow_dead and not o_flow[o_flow_top].exit and o_flow[o_flow_top].kind != .if_
+        o_flow[o_flow_top].terminated = o_flow_dead
+        o_flow_at[o_count] = i32(o_flow_top)
+        o_flow_top = o_flow[o_flow_top].parent
+        o_flow_level -= 1
+        if o_flow_dead: o_dead_start = o_count + 1
+    else:
+        if control == 7 or control == 8 or control == 9:
+            o_flow_exit(int(ins.imm))
+            if control == 9:
+                loop k in [0..int(ins.b)):
+                    o_flow_exit(int(ir.args[int(ins.c) + k]))
+        if control == 7 or control == 9 or control == 10 or control == 11 or (control == 12 and ins.c == 1):
+            o_flow_dead = true
+            o_flow_depth = 0
+            o_dead_start = o_count + 1
+
+o_flow_pop = ():
+    # Only an empty block/if opener can be removed by the forward writer.
+    if o_flow_dead: o_flow_depth -= 1
+    else:
+        o_flow_top = o_flow[o_flow_top].parent
+        o_flow_level -= 1
+        o_flow_count -= 1
+
+o_grow_output = ():
+    o_capacity = max(32, o_capacity * 2)
+    o_out_storage.resize(o_capacity)
+    o_out = data(o_out_storage)
+    o_flow_at_storage.resize(o_capacity)
+    o_flow_at = data(o_flow_at_storage)
+
+o_append_plain = (ins: Ins):
+    if o_count == o_capacity: o_grow_output()
+    o_out[o_count] = ins
+    o_count += 1
+
 o_append = (ins: Ins):
-    if o_count == o_capacity:
-        o_capacity = max(32, o_capacity * 2)
-        o_out_storage.resize(o_capacity)
-        o_out = data(o_out_storage)
+    o_flow_emit(&ins)
     o_out[o_count] = ins
     o_count += 1
 
@@ -450,10 +587,13 @@ o_push = (ins: Ins):
     d = ir_operands(ins)
     if d >= 0: o_regs[d].ver += 1
     loop k in [0..ir_use_count): o_regs[ir_use(k)].nuse += 1
-    o_append(ins)
+    control = (o_decode[int(ins.op)] >> 20) & 15
+    if control >= 2 and control <= 11 or (control == 12 and ins.c == 1): o_flow_emit(&ins)
+    o_append_plain(ins)
 
 # drop the last output instruction (an empty construct's opening)
 o_pop = ():
+    o_flow_pop()
     o_count -= 1
     ins = o_out[o_count]
     if ins.op == .if_: o_regs[int(ins.a)].nuse -= 1
@@ -511,7 +651,9 @@ def_is = (v: int, op: Op) -> bool:
 
 o_fits32 = (v: int) -> bool: v >= -2147483648 and v <= 2147483647
 
-o_emit = (ins: Ins): o_transfer(ins, false)
+o_emit = (ins0: Ins):
+    ins = ins0
+    o_transfer(ins, false)
 
 # Only single-definition values have facts. Direct indexing avoids hashing the
 # same condition at every branch; both truth values keep their own scope, just
@@ -548,11 +690,10 @@ add_fact_true = (c: int): add_fact(c, 1)
 # Replacement operations are revisited locally, never by a whole-function sweep.
 # The walk is O(input operations + emitted strength-reduction operations), apart
 # from the separately bounded copy-lifetime queries and CSE hash probes.
-o_transfer = (ins0: Ins, simplify: bool):
-    ins = ins0
+o_transfer = (ins: mut Ins, simplify: bool):
     loop simplify:
         op = ins.op
-        kind = o_decode[int(op)] >> 16
+        kind = (o_decode[int(op)] >> 16) & 15
         if kind == 0 or kind == 7:
             o_rewrite(ins)
             if kind == 0: break
@@ -779,7 +920,7 @@ o_transfer = (ins0: Ins, simplify: bool):
                     return
                 reg.ver += 1
                 o_regs[e].nuse += 1
-                o_append(Ins(.mov, i32(vtype(d)), i32(d), i32(e), 0, 0, 0))
+                o_append_plain(Ins(.mov, i32(vtype(d)), i32(d), i32(e), 0, 0, 0))
                 return
             if reg.stable:
                 ht_insert(slot, k1, k2, k3, d, gen, va, vb)
@@ -793,7 +934,7 @@ o_transfer = (ins0: Ins, simplify: bool):
             reg.ver += 1
             if arity > 0: o_regs[int(ins.a)].nuse += 1
             if arity > 1: o_regs[int(ins.b)].nuse += 1
-            o_append(ins)
+            o_append_plain(ins)
             return
         else if op == .store:
             mode = int(ins.c)
@@ -811,7 +952,7 @@ o_transfer = (ins0: Ins, simplify: bool):
             o_regs[a].nuse += 1
             o_regs[v].nuse += 1
             if mode & M_INDEX != 0: o_regs[ix].nuse += 1
-            o_append(ins)
+            o_append_plain(ins)
             return
         else if op == .assume:
             a = int(ins.a)
@@ -958,8 +1099,6 @@ o_copy_forward = ():
 struct SraValue:
     slot: int = -1
     offset: int
-    constant: bool
-    kval: int
 
 struct SraSlot:
     width: int = 8
@@ -1052,7 +1191,7 @@ sra_resolve_address = (value: int) -> int:
             break
         if ins.op == .add:
             b = int(ins.b)
-            if not is_kv(b) and not (o_regs[b].ndef == 1 and sra_values[b].constant and o_regs[b].defpos < pos):
+            if not is_kv(b) and not (o_regs[b].ndef == 1 and ir.code[o_regs[b].defpos].op == .iconst and o_regs[b].defpos < pos):
                 sra_values[v].slot = -1
                 break
         sra_chain.push(v)
@@ -1066,7 +1205,7 @@ sra_resolve_address = (value: int) -> int:
             offset = sra_values[a].offset
             if ins.op == .add:
                 b = int(ins.b)
-                offset += if is_kv(b): kv_of(b) else: sra_values[b].kval
+                offset += if is_kv(b): kv_of(b) else: ir.code[o_regs[b].defpos].imm
             sra_values[d].offset = offset
     sra_values[value].slot
 
@@ -1088,26 +1227,24 @@ o_sra = ():
     o_resize(ir.vtypes.len())
     ns = ir.slot_size.len()
     if ns == 0: return
-    code = ir.code
+    code = data(ir.code)
+    count = ir.code.len()
     nv = ir.vtypes.len()
     sra_nv = nv
     sra_workspace(nv, ns)
     roots: int[]
-    loop pos in 0.. and ins in code:
+    loop pos in [0..count):
+        ins = &code[pos]
         d = int(ins.dst)
         op = ins.op
         if d < 0 or not o_defines(op): continue
         o_regs[d].ndef += 1
         o_regs[d].defpos = i32(pos)
-        sra_values[d].constant = op == .iconst
         if op == .slot: roots.push(pos)
         else if op == .mov or op == .add: sra_values[d].slot = -2
-        if op == .iconst:
-            sra_values[d].constant = true
-            sra_values[d].kval = ins.imm
     any = false
     loop pos in roots:
-        ins = code[pos]
+        ins = &code[pos]
         d = int(ins.dst)
         slot = int(ins.a)
         if o_regs[d].ndef == 1 and int(ir.slot_size[slot]) <= 32:
@@ -1118,7 +1255,8 @@ o_sra = ():
         else: sra_values[d].slot = -1
     if not any: return
     pending: int[]
-    loop pos in 0.. and ins in code:
+    loop pos in [0..count):
+        ins = &code[pos]
         op = ins.op
         a = int(ins.a)
         b = int(ins.b)
@@ -1194,7 +1332,7 @@ o_sra = ():
     if not any: return
     loop lane in [0..ns * 4): sra_lanes[lane].kind = 0
     loop pos in pending:
-        ins = code[pos]
+        ins = &code[pos]
         op = ins.op
         a = int(ins.a)
         b = int(ins.b)
@@ -1233,7 +1371,7 @@ o_sra = ():
         if (op == .add or op == .mov) and int(ins.dst) >= 0 and sra_values[int(ins.dst)].slot >= 0: continue
         if op == .slot: continue
         if op == .zeroslots: continue
-        ir_operands(ins)
+        ir_operands(ins[0])
         loop operand_index in [0..ir_use_count):
             let u = ir_use(operand_index)
             if sra_values[u].slot >= 0: sra_slots[sra_values[u].slot].ok = false
@@ -1249,8 +1387,9 @@ o_sra = ():
     # Rewrite, updating the shared definition index at each mutation.
     sra_index_nv = nv
     out: Ins[]
-    out.reserve(code.len() + code.len() / 4)
-    loop ins in code:
+    out.reserve(count + count / 4)
+    loop input_pos in [0..count):
+        ins = &code[input_pos]
         op = ins.op
         a = int(ins.a)
         b = int(ins.b)
@@ -1329,7 +1468,7 @@ o_sra = ():
                     sra_emit(out, Ins(.fconst, i32(vtype(t)), i32(t), 0, 0, 0, 0))
                 else: sra_emit(out, Ins(.mov, VI, i32(t), i32(k_vreg(0)), 0, 0, 0))
             continue
-        out.push(ins)
+        out.push(ins[0])
         if op == .zeroslots:
             # (lanes of slots cleared here start at zero)
             loop k in [0..b):
@@ -1364,9 +1503,10 @@ enter_loop = ():
     if k & 4 != 0 or ir.raw_mem: o_genh += 1
 
 # Input metadata is O(N + U): each operation and operand use is visited once.
+o_input_last: *i32
 o_input_use = (v: int, pos: int):
     if o_regs[v].first > pos: o_regs[v].first = i32(pos)
-    o_lastuse[v] = i32(pos)
+    o_input_last[v] = i32(pos)
 
 optimize = ():
     o_sra()
@@ -1386,8 +1526,10 @@ optimize = ():
             if let c = o_kmap.get(ir.kval[v]): o_regs[v].repl = i32(c)
             else: o_kmap[ir.kval[v]] = v
     o_lastuse.resize(nv)
+    o_input_last = data(o_lastuse)
     loop v in [0..nv): o_lastuse[v] = -1
     o_depth.resize(ir.code.len())
+    depths = data(o_depth)
     depth = 0
     # (and what each loop defines and stores to, in the same walk)
     lp_defs.clear()
@@ -1401,17 +1543,19 @@ optimize = ():
     # One dispatch supplies operand uses, structured-loop facts, definitions,
     # and memory invalidation. Do not reconstruct a general operand view and
     # redispatch the same operation separately for each consumer.
-    loop pos in 0.. and ins in ir.code:
+    input = data(ir.code)
+    loop pos in [0..ir.code.len()):
+        ins = &input[pos]
         op = ins.op
         a = int(ins.a)
         b = int(ins.b)
         d = int(ins.dst)
         kill = 0
-        o_depth[pos] = i32(depth)
+        depths[pos] = i32(depth)
         match op:
             end:
                 depth -= 1
-                o_depth[pos] = i32(depth)
+                depths[pos] = i32(depth)
                 l = lp_open.pop()
                 if l >= 0:
                     lp_limit[l] = lp_defs.len()
@@ -1503,6 +1647,7 @@ optimize = ():
         o_capacity = ir.code.len()
         o_out_storage.resize(o_capacity)
         o_out = data(o_out_storage)
+    o_flow_begin()
     o_cse = true
     ht_setup(ir.code.len() + 16)
     # 0 normal, 1 if(true), 2 if(false), 3 block; keep each control's facts together.
@@ -1510,7 +1655,8 @@ optimize = ():
     o_join_regs.clear()
     o_join_next.clear()
     skip = 0           # nesting depth inside a dead branch
-    loop pos in 0.. and ins in ir.code:
+    loop pos in [0..ir.code.len()):
+        ins = input[pos]
         op = ins.op
         if skip > 0:
             if op == .block or op == .loop or op == .if_: skip += 1
@@ -1526,6 +1672,9 @@ optimize = ():
                     lop = o_out[o_count - 1].op
                     if lop == .block or lop == .if_: o_pop()
                     else: o_append(ins)
+            continue
+        if o_decode[int(op)] & (1 << 24) == 0:
+            o_transfer(ins, true)
             continue
         if op == .nop: continue
         if op == .block or op == .loop:
@@ -1618,9 +1767,10 @@ optimize = ():
             loop k in [0..int(ins.b)):
                 item = int(ir.args[int(ins.a) + k])
                 if item & 1 == 1: o_regs[item >> 1].ver += 1
-            o_append(ins)
+            o_append_plain(ins)
             continue
         o_transfer(ins, true)
+    if o_flow_dead: o_flow_end_dead()
     # backward: drop pure instructions whose results are unused (o_push counted the uses)
     i = o_count - 1
     loop i >= 0:
@@ -1891,18 +2041,6 @@ o_if_select = (out: *Ins, start: int, n: int) -> int:
 
 # A branch to a block's end can make that end reachable even when its body
 # cannot fall through. Branches to loop headers do not reach the loop's end.
-struct OptCleanControl:
-    kind: Op
-    start: int
-    exit: bool
-
-o_clean_storage: OptCleanControl[]
-o_clean_frames: *OptCleanControl
-
-o_live_exit = (distance: int, top: int):
-    target = top - distance
-    if target >= 0 and o_clean_frames[target].kind != .loop: o_clean_frames[target].exit = true
-
 o_cleanup = (code: *Ins, count: int) -> Ins[]:
     storage: Ins[]
     # At most one instruction and one explicit trap per input operation. The
@@ -1910,73 +2048,62 @@ o_cleanup = (code: *Ins, count: int) -> Ins[]:
     storage.resize(count * 2)
     out = data(storage)
     used = 0
-    # One indexed CFG stack, reused across functions; O(N + branch targets).
-    if o_clean_storage.len() < count: o_clean_storage.resize(count)
-    o_clean_frames = data(o_clean_storage)
-    top = -1
-    dead = false
-    depth = 0
-    loop input_pos in [0..count):
-        ins = code[input_pos]
+    dead_range = 0
+    dead_count = o_dead_first.len()
+    dead_first = data(o_dead_first)
+    dead_limit = data(o_dead_limit)
+    next_dead = if dead_count > 0: dead_first[0] else: count
+    input_pos = 0
+    loop input_pos < count:
+        if input_pos == next_dead:
+            input_pos = dead_limit[dead_range]
+            dead_range += 1
+            next_dead = if dead_range < dead_count: dead_first[dead_range] else: count
+            continue
+        index = input_pos
+        ins = &code[index]
+        input_pos += 1
         op = ins.op
-        if op == .nop: continue
-        if dead:
-            if op == .block or op == .loop or op == .if_:
-                depth += 1
-                continue
-            if op == .end or op == .else_:
-                if depth > 0:
-                    if op == .end: depth -= 1
-                    continue
-            else: continue
-        if op == .else_:
-            o_clean_frames[top].exit = o_clean_frames[top].exit or not dead
-            o_clean_frames[top].kind = .else_
-            dead = false
-        else if op == .end:
-            # An if without else also reaches its end through its false arm.
-            dead = dead and not o_clean_frames[top].exit and o_clean_frames[top].kind != .if_
-        else if op == .br or op == .brif:
-            o_live_exit(int(ins.imm), top)
-        else if op == .brtable:
-            o_live_exit(int(ins.imm), top)
-            loop i in [0..int(ins.b)):
-                o_live_exit(int(ir.args[int(ins.c) + i]), top)
+        control = (o_decode[int(op)] >> 20) & 15
+        if control == 0 or control == 15 or (control == 12 and ins.c != 1):
+            out[used] = ins[0]
+            used += 1
+            continue
+        if control == 1: continue
+        top = -1
+        if op == .end: top = int(o_flow_at[index])
         if op == .end and used > 0:
-            if o_clean_frames[top].kind == .block:
-                selected = o_if_select(out, o_clean_frames[top].start, used)
+            if o_flow[top].kind == .block:
+                selected = o_if_select(out, o_flow[top].start, used)
                 if selected >= 0:
                     used = selected
-                    top -= 1
                     continue
             last = out[used - 1]
-            if last.op == .br and last.imm == 0 and o_clean_frames[top].kind != .loop: used -= 1
+            if last.op == .br and last.imm == 0 and o_flow[top].kind != .loop: used -= 1
             # Inlining a leaf can leave `block; value; end` after its final
             # branch is removed. A single pure instruction cannot target this
             # block; removing the wrapper exposes adjacent compare/branch pairs.
-            if o_clean_frames[top].kind == .block and used == o_clean_frames[top].start + 2 and o_pure(out[used - 1].op):
+            if o_flow[top].kind == .block and used == o_flow[top].start + 2 and o_pure(out[used - 1].op):
                 used -= 1
                 value = out[used]
                 out[used - 1] = value
-                top -= 1
                 continue
             # `if c { br d }` is `brif c, d - 1` (one branch instead of two)
-            if used >= 2 and o_clean_frames[top].kind == .if_:
+            if used >= 2 and o_flow[top].kind == .if_:
                 last = out[used - 1]
                 prev = out[used - 2]
                 if last.op == .br and last.imm >= 1 and prev.op == .if_:
                     used -= 1
                     used -= 1
-                    top -= 1
                     out[used] = Ins(.brif, 0, 0, prev.a, 0, 0, last.imm - 1)
                     used += 1
                     continue
             # `block { ...; brif c, 0; br d }` (c a comparison used only there) is
             # `...; brif !c, d - 1`
-            if used >= 2 and o_clean_frames[top].kind == .block:
+            if used >= 2 and o_flow[top].kind == .block:
                 last = out[used - 1]
                 prev = out[used - 2]
-                st = o_clean_frames[top].start
+                st = o_flow[top].start
                 c = int(prev.a)
                 if last.op == .br and last.imm >= 1 and prev.op == .brif and prev.imm == 0 and c >= 0 and c < o_reg_count and o_regs[c].nuse == 1:
                     # the comparison, inside the block, with no other branch there
@@ -1995,7 +2122,6 @@ o_cleanup = (code: *Ins, count: int) -> Ins[]:
                         used -= 1
                         loop j in [st..used - 1): out[j] = out[j + 1]
                         used -= 1
-                        top -= 1
                         out[used] = Ins(.brif, 0, 0, i32(c), 0, 0, d)
                         used += 1
                         continue
@@ -2029,21 +2155,13 @@ o_cleanup = (code: *Ins, count: int) -> Ins[]:
                 last.a = ins.a
                 out[used - 1] = last
                 continue
-        out[used] = ins
+        out[used] = ins[0]
         used += 1
         if op == .block or op == .loop or op == .if_:
-            top += 1
-            o_clean_frames[top] = OptCleanControl(op, used - 1, false)
-        else if op == .end:
-            top -= 1
-            # Structured validators do not infer that every incoming path
-            # terminates. Keep that fact explicit after closing the construct.
-            if dead:
-                out[used] = Ins(.trap, 0, 0, 0, 0, 0, 0)
-                used += 1
-        else if op == .br or op == .brtable or op == .ret or op == .trap or (op == .call and ins.c == 1):
-            dead = true
-            depth = 0
+            o_flow[int(o_flow_at[index])].start = used - 1
+        else if op == .end and o_flow[top].terminated:
+            out[used] = Ins(.trap, 0, 0, 0, 0, 0, 0)
+            used += 1
     storage.resize(used)
     storage
 
@@ -2052,12 +2170,12 @@ o_cleanup = (code: *Ins, count: int) -> Ins[]:
 o_sole_slot = (code: *Ins, count: int, t: int) -> bool:
     s = -1
     loop input_pos in [0..count):
-        ins = code[input_pos]
+        ins = &code[input_pos]
         if ins.op == .slot and int(ins.dst) == t: s = int(ins.a)
     if s < 0: return false
     refs = 0
     loop input_pos in [0..count):
-        ins = code[input_pos]
+        ins = &code[input_pos]
         if ins.op == .slot and int(ins.a) == s: refs += 1
     refs == 1
 
