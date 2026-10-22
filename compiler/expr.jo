@@ -3534,6 +3534,20 @@ number_literal_tree = (n: int) -> bool:
     if k == .binary: return number_literal_tree(int(nodes[n].a)) and number_literal_tree(int(nodes[n].b))
     false
 
+# `a.rem(b kind=...)`: Dewy's numbers library (lib/numbers.dewy), unless the
+# program has its own. True when the call now names it.
+dewy_numbers_call = (n: int, name: int, args: int[]) -> bool:
+    text = name_of(name)
+    if text != "rem": return false
+    s = lookup(name)
+    if s != 0 and not (syms[s].kind == .fns and decl_in_prelude(int(syms[s].decl))): return false
+    if nodes[args[0]].kind == .namedarg: return false
+    pos = nodes[n].pos
+    ensure_bundled_import("numbers.dewy", "$dewy_numbers", pos)
+    nodes[n].a = i32(bc_field(bc_ident("$dewy_numbers", pos), text, pos))
+    set_list(n, args)
+    true
+
 # (the library functions Dewy calls with physical quantities: dewy_quantity_call)
 quantity_call_names: int[]
 dewy_quantity_name = (name: int) -> bool:
@@ -3558,6 +3572,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                 set_kid(n, 0, last_checked)
         nodes[n].a = i32(bc_field(bc_ident("$dewy_rational", pos), fname, pos))
         return check_expr(n, expected)
+    if mod_scope < 0 and args.len() >= 1 and files[pos_file(nodes[n].pos)].is_dewy and dewy_numbers_call(n, name, args): return check_expr(n, expected)
     if not ufcs and mod_scope < 0 and args.len() == 2 and (name == intern("__floor_div") or name == intern("__floor_mod") or name == intern("__dewy_power") or name == intern("__dewy_divide")) and files[pos_file(nodes[n].pos)].is_dewy:
         if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
             return dewy_arithmetic_call(n, name, args, expected)

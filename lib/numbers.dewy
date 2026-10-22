@@ -1,0 +1,19 @@
+# Remainders with an explicit rule. `%` is the floored remainder;
+# `a.rem(b kind='euclid')` names another. The compiler routes a Dewy `rem`
+# call here.
+
+# floor: the divisor's sign (`%`); trunc: the dividend's (C's); euclid: never negative
+RemKind:type='floor'|'trunc'|'euclid'
+
+rem = ((a:int64 b:int64<d => d not=? 0> kind:RemKind='floor'):>int64=>{
+        let r=a % b
+        if kind =? 'trunc' and r not=? 0 and (r <? 0) not=? (a <? 0) return r-b
+        if kind =? 'euclid' and r <? 0 return r-b
+        return r
+    })
+    & ((a:int b:int<d => d not=? 0> kind:RemKind='floor'):>int=>{
+        let r=a % b
+        if kind =? 'trunc' and r not=? 0 and (r <? 0) not=? (a <? 0) return r-b
+        if kind =? 'euclid' and r <? 0 return r-b
+        return r
+    })

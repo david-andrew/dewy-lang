@@ -770,6 +770,10 @@ operators support `int`, signed `int64` and unsigned `uint64`, preserving the fu
 unsigned range; narrower operands retain the existing integer widening rules.
 Integer `/` produces an exact fraction; `/` with a floating operand uses floating math.
 `//` and `%` reject floating operands; `(a / b).floor()` floors a float quotient.
+`a.rem(b kind='trunc')` gives the remainder with the dividend's sign (C's `%`)
+and `kind='euclid'` a remainder that is never negative; `kind='floor'`, the
+default, is `%`. They take `int` and `int64` operands, and a divisor proven
+nonzero, as `%` does.
 `int` division of the minimum stored word by −1 overflows; its remainder is zero.
 Mathematical shifts reject negative counts. A right shift of at least 64 bits
 returns the sign continuation (zero or −1); a left shift that cannot fit fails,
