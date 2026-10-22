@@ -227,6 +227,10 @@ Compile errors, panics and interrupted inputs restore both session values and
 new declarations. External effects such as printed output and file writes
 remain. Imported modules initialize once, in dependency order.
 
+A decimal binding declared and written a float in the same input is a `float64`
+(`let acc=0.0; acc+=dt`). One declared in an earlier input already ran as an
+exact fraction, so writing it a float later is a type error; annotate it instead.
+
 Terminal history lives in `~/.dewy_history`. `DEWY_REPL_HISTORY` selects another
 file; an empty value disables history persistence. The prompt is currently
 validated on the Linux compiler host.
@@ -1046,7 +1050,8 @@ fractions unless their context is floating: `0.1 + 0.2 =? 0.3` is true, `1.0/2` 
 `1/2`, and `1.25e2` is `125`. A float annotation, a floating operand beside the
 literal, a `float64` parameter or field, or a later float written to the
 unannotated binding the literal initializes makes it a `float64` when compiling:
-`let acc=0.0` followed by `acc+=dt` with `dt:float64` declares a `float64`.
+`let acc=0.0` followed by `acc+=dt` with `dt:float64` declares a `float64`,
+inside a lambda too.
 Among overloads, a decimal literal takes an exact parameter before a float one.
 An integer promotes to `rational` wherever one is
 expected: arguments, results, record fields and container elements.

@@ -26,6 +26,7 @@ use 'elf.jo'
 use 'macho.jo'
 use 'main.jo'
 use 'ide.jo'
+use 'decimals.jo'
 
 const REPL_REGION = 0x10000000          # where inputs' code goes in the session (within 2 GB of
 const REPL_REGION_SIZE = 0x10000000     # its globals: code reaches them by 32-bit offsets; arm64's
@@ -255,13 +256,15 @@ repl_compile = (text: str, n: int) -> ReplOut:
     set_list(body, stmts)
     fns[ci].body = i32(body)
     fns[ci].ret = i32(T_VOID)
+    # (as top-level code: a decimal binding the input declares and writes a float is a float64,
+    # its statements checked again)
+    if module_ctx[m] >= 0: ctxs[module_ctx[m]].inst = i32(ci)
+    else: module_frames[m].inst = i32(ci)
+    decimal_input_globals(m, stmts)
+    if decimal_wants(ci): decimal_check_body(ci)
+    else: check_init_now(ci)
     entered = enter_module_context(m)
     cx = module_ctx[m]
-    fns[ci].state = 1
-    ctxs[cx].inst = i32(ci)
-    mark = scope_mark()
-    ctxs[cx].floor = i32(sc_names.len())
-    loop s in stmts: check_stmt(s)
     # an expression with a value at the end: shown
     if stmts.len() > 0:
         last = stmts[stmts.len() - 1]
@@ -277,10 +280,7 @@ repl_compile = (text: str, n: int) -> ReplOut:
                     shown = synth_call(show, [int(nodes[last].a)], nodes[last].pos)
                     check_stmt(shown)
                     nodes[last] = nodes[shown]
-    scope_reset(mark)
-    zonk_tree(body)
-    loop l in fns[ci].locals: locals[l].type = i32(zonk(int(locals[l].type)))
-    fns[ci].state = 2
+                    zonk_tree(body)
     leave_module_context(m, entered)
     cx = -1
     loop d in decls:

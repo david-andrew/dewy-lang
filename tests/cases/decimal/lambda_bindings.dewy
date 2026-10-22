@@ -1,0 +1,21 @@
+# A decimal binding declared inside a lambda becomes a float64 when the lambda writes it one.
+main=()=>{
+    let f=(dt:float64)=>{
+        let acc=0.0
+        acc+=dt
+        acc
+    }
+    printl(f(0.5))
+    let scale=(x:float64)=>{
+        let s=0.5
+        s=s*x
+        s
+    }
+    printl(scale(3.0))
+    let exact=()=>{
+        let e=0.1
+        e+=0.2
+        e =? 0.3
+    }
+    printl(exact())
+}

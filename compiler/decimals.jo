@@ -72,17 +72,30 @@ decimal_let = (n: int):
     if nodes[n].kind == .vardecl and nodes[n].a == 0 and nodes[n].b != 0 and not has_flag(n, NF_RDONLY) and decimal_literal_tree(int(nodes[n].b)): decimal_lets += 1
 
 # an unannotated, assignable binding that a decimal literal initializes, among the
-# statements of n (not inside expressions: a lambda's own such binding keeps its exact type)
+# statements of n or of a lambda inside them (its float write starts the enclosing body over)
 decimal_binding_in = (n: int) -> bool:
     if n == 0: return false
     k = nodes[n].kind
-    if k == .vardecl: return nodes[n].a == 0 and nodes[n].b != 0 and nodes[n].nlist == 0 and not has_flag(n, NF_RDONLY) and decimal_literal_tree(int(nodes[n].b))
-    if k != .block and k != .if_ and k != .iflet and k != .while_ and k != .for_ and k != .exprstmt and k != .match_ and k != .arm and k != .defer_ and k != .when_: return false
+    if k == .vardecl:
+        if nodes[n].a == 0 and nodes[n].b != 0 and nodes[n].nlist == 0 and not has_flag(n, NF_RDONLY) and decimal_literal_tree(int(nodes[n].b)): return true
+        return decimal_lambda_in(int(nodes[n].b))
+    if k != .block and k != .if_ and k != .iflet and k != .while_ and k != .for_ and k != .exprstmt and k != .match_ and k != .arm and k != .defer_ and k != .when_: return decimal_lambda_in(n)
     if decimal_binding_in(int(nodes[n].a)) or decimal_binding_in(int(nodes[n].b)) or decimal_binding_in(int(nodes[n].c)) or decimal_binding_in(int(nodes[n].d)): return true
     loop i in [0..nkids(n)):
         if decimal_binding_in(kid(n, i)): return true
     loop i in [0..nkids2(n)):
         if decimal_binding_in(kid2(n, i)): return true
+    false
+
+# a lambda inside expression n whose body declares such a binding
+decimal_lambda_in = (n: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .lambda: return decimal_binding_in(int(nodes[n].b))
+    if k == .ident or k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit or k == .none_lit: return false
+    if decimal_lambda_in(int(nodes[n].a)) or decimal_lambda_in(int(nodes[n].b)) or decimal_lambda_in(int(nodes[n].c)) or decimal_lambda_in(int(nodes[n].d)): return true
+    loop i in [0..nkids(n)):
+        if decimal_lambda_in(kid(n, i)): return true
     false
 
 # __check_fn_body: whether f's body check keeps a copy to start over from
@@ -389,6 +402,19 @@ decimal_writers_first = ():
     decimal_phase = false
     decimal_kept = {}
     loop decimal_copies.len() > 0: decimal_drop(decimal_copies.len() - 1)
+
+# The prompt's input declares globals as top-level code does: those a decimal literal makes
+# become float64 when the same input writes them a float (as decimal_writers_first finds them).
+# An earlier input's ran exact already: a float written to it later is the usual type error.
+decimal_input_globals = (m: int, stmts: int[]):
+    if decimal_global_inits.len() > 0: decimal_global_inits = {}
+    if decimal_lets == 0: return
+    loop d in stmts:
+        if nodes[d].kind == .vardecl and nodes[d].nlist == 0 and nodes[d].a == 0 and nodes[d].b != 0 and not has_flag(d, NF_RDONLY) and dewy_at(nodes[d].pos) and decimal_literal_tree(int(nodes[d].b)):
+            g = int(nodes[d].sym)
+            if g > 0 and globals[g].state == 0 and int(globals[g].decl) == d:
+                decimal_global_inits[g] = clone(int(nodes[d].b))
+                decimal_modules[m] = true
 
 decimal_writes = (n: int, names: {int: bool}) -> bool:
     if n == 0: return false
