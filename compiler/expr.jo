@@ -4868,6 +4868,14 @@ receiver_fits = (name: str, t0: int) -> bool:
             s = int(syms[s].next)
     false
 
+# Membership in fn_names_for without building a diagnostic's complete list.
+fn_name_for = (t: int, name: int) -> bool:
+    if method_name_for(t, name): return true
+    ii = intrinsic_of(name)
+    if ii < 0: return false
+    tk = types[t].kind
+    intrinsics[ii].arr == (tk == .array or tk == .str_)
+
 fn_names_for = (t: int) -> int[]:
     out = method_names(t)
     tk = types[t].kind
@@ -8632,17 +8640,15 @@ check_expr = (n: int, expected: int) -> int:
                 # (b.velocity, b.position on a physics Body: a handle, asked of its world)
                 if types[bt].kind == .struct_ and dt(bt) == "Body" and pos_in_lib(nodes[int(structs[int(types[bt].st)].decl)].pos):
                     fatal(nodes[n].pos, "a Body is a handle into its world: ask the world, `w.pos(b)`, `w.velocity(b)`, `w.rotation(b)`, and change it there, `w.set_pos(b, p)`, `w.set_velocity(b, v)`, `w.push(b, impulse)`")
-                cands = fn_names_for(bt)
                 # (Dewy's length of a library container or a sequence, as Heap and Pool: its `len`)
-                if files[pos_file(nodes[n].pos)].is_dewy and name_of(fname) == "length" and cands.contains(intern("len")) and receiver_fits("len", bt) and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
+                if files[pos_file(nodes[n].pos)].is_dewy and name_of(fname) == "length" and fn_name_for(bt, intern("len")) and receiver_fits("len", bt) and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
                     # (a member: found through the object, as methods are, whatever `len` names here)
                     method = mk(.field, nodes[n].pos)
                     nodes[method].a = nodes[n].a
                     nodes[method].name = i32(intern("len"))
                     nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
                     return check_expr(n, expected)
-                loop c in cands:
-                    if c != fname: continue
+                if fn_name_for(bt, fname):
                     if files[pos_file(nodes[n].pos)].is_dewy:
                         # Zero-argument calls may omit their parentheses:
                         # `xs.pop` is `xs.pop()`. A field of that name wins.
@@ -8655,9 +8661,6 @@ check_expr = (n: int, expected: int) -> int:
                             return check_expr(n, expected)
                         fatal(nodes[n].pos, "'{name_of(fname)}' needs arguments: `{receiver_text(int(nodes[n].a))}.{name_of(fname)}(...)`")
                     fatal(nodes[n].pos, "'{name_of(fname)}' is a function: call it, `x.{name_of(fname)}()`")
-                if types[bt].kind == .struct_:
-                    si = int(types[bt].st)
-                    loop i in [0..int(structs[si].nfields)): cands.push(int(fields[int(structs[si].fields) + i].name))
                 if is_union(bt):
                     # (a field every member has, of one type: read from whichever it holds)
                     if not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
@@ -8675,6 +8678,10 @@ check_expr = (n: int, expected: int) -> int:
                         et = pushed_type(gn)
                         if len(et) == 0: et = "Thing"
                         fatal(nodes[n].pos, "the type of what '{gn}' holds is not known here (it starts empty): write it where '{gn}' is made, as {jd(nodes[n].pos, "`{gn}: {et}[] = []`", "`let {gn}:array<{et}> = []`")}")
+                cands = fn_names_for(bt)
+                if types[bt].kind == .struct_:
+                    si = int(types[bt].st)
+                    loop i in [0..int(structs[si].nfields)): cands.push(int(fields[int(structs[si].fields) + i].name))
                 fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}'{suggestion(name_of(fname), surface_names(cands, nodes[n].pos), bt)}")
     else if k == .dotname:
         if ide_sentinel != 0 and int(nodes[n].name) == ide_sentinel: ide_complete_variants(ex)

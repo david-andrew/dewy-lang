@@ -893,6 +893,16 @@ type_names = () -> int[]:
             if sk == .type_ or sk == .struct_ or sk == .enum_: out.push(k)
     out
 
+# Shared by named member lookup and the complete diagnostic/IDE listing.
+# Read the cached signature in place; no candidate needs a signature copy.
+method_decl_for = (decl: int, rt: int) -> bool:
+    di = decl_info(decl)
+    if not decl_infos[di].sig.done: fn_sig(decl)
+    if decl_infos[di].sig.params.len() == 0: return false
+    p0 = prune(decl_infos[di].sig.params[0])
+    # (a method of a minted parent takes its family, which this type is in)
+    types[p0].kind != .var and (types[p0].kind == types[rt].kind or type_eq(p0, rt) or family_annotation(p0) and value_members(p0).contains(rt))
+
 # functions that could be called as recv.f(...): their first parameter has the receiver's kind
 method_names = (recv: int) -> int[]:
     out: int[]
@@ -905,15 +915,28 @@ method_names = (recv: int) -> int[]:
             s = s0
             loop s != 0:
                 if syms[s].kind == .fns and syms[s].decl != 0 and nkids(int(syms[s].decl)) > 0:
-                    sig = fn_sig(int(syms[s].decl))
-                    if sig.params.len() > 0:
-                        p0 = prune(sig.params[0])
-                        # (a method of a minted parent takes its family, which this type is in)
-                        if types[p0].kind != .var and (types[p0].kind == types[rt].kind or type_eq(p0, rt) or family_annotation(p0) and value_members(p0).contains(rt)):
-                            out.push(k)
-                            break
+                    if method_decl_for(int(syms[s].decl), rt):
+                        out.push(k)
+                        break
                 s = int(syms[s].next)
     out
+
+# The named part of method_names, for a member being checked rather than a
+# diagnostic listing every spelling. Probe complete overload chains in the
+# same visible tables; an unrelated name must not demand its signatures.
+# O(visible method modules + overloads of name), with indexed name lookup.
+method_name_for = (recv: int, name: int) -> bool:
+    rt = prune(recv)
+    tables = [modules[cur_mod()].names, prelude]
+    loop tm in method_modules(rt):
+        if tm != cur_mod(): tables.push(modules[tm].names)
+    loop tbl in tables:
+        s = tbl.get(name) ?? 0
+        loop s != 0:
+            if syms[s].kind == .fns and syms[s].decl != 0 and nkids(int(syms[s].decl)) > 0:
+                if method_decl_for(int(syms[s].decl), rt): return true
+            s = int(syms[s].next)
+    false
 
 cur_mod = () -> int:
     if cx >= 0: return int(ctxs[cx].mod)

@@ -1,0 +1,17 @@
+# A named probe must retain the complete overload family, defaults, mutation,
+# and field precedence; common union fields need no diagnostic method list.
+Left:type = [value:int64]
+Right:type = [value:int64]
+Other:type = [extra:int64]
+amount = (x:Other):>int64 => x.extra
+amount = (x:Left step:int64=2):>int64 => x.value + step
+amount = (x:Right):>int64 => x.value * 2
+bump = (@x:Left step:int64=3):>int64 => { x.value += step x.value }
+common = (x:Left|Right):>int64 => x.value
+Field:type = [amount:int64]
+main = () => {
+    let x = Left(4)
+    let y = Right(5)
+    let f = Field(17)
+    printl"{x.amount} {y.amount} {x.bump} {x.value} {common(x)} {common(y)} {f.amount}"
+}
