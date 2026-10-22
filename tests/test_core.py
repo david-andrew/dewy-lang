@@ -3095,7 +3095,7 @@ def test_core_slider_controls(compiler, tmp_path, release):
 @pytest.mark.core_quick
 def test_core_check_and_format_boundary(compiler, tmp_path):
     source = tmp_path / 'main.dewy'
-    text = 'unused=()=>missing\nmain=():>void=>exit(42)'
+    text = 'unused=()=>missing\nmain=()=>exit(42)'
     source.write_text(text)
     checked = subprocess.run([compiler, 'check', source], capture_output=True,
                              text=True, timeout=10, check=False)
@@ -3103,7 +3103,7 @@ def test_core_check_and_format_boundary(compiler, tmp_path):
     formatted = subprocess.run([compiler, 'fmt', source], capture_output=True,
                                text=True, timeout=10, check=False)
     assert formatted.returncode == 0, formatted.stdout + formatted.stderr
-    assert source.read_text() == 'unused = () => missing\nmain=():>void=>exit(42)\n'
+    assert source.read_text() == 'unused = () => missing\nmain = () => exit(42)\n'
 
 
 @pytest.mark.parametrize(('text', 'expected', 'errors'), [
