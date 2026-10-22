@@ -15,8 +15,23 @@ if os.name == 'nt':
                 return
             except OSError:
                 continue
+
+    def try_lock_exclusive(handle) -> bool:
+        handle.seek(0)
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
 else:
     import fcntl
 
     def lock_exclusive(handle) -> None:
         fcntl.flock(handle, fcntl.LOCK_EX)
+
+    def try_lock_exclusive(handle) -> bool:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            return False

@@ -319,7 +319,7 @@
   "76_arena_escape": {
    "milestone": 24,
    "note": "Copies escaping nested allocator scopes survive reset and preserve independent aggregates.",
-   "open": "Typed allocation capabilities and allocator exhaustion result contract remain provisional."
+   "open": "Decided (Q4, 2026-10-21): implicit context allocator; $explicit_allocation_failure; arenas return Arena | OutOfMemory under $no_hidden_costs. Awaiting implementation (ownership slices 4-5)."
   },
   "77_owner_cleanup": {
    "milestone": 24,
@@ -350,27 +350,27 @@
   "81_partition_join": {
    "milestone": 25,
    "note": "Fork owned disjoint partitions, join in source order, and prove coverage including an uneven tail.",
-   "open": "Scoped fork-join, partition proof syntax and scheduler context are unspecified; sequential value projection only."
+   "open": "Decided (concurrency direction, 2026-10-21): parallel, concurrent/spawn groups, inferred Send/Sync. Awaiting implementation (concurrency stages 2-3)."
   },
   "82_overlap_race": {
    "milestone": 25,
    "note": "Compile-time reject concurrent writes to overlapping ranges; accept adjacent partitions.",
-   "open": "No task/partition spelling exists to encode the rejected concurrent source. This source is the deterministic overlap oracle, not a negative compiler test. Pending rejection: overlapping mutable task partitions."
+   "open": "Decided (concurrency direction, 2026-10-21): parallel/concurrent spellings exist; the rejected concurrent source needs stage 2-3 checks. Awaiting implementation."
   },
   "83_transfer_properties": {
    "milestone": 25,
    "note": "Derive structural task-transfer properties; reject an Rc-like non-atomic handle crossing tasks.",
-   "open": "Send/Sync spelling and negative assertion API are open; this only tests owned-message value behavior. Rc/Arc APIs cannot be invented. Pending rejection: value cannot cross a task boundary because its non-atomic shared owner is not transferable."
+   "open": "Decided (2026-10-21): Send/Sync inferred structurally, $send=false/$sync=false opt-outs. Awaiting implementation (concurrency stage 2)."
   },
   "84_tensor_broadcast": {
    "milestone": 26,
    "note": "Contiguous rank-2 arrays, row/column broadcast, transpose, snapshot rows, and reject mismatched shapes.",
-   "open": "General multidimensional literals/types, axis broadcasting and view layout are provisional; flat Matrix is an algorithm projection, not the tensor feature."
+   "open": "Decided (Q7, docs/design/tensors.md): shape in the type, dot broadcasting, N-d literals. Awaiting implementation (after concurrency stage 1)."
   },
   "85_ieee_policy": {
    "milestone": 26,
    "note": "IEEE signed zero, subnormal, overflow/underflow, NaN comparisons and deterministic reduction under an explicit policy.",
-   "open": "Formats, literals/conversions, NaN/Inf/divide-by-zero behavior, promotion, FMA and reduction policy need decisions. Exact controls do not satisfy IEEE acceptance."
+   "open": "Decided (Q8, 2026-10-21): strict IEEE by default; $fast_math, $no_nan, $no_inf, $finite_floats. Awaiting implementation."
   },
   "86_exact_energy": {
    "milestone": 27,
@@ -383,7 +383,7 @@
   "88_temperature_points": {
    "milestone": 28,
    "note": "Temperature point-minus-point and point-plus-delta, exact C/F/K conversions and requested display units.",
-   "open": "Offset scale declarations and point/delta arithmetic are provisional; display-unit selection x as km is provisional. Wrappers are exact controls only."
+   "open": "Decided (Q9, 2026-10-21): automatic display, as-unit conversion, offset points/deltas by use. Awaiting implementation (units work in progress)."
   },
   "89_test_contracts": {
    "milestone": 28,
@@ -403,7 +403,7 @@
   "92_http_json_routes": {
    "milestone": 30,
    "note": "HTTP/1.1 request parser and JSON integer-schema CRUD routing with status codes and transactional validation; deterministic transport transcripts.",
-   "open": "Portable socket/listen/accept, request framing limits and host capability APIs are unspecified. This tests the API handler, not a listening network server."
+   "open": "Decided (Q12, 2026-10-21): blocking net module returning | NetError | Canceled, FFI underneath. Awaiting implementation."
   },
   "93_table_queries": {
    "milestone": 30,
@@ -429,7 +429,7 @@
    "milestone": 33,
    "serial": true,
    "note": "The notes service of 97 behind a real loopback listener (accept, partial reads, pipelining, close, EOF) plus the wasm page shell (ui_app.dewy, built by tests/test_flagship_web.py) that talks to it over WebSocket.",
-   "open": "12: portable socket listen/accept, host capabilities and a web fetch/socket surface are unspecified; this uses the implementation library net."
+   "open": "Decided (Q12, 2026-10-21): blocking net module with listen/accept. Awaiting implementation."
   },
   "99_dewy_frontend": {
    "milestone": 34,
@@ -442,7 +442,7 @@
   "101_ml_training": {
    "milestone": 36,
    "note": "ML training loop (tier-4 flagship): a 2-12-12-3 ReLU perceptron trained with Adam on a seeded three-class XOR cloud, per-sample backpropagation in parallel with a fixed-order gradient reduction, per-epoch loss/accuracy, held-out confusion matrix and probes, matched bit for bit (printed) by an independent float oracle. core.dewy is the twin over arrays and parallel.",
-   "open": "7: tensor syntax and broadcasting are unsettled; the design uses whole-batch matrix products, new axes, dotted broadcasting, index-array row gathers, rank-1 tensors, [a b; c d] literals and .to(device) placement."
+   "open": "Decided (Q7, docs/design/tensors.md): tensor syntax and broadcasting. Awaiting implementation (after concurrency stage 1)."
   }
  },
  "design_passing": [

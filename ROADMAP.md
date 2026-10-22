@@ -9,11 +9,12 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 
 | Measure | Now (2026-10-21) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 86/99 (13 held on open questions) | all |
+| Acceptance ladder, design surface | 91/101 (10 decided, awaiting implementation) | all |
 | Acceptance ladder, current dialect | all non-held programs pass; held ones run | stays green |
 | Tier-4 flagship programs (1–5k lines each) | 5/7 written (game, KV store, crypto, notes service, Dewy frontend) | 7/7 |
-| Programs passing under no-traps (`DEWY_INTERNAL_FACT_POLICY=require-static`) | 43/115 ladder+examples; cases unmeasured | all, then flip the default |
-| Compile throughput, single thread, default build, per corpus (`speed --corpus`) | ~1.7k–3k est. lines/s (each program pays a ~0.16 G library floor) | 250k lines/s (200k minimum) |
+| Programs passing under no-traps (`DEWY_INTERNAL_FACT_POLICY=require-static`) | 63/120 ladder+examples (per directory); cases ~1342/1694 | all, then flip the default |
+| Compile latency, hello world / median ladder program | ~65 ms (load ~20; library floor: 75 files, 38k lines) | hello ~50 ms guardrail |
+| Compile throughput, single thread, default build, flagships (library separate) | ~10–30k lines/s marginal | 250k lines/s (200k minimum) |
 | Critical-path instructions at 4 workers (secondary) | synthetic 0.60 G | no regression |
 | Single-thread instructions, synthetic-22k (regression signal) | 1.17 G | ~0.09 G (250k lines/s) |
 | Hello-world compile (guardrail) | 31 ms | ~50 ms |
@@ -25,36 +26,31 @@ Ladder: `python3 -m tools.core ladder` (`tests/ladder/ladder.json`). Compile:
 `--critical` is secondary. Wall clock only on a quiet pinned machine or a CI
 runner, never on the shared box. Kernels: `bench`.
 
-## Now
-
-- Astra: codegen for `parallel` regions (fork costs about a call; then the
-  work-stealing runtime).
-- Opus: no-traps solver idioms; `$runtime_checks`/`$prototype`/`$no_hidden_costs`
-  and boolean metatags; flagship gaps 2 (`no_effects`, copies, durable files).
-- Opus: the reference-following changes (`+`, initialization, `d.keys`,
-  conversions, declared rows) and context-adaptive decimal literals.
-- Opus: `$shadowable const` (prelude included) and the loop value/place split.
-
 ## Next
 
-1. **No traps by default:** prove idioms, fix the corpus (real guards or
-   `$runtime_checks`), then flip the default.
-2. **Concurrency** ([design](docs/design/safety_and_concurrency.md)): fork-join
-   codegen and runtime; `Send`/`Sync` and parallel obligations; `concurrent`/
-   `spawn` groups, `Canceled`, deadlines and `within`/`race` over a threads
-   backend; `Atomic<T>` and the `blocks` effect; device-agnostic throughout.
-3. **Tier-4 flagships:** a kernel/RTOS program under `$no_hidden_costs`; an ML
-   training loop (question 7).
-4. **Single-thread compile throughput** on `speed --corpus`: structural wins in
-   the checker, lowering and the default optimizer's budget. Every program pays
-   a ~0.16 G library floor today.
-5. **Self-hosting** ([readiness](docs/design/self_hosting.md)): after question 24,
-   new leaf compiler modules start in Dewy.
-6. **Runtime gaps** (upper bound first): callback traversal, graph layout, float
-   compare/negate, outer-target SIMD, destination passing, bounds-check upgrades.
-7. **Small items:** swap primitive for refined arrays; strict Map invariants
-   (question 10); result-length facts for `make(n)`; runtime `type<T>` statics;
-   effects slice 4 follow-ups; the `@obj.method()` source-text heuristic.
+1. **Compile speed** (the biggest gap). Do less work: parse and check only what
+   is reached (lazy library declarations and bodies, demand-driven checking),
+   and a cheaper checker per node. Report latency (hello, median ladder program)
+   and throughput (flagships; later the compiler's own Dewy) separately; gate on
+   the flagship corpus as well as synthetic, so fact work can't creep in unseen.
+2. **The decided-but-unimplemented frontier** (10 ladder programs): concurrency
+   stages 2–3 (81–83); IEEE policy (85); offset units (88); allocator and arenas
+   (76); a blocking `net` module (92, 98); tensors (84, 101; after concurrency).
+3. **Round 5/6 follow-through:** `wrap<T>(x)` and infix `transmute` (no
+   `.wrap`/`.bitcast`); iterator control via `loop x in @w`; escapes; short-
+   circuit `and=`/`or=`; ambiguous-partial error; closure `@` capture; `$build`;
+   `Path` methods; optional `main`; `@(m.method)` handle places; uniform
+   precision (string unions, int ranges); sibling-literal positional types.
+4. **Decimal adaptation in-compile** (replace the restart, which is disabled in
+   the editor, REPL and watch).
+5. **No traps by default:** prove idioms, fix the corpus, then flip the default.
+6. **Self-hosting** ([readiness](docs/design/self_hosting.md)): new leaf compiler
+   modules start in Dewy.
+7. **Runtime gaps** (upper bound first): mergesort, callback traversal, graph
+   layout, float compare/negate, outer-target SIMD, destination passing.
+8. **Small items:** swap primitive for refined arrays; result-length facts for
+   `make(n)`; runtime `type<T>` statics; effects slice 4 follow-ups; the
+   `@obj.method()` heuristic; name hooks behind `mod`/`round`/`rational`.
 
 ## Decided (David; full text in [docs/design/decisions.md](docs/design/decisions.md))
 

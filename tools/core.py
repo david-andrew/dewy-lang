@@ -149,6 +149,28 @@ def toolchain(*, bootstrap: bool = False, cache: Path = CACHE, root: Path = ROOT
         return binary
 
 
+# The machine is shared by several worktrees: at most this many full gates run at once.
+GATE_SLOTS = int(os.environ.get('DEWY_GATE_SLOTS', '2'))
+
+
+def gate_slot():
+    """Hold one of the machine-wide full-gate slots (a file lock) for the rest of the process."""
+    from tools.filelock import try_lock_exclusive
+    directory = Path.home() / '.cache' / 'dewy-gates'
+    directory.mkdir(parents=True, exist_ok=True)
+    waited = False
+    while True:
+        for slot in range(max(1, GATE_SLOTS)):
+            handle = (directory / f'slot{slot}.lock').open('w')
+            if try_lock_exclusive(handle):
+                return handle
+            handle.close()
+        if not waited:
+            print(f'Waiting for a full-gate slot ({GATE_SLOTS} run at once on this machine)…', file=sys.stderr, flush=True)
+            waited = True
+        time.sleep(5)
+
+
 def gate_options(arguments: list[str]) -> tuple[str, int | None, bool, bool]:
     """The -k expression, -n workers, --maxfail=0 and whether pytest paths were named."""
     keyword, workers, every, paths = '', None, False, False
@@ -272,7 +294,12 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     env = os.environ.copy()
     if args.command == 'test':
-        return test(binary, args.arguments, quick)
+        slot = None if quick or gate_options(args.arguments)[0] else gate_slot()
+        try:
+            return test(binary, args.arguments, quick)
+        finally:
+            if slot is not None:
+                slot.close()
     # The compiler owns the terminal/LSP streams and receives signals directly;
     # there is no wrapper process to leave a watcher or language server orphaned.
     os.execve(binary, [str(binary), args.command, *args.arguments], env)

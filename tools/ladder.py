@@ -365,7 +365,7 @@ def print_scoreboard(doc: dict, names: list[str], design: dict, core: dict):
         opened = len(names) - len(scored)
         # Held programs count against the total: they are unfinished work, not exclusions.
         print(f'Design total: {sum(design[n].ok for n in scored)}/{len(names)}'
-              + (f' ({opened} held open on decisions)' if opened else ''))
+              + (f' ({opened} decided, awaiting implementation)' if opened else ''))
 
     failing = [n for n in names if not design[n].ok and not is_open(n) and design[n].status != 'wrongly-accepted']
     accepted = [n for n in names if design[n].status == 'wrongly-accepted']
@@ -378,7 +378,7 @@ def print_scoreboard(doc: dict, names: list[str], design: dict, core: dict):
     if accepted:
         print('Wrongly accepted (must be rejected):')
         for name in accepted:
-            print(f'  {name:<{pad}}' + ('  (open)' if is_open(name) else ''))
+            print(f'  {name:<{pad}}' + ('  (awaiting implementation)' if is_open(name) else ''))
     if opened:
         print('Open (excluded from design counts; the program does not yet settle its question):')
         for name in opened:
