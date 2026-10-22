@@ -1365,7 +1365,11 @@ managed fields. Arrays support indexing, `.length`, and methods such as
 `.push(value)`, `.pop()`, `.pop(i)` (removes and returns the element at `i`),
 `.insert(value i)` (inserts before `i`), `.clear()` and `.truncate(count)` (a
 negative count panics). `xs[1..3)` is an
-exclusive-end slice; `xs[1..2]` includes index 2.
+exclusive-end slice; `xs[1..2]` includes index 2. A slice's bounds are proven
+like an index (or checked under `$runtime_checks`). `xs[$clamp a..b)` instead
+truncates them to the receiver, as Python's slices do: each bound is clamped
+to `0..xs.length` and the end to at least the start, so `xs[$clamp 1..10)` of
+three elements is `xs[1..3)` and `xs[$clamp 5..9)` is empty.
 
 A member call that needs no other arguments may omit its parentheses: `xs.pop`,
 `xs.sort`, `text.trim` and `shape.area` (for `area=(s:Shape)=>...`) call the

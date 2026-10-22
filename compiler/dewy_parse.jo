@@ -1861,6 +1861,20 @@ dw_expr = (id: int) -> int:
             args: int[]
             new_axis = false
             if bracket: dw_index_context.push(n)
+            if bracket and xs.len() == 1 and dw_op(xs[0]) == .range_apply and dw_nchildren(dw_unwrap(xs[0])) >= 3 and dewy_syntax[dw_child(dw_unwrap(xs[0]), 1)].kind == .metatag:
+                # (`xs[$clamp ..b)`: the metatag took the place of the start)
+                whole = dw_unwrap(xs[0])
+                parts = dw_children(whole)
+                tag = parts[1]
+                parts.remove(1)
+                bare = dewy_syntax.len()
+                dewy_syntax.push(DewySyntax(kind = dewy_syntax[whole].kind, text = dewy_syntax[whole].text, pos = dewy_syntax[whole].pos, children = parts, symbol = dewy_syntax[whole].symbol))
+                xs = [tag, bare]
+            if bracket and xs.len() > 0 and dewy_syntax[xs[0]].kind == .metatag:
+                block = dw_clamp_slice(n, right, xs)
+                dw_index_context.pop()
+                nodes[n] = nodes[block]
+                return n
             if dewy_syntax[right].kind != .block: args.push(dw_expr(right))
             else if bracket and xs.len() == 1 and (dw_op(xs[0]) == .range_apply or dw_name(xs[0]) == ".."):
                 if dw_new_range_at(xs[0]):
@@ -2522,6 +2536,47 @@ dw_membership = (id: int) -> int:
     r = dw_iterable(id, true, true)
     if nodes[r].kind == .range and (has_flag(r, NF_STEP) or has_flag(r, NF_EXCL_FIRST)): return dw_range_value(r)
     r
+
+# `xs[$clamp a..b)`: the slice truncated to the receiver, as Python's is. The
+# bounds are clamped to [0, length] and the end to at least the start, so it
+# is always in bounds; the receiver and the bounds are evaluated once, in order.
+dw_clamp_slice = (n: int, right: int, xs: int[]) -> int:
+    pos = nodes[n].pos
+    tag = dewy_syntax[xs[0]].text
+    if tag != "clamp": fatal(dewy_syntax[xs[0]].pos, "`${tag}` is not an index setting: `$clamp` truncates a slice to the receiver, as in `xs[$clamp a..b)`")
+    if xs.len() != 2 or dw_op(xs[1]) != .range_apply: fatal(dewy_syntax[xs[0]].pos, "`$clamp` truncates one range: `xs[$clamp a..b)`")
+    wrapper = dewy_syntax.len()
+    dewy_syntax.push(DewySyntax(kind = .block, text = dewy_syntax[right].text, pos = dewy_syntax[right].pos, children = [xs[1]]))
+    r = dw_iterable(wrapper, true)
+    if nodes[r].kind != .range or has_flag(r, NF_STEP): fatal(dewy_syntax[xs[1]].pos, "`$clamp` truncates a contiguous slice: `xs[$clamp a..b)`")
+    source = "$clamp_source{n}"
+    length = "$clamp_length{n}"
+    lo = "$clamp_start{n}"
+    hi = "$clamp_stop{n}"
+    count = mk(.field, pos)
+    nodes[count].a = i32(bc_ident(source, pos))
+    nodes[count].name = i32(intern("length"))
+    stmts = [bc_let(source, int(nodes[n].a), pos), bc_let(length, count, pos)]
+    if nodes[n].sval != 0: stmts.push(bc_let(name_of(int(nodes[n].sval)), bc_bin(.minus, bc_ident(length, pos), bc_int(1, pos), pos), pos))
+    stmts.push(bc_let(lo, if nodes[r].a != 0: int(nodes[r].a) else: bc_int(0, pos), pos))
+    stmts.push(bc_if(bc_bin(.lt, bc_ident(lo, pos), bc_int(0, pos), pos), [bc_assign(bc_ident(lo, pos), bc_int(0, pos), pos)], [], pos))
+    stmts.push(bc_if(bc_bin(.gt, bc_ident(lo, pos), bc_ident(length, pos), pos), [bc_assign(bc_ident(lo, pos), bc_ident(length, pos), pos)], [], pos))
+    stop = bc_ident(length, pos)
+    if nodes[r].b != 0:
+        stop = int(nodes[r].b)
+        if has_flag(r, NF_INCLUSIVE): stop = bc_bin(.plus, stop, bc_int(1, pos), pos)
+    stmts.push(bc_let(hi, stop, pos))
+    stmts.push(bc_if(bc_bin(.gt, bc_ident(hi, pos), bc_ident(length, pos), pos), [bc_assign(bc_ident(hi, pos), bc_ident(length, pos), pos)], [], pos))
+    stmts.push(bc_if(bc_bin(.lt, bc_ident(hi, pos), bc_ident(lo, pos), pos), [bc_assign(bc_ident(hi, pos), bc_ident(lo, pos), pos)], [], pos))
+    bounds = mk(.range, pos)
+    nodes[bounds].a = i32(bc_ident(lo, pos))
+    nodes[bounds].b = i32(bc_ident(hi, pos))
+    slice = mk(.index, pos)
+    nodes[slice].a = i32(bc_ident(source, pos))
+    set_list(slice, [bounds])
+    nodes[slice].b = i32(bounds)
+    stmts.push(bc_stmt(slice, pos))
+    bc_block(stmts, pos)
 
 # `new ..`, `.. new` and `new .. new` read as ranges; inside brackets they are
 # the entries `new`, a whole axis, and `new`. Empty when id is no such range.

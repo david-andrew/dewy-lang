@@ -1,0 +1,11 @@
+# quick
+# `xs[$clamp a..b)` truncates the bounds to the receiver, as Python's slices do.
+$runtime_checks=false
+take=(xs:array<int64> a:int64 b:int64):>array<int64>=>xs[$clamp a..b)
+first=(s:string n:int64):>string=>s[$clamp ..n)
+main=()=>{
+    let xs:array<int64>=[1 2 3]
+    printl"{take(xs 1 10)} {take(xs -5 2)} {take(xs 2 1)} {take(xs 5 9)}"
+    printl"{xs[$clamp ..10]} {xs[$clamp 1..]} {xs[$clamp 0..end]} {xs[$clamp -1..1]}"
+    printl"{first("héllo" 3)} {first("hi" 3)}"
+}

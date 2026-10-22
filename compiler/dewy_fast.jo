@@ -810,7 +810,9 @@ dn_bracketed_from = (opening: DewyLexeme) -> int:
             dn_tokens[dn_at].symbol = dn_token_kind(files[dn_file].src[tail.start..tail.stop))
             break
         if dn_accept(close): break
-        if ((opening.symbol == .lbrack and dn_peek() == .rparen) or (opening.symbol == .lparen and dn_peek() == .rbrack)) and children.len() == 1 and dw_op(children[0]) == .range_apply:
+        # (`xs[$clamp a..b)`: an in-index metatag before the range)
+        ranged = children.len() == 1 and dw_op(children[0]) == .range_apply or children.len() == 2 and dewy_syntax[children[0]].kind == .metatag and dw_op(children[1]) == .range_apply
+        if ((opening.symbol == .lbrack and dn_peek() == .rparen) or (opening.symbol == .lparen and dn_peek() == .rbrack)) and ranged:
             close = dn_peek()
             dn_at += 1
             break
