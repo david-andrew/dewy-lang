@@ -317,10 +317,9 @@ module_lookup = (m: int, name: int) -> int:
     if not ide_on:
         if ml_at.len() <= name:
             grown = name * 2 + 64
-            loop ml_at.len() < grown:
-                ml_at.push(0)
-                ml_mod.push(0)
-                ml_sym.push(0)
+            ml_at.resize(grown)
+            ml_mod.resize(grown)
+            ml_sym.resize(grown)
         ml_at[name] = ml_gen
         ml_mod[name] = m
         ml_sym[name] = s

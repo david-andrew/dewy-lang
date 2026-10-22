@@ -149,26 +149,28 @@ clear_flag = (n: int, f: int): nodes[n].flags = i32(int(nodes[n].flags) & ~f)
 # deep copy of a subtree (used to instantiate generic functions)
 clone = (n: int) -> int:
     if n == 0: return 0
+    # (the copy's own fields first; its children are copied after it, in order)
+    nd = nodes[n]
+    k = nd.kind
+    if k != .fn_ and k != .struct_ and k != .enum_: nd.sym = 0
+    if k != .conv: nd.type = 0
+    nd.flags = i32(int(nd.flags) & ~NF_CHECKED)
     c = nodes.len()
-    nodes.push(nodes[n])
-    k = nodes[n].kind
-    nodes[c].a = i32(clone(int(nodes[n].a)))
-    nodes[c].b = i32(clone(int(nodes[n].b)))
-    nodes[c].c = i32(clone(int(nodes[n].c)))
-    nodes[c].d = i32(clone(int(nodes[n].d)))
-    nl = int(nodes[n].nlist)
+    nodes.push(nd)
+    if nd.a != 0: nodes[c].a = i32(clone(int(nd.a)))
+    if nd.b != 0: nodes[c].b = i32(clone(int(nd.b)))
+    if nd.c != 0: nodes[c].c = i32(clone(int(nd.c)))
+    if nd.d != 0: nodes[c].d = i32(clone(int(nd.d)))
+    nl = int(nd.nlist)
     if nl > 0:
         xs: int[]
-        loop i in [0..nl): xs.push(clone(kid(n, i)))
+        loop i in [0..nl): xs.push(clone(int(lists[int(nd.list) + i])))
         set_list(c, xs)
-    nl2 = int(nodes[n].nlist2)
+    nl2 = int(nd.nlist2)
     if nl2 > 0:
         xs: int[]
-        loop i in [0..nl2): xs.push(clone(kid2(n, i)))
+        loop i in [0..nl2): xs.push(clone(int(lists[int(nd.list2) + i])))
         set_list2(c, xs)
-    if k != .fn_ and k != .struct_ and k != .enum_: nodes[c].sym = 0
-    if k != .conv: nodes[c].type = 0
-    clear_flag(c, NF_CHECKED)
     c
 
 # Declarations marked `$shadowable const`: an inner scope or an importing module
