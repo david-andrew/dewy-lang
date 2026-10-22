@@ -2460,7 +2460,7 @@ return x.value
 
 
 @pytest.mark.parametrize('extension', ['dewy', 'jo'])
-@pytest.mark.parametrize('style', ['selected', 'namespace', 'module-alias', 'name-alias'])
+@pytest.mark.parametrize('style', ['selected', 'splat', 'module-alias', 'name-alias'])
 @pytest.mark.core_quick
 def test_core_imports(compiler, tmp_path, extension, style):
     dependency = tmp_path / f'helper.{extension}'
@@ -2469,7 +2469,7 @@ def test_core_imports(compiler, tmp_path, extension, style):
     source = tmp_path / 'main.dewy'
     forms = {
         'selected': (f'from p"helper.{extension}" import twice', 'twice(21)'),
-        'namespace': (f'import p"helper.{extension}"', 'helper.twice(21)'),
+        'splat': (f'import p"helper.{extension}"', 'twice(21)'),
         'module-alias': (f'import p"helper.{extension}" as other', 'other.twice(21)'),
         'name-alias': (f'from p"helper.{extension}" import twice as double', 'double(21)'),
     }
@@ -4161,7 +4161,7 @@ Rational:type=[numerator:int=0 denominator:int=1]
 def test_core_tuple_interop(compiler, tmp_path, expression, diagnostic):
     (tmp_path / 'helper.jo').write_text('pair = () -> (int, str): (39, "abc")')
     source = tmp_path / 'tuple.dewy'
-    source.write_text(f'import p"helper.jo"\nmain=()=>{{let pair=helper.pair() let i:int64=0 return {expression}}}')
+    source.write_text(f'import p"helper.jo" as helper\nmain=()=>{{let pair=helper.pair() let i:int64=0 return {expression}}}')
     binary = tmp_path / 'tuple'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)
@@ -4200,7 +4200,7 @@ return count+text.length+extra}''' if nested else
         else:
             program = ('sum=([[count text] [extra]])=>count+text.length+extra\nmain=()=>sum(helper.nested())' if nested else
                        'sum=([count:float64 text:string])=>if count is?float64 (count as int64)+text.length else 1\nmain=()=>sum(helper.pair())')
-    source.write_text('import p"helper.jo"\n' + program)
+    source.write_text('import p"helper.jo" as helper\n' + program)
     binary = tmp_path / 'unpack'
     node = shutil.which('node')
     if target == 'wasm' and node is None:

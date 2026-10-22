@@ -331,6 +331,9 @@ bind_from_imports = (start: int = 0):
         d = from_imports[di]
         m = int(nodes[d].mod)
         im = int(nodes[d].sym)
+        if nodes[d].aux == 3:
+            bind_splat(d, m, im)
+            continue
         loop i in [0..nkids(d)):
             id = kid(d, i)
             nm = int(nodes[id].name)
@@ -360,6 +363,11 @@ bind_from_imports = (start: int = 0):
             if dewy_own != 0:
                 if decl_shadowable(int(syms[s].decl)): continue
                 fatal(nodes[id].pos, "cannot import '{name_of(alias)}': this module declares its own '{name_of(alias)}' (at {pos_str(nodes[int(syms[dewy_own].decl)].pos)}), and the imported one is not `$shadowable`; import it with another name: {name_of(nm)} as ...")
+            if files[int(modules[m].file)].is_dewy and modules[m].names.get(alias) != none:
+                owned = family_decls(s)
+                if dewy_import_clash(m, alias, s, owned, d, nodes[id].pos) == 1: continue
+                bind_imported(m, alias, syms[s].kind, owned)
+                continue
             if syms[s].kind == .fns:
                 if let ex = modules[m].names.get(alias):
                     if syms[ex].kind != .fns: fatal(nodes[id].pos, "cannot import '{name_of(alias)}': this module has a '{name_of(alias)}' (at {pos_str(nodes[int(syms[ex].decl)].pos)}); import it with another name: {name_of(nm)} as ...")
@@ -373,6 +381,99 @@ bind_from_imports = (start: int = 0):
                     if syms[ex].decl != 0: where = "at {pos_str(nodes[int(syms[ex].decl)].pos)}"
                     fatal(nodes[id].pos, "cannot import '{name_of(alias)}': this module has a '{name_of(alias)}' ({where}); import it with another name: {name_of(nm)} as ...")
                 modules[m].names[alias] = new_sym(alias, syms[s].kind, int(syms[s].ref), int(syms[s].decl))
+
+# The module a binding belongs to: where its declaration is (an imported binding
+# keeps its declaration, so it names the module it came from).
+sym_home = (s: int) -> int:
+    k = syms[s].kind
+    if k == .global or k == .const_: return int(globals[int(syms[s].ref)].mod)
+    if k == .module or syms[s].decl == 0: return -1
+    int(nodes[int(syms[s].decl)].mod)
+
+sym_file_name = (s: int) -> str:
+    h = sym_home(s)
+    if h < 0: return "an import"
+    path = files[int(modules[h].file)].path
+    path[rfind(path, "/") + 1..]
+
+# The overloads of a function family (the declarations of one binding otherwise)
+# that module im declares itself, as (ref, decl).
+import_owned = (s: int, im: int) -> (int, int)[]:
+    out: (int, int)[]
+    if syms[s].kind == .fns:
+        o = s
+        loop o != 0:
+            d = int(syms[o].decl)
+            if d != 0 and int(nodes[d].mod) == im: out.push((int(syms[o].ref), d))
+            o = int(syms[o].next)
+    else if syms[s].kind != .module and sym_home(s) == im: out.push((int(syms[s].ref), int(syms[s].decl)))
+    out
+
+# Every declaration of a binding, as (ref, decl).
+family_decls = (s: int) -> (int, int)[]:
+    out: (int, int)[]
+    o = s
+    loop o != 0:
+        out.push((int(syms[o].ref), int(syms[o].decl)))
+        o = if syms[o].kind == .fns: int(syms[o].next) else: 0
+    out
+
+# Does binding `name` hold every one of these declarations already?
+binds_all = (ex: int, owned: (int, int)[]) -> bool:
+    loop p in owned:
+        found = false
+        o = ex
+        loop o != 0 and not found:
+            if int(syms[o].decl) == p.1 and int(syms[o].ref) == p.0: found = true
+            o = if syms[o].kind == .fns: int(syms[o].next) else: 0
+        if not found: return false
+    true
+
+# A Dewy module already has `name` and an import brings another binding of it (s, its
+# declarations `owned`): 1 keeps the module's (the import adds nothing, or the module's
+# own declaration shadows a `$shadowable` one), 0 binds the import in its place (it
+# outranks a `$shadowable` import). Otherwise the two collide: an error naming both.
+dewy_import_clash = (m: int, name: int, s: int, owned: (int, int)[], d: int, pos: int) -> int:
+    ex = modules[m].names[name]
+    if binds_all(ex, owned): return 1
+    rel = name_of(int(nodes[d].sval))
+    spell = if nodes[d].aux2 == 1: "p\"{rel}\"" else: rel
+    fix = "import the module under a name (`import {spell} as name`) or select the names you need (`from {spell} import (...)`)"
+    if nodes[d].aux == 2: fix = "import it with another name: {name_of(name)} as ..."
+    mine = shadowable_decls.has(int(syms[s].decl))
+    if sym_home(ex) == m:
+        if mine: return 1
+        fatal(pos, "cannot import '{name_of(name)}' from {sym_file_name(s)}: this module declares its own '{name_of(name)}' (at {pos_str(nodes[int(syms[ex].decl)].pos)}), and the imported one is not `$shadowable`; {fix}")
+    theirs = syms[ex].decl != 0 and shadowable_decls.has(int(syms[ex].decl))
+    if theirs and not mine: return 0
+    if mine and not theirs: return 1
+    fatal(pos, "'{name_of(name)}' is imported from both {sym_file_name(ex)} and {sym_file_name(s)}; {fix}")
+    1
+
+# Bind an import's declarations of `name` (owned, as (ref, decl)) in module m,
+# replacing any binding there.
+bind_imported = (m: int, name: int, kind: SK, owned: (int, int)[]):
+    loop i in [0..owned.len()):
+        o = owned[i]
+        if i == 0: modules[m].names[name] = new_sym(name, kind, o.0, o.1)
+        else: scope_add_module(m, name, kind, o.0, o.1)
+
+# import p"x.dewy": each top-level binding x declares, bound here as if selected
+# (names starting with _ stay in x, and x's own imports are not passed on).
+bind_splat = (d: int, m: int, im: int):
+    if modules[im].is_prelude: return
+    pairs: (int, int)[]
+    loop k, v in modules[im].names: pairs.push((k, v))
+    loop p in pairs:
+        name = p.0
+        s = p.1
+        if is_private(name): continue
+        owned = import_owned(s, im)
+        if owned.len() == 0: continue
+        if files[int(modules[im].file)].path == lib_dir + "/rational.dewy" and (name_of(name) == "Rational" or name_of(name) == "RationalWord"): continue
+        if modules[m].names.get(name) != none:
+            if dewy_import_clash(m, name, s, owned, d, nodes[d].pos) == 1: continue
+        bind_imported(m, name, syms[s].kind, owned)
 
 # The bundled exact fraction's types are the builtin `rational` and
 # `rational<int64>`: their library names are not a second spelling.
@@ -1096,8 +1197,9 @@ register_decls = (m: int, decls: int[]):
             if nodes[d].aux == 1:
                 modules[m].uses.push(im)
                 register_module(im)
-            else if nodes[d].aux == 2:
-                # from x import a, b: bound once every module's names are known (bind_from_imports)
+            else if nodes[d].aux == 2 or nodes[d].aux == 3:
+                # from x import a, b (and Dewy's import p"x.dewy", every name): bound once every
+                # module's names are known (bind_from_imports)
                 nodes[d].sym = i32(im)
                 from_imports.push(d)
             else: scope_add_module(m, nm, .module, im, d)
@@ -4855,7 +4957,7 @@ order_modules = (m: int, out: mut int[]):
     dfs_state[m] = true
     loop d in modules[m].decls:
         if nodes[d].kind == .import_:
-            if nodes[d].aux == 2: order_modules(int(nodes[d].sym), out)
+            if nodes[d].aux == 2 or nodes[d].aux == 3: order_modules(int(nodes[d].sym), out)
             else if nodes[d].aux == 1:
                 loop u in modules[m].uses: order_modules(u, out)
             else if let s = modules[m].names.get(int(nodes[d].name)):

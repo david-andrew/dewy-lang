@@ -2871,8 +2871,19 @@ not classify is rejected there. `$realtime` is reserved for a stronger future bu
 ```dewy
 import physics
 import p"model.dewy" as model
+import p"shapes.dewy"
 from p"helpers.dewy" import advance, fresh
 ```
+
+`import p"shapes.dewy"` with no selection and no name binds each of the module's
+top-level declarations here, as if every one were selected (names starting with
+`_` stay in it, and its own imports are not passed on). `as model` keeps a module
+behind a namespace instead (`model.step()`), and a bare library name such as
+`physics` is its namespace. Two imports binding different declarations under one
+name are an error naming both modules; import one under a name or select what you
+need. A module's own declaration may shadow an imported `$shadowable` one, an
+import may shadow the prelude's, and a non-`$shadowable` import outranks a
+`$shadowable` one.
 
 A selection lists names with commas or in parentheses, each optionally renamed
 (`import (advance fresh as new)`, `import advance as step, fresh` after `from
