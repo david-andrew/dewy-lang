@@ -1903,7 +1903,7 @@ dw_expr = (id: int) -> int:
         if op == .at:
             # `@f(args)` partially evaluates f; `@x` selects a place or a function.
             if nodes[e].kind == .call: nodes[e].aux2 = i32(AUX2_PARTIAL)
-            else: add_flag(e, NF_MUT)
+            else: add_flag(e, NF_MUT | NF_AT)
             return e
         if op == .dot_minus or op == .dot_plus:
             n = mk(.unary, pos)
