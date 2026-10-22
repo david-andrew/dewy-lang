@@ -1,0 +1,37 @@
+# Tensor broadcasting: a 256x256 matrix plus a bias row and a shift column
+# (through `new` axes), clipped at zero, then a same-shape elementwise product
+# and its sum. Count is the number of passes; the inputs are made before timing.
+from p"harness.dewy" import size_argument, clock
+
+const N:int64=256
+
+values=(count:int64 seed0:int64):>array<int64>=>{
+    let out:array<int64>=[]
+    let seed=seed0
+    loop _ in [0..count) {
+        seed=(seed*1103515245+12345)%2147483648
+        out.push(seed%1000-500)
+    }
+    return out
+}
+
+kernel=(rounds:int64 m:array<int64 length=[N N]> bias:array<int64> shift:array<int64>):>int64=>{
+    let total:int64=0
+    loop r in [0..rounds) {
+        let h=max.(m .+ bias[new ..] .+ shift[.. new] .- r%7 0)
+        let g=h .* m .- h
+        total+=sum(g)
+    }
+    return total
+}
+
+main=(args:array<string>):>void=>{
+    let count=size_argument(args 1000)
+    let m=reshape(values(N*N 1) N N)
+    let bias=values(N 2)
+    let shift=values(N 3)
+    let start=clock()
+    let result=kernel(count m bias shift)
+    let stop=clock()
+    printl"{result} {stop-start}"
+}
