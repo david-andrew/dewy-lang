@@ -275,20 +275,33 @@ dw_is_target = (id: int) -> bool:
     let id = dw_unwrap(id)
     dewy_syntax[id].kind == .metatag and dewy_syntax[id].text == "target"
 
-# `$target` (0), `$target.arch` (1) or `$target.os` (2); -1 for anything else.
+dw_is_build = (id: int) -> bool:
+    let id = dw_unwrap(id)
+    dewy_syntax[id].kind == .metatag and dewy_syntax[id].text == "build"
+
+# `$target` (0), `$target.arch` (1), `$target.os` (2), `$build.mode` (3) or
+# `$build.debug` (4, a bool); -1 for anything else. `$build` is the compile-time
+# record of how the program is built: its mode, 'release' or 'debug'.
 dw_target_field = (id: int) -> int:
     let id = dw_unwrap(id)
     if dw_is_target(id): return 0
-    if dw_op(id) != .dot or dw_nchildren(id) != 3 or not dw_is_target(dw_child(id, 1)): return -1
+    if dw_op(id) != .dot or dw_nchildren(id) != 3: return -1
     member = dw_name(dw_child(id, 2))
+    if dw_is_build(dw_child(id, 1)):
+        if member == "mode": return 3
+        if member == "debug": return 4
+        fatal(dewy_syntax[id].pos, "`$build` has `mode` ('release' or 'debug') and `debug` (true in a debug build), not `{member}`")
+    if not dw_is_target(dw_child(id, 1)): return -1
     if member == "arch": return 1
     if member == "os": return 2
     -1
 
-# The value of a `$target` field.
+# The value of a `$target` or `$build` field.
 dw_target_field_value = (field: int) -> str:
     if field == 1: return target_arch_of(dw_target_name())
     if field == 2: return target_os_of(dw_target_name())
+    if field == 3: return if release_build: "release" else: "debug"
+    if field == 4: return if release_build: "false" else: "true"
     dw_target_name()
 
 # A target name (field 0), processor (1) or system (2) written as a string literal,
@@ -298,6 +311,9 @@ dw_target_literal = (id: int, field: int = 0) -> str?:
     if dewy_syntax[id].kind != .string: return none
     name = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
+    if field == 3:
+        if name != "release" and name != "debug": fatal(pos, "unknown build mode \"{name}\": `$build.mode` is \"release\" or \"debug\"")
+        return name
     if field == 1:
         if not (name in target_arches()): fatal(pos, "unknown processor \"{name}\": `$target.arch` is one of {join(target_arches(), ", ")}")
         return name
@@ -320,6 +336,7 @@ dw_target_condition = (id0: int) -> int:
     if kind == .prefix and op == .kw_not:
         inner = dw_target_condition(dw_child(id, 1))
         return if inner < 0: -1 else: 1 - inner
+    if dw_target_field(id) == 4: return if release_build: 0 else: 1
     if kind != .binary: return -1
     if op == .kw_and or op == .kw_or:
         left = dw_target_condition(dw_child(id, 1))
@@ -336,7 +353,7 @@ dw_target_condition = (id0: int) -> int:
             right = left
             left = dw_child(id, 2)
         field = dw_target_field(left)
-        if field < 0: return -1
+        if field < 0 or field == 4: return -1
         name = dw_target_literal(right, field) ?? ""
         if len(name) == 0: return -1
         found = name == dw_target_field_value(field)
@@ -1647,6 +1664,7 @@ dw_expr = (id: int) -> int:
     if k == .directive and text == "concurrent": return dw_concurrent(id, false)
     if k == .directive: return dw_directive(id)
     if k == .metatag:
+        if text == "build": fatal(pos, "`$build` is the compile-time record of how the program is built: `$build.mode` ('release' or 'debug') or `$build.debug`")
         if text != "target": return dw_metatag_fail(id)
         n = mk(.str_lit, pos)
         nodes[n].sval = i32(intern(dw_target_name()))
@@ -1860,6 +1878,10 @@ dw_expr = (id: int) -> int:
             return n
         if op == .dot:
             field = dw_target_field(id)
+            if field == 4:
+                n = mk(.bool_lit, pos)
+                nodes[n].ival = if release_build: 0 else: 1
+                return n
             if field > 0:
                 n = mk(.str_lit, pos)
                 nodes[n].sval = i32(intern(dw_target_field_value(field)))

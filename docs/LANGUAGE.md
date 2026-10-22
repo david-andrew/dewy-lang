@@ -3307,6 +3307,12 @@ if $target =? "wasm32" {
 `$supported_targets` lists the full target names a module accepts, once at file
 scope; compiling it for any other target is an error.
 
+`$build` is the compile-time record of how the program is built: `$build.mode`
+is `"release"` or `"debug"`, and `$build.debug` is `true` in a debug build.
+Conditions on them fold like `$target` tests (`if $build.debug {...}` compiles
+only the live arm). Project flags are ordinary constants in a build module the
+entry module overrides; there are no command-line `-D` flags.
+
 Start a game with the built-in template, then edit it while it runs:
 
 ```sh
