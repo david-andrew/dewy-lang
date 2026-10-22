@@ -44,7 +44,7 @@ reduce_tree=(input:array<int64> chunk_size:int64):>Summary=> {
     }
     return level[0]
 }
-main=():>int64=> {
+main=():>void=> {
     let input:array<int64>=[loop i in [0..4097) (i*37)%101]
     let serial=leaf_summary(input)
     loop chunk in [1 7 64 511 4097]  {
@@ -63,5 +63,4 @@ main=():>int64=> {
     input[0]=999
     assert(reduce_tree(snapshot 64).hash =? a.hash)
     printl("{serial.count} {serial.sum} {serial.hash}")
-    return 0
 }

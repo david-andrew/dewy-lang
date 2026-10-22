@@ -57,7 +57,7 @@ kernel = (@values:array<int64> @flags:array<int64>):>int64 => {
     return hash
 }
 
-main = (args:array<string>):>int64 => {
+main = (args:array<string>):>void => {
     let count=size_argument(args 1000000)
     let values=fill(count)
     let flags:array<int64>=[]
@@ -70,5 +70,4 @@ main = (args:array<string>):>int64 => {
     let result=kernel(@values @flags)
     let finished=clock()
     printl"{result} {finished-started}"
-    return 0
 }

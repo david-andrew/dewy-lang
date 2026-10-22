@@ -1,6 +1,5 @@
 quiet=(x:int64):>int64 & no_effects=>x+1
-main=():>int64=>{
+main=():>void=>{
     let f:<(x:int64):>int64>=@quiet
     let g:<(x:int64):>int64 & no_effects>=@f
-    return 0
 }

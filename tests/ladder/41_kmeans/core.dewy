@@ -32,7 +32,7 @@ fit=(points:array<Point> seeds:array<Point> rounds:int64):>array<Point>=> {
     }
     return centers
 }
-main=():>int64=> {
+main=():>void=> {
     let points:array<Point>=[]
     loop cluster in [0..3)  {
         loop i in [0..40)  {
@@ -57,5 +57,4 @@ main=():>int64=> {
     assert(nearest(Point[0.0 0.0] [Point[-1.0 0.0] Point[1.0 0.0]]) =? 0)
     assert(fit(points seeds 0) =? seeds)
     printl("{format(result[0].x ".1f")} {format(result[1].y ".1f")} {format(result[2].x ".1f")} {format(loss ".1f")}")
-    return 0
 }

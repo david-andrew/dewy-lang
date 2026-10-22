@@ -9,15 +9,15 @@ snapshot=(@entry:Entry):>string=>{
     entry.name='changed'
     return saved.name
 }
-main=():>int64=>{
+main=():>void=>{
     let entry=Entry['old' 'note']
-    if snapshot(@entry) not=? 'old' or entry.name not=? 'changed' return 3
+    if snapshot(@entry) not=? 'old' or entry.name not=? 'changed' exit(3)
     let names:array<string>=['a' 'bb' 'ccc']
     let entries:array<Entry>=[]
     loop name in names {entries.push(label(name))}
-    if names.length =? 0 or entries.length <? 3 return 1
+    if names.length =? 0 or entries.length <? 3 exit(1)
     let first=names[0]
     let kept=first
     let note=entries[2].note
-    return if kept =? 'a' and note =? 'n:ccc' and first.length =? 1 42 else 2
+    exit((if kept =? 'a' and note =? 'n:ccc' and first.length =? 1 42 else 2))
 }

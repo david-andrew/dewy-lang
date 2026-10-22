@@ -17,7 +17,7 @@ exchange=(payload:string):>string=>{
     net.tcp_close(server)
     return echoed
 }
-main=():>int64=>{
+main=():>void=>{
     let one=exchange("hello café")
     $runtime_assert (one =? "hello café")
     let two=exchange("second request")
@@ -28,5 +28,4 @@ main=():>int64=>{
     loop b in bytes(one) {checksum+=b as int64}
     $runtime_assert (checksum >? 0)
     printl("{one}|{two}|{three}")
-    return 0
 }

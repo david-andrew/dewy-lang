@@ -7,7 +7,7 @@ from tests.support import compiler
 
 
 PROGRAM = r'''
-main=(args:array<string>):>int64=>{
+main=(args:array<string>):>void=>exit(entry(args)) entry=(args:array<string>):>int64=>{
 if args[1]=?"stdin" {
     write(read_stdin())
     return if read_stdin()=?"" and read_line() is?none 0 else 1

@@ -82,10 +82,9 @@ run=(entry:Entry @totals:Totals):>void=>{
     loop tree in tree_lines(parsed) printl("  tree {tree}")
 }
 
-main=():>int64=>{
+main=():>void=>{
     let corpus=$include_bytes(p"corpus.txt")
     let totals=Totals()
     loop entry in entries(corpus) run(entry @totals)
     printl("entries {totals.entries}, tokens {totals.tokens}, nodes {totals.nodes}, errors {totals.errors}")
-    return 0
 }

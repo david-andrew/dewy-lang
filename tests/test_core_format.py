@@ -59,16 +59,16 @@ def test_core_format_implementation_language(compiler, tmp_path):
 
 
 PROGRAMS = {
-    'named-values': 'main=()=>{let f:<(left:int64 right:int64):>int64>=(x y)=>x+y printl(f(right=22 left=20)) return 0}',
-    'partial-operators': 'apply=(f:<(value:int64):>int64> x:int64)=>f(x)\nmain=()=>{printl(apply((*2+2)20)) let p:<(value:int64):>bool>=(not in? [1 2]) printl(p(3)) return 0}',
-    'transmute': 'main=()=>{let bits:uint32=1065353216 printl(bits transmute float32) printl(float64(1.0) transmute uint64) return 0}',
+    'named-values': 'main=():>void=>{let f:<(left:int64 right:int64):>int64>=(x y)=>x+y printl(f(right=22 left=20))}',
+    'partial-operators': 'apply=(f:<(value:int64):>int64> x:int64)=>f(x)\nmain=():>void=>{printl(apply((*2+2)20)) let p:<(value:int64):>bool>=(not in? [1 2]) printl(p(3))}',
+    'transmute': 'main=():>void=>{let bits:uint32=1065353216 printl(bits transmute float32) printl(float64(1.0) transmute uint64)}',
     'keyword-ids': '''probe=(is:int64? isnt:int64? notin:int64)=>{
 let iffy=true and not false
 printl(iffy) printl(is isnt? int64) printl(isnt is? none)
 let λ=notin
 printl((is ?? 0) in? [20 21]) printl(λ notin? [22])
 return (is ?? 0)+λ}
-main=()=>{printl(probe(20 21 22)); return 0}''',
+main=():>void=>{printl(probe(20 21 22));}''',
     'decimal-literals': '''from bigint import bigint
 main=()=>{
 printl(0d4_2.0_0E+0_0) printl(2.1(10+10))
@@ -110,16 +110,16 @@ m[rows (0..2]] .+= [1 2]
 printl(m[[..] [end,end-1..]].data)
 return 0
 }''',
-    'unpack-leaf-types': 'main=()=>{const [x:int64 y:float64]=[20 22] printl(x+y) return 0}',
-    'record-spread': 'main=()=>{let base=[x=20 y=1] let next=[base... y=22] printl(next.x+next.y) return 0}',
-    'generic-value': 'identity=<T>(x:T):>T=>x\nmain=()=>{let f=@identity<int64> printl(f(42)) return 0}',
-    'generic-return-adjacency': 'pair=():>array<array<int64>>=>[[20 22]]\nmain=()=>{printl(pair()[0]) return 0}',
-    'spread': 'main=()=>{let xs=[20 22] printl([0 xs... 1 (xs)...]) return 0}',
-    'sequence': 'Series:type=[count:int64]\nlen=(s:Series)=>s.count\n__index__=(s:Series i:int64)=>i\nmain=()=>{printl([loop x in Series[3] x]) return 0}',
-    'slice-update': 'main=()=>{let xs=[1 2 3 4] xs[1..2]=[20 22] printl(xs) return 0}',
-    'range-index': 'main=()=>{let xs=[10 20 30 40 50] printl(xs[0,2..]) xs[4,2..]=[1 2 3] printl(xs[(0..4]]) return 0}',
-    'coalesce': 'read=():>int64?=>none\nmain=()=>{printl"{read()??20+22}" return 0}',
-    'compound': 'main=()=>{let x=-17 x//=3 x%=4 x^=2 let y=3/2 y/=3 printl"{x} {y}" return 0}',
+    'unpack-leaf-types': 'main=():>void=>{const [x:int64 y:float64]=[20 22] printl(x+y)}',
+    'record-spread': 'main=():>void=>{let base=[x=20 y=1] let next=[base... y=22] printl(next.x+next.y)}',
+    'generic-value': 'identity=<T>(x:T):>T=>x\nmain=():>void=>{let f=@identity<int64> printl(f(42))}',
+    'generic-return-adjacency': 'pair=():>array<array<int64>>=>[[20 22]]\nmain=():>void=>{printl(pair()[0])}',
+    'spread': 'main=():>void=>{let xs=[20 22] printl([0 xs... 1 (xs)...])}',
+    'sequence': 'Series:type=[count:int64]\nlen=(s:Series)=>s.count\n__index__=(s:Series i:int64)=>i\nmain=():>void=>{printl([loop x in Series[3] x])}',
+    'slice-update': 'main=():>void=>{let xs=[1 2 3 4] xs[1..2]=[20 22] printl(xs)}',
+    'range-index': 'main=():>void=>{let xs=[10 20 30 40 50] printl(xs[0,2..]) xs[4,2..]=[1 2 3] printl(xs[(0..4]])}',
+    'coalesce': 'read=():>int64?=>none\nmain=():>void=>{printl"{read()??20+22}"}',
+    'compound': 'main=():>void=>{let x=-17 x//=3 x%=4 x^=2 let y=3/2 y/=3 printl"{x} {y}"}',
     'loop-else': '''main=()=>{
 loop x in [0..0) {printl(x)}
 else loop c in "" {printl(c)}

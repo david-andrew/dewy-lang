@@ -23,10 +23,9 @@ touch_all=(@w:Wide):>void & no allocates & no blocks=>{
     w.f18+=1
     w.f19+=1
 }
-main=():>int64=>{
+main=():>void=>{
     $no_hidden_costs=false
     let w:Wide=[f0=0 f1=0 f2=0 f3=0 f4=0 f5=0 f6=0 f7=0 f8=0 f9=0 f10=1 f11=1 f12=1 f13=1 f14=1 f15=1 f16=1 f17=1 f18=1 f19=1]
     touch_all(@w)
     printl("{w.f0} {w.f19}")
-    return 0
 }

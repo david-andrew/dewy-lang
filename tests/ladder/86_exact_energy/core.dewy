@@ -42,7 +42,7 @@ report=(readings:array<Reading> tariff:Rat):>Rat=>{
     }
     return times(total tariff)
 }
-main=():>int64=>{
+main=():>void=>{
     let input:array<Reading>=[Reading[0 1200 1500] Reading[1200 3600 500]]
     let tariff=ratio(24 100)
     let cost=report(input tariff)
@@ -85,5 +85,4 @@ main=():>int64=>{
     $runtime_assert equal(energy(Reading[0 1800 1000]) ratio(1 2))
     $runtime_assert equal(report(saved ratio(1 1)) ratio(5 6))
     printl("{show(e)} {show(cost)} {show(cents)} {show(growth)}")
-    return 0
 }

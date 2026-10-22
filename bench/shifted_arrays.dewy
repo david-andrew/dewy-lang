@@ -11,12 +11,11 @@ kernel=(rounds:int64):>int64=>{
     }
     return total
 }
-main=(args:array<string>):>int64=>{
+main=(args:array<string>):>void=>{
     let count=size_argument(args 100000)
     loop i in [0..1026) {left.push(i) right.push(i*3+1)}
     let start=clock()
     let result=kernel(count)
     let stop=clock()
     printl"{result} {stop-start}"
-    return 0
 }

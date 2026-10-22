@@ -1,9 +1,9 @@
 # exit: 42
-let main = ():>int64 => {
+let main = ():>void => {
     let total:int64 = 0
     loop i in 0..2 { total += i }
     loop i in [0..3) { total += i }
     loop i in (0..2] { total += i }
     loop i in (0..3) { total += i }
-    return total + 30
+    exit(total + 30)
 }

@@ -1,9 +1,8 @@
 # Anonymous records print their fields as first written, though their type is kept by name.
 let show = (r:[zeta:int64 alpha:string]) => printl"{r}"
-let main = ():>int64 => {
+let main = ():>void => {
     let a = [y=2 x=1 name="q"]
     printl"{a} {[b=1 a=[d=2 c=3]]}"
     show([alpha="s" zeta=9])
     printl(a as string)
-    return 0
 }

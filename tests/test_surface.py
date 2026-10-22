@@ -295,7 +295,7 @@ signed=(x:int64 count:int64):>int64=>x >> count
 narrow=(x:uint8 count:int64):>uint8=>x << count
 nsigned=(x:int8 count:int64):>int8=>x >> count
 masked=(x:uint64 count:int64):>uint64=>x << (count and 63)
-main=():>int64=>{
+main=():>void=>exit(entry()) entry=():>int64=>{
     loop c in [0 1 7 8 9 63 64 65 127 128 -1] {
         printl"{left(1 c)} {right(18446744073709551615 c)} {signed(-2 c)} {signed(2 c)} {narrow(3 c)} {nsigned(-100 c)} {masked(1 c)}"
     }

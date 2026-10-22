@@ -6,7 +6,7 @@ choose=(flag:bool):>array<int64>=>{
     xs.push(22)
     return if flag xs else xs
 }
-main=():>int64=>{
+main=():>void=>{
     let a=grow([])
     let b=a
     b[0]=99
@@ -15,5 +15,4 @@ main=():>int64=>{
     let boxed=Box[chosen]
     let final=boxed.items
     $runtime_assert final=?[20 22]
-    return 0
 }

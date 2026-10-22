@@ -15,7 +15,7 @@ train_binary=(xs:array<float64> ys:array<float64>):>array<float64>=>{
     }
     return weights
 }
-main=():>int64=>{
+main=():>void=>{
     let xs:array<float64>=[-3.0 -2.0 -1.0 1.0 2.0 3.0]
     let ys:array<float64>=[0.0 0.0 0.0 1.0 1.0 1.0]
     let model=train_binary(xs ys)
@@ -28,5 +28,4 @@ main=():>int64=>{
     $runtime_assert (correct =? 6)
     $runtime_assert (abs(model[1]) <? 1e-10)
     printl("{correct} {format(model[0] ".4f")}")
-    return 0
 }

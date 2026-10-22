@@ -1,7 +1,7 @@
 # Tier 3 / 88_temperature_points / milestone 28
 # Acceptance: Temperature point-minus-point and point-plus-delta, exact C/F/K conversions and requested display units.
 from units import K, °C, °F
-main=():>int64=>{
+main=():>void=>{
     let freezing=0°C
     let boiling=100°C
     let delta=boiling-freezing
@@ -44,5 +44,4 @@ main=():>int64=>{
     warm-=start
     $runtime_assert "{warm} {start*2} {-start}" =? "5°C 40°C -20°C"
     printl("{delta/K} {checksum}")
-    return 0
 }

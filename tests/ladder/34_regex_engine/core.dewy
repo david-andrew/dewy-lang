@@ -37,7 +37,7 @@ accepts=(pattern:string text:string):>bool=> {
     }
     return active[pattern.length]
 }
-main=():>int64=> {
+main=():>void=> {
     let patterns=["a*b" ".*" "ab*" "c*a*b" "a.*c" "a*a*a*b"]
     let texts=["" "b" "ab" "aaab" "ac" "axxc" "miss"]
     let count=0
@@ -62,5 +62,4 @@ main=():>int64=> {
     assert(accepts("a*b*c*" ""))
     assert(not accepts("a*a*a*b" "aaaaaaaaac"))
     printl("{count} {signature}")
-    return 0
 }

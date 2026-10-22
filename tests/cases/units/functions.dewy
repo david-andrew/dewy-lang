@@ -6,7 +6,7 @@ travel=(speed:Speed elapsed:Duration<float64>):>(float64 * Length)=>speed*elapse
 identity=<T>(value:T):>T=>value
 stretch=<T>(distance:T * Length factor:T):>(T * Length)=>distance*factor
 choose=((x:float64 * Length):>int64=>1) & ((x:float64 * Time):>int64=>2)
-main=():>int64=>{
+main=():>void=>{
     let speed:Speed=2.0m/s
     let elapsed:Duration<float64>=3s
     $runtime_assert (travel(speed 300ms) =? 0.6m)
@@ -19,5 +19,4 @@ main=():>int64=>{
     $runtime_assert (choose(elapsed) =? 2)
     let kilometers:float64 * Length=2km
     printl"{distance} {kilometers}"
-    return 0
 }

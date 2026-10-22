@@ -2,7 +2,7 @@
 # `d.get(k)` yields `V|none` for a key that may miss, `in?` tests
 # membership, `.length` counts entries, and iteration follows insertion order
 # even after growth.
-let main = ():>int64 => {
+let main = ():>void => {
     let counts:dict<string int64> = []
     counts['apple'] = 3
     counts['pear'] = 5
@@ -23,5 +23,5 @@ let main = ():>int64 => {
         order = order * 10 + v                      # 4 then 5 -> 45
     }
     loop [k v] in names { total += v }              # 36 + 1 + 2 = 39
-    return total + order - 42                       # 39 + 45 - 42 = 42
+    exit(total + order - 42)                       # 39 + 45 - 42 = 42
 }

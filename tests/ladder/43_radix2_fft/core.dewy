@@ -48,7 +48,7 @@ fft=(input:array<Complex> inverse:bool):>array<Complex>=> {
     }
     return data
 }
-main=():>int64=> {
+main=():>void=> {
     let input=[loop i in [0..64) Complex[((i*7)%13) as float64 0.0]]
     let spectrum=fft(input false)
     let restored=fft(spectrum true)
@@ -70,5 +70,4 @@ main=():>int64=> {
     let singleton=fft([Complex[3.0 4.0]] false)
     assert(singleton[0].im =? 4.0)
     printl("{format(spectrum[0].re ".3f")} {format(energy ".3f")} {format(spectrum[1].re ".3f")}")
-    return 0
 }

@@ -41,7 +41,7 @@ join_lines=(lines:array<string>):>string=> {
     }
     return result
 }
-main=():>int64=> {
+main=():>void=> {
     let text="café 👩‍💻 tools αβγδε 世界 hello"
     let lines=wrap(text 5)
     loop line in lines  {
@@ -72,5 +72,4 @@ main=():>int64=> {
     }
     printl(join_lines(saved))
     printl("{saved.length} {count} {long.length}")
-    return 0
 }

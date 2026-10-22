@@ -1,10 +1,9 @@
 $explicit_copies
 make=():>array<int64>=>{let xs:array<int64>=[] xs.push(20) return xs}
 grow=(n:int64 xs:array<int64>):>array<int64>=>{xs.push(n) return xs}
-main=():>int64=>{
+main=():>void=>{
     loop i in [0..100) {
         let xs=grow(xs=make() n=22)
         $runtime_assert xs=?[20 22]
     }
-    return 0
 }

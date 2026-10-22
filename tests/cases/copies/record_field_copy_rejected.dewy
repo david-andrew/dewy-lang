@@ -3,9 +3,9 @@ $explicit_copies
 Inner:type=[values:array<int64>]
 Outer:type=[child:Inner]
 make=():>Inner=>Inner[[42]]
-main=():>int64=>{
+main=():>void=>{
     let source=make()
     let target=Outer[source]
     target.child.values.clear
-    return if source.values.length>?0 source.values[0] else 0
+    exit((if source.values.length>?0 source.values[0] else 0))
 }

@@ -1,6 +1,6 @@
 # append_file adds to the end of a file, making it if it is not there, and gives the byte
 # count or a file error, as write_text does.
-main=():>int64=>{
+main=():>void=>{
     let dir="case_path_append"
     printl(make_directory(dir))
     let log="{dir}/log.txt"
@@ -8,17 +8,16 @@ main=():>int64=>{
     printl(append_file(log "two\n"))
     printl(append_file(log ""))
     let text=read_text(log)
-    if text is? error return 1
+    if text is? error exit(1)
     printl(text.split("\n"))
     printl(append_file(dir "x") is? IsDirectory)
     printl(record(log "three") is? error)
     printl(record(dir "three") is? IsDirectory)
     let after=read_text(log)
-    if after is? error return 2
+    if after is? error exit(2)
     printl(after.split("\n"))
     printl(remove_file(log))
     printl(remove_directory(dir))
-    return 0
 }
 
 # A function that propagates a file error to its caller.

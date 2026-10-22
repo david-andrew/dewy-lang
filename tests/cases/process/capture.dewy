@@ -1,6 +1,6 @@
 # modes: native native-release
 # capture collects a child's stdout and stderr; spawn starts one to wait for later.
-main=():>int64=>{
+main=():>void=>{
     let result=capture("/bin/sh" ["-c" "echo out; echo err 1>&2; exit 3"])
     match result {
         output:Output => {
@@ -10,20 +10,19 @@ main=():>int64=>{
             printl"{out.trim}|{err.trim}"
             printl(output.stdout.length)
         }
-        <SpawnError> => return 1
+        <SpawnError> => exit(1)
     }
     # More than a pipe holds on both streams at once: both are drained as they fill.
     let big=capture("/bin/sh" ["-c" "i=0; while [ $i -lt 3000 ]; do echo 0123456789abcdef0123456789abcdef; echo fedcba9876543210 1>&2; i=$((i+1)); done"])
-    if big is? SpawnError return 2
+    if big is? SpawnError exit(2)
     printl"{big.status} {big.stdout.length} {big.stderr.length}"
     let binary=capture("/bin/sh" ["-c" "printf '\\377'"])
-    if binary is? SpawnError return 3
+    if binary is? SpawnError exit(3)
     printl(binary.stdout_text is? none)
     printl(capture("/nonexistent/program" []).status)
     let first=spawn("/bin/sh" ["-c" "exit 7"])
     let second=spawn("/bin/sh" ["-c" "kill -9 $$"])
-    if first is? SpawnError or second is? SpawnError return 4
+    if first is? SpawnError or second is? SpawnError exit(4)
     printl(second.wait)
     printl(first.wait)
-    return 0
 }

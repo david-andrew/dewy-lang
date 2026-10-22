@@ -31,13 +31,13 @@ read=(p:Pool h:Handle):>int64?=> {
     }
     return p.data[h.slot]
 }
-main=():>int64=> {
+main=():>void=> {
     let pool=Pool[[false false false false false false false false false false false false false false false false] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]]
     let handles:array<Handle>=[]
     loop i in [0..16)  {
         let h=allocate(@pool i*10)
         if h is? none  {
-            return 1
+            exit(1)
         }
         handles.push(h)
     }
@@ -48,7 +48,7 @@ main=():>int64=> {
     assert(not release(@pool stale))
     let fresh=allocate(@pool 777)
     if fresh is? none  {
-        return 2
+        exit(2)
     }
     assert(fresh.slot =? stale.slot)
     assert(fresh.generation =? stale.generation+1)
@@ -65,5 +65,4 @@ main=():>int64=> {
     assert(not release(@pool Handle[-1 0]))
     assert(not release(@pool Handle[16 0]))
     printl("{total} {read(pool fresh)} {fresh.generation}")
-    return 0
 }

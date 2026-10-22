@@ -1,0 +1,47 @@
+# Dewy's console: colour on the standard streams, and what a program's main gives
+# back when an error reaches it.
+
+# standard error is a terminal (not a file or a pipe)
+__stderr_tty = () -> bool:
+    when TARGET == "windows":
+        m = [u32(0)]
+        return GetConsoleMode(GetStdHandle(u32(0xFFFFFFF4)), data(m)) != 0
+    else when TARGET == "macos":
+        return __mac_isatty(i32(2)) == 1
+    else when TARGET == "wasm":
+        return false
+    else:
+        # (TCGETS writes what it knows of the terminal: a buffer for it)
+        b: u8[] = []
+        b.resize(64)
+        syscall(16, 2, 0x5401, data(b)) == 0
+
+# Colour on stream fd (1 or 2): the program's console.color first ('always', 'never'),
+# then NO_COLOR, then FORCE_COLOR or CLICOLOR_FORCE, then whether it is a terminal.
+__console_color_mode = "auto"
+__console_colored = (fd: int) -> bool:
+    if __console_color_mode == "always": return true
+    if __console_color_mode == "never": return false
+    if len(env("NO_COLOR") ?? "") > 0: return false
+    force = env("FORCE_COLOR") ?? ""
+    if len(force) == 0: force = env("CLICOLOR_FORCE") ?? ""
+    if len(force) > 0 and force != "0" and force != "false": return true
+    if fd == 1: return __stdout_tty()
+    __stderr_tty()
+
+# text and a line break on stream fd, in an ANSI colour ("" for none) when colour is on
+__console_line = (fd: int, s: str, color: str):
+    if len(color) > 0 and __console_colored(fd):
+        __console_write(fd, "\x1b[{color}m{s}\x1b[0m\n")
+    else: __console_write(fd, s + "\n")
+
+__console_write = (fd: int, s: str):
+    if fd == 1: write(s)
+    else:
+        __out_flush()
+        __write_fd(2, data(s), len(s))
+
+# An error that reached main: said on standard error, and main's exit code.
+__main_failed = (message: str, code: int) -> int:
+    __console_line(2, "error: {message}", "31")
+    code

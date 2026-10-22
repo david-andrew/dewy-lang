@@ -29,7 +29,7 @@ control=():>int64=>{
     }
     return total
 }
-main=():>int64=>{
+main=():>void=>{
     # Ordinary main is preserved when the separate test entry is generated.
     $runtime_assert control() =? 120
     $runtime_assert identity(1) =? 1
@@ -45,5 +45,4 @@ main=():>int64=>{
     $runtime_assert identity(3)+identity(4) =? 7
     $runtime_assert identity(0)+identity(0) =? 0
     printl("{control()}")
-    return 0
 }

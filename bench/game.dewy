@@ -22,12 +22,11 @@ simulate=(start:Ball frames:int64):>Ball=>{
     loop frame in [0..frames) {state=tick(state 0.125)}
     return state
 }
-main=(args:array<string>):>int64=>{
+main=(args:array<string>):>void=>{
     let frames=size_argument(args 5000000)
     let started=clock()
     let final=simulate(Ball[1.0 4.0] frames)
     let result=mix(mix(int64(final.x*2.0) int64(final.velocity)) final.hits)
     let finished=clock()
     printl"{result} {finished-started}"
-    return 0
 }

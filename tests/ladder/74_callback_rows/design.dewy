@@ -22,7 +22,7 @@ fold=<E:Effect>(xs:array<int64> f:Action<E>):>int64 & E=>{
     }
     return total
 }
-main=():>int64=>{
+main=():>void=>{
     let total:int64=0
     loop n in [0..32) {
         total+=quiet(n)
@@ -58,5 +58,4 @@ main=():>int64=>{
     $runtime_assert fold([2 2 2] @negate) =? -6
     $runtime_assert quiet(6) =? 30
     printl("{total} {cell}")
-    return 0
 }

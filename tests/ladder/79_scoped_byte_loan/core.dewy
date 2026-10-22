@@ -30,7 +30,7 @@ rewrite=():>int64=>{
     $runtime_assert bytes[5] =? 10
     return byte_sum(bytes)+byte_sum(saved)
 }
-main=():>int64=>{
+main=():>void=>{
     let total:int64=0
     loop n in [0..32) {
         total+=inspect(n)
@@ -52,5 +52,4 @@ main=():>int64=>{
     $runtime_assert rewrite() =? 39
     $runtime_assert byte_sum([8 7 6 5 4 3 2 1]) =? 36
     printl("{total} {rewrite()}")
-    return 0
 }

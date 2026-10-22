@@ -55,10 +55,9 @@ control=():>int64=>{
     $runtime_assert second[0] =? 1
     return verify()
 }
-main=():>int64=>{
+main=():>void=>{
     let witness=control()
     let items:array<int64>=[1]
     forbidden(@items)
     $runtime_assert witness >? 0
-    return 0
 }

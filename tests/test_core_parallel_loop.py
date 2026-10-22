@@ -76,7 +76,7 @@ def test_parallel_syntax(compiler, tmp_path, target, release):
 ])
 def test_parallel_obligations(compiler, tmp_path, body, diagnostic):
     source = tmp_path / 'invalid.dewy'
-    source.write_text('main=()=>{' + body + '\nreturn 0}')
+    source.write_text('main=():>void=>{' + body + '}')
     result = subprocess.run([compiler, 'check', source], capture_output=True,
                             text=True, timeout=30)
     assert result.returncode != 0

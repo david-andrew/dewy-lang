@@ -52,7 +52,7 @@ checksum=(w:World):>int64=> {
     }
     return result
 }
-main=():>int64=> {
+main=():>void=> {
     let world=World[[] [] [] [] [] []]
     loop id in [0..4096)  {
         spawn_entity(@world id)
@@ -82,5 +82,4 @@ main=():>int64=> {
         $runtime_assert (world.y[i] >=? 0 and world.y[i] <=? 78)
     }
     printl("{world.ids.length} {checksum(world)} {checksum(snapshot)}")
-    return 0
 }

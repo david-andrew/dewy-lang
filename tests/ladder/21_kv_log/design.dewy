@@ -12,25 +12,24 @@ recover=(path:string):>dict<string string>|error=>{
     }
     return state
 }
-main=():>int64=>{
+main=():>void=>{
     let path="kv.log"
     let initialized=write_text(path "")
-    if initialized is? error {return 1}
+    if initialized is? error {exit(1)}
     $runtime_assert (append(path Entry["a" "one"]) isnt? error)
     $runtime_assert (append(path Entry["b" "two"]) isnt? error)
     $runtime_assert (append(path Entry["a" "three"]) isnt? error)
     $runtime_assert (append(path Entry["b" "" true]) isnt? error)
     let first=recover(path)
-    if first is? error {return 2}
+    if first is? error {exit(2)}
     $runtime_assert (first.length =? 1)
     $runtime_assert (first["a"] =? "three")
     $runtime_assert (append_file(path "partial-record") isnt? error)
     let second=recover(path)
-    if second is? error {return 3}
+    if second is? error {exit(3)}
     $runtime_assert (second["a"] =? "three")
     $runtime_assert (second.length =? first.length)
     let persisted=read_text(path)
-    if persisted is? error {return 4}
+    if persisted is? error {exit(4)}
     printl("{second.length} {second["a"]} {persisted.split("\n").length}")
-    return 0
 }

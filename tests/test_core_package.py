@@ -50,7 +50,7 @@ def test_core_packaged_toolchain(toolchain, tmp_path):
 
     assert os.path.normcase(run('--print-lib').stdout.strip()) == os.path.normcase(str(moved / 'lib'))
     source = tmp_path / 'sample.dewy'
-    source.write_text('main=()=>{let values=[20 22] return sum(values)}\n')
+    source.write_text('main=():>void=>{let values=[20 22] exit(sum(values))}\n')
     binary = tmp_path / ('sample.exe' if os.name == 'nt' else 'sample')
     run('build', source, '-o', binary)
     executed = subprocess.run([binary], cwd=tmp_path, env=env, capture_output=True,

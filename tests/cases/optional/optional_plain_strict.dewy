@@ -12,10 +12,9 @@ or_zero=(x:int64|none):>int64=>{
     if x is? int64 return x
     return 0
 }
-main=():>int64=>{
+main=():>void=>{
     $no_hidden_costs=false
     let slots:array<Slot length=4>=[[used=false value=1] [used=true value=7] [used=true value=9] [used=false value=2]]
     let empty:array<Slot length=4>=[[used=false value=1] [used=false value=7] [used=false value=9] [used=false value=2]]
     printl("{first_used(slots)} {first_used(empty)} {or_zero(first_used(slots))} {or_zero(none)}")
-    return 0
 }

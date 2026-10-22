@@ -10,10 +10,9 @@ step=(s:State):>State=>{
 wake=(@t:Task):>void=>{
     if t.state =? 'blocked' t.state='ready'
 }
-main=():>int64=>{
+main=():>void=>{
     $no_hidden_costs=false
     let t:Task=[prio=3 state='blocked']
     wake(@t)
     printl("{t.state} {step('idle')} {step(t.state)} {step('blocked')}")
-    return 0
 }

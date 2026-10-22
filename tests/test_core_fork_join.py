@@ -122,7 +122,7 @@ fork=(n:int64):>int64=>{
  let parts=[parallel i in [0..2) fork(n-1-i)]
  return parts[0]+parts[1]
 }
-main=()=>{printl"{fork(25)}" return 0}
+main=():>void=>{printl"{fork(25)}"}
 '''
     if managed:
         program = program.replace(':>int64=>', ':>array<int64>=>').replace('return n', 'return [n]').replace('return parts[0]+parts[1]', 'return [parts[0][0]+parts[1][0]]').replace('fork(25)}', 'fork(25)[0]}')

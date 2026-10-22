@@ -3,7 +3,6 @@ bump=(x:int64):>int64 & reads<shared> & mutates<shared>=>{
     shared+=x
     return shared
 }
-main=():>int64=>{
+main=():>void=>{
     printl("{bump(42)}")
-    return 0
 }

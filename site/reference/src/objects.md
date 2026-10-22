@@ -63,11 +63,11 @@ BaseInfo:type = const [
 let hex = BaseInfo['0123456789abcdef' false]                   # radix defaults to 16, proven equal to the length
 let bin = BaseInfo['01' true 2]                                # an explicit radix is checked the same way
 let last_digit = (info:BaseInfo):>string => info.alphabet[info.radix - 1]   # in bounds: radix is the alphabet's length
-let main = ():>int64 => {
+let main = ():>void => {
     let current:BaseInfo = bin
     current = hex                                              # the binding is replaced whole; its contents never change
-    if last_digit(current) =? 'f' and bin.radix =? 2 return 0
-    return 1
+    if last_digit(current) =? 'f' and bin.radix =? 2 return
+    exit(1)
 }
 ```
 
@@ -127,10 +127,10 @@ const specs:dict<string Spec> = [
     't' -> [set'012' false]
 ]
 
-let main = ():>int64 => {
+let main = ():>void => {
     let p:Point = [3]                        # [x=3 y=0]
     let corners:array<Point> = [[1 2] [5 6]]
-    return p.x + corners[1].y + specs['t'].digits.length   # 3 + 6 + 3
+    exit(p.x + corners[1].y + specs['t'].digits.length)   # 3 + 6 + 3
 }
 ```
 
@@ -150,10 +150,10 @@ let Span:type = [
     shifted = (by:int64):>Span => Span(start + by stop + by)
 ]
 
-let main = ():>int64 => {
+let main = ():>void => {
     let s = Span(3 7)
     s.grow(2)                       # 3..9
-    return s.width + s.shifted(1).start   # 6 + 4
+    exit(s.width + s.shifted(1).start)   # 6 + 4
 }
 ```
 

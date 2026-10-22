@@ -7,9 +7,9 @@ sum=(stop:int64 shift:int64):>int64=>{
     loop i in [0..stop) {total+=left[i+shift]+right[i+shift]}
     return total
 }
-main=(args:array<string>):>int64=>{
+main=(args:array<string>):>void=>{
     left=[10 20 30 40 50 60]
     right=[1 2 3]
-    return sum(8 args.length)
+    exit(sum(8 args.length))
 }
 $runtime_checks

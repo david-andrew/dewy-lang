@@ -17,7 +17,7 @@ forward=(@destination:int64 @source:int64):>void=>{
     write(@destination read(@source))
 }
 quiet=(x:int64):>int64=>x*2
-main=():>int64=>{
+main=():>void=>{
     let pair=Pair[0 10]
     loop i in [0..64) {
         advance(@pair)
@@ -59,5 +59,4 @@ main=():>int64=>{
     $runtime_assert quiet(read(@pair.right)) =? -4
     $runtime_assert quiet(read(@pair.left)) =? 128
     printl("{pair.left} {pair.right} {saved.right}")
-    return 0
 }

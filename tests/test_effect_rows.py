@@ -66,7 +66,7 @@ def test_effect_rows_implicit_and_path(compiler, tmp_path, mode, name, directory
     helper.write_text((FIXTURES / f'{name}.jo').read_text())
     source = tmp_path / 'main.dewy'
     source.write_text(f'from p"{directory}/helper.jo" import (hidden)\n'
-                      'bad=():>int64 & no_effects=>hidden()\nmain=():>int64=>0\n')
+                      'bad=():>int64 & no_effects=>hidden()\nmain=():>void=>exit(0)\n')
     result = compile_source(compiler, source, tmp_path, mode, env)
     assert result.returncode != 0
     assert 'effect contract violation' in result.stderr, result.stdout + result.stderr
@@ -76,7 +76,7 @@ def test_effect_rows_implicit_and_path(compiler, tmp_path, mode, name, directory
 @pytest.mark.parametrize('body,accepted', [('42', True), ('[42][0]', False)])
 def test_effect_rows_internal_policy(compiler, tmp_path, mode, body, accepted):
     source = tmp_path / 'main.dewy'
-    source.write_text(f'main=():>int64=>{body}\n')
+    source.write_text(f'main=():>void=>exit(entry()) entry=():>int64=>{body}\n')
     env = dict(os.environ, DEWY_INTERNAL_EFFECT_POLICY='scalar-no-effects')
     result = compile_source(compiler, source, tmp_path, mode, env)
     assert (result.returncode == 0) == accepted, result.stdout + result.stderr

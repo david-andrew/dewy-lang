@@ -13,8 +13,8 @@ from tests.support import compiler  # noqa: F401
     '"""first\n{value}\nlast"""'])
 def test_direct_string_identity(compiler, tmp_path, literal):
     source = tmp_path / 'strings.dewy'
-    source.write_text('main=()=>{\nlet value=20\nlet values=[1 2 3]\n'
-                      f'let text={literal}\nprintl(text)\nreturn 0\n}}\n')
+    source.write_text('main=():>void=>{\nlet value=20\nlet values=[1 2 3]\n'
+                      f'let text={literal}\nprintl(text)\n}}\n')
     images, outputs = [], []
     for mode in ('old', 'compare'):
         output = tmp_path / mode

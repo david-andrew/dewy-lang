@@ -1,9 +1,8 @@
 # Inside a generic function a binding typed by a type parameter stays a value.
 keep=<T>(value:T):>T=>value
 double=(x:int64):>int64=>x*2
-main=():>int64=>{
+main=():>void=>{
     let f=keep(@double)
     printl(f(21))
     printl(keep(7))
-    return 0
 }

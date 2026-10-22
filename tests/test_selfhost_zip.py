@@ -69,7 +69,7 @@ def test_selfhost_zip_ships_dewy(compiler, tmp_path):
     assert b'/compiler/zip.dewy\0' in binary
     assert b'/compiler/zip.jo\0' not in binary
     source = tmp_path / 'page.dewy'
-    source.write_text('main=()=>{printl"zipped" return 0}\n')
+    source.write_text('main=():>void=>{printl"zipped"}\n')
     built = subprocess.run([compiler, 'build', source, '--target', 'wasm32', '-o', tmp_path / 'game.zip'],
                            capture_output=True, text=True, timeout=120)
     assert built.returncode == 0, built.stdout + built.stderr

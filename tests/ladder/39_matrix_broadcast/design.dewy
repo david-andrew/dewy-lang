@@ -10,7 +10,7 @@ center=(matrix:NDArray<float64>):>NDArray<float64>=> {
 }
 gram=(matrix:NDArray<float64>):>NDArray<float64>=>transpose(matrix)*matrix
 close=(a:float64 b:float64):>bool=>abs(a-b) <? 1e-8
-main=():>int64=> {
+main=():>void=> {
     let a=reshape<float64>([1.0 2.0 3.0 4.0 5.0 6.0] 2 3)
     let row:array<float64>=[10.0 20.0 30.0]
     let column=reshape<float64>([100.0 200.0] 2 1)
@@ -62,5 +62,4 @@ main=():>int64=> {
     let shifted_again=saved .+ 0.0
     $runtime_assert (shifted_again.data =? saved.data)
     printl("{format(total ".1f")} {format(checksum ".1f")} {format(sum(expanded) ".1f")}")
-    return 0
 }

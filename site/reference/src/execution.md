@@ -16,13 +16,12 @@ A program does not require `main`. When a zero-argument function named `main` ex
 ```dewy
 printl"initializing"
 
-let main = ():>int64 => {
+let main = ():>void => {
     printl"running"
-    return 0
 }
 ```
 
-`main` may return `void` or an integer exit status. Additional standardized entry parameters such as command-line arguments and environment access are provisional.
+`main` returns `void` or the errors that reach it: `void | E`, an ordinary result type, declared or inferred. It gives no exit code: success exits 0, and a script that needs a particular code calls `exit(n)`. An error reaching `main` is printed on standard error and ends the program with its kind's code, assigned 1, 2, 3, … in the order the kinds are declared (a declared result fixes the order), below 126; an error type may pin its own with an `exit_code` member. `dewy build --exit-codes` prints the table. Additional standardized entry parameters such as command-line arguments and environment access are provisional.
 
 An explicit top-level call to `main()` is an ordinary call and does not suppress automatic entry invocation.
 

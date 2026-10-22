@@ -103,7 +103,7 @@ run=(argv:array<string>):>int64=>{
 }
 
 # The command runs with each argument list below; its files are written first.
-main=():>int64=>{
+main=():>void=>{
     write_text("dogfood_wc.conf" "# word counter settings\nmin_length = 3\ntop = 4\nignore = the and of to a in\n");
     write_text("dogfood_bad.conf" "top = 2\ncolour = red\n");
     write_text("dogfood_input.txt" "The quick brown fox jumps over the lazy dog.\nThe dog sleeps; the fox runs and runs and runs.\nOf foxes and dogs, a tale.\n");
@@ -121,5 +121,4 @@ main=():>int64=>{
         printl("exit {run(argv)}")
     }
     loop f in ["dogfood_wc.conf" "dogfood_bad.conf" "dogfood_input.txt"] remove_file(f)
-    return 0
 }

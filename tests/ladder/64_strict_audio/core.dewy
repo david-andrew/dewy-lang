@@ -33,7 +33,7 @@ clamp=(x:int64):>int64=>{
     if x >? 100 return 100
     return x
 }
-main=():>int64=>{
+main=():>void=>{
     let checksum:int64=0
     loop frame in [0..64) {
         checksum+=block(frame)
@@ -58,5 +58,4 @@ main=():>int64=>{
     $runtime_assert block(2) =? 146
     $runtime_assert silence()+silence() =? 0
     printl("{checksum}")
-    return 0
 }

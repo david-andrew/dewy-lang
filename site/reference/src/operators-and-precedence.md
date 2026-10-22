@@ -110,15 +110,15 @@ A binary operator applied to only its right operand, in parentheses, is a *parti
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
-let main = ():>int64 => {
+let main = ():>void => {
     let names:array<string> = ["bb" "a" "ccc"]
     names.sort(key=(.length))
     let small:<(x:int64):>bool> = (<? 10)
     let text = "hello"
     let k:uint64<(<? text.length)> = 3
     let digit:uint64<(in? 0..9)> = 7
-    if small(3) and names[0] =? "a" { return 0 }
-    return 1
+    if small(3) and names[0] =? "a" { return }
+    exit(1)
 }
 ```
 

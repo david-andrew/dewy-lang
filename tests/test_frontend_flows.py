@@ -11,7 +11,7 @@ from tests.support import compiler  # noqa: F401
 @pytest.mark.parametrize('release', [False, True])
 def test_direct_flow_identity(compiler, tmp_path, release):
     source = tmp_path / 'flows.dewy'
-    source.write_text('''main=()=>{
+    source.write_text('''main=():>void=>{
     let total:int64=0
     loop i in [0..4) {
         if i%2=?0 {total+=i}
@@ -20,8 +20,8 @@ def test_direct_flow_identity(compiler, tmp_path, release):
     }
     let count=0
     loop count <? 2 {count+=1}
-    loop false {return 0} else {total+=count}
-    if total=?34 {return total+8} else {return 0}
+    loop false {return} else {total+=count}
+    if total=?34 {exit(total+8)} else {return}
 }
 ''')
     images = []

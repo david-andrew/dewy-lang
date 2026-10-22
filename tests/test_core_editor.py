@@ -120,7 +120,7 @@ def test_unsaved_diagnostics_hover_and_definition(tmp_path):
     if not value:
         pytest.skip('set DEWY_CORE_COMPILER to the experimental source-level core')
     source = tmp_path / 'main.dewy'
-    source.write_text('main=()=>42')
+    source.write_text('main=():>void=>exit(42)')
     uri = source.as_uri()
     client = Client(Path(value).resolve(strict=True), tmp_path)
     try:
@@ -175,7 +175,7 @@ def test_unsaved_diagnostics_hover_and_definition(tmp_path):
         assert '$index_end' not in str(diagnostics), diagnostics
         diagnostics = client.set_text(uri, 'main=()=>{let xs=[42] return xs[end]}', 14)
         assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
-        assert source.read_text() == 'main=()=>42'
+        assert source.read_text() == 'main=():>void=>exit(42)'
     finally:
         client.close()
 
@@ -409,7 +409,7 @@ def test_dewy_hover_type_spelling(tmp_path, declarations, body, name, expected):
     # Imported implementation code is displayed in the language being edited.
     (tmp_path / 'support.jo').write_text('answer = (x: int, n: int = 2) -> int: x + n\n')
     source = tmp_path / 'main.dewy'
-    source.write_text('main=()=>42')
+    source.write_text('main=():>void=>exit(42)')
     text = declarations + 'main=()=>{' + body + '}\n'
     before = text[:text.rindex(name)]
     pos = {'line': before.count('\n'), 'character': len(before.rsplit('\n', 1)[-1])}
@@ -465,7 +465,7 @@ def test_dewy_completions(tmp_path, text, wanted, absent):
         pytest.skip('set DEWY_CORE_COMPILER for the editor checks')
     (tmp_path / 'support.jo').write_text('answer = (x: int, n: int = 2) -> int: x + n\n')
     source = tmp_path / 'main.dewy'
-    source.write_text('main=()=>42')
+    source.write_text('main=():>void=>exit(42)')
     before, after = text.split('§')
     position = {'line': before.count('\n'),
                 'character': len(before.rsplit('\n', 1)[-1].encode('utf-16-le')) // 2}
@@ -486,7 +486,7 @@ def test_dewy_completions(tmp_path, text, wanted, absent):
         # Completion checks must restore the editor snapshot after inserting a sentinel.
         diagnostics = client.set_text(source.as_uri(), 'main=()=>42', 2)
         assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
-        assert source.read_text() == 'main=()=>42'
+        assert source.read_text() == 'main=():>void=>exit(42)'
     finally:
         client.close()
 
@@ -504,7 +504,7 @@ def test_dewy_mutable_loop_quickfix(tmp_path, marked):
     if not compiler:
         pytest.skip('set DEWY_CORE_COMPILER for the editor checks')
     source = tmp_path / 'main.dewy'
-    source.write_text('main=()=>42')
+    source.write_text('main=():>void=>exit(42)')
     before, after = marked.split('§')
     text = before + after
     client = Client(Path(compiler).resolve(strict=True), tmp_path)
@@ -525,7 +525,7 @@ def test_dewy_mutable_loop_quickfix(tmp_path, marked):
         fixed = before + '@' + after
         diagnostics = client.set_text(source.as_uri(), fixed, 2)
         assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
-        assert source.read_text() == 'main=()=>42'
+        assert source.read_text() == 'main=():>void=>exit(42)'
     finally:
         client.close()
 
@@ -543,7 +543,7 @@ def test_dewy_mutable_loop_quickfix_unsupported(tmp_path, text):
     if not compiler:
         pytest.skip('set DEWY_CORE_COMPILER for the editor checks')
     source = tmp_path / 'main.dewy'
-    source.write_text('main=()=>42')
+    source.write_text('main=():>void=>exit(42)')
     client = Client(Path(compiler).resolve(strict=True), tmp_path)
     try:
         diagnostics = client.set_text(source.as_uri(), text, 1)

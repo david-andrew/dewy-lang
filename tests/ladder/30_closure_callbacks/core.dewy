@@ -9,7 +9,7 @@ apply=(items:array<int64> callback:<(value:int64):>int64>):>array<int64>=>{
     }
     return result
 }
-main=():>int64=>{
+main=():>void=>{
     let counter=make_counter(10)
     let copy=@counter
     assert(counter(2) =? 12)
@@ -28,5 +28,4 @@ main=():>int64=>{
     assert(cumulative =? [1 3 6])
     assert(private(1) =? 1)
     printl("{values} {cumulative} {total}")
-    return 0
 }

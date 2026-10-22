@@ -3,7 +3,7 @@
 show=(path:Path):>void=>{
     printl"{path}: name={path.name} stem={path.stem} suffix={path.suffix} parent={path.parent} parts={path.parts} absolute={path.is_absolute}"
 }
-main=():>int64=>{
+main=():>void=>{
     show(p"src/main.dewy")
     show(p"/usr/lib/archive.tar.gz")
     show(p"notes")
@@ -23,5 +23,4 @@ main=():>int64=>{
     printl(p"/top".with_name("other"))
     printl(p"bare.txt".with_suffix(".md"))
     printl(p"archive.tar.gz".with_stem("backup"))
-    return 0
 }

@@ -35,7 +35,7 @@ pop_back=<T>(@q:Deque<T>):>T|none=> {
 }
 len=<T>(q:Deque<T>):>int64=>q.count
 __index__=<T>(q:Deque<T> i:int64):>T=>q.storage[(q.head+i)%q.storage.length]
-main=():>int64=> {
+main=():>void=> {
     let q=make_deque(16 0)
     let total=0
     let count=0
@@ -72,5 +72,4 @@ main=():>int64=> {
     assert(not push_back(@zero 1))
     assert(pop_back(@zero) is? none)
     printl("{count} {total} {collected.length}")
-    return 0
 }

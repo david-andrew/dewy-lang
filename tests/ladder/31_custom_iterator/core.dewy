@@ -13,7 +13,7 @@ filter_series=(s:Series):>array<int64>=>{
     }
     return values
 }
-main=():>int64=>{
+main=():>void=>{
     let source=Series[1 3 5]
     let original=source
     let values=[loop value in source value]
@@ -27,5 +27,4 @@ main=():>int64=>{
     let doubled=[loop value in original 2value]
     assert(doubled =? [2 8 14 20 26])
     printl("{values} {sum_series(original)} {filter_series(original)}")
-    return 0
 }

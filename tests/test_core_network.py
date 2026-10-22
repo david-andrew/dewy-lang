@@ -19,7 +19,7 @@ payload=():>array<uint8>=>{
     loop i in [0..512) {data.push(int64(i).wrap(uint8))}
     return data
 }
-main=(args:array<string>):>int64=>{
+main=(args:array<string>):>void=>exit(entry(args)) entry=(args:array<string>):>int64=>{
     let port=match to_int(args[2]) {value:int=>int64(value) <none>=>0}
     let server=args[1] =? "server"
     let count=0 let peer=-1 let data=payload()

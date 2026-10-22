@@ -1,0 +1,11 @@
+# exit: 69
+# An error type pins its own exit code with an `exit_code` field.
+Offline:type=type of error & [host:string exit_code:int64=69]
+Other:type=type of error
+connect=(host:string):>void|Offline|Other=>{
+    if host =? "" return Other
+    return Offline[host]
+}
+main=()=>{
+    connect("example.org") or_throw
+}

@@ -32,7 +32,7 @@ let first_word = (text:string):>string => {
     return text
 }
 
-let main = ():>int64 => first_word("héllo world").length   # 5
+let main = ():>void => exit(first_word("héllo world").length)   # 5
 ```
 
 ## Interpolation
@@ -57,14 +57,14 @@ An implementation may stream the literal chunks and converted fields directly to
 ```dewy
 let Point:type = [x:int64 y:int64]
 
-let main = ():>int64 => {
+let main = ():>void => {
     printl(5)
     printl([1 2 3])                  # [1 2 3]
     printl(set["ab" "c"])            # set["ab" "c"]
     printl(["k" -> Point(1 2)])      # ["k" -> [x=1 y=2]]
     printl'{[true false]} and {[name="q"]}'
     let text:string = [1 2 3] as string
-    return text.length               # 7
+    exit(text.length)               # 7
 }
 ```
 
@@ -76,14 +76,14 @@ Strings have methods, written in Dewy in the prelude's `strings.dewy`; positions
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
-let main = ():>int64 => {
+let main = ():>void => {
     let line:string = "  key: value  ".trim
     match line.find": " {
         i:int64 => printl"key ends at {i}"
         <Missing> => printl"no separator"
     }
     let parts = line.split": "
-    return parts.length                    # 2
+    exit(parts.length)                    # 2
 }
 ```
 
@@ -149,9 +149,9 @@ A range whose unannotated anchors are one-grapheme strings advances in Unicode s
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
-let main = ():>int64 => {
+let main = ():>void => {
     let letters:array<string> = []
     loop i in [0x41..0x44) { letters.push(chr(i)) }
-    return letters.join.length      # "ABC": 3
+    exit(letters.join.length)      # "ABC": 3
 }
 ```

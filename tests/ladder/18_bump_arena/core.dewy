@@ -17,7 +17,7 @@ read_word=(a:Arena at:int64):>uint32=>{
     }
     return result
 }
-main=():>int64=>{
+main=():>void=>{
     let arena:Arena=[bytes=[]]
     let first=allocate(@arena 3 1) ?? -1
     let second=allocate(@arena 4 4) ?? -1
@@ -30,5 +30,4 @@ main=():>int64=>{
     write_word(@arena second 0)
     assert(read_word(snapshot second) =? 305419896)
     printl("{first} {second} {read_word(snapshot second)}")
-    return 0
 }

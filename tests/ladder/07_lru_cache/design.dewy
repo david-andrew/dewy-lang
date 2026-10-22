@@ -21,7 +21,7 @@ get=(@cache:Cache key:string):>int64?=>{
     if value isnt? none {touch(@cache key)}
     return value
 }
-main=():>int64=>{
+main=():>void=>{
     let c:Cache=[values=[] order=[] capacity=2]
     put(@c "a" 1)
     put(@c "b" 2)
@@ -30,5 +30,4 @@ main=():>int64=>{
     $runtime_assert (get(@c "b") is? none)
     put(@c "a" 9)
     printl("{get(@c "a")} {c.order}")
-    return 0
 }

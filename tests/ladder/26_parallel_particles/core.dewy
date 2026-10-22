@@ -8,7 +8,7 @@ advance=(p:Particle all:array<Particle>):>Particle=>{
     let velocity=p.v+force*0.001
     return Particle[p.x+velocity*0.001 velocity]
 }
-main=():>int64=>{
+main=():>void=>{
     let initial=[loop i in [0..32) Particle[i as float64 0.0]]
     let threaded=initial
     let serial=initial
@@ -28,5 +28,4 @@ main=():>int64=>{
     assert(threaded[0].x >? 0.0)
     assert(threaded[end].x <? 31.0)
     printl("{threaded.length} {format(center ".6f")} {threaded =? serial}")
-    return 0
 }

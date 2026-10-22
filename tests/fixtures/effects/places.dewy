@@ -11,10 +11,9 @@ scalar=(x:int64):>int64 & no_effects=>{
     swap(@y @z)
     return get(@z)
 }
-main=():>int64=>{
+main=():>void=>{
     let p=Pair[3 5]
     right(@p)
     swap(@p.right @p.left)
     printl("{p.left} {p.right} {scalar(21)}")
-    return 0
 }

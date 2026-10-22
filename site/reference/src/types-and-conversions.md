@@ -176,7 +176,7 @@ let classify = (text:string):>string => {
     return "none"
 }
 
-let main = ():>int64 => classify("0x1f").length     # 2
+let main = ():>void => exit(classify("0x1f").length)     # 2
 ```
 
 ### Recursive Types
@@ -219,11 +219,11 @@ let swap = <T U>(a:T b:U):>[x:U y:T] => [x=b y=a]
 
 let total = <T of int>(a:T b:T):>T => a + b
 
-let main = ():>int64 => {
+let main = ():>void => {
     let words:array<string> = ["hi"]
     let w = first(words)          # T = string
     let s = swap(1 "one")         # T = int64, U = string
-    return total(20 22) + s.y     # 43
+    exit(total(20 22) + s.y)     # 43
 }
 ```
 
@@ -235,7 +235,7 @@ A type test the static types settle is decided while checking — `v is? string`
 ```dewy
 let size = <T>(v:T):>int64 => if v is? string v.length else 1
 
-let main = ():>int64 => size("abc") + size(true)   # 4
+let main = ():>void => exit(size("abc") + size(true))   # 4
 ```
 
 ## Literal Types
@@ -251,9 +251,9 @@ let Mode:type = <1 | 2 | "fast" | "slow">
 let describe = (m:Mode):>int64 =>
     if m is? 1 10 else if m is? 2 20 else if m is? "fast" 30 else 40
 
-let main = ():>int64 => {
+let main = ():>void => {
     let m:Mode = "slow"
-    return describe(m) + describe(2)    # 60
+    exit(describe(m) + describe(2))    # 60
 }
 ```
 
@@ -265,11 +265,10 @@ let DivZero:type = type of error
 let safe_div = ((n:int64 d:0):>DivZero => DivZero)
              & ((n:int64 d:int64 & ~0):>int64 => n // d)
 
-let main = ():>int64 => {
+let main = ():>void => {
     let q = safe_div(6 3)             # int64
     let e = safe_div(6 0)             # DivZero
-    if e is? DivZero { return q }     # 2
-    return 0
+    if e is? DivZero { exit(q) }     # 2
 }
 ```
 
@@ -301,11 +300,11 @@ let Point:type = [
     __as__ = ():>string => "({x}, {y})"
 ]
 
-let main = ():>int64 => {
+let main = ():>void => {
     let pt = Point(3 4)
     let text:string = pt as string      # "(3, 4)"
     printl"{pt} and {p"a/b.c".parent}"  # (3, 4) and a
-    return text.length
+    exit(text.length)
 }
 ```
 

@@ -19,12 +19,11 @@ join_lines=(lines:array<string>):>string=>{
     }
     return out
 }
-main=():>int64=>{
+main=():>void=>{
     let input="INFO boot\nERROR disk\nWARN hot\nERROR network\n"
     let results=find_lines(input "^ERROR")
     $runtime_assert (results.length =? 2)
     $runtime_assert (find_lines(input "^DEBUG").length =? 0)
     $runtime_assert (find_lines("café" "caf.").length =? 1)
     printl(join_lines(results))
-    return 0
 }

@@ -1,10 +1,9 @@
 from units import m
 apply=<T>(value:T f:<(x:T):>T>):>T=>f(value)
-main=():>int64=>{
+main=():>void=>{
     let doubled=apply(3m (x:int * Length):>(int * Length)=>2x)
     let later=apply(4s (x:int * Time):>(int * Time)=>x+1s)
     $runtime_assert (doubled =? 6m)
     $runtime_assert (later =? 5s)
     printl"{doubled} {later}"
-    return 0
 }

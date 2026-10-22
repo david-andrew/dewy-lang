@@ -8,5 +8,5 @@ make=():>Pack=>{
 }
 read=(values:array<int64>):>int64=>if values.length>?1 values[0]+values[1] else 0
 take=(which:bool):>array<int64>=>{let owner=make() if which return owner.values return owner.values}
-main=():>int64=>{let first=take(true) if first.length not=?1 return 0
- let values=take(false) values.push(40) return read(values)}
+main=():>void=>{let first=take(true) if first.length not=?1 return
+ let values=take(false) values.push(40) exit(read(values))}

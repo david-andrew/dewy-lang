@@ -18,7 +18,7 @@ shortest=(n:int64 edges:array<Edge> source:int64):>array<int64>=>{
     }
     return dist
 }
-main=():>int64=>{
+main=():>void=>{
     let edges=[Edge[0 1 4] Edge[0 2 1] Edge[2 1 2] Edge[1 3 1] Edge[2 3 8]]
     let distance=shortest(5 edges 0)
     assert(distance =? [0 3 1 4 1000000])
@@ -29,5 +29,4 @@ main=():>int64=>{
     distance[0]=9
     assert(snapshot[0] =? 0)
     printl(snapshot)
-    return 0
 }

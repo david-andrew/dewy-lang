@@ -133,11 +133,11 @@ An array literal whose only item is a loop collects the values the loop body exp
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
-let main = ():>int64 => {
+let main = ():>void => {
     let squares = [loop i in [1..5) i * i]                     # [1 4 9 16]
     let evens = [loop n in [0..10) if n % 2 =? 0 n]            # [0 2 4 6 8]
     let pairs = [loop a in [1..3) loop b in [1..3) a * 10 + b]  # [11 12 21 22]
-    return squares.length + evens.length + pairs.length         # 13
+    exit(squares.length + evens.length + pairs.length)         # 13
 }
 ```
 
@@ -145,10 +145,10 @@ let main = ():>int64 => {
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
-let main = ():>int64 => {
+let main = ():>void => {
     let odds = set[loop n in [0..10) if n % 2 =? 1 n]          # set[1 3 5 7 9]
     let lengths = [loop w in ["a" "bb" "ccc"] w -> w.length]   # ["a" -> 1 "bb" -> 2 "ccc" -> 3]
-    return odds.length + lengths.length                         # 8
+    exit(odds.length + lengths.length)                         # 8
 }
 ```
 

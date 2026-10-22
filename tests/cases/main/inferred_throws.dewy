@@ -1,0 +1,17 @@
+# quick
+# A function without a declared result infers the errors it throws.
+ParseError:type=type of error & [text:string]
+parse=(text:string)=>{
+    let n=to_int(text)
+    if n is? none return ParseError[text]
+    return n
+}
+twice=(text:string)=>{
+    let n=parse(text) or_throw
+    return n*2
+}
+main=()=>{
+    printl(twice("21"))
+    let bad=twice("x")
+    if bad is? ParseError printl("bad: {bad.text}")
+}

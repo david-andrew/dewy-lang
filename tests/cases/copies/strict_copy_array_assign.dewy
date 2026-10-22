@@ -1,9 +1,9 @@
 # exit: 42
 $explicit_copies
 replace_values=(@target:array<int64> source:array<int64>):>void=>{target=source}
-main=():>int64=>{
+main=():>void=>{
     let target:array<int64>=[]
     replace_values(@target [42])
-    if target.length =? 0 return 1
-    return target[0]
+    if target.length =? 0 exit(1)
+    exit(target[0])
 }

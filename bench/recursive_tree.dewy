@@ -20,12 +20,11 @@ kernel=(root:Node? count:int64):>int64=>{
     loop i in [0..count) {result+=find_key(root (i*73)%4096)}
     return result
 }
-main=(args:array<string>):>int64=>{
+main=(args:array<string>):>void=>{
     let count=size_argument(args 2000000)
     let root=build_tree(0 2047)
     let started=clock()
     let result=kernel(root count)
     let finished=clock()
     printl"{result} {finished-started}"
-    return 0
 }

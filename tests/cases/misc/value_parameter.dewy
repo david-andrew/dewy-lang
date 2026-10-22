@@ -1,4 +1,4 @@
 # exit: 42
 # modes: native native-release
 bump=(xs:array<int64>):>int64=>{xs[0]=0 return xs[0]}
-main=():>int64=>{let xs:array<int64>=[42] bump(xs); return xs[0]}
+main=():>void=>{let xs:array<int64>=[42] bump(xs); exit(xs[0])}

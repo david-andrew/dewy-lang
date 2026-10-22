@@ -23,7 +23,7 @@ save = (path:string store:Store):>void => {
 }
 
 find = (store:Store id:int):>int|none => {
-    loop [i t] in store.tasks.enumerate() {
+    loop i in 0.. and t in store.tasks {
         if t.id =? id { return i }
     }
     return none
@@ -84,9 +84,9 @@ run_command = (argv:array<string>):>int => {
     return 0
 }
 
-main = ():>int => {
+main = ():>void => {
     let argv = args()
-    if argv.length >? 1 { return run_command(argv[1..]) }
+    if argv.length >? 1 { exit(run_command(argv[1..])) }
     # Demo session: each line is one invocation of the CLI.
     let session = [
         ["clear"]
@@ -108,5 +108,4 @@ main = ():>int => {
         if status not=? 0 { printl("(exit {status})") }
     }
     remove_file(store_path())
-    return 0
 }

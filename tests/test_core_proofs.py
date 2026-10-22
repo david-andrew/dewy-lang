@@ -56,7 +56,7 @@ f=(a:int64 b:int64<v=>a <=? v> c:int64<v=>b <=? v>):>int64=>{
     $assert a <=? c
     return 7
 }
-main=():>int64=>{return f(1 2 3)-7}
+main=():>void=>{exit(f(1 2 3)-7)}
 ''')
     output = tmp_path / 'program'
     result = subprocess.run([compiler, 'build', source, '-o', output, '--ir',
@@ -117,7 +117,7 @@ f=(a:int64):>int64=>{
     if r is? Yes {$assert a >? 0; return 1}
     else {$assert a <=? 0; return 0}
 }
-main=():>int64=>{return f(2)+f(-2)-1}
+main=():>void=>{exit(f(2)+f(-2)-1)}
 ''')
     output = tmp_path / 'program'
     result = subprocess.run([compiler, 'build', source, '-o', output,

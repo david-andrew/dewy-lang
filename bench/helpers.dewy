@@ -34,11 +34,10 @@ kernel = (count:int64):>int64 => {
     return hash
 }
 
-main = (args:array<string>):>int64 => {
+main = (args:array<string>):>void => {
     let count=size_argument(args 200000)
     let started=clock()
     let result=kernel(count)
     let finished=clock()
     printl"{result} {finished-started}"
-    return 0
 }

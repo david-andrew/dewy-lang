@@ -25,7 +25,7 @@ reset=<T>(value:T):>T=> {
     }
     return result
 }
-main=():>int64=> {
+main=():>void=> {
     let settings=Settings[4 16 3]
     let point=Point[20 22]
     let mixed=Mixed[42 "ready" true]
@@ -64,5 +64,4 @@ main=():>int64=> {
     $runtime_assert (describe(named) =? describe(saved))
     printl(describe(saved))
     printl("{count} {checksum} {differences(point copy)}")
-    return 0
 }

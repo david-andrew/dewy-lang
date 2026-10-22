@@ -101,12 +101,73 @@ prepare_nominals = ():
     loop t in nominal_types: nominal_resolve(t)
     nominal_ready = true
 
+# Dewy functions without a declared result: the exception kinds (not none) their
+# returns and or_throw give, by instance, and the returns to give the joined result
+infer_throws: {int: int[]} = {}
+infer_returns: {int: int[]} = {}
+
+# `return e` in such a function, e an exception (or a value-or-exception union): its
+# kinds are thrown, joined to the result when the body is done (false: an ordinary value)
+infer_throw = (s: int, t0: int) -> bool:
+    f = int(ctxs[cx].inst)
+    if not ctxs[cx].infer_ret or not infer_throws.has(f): return false
+    t = prune(t0)
+    members = value_members(t)
+    thrown: int[]
+    rest: int[]
+    loop m in members:
+        if m != T_NONE and exception_member(m): thrown.push(m)
+        else: rest.push(m)
+    if thrown.len() == 0: return false
+    if rest.len() > 0:
+        ret = prune(int(ctxs[cx].ret))
+        value = if rest.len() == 1: rest[0] else: mk_union(rest)
+        if tkind(ret) == .var: unify(ret, value)
+        else if not can_coerce(0, value, ret): return false
+    known = infer_throws[f]
+    loop m in thrown:
+        if not known.contains(m): known.push(m)
+    infer_throws[f] = known
+    infer_note_return(s)
+    true
+
+infer_note_return = (s: int):
+    f = int(ctxs[cx].inst)
+    returns = infer_returns[f]
+    returns.push(s)
+    infer_returns[f] = returns
+
+# The result of a function that threw: its value part (void, never or a type) and
+# the thrown kinds; every return gives it
+infer_finish = (f: int, body: int) -> int:
+    thrown = infer_throws[f]
+    r = prune(int(ctxs[cx].ret))
+    if thrown.len() == 0: return r
+    members: int[]
+    if r != T_NEVER:
+        loop m in value_members(r): members.push(m)
+    loop m in thrown: members.push(m)
+    final = if members.len() == 1: members[0] else: mk_union(members)
+    ctxs[cx].ret = i32(final)
+    ctxs[cx].infer_ret = false
+    loop s in infer_returns[f]:
+        if nodes[s].a != 0: nodes[s].a = i32(coerce(int(nodes[s].a), final))
+        else if union_has_void(final):
+            check_expr(bc_block([], nodes[s].pos), final)
+            nodes[s].a = i32(coerce(last_checked, final))
+    n = nkids(body)
+    if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), final))
+    else if r == T_VOID and not (n > 0 and stmt_terminates(kid(body, n - 1))): void_arm_end(body, final)
+    final
+
 # A propagation is ordinary control flow, so gen_return performs all temporary,
 # partial-expression, defer and enclosing-scope cleanup on the early path.
 check_propagate = (n: int, expected: int) -> int:
     pos = nodes[n].pos
     inst = int(ctxs[cx].inst)
-    if fns[inst].kind == FK_INIT or ctxs[cx].infer_ret:
+    # (a Dewy function without a declared result infers the kinds it throws)
+    inferring = ctxs[cx].infer_ret and infer_throws.has(inst)
+    if fns[inst].kind == FK_INIT or (ctxs[cx].infer_ret and not inferring):
         fatal(pos, "or_throw requires an enclosing function with a declared return type")
     at = prune(check_expr(int(nodes[n].a), 0))
     a = last_checked
@@ -115,7 +176,8 @@ check_propagate = (n: int, expected: int) -> int:
     exceptions: int[]
     loop t in members:
         if not exception_member(t): continue
-        if not can_coerce(0, t, int(ctxs[cx].ret)):
+        if inferring and t == T_NONE: fatal(pos, "or_throw cannot propagate none from a function without a declared result type: declare it, as `:>T?`, or handle none here")
+        if not inferring and not can_coerce(0, t, int(ctxs[cx].ret)):
             # (an optional result with errors: `none` is an exception too, so
             # keeping the optional takes a match that forwards only the errors)
             errors = ""

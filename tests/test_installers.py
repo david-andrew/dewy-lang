@@ -32,7 +32,7 @@ from tools.compiler.package import package, release_identity
 
 ROOT = Path(__file__).resolve().parents[1]
 DATE = '20261020'
-SAMPLE = 'main=()=>{let values=[20 22] return sum(values)}\n'
+SAMPLE = 'main=():>void=>{let values=[20 22] exit(sum(values))}\n'
 
 
 def host_platform() -> str | None:

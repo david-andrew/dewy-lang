@@ -17,7 +17,7 @@ const NOISE:float64=0.8
 
 two=(n:int64):>string=>if n <? 10 "0{n}" else "{n}"
 
-main=():>int64=>{
+main=():>void=>{
     let train=make_dataset(2026 120 NOISE)
     let test=make_dataset(99 60 NOISE)
     let init_rng:Rng=[state=7]
@@ -45,5 +45,4 @@ main=():>int64=>{
         let shown=[loop v in y format(v ".3f")]
         printl("probe ({format(s.x0 ".1f")}, {format(s.x1 ".1f")}) -> {shown.join(" ")} class {argmax(y)}")
     }
-    return 0
 }

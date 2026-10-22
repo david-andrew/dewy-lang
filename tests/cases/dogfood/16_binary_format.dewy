@@ -84,19 +84,19 @@ decode=(data:array<uint8>):>array<Record>|FormatError=>{
     return records
 }
 
-main=():>int=>{
+main=():>void=>{
     let records=[Record[1 1500 "ada"] Record[70000 (-42) "grace"] Record[3 0 "linus"]]
     let blob=encode(records)
     printl("encoded {blob.length} bytes, crc {format(get_u32_le(blob blob.length-4) "08x")}")
     let path=p"dogfood_records.bin"
     if path.write_bytes(blob) is? error {
         printl("cannot write {path}")
-        return 1
+        exit(1)
     }
     let back=path.read_bytes()
     if back is? error {
         printl("cannot read {path}")
-        return 1
+        exit(1)
     }
     match decode(back) {
         rs:array<Record> => loop r in rs printl("  {r.id}: {r.name} scored {r.score}")
@@ -108,5 +108,4 @@ main=():>int=>{
         e:FormatError => printl("corrupted: {e.message}")
     }
     path.unlink()
-    return 0
 }

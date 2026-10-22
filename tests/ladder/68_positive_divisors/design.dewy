@@ -24,7 +24,7 @@ triangular=(n:int64<i => i >=? 0 and i <=? 100>):>int64=>{
     }
     return total
 }
-main=():>int64=>{
+main=():>void=>{
     let total:int64=0
     loop d in [1..17) {
         $assert d >? 0
@@ -58,5 +58,4 @@ main=():>int64=>{
     $runtime_assert first([0 1]) =? 0
     $runtime_assert triangular(3) =? 3
     printl("{total}")
-    return 0
 }

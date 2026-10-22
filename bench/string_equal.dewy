@@ -30,12 +30,11 @@ kernel=(pairs:array<Pair> count:int64):>int64=>{
     return result
 }
 
-main=(args:array<string>):>int64=>{
+main=(args:array<string>):>void=>{
     let count=size_argument(args 10000000)
     let pairs=generate()
     let started=clock()
     let result=kernel(pairs count)
     let finished=clock()
     printl"{result} {finished-started}"
-    return 0
 }

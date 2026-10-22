@@ -13,7 +13,7 @@ recover=(path:string):>dict<string string>=>{
     }
     return state
 }
-main=():>int64=>{
+main=():>void=>{
     let path="kv.log"
     assert(write_text(path "") isnt? error)
     assert(append(path Entry["a" "one"]) isnt? error)
@@ -28,7 +28,6 @@ main=():>int64=>{
     assert(second["a"] =? "three")
     assert(second.length =? first.length)
     let persisted=read_text(path)
-    if persisted is? error {return 1}
+    if persisted is? error {exit(1)}
     printl("{second.length} {second["a"]} {persisted.split("\n").length}")
-    return 0
 }

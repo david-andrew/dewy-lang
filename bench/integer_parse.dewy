@@ -9,7 +9,7 @@ kernel=(texts:array<string> count:int64):>int64=>{
     }
     return checksum
 }
-main=(args:array<string>):>int64=>{
+main=(args:array<string>):>void=>{
     let count=size_argument(args 2000000)
     let texts:array<string>=[]
     loop i in [0..32) {
@@ -19,5 +19,4 @@ main=(args:array<string>):>int64=>{
     let started=clock()
     let result=kernel(texts count)
     printl"{result} {clock()-started}"
-    return 0
 }

@@ -13,19 +13,18 @@ invoice=(text:string):>int64|ParseError=>{
     let value=positive(text) or_throw
     return value*7
 }
-main=():>int64=>{
+main=():>void=>{
     let zero=invoice("0")
-    if zero is? ParseError {return 5}
+    if zero is? ParseError {exit(5)}
     $runtime_assert (zero =? 0)
     let good=invoice("6")
     let bad=invoice("oops")
     let negative=invoice("-2")
-    if good is? ParseError {return 1}
+    if good is? ParseError {exit(1)}
     $runtime_assert (good =? 42)
     $runtime_assert (bad is? ParseError)
     $runtime_assert (negative is? ParseError)
     if bad is? ParseError {$runtime_assert (bad.message =? "invalid integer")}
     if negative is? ParseError {$runtime_assert (negative.message =? "negative")}
     printl("{good} invalid integer negative")
-    return 0
 }

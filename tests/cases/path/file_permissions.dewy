@@ -1,12 +1,12 @@
 # modes: native native-release
 # Native file systems: permission denied, and a write into a directory that is not there.
 # (A web page keeps its files in memory, where directories are implied by the files' paths.)
-main=():>int64=>{
+main=():>void=>{
     let dir=p"case_path_permissions"
     let made=dir.mkdir
-    if made is? error return 1
+    if made is? error exit(1)
     let secret=p"{dir}/secret.txt"
-    if secret.write_text("hidden") is? error return 2
+    if secret.write_text("hidden") is? error exit(2)
     chmod(secret.path 0)
     let denied=secret.read_text
     printl(denied is? FileAccessDenied)
@@ -18,5 +18,4 @@ main=():>int64=>{
     printl(p"{dir}/no/such".mkdir is? FileNotFound)
     printl(secret.unlink)
     printl(dir.rmdir)
-    return 0
 }

@@ -15,7 +15,7 @@ crc_update=(state:uint32 bytes:array<uint8>):>uint32=> {
     return crc
 }
 crc32=(bytes:array<uint8>):>uint32=>crc_update(4294967295 bytes) xor 4294967295
-main=():>int64=> {
+main=():>void=> {
     let known:array<uint8>=[49 50 51 52 53 54 55 56 57]
     assert(crc32(known) =? 3421780262)
     assert(crc32([]) =? 0)
@@ -57,5 +57,4 @@ main=():>int64=> {
     let single=crc32([255])
     assert(single =? 4278190080)
     printl("{complete} {combinations} {single}")
-    return 0
 }

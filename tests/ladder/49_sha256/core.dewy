@@ -61,7 +61,7 @@ digest=(input:array<uint8>):>array<uint32>=> {
     }
     return h
 }
-main=():>int64=> {
+main=():>void=> {
     let abc=digest(bytes("abc"))
     assert(abc =? [3128432319 2399260650 1094795486 1571693091 2953011619 2518121116 3021012833 4060091821])
     let empty=digest([])
@@ -79,5 +79,4 @@ main=():>int64=> {
     printl(abc)
     printl(multi)
     printl(two)
-    return 0
 }

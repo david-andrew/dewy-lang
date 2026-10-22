@@ -184,7 +184,7 @@ boundaries=():>void=>{
     $runtime_assert db.rows.length =? 0
 }
 
-main=():>int64=>{
+main=():>void=>{
     boundaries()
     selfcheck()
     let db=Database[[] [] false]
@@ -212,5 +212,4 @@ main=():>int64=>{
     $runtime_assert not db.active
     $runtime_assert db.rows.length =? 3
     printl("{db.rows.length} {db.saved.length}")
-    return 0
 }

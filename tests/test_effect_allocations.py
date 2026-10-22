@@ -14,7 +14,7 @@ def test_effect_allocation_witness(compiler, tmp_path, mode):
     source.write_text('''grow=(@xs:array<int64>):>void=>{xs.push(1)}
 forward=(@xs:array<int64>):>void=>grow(@xs)
 bad=(@xs:array<int64>):>void & no allocates=>forward(@xs)
-main=():>int64=>0
+main=():>void=>exit(0)
 ''')
     result = compile_source(compiler, source, tmp_path, mode)
     assert result.returncode != 0
@@ -30,7 +30,7 @@ def test_effect_readonly_and_library_body(compiler, tmp_path, mode):
     source.write_text('''Point:type=[x:int64 y:int64]
 cell=(p:Point):>int64 & no_effects=>p.x//16+p.y
 inspect=(xs:array<int64>):>int64 & no_effects=>xs.length
-main=():>int64=>{printl(cell(Point[-1 3])+inspect([1 2])) return 0}
+main=():>void=>{printl(cell(Point[-1 3])+inspect([1 2]))}
 ''')
     result = compile_source(compiler, source, tmp_path, mode)
     assert result.returncode == 0, result.stderr
@@ -73,7 +73,7 @@ bad=(@xs:array<int64>):>void & no allocates=>{xs.sort(key=@key)}
 @pytest.mark.parametrize('name', ALLOCATIONS)
 def test_effect_implicit_allocation(compiler, tmp_path, mode, name):
     source = tmp_path / f'{name}.dewy'
-    source.write_text(ALLOCATIONS[name] + 'main=():>int64=>0\n')
+    source.write_text(ALLOCATIONS[name] + 'main=():>void=>exit(0)\n')
     result = compile_source(compiler, source, tmp_path, mode)
     assert result.returncode != 0
     assert 'allocation exceeds' in result.stderr, result.stderr
@@ -92,7 +92,7 @@ bad=(n:int64):>int64 & no_effects=>{
     if n >? 0 return ticket.id
     return 0
 }
-main=():>int64=>0
+main=():>void=>exit(0)
 ''')
     result = compile_source(compiler, source, tmp_path, mode)
     assert result.returncode != 0
@@ -111,7 +111,7 @@ hidden = (xs: mut i64[], early: bool):
     source = tmp_path / 'defer.dewy'
     source.write_text('''from p"deferred.jo" import hidden
 bad=(@xs:array<int64>):>void & no allocates=>hidden(@xs true)
-main=():>int64=>0
+main=():>void=>exit(0)
 ''')
     result = compile_source(compiler, source, tmp_path, mode)
     assert result.returncode != 0
@@ -131,7 +131,7 @@ hidden = (link: mut Link): link.child.value = 1
     source = tmp_path / 'box.dewy'
     source.write_text('''from p"boxes.jo" import Link, hidden
 bad=(@link:Link):>void & no allocates=>hidden(@link)
-main=():>int64=>0
+main=():>void=>exit(0)
 ''')
     result = compile_source(compiler, source, tmp_path, mode)
     assert result.returncode != 0
@@ -150,7 +150,7 @@ Owner=type of [value:int64
 consume=(owner:Owner n:int64):>int64=>owner.value+n
 fail=():>int64=>panic("argument panic")
 bad=():>int64 & no mutates<released>=>consume(Owner[1] fail())
-main=():>int64=>0
+main=():>void=>exit(0)
 ''')
     result = compile_source(compiler, source, tmp_path, mode)
     assert result.returncode != 0
@@ -162,7 +162,7 @@ def test_effect_wasm_plan(compiler, tmp_path, allocate):
     source = tmp_path / 'target.dewy'
     body = 'let xs:array<int64>=[x]; return xs.length' if allocate else 'return x//16'
     source.write_text(f'helper=(x:int64):>int64 & no_effects=>{{{body}}}\n'
-                      'main=():>int64=>helper(8)\n')
+                      'main=():>void=>exit(entry()) entry=():>int64=>helper(8)\n')
     result = subprocess.run([compiler, 'build', source, '--target', 'wasm32', '-o', tmp_path / 'web'],
                             capture_output=True, text=True, timeout=60)
     assert (result.returncode != 0) == allocate, result.stderr

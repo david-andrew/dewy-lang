@@ -13,12 +13,11 @@ kernel=(@values:array<int64> count:int64):>int64=>{
     loop value in values {hash=mix(hash value)}
     return hash
 }
-main=(args:array<string>):>int64=>{
+main=(args:array<string>):>void=>{
     let count=size_argument(args 10000000)
     let values:array<int64>=[]
     loop i in [0..1024) {values.push(i)}
     let started=clock()
     let result=kernel(@values count)
     printl"{result} {clock()-started}"
-    return 0
 }

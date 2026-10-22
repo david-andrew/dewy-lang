@@ -11,7 +11,7 @@ from tests.support import compiler  # noqa: F401
 @pytest.mark.parametrize('release', [False, True])
 def test_direct_statements(compiler, tmp_path, release):
     source = tmp_path / 'statements.dewy'
-    source.write_text('''main=()=>{
+    source.write_text('''main=():>void=>{
     let value:int64=7
     value+=5
     value*=3
@@ -26,7 +26,7 @@ def test_direct_statements(compiler, tmp_path, release):
         if value=?48 {continue $outer}
         break $outer
     }
-    return value;
+    exit(value);
 }
 ''')
     images = []

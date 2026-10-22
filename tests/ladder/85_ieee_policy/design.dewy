@@ -21,7 +21,7 @@ ordered=(xs:array<int64>):>bool=>{
     }
     return true
 }
-main=():>int64=>{
+main=():>void=>{
     let cancellation:array<int64>=[100000000 1 -100000000]
     let reverse:array<int64>=[-100000000 1 100000000]
     let exact=reduce(cancellation)
@@ -58,5 +58,4 @@ main=():>int64=>{
     $runtime_assert add(zero zero).value =? 0
     $runtime_assert add(tiny zero).scale =? 1000000
     printl("{exact} {sum.value} {tiny.value}")
-    return 0
 }

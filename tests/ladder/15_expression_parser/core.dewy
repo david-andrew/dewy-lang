@@ -38,7 +38,7 @@ expression=(@p:Parser):>int64=>{
     loop peek(p) =? "+" {p.at+=1 value+=term(@p)}
     return value
 }
-main=():>int64=>{
+main=():>void=>{
     let p:Parser=[tokens=["2" "+" "3" "*" "(" "4" "+" "5" ")"]]
     let value=expression(@p)
     assert(evaluate("2+3*(4+5)") =? 29)
@@ -48,5 +48,4 @@ main=():>int64=>{
     let q:Parser=[tokens=["(" "2" "+" "3" ")" "*" "4"]]
     assert(expression(@q) =? 20)
     printl(value)
-    return 0
 }

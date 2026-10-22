@@ -20,7 +20,7 @@ popcount=(word:uint64):>int64=>{
     }
     return count
 }
-main=():>int64=>{
+main=():>void=>{
     let packet=Packet[2 3 1024]
     let word=encode(packet)
     $runtime_assert (decode(word) =? packet)
@@ -28,5 +28,4 @@ main=():>int64=>{
     $runtime_assert (popcount(0) =? 0)
     $runtime_assert (popcount(word) =? 4)
     printl("{word} {popcount(word)} {decode(word).length}")
-    return 0
 }

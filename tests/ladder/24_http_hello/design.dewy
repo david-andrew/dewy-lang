@@ -21,7 +21,7 @@ request=(path:string):>string=>{
     net.tcp_close(server)
     return response
 }
-main=():>int64=>{
+main=():>void=>{
     let found=request("/hello")
     let missing=request("/missing")
     $runtime_assert (found.startswith("HTTP/1.1 200 OK"))
@@ -30,5 +30,4 @@ main=():>int64=>{
     $runtime_assert (missing.startswith("HTTP/1.1 404 Not Found"))
     $runtime_assert (missing.endswith("missing\n"))
     printl("200 hello 404 missing")
-    return 0
 }

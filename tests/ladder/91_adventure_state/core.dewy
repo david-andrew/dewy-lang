@@ -173,7 +173,7 @@ boundaries=():>void=>{
     $runtime_assert command(@world map "score") =? "game over"
 }
 
-main=():>int64=>{
+main=():>void=>{
     boundaries()
     selfcheck()
     let map=rooms()
@@ -207,5 +207,4 @@ main=():>int64=>{
     $runtime_assert world.room =? "gate"
     $runtime_assert world.inventory.length =? 4
     printl("{world.score} {world.turns} {world.inventory.length}")
-    return 0
 }

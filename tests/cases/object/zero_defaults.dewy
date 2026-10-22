@@ -1,10 +1,10 @@
 # exit: 4
 # Defaults that are zero bytes (none, a fixed array's []) are filled in place.
 let Node:type = [data:array<int64 length=4> = [] next:Node? = none]
-let main = ():>int64 => {
+let main = ():>void => {
     let a = Node[]
     let b = Node[next=Node[[1 2 3 4]]]
     printl"{a} {b}"
-    if b.next is? Node return a.data[0] + b.next.data[3]
-    return 1
+    if b.next is? Node exit(a.data[0] + b.next.data[3])
+    exit(1)
 }

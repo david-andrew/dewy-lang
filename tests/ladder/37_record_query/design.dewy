@@ -44,7 +44,7 @@ evaluate=(orders:array<Order> customers:array<Customer> minimum:int64):>array<Ag
     }
     return output
 }
-main=():>int64=> {
+main=():>void=> {
     let customers=[Customer[1 true] Customer[2 false] Customer[3 true]]
     let orders=[Order[1 "N" 3 10] Order[3 "S" 2 20] Order[2 "N" 9 99] Order[1 "N" 1 7] Order[3 "E" 5 8] Order[9 "W" 9 99] Order[1 "S" 4 5]]
     let original=orders
@@ -65,5 +65,4 @@ main=():>int64=> {
     $runtime_assert (evaluate(original [] 2).length =? 0)
     $runtime_assert (evaluate(original customers 100).length =? 0)
     printl("{result.length} {revenue} {count}")
-    return 0
 }

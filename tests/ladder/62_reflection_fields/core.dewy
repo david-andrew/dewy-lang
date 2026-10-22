@@ -27,7 +27,7 @@ differences=(a:Point b:Point):>int64=> {
 }
 reset=(v:Settings):>Settings=>Settings[0 0 0]
 reset=(v:Point):>Point=>Point[0 0]
-main=():>int64=> {
+main=():>void=> {
     let settings=Settings[4 16 3]
     let point=Point[20 22]
     assert(describe(settings) =? "workers=4;limit=16;mode=3;")
@@ -63,5 +63,4 @@ main=():>int64=> {
     assert(describe(named) =? describe(saved))
     printl(describe(saved))
     printl("{count} {checksum} {differences(point copy)}")
-    return 0
 }

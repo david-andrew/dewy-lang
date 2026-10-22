@@ -1,11 +1,11 @@
 from units import m
 Sample:type=[distance:float64 * Length elapsed:float64 * Time]
 maybe=(yes:bool):>(float64 * Length)|none=>if yes 2m else none
-main=():>int64=>{
+main=():>void=>{
     let sample=Sample[3m 2s]
     $runtime_assert (sample.distance/sample.elapsed =? 1.5m/s)
     let present=maybe(true)
-    if present isnt? none {$runtime_assert (present =? 2m)} else {return 1}
+    if present isnt? none {$runtime_assert (present =? 2m)} else {exit(1)}
     let absent=maybe(false)
     $runtime_assert (absent is? none)
     let distances:array<float64 * Length length=2>=[1m 2m]
@@ -13,5 +13,4 @@ main=():>int64=>{
     distances[0]=3m
     $runtime_assert (copy[0] =? 1m)
     printl"{present} {absent} {sample} {distances}"
-    return 0
 }

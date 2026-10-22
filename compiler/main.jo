@@ -52,7 +52,7 @@ use 'directives.jo'
 const DEWY_CORE_VERSION = "0.0.0-dev"
 
 usage = (status: int = 2):
-    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target x86_64-linux|aarch64-linux|aarch64-mac|x86_64-windows|wasm32] [--release] [--time]\n       dewy-core check [--obligations] file.dewy\n       dewy-core test [--watch] [--release] [--json] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core repl\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.")
+    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target x86_64-linux|aarch64-linux|aarch64-mac|x86_64-windows|wasm32] [--release] [--time] [--exit-codes]\n       dewy-core check [--obligations] file.dewy\n       dewy-core test [--watch] [--release] [--json] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core repl\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.")
     exit(status)
 
 find_lib_dir = () -> str:
@@ -76,6 +76,7 @@ host_ir = false                # scalar IR for the optional optimized compiler-h
 debug_info = false            # DWARF line tables (sloppy build)
 debug_vars = false            # and where variables are, with their types (sloppy build -g)
 cli_release = false
+exit_codes_only = false          # (dewy build --exit-codes: main's exit codes, and nothing built)
 timing = false
 
 # build options written in the program itself:
@@ -379,6 +380,11 @@ compile = (path: str, out0: str) -> str:
     # (code made after lowering everything, except where code is patched in place as it is made)
     queue_emit = not watch_build and not repl_image and not lower_only
     check_program(path)
+    if exit_codes_only:
+        dc_flush_warnings()
+        if errors_only: exit(error_exit)
+        print_exit_codes()
+        exit(0)
     decimal_checked = true
     decimal_restart()
     dc_flush_warnings()
@@ -417,11 +423,12 @@ compile = (path: str, out0: str) -> str:
             lf_of_inst(f)
             exp_done[k] = true
     main_lf = -1
-    if main_fn != 0:
-        main_lf = lf_of_inst(main_fn)
-        if prune(int(fns[main_fn].ret)) == T_MATH_INT: main_lf = lf_helper(.math_main, T_MATH_INT, main_fn)
+    entry_fn = if main_entry_fn != 0: main_entry_fn else: main_fn
+    if entry_fn != 0:
+        main_lf = lf_of_inst(entry_fn)
+        if prune(int(fns[entry_fn].ret)) == T_MATH_INT: main_lf = lf_helper(.math_main, T_MATH_INT, entry_fn)
     # (main = () -> int: its value is the exit code)
-    main_code = main_fn != 0 and is_int(prune(int(fns[main_fn].ret)))
+    main_code = entry_fn != 0 and is_int(prune(int(fns[entry_fn].ret)))
     main_exit_lf = -1
     if main_code and target_wasm: main_exit_lf = lf_of_inst(runtime_fn("exit"))
     # (after main: what print has collected, written out)
@@ -711,6 +718,7 @@ main = ():
             else if x == "-g": debug_vars = true
             else if x == "--release": cli_release = true
             else if x == "--time": timing = true
+            else if x == "--exit-codes": exit_codes_only = true
             else: path = os_path(x)
             i += 1
         if len(path) == 0: usage()

@@ -13,7 +13,7 @@ combine=(texts:array<string>):>array<uint64>=>{
     }
     return hashes
 }
-main=():>int64=>{
+main=():>void=>{
     let words=["" "a" "hello" "foobar"]
     let expected:array<uint64>=[14695981039346656037 12638187200555641996 11831194018420276491 9625390261332436968]
     let actual=combine(words)
@@ -27,5 +27,4 @@ main=():>int64=>{
     assert(seen.length =? 4)
     assert(seen[fnv1a("hello")] =? "hello")
     printl(actual)
-    return 0
 }

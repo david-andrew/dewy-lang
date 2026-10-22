@@ -26,7 +26,7 @@ def run(compiler, root, tmp_path, monkeypatch, **options):
 
 def test_core_case_headers(tmp_path):
     path = write(tmp_path, 'a/header', '# exit: 42\n# modes: native web-release\n# args: one "two three"\n'
-                 '# stdin: x\\ny\n# quick\n# An ordinary comment: not a header.\nmain=()=>42\n')
+                 '# stdin: x\\ny\n# quick\n# An ordinary comment: not a header.\nmain=():>void=>exit(42)\n')
     case = cases.parse(path, tmp_path)
     assert (case.name, case.exit, case.modes, case.args, case.stdin, case.quick, case.kind) == (
         'a/header', 42, ('native', 'web-release'), ('one', 'two three'), b'x\ny', True, 'run')
@@ -39,14 +39,14 @@ def test_core_case_headers(tmp_path):
 
 def test_core_case_batch_fallbacks(compiler, tmp_path, monkeypatch):
     root = tmp_path / 'cases'
-    write(root, 'value', '# exit: 42\nmain=()=>{printl"value 🙂" return 42}\n', out='value 🙂\n')
+    write(root, 'value', '# exit: 42\nmain=():>void=>{printl"value 🙂" exit(42)}\n', out='value 🙂\n')
     write(root, 'void', 'main=()=>{if false {return} printl"void"}\n', out='void\n')
-    write(root, 'exits', '# modes: native web\n# exit: 3\nmain=()=>{exit(3) return 0}\n')
-    write(root, 'after', 'let g=7\nmain=()=>{printl"{g}" return 0}\n', out='7\n')
-    write(root, 'panics', '# exit: 101\nmain=():>int64=>{printl"before" let xs:array<int64>=[] return xs[1]}\n',
+    write(root, 'exits', '# modes: native web\n# exit: 3\nmain=():>void=>{exit(3)}\n')
+    write(root, 'after', 'let g=7\nmain=():>void=>{printl"{g}"}\n', out='7\n')
+    write(root, 'panics', '# exit: 101\nmain=():>void=>exit(entry()) entry=():>int64=>{printl"before" let xs:array<int64>=[] return xs[1]}\n',
           out='before\n', err='out of bounds\n/index \\d+ out of bounds/\n')
-    write(root, 'rejects', '# modes: native\nmain=()=>{let x:int64="no" return 0}\n', err='type mismatch\n')
-    write(root, 'arguments', '# modes: native native-release\n# args: a b\nmain=()=>{printl(args().length) return 0}\n',
+    write(root, 'rejects', '# modes: native\nmain=():>void=>{let x:int64="no"}\n', err='type mismatch\n')
+    write(root, 'arguments', '# modes: native native-release\n# args: a b\nmain=():>void=>{printl(args().length)}\n',
           out='3\n')
     # Guessed void, but main has a result: the guess must not drop the exit code.
     write(root, 'hidden', '# exit: 5\nmain=()=>{let five=5 printl"hidden" five}\n', out='hidden\n')
@@ -58,18 +58,18 @@ def test_core_case_batch_fallbacks(compiler, tmp_path, monkeypatch):
 def test_core_case_void_guess():
     assert cases.returns_void('main=()=>{printl"x"}\n')
     assert cases.returns_void('main = ():>void => {\n    let f=()=>{return 1}\n}\n') is True
-    assert not cases.returns_void('main=()=>{printl"x" return 0}\n')
-    assert not cases.returns_void('main=()=>{\n    printl"x"\n    0\n}\n')
-    assert not cases.returns_void('main=():>int64=>{printl"x"}\n')
+    assert not cases.returns_void('main=():>void=>{printl"x"}\n')
+    assert not cases.returns_void('main=():>void=>{\n    printl"x"\n}\n')
+    assert not cases.returns_void('main=():>void=>exit(entry()) entry=():>int64=>{printl"x"}\n')
     assert not cases.returns_void('main=(args:array<string>)=>{printl"x"}\n')
 
 
 def test_core_case_failures(compiler, tmp_path, monkeypatch, capsys):
     root = tmp_path / 'cases'
-    write(root, 'wrong-exit', '# modes: native native-release\nmain=()=>1\n')
-    write(root, 'wrong-output', '# modes: native\nmain=()=>{printl"actual" return 0}\n', out='expected\n')
-    write(root, 'broken', '# modes: native\nmain=()=>missing_name\n')
-    write(root, 'compiles', '# modes: native\nmain=()=>0\n', err='an error\n')
+    write(root, 'wrong-exit', '# modes: native native-release\nmain=():>void=>exit(1)\n')
+    write(root, 'wrong-output', '# modes: native\nmain=():>void=>{printl"actual"}\n', out='expected\n')
+    write(root, 'broken', '# modes: native\nmain=():>void=>exit(missing_name)\n')
+    write(root, 'compiles', '# modes: native\nmain=():>void=>exit(0)\n', err='an error\n')
     assert run(compiler, root, tmp_path, monkeypatch) == 1
     report = capsys.readouterr().out
     assert 'FAIL wrong-exit [native native-release]' in report and 'exit 1, expected 0' in report

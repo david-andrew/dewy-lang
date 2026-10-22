@@ -1,7 +1,7 @@
 $explicit_copies
-main=():>int64=>{
+main=():>void=>{
     let value:int64=0
     let first=($capture value):>int64=>{value+=1 return value}
     let second=@first
-    return first()+second()
+    exit(first()+second())
 }

@@ -2,7 +2,7 @@
 # checksum are outside the timed region; output allocation is included.
 from p"harness.dewy" import size_argument, clock
 
-main=(args:array<string>):>int64=>{
+main=(args:array<string>):>void=>{
     let count=size_argument(args 20000)
     let text=repeat("abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789 _- café Ωω Яя Ёё." count)
     let started=clock()
@@ -13,5 +13,4 @@ main=(args:array<string>):>int64=>{
     loop b in bytes(hi) {checksum+=b as int64}
     loop b in bytes(lo) {checksum+=b as int64}
     printl"{checksum} {finished-started}"
-    return 0
 }

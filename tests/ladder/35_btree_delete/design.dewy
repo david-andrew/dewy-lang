@@ -193,7 +193,7 @@ valid=(node:Node root:bool):>bool=> {
     }
     return true
 }
-main=():>int64=> {
+main=():>void=> {
     let tree=leaf()
     loop i in [0..64)  {
         insert(@tree (i*37)%64)
@@ -219,5 +219,4 @@ main=():>int64=> {
     }
     $runtime_assert (tree.keys.length =? 0)
     printl("{remaining.length} {sum} {walk(saved).length}")
-    return 0
 }

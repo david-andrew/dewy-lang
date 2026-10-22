@@ -57,7 +57,7 @@ def test_overlapping_mutable_slices_rejected(compiler, tmp_path, arguments):
 def test_mutable_slice_cannot_resize_or_escape(compiler, tmp_path, body):
     source = tmp_path / 'escape.dewy'
     source.write_text('change=(@a:array<int64>):>void=>{' + body + '''}
-main=()=>{let a:array<int64>=[1 2] change(@a[..1)) return 0}
+main=():>void=>{let a:array<int64>=[1 2] change(@a[..1))}
 ''')
     run = subprocess.run([compiler, 'check', source], capture_output=True, text=True)
     assert run.returncode != 0
@@ -115,7 +115,7 @@ def test_mutable_slice_capture_cannot_escape(compiler, tmp_path):
     source = tmp_path / 'escape_capture.dewy'
     source.write_text('''
 escape=(@a:array<int64>)=>($capture @a):>int64=>a[0]
-main=()=>{let a:array<int64>=[1] let f=escape(@a) printl"{f()}" return 0}
+main=():>void=>{let a:array<int64>=[1] let f=escape(@a) printl"{f()}"}
 ''')
     run = subprocess.run([compiler, 'check', source], capture_output=True, text=True)
     assert run.returncode != 0
@@ -184,7 +184,7 @@ def test_read_and_write_slice_overlap_rejected(compiler, tmp_path):
 def test_borrowed_bounds_still_trap(compiler, tmp_path, release, body):
     source = tmp_path / 'bounds.dewy'
     source.write_text('copy=(@a:array<int64> @b:array<int64>):>void=>{' + body + '''}
-main=()=>{let a:array<int64>=[1 2 3] let b:array<int64>=[0] copy(@a[..] @b[..]) return 0}
+main=():>void=>{let a:array<int64>=[1 2 3] let b:array<int64>=[0] copy(@a[..] @b[..])}
 ''')
     result = subprocess.run([compiler, *(['--release'] if release else []), source],
                             capture_output=True, text=True)

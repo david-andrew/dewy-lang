@@ -12,7 +12,7 @@ f=(x:Dual):>Dual=> {
     return div_dual(numerator denominator)
 }
 plain=(x:float64):>float64=>(sin(x)+x*x*x)/(1.0+x*x)
-main=():>int64=> {
+main=():>void=> {
     let maximum:float64=0.0
     let derivative_sum:float64=0.0
     loop i in [-8..9)  {
@@ -58,5 +58,4 @@ main=():>int64=> {
     $runtime_assert (exponential.value =? 1.0)
     $runtime_assert (exponential.tangent =? 4.0)
     printl("{format(derivative_sum ".6f")} {format(dx.tangent ".6f")} {format(dy.tangent ".6f")}")
-    return 0
 }

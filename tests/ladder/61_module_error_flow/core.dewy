@@ -11,10 +11,10 @@ summarize=(lines:array<string>):>Invoice|BadNumber|BadQuantity=> {
     }
     return Invoice[total count]
 }
-main=():>int64=> {
+main=():>void=> {
     let good=summarize(["2" "3" "0" "10"])
     if good is? error  {
-        return 1
+        exit(1)
     }
     assert(good.total =? 105)
     assert(good.count =? 4)
@@ -24,7 +24,7 @@ main=():>int64=> {
         assert(bad.text =? "oops")
     }
     else  {
-        return 2
+        exit(2)
     }
     let negative=summarize(["1" "-4"])
     assert(negative is? BadQuantity)
@@ -32,11 +32,11 @@ main=():>int64=> {
         assert(negative.value =? -4)
     }
     else  {
-        return 3
+        exit(3)
     }
     let maximum=summarize(["100" "0"])
     if maximum is? error  {
-        return 4
+        exit(4)
     }
     assert(maximum.total =? 700)
     let excessive=summarize(["101"])
@@ -44,11 +44,11 @@ main=():>int64=> {
         assert(excessive.value =? 101)
     }
     else  {
-        return 5
+        exit(5)
     }
     let empty=summarize([])
     if empty is? error  {
-        return 6
+        exit(6)
     }
     assert(empty.total =? 0)
     assert(empty.count =? 0)
@@ -75,5 +75,4 @@ main=():>int64=> {
     assert(successes =? 3)
     assert(failures =? 3)
     printl("{saved.total} {saved.count} {successes} {failures}")
-    return 0
 }

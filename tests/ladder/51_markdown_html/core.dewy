@@ -101,7 +101,7 @@ render=(source:string):>string=> {
     }
     return result
 }
-main=():>int64=> {
+main=():>void=> {
     let source="# Dewy & tools\n\nA **bold** line\nwith `<tag>`.\n\n- one\n- **two**\n\n<script>"
     let output=render(source)
     assert(not output.contains("<script>"))
@@ -110,5 +110,4 @@ main=():>int64=> {
     assert(inline("`**x**`") =? "<code>**x**</code>")
     assert(inline("**x") =? "<strong>x</strong>")
     printl(output)
-    return 0
 }

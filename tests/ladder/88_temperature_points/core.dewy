@@ -37,7 +37,7 @@ difference=(a:Point b:Point):>Delta=>Delta[minus(a.kelvin b.kelvin)]
 shift=(p:Point d:Delta):>Point=>Point[plus(p.kelvin d.kelvin)]
 celsius=(p:Point):>Rat=>minus(p.kelvin ratio(27315 100))
 fahrenheit=(p:Point):>Rat=>plus(times(celsius(p) ratio(9 5)) ratio(32 1))
-main=():>int64=>{
+main=():>void=>{
     let freezing=from_celsius(ratio(0 1))
     let boiling=from_celsius(ratio(100 1))
     let delta=difference(boiling freezing)
@@ -86,5 +86,4 @@ main=():>int64=>{
     $runtime_assert equal(from_fahrenheit(ratio(-40 1)).kelvin from_celsius(ratio(-40 1)).kelvin)
     $runtime_assert equal(checksum ratio(345443 20))
     printl("{show(delta.kelvin)} {show(checksum)}")
-    return 0
 }

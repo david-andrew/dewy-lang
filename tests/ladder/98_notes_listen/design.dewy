@@ -33,7 +33,7 @@ session=(@host:Host label:string parts:array<string>):>void=>{
     show(reply)
 }
 
-main=():>int64=>{
+main=():>void=>{
     let host=Host()
     $runtime_assert start(@host 0)
     $runtime_assert port(host) >? 0
@@ -47,5 +47,4 @@ main=():>int64=>{
     session(@host "http/1.0" ["GET /api/stats HTTP/1.0\r\n\r\n"])
     printl("accepted {host.accepted}")
     stop(@host)
-    return 0
 }

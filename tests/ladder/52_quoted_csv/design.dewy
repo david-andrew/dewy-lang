@@ -65,11 +65,11 @@ parse_csv=(text:string):>array<array<string>>|CsvError=> {
     }
     return rows
 }
-main=():>int64=> {
+main=():>void=> {
     let text="name,note,amount\r\nAda,\"a,b\",12\r\n\"B\"\"ob\",\"two\nlines\",7\r\n,empty,0\r\n"
     let result=parse_csv(text)
     if result is? CsvError  {
-        return 1
+        exit(1)
     }
     $runtime_assert (result.length =? 4)
     $runtime_assert (result[1][1] =? "a,b")
@@ -89,14 +89,13 @@ main=():>int64=> {
     }
     let empty=parse_csv("")
     if empty is? CsvError  {
-        return 2
+        exit(2)
     }
     $runtime_assert (empty.length =? 0)
     let trailing=parse_csv("a,,")
     if trailing is? CsvError  {
-        return 3
+        exit(3)
     }
     $runtime_assert (trailing[0].length =? 3)
     printl("{result.length} {cells} {amount}")
-    return 0
 }

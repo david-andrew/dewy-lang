@@ -92,13 +92,13 @@ The prelude runs programs as child processes (`library/linux/process.dewy`); eve
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
-let main = ():>int64 => {
+let main = ():>void => {
     match capture("/bin/sh" ["-c" "echo out; echo err 1>&2; exit 3"]) {
         result:Output => {
             match result.stdout_text { text:string => printl"{text}"  <none> => {} }
-            return result.status                       # 3
+            exit(result.status)                       # 3
         }
-        <SpawnError> => return 1
+        <SpawnError> => exit(1)
     }
 }
 ```

@@ -27,7 +27,7 @@ pipeline=(jobs:array<Job>):>array<Product>=> {
     }
     return parallel_map(valid @compute)
 }
-main=():>int64=> {
+main=():>void=> {
     let jobs:array<Job>=[]
     loop i in [0..200)  {
         if i%11 =? 0  {
@@ -52,10 +52,10 @@ main=():>int64=> {
         previous=item.id
         total+=item.value
         let job=saved.get(item.id)
-        if job is? none return 1
+        if job is? none exit(1)
         let parsed=parse_job(job)
         if parsed is? Failure  {
-            return 1
+            exit(1)
         }
         $runtime_assert (compute(parsed).value =? item.value)
     }
@@ -71,5 +71,4 @@ main=():>int64=> {
         ids+=item.id
     }
     printl("{results.length} {failures} {total} {ids}")
-    return 0
 }

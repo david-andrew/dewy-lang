@@ -70,7 +70,7 @@ put=(@c:Cache key:int64 value:int64):>void=> {
     c.tail=slot
     c.index[key]=slot
 }
-main=():>int64=> {
+main=():>void=> {
     let c=Cache[[] [] [] -1 -1 8]
     let hits=0
     let checksum=0
@@ -98,5 +98,4 @@ main=():>int64=> {
     put(@zero 1 2)
     $runtime_assert (get(@zero 1) is? none)
     printl("{hits} {checksum} {keys[0]} {keys[7]}")
-    return 0
 }

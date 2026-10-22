@@ -208,6 +208,10 @@ target_windows = false        # (Windows x64: compiler/pe.jo)
 target_arm64 = false          # (Linux on arm64: compiler/arm64.jo)
 target_macos = false          # (macOS on arm64: compiler/arm64.jo, compiler/macho.jo)
 main_fn = 0
+main_entry_fn = 0        # (a Dewy main giving errors: the entry that reports them and gives the exit code)
+main_exit_kinds: int[]   # (its error kinds, in exit-code order, and their codes)
+main_exit_codes: int[]
+main_exit_pinned: bool[]
 test_mode = false        # `sloppy test`: run the main file's test blocks instead of main()
 expectation_ifs: {int: bool} = {}   # Dewy's `$expect`s: `if not condition { report; return }`
 check_all = false        # (sloppy check: the tests and the game loop both checked; nothing runs)
@@ -4105,17 +4109,25 @@ check_stmt = (s: int):
             if ctxs[cx].infer_ret and tkind(ret) == .var:
                 t = check_expr(int(nodes[s].a), 0)
                 nodes[s].a = i32(last_checked)
-                if has_flag(int(nodes[s].a), NF_LITERAL):
-                    t = lit_default(int(nodes[s].a))
-                    nodes[s].a = i32(coerce(int(nodes[s].a), t))
-                unify(ret, t)
+                if not infer_throw(s, t):
+                    if has_flag(int(nodes[s].a), NF_LITERAL):
+                        t = lit_default(int(nodes[s].a))
+                        nodes[s].a = i32(coerce(int(nodes[s].a), t))
+                    unify(ret, t)
+                    if infer_throws.has(int(ctxs[cx].inst)): infer_note_return(s)
             else:
                 rt = prune(ret)
-                if tkind(rt) == .void_: fatal(nodes[s].pos, "this function does not return a value")
-                check_expr(int(nodes[s].a), rt)
-                nodes[s].a = i32(coerce(last_checked, rt))
+                inferring = ctxs[cx].infer_ret and infer_throws.has(int(ctxs[cx].inst))
+                if tkind(rt) == .void_ and not inferring: fatal(nodes[s].pos, "this function does not return a value")
+                t = check_expr(int(nodes[s].a), (if tkind(rt) == .void_: 0 else: rt))
+                nodes[s].a = i32(last_checked)
+                if not (inferring and not can_coerce(0, t, rt) and infer_throw(s, t)):
+                    if tkind(rt) == .void_: fatal(nodes[s].pos, "this function does not return a value")
+                    nodes[s].a = i32(coerce(int(nodes[s].a), rt))
+                    if inferring: infer_note_return(s)
         else:
             rt = prune(ret)
+            if ctxs[cx].infer_ret and infer_throws.has(int(ctxs[cx].inst)): infer_note_return(s)
             if tkind(rt) == .var: unify(rt, T_VOID)
             else if union_has_void(rt):
                 # (a bare return in a `:>void | E` function gives its void member)
@@ -4228,6 +4240,9 @@ __check_fn_body = (f: int):
     else:
         ctxs[cx].ret = i32(mk_var())
         ctxs[cx].infer_ret = true
+        if decl != 0 and nodes[decl].kind == .fn_ and fns[f].kind != FK_INIT and files[pos_file(nodes[decl].pos)].is_dewy:
+            infer_throws[f] = []
+            infer_returns[f] = []
     body = int(fns[f].body)
     if fns[f].kind == FK_INIT:
         loop i in [0..nkids(body)): check_stmt(kid(body, i))
@@ -4257,6 +4272,10 @@ __check_fn_body = (f: int):
             else if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
             else if bt != T_NEVER and not (n > 0 and stmt_terminates(kid(body, n - 1))):
                 fatal(nodes[decl].pos, "function must return a value of type {dt(r)} on all paths")
+            if infer_throws.has(f):
+                infer_finish(f, body)
+                infer_throws.remove(f)
+                infer_returns.remove(f)
             fns[f].ret = i32(zonk(int(ctxs[cx].ret)))
             if ide_on and decl != 0 and nodes[decl].kind == .fn_ and ide_indexed(pos_file(nodes[decl].pos)): ide_hint_fns.push(f)
             if fns[f].aux_void and tkind(int(fns[f].ret)) != .void_: fatal(nodes[decl].pos, "recursive function '{name_of(int(nodes[decl].name))}' returns a value; add an explicit return type ({jd(nodes[decl].pos, "`-> Type`", "`:>Type`")})")
@@ -5466,7 +5485,8 @@ check_program = (main_path: str):
         if syms[s].kind == .fns and not skip_main and not calls_main:
             main_fn = get_fn_inst(int(syms[s].decl), [], 0)
             rt = prune(int(fns[main_fn].ret))
-            if rt != T_VOID and rt != T_NEVER and not is_int(rt):
+            if files[int(modules[mainm].file)].is_dewy: dewy_main_result(int(syms[s].decl), rt)
+            else if rt != T_VOID and rt != T_NEVER and not is_int(rt):
                 fatal(nodes[int(syms[s].decl)].pos, "main must return void or an integer exit code, found {dt(rt)}")
     if let s = modules[mainm].names.get(intern("update")):
         if syms[s].kind == .fns:
@@ -5607,3 +5627,137 @@ check_program = (main_path: str):
     if not errors_only:
         ownership_finalize()
         effects_finalize()
+
+# ---------------- Dewy's main ----------------
+# Dewy's main gives back void or the errors that reach it (`void | E`, declared or
+# inferred; an ordinary type). An error is said on standard error and ends the program
+# with its kind's code: 1, 2, 3, ... in the kinds' order (the declaration's, or the
+# order the kinds are declared in when inferred), below 126; an error type with an
+# `exit_code` field gives its own.
+dewy_main_result = (decl: int, rt: int):
+    if rt == T_VOID or rt == T_NEVER: return
+    pos = nodes[decl].pos
+    if is_int(rt) or rt == T_MATH_INT: fatal(pos, "main gives back no exit code: it returns void, or the errors that reach it (`main=():>void|ParseError=>...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code")
+    kinds: int[]
+    loop m in value_members(rt):
+        if tkind(m) == .void_: continue
+        if m == T_NONE or not exception_member(m): fatal(pos, "main returns void or the errors that reach it, found {dt(rt)}: {dt(m)} is not an error. A last line giving a value gives it back: declare `main=():>void=>...` to drop it, print it, or end with `exit(n)` for a code")
+        kinds.push(m)
+    ordered = main_kind_order(decl, kinds)
+    taken: {int: bool}
+    pinned: int[]
+    loop k in ordered:
+        c = main_pinned_code(k, pos)
+        pinned.push(c)
+        if c > 0:
+            if taken.has(c): fatal(pos, "two error kinds reaching main pin exit code {c}")
+            taken[c] = true
+    next = 1
+    loop i in 0.. and k in ordered:
+        code = pinned[i]
+        if code == 0:
+            loop taken.has(next): next += 1
+            if next >= 126: fatal(pos, "main's errors need more exit codes than 1 to 125: let some share a parent type, or handle them")
+            code = next
+            taken[next] = true
+        main_exit_kinds.push(k)
+        main_exit_codes.push(code)
+        main_exit_pinned.push(pinned[i] != 0)
+    # (the entry: main's result, an error said and its code given back, else 0)
+    d = mk(.fn_, pos)
+    nodes[d].name = i32(intern("$main_entry"))
+    nodes[d].mod = nodes[decl].mod
+    nodes[d].a = i32(type_node_of(T_INT, pos))
+    result = "$main_result"
+    stmts = [bc_let(result, bc_call("main", [], pos), pos)]
+    loop i in 0.. and k in main_exit_kinds:
+        message = mk(.str_lit, pos)
+        nodes[message].aux = 1
+        part = mk(.pair, pos)
+        nodes[part].a = i32(bc_ident(result, pos))
+        nodes[part].sval = -1
+        set_list(message, [part])
+        code = if main_exit_pinned[i]: bc_field(bc_ident(result, pos), "exit_code", pos) else: bc_int(main_exit_codes[i], pos)
+        ret = mk(.return_, pos)
+        nodes[ret].a = i32(bc_call("__main_failed", [message, code], pos))
+        condition = mk(.istype, pos)
+        nodes[condition].a = i32(bc_ident(result, pos))
+        nodes[condition].b = i32(type_node_of(k, pos))
+        branch = mk(.if_, pos)
+        nodes[branch].a = i32(condition)
+        nodes[branch].b = i32(bc_block([ret], pos))
+        add_flag(branch, NF_STMT)
+        stmts.push(branch)
+    done = mk(.return_, pos)
+    nodes[done].a = i32(bc_int(0, pos))
+    stmts.push(done)
+    nodes[d].b = i32(bc_block(stmts, pos))
+    main_entry_fn = get_fn_inst(d, [], pos)
+
+# The kinds in exit-code order: as a declared result writes them, else in the order
+# their types are declared
+main_kind_order = (decl: int, kinds: int[]) -> int[]:
+    out: int[]
+    if nodes[decl].a != 0:
+        written: int[]
+        saved = cx
+        ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[decl].mod), "main result")), -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(sc_names.len())))
+        cx = ctxs.len() - 1
+        main_written_kinds(int(nodes[decl].a), written)
+        ctxs.pop()
+        cx = saved
+        loop w in written:
+            if kinds.contains(w) and not out.contains(w): out.push(w)
+    rest: int[]
+    loop k in kinds:
+        if not out.contains(k): rest.push(k)
+    # (insertion by declaration position)
+    i = 1
+    loop i < rest.len():
+        j = i
+        loop j > 0 and main_kind_pos(rest[j]) < main_kind_pos(rest[j - 1]):
+            t = rest[j]
+            rest[j] = rest[j - 1]
+            rest[j - 1] = t
+            j -= 1
+        i += 1
+    loop k in rest: out.push(k)
+    out
+
+main_written_kinds = (tn: int, out: mut int[]):
+    if nodes[tn].kind == .tunion:
+        loop i in [0..nkids(tn)): main_written_kinds(kid(tn, i), out)
+        return
+    t = prune(resolve_type(tn))
+    loop m in value_members(nominal_family(t)): out.push(m)
+
+main_kind_pos = (t: int) -> int:
+    if tkind(t) != .struct_: return 0
+    d = int(structs[int(types[t].st)].decl)
+    if d == 0: return 0
+    f = pos_file(nodes[d].pos)
+    f * 1000000000 + pos_off(nodes[d].pos)
+
+# an error type's own exit code: its `exit_code` field's default (0: none of its own)
+main_pinned_code = (t: int, pos: int) -> int:
+    if tkind(t) != .struct_: return 0
+    si = int(types[t].st)
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        if name_of(int(fields[f].name)) != "exit_code": continue
+        if not is_int(prune(int(fields[f].type))): fatal(pos, "{dt(t)}'s exit_code is the exit code main ends with for it: an integer")
+        dv = int(fields[f].defval)
+        if dv == 0 or nodes[dv].kind != .int_lit: fatal(pos, "{dt(t)}'s exit_code needs a constant default, the code main ends with for it: `exit_code:int64=3`")
+        c = int(nodes[dv].ival)
+        if c < 1 or c > 255: fatal(pos, "{dt(t)}'s exit_code is {c}: an exit code for an error is 1 to 255 (0 is success)")
+        return c
+    0
+
+# `dewy build --exit-codes`: the table of main's exit codes
+print_exit_codes = ():
+    print("0 success")
+    loop i in 0.. and k in main_exit_kinds:
+        own = if main_exit_pinned[i]: " (its exit_code)" else: ""
+        print("{main_exit_codes[i]} {dt(k)}{own}")
+    print("101 a panic")

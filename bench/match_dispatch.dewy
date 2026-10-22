@@ -38,10 +38,9 @@ kernel=(count:int64):>int64=>{
     }
     return checksum
 }
-main=(args:array<string>):>int64=>{
+main=(args:array<string>):>void=>{
     let count=size_argument(args 10000000)
     let started=clock()
     let result=kernel(count)
     printl"{result} {clock()-started}"
-    return 0
 }

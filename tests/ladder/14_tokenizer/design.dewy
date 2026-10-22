@@ -17,7 +17,7 @@ tokenize=(source:string):>array<Token>=>{
     }
     return tokens
 }
-main=():>int64=>{
+main=():>void=>{
     let tokens=tokenize("12 + (3*40)")
     $runtime_assert (tokens.length =? 7)
     $runtime_assert (tokens[0].text =? "12")
@@ -28,5 +28,4 @@ main=():>int64=>{
     $runtime_assert (rebuilt =? "12+(3*40)")
     $runtime_assert (tokenize(" \t\n").length =? 0)
     printl(rebuilt)
-    return 0
 }

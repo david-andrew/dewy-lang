@@ -40,7 +40,7 @@ gradient=(net:Net):>Net=> {
     }
     return g
 }
-main=():>int64=> {
+main=():>void=> {
     let net=Net[[0.3 -0.2 0.5 0.4 -0.7 0.6] [0.1 -0.3 0.2] [0.2 -0.4 0.7] 0.05]
     let start=loss(net)
     let grad=gradient(net)
@@ -77,5 +77,4 @@ main=():>int64=> {
         }
     }
     printl("{format(start ".6f")} {format(finish ".6f")} {correct}")
-    return 0
 }

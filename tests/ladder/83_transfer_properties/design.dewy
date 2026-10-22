@@ -22,7 +22,7 @@ replace=(@message:Message):>void=>{
     message.payload[0]=-1
     message.sender=-1
 }
-main=():>int64=>{
+main=():>void=>{
     let total:int64=0
     loop sender in [1..9) {
         let message=make(sender 16)
@@ -58,5 +58,4 @@ main=():>int64=>{
     $runtime_assert receive(make(9 1)) =? 900
     $runtime_assert receive(snapshot[0])+receive(snapshot[1]) =? 602
     printl("{total}")
-    return 0
 }

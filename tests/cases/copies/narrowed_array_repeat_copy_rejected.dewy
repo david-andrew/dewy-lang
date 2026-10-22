@@ -1,10 +1,10 @@
 $explicit_copies
 make=(flag:bool):>array<int64>|none=>if flag [42] else none
-main=():>int64=>{
+main=():>void=>{
     let value=make(true)
-    if value is? none return 1
+    if value is? none exit(1)
     let rows:array<array<int64>>=[]
     loop i in [0..2) {rows.push(value)}
-    if rows.length>=?2 {rows[0].clear return if rows[1].length>?0 rows[1][0] else 3}
-    return 2
+    if rows.length>=?2 {rows[0].clear exit((if rows[1].length>?0 rows[1][0] else 3))}
+    exit(2)
 }

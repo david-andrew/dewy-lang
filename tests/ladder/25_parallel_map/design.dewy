@@ -5,7 +5,7 @@ work=(n:int64):>int64=>{
     }
     return sum
 }
-main=():>int64=>{
+main=():>void=>{
     let input=[loop i in [0..128) i]
     let output=parallel_map(input (n)=>work(n))
     let total=0
@@ -27,5 +27,4 @@ main=():>int64=>{
     loop i in input {serial+=work(i)}
     $runtime_assert (serial =? total)
     printl("{output.length} {total} {nested[7]}")
-    return 0
 }

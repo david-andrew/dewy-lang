@@ -35,7 +35,7 @@ fingerprint=(g:Game):>uint64=> {
     }
     return hash*257+(g.frame as uint64)
 }
-main=():>int64=> {
+main=():>void=> {
     let initial=Game[[Player[20 0 0] Player[80 0 0]] 12345 0]
     let baseline=initial
     let snapshots:array<Game>=[initial]
@@ -72,5 +72,4 @@ main=():>int64=> {
         score+=player.score
     }
     printl("{baseline.frame} {fingerprint(baseline)} {score} {replayed}")
-    return 0
 }

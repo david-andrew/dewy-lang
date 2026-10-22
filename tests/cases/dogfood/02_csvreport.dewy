@@ -43,12 +43,12 @@ parse_args = (argv:array<string>):>Options|string => {
 
 Totals:type = [units:int revenue:float64 rows:int]
 
-main = ():>int => {
+main = ():>void => {
     let parsed = parse_args(args())
     if parsed is? string {
         printl("error: {parsed}")
         usage()
-        return 2
+        exit(2)
     }
     let opts = parsed
     let rows = csv_rows(DATA)
@@ -56,7 +56,7 @@ main = ():>int => {
     let col = header.index_of(opts.group)
     if col is? Missing {
         printl("error: no column named {opts.group}")
-        return 2
+        exit(2)
     }
     let groups:dict<string Totals> = []
     let skipped = 0
@@ -89,5 +89,4 @@ main = ():>int => {
     printl(format("" "-<36"))
     printl("{format("total" "<10")} {format(grand ">26,.2f")}")
     if skipped >? 0 { printl("({skipped} rows skipped)") }
-    return 0
 }

@@ -49,7 +49,7 @@ change=(values:array<int64>):>int64=>{values[0]=99 return values[0]}
     (tmp_path / 'library.dewy').write_text(library)
     source = tmp_path / 'main.dewy'
     source.write_text(directive + '''import p"library.dewy" as library
-main=():>int64=>{
+main=():>void=>exit(entry()) entry=():>int64=>{
     let xs:array<int64>=[42]
     $runtime_assert library.change(xs)=?99
     $runtime_assert xs[0]=?42

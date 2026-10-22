@@ -90,18 +90,18 @@ step=(@session:Session line:string):>void|DiskError=>{
     }
 }
 
-main=():>int64=>{
+main=():>void=>{
     clear("kvdata")
     clear("kvwork")
     let disk=open_disk("kvdata")
     if disk is? DiskError {
         printl(disk.message)
-        return 1
+        exit(1)
     }
     let opened=open_store(disk)
     if opened is? DiskError {
         printl(opened.message)
-        return 1
+        exit(1)
     }
     let session=Session[opened]
     loop true {
@@ -112,21 +112,21 @@ main=():>int64=>{
         let done=step(@session line)
         if done is? DiskError {
             printl(done.message)
-            return 1
+            exit(1)
         }
     }
 
     let work=open_disk("kvwork")
-    if work is? DiskError return 1
+    if work is? DiskError exit(1)
     let tally=run_workload("kvwork" 20261021 3000)
     match tally {
         failure:DiskError => {
             printl(failure.message)
-            return 1
+            exit(1)
         }
         <WorkloadError> => {
             printl("workload failed")
-            return 1
+            exit(1)
         }
         t:Tally => {
             printl("workload steps={t.steps} commits={t.commits} rollbacks={t.rollbacks} torn={t.torn} crashes={t.crashes} damaged={t.damaged}")
@@ -134,9 +134,8 @@ main=():>int64=>{
         }
     }
     let final=open_store(Disk["kvwork"])
-    if final is? DiskError return 1
+    if final is? DiskError exit(1)
     printl("workload keys={final.length()} fingerprint={fingerprint(final.index.entries)}")
     clear("kvdata")
     clear("kvwork")
-    return 0
 }

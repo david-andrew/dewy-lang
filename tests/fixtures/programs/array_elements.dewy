@@ -14,7 +14,7 @@ let first = (xs:array<string>):>string => {
     if xs.length >? 0 { return xs[0] }    # an element of the caller's array: the caller gets a copy
     return ""
 }
-let main = ():>int64 => {
+let main = ():>void => {
     let total:int64 = 0
     let rounds:int64 = 0
     loop rounds <? 300 {
@@ -32,5 +32,5 @@ let main = ():>int64 => {
     if copy.length =? 4 and copy[0] =? "p0-0" { total += 1 }
     let words = "a,bb,ccc".split","
     let sizes = [loop w in words w.length]
-    return total + 7 - sizes.length            # (4 + 27 + 6) + 1 + 7 - 3 = 42
+    exit(total + 7 - sizes.length)            # (4 + 27 + 6) + 1 + 7 - 3 = 42
 }

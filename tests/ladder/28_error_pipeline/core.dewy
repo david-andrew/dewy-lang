@@ -15,19 +15,18 @@ invoice=(text:string):>int64|ParseError=>{
     if value is? ParseError {return value}
     return value*7
 }
-main=():>int64=>{
+main=():>void=>{
     let zero=invoice("0")
-    if zero is? ParseError {return 5}
+    if zero is? ParseError {exit(5)}
     assert(zero =? 0)
     let good=invoice("6")
     let bad=invoice("oops")
     let negative=invoice("-2")
-    if good is? ParseError {return 1}
+    if good is? ParseError {exit(1)}
     assert(good =? 42)
     assert(bad is? ParseError)
     assert(negative is? ParseError)
     if bad is? ParseError {assert(bad.message =? "invalid integer")}
     if negative is? ParseError {assert(negative.message =? "negative")}
     printl("{good} invalid integer negative")
-    return 0
 }

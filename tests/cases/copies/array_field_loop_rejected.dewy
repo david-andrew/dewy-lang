@@ -6,8 +6,8 @@ make=():>Pack=>{
  return Pack[values ['left behind']]
 }
 read=(values:array<int64>):>int64=>if values.length>?1 values[0]+values[1] else 0
-main=():>int64=>{
+main=():>void=>{
  let owner=make()
- loop i in [0..2) {let values=owner.values values.push(40) if read(values) not=?42 return 0}
- return 42
+ loop i in [0..2) {let values=owner.values values.push(40) if read(values) not=?42 return}
+ exit(42)
 }

@@ -7,10 +7,10 @@ collect=(@box:Box):>array<int64>=>{
     loop item in box.items {output.push(item)}
     return output
 }
-main=():>int64=>{
+main=():>void=>{
     let box=Box[[20] 0]
     let values=collect(@box)
-    if values.length not=?2 return 1
+    if values.length not=?2 exit(1)
     values[0]=0
-    return if box.items.length=?2 and box.items[0]=?20 and box.items[1]=?22 and values[1]=?22 42 else 2
+    exit((if box.items.length=?2 and box.items[0]=?20 and box.items[1]=?22 and values[1]=?22 42 else 2))
 }

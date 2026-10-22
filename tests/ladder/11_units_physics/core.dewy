@@ -9,7 +9,7 @@ check_energy=(mass:float64 height:float64 gravity:float64 kinetic:float64):>bool
     let potential=mass*gravity*height
     return abs(potential-kinetic) <? 1e-9
 }
-main=():>int64=>{
+main=():>void=>{
     let mass:float64=2.0
     let launch:float64=20.0
     let gravity:float64=10.0
@@ -28,5 +28,4 @@ main=():>int64=>{
     assert(duration =? 2.0)
     # Report integral counts like the design's exact rational arithmetic.
     printl("{int64(result.height)} {int64(result.energy)} {int64(duration)}")
-    return 0
 }

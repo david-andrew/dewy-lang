@@ -196,7 +196,7 @@ boundaries=():>void=>{
     $runtime_assert state.names["total"] =? 9
 }
 
-main=():>int64=>{
+main=():>void=>{
     boundaries()
     selfcheck()
     let state=fresh()
@@ -213,5 +213,4 @@ main=():>int64=>{
         }
     }
     printl("done {lines} {state.errors} {state.names.length}")
-    return 0
 }

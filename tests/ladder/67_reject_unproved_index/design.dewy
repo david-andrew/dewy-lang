@@ -54,10 +54,9 @@ control=():>int64=>{
     $runtime_assert checksum(make(1)) =? 1
     return verify()
 }
-main=():>int64=>{
+main=():>void=>{
     let witness=control()
     let index=to_int(read_line() ?? "1") ?? 0
     forbidden(make(3) index)
     $runtime_assert witness >? 0
-    return 0
 }

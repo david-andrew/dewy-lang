@@ -10,7 +10,7 @@ peek=<T>(stack:Stack<T>):>T|none=>{
     if stack.values.length =? 0 {return none}
     return stack.values[end]
 }
-main=():>int64=>{
+main=():>void=>{
     let ints:Stack<int64>=[values=[]]
     loop n in [0..4) {push(@ints n)}
     let snapshot=ints
@@ -27,5 +27,4 @@ main=():>int64=>{
     loop ints.values.length >? 0 {sum+=pop(@ints) ?? 0}
     $runtime_assert (sum =? 3)
     printl("{sum} {snapshot.values.length} {strings.values.length}")
-    return 0
 }

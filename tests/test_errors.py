@@ -20,16 +20,16 @@ def test_error_values(compiler, tmp_path, release, target):
 
 @pytest.mark.core_quick
 @pytest.mark.parametrize('source,diagnostic', [
-    ('E:type=type of error\nfail=():>int64|E=>E\nmain=():>int64=>fail() or_throw',
+    ('E:type=type of error\nfail=():>int64|E=>E\nmain=():>void=>exit(fail() or_throw)',
      'or_throw cannot propagate'),
-    ('E:type=type of error\nF:type=type of error\nf=():>int64|E=>F\nmain=()=>{f() return 0}',
+    ('E:type=type of error\nF:type=type of error\nf=():>int64|E=>F\nmain=():>void=>{f()}',
      'type mismatch'),
-    ('E:type=type of error\nf=():>int64|E=>E\ng=()=>f() or_throw\nmain=()=>{g() return 0}',
+    ('E:type=type of error\nf=():>int64|E=>E\nlet x=f() or_throw\nmain=():>void=>{printl(x)}',
      'declared return type'),
-    ('E:type=type of error\nmain=():>int64|E=>E', 'main must return'),
-    ('A:type=[x:int64]\nB:type=[y:int64]\nf=(b:bool):>A|B=>if b A[1] else B[2]\nmain=()=>f(true).x',
+    ('E:type=type of error\nmain=():>int64|E=>E', 'main returns void or the errors that reach it'),
+    ('A:type=[x:int64]\nB:type=[y:int64]\nf=(b:bool):>A|B=>if b A[1] else B[2]\nmain=():>void=>exit(f(true).x)',
      'has no field'),
-    ('A:type=[x:int64]\nE:type=type of error\nf=():>A|E=>A[1]\nmain=()=>{let a=f() a.x=2 return 0}',
+    ('A:type=[x:int64]\nE:type=type of error\nf=():>A|E=>A[1]\nmain=():>void=>{let a=f() a.x=2}',
      'union'),
 ])
 def test_error_diagnostics(compiler, tmp_path, source, diagnostic):

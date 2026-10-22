@@ -2,12 +2,11 @@ from units import m, kg
 from bigint import bigint, BigInt
 mass=(n:BigInt):>(BigInt * Mass)=>n*kg
 half=(value:rational * Length):>(rational * Length)=>value/2
-main=():>int64=>{
+main=():>void=>{
     let distance=rational(1 3)*m
     let part=half(distance)
     $runtime_assert (part =? m/6)
     let huge=mass(bigint("1000000000000000000000000"))
     $runtime_assert (huge/kg =? bigint("1000000000000000000000000"))
     printl"{distance} {part} {huge}"
-    return 0
 }

@@ -8,7 +8,7 @@ let Shown:type = [x:int64 __as__ = ():>string => "<{x}>"]
 let Fault:type = type of error & [code:int64 = 7]
 let Bare:type = type of error
 let Box:type = [value:int64 on_change:<(v:int64):>int64>]
-let main = ():>int64 => {
+let main = ():>void => {
     printl(5)
     printl([1 2 3])
     printl(set["ab" "c"])
@@ -29,5 +29,5 @@ let main = ():>int64 => {
     printl"{empty} {none_set} {[[1 2] [3]]}"
     printl"{[0..3)} {[1,3..9]} {[5,4..1]}"
     let text:string = [1 2 3] as string
-    return text.length
+    exit(text.length)
 }

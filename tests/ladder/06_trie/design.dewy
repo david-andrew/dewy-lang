@@ -25,7 +25,7 @@ contains_word=(trie:Trie word:string):>bool=>{
     }
     return trie.terminal[node]
 }
-main=():>int64=>{
+main=():>void=>{
     let t:Trie=[edges=[] terminal=[false]]
     loop word in ["cat" "car" "café" "dog"] {insert(@t word)}
     $runtime_assert (contains_word(t "cat"))
@@ -33,5 +33,4 @@ main=():>int64=>{
     $runtime_assert (not contains_word(t "ca"))
     $runtime_assert (not contains_word(t "cow"))
     printl("{t.terminal.length} {contains_word(t "car")}")
-    return 0
 }

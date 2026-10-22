@@ -206,7 +206,7 @@ boundaries=():>void=>{
     $runtime_assert service.writes =? 3
 }
 
-main=():>int64=>{
+main=():>void=>{
     boundaries()
     selfcheck()
     let service=Service[[] 0]
@@ -232,5 +232,4 @@ main=():>int64=>{
     $runtime_assert service.values["pear"] =? -4
     $runtime_assert service.writes =? 4
     printl("{service.values.length} {service.writes}")
-    return 0
 }

@@ -100,7 +100,7 @@ narrows = () => {
 }
 $test(cases=[[a=1 b=2] [a=(-3) b=4]])
 pairs = (a:int64 b:int64) => $expect a - b <? 0, "{a} is not below {b}"
-main = () => 0
+main=():>void=>exit(0)
 ''')
     result = command(compiler, 'test', '--json', source)
     assert result.returncode == 1, result.stdout + result.stderr
@@ -180,7 +180,7 @@ last = () => panic("child continued after its test")
 
 def test_core_native_tests_check_and_build(compiler, tmp_path):
     source = tmp_path / 'program.dewy'
-    source.write_text('$test\nchecked_only = () => $expect missing_test_value\nmain=()=>42')
+    source.write_text('$test\nchecked_only = () => $expect missing_test_value\nmain=():>void=>exit(42)')
     result = command(compiler, 'check', source)
     assert result.returncode != 0 and 'missing_test_value' in result.stderr
     result = command(compiler, 'test', source)
@@ -189,9 +189,9 @@ def test_core_native_tests_check_and_build(compiler, tmp_path):
 
 @pytest.mark.parametrize('tests', ['', '$test\nalso_checked = () => $expect true\n'])
 @pytest.mark.parametrize(('main', 'error'), [
-    ('main=()=>missing_main_value', 'missing_main_value'),
-    ('main=()=>[1 2]', 'main must return'),
-    ('helper=()=>missing_helper_value\nmain=()=>helper()', 'missing_helper_value'),
+    ('main=():>void=>exit(missing_main_value)', 'missing_main_value'),
+    ('main=():>void=>exit([1 2])', 'main must return'),
+    ('helper=()=>missing_helper_value\nmain=():>void=>exit(helper())', 'missing_helper_value'),
 ])
 def test_core_check_main_with_tests(compiler, tmp_path, tests, main, error):
     source = tmp_path / 'program.dewy'
@@ -298,7 +298,7 @@ def test_core_native_tests_directory(compiler, tmp_path):
     (tmp_path / '.hidden').mkdir()
     (tmp_path / 'a.dewy').write_text('$test\nok = () => $expect true\n$test(cases=(1 2))\nc = (x:int64) => $expect x =? 1\n')
     (tmp_path / 'sub' / 'b.dewy').write_text('$test\nb_ok = () => $expect 2 =? 2\n')
-    (tmp_path / 'program.dewy').write_text('main = () => 0\n')
+    (tmp_path / 'program.dewy').write_text('main=():>void=>exit(0)\n')
     (tmp_path / '.hidden' / 'h.dewy').write_text('$test\nhidden = () => $expect false\n')
     result = subprocess.run([compiler, 'test', '.'], cwd=tmp_path, capture_output=True, text=True,
                             timeout=60, check=False)

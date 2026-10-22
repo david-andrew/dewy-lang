@@ -15,7 +15,7 @@ integrate=(initial:float64 h:float64 count:int64):>array<float64>=>{
     }
     return history
 }
-main=():>int64=>{
+main=():>void=>{
     let history=integrate(1.0 0.01 100)
     let answer=history[end]
     assert(abs(answer-exp(-1.0)) <? 1e-8)
@@ -26,5 +26,4 @@ main=():>int64=>{
     assert(step(0.0 0.01) =? 0.0)
     assert(integrate(2.0 0.1 0)[0] =? 2.0)
     printl(format(answer ".8f"))
-    return 0
 }

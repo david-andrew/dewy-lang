@@ -69,7 +69,7 @@ find=(db:Database id:int64):>int64<i => i <? db.rows.length> | none=>{
     loop i in [0..db.rows.length) {if db.rows[i].id =? id return i}
     return none
 }
-main=():>int64=>{
+main=():>void=>exit(entry()) entry=():>int64=>{
     let db=Database[[Row[7]]]
     let found=find(db 7)
     if found is? int64 {$runtime_assert db.rows[found].id =? 7; return 0}

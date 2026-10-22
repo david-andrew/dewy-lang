@@ -5,7 +5,7 @@ Length32:type=float32 * Length
 const tiny:int8 * Length=7m
 width=((value:int8 * Length):>int64=>8) & ((value:int64 * Length):>int64=>64)
 small=(value:int8 * Length):>(int8 * Length)=>value+1m
-main=():>int64=>{
+main=():>void=>{
     $runtime_assert (width(tiny) =? 8)
     let original=3m
     let wide=original as Length64
@@ -17,5 +17,4 @@ main=():>int64=>{
     negative-=10m
     $runtime_assert (negative =? 126m)
     printl"{wide} {narrow} {negative}"
-    return 0
 }

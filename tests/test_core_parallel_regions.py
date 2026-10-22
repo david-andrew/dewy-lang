@@ -34,7 +34,7 @@ fork=(n:int64):>int64=>{
  let children=''' + surface + '''
  return children[0]+children[1]
 }
-main=()=>{printl"{fork(20)}" return 0}
+main=():>void=>{printl"{fork(20)}"}
 ''')
     run = execute(output)
     assert run.returncode == 0, run.stderr

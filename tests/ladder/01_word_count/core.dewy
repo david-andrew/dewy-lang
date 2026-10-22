@@ -13,12 +13,12 @@ count_text=(text:string):>Counts=>{
     return Counts[lines words text.length]
 }
 show=(c:Counts):>string=>"{c.lines} {c.words} {c.graphemes}"
-main=():>int64=>{
+main=():>void=>{
     let input="hello world\nhello café\n"
     let argv=args()
     if argv.length >? 1 {
         let loaded=read_text(argv[1])
-        if loaded is? error {return 1}
+        if loaded is? error {exit(1)}
         input=loaded
     }
     let result=count_text(input)
@@ -29,5 +29,4 @@ main=():>int64=>{
     assert(count_text("  x\t y ").words =? 2)
     assert(count_text("no newline").lines =? 1)
     printl(show(result))
-    return 0
 }

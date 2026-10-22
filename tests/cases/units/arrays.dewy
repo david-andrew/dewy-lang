@@ -1,5 +1,5 @@
 from units import m, cm
-main=():>int64=>{
+main=():>void=>{
     let distances:array<float64 * Length>=[1m 250cm 3m]
     let snapshot=distances
     distances[0]=4m
@@ -14,5 +14,4 @@ main=():>int64=>{
     times[0]=4ms
     $runtime_assert (copy[0] =? 1ms)
     printl"{times} {copy}"
-    return 0
 }

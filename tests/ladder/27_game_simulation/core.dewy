@@ -19,7 +19,7 @@ simulate=(start:Ball frames:int64):>Ball=>{
     loop frame in [0..frames) {state=tick(state 0.125)}
     return state
 }
-main=():>int64=>{
+main=():>void=>{
     let initial=Ball[1.0 4.0]
     let final=simulate(initial 100)
     assert(final.x =? 9.0)
@@ -28,5 +28,4 @@ main=():>int64=>{
     assert(simulate(initial 100) =? final)
     assert(simulate(initial 0) =? initial)
     printl("{final.x} {final.velocity} {final.hits}")
-    return 0
 }

@@ -23,7 +23,7 @@ lookup=(index:Index key:int64):>string?=>{
     }
     return none
 }
-main=():>int64=>{
+main=():>void=>{
     let index:Index=[pages=[]]
     loop key in [9 1 7 3 5 2 8 4 6 0] {insert(@index key "v{key}")}
     loop key in [0..10) {$runtime_assert (lookup(index key) =? "v{key}")}
@@ -32,5 +32,4 @@ main=():>int64=>{
     loop page in index.pages {loop key in page.keys {all.push(key)}}
     $runtime_assert (all =? [0 1 2 3 4 5 6 7 8 9])
     printl("{index.pages.length} {lookup(index 7)}")
-    return 0
 }

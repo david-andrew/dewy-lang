@@ -426,7 +426,7 @@ values. Use `@` in both a parameter and its call to change the caller:
 
 ```dewy
 bump=(@value:int64):>void=>{value+=1}
-main=()=>{let value:int64=41 bump(@value) return value}
+main=()=>{let value:int64=41 bump(@value) printl(value)}
 ```
 
 References can name a field or array element: `bump(@point.x)`,
@@ -1044,14 +1044,14 @@ narrows explicitly: `rational<int64>(q)`, or `rational<int64>(numerator
 denominator)` like `rational(...)`, returns `rational<int64> | Overflow`.
 
 ```dewy
-main=():>int64=>{
+main=():>void=>{
     let total:rational<int64>=0
     loop i in [0..30) {
         let next=total+1/3
-        if next is? Overflow return 1
+        if next is? Overflow exit(1)
         total=next
     }
-    return if total =? 10 42 else 2
+    exit((if total =? 10 42 else 2))
 }
 ```
 
@@ -2200,8 +2200,38 @@ and then the arguments once, and gives the exception (or `none`) unchanged, or
 the call's result.
 
 `TextError` and `JsonError` belong to `error`, as do the file errors and
-`SpawnError` below. `main` still returns void or an integer exit code: handle
-exceptions there explicitly.
+`SpawnError` below.
+
+A function without a declared result type infers the kinds it throws: each
+`return` of an error and each `or_throw` adds its kinds to the result, so
+`parse=(text:string)=>{... return ParseError[...] ... return n}` gives
+`int64 | ParseError`. A declared result fixes the set instead.
+
+`main` returns `void` or the errors that reach it, an ordinary `void | E` type,
+declared or inferred. It gives no exit code: success exits 0, and a script that
+needs a particular code calls `exit(n)`. An error reaching `main` is printed on
+standard error (`error: ParseError[message="..."]`) and ends the program with
+its kind's exit code: 1, 2, 3, … in the order the kinds are declared, or as a
+declared result lists them, below 126. An error type with an `exit_code` field
+pins its own code (its default, 1 to 255). `dewy build --exit-codes file.dewy`
+prints the table without building.
+
+```dewy
+UsageError:type=type of error & [message:string]
+Offline:type=type of error & [exit_code:int64=69]
+connect=(host:string):>void|Offline=>{
+    if host =? "nowhere" return Offline[]
+    printl"connected to {host}"
+}
+main=():>void|UsageError|Offline=>{
+    let argv=args()
+    if argv.length <? 2 return UsageError["usage: fetch HOST"]
+    connect(argv[1]) or_throw
+}
+```
+
+Without arguments this prints `error: UsageError[message="usage: fetch HOST"]`
+and exits 1; `fetch nowhere` exits 69.
 
 ## Files, paths and processes
 
@@ -2211,7 +2241,7 @@ text, and `path as string` is that text too, so paths are joined by
 interpolation: `p"{root}/{name}.csv"`. There is no `join` method.
 
 ```dewy
-main=():>int64=>{
+main=():>void=>{
     let source=p"project/src/main.dewy"
     match source.read_text {
         text:string => printl(text)
@@ -2220,7 +2250,6 @@ main=():>int64=>{
     }
     printl(source.with_suffix(".udewy"))   # project/src/main.udewy
     printl(source.parent.name)             # src
-    return 0
 }
 ```
 
@@ -3152,5 +3181,5 @@ This remains a developing subset of Dewy. The earlier proof/effect system,
 automatic growth of machine integers on overflow, general structural conversions and every historical
 juxtaposition form have not been recreated.
 
-An executable’s `main` returns `void` or an integer exit code. Other result types
-are diagnosed rather than passed to the native/web entry wrapper.
+An executable’s `main` returns `void` or the errors that reach it (see
+[Errors as values](#errors-as-values)); other result types are diagnosed.

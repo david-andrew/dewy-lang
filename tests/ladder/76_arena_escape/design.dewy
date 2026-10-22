@@ -17,7 +17,7 @@ sum=(xs:array<int64>):>int64=>{
     }
     return total
 }
-main=():>int64=>{
+main=():>void=>{
     let arena=Arena[]
     let other=Arena[]
     let kept:array<Packet>=[]
@@ -58,5 +58,4 @@ main=():>int64=>{
     $runtime_assert sum(saved[4].values) =? 30
     $runtime_assert sum(saved[5].values) =? 55
     printl("{total} {sum(nested.values)} {saved.length}")
-    return 0
 }

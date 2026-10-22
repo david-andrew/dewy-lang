@@ -12,7 +12,7 @@ pop=(@r:Ring):>int64?=>{
     r.count-=1
     return value
 }
-main=():>int64=>{
+main=():>void=>{
     let ring:Ring=[]
     loop n in [1..7] {push(@ring n)}
     let snapshot=ring
@@ -27,5 +27,4 @@ main=():>int64=>{
     push(@ring 9)
     assert(pop(@ring) =? 9)
     printl(out)
-    return 0
 }

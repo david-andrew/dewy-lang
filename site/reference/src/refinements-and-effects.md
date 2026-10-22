@@ -116,7 +116,7 @@ let share = (part:int64 whole:int64):>int64 => {
     return 0
 }
 
-let main = ():>int64 => percent(1 4) + share(3 4)   # 25 + 75
+let main = ():>void => exit(percent(1 4) + share(3 4))   # 25 + 75
 ```
 
 ### Refined Results and Field Invariants
@@ -167,10 +167,10 @@ A field may declare an invariant: `let Ratio:type = [top:int64 bottom:int64<bott
 let Ratio:type = [top:int64 bottom:int64<bottom >? 0>]
 let scale = (r:Ratio):>int64 => r.top // r.bottom      # the invariant proves the division
 
-let main = ():>int64 => {
+let main = ():>void => {
     let r = Ratio(84 2)
     let q:rational<int64> = 1 / 3                        # the word rational declares the same invariant
-    return scale(r) // 42 * (9 // q.denominator)         # 3
+    exit(scale(r) // 42 * (9 // q.denominator))         # 3
 }
 ```
 
@@ -221,11 +221,11 @@ let eat_block = (src:string):>uint64<n => n <=? src.length> | none => {
     return none
 }
 
-let main = ():>int64 => {
+let main = ():>void => {
     let t:Tok = Word[text="hi"]
     let n = eat_block("[[a[[b]]c]] rest")
-    if is_word(t) and n is? uint64 { let w:Word = t  return (n transmute int64) - 11 }   # 0
-    return 1
+    if is_word(t) and n is? uint64 { let w:Word = t  exit((n transmute int64) - 11) }   # 0
+    exit(1)
 }
 ```
 
@@ -299,9 +299,9 @@ let get = (ys:array<int64> i:int64):>int64 => {
     return ys[i]                      # proven by the assertion
 }
 
-let main = ():>int64 => {
+let main = ():>void => {
     loop i in 0..2 { $assert i <? 3 }
-    return get(xs 1)                  # 2
+    exit(get(xs 1))                  # 2
 }
 ```
 

@@ -1,10 +1,9 @@
 # A path literal names a module file: the same `p"..."` as a Path value.
 from p"../../../tests/fixtures/programs/path_module.dewy" import greeting
 import p"../../../tests/fixtures/programs/path_module.dewy" as module
-main=():>int64=>{
+main=():>void=>{
     printl(greeting("paths"))
     printl(module.answer())
     let source=p"../../../tests/fixtures/programs/path_module.dewy"
     printl"{source.name} {source.suffix} {source.parent.name}"
-    return 0
 }

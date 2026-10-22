@@ -9,7 +9,7 @@ describe=(outcome:string|int64|bool|array<uint8>|array<string>|FileNotFound|File
     if outcome is? FileError return "FileError"
     return "ok"
 }
-main=():>int64=>{
+main=():>void=>{
     let dir=p"case_path_errors"
     let missing=p"{dir}/missing.txt"
     printl(missing.read_text is? FileNotFound)
@@ -37,5 +37,4 @@ main=():>int64=>{
         <FileNotFound> => printl"no such file: {missing.name}"
         _ => printl"cannot read {missing}"
     }
-    return 0
 }

@@ -114,7 +114,7 @@ predict=(y:NDArray<float64>):>array<int64>=>[loop r in [0..rows(y)) {
 
 two=(n:int64):>string=>if n <? 10 "0{n}" else "{n}"
 
-main=():>int64=>{
+main=():>void=>{
     let device='best'
     let train=make_dataset(2026 120 NOISE)
     let test=make_dataset(99 60 NOISE)
@@ -163,5 +163,4 @@ main=():>int64=>{
         let shown=[loop k in [0..CLASSES) format(y[r k] ".3f")]
         printl("probe ({format(probes[r 0] ".1f")}, {format(probes[r 1] ".1f")}) -> {shown.join(" ")} class {classes[r]}")
     }
-    return 0
 }

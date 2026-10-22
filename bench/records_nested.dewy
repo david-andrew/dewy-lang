@@ -50,12 +50,11 @@ kernel = (@particles:array<Particle> rounds:int64):>int64 => {
     return hash
 }
 
-main = (args:array<string>):>int64 => {
+main = (args:array<string>):>void => {
     let count=size_argument(args 100000)
     let particles=populate(count)
     let started=clock()
     let result=kernel(@particles 50)
     let finished=clock()
     printl"{result} {finished-started}"
-    return 0
 }

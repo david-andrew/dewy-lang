@@ -11,7 +11,7 @@ step=(body:Body dt:float64*Time gravity:Acceleration):>Body=> {
 }
 energy=(body:Body gravity:Acceleration)=>body.mass*body.speed^2/2+body.mass*gravity*body.height
 travel=(speed elapsed)=>speed*elapsed
-main=():>int64=> {
+main=():>void=> {
     let gravity:Acceleration=10m/s^2
     let body=Body[0m 72km/hour 2kg]
     let saved=body
@@ -57,5 +57,4 @@ main=():>int64=> {
     let momentum=saved.mass*saved.speed
     assert(momentum/(kg*m/s) =? 40.0)
     printl("{format(maximum/m ".3f")} {format(initial/(kg*m^2/s^2) ".3f")} {format(reported_impulse ".3f")} {distance/m}")
-    return 0
 }

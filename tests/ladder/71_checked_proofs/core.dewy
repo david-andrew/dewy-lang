@@ -12,7 +12,7 @@ chain=(a:int64):>int64=>{
     $runtime_assert a <=? c
     return width(a c)
 }
-main=():>int64=>{
+main=():>void=>{
     let total:int64=0
     loop a in [0..64) {
         total+=chain(a)
@@ -40,5 +40,4 @@ main=():>int64=>{
     $runtime_assert chain(50) =? 2
     $runtime_assert chain(25) =? 2
     printl("{total}")
-    return 0
 }

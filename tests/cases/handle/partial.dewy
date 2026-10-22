@@ -1,7 +1,7 @@
 plus=(a:int64 b:int64):>int64=>a+b
 scaled=(a:int64 scale:int64=10):>int64=>a*scale
 Worker:type=[on_event:<(x:int64 y:int64):>int64>]
-main=():>int64=>{
+main=():>void=>{
     let add5=@plus(5)
     printl(add5(1))
     printl((@plus)(4 5))
@@ -19,5 +19,4 @@ main=():>int64=>{
     let early=@plus(count(1))
     printl(calls)
     printl(early(1))
-    return 0
 }

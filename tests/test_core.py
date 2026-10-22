@@ -273,12 +273,12 @@ def test_core_unused_global_hint_scope(compiler, tmp_path, scope):
     (tmp_path / 'other.dewy').write_text('let score=0\nkeep=()=>42\n')
     programs = {
         'unrelated': ('from p"other.dewy" import keep\n'
-                      'main=()=>{let score=1 let scroe=2 return keep()}'),
-        'visible': 'let score=0\nmain=()=>{let scroe=1 return 42}',
+                      'main=():>void=>{let score=1 let scroe=2 exit(keep())}'),
+        'visible': 'let score=0\nmain=():>void=>{let scroe=1 exit(42)}',
         'shadowed': ('let score=0\nprobe=(score:int64)=>{let scroe=1 return 42}\n'
-                     'main=()=>probe(9)'),
+                     'main=():>void=>exit(probe(9))'),
         'alias': ('from p"other.dewy" import (score as points), keep\n'
-                  'main=()=>{let poitns=1 return keep()}'),
+                  'main=():>void=>{let poitns=1 exit(keep())}'),
     }
     source = tmp_path / 'main.dewy'
     source.write_text(programs[scope])
@@ -416,7 +416,7 @@ def test_core_named_module_languages(compiler, tmp_path, extension, both):
         (tmp_path / f'helper.{extension}').write_text('answer=()=>42' if extension == 'dewy' else 'answer = (): 42')
     source = tmp_path / f'main.{extension}'
     if extension == 'dewy':
-        source.write_text(f'from helper import answer\nmain=()=>if answer() =? {expected} 42 else 1')
+        source.write_text(f'from helper import answer\nmain=():>void=>exit((if answer() =? {expected} 42 else 1))')
     else:
         source.write_text(f'from helper import answer\nmain = (): if answer() == {expected}: 42 else: 1')
     binary = tmp_path / 'imports'
@@ -433,7 +433,7 @@ def test_core_bundled_module_path(compiler, tmp_path, extension):
     (tmp_path / 'bigint.jo').write_text('bigint = (value): 0')
     source = tmp_path / f'main.{extension}'
     if extension == 'dewy':
-        source.write_text('from p"@lib/bigint.dewy" import bigint\nmain=()=>if bigint(42).to_int64() =? 42 42 else 1')
+        source.write_text('from p"@lib/bigint.dewy" import bigint\nmain=():>void=>exit((if bigint(42).to_int64() =? 42 42 else 1))')
     else:
         source.write_text('from "@lib/bigint.dewy" import bigint\nmain = (): if bigint(42).to_int64() == 42: 42 else: 1')
     binary = tmp_path / 'bundled'
@@ -1473,7 +1473,7 @@ def test_core_function_reachability(compiler, tmp_path, target):
 def test_core_dictionary_presence_ir(compiler, tmp_path, target):
     source = tmp_path / 'presence.dewy'
     source.write_text('''probe=(values:dict<int64 array<int64>> key:int64):>bool=>values.get(key) is? none
-main=()=>if probe([1->[42]] 1) 1 else 42
+main=():>void=>exit((if probe([1->[42]] 1) 1 else 42))
 ''')
     flags = ['--ir', *(['--target', 'wasm32'] if target == 'wasm' else [])]
     built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'presence', *flags],
@@ -2244,7 +2244,7 @@ return 0
 def test_core_metal_magnitude(compiler, tmp_path, release):
     # Source cross-compilation only: execution requires Apple hardware.
     source = tmp_path / 'magnitude.dewy'
-    source.write_text('main=()=>{printl(cpu(hypot.(gpu([3.0]) gpu([4.0]))).data) return 0}')
+    source.write_text('main=():>void=>{printl(cpu(hypot.(gpu([3.0]) gpu([4.0]))).data)}')
     shaders = tmp_path / 'shaders'
     shaders.mkdir()
     env = {key: value for key, value in os.environ.items()
@@ -2266,10 +2266,9 @@ def test_core_metal_magnitude(compiler, tmp_path, release):
 def test_core_metal_unary_plus(compiler, tmp_path, release):
     # Cross-compilation checks generated source; executing Metal needs macOS.
     source = tmp_path / 'plus.dewy'
-    source.write_text('''main=()=>{
+    source.write_text('''main=():>void=>{
 let floats=.+gpu([1.0 2.0]) let ints=.+gpu([1 -2])
 printl(cpu(floats).data) printl(cpu(ints).data)
-return 0
 }''')
     shaders = tmp_path / 'shaders'
     shaders.mkdir()
@@ -2348,7 +2347,7 @@ def test_core_numeric_cpu_feature_initializer(compiler, tmp_path, flags):
     if platform.machine().lower() not in ('x86_64', 'amd64'):
         pytest.skip('the vectorizer currently targets native x86-64')
     source = tmp_path / 'matrix.dewy'
-    source.write_text('main=()=>{let a=ones(2 2) return sum(a*a) as int64}')
+    source.write_text('main=():>void=>{let a=ones(2 2) exit(sum(a*a) as int64)}')
     binary = tmp_path / 'matrix'
     built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
@@ -2474,7 +2473,7 @@ def test_core_imports(compiler, tmp_path, extension, style):
         'name-alias': (f'from p"helper.{extension}" import twice as double', 'double(21)'),
     }
     declaration, expression = forms[style]
-    source.write_text(f'{declaration}\nmain=():>int64=>{expression}')
+    source.write_text(f'{declaration}\nmain=():>void=>{expression}')
     binary = tmp_path / 'main'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)
@@ -2602,7 +2601,7 @@ def test_core_rollback_model(compiler, tmp_path, target, release):
 def test_core_netplay_tick_warnings(compiler, tmp_path, setup, callback, start, diagnostic, target, release, at_top):
     source = tmp_path / 'tick.dewy'
     session = f'let game=netplay.session({start} {callback} players=2 me=0)'
-    program = f'{session}\nmain=()=>game.tick+42' if at_top else f'main=()=>{{{session} return game.tick+42}}'
+    program = f'{session}\nmain=()=>printl(game.tick+42)' if at_top else f'main=()=>{{{session} printl(game.tick+42)}}'
     source.write_text(f'import netplay\n{setup}\n{program}')
     flags = ['--release'] if release else []
     built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', tmp_path / 'tick', *flags],
@@ -3096,7 +3095,7 @@ def test_core_slider_controls(compiler, tmp_path, release):
 @pytest.mark.core_quick
 def test_core_check_and_format_boundary(compiler, tmp_path):
     source = tmp_path / 'main.dewy'
-    text = 'unused=()=>missing\nmain=()=>42'
+    text = 'unused=()=>missing\nmain=():>void=>exit(42)'
     source.write_text(text)
     checked = subprocess.run([compiler, 'check', source], capture_output=True,
                              text=True, timeout=10, check=False)
@@ -3104,7 +3103,7 @@ def test_core_check_and_format_boundary(compiler, tmp_path):
     formatted = subprocess.run([compiler, 'fmt', source], capture_output=True,
                                text=True, timeout=10, check=False)
     assert formatted.returncode == 0, formatted.stdout + formatted.stderr
-    assert source.read_text() == 'unused = () => missing\nmain = () => 42\n'
+    assert source.read_text() == 'unused = () => missing\nmain=():>void=>exit(42)\n'
 
 
 @pytest.mark.parametrize(('text', 'expected', 'errors'), [
@@ -3258,7 +3257,7 @@ def test_core_cli_identity(compiler):
 def test_core_build_source_counts(compiler, tmp_path):
     source = tmp_path / 'main.dewy'
     helper = tmp_path / 'helper.dewy'
-    body = 'import p"helper.dewy" as h\n# 🙂\n\nmain=():>int64=>h.answer()'
+    body = 'import p"helper.dewy" as h\n# 🙂\n\nmain=():>void=>exit(h.answer())'
     imported = 'answer=():>int64=>42\n'
     source.write_text(body)
     helper.write_text(imported)
@@ -3709,7 +3708,7 @@ def test_core_x64_compare_branch_layout(compiler, tmp_path):
     source = tmp_path / 'branches.dewy'
     source.write_text('branch_probe=(x:int64 y:int64):>void=>{\n'
                       'if x <? y printl(777)\n' + body +
-                      '\n}\nmain=()=>{branch_probe(100 200) return 42}\n')
+                      '\n}\nmain=():>void=>{branch_probe(100 200) exit(42)}\n')
     binary = tmp_path / 'branches'
     built = subprocess.run([compiler, 'build', source, '--release', '-o', binary],
                            capture_output=True, text=True, timeout=30, check=False)
@@ -4082,8 +4081,8 @@ conditional_runtime = () -> int:
 
 
 @pytest.mark.parametrize('source_text', [
-    'divide=(a:float64 b:float64)=>a/b\nmain=():>int64=>if divide(3.0 2.0) =? 1.5 42 else 1',
-    'BigInt:type=[value:int64]\n__truediv__=(a:BigInt b:BigInt)=>a.value//b.value\nmain=()=>BigInt[84]/BigInt[2]',
+    'divide=(a:float64 b:float64)=>a/b\nmain=():>void=>exit((if divide(3.0 2.0) =? 1.5 42 else 1))',
+    'BigInt:type=[value:int64]\n__truediv__=(a:BigInt b:BigInt)=>a.value//b.value\nmain=():>void=>exit(BigInt[84]/BigInt[2])',
 ], ids=['float', 'custom'])
 def test_core_division_without_exact_libraries(compiler, tmp_path, source_text):
     library = tmp_path / 'lib'
@@ -4123,9 +4122,9 @@ Rational:type=[numerator:int=0 denominator:int=1]
     (tmp_path / 'helper.dewy').write_text('const offset=1\n')
     # (a runtime divisor calls the library's `rational`; a constant folds to its `Rational`)
     bodies = {
-        'body': 'two=():>int64=>2\nmain=()=>1/two()-offset',
-        'global': 'two=():>int64=>2\nlet ratio=1/two()\nmain=()=>ratio-offset',
-        'unused-constant': 'const unused=1/2\nmain=()=>42',
+        'body': 'two=():>int64=>2\nmain=():>void=>exit(1/two()-offset)',
+        'global': 'two=():>int64=>2\nlet ratio=1/two()\nmain=():>void=>exit(ratio-offset)',
+        'unused-constant': 'const unused=1/2\nmain=():>void=>exit(42)',
     }
     source = tmp_path / 'main.dewy'
     source.write_text('from helper import offset\nprintl"main"\n' + bodies[entry] + '\n')
@@ -4184,7 +4183,7 @@ pairs = () -> (str, int[])[]: [("a", [20, 1]), ("b", [2, 19])]''')
     source = tmp_path / 'unpack.dewy'
     if mismatch:
         program = ('main=()=>{let [[first second] [_]]=[[42] [0]] return first+second}' if nested else
-                   'main=()=>{let [first second]=[42] return first+second}')
+                   'main=():>void=>{let [first second]=[42] exit(first+second)}')
     else:
         program = ('''main=()=>{let [[count text] [extra]]=helper.nested()
 let total:int64=0
@@ -4192,7 +4191,7 @@ loop [key [x y]] in helper.pairs() {total+=x+y}
 loop i in [0..2) and [key [x y]] in helper.pairs() {total+=x+y}
 if total not=? 84 return 1
 return count+text.length+extra}''' if nested else
-                   'main=()=>{let [count:float64 text:string]=helper.pair() return if count is?float64 (count as int64)+text.length else 1}')
+                   'main=():>void=>{let [count:float64 text:string]=helper.pair() exit((if count is?float64 (count as int64)+text.length else 1))}')
     if parameter:
         if mismatch:
             program = ('sum=([[first second] [_]]:array<array<int64>>):>int64=>first+second\nmain=()=>sum([[42] [0]])' if nested else
@@ -5560,7 +5559,7 @@ def test_core_text_case_bytes(compiler, tmp_path, release, target):
     arrays = [f'[{" ".join("0x\"" + row[k].hex() + "\"" for row in pairs)}]'
               for k in range(3)]
     source = tmp_path / 'case-bytes.dewy'
-    source.write_text('''main=()=>{
+    source.write_text('''main=():>void=>{
 let inputs:array<array<uint8>>=INPUTS
 let uppers:array<array<uint8>>=UPPERS
 let lowers:array<array<uint8>>=LOWERS
@@ -5569,11 +5568,11 @@ loop i in [0..inputs.length) {
     let saved=text
     let hi=upper(text)
     let lo=lower(text)
-    if bytes(hi) not=? uppers[i] return 1
-    if bytes(lo) not=? lowers[i] return 2
-    if bytes(text) not=? inputs[i] or saved not=? text return 3
+    if bytes(hi) not=? uppers[i] exit(1)
+    if bytes(lo) not=? lowers[i] exit(2)
+    if bytes(text) not=? inputs[i] or saved not=? text exit(3)
 }
-return 42
+exit(42)
 }
 '''.replace('INPUTS', arrays[0]).replace('UPPERS', arrays[1]).replace('LOWERS', arrays[2]))
     binary = tmp_path / 'case-bytes'
@@ -5852,8 +5851,8 @@ def test_core_grapheme_length_blocks(compiler, tmp_path, release, target):
 @pytest.mark.parametrize('prefix', [0, 7, 8, 15, 16, 31, 32, 65])
 def test_core_grapheme_length_invalid_tail(compiler, tmp_path, prefix):
     source = tmp_path / 'invalid.dewy'
-    source.write_text('main=()=>{let text=str_from_bytes([' + '97 '*prefix +
-                      '226 130]) return text.length}\n')
+    source.write_text('main=():>void=>{let text=str_from_bytes([' + '97 '*prefix +
+                      '226 130]) exit(text.length)}\n')
     binary = tmp_path / 'invalid'
     built = subprocess.run([compiler, 'build', source, '-o', binary],
                            capture_output=True, text=True, timeout=30)
@@ -6123,7 +6122,7 @@ main = () -> int:
 ])
 def test_core_matrix_product_tiles(compiler, tmp_path, target, flags, threads):
     source = tmp_path / 'products.dewy'
-    source.write_text('''main=()=>{
+    source.write_text('''main=():>void=>{
 loop dims in [[0 3 2] [2 0 3] [3 7 5] [9 65 513] [3 64 512] [2 66 515]] {
     let r=dims[0] let m=dims[1] let p=dims[2]
     let a=reshape([loop i in [0..r*m) ((i%17)-8) as float64] r m)
@@ -6147,7 +6146,7 @@ assert(cancellation[0 0] =? 4.0)
 let zero=reshape([float64(0.0) (-0.0) 0.0 0.0 0.0] 1 5)
 let nonfinite=reshape([INF NAN INF NAN INF] 5 1)
 assert((zero*nonfinite)[0 0] =? 0.0)
-return 42
+exit(42)
 }
 ''')
     binary = tmp_path / 'products'

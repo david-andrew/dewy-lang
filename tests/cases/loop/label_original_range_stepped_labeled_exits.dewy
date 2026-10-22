@@ -1,5 +1,5 @@
 # exit: 42
-let main = ():>int64 => {
+let main = ():>void => {
     let result:int64 = 0
     $outer
     loop i in 0,2..6 or j in 10,20..40 {
@@ -16,5 +16,5 @@ let main = ():>int64 => {
             break $outer
         }
     }
-    return result
+    exit(result)
 }

@@ -33,7 +33,7 @@ join=(parts:array<Partition>):>array<int64>=>{
     }
     return result
 }
-main=():>int64=>{
+main=():>void=>{
     let source:array<int64>=[loop i in [0..65) i-32]
     let parts=split(source 8)
     let completed:array<Partition>=[]
@@ -59,5 +59,4 @@ main=():>int64=>{
     $runtime_assert parts[0].begin =? 0
     $runtime_assert parts[8].stop =? 65
     printl("{checksum} {parts.length}")
-    return 0
 }

@@ -16,7 +16,7 @@ roundtrip=(text:string):>bool=>{
     let encoded=to_csv(rows)
     return csv_rows(encoded) =? rows
 }
-main=():>int64=>{
+main=():>void=>{
     let input="region,units,price\nNorth,2,3.5\nSouth,4,1.25\n"
     let quoted="name,value\n\"east, coast\",7\n"
     $runtime_assert (roundtrip(input))
@@ -26,5 +26,4 @@ main=():>int64=>{
     $runtime_assert (summarize("region,units,price\n") =? 0.0)
     let rows=csv_rows(input)
     printl("{rows.length-1} {summarize(input)}")
-    return 0
 }

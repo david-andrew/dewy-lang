@@ -29,7 +29,7 @@ recover=(bytes:array<uint8>):>dict<int64 int64>=> {
     }
     return store
 }
-main=():>int64=> {
+main=():>void=> {
     let log:array<uint8>=[]
     loop record in [encode(1 10) encode(2 20) encode(1 30) encode(2 255) encode(3 40)]  {
         loop byte in record  {
@@ -47,11 +47,11 @@ main=():>int64=> {
         let path="crash.wal"
         let written=write_bytes(path prefix)
         if written is? error  {
-            return 1
+            exit(1)
         }
         let loaded=read_bytes(path)
         if loaded is? error  {
-            return 2
+            exit(2)
         }
         let state=recover(loaded)
         cases+=1
@@ -75,8 +75,7 @@ main=():>int64=> {
     assert(recovered.get(2) =? 20)
     let removed=remove_file("crash.wal")
     if removed is? error  {
-        return 3
+        exit(3)
     }
     printl("{cases} {total} {full.length}")
-    return 0
 }

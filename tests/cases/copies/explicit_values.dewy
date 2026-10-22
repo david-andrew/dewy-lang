@@ -1,7 +1,7 @@
 # quick
 Record:type=[items:array<int64>]
 make=(@calls:int64):>Record=>{calls+=1 return Record[[3 4]]}
-main=():>int64=>{
+main=():>void=>{
     let original:array<int64>=[1 2]
     let copied=original.copy
     copied[0]=9
@@ -23,5 +23,4 @@ main=():>int64=>{
     let more=members.copy
     more.push(2)
     $runtime_assert 2 not in? members and 2 in? more
-    return 0
 }

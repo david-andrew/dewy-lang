@@ -80,7 +80,7 @@ decode64=(text:string):>array<uint8>|Invalid=> {
     }
     return out
 }
-main=():>int64=> {
+main=():>void=> {
     let cases=0
     let length=0
     loop n in [0..130)  {
@@ -88,7 +88,7 @@ main=():>int64=> {
         let encoded=encode64(input)
         let decoded=decode64(encoded)
         if decoded is? Invalid  {
-            return 1
+            exit(1)
         }
         $runtime_assert (decoded =? input)
         cases+=1
@@ -99,5 +99,4 @@ main=():>int64=> {
     }
     $runtime_assert (encode64(bytes("foobar")) =? "Zm9vYmFy")
     printl("{cases} {length} {encode64(bytes("hello"))}")
-    return 0
 }

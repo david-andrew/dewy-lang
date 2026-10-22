@@ -121,7 +121,7 @@ def test_core_parallel_values(compiler, tmp_path, name, release, target):
 @pytest.mark.parametrize('body', [
     'let total=0\nmain=()=>{parallel_range(10 (i:int64)=>{total+=i return i}); return 0}',
     'main=()=>{let total=0 parallel_range(10 (i:int64)=>{total+=i return i}); return 0}',
-    'let total=0\nchange=(i:int64)=>{total+=i return i}\nmain=()=>{parallel_range(10 @change); return 0}',
+    'let total=0\nchange=(i:int64)=>{total+=i return i}\nmain=():>void=>{parallel_range(10 @change);}',
     'let total:array<int64>=[]\nmain=()=>{parallel_range(10 (i:int64)=>{total.push(i) return i}); return 0}',
 ])
 def test_core_parallel_rejects_shared_writes(compiler, tmp_path, body):

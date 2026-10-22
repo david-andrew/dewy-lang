@@ -41,7 +41,7 @@ use_it=(f:<(x:int64):>int64 & no_effects>):>int64=>f(1)
 Holder:type=[f:<(x:int64):>int64>]
 ''' + f'make=():><(x:int64):>int64>=>@{selected}\n'
       + f'add=(a:int64 x:int64):>int64=>{{return {selected}(a+x)-1}}\n'
-      + 'main=():>int64=>{\n' + FLOWS[flow].replace('FUNC', selected) + '\n}\n')
+      + 'main=():>void=>exit(entry()) entry=():>int64=>{\n' + FLOWS[flow].replace('FUNC', selected) + '\n}\n')
     result = compile_source(compiler, source, tmp_path, mode)
     assert (result.returncode != 0) == forbidden, result.stdout + result.stderr
     if forbidden:
@@ -67,7 +67,7 @@ Forward:type=<T E:Effect>(Action<E>)
 callback=(x:int64):>int64 & ''' + effect + '''<Filesystem>=>x+1
 invoke=<E:Effect>(f:Forward<int64 E>):>int64 & E=>f(1)
 restricted=(f:Action<no mutates<Disk>>):>int64 & no mutates<Filesystem>=>invoke(@f)
-main=():>int64=>restricted(@callback)
+main=():>void=>exit(entry()) entry=():>int64=>restricted(@callback)
 ''')
     result = compile_source(compiler, source, tmp_path, mode)
     assert (result.returncode != 0) == forbidden, result.stdout + result.stderr
@@ -94,7 +94,7 @@ def test_effect_kind_errors(compiler, tmp_path, declaration, message):
     elif declaration.startswith('Bad:type=<T>'): use = 'let invalid:Bad<int64>\n'
     elif declaration.startswith('bad=<E:Effect>'): use = 'bad<no_effects>(1)\n'
     source.write_text('Filesystem:type=[]\nAction:type=<E:Effect>(<(x:int64):>int64 & E>)\n'
-                      + declaration + '\nmain=():>int64=>{\n' + use + 'return 0\n}\n')
+                      + declaration + '\nmain=():>void=>exit(entry()) entry=():>int64=>{\n' + use + 'return 0\n}\n')
     result = compile_source(compiler, source, tmp_path, 'check')
     assert result.returncode != 0, result.stdout + result.stderr
     assert message in result.stderr, result.stderr
@@ -108,7 +108,7 @@ def test_callback_place_is_not_nonlocal_remainder(compiler, tmp_path, explicit_p
     source.write_text('forward=<E:Effect>(f:<(@x:int64):>void & ' + permission
                       + 'E> @y:int64):>void & ' + wrapper_permission + 'E=>f(@y)\n'
                       'mutator=(@x:int64):>void & mutates<x>=>{x=7}\n'
-                      'main=():>int64=>{let cell:int64=0; forward(@mutator @cell); return cell}\n')
+                      'main=():>void=>{let cell:int64=0; forward(@mutator @cell); exit(cell)}\n')
     result = compile_source(compiler, source, tmp_path, 'check')
     assert (result.returncode == 0) == explicit_place, result.stderr
     if not explicit_place:
@@ -125,7 +125,7 @@ accept_any=(cb:Plain):>int64=>cb(1)
 require_pure=(cb:Pure):>int64=>cb(1)
 with_pure=(f:<(cb:Pure):>int64>):>int64=>f(@pure)
 with_any=(f:<(cb:Plain):>int64>):>int64=>f(@pure)
-main=():>int64=>''' + ('with_any(@require_pure)' if forbidden else 'with_pure(@accept_any)') + '\n')
+main=():>void=>exit(entry()) entry=():>int64=>''' + ('with_any(@require_pure)' if forbidden else 'with_pure(@accept_any)') + '\n')
     result = compile_source(compiler, source, tmp_path, 'default')
     assert (result.returncode != 0) == forbidden, result.stdout + result.stderr
     if not forbidden:
@@ -137,7 +137,7 @@ def test_closure_environment_inventory(compiler, tmp_path, captured):
     source = tmp_path / 'environment.dewy'
     capture = '($capture offset x:int64)' if captured else '(x:int64)'
     body = 'x+offset' if captured else 'x+1'
-    source.write_text('main=():>int64=>{let offset:int64=1\nlet f=' + capture
+    source.write_text('main=():>void=>{let offset:int64=1\nlet f=' + capture
                       + ':>int64 & no_effects=>' + body + '\nreturn f(1)}\n')
     result = compile_source(compiler, source, tmp_path, 'default')
     assert (result.returncode != 0) == captured, result.stdout + result.stderr
@@ -154,7 +154,7 @@ def test_reassignment_joins_declared_rows(compiler, tmp_path, constrained):
 pure=(x:int64):>int64 & no_effects=>x+1
 bad=(x:int64):>int64 & reads<shared> & mutates<shared>=>{shared+=x; return x+1}
 invoke=(f:<(x:int64):>int64 & no_effects>):>int64=>f(1)
-main=():>int64=>{let f=@pure; f=@bad; return '''
+main=():>void=>exit(entry()) entry=():>int64=>{let f=@pure; f=@bad; return '''
                       + ('invoke(@f)' if constrained else 'f(1)') + '}\n')
     result = compile_source(compiler, source, tmp_path, 'default')
     assert (result.returncode != 0) == constrained, result.stdout + result.stderr
@@ -169,7 +169,7 @@ def test_demanded_nested_handle_summary(compiler, tmp_path):
     source.write_text('''leaf=(x:int64):>int64=>x+1
 wrapper=(x:int64):>int64=>{let f=@leaf; return f(x)}
 invoke=(f:<(x:int64):>int64 & no_effects>):>int64=>f(1)
-main=():>int64=>invoke(@wrapper)
+main=():>void=>exit(entry()) entry=():>int64=>invoke(@wrapper)
 ''')
     result = compile_source(compiler, source, tmp_path, 'default')
     assert result.returncode == 0, result.stdout + result.stderr
@@ -185,7 +185,7 @@ Action:type=<E:Effect>(<():>int64 & E>)
 first=():>int64 & reads<Filesystem>=>20
 second=():>int64 & mutates<Database>=>22
 twice=<E:Effect>(a:Action<E> b:Action<E>):>int64 & E=>a()+b()
-main=():>int64=>twice(@first @second)
+main=():>void=>exit(entry()) entry=():>int64=>twice(@first @second)
 ''')
     result = compile_source(compiler, source, tmp_path, mode)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -202,7 +202,7 @@ def test_qualified_resources_remain_nominal(compiler, tmp_path, same_resource):
 Filesystem:type=[]
 reader=():>int64 & reads<resources.Filesystem>=>42
 invoke=(f:<():>int64 & reads<''' + permission + '''>>):>int64=>f()
-main=():>int64=>invoke(@reader)
+main=():>void=>exit(entry()) entry=():>int64=>invoke(@reader)
 ''')
     result = compile_source(compiler, source, tmp_path, 'check')
     assert (result.returncode == 0) == same_resource, result.stdout + result.stderr
@@ -221,7 +221,7 @@ Holder:type=[f:Pure]
                                       f'hidden = () -> {result_type}: forged()\n')
     source = tmp_path / 'extern.dewy'
     source.write_text('from p"foreign.jo" import hidden\n'
-                      'main=():>int64=>{let value=hidden(); return 0}\n')
+                      'main=():>void=>exit(entry()) entry=():>int64=>{let value=hidden(); return 0}\n')
     result = compile_source(compiler, source, tmp_path, 'check')
     assert result.returncode != 0, result.stdout + result.stderr
     assert 'extern callable effect contracts require a checked implementation' in result.stderr
@@ -233,7 +233,7 @@ def test_explicit_row_is_not_widened(compiler, tmp_path):
 first=():>int64 & no_effects=>20
 second=():>int64 & reads<Filesystem>=>22
 twice=<E:Effect>(a:<():>int64 & E> b:<():>int64 & E>):>int64 & E=>a()+b()
-main=():>int64=>twice<no_effects>(@first @second)
+main=():>void=>exit(entry()) entry=():>int64=>twice<no_effects>(@first @second)
 ''')
     result = compile_source(compiler, source, tmp_path, 'check')
     assert result.returncode != 0, result.stdout + result.stderr

@@ -52,7 +52,7 @@ probe=(at:int64):>int64=>{
  let final=read(box at)
  return final.value+original.value
 }
-main=(args:array<string>):>int64=>{return probe(args.length-1)}
+main=(args:array<string>):>void=>{exit(probe(args.length-1))}
 ''')
     binary = tmp_path / 'checked'
     built = subprocess.run([compiler, 'build', source, '--ir', '--target', target_name(target),

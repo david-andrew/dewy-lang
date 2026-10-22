@@ -30,7 +30,7 @@ let churn = (depth:int64):>int64 => {
     if depth >? 0 { return churn(depth - 1) + junk.length }
     return junk.length
 }
-let main = ():>int64 => {
+let main = ():>void => {
     let xs = build(5)
     let b = boxed(3)
     let rounds:int64 = 0
@@ -39,5 +39,5 @@ let main = ():>int64 => {
     let total:int64 = 0
     loop x in xs { total += x }          # 12 + 11 + ... = 12*13/2 = 78
     loop y in b.items { total += y }     # 3 + 4 = 7
-    return total + twice(1) - 34         # 66 + 7 + 3 - 34 = 42
+    exit(total + twice(1) - 34)         # 66 + 7 + 3 - 34 = 42
 }

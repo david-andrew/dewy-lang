@@ -9,7 +9,7 @@ kernel=(rows:array<Row> count:int64):>int64=>{
     loop i in [0..count) {total+=score(rows[i%128] i%4)}
     return total
 }
-main=(args:array<string>):>int64=>{
+main=(args:array<string>):>void=>{
     let count=size_argument(args 10000000)
     let rows:array<Row>=[]
     loop i in [0..128) {rows.push(Row[[i i+1 i+2 i+3] i*3])}
@@ -17,5 +17,4 @@ main=(args:array<string>):>int64=>{
     let result=kernel(rows count)
     let stop=clock()
     printl"{result} {stop-start}"
-    return 0
 }

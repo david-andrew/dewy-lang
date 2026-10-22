@@ -1,13 +1,13 @@
 let choose = (flag:bool):>int64|none =>
     if flag 40 else none
 
-let main = ():>int64 => {
+let main = ():>void => {
     let original:int64|none = choose(true)
     let copy:int64|none = original
     copy = none
     if original is? int64 {
-        return original + 2
+        exit(original + 2)
     } else {
-        return 0
+        return
     }
 }

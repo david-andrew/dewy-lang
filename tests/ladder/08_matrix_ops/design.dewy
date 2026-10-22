@@ -7,7 +7,7 @@ residual=(matrix:NDArray<float64> x:array<float64> b:array<float64>):>float64=>{
     }
     return total
 }
-main=():>int64=>{
+main=():>void=>{
     let a=reshape<float64>([3.0 1.0 1.0 2.0] 2 2)
     let b:array<float64>=[9.0 8.0]
     let solution=solve(a b)
@@ -27,5 +27,4 @@ main=():>int64=>{
     $runtime_assert (transposed.data =? saved.data)
     $runtime_assert (close(det(saved) 5.0))
     printl("{solution} {det(saved)}")
-    return 0
 }

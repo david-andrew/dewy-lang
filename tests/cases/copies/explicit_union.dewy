@@ -10,7 +10,7 @@ exercise=(value:Payload):>void=>{
     value.copy;
 }
 optional=(value:Box?):>Box?=>value.copy
-main=():>int64=>{
+main=():>void=>{
     let array:array<string>=['original']
     exercise(Box[['original']]) exercise(array)
     exercise('text') exercise(42) exercise(none)
@@ -18,5 +18,4 @@ main=():>int64=>{
     $runtime_assert box isnt? none
     $runtime_assert box.items.length=?1
     $runtime_assert optional(none) is? none
-    return 0
 }

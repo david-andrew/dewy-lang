@@ -12,7 +12,7 @@ run_events=(events:array<Event>):>array<string>=>{
     }
     return out
 }
-main=():>int64=>{
+main=():>void=>{
     let events=[Event["flush" 30] Event["read" 5] Event["write" 10]]
     let ordered=run_events(events)
     assert(ordered =? ["read" "write" "flush"])
@@ -27,5 +27,4 @@ main=():>int64=>{
     let empty:array<Event>=[]
     assert(run_events(empty).length =? 0)
     printl(ordered)
-    return 0
 }

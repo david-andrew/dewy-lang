@@ -1,9 +1,8 @@
 # Angle brackets group a type, as a function type in an annotation.
 apply=(items:array<int64> callback:<(value:int64):>int64>):>array<int64>=>[loop item in items callback(item)]
-main=():>int64=>{
+main=():>void=>{
     let table:dict<string <(x:int64):>int64>>=["double"->(x:int64)=>x*2]
     let maybe:<int64|string>?=none
     printl(apply([1 2 3] table["double"]))
     printl(maybe is? none)
-    return 0
 }

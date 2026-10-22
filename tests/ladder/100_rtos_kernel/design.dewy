@@ -84,7 +84,7 @@ summary=(k:Kernel names:array<string>):>void=>{
     printl("pool {k.pool.available}/{NBLOCK} free, arena peak {k.arena.peak}/{ARENA}, mailbox peaks {peaks.join(" ")}, trace dropped {k.log.dropped}")
 }
 
-main=():>int64=>{
+main=():>void=>{
     let lines:array<string>=[]
     loop true {
         let line=read_line()
@@ -94,7 +94,7 @@ main=():>int64=>{
     let script=parse_script(lines)
     if script is? ScriptError {
         printl("script line {script.line}: {script.message}")
-        return 1
+        exit(1)
     }
     let k:Kernel=[
         now=0 tasks=[] ntasks=0 code=[] ncode=0 mutexes=[] boxes=[]
@@ -107,7 +107,7 @@ main=():>int64=>{
     let names=install(@k script)
     if names is? ScriptError {
         printl("script: {names.message}")
-        return 1
+        exit(1)
     }
     printl("boot: {names.length} tasks, {k.ncode} program words, run {script.run} ticks")
     loop now in [0..script.run) {
@@ -118,5 +118,4 @@ main=():>int64=>{
         drain(@k names)
     }
     summary(k names)
-    return 0
 }

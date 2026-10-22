@@ -28,7 +28,7 @@ correlation = (xs:array<float64> ys:array<float64>):>float64 => {
     let sxy = 0.0
     let sxx = 0.0
     let syy = 0.0
-    loop [x y] in zip(xs ys) {
+    loop x in xs and y in ys {
         sxy += (x - mx) * (y - my)
         sxx += (x - mx)^2
         syy += (y - my)^2

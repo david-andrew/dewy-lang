@@ -1,0 +1,16 @@
+# exit: 2
+# quick
+# An error reaching main is printed and gives its kind's exit code: 1, 2, ... in the
+# order the kinds are declared (here inferred from the returns and or_throw).
+Bad:type=type of error
+Worse:type=type of error & [why:string]
+check=(x:int64)=>{
+    if x >? 3 return Bad
+    if x >? 2 return Worse["big"]
+    return x
+}
+main=()=>{
+    printl(check(1) or_throw)
+    printl(check(3) or_throw)
+    printl("not reached")
+}

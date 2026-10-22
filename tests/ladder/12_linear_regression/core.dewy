@@ -17,7 +17,7 @@ train=(xs:array<float64> ys:array<float64> epochs:int64):>array<float64>=>{
     }
     return [w b]
 }
-main=():>int64=>{
+main=():>void=>{
     let xs:array<float64>=[-2.0 -1.0 0.0 1.0 2.0]
     let ys:array<float64>=[-3.0 -1.0 1.0 3.0 5.0]
     let weights=train(xs ys 1000)
@@ -28,5 +28,4 @@ main=():>int64=>{
     }
     assert(xs[0] =? -2.0)
     printl("{format(weights[0] ".4f")} {format(weights[1] ".4f")}")
-    return 0
 }

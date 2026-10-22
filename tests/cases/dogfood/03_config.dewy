@@ -117,12 +117,12 @@ show = (v:Value):>string => match v {
     x:Str => "\"{x.s}\""
     x:Bool => if x.b "true" else "false"
     x:List => "[{[loop i in x.items show(i)].join(", ")}]"
-    x:Obj => "\{{[loop [k v] in zip(x.keys x.vals) "{k}: {show(v)}"].join(", ")}\}"
+    x:Obj => "\{{[loop k in x.keys and v in x.vals "{k}: {show(v)}"].join(", ")}\}"
     _ => "null"
 }
 
 lookup = (o:Obj key:string):>Value|none => {
-    loop [k v] in zip(o.keys o.vals) { if k =? key return v }
+    loop k in o.keys and v in o.vals { if k =? key return v }
     return none
 }
 

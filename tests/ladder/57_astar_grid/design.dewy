@@ -48,7 +48,7 @@ search=(grid:array<int64> width:int64 start:int64 goal:int64):>array<int64>=> {
     }
     return []
 }
-main=():>int64=> {
+main=():>void=> {
     let width=32
     let grid:array<int64>=[loop i in [0..1024) 0]
     loop y in [0..31)  {
@@ -79,5 +79,4 @@ main=():>int64=> {
         sum+=grid[node]
     }
     printl("{path.length-1} {path[0]} {path[path.length-1]} {sum}")
-    return 0
 }

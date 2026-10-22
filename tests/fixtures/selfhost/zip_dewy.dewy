@@ -1,13 +1,13 @@
 # The compiler's zip.dewy: `zip out.zip file...` writes the named files.
 from p"../../../compiler/zip.dewy" import write_zip
 
-main=():>int64=>{
+main=():>void=>{
     let arguments=args()
     let names:array<string>=[]
     let contents:array<array<uint8>>=[]
     loop i in [2..arguments.length) {
         let data=read_bytes(arguments[i])
-        if not (data is? array<uint8>) {return 1}
+        if not (data is? array<uint8>) {exit(1)}
         names.push(arguments[i])
         contents.push(data)
     }
