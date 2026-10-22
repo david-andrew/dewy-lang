@@ -24,16 +24,19 @@ pu_done: bool[]                 # unit -> parsed
 pm_exports: {int: int[]}        # module -> its units with exports: parsed once it is in use
 # the names the index found, by their bytes (open addressing): each entry's first sight, its hash,
 # and the units declaring it (in module and file order), parsed once the name is asked for
-pn_slots: int[]
-pn_file: int[]
-pn_at: int[]
-pn_len: int[]
-pn_hash: int[]
-pn_post: int[]                  # entry -> its first posting (a unit, then the next posting), or -1
-pn_last: int[]
-post_unit: int[]
-post_next: int[]
-pn_done: bool[]
+struct PnEntry:
+    hash: int
+    at: *u8                     # the name's bytes (in its source, which lives as long as the compile)
+    len: int
+    post: i32                   # its first posting (a unit, then the next posting), or -1
+    last: i32
+    done: bool
+struct PnPost:
+    unit: i32
+    next: i32
+pn_slots: i32[]
+pn_entries: PnEntry[]
+pn_posts: PnPost[]
 pn_pending = 0
 pn_seen: bool[]                 # by name: looked for in the index already
 prelude_new_decls: int[]        # declarations parsed on demand, in that order (dewy_methods.jo)
@@ -70,48 +73,46 @@ defer_prelude = (path: str, sub: str) -> bool:
                 pm_exports[mi] = xs
             p = data(src!)
             loop x in [su_name0[u]..su_name0[u + 1]):
-                e = pn_entry(fi, p, su_name_at[x], su_name_len[x])
-                if pn_last[e] < 0 or post_unit[pn_last[e]] != u:
-                    post_unit.push(u)
-                    post_next.push(-1)
-                    k = post_unit.len() - 1
-                    if pn_last[e] < 0: pn_post[e] = k
-                    else: post_next[pn_last[e]] = k
-                    pn_last[e] = k
+                e = pn_entry(p + su_name_at[x], su_name_len[x])
+                last = int(pn_entries[e].last)
+                if last < 0 or int(pn_posts[last].unit) != u:
+                    k = pn_posts.len()
+                    pn_posts.push(PnPost(i32(u), -1))
+                    if last < 0: pn_entries[e].post = i32(k)
+                    else: pn_posts[last].next = i32(k)
+                    pn_entries[e].last = i32(k)
     modules[mi].decls = prelude_parse_units(eager)
     ic_restore(icb)
     true
 
-# The index entry of the name at p[at..at + n) of file f, made if it is new
-pn_entry = (f: int, p: *u8, at: int, n: int) -> int:
-    if pn_slots.len() == 0: pn_slots = fill(0, 1 << 13)
-    h = hash_bytes(p + at, n)
+# The index entry of the name at p[0..n), made if it is new
+pn_entry = (p: *u8, n: int) -> int:
+    if pn_slots.len() == 0: pn_slots = fill(i32(0), 1 << 13)
+    h = hash_bytes(p, n)
     mask = pn_slots.len() - 1
     i = h & mask
+    slots = data(pn_slots)
+    entries = data(pn_entries)
     loop true:
-        e = pn_slots[i]
+        e = int(slots[i])
         if e == 0: break
         e -= 1
-        if pn_hash[e] == h and pn_len[e] == n and __mem_eq(data(files[pn_file[e]].src) + pn_at[e], p + at, n): return e
+        if entries[e].hash == h and entries[e].len == n and __mem_eq(entries[e].at, p, n): return e
         i = (i + 1) & mask
-    e = pn_hash.len()
-    pn_file.push(f)
-    pn_at.push(at)
-    pn_len.push(n)
-    pn_hash.push(h)
-    pn_post.push(-1)
-    pn_last.push(-1)
-    pn_done.push(false)
+    e = pn_entries.len()
+    pn_entries.push(PnEntry(h, p, n, -1, -1, false))
     pn_pending += 1
-    pn_slots[i] = e + 1
-    if pn_hash.len() * 2 > pn_slots.len():
+    slots[i] = i32(e + 1)
+    if pn_entries.len() * 2 > pn_slots.len():
         # (grown: every entry placed again)
-        pn_slots = fill(0, pn_slots.len() * 2)
+        pn_slots = fill(i32(0), pn_slots.len() * 2)
         mask = pn_slots.len() - 1
-        loop k in [0..pn_hash.len()):
-            j = pn_hash[k] & mask
-            loop pn_slots[j] != 0: j = (j + 1) & mask
-            pn_slots[j] = k + 1
+        slots = data(pn_slots)
+        entries = data(pn_entries)
+        loop k in [0..pn_entries.len()):
+            j = entries[k].hash & mask
+            loop slots[j] != 0: j = (j + 1) & mask
+            slots[j] = i32(k + 1)
     e
 
 # The entry of an interned name, or -1 (looked for once per name)
@@ -127,10 +128,10 @@ pn_find = (name: int) -> int:
     mask = pn_slots.len() - 1
     i = h & mask
     loop true:
-        e = pn_slots[i]
+        e = int(pn_slots[i])
         if e == 0: return -1
         e -= 1
-        if pn_hash[e] == h and pn_len[e] == n and __mem_eq(data(files[pn_file[e]].src) + pn_at[e], data(s), n): return e
+        if pn_entries[e].hash == h and pn_entries[e].len == n and __mem_eq(pn_entries[e].at, data(s), n): return e
         i = (i + 1) & mask
     -1
 
@@ -156,14 +157,14 @@ prelude_demand_units = (name: int):
     if e >= 0: prelude_demand_entry(e)
 
 prelude_demand_entry = (e: int):
-    if pn_done[e]: return
-    pn_done[e] = true
+    if pn_entries[e].done: return
+    pn_entries[e].done = true
     pn_pending -= 1
     us: int[]
-    k0 = pn_post[e]
+    k0 = int(pn_entries[e].post)
     loop k0 >= 0:
-        us.push(post_unit[k0])
-        k0 = post_next[k0]
+        us.push(int(pn_posts[k0].unit))
+        k0 = int(pn_posts[k0].next)
     icb = ic_switch(IC_LOAD, IC_LIB)
     k = 0
     loop k < us.len():
@@ -202,7 +203,7 @@ prelude_demand_entry = (e: int):
 
 # Every unit still unparsed (a diagnostic listing every name, an explicit import of a whole module)
 prelude_demand_all = ():
-    loop e in [0..pn_hash.len()): prelude_demand_entry(e)
+    loop e in [0..pn_entries.len()): prelude_demand_entry(e)
 
 # Names the compiler reads from the prelude map directly (prelude.get(intern("...")) and
 # rt_global): registered with their modules from the start (tests/test_prelude_loading.py keeps

@@ -18,10 +18,21 @@ names: str[]
 name_hash: int[]
 name_tab: i32[]          # open addressing over name ids (+1; 0 = empty)
 
+# (eight bytes at a time: words, then the last eight overlapping; a short name in at most two
+# reads. Names are mostly short, so this is a handful of multiplies, not one per byte.)
 hash_bytes = (p: *u8, n: int) -> int:
-    h = -3750763034362895579                 # FNV-1a
-    loop i in [0..n): h = ((h xor int(p[i]))) * 1099511628211
-    (h xor (h >> 31))
+    h = u64(n) * 0x9E3779B97F4A7C15
+    if n > 8:
+        i = 0
+        loop i + 8 < n:
+            h = (h xor ((p + i) as *u64)[0]) * 0xBF58476D1CE4E5B9
+            h = h xor (h >> 31)
+            i += 8
+        h = h xor ((p + n - 8) as *u64)[0]
+    else if n >= 4: h = h xor u64((p as *u32)[0]) xor (u64(((p + n - 4) as *u32)[0]) << 32)
+    else if n > 0: h = h xor u64(p[0]) xor (u64(p[n >> 1]) << 8) xor (u64(p[n - 1]) << 16)
+    h = h * 0xBF58476D1CE4E5B9
+    int(h xor (h >> 32))
 
 intern = (s: str) -> int: intern_sub(s, 0, len(s))
 

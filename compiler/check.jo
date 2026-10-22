@@ -4786,47 +4786,67 @@ zonk_indexes = 0
 zonk_user_globals = 0
 
 # zonk_tree's counts for a body whose types it would leave as they are: the walk stops once it
-# has found an index and a user global, which settle both
+# has found an index and a user global, which settle both. (The counts do not depend on the order
+# the nodes are visited in: the stack is a plain buffer, read through pointers, nothing copied.)
+zs_stack: int[]
 zonk_summary = (root: int):
     if root == 0: return
-    base = zonk_stack.len()
-    zonk_stack.push(root)
+    if zs_stack.len() < 256: zs_stack.resize(256)
+    st = data(zs_stack)
+    cap = zs_stack.len()
+    st[0] = root
+    sp = 1
     index = false
     global = false
-    loop zonk_stack.len() > base:
-        n = zonk_stack.pop()
-        nd = nodes[n]
-        k = nd.kind
+    ns = data(nodes)
+    ls = data(lists)
+    loop sp > 0:
+        sp -= 1
+        n = st[sp]
+        k = ns[n].kind
         if k == .index and not index:
             zonk_indexes += 1
             index = true
             if global: break
         if k == .ident and not global:
-            if nd.aux == i32(int(SK.global)):
-                if not modules[int(globals[int(nd.sym)].mod)].is_prelude: global = true
-            else if nd.aux == i32(int(SK.local)) and int(locals[int(nd.sym)].flags) & LF_ALIAS != 0: global = true
+            if ns[n].aux == i32(int(SK.global)):
+                if not modules[int(globals[int(ns[n].sym)].mod)].is_prelude: global = true
+            else if ns[n].aux == i32(int(SK.local)) and int(locals[int(ns[n].sym)].flags) & LF_ALIAS != 0: global = true
             if global:
                 zonk_user_globals += 1
                 if index: break
         if k == .lambda: continue
-        l = int(nd.list2)
-        i = int(nd.nlist2) - 1
-        loop i >= 0:
-            x = int(lists[l + i])
-            if x != 0: zonk_stack.push(x)
-            i -= 1
-        l = int(nd.list)
-        i = int(nd.nlist) - 1
-        loop i >= 0:
-            x = int(lists[l + i])
-            if x != 0: zonk_stack.push(x)
-            i -= 1
+        n1 = int(ns[n].nlist)
+        n2 = int(ns[n].nlist2)
+        if sp + n1 + n2 + 4 > cap:
+            cap = (sp + n1 + n2 + 4) * 2
+            zs_stack.resize(cap)
+            st = data(zs_stack)
+        l = int(ns[n].list2)
+        loop i in [0..n2):
+            x = int(ls[l + i])
+            if x != 0:
+                st[sp] = x
+                sp += 1
+        l = int(ns[n].list)
+        loop i in [0..n1):
+            x = int(ls[l + i])
+            if x != 0:
+                st[sp] = x
+                sp += 1
         if k != .for_:
-            if k != .partial and nd.d != 0: zonk_stack.push(int(nd.d))
-            if nd.c != 0: zonk_stack.push(int(nd.c))
-        if nd.b != 0: zonk_stack.push(int(nd.b))
-        if nd.a != 0: zonk_stack.push(int(nd.a))
-    zonk_stack.truncate(base)
+            if k != .partial and ns[n].d != 0:
+                st[sp] = int(ns[n].d)
+                sp += 1
+            if ns[n].c != 0:
+                st[sp] = int(ns[n].c)
+                sp += 1
+        if ns[n].b != 0:
+            st[sp] = int(ns[n].b)
+            sp += 1
+        if ns[n].a != 0:
+            st[sp] = int(ns[n].a)
+            sp += 1
 
 # (pre-order, as a recursive walk would go: a, b, c, d, the lists; a for/while's -n marks the
 # end of its children. Only a type with variables in it can change, and only those are zonked.)

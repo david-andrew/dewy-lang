@@ -160,8 +160,30 @@ lx_base = 0
 
 lx_err = (off: int, msg: str): fatal(mkpos(lx_file, lx_base + off), msg)
 
+# Tokens go straight into lx_toks's zeroed slots (lx_cap of them, lx_count used): only the fields
+# that are not zero are written, and the array is cut to lx_count at the end.
+lx_slots: *Token = null
+lx_count = 0
+lx_cap = 0
+
+lx_grow = ():
+    lx_cap = lx_cap * 2 + 16
+    lx_toks.resize(lx_cap)
+    lx_slots = data(lx_toks)
+
+# the next token's slot (its fields zero), counted
+lx_next = () -> int:
+    if lx_count == lx_cap: lx_grow()
+    lx_count += 1
+    lx_count - 1
+
 lx_emit = (kind: Tok, start: int, n: int):
-    lx_toks.push(Token(kind, 0, (lx_file << 40) | (lx_base + start), i32(start), i32(n), 0, 0.0))
+    k = lx_next()
+    t = lx_slots
+    t[k].kind = kind
+    t[k].pos = (lx_file << 40) | (lx_base + start)
+    t[k].start = i32(start)
+    t[k].len = i32(n)
 
 
 lx_open_tok: int[]      # token indexes of open brackets (each gets its partner's index)
@@ -181,8 +203,8 @@ init_keywords = ():
         kw_kinds[int(v)] = true
 
 lx_last_kind = () -> Tok:
-    if lx_toks.len() == 0: return Tok.newline
-    lx_toks[lx_toks.len() - 1].kind
+    if lx_count == 0: return Tok.newline
+    lx_slots[lx_count - 1].kind
 
 lx_emit_newline = ():
     k = lx_last_kind()
@@ -195,11 +217,12 @@ lx_top_base = () -> int: (lx_ctx[lx_ctx.len() - 1] >> 1) & 0x7FFFFF
 # (op) = (
 lx_decl_line = () -> bool:
     i = lx_line_tok0
-    n = lx_toks.len()
-    if i >= n or (lx_toks[i].kind != .ident and lx_toks[i].kind != .lparen): return false
+    n = lx_count
+    t = lx_slots
+    if i >= n or (t[i].kind != .ident and t[i].kind != .lparen): return false
     k = i + 1
     loop k + 1 < n and k < i + 16:
-        if lx_toks[k].kind == .assign: return lx_toks[k + 1].kind == .lparen
+        if t[k].kind == .assign: return t[k + 1].kind == .lparen
         k += 1
     false
 
@@ -208,8 +231,8 @@ lx_decl_line = () -> bool:
 lx_decl_context = () -> bool:
     depth = lx_indents.len()
     first = lx_line_tok0
-    if first >= lx_toks.len(): return false
-    kind = lx_toks[first].kind
+    if first >= lx_count: return false
+    kind = lx_slots[first].kind
     if kind == .kw_else and depth <= lx_decl_lines.len() and lx_decl_lines[depth - 1] == .kw_when: kind = .kw_when
     lx_decl_lines.resize(depth)
     lx_decl_lines[depth - 1] = kind
@@ -235,25 +258,28 @@ lx_body_end = (from: int, header_indent: int) -> int:
         if j >= lx_n: return lx_n
         c = p[j]
         if c == '\n' or c == '#':
-            loop j < lx_n and p[j] != '\n': j += 1
-            i = j + 1
+            i = __find_newline(p, j, lx_n) + 1
             continue
         if ind <= header_indent:
             if first: return -1
             return i
         first = false
-        # (to the end of the line, past strings, which may span lines)
-        loop j < lx_n and p[j] != '\n':
+        # (to the end of the line, past strings, which may span lines; then past the lines indented
+        # deeper than the header's next lines can be, sixteen bytes at a time)
+        loop true:
+            if header_indent == 0: j = __find_line_delim(p, j, lx_n)
+            else if header_indent == 4: j = __find_line_delim4(p, j, lx_n)
+            else if header_indent == 8: j = __find_line_delim8(p, j, lx_n)
+            else: j = __find_delim(p, j, lx_n)
+            if j >= lx_n: return lx_n
             c2 = p[j]
+            if c2 == '\n': break
             if c2 == '#':
-                loop j < lx_n and p[j] != '\n': j += 1
-                break
-            if c2 == '"' or c2 == '\'':
-                raw = j > 0 and p[j - 1] == 'r' and (j < 2 or not is_ident_char(p[j - 2]))
-                j = lx_skip_str(j, raw)
-                if j < 0: return -1
+                j = __find_newline(p, j, lx_n)
                 continue
-            j += 1
+            raw = j > 0 and p[j - 1] == 'r' and (j < 2 or not is_ident_char(p[j - 2]))
+            j = lx_skip_str(j, raw)
+            if j < 0: return -1
         i = j + 1
     lx_n
 
@@ -350,7 +376,7 @@ lx_line_start = ():
                     else if j > 0: at += ", "
                     at += "{v}"
                 lx_err(q, "this line is indented {ind} spaces, which matches no line above it: a line goes at the same place as one of the lines before it, indented {at}")
-        lx_line_tok0 = lx_toks.len()
+        lx_line_tok0 = lx_count
         return
 
 # whether the rest of the line from `from` closes a bracket it did not open, or is another
@@ -389,11 +415,6 @@ lx_close_block_ctx = (at: int):
             lx_emit(.dedent, at, 0)
         lx_indents.pop()
         lx_ctx.pop()
-
-# `+` or `+=` style operators
-op_or_assign = (c1: u8, plain: Tok, with_eq: Tok) -> Tok:
-    if c1 == '=': return with_eq
-    plain
 
 # character classes for the lexer's hot loops: 1 = starts an identifier, 2 = continues one
 lx_cls: *u8 = null
@@ -479,7 +500,7 @@ lx_number = ():
             fv = lx_float(s, i)
             if fv - fv != 0.0: lx_err(s, "number too large: the largest a float holds is about 1.8e308 (INF is infinity; for bigger numbers, `use big`: `big(1, 400)`)")
             lx_emit(.float_lit, s, i - s)
-            lx_toks[lx_toks.len() - 1].fval = fv
+            lx_slots[lx_count - 1].fval = fv
             return
     if lx_cls[p[lx_i]] & 1 != 0:
         lx_unit(s, f64(v))
@@ -487,7 +508,7 @@ lx_number = ():
     if is_ident_char(p[lx_i]): lx_err(lx_i, "invalid character in number literal")
     if big: lx_err(s, "integer literal too large (more than 64 bits)")
     lx_emit(.int_lit, s, lx_i - s)
-    lx_toks[lx_toks.len() - 1].ival = int(v)
+    lx_slots[lx_count - 1].ival = int(v)
 
 # value of the float literal at [s, e): short literals are exact with one operation (Clinger's
 # fast path); anything else goes through the correctly rounded library parser
@@ -541,8 +562,8 @@ lx_unit = (s: int, v: f64):
     if f == 0.0: lx_err(us, "unknown unit '{name}' (a number cannot be followed directly by a name)")
     lx_i = i
     lx_emit(.float_lit, s, i - s)
-    lx_toks[lx_toks.len() - 1].fval = v * f
-    lx_toks[lx_toks.len() - 1].flags = i32(int(lx_toks[lx_toks.len() - 1].flags) | INTF_UNIT)
+    lx_slots[lx_count - 1].fval = v * f
+    lx_slots[lx_count - 1].flags = i32(int(lx_slots[lx_count - 1].flags) | INTF_UNIT)
 
 # how many base units (s, m, kg, rad, N) one of these is; 0 for unknown names
 unit_scale = (u: str) -> f64:
@@ -623,13 +644,17 @@ lx_string = (raw: bool):
             k = start
             loop k < i and p[k] != '\n': k += 1
             if k < i: lx_err(s, "this text has no closing quote on its line: a `\"` ends it there (text that goes on over lines is written in triple quotes, \"\"\"...\"\"\")")
-    t = Token(Tok.str_lit, 0, mkpos(lx_file, lx_base + s), i32(start), i32(i - start), 0, 0.0)
-    f = int(t.flags)
+    f = 0
     if raw: f |= STRF_RAW
     if triple: f |= STRF_TRIPLE
     if q == '\'': f |= STRF_SINGLE
-    t.flags = i32(f)
-    lx_toks.push(t)
+    k = lx_next()
+    t = lx_slots
+    t[k].kind = .str_lit
+    t[k].flags = i32(f)
+    t[k].pos = mkpos(lx_file, lx_base + s)
+    t[k].start = i32(start)
+    t[k].len = i32(i - start)
     if triple: lx_i = i + 3
     else: lx_i = i + 1
 
@@ -674,8 +699,8 @@ lx_char = ():
     if p[i] != '\'': lx_err(s, "unterminated character literal")
     lx_i = i + 1
     lx_emit(.int_lit, s, lx_i - s)
-    lx_toks[lx_toks.len() - 1].ival = v
-    lx_toks[lx_toks.len() - 1].flags = i32(INTF_CHAR)
+    lx_slots[lx_count - 1].ival = v
+    lx_slots[lx_count - 1].flags = i32(INTF_CHAR)
 
 # (from, to: a part of src alone, as a lazy function body: tokens keep their places in src)
 lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
@@ -685,8 +710,14 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
     lx_n = len(src)
     if to >= 0: lx_n = to
     lx_i = from
+    # (about a token per five bytes of source; in a library file the bodies are mostly skipped)
+    cap = (lx_n - lx_i) / 5 + 16
+    if lx_lazy and cap > 512: cap = 512
     lx_toks = []
-    lx_toks.reserve((lx_n - lx_i) / 5 + 16)     # (about a token per five bytes of source)
+    lx_toks.resize(cap)
+    lx_slots = data(lx_toks)
+    lx_count = 0
+    lx_cap = cap
     lx_indents = [0]
     lx_decl_lines = []
     lx_line_tok0 = 0
@@ -697,21 +728,52 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
     if lx_cls == null: lx_init_classes()
     lx_line_start()
     p = lx_p
-    loop lx_i < lx_n:
-        c = p[lx_i]
+    cls = lx_cls
+    kws = data(kw_tok)
+    nkw = kw_tok.len()
+    at = (lx_file << 40) | lx_base
+    # (the scan position is local here; the helpers read and move lx_i)
+    i = lx_i
+    loop i < lx_n:
+        c = p[i]
         if c == ' ' or c == '\t' or c == '\r':
-            lx_i += 1
+            i += 1
+            loop i < lx_n and p[i] == ' ': i += 1
             continue
-        if c == '\\' and p[lx_i + 1] == '\n':
-            lx_i += 2
+        if cls[c] & 1 != 0:
+            if c == 'r' and (p[i + 1] == '"' or p[i + 1] == '\''):
+                lx_i = i + 1
+                lx_string(true)
+                i = lx_i
+                continue
+            s = i
+            i += 1
+            loop cls[p[i]] & 2 != 0: i += 1
+            id = intern_sub(src, s, i - s)
+            kind = Tok.ident
+            if id < nkw: kind = kws[id]
+            if lx_count == lx_cap: lx_grow()
+            t = lx_slots
+            k = lx_count
+            lx_count = k + 1
+            t[k].kind = kind
+            t[k].pos = at + s
+            t[k].start = i32(s)
+            t[k].len = i32(i - s)
+            t[k].ival = id
+            continue
+        if c == '\\' and p[i + 1] == '\n':
+            i += 2
             continue
         if c == '#':
             # (#xs, Lua's length: right after an opening bracket, a comma or an operator)
-            lk = lx_last_kind()
-            if lx_i + 1 < lx_n and is_alpha(p[lx_i + 1]) and (lk == .lparen or lk == .lbrack or lk == .comma or lk == .assign or lk == .plus or lk == .minus or lk == .star or lk == .lt or lk == .gt or lk == .eq):
-                lx_err(lx_i, "`#` starts a comment; a length is `xs.len()` (or `len(s)`)")
-            loop lx_i < lx_n and p[lx_i] != '\n': lx_i += 1
+            if i + 1 < lx_n and is_alpha(p[i + 1]):
+                lk = lx_last_kind()
+                if lk == .lparen or lk == .lbrack or lk == .comma or lk == .assign or lk == .plus or lk == .minus or lk == .star or lk == .lt or lk == .gt or lk == .eq:
+                    lx_err(i, "`#` starts a comment; a length is `xs.len()` (or `len(s)`)")
+            i = __find_newline(p, i, lx_n)
             continue
+        lx_i = i
         if c == '\n':
             if lx_lazy and lx_ctx.len() == 1 and lx_decl_context() and lx_last_kind() == .colon and lx_decl_line():
                 end = lx_body_end(lx_i + 1, lx_line_indent)
@@ -720,37 +782,23 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
                     lx_emit(.lazy, lx_i + 1, end - (lx_i + 1))
                     lx_i = end
                     lx_line_start()
+                    i = lx_i
                     continue
             lx_i += 1
             if lx_top_block(): lx_emit_newline()
             lx_line_start()
-            continue
-        cls = lx_cls
-        if cls[c] & 1 != 0:
-            if c == 'r' and (p[lx_i + 1] == '"' or p[lx_i + 1] == '\''):
-                lx_i += 1
-                lx_string(true)
-                continue
-            s = lx_i
-            i = s + 1
-            loop cls[p[i]] & 2 != 0: i += 1
-            lx_i = i
-            id = intern_sub(src, s, i - s)
-            kind = Tok.ident
-            if id < kw_tok.len(): kind = kw_tok[id]
-            lx_toks.push(Token(kind, 0, (lx_file << 40) | (lx_base + s), i32(s), i32(i - s), id, 0.0))
+            i = lx_i
             continue
         if c >= '0' and c <= '9':
             lx_number()
+            i = lx_i
             continue
-        if c == '"':
+        if c == '"' or c == '\'':
             lx_string(false)
+            i = lx_i
             continue
-        if c == '\'':
-            lx_string(false)
-            continue
-        c1 = p[lx_i + 1]
-        c2 = p[lx_i + 2]
+        c1 = p[i + 1]
+        c2 = p[i + 2]
         k = Tok.eof
         n = 1
         match c:
@@ -786,19 +834,54 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
                 else if c1 == '=':
                     k = .minuseq
                     n = 2
-            '+': k = op_or_assign(c1, .plus, .pluseq)
+            '+':
+                k = .plus
+                if c1 == '=':
+                    k = .pluseq
+                    n = 2
             '*':
-                k = op_or_assign(c1, .star, .stareq)
-                if c1 == '*':
+                k = .star
+                if c1 == '=':
+                    k = .stareq
+                    n = 2
+                else if c1 == '*':
                     k = .starstar
                     n = 2
-            '/': k = op_or_assign(c1, .slash, .slasheq)
-            '%': k = op_or_assign(c1, .percent, .percenteq)
-            '&': k = op_or_assign(c1, .amp, .ampeq)
-            '|': k = op_or_assign(c1, .pipe, .pipeeq)
-            '^': k = op_or_assign(c1, .caret, .careteq)
-            '=': k = op_or_assign(c1, .assign, .eq)
-            '!': k = op_or_assign(c1, .bang, .ne)
+            '/':
+                k = .slash
+                if c1 == '=':
+                    k = .slasheq
+                    n = 2
+            '%':
+                k = .percent
+                if c1 == '=':
+                    k = .percenteq
+                    n = 2
+            '&':
+                k = .amp
+                if c1 == '=':
+                    k = .ampeq
+                    n = 2
+            '|':
+                k = .pipe
+                if c1 == '=':
+                    k = .pipeeq
+                    n = 2
+            '^':
+                k = .caret
+                if c1 == '=':
+                    k = .careteq
+                    n = 2
+            '=':
+                k = .assign
+                if c1 == '=':
+                    k = .eq
+                    n = 2
+            '!':
+                k = .bang
+                if c1 == '=':
+                    k = .ne
+                    n = 2
             '?':
                 k = .question
                 if c1 == '?':
@@ -832,20 +915,27 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
                 # ($"Score: {s}": C#'s interpolated text)
                 if c == '$' and lx_i + 1 < len(lx_src) and lx_src[lx_i + 1] == '"': lx_err(lx_i, "every string can hold values: drop the `$` (`\"Score: \{s}\"`)")
                 lx_err(lx_i, "unexpected character '{byte_str(int(c))}'")
-        if k == .pluseq or k == .stareq or k == .slasheq or k == .percenteq or k == .ampeq or k == .pipeeq or k == .careteq or k == .eq or k == .ne: n = 2
         # (a lambda's indented body inside brackets ends at a comma whose line goes on to close the
         # bracket: f(():\n    a(), 5) gives f a lambda and 5; a, b = b, a alone on a line is a tuple)
-        if k == .comma and lx_ctx.len() > 1 and lx_top_block() and lx_line_closes(lx_i + 1): lx_close_block_ctx(lx_i)
-        if k == .rparen or k == .rbrack or k == .rbrace:
+        if k == .comma:
+            if lx_ctx.len() > 1 and lx_top_block() and lx_line_closes(lx_i + 1): lx_close_block_ctx(lx_i)
+        else if k == .rparen or k == .rbrack or k == .rbrace:
             lx_close_block_ctx(lx_i)
             if lx_ctx.len() <= 1: lx_err(lx_i, "unmatched '{byte_str(int(c))}'")
             lx_ctx.pop()
-        lx_emit(k, lx_i, n)
-        if k == .dotop: lx_toks[lx_toks.len() - 1].ival = int(c1)
-        lx_i += n
+        if lx_count == lx_cap: lx_grow()
+        t = lx_slots
+        tk = lx_count
+        lx_count = tk + 1
+        t[tk].kind = k
+        t[tk].pos = at + i
+        t[tk].start = i32(i)
+        t[tk].len = i32(n)
+        if k == .dotop: t[tk].ival = int(c1)
+        lx_i = i + n
         if k == .lparen or k == .lbrack or k == .lbrace:
-            lx_ctx.push((lx_i - n) << 24)
-        if k == .colon and not lx_top_block():
+            lx_ctx.push(i << 24)
+        else if k == .colon and not lx_top_block():
             q = lx_i
             loop p[q] == ' ' or p[q] == '\t' or p[q] == '\r': q += 1
             if p[q] == '#':
@@ -853,6 +943,8 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
             if p[q] == '\n':
                 lx_indents.push(lx_line_indent)
                 lx_ctx.push((lx_i << 24) | (lx_indents.len() << 1) | 1)
+        i = lx_i
+    lx_i = i
     lx_close_block_ctx(lx_i)
     if lx_ctx.len() > 1:
         lx_err(lx_ctx[lx_ctx.len() - 1] >> 24, "this bracket is never closed")
@@ -861,6 +953,8 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
         lx_indents.pop()
         lx_emit(.dedent, lx_i, 0)
     lx_emit(.eof, lx_i, 0)
+    lx_toks.truncate(lx_count)
+    lx_slots = null
     out = lx_toks
     lx_toks = []
     out
