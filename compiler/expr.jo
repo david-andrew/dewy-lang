@@ -3664,6 +3664,17 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
         nodes[n].a = i32(bc_field(bc_ident("$dewy_rational", pos), fname, pos))
         return check_expr(n, expected)
     if mod_scope < 0 and args.len() >= 1 and files[pos_file(nodes[n].pos)].is_dewy and dewy_numbers_call(n, name, args, ufcs): return check_expr(n, expected)
+    # (`find(text part)` and `index_of(xs x)` written as calls: Dewy's searches, giving Missing)
+    if not ufcs and mod_scope < 0 and args.len() >= 2 and (name == intern("find") or name == intern("rfind") or name == intern("index_of")) and files[pos_file(nodes[n].pos)].is_dewy and nodes[args[0]].kind != .namedarg:
+        s = lookup(name)
+        if s != 0 and syms[s].kind == .fns and decl_in_prelude(int(syms[s].decl)):
+            a0 = args[0]
+            if not has_flag(a0, NF_CHECKED):
+                check_expr(a0, 0)
+                add_flag(a0, NF_CHECKED)
+            k0 = tkind(prune(ntype(a0)))
+            if k0 == .str_ and name != intern("index_of"): return call_by_name(n, intern("__dewy_{name_of(name)}"), mod_scope, args, expected, false)
+            if k0 == .array and name == intern("index_of") and args.len() == 2: return call_by_name(n, intern("__dewy_index_of"), mod_scope, args, expected, false)
     if not ufcs and mod_scope < 0 and args.len() == 2 and (name == intern("__floor_div") or name == intern("__floor_mod") or name == intern("__dewy_power") or name == intern("__dewy_divide")) and files[pos_file(nodes[n].pos)].is_dewy:
         if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
             return dewy_arithmetic_call(n, name, args, expected)
@@ -4048,7 +4059,8 @@ fmt_hidden = (ft: int, aux2: i32) -> bool:
 # a minted Dewy type (`type of error & [...]`): its values print with its name, Name[x=1]
 fmt_minted = (si: int) -> bool:
     d = int(structs[si].decl)
-    d != 0 and nodes[d].kind == .struct_ and nodes[d].a != 0 and dewy_at(nodes[d].pos)
+    # (a Dewy `type of` declaration, or a library type with `@nominal` metadata)
+    d != 0 and nodes[d].kind == .struct_ and nodes[d].a != 0
 
 # the library's last-resort __fmt, (buf, x): __fmt_fields(buf, x), rather than one for the type
 fmt_fallback = (inst: int) -> bool:
@@ -4602,10 +4614,17 @@ cmp_error = (n: int, ta: int, tb: int):
     fatal(nodes[n].pos, "cannot compare {dt(ta)} with {dt(tb)}{why}")
 
 # "space" given where a Key goes: " (write `.space`)"
+# (the library's Missing, a search's result when nothing is found; 0 before the library is loaded)
+missing_type = () -> int:
+    s = prelude.get(intern("Missing")) ?? 0
+    if s == 0 or syms[s].kind != .struct_: return 0
+    get_struct_inst(int(syms[s].decl), [])
+
 # the member a Dewy program wrote, for a library function standing for it
 shown_fn_name = (name: str) -> str:
     if name == "__dewy_find": return "find"
     if name == "__dewy_rfind": return "rfind"
+    if name == "__dewy_index_of": return "index_of"
     if name == "__dewy_insert": return "insert"
     if name == "__dewy_keys": return "keys"
     name
@@ -4872,6 +4891,7 @@ dewy_member_name = (callee: int, rt: int, fname: int, args: int[]) -> int:
         if name == "pop" and args.len() == 1: return intern("remove")
         if name == "insert": return intern("__dewy_insert")
         if name == "remove": fatal(pos, "an array removes by position with pop: `{recv}.pop(i)`")
+        if name == "index_of" and args.len() == 1: return intern("__dewy_index_of")
     if name == "keys" and args.len() == 0 and is_map_type(rt): return intern("__dewy_keys")
     if k == .str_:
         if name == "find": return intern("__dewy_find")
@@ -8803,6 +8823,9 @@ check_expr = (n: int, expected: int) -> int:
                 if tkind(bt) == .tuple: fatal(nodes[n].pos, "a tuple's parts are `t.0`, `t.1` (an index in brackets is for arrays)")
                 if tkind(bt) == .opt and dewy_at(nodes[n].pos):
                     fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}: it may be none (a member read through an optional is optional too). Check the value first, `if x isnt? none \{ ... }`, which narrows x inside, or give a fallback, `(x ?? default)[i]`")
+                if is_union(bt) and dewy_at(nodes[n].pos):
+                    loop m in union_members(bt):
+                        if m != T_NONE and exception_member(m): fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}: it may be {dt(m)} (a member read through it forwards {dt(m)} too). Check the value first, `if x isnt? {dt(m)} \{ ... }`, which narrows x inside")
                 fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}")
     else if k == .unary:
         if has_flag(n, NF_BROADCAST): return check_dotted(n, expected)
@@ -8906,6 +8929,7 @@ check_expr = (n: int, expected: int) -> int:
             lf = pos_file(lp)
             if lf >= 0 and lf < files.len() and pos_off(lp) < len(files[lf].src) and files[lf].src[pos_off(lp)] == '[':
                 fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)} (indexing gives the element itself; m.get(k) gives an optional, m.get(k, default) a value)")
+            if is_union(prune(at)) and union_index(prune(at), missing_type()) >= 0: fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)}: a search's Missing is not none; `if x is? Missing \{ ... }` handles it")
             fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)}")
         inner = int(types[at].elem)
         h2 = inner

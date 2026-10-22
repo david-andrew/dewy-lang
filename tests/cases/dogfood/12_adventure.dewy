@@ -62,7 +62,7 @@ do_command = (@w:World line:string):>void => {
         <"take"> => {
             let items = w.rooms[w.here].items
             let i = items.index_of(noun)
-            if i <? 0 {
+            if i is? Missing {
                 printl("There is no {noun} here.")
                 return
             }
@@ -72,7 +72,7 @@ do_command = (@w:World line:string):>void => {
         }
         <"drop"> => {
             let i = w.inventory.index_of(noun)
-            if i <? 0 { printl("You don't have {noun}.") return }
+            if i is? Missing { printl("You don't have {noun}.") return }
             w.inventory.pop(i)
             w.rooms[w.here].items.push(noun)
             printl("Dropped: {noun}.")

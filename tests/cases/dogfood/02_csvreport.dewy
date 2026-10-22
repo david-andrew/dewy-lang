@@ -54,7 +54,7 @@ main = ():>int => {
     let rows = csv_rows(DATA)
     let header = rows[0]
     let col = header.index_of(opts.group)
-    if col <? 0 {
+    if col is? Missing {
         printl("error: no column named {opts.group}")
         return 2
     }

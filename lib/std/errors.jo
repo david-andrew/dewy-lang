@@ -17,6 +17,11 @@ struct FileError:
 @nominal(error)
 struct InvalidUtf8:
     pass
+# A search that found nothing (`text.find(part)`, `xs.index_of(x)`): an
+# exception, so it forwards like none, but distinct from none and from -1.
+@nominal(exception)
+struct Missing:
+    pass
 # A fixed-width result that does not fit its parts (rational<int64> arithmetic).
 @nominal(error)
 struct Overflow:

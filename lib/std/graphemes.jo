@@ -188,20 +188,20 @@ __dewy_string_length = (s: str) -> int:
         count += 1
     count
 
-# Dewy's text.find and text.rfind: grapheme positions, as indexing uses, or none
-__dewy_find = (s: str, sub: str) -> int?:
+# Dewy's text.find and text.rfind: grapheme positions, as indexing uses, or Missing
+__dewy_find = (s: str, sub: str) -> int | Missing:
     at = find(s, sub)
-    if at < 0: return none
+    if at < 0: return Missing()
     __dewy_string_length(s[0..at))
-__dewy_find = (s: str, sub: str, start: int) -> int?:
+__dewy_find = (s: str, sub: str, start: int) -> int | Missing:
     if start < 0: panic("find start {start} is before the string")
     from = len(__dewy_string_slice(s, 0, start, false, true))
     at = find(s, sub, from)
-    if at < 0: return none
+    if at < 0: return Missing()
     start + __dewy_string_length(s[from..at))
-__dewy_rfind = (s: str, sub: str) -> int?:
+__dewy_rfind = (s: str, sub: str) -> int | Missing:
     at = rfind(s, sub)
-    if at < 0: return none
+    if at < 0: return Missing()
     __dewy_string_length(s[0..at))
 
 __dewy_string_index = (s: str, index: int) -> str:

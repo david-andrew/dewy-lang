@@ -5,7 +5,7 @@ find_lines=(text:string pattern:string):>array<string>=>{
     loop line in text.split("\n") {
         number+=1
         let hit=line.find(matcher)
-        if hit isnt? none {
+        if hit isnt? Missing {
             found.push("{number}:{line}")
         }
     }

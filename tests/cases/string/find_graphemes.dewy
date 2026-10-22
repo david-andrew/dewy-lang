@@ -1,14 +1,14 @@
 # quick
-# text.find and text.rfind give grapheme positions, as indexing uses, or none.
+# text.find and text.rfind give grapheme positions, as indexing uses, or Missing.
 main=()=>{
     let s="café b café"
     let i=s.find("b")
     printl(i)
-    if i isnt? none { printl(s[i]) }
+    if i isnt? Missing { printl(s[i]) }
     printl(s.find("zz"))
     printl(s.rfind("c"))
     printl(s.find("c" 1))
     printl(s.find("é"))
     let m=s.find(regex(r"b"))
-    if m isnt? none { printl(m.start) }
+    if m isnt? Missing { printl(m.start) }
 }

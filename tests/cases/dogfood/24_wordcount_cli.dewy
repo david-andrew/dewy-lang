@@ -15,7 +15,7 @@ parse_config=(text:string):>Config|ConfigError=>{
         let line=raw.trim()
         if line.length =? 0 or line.startswith("#") continue
         let eq=line.find("=")
-        if eq is? none return ConfigError[i+1 "expected key = value"]
+        if eq is? Missing return ConfigError[i+1 "expected key = value"]
         let key=line[..eq).trim()
         let value=line[eq+1..].trim()
         if key =? "min_length" or key =? "top" {

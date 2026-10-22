@@ -1,0 +1,23 @@
+# quick
+# index_of and find give the position or Missing: an exception value, not none or -1.
+first_comma=(text:string):>int64|Missing=>{
+    let at=text.find(",") or_throw
+    return at+1
+}
+main=()=>{
+    let xs=[3 1 4 1 5]
+    printl(xs.index_of(1))
+    printl(xs.index_of(9))
+    printl(index_of(xs 4))
+    let i=xs.index_of(9)
+    if i is? Missing printl("not there")
+    let text="a,b"
+    printl(text.find(","))
+    printl(text.rfind("z"))
+    printl(find(text "b"))
+    printl(first_comma(text))
+    printl(first_comma("ab"))
+    let found=text.find(regex(r"b"))
+    if found isnt? Missing printl(found.start)
+    printl(text.find(regex(r"q")))
+}

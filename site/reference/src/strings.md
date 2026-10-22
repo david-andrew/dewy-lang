@@ -72,7 +72,7 @@ Because printing is `as string`, an array of graphemes prints as the text they f
 
 ## Searching, Splitting, and Trimming
 
-Strings have methods, written in Dewy in the prelude's `strings.dewy`; positions and lengths are graphemes, like indexing. `text.contains(x)`, `text.startswith(x)`, `text.endswith(x)`; `text.find(x)` and `text.rfind(x)` yield the first or last position or `none`; `text.split(sep)` yields the pieces between separators (adjacent separators give empty pieces; an empty separator splits into graphemes); `text.lines` the lines without their breaks (a final break adds no empty line); `text.trim`, `text.trim_start`, `text.trim_end` drop spaces, tabs, and line breaks; `text.replace(old new)` replaces every occurrence. Zero-argument methods are called without parentheses.
+Strings have methods, written in Dewy in the prelude's `strings.dewy`; positions and lengths are graphemes, like indexing. `text.contains(x)`, `text.startswith(x)`, `text.endswith(x)`; `text.find(x)` and `text.rfind(x)` yield the first or last position or `Missing` (the prelude's search exception, neither `none` nor -1; `xs.index_of(x)` too); `text.split(sep)` yields the pieces between separators (adjacent separators give empty pieces; an empty separator splits into graphemes); `text.lines` the lines without their breaks (a final break adds no empty line); `text.trim`, `text.trim_start`, `text.trim_end` drop spaces, tabs, and line breaks; `text.replace(old new)` replaces every occurrence. Zero-argument methods are called without parentheses.
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
@@ -80,7 +80,7 @@ let main = ():>int64 => {
     let line:string = "  key: value  ".trim
     match line.find": " {
         i:int64 => printl"key ends at {i}"
-        <none> => printl"no separator"
+        <Missing> => printl"no separator"
     }
     let parts = line.split": "
     return parts.length                    # 2

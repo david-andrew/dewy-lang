@@ -2166,7 +2166,7 @@ one. A `Name` value passes where an `A` or a `B` is wanted, as those fields.
 Intersections are module-level declarations of plain (not minted) records.
 
 ```dewy
-Missing:type=type of error
+Empty:type=type of error
 ParseError:type=type of error & [message:string]
 parse=(text:string):>int64|ParseError=>{
     let n=to_int(text)
@@ -2664,11 +2664,20 @@ is `"CAFÉ"`. Unmapped characters and malformed UTF-8 bytes are preserved;
 these byte-oriented transformations do not perform grapheme validation.
 `text.startswith(prefix)` and `text.endswith(suffix)` test the ends of a string.
 `text.find(part)` and `text.rfind(part)` give the grapheme position of the first or
-last occurrence, as indexing counts, or `none`; `text.find(part start)` searches from
-grapheme `start`.
+last occurrence, as indexing counts, or `Missing`; `text.find(part start)` searches from
+grapheme `start`. `xs.index_of(x)` gives the first position of `x` in an array, or
+`Missing`. `Missing` is the prelude's exception for a search that found nothing:
+it is neither `none` nor -1, so `??` does not apply; test it with `is? Missing`,
+forward it with `or_throw`, or `match` it.
+
+```dewy
+let at="key=value".find("=")
+if at isnt? Missing {printl(at)}       # 3
+printl([3 1 4].index_of(9))            # Missing
+```
 
 `regex(pattern)` prepares a reusable regular expression. `text.find(pattern)`
-returns `Match|none`; `find_all` returns nonoverlapping matches, `contains` tests
+returns `Match|Missing`; `find_all` returns nonoverlapping matches, `contains` tests
 for any match, and `matches` requires the whole string to match. A `Match` has
 `text`, `groups`, `start` and `end`. **Match offsets and the optional `find`
 starting offset are UTF-8 byte offsets**, while regex atoms consume code points.
@@ -2677,7 +2686,7 @@ They are not Dewy's ordinary grapheme indices; use the returned `text` directly.
 ```dewy
 let date = regex(r"(\d{4})-(\d\d)-(\d\d)")
 let found = "due 2026-10-19!".find(date)
-if found isnt? none {printl(found.groups[0])}
+if found isnt? Missing {printl(found.groups[0])}
 let rewritten = "due 2026-10-19!".replace(date "$3/$2/$1")
 let fields = "a, b;c".split(regex(r"[,;]\s*"))
 ```

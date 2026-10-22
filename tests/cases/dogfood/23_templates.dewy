@@ -27,7 +27,7 @@ render=(template:string vars:dict<string string>):>string|TemplateError=>{
                 continue
             }
             let close=template.find("\}" i)
-            if close is? none return TemplateError["unclosed '\{'" i+1]
+            if close is? Missing return TemplateError["unclosed '\{'" i+1]
             let inner=template[i+1..close).trim()
             let parts=inner.split("|")
             let name=parts[0].trim()

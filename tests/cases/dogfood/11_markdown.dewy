@@ -36,7 +36,7 @@ inline = (text:string):>string => {
         if c =? "[" {
             let rest = chars[i..].join("")
             let link = rest.find(regex(r"^\[([^\]]+)\]\(([^)]+)\)"))
-            if link isnt? none {
+            if link isnt? Missing {
                 out = "{out}<a href=\"{link.groups[1]}\">{escape_html(link.groups[0])}</a>"
                 i += graphemes(link.text).length
                 continue
@@ -76,17 +76,17 @@ convert = (markdown:string):>string => {
         if line.trim() =? "" {
             flush_paragraph()
             close_list()
-        } else if heading isnt? none {
+        } else if heading isnt? Missing {
             flush_paragraph()
             close_list()
             let level = heading.groups[0].length
             html.push("<h{level}>{inline(heading.groups[1])}</h{level}>")
-        } else if bullet isnt? none or numbered isnt? none {
+        } else if bullet isnt? Missing or numbered isnt? Missing {
             flush_paragraph()
-            let kind = if bullet isnt? none "ul" else "ol"
+            let kind = if bullet isnt? Missing "ul" else "ol"
             let item = ""
-            if bullet isnt? none { item = bullet.groups[0] }
-            else if numbered isnt? none { item = numbered.groups[0] }
+            if bullet isnt? Missing { item = bullet.groups[0] }
+            else if numbered isnt? Missing { item = numbered.groups[0] }
             if list_kind not=? kind {
                 close_list()
                 html.push("<{kind}>")

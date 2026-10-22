@@ -45,3 +45,9 @@ pop[K, V] = (m: mut Map[K, V], k: K, default: V) -> V:
 
 # Dewy's `xs.insert(value index)` names the value first.
 __dewy_insert[T] = (xs: mut T[], value: T, index: int): xs.insert(index, value)
+
+# Dewy's xs.index_of(x): the first position holding x, or Missing
+__dewy_index_of[T] = (xs: T[], x: T) -> int | Missing:
+    loop i in 0.. and e in xs:
+        if e == x: return i
+    Missing()

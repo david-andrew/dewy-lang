@@ -50,7 +50,7 @@ LRU:type=<K V>[
     }
     touch=(key:K):>void=>{
         let i=order.index_of(key)
-        if i >=? 0 {
+        if i isnt? Missing {
             order.pop(i)
             order.push(key)
         }

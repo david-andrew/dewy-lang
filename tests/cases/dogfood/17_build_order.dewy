@@ -36,6 +36,7 @@ visit=(g:Graph node:string @state:dict<string int64> @stack:array<string> @order
     if s =? 2 return
     if s =? 1 {
         let start=stack.index_of(node)
+        if start is? Missing return CycleError[[node]]
         return CycleError[[stack[start..]... node]]
     }
     state[node]=1

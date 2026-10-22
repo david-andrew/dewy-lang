@@ -145,8 +145,8 @@ parse_query=(text:string):>dict<string string>|HttpError=>{
     loop pair in text.split("&") {
         if pair.length =? 0 continue
         let eq=pair.find("=")
-        let key_text=if eq is? none pair else pair[0..eq)
-        let value_text=if eq is? none "" else pair[eq+1..]
+        let key_text=if eq is? Missing pair else pair[0..eq)
+        let value_text=if eq is? Missing "" else pair[eq+1..]
         let key=percent_decode(key_text true) or_throw
         let value=percent_decode(value_text true) or_throw
         query[key]=value
@@ -165,7 +165,7 @@ trim_ows=(text:string):>string=>{
 parse_header=(line:string):>Header|HttpError=>{
     if line.startswith(" ") or line.startswith("\t") return bad(400 "folded header")
     let colon=line.find(":")
-    if colon is? none or colon =? 0 return bad(400 "malformed header")
+    if colon is? Missing or colon =? 0 return bad(400 "malformed header")
     let name=line[0..colon)
     loop b in bytes(name) {
         if not is_token_byte(b) return bad(400 "invalid header name")
@@ -224,7 +224,7 @@ read_chunked=(data:array<uint8> start:int64 limits:Limits):>Body|Incomplete|Http
         if lf <? 0 return Incomplete
         let size_line=line_text(data at lf) or_throw
         let semi=size_line.find(";")
-        let digits=if semi is? none size_line else size_line[0..semi)
+        let digits=if semi is? Missing size_line else size_line[0..semi)
         if digits.length =? 0 or digits.length >? 6 return bad(400 "invalid chunk size")
         let size=0
         loop b in bytes(digits) {
@@ -294,9 +294,9 @@ frame=(data:array<uint8> limits:Limits):>Framed|Incomplete|HttpError=>{
         body=Body[text head.stop+length]
     }
     let question=target.find("?")
-    let raw_path=if question is? none target else target[0..question)
+    let raw_path=if question is? Missing target else target[0..question)
     let path=percent_decode(raw_path false) or_throw
-    let query=parse_query(if question is? none "" else target[question+1..]) or_throw
+    let query=parse_query(if question is? Missing "" else target[question+1..]) or_throw
     let request=Request[method target path query version headers body.text]
     return Framed[request body.stop]
 }
