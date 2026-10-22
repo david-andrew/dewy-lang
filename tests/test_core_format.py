@@ -70,25 +70,24 @@ printl((is ?? 0) in? [20 21]) printl(λ notin? [22])
 return (is ?? 0)+λ}
 main=():>void=>{printl(probe(20 21 22));}''',
     'decimal-literals': '''from bigint import bigint
-main=()=>{
+main=():>void=>{
 printl(0d4_2.0_0E+0_0) printl(2.1(10+10))
 printl(uint64(0d18_446_744_073_709_551_615)) printl(bigint(18_446_744_073_709_551_616))
-printl(-0d9_223_372_036_854_775_808) return 0
+printl(-0d9_223_372_036_854_775_808)
 }''',
-    'closure-captures': '''main=()=>{
+    'closure-captures': '''main=():>void=>{
 let n=0 let xs=[10]
 let next=($capture @n step:int64
 $capture xs extra:int64)=>{n+=step xs[0]+=extra; n+xs[0]}
-let other=@next printl(next(1 2)) printl(other(3 4)) printl(n) return 0
+let other=@next printl(next(1 2)) printl(other(3 4)) printl(n)
 }''',
-    'mutable-loop': """main=()=>{
+    'mutable-loop': """main=():>void=>{
 let values=[20 22] let saved=values
 loop @value in values {value+=1}
 printl(values) printl(saved)
-return 0
 }""",
     'broadcast': '''square=(x:float64)=>x*x
-main=()=>{
+main=():>void=>{
 let xs:array<float64>=[1.0 4.0 9.0]
 xs .+=1.0 xs .*=2.0
 xs[1..end] .+=0.5 xs[[true false true]] .*=2.0
@@ -96,9 +95,8 @@ printl(square.(sqrt.(xs) .+ 1.0))
 printl(reshape([1 2 3 4] 2 2) .* [10 20])
 printl([1 2 3] .not<=? 2)
 printl(.-(xs .+ 1.0)) printl(.+xs) printl(.- .-xs)
-return 0
 }''',
-    'matrix-slices': '''main=()=>{
+    'matrix-slices': '''main=():>void=>{
 let m=reshape([1 2 3 4 5 6] 2 3)
 let part:NDArray<int>=m[[0..end] [1..end]]
 m[[..] end]=[20 22]
@@ -108,7 +106,6 @@ let rows=[1,0..0]
 printl(m[rows [2,0..0]].data)
 m[rows (0..2]] .+= [1 2]
 printl(m[[..] [end,end-1..]].data)
-return 0
 }''',
     'unpack-leaf-types': 'main=():>void=>{const [x:int64 y:float64]=[20 22] printl(x+y)}',
     'record-spread': 'main=():>void=>{let base=[x=20 y=1] let next=[base... y=22] printl(next.x+next.y)}',
@@ -120,13 +117,12 @@ return 0
     'range-index': 'main=():>void=>{let xs=[10 20 30 40 50] printl(xs[0,2..]) xs[4,2..]=[1 2 3] printl(xs[(0..4]])}',
     'coalesce': 'read=():>int64?=>none\nmain=():>void=>{printl"{read()??20+22}"}',
     'compound': 'main=():>void=>{let x=-17 x//=3 x%=4 x^=2 let y=3/2 y/=3 printl"{x} {y}"}',
-    'loop-else': '''main=()=>{
+    'loop-else': '''main=():>void=>{
 loop x in [0..0) {printl(x)}
 else loop c in "" {printl(c)}
 else {printl("empty")}
-return 0
 }''',
-    'labels': '''main=()=>{
+    'labels': '''main=():>void=>{
 let total=0
 $outer
 loop i in [0..4) {
@@ -137,10 +133,9 @@ if i =? 2 {break $outer}
 }
 }
 printl(total)
-return 0
 }''',
     'adjacency': '''identity=<T>(x:T):>T=>x
-main=()=>{
+main=():>void=>{
 let x=5
 let values=[1 -2 3]
 let optional:array<array<int64>?>=[]
@@ -149,9 +144,8 @@ let exclusive=(0,2..8]
 printl(identity<int64>(2x+2(x+1)))
 printl(values) printl([loop point in points point]) printl(optional.length)
 printl([loop point in exclusive point])
-return 0
 }''',
-    'strings': '''main=()=>{
+    'strings': '''main=():>void=>{
 let raw=r"""first  
 \t{raw # untouched}  
   last"""
@@ -159,9 +153,8 @@ let quoted="""first
 {"nested"}  
   last"""
 printl(raw) printl(quoted) printl(0x"cafe")
-return 0
 }''',
-    'crlf': 'main=()=>{\r\nlet text=r"""a  \r\n\tb\r\nc"""\r\nprintl(text)\r\nreturn 0\r\n}',
+    'crlf': 'main=():>void=>{\r\nlet text=r"""a  \r\n\tb\r\nc"""\r\nprintl(text)\r\n}',
 }
 
 
