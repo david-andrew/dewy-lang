@@ -379,7 +379,10 @@ cond_depth = 0
 scope_locals: int[][]
 scope_defers: int[][]
 loops: LoopInfo[]
-tl_items: TempItem[][]
+# Statement marks index one reusable temporary arena. No per-statement array
+# is allocated; cleanup visits each held value once in reverse creation order.
+tl_items: int[]
+tl_values: TempItem[]
 tl_nop: int[]
 tl_cond: int[]
 
@@ -524,14 +527,14 @@ new_temp = (t: int) -> int: new_slot(tsize(t), talign(t))
 
 reg_temp_slot = (s: int, t: int, stack_target: int = -1):
     if not is_managed(t) or tl_items.len() == 0: return
-    tl_items[tl_items.len() - 1].push(TempItem(true, s, t, cond_depth > tl_cond[tl_cond.len() - 1], stack_target))
+    tl_values.push(TempItem(true, s, t, cond_depth > tl_cond[tl_cond.len() - 1], stack_target))
 
 reg_temp_vreg = (v: int, t: int):
     if not is_managed(t) or tl_items.len() == 0: return
     # An empty literal is an immutable null constant. It owns no allocation,
     # and conditional cleanup must not try to clear its constant register.
     if is_kv(v) and kv_of(v) == 0: return
-    tl_items[tl_items.len() - 1].push(TempItem(false, v, t, cond_depth > tl_cond[tl_cond.len() - 1]))
+    tl_values.push(TempItem(false, v, t, cond_depth > tl_cond[tl_cond.len() - 1]))
 
 borrow = (val: Val, t: int):
     if not val.owned or not is_managed(t): return
@@ -591,27 +594,26 @@ gen_borrowed = (e: int) -> Val:
     Val(v.v, false, -1)
 
 stmt_begin = ():
-    tl_items.push([])
+    tl_items.push(tl_values.len())
     tl_nop.push(emit(.nop, 0, 0, 0, 0, 0, 0))
     tl_cond.push(cond_depth)
 
 stmt_end = ():
-    items = tl_items.pop()
+    start = tl_items.pop()
+    end = tl_values.len()
     nop = tl_nop.pop()
     tl_cond.pop()
-    # zero conditionally created temps at statement start
-    zs: int[]
-    loop it in items:
-        if it.cond:
-            if it.is_slot: zs.push(it.ref * 2)
-            else: zs.push(it.ref * 2 + 1)
-    if zs.len() > 0:
-        start = ir.args.len()
-        loop z in zs: ir.args.push(i32(z))
-        ir.code[nop] = Ins(.zeroslots, 0, 0, i32(start), i32(zs.len()), 0, 0)
-    i = items.len() - 1
-    loop i >= 0:
-        it = items[i]
+    # Append the demanded zero inventory directly into the IR argument arena.
+    args_start = ir.args.len()
+    loop i in [start..end):
+        it = tl_values[i]
+        if it.cond: ir.args.push(i32(it.ref * 2 + int(not it.is_slot)))
+    count = ir.args.len() - args_start
+    if count > 0:
+        ir.code[nop] = Ins(.zeroslots, 0, 0, i32(args_start), i32(count), 0, 0)
+    i = end - 1
+    loop i >= start:
+        it = tl_values[i]
         if it.is_slot:
             a = e_slot(it.ref)
             if it.stack_target >= 0: drop_stack_closure(a, it.stack_target)
@@ -621,6 +623,7 @@ stmt_end = ():
             release(it.ref, it.t)
             if it.cond: e_mov(it.ref, e_iconst(0))
         i -= 1
+    tl_values.truncate(start)
 
 # Keep ordinary construction unchanged: a placeholder becomes a zero only
 # when return/break/continue can bypass writes to some managed fields.
@@ -645,17 +648,16 @@ drop_held = (items: int, built: int):
         if it.is_slot: drop_at(e_slot(it.ref), it.t)
         else: release(it.ref, it.t)
         k -= 1
-    j = tl_items.len() - 1
-    loop j >= items:
-        k = tl_items[j].len() - 1
-        loop k >= 0:
-            it = tl_items[j][k]
+    if items < tl_items.len():
+        start = tl_items[items]
+        k = tl_values.len() - 1
+        loop k >= start:
+            it = tl_values[k]
             if it.is_slot:
                 if it.stack_target >= 0: drop_stack_closure(e_slot(it.ref), it.stack_target)
                 else: drop_at(e_slot(it.ref), it.t)
             else: release(it.ref, it.t)
             k -= 1
-        j -= 1
 
 enter_cond = (): cond_depth += 1
 leave_cond = (): cond_depth -= 1
@@ -1349,10 +1351,10 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
         # its captures alive through the statement, then destroy them directly.
         if stack: reg_temp_slot(val.slot, pt, int(nodes[value_node].sym))
         else:
-            held = if tl_items.len() == 0: 0 else: tl_items[tl_items.len() - 1].len()
+            held = tl_values.len()
             borrow(val, pt)
-            if snapshot and not ownership_type(pt) and tl_items.len() > 0 and tl_items[tl_items.len() - 1].len() == held + 1:
-                arg_snapshots.push(tl_items[tl_items.len() - 1][held])
+            if snapshot and not ownership_type(pt) and tl_items.len() > 0 and tl_values.len() == held + 1:
+                arg_snapshots.push(tl_values[held])
         out.push(val.v)
 
 # A snapshot taken only to keep an argument stable while the callee runs. The
@@ -1365,17 +1367,18 @@ arg_snapshots: TempItem[]
 release_arg_snapshots = (mark: int):
     loop arg_snapshots.len() > mark:
         it = arg_snapshots.pop()
-        j = tl_items.len() - 1
+        k = tl_values.len() - 1
         found = false
-        loop j >= 0 and not found:
-            k = tl_items[j].len() - 1
-            loop k >= 0 and not found:
-                x = tl_items[j][k]
-                if x.is_slot == it.is_slot and x.ref == it.ref:
-                    tl_items[j].remove(k)
-                    found = true
-                k -= 1
-            j -= 1
+        loop k >= 0 and not found:
+            x = tl_values[k]
+            if x.is_slot == it.is_slot and x.ref == it.ref:
+                tl_values.remove(k)
+                # An early release can belong to an enclosing statement.
+                # Preserve the offsets of every still-active nested statement.
+                loop j in [0..tl_items.len()):
+                    if tl_items[j] > k: tl_items[j] -= 1
+                found = true
+            k -= 1
         if not found: continue
         if it.is_slot: drop_at(e_slot(it.ref), it.t)
         else: release(it.ref, it.t)
@@ -3300,108 +3303,182 @@ struct LoanCapacity:
     limit: int
 loan_capacities: LoanCapacity[]
 
+# O(1) intrinsic dispatch and indexed operand reads. Each handler performs
+# only its own lowering and helper work; list offsets survive AST/list growth.
 gen_intrinsic = (e: int) -> Val:
     if (effects_active or effect_policy.prohibitions != 0) and e != fixed_fill_push: effect_lower_intrinsic(cur_fn, e)
     id = nodes[e].aux as IN
-    args = kids(e)
-    if partition_mode and id == .len and args.len() == 1:
-        desc = partition_descriptor(args[0])
-        if desc >= 0: return V(partition_lengths[int(nodes[args[0]].sym)], false)
-    if id == .lend:
-        extra = gen_expr(args[1]).v
-        pl = gen_place(args[0], has_flag(e, NF_MUT))
-        at = ntype(args[0])
-        length = arr_len(read_place(pl, at))
-        limit = e_bin(.add, VI, length, extra)
-        iff(e_bin(.or_, VI, e_bin(.lts, VI, extra, e_iconst(0)), e_bin(.lts, VI, limit, length)))
-        e_call_nr1(rt("__panic"), e_daddr(str_data("invalid scoped loan reservation")), -1)
-        endc()
-        if has_flag(e, NF_MUT):
-            arr_unique(pl, at)
-            sa = place_addr(pl, at)
-            e_call3(rt("__arr_reserve"), sa, e_iconst(1), limit, -1)
-            if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
-        loan_capacities.push(LoanCapacity(place_route(args[0]), limit))
-        result = gen_expr(args[2])
-        loan_capacities.pop()
-        return result
-    if id == .loan_address:
-        p = gen_borrowed(args[0]).v
-        r = vreg(VI)
-        e_mov(r, e_iconst(0))
-        iff(e_bin(.ne, VI, p, e_iconst(0)))
-        e_mov(r, e_addi(p, 24))
-        endc()
-        return V(r, false)
-    if id == .loan_load: return V(e_load(VI, gen_expr(args[0]).v, 0, 1), false)
-    if id == .loan_store:
-        value = gen_expr(args[0]).v
-        address = gen_expr(args[1]).v
-        e_store(address, 0, value, 1)
-        return V(-1, false)
-    if id == .loan_length:
-        length = gen_expr(args[1]).v
-        p = place_route(args[0])
-        loop loan in loan_capacities:
-            if loan.place == p:
-                iff(e_bin(.or_, VI, e_bin(.lts, VI, length, e_iconst(0)), e_bin(.gts, VI, length, loan.limit)))
-                e_call_nr1(rt("__panic"), e_daddr(str_data("scoped loan length exceeds reservation")), -1)
-                endc()
-        address = gen_borrowed(args[0]).v
-        iff(e_bin(.ne, VI, address, e_iconst(0)))
-        hdr_store(address, 8, length)
-        endc()
-        return V(-1, false)
-    if id == .len or id == .arrcap:
-        at = prune(ntype(args[0]))
-        if id == .len and types[at].kind == .fixed:
-            gen_borrowed(args[0])
-            return V(e_iconst(fixed_len(at)), false)
-        if id == .len:
-            fixed = fixed_path_of(args[0])
-            if fixed >= 0: return V(fixed_paths[fixed].len, false)
-        p = gen_borrowed(args[0]).v
-        r = vreg(VI)
-        e_mov(r, e_iconst(0))
-        iff(e_bin(.ne, VI, p, e_iconst(0)))
-        off = 8
-        if id == .arrcap: off = 16
-        e_mov(r, e_load(VI, p, off, 8))
-        endc()
-        return V(r, false)
-    if id == .take_slot:
-        at = ntype(args[0])
-        et = telem(at)
-        index = gen_expr(args[1]).v
-        pl = gen_place(args[0], true)
+    arg_start = int(nodes[e].list)
+    arg_count = nkids(e)
+    if partition_mode and id == .len and arg_count == 1:
+        desc = partition_descriptor(int(lists[arg_start]))
+        if desc >= 0: return V(partition_lengths[int(nodes[int(lists[arg_start])].sym)], false)
+    match id:
+        lend: return gen_intrinsic_lend(e, arg_start)
+        loan_address: return gen_intrinsic_loan_address(e, arg_start)
+        loan_load: return gen_intrinsic_loan_load(e, arg_start)
+        loan_store: return gen_intrinsic_loan_store(e, arg_start)
+        loan_length: return gen_intrinsic_loan_length(e, arg_start)
+        len, arrcap: return gen_intrinsic_len(e, arg_start)
+        take_slot: return gen_intrinsic_take_slot(e, arg_start)
+        relocate: return gen_intrinsic_relocate(e, arg_start)
+        push: return gen_intrinsic_push(e, arg_start)
+        pop: return gen_intrinsic_pop(e, arg_start)
+        insert: return gen_intrinsic_insert(e, arg_start)
+        remove: return gen_intrinsic_remove(e, arg_start)
+        clear: return gen_intrinsic_clear(e, arg_start)
+        extend: return gen_intrinsic_extend(e, arg_start)
+        reserve: return gen_intrinsic_reserve(e, arg_start)
+        resize, truncate, setlen: return gen_intrinsic_resize(e, arg_start)
+        arrdata, task_data: return gen_intrinsic_arrdata(e, arg_start)
+        syscall: return gen_intrinsic_syscall(e, arg_start, arg_count)
+        callc: return gen_intrinsic_callc(e, arg_start, arg_count)
+        memcpy: return gen_intrinsic_memcpy(e, arg_start)
+        zeroed: return gen_intrinsic_zeroed(e, arg_start)
+        memset: return gen_intrinsic_memset(e, arg_start)
+        panic: return gen_intrinsic_panic(e, arg_start, arg_count)
+        unreachable: return gen_intrinsic_unreachable(e, arg_start)
+        static_assert: return V(-1, false)
+        assert, runtime_assert: return gen_intrinsic_assert(e, arg_start, arg_count)
+        embed: return gen_intrinsic_embed(e, arg_start)
+        to_bytes: return gen_intrinsic_to_bytes(e, arg_start)
+        argv: return gen_intrinsic_argv(e, arg_start)
+        setjmp, longjmp, jump, clone_thread, atomic_add, atomic_cas, stack_ptr, cpu_features, code_sync: return gen_intrinsic_setjmp(e, arg_start, arg_count)
+        sqrt: return gen_intrinsic_sqrt(e, arg_start)
+        hash: return gen_intrinsic_hash(e, arg_start)
+        fmt_struct: return gen_fmt_struct(e)
+        json_fields: return gen_json_fields(e)
+        gpu_kernel: return gen_intrinsic_gpu_kernel(e, arg_start)
+        compute_spirv: return gen_intrinsic_compute_spirv(e, arg_start)
+        compute_textures: return gen_intrinsic_compute_textures(e, arg_start)
+        shader: return gen_intrinsic_shader(e, arg_start)
+        vec_ctor: return gen_vec_ctor(e)
+        _: fatal(nodes[e].pos, "intrinsic not supported in codegen")
+    V(-1, false)
+
+gen_intrinsic_lend = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    arg2 = int(lists[arg_start + 2])
+    extra = gen_expr(arg1).v
+    pl = gen_place(arg0, has_flag(e, NF_MUT))
+    at = ntype(arg0)
+    length = arr_len(read_place(pl, at))
+    limit = e_bin(.add, VI, length, extra)
+    iff(e_bin(.or_, VI, e_bin(.lts, VI, extra, e_iconst(0)), e_bin(.lts, VI, limit, length)))
+    e_call_nr1(rt("__panic"), e_daddr(str_data("invalid scoped loan reservation")), -1)
+    endc()
+    if has_flag(e, NF_MUT):
         arr_unique(pl, at)
-        p = read_place(pl, at)
-        bounds_check(p, index, nodes[e].pos)
-        ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, index, e_iconst(owner_stride(et))))
-        slot = new_temp(et)
-        store_val(et, e_slot(slot), 0, load_val(et, ea, 0))
-        e_zero(ea, owner_stride(et))
-        return result_from_slot(slot, et)
-    if id == .relocate:
-        at = ntype(args[0])
-        et = telem(at)
-        dst = gen_expr(args[1]).v
-        src = gen_expr(args[2]).v
-        pl = gen_place(args[0], true)
-        arr_unique(pl, at)
-        p = read_place(pl, at)
-        da = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, dst, e_iconst(owner_stride(et))))
-        sa = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, src, e_iconst(owner_stride(et))))
-        iff(e_bin(.ne, VI, dst, src))
-        owner_element_drop(da, et)
-        e_copy(da, sa, owner_stride(et))
-        e_zero(sa, owner_stride(et))
-        endc()
-        return V(-1, false)
-    if id == .push and fixed_fill_push == e:
+        sa = place_addr(pl, at)
+        e_call3(rt("__arr_reserve"), sa, e_iconst(1), limit, -1)
+        if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
+    loan_capacities.push(LoanCapacity(place_route(arg0), limit))
+    result = gen_expr(arg2)
+    loan_capacities.pop()
+    return result
+
+gen_intrinsic_loan_address = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    p = gen_borrowed(arg0).v
+    r = vreg(VI)
+    e_mov(r, e_iconst(0))
+    iff(e_bin(.ne, VI, p, e_iconst(0)))
+    e_mov(r, e_addi(p, 24))
+    endc()
+    return V(r, false)
+
+gen_intrinsic_loan_load = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    return V(e_load(VI, gen_expr(arg0).v, 0, 1), false)
+
+gen_intrinsic_loan_store = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    value = gen_expr(arg0).v
+    address = gen_expr(arg1).v
+    e_store(address, 0, value, 1)
+    return V(-1, false)
+
+gen_intrinsic_loan_length = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    length = gen_expr(arg1).v
+    p = place_route(arg0)
+    loop loan in loan_capacities:
+        if loan.place == p:
+            iff(e_bin(.or_, VI, e_bin(.lts, VI, length, e_iconst(0)), e_bin(.gts, VI, length, loan.limit)))
+            e_call_nr1(rt("__panic"), e_daddr(str_data("scoped loan length exceeds reservation")), -1)
+            endc()
+    address = gen_borrowed(arg0).v
+    iff(e_bin(.ne, VI, address, e_iconst(0)))
+    hdr_store(address, 8, length)
+    endc()
+    return V(-1, false)
+
+gen_intrinsic_len = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    id = nodes[e].aux as IN
+    at = prune(ntype(arg0))
+    if id == .len and types[at].kind == .fixed:
+        gen_borrowed(arg0)
+        return V(e_iconst(fixed_len(at)), false)
+    if id == .len:
+        fixed = fixed_path_of(arg0)
+        if fixed >= 0: return V(fixed_paths[fixed].len, false)
+    p = gen_borrowed(arg0).v
+    r = vreg(VI)
+    e_mov(r, e_iconst(0))
+    iff(e_bin(.ne, VI, p, e_iconst(0)))
+    off = 8
+    if id == .arrcap: off = 16
+    e_mov(r, e_load(VI, p, off, 8))
+    endc()
+    return V(r, false)
+
+gen_intrinsic_take_slot = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    at = ntype(arg0)
+    et = telem(at)
+    index = gen_expr(arg1).v
+    pl = gen_place(arg0, true)
+    arr_unique(pl, at)
+    p = read_place(pl, at)
+    bounds_check(p, index, nodes[e].pos)
+    ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, index, e_iconst(owner_stride(et))))
+    slot = new_temp(et)
+    store_val(et, e_slot(slot), 0, load_val(et, ea, 0))
+    e_zero(ea, owner_stride(et))
+    return result_from_slot(slot, et)
+
+gen_intrinsic_relocate = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    arg2 = int(lists[arg_start + 2])
+    at = ntype(arg0)
+    et = telem(at)
+    dst = gen_expr(arg1).v
+    src = gen_expr(arg2).v
+    pl = gen_place(arg0, true)
+    arr_unique(pl, at)
+    p = read_place(pl, at)
+    da = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, dst, e_iconst(owner_stride(et))))
+    sa = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, src, e_iconst(owner_stride(et))))
+    iff(e_bin(.ne, VI, dst, src))
+    owner_element_drop(da, et)
+    e_copy(da, sa, owner_stride(et))
+    e_zero(sa, owner_stride(et))
+    endc()
+    return V(-1, false)
+
+gen_intrinsic_push = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    if fixed_fill_push == e:
         # (a fixed comprehension's element goes straight to its next slot)
         et = int(types[representation_type(fixed_fill_type)].elem)
-        val = gen_owned(args[1])
+        val = gen_owned(arg1)
         if not fixed_fill_exact:
             iff(e_bin(.ges, VI, fixed_fill_count, e_iconst(fixed_len(representation_type(fixed_fill_type)))))
             e_call_nr1(rt("__panic"), e_daddr(str_data("fixed-size array needs {fixed_len(representation_type(fixed_fill_type))} elements")), -1)
@@ -3409,154 +3486,168 @@ gen_intrinsic = (e: int) -> Val:
         store_val(et, e_bin(.add, VI, e_slot(fixed_fill_slot), e_bin(.mul, VI, fixed_fill_count, e_iconst(tsize(et)))), 0, val.v)
         e_mov(fixed_fill_count, e_addi(fixed_fill_count, 1))
         return V(-1, false)
-    if id == .push:
-        at = prune(ntype(args[0]))
-        et = int(types[at].elem)
-        esz = owner_stride(et)
-        # xs.push(S(...)) with side-effect-free fields: build the element in place
-        in_place = not ownership_type(et) and is_plain_ctor(args[1])
-        val = V(-1, false)
-        if not in_place: val = gen_owned(args[1])
-        pl = gen_place(args[0], true)
-        p = read_place(pl, at)
-        slotp = vreg(VI)
-        if has_flag(e, NF_INBOUNDS):
-            # (generated code that reserved room in an array of its own: no checks)
-            n0 = 0
-            if has_flag(e, NF_COMPREHENSION):
-                n0 = read_place(local_place(int(nodes[e].d), false), T_INT)
-            else:
-                n0 = hdr_load(p, 8)
-                hdr_store(p, 8, e_addi(n0, 1))
-            e_mov(slotp, e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, n0, e_iconst(esz))))
+    at = prune(ntype(arg0))
+    et = int(types[at].elem)
+    esz = owner_stride(et)
+    # xs.push(S(...)) with side-effect-free fields: build the element in place
+    in_place = not ownership_type(et) and is_plain_ctor(arg1)
+    val = V(-1, false)
+    if not in_place: val = gen_owned(arg1)
+    pl = gen_place(arg0, true)
+    p = read_place(pl, at)
+    slotp = vreg(VI)
+    if has_flag(e, NF_INBOUNDS):
+        # (generated code that reserved room in an array of its own: no checks)
+        n0 = 0
+        if has_flag(e, NF_COMPREHENSION):
+            n0 = read_place(local_place(int(nodes[e].d), false), T_INT)
         else:
-            # fast path: a unique array with spare capacity; anything else branches to the slow path
-            blk()
-            done = ctl
-            blk()
-            slow = ctl
-            brif_to(e_bin(.eq, VI, p, e_iconst(0)), slow)
-            brif_to(e_bin(.ne, VI, hdr_load(p, 0), e_iconst(1)), slow)
-            n = hdr_load(p, 8)
-            brif_to(e_bin(.ges, VI, n, hdr_load(p, 16)), slow)
-            hdr_store(p, 8, e_addi(n, 1))
-            e_mov(slotp, e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, n, e_iconst(esz))))
-            br_to(done)
-            endc()
-            # slow path: copy if shared, then grow
-            was = ir_cold
-            ir_cold = true
-            write_place(pl, at, e_call1(lf_helper(.arruniq, at, 0), read_place(pl, at), VI))
-            sa = place_addr(pl, at)
-            e_mov(slotp, e_call2(rt("__arr_push_slot"), sa, e_iconst(esz), VI))
-            ir_cold = was
-            if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
-            endc()
-        if in_place:
-            ce = args[1]
-            t = prune(ntype(ce))
-            si = int(types[t].st)
-            layout(t)
-            e_zero(slotp, tsize(t))
-            loop i in [0..int(structs[si].nfields)):
-                a = kid(ce, i)
-                if a == 0: continue
-                f = int(structs[si].fields) + i
-                fv = gen_owned(a)
-                store_field(f, slotp, fv.v)
-            return V(-1, false)
-        store_val(et, slotp, 0, val.v)
-        owner_element_live(slotp, et)
-        if ownership_type(et): owner_forget_slot(val.slot)
-        return V(-1, false)
-    if id == .pop:
-        at = prune(ntype(args[0]))
-        et = int(types[at].elem)
-        pl = gen_place(args[0], true)
-        arr_unique(pl, at)
-        p = read_place(pl, at)
-        n = arr_len(p)
-        iff(e_bin(.eq, VI, n, e_iconst(0)))
-        e_call_nr1(rt("__panic"), e_daddr(str_data("pop() from an empty array")), -1)
+            n0 = hdr_load(p, 8)
+            hdr_store(p, 8, e_addi(n0, 1))
+        e_mov(slotp, e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, n0, e_iconst(esz))))
+    else:
+        # fast path: a unique array with spare capacity; anything else branches to the slow path
+        blk()
+        done = ctl
+        blk()
+        slow = ctl
+        brif_to(e_bin(.eq, VI, p, e_iconst(0)), slow)
+        brif_to(e_bin(.ne, VI, hdr_load(p, 0), e_iconst(1)), slow)
+        n = hdr_load(p, 8)
+        brif_to(e_bin(.ges, VI, n, hdr_load(p, 16)), slow)
+        hdr_store(p, 8, e_addi(n, 1))
+        e_mov(slotp, e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, n, e_iconst(esz))))
+        br_to(done)
         endc()
-        nn = e_bin(.sub, VI, n, e_iconst(1))
-        hdr_store(p, 8, nn)
-        sz = owner_stride(et)
-        ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, nn, e_iconst(sz)))
-        if vc(et) == VC_AGG:
-            s = new_temp(et)
-            d = e_slot(s)
-            e_copy(d, ea, tsize(et))
-            e_zero(ea, sz)
-            return Val(d, true, s)
-        v = load_val(et, ea, 0)
-        e_zero(ea, sz)
-        return V(v, true)
-    if id == .insert:
-        at = prune(ntype(args[0]))
-        et = int(types[at].elem)
-        val = gen_owned(args[2])
-        idx = gen_expr(args[1]).v
-        pl = gen_place(args[0], true)
-        arr_unique(pl, at)
+        # slow path: copy if shared, then grow
+        was = ir_cold
+        ir_cold = true
+        write_place(pl, at, e_call1(lf_helper(.arruniq, at, 0), read_place(pl, at), VI))
         sa = place_addr(pl, at)
-        slotp = e_call3(rt("__arr_insert_slot"), sa, e_iconst(owner_stride(et)), idx, VI)
+        e_mov(slotp, e_call2(rt("__arr_push_slot"), sa, e_iconst(esz), VI))
+        ir_cold = was
         if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
-        store_val(et, slotp, 0, val.v)
-        owner_element_live(slotp, et)
-        if ownership_type(et): owner_forget_slot(val.slot)
+        endc()
+    if in_place:
+        ce = arg1
+        t = prune(ntype(ce))
+        si = int(types[t].st)
+        layout(t)
+        e_zero(slotp, tsize(t))
+        loop i in [0..int(structs[si].nfields)):
+            a = kid(ce, i)
+            if a == 0: continue
+            f = int(structs[si].fields) + i
+            fv = gen_owned(a)
+            store_field(f, slotp, fv.v)
         return V(-1, false)
-    if id == .remove:
-        at = prune(ntype(args[0]))
-        et = int(types[at].elem)
-        sz = owner_stride(et)
-        idx = gen_expr(args[1]).v
-        pl = gen_place(args[0], true)
-        arr_unique(pl, at)
-        p = read_place(pl, at)
-        bounds_check(p, idx, nodes[e].pos)
-        ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, idx, e_iconst(sz)))
+    store_val(et, slotp, 0, val.v)
+    owner_element_live(slotp, et)
+    if ownership_type(et): owner_forget_slot(val.slot)
+    return V(-1, false)
+
+gen_intrinsic_pop = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    at = prune(ntype(arg0))
+    et = int(types[at].elem)
+    pl = gen_place(arg0, true)
+    arr_unique(pl, at)
+    p = read_place(pl, at)
+    n = arr_len(p)
+    iff(e_bin(.eq, VI, n, e_iconst(0)))
+    e_call_nr1(rt("__panic"), e_daddr(str_data("pop() from an empty array")), -1)
+    endc()
+    nn = e_bin(.sub, VI, n, e_iconst(1))
+    hdr_store(p, 8, nn)
+    sz = owner_stride(et)
+    ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, nn, e_iconst(sz)))
+    if vc(et) == VC_AGG:
         s = new_temp(et)
         d = e_slot(s)
         e_copy(d, ea, tsize(et))
-        sa = place_addr(pl, at)
-        e_call3(rt("__arr_remove_slot"), sa, e_iconst(sz), idx, -1)
-        if vc(et) == VC_AGG: return Val(d, true, s)
-        return V(load_val(et, d, 0), true)
-    if id == .clear:
-        at = prune(ntype(args[0]))
-        et = int(types[at].elem)
-        pl = gen_place(args[0], true)
-        p = read_place(pl, at)
-        iff(e_bin(.ne, VI, p, e_iconst(0)))
-        iff(e_bin(.eq, VI, hdr_load(p, 0), e_iconst(1)))
-        # unique: drop the elements but keep the storage
-        if is_managed(et):
-            n = hdr_load(p, 8)
-            i = vreg(VI)
-            e_mov(i, e_iconst(0))
-            blk()
-            lop()
-            brif_to(e_bin(.ges, VI, i, n), ctl - 1)
-            ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, (if ownership_type(et): e_bin(.sub, VI, e_addi(n, -1), i) else: i), e_iconst(owner_stride(et))))
-            owner_element_drop(ea, et)
-            e_zero(ea, owner_stride(et))
-            e_mov(i, e_addi(i, 1))
-            br_to(ctl)
-            endc()
-            endc()
-        hdr_store(p, 8, e_iconst(0))
-        els()
-        release(p, at)
-        write_place(pl, at, e_iconst(0))
+        e_zero(ea, sz)
+        return Val(d, true, s)
+    v = load_val(et, ea, 0)
+    e_zero(ea, sz)
+    return V(v, true)
+
+gen_intrinsic_insert = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    arg2 = int(lists[arg_start + 2])
+    at = prune(ntype(arg0))
+    et = int(types[at].elem)
+    val = gen_owned(arg2)
+    idx = gen_expr(arg1).v
+    pl = gen_place(arg0, true)
+    arr_unique(pl, at)
+    sa = place_addr(pl, at)
+    slotp = e_call3(rt("__arr_insert_slot"), sa, e_iconst(owner_stride(et)), idx, VI)
+    if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
+    store_val(et, slotp, 0, val.v)
+    owner_element_live(slotp, et)
+    if ownership_type(et): owner_forget_slot(val.slot)
+    return V(-1, false)
+
+gen_intrinsic_remove = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    at = prune(ntype(arg0))
+    et = int(types[at].elem)
+    sz = owner_stride(et)
+    idx = gen_expr(arg1).v
+    pl = gen_place(arg0, true)
+    arr_unique(pl, at)
+    p = read_place(pl, at)
+    bounds_check(p, idx, nodes[e].pos)
+    ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, idx, e_iconst(sz)))
+    s = new_temp(et)
+    d = e_slot(s)
+    e_copy(d, ea, tsize(et))
+    sa = place_addr(pl, at)
+    e_call3(rt("__arr_remove_slot"), sa, e_iconst(sz), idx, -1)
+    if vc(et) == VC_AGG: return Val(d, true, s)
+    return V(load_val(et, d, 0), true)
+
+gen_intrinsic_clear = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    at = prune(ntype(arg0))
+    et = int(types[at].elem)
+    pl = gen_place(arg0, true)
+    p = read_place(pl, at)
+    iff(e_bin(.ne, VI, p, e_iconst(0)))
+    iff(e_bin(.eq, VI, hdr_load(p, 0), e_iconst(1)))
+    # unique: drop the elements but keep the storage
+    if is_managed(et):
+        n = hdr_load(p, 8)
+        i = vreg(VI)
+        e_mov(i, e_iconst(0))
+        blk()
+        lop()
+        brif_to(e_bin(.ges, VI, i, n), ctl - 1)
+        ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, (if ownership_type(et): e_bin(.sub, VI, e_addi(n, -1), i) else: i), e_iconst(owner_stride(et))))
+        owner_element_drop(ea, et)
+        e_zero(ea, owner_stride(et))
+        e_mov(i, e_addi(i, 1))
+        br_to(ctl)
         endc()
         endc()
-        return V(-1, false)
-    if id == .extend and ownership_type(ntype(args[0])):
-        at = ntype(args[0])
+    hdr_store(p, 8, e_iconst(0))
+    els()
+    release(p, at)
+    write_place(pl, at, e_iconst(0))
+    endc()
+    endc()
+    return V(-1, false)
+
+gen_intrinsic_extend = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    if ownership_type(ntype(arg0)):
+        at = ntype(arg0)
         et = telem(at)
-        source = gen_owned(args[1])
-        pl = gen_place(args[0], true)
+        source = gen_owned(arg1)
+        pl = gen_place(arg0, true)
         sa = place_addr(pl, at)
         e_call3(rt("__arr_extend"), sa, source.v, e_iconst(owner_stride(et)), VI)
         iff(e_bin(.ne, VI, source.v, e_iconst(0)))
@@ -3564,341 +3655,384 @@ gen_intrinsic = (e: int) -> Val:
         endc()
         owner_drop(e_slot(source.slot))
         return V(-1, false)
-    if id == .extend:
-        # append all of ys: one copy of the bytes, then retain managed elements
-        at = prune(ntype(args[0]))
-        et = int(types[at].elem)
-        esz = owner_stride(et)
-        sliced = is_slice(args[1])
-        if sliced:
-            src_root = write_root(int(nodes[args[1]].a))
-            dst_root = write_root(args[0])
-            # A small self-append should copy the selected range rather than
-            # retaining the entire source and forcing a full COW detach.
-            if src_root != 0 and dst_root != 0 and same_var(src_root, dst_root): sliced = false
-        ys = V(-1, false)
-        data = -1
-        cnt = -1
-        if sliced:
-            source_node = int(nodes[args[1]].a)
-            bt = prune(ntype(source_node))
-            # The retained source is only read: the selected elements are the
-            # copy extend makes, so `$explicit_copies` asks for no `.copy` here.
-            if copies_on: copy_explicit[source_node] = true
-            source = gen_owned(source_node)
-            if copies_on: copy_explicit.remove(source_node)
-            borrow(source, bt)
-            p = vreg(VI)
-            e_mov(p, source.v)
-            lo, hi = gen_slice_bounds(args[1], p)
-            n = if types[bt].kind == .fixed: e_iconst(fixed_len(bt)) else: arr_len(p)
-            bad = e_bin(.or_, VI, e_bin(.lts, VI, lo, e_iconst(0)), e_bin(.gts, VI, hi, n))
-            bad = e_bin(.or_, VI, bad, e_bin(.gts, VI, lo, hi))
-            iff(bad)
-            e_call_nr4(rt("__panic_slice"), e_daddr(str_data("slice")), lo, hi, n, -1)
-            endc()
-            # Freeze both bounds before destination evaluation, which may run
-            # user code or replace the source (including a self-append).
-            cnt = e_bin(.sub, VI, hi, lo)
-            base = if types[bt].kind == .fixed: p else: e_addi(p, 24)
-            data = e_bin(.add, VI, base, e_bin(.mul, VI, lo, e_iconst(esz)))
-        else:
-            # Finish a materialized slice's source snapshot before mutating
-            # the destination. The owned slice itself survives this scope.
-            if is_slice(args[1]): stmt_begin()
-            # (a whole source is only read, as a slice's is above: its elements
-            # are the copy extend makes, which spreading `[xs... ys...]` uses)
-            whole = copies_on and not is_slice(args[1]) and not costly_copy(et) and not copy_explicit.has(args[1])
-            if whole: copy_explicit[args[1]] = true
-            ys = gen_owned(args[1])
-            if whole: copy_explicit.remove(args[1])
-            if is_managed(et): cnt = arr_len(ys.v)
-            if is_slice(args[1]): stmt_end()
-        pl = gen_place(args[0], true)
-        arr_unique(pl, at)
-        sa = place_addr(pl, at)
-        first = 0
-        if sliced: first = e_call4(rt("__arr_extend_raw"), sa, data, cnt, e_iconst(esz), VI)
-        else: first = e_call3(rt("__arr_extend"), sa, ys.v, e_iconst(esz), VI)
-        if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
-        if is_managed(et):
-            i = vreg(VI)
-            e_mov(i, e_iconst(0))
-            blk()
-            lop()
-            brif_to(e_bin(.ges, VI, i, cnt), ctl - 1)
-            copy_at(e_bin(.add, VI, first, e_bin(.mul, VI, i, e_iconst(esz))), et)
-            e_mov(i, e_addi(i, 1))
-            br_to(ctl)
-            endc()
-            endc()
-        if not sliced: release(ys.v, at)
-        return V(-1, false)
-    if id == .reserve:
-        at = prune(ntype(args[0]))
-        n = gen_expr(args[1]).v
-        pl = gen_place(args[0], true)
-        arr_unique(pl, at)
-        sa = place_addr(pl, at)
-        e_call3(rt("__arr_reserve"), sa, e_iconst(owner_stride(int(types[at].elem))), n, -1)
-        if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
-        return V(-1, false)
-    if id == .resize or id == .truncate or id == .setlen:
-        at = prune(ntype(args[0]))
-        et = int(types[at].elem)
-        n = gen_expr(args[1]).v
-        if id == .truncate and files[pos_file(nodes[args[1]].pos)].is_dewy:
-            # (a count below zero keeps no elements and is a mistake, not `clear`)
-            iff(e_bin(.lts, VI, n, e_iconst(0)))
-            e_call_nr1(rt("__panic"), e_daddr(str_data("{loc_str(nodes[args[1]].pos)}: truncate keeps a count of elements, which cannot be negative")), -1)
-            endc()
-        pl = gen_place(args[0], true)
-        arr_unique(pl, at)
-        # (elements past an array's length are not zeroed: for elements that hold references
-        # the new ones are zeroed, as the stores that write them drop what they replace)
-        if id == .setlen and not is_managed(et):
-            p = read_place(pl, at)
-            # reserve(0) leaves an empty array null; it has no length header.
-            iff(e_bin(.ne, VI, p, e_iconst(0)))
-            hdr_store(p, 8, n)
-            endc()
-            return V(-1, false)
-        if is_managed(et):
-            # drop elements beyond the new length
-            blk()
-            lop()
-            p = read_place(pl, at)
-            cur = arr_len(p)
-            brif_to(e_bin(.les, VI, cur, n), ctl - 1)
-            last = e_bin(.sub, VI, cur, e_iconst(1))
-            hdr_store(p, 8, last)
-            ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, last, e_iconst(owner_stride(et))))
-            owner_element_drop(ea, et)
-            e_zero(ea, owner_stride(et))
-            br_to(ctl)
-            endc()
-            endc()
-        if id == .truncate:
-            p = read_place(pl, at)
-            iff(e_bin(.ne, VI, p, e_iconst(0)))
-            iff(e_bin(.lts, VI, n, hdr_load(p, 8)))
-            hdr_store(p, 8, n)
-            endc()
-            endc()
-            return V(-1, false)
-        sa = place_addr(pl, at)
-        e_call3(rt("__arr_resize"), sa, e_iconst(owner_stride(et)), n, -1)
-        if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
-        return V(-1, false)
-    if id == .arrdata or id == .task_data:
-        # a raw pointer into a variable's array may be written through: give the variable its own
-        # copy first (a literal, or a shared one, must not change)
-        a0 = args[0]
-        at = prune(ntype(a0))
-        p = 0
-        if id == .arrdata and types[at].kind == .array and data_writable(a0):
-            pl = gen_place(a0, true)
-            arr_unique(pl, at)
-            # gen_place also detaches containing arrays and evaluates indexes.
-            # Read that place directly; evaluating a side-effectful index again
-            # could select another element or run the user's code twice.
-            p = read_place(pl, at)
-        else: p = gen_borrowed(a0).v
-        r = vreg(VI)
-        e_mov(r, e_iconst(0))
+    # append all of ys: one copy of the bytes, then retain managed elements
+    at = prune(ntype(arg0))
+    et = int(types[at].elem)
+    esz = owner_stride(et)
+    sliced = is_slice(arg1)
+    if sliced:
+        src_root = write_root(int(nodes[arg1].a))
+        dst_root = write_root(arg0)
+        # A small self-append should copy the selected range rather than
+        # retaining the entire source and forcing a full COW detach.
+        if src_root != 0 and dst_root != 0 and same_var(src_root, dst_root): sliced = false
+    ys = V(-1, false)
+    data = -1
+    cnt = -1
+    if sliced:
+        source_node = int(nodes[arg1].a)
+        bt = prune(ntype(source_node))
+        # The retained source is only read: the selected elements are the
+        # copy extend makes, so `$explicit_copies` asks for no `.copy` here.
+        if copies_on: copy_explicit[source_node] = true
+        source = gen_owned(source_node)
+        if copies_on: copy_explicit.remove(source_node)
+        borrow(source, bt)
+        p = vreg(VI)
+        e_mov(p, source.v)
+        lo, hi = gen_slice_bounds(arg1, p)
+        n = if types[bt].kind == .fixed: e_iconst(fixed_len(bt)) else: arr_len(p)
+        bad = e_bin(.or_, VI, e_bin(.lts, VI, lo, e_iconst(0)), e_bin(.gts, VI, hi, n))
+        bad = e_bin(.or_, VI, bad, e_bin(.gts, VI, lo, hi))
+        iff(bad)
+        e_call_nr4(rt("__panic_slice"), e_daddr(str_data("slice")), lo, hi, n, -1)
+        endc()
+        # Freeze both bounds before destination evaluation, which may run
+        # user code or replace the source (including a self-append).
+        cnt = e_bin(.sub, VI, hi, lo)
+        base = if types[bt].kind == .fixed: p else: e_addi(p, 24)
+        data = e_bin(.add, VI, base, e_bin(.mul, VI, lo, e_iconst(esz)))
+    else:
+        # Finish a materialized slice's source snapshot before mutating
+        # the destination. The owned slice itself survives this scope.
+        if is_slice(arg1): stmt_begin()
+        # (a whole source is only read, as a slice's is above: its elements
+        # are the copy extend makes, which spreading `[xs... ys...]` uses)
+        whole = copies_on and not is_slice(arg1) and not costly_copy(et) and not copy_explicit.has(arg1)
+        if whole: copy_explicit[arg1] = true
+        ys = gen_owned(arg1)
+        if whole: copy_explicit.remove(arg1)
+        if is_managed(et): cnt = arr_len(ys.v)
+        if is_slice(arg1): stmt_end()
+    pl = gen_place(arg0, true)
+    arr_unique(pl, at)
+    sa = place_addr(pl, at)
+    first = 0
+    if sliced: first = e_call4(rt("__arr_extend_raw"), sa, data, cnt, e_iconst(esz), VI)
+    else: first = e_call3(rt("__arr_extend"), sa, ys.v, e_iconst(esz), VI)
+    if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
+    if is_managed(et):
+        i = vreg(VI)
+        e_mov(i, e_iconst(0))
+        blk()
+        lop()
+        brif_to(e_bin(.ges, VI, i, cnt), ctl - 1)
+        copy_at(e_bin(.add, VI, first, e_bin(.mul, VI, i, e_iconst(esz))), et)
+        e_mov(i, e_addi(i, 1))
+        br_to(ctl)
+        endc()
+        endc()
+    if not sliced: release(ys.v, at)
+    return V(-1, false)
+
+gen_intrinsic_reserve = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    at = prune(ntype(arg0))
+    n = gen_expr(arg1).v
+    pl = gen_place(arg0, true)
+    arr_unique(pl, at)
+    sa = place_addr(pl, at)
+    e_call3(rt("__arr_reserve"), sa, e_iconst(owner_stride(int(types[at].elem))), n, -1)
+    if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
+    return V(-1, false)
+
+gen_intrinsic_resize = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    id = nodes[e].aux as IN
+    at = prune(ntype(arg0))
+    et = int(types[at].elem)
+    n = gen_expr(arg1).v
+    if id == .truncate and files[pos_file(nodes[arg1].pos)].is_dewy:
+        # (a count below zero keeps no elements and is a mistake, not `clear`)
+        iff(e_bin(.lts, VI, n, e_iconst(0)))
+        e_call_nr1(rt("__panic"), e_daddr(str_data("{loc_str(nodes[arg1].pos)}: truncate keeps a count of elements, which cannot be negative")), -1)
+        endc()
+    pl = gen_place(arg0, true)
+    arr_unique(pl, at)
+    # (elements past an array's length are not zeroed: for elements that hold references
+    # the new ones are zeroed, as the stores that write them drop what they replace)
+    if id == .setlen and not is_managed(et):
+        p = read_place(pl, at)
+        # reserve(0) leaves an empty array null; it has no length header.
         iff(e_bin(.ne, VI, p, e_iconst(0)))
-        e_mov(r, e_addi(p, 24))
-        endc()
-        return V(r, false)
-    if id == .syscall:
-        # (an error only where it is used: the compiler has Linux's in code Windows programs leave out)
-        if target_windows: fatal(nodes[e].pos, "syscall() is Linux's: a Windows program calls the system's DLL functions (lib/core/windows.jo)")
-        vs: int[]
-        loop a in args: vs.push(gen_expr(a).v)
-        # (macOS: done with libSystem's functions, lib/core/macos.jo)
-        if target_macos:
-            loop vs.len() < 7: vs.push(e_iconst(0))
-            return V(e_call(rt("__mac_syscall"), vs, VI), false)
-        interruptible = false
-        if concurrency.concurrency_runtime_needed and nodes[args[0]].kind == .int_lit and files[pos_file(nodes[e].pos)].path != lib_dir + "/std/tasks.jo" and files[pos_file(nodes[e].pos)].path != lib_dir + "/std/fork_join.jo":
-            number = nodes[args[0]].ival
-            interruptible = number in [0, 1, 2, 7, 16, 17, 19, 20, 35, 42, 43, 44, 45, 46, 47, 61, 74, 75, 202, 288]
-        if interruptible:
-            result = vreg(VI)
-            e_mov(result, e_iconst(-125))
-            blk()
-            done = ctl
-            lop()
-            retry = ctl
-            brif_to(e_call0(rt("__task_canceled"), VI), done)
-            start = ir.args.len()
-            loop v in vs: ir.args.push(i32(v))
-            raw = vreg(VI)
-            emit(.syscall, VI, raw, i32(start), i32(vs.len()), 0, 0)
-            brif_to(e_bin(.eq, VI, raw, e_iconst(-4)), retry)
-            # Completed syscalls may transfer a descriptor or reap a process.
-            # Let the public boundary account for that result before reporting
-            # cancellation; only EINTR retries consult the scope here.
-            e_mov(result, raw)
-            endc()
-            endc()
-            return V(result, false)
-        start = ir.args.len()
-        loop v in vs: ir.args.push(i32(v))
-        d = vreg(VI)
-        emit(.syscall, VI, d, i32(start), i32(vs.len()), 0, 0)
-        return V(d, false)
-    if id == .callc:
-        fp = gen_expr(args[0]).v
-        vs: int[]
-        loop i in [1..args.len()): vs.push(gen_expr(args[i]).v)
-        e_calli(fp, vs, -1, false)
-        return V(-1, false)
-    if id == .memcpy:
-        d = gen_expr(args[0]).v
-        s = gen_expr(args[1]).v
-        n = gen_expr(args[2]).v
-        emit(.memcpy, VI, 0, d, s, n, 0)
-        return V(-1, false)
-    if id == .zeroed:
-        t = ntype(e)
-        if vc(t) != VC_AGG: return V(zero_val(t), true)
-        z = e_slot(new_temp(t))
-        e_zero(z, tsize(t))
-        return V(z, true)
-    if id == .memset:
-        d = gen_expr(args[0]).v
-        b = gen_expr(args[1]).v
-        n = gen_expr(args[2]).v
-        emit(.memset, VI, 0, d, b, n, 0)
-        return V(-1, false)
-    if id == .panic:
-        m = 0
-        # Message construction only runs on the terminating path. Its calls
-        # must not make a checked helper look like it calls on successful paths.
-        was = ir_cold
-        ir_cold = true
-        if args.len() > 0: m = gen_borrowed(args[0]).v
-        else: m = e_daddr(str_data("panic"))
-        ir_cold = was
-        e_call_nr1(rt("__panic"), m, -1)
-        return never_after(e)
-    if id == .unreachable:
-        e_call_nr1(rt("__panic"), e_daddr(str_data("unreachable code reached")), -1)
-        return never_after(e)
-    if id == .static_assert: return V(-1, false)
-    if id == .assert or id == .runtime_assert:
-        c = gen_expr(args[0]).v
-        iff(e_bin(.eq, VI, c, e_iconst(0)))
-        # (the message is made only when it fails: a temporary made there is a conditional one)
-        enter_cond()
-        m = 0
-        if args.len() > 1: m = gen_borrowed(args[1]).v
-        else:
-            cond = call_args_text(nodes[e].pos)
-            msg = "assertion failed"
-            if len(cond) > 0 and len(cond) <= 200: msg = "assertion failed: {cond}"
-            m = e_daddr(str_data(msg))
-        e_call_nr2(rt("__assert_fail"), m, e_daddr(loc_data(nodes[e].pos)), -1)
-        leave_cond()
+        hdr_store(p, 8, n)
         endc()
         return V(-1, false)
-    if id == .embed:
-        s = name_of(int(nodes[e].sval))
-        return V(e_daddr(str_data(s)), false)
-    if id == .to_bytes: return V(gen_expr(args[0]).v, false)
-    if id == .argv:
-        d = vreg(VI)
-        emit(.intr, VI, d, 0, 0, 0, 1)
-        return V(d, false)
-    if id == .setjmp or id == .longjmp or id == .jump or id == .clone_thread or id == .atomic_add or id == .atomic_cas or id == .stack_ptr or id == .cpu_features or id == .code_sync:
-        vs: int[]
-        loop a in args: vs.push(gen_expr(a).v)
+    if is_managed(et):
+        # drop elements beyond the new length
+        blk()
+        lop()
+        p = read_place(pl, at)
+        cur = arr_len(p)
+        brif_to(e_bin(.les, VI, cur, n), ctl - 1)
+        last = e_bin(.sub, VI, cur, e_iconst(1))
+        hdr_store(p, 8, last)
+        ea = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, last, e_iconst(owner_stride(et))))
+        owner_element_drop(ea, et)
+        e_zero(ea, owner_stride(et))
+        br_to(ctl)
+        endc()
+        endc()
+    if id == .truncate:
+        p = read_place(pl, at)
+        iff(e_bin(.ne, VI, p, e_iconst(0)))
+        iff(e_bin(.lts, VI, n, hdr_load(p, 8)))
+        hdr_store(p, 8, n)
+        endc()
+        endc()
+        return V(-1, false)
+    sa = place_addr(pl, at)
+    e_call3(rt("__arr_resize"), sa, e_iconst(owner_stride(et)), n, -1)
+    if not pl.mem: e_mov(pl.v, e_load(VI, sa, 0, ptr_size))
+    return V(-1, false)
+
+gen_intrinsic_arrdata = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    id = nodes[e].aux as IN
+    # a raw pointer into a variable's array may be written through: give the variable its own
+    # copy first (a literal, or a shared one, must not change)
+    a0 = arg0
+    at = prune(ntype(a0))
+    p = 0
+    if id == .arrdata and types[at].kind == .array and data_writable(a0):
+        pl = gen_place(a0, true)
+        arr_unique(pl, at)
+        # gen_place also detaches containing arrays and evaluates indexes.
+        # Read that place directly; evaluating a side-effectful index again
+        # could select another element or run the user's code twice.
+        p = read_place(pl, at)
+    else: p = gen_borrowed(a0).v
+    r = vreg(VI)
+    e_mov(r, e_iconst(0))
+    iff(e_bin(.ne, VI, p, e_iconst(0)))
+    e_mov(r, e_addi(p, 24))
+    endc()
+    return V(r, false)
+
+gen_intrinsic_syscall = (e: int, arg_start: int, arg_count: int) -> Val:
+    arg0 = int(lists[arg_start])
+    # (an error only where it is used: the compiler has Linux's in code Windows programs leave out)
+    if target_windows: fatal(nodes[e].pos, "syscall() is Linux's: a Windows program calls the system's DLL functions (lib/core/windows.jo)")
+    vs: int[]
+    loop i in [0..arg_count): vs.push(gen_expr(int(lists[arg_start + i])).v)
+    # (macOS: done with libSystem's functions, lib/core/macos.jo)
+    if target_macos:
+        loop vs.len() < 7: vs.push(e_iconst(0))
+        return V(e_call(rt("__mac_syscall"), vs, VI), false)
+    interruptible = false
+    if concurrency.concurrency_runtime_needed and nodes[arg0].kind == .int_lit and files[pos_file(nodes[e].pos)].path != lib_dir + "/std/tasks.jo" and files[pos_file(nodes[e].pos)].path != lib_dir + "/std/fork_join.jo":
+        number = nodes[arg0].ival
+        interruptible = number in [0, 1, 2, 7, 16, 17, 19, 20, 35, 42, 43, 44, 45, 46, 47, 61, 74, 75, 202, 288]
+    if interruptible:
+        result = vreg(VI)
+        e_mov(result, e_iconst(-125))
+        blk()
+        done = ctl
+        lop()
+        retry = ctl
+        brif_to(e_call0(rt("__task_canceled"), VI), done)
         start = ir.args.len()
         loop v in vs: ir.args.push(i32(v))
-        d = vreg(VI)
-        code = 2
-        if id == .longjmp: code = 3
-        if id == .jump: code = 4
-        if id == .clone_thread: code = 5
-        if id == .atomic_add: code = 6
-        if id == .atomic_cas: code = 7
-        if id == .stack_ptr: code = 8
-        if id == .cpu_features: code = 9
-        if id == .code_sync: code = 11
-        emit(.intr, VI, d, i32(start), i32(vs.len()), 0, code)
-        return V(d, false)
-    if id == .sqrt:
-        v = gen_expr(args[0]).v
-        return V(e_un(.fsqrt, vt_of(ntype(args[0])), v), false)
-    if id == .hash:
-        t = prune(ntype(args[0]))
-        pa = place_addr(gen_place(args[0], false), t)
-        return V(e_call1(lf_helper(.hash, t, 0), pa, VI), false)
-    if id == .fmt_struct: return gen_fmt_struct(e)
-    if id == .json_fields: return gen_json_fields(e)
-    if id == .gpu_kernel:
-        # (the GLSL program, then, past a 0 byte, the SPIR-V one for Vulkan: not on the web)
-        kf = int(nodes[args[0]].sym)
-        kd = name_of(int(nodes[args[1]].sval))
-        ks = glsl_kernel(kf, kd)
-        # (on macOS, Metal's in place of SPIR-V)
-        if target_macos: ks = ks + str_from_bytes([u8(0)]) + msl_kernel(kf, kd)
-        else if not target_wasm: ks = ks + str_from_bytes([u8(0)]) + spirv_kernel(kf, kd)
-        return V(e_daddr(str_data(ks)), false)
-    if id == .compute_spirv:
-        cs = ""
-        if target_macos: cs = msl_compute(int(nodes[args[0]].sym))
-        else if not target_wasm: cs = spirv_compute(int(nodes[args[0]].sym))
-        return V(e_daddr(str_data(cs)), false)
-    if id == .compute_textures:
-        # where the parameters hold Textures (their GL names, given slots when dispatched): "8,40"
-        offs: int[]
-        texture_offsets(fns[int(nodes[args[0]].sym)].ptypes[1], 0, offs)
-        ts = ""
-        loop i in 0.. and o in offs:
-            if i > 0: ts += ","
-            ts += "{o}"
-        return V(e_daddr(str_data(ts)), false)
-    if id == .shader:
-        vsf = int(nodes[args[0]].sym)
-        fsf = int(nodes[args[1]].sym)
-        vs, fs, lay = glsl_build(vsf, fsf)
-        if watch_build: glsl_of[e] = vs + fs + lay
-        t = ntype(e)
-        si = int(types[prune(t)].st)
-        layout(t)
-        s = new_temp(t)
-        d = e_slot(s)
-        e_zero(d, tsize(t))
-        srcs = [vs, fs, lay]
-        loop i in [0..3): e_store(d, int(fields[int(structs[si].fields) + i].offset), e_daddr(str_data(srcs[i])), ptr_size)
-        # for the software renderer: the shader functions themselves (callable through C function
-        # pointers: the result pointer comes first, then the arguments' addresses) and the size of
-        # the vertex function's output (the values interpolated across triangles)
-        if int(structs[si].nfields) >= 7:
-            fo = int(structs[si].fields)
-            e_store(d, int(fields[fo + 3].offset), e_faddr(lf_of_inst(vsf)), ptr_size)
-            e_store(d, int(fields[fo + 4].offset), e_faddr(lf_of_inst(fsf)), ptr_size)
-            e_store(d, int(fields[fo + 5].offset), e_iconst(tsize(int(fns[vsf].ret))), 8)
-            e_store(d, int(fields[fo + 6].offset), e_iconst(fns[vsf].ptypes.len()), 8)
-            if int(structs[si].nfields) >= 8:
-                # per 4-byte slot of the output: 'i' if it holds integer (or f64) data, which is
-                # passed on unchanged ("flat") instead of interpolated
-                rt = int(fns[vsf].ret)
-                mask = fill(u8('f'), max(tsize(rt) / 4, 1))
-                flat_slots(rt, 0, mask)
-                e_store(d, int(fields[fo + 7].offset), e_daddr(str_data(str_from_bytes(mask))), ptr_size)
-            if int(structs[si].nfields) >= 10:
-                vk = ("", "")
-                if target_macos: vk = msl_build(vsf, fsf)
-                else if not target_wasm: vk = spirv_build(vsf, fsf)
-                e_store(d, int(fields[fo + 8].offset), e_daddr(str_data(vk.0)), ptr_size)
-                e_store(d, int(fields[fo + 9].offset), e_daddr(str_data(vk.1)), ptr_size)
-        return Val(d, true, s)
-    if id == .vec_ctor: return gen_vec_ctor(e)
-    fatal(nodes[e].pos, "intrinsic not supported in codegen")
-    V(-1, false)
+        raw = vreg(VI)
+        emit(.syscall, VI, raw, i32(start), i32(vs.len()), 0, 0)
+        brif_to(e_bin(.eq, VI, raw, e_iconst(-4)), retry)
+        # Completed syscalls may transfer a descriptor or reap a process.
+        # Let the public boundary account for that result before reporting
+        # cancellation; only EINTR retries consult the scope here.
+        e_mov(result, raw)
+        endc()
+        endc()
+        return V(result, false)
+    start = ir.args.len()
+    loop v in vs: ir.args.push(i32(v))
+    d = vreg(VI)
+    emit(.syscall, VI, d, i32(start), i32(vs.len()), 0, 0)
+    return V(d, false)
+
+gen_intrinsic_callc = (e: int, arg_start: int, arg_count: int) -> Val:
+    arg0 = int(lists[arg_start])
+    fp = gen_expr(arg0).v
+    vs: int[]
+    loop i in [1..arg_count): vs.push(gen_expr(int(lists[arg_start + (i)])).v)
+    e_calli(fp, vs, -1, false)
+    return V(-1, false)
+
+gen_intrinsic_memcpy = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    arg2 = int(lists[arg_start + 2])
+    d = gen_expr(arg0).v
+    s = gen_expr(arg1).v
+    n = gen_expr(arg2).v
+    emit(.memcpy, VI, 0, d, s, n, 0)
+    return V(-1, false)
+
+gen_intrinsic_zeroed = (e: int, arg_start: int) -> Val:
+    t = ntype(e)
+    if vc(t) != VC_AGG: return V(zero_val(t), true)
+    z = e_slot(new_temp(t))
+    e_zero(z, tsize(t))
+    return V(z, true)
+
+gen_intrinsic_memset = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    arg2 = int(lists[arg_start + 2])
+    d = gen_expr(arg0).v
+    b = gen_expr(arg1).v
+    n = gen_expr(arg2).v
+    emit(.memset, VI, 0, d, b, n, 0)
+    return V(-1, false)
+
+gen_intrinsic_panic = (e: int, arg_start: int, arg_count: int) -> Val:
+    arg0 = int(lists[arg_start])
+    m = 0
+    # Message construction only runs on the terminating path. Its calls
+    # must not make a checked helper look like it calls on successful paths.
+    was = ir_cold
+    ir_cold = true
+    if arg_count > 0: m = gen_borrowed(arg0).v
+    else: m = e_daddr(str_data("panic"))
+    ir_cold = was
+    e_call_nr1(rt("__panic"), m, -1)
+    return never_after(e)
+
+gen_intrinsic_unreachable = (e: int, arg_start: int) -> Val:
+    e_call_nr1(rt("__panic"), e_daddr(str_data("unreachable code reached")), -1)
+    return never_after(e)
+
+gen_intrinsic_assert = (e: int, arg_start: int, arg_count: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    c = gen_expr(arg0).v
+    iff(e_bin(.eq, VI, c, e_iconst(0)))
+    # (the message is made only when it fails: a temporary made there is a conditional one)
+    enter_cond()
+    m = 0
+    if arg_count > 1: m = gen_borrowed(arg1).v
+    else:
+        cond = call_args_text(nodes[e].pos)
+        msg = "assertion failed"
+        if len(cond) > 0 and len(cond) <= 200: msg = "assertion failed: {cond}"
+        m = e_daddr(str_data(msg))
+    e_call_nr2(rt("__assert_fail"), m, e_daddr(loc_data(nodes[e].pos)), -1)
+    leave_cond()
+    endc()
+    return V(-1, false)
+
+gen_intrinsic_embed = (e: int, arg_start: int) -> Val:
+    s = name_of(int(nodes[e].sval))
+    return V(e_daddr(str_data(s)), false)
+
+gen_intrinsic_to_bytes = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    return V(gen_expr(arg0).v, false)
+
+gen_intrinsic_argv = (e: int, arg_start: int) -> Val:
+    d = vreg(VI)
+    emit(.intr, VI, d, 0, 0, 0, 1)
+    return V(d, false)
+
+gen_intrinsic_setjmp = (e: int, arg_start: int, arg_count: int) -> Val:
+    id = nodes[e].aux as IN
+    vs: int[]
+    loop i in [0..arg_count): vs.push(gen_expr(int(lists[arg_start + i])).v)
+    start = ir.args.len()
+    loop v in vs: ir.args.push(i32(v))
+    d = vreg(VI)
+    code = 2
+    if id == .longjmp: code = 3
+    if id == .jump: code = 4
+    if id == .clone_thread: code = 5
+    if id == .atomic_add: code = 6
+    if id == .atomic_cas: code = 7
+    if id == .stack_ptr: code = 8
+    if id == .cpu_features: code = 9
+    if id == .code_sync: code = 11
+    emit(.intr, VI, d, i32(start), i32(vs.len()), 0, code)
+    return V(d, false)
+
+gen_intrinsic_sqrt = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    v = gen_expr(arg0).v
+    return V(e_un(.fsqrt, vt_of(ntype(arg0)), v), false)
+
+gen_intrinsic_hash = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    t = prune(ntype(arg0))
+    pa = place_addr(gen_place(arg0, false), t)
+    return V(e_call1(lf_helper(.hash, t, 0), pa, VI), false)
+
+gen_intrinsic_gpu_kernel = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    # (the GLSL program, then, past a 0 byte, the SPIR-V one for Vulkan: not on the web)
+    kf = int(nodes[arg0].sym)
+    kd = name_of(int(nodes[arg1].sval))
+    ks = glsl_kernel(kf, kd)
+    # (on macOS, Metal's in place of SPIR-V)
+    if target_macos: ks = ks + str_from_bytes([u8(0)]) + msl_kernel(kf, kd)
+    else if not target_wasm: ks = ks + str_from_bytes([u8(0)]) + spirv_kernel(kf, kd)
+    return V(e_daddr(str_data(ks)), false)
+
+gen_intrinsic_compute_spirv = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    cs = ""
+    if target_macos: cs = msl_compute(int(nodes[arg0].sym))
+    else if not target_wasm: cs = spirv_compute(int(nodes[arg0].sym))
+    return V(e_daddr(str_data(cs)), false)
+
+gen_intrinsic_compute_textures = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    # where the parameters hold Textures (their GL names, given slots when dispatched): "8,40"
+    offs: int[]
+    texture_offsets(fns[int(nodes[arg0].sym)].ptypes[1], 0, offs)
+    ts = ""
+    loop i in 0.. and o in offs:
+        if i > 0: ts += ","
+        ts += "{o}"
+    return V(e_daddr(str_data(ts)), false)
+
+gen_intrinsic_shader = (e: int, arg_start: int) -> Val:
+    arg0 = int(lists[arg_start])
+    arg1 = int(lists[arg_start + 1])
+    vsf = int(nodes[arg0].sym)
+    fsf = int(nodes[arg1].sym)
+    vs, fs, lay = glsl_build(vsf, fsf)
+    if watch_build: glsl_of[e] = vs + fs + lay
+    t = ntype(e)
+    si = int(types[prune(t)].st)
+    layout(t)
+    s = new_temp(t)
+    d = e_slot(s)
+    e_zero(d, tsize(t))
+    srcs = [vs, fs, lay]
+    loop i in [0..3): e_store(d, int(fields[int(structs[si].fields) + i].offset), e_daddr(str_data(srcs[i])), ptr_size)
+    # for the software renderer: the shader functions themselves (callable through C function
+    # pointers: the result pointer comes first, then the arguments' addresses) and the size of
+    # the vertex function's output (the values interpolated across triangles)
+    if int(structs[si].nfields) >= 7:
+        fo = int(structs[si].fields)
+        e_store(d, int(fields[fo + 3].offset), e_faddr(lf_of_inst(vsf)), ptr_size)
+        e_store(d, int(fields[fo + 4].offset), e_faddr(lf_of_inst(fsf)), ptr_size)
+        e_store(d, int(fields[fo + 5].offset), e_iconst(tsize(int(fns[vsf].ret))), 8)
+        e_store(d, int(fields[fo + 6].offset), e_iconst(fns[vsf].ptypes.len()), 8)
+        if int(structs[si].nfields) >= 8:
+            # per 4-byte slot of the output: 'i' if it holds integer (or f64) data, which is
+            # passed on unchanged ("flat") instead of interpolated
+            rt = int(fns[vsf].ret)
+            mask = fill(u8('f'), max(tsize(rt) / 4, 1))
+            flat_slots(rt, 0, mask)
+            e_store(d, int(fields[fo + 7].offset), e_daddr(str_data(str_from_bytes(mask))), ptr_size)
+        if int(structs[si].nfields) >= 10:
+            vk = ("", "")
+            if target_macos: vk = msl_build(vsf, fsf)
+            else if not target_wasm: vk = spirv_build(vsf, fsf)
+            e_store(d, int(fields[fo + 8].offset), e_daddr(str_data(vk.0)), ptr_size)
+            e_store(d, int(fields[fo + 9].offset), e_daddr(str_data(vk.1)), ptr_size)
+    return Val(d, true, s)
 
 flat_slots = (t0: int, base: int, mask: mut u8[]):
     t = prune(t0)
@@ -4314,338 +4448,413 @@ gen_expr = (e: int) -> Val:
     if ownership_type(ntype(e)) and value.owned: return owner_value(value, ntype(e))
     value
 
+# Dispatch once by the checked AST kind. Case-local scratch is constructed
+# only in the selected handler; recursive children still lower exactly once.
 gen_expr_value = (e: int) -> Val:
+    match nodes[e].kind:
+        int_lit: return gen_value_int_lit(e)
+        float_lit: return gen_value_float_lit(e)
+        bool_lit: return V(e_iconst(nodes[e].ival), false)
+        null_lit: return V(e_iconst(0), false)
+        none_lit: return gen_value_none_lit(e)
+        str_lit: return gen_value_str_lit(e)
+        ident: return gen_value_ident(e)
+        field: return gen_value_field(e)
+        dotname: return gen_value_dotname(e)
+        parallel_region: return gen_expr(int(nodes[e].a))
+        index: return gen_value_index(e)
+        unwrap, narrow: return gen_value_unwrap(e)
+        istype: return gen_value_istype(e)
+        call: return gen_value_call(e)
+        intrinsic: return gen_intrinsic(e)
+        partial: return gen_partial(e)
+        lambda: return gen_lambda(e)
+        fnref: return gen_fnref(e)
+        unary: return gen_value_unary(e)
+        not_: return V(e_bin(.xor, VI, gen_expr(int(nodes[e].a)).v, e_iconst(1)), false)
+        and_, or_: return gen_value_and_(e)
+        binary: return gen_binary(e)
+        conv: return gen_value_conv(e)
+        cast: return gen_value_cast(e)
+        coalesce: return gen_value_coalesce(e)
+        array: return gen_value_array(e)
+        map_lit: return gen_value_map_lit(e)
+        tuple: return gen_value_tuple(e)
+        range: return gen_value_range(e)
+        addr: return gen_value_addr(e)
+        if_: return gen_value_if_(e)
+        iflet: return gen_value_iflet(e)
+        match_: return gen_match(e, not has_flag(e, NF_STMT))
+        block: return gen_value_block(e)
+        _: fatal(nodes[e].pos, "unsupported expression in codegen ({nodes[e].kind})")
+    V(-1, false)
+
+gen_value_int_lit = (e: int) -> Val:
     t = prune(ntype(e))
-    k = nodes[e].kind
+    if quantity_base(t) == T_MATH_INT:
+        if has_flag(e, NF_U64) and nodes[e].ival < 0: return math_call("__mi_unsigned", [e_iconst(nodes[e].ival)])
+        return math_word(e_iconst(nodes[e].ival))
+    if vc(t) == VC_FLT: return V(e_fconst(f64(nodes[e].ival), vt_of(t)), false)
+    return V(e_iconst(nodes[e].ival), false)
+
+gen_value_float_lit = (e: int) -> Val:
+    t = prune(ntype(e))
+    return V(e_fconst(nodes[e].fval, vt_of(t)), false)
+
+gen_value_none_lit = (e: int) -> Val:
+    t = prune(ntype(e))
+    if vc(t) != VC_AGG: return V(e_iconst(0), false)
+    s = new_temp(t)
+    d = e_slot(s)
+    e_zero(d, tsize(t))
+    return Val(d, true, s)
+
+gen_value_str_lit = (e: int) -> Val:
+    if nodes[e].aux != 0: return gen_interp(e)
+    return V(e_daddr(str_data(name_of(int(nodes[e].sval)))), false)
+
+gen_value_ident = (e: int) -> Val:
+    t = prune(ntype(e))
+    if t == T_MATH_INT and nodes[e].aux == i32(int(SK.local)):
+        if let word = math_word_regs.get(int(nodes[e].sym)): return math_pack_word(e, word)
+    if nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global)):
+        p = gen_place(e, false)
+        return V(read_place(p, t), false)
+    if tkind(t) == .typeval or tkind(t) == .module: type_as_value(e)
+    fatal(nodes[e].pos, "cannot generate identifier")
+    V(-1, false)  # unreachable; the C seed does not infer fatal as never
+
+gen_value_field = (e: int) -> Val:
+    t = prune(ntype(e))
+    if nodes[e].aux == -4: return gen_swizzle(e)
+    p = gen_place(e, false)
+    return V(read_place(p, t), false)
+
+gen_value_dotname = (e: int) -> Val:
+    t = prune(ntype(e))
+    si = int(types[t].st)
+    layout(t)
+    if structs[si].simple_enum: return V(e_iconst(variants[int(structs[si].variants) + int(nodes[e].aux)].value), false)
+    s = new_temp(t)
+    d = e_slot(s)
+    e_zero(d, tsize(t))
+    e_store(d, 0, e_iconst(int(nodes[e].aux)), 4)
+    return Val(d, true, s)
+
+gen_value_index = (e: int) -> Val:
+    t = prune(ntype(e))
+    scalar = parallel_scalar_read(e)
+    if scalar >= 0: return V(scalar, false)
+    if nodes[e].aux == 1: return gen_slice(e)
+    p = gen_place(e, false)
+    return V(read_place(p, t), false)
+
+gen_value_unwrap = (e: int) -> Val:
+    t = prune(ntype(e))
+    p = gen_place(e, false)
+    return V(read_place(p, t), false)
+
+gen_value_istype = (e: int) -> Val:
+    a = int(nodes[e].a)
+    at = prune(ntype(a))
+    vi = int(nodes[e].aux)
+    if vi == -3: return V(e_iconst(1), false)
+    if nodes[e].aux2 != 0:
+        has = gen_map_presence(a, int(nodes[e].aux2))
+        if vi == -1: return V(e_bin(.eq, VI, has, e_iconst(0)), false)
+        return V(has, false)
+    if vi < 0:
+        view = held_opt_reg(a)
+        if view >= 0:
+            return V(e_bin((if vi == -1: Op.eq else: Op.ne), VI, view, e_iconst(0)), false)
+    p = gen_place(a, false)
+    addr = place_addr(p, at)
+    if vi < 0:
+        # optional: its has-value flag follows the value
+        has = opt_has(addr, int(types[at].elem))
+        if vi == -1: return V(e_bin(.eq, VI, has, e_iconst(0)), false)
+        return V(e_bin(.ne, VI, has, e_iconst(0)), false)
+    layout(at)
+    return V(e_bin(.eq, VI, e_load(VI, addr, 0, 4), e_iconst(vi)), false)
+
+gen_value_call = (e: int) -> Val:
+    t = prune(ntype(e))
     # (a call that never comes back, as panic(...), where a value is wanted: "a" + panic("x"))
-    if k == .call and t != T_NEVER and vc(t) != VC_VOID and int(nodes[e].aux) == 0 and nodes[e].sym > 0 and prune(int(fns[int(nodes[e].sym)].ret)) == T_NEVER:
+    if t != T_NEVER and vc(t) != VC_VOID and int(nodes[e].aux) == 0 and nodes[e].sym > 0 and prune(int(fns[int(nodes[e].sym)].ret)) == T_NEVER:
         saved_t = nodes[e].type
         nodes[e].type = i32(T_NEVER)
         gen_expr(e)
         nodes[e].type = saved_t
         return never_value(t)
-    if k == .int_lit:
-        if quantity_base(t) == T_MATH_INT:
-            if has_flag(e, NF_U64) and nodes[e].ival < 0: return math_call("__mi_unsigned", [e_iconst(nodes[e].ival)])
-            return math_word(e_iconst(nodes[e].ival))
-        if vc(t) == VC_FLT: return V(e_fconst(f64(nodes[e].ival), vt_of(t)), false)
-        return V(e_iconst(nodes[e].ival), false)
-    if k == .float_lit: return V(e_fconst(nodes[e].fval, vt_of(t)), false)
-    if k == .bool_lit: return V(e_iconst(nodes[e].ival), false)
-    if k == .null_lit: return V(e_iconst(0), false)
-    if k == .none_lit:
-        if vc(t) != VC_AGG: return V(e_iconst(0), false)
-        s = new_temp(t)
-        d = e_slot(s)
-        e_zero(d, tsize(t))
-        return Val(d, true, s)
-    if k == .str_lit:
-        if nodes[e].aux != 0: return gen_interp(e)
-        return V(e_daddr(str_data(name_of(int(nodes[e].sval)))), false)
-    if k == .ident:
-        if t == T_MATH_INT and nodes[e].aux == i32(int(SK.local)):
-            if let word = math_word_regs.get(int(nodes[e].sym)): return math_pack_word(e, word)
-        if nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global)):
-            p = gen_place(e, false)
-            return V(read_place(p, t), false)
-        if tkind(t) == .typeval or tkind(t) == .module: type_as_value(e)
-        fatal(nodes[e].pos, "cannot generate identifier")
-    if k == .field:
-        if nodes[e].aux == -4: return gen_swizzle(e)
-        p = gen_place(e, false)
-        return V(read_place(p, t), false)
-    if k == .dotname:
+    if t == T_MATH_INT and math_word_helper(e) > 0: return math_pack_word(e, math_word_expr(e))
+    ir_set_pos(nodes[e].pos)
+    aux = int(nodes[e].aux)
+    if aux == 0:
+        remainder = gen_positive_mod(e)
+        if remainder >= 0: return V(remainder, false)
+        arithmetic = gen_constant_floor(e)
+        if arithmetic >= 0: return V(arithmetic, false)
+        if fns[int(nodes[e].sym)].parallel: race_check(int(nodes[e].sym), kids(e), nodes[e].pos)
+        if fns[int(nodes[e].sym)].deterministic:
+            # Cache ownership follows reachable serial lowering, not worker candidates.
+            if fused_on: fz_note(7, 0, e, 0, 0)
+            else: det_check(int(nodes[e].sym), kids(e), nodes[e].pos)
+        order: int[]
+        if nodes[e].c != 0: order = call_eval_order(e)
+        target = if ownership_prints.has(e): runtime_fn("__owner_print") else: int(nodes[e].sym)
+        r = gen_direct_call(target, kids(e), order, e)
+        if ownership_prints.has(e) and is_union(t):
+            slot = new_temp(t)
+            value = e_slot(slot)
+            e_zero(value, tsize(t))
+            e_store(value, 0, e_iconst(union_index(t, T_VOID)), 4)
+            return Val(value, true, slot)
+        if vc(t) == VC_VOID: return V(-1, false)
+        return r
+    if aux == 1:
+        order: int[]
+        if nodes[e].c != 0: order = call_eval_order(e)
+        r = gen_closure_call(int(nodes[e].a), kids(e), order)
+        if vc(t) == VC_VOID: return V(-1, false)
+        return r
+    if aux == 4: return gen_cfn_call(int(nodes[e].a), kids(e))
+    if aux == 2:
         si = int(types[t].st)
         layout(t)
-        if structs[si].simple_enum: return V(e_iconst(variants[int(structs[si].variants) + int(nodes[e].aux)].value), false)
         s = new_temp(t)
         d = e_slot(s)
         e_zero(d, tsize(t))
-        e_store(d, 0, e_iconst(int(nodes[e].aux)), 4)
-        return Val(d, true, s)
-    if k == .parallel_region: return gen_expr(int(nodes[e].a))
-    if k == .index:
-        scalar = parallel_scalar_read(e)
-        if scalar >= 0: return V(scalar, false)
-        if nodes[e].aux == 1: return gen_slice(e)
-        p = gen_place(e, false)
-        return V(read_place(p, t), false)
-    if k == .unwrap or k == .narrow:
-        p = gen_place(e, false)
-        return V(read_place(p, t), false)
-    if k == .istype:
-        a = int(nodes[e].a)
-        at = prune(ntype(a))
-        vi = int(nodes[e].aux)
-        if vi == -3: return V(e_iconst(1), false)
-        if nodes[e].aux2 != 0:
-            has = gen_map_presence(a, int(nodes[e].aux2))
-            if vi == -1: return V(e_bin(.eq, VI, has, e_iconst(0)), false)
-            return V(has, false)
-        if vi < 0:
-            view = held_opt_reg(a)
-            if view >= 0:
-                return V(e_bin((if vi == -1: Op.eq else: Op.ne), VI, view, e_iconst(0)), false)
-        p = gen_place(a, false)
-        addr = place_addr(p, at)
-        if vi < 0:
-            # optional: its has-value flag follows the value
-            has = opt_has(addr, int(types[at].elem))
-            if vi == -1: return V(e_bin(.eq, VI, has, e_iconst(0)), false)
-            return V(e_bin(.ne, VI, has, e_iconst(0)), false)
-        layout(at)
-        return V(e_bin(.eq, VI, e_load(VI, addr, 0, 4), e_iconst(vi)), false)
-    if k == .call:
-        if t == T_MATH_INT and math_word_helper(e) > 0: return math_pack_word(e, math_word_expr(e))
-        ir_set_pos(nodes[e].pos)
-        aux = int(nodes[e].aux)
-        if aux == 0:
-            remainder = gen_positive_mod(e)
-            if remainder >= 0: return V(remainder, false)
-            arithmetic = gen_constant_floor(e)
-            if arithmetic >= 0: return V(arithmetic, false)
-            if fns[int(nodes[e].sym)].parallel: race_check(int(nodes[e].sym), kids(e), nodes[e].pos)
-            if fns[int(nodes[e].sym)].deterministic:
-                # Cache ownership follows reachable serial lowering, not worker candidates.
-                if fused_on: fz_note(7, 0, e, 0, 0)
-                else: det_check(int(nodes[e].sym), kids(e), nodes[e].pos)
-            order: int[]
-            if nodes[e].c != 0: order = call_eval_order(e)
-            target = if ownership_prints.has(e): runtime_fn("__owner_print") else: int(nodes[e].sym)
-            r = gen_direct_call(target, kids(e), order, e)
-            if ownership_prints.has(e) and is_union(t):
-                slot = new_temp(t)
-                value = e_slot(slot)
-                e_zero(value, tsize(t))
-                e_store(value, 0, e_iconst(union_index(t, T_VOID)), 4)
-                return Val(value, true, slot)
-            if vc(t) == VC_VOID: return V(-1, false)
-            return r
-        if aux == 1:
-            order: int[]
-            if nodes[e].c != 0: order = call_eval_order(e)
-            r = gen_closure_call(int(nodes[e].a), kids(e), order)
-            if vc(t) == VC_VOID: return V(-1, false)
-            return r
-        if aux == 4: return gen_cfn_call(int(nodes[e].a), kids(e))
-        if aux == 2:
-            si = int(types[t].st)
-            layout(t)
-            s = new_temp(t)
-            d = e_slot(s)
-            e_zero(d, tsize(t))
-            tracked = build_slot(s, t)
-            owner_fields: (int, int)[]
-            loop i in call_eval_order(e):
-                a = kid(e, i)
-                if a == 0: continue
-                f = int(structs[si].fields) + i
-                source = a
-                if refine_active and nodes[a].kind == .conv and nodes[a].aux == i32(int(CV.refinement)): source = int(nodes[a].a)
-                val = gen_owned(source)
-                store_field(f, d, val.v)
-                if ownership_type(ntype(source)):
-                    held_type = ntype(source)
-                    if fields[f].boxed:
-                        # After boxing, the allocation and payload have one
-                        # cleanup authority even before the outer record exists.
-                        held_type = field_store_type(f)
-                        boxed = owner_value(V(e_load(VI, d, int(fields[f].offset), ptr_size), true), held_type)
-                        owner_forget_slot(val.slot)
-                        val = boxed
-                    owner_fields.push((val.slot, held_type))
-                    building.push(BuildItem(true, val.slot, held_type))
-            if refine_active:
-                values: int[]
-                arg_types: int[]
-                loop i in [0..nkids(e)):
-                    f = int(structs[si].fields) + i
-                    ft = int(fields[f].type)
-                    values.push(load_val(ft, field_val_addr(f, d), 0))
-                    arg_types.push(ft)
-                loop i in [0..nkids(e)):
-                    a = kid(e, i)
-                    if a != 0 and nodes[a].kind == .conv and nodes[a].aux == i32(int(CV.refinement)): ref_gen_check(a, values[i], values, arg_types)
-            loop field in owner_fields:
-                owner_forget_slot(field.0)
-                building.pop()
-            if tracked: building.pop()
-            return Val(e_slot(s), true, s)
-        if aux == 3:
-            si = int(types[t].st)
-            layout(t)
-            v = int(nodes[e].aux2)
-            # (a value made a union member: which member, by its type now that inference is done,
-            # since the union's members may have been put in another order)
-            if structs[si].union_ and nkids(e) == 1:
-                j = union_index(t, ntype(kid(e, 0)))
-                if j >= 0: v = j
-            vi = int(structs[si].variants) + v
-            if structs[si].simple_enum: return V(e_iconst(variants[vi].value), false)
-            s = new_temp(t)
-            d = e_slot(s)
-            e_zero(d, tsize(t))
-            e_store(d, 0, e_iconst(v), 4)
-            tracked = build_slot(s, t)
-            loop i in call_eval_order(e):
-                f = int(variants[vi].fields) + i
-                val = gen_owned(kid(e, i))
-                store_field(f, d, val.v)
-            if tracked: building.pop()
-            return Val(e_slot(s), true, s)
-        fatal(nodes[e].pos, "invalid call")
-    if k == .intrinsic: return gen_intrinsic(e)
-    if k == .partial: return gen_partial(e)
-    if k == .lambda: return gen_lambda(e)
-    if k == .fnref: return gen_fnref(e)
-    if k == .unary:
-        a = int(nodes[e].a)
-        if nodes[e].op == i32(int(Tok.plus)): return gen_expr(a)
-        if is_vec(t):
-            neg = mk(.binary, nodes[e].pos)
-            nodes[neg].op = i32(int(Tok.star))
-            nodes[neg].a = i32(a)
-            m1 = mk(.float_lit, nodes[e].pos)
-            nodes[m1].fval = -1.0
-            nodes[m1].type = i32(T_F32)
-            if types[prune(t)].sign:
-                # (an integer vector: times the integer -1, which wraps as the CPU's integers do)
-                nodes[m1].kind = .int_lit
-                nodes[m1].ival = -1
-                nodes[m1].type = i32(T_I32)
-            nodes[neg].b = i32(m1)
-            nodes[neg].aux = 10
-            nodes[neg].type = i32(t)
-            return gen_vec_binary(neg, false)
-        if t == T_MATH_INT:
-            base = if nodes[e].op == i32(int(Tok.minus)): 0 else: -1
-            return math_binary(.minus, math_word(e_iconst(base)).v, gen_borrowed(a).v)
-        v = gen_expr(a).v
-        if nodes[e].op == i32(int(Tok.minus)):
-            if vc(t) == VC_FLT: return V(e_un(.fneg, vt_of(t), v), false)
-            if t == T_MATH_INT: return V(gen_math_int(.minus, e_iconst(0), v), false)
-            return V(norm(e_un(.neg, VI, v), t), false)
-        return V(norm(e_un(.not_, VI, v), t), false)
-    if k == .not_: return V(e_bin(.xor, VI, gen_expr(int(nodes[e].a)).v, e_iconst(1)), false)
-    if k == .and_ or k == .or_:
-        chain = range_tail(e)
-        if chain != e: return gen_expr(chain)
-        range = gen_range_cond(e)
-        if range >= 0: return V(range, false)
-        r = vreg(VI)
-        e_mov(r, gen_expr(int(nodes[e].a)).v)
-        if k == .and_: iff(r)
-        else: iff(e_bin(.eq, VI, r, e_iconst(0)))
-        enter_cond()
-        e_mov(r, gen_expr(int(nodes[e].b)).v)
-        leave_cond()
-        endc()
-        return V(r, false)
-    if k == .binary: return gen_binary(e)
-    if k == .conv:
-        # (something that never comes back, as panic(...), taken as a value: done, then any
-        # value of the type, never used)
-        if prune(ntype(int(nodes[e].a))) == T_NEVER and t != T_NEVER:
-            gen_expr(int(nodes[e].a))
-            return never_value(t)
-        return gen_conv(e)
-    if k == .cast:
-        a = int(nodes[e].a)
-        from = prune(ntype(a))
-        val = gen_expr(a)
-        if types[from].kind == .float_ and types[t].kind == .int_:
-            d = vreg(VI)
-            emit(.f2bits, vt_of(from), d, val.v, 0, 0, 0)
-            return V(norm(d, t), false)
-        if types[from].kind == .int_ and types[t].kind == .float_:
-            d = vreg(vt_of(t))
-            emit(.bits2f, vt_of(t), d, val.v, 0, 0, 0)
-            return V(d, false)
-        if is_managed(from): borrow(val, from)
-        if is_managed(t): return V(val.v, true)
-        if types[t].kind == .int_: return V(norm(val.v, t), false)
-        return V(val.v, false)
-    if k == .coalesce:
-        a = int(nodes[e].a)
-        ot = prune(ntype(a))
-        rs = new_temp(t)
-        pa = place_addr(gen_place(a, false), ot)
-        inner = int(types[ot].elem)
-        has = opt_has(pa, inner)
-        iff(has)
-        if nodes[e].aux == 1:
-            vv = own_at(a, V(pa, false), ot)
-            store_val(ot, e_slot(rs), 0, vv.v)
-        else:
-            vv = own_at(a, V(opt_value(pa, inner), false), inner)
-            store_val(inner, e_slot(rs), 0, vv.v)
-        els()
-        enter_cond()
-        vb = gen_owned(int(nodes[e].b))
-        store_val(t, e_slot(rs), 0, vb.v)
-        leave_cond()
-        endc()
-        return result_from_slot(rs, t)
-    if k == .array: return gen_array(e, t)
-    if k == .map_lit:
-        s = new_temp(t)
-        d = e_slot(s)
-        e_zero(d, tsize(t))
-        f = int(nodes[e].sym)
         tracked = build_slot(s, t)
-        if ownership_type(t): owner_register(s, t)
-        loop i in [0..nkids(e)):
-            p = kid(e, i)
-            key = int(nodes[p].a)
-            value = int(nodes[p].b)
-            kv = if copy_consumes(f, 1): gen_owned(key) else: gen_borrowed(key)
-            vv = if copy_consumes(f, 2): gen_owned(value) else: gen_borrowed(value)
-            if copy_consumes(f, 1) and ownership_type(ntype(key)): owner_forget_slot(kv.slot)
-            if copy_consumes(f, 2) and ownership_type(ntype(value)): owner_forget_slot(vv.slot)
-            e_call3(lf_of_inst(f), e_slot(s), kv.v, vv.v, -1)
+        owner_fields: (int, int)[]
+        loop i in call_eval_order(e):
+            a = kid(e, i)
+            if a == 0: continue
+            f = int(structs[si].fields) + i
+            source = a
+            if refine_active and nodes[a].kind == .conv and nodes[a].aux == i32(int(CV.refinement)): source = int(nodes[a].a)
+            val = gen_owned(source)
+            store_field(f, d, val.v)
+            if ownership_type(ntype(source)):
+                held_type = ntype(source)
+                if fields[f].boxed:
+                    # After boxing, the allocation and payload have one
+                    # cleanup authority even before the outer record exists.
+                    held_type = field_store_type(f)
+                    boxed = owner_value(V(e_load(VI, d, int(fields[f].offset), ptr_size), true), held_type)
+                    owner_forget_slot(val.slot)
+                    val = boxed
+                owner_fields.push((val.slot, held_type))
+                building.push(BuildItem(true, val.slot, held_type))
+        if refine_active:
+            values: int[]
+            arg_types: int[]
+            loop i in [0..nkids(e)):
+                f = int(structs[si].fields) + i
+                ft = int(fields[f].type)
+                values.push(load_val(ft, field_val_addr(f, d), 0))
+                arg_types.push(ft)
+            loop i in [0..nkids(e)):
+                a = kid(e, i)
+                if a != 0 and nodes[a].kind == .conv and nodes[a].aux == i32(int(CV.refinement)): ref_gen_check(a, values[i], values, arg_types)
+        loop field in owner_fields:
+            owner_forget_slot(field.0)
+            building.pop()
         if tracked: building.pop()
         return Val(e_slot(s), true, s)
-    if k == .tuple:
-        if vc(t) == VC_VOID: return V(-1, false)
+    if aux == 3:
+        si = int(types[t].st)
+        layout(t)
+        v = int(nodes[e].aux2)
+        # (a value made a union member: which member, by its type now that inference is done,
+        # since the union's members may have been put in another order)
+        if structs[si].union_ and nkids(e) == 1:
+            j = union_index(t, ntype(kid(e, 0)))
+            if j >= 0: v = j
+        vi = int(structs[si].variants) + v
+        if structs[si].simple_enum: return V(e_iconst(variants[vi].value), false)
         s = new_temp(t)
-        tracked = build_slot(s, t, true)
-        loop i in [0..int(types[t].nargs)):
-            el = targ(t, i)
+        d = e_slot(s)
+        e_zero(d, tsize(t))
+        e_store(d, 0, e_iconst(v), 4)
+        tracked = build_slot(s, t)
+        loop i in call_eval_order(e):
+            f = int(variants[vi].fields) + i
             val = gen_owned(kid(e, i))
-            store_val(el, e_slot(s), tuple_off(t, i), val.v)
+            store_field(f, d, val.v)
         if tracked: building.pop()
         return Val(e_slot(s), true, s)
-    if k == .range:
-        s = new_temp(T_RANGE)
-        d = e_slot(s)
-        lo = 0
-        if nodes[e].a != 0: lo = gen_expr(int(nodes[e].a)).v
-        else: lo = e_iconst(0)
-        e_store(d, 0, lo, 8)
-        hi = 0
-        if nodes[e].b != 0:
-            hi = gen_expr(int(nodes[e].b)).v
-            if has_flag(e, NF_INCLUSIVE): hi = e_addi(hi, 1)
-        else: hi = e_iconst(0x7fffffffffffffff)
-        e_store(d, 8, hi, 8)
-        return Val(d, false, -1)
-    if k == .addr:
-        p = gen_place(int(nodes[e].a), true)
-        return V(place_addr(p, ntype(int(nodes[e].a))), false)
-    if k == .if_: return gen_if(e, t)
-    if k == .iflet: return gen_iflet(e, t)
-    if k == .match_: return gen_match(e, not has_flag(e, NF_STMT))
-    if k == .block:
-        reserve_comprehension(e)
-        rs = -1
-        if vc(t) != VC_VOID:
-            rs = new_temp(t)
-            e_zero(e_slot(rs), tsize(t))
-        gen_value_block(e, rs, t)
-        if rs >= 0: return result_from_slot(rs, t)
-        return V(-1, false)
-    fatal(nodes[e].pos, "unsupported expression in codegen ({k})")
-    V(-1, false)
+    fatal(nodes[e].pos, "invalid call")
+    V(-1, false)  # unreachable; the C seed does not infer fatal as never
+
+gen_value_unary = (e: int) -> Val:
+    t = prune(ntype(e))
+    a = int(nodes[e].a)
+    if nodes[e].op == i32(int(Tok.plus)): return gen_expr(a)
+    if is_vec(t):
+        neg = mk(.binary, nodes[e].pos)
+        nodes[neg].op = i32(int(Tok.star))
+        nodes[neg].a = i32(a)
+        m1 = mk(.float_lit, nodes[e].pos)
+        nodes[m1].fval = -1.0
+        nodes[m1].type = i32(T_F32)
+        if types[prune(t)].sign:
+            # (an integer vector: times the integer -1, which wraps as the CPU's integers do)
+            nodes[m1].kind = .int_lit
+            nodes[m1].ival = -1
+            nodes[m1].type = i32(T_I32)
+        nodes[neg].b = i32(m1)
+        nodes[neg].aux = 10
+        nodes[neg].type = i32(t)
+        return gen_vec_binary(neg, false)
+    if t == T_MATH_INT:
+        base = if nodes[e].op == i32(int(Tok.minus)): 0 else: -1
+        return math_binary(.minus, math_word(e_iconst(base)).v, gen_borrowed(a).v)
+    v = gen_expr(a).v
+    if nodes[e].op == i32(int(Tok.minus)):
+        if vc(t) == VC_FLT: return V(e_un(.fneg, vt_of(t), v), false)
+        if t == T_MATH_INT: return V(gen_math_int(.minus, e_iconst(0), v), false)
+        return V(norm(e_un(.neg, VI, v), t), false)
+    return V(norm(e_un(.not_, VI, v), t), false)
+
+gen_value_and_ = (e: int) -> Val:
+    k = nodes[e].kind
+    chain = range_tail(e)
+    if chain != e: return gen_expr(chain)
+    range = gen_range_cond(e)
+    if range >= 0: return V(range, false)
+    r = vreg(VI)
+    e_mov(r, gen_expr(int(nodes[e].a)).v)
+    if k == .and_: iff(r)
+    else: iff(e_bin(.eq, VI, r, e_iconst(0)))
+    enter_cond()
+    e_mov(r, gen_expr(int(nodes[e].b)).v)
+    leave_cond()
+    endc()
+    return V(r, false)
+
+gen_value_conv = (e: int) -> Val:
+    t = prune(ntype(e))
+    # (something that never comes back, as panic(...), taken as a value: done, then any
+    # value of the type, never used)
+    if prune(ntype(int(nodes[e].a))) == T_NEVER and t != T_NEVER:
+        gen_expr(int(nodes[e].a))
+        return never_value(t)
+    return gen_conv(e)
+
+gen_value_cast = (e: int) -> Val:
+    t = prune(ntype(e))
+    a = int(nodes[e].a)
+    from = prune(ntype(a))
+    val = gen_expr(a)
+    if types[from].kind == .float_ and types[t].kind == .int_:
+        d = vreg(VI)
+        emit(.f2bits, vt_of(from), d, val.v, 0, 0, 0)
+        return V(norm(d, t), false)
+    if types[from].kind == .int_ and types[t].kind == .float_:
+        d = vreg(vt_of(t))
+        emit(.bits2f, vt_of(t), d, val.v, 0, 0, 0)
+        return V(d, false)
+    if is_managed(from): borrow(val, from)
+    if is_managed(t): return V(val.v, true)
+    if types[t].kind == .int_: return V(norm(val.v, t), false)
+    return V(val.v, false)
+
+gen_value_coalesce = (e: int) -> Val:
+    t = prune(ntype(e))
+    a = int(nodes[e].a)
+    ot = prune(ntype(a))
+    rs = new_temp(t)
+    pa = place_addr(gen_place(a, false), ot)
+    inner = int(types[ot].elem)
+    has = opt_has(pa, inner)
+    iff(has)
+    if nodes[e].aux == 1:
+        vv = own_at(a, V(pa, false), ot)
+        store_val(ot, e_slot(rs), 0, vv.v)
+    else:
+        vv = own_at(a, V(opt_value(pa, inner), false), inner)
+        store_val(inner, e_slot(rs), 0, vv.v)
+    els()
+    enter_cond()
+    vb = gen_owned(int(nodes[e].b))
+    store_val(t, e_slot(rs), 0, vb.v)
+    leave_cond()
+    endc()
+    return result_from_slot(rs, t)
+
+gen_value_array = (e: int) -> Val:
+    t = prune(ntype(e))
+    return gen_array(e, t)
+
+gen_value_map_lit = (e: int) -> Val:
+    t = prune(ntype(e))
+    s = new_temp(t)
+    d = e_slot(s)
+    e_zero(d, tsize(t))
+    f = int(nodes[e].sym)
+    tracked = build_slot(s, t)
+    if ownership_type(t): owner_register(s, t)
+    loop i in [0..nkids(e)):
+        p = kid(e, i)
+        key = int(nodes[p].a)
+        value = int(nodes[p].b)
+        kv = if copy_consumes(f, 1): gen_owned(key) else: gen_borrowed(key)
+        vv = if copy_consumes(f, 2): gen_owned(value) else: gen_borrowed(value)
+        if copy_consumes(f, 1) and ownership_type(ntype(key)): owner_forget_slot(kv.slot)
+        if copy_consumes(f, 2) and ownership_type(ntype(value)): owner_forget_slot(vv.slot)
+        e_call3(lf_of_inst(f), e_slot(s), kv.v, vv.v, -1)
+    if tracked: building.pop()
+    return Val(e_slot(s), true, s)
+
+gen_value_tuple = (e: int) -> Val:
+    t = prune(ntype(e))
+    if vc(t) == VC_VOID: return V(-1, false)
+    s = new_temp(t)
+    tracked = build_slot(s, t, true)
+    loop i in [0..int(types[t].nargs)):
+        el = targ(t, i)
+        val = gen_owned(kid(e, i))
+        store_val(el, e_slot(s), tuple_off(t, i), val.v)
+    if tracked: building.pop()
+    return Val(e_slot(s), true, s)
+
+gen_value_range = (e: int) -> Val:
+    s = new_temp(T_RANGE)
+    d = e_slot(s)
+    lo = 0
+    if nodes[e].a != 0: lo = gen_expr(int(nodes[e].a)).v
+    else: lo = e_iconst(0)
+    e_store(d, 0, lo, 8)
+    hi = 0
+    if nodes[e].b != 0:
+        hi = gen_expr(int(nodes[e].b)).v
+        if has_flag(e, NF_INCLUSIVE): hi = e_addi(hi, 1)
+    else: hi = e_iconst(0x7fffffffffffffff)
+    e_store(d, 8, hi, 8)
+    return Val(d, false, -1)
+
+gen_value_addr = (e: int) -> Val:
+    p = gen_place(int(nodes[e].a), true)
+    return V(place_addr(p, ntype(int(nodes[e].a))), false)
+
+gen_value_if_ = (e: int) -> Val:
+    t = prune(ntype(e))
+    return gen_if(e, t)
+
+gen_value_iflet = (e: int) -> Val:
+    t = prune(ntype(e))
+    return gen_iflet(e, t)
+
+gen_value_block = (e: int) -> Val:
+    t = prune(ntype(e))
+    reserve_comprehension(e)
+    rs = -1
+    if vc(t) != VC_VOID:
+        rs = new_temp(t)
+        e_zero(e_slot(rs), tsize(t))
+    gen_value_block(e, rs, t)
+    if rs >= 0: return result_from_slot(rs, t)
+    return V(-1, false)
 
 gen_slice_bounds = (e: int, p: int) -> (int, int):
     r = int(nodes[e].b)
@@ -4993,7 +5202,7 @@ gen_range_cond = (e: int, invert: bool = false) -> int:
 cond_leaf = (e: int) -> int:
     stmt_begin()
     c = gen_expr(e).v
-    if tl_items[tl_items.len() - 1].len() == 0:
+    if tl_values.len() == tl_items[tl_items.len() - 1]:
         stmt_end()
         return c
     cv = vreg(VI)
@@ -6984,9 +7193,10 @@ begin_fn = (name: str, idx: int):
     scope_locals = []
     scope_defers = []
     loops = []
-    tl_items = []
-    tl_nop = []
-    tl_cond = []
+    tl_items.clear()
+    tl_values.clear()
+    tl_nop.clear()
+    tl_cond.clear()
     building = []
     sret_v = -1
     env_v = -1
