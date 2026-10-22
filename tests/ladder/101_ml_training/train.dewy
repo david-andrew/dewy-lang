@@ -1,0 +1,78 @@
+# Mini-batch training: per-sample gradients in parallel, summed in batch
+# order (a deterministic reduction), averaged, then one Adam step.
+
+$runtime_checks=false
+
+from p"data.dewy" import Rng, Sample, CLASSES, shuffled
+from p"mlp.dewy" import Mlp, Step, empty_mlp, backprop, forward, argmax
+from p"adam.dewy" import Adam, step
+
+# acc += x, elementwise.
+accumulate=(@acc:array<float64> x:array<float64>):>void=>{
+    loop i in 0.. and xi in x {
+        if i >=? acc.length break
+        acc[i]+=xi
+    }
+}
+
+scale=(@xs:array<float64> by:float64):>void=>{
+    loop @x in xs {
+        x*=by
+    }
+}
+
+sum_grads=(steps:array<Step> count:int64):>Mlp=>{
+    let total=empty_mlp()
+    loop s in steps {
+        accumulate(@total.w1 s.grad.w1)
+        accumulate(@total.b1 s.grad.b1)
+        accumulate(@total.w2 s.grad.w2)
+        accumulate(@total.b2 s.grad.b2)
+        accumulate(@total.w3 s.grad.w3)
+        accumulate(@total.b3 s.grad.b3)
+    }
+    let mean=1.0/float64(count)
+    scale(@total.w1 mean)
+    scale(@total.b1 mean)
+    scale(@total.w2 mean)
+    scale(@total.b2 mean)
+    scale(@total.w3 mean)
+    scale(@total.b3 mean)
+    return total
+}
+
+Epoch:type=[loss:float64 correct:int64]
+
+train_epoch=(@model:Mlp @opt:Adam @rng:Rng data:array<Sample> batch:int64):>Epoch=>{
+    let order=shuffled(@rng data.length)
+    let total_loss:float64=0.0
+    let correct:int64=0
+    let start:int64=0
+    loop start+batch <=? order.length {
+        let picked:array<Sample>=[]
+        loop i in [start..start+batch) {
+            let sample=data.get(order.get(i) ?? 0)
+            if sample is? Sample picked.push(sample)
+        }
+        let snapshot=model
+        let steps=[parallel s in picked backprop(snapshot s)]
+        loop st in steps {
+            total_loss+=st.loss
+            if st.correct correct+=1
+        }
+        step(@model @opt sum_grads(steps batch))
+        start+=batch
+    }
+    return [loss=total_loss/float64(data.length) correct=correct]
+}
+
+# confusion[actual*CLASSES + predicted]
+confusion=(model:Mlp data:array<Sample>):>array<int64>=>{
+    let counts:array<int64>=[loop i in [0..CLASSES*CLASSES) 0]
+    let predicted=[parallel s in data argmax(forward(model s).y)]
+    loop i in 0.. and s in data {
+        let cell=s.label*CLASSES+(predicted.get(i) ?? 0)
+        if cell >=? 0 and cell <? counts.length counts[cell]+=1
+    }
+    return counts
+}

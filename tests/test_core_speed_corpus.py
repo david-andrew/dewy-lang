@@ -43,7 +43,7 @@ def test_corpora_membership(tmp_path):
     assert corpus.LADDER / '01_word_count/core.dewy' in mixed
     assert not any(path.name == 'design.dewy' for path in mixed)
     assert corpus.ROOT / 'examples/dunes.dewy' in mixed and corpus.ROOT / 'examples/dunes_model.dewy' not in mixed
-    early = {int(path.parent.name[:2]) for path in mixed if path.parent.parent == corpus.LADDER}
+    early = {int(path.parent.name.split('_')[0]) for path in mixed if path.parent.parent == corpus.LADDER}
     assert early and max(early) < corpus.TIER4_FIRST
-    assert all(int(path.parent.name[:2]) >= corpus.TIER4_FIRST for path in found['tier-4'])
+    assert all(int(path.parent.name.split('_')[0]) >= corpus.TIER4_FIRST for path in found['tier-4'])
     assert [path.name for path in found['game']] == ['dunes.dewy', 'game.dewy']

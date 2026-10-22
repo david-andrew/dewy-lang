@@ -105,11 +105,11 @@ stack=list(range(4));snapshot=stack[:];assert stack.pop()==3;put(29,f'{sum(stack
 put(30,f'{dewy([x*2 for x in [1,2,3]])} {dewy(list(__import__("itertools").accumulate([1,2,3])))} 5')
 series=[1+3*i for i in range(5)];put(31,f'{dewy(series)} {sum(series)} {dewy([n for n in series if n%2==0])}')
 
-programs=sorted(p for p in W.iterdir() if p.is_dir() and p.name[:2].isdigit() and int(p.name[:2])<32)
-assert sorted(expected)==[int(p.name[:2]) for p in programs],'every program needs an oracle'
+programs=sorted(p for p in W.iterdir() if p.is_dir() and p.name.split('_')[0].isdigit() and int(p.name.split('_')[0])<32)
+assert sorted(expected)==[int(p.name.split('_')[0]) for p in programs],'every program needs an oracle'
 stale=[]
 for program in programs:
- path=program/'expected.out';text=expected[int(program.name[:2])]+'\n'
+ path=program/'expected.out';text=expected[int(program.name.split('_')[0])]+'\n'
  if '--write' in sys.argv:path.write_text(text)
  elif not path.exists() or path.read_text()!=text:stale.append(program.name)
 if stale:raise SystemExit('expected.out differs from the oracle: '+', '.join(stale))

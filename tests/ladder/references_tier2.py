@@ -280,8 +280,8 @@ def comptime():
 if __name__=='__main__':
     assert set(ORACLES)==set(range(1,33))
     failed=[]
-    for p in sorted(q for q in ROOT.iterdir() if q.is_dir() and q.name[:2].isdigit() and 32<=int(q.name[:2])<=63):
-        n=int(p.name[:2])-31;expected=ORACLES[n]()+'\n';target=p/'expected.out'
+    for p in sorted(q for q in ROOT.iterdir() if q.is_dir() and q.name.split('_')[0].isdigit() and 32<=int(q.name.split('_')[0])<=63):
+        n=int(p.name.split('_')[0])-31;expected=ORACLES[n]()+'\n';target=p/'expected.out'
         if '--write' in sys.argv:target.write_text(expected)
         elif not target.exists() or target.read_text()!=expected:failed.append(p.name)
     if failed:raise SystemExit('Oracle mismatch: '+', '.join(failed))

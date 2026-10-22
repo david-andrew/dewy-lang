@@ -311,6 +311,111 @@ def rtos_kernel():
     return '\n'.join(out)
 
 # ---------------------------------------------------------------- 101: ML training loop
+# A 2-12-12-3 ReLU perceptron trained with Adam on a jittered three-class XOR
+# cloud, in plain Python floats (IEEE binary64, the same operation order:
+# dense sums start from the bias, gradients are summed in batch order).
+M64=2**64
+class Lcg:
+    def __init__(s,seed):s.state=seed
+    def next(s):
+        s.state=(s.state*6364136223846793005+1442695040888963407)%M64
+        return s.state>>33
+    def uniform(s):return s.next()/2147483648.0
+    def below(s,n):
+        d=s.next()
+        return d%n if n>0 else 0
+
+def dataset(seed,count,noise):
+    r=Lcg(seed);out=[]
+    for i in range(count):
+        label=i%3;side=(i//3)%2;flip=-1.0 if side==0 else 1.0
+        cx,cy=(0.0,0.0) if label==2 else (flip,flip) if label==0 else (0.0-flip,flip)
+        x0=cx+(2.0*r.uniform()-1.0)*noise
+        x1=cy+(2.0*r.uniform()-1.0)*noise
+        out.append((x0,x1,label))
+    return out
+
+IN,HID,OUT=2,12,3
+def glorot(r,fi,fo):
+    limit=math.sqrt(6.0/float(fi+fo))
+    return [(2.0*r.uniform()-1.0)*limit for _ in range(fi*fo)]
+def dense(x,w,b,cols):
+    out=[]
+    for j in range(cols):
+        acc=b[j]
+        for i,xi in enumerate(x):acc+=xi*w[i*cols+j]
+        out.append(acc)
+    return out
+def relu(z):return [v if v>0.0 else 0.0 for v in z]
+def forward(m,x0,x1):
+    x=[x0,x1];h1=relu(dense(x,m[0],m[1],HID));h2=relu(dense(h1,m[2],m[3],HID));y=dense(h2,m[4],m[5],OUT)
+    return x,h1,h2,y
+def argmax(y):
+    best,top=0,y[0]
+    for k,v in enumerate(y):
+        if v>top:best,top=k,v
+    return best
+def back(dz,w,rows,cols):
+    out=[]
+    for i in range(rows):
+        acc=0.0
+        for j,d in enumerate(dz):acc+=w[i*cols+j]*d
+        out.append(acc)
+    return out
+def outer(a,b):return [ai*bj for ai in a for bj in b]
+def backprop(m,sample):
+    x0,x1,label=sample
+    x,h1,h2,y=forward(m,x0,x1)
+    dy=[yk-(1.0 if k==label else 0.0) for k,yk in enumerate(y)]
+    dz2=[d if h>0.0 else 0.0 for d,h in zip(back(dy,m[4],HID,OUT),h2)]
+    dz1=[d if h>0.0 else 0.0 for d,h in zip(back(dz2,m[2],HID,HID),h1)]
+    acc=0.0
+    for k,yk in enumerate(y):
+        d=yk-(1.0 if k==label else 0.0);acc+=d*d
+    return [outer(x,dz1),dz1,outer(h1,dz2),dz2,outer(h2,dy),dy],0.5*acc,argmax(y)==label
+
+@oracle('101_ml_training')
+def ml_training():
+    train=dataset(2026,120,ML_NOISE);test=dataset(99,60,ML_NOISE)
+    r=Lcg(7)
+    m=[glorot(r,IN,HID),[0.0]*HID,glorot(r,HID,HID),[0.0]*HID,glorot(r,HID,OUT),[0.0]*OUT]
+    rate,beta1,beta2,eps=0.01,0.9,0.999,0.00000001
+    mm=[[0.0]*len(a) for a in m];vv=[[0.0]*len(a) for a in m];decay1=decay2=1.0
+    rng=Lcg(77);epochs,batch=30,20
+    out=[f'train {len(train)} samples, test {len(test)}, batch {batch}, {epochs} epochs']
+    for epoch in range(1,epochs+1):
+        order=list(range(len(train)))
+        for j in range(1,len(order)):
+            p=rng.below(j+1);order[j],order[p]=order[p],order[j]
+        total=0.0;correct=0;start=0
+        while start+batch<=len(order):
+            steps=[backprop(m,train[order[i]]) for i in range(start,start+batch)]
+            for g,l,c in steps:
+                total+=l;correct+=c
+            grad=[[0.0]*len(a) for a in m]
+            for g,_,_ in steps:
+                for a,ga in zip(grad,g):
+                    for i,v in enumerate(ga):a[i]+=v
+            mean=1.0/float(batch)
+            grad=[[v*mean for v in a] for a in grad]
+            decay1*=beta1;decay2*=beta2
+            for p,mp,vp,g in zip(m,mm,vv,grad):
+                for i,gi in enumerate(g):
+                    mp[i]=beta1*mp[i]+(1.0-beta1)*gi
+                    vp[i]=beta2*vp[i]+(1.0-beta2)*(gi*gi)
+                    mhat=mp[i]/(1.0-decay1);vhat=vp[i]/(1.0-decay2)
+                    p[i]-=rate*mhat/(math.sqrt(vhat)+eps)
+            start+=batch
+        out.append(f'epoch {epoch:02d} loss {total/float(len(train)):.6f} train {correct}/{len(train)}')
+    counts=[[0]*3 for _ in range(3)]
+    for x0,x1,label in test:counts[label][argmax(forward(m,x0,x1)[3])]+=1
+    out.append(f'test {sum(counts[c][c] for c in range(3))}/{len(test)}')
+    for c in range(3):out.append(f'  class {c}: '+' '.join(map(str,counts[c])))
+    for x0,x1,label in [(-1.0,-1.0,0),(1.0,-1.0,1),(0.0,0.0,2),(0.5,0.5,0)]:
+        y=forward(m,x0,x1)[3]
+        out.append(f'probe ({x0:.1f}, {x1:.1f}) -> '+' '.join(f'{v:.3f}' for v in y)+f' class {argmax(y)}')
+    return '\n'.join(out)
+ML_NOISE=0.8
 
 
 if __name__=='__main__':

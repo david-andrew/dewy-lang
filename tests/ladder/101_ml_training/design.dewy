@@ -1,0 +1,167 @@
+# Tier 4 / 101_ml_training / milestone 36
+# Acceptance: train a 2-12-12-3 ReLU perceptron with Adam on a deterministic
+# three-class XOR-like point cloud, written over tensors: whole-batch matrix
+# products, `new` axes and broadcasting operators for biases and masks,
+# placement that follows the data (`.to('best')`), and a `parallel` loop over
+# the batches of an evaluation pass; per-epoch loss and accuracy, a held-out
+# confusion matrix and probe predictions match an independent float-exact
+# oracle.
+#
+# HELD (question 7): tensor syntax and broadcasting are not settled. This is
+# the design surface as the decisions describe it; core.dewy is the passing
+# twin over today's arrays and `parallel`.
+
+$runtime_checks=false
+
+from p"data.dewy" import Rng, Sample, CLASSES, make_dataset, shuffled, uniform
+
+const EPOCHS:int64=30
+const BATCH:int64=20
+const HIDDEN:int64=12
+const NOISE:float64=0.8
+
+# Inputs as rows, one-hot targets beside them.
+features=(data:array<Sample>):>NDArray<float64>=>{
+    let x=zeros(data.length 2)
+    loop i in 0.. and s in data {
+        x[i [..]]=[s.x0 s.x1]
+    }
+    return x
+}
+onehot=(data:array<Sample>):>NDArray<float64>=>{
+    let t=zeros(data.length CLASSES)
+    loop i in 0.. and s in data {
+        t[i s.label]=1.0
+    }
+    return t
+}
+
+glorot=(@r:Rng rows:int64 cols:int64):>NDArray<float64>=>{
+    let limit=sqrt(6.0/float64(rows+cols))
+    return reshape([loop i in [0..rows*cols) (2.0*uniform(@r)-1.0)*limit] rows cols)
+}
+
+Model:type=[w1:NDArray<float64> b1:NDArray<float64> w2:NDArray<float64> b2:NDArray<float64> w3:NDArray<float64> b3:NDArray<float64>]
+
+init=(@r:Rng):>Model=>{
+    let w1=glorot(@r 2 HIDDEN)
+    let w2=glorot(@r HIDDEN HIDDEN)
+    let w3=glorot(@r HIDDEN CLASSES)
+    return [w1=w1 b1=zeros(HIDDEN) w2=w2 b2=zeros(HIDDEN) w3=w3 b3=zeros(CLASSES)]
+}
+
+Activations:type=[h1:NDArray<float64> h2:NDArray<float64> y:NDArray<float64>]
+
+# A batch of rows through the network: each bias row broadcasts over the
+# batch through a `new` leading axis.
+forward=(m:Model x:NDArray<float64>):>Activations=>{
+    let h1=max.(x*m.w1 .+ m.b1[new ..] 0.0)
+    let h2=max.(h1*m.w2 .+ m.b2[new ..] 0.0)
+    let y=h2*m.w3 .+ m.b3[new ..]
+    return [h1=h1 h2=h2 y=y]
+}
+
+# Column sums: a row of ones times the matrix.
+column_sums=(a:NDArray<float64>):>NDArray<float64>=>(ones(1 rows(a))*a)[0 [..]]
+
+Grads:type=Model
+
+# Gradients of the mean half squared error over the batch. Masks come from
+# the activations: a unit passes gradient where it was positive.
+backward=(m:Model x:NDArray<float64> t:NDArray<float64> a:Activations):>Grads=>{
+    let n=float64(rows(x))
+    let dy=a.y .- t
+    let dz2=(dy*transpose(m.w3)) .* (a.h2 .>? 0.0)
+    let dz1=(dz2*transpose(m.w2)) .* (a.h1 .>? 0.0)
+    return [
+        w1=(transpose(x)*dz1) ./ n b1=column_sums(dz1) ./ n
+        w2=(transpose(a.h1)*dz2) ./ n b2=column_sums(dz2) ./ n
+        w3=(transpose(a.h2)*dy) ./ n b3=column_sums(dy) ./ n
+    ]
+}
+
+Adam:type=[m:Model v:Model decay1:float64 decay2:float64]
+
+# Zero moments shaped like the model.
+still=(m:Model):>Model=>[w1=m.w1 .* 0.0 b1=m.b1 .* 0.0 w2=m.w2 .* 0.0 b2=m.b2 .* 0.0 w3=m.w3 .* 0.0 b3=m.b3 .* 0.0]
+
+adam_step=(@p:NDArray<float64> @mo:NDArray<float64> @ve:NDArray<float64> g:NDArray<float64> decay1:float64 decay2:float64):>void=>{
+    mo=0.9 .* mo .+ (1.0-0.9) .* g
+    ve=0.999 .* ve .+ (1.0-0.999) .* (g .* g)
+    p .-= 0.01 .* (mo ./ (1.0-decay1)) ./ (sqrt.(ve ./ (1.0-decay2)) .+ 0.00000001)
+}
+
+train_step=(@m:Model @opt:Adam g:Grads):>void=>{
+    opt.decay1*=0.9
+    opt.decay2*=0.999
+    adam_step(@m.w1 @opt.m.w1 @opt.v.w1 g.w1 opt.decay1 opt.decay2)
+    adam_step(@m.b1 @opt.m.b1 @opt.v.b1 g.b1 opt.decay1 opt.decay2)
+    adam_step(@m.w2 @opt.m.w2 @opt.v.w2 g.w2 opt.decay1 opt.decay2)
+    adam_step(@m.b2 @opt.m.b2 @opt.v.b2 g.b2 opt.decay1 opt.decay2)
+    adam_step(@m.w3 @opt.m.w3 @opt.v.w3 g.w3 opt.decay1 opt.decay2)
+    adam_step(@m.b3 @opt.m.b3 @opt.v.b3 g.b3 opt.decay1 opt.decay2)
+}
+
+# Row-wise argmax: the first index of each row's largest value.
+predict=(y:NDArray<float64>):>array<int64>=>[loop r in [0..rows(y)) {
+    let row=y[r [..]]
+    let best:int64=0
+    loop k in [0..cols(y)) {
+        if row[k] >? row[best] best=k
+    }
+    best
+}]
+
+two=(n:int64):>string=>if n <? 10 "0{n}" else "{n}"
+
+main=():>int64=>{
+    let device='best'
+    let train=make_dataset(2026 120 NOISE)
+    let test=make_dataset(99 60 NOISE)
+    let x=features(train).to(device)
+    let t=onehot(train).to(device)
+    let init_rng:Rng=[state=7]
+    let m=init(@init_rng).to(device)
+    let opt:Adam=[m=still(m) v=still(m) decay1=1.0 decay2=1.0]
+    let rng:Rng=[state=77]
+    printl("train {train.length} samples, test {test.length}, batch {BATCH}, {EPOCHS} epochs")
+    loop epoch in [1..EPOCHS] {
+        let order=shuffled(@rng train.length)
+        let loss:float64=0.0
+        let correct:int64=0
+        loop start in [0,BATCH..train.length) {
+            let picked=order[start..start+BATCH)
+            let xb=x[picked [..]]
+            let tb=t[picked [..]]
+            let a=forward(m xb)
+            loss+=sum(0.5 .* (a.y .- tb) .^ 2)
+            let hits=predict(a.y) .=? [loop i in picked train[i].label]
+            correct+=[loop hit in hits if hit hit].length
+            train_step(@m @opt backward(m xb tb a))
+        }
+        printl("epoch {two(epoch)} loss {format(loss/float64(train.length) ".6f")} train {correct}/{train.length}")
+    }
+    # Evaluation in parallel batches of the held-out set.
+    let tx=features(test).to(device)
+    let guesses=[parallel b in [0,BATCH..test.length) predict(forward(m tx[[b..b+BATCH) [..]]).y)]
+    let counts=zeros<int64>(CLASSES CLASSES)
+    let i=0
+    loop batch in guesses {
+        loop guess in batch {
+            counts[test[i].label guess]+=1
+            i+=1
+        }
+    }
+    printl("test {sum([loop c in [0..CLASSES) counts[c c]])}/{test.length}")
+    loop c in [0..CLASSES) {
+        printl("  class {c}: {[loop p in [0..CLASSES) string(counts[c p])].join(" ")}")
+    }
+    let probes=[(-1.0) (-1.0); 1.0 (-1.0); 0.0 0.0; 0.5 0.5]
+    let y=forward(m probes.to(device)).y
+    let classes=predict(y)
+    loop r in [0..rows(probes)) {
+        let shown=[loop k in [0..CLASSES) format(y[r k] ".3f")]
+        printl("probe ({format(probes[r 0] ".1f")}, {format(probes[r 1] ".1f")}) -> {shown.join(" ")} class {classes[r]}")
+    }
+    return 0
+}

@@ -458,7 +458,7 @@ def ct_crypto():
     return '\n'.join(lines)
 
 if __name__=='__main__':
-    programs=sorted(q.name for q in ROOT.iterdir() if q.is_dir() and q.name[:2].isdigit() and 95<=int(q.name[:2])<=96)
+    programs=sorted(q.name for q in ROOT.iterdir() if q.is_dir() and q.name.split('_')[0].isdigit() and 95<=int(q.name.split('_')[0])<=96)
     assert sorted(ORACLES)==programs,'every program 95-96 needs an oracle'
     selected=[a for a in sys.argv[1:] if not a.startswith('--')]
     files={}

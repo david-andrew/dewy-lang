@@ -1,0 +1,49 @@
+# Tier 4 / 101_ml_training / milestone 36 (core twin over today's arrays)
+# Acceptance: train a 2-12-12-3 ReLU perceptron with Adam on a deterministic
+# three-class XOR-like point cloud: per-sample backpropagation in `parallel`,
+# a fixed-order gradient reduction, per-epoch loss and accuracy, then a held-out
+# confusion matrix and probe predictions; independent float-exact oracle.
+
+$runtime_checks=false
+
+from p"data.dewy" import Rng, Sample, CLASSES, make_dataset
+from p"mlp.dewy" import Mlp, init_mlp, forward, argmax
+from p"adam.dewy" import adam
+from p"train.dewy" import train_epoch, confusion
+
+const EPOCHS:int64=30
+const BATCH:int64=20
+const NOISE:float64=0.8
+
+two=(n:int64):>string=>if n <? 10 "0{n}" else "{n}"
+
+main=():>int64=>{
+    let train=make_dataset(2026 120 NOISE)
+    let test=make_dataset(99 60 NOISE)
+    let init_rng:Rng=[state=7]
+    let model=init_mlp(@init_rng)
+    let opt=adam(0.01)
+    let rng:Rng=[state=77]
+    printl("train {train.length} samples, test {test.length}, batch {BATCH}, {EPOCHS} epochs")
+    loop epoch in [1..EPOCHS] {
+        let e=train_epoch(@model @opt @rng train BATCH)
+        printl("epoch {two(epoch)} loss {format(e.loss ".6f")} train {e.correct}/{train.length}")
+    }
+    let counts=confusion(model test)
+    let right=0
+    loop c in [0..CLASSES) {
+        right+=counts.get(c*CLASSES+c) ?? 0
+    }
+    printl("test {right}/{test.length}")
+    loop c in [0..CLASSES) {
+        let row=[loop p in [0..CLASSES) string(counts.get(c*CLASSES+p) ?? 0)]
+        printl("  class {c}: {row.join(" ")}")
+    }
+    let probes:array<Sample>=[[x0=-1.0 x1=-1.0 label=0] [x0=1.0 x1=-1.0 label=1] [x0=0.0 x1=0.0 label=2] [x0=0.5 x1=0.5 label=0]]
+    loop s in probes {
+        let y=forward(model s).y
+        let shown=[loop v in y format(v ".3f")]
+        printl("probe ({format(s.x0 ".1f")}, {format(s.x1 ".1f")}) -> {shown.join(" ")} class {argmax(y)}")
+    }
+    return 0
+}

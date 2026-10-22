@@ -180,11 +180,11 @@ def test_contract():
     return json.dumps({'cases':cases,'passed':9,'failed':1,'exit':1,'failure_stdout':'continued\n','message_contains':'nonempty input','ordinary_stdout':test_contracts()+'\n'},indent=2)+'\n'
 if __name__=='__main__':
     assert set(ORACLES)|NEGATIVE==set(range(1,32)) and not set(ORACLES)&NEGATIVE
-    programs=sorted(q for q in ROOT.iterdir() if q.is_dir() and q.name[:2].isdigit() and 64<=int(q.name[:2])<=94)
-    assert [int(p.name[:2])-63 for p in programs]==list(range(1,32)),'every tier-3 program needs an oracle'
+    programs=sorted(q for q in ROOT.iterdir() if q.is_dir() and q.name.split('_')[0].isdigit() and 64<=int(q.name.split('_')[0])<=94)
+    assert [int(p.name.split('_')[0])-63 for p in programs]==list(range(1,32)),'every tier-3 program needs an oracle'
     files={}
     for p in programs:
-        n=int(p.name[:2])-63
+        n=int(p.name.split('_')[0])-63
         if n in NEGATIVE:files[p/'expected.out']=None
         else:files[p/'expected.out']=ORACLES[n]()+'\n'
     files[ROOT/'90_stack_repl'/'stdin.txt']='\n'.join(REPL_INPUT)+'\n'

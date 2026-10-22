@@ -1,0 +1,71 @@
+# Adam over every parameter array of the model, in a fixed order. The bias
+# corrections use running products of the decay rates, not powers, so the
+# arithmetic is the same sequence of IEEE operations on every target.
+
+$runtime_checks=false
+
+from p"mlp.dewy" import Mlp, empty_mlp
+
+Adam:type=[
+    rate:float64 beta1:float64 beta2:float64 epsilon:float64
+    m:Mlp v:Mlp
+    decay1:float64      # beta1^t
+    decay2:float64      # beta2^t
+    steps:int64
+]
+
+adam=(rate:float64):>Adam=>[
+    rate=rate beta1=0.9 beta2=0.999 epsilon=0.00000001
+    m=empty_mlp() v=empty_mlp() decay1=1.0 decay2=1.0 steps=0
+]
+
+# The scalars of one step.
+Hyper:type=[rate:float64 beta1:float64 beta2:float64 epsilon:float64 decay1:float64 decay2:float64]
+
+# One array's update: the new parameters and moments, as fresh arrays.
+Layer:type=[p:array<float64> m:array<float64> v:array<float64>]
+
+update=(p:array<float64> m:array<float64> v:array<float64> g:array<float64> h:Hyper):>Layer=>{
+    let out:Layer=[p=[] m=[] v=[]]
+    loop i in 0.. and gi in g {
+        let mi=h.beta1*(m.get(i) ?? 0.0)+(1.0-h.beta1)*gi
+        let vi=h.beta2*(v.get(i) ?? 0.0)+(1.0-h.beta2)*(gi*gi)
+        let mhat=mi/(1.0-h.decay1)
+        let vhat=vi/(1.0-h.decay2)
+        out.m.push(mi)
+        out.v.push(vi)
+        out.p.push((p.get(i) ?? 0.0)-h.rate*mhat/(sqrt(vhat)+h.epsilon))
+    }
+    return out
+}
+
+step=(@model:Mlp @opt:Adam g:Mlp):>void=>{
+    opt.steps+=1
+    opt.decay1*=opt.beta1
+    opt.decay2*=opt.beta2
+    let h:Hyper=[rate=opt.rate beta1=opt.beta1 beta2=opt.beta2 epsilon=opt.epsilon decay1=opt.decay1 decay2=opt.decay2]
+    let w1=update(model.w1 opt.m.w1 opt.v.w1 g.w1 h)
+    model.w1=w1.p
+    opt.m.w1=w1.m
+    opt.v.w1=w1.v
+    let b1=update(model.b1 opt.m.b1 opt.v.b1 g.b1 h)
+    model.b1=b1.p
+    opt.m.b1=b1.m
+    opt.v.b1=b1.v
+    let w2=update(model.w2 opt.m.w2 opt.v.w2 g.w2 h)
+    model.w2=w2.p
+    opt.m.w2=w2.m
+    opt.v.w2=w2.v
+    let b2=update(model.b2 opt.m.b2 opt.v.b2 g.b2 h)
+    model.b2=b2.p
+    opt.m.b2=b2.m
+    opt.v.b2=b2.v
+    let w3=update(model.w3 opt.m.w3 opt.v.w3 g.w3 h)
+    model.w3=w3.p
+    opt.m.w3=w3.m
+    opt.v.w3=w3.v
+    let b3=update(model.b3 opt.m.b3 opt.v.b3 g.b3 h)
+    model.b3=b3.p
+    opt.m.b3=b3.m
+    opt.v.b3=b3.v
+}
