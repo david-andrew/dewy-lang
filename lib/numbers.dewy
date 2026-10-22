@@ -1,7 +1,8 @@
 # Remainders and rounding with an explicit rule. `%` is the floored remainder;
 # `mod(a b kind='euclid')` names another. Floats round to nearest with ties to
 # even (IEEE 754); `round(x ties='away')` names another tie rule. The compiler
-# routes a Dewy `mod` of integers, and `round` of a float, here.
+# routes a Dewy `mod` of integers, `round` of a float, and `round` of a
+# fraction given `ties=` here (rational.dewy rounds a half away from zero).
 
 # floor: the divisor's sign (`%`); trunc: the dividend's (C's); euclid: never negative
 ModKind:type='floor'|'trunc'|'euclid'
@@ -43,3 +44,21 @@ round = ((x:float64 ties:Ties='even'):>float64=>{
         return result
     })
     & ((x:float32 ties:Ties='even'):>float32=>float32(round(float64(x) ties)))
+    & ((value:rational ties:Ties):>int=>{
+        let low=value.numerator//value.denominator
+        let twice=(value.numerator-low*value.denominator)*2
+        if twice <? value.denominator return low
+        if twice >? value.denominator return low+1
+        let up=match ties {
+            <'away'>=>value.numerator >? 0
+            <'even'>=>low%2 =? 1
+            <'zero'>=>value.numerator <? 0
+            <'up'>=>true
+            <'down'>=>false
+        }
+        return if up low+1 else low
+    })
+    & ((value:rational<int64> ties:Ties):>int=>{
+        let exact:rational=value
+        return round(exact ties)
+    })

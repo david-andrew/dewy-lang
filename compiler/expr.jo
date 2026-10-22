@@ -3616,12 +3616,15 @@ dewy_numbers_call = (n: int, name: int, args: int[], ufcs: bool) -> bool:
     if text == "round":
         # (an exact number rounds a half away from zero: `round(2.5)` is 3,
         # a decimal literal included)
-        if bundled_rational_type(t) or bundled_word_rational_type(t) or is_float(t) and decimal_literal_tree(first):
+        named = false
+        loop a in args:
+            if nodes[a].kind == .namedarg: named = true
+        if (bundled_rational_type(t) or bundled_word_rational_type(t) or is_float(t) and decimal_literal_tree(first)) and not named:
             ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
             nodes[n].a = i32(bc_field(bc_ident("$dewy_rational", pos), text, pos))
             set_list(n, args)
             return true
-        if not is_float(t): return false
+        if not is_float(t) and not named: return false
     ensure_bundled_import("numbers.dewy", "$dewy_numbers", pos)
     nodes[n].a = i32(bc_field(bc_ident("$dewy_numbers", pos), text, pos))
     set_list(n, args)
