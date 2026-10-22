@@ -996,6 +996,8 @@ ensure_bundled_import = (file: str, alias: str, pos: int):
     m = cur_mod()
     name = intern(alias)
     if modules[m].names.get(name) != none: return
+    # (a library writer, such as __dewy_fmt for an array of quantities, imports once)
+    if modules[m].is_prelude and prelude.get(name) != none: return
     if files[int(modules[m].file)].path == lib_dir + "/" + file:
         scope_add_module(m, name, .module, m, 0)
         return

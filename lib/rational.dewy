@@ -326,8 +326,8 @@ _whole_nanoseconds=(seconds:Rational):>int64=>{
 
 # How a physical quantity prints (the compiler calls these): the candidate units, smallest
 # first, are worth nums[i]/dens[i] canonical units, and units[base] shows a zero. Exact
-# values take the largest unit that keeps a whole count, else the largest not above the
-# magnitude; floats take the largest not above the magnitude. offset is the shown unit's
+# values take the largest unit not above the magnitude that keeps a whole count, else the
+# unit with the simplest fraction; floats take the largest unit not above the magnitude. offset is the shown unit's
 # zero (Celsius' 273.15 K); for floats it comes multiplied by dens[0], so that a reading
 # is (value*den - offset)/num with the fewest roundings.
 _quantity_exact=(value:Rational units:array<string> nums:array<int64> dens:array<int64> base:int64 offset:Rational):>string=>{
@@ -336,17 +336,19 @@ _quantity_exact=(value:Rational units:array<string> nums:array<int64> dens:array
     let pick=base
     if shifted.numerator not=? 0 {
         let whole=-1
-        let fits=-1
+        let simplest=-1
+        let simplest_size=0
         loop i in 0.. and n in nums {
-            let scale=_make(n dens[i])
-            if not _lt(size scale) {
-                fits=i
-                if _div(shifted scale).denominator =? 1 whole=i
+            let count=_div(shifted _make(n dens[i]))
+            if count.denominator =? 1 and not _lt(size _make(n dens[i])) whole=i
+            let digits=count.numerator.abs()+count.denominator
+            if simplest <? 0 or digits <? simplest_size {
+                simplest=i
+                simplest_size=digits
             }
         }
-        pick=0
+        pick=simplest
         if whole >=? 0 pick=whole
-        else if fits >=? 0 pick=fits
     }
     return "{_div(shifted _make(nums[pick] dens[pick]))}{units[pick]}"
 }
