@@ -1,0 +1,73 @@
+# Target names (docs/LANGUAGE.md, "Targets"). A name has only the fields it needs:
+# the processor (or `c`, `wasm32`), then the system. A processor alone asks for the
+# current machine.
+target_names = () -> str[]: ["x86_64", "riscv64", "aarch64", "c",
+    "x86_64-freestanding", "riscv64-freestanding", "aarch64-freestanding", "c-freestanding",
+    "x86_64-linux", "riscv64-linux", "aarch64-linux", "c-linux",
+    "x86_64-mac", "aarch64-mac",
+    "x86_64-windows", "riscv64-windows", "aarch64-windows", "c-windows",
+    "c-posix", "c89", "wasm32"]
+
+# The targets this compiler has a backend for.
+supported_target_names = () -> str[]: ["x86_64-linux", "aarch64-linux", "aarch64-mac", "x86_64-windows", "wasm32"]
+
+target_arches = () -> str[]: ["x86_64", "riscv64", "aarch64", "c", "wasm32"]
+target_oses = () -> str[]: ["linux", "mac", "windows", "freestanding", "posix", "none"]
+
+# A target name's fields: its processor (c89 is C's) and its system (none when it names none).
+target_arch_of = (name: str) -> str:
+    if name == "c89": return "c"
+    dash = find(name, "-")
+    if dash < 0: return name
+    name[..dash)
+
+target_os_of = (name: str) -> str:
+    dash = find(name, "-")
+    if dash < 0: return "none"
+    name[dash + 1..]
+
+# Why a requested target (a command line's or build block's) cannot be compiled for,
+# or "" when it can. host is the full name of the machine compiling.
+target_problem = (name: str, host: str) -> str:
+    supported = join(supported_target_names(), ", ")
+    if name in supported_target_names(): return ""
+    if name in target_names():
+        if name == target_arch_of(host): return ""
+        if "{name}-linux" in supported_target_names(): return "target '{name}' (a processor alone) means this machine, which is {host}: name the system too, as {name}-linux"
+        return "target '{name}' is not supported yet (the supported targets are {supported})"
+    old = ""
+    if name == "native": old = "; the current machine is the default, or its processor names it: {target_arch_of(host)}"
+    else if name == "linux": old = "; Linux on x86-64 is x86_64-linux"
+    else if name == "linux-arm64" or name == "arm" or name == "arm64": old = "; Linux on 64-bit ARM is aarch64-linux"
+    else if name == "macos" or name == "mac": old = "; macOS on Apple's processors is aarch64-mac"
+    else if name == "windows": old = "; Windows on x86-64 is x86_64-windows"
+    else if name == "wasm" or name == "web": old = "; WebAssembly is wasm32"
+    "unknown target '{name}' (the supported targets are {supported}){old}"
+
+# the machine field of an ELF file's header (0 if unreadable): 20 bytes, not the whole file
+elf_machine_of = (path: str) -> int:
+    when TARGET == "windows":
+        return 0
+    else:
+        fd = syscall(2, data(__zstr(path)), 0, 0)
+        if fd < 0: return 0
+        hdr = fill(u8(0), 20)
+        n = syscall(17, fd, data(hdr), 20, 0)
+        syscall(3, fd)
+        if n < 20: return 0
+        # (a Mach-O file: macOS's; its CPU type, 0x100000C for arm64)
+        if hdr[0] == 0xCF and hdr[1] == 0xFA and hdr[2] == 0xED and hdr[3] == 0xFE: return int(hdr[4]) | (int(hdr[5]) << 8) | (int(hdr[6]) << 16) | (int(hdr[7]) << 24)
+        return int(hdr[18]) | (int(hdr[19]) << 8)
+
+# The full target name of the machine this compiler runs on.
+host_target_name = () -> str:
+    name = "x86_64-linux"
+    when TARGET == "windows":
+        name = "x86_64-windows"
+    # (the compiler's own processor: its executable's ELF machine, 183 for arm64)
+    when TARGET != "windows":
+        m = elf_machine_of(exe_path())
+        if m == 183: name = "aarch64-linux"
+        else if m == 0x100000C: name = "aarch64-mac"
+    name
+

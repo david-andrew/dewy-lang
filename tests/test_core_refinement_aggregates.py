@@ -139,7 +139,7 @@ def test_addr_target_bound(compiler, tmp_path):
     source = tmp_path / 'target.dewy'
     source.write_text('main=()=>{let i:addr=4294967296;printl(i)}')
     native = subprocess.run([compiler, 'check', source], capture_output=True, text=True)
-    web = subprocess.run([compiler, 'build', source, '--target', 'wasm', '-o', tmp_path / 'web'], capture_output=True, text=True)
+    web = subprocess.run([compiler, 'build', source, '--target', 'wasm32', '-o', tmp_path / 'web'], capture_output=True, text=True)
     assert native.returncode == 0, native.stderr
     assert web.returncode != 0 and 'refinement refuted' in web.stderr, web.stderr
 

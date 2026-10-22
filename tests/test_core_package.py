@@ -56,7 +56,7 @@ def test_core_packaged_toolchain(toolchain, tmp_path):
     executed = subprocess.run([binary], cwd=tmp_path, env=env, capture_output=True,
                               text=True, timeout=10, check=False)
     assert executed.returncode == 42, executed.stdout + executed.stderr
-    run('build', source, '--target', 'wasm', '-o', tmp_path / 'sample-web')
+    run('build', source, '--target', 'wasm32', '-o', tmp_path / 'sample-web')
     node = shutil.which('node')
     assert node, 'Node is required for the packaged web compiler check'
     scripts = Scripts()
@@ -70,7 +70,7 @@ def test_core_packaged_toolchain(toolchain, tmp_path):
     run('new', tmp_path / 'my-game')
     game = tmp_path / 'my-game/main.dewy'
     run('build', game, '-o', tmp_path / 'game-native')
-    run('build', game, '--target', 'wasm', '-o', tmp_path / 'game-web')
+    run('build', game, '--target', 'wasm32', '-o', tmp_path / 'game-web')
     assert (tmp_path / 'game-web.html').is_file()
 
 

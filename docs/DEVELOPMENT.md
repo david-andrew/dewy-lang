@@ -144,7 +144,7 @@ python3 -m tools.compiler.build --bootstrap --output /tmp/dewy-core
 /tmp/dewy-core/bin/dewy-core --version
 /tmp/dewy-core/bin/dewy-core new /tmp/my-dewy-game
 /tmp/dewy-core/bin/dewy-core watch /tmp/my-dewy-game/main.dewy
-/tmp/dewy-core/bin/dewy-core build examples/paddle.dewy --target wasm -o /tmp/paddle
+/tmp/dewy-core/bin/dewy-core build examples/paddle.dewy --target wasm32 -o /tmp/paddle
 ```
 
 The output directory must be new. It contains a standalone `bin/` and `lib/`,

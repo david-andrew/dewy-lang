@@ -9,7 +9,7 @@
 <main id="main" class="page-wrap"><header class="page-hero"><p class="eyebrow">The Dewy programming language</p><h1>Tools for the edit loop</h1><p>Check a program, run it, inspect it, and repeat with the current compiler.</p></header><section class="content-section" id="cli"><h2>Run, check and build</h2><pre><code>dewy check hello.dewy
 dewy hello.dewy
 dewy build hello.dewy --release -o hello
-dewy build hello.dewy --target wasm -o hello-web
+dewy build hello.dewy --target wasm32 -o hello-web
 dewy repl
 dewy watch hello.dewy</code></pre><p>The interactive prompt and watch command are part of the compiler. Native watch reruns after source changes. Web builds emit an HTML runner.</p></section><section class="content-section" id="editor"><h2>VS Code and the language server</h2><p>Install the <a href="https://marketplace.visualstudio.com/items?itemName=RedFoxLabs.dewy">Dewy extension</a>. Set <code>dewy.core.path</code> to a standalone <code>bin/dewy-core</code> or the checkout’s absolute <code>tools/dewy</code> path.</p><p>The extension provides unsaved diagnostics, completion, hover, definitions and formatting through <code>dewy lsp</code>, plus native test tasks and CodeLLDB integration. This page does not promise a complete rename, references, semantic-token, inlay-hint or test-explorer experience. See the <a href="https://github.com/david-andrew/dewy-lang/blob/master/editors/vscode/README.md">extension guide</a>.</p></section><section class="content-section" id="testing"><h2>Tests and formatting</h2><pre><code>dewy test project.dewy
 dewy test --watch project.dewy

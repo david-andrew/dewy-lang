@@ -47,9 +47,11 @@ Reachable source modules share a coherent type environment, initialize once in d
 
 ## Targets
 
-`$target` is a compile-time string naming the backend (`x86_64`, `riscv`, `arm`, `c`, `wasm32`). Comparing `$target` with a string literal (`=?`, `not =?`, `in?` and `not in?` against a literal list, combined with `not`, `and`, `or`) folds during checking; an `if` whose condition is such a comparison skips its dead arms without checking them — they may import files that exist only for other targets — and splices the live arm's `{}` body into the enclosing scope so gated imports and declarations bind there. Plain literal conditions keep ordinary flow semantics.
+Target names have only the fields they need, not LLVM triples: a processor alone (`x86_64`, `aarch64`, `riscv64`, `c`) is the current machine's system on it; then `x86_64-linux`, `aarch64-linux`, `riscv64-linux`, `c-linux`; `x86_64-mac`, `aarch64-mac`; `x86_64-windows`, `aarch64-windows`, `riscv64-windows`, `c-windows`; `x86_64-freestanding`, `aarch64-freestanding`, `riscv64-freestanding`, `c-freestanding`; and `c-posix`, `c89`, `wasm32`.
 
-`$supported_targets = ["x86_64" ...]` lists the backends a module accepts; compiling for another target is an error.
+`$target` is a compile-time string holding the full name being compiled for (never a processor alone); `$target.arch` and `$target.os` are its processor and system (`none` when the name has none). Comparing these with a string literal (`=?`, `not =?`, `in?` and `not in?` against a literal list, combined with `not`, `and`, `or`) folds during checking; an `if` whose condition is such a comparison skips its dead arms without checking them — they may import files that exist only for other targets — and splices the live arm's `{}` body into the enclosing scope so gated imports and declarations bind there. Plain literal conditions keep ordinary flow semantics.
+
+`$supported_targets = ["x86_64-linux" ...]` lists the full target names a module accepts; compiling for another target is an error.
 
 ## Prelude
 

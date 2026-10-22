@@ -5,6 +5,7 @@ import subprocess
 import pytest
 
 from tests.support import compiler  # noqa: F401
+from tests.support import target_name
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
@@ -49,7 +50,7 @@ main=()=>{{
     printl"{{result}}"
 }}
 ''')
-        flags = ['--ir', '--target', target, *(['--release'] if release else [])]
+        flags = ['--ir', '--target', target_name(target), *(['--release'] if release else [])]
         built = subprocess.run([compiler, 'build', source, '-o', source.with_suffix(''), *flags],
                                capture_output=True, text=True, timeout=30, check=False)
         assert built.returncode == 0, built.stdout + built.stderr

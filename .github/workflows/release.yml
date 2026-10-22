@@ -172,7 +172,7 @@ jobs:
           status=0
           ./check-native || status=$?
           test "$status" -eq 42
-          "$prefix/bin/dewy" build check.dewy --target wasm -o check-web
+          "$prefix/bin/dewy" build check.dewy --target wasm32 -o check-web
           test -s check-web.html
       - name: Install with install.ps1 and build a program
         if: runner.os == 'Windows'
@@ -190,7 +190,7 @@ jobs:
           if ($LASTEXITCODE) { exit 1 }
           & .\check-native.exe
           if ($LASTEXITCODE -ne 42) { exit 1 }
-          & "$prefix\bin\dewy.cmd" build check.dewy --target wasm -o check-web
+          & "$prefix\bin\dewy.cmd" build check.dewy --target wasm32 -o check-web
           if ($LASTEXITCODE -or -not (Test-Path check-web.html)) { exit 1 }
           exit 0
 

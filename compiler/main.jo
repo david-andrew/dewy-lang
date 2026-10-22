@@ -3,9 +3,10 @@ use 'lazy_bodies.jo'
 use 'frontend.jo'
 use 'effects.jo'
 use 'decimals.jo'
+use 'targets.jo'
 # The Sloppy compiler.
 #   sloppy file.jo [args]     compile and run
-#   sloppy build file.jo [-o out] [--target wasm] [--release]
+#   sloppy build file.jo [-o out] [--target wasm32] [--release]
 #   sloppy watch file.jo [args]     run it, and reload it while its files change (watch.jo)
 
 build:
@@ -51,7 +52,7 @@ use 'directives.jo'
 const DEWY_CORE_VERSION = "0.0.0-dev"
 
 usage = (status: int = 2):
-    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target native|wasm] [--release] [--time]\n       dewy-core check [--obligations] file.dewy\n       dewy-core test [--watch] [--release] [--json] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core repl\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.")
+    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target x86_64-linux|aarch64-linux|aarch64-mac|x86_64-windows|wasm32] [--release] [--time]\n       dewy-core check [--obligations] file.dewy\n       dewy-core test [--watch] [--release] [--json] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core repl\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.")
     exit(status)
 
 find_lib_dir = () -> str:
@@ -79,7 +80,7 @@ timing = false
 
 # build options written in the program itself:
 #   build:
-#       target = wasm
+#       target = wasm32
 #       output = "game"
 build_target = ""
 build_output = ""
@@ -87,49 +88,23 @@ cli_target = ""
 
 # the target, from the command line or else the build block: for building, checking and the
 # language server alike
-# the machine field of an ELF file's header (0 if unreadable): 20 bytes, not the whole file
-elf_machine_of = (path: str) -> int:
-    when TARGET == "windows":
-        return 0
-    else:
-        fd = syscall(2, data(__zstr(path)), 0, 0)
-        if fd < 0: return 0
-        hdr = fill(u8(0), 20)
-        n = syscall(17, fd, data(hdr), 20, 0)
-        syscall(3, fd)
-        if n < 20: return 0
-        # (a Mach-O file: macOS's; its CPU type, 0x100000C for arm64)
-        if hdr[0] == 0xCF and hdr[1] == 0xFA and hdr[2] == 0xED and hdr[3] == 0xFE: return int(hdr[4]) | (int(hdr[5]) << 8) | (int(hdr[6]) << 16) | (int(hdr[7]) << 24)
-        return int(hdr[18]) | (int(hdr[19]) << 8)
-
 setup_target = ():
+    host = host_target_name()
     tgt = build_target
     # (one the build block names wrongly: the checker says where)
-    if tgt != "linux" and tgt != "linux-arm64" and tgt != "macos" and tgt != "windows" and tgt != "wasm": tgt = ""
+    if len(target_problem(tgt, host)) > 0: tgt = ""
     if len(cli_target) > 0: tgt = cli_target
-    if tgt == "" or tgt == "native":
-        # (the system this compiler runs on)
-        tgt = "linux"
-        when TARGET == "windows":
-            tgt = "windows"
-        # (the compiler's own processor: its executable's ELF machine, 183 for arm64)
-        when TARGET != "windows":
-            m = elf_machine_of(exe_path())
-            if m == 183: tgt = "linux-arm64"
-            else if m == 0x100000C: tgt = "macos"
-    if tgt == "web": tgt = "wasm"            # (as --web says it)
-    # (linux-arm64: Linux on 64-bit ARM, TARGET "linux" and ARCH "arm64")
-    if tgt == "linux-arm64":
-        target_arm64 = true
-        tgt = "linux"
-    # (macos: macOS on Apple's arm64 processors)
-    if tgt == "macos": target_macos = true
-    if target_macos: target_arm64 = true
-    if tgt != "linux" and tgt != "windows" and tgt != "wasm" and tgt != "macos":
-        eprint("dewy-core: unknown target '{tgt}' (native, linux, linux-arm64, macos, windows or wasm)")
+    if tgt == "": tgt = host
+    why = target_problem(tgt, host)
+    if len(why) > 0:
+        eprint("dewy-core: {why}")
         exit(2)
-    target_wasm = tgt == "wasm"
-    target_windows = tgt == "windows"
+    # (a processor alone: this machine)
+    if not (tgt in supported_target_names()): tgt = host
+    target_wasm = tgt == "wasm32"
+    target_windows = tgt == "x86_64-windows"
+    target_macos = tgt == "aarch64-mac"
+    target_arm64 = tgt == "aarch64-linux" or target_macos
     if target_wasm: ptr_size = 4
 
 # (a quick read of the main file's build block before anything is checked; check_build_block
@@ -751,8 +726,8 @@ main = ():
             if out == path: out = path + ".bin"     # (no extension: not over the source)
         # (-o game.zip, -o game.html, -o game.exe: what is asked for, without --target too)
         if len(cli_target) == 0:
-            if ends_with(out, ".html") or ends_with(out, ".zip"): cli_target = "wasm"
-            else if ends_with(out, ".exe"): cli_target = "windows"
+            if ends_with(out, ".html") or ends_with(out, ".zip"): cli_target = "wasm32"
+            else if ends_with(out, ".exe"): cli_target = "x86_64-windows"
         # (-o dist/game.zip: the directory made if it is not there)
         sl = max(rfind(out, "/"), rfind(out, "\\"))
         if sl > 0: make_dirs(out[..sl))
@@ -816,7 +791,7 @@ main = ():
     # options for running come before the file (what follows it goes to the program)
     loop first < a.len() and starts_with(a[first], "--"):
         x = a[first]
-        if x == "--web": cli_target = "wasm"
+        if x == "--web": cli_target = "wasm32"
         else if x == "--release": cli_release = true
         else if x == "--watch" and test_mode: test_watch = true
         else if x == "--json" and test_mode: test_json = true
@@ -832,8 +807,8 @@ main = ():
     if a[first] == "watch" or test_watch:
         if not test_watch: first += 1
         if a.len() <= first: usage()
-        if cli_target == "wasm" and not test_mode: fatal(0, "dewy-core watch runs programs natively (for the web, use dewy-core build --target wasm)")
-        cli_target = "native"
+        if cli_target == "wasm32" and not test_mode: fatal(0, "dewy-core watch runs programs natively (for the web, use dewy-core build --target wasm32)")
+        cli_target = host_target_name()
         wargs: str[]
         loop i in [first + 1..a.len()): wargs.push(a[i])
         watch_main(os_path(a[first]), wargs)
@@ -843,7 +818,7 @@ main = ():
         test_mode = true
         error_exit = 102
         first += 1
-    if test_mode: cli_target = "native"  # tests run natively even for web games
+    if test_mode: cli_target = host_target_name()  # tests run natively even for web games
     when TARGET == "windows":
         if test_mode: __test_process_group()
     path = os_path(a[first])
@@ -876,7 +851,7 @@ main = ():
     # (made beside it, then put in its place: a copy of the program still running is not
     # written over; Windows cannot replace a running program, so there it is written in place)
     tmp = out
-    if not target_windows and not target_wasm and cli_target != "wasm" and cli_target != "web" and cli_target != "windows": tmp = "{cache}/{base}.{time_ns()}.new"
+    if not target_windows and not target_wasm and cli_target != "wasm32" and cli_target != "x86_64-windows": tmp = "{cache}/{base}.{time_ns()}.new"
     built = compile(path, tmp)
     if len(built) == 0: exit(error_exit)
     if built == tmp and tmp != out and not target_wasm:

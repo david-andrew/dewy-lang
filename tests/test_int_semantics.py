@@ -87,9 +87,9 @@ def int_program(compiler, tmp_path_factory, request):
         qemu = shutil.which('qemu-aarch64')
         if not qemu:
             pytest.skip('qemu-aarch64 is needed for ARM execution')
-        flags += ['--target', 'linux-arm64']
+        flags += ['--target', 'aarch64-linux']
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=60)
     assert built.returncode == 0, built.stdout + built.stderr

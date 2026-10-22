@@ -38,7 +38,7 @@ new_project = (lib: str, a: str[]):
     entry = if kind == "online" or kind == "arcade" or kind == "story": new_project_name(dir, kind) else: "main.dewy"
     readme = "# Dewy {kind}\n\nFrom this directory:\n\n```sh\ndewy-core {entry}\ndewy-core check {entry}\ndewy-core watch {entry}\ndewy-core build {entry} -o main\n```\n"
     if kind != "program":
-        readme += "\nFor a self-contained web build:\n\n```sh\ndewy-core build {entry} --target wasm -o main\n```\n\nOpen main.html in a browser. In watch mode, saving a function change updates the\nrunning game while keeping its state. Compiler errors leave the last working\nversion running. Use --release for an optimizing standalone build.\n"
+        readme += "\nFor a self-contained web build:\n\n```sh\ndewy-core build {entry} --target wasm32 -o main\n```\n\nOpen main.html in a browser. In watch mode, saving a function change updates the\nrunning game while keeping its state. Compiler errors leave the last working\nversion running. Use --release for an optimizing standalone build.\n"
     if kind == "arcade":
         readme += "\nCollect gold and avoid the rocks with arrows/WASD or a gamepad. Escape/Start\npauses, as does leaving the window. Menus accept mouse, keyboard and gamepad.\nThe high score is saved locally. Keep {entry}'s filename the same between builds;\nit names the saved data. Use a distinct source filename before publishing.\nRun `dewy-core test {entry}` for the two simulation tests. Its Game value includes\nits random generator, so saved states replay the same input identically.\n"
     if kind == "story":

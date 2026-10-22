@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.support import Scripts
+from tests.support import Scripts, target_name
 
 
 @pytest.fixture(scope='module')
@@ -48,7 +48,7 @@ def test_parallel_syntax(compiler, tmp_path, target, release):
     source.write_text(PROGRAM)
     output = tmp_path / 'main'
     env = dict(os.environ, SLOPPY_THREADS='2', SLOPPY_EMIT_WORKERS='1')
-    built = subprocess.run([compiler, 'build', source, '-o', output, '--target', target,
+    built = subprocess.run([compiler, 'build', source, '-o', output, '--target', target_name(target),
                             *(['--release'] if release else [])], env=env,
                            capture_output=True, text=True, timeout=60)
     assert built.returncode == 0, built.stdout + built.stderr

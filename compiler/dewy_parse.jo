@@ -15,6 +15,7 @@ use 'effects.jo'
 use 'ownership.jo'
 use 'dewy_directives.jo'
 use 'directives.jo'
+use 'targets.jo'
 
 # Compact tags shared by lexical tokens and syntax nodes. Names are needed
 # only for formatter/diagnostic text.
@@ -257,30 +258,58 @@ dw_fail_pos = (pos: int, what: str) -> int:
 dw_designed_directive = (name: str) -> bool:
     name in ["abstract", "allocator", "field", "lend", "no_prelude", "proof", "unsafe_assume", "__copy__", "__drop__", "__move__"]
 
-# `$target`: the backend being compiled for, by the design's names (x64 is x86_64,
-# arm64 is arm, WebAssembly is wasm32; riscv and c name backends this compiler lacks).
+# `$target`: the full name of the target being compiled for (docs/LANGUAGE.md,
+# "Targets"). A name has only the fields it needs: the processor (or `c`, `wasm32`),
+# then the system. A processor alone asks for the current machine, so `$target` is
+# never one; `$target.arch` and `$target.os` are its fields.
 dw_target_name = () -> str:
     if target_wasm: return "wasm32"
-    if target_arm64: return "arm"
-    "x86_64"
-
-dw_target_names = () -> str[]: ["x86_64", "riscv", "arm", "c", "wasm32"]
+    if target_macos: return "aarch64-mac"
+    if target_arm64: return "aarch64-linux"
+    if target_windows: return "x86_64-windows"
+    "x86_64-linux"
 
 dw_is_target = (id: int) -> bool:
     let id = dw_unwrap(id)
     dewy_syntax[id].kind == .metatag and dewy_syntax[id].text == "target"
 
-# A target name written as a string literal, checked against the known backends.
-dw_target_literal = (id: int) -> str?:
+# `$target` (0), `$target.arch` (1) or `$target.os` (2); -1 for anything else.
+dw_target_field = (id: int) -> int:
+    let id = dw_unwrap(id)
+    if dw_is_target(id): return 0
+    if dw_op(id) != .dot or dw_nchildren(id) != 3 or not dw_is_target(dw_child(id, 1)): return -1
+    member = dw_name(dw_child(id, 2))
+    if member == "arch": return 1
+    if member == "os": return 2
+    -1
+
+# The value of a `$target` field.
+dw_target_field_value = (field: int) -> str:
+    if field == 1: return target_arch_of(dw_target_name())
+    if field == 2: return target_os_of(dw_target_name())
+    dw_target_name()
+
+# A target name (field 0), processor (1) or system (2) written as a string literal,
+# checked against the names the design gives.
+dw_target_literal = (id: int, field: int = 0) -> str?:
     let id = dw_unwrap(id)
     if dewy_syntax[id].kind != .string: return none
     name = dewy_syntax[id].text
-    if not (name in dw_target_names()): fatal(dewy_syntax[id].pos, "unknown target \"{name}\": `$target` is one of {join(dw_target_names(), ", ")}")
+    pos = dewy_syntax[id].pos
+    if field == 1:
+        if not (name in target_arches()): fatal(pos, "unknown processor \"{name}\": `$target.arch` is one of {join(target_arches(), ", ")}")
+        return name
+    if field == 2:
+        if not (name in target_oses()): fatal(pos, "unknown system \"{name}\": `$target.os` is one of {join(target_oses(), ", ")}")
+        return name
+    if not (name in target_names()): fatal(pos, "unknown target \"{name}\": `$target` is one of {join(target_names(), ", ")}")
+    if target_os_of(name) == "none" and name != "wasm32" and name != "c89": fatal(pos, "`$target` is a full target name, never \"{name}\" alone (which asks for the current machine): test the processor with `$target.arch =? \"{name}\"`, or name the system too, as \"{name}-linux\"")
     name
 
-# A condition made only of `$target` compared with string literals (`=?`, `not =?`,
-# and `in?`/`not in?` a literal list), joined by `not`, `and` and `or`, folds here:
-# 1 true, 0 false, -1 any other condition (an ordinary runtime test).
+# A condition made only of `$target`, `$target.arch` or `$target.os` compared with
+# string literals (`=?`, `not =?`, and `in?`/`not in?` a literal list), joined by
+# `not`, `and` and `or`, folds here: 1 true, 0 false, -1 any other condition (an
+# ordinary runtime test).
 dw_target_condition = (id0: int) -> int:
     id = dw_unwrap(id0)
     kind = dewy_syntax[id].kind
@@ -301,21 +330,23 @@ dw_target_condition = (id0: int) -> int:
     right = dw_child(id, 2)
     found = false
     if op == .eq or op == .not_eq:
-        if dw_is_target(right):
+        if dw_target_field(right) >= 0:
             right = left
             left = dw_child(id, 2)
-        if not dw_is_target(left): return -1
-        name = dw_target_literal(right) ?? ""
+        field = dw_target_field(left)
+        if field < 0: return -1
+        name = dw_target_literal(right, field) ?? ""
         if len(name) == 0: return -1
-        found = name == dw_target_name()
+        found = name == dw_target_field_value(field)
     else if op == .contains or op == .not_contains:
-        if not dw_is_target(left): return -1
+        field = dw_target_field(left)
+        if field < 0: return -1
         list = dw_unwrap(right)
         if dewy_syntax[list].kind != .block or dewy_syntax[list].text != "[]:": return -1
         loop entry in dw_children(list):
-            name = dw_target_literal(entry) ?? ""
+            name = dw_target_literal(entry, field) ?? ""
             if len(name) == 0: return -1
-            if name == dw_target_name(): found = true
+            if name == dw_target_field_value(field): found = true
     else: return -1
     if inverted: found = not found
     if found: 1 else: 0
@@ -351,13 +382,13 @@ dw_target_splice = (items: int[]) -> int[]:
         loop statement in dw_target_splice(inner): out.push(statement)
     out
 
-# `$supported_targets = ["x86_64" ...]`: the backends a module accepts.
+# `$supported_targets = ["x86_64-linux" ...]`: the targets a module accepts, by full name.
 dw_targets_listed: {int: bool} = {}   # files that set it
 dw_supported_targets = (tag: int, declaration: int):
     pos = dewy_syntax[tag].pos
-    if tag == declaration: fatal(pos, "`$supported_targets` lists the module's targets: `$supported_targets = [\"x86_64\" \"wasm32\"]`")
+    if tag == declaration: fatal(pos, "`$supported_targets` lists the module's targets: `$supported_targets = [\"x86_64-linux\" \"wasm32\"]`")
     list = dw_unwrap(dw_child(declaration, 2))
-    if dewy_syntax[list].kind != .block or dewy_syntax[list].text != "[]:": fatal(dewy_syntax[list].pos, "`$supported_targets` takes a literal list of target names: `[\"x86_64\" \"wasm32\"]`")
+    if dewy_syntax[list].kind != .block or dewy_syntax[list].text != "[]:": fatal(dewy_syntax[list].pos, "`$supported_targets` takes a literal list of target names: `[\"x86_64-linux\" \"wasm32\"]`")
     names: str[]
     loop entry in dw_children(list):
         name = dw_target_literal(entry) ?? ""
@@ -1789,6 +1820,11 @@ dw_expr = (id: int) -> int:
             set_list(n, [a, b])
             return n
         if op == .dot:
+            field = dw_target_field(id)
+            if field > 0:
+                n = mk(.str_lit, pos)
+                nodes[n].sval = i32(intern(dw_target_field_value(field)))
+                return n
             name = dw_name(right)
             computed = dw_field_name(right)
             if name == "" and computed == 0: return dw_fail(id, "computed member names")

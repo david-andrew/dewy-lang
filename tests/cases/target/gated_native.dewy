@@ -5,7 +5,7 @@
 if $target =? "wasm32" {
     import p"../../fixtures/target/web_note.dewy" as notes
     width=()=>32
-} else if $target in? ["x86_64" "arm"] {
+} else if $target.arch in? ["x86_64" "aarch64"] {
     import p"../../fixtures/target/native_note.dewy" as notes
     width=()=>64
 } else {
@@ -14,7 +14,7 @@ if $target =? "wasm32" {
 }
 
 main=()=>{
-    if $target not =? "wasm32" and not ($target =? "c") {
+    if $target not =? "wasm32" and not ($target.arch =? "c") {
         let place="native"
     } else {
         let place="web"
@@ -22,9 +22,9 @@ main=()=>{
     printl(place)
     printl(notes.note())
     printl(width())
-    let bits=if $target in? ["riscv" "c"] {undefined_bits()} else {width()*2}
+    let bits=if $target.arch in? ["riscv64" "c"] {undefined_bits()} else {width()*2}
     printl(bits)
-    if $target not in? ["x86_64" "arm" "wasm32"] {undefined_call()}
+    if $target not in? ["x86_64-linux" "aarch64-linux" "aarch64-mac" "x86_64-windows" "wasm32"] {undefined_call()}
     let on_web=$target =? "wasm32"
     printl(on_web)
     printl($target.length >? 2)

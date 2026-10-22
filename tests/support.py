@@ -4,6 +4,7 @@ Simple programs belong in tests/cases (one golden file each); these helpers
 serve tests that generate programs or check more than output and exit codes.
 """
 import os
+import platform
 import shutil
 import subprocess
 from html.parser import HTMLParser
@@ -12,6 +13,15 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def target_name(mode):
+    """The compiler's --target name for a test mode; native is this machine's processor."""
+    if mode == 'native':
+        machine = platform.machine().lower()
+        return {'amd64': 'x86_64', 'arm64': 'aarch64'}.get(machine, machine)
+    return {'wasm': 'wasm32', 'linux-arm64': 'aarch64-linux', 'macos': 'aarch64-mac',
+            'windows': 'x86_64-windows'}.get(mode, mode)
 
 
 def case_source(name):
@@ -59,7 +69,7 @@ def build_case_batch(compiler, directory, cases, body, release, target, *, argum
     binary = directory / 'batch'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     if built.returncode:

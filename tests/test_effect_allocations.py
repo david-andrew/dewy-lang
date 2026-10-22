@@ -163,7 +163,7 @@ def test_effect_wasm_plan(compiler, tmp_path, allocate):
     body = 'let xs:array<int64>=[x]; return xs.length' if allocate else 'return x//16'
     source.write_text(f'helper=(x:int64):>int64 & no_effects=>{{{body}}}\n'
                       'main=():>int64=>helper(8)\n')
-    result = subprocess.run([compiler, 'build', source, '--target', 'wasm', '-o', tmp_path / 'web'],
+    result = subprocess.run([compiler, 'build', source, '--target', 'wasm32', '-o', tmp_path / 'web'],
                             capture_output=True, text=True, timeout=60)
     assert (result.returncode != 0) == allocate, result.stderr
     if allocate:

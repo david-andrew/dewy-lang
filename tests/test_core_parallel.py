@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.support import Scripts
+from tests.support import Scripts, target_name
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL = ROOT / 'examples/parallel_particles.dewy'
@@ -94,7 +94,7 @@ def test_core_parallel_values(compiler, tmp_path, name, release, target):
     flags = ['--release'] if release else []
     env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
     env.update(SLOPPY_EMIT_WORKERS='1', SLOPPY_THREADS='2')
-    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', output, *flags],
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', output, *flags],
                            env=env, capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     args = [output]

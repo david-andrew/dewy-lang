@@ -133,7 +133,7 @@ def check(compiler: Path, output: Path, *, seed: int = 1, count: int = 25,
     env['SLOPPY_EMIT_WORKERS'] = '1'
     modes = [('default', []), ('release', ['--release']), ('debug', ['-g'])]
     if wasm:
-        modes += [('web', ['--target', 'wasm']), ('web-release', ['--target', 'wasm', '--release'])]
+        modes += [('web', ['--target', 'wasm32']), ('web-release', ['--target', 'wasm32', '--release'])]
     report = {'status': 'incomplete', 'compiler': str(compiler), 'toolchain': identity,
               'generator_sha256': generator_hash, 'seed': seed, 'count': count,
               'basic': basic, 'modes': dict(modes), 'workers': 1,

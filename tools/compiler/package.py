@@ -29,7 +29,7 @@ From this directory:
   ./bin/{binary} --version
   ./bin/{binary} new my-game
   ./bin/{binary} build my-game/main.dewy -o {native}
-  ./bin/{binary} build my-game/main.dewy --target wasm -o my-game-web
+  ./bin/{binary} build my-game/main.dewy --target wasm32 -o my-game-web
   ./bin/{binary} watch my-game/main.dewy
 
 Open my-game-web.html in a browser, or run ./{native} on a {desktop} desktop.

@@ -2903,34 +2903,54 @@ Import cycles containing a Dewy (`.dewy`) module are rejected, with the import
 path through the cycle in the diagnostic. This includes cycles that pass through
 Jo implementation libraries; cycles made entirely of Jo modules remain allowed.
 
-`$target` is the compile-time name of the backend being compiled for: `x86_64`,
-`arm` (64-bit ARM) or `wasm32`; `riscv` and `c` name backends this compiler does
-not have yet. A condition made only of `$target` compared with string literals
-(`=?`, `not =?`, `in?` and `not in?` a literal list, joined by `not`, `and` and
-`or`) is decided while compiling. Its `if` compiles only the live arm and splices
-that arm's body into the enclosing scope, so imports and declarations there bind
-as if written outside. The other arms are never checked, so they may name
-modules or functions that exist only for another target. A misspelled target
-name is an error. Elsewhere `$target` is an ordinary string.
+`--target` and `$target` use the design's target names. A name has only the
+fields it needs: the processor, then the system.
+
+| Names | Target |
+|---|---|
+| `x86_64`, `aarch64`, `riscv64`, `c` | this machine's system on that processor |
+| `x86_64-linux`, `aarch64-linux`, `riscv64-linux`, `c-linux` | Linux |
+| `x86_64-mac`, `aarch64-mac` | macOS |
+| `x86_64-windows`, `aarch64-windows`, `riscv64-windows`, `c-windows` | Windows |
+| `x86_64-freestanding`, `aarch64-freestanding`, `riscv64-freestanding`, `c-freestanding` | bare metal |
+| `c-posix`, `c89`, `wasm32` | portable C, and WebAssembly in the browser |
+
+This compiler builds `x86_64-linux`, `aarch64-linux`, `aarch64-mac`,
+`x86_64-windows` and `wasm32`; the default is this machine. `--target` with
+another of the names is an error saying it is not supported yet.
+
+`$target` is the full name of the target being compiled for (`x86_64-linux`,
+`wasm32`, …), never a processor alone. `$target.arch` is its processor (`x86_64`,
+`aarch64`, `riscv64`, `c` or `wasm32`) and `$target.os` its system (`linux`,
+`mac`, `windows`, `freestanding`, `posix`, or `none` for `wasm32` and `c89`). A
+condition made only of these compared with string literals (`=?`, `not =?`,
+`in?` and `not in?` a literal list, joined by `not`, `and` and `or`) is decided
+while compiling. Its `if` compiles only the live arm and splices that arm's body
+into the enclosing scope, so imports and declarations there bind as if written
+outside. The other arms are never checked, so they may name modules or functions
+that exist only for another target. A misspelled name is an error. Elsewhere
+these are ordinary strings.
 
 ```dewy
-$supported_targets = ["x86_64" "arm" "wasm32"]
+$supported_targets = ["x86_64-linux" "aarch64-mac" "wasm32"]
 if $target =? "wasm32" {
     import p"web_audio.dewy" as audio
+} else if $target.os =? "mac" {
+    import p"mac_audio.dewy" as audio
 } else {
     import p"native_audio.dewy" as audio
 }
 ```
 
-`$supported_targets` lists the targets a module accepts, once at file scope;
-compiling it for any other target is an error.
+`$supported_targets` lists the full target names a module accepts, once at file
+scope; compiling it for any other target is an error.
 
 Start a game with the built-in template, then edit it while it runs:
 
 ```sh
 /tmp/dewy-core/bin/dewy-core new /tmp/my-dewy-game
 /tmp/dewy-core/bin/dewy-core watch /tmp/my-dewy-game/main.dewy
-/tmp/dewy-core/bin/dewy-core build /tmp/my-dewy-game/main.dewy --target wasm -o /tmp/game
+/tmp/dewy-core/bin/dewy-core build /tmp/my-dewy-game/main.dewy --target wasm32 -o /tmp/game
 ```
 
 The web build produces `/tmp/game.html`. Games use `main()` for setup,

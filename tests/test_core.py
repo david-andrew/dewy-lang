@@ -19,7 +19,7 @@ import pytest
 
 from tests.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tests import support
-from tests.support import build_case_batch, build_exit_batch, case_source, run_value_batch, Scripts
+from tests.support import build_case_batch, build_exit_batch, case_source, run_value_batch, Scripts, target_name
 from tests.support import compiler  # noqa: F401 (fixture)
 from tools.compiler.bench import CHECKSUMS_1000, prepare_source
 
@@ -486,7 +486,7 @@ loop line in input.split("\n") {
     binary = tmp_path / 'fractions'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -572,7 +572,7 @@ loop line in input.split("\n") {
     binary = tmp_path / 'conversions'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -631,7 +631,7 @@ return 0
 }
 ''')
     binary = tmp_path / 'magnitudes'
-    flags = (['--release'] if release else []) + (['--target', 'wasm'] if target == 'wasm' else [])
+    flags = (['--release'] if release else []) + (['--target', 'wasm32'] if target == 'wasm' else [])
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -670,7 +670,7 @@ def test_core_exact_example(compiler, tmp_path, target, release, example):
     binary = tmp_path / 'exact'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -734,7 +734,7 @@ def test_core_bigint_literal_bases(compiler, tmp_path, target, release):
     binary = tmp_path / 'literals'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -772,7 +772,7 @@ and fractional() =? amount 42 else 1
     binary = tmp_path / 'modules'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -831,7 +831,7 @@ loop line in input.split("\n") {
     binary = tmp_path / 'bigint'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -932,7 +932,7 @@ loop line in input.split("\\n") {
     binary = tmp_path / 'ranges'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -986,7 +986,7 @@ loop line in input.split("\\n") {
     binary = tmp_path / 'bits'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1029,7 +1029,7 @@ loop a in unsigned {{loop n in exponents {{printl"{{a^n}}"}}}}
     binary = tmp_path / 'powers'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1080,7 +1080,7 @@ printl(digest(a-b)) printl(digest(a xor b)) printl(a =? b)
     binary = tmp_path / 'sets'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1104,7 +1104,7 @@ printl(digest(a-b)) printl(digest(a xor b)) printl(a =? b)
 def test_core_bounded_remainder_ir(compiler, tmp_path, target, release):
     source = tmp_path / 'bounded.dewy'
     source.write_text(case_source('numeric/bounded_remainder'))
-    flags = ['--ir', *(['--release'] if release else []), *(['--target', 'wasm'] if target == 'wasm' else [])]
+    flags = ['--ir', *(['--release'] if release else []), *(['--target', 'wasm32'] if target == 'wasm' else [])]
     built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'bounded', *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1128,7 +1128,7 @@ def test_core_constant_floor_ir(compiler, tmp_path, target):
     source.write_text('''probe=(a:int64):>int64=>a%3+a//3+a%8+a//8
 main=()=>probe(-7)
 ''')
-    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target,
+    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target_name(target),
                             '-o', tmp_path / 'constant'],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1153,7 +1153,7 @@ lookup_probe = (key: int) -> int:
         _: 5
 main = () -> int: lookup_probe(3)
 """)
-    flags = ['--ir', '--target', target, *(['--release'] if release else [])]
+    flags = ['--ir', '--target', target_name(target), *(['--release'] if release else [])]
     binary = tmp_path / 'lookup'
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
@@ -1219,7 +1219,7 @@ main = () -> int:
     42
 ''')
     binary = tmp_path / 'grouped'
-    flags = ['--ir', '--target', target, *(['--release'] if release else [])]
+    flags = ['--ir', '--target', target_name(target), *(['--release'] if release else [])]
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1284,7 +1284,7 @@ main = () -> int:
     42
 ''')
     binary = tmp_path / 'narrow'
-    flags = ['--ir', '--target', target, *(['--release'] if release else [])]
+    flags = ['--ir', '--target', target_name(target), *(['--release'] if release else [])]
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1336,7 +1336,7 @@ main=()=>{
 }
 ''')
     binary = tmp_path / 'returns'
-    flags = ['--ir', '--target', target, *(['--release'] if release else [])]
+    flags = ['--ir', '--target', target_name(target), *(['--release'] if release else [])]
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1387,7 +1387,7 @@ main = () -> int:
     1
 ''')
     binary = tmp_path / 'leaf'
-    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target, '-o', binary],
+    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target_name(target), '-o', binary],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     main = re.search(r'^fn f_main_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
@@ -1446,7 +1446,7 @@ def test_core_type_instance_inference(compiler, tmp_path, release):
 def test_core_function_reachability(compiler, tmp_path, target):
     source = Path(__file__).resolve().parents[1] / 'tests/fixtures/programs/function_reachability.jo'
     binary = tmp_path / 'reachable'
-    built = subprocess.run([compiler, 'build', source, '--target', target,
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target),
                             '--release', '--ir', '-o', binary],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1475,7 +1475,7 @@ def test_core_dictionary_presence_ir(compiler, tmp_path, target):
     source.write_text('''probe=(values:dict<int64 array<int64>> key:int64):>bool=>values.get(key) is? none
 main=()=>if probe([1->[42]] 1) 1 else 42
 ''')
-    flags = ['--ir', *(['--target', 'wasm'] if target == 'wasm' else [])]
+    flags = ['--ir', *(['--target', 'wasm32'] if target == 'wasm' else [])]
     built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'presence', *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1497,7 +1497,7 @@ probe = (value: int) -> int:
     return 13
 main = () -> int: probe(1)
 """)
-    flags = ['--ir', '--target', target, *(['--release'] if release else [])]
+    flags = ['--ir', '--target', target_name(target), *(['--release'] if release else [])]
     built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'return_facts', *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1524,7 +1524,7 @@ main = () -> int: reachability_probe(true, false)
 ''')
     flags = ['--ir', *(['--release'] if release else [])]
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'nested_exit', *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1561,7 +1561,7 @@ loop flag in [true false] {{printl(pick(x y flag))}}
     binary = tmp_path / 'select'
     flags = ['--ir', *(['--release'] if release else [])]
     if target != 'native':
-        flags += ['--target', target]
+        flags += ['--target', target_name(target)]
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1590,7 +1590,7 @@ def test_core_compiler_hosts(compiler, tmp_path, host):
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(('DEWY_', 'SLOPPY_'))}
     env.update(DEWY_CORE_LIB=str(compiler.parent.parent / 'lib'), SLOPPY_EMIT_WORKERS='1')
-    built = subprocess.run([compiler, 'build', source, '--target', host,
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(host),
                             '-o', binary], env=env, capture_output=True, text=True,
                            timeout=60, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1650,7 +1650,7 @@ loop a in values {{
     binary = tmp_path / 'unsigned'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1698,7 +1698,7 @@ loop a in numerators {{
     binary = tmp_path / 'floor'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1744,7 +1744,7 @@ main=():>void=>{
     binary = tmp_path / 'conditional'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1775,7 +1775,7 @@ def test_core_string_literals(compiler, tmp_path, name, expression, expected, ta
     binary = tmp_path / name
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1832,7 +1832,7 @@ main=()=>{
     binary = tmp_path / 'imports'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1928,7 +1928,7 @@ events=():>string=>trace
     binary = tmp_path / 'order'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -1964,7 +1964,7 @@ def test_core_operator_imports(compiler, tmp_path, name, imports, target, releas
     binary = tmp_path / 'operators'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -2028,7 +2028,7 @@ return if empty.len() =? 1 and empty[0] =? 42 42 else 4
     binary = tmp_path / 'ring'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -2079,7 +2079,7 @@ erase=():>int64=>{pool.remove(h) return 22}
     binary = tmp_path / 'invalid'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -2125,7 +2125,7 @@ def test_core_applications(compiler, tmp_path, name, target, release):
     binary = tmp_path / name
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -2250,7 +2250,7 @@ def test_core_metal_magnitude(compiler, tmp_path, release):
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(('DEWY_', 'SLOPPY_'))}
     env['SLOPPY_MSL_DUMP'] = str(shaders)
-    built = subprocess.run([compiler, 'build', source, '--target', 'macos', '-o', tmp_path / 'magnitude',
+    built = subprocess.run([compiler, 'build', source, '--target', 'aarch64-mac', '-o', tmp_path / 'magnitude',
                             *(['--release'] if release else [])], env=env,
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -2276,7 +2276,7 @@ return 0
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(('DEWY_', 'SLOPPY_'))}
     env['SLOPPY_MSL_DUMP'] = str(shaders)
-    built = subprocess.run([compiler, 'build', source, '--target', 'macos', '-o', tmp_path / 'plus',
+    built = subprocess.run([compiler, 'build', source, '--target', 'aarch64-mac', '-o', tmp_path / 'plus',
                             *(['--release'] if release else [])], env=env,
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -2542,7 +2542,7 @@ def test_core_rollback_model(compiler, tmp_path, target, release):
     binary = tmp_path / 'rollback'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -2605,7 +2605,7 @@ def test_core_netplay_tick_warnings(compiler, tmp_path, setup, callback, start, 
     program = f'{session}\nmain=()=>game.tick+42' if at_top else f'main=()=>{{{session} return game.tick+42}}'
     source.write_text(f'import netplay\n{setup}\n{program}')
     flags = ['--release'] if release else []
-    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', tmp_path / 'tick', *flags],
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', tmp_path / 'tick', *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     outputs = [built.stderr]
@@ -2628,7 +2628,7 @@ def test_core_netplay_restart(compiler, tmp_path, target, release):
     source = Path(__file__).resolve().parents[1] / 'tests/fixtures/programs/netplay_restart.dewy'
     binary = tmp_path / 'restart'
     flags = ['--release'] if release else []
-    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary, *flags],
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     command = [binary]
@@ -2689,7 +2689,7 @@ main=():>int64=>{
 }''')
     binary = tmp_path / 'model_test'
     flags = ['--release'] if release else []
-    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary, *flags],
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     command = [binary]
@@ -2782,7 +2782,7 @@ return 42
 }''')
     binary = tmp_path / 'reaction_test'
     flags = ['--release'] if release else []
-    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary, *flags],
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     command = [binary]
@@ -2848,7 +2848,7 @@ main=()=>{
     binary = tmp_path / 'forest-model'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -2946,7 +2946,7 @@ return 42
     binary = tmp_path / 'dunes-model'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -2973,7 +2973,7 @@ def test_core_game_web_build(compiler, tmp_path, game, release):
     source = Path(__file__).resolve().parents[1] / f'examples/{game}.dewy'
     output = tmp_path / game
     flags = ['--release'] if release else []
-    built = subprocess.run([compiler, 'build', source, '--target', 'wasm', '-o', output, *flags],
+    built = subprocess.run([compiler, 'build', source, '--target', 'wasm32', '-o', output, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     html = output.with_suffix('.html').read_text()
@@ -3292,7 +3292,7 @@ def test_core_new_project(compiler, tmp_path, kind):
         assert ran.stdout == 'Hello, Dewy!\n'
     else:
         assert (project / 'frame.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
-        built = subprocess.run([compiler, 'build', source, '--target', 'wasm', '-o', binary],
+        built = subprocess.run([compiler, 'build', source, '--target', 'wasm32', '-o', binary],
                                capture_output=True, text=True, timeout=30, check=False)
         assert built.returncode == 0, built.stdout + built.stderr
         assert (project / 'main.html').is_file()
@@ -3730,7 +3730,7 @@ def test_core_existing_program(compiler, tmp_path, release, name, target):
     node = shutil.which('node')
     if target == 'wasm':
         if node is None: pytest.skip('Node is needed for web execution')
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], capture_output=True,
                            text=True, timeout=30, cwd=tmp_path, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -3811,7 +3811,7 @@ main = ():
         node = shutil.which('node')
         if node is None:
             pytest.skip('Node is needed for web conformance')
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], capture_output=True,
                            text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -3880,7 +3880,7 @@ main=()=>{
     binary = tmp_path / 'stream'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -3921,7 +3921,7 @@ return if image.width =? 1 and image.height =? 1 and image.pixels.length =? 4 im
     if target == 'wasm':
         if node is None:
             pytest.skip('Node is needed for web execution')
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], capture_output=True,
                            text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -3974,7 +3974,7 @@ main=()=>{
 }''')
     binary = tmp_path / 'physics_test'
     flags = ['--release'] if release else []
-    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary, *flags],
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     command = [binary]
@@ -4059,7 +4059,7 @@ conditional_runtime = () -> int:
     binary = tmp_path / 'program'
     flags = ['--release'] if release else []
     env = {**os.environ, 'DEWY_CORE_LIB': str(library)}
-    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary, *flags],
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', binary, *flags],
                            env=env, capture_output=True, text=True, timeout=30, check=False)
     if use_invalid:
         line = text.splitlines().index('        return )'.replace('    ', indent), 5) + 1
@@ -4132,7 +4132,7 @@ Rational:type=[numerator:int=0 denominator:int=1]
     binary = tmp_path / 'program'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     env = {**os.environ, 'DEWY_CORE_LIB': str(library)}
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], env=env,
                            capture_output=True, text=True, timeout=30, check=False)
@@ -4206,7 +4206,7 @@ return count+text.length+extra}''' if nested else
     if target == 'wasm' and node is None:
         pytest.skip('Node is needed for web execution')
     flags = ['--release'] if release else []
-    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary, *flags],
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     command = [binary]
@@ -4446,7 +4446,7 @@ def test_core_emission_words(compiler, tmp_path, release, target):
     binary = tmp_path / 'words'
     flags = ['--release'] if release else []
     if target != 'native':
-        flags += ['--target', target]
+        flags += ['--target', target_name(target)]
     built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -4632,7 +4632,7 @@ main = () -> int:
     0
 """)
     binary = tmp_path / 'allocator'
-    built = subprocess.run([compiler, 'build', source, '--target', target,
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target),
                             *(['--release'] if release else []), '-o', binary],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -4866,7 +4866,7 @@ main = () -> int:
     checked_leaf_probe([20], at, 22)
 ''')
     binary = tmp_path / 'checked-leaf'
-    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target, '-o', binary],
+    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target_name(target), '-o', binary],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
     probe = re.search(r'^fn f_checked_leaf_probe_.*?(?=^fn |\Z)',
@@ -4956,7 +4956,7 @@ main = () -> int:
     99
 ''')
     binary = tmp_path / 'loop-endpoints'
-    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary,
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', binary,
                             *(['--release'] if release else [])],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -5045,7 +5045,7 @@ main = () -> int:
     99
 ''')
     binary = tmp_path / 'affine-checks'
-    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary,
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', binary,
                             *(['--release'] if release else [])],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -5139,7 +5139,7 @@ main = () -> int:
         .replace('fill(0.0, 24)', f'fill({float_type}(0.0), 24)')
         .replace('fill(-7.0, 24)', f'fill({float_type}(-7.0), 24)'))
     binary = tmp_path / 'shifted-vectors'
-    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target, '-o', binary,
+    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target_name(target), '-o', binary,
                             *(['--release'] if release else [])],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -5233,7 +5233,7 @@ main = () -> int:
     42
 ''')
     binary = tmp_path / 'masked-bounds'
-    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target, '-o', binary,
+    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target_name(target), '-o', binary,
                             *(['--release'] if release else [])],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -5417,7 +5417,7 @@ def test_core_integer_extension_boundaries(compiler, tmp_path, release, target):
                       'main = ():\n    loop value in [' + ', '.join(map(str, values)) + ']:\n' +
                       '\n'.join(calls) + '\n')
     binary = tmp_path / 'integer-extensions'
-    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary,
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', binary,
                             *(['--release'] if release else [])],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -5579,7 +5579,7 @@ return 42
     binary = tmp_path / 'case-bytes'
     flags = ['--release'] if release else []
     if target == 'wasm':
-        flags += ['--target', target]
+        flags += ['--target', target_name(target)]
     built = subprocess.run([compiler, 'build', source, *flags, '-o', binary],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -5651,7 +5651,7 @@ main = () -> int:
     42
 ''')
     binary = tmp_path / 'swap-inline'
-    built = subprocess.run([compiler, 'build', source, '--release', '--ir', '--target', target,
+    built = subprocess.run([compiler, 'build', source, '--release', '--ir', '--target', target_name(target),
                             '-o', binary], capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     probe = re.search(r'^fn f_swap_probe_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
@@ -5719,7 +5719,7 @@ return 42
 }}
 ''')
     binary = tmp_path / 'integers'
-    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary,
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', binary,
                             *(['--release'] if release else [])],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -5770,7 +5770,7 @@ main = () -> int:
     42
 ''')
     binary = tmp_path / 'terminal'
-    built = subprocess.run([compiler, 'build', source, '-o', binary, '--target', target, *flags],
+    built = subprocess.run([compiler, 'build', source, '-o', binary, '--target', target_name(target), *flags],
                            capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     command = [binary]
@@ -5834,7 +5834,7 @@ def test_core_grapheme_length_blocks(compiler, tmp_path, release, target):
         node = shutil.which('node')
         if node is None:
             pytest.skip('Node is needed for web conformance')
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -5911,7 +5911,7 @@ def test_core_grapheme_property_pages(compiler, tmp_path, release, target):
         node = shutil.which('node')
         if node is None:
             pytest.skip('Node is needed for web conformance')
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -5967,7 +5967,7 @@ main=()=>{
         node = shutil.which('node')
         if node is None:
             pytest.skip('Node is needed for web fixed-index checks')
-        flags += ['--target', 'wasm']
+        flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -6151,7 +6151,7 @@ return 42
 }
 ''')
     binary = tmp_path / 'products'
-    built = subprocess.run([compiler, 'build', source, '--target', target,
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target),
                             '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -6191,7 +6191,7 @@ main = () -> int:
     42
 ''')
     binary = tmp_path / 'byte-count'
-    built = subprocess.run([compiler, 'build', source, '--target', target, '-o', binary,
+    built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', binary,
                             *(['--release'] if release else [])],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -6261,7 +6261,7 @@ main = () -> int:
     checked_probe(values[0], 22)
 ''')
     binary = tmp_path / 'nonreturning'
-    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target, *flags, '-o', binary],
+    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target_name(target), *flags, '-o', binary],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
     probe = re.search(r'^fn f_checked_probe_.*?(?=^fn |\Z)', built.stdout + built.stderr, re.M | re.S)
@@ -6330,7 +6330,7 @@ mask_probe = (x: int) -> int:
                       + '\n'.join(checks)
                       + '\n    assert(changed_mask(false) == 0 and changed_mask(true) == 1)\n    mask_probe(42)\n')
     binary = tmp_path / 'mask-comparisons'
-    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target,
+    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target_name(target),
                             *(['--release'] if release else []), '-o', binary],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr

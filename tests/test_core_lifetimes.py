@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from tests.support import compiler, run_value_batch, Scripts
+from tests.support import compiler, run_value_batch, Scripts, target_name
 
 MAKE = 'make=(n:int64):>string=>"value={n}"\n'
 EXIT = '{if stop return 42; make(2)}'
@@ -159,7 +159,7 @@ def test_core_abandoned_implementation_values(compiler, tmp_path, target, flags)
     source = tmp_path / 'construction.jo'
     source.write_text('\n'.join(declarations) + '\n')
     binary = tmp_path / 'construction'
-    built = subprocess.run([compiler, 'build', source, '-o', binary, '--target', target, *flags],
+    built = subprocess.run([compiler, 'build', source, '-o', binary, '--target', target_name(target), *flags],
                            capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
     command = [binary]

@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from tests.support import Scripts, compiler
+from tests.support import Scripts, compiler, target_name
 from tools.compiler.bench import prepare_source
 
 
@@ -55,7 +55,7 @@ probe=(at:int64):>int64=>{
 main=(args:array<string>):>int64=>{return probe(args.length-1)}
 ''')
     binary = tmp_path / 'checked'
-    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target,
+    built = subprocess.run([compiler, 'build', source, '--ir', '--target', target_name(target),
                             '-o', binary], capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
     probe = function(built.stdout, 'probe')

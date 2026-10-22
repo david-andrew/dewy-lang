@@ -2,5 +2,5 @@
 # A condition that is not only `$target` tests is an ordinary branch: both arms are checked.
 main=()=>{
     let wide=true
-    if $target =? "x86_64" and wide {printl(1)} else {missing_name()}
+    if $target.arch =? "x86_64" and wide {printl(1)} else {missing_name()}
 }

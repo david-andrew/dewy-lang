@@ -1,0 +1,6 @@
+# modes: native
+# Names of targets this compiler has no backend for yet are known names: their arms fold away.
+if $target in? ["x86_64-mac" "riscv64-freestanding" "c-posix" "c89"] {
+    import p"../../fixtures/target/no_such_module.dewy" as notes
+}
+main=()=>printl("folded")

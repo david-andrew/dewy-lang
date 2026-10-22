@@ -14,7 +14,7 @@ LADDER = Path(__file__).resolve().parent / 'ladder'
 
 def build_web(compiler, source, output, release):
     flags = ['--release'] if release else []
-    built = subprocess.run([compiler, 'build', source, '-o', output, '--target', 'wasm', *flags],
+    built = subprocess.run([compiler, 'build', source, '-o', output, '--target', 'wasm32', *flags],
                            capture_output=True, text=True, timeout=120, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     return output.with_suffix('.html')

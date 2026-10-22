@@ -4,14 +4,14 @@
 field built with matrix slices and dotted arithmetic. Drag to paint, adjust the
 feed/removal rates and simulation speed, press **Space** to pause, or **R** to
 seed again. Run `./tools/dewy examples/reaction_field.dewy`, or build
-with `--target wasm` for the browser. Its [model](reaction_model.dewy) has native
+with `--target wasm32` for the browser. Its [model](reaction_model.dewy) has native
 test blocks: `./tools/dewy test examples/reaction_model.dewy`.
 The regression harness also compares every cell with an independent scalar
 simulation on native and web targets, in default and release builds.
 
 [`terrain_array.dewy`](terrain_array.dewy) generates a height field with one fused
 GPU expression and checks it against the same Dewy function on the CPU. Run
-`./tools/dewy examples/terrain_array.dewy`, or build with `--target wasm`
+`./tools/dewy examples/terrain_array.dewy`, or build with `--target wasm32`
 for the browser. `SLOPPY_SOFTWARE=1` exercises the CPU fallback. See the
 [GPU array guide](../docs/LANGUAGE.md#gpu-arrays).
 
@@ -37,7 +37,7 @@ optimized code. Test failures are isolated so subsequent tests still run.
 scales, annotations, dashed lines, grouped bars and a sampled wave. Integer and
 float32 series work directly. Run
 `python3 -m tools.core run examples/charts.dewy`, or build with
-`--target wasm` for the browser. `chart_image` also renders charts without a
+`--target wasm32` for the browser. `chart_image` also renders charts without a
 window for saving with `save_png`.
 
 [`controls.dewy`](controls.dewy) is a pendulum with ranged sliders for gravity,
@@ -45,12 +45,12 @@ length, release angle, damping and playback speed. Sliders keep a mouse or touch
 drag outside their bounds. It also shows the light menu theme and the bundled
 Greek/mathematical glyphs. **Space** pauses and **R** releases the pendulum again.
 Run `python3 -m tools.core run examples/controls.dewy`, or build with
-`--target wasm` for the browser.
+`--target wasm32` for the browser.
 
 [`outlines.dewy`](outlines.dewy) shows joined open/closed paths, rounded outlines,
 repeated points and a 6,000-point plot that crosses drawing batches. Run it with
 `python3 -m tools.core run examples/outlines.dewy`, or build with
-`--target wasm` for the browser.
+`--target wasm32` for the browser.
 
 [`rollback_lab.dewy`](rollback_lab.dewy) runs two copies of a small game over a
 simulated network. Adjust latency, jitter and packet loss to see prediction,
@@ -59,7 +59,7 @@ current prediction, which can differ briefly while inputs are in flight. The
 [model](rollback_model.dewy) uses ordinary Dewy records, arrays and value copies
 with the bundled `netplay` library. Run it with
 `python3 -m tools.core run examples/rollback_lab.dewy`, or build with
-`--target wasm` for a browser. Its native/web regression harness compares both
+`--target wasm32` for a browser. Its native/web regression harness compares both
 peers' confirmed history with an independent Python simulation, including a
 saved original value that must remain unchanged.
 
@@ -68,7 +68,7 @@ projected from world positions, cursor-ray picking and menus with long labels.
 Use the slider to roll, **P** to rotate automatically, and **R** to reset. The orange
 marker remains under the cursor as the view rotates. Run it with
 `python3 -m tools.core run examples/camera_roll.dewy`; build with
-`--target wasm` for the browser.
+`--target wasm32` for the browser.
 
 [`settings.dewy`](settings.dewy) loads typed JSON with defaults, updates a record
 copy, and saves/loads a full-width player ID without rounding. Run it with
@@ -173,14 +173,14 @@ $CORE build examples/paddle.dewy -o /tmp/paddle
 /tmp/paddle
 
 # The wasm target emits a self-contained HTML file, including its web runtime.
-$CORE build examples/paddle.dewy --target wasm -o /tmp/paddle
+$CORE build examples/paddle.dewy --target wasm32 -o /tmp/paddle
 # Open /tmp/paddle.html in a browser.
 $CORE build examples/physics.dewy --release -o /tmp/physics
-$CORE build examples/physics.dewy --target wasm --release -o /tmp/physics
+$CORE build examples/physics.dewy --target wasm32 --release -o /tmp/physics
 $CORE build examples/forest.dewy --release -o /tmp/forest
-$CORE build examples/forest.dewy --target wasm --release -o /tmp/forest
+$CORE build examples/forest.dewy --target wasm32 --release -o /tmp/forest
 $CORE build examples/dunes.dewy --release -o /tmp/dunes
-$CORE build examples/dunes.dewy --target wasm --release -o /tmp/dunes
+$CORE build examples/dunes.dewy --target wasm32 --release -o /tmp/dunes
 ```
 
 Use `--release` for the optimizing compiler. The default development build
@@ -259,7 +259,7 @@ A browser can join the same native host. Build and serve the page locally:
 
 ```sh
 mkdir -p /tmp/dewy-netpong-web
-python3 -m tools.core build examples/netpong.dewy --target wasm -o /tmp/dewy-netpong-web/index
+python3 -m tools.core build examples/netpong.dewy --target wasm32 -o /tmp/dewy-netpong-web/index
 python3 -m http.server 8000 --bind 127.0.0.1 --directory /tmp/dewy-netpong-web
 ```
 

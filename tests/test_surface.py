@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support import target_name
+
 quick = pytest.mark.core_quick
 
 
@@ -51,7 +53,7 @@ def run(compiler, tmp_path, source, target='native', release=False):
     binary = tmp_path / 'main'
     flags = ['--release'] if release else []
     if target != 'native':
-        flags += ['--target', target]
+        flags += ['--target', target_name(target)]
     built = subprocess.run([compiler, 'build', path, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=60, check=False)
     assert built.returncode == 0, built.stdout + built.stderr

@@ -4,7 +4,7 @@
 
 ## Current command line
 
-Use `dewy file.dewy` to run, `dewy check file.dewy` to check without output, or `dewy build file.dewy --release -o program` to save a native executable. In a checkout use `./tools/dewy` in place of `dewy`. `build --target wasm` emits a browser page. See [installation](/install/) and [target-scoped coverage](/status/).
+Use `dewy file.dewy` to run, `dewy check file.dewy` to check without output, or `dewy build file.dewy --release -o program` to save a native executable. In a checkout use `./tools/dewy` in place of `dewy`. `build --target wasm32` emits a browser page. See [installation](/install/) and [target-scoped coverage](/status/).
 
 ## Source-language rules
 

@@ -6,6 +6,7 @@ use 'units.jo'
 use 'definite.jo'
 use 'decimals.jo'
 use 'errors.jo'
+use 'targets.jo'
 use 'watch.jo'
 # Semantic analysis: modules, scopes, declarations, function instances, statements.
 
@@ -4824,8 +4825,8 @@ check_build_block = ():
                 if nodes[kid(v, k)].kind != .str_lit or nodes[kid(v, k)].aux != 0: fatal(nodes[kid(v, k)].pos, "package() takes strings in quotes")
             continue
         if key == "target":
-            if word != "native" and word != "linux" and word != "linux-arm64" and word != "macos" and word != "windows" and word != "wasm":
-                fatal(nodes[v].pos, "build option 'target' is native, linux, linux-arm64, macos, windows or wasm")
+            why = target_problem(word, host_target_name())
+            if len(why) > 0: fatal(nodes[v].pos, "build option 'target': {why}")
         else if key == "opt":
             if word != "debug" and word != "release": fatal(nodes[v].pos, "build option 'opt' is debug or release")
         else if key == "output":

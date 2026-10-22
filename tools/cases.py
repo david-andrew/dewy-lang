@@ -202,7 +202,7 @@ class Runner:
 
     def flags(self, mode: str) -> list[str]:
         flags = ['--release'] if mode.endswith('-release') else []
-        return flags + (['--target', 'wasm'] if mode.startswith('web') else [])
+        return flags + (['--target', 'wasm32'] if mode.startswith('web') else [])
 
     def build(self, source: Path, output: Path, mode: str):
         self.builds += 1

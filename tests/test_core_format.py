@@ -173,7 +173,7 @@ def test_core_format_execution(compiler, tmp_path, name, target):
 
     def execute(label):
         output = tmp_path / label
-        flags = ['--target', 'wasm'] if target == 'wasm' else []
+        flags = ['--target', 'wasm32'] if target == 'wasm' else []
         built = command(compiler, 'build', path, '-o', output, *flags)
         assert built.returncode == 0, built.stdout + built.stderr
         args = [output]

@@ -11,6 +11,10 @@ import tarfile
 from pathlib import Path
 
 
+# Each host bundle's compiler target name.
+TARGETS = {'windows': 'x86_64-windows', 'macos': 'aarch64-mac', 'linux-arm64': 'aarch64-linux'}
+
+
 def build(toolchain: Path, output: Path) -> None:
     toolchain = toolchain.resolve(strict=True)
     output = output.resolve()
@@ -19,11 +23,11 @@ def build(toolchain: Path, output: Path) -> None:
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(('DEWY_', 'SLOPPY_'))}
     env.update(DEWY_CORE_LIB=str(toolchain / 'lib'), SLOPPY_EMIT_WORKERS='1')
-    for host in ('windows', 'macos', 'linux-arm64'):
+    for host, target in TARGETS.items():
         bundle = output / host / 'dewy-core'
         (bundle / 'bin').mkdir(parents=True)
         binary = bundle / 'bin' / ('dewy-core.exe' if host == 'windows' else 'dewy-core')
-        command = [compiler, 'build', toolchain / 'compiler/main.jo', '--target', host, '-o', binary]
+        command = [compiler, 'build', toolchain / 'compiler/main.jo', '--target', target, '-o', binary]
         result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=90, check=False)
         (output / f'{host}.log').write_text(result.stdout + result.stderr)
         if result.returncode:

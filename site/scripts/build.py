@@ -126,7 +126,7 @@ def build_playground(compiler, scratch, node):
         run([str(compiler),'check',str(source)])
         output=DIST/'playground/programs'/e['id']
         output.parent.mkdir(parents=True,exist_ok=True)
-        run([str(compiler),'build',str(source),'--target','wasm','--release','-o',str(output)])
+        run([str(compiler),'build',str(source),'--target','wasm32','--release','-o',str(output)])
         page=output.with_suffix('.html')
         if e['mode']=='run':
             scripts=Scripts();scripts.feed(page.read_text());runner=scratch/(e['id']+'.cjs')
