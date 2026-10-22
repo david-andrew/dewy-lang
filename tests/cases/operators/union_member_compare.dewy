@@ -1,0 +1,16 @@
+# quick
+# A union compares with one of its members: plain true or false.
+Tok:type=[k:int64]
+main=()=>{
+    let u:int64|string="hi"
+    let n:int64=3
+    printl"{u =? n} {n =? u} {u not=? n} {u =? "hi"} {"hi" =? u}"
+    let v:int64|string|none=4
+    printl"{v =? n} {v =? 4} {v =? "x"} {v not=? 4}"
+    let w:int64|bool=true
+    printl"{w =? true} {w =? 1}"
+    let fl:float64|string=1.5
+    printl"{fl =? 1.5}"
+    let t:Tok|string=Tok[3]
+    printl"{t =? "a"}"
+}

@@ -4462,6 +4462,11 @@ variant_names = (t: int) -> int[]:
     loop vi in [0..int(structs[si].nvariants)): out.push(int(variants[int(structs[si].variants) + vi].name))
     out
 
+# a union, or an optional union
+union_or_optional = (t0: int) -> bool:
+    t = prune(t0)
+    is_union(t) or tkind(t) == .opt and is_union(prune(int(types[t].elem)))
+
 # a == b, a < b with types that do not compare
 cmp_error = (n: int, ta: int, tb: int):
     why = variant_hint(int(nodes[n].b), ta)
@@ -6285,6 +6290,16 @@ check_binary = (n: int, expected: int) -> int:
             b = int(nodes[n].b)
             tb = ta
         else if tkind(tb) == .opt and tkind(ta) != .opt and tkind(ta) != .none_lit and type_eq(prune(int(types[tb].elem)), ta):
+            nodes[n].a = i32(coerce(a, tb))
+            a = int(nodes[n].a)
+            ta = tb
+        # (a union and one of its members, `back =? n`: the member joins the
+        # union, so a different member compares unequal)
+        else if not type_eq(ta, tb) and union_or_optional(ta) and not union_or_optional(tb) and can_coerce(b, tb, ta):
+            nodes[n].b = i32(coerce(b, ta))
+            b = int(nodes[n].b)
+            tb = ta
+        else if not type_eq(ta, tb) and union_or_optional(tb) and not union_or_optional(ta) and can_coerce(a, ta, tb):
             nodes[n].a = i32(coerce(a, tb))
             a = int(nodes[n].a)
             ta = tb

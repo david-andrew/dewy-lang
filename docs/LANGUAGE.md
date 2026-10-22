@@ -2745,6 +2745,8 @@ An arm after a catch-all, or one whose member earlier arms already cover, is
 unreachable and an error. An `if`/`else if` chain of `is?` tests that names every
 member is a value without a final `else`:
 `if v is? int64 "int" else if v is? string "str"` for `v:int64|string`.
+A union compares with one of its members directly: `v =? 3` is true only when
+`v` holds that `int64` and it equals 3, and false while it holds a `string`.
 Literal arms also work directly on unions:
 
 ```dewy

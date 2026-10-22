@@ -251,8 +251,8 @@ def test_surface_member_call_errors(compiler, tmp_path, name):
 # ------------------------------------------------- Dewy-native diagnostics
 
 NATIVE_DIAGNOSTICS = {
-    'union-comparison': ('read=(x:int64|string):>bool=>x =? int64(1)\nmain=()=>printl(read(1))',
-                         'cannot compare int64 | string with int64 (find out which it holds first: `x is? int64 and x =? value`)'),
+    'union-comparison': ('read=(x:int64|string):>bool=>x =? 1.5\nmain=()=>printl(read(1))',
+                         'cannot compare int64 | string with float64'),
     'type-names': ('main = () => { let x:string = 3 }', 'expected string, found int'),
     'array-type-name': ('accept=(xs:array<uint8>)=>0\nmain=()=>accept([256])', 'expects array<uint8>'),
     'count-hint': ('main = () => { if 3 { printl"x" } }', '`loop i in [1..3] { }`'),
