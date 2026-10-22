@@ -7,6 +7,7 @@ use 'check.jo'
 use 'expr.jo'
 use 'lower.jo'
 use 'effects.jo'
+use 'ownership.jo'
 
 enum IsolationReason: none_, unavailable, global_, capture, indirect, raw, intrinsic, node
 
@@ -109,6 +110,27 @@ isolation_block = (f: int, reason: IsolationReason, witness: int):
 # generation-wide stamped array handles shared checked expression nodes without
 # allocating/clearing a nodes-sized bitmap for every function. Edges need not be
 # deduplicated: Tarjan visits a target once, so diamonds remain O(nodes + edges).
+# Lifecycle hooks a value of type t0 can run (drop, copy, move and map-copy
+# hooks, through inline fields and elements) are implicit calls: edges. False
+# when the type cannot be followed, which blocks.
+isolation_hooks = (t0: int, edges: mut int[], depth: int = 0) -> bool:
+    if depth > 32: return false
+    t = prune(t0)
+    if not ownership_type(t): return true
+    if ownership_callable_cap(t) != 0: return false
+    k = tkind(t)
+    if k == .array or k == .fixed or k == .opt or k == .box: return isolation_hooks(int(types[t].elem), edges, depth + 1)
+    if k != .struct_: return false
+    if let c = owner_map_copies.get(t): edges.push(c)
+    if let c = ownership_copies.get(t): edges.push(c)
+    if let m = ownership_moves.get(t): edges.push(m)
+    layout(t)
+    si = int(types[t].st)
+    if structs[si].drop_fn != 0: edges.push(int(structs[si].drop_fn))
+    loop i in [0..int(structs[si].nfields)):
+        if not isolation_hooks(int(fields[int(structs[si].fields) + i].type), edges, depth + 1): return false
+    true
+
 isolation_scan = (f: int) -> int[]:
     edges: int[]
     if f < effect_summaries.len() and effect_summaries[f].done:
@@ -144,6 +166,13 @@ isolation_scan = (f: int) -> int[]:
         if reason != .none_:
             isolation_block(f, reason, n)
             break
+        # (a value with lifecycle hooks may run them as it is copied, moved or
+        # dropped; a declared local is dropped at its scope's end)
+        if ownership_decls.len() != 0:
+            held = if k == .vardecl and nodes[n].sym > 0 and not has_flag(n, NF_GLOBAL): int(locals[int(nodes[n].sym)].type) else: ntype(n)
+            if not isolation_hooks(held, edges) or not isolation_hooks(ntype(n), edges):
+                isolation_block(f, .node, n)
+                break
         mask = isolation_children(k)
         if mask & 1 != 0: todo.push(int(nodes[n].a))
         if mask & 2 != 0: todo.push(int(nodes[n].b))

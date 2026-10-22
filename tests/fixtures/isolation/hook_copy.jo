@@ -1,0 +1,29 @@
+use '../../../compiler/ast.jo'
+use '../../../compiler/check.jo'
+use '../../../compiler/isolation.jo'
+use '../../../compiler/effects.jo'
+use '../../../compiler/types.jo'
+use '../../../compiler/util.jo'
+# A copy hook writing a global is an implicit call: the copying function is not
+# isolated, whether or not an effect summary happens to exist for it.
+
+named = (name: str) -> int:
+    loop f in [1..fns.len()):
+        d = int(fns[f].decl)
+        if d != 0 and fns[f].state == 2 and name_of(int(nodes[d].name)) == name: return f
+    0
+
+main = ():
+    lib_dir = env("DEWY_CORE_LIB") ?? ""
+    lib_root = lib_dir
+    init_types()
+    check_program(args()[1])
+    copier = named("duplicate_owner")
+    plain = named("plain")
+    assert(copier != 0 and plain != 0)
+    # (isolation's own scan: no effect rows)
+    effect_summaries = []
+    isolation_reset()
+    assert(not instance_isolated(copier))
+    assert(instance_isolated(plain))
+    print("hook isolation ok")
