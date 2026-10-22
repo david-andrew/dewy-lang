@@ -107,10 +107,22 @@ line_col = (p: int) -> (int, int):
     if f == lc_file and off0 >= lc_start and off0 < lc_end: return (lc_line, off0 - lc_start + 1)
     loop line_starts.len() <= f: line_starts.push([])
     if line_starts[f].len() == 0:
+        # (newlines found a word at a time: only a word holding one is
+        # scanned by byte; O(bytes / 8 + lines))
         ls = [0]
         src = files[f].src
-        loop i in 0.. and c in src:
-            if c == '\n': ls.push(i + 1)
+        n = len(src)
+        sp = data(src)
+        i = 0
+        loop i + 8 <= n:
+            w = ((sp + i) as *u64)[0] xor 0x0A0A0A0A0A0A0A0A
+            if (w - 0x0101010101010101) & (w xor 0xFFFFFFFFFFFFFFFF) & 0x8080808080808080 != 0:
+                loop j in [i..i + 8):
+                    if sp[j] == 10: ls.push(j + 1)
+            i += 8
+        loop i < n:
+            if sp[i] == 10: ls.push(i + 1)
+            i += 1
         line_starts[f] = ls
     off = pos_off(p)
     # (indexed directly: data() of an element would copy the whole array first)
