@@ -5790,7 +5790,10 @@ check_program = (main_path: str):
         # (main() at the end of the file, as in Python: it runs once, there)
         calls_main = false
         loop st in modules[mainm].inits:
-            if calls_named(st, "main"): calls_main = true
+            if calls_named(st, "main"):
+                # (Dewy runs a program's main by itself, exactly once)
+                if files[int(modules[mainm].file)].is_dewy and syms[s].kind == .fns: fatal(nodes[st].pos, "main runs by itself, once, after the file's top-level statements: remove this call (a file without main runs top to bottom as a script)")
+                calls_main = true
         if syms[s].kind == .fns and not skip_main and not calls_main:
             main_fn = get_fn_inst(int(syms[s].decl), [], 0)
             rt = prune(int(fns[main_fn].ret))
@@ -6064,7 +6067,7 @@ main_pinned_code = (t: int, pos: int) -> int:
         dv = int(fields[f].defval)
         if dv == 0 or nodes[dv].kind != .int_lit: fatal(pos, "{dt(t)}'s exit_code needs a constant default, the code main ends with for it: `exit_code:int64=3`")
         c = int(nodes[dv].ival)
-        if c < 1 or c > 255: fatal(pos, "{dt(t)}'s exit_code is {c}: an exit code for an error is 1 to 255 (0 is success)")
+        if c < 1 or c > 100: fatal(pos, "{dt(t)}'s exit_code is {c}: an exit code for an error is 1 to 100 (0 is success, and 101 a failed runtime check)")
         return c
     0
 

@@ -1,0 +1,11 @@
+# quick
+# main runs by itself, exactly once, after the top-level statements; recursion
+# inside main is fine.
+let depth=0
+let ready="top level ran"
+main=():>void=>{
+    depth+=1
+    if depth =? 1 printl(ready)
+    printl("main {depth}")
+    if depth <? 3 main()
+}

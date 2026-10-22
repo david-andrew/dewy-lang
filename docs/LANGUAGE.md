@@ -2337,13 +2337,17 @@ A function without a declared result type infers the kinds it throws: each
 `parse=(text:string)=>{... return ParseError[...] ... return n}` gives
 `int64 | ParseError`. A declared result fixes the set instead.
 
+`main` is optional: without it a file runs top to bottom as a script. With it,
+the top-level statements run first and then `main` runs by itself, exactly once;
+calling `main()` at the top level is an error (recursion inside `main` is fine).
+
 `main` returns `void` or the errors that reach it, an ordinary `void | E` type,
 declared or inferred. It gives no exit code: success exits 0, and a script that
 needs a particular code calls `exit(n)`. An error reaching `main` is printed on
 standard error (`error: ParseError[message="..."]`) and ends the program with
 its kind's exit code: 1, 2, 3, … in the order the kinds are declared, or as a
 declared result lists them, up to 100 (101 is a failed runtime check). An error type with an `exit_code` field
-pins its own code (its default, 1 to 255). `dewy build --exit-codes file.dewy`
+pins its own code (its default, 1 to 100). `dewy build --exit-codes file.dewy`
 prints the table without building.
 
 ```dewy
