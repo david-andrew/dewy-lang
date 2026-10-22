@@ -239,9 +239,9 @@ generated programs.
   `compiler/dewy_parse.jo` projects the syntax tree into the compact AST.
 - `compiler/` contains checking, lowering, code generation and tools, written in
   the inherited implementation language (`.jo`), except the modules written in
-  Dewy (`zip.dewy`, `spelling.dewy`, `leb128.dewy`). A Dewy module is a leaf: it
-  uses the library but no compiler module, and each `.jo` module calling it uses
-  it.
+  Dewy (`zip.dewy`, `spelling.dewy`, `leb128.dewy`, `base64.dewy`). A Dewy module
+  is a leaf: it uses the library but no compiler module, and each `.jo` module
+  calling it uses it.
 - `lib/` contains containers, platform support, graphics, input, audio and other
   libraries. Dewy programs can import `.jo` library modules directly.
 - `stage0/` is the small independent C bootstrap. It implements a smaller

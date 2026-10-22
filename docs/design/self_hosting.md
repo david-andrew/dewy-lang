@@ -32,7 +32,7 @@ that the code generator is not the obstacle. The obstacles are surface and boots
 | `when not BOOTSTRAP:` | dropped: stage0 never compiles Dewy, so the gate is meaningless here | see `$target` |
 | closure capturing loop locals | works (snapshots) | A |
 | `mut u8[]` | `@b:array<uint8>` / `put16(@h v)`, also across Jo<->Dewy | A |
-| `len(str)`, `loop c in str` (bytes) | `s as array<uint8>` (specified view; measured zero-copy). The loop source needs parens, and there is now a diagnostic for that | A |
+| `len(str)`, `loop c in str` (bytes) | `s as array<uint8>` (specified view; measured zero-copy). `loop c in s as array<uint8>` converts the source | A |
 | `data(out)+n`, `mem_copy` | the literal form compiles via undocumented Jo-prelude leakage; `out.extend(src)` is documented and costs the same | A |
 | `deflate` (lib/game/image.jo) | `from p"@lib/game/image.jo" import deflate` (it also leaks in unimported) | A |
 | `write_bytes -> bool` | `write_bytes(path out) is? int64` | A |
@@ -61,6 +61,10 @@ across the languages is an ordinary call.
 - **Jo -> Dewy**: `use 'lib.dewy'` (verified: Jo calls a Dewy `put16` through `mut`).
 - **Type mapping**: `mut` <-> `@`; `T[]` <-> `array<T>`; `u8` <-> `uint8`; Jo `int` takes
   `int64`; `str` <-> `string` (Dewy indexes graphemes, so pass bytes on hot paths).
+- **Enumerations**: a Dewy union of string literals (`Phase:type = 'lex' | 'parse'`) is a
+  Jo enum to Jo code: `match p: lex:`, `.lex`, `Phase.lex`, `int(p)`, `Phase(1)`, table
+  keys. Its members are numbered in the order its set was first written, so a twin's
+  `enum Phase:` lists them in that order (`tests/test_selfhost_twins.py`).
 - **C**: `$extern` in either language.
 - **Bootstrap blocker for Dewy inside the compiler**: generation 1 (stage0 ->
   `core-bootstrap`) has no Dewy frontend (`bootstrap/frontend.jo`), and it builds generation
@@ -87,8 +91,9 @@ across the languages is an ordinary call.
 ## Leaves shipped (B3)
 
 `zip.dewy` (the web build's archive), `spelling.dewy` (the checker's "did you mean"
-distance) and `leb128.dewy` (the one LEB128 encoder of the wasm, DWARF and Mach-O
-writers, formerly three). Rules, enforced by `tests/test_selfhost_twins.py`: every
+distance), `leb128.dewy` (the one LEB128 encoder of the wasm, DWARF and Mach-O
+writers, formerly three) and `base64.dewy` (the web page's module and icon, and the
+macOS signature's hashes, formerly two encoders). Rules, enforced by `tests/test_selfhost_twins.py`: every
 `compiler/*.dewy` has its `FROZEN_TWINS` entry; it imports only the library, never a
 compiler module; its twin defines no name it lacks; each `.jo` module calling it
 `use`s it (Dewy names reach only their importers, unlike Jo's shared namespace). Each
@@ -97,10 +102,8 @@ Python oracle in default and release builds. Compiler output stayed byte-identic
 (734 builds: examples and ladder, native, `--release`, `-g`, wasm32, aarch64-mac,
 x86_64-windows).
 
-Gaps met on the way: `loop {` needs `loop true {`; `loop c in s as array<uint8>`
-needs parentheses; `bytes as string ?? ""` is reported as an unsupported type
-expression rather than asking for `(bytes as string | none) ?? ""`; no 1-D
-`fill(v n)` (a comprehension stands in); Dewy can take a Jo `enum` imported from Jo
-but declares none of its own for Jo code to switch on (string-literal unions are
-words, not tags); a leaf cannot read the compiler's state, so the stateful halves of
-`line_col` and `hash_bytes` stay in Jo.
+Gaps met on the way, and since closed: `loop {` ending its line now loops until it
+exits; a conversion ending a loop header converts the last source; `bytes as string ?? ""`
+converts to `string | none` and falls back; `fill(v n)` is documented; Jo takes a Dewy
+string-literal union as its enum. Still open: a leaf cannot read the compiler's state, so
+the stateful halves of `line_col` and `hash_bytes` stay in Jo.
