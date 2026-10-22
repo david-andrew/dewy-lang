@@ -99,7 +99,7 @@ const vscode = {
     assert.equal(results.at(-1).status, 0, results.at(-1).stderr);
     assert.deepEqual(tasks.at(-1).execution.args, ['test', source, 'saved_version']);
     assert.match(results.at(-1).stdout, /^1 passed$/m);
-    body = 'main=():>int64=>{\n    printl("ran")\n    return 0\n}';
+    body = 'main=():>void=>{\n    printl("ran")\n}';
     await commands.get('dewy.core.run')(document.uri);
     assert.deepEqual(tasks.at(-1).execution.args, ['run', source]);
     assert.equal(tasks.at(-1).group, undefined);

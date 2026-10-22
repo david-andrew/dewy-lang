@@ -19,7 +19,6 @@ probe = (hits:array<Hit> label:string) => {
     let node = Node[20 Node[22]]
     printl(n + big + xs[0] + (maybe ?? 0) + d["a"] + node.value)
     printl(u)
-    return 0
 }
 main = () => probe([Hit(3 "a") Hit(10 "b")] "run")
 '''

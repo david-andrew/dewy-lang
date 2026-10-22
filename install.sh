@@ -368,7 +368,7 @@ smoke() {
     mkdir -- "$work"
     local clean=(env -i "HOME=${HOME:-$work}" "TMPDIR=$work" PATH=/usr/bin:/bin)
     "${clean[@]}" "$compiler" --version < /dev/null > "$work/version" 2>&1 || { cat "$work/version" >&2; return 1; }
-    printf 'main=()=>{let values=[20 22] return sum(values)}\n' > "$work/smoke.dewy"
+    printf 'main=():>void=>{let values=[20 22] exit(sum(values))}\n' > "$work/smoke.dewy"
     if ! (cd "$work" && "${clean[@]}" "$compiler" build "$work/smoke.dewy" -o "$work/smoke" < /dev/null > "$work/build.log" 2>&1); then
         cat "$work/build.log" >&2
         return 1

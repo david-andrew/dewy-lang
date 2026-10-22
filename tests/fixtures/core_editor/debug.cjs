@@ -14,7 +14,7 @@ const source = path.join(directory, 'source with spaces.dewy');
 const compilerLink = path.join(directory, 'compiler with spaces');
 fs.symlinkSync(compiler, compilerLink);
 fs.writeFileSync(source, 'main=()=>unknown_on_disk');
-let body = 'main=()=>42';
+let body = 'main=():>void=>exit(42)';
 let setting = compilerLink;
 let save = true;
 let installed = true;
