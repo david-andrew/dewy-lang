@@ -3700,6 +3700,15 @@ dewy_quantity_name = (name: int) -> bool:
     if quantity_call_names.len() == 0: quantity_call_names = [intern("sleep"), intern("sin"), intern("cos"), intern("tan")]
     name == quantity_call_names[0] or name == quantity_call_names[1] or name == quantity_call_names[2] or name == quantity_call_names[3]
 
+# (a constant name, interned the first time it is asked for, as `intern` would: its id kept by slot)
+ci_ids: int[]
+ci = (slot: int, s: str) -> int:
+    if slot < ci_ids.len() and ci_ids[slot] != 0: return ci_ids[slot]
+    if ci_ids.len() <= slot: ci_ids.resize(slot + 64)
+    id = intern(s)
+    ci_ids[slot] = id
+    id
+
 call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool) -> int:
     if ide_sentinel != 0 and name == ide_sentinel:
         if ufcs and args.len() > 0:
@@ -3707,7 +3716,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             ide_complete_members(ntype(args[0]))
         ide_complete_names()
     # `rational(...)`: the builtin exact type's constructor, unless a binding shadows it.
-    if not ufcs and mod_scope < 0 and name == intern("rational") and lookup(name) == 0 and files[pos_file(nodes[n].pos)].is_dewy:
+    if not ufcs and mod_scope < 0 and name == ci(0, "rational") and lookup(name) == 0 and files[pos_file(nodes[n].pos)].is_dewy:
         pos = nodes[n].pos
         ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
         fname = "rational"
@@ -3728,10 +3737,10 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                 check_expr(a0, 0)
                 add_flag(a0, NF_CHECKED)
             k0 = tkind(prune(ntype(a0)))
-            if k0 == .str_ and name == id_chars: return call_by_name(n, intern("graphemes"), mod_scope, args, expected, false)
+            if k0 == .str_ and name == id_chars: return call_by_name(n, ci(1, "graphemes"), mod_scope, args, expected, false)
             if k0 == .str_ and name != id_index_of and name != id_chars: return call_by_name(n, intern("__dewy_{name_of(name)}"), mod_scope, args, expected, false)
-            if k0 == .array and name == id_index_of and args.len() == 2: return call_by_name(n, intern("__dewy_index_of"), mod_scope, args, expected, false)
-    if not ufcs and mod_scope < 0 and args.len() == 2 and (name == intern("__floor_div") or name == intern("__floor_mod") or name == intern("__dewy_power") or name == intern("__dewy_divide")) and files[pos_file(nodes[n].pos)].is_dewy:
+            if k0 == .array and name == id_index_of and args.len() == 2: return call_by_name(n, ci(2, "__dewy_index_of"), mod_scope, args, expected, false)
+    if not ufcs and mod_scope < 0 and args.len() == 2 and (name == ci(3, "__floor_div") or name == ci(4, "__floor_mod") or name == ci(5, "__dewy_power") or name == ci(6, "__dewy_divide")) and files[pos_file(nodes[n].pos)].is_dewy:
         if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
             return dewy_arithmetic_call(n, name, args, expected)
     if not ufcs and mod_scope < 0 and args.len() == 1 and dewy_quantity_name(name) and (name == quantity_call_names[0] or not number_literal_tree(args[0])) and nodes[args[0]].kind != .namedarg and files[pos_file(nodes[n].pos)].is_dewy:
@@ -3831,19 +3840,19 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
         if mod_scope >= 0: collect_module(mod_scope, name, decls)
         else: collect_fns(name, decls)
     else: collect_named(name, mod_scope, decls)
-    if name == intern("to_int") and mod_scope < 0 and files[pos_file(nodes[n].pos)].is_dewy:
+    if name == ci(7, "to_int") and mod_scope < 0 and files[pos_file(nodes[n].pos)].is_dewy:
         own = false
         loop d in decls:
             if not decl_in_prelude(d): own = true
         if not own:
-            parser = intern("__mi_parse")
+            parser = ci(8, "__mi_parse")
             demand_prelude_name(parser)
             decls = []
             collect_fns(parser, decls)
             return resolve_fn_call(n, parser, decls, args, expected)
     # Index operators belong to the receiver's module, just like methods. A
     # selected import of a container type must also make its operators usable.
-    indexed = name == intern("[]") or name == intern("[]=")
+    indexed = name == ci(9, "[]") or name == ci(10, "[]=")
     if (ufcs or indexed) and args.len() > 0:
         if indexed and not has_flag(args[0], NF_CHECKED):
             check_expr(args[0], 0)
@@ -3852,7 +3861,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
         loop tm in tms: collect_module(tm, name, decls)
         tm = if tms.len() > 0: tms[0] else: -1
         if indexed:
-            protocol = intern(if name == intern("[]"): "__index__" else: "__setindex__")
+            protocol = intern(if name == ci(11, "[]"): "__index__" else: "__setindex__")
             if mod_scope >= 0: collect_module(mod_scope, protocol, decls)
             else: collect_fns(protocol, decls)
             if tm >= 0: collect_module(tm, protocol, decls)
@@ -5525,7 +5534,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
     else if id == .len or id == .arrcap:
         nargs_check(n, nargs, 1, 1, "len")
         t = arg_type(args, 0, 0)
-        if is_soa(t): return check_soa_method(n, args[0], intern("len"), [], expected)
+        if is_soa(t): return check_soa_method(n, args[0], ci(17, "len"), [], expected)
         if id == .len and types[t].kind == .str_ and files[pos_file(nodes[n].pos)].is_dewy:
             add_flag(args[0], NF_CHECKED)
             nodes[n] = nodes[bc_call("__dewy_string_length", args, nodes[n].pos)]
@@ -5588,7 +5597,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             source = kid(source, 0)
         hint = t
         if dewy_set_literal(source):
-            set_sym = prelude.get(intern("Set")) ?? 0
+            set_sym = prelude.get(ci(18, "Set")) ?? 0
             if set_sym == 0: fatal(nodes[source].pos, "Set type is not available")
             hint = get_struct_inst(int(syms[set_sym].ref), [int(types[t].elem)])
         source_type = prune(check_expr(source, hint))
@@ -5699,7 +5708,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
                 fatal(nodes[a].pos, "print() does not take named arguments (`write(s)` prints without a line break; print puts a space between its values)")
             if i > 0:
                 sp = mk(.str_lit, nodes[n].pos)
-                nodes[sp].sval = i32(intern(" "))
+                nodes[sp].sval = i32(ci(19, " "))
                 parts.push(sp)
             part = mk(.pair, nodes[n].pos)
             nodes[part].a = i32(a)
@@ -5908,10 +5917,10 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         # (a union shows just its value: quoted inside a container, as a string would be)
         dewy = int(nodes[n].aux2) & FMT_DEWY != 0
         top = is_union(t) and int(nodes[n].aux2) & 1 == 0
-        fname = intern("__fmt_elem")
-        if top: fname = intern("__fmt")
-        if dewy and top: fname = intern("__dewy_fmt")
-        else if dewy: fname = intern("__dewy_fmt_elem")
+        fname = ci(20, "__fmt_elem")
+        if top: fname = ci(21, "__fmt")
+        if dewy and top: fname = ci(22, "__dewy_fmt")
+        else if dewy: fname = ci(23, "__dewy_fmt_elem")
         loop ft in fts:
             ref = mk(.fnref, nodes[n].pos)
             nodes[ref].sym = i32(resolve_by_types(fname, [bt, ft], nodes[n].pos, true))
@@ -5947,7 +5956,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         if not type_eq(int(fns[fsf].ret), T_VEC4): fatal(nodes[n].pos, "the fragment function must return a vec4 color")
         # The shader intrinsic synthesizes this type without a source-level
         # reference, so it must demand the module just like an ordinary name.
-        s = module_lookup(-1, intern("ShaderSource"))
+        s = module_lookup(-1, ci(24, "ShaderSource"))
         if s == 0: fatal(nodes[n].pos, "ShaderSource is not available")
         r = get_struct_inst(int(syms[s].ref), [])
     else if id == .setjmp:
@@ -6066,7 +6075,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             return check_intrinsic(n, .fmt_struct, args, expected)
         c = mk(.call, nodes[n].pos)
         callee = mk(.ident, nodes[n].pos)
-        nodes[callee].name = i32(intern("__fmt"))
+        nodes[callee].name = i32(ci(25, "__fmt"))
         nodes[c].a = i32(callee)
         set_list(c, args)
         nodes[n] = nodes[c]
@@ -6094,12 +6103,12 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
                 inner = mk(.call, pos)
                 nodes[inner].a = i32(bc_ident("__as__", pos))
                 set_list(inner, [args[1]])
-                nodes[inner].type = i32(resolve_fn_call(inner, intern("__as__"), [conv], [args[1]], T_STR))
+                nodes[inner].type = i32(resolve_fn_call(inner, ci(26, "__as__"), [conv], [args[1]], T_STR))
                 add_flag(inner, NF_CHECKED)
                 nodes[n] = nodes[bc_call("__buf_append_str", [args[0], inner], pos)]
                 return check_expr(n, 0)
             # (a library type the library writes, as a BigInt: as it writes it)
-            jo = resolve_by_types(intern("__fmt"), [bt, t], pos, false)
+            jo = resolve_by_types(ci(27, "__fmt"), [bt, t], pos, false)
             own = jo == 0 or fmt_fallback(jo)
         if own:
             nodes[n].aux = i32(int(IN.fmt_struct))
