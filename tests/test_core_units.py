@@ -17,7 +17,8 @@ def test_quantity_kernel_erasure(compiler, tmp_path, target, release, representa
     Keep the loop large enough that release retains it as a callable function.
     Canonical unit multiplication/division inside the loop also must disappear.
     Compare all instructions, operands, register types and stack layouts, not
-    just an instruction count or the absence of a runtime tag.
+    just an instruction count or the absence of a runtime tag. Both programs print
+    a plain number: a printed quantity shows its unit through library code.
     """
     bodies = []
     for quantities in (False, True):
@@ -47,7 +48,7 @@ main=()=>{{
     let acceleration:{acceleration}=0.5{'m/s^2' if quantities else ''}
     let step:{duration}=0.01{'s' if quantities else ''}
     let result=kernel(position velocity acceleration step 1000)
-    printl"{{result}}"
+    printl"{{result{'/m' if quantities else ''}}}"
 }}
 ''')
         flags = ['--ir', '--target', target_name(target), *(['--release'] if release else [])]
