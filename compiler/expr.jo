@@ -2065,6 +2065,49 @@ call_targs: int[]              # type arguments written at the call being resolv
 cur_assign = 0                 # the assignment whose target is being checked (`x = ...`, `x += ...`)
 early_set: {int: bool} = {}    # globals top-level code assigns above their own line
 
+# Why candidate d rejects argument fi (a, wanting ptx): built only when the
+# call fails or two candidates' reasons at one argument are compared.
+rfc_arg_message = (d: int, fi: int, a: int, ptx: int, cd: Cand) -> str:
+    last_err = ""
+    if nodes[a].type != 0: last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' expects {sig_dt(d, ptx)}, found {dt(ntype(a))}{variant_hint(a, ptx)}"
+    else if nodes[a].kind == .dotname and tkind(ptx) == .enum_:
+        vn = int(nodes[a].name)
+        last_err = "{dt(ptx)} has no variant '{name_of(vn)}'{variant_hint_for(ptx, name_of(vn))}"
+    else: last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' has the wrong type (expects {sig_dt(d, ptx)})"
+    last_err += uncalled_hint(a, ptx)
+    fnm = name_of(int(nodes[int(cd.decl)].name))
+    # (text("Score:", score, pos): Scratch's join, or Python's print, pieces in a row)
+    if (fnm == "text" or fnm == "text_centered") and fi == 1 and nodes[cd.args[0]].kind == .str_lit and nodes[a].type != 0 and tkind(ntype(a)) != .vec:
+        last_err = "text takes one piece of text, then where it goes: put the value inside it, `\"Score: \{score}\"`"
+    # (play("meow.wav"): a sound's file, not loaded)
+    if (fnm == "play" or fnm == "play_music") and nodes[a].kind == .str_lit:
+        last_err = "load the sound first, at the top of the file (`meow = load_wav(embed(\"meow.wav\"))`, or load_ogg), then `play(meow)`"
+    # (load_texture("cat.png"): a file's name where its bytes go)
+    if starts_with(fnm, "load_") and nodes[a].type != 0 and tkind(ntype(a)) == .str_ and tkind(ptx) == .array:
+        fln = "name.png"
+        if nodes[a].kind == .str_lit and nodes[a].aux == 0: fln = name_of(int(nodes[a].sval))
+        last_err = "{fnm} takes the file's contents: `{fnm}(embed(\"{fln}\"))` builds the file into the program (read_bytes(path) reads one at run time)"
+    # (xs.map((x, i): ...): JavaScript's map, which passes the position too)
+    if (fnm == "map" or fnm == "filter" or fnm == "each" or fnm == "any" or fnm == "all") and nodes[a].kind == .lambda and nkids(a) == 2:
+        last_err = "{fnm} gives the function each element alone; with its position too: `[loop i in 0.. and x in xs: ...]`, or `loop i in 0.. and x in xs:`"
+    # (xs.reduce((a, b): a + b, 0): JavaScript's order)
+    if fnm == "reduce" and cd.args.len() == 3 and cd.args[1] != 0 and nodes[unnamed(cd.args[1])].kind == .lambda:
+        last_err = "reduce takes the start value first, then the function: `xs.reduce(0, (a, b): a + b)` (or `sum(xs)`)"
+    # (overlaps(apple, cat_picture): a picture or a thing where a box goes)
+    if nodes[a].type != 0 and tkind(ptx) == .struct_ and dt(ptx) == "Rect" and not pos_in_lib(nodes[a].pos):
+        at = prune(ntype(a))
+        if dt(at) == "Texture": last_err += " (a picture has no place of its own: the box where it is drawn is `Rect(pos.x, pos.y, f64(pic.width), f64(pic.height))`)"
+        else if tkind(at) == .struct_:
+            sn = dt(at)
+            art = "a"
+            if len(sn) > 0 and find("AEIOU", sn[..1)) >= 0: art = "an"
+            last_err += " ({art} {sn} is not a box: `Rect(x, y, width, height)` makes the box around it)"
+    # (xs.sort((a, b): ...): a comparison, as JavaScript sorts)
+    if nodes[a].kind == .lambda and nkids(a) == 2 and name_of(int(nodes[int(cd.decl)].name)) == "sort": last_err += " (`sort_with(xs, (a, b): a.hp > b.hp)` sorts by a comparison, `sort_by(xs, (x): x.hp)` by a key)"
+    if tkind(ptx) == .cfn and (nodes[a].kind == .lambda or (nodes[a].type != 0 and tkind(ntype(a)) == .fn_)):
+        last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' is called from C: give it a top-level function marked @cabi (a function value made in the program cannot be)"
+    last_err
+
 resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0, ufcs: bool = false) -> int:
     # (this call's own type arguments: a call among its arguments has none, from_text[S](f(x)))
     targs_here = call_targs
@@ -2082,6 +2125,14 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
     # (candidates that got equally far but fail there for different reasons: blaming one of
     # them is arbitrary, as len(thing) told of a GpuBuffer's)
     last_err_tie = false
+    # (the rejections at the furthest argument, their messages built only if no candidate
+    # fits: the last one's is the error, and they tie when any two differ)
+    rfc_text: str[]
+    rfc_d: int[]
+    rfc_fi: int[]
+    rfc_a: int[]
+    rfc_ptx: int[]
+    rfc_cd: Cand[]
     recv_fits = false         # (some candidate takes the object of x.f(...), whatever else fails)
     best = -1
     # (an argument that is a number of a known type, the first such, rules out before anything is
@@ -2158,14 +2209,13 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                     if not ok2:
                         ok = false
                         if i + 1 < last_err_arg: break
-                        prev_err = last_err
-                        prev_arg = last_err_arg
+                        if last_err_arg < i + 1:
+                            rfc_text = []; rfc_d = []; rfc_fi = []; rfc_a = []; rfc_ptx = []; rfc_cd = []
                         last_err_arg = i + 1
                         mutable = "mut parameters"
                         if caller_dewy(): mutable = "`@` parameters"
-                        last_err = "argument {i + 1} must have type {sig_dt(cd.decl, subst(pt, cd.binds))} ({mutable} need an exact match)"
-                        if prev_arg < i + 1: last_err_tie = false
-                        else if prev_err != last_err: last_err_tie = true
+                        rfc_text.push("argument {i + 1} must have type {sig_dt(cd.decl, subst(pt, cd.binds))} ({mutable} need an exact match)")
+                        rfc_d.push(0); rfc_fi.push(0); rfc_a.push(0); rfc_ptx.push(0); rfc_cd.push(cd)
                         break
                     cost += r
                     continue
@@ -2187,49 +2237,10 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                                 fi = j
                                 break
                     a = cd.args[fi]
-                    prev_err = last_err
-                    prev_arg = last_err_arg
+                    if last_err_arg < i + 1:
+                        rfc_text = []; rfc_d = []; rfc_fi = []; rfc_a = []; rfc_ptx = []; rfc_cd = []
                     last_err_arg = i + 1
-                    ptx = subst(cd.sig.params[fi], cd.binds)
-                    if nodes[a].type != 0: last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' expects {sig_dt(d, ptx)}, found {dt(ntype(a))}{variant_hint(a, ptx)}"
-                    else if nodes[a].kind == .dotname and tkind(ptx) == .enum_:
-                        vn = int(nodes[a].name)
-                        last_err = "{dt(ptx)} has no variant '{name_of(vn)}'{variant_hint_for(ptx, name_of(vn))}"
-                    else: last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' has the wrong type (expects {sig_dt(d, ptx)})"
-                    last_err += uncalled_hint(a, ptx)
-                    fnm = name_of(int(nodes[int(cd.decl)].name))
-                    # (text("Score:", score, pos): Scratch's join, or Python's print, pieces in a row)
-                    if (fnm == "text" or fnm == "text_centered") and fi == 1 and nodes[cd.args[0]].kind == .str_lit and nodes[a].type != 0 and tkind(ntype(a)) != .vec:
-                        last_err = "text takes one piece of text, then where it goes: put the value inside it, `\"Score: \{score}\"`"
-                    # (play("meow.wav"): a sound's file, not loaded)
-                    if (fnm == "play" or fnm == "play_music") and nodes[a].kind == .str_lit:
-                        last_err = "load the sound first, at the top of the file (`meow = load_wav(embed(\"meow.wav\"))`, or load_ogg), then `play(meow)`"
-                    # (load_texture("cat.png"): a file's name where its bytes go)
-                    if starts_with(fnm, "load_") and nodes[a].type != 0 and tkind(ntype(a)) == .str_ and tkind(ptx) == .array:
-                        fln = "name.png"
-                        if nodes[a].kind == .str_lit and nodes[a].aux == 0: fln = name_of(int(nodes[a].sval))
-                        last_err = "{fnm} takes the file's contents: `{fnm}(embed(\"{fln}\"))` builds the file into the program (read_bytes(path) reads one at run time)"
-                    # (xs.map((x, i): ...): JavaScript's map, which passes the position too)
-                    if (fnm == "map" or fnm == "filter" or fnm == "each" or fnm == "any" or fnm == "all") and nodes[a].kind == .lambda and nkids(a) == 2:
-                        last_err = "{fnm} gives the function each element alone; with its position too: `[loop i in 0.. and x in xs: ...]`, or `loop i in 0.. and x in xs:`"
-                    # (xs.reduce((a, b): a + b, 0): JavaScript's order)
-                    if fnm == "reduce" and cd.args.len() == 3 and cd.args[1] != 0 and nodes[unnamed(cd.args[1])].kind == .lambda:
-                        last_err = "reduce takes the start value first, then the function: `xs.reduce(0, (a, b): a + b)` (or `sum(xs)`)"
-                    # (overlaps(apple, cat_picture): a picture or a thing where a box goes)
-                    if nodes[a].type != 0 and tkind(ptx) == .struct_ and dt(ptx) == "Rect" and not pos_in_lib(nodes[a].pos):
-                        at = prune(ntype(a))
-                        if dt(at) == "Texture": last_err += " (a picture has no place of its own: the box where it is drawn is `Rect(pos.x, pos.y, f64(pic.width), f64(pic.height))`)"
-                        else if tkind(at) == .struct_:
-                            sn = dt(at)
-                            art = "a"
-                            if len(sn) > 0 and find("AEIOU", sn[..1)) >= 0: art = "an"
-                            last_err += " ({art} {sn} is not a box: `Rect(x, y, width, height)` makes the box around it)"
-                    # (xs.sort((a, b): ...): a comparison, as JavaScript sorts)
-                    if nodes[a].kind == .lambda and nkids(a) == 2 and name_of(int(nodes[int(cd.decl)].name)) == "sort": last_err += " (`sort_with(xs, (a, b): a.hp > b.hp)` sorts by a comparison, `sort_by(xs, (x): x.hp)` by a key)"
-                    if tkind(ptx) == .cfn and (nodes[a].kind == .lambda or (nodes[a].type != 0 and tkind(ntype(a)) == .fn_)):
-                        last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' is called from C: give it a top-level function marked @cabi (a function value made in the program cannot be)"
-                    if prev_arg < i + 1: last_err_tie = false
-                    else if prev_err != last_err: last_err_tie = true
+                    rfc_text.push(""); rfc_d.push(d); rfc_fi.push(fi); rfc_a.push(a); rfc_ptx.push(subst(cd.sig.params[fi], cd.binds)); rfc_cd.push(cd)
                     last_err_pos = nodes[a].pos
                     break
                 cost += r
@@ -2237,6 +2248,11 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         cd.ok = true
         cd.cost = cost
         cands.push(cd)
+    if cands.len() == 0 and rfc_text.len() > 0:
+        loop k in [0..rfc_text.len()):
+            if rfc_d[k] != 0: rfc_text[k] = rfc_arg_message(rfc_d[k], rfc_fi[k], rfc_a[k], rfc_ptx[k], rfc_cd[k])
+            if k > 0 and rfc_text[k] != rfc_text[k - 1]: last_err_tie = true
+        last_err = rfc_text[rfc_text.len() - 1]
     # pick the cheapest candidate; prefer non-generic ones, then the program's own definitions
     # over the standard library's; report real ties (the library's are settled by how many
     # arguments have exactly a parameter's type, then which comes first: min(x, 5) with x: i32
