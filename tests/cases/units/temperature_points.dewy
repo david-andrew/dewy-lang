@@ -1,0 +1,24 @@
+# quick
+# Offset temperatures: a literal added to or taken from a point is a difference;
+# point - point is a difference; scaling works in the value's own unit.
+from units import K, °C, °F
+main=()=>{
+    let start=20°C
+    let later=start+15°C
+    let rise=later-start
+    printl"{start} {later} {rise} {rise as °F} {start-5°C} {later as °F} {later as K}"
+    # conversion keeps the scale a value was written in: as a point 68°F, as a difference 20 K
+    let converted=20°C as °F
+    printl"{converted} {start+converted} {start+(20°C as °F)} {(start+converted-start) as °F}"
+    printl"{start*2} {start/2} {-start} {start/°C} {start/°F} {start/K} {68°F =? start}"
+    # a difference added to a point, and compound updates
+    printl"{rise+start} {rise*2}"
+    let t=start
+    t+=10°C
+    t-=start
+    printl"{t} {t+rise}"
+    # plain kelvins: temperature minus temperature is still a difference
+    let a:float64 * Temperature=300K
+    let b:float64 * Temperature=290K
+    printl"{a-b} {(a-b) as °F} {a as °C} {a-10K}"
+}

@@ -1,0 +1,15 @@
+# quick
+# `x as unit` converts a quantity to a unit of the same dimension for display.
+from units import m, km, cm, mm, inches, kg, g
+main=()=>{
+    let l=30cm
+    let speed=25m/s
+    let mass:float64 * Mass=1.5kg
+    printl"{l as inches} {l as mm} {1500m as km} {speed as km/hour} {mass as g}"
+    # the unit survives scaling and sums, not products
+    let shown=l as mm
+    printl"{shown*2} {shown/4} {shown+1cm} {-shown} {shown*shown}"
+    # only the display changes: comparisons and counts see the same length
+    $runtime_assert (shown =? l)
+    $runtime_assert ((l as inches)/cm =? 30)
+}

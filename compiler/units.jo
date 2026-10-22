@@ -922,10 +922,13 @@ quantity_composite_text = (named: str, powers: int[]) -> str:
     bottom = ""
     loop i in quantity_base_order:
         p = powers[i]
+        # (a fractional power of time is one of frequency: V/Hz^(1/2), not V*s^(1/2))
+        if i == 0 and p % QUANTITY_POWER_DEN != 0: p = -p
+        sym = if i == 0 and p != powers[i]: "Hz" else: quantity_base_symbols[i]
         if p > 0:
             if top != "": top += "*"
-            top += quantity_base_symbols[i] + quantity_power_suffix(p)
-        else if p < 0: bottom += "/" + quantity_base_symbols[i] + quantity_power_suffix(-p)
+            top += sym + quantity_power_suffix(p)
+        else if p < 0: bottom += "/" + sym + quantity_power_suffix(-p)
     if top == "" and bottom == "": return ""
     if top == "": top = "1"
     top + bottom
@@ -966,6 +969,12 @@ quantity_ladder = (dim: int) -> QuantityLadder:
         if quantity_factor_count(rest) + 1 < cost:
             cost = quantity_factor_count(rest) + 1
             best = quantity_composite_text(quantity_named_symbols[i], rest)
+    # (angles in degrees, as alone: 90°/s, not 1/4 turn/s)
+    if powers[7] == QUANTITY_POWER_DEN or powers[7] == -QUANTITY_POWER_DEN:
+        rest = fill(0, 8)
+        loop i in [0..7): rest[i] = powers[i]
+        if powers[7] > 0: return quantity_one_unit(quantity_composite_text("°", rest), 1, 360)
+        return quantity_one_unit(quantity_composite_text("", rest) + "/°", 360, 1)
     quantity_one_unit(best, 1, 1)
 
 # (the text after the number: " km", but "°C" and "°" attach)

@@ -1,0 +1,16 @@
+# quick
+# A quantity prints in a unit chosen for its kind and magnitude.
+from units import m, km, mm, kg, g, A, N, J, W, Pa, Hz, V, K, mol, cd, °
+main=()=>{
+    # exact values: the largest unit keeping a whole count, else the simplest fraction
+    printl"{1500m} {3000m} {2.5m} {0.3s} {m/3} {s/3} {90s} {120s} {7200s} {1e-12s}"
+    # floats: the largest unit not above the magnitude
+    let d:float64 * Length=1500m
+    let t:float32 * Time=0.25s
+    printl"{d} {-d} {0.0*d} {t} {2.0e-6*m} {1.0e7*m}"
+    printl"{5kg} {0.5kg} {3g} {2A/1000} {4500J} {2.5e6*W} {101325Pa} {50Hz} {12V} {300K} {2mol} {cd} {90°}"
+    # other dimensions: base units, with one named unit where it saves factors
+    printl"{20m/s} {9.8m/s^2} {2kg*m/s} {3m^2} {1000kg/m^3} {2J*s} {(1/s)/s} {°/s} {90°/s} {m/°}"
+    let r=[distance=3km elapsed=20ms]
+    printl"{r} {[1m 2km]} {string(5km)}"
+}
