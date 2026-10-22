@@ -1,0 +1,12 @@
+$explicit_copies
+build=(n:int64):>array<string>=>{
+    let out:array<string>=[]
+    loop i in [0..n) { out.push("s{i}") }
+    return out
+}
+main=()=>{
+    let a=Arena[]
+    let words=$allocator(@a) build(3)
+    a.reset()
+    printl("{words}")
+}

@@ -27,6 +27,7 @@ use 'facts.jo'
 use 'refine.jo'
 use 'proofs.jo'
 use 'effects.jo'
+use 'arena.jo'
 use 'ownership.jo'
 use 'reflection.jo'
 use 'string_domains.jo'
@@ -5656,6 +5657,7 @@ check_program = (main_path: str):
     refine_reset()
     proof_reset()
     effects_reset()
+    arena_reset()
     directives_reset()
     if len(program_name) > 0: program_named = true
     if len(program_name) == 0:
@@ -5682,6 +5684,7 @@ check_program = (main_path: str):
         register_module(i)
         ic_restore(icb)
         i += 1
+    if arena_enabled: arena_switch_runtime()
     bind_from_imports()
     dewy_resolve_inherited()
     if dewy_methods.len() > 0: dc_force_all()

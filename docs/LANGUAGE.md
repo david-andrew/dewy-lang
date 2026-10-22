@@ -2972,9 +2972,49 @@ views and mutable parameter owners are rejected. Address-controlled branches and
 loans currently reject conservatively. Raw writes require a writable address origin. Ordinary scalar results and early exits are supported; after
 the expression the owner is an ordinary value and is freed normally.
 
+`$allocator(@scratch) expression` makes an `Arena` the context allocator for
+the whole next expression (braces group statements): everything the expression
+allocates, in it and in the functions it calls, bumps the arena's cursor.
+`scratch.reset()` gives all of it back at once:
+
+```dewy
+let scratch=Arena[]
+loop request in requests {
+    let summary=$allocator(@scratch) build_summary(request)
+    send(summary)
+    scratch.reset()
+}
+```
+
+The expression's value leaves with independent storage of the enclosing
+allocator (the heap, or the arena of an enclosing `$allocator`): it is copied
+out, so a reset never invalidates it. Static data such as string literals is
+not copied. Separate arenas nest; the inner value is copied into the outer
+arena. Everything else the expression allocates must die inside it, which the
+compiler proves rather than checks at run time. Inside the expression:
+
+- a variable declared outside it may only be given plain data (numbers, flags,
+  records of them), and not through an array or string; a call may not change
+  such a variable through an `@` argument, and a function it calls may not
+  change a global that holds managed values or a shared capture;
+- `return`, and `break`/`continue` to a loop outside it, are errors;
+- the lent arena cannot be used, reset or lent again;
+- closures made in it capture snapshots only, and function values made
+  outside it cannot be called from it;
+- its value cannot hold closures, resource owners or raw pointers.
+
+Under `$explicit_copies` the copy out is a costly copy like any other, strings
+included: end the expression with `.copy()` to ask for it
+(`$allocator(@scratch) build_summary(request).copy()`).
+
+The bundled library's raw-memory code (output, the allocator, system calls) is
+trusted not to keep what it is given; starting threads or tasks is not. An `Arena` is a value: a copy is another
+arena, and dropping one gives its memory back. Debug builds fill reset storage
+with `0xdb`.
+
 Other directives of the design (`$no_prelude`,
-`$allocator`, `$expect`, `$unsafe_assume`, …) are reported as not
-implemented yet where they appear.
+`$expect`, `$unsafe_assume`, `$explicit_allocation_failure`, …) are reported
+as not implemented yet where they appear.
 
 `value.copy` requests an independent value. It evaluates the receiver once
 and supports arrays, records, dictionaries, sets, strings, closures and

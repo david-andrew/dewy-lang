@@ -32,6 +32,7 @@ use 'callback_specialize.jo'
 use 'parallel_lower.jo'
 use 'partition.jo'
 use 'floats.jo'
+use 'arena.jo'
 
 const VC_VOID = 0
 const VC_INT = 1
@@ -41,7 +42,7 @@ const VC_AGG = 3
 const LK_INST = 0
 const LK_HELPER = 1
 
-enum HK: drop, copy, move, arrrel, arruniq, arrcopy, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq, math_main, owner_boxcopy, parallel_serial, parallel_job, partition
+enum HK: drop, copy, move, arrrel, arruniq, arrcopy, eq, hash, thunk, envdrop, partial, envcopy, stackenvdrop, boxrel, boxdrop, boxuniq, math_main, owner_boxcopy, parallel_serial, parallel_job, partition, promote
 
 struct LFunc:
     kind: int
@@ -4221,6 +4222,7 @@ gen_conv = (e: int) -> Val:
     from = prune(ntype(a))
     cv = nodes[e].aux as CV
     if cv == .refinement: return refine_gen(e)
+    if cv == .promote: return arena_gen_promote(e)
     if cv == .explicit_copy:
         if ownership_type(from):
             value = gen_expr(a)
@@ -8090,6 +8092,7 @@ lower_helper = (lf: int):
         owner_boxcopy: helper_owner_boxcopy(t)
         parallel_serial, partition: ice("borrowed region helper must lower as an instance")
         parallel_job: parallel_job_helper(h.inst, h.htype & 1 != 0, h.htype & 2 != 0)
+        promote: helper_promote(t)
 
 # native FFI: a thunk that resolves the C function on first use and calls it
 # macOS: the C functions dyld puts in their slots when the program starts: (slot's offset in the

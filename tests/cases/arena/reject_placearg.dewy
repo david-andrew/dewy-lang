@@ -1,0 +1,10 @@
+add=(@xs:array<string> s:string):>void=>{ xs.push(s) }
+main=()=>{
+    let a=Arena[]
+    let kept:array<string>=[]
+    let n=$allocator(@a) {
+        add(@kept "x{5}")
+        1
+    }
+    printl("{n} {kept}")
+}

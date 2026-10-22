@@ -1,0 +1,14 @@
+# Arenas give their chunks back when they are dropped.
+main=()=>{
+    let before=alloc_count()
+    loop r in [0..50) {
+        let a=Arena[]
+        let n=$allocator(@a) {
+            let xs:array<int64>=[]
+            loop k in [0..50000) { xs.push(k) }
+            xs.length
+        }
+        $runtime_assert n =? 50000
+    }
+    printl("{alloc_count()-before}")
+}

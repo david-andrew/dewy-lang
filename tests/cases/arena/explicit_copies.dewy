@@ -1,0 +1,18 @@
+# quick
+$explicit_copies
+build=(n:int64):>array<string>=>{
+    let out:array<string>=[]
+    loop i in [0..n) { out.push("s{i}") }
+    return out
+}
+main=()=>{
+    let a=Arena[]
+    let words=$allocator(@a) build(3).copy()
+    let more=$allocator(@a) {
+        let w=build(2)
+        w.copy()
+    }
+    let n=$allocator(@a) build(4).length
+    a.reset()
+    printl("{words} {more} {n}")
+}

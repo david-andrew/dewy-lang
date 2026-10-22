@@ -6,6 +6,7 @@ use 'ast.jo'
 use 'lex.jo'
 use 'parse.jo'
 use 'expr.jo'
+use 'arena.jo'
 use 'check.jo'
 use 'decimals.jo'
 use 'dewy_tokens.jo'
@@ -259,7 +260,7 @@ dw_fail_pos = (pos: int, what: str) -> int:
 # Metatags the design defines that this compiler does not implement yet. Each
 # is reported where it is written rather than as a generic syntax error.
 dw_designed_directive = (name: str) -> bool:
-    name in ["abstract", "allocator", "field", "lend", "no_prelude", "proof", "unsafe_assume", "__copy__", "__drop__", "__move__"]
+    name in ["abstract", "explicit_allocation_failure", "field", "lend", "no_prelude", "proof", "unsafe_assume", "__copy__", "__drop__", "__move__"]
 
 # `$target`: the full name of the target being compiled for (docs/LANGUAGE.md,
 # "Targets"). A name has only the fields it needs: the processor (or `c`, `wasm32`),
@@ -440,6 +441,34 @@ dw_metatag_fail = (id: int) -> int:
     fatal(pos, "unknown directive `${name}` (a loop label goes on its own line just before its loop)")
     0
 
+# `$allocator(@arena) expression` (docs/LANGUAGE.md, "Scoped allocators"): the
+# expression allocates from the arena, the context allocator until it ends, and its
+# value leaves with storage of the enclosing allocator's:
+#     { let c=__arena_enter(@arena)  let v=expression  __arena_leave(c)  $allocator_result(v) }
+# compiler/arena.jo checks that nothing else the expression makes outlives it.
+dw_allocators = 0
+dw_allocator = (id: int) -> int:
+    pos = dewy_syntax[id].pos
+    arena = dw_unwrap(dw_child(id, 0))
+    if dw_op(arena) != .at: fatal(dewy_syntax[arena].pos, "`$allocator` lends an arena by its place: `$allocator(@scratch) expression`")
+    arena_enable()
+    dw_allocators += 1
+    context = "__arena_context{dw_allocators}"
+    value = "__arena_value{dw_allocators}"
+    bc_block([bc_let(context, bc_call("__arena_enter", [dw_expr(arena)], pos), pos), bc_let(value, dw_expr(dw_child(id, 2)), pos),
+        bc_stmt(bc_call("__arena_leave", [bc_ident(context, pos)], pos), pos), bc_stmt(bc_call("$allocator_result", [bc_ident(value, pos), bc_bool(dw_copy_result(dw_child(id, 2)), pos)], pos), pos)], pos)
+
+# (an expression whose value is written `....copy()`: the copy out of the arena is asked for,
+# as `$explicit_copies` wants)
+dw_copy_result = (id0: int) -> bool:
+    id = dw_unwrap(id0)
+    if dewy_syntax[id].kind == .block and dewy_syntax[id].text == "{{}}:":
+        items = dw_children(id)
+        if items.len() == 0: return false
+        return dw_copy_result(items[items.len() - 1])
+    if dw_op(id) == .call: id = dw_unwrap(dw_child(id, 1))
+    dw_op(id) == .dot and dw_name(dw_child(id, 2)) == "copy"
+
 # `$assert`/`$runtime_assert` become calls of internal intrinsics whose names
 # no program can shadow; unimplemented directive forms are reported here.
 dw_directive = (id: int) -> int:
@@ -450,6 +479,7 @@ dw_directive = (id: int) -> int:
         owner = dw_expr(dw_child(id, 0))
         reservation = if dw_child(id, 1) != 0: dw_expr(dw_child(id, 1)) else: bc_int(0, pos)
         return bc_call("$lend", [owner, reservation, dw_expr(dw_child(id, 2))], pos)
+    if name == "allocator": return dw_allocator(id)
     if name == "breakpoint": return bc_call("$breakpoint", [], pos)
     if name != "assert" and name != "runtime_assert": return dw_unimplemented(id, name)
     condition = dw_child(id, 0)

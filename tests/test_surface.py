@@ -178,7 +178,7 @@ DIRECTIVE_ERRORS = {
     'runtime-assert-refuted': ('main = () => { $runtime_assert 1 =? 2 }', 'assertion refuted'),
     'runtime-assert-bool': ('main = () => { $runtime_assert 3 }', 'expected bool'),
     'no-prelude-setting': ('$no_prelude = true', '`$no_prelude` is part of the design but not implemented yet'),
-    'allocator': ('main = () => { let s = $allocator(@scratch) [1 2] }', '`$allocator` is part of the design'),
+    'allocator': ('main = () => {\n    let scratch = Arena[]\n    let s = $allocator(scratch) [1 2]\n}', '`$allocator` lends an arena by its place'),
     'unsafe-assume': ('main = () => { $unsafe_assume 1 >? 0 }', '`$unsafe_assume` is part of the design'),
     'expect': ('main = () => { let y = $expect 1 >? 0, "x" }', '`$expect` is a statement'),
     'fail': ('$fail "nope"', '`$fail` belongs in a function'),

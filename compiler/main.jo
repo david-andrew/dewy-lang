@@ -25,6 +25,7 @@ use 'prelude.jo'
 use 'expr.jo'
 use 'ir.jo'
 use 'lower.jo'
+use 'arena.jo'
 use 'isolation.jo'
 use 'copies.jo'
 use 'ownership.jo'
@@ -422,6 +423,7 @@ compile = (path: str, out0: str) -> str:
     ic_switch(IC_OWNERSHIP, IC_SHARED)
     isolation_reset()
     loans_finalize()
+    arena_finalize()
     partition_finalize()
     ic_switch(IC_FACTS, IC_SHARED)
     facts_finalize()

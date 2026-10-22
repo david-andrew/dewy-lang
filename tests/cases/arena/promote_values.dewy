@@ -1,0 +1,36 @@
+# quick
+# Values leaving an allocator expression are copied out: the arena's reset (which
+# poisons its storage in debug builds) cannot reach them.
+Item:type=[name:string tags:array<string> score:int64? grid:array<array<int64>>]
+make=(i:int64):>Item=>{
+    let tags:array<string>=[]
+    loop j in [0..i) { tags.push("t{j}-{i}") }
+    let grid:array<array<int64>>=[]
+    loop j in [0..i) { grid.push([j j*i]) }
+    return Item["item{i}" tags (if i%2=?0 i*10 else none) grid]
+}
+main=()=>{
+    let scratch=Arena[]
+    let items:array<Item>=[]
+    loop i in [0..5) {
+        let it=$allocator(@scratch) make(i)
+        items.push(it)
+        scratch.reset()
+    }
+    let big=$allocator(@scratch) {
+        let xs:array<int64>=[]
+        loop k in [0..100000) { xs.push(k) }
+        xs
+    }
+    let words=$allocator(@scratch) {
+        let ws:array<string>=[]
+        loop k in [0..3000) { ws.push("w{k}") }
+        ws
+    }
+    let literal=$allocator(@scratch) "static"
+    scratch.reset()
+    loop it in items { printl("{it.name} {it.tags} {it.score} {it.grid}") }
+    let total:int64=0
+    loop x in big { total+=x }
+    printl("{total} {words.length} {words[2999]} {literal}")
+}

@@ -1,0 +1,11 @@
+main=()=>{
+    let a=Arena[]
+    let kept:array<string>=[]
+    let n=$allocator(@a) {
+        let xs:array<int64>=[1 2 3]
+        let ys=xs.map(($capture @kept x:int64)=>{ kept.push("v{x}") x })
+        ys.length
+    }
+    a.reset()
+    printl("{n} {kept}")
+}

@@ -1,0 +1,10 @@
+let cache:array<string>=[]
+remember=(s:string):>void=>{ cache.push(s) }
+main=()=>{
+    let a=Arena[]
+    let n=$allocator(@a) {
+        remember("x{4}")
+        1
+    }
+    printl("{n} {cache}")
+}

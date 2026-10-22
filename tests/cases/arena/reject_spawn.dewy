@@ -1,0 +1,12 @@
+# modes: native native-release
+main=()=>{
+    let a=Arena[]
+    let n=$allocator(@a) {
+        let words:array<string>=["a{1}" "b{2}"]
+        concurrent {
+            let t=spawn words.length
+        }
+        words.length
+    }
+    printl("{n}")
+}

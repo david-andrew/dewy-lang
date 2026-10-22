@@ -994,6 +994,7 @@ dn_flow = () -> int:
 dn_directive_form = (name: str) -> int:
     if name == "assert" or name == "runtime_assert" or name == "expect" or name == "unsafe_assume": return 1
     if name == "lend": return 4
+    if name == "allocator": return 5
     if name == "fail": return 2
     if name == "breakpoint": return 3
     0
@@ -1014,6 +1015,12 @@ dn_directive = (token: DewyLexeme, form: int) -> int:
         dn_expect(.rparen)
         body = dn_expr(0)
         return dn_node(.directive, name, token.start, [owner, reservation, body])
+    if form == 5:
+        # `$allocator(@arena) expression`: the arena lent to the whole next expression
+        dn_expect(.lparen)
+        arena = dn_expr(0)
+        dn_expect(.rparen)
+        return dn_node(.directive, name, token.start, [arena, 0, dn_expr(0)])
     next = dn_tokens[dn_at]
     present = not next.newline and dn_can_start()
     if form == 3 or not present:

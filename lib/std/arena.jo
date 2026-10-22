@@ -1,0 +1,175 @@
+# Arenas (docs/LANGUAGE.md, "Scoped allocators"): `$allocator(@scratch) expression` allocates
+# what the expression makes from the arena, by bumping a cursor; `scratch.reset()` takes all of
+# it back at once. Values leaving the expression are copied out first (compiler/arena.jo), so a
+# reset never invalidates them. The runtime half is in lib/core/rt.jo ("arenas").
+#
+# An arena is a value: a copy is another arena. Copies share their (unused) storage until one
+# is lent or reset, which gives it storage of its own first, as a write to a shared array does.
+struct Arena:
+    # (the control words and the chunks, made on first use; dropping the arena frees them)
+    __chunks: u8[][]
+
+# Give back everything allocated from the arena: no value made in it is still reachable.
+reset = (a: mut Arena):
+    if __arena_shared(a): a.__chunks = []
+    __arena_reset(a.__chunks as *u8)
+
+# (the projection of `$allocator(@arena) expression`, dewy_parse.jo: the arena becomes the
+# context allocator; what it replaced is given back to __arena_leave)
+__arena_enter = (a: mut Arena) -> int:
+    if a.__chunks as *u8 == null or __arena_shared(a): a.__chunks = __arena_new() as u8[][]
+    t = __ts()
+    previous = t[__TS_ARENA]
+    t[__TS_ARENA] = __arena_control(a.__chunks as *u8)
+    previous
+
+__arena_leave = (previous: int):
+    __ts()[__TS_ARENA] = previous
+
+__arena_shared = (a: Arena) -> bool:
+    p = a.__chunks as *int
+    p != null and p[0] != 1
+
+# ---------------- the runtime ----------------
+# An arena hands out memory by bumping a cursor through chunks it takes from the heap. It is
+# a u8[][] the Arena value owns, so dropping it gives every chunk back: element 0 holds the
+# control words, [cursor, end, the list itself, generation, next chunk size], and the others
+# are the chunks, oldest first. Chunks grow geometrically, so the list's fixed capacity is
+# never reached before memory is. (lib/core/rt.jo calls __arena_alloc and __arena_grow, in
+# programs that use `$allocator` only.)
+const __ARENA_CHUNKS = 64
+const __ARENA_FIRST = 65536
+const __ARENA_LARGEST = 1 << 30
+
+__arena_alloc = (c: *int, size: int, zero: bool) -> *u8:
+    n = (size + 31) & ~15
+    p = c[0]
+    if n > c[1] - p: p = __arena_refill(c, n)
+    c[0] = p + n
+    h = p as *int
+    h[0] = n - 16
+    h[1] = c as int
+    q = (p + 16) as *u8
+    if zero: mem_set(q, 0, n - 16)
+    q
+
+# (memory the arena's own bookkeeping needs comes from the heap, whatever the context)
+__heap_alloc_raw = (size: int) -> *u8:
+    t = __ts()
+    a = t[__TS_ARENA]
+    t[__TS_ARENA] = 0
+    p = __alloc_raw(size)
+    t[__TS_ARENA] = a
+    p
+
+# (a byte array of n bytes, from the heap)
+__arena_bytes = (n: int) -> *int:
+    b = __heap_alloc_raw(24 + n) as *int
+    b[0] = 1
+    b[1] = n
+    b[2] = n
+    b
+
+# (rt.jo's __box_new in programs that use arenas: a box from the heap, whatever the context)
+__arena_box_new = (size: int) -> *u8:
+    t = __ts()
+    a = t[__TS_ARENA]
+    t[__TS_ARENA] = 0
+    p: *u8
+    if size + 8 <= 262144: p = __alloc_raw(max(0, size - 8)) - 16
+    else: p = __alloc_raw(8 + size)
+    (p as *int)[0] = 1
+    t[__TS_ARENA] = a
+    p
+
+# a fresh chunk holding at least n bytes; its first block's address
+@noinline
+__arena_refill = (c: *int, n: int) -> int:
+    list = c[2] as *int
+    if list[1] == list[2]: __out_of_memory()
+    size = c[4]
+    if size < __ARENA_FIRST: size = __ARENA_FIRST
+    if size < n: size = n
+    c[4] = size
+    if size < __ARENA_LARGEST: c[4] = size * 2
+    chunk = __arena_bytes(size)
+    ((list + 3) as **u8)[list[1]] = chunk as *u8
+    list[1] += 1
+    c[1] = chunk as int + 24 + size
+    chunk as int + 24
+
+# a new arena: its list, holding the control words
+__arena_new = () -> *u8:
+    list = __heap_alloc_raw(24 + __ARENA_CHUNKS * 8) as *int
+    list[0] = 1
+    list[1] = 1
+    list[2] = __ARENA_CHUNKS
+    control = __arena_bytes(40)
+    mem_set((control + 3) as *u8, 0, 40)
+    ((list + 3) as **u8)[0] = control as *u8
+    (control + 3)[2] = list as int
+    list as *u8
+
+# the control words of an arena's list
+__arena_control = (list: *u8) -> int: ((list + 24) as **u8)[0] as int + 24
+
+# Every block back at once: the newest chunk (the largest) is kept for the next blocks, the
+# others go back to the heap. Debug builds fill what was handed out with 0xdb first, so a
+# value that wrongly outlived its arena shows itself.
+__arena_reset = (list0: *u8):
+    if list0 == null: return
+    list = list0 as *int
+    n = list[1]
+    if n < 2: return
+    chunks = (list + 3) as **u8
+    c = (chunks[0] + 24) as *int
+    newest = chunks[n - 1] as *int
+    when __ARENA_POISON:
+        mem_set((newest + 3) as *u8, 219, c[0] - (newest as int + 24))
+    i = 1
+    loop i < n - 1:
+        old = chunks[i]
+        when __ARENA_POISON:
+            mem_set(old + 24, 219, (old as *int)[1])
+        __free(old)
+        i += 1
+    chunks[1] = newest as *u8
+    list[1] = 2
+    c[0] = newest as int + 24
+    c[1] = newest as int + 24 + newest[1]
+    c[3] += 1
+
+# An arena's block grows in place when it is its arena's newest and no other thread runs (the
+# arena's own thread is the only one that bumps it); else it moves to a block of the context
+# allocator (another thread's: the heap).
+__arena_grow = (p: *u8, used: int, size: int) -> *u8:
+    h = (p - 16) as *int
+    if size <= h[0]: return p
+    n = (size + 15) & ~15
+    c = h[1] as *int
+    at = p as int
+    if not __mt_active and at + h[0] == c[0] and n <= c[1] - at:
+        c[0] = at + n
+        h[0] = n
+        return p
+    q = __alloc_raw(size)
+    mem_copy(q, p, used)
+    q
+
+# Promotion out of an allocator scope (compiler/arena.jo): a copy of an array's elements (or
+# a string's bytes) in the context allocator's storage. Static data stays where it is.
+__arena_promote_arr = (p: *u8, es: int) -> *u8:
+    if p == null or (p as *int)[0] < 0: return p
+    n = (p as *int)[1]
+    q = __arr_new_raw(n, es)
+    (q as *int)[1] = n
+    mem_copy(q + 24, p + 24, n * es)
+    q
+
+__arena_promote_str = (p: *u8) -> *u8:
+    if p == null or (p as *int)[0] < 0: return p
+    n = (p as *int)[1]
+    q = __str_new(n)
+    mem_copy(q + 24, p + 24, n)
+    q
+

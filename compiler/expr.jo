@@ -19,6 +19,7 @@ use 'facts.jo'
 use 'refine.jo'
 use 'proofs.jo'
 use 'effects.jo'
+use 'arena.jo'
 use 'reflection.jo'
 use 'prelude.jo'
 use 'ide.jo'
@@ -32,10 +33,10 @@ enum IN:
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
     read_fields, default_init, offset_unit, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
     static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem, lend, loan_address, loan_load, loan_store, loan_length,
-    zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration, wrap_bits
+    zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration, wrap_bits, arena_result
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
-enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big, set_text
+enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big, set_text, promote
 
 struct Intrinsic:
     name: str
@@ -44,6 +45,7 @@ struct Intrinsic:
 
 intrinsics = [
     Intrinsic("$lend", .lend, false),
+    Intrinsic("$allocator_result", .arena_result, false),
     Intrinsic("__load_i64__", .loan_address, false),
     Intrinsic("__load_u8__", .loan_load, false),
     Intrinsic("__store_u8__", .loan_store, false),
@@ -5575,6 +5577,9 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
     if id == .task_report:
         nargs_check(n, nargs, 2, 2, "__task_report")
         return concurrency_report(n, args)
+    if id == .arena_result:
+        nargs_check(n, nargs, 2, 2, "$allocator_result")
+        return arena_check_result(n, args[0], arg_type(args, 0, expected), nodes[args[1]].ival != 0)
     if id == .lend:
         nargs_check(n, nargs, 3, 3, "$lend")
         if has_flag(args[0], NF_MUT): add_flag(n, NF_MUT)

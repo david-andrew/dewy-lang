@@ -1,0 +1,531 @@
+# Scoped allocators (docs/LANGUAGE.md, "Scoped allocators"; docs/design/ownership.md,
+# "Arena placement, escape and runtime").
+#
+# `$allocator(@arena) expression` is projected (dewy_parse.jo, dw_allocator) into
+#     { let c=__arena_enter(@arena)  let v=expression  __arena_leave(c)  $allocator_result(v) }
+# While it runs, the arena is the thread's context allocator (lib/core/rt.jo, __TS_ARENA):
+# every allocation bumps its cursor. `$allocator_result(v)` becomes a promotion (a `.conv`
+# node, CV.promote): a deep copy of v made after the context is restored, so the value
+# leaving the scope holds only storage of the enclosing allocator, never an rc increment
+# of resettable bytes. What else the expression makes dies inside it: the escape check
+# below proves, from the scope's own facts, that nothing it allocates can be reached after
+# it ends, so reset needs no runtime check.
+use 'util.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'ir.jo'
+use 'lower.jo'
+use 'places.jo'
+use 'effects.jo'
+use 'ownership.jo'
+use 'isolation.jo'
+use 'math_lower.jo'
+use 'units.jo'
+use 'directives.jo'
+
+# function instances holding an allocator scope: the only ones the escape check visits
+arena_fns: {int: bool} = {}
+arena_runtime_ready = false
+arena_lambda_depth = 0       # (the escape check is inside a closure's body)
+
+arena_enabled = false
+
+# The runtime's allocator consults the context allocator only in programs that use arenas:
+# its `when __ARENAS:` branches (lib/core/rt.jo) are switched on before any body is checked.
+arena_enable = ():
+    arena_enabled = true
+
+# (once the modules are registered, before bodies are checked)
+arena_switch_runtime = ():
+    loop name in ["__ARENAS", "__ARENA_POISON"]:
+        id = intern(name)
+        demand_name(id)
+        s = prelude.get(id) ?? 0
+        if s == 0 or syms[s].kind != .const_: ice("missing runtime constant {name}")
+        value = int(nodes[int(syms[s].decl)].b)
+        if nodes[value].kind != .bool_lit: ice("runtime constant {name} is not a literal")
+        if name == "__ARENAS" or not release_build: nodes[value].ival = 1
+
+arena_reset = ():
+    arena_fns = {}
+    arena_runtime_ready = false
+    arena_enabled = false
+    arena_lambda_depth = 0
+
+# What can leave a scope: values whose storage promotion can rebuild. Closures keep their
+# captures in an environment laid out per function, so a closure made in the scope stays
+# there; resource owners need a checked move (ownership.md), and raw pointers have no owner.
+arena_unpromotable = (t0: int, depth: int = 0) -> str:
+    t = quantity_base(t0)
+    if depth > 32 or not is_managed(t) and tkind(t) != .ptr: return ""
+    if ownership_type(t): return "a resource owner ({type_str(t)})"
+    k = types[t].kind
+    if k == .fn_ or k == .polyfn or k == .callable: return "a function value ({type_str(t)})"
+    if k == .ptr: return "a raw pointer ({type_str(t)})"
+    if k == .array or k == .box or k == .opt or k == .fixed: return arena_unpromotable(int(types[t].elem), depth + 1)
+    if k == .struct_ or k == .tuple:
+        loop field in field_list(t):
+            why = arena_unpromotable(field.0, depth + 1)
+            if why != "": return why
+    if k == .enum_:
+        layout(t)
+        si = int(types[t].st)
+        loop v in [0..int(structs[si].nvariants)):
+            vi = int(structs[si].variants) + v
+            loop i in [0..int(variants[vi].nfields)):
+                why = arena_unpromotable(field_store_type(int(variants[vi].fields) + i), depth + 1)
+                if why != "": return why
+    ""
+
+# `$allocator_result(v)`: the scope's value, promoted to the enclosing allocator.
+# Under `$explicit_copies` the copy out is a costly copy like any other (strings included:
+# their bytes leave the arena), so the expression's value says so: `... .copy()`.
+arena_check_result = (n: int, value: int, t: int, asked: bool) -> int:
+    why = arena_unpromotable(t)
+    if why != "": fatal(nodes[n].pos, "the value of an `$allocator` expression leaves its arena, and {why} cannot be copied out of it yet: return plain data (records, arrays, strings, numbers)")
+    if not asked and is_managed(t) and dir_explicit_copies(nodes[n].pos):
+        fatal(nodes[n].pos, "under `$explicit_copies`, the value of an `$allocator` expression is copied out of its arena: end the expression with `.copy()` to ask for the copy")
+    if not arena_runtime_ready:
+        arena_runtime_ready = true
+        loop name in ["__arena_promote_arr", "__arena_promote_str", "__box_new"]:
+            runtime_fn(name)
+    arena_fns[if cx >= 0: int(ctxs[cx].inst) else: 0] = true
+    nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(value), aux = i32(int(CV.promote)), type = i32(t), flags = i32(NF_CHECKED))
+    last_checked = n
+    t
+
+# ---------------- promotion ----------------
+# The scope's value v, copied into storage of the (now restored) context allocator. The
+# source is released as an ordinary temporary: its arena blocks give nothing back.
+arena_gen_promote = (e: int) -> Val:
+    a = int(nodes[e].a)
+    t = prune(ntype(e))
+    value = gen_expr(a)
+    if not is_managed(t): return value
+    slot = new_temp(t)
+    addr = e_slot(slot)
+    if vc(t) == VC_AGG: e_copy(addr, value.v, tsize(t))
+    else: store_val(t, addr, 0, value.v)
+    e_call1(lf_helper(.promote, t, 0), addr, -1)
+    borrow(value, t)
+    if vc(t) == VC_AGG: return Val(addr, true, slot)
+    V(load_val(t, addr, 0), true)
+
+arena_promote_at = (addr: int, t0: int):
+    t = quantity_base(t0)
+    if is_managed(t): e_call1(lf_helper(.promote, t, 0), addr, -1)
+
+# (an array or string at p, its elements' storage still the source's: copied, then each
+# managed element promoted in turn)
+arena_promote_buffer = (a: int, t: int):
+    k = types[t].kind
+    p = e_load(VI, a, 0, ptr_size)
+    if k == .str_:
+        e_store(a, 0, e_call1(rt("__arena_promote_str"), p, VI), ptr_size)
+        return
+    et = int(types[t].elem)
+    stride = owner_stride(et)
+    q = e_call2(rt("__arena_promote_arr"), p, e_iconst(stride), VI)
+    e_store(a, 0, q, ptr_size)
+    if not is_managed(et): return
+    # (static data, not copied, holds static data only: its elements stay too)
+    iff(e_bin(.ne, VI, q, p))
+    n = hdr_load(q, 8)
+    i = vreg(VI)
+    e_mov(i, e_iconst(0))
+    blk()
+    lop()
+    brif_to(e_bin(.ges, VI, i, n), ctl - 1)
+    arena_promote_at(e_bin(.add, VI, e_addi(q, 24), e_bin(.mul, VI, i, e_iconst(stride))), et)
+    e_mov(i, e_addi(i, 1))
+    br_to(ctl)
+    endc()
+    endc()
+    endc()
+
+# HK.promote: the value at the address, made independent of every arena, in place.
+helper_promote = (t: int):
+    ps = helper_params(1)
+    a = ps[0]
+    k = types[t].kind
+    if types[t].rep == .tagged_int or math_optional(t):
+        # (an arbitrary-precision integer: a word, or a tagged pointer to its digits)
+        v = e_load(VI, a, 0, 8)
+        if math_optional(t): v = e_bin(.xor, VI, v, e_iconst(1))
+        iff(e_bin(.and_, VI, math_tag(v), e_bin(.ne, VI, v, e_iconst(1))))
+        digits = e_slot(new_temp(math_payload_type()))
+        e_store(digits, 0, e_addi(v, -1), 8)
+        arena_promote_buffer(digits, math_payload_type())
+        w = e_addi(e_load(VI, digits, 0, 8), 1)
+        if math_optional(t): w = e_bin(.xor, VI, w, e_iconst(1))
+        e_store(a, 0, w, 8)
+        endc()
+    else if k == .str_ or k == .array:
+        arena_promote_buffer(a, t)
+    else if k == .box:
+        et = int(types[t].elem)
+        p = e_load(VI, a, 0, ptr_size)
+        iff(e_bin(.ne, VI, p, e_iconst(0)))
+        q = e_call1(rt("__box_new"), e_iconst(tsize(et)), VI)
+        e_copy(e_addi(q, BOX_HDR), e_addi(p, BOX_HDR), tsize(et))
+        arena_promote_at(e_addi(q, BOX_HDR), et)
+        e_store(a, 0, q, ptr_size)
+        endc()
+    else if k == .opt:
+        inner = int(types[t].elem)
+        iff(e_bin(.ne, VI, opt_has(a, inner), e_iconst(0)))
+        arena_promote_at(a, inner)
+        endc()
+    else if k == .enum_:
+        si = int(types[t].st)
+        layout(t)
+        tag = e_load(VI, a, 0, 4)
+        loop v in [0..int(structs[si].nvariants)):
+            vi = int(structs[si].variants) + v
+            any = false
+            loop i in [0..int(variants[vi].nfields)):
+                if is_managed(field_store_type(int(variants[vi].fields) + i)): any = true
+            if not any: continue
+            iff(e_bin(.eq, VI, tag, e_iconst(v)))
+            loop i in [0..int(variants[vi].nfields)):
+                f = int(variants[vi].fields) + i
+                arena_promote_at(e_addi(a, int(fields[f].offset)), field_store_type(f))
+            endc()
+    else if k == .fixed:
+        et = int(types[t].elem)
+        if is_managed(et):
+            i = fixed_loop_begin(t)
+            arena_promote_at(fixed_elem_addr(a, i, et), et)
+            fixed_loop_end(i)
+    else if k == .struct_ or k == .tuple:
+        loop field in field_list(t): arena_promote_at(e_addi(a, field.1), field.0)
+    else: ice("promotion of {type_str(t)} out of an allocator scope")
+    e_ret(-1)
+
+# ---------------- the escape check ----------------
+# Demanded: it walks only the function instances holding an allocator scope (arena_fns), once
+# each, O(their nodes) plus one effect summary per distinct callee (effects.jo, memoized). The
+# scope's facts carry the proof. Its value is promoted; everything else it allocates is held
+# by its own locals and temporaries, which die inside it, unless the expression publishes
+# storage outward. So, inside a scope:
+#   - a write to a place declared outside it (a local of an enclosing scope or the function,
+#     a parameter, a capture, a global) may store only plain data, through record fields:
+#     never managed values, nor through an array or string, whose detach or growth would
+#     allocate the place's new buffer in the arena;
+#   - a call may not reach such a place either: its arguments `@place` follow the same rule,
+#     and its transitive summary may not write globals or captures, spawn work, escape, or be
+#     opaque; a call through a function value has no summary and is rejected;
+#   - `return`, and `break`/`continue` to a loop outside it, would skip the promotion;
+#   - the lent arena itself cannot be read, reset, copied or lent again.
+# Anything the check cannot prove is rejected with its reason; it never guesses a placement.
+struct ArenaScope:
+    context: int      # the scope's context local: the locals declared after it are the scope's
+    arena: int        # the lent arena's local (0: not a local)
+    loops: int        # loops entered inside the scope
+
+arena_stack: ArenaScope[]
+arena_enter_decl = 0
+
+arena_error = (n: int, reason: str):
+    fatal(nodes[n].pos, "`$allocator`: {reason}")
+
+# The projected block's first statement, `let c=__arena_enter(@arena)`, or 0.
+arena_scope_start = (b: int) -> int:
+    if nkids(b) != 4: return 0
+    d = kid(b, 0)
+    if nodes[d].kind != .vardecl: return 0
+    c = int(nodes[d].b)
+    if c == 0 or nodes[c].kind != .call or nodes[c].aux != 0 or nodes[c].sym <= 0: return 0
+    if int(fns[int(nodes[c].sym)].decl) != arena_enter_decl: return 0
+    d
+
+struct ArenaRoot:
+    local: int        # the root local (0 when not a local)
+    outside: bool     # declared outside the innermost scope (or not known to be inside)
+    buffer: bool      # reached through an array, string or other detachable buffer
+    name: str = ""
+
+arena_root = (e0: int) -> ArenaRoot:
+    e = e0
+    buffer = false
+    loop depth in [0..64):
+        k = nodes[e].kind
+        if k == .addr or k == .unwrap or k == .narrow or k == .field:
+            e = int(nodes[e].a)
+            continue
+        if k == .index:
+            buffer = true
+            e = int(nodes[e].a)
+            continue
+        if k == .ident:
+            p = place_scalar_root(e)
+            if p.root == .local and p.declaration > 0:
+                l = p.declaration
+                inside = arena_stack.len() > 0 and l > arena_stack[arena_stack.len() - 1].context
+                # (a loop's `mut` element stands for an element of another place)
+                if int(locals[l].flags) & (LF_ELEMALIAS | LF_SOAELEM | LF_BYREF | LF_CAPTURE | LF_PARAM) != 0:
+                    inside = false
+                    buffer = true
+                return ArenaRoot(l, not inside, buffer, name_of(int(locals[l].name)))
+            if p.root == .global and p.declaration > 0: return ArenaRoot(0, true, buffer, name_of(int(globals[p.declaration].name)))
+        break
+    ArenaRoot(0, true, true)
+
+# (an Arena is storage of the heap, and copies of it are other arenas: lib/std/arena.jo)
+arena_handle = (t0: int) -> bool:
+    t = prune(t0)
+    if tkind(t) != .struct_: return false
+    si = int(types[t].st)
+    d = int(structs[si].decl)
+    structs[si].name == "Arena" and d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/arena.jo"
+
+# A write of a value of type t to the place e, inside the innermost scope.
+arena_store = (n: int, e: int, t: int):
+    r = arena_root(e)
+    if not r.outside: return
+    loop scope in arena_stack:
+        if r.local != 0 and scope.arena == r.local: arena_lent(n, r.local)
+    if not r.buffer and (not is_managed(t) or arena_handle(t)): return
+    what = if r.name != "": "`{r.name}`" else: "a place"
+    arena_error(n, "this changes {what}, declared outside the expression, and could leave storage of the arena in it, which its reset would invalidate: make the change after the expression, from its value")
+
+arena_lent = (n: int, l: int):
+    arena_error(n, "`{name_of(int(locals[l].name))}` is lent to the expression: it cannot be used, reset or lent again inside it")
+
+arena_mention = (n: int):
+    if nodes[n].aux != i32(int(SK.local)): return
+    l = int(nodes[n].sym)
+    loop scope in arena_stack:
+        if scope.arena == l: arena_lent(n, l)
+
+arena_mutators = (id: IN) -> bool:
+    id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend or id == .setlen or id == .fill or id == .lend
+
+# ---------------- what a call keeps ----------------
+# A callee keeps storage of the arena past the expression only by writing it somewhere the
+# expression's locals do not own: a managed global (or a global's buffer), a closure's shared
+# capture, or an `@` place its caller passed (checked at the expression's own call sites,
+# where the place is known). Its locals, by-value parameters (copy on write) and results are
+# its own or its caller's. A call through a function value runs an unknown body, unless the
+# function is the callee's parameter: then the caller's argument is checked instead. Raw
+# memory and foreign calls could keep anything, except in the bundled library, which is
+# reviewed source: its raw code (the allocator, output buffers, the system's calls) copies
+# what it is given; its global writes are checked like a program's. Starting a thread or a
+# task is never trusted: the work could outlive the expression.
+# Summaries are demanded from the expression's direct calls, computed once per function
+# instance over its body and its callees' (O(their nodes)), memoized; recursion is settled
+# by depth (a component's members are memoized only as a whole).
+arena_keep_state: {int: int} = {}      # instance -> 2 keeps nothing, 3 may keep (its witness in arena_keep_witness)
+arena_keep_witness: {int: int} = {}
+arena_keep_depth: {int: int} = {}      # instances being summarized -> their depth
+arena_keep_low = 0                     # the lowest depth of an unsettled instance reached
+
+arena_trusted = (n: int) -> bool: pos_in_lib(nodes[n].pos)
+
+# (the first write or call in f's own body that could keep storage; callees are collected)
+arena_keep_scan = (f: int, n: int, callees: mut int[]) -> int:
+    if n == 0: return 0
+    k = nodes[n].kind
+    if k == .lambda: return 0
+    bad = 0
+    if k == .assign: bad = arena_keep_store(f, int(nodes[n].a), n)
+    else if k == .intrinsic:
+        id = nodes[n].aux as IN
+        if arena_mutators(id) and nkids(n) > 0: bad = arena_keep_store(f, kid(n, 0), n)
+        # (work started elsewhere could still hold the expression's storage after it ends)
+        else if id == .clone_thread or id == .task_report or id == .task_data: bad = n
+        else if (id == .setjmp or id == .longjmp or id == .jump or id == .callc or id == .wasm_call or id == .compute or id == .compute_spirv or id == .compute_textures or id == .gpu_kernel or id == .memcpy or id == .memset or id == .syscall) and not arena_trusted(n): bad = n
+    else if k == .call:
+        aux = int(nodes[n].aux)
+        if aux == 0 and nodes[n].sym > 0:
+            g = int(nodes[n].sym)
+            d = int(fns[g].decl)
+            if d == 0 or has_flag(d, NF_EXTERN) or fns[g].cabi:
+                if not arena_trusted(n): bad = n
+            else: callees.push(g)
+        else if aux == 1:
+            callee = int(nodes[n].a)
+            formal = nodes[callee].kind == .ident and nodes[callee].aux == i32(int(SK.local)) and int(locals[int(nodes[callee].sym)].flags) & LF_PARAM != 0
+            if not formal: bad = n
+    else if (k == .index or k == .field) and tkind(ntype(int(nodes[n].a))) == .ptr and not arena_trusted(n): bad = n
+    if bad != 0: return bad
+    mask = isolation_children(k)
+    if mask < 0: return if arena_trusted(n): 0 else: n
+    if mask & 1 != 0: bad = arena_keep_scan(f, int(nodes[n].a), callees)
+    if bad == 0 and mask & 2 != 0: bad = arena_keep_scan(f, int(nodes[n].b), callees)
+    if bad == 0 and mask & 4 != 0: bad = arena_keep_scan(f, int(nodes[n].c), callees)
+    if bad == 0 and mask & 16 != 0:
+        loop child in kids(n):
+            bad = arena_keep_scan(f, child, callees)
+            if bad != 0: break
+    bad
+
+# A write in a callee's body to the place e: its own locals and `@` parameters are fine.
+arena_keep_store = (f: int, e0: int, n: int) -> int:
+    e = e0
+    buffer = false
+    loop depth in [0..64):
+        k = nodes[e].kind
+        if k == .addr or k == .unwrap or k == .narrow or k == .field:
+            if k == .field and tkind(ntype(int(nodes[e].a))) == .ptr: return if arena_trusted(n): 0 else: n
+            e = int(nodes[e].a)
+            continue
+        if k == .index:
+            if tkind(ntype(int(nodes[e].a))) == .ptr: return if arena_trusted(n): 0 else: n
+            buffer = true
+            e = int(nodes[e].a)
+            continue
+        break
+    if nodes[e].kind != .ident: return n
+    if nodes[e].aux == i32(int(SK.global)):
+        g = int(nodes[e].sym)
+        if buffer or is_managed(int(globals[g].type)): return n
+        return 0
+    if nodes[e].aux != i32(int(SK.local)): return n
+    l = int(nodes[e].sym)
+    flags = int(locals[l].flags)
+    if flags & LF_CAPTURE != 0 and flags & LF_VALUECAP == 0: return n
+    if flags & (LF_ELEMALIAS | LF_SOAELEM | LF_BYREF | LF_ALIAS) != 0:
+        a = int(locals[l].alias)
+        if a == 0: return n
+        return arena_keep_store(f, a, n)
+    0
+
+# 0 when f keeps no storage of a caller's arena; else the witness node.
+arena_keeps = (f: int, depth: int = 0) -> int:
+    state = arena_keep_state.get(f) ?? 0
+    if state == 2: return 0
+    if state == 3: return arena_keep_witness[f]
+    if let at = arena_keep_depth.get(f):
+        arena_keep_low = min(arena_keep_low, at)
+        return 0
+    if fns[f].body == 0 or fns[f].state != 2:
+        arena_keep_state[f] = 3
+        arena_keep_witness[f] = int(fns[f].decl)
+        return int(fns[f].decl)
+    arena_keep_depth[f] = depth
+    saved_low = arena_keep_low
+    arena_keep_low = depth
+    callees: int[]
+    bad = arena_keep_scan(f, int(fns[f].body), callees)
+    loop g in callees:
+        if bad != 0: break
+        if arena_keeps(g, depth + 1) != 0: bad = arena_keep_call_site(f, g)
+    arena_keep_depth.remove(f)
+    if bad != 0:
+        arena_keep_state[f] = 3
+        arena_keep_witness[f] = bad
+    else if arena_keep_low >= depth: arena_keep_state[f] = 2
+    arena_keep_low = min(saved_low, arena_keep_low)
+    bad
+
+# (the call of g in f's body: the witness that f may keep storage, through g)
+arena_keep_call_site = (f: int, g: int) -> int:
+    w = arena_keep_witness.get(g) ?? int(fns[g].decl)
+    if w == 0: w = int(fns[f].decl)
+    w
+
+arena_summary = (n: int, f: int):
+    w = arena_keeps(f)
+    if w == 0: return
+    where = if w > 0 and w < nodes.len(): " (at {pos_str(nodes[w].pos)})" else: ""
+    arena_error(n, "`{effect_name(f)}` may keep storage of the arena where the expression's reset cannot see it{where}")
+
+arena_call = (n: int):
+    aux = int(nodes[n].aux)
+    if aux == 2 or aux == 3: return
+    if aux != 0 or nodes[n].sym <= 0: arena_error(n, "a call through a function value has no checked summary of what it keeps")
+    f = int(nodes[n].sym)
+    # (an `@place` argument: the callee may write it, as the expression would)
+    loop i in [0..nkids(n)):
+        arg = kid(n, i)
+        if i < fns[f].params.len() and int(locals[fns[f].params[i]].flags) & LF_MUTPARAM != 0: arena_store(arg, arg, ntype(arg))
+    if type_has_fn(ntype(n)): arena_error(n, "a function value made by `{effect_name(f)}` has no checked summary of what it keeps")
+    arena_summary(n, f)
+
+# Function values: whatever calls one inside the expression (a library loop, a callback)
+# runs its body there, unseen by the call's summary. A closure made inside the expression is
+# checked as part of it, capturing only snapshots; one made elsewhere has an unknown body.
+
+arena_function_value = (n: int):
+    k = nodes[n].kind
+    if k == .lambda:
+        f = int(nodes[n].sym)
+        if has_flag(n, NF_GENERIC) or f <= 0: arena_error(n, "a generic function value is not checked inside an allocator expression yet")
+        loop cap in fns[f].caps:
+            if int(locals[int(cap.inner)].flags) & LF_VALUECAP == 0: arena_error(n, "a closure that changes `{name_of(int(locals[int(cap.inner)].name))}` could leave storage of the arena in it: change it after the expression")
+        arena_lambda_depth += 1
+        arena_visit(int(fns[f].body))
+        arena_lambda_depth -= 1
+        return
+    if k == .fnref and nodes[n].aux == 0 and nodes[n].sym > 0:
+        arena_summary(n, int(nodes[n].sym))
+        return
+    arena_error(n, "a function value made outside the expression has no checked summary of what it keeps")
+
+arena_visit = (n: int):
+    if n == 0: return
+    k = nodes[n].kind
+    active = arena_stack.len() > 0
+    if k == .lambda:
+        if active: arena_function_value(n)
+        return
+    if k == .block:
+        d = arena_scope_start(n)
+        if d != 0:
+            arena_scope(n, d)
+            return
+    if active:
+        if k == .ident:
+            arena_mention(n)
+            if type_has_fn(ntype(n)) and arena_root(n).outside: arena_error(n, "a function value made outside the expression has no checked summary of what it keeps")
+        else if k == .fnref or k == .partial: arena_function_value(n)
+        else if arena_lambda_depth > 0 and (k == .return_ or k == .break_ or k == .continue_): pass
+        else if k == .return_: arena_error(n, "`return` would leave the expression before its value is copied out: give the value as the expression's result")
+        else if k == .break_ or k == .continue_:
+            if int(nodes[n].ival) >= arena_stack[arena_stack.len() - 1].loops: arena_error(n, "this leaves the expression before its value is copied out: end the loop outside it")
+        else if k == .assign: arena_store(n, int(nodes[n].a), ntype(int(nodes[n].a)))
+        else if k == .intrinsic:
+            id = nodes[n].aux as IN
+            if arena_mutators(id) and nkids(n) > 0: arena_store(n, kid(n, 0), ntype(kid(n, 0)))
+            if id == .setjmp or id == .longjmp or id == .jump or id == .clone_thread or id == .task_report or id == .task_data:
+                arena_error(n, "this intrinsic leaves the expression's control or thread")
+        else if k == .call: arena_call(n)
+    looping = k == .while_ or k == .for_
+    if active and looping: arena_stack[arena_stack.len() - 1].loops += 1
+    mask = isolation_children(k)
+    if mask < 0:
+        if active: arena_error(n, "this construct is not checked inside an allocator expression yet")
+        return
+    if mask & 1 != 0: arena_visit(int(nodes[n].a))
+    if mask & 2 != 0: arena_visit(int(nodes[n].b))
+    if mask & 4 != 0: arena_visit(int(nodes[n].c))
+    if mask & 16 != 0:
+        loop child in kids(n): arena_visit(child)
+    if active and looping: arena_stack[arena_stack.len() - 1].loops -= 1
+
+# { let c=__arena_enter(@arena)  let v=expression  __arena_leave(c)  $allocator_result(v) }
+arena_scope = (b: int, d: int):
+    enter = int(nodes[d].b)
+    place = kid(enter, 0)
+    arena_visit(place)
+    lent = arena_root(place)
+    loop scope in arena_stack:
+        if lent.local != 0 and scope.arena == lent.local: arena_error(place, "this arena is already lent to an enclosing `$allocator` expression")
+    arena_stack.push(ArenaScope(int(nodes[d].sym), lent.local, 0))
+    arena_visit(kid(b, 1))
+    arena_stack.pop()
+    arena_visit(kid(b, 2))
+    arena_visit(kid(b, 3))
+
+arena_finalize = ():
+    if arena_fns.len() == 0: return
+    arena_enter_decl = int(fns[runtime_fn("__arena_enter")].decl)
+    arena_keep_state = {}
+    arena_keep_witness = {}
+    arena_keep_depth = {}
+    loop f, _ in arena_fns:
+        arena_stack = []
+        arena_visit(int(fns[f].body))

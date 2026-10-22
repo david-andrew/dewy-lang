@@ -1,0 +1,29 @@
+# quick
+# Separate arenas nest: the inner value is promoted into the outer arena, the
+# outer value into the heap; both survive both resets. A copy of an arena is
+# another arena: resetting it leaves the original's values alone.
+Packet:type=[id:int64 values:array<int64>]
+build=(n:int64):>Packet=>{
+    let values:array<int64>=[]
+    loop i in [0..n) { values.push(i*i) }
+    return Packet[n values]
+}
+main=()=>{
+    let outer=Arena[]
+    let inner=Arena[]
+    let p=$allocator(@outer) {
+        let q=$allocator(@inner) build(6)
+        inner.reset()
+        let extra=build(3)
+        Packet[q.id+extra.id [q.values... extra.values...]]
+    }
+    outer.reset()
+    inner.reset()
+    let copy=outer
+    let r=$allocator(@outer) {
+        let kept=build(4)
+        copy.reset()
+        kept
+    }
+    printl("{p.id} {p.values} {r.values}")
+}

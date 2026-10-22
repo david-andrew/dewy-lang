@@ -1,0 +1,20 @@
+# quick
+# Inside the expression: scalar changes outside it, loops with their own breaks,
+# printing, closures over snapshots, top-level scripts.
+let scratch=Arena[]
+let total:int64=0
+let parts=$allocator(@scratch) {
+    let out:array<string>=[]
+    loop i in [0..10) {
+        if i =? 4 break
+        total+=i
+        out.push("p{i}")
+    }
+    printl("inside {out.length}")
+    out
+}
+let prefix="q"
+let numbers:array<int64>=[1 2 3]
+let mapped=$allocator(@scratch) numbers.map((x:int64)=>"{prefix}{x}")
+scratch.reset()
+printl("{parts} {total} {mapped}")

@@ -54,11 +54,12 @@ __tid = () -> int:
 # ---------------- low level memory ----------------
 # per-thread allocator state: [heap_cur, heap_end, live count, free list heads (64 size classes),
 # large blocks freed for reuse (a list), the bytes in that list, boxes waiting to be dropped (a
-# list, its length and capacity), a box being dropped]
-const __TS_WORDS = 79
+# list, its length and capacity), a box being dropped, the context allocator]
+const __TS_WORDS = 80
 const __TS_OWNERS = 76
 const __TS_DROPPING = 77
 const __TS_FILE_CODE = 78     # (while tasks run: this thread's or task's last file error)
+const __TS_ARENA = 79         # (the context allocator: an arena's control words, or 0 for the heap)
 # Task stacks (lib/std/tasks.jo sets them when tasks start): a task's thread state is its slot's
 const __TASK_SLOTS = 16384
 const __TASK_SHIFT = 23
@@ -218,6 +219,9 @@ __alloc_raw = (size: int) -> *u8: __alloc_z(size, false)
 __alloc_z = (size: int, zero: bool) -> *u8:
     n = size + 16
     t = __ts()
+    # (only programs that use `$allocator` ask which allocator is the context's)
+    when __ARENAS:
+        if t[__TS_ARENA] != 0: return __arena_alloc(t[__TS_ARENA] as *int, size, zero)
     if t == __ts_foreign: return __alloc_foreign(size, zero)
     if n <= 262144:
         c = __size_class(n)
@@ -285,8 +289,9 @@ __free = (p: *u8):
     if t == __ts_foreign:
         __free_foreign(h)
         return
-    if h[1] == -1:
-        __free_big(h)
+    if h[1] != 0:
+        # (a large block; an arena's gives nothing back)
+        if h[1] == -1: __free_big(h)
         return
     t[2] -= 1
     c = h[0]
@@ -298,8 +303,8 @@ __free = (p: *u8):
 __free_foreign = (h: *int):
     lk = &__ts_lock
     loop __atomic_cas(lk, 0, 1) != 0: pass
-    if h[1] == -1:
-        __free_big(h)
+    if h[1] != 0:
+        if h[1] == -1: __free_big(h)
         __atomic_cas(lk, 1, 0)
         return
     t = __ts_foreign
@@ -349,7 +354,10 @@ __big_take = (t: *int, total: int) -> *int:
 # remapped in place (no copy); small ones stay put if their size class has room.
 __grow_alloc = (p: *u8, used: int, size: int) -> *u8:
     h = (p - 16) as *int
-    if h[1] == -1: return __grow_big(p, used, size)
+    if h[1] != 0:
+        when __ARENAS:
+            if h[1] != -1: return __arena_grow(p, used, size)
+        return __grow_big(p, used, size)
     if size + 16 <= 32 << h[0]: return p
     q = __alloc_raw(size)
     mem_copy(q, p, used)
@@ -379,7 +387,9 @@ __grow_big = (p: *u8, used: int, size: int) -> *u8:
 # usable bytes of an allocation
 __alloc_size = (p: *u8) -> int:
     h = (p - 16) as *int
-    if h[1] == -1: return h[0] - 16
+    if h[1] != 0:
+        if h[1] == -1: return h[0] - 16
+        return h[0]
     (32 << h[0]) - 16
 
 __free_obj = (p: *u8):
@@ -432,6 +442,17 @@ __mem_eq = (a: *u8, b: *u8, n: int) -> bool:
     if n > 0: return a[0] == b[0]
     true
 
+# ---------------- arenas ----------------
+# `$allocator(@arena) expression` makes an arena the thread's context allocator (__TS_ARENA)
+# while the expression runs: lib/std/arena.jo. An arena's blocks keep the allocator's two
+# header words: the block's size and the arena's control words, which no heap block's second
+# word can be (0 there, -1 for a large block). Freeing such a block gives nothing back: the
+# arena's reset does, for all of them at once.
+# (true only in programs that use `$allocator`, and poisoning only in their debug builds:
+# compiler/arena.jo, arena_switch_runtime)
+const __ARENAS = false
+const __ARENA_POISON = false
+
 # ---------------- boxes ----------------
 # A field whose type holds the struct or enum it is in (struct Node: next: Node?) keeps its value
 # in a box, [rc][value...] (lower.jo). Dropping a box's value may drop the boxes in it: on each
@@ -441,6 +462,10 @@ __box_new = (size: int) -> *u8:
     # Small boxes know their size at every drop site, so the allocator's two
     # header words can hold the reference count and the start of the value.
     # Keep large allocations' headers: a reused block may exceed this request.
+    # (a box's header words are its own, so it never comes from an arena: the
+    # promotion out of an allocator scope copies it)
+    when __ARENAS:
+        return __arena_box_new(size)
     p: *u8
     if size + 8 <= 262144: p = __alloc_raw(max(0, size - 8)) - 16
     else: p = __alloc_raw(8 + size)
@@ -615,6 +640,9 @@ __exit_raw = (code: int):
         syscall(231, code)
 
 __panic = (msg: str):
+    # (what runs after a panic, as the prompt's next input, allocates from the heap again)
+    when __ARENAS:
+        __ts()[__TS_ARENA] = 0
     __owner_unwind()
     __write_err("panic: ")
     # (a check inside the library has no location of its own: "{loc}: ..." with loc "")
