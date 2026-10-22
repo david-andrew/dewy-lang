@@ -178,6 +178,7 @@ rel_finish = ():
     ir.code = o_licm(ir.code)
 
 emit_now = (finish: bool):
+    icb = ic_phase(IC_OPT)
     if finish: rel_finish()
     else if not opt_release and not dbg_on:
         # Tiny leaves expand before the local pass; short array/float kernels
@@ -186,6 +187,7 @@ emit_now = (finish: bool):
         if not watch_build and not repl_image: fast_inline_into()
         optimize()
         if not watch_build and not repl_image: fast_vectorize()
+    ic_restore(icb)
     if host_ir:
         dump_host_ir()
         return
@@ -215,6 +217,7 @@ dump_host_ir = ():
 
 # release builds: optimize everything, inline small functions, optimize callers again, emit
 release_pipeline = ():
+    icb = ic_phase(IC_OPT)
     rt0 = time()
     loop k in [0..rel_fns.len()):
         ir = rel_fns[k]
@@ -235,6 +238,7 @@ release_pipeline = ():
             snap[k] = ir
             can[k] = inlinable(ir)
     rt2 = time()
+    ic_restore(icb)
     loop k in [0..snap.len()):
         ir = snap[k]
         if queue_emit:

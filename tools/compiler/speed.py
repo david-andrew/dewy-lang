@@ -351,6 +351,74 @@ def time_run(toolchain: Toolchain, source: str) -> str:
     return run.stderr
 
 
+# Track B0's cost model: each phase's instructions (root, library and shared work alike) per root
+# syntax node on the flagship panel, against David's budgets (250k lines/s at ~20 nodes a line and
+# 6.3 G instructions/s is ~1.2k instructions a node). (row, build --time phases, budget per node)
+PHASE_BUDGETS = [('lex+parse', ('load',), 150), ('resolve+check', ('check',), 350),
+                 ('facts', ('facts',), None), ('effects', ('effects',), None),
+                 ('facts+effects', ('facts', 'effects'), 200), ('ownership', ('ownership',), None),
+                 ('lower+codegen', ('lower', 'codegen', 'other'), 450), ('optimizer', ('optimize',), 50)]
+NODES = re.compile(r'^nodes: root (\d+)', re.MULTILINE)
+
+
+def phase_totals(toolchain: Toolchain, sources: list[str]) -> tuple[dict[str, int], int] | None:
+    """Each build --time phase's instructions, all sides, summed over sources, and their root nodes;
+    None for a compiler without the phase split."""
+    totals: dict[str, int] = {}
+    nodes = 0
+    for source in sources:
+        report = time_run(toolchain, source)
+        split = speed_corpus.instruction_split(report)
+        found = NODES.search(report)
+        if not split or not found or not any('optimize' in side for side in split.values()):
+            return None
+        nodes += int(found.group(1))
+        for name, side in split.items():
+            for phase, n in side.items():
+                if phase != 'total':
+                    totals[phase] = totals.get(phase, 0) + n
+                    if name == 'root':
+                        totals['root ' + phase] = totals.get('root ' + phase, 0) + n
+    return totals, nodes
+
+
+def cost_model(candidate: Toolchain, base: Toolchain | None, limit: float) -> list[tuple[str, float]]:
+    """The flagship panel's instructions per root node by phase, against the budgets; returns the phases
+    that grew more than `limit` percent over the base's."""
+    sources = [source for name, source, _ in panel(False) if name.startswith('flagship ')]
+    lines = sum(speed_corpus.root_counts(ROOT / source)[0] for source in sources)
+    new = phase_totals(candidate, sources)
+    old = phase_totals(base, sources) if base is not None else None
+    if new is None:
+        print('  (no phase split: build --time needs Linux x86-64 hardware counters)')
+        return []
+    totals, nodes = new
+    print(f'cost model, flagship panel ({len(sources)} programs, {lines} lines, {nodes} root nodes, '
+          f'{nodes / lines:.1f} nodes/line; instructions per root node, all work included)'
+          + ('' if old else ': no base phase split, not gated'))
+    print(f'  {"phase":16}{"budget":>8}{"now":>8}{"x budget":>9}{"k/line":>8}{"root":>8}' + (f'{"base":>8}{"change":>9}' if old else ''))
+    failures = []
+    for row, parts, budget in PHASE_BUDGETS:
+        n = sum(totals.get(p, 0) for p in parts)
+        ratio = f'{n / nodes / budget:8.1f}x' if budget else ' ' * 9
+        own = sum(totals.get('root ' + p, 0) for p in parts)
+        line = f'  {row:16}{budget or "-":>8}{n / nodes:8.0f}{ratio}{n / lines / 1e3:8.1f}{own / nodes:8.0f}'
+        if old:
+            b = sum(old[0].get(p, 0) for p in parts)
+            change = round(delta(b, n), 2) + 0.0 if b else 0.0
+            line += f'{b / old[1]:8.0f}{change:+8.2f}%'
+            # (every phase is gated once: facts+effects is its two rows)
+            if b and change > limit and row != 'facts+effects':
+                failures.append((row, change))
+                line += ' <-'
+        print(line, flush=True)
+    total = sum(n for phase, n in totals.items() if not phase.startswith('root '))
+    own = sum(n for phase, n in totals.items() if phase.startswith('root '))
+    print(f'  {"total":16}{1200:>8}{total / nodes:8.0f}{total / nodes / 1200:8.1f}x{total / lines / 1e3:8.1f}{own / nodes:8.0f}')
+    print('  (now: every instruction, library and shared work included, per root node; root: the root\'s own work only)')
+    return failures
+
+
 def yardstick(toolchain: Toolchain, counts: dict[str, int]) -> None:
     """The candidate's latency and throughput, from its gated counts and one `build --time` per item."""
     print(f'compile yardstick ({toolchain.label}): est. ms and lines/s are instructions at {IPS / 1e9:.1f} G/s, the '
@@ -369,7 +437,7 @@ def yardstick(toolchain: Toolchain, counts: dict[str, int]) -> None:
             continue
         found[name] = (lines, counts[name], speed_corpus.instruction_split(report) or {},
                        speed_corpus.library_lines(report, physical))
-    phases = ('load', 'check', 'facts', 'effects', 'ownership', 'lower', 'emit')
+    phases = ('load', 'check', 'facts', 'effects', 'ownership', 'lower', 'optimize', 'codegen')
     print(f'  latency {"":22}{"G inst":>9}{"est ms":>8}{"root M":>9}{"lib M":>9}{"shared M":>9}{"lib lines":>10}'
           '   library M by phase')
     for name, (lines, inst, split, library_lines) in found.items():
@@ -738,6 +806,9 @@ def main(argv: list[str], current: Path) -> int:
         for note in dict.fromkeys(notes):
             print(f'  ({note})')
         yardstick(candidate, counts)
+        base_toolchain = references['base'][2]
+        for row, change in cost_model(candidate, base_toolchain, args.limit):
+            failures.append(('base', f'phase {row} (flagships)', change))
         print(f'  ({time.perf_counter() - started:.0f} s)')
     base_failures = [f for f in failures if f[0] == 'base']
     other_failures = [f for f in failures if f[0] != 'base']

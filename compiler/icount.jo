@@ -12,9 +12,10 @@ const IC_FACTS = 2
 const IC_EFFECTS = 3
 const IC_OWNERSHIP = 4
 const IC_LOWER = 5
-const IC_EMIT = 6
-const IC_OTHER = 7
-const IC_PHASES = 8
+const IC_OPT = 6
+const IC_EMIT = 7
+const IC_OTHER = 8
+const IC_PHASES = 9
 const IC_SHARED = 0
 const IC_ROOT = 1
 const IC_LIB = 2
@@ -108,7 +109,7 @@ ic_phase = (phase: int) -> int:
 ic_report = ():
     if not ic_on: return
     ic_restore(ic_bucket)
-    names = ["load", "check", "facts", "effects", "ownership", "lower", "emit", "other"]
+    names = ["load", "check", "facts", "effects", "ownership", "lower", "optimize", "codegen", "other"]
     sides = ["shared", "root", "library"]
     total = 0
     side_total = fill(0, 3)
@@ -123,3 +124,18 @@ ic_report = ():
             if c != 0: row = row + " {names[p]} {c}"
         parts = parts + "; {sides[s]} {side_total[s]}:{row}"
     eprint("instructions: {total}{parts}")
+    # (syntax nodes by whose source they come from; made by the compiler: shared)
+    counts = fill(0, 3)
+    side_of: {int: int} = {}
+    loop i in [1..nodes.len()):
+        p = nodes[i].pos
+        side = IC_SHARED
+        if p > 0:
+            f = pos_file(p)
+            if let known = side_of.get(f): side = known
+            else:
+                side = IC_ROOT
+                if f >= files.len() or len(lib_root) > 0 and starts_with(files[f].path, lib_root): side = IC_LIB
+                side_of[f] = side
+        counts[side] += 1
+    eprint("nodes: root {counts[IC_ROOT]}, library {counts[IC_LIB]}, shared {counts[IC_SHARED]}")
