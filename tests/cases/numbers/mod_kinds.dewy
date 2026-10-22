@@ -1,0 +1,16 @@
+# quick
+# `%` is floored; `mod(a b kind=...)` names the truncated or Euclidean remainder.
+main=()=>{
+    let a:int64=-7
+    let b:int64=3
+    printl"{mod(a b)} {mod(a b kind='trunc')} {mod(a b kind='euclid')} {a % b}"
+    let c:int64=7
+    let d:int64=-3
+    printl"{mod(c d)} {mod(c d kind='trunc')} {mod(c d kind='euclid')}"
+    printl"{mod(-7 -3 kind='euclid')} {mod(-7 -3 kind='trunc')}"
+    let big:int=-(10^30)
+    printl"{mod(big 7)} {mod(big 7 kind='trunc')} {mod(big -7 kind='euclid')}"
+    let k='trunc'
+    printl(mod(-7 3 kind=k))
+    printl(mod(7.5 2.0))
+}

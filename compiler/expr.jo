@@ -3595,22 +3595,25 @@ dewy_position_index = (n: int, bt: int, expected: int) -> int:
     nodes[n] = nodes[bc_block([bc_let(source, int(nodes[n].a), pos), declared, bc_stmt(read, pos)], pos)]
     check_expr(n, expected)
 
-# `a.rem(b kind=...)`, and `round` of a float (ties to even, or `ties=...`):
-# Dewy's numbers library (lib/numbers.dewy), unless the program has its own.
-# True when the call now names it.
-dewy_numbers_call = (n: int, name: int, args: int[]) -> bool:
+# `mod(a b kind=...)` of integers, and `round` of a float (ties to even, or
+# `ties=...`): Dewy's numbers library (lib/numbers.dewy), unless the program
+# has its own. True when the call now names it.
+dewy_numbers_call = (n: int, name: int, args: int[], ufcs: bool) -> bool:
     text = name_of(name)
-    if text != "rem" and text != "round": return false
+    if text != "mod" and text != "round": return false
     s = lookup(name)
     if s != 0 and not (syms[s].kind == .fns and decl_in_prelude(int(syms[s].decl))): return false
     first = args[0]
     if nodes[first].kind == .namedarg: return false
     pos = nodes[n].pos
+    if not has_flag(first, NF_CHECKED):
+        check_expr(first, 0)
+        add_flag(first, NF_CHECKED)
+    t = prune(ntype(first))
+    if text == "mod":
+        if not is_int(t): return false
+        if ufcs: fatal(pos, "`mod` is a function, not a member: `mod(a b)`, or `mod(a b kind='euclid')`")
     if text == "round":
-        if not has_flag(first, NF_CHECKED):
-            check_expr(first, 0)
-            add_flag(first, NF_CHECKED)
-        t = prune(ntype(first))
         # (an exact number rounds a half away from zero: `round(2.5)` is 3,
         # a decimal literal included)
         if bundled_rational_type(t) or bundled_word_rational_type(t) or is_float(t) and decimal_literal_tree(first):
@@ -3657,7 +3660,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                 set_kid(n, 0, last_checked)
         nodes[n].a = i32(bc_field(bc_ident("$dewy_rational", pos), fname, pos))
         return check_expr(n, expected)
-    if mod_scope < 0 and args.len() >= 1 and files[pos_file(nodes[n].pos)].is_dewy and dewy_numbers_call(n, name, args): return check_expr(n, expected)
+    if mod_scope < 0 and args.len() >= 1 and files[pos_file(nodes[n].pos)].is_dewy and dewy_numbers_call(n, name, args, ufcs): return check_expr(n, expected)
     if not ufcs and mod_scope < 0 and args.len() == 2 and (name == intern("__floor_div") or name == intern("__floor_mod") or name == intern("__dewy_power") or name == intern("__dewy_divide")) and files[pos_file(nodes[n].pos)].is_dewy:
         if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
             return dewy_arithmetic_call(n, name, args, expected)

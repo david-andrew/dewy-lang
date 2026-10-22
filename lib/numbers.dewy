@@ -1,21 +1,21 @@
 # Remainders and rounding with an explicit rule. `%` is the floored remainder;
-# `a.rem(b kind='euclid')` names another. Floats round to nearest with ties to
+# `mod(a b kind='euclid')` names another. Floats round to nearest with ties to
 # even (IEEE 754); `round(x ties='away')` names another tie rule. The compiler
-# routes a Dewy `rem` call, and `round` of a float, here.
+# routes a Dewy `mod` of integers, and `round` of a float, here.
 
 # floor: the divisor's sign (`%`); trunc: the dividend's (C's); euclid: never negative
-RemKind:type='floor'|'trunc'|'euclid'
+ModKind:type='floor'|'trunc'|'euclid'
 # Where a value exactly halfway between two integers goes: away from zero, to
 # the even one, toward zero, up (toward +infinity) or down (toward -infinity).
 Ties:type='away'|'even'|'zero'|'up'|'down'
 
-rem = ((a:int64 b:int64<d => d not=? 0> kind:RemKind='floor'):>int64=>{
+mod = ((a:int64 b:int64<d => d not=? 0> kind:ModKind='floor'):>int64=>{
         let r=a % b
         if kind =? 'trunc' and r not=? 0 and (r <? 0) not=? (a <? 0) return r-b
         if kind =? 'euclid' and r <? 0 return r-b
         return r
     })
-    & ((a:int b:int<d => d not=? 0> kind:RemKind='floor'):>int=>{
+    & ((a:int b:int<d => d not=? 0> kind:ModKind='floor'):>int=>{
         let r=a % b
         if kind =? 'trunc' and r not=? 0 and (r <? 0) not=? (a <? 0) return r-b
         if kind =? 'euclid' and r <? 0 return r-b
