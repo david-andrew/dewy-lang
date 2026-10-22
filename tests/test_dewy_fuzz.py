@@ -22,6 +22,21 @@ def test_variants_keep_the_oracle_outcome():
             assert not gen.scope_errors(variant), (seed, name)
 
 
+def test_conversions_keep_the_value_and_keys_are_a_set():
+    n, d = gen.Var(gen.I, 'n'), gen.Var(gen.DII, 'd')
+    fits, unfit = gen.Conv(gen.U, gen.Lit(gen.I, 3), tag=1), gen.Conv(gen.U, n, tag=2)
+    unseen = gen.Conv(gen.I, gen.Lit(gen.U, 2 ** 63), tag=3)
+    body = (gen.Let('n', gen.I, gen.Lit(gen.I, -1)),
+            gen.Let('d', gen.DII, gen.DictLit(gen.DII, ((gen.Lit(gen.I, -3), gen.Lit(gen.I, 1)),))),
+            gen.Print(fits), gen.Print(unfit), gen.If(gen.Lit(gen.B, False), (gen.Print(unseen),)),
+            gen.Print(gen.Method(gen.SI, d, 'keys')), gen.Print(gen.Collect(gen.AI, gen.Method(gen.SI, d, 'keys'))))
+    program = gen.fill_asserts(gen.Program((), body))
+    source = program.source()
+    assert 'uint64(int64(3))' in source and 'n.wrap(uint64)' in source and '.wrap(int64)' in source
+    assert program.outcome() == ('3\n18446744073709551615\nset[-3]\n[-3]\n', 0)
+    assert gen.Program((), body).outcome()[1] == 101  # unsettled, the unfit conversion is checked
+
+
 def test_fuzz_smoke(compiler, tmp_path):  # noqa: F811
     started = time.monotonic()
     status = dewy_fuzz.fuzz(compiler, seed=1, count=3, modes=('native', 'web'), shrink=0, quiet=True,

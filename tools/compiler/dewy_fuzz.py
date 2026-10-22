@@ -119,7 +119,7 @@ class Fuzzer:
         built = self.runner.build(source, output, mode)
         if built.returncode:
             text = built.stdout + built.stderr
-            if exit == 101 and 'error: integer overflow' in text:
+            if exit == 101 and re.search(r'error: (integer overflow|\S+ does not fit)', text):
                 return 'pass', '', text  # a provable overflow may be reported while compiling
             return 'reject', first_error(text), text
         code, stdout, stderr = self.runner.execute(self.runner.command(output, mode), timeout=RUN_TIMEOUT)

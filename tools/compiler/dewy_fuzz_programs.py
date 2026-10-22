@@ -8,8 +8,11 @@ the oracle makes an eager deep copy instead of copy-on-write.
 
 Integers are mostly explicit `int64`/`uint64`, which wrap; the `checked` feature
 adds unannotated arbitrary-precision `int`; fixed-width narrowing can fail (exit 101, or a
-compile-time error when provable). Floats are `float64`. `@fn` handles and
-units are deliberately absent while they change.
+compile-time error when provable). Conversions keep the value: `uint64(x)` stays only where
+every evaluation fits (a first oracle run decides); the rest keep the bits with
+`x.wrap(uint64)`. `d.keys` is an insertion-ordered set, `+` never concatenates, and a
+container iterated by value keeps its length in the loop body. Floats are `float64`.
+`@fn` handles and units are deliberately absent while they change.
 
 Adding a feature:
 - a node class with `render` (its Dewy text) and `eval` (its semantics);
@@ -231,7 +234,7 @@ class Bin(Expr):
         if op == 'in?':
             return x in (y.items if isinstance(y, DSet) else y)
         if self.ty == S:
-            return x + y
+            raise InvalidProgram('`+` never concatenates')
         if self.ty.kind == 'set':
             if op == '|':
                 return DSet([*x.items, *y.items])
@@ -500,7 +503,7 @@ class Method(Expr):
             if name == 'get':
                 return copy.deepcopy(recv.get(args[0]))
             if name == 'keys':
-                return copy.deepcopy(list(recv))
+                return DSet(copy.deepcopy(list(recv)))
             if name == 'values':
                 return copy.deepcopy(list(recv.values()))
             if name == 'remove':
@@ -512,6 +515,20 @@ class Method(Expr):
             if name == 'remove':
                 return recv.items.pop(args[0], m) is not m
         raise InvalidProgram(f'method {name}')
+
+
+@dataclass(frozen=True)
+class Collect(Expr):
+    """`[xs...]`: a set (or array) collected into an array."""
+    ty: Ty
+    x: Expr
+
+    def render(self, typed=False):
+        return f'[{atom(self.x)}...]'
+
+    def eval(self, m, env):
+        value = m.eval(self.x, env)
+        return copy.deepcopy(list(value.items if isinstance(value, DSet) else value))
 
 
 @dataclass(frozen=True)
@@ -561,10 +578,19 @@ class Interp(Expr):
 
 @dataclass(frozen=True)
 class Conv(Expr):
+    """`T(x)` keeps the value (checked: exit 101 when it does not fit); `x.wrap(T)` keeps the bits.
+
+    A tagged integer conversion is decided by `settle`: it stays checked only where a first
+    oracle run evaluated it and every value fit.
+    """
     ty: Ty
     x: Expr
+    tag: int = 0
+    wrap: bool = False
 
     def render(self, typed=False):
+        if self.wrap:
+            return f'{atom(self.x)}.wrap({self.ty})'
         return f'{self.ty}({render(self.x)})'
 
     def eval(self, m, env):
@@ -573,7 +599,14 @@ class Conv(Expr):
             return show(value)
         if self.ty == F:
             return float(value)
-        return wrap(value, self.ty)
+        wrapped = wrap(value, self.ty)
+        if self.wrap or wrapped == value:
+            m.converted.setdefault(self.tag, True)
+            return wrapped
+        if m.probing:
+            m.converted[self.tag] = False
+            return wrapped
+        raise Panicked('value does not fit')
 
 
 @dataclass(frozen=True)
@@ -1027,6 +1060,8 @@ class Machine:
         self.fuel = fuel
         self.depth = 0
         self.observed = {}
+        self.probing = False  # a settling run: unfit conversions wrap and are recorded
+        self.converted = {}   # conversion tag -> every evaluation fit
 
     def tick(self):
         self.fuel -= 1
@@ -1345,6 +1380,7 @@ class V:
     ty: Ty
     mutable: bool = True
     minlen: int = 0  # arrays: a guaranteed lower bound on the length
+    frozen: bool = False  # iterated by value in an enclosing loop: its length may not change
 
 
 class Generator:
@@ -1359,6 +1395,7 @@ class Generator:
         self.guarded = 0     # inside a branch, loop or function: lengths are uncertain
         self.in_function = None
         self.asserts = 0
+        self.conversions = 0
 
     # Scope ---------------------------------------------------------------------
 
@@ -1511,7 +1548,7 @@ class Generator:
             if v is not None:
                 return Bin(I, '??', Method(OI, Var(DII, v.name), 'get', (self.expr(I, d),)), self.expr(I, d))
         if choice == 'convert':
-            return Conv(I, self.expr(U, d))
+            return self.convert(I, self.expr(U, d))
         if choice == 'optmatch' and 'optionals' in self.features:
             v = self.pick(lambda v: v.ty == OI)
             if v is not None:
@@ -1528,6 +1565,13 @@ class Generator:
             if v is not None:
                 return self.union_match(Var(UIS, v.name), I, d)
         return self.leaf(I)
+
+    def convert(self, ty, x):
+        """Between int64 and uint64: `x.wrap(T)`, or `T(x)` where it will fit (see `fill_asserts`)."""
+        if self.chance(.25):
+            return Conv(ty, x, wrap=True)
+        self.conversions += 1
+        return Conv(ty, x, tag=self.conversions)
 
     def narrow(self, subject, ty):
         """A match arm or `if` test narrows a variable subject (HIDDEN: not usable there)."""
@@ -1557,7 +1601,7 @@ class Generator:
                 return Bin(U, op, left, Lit(I, r.randrange(64)))
             return Bin(U, op, left, self.expr(U, d))
         if choice == 'convert':
-            return Conv(U, self.expr(I, d))
+            return self.convert(U, self.expr(I, d))
         return self.cond(U, d)
 
     def expr_float64(self, ty, depth):
@@ -1683,7 +1727,9 @@ class Generator:
         if choice == 'keys' and not nonempty and ty == AI:
             v = self.pick(lambda v: v.ty == DII)
             if v is not None:
-                return Method(AI, Var(DII, v.name), r.choice(('keys', 'values')), parens=self.chance(.5))
+                if self.chance(.5):
+                    return Collect(AI, Method(SI, Var(DII, v.name), 'keys', parens=self.chance(.5)))
+                return Method(AI, Var(DII, v.name), 'values', parens=self.chance(.5))
         if choice == 'field' and ty == AI:
             v = self.pick(lambda v: v.ty in (ITEM, CELL))
             if v is not None:
@@ -1786,6 +1832,10 @@ class Generator:
         d = depth + 1
         if v is not None and self.chance(.3):
             return Bin(ty, r.choice(('|', '&', '-')), Var(ty, v.name), self.expr_set(ty, d))
+        if ty == SI and self.chance(.2):
+            keys = self.pick(lambda v: v.ty == DII)
+            if keys is not None:
+                return Method(SI, Var(DII, keys.name), 'keys', parens=self.chance(.5))
         if 'comprehensions' in self.features and self.chance(.25):
             return self.comprehension(ty, d)
         element = ty.args[0]
@@ -1969,7 +2019,7 @@ class Generator:
         if v.ty.kind == 'array':
             element = v.ty.args[0]
             choices = ['push', 'assign'] + ['index'] * (v.minlen > 0) + ['pop'] * (v.minlen > 1 and not self.guarded)
-            choice = r.choice(choices)
+            choice = 'index' if v.frozen else r.choice(choices)
             if choice == 'push':
                 value = self.expr_array(AI, depth, nonempty=True) if element == AI else self.expr(element, depth)
                 if not self.guarded:
@@ -2030,7 +2080,8 @@ class Generator:
         r = self.r
         choice = r.choice(('mutate', 'mutate', 'mutate', 'print', 'let', 'if', 'loop', 'jump', 'ref'))
         if choice == 'mutate':
-            v = self.pick(lambda v: v.mutable)
+            # A by-value loop source may only change its elements.
+            v = self.pick(lambda v: v.mutable and (not v.frozen or v.ty in (AI, AS, AF) and v.minlen > 0))
             if v is not None:
                 return self.mutation(v, depth)
         if choice == 'print' and self.in_function is None:
@@ -2080,6 +2131,9 @@ class Generator:
             loop = While(Bin(B, '<?', Var(I, counter), Lit(I, limit)), self.nested(body, loop=True))
             return _Seq((Let(counter, I, Lit(I, 0)), loop))
         source, names, types = self.iterable(depth)
+        # Iterating by value: changing the source's length in the body is a compile error.
+        frozen = self.visible().get(source.name) if isinstance(source, Var) else None
+        thawed = frozen is not None and not frozen.frozen
 
         def body():
             for n, t in zip(names, types):
@@ -2088,7 +2142,13 @@ class Generator:
             if accumulate is not None:
                 stmts.insert(r.randint(0, len(stmts)), Assign(Var(I, accumulate), self.expr(I, depth + 1), '+'))
             return stmts
-        stmts = self.nested(body, loop=True)
+        if frozen is not None:
+            frozen.frozen = True
+        try:
+            stmts = self.nested(body, loop=True)
+        finally:
+            if thawed:
+                frozen.frozen = False
         other = self.nested(lambda: [self.print_value(Lit(S, 'empty'))]) if self.chance(.15) and self.in_function is None else ()
         return Loop(names, source, stmts, other=other)
 
@@ -2106,7 +2166,7 @@ class Generator:
         """Mutable places of type `ty` for an `@` argument: variables, fields and elements."""
         r, found = self.r, []
         for v in self.visible().values():
-            if not v.mutable:
+            if not v.mutable or v.frozen:
                 continue
             t = Var(v.ty, v.name)
             k = Lit(I, r.randrange(v.minlen)) if v.minlen else None
@@ -2325,7 +2385,7 @@ class Generator:
         out.append(self.print_value(t))
         if v.ty == DII:
             out.append(self.print_value(Method(OI, t, 'get', (Lit(I, r.randint(-3, 6)),))))
-            out.append(self.print_value(Method(AI, t, r.choice(('keys', 'values')))))
+            out.append(self.print_value(Method(SI, t, 'keys') if self.chance(.5) else Method(AI, t, 'values')))
         if self.chance(.5):
             out.append(self.loop_statement(1))
         return flatten(out)
@@ -2472,15 +2532,20 @@ def minlen(expr, scope) -> int:
 
 
 def fill_asserts(program: Program) -> Program:
-    """Run once to learn each assertion's value, then write it into the program."""
+    """Run once to learn each assertion's value and settle each tagged conversion: a
+    value-preserving `T(x)` stays only where it ran and always fit, the rest keep the bits."""
     machine = Machine(program.functions)
+    machine.probing = True
     try:
         machine.run(program.body)
     except Panicked:
         pass  # assertions after the failure never run
-    observed = machine.observed
+    observed, converted = machine.observed, machine.converted
 
     def fill(node):
+        if isinstance(node, Conv) and node.tag and not node.wrap:
+            fits = converted.get(node.tag, False)
+            return replace(node, tag=0, wrap=not fits)
         if isinstance(node, Assert) and node.expected is None:
             value = observed.get(node.tag)
             if value is None and node.tag not in observed:
