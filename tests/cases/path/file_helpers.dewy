@@ -1,0 +1,28 @@
+# modes: native native-release
+# The file helpers are Path methods, each outcome a value.
+main=():>void=>{
+    let root=p"case_path_helpers"
+    printl(p"{root}/a/b".make_dirs)
+    printl(p"{root}/a/b".make_dirs)
+    let notes=p"{root}/a/notes.txt"
+    printl(notes.write_text("hello"))
+    printl(notes.size)
+    printl(notes.copy_to(p"{root}/a/b/copy.txt"))
+    printl(p"{root}/a/b/copy.txt".rename(p"{root}/moved.txt"))
+    printl(p"{root}/moved.txt".read_text)
+    printl(p"{root}/a/b/copy.txt".exists)
+    printl(root.walk)
+    printl(root.glob"**/*.txt")
+    printl(root.glob"*.txt")
+    let changed=notes.modified
+    if changed is? (error|Canceled) exit(1)
+    printl(changed.year >? 2000)
+    printl(notes.chmod(0o600))
+    printl(p"{root}/missing.txt".size)
+    printl(p"{root}/missing".walk)
+    notes.unlink
+    p"{root}/moved.txt".unlink
+    p"{root}/a/b".rmdir
+    p"{root}/a".rmdir
+    printl(root.rmdir)
+}

@@ -2402,7 +2402,15 @@ outcome as a value:
   directory's entry names;
 - `write_text(text)` and `write_bytes(bytes)` replace the file and give the byte
   count;
-- `mkdir`, `rmdir` and `unlink` give `true`.
+- `mkdir`, `rmdir` and `unlink` give `true`;
+- `copy_to(target)` copies the file's bytes and gives the byte count,
+  `rename(target)` moves a file or directory in one step, `make_dirs` makes the
+  directory and any missing ones above it, and `chmod(0o644)` sets permission
+  bits, the last three giving `true`;
+- `size` gives the file's byte count, `modified` the `Date` it last changed,
+  `walk` every file under a directory (sorted paths, links to directories not
+  followed), and `glob"*.dewy"` the sorted paths under it matching a pattern
+  (`*` any part of a name, `?` one character, `**` any number of directories).
 
 A failure is `FileNotFound`, `FileAccessDenied`, `IsDirectory`, `FileExists` or
 `FileError` (any other failure), and `read_text` adds `InvalidUtf8`. All are

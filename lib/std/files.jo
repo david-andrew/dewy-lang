@@ -403,6 +403,86 @@ replace = (path: Path, target: Path) -> bool | __FileFailure: __fsys_replace(pat
 append_bytes = (path: Path, b: u8[]) -> int | __FileFailure: __fsys_append_bytes(path.path, b)
 read_at = (path: Path, offset: int, count: int) -> u8[] | __FileFailure: __fsys_read_at(path.path, offset, count)
 
+# ---------------- file helpers (Path methods) ----------------
+
+# p.copy_to(q): q gets p's bytes (made, or replaced); gives the byte count
+copy_to = (path: Path, target: Path) -> int | __FileFailure:
+    if __task_canceled(): return Canceled
+    if let b = __fsys_read(path.path): return __fsys_write_bytes(target.path, b)
+    __file_failure()
+
+# p.rename(q): moves p's file or directory to q in one step (a file at q is replaced)
+rename = (path: Path, target: Path) -> bool | __FileFailure: __fsys_replace(path.path, target.path)
+
+# p.make_dirs: the directory p and the ones it is in that are missing (true when it is there
+# after; FileExists when a file is in the way)
+make_dirs = (path: Path) -> bool | __FileFailure:
+    if __task_canceled(): return Canceled
+    __fsys_begin()
+    kind = __fsys_kind(path.path)
+    if kind == 2: return true
+    if kind != 0: return __fsys_failure(-17)
+    up = parent(path)
+    if up.path != path.path and up.path != "." and up.path != "/":
+        make_dirs(up)
+        if __fsys_kind(up.path) != 2: return __file_failure()
+    r = __fsys_mkdir(path.path)
+    if __fsys_kind(path.path) == 2: return true
+    r
+
+# p.walk: every file under the directory p, at any depth, as paths from p ("p/maps/a.tmx"),
+# sorted; links to directories are not followed
+walk = (path: Path) -> Path[] | __FileFailure:
+    if __task_canceled(): return Canceled
+    __fsys_begin()
+    if __fsys_kind(path.path) != 2:
+        if __fsys_kind(path.path) == 0: return __fsys_failure(-2)
+        return __fsys_failure(-20)
+    out: Path[]
+    loop rel in walk_dir(path.path): out.push(Path(path = join_path(path.path, rel)))
+    out
+
+# p.glob"*.dewy": the paths under p matching a pattern (`*` any part of a name, `?` one
+# character, `**` any number of directories), sorted
+glob = (path: Path, pattern: str) -> Path[]:
+    out: Path[]
+    loop found in glob(join_path(path.path, pattern)): out.push(Path(path = found))
+    out
+
+# p.size: the file's size in bytes
+size = (path: Path) -> int | __FileFailure:
+    if __task_canceled(): return Canceled
+    __fsys_begin()
+    kind = __fsys_kind(path.path)
+    if kind == 0: return __fsys_failure(-2)
+    if kind == 2: return __fsys_failure(-21)
+    when TARGET == "wasm" or TARGET == "windows":
+        if let b = __fsys_read(path.path): return b.len()
+        return __file_failure()
+    else:
+        fd = syscall(2, data(__zstr(path.path)), 0, 0)
+        if fd < 0: return __fsys_failure(fd)
+        n = syscall(8, fd, 0, 2)                     # (lseek to the end: the size)
+        syscall(3, fd)
+        if n < 0: return __fsys_failure(n)
+        return n
+
+# p.modified: when the file or directory was last changed
+modified = (path: Path) -> Date | __FileFailure:
+    if __task_canceled(): return Canceled
+    __fsys_begin()
+    if let t = file_time(path.path): return date(t)
+    if __fsys_kind(path.path) == 0: return __fsys_failure(-2)
+    __file_failure()
+
+# p.chmod(0o644): sets the file's permission bits (nothing to set on Windows)
+chmod = (path: Path, mode: int) -> bool | __FileFailure:
+    if __task_canceled(): return Canceled
+    __fsys_begin()
+    if __fsys_kind(path.path) == 0: return __fsys_failure(-2)
+    if chmod(path.path, mode): return true
+    __file_failure()
+
 # reading from an open file in a canceled task gives Canceled
 read_bytes = (f: mut File, n: int) -> (u8[] | Canceled):
     if __task_canceled(): return Canceled
