@@ -217,4 +217,12 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
 - The open-question pass is complete (2026-10-21). Anything not covered follows
   the provisional-default rule: a recommendation plus reversibility,
   implemented provisionally and flagged.
+- Approved provisional calls (2026-10-21): bundle definitions
+  `$name = { $setting … }` with `$default_row` inside bundles; every failed
+  runtime check (`$runtime_checks` and `$prototype`) exits 101, and `main`'s
+  sequential error exit codes are capped at 100 so they never collide; `sorted`
+  on sets returns an array; module-level `let x:T` with no value is allowed when
+  `main` provably assigns it before any read; forbid-only rows check the body
+  while callers see the inferred effects; distinct `@` parameters are disjoint
+  for the solver; regex `find` returns `Match | Missing`.
 
