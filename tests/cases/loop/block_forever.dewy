@@ -1,0 +1,20 @@
+# quick
+# `loop { ... }` ending its line runs until it exits; a block with a body on
+# its line is the condition.
+count=():>int64=>{
+    let i=0
+    loop {
+        i+=1
+        if i =? 2 {continue}
+        if i >? 4 {break}
+    }
+    let j=0
+    loop {j+=1; if j >=? 3 {return i*10+j}}
+}
+main=()=>{
+    printl(count())
+    let calls=0
+    let total=0
+    loop {calls+=1; calls <? 4} {total+=1}
+    printl"{calls} {total}"
+}

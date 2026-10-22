@@ -1,0 +1,8 @@
+# quick
+# A conversion ending a loop header converts the last source.
+main=()=>{
+    loop c in "ab" as array<uint8> {printl(c)}
+    loop i in 0.. and c in "é" as array<uint8> {printl"{i} {c}"}
+    let doubled=[loop c in "ab" as array<uint8> int64(c)*2]
+    printl(doubled)
+}

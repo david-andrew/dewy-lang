@@ -1477,7 +1477,9 @@ Arrays and records retain independent values when copied, including nested
 managed fields. Arrays support indexing, `.length`, and methods such as
 `.push(value)`, `.pop()`, `.pop(i)` (removes and returns the element at `i`),
 `.insert(value i)` (inserts before `i`), `.clear()` and `.truncate(count)` (a
-negative count panics). `xs[1..3)` is an
+negative count panics). `fill(value count)` makes an array of `count` copies of
+`value`: `fill(false n)`, `fill(uint8(0) 512)`, and with an annotation choosing
+the element type, `let row:array<int64>=fill(0 n)`. `xs[1..3)` is an
 exclusive-end slice; `xs[1..2]` includes index 2. A slice's bounds are proven
 like an index (or checked under `$runtime_checks`). `xs[$clamp a..b)` instead
 truncates them to the receiver, as Python's slices do: each bound is clamped
@@ -2885,6 +2887,15 @@ Inputs and range bounds are evaluated once, in source order. Conditions run
 from left to right and can refer to earlier bindings. An `or` group accepts
 iterator bindings; ordinary boolean `or` still works in a condition.
 
+A conversion ending a header converts the last source, since a header itself
+has no type: `loop byte in text as array<uint8> { ... }` iterates
+`text as array<uint8>`, as does `loop i in 0.. and byte in text as array<uint8>`.
+
+`loop { ... }` with nothing after the block on its line runs until `break` or
+`return` leaves it, like `loop true { ... }`. A block followed on the same line
+by a body is that loop's condition instead, evaluated before each pass:
+`loop {calls+=1; calls <? 4} {total+=1}`.
+
 An `else` after a loop runs only if its body never enters:
 
 ```dewy
@@ -3259,7 +3270,8 @@ also produce bytes. Byte literals spell them directly: `b'a'` is the `uint8` 97
 `match` arm, and `b"abc"` is an `array<uint8>` of the text's UTF-8 bytes,
 without interpolation. `bytes as string | none` decodes UTF-8, giving `none` for
 invalid input; plain `bytes as string` is an error, since nothing proves the
-bytes valid. `$include_bytes(p"asset.png") as image` embeds an asset at
+bytes valid. `bytes as string ?? ""` decodes or falls back: no type has a
+fallback, so a conversion to `T ?? fallback` is `(bytes as T?) ?? fallback`. `$include_bytes(p"asset.png") as image` embeds an asset at
 compile time, including for web builds.
 
 `Type?` holds a value or `none`. `is?` narrows optional and union values:

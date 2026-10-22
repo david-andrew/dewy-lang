@@ -1,0 +1,11 @@
+# quick
+# `bytes as string ?? fallback` decodes UTF-8 or falls back.
+main=()=>{
+    let good:array<uint8>=[104 105]
+    let bad:array<uint8>=[255 254]
+    printl(good as string ?? "")
+    printl(bad as string ?? "invalid")
+    printl(bad as string ?? (good as string ?? "neither"))
+    let label=bad as string | none ?? "union"
+    printl(label)
+}

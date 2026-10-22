@@ -15,9 +15,9 @@ edit_distance=(a:string b:string limit:int64):>int64=>{
     let n=x.length
     let m=y.length
     if abs(n-m) >? limit {return limit+1}
-    let pp:array<int64>=[loop j in [0..m] 0]
+    let pp:array<int64>=fill(0 m+1)
     let prev:array<int64>=[loop j in [0..m] j]
-    let cur:array<int64>=[loop j in [0..m] 0]
+    let cur:array<int64>=fill(0 m+1)
     loop i in [1..n] {
         cur[0]=i
         let best=i

@@ -975,6 +975,11 @@ dn_flow = () -> int:
         keyword = dn_take()
         key = dn_node(.keyword, dn_token_text(keyword.symbol), keyword.start)
         condition = if keyword.symbol == .kw_loop or keyword.symbol == .kw_parallel: dn_expr(0) else: dn_value(0)
+        # (`loop { ... }` ending its line: a block with no body after it is the
+        # body of a loop that runs until it exits; `loop {c} body` keeps the block as its condition)
+        if keyword.symbol == .kw_loop and dewy_syntax[condition].kind == .block and dewy_syntax[condition].text == "{{}}:" and dn_peek() != .kw_else and (dn_tokens[dn_at].newline or not dn_can_start()):
+            arms.push(dn_node(.keyword_expr, "", keyword.start, [key, dn_node(.boolean, "true", keyword.start), condition]))
+            break
         if not dn_can_start():
             next = dn_peek()
             habit = ""
@@ -1202,6 +1207,21 @@ dn_expr = (minimum: int) -> int:
             continue
         value_rhs = dn_token_assignment(op) or (op == .assign and dw_name(left) != "")
         right = if value_rhs: dn_value(power + 1) else: dn_expr(if op == .function or op == .caret or op == .dot_caret or op == .coalesce or op == .pipe_left: power else: power + 1)
+        if op == .kw_as or op == .kw_transmute:
+            # `loop c in text as array<uint8>`: a loop header converts no type, so
+            # the conversion takes the last `in`'s source, as `loop c in (text as array<uint8>)`
+            last = left
+            loop dewy_syntax[last].kind == .binary and dw_op(last) == .kw_and: last = dewy_syntax[last].child_right
+            if dewy_syntax[last].kind == .binary and dw_op(last) == .kw_in:
+                dewy_syntax[last].child_right = dn_operator(.binary, op, dewy_syntax[last].child_right, right)
+                continue
+            # `bytes as string ?? ""`: no type has a fallback, so this converts to an
+            # optional and falls back, as `(bytes as string | none) ?? ""`
+            if op == .kw_as and dewy_syntax[right].kind == .binary and dw_op(right) == .coalesce:
+                target = dewy_syntax[right].child_left
+                optional = dn_operator(.binary, .pipe, target, dn_node(.identifier, "none", pos_off(dewy_syntax[target].pos)))
+                left = dn_operator(.binary, .coalesce, dn_operator(.binary, op, left, optional), dewy_syntax[right].child_right)
+                continue
         if op == .comma:
             parts: int[]
             if dw_op(left) == .comma: parts = dw_children(left)
