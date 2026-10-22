@@ -2974,6 +2974,9 @@ building text in a loop stays linear; `s += x` is an error. Unicode escapes use
 four hexadecimal digits (`"\u00E9"`) or one to six inside braces
 (`"\u{1F642}"`); both name Unicode scalar values. Surrogates and values above
 `10FFFF` are errors. Braced escapes currently accept hex literals, not expressions.
+The letter escapes are `\n`, `\r`, `\t`, `\a`, `\b`, `\v` and `\f`, plus `\0`;
+any ASCII punctuation escapes to itself (`\{`, `\}`, `\'`, `\"`, `\\`, `\%`), and
+an unknown escape of a letter or digit (`\N`) is an error.
 
 Prefix a string with `r` to keep backslashes and braces literally. Three matching
 quotes allow embedded single quotes and multiline text; whitespace is preserved,

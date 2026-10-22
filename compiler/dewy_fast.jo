@@ -674,8 +674,9 @@ dn_string = (token: DewyLexeme, direct: bool = false) -> int:
                 loop byte in chr(scalar.0): bytes_.push(byte)
                 i = scalar.1
                 continue
-            else if c == '\\' or c == '"' or c == '\'' or c == '{' or c == '}': bytes_.push(c)
-            else: dn_error(i, "unsupported string escape")
+            # (any ASCII punctuation escapes to itself: `\}`, `\{`, `\'`, `\"`, `\\`)
+            else if c > 32 and c < 127 and not (c >= '0' and c <= '9' or c >= 'a' and c <= 'z' or c >= 'A' and c <= 'Z'): bytes_.push(c)
+            else: dn_error(i, "unknown escape `\\{str_from_bytes([c])}`: the letter escapes are \\n \\r \\t \\a \\b \\v \\f, \\0 and \\u\{...}, and any ASCII punctuation escapes to itself")
             i += 1
             continue
         if c == '{':
