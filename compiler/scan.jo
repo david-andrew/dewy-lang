@@ -22,20 +22,27 @@ su_name_len: int[]
 sc_p: *u8 = null
 sc_n = 0
 
-# (bytes of a name: letters, digits, '_')
-sc_cls: u8[]
-sc_ident_char = (c: u8) -> bool: sc_cls[int(c)] != 0
+# byte classes: SC_NAME, a name's (letters, digits, '_'); SC_STR, one a string reads specially
+# (quotes, '\\', braces)
+const SC_NAME = 1
+const SC_STR = 2
+sc_cls: *u8 = null
+sc_ident_char = (c: u8) -> bool: sc_cls[int(c)] & SC_NAME != 0
 
 # past the string whose quote is at i0, as lx_skip_str reads it; -1 if it does not end
 sc_skip_str = (i0: int, raw: bool) -> int:
     p = sc_p
     n = sc_n
+    cls = sc_cls
     q = p[i0]
     triple = q == '"' and i0 + 2 < n and p[i0 + 1] == '"' and p[i0 + 2] == '"'
     i = i0 + 1
     if triple: i = i0 + 3
     depth = 0
     loop i < n:
+        # (ordinary bytes in bulk)
+        loop i < n and cls[int(p[i])] & SC_STR == 0: i += 1
+        if i >= n: break
         c = p[i]
         if depth == 0:
             if c == '\\' and not raw:
@@ -83,7 +90,7 @@ sc_word_is = (j: int, w: str) -> bool:
     q = data(w)
     loop t in [0..k):
         if p[t] != q[t]: return false
-    j + k >= sc_n or sc_cls[int(p[k])] == 0
+    j + k >= sc_n or sc_cls[int(p[k])] & SC_NAME == 0
 
 sc_spaces = (j0: int) -> int:
     j = j0
@@ -93,8 +100,9 @@ sc_spaces = (j0: int) -> int:
 sc_ident_end = (j0: int) -> int:
     p = sc_p
     n = sc_n
+    cls = sc_cls
     j = j0
-    loop j < n and sc_cls[int(p[j])] != 0: j += 1
+    loop j < n and cls[int(p[j])] & SC_NAME != 0: j += 1
     j
 
 # past a bracketed group starting at j ('[' or '('), on this line; -1 when it does not close here
@@ -202,10 +210,13 @@ sc_open = (at: int):
 # not indented to the next (__find_line_delim), following strings and comments; only a `when`
 # unit's lines are each looked at, for its branches' declarations.
 scan_source = (src: str) -> (int, int):
-    if sc_cls.len() == 0:
-        sc_cls = fill(u8(0), 256)
+    if sc_cls == null:
+        sc_cls = __alloc(256)
         loop c in [0..256):
-            if (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_': sc_cls[c] = 1
+            k = 0
+            if (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_': k = SC_NAME
+            if c == '"' or c == '\'' or c == '\\' or c == '{{' or c == '}}': k = SC_STR
+            sc_cls[c] = u8(k)
     sc_src = src
     sc_p = data(src)
     sc_n = len(src)

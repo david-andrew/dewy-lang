@@ -1853,14 +1853,24 @@ emit_findb = (d: int, p: int, i: int, n: int, set0: int):
     ld(RCX, p)
     ld(RDX, n)
     op_rr(0x01, true, RAX, RCX)                # add rcx, rax: the address of byte k
-    mov_imm(mask, set)
+    # (w = 0: a line end counts unless a byte above space follows it, so blank lines do not;
+    # '"' and '#' are one compare (their bytes differ only in bit 0))
+    plain = lines and w == 0
+    mov_imm(mask, if plain: 0xFE27220A else: set)
     sse_rr(0x66, 0x6E, 2, mask)                # movd xmm2, mask
     sse_rr(0x66, 0x60, 2, 2)                   # punpcklbw: each byte twice
     sse_rr(0x66, 0x61, 2, 2)                   # punpcklwd: four times
     loop k in [0..4):
         sse_rr(0x66, 0x70, 4 + k, 2)           # pshufd xmm4+k, xmm2: byte k in all sixteen
         b(k * 0x55)
-    if lines:
+    if plain:
+        mov_imm(mask, 0x20)
+        sse_rr(0x66, 0x6E, 2, mask)
+        sse_rr(0x66, 0x60, 2, 2)
+        sse_rr(0x66, 0x61, 2, 2)
+        sse_rr(0x66, 0x70, 8, 2)
+        b(0)
+    else if lines:
         mov_imm(mask, 0x0920)                  # space, tab
         sse_rr(0x66, 0x6E, 2, mask)
         sse_rr(0x66, 0x60, 2, 2)
@@ -1877,7 +1887,19 @@ emit_findb = (d: int, p: int, i: int, n: int, set0: int):
     sse_rm(0xF3, 0x6F, 0, RCX, 0)              # movdqu xmm0, [rcx]
     sse_rr(0x66, 0x6F, 1, 0)                   # movdqa xmm1, xmm0
     sse_rr(0x66, 0x74, 1, 4)                   # pcmpeqb xmm1, xmm4
-    if lines:
+    if plain:
+        sse_rm(0xF3, 0x6F, 3, RCX, 1)          # movdqu xmm3, [rcx + 1]
+        sse_rr(0x66, 0x6F, 2, 3)
+        sse_rr(0x66, 0xDA, 2, 8)               # pminub xmm2, xmm8
+        sse_rr(0x66, 0x74, 2, 3)               # (the byte after is at most a space)
+        sse_rr(0x66, 0xDF, 2, 1)               # pandn: line ends before others
+        sse_rr(0x66, 0x6F, 1, 0)
+        sse_rr(0x66, 0xDB, 1, 7)               # pand xmm1, 0xFE
+        sse_rr(0x66, 0x74, 1, 5)               # '"' or '#'
+        sse_rr(0x66, 0xEB, 2, 1)
+        sse_rr(0x66, 0x74, 0, 6)               # '\''
+        sse_rr(0x66, 0xEB, 0, 2)
+    else if lines:
         # xmm3: the w + 1 bytes after each are indentation (spaces; at w = 0 a tab too)
         sse_rm(0xF3, 0x6F, 3, RCX, 1)          # movdqu xmm3, [rcx + 1]
         if w == 0:
@@ -1891,12 +1913,13 @@ emit_findb = (d: int, p: int, i: int, n: int, set0: int):
             sse_rr(0x66, 0xDB, 3, 2)           # pand
         sse_rr(0x66, 0xDF, 3, 1)               # pandn: line ends before others
         sse_rr(0x66, 0x6F, 1, 3)
-    loop k in [1..3):
-        sse_rr(0x66, 0x6F, 3, 0)
-        sse_rr(0x66, 0x74, 3, 4 + k)
-        sse_rr(0x66, 0xEB, 1, 3)               # por xmm1, xmm3
-    sse_rr(0x66, 0x74, 0, 7)
-    sse_rr(0x66, 0xEB, 0, 1)
+    if not plain:
+        loop k in [1..3):
+            sse_rr(0x66, 0x6F, 3, 0)
+            sse_rr(0x66, 0x74, 3, 4 + k)
+            sse_rr(0x66, 0xEB, 1, 3)           # por xmm1, xmm3
+        sse_rr(0x66, 0x74, 0, 7)
+        sse_rr(0x66, 0xEB, 0, 1)
     sse_rr(0x66, 0xD7, mask, 0)                # pmovmskb mask, xmm0
     op_rr(0x85, false, mask, mask)             # test
     found = jcc32(CC_NE)
@@ -1930,12 +1953,7 @@ emit_findb = (d: int, p: int, i: int, n: int, set0: int):
             load_sized(mask, RCX, off, 1, false)
             rex(false, 0, 0, mask, false)
             b(0x83); modrr(7, mask); b(0x20)
-            if w == 0:
-                is_space = jcc32(CC_E)
-                rex(false, 0, 0, mask, false)
-                b(0x83); modrr(7, mask); b(0x09)
-                found_here.push(jcc32(CC_NE))
-                patch_here(is_space)
+            if w == 0: found_here.push(jcc32(CC_A))
             else: found_here.push(jcc32(CC_NE))
         skips.push(jmp32())                    # indented: not one
         loop f in found_here: ends.push(f)

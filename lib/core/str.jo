@@ -79,7 +79,7 @@ __memchr = (p: *u8, from: int, n: int, c: u8) -> int:
 # at a time (Op.findb, lower.jo); these bodies are the other targets' and the bootstrap's. Each
 # gives the first k in [i, n) where p[k] starts a string ('"' or '\'') or a comment ('#') or
 # ends a line, or n: any line (__find_delim); a line before one indented by at most w columns,
-# w = 0, 4 or 8 (__find_line_delim[w]: then a tab indents too); or __find_newline: just a line end.
+# w = 0, 4 or 8 (__find_line_delim[w]; at 0 a tab indents, a blank line too); or __find_newline.
 __find_delim = (p: *u8, i: int, n: int) -> int:
     k = i
     loop k < n:
@@ -99,7 +99,7 @@ __find_line_delim_w = (p: *u8, i: int, n: int, w: int) -> int:
         if c == '\n':
             if k + w + 1 >= n: return k
             m = 1
-            loop m <= w + 1 and (p[k + m] == ' ' or (w == 0 and p[k + m] == '\t')): m += 1
+            loop m <= w + 1 and (p[k + m] == ' ' or (w == 0 and p[k + m] <= ' ')): m += 1
             if m <= w + 1: return k
         else if c == '"' or c == '#' or c == '\'': return k
         k += 1
