@@ -3534,19 +3534,43 @@ number_literal_tree = (n: int) -> bool:
     if k == .binary: return number_literal_tree(int(nodes[n].a)) and number_literal_tree(int(nodes[n].b))
     false
 
-# `a.rem(b kind=...)`: Dewy's numbers library (lib/numbers.dewy), unless the
-# program has its own. True when the call now names it.
+# `a.rem(b kind=...)`, and `round` of a float (ties to even, or `ties=...`):
+# Dewy's numbers library (lib/numbers.dewy), unless the program has its own.
+# True when the call now names it.
 dewy_numbers_call = (n: int, name: int, args: int[]) -> bool:
     text = name_of(name)
-    if text != "rem": return false
+    if text != "rem" and text != "round": return false
     s = lookup(name)
     if s != 0 and not (syms[s].kind == .fns and decl_in_prelude(int(syms[s].decl))): return false
-    if nodes[args[0]].kind == .namedarg: return false
+    first = args[0]
+    if nodes[first].kind == .namedarg: return false
     pos = nodes[n].pos
+    if text == "round":
+        if not has_flag(first, NF_CHECKED):
+            check_expr(first, 0)
+            add_flag(first, NF_CHECKED)
+        t = prune(ntype(first))
+        # (an exact number rounds a half away from zero: `round(2.5)` is 3,
+        # a decimal literal included)
+        if bundled_rational_type(t) or bundled_word_rational_type(t) or is_float(t) and decimal_literal_tree(first):
+            ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
+            nodes[n].a = i32(bc_field(bc_ident("$dewy_rational", pos), text, pos))
+            set_list(n, args)
+            return true
+        if not is_float(t): return false
     ensure_bundled_import("numbers.dewy", "$dewy_numbers", pos)
     nodes[n].a = i32(bc_field(bc_ident("$dewy_numbers", pos), text, pos))
     set_list(n, args)
     true
+
+# literal numbers with a decimal literal among them (`2.5`, `-2.5`, `1.5*3`):
+# exact until a float context makes them floats
+decimal_literal_tree = (n: int) -> bool:
+    k = nodes[n].kind
+    if k == .float_lit: return nodes[n].sval != 0
+    if k == .unary: return decimal_literal_tree(int(nodes[n].a))
+    if k == .binary: return number_literal_tree(n) and (decimal_literal_tree(int(nodes[n].a)) or decimal_literal_tree(int(nodes[n].b)))
+    false
 
 # (the library functions Dewy calls with physical quantities: dewy_quantity_call)
 quantity_call_names: int[]

@@ -1,0 +1,13 @@
+# quick
+# Floats round to nearest with ties to even (IEEE 754); `ties=` names another rule.
+main=()=>{
+    let xs:array<float64>=[2.5 -2.5 3.5 0.5 -0.25 1.4999 -0.5]
+    printl"{[loop x in xs round(x)]}"
+    loop ties in ['even' 'away' 'zero' 'up' 'down'] {
+        printl"{ties}: {round(xs[0] ties=ties)} {round(xs[1] ties=ties)} {xs[2].round(ties=ties)}"
+    }
+    let f:float32=2.5
+    let huge:float64=1e300
+    let zero:float64=0.0
+    printl"{round(f)} {round(huge)} {round(zero/zero)}"
+}

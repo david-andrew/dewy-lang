@@ -955,8 +955,13 @@ denominator is one, otherwise `numerator/denominator`.
 Arithmetic `+`, `-`, `*`, `/`, comparisons, and unary minus work with fractions,
 `BigInt`, and integers in either order. `//` returns an `int` floor quotient;
 `%` returns a `rational` remainder with the divisor's sign. `.divmod(other)`
-returns both. `.floor()`, `.ceil()` and `.round()` return `int` (`.round()`
-takes a half to the even neighbour), and `int(q)` truncates toward zero; `.abs()`, `.reciprocal()` and `.pow(signed_exponent)` return
+returns both. `.floor()`, `.ceil()` and `.round()` return `int`, and `int(q)`
+truncates toward zero. Exact numbers round as people do, a half away from zero:
+`round(5/2)` and `round(2.5)` are 3, `round(-2.5)` is −3. Floats follow IEEE
+754 instead, a half to the even neighbour: `round(f)` is `2.0` for
+`f:float64=2.5`. Both take `ties=` to choose the rule: `'away'`, `'even'`,
+`'zero'` (toward zero), `'up'` (toward +∞) or `'down'` (toward −∞), as in
+`round(f ties='away')`. `.abs()`, `.reciprocal()` and `.pow(signed_exponent)` return
 fractions. Runtime division by zero, a zero denominator and negative powers of
 zero panic. Zero to the zeroth power is one. Copies are independent, and
 normalized values can be dictionary keys.

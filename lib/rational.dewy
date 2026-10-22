@@ -4,6 +4,7 @@
 # operation overflows. Reduction strategies are adapted from the old
 # library/rational.dewy; representation and error handling use the compact core.
 from bigint import BigInt, bigint, parse_bigint, _ratio_float_bits
+from numbers import Ties
 
 Rational:type=[numerator:int=0 denominator:int=1]
 # The explicit fixed-width form, `rational<int64>`: normalized int64 parts.
@@ -121,15 +122,23 @@ floor = ((value:Rational):>int=>value.numerator//value.denominator)
     & ((value:RationalWord):>int=>floor(_widen(value)))
 ceil = ((value:Rational):>int=>-((-value.numerator)//value.denominator))
     & ((value:RationalWord):>int=>ceil(_widen(value)))
-# The nearest integer; a half goes to the even one, as the float conversions round.
-round = ((value:Rational):>int=>{
-        let whole=value.numerator//value.denominator
-        let twice=(value.numerator-whole*value.denominator)*2
-        if twice <? value.denominator return whole
-        if twice >? value.denominator or whole%2 =? 1 return whole+1
-        return whole
+# The nearest integer; a half goes away from zero, as people round
+# (`round(5/2)` is 3, `round(-5/2)` is -3), unless `ties=` names another rule.
+round = ((value:Rational ties:Ties='away'):>int=>{
+        let low=value.numerator//value.denominator
+        let twice=(value.numerator-low*value.denominator)*2
+        if twice <? value.denominator return low
+        if twice >? value.denominator return low+1
+        let up=match ties {
+            <'away'>=>value.numerator >? 0
+            <'even'>=>low%2 =? 1
+            <'zero'>=>value.numerator <? 0
+            <'up'>=>true
+            <'down'>=>false
+        }
+        return if up low+1 else low
     })
-    & ((value:RationalWord):>int=>round(_widen(value)))
+    & ((value:RationalWord ties:Ties='away'):>int=>round(_widen(value) ties))
 # Toward zero: the integer conversion, `int(q)` and `q as int`.
 _truncate = ((value:Rational):>int=>if value.numerator <? 0 ceil(value) else floor(value))
     & ((value:RationalWord):>int=>_truncate(_widen(value)))
