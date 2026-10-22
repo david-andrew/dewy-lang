@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.support import compiler, run_value_batch
+from tests.support import compiler, exit_main, run_value_batch
 
 FIXTURES = Path(__file__).parent / 'fixtures' / 'records_sra'
 
@@ -39,11 +39,13 @@ def test_records_sra_large_copy_codegen(compiler, tmp_path):
     import re
     import subprocess
 
-    built = subprocess.run([compiler, 'build', FIXTURES / 'large_game.dewy', '--release', '--ir',
+    source = tmp_path / 'large_game.dewy'
+    source.write_text(exit_main((FIXTURES / 'large_game.dewy').read_text()))
+    built = subprocess.run([compiler, 'build', source, '--release', '--ir',
                             '-o', tmp_path / 'large-game'], capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
     main = next(body for body in re.split(r'^fn ', built.stdout, flags=re.MULTILINE)
-                if body.startswith('f_main_'))
+                if body.startswith('f_entry_'))
     lines = main.splitlines()
     start = next(i for i, line in enumerate(lines) if re.search(r'\bloop a=', line))
     indent = len(lines[start]) - len(lines[start].lstrip())
