@@ -1,0 +1,43 @@
+# modes: native native-release
+# One listener, several connections: each accept gives the next connection in
+# the order they were made, and each stream carries its own bytes. Large sends
+# arrive whole, in pieces no bigger than asked for.
+import net
+
+main=():>void | net.NetError | Canceled=>{
+    let server=net.tcp_listen(0 host="127.0.0.1") or_throw
+    let clients:array<net.TcpStream>=[]
+    loop i in [0..3) {
+        let client=net.tcp_connect("localhost" server.port) or_throw
+        net.tcp_send(client "client {i}") or_throw
+        clients.push(client)
+    }
+    loop i in [0..3) {
+        let peer=net.tcp_accept(server) or_throw
+        let got=net.tcp_receive(peer)
+        if got is? none return
+        let data=got or_throw
+        printl((data as string | none) ?? "?")
+        net.tcp_close(peer)
+    }
+    loop client in clients net.tcp_close(client)
+    # (bigger than a socket buffer: the receiver reads while the sender waits)
+    let client=net.tcp_connect("127.0.0.1" server.port) or_throw
+    let peer=net.tcp_accept(server) or_throw
+    let total=0
+    let largest=0
+    concurrent {
+        let sent=spawn net.tcp_send(client [loop i in [0..3000000) wrap<uint8>(i)])
+        loop total <? 3000000 {
+            let got=net.tcp_receive(peer 100000)
+            if got is? none break
+            let data=got or_throw
+            if data.length >? largest largest=data.length
+            total+=data.length
+        }
+    }
+    printl(total largest <=? 100000)
+    net.tcp_close(client)
+    net.tcp_close(peer)
+    net.tcp_close(server)
+}

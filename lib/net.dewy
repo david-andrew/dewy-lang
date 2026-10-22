@@ -1,0 +1,358 @@
+# Networking. Blocking TCP sockets over the system's C library: each call waits
+# for its result, and gives a NetError when the system refuses, or Canceled when
+# its task is canceled (a blocked accept, connect, receive or send wakes up):
+#
+#     let server=net.tcp_listen(0) or_throw          # an ephemeral loopback port
+#     let client=net.tcp_connect("127.0.0.1" server.port) or_throw
+#     let peer=net.tcp_accept(server) or_throw
+#     net.tcp_send(client "hello") or_throw
+#     let data=net.tcp_receive(peer) or_throw        # some bytes, or none at the end
+#
+# The game library's WebSocket messages (`net.listen`, `net.connect`,
+# `net.receive`, `net.send`, ...) come from lib/net.jo, re-exported here.
+import p"net.jo"
+$unsafe
+
+NetError:type=type of error & [message:string]
+
+# A listening socket and the port it is bound to (the one the system chose for port 0).
+TcpListener:type=[handle:int64 port:int64]
+# A connection, made by tcp_connect or tcp_accept.
+TcpStream:type=[handle:int64]
+
+# A server on host's port (0: any free one). host is a numeric address; the
+# default is loopback, so only this machine can connect.
+tcp_listen=(port:int64 host:string="127.0.0.1" backlog:int32=128):>TcpListener | NetError=>{
+    let address=__address(host port) or_throw
+    let handle=__open(address.family)
+    if handle <? 0 return __failure("cannot make a socket" __last_error())
+    __reuse_address(handle)
+    if __bind(handle address.bytes.ptr int32(address.bytes.length)) not=? 0 {
+        let code=__last_error()
+        __close(handle)
+        return __failure("cannot listen on {host}:{port}" code)
+    }
+    if __listen(handle backlog) not=? 0 {
+        let code=__last_error()
+        __close(handle)
+        return __failure("cannot listen on {host}:{port}" code)
+    }
+    let bound:array<uint8>=fill(uint8(0) 28)
+    let length:array<int32>=[28]
+    if __name(handle bound.ptr length.ptr) not=? 0 {
+        let code=__last_error()
+        __close(handle)
+        return __failure("cannot listen on {host}:{port}" code)
+    }
+    return TcpListener[handle (int64(bound[2]) << 8) | int64(bound[3])]
+}
+
+# The next connection made to the server, waiting for one.
+tcp_accept=(server:TcpListener):>TcpStream | NetError | Canceled=>{
+    loop true {
+        let ready=__wait(server.handle __READ) or_throw
+        let handle=__accept(server.handle)
+        if handle >=? 0 {
+            __prepare(handle)
+            return TcpStream[handle]
+        }
+        let code=__last_error()
+        if not __again(code) return __failure("cannot accept a connection" code)
+    }
+}
+
+# A connection to host's port (a numeric address or localhost), waiting until it is made.
+tcp_connect=(host:string port:int64):>TcpStream | NetError | Canceled=>{
+    let address=__address(host port) or_throw
+    let handle=__open(address.family)
+    if handle <? 0 return __failure("cannot make a socket" __last_error())
+    if __connect(handle address.bytes.ptr int32(address.bytes.length)) not=? 0 {
+        let code=__last_error()
+        if not __in_progress(code) {
+            __close(handle)
+            return __failure("cannot connect to {host}:{port}" code)
+        }
+        let ready=__wait(handle __WRITE)
+        if ready is? Canceled {
+            __close(handle)
+            return Canceled
+        }
+        let failed=__socket_error(handle)
+        if failed not=? 0 {
+            __close(handle)
+            return __failure("cannot connect to {host}:{port}" failed)
+        }
+    }
+    __prepare(handle)
+    return TcpStream[handle]
+}
+
+# Sends all of data, waiting while the other side is slow to take it.
+tcp_send=(stream:TcpStream data:array<uint8>):>void | NetError | Canceled=>{
+    let at:int64=0
+    loop at <? data.length {
+        let ready=__wait(stream.handle __WRITE) or_throw
+        let sent=__send(stream.handle data.ptr + at data.length - at)
+        if sent >=? 0 {
+            at+=sent
+        } else {
+            let code=__last_error()
+            if not __again(code) return __failure("cannot send" code)
+        }
+    }
+}
+tcp_send=(stream:TcpStream text:string):>void | NetError | Canceled=>tcp_send(stream bytes(text))
+
+# The bytes that have arrived (at least one and at most `largest`), waiting for
+# some; none once the other side has closed the connection and everything it
+# sent has been received.
+tcp_receive=(stream:TcpStream largest:int64=65536):>array<uint8> | none | NetError | Canceled=>{
+    let buffer:array<uint8>=fill(uint8(0) max(largest 1))
+    loop true {
+        let ready=__wait(stream.handle __READ) or_throw
+        let got=__receive(stream.handle buffer.ptr buffer.length)
+        if got >? 0 return buffer[0..got)
+        if got =? 0 return none
+        let code=__last_error()
+        if not __again(code) return __failure("cannot receive" code)
+    }
+}
+
+tcp_close=(stream:TcpStream):>void=>__close(stream.handle)
+tcp_close=(server:TcpListener):>void=>__close(server.handle)
+
+# ---------------- below: each system's C functions ----------------
+
+__Address:type=[family:int32 bytes:array<uint8>]
+__SockAddrIn:type=[family:uint16 port:uint16 address:uint32 zero:uint64]
+__SockAddrIn6:type=[family:uint16 port:uint16 flow:uint32 a0:uint32 a1:uint32 a2:uint32 a3:uint32 scope:uint32]
+
+# port in network byte order
+__port_bytes=(port:int64):>uint16=>wrap<uint16>(((port & 255) << 8) | ((port >> 8) & 255))
+
+# A numeric IPv4 or IPv6 address (or localhost) and a port, as the C sockaddr's bytes.
+__address=(host:string port:int64):>__Address | NetError=>{
+    if port <? 0 or port >? 65535 return NetError["invalid port {port}"]
+    let name=if host =? "localhost" "127.0.0.1" else host
+    let v4:array<__SockAddrIn>=[__SockAddrIn[__family_field(__AF_INET 16) __port_bytes(port) 0 0]]
+    if __inet_pton(__AF_INET name (v4.ptr as ptr<uint8>) + 4) =? 1 {
+        let raw=v4.ptr as ptr<uint8>
+        return __Address[__AF_INET [loop i in [0..16) raw[i]]]
+    }
+    let v6:array<__SockAddrIn6>=[__SockAddrIn6[__family_field(__AF_INET6 28) __port_bytes(port) 0 0 0 0 0 0]]
+    if __inet_pton(__AF_INET6 name (v6.ptr as ptr<uint8>) + 8) =? 1 {
+        let raw=v6.ptr as ptr<uint8>
+        return __Address[__AF_INET6 [loop i in [0..28) raw[i]]]
+    }
+    return NetError["invalid address '{host}'"]
+}
+
+# Waits until the socket is ready for `events`, or its task is canceled. The
+# cancellation signal interrupts the wait; the timeout covers a signal that
+# came just before it.
+__wait=(handle:int64 events:int32):>int32 | Canceled=>{
+    loop true {
+        if __task_canceled() return Canceled
+        let got=__poll_one(handle events 100)
+        if got >? 0 return got
+    }
+}
+
+__failure=(what:string code:int32):>NetError=>NetError["{what}: {__describe(code)}"]
+
+if $target.os =? "windows" {
+    __WSAStartup=(version:uint16 data:ptr<uint8>):>int32 => $extern(name='WSAStartup' lib='ws2_32')
+    __socket=(domain:int32 kind:int32 protocol:int32):>int64 => $extern(name='socket' lib='ws2_32')
+    __closesocket=(s:int64):>int32 => $extern(name='closesocket' lib='ws2_32')
+    __bind=(s:int64 address:ptr<uint8> length:int32):>int32 => $extern(name='bind' lib='ws2_32')
+    __listen=(s:int64 backlog:int32):>int32 => $extern(name='listen' lib='ws2_32')
+    __connect=(s:int64 address:ptr<uint8> length:int32):>int32 => $extern(name='connect' lib='ws2_32')
+    __accept_c=(s:int64 address:ptr<uint8>? length:ptr<int32>?):>int64 => $extern(name='accept' lib='ws2_32')
+    __send_c=(s:int64 data:ptr<uint8> length:int32 flags:int32):>int32 => $extern(name='send' lib='ws2_32')
+    __recv_c=(s:int64 data:ptr<uint8> length:int32 flags:int32):>int32 => $extern(name='recv' lib='ws2_32')
+    __name=(s:int64 address:ptr<uint8> length:ptr<int32>):>int32 => $extern(name='getsockname' lib='ws2_32')
+    __setsockopt=(s:int64 level:int32 name:int32 value:ptr<int32> length:int32):>int32 => $extern(name='setsockopt' lib='ws2_32')
+    __getsockopt=(s:int64 level:int32 name:int32 value:ptr<int32> length:ptr<int32>):>int32 => $extern(name='getsockopt' lib='ws2_32')
+    __ioctlsocket=(s:int64 command:int32 argument:ptr<uint32>):>int32 => $extern(name='ioctlsocket' lib='ws2_32')
+    __WSAPoll=(fds:ptr<__PollFd> count:uint32 timeout:int32):>int32 => $extern(name='WSAPoll' lib='ws2_32')
+    __WSAGetLastError=():>int32 => $extern(name='WSAGetLastError' lib='ws2_32')
+    __inet_pton=(family:int32 text:string out:ptr<uint8>):>int32 => $extern(name='inet_pton' lib='ws2_32')
+
+    __PollFd:type=[fd:int64 events:int16 revents:int16]
+    const __AF_INET:int32=2
+    const __AF_INET6:int32=23
+    const __READ:int32=0x100
+    const __WRITE:int32=0x10
+    const __SOL_SOCKET:int32=0xffff
+    const __SO_ERROR:int32=0x1007
+
+    __family_field=(family:int32 size:int64):>uint16=>wrap<uint16>(family)
+
+    __open=(family:int32):>int64=>{
+        # (Winsock counts its users: every opening may start it)
+        let info:array<uint8>=fill(uint8(0) 512)
+        __WSAStartup(0x0202 info.ptr)
+        let s=__socket(family 1 6)
+        if s =? -1 return -1
+        let on:array<uint32>=[1]
+        __ioctlsocket(s -2147195266 on.ptr)              # FIONBIO
+        return s
+    }
+    __close=(s:int64):>void=>{__closesocket(s)}
+    __reuse_address=(s:int64):>void=>{}
+    __accept=(s:int64):>int64=>{
+        let got=__accept_c(s none none)
+        if got =? -1 return -1
+        let on:array<uint32>=[1]
+        __ioctlsocket(got -2147195266 on.ptr)
+        return got
+    }
+    __send=(s:int64 data:ptr<uint8> length:int64):>int64=>int64(__send_c(s data int32(min(length 1 << 30)) 0))
+    __receive=(s:int64 data:ptr<uint8> length:int64):>int64=>int64(__recv_c(s data int32(min(length 1 << 30)) 0))
+    __socket_error=(s:int64):>int32=>{
+        let code:array<int32>=[0]
+        let length:array<int32>=[4]
+        if __getsockopt(s __SOL_SOCKET __SO_ERROR code.ptr length.ptr) not=? 0 return __last_error()
+        return code[0]
+    }
+    __last_error=():>int32=>__WSAGetLastError()
+    __again=(code:int32):>bool=>code =? 10035 or code =? 10004
+    __in_progress=(code:int32):>bool=>code =? 10035 or code =? 10036
+    __poll_one=(s:int64 events:int32 timeout:int32):>int32=>{
+        let fds:array<__PollFd>=[__PollFd[s wrap<int16>(events) 0]]
+        if __WSAPoll(fds.ptr 1 timeout) <=? 0 return 0
+        return int32(fds[0].revents)
+    }
+    __describe=(code:int32):>string=>{
+        if code =? 10061 return "connection refused"
+        if code =? 10048 return "address already in use"
+        if code =? 10049 return "address not available"
+        if code =? 10054 return "connection reset"
+        if code =? 10053 return "connection aborted"
+        if code =? 10051 return "network unreachable"
+        if code =? 10065 return "host unreachable"
+        if code =? 10060 return "timed out"
+        if code =? 10013 return "permission denied"
+        return "socket error {code}"
+    }
+} else {
+    __socket=(domain:int32 kind:int32 protocol:int32):>int32 => $extern(name='socket')
+    __close_c=(fd:int32):>int32 => $extern(name='close')
+    __bind_c=(fd:int32 address:ptr<uint8> length:uint32):>int32 => $extern(name='bind')
+    __listen_c=(fd:int32 backlog:int32):>int32 => $extern(name='listen')
+    __connect_c=(fd:int32 address:ptr<uint8> length:uint32):>int32 => $extern(name='connect')
+    __send_c=(fd:int32 data:ptr<uint8> length:uint64 flags:int32):>int64 => $extern(name='send')
+    __recv_c=(fd:int32 data:ptr<uint8> length:uint64 flags:int32):>int64 => $extern(name='recv')
+    __name_c=(fd:int32 address:ptr<uint8> length:ptr<int32>):>int32 => $extern(name='getsockname')
+    __setsockopt=(fd:int32 level:int32 name:int32 value:ptr<int32> length:uint32):>int32 => $extern(name='setsockopt')
+    __getsockopt=(fd:int32 level:int32 name:int32 value:ptr<int32> length:ptr<uint32>):>int32 => $extern(name='getsockopt')
+    __poll=(fds:ptr<__PollFd> count:uint64 timeout:int32):>int32 => $extern(name='poll')
+    __inet_pton=(family:int32 text:string out:ptr<uint8>):>int32 => $extern(name='inet_pton')
+
+    __PollFd:type=[fd:int32 events:int16 revents:int16]
+    const __AF_INET:int32=2
+    const __READ:int32=1
+    const __WRITE:int32=4
+
+    __close=(fd:int64):>void=>{__close_c(int32(fd))}
+    __bind=(fd:int64 address:ptr<uint8> length:int32):>int32=>__bind_c(int32(fd) address uint32(length))
+    __listen=(fd:int64 backlog:int32):>int32=>__listen_c(int32(fd) backlog)
+    __connect=(fd:int64 address:ptr<uint8> length:int32):>int32=>__connect_c(int32(fd) address uint32(length))
+    __name=(fd:int64 address:ptr<uint8> length:ptr<int32>):>int32=>__name_c(int32(fd) address length)
+    __receive=(fd:int64 data:ptr<uint8> length:int64):>int64=>__recv_c(int32(fd) data uint64(length) 0)
+    __poll_one=(fd:int64 events:int32 timeout:int32):>int32=>{
+        let fds:array<__PollFd>=[__PollFd[int32(fd) wrap<int16>(events) 0]]
+        if __poll(fds.ptr 1 timeout) <=? 0 return 0
+        return int32(fds[0].revents)
+    }
+    __reuse_address=(fd:int64):>void=>{
+        let on:array<int32>=[1]
+        __setsockopt(int32(fd) __SOL_SOCKET __SO_REUSEADDR on.ptr 4)
+    }
+    __socket_error=(fd:int64):>int32=>{
+        let code:array<int32>=[0]
+        let length:array<uint32>=[4]
+        if __getsockopt(int32(fd) __SOL_SOCKET __SO_ERROR code.ptr length.ptr) not=? 0 return __last_error()
+        return code[0]
+    }
+
+    if $target.os =? "mac" {
+        __error_location=():>ptr<int32> => $extern(name='__error')
+        __accept_c=(fd:int32 address:ptr<uint8>? length:ptr<uint32>?):>int32 => $extern(name='accept')
+        const __AF_INET6:int32=30
+        const __SOL_SOCKET:int32=0xffff
+        const __SO_REUSEADDR:int32=4
+        const __SO_ERROR:int32=0x1007
+        # (sockaddr starts with its length on macOS)
+        __family_field=(family:int32 size:int64):>uint16=>wrap<uint16>((family << 8) | size)
+        # Blocking sockets: each call waits for readiness first. No SIGPIPE on send.
+        __open=(family:int32):>int64=>{
+            let fd=__socket(family 1 6)
+            if fd <? 0 return -1
+            let on:array<int32>=[1]
+            __setsockopt(fd __SOL_SOCKET 0x1022 on.ptr 4)
+            return int64(fd)
+        }
+        __accept=(fd:int64):>int64=>{
+            let got=__accept_c(int32(fd) none none)
+            if got <? 0 return -1
+            let on:array<int32>=[1]
+            __setsockopt(got __SOL_SOCKET 0x1022 on.ptr 4)
+            return int64(got)
+        }
+        __send=(fd:int64 data:ptr<uint8> length:int64):>int64=>__send_c(int32(fd) data uint64(length) 0)
+        __again=(code:int32):>bool=>code =? 35 or code =? 4
+        __in_progress=(code:int32):>bool=>code =? 36 or code =? 4
+        __describe=(code:int32):>string=>{
+            if code =? 61 return "connection refused"
+            if code =? 48 return "address already in use"
+            if code =? 49 return "address not available"
+            if code =? 54 return "connection reset"
+            if code =? 53 return "connection aborted"
+            if code =? 32 return "connection closed"
+            if code =? 51 return "network unreachable"
+            if code =? 65 return "host unreachable"
+            if code =? 60 return "timed out"
+            if code =? 13 return "permission denied"
+            return "socket error {code}"
+        }
+    } else {
+        __error_location=():>ptr<int32> => $extern(name='__errno_location')
+        __accept4=(fd:int32 address:ptr<uint8>? length:ptr<uint32>? flags:int32):>int32 => $extern(name='accept4')
+        const __AF_INET6:int32=10
+        const __SOL_SOCKET:int32=1
+        const __SO_REUSEADDR:int32=2
+        const __SO_ERROR:int32=4
+        __family_field=(family:int32 size:int64):>uint16=>wrap<uint16>(family)
+        # Nonblocking, closed on exec. Sends never raise SIGPIPE.
+        __open=(family:int32):>int64=>int64(__socket(family 1 | 0x800 | 0x80000 6))
+        __accept=(fd:int64):>int64=>int64(__accept4(int32(fd) none none 0x800 | 0x80000))
+        __send=(fd:int64 data:ptr<uint8> length:int64):>int64=>__send_c(int32(fd) data uint64(length) 0x4000)
+        __again=(code:int32):>bool=>code =? 11 or code =? 4
+        __in_progress=(code:int32):>bool=>code =? 115 or code =? 4
+        __describe=(code:int32):>string=>{
+            if code =? 111 return "connection refused"
+            if code =? 98 return "address already in use"
+            if code =? 99 return "address not available"
+            if code =? 104 return "connection reset"
+            if code =? 103 return "connection aborted"
+            if code =? 32 return "connection closed"
+            if code =? 101 return "network unreachable"
+            if code =? 113 return "host unreachable"
+            if code =? 110 return "timed out"
+            if code =? 13 return "permission denied"
+            return "socket error {code}"
+        }
+    }
+    __last_error=():>int32=>__error_location()[0]
+}
+
+# Small writes go out at once (no Nagle delay): requests and replies are messages.
+__prepare=(handle:int64):>void=>{
+    let on:array<int32>=[1]
+    if $target.os =? "windows" {
+        __setsockopt(handle 6 1 on.ptr 4)
+    } else {
+        __setsockopt(int32(handle) 6 1 on.ptr 4)
+    }
+}

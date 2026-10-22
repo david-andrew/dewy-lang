@@ -5,8 +5,8 @@
 #
 # Keys: type a title, Tab moves to the tags field, Enter saves, Up/Down
 # select, F2 opens, F4 toggles done, Delete removes, Escape clears filters.
-# HELD on open question 12, like host.dewy: the page reaches the server
-# through the implementation library's `net`, not a designed fetch/socket API.
+# A page cannot open TCP sockets: it reaches the host (host.dewy's `relay`)
+# through net's WebSocket messages, not the blocking TCP calls.
 import net
 from p"../97_notes_service/http.dewy" import Limits, HttpError
 from p"../97_notes_service/client.dewy" import ApiCall, ClientConn, to_wire, receive_bytes

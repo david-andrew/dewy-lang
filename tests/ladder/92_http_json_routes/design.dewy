@@ -1,7 +1,8 @@
 # Tier 3 / 92_http_json_routes / milestone 30
 # Acceptance: HTTP/1.1 request parser and JSON integer-schema CRUD routing with status codes and transactional validation; deterministic transport transcripts.
-# OPEN: Portable socket/listen/accept, request framing limits and host capability APIs are unspecified. This tests the API handler, not a listening network server.
-# This executable projection does not establish the OPEN obligation.
+# The handler is checked in-process, then main carries the same requests over a
+# loopback listener (net), one connection each, framed by Content-Length.
+import net
 Request:type=[method:string target:string body:string]
 Response:type=[status:int64 body:string]
 Service:type=[values:dict<string int64> writes:int64]
@@ -206,7 +207,94 @@ boundaries=():>void=>{
     $runtime_assert service.writes =? 3
 }
 
-main=():>void=>{
+# How much of `buffer` the first request takes (its head, the blank line and
+# Content-Length more), once all of it has arrived; at most `largest`.
+request_length=(buffer:string largest:int64=65536):>int64 | none=>{
+    # (positions count graphemes, as 92's lengths do: "\r\n" is one)
+    let blank="\r\n\r\n"
+    let head=buffer.find(blank)
+    if head is? Missing {
+        blank="\n\n"
+        head=buffer.find(blank)
+    }
+    if head is? Missing return if buffer.length >? largest largest else none
+    let declared:int64=0
+    loop line in buffer[$clamp 0..head).split("\n") {
+        let prefix="Content-Length: "
+        if line.startswith(prefix) declared=integer(line[$clamp prefix.length..].trim_end()) ?? 0
+    }
+    let total=head+blank.length+max(declared 0)
+    if total >? largest return largest
+    if total >? buffer.length return none
+    return total
+}
+
+reason=(status:int64):>string=>{
+    if status =? 200 return "OK"
+    if status =? 201 return "Created"
+    if status =? 204 return "No Content"
+    if status =? 400 return "Bad Request"
+    if status =? 404 return "Not Found"
+    if status =? 405 return "Method Not Allowed"
+    return "Error"
+}
+
+# One request per connection: read until it has all arrived (or the client
+# stops sending), answer it and close.
+answer=(@service:Service socket:net.TcpStream):>void | net.NetError | Canceled=>{
+    let received:array<uint8>=[]
+    loop true {
+        let buffer=(received as string | none) ?? ""
+        let length=request_length(buffer)
+        if length is? none {
+            let got=net.tcp_receive(socket)
+            if got isnt? none {
+                received.extend(got or_throw)
+                continue
+            }
+        }
+        let request=if length is? int64 buffer[$clamp 0..length) else buffer
+        let response=serve(@service request)
+        net.tcp_send(socket "HTTP/1.1 {response.status} {reason(response.status)}\r\nContent-Length: {response.body.length}\r\nConnection: close\r\n\r\n{response.body}") or_throw
+        return
+    }
+}
+
+# Answers connections until its task group is canceled.
+listen=(@service:Service listener:net.TcpListener):>void | net.NetError | Canceled=>{
+    loop true {
+        let socket=net.tcp_accept(listener) or_throw
+        let answered=answer(@service socket)
+        net.tcp_close(socket)
+        if answered is? Canceled return Canceled
+    }
+}
+
+# The client: each request on its own connection, printing the status and body
+# of each response; then it cancels the group, which ends the server's accept.
+fetch_all=(server:TaskGroup port:int64 requests:array<string>):>void | net.NetError | Canceled=>{
+    loop request in requests {
+        let client=net.tcp_connect("127.0.0.1" port) or_throw
+        net.tcp_send(client request) or_throw
+        let reply:array<uint8>=[]
+        loop true {
+            let got=net.tcp_receive(client)
+            if got is? none break
+            reply.extend(got or_throw)
+        }
+        net.tcp_close(client)
+        let text=(reply as string | none) ?? ""
+        let blank="\r\n\r\n"
+        let head=text.find(blank)
+        if head is? Missing return net.NetError["no response head"]
+        let status=split_words(text[$clamp 0..head])
+        let code=if status.length >=? 2 status[1] else "?"
+        printl("{code} {text[$clamp head+blank.length..]}")
+    }
+    cancel(server)
+}
+
+main=():>void | net.NetError | Canceled=>{
     boundaries()
     selfcheck()
     let service=Service[[] 0]
@@ -224,10 +312,13 @@ main=():>void=>{
         wire("GET" "/items/pear")
         "GET /health HTTP/1.0\n\n"
     ]
-    loop request in requests {
-        let response=serve(@service request)
-        printl("{response.status} {response.body}")
+    let listener=net.tcp_listen(0) or_throw
+    concurrent server {
+        spawn(server) fetch_all(server listener.port requests)
+        # (this thread serves until the client's task cancels the group)
+        listen(@service listener)
     }
+    net.tcp_close(listener)
     $runtime_assert service.values.length =? 1
     $runtime_assert service.values["pear"] =? -4
     $runtime_assert service.writes =? 4

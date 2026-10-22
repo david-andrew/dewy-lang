@@ -2,8 +2,7 @@
 # Acceptance: the notes service of 97 behind a real loopback listener:
 # accept, partial reads, pipelined requests, Connection: close and EOF, with
 # the same framing and answers as the in-process harness.
-# OPEN 12: portable socket listen/accept and host capabilities are unspecified.
-from p"host.dewy" import Host, start, port, poll, stop
+from p"host.dewy" import Host, serve
 import net
 
 show=(data:array<uint8>):>void=>{
@@ -11,40 +10,47 @@ show=(data:array<uint8>):>void=>{
     loop line in text.replace("\r\n" "\n").split("\n") printl("  {line}".trim_end())
 }
 
-# Send `parts` one at a time, letting the server run between them, then read
-# until the server closes the connection.
-session=(@host:Host label:string parts:array<string>):>void=>{
+# Send `parts` one at a time, giving the server a moment to read each alone,
+# then read until the server closes the connection.
+session=(port:int64 label:string parts:array<string>):>void | net.NetError | Canceled=>{
     printl("== {label}")
-    let client=net.tcp_connect("127.0.0.1" port(host) 1.0)
-    $runtime_assert client >=? 0
-    let reply:array<uint8>=[]
+    let client=net.tcp_connect("127.0.0.1" port) or_throw
     loop part in parts {
-        $runtime_assert net.tcp_send(client part)
-        poll(@host 0.05)
-        reply.extend(net.tcp_receive(client 0.01))
+        net.tcp_send(client part) or_throw
+        sleep(20ms) or_throw
     }
-    let rounds=0
-    loop not net.tcp_closed(client) and rounds <? 200 {
-        poll(@host 0.0)
-        reply.extend(net.tcp_receive(client 0.01))
-        rounds+=1
+    let reply:array<uint8>=[]
+    loop true {
+        let got=net.tcp_receive(client)
+        if got is? none break
+        reply.extend(got or_throw)
     }
     net.tcp_close(client)
     show(reply)
 }
 
-main=():>void=>{
-    let host=Host()
-    $runtime_assert start(@host 0)
-    $runtime_assert port(host) >? 0
+# The client: three sessions, then it cancels the group, which ends the
+# server's wait in accept.
+visit=(server:TaskGroup port:int64):>void | net.NetError | Canceled=>{
     let create=r'{"title":"Socket note","tags":["net"]}'
-    session(@host "split create, then close" [
+    session(port "split create, then close" [
         "POST /api/notes HTTP/1.1\r\nHost: lo"
         "cal\r\nContent-Type: application/json\r\nContent-Length: {bytes(create).length}\r\n\r\n{create[0..10)}"
         "{create[10..]}GET /api/notes/1 HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
-    ])
-    session(@host "framing error closes" ["GET /api/health HTTP/1.1\r\nHost: local\r\n\r\nGET / HTTP/9\r\n\r\n"])
-    session(@host "http/1.0" ["GET /api/stats HTTP/1.0\r\n\r\n"])
+    ]) or_throw
+    session(port "framing error closes" ["GET /api/health HTTP/1.1\r\nHost: local\r\n\r\nGET / HTTP/9\r\n\r\n"]) or_throw
+    session(port "http/1.0" ["GET /api/stats HTTP/1.0\r\n\r\n"]) or_throw
+    cancel(server)
+}
+
+main=():>void | net.NetError | Canceled=>{
+    let host=Host()
+    let listener=net.tcp_listen(0) or_throw
+    concurrent server {
+        spawn(server) visit(server listener.port)
+        # (this thread serves until the client's task cancels the group)
+        serve(@host listener)
+    }
     printl("accepted {host.accepted}")
-    stop(@host)
+    net.tcp_close(listener)
 }

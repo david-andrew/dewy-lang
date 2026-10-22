@@ -1,0 +1,12 @@
+# modes: native native-release
+# A `within` deadline wakes a blocked accept: the wait gives Timeout.
+import net
+
+main=():>void | net.NetError=>{
+    let server=net.tcp_listen(0) or_throw
+    let started=time()
+    let got=within(100ms @net.tcp_accept(server))
+    printl(got is? Timeout)
+    printl(time() - started <? 2.0)
+    net.tcp_close(server)
+}

@@ -1,79 +1,62 @@
 # The notes server on real sockets. Raw HTTP arrives over TCP (browsers,
-# curl); the wasm UI, which cannot open TCP sockets in a page, sends the same
-# request bytes as WebSocket messages. Both feed the transport-free server
-# connections of 97_notes_service, so the sockets only move bytes.
+# curl): `serve` accepts connections with the blocking net module and feeds
+# each one's bytes to the transport-free connections of 97_notes_service, so
+# the sockets only move bytes. It runs until its task group is canceled.
 #
-# HELD on open question 12 (portable sockets/FFI boundary): `net` is the
-# implementation library's host API, not a designed Dewy surface. Which
-# capability may listen, how accept/receive report failure as values, and
-# what a web or freestanding target offers instead are unsettled.
+# The wasm UI, which cannot open TCP sockets in a page, sends the same request
+# bytes as WebSocket messages (the game library's net messages, re-exported by
+# net); `relay` answers them. A host runs one of the two: serving both at once
+# needs the service shared between tasks, and the router calls through
+# function values, which a spawned task cannot (its writes are race-checked).
 import net
 from p"../97_notes_service/router.dewy" import Service
 from p"../97_notes_service/server.dewy" import Connection, feed, finish
 
-Host:type=[
-    service:Service=Service()
-    listener:int64=-1
-    sockets:dict<int64 Connection>=[]
-    peers:dict<int64 Connection>=[]
-    accepted:int64=0
-]
+Host:type=[service:Service=Service() accepted:int64=0]
 
-start=(@host:Host port:int64 websocket_port:int64=0):>bool=>{
-    host.listener=net.tcp_listen(port)
-    if host.listener <? 0 return false
-    if websocket_port >? 0 and not net.listen(websocket_port) return false
-    return true
+# One connection until it closes: the connection buffers partial reads, answers
+# pipelined requests in order, and answers a partial request left at the end.
+serve_connection=(@service:Service socket:net.TcpStream):>void | net.NetError | Canceled=>{
+    let conn=Connection()
+    loop not conn.closed {
+        let data=net.tcp_receive(socket)
+        let reply:array<uint8>=[]
+        if data is? none {
+            reply=finish(@service @conn)
+        } else {
+            reply=feed(@service @conn data or_throw)
+        }
+        if reply.length >? 0 net.tcp_send(socket reply) or_throw
+    }
 }
 
-port=(host:Host):>int64=>net.tcp_port(host.listener)
-
-# One pass over every socket: accept, read, answer, close. Returns whether
-# anything happened, so a caller can sleep when idle.
-poll=(@host:Host wait:float64=0.0):>bool=>{
-    let busy=false
+# Accepts connections one at a time, counting them, until canceled. A failed
+# connection is closed and the server goes on.
+serve=(@host:Host listener:net.TcpListener):>void | net.NetError | Canceled=>{
     loop true {
-        let socket=net.tcp_accept(host.listener wait)
-        if socket <? 0 break
-        host.sockets[socket]=Connection()
+        let socket=net.tcp_accept(listener) or_throw
         host.accepted+=1
-        busy=true
-    }
-    let finished:array<int64>=[]
-    loop [socket conn] in host.sockets {
-        let data=net.tcp_receive(socket wait)
-        let state=conn
-        let reply=feed(@host.service @state data)
-        if net.tcp_closed(socket) reply.extend(finish(@host.service @state))
-        if reply.length >? 0 {
-            busy=true
-            if not net.tcp_send(socket reply) state.closed=true
-        }
-        host.sockets[socket]=state
-        if state.closed finished.push(socket)
-    }
-    loop socket in finished {
+        let served=serve_connection(@host.service socket)
         net.tcp_close(socket)
-        host.sockets.remove(socket)
+        if served is? Canceled return Canceled
     }
+}
+
+# Answers the WebSocket peers' requests that have arrived; one message carries
+# one request and each peer keeps its own framing state. Returns whether
+# anything happened, so a caller can sleep when idle.
+relay=(@host:Host @peers:dict<int64 Connection>):>bool=>{
+    let busy=false
     loop event in net.receive() {
         busy=true
         if event.kind =? net.NetKind.joined {
-            host.peers[event.peer]=Connection()
+            peers[event.peer]=Connection()
         } else if event.kind =? net.NetKind.left {
-            host.peers.remove(event.peer)
-        } else if event.peer in? host.peers {
-            # One message carries one request; each peer keeps its own framing state.
-            let reply=feed(@host.service @host.peers[event.peer] event.data)
+            peers.remove(event.peer)
+        } else if event.peer in? peers {
+            let reply=feed(@host.service @peers[event.peer] event.data)
             if reply.length >? 0 net.send(event.peer reply)
         }
     }
     return busy
-}
-
-stop=(@host:Host):>void=>{
-    loop socket in host.sockets.keys() net.tcp_close(socket)
-    host.sockets=[]
-    net.tcp_close(host.listener)
-    host.listener=-1
 }

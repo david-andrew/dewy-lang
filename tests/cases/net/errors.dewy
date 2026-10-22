@@ -1,0 +1,21 @@
+# modes: native native-release
+# Failures are NetError values: a refused connection, an address or port that
+# is not one, a port already taken.
+import net
+
+main=():>void | net.NetError=>{
+    let server=net.tcp_listen(0) or_throw
+    let port=server.port
+    net.tcp_close(server)
+    let refused=net.tcp_connect("127.0.0.1" port)
+    if refused is? net.NetError printl(refused.message.replace("{port}" "PORT"))
+    printl(net.tcp_connect("300.1.2.3" 80))
+    printl(net.tcp_connect("not an address" 80))
+    printl(net.tcp_connect("127.0.0.1" 70000))
+    printl(net.tcp_listen(-1))
+    let held=net.tcp_listen(0) or_throw
+    let taken=net.tcp_listen(held.port)
+    if taken is? net.NetError printl(taken.message.replace("{held.port}" "PORT"))
+    net.tcp_close(held)
+    printl(net.tcp_connect("127.0.0.1" port) is? net.NetError)
+}

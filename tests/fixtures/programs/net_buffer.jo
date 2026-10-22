@@ -1,0 +1,16 @@
+# Two peers' messages read in one receive: the second peer overwrites the shared
+# scratch buffer before either event is read, and each event keeps its own bytes.
+import net
+
+argv = args()
+loop i in [0..2):
+    fd = to_int(argv[i + 1]) ?? -1
+    net.__net_peers.push(net.__NetPeer(id = i, fd = fd, state = 2, client = true))
+events = net.receive()
+if events.len() != 2: exit(1)
+loop i in [0..2):
+    if events[i].peer != i or events[i].kind != .message: exit(2)
+    if events[i].data.len() != 65536 + i: exit(3)
+    loop b in events[i].data:
+        if b != u8(40 + i): exit(4)
+exit(42)

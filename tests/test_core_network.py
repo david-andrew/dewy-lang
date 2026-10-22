@@ -210,7 +210,7 @@ peer.onclose = () => {assert.ok(won, 'host closed without the winning state'); c
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_network_shared_read_buffer(compiler, tmp_path, release):
     binary = tmp_path / 'buffers'
-    build(compiler, ROOT / 'tests/fixtures/programs/net_buffer.dewy', binary, release)
+    build(compiler, ROOT / 'tests/fixtures/programs/net_buffer.jo', binary, release)
     first, first_writer = socket.socketpair()
     second, second_writer = socket.socketpair()
     with first, first_writer, second, second_writer:

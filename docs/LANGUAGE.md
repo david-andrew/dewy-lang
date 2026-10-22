@@ -2470,6 +2470,49 @@ paths of its files and those made with `mkdir`. Processes are `SpawnError` there
 On Windows, `run` works and `run_silent`, `spawn` and `capture` are not available
 yet (`SpawnError`).
 
+## Networking
+
+`import net` gives blocking TCP sockets. Each call waits for its result and
+gives a `NetError` (an `error` with a `message`) when the system refuses, or
+`Canceled` when its task is canceled: a task waiting in `tcp_accept`,
+`tcp_connect`, `tcp_receive` or `tcp_send` wakes up when its group is canceled
+or its `within` deadline passes.
+
+```dewy
+import net
+main=():>void | net.NetError | Canceled=>{
+    let server=net.tcp_listen(0) or_throw           # 0: a free port, on loopback
+    let client=net.tcp_connect("127.0.0.1" server.port) or_throw
+    let peer=net.tcp_accept(server) or_throw
+    net.tcp_send(client "hello") or_throw
+    let got=net.tcp_receive(peer)
+    if got is? none return                           # the client closed
+    printl((got or_throw) as string | none)
+    loop stream in [client peer] net.tcp_close(stream)
+    net.tcp_close(server)
+}
+```
+
+- `tcp_listen(port host="127.0.0.1" backlog=128)` gives a `TcpListener`, whose
+  `port` is the one bound (the system's choice for port 0). `host` is a numeric
+  IPv4 or IPv6 address; the default admits only this machine.
+- `tcp_accept(listener)` waits for the next connection, a `TcpStream`.
+- `tcp_connect(host port)` connects to a numeric address or `localhost`.
+- `tcp_send(stream data)` sends all of a string or `array<uint8>`, waiting while
+  the other side is slow to take it.
+- `tcp_receive(stream largest=65536)` waits for some bytes and gives what has
+  arrived, at most `largest`; `none` once the other side has closed and
+  everything it sent has been read. Check `none` before handling the errors, as
+  for other streaming reads.
+- `tcp_close` closes a stream or a listener.
+
+Cancellation reaches the group's own thread as well: a server can accept on the
+thread that opened the group while a spawned client cancels the group when it
+is done. Tasks run on Linux for now; elsewhere the calls simply block. Native
+targets use the system's C library (Winsock on Windows); a web page has no TCP
+sockets. The game library's WebSocket messages (`net.listen`, `net.connect`,
+`net.receive`, `net.send`, below) come with the same import.
+
 ## Foreign functions
 
 A function whose body is the metatag `$extern` is a C function. Its signature is
@@ -3457,9 +3500,7 @@ and native/browser endpoint details. `net.listen(port largest=4096)` can bound
 incoming message size for a small signaling service; ordinary games retain the
 16 MiB default. Fragmented WebSocket messages retain their bytes across polls.
 
-For native TCP, `net.tcp_listen(0)` lets the operating system choose an available
-port. `net.tcp_port(socket)` returns the bound local port, or `-1` on failure
-(including in a browser).
+For TCP streams of your own protocol, see [Networking](#networking).
 
 `import netplay` adds rollback sessions: each peer runs the game from ordinary
 value snapshots, predicts remote input, then rewinds and replays when late input

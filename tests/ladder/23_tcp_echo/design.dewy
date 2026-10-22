@@ -1,28 +1,24 @@
 import net
-exchange=(payload:string):>string=>{
-    let server=net.tcp_listen(0)
-    $runtime_assert (server >=? 0)
-    let port=net.tcp_port(server)
-    $runtime_assert (port >? 0)
-    let client=net.tcp_connect("127.0.0.1" port 1.0)
-    $runtime_assert (client >=? 0)
-    let peer=net.tcp_accept(server 1.0)
-    $runtime_assert (peer >=? 0)
-    $runtime_assert (net.tcp_send(client payload))
-    let received=net.tcp_receive(peer 1.0)
-    $runtime_assert (net.tcp_send(peer received))
-    let echoed=str_from_bytes(net.tcp_receive(client 1.0))
+exchange=(payload:string):>string | net.NetError | Canceled=>{
+    let server=net.tcp_listen(0) or_throw
+    $runtime_assert (server.port >? 0)
+    let client=net.tcp_connect("127.0.0.1" server.port) or_throw
+    let peer=net.tcp_accept(server) or_throw
+    net.tcp_send(client payload) or_throw
+    let received=(net.tcp_receive(peer) ?? []) or_throw
+    net.tcp_send(peer received) or_throw
+    let echoed=(net.tcp_receive(client) ?? []) or_throw
     net.tcp_close(client)
     net.tcp_close(peer)
     net.tcp_close(server)
-    return echoed
+    return (echoed as string | none) ?? "<not UTF-8>"
 }
-main=():>void=>{
-    let one=exchange("hello café")
+main=():>void | net.NetError | Canceled=>{
+    let one=exchange("hello café") or_throw
     $runtime_assert (one =? "hello café")
-    let two=exchange("second request")
+    let two=exchange("second request") or_throw
     $runtime_assert (two =? "second request")
-    let three=exchange("0123456789")
+    let three=exchange("0123456789") or_throw
     $runtime_assert (three.length =? 10)
     let checksum=0
     loop b in bytes(one) {checksum+=b as int64}

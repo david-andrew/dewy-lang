@@ -1,0 +1,30 @@
+# modes: native native-release
+# A loopback TCP echo on an ephemeral port: bytes go each way, then the end of
+# the stream is none.
+import net
+
+text=(data:array<uint8> | none):>string=>{
+    if data is? none return "<end>"
+    return (data as string | none) ?? "<not UTF-8>"
+}
+
+main=():>void | net.NetError | Canceled=>{
+    let server=net.tcp_listen(0) or_throw
+    printl(server.port >? 0)
+    let client=net.tcp_connect("127.0.0.1" server.port) or_throw
+    let peer=net.tcp_accept(server) or_throw
+    net.tcp_send(client "hello café") or_throw
+    let request=net.tcp_receive(peer)
+    if request is? none return
+    let got=request or_throw
+    printl(text(got))
+    net.tcp_send(peer got) or_throw
+    let reply=net.tcp_receive(client)
+    if reply is? none return
+    printl(text(reply or_throw))
+    net.tcp_close(client)
+    let after=net.tcp_receive(peer)
+    printl(after is? none)
+    net.tcp_close(peer)
+    net.tcp_close(server)
+}

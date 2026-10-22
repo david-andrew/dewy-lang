@@ -1,0 +1,45 @@
+# modes: native native-release
+# Canceling a task wakes its blocked accept and receive: they give Canceled.
+import net
+
+wait_for_client=(server:net.TcpListener):>string=>{
+    let got=net.tcp_accept(server)
+    if got is? Canceled return "accept: Canceled"
+    if got is? net.NetError return "accept: {got.message}"
+    return "accept: a connection"
+}
+
+wait_for_bytes=(stream:net.TcpStream):>string=>{
+    let got=net.tcp_receive(stream)
+    if got is? Canceled return "receive: Canceled"
+    if got is? none return "receive: end"
+    if got is? net.NetError return "receive: {got.message}"
+    return "receive: bytes"
+}
+
+main=():>void | net.NetError | Canceled=>{
+    let server=net.tcp_listen(0) or_throw
+    let started=time()
+    concurrent g {
+        let accepting=spawn(g) wait_for_client(server)
+        sleep(50ms)
+        cancel(g)
+    }
+    printl(accepting)
+    let client=net.tcp_connect("127.0.0.1" server.port) or_throw
+    let peer=net.tcp_accept(server) or_throw
+    concurrent h {
+        let receiving=spawn(h) wait_for_bytes(peer)
+        sleep(50ms)
+        cancel(h)
+    }
+    printl(receiving)
+    # (woken at once, not after a timeout)
+    printl(time() - started <? 2.0)
+    # The connection still works after the canceled wait.
+    net.tcp_send(client "still here") or_throw
+    printl(wait_for_bytes(peer))
+    net.tcp_close(client)
+    net.tcp_close(peer)
+    net.tcp_close(server)
+}
