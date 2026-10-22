@@ -154,7 +154,12 @@ GATE_SLOTS = int(os.environ.get('DEWY_GATE_SLOTS', '2'))
 
 
 def gate_slot():
-    """Hold one of the machine-wide full-gate slots (a file lock) for the rest of the process."""
+    """Hold one of the machine-wide full-gate slots (a file lock) for the rest of the process.
+
+    Nested runs (a test that runs the gate) inherit the parent's slot: waiting
+    for a second slot there would deadlock against the parent."""
+    if os.environ.get('DEWY_GATE_SLOT_HELD'):
+        return None
     from tools.filelock import try_lock_exclusive
     directory = Path.home() / '.cache' / 'dewy-gates'
     directory.mkdir(parents=True, exist_ok=True)
@@ -163,6 +168,7 @@ def gate_slot():
         for slot in range(max(1, GATE_SLOTS)):
             handle = (directory / f'slot{slot}.lock').open('w')
             if try_lock_exclusive(handle):
+                os.environ['DEWY_GATE_SLOT_HELD'] = '1'
                 return handle
             handle.close()
         if not waited:
@@ -230,7 +236,8 @@ def test(binary: Path, arguments: list[str], quick: bool) -> int:
     python = ROOT / '.venv/bin/python'
     if not python.exists():
         python = Path(sys.executable)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(('DEWY_', 'SLOPPY_'))}
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(('DEWY_', 'SLOPPY_')) or k == 'DEWY_GATE_SLOT_HELD'}
     env.update(DEWY_CORE_COMPILER=str(binary), PYTEST_DISABLE_PLUGIN_AUTOLOAD='1')
     if quick:
         arguments = ['-m', 'core_quick', *arguments]
