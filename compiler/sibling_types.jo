@@ -1,0 +1,204 @@
+# Literals of sibling record types (one minted family) keep their positions:
+# `[Circle[...] Square[...]]` is the positional `[Circle Square]`, usable where
+# `array<Shape>` is expected. A binding the rest of its block writes covers its
+# elements instead (`array<Circle|Square>`), and straight-line knowledge of its
+# contents narrows constant-index reads (`shapes[2]` after a known push).
+# Demand: only heterogeneous sibling literals start any of this; the write scan
+# is O(rest of the block) once per such binding, and each later statement and
+# write costs O(1) map work while some binding is known.
+use 'util.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'errors.jo'
+
+SIBLING_CAP = 8
+
+struct SiblingKnown:
+    types: int[]
+    owner: int = 0
+    depth: int = 0
+    block: int = 0
+
+sibling_literals: {int: bool} = {}
+sibling_known: {int: SiblingKnown} = {}
+sibling_block = 0
+sibling_index = 0
+sibling_extending = 0
+sibling_pending: int[]
+
+sibling_descends = (t0: int, p: int) -> bool:
+    t = prune(t0)
+    loop t != 0:
+        if type_eq(t, p): return true
+        t = nominal_parent.get(t, 0)
+    false
+
+# The family two or more distinct record types among a literal's elements share, or 0.
+sibling_parent = (n: int) -> int:
+    if nkids(n) < 2: return 0
+    first = prune(ntype(kid(n, 0)))
+    distinct = false
+    loop c in kids(n):
+        t = prune(ntype(c))
+        if tkind(t) != .struct_ or is_lit(c): return 0
+        if not type_eq(t, first): distinct = true
+    if not distinct: return 0
+    p = first
+    loop p != 0:
+        all = true
+        loop c in kids(n):
+            if all and not sibling_descends(ntype(c), p): all = false
+        if all: return p
+        p = nominal_parent.get(p, 0)
+    0
+
+sibling_literal = (n: int) -> int:
+    el: int[]
+    loop c in kids(n): el.push(prune(ntype(c)))
+    nodes[n].kind = .tuple
+    sibling_literals[n] = true
+    mk_tuple(el)
+
+# A positional value whose every position fits `elem` becomes an array: a
+# literal in place, a local by reading each position.
+sibling_array_source = (n: int, from: int, elem0: int) -> bool:
+    elem = prune(elem0)
+    if not sibling_literals.has(n) and not (nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.local))): return false
+    if not dewy_at(nodes[n].pos): return false
+    loop i in [0..int(types[from].nargs)):
+        ti = prune(targ(from, i))
+        if not (type_eq(ti, elem) or sibling_descends(ti, elem) or (is_union(elem) and union_index(elem, ti) >= 0)): return false
+    true
+
+sibling_to_array = (n: int, from: int, to: int) -> int:
+    elem = int(types[prune(to)].elem)
+    pos = nodes[n].pos
+    if sibling_literals.has(n) and nodes[n].kind == .tuple:
+        nodes[n].kind = .array
+        loop i in [0..nkids(n)): set_kid(n, i, coerce(kid(n, i), elem))
+        nodes[n].type = i32(to)
+        return n
+    l = int(nodes[n].sym)
+    items: int[]
+    loop i in [0..int(types[from].nargs)):
+        ix = mk(.index, pos)
+        nodes[ix].a = i32(mk_ident_local(l, pos))
+        at = bc_int(i, pos)
+        nodes[ix].b = i32(at)
+        set_list(ix, [at])
+        items.push(ix)
+    arr = mk(.array, pos)
+    set_list(arr, items)
+    nodes[n] = nodes[arr]
+    check_expr(n, to)
+    n
+
+# `let shapes=[Circle[...] Square[...]]`: positional unless the rest of its block
+# writes it; then its elements' union, with its contents known from here.
+sibling_binding = (s: int, t: int) -> int:
+    name = int(nodes[s].name)
+    written = true
+    if sibling_block != 0 and sibling_index < nkids(sibling_block) and kid(sibling_block, sibling_index) == s:
+        written = false
+        loop i in [sibling_index + 1..nkids(sibling_block)):
+            if not written and sibling_writes(kid(sibling_block, i), name): written = true
+    if not written: return t
+    members: int[]
+    loop i in [0..int(types[t].nargs)):
+        m = prune(targ(t, i))
+        if not members.contains(m): members.push(m)
+    to = mk_array(mk_union(members))
+    nodes[s].b = i32(sibling_to_array(int(nodes[s].b), t, to))
+    sibling_pending = []
+    loop i in [0..int(types[t].nargs)): sibling_pending.push(prune(targ(t, i)))
+    to
+
+# Whether unchecked syntax may write the binding `name`: an assignment into it,
+# an `@` of it, a method call on it, a mutable loop over it (conservative).
+sibling_writes = (n: int, name: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .ident: return int(nodes[n].name) == name and has_flag(n, NF_MUT)
+    if k == .assign and sibling_route_name(int(nodes[n].a)) == name: return true
+    if k == .call and nodes[int(nodes[n].a)].kind == .field and sibling_route_name(int(nodes[int(nodes[n].a)].a)) == name: return true
+    if (k == .for_ or k == .lhead) and has_flag(n, NF_MUT) and sibling_route_name(int(nodes[n].a)) == name: return true
+    if sibling_writes(int(nodes[n].a), name) or sibling_writes(int(nodes[n].b), name): return true
+    if sibling_writes(int(nodes[n].c), name) or sibling_writes(int(nodes[n].d), name): return true
+    loop c in kids(n):
+        if sibling_writes(c, name): return true
+    if k != .lambda and k != .fn_:
+        loop c in kids2(n):
+            if sibling_writes(c, name): return true
+    false
+
+sibling_route_name = (n0: int) -> int:
+    n = n0
+    loop n != 0 and (nodes[n].kind == .field or nodes[n].kind == .index): n = int(nodes[n].a)
+    if n != 0 and nodes[n].kind == .ident: return int(nodes[n].name)
+    0
+
+sibling_establish = (l: int):
+    if sibling_pending.len() == 0: return
+    sibling_known[l] = SiblingKnown(types = sibling_pending, owner = int(ctxs[cx].inst), depth = int(ctxs[cx].loop_depth), block = sibling_block)
+    sibling_pending = []
+
+# A write the knowledge cannot follow ends it.
+sibling_forget = (l: int):
+    if l != sibling_extending and sibling_known.has(l): sibling_known.remove(l)
+
+# A statement of block b while some binding's contents are known: `xs.push(v)`
+# as a statement of the declaring block appends v's record type.
+sibling_statement = (s: int, b: int):
+    l = 0
+    arg = 0
+    if nodes[s].kind == .exprstmt and not has_flag(s, NF_CHECKED):
+        call = int(nodes[s].a)
+        if nodes[call].kind == .call and nkids(call) == 1 and nodes[int(nodes[call].a)].kind == .field and name_of(int(nodes[int(nodes[call].a)].name)) == "push":
+            base = int(nodes[int(nodes[call].a)].a)
+            if nodes[base].kind == .ident:
+                sy = lookup(int(nodes[base].name))
+                if sy != 0 and syms[sy].kind == .local and sibling_known.has(int(syms[sy].ref)):
+                    l = int(syms[sy].ref)
+                    arg = kid(call, 0)
+    if l == 0:
+        check_stmt(s)
+        return
+    # (the pushed value's own type, before the push converts it to the union)
+    t = 0
+    if not ctx_dependent(arg) and not is_lit(arg):
+        t = prune(check_expr(arg, 0))
+        add_flag(arg, NF_CHECKED)
+    sibling_extending = l
+    check_stmt(s)
+    sibling_extending = 0
+    if not sibling_known.has(l): return
+    known = sibling_known[l]
+    if known.block != b or known.owner != int(ctxs[cx].inst) or known.depth != int(ctxs[cx].loop_depth) or known.types.len() >= SIBLING_CAP or t == 0 or tkind(t) != .struct_:
+        sibling_known.remove(l)
+        return
+    known.types.push(t)
+    sibling_known[l] = known
+
+# `xs[k]` with a constant k whose record type is known here: that member.
+sibling_index_narrow = (n: int, t: int) -> int:
+    if nodes[n].kind != .index or cur_assign != 0 or has_flag(n, NF_MUT) or not is_union(prune(t)): return t
+    base = int(nodes[n].a)
+    if nodes[base].kind != .ident or nodes[base].aux != i32(int(SK.local)): return t
+    l = int(nodes[base].sym)
+    if not sibling_known.has(l): return t
+    if int(locals[l].flags) & (LF_SHARED | LF_ADDR | LF_CAPTURE) != 0: return t
+    e = int(nodes[n].b)
+    loop e != 0 and nodes[e].kind == .conv: e = int(nodes[e].a)
+    if e == 0 or nodes[e].kind != .int_lit: return t
+    k = nodes[e].ival
+    known = sibling_known[l]
+    if k < 0 or k >= known.types.len() or known.owner != int(ctxs[cx].inst) or known.depth != int(ctxs[cx].loop_depth): return t
+    member = known.types[k]
+    vi = union_index(prune(t), member)
+    if vi < 0: return t
+    inner = nodes.len()
+    nodes.push(nodes[n])
+    nodes[n] = Node(kind = .narrow, pos = nodes[inner].pos, a = i32(inner), aux = i32(vi), type = i32(member), flags = i32(NF_CHECKED))
+    member

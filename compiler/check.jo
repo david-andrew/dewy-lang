@@ -31,6 +31,7 @@ use 'arena.jo'
 use 'ownership.jo'
 use 'reflection.jo'
 use 'string_domains.jo'
+use 'sibling_types.jo'
 use 'dewy_methods.jo'
 use 'directives.jo'
 use 'ffi.jo'
@@ -2560,8 +2561,12 @@ check_block = (b: int, expected: int, want_value: bool) -> int:
     result = T_VOID
     nodes[b].aux = 0
     n = nkids(b)
+    saved_block = sibling_block
+    saved_index = sibling_index
+    sibling_block = b
     loop i in [0..n):
         s = kid(b, i)
+        sibling_index = i
         if i == n - 1 and want_value and value_capable(s):
             if nodes[s].kind == .if_ or nodes[s].kind == .iflet:
                 es = mk(.exprstmt, nodes[s].pos)
@@ -2577,7 +2582,10 @@ check_block = (b: int, expected: int, want_value: bool) -> int:
             if result == T_NEVER: nodes[b].aux = 0
             add_flag(s, NF_CHECKED)
             continue
-        check_stmt(s)
+        if sibling_known.len() > 0: sibling_statement(s, b)
+        else: check_stmt(s)
+    sibling_block = saved_block
+    sibling_index = saved_index
     if want_value and nodes[b].aux == 0 and n > 0 and stmt_terminates(kid(b, n - 1)): result = T_NEVER
     if want_value and has_flag(b, NF_FLOW_RETURNS): result = T_NEVER
     # (an array built by pushing has a solved inference variable inside its type: the plain type
@@ -4137,6 +4145,7 @@ check_vardecl = (s: int):
         if t != 0: nodes[s].b = i32(coerce(int(nodes[s].b), t))
         else:
             t = et
+            if tkind(t) == .tuple and sibling_literals.has(int(nodes[s].b)): t = sibling_binding(s, t)
             if has_flag(int(nodes[s].b), NF_LITERAL):
                 t = decimal_binding_type(nodes[s].pos, lit_default(int(nodes[s].b)))
                 literal_init = true
@@ -4162,6 +4171,7 @@ check_vardecl = (s: int):
     if tk == .null_: fatal(nodes[s].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(nodes[s].pos, "`{nm}: Enemy? = none`", "`let {nm}:Enemy? = none`")}")
     if tk == .typeval or tk == .module: fatal(nodes[s].pos, "'{nm}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
     l = new_local(int(nodes[s].name), t, nodes[s].pos)
+    if sibling_pending.len() > 0: sibling_establish(l)
     if literal_init: decimal_local(l, nodes[s].pos, t)
     if nodes[s].b != 0 and quat_nodes.has(int(nodes[s].b)): quat_locals[l] = true
     locals[l].flags = i32(LF_DECL)

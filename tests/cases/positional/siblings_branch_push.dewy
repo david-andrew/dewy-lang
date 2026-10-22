@@ -1,0 +1,10 @@
+Shape:type=type of any & [name:string="shape"]
+Circle:type=type of Shape & [r:int64]
+Square:type=type of Shape & [s:int64]
+run=(c:bool)=>{
+    let xs=[Circle[r=1] Square[s=2]]
+    if c {xs.push(Square[s=3])}
+    xs.push(Circle[r=4])
+    printl(xs[2].r)
+}
+main=()=>run(true)

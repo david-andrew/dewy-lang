@@ -1,0 +1,9 @@
+Shape:type=type of any & [name:string="shape"]
+Circle:type=type of Shape & [r:int64]
+Square:type=type of Shape & [s:int64]
+flip=(@ys:array<Circle|Square>)=>{ys[0]=Square[s=0]}
+main=()=>{
+    let xs=[Circle[r=1] Square[s=2]]
+    flip(@xs)
+    printl(xs[0].r)
+}

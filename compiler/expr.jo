@@ -26,6 +26,7 @@ use 'ide.jo'
 use 'dewy_methods.jo'
 use 'ffi.jo'
 use 'isolation.jo'
+use 'sibling_types.jo'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -376,6 +377,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if from == T_NEVER: return true
     fk = types[from].kind
     tk = types[to].kind
+    if fk == .tuple and tk == .array and n != 0 and sibling_array_source(n, from, int(types[to].elem)): return true
     if str_sets.len() > 1:
         fs = str_set_of(from)
         ts = str_set_of(to)
@@ -558,6 +560,7 @@ coerce = (n: int, target: int) -> int:
         if to != T_NEVER and types[to].kind != .void_ and types[to].kind != .var and types[to].kind != .param: wrap_conv(n, CV.none_, to)
         return n
     tk = types[to].kind
+    if types[from].kind == .tuple and tk == .array and sibling_array_source(n, from, int(types[to].elem)): return sibling_to_array(n, from, to)
     if (from == T_MATH_INT and math_rep_type(to)) or (to == T_MATH_INT and math_rep_type(from)):
         wrap_conv(n, .none_, to)
         return n
@@ -1036,6 +1039,7 @@ check_place = (n: int, for_mut: bool):
             if for_mut and string_domains.len() > 0 and ntype(n) == T_STR: string_domain_write(n, 0)
             if for_mut and ntype(n) == T_MATH_INT: int_domain_write(n, 0, -1)
             note_write(r, via_closure, nodes[n].pos)
+            if sibling_known.len() > 0: sibling_forget(r)
             if ag >= 0: note_global_write(ag)
             return
         if nodes[n].aux == i32(int(SK.global)):
@@ -1817,6 +1821,8 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
         return -1
     if tkind(ntype(a)) == .polyfn and types[fp].kind == .fn_ and poly_matches(prune(ntype(a)), fp): return 0
     r = match_type(pat, ntype(a), binds, 0)
+    # (sibling records in their positions, `[Circle Square]`, for an `array<Shape>`)
+    if r < 0 and types[fp].kind == .array and tkind(ntype(a)) == .tuple and not has_var(fp) and sibling_array_source(a, prune(ntype(a)), int(types[fp].elem)): return 2
     # (a function value through a wrapper: wider result, narrower parameters)
     if r < 0 and types[fp].kind == .fn_ and tkind(ntype(a)) == .fn_ and not has_var(fp) and fn_value_adapts(a, prune(ntype(a)), fp): return 2
     if r < 0 and types[fp].kind == .array and is_nd(ntype(a)):
@@ -8495,7 +8501,10 @@ check_expr = (n: int, expected: int) -> int:
     if k == .call: return check_call_expr(n, expected)
     if k == .field: return check_field_expr(n, expected)
     if k == .if_: return ce_finish(n, check_if(n, ce_expected(expected)), expected)
-    if k == .index: return check_index_expr(n, expected)
+    if k == .index:
+        it = check_index_expr(n, expected)
+        if sibling_known.len() > 0: it = sibling_index_narrow(n, it)
+        return it
     if k == .str_lit: return check_str_expr(n, expected)
     check_expr_other(n, expected)
 
@@ -9529,25 +9538,28 @@ check_expr_other = (n: int, expected: int) -> int:
                     # ([Kind.a, .b]: the first names the enum for the rest)
                     if elt == 0 and it != 0 and tkind(it) == .enum_: elt = it
                 else if elt == 0 and not charlike(c): elt = it
-            if elt == 0:
-                if allchar: elt = T_STR
-                else if decimal != 0: elt = lit_default(decimal)
-                else if anyfloat: elt = T_FLOAT
-                else if anyunsigned: elt = T_U64
-                else: elt = if files[pos_file(nodes[n].pos)].is_dewy: T_MATH_INT else: T_INT
-            # ([1, "two", 3]: an array holds one kind of value)
-            coerce_hint = jd(nodes[n].pos, " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, make a struct or a union)", " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, use a record type or a union such as `array<int64|string>`)")
-            # ([Bool[true] Null]: siblings of a minted family are held as their parent)
-            if nominal_parent.get(prune(elt), 0) != 0 and dewy_at(nodes[n].pos):
-                coerce_hint = " (an array holds one kind of value, here {dt(elt)}, taken from the first element; for any member of its family, name the parent: `let values:array<{dt(nominal_parent[prune(elt)])}>=[...]`)"
-            loop i in [0..nkids(n)):
-                c = kid(n, i)
-                if has_flag(c, NF_SPREAD): coerce(c, mk_array(elt))
-                else: coerce(c, elt)
-            coerce_hint = ""
-            if spread: nodes[n].aux = 2
-            if et != 0 and tkind(prune(et)) != .var: t = ex
-            else: t = mk_array(elt)
+            # (`[Circle[...] Square[...]]`: siblings keep their positions, sibling_types.jo)
+            if et == 0 and not spread and dewy_at(nodes[n].pos) and sibling_parent(n) != 0: t = sibling_literal(n)
+            else:
+                if elt == 0:
+                    if allchar: elt = T_STR
+                    else if decimal != 0: elt = lit_default(decimal)
+                    else if anyfloat: elt = T_FLOAT
+                    else if anyunsigned: elt = T_U64
+                    else: elt = if files[pos_file(nodes[n].pos)].is_dewy: T_MATH_INT else: T_INT
+                # ([1, "two", 3]: an array holds one kind of value)
+                coerce_hint = jd(nodes[n].pos, " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, make a struct or a union)", " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, use a record type or a union such as `array<int64|string>`)")
+                # ([Bool[true] Null]: siblings of a minted family are held as their parent)
+                if nominal_parent.get(prune(elt), 0) != 0 and dewy_at(nodes[n].pos):
+                    coerce_hint = " (an array holds one kind of value, here {dt(elt)}, taken from the first element; for any member of its family, name the parent: `let values:array<{dt(nominal_parent[prune(elt)])}>=[...]`)"
+                loop i in [0..nkids(n)):
+                    c = kid(n, i)
+                    if has_flag(c, NF_SPREAD): coerce(c, mk_array(elt))
+                    else: coerce(c, elt)
+                coerce_hint = ""
+                if spread: nodes[n].aux = 2
+                if et != 0 and tkind(prune(et)) != .var: t = ex
+                else: t = mk_array(elt)
     else if k == .map_lit:
         # ({x: 1, y: 2}: JavaScript's object, with names the program does not have)
         loop i in [0..nkids(n)):

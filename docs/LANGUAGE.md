@@ -1536,6 +1536,17 @@ proven in bounds like an array index. `.length` is the number of positions,
 and `let [n name]=entry` unpacks it. It prints as an array, `[7 "seven"]`, and
 is how implementation-language tuples such as `(str, u8[])` appear in Dewy.
 
+A literal of sibling records (types minted in one family) keeps their
+positions: with `Circle` and `Square` minted from `Shape`,
+`let shapes=[Circle[r=1] Square[s=2]]` is a `[Circle Square]`, so `shapes[0].r`
+reads a `Circle`, and it is accepted where an `array<Shape>` is expected. When
+the rest of its block writes the binding (a push, an element store, `@shapes`,
+any method call on it), its type is instead the union of its elements,
+`array<Circle|Square>`. Straight-line code still knows its contents: after
+`shapes.push(Circle[r=3])` in the same block, `shapes[2]` is a `Circle`. That
+knowledge ends at any other write, inside loops and closures, after a push in a
+branch, and past eight positions.
+
 An ordinary `array<T>` remains growable. Assigning or passing one to a fixed-array
 value checks its exact length at runtime and copies the elements. An empty
 growable array therefore fails that check. Converting back creates a growable array.

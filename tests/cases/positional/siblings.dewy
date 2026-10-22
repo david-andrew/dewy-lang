@@ -1,0 +1,24 @@
+# quick
+# Sibling literals keep their positions; a written binding covers its
+# elements, and known pushes keep exact positions.
+Shape:type=type of any & [name:string='shape']
+Circle:type=type of Shape & [r:int64]
+Square:type=type of Shape & [s:int64]
+count=(xs:array<Shape>):>int64=>xs.length
+main=()=>{
+    let shapes = [Circle[r=1] Square[s=2]]
+    printl(shapes[0].r)
+    printl(shapes[1].s)
+    printl(count(shapes))
+    printl(count([Circle[r=1] Square[s=2] Circle[r=3]]))
+    let more = [Circle[r=5] Square[s=6]]
+    more.push(Circle[r=7])
+    printl(more[2].r)
+    printl(more[1].s)
+    printl(more.length)
+    loop i in [0..more.length) {
+        printl(more[i] is? Circle)
+    }
+    more[0] = Square[s=9]
+    printl(more[0] is? Square)
+}
