@@ -42,11 +42,10 @@ main=():>void=>exit(entry()) entry=()=>{
 ])
 def test_overlapping_mutable_slices_rejected(compiler, tmp_path, arguments):
     source = tmp_path / 'overlap.dewy'
-    source.write_text(SWAP + '''main=()=>{
+    source.write_text(SWAP + '''main=():>void=>{
  let a:array<int64>=[1 2 3 4]
  let mid:int64=2
  swap(''' + arguments + ''')
- return 0
 }''')
     run = subprocess.run([compiler, 'check', source], capture_output=True, text=True)
     assert run.returncode != 0
@@ -75,13 +74,12 @@ walk=(@a:array<int64> @scratch:array<int64>):>void=>{
   return 0
  })
 }
-main=()=>{
+main=():>void=>{
  let a:array<int64>=[loop i in [0..2049) i as int64]
  let scratch:array<int64>=[loop i in [0..2049) 0 as int64]
  let saved=a
  loop round in [0..3) {walk(@a @scratch)}
  loop i in [0..2049) {assert(a[i] =? saved[i]+3 and scratch[i] =? 2*a[i])}
- return 0
 }
 '''
 
@@ -132,12 +130,11 @@ copy=(src:array<int64> @out:array<int64> first:int64):>void=>{
   return 0
  })
 }
-main=()=>{
+main=():>void=>{
  let src:array<int64>=[loop i in [0..1031) i as int64]
  let out=src
  copy(src @out[..] 0)
  loop i in [0..1031) {assert(src[i] =? i and out[i] =? i+1)}
- return 0
 }
 '''
 

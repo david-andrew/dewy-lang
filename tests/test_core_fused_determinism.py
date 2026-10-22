@@ -72,14 +72,13 @@ def test_fused_example(compiler, tmp_path, name):
 CALLBACK_VERSIONS = '''Callback:type=(x:int64):>int64
 visit=(callback:Callback):>int64=>callback(3)+callback(4)
 forward=(callback:Callback):>int64=>visit(@callback)
-main=()=>{
+main=():>void=>{
  let n:int64=5
  let named=(x:int64):>int64=>x+n
  let a=visit(@named)
  let b=visit((x:int64):>int64=>x*n)
  let c=forward((x:int64):>int64=>x-n)
  printl"{a} {b} {c} {visit((x:int64):>int64=>x)}"
- return 0
 }
 '''
 

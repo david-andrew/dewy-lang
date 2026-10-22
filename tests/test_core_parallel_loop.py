@@ -16,7 +16,7 @@ def compiler():
     return Path(path).resolve(strict=True)
 
 
-PROGRAM = '''main=()=>{
+PROGRAM = '''main=():>void=>{
 let empty:array<int64>=[]
 assert([parallel x in empty x*x] =? [])
 assert([parallel i in [3..3) i] =? [])
@@ -37,7 +37,6 @@ loop round in [0..12) {
 }
 let floats:array<float64>=[1e16 1.0 -1e16 2.0]
 loop round in [0..20) {assert(sum([parallel x in floats x]) =? sum(floats))}
-return 0
 }'''
 
 

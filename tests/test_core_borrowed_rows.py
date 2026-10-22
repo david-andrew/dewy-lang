@@ -12,7 +12,7 @@ read=(a:array<int64>):>int64=>sum(a)
 replace=(@a:array<array<int64>>):>int64=>{a=[[90 91]] return 0}
 first=(a:array<int64> ignored:int64):>int64=>a[0]
 escape=(a:array<array<int64>>):>array<int64>=>{let row=a[0] return row}
-main=()=>{
+main=():>void=>{
  let a:array<array<int64>>=[[1 2] [3 4]]
  let sliced=a[1..]
  assert(sliced =? [[3 4]])
@@ -33,7 +33,6 @@ main=()=>{
  loop i in [0..257) {assert(results[i] =? 181+i)}
  let capture=(i:int64)=>read(a[0])+i
  assert(capture(2) =? 183)
- return 0
 }
 '''
 
