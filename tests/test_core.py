@@ -2151,7 +2151,7 @@ def test_core_applications(compiler, tmp_path, name, target, release):
 def test_core_numeric_example(compiler, tmp_path, target, release):
     source = Path(__file__).resolve().parents[1] / 'examples/trajectory_fit.dewy'
     command, error = build_case_batch(compiler, tmp_path, {'trajectory': source.read_text()},
-                                      ['exit(case_0())'], release, target)
+                                      ['case_0()'], release, target)
     assert error is None, error
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
@@ -2186,7 +2186,7 @@ def test_core_gpu_arrays(compiler, tmp_path, target, backend, release, request):
                        VK_ICD_FILENAMES=str(drivers[0]))
     program = '''import p"@lib/game/gpuarray.jo" as engine
 half=(x:float32):>float32=>x*0.5+0.25
-main=()=>{
+main=():>void=>{
 printl"{gpu_available()} {engine.__gpu_vk}"
 let original:array<float64>=[1.0 2.0 3.0 4.0] let g=gpu(original) let saved=g
 original[0]=99.0
@@ -2225,11 +2225,10 @@ assert(cpu(g).data =? [13.0 14.0 15.0 16.0])
 assert(cpu(saved).data =? [1.0 2.0 3.0 4.0])
 let downloaded=cpu(saved) downloaded[0]=123.0
 assert(cpu(saved).data =? [1.0 2.0 3.0 4.0])
-return 0
 }'''
     example = Path(__file__).resolve().parents[1] / 'examples/terrain_array.dewy'
     command, error = build_case_batch(compiler, tmp_path, {'gpu': program, 'terrain': example.read_text()},
-                                      ['exit(case_0()+case_1())'], release, target)
+                                      ['case_0()', 'case_1()'], release, target)
     assert error is None, error
     ran = subprocess.run(command, env=env, capture_output=True, text=True, timeout=20, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
