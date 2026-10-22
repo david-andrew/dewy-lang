@@ -190,7 +190,7 @@ def test_core_native_tests_check_and_build(compiler, tmp_path):
 @pytest.mark.parametrize('tests', ['', '$test\nalso_checked = () => $expect true\n'])
 @pytest.mark.parametrize(('main', 'error'), [
     ('main=():>void=>exit(missing_main_value)', 'missing_main_value'),
-    ('main=():>void=>exit([1 2])', 'main must return'),
+    ('main=()=>[1 2]', 'main returns void or the errors'),
     ('helper=()=>missing_helper_value\nmain=():>void=>exit(helper())', 'missing_helper_value'),
 ])
 def test_core_check_main_with_tests(compiler, tmp_path, tests, main, error):

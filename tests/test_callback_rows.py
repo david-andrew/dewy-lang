@@ -138,7 +138,7 @@ def test_closure_environment_inventory(compiler, tmp_path, captured):
     capture = '($capture offset x:int64)' if captured else '(x:int64)'
     body = 'x+offset' if captured else 'x+1'
     source.write_text('main=():>void=>{let offset:int64=1\nlet f=' + capture
-                      + ':>int64 & no_effects=>' + body + '\nreturn f(1)}\n')
+                      + ':>int64 & no_effects=>' + body + '\nexit(f(1))}\n')
     result = compile_source(compiler, source, tmp_path, 'default')
     assert (result.returncode != 0) == captured, result.stdout + result.stderr
     if captured:

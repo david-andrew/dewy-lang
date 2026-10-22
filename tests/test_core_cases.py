@@ -58,9 +58,10 @@ def test_core_case_batch_fallbacks(compiler, tmp_path, monkeypatch):
 def test_core_case_void_guess():
     assert cases.returns_void('main=()=>{printl"x"}\n')
     assert cases.returns_void('main = ():>void => {\n    let f=()=>{return 1}\n}\n') is True
-    assert not cases.returns_void('main=():>void=>{printl"x"}\n')
-    assert not cases.returns_void('main=():>void=>{\n    printl"x"\n}\n')
-    assert not cases.returns_void('main=():>void=>exit(entry()) entry=():>int64=>{printl"x"}\n')
+    assert cases.returns_void('main=():>void=>{printl"x"}\n')
+    assert not cases.returns_void('main=()=>{printl"x" return 0}\n')
+    assert not cases.returns_void('main=()=>{\n    printl"x"\n    0\n}\n')
+    assert not cases.returns_void('main=():>int64=>{printl"x"}\n')
     assert not cases.returns_void('main=(args:array<string>)=>{printl"x"}\n')
 
 
