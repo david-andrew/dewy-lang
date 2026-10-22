@@ -11,5 +11,6 @@ mapped[0].push(1) assert(fixed[0] =? [20] and mapped[1] =? [22])
 let pairs=[loop i in 0.. and xs in source i->xs] let old=pairs
 pairs[0].push(1) assert(old[0] =? [99])
 }
-main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+run=()=>{work() let before=alloc_count() loop i in [0..20) work()
 return if alloc_count() =? before 42 else 1}
+main=()=>exit(run())

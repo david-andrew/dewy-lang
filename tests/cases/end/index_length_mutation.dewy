@@ -3,5 +3,6 @@ Series:type=[values:array<int64>]
 let source=Series[[20 22]]
 len=(s:Series)=>{source.values[1]=99 return s.values.length}
 __index__=(s:Series i:int64)=>s.values[i]
-main=()=>{source.values.push(0) let value=source[end-1]
+run=()=>{source.values.push(0) let value=source[end-1]
 return if value =? 22 and source.values[1] =? 99 42 else 1}
+main=()=>exit(run())

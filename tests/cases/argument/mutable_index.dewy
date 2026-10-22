@@ -1,5 +1,6 @@
 # exit: 42
 bump=(@value:int):>void=>{value+=22}
-main=()=>{let values=[20 30] let copy=values let index:int=0
+run=()=>{let values=[20 30] let copy=values let index:int=0
 bump(@values[index])
 return if copy[0]=?20 and values[1]=?30 values[0] else 1}
+main=()=>exit(run())

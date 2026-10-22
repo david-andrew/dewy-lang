@@ -1,4 +1,5 @@
 # exit: 42
 make=()=>{let count=40 return <T>(x:T)=><U>(y:U)=>{count+=1; count}}
-main=()=>{let f=make() let a=f(1) let b=f("x") let c=@a
+run=()=>{let f=make() let a=f(1) let b=f("x") let c=@a
 return if a(true)=?41 and a(1)=?42 and b(1)=?41 and c("a")=?41 42 else 1}
+main=()=>exit(run())

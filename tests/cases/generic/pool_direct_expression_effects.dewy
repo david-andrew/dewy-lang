@@ -3,6 +3,7 @@ Item:type=[values:array<int64> health:int64=10]
 Amount:type=[value:int64]
 let pool:Pool<Item>=[] let h:Handle=[]
 __add__=(a:Amount b:Amount):>int64=>{pool[h].health=99 return a.value+b.value}
-main=()=>{h=pool.add(Item[[20]]) let a=Amount[10] let b=Amount[11]
+run=()=>{h=pool.add(Item[[20]]) let a=Amount[10] let b=Amount[11]
 pool[h].values[0]+=1+(a+b)
 return if pool[h].values[0] =? 42 and pool[h].health =? 10 42 else 1}
+main=()=>exit(run())

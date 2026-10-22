@@ -5,10 +5,11 @@ first=()=>{calls="{calls}a" return 0}
 stop=()=>{calls="{calls}b" return 2}
 column=()=>{calls="{calls}c" return 1}
 replacement=()=>{calls="{calls}v" return [20 50]}
-main=()=>{
+run=()=>{
 let part=source()[[first()..stop()) column()]
 assert(calls =? "sabc" and part.data =? [2 5])
 let a=source() calls=""
 a[[first()..stop()) column()]=replacement()
 assert(calls =? "abcv" and a.data =? [1 20 3 4 50 6])
 return 42}
+main=()=>exit(run())

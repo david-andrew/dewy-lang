@@ -1,8 +1,9 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let m=reshape([loop i in [0..24) i] 2 3 4)
 assert(m[end end end] =? 23 and m[0 end end] =? 11)
 assert(m[[..] end end].data =? [11 23])
 let n=zeros(2 3 4 5) n[end end end end]=42.0
 assert(n[1 2 3 4] =? 42.0 and sum(n) =? 42.0)
 return 42}
+main=()=>exit(run())

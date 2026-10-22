@@ -14,6 +14,7 @@ return result+value[0]
 }
 return 1
 }
-main=()=>{if work() not=? 42 return 1 let before=alloc_count()
+run=()=>{if work() not=? 42 return 1 let before=alloc_count()
 loop i in [0..30) {if work() not=? 42 return 2}
 return if alloc_count() =? before 42 else 3}
+main=()=>exit(run())

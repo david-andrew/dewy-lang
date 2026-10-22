@@ -1,4 +1,5 @@
 # exit: 42
 let value:int64=84 let calls:int64=0
 change=()=>{calls+=1 value=999 return 2}
-main=()=>{value//=change() return if value =? 42 and calls =? 1 42 else 1}
+run=()=>{value//=change() return if value =? 42 and calls =? 1 42 else 1}
+main=()=>exit(run())

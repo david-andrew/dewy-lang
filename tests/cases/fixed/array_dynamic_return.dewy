@@ -3,5 +3,6 @@ Pair:type=array<int length=2>
 let calls:int=0
 source=()=>{calls+=1 return [20 22]}
 make=():>Pair=>source()
-main=()=>{let pair=make() let [a b]=pair
+run=()=>{let pair=make() let [a b]=pair
 return if calls =? 1 a+b else 1}
+main=()=>exit(run())

@@ -1,4 +1,5 @@
 # exit: 42
 pick=(v:uint8|string):>int64=>match v {<255>=>20 <0>=>1 _=>0}
 wide=(v:uint64|string):>int64=>match v {<18446744073709551615>=>21 _=>0}
-main=()=>pick(255)+pick(0)+pick("x")+wide(18446744073709551615)+wide("x")
+run=()=>pick(255)+pick(0)+pick("x")+wide(18446744073709551615)+wide("x")
+main=()=>exit(run())

@@ -2,5 +2,6 @@
 Item:type=[value:int64]
 let xs=[Item[21]]
 rhs=()=>{xs.push(Item[999]) return 1}
-main=()=>{xs[0].value+=rhs()
+run=()=>{xs[0].value+=rhs()
 return if xs[0].value =? 22 and xs[1].value =? 999 42 else 1}
+main=()=>exit(run())

@@ -3,6 +3,7 @@ let reads:int64=0
 __index__=(pool:Pool<array<int64>> h:Handle):>array<int64>=>{
 reads+=1 return pool.items[pool.index_of(h)]
 }
-main=()=>{let pool:Pool<array<int64>>=[] let h=pool.add([20])
+run=()=>{let pool:Pool<array<int64>>=[] let h=pool.add([20])
 pool[h][0]+=22
 return if reads =? 1 and pool.items[0][0] =? 42 42 else 1}
+main=()=>exit(run())

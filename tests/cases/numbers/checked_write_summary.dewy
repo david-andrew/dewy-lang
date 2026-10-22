@@ -34,10 +34,11 @@ early=(n:int):>int=>{
     }
     return total
 }
-main=()=>{
+run=()=>{
     if sum_to(10) not=?45 return 1
     if nested(5) not=?9223372036854775818 return 2
     if boundaries(8) not=?46 return 3
     if early(10) not=?6 return 4
     return 42
 }
+main=()=>exit(run())

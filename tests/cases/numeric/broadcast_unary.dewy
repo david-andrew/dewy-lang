@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let xs=[1 -2 3] let saved=xs
 let negated=.-xs let positive=.+xs
 if negated not=?[-1 2 -3] or positive not=?xs return 1
@@ -9,3 +9,4 @@ if (.-(xs .+ 1) .* 2) not=?[-4 2 -8] return 3
 if (.-xs .^ 2) not=?[-1 -4 -9] return 4
 if (.- .-xs) not=?xs or (.+42) not=?42 or (.-42) not=? -42 return 5
 return 42}
+main=()=>exit(run())

@@ -5,7 +5,8 @@ __index__=(box:Box i:int):>array<int>=>{trace="{trace}g" return box.values[i]}
 __setindex__=(@box:Box i:int value:array<int>)=>{trace="{trace}s" box.values[i]=value}
 at=()=>{trace="{trace}i" return index}
 right=()=>{trace="{trace}r" index=1 return [10]}
-main=()=>{let box=Box[[[1 2] [3 4]]] let saved=box
+run=()=>{let box=Box[[[1 2] [3 4]]] let saved=box
 box[at()] .+= right()
 return if box.values =? [[11 12] [3 4]] and saved.values =? [[1 2] [3 4]]
 and trace =? "igrs" 42 else 1}
+main=()=>exit(run())

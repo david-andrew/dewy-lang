@@ -7,7 +7,7 @@ replace_rows=(@rows:array<Row>):>int64=>{rows=[] return 0}
 replace_global=():>int64=>{global_rows=[] return 0}
 mutating_reader=(row:Row):>int64=>{global_rows=[] return row.values[0]+row.bias}
 return_row=(row:Row):>Row=>row
-main=()=>{
+run=()=>{
 let rows=[Row[[20] 22]] let row=rows[0]
 if read_row(row replace_rows(@rows)) not=?42 return 1
 let global_row=global_rows[0]
@@ -25,3 +25,4 @@ let captured=[Row[[20] 22]] let snapshot=captured[0]
 let clear=($capture @captured)=>{captured=[] return 0}
 return read_row(snapshot clear())
 }
+main=()=>exit(run())

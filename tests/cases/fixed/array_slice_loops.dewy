@@ -5,6 +5,7 @@ work=()=>{let total:int64=0 loop value in make()[..] {total+=value[0]}
 let values=make() loop i in 0.. and value in values[..] {if value[0] not=? values[i][0] return 1}
 loop value in values[..] and expected in [20 22] {if value[0] not=? expected return 2}
 return total}
-main=()=>{if work() not=? 42 return 1 let before=alloc_count()
+run=()=>{if work() not=? 42 return 1 let before=alloc_count()
 loop i in [0..30) {if work() not=? 42 return 2}
 return if alloc_count() =? before 42 else 3}
+main=()=>exit(run())

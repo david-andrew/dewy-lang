@@ -1,5 +1,6 @@
 # exit: 42
 # modes: native native-release
 Item:type=[values:array<int64> name:string]
-main=()=>{let a=[Item[[20 22] "answer"]] let b=a[..] b[0].values[0]=99
+run=()=>{let a=[Item[[20 22] "answer"]] let b=a[..] b[0].values[0]=99
 a.clear() return if b[0].name =? "answer" b[0].values[1]+20 else 1}
+main=()=>exit(run())

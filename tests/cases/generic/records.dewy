@@ -5,7 +5,7 @@ Words:type=Box<array<string>>
 Values:type=<T>(array<T>)
 Container:type=<T>(Box<Values<T>>)
 let global:Box<int64>=[value=42]
-main=()=>{
+run=()=>{
     let a=Box<string>["hello"] let b:Box<int64>=[value=20]
     let pair=Pair<Box<string> Box<int64>>[a b]
     let words:Words=[value=["one" "two"]]
@@ -17,3 +17,4 @@ main=()=>{
     return if pair.left.value =? "hello" and copy.value[0] =? "one" and words.history.length =? 0
         and pair.right.value+inferred.value =? 42 and global.value =? 42 42 else 1
 }
+main=()=>exit(run())

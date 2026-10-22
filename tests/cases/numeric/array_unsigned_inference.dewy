@@ -1,5 +1,6 @@
 # exit: 42
 first=<T>(values:array<T>)=>values[0]
-main=()=>{
+run=()=>{
 let a:array<uint64>=[18446744073709551615 1] let b:array<uint64>=[1 18446744073709551615]
 return if a[0]=?b[1] and first<uint64>([18446744073709551615 0])=?18446744073709551615 42 else 1}
+main=()=>exit(run())

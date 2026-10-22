@@ -1,7 +1,8 @@
 # exit: 42
 let key:string="first"
 change=()=>{key="second" return 2}
-main=()=>{let values=["first"->84 "second"->100] let saved=values
+run=()=>{let values=["first"->84 "second"->100] let saved=values
 values[key]//=change() values["second"]%=3
 return if values["first"] =? 42 and values["second"] =? 1 and values.length =? 2
 and saved["first"] =? 84 and saved.length =? 2 42 else 1}
+main=()=>exit(run())

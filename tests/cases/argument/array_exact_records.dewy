@@ -3,4 +3,5 @@ from bigint import BigInt
 Item:type=[values:array<uint64>]
 exact=(values:array<BigInt>)=>values[0]+values[1]
 items=(values:array<Item>)=>values[0].values[0]
-main=()=>{return if exact([20 22]) =? 42 and items([[values=[42]]]) =? 42 42 else 1}
+run=()=>{return if exact([20 22]) =? 42 and items([[values=[42]]]) =? 42 42 else 1}
+main=()=>exit(run())

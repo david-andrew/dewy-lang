@@ -1,6 +1,7 @@
 # exit: 42
-main=()=>{let source=[words=["a"] number=20]
+run=()=>{let source=[words=["a"] number=20]
 source.words.push("b") let copy=[source... number=22]
 copy.words[0]="changed" source.words.push("c")
 return if source.words =? ["a" "b" "c"] and copy.words =? ["changed" "b"]
 source.number+copy.number else 1}
+main=()=>exit(run())

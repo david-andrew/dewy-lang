@@ -5,7 +5,8 @@ return ()=>{let p=values.data() p[0]+=1 return values[0]}}
 work=():>int64=>{let a=make() let b=@a
 let first=a() let second=b() let third=a()
 return if first =? 1 and second =? 1 and third =? 2 42 else 1}
-main=()=>{if work() not=? 42 return 1
+run=()=>{if work() not=? 42 return 1
 let before=alloc_count()
 loop i in [0..20) {if work() not=? 42 return 2}
 return if alloc_count() =? before 42 else 3}
+main=()=>exit(run())

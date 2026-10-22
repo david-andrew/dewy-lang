@@ -1,6 +1,7 @@
 # exit: 42
 read=(x:int @state:int)=>state
 read=(x:string @state:int)=>{state+=1; state}
-main=()=>{let count=40 let f=<T>(x:T)=>read(x @count)
+run=()=>{let count=40 let f=<T>(x:T)=>read(x @count)
 let g=@f
 return if f(1)=?40 and f("a")=?41 and g("b")=?41 and f("c")=?42 42 else 1}
+main=()=>exit(run())

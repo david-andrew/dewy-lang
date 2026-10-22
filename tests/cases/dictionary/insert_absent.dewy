@@ -1,7 +1,8 @@
 # exit: 42
-main=()=>{let values:dict<string int64>=[]
+run=()=>{let values:dict<string int64>=[]
 if not values.insert_if_absent("first" 20) return 1
 if values.insert_if_absent("first" 99) return 2
 if not values.insert_if_absent("second" 22) return 3
 if [values.keys...] not=? ["first" "second"] return 4
 return values["first"]+values["second"]}
+main=()=>exit(run())

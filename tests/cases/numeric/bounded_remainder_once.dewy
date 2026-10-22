@@ -1,6 +1,7 @@
 # exit: 42
 let calls:int64=0
 byte=():>uint8=>{calls+=1 return 255}
-main=()=>{
+run=()=>{
 let word:int64=0 loop i in [0..20) {word=(word*131+(byte() as int64))%1000000007}
 return if calls=?20 and word>=?0 42 else 1}
+main=()=>exit(run())

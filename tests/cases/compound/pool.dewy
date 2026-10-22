@@ -1,5 +1,6 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let pool:Pool<array<int64>>=[] let h=pool.add([84]) let saved=pool
 pool[h][0]//=2
 return if pool[h][0] =? 42 and saved[h][0] =? 84 42 else 1}
+main=()=>exit(run())

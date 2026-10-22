@@ -2,5 +2,6 @@
 let values:array<string>=[str_from_bytes([97 98 99] as array<uint8>)]
 change=()=>{values=[] let noise=str_from_bytes([120 121 122] as array<uint8>)
 return if noise.length=?3 "abc" else "wrong"}
-main=()=>{let same=values[0]=?change()
+run=()=>{let same=values[0]=?change()
 return if same and values.length=?0 42 else 1}
+main=()=>exit(run())

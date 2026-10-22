@@ -1,6 +1,6 @@
 # exit: 42
 # quick
-main=()=>{
+run=()=>{
 let first=["a"->[20] "b"->[22]]
 let second=["b"->[22] "gone"->[0] "a"->[20]]
 second.remove("gone") second.reserve(100)
@@ -14,3 +14,4 @@ if variant not=?other return 4
 let values=[first->42]
 let saved=second second["a"].push(99)
 return if second not in? values values[saved] else 5}
+main=()=>exit(run())

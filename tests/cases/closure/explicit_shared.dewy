@@ -1,7 +1,8 @@
 # exit: 42
 make=()=>{let n=0 return ($capture @n)=>{n+=1; n}}
-main=()=>{let a=make() let b=@a
+run=()=>{let a=make() let b=@a
 if a() not=?1 or b() not=?2 return 1
 let n=10 let read=($capture @n)=>n let inc=($capture @n)=>{n+=1}
 inc() n+=1
 return if read()=?12 and a()=?3 42 else 2}
+main=()=>exit(run())

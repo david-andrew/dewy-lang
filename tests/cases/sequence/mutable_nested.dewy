@@ -1,5 +1,6 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let rows=[[19 20] [21 22]] let saved=rows
 loop @row in rows {loop @value in row value+=1}
 return if rows=?[[20 21] [22 23]] and saved=?[[19 20] [21 22]] 42 else 1}
+main=()=>exit(run())

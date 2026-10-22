@@ -4,5 +4,6 @@ work=():>void=>{
 let values:array<BigInt>=[1 2 123456789012345678901234567890]
 loop i in [0..10) {let text="{values[2]+i}" if text.length <? 30 panic("lost digits")}
 }
-main=()=>{work() let before=alloc_count() loop i in [0..30) {work()}
+run=()=>{work() let before=alloc_count() loop i in [0..30) {work()}
 return if alloc_count() =? before 42 else 1}
+main=()=>exit(run())

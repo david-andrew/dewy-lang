@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let xs=[1 2 3] let saved=xs
 let ys=xs .* 2 .+ [10] .- 1
 if ys not=? [11 13 15] or xs not=? saved return 1
@@ -9,3 +9,4 @@ if (xs .+ 1) .* (xs .- 1) not=? [0 3 8] return 4
 if (20 .+ 22) not=? 42 return 5
 return 42
 }
+main=()=>exit(run())

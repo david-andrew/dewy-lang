@@ -1,7 +1,7 @@
 # exit: 42
 # quick
 Row:type=[name:string values:array<int64>]
-main=()=>{
+run=()=>{
 let xs=[1 2 3] let saved=xs xs.swap(0 2)
 if xs not=?[3 2 1] or saved not=?[1 2 3] return 1
 xs.swap(1 1) xs.swap(0 2)
@@ -18,3 +18,4 @@ if callbacks[0]() not=?1 or callbacks[1]() not=?10 return 6
 counters.swap(0 0)
 return if counters[0]()=?20 and counters[1]()=?2 42 else 7
 }
+main=()=>exit(run())

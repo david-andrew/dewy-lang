@@ -1,7 +1,8 @@
 # exit: 42
 identity=(value)=>value
-main=()=>{
+run=()=>{
 let calls:int64=0
 let values=identity(set[loop value in [20 22 20] {calls+=1; value}])
 let output=[loop a in values or b in [1 2 3] a??0]
 return if calls=?3 and output=?[20 22 0] 42 else 1}
+main=()=>exit(run())

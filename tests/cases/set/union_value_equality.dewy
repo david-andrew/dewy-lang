@@ -1,7 +1,8 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let first:set<int64>|string=set[20 22]
 let second:set<int64>|string=set[22 20]
 if first not=? second return 1
 let values=[first->42]
 return values[second]}
+main=()=>exit(run())

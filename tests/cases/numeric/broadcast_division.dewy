@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let xs=[-7 7 -7 7] let ys=[2 2 -2 -2]
 if (xs .// ys) not=? [-4 3 3 -4] return 1
 if (xs .% ys) not=? [1 1 -1 -1] return 2
@@ -9,3 +9,4 @@ if fractions[2] not=? 7/2 or fractions[3] not=? -7/2 return 4
 if ([1.0 2.0 3.0] ./ 2.0) not=? [0.5 1.0 1.5] return 5
 return 42
 }
+main=()=>exit(run())

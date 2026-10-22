@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let values=[loop i in [0..8) [amount=i]] let saved=values
 loop i in [0,2..6] {values[i].amount+=10}
 let sum:int64=0
@@ -7,3 +7,4 @@ loop i in [7,5..0] {sum+=values[i].amount}
 return if sum =? 16 and values[0].amount =? 10 and values[6].amount =? 16
 and saved[0].amount =? 0 and saved[6].amount =? 6 42 else 1
 }
+main=()=>exit(run())

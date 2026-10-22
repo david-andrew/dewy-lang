@@ -2,7 +2,8 @@
 Item:type=[values:array<int64> health:int64=10]
 let pool:Pool<Item>=[] let handle:Handle=[] let other:Handle=[]
 change=():>int64=>{pool[handle].health=99 handle=other return 22}
-main=()=>{let first=pool.add(Item[[20]]) other=pool.add(Item[[1]]) handle=first
+run=()=>{let first=pool.add(Item[[20]]) other=pool.add(Item[[1]]) handle=first
 pool[handle].values[0]+=change()
 return if pool[first].values[0] =? 42 and pool[first].health =? 10
 and pool[other].values[0] =? 1 and handle =? other 42 else 1}
+main=()=>exit(run())

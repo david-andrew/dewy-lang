@@ -5,9 +5,10 @@ if mode >? 0 {if mode >? 1 return local else return values}
 else {local[0]=99 return local}
 panic("unreachable managed tail")
 }
-main=()=>{let values=[20]
+run=()=>{let values=[20]
 loop i in [0..100) {
 if pick(2 values) not=? [20 22] or pick(1 values) not=? [20]
 or pick(0 values) not=? [99 22] or values not=? [20] return 1
 }
 return 42}
+main=()=>exit(run())

@@ -3,7 +3,7 @@ first=(values:array<int>):>int=>{
 loop value in values[1..] return value
 return 0
 }
-main=()=>{
+run=()=>{
 let values=[99 20 22 100] let before=alloc_count()
 let sum=first(values)
 loop value in values[2..] {sum+=value break}
@@ -12,3 +12,4 @@ let visited=[loop value in values[1..3) value]
 let empty=first([99])
 return if visited=?[20 22] and empty=?0
 and alloc_count()=?before+1 sum else 2}
+main=()=>exit(run())

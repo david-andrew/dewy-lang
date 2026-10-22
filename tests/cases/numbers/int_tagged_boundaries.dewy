@@ -28,8 +28,9 @@ exercise=():>int=>{
     if keys[none] not=?"none" or keys[0] not=?"zero" or keys[top+1] not=?"big" return 12
     return 42
 }
-main=()=>{
+run=()=>{
     let before=alloc_count()
     loop i in [0..20) {let result=exercise() if result not=?42 return result}
     return if alloc_count()=?before 42 else 13
 }
+main=()=>exit(run())

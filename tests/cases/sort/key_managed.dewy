@@ -1,7 +1,7 @@
 # exit: 42
 Item:type=[name:string id:int64 values:array<int64>]
 key=(item:Item):>string=>item.name
-main=()=>{
+run=()=>{
 let items=[loop i in [0..65) Item[if i%2 =? 0 "beta" else "alpha" i [i]]]
 let snapshot=items
 items.sort(key=@key reverse=true)
@@ -10,3 +10,4 @@ if snapshot[0].values[0] not=? 0 return 1
 loop i in [1..33) {if items[i].id not=? i*2 return 2}
 loop i in [33..65) {if items[i].id not=? (i-33)*2+1 return 3}
 return 42}
+main=()=>exit(run())

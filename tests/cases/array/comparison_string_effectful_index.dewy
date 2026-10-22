@@ -1,5 +1,6 @@
 # exit: 42
 let values:array<string>=[str_from_bytes([97 98 99] as array<uint8>)]
 change=()=>{values=[] values.push(str_from_bytes([120 121 122] as array<uint8>)) return 0}
-main=()=>{let same=values[0]=?values[change()]
+run=()=>{let same=values[0]=?values[change()]
 return if not same and values[0]=?"xyz" 42 else 1}
+main=()=>exit(run())

@@ -1,7 +1,8 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let xs:array<float32 length=4>=[1.0 2.0 3.0 4.0] let saved=xs
 xs[1..] .*= 2.0 xs[[true false false true]] ./= 2.0
 let indexes:array<int64 length=2>=[1 2] xs[indexes] .+= 0.5
 return if xs =? [0.5 4.5 6.5 4.0] and saved =? [1.0 2.0 3.0 4.0] 42 else 1
 }
+main=()=>exit(run())

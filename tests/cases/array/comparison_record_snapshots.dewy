@@ -1,7 +1,7 @@
 # exit: 42
 Item:type=[amount:int64]
 change=(@item:Item):>Item=>{item.amount=2 return [amount=1]}
-main=()=>{
+run=()=>{
 let item:Item=[amount=1]
 if item not=? change(@item) or item.amount not=? 2 return 1
 let nested=[values=[1 2]]
@@ -10,3 +10,4 @@ let values=[1 2]
 if values not=? {values=[3 4] [1 2]} or values[0] not=? 3 return 3
 return 42
 }
+main=()=>exit(run())

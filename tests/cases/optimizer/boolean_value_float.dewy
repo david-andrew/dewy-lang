@@ -2,6 +2,7 @@
 probe=(value:float64):>bool=>{
 let ordered=value<?0.0 or value>=?0.0
 return ordered}
-main=()=>{
+run=()=>{
 if not probe(-1.0) or not probe(0.0) or not probe(1.0) or probe(NAN) return 1
 return 42}
+main=()=>exit(run())

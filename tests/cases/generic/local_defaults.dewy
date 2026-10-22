@@ -1,7 +1,8 @@
 # exit: 42
-main=()=>{let count=0
+run=()=>{let count=0
 let f=<T>(x:T step:int64=count+1)=>{count+=step; count}
 let g=@f
 let same=<T>(x:T y:T=x)=>y
 let u=<T>(x:T y=count)=>{count+=y+1; count}
 return if f(1)=?1 and f("a")=?3 and g(true)=?1 and same(42)=?42 and u(1)=?1 and u(false)=?3 and count=?0 42 else 1}
+main=()=>exit(run())

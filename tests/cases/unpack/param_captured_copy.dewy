@@ -1,5 +1,6 @@
 # exit: 42
 make=([a]:array<array<int>>)=>()=>{a[0]+=1 return a[0]}
-main=()=>{let values=[[40]] let next=make(values)
+run=()=>{let values=[[40]] let next=make(values)
 if next() not=?41 or values[0][0] not=?40 return 1
 return next()}
+main=()=>exit(run())

@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 if abs(hypot(3e200 4e200)/5e200-1.0)>?1e-15 return 1
 if abs(hypot(3e-200 4e-200)/5e-200-1.0)>?1e-15 return 2
 if abs(norm([3e200 4e200])/5e200-1.0)>?1e-15 return 3
@@ -7,3 +7,4 @@ if abs(norm([3e-200 4e-200])/5e-200-1.0)>?1e-15 return 4
 let tiny=f64_from_bits(1 as uint64)
 if norm([tiny]) not=?tiny or hypot(tiny 0.0) not=?tiny return 5
 return 42}
+main=()=>exit(run())

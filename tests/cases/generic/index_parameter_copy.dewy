@@ -1,4 +1,5 @@
 # exit: 42
 edit=(pool:Pool<array<int64>> handle:Handle)=>{pool[handle][0]=42 return pool[handle][0]}
-main=()=>{let p:Pool<array<int64>>=[] let h=p.add([1])
+run=()=>{let p:Pool<array<int64>>=[] let h=p.add([1])
 return if edit(p h) =? 42 and p[h][0] =? 1 42 else 1}
+main=()=>exit(run())

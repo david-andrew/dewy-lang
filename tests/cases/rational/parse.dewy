@@ -1,6 +1,6 @@
 # exit: 42
 from rational import parse_rational
-main=()=>{
+run=()=>{
 loop text in ["" "+" "-" "1/" "/2" "1/0" "1/2/3" " 1" "1 /2" "1.5" "１２"] {
     if parse_rational(text) isnt? none return 1
 }
@@ -8,3 +8,4 @@ let half=rational("-0002/-0004")
 if "{half}" not=? "1/2" or "{rational(0 -3)}" not=? "0" return 2
 return if half =? rational("1" "2") and rational(0) =? 0 and rational("+42") =? 42 42 else 3
 }
+main=()=>exit(run())

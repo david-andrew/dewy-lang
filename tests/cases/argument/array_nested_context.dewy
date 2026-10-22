@@ -1,8 +1,9 @@
 # exit: 42
 nested=(values:array<array<uint64>>)=>values[0][0]+values[1][0]
 optional=(values:array<uint64>|none):>uint64=>if values is? none 0 else values[0]
-main=()=>{
+run=()=>{
 let nested_optional:array<array<uint64>>|none=[[42]]
 return if nested([[20] [22]]) =? 42 and optional([42]) =? 42
 and nested_optional is? array<array<uint64>> and nested_optional[0][0] =? 42 42 else 1
 }
+main=()=>exit(run())

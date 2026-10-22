@@ -1,10 +1,11 @@
 # exit: 42
 let calls:int64=0
 start=()=>{calls+=1 return 10}
-main=()=>{
+run=()=>{
 let values=[20 22] let sum:int64=0
 loop i in start().. and x in values {sum+=i+x}
 let high:uint8=255 let last:int64=0
 loop x in [1] and i in high.. {last=i as int64}
 return if sum =? 63 and calls =? 1 and last =? 255 42 else 1
 }
+main=()=>exit(run())

@@ -1,7 +1,8 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let source:set<uint8>=set[20 22]
 let values:array<uint8>=[]
 values.extend(source) values.extend(set[]) values.extend(set[42])
 source.clear()
 return if values =? [20 22 42] values[end] as int64 else 1}
+main=()=>exit(run())

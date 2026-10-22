@@ -1,6 +1,7 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let pool:Pool<array<int64>>=[] let h=pool.add([20])
 let array=[pool] let map=["entry"->pool]
 array[0][h][0]=42 map["entry"][h][0]+=22
 return if array[0][h][0] =? 42 and map["entry"][h][0] =? 42 and pool[h][0] =? 20 42 else 1}
+main=()=>exit(run())

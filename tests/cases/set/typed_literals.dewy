@@ -3,10 +3,11 @@ sum=(values:set<int8>):>int64=>{
 let result:int64=0 loop value in values {result+=value as int64} return result}
 empty=():>set<uint64>=>set[]
 wrap=<T>(value:T):>set<T>=>set[value]
-main=()=>{
+run=()=>{
 let values:set<uint8>=set[20 22 20]
 let absent:set<string>?=set[]
 let high:uint64=uint64.max
 if empty().length not=? 0 or absent is? none or absent.length not=? 0 return 1
 if high not in? wrap(high) or values.length not=? 2 return 2
 return sum(set[20 22])}
+main=()=>exit(run())

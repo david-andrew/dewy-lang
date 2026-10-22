@@ -1957,10 +1957,11 @@ events=():>string=>trace
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_operator_imports(compiler, tmp_path, name, imports, target, release):
-    declarations, body = case_source(name).split('main=', 1)
-    (tmp_path / 'operators.dewy').write_text(declarations)
+    text = exit_main(case_source(name)).replace('main=():>void=>exit(entry())', '')
+    at = re.search(r'(?:^|\s)entry\s*=', text, re.M)
+    (tmp_path / 'operators.dewy').write_text(text[:at.start()])
     source = tmp_path / 'main.dewy'
-    source.write_text(f'from p"operators.dewy" import {imports}\nmain=():>void=>exit(entry()) entry={body}')
+    source.write_text(f'from p"operators.dewy" import {imports}\nmain=():>void=>exit(entry())\n{text[at.start():]}')
     binary = tmp_path / 'operators'
     flags = ['--release'] if release else []
     if target == 'wasm':

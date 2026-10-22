@@ -10,5 +10,6 @@ loop i in [0..20) {
     a=not (not a)
 }
 }
-main=()=>{exercise() let before=alloc_count() exercise()
+run=()=>{exercise() let before=alloc_count() exercise()
 return if before =? alloc_count() 42 else 1}
+main=()=>exit(run())

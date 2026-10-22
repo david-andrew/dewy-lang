@@ -1,8 +1,9 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let a:int8=-1 let b:int16=-2 let c:int32=-3 let d:int64=-4
 if (a transmute uint8) not=?255 or (b transmute uint16) not=?65534 return 1
 if (c transmute uint32) not=?4294967293 or (d transmute uint64) not=?18446744073709551612 return 2
 let x:uint8=128 let y:uint16=32768 let z:uint32=2147483648 let w:uint64=9223372036854775808
 return if (x transmute int8)=?-128 and (y transmute int16)=?-32768 and (z transmute int32)=?-2147483648 and (w transmute int64)=?-9223372036854775808 42 else 3
 }
+main=()=>exit(run())

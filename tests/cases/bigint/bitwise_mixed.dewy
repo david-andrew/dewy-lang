@@ -1,6 +1,6 @@
 # exit: 42
 from bigint import BigInt, bigint
-main=()=>{
+run=()=>{
 let a:BigInt=18446744073709551616 let signed:int64=-1 let word:uint64=18446744073709551615
 let saved=a
 if (a and signed) not=? a or (signed and a) not=? a return 1
@@ -14,3 +14,4 @@ if a not=? saved or (not a) not=? bigint(-18446744073709551617) return 7
 let huge:int64=9223372036854775807
 return if (a >> huge) =? 0 and ((-a) >> huge) =? -1 and (bigint(0) << huge) =? 0 42 else 8
 }
+main=()=>exit(run())

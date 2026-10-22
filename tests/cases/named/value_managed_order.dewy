@@ -2,6 +2,7 @@
 let trace:int=0
 mark=(tag:int value:array<int>)=>{trace=trace*10+tag; value}
 sum_named_arrays=(left:array<int> right:array<int>)=>left[0]+right[0]
-main=()=>{let f=@sum_named_arrays let a=[20] let b=[22]
+run=()=>{let f=@sum_named_arrays let a=[20] let b=[22]
 let answer=f(right=mark(1 b) left=mark(2 a))
 return if answer=?42 and trace=?12 and a[0]=?20 and b[0]=?22 42 else 1}
+main=()=>exit(run())

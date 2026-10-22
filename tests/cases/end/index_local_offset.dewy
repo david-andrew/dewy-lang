@@ -1,5 +1,6 @@
 # exit: 42
 tail=(xs:array<int> offset:int)=>xs[end-offset]
-main=()=>{let xs=[1 20 22] let offset=1
+run=()=>{let xs=[1 20 22] let offset=1
 let a=tail(xs offset) offset=0
 return a+xs[end-offset]}
+main=()=>exit(run())

@@ -1,7 +1,8 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let value:uint64=18446744073709551615
 if value^2 not=? 1 or value^3 not=? value return 1
 if uint64(18446744073709551615)^1 not=? value return 2
 return if (2 as uint64)^63 =? 9223372036854775808 and value^0 =? 1 42 else 3
 }
+main=()=>exit(run())

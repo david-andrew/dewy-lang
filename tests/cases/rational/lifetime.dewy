@@ -4,5 +4,6 @@ let a=rational("123456789012345678901234567890" "9876543210123456789")
 loop i in [1..12) {let value=(a+i)/rational(i 3) let parts=value.divmod(rational(2 7))
 let text="{parts.remainder}" if text.length =? 0 panic("missing fraction")}
 }
-main=()=>{work() let before=alloc_count() loop i in [0..20) {work()}
+run=()=>{work() let before=alloc_count() loop i in [0..20) {work()}
 return if alloc_count() =? before 42 else 1}
+main=()=>exit(run())

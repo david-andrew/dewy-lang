@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let matrix=mat4()
 let product=matrix*{matrix=mat4(2); mat4()}
 if product not=? mat4() return 1
@@ -7,3 +7,4 @@ matrix=mat4()
 let point=matrix*{matrix=mat4(2); vec4(1 2 3 1)}
 return if point =? vec4(1 2 3 1) 42 else 2
 }
+main=()=>exit(run())

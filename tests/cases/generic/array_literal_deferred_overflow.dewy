@@ -1,5 +1,6 @@
 # exit: 42
 choose=<T>(value:array<T>)=>1
 choose=(value:array<int64>)=>42
-main=()=>{let narrow:int32=1
+run=()=>{let narrow:int32=1
 return if choose([2147483648 narrow])=?42 and choose([narrow 2147483648])=?42 42 else 1}
+main=()=>exit(run())

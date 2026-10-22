@@ -6,8 +6,9 @@ if values not=?other return 1
 let noise=[[3->set_effects.Key[99]]]
 return if noise.length=?1 values[0].length*21 else 2
 }
-main=()=>{
+run=()=>{
 set_effects.current_maps=[[1->set_effects.Key[20] 2->set_effects.Key[22]]]
 set_effects.armed=true
 let result=through(set_effects.current_maps)
 return if set_effects.current_maps.length=?0 and not set_effects.armed result else 3}
+main=()=>exit(run())

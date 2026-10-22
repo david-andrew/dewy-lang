@@ -2,5 +2,6 @@
 upper=<T>():>T=>T.max
 lower=<T>():>T=>T.min
 Byte:type=uint8
-main=()=>{let a:Byte=upper<Byte>() let b:int16=lower<int16>()
+run=()=>{let a:Byte=upper<Byte>() let b:int16=lower<int16>()
 return if a =? 255 and b =? -32768 and upper<uint64>() =? 18446744073709551615 42 else 1}
+main=()=>exit(run())

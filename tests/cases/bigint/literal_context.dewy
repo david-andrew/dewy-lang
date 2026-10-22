@@ -1,7 +1,7 @@
 # exit: 42
 from bigint import BigInt, bigint
 read=(value:BigInt=42):>BigInt=>value
-main=()=>{
+run=()=>{
 let values:array<BigInt>=[0 42 -9223372036854775808 18446744073709551615]
 let inferred:array<BigInt>=[1 -2 123456789012345678901234567890]
 let optional:BigInt|none=42
@@ -10,3 +10,4 @@ if values[0] not=? 0 or values[1] not=? 42 or values[2].to_int64() not=? -922337
 if values[3].to_uint64() not=? 18446744073709551615 or inferred[1] not=? -2 return 3
 return if optional =? 42 and read() =? 42 and read(7) =? 7 and bigint(inferred[2]) =? inferred[2] 42 else 4
 }
+main=()=>exit(run())

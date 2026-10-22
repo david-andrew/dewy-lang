@@ -1,8 +1,9 @@
 # exit: 42
 Pair:type=array<int64 length=2>
-main=()=>{let pair:Pair=[20 22] let [a b]=pair
+run=()=>{let pair:Pair=[20 22] let [a b]=pair
 [a b]=[b a]
 let rows:array<Pair length=2>=[[10 11] [12 9]]
 let total:int64=0 loop [left right] in rows {total+=left+right}
 let [[x y] [z w]]=rows
 return if a =? 22 and b =? 20 and x+y+z+w =? 42 total else 1}
+main=()=>exit(run())

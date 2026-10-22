@@ -2,7 +2,8 @@
 Cell:type=[value:int64]
 let cells=[Cell(10) Cell(20)]
 change=()=>{cells[0].value=99 return 1}
-main=()=>{
+run=()=>{
 let saved=cells[0..change())
 return if saved[0].value=?10 and cells[0].value=?99 42 else 1
 }
+main=()=>exit(run())

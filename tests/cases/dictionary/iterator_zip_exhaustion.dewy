@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let values=[0->0 1->99 2->20 3->22 4->99]
 values.remove(1) values.remove(4)
 let count:int64=0 let total:int64=0
@@ -15,3 +15,4 @@ if key isnt? none {if key not=? 2 return 2 count+=1}
 total+=value??0
 }
 return if count =? 1 total else 3}
+main=()=>exit(run())

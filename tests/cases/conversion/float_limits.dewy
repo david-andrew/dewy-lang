@@ -1,5 +1,6 @@
 # exit: 42
 # The extreme values that fit convert exactly; NaN and values beyond them
 # fail their check (float/to_int_checked, float/to_int_nan).
-main=()=>{let top:float64=9223372036854774784.0 let bottom:float64=-9223372036854775808.0 let utop:float64=18446744073709549568.0
+run=()=>{let top:float64=9223372036854774784.0 let bottom:float64=-9223372036854775808.0 let utop:float64=18446744073709549568.0
 return if (top as int64) =? 9223372036854774784 and (bottom as int64) =? -9223372036854775807-1 and (utop as uint64) =? 18446744073709549568 42 else 1}
+main=()=>exit(run())

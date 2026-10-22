@@ -3,6 +3,7 @@ read=(values:array<array<uint16>?>?):>int64=>{
 if values is? none return 0
 let first=values[0] let second=values[1]
 return if first is? none and second isnt? none second[0]+second[1] else 1}
-main=()=>{let absent:array<array<uint16>?>?=none
+run=()=>{let absent:array<array<uint16>?>?=none
 let present:array<array<uint16>?>?=[none [20 22]]
 return if read(absent)=?0 read(present) else 1}
+main=()=>exit(run())

@@ -6,5 +6,6 @@ rows[0].push("changed")
 assert(saved =? [["a" "!"] ["b" "!"] ["c" "!"]])
 assert(rows[0] =? ["a" "!" "changed"])
 }
-main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+run=()=>{work() let before=alloc_count() loop i in [0..20) work()
 return if alloc_count() =? before 42 else 1}
+main=()=>exit(run())

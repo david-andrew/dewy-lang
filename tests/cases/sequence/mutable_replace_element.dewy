@@ -1,6 +1,7 @@
 # exit: 42
 Item:type=[parts:array<int64>]
-main=()=>{let values=[Item[[1]] Item[[2]]] let saved=values
+run=()=>{let values=[Item[[1]] Item[[2]]] let saved=values
 loop @item in values {let old=item item=Item[[20 22]] old.parts[0]=99}
 return if values[0].parts=?[20 22] and values[1].parts=?[20 22]
 and saved[0].parts=?[1] and saved[1].parts=?[2] 42 else 1}
+main=()=>exit(run())

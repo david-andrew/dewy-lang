@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let xs=[1 2 3 4] let saved=xs
 let positions=[0 2] xs[positions] .+= [10 20]
 xs[[false true false true]] .*= 3
@@ -9,3 +9,4 @@ let empty_mask:array<bool>=[] let empty:array<int64>=[]
 empty[empty_mask] .+= 1 assert(empty.length =? 0)
 return if xs =? [13 5 23 11] and saved =? [1 2 3 4] 42 else 1
 }
+main=()=>exit(run())

@@ -1,8 +1,9 @@
 # exit: 42
-main=()=>{let xs:array<int64 length=6>=[10 20 30 40 50 60]
+run=()=>{let xs:array<int64 length=6>=[10 20 30 40 50 60]
 xs[0,2..]=42 xs[5,3..1]=[1 2 3]
 if xs not=? [42 3 42 2 42 1] return 1
 let selected=[4 0] xs[selected]=[8 9]
 let mask=[false true false true false false] xs[mask]=[20 22]
 let r=[5,3..1] xs[r]=7
 return if xs =? [9 7 42 7 8 7] 42 else 2}
+main=()=>exit(run())

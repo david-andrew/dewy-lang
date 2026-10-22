@@ -1,5 +1,6 @@
 # exit: 42
-main=()=>{const n=20 const word="hello" const xs=[22]
+run=()=>{const n=20 const word="hello" const xs=[22]
 let a=($capture n $capture word $capture xs)=>if word=?"hello" n+xs[0] else 1
 let b=($capture @n $capture @word $capture @xs)=>if word=?"hello" n+xs[0] else 1
 return if a()=?42 and b()=?42 42 else 1}
+main=()=>exit(run())

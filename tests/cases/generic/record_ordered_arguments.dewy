@@ -3,7 +3,7 @@ Box:type=<T>[value:T]
 Pair:type=<A B>[left:A right:B]
 score=(box:Box<array<int64>>):>int64=>box.value[0]
 score=(box:Box<array<string>>):>int64=>box.value[0].length
-main=()=>{
+run=()=>{
 let numbers=Box<array<int64>>[[40]]
 let words=Box<array<string>>[["hi"]]
 let fixed=Box<array<int64>>[[20 22]]
@@ -12,3 +12,4 @@ let saved=numbers numbers.value[0]=99
 if fixed.value[0]+fixed.value[1] not=?42 or saved.value[0] not=?40 return 1
 return if reversed.left.value[0]=?"hi" and reversed.right.value[0]=?40
 score(pair.left)+score(pair.right) else 2}
+main=()=>exit(run())

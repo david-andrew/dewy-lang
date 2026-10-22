@@ -1,4 +1,5 @@
 # exit: 42
 pick=(v:int64|string):>int64=>match v {
 <0>=>0 <"yes">=>1 _=>if v is? int64 v else v.length}
-main=()=>pick(0)+pick("yes")+pick(38)+pick("abc")
+run=()=>pick(0)+pick("yes")+pick(38)+pick("abc")
+main=()=>exit(run())

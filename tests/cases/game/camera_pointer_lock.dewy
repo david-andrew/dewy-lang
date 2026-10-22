@@ -1,6 +1,6 @@
 # exit: 42
 import p"@lib/game/window.jo" as input
-main=()=>{
+run=()=>{
 input.__mouse_x=72.0 input.__mouse_y=48.0
 input.__mouse_dx=640.0 input.__mouse_dy=400.0
 mouse_lock(true)
@@ -14,3 +14,4 @@ input.__mouse_dx=-640.0 input.__mouse_dy=-400.0
 input.__mouse_motion_reset()
 return if input.__mouse_dx=?0.0 and input.__mouse_dy=?0.0
 and input.__mouse_x=?72.0 and input.__mouse_y=?48.0 42 else 4}
+main=()=>exit(run())

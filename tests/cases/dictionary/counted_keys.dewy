@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{let values=["a"->10 "b"->20]
+run=()=>{let values=["a"->10 "b"->20]
 let count:int64=0
 loop i in 0.. and key in values {
 if i =? 0 and key not=? "a" return 1
@@ -7,3 +7,4 @@ if i =? 1 and key not=? "b" return 2
 count+=1
 }
 return if count =? 2 42 else 3}
+main=()=>exit(run())

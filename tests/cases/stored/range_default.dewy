@@ -1,7 +1,8 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let r:IntRange=[0..0) let values:array<IntRange>=[] values.resize(3)
 let count:int64=0 loop x in r {count+=1}
 loop item in values {loop x in item {count+=1} if 0 in? item return 1}
 return if count =? 0 and 0 notin? r 42 else 2
 }
+main=()=>exit(run())

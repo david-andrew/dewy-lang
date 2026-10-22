@@ -8,5 +8,6 @@ if value.to_float64() <? 0.99 or value.to_float32() <? 0.99 panic("lost ratio")
 if huge.to_float64() <? 1e20 or huge.to_float32() <? 1e20 panic("lost integer")
 }
 }
-main=()=>{work() let before=alloc_count() loop i in [0..20) {work()}
+run=()=>{work() let before=alloc_count() loop i in [0..20) {work()}
 return if alloc_count() =? before 42 else 1}
+main=()=>exit(run())

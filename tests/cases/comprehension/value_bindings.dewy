@@ -1,10 +1,11 @@
 # exit: 42
 bump=(@i:int64 x:int64)=>{i+=10 return i+x}
 change=(@x:int)=>{x+=1 return x}
-main=()=>{
+run=()=>{
 let values=[10 20 30]
 let indexed=[loop i in 0.. and x in values bump(@i x)]
 let edited=[loop x in values {let local=x change(@local)}]
 return if indexed =? [20 31 42] and edited =? [11 21 31]
 and values =? [10 20 30] 42 else 1
 }
+main=()=>exit(run())

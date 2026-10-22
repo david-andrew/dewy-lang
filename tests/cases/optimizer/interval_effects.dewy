@@ -2,7 +2,7 @@
 let calls:int64=0
 next=():>int64=>{calls+=1 return calls-1}
 probe=(@x:int64):>bool=>x >=? 0 and x <? 4
-main=()=>{
+run=()=>{
 let a=next() <? 0 or next() >=? 4
 if calls not=? 2 or a return 1
 calls=0
@@ -15,3 +15,4 @@ let x:int64=2
 if not probe(@x) return 4
 let narrow:int8=-1
 return if narrow <? 0 or narrow >=? 42 42 else 1}
+main=()=>exit(run())

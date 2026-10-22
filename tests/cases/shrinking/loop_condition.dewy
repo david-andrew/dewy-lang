@@ -3,4 +3,5 @@
 let xs:array<int64>=[10 20 12 99]
 let index:int64=0
 keep=()=>{if xs.length >? 2 {xs.pop();} return index <? xs.length}
-main=()=>{let sum:int64=0 loop keep() {sum+=xs[index]+xs.length index+=1} return sum+7}
+run=()=>{let sum:int64=0 loop keep() {sum+=xs[index]+xs.length index+=1} return sum+7}
+main=()=>exit(run())

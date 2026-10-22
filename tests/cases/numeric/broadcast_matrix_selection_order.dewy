@@ -5,7 +5,8 @@ at=()=>{trace=trace*10+1 return index}
 row=()=>{trace=trace*10+2 boxes[0].matrix=reshape([10 20 30 40 50 60] 2 3) return 1}
 lower=()=>{trace=trace*10+3 return 1}
 right=()=>{trace=trace*10+4 boxes.push([matrix=zeros<int>(1 1)]) index=1 return 10}
-main=()=>{let saved=boxes
+run=()=>{let saved=boxes
 boxes[at()].matrix[row() [lower()..end]] .+= right()
 return if trace =? 1234 and boxes[0].matrix.data =? [10 20 30 40 15 16]
 and saved[0].matrix.data =? [1 2 3 4 5 6] 42 else 1}
+main=()=>exit(run())

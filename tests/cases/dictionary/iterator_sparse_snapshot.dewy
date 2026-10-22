@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let values=[0->[0] 1->[99] 2->[20] 3->[22] 4->[99]]
 values.remove(1) values.remove(4)
 let total:int64=0 let seen:array<int64>=[]
@@ -9,3 +9,4 @@ values.remove(0) values.remove(2) values[3]=[999] values[5]=[999]
 let copy=value copy[0]=100
 }
 return if seen =? [0 2 3] and total =? 42 and values[3] =? [999] 42 else 1}
+main=()=>exit(run())

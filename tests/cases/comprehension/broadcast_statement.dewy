@@ -1,6 +1,7 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let xs=[1 2]
 let empty:array<int64>=[loop i in [0..3) {xs .+= i}]
 return if empty.length =? 0 and xs =? [4 5] 42 else 1
 }
+main=()=>exit(run())

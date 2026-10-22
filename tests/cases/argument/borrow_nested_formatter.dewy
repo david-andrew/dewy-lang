@@ -4,5 +4,6 @@ Marker:type=[id:int64]
 __as__=(value:Marker):>string=>{source[0]=99 return "x"}
 read=(value:array<int64> ignored:string)=>value[0]
 through=(@value:array<int64>)=>read(value "{[item=Marker[0]]}")
-main=()=>{source.push(1) let before=through(@source)
+run=()=>{source.push(1) let before=through(@source)
 return if source[0]=?99 before+22 else 1}
+main=()=>exit(run())

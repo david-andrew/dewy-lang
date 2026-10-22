@@ -1,5 +1,6 @@
 # exit: 42
-main=()=>{let xs:array<uint8 length=4>=[]
+run=()=>{let xs:array<uint8 length=4>=[]
 xs[..]=12 xs[1..]=[20 21 22] xs[[0 2]]=[3 4] xs[[false true false true]]=5
 let rhs:array<uint8 length=2>=[30 40] xs[1..2]=rhs
 return if xs =? [3 30 40 5] 42 else 1}
+main=()=>exit(run())

@@ -1,6 +1,6 @@
 # exit: 42
 from p"../../../tests/fixtures/programs/hash_keys.dewy" import Key, Tagged
-main=()=>{
+run=()=>{
 let a=Key[7 "first"] let b=Key[7 "other"]
 if [a] not=?[b] or [item=a] not=?[item=b] return 1
 let optional:Key?=a let other:Key?=b
@@ -12,3 +12,4 @@ let keys=[[item=[a]]->42]
 if keys[[item=[b]]] not=?42 return 5
 let generic=[Tagged<string>["same" "first"]]
 return if generic=?[Tagged<string>["same" "other"]] 42 else 6}
+main=()=>exit(run())

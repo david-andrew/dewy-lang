@@ -3,9 +3,10 @@ Pair:type=array<string length=2>
 let calls:int64=0
 make=():>Pair=>{calls+=1 return ["first" "last"]}
 index=()=>{calls+=10 return 0}
-main=()=>{let pairs:array<Pair>=[make()] calls=0
+run=()=>{let pairs:array<Pair>=[make()] calls=0
 if make().length not=? 2 or calls not=? 1 return 1
 if pairs[index()].length not=? 2 or calls not=? 11 return 2
 let before=alloc_count()
 loop i in [0..20) {if make().length not=? 2 return 3}
 return if alloc_count() =? before and calls =? 31 42 else 4}
+main=()=>exit(run())

@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let values=[1 2 3] let total:int64=0 let i:int64=0
 loop i <? values.length {
     if values[i] >? 0 and values[i] <? 10 {total+=values[i]}
@@ -9,3 +9,4 @@ i=0
 loop i <? values.length {total+=values[i] i+=1}
 return total
 }
+main=()=>exit(run())

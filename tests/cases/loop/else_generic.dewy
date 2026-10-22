@@ -2,4 +2,5 @@
 head_or=<T>(values:array<T> fallback:T):>T=>{
 loop value in values {return value} else {return fallback}
 }
-main=()=>if head_or([42] 0) =? 42 and head_or([] "empty") =? "empty" 42 else 1
+run=()=>if head_or([42] 0) =? 42 and head_or([] "empty") =? "empty" 42 else 1
+main=()=>exit(run())

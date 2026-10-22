@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let values=set[[20] [99] [22]] values.remove([99])
 let saved=values let item=values.pop()
 item[0]=999
@@ -7,3 +7,4 @@ if [saved...] not=? [[20] [22]] or [values...] not=? [[20]] return 1
 values.push([42])
 if values.pop() not=? [42] or saved.pop() not=? [22] return 2
 return values.pop()[0]+22}
+main=()=>exit(run())

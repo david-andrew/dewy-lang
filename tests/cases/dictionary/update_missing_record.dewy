@@ -2,7 +2,7 @@
 # A compound update reads its entry first: a missing key fails as m[k] does and
 # no record is invented for it.
 Point:type=[x:int64 y:int64]
-main=()=>{
+run=()=>{
     let points:dict<string Point>=["a"->Point[1 2]]
     points["a"].x+=1
     printl("{points}")
@@ -11,3 +11,4 @@ main=()=>{
     return 0
 }
 $runtime_checks
+main=()=>exit(run())

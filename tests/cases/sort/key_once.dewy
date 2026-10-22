@@ -1,6 +1,6 @@
 # exit: 42
 Item:type=[score:int64 id:int64]
-main=()=>{
+run=()=>{
 let calls:array<int64>=[]
 let key=($capture @calls item:Item):>int64=>{calls.push(item.id) return item.score}
 let items=[loop i in [0..65) Item[65-i i]]
@@ -10,3 +10,4 @@ loop i in [0..65) {
     if calls[i] not=? i or items[i].id not=? 64-i return 2
 }
 return 42}
+main=()=>exit(run())

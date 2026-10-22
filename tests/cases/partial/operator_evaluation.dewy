@@ -1,7 +1,8 @@
 # exit: 42
 let calls:int64=0
 next=()=>{calls+=1 2}
-main=()=>{let multiply:<(value:int64):>int64>=(*next())
+run=()=>{let multiply:<(value:int64):>int64>=(*next())
 if calls not=?0 return 1
 if multiply(20) not=?40 or calls not=?1 return 2
 return if multiply(21)=?42 and calls=?2 42 else 3}
+main=()=>exit(run())

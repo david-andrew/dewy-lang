@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{let values=["one"->[20]] let snapshot=values
+run=()=>{let values=["one"->[20]] let snapshot=values
 let incoming=[22]
 if not values.insert_if_absent("two" incoming) return 1
 incoming[0]=99
@@ -8,3 +8,4 @@ if values.insert_if_absent("one" [99]) return 2
 if snapshot.length not=? 1 or snapshot["one"] not=? [20] return 3
 if values["one"] not=? [20 7] return 4
 return snapshot["one"][0]+values["two"][0]}
+main=()=>exit(run())

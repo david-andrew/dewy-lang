@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let matrix:array<array<uint8>>=[[1 2] [3]]
 let present:array<uint16>|none=[1 2] let absent:array<uint16>|none=none
 let empty:array<uint16>=[] let optional_empty:array<uint16>|none=[]
@@ -7,3 +7,4 @@ return if matrix =? [[1 2] [3]] and [[1 2] [3]] =? matrix
 and present =? [1 2] and [1 2] =? present and absent not=? [1 2] and [1 2] not=? absent
 and empty =? [] and [] =? empty and optional_empty =? [] and [] =? optional_empty 42 else 1
 }
+main=()=>exit(run())

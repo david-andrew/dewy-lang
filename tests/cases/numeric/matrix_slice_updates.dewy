@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let a=reshape([1 2 3 4 5 6] 2 3) let saved=a
 let column=a[[..] 1]
 a[[..] 1]=[20 50]
@@ -13,3 +13,4 @@ let box=[matrix=a] let old=box
 box.matrix[[..] 1]=0
 assert(box.matrix.data =? [99 0 99 6 0 6] and old.matrix.data =? a.data)
 return 42}
+main=()=>exit(run())

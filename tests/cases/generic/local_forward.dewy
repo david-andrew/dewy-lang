@@ -1,6 +1,7 @@
 # exit: 42
 invoke=<F T>(f:F x:T)=>f(x)
 identity=<F>(f:F)=>f
-main=()=>{let count=40 let f=<T>(x:T)=>{count+=1; count}
+run=()=>{let count=40 let f=<T>(x:T)=>{count+=1; count}
 let a=identity(@f)
 return if invoke(@f 1)=?41 and invoke(@f "a")=?41 and a(false)=?41 and f(1)=?41 and f(2)=?42 42 else 1}
+main=()=>exit(run())

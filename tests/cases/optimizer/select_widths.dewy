@@ -1,6 +1,7 @@
 # exit: 42
 signed=(take:bool a:int8 b:int8):>int8=>if take a+1 else b-1
 unsigned=(take:bool a:uint64 b:uint64):>uint64=>if take a xor b else a+b
-main=()=>{let high:uint64=18446744073709551615
+run=()=>{let high:uint64=18446744073709551615
 return if signed(true 127 0)=?(-128) and signed(false 0 (-128))=?127
 and unsigned(true high 1)=?18446744073709551614 and unsigned(false high 1)=?0 42 else 1}
+main=()=>exit(run())

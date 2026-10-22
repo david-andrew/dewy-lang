@@ -7,10 +7,11 @@ first=<T U>(a:T b:U):>T=>a
 second=<T U>(a:T b:U):>U=>b
 score=(value:A):>int64=>value.value
 score=(value:B):>int64=>value.value+1
-main=()=>{
+run=()=>{
 let a=identity(A[20]) let b=identity(B[21])
 let copied=identity([a.value b.value]) copied[0]=99
 if first<int64 string>(20 "ignored") not=?20 return 1
 if second<int64 string>(20 "kept") not=?"kept" return 2
 if first<string int64>("kept" 22) not=?"kept" return 3
 return score(identity(a))+score(identity(b))}
+main=()=>exit(run())

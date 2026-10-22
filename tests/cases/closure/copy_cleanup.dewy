@@ -7,5 +7,6 @@ let record=[run=@a rows=[xs]] let other=record
 let shared=0 let c=($capture @shared)=>{shared+=1; shared} let d=@c
 loop i in [0..10) {xs[0]() ys[1]() other.run() c() d()}
 }
-main=()=>{let before=alloc_count() loop i in [0..20) work()
+run_case=()=>{let before=alloc_count() loop i in [0..20) work()
 return if alloc_count()=?before 42 else 1}
+main=()=>exit(run_case())

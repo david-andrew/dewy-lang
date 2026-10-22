@@ -4,9 +4,10 @@ if first {if second return 20 else return 21} else {return 22}
 printl"unreachable tail"
 return 99
 }
-main=()=>{
+run=()=>{
 loop first in [false true] {loop second in [false true] {
 let expected=if first (if second 20 else 21) else 22
 if reachability_probe(first second) not=? expected return 1
 }}
 return 42}
+main=()=>exit(run())

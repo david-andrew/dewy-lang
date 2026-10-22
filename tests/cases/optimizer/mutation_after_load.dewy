@@ -1,6 +1,6 @@
 # exit: 42
 change=(@values:array<int>):>bool=>{values[0]+=1 return true}
-main=()=>{
+run=()=>{
 let values=[7 11] let index:int=0
 if values[index] =? 7 and values[index] >? 0 {index=1}
 if values[index] not=? 11 return 1
@@ -11,3 +11,4 @@ loop take in [true false] {
 }
 return values[0]
 }
+main=()=>exit(run())

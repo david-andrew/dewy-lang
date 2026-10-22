@@ -4,7 +4,7 @@ identity=<T>(x:T):>T=>x
 empty=<T>():>array<T>=>[]
 combine=<T>(a:T b:T=a):>T=>a+b
 count_down=<T>(n:T acc:T):>T=>if n <=? 0 acc else count_down(n-1 acc+n)
-main=()=>{
+run=()=>{
     let a=first([42 10]) let b=first(["yes"])
     let items=identity<array<dict<string int64>>>([["answer"->42]])
     let no_values=empty<string>()
@@ -13,3 +13,4 @@ main=()=>{
         and typed(42) =? 42 and combine(21) =? 42 and combine<float64>(b=0.5 a=1.5) =? 2.0
         and count_down(4 0) =? 10 42 else 1
 }
+main=()=>exit(run())

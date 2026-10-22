@@ -2,5 +2,6 @@
 empty=<T>():>array<T>=>[]
 fallback=<T>(values:array<T>=empty<T>()):>array<T>=>values
 Bucket:type=<T>[values:array<T>=empty<T>()]
-main=()=>{let one=fallback<int64>() let two=Bucket<string>[] let three:Bucket<int64>=[]
+run=()=>{let one=fallback<int64>() let two=Bucket<string>[] let three:Bucket<int64>=[]
 return if one.length =? 0 and two.values.length =? 0 and three.values.length =? 0 42 else 1}
+main=()=>exit(run())

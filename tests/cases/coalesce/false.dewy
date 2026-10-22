@@ -2,4 +2,5 @@
 let called:bool=false
 read=():>bool?=>false
 fallback=()=>{called=true true}
-main=()=>if not (read()??fallback()) and not called 42 else 1
+run=()=>if not (read()??fallback()) and not called 42 else 1
+main=()=>exit(run())

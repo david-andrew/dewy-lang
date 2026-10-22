@@ -1,7 +1,8 @@
 # exit: 42
-main=()=>{let x:int64=0 let total:int64=0
+run=()=>{let x:int64=0 let total:int64=0
 loop i in [0..10) {
 let value=if {x+=1; x%2 =? 0} x*3 else x+1
 total+=value
 }
 return if x=?10 and total=?120 42 else 1}
+main=()=>exit(run())

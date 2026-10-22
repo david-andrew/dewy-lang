@@ -2,5 +2,6 @@
 let trace:int64=0
 read=(present:bool):>int64?=>{trace=trace*10+1 if present 42 else none}
 fallback=()=>{trace=trace*10+2 42}
-main=()=>{let a=read(true)??fallback() let b=read(false)??fallback()
+run=()=>{let a=read(true)??fallback() let b=read(false)??fallback()
 return if a =? 42 and b =? 42 and trace =? 112 42 else 1}
+main=()=>exit(run())

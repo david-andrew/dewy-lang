@@ -6,8 +6,9 @@ edit=(first:Box raw:Box changed:Box last:Box take:bool):>int64=>{
 if take {let p=raw.values.data() p[0]=40 bump(@changed.values)}
 return first.values[0]+raw.values[0]+changed.values[0]+last.values[0]}
 read=(first:Box second:Box third:Box):>int64=>first.values[0]+second.values[0]+third.values[0]
-main=()=>{let original=Box[[10]] original.values.push(22)
+run=()=>{let original=Box[[10]] original.values.push(22)
 if edit(original original original original true) not=? 71 return 1
 if edit(original original original original false) not=? 40 return 2
 if read(original original original) not=? 30 return 3
 return if original.values =? [10 22] 42 else 4}
+main=()=>exit(run())

@@ -3,7 +3,7 @@ read=(take:bool values:array<int>):>int=>{
 if take and values[0] >? 0 and values[0] <? 100 return values[0]
 return 42
 }
-main=()=>{let empty:array<int>=[]
+run=()=>{let empty:array<int>=[]
 if read(false empty) not=? 42 return 1
 loop take in [true false] {
     let values=[7]
@@ -12,3 +12,4 @@ loop take in [true false] {
     if read(take values) not=? (if take 7 else 42) return 3
 }
 return 42}
+main=()=>exit(run())

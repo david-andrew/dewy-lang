@@ -1,7 +1,8 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let a:array<int64>=[] let b:array<int64>=[]
 loop i in [int64.min,int64.max..] and n in [0 1] {a.push(i) if n=?1 break}
 loop i in [int64.max,int64.min..] and n in [0 1] {b.push(i) if n=?1 break}
 return if a=?[int64.min int64.max] and b=?[int64.max int64.min] 42 else 1
 }
+main=()=>exit(run())

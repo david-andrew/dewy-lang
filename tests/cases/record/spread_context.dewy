@@ -1,5 +1,6 @@
 # exit: 42
 Pair:type=[left:uint8 right:uint8]
 total=(pair:Pair)=>(pair.left as int64)+(pair.right as int64)
-main=()=>{let base=Pair[20 1] let typed:Pair=[base... right=22]
+run=()=>{let base=Pair[20 1] let typed:Pair=[base... right=22]
 return if total([base... right=22]) =? 42 total(typed) else 1}
+main=()=>exit(run())

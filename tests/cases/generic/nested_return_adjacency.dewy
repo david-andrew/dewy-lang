@@ -1,7 +1,8 @@
 # exit: 42
 pair=():>array<array<int64>>=>[[20 22]]
 deep=():>array<array<array<array<int64>>>>=>[[[[20 22]]]]
-main=()=>{
+run=()=>{
 let shifted:int64=84 shifted>>=1
 if shifted not=? 42 return 1
 return pair()[0][0]+deep()[0][0][0][1]}
+main=()=>exit(run())

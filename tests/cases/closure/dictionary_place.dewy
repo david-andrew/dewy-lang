@@ -2,8 +2,9 @@
 Counter:type=():>int
 make=()=>{let n=0 return ()=>{n+=1; n}}
 advance=(@next:Counter)=>next()
-main=()=>{let counters=["next"->make()]
+run=()=>{let counters=["next"->make()]
 if counters["next"]() not=?1 or counters["next"]() not=?1 return 1
 if advance(@counters["next"]) not=?1 or advance(@counters["next"]) not=?2 return 2
 let copy=counters
 return if advance(@counters["next"])=?3 and advance(@copy["next"])=?3 42 else 3}
+main=()=>exit(run())

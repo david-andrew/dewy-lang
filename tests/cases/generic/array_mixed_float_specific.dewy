@@ -1,6 +1,7 @@
 # exit: 42
 choose=<T>(values:array<T>)=>1
 choose=(values:array<float64>)=>42
-main=()=>{let floating:float64=20.0 let integer=22
+run=()=>{let floating:float64=20.0 let integer=22
 return if choose([floating 22])=?42 and choose([22 floating])=?42
 and choose([integer 20.0])=?42 and choose([20.0 integer])=?42 42 else 1}
+main=()=>exit(run())

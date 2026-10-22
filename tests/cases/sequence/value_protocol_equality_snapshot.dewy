@@ -11,7 +11,8 @@ if values not=?[Key[20] Key[22]] return 1
 let noise=[Key[99] Key[100]]
 return if noise.length=?2 values[0].value+values[1].value else 2
 }
-main=()=>{
+run=()=>{
 current=[Key[20] Key[22]] armed=true
 let result=through(current)
 return if current.length=?0 and calls=?2 result else 3}
+main=()=>exit(run())

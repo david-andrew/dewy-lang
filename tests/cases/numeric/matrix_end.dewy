@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let m=reshape([1 2 3 4 5 6] 2 3)
 assert(m[end end] =? 6 and m[0 end] =? 3 and m[end 0] =? 4)
 assert(m[end-1 end] =? 3)
@@ -13,3 +13,4 @@ assert(m[0 end] =? 13)
 m[[0..end] end]=[20 22]
 assert(m.data =? [1 2 20 4 5 22])
 return 42}
+main=()=>exit(run())

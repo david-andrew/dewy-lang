@@ -1,5 +1,6 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let values=[[20] [22]] let readers:array< <():>array<int> > >=[]
 loop @value in values {let captured=value readers.push(()=>captured) value[0]=99}
 return if readers[0]()=?[20] and readers[1]()=?[22] and values=?[[99] [99]] 42 else 1}
+main=()=>exit(run())

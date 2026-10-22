@@ -3,5 +3,6 @@ work=():>void=>{let rows:array<array<string> length=3>=[["a"] ["b"] ["c"]]
 let mask:array<bool length=3>=[true false true] let saved=rows
 let chosen=rows[mask] rows[mask]=[["x"] ["y"]] chosen[0].push("copy")
 if rows not=? [["x"] ["b"] ["y"]] or saved not=? [["a"] ["b"] ["c"]] panic("mask snapshot changed")}
-main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+run=()=>{work() let before=alloc_count() loop i in [0..20) work()
 return if alloc_count() =? before 42 else 1}
+main=()=>exit(run())

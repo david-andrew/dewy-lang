@@ -6,10 +6,11 @@ __and__=(a:Flags b:Flags):>Flags=>Flags[a.bits and b.bits]
 __or__=(a:Flags b:Flags):>Flags=>Flags[a.bits or b.bits]
 __xor__=(a:Flags b:Flags):>Flags=>Flags[a.bits xor b.bits]
 __not__=(a:Flags):>Flags=>Flags[not a.bits]
-main=()=>{
+run=()=>{
 let joined=make(1 3) or make(2 4)
 let common=make(3 7) and make(4 2)
 let flipped=joined xor common
 return if order =? 1234 and joined.bits =? 7 and common.bits =? 2
 and flipped.bits =? 5 and (not flipped).bits =? 18446744073709551610 42 else 1
 }
+main=()=>exit(run())

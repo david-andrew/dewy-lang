@@ -1,6 +1,7 @@
 # exit: 42
-main=()=>{let total:int64=0
+run=()=>{let total:int64=0
 let entries=["a"->1 "b"->2]
 loop [key value] in entries and value <? 1 {total+=value} else {total=42}
 loop key in entries and key =? "a" {total+=1}
 return total-1}
+main=()=>exit(run())

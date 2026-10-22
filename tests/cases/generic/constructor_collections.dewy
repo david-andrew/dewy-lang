@@ -1,9 +1,10 @@
 # exit: 42
 Box:type=<T>[value:T]
-main=()=>{
+run=()=>{
 let numbers=Box([20 22]) let words=Box(["hello" "world"])
 let record=Box([x=20 y=22]) let keys=Box(["answer"->42])
 let members=Box(set[20 22])
 if words.value[1] not=?"world" or keys.value["answer"] not=?42 return 1
 if not members.value.contains(20) or record.value.x+record.value.y not=?42 return 2
 return numbers.value[0]+numbers.value[1]}
+main=()=>exit(run())

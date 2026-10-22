@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let integers=[0] let floats=[0.0] let history:array<int64>=[]
 let counter:int64=0 let outer:int64=0
 loop outer <? 4 {
@@ -25,3 +25,4 @@ loop outer <? 4 {
 }
 return if integers[0] =? 56 and floats[0] =? 8.0 and history.length =? 16 and counter =? 24 42 else 4
 }
+main=()=>exit(run())

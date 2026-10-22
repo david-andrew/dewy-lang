@@ -6,7 +6,7 @@ pick=((a:int64 b:int64):>int64=>a+b)
 add=<T>(a:T b:T):>T=>a+b
 Box:type=[value:int64]
 scaled=(box:Box factor:int64):>int64=>box.value*factor
-main=()=>{
+run=()=>{
     let integer=@describe(5)
     let text=@describe("x")
     printl"{integer("!")} {text("?")}"
@@ -27,3 +27,4 @@ main=()=>{
     printl"{times(6)} {pieces().length}"
     return 0
 }
+main=()=>exit(run())

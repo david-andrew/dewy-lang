@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let a=reshape([float64(0.0) 2.0 1.0 3.0] 2 2) let b:array<float64>=[4.0 7.0]
 let x=solve(a b)
 assert(abs(x[0]-1.0) <? 1e-12 and abs(x[1]-2.0) <? 1e-12)
@@ -9,3 +9,4 @@ assert(abs(identity[i j]-(if i =? j 1.0 else 0.0)) <? 1e-12)}}
 assert(abs(det(a)+2.0) <? 1e-12)
 assert(a.data =? [0.0 2.0 1.0 3.0] and b =? [4.0 7.0])
 return 42}
+main=()=>exit(run())

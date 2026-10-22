@@ -5,7 +5,8 @@ if first {if second break else return 11}
 if first return 12
 return 13}
 return if first 14 else 15}
-main=()=>{loop first in [false true] {loop second in [false true] {
+run=()=>{loop first in [false true] {loop second in [false true] {
 let expected=if first (if second 14 else 11) else 13
 if probe(first second) not=?expected return 1}}
 return 42}
+main=()=>exit(run())

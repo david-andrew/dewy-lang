@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let x:float64=12.0
 if x+{x=20.0; 3.0} not=? 15.0 return 1
 x=12.0
@@ -13,3 +13,4 @@ if x <? {x=0.0; 5.0} return 5
 let single:float32=1.5
 return if single+{single=2.5; 3.0} =? 4.5 42 else 6
 }
+main=()=>exit(run())

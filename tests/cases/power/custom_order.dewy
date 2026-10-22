@@ -5,5 +5,6 @@ base=()=>{trace="{trace}a" return Box[40]}
 exponent=()=>{trace="{trace}b" return 2}
 __pow__=(base:Box exponent:int64)=>Box[base.value+exponent]
 __xor__=(a:Box b:Box)=>Box[a.value xor b.value]
-main=()=>{let answer=base()^exponent()
+run=()=>{let answer=base()^exponent()
 return if answer.value =? 42 and trace =? "ab" and (Box[40] xor Box[2]).value =? 42 42 else 1}
+main=()=>exit(run())

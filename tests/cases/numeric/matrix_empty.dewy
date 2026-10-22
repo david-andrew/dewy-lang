@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let a=zeros(2 0) let b=zeros(0 3) let c=a*b
 assert(c.shape =? [2 3] and c.data =? [0.0 0.0 0.0 0.0 0.0 0.0])
 assert(transpose(a).shape =? [0 2] and size(transpose(a)) =? 0)
@@ -8,3 +8,4 @@ assert(size(huge) =? 0 and huge.shape =? [1<<32 0 1<<32])
 assert(size(ones(0 2)) =? 0 and size(rand(2 0)) =? 0 and size(randn(0 2)) =? 0)
 assert(fill(0 -1).length =? 0)
 return 42}
+main=()=>exit(run())

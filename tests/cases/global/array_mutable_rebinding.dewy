@@ -3,7 +3,8 @@ Cell:type=[value:int64]
 let cells=[Cell(10)]
 let other=[Cell(20)]
 replace=(@target:array<Cell>)=>{target=other}
-main=()=>{
+run=()=>{
 replace(@cells) cells[0].value=99
 return if cells[0].value=?99 and other[0].value=?20 42 else 1
 }
+main=()=>exit(run())

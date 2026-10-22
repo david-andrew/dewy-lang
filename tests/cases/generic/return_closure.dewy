@@ -1,4 +1,5 @@
 # exit: 42
 keep=<T>(value:T):><():>T>=>()=>value
-main=()=>{let original=[42] let retained=keep(original) original[0]=1
+run=()=>{let original=[42] let retained=keep(original) original[0]=1
 let value=retained() value[0]=3 return if retained()[0] =? 42 and original[0] =? 1 42 else 1}
+main=()=>exit(run())

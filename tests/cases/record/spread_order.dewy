@@ -3,5 +3,6 @@
 let trace=0
 part=(tag:int64 value:int64)=>{trace=trace*10+tag return [x=value]}
 number=(tag:int64 value:int64)=>{trace=trace*10+tag return value}
-main=()=>{let result=[x=number(1 0) part(2 1)... x=number(3 2) part(4 42)...]
+run=()=>{let result=[x=number(1 0) part(2 1)... x=number(3 2) part(4 42)...]
 return if trace =? 1234 result.x else 1}
+main=()=>exit(run())

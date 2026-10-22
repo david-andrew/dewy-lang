@@ -398,8 +398,19 @@ def returns_void(source: str) -> bool:
         re.search(r'(^|\s)-?\d+\s*$', body) is None
 
 
+# A case whose result is an exit code runs as `main=()=>exit(run())`; batches
+# call the function itself and keep its result.
+ENTRY = re.compile(r'^main\s*=\s*\(\s*\)\s*=>\s*exit\((\w+)\(\)\)\s*$', re.MULTILINE)
+
+
+def entry_name(source: str) -> str:
+    match = ENTRY.search(source)
+    return match[1] if match else 'main'
+
+
 def batch_source(cases: list[Case], forms: list[str], select: bool) -> tuple[str, dict[int, int]]:
-    lines = [f'from p"{case.path.as_posix()}" import (main as case_{i})' for i, case in enumerate(cases)]
+    lines = [f'from p"{case.path.as_posix()}" import ({entry_name(case.path.read_text())} as case_{i})'
+             for i, case in enumerate(cases)]
     owners = {i + 1: i for i in range(len(cases))}
     if select:
         # The selector comes from the environment so each case sees its own

@@ -5,7 +5,7 @@ known=(flag:bool x:int64):>int64=>{
 if flag return choose(flag x 99)
 return choose(flag 99 x)
 }
-main=()=>{
+run=()=>{
 let calls:int64=0
 let next=($capture @calls):>int64=>{calls+=1 return calls}
 if choose(true next() next()) not=? 1 or calls not=? 2 return 1
@@ -15,3 +15,4 @@ if saved+value not=? 42 return 3
 if choose(calls >? 2 value value) not=? 22 return 4
 if known(true 20)+known(false 22) not=? 42 return 5
 return offset(true 20)+offset(false 22)}
+main=()=>exit(run())

@@ -6,8 +6,9 @@ $test
 squares = () => $expect square(3) =? 9
 $test(cases=CASES)
 positive = (x:int64) => $expect square(x) >? 0
-main = () => {
+run_case = () => {
     squares()
     printl("{square(4)}")
     return 0
 }
+main=()=>exit(run_case())

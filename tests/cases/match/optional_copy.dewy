@@ -1,5 +1,6 @@
 # exit: 42
 Numbers:type=array<int64>
-main=()=>{let a:Numbers?=[20 22]
+run=()=>{let a:Numbers?=[20 22]
 let result=match a {b:Numbers=>{b[0]=99 b[1]} <none>=>0}
 return if a is? Numbers a[0]+result else 1}
+main=()=>exit(run())

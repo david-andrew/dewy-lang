@@ -1,8 +1,9 @@
 # exit: 42
-main=()=>{let values=[10 20 30 40]
+run=()=>{let values=[10 20 30 40]
 let indexes:array<int64 length=3>=[3 0 3] let mask:array<bool length=4>=[false true false true]
 if values[indexes] not=? [40 10 40] or values[mask] not=? [20 40] return 1
 values[indexes]=[1 2 3] values[mask]=42
 let inline:array<int64 length=4>=[10 20 30 40]
 inline[indexes]=[5 6 7] inline[mask]=[8 9]
 return if values =? [2 42 30 42] and inline =? [6 8 30 9] and inline[indexes] =? [9 6 9] 42 else 2}
+main=()=>exit(run())

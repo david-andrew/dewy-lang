@@ -1,7 +1,8 @@
 # exit: 42
-main=()=>{
+run=()=>{
     let mode="fast"
     let update=($capture @mode)=>{mode="slow"}
     update()
     return match mode {<"fast">=>0 <"slow">=>42}
 }
+main=()=>exit(run())

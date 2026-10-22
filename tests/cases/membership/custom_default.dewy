@@ -5,4 +5,5 @@ needle=()=>{trace=trace*10+1 return 21}
 container=()=>{trace=trace*10+2 return Box[42]}
 contains=(hay:Box needle:int64 extra:int64=needle):>bool=>hay.value =? needle+extra
 probe=()=>if needle() in? container() and trace =? 12 42 else 1
-main=()=>probe()
+run=()=>probe()
+main=()=>exit(run())

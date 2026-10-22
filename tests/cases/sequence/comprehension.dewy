@@ -2,6 +2,7 @@
 Series:type=<T>[values:array<T>]
 len=<T>(s:Series<T>)=>s.values.length
 __index__=<T>(s:Series<T> index:int64):>T=>s.values[index]
-main=()=>{let source=Series<string>[["a" "bb" "ccc"]]
+run=()=>{let source=Series<string>[["a" "bb" "ccc"]]
 let lengths=[loop text in source text.length]
 return if lengths =? [1 2 3] 42 else 1}
+main=()=>exit(run())

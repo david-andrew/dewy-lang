@@ -1,3 +1,4 @@
 # exit: 42
 apply=(f:<(value:uint64):>float64> value:uint64):>float64=>f(value)
-main=()=>{return if apply((transmute float64)4607182418800017408)=?1.0 and apply((as float64)42)=?42.0 42 else 1}
+run=()=>{return if apply((transmute float64)4607182418800017408)=?1.0 and apply((as float64)42)=?42.0 42 else 1}
+main=()=>exit(run())

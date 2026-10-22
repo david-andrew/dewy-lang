@@ -1,6 +1,6 @@
 # exit: 42
 # quick
-main=()=>{
+run=()=>{
 loop size in [0..130) {
     let bytes:array<uint8>=[]
     loop i in [0..size) {bytes.push(((i*17)%128) as uint8)}
@@ -17,3 +17,4 @@ loop size in [0..130) {
     if left=?str_from_bytes(bytes) return 3
 }
 return 42}
+main=()=>exit(run())

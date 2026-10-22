@@ -1,6 +1,7 @@
 # exit: 42
-main=()=>{let values:dict<string uint64>=["gone"->0 "answer"->uint64.max]
+run=()=>{let values:dict<string uint64>=["gone"->0 "answer"->uint64.max]
 values.remove("gone") values["next"]=42
 let copy=from_json<dict<string uint64>>(to_json(values 2))
 if copy is? TextError return 1
 return if copy.length =? 2 and copy["answer"] =? uint64.max and copy["next"] =? 42 42 else 1}
+main=()=>exit(run())

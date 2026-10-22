@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let xs=[1 2 3] let saved=xs
 xs .+= [10] xs .*= 2 xs .-= 1 xs .^= 2
 if xs not=? [441 529 625] or saved not=? [1 2 3] return 1
@@ -12,3 +12,4 @@ if fractions not=? [1/4 3/4] return 4
 let scalar=20 scalar .+= 22
 return if scalar =? 42 42 else 5
 }
+main=()=>exit(run())

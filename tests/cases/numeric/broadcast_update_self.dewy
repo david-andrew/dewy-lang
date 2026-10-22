@@ -1,7 +1,7 @@
 # exit: 42
 Tag=type of [text:string]
 __add__=(a:Tag b:string):>Tag=>Tag["{a.text}{b}"]
-main=()=>{
+run=()=>{
 let xs=[1 2 3] let saved=xs
 xs .+= xs .* 2
 if xs not=? [3 6 9] or saved not=? [1 2 3] return 1
@@ -12,3 +12,4 @@ tags .+= "!"
 return if rows =? [[1 2] [3 8]] and old =? [[1 2] [3 4]]
 and tags =? [Tag["a!"] Tag["b!"]] and old_tags =? [Tag["a"] Tag["b"]] 42 else 2
 }
+main=()=>exit(run())

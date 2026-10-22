@@ -9,8 +9,9 @@ loop text in source {
     return values.length
 }
 }
-main=()=>{
+run=()=>{
 work(true) work(false) let before=alloc_count()
 loop i in [0..20) {if work(i%2 =? 0) not=? 2 return 1}
 return if alloc_count() =? before 42 else 2
 }
+main=()=>exit(run())

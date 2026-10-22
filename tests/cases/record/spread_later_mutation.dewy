@@ -2,6 +2,7 @@
 Item:type=[words:array<int64> number:int64]
 let source=Item[[20] 1]
 change=()=>{source.words[0]=99 return 22}
-main=()=>{source.words.push(0) let result=[source... number=change()]
+run=()=>{source.words.push(0) let result=[source... number=change()]
 return if result.words =? [20 0] and source.words =? [99 0]
 result.words[0]+result.number else 1}
+main=()=>exit(run())

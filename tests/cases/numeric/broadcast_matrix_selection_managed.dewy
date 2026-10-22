@@ -6,5 +6,6 @@ let m=reshape([Tag["a"] Tag["b"] Tag["c"] Tag["d"]] 2 2) let saved=m
 m[[..] 1] .+= "!"
 assert(m.data =? [Tag["a"] Tag["b!"] Tag["c"] Tag["d!"]] and saved.data =? [Tag["a"] Tag["b"] Tag["c"] Tag["d"]])
 }
-main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+run=()=>{work() let before=alloc_count() loop i in [0..20) work()
 return if alloc_count() =? before 42 else 1}
+main=()=>exit(run())

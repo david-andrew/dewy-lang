@@ -1,4 +1,5 @@
 # exit: 42
 make=()=>{let n=0 return (step:int64)=>{n+=step; n}}
-main=()=>{let a=make() let p=(step:int64)=>a(step) let q=@p
+run=()=>{let a=make() let p=(step:int64)=>a(step) let q=@p
 return if p(1)=?1 and q(2)=?2 and p(3)=?4 and a(1)=?1 42 else 1}
+main=()=>exit(run())

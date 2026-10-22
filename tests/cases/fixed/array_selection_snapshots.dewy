@@ -3,7 +3,8 @@ Pair:type=array<array<int64> length=2>
 let values:Pair=[[20] [22]] let calls:int64=0
 indexes=()=>{calls+=1 values[0][0]=99 return [0 1]}
 last=()=>{calls+=1 values[1][0]=88 return 1}
-main=()=>{let picked=values[indexes()]
+run=()=>{let picked=values[indexes()]
 if picked not=? [[20] [22]] or values[0][0] not=? 99 return 1
 let selected=values[0,1..last()]
 return if selected =? [[99] [22]] and values[1][0] =? 88 and calls =? 2 42 else 2}
+main=()=>exit(run())

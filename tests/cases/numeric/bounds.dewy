@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 if int8.min not=? -128 or int8.max not=? 127 return 1
 if int16.min not=? -32768 or int16.max not=? 32767 return 2
 if int32.min not=? -2147483648 or int32.max not=? 2147483647 return 3
@@ -9,3 +9,4 @@ if uint16.min not=? 0 or uint16.max not=? 65535 return 6
 if uint32.min not=? 0 or uint32.max not=? 4294967295 return 7
 if uint64.min not=? 0 or uint64.max not=? 18446744073709551615 return 8
 return 42}
+main=()=>exit(run())

@@ -1,4 +1,5 @@
 # exit: 42
-main=()=>{let a:int8=-128 let b:uint8=0xff
+run=()=>{let a:int8=-128 let b:uint8=0xff
 let c:int16=-32768 let d:uint16=0xffff
 return if (a as int64) =? -128 and (b as int64) =? 255 and (c as int64) =? -32768 and (d as int64) =? 65535 42 else 1}
+main=()=>exit(run())

@@ -1,6 +1,7 @@
 # exit: 42
 Numbers:type=[small:float32 tiny:float64 zero:float64]
-main=()=>{let value=Numbers[0.1 5e-324 -0.0]
+run=()=>{let value=Numbers[0.1 5e-324 -0.0]
 let copy=from_json<Numbers>(to_json(value))
 if copy is? TextError return 1
 return if copy.small =? value.small and copy.tiny =? value.tiny and 1.0/copy.zero <? 0.0 42 else 1}
+main=()=>exit(run())

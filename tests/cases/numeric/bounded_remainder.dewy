@@ -3,4 +3,5 @@ probe=(bytes:array<uint8>):>int64=>{
 let word:int64=0
 loop round in [0..50) {loop byte in bytes {word=(word*131+(byte as int64))%1000000007}}
 return word}
-main=()=>if probe([0 127 128 255 1])=?612902960 42 else 1
+run=()=>if probe([0 127 128 255 1])=?612902960 42 else 1
+main=()=>exit(run())

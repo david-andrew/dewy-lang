@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{let values=["gone"->99 "a"->20 "b"->22]
+run=()=>{let values=["gone"->99 "a"->20 "b"->22]
 values.remove("gone") let total:int64=0
 loop [key value] in values and expected in [20 22] {
 if key =? "gone" or value not=? expected return 1 total+=value
@@ -7,3 +7,4 @@ if key =? "gone" or value not=? expected return 1 total+=value
 let count:int64=0
 loop i in 0.. and key in values {if key =? "gone" or i >? 1 return 2 count+=1}
 return if count =? 2 total else 3}
+main=()=>exit(run())

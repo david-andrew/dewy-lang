@@ -1,7 +1,8 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let a:array<int64>=[] let b:array<int64>=[]
 loop i in [0,2..] and x in [10 20 30] {a.push(i+x)}
 loop x in [10 20 30] and i in [6,3..] {b.push(i+x)}
 return if a=?[10 22 34] and b=?[16 23 30] 42 else 1
 }
+main=()=>exit(run())

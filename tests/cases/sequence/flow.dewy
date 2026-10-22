@@ -2,7 +2,7 @@
 Series:type=[first:int64 count:int64]
 len=(s:Series)=>s.count
 __index__=(s:Series index:int64)=>s.first+index
-main=()=>{let total=0
+run=()=>{let total=0
 loop x in Series[0 0] {total=999} else {total+=40}
 $outer loop x in Series[0 3] {
     loop y in Series[0 3] {
@@ -12,3 +12,4 @@ $outer loop x in Series[0 3] {
     }
 }
 return total}
+main=()=>exit(run())

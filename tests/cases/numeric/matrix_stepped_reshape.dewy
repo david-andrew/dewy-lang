@@ -2,8 +2,9 @@
 let m=reshape([loop i in [0..20) i] 4 5)
 let rows=[3,1..0] let cols=[0,2..4]
 right=()=>{rows=[0..0] cols=[1..1] m=reshape([loop i in [0..24) 100+i] 4 6) return [10 20 30]}
-main=()=>{m[rows cols] .+= right()
+run=()=>{m[rows cols] .+= right()
 let expected=[loop i in [0..24) 100+i]
 expected[18]=25 expected[20]=37 expected[22]=49
 expected[6]=15 expected[8]=27 expected[10]=39
 return if m.shape =? [4 6] and m.data =? expected 42 else 1}
+main=()=>exit(run())

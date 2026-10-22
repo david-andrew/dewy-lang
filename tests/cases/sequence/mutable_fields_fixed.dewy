@@ -2,8 +2,9 @@
 Box:type=[items:array<array<int64> length=2>]
 Outer:type=[box:Box]
 update=(@outer:Outer):>void=>{loop @row in outer.box.items row.push(22)}
-main=()=>{
+run=()=>{
 let outer=Outer[Box[[[20] [21]]]] let saved=outer
 update(@outer)
 return if outer.box.items[0]=?[20 22] and outer.box.items[1]=?[21 22]
 and saved.box.items[0]=?[20] and saved.box.items[1]=?[21] 42 else 1}
+main=()=>exit(run())

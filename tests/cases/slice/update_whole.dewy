@@ -1,6 +1,7 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let xs=[1 2 3] xs[..]=[10 20 30] xs[..]=42
 let empty:array<int64>=[] empty[..]=42 empty[..]=[]
 return if xs =? [42 42 42] and empty =? [] 42 else 1
 }
+main=()=>exit(run())

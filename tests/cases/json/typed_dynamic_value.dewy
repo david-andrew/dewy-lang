@@ -1,6 +1,7 @@
 # exit: 42
 Holder:type=[value:Json]
-main=()=>{let parsed=parse_json(r'{"answer":42}')
+run=()=>{let parsed=parse_json(r'{"answer":42}')
 if parsed is? JsonError return 1
 let text=to_json(Holder[parsed])
 return if text =? r'{"value":{"answer":42}}' 42 else 1}
+main=()=>exit(run())

@@ -6,7 +6,7 @@ show=(text:string)=>{
     let loaded=from_json<Settings>(text)
     if loaded is? TextError printl(loaded.message) else printl("{loaded}")
 }
-main=()=>{
+run=()=>{
     show(r'{"id":1,"inner":{"a":3}}')
     show(r'{"volume":3,"inner":{"a":1}}')
     show(r'{"id":3,"inner":{"b":1}}')
@@ -14,3 +14,4 @@ main=()=>{
     if items is? TextError printl(items.message)
     return 0
 }
+main=()=>exit(run())

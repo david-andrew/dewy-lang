@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let fixed:array<int64 length=3>=[1 -2 3]
 let result:array<int64>=.-fixed
 if result not=?[-1 2 -3] return 1
@@ -11,3 +11,4 @@ if (.-empty).length not=?0 or (.+empty).length not=?0 return 3
 let empty_matrix=.-zeros<int64>(0 3)
 if empty_matrix.shape not=?[0 3] or empty_matrix.data.length not=?0 return 4
 return 42}
+main=()=>exit(run())

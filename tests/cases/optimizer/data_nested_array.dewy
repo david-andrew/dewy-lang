@@ -1,8 +1,9 @@
 # exit: 42
 $unsafe
-main=()=>{
+run=()=>{
 let rows=[[[10 11] [20 21]] [[30 31]]]
 let saved=rows
 let p=rows[0][1].data()
 p[0]=42
 return if saved =? [[[10 11] [20 21]] [[30 31]]] and rows =? [[[10 11] [42 21]] [[30 31]]] 42 else 1}
+main=()=>exit(run())

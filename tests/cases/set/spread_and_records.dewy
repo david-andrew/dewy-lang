@@ -1,8 +1,9 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let source:array<uint8>=[20 22]
 let values:set<uint8>=set[source... 20]
 source[0]=99
 let records=set[[value=42] [value=0] [value=42]]
 let [[value] _]=records
 return if values=?set[20 22] and records.length=?2 value else 1}
+main=()=>exit(run())

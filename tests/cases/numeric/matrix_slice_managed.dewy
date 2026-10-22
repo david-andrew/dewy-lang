@@ -1,8 +1,9 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let a=reshape(["a" "b" "c" "d"] 2 2) let saved=a
 let part=a[[..] 0] part[0]="new"
 a[[..] 1]=a[[..] 0]
 assert(a.data =? ["a" "a" "c" "c"] and saved.data =? ["a" "b" "c" "d"])
 assert(part.data =? ["new" "c"])
 return 42}
+main=()=>exit(run())

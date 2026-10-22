@@ -2,6 +2,7 @@
 Pair:type=<A B>[left:A right:B]
 let trace:int64=0
 mark=(value:int64):>int64=>{trace=trace*10+value return value}
-main=()=>{
+run=()=>{
 let pair=Pair(right=[mark(2)] left=[item=mark(1)])
 return if trace=?21 and pair.left.item=?1 and pair.right[0]=?2 42 else 1}
+main=()=>exit(run())

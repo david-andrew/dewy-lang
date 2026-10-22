@@ -2,4 +2,5 @@
 # modes: native native-release
 Choice:type=int64|string
 value=(x:Choice):>int64=>if x is? int64 x else 0
-main=()=>value(42)+value("ignored")
+run=()=>value(42)+value("ignored")
+main=()=>exit(run())

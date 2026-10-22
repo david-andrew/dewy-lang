@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let xs=[1 2 3]
 if (xs .=? 2) not=? [false true false] return 1
 if (xs .not=? 2) not=? [true false true] return 2
@@ -13,3 +13,4 @@ if (xs .not>? 2) not=? [true true false] return 9
 if (xs .not>=? 2) not=? [true false false] return 10
 return 42
 }
+main=()=>exit(run())

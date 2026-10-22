@@ -1,6 +1,6 @@
 # exit: 42
 Box:type=[values:array<int>]
-main=()=>{
+run=()=>{
 let rows=[Box[[1 2]] Box[[3 4]]] let saved=rows
 let which=0 let calls=0
 index=($capture @calls $capture @which)=>{calls+=1 return which}
@@ -12,3 +12,4 @@ let m:dict<string array<int>>=["a"->[1 2]] let old=m
 m["a"] .*= [10 20]
 return if m["a"] =? [10 40] and old["a"] =? [1 2] 42 else 3
 }
+main=()=>exit(run())

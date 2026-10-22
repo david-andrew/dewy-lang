@@ -2,4 +2,5 @@
 Count:type=int64
 classify=(v:bool|Count|string):>int64=>match v {
 <bool>=>10 n:Count=>n s:string=>s.length}
-main=()=>classify(true)+classify(29)+classify("abc")
+run=()=>classify(true)+classify(29)+classify("abc")
+main=()=>exit(run())

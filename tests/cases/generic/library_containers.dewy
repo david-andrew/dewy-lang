@@ -1,6 +1,6 @@
 # exit: 42
 Enemy:type=[name:string health:int64]
-main=()=>{
+run=()=>{
     let enemies:Pool<Enemy>=[]
     let first=enemies.add(Enemy["one" 42]) let second=enemies.add(Enemy["two" 20])
     let copy=enemies
@@ -19,3 +19,4 @@ main=()=>{
     let original=arrays let updated=arrays[handle] updated[0]="changed" arrays[handle]=updated
     return if original[handle][0] =? "hello" and arrays[handle][0] =? "changed" 42 else 6
 }
+main=()=>exit(run())

@@ -1,8 +1,9 @@
 # exit: 42
 import p"../../../tests/fixtures/programs/set_effects.jo" as set_effects
-main=()=>{
+run=()=>{
 set_effects.current=[set[set_effects.Key[20] set_effects.Key[22]]]
 let other=[set[set_effects.Key[22] set_effects.Key[20]]]
 set_effects.armed=true
 if set_effects.current not=? other return 1
 return if set_effects.current.length=?0 and not set_effects.armed 42 else 2}
+main=()=>exit(run())

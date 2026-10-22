@@ -5,4 +5,5 @@ loop i in [0..5) {rows[0][0](i) rows[1][1]("a") other[0][0](false)}
 let selected=@f<int64> selected(1)
 make()(true)
 }
-main=()=>{let before=alloc_count() loop i in [0..20) work() return if alloc_count()=?before 42 else 1}
+run=()=>{let before=alloc_count() loop i in [0..20) work() return if alloc_count()=?before 42 else 1}
+main=()=>exit(run())

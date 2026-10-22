@@ -1,8 +1,9 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let values:set<uint8>=set[20 22]
 if values not=? set[20 22] or set[22 20] not=? values return 1
 if (values | set[20 22 24]).length not=?3 return 2
 if (set[20 22 24]-values) not=? set[24 as uint8] return 3
 let optional:set<uint8>?=values
 return if optional=?set[22 20] and set[20 22]=?optional 42 else 4}
+main=()=>exit(run())

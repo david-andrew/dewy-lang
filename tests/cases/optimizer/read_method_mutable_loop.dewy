@@ -4,7 +4,7 @@ private_first=(values:array<int64>):>int64=>{
 let local=values local.push(99) return local[0]
 }
 Box:type=[values:array<int64>]
-main=()=>{
+run=()=>{
 let values=[2 3 4] let saved=values
 loop @item in values {item+=values.first()}
 if values not=? [4 7 8] or saved not=? [2 3 4] return 1
@@ -13,3 +13,4 @@ loop @item in box.values {item+=box.values.private_first()}
 if box.values not=? [4 7 8] or original.values not=? [2 3 4] return 2
 return 42
 }
+main=()=>exit(run())

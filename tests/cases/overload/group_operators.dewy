@@ -2,5 +2,6 @@
 Point:type=[x:int64 y:int64]
 __mul__ = ((v:Point amount:int64)=>Point[v.x*amount v.y*amount])
         & ((amount:int64 v:Point)=>Point[amount*v.x amount*v.y])
-main=()=>{let point=Point[10 11] let a=point*2 let b=2point
+run=()=>{let point=Point[10 11] let a=point*2 let b=2point
 return if a =? b a.x+a.y else 1}
+main=()=>exit(run())

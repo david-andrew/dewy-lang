@@ -1,9 +1,10 @@
 # exit: 42
 Item:type=[rank:int64 values:array<int64>]
 key=(item:Item):>int64=>item.rank
-main=()=>{
+run=()=>{
 let items=[Item[1 [20]] Item[1 [99]] Item[2 [22]] Item[2 [100]]]
 let low=items.min_by(@key) let high=items.max_by(@key)
 let saved=low low.values[0]=0 high.values[0]=0
 return if items[0].values[0]=?20 and items[2].values[0]=?22
 and saved.values[0]=?20 saved.values[0]+items[2].values[0] else 1}
+main=()=>exit(run())

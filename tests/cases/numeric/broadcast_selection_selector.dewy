@@ -2,9 +2,10 @@
 let xs=[1 2 3] let mask=[true false true]
 indexes=():>array<int64>=>{xs=[100 200 300] return [0 2]}
 right=()=>{mask=[false true false] return 10}
-main=()=>{
+run=()=>{
 xs[indexes()] .+= 10
 if xs not=? [11 200 13] return 1
 xs[mask] .+= right()
 return if xs =? [21 200 23] and mask =? [false true false] 42 else 2
 }
+main=()=>exit(run())

@@ -8,7 +8,7 @@ __unary_sub__=(value:Number):>Number=>{
 trace=trace*10+value.value
 return Number[-value.value value.label]
 }
-main=()=>{
+run=()=>{
 let values=.-source()
 if trace not=?123 or values not=?[Number[-2 "a"] Number[-3 "b"]] return 1
 trace=0
@@ -16,3 +16,4 @@ let fused=extract.(.-source()) .+ offset()
 if trace not=?1423 or fused not=?[8 7] return 3
 let saved=values values[0].label="changed"
 return if saved[0].label=?"a" 42 else 2}
+main=()=>exit(run())

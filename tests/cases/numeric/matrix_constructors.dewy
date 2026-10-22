@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let a=ones(2 3) let b=eye(3) let c=zeros<int64>(2 2)
 assert(sum(a) =? 6.0 and mean(a) =? 1.0 and trace(b) =? 3.0)
 assert((a+a).data =? [2.0 2.0 2.0 2.0 2.0 2.0])
@@ -8,3 +8,4 @@ let r=rand(2 3 4) let n=randn(2 2 2 2)
 assert(r.shape =? [2 3 4] and size(r) =? 24 and size(n) =? 16)
 loop x in r.data {assert(x >=? 0.0 and x <? 1.0)}
 return 42}
+main=()=>exit(run())

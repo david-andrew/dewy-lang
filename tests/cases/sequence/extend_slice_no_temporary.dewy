@@ -2,6 +2,7 @@
 let source=[10 20 22 90]
 let boxes:array<array<int>>=[[]] let before=0
 choose=()=>{assert(alloc_count() =? before) return 0}
-main=()=>{boxes[0].reserve(4) before=alloc_count()
+run=()=>{boxes[0].reserve(4) before=alloc_count()
 boxes[choose()].extend(source[1..3))
 return if boxes[0] =? [20 22] and alloc_count() =? before 42 else 1}
+main=()=>exit(run())

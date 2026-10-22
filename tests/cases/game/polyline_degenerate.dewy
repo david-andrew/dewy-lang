@@ -15,10 +15,11 @@ polyline([vec2(0 0) vec2(100 0) vec2(0 0)] 10 WHITE)
 loop i in [0..surface.__b_count) {
 if not (abs(buffer[i*9]) <=? 106) or not (abs(buffer[i*9+1]) <=? 6) return 4}
 return 42}
-main=()=>{let buffer:array<float32>=[] buffer.resize(18*9)
+run=()=>{let buffer:array<float32>=[] buffer.resize(18*9)
 let previous=surface.__b_buf
 surface.__b_buf=buffer.data() surface.__b_tex=surface.__white.id surface.__b_count=0
 let before=alloc_count() let result=work(buffer)
 if alloc_count() not=? before result=5
 surface.__b_buf=previous surface.__b_count=0
 return result}
+main=()=>exit(run())

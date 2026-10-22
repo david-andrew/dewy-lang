@@ -4,7 +4,8 @@ Outer:type=[id:int64 ignored:Inner]
 __eq__=(a:Inner b:Inner):>bool=>false
 __eq__=(a:Outer b:Outer):>bool=>a.id=?b.id
 hash=(value:Outer):>uint64=>(value.id as uint64).hash()
-main=()=>{
+run=()=>{
 let a=Outer[7 Inner[20]] let b=Outer[7 Inner[22]]
 let values=[a->42]
 return if [a]=?[b] and [a].hash()=?[b].hash() values[b] else 1}
+main=()=>exit(run())

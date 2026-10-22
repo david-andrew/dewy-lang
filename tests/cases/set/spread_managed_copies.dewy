@@ -1,6 +1,6 @@
 # exit: 42
 Item:type=[values:array<int64>]
-main=()=>{
+run=()=>{
 let source=set[Item[[20]] Item[[22]]]
 let values=[source...]
 values[0].values[0]=99
@@ -8,3 +8,4 @@ let unique=set[source... Item[[42]]]
 source.clear()
 return if [unique...] =? [Item[[20]] Item[[22]] Item[[42]]]
 and values =? [Item[[99]] Item[[22]]] 42 else 1}
+main=()=>exit(run())

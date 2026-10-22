@@ -1,8 +1,9 @@
 # exit: 42
 from bigint import BigInt, bigint
-main=()=>{
+run=()=>{
 let top:uint64=0d18_446_744_073_709_551_615
 let large:BigInt=18_446_744_073_709_551_616
 if top not=? 0xffff_ffff_ffff_ffff or large not=? bigint(0x1_0000_0000_0000_0000) return 1
 if -0d9_223_372_036_854_775_808 not=? -9223372036854775808 return 2
 return if 000_042 =? 42 and large-top =? 1 42 else 1}
+main=()=>exit(run())

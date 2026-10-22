@@ -1,4 +1,5 @@
 # exit: 42
 choose=(value:int64?):>int64=>value??42
-main=()=>{let bytes:array<uint8>=none??[20 22]
+run=()=>{let bytes:array<uint8>=none??[20 22]
 return if choose(none) =? 42 and bytes[0]+bytes[1] =? 42 42 else 1}
+main=()=>exit(run())

@@ -1,6 +1,6 @@
 # exit: 42
 import p"@lib/game/draw2d.jo" as surface
-main=()=>{let points:array<vec2>=[] loop i in [0..3000) {points.push(vec2(i as float32 (i%2) as float32))}
+run=()=>{let points:array<vec2>=[] loop i in [0..3000) {points.push(vec2(i as float32 (i%2) as float32))}
 let buffer:array<float32>=[] buffer.resize(points.length*6*9)
 let previous=surface.__b_buf let previous_effect=@surface.__fx_draw let previous_on=surface.__fx_on
 surface.__b_buf=buffer.data() surface.__b_tex=surface.__white.id surface.__b_count=0
@@ -16,3 +16,4 @@ baseline=alloc_count()
 polyline(points 2 WHITE) surface.flush()
 surface.__fx_draw=@previous_effect surface.__fx_on=previous_on surface.__b_buf=previous
 return if seen =? 2999*6 and batches =? 2 and points.length =? 0 42 else 1}
+main=()=>exit(run())

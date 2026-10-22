@@ -1,6 +1,6 @@
 # exit: 42
 Item:type=[values:array<int64> speed:float32 active:bool]
-main=()=>{
+run=()=>{
 let pool:Pool<Item>=[] let h=pool.add(Item[[20 22] 2.0 false]) let saved=pool
 let slot:int64=0 let delta:int64=3 let factor:float32=4.0
 pool[h].values[slot+1]+=delta*7-1
@@ -10,3 +10,4 @@ pool[h].active=not (delta <? 0) and (slot =? 0 or delta <? 0)
 return if pool[h].values =? [20 42] and pool[h].speed =? 14.0 and pool[h].active
 and saved[h].values =? [20 22] and saved[h].speed =? 2.0 and not saved[h].active 42 else 1
 }
+main=()=>exit(run())

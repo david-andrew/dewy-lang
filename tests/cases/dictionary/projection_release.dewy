@@ -4,5 +4,6 @@ let values=["first"->[20] "gone"->[99] "last"->[22]] values.remove("gone")
 let keys=[values.keys...] let items=values.values()
 if keys not=? ["first" "last"] or items not=? [[20] [22]] panic("projection")
 }
-main=()=>{work() let before=alloc_count() loop i in [0..30) work()
+run=()=>{work() let before=alloc_count() loop i in [0..30) work()
 return if alloc_count() =? before 42 else 1}
+main=()=>exit(run())

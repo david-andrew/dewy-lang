@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let values:dict<int64 int64?>=[1->none 2->42]
 if values.get(1) is? none or values.get(3) isnt? none return 1
 if values.get(1) =? none or values.get(3) not=? none return 2
@@ -8,3 +8,4 @@ if empty is? none or present is? none or missing isnt? none return 3
 let inner_empty=empty let inner_present=present
 if inner_empty isnt? none or inner_present is? none return 4
 return inner_present}
+main=()=>exit(run())

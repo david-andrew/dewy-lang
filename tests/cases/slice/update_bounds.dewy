@@ -1,6 +1,7 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let xs=[10 20 30 40 50] xs.push(60) let saved=xs
 xs[1..2]=[1 2] xs[..1)=3 xs[4..]=42 xs[3..3)=[]
 return if xs =? [3 1 2 40 42 42] and saved =? [10 20 30 40 50 60] 42 else 1
 }
+main=()=>exit(run())

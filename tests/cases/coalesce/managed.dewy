@@ -8,6 +8,7 @@ values.push("new")
 if present {if saved not=? ["a" "b"] panic("snapshot changed")}
 else {if saved not=? ["fallback"] panic("fallback changed")}
 }
-main=()=>{work(true) work(false) let before=alloc_count()
+run=()=>{work(true) work(false) let before=alloc_count()
 loop i in [0..20) {work(true) work(false)}
 return if alloc_count() =? before 42 else 1}
+main=()=>exit(run())

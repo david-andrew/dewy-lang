@@ -1,7 +1,8 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let values=["a"->20 "gone"->99 "b"->22]
 values.remove("gone")
 let [[first x] [second y]]=values
 values["a"]=0 values.remove("b")
 return if first=?"a" and second=?"b" x+y else 1}
+main=()=>exit(run())

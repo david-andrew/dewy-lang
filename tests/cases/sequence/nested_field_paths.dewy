@@ -1,7 +1,7 @@
 # exit: 42
 Inner:type=[values:array<int64>]
 Outer:type=[left:Inner right:Inner]
-main=()=>{
+run=()=>{
 let world=Outer(Inner([10 11]) Inner([100 200]))
 let sum:int64=0
 loop i in [0..world.left.values.length) {
@@ -19,3 +19,4 @@ and world.right.values =? [102 202]
 and snapshots[0].left.values =? [900 32] and snapshots[1].left.values =? [901 32]
 and snapshots[0].right.values =? [100 200] and snapshots[1].right.values =? [102 200] 42 else 1
 }
+main=()=>exit(run())

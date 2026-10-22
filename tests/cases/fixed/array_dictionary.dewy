@@ -1,8 +1,9 @@
 # exit: 42
 Pair:type=array<int64 length=2>
-main=()=>{let values:dict<int64 Pair>=[0->[0 0] 1->[20 22]]
+run=()=>{let values:dict<int64 Pair>=[0->[0 0] 1->[20 22]]
 let zero=values.get(0) if zero is? none return 1
 let copy=values copy[1][0]=99
 if values[1][0] not=? 20 or copy[1][0] not=? 99 return 2
 let total:int64=0 loop [key pair] in values {loop value in pair {total+=value}}
 return total}
+main=()=>exit(run())

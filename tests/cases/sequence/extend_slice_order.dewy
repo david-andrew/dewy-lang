@@ -5,5 +5,6 @@ get=()=>{trace=trace*10+1 return source}
 lower=()=>{trace=trace*10+2 source=[100] return 1}
 end_at=()=>{trace=trace*10+3 return upper}
 choose=()=>{trace=trace*10+4 upper=0 boxes.push([99]) return 0}
-main=()=>{boxes[choose()].extend(get()[lower()..end_at()))
+run=()=>{boxes[choose()].extend(get()[lower()..end_at()))
 return if trace =? 1234 and boxes =? [[20 22] [99]] and source =? [100] 42 else 1}
+main=()=>exit(run())

@@ -1,6 +1,7 @@
 # exit: 42
 Item:type=[values:array<[amount:int64]>]
-main=()=>{
+run=()=>{
 let pool:Pool<Item>=[] let h=pool.add(Item[[[amount=20] [amount=22]]]) let original=pool
 pool[h].values[1].amount+=20
 return if pool[h].values[1].amount =? 42 and original[h].values[1].amount =? 22 42 else 1}
+main=()=>exit(run())

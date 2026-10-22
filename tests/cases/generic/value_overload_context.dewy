@@ -2,5 +2,6 @@
 choose=<T>(x:T):>T=>x
 choose=<T>(x:T y:T):>T=>y
 apply=(f:<(x:int64):>int64>)=>f(42)
-main=()=>{let pair:<(x:int64 y:int64):>int64>=@choose<int64>
+run=()=>{let pair:<(x:int64 y:int64):>int64>=@choose<int64>
 return pair(0 apply(@choose<int64>))}
+main=()=>exit(run())

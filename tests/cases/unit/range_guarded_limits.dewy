@@ -4,8 +4,9 @@ let count:int64=0
 loop i in start.. and i <? stop {count+=1 if count >? 10 panic("did not stop")}
 return count
 }
-main=()=>{
+run=()=>{
 let high=int64.max let low=int64.min
 let count=bounded_count(high-2 high)+bounded_count(low low+2)+bounded_count(-3 4)
 count+=bounded_count(high low)+bounded_count(0 0)
 return if count =? 11 42 else 1}
+main=()=>exit(run())

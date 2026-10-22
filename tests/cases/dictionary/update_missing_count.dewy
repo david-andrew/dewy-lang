@@ -1,6 +1,6 @@
 # exit: 101
 # The counting idiom guards the key; an unguarded update of a missing key fails.
-main=()=>{
+run=()=>{
     let counts:dict<string int64>=[]
     loop word in ["a" "b" "a"] {
         if word in? counts counts[word]+=1 else counts[word]=1
@@ -10,3 +10,4 @@ main=()=>{
     return 0
 }
 $runtime_checks
+main=()=>exit(run())

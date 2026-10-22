@@ -1,6 +1,6 @@
 # exit: 42
 Item:type=[score:int64 id:int64 payload:array<int64>]
-main=()=>{
+run=()=>{
 let values=[loop i in [0..65) Item[(i*17)%13 i [i]]]
 let snapshot=values
 let comparisons:int64=0
@@ -23,3 +23,4 @@ if comparisons <? 1 return 4
 values[0].payload[0]=999
 loop i in [0..65) {if snapshot[i].id not=? i or snapshot[i].payload[0] not=? i return 5}
 return 42}
+main=()=>exit(run())

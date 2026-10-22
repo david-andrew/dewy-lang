@@ -1,5 +1,6 @@
 # exit: 42
 Item:type=[value:int64]
 bump=(@value:int64):>void=>{value+=22}
-main=()=>{let item=Item[20] let copy=item bump(@item.value)
+run=()=>{let item=Item[20] let copy=item bump(@item.value)
 return if copy.value=?20 item.value else 1}
+main=()=>exit(run())

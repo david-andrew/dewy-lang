@@ -1,5 +1,6 @@
 # exit: 42
 let calls=0
 make=()=>{calls+=1 let n=40 return ()=>{n+=1 return n}}
-main=()=>{const next=make() let a=next() let b=next()
+run=()=>{const next=make() let a=next() let b=next()
 return if calls=?1 and a=?41 and b=?41 42 else 1}
+main=()=>exit(run())

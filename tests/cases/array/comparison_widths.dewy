@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let wide:array<uint64>=[0 1 18446744073709551615]
 let small:array<uint8>=[0 42 255] let signed:array<int8>=[-128 0 127]
 let real:array<float32>=[1.25 2.5]
@@ -8,3 +8,4 @@ and small =? [0 42 255] and [0 42 255] =? small and small not=? [0 42]
 and signed =? [-128 0 127] and [-128 0 127] =? signed
 and real =? [1.25 2.5] and [1.25 2.5] =? real 42 else 1
 }
+main=()=>exit(run())

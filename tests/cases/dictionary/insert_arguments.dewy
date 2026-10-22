@@ -2,8 +2,9 @@
 let calls:int64=0
 key=()=>{calls=calls*10+1 return "key"}
 value=()=>{calls=calls*10+2 return 42}
-main=()=>{let values:dict<string int64>=[]
+run=()=>{let values:dict<string int64>=[]
 if not values.insert_if_absent(key() value()) or calls not=? 12 return 1
 calls=0
 if values.insert_if_absent(key() value()) or calls not=? 12 return 2
 return values["key"]}
+main=()=>exit(run())

@@ -2,4 +2,5 @@
 Envelope:type=[value:int64|string]
 pick=(box:Envelope):>int64=>match box.value {
 <"yes">=>box.value.length <0>=>box.value n:int64=>n _=>box.value.length}
-main=()=>pick(Envelope["yes"])+pick(Envelope[0])+pick(Envelope[36])+pick(Envelope["abc"])
+run=()=>pick(Envelope["yes"])+pick(Envelope[0])+pick(Envelope[36])+pick(Envelope["abc"])
+main=()=>exit(run())

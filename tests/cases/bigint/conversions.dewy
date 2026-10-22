@@ -1,6 +1,6 @@
 # exit: 42
 from bigint import bigint
-main=()=>{
+run=()=>{
 if bigint(-9223372036854775808).to_int64() not=? -9223372036854775808 return 1
 if bigint(9223372036854775807).to_int64() not=? 9223372036854775807 return 2
 if bigint(18446744073709551615).to_uint64() not=? 18446744073709551615 return 3
@@ -10,3 +10,4 @@ if bigint("18446744073709551616").to_uint64() isnt? none return 6
 if bigint(-1).to_uint64() isnt? none return 7
 return if bigint(0).to_int64() =? 0 and bigint(0).to_uint64() =? 0 42 else 8
 }
+main=()=>exit(run())

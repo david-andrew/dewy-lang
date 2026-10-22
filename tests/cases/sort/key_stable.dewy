@@ -1,7 +1,7 @@
 # exit: 42
 Item:type=[score:int64 id:int64]
 key=(item:Item):>int64=>item.score
-main=()=>{
+run=()=>{
 loop size in [0 1 2 15 16 17 31 32 33 129] {
     let items=[loop i in [0..size) Item[(i*17)%13 i]]
     loop descending in [false true] {
@@ -17,3 +17,4 @@ loop size in [0 1 2 15 16 17 31 32 33 129] {
     }
 }
 return 42}
+main=()=>exit(run())

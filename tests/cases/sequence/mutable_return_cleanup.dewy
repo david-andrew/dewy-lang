@@ -3,7 +3,8 @@ first=(@values:array<array<int>>):>array<int>=>{
 loop @value in values {value.push(22) return value}
 return []
 }
-main=()=>{
+run=()=>{
 let values=[[20] [99]] let saved=values let result=first(@values)
 values[0][0]=0
 return if result=?[20 22] and saved=?[[20] [99]] and values=?[[0 22] [99]] 42 else 1}
+main=()=>exit(run())

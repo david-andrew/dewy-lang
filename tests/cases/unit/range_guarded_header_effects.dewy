@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let calls:int64=0 let count:int64=0
 let limit=($capture @calls):>int64=>{calls+=1 return 3}
 loop i in 0.. and i <? limit() {count+=1}
@@ -8,3 +8,4 @@ calls=0 count=0
 let allowed=($capture @calls):>bool=>{calls+=1 return calls <? 3}
 loop i in 0.. and i <? 3 and allowed() {count+=1}
 return if count =? 2 and calls =? 3 42 else 2}
+main=()=>exit(run())

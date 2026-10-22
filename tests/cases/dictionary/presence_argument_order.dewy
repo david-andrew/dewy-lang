@@ -3,10 +3,11 @@ let trace:int64=0
 let values:dict<int64 array<int64>>=[1->[42]]
 source=():>dict<int64 array<int64>>=>{trace=trace*10+1 return values}
 key=():>int64=>{trace=trace*10+2 values.clear() return 1}
-main=()=>{
+run=()=>{
 if source().get(key()) is? none or trace not=?12 return 1
 values=[1->[42]] trace=0
 if get(k=key() m=source()) isnt? none or trace not=?21 return 2
 values=[1->[42]] trace=0
 if none =? source().get(key()) or trace not=?12 return 3
 return 42}
+main=()=>exit(run())

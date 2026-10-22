@@ -5,8 +5,9 @@ edit=(first:array<int> raw:array<int> changed:array<int> last:array<int> take:bo
 if take {let p=raw.data() p[0]=40 bump(@changed)}
 return first[0]+raw[0]+changed[0]+last[0]}
 read=(first:array<int> second:array<int> third:array<int>):>int=>first[0]+second[0]+third[0]
-main=()=>{let original=[10] original.push(22)
+run=()=>{let original=[10] original.push(22)
 if edit(original original original original true) not=? 71 return 1
 if edit(original original original original false) not=? 40 return 2
 if read(original original original) not=? 30 return 3
 return if original =? [10 22] 42 else 4}
+main=()=>exit(run())

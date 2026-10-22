@@ -1,8 +1,9 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let value:int64=0 let count:int64=0
 loop value =? 0 and value in [20 22] {count+=1}
 loop value =? 0 and value in [1..2] {count+=1}
 loop value =? 0 and value in [10 11] and i in 0.. {count+=1}
 return if count =? 6 and value =? 0 42 else 1
 }
+main=()=>exit(run())

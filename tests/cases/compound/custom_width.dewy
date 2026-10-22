@@ -2,5 +2,6 @@
 Box:type=[value:int8]
 __index__=(box:Box i:int64):>int8=>box.value
 __setindex__=(@box:Box i:int64 value:int8):>void=>{box.value=value}
-main=()=>{let box=Box[-128] box[0]//=-1 box[0]%=3
+run=()=>{let box=Box[-128] box[0]//=-1 box[0]%=3
 return if box.value =? 1 42 else 1}
+main=()=>exit(run())

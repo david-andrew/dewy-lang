@@ -7,5 +7,6 @@ m[rows cols]=selected
 assert(m.data =? [["a"] ["b"] ["c"] ["d"] ["e"] ["f" "!"]])
 assert(saved.data =? [["a"] ["b"] ["c"] ["d"] ["e"] ["f"]])
 }
-main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+run=()=>{work() let before=alloc_count() loop i in [0..20) work()
 return if alloc_count() =? before 42 else 1}
+main=()=>exit(run())

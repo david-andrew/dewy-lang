@@ -8,5 +8,6 @@ assert(saved[0].values =? [20] and saved[1].name =? "second")
 assert(out[0].values =? [20 42] and out[1].values =? [22])
 assert(a[1].name =? "second" and a[3].values =? [22] and a.length =? 5)
 }
-main=()=>{work() let before=alloc_count() loop i in [0..20) work()
+run=()=>{work() let before=alloc_count() loop i in [0..20) work()
 return if alloc_count() =? before 42 else 1}
+main=()=>exit(run())

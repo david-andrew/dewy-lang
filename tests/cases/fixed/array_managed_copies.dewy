@@ -1,8 +1,9 @@
 # exit: 42
 Pair:type=array<array<int64> length=2>
 Box:type=[items:Pair]
-main=()=>{let pair:Pair=[[20] [22]] let box=Box[pair] let copied=box
+run=()=>{let pair:Pair=[[20] [22]] let box=Box[pair] let copied=box
 copied.items[0].push(99) copied.items[1][0]=0
 let dynamic:array<array<int64>>=pair dynamic[0][0]=100
 return if pair[0] =? [20] and box.items[1] =? [22]
 and copied.items[0] =? [20 99] and copied.items[1] =? [0] 42 else 1}
+main=()=>exit(run())

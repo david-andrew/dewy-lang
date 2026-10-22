@@ -5,6 +5,7 @@ let saved=pool
 loop i in [0..20) {pool[h].values[0]+=1 pool[h].values[1]=i}
 if saved[h].values not=? [1 2 3] panic("snapshot changed")
 }
-main=()=>{exercise() let before=alloc_count()
+run=()=>{exercise() let before=alloc_count()
 loop i in [0..20) {exercise()}
 return if alloc_count() =? before 42 else 1}
+main=()=>exit(run())

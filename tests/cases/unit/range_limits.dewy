@@ -4,7 +4,7 @@ let result:int64=0
 loop i in [start..stop] {result+=1 if result >? 4 panic("range did not stop")}
 return result
 }
-main=()=>{
+run=()=>{
 let total:int64=0
  total+=count(125 as int8 127 as int8)
  total+=count(253 as uint8 255 as uint8)
@@ -22,3 +22,4 @@ loop i in [zero..18446744073709551615] {unsigned.push(i) if unsigned.length =? 3
 return if total =? 24 and signed =? [low low+1 low+2]
 and unsigned =? [zero zero+1 zero+2] 42 else 1
 }
+main=()=>exit(run())

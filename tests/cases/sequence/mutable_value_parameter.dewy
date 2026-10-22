@@ -3,5 +3,6 @@ update=(values:array<int>):>array<int>=>{
 loop @value in values value+=1
 return values
 }
-main=()=>{let values=[19 21] let result=update(values)
+run=()=>{let values=[19 21] let result=update(values)
 return if result=?[20 22] and values=?[19 21] 42 else 1}
+main=()=>exit(run())

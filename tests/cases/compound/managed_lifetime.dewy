@@ -4,5 +4,6 @@ let values=[3/2] values.push(5/2) let saved=values
 loop i in [0..20) {values[0]/=3 values[0]^=(-1)}
 if saved not=? [3/2 5/2] panic("snapshot changed")
 }
-main=()=>{work() let before=alloc_count() loop i in [0..10) work()
+run=()=>{work() let before=alloc_count() loop i in [0..10) work()
 return if alloc_count() =? before 42 else 1}
+main=()=>exit(run())

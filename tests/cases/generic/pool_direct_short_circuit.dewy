@@ -2,9 +2,10 @@
 Item:type=[active:bool health:int64=10]
 let pool:Pool<Item>=[] let h:Handle=[] let calls:int64=0
 touch=():>bool=>{calls+=1 pool[h].health=99 return true}
-main=()=>{h=pool.add(Item[false]) let yes=true let no=false
+run=()=>{h=pool.add(Item[false]) let yes=true let no=false
 pool[h].active=yes or touch()
 pool[h].active=no and touch()
 if calls not=? 0 return 1
 pool[h].active=no or touch()
 return if calls =? 1 and pool[h].active and pool[h].health =? 10 42 else 1}
+main=()=>exit(run())

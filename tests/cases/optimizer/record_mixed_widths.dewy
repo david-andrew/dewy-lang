@@ -2,7 +2,7 @@
 Pair:type=[x:int32 y:int64]
 Outer:type=[left:Pair right:Pair]
 advance=(p:Pair):>Pair=>Pair(x=p.x+1 y=p.y-2)
-main=()=>{
+run=()=>{
 let p=Pair(x=-2147483648 y=4294967296)
 let outer=Outer(left=p right=p)
 loop i in [0..20) {p=advance(p)}
@@ -10,3 +10,4 @@ outer.right=p
 return if outer.left.x =? (-2147483648) and outer.left.y =? 4294967296
 and outer.right.x =? (-2147483628) and outer.right.y =? 4294967256 42 else 1
 }
+main=()=>exit(run())

@@ -1,6 +1,6 @@
 # exit: 42
 from p"../../../tests/fixtures/programs/hash_keys.dewy" import Key
-main=()=>{
+run=()=>{
 let values:dict<Key int64>=[]
 values[Key[7 "first"]]=20
 values[Key[7 "second"]]+=22
@@ -10,3 +10,4 @@ if values.insert_if_absent(Key[7 "fifth"] 99) return 3
 let saved=values
 if not values.remove(Key[7 "sixth"]) or values.length not=?0 return 4
 return saved[Key[7 "last"]]}
+main=()=>exit(run())

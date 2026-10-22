@@ -1,8 +1,9 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let one:float32=1.0 let negative:float32=-0.0
 if (one transmute uint32) not=?1065353216 or (negative transmute uint32) not=?2147483648 return 1
 if (float64(1.0) transmute uint64) not=?4607182418800017408 or (float64(-0.0) transmute uint64) not=?9223372036854775808 return 2
 let f:uint32=1073741824 let d:uint64=4611686018427387904
 return if (f transmute float32)=?2.0 and (d transmute float64)=?2.0 and (float64(1.0) as uint64)=?1 42 else 3
 }
+main=()=>exit(run())

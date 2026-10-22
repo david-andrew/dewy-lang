@@ -1,6 +1,6 @@
 # exit: 42
 Item:type=[values:array<int> health:int=10]
-main=()=>{
+run=()=>{
 let original_values=[20 22] let pool:Pool<Item>=[]
 let a=pool.add(Item[original_values]) let b=pool.add(Item[original_values])
 let snapshot=pool let delta:int=2
@@ -12,3 +12,4 @@ and snapshot[b].values =? [20 22] and pool[a].values =? [22 22]
 and pool[b].values =? [20 40] and pool[a].health =? 8
 and pools[0][a].values =? [42 22] 42 else 1
 }
+main=()=>exit(run())

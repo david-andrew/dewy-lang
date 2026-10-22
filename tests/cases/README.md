@@ -26,6 +26,10 @@ python3 -m tools.core cases -k string/new_case --update   # record a new case's 
 python3 -m tools.core cases --update             # re-record changed outputs of existing .out files
 ```
 
+`main` returns `void` or errors, as in any program. A case that checks a
+computed exit code returns it from its own function and ends with
+`main=()=>exit(run())`; batches call `run` directly and keep its result.
+
 `--update` only rewrites stdout; exit codes and diagnostics stay hand-written.
 Check the recorded output before committing it. Ordinary cases of one mode
 compile together as modules of one program, so a case keeps its own module

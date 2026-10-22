@@ -2,5 +2,6 @@
 let values=[10 20 30] let trace=0
 source=():>array<int>=>{trace=trace*10+1 return values}
 item=(x:int)=>{trace=trace*10+2 values.clear() return x+1}
-main=()=>{let result=[loop x in source() item(x)]
+run=()=>{let result=[loop x in source() item(x)]
 return if result =? [11 21 31] and values.length =? 0 and trace =? 1222 42 else 1}
+main=()=>exit(run())

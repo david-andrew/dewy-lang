@@ -2,7 +2,7 @@
 Key:type=[value:int64 label:string]
 hash=(key:Key):>uint64=>0
 __eq__=(a:Key b:Key):>bool=>a.value=?b.value
-main=()=>{
+run=()=>{
 let values:dict<Key array<int64>>=[]
 loop i in [0..80) values[Key[i "first"]]=[i]
 let saved=values
@@ -21,3 +21,4 @@ let keys=[values.keys...]
 if keys.length not=?80 or keys[0].value not=?61 or keys[19].value not=?0 return 7
 values[Key[0 "mutate"]].push(42)
 return if saved[Key[0 "original"]]=?[0] 42 else 8}
+main=()=>exit(run())

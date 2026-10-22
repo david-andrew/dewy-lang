@@ -1,5 +1,5 @@
 # exit: 42
-main=()=>{
+run=()=>{
 let v=vec2(1 2)
 let sum=v+{v=vec2(10 20); vec2(3 4)}
 if sum not=? vec2(4 6) return 1
@@ -13,3 +13,4 @@ let iv=ivec2(1 2)
 let integers=iv+{iv=ivec2(10 20); ivec2(3 4)}
 return if integers =? ivec2(4 6) 42 else 4
 }
+main=()=>exit(run())

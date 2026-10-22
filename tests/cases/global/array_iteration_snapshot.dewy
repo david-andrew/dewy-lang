@@ -2,8 +2,9 @@
 Cell:type=[value:int64]
 let cells=[Cell(10) Cell(20)]
 change=()=>{cells[1].value=99}
-main=()=>{
+run=()=>{
 let sum:int64=0
 loop cell in cells {sum+=cell.value change()}
 return if sum=?30 and cells[1].value=?99 42 else 1
 }
+main=()=>exit(run())

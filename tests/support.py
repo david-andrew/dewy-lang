@@ -31,8 +31,12 @@ def case_source(name):
 
 
 def exit_main(source):
-    """A golden case's int-returning main (cases run it in batches) as a standalone program:
-    main exits with what the original returned."""
+    """A golden case's exit-code function as `entry`, the function IR tests inspect, with
+    main exiting with what it returns (also for an older int-returning main)."""
+    entry = re.search(r'^main\s*=\s*\(\s*\)\s*=>\s*exit\((\w+)\(\)\)\s*$', source, re.M)
+    if entry:
+        source = source[:entry.start()] + 'main=():>void=>exit(entry())' + source[entry.end():]
+        return re.sub(rf'^{entry[1]}(?=\s*=)', 'entry', source, count=1, flags=re.M)
     return re.sub(r'^main=\(\)(?::>\w+)?=>', 'main=():>void=>exit(entry()) entry=()=>', source, count=1, flags=re.M)
 
 
