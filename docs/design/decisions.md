@@ -113,7 +113,7 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   annotation fixes the order and documents it); no main special case. Scripts
   needing a code call `exit(n)`. Success exits 0. An error reaching `main` is
   printed and exits with a code assigned 1, 2, 3, … in the declaration order of
-  the error kinds, below 126. An error type may pin its code with an `exit_code`
+  the error kinds, up to 100 (101 is a failed runtime check). An error type may pin its code with an `exit_code`
   member. `dewy build --exit-codes` prints the table.
 - Console: the prelude `console` object has `print`/`printl` and `info`
   (stdout), `warn`/`error` (stderr, coloured on a terminal) and `debug`

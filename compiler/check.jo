@@ -5634,7 +5634,7 @@ check_program = (main_path: str):
 # Dewy's main gives back void or the errors that reach it (`void | E`, declared or
 # inferred; an ordinary type). An error is said on standard error and ends the program
 # with its kind's code: 1, 2, 3, ... in the kinds' order (the declaration's, or the
-# order the kinds are declared in when inferred), below 126; an error type with an
+# order the kinds are declared in when inferred), up to 100 (101 is a failed runtime check); an error type with an
 # `exit_code` field gives its own.
 dewy_main_result = (decl: int, rt: int):
     if rt == T_VOID or rt == T_NEVER: return
@@ -5659,7 +5659,7 @@ dewy_main_result = (decl: int, rt: int):
         code = pinned[i]
         if code == 0:
             loop taken.has(next): next += 1
-            if next >= 126: fatal(pos, "main's errors need more exit codes than 1 to 125: let some share a parent type, or handle them")
+            if next > 100: fatal(pos, "main's errors need more exit codes than 1 to 100: let some share a parent type, or handle them")
             code = next
             taken[next] = true
         main_exit_kinds.push(k)
