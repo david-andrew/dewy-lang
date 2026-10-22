@@ -842,14 +842,64 @@ exact scale to that representation.
 
 Addition, subtraction, and comparisons require identical dimensions.
 Multiplication/division combine dimensions; powers require a constant integer
-exponent, and `sqrt` halves even powers (`sqrt(v*v)` of a speed is a speed).
-Divide by a unit to get a dimensionless count in that unit.
+exponent, and `sqrt` halves powers. Powers may be fractions: `sqrt(Hz)` has
+`Time^(1/2)`, so a noise density is `V/sqrt(Hz)`, and types can say
+`Time^(1/2)`. Divide by a unit to get a dimensionless count in that unit.
 Annotations, generic functions, overloads, arrays, records, and conversions
 preserve dimensions. Ordinary conversions cannot add or remove a dimension;
 `transmute` can explicitly change it while preserving the numeric representation.
-Formatting currently prints the canonical number without a unit suffix.
-Display-unit selection, offset units such as Celsius, and calendar durations
-remain open. `sleep` takes a time, `sleep(300ms)`, and waits whole nanoseconds;
+
+A quantity prints with a unit chosen from its dimension and magnitude:
+
+```dewy
+from units import m, kg, J
+printl"{1500m} {3000m} {300ms} {4500J} {20m/s} {2kg*m/s}"  # 1500 m 3 km 300 ms 4500 J 20 m/s 2 N*s
+let d:float64 * Length=1500m
+printl"{d} {d/1000}"  # 1.5 km 1.5 m
+```
+
+Each kind has a list of candidate units: time `ns µs ms s min h`, length
+`nm µm mm m km`, mass `mg g kg`, and SI prefixes `n` to `G` for amperes,
+moles and the named units `Hz N Pa J W C V Ω`; temperatures print in `K`,
+angles in `°` and luminosity in `cd`. A float prints in the largest candidate
+not above its magnitude. An exact value prints in the largest such candidate
+that keeps a whole count (`2.5m` is `2500 mm`), and otherwise in the candidate
+with the simplest fraction (`m/3` is `1/3 m`). Zero prints in the kind's own
+unit (`0 s`). Other dimensions print in canonical units, using one named unit
+where that needs fewer factors (`m/s^2`, `N*s`, `kg/m^3`, `V/Hz^(1/2)`,
+`°/s`). Text from `string(x)` is the same. A format spec such as `{x:.2f}`
+formats the canonical number alone.
+
+`x as unit` converts a quantity to a constant unit of the same dimension:
+`30cm as inches` prints `1500/127 inches` and `25m/s as km/hour` prints
+`90 km/hour`. It changes only how the value prints: comparisons and counts are
+unaffected. The unit stays through scaling and sums (`(l as mm)*2`), but not
+through products of quantities.
+
+Temperatures in `°C` and `°F` (from `units`, beside `K`) count from an offset
+zero:
+
+```dewy
+from units import K, °C, °F
+let start=20°C
+let later=start+15°C       # 35°C: a literal added to a point is a difference
+let rise=later-start       # 15°C: point - point is a difference
+printl"{rise as °F} {later as °F} {start*2} {start/°F}"  # 27°F 95°F 40°C 68
+```
+
+A temperature is a point unless it is the difference of two points. Where a
+difference is needed, a point is read as one in the unit it was written in:
+`start + 20°C`, `t += 5°C`, and the right side of `-` when it is a literal
+(`start - 5°C` is `15°C`). Subtracting a temperature that is not a literal
+gives a difference, also for plain kelvins (`a - b`); the difference prints in
+the first point's unit. A product or quotient with a plain number scales the
+reading in the value's own unit (`20°C*2` is `40°C`). With other quantities a
+temperature counts as its difference, and dividing by a temperature unit gives
+the reading in that unit (`t/°C`, `t/K`). Comparisons compare points. `as` keeps
+the scale a value was written in: `(20°C as °F)` prints `68°F`, but read as a
+difference it is still 20 K (`36°F`), so `start + (20°C as °F)` is `40°C`.
+A plain `float64 * Temperature` annotation holds kelvins and drops the offset
+scale. Calendar durations remain open. `sleep` takes a time, `sleep(300ms)`, and waits whole nanoseconds;
 a plain number is rejected. `sin`, `cos` and `tan` take an angle, `cos(45°)`, reduced
 exactly in whole turns; until `fixed` exists they give a `float64` rounded to
 fixed's 32 fraction bits (a plain number is still radians). The radian unit
