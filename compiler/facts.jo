@@ -108,6 +108,8 @@ const FACT_VALUE = 2
 const FACT_ACTIVE = 4
 struct FactSlice:
     flags: int[]
+    # (a probe also reads floor calls the facts pass's slice leaves out)
+    probe_only: bool = false
 
 fact_slice_flags = (n: int) -> int: max(0, fact_index_get(fact_slice.flags, n))
 
@@ -132,6 +134,7 @@ fact_owner = 0
 fact_query = false
 fact_policy = FactPolicy.RuntimeAllowed
 const FACT_CAP = 256
+const FACT_STEPS = 4096
 const FACT_MIN = -9223372036854775807 - 1
 const FACT_MAX = 9223372036854775807
 
@@ -622,18 +625,74 @@ fact_route_bounds = (s: mut FactState, route: FactRoute, values: int[]):
 fact_probe_on = false
 fact_probe_disjoint = 0
 fact_probe: {int: bool} = {}
+fact_probe_diverged = false
+
+# Under the static policy a probe runs the facts pass's own transfer, with
+# index failures recorded instead of reported. A probe that proved everything,
+# reported nothing and never diverged from that transfer is the facts pass's
+# run of its body: facts_finalize reuses it rather than analysing it again.
+# The run is the facts pass's only while its inputs are: its slice, and the
+# effect footprints of the callees it consulted (rows can differ after the
+# probes settle, where a row reached its region budget).
+struct FactFootprint:
+    kind: int
+    writes: EffectAtom[]
+struct FactProbeRun:
+    proven: {int: bool}
+    refine: bool
+    slice: int[]
+    callees: int[]
+    footprints: FactFootprint[]
+fact_probe_runs: {int: FactProbeRun} = {}
+fact_probe_callees: int[]
+fact_probe_footprints: FactFootprint[]
+
+# What fact_call_effects reads of a direct callee's settled row.
+fact_footprint = (f: int) -> FactFootprint:
+    if not effects_demand(f): return FactFootprint(1, [])
+    if fns[f].body != 0 and fns[f].state != 2: return FactFootprint(2, [])
+    writes: EffectAtom[]
+    loop event in effect_summaries[f].events:
+        if event.atom.kind == .opaque or event.atom.kind == .escape: return FactFootprint(3, [])
+        if event.atom.kind == .write: writes.push(event.atom)
+    FactFootprint(4, writes)
+
+fact_footprint_same = (a: FactFootprint, b: FactFootprint) -> bool:
+    if a.kind != b.kind or a.writes.len() != b.writes.len(): return false
+    loop i in [0..a.writes.len()):
+        if a.writes[i] != b.writes[i]: return false
+    true
+
+fact_probe_note = (f: int):
+    if fact_probe_callees.contains(f): return
+    fact_probe_callees.push(f)
+    fact_probe_footprints.push(fact_footprint(f))
+
+# Whether the facts pass would run f's body exactly as its probe did.
+fact_probe_reusable = (f: int, run: FactProbeRun) -> bool:
+    if fact_policy != .RequireStatic or proof_active or result_active or wit_collect or run.refine != (refine_active or refine_requests.len() > 0): return false
+    fact_slice_prepare(f)
+    if fact_slice.flags.len() != run.slice.len(): return false
+    loop i in [0..run.slice.len()):
+        if fact_slice.flags[i] != run.slice[i]: return false
+    loop i in [0..run.callees.len()):
+        if not fact_footprint_same(fact_footprint(run.callees[i]), run.footprints[i]): return false
+    true
+
+fact_probe_record = (n: int, proven: bool):
+    ok = proven
+    if let old = fact_probe.get(n): ok = ok and old
+    fact_probe[n] = ok
 
 fact_probe_index = (n: int, s: mut FactState, index: int, length: int):
     zero = fact_constant(s, 0)
-    ok = fact_compare(s, .le, zero, index) == 1 and fact_compare(s, .lt, index, length) == 1
-    if let old = fact_probe.get(n): ok = ok and old
-    fact_probe[n] = ok
+    fact_probe_record(n, fact_compare(s, .le, zero, index) == 1 and fact_compare(s, .lt, index, length) == 1)
 
+# (a check of the probe's own: the facts pass would not make this constant)
 fact_probe_divisor = (n: int, s: mut FactState, divisor: int, operand: int):
+    fact_probe_diverged = true
     zero = fact_constant(s, ref_encoded(0, ntype(operand)))
-    ok = fact_compare(s, .ne, divisor, zero) == 1
-    if let old = fact_probe.get(n): ok = ok and old
-    fact_probe[n] = ok
+    fact_probe_record(n, fact_compare(s, .ne, divisor, zero) == 1)
 
 fact_probe_route = (s: mut FactState, route: FactRoute, values: int[]):
     loop i in [0..route.selectors.len()):
@@ -659,9 +718,21 @@ fact_probe_function = (f: int, disjoint: bool = false) -> {int: bool}:
     fact_owner = f
     fact_terms = [FactTerm()]
     state = FactState()
-    if refine_active or refine_requests.len() > 0: refine_fact_entry(f, state)
+    refine = refine_active or refine_requests.len() > 0
+    if refine: refine_fact_entry(f, state)
     fact_slice_prepare(f)
+    fact_probe_diverged = fact_slice.probe_only
+    fact_probe_callees = []
+    fact_probe_footprints = []
+    reported = wit_collected + dir_sites.len()
     fact_capture(int(fns[f].body), state)
+    if not disjoint and fact_policy == .RequireStatic and not saved_proof and not saved_result and not wit_collect and not fact_probe_diverged and reported == wit_collected + dir_sites.len():
+        all = true
+        loop _, ok in fact_probe:
+            if not ok: all = false
+        if all: fact_probe_runs[f] = FactProbeRun(fact_probe, refine, fact_slice.flags, fact_probe_callees, fact_probe_footprints)
+    fact_probe_callees = []
+    fact_probe_footprints = []
     fact_slice = FactSlice()
     fact_owner = 0
     fact_terms = []
@@ -694,6 +765,17 @@ fact_summary_record = (s: mut FactState, r: int):
         length = fact_hull(fact_summary_acc.length, length, 0)
         value = fact_hull(fact_summary_acc.value, value, 0)
     fact_summary_acc = FactSummary(length, value, true)
+    # A hull only widens. Once it says nothing the result's own domain does
+    # not, the rest of the run cannot bound anything a caller asks: stop it
+    # (an unbounded summary counts the same as none).
+    if fact_summary_vacuous(fact_summary_acc, t):
+        fact_loop_steps = FACT_STEPS + 1
+        fact_loop_exhausted = true
+
+fact_summary_vacuous = (acc: FactSummary, t: int) -> bool:
+    if tkind(t) == .array: return acc.length.lo <= 0 and acc.length.hi >= fact_length_max()
+    d = fact_domain(t)
+    acc.value.lo <= d.lo and acc.value.hi >= d.hi and not acc.value.nz
 
 fact_summary = (f: int) -> FactSummary:
     if let known = fact_summaries.get(f): return known
@@ -774,10 +856,25 @@ fact_forget = (s: mut FactState, at: int, reason: FactReason, all: bool = false,
         v = fact_new(s, fact_domain(t, reason, at), FactTerm(type = t))
         s.bindings[i] = FactBinding(p, v, at, s.bindings[i].value)
 
+# A call that never returns ends its path: what it writes is never read, so
+# its callee tree is not summarized for it.
+fact_ends_path = (n: int) -> bool: ntype(n) == T_NEVER or nodes[n].aux == 0 and library_exit_call(n)
+
+fact_path_call_effects = (n: int, s: mut FactState):
+    if fact_ends_path(n): effects_demand(0)
+    else: fact_call_effects(n, s)
+
 # A settled summary can preserve exposed roots across read-only calls.
 # Opaque/callback/hidden-helper effects still invalidate every exposed root.
 fact_call_effects = (n: int, s: mut FactState):
     f = int(nodes[n].sym)
+    # (a callee opaque by its signature forgets the same exposed roots its
+    # summary would: its call tree is not visited for it)
+    if nodes[n].aux == 0 and f > 0 and f < fns.len() and not (fns[f].body != 0 and fns[f].state != 2) and effect_signature_opaque(f):
+        effects_demand(0)
+        fact_forget(s, n, .call)
+        return
+    if fact_probe_on and nodes[n].aux == 0: fact_probe_note(f)
     if nodes[n].aux != 0 or not effects_demand(f):
         fact_forget(s, n, .call)
         return
@@ -1410,7 +1507,7 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         fact_difference(s, b, value, -x.lo)
     value
 
-fact_divisor = (s: mut FactState, n: int, a: int, b: int, modulo: bool):
+fact_divisor = (s: mut FactState, n: int, a: int, b: int, modulo: bool) -> bool:
     operand = if nodes[n].kind == .call: kid(n, 1) else: int(nodes[n].b)
     zero = fact_constant(s, ref_encoded(0, ntype(operand)))
     truth = fact_compare(s, .ne, b, zero)
@@ -1421,6 +1518,7 @@ fact_divisor = (s: mut FactState, n: int, a: int, b: int, modulo: bool):
         x = fact_bound(s, a); y = fact_bound(s, b)
         if x.lo <= FACT_MIN and y.lo <= -1 and y.hi >= -1:
             fact_unknown(n, FactBound(reason = .wrap, witness = n), "division result")
+    truth == 1
 
 # Integer `//` and `%` by a positive divisor (kind 1, 2), or by a power of two
 # as a shift count or mask (3, 4). Dewy's remainder has the divisor's sign, so
@@ -2063,6 +2161,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
     work = [int(fns[f].body)]
     values: int[]
     active: int[]
+    probe_only = false
     if summary or result_active: values.push(int(fns[f].body))
     cursor = 0
     loop cursor < work.len():
@@ -2105,7 +2204,10 @@ fact_slice_prepare = (f: int, summary: bool = false):
         else if k == .break_ or k == .continue_ or k == .defer_: active.push(n)
         else if k == .call:
             if ntype(n) == T_NEVER or nodes[n].aux == 0 and library_exit_call(n): active.push(n)
-            if result_active or proof_active or fact_divisors.has(n) or fact_probe_on and fact_floor_call(n) != 0: values.push(n)
+            if result_active or proof_active or fact_divisors.has(n): values.push(n)
+            else if fact_probe_on and fact_floor_call(n) != 0:
+                values.push(n)
+                probe_only = true
             loop arg in kids(n):
                 if ownership_decls.len() != 0 and ownership_fact_type(ntype(arg)): active.push(n)
                 if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)): values.push(n)
@@ -2215,7 +2317,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
     flags = fact_index_sized(fact_mark_touched.len())
     loop n in fact_mark_touched:
         if fact_mark_flags[n] != 0: fact_index_put(flags, n, fact_mark_flags[n])
-    fact_slice = FactSlice(flags)
+    fact_slice = FactSlice(flags, probe_only)
     fact_slice_cache[key] = fact_slice
 
 # Undemanded values still execute their effectful descendants. Ordinary calls
@@ -2229,8 +2331,8 @@ fact_slice_capture = (n: int, s: mut FactState) -> int:
             arg = kid(n, i)
             value = fact_capture(arg, s)
             if ownership_decls.len() != 0: fact_owner_value(arg, value, s)
-        if nodes[n].aux != 2 and nodes[n].aux != 3: fact_call_effects(n, s)
-        if ntype(n) == T_NEVER or nodes[n].aux == 0 and library_exit_call(n): s.live = false
+        if nodes[n].aux != 2 and nodes[n].aux != 3: fact_path_call_effects(n, s)
+        if fact_ends_path(n): s.live = false
         return 0
     if k == .vardecl or k == .assign:
         if k == .assign and nodes[n].op != i32(int(Tok.assign)): fact_capture(int(nodes[n].a), s)
@@ -2249,7 +2351,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
     if n == 0 or not s.live: return 0
     if fact_speculating > 0:
         fact_loop_steps += 1
-        if fact_loop_steps > 4096:
+        if fact_loop_steps > FACT_STEPS:
             fact_loop_exhausted = true
             return 0
     mark = fact_slice_flags(n)
@@ -2332,14 +2434,16 @@ fact_capture = (n: int, s: mut FactState) -> int:
         t = representation_type(ntype(int(nodes[n].a)))
         if types[t].kind == .array or types[t].kind == .fixed:
             length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, base, -1, false, T_INT)
-            if fact_speculating == 0 and fact_probe_on: fact_probe_index(n, s, index, length)
+            if fact_speculating == 0 and fact_probe_on and fact_policy != .RequireStatic: fact_probe_index(n, s, index, length)
             # (an index the compiler generated in bounds, as an elementwise loop's reads)
             else if fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query) and not has_flag(n, NF_INBOUNDS):
                 zero = fact_constant(s, 0)
                 lo = fact_compare(s, .le, zero, index)
                 hi = fact_compare(s, .lt, index, length)
-                dir_index(n, lo == 1 and hi == 1)
-                if lo != 1 or hi != 1: wit_index(n, s, index, length, lo, hi)
+                if fact_probe_on: fact_probe_record(n, lo == 1 and hi == 1)
+                else:
+                    dir_index(n, lo == 1 and hi == 1)
+                    if lo != 1 or hi != 1: wit_index(n, s, index, length, lo, hi)
             return fact_project(s, base, index, true, int(types[t].elem))
         return fact_unmodeled(s, n, .unsupported)
     if k == .array and nodes[n].aux == 0:
@@ -2511,8 +2615,9 @@ fact_capture = (n: int, s: mut FactState) -> int:
             return fact_new(s, result, FactTerm(op, a, b, n))
         if nodes[n].aux == 0 and fact_scalar(ntype(n)) and (op == .plus or op == .minus or op == .star): return fact_arithmetic(s, n, op, a, b)
         if fact_speculating == 0 and fact_policy == .RequireStatic and nodes[n].aux == 0 and (op == .slash or op == .percent) and is_int(ntype(int(nodes[n].b))):
-            fact_divisor(s, n, a, b, op == .percent)
-        if fact_speculating == 0 and fact_probe_on and nodes[n].aux == 0 and (op == .slash or op == .percent) and is_int(ntype(int(nodes[n].b))):
+            proven = fact_divisor(s, n, a, b, op == .percent)
+            if fact_probe_on: fact_probe_record(n, proven)
+        else if fact_speculating == 0 and fact_probe_on and nodes[n].aux == 0 and (op == .slash or op == .percent) and is_int(ntype(int(nodes[n].b))):
             fact_probe_divisor(n, s, b, int(nodes[n].b))
         if nodes[n].aux == 0 and (op == .slash or op == .percent) and representation_type(ntype(n)) == T_U64 and representation_type(ntype(int(nodes[n].a))) == T_U64 and representation_type(ntype(int(nodes[n].b))) == T_U64:
             return fact_floor_unsigned(s, n, (if op == .slash: 1 else: 2), a, b)
@@ -2663,8 +2768,11 @@ fact_capture = (n: int, s: mut FactState) -> int:
             arg = kid(n, i)
             if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)): ref_check(arg, values[i], values, s)
         if fact_speculating == 0:
-            if let obligation = fact_divisors.get(n): fact_divisor(s, n, values[0], values[1], obligation == 2)
-            if fact_probe_on and nkids(n) == 2 and (fact_floor_call(n) == 1 or fact_floor_call(n) == 2): fact_probe_divisor(n, s, values[1], kid(n, 1))
+            floor_probe = fact_probe_on and nkids(n) == 2 and (fact_floor_call(n) == 1 or fact_floor_call(n) == 2)
+            if let obligation = fact_divisors.get(n):
+                proven = fact_divisor(s, n, values[0], values[1], obligation == 2)
+                if floor_probe: fact_probe_record(n, proven)
+            else if floor_probe: fact_probe_divisor(n, s, values[1], kid(n, 1))
         if nodes[n].aux == 2:
             result = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
             si = int(types[representation_type(ntype(n))].st)
@@ -2673,11 +2781,11 @@ fact_capture = (n: int, s: mut FactState) -> int:
                 value = if kid(n, i) == 0: fact_constant(s, 0) else: values[i]
                 if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, name, false, value))
             return result
-        fact_call_effects(n, s)
+        fact_path_call_effects(n, s)
         floor = fact_floor_call(n)
         if floor != 0 and representation_type(ntype(n)) == T_U64: return fact_floor_unsigned(s, n, floor, values[0], values[1])
         if floor != 0: return fact_floor(s, n, floor, values[0], values[1], true)
-        if ntype(n) == T_NEVER or nodes[n].aux == 0 and library_exit_call(n): s.live = false
+        if fact_ends_path(n): s.live = false
         result = fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
         if nodes[n].aux == 0 and nodes[n].sym > 0:
             f = int(nodes[n].sym)
@@ -2806,6 +2914,12 @@ facts_finalize = ():
     loop f, _ in demanded:
         if f <= 0 or f >= isolation_limit or fns[f].state != 2: fatal(-1, "cannot prove assertion: unsettled checked body")
         icb = ic_fn(IC_FACTS, f)
+        if let run = fact_probe_runs.get(f):
+            if fact_probe_reusable(f, run):
+                loop n, _ in run.proven:
+                    if nodes[n].kind == .index and not has_flag(n, NF_INBOUNDS): dir_index(n, true)
+                ic_restore(icb)
+                continue
         fact_owner = f
         fact_terms = [FactTerm()]
         state = FactState()
@@ -2844,6 +2958,7 @@ facts_finalize = ():
 facts_reset = ():
     fact_slice = FactSlice()
     fact_slice_cache = {}
+    fact_probe_runs = {}
     fact_returns_cache = {}
     fact_owner = 0
     fact_summaries = {}

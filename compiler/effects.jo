@@ -1488,6 +1488,20 @@ effect_propagate = (f: int) -> bool:
             if effect_add(f, e): changed = true
     changed
 
+# Whether effect_visit's signature checks alone give f an opaque event. Its
+# row then holds one whatever its body and callees do (propagation keeps it).
+effect_signature_opaque = (f: int) -> bool:
+    d = int(fns[f].decl)
+    if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)):
+        return not (d != 0 and has_flag(d, NF_EXTERN) and effect_declared_row(f) != 0)
+    if fns[f].caps.len() != 0 or fns[f].kind == FK_PARTIAL or fns[f].cabi: return true
+    if not effect_plain(int(fns[f].ret)) and not ownership_scalar(int(fns[f].ret)) and int(fns[f].ret) != T_VOID: return true
+    loop l in fns[f].params:
+        t = representation_type(int(locals[l].type))
+        if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_plain(t) and not is_fn_type(t) and not (tkind(t) == .array and effect_scalar(telem(t))): return true
+    false
+
+# (keep its opaque conditions those of effect_signature_opaque)
 effect_visit = (f: int):
     effect_serial += 1
     effect_summaries[f].index = effect_serial
