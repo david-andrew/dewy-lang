@@ -241,6 +241,9 @@ mk_fn = (params: int[], ret: int, mutmask: int, labels: int = 0) -> int: mk_type
 mk_cfn = (params: int[], ret: int) -> int: mk_type(TypeInfo(kind = .cfn, elem = i32(ret)), params)
 mk_tuple = (elems: int[]) -> int: mk_type(TypeInfo(kind = .tuple), elems)
 var_counter = 0
+# (each binding of a type variable: a body checked with neither a new variable nor a binding
+# has no type a zonk would change)
+type_binds = 0
 mk_var = () -> int:
     var_counter += 1
     mk_type(TypeInfo(kind = .var, id = i32(var_counter)), [])
@@ -369,10 +372,12 @@ unify = (a0: int, b0: int) -> bool:
     if types[a].kind == .var:
         if occurs(a, b): return false
         types[a].ref = i32(b)
+        type_binds += 1
         return true
     if types[b].kind == .var:
         if occurs(b, a): return false
         types[b].ref = i32(a)
+        type_binds += 1
         return true
     if is_union(a) and is_union(b) and (has_var(a) or has_var(b)): return unify_unions(a, b)
     ta = types[a]

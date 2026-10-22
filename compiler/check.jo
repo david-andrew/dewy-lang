@@ -556,11 +556,14 @@ dewy_type_word = (w: str) -> str:
 # Dewy source names the builtin types one way: a Jo spelling written there (and
 # resolved to the builtin, not a binding of the program's) is rejected. Only
 # text the source spells counts, not names the compiler builds at its positions.
-jo_type_names: {int: bool} = {}
+jo_type_names: bool[]           # (by name)
 jo_type_spelling = (nm: int, s: int, pos: int):
     if jo_type_names.len() == 0:
-        loop w in ["str", "byte", "f32", "f64", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"]: jo_type_names[intern(w)] = true
-    if not jo_type_names.has(nm) or s == 0 or not dewy_at(pos) or (universe.get(nm) ?? 0) != s: return
+        loop w in ["str", "byte", "f32", "f64", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"]:
+            id = intern(w)
+            if jo_type_names.len() <= id: jo_type_names.resize(id + 1)
+            jo_type_names[id] = true
+    if nm >= jo_type_names.len() or not jo_type_names[nm] or s == 0 or not dewy_at(pos) or (universe.get(nm) ?? 0) != s: return
     w = name_of(nm)
     src = files[pos_file(pos)].src
     off = pos_off(pos)
@@ -1840,6 +1843,12 @@ sanitize = (s: str) -> str:
             if OP_NAMES[i] == s: return "op_{OP_NAMES[i + 1]}"
             i += 2
         return "op"
+    # (a name of letters and digits, not too long, is its own)
+    plain = len(s) <= 41
+    loop c in s:
+        if not plain: break
+        if not is_alnum(c): plain = false
+    if plain: return s
     b: u8[]
     loop c in s:
         if is_alnum(c): b.push(c)
@@ -1929,12 +1938,12 @@ method_type_name = (d: int) -> str:
 
 syntactic_void = (body: int) -> bool:
     if body == 0 or nkids(body) == 0: return true
-    if has_value_return(body): return false
+    # (the last line first: what it says needs no walk of the body)
     last = kid(body, nkids(body) - 1)
     k = nodes[last].kind
     if k == .exprstmt: return false
-    if k == .if_ or k == .iflet: return nodes[last].c == 0
-    true
+    if (k == .if_ or k == .iflet) and nodes[last].c != 0: return false
+    not has_value_return(body)
 
 # (@no_web("why"): a function that does nothing in a browser, said where a web build's program
 # calls it)
@@ -2113,6 +2122,7 @@ ensure_ret = (f: int, use_pos: int):
                 g = recursive_base_type(int(fns[f].body), int(nodes[int(fns[f].decl)].name))
                 if g != 0: unify(int(ctxs[c].ret), g)
             if g != 0:
+                if has_var(g): type_exposures += 1
                 fns[f].ret = i32(g)
                 return
     if fns[f].state == 1 and fns[f].decl != 0 and not has_value_return(int(nodes[int(fns[f].decl)].b)):
@@ -3810,15 +3820,17 @@ __check_assign = (s: int) -> int:
         # (release_call's zero bytes are no value of lt: nothing reads them)
         if nodes[last_checked].kind != .intrinsic or nodes[last_checked].aux != i32(int(IN.zeroed)): nodes[s].b = i32(coerce(last_checked, lt))
         if (nodes[lhs].kind != .ident or nodes[lhs].aux == i32(int(SK.global))) and (path_narrows > 0 or is_union(lt) or tkind(lt) == .opt):
-            key = path_key(lhs)
-            path_forget(key, rt)
+            rooted = path_rooted(lhs)
+            key = ""
+            if rooted or is_union(lt) or tkind(lt) == .opt: key = path_key(lhs)
+            if rooted: path_forget(key, rt)
             # x.f = 5 where x.f is int | str: x.f is an int from here on
             if is_union(lt) and union_index(lt, rt) >= 0 and len(key) > 0:
                 path_narrows += 1
-                narrow_expr(copy_path(lhs), [rt], nodes[s].pos, intern(key))
+                narrow_expr(copy_path(lhs), [rt], nodes[s].pos, path_name(key))
             # x.f = Enemy() where x.f is an Enemy?: it holds one from here on
             else if tkind(lt) == .opt and len(key) > 0 and type_eq(int(types[prune(lt)].elem), rt): narrow_path(lhs, -2, true)
-        else if path_narrows > 0 and nodes[lhs].kind == .ident: path_forget(path_key(lhs))
+        else if path_narrows > 0 and nodes[lhs].kind == .ident and path_rooted(lhs): path_forget(path_key(lhs))
         return s
     if types[prune(lt)].kind == .refined:
         # The checked replacement reads and writes one selected element.
@@ -4316,6 +4328,9 @@ check_fn_body = (f: int):
 # boundary. Save/restore around finalization, which can check other instances.
 zonk_write_sites: int[]
 zonk_collect_writes = false
+# (a function's return type given out while its body is still being checked: what has it may
+# change as that body goes on)
+type_exposures = 0
 
 __check_fn_body = (f: int):
     if fns[f].state != 0: return
@@ -4326,6 +4341,9 @@ __check_fn_body = (f: int):
 
 check_body_now = (f: int):
     fns[f].state = 1
+    vars0 = var_counter
+    binds0 = type_binds
+    exposed0 = type_exposures
     decl = int(fns[f].decl)
     if decl != 0:
         icl = ic_fn(IC_LOAD, f)
@@ -4427,7 +4445,11 @@ check_body_now = (f: int):
     if fns[f].kind == FK_NORMAL:
         loop l in fns[f].locals:
             if prune(int(locals[l].type)) == T_MATH_INT and int(locals[l].flags) & LF_ASSIGNED != 0: zonk_collect_writes = true
-    zonk_tree(body)
+    # (a normal body checked without making or binding a type variable, nor taking a return
+    # type still being worked out, has no type a zonk would change: only the counts are wanted)
+    quiet = fns[f].kind == FK_NORMAL and not zonk_collect_writes and var_counter == vars0 and type_binds == binds0 and type_exposures == exposed0
+    if quiet: zonk_summary(body)
+    else: zonk_tree(body)
     fns[f].write_sites = zonk_write_sites
     fns[f].writes_ready = zonk_collect_writes
     zonk_write_sites = saved_sites
@@ -4704,6 +4726,49 @@ settle_open_globals = ():
 # disprove closed-program ownership. Init/lambda bodies remain unsummarized.
 zonk_indexes = 0
 zonk_user_globals = 0
+
+# zonk_tree's counts for a body whose types it would leave as they are: the walk stops once it
+# has found an index and a user global, which settle both
+zonk_summary = (root: int):
+    if root == 0: return
+    base = zonk_stack.len()
+    zonk_stack.push(root)
+    index = false
+    global = false
+    loop zonk_stack.len() > base:
+        n = zonk_stack.pop()
+        nd = nodes[n]
+        k = nd.kind
+        if k == .index and not index:
+            zonk_indexes += 1
+            index = true
+            if global: break
+        if k == .ident and not global:
+            if nd.aux == i32(int(SK.global)):
+                if not modules[int(globals[int(nd.sym)].mod)].is_prelude: global = true
+            else if nd.aux == i32(int(SK.local)) and int(locals[int(nd.sym)].flags) & LF_ALIAS != 0: global = true
+            if global:
+                zonk_user_globals += 1
+                if index: break
+        if k == .lambda: continue
+        l = int(nd.list2)
+        i = int(nd.nlist2) - 1
+        loop i >= 0:
+            x = int(lists[l + i])
+            if x != 0: zonk_stack.push(x)
+            i -= 1
+        l = int(nd.list)
+        i = int(nd.nlist) - 1
+        loop i >= 0:
+            x = int(lists[l + i])
+            if x != 0: zonk_stack.push(x)
+            i -= 1
+        if k != .for_:
+            if k != .partial and nd.d != 0: zonk_stack.push(int(nd.d))
+            if nd.c != 0: zonk_stack.push(int(nd.c))
+        if nd.b != 0: zonk_stack.push(int(nd.b))
+        if nd.a != 0: zonk_stack.push(int(nd.a))
+    zonk_stack.truncate(base)
 
 # (pre-order, as a recursive walk would go: a, b, c, d, the lists; a for/while's -n marks the
 # end of its children. Only a type with variables in it can change, and only those are zonked.)

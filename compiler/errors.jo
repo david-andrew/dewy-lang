@@ -47,8 +47,8 @@ value_members = (t: int) -> int[]:
     [t]
 
 nominal_family = (t: int) -> int:
-    if ownership_nominals.has(t): return t
     if not nominal_ready or (t != exception_type and t != error_type and not nominal_parent.has(t)): return t
+    if ownership_nominals.has(t): return t
     if let found = nominal_families.get(t): return found
     members: int[]
     loop child in nominal_types:
