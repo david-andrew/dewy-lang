@@ -3188,7 +3188,11 @@ compound_value = (s: int, left: int, right: int) -> int:
         return n
     # (Dewy's `and=`/`or=`: the logical operator, short-circuiting on booleans)
     logical = nodes[s].aux2 == 1 and not has_flag(s, NF_BROADCAST)
-    n = mk(if not logical: NK.binary else if nodes[s].op == i32(int(Tok.ampeq)): NK.and_ else: NK.or_, nodes[s].pos)
+    kind = NK.binary
+    if logical:
+        kind = NK.or_
+        if nodes[s].op == i32(int(Tok.ampeq)): kind = NK.and_
+    n = mk(kind, nodes[s].pos)
     nodes[n].op = i32(compound_op(int(nodes[s].op)))
     if has_flag(s, NF_BROADCAST):
         nodes[n].aux = i32(tok_text(nodes[n].op as Tok)[0])

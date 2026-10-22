@@ -96,7 +96,9 @@ da_walk = (n: int, st0: DaState) -> DaState:
         st = da_walk(int(nodes[n].a), st)
         st = da_walk_all(kids(n), st)
         f = if k == .partial: int(nodes[n].d) else: int(nodes[n].sym)
-        dg_through(n, f, st, if k == .call: "calls a function that reads" else: "takes a function that reads", k == .call)
+        how = "takes a function that reads"
+        if k == .call: how = "calls a function that reads"
+        dg_through(n, f, st, how, k == .call)
         return st
     if k == .fn_ or k == .defer_ or k == .typealias or k == .struct_ or k == .enum_: return st
     if k == .block:
