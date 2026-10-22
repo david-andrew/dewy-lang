@@ -2122,6 +2122,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             positional = false
             break
     cands: Cand[]
+    arg_cls: int[]
     last_err = ""
     last_err_pos = 0          # (where the argument it is about is: the error points there)
     last_err_arg = 0          # (which argument, from 1)
@@ -2189,17 +2190,24 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             loop i in 0.. and t in targs_here: cd.binds[i] = t
         cost = 0
         ok = true
+        # (each argument's class, read once for this candidate: trying the others leaves it as it is)
+        arg_cls.truncate(0)
+        loop i in [0..np):
+            a = cd.args[i]
+            cls = 0
+            if a != 0:
+                if ctx_dependent(a): cls = 2
+                else if is_lit(a): cls = 1
+            arg_cls.push(cls)
         loop phase in [0..3):
             if not ok: break
             loop i in [0..np):
                 a = cd.args[i]
                 if a == 0: continue
-                cls = 0
-                if ctx_dependent(a): cls = 2
-                else if is_lit(a): cls = 1
+                cls = arg_cls[i]
                 if cls != phase: continue
                 pt = cd.sig.params[i]
-                if int(cd.sig.mutmask) & (1 << i) != 0 and not ctx_dependent(a):
+                if int(cd.sig.mutmask) & (1 << i) != 0 and cls != 2:
                     r = match_type(pt, ntype(a), cd.binds, 0)
                     ok2 = r >= 0
                     if i == 0 and ok2: recv_fits = true
