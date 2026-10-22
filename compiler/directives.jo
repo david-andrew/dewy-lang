@@ -194,6 +194,10 @@ dir_policy = (p: int) -> int:
     if rv == 1: return DIR_RUNTIME
     if rv == 0: return DIR_STATIC
     if qv == 1: return DIR_PROTOTYPE
+    # (the library's own obligations keep their checks unless it says otherwise,
+    # however its function came to be analyzed: not every function is, and a
+    # library function analyzed for one request is no different)
+    if pos_in_lib(p): return DIR_IMPLICIT
     if DIR_DEFAULT == DIR_STATIC: return DIR_STATIC
     static = if dir_forced: dir_prior_static else: fact_policy == .RequireStatic
     if static: DIR_STATIC else: DIR_IMPLICIT

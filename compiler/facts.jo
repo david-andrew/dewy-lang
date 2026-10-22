@@ -687,7 +687,7 @@ fact_probe_note = (f: int):
 
 # Whether the facts pass would run f's body exactly as its probe did.
 fact_probe_reusable = (f: int, run: FactProbeRun) -> bool:
-    if fact_policy != .RequireStatic or proof_active or result_active or wit_collect or run.refine != (refine_active or refine_requests.len() > 0): return false
+    if fact_policy != .RequireStatic or proof_active or result_active or wit_collect and not wit_measure or run.refine != (refine_active or refine_requests.len() > 0): return false
     fact_slice_prepare(f)
     if fact_slice.flags.len() != run.slice.len(): return false
     loop i in [0..run.slice.len()):
@@ -743,7 +743,7 @@ fact_probe_function = (f: int, disjoint: bool = false) -> {int: bool}:
     fact_probe_footprints = []
     reported = wit_collected + dir_sites.len()
     fact_capture(int(fns[f].body), state)
-    if not disjoint and fact_policy == .RequireStatic and not saved_proof and not saved_result and not wit_collect and not fact_probe_diverged and reported == wit_collected + dir_sites.len():
+    if not disjoint and fact_policy == .RequireStatic and not saved_proof and not saved_result and not (wit_collect and not wit_measure) and not fact_probe_diverged and reported == wit_collected + dir_sites.len():
         all = true
         loop _, ok in fact_probe:
             if not ok: all = false
@@ -3030,6 +3030,16 @@ fact_capture = (n: int, s: mut FactState) -> int:
     fact_forget(s, n, .unsupported, true)
     return fact_new(s, FactBound(reason = .unsupported, witness = n))
 
+# A function is the library's when its module was read from the library
+# directory (its body position cannot say: the prelude's initializer starts at
+# offset 0 of file 0, which is no position at all).
+fn_in_lib = (f: int) -> bool:
+    m = int(fns[f].mod)
+    if m >= 0 and m < modules.len():
+        file = int(modules[m].file)
+        return len(lib_root) > 0 and file >= 0 and file < files.len() and starts_with(files[file].path, lib_root)
+    pos_in_lib(nodes[int(fns[f].body)].pos)
+
 facts_finalize = ():
     if proof_active: proof_prepare()
     if loan_owners.len() == 0 and fact_requests.len() == 0 and refine_requests.len() == 0 and proof_calls.len() == 0 and not proof_active and not result_active and fact_policy == .RuntimeAllowed: return
@@ -3046,7 +3056,7 @@ facts_finalize = ():
             if result_contracts.has(int(fns[f].decl)): demanded[f] = true
     if fact_policy == .RequireStatic:
         loop f in [1..fns.len()):
-            if fns[f].body != 0 and fns[f].state == 2 and not pos_in_lib(nodes[int(fns[f].body)].pos): demanded[f] = true
+            if fns[f].body != 0 and fns[f].state == 2 and not fn_in_lib(f): demanded[f] = true
     loop f, _ in demanded:
         if f <= 0 or f >= isolation_limit or fns[f].state != 2: fatal(-1, "cannot prove assertion: unsettled checked body")
         icb = ic_fn(IC_FACTS, f)
@@ -3088,7 +3098,7 @@ facts_finalize = ():
     fact_requests = []
     fact_terms = []
     if proof_active: proof_erase()
-    if wit_collected > 0: stop(1)
+    if wit_collected > 0 and not wit_measure: stop(1)
 
 # Harness-only policy; this is not a strict-lane surface or no-panic claim.
 facts_reset = ():
@@ -3105,8 +3115,11 @@ facts_reset = ():
     fact_query = false
     fact_policy = FactPolicy.RuntimeAllowed
     if let policy = env("DEWY_INTERNAL_FACT_POLICY"):
-        if policy == "require-static" or policy == "require-static-all": fact_policy = .RequireStatic
-        wit_collect = policy == "require-static-all"
+        if policy == "require-static" or policy == "require-static-all" or policy == "require-static-measure": fact_policy = .RequireStatic
+        wit_collect = policy == "require-static-all" or policy == "require-static-measure"
+        # (measure: report every failure and build anyway, so `build --time`
+        # shows what analysing every function costs)
+        wit_measure = policy == "require-static-measure"
 
 positive_bounds_fn = -1
 positive_bounds: {int: int} = {}
