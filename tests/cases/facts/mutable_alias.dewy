@@ -1,4 +1,6 @@
-checked=(@x:int64 @y:int64)=>{
-    if x >? 0 { y=0; $assert x >? 0 }
+# An `@` parameter may be the caller's global, so writing the global forgets it.
+let g:int64=3
+checked=(@x:int64)=>{
+    if x >? 0 { g=0; $assert x >? 0 }
 }
-main=()=>{ let x:int64=2; let y:int64=3; checked(@x @y) }
+main=()=>{ let x:int64=2; checked(@x) }

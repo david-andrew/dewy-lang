@@ -1827,7 +1827,7 @@ mutable_overlap = (a: int, b: int) -> bool:
     ar = mutable_route(a, left)
     br = mutable_route(b, right)
     if nodes[ar].kind != .ident or nodes[br].kind != .ident: return false
-    if nodes[ar].aux != nodes[br].aux or nodes[ar].sym != nodes[br].sym: return false
+    if nodes[ar].aux != nodes[br].aux or nodes[ar].sym != nodes[br].sym: return mutable_borrowed_overlap(ar, br)
     loop i in [0..min(left.len(), right.len())):
         x = left[i]
         y = right[i]
@@ -1841,6 +1841,18 @@ mutable_overlap = (a: int, b: int) -> bool:
             if nodes[xi].kind == .int_lit and nodes[yi].kind == .int_lit and nodes[xi].ival != nodes[yi].ival: return false
     # Equal routes and parent/child routes overlap. Unknown indices can overlap.
     true
+
+# Two different roots are different storage, except that an `@` parameter
+# borrows its caller's place: a global or another function's variable (a
+# shared capture) may be that same place. Distinct `@` parameters of one
+# function were proven apart where it was called.
+mutable_borrowed_overlap = (a: int, b: int) -> bool:
+    x = if nodes[a].aux == i32(int(SK.local)): int(nodes[a].sym) else: 0
+    y = if nodes[b].aux == i32(int(SK.local)): int(nodes[b].sym) else: 0
+    bx = x != 0 and int(locals[x].flags) & LF_MUTPARAM != 0
+    by = y != 0 and int(locals[y].flags) & LF_MUTPARAM != 0
+    if not bx and not by: return false
+    x == 0 or y == 0 or locals[x].owner != locals[y].owner
 
 check_mutable_arguments = (args: int[], mask: int, pos: int):
     if mask == 0 or mask & (mask - 1) == 0 or not dewy_at(pos): return

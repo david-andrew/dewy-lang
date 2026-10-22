@@ -618,7 +618,10 @@ operand's width, the right operand taking the same proven conversion. Mutable ar
 containers require matching element types: an `int` local is not an `@int64` place. Two mutable arguments in one call
 must be disjoint: the same binding, a parent and its field/element, or possibly
 equal indices of one array are rejected. Distinct fields and distinct constant
-indices are accepted.
+indices are accepted. An `@` parameter may be its caller's global or captured
+variable, so passing it together with one is rejected too; distinct `@`
+parameters of one function are disjoint, and writing one keeps what is known
+of the others.
 
 `let cursor = @xs[i]` declares a local place: reads and writes of `cursor` read
 and write `xs[i]`, with `i` evaluated once at the declaration. A local place can

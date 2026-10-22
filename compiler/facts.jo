@@ -389,7 +389,7 @@ fact_store_route = (s: mut FactState, route: FactRoute, value0: int, at: int, bo
         t = if i == 0: ntype(route.root) else: route.types[i - 1]
         value = fact_replace(s, values[i], route.selectors[i], route.elements[i], value, t)
         i -= 1
-    if fact_exposed(p): fact_forget(s, at, .write)
+    if fact_exposed(p): fact_forget(s, at, .write, false, p)
     fact_rebind(s, p, value, at, if values.len() > 0: values[0] else: 0)
 
 # Component i of an unpacked value of type t0: a tuple's field or an array's
@@ -561,10 +561,22 @@ fact_exposed = (p: PlaceIdentity) -> bool:
     if fact_probe_disjoint != 0 and fact_owner == fact_probe_disjoint and int(locals[p.declaration].owner) == fact_probe_disjoint and tkind(int(locals[p.declaration].type)) == .array and int(locals[p.declaration].flags) & LF_MUTPARAM != 0: return false
     int(locals[p.declaration].flags) & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_ADDR | LF_BYREF | LF_EXPOSED) != 0
 
-fact_forget = (s: mut FactState, at: int, reason: FactReason, all: bool = false):
+# Distinct `@` parameters of one Dewy function are disjoint storage: each call
+# passes them places the mutable-argument check proves apart (provisional).
+fact_disjoint = (p: PlaceIdentity, q: PlaceIdentity) -> bool:
+    if p.root != .local or q.root != .local or p.declaration == q.declaration or p.declaration == 0 or q.declaration == 0: return false
+    a = p.declaration; b = q.declaration
+    if locals[a].owner != locals[b].owner or int(locals[a].flags) & LF_MUTPARAM == 0 or int(locals[b].flags) & LF_MUTPARAM == 0: return false
+    f = int(locals[a].owner)
+    f > 0 and f < fns.len() and fns[f].decl != 0 and files[pos_file(nodes[int(fns[f].decl)].pos)].is_dewy
+
+# A write through an exposed place p forgets every exposed root but those
+# disjoint from p.
+fact_forget = (s: mut FactState, at: int, reason: FactReason, all: bool = false, written: PlaceIdentity = PlaceIdentity(.local, 0, 0)):
     loop i in [0..s.bindings.len()):
         p = s.bindings[i].place
         if not all and not fact_exposed(p): continue
+        if not all and fact_disjoint(written, p): continue
         t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
         v = fact_new(s, fact_domain(t, reason, at), FactTerm(type = t))
         s.bindings[i] = FactBinding(p, v, at, s.bindings[i].value)
@@ -593,7 +605,7 @@ fact_call_effects = (n: int, s: mut FactState):
             p = place_base(place_route(kid(n, i)))
         if p.declaration == 0: fact_forget(s, n, .call); return
         # Alias overlap is conservative until its provenance is represented.
-        if fact_exposed(p): fact_forget(s, n, .call)
+        if fact_exposed(p): fact_forget(s, n, .call, false, p)
         i = fact_binding(s, p)
         if i >= 0:
             t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
@@ -911,7 +923,7 @@ fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reaso
     # (the root's own prior value first: forgetting exposed roots replaces it)
     i = fact_binding(s, p)
     old = if i >= 0: s.bindings[i].value else: 0
-    if fact_exposed(p): fact_forget(s, at, reason)
+    if fact_exposed(p): fact_forget(s, at, reason, false, p)
     fresh = fact_new(s, fact_domain(ntype(e), reason, at), FactTerm(type = ntype(e)))
     fact_bind(s, p, fresh)
     j = chain.len() - 1

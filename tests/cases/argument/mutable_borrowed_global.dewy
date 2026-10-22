@@ -1,0 +1,11 @@
+# An `@` parameter may be the caller's global: passing both could alias.
+let g:array<int64>=[1 2 3]
+both=(@a:array<int64> @b:array<int64>):>void=>{
+    a[0]=1
+    b[0]=2
+}
+via=(@x:array<int64>):>void=>both(@x @g)
+main=()=>{
+    via(@g)
+    printl(g)
+}

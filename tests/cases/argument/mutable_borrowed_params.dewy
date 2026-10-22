@@ -1,0 +1,19 @@
+# quick
+# Two `@` parameters of one function were proven apart by its callers, and a
+# local of the same function is fresh storage: both pairs pass on.
+both=(@a:array<int64> @b:array<int64>):>void=>{
+    a[0]+=1
+    b[0]+=10
+}
+forward=(@x:array<int64> @y:array<int64>):>void=>{
+    both(@x @y)
+    let mine:array<int64>=[0]
+    both(@x @mine)
+    printl(mine)
+}
+main=()=>{
+    let v:array<int64>=[1 2]
+    let w:array<int64>=[3 4]
+    forward(@v @w)
+    printl("{v} {w}")
+}

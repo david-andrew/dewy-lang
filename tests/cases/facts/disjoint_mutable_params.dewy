@@ -1,0 +1,19 @@
+# quick
+# A store through one `@` parameter keeps what is known of another: callers
+# pass them disjoint places.
+copy_into=(@dst:array<int64> @src:array<int64>):>int64=>{
+    if src.length <? 1 or dst.length <? src.length return 0
+    dst[0]=src[0]
+    $assert src.length >=? 1
+    $assert dst.length >=? src.length
+    loop i in [1..src.length) {
+        dst[i]=src[i]
+    }
+    return src.length
+}
+main=()=>{
+    let a:array<int64>=[0 0 0]
+    let b:array<int64>=[1 2]
+    printl(copy_into(@a @b))
+    printl(a)
+}

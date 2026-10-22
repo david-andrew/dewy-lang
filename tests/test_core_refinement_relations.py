@@ -128,8 +128,8 @@ main=()=>probe()
 probe=(@xs:array<int64>)=>{loop xs.length >? 0 and resize(@xs) {$assert xs.length >? 0}}
 main=()=>{let xs:array<int64>=[1]; probe(@xs)}
 ''',
-    'probe=(@x:int64 @y:int64 flag:bool)=>{if x >? 0 {loop flag {y=0; $assert x >? 0}}}\n'
-    'main=()=>{let x:int64=1; let y:int64=1; probe(@x @y false)}\n',
+    'let y:int64=1\nprobe=(@x:int64 flag:bool)=>{if x >? 0 {loop flag {y=0; $assert x >? 0}}}\n'
+    'main=()=>{let x:int64=1; probe(@x false)}\n',
     'probe=(flag:bool)=>{let i:int64=0;' + 'loop flag {' * 7 +
     'i=-1;' + '}' * 7 + '$assert i =? 0}\nmain=()=>probe(false)\n',
 ])
