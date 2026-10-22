@@ -3236,6 +3236,8 @@ dw_top_declarations = (id: int) -> int[]:
 
 dw_top_declarations_inner = (id: int) -> int[]:
     declaration = dw_unwrap(id)
+    # (a directly built overload group: its member declarations)
+    if dewy_syntax[declaration].kind == .compact_stmt and dewy_syntax[declaration].children.len() > 0: return dewy_syntax[declaration].children
     if dw_op(declaration) == .statement_end: declaration = dw_unwrap(dw_child(declaration, 1))
     if dw_target_live(declaration) >= 0:
         spliced: int[]

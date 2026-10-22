@@ -781,11 +781,34 @@ dn_double_closes = () -> bool:
         at += 1
     false
 
+# Splitting a generic closer edits its token in place. While a direct declaration
+# may still retry the reference grammar, the original tokens are kept to restore.
+dn_edits_on = false
+dn_edit_at: int[]
+dn_edit_was: DewyLexeme[]
+
+dn_token_edit = (at: int):
+    if not dn_edits_on: return
+    dn_edit_at.push(at)
+    dn_edit_was.push(dn_tokens[at])
+
+dn_edits_undo = ():
+    i = dn_edit_at.len() - 1
+    loop i >= 0:
+        dn_tokens[dn_edit_at[i]] = dn_edit_was[i]
+        i -= 1
+    dn_edits_clear()
+
+dn_edits_clear = ():
+    dn_edit_at.clear()
+    dn_edit_was.clear()
+
 # `array<<(x:int64):>int64>>`: an adjacent `<<` opens two type-argument blocks
 dn_double_angle = () -> int:
     outer = dn_tokens[dn_at]
     outer.symbol = .langle
     outer.stop = outer.start + 1
+    dn_token_edit(dn_at)
     dn_tokens[dn_at].start += 1
     dn_tokens[dn_at].symbol = .langle
     dn_bracketed_from(outer)
@@ -803,6 +826,7 @@ dn_bracketed_from = (opening: DewyLexeme) -> int:
         # Consume one angle at a time, leaving the rest for its parent.
         # A spaced ` >? ` stays a comparison inside a refinement.
         if close == .rangle and ((dn_peek() == .shr or dn_peek() == .shr_assign or dn_peek() == .angle_assign) or (dn_peek() == .gt and not dn_tokens[dn_at].space)):
+            dn_token_edit(dn_at)
             dn_tokens[dn_at].start += 1
             tail = dn_tokens[dn_at]
             dn_tokens[dn_at].symbol = dn_token_kind(files[dn_file].src[tail.start..tail.stop))
@@ -1098,8 +1122,12 @@ dn_stmt = () -> int:
 
 dewy_fast_file = (file: int) -> int[]:
     dw_bigint_import = 0
-    dc_enabled = (env("DEWY_FRONTEND") ?? "") != "old"
-    dc_compare = (env("DEWY_FRONTEND") ?? "") == "compare"
+    if not dc_mode_read:
+        dc_mode_read = true
+        mode = env("DEWY_FRONTEND") ?? ""
+        dc_selected = mode != "old"
+        dc_compare = mode == "compare"
+    dc_enabled = dc_selected
     dn_file = file
     dn_suspect_brace = -1
     dn_in_interpolation = 0
