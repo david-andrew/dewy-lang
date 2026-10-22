@@ -4,9 +4,16 @@ Compares this checkout's compiler (working tree) with a base commit's and fails
 when any panel item needs more than --limit percent more instructions. The
 panel: the self-build, synthetic-22k and the game; small-program latency (hello
 and the median tier 1-3 ladder program); large-program throughput (each tier-4
-flagship). A yardstick table then reports the candidate's lines, estimated
+flagship). Compile throughput counts every source line the compiler processes:
+the program's, the library lines it reached (lazy bodies nobody asked for left
+out) and each generic instance's declaration once per instance. A yardstick
+table reports the candidate's lines (all, user-only, fan-out), estimated
 milliseconds and lines/s (instructions at the reference rate IPS), and its
-instructions split into root, library and shared work (`build --time`). Each
+instructions split into root, library and shared work (`build --time`); a cost
+model gives instructions per processed node by phase. The gates: the per-item
+instruction comparison with the base, the flagship panel's all-lines
+throughput (it may not drop more than --limit percent unless the panel got
+cheaper) and hello-world latency (<= 20 ms; reported until it is under). Each
 compiler is its commit's own fixed point (its sources built by a compiler with
 the same sources) and uses its commit's library, so the counts cover compiler
 and library changes alike. Inputs are this checkout's; a base that cannot
