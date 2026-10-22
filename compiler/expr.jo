@@ -3267,15 +3267,29 @@ enum_from_int = (n: int, et: int, a: int) -> int:
     nodes[n] = Node(kind = .conv, pos = pos, a = i32(last_checked), aux = i32(int(CV.int_)), type = i32(et), flags = i32(NF_CHECKED))
     et
 
+# (collect_in's marks, by declaration: the pass that found it in `out` already)
+cin_mark: i32[]
+cin_pass = 0
+cin_marked = (d: int) -> bool: d < cin_mark.len() and int(cin_mark[d]) == cin_pass
+cin_set = (d: int):
+    if d >= cin_mark.len(): cin_mark.resize(max(d + 1, nodes.len()) + 1024)
+    cin_mark[d] = i32(cin_pass)
+
 collect_in = (table: {int: int}, name: int, out: mut int[]):
     s = table.get(name) ?? 0
     if s != 0 and hide_private and is_private(name) and (not hide_lib_only or name_of(name)[1] != '_'): return
     if s == 0 or syms[s].kind != .fns: return
+    dewy = caller_dewy()
+    # (each declaration once: what `out` holds, and what this family adds)
+    cin_pass += 1
+    loop d in out: cin_set(d)
     o = s
     loop o != 0:
         d = int(syms[o].decl)
-        if not surface_sees(o, caller_dewy()): surface_hidden.push(d)
-        else if not out.contains(d): out.push(d)
+        if not surface_sees(o, dewy): surface_hidden.push(d)
+        else if not cin_marked(d):
+            out.push(d)
+            cin_set(d)
         o = int(syms[o].next)
 
 # Library operations Dewy spells differently from the Jo library underneath. For these
