@@ -12,7 +12,7 @@ tile=(a:array<float64> b:array<float64> n:int64 id:int64):>array<float64>=>{
     }}
     return out
 }
-main=(args:array<string>)=>{
+main=(args:array<string>):>void=>{
     let n=size_argument(args 1024)
     let a=[loop i in [0..n*n) (i%7) as float64]
     let b=[loop i in [0..n*n) (i%5) as float64]
@@ -22,5 +22,4 @@ main=(args:array<string>)=>{
     let elapsed=clock()-start
     let result:int64=0 loop part in out {result+=sum(part) as int64}
     printl"{result} {elapsed}"
-    return 0
 }

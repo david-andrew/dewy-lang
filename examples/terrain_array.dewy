@@ -6,7 +6,7 @@ height=(x:float32 z:float32 phase:float32):>float32=>{
     return sin(x*0.25+phase)*cos(z*0.25-phase)*2.0
 }
 
-main=()=>{
+main=():>void=>{
     let axis=float32.(linspace(-8.0 8.0 33))
     let x=reshape(axis 1 axis.length)
     let z=reshape(axis axis.length 1)
@@ -19,5 +19,4 @@ main=()=>{
     assert(downloaded.shape =? [33 33] and error <? 0.00002)
     printl"Generated {rows(downloaded)}x{cols(downloaded)} height field (GPU available: {gpu_available()})."
     printl"Maximum CPU difference: {format(error ".6f")}"
-    return 0
 }

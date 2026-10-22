@@ -23,7 +23,7 @@ step=(a:array<float64> @out:array<float64> first:int64 n:int64 threaded:bool):>v
         step(a @out[mid..] first+mid n false)
     }
 }
-main=(args:array<string>)=>{
+main=(args:array<string>):>void=>{
     let n=size_argument(args 1024)
     let a=[loop p in [0..n*n) (((p//n)+(p%n))%17) as float64]
     let tmp:array<float64>=[loop p in [0..n*n) 0.0]
@@ -36,5 +36,4 @@ main=(args:array<string>)=>{
     let elapsed=clock()-start
     let result:int64=0 loop v in a {result+=(v*1024.0) as int64}
     printl"{result} {elapsed}"
-    return 0
 }

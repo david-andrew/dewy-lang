@@ -19,7 +19,7 @@ advance=(particles:array<Particle> dt:float64 threaded:bool):>array<Particle>=>{
     if threaded return parallel_map(particles (p)=>step(p particles dt))
     return [loop p in particles step(p particles dt)]
 }
-main=()=>{
+main=():>void=>{
     let original=make(128)
     let serial=original let threaded=original
     loop i in [0..4) {
@@ -29,5 +29,4 @@ main=()=>{
     assert(serial =? threaded)
     assert(original =? make(128))
     printl"Simulated {threaded.length} particles; serial and parallel results agree."
-    return 0
 }

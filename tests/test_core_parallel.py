@@ -22,7 +22,7 @@ def compiler():
 
 PROGRAMS = {
     'particles': MODEL.read_text(),
-    'matrix-product': '''main=()=>{
+    'matrix-product': '''main=():>void=>{
 let rows=65 let inner=64 let cols=67
 let a=reshape([loop i in [0..rows*inner) ((i//inner%3+1)*(i%inner+1)) as float64] rows inner)
 let b=reshape([loop i in [0..inner*cols) ((i//cols+1)*(i%cols%5+1)) as float64] inner cols)
@@ -35,21 +35,19 @@ loop i in [0..rows) {loop j in [0..cols) {
 assert(product.shape =? [rows cols] and a.data =? saved.data)
 product[0 0]=0.0
 assert(a[0 0] =? 1.0 and b[0 0] =? 1.0)
-return 0
 }''',
     'managed-lifetimes': '''work=():>void=>{
 let values=parallel_range(257 (i:int64)=>[name="item {i}" items=[i i+1]])
 parallel_update(@values (p)=>{p.items.push(42) p.name="{p.name}!" return p})
 parallel_map(values (p)=>[p.items p.items]);
 }
-main=()=>{
+main=():>void=>{
 work()
 let before=alloc_count()
 loop round in [0..12) {work()}
 assert(alloc_count() =? before)
-return 0
 }''',
-    'managed-values': '''main=()=>{
+    'managed-values': '''main=():>void=>{
 let words=["one" "two" "three"]
 let values=parallel_range(257 (i:int64)=>[name=words[i%3] items=[i i+1]])
 let saved=values
@@ -61,10 +59,9 @@ loop i in [0..values.length) {
     assert(sums[i] =? 2*i+43)
 }
 assert(words =? ["one" "two" "three"])
-return 0
 }''',
     'nested-and-repeated': '''square=(i:int64)=>i*i
-main=()=>{
+main=():>void=>{
 let empty:array<int64>=[]
 assert(parallel_map(empty @square) =? [])
 parallel_update(@empty @square)
@@ -77,7 +74,6 @@ loop round in [0..20) {
     }
     assert(parallel_range(2 @square) =? [0 1])
 }
-return 0
 }''',
 }
 
