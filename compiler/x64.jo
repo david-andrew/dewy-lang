@@ -385,10 +385,15 @@ ra_spill_visits = 0
 ra_peak_gpr = 0
 ra_peak_xmm = 0
 
+# Fixed physical-register workspace, private to one sequential allocation.
+# Entries in active are written before their count is published.
+ra_active_storage: int[] = fill(0, 24)
+ra_byreg_storage: int[] = fill(-1, 32)
+
 # struct copies/clears up to this size are emitted inline
 const INLINE_COPY = 256
 
-call_like = (ins: Ins) -> bool:
+call_like = (ins: *Ins) -> bool:
     op = ins.op
     if op == .intr and ins.imm >= 2: return true
     if op == .call and ins.c == 1 and not dbg_on: return false      # never returns (a panic: with -g, where its caller's variables must be readable)
@@ -400,7 +405,7 @@ call_like = (ins: Ins) -> bool:
 # A returned scalar consumed only by the following nonreturning call needs no
 # earlier registers preserved. Linear live intervals otherwise extend values
 # from the successful path across this terminal failure path.
-call_ends_here = (pos: int, ins: Ins) -> bool:
+call_ends_here = (pos: int, ins: *Ins) -> bool:
     if dbg_on or ins.dst < 0 or pos + 1 >= ir.code.len(): return false
     if ins.op != .call and ins.op != .calli and ins.op != .callc: return false
     next = ir.code[pos + 1]
@@ -469,20 +474,45 @@ analyze = (plan_starts: bool = false):
             vloc[v] = LOC_CONST
             vcval[v] = ir.kval[v]
     depth = 0
-    loop pos in 0.. and ins in ir.code:
-        d = ir_operands(ins)
-        w = 1 << (3 * min(depth, 6))
-        loop operand_index in [0..ir_use_count):
-            let u = ir_use(operand_index)
-            live = &v_live[u]
+    w = 1
+    instructions = data(ir.code)
+    arguments = data(ir.args)
+    layouts = data(ir_operand_layout)
+    # One indexed scan of the final instructions and their argument spans:
+    # O(instructions + operands). No shared decoder state or per-op arrays.
+    loop pos in [0..ir.code.len()):
+        ins = &instructions[pos]
+        mode = layouts[int(ins.op)]
+        uses = &ins.a
+        nuses = mode & 3
+        extra = -1
+        if mode & IR_ARGS != 0:
+            uses = arguments + int(ins.a)
+            nuses = int(ins.b)
+            if mode & IR_INDIRECT != 0: extra = int(ins.c)
+        else if mode & IR_STORE != 0:
+            if mode & IR_INDEX == 0 or int(ins.c) & M_INDEX != 0: extra = int(ins.dst)
+        else if mode & IR_INDEX != 0:
+            if int(ins.c) & M_INDEX != 0: nuses = 2
+        else if mode & IR_RETURN != 0 and ins.a < 0: nuses = 0
+        loop operand_index in [0..nuses):
+            live = &v_live[int(uses[operand_index])]
             if pos < live.first: live.first = pos
-            if pos > live.last: live.last = pos
+            live.last = pos
             live.nuse += 1
             live.weight += w
+        if extra >= 0:
+            live = &v_live[extra]
+            if pos < live.first: live.first = pos
+            live.last = pos
+            live.nuse += 1
+            live.weight += w
+        d = -1
+        if mode & IR_DEF != 0: d = int(ins.dst)
         if d >= 0:
             live = &v_live[d]
             if pos < live.first: live.first = pos
-            if pos > live.last: live.last = pos
+            live.last = pos
             live.ndef += 1
             live.weight += w
             if live.ndef == 1:
@@ -512,7 +542,7 @@ analyze = (plan_starts: bool = false):
                     v = item >> 1
                     live = &v_live[v]
                     if pos < live.first: live.first = pos
-                    if pos > live.last: live.last = pos
+                    live.last = pos
                     live.ndef += 2
         if call_like(ins) and not call_ends_here(pos, ins):
             call_pos.push(pos)
@@ -526,12 +556,14 @@ analyze = (plan_starts: bool = false):
                 loop_s.push(pos)
                 loop_e.push(0)
                 depth += 1
+                w = 1 << (3 * min(depth, 6))
             else: starts.push(-1)
         else if ins.op == .end:
             k = kinds.pop()
             s = starts.pop()
             if k == int(Op.loop):
                 depth -= 1
+                w = 1 << (3 * min(depth, 6))
                 loop_e[s] = pos
     # (sloppy build -g: each variable lives on to the end of the function, where debuggers can
     # read it, and not in a register a call changes: dbg_keep)
@@ -647,8 +679,9 @@ allocate = ():
     # At most eleven GPRs and thirteen vector registers can be occupied.
     # Membership is indexed by physical register, never by the vreg population.
     free = 0x7FFCFFC8
-    active = fill(0, 24)
-    byreg = fill(-1, 32)
+    active = data(ra_active_storage)
+    byreg = data(ra_byreg_storage)
+    loop r in [0..32): byreg[r] = -1
     nactive = 0
     min_end = INF_POS      # earliest end among active intervals
     call_next = 0
@@ -686,7 +719,7 @@ allocate = ():
             if h >= 0 and crosses and dbg_on and dbg_keep[v] and vloc[h] >= XMM: h = -1
             if h >= 0 and byreg[vloc[h]] >= 0 and active[byreg[vloc[h]]] == h:
                 reg = vloc[h]
-                nactive = ra_remove(data(active), data(byreg), nactive, reg)
+                nactive = ra_remove(active, byreg, nactive, reg)
                 vsave[v] = crosses and (reg >= XMM or not is_callee[reg])
                 if reg < XMM and is_callee[reg]: callee_off[reg] = 1
             else if vtype(v) != VI:
@@ -734,14 +767,14 @@ allocate = ():
                     reg = vloc[best]
                     vloc[best] = LOC_SPILL
                     vsave[v] = crosses and (reg >= XMM or not is_callee[reg])
-                    nactive = ra_remove(data(active), data(byreg), nactive, reg)
+                    nactive = ra_remove(active, byreg, nactive, reg)
             if reg >= 0:
                 vloc[v] = reg
                 free &= ~(1 << reg)
                 byreg[reg] = nactive
                 active[nactive] = v
                 nactive += 1
-                if ra_stat: ra_pressure(data(active), nactive)
+                if ra_stat: ra_pressure(active, nactive)
                 if v_live[v].last < min_end: min_end = v_live[v].last
                 if reg < XMM and is_callee[reg]: callee_off[reg] = 1
             else: vloc[v] = LOC_SPILL
@@ -827,8 +860,9 @@ allocate_release = ():
     # pass 1: integer values living across calls, into callee-saved registers (in order of
     # start; when there are too many, those used most keep them)
     placed = fill(false, nv)
-    active = fill(0, 24)
-    byreg = fill(-1, 32)
+    active = data(ra_active_storage)
+    byreg = data(ra_byreg_storage)
+    loop r in [0..32): byreg[r] = -1
     nactive = 0
     free = 0xF008                 # callee-saved GPRs
     loop pos in [0..n):
@@ -867,7 +901,7 @@ allocate_release = ():
                         reg = vloc[best]
                         vloc[best] = LOC_SPILL
                         placed[best] = false
-                        nactive = ra_remove(data(active), data(byreg), nactive, reg)
+                        nactive = ra_remove(active, byreg, nactive, reg)
                 if reg >= 0:
                     vloc[v] = reg
                     placed[v] = true
@@ -924,7 +958,7 @@ allocate_release = ():
                 if r >= XMM and not caller_ok: ok = false
                 if ok:
                     reg = r
-                    nactive = ra_remove(data(active), data(byreg), nactive, reg)
+                    nactive = ra_remove(active, byreg, nactive, reg)
             if reg < 0:
                 if vtype(v) != VI:
                     if caller_ok:
@@ -968,7 +1002,7 @@ allocate_release = ():
                     reg = vloc[best]
                     vloc[best] = LOC_SPILL
                     vsave[best] = false
-                    nactive = ra_remove(data(active), data(byreg), nactive, reg)
+                    nactive = ra_remove(active, byreg, nactive, reg)
             if reg >= 0:
                 vloc[v] = reg
                 vsave[v] = c > 0 and (reg >= XMM or not is_callee[reg])
@@ -976,7 +1010,7 @@ allocate_release = ():
                 byreg[reg] = nactive
                 active[nactive] = v
                 nactive += 1
-                if ra_stat: ra_pressure(data(active), nactive, pos)
+                if ra_stat: ra_pressure(active, nactive, pos)
                 if v_live[v].last < min_end: min_end = v_live[v].last
                 if reg < XMM and is_callee[reg]: callee_off[reg] = 1
             else: vloc[v] = LOC_SPILL
@@ -2011,18 +2045,642 @@ sel_ca = 0
 sel_cb = 0
 sel_cc = 0
 
-emit_ins = (pos: int, ins: Ins):
+# The final IR is immutable through selection. Borrow its instruction records
+# and dispatch to case-local encoders, avoiding a giant per-operation frame.
+emit_ins = (pos: int, ins: *Ins):
     if pos == cmp_reload_at:
         original = cmp_reload
         cmp_reload = -1
         cmp_reload_at = -1
-        emit_ins(pos, ir.code[original])
+        emit_ins(pos, data(ir.code) + original)
+    op = ins.op
+    if pos == fuse_skip: return
+    match op:
+        nop, assume: pass
+        iconst: x_emit_iconst(pos, ins)
+        fconst: x_emit_fconst(pos, ins)
+        mov: x_emit_mov(pos, ins)
+        overflow_add, overflow_sub, overflow_mul: x_emit_overflow_add(pos, ins)
+        checked_add, checked_sub, checked_mul: x_emit_checked_add(pos, ins)
+        add: x_emit_add(pos, ins)
+        sub: x_emit_sub(pos, ins)
+        and_: x_emit_and_(pos, ins)
+        or_: x_emit_or_(pos, ins)
+        xor: x_emit_xor(pos, ins)
+        mul: x_emit_mul(pos, ins)
+        mulhs, mulhu: x_emit_mulhs(pos, ins)
+        divs, rems, divu, remu: x_emit_divs(pos, ins)
+        shl, shrs, shru: x_emit_shl(pos, ins)
+        neg, not_: x_emit_neg(pos, ins)
+        eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu: x_emit_eq(pos, ins)
+        fadd: x_emit_fadd(pos, ins)
+        fsub: x_emit_fsub(pos, ins)
+        fmul: x_emit_fmul(pos, ins)
+        fdiv: x_emit_fdiv(pos, ins)
+        fmin: x_emit_fmin(pos, ins)
+        fmax: x_emit_fmax(pos, ins)
+        fsqrt: x_emit_fsqrt(pos, ins)
+        ffloor, fceil, ftrunc: x_emit_ffloor(pos, ins)
+        fneg, fabs: x_emit_fneg(pos, ins)
+        feq, fne, flt, fle, fgt, fge: x_emit_feq(pos, ins)
+        sext8, sext16, sext32, zext8, zext16, zext32: x_emit_sext8(pos, ins)
+        i2f: x_emit_i2f(pos, ins)
+        u2f: x_emit_u2f(pos, ins)
+        f2i: x_emit_f2i(pos, ins)
+        f2f: x_emit_f2f(pos, ins)
+        bits2f: x_emit_bits2f(pos, ins)
+        f2bits: x_emit_f2bits(pos, ins)
+        load: x_emit_load(pos, ins)
+        store: x_emit_store(pos, ins)
+        slot: x_emit_slot(pos, ins)
+        gaddr, daddr: x_emit_gaddr(pos, ins)
+        faddr: x_emit_faddr(pos, ins)
+        memeq, streq: x_emit_memeq(pos, ins)
+        findb: x_emit_findb(pos, ins)
+        copy: x_emit_copy(pos, ins)
+        zero: x_emit_zero(pos, ins)
+        vld: x_emit_vld(pos, ins)
+        vst: x_emit_vst(pos, ins)
+        vbin: x_emit_vbin(pos, ins)
+        vsplat: x_emit_vsplat(pos, ins)
+        vzu: x_emit_vzu(pos, ins)
+        vop: x_emit_vop(pos, ins)
+        memcpy: x_emit_memcpy(pos, ins)
+        memset: x_emit_memset(pos, ins)
+        zeroslots: x_emit_zeroslots(pos, ins)
+        call: x_emit_call(pos, ins)
+        calli, callc: x_emit_calli(pos, ins)
+        syscall: x_emit_syscall(pos, ins)
+        intr: x_emit_intr(pos, ins)
+        block: x_emit_block(pos, ins)
+        loop: x_emit_loop(pos, ins)
+        if_: x_emit_if_(pos, ins)
+        else_: x_emit_else_(pos, ins)
+        end: x_emit_end(pos, ins)
+        br: x_emit_br(pos, ins)
+        brif: x_emit_brif(pos, ins)
+        brtable: x_emit_brtable(pos, ins)
+        ret: x_emit_ret(pos, ins)
+        trap: x_emit_trap(pos, ins)
+        select: x_emit_select(pos, ins)
+
+x_emit_iconst = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    if vloc[d] == LOC_CONST or vloc[d] == LOC_NONE: return
+    r = dreg(d, RAX)
+    mov_imm(r, ins.imm)
+    st(d, r)
+
+x_emit_fconst = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    if vloc[d] == LOC_NONE or vloc[d] == LOC_FCONST: return
+    if vloc[d] >= XMM:
+        x = vloc[d] - XMM
+        if ins.imm == 0: xzero(x)
+        else:
+            # float constants live in read-only data: one load, no integer register
+            rip_kind = 0
+            sse_rm(fpre(int(ins.ty)), 0x10, x, RIPREL, ro_const(ins.imm))
+        return
+    mov_imm(RAX, ins.imm)
+    st(d, RAX)
+
+x_emit_mov = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    if vloc[d] == LOC_NONE: return
+    if vtype(d) == VI:
+        r = dreg(d, RAX)
+        ld(r, a)
+        st(d, r)
+    else:
+        x = xdreg(d, 0)
+        lds(x, a, vtype(d))
+        sts(d, x, vtype(d))
+
+x_emit_overflow_add = (pos: int, ins: *Ins):
     op = ins.op
     d = int(ins.dst)
     a = int(ins.a)
     bb = int(ins.b)
-    if pos == fuse_skip: return
-    if (op == .memeq or op == .streq) and pos + 1 < ir.code.len() and v_live[d].nuse == 1:
+    ld(RAX, a)
+    if op == .overflow_add: alu_v(0x01, 0, RAX, bb)
+    else if op == .overflow_sub: alu_v(0x29, 5, RAX, bb)
+    else:
+        rb = reg_of(bb, RCX)
+        rex(true, RAX, 0, rb, false)
+        b(0x0F)
+        b(0xAF)
+        modrr(RAX, rb)
+    setcc(0)  # OF from the tagged-word operation
+    st(d, RAX)
+
+x_emit_checked_add = (pos: int, ins: *Ins):
+    op = ins.op
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    # No LEA/strength reduction: the immediately following JO consumes OF.
+    r = dreg(d, RAX)
+    if vloc[bb] == r and r != vloc[a]: r = RAX
+    ld(r, a)
+    if op == .checked_add: alu_v(0x01, 0, r, bb)
+    else if op == .checked_sub: alu_v(0x29, 5, r, bb)
+    else if vloc[bb] == LOC_CONST:
+        rex(true, r, 0, r, false)
+        b(0x69)
+        modrr(r, r)
+        b32(vcval[bb])
+    else:
+        rb = reg_of(bb, RCX)
+        rex(true, r, 0, rb, false)
+        b(0x0F)
+        b(0xAF)
+        modrr(r, rb)
+    x_int_fail.push(jcc32(0))
+    x_int_fail_fn = int(ins.imm)
+    st(d, r)
+
+x_emit_add = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    if vloc[d] == LOC_NONE or vloc[d] == LOC_SLOT: return
+    if lea_add(d, a, bb, 1): return
+    int_bin(0x01, 0, ins[0])
+
+x_emit_sub = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    if vloc[bb] == LOC_CONST and lea_add(d, a, bb, -1): return
+    int_bin(0x29, 5, ins[0])
+
+x_emit_and_ = (pos: int, ins: *Ins):
+    int_bin(0x21, 4, ins[0])
+
+x_emit_or_ = (pos: int, ins: *Ins):
+    int_bin(0x09, 1, ins[0])
+
+x_emit_xor = (pos: int, ins: *Ins):
+    int_bin(0x31, 6, ins[0])
+
+x_emit_mul = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    if vloc[d] == LOC_NONE: return
+    r = dreg(d, RAX)
+    if vloc[bb] == r and r != vloc[a]: r = RAX
+    l = vloc[bb]
+    if l == LOC_CONST:
+        c = vcval[bb]
+        if c == 3 or c == 5 or c == 9:
+            # x + x * {2,4,8}, preserving the same low 64 bits.
+            scale = 1
+            if c == 5: scale = 2
+            else if c == 9: scale = 3
+            base = reg_of(a, RAX)
+            use_index(base, scale)
+            lea(r, base, 0)
+            cur_index = -1
+        else:
+            ld(r, a)
+            rex(true, r, 0, r, false)
+            b(0x69)
+            modrr(r, r)
+            b32(c)
+    else:
+        ld(r, a)
+        rb = reg_of(bb, RCX)
+        rex(true, r, 0, rb, false)
+        b(0x0F)
+        b(0xAF)
+        modrr(r, rb)
+    st(d, r)
+
+x_emit_mulhs = (pos: int, ins: *Ins):
+    op = ins.op
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    # (one-operand imul, or mul: rdx:rax = rax * b)
+    ld(RAX, a)
+    rb = reg_of(bb, RCX)
+    if rb == RDX:
+        mov_rr(RCX, RDX)
+        rb = RCX
+    rex(true, 0, 0, rb, false)
+    b(0xF7)
+    if op == .mulhu: modrr(4, rb)
+    else: modrr(5, rb)
+    st(d, RDX)
+
+x_emit_divs = (pos: int, ins: *Ins):
+    op = ins.op
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    ld(RAX, a)
+    rb = reg_of(bb, RCX)
+    if rb == RDX:
+        mov_rr(RCX, RDX)
+        rb = RCX
+    if op == .divs or op == .rems:
+        b(0x48)
+        b(0x99)               # cqo
+    else:
+        b(0x31)
+        b(0xD2)               # xor edx, edx
+    rex(true, 0, 0, rb, false)
+    b(0xF7)
+    if op == .divs or op == .rems: modrr(7, rb)
+    else: modrr(6, rb)
+    if op == .rems or op == .remu: st(d, RDX)
+    else: st(d, RAX)
+
+x_emit_shl = (pos: int, ins: *Ins):
+    op = ins.op
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    if vloc[d] == LOC_NONE: return
+    ext = 7
+    if op == .shl: ext = 4
+    else if op == .shru: ext = 5
+    if vloc[bb] == LOC_CONST:
+        r = dreg(d, RAX)
+        ld(r, a)
+        rex(true, 0, 0, r, false)
+        b(0xC1)
+        modrr(ext, r)
+        b(vcval[bb] & 63)
+        st(d, r)
+        return
+    ld(RCX, bb)
+    r = dreg(d, RAX)
+    if r == RCX: r = RAX
+    ld(r, a)
+    rex(true, 0, 0, r, false)
+    b(0xD3)
+    if op == .shl: modrr(4, r)
+    else if op == .shru: modrr(5, r)
+    else: modrr(7, r)
+    st(d, r)
+
+x_emit_neg = (pos: int, ins: *Ins):
+    op = ins.op
+    d = int(ins.dst)
+    a = int(ins.a)
+    r = dreg(d, RAX)
+    ld(r, a)
+    rex(true, 0, 0, r, false)
+    b(0xF7)
+    if op == .neg: modrr(3, r)
+    else: modrr(2, r)
+    st(d, r)
+
+x_compare_fused = (pos: int, ins: *Ins) -> bool:
+    op = ins.op
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    # fuse with a following if/brif that is the only user
+    if pos + 1 < ir.code.len() and v_live[d].nuse == 1:
+        nx = ir.code[pos + 1]
+        # Compare first at the select, then preserve its flags through
+        # the operand moves. Adapted from Sloppy f9ba5a464f0171b3.
+        if nx.op == .select and int(nx.a) == d and is_icmp(op) and int(nx.b) != d and int(nx.c) != d:
+            sel_fused = pos + 1
+            sel_ca = a
+            sel_cb = bb
+            sel_cc = icc(op)
+            return true
+        if (nx.op == .if_ or nx.op == .brif) and int(nx.a) == d:
+            if is_icmp(op):
+                cmp_ops(a, bb, true)
+                fused_cc = icc(op)
+            else: fused_cc = fcmp_flags(ins[0])
+            return true
+        # a float comparison tested for false (c == 0): branch on the opposite flags
+        if is_fcmp(op) and nx.op == .eq and int(nx.a) == d and vloc[int(nx.b)] == LOC_CONST and vcval[int(nx.b)] == 0 and pos + 2 < ir.code.len():
+            t = int(nx.dst)
+            n2 = ir.code[pos + 2]
+            if v_live[t].nuse == 1 and (n2.op == .if_ or n2.op == .brif) and int(n2.a) == t:
+                cc = fcmp_flags(ins[0])
+                if cc == 100: cc = 101
+                else if cc == 101: cc = 100
+                else: cc = cc xor 1
+                fused_cc = cc
+                fuse_skip = pos + 1
+                return true
+    false
+
+x_emit_eq = (pos: int, ins: *Ins):
+    if x_compare_fused(pos, ins): return
+    op = ins.op
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    cmp_ops(a, bb)
+    setcc(icc(op))
+    st(d, RAX)
+
+x_emit_fadd = (pos: int, ins: *Ins):
+    falu(0x58, ins[0])
+
+x_emit_fsub = (pos: int, ins: *Ins):
+    falu(0x5C, ins[0])
+
+x_emit_fmul = (pos: int, ins: *Ins):
+    falu(0x59, ins[0])
+
+x_emit_fdiv = (pos: int, ins: *Ins):
+    falu(0x5E, ins[0])
+
+x_emit_fmin = (pos: int, ins: *Ins):
+    falu(0x5D, ins[0])
+
+x_emit_fmax = (pos: int, ins: *Ins):
+    falu(0x5F, ins[0])
+
+x_emit_fsqrt = (pos: int, ins: *Ins):
+    x_unary(fpre(int(ins.ty)), 0x51, ins[0], int(ins.ty), int(ins.ty))
+
+x_emit_ffloor = (pos: int, ins: *Ins):
+    op = ins.op
+    d = int(ins.dst)
+    a = int(ins.a)
+    ty = int(ins.ty)
+    mode = 1
+    if op == .fceil: mode = 2
+    if op == .ftrunc: mode = 3
+    x = xdreg(d, 0)
+    xa = xreg_of(a, 1, ty)
+    b(0x66)
+    rex(false, x, 0, xa, false)
+    b(0x0F)
+    b(0x3A)
+    if ty == VS: b(0x0A)
+    else: b(0x0B)
+    modrr(x, xa)
+    b(mode)
+    sts(d, x, ty)
+
+x_emit_fneg = (pos: int, ins: *Ins):
+    op = ins.op
+    d = int(ins.dst)
+    a = int(ins.a)
+    ty = int(ins.ty)
+    xa = xreg_of(a, 0, ty)
+    movq_rx(RAX, xa)
+    bit = 63
+    if ty == VS: bit = 31
+    rex(true, 0, 0, RAX, false)
+    b(0x0F)
+    b(0xBA)
+    if op == .fneg: modrr(7, RAX)
+    else: modrr(6, RAX)
+    b(bit)
+    x = xdreg(d, 0)
+    movq_xr(x, RAX)
+    sts(d, x, ty)
+
+x_emit_feq = (pos: int, ins: *Ins):
+    if x_compare_fused(pos, ins): return
+    d = int(ins.dst)
+    cc = fcmp_flags(ins[0])
+    if cc == 100:
+        b24(0xC0940F)        # sete al
+        b24(0xC19B0F)        # setnp cl
+        b16(0xC820)                  # and al, cl
+        b24(0xC0B60F)
+    else if cc == 101:
+        b24(0xC0950F)        # setne al
+        b24(0xC19A0F)        # setp cl
+        b16(0xC808)                  # or al, cl
+        b24(0xC0B60F)
+    else: setcc(cc)
+    st(d, RAX)
+
+x_emit_sext8 = (pos: int, ins: *Ins):
+    op = ins.op
+    d = int(ins.dst)
+    a = int(ins.a)
+    ra = reg_of(a, RAX)
+    r = dreg(d, RAX)
+    if op == .sext32: op_rr(0x63, true, r, ra)      # movsxd r, ra32
+    else if op == .zext32: op_rr(0x8B, false, r, ra) # mov r32, ra32
+    else:
+        w = op == .sext8 or op == .zext8
+        sg = op == .sext8 or op == .sext16
+        rex(true, r, 0, ra, false)
+        b(0x0F)
+        if w:
+            if sg: b(0xBE)
+            else: b(0xB6)
+        else:
+            if sg: b(0xBF)
+            else: b(0xB7)
+        modrr(r, ra)
+    st(d, r)
+
+x_emit_i2f = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    ty = int(ins.ty)
+    ra = reg_of(a, RAX)
+    x = xdreg(d, 0)
+    xzero(x)
+    b(fpre(ty))
+    rex(true, x, 0, ra, false)
+    b(0x0F)
+    b(0x2A)
+    modrr(x, ra)
+    sts(d, x, ty)
+
+x_emit_u2f = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    ty = int(ins.ty)
+    ld(RAX, a)
+    xzero(0)
+    b24(0xC08548)          # test rax, rax
+    j1 = jcc32(0x8)                     # js
+    b(fpre(ty)); b24(0x2A0F48); b(0xC0)    # cvtsi2sd xmm0, rax
+    j2 = jmp32()
+    patch_here(j1)
+    mov_rr(RCX, RAX)
+    b24(0xE9D148)          # shr rcx, 1
+    b24(0x01E083)          # and eax, 1
+    b24(0xC10948)          # or rcx, rax
+    b(fpre(ty)); b24(0x2A0F48); b(0xC1)    # cvtsi2sd xmm0, rcx
+    b(fpre(ty)); b24(0xC0580F)             # addsd xmm0, xmm0
+    patch_here(j2)
+    sts(d, 0, ty)
+
+x_emit_f2i = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    # saturating, like wasm's trunc_sat: NaN -> 0, too large -> max, too small -> min
+    ty = int(ins.ty)
+    xa = xreg_of(a, 0, ty)
+    r = dreg(d, RAX)
+    b(fpre(ty))
+    rex(true, r, 0, xa, false)
+    b(0x0F)
+    b(0x2C)
+    modrr(r, xa)
+    # cvttsd2si gives INT64_MIN when out of range; `cmp r, 1` overflows only for that value
+    rex(true, 0, 0, r, false)
+    b(0x83)
+    modrr(7, r)
+    b(1)
+    done = jcc32(1)                       # jno
+    if ty == VS: sse_rr(0, 0x2E, xa, xa)   # ucomiss
+    else: sse_rr(0x66, 0x2E, xa, xa)       # ucomisd
+    nan = jcc32(CC_P)
+    sse_rr(0, 0x57, XMM + 15, XMM + 15)    # xorps xmm15, xmm15
+    if ty == VS: sse_rr(0, 0x2E, xa, XMM + 15)
+    else: sse_rr(0x66, 0x2E, xa, XMM + 15)
+    neg = jcc32(CC_BE)
+    mov_imm(r, 0x7FFFFFFFFFFFFFFF)
+    done2 = jmp32()
+    patch_here(nan)
+    op_rr(0x31, false, r, r)               # xor r32, r32
+    patch_here(done)
+    patch_here(neg)
+    patch_here(done2)
+    st(d, r)
+
+x_emit_f2f = (pos: int, ins: *Ins):
+    # ins.ty is the destination type
+    if int(ins.ty) == VF: x_unary(0xF3, 0x5A, ins[0], VS, VF)
+    else: x_unary(0xF2, 0x5A, ins[0], VF, VS)
+
+x_emit_bits2f = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    ra = reg_of(a, RAX)
+    x = xdreg(d, 0)
+    movq_xr(x, ra)
+    sts(d, x, int(ins.ty))
+
+x_emit_f2bits = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    ty = int(ins.ty)
+    xa = xreg_of(a, 0, ty)
+    r = dreg(d, RAX)
+    movq_rx(r, xa)
+    if ty == VS: op_rr(0x8B, false, r, r)          # zero upper half
+    st(d, r)
+
+x_emit_load = (pos: int, ins: *Ins):
+    op = ins.op
+    d = int(ins.dst)
+    a = int(ins.a)
+    if vloc[d] == LOC_NONE: return
+    mode = int(ins.c)
+    size = mode & 15
+    if mode & M_FLOAT == 0 and v_live[d].nuse <= 2 and pos + 1 < ir.code.len() and can_cmp_load(ins[0], ir.code[pos + 1]):
+        failure = cmp_failure_use(pos, ins[0], ir.code[pos + 1])
+        if v_live[d].nuse == 1 or failure:
+            cmp_load = pos
+            if failure:
+                cmp_reload = pos
+                cmp_reload_at = pos + 3
+            return
+    if mode & M_FLOAT != 0 and v_live[d].nuse == 1 and pos + 1 < ir.code.len():
+        # a float load used only as the second operand of the next arithmetic: that
+        # instruction reads the memory itself
+        nx = ir.code[pos + 1]
+        if is_falu(nx.op) and int(nx.b) == d and int(nx.a) != d and int(nx.ty) == vtype(d):
+            fold_load = pos
+            return
+    base, disp = addr_of(a, RCX)
+    disp += int(ins.imm)
+    ix = -1
+    if mode & M_INDEX != 0:
+        base, disp = indexed_base(base, disp, int(ins.imm))
+        ix = reg_of(int(ins.b), RDX)
+    if mode & M_FLOAT != 0:
+        x = xdreg(d, 0)
+        use_index(ix, mem_scale(ins[0]))
+        if size == 4: sse_rm(0xF3, 0x10, x, base, disp)
+        else: sse_rm(0xF2, 0x10, x, base, disp)
+        cur_index = -1
+        sts(d, x, vtype(d))
+    else:
+        r = dreg(d, RAX)
+        use_index(ix, mem_scale(ins[0]))
+        load_sized(r, base, disp, size, mode & M_SIGNED != 0)
+        cur_index = -1
+        st(d, r)
+
+x_emit_store = (pos: int, ins: *Ins):
+    a = int(ins.a)
+    bb = int(ins.b)
+    mode = int(ins.c)
+    size = mode & 15
+    base, disp = addr_of(a, RCX)
+    disp += int(ins.imm)
+    ix = -1
+    if mode & M_INDEX != 0:
+        base, disp = indexed_base(base, disp, int(ins.imm))
+        ix = reg_of(int(ins.dst), RDX)
+    if vtype(bb) != VI:
+        xb = xreg_of(bb, 0, vtype(bb))
+        use_index(ix, mem_scale(ins[0]))
+        if size == 4: sse_rm(0xF3, 0x11, xb, base, disp)
+        else: sse_rm(0xF2, 0x11, xb, base, disp)
+    else if vloc[bb] == LOC_CONST and size >= 4 and base != RIPREL:
+        use_index(ix, mem_scale(ins[0]))
+        rex(size == 8, 0, 0, base, false)
+        b(0xC7)
+        mem(0, base, disp)
+        b32(vcval[bb])
+    else:
+        rb = reg_of(bb, RAX)
+        use_index(ix, mem_scale(ins[0]))
+        store_sized(base, disp, rb, size)
+    cur_index = -1
+
+x_emit_slot = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    if vloc[d] == LOC_SLOT or vloc[d] == LOC_NONE: return
+    r = dreg(d, RAX)
+    lea(r, RBP, slot_off[a])
+    st(d, r)
+
+x_emit_gaddr = (pos: int, ins: *Ins):
+    op = ins.op
+    d = int(ins.dst)
+    if vloc[d] == LOC_GLOBAL or vloc[d] == LOC_NONE: return
+    r = dreg(d, RAX)
+    kind = 1
+    if op == .daddr: kind = 0
+    rel_fixup_lea(r, kind, int(ins.imm))
+    st(d, r)
+
+x_emit_faddr = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    r = dreg(d, RAX)
+    rex(true, r, 0, 0, false)
+    b(0x8D)
+    b(((r & 7) << 3) | 5)
+    b32(0)
+    if target_windows and lf_is_cabi(int(ins.imm)): cabi_fix.push((code.len() - 4, int(ins.imm)))
+    else: call_fix.push((code.len() - 4, int(ins.imm)))
+    st(d, r)
+
+x_emit_memeq = (pos: int, ins: *Ins):
+    op = ins.op
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    if pos + 1 < ir.code.len() and v_live[d].nuse == 1:
         nx = ir.code[pos + 1]
         if (nx.op == .if_ or nx.op == .brif) and int(nx.a) == d:
             emit_memeq(d, a, bb, int(ins.c), true, op == .streq)
@@ -2036,814 +2694,461 @@ emit_ins = (pos: int, ins: Ins):
                 fused_cc = 5
                 fuse_skip = pos + 1
                 return
-    if is_icmp(op) or is_fcmp(op):
-        # fuse with a following if/brif that is the only user
-        if pos + 1 < ir.code.len() and v_live[d].nuse == 1:
-            nx = ir.code[pos + 1]
-            # Compare first at the select, then preserve its flags through
-            # the operand moves. Adapted from Sloppy f9ba5a464f0171b3.
-            if nx.op == .select and int(nx.a) == d and is_icmp(op) and int(nx.b) != d and int(nx.c) != d:
-                sel_fused = pos + 1
-                sel_ca = a
-                sel_cb = bb
-                sel_cc = icc(op)
-                return
-            if (nx.op == .if_ or nx.op == .brif) and int(nx.a) == d:
-                if is_icmp(op):
-                    cmp_ops(a, bb, true)
-                    fused_cc = icc(op)
-                else: fused_cc = fcmp_flags(ins)
-                return
-            # a float comparison tested for false (c == 0): branch on the opposite flags
-            if is_fcmp(op) and nx.op == .eq and int(nx.a) == d and vloc[int(nx.b)] == LOC_CONST and vcval[int(nx.b)] == 0 and pos + 2 < ir.code.len():
-                t = int(nx.dst)
-                n2 = ir.code[pos + 2]
-                if v_live[t].nuse == 1 and (n2.op == .if_ or n2.op == .brif) and int(n2.a) == t:
-                    cc = fcmp_flags(ins)
-                    if cc == 100: cc = 101
-                    else if cc == 101: cc = 100
-                    else: cc = cc xor 1
-                    fused_cc = cc
-                    fuse_skip = pos + 1
-                    return
-    match op:
-        nop, assume: pass
-        iconst:
-            if vloc[d] == LOC_CONST or vloc[d] == LOC_NONE: return
-            r = dreg(d, RAX)
-            mov_imm(r, ins.imm)
-            st(d, r)
-        fconst:
-            if vloc[d] == LOC_NONE or vloc[d] == LOC_FCONST: return
-            if vloc[d] >= XMM:
-                x = vloc[d] - XMM
-                if ins.imm == 0: xzero(x)
-                else:
-                    # float constants live in read-only data: one load, no integer register
-                    rip_kind = 0
-                    sse_rm(fpre(int(ins.ty)), 0x10, x, RIPREL, ro_const(ins.imm))
-                return
-            mov_imm(RAX, ins.imm)
-            st(d, RAX)
-        mov:
-            if vloc[d] == LOC_NONE: return
-            if vtype(d) == VI:
-                r = dreg(d, RAX)
-                ld(r, a)
-                st(d, r)
-            else:
-                x = xdreg(d, 0)
-                lds(x, a, vtype(d))
-                sts(d, x, vtype(d))
-        overflow_add, overflow_sub, overflow_mul:
-            ld(RAX, a)
-            if op == .overflow_add: alu_v(0x01, 0, RAX, bb)
-            else if op == .overflow_sub: alu_v(0x29, 5, RAX, bb)
-            else:
-                rb = reg_of(bb, RCX)
-                rex(true, RAX, 0, rb, false)
-                b(0x0F)
-                b(0xAF)
-                modrr(RAX, rb)
-            setcc(0)  # OF from the tagged-word operation
-            st(d, RAX)
-        checked_add, checked_sub, checked_mul:
-            # No LEA/strength reduction: the immediately following JO consumes OF.
-            r = dreg(d, RAX)
-            if vloc[bb] == r and r != vloc[a]: r = RAX
-            ld(r, a)
-            if op == .checked_add: alu_v(0x01, 0, r, bb)
-            else if op == .checked_sub: alu_v(0x29, 5, r, bb)
-            else if vloc[bb] == LOC_CONST:
-                rex(true, r, 0, r, false)
-                b(0x69)
-                modrr(r, r)
-                b32(vcval[bb])
-            else:
-                rb = reg_of(bb, RCX)
-                rex(true, r, 0, rb, false)
-                b(0x0F)
-                b(0xAF)
-                modrr(r, rb)
-            x_int_fail.push(jcc32(0))
-            x_int_fail_fn = int(ins.imm)
-            st(d, r)
-        add:
-            if vloc[d] == LOC_NONE or vloc[d] == LOC_SLOT: return
-            if lea_add(d, a, bb, 1): return
-            int_bin(0x01, 0, ins)
-        sub:
-            if vloc[bb] == LOC_CONST and lea_add(d, a, bb, -1): return
-            int_bin(0x29, 5, ins)
-        and_: int_bin(0x21, 4, ins)
-        or_: int_bin(0x09, 1, ins)
-        xor: int_bin(0x31, 6, ins)
-        mul:
-            if vloc[d] == LOC_NONE: return
-            r = dreg(d, RAX)
-            if vloc[bb] == r and r != vloc[a]: r = RAX
-            l = vloc[bb]
-            if l == LOC_CONST:
-                c = vcval[bb]
-                if c == 3 or c == 5 or c == 9:
-                    # x + x * {2,4,8}, preserving the same low 64 bits.
-                    scale = 1
-                    if c == 5: scale = 2
-                    else if c == 9: scale = 3
-                    base = reg_of(a, RAX)
-                    use_index(base, scale)
-                    lea(r, base, 0)
-                    cur_index = -1
-                else:
-                    ld(r, a)
-                    rex(true, r, 0, r, false)
-                    b(0x69)
-                    modrr(r, r)
-                    b32(c)
-            else:
-                ld(r, a)
-                rb = reg_of(bb, RCX)
-                rex(true, r, 0, rb, false)
-                b(0x0F)
-                b(0xAF)
-                modrr(r, rb)
-            st(d, r)
-        mulhs, mulhu:
-            # (one-operand imul, or mul: rdx:rax = rax * b)
-            ld(RAX, a)
-            rb = reg_of(bb, RCX)
-            if rb == RDX:
-                mov_rr(RCX, RDX)
-                rb = RCX
-            rex(true, 0, 0, rb, false)
-            b(0xF7)
-            if op == .mulhu: modrr(4, rb)
-            else: modrr(5, rb)
-            st(d, RDX)
-        divs, rems, divu, remu:
-            ld(RAX, a)
-            rb = reg_of(bb, RCX)
-            if rb == RDX:
-                mov_rr(RCX, RDX)
-                rb = RCX
-            if op == .divs or op == .rems:
-                b(0x48)
-                b(0x99)               # cqo
-            else:
-                b(0x31)
-                b(0xD2)               # xor edx, edx
-            rex(true, 0, 0, rb, false)
-            b(0xF7)
-            if op == .divs or op == .rems: modrr(7, rb)
-            else: modrr(6, rb)
-            if op == .rems or op == .remu: st(d, RDX)
-            else: st(d, RAX)
-        shl, shrs, shru:
-            if vloc[d] == LOC_NONE: return
-            ext = 7
-            if op == .shl: ext = 4
-            else if op == .shru: ext = 5
-            if vloc[bb] == LOC_CONST:
-                r = dreg(d, RAX)
-                ld(r, a)
-                rex(true, 0, 0, r, false)
-                b(0xC1)
-                modrr(ext, r)
-                b(vcval[bb] & 63)
-                st(d, r)
-                return
-            ld(RCX, bb)
-            r = dreg(d, RAX)
-            if r == RCX: r = RAX
-            ld(r, a)
-            rex(true, 0, 0, r, false)
-            b(0xD3)
-            if op == .shl: modrr(4, r)
-            else if op == .shru: modrr(5, r)
-            else: modrr(7, r)
-            st(d, r)
-        neg, not_:
-            r = dreg(d, RAX)
-            ld(r, a)
-            rex(true, 0, 0, r, false)
-            b(0xF7)
-            if op == .neg: modrr(3, r)
-            else: modrr(2, r)
-            st(d, r)
-        eq, ne, lts, les, gts, ges, ltu, leu, gtu, geu:
-            cmp_ops(a, bb)
-            setcc(icc(op))
-            st(d, RAX)
-        fadd: falu(0x58, ins)
-        fsub: falu(0x5C, ins)
-        fmul: falu(0x59, ins)
-        fdiv: falu(0x5E, ins)
-        fmin: falu(0x5D, ins)
-        fmax: falu(0x5F, ins)
-        fsqrt: x_unary(fpre(int(ins.ty)), 0x51, ins, int(ins.ty), int(ins.ty))
-        ffloor, fceil, ftrunc:
-            ty = int(ins.ty)
-            mode = 1
-            if op == .fceil: mode = 2
-            if op == .ftrunc: mode = 3
-            x = xdreg(d, 0)
-            xa = xreg_of(a, 1, ty)
+    emit_memeq(d, a, bb, int(ins.c), false, op == .streq)
+
+x_emit_findb = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    emit_findb(d, a, bb, int(ins.c), int(ins.imm))
+
+x_emit_copy = (pos: int, ins: *Ins):
+    a = int(ins.a)
+    bb = int(ins.b)
+    size = int(ins.imm)
+    if size <= INLINE_COPY:
+        db, dd = addr_reg(a, RDX)
+        sb, sd = addr_reg(bb, RCX)
+        k = 0
+        loop k + 16 <= size:
+            sse_rm(0xF3, 0x6F, XMM + 15, sb, sd + k)      # movdqu
+            sse_rm(0xF3, 0x7F, XMM + 15, db, dd + k)
+            k += 16
+        loop w in [8, 4, 2, 1]:
+            if k + w <= size:
+                load_sized(RAX, sb, sd + k, w, false)
+                store_sized(db, dd + k, RAX, w)
+                k += w
+    else:
+        pm_count = 0
+        pmove(RDI, a)
+        pmove(RSI, bb)
+        emit_parallel()
+        mov_imm(RCX, size)
+        b16(0xA4F3)          # rep movsb
+
+x_emit_zero = (pos: int, ins: *Ins):
+    a = int(ins.a)
+    size = int(ins.imm)
+    if size <= INLINE_COPY:
+        db, dd = addr_reg(a, RDX)
+        b16(0xC031)          # xor eax, eax
+        k = 0
+        if size >= 16: sse_rr(0x66, 0xEF, XMM + 15, XMM + 15)      # pxor
+        loop k + 16 <= size:
+            sse_rm(0xF3, 0x7F, XMM + 15, db, dd + k)
+            k += 16
+        loop w in [8, 4, 2, 1]:
+            if k + w <= size:
+                store_sized(db, dd + k, RAX, w)
+                k += w
+    else:
+        ld(RDI, a)
+        mov_imm(RCX, size)
+        b16(0xC031)
+        b16(0xAAF3)          # rep stosb
+
+x_emit_vld = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    if vloc[d] == LOC_NONE: return
+    ty = int(ins.ty)
+    base, disp = addr_of(a, RCX)
+    disp += int(ins.imm)
+    base, disp = indexed_base(base, disp, int(ins.imm))
+    ix = reg_of(bb, RDX)
+    x = xdreg(d, 0)
+    sc = 3
+    if vec_esize(int(ins.c)) == 4: sc = 2
+    use_index(ix, sc)
+    vmov_rm(x, base, disp, ty)
+    cur_index = -1
+    sts(d, x, ty)
+
+x_emit_vst = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    ty = int(ins.ty)
+    base, disp = addr_of(a, RCX)
+    disp += int(ins.imm)
+    base, disp = indexed_base(base, disp, int(ins.imm))
+    ix = reg_of(d, RDX)
+    x = xreg_of(bb, 0, ty)
+    sc = 3
+    if vec_esize(int(ins.c)) == 4: sc = 2
+    use_index(ix, sc)
+    vmov_mr(base, disp, x, ty)
+    cur_index = -1
+
+x_emit_vbin = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    if vloc[d] == LOC_NONE: return
+    ty = int(ins.ty)
+    vk = int(ins.imm)
+    vo = int(ins.c)
+    x = xdreg(d, 0)
+    xa = xreg_of(a, 1, ty)
+    xb = xreg_of(bb, 15, ty)
+    if ty == VY: vop3(vo, vk, x, xa, xb)
+    else if x == xb and x != xa:
+        if vec_commutes(vo): vop2(vo, vk, x, xa)
+        else:
+            vmov_rr(1, xa, ty)
+            vop2(vo, vk, 1, xb)
+            vmov_rr(x, 1, ty)
+    else:
+        vmov_rr(x, xa, ty)
+        vop2(vo, vk, x, xb)
+    sts(d, x, ty)
+
+x_emit_vsplat = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    if vloc[d] == LOC_NONE: return
+    ty = int(ins.ty)
+    vk = int(ins.imm)
+    x = xdreg(d, 0)
+    if vk == 0 or vk == 1:
+        sty = VF
+        if vk == 0: sty = VS
+        sx = xreg_of(a, 1, sty)
+        if ty == VY:
+            vex(x, 0, sx, 2, 1, 0, 1)
+            if vk == 0: b(0x18)                  # vbroadcastss ymm, xmm
+            else: b(0x19)                        # vbroadcastsd ymm, xmm
+            modrr(x, sx)
+        else:
+            vmov_rr(x, sx, VX)
+            if vk == 0:
+                sse_rr(0, 0xC6, x, x)             # shufps x, x, 0
+                b(0)
+            else: sse_rr(0x66, 0x14, x, x)       # unpcklpd x, x
+    else:
+        r = reg_of(a, RAX)
+        w = 0
+        if vk == 3: w = 1
+        if ty == VY:
+            vex(x, 0, r, 1, 1, w, 0)
+            b(0x6E)                              # vmovd / vmovq xmm, r
+            modrr(x, r)
+            vex(x, 0, x, 2, 1, 0, 1)
+            if vk == 2: b(0x58)                  # vpbroadcastd ymm, xmm
+            else: b(0x59)                        # vpbroadcastq ymm, xmm
+            modrr(x, x)
+        else:
             b(0x66)
-            rex(false, x, 0, xa, false)
-            b(0x0F)
-            b(0x3A)
-            if ty == VS: b(0x0A)
-            else: b(0x0B)
-            modrr(x, xa)
-            b(mode)
-            sts(d, x, ty)
-        fneg, fabs:
-            ty = int(ins.ty)
-            xa = xreg_of(a, 0, ty)
-            movq_rx(RAX, xa)
-            bit = 63
-            if ty == VS: bit = 31
-            rex(true, 0, 0, RAX, false)
-            b(0x0F)
-            b(0xBA)
-            if op == .fneg: modrr(7, RAX)
-            else: modrr(6, RAX)
-            b(bit)
-            x = xdreg(d, 0)
-            movq_xr(x, RAX)
-            sts(d, x, ty)
-        feq, fne, flt, fle, fgt, fge:
-            cc = fcmp_flags(ins)
-            if cc == 100:
-                b24(0xC0940F)        # sete al
-                b24(0xC19B0F)        # setnp cl
-                b16(0xC820)                  # and al, cl
-                b24(0xC0B60F)
-            else if cc == 101:
-                b24(0xC0950F)        # setne al
-                b24(0xC19A0F)        # setp cl
-                b16(0xC808)                  # or al, cl
-                b24(0xC0B60F)
-            else: setcc(cc)
-            st(d, RAX)
-        sext8, sext16, sext32, zext8, zext16, zext32:
-            ra = reg_of(a, RAX)
-            r = dreg(d, RAX)
-            if op == .sext32: op_rr(0x63, true, r, ra)      # movsxd r, ra32
-            else if op == .zext32: op_rr(0x8B, false, r, ra) # mov r32, ra32
-            else:
-                w = op == .sext8 or op == .zext8
-                sg = op == .sext8 or op == .sext16
-                rex(true, r, 0, ra, false)
-                b(0x0F)
-                if w:
-                    if sg: b(0xBE)
-                    else: b(0xB6)
-                else:
-                    if sg: b(0xBF)
-                    else: b(0xB7)
-                modrr(r, ra)
-            st(d, r)
-        i2f:
-            ty = int(ins.ty)
-            ra = reg_of(a, RAX)
-            x = xdreg(d, 0)
-            xzero(x)
-            b(fpre(ty))
-            rex(true, x, 0, ra, false)
-            b(0x0F)
-            b(0x2A)
-            modrr(x, ra)
-            sts(d, x, ty)
-        u2f:
-            ty = int(ins.ty)
-            ld(RAX, a)
-            xzero(0)
-            b24(0xC08548)          # test rax, rax
-            j1 = jcc32(0x8)                     # js
-            b(fpre(ty)); b24(0x2A0F48); b(0xC0)    # cvtsi2sd xmm0, rax
-            j2 = jmp32()
-            patch_here(j1)
-            mov_rr(RCX, RAX)
-            b24(0xE9D148)          # shr rcx, 1
-            b24(0x01E083)          # and eax, 1
-            b24(0xC10948)          # or rcx, rax
-            b(fpre(ty)); b24(0x2A0F48); b(0xC1)    # cvtsi2sd xmm0, rcx
-            b(fpre(ty)); b24(0xC0580F)             # addsd xmm0, xmm0
-            patch_here(j2)
-            sts(d, 0, ty)
-        f2i:
-            # saturating, like wasm's trunc_sat: NaN -> 0, too large -> max, too small -> min
-            ty = int(ins.ty)
-            xa = xreg_of(a, 0, ty)
-            r = dreg(d, RAX)
-            b(fpre(ty))
-            rex(true, r, 0, xa, false)
-            b(0x0F)
-            b(0x2C)
-            modrr(r, xa)
-            # cvttsd2si gives INT64_MIN when out of range; `cmp r, 1` overflows only for that value
-            rex(true, 0, 0, r, false)
-            b(0x83)
-            modrr(7, r)
-            b(1)
-            done = jcc32(1)                       # jno
-            if ty == VS: sse_rr(0, 0x2E, xa, xa)   # ucomiss
-            else: sse_rr(0x66, 0x2E, xa, xa)       # ucomisd
-            nan = jcc32(CC_P)
-            sse_rr(0, 0x57, XMM + 15, XMM + 15)    # xorps xmm15, xmm15
-            if ty == VS: sse_rr(0, 0x2E, xa, XMM + 15)
-            else: sse_rr(0x66, 0x2E, xa, XMM + 15)
-            neg = jcc32(CC_BE)
-            mov_imm(r, 0x7FFFFFFFFFFFFFFF)
-            done2 = jmp32()
-            patch_here(nan)
-            op_rr(0x31, false, r, r)               # xor r32, r32
-            patch_here(done)
-            patch_here(neg)
-            patch_here(done2)
-            st(d, r)
-        f2f:
-            # ins.ty is the destination type
-            if int(ins.ty) == VF: x_unary(0xF3, 0x5A, ins, VS, VF)
-            else: x_unary(0xF2, 0x5A, ins, VF, VS)
-        bits2f:
-            ra = reg_of(a, RAX)
-            x = xdreg(d, 0)
-            movq_xr(x, ra)
-            sts(d, x, int(ins.ty))
-        f2bits:
-            ty = int(ins.ty)
-            xa = xreg_of(a, 0, ty)
-            r = dreg(d, RAX)
-            movq_rx(r, xa)
-            if ty == VS: op_rr(0x8B, false, r, r)          # zero upper half
-            st(d, r)
-        load:
-            if vloc[d] == LOC_NONE: return
-            mode = int(ins.c)
-            size = mode & 15
-            if mode & M_FLOAT == 0 and v_live[d].nuse <= 2 and pos + 1 < ir.code.len() and can_cmp_load(ins, ir.code[pos + 1]):
-                failure = cmp_failure_use(pos, ins, ir.code[pos + 1])
-                if v_live[d].nuse == 1 or failure:
-                    cmp_load = pos
-                    if failure:
-                        cmp_reload = pos
-                        cmp_reload_at = pos + 3
-                    return
-            if mode & M_FLOAT != 0 and v_live[d].nuse == 1 and pos + 1 < ir.code.len():
-                # a float load used only as the second operand of the next arithmetic: that
-                # instruction reads the memory itself
-                nx = ir.code[pos + 1]
-                if is_falu(nx.op) and int(nx.b) == d and int(nx.a) != d and int(nx.ty) == vtype(d):
-                    fold_load = pos
-                    return
-            base, disp = addr_of(a, RCX)
-            disp += int(ins.imm)
-            ix = -1
-            if mode & M_INDEX != 0:
-                base, disp = indexed_base(base, disp, int(ins.imm))
-                ix = reg_of(int(ins.b), RDX)
-            if mode & M_FLOAT != 0:
-                x = xdreg(d, 0)
-                use_index(ix, mem_scale(ins))
-                if size == 4: sse_rm(0xF3, 0x10, x, base, disp)
-                else: sse_rm(0xF2, 0x10, x, base, disp)
-                cur_index = -1
-                sts(d, x, vtype(d))
-            else:
-                r = dreg(d, RAX)
-                use_index(ix, mem_scale(ins))
-                load_sized(r, base, disp, size, mode & M_SIGNED != 0)
-                cur_index = -1
-                st(d, r)
-        store:
-            mode = int(ins.c)
-            size = mode & 15
-            base, disp = addr_of(a, RCX)
-            disp += int(ins.imm)
-            ix = -1
-            if mode & M_INDEX != 0:
-                base, disp = indexed_base(base, disp, int(ins.imm))
-                ix = reg_of(int(ins.dst), RDX)
-            if vtype(bb) != VI:
-                xb = xreg_of(bb, 0, vtype(bb))
-                use_index(ix, mem_scale(ins))
-                if size == 4: sse_rm(0xF3, 0x11, xb, base, disp)
-                else: sse_rm(0xF2, 0x11, xb, base, disp)
-            else if vloc[bb] == LOC_CONST and size >= 4 and base != RIPREL:
-                use_index(ix, mem_scale(ins))
-                rex(size == 8, 0, 0, base, false)
-                b(0xC7)
-                mem(0, base, disp)
-                b32(vcval[bb])
-            else:
-                rb = reg_of(bb, RAX)
-                use_index(ix, mem_scale(ins))
-                store_sized(base, disp, rb, size)
-            cur_index = -1
-        slot:
-            if vloc[d] == LOC_SLOT or vloc[d] == LOC_NONE: return
-            r = dreg(d, RAX)
-            lea(r, RBP, slot_off[a])
-            st(d, r)
-        gaddr, daddr:
-            if vloc[d] == LOC_GLOBAL or vloc[d] == LOC_NONE: return
-            r = dreg(d, RAX)
-            kind = 1
-            if op == .daddr: kind = 0
-            rel_fixup_lea(r, kind, int(ins.imm))
-            st(d, r)
-        faddr:
-            r = dreg(d, RAX)
-            rex(true, r, 0, 0, false)
-            b(0x8D)
-            b(((r & 7) << 3) | 5)
-            b32(0)
-            if target_windows and lf_is_cabi(int(ins.imm)): cabi_fix.push((code.len() - 4, int(ins.imm)))
-            else: call_fix.push((code.len() - 4, int(ins.imm)))
-            st(d, r)
-        memeq, streq:
-            emit_memeq(d, a, bb, int(ins.c), false, op == .streq)
-        findb:
-            emit_findb(d, a, bb, int(ins.c), int(ins.imm))
-        copy:
-            size = int(ins.imm)
-            if size <= INLINE_COPY:
-                db, dd = addr_reg(a, RDX)
-                sb, sd = addr_reg(bb, RCX)
-                k = 0
-                loop k + 16 <= size:
-                    sse_rm(0xF3, 0x6F, XMM + 15, sb, sd + k)      # movdqu
-                    sse_rm(0xF3, 0x7F, XMM + 15, db, dd + k)
-                    k += 16
-                loop w in [8, 4, 2, 1]:
-                    if k + w <= size:
-                        load_sized(RAX, sb, sd + k, w, false)
-                        store_sized(db, dd + k, RAX, w)
-                        k += w
-            else:
-                pm_count = 0
-                pmove(RDI, a)
-                pmove(RSI, bb)
-                emit_parallel()
-                mov_imm(RCX, size)
-                b16(0xA4F3)          # rep movsb
-        zero:
-            size = int(ins.imm)
-            if size <= INLINE_COPY:
-                db, dd = addr_reg(a, RDX)
-                b16(0xC031)          # xor eax, eax
-                k = 0
-                if size >= 16: sse_rr(0x66, 0xEF, XMM + 15, XMM + 15)      # pxor
-                loop k + 16 <= size:
-                    sse_rm(0xF3, 0x7F, XMM + 15, db, dd + k)
-                    k += 16
-                loop w in [8, 4, 2, 1]:
-                    if k + w <= size:
-                        store_sized(db, dd + k, RAX, w)
-                        k += w
-            else:
-                ld(RDI, a)
-                mov_imm(RCX, size)
-                b16(0xC031)
-                b16(0xAAF3)          # rep stosb
-        vld:
-            if vloc[d] == LOC_NONE: return
-            ty = int(ins.ty)
-            base, disp = addr_of(a, RCX)
-            disp += int(ins.imm)
-            base, disp = indexed_base(base, disp, int(ins.imm))
-            ix = reg_of(bb, RDX)
-            x = xdreg(d, 0)
-            sc = 3
-            if vec_esize(int(ins.c)) == 4: sc = 2
-            use_index(ix, sc)
-            vmov_rm(x, base, disp, ty)
-            cur_index = -1
-            sts(d, x, ty)
-        vst:
-            ty = int(ins.ty)
-            base, disp = addr_of(a, RCX)
-            disp += int(ins.imm)
-            base, disp = indexed_base(base, disp, int(ins.imm))
-            ix = reg_of(d, RDX)
-            x = xreg_of(bb, 0, ty)
-            sc = 3
-            if vec_esize(int(ins.c)) == 4: sc = 2
-            use_index(ix, sc)
-            vmov_mr(base, disp, x, ty)
-            cur_index = -1
-        vbin:
-            if vloc[d] == LOC_NONE: return
-            ty = int(ins.ty)
-            vk = int(ins.imm)
-            vo = int(ins.c)
-            x = xdreg(d, 0)
-            xa = xreg_of(a, 1, ty)
-            xb = xreg_of(bb, 15, ty)
-            if ty == VY: vop3(vo, vk, x, xa, xb)
-            else if x == xb and x != xa:
-                if vec_commutes(vo): vop2(vo, vk, x, xa)
-                else:
-                    vmov_rr(1, xa, ty)
-                    vop2(vo, vk, 1, xb)
-                    vmov_rr(x, 1, ty)
-            else:
-                vmov_rr(x, xa, ty)
-                vop2(vo, vk, x, xb)
-            sts(d, x, ty)
-        vsplat:
-            if vloc[d] == LOC_NONE: return
-            ty = int(ins.ty)
-            vk = int(ins.imm)
-            x = xdreg(d, 0)
-            if vk == 0 or vk == 1:
-                sty = VF
-                if vk == 0: sty = VS
-                sx = xreg_of(a, 1, sty)
-                if ty == VY:
-                    vex(x, 0, sx, 2, 1, 0, 1)
-                    if vk == 0: b(0x18)                  # vbroadcastss ymm, xmm
-                    else: b(0x19)                        # vbroadcastsd ymm, xmm
-                    modrr(x, sx)
-                else:
-                    vmov_rr(x, sx, VX)
-                    if vk == 0:
-                        sse_rr(0, 0xC6, x, x)             # shufps x, x, 0
-                        b(0)
-                    else: sse_rr(0x66, 0x14, x, x)       # unpcklpd x, x
-            else:
-                r = reg_of(a, RAX)
-                w = 0
-                if vk == 3: w = 1
-                if ty == VY:
-                    vex(x, 0, r, 1, 1, w, 0)
-                    b(0x6E)                              # vmovd / vmovq xmm, r
-                    modrr(x, r)
-                    vex(x, 0, x, 2, 1, 0, 1)
-                    if vk == 2: b(0x58)                  # vpbroadcastd ymm, xmm
-                    else: b(0x59)                        # vpbroadcastq ymm, xmm
-                    modrr(x, x)
-                else:
-                    b(0x66)
-                    rex(vk == 3, x, 0, r, false)
-                    b16(0x6E0F)                     # movd / movq xmm, r
-                    modrr(x, r)
-                    if vk == 2:
-                        sse_rr(0x66, 0x70, x, x)          # pshufd x, x, 0
-                        b(0)
-                    else: sse_rr(0x66, 0x6C, x, x)        # punpcklqdq x, x
-            sts(d, x, ty)
-        vzu:
-            b24(0x77F8C5)                    # vzeroupper
-        vop:
-            # packed float vector arithmetic, memory to memory (xmm0, xmm1, xmm15 are scratch)
-            let code = int(ins.imm)
-            n = (code >> 4) & 7
-            vop_operand(0, bb, code & VOP_SPLAT_B != 0, n, RCX)
-            vop_operand(1, int(ins.c), code & VOP_SPLAT_C != 0, n, RAX)
-            sse_rr(0, [0x58, 0x5C, 0x59, 0x5E][code & 3], 0, 1)          # addps subps mulps divps
-            db, dd = addr_reg(a, RDX)
-            if n == 4: sse_rm(0, 0x11, 0, db, dd)                        # movups
-            else:
-                sse_rm(0xF2, 0x11, 0, db, dd)                            # movsd: lanes 0-1
-                if n == 3:
-                    sse_rr(0, 0x12, 15, 0)                               # movhlps xmm15, xmm0
-                    sse_rm(0xF3, 0x11, 15, db, dd + 8)                   # movss: lane 2
-        memcpy:
-            pm_count = 0
-            pmove(RDI, a)
-            pmove(RSI, bb)
-            pmove(RCX, int(ins.c))
-            emit_parallel()
-            b16(0xA4F3)
-        memset:
-            pm_count = 0
-            pmove(RDI, a)
-            pmove(RAX, bb)
-            pmove(RCX, int(ins.c))
-            emit_parallel()
-            b16(0xAAF3)
-        zeroslots:
-            b16(0xC031)
+            rex(vk == 3, x, 0, r, false)
+            b16(0x6E0F)                     # movd / movq xmm, r
+            modrr(x, r)
+            if vk == 2:
+                sse_rr(0x66, 0x70, x, x)          # pshufd x, x, 0
+                b(0)
+            else: sse_rr(0x66, 0x6C, x, x)        # punpcklqdq x, x
+    sts(d, x, ty)
+
+x_emit_vzu = (pos: int, ins: *Ins):
+    b24(0x77F8C5)                    # vzeroupper
+
+x_emit_vop = (pos: int, ins: *Ins):
+    a = int(ins.a)
+    bb = int(ins.b)
+    # packed float vector arithmetic, memory to memory (xmm0, xmm1, xmm15 are scratch)
+    let code = int(ins.imm)
+    n = (code >> 4) & 7
+    vop_operand(0, bb, code & VOP_SPLAT_B != 0, n, RCX)
+    vop_operand(1, int(ins.c), code & VOP_SPLAT_C != 0, n, RAX)
+    sse_rr(0, [0x58, 0x5C, 0x59, 0x5E][code & 3], 0, 1)          # addps subps mulps divps
+    db, dd = addr_reg(a, RDX)
+    if n == 4: sse_rm(0, 0x11, 0, db, dd)                        # movups
+    else:
+        sse_rm(0xF2, 0x11, 0, db, dd)                            # movsd: lanes 0-1
+        if n == 3:
+            sse_rr(0, 0x12, 15, 0)                               # movhlps xmm15, xmm0
+            sse_rm(0xF3, 0x11, 15, db, dd + 8)                   # movss: lane 2
+
+x_emit_memcpy = (pos: int, ins: *Ins):
+    a = int(ins.a)
+    bb = int(ins.b)
+    pm_count = 0
+    pmove(RDI, a)
+    pmove(RSI, bb)
+    pmove(RCX, int(ins.c))
+    emit_parallel()
+    b16(0xA4F3)
+
+x_emit_memset = (pos: int, ins: *Ins):
+    a = int(ins.a)
+    bb = int(ins.b)
+    pm_count = 0
+    pmove(RDI, a)
+    pmove(RAX, bb)
+    pmove(RCX, int(ins.c))
+    emit_parallel()
+    b16(0xAAF3)
+
+x_emit_zeroslots = (pos: int, ins: *Ins):
+    a = int(ins.a)
+    bb = int(ins.b)
+    b16(0xC031)
+    loop k in [0..bb):
+        item = int(ir.args[a + k])
+        if item & 1 == 1:
+            v = item >> 1
+            if vloc[v] != LOC_NONE: st(v, RAX)
+        else:
+            s = item >> 1
+            size = int(ir.slot_size[s])
+            off = slot_off[s]
+            j = 0
+            loop j < size:
+                mov_mr(RBP, off + j, RAX)
+                j += 8
+
+x_emit_call = (pos: int, ins: *Ins):
+    a = int(ins.a)
+    bb = int(ins.b)
+    if ins.c == CALL_IF_SHARED:
+        # x itself, in rax, when it is 0 or its refcount is 1; else f(x) through a stub
+        # that keeps every register (so this is no call to the register allocator)
+        ld(RAX, int(ir.args[a]))
+        b24(0xC08548)                 # test rax, rax
+        b16(0x0074)                             # jz done
+        skip0 = code.len() - 1
+        b24(0x388348); b(1)           # cmp qword [rax], 1
+        b16(0x0074)                             # je done
+        skip1 = code.len() - 1
+        b24(0x0D8D48); b32(0)         # lea rcx, [rip + f]
+        call_fix.push((code.len() - 4, int(ins.imm)))
+        b(0xE8)
+        b32(0)
+        stub_fix.push((code.len() - 4, 12))
+        call_site(ins[0])
+        code[skip0] = u8(code.len() - skip0 - 1)
+        code[skip1] = u8(code.len() - skip1 - 1)
+    else if ins.c == CALL_RC_INC or ins.c == CALL_RC_DEC:
+        # inline: x's refcount one more, or one less while more than one is left; f(x)
+        # through the stub keeping every register when threads run (atomically there) or
+        # for the last reference (freeing)
+        ld(RAX, int(ir.args[a]))
+        b24(0xC08548)                 # test rax, rax
+        b16(0x0074)                             # jz done
+        done0 = code.len() - 1
+        b24(0x388348)                 # cmp qword [rax], ...
+        slow0 = -1
+        done1 = -1
+        if ins.c == CALL_RC_INC:
+            b(0)                                  # ... 0
+            b16(0x007E)                         # jle done (immortal)
+            done1 = code.len() - 1
+        else:
+            b(1)                                  # ... 1
+            b16(0x007C)                         # jl done (immortal)
+            done1 = code.len() - 1
+            b16(0x0074)                         # je slow (the last)
+            slow0 = code.len() - 1
+        rel_fixup_lea(RCX, 1, mt_active_off)      # lea rcx, [rip + __mt_active]
+        b24(0x003980)                    # cmp byte [rcx], 0
+        b16(0x0075)                             # jne slow
+        slow1 = code.len() - 1
+        b16(0xFF48)
+        if ins.c == CALL_RC_INC: b(0x00)          # inc qword [rax]
+        else: b(0x08)                             # dec qword [rax]
+        b16(0x00EB)                             # jmp done
+        done2 = code.len() - 1
+        if slow0 >= 0: code[slow0] = u8(code.len() - slow0 - 1)
+        code[slow1] = u8(code.len() - slow1 - 1)
+        b24(0x0D8D48); b32(0)         # lea rcx, [rip + f]
+        call_fix.push((code.len() - 4, int(ins.imm)))
+        b(0xE8)
+        b32(0)
+        stub_fix.push((code.len() - 4, 12))
+        call_site(ins[0])
+        loop j in [done0, done1, done2]: code[j] = u8(code.len() - j - 1)
+    else:
+        emit_call_args(a, bb, -1, 0)
+        b(0xE8)
+        b32(0)
+        call_fix.push((code.len() - 4, int(ins.imm)))
+        call_site(ins[0])
+        pop_call_stack()
+    store_result(ins[0])
+
+x_emit_calli = (pos: int, ins: *Ins):
+    op = ins.op
+    a = int(ins.a)
+    bb = int(ins.b)
+    if op == .callc and target_windows: emit_call_args_win64(a, bb, int(ins.c), R11)
+    else:
+        emit_call_args(a, bb, int(ins.c), R11)
+        # System V variadic calls report their vector-register count
+        # in al, including fixed floating parameters (at most eight).
+        if op == .callc and ins.imm > 0:
+            nvec = 0
             loop k in [0..bb):
-                item = int(ir.args[a + k])
-                if item & 1 == 1:
-                    v = item >> 1
-                    if vloc[v] != LOC_NONE: st(v, RAX)
-                else:
-                    s = item >> 1
-                    size = int(ir.slot_size[s])
-                    off = slot_off[s]
-                    j = 0
-                    loop j < size:
-                        mov_mr(RBP, off + j, RAX)
-                        j += 8
-        call:
-            if ins.c == CALL_IF_SHARED:
-                # x itself, in rax, when it is 0 or its refcount is 1; else f(x) through a stub
-                # that keeps every register (so this is no call to the register allocator)
-                ld(RAX, int(ir.args[a]))
-                b24(0xC08548)                 # test rax, rax
-                b16(0x0074)                             # jz done
-                skip0 = code.len() - 1
-                b24(0x388348); b(1)           # cmp qword [rax], 1
-                b16(0x0074)                             # je done
-                skip1 = code.len() - 1
-                b24(0x0D8D48); b32(0)         # lea rcx, [rip + f]
-                call_fix.push((code.len() - 4, int(ins.imm)))
-                b(0xE8)
-                b32(0)
-                stub_fix.push((code.len() - 4, 12))
-                call_site(ins)
-                code[skip0] = u8(code.len() - skip0 - 1)
-                code[skip1] = u8(code.len() - skip1 - 1)
-            else if ins.c == CALL_RC_INC or ins.c == CALL_RC_DEC:
-                # inline: x's refcount one more, or one less while more than one is left; f(x)
-                # through the stub keeping every register when threads run (atomically there) or
-                # for the last reference (freeing)
-                ld(RAX, int(ir.args[a]))
-                b24(0xC08548)                 # test rax, rax
-                b16(0x0074)                             # jz done
-                done0 = code.len() - 1
-                b24(0x388348)                 # cmp qword [rax], ...
-                slow0 = -1
-                done1 = -1
-                if ins.c == CALL_RC_INC:
-                    b(0)                                  # ... 0
-                    b16(0x007E)                         # jle done (immortal)
-                    done1 = code.len() - 1
-                else:
-                    b(1)                                  # ... 1
-                    b16(0x007C)                         # jl done (immortal)
-                    done1 = code.len() - 1
-                    b16(0x0074)                         # je slow (the last)
-                    slow0 = code.len() - 1
-                rel_fixup_lea(RCX, 1, mt_active_off)      # lea rcx, [rip + __mt_active]
-                b24(0x003980)                    # cmp byte [rcx], 0
-                b16(0x0075)                             # jne slow
-                slow1 = code.len() - 1
-                b16(0xFF48)
-                if ins.c == CALL_RC_INC: b(0x00)          # inc qword [rax]
-                else: b(0x08)                             # dec qword [rax]
-                b16(0x00EB)                             # jmp done
-                done2 = code.len() - 1
-                if slow0 >= 0: code[slow0] = u8(code.len() - slow0 - 1)
-                code[slow1] = u8(code.len() - slow1 - 1)
-                b24(0x0D8D48); b32(0)         # lea rcx, [rip + f]
-                call_fix.push((code.len() - 4, int(ins.imm)))
-                b(0xE8)
-                b32(0)
-                stub_fix.push((code.len() - 4, 12))
-                call_site(ins)
-                loop j in [done0, done1, done2]: code[j] = u8(code.len() - j - 1)
-            else:
-                emit_call_args(a, bb, -1, 0)
-                b(0xE8)
-                b32(0)
-                call_fix.push((code.len() - 4, int(ins.imm)))
-                call_site(ins)
-                pop_call_stack()
-            store_result(ins)
-        calli, callc:
-            if op == .callc and target_windows: emit_call_args_win64(a, bb, int(ins.c), R11)
-            else:
-                emit_call_args(a, bb, int(ins.c), R11)
-                # System V variadic calls report their vector-register count
-                # in al, including fixed floating parameters (at most eight).
-                if op == .callc and ins.imm > 0:
-                    nvec = 0
-                    loop k in [0..bb):
-                        if vtype(int(ir.args[a + k])) != VI: nvec += 1
-                    b(0xB8)                       # mov eax, nvec
-                    b32(min(nvec, 8))
-            b24(0xD3FF41)     # call r11
-            call_site(ins)
-            pop_call_stack()
-            store_result(ins)
-        syscall:
-            pm_count = 0
-            loop k in [0..bb): pmove(SYSCALL_REGS[k], int(ir.args[a + k]))
-            emit_parallel()
-            b16(0x050F)
-            st(d, RAX)
-        intr:
-            if ins.imm == 1:
-                r = dreg(d, RAX)
-                rel_fixup_lea(r, 1, 0)
-                mov_rm(r, r, 0)
-                st(d, r)
-            else if ins.imm == 10:
-                # the function in entry c of the import address table, below the globals (pe.jo)
-                r = dreg(d, RAX)
-                rel_fixup_lea(r, 1, pe_iat_off(int(ins.c)))
-                mov_rm(r, r, 0)
-                st(d, r)
-            else:
-                # setjmp / longjmp / jump: arguments in rdi, rsi then a call to a machine-code stub
-                emit_call_args(a, bb, -1, 0)
-                b(0xE8)
-                b32(0)
-                stub_fix.push((code.len() - 4, int(ins.imm)))
-                pop_call_stack()
-                if d >= 0 and vloc[d] != LOC_NONE: st(d, RAX)
-        block: xctl.push(XCtl(0, code.len(), [], []))
-        loop:
-            # Default code needs a consistent loop entry before comparison
-            # padding. Release keeps its measured limited-padding policy.
-            if ra_on:
-                if not opt_release or (16 - code.len() % 16) % 16 <= 10: nop_pad((16 - code.len() % 16) % 16)
-                else: nop_pad((8 - code.len() % 8) % 8)
-            xctl.push(XCtl(1, code.len(), [], []))
-        if_:
-            fx: int[]
-            if fused_cc >= 0:
-                cc = fused_cc
-                fused_cc = -1
-                jfalse(cc, fx)
-            else:
-                ra = reg_of(a, RAX)
-                rex(true, ra, 0, ra, false)
-                b(0x85)
-                modrr(ra, ra)                   # test r, r
-                fx.push(jcc32(CC_E))
-            xctl.push(XCtl(2, code.len(), [], fx))
-        else_:
-            c = xctl.len() - 1
-            xctl[c].fixups.push(jmp32())
-            loop f in xctl[c].ifx: patch_here(f)
-            xctl[c].ifx = []
-        end:
-            c = xctl.pop()
-            patch_control_end(c, pos)
-        br: branch_target_fix(int(ins.imm))
-        brif:
-            if fused_cc >= 0:
-                cc = fused_cc
-                fused_cc = -1
-                if cc == 100:
-                    # equal and ordered: jump only when ZF=1 and PF=0
-                    skip = jcc32(CC_P)
-                    branch_target_jcc(int(ins.imm), CC_E)
-                    patch_here(skip)
-                else if cc == 101:
-                    branch_target_jcc(int(ins.imm), CC_P)
-                    branch_target_jcc(int(ins.imm), CC_NE)
-                else: branch_target_jcc(int(ins.imm), cc)
-            else:
-                ra = reg_of(a, RAX)
-                rex(true, ra, 0, ra, false)
-                b(0x85)
-                modrr(ra, ra)
-                branch_target_jcc(int(ins.imm), CC_NE)
-        brtable:
-            # bounds check, then jump into a table of 5-byte jmp instructions
-            ld(RAX, a)
-            b16(0x8148); modrr(7, RAX); b32(bb)          # cmp rax, n
-            branch_target_jcc(int(ins.imm), CC_AE)
-            b24(0x0C8D48); b(0x80)                # lea rcx, [rax + rax*4]
-            b24(0x058D48); b32(5)                 # lea rax, [rip + 5]
-            b24(0xC80148)                         # add rax, rcx
-            b16(0xE0FF)                                  # jmp rax
-            loop k in [0..bb): branch_target_fix(int(ir.args[int(ins.c) + k]))
-        ret:
-            if a >= 0:
-                ty = vtype(a)
-                if ty == VI: ld(RAX, a)
-                else: lds(0, a, ty)
-            emit_epilogue()
-        trap: b16(0x0B0F)
-        select:
-            # d = a != 0 ? b : c (integers): rax = c; test a; cmovne rax, b
-            cc = CC_NE
-            rb = 0
-            r = 0
-            if sel_fused == pos:
-                # (its compare first: what follows only moves, which keep the flags)
-                sel_fused = -1
-                if vloc[d] == LOC_NONE: return
-                cmp_ops(sel_ca, sel_cb)
-                cc = sel_cc
-                rb = reg_of(bb, RDX)
-                r = dreg(d, RAX)
-                if r == rb: r = RAX
-                ld(r, int(ins.c))
-            else:
-                if vloc[d] == LOC_NONE: return
-                rb = reg_of(bb, RDX)
-                rc = reg_of(a, RCX)
-                r = dreg(d, RAX)
-                if r == rb or r == rc: r = RAX
-                ld(r, int(ins.c))
-                rex(true, rc, 0, rc, false)
-                b(0x85)
-                modrr(rc, rc)
-            rex(true, r, 0, rb, false)
-            b(0x0F)
-            b(0x40 + cc)
-            modrr(r, rb)
-            st(d, r)
+                if vtype(int(ir.args[a + k])) != VI: nvec += 1
+            b(0xB8)                       # mov eax, nvec
+            b32(min(nvec, 8))
+    b24(0xD3FF41)     # call r11
+    call_site(ins[0])
+    pop_call_stack()
+    store_result(ins[0])
+
+x_emit_syscall = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    pm_count = 0
+    loop k in [0..bb): pmove(SYSCALL_REGS[k], int(ir.args[a + k]))
+    emit_parallel()
+    b16(0x050F)
+    st(d, RAX)
+
+x_emit_intr = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    if ins.imm == 1:
+        r = dreg(d, RAX)
+        rel_fixup_lea(r, 1, 0)
+        mov_rm(r, r, 0)
+        st(d, r)
+    else if ins.imm == 10:
+        # the function in entry c of the import address table, below the globals (pe.jo)
+        r = dreg(d, RAX)
+        rel_fixup_lea(r, 1, pe_iat_off(int(ins.c)))
+        mov_rm(r, r, 0)
+        st(d, r)
+    else:
+        # setjmp / longjmp / jump: arguments in rdi, rsi then a call to a machine-code stub
+        emit_call_args(a, bb, -1, 0)
+        b(0xE8)
+        b32(0)
+        stub_fix.push((code.len() - 4, int(ins.imm)))
+        pop_call_stack()
+        if d >= 0 and vloc[d] != LOC_NONE: st(d, RAX)
+
+x_emit_block = (pos: int, ins: *Ins):
+    xctl.push(XCtl(0, code.len(), [], []))
+
+x_emit_loop = (pos: int, ins: *Ins):
+    a = int(ins.a)
+    # Default code needs a consistent loop entry before comparison
+    # padding. Release keeps its measured limited-padding policy.
+    if ra_on:
+        if not opt_release or (16 - code.len() % 16) % 16 <= 10: nop_pad((16 - code.len() % 16) % 16)
+        else: nop_pad((8 - code.len() % 8) % 8)
+    xctl.push(XCtl(1, code.len(), [], []))
+
+x_emit_if_ = (pos: int, ins: *Ins):
+    a = int(ins.a)
+    fx: int[]
+    if fused_cc >= 0:
+        cc = fused_cc
+        fused_cc = -1
+        jfalse(cc, fx)
+    else:
+        ra = reg_of(a, RAX)
+        rex(true, ra, 0, ra, false)
+        b(0x85)
+        modrr(ra, ra)                   # test r, r
+        fx.push(jcc32(CC_E))
+    xctl.push(XCtl(2, code.len(), [], fx))
+
+x_emit_else_ = (pos: int, ins: *Ins):
+    c = xctl.len() - 1
+    xctl[c].fixups.push(jmp32())
+    loop f in xctl[c].ifx: patch_here(f)
+    xctl[c].ifx = []
+
+x_emit_end = (pos: int, ins: *Ins):
+    c = xctl.pop()
+    patch_control_end(c, pos)
+
+x_emit_br = (pos: int, ins: *Ins):
+    branch_target_fix(int(ins.imm))
+
+x_emit_brif = (pos: int, ins: *Ins):
+    a = int(ins.a)
+    if fused_cc >= 0:
+        cc = fused_cc
+        fused_cc = -1
+        if cc == 100:
+            # equal and ordered: jump only when ZF=1 and PF=0
+            skip = jcc32(CC_P)
+            branch_target_jcc(int(ins.imm), CC_E)
+            patch_here(skip)
+        else if cc == 101:
+            branch_target_jcc(int(ins.imm), CC_P)
+            branch_target_jcc(int(ins.imm), CC_NE)
+        else: branch_target_jcc(int(ins.imm), cc)
+    else:
+        ra = reg_of(a, RAX)
+        rex(true, ra, 0, ra, false)
+        b(0x85)
+        modrr(ra, ra)
+        branch_target_jcc(int(ins.imm), CC_NE)
+
+x_emit_brtable = (pos: int, ins: *Ins):
+    a = int(ins.a)
+    bb = int(ins.b)
+    # bounds check, then jump into a table of 5-byte jmp instructions
+    ld(RAX, a)
+    b16(0x8148); modrr(7, RAX); b32(bb)          # cmp rax, n
+    branch_target_jcc(int(ins.imm), CC_AE)
+    b24(0x0C8D48); b(0x80)                # lea rcx, [rax + rax*4]
+    b24(0x058D48); b32(5)                 # lea rax, [rip + 5]
+    b24(0xC80148)                         # add rax, rcx
+    b16(0xE0FF)                                  # jmp rax
+    loop k in [0..bb): branch_target_fix(int(ir.args[int(ins.c) + k]))
+
+x_emit_ret = (pos: int, ins: *Ins):
+    a = int(ins.a)
+    if a >= 0:
+        ty = vtype(a)
+        if ty == VI: ld(RAX, a)
+        else: lds(0, a, ty)
+    emit_epilogue()
+
+x_emit_trap = (pos: int, ins: *Ins):
+    b16(0x0B0F)
+
+x_emit_select = (pos: int, ins: *Ins):
+    d = int(ins.dst)
+    a = int(ins.a)
+    bb = int(ins.b)
+    # d = a != 0 ? b : c (integers): rax = c; test a; cmovne rax, b
+    cc = CC_NE
+    rb = 0
+    r = 0
+    if sel_fused == pos:
+        # (its compare first: what follows only moves, which keep the flags)
+        sel_fused = -1
+        if vloc[d] == LOC_NONE: return
+        cmp_ops(sel_ca, sel_cb)
+        cc = sel_cc
+        rb = reg_of(bb, RDX)
+        r = dreg(d, RAX)
+        if r == rb: r = RAX
+        ld(r, int(ins.c))
+    else:
+        if vloc[d] == LOC_NONE: return
+        rb = reg_of(bb, RDX)
+        rc = reg_of(a, RCX)
+        r = dreg(d, RAX)
+        if r == rb or r == rc: r = RAX
+        ld(r, int(ins.c))
+        rex(true, rc, 0, rc, false)
+        b(0x85)
+        modrr(rc, rc)
+    rex(true, r, 0, rb, false)
+    b(0x0F)
+    b(0x40 + cc)
+    modrr(r, rb)
+    st(d, r)
 
 # jumps taken when condition `cc` is false (fixup positions appended to fx)
 jfalse = (cc: int, fx: mut int[]):
@@ -2958,7 +3263,9 @@ x64_function = ():
     save_list.sort_by((v: int): live_start(v))
     save_next = 0
     save_active.clear()
-    loop pos in 0.. and ins in ir.code:
+    instructions = data(ir.code)
+    loop pos in [0..ir.code.len()):
+        ins = instructions + pos
         line_row(int(ins.pos))
         if dbg_on: dbg_pos[pos] = code.len()
         if ci < call_pos.len() and call_pos[ci] == pos and save_list.len() > 0:
