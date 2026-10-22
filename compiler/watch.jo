@@ -1813,12 +1813,7 @@ watch_lower_migrate = ():
         k += 1
 
 w_emit = ():
-    k = 0
-    loop ins in ir.code:
-        if ins.op != .nop:
-            ir.code[k] = ins
-            k += 1
-    ir.code.truncate(k)
+    lower_finish()
     if opt_release: rel_collect()
     else: emit_function()
 

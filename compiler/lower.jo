@@ -387,6 +387,17 @@ tl_values: TempItem[]
 tl_nop: int[]
 tl_cond: int[]
 
+# A statement normally needs no entry-time initialization. Record a compact
+# insertion boundary, and publish a zero request only for conditional temps.
+# Unlike placeholder instructions these records do not enter the optimizer IR.
+struct LowerZero:
+    mark: int
+    start: int
+    count: int
+lower_zeros: LowerZero[]
+lower_mark_serial = 0
+lower_has_nops = false
+
 V = (v: int, owned: bool) -> Val: Val(v, owned, -1)
 
 # ---------------- reference counting ----------------
@@ -596,7 +607,8 @@ gen_borrowed = (e: int) -> Val:
 
 stmt_begin = ():
     tl_items.push(tl_values.len())
-    tl_nop.push(emit(.nop, 0, 0, 0, 0, 0, 0))
+    lower_mark_serial += 1
+    tl_nop.push((ir.code.len() << 32) | lower_mark_serial)
     tl_cond.push(cond_depth)
 
 stmt_end = ():
@@ -611,7 +623,7 @@ stmt_end = ():
         if it.cond: ir.args.push(i32(it.ref * 2 + int(not it.is_slot)))
     count = ir.args.len() - args_start
     if count > 0:
-        ir.code[nop] = Ins(.zeroslots, 0, 0, i32(args_start), i32(count), 0, 0)
+        lower_zeros.push(LowerZero(nop, args_start, count))
     i = end - 1
     loop i >= start:
         it = tl_values[i]
@@ -631,7 +643,9 @@ stmt_end = ():
 build_slot = (s: int, t: int, needs_zero: bool = false) -> bool:
     if not is_managed(t): return false
     at = -1
-    if needs_zero: at = emit(.nop, 0, 0, e_slot(s), 0, 0, 0)
+    if needs_zero:
+        lower_has_nops = true
+        at = emit(.nop, 0, 0, e_slot(s), 0, 0, 0)
     building.push(BuildItem(true, s, t, at))
     true
 
@@ -7198,6 +7212,9 @@ begin_fn = (name: str, idx: int):
     tl_items.clear()
     tl_values.clear()
     tl_nop.clear()
+    lower_zeros.clear()
+    lower_mark_serial = 0
+    lower_has_nops = ownership_decls.len() != 0
     tl_cond.clear()
     building = []
     sret_v = -1
@@ -7379,14 +7396,34 @@ lower_function = (lf: int):
     else: lower_helper(lf)
     parallel_serial = false
     partition_mode = false
-    # drop statement markers that did not become zeroslots
-    k = 0
-    loop ins in ir.code:
-        if ins.op != .nop:
-            ir.code[k] = ins
-            k += 1
-    ir.code.truncate(k)
+    lower_finish()
     lower_planning = false
+
+# Only functions with demanded insertions or construction/owner placeholders
+# need a final IR walk. P requested zeros cost O(P log P) ordering and one
+# O(IR + P) merge; the ordinary path is O(1), with no full-code copy or scan.
+# Equal instruction boundaries retain statement-entry order through the serial.
+lower_finish = ():
+    if lower_zeros.len() == 0:
+        if not lower_has_nops: return
+        k = 0
+        loop ins in ir.code:
+            if ins.op != .nop:
+                ir.code[k] = ins
+                k += 1
+        ir.code.truncate(k)
+        return
+    lower_zeros.sort_by((z: LowerZero) -> int: z.mark)
+    out: Ins[]
+    out.reserve(ir.code.len() + lower_zeros.len())
+    next = 0
+    loop i in [0..ir.code.len() + 1):
+        loop next < lower_zeros.len() and lower_zeros[next].mark >> 32 == i:
+            z = lower_zeros[next]
+            out.push(Ins(.zeroslots, 0, 0, i32(z.start), i32(z.count), 0, 0))
+            next += 1
+        if i < ir.code.len() and ir.code[i].op != .nop: out.push(ir.code[i])
+    ir.code = out
 
 # ---------------- generated helper functions ----------------
 lower_partial_thunk = (lf: int, th: int):

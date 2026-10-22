@@ -12,8 +12,8 @@ def test_lower_temporary_arena_nested_early_release(compiler, tmp_path):
     source.write_text(''.join(f"use '{ROOT / 'compiler' / (name + '.jo')}'\n"
                               for name in ('lower', 'ir', 'types')) + '''
 init_types()
-ir_begin("temps", 0)
 loop round in [0..3):
+    begin_fn("temps", 0)
     stmt_begin()
     parent = TempItem(true, new_slot(8, 8), T_INT, false)
     tl_values.push(parent)
@@ -27,11 +27,12 @@ loop round in [0..3):
     marker = tl_nop[1]
     stmt_end()
     assert(tl_items.len() == 1 and tl_values.len() == 0, "nested cleanup")
-    zero = ir.code[marker]
-    assert(zero.op == .zeroslots and zero.b == 1, "conditional zero inventory")
-    assert(ir.args[int(zero.a)] == i32(inner_slot * 2), "zero slot identity")
     stmt_end()
     assert(tl_items.len() == 0 and tl_values.len() == 0, "empty arena")
+    lower_finish()
+    zero = ir.code[marker >> 32]
+    assert(zero.op == .zeroslots and zero.b == 1, "conditional zero inventory")
+    assert(ir.args[int(zero.a)] == i32(inner_slot * 2), "zero slot identity")
 print("ok")
 ''')
     binary = tmp_path / 'temporary_arena'
