@@ -844,6 +844,11 @@ effect_small = (n: int, depth: int = 0) -> int:
 # A word operand, or a semantic integer that stays a small immediate.
 effect_word = (n: int) -> bool: effect_scalar(ntype(n)) or effect_small(n) >= 0
 
+# The word inside a value-preserving widening of a word to `int`, or n.
+effect_unwidened = (n: int) -> int:
+    if nodes[n].kind == .conv and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))) and prune(ntype(n)) == T_MATH_INT and effect_scalar(ntype(int(nodes[n].a))): return int(nodes[n].a)
+    n
+
 # A counted loop over a word range: its bounds are evaluated once, and its
 # counter is a private word (or a small semantic integer, recorded).
 effect_range_loop = (n: int) -> bool:
@@ -1143,6 +1148,16 @@ effect_scan_node = (f: int, n: int):
         # (small semantic integers: arithmetic that cannot promote, comparisons)
         if not supported and nodes[n].aux == 0 and effect_word(int(nodes[n].a)) and effect_word(int(nodes[n].b)):
             supported = effect_small(n) >= 0 or (effect_word_op(nodes[n].op as Tok) and effect_scalar(ntype(n)))
+        # (a small counter against a word widened to `int`: compared as two
+        # words, so the widened word is never packed)
+        if not supported and nodes[n].aux == 0 and effect_scalar(ntype(n)) and fact_comparison(nodes[n].op as Tok):
+            a = effect_unwidened(int(nodes[n].a))
+            b = effect_unwidened(int(nodes[n].b))
+            if (a != int(nodes[n].a) or b != int(nodes[n].b)) and effect_word(a) and effect_word(b):
+                loop g in hidden: effect_summaries[f].edges.push(EffectEdge(g, n, []))
+                effect_scan_node(f, a)
+                effect_scan_node(f, b)
+                return
     else if k == .dotname or k == .none_lit: supported = effect_plain(ntype(n))
     # (an optional's or plain union's tag test, payload and fallback are inline reads)
     else if k == .istype or k == .narrow or k == .coalesce: supported = effect_plain(ntype(int(nodes[n].a))) and (k == .istype or effect_plain(ntype(n)))

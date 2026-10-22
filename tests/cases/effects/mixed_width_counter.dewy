@@ -1,0 +1,26 @@
+# quick
+$no_hidden_costs
+Box:type=[xs:array<int64 length=8> n:int64]
+total=(b:Box):>int64=>{
+    let s:int64=0
+    loop t in [0..8) {
+        if t >=? b.n break
+        s+=b.xs[t]
+    }
+    return s
+}
+# (the guard against the word, not the range, keeps the index in bounds)
+first_negative=(b:Box limit:int64):>int64=>{
+    if limit <? 0 or limit >? 8 return -1
+    loop t in [0..100) {
+        if limit <=? t break
+        if b.xs[t] <? 0 return t
+    }
+    return -1
+}
+main=():>int64=>{
+    $no_hidden_costs=false
+    let b:Box=[xs=[1 2 3 -4 5 6 -7 8] n=3]
+    printl("{total(b)} {first_negative(b 8)} {first_negative(b 3)} {first_negative(b 9)}")
+    return 0
+}
