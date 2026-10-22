@@ -235,8 +235,9 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   Track A: the five structural fixes (milestone: flagship median ≥ 50k lines/s
   single-thread). Track B: B0 per-phase per-node cost budgets gated on the
   flagship panel (~1.2k instructions/node total); B1 an architecture design
-  (docs/design/compiler_architecture.md; Astra designs, Sol audits, David
-  approves); B2 phase-by-phase migration behind stable interfaces, most
+  (docs/design/compiler_architecture.md; Astra designs, Sol audits; internal
+  architecture needs no sign-off, so B2 starts once the audit agrees the budgets
+  can plausibly reach the goal); B2 phase-by-phase migration behind stable interfaces, most
   expensive first; B3 new import-cycle-leaf modules written in Dewy. Track C:
   capability work continues. No precomputed library summaries or images
   without David's explicit approval.
