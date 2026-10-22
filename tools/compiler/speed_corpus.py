@@ -79,6 +79,24 @@ def ladder_programs(tier4: bool) -> list[Path]:
     return found
 
 
+def flagships() -> list[Path]:
+    """The tier-4 flagship programs: each one's core.dewy where it has one (today's dialect), else its design.dewy."""
+    found = []
+    for directory in sorted(LADDER.iterdir(), key=lambda d: (d.name.split('_')[0].zfill(4), d.name)):
+        if directory.is_dir() and directory.name[:2].isdigit() and int(directory.name.split('_')[0]) >= TIER4_FIRST:
+            for name in ('core.dewy', 'design.dewy'):
+                if (directory / name).is_file():
+                    found.append(directory / name)
+                    break
+    return found
+
+
+def median_ladder_program() -> Path:
+    """The tier 1-3 ladder program (core.dewy) of median root source lines: the small-program latency probe."""
+    ranked = sorted(ladder_programs(False), key=lambda path: (root_counts(path)[0], str(path)))
+    return ranked[(len(ranked) - 1) // 2]
+
+
 def corpora(scratch: Path) -> dict[str, list[Path]]:
     """Corpus name -> the programs compiled one by one and summed. `scratch` holds bench/game.dewy as the bench
     command builds it (its raw-syscall harness swapped for bench/harness.jo)."""
@@ -90,7 +108,7 @@ def corpora(scratch: Path) -> dict[str, list[Path]]:
         'compiler': standalone(sorted((ROOT / 'compiler').glob('*.dewy'))),
         'ladder+examples': ladder_programs(False) + examples,
         'game': [ROOT / 'examples/dunes.dewy', bench.prepare_source('game', scratch)],
-        'tier-4': ladder_programs(True),
+        'tier-4': flagships(),
     }
 
 
@@ -107,3 +125,21 @@ def library_lines(time_stderr: str, root_physical: int) -> int:
     if not found:
         raise ValueError('Missing sources line in --time output')
     return int(found.group(2)) + max(0, int(found.group(1)) - root_physical)
+
+
+INSTRUCTION_SPLIT = re.compile(r'^instructions: (\d+)((?:; \w+ \d+:[^;\n]*)*)$', re.MULTILINE)
+
+
+def instruction_split(time_stderr: str) -> dict[str, dict[str, int]] | None:
+    """`build --time`'s instruction split, {side: {phase: instructions}} with each side's 'total', or None
+    (a compiler without it, or no hardware counters)."""
+    found = INSTRUCTION_SPLIT.search(time_stderr)
+    if not found:
+        return None
+    split = {}
+    for part in found.group(2).split('; ')[1:]:
+        head, _, rest = part.partition(':')
+        side, total = head.split()
+        words = rest.split()
+        split[side] = {'total': int(total), **{words[i]: int(words[i + 1]) for i in range(0, len(words), 2)}}
+    return split

@@ -187,8 +187,12 @@ python3 -m tools.core bench --baseline master     # fail on a >3% kernel regress
 
 `speed` is the compile-speed gate. It counts the user-space instructions that
 compiling a fixed panel takes: the compiler's own source, a synthetic 22k-line
-Dewy program and `examples/dunes.dewy` (`--release` adds the synthetic program
-in release mode). It compares this checkout's compiler (working tree included)
+Dewy program and `examples/dunes.dewy`; small-program latency (hello world and
+the median tier 1–3 ladder program); and large-program throughput, each tier-4
+flagship (`--release` adds the synthetic program in release mode). A yardstick
+table follows: each Dewy item's root source lines, estimated milliseconds and
+lines/s (instructions at the reference rate, a load-independent proxy), and its
+instructions split into root, library and shared work. It compares this checkout's compiler (working tree included)
 with the base commit's and fails when any item needs more than `--limit`
 percent (default 1) more. Each compiler is its commit's own fixed point and uses
 its commit's library; base compilers are built in a temporary git worktree
@@ -196,7 +200,7 @@ its commit's library; base compilers are built in a temporary git worktree
 by commit under `__dewycache__/speed/`. Counts come from `perf_event_open`
 (`tools/compiler/count_instructions.c`), or from valgrind's cachegrind where
 hardware counters are unavailable, as on CI. Every item runs twice and must
-agree within 0.01%. A cached run takes about 10 s with counters, about 4
+agree within 0.01%. A cached run takes about 30 s with counters, about 6
 minutes under valgrind.
 
 When a cost is intended, add a line `speed: accept <reason>` to the commit
@@ -221,7 +225,9 @@ noted, not compared. It is the check for the rule that no bench kernel regresses
 more than 3%: run it against the main line before merging optimizer, code
 generation or library changes. A cached run takes about 20 s with counters.
 Without counters it uses valgrind with inputs a tenth the size (`--counter
-valgrind` forces this); CI does not run it. `build --time` reports compiler phases; `SLOPPY_PAR_TIME=1` adds
+valgrind` forces this); CI does not run it. `build --time` reports compiler phases and, on Linux x86-64, the
+instructions of each phase for the program's code, the library's (`lib/`) and
+neither; `SLOPPY_PAR_TIME=1` adds
 optimizer and emission timing. `python3 -m tools.compiler.fuzz` runs bounded
 differential checks of native/web, default/release and `-g` builds on
 generated programs.

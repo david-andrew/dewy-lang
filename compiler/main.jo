@@ -4,6 +4,7 @@ use 'frontend.jo'
 use 'effects.jo'
 use 'decimals.jo'
 use 'targets.jo'
+use 'icount.jo'
 # The Sloppy compiler.
 #   sloppy file.jo [args]     compile and run
 #   sloppy build file.jo [-o out] [--target wasm32] [--release]
@@ -288,7 +289,9 @@ emit_queued = ():
     t0 = time()
     loop k in 0.. and f in q:
         ir = f
+        icb = ic_lf(IC_EMIT, f.fn_index)
         emit_now(fin[k])
+        ic_restore(icb)
     if env("SLOPPY_PAR_TIME") != none: eprint("emit: here, {(time() - t0) * 1000.0:.1} ms")
 
 # the functions in an order where each comes after the ones it calls (but in cycles)
@@ -350,6 +353,7 @@ source_counts = ():
 compile = (path: str, out0: str) -> str:
     if watch_build and not watch_first: late_binding = true
     t0 = time()
+    if timing: ic_start()
     ra_stat = env("SLOPPY_RASTAT") != none
     ra_verbose = (env("SLOPPY_RASTAT") ?? "") == "v"
     if env("SLOPPY_RA_LINEAR") != none: ra_prio = false
@@ -396,6 +400,7 @@ compile = (path: str, out0: str) -> str:
     if lower_only and ide_skip.len() > 0: return ""
     if lower_only: det_check_program()
     if repl_image: repl_set_main()
+    ic_switch(IC_ANALYZE, IC_SHARED)
     isolation_reset()
     loans_finalize()
     partition_finalize()
@@ -408,6 +413,7 @@ compile = (path: str, out0: str) -> str:
     find_unique_globals(not watch_build and not repl_image and not lower_only)
     if not dbg_on and not watch_build and not repl_image and not lower_only: callback_prepare()
     t1 = time()
+    ic_switch(IC_LOWER, IC_SHARED)
     roots: int[]
     loop f in init_fns: roots.push(lf_of_inst(f))
     # Source promises apply to checked bodies even when no caller reaches
@@ -479,9 +485,11 @@ compile = (path: str, out0: str) -> str:
             if fz_ready and fz_replay(i):
                 i += 1
                 continue
+            icb = ic_lf(IC_LOWER, i)
             lower_function(i)
             if opt_release: rel_collect()
             else: emit_function()
+            ic_restore(icb)
             i += 1
 
         # library globals: initialize only the ones compiled code refers to (fixed point)
@@ -504,12 +512,14 @@ compile = (path: str, out0: str) -> str:
     if watch_build and not watch_first:
         watch_lower_inits()
         watch_lower_migrate()
+    ic_switch(IC_EMIT, IC_SHARED)
     if opt_release: release_pipeline()
     if queue_emit:
         if opt_release and not watch_build and not repl_image:
             prune_emit_queue(roots + [main_lf, main_exit_lf, entry_end_lf])
         emit_queued()
     t2 = time()
+    ic_switch(IC_OTHER, IC_SHARED)
     if host_ir:
         print("META {data_size} {main_lf} {main_code} {entry_end_lf} {mt_active_off}")
         dump_host_values("ROOTS", roots)
@@ -627,6 +637,7 @@ compile = (path: str, out0: str) -> str:
     if ra_stat: eprint("regalloc: spill cost {ra_spill_cost}, save cost {ra_save_cost} (int) {ra_save_x} (float), of {ra_total} weighted accesses\n")
     if timing:
         eprint("check {(t1 - t0) * 1000.0:.1} ms, lower+codegen {(t2 - t1) * 1000.0:.1} ms, write {(t3 - t2) * 1000.0:.1} ms; {lfuncs.len()} functions, {nodes.len()} nodes, {size} bytes of code")
+        ic_report()
         source_counts()
     if not ok:
         # (a patch for sloppy watch tells its own trouble)

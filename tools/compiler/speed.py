@@ -1,7 +1,12 @@
 """Compile-speed gate: user-space instructions to compile a fixed panel.
 
 Compares this checkout's compiler (working tree) with a base commit's and fails
-when any panel item needs more than --limit percent more instructions. Each
+when any panel item needs more than --limit percent more instructions. The
+panel: the self-build, synthetic-22k and the game; small-program latency (hello
+and the median tier 1-3 ladder program); large-program throughput (each tier-4
+flagship). A yardstick table then reports the candidate's lines, estimated
+milliseconds and lines/s (instructions at the reference rate IPS), and its
+instructions split into root, library and shared work (`build --time`). Each
 compiler is its commit's own fixed point (its sources built by a compiler with
 the same sources) and uses its commit's library, so the counts cover compiler
 and library changes alike. Inputs are this checkout's; a base that cannot
@@ -262,14 +267,20 @@ class Toolchain:
 
 
 def panel(release: bool) -> list[tuple[str, str, list[str]]]:
+    """(name, source, flags): the compiler itself, synthetic and the game, then the latency probes (hello, the
+    median ladder program) and the throughput panel (each tier-4 flagship)."""
     synthetic = CACHE / 'panel' / f'synthetic-{SYNTHETIC_FUNCTIONS}.dewy'
     generated = generate_dewy(SYNTHETIC_FUNCTIONS)
     if not synthetic.exists() or synthetic.read_text() != generated:
         synthetic.parent.mkdir(parents=True, exist_ok=True)
         synthetic.write_text(generated)
+    median = speed_corpus.median_ladder_program()
     items = [('self-build', 'compiler/main.jo', []),
              ('synthetic-22k', str(synthetic), []),
-             ('game', GAME, [])]
+             ('game', GAME, []),
+             ('hello', hello_source(), []),
+             (f'ladder {median.parent.name}', str(median.relative_to(ROOT)), [])]
+    items += [(f'flagship {path.parent.name}', str(path.relative_to(ROOT)), []) for path in speed_corpus.flagships()]
     if release:
         # (compiler/main.jo's build block already selects release mode: no second self-build)
         items.append(('synthetic-22k --release', str(synthetic), ['--release']))
@@ -316,12 +327,77 @@ def measure(counter: Counter, toolchain: Toolchain, source: str, flags: list[str
 HELLO = 'printl"hello"\n'
 
 
-def wall_panel() -> list[tuple[str, str]]:
-    synthetic = panel(False)[1][1]
+def hello_source() -> str:
     hello = CACHE / 'panel' / 'hello.dewy'
     if not hello.exists() or hello.read_text() != HELLO:
+        hello.parent.mkdir(parents=True, exist_ok=True)
         hello.write_text(HELLO)
-    return [('synthetic-22k', synthetic), ('game', GAME), ('hello', str(hello))]
+    return str(hello)
+
+
+def wall_panel() -> list[tuple[str, str]]:
+    synthetic = panel(False)[1][1]
+    return [('synthetic-22k', synthetic), ('game', GAME), ('hello', hello_source())]
+
+
+def time_run(toolchain: Toolchain, source: str) -> str:
+    """`build --time`'s report for one source: phases, source counts and the instruction split."""
+    active = stage(toolchain)
+    path = Path(source) if Path(source).is_absolute() else ROOT / source
+    run = subprocess.run([active / 'bin/dewy-core', 'build', path, '--time', '-o', CACHE / 'panel' / 'program'],
+                         cwd=ROOT, env=clean_env(DEWY_CORE_LIB=str(active / 'lib')), capture_output=True, text=True)
+    if run.returncode:
+        raise CompileError(run.stdout + run.stderr)
+    return run.stderr
+
+
+def yardstick(toolchain: Toolchain, counts: dict[str, int]) -> None:
+    """The candidate's latency and throughput, from its gated counts and one `build --time` per item."""
+    def millions(n: int | None) -> str:
+        return f'{n / 1e6:9.1f}' if n is not None else f'{"-":>9}'
+
+    print(f'compile yardstick ({toolchain.label}): est. ms and lines/s are instructions at {IPS / 1e9:.1f} G/s, the '
+          'reference machine\'s compiler rate (compile_throughput.md), a load-independent proxy, not wall time; '
+          'lines are root source lines (non-blank, non-comment; local imports included); root, library and shared '
+          'instructions come from build --time (library: lib/, generic instances included)')
+    print(f'  {"":30}{"lines":>7}{"G inst":>9}{"est ms":>8}{"lines/s":>9}{"root M":>9}{"lib M":>9}{"shared M":>9}'
+          f'{"root k/line":>12}{"lib lines":>10}')
+    rows = [(name, source) for name, source, flags in panel(False) if name not in ('self-build', 'game')]
+    sums = {'lines': 0, 'inst': 0, 'root': 0, 'library': 0, 'shared': 0}
+    phases: dict[str, int] = {}
+    for name, source in rows:
+        path = Path(source) if Path(source).is_absolute() else ROOT / source
+        lines, physical = speed_corpus.root_counts(path)
+        try:
+            report = time_run(toolchain, source)
+        except CompileError:
+            print(f'  {name:30}(cannot build)')
+            continue
+        split = speed_corpus.instruction_split(report) or {}
+        library_lines = speed_corpus.library_lines(report, physical)
+        inst = counts[name]
+        side = {key: split.get(key, {}).get('total') for key in ('root', 'library', 'shared')}
+        per_line = f'{side["root"] / lines / 1e3:12.1f}' if side['root'] is not None and lines else f'{"-":>12}'
+        print(f'  {name:30}{lines:7}{inst / 1e9:9.4f}{inst / IPS * 1e3:8.1f}{lines / (inst / IPS):9.0f}'
+              f'{millions(side["root"])}{millions(side["library"])}{millions(side["shared"])}{per_line}'
+              f'{library_lines:10}', flush=True)
+        if name.startswith('flagship '):
+            sums['lines'] += lines
+            sums['inst'] += inst
+            for key in ('root', 'library', 'shared'):
+                sums[key] += side[key] or 0
+            for phase, n in split.get('root', {}).items():
+                if phase != 'total':
+                    phases[phase] = phases.get(phase, 0) + n
+        if name == 'hello' and 'library' in split:
+            print('    hello library M: ' + ', '.join(f'{phase} {n / 1e6:.1f}' for phase, n in split['library'].items()
+                                                    if phase != 'total'))
+    if sums['lines']:
+        lines, inst = sums['lines'], sums['inst']
+        print(f'  {"flagships (sum)":30}{lines:7}{inst / 1e9:9.4f}{inst / IPS * 1e3:8.1f}{lines / (inst / IPS):9.0f}'
+              f'{millions(sums["root"])}{millions(sums["library"])}{millions(sums["shared"])}'
+              f'{sums["root"] / lines / 1e3:12.1f}')
+        print('    flagship root M: ' + ', '.join(f'{phase} {n / 1e6:.1f}' for phase, n in phases.items()))
 
 
 def physical_cpus() -> list[int]:
@@ -481,7 +557,7 @@ def corpus_main(args, staged: dict[str, Path], labels: str, limit: float) -> lis
     """Per-corpus line counts and critical-path instructions (lines/s with --wall); returns failures."""
     counter = critical_counter()
     order = list(staged)
-    hello = Path(wall_panel()[2][1])
+    hello = Path(hello_source())
     floor = {role: {n: critical_once(counter, staged[role], hello, n)[0] for n in CORPUS_WORKERS} for role in order}
     cpus = physical_cpus() if args.wall and not args.no_pin else []
     print('compile corpora, critical-path instructions, G (own + largest worker; per program, then summed): ' + labels)
@@ -638,8 +714,10 @@ def main(argv: list[str], current: Path) -> int:
               + f' -> {target}')
         notes: list[str] = []
         failures = []
+        counts = {}
         for name, source, flags in panel(args.release):
             new = measure(counter, candidate, source, flags, notes)
+            counts[name] = new
             line = f'  {name:26}'
             for role, (revision, _, toolchain) in references.items():
                 old = measure(counter, toolchain, source, flags, notes)
@@ -652,6 +730,7 @@ def main(argv: list[str], current: Path) -> int:
             print(line.rstrip(), flush=True)
         for note in dict.fromkeys(notes):
             print(f'  ({note})')
+        yardstick(candidate, counts)
         print(f'  ({time.perf_counter() - started:.0f} s)')
     base_failures = [f for f in failures if f[0] == 'base']
     other_failures = [f for f in failures if f[0] != 'base']

@@ -7,6 +7,7 @@ use 'definite.jo'
 use 'decimals.jo'
 use 'errors.jo'
 use 'targets.jo'
+use 'icount.jo'
 use 'watch.jo'
 # Semantic analysis: modules, scopes, declarations, function instances, statements.
 
@@ -4213,9 +4214,17 @@ zonk_collect_writes = false
 
 __check_fn_body = (f: int):
     if fns[f].state != 0: return
+    icb = ic_fn(IC_CHECK, f)
+    __check_fn_body_now(f)
+    ic_restore(icb)
+
+__check_fn_body_now = (f: int):
     fns[f].state = 1
     decl = int(fns[f].decl)
-    if decl != 0: source_force_body(decl)
+    if decl != 0:
+        icl = ic_fn(IC_LOAD, f)
+        source_force_body(decl)
+        ic_restore(icl)
     saved = cx
     ctxs.push(FnCtx(i32(f), -1, 0, false, 0, fns[f].mod, i32(sc_names.len())))
     cx = ctxs.len() - 1
@@ -5221,6 +5230,7 @@ check_pending_functions = (start: int) -> int:
         if fns[k].state == 0 and (fns[k].kind == FK_NORMAL or fns[k].kind == FK_INIT) and k != 0:
             if fns[k].kind == FK_INIT:
                 m = int(fns[k].mod)
+                icb = ic_mod(IC_CHECK, m)
                 entered = enter_module_context(m)
                 cx = module_ctx[m]
                 fns[k].state = 1
@@ -5236,6 +5246,7 @@ check_pending_functions = (start: int) -> int:
                 fns[k].state = 2
                 leave_module_context(m, entered)
                 cx = -1
+                ic_restore(icb)
             else: check_fn_body(k)
         k += 1
     k
@@ -5255,8 +5266,11 @@ check_program = (main_path: str):
         if s >= 0: program_name = program_name[s + 1..]
         program_name = strip_ext(program_name)
     add_universe()
+    ic_switch(IC_LOAD, IC_LIB)
     load_prelude()
+    ic_switch(IC_LOAD, IC_ROOT)
     mainm = load_module(main_path, false, -1)
+    ic_switch(IC_CHECK, IC_SHARED)
     ts_dewy = files[int(modules[mainm].file)].is_dewy
     # The editor checks library documents with an empty main. Named libraries
     # are outside the prelude, so load the opened document explicitly as well.
@@ -5266,7 +5280,10 @@ check_program = (main_path: str):
     modules[mainm].is_main = true
     i = 0
     loop i < modules.len():
-        if not prelude_pending.has(i): register_module(i)
+        if not prelude_pending.has(i):
+            icb = ic_mod(IC_CHECK, i)
+            register_module(i)
+            ic_restore(icb)
         i += 1
     bind_from_imports()
     dewy_resolve_inherited()

@@ -2,6 +2,7 @@ use 'math_lower.jo'
 # Finite value facts and the cheap lowering domain. Places name storage;
 # values name immutable evaluations. Isolation alone never establishes purity.
 use 'ast.jo'
+use 'icount.jo'
 use 'lex.jo'
 use 'types.jo'
 use 'util.jo'
@@ -2217,6 +2218,7 @@ facts_finalize = ():
             if fns[f].body != 0 and fns[f].state == 2 and not pos_in_lib(nodes[int(fns[f].body)].pos): demanded[f] = true
     loop f, _ in demanded:
         if f <= 0 or f >= isolation_limit or fns[f].state != 2: fatal(-1, "cannot prove assertion: unsettled checked body")
+        icb = ic_fn(IC_ANALYZE, f)
         fact_owner = f
         fact_terms = [FactTerm()]
         state = FactState()
@@ -2227,6 +2229,7 @@ facts_finalize = ():
         if result_active: result_exit(f, result, int(fns[f].body), state)
         if proof_active and proof_decls.has(int(fns[f].decl)): proof_exit(f, int(fns[f].body), state)
         fact_policy = previous_policy
+        ic_restore(icb)
     fact_owner = 0
     # A conservative transfer must never silently lose an obligation (opaque
     # controls, deferred cleanup, or checked nodes absent from a published body).

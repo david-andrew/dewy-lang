@@ -1,0 +1,117 @@
+# `build --time`'s instruction split: user-space instructions this process
+# retires, by phase and by whose code the work is for (the program's own,
+# the library's, or neither). Linux x86-64 only; off unless --time asks.
+use 'check.jo'
+use 'lower.jo'
+use 'util.jo'
+use 'ast.jo'
+
+const IC_LOAD = 0
+const IC_CHECK = 1
+const IC_ANALYZE = 2
+const IC_LOWER = 3
+const IC_EMIT = 4
+const IC_OTHER = 5
+const IC_SHARED = 0
+const IC_ROOT = 1
+const IC_LIB = 2
+
+ic_on = false
+ic_fd = -1
+ic_last = 0
+ic_bucket = IC_OTHER * 3
+ic_counts: int[]
+
+ic_read = () -> int:
+    buf = [0]
+    when BOOTSTRAP:
+        return 0
+    else when TARGET != "linux" or ARCH != "x86_64":
+        return 0
+    else:
+        if syscall(0, ic_fd, data(buf), 8) != 8: return ic_last
+        buf[0]
+
+ic_start = ():
+    when BOOTSTRAP:
+        return
+    else when TARGET != "linux" or ARCH != "x86_64":
+        return
+    else:
+        # perf_event_attr: hardware instructions, user space only, counting from now
+        attr = fill(0, 16)
+        attr[0] = 128 << 32
+        attr[1] = 1
+        attr[5] = 0x60
+        fd = syscall(298, data(attr), 0, -1, -1, 0)
+        if fd < 0: return
+        ic_fd = fd
+        ic_on = true
+        ic_counts = fill(0, 18)
+        ic_last = ic_read()
+
+# Charge what ran since the last switch to the current bucket; continue in
+# (phase, side). Returns the bucket to give back to ic_restore.
+ic_switch = (phase: int, side: int) -> int:
+    if not ic_on: return 0
+    now = ic_read()
+    ic_counts[ic_bucket] += now - ic_last
+    ic_last = now
+    was = ic_bucket
+    ic_bucket = phase * 3 + side
+    was
+
+ic_restore = (bucket: int):
+    if not ic_on: return
+    now = ic_read()
+    ic_counts[ic_bucket] += now - ic_last
+    ic_last = now
+    ic_bucket = bucket
+
+# (library: the prelude, and any module whose file lies under lib/)
+ic_side_mod = (m: int) -> int:
+    if m < 0 or m >= modules.len(): return IC_SHARED
+    if modules[m].is_prelude: return IC_LIB
+    f = int(modules[m].file)
+    if len(lib_root) > 0 and f >= 0 and f < files.len() and starts_with(files[f].path, lib_root): return IC_LIB
+    IC_ROOT
+
+ic_side_fn = (f: int) -> int:
+    if f <= 0 or f >= fns.len(): return IC_SHARED
+    ic_side_mod(int(fns[f].mod))
+
+ic_side_lf = (lf: int) -> int:
+    if lf < 0 or lf >= lfuncs.len() or lfuncs[lf].kind != LK_INST: return IC_SHARED
+    ic_side_fn(lfuncs[lf].inst)
+
+# (ic_switch for one function's work: checking, lowering, emitting it)
+ic_fn = (phase: int, f: int) -> int:
+    if not ic_on: return 0
+    ic_switch(phase, ic_side_fn(f))
+
+ic_lf = (phase: int, lf: int) -> int:
+    if not ic_on: return 0
+    ic_switch(phase, ic_side_lf(lf))
+
+ic_mod = (phase: int, m: int) -> int:
+    if not ic_on: return 0
+    ic_switch(phase, ic_side_mod(m))
+
+ic_report = ():
+    if not ic_on: return
+    ic_restore(ic_bucket)
+    names = ["load", "check", "analyze", "lower", "emit", "other"]
+    sides = ["shared", "root", "library"]
+    total = 0
+    side_total = fill(0, 3)
+    loop i in [0..18):
+        total += ic_counts[i]
+        side_total[i % 3] += ic_counts[i]
+    parts = ""
+    loop s in [0..3):
+        row = ""
+        loop p in [0..6):
+            c = ic_counts[p * 3 + s]
+            if c != 0: row = row + " {names[p]} {c}"
+        parts = parts + "; {sides[s]} {side_total[s]}:{row}"
+    eprint("instructions: {total}{parts}")

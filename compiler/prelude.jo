@@ -1,6 +1,7 @@
 # Demand loading for the optional game prelude. Core/std remain eager: their
 # declarations define the language's builtins and implicit native runtime.
 use 'check.jo'
+use 'icount.jo'
 use 'util.jo'
 use 'ast.jo'
 use 'frontend.jo'
@@ -44,9 +45,11 @@ defer_prelude = (path: str, entry: str[]) -> bool:
 parse_prelude_module = (m: int):
     if not prelude_pending.has(m): return
     prelude_pending.remove(m)
+    icb = ic_switch(IC_LOAD, IC_LIB)
     p_lazy = true
     modules[m].decls = source_declarations(int(modules[m].file))
     p_lazy = false
+    ic_restore(icb)
 
 math_runtime_loaded = false
 math_eval_loaded = false
