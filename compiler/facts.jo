@@ -852,18 +852,41 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
         if v == binding.value and b.bindings[j].event == binding.event: fact_rebind(s, binding.place, v, binding.event, binding.prior)
         left.push(binding.value); right.push(other); merged.push(v)
     # Match projections of merged aggregate values, including current lengths.
+    # (each side's non-element projections chained by base value, in order:
+    # the same matches as scanning both lists for every merged value)
+    a_head: {int: int} = {}
+    a_next = fill(-1, a.projections.len())
+    k = a.projections.len() - 1
+    loop k >= 0:
+        if not a.projections[k].element:
+            a_next[k] = a_head.get(a.projections[k].base) ?? -1
+            a_head[a.projections[k].base] = k
+        k -= 1
+    b_head: {int: int} = {}
+    b_next = fill(-1, b.projections.len())
+    k = b.projections.len() - 1
+    loop k >= 0:
+        if not b.projections[k].element:
+            b_next[k] = b_head.get(b.projections[k].base) ?? -1
+            b_head[b.projections[k].base] = k
+        k -= 1
     cursor = 0
     loop cursor < merged.len() and merged.len() < FACT_CAP:
-        loop p in a.projections:
-            if p.base != left[cursor] or p.element: continue
-            loop q in b.projections:
-                if q.base != right[cursor] or q.element or q.selector != p.selector: continue
+        pi = a_head.get(left[cursor]) ?? -1
+        loop pi >= 0:
+            p = a.projections[pi]
+            qi = b_head.get(right[cursor]) ?? -1
+            loop qi >= 0:
+                q = b.projections[qi]
+                qi = b_next[qi]
+                if q.selector != p.selector: continue
                 if merged.len() >= FACT_CAP: break
                 v = p.value
                 if v != q.value: v = fact_new(s, fact_hull(fact_bound(a, v), fact_bound(b, q.value), at))
                 if s.projections.len() < FACT_CAP: s.projections.push(FactProjection(merged[cursor], p.selector, false, v))
                 left.push(p.value); right.push(q.value); merged.push(v)
                 break
+            pi = a_next[pi]
         cursor += 1
     # Select rows from either predecessor, rename into the merge frame, and
     # require a proof from the other. Branch-local evaluations never escape.
