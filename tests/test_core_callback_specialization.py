@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from tests.support import compiler, run_value_batch, build_exit_batch
+from tests.support import compiler, exit_main, run_value_batch, build_exit_batch
 
 
 CASES = {
@@ -94,7 +94,7 @@ main=()=>{
 @pytest.mark.parametrize('release', [False, True])
 def test_callback_specialization_resolves_body(compiler, tmp_path, release):
     source = tmp_path / 'known.dewy'
-    source.write_text(CASES['multiple-identities'].replace(
+    source.write_text(exit_main(CASES['multiple-identities']).replace(
         'visit=(callback:Callback):>int64=>callback(3)',
         'visit=(callback:Callback):>int64=>{let total:int64=0 '
         'loop i in [0..3) {total+=callback(i)} return total}'))
