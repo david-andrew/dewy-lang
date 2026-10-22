@@ -141,4 +141,53 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   IEEE ties-to-even. Both take `ties=` to override.
 - Lifecycle hooks: copy and move hooks preserve the abstract value; move hooks
   cannot fail. No explicit `move` syntax for now.
+- Units (round 5): display is automatic, picking a sensible unit per kind, with
+  likely display units chosen for derived expressions; `x as unit` overrides
+  and converts (`l as inches`). Offset units do what people expect: `20°C` is a
+  point, but read as a delta when added to or subtracted from a point
+  (`start + 20°C`); point − point = delta; scaling works in the value's own
+  unit. `(20°C as °F)` converts as a point (68°F), but as a delta (36°F) when
+  used as a delta: infer delta-ness from use, or document the rule. Rational
+  dimension exponents are allowed (V/√Hz), so `sqrt` of odd powers is valid.
+- Time: `month`/`year` combine only with real dates. Long-term direction in
+  [time.md](time.md).
+- Invariants: types declare invariants; construction proves them (or checks
+  them under `$runtime_checks`) and mutating methods re-establish them. Richer
+  properties ("sorted", "validated") are brands minted only by trusted
+  validators; later, user-defined validators via compile-time code. Public
+  interfaces use written contracts; inferred facts stay private.
+- Resources: no blanket guarantee; practical tools (size-limited input APIs,
+  default parser depth limits, `within` deadlines, static stack bounds where
+  provable) and specific error values for failures that can't be ruled out.
+  Goal: the highest-safety configuration handles every resource-exhaustion case
+  (heap and stack), as a future bundle on top of `$explicit_allocation_failure`.
+- Index-typed refinements: deferred until real code needs them.
+- `Send`/`Sync` are inferred structurally; `$send=false`/`$sync=false` on a type
+  is a safe opt-out; claiming either for a type the compiler can't verify needs
+  an unsafe boundary.
+- Conversions: `wrap<uint8>(x)` keeps the low bits; same-size reinterpretation
+  is the infix word `f transmute uint64` (like `as`). No `.bitcast`/`.wrap`
+  method spellings.
+- Iterator control: bind the iterator and loop over its place:
+  `let w=tree.walk` then `loop node in @w { if skip?(node) w.skip_children }`;
+  also `w.seek(i)`. A one-line binding form may come later (`as` is conversion).
+- `mod(a b)` is a free function with `kind='floor'` (default, same as `%`),
+  `'euclid'` or `'trunc'`. Not `rem`, not a method.
+- Indexed iteration is always `loop i in 0.. and x in xs`: no `enumerate`, no
+  `indexed`.
+- `$build`: a compile-time record like `$target` (`$build.mode =? 'release'`,
+  `$build.debug`). Project flags (e.g. BOOTSTRAP) are ordinary consts in a build
+  module the entry module overrides; no CLI `-D` flags.
+- File helpers are `Path` methods: `p.copy_to(q)`, `p.rename(q)`, `p.make_dirs`,
+  `p.walk`, `p.glob"*.dewy"`, `p.size`, `p.modified`, `p.chmod(...)`; `env`
+  stays in the prelude.
+- An ambiguous partial application of an overloaded function is a compile error
+  asking for an annotation.
+- A closure inside a method changes the object's fields only through an
+  explicit `@` capture.
+- Printing details: approved as provisionally implemented.
+- Tests: one process per `$test`; `--json` stays provisional.
+- Escapes: an unknown escape of a letter or digit (`\N`) is an error; any ASCII
+  punctuation may be escaped to itself (`\}`, `\{`, `\'`, `\"`, `\\`).
+- `and=`/`or=` short-circuit: `a and= f()` means `a = a and f()`.
 

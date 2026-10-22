@@ -89,6 +89,13 @@ runner, never on the shared box. Kernels: `bench`.
 - Floored `%`; human types round half away from zero, floats IEEE (`ties=`).
 - Hooks preserve value; move hooks can't fail; no `move` syntax yet.
 - Spelling: extra spellings allowed when well justified; no unjustified aliases.
+- Units: automatic display, `as unit` overrides; offset points/deltas by use;
+  rational exponents. Time: one timeline plus layers ([time](docs/design/time.md)).
+- Invariants with trusted-validator brands; resources via practical limits.
+- `wrap<uint8>(x)`; `f transmute uint64`; `mod(a b kind=…)`; iterator control
+  via `let w=…` and `loop x in @w`; `loop i in 0.. and x in xs` (no `enumerate`).
+- `$build` record; `Path` file methods; inferred `Send`/`Sync` with
+  `$send=false` opt-outs; escapes; short-circuit `and=`/`or=`.
 - Versions: language 0.0.0; extension patch bumps, at most one release a day.
 
 ## Open questions for David
@@ -96,26 +103,11 @@ runner, never on the shared box. Kernels: `bench`.
 New questions carry a recommended answer, what it unblocks and whether it's
 reversible; reversible ones are implemented provisionally and flagged.
 
-3. Readonly/lifetime-bearing payload places beyond `$lend`.
-9. Units: display (`as km`), affine units, calendar durations. (88)
-10. Invariant authority beyond scalar refinements (strict Map invariants).
-11. Finite-resource and denial-of-service guarantees.
-15. Provisional file helpers (`copy_file`, `walk_dir`, `glob`, …): keep or rename?
-16. Partial application of an overloaded function picks the fewest open
-    parameters (provisional).
-17. A function nested in a method can't change the object's members (today).
-18. Printing details (minted type names, range forms, unused-method warnings).
-20. Per-process `$test` isolation; provisional `test --json` fields.
-23. Dogfooding leftovers: sibling minted literals; `loop [k @v] in d`;
-    `sqrt` of quantities (provisional).
-24. Self-hosting leftovers: build-mode flags.
-25. Spellings to confirm (recommendations implemented provisionally):
-    raw-bit conversions, recommended `x.wrap(uint8)` (integers, modulo 2^N) and
-    `x.bitcast(float64)` (same-width reinterpretation); steerable loops,
-    recommended naming the iterator inline: `loop node in w=tree.walk() {
-    if leaf? node w.skip_children }`. Both reversible.
-26. Index-typed refinements ("below `a.length`"); the `rem` alternatives
-    spelling (recommended: `a.rem(b kind='euclid')`).
+3. Readonly/lifetime-bearing (scoped handle) places beyond `$lend`. (With David.)
+23. Inferring the common parent for sibling minted literals. (With David.)
+25. Whether a binding from a match of string-literal arms keeps the literal
+    union. (With David.)
+- Deferred until real code needs them: index-typed refinements.
 
 Each held ladder program's note names the question that holds it.
 
