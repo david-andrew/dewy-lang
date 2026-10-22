@@ -2666,25 +2666,25 @@ def test_core_game_model(compiler, tmp_path, target, release):
     shutil.copy2(model, tmp_path)
     source = tmp_path / 'model_test.dewy'
     source.write_text('''from p"paddle_model.dewy" import fresh, advance, Point
-main=():>int64=>{
+main=():>void=>{
     let world=fresh()
     let original=world
     advance(@world 0.5 730.0)
-    if world.position.x not=? 730.0 or world.position.y not=? 340.0 return 1
-    if original.position.x not=? 640.0 or original.position.y not=? 220.0 return 2
+    if world.position.x not=? 730.0 or world.position.y not=? 340.0 exit(1)
+    if original.position.x not=? 640.0 or original.position.y not=? 220.0 exit(2)
     world.position=Point(730.0 610.0)
     world.velocity=Point(0.0 240.0)
     advance(@world 0.1 730.0)
-    if world.score not=? 1 or world.velocity.y >=? 0.0 return 3
+    if world.score not=? 1 or world.velocity.y >=? 0.0 exit(3)
     world.position=Point(100.0 750.0)
     world.velocity=Point(0.0 240.0)
     advance(@world 0.1 730.0)
-    if world.misses not=? 1 or world.position.y not=? 220.0 return 4
+    if world.misses not=? 1 or world.position.y not=? 220.0 exit(4)
     advance(@world 0.0 0.0)
-    if world.paddle not=? 80.0 return 5
+    if world.paddle not=? 80.0 exit(5)
     advance(@world 0.0 1280.0)
-    if world.paddle not=? 1200.0 return 6
-    return 42
+    if world.paddle not=? 1200.0 exit(6)
+    exit(42)
 }''')
     binary = tmp_path / 'model_test'
     flags = ['--release'] if release else []
