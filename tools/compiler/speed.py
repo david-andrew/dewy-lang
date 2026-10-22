@@ -381,7 +381,7 @@ PHASE_BUDGETS = [('lex+parse', ('load',), 3000), ('resolve+check', ('check',), 7
                  ('facts+effects', ('facts', 'effects'), 4000), ('ownership', ('ownership',), None),
                  ('lower+codegen', ('lower', 'codegen', 'other'), 9000), ('optimizer', ('optimize',), 1000)]
 HELLO_BUDGET_MS = 20.0
-HELLO_GATED = False     # report only while hello is over budget; gate it once it is under
+HELLO_GATED = True      # hello is under its 20 ms budget: a regression past it fails
 
 
 def phase_totals(toolchain: Toolchain, sources: list[str]) -> tuple[dict[str, int], int, int | None] | None:
