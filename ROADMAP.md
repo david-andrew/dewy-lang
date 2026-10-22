@@ -17,7 +17,7 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 | Compile throughput, single thread, default build, flagships (library separate) | 13–37k lines/s | Track A: median ≥50k; north star 200–250k |
 | Critical-path instructions at 4 workers (secondary) | synthetic 0.60 G | no regression |
 | Single-thread instructions, synthetic-22k (regression signal) | 1.17 G | ~0.09 G (250k lines/s) |
-| Hello-world compile (guardrail) | 31 ms | ~50 ms |
+| Hello-world compile (guardrail) | ~22 ms (0.14 G) | ≤20 ms |
 | Kernels vs C -O2 (time, default) | literal callbacks 4.6×, callbacks 2.3×, params 1.75×, graph 1.7×, game 1.6× | ≤1.2× |
 | Quick / full suite | ~17 s / ~4 min | ≤30 s / ≤5 min |
 

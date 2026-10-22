@@ -241,4 +241,17 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   expensive first; B3 new import-cycle-leaf modules written in Dewy. Track C:
   capability work continues. No precomputed library summaries or images
   without David's explicit approval.
+- Compile-speed metric (decided 2026-10-22): the goal stands at 200–250k lines/s
+  single-threaded, default build, for every flagship (dunes and 101 included).
+  Throughput counts EVERY source line the compiler processes for the build: the
+  user's lines, plus the library lines it reaches after lazy pruning, plus
+  generic-instance work charged to the lines that cause it (as Jai counts).
+  Companion numbers: library fan-out (reached library lines and instantiated
+  bodies per program), pushed down by the closure diet (pay-as-you-go runtime
+  pieces, instances shared by representation); and hello-world latency ≤20 ms
+  (tightened from ~50 ms). A user-only column may be reported, but the gated
+  number counts all lines. Rejected: a per-machine library index (a precomputed
+  cache) and making the game prelude an explicit import (it stays implicit and
+  is made cheap by laziness). The library index scan must be near-free
+  (memchr-class, no tokenizing what isn't reached).
 
