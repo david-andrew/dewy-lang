@@ -36,6 +36,6 @@ main = () -> int:
         declared.sort()
         src = files[int(modules[m].file)].src
         joined = join(declared, " ")
-        entries.push("{path} {int(hash(src))} {joined}")
+        entries.push("{path} {source_digest(src)} {joined}")
     print(join(entries, "\n"))
     0

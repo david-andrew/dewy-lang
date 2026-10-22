@@ -191,6 +191,22 @@ lib_root = ""
 # (extra notes for the next error, each a position (or -1) and its text: why a fact is unproven)
 err_notes: (int, str)[]
 
+# The prelude index's digest of a library source, eight bytes a step: every
+# compile checks each deferred module's source against its index entry.
+source_digest = (s: str) -> int:
+    p = data(s)
+    n = len(s)
+    h: u64 = 11400714819323198485 xor u64(n)
+    i = 0
+    loop i + 8 <= n:
+        h = (h xor u64(((p + i) as *int)[0])) * 18397679294719823053
+        h = h xor (h >> 31)
+        i += 8
+    loop i < n:
+        h = (h xor u64(p[i])) * 1099511628211
+        i += 1
+    int(h xor (h >> 29))
+
 pos_in_lib = (p: int) -> bool:
     if p <= 0 or len(lib_root) == 0: return false
     f = pos_file(p)

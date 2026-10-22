@@ -27,7 +27,7 @@ defer_prelude = (path: str, entry: str[]) -> bool:
     if src == none: return false
     # An edited or third-party library is always parsed normally. The index is
     # an optimization, never the authority for the library's exported names.
-    if (to_int(entry[1]) ?? 0) != int(hash(src!)): return false
+    if (to_int(entry[1]) ?? 0) != source_digest(src!): return false
     d = lib_dir + "/game"
     fi = files.len()
     files.push(SrcFile(path, d, src!))
