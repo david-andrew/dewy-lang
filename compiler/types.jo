@@ -321,7 +321,7 @@ zonk = (t0: int) -> int:
     if k == .callable: return mk_callable_contract(zonk(int(types[t].elem)), effect_subst(int(types[t].st), [], true), int(types[t].bits))
     if k == .effect: return effect_type(effect_subst(int(types[t].st), [], true))
     if k == .refined: return mk_refined(zonk(int(types[t].elem)), ref_subst(int(types[t].st), [], true))
-    if k == .quantity: return mk_quantity(zonk(int(types[t].elem)), int(types[t].st))
+    if k == .quantity: return mk_quantity(zonk(int(types[t].elem)), int(types[t].st), 0, int(types[t].bits))
     if k == .struct_ or k == .enum_:
         si = int(types[t].st)
         args: int[]

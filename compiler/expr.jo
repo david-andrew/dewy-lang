@@ -27,7 +27,7 @@ enum IN:
     arrdata, panic, assert, print, embed, from_bytes, to_bytes, argv, setlen, truncate, resize,
     hash, alignof, unreachable, arrcap, fmt_struct, sqrt, vec_ctor, cfn_cast, wasm_call, callc, floor_,
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
-    read_fields, default_init, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
+    read_fields, default_init, offset_unit, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
     static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem, lend, loan_address, loan_load, loan_store, loan_length,
     zeroed, relocate, take_slot, live_len
 
@@ -66,7 +66,7 @@ intrinsics = [
     Intrinsic("size_of", .sizeof, false), Intrinsic("align_of", .alignof, false), Intrinsic("panic", .panic, false),
     Intrinsic("assert", .assert, false), Intrinsic("print", .print, false), Intrinsic("embed", .embed, false), Intrinsic("embed_dir", .embed_dir, false),
     Intrinsic("str_from_bytes", .from_bytes, false), Intrinsic("bytes", .to_bytes, false), Intrinsic("__argv", .argv, false),
-    Intrinsic("unreachable", .unreachable, false), Intrinsic("sqrt", .sqrt, false), Intrinsic("__fmt_fields", .fmt_struct, false), Intrinsic("__fmt_elem_value", .fmt_elem, false), Intrinsic("__gpu_kernel", .gpu_kernel, false),
+    Intrinsic("unreachable", .unreachable, false), Intrinsic("sqrt", .sqrt, false), Intrinsic("__offset_unit", .offset_unit, false), Intrinsic("__fmt_fields", .fmt_struct, false), Intrinsic("__fmt_elem_value", .fmt_elem, false), Intrinsic("__gpu_kernel", .gpu_kernel, false),
     Intrinsic("__hash_value", .hash, false), Intrinsic("__set_len", .setlen, false), Intrinsic("__call_raw", .callc, false),
     Intrinsic("shader", .shader, false), Intrinsic("__setjmp", .setjmp, false), Intrinsic("__longjmp", .longjmp, false), Intrinsic("__jump", .jump, false),
     Intrinsic("__clone_thread", .clone_thread, false), Intrinsic("__atomic_add", .atomic_add, false),
@@ -1389,7 +1389,7 @@ subst_partial = (pat0: int, binds: mut int[]) -> int:
     if k == .array: return mk_array(subst_partial(int(types[pat].elem), binds))
     if k == .callable: return mk_callable_contract(subst_partial(int(types[pat].elem), binds), effect_subst(int(types[pat].st), binds), int(types[pat].bits))
     if k == .refined: return mk_refined(subst_partial(int(types[pat].elem), binds), ref_subst(int(types[pat].st), binds))
-    if k == .quantity: return mk_quantity(subst_partial(int(types[pat].elem), binds), int(types[pat].st))
+    if k == .quantity: return mk_quantity(subst_partial(int(types[pat].elem), binds), int(types[pat].st), 0, int(types[pat].bits))
     if k == .fixed: return mk_fixed(subst_partial(int(types[pat].elem), binds), fixed_len(pat))
     if k == .ptr: return mk_ptr(subst_partial(int(types[pat].elem), binds))
     if k == .opt: return mk_opt(subst_partial(int(types[pat].elem), binds))
@@ -5208,7 +5208,11 @@ nargs_check = (n: int, nargs: int, lo: int, hi: int, name: str):
 
 fmt_part = (part: int, pos: int):
     t = prune(ntype(int(nodes[part].a)))
-    if is_quantity(t):
+    shown = if is_quantity(t) and nodes[part].sval < 0 and dewy_at(pos): quantity_display(int(nodes[part].a)) else: 0
+    if shown != 0:
+        nodes[part].a = i32(shown)
+        t = T_STR
+    else if is_quantity(t):
         nodes[part].a = i32(quantity_number(int(nodes[part].a)))
         t = quantity_base(t)
     if types[t].kind == .fixed:
@@ -5615,17 +5619,23 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         arg_type(args, 0, T_STR)
         r = mk_array(T_U8)
     else if id == .argv: r = T_RAWPTR
+    else if id == .offset_unit:
+        nargs_check(n, nargs, 3, 3, "__offset_unit")
+        if nodes[args[0]].kind != .str_lit: fatal(nodes[args[0]].pos, "an offset unit's symbol is a string literal")
+        arg_type(args, 1, 0)
+        arg_type(args, 2, 0)
+        return quantity_offset_unit(n, name_of(int(nodes[args[0]].sval)), args[1], args[2])
     else if id == .sqrt:
         nargs_check(n, nargs, 1, 1, "sqrt")
         t = arg_type(args, 0, 0)
+        # (the root of a temperature is of its difference reading)
+        if is_quantity(t) and quantity_tag(t) != 0:
+            args[0] = quantity_delta_reading(args[0])
+            t = prune(ntype(args[0]))
         # (the root of a quantity halves its dimension's powers: sqrt of an area is a length)
         if is_quantity(t) and dewy_at(nodes[n].pos):
-            dim = quantity_dimension(t)
-            powers: int[]
-            loop i in [0..8):
-                p = quantity_dimensions[dim][i]
-                if p % 2 != 0: fatal(nodes[n].pos, "sqrt of {dt(t)}: {dimension_str(dim)} has an odd power, so its root is not a quantity of whole powers (divide by a unit for a plain number first, as in `sqrt(x/m)`)")
-                powers.push(p / 2)
+            # (odd powers give rational ones: sqrt of a frequency is Time^(-1/2), as in V/sqrt(Hz))
+            dim = power_dimension(quantity_dimension(t), 1, nodes[n].pos, 2)
             number = quantity_number(args[0])
             base = quantity_base(t)
             if types[base].kind != .float_:
@@ -5635,7 +5645,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             set_list(n, args)
             nodes[n].type = i32(base)
             add_flag(n, NF_CHECKED)
-            wrap_conv(n, .none_, mk_quantity(base, intern_dimension(powers)))
+            wrap_conv(n, .none_, mk_quantity(base, dim))
             last_checked = n
             return ntype(n)
         if is_lit(args[0]) or types[t].kind == .int_ or bundled_rational_type(t):
@@ -5912,7 +5922,9 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         t = arg_type(args, 1, 0)
         pos = nodes[n].pos
         if is_quantity(t):
-            nodes[n] = nodes[bc_call("__dewy_fmt", [args[0], quantity_number(args[1])], pos)]
+            shown = quantity_display(args[1])
+            if shown == 0: shown = quantity_number(args[1])
+            nodes[n] = nodes[bc_call("__dewy_fmt", [args[0], shown], pos)]
             return check_expr(n, 0)
         bt = mk_array(T_U8)
         k = types[t].kind
@@ -6276,6 +6288,9 @@ check_binary = (n: int, expected: int) -> int:
     if not is_cmp and is_quantity(expected) and is_float(quantity_base(expected)): hint = quantity_base(expected)
     a = int(nodes[n].a)
     b = int(nodes[n].b)
+    # (20°C in start + 20°C is a difference: offset temperatures tell literals from values)
+    q_lit_a = (op == .plus or op == .minus) and quantity_literal_syntax(a)
+    q_lit_b = (op == .plus or op == .minus) and (quantity_literal_syntax(b) or (b == quantity_update_right and b != 0))
     # ("-" * 40 is forty dashes, as in Python: a character's code multiplied means nothing)
     if op == .star:
         if charlike(a) and not charlike(b): clear_flag(a, NF_CHARLIKE)
@@ -6351,7 +6366,10 @@ check_binary = (n: int, expected: int) -> int:
     if exact_operands and not is_float(hint) and not (is_float(na) and not is_lit(a)) and not (is_float(nb) and not is_lit(b)):
         if nodes[a].kind == .float_lit and nodes[a].sval != 0 and is_lit(a): ta = exact_decimal(a)
         if nodes[b].kind == .float_lit and nodes[b].sval != 0 and is_lit(b): tb = exact_decimal(b)
-    if types[ta].kind == .quantity or types[tb].kind == .quantity: return quantity_binary(n, a, b, expected)
+    if types[ta].kind == .quantity or types[tb].kind == .quantity:
+        quantity_left_literal = q_lit_a
+        quantity_right_literal = q_lit_b
+        return quantity_binary(n, a, b, expected)
     if not is_shift and ta == T_MATH_INT and (bundled_bigint_type(tb) or bundled_rational_type(tb)):
         coerce(a, tb)
         ta = tb
@@ -8236,7 +8254,8 @@ check_expr = (n: int, expected: int) -> int:
                 q = quantity_scales[quantity_constant_scale(int(globals[g].init))]
                 hint = expected
                 if nodes[int(globals[g].decl)].a != 0: hint = int(globals[g].type)
-                return quantity_constant(n, q.numerator, q.denominator, quantity_dimension(int(globals[g].type)), hint)
+                quantity_constant(n, q.numerator, q.denominator, quantity_dimension(int(globals[g].type)), hint)
+                return quantity_retag(n, quantity_tag(int(globals[g].type)))
             if n != assign_root:
                 loop global_read.len() <= g: global_read.push(false)
                 global_read[g] = true
@@ -9120,6 +9139,8 @@ check_expr = (n: int, expected: int) -> int:
     else if k == .match_: t = check_match(n, expected)
     else if k == .cast:
         a = int(nodes[n].a)
+        # (x as km: the quantity shown in a unit; units are values, not types)
+        if nodes[n].aux2 != 1 and dewy_at(nodes[n].pos) and quantity_unit_syntax(int(nodes[n].b)): return quantity_as_unit(n)
         tt = prune(resolve_type(int(nodes[n].b)))
         if nodes[n].aux2 == 1:
             # The written source type determines its bits. In particular the

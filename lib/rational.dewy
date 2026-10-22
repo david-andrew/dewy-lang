@@ -323,3 +323,54 @@ _whole_nanoseconds=(seconds:Rational):>int64=>{
     if count >? 9223372036854775807 return 9223372036854775807
     return count
 }
+
+# How a physical quantity prints (the compiler calls these): the candidate units, smallest
+# first, are worth nums[i]/dens[i] canonical units, and units[base] shows a zero. Exact
+# values take the largest unit that keeps a whole count, else the largest not above the
+# magnitude; floats take the largest not above the magnitude. offset is the shown unit's
+# zero (Celsius' 273.15 K); for floats it comes multiplied by dens[0], so that a reading
+# is (value*den - offset)/num with the fewest roundings.
+_quantity_exact=(value:Rational units:array<string> nums:array<int64> dens:array<int64> base:int64 offset:Rational):>string=>{
+    let shifted=_sub(value offset)
+    let size=abs(shifted)
+    let pick=base
+    if shifted.numerator not=? 0 {
+        let whole=-1
+        let fits=-1
+        loop i in 0.. and n in nums {
+            let scale=_make(n dens[i])
+            if not _lt(size scale) {
+                fits=i
+                if _div(shifted scale).denominator =? 1 whole=i
+            }
+        }
+        pick=0
+        if whole >=? 0 pick=whole
+        else if fits >=? 0 pick=fits
+    }
+    return "{_div(shifted _make(nums[pick] dens[pick]))}{units[pick]}"
+}
+_quantity_float=(value:float64 units:array<string> nums:array<int64> dens:array<int64> base:int64 offset:float64):>string=>{
+    let size=value
+    if size <? 0 size=-size
+    let pick=base
+    if value not=? 0 and value*0 =? 0 {
+        pick=0
+        loop i in 0.. and n in nums {
+            if size*float64(dens[i]) >=? float64(n) pick=i
+        }
+    }
+    return "{(value*float64(dens[pick])-offset)/float64(nums[pick])}{units[pick]}"
+}
+_quantity_float32=(value:float32 units:array<string> nums:array<int64> dens:array<int64> base:int64 offset:float32):>string=>{
+    let size=value
+    if size <? 0 size=-size
+    let pick=base
+    if value not=? 0 and value*0 =? 0 {
+        pick=0
+        loop i in 0.. and n in nums {
+            if size*float32(dens[i]) >=? float32(n) pick=i
+        }
+    }
+    return "{(value*float32(dens[pick])-offset)/float32(nums[pick])}{units[pick]}"
+}

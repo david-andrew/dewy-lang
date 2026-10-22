@@ -1473,7 +1473,7 @@ subst = (t0: int, targs: int[]) -> int:
     if k == .effect: return effect_type(effect_subst(int(types[t].st), targs))
     if k == .callable: return mk_callable_contract(subst(int(types[t].elem), targs), effect_subst(int(types[t].st), targs), int(types[t].bits))
     if k == .refined: return mk_refined(subst(int(types[t].elem), targs), ref_subst(int(types[t].st), targs))
-    if k == .quantity: return mk_quantity(subst(int(types[t].elem), targs), int(types[t].st))
+    if k == .quantity: return mk_quantity(subst(int(types[t].elem), targs), int(types[t].st), 0, int(types[t].bits))
     if k == .array: return mk_array(subst(int(types[t].elem), targs))
     if k == .fixed: return mk_fixed(subst(int(types[t].elem), targs), fixed_len(t))
     if k == .ptr: return mk_ptr(subst(int(types[t].elem), targs))
@@ -3022,7 +3022,10 @@ compound_value = (s: int, left: int, right: int) -> int:
 
 compound_checked = (s: int, left: int, right: int, target: int) -> int:
     n = compound_value(s, left, right)
+    # (t -= x on a temperature takes away a difference: x reads as one)
+    if is_quantity(target): quantity_update_right = right
     result = prune(check_expr(n, 0))
+    quantity_update_right = 0
     t = prune(target)
     if decimal_target != 0 and decimal_float_write(result, t): return last_checked
     # Built-in compound arithmetic keeps the destination's fixed width,

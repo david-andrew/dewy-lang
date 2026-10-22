@@ -10,6 +10,10 @@ use 'expr.jo'
 
 quantity_dimensions: int[][] = [[0, 0, 0, 0, 0, 0, 0, 0]]
 quantity_dimension_names: str[] = ["Time", "Length", "Mass", "Current", "Temperature", "Amount", "Luminosity", "Angle"]
+# Dimension powers are rational (V/sqrt(Hz) has Time^(1/2)): each is stored times this
+# denominator, so roots down to a 16th (and thirds, fifths, sevenths...) stay exact.
+const QUANTITY_POWER_DEN = 720720
+const QUANTITY_POWER_MAX = 32767 * 720720
 
 struct QuantityScale:
     numerator: int
@@ -41,18 +45,28 @@ combine_dimensions = (a: int, b: int, sign: int, pos: int) -> int:
     powers: int[]
     loop i in [0..8):
         power = quantity_dimensions[a][i] + sign * quantity_dimensions[b][i]
-        if power < -32767 or power > 32767: fatal(pos, "physical dimension exponent is too large")
+        if power < -QUANTITY_POWER_MAX or power > QUANTITY_POWER_MAX: fatal(pos, "physical dimension exponent is too large")
         powers.push(power)
     intern_dimension(powers)
 
-power_dimension = (dim: int, power: int, pos: int) -> int:
-    if power < -32767 or power > 32767: fatal(pos, "physical dimension exponent is too large")
+# (dim raised to num/den; a root finer than the stored denominator is an error)
+power_dimension = (dim: int, num: int, pos: int, den: int = 1) -> int:
+    if num < -32767 or num > 32767 or den < 1 or den > 32767: fatal(pos, "physical dimension exponent is too large")
     powers: int[]
     loop i in [0..8):
-        value = quantity_dimensions[dim][i] * power
-        if value < -32767 or value > 32767: fatal(pos, "physical dimension exponent is too large")
-        powers.push(value)
+        value = quantity_dimensions[dim][i] * num
+        if value < -QUANTITY_POWER_MAX or value > QUANTITY_POWER_MAX: fatal(pos, "physical dimension exponent is too large")
+        if value % den != 0: fatal(pos, "physical dimension exponent {quantity_power_text(quantity_dimensions[dim][i])} divided by {den} is finer than Dewy tracks")
+        powers.push(value / den)
     intern_dimension(powers)
+
+# (a stored power as written: 2, -1, 1/2 or -3/2)
+quantity_power_text = (stored: int) -> str:
+    g = quantity_gcd(stored, QUANTITY_POWER_DEN)
+    num = stored / g
+    den = QUANTITY_POWER_DEN / g
+    if den == 1: return "{num}"
+    "{num}/{den}"
 
 quantity_numeric = (t0: int) -> bool:
     t = prune(t0)
@@ -64,10 +78,11 @@ quantity_numeric = (t0: int) -> bool:
     d = int(structs[si].decl)
     d != 0 and structs[si].name == "Rational" and files[pos_file(nodes[d].pos)].path == lib_dir + "/rational.dewy"
 
-mk_quantity = (base: int, dim: int, pos: int = 0) -> int:
+# (tag: how the quantity shows and where an offset scale's zero is; see quantity_tags)
+mk_quantity = (base: int, dim: int, pos: int = 0, tag: int = 0) -> int:
     if dim == 0: return base
     if not quantity_numeric(base): fatal(pos, "physical quantities need a numeric representation, found {dt(base)}")
-    mk_type(TypeInfo(kind = .quantity, elem = i32(base), st = i32(dim)), [])
+    mk_type(TypeInfo(kind = .quantity, elem = i32(base), st = i32(dim), bits = i32(tag)), [])
 
 mk_dimension = (dim: int) -> int: mk_type(TypeInfo(kind = .dimension, st = i32(dim)), [])
 
@@ -78,7 +93,10 @@ dimension_str = (dim: int) -> str:
         if power == 0: continue
         if text != "": text += " * "
         text += quantity_dimension_names[i]
-        if power != 1: text += "^{power}"
+        if power != QUANTITY_POWER_DEN:
+            shown = quantity_power_text(power)
+            if find_byte(shown, '/') >= 0: text += "^({shown})"
+            else: text += "^{shown}"
     if text == "": return "dimensionless"
     text
 
@@ -91,7 +109,12 @@ resolve_quantity_type = (n: int) -> int:
     op = nodes[n].op as Tok
     if op == .caret:
         if types[a].kind != .dimension: fatal(nodes[n].pos, "raise the dimension factor to a power, not its numeric representation")
-        power = ceval(int(nodes[n].b)).i
+        e = int(nodes[n].b)
+        if nodes[e].kind == .binary and nodes[e].op == i32(int(Tok.slash)):
+            return mk_dimension(power_dimension(ad, ceval(int(nodes[e].a)).i, nodes[n].pos, ceval(int(nodes[e].b)).i))
+        if nodes[e].kind == .call and nodes[int(nodes[e].a)].kind == .ident and nodes[int(nodes[e].a)].name == i32(intern("__dewy_divide")) and nkids(e) == 2:
+            return mk_dimension(power_dimension(ad, ceval(kid(e, 0)).i, nodes[n].pos, ceval(kid(e, 1)).i))
+        power = ceval(e).i
         return mk_dimension(power_dimension(ad, power, nodes[n].pos))
     b = resolve_type(int(nodes[n].b))
     bd = quantity_dimension(b)
@@ -107,9 +130,7 @@ resolve_quantity_type = (n: int) -> int:
 
 register_quantity_names = ():
     loop i in [0..8):
-        powers = fill(0, 8)
-        powers[i] = 1
-        dim = intern_dimension(powers)
+        dim = base_dimension(i)
         nm = intern(quantity_dimension_names[i])
         universe[nm] = new_sym(nm, .type_, mk_dimension(dim), 0)
     # Time is prelude surface. Other unit values live in units.dewy.
@@ -170,7 +191,8 @@ quantity_constant = (n: int, num: int, den: int, dim: int, expected: int) -> int
         nodes[a].a = i32(callee)
         set_list(a, [bc_int(value.numerator, pos), bc_int(value.denominator, pos)])
         check_expr(a, 0)
-    t = mk_quantity(ntype(a), dim)
+    tag = if dim != 0 and is_quantity(expected) and quantity_dimension(expected) == dim: quantity_tag(expected) else: 0
+    t = mk_quantity(ntype(a), dim, 0, tag)
     nodes[n] = Node(kind = .conv, pos = pos, a = i32(a), aux = i32(int(CV.quantity_const)), aux2 = i32(scale), type = i32(t), flags = i32(NF_CHECKED))
     last_checked = n
     t
@@ -189,7 +211,10 @@ quantity_constant_scale = (n: int) -> int:
 
 quantity_number = (n: int) -> int:
     if not is_quantity(ntype(n)): return n
-    if nodes[n].kind == .conv and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.quantity_const))): return int(nodes[n].a)
+    if nodes[n].kind == .conv and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.quantity_const))):
+        inner = int(nodes[n].a)
+        if is_quantity(ntype(inner)): return quantity_number(inner)
+        return inner
     a = mk(.conv, nodes[n].pos)
     nodes[a].a = i32(n)
     nodes[a].aux = i32(int(CV.none_))
@@ -316,7 +341,7 @@ quantity_operands = (a: int, b: int) -> int[]:
     add_flag(bb, NF_CHECKED)
     [aa, bb]
 
-quantity_binary = (n: int, a: int, b: int, expected: int) -> int:
+quantity_binary_plain = (n: int, a: int, b: int, expected: int) -> int:
     op = nodes[n].op as Tok
     ad = quantity_dimension(ntype(a))
     bd = quantity_dimension(ntype(b))
@@ -345,7 +370,7 @@ quantity_binary = (n: int, a: int, b: int, expected: int) -> int:
     if cmp: return T_BOOL
     quantity_result(n, dim)
 
-quantity_arithmetic = (n: int, name: int, a: int, b: int, expected: int) -> int:
+quantity_arithmetic_plain = (n: int, name: int, a: int, b: int, expected: int) -> int:
     dim = quantity_dimension(ntype(a))
     bd = quantity_dimension(ntype(b))
     power = name == intern("__dewy_power")
@@ -396,7 +421,7 @@ quantity_arithmetic = (n: int, name: int, a: int, b: int, expected: int) -> int:
     check_expr(n, quantity_base(expected))
     quantity_result(n, dim)
 
-quantity_unary = (n: int, expected: int) -> int:
+quantity_unary_plain = (n: int, expected: int) -> int:
     a = int(nodes[n].a)
     dim = quantity_dimension(ntype(a))
     op = nodes[n].op as Tok
@@ -419,7 +444,10 @@ quantity_compound = (s: int, target: int) -> bool:
     if nodes[s].op != i32(int(Tok.pluseq)) and nodes[s].op != i32(int(Tok.minuseq)): return false
     right = int(nodes[s].b)
     check_expr(right, target)
-    nodes[s].b = i32(quantity_number(coerce(last_checked, target)))
+    right = last_checked
+    # (t += 5°C: what is added to or taken from a temperature is a difference)
+    if quantity_offset_tagged(target) or quantity_offset_tagged(ntype(right)): right = quantity_delta_reading(right)
+    nodes[s].b = i32(quantity_number(coerce(right, target)))
     true
 
 bundled_word_rational_type = (t0: int) -> bool:
@@ -438,7 +466,7 @@ bundled_rational_type = (t0: int) -> bool:
 
 base_dimension = (i: int) -> int:
     powers = fill(0, 8)
-    powers[i] = 1
+    powers[i] = QUANTITY_POWER_DEN
     intern_dimension(powers)
 
 # (n calls the runtime function fname with the checked arguments args)
@@ -512,3 +540,493 @@ dewy_quantity_call = (n: int, name: int, a: int, expected: int) -> int:
     turns = quantity_float(number)
     if turns == 0: fatal(nodes[a].pos, "{fname} takes an angle counted in an integer, rational or float (found {dt(t)})")
     runtime_call(n, "__{fname}_turns", [turns], T_FLOAT)
+
+# ---------------- display units, offset scales and differences ----------------
+# A quantity type may carry a tag (in TypeInfo.bits) saying which unit it shows in and,
+# for an offset scale such as Celsius, which unit's zero it was measured from. Tags never
+# change the runtime number, which stays canonical (kelvins for a temperature point or
+# difference); they decide how a value prints and how offset values combine.
+struct QuantityUnit:
+    sym: str
+    num: int        # one unit is num/den canonical units
+    den: int
+    onum: int       # the unit's zero, in canonical units (0 °C is 5463/20 K)
+    oden: int
+quantity_units: QuantityUnit[] = [QuantityUnit("", 1, 1, 0, 1)]
+
+struct QuantityTag:
+    display: int    # the unit it shows in (0: chosen from the dimension and magnitude)
+    origin: int     # the offset unit it was written in (0: none)
+    delta: bool     # a difference of temperatures: shown without the unit's offset
+quantity_tags: QuantityTag[] = [QuantityTag(0, 0, false)]
+
+intern_quantity_unit = (sym: str, num: int, den: int, onum: int, oden: int) -> int:
+    loop i in [1..quantity_units.len()):
+        u = quantity_units[i]
+        if u.sym == sym and u.num == num and u.den == den and u.onum == onum and u.oden == oden: return i
+    quantity_units.push(QuantityUnit(sym, num, den, onum, oden))
+    quantity_units.len() - 1
+
+intern_quantity_tag = (display: int, origin: int, delta: bool) -> int:
+    loop i in [0..quantity_tags.len()):
+        q = quantity_tags[i]
+        if q.display == display and q.origin == origin and q.delta == delta: return i
+    quantity_tags.push(QuantityTag(display, origin, delta))
+    quantity_tags.len() - 1
+
+quantity_tag = (t0: int) -> int:
+    t = prune(t0)
+    if types[t].kind == .quantity: return int(types[t].bits)
+    0
+
+# (a temperature written in an offset unit, or a difference of temperatures)
+quantity_offset_tagged = (t: int) -> bool:
+    q = quantity_tags[quantity_tag(t)]
+    q.origin != 0 or q.delta
+
+quantity_is_delta = (t: int) -> bool: quantity_tags[quantity_tag(t)].delta
+
+# (the checked quantity n given tag; its number is unchanged)
+quantity_retag = (n: int, tag: int) -> int:
+    t = ntype(n)
+    if not is_quantity(t) or quantity_tag(t) == tag: return t
+    to = mk_quantity(quantity_base(t), quantity_dimension(t), nodes[n].pos, tag)
+    if nodes[n].kind == .conv and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.quantity_const))): nodes[n].type = i32(to)
+    else: wrap_conv(n, .none_, to)
+    add_flag(n, NF_CHECKED)
+    last_checked = n
+    to
+
+# (the checked constant num/den canonical units of dim, in the number type of like)
+quantity_offset_constant = (num: int, den: int, dim: int, like: int, pos: int) -> int:
+    c = mk(.unit_lit, pos)
+    quantity_constant(c, num, den, dim, mk_quantity(quantity_base(like), dim))
+    c
+
+# (n read as a difference: a temperature written in °C counts from 0 °C, so 20°C is 20 K)
+quantity_delta_reading = (n: int) -> int:
+    t = ntype(n)
+    if not is_quantity(t): return n
+    q = quantity_tags[quantity_tag(t)]
+    quantity_retag(n, 0)
+    if q.delta or q.origin == 0 or quantity_units[q.origin].onum == 0: return n
+    u = quantity_units[q.origin]
+    pos = nodes[n].pos
+    e = bc_bin(.minus, n, quantity_offset_constant(u.onum, u.oden, quantity_dimension(t), t, pos), pos)
+    quantity_internal_check(e)
+
+# (n read as a point: its canonical number)
+quantity_point_reading = (n: int) -> int:
+    quantity_retag(n, 0)
+    n
+
+# (x scaled in its own unit: (x - zero) op k + zero, so 20°C * 2 is 40°C)
+quantity_scaled = (x: int, k: int, op: Tok, x_first: bool, pos: int) -> int:
+    t = ntype(x)
+    q = quantity_tags[quantity_tag(t)]
+    reading = quantity_delta_reading(x)
+    left = if x_first: reading else: k
+    right = if x_first: k else: reading
+    e = quantity_operation(op, left, right, pos)
+    if q.delta or q.origin == 0: return e
+    u = quantity_units[q.origin]
+    sum = bc_bin(.plus, e, quantity_offset_constant(u.onum, u.oden, quantity_dimension(t), t, pos), pos)
+    quantity_internal_check(sum)
+
+# (a op b checked; Dewy division is exact)
+quantity_operation = (op: Tok, a: int, b: int, pos: int) -> int:
+    e = 0
+    if op == .slash and dewy_at(pos): e = bc_call("__dewy_divide", [a, b], pos)
+    else: e = bc_bin(op, a, b, pos)
+    quantity_internal_check(e)
+
+# (n becomes the checked e, tagged)
+quantity_become = (n: int, e: int, tag: int) -> int:
+    nodes[n] = nodes[e]
+    last_checked = n
+    if is_quantity(ntype(n)): return quantity_retag(n, tag)
+    ntype(n)
+
+# Literal-looking operands (`20°C`, `-5°F`, `(20°C as °F)`), before they are checked.
+quantity_literal_syntax = (e: int) -> bool:
+    if e == 0 or has_flag(e, NF_CHECKED): return false
+    k = nodes[e].kind
+    if k == .unary: return quantity_literal_syntax(int(nodes[e].a))
+    if k == .cast and nodes[e].aux2 != 1: return quantity_literal_syntax(int(nodes[e].a))
+    if k == .binary and nodes[e].op == i32(int(Tok.star)):
+        x = nodes[int(nodes[e].a)].kind
+        return (x == .int_lit or x == .float_lit) and nodes[int(nodes[e].b)].kind == .ident
+    false
+
+quantity_update_right = 0      # the right side of a compound update being checked
+quantity_left_literal = false
+quantity_right_literal = false
+
+# (the checked value of e, built here from checked operands without tags)
+quantity_internal_check = (e: int) -> int:
+    quantity_internal += 1
+    check_expr(e, 0)
+    quantity_internal -= 1
+    last_checked
+
+quantity_internal = 0
+
+quantity_binary = (n: int, a: int, b: int, expected: int) -> int:
+    a_lit = quantity_left_literal
+    b_lit = quantity_right_literal
+    quantity_left_literal = false
+    quantity_right_literal = false
+    if quantity_internal > 0: return quantity_binary_plain(n, a, b, expected)
+    ta = ntype(a)
+    tb = ntype(b)
+    op = nodes[n].op as Tok
+    # (a temperature minus a temperature is a difference unless a literal is taken away)
+    temperatures = op == .minus and quantity_dimension(ta) == base_dimension(4) and quantity_dimension(tb) == base_dimension(4)
+    if quantity_tag(ta) == 0 and quantity_tag(tb) == 0 and not temperatures: return quantity_binary_plain(n, a, b, expected)
+    pos = nodes[n].pos
+    aq = is_quantity(ta)
+    bq = is_quantity(tb)
+    cmp = op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
+    if not quantity_offset_tagged(ta) and not quantity_offset_tagged(tb) and not temperatures:
+        # Display units only: a sum keeps its first operand's, scaling keeps the quantity's.
+        keep = 0
+        if op == .plus or op == .minus: keep = if quantity_tag(ta) != 0: quantity_tag(ta) else: quantity_tag(tb)
+        else if (op == .star or op == .slash) and not bq: keep = quantity_tag(ta)
+        else if op == .star and not aq: keep = quantity_tag(tb)
+        quantity_retag(a, 0)
+        quantity_retag(b, 0)
+        t = quantity_binary_plain(n, a, b, expected)
+        if cmp or not is_quantity(t): return t
+        return quantity_retag(n, keep)
+    if op == .plus or op == .minus or cmp:
+        if not aq or not bq or quantity_dimension(ta) != quantity_dimension(tb): quantity_mismatch(pos, ta, tb)
+    da = quantity_is_delta(ta)
+    db = quantity_is_delta(tb)
+    if op == .plus:
+        # One side is a point and the other is read as a difference: start + 20°C.
+        if da and db: return quantity_become(n, quantity_operation(.plus, quantity_point_reading(a), quantity_point_reading(b), pos), quantity_tag(ta))
+        a_point = not da and (db or not a_lit or b_lit)
+        if a_point: return quantity_become(n, quantity_operation(.plus, quantity_point_reading(a), quantity_delta_reading(b), pos), quantity_tag(ta))
+        return quantity_become(n, quantity_operation(.plus, quantity_delta_reading(a), quantity_point_reading(b), pos), quantity_tag(tb))
+    if op == .minus:
+        if db or da: return quantity_become(n, quantity_operation(.minus, quantity_point_reading(a), quantity_delta_reading(b), pos), quantity_tag(ta))
+        if b_lit and not a_lit: return quantity_become(n, quantity_operation(.minus, quantity_point_reading(a), quantity_delta_reading(b), pos), quantity_tag(ta))
+        # point - point = difference, shown in the first point's unit
+        q = quantity_tags[quantity_tag(ta)]
+        unit = if q.display != 0: q.display else: q.origin
+        return quantity_become(n, quantity_operation(.minus, quantity_point_reading(a), quantity_point_reading(b), pos), intern_quantity_tag(unit, 0, true))
+    if cmp:
+        if da == db: return quantity_become(n, quantity_operation(op, quantity_point_reading(a), quantity_point_reading(b), pos), 0)
+        return quantity_become(n, quantity_operation(op, quantity_delta_reading(a), quantity_delta_reading(b), pos), 0)
+    if op == .star or op == .slash: return quantity_offset_product(n, a, b, op, expected)
+    quantity_retag(a, 0)
+    quantity_retag(b, 0)
+    quantity_binary_plain(n, a, b, expected)
+
+# Products and quotients with an offset temperature: a plain number scales it in its own
+# unit; another quantity combines with its difference reading; a temperature over a
+# temperature unit counts in that unit (t/°C is t's reading in Celsius).
+quantity_offset_product = (n: int, a: int, b: int, op: Tok, expected: int) -> int:
+    pos = nodes[n].pos
+    ta = ntype(a)
+    tb = ntype(b)
+    aq = is_quantity(ta)
+    bq = is_quantity(tb)
+    if aq and not bq: return quantity_become(n, quantity_scaled(a, b, op, true, pos), quantity_tag(ta))
+    if bq and not aq and op == .star: return quantity_become(n, quantity_scaled(b, a, op, false, pos), quantity_tag(tb))
+    if op == .slash and aq and bq and quantity_dimension(ta) == quantity_dimension(tb) and not quantity_is_delta(tb) and quantity_tags[quantity_tag(tb)].origin != 0:
+        u = quantity_units[quantity_tags[quantity_tag(tb)].origin]
+        top = a
+        if not quantity_is_delta(ta):
+            quantity_retag(a, 0)
+            top = bc_bin(.minus, a, quantity_offset_constant(u.onum, u.oden, quantity_dimension(ta), ta, pos), pos)
+            top = quantity_internal_check(top)
+        else: quantity_retag(a, 0)
+        return quantity_become(n, quantity_operation(.slash, top, quantity_delta_reading(b), pos), 0)
+    return quantity_become(n, quantity_operation(op, quantity_delta_reading(a), quantity_delta_reading(b), pos), 0)
+
+quantity_arithmetic = (n: int, name: int, a: int, b: int, expected: int) -> int:
+    ta = ntype(a)
+    tb = ntype(b)
+    if quantity_tag(ta) == 0 and quantity_tag(tb) == 0: return quantity_arithmetic_plain(n, name, a, b, expected)
+    if name == intern("__dewy_divide"):
+        if quantity_offset_tagged(ta) or quantity_offset_tagged(tb): return quantity_offset_product(n, a, b, .slash, expected)
+        keep = if not is_quantity(tb): quantity_tag(ta) else: 0
+        quantity_retag(a, 0)
+        quantity_retag(b, 0)
+        t = quantity_arithmetic_plain(n, name, a, b, expected)
+        if not is_quantity(t): return t
+        return quantity_retag(n, keep)
+    reading = quantity_delta_reading(a)
+    quantity_retag(b, 0)
+    quantity_arithmetic_plain(n, name, reading, b, expected)
+
+quantity_unary = (n: int, expected: int) -> int:
+    a = int(nodes[n].a)
+    t = ntype(a)
+    tag = quantity_tag(t)
+    if tag == 0: return quantity_unary_plain(n, expected)
+    q = quantity_tags[tag]
+    op = nodes[n].op as Tok
+    if op == .minus and not q.delta and q.origin != 0:
+        # (negating a reading: -(20°C) is -20°C)
+        u = quantity_units[q.origin]
+        pos = nodes[n].pos
+        quantity_retag(a, 0)
+        twice = quantity_offset_constant(2 * u.onum, u.oden, quantity_dimension(t), t, pos)
+        return quantity_become(n, quantity_operation(.minus, twice, a, pos), tag)
+    quantity_retag(a, 0)
+    quantity_unary_plain(n, expected)
+    quantity_retag(n, tag)
+
+# `const °C = __offset_unit("°C" K 5463K/20)`: a unit of the given size whose zero sits at
+# origin; its value, one degree, is origin + size.
+quantity_offset_unit = (n: int, sym: str, size: int, origin: int) -> int:
+    pos = nodes[n].pos
+    ss = quantity_constant_scale(size)
+    os = quantity_constant_scale(origin)
+    if ss < 0 or os < 0: fatal(pos, "an offset unit needs an exact constant size and origin")
+    dim = quantity_dimension(ntype(size))
+    if dim == 0 or quantity_dimension(ntype(origin)) != dim: quantity_mismatch(pos, ntype(size), ntype(origin))
+    s = quantity_scales[ss]
+    o = quantity_scales[os]
+    u = intern_quantity_unit(sym, s.numerator, s.denominator, o.numerator, o.denominator)
+    g = quantity_gcd(s.denominator, o.denominator)
+    den = s.denominator / g * o.denominator
+    num = s.numerator * (den / s.denominator) + o.numerator * (den / o.denominator)
+    quantity_constant(n, num, den, dim, 0)
+    quantity_retag(n, intern_quantity_tag(u, u, false))
+
+# ---------------- x as unit ----------------
+# (the written unit of `x as km/h`: names of constants joined by * / ^)
+quantity_unit_text = (e: int) -> str:
+    k = nodes[e].kind
+    if k == .tname or k == .ident: return name_of(int(nodes[e].name))
+    if k == .tquantity:
+        op = nodes[e].op as Tok
+        if op == .caret:
+            p = int(nodes[e].b)
+            if nodes[p].kind == .int_lit: return "{quantity_unit_text(int(nodes[e].a))}^{nodes[p].ival}"
+            return ""
+        left = quantity_unit_text(int(nodes[e].a))
+        right = quantity_unit_text(int(nodes[e].b))
+        if left == "" or right == "": return ""
+        if op == .slash: return "{left}/{right}"
+        return "{left}*{right}"
+    ""
+
+# (does the type syntax e name unit values, as in `x as km` or `x as (km/hour)`?)
+quantity_unit_syntax = (e: int) -> bool:
+    k = nodes[e].kind
+    if k == .tname:
+        s = lookup(int(nodes[e].name))
+        if s < 0: return false
+        sk = syms[s].kind
+        return sk == .global or sk == .const_ or sk == .local
+    if k == .tquantity:
+        if nodes[e].op == i32(int(Tok.caret)): return quantity_unit_syntax(int(nodes[e].a))
+        return quantity_unit_syntax(int(nodes[e].a)) and quantity_unit_syntax(int(nodes[e].b))
+    false
+
+# (the unit syntax e as an expression)
+quantity_unit_expr = (e: int) -> int:
+    pos = nodes[e].pos
+    if nodes[e].kind == .tname:
+        x = mk(.ident, pos)
+        nodes[x].name = nodes[e].name
+        return x
+    op = nodes[e].op as Tok
+    if op == .caret: return bc_call("__dewy_power", [quantity_unit_expr(int(nodes[e].a)), int(nodes[e].b)], pos)
+    if op == .slash and dewy_at(pos): return bc_call("__dewy_divide", [quantity_unit_expr(int(nodes[e].a)), quantity_unit_expr(int(nodes[e].b))], pos)
+    bc_bin(op, quantity_unit_expr(int(nodes[e].a)), quantity_unit_expr(int(nodes[e].b)), pos)
+
+# `x as unit`: the same quantity, shown in unit. A temperature keeps the scale it was
+# written in, so (20°C as °F) shows 68°F and still reads as a 20 K difference.
+quantity_as_unit = (n: int) -> int:
+    pos = nodes[n].pos
+    text = quantity_unit_text(int(nodes[n].b))
+    unit = quantity_unit_expr(int(nodes[n].b))
+    check_expr(unit, 0)
+    unit = last_checked
+    ut = ntype(unit)
+    if not is_quantity(ut): fatal(nodes[unit].pos, "`as` converts to a unit of measure here, but {text} is a {dt(ut)}")
+    scale = quantity_constant_scale(unit)
+    if scale < 0: fatal(nodes[unit].pos, "`as` converts to a constant unit, such as `km` or `km/hour`")
+    check_expr(int(nodes[n].a), 0)
+    x = last_checked
+    xt = ntype(x)
+    if not is_quantity(xt): fatal(pos, "{dt(xt)} has no unit to convert; multiply by a unit to give it one, as in `3*{text}`")
+    if quantity_dimension(xt) != quantity_dimension(ut): fatal(pos, "cannot convert a {dimension_str(quantity_dimension(xt))} to {text}, a unit of {dimension_str(quantity_dimension(ut))}")
+    uq = quantity_tags[quantity_tag(ut)]
+    shown = 0
+    if uq.origin != 0 and uq.display == uq.origin: shown = uq.origin
+    else:
+        q = quantity_scales[scale]
+        if q.numerator == 0: fatal(nodes[unit].pos, "a unit cannot be zero")
+        shown = intern_quantity_unit(text, q.numerator, q.denominator, 0, 1)
+    xq = quantity_tags[quantity_tag(xt)]
+    tag = if xq.delta: intern_quantity_tag(shown, 0, true) else: intern_quantity_tag(shown, xq.origin, false)
+    nodes[n] = nodes[x]
+    last_checked = n
+    quantity_retag(n, tag)
+
+# ---------------- display ----------------
+# A quantity prints in a unit chosen for its kind: each base dimension and each named
+# derived unit (N, J, W, ...) has a list of candidate units, and the value's magnitude picks
+# one at runtime (1500.0 m prints as 1.5 km, 3/10 s as 300 ms). Other dimensions print in
+# canonical units composed from a named unit and base units (m/s, N*s, V*s^(1/2)).
+# `x as unit` and offset scales print in their own unit.
+
+struct QuantityLadder:
+    units: int[]
+    base: int
+
+quantity_si_prefixes: str[] = ["n", "µ", "m", "", "k", "M", "G"]
+
+# (sym with SI prefixes from n to G, sym itself worth one canonical unit)
+quantity_si_ladder = (sym: str) -> QuantityLadder:
+    units: int[]
+    loop i in [0..7):
+        num = 1
+        den = 1
+        loop j in [i..3): den *= 1000
+        loop j in [3..i): num *= 1000
+        units.push(intern_quantity_unit(quantity_si_prefixes[i] + sym, num, den, 0, 1))
+    QuantityLadder(units, 3)
+
+quantity_one_unit = (sym: str, num: int, den: int) -> QuantityLadder:
+    QuantityLadder([intern_quantity_unit(sym, num, den, 0, 1)], 0)
+
+# base symbols, in the order composite units are written (kg*m^2/s^2)
+quantity_base_order: int[] = [2, 1, 0, 3, 4, 5, 6, 7]
+quantity_base_symbols: str[] = ["s", "m", "kg", "A", "K", "mol", "cd", "turn"]
+quantity_named_symbols: str[] = ["Hz", "N", "Pa", "J", "W", "C", "V", "Ω"]
+# powers of Time, Length, Mass, Current for each named unit
+quantity_named_powers: int[][] = [[-1, 0, 0, 0], [-2, 1, 1, 0], [-2, -1, 1, 0], [-2, 2, 1, 0], [-3, 2, 1, 0], [1, 0, 0, 1], [-3, 2, 1, -1], [-3, 2, 1, -2]]
+
+quantity_named_dimension = (i: int) -> int:
+    powers = fill(0, 8)
+    loop j in [0..4): powers[j] = quantity_named_powers[i][j] * QUANTITY_POWER_DEN
+    intern_dimension(powers)
+
+quantity_power_suffix = (stored: int) -> str:
+    if stored == QUANTITY_POWER_DEN: return ""
+    shown = quantity_power_text(stored)
+    if find_byte(shown, '/') >= 0 or stored < 0: return "^({shown})"
+    "^{shown}"
+
+# (named, or "", times base units with the stored powers; "" when nothing is left)
+quantity_composite_text = (named: str, powers: int[]) -> str:
+    top = named
+    bottom = ""
+    loop i in quantity_base_order:
+        p = powers[i]
+        if p > 0:
+            if top != "": top += "*"
+            top += quantity_base_symbols[i] + quantity_power_suffix(p)
+        else if p < 0: bottom += "/" + quantity_base_symbols[i] + quantity_power_suffix(-p)
+    if top == "" and bottom == "": return ""
+    if top == "": top = "1"
+    top + bottom
+
+quantity_factor_count = (powers: int[]) -> int:
+    count = 0
+    loop p in powers:
+        if p != 0: count += 1
+    count
+
+quantity_ladder = (dim: int) -> QuantityLadder:
+    powers = quantity_dimensions[dim]
+    if dim == base_dimension(0):
+        units: int[]
+        loop item in [("ns", 1, 1000000000), ("µs", 1, 1000000), ("ms", 1, 1000), ("s", 1, 1), ("min", 60, 1), ("h", 3600, 1)]:
+            units.push(intern_quantity_unit(item.0, item.1, item.2, 0, 1))
+        return QuantityLadder(units, 3)
+    if dim == base_dimension(1):
+        ladder = quantity_si_ladder("m")
+        return QuantityLadder(ladder.units[0..5), 3)
+    if dim == base_dimension(2):
+        units: int[]
+        loop item in [("mg", 1, 1000000), ("g", 1, 1000), ("kg", 1, 1)]:
+            units.push(intern_quantity_unit(item.0, item.1, item.2, 0, 1))
+        return QuantityLadder(units, 2)
+    if dim == base_dimension(7): return quantity_one_unit("°", 1, 360)
+    if dim == base_dimension(4): return quantity_one_unit("K", 1, 1)
+    if dim == base_dimension(6): return quantity_one_unit("cd", 1, 1)
+    if dim == base_dimension(3): return quantity_si_ladder("A")
+    if dim == base_dimension(5): return quantity_si_ladder("mol")
+    loop i in [0..quantity_named_symbols.len()):
+        if quantity_named_dimension(i) == dim: return quantity_si_ladder(quantity_named_symbols[i])
+    # Fewest factors: base units alone, or one named unit times base units.
+    best = quantity_composite_text("", powers)
+    cost = quantity_factor_count(powers)
+    loop i in [0..quantity_named_symbols.len()):
+        rest = quantity_dimensions[combine_dimensions(dim, quantity_named_dimension(i), -1, 0)]
+        if quantity_factor_count(rest) + 1 < cost:
+            cost = quantity_factor_count(rest) + 1
+            best = quantity_composite_text(quantity_named_symbols[i], rest)
+    quantity_one_unit(best, 1, 1)
+
+# (the text after the number: " km", but "°C" and "°" attach)
+quantity_shown_symbol = (sym: str) -> str:
+    if starts_with(sym, "°"): return sym
+    " " + sym
+
+# The text of the checked quantity x, as a checked string expression; 0 for a number
+# Dewy cannot divide exactly or in floating point (it then prints as a plain number).
+quantity_display = (x: int) -> int:
+    t = prune(ntype(x))
+    base = prune(quantity_base(t))
+    exact = is_int(base) or base == T_MATH_INT or bundled_rational_type(base) or bundled_bigint_type(base)
+    if not exact and not is_float(base): return 0
+    pos = nodes[x].pos
+    q = quantity_tags[quantity_tag(t)]
+    ladder = QuantityLadder([], 0)
+    shown = if q.display != 0: q.display else: q.origin
+    if shown != 0: ladder = QuantityLadder([shown], 0)
+    else: ladder = quantity_ladder(quantity_dimension(t))
+    onum = 0
+    oden = 1
+    if shown != 0 and not q.delta:
+        onum = quantity_units[shown].onum
+        oden = quantity_units[shown].oden
+    ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
+    syms: int[]
+    nums: int[]
+    dens: int[]
+    loop u in ladder.units:
+        syms.push(bc_str(quantity_shown_symbol(quantity_units[u].sym), pos))
+        nums.push(bc_int(quantity_units[u].num, pos))
+        dens.push(bc_int(quantity_units[u].den, pos))
+    number = quantity_number(x)
+    add_flag(number, NF_CHECKED)
+    fname = "_quantity_exact"
+    offset = 0
+    if exact:
+        if not bundled_rational_type(base):
+            r = mk(.call, pos)
+            nodes[r].a = i32(bc_field(bc_ident("$dewy_rational", pos), "rational", pos))
+            set_list(r, [number])
+            number = r
+        offset = mk(.call, pos)
+        nodes[offset].a = i32(bc_field(bc_ident("$dewy_rational", pos), "rational", pos))
+        set_list(offset, [bc_int(onum, pos), bc_int(oden, pos)])
+    else:
+        if base == T_F32: fname = "_quantity_float32"
+        else:
+            fname = "_quantity_float"
+            number = quantity_float(number)
+        offset = mk(.float_lit, pos)
+        scaled = quantity_scale(onum * quantity_units[ladder.units[0]].den, oden)
+        nodes[offset].fval = f64(quantity_scales[scaled].numerator) / f64(quantity_scales[scaled].denominator)
+    c = mk(.call, pos)
+    nodes[c].a = i32(bc_field(bc_ident("$dewy_rational", pos), fname, pos))
+    set_list(c, [number, quantity_array(syms, T_STR, pos), quantity_array(nums, T_INT, pos), quantity_array(dens, T_INT, pos), bc_int(ladder.base, pos), offset])
+    check_expr(c, T_STR)
+    last_checked
+
+quantity_array = (items: int[], elem: int, pos: int) -> int:
+    a = mk(.array, pos)
+    set_list(a, items)
+    check_expr(a, mk_array(elem))
+    last_checked
