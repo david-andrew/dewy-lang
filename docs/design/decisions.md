@@ -225,4 +225,16 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   `main` provably assigns it before any read; forbid-only rows check the body
   while callers see the inferred effects; distinct `@` parameters are disjoint
   for the solver; regex `find` returns `Match | Missing`.
+- Compile speed framing (A, 2026-10-21): the north star is 200–250k lines/s
+  single-threaded on real code (the flagships, not synthetic), default build;
+  parallel workers are measured but secondary. It takes a different compiler
+  architecture, not tuning, via a strangler-fig migration (not a rewrite).
+  Track A: the five structural fixes (milestone: flagship median ≥ 50k lines/s
+  single-thread). Track B: B0 per-phase per-node cost budgets gated on the
+  flagship panel (~1.2k instructions/node total); B1 an architecture design
+  (docs/design/compiler_architecture.md; Astra designs, Sol audits, David
+  approves); B2 phase-by-phase migration behind stable interfaces, most
+  expensive first; B3 new import-cycle-leaf modules written in Dewy. Track C:
+  capability work continues. No precomputed library summaries or images
+  without David's explicit approval.
 

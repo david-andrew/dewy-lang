@@ -14,7 +14,7 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 | Tier-4 flagship programs (1–5k lines each) | 5/7 written (game, KV store, crypto, notes service, Dewy frontend) | 7/7 |
 | Programs passing under no-traps (`DEWY_INTERNAL_FACT_POLICY=require-static`) | 63/120 ladder+examples (per directory); cases ~1342/1694 | all, then flip the default |
 | Compile latency, hello world / median ladder program | ~65 ms (load ~20; library floor: 75 files, 38k lines) | hello ~50 ms guardrail |
-| Compile throughput, single thread, default build, flagships (library separate) | ~10–30k lines/s marginal | 250k lines/s (200k minimum) |
+| Compile throughput, single thread, default build, flagships (library separate) | 13–37k lines/s | Track A: median ≥50k; north star 200–250k |
 | Critical-path instructions at 4 workers (secondary) | synthetic 0.60 G | no regression |
 | Single-thread instructions, synthetic-22k (regression signal) | 1.17 G | ~0.09 G (250k lines/s) |
 | Hello-world compile (guardrail) | 31 ms | ~50 ms |
