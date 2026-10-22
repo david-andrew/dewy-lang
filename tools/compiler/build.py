@@ -12,7 +12,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-ORIGIN = ROOT / 'docs/origin'
 
 # The bootstrap chain, and the compiler modules written in Dewy:
 #   1. stage0/ (C) builds core-bootstrap from compiler/, with bootstrap/'s
@@ -52,8 +51,6 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False) ->
     output.mkdir(parents=True, exist_ok=False)
     for name in ('compiler', 'lib', 'stage0', 'bootstrap'):
         shutil.copytree(ROOT / name, output / name, ignore=shutil.ignore_patterns('sloppy0', '__pycache__'))
-    for name in ('LICENSE', 'NOTICE'):
-        shutil.copy2(ORIGIN / name, output / name)
     sources = {str(p.relative_to(output)): identity(p) for p in sorted(output.rglob('*')) if p.is_file()}
     binary_dir = output / 'bin'
     binary_dir.mkdir()
@@ -132,7 +129,7 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False) ->
 if __name__ == '__main__':
     cli = argparse.ArgumentParser(description=__doc__)
     seeds = cli.add_mutually_exclusive_group(required=True)
-    seeds.add_argument('--seed', type=Path, help='existing native Sloppy or Dewy core compiler')
+    seeds.add_argument('--seed', type=Path, help='existing native Dewy core compiler')
     seeds.add_argument('--bootstrap', action='store_true', help='build from the independent C bootstrap')
     cli.add_argument('--output', type=Path, required=True, help='new directory for the standalone toolchain')
     args = cli.parse_args()

@@ -13,8 +13,8 @@ edit loop. Games are a primary customer. See [docs/GOALS.md](docs/GOALS.md).
 
 ## Status
 
-Experimental (version 0.0.0). The compiler is a compact native/web compiler,
-originally forked from Sloppy, that implements a growing part of the designed
+Experimental (version 0.0.0). The compiler is a compact native/web compiler
+that implements a growing part of the designed
 language; the acceptance ladder in [ROADMAP.md](ROADMAP.md) tracks how much. The previous implementation (the Python/native compiler, µDewy
 and their library) is archived in git tag `archive/master-pre-restart`.
 
@@ -43,15 +43,14 @@ python3 -m tools.compiler.build --bootstrap --output /tmp/dewy-core   # standalo
 | `tests/` | the test suite; `tests/legacy_corpus/` holds untested pre-restart programs |
 | `tools/` | `tools/dewy` launcher, `tools/core.py` driver, `tools/compiler/` build, packaging, speed gate and fuzz tooling |
 | `bench/` | application benchmarks with C counterparts |
-| `docs/` | goals, language guide, development guide, design notes, origin |
+| `docs/` | goals, language guide, development guide, design notes |
 | `editors/vscode/` | VS Code extension |
 | `site/` | the dewy-lang.org website |
 
 ## Documentation
 
 [Goals](docs/GOALS.md) · [roadmap](ROADMAP.md) · [language guide and tour](docs/LANGUAGE.md) ·
-[developing the compiler](docs/DEVELOPMENT.md) · [design notes](docs/design/README.md) ·
-[origin and licensing](docs/origin/ORIGIN.md)
+[developing the compiler](docs/DEVELOPMENT.md) · [design notes](docs/design/README.md)
 
 ## Install
 

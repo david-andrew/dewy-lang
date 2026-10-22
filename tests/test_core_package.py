@@ -82,8 +82,6 @@ def test_core_package_rejects_changed_payload(toolchain, tmp_path, changed):
     shutil.copy2(toolchain / provenance, copy / provenance)
     for name in ('bin', 'lib'):
         shutil.copytree(toolchain / name, copy / name)
-    for name in ('LICENSE', 'NOTICE'):
-        shutil.copy2(toolchain / name, copy / name)
     if changed == 'compiler':
         changed = 'bin/dewy-core.exe' if os.name == 'nt' else 'bin/dewy-core'
     with (copy / changed).open('ab') as stream:

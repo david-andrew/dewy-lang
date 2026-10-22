@@ -1,6 +1,5 @@
-"""Sloppy random program generator, adapted for Dewy shared-backend validation.
+"""Random program generator for shared-backend validation.
 
-Upstream 6725916fc98f650372fbdf6bd72e266a74a1fe2e tools/fuzz.py; see docs/origin/LICENSE.
 The runner chooses the supported feature subset explicitly. No work at import.
 """
 import random

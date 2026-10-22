@@ -1,8 +1,7 @@
 # Developing the Dewy compiler
 
 The compiler connects an in-process Dewy frontend to a compact checker, runtime,
-native/web backends and libraries, forked from Sloppy (see
-[`origin/ORIGIN.md`](origin/ORIGIN.md)). It is an experimental subset of Dewy;
+native/web backends and libraries. It is an experimental subset of Dewy;
 start with the [language guide and executable tour](LANGUAGE.md).
 
 Projects mark test functions with `$test` (checked by `$expect`) and run them
@@ -253,7 +252,7 @@ generated programs.
   differential test keeps each pair giving the same results.
 
 Build hashes identify provenance; byte-identical executables are not required.
-Runtime tuning variables inherited from Sloppy keep their `SLOPPY_*` names for now.
+Runtime tuning variables keep their `SLOPPY_*` names for now.
 
 ## Releases and installers
 
@@ -370,7 +369,7 @@ python3 -m tools.compiler.vsix --target linux-x64 --toolchain /tmp/dewy-core-lin
 ``` It runs in the GitHub environment `marketplace-publish`, which only admits
 `vscode-v*` tags and the main branches.
 
-One-time setup (mirrors Sloppy's):
+One-time setup:
 
 - **Marketplace:** Azure managed identity → Federated credentials → GitHub Actions:
   organization `david-andrew` (ID `41205753`), repository `dewy-lang` (ID `141009909`),
