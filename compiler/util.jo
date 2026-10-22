@@ -207,6 +207,40 @@ source_digest = (s: str) -> int:
         i += 1
     int(h xor (h >> 29))
 
+# `build --time`'s line counts (pl_on): the source lines the compile processes, as the speed yardstick
+# counts them. A line is code when it has something besides blanks and comments (`#` to the end of the
+# line, `#{ ... }#` nesting): tools/compiler/speed_corpus.py's source_lines, the same count.
+pl_on = false
+pl_files: int[]                  # the files parsed (counted when the report is made: the instruction split stays clean)
+pl_reached: int[]                # lazy library bodies parsed on demand (ensure_body): file, start, end
+pl_inst_decls: int[]             # the declaration of each generic instance made
+
+code_lines = (src: str, a: int, b: int) -> int:
+    count = 0
+    depth = 0
+    code = false
+    i = a
+    loop i < b:
+        c = src[i]
+        if c == '\n':
+            if code: count += 1
+            code = false
+            i += 1
+        else if c == '#' and i + 1 < b and src[i + 1] == '{':
+            depth += 1
+            i += 2
+        else if depth > 0 and c == '}' and i + 1 < b and src[i + 1] == '#':
+            depth -= 1
+            i += 2
+        else if depth > 0: i += 1
+        else if c == '#':
+            loop i < b and src[i] != '\n': i += 1
+        else:
+            if c != ' ' and c != '\t' and c != '\r': code = true
+            i += 1
+    if code: count += 1
+    count
+
 pos_in_lib = (p: int) -> bool:
     if p <= 0 or len(lib_root) == 0: return false
     f = pos_file(p)

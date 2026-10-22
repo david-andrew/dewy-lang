@@ -2853,6 +2853,10 @@ ensure_body = (d: int):
     p_file = pos_file(nodes[d].pos)
     start = int(nodes[b].ival)
     p_src = files[p_file].src
+    if pl_on:
+        pl_reached.push(p_file)
+        pl_reached.push(start)
+        pl_reached.push(start + int(nodes[b].aux))
     toks = lex(p_file, p_src, start, start + int(nodes[b].aux))
     ti = 0
     p_base = 0

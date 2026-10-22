@@ -963,6 +963,7 @@ load_module = (path: str, is_prelude: bool, from: int) -> int:
     mi = modules.len() - 1
     module_by_path[key] = mi
     p_lazy = is_prelude and not ide_on
+    if pl_on: pl_files.push(fi)
     decls = source_declarations(fi)
     p_lazy = false
     modules[mi].decls = decls
@@ -1910,6 +1911,7 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
     if sig.ret != 0: fns[f].ret = i32(subst(int(sig.ret), zt))
     else if nodes[decl].b != 0 and syntactic_void(int(nodes[decl].b)): fns[f].ret = i32(T_VOID)
     if refine_active and sig.generic: ref_validate_signature(fns[f].ptypes, int(fns[f].ret), int(sig.mutmask), use_pos)
+    if sig.generic and pl_on: pl_inst_decls.push(decl)
     if sig.generic: fns[f].body = i32(clone(int(nodes[decl].b)))
     else: fns[f].body = nodes[decl].b
     if has_flag(decl, NF_EXTERN) and fns[f].ret == 0: fns[f].ret = i32(T_VOID)

@@ -139,3 +139,61 @@ ic_report = ():
                 side_of[f] = side
         counts[side] += 1
     eprint("nodes: root {counts[IC_ROOT]}, library {counts[IC_LIB]}, shared {counts[IC_SHARED]}")
+
+# The code lines of the source a declaration spans (its first node's line to its last node's)
+ic_decl_lines = (decl: int) -> int:
+    f = pos_file(nodes[decl].pos)
+    if f <= 0 and nodes[decl].pos <= 0 or f >= files.len(): return 0
+    lo = 1 << 62
+    hi = -1
+    stack = [decl]
+    loop stack.len() > 0:
+        n = stack.pop()
+        p = nodes[n].pos
+        if p > 0 and pos_file(p) == f:
+            o = pos_off(p)
+            if o < lo: lo = o
+            if o > hi: hi = o
+        if nodes[n].a != 0: stack.push(int(nodes[n].a))
+        if nodes[n].b != 0: stack.push(int(nodes[n].b))
+        if nodes[n].c != 0: stack.push(int(nodes[n].c))
+        if nodes[n].d != 0: stack.push(int(nodes[n].d))
+        loop k in kids(n): stack.push(k)
+        loop k in kids2(n): stack.push(k)
+    if hi < 0: return 0
+    src = files[f].src
+    a = lo
+    loop a > 0 and src[a - 1] != '\n': a -= 1
+    b = hi
+    loop b < len(src) and src[b] != '\n': b += 1
+    code_lines(src, a, b)
+
+# The source lines the compile processed: the program's files; the library files parsed, less the
+# bodies nobody asked for, plus (once per instance, as each is checked and lowered again) the
+# declaration of every generic instance made.
+ic_lines_report = ():
+    if not pl_on: return
+    root = 0
+    library = 0
+    loop f in pl_files:
+        n = code_lines(files[f].src, 0, len(files[f].src))
+        if len(lib_root) > 0 and starts_with(files[f].path, lib_root): library += n
+        else: root += n
+    reached = 0
+    for_i = 0
+    loop for_i < pl_reached.len():
+        reached += code_lines(files[pl_reached[for_i]].src, pl_reached[for_i + 1], pl_reached[for_i + 2])
+        for_i += 3
+    unasked = 0
+    loop i in [1..nodes.len()):
+        if nodes[i].kind == .block and has_flag(i, NF_LAZY):
+            f = pos_file(nodes[i].pos)
+            if f >= 0 and f < files.len(): unasked += code_lines(files[f].src, int(nodes[i].ival), int(nodes[i].ival) + int(nodes[i].aux))
+    made: {int: int} = {}
+    loop d in pl_inst_decls: made[d] = (made.get(d) ?? 0) + 1
+    inst_lines = 0
+    loop d in pl_inst_decls:
+        if made.has(d):
+            inst_lines += ic_decl_lines(d) * (made.get(d) ?? 0)
+            made.remove(d)
+    eprint("lines: root {root}, library {library - unasked + reached}, instance {inst_lines}; {pl_inst_decls.len()} instances; library parsed {library}, bodies reached {reached} of {unasked}")

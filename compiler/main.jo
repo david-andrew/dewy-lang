@@ -357,7 +357,9 @@ source_counts = ():
 compile = (path: str, out0: str) -> str:
     if watch_build and not watch_first: late_binding = true
     t0 = time()
-    if timing: ic_start()
+    if timing:
+        pl_on = true
+        ic_start()
     ra_stat = env("SLOPPY_RASTAT") != none
     ra_verbose = (env("SLOPPY_RASTAT") ?? "") == "v"
     if env("SLOPPY_RA_LINEAR") != none: ra_prio = false
@@ -644,6 +646,7 @@ compile = (path: str, out0: str) -> str:
     if timing:
         eprint("check {(t1 - t0) * 1000.0:.1} ms, lower+codegen {(t2 - t1) * 1000.0:.1} ms, write {(t3 - t2) * 1000.0:.1} ms; {lfuncs.len()} functions, {nodes.len()} nodes, {size} bytes of code")
         ic_report()
+        ic_lines_report()
         source_counts()
     if not ok:
         # (a patch for sloppy watch tells its own trouble)

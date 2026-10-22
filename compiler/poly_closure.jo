@@ -144,6 +144,7 @@ poly_inst = (decl: int, targs: int[], use_pos: int) -> int:
         # A recursive call (through the object of a record literal's method, or
         # a parameter) selects this instance before its body is checked.
         fns[f].fntype = i32(mk_fn(fns[f].ptypes, int(fns[f].ret), int(sig.mutmask), decl_fn_labels(decl)))
+    if pl_on: pl_inst_decls.push(decl)
     fns[f].body = i32(clone(int(nodes[decl].b)))
     fn_instances[key] = f
     decl_infos[decl_info(poly_families[family].decl)].insts.push(f)

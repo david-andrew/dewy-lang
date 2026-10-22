@@ -47,6 +47,7 @@ parse_prelude_module = (m: int):
     prelude_pending.remove(m)
     icb = ic_switch(IC_LOAD, IC_LIB)
     p_lazy = true
+    if pl_on: pl_files.push(int(modules[m].file))
     modules[m].decls = source_declarations(int(modules[m].file))
     p_lazy = false
     ic_restore(icb)
