@@ -18,13 +18,14 @@ The kernels are recursive fib(32), a 16M-element sum with fixed 4096-element
 reduction leaves, 1024² matmul with 32² output tiles, twenty 1024² Jacobi steps,
 and recursive mergesort of 262144 integers. Tile sizes describe the numerical
 algorithm, not scheduler chunk sizes. All checksums are computed in source
-order. Dewy kernels retain the existing `parallel_*` entry points so an older
-compiler can measure precisely the same source; syntax is covered separately.
+order. Dewy kernels retain the existing `parallel_*` entry points. Mergesort
+requires mutable slice support; older compilers cannot build that kernel.
 
-These comparisons include representation costs. Dewy mergesort returns arrays
-at each recursive node, while C uses two flat buffers. Dewy Jacobi copies and
-updates interior rows each step, sharing unchanged boundary rows; C swaps two
-flat grids. Matmul hoists tile-row and input-row index bases so the existing
+These comparisons include representation costs. Both mergesorts use two
+preallocated flat buffers; Dewy passes checked, borrowed slice descriptors
+through its recursive calls and disjoint fork arms. Both Jacobi kernels swap
+two preallocated flat grids; Dewy shares the input as a read-only borrow and
+partitions output rows across a recursive binary fork. Matmul hoists tile-row and input-row index bases so the existing
 vectorizer can recognize the inner loop. OpenMP fib and mergesort use explicit
 serial cutoffs of 20 and 2048 respectively. Dewy has no user-selected scheduler
 cutoff. Fib's sequential path is naive recursion in both languages. Report these

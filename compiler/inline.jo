@@ -6,6 +6,7 @@
 use 'ir.jo'
 use 'check.jo'
 use 'opt.jo'
+use 'partition.jo'
 
 const INLINE_MAX = 24       # callee size limit, in IR instructions
 const INLINE_LOOP_MAX = 96  # ... for a call in a loop to a leaf (a function that calls nothing)
@@ -129,7 +130,9 @@ rel_collect = ():
 # loop of its own (into callers that are not large: in a large one, what its loop keeps in
 # registers may not get them, and a call costs little next to a loop)
 inlinable = (f: IrFn) -> int:
-    if f.cabi or f.noinline or len(f.export_name) > 0 or f.code.len() > INLINE_LOOP_MAX: return 0
+    borrowed_body = partition_active and partition_inline_body(f.fn_index)
+    limit = if borrowed_body: 192 else: INLINE_LOOP_MAX
+    if f.cabi or f.noinline or len(f.export_name) > 0 or f.code.len() > limit: return 0
     leaf = true
     has_loop = false
     size = f.code.len()
@@ -159,7 +162,11 @@ inlinable = (f: IrFn) -> int:
     # runtime tier it up; embedding it in a one-shot outer loop can keep the
     # entire workload in baseline machine code for that invocation.
     if target_wasm and has_loop: return 0
-    if size > INLINE_LOOP_MAX: return 0
+    if size > limit: return 0
+    # A checked fork adapter only selects a branch and constructs borrowed
+    # descriptors. Inlining its literal-index call removes the unused arm and
+    # stack environment; the recursive activation itself stays noinline.
+    if borrowed_body and not has_loop: return 1
     if size <= INLINE_MAX: return 1
     # A single tiny read-only search has bounded register needs even in a large
     # caller. Keep larger/allocating loops under the existing caller-size cap.

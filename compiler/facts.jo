@@ -424,10 +424,12 @@ fact_route_bounds = (s: mut FactState, route: FactRoute, values: int[]):
         dir_index(n, lo == 1 and hi == 1)
         if lo != 1 or hi != 1: wit_index(n, s, index, length, lo, hi)
 
-# Effect verification asks which element accesses a body's own facts keep in
-# bounds. A probe records answers instead of reporting them: it is never a
-# strict obligation and never removes a runtime check.
+# Effect verification asks which accesses a body's own facts keep in bounds.
+# A probe records answers instead of reporting obligations. Borrowed partition
+# lowering can also use these answers: its checked ABI makes mutable array
+# parameters disjoint and forbids resizing, copying, escaping and opaque calls.
 fact_probe_on = false
+fact_probe_disjoint = 0
 fact_probe: {int: bool} = {}
 
 fact_probe_index = (n: int, s: mut FactState, index: int, length: int):
@@ -448,7 +450,7 @@ fact_probe_route = (s: mut FactState, route: FactRoute, values: int[]):
 # Analyze f's body from an unknown entry (plus its checked parameter
 # refinements) and return the element accesses proven in bounds on every path
 # that reaches them. Nested runs are refused: the caller keeps its obligation.
-fact_probe_function = (f: int) -> {int: bool}:
+fact_probe_function = (f: int, disjoint: bool = false) -> {int: bool}:
     fact_probe = {}
     if fact_owner != 0 or fact_probe_on or f <= 0 or f >= fns.len() or fns[f].state != 2 or fns[f].body == 0: return fact_probe
     saved_proof = proof_active
@@ -456,6 +458,7 @@ fact_probe_function = (f: int) -> {int: bool}:
     proof_active = false
     result_active = false
     fact_probe_on = true
+    fact_probe_disjoint = if disjoint: f else: 0
     fact_owner = f
     fact_terms = [FactTerm()]
     state = FactState()
@@ -464,6 +467,7 @@ fact_probe_function = (f: int) -> {int: bool}:
     fact_owner = 0
     fact_terms = []
     fact_probe_on = false
+    fact_probe_disjoint = 0
     proof_active = saved_proof
     result_active = saved_result
     fact_probe
@@ -543,6 +547,9 @@ fact_store = (s: mut FactState, e: int, value: int, at: int):
 
 fact_exposed = (p: PlaceIdentity) -> bool:
     if p.root != .local: return true
+    # Only the closed, checked partition ABI supplies this guarantee. Ordinary
+    # callers and speculative summaries retain conservative alias invalidation.
+    if fact_probe_disjoint != 0 and fact_owner == fact_probe_disjoint and int(locals[p.declaration].owner) == fact_probe_disjoint and tkind(int(locals[p.declaration].type)) == .array and int(locals[p.declaration].flags) & LF_MUTPARAM != 0: return false
     int(locals[p.declaration].flags) & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_ADDR | LF_BYREF | LF_EXPOSED) != 0
 
 fact_forget = (s: mut FactState, at: int, reason: FactReason, all: bool = false):

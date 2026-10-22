@@ -59,7 +59,24 @@ lx_counting = (code: Ins[], ends: int[]) -> CLoop[]:
         ctr = int(cmp.a)
         endv = int(cmp.b)
         # (the increment defines the counter: the bound must be another vreg)
-        if endv == ctr or inc.op != .add or int(inc.dst) != ctr or int(inc.a) != ctr or not lx_is_const(int(inc.b), 1): continue
+        if endv == ctr or int(inc.dst) != ctr: continue
+        step = inc
+        # CSE can reuse a stencil's i+1 as the loop increment. The
+        # temporary must have one definition in this iteration, from i+1.
+        if inc.op == .mov:
+            at = lx_def_at(code, int(inc.a), i + 1, e - 3)
+            if at < 0: continue
+            # The reused addition must execute on every path to the latch.
+            # A branch can skip a definition in an enclosing block; a value
+            # made inside a conditional is not an induction step either.
+            dominates = true
+            loop q in [i + 1..at):
+                op = code[q].op
+                if op == .br or op == .brif or op == .brtable: dominates = false
+                if op == .if_ and ends[q] >= at: dominates = false
+            if not dominates: continue
+            step = code[at]
+        if step.op != .add or int(step.a) != ctr or not lx_is_const(int(step.b), 1): continue
         # (nothing else changes the counter or the bound, and no loop is nested)
         ok = true
         loop p in [i + 1..e - 3):
@@ -179,7 +196,7 @@ lx_checks = (code: Ins[], ends: int[], L: CLoop) -> LCheck[]:
                 continue
             xd = lx_def_at(code, x, L.pl + 1, L.inc)
             if xd >= 0 and code[xd].op == .add and int(code[xd].a) == L.ctr and is_kv(int(code[xd].b)) and lx_def_at(code, L.ctr, L.pl + 1, L.inc) < 0:
-                out.push(LCheck(p, q, d, 0, L.ctr, kv_of(int(code[xd].b)), len, []))
+                out.push(LCheck(p, q, d, 3, x, kv_of(int(code[xd].b)), len, []))
                 continue
             if lx_def_at(code, L.ctr, L.pl + 1, L.inc) >= 0: continue
             lx_terms = []
@@ -188,7 +205,7 @@ lx_checks = (code: Ins[], ends: int[], L: CLoop) -> LCheck[]:
             if not lx_decomp(code, L, x, 1, p, 0): continue
             if lx_tk <= -(1 << 40) or lx_tk >= (1 << 40) or lx_terms.len() > 4: continue
             if lx_tc == 1 and lx_terms.len() == 0:
-                out.push(LCheck(p, q, d, 0, L.ctr, lx_tk, len, []))
+                out.push(LCheck(p, q, d, 3, x, lx_tk, len, []))
             else if lx_tc == 1: out.push(LCheck(p, q, d, 3, x, lx_tk, len, lx_terms))
             else if lx_tc == 0: out.push(LCheck(p, q, d, 4, 0, lx_tk, len, lx_terms))
             continue
@@ -302,6 +319,7 @@ struct VPlan:
     offs: int[]
     stores: bool[]
     indexes: int[]          # counter, or a checked counter + invariant offset
+    index_defs: int[]       # intermediate affine calculations omitted from vector bodies
 
 # where each vreg first and last appears (defined or used), worked out on first need:
 # most loops fail their plan on an instruction kind before asking
@@ -344,33 +362,34 @@ lx_in_check = (p: int, checks: LCheck[]) -> bool:
         if (p >= ch.pi and p <= ch.pend) or p == ch.pc: return true
     false
 
-# A single shifted-index calculation can disappear from the vector body
-# when only checked memory indexes use it. Other uses (including stored values)
-# must keep their scalar meaning and disqualify this narrow vector plan.
-lx_vec_index = (code: Ins[], L: CLoop, checks: LCheck[], p: int) -> bool:
+# A checked affine index may be built in several steps (base+i, then
+# plus/minus a row stride). Every use of each intermediate must lead only
+# to another such index or to its checked memory access; scalar value uses
+# must retain their meaning and reject this vector plan.
+lx_vec_index = (code: Ins[], L: CLoop, checks: LCheck[], p: int, depth: int = 0) -> bool:
+    if depth > 5: return false
     ins = code[p]
     if ins.op != .add and ins.op != .sub: return false
     d = int(ins.dst)
-    a = int(ins.a)
-    b = int(ins.b)
-    other = -1
-    if a == L.ctr: other = b
-    else if ins.op == .add and b == L.ctr: other = a
-    if other < 0 or not lx_within(code, d, L): return false
-    if lx_defined_in(code, other, L.pl + 1, L.pe): return false
+    if not lx_within(code, d, L): return false
+    lx_terms.clear(); lx_tk = 0; lx_tc = 0
+    if not lx_decomp(code, L, d, 1, p + 1, 0) or lx_tc != 1: return false
     checked = false
     loop ch in checks:
         if ch.kind == 3 and ch.x == d: checked = true
-    if not checked: return false
+    used = false
     loop q in [L.pl + 1..L.pe]:
         if q == p or lx_in_check(q, checks): continue
         qi = code[q]
         ir_operands(qi)
-        loop oi in [0..ir_use_count):
-            if ir_use(oi) != d: continue
-            if qi.op != .load and qi.op != .store: return false
-            if mem_index(qi) != d or int(qi.a) == d or (qi.op == .store and int(qi.b) == d): return false
-    true
+        reads = ir_has_use(d)
+        if not reads: continue
+        used = true
+        if q == L.inc and qi.op == .mov and int(qi.dst) == L.ctr and int(qi.a) == d: continue
+        if qi.op == .load or qi.op == .store:
+            if not checked or mem_index(qi) != d or int(qi.a) == d or (qi.op == .store and int(qi.b) == d): return false
+        else if q <= p or not lx_vec_index(code, L, checks, q, depth + 1): return false
+    used
 
 # the instructions a vector plan can take (outside the checks it drops)
 lx_vec_op = (op: Op) -> bool:
@@ -380,8 +399,8 @@ lx_vec_op = (op: Op) -> bool:
         _: false
 
 lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
-    no = VPlan(false, 0, false, [], [], [], [])
-    plan = VPlan(true, 0, false, [], [], [], [])
+    no = VPlan(false, 0, false, [], [], [], [], [])
+    plan = VPlan(true, 0, false, [], [], [], [], [])
     lx_reds.clear()
     lx_red_ops.clear()
     # (an instruction kind the plan never takes rules it out before anything is worked out)
@@ -490,6 +509,7 @@ lx_vec_plan = (code: Ins[], L: CLoop, checks: LCheck[]) -> VPlan:
     loop i in 0.. and bi in plan.bases:
         loop j in 0.. and bj in plan.bases:
             if i < j and bi == bj and (plan.stores[i] or plan.stores[j]) and (plan.offs[i] != plan.offs[j] or plan.indexes[i] != plan.indexes[j]): return no
+    plan.index_defs = indexes
     plan
 
 # how many instructions in [lo, hi] name v (define or use it)
@@ -541,7 +561,7 @@ lx_vloop = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, bases: int[], 
         op = ins.op
         d = int(ins.dst)
         if op == .block or op == .end or op == .nop: continue
-        if o_defines(op) and d != L.ctr and plan.indexes.contains(d): continue
+        if o_defines(op) and d != L.ctr and plan.index_defs.contains(d): continue
         if op == .fconst:
             # (made in front of the loop, in every lane)
             c = vreg(int(ins.ty))
@@ -730,7 +750,7 @@ loop_versioning = (vector_only: bool = false):
     loop L in cl:
         if L.pe - L.pl > 400: continue
         checks = lx_checks(code, ends, L)
-        plan = VPlan(false, 0, false, [], [], [], [])
+        plan = VPlan(false, 0, false, [], [], [], [], [])
         if lx_vec_on: plan = lx_vec_plan(code, L, checks)
         if vector_only and not plan.ok: continue
         # (one check costs about as much as testing for it in front: not worth a copy)

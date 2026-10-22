@@ -1,0 +1,345 @@
+# Nonescaping mutable array slices. A specialized call ABI carries (data,
+# length) on the caller's stack; the callee cannot copy, resize or retain it.
+use 'ast.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'types.jo'
+use 'lower.jo'
+use 'isolation.jo'
+use 'facts.jo'
+use 'lex.jo'
+use 'ir.jo'
+use 'util.jo'
+use 'parallel_lower.jo'
+
+partition_active = false
+partition_mode = false
+partition_proven: {int: bool}
+
+partition_scalar = (t: int) -> bool:
+    k = tkind(t)
+    k == .int_ or k == .float_ or k == .bool_ or k == .void_
+
+partition_slice = (n: int) -> bool:
+    nodes[n].kind == .index and nodes[n].aux == 1 and tkind(ntype(int(nodes[n].a))) == .array
+
+partition_root = (n: int) -> int:
+    if partition_slice(n): return int(nodes[n].a)
+    n
+
+# Bounds must be inert: argument evaluation cannot invalidate an earlier
+# descriptor, nor change the shared endpoint used by the disjointness proof.
+partition_bound = (n: int) -> bool:
+    if n == 0: return true
+    k = nodes[n].kind
+    if k == .int_lit: return true
+    if k == .ident and nodes[n].aux == i32(int(SK.local)):
+        return int(locals[int(nodes[n].sym)].flags) & (LF_ASSIGNED | LF_ADDR | LF_SHARED | LF_BYREF | LF_ALIAS | LF_MUTPARAM) == 0
+    if k == .conv: return partition_bound(int(nodes[n].a))
+    if k == .binary and nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.minus))):
+        return partition_bound(int(nodes[n].a)) and partition_bound(int(nodes[n].b))
+    false
+
+partition_disjoint = (a: int, b: int) -> bool:
+    if not partition_slice(a) or not partition_slice(b): return false
+    if not same_var(int(nodes[a].a), int(nodes[b].a)): return false
+    x = int(nodes[a].b)
+    y = int(nodes[b].b)
+    if nodes[x].b != 0 and has_flag(x, NF_INCLUSIVE) or nodes[y].b != 0 and has_flag(y, NF_INCLUSIVE): return false
+    xl = int(nodes[x].a)
+    xh = int(nodes[x].b)
+    yl = int(nodes[y].a)
+    yh = int(nodes[y].b)
+    if not partition_bound(xl) or not partition_bound(xh) or not partition_bound(yl) or not partition_bound(yh): return false
+    if xh != 0 and yl != 0 and same_value(xh, yl): return true
+    if yh != 0 and xl != 0 and same_value(yh, xl): return true
+    if xh != 0 and yl != 0 and nodes[xh].kind == .int_lit and nodes[yl].kind == .int_lit: return nodes[xh].ival <= nodes[yl].ival
+    if yh != 0 and xl != 0 and nodes[yh].kind == .int_lit and nodes[xl].kind == .int_lit: return nodes[yh].ival <= nodes[xl].ival
+    false
+
+partition_parameter = (l: int, f: int) -> int:
+    if int(locals[l].owner) != f or tkind(int(locals[l].type)) != .array: return 0
+    if int(locals[l].flags) & LF_PARAM != 0: return l
+    if int(locals[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_EXPOSED | LF_SHARED) != 0: return 0
+    loop s in kids(int(fns[f].body)):
+        if nodes[s].kind != .vardecl or nodes[s].aux2 != 1: break
+        if nodes[s].sym != i32(l): continue
+        a = int(nodes[s].b)
+        if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)):
+            p = int(nodes[a].sym)
+            if fns[f].params.contains(p): return p
+    0
+
+partition_formal = (n: int, f: int) -> bool:
+    if nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.local)): return false
+    l = int(nodes[n].sym)
+    partition_parameter(l, f) != 0
+
+partition_body = (n: int, f: int, seen: mut {int: bool}) -> bool:
+    if n == 0: return true
+    k = nodes[n].kind
+    if k == .ident:
+        return nodes[n].aux == i32(int(SK.local)) and partition_scalar(ntype(n))
+    if k == .lambda or k == .fnref or k == .partial or k == .addr or k == .defer_: return false
+    if k == .assign:
+        root = place_var(int(nodes[n].a))
+        if root != 0 and partition_formal(root, f) and int(locals[int(nodes[root].sym)].flags) & LF_MUTPARAM == 0: return false
+    if k == .index:
+        if nodes[n].aux != 0 or not partition_formal(int(nodes[n].a), f): return false
+        return partition_scalar(ntype(n)) and partition_body(int(nodes[n].b), f, seen)
+    if k == .intrinsic and nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1 and partition_formal(kid(n, 0), f): return true
+    if k == .call:
+        if nodes[n].aux != 0 or nodes[n].sym <= 0: return false
+        callee = int(nodes[n].sym)
+        if not partition_function(callee, seen): return false
+        loop i in [0..nkids(n)):
+            arg = kid(n, i)
+            p = fns[callee].params[i]
+            if tkind(int(locals[p].type)) == .array:
+                root = partition_root(arg)
+                if not partition_formal(root, f): return false
+                if int(locals[p].flags) & LF_MUTPARAM != 0 and int(locals[int(nodes[root].sym)].flags) & LF_MUTPARAM == 0: return false
+                if partition_slice(arg):
+                    r = int(nodes[arg].b)
+                    if nodes[r].b != 0 and has_flag(r, NF_INCLUSIVE) or not partition_bound(int(nodes[r].a)) or not partition_bound(int(nodes[r].b)): return false
+            else if not partition_body(arg, f, seen): return false
+        return true
+    if k == .intrinsic:
+        id = nodes[n].aux as IN
+        if id != .assert and id != .fmin and id != .fmax and id != .sqrt: return false
+    if k == .vardecl and nodes[n].aux2 == 1 and partition_parameter(int(nodes[n].sym), f) != 0: return true
+    if k == .vardecl and not has_flag(n, NF_GLOBAL):
+        fork = partition_fork(int(nodes[n].b))
+        if fork != 0: return partition_fork_safe(fork, seen)
+    if k == .vardecl and (has_flag(n, NF_GLOBAL) or not partition_scalar(int(locals[int(nodes[n].sym)].type))): return false
+    mask = isolation_children(k)
+    if mask < 0: return false
+    if mask & 1 != 0 and not partition_body(int(nodes[n].a), f, seen): return false
+    if mask & 2 != 0 and not partition_body(int(nodes[n].b), f, seen): return false
+    if mask & 4 != 0 and not partition_body(int(nodes[n].c), f, seen): return false
+    if mask & 16 != 0:
+        loop child in kids(n):
+            if not partition_body(child, f, seen): return false
+    if mask & 32 != 0:
+        loop child in kids2(n):
+            if not partition_body(child, f, seen): return false
+    true
+
+# One query owns the visited set, including recursive edges. No optimistic
+# answer is published until every reachable body has passed the same checks.
+partition_function = (f: int, seen: mut {int: bool}) -> bool:
+    if seen.has(f): return true
+    if seen.len() >= 128 or fns[f].body == 0 or fns[f].cabi or not partition_scalar(int(fns[f].ret)): return false
+    if fns[f].caps.len() > 0: return false
+    seen[f] = true
+    loop p in fns[f].params:
+        t = int(locals[p].type)
+        if tkind(t) == .array:
+            if not partition_scalar(telem(t)): return false
+        else if not partition_scalar(t) or int(locals[p].flags) & LF_MUTPARAM != 0: return false
+    partition_body(int(fns[f].body), f, seen)
+
+partition_descriptor = (n: int) -> int:
+    if not partition_mode: return -1
+    if partition_formal(n, cur_fn) or partition_shared_root(n, cur_fn): return partition_descs.get(int(nodes[n].sym)) ?? -1
+    -1
+
+partition_arg = (n: int, write: bool = true) -> int:
+    root = partition_root(n)
+    desc = partition_descriptor(root)
+    data = 0
+    length = 0
+    if desc >= 0:
+        if not partition_slice(n): return desc
+        data = partition_data[int(nodes[root].sym)]
+        length = partition_lengths[int(nodes[root].sym)]
+    else:
+        if nodes[root].kind != .ident or nodes[root].aux != i32(int(SK.local)) or int(locals[int(nodes[root].sym)].flags) & (LF_ALIAS | LF_BYREF | LF_OWNERBORROW) != 0:
+            fatal(nodes[n].pos, "a mutable slice requires a direct array binding")
+        p = gen_place(root, write)
+        if write: arr_unique(p, ntype(root))
+        array = read_place(p, ntype(root))
+        data = e_addi(array, 24)
+        length = arr_len(array)
+    if partition_slice(n):
+        r = int(nodes[n].b)
+        if nodes[r].b != 0 and has_flag(r, NF_INCLUSIVE) or not partition_bound(int(nodes[r].a)) or not partition_bound(int(nodes[r].b)):
+            fatal(nodes[n].pos, "mutable slices require stable, exclusive bounds")
+        lo = if nodes[r].a == 0: e_iconst(0) else: gen_index(int(nodes[r].a))
+        hi = if nodes[r].b == 0: length else: gen_index(int(nodes[r].b))
+        iff(e_bin(.or_, VI, e_bin(.gtu, VI, lo, hi), e_bin(.gtu, VI, hi, length)))
+        e_call_nr(rt("__panic_slice"), [e_daddr(str_data("mutable slice")), lo, hi, length], -1)
+        endc()
+        data = e_bin(.add, VI, data, e_bin(.mul, VI, lo, e_iconst(tsize(telem(ntype(root))))))
+        length = e_bin(.sub, VI, hi, lo)
+    slot = e_slot(new_slot(16, 8))
+    e_store(slot, 0, data, 8)
+    e_store(slot, 8, length, 8)
+    slot
+
+partition_call_needed = (f: int, args: int[]) -> bool:
+    loop i in [0..args.len()):
+        if int(locals[fns[f].params[i]].flags) & LF_MUTPARAM != 0 and tkind(ntype(args[i])) == .array:
+            if partition_slice(args[i]) or partition_descriptor(args[i]) >= 0: return true
+    false
+
+partition_call = (f: int, args: int[], order: int[]) -> Val:
+    seen: {int: bool}
+    if not partition_function(f, seen): fatal(nodes[args[0]].pos, "mutable slice callee must only read or write elements: no resizing, copying, escaping or unknown calls")
+    if order.len() != 0: fatal(nodes[args[0]].pos, "mutable slices require source-order positional arguments")
+    loop i in [0..args.len()):
+        if tkind(ntype(args[i])) != .array: continue
+        loop j in [0..i):
+            if tkind(ntype(args[j])) == .array and (int(locals[fns[f].params[i]].flags) & LF_MUTPARAM != 0 or int(locals[fns[f].params[j]].flags) & LF_MUTPARAM != 0) and same_var(partition_root(args[i]), partition_root(args[j])) and not partition_disjoint(args[i], args[j]):
+                fatal(nodes[args[i]].pos, "mutable slice arguments overlap; pass disjoint places")
+    argv: int[]
+    loop i in [0..args.len()):
+        a = args[i]
+        if tkind(ntype(a)) == .array: argv.push(partition_arg(a, int(locals[fns[f].params[i]].flags) & LF_MUTPARAM != 0))
+        else:
+            if not partition_bound(a) and nodes[a].kind != .bool_lit: fatal(nodes[a].pos, "mutable slice arguments must be stable values")
+            argv.push(gen_expr(a).v)
+    ret = int(fns[f].ret)
+    V(e_call(lf_helper(.partition, (if parallel_serial: 1 else: 0), f), argv, ret_vt(ret)), false)
+
+# A binary scoped fork spells its two partitions explicitly. Both arms are
+# single direct calls; all array accesses in each child are confined to the
+# supplied views. Unknown or overlapping footprints are never parallelized.
+partition_arm = (n0: int) -> int:
+    n = n0
+    if nodes[n].kind == .block:
+        if nkids(n) != 1: return 0
+        n = kid(n, 0)
+    if nodes[n].kind == .exprstmt: n = int(nodes[n].a)
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return 0
+    n
+
+partition_shared_root = (n: int, f: int) -> bool:
+    if nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.local)): return false
+    l = int(nodes[n].sym)
+    fl = int(locals[l].flags)
+    int(locals[l].owner) == f and fl & LF_CAPTURE != 0 and (fl & LF_PARTBORROW != 0 or is_shared(l) or fl & LF_VALUECAP != 0 and fl & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED) == 0) and tkind(ntype(n)) == .array and partition_scalar(telem(ntype(n)))
+
+partition_fork = (n0: int) -> int:
+    n = n0
+    if nodes[n].kind == .parallel_region: n = int(nodes[n].a)
+    if not parallel_prelude_call(n, "parallel_range") or nkids(n) != 2: return 0
+    count = kid(n, 0)
+    callback = kid(n, 1)
+    if nodes[count].kind != .int_lit or nodes[count].ival != 2 or nodes[callback].kind != .lambda or has_flag(callback, NF_GENERIC): return 0
+    f = int(nodes[callback].sym)
+    body = int(fns[f].body)
+    branch = 0
+    returned = false
+    loop statement in kids(body):
+        if nodes[statement].kind == .vardecl and nodes[statement].aux2 == 1: continue
+        if nodes[statement].kind == .if_ and branch == 0 and not returned: branch = statement
+        else if nodes[statement].kind == .return_ and branch != 0 and not returned:
+            r = int(nodes[statement].a)
+            if nodes[r].kind != .int_lit or nodes[r].ival != 0: return 0
+            returned = true
+        else: return 0
+    if branch == 0 or not returned: return 0
+    condition = int(nodes[branch].a)
+    if nodes[condition].kind != .binary or nodes[condition].op != i32(int(Tok.eq)) or nodes[condition].aux != 0: return 0
+    index = word_integer_value(int(nodes[condition].a))
+    zero = word_integer_value(int(nodes[condition].b))
+    if nodes[zero].kind != .int_lit or nodes[zero].ival != 0 or nodes[index].kind != .ident or nodes[index].aux != i32(int(SK.local)): return 0
+    l = int(nodes[index].sym)
+    if fns[f].params.len() != 1 or locals[l].owner != i32(f) or locals[l].name != locals[fns[f].params[0]].name or int(locals[l].flags) & LF_ASSIGNED != 0: return 0
+    left = partition_arm(int(nodes[branch].b))
+    right = partition_arm(int(nodes[branch].c))
+    if left == 0 or right == 0: return 0
+    arrays: int[]
+    writes: bool[]
+    cut = 0
+    loop call in [left, right]:
+        callee = int(nodes[call].sym)
+        before = arrays.len()
+        loop i in [0..nkids(call)):
+            arg = kid(call, i)
+            if tkind(ntype(arg)) == .array:
+                write = int(locals[fns[callee].params[i]].flags) & LF_MUTPARAM != 0
+                root = partition_root(arg)
+                if not partition_shared_root(root, f): return 0
+                if write and (not partition_slice(arg) or int(locals[int(nodes[root].sym)].flags) & LF_VALUECAP != 0): return 0
+                arrays.push(arg)
+                writes.push(write)
+            else if not partition_bound(arg) and nodes[arg].kind != .bool_lit: return 0
+        if arrays.len() == before: return 0
+        if call == left: cut = arrays.len()
+    loop a in [0..cut):
+        loop b in [cut..arrays.len()):
+            if (writes[a] or writes[b]) and same_var(partition_root(arrays[a]), partition_root(arrays[b])) and not partition_disjoint(arrays[a], arrays[b]): return 0
+    f
+
+partition_fork_calls = (f: int) -> int[]:
+    loop statement in kids(int(fns[f].body)):
+        if nodes[statement].kind == .if_: return [partition_arm(int(nodes[statement].b)), partition_arm(int(nodes[statement].c))]
+    []
+
+partition_fork_safe = (f: int, seen: mut {int: bool}) -> bool:
+    loop call in partition_fork_calls(f):
+        if not partition_function(int(nodes[call].sym), seen): return false
+    true
+
+partition_local_arg = (l: int, write: bool = true) -> int:
+    n = mk(.ident, locals[l].pos)
+    nodes[n].aux = i32(int(SK.local))
+    nodes[n].sym = i32(l)
+    nodes[n].type = locals[l].type
+    partition_arg(n, write)
+
+# Reject escaping borrowed captures before any optimizer can erase a closure
+# construction or specialize its consumer. Only the directly checked fork
+# owns these borrowed environments and joins them before returning.
+partition_finalize = ():
+    if not partition_active: return
+    allowed: {int: bool}
+    loop n in [1..nodes.len()):
+        if nodes[n].kind == .call and nodes[n].aux == 0 and partition_fork(n) != 0:
+            allowed[kid(n, 1)] = true
+    loop n in [1..nodes.len()):
+        if nodes[n].kind != .lambda or nodes[n].sym <= 0 or nodes[n].type == 0: continue
+        f = int(nodes[n].sym)
+        loop capture in fns[f].caps:
+            if int(locals[int(capture.inner)].flags) & LF_PARTBORROW != 0 and not allowed.has(n):
+                fatal(nodes[n].pos, "mutable array parameter captures require a proven-disjoint scoped fork")
+
+partition_data: {int: int}
+partition_lengths: {int: int}
+partition_descs: {int: int}
+
+partition_begin = (f: int):
+    if not partition_mode: return
+    partition_proven = fact_probe_function(f, true)
+    partition_data.clear()
+    partition_lengths.clear()
+    partition_descs.clear()
+    loop p in fns[f].params:
+        if tkind(int(locals[p].type)) == .array:
+            desc = int(locals[p].vreg)
+            partition_descs[p] = desc
+            partition_data[p] = e_load(VI, desc, 0, 8)
+            partition_lengths[p] = e_load(VI, desc, 8, 8)
+    loop cap in fns[f].caps:
+        l = int(cap.inner)
+        if tkind(int(locals[l].type)) == .array:
+            desc = e_load(VI, env_v, int(locals[l].env_off), 8)
+            partition_descs[l] = desc
+            partition_data[l] = e_load(VI, desc, 0, 8)
+            partition_lengths[l] = e_load(VI, desc, 8, 8)
+
+    loop s in kids(int(fns[f].body)):
+        if nodes[s].kind != .vardecl or nodes[s].aux2 != 1: break
+        l = int(nodes[s].sym)
+        p = partition_parameter(l, f)
+        if p != 0 and p != l:
+            partition_descs[l] = partition_descs[p]
+            partition_data[l] = partition_data[p]
+            partition_lengths[l] = partition_lengths[p]
+
+partition_inline_body = (index: int) -> bool:
+    if index < 0 or index >= lfuncs.len(): return false
+    lf = lfuncs[index]
+    lf.kind == LK_HELPER and lf.hkind == HK.partition and fns[lf.inst].kind == FK_LAMBDA

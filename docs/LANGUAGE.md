@@ -1563,6 +1563,23 @@ let selected=[loop value in values if value >? 20 value]
 let lengths=[loop word in ["café" "🙂"] word->word.length]
 ```
 
+A direct call can borrow an exclusive-end mutable slice, such as
+`swap(@values[..mid) @values[mid..])`. Its callee must only inspect lengths and
+read or write scalar elements, including through other checked direct calls;
+it cannot resize, copy or retain the borrowed array. Bounds are checked, and
+multiple mutable arguments from one array must have provably disjoint ranges.
+Stable matching endpoints and ordered constant endpoints establish that proof.
+Ordinary slice reads still produce values.
+
+A scoped binary `parallel_range(2 ...)` can pass such disjoint slices to its
+two branches. Each branch must be a single direct call selected by the index
+being zero, followed by `return 0`. Mutable array captures stay borrowed until
+both branches finish; they cannot escape into a stored or returned closure.
+Read-only array inputs may be shared between branches without copying. The
+checked callee must not mutate, copy or retain those inputs, and their ranges
+must not overlap a writable range. Unknown footprints and overlapping writable
+ranges are rejected.
+
 Arrays can select elements with a stored `IntRange` or a stepped slice:
 
 ```dewy

@@ -9,6 +9,7 @@ use 'types.jo'
 use 'util.jo'
 use 'ir.jo'
 use 'ownership.jo'
+use 'partition.jo'
 
 struct ParallelRegion:
     call: int
@@ -58,6 +59,7 @@ parallel_region = (n0: int) -> ParallelRegion:
     f = int(nodes[callback].sym)
     if fns[f].params.len() != 1 or ownership_type(int(fns[f].ret)) or (vc(int(fns[f].ret)) != VC_INT and vc(int(fns[f].ret)) != VC_FLT): return ParallelRegion()
     if ownership_callable_cap(int(fns[f].fntype)) != 0: return ParallelRegion()
+    if count == 2 and partition_fork(n) != 0: return ParallelRegion(n, callback, first, count)
     loop cap in fns[f].caps:
         inn = int(cap.inner)
         t = store_type(inn)
@@ -105,7 +107,11 @@ parallel_scalar_decl = (s: int, l: int) -> bool:
     if not parallel_scalar_uses(int(fns[cur_fn].body), l, region.count): return false
     seen: {int: bool}
     if not parallel_context_free(region.callback, seen): return false
-    race_check(int(nodes[region.call].sym), kids(region.call), nodes[region.call].pos)
+    split = partition_fork(region.call) != 0
+    if split:
+        proof: {int: bool}
+        if not partition_fork_safe(int(nodes[region.callback].sym), proof): fatal(nodes[region.call].pos, "mutable slice fork must not resize, copy or escape its partitions")
+    else: race_check(int(nodes[region.call].sym), kids(region.call), nodes[region.call].pos)
     f = int(nodes[region.callback].sym)
     # Preserve the activation owning the region. In particular, recursive
     # forks must inline their body into the parent, not expand the parent into
@@ -121,6 +127,9 @@ parallel_scalar_decl = (s: int, l: int) -> bool:
             inn = int(cap.inner)
             outer = int(cap.outer)
             t = store_type(inn)
+            if split and tkind(int(locals[inn].type)) == .array:
+                e_store(env, int(locals[inn].env_off), partition_local_arg(outer, int(locals[inn].flags) & LF_VALUECAP == 0), 8)
+                continue
             store_val(t, env, int(locals[inn].env_off), read_place(local_place(outer, false), t))
     results: int[]
     result_type = ret_vt(int(fns[f].ret))
@@ -130,15 +139,15 @@ parallel_scalar_decl = (s: int, l: int) -> bool:
         root = e_call(rt("__fj_enter"), [], VI)
         job = e_slot(new_slot(80, 8))
         output = e_slot(new_slot(region.count * 8, 8))
-        e_call(rt("__fj_scalar"), [job, e_faddr(lf_helper(.parallel_job, 0, f)), env, e_iconst(region.first), e_iconst(region.count), e_addi(output, 8), e_faddr(lf_helper(.parallel_job, 1, f))], -1)
-        first_result = e_call(lf_of_inst(f), [env, e_iconst(region.first)], result_type)
+        e_call(rt("__fj_scalar"), [job, e_faddr(lf_helper(.parallel_job, (if split: 2 else: 0), f)), env, e_iconst(region.first), e_iconst(region.count), e_addi(output, 8), e_faddr(lf_helper(.parallel_job, (if split: 3 else: 1), f))], -1)
+        first_result = e_call((if split: lf_helper(.partition, 0, f) else: lf_of_inst(f)), [env, e_iconst(region.first)], result_type)
         e_mov(results[0], first_result)
         e_call(rt("__fj_join"), [job], -1)
         loop i in [1..region.count):
             e_mov(results[i], load_val(int(fns[f].ret), output, i * 8))
         e_call(rt("__fj_leave"), [root], -1)
         els()
-    serial_body = if target_wasm or parallel_serial or region.count == 1: lf_of_inst(f) else: lf_helper(.parallel_serial, 0, f)
+    serial_body = if split: lf_helper(.partition, 1, f) else if target_wasm or parallel_serial or region.count == 1: lf_of_inst(f) else: lf_helper(.parallel_serial, 0, f)
     loop i in [0..region.count):
         e_mov(results[i], e_call(serial_body, [env, e_iconst(region.first + i)], result_type))
     if not target_wasm and not parallel_serial and region.count > 1: endc()
@@ -199,7 +208,7 @@ parallel_context_free = (n: int, seen: mut {int: bool}) -> bool:
 # A promoted job's native ABI is (ignored closure environment, job-address).
 # Its adapter owns the result representation, including narrow integers and
 # floats. Scheduling itself never needs to inspect the result type.
-parallel_job_helper = (f: int, serial: bool):
+parallel_job_helper = (f: int, serial: bool, split: bool):
     ps = helper_params(2)
     job = ps[1]
     env = e_load(VI, job, 8, 8)
@@ -209,7 +218,7 @@ parallel_job_helper = (f: int, serial: bool):
     index = vreg(VI)
     e_mov(index, first)
     t = int(fns[f].ret)
-    body = if serial: lf_helper(.parallel_serial, 0, f) else: lf_of_inst(f)
+    body = if split: lf_helper(.partition, (if serial: 1 else: 0), f) else if serial: lf_helper(.parallel_serial, 0, f) else: lf_of_inst(f)
     blk()
     done = ctl
     lop()

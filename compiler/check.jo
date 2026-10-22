@@ -1,3 +1,4 @@
+use 'partition.jo'
 use 'lazy_bodies.jo'
 use 'frontend.jo'
 use 'pcheck.jo'
@@ -69,6 +70,7 @@ const LF_ELEMALIAS = 16384  # `mut x in xs` in a combined loop: x stands for xs[
 const LF_READ = 32768       # its value is read somewhere (not only the base of a write: v.f = 1)
 const LF_QUIET = 65536      # a loop counter or part of `a, b = f()`: not warned about when unused
 const LF_EXPOSED = 1048576 # raw storage exposure needs owned storage, including private captures
+const LF_PARTBORROW = 16777216 # mutable array capture, admitted only by checked scoped partitions
 const LF_OWNERBORROW = 8388608 # nonescaping resource capture: pointer, not an owned cell
 const LF_VALUECAP = 262144  # Dewy capture owns a snapshot; outer links stop here
 const LF_CONST = 131072     # Dewy const: one initialized value, no writes through the binding
@@ -1949,6 +1951,10 @@ capture_in = (c: int, l: int) -> int:
         flags |= LF_VALUECAP | LF_DECL
         flags |= int(locals[outer].flags) & LF_CONST
         locals[outer].flags = locals[outer].flags | i32(LF_CAPTURED)
+    else if int(locals[outer].flags) & (LF_MUTPARAM | LF_PARTBORROW) != 0 and tkind(int(locals[outer].type)) == .array:
+        flags |= LF_PARTBORROW
+        partition_active = true
+        locals[outer].flags |= i32(LF_CAPTURED)
     else if ownership_decls.len() != 0 and ownership_fact_type(int(locals[outer].type)):
         flags |= LF_OWNERBORROW
         locals[outer].flags |= i32(LF_ADDR | LF_CAPTURED)

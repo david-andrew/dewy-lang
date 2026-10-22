@@ -1,4 +1,5 @@
 use 'parallel_lower.jo'
+use 'partition.jo'
 use 'string_domains.jo'
 use 'ownership.jo'
 use 'units.jo'
@@ -1042,7 +1043,7 @@ check_place = (n: int, for_mut: bool):
             cp_inner -= 1
             return
         if bk != .array: fatal(nodes[n].pos, "cannot assign to this index expression")
-        if nodes[n].aux == 1: fatal(nodes[n].pos, "cannot assign to a slice")
+        if nodes[n].aux == 1 and not for_mut: fatal(nodes[n].pos, "cannot assign to a slice")
         check_place(int(nodes[n].a), for_mut)
         cp_inner -= 1
         return
@@ -1844,7 +1845,7 @@ check_mutable_arguments = (args: int[], mask: int, pos: int):
         if mask & (1 << i) == 0 or nodes[args[i]].kind == .hole: continue
         loop j in [0..i):
             if mask & (1 << j) == 0 or nodes[args[j]].kind == .hole: continue
-            if mutable_overlap(args[j], args[i]):
+            if not partition_disjoint(args[j], args[i]) and mutable_overlap(args[j], args[i]):
                 fatal(nodes[args[i]].pos, "mutable arguments {j + 1} and {i + 1} overlap; pass disjoint places")
 
 finish_arg = (a: int, pt: int, is_mut: bool):
@@ -1867,6 +1868,7 @@ finish_arg = (a: int, pt: int, is_mut: bool):
     if not is_mut and has_flag(a, NF_MUT) and not is_fn_type(ntype(a)) and files[pos_file(nodes[a].pos)].is_dewy and written_at(a):
         fatal(nodes[a].pos, "`@` passes a place, but this parameter takes a value: drop the `@`")
     if is_mut:
+        if partition_slice(a): partition_active = true
         check_place(a, true)
         if path_narrows > 0: path_forget(path_key(a))
         actual = if refine_active: refine_storage(a, ntype(a)) else: ntype(a)

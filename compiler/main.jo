@@ -1,3 +1,4 @@
+use 'partition.jo'
 use 'lazy_bodies.jo'
 use 'frontend.jo'
 use 'effects.jo'
@@ -415,6 +416,7 @@ compile = (path: str, out0: str) -> str:
     if repl_image: repl_set_main()
     isolation_reset()
     loans_finalize()
+    partition_finalize()
     facts_finalize()
     directives_after_facts()
     copies_reset()
