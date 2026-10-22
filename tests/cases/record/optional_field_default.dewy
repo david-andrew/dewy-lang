@@ -1,0 +1,21 @@
+# quick
+# An optional field left out of a construction is none.
+Node:type=[value:int64 next:int64?]
+Pair:type=<T>[first:T second:T? label:string|none]
+Wide:type=[name:string extra:(int64|string)? tag:string?="t"]
+make=():>Node=>[value=5]
+main=()=>{
+    let n=Node[value=3]
+    printl"{n.value} {n.next}"
+    let m=Node[7]
+    printl"{m.value} {m.next}"
+    let p=Pair<int64>[first=1]
+    printl"{p.first} {p.second} {p.label}"
+    let w=Wide[name="w"]
+    printl"{w.name} {w.extra} {w.tag}"
+    printl"{make().next}"
+    let k:Node=[value=9]
+    printl"{k.next ?? -1}"
+    n.next=4
+    printl"{n.next}"
+}

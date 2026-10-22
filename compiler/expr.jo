@@ -2942,7 +2942,8 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
         # (a Dewy object is built from what is given and its defaults, never from invented zeros)
         loop i in [0..nf):
             fi = int(structs[si].fields) + i
-            if mapped[i] == 0 and int(fields[fi].defval) == 0:
+            # (an optional field defaults to none)
+            if mapped[i] == 0 and int(fields[fi].defval) == 0 and tkind(int(fields[fi].type)) != .opt:
                 fatal(nodes[n].pos, "{dt(t)} needs its field '{name_of(int(fields[fi].name))}', which has no default")
     missing_field_check(n, decl, si, args, mapped)
     if ide_on:
@@ -4249,7 +4250,7 @@ read_code = (t: int, rn: str, xn: str, pos: int) -> int[]:
         check_struct_fields(si)
         st.push(rcall("__tx_open", rn, [], pos))
         chain = rcall("__tx_skip", rn, [], pos)
-        # (a Dewy record's field without a default must be in the text: nothing is invented for it)
+        # (a Dewy record's field without a default must be in the text, an optional one is none: nothing is invented for it)
         dewy = files[pos_file(nodes[int(structs[si].decl)].pos)].is_dewy
         required: int[]
         i = int(structs[si].nfields) - 1
@@ -4263,7 +4264,7 @@ read_code = (t: int, rn: str, xn: str, pos: int) -> int[]:
             rd = rcall("__read", rn, [bc_field(bc_ident(xn, pos), fname, pos)], pos)
             # (the field's name kept while it is read: errors say where they are)
             body = [rd, rcall("__tx_at", rn, [bc_str(fname, pos)], pos)]
-            if dewy and int(f.defval) == 0:
+            if dewy and int(f.defval) == 0 and fk != .opt:
                 required.insert(0, fi)
                 body.push(bc_assign(bc_ident("__seen{fi}", pos), bc_bool(true, pos), pos))
             chain = bc_if(bc_call("__tx_name_is", [bc_ident(rn, pos), bc_str(fname, pos)], pos), body, [chain], pos)

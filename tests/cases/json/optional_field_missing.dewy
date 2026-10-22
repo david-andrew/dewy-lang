@@ -1,0 +1,6 @@
+# A missing optional field reads as none.
+S:type=[id:int64 note:string?]
+main=()=>{
+    let s=from_json<S>(r'{"id":1}')
+    if s is? TextError printl(s.message) else printl("{s}")
+}
