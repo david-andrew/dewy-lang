@@ -1241,6 +1241,9 @@ dw_type = (id: int) -> int:
         if count == 2:
             constraint = dw_child(args, 1)
             if dw_op(constraint) == .assign and dw_name(dw_child(constraint, 1)) == "length":
+                size = dw_unwrap(dw_child(constraint, 2))
+                if dewy_syntax[size].kind == .block and dewy_syntax[size].text == "[]:":
+                    return dw_shape_type(n, size)
                 nodes[n].b = i32(dw_expr(dw_child(constraint, 2)))
             else:
                 if dw_op(constraint) == .assign: return dw_fail(constraint, "array type constraints; use length=N or a length comparison")
@@ -1294,6 +1297,45 @@ dw_type = (id: int) -> int:
             set_list(base, args)
         return base
     return dw_fail(id, "this type expression")
+
+# `array<T length=[m n]>`: the shape in the type (tensors.md). Two or more
+# dimensions make an n-dimensional array; one is a 1-D array. The dimensions
+# (ival 1 marks them, in kids) are checked where values enter: parameters bind
+# a name not yet known (`m`) and check the rest.
+dw_shape_type = (n: int, size: int) -> int:
+    dims: int[]
+    loop entry in dw_children(size):
+        if dw_row_break(entry) or dw_op(entry) == .statement_end: return dw_fail(entry, "`;` in a shape; list the dimensions, `length=[m n]`")
+        dims.push(dw_expr(entry))
+    if dims.len() == 0: return dw_fail(size, "an empty shape; give each dimension, `length=[m n]`")
+    nodes[n].aux = i32(max(dims.len(), 1))
+    nodes[n].ival = 1
+    set_list(n, dims)
+    n
+
+dw_has_shape = (t: int) -> bool: t != 0 and nodes[t].kind == .tarray and nodes[t].ival == 1
+
+# The checks of a shaped parameter at entry: its rank, then each dimension.
+# A dimension named by a word not yet bound binds it (SHAPE_DIM marks the
+# declaration for the checker); any other dimension is compared.
+dw_shape_prologue = (param: int, out: mut int[]):
+    t = int(nodes[param].a)
+    pos = nodes[param].pos
+    value = (p: int) -> int:
+        v = mk(.ident, nodes[p].pos)
+        nodes[v].name = nodes[p].name
+        nodes[v].aux2 = 1
+        v
+    out.push(bc_stmt(bc_call("__shape_rank", [value(param), bc_int(nkids(t), pos)], pos), pos))
+    loop i in 0.. and dim in kids(t):
+        if nodes[dim].kind == .ident:
+            local = mk(.vardecl, nodes[dim].pos)
+            nodes[local].name = nodes[dim].name
+            nodes[local].aux2 = SHAPE_DIM
+            add_flag(local, NF_LOOPCOUNT)
+            nodes[local].b = i32(bc_call("__shape_dim", [value(param), bc_int(i, pos)], pos))
+            out.push(local)
+        else: out.push(bc_stmt(bc_call("__shape_check", [value(param), bc_int(i, pos), clone(dim)], pos), pos))
 
 # `[int64 string]`: an array of fixed length with a type per position (no
 # entry names a field)
@@ -1515,12 +1557,24 @@ dw_finish_function = (n: int, parameters: int[], body: int, name: str) -> int:
             nodes[local].a = nodes[param].a
         nodes[local].b = i32(value)
         prefix.push(local)
+    loop param in ps:
+        if dw_has_shape(int(nodes[param].a)): dw_shape_prologue(param, prefix)
     if name == "main":
         loop param in ps:
             if has_flag(param, NF_MUT): return dw_fail_pos(nodes[n].pos, "a mutable entry-point parameter")
         ps = []
     set_list(n, ps)
     loop statement in kids(body): prefix.push(statement)
+    # (a shaped result, `:>array<T length=[m p]>`: the final value is checked as it leaves;
+    # a `return` is checked where it is)
+    if dw_has_shape(int(nodes[n].a)) and prefix.len() > 0 and nodes[prefix[prefix.len() - 1]].kind == .exprstmt:
+        last = prefix[prefix.len() - 1]
+        pos = nodes[last].pos
+        dims: int[]
+        loop dim in kids(int(nodes[n].a)): dims.push(clone(dim))
+        sizes = mk(.array, pos)
+        set_list(sizes, dims)
+        nodes[last].a = i32(bc_call("__shape_value", [int(nodes[last].a), sizes], pos))
     set_list(body, prefix)
     nodes[n].b = i32(body)
     return n
@@ -1755,6 +1809,7 @@ dw_expr = (id: int) -> int:
             if children.len() == 1 and dewy_syntax[children[0]].kind == .flow:
                 first = dw_child(children[0], 0)
                 if dewy_syntax[first].kind == .keyword_expr and (dewy_syntax[dw_child(first, 0)].text == "loop" or dewy_syntax[dw_child(first, 0)].text == "parallel"): return dw_comprehension(children[0])
+            if dw_has_rows(children): return dw_rows_literal(id, children)
             is_map = children.len() > 0 and dw_op(children[0]) == .arrow
             is_record = children.len() > 0 and dw_op(children[0]) == .assign
             loop child in children:
@@ -1994,6 +2049,69 @@ dw_byte_char = (id: int) -> int:
     pos = dewy_syntax[right].pos
     if files[pos_file(pos)].src[pos_off(pos)] != '\'' or len(dewy_syntax[right].text) != 1: return -1
     int(dewy_syntax[right].text[0])
+
+# `[1 2; 3 4]`: in an array literal a `;` (standalone, or attached to the element
+# before it) ends a row, and `;;` ends a 2-D block (tensors.md). The literal is
+# contiguous: every row has the same length and every block the same rows.
+dw_row_break = (id: int) -> bool: dewy_syntax[id].kind == .keyword and dewy_syntax[id].text == ";"
+
+dw_has_rows = (children: int[]) -> bool:
+    loop child in children:
+        if dw_row_break(child) or dw_op(child) == .statement_end: return true
+    false
+
+dw_rows_literal = (id: int, children: int[]) -> int:
+    pos = dewy_syntax[id].pos
+    elements: int[]
+    breaks: int[]
+    loop child in children:
+        if dw_row_break(child):
+            if breaks.len() == 0: fatal(dewy_syntax[child].pos, "an array literal cannot start with `;`: a `;` ends a row, as in `[1 2; 3 4]`")
+            breaks[breaks.len() - 1] += 1
+            continue
+        item = dw_unwrap(child)
+        after = 0
+        if dw_op(item) == .statement_end:
+            item = dw_unwrap(dw_child(item, 1))
+            after = 1
+        op = dw_op(item)
+        if op == .assign or op == .arrow or (dewy_syntax[item].kind == .postfix and op == .ellipsis):
+            fatal(dewy_syntax[item].pos, "rows separated by `;` hold plain values; records, dictionaries and spreads don't split into rows")
+        elements.push(dw_expr(item))
+        breaks.push(after)
+    rank = 1
+    loop b in breaks: rank = max(rank, b + 1)
+    # (dims[0] is the row length; dims[k] counts the level-k units in each level-(k+1) group)
+    dims = fill(-1, rank)
+    counts = fill(0, rank)
+    loop i in 0.. and b in breaks:
+        counts[0] += 1
+        close = if i + 1 == breaks.len(): rank - 1 else: b
+        loop level in [1..close]:
+            size = counts[level - 1]
+            if dims[level - 1] < 0: dims[level - 1] = size
+            else if dims[level - 1] != size:
+                what = if level == 1: "rows" else if level == 2: "blocks" else: "parts"
+                unit = if level == 1: "elements" else if level == 2: "rows" else: "parts"
+                fatal(nodes[elements[i]].pos, "the {what} of an array literal must have the same size: this one has {size} {unit}, the first has {dims[level - 1]}")
+            counts[level - 1] = 0
+            counts[level] += 1
+    dims[rank - 1] = counts[rank - 1]
+    if rank == 2:
+        n = mk(.matrix, pos)
+        set_list(n, elements)
+        nodes[n].ival = dims[0]
+        return n
+    values = mk(.array, pos)
+    set_list(values, elements)
+    shape: int[]
+    k = rank - 1
+    loop k >= 0:
+        shape.push(bc_int(dims[k], pos))
+        k -= 1
+    sizes = mk(.array, pos)
+    set_list(sizes, shape)
+    bc_call("reshape", [values, sizes], pos)
 
 # `b'a'` is a `uint8`, `b"abc"` an `array<uint8>` of the text's UTF-8 bytes.
 dw_byte_literal = (id: int) -> int:

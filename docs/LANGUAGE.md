@@ -1921,7 +1921,25 @@ let product = saved*eye(2)
 assert(product.data =? saved.data)
 ```
 
-`NDArray<T>` stores a flat, row-major `data` array and a `shape` array. Use
+Write a matrix literal with `;` between rows, either standalone or attached to
+the element before it, and `;;` between 2-D blocks: `[1 2; 3 4]` has shape
+`[2 2]`, `[1 2; 3 4;; 5 6; 7 8]` shape `[2 2 2]` and `[1 2 3;]` shape `[1 3]`.
+Rows must have the same length. `[xs; ys]` stacks two arrays as rows.
+
+The shape belongs in the type: `array<float64 length=[m n]>` is a 2-D array,
+`array<float64 length=[n]>` a 1-D one. In a parameter, a dimension named by a
+word not yet bound binds it, and later mentions check it; an annotated `let`
+checks its value's shape. Shapes are compared where values enter: a literal of
+the wrong shape is a compile-time error, other values are checked at run time:
+
+```dewy
+product=(a:array<float64 length=[m n]> b:array<float64 length=[n p]>)=>a*b
+width=(rows:array<int64 length=[r 2]>):>int64=>r   # r is rows' first dimension
+```
+
+An n-dimensional array's `.length` is its shape, `[2 3]` for a matrix; there
+is no `.shape` member in Dewy code. Internally it is an `NDArray<T>` holding a
+flat, row-major `data` array and a `shape` array. Use
 `matrix[i j]` for a two-dimensional element; three- and four-dimensional
 indexing work too. `zeros<int64>(rows cols)` chooses integer elements instead of
 the default `float64`. Dimensions must be nonnegative and their product must
@@ -1972,7 +1990,11 @@ order and may return managed values such as strings and arrays.
 Shapes align at the last dimension. Equal dimensions match; a dimension of one
 stretches to the other operand's size, and missing leading dimensions behave as
 one. A one-dimensional array therefore acts as a row when combined with a
-matrix. Empty dimensions produce empty results when the other dimension is
+matrix; `xs[new ..]` makes it an explicit `[1 n]` row and `xs[.. new]` an
+`[n 1]` column, and `m[new ..]` inserts a leading axis into a matrix. Nested
+rows of numbers, such as `[[1 2] [3 4]]`, combine as a 2-D operand. In an
+elementwise product a `bool` counts as 1 or 0, so `xs .* (xs .>? 0.0)` keeps
+the positive elements. Empty dimensions produce empty results when the other dimension is
 zero or one; incompatible shapes raise an error. Fixed-size array operands are
 accepted and produce ordinary dynamic arrays. Results are independent values.
 `xs .+= amount` is the update form of `xs = xs .+ amount`; `.-=`, `.*=`, `./=`,
@@ -2041,6 +2063,8 @@ let flipped = matrix[[..] [end,end-1..]]
 matrix[selected_rows [0,2..end]] .+= 10
 ```
 
+An array of indexes selects those positions of an axis, in order:
+`matrix[[2 0] [..]]` takes rows 2 and 0, and assigning to it writes them.
 The first two values define a step, as they do in ordinary array ranges. A
 range keeps its axis even when it selects zero or one element. An empty range
 selects no cells; a nonempty range must select only in-bounds coordinates.
@@ -2083,6 +2107,10 @@ when a whole loop cannot safely use SIMD; tail elements also use scalar code.
 Web builds use the same scalar
 operations. `SLOPPY_THREADS=1` restricts native execution to the
 calling thread.
+
+`value.to(device)` places a value's arrays on a device, and computation
+follows the data. This build has one device: `'cpu'`, which `'best'` chooses,
+so placement currently returns the value unchanged.
 
 ## GPU arrays
 

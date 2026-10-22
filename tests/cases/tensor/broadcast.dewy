@@ -1,0 +1,22 @@
+# quick
+let values:array<float64>=[1.0 2.0 3.0 4.0 5.0 6.0]
+let m=reshape(values 2 3)
+let row:array<float64>=[10.0 20.0 30.0]
+let column:array<float64>=[100.0 200.0]
+let both=m .+ row[new ..] .+ column[.. new]
+printl(both[0 0])
+printl(both[1 2])
+printl(both.length)
+# a bool counts as 1 or 0 in an elementwise product: a mask
+let kept=m .* (m .>? 2.5)
+printl(sum(kept))
+printl(kept[0 1])
+# selections by an array of indexes, in order
+let picked=m[[1 0 1] [..]]
+printl(picked.length)
+printl(picked[0 2])
+let rows=zeros(3 2)
+rows[[2 0] [..]]=1.0
+printl(sum(rows[2 [..]]) + sum(rows[1 [..]]))
+printl(m[0 [..]] =? [1.0 2.0 3.0])
+printl(m.to('best') =? m)

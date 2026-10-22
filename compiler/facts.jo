@@ -566,7 +566,7 @@ fact_store_pattern = (s: mut FactState, target: int, value: int, at: int, depth:
 fact_route_bounds = (s: mut FactState, route: FactRoute, values: int[]):
     loop i in [0..route.selectors.len()):
         n = route.sites[i]
-        if n == 0 or i >= values.len(): continue
+        if n == 0 or i >= values.len() or has_flag(n, NF_INBOUNDS): continue
         t = representation_type(if i == 0: ntype(route.root) else: route.types[i - 1])
         if types[t].kind != .array and types[t].kind != .fixed: continue
         index = route.selectors[i]
@@ -600,7 +600,7 @@ fact_probe_divisor = (n: int, s: mut FactState, divisor: int, operand: int):
 fact_probe_route = (s: mut FactState, route: FactRoute, values: int[]):
     loop i in [0..route.selectors.len()):
         n = route.sites[i]
-        if n == 0 or i >= values.len(): continue
+        if n == 0 or i >= values.len() or has_flag(n, NF_INBOUNDS): continue
         t = representation_type(if i == 0: ntype(route.root) else: route.types[i - 1])
         if types[t].kind != .array and types[t].kind != .fixed: continue
         length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, values[i], -1, false, T_INT)
@@ -2188,7 +2188,8 @@ fact_capture = (n: int, s: mut FactState) -> int:
         if types[t].kind == .array or types[t].kind == .fixed:
             length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, base, -1, false, T_INT)
             if fact_speculating == 0 and fact_probe_on: fact_probe_index(n, s, index, length)
-            else if fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query):
+            # (an index the compiler generated in bounds, as an elementwise loop's reads)
+            else if fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query) and not has_flag(n, NF_INBOUNDS):
                 zero = fact_constant(s, 0)
                 lo = fact_compare(s, .le, zero, index)
                 hi = fact_compare(s, .lt, index, length)

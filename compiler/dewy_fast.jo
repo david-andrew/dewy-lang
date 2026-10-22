@@ -537,10 +537,12 @@ dn_accept = (symbol: DewyToken) -> bool:
     true
 
 # A statement's `;` is attached to it, `f();`: an unattached one (after a space or
-# on its own line) is reserved for array-dimension selection
+# on its own line) ends a row of an array literal, `[1 2 ; 3 4]`
+dn_rows = false
 dn_accept_semi = () -> bool:
     if dn_peek() != .semi: return false
     token = dn_tokens[dn_at]
+    if dn_rows and (token.space or token.newline): return false
     if token.space or token.newline: dn_error(token.start, "an unattached `;` is reserved for array-dimension selection: attach it to the statement it ends, `f();`, or leave it out")
     dn_at += 1
     true
@@ -818,6 +820,8 @@ dn_bracketed_from = (opening: DewyLexeme) -> int:
         op = dn_peek()
         if dn_partial_operator(op) or (op == .kw_not and dn_at + 1 < dn_tokens.len() and dn_token_invert(dn_tokens[dn_at + 1].symbol) != .none): return dn_partial(opening)
     if opening.symbol == .langle: dn_angles += 1
+    rows = dn_rows
+    dn_rows = opening.symbol == .lbrack
     close = if opening.symbol == .lparen: DewyToken.rparen else if opening.symbol == .lbrack: DewyToken.rbrack else if opening.symbol == .langle: DewyToken.rangle else: DewyToken.rbrace
     children: int[]
     loop true:
@@ -840,9 +844,14 @@ dn_bracketed_from = (opening: DewyLexeme) -> int:
         # ([0..n as int64): `as` binds more loosely than `..`, so it took the whole range)
         if opening.symbol == .lbrack and dn_peek() == .rparen and children.len() == 1 and (dw_op(children[0]) == .kw_as or dw_op(children[0]) == .kw_transmute) and dw_op(dw_child(children[0], 1)) == .range_apply:
             return dn_error(dn_tokens[dn_at].start, "expected an expression, found ')': `{dn_token_text(dw_op(children[0]))}` binds more loosely than `..`, so here it converts the whole range; parenthesize the bound, as in `[0..(n as int64))`")
+        # (a `;` in an array literal ends a row: `[1 2; 3 4]`, and `;;` a block)
+        if dn_rows and dn_peek() == .semi:
+            children.push(dn_node(.keyword, ";", dn_take().start))
+            continue
         before = dn_at
         children.push(if opening.symbol == .lbrace: dn_statement() else: dn_stmt())
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a block element")
+    dn_rows = rows
     if opening.symbol == .langle: dn_angles -= 1
     label = dn_token_text(opening.symbol) + dn_token_text(close) + ":"
     dn_node(.block, label, opening.start, children)

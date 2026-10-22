@@ -1,0 +1,14 @@
+# quick
+# Shape variables bind at the first use and check the rest.
+product=(a:array<float64 length=[m n]> b:array<float64 length=[n p]>):>array<float64 length=[m p]>=>{
+    printl("{m}x{n} times {n}x{p}")
+    a*b
+}
+total=(xs:array<int64 length=[3]>):>int64=>sum(xs)
+const WIDTH:int64=2
+width_rows=(m:array<int64 length=[rows WIDTH]>):>int64=>rows
+main=():>void=>{
+    printl(product(ones(2 3) ones(3 4)).length)
+    printl(total([1 2 3]))
+    printl(width_rows(zeros<int64>(5 2)))
+}

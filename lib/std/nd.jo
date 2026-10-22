@@ -94,6 +94,50 @@ __offset4 = (s: int[], i: int, j: int, k: int, l: int) -> int:
 ([]=)[T] = (m: mut T[,], i: int, j: int, k: int, v: T): m.data[__offset3(m.shape, i, j, k)] = v
 ([]=)[T] = (m: mut T[,], i: int, j: int, k: int, l: int, v: T): m.data[__offset4(m.shape, i, j, k, l)] = v
 
+# ---------------- shapes in types (`array<T length=[m n]>`) ----------------
+__shape_rank[T] = (m: T[,], rank: int):
+    if m.shape.len() != rank: panic("expected an array of {rank} dimensions, found one of shape {__shape_str(m.shape)}")
+__shape_rank[T] = (xs: T[], rank: int):
+    if rank != 1: panic("expected an array of {rank} dimensions, found a 1-D array of length {xs.len()}")
+__shape_dim[T] = (m: T[,], axis: int) -> int: m.shape[axis]
+__shape_dim[T] = (xs: T[], axis: int) -> int: xs.len()
+__shape_check[T] = (m: T[,], axis: int, size: int):
+    if m.shape[axis] != size: panic("expected dimension {axis} to be {size}, found an array of shape {__shape_str(m.shape)}")
+__shape_check[T] = (xs: T[], axis: int, size: int):
+    if xs.len() != size: panic("expected an array of length {size}, found one of length {xs.len()}")
+# (`xs .* mask`: an element times a bool, which counts as 1 or 0)
+__mask_mul[T] = (x: T, keep: bool) -> T:
+    if keep: return x * T(1)
+    x * T(0)
+
+# (`m[new ..]`: the same elements, with a dimension of 1 at each position in `at`)
+__nd_new_axes[T] = (m: T[,], at: int[]) -> T[,]:
+    shape: int[]
+    k = 0
+    loop i in [0..m.shape.len() + at.len()):
+        if at.contains(i): shape.push(1)
+        else:
+            if k >= m.shape.len(): panic("more axes next to `new` than an array of shape {__shape_str(m.shape)} has")
+            shape.push(m.shape[k])
+            k += 1
+    NDArray(m.data, shape)
+
+# (a 1-D selection, `m[0 [..]]`, equals the 1-D array with its elements)
+(==)[T] = (a: T[,], b: T[,]) -> bool: a.shape == b.shape and a.data == b.data
+(==)[T] = (a: T[,], b: T[]) -> bool: a.shape.len() == 1 and a.data == b
+(==)[T] = (a: T[], b: T[,]) -> bool: b.shape.len() == 1 and a == b.data
+
+# (`let m:array<T length=[2 3]>=value`: value, once its shape is the type's)
+__shape_value[T] = (m: T[,], dims: int[]) -> T[,]:
+    if m.shape != dims: panic("expected an array of shape {__shape_str(dims)}, found one of shape {__shape_str(m.shape)}")
+    m
+__shape_value[T] = (xs: T[], dims: int[]) -> T[]:
+    if dims.len() != 1 or xs.len() != dims[0]: panic("expected an array of shape {__shape_str(dims)}, found a 1-D array of length {xs.len()}")
+    xs
+
+# (Dewy's `.length` of an n-dimensional array: its shape)
+__nd_length[T] = (m: T[,]) -> int[]: m.shape
+
 # (a 1-D array where a T[] is expected: its elements)
 __nd_1d[T] = (m: T[,]) -> T[]:
     if m.shape.len() != 1: panic("an array of shape {__shape_str(m.shape)} where a 1-D one (T[]) is expected (m.data has all its elements)")
@@ -105,11 +149,15 @@ __nd_1d[T] = (m: T[,]) -> T[]:
 struct __NDAxis:
     selection: IntRange
     flags: int
+    picks: int[] = []
 
 __nd_axis = (index: int) -> __NDAxis:
     __NDAxis(__dewy_range(index, 0, index, false, true), 0)
 
 __nd_axis = (selection: IntRange) -> __NDAxis: __NDAxis(selection, 1)
+
+# (`m[rows [..]]` with an array of indexes: those, in order; flag 8)
+__nd_axis = (picks: int[]) -> __NDAxis: __NDAxis(__dewy_range(0, 0, 0, false, true), 9, picks)
 
 __nd_axis_slice = (first: int, second: int, last: int, inclusive: bool, bounded: bool, stepped: bool, exclusive_first: bool) -> __NDAxis:
     flags = 1
@@ -130,6 +178,11 @@ __nd_bound_part = (shape: int[], spec: __NDAxis[]) -> __NDAxis[]:
         if d < spec.len(): axis = spec[d]
         else: axis = __nd_axis(__dewy_range(0, 0, shape[d] - 1, false, true))
         r = axis.selection
+        if axis.flags & 8 != 0:
+            loop i in axis.picks:
+                if i < 0 or i >= shape[d]: panic("index {i} out of bounds for axis {d} of an array of shape {__shape_str(shape)}")
+            out.push(axis)
+            continue
         if axis.flags & 1 == 0:
             if r._first < 0 or r._first >= shape[d]: panic("index {r._first} out of bounds for axis {d} of an array of shape {__shape_str(shape)}")
         else:
@@ -145,6 +198,7 @@ __nd_bound_part = (shape: int[], spec: __NDAxis[]) -> __NDAxis[]:
     out
 
 __nd_axis_count = (axis: __NDAxis) -> int:
+    if axis.flags & 8 != 0: return axis.picks.len()
     if axis.selection._empty or axis.selection._stride == 0: return 0
     int(axis.selection._count)
 
@@ -188,6 +242,45 @@ __nd_runs = (shape: int[], axes: __NDAxis[]) -> int[]:
         if d < 0: break
     out
 
+# The selected indexes of a bound axis, in order.
+__nd_axis_indices = (axis: __NDAxis) -> int[]:
+    if axis.flags & 8 != 0: return axis.picks
+    out: int[]
+    count = __nd_axis_count(axis)
+    out.reserve(count)
+    index = axis.selection._first
+    delta = __nd_axis_delta(axis)
+    loop _ in [0..count):
+        out.push(index)
+        index += delta
+    out
+
+# Every selected element's offset, in result order (selections with index arrays).
+__nd_offsets = (shape: int[], axes: __NDAxis[]) -> int[]:
+    picks = [loop axis in axes: __nd_axis_indices(axis)]
+    out: int[]
+    rank = shape.len()
+    loop p in picks:
+        if p.len() == 0: return out
+    digits = fill(0, rank)
+    loop:
+        offset = 0
+        loop d in [0..rank): offset = offset * shape[d] + picks[d][digits[d]]
+        out.push(offset)
+        d = rank - 1
+        loop d >= 0:
+            digits[d] += 1
+            if digits[d] < picks[d].len(): break
+            digits[d] = 0
+            d -= 1
+        if d < 0: break
+    out
+
+__nd_picked = (axes: __NDAxis[]) -> bool:
+    loop axis in axes:
+        if axis.flags & 8 != 0: return true
+    false
+
 __nd_slice[T] = (m: T[,], spec: __NDAxis[]) -> T[,]:
     axes = __nd_bound_part(m.shape, spec)
     shape: int[]
@@ -198,6 +291,9 @@ __nd_slice[T] = (m: T[,], spec: __NDAxis[]) -> T[,]:
         if axis.flags & 1 != 0: shape.push(count)
     out: T[]
     out.reserve(n)
+    if __nd_picked(axes):
+        loop offset in __nd_offsets(m.shape, axes): out.push(m.data[offset])
+        return NDArray(out, shape)
     if n > 0 and axes.len() > 0:
         last = axes[axes.len() - 1]
         count = __nd_axis_count(last)
@@ -215,6 +311,9 @@ __nd_slice[T] = (m: T[,], spec: __NDAxis[]) -> T[,]:
 __nd_slice_set[T] = (m: mut T[,], spec: __NDAxis[], value: T):
     axes = __nd_bound_part(m.shape, spec)
     if axes.len() == 0: return
+    if __nd_picked(axes):
+        loop offset in __nd_offsets(m.shape, axes): m.data[offset] = value
+        return
     last = axes[axes.len() - 1]
     count = __nd_axis_count(last)
     delta = __nd_axis_delta(last)
@@ -230,6 +329,9 @@ __nd_slice_set[T] = (m: mut T[,], spec: __NDAxis[], values: T[]):
     loop axis in axes: n *= __nd_axis_count(axis)
     if values.len() != n: panic("assigning {values.len()} elements to a part of {n}")
     if n == 0 or axes.len() == 0: return
+    if __nd_picked(axes):
+        loop k in 0.. and offset in __nd_offsets(m.shape, axes): m.data[offset] = values[k]
+        return
     last = axes[axes.len() - 1]
     count = __nd_axis_count(last)
     delta = __nd_axis_delta(last)
@@ -300,6 +402,14 @@ __bcast_shape = (shapes: int[][]) -> int[]:
                         msg += __shape_str(t)
                     panic("shapes {msg} do not match for an elementwise operation")
     out
+
+# the rows of the outer loop: n elements, `inner` at a time
+__bcast_rows = (n: int, inner: int) -> int: n / max(inner, 1)
+
+# an operand's elements, checked against its shape once, before the unchecked loop reads them
+__bcast_data[T] = (m: T[,]) -> T[]:
+    if m.data.len() != __nd_size(m.shape): panic("an array of shape {__shape_str(m.shape)} holds {m.data.len()} elements")
+    m.data
 
 # the step through an operand's data for each dimension of the result (0 where it stretches)
 __bcast_strides = (s: int[], out: int[]) -> int[]:
@@ -840,9 +950,9 @@ __swap_rows = (m: mut f64[], n: int, a: int, b: int):
     # output row and a cache-sized block of the right operand. A zero factor's
     # products are skipped only when b is finite: 0 * inf and 0 * NaN are NaN.
     skip = __nd_finite(b.data)
-    some_rows = (lo: int, hi: int): __nd_product_rows(op, ap, bp, ac, bc, lo, hi, skip)
-    if ar > 1 and ar * ac * bc >= 1 << 18: __parallel_run(ar, some_rows)
-    else: some_rows(0, ar)
+    # (small products run inline: a direct call, which never waits, inside `parallel` too)
+    if ar > 1 and ar * ac * bc >= 1 << 18: __parallel_run(ar, (lo: int, hi: int): __nd_product_rows(op, ap, bp, ac, bc, lo, hi, skip))
+    else: __nd_product_rows(op, ap, bp, ac, bc, 0, ar, skip)
     NDArray(out, shape)
 
 # (x - x is zero for every number, and NaN for an infinity or NaN)
@@ -1001,3 +1111,11 @@ __fmt_nd[T] = (buf: mut u8[], data: T[], shape: int[], dim: int, start: int):
         __buf_byte(buf, ']')
         return
     __buf_byte(buf, ']')
+
+# ---------------- placement ----------------
+# `x.to(device)`: data placed on a device, computation following it (decisions.md, GPU).
+# Provisional: every device is the CPU for now ('best' chooses it), so placing a value
+# gives it back unchanged, whatever arrays it holds.
+to[T] = (value: T, device: str) -> T:
+    if device != "best" and device != "cpu": panic("unknown device '{device}' (this build places data on 'cpu'; 'best' chooses it)")
+    value

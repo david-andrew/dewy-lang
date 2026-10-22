@@ -6626,6 +6626,8 @@ check_binary = (n: int, expected: int) -> int:
         h = 0
         if not is_lit(a) and not is_shift and is_numeric(ta): h = ta
         if not a_literal and b_literal and binary_literal_context(b, ta, op): h = if tkind(ta) == .opt: telem(ta) else: ta
+        # (`m[0 [..]] =? [1 2]`: a 1-D selection against a literal of its elements)
+        if (op == .eq or op == .ne) and is_nd(ta) and bk == .array: h = mk_array(nd_elem(ta))
         tb = prune(check_expr(b, h))
     # (two plain numbers, neither a written fraction nor a character: none of the cases below
     # applies to them, so straight to the arithmetic)
@@ -6814,6 +6816,12 @@ check_binary = (n: int, expected: int) -> int:
         return ta
     tka = types[ta].kind
     tkb = types[tb].kind
+    # (an elementwise mask, `xs .* (ys .>? 0.0)`: a bool counts as 1 or 0, as in NumPy)
+    if op == .star and has_flag(n, NF_BROADCAST) and ((tka == .bool_ and is_numeric(tb)) or (tkb == .bool_ and is_numeric(ta))):
+        value = if tka == .bool_: b else: a
+        keep = if tka == .bool_: a else: b
+        nodes[n] = nodes[bc_call("__mask_mul", [value, keep], nodes[n].pos)]
+        return check_expr(n, expected)
     if op == .plus and dewy_at(nodes[n].pos) and (tka == .str_ or tkb == .str_ or tka == .array or tka == .fixed or tkb == .array or tkb == .fixed):
         no_concat_error(n, a, b, tka == .str_ or tkb == .str_)
     if op == .plus and tka == .str_:
@@ -8890,6 +8898,10 @@ check_field_expr = (n: int, expected: int) -> int:
             # (b.velocity, b.position on a physics Body: a handle, asked of its world)
             if types[bt].kind == .struct_ and dt(bt) == "Body" and pos_in_lib(nodes[int(structs[int(types[bt].st)].decl)].pos):
                 fatal(nodes[n].pos, "a Body is a handle into its world: ask the world, `w.pos(b)`, `w.velocity(b)`, `w.rotation(b)`, and change it there, `w.set_pos(b, p)`, `w.set_velocity(b, v)`, `w.push(b, impulse)`")
+            # (Dewy's length of an n-dimensional array: its shape, tensors.md)
+            if name_of(fname) == "length" and is_nd(bt) and files[pos_file(nodes[n].pos)].is_dewy and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
+                nodes[n] = nodes[bc_call("__nd_length", [int(nodes[n].a)], nodes[n].pos)]
+                return check_expr(n, expected)
             # (Dewy's length of a library container or a sequence, as Heap and Pool: its `len`)
             if files[pos_file(nodes[n].pos)].is_dewy and name_of(fname) == "length" and fn_name_for(bt, intern("len")) and receiver_fits("len", bt) and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
                 # (a member: found through the object, as methods are, whatever `len` names here)
@@ -10358,7 +10370,18 @@ dewy_new_axis = (n: int, expected: int) -> int:
     base = if nodes[n].sval != 0: name_of(int(nodes[n].sval)) else: ""
     receiver = int(nodes[n].a)
     t = prune(check_expr(clone(receiver), 0))
-    if is_nd(t): fatal(pos, "`new` does not insert axes into an NDArray yet; it works on arrays, nested arrays and strings")
+    if is_nd(t):
+        # (an n-dimensional array: a singleton axis at each `new`, `..` keeping an axis)
+        at: int[]
+        axis = 0
+        loop e in entries:
+            if dewy_axis_new(e): at.push(bc_int(axis, pos))
+            else if not dewy_axis_full(e): fatal(nodes[e].pos, "next to `new`, an n-dimensional array takes `..` for each axis it keeps; select first, then add the axis")
+            axis += 1
+        positions = mk(.array, pos)
+        set_list(positions, at)
+        nodes[n] = nodes[bc_call("__nd_new_axes", [receiver, positions], pos)]
+        return check_expr(n, expected)
     depth = dewy_axis_depth(t)
     if depth == 0: fatal(pos, "`new` inserts an axis into an array or a string, not {dt(t)}")
     axes = 0
@@ -10659,6 +10682,7 @@ dot_template = (n: int, leaves: mut int[], tag: str) -> int:
         op = dot_base_op(n)
         if op == .caret: return bc_call("pow", [a, b], pos)
         result = bc_bin(op, a, b, pos)
+        add_flag(result, NF_BROADCAST)
         # Dewy's .not<? negates the comparison, including unordered floats.
         if nodes[n].ival != 0:
             negated = mk(.not_, pos)
@@ -10677,9 +10701,11 @@ dot_template = (n: int, leaves: mut int[], tag: str) -> int:
     bc_ident("__b{tag}e{leaves.len() - 1}", pos)
 
 # the loops computing a dotted expression over n-dimensional arrays: kinds[k] is 1 for a 1-D
-# array, 2 for an n-dimensional one, 0 for a number; arrs[k] names the array. The result's last
-# dimension is the inner loop (the whole array when no operand is stretched); the outer loop
-# finds where each operand's row starts.
+# array, 2 for an n-dimensional one, 0 for a number; arrs[k] names the array. When no operand is
+# stretched (the usual case) one flat loop runs over every element, as for 1-D arrays; otherwise
+# the result's last dimension is the inner loop and the outer loop finds where each operand's row
+# starts. The library checks each operand's data against its shape once, so the element reads
+# need no checks of their own.
 bc_loop_nd = (tmpl: int, arrs: str[], kinds: int[], pre: str, epre: str, pos: int) -> int[]:
     stmts: int[]
     rowpre: int[]
@@ -10700,30 +10726,53 @@ bc_loop_nd = (tmpl: int, arrs: str[], kinds: int[], pre: str, epre: str, pos: in
     stmts.push(bc_let("{pre}shp", bc_call("__bcast_shape", [id("shs")], pos), pos))
     stmts.push(bc_let("{pre}n", bc_call("__nd_size", [id("shp")], pos), pos))
     stmts.push(bc_let("{pre}in", bc_call("__bcast_inner", [id("shs"), id("shp")], pos), pos))
-    # Shape counts are nonnegative integers, including in Dewy source where / is exact.
-    stmts.push(bc_let("{pre}on", bc_call("__floor_div", [id("n"), bc_call("max", [id("in"), bc_int(1, pos)], pos)], pos), pos))
+    stmts.push(bc_let("{pre}on", bc_call("__bcast_rows", [id("n"), id("in")], pos), pos))
+    flat: str[]
+    advance: int[]
     loop k in [0..kinds.len()):
-        if kinds[k] == 0: continue
+        if kinds[k] == 0:
+            flat.push("")
+            continue
         src = bc_ident(arrs[k], pos)
-        if kinds[k] == 2: src = bc_field(bc_ident(arrs[k], pos), "data", pos)
+        if kinds[k] == 2: src = bc_call("__bcast_data", [bc_ident(arrs[k], pos)], pos)
         stmts.push(bc_let("{pre}x{k}", src, pos))
+        flat.push("{pre}x{k}")
         stmts.push(bc_let("{pre}st{k}", bc_call("__bcast_strides", [shp(k), id("shp")], pos), pos))
         stmts.push(bc_let("{pre}ls{k}", bc_call("__bcast_last", [id("st{k}"), bc_call("len", [id("x{k}")], pos), id("n")], pos), pos))
-        rowpre.push(bc_let("{pre}b{k}", bc_call("__bcast_offset", [id("r"), id("shp"), id("st{k}")], pos), pos))
+        # (q{k} walks operand k's row: by its last stride, 0 where it stretches)
+        rowpre.push(bc_let("{pre}q{k}", bc_call("__bcast_offset", [id("r"), id("shp"), id("st{k}")], pos), pos))
         ix = mk(.index, pos)
         nodes[ix].a = i32(id("x{k}"))
-        nodes[ix].b = i32(bc_bin(.plus, id("b{k}"), bc_bin(.star, id("j"), id("ls{k}"), pos), pos))
+        nodes[ix].b = i32(id("q{k}"))
+        # (the shapes broadcast and each operand's data matches its shape: in bounds)
+        add_flag(ix, NF_INBOUNDS)
         body.push(bc_let("{epre}e{k}", ix, pos))
+        step = mk(.assign, pos)
+        nodes[step].a = i32(id("q{k}"))
+        nodes[step].b = i32(id("ls{k}"))
+        nodes[step].op = i32(int(Tok.pluseq))
+        advance.push(step)
+    # (room for every element, written in place: element i in step i)
     stmts.push(bc_let(out, mk(.array, pos), pos))
     stmts.push(bc_stmt(bc_method(bc_ident(out, pos), "reserve", [id("n")], pos), pos))
-    # (on * in = n elements, room reserved; the indexes keep their checks: an NDArray's data and
-    # shape could disagree)
-    pu = bc_method(bc_ident(out, pos), "push", [tmpl], pos)
-    add_flag(pu, NF_INBOUNDS)
-    body.push(bc_stmt(pu, pos))
+    stmts.push(bc_stmt(bc_call("__set_len", [bc_ident(out, pos), id("n")], pos), pos))
+    # (every operand has the result's size: element i of each is at i, one flat loop)
+    fast = [bc_loop("{pre}i", id("n"), bc_body1(clone(tmpl), flat, pre, epre, out, false, pos), pos)]
+    rowpre.push(bc_let("{pre}ob", bc_bin(.star, id("r"), id("in"), pos), pos))
+    ixo = mk(.index, pos)
+    nodes[ixo].a = i32(bc_ident(out, pos))
+    nodes[ixo].b = i32(bc_bin(.plus, id("ob"), id("j"), pos))
+    add_flag(ixo, NF_INBOUNDS)
+    store = mk(.assign, pos)
+    nodes[store].a = i32(ixo)
+    nodes[store].b = i32(tmpl)
+    nodes[store].op = i32(int(Tok.assign))
+    body.push(store)
+    loop step in advance: body.push(step)
     rowpre.push(bc_loop("{pre}j", id("in"), body, pos))
-    stmts.push(bc_loop("{pre}r", id("on"), rowpre, pos))
-    stmts.push(bc_stmt(bc_call("ndarray", [bc_ident(out, pos), id("shp")], pos), pos))
+    slow = [bc_loop("{pre}r", id("on"), rowpre, pos)]
+    stmts.push(bc_if(bc_bin(.eq, id("in"), id("n"), pos), fast, slow, pos))
+    stmts.push(bc_stmt(bc_call("NDArray", [bc_ident(out, pos), id("shp")], pos), pos))
     stmts
 
 # the loop computing a dotted expression over 1-D arrays: arrs[k] names operand k's array ("" for
@@ -10879,6 +10928,11 @@ check_dotted = (n: int, expected: int) -> int:
         if types[t].kind == .fixed:
             t = mk_array(int(types[t].elem))
             lf = coerce(lf, t)
+        # (nested rows of numbers, `xs[new ..]` or `[[1 2] [3 4]]`, are a 2-D operand)
+        if types[t].kind == .array and tkind(int(types[t].elem)) == .array and (is_numeric(int(types[prune(int(types[t].elem))].elem)) or tkind(int(types[prune(int(types[t].elem))].elem)) == .bool_):
+            lf = bc_call("__array2_rows", [lf], pos)
+            t = prune(check_expr(lf, 0))
+            lf = last_checked
         r = 0
         if types[t].kind == .array: r = 1
         else if is_nd(t): r = 2
