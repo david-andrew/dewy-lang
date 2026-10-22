@@ -510,9 +510,24 @@ lit_fits = (n: int, t: int) -> bool:
         return int(types[t].bits) >= 64
     int_fits(nodes[n].ival, t)
 
+coerce_int_literal = (n: int, to: int) -> int:
+    v = nodes[n].ival
+    if not lit_fits(n, to):
+        if has_flag(n, NF_U64): fatal(nodes[n].pos, "value {u64(v)} does not fit in {dt(to)}")
+        fatal(nodes[n].pos, "value {v} does not fit in {dt(to)}")
+    nodes[n].type = i32(to)
+    clear_flag(n, NF_LITERAL)
+    n
+
 # coerce node n to `target` (rewrites n in place); returns n
 coerce = (n: int, target: int) -> int:
     if target == 0: return n
+    # (an integer literal into a fixed-width integer type: none of the cases before the
+    # literal's below applies; its range is checked there and here alike)
+    if nodes[n].kind == .int_lit and is_lit(n):
+        to = prune(target)
+        from = prune(ntype(n))
+        if from != 0 and from != T_MATH_INT and to != T_MATH_INT and types[from].kind == .int_ and types[to].kind == .int_: return coerce_int_literal(n, to)
     if refine_active and types[prune(target)].kind == .refined: return refine_coerce(n, target)
     if nodes[n].kind == .float_lit and nodes[n].sval != 0 and is_lit(n) and tkind(target) == .struct_:
         exact_decimal(n)
@@ -589,14 +604,7 @@ coerce = (n: int, target: int) -> int:
         return n
     if is_lit(n):
         k = nodes[n].kind
-        if k == .int_lit and tk == .int_:
-            v = nodes[n].ival
-            if not lit_fits(n, to):
-                if has_flag(n, NF_U64): fatal(nodes[n].pos, "value {u64(v)} does not fit in {dt(to)}")
-                fatal(nodes[n].pos, "value {v} does not fit in {dt(to)}")
-            nodes[n].type = i32(to)
-            clear_flag(n, NF_LITERAL)
-            return n
+        if k == .int_lit and tk == .int_: return coerce_int_literal(n, to)
         if k == .int_lit and tk == .float_:
             nodes[n].kind = .float_lit
             nodes[n].fval = f64(nodes[n].ival)
@@ -8354,6 +8362,10 @@ check_expr = (n: int, expected: int) -> int:
     if k == .int_lit: return check_int_expr(n, expected)
     if k == .binary: return ce_finish(n, check_binary(n, expected), expected)
     if k == .call: return check_call_expr(n, expected)
+    if k == .field: return check_field_expr(n, expected)
+    if k == .if_: return ce_finish(n, check_if(n, ce_expected(expected)), expected)
+    if k == .index: return check_index_expr(n, expected)
+    if k == .str_lit: return check_str_expr(n, expected)
     check_expr_other(n, expected)
 
 # (the expected type as checking reads it: a refinement's representation)
@@ -8577,6 +8589,445 @@ check_call_expr = (n: int, expected: int) -> int:
         parallel_prepare(n)
     ce_finish(n, t, expected)
 
+check_str_expr = (n: int, expected: int) -> int:
+    ex = ce_expected(expected)
+    t = 0
+    if has_flag(n, NF_CHARLIKE) and ex != 0 and is_int(ex):
+        charlike_to_int(n)
+        return check_expr(n, expected)
+    else:
+        if nodes[n].aux != 0:
+            loop i in [0..nkids(n)):
+                part = kid(n, i)
+                if nodes[part].kind != .pair: continue
+                e = int(nodes[part].a)
+                # ("[0-9]{4}" for a regular expression: {4} puts the number 4 in the text)
+                if (nodes[e].kind == .int_lit or (nodes[e].kind == .tuple and nkids(e) > 0 and nodes[kid(e, 0)].kind == .int_lit)) and not pos_in_lib(nodes[e].pos) and not files[pos_file(nodes[e].pos)].is_dewy and brace_before(nodes[e].pos):
+                    warn(nodes[e].pos, "`\{...}` with a number in it puts that number in the text: for the characters themselves (a regular expression's repeat), write `\{\{4}}}}`, or a raw string `r\"[0-9]\{4}\"`")
+                check_expr(e, 0)
+                finalize_literal(e)
+                fmt_part(part, nodes[part].pos)
+        t = T_STR
+    ce_finish(n, t, expected)
+
+check_field_expr = (n: int, expected: int) -> int:
+    t = 0
+    if nodes[n].b != 0: reflect_name(n)
+    if reflect_active and reflect_member(n): return ntype(n)
+    a0 = int(nodes[n].a)
+    is_callee = n == callee_at
+    # (c.__peer in a program: a library's own field, which may change or go in any version)
+    if starts_with(name_of(int(nodes[n].name)), "__") and not pos_in_lib(nodes[n].pos) and not ide_on and not has_flag(n, NF_LOOPCOUNT):
+        lt = prune(check_expr(a0, 0))
+        nodes[n].a = i32(last_checked)
+        a0 = last_checked
+        add_flag(a0, NF_CHECKED)
+        if types[lt].kind == .struct_:
+            sd = int(structs[int(types[lt].st)].decl)
+            if (concurrency_builtin_type(lt, "Atomic") or concurrency_builtin_type(lt, "Task") or concurrency_builtin_type(lt, "TaskGroup")) and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "shared concurrency storage is private; use its checked operations")
+            if sd != 0 and pos_in_lib(nodes[sd].pos): warn(nodes[n].pos, "{name_of(int(nodes[n].name))} is {structs[int(types[lt].st)].name}'s own, inside the library: it may change or go in any version (if something here is missing, it is worth asking for)")
+    sl = soa_alias_of(a0)
+    if sl != 0:
+        nodes[n] = nodes[soa_alias_field(n, sl)]
+        return check_expr(n, expected)
+    if nodes[a0].kind == .index and nodes[a0].b != 0:
+        # ps[i].x on a soa array is ps.x[i]
+        abt = prune(check_expr(int(nodes[a0].a), 0))
+        nodes[a0].a = i32(last_checked)
+        if is_soa(abt):
+            f = mk(.field, nodes[n].pos)
+            nodes[f].a = nodes[a0].a
+            nodes[f].name = nodes[n].name
+            nodes[n] = Node(kind = .index, pos = nodes[n].pos, a = i32(f), b = nodes[a0].b)
+            return check_expr(n, expected)
+    saved_receiver = type_receiver_at
+    type_receiver_at = int(nodes[n].a)
+    bt = prune(check_expr(int(nodes[n].a), 0))
+    type_receiver_at = saved_receiver
+    nodes[n].a = i32(last_checked)
+    fname = int(nodes[n].name)
+    if str_sets.len() > 1 and str_set_of(bt) != 0:
+        coerce(int(nodes[n].a), T_STR)
+        bt = T_STR
+    if name_of(fname) == "add" and is_dewy_set_type(bt) and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "sets insert with push: replace `.add(value)` with `.push(value)`")
+    if synthetic_copy(bt, fname, nodes[n].pos): return check_copy(n, int(nodes[n].a), bt)
+    if (is_union(bt) or tkind(bt) == .opt) and files[pos_file(nodes[n].pos)].is_dewy:
+        return forward_member(n, int(nodes[n].a), bt, expected)
+    if ide_sentinel != 0 and fname == ide_sentinel: ide_complete_members(bt)
+    bk = types[bt].kind
+    if fname == id_dewy_len: dewy_len_check(n, true, bt, int(nodes[n].a))
+    if name_of(fname) == "length" and (bk == .array or bk == .fixed or bk == .str_ or is_map_type(bt) or is_dewy_set_type(bt)) and files[pos_file(nodes[n].pos)].is_dewy:
+        method = mk(.field, nodes[n].pos)
+        nodes[method].a = nodes[n].a
+        nodes[method].name = i32(intern("len"))
+        nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
+        return check_expr(n, expected)
+    if bk == .module:
+        m = int(types[bt].mod)
+        s = module_lookup(m, fname)
+        qualifier = int(nodes[n].a)
+        if nodes[qualifier].kind != .ident or name_of(int(nodes[qualifier].name))[0] != '$':
+            if dewy_at(nodes[n].pos): rational_one_spelling(m, fname, nodes[n].pos, "")
+        if s == 0:
+            if name_of(fname) == "path" and not dewy_at(nodes[n].pos): fatal(nodes[n].pos, "paths are plain functions: `join_path(a, b)`, `file_name(p)`, `dir_name(p)`, `extension(p)`, `file_exists(p)`")
+            fatal(nodes[n].pos, "module '{name_of(int(modules[m].name))}' has no member '{name_of(fname)}'")
+        nodes[n] = Node(kind = .ident, pos = nodes[n].pos, name = i32(fname), flags = i32(int(nodes[n].flags) & NF_MUT))
+        if is_callee: callee_at = n
+        t = check_expr_in_module(n, m, expected)
+        last_checked = n
+        return t
+    if bk == .typeval:
+        tt = prune(int(types[bt].elem))
+        if tt == ref_addr_type and (name_of(fname) == "min" or name_of(fname) == "max"):
+            nodes[n] = nodes[bc_int((if name_of(fname) == "max": ref_addr_max() else: 0), nodes[n].pos)]
+            return check_expr(n, T_INT)
+        if tt == T_MATH_INT and (name_of(fname) == "min" or name_of(fname) == "max"):
+            fatal(nodes[n].pos, "mathematical int has no min or max; int64 describes the interim storage limits")
+        if tt != 0 and is_int(tt) and (name_of(fname) == "min" or name_of(fname) == "max"):
+            if ide_on: ide_ref(nodes[n].pos, fname, IK_CONST, 0, tt, 0)
+            bits = int(types[tt].bits)
+            value = 0
+            if name_of(fname) == "min":
+                if types[tt].sign: value = 1 << (bits - 1)
+                if types[tt].sign and bits < 64: value = -value
+            else:
+                if bits == 64: value = -1
+                else: value = (1 << bits) - 1
+                if types[tt].sign: value = int(u64(value) >> 1)
+            lit = mk(.int_lit, nodes[n].pos)
+            nodes[lit].ival = value
+            # Keep the bound's type when a constant/default is cloned and checked again.
+            nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(lit), aux = i32(int(CV.int_)), aux2 = 1, type = i32(tt))
+            if not types[tt].sign and value < 0: add_flag(lit, NF_U64)
+            check_expr(lit, tt)
+            t = tt
+        else if tt != 0 and types[tt].kind == .struct_ and not is_callee and dewy_type_method(int(structs[int(types[tt].st)].decl), fname) >= 0:
+            # `Type.method`: a static method of no arguments is called by its name
+            callee = mk(.field, nodes[n].pos)
+            nodes[callee].a = nodes[n].a
+            nodes[callee].name = i32(fname)
+            nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(callee))
+            return check_expr(n, expected)
+        else if tt != 0 and types[tt].kind == .enum_:
+            vi = find_variant(int(types[tt].st), fname)
+            if vi < 0: fatal(nodes[n].pos, "{dt(tt)} has no variant '{name_of(fname)}'{variant_hint_for(tt, name_of(fname))}")
+            if variants[int(structs[int(types[tt].st)].variants) + vi].nfields != 0: fatal(nodes[n].pos, "variant '{name_of(fname)}' needs arguments")
+            if ide_on: ide_variant_ref(nodes[n].pos, fname, tt, vi)
+            nodes[n].kind = .dotname
+            nodes[n].aux = i32(vi)
+            nodes[n].a = 0
+            t = tt
+        else:
+            # (vec3.up, Vector3.zero: written out here)
+            if tt != 0 and is_vec(tt):
+                vn = name_of(fname)
+                dims = vec_n(tt)
+                lit = ""
+                if vn == "zero": lit = "0"
+                else if vn == "one": lit = "1"
+                else if dims == 3:
+                    if vn == "up": lit = "0, 1, 0"
+                    else if vn == "down": lit = "0, -1, 0"
+                    else if vn == "left": lit = "-1, 0, 0"
+                    else if vn == "right": lit = "1, 0, 0"
+                    else if vn == "forward": lit = "0, 0, -1"
+                    else if vn == "back": lit = "0, 0, 1"
+                else if dims == 2:
+                    if vn == "up": lit = "0, -1"
+                    else if vn == "down": lit = "0, 1"
+                    else if vn == "left": lit = "-1, 0"
+                    else if vn == "right": lit = "1, 0"
+                if len(lit) > 0:
+                    why = ""
+                    if vn == "forward": why = " (forward is -z, the way a camera looks)"
+                    if dims == 2 and (vn == "up" or vn == "down"): why = " (y goes down the screen)"
+                    fatal(nodes[n].pos, "write it out: `{dt(tt)}({lit})`{why}")
+            fatal(nodes[n].pos, "type has no member '{name_of(fname)}'")
+    else if nodes[n].aux == -2:
+        if bk != .tuple: fatal(nodes[n].pos, "'.{nodes[n].ival}' needs a tuple, found {dt(bt)}")
+        if nodes[n].ival < 0 or nodes[n].ival >= int(types[bt].nargs): fatal(nodes[n].pos, "tuple index out of range")
+        t = targ(bt, nodes[n].ival)
+    else if bk == .vec:
+        t = check_swizzle(n, bt)
+        if ide_on: ide_ref(nodes[n].pos, fname, IK_FIELD, 0, t, 0)
+    else:
+        st = bt
+        if bk == .ptr: st = prune(int(types[bt].elem))
+        if types[st].kind == .struct_:
+            si = int(types[st].st)
+            check_struct_fields(si)
+            fi = -1
+            loop i in [0..int(structs[si].nfields)):
+                if int(fields[int(structs[si].fields) + i].name) == fname: fi = i
+            if fi >= 0:
+                nodes[n].aux = i32(fi)
+                t = int(fields[int(structs[si].fields) + fi].type)
+                if ide_on: ide_field_ref(nodes[n].pos, fname, int(structs[si].decl), fi, t)
+                method = dewy_method_field(t)
+                if method != 0 and not is_callee:
+                    text = "{receiver_text(int(nodes[n].a))}.{name_of(fname)}"
+                    if not dewy_bare_fn(n, is_callee): fatal(nodes[n].pos, "'{text}' is a method, which is not a value yet: call it, `{text}()`")
+                    loop i in [1..nkids(method)):
+                        if nodes[kid(method, i)].b == 0: bare_fn_error(n, text, true)
+                    add_flag(int(nodes[n].a), NF_CHECKED)
+                    return bare_call(n, expected)
+                if is_fn_type(t) and dewy_bare_fn(n, is_callee):
+                    add_flag(int(nodes[n].a), NF_CHECKED)
+                    return bare_fn_value(n, t, "{receiver_text(int(nodes[n].a))}.{name_of(fname)}", expected)
+                if path_narrows > 0 and n != no_narrow_at and bk == .struct_:
+                    al = path_alias(n)
+                    if al >= 0:
+                        nodes[n] = nodes[mk_ident_local(al, nodes[n].pos)]
+                        t = int(locals[al].type)
+        # (`pair.length` of a `[int64 string]`: its number of positions)
+        if t == 0 and bk == .tuple and (fname == id_dewy_len or name_of(fname) == "length") and files[pos_file(nodes[n].pos)].is_dewy:
+            receiver = int(nodes[n].a)
+            add_flag(receiver, NF_CHECKED)
+            count = bc_int(int(types[bt].nargs), nodes[n].pos)
+            # (a receiver that could do something still runs)
+            if nodes[receiver].kind != .ident: count = bc_block([bc_stmt(receiver, nodes[n].pos), bc_stmt(count, nodes[n].pos)], nodes[n].pos)
+            nodes[n] = nodes[count]
+            return check_expr(n, expected)
+        if t == 0:
+            if bk == .opt:
+                et = prune(int(types[bt].elem))
+                has = false
+                if types[et].kind == .struct_:
+                    esi = int(types[et].st)
+                    check_struct_fields(esi)
+                    loop i in [0..int(structs[esi].nfields)):
+                        if int(fields[int(structs[esi].fields) + i].name) == fname: has = true
+                if has:
+                    if files[pos_file(nodes[n].pos)].is_dewy:
+                        fatal(nodes[n].pos, "this {dt(bt)} may be none (nothing), which has no {name_of(fname)}: check it with `is?none` before accessing the field")
+                    fatal(nodes[n].pos, "this {dt(bt)} may be none (nothing), which has no {name_of(fname)}: `x!.{name_of(fname)}` when it cannot be none, or `if let v = x: v.{name_of(fname)}`")
+            # (transform.position: a function's name, with a field after it)
+            if tkind(bt) == .fn_:
+                bn = int(nodes[n].a)
+                fnn = ""
+                if nodes[bn].kind == .ident: fnn = name_of(int(nodes[bn].name))
+                else if nodes[bn].kind == .fnref and nodes[bn].sym > 0 and fns[int(nodes[bn].sym)].decl != 0: fnn = name_of(int(nodes[int(fns[int(nodes[bn].sym)].decl)].name))
+                if fnn == "transform": fatal(nodes[n].pos, "there are no GameObjects or transforms: where a thing is, is a field of your struct (`pos: vec3`), drawn with `draw_mesh(mesh, translation(pos))`")
+                if len(fnn) > 0: fatal(nodes[n].pos, "'{fnn}' is a function, which has no field '{name_of(fname)}': `{fnn}(...)` gives what it makes")
+            # (b.velocity, b.position on a physics Body: a handle, asked of its world)
+            if types[bt].kind == .struct_ and dt(bt) == "Body" and pos_in_lib(nodes[int(structs[int(types[bt].st)].decl)].pos):
+                fatal(nodes[n].pos, "a Body is a handle into its world: ask the world, `w.pos(b)`, `w.velocity(b)`, `w.rotation(b)`, and change it there, `w.set_pos(b, p)`, `w.set_velocity(b, v)`, `w.push(b, impulse)`")
+            # (Dewy's length of a library container or a sequence, as Heap and Pool: its `len`)
+            if files[pos_file(nodes[n].pos)].is_dewy and name_of(fname) == "length" and fn_name_for(bt, intern("len")) and receiver_fits("len", bt) and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
+                # (a member: found through the object, as methods are, whatever `len` names here)
+                method = mk(.field, nodes[n].pos)
+                nodes[method].a = nodes[n].a
+                nodes[method].name = i32(intern("len"))
+                nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
+                return check_expr(n, expected)
+            if fn_name_for(bt, fname):
+                if files[pos_file(nodes[n].pos)].is_dewy:
+                    # Zero-argument calls may omit their parentheses:
+                    # `xs.pop` is `xs.pop()`. A field of that name wins.
+                    if member_call_without_arguments(bt, fname):
+                        add_flag(int(nodes[n].a), NF_MUT)
+                        method = mk(.field, nodes[n].pos)
+                        nodes[method].a = nodes[n].a
+                        nodes[method].name = i32(fname)
+                        nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method), aux2 = -9)
+                        return check_expr(n, expected)
+                    fatal(nodes[n].pos, "'{name_of(fname)}' needs arguments: `{receiver_text(int(nodes[n].a))}.{name_of(fname)}(...)`")
+                fatal(nodes[n].pos, "'{name_of(fname)}' is a function: call it, `x.{name_of(fname)}()`")
+            if is_union(bt):
+                # (a field every member has, of one type: read from whichever it holds)
+                if not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
+                    uf = union_field(n, bt, fname)
+                    if uf >= 0:
+                        last_checked = n
+                        return check_expr(n, expected)
+                fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}' (it is one of its members: find out which first, with {jd(nodes[n].pos, "`match x:` and an arm for each, or `if x is ...:`", "`match x \{ ... }` and an arm for each, or `if x is? ... \{ }`")})")
+            if is_map_type(bt): fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}' (a map's entries are `m[\"{name_of(fname)}\"]`; for fields by name, make a struct)")
+            # (an element of enemies = [] read before anything checked so far pushed one)
+            loop g in open_globals:
+                gt = prune(int(globals[g].type))
+                if tkind(gt) == .array and prune(int(types[gt].elem)) == bt:
+                    gn = name_of(int(globals[g].name))
+                    et = pushed_type(gn)
+                    if len(et) == 0: et = "Thing"
+                    fatal(nodes[n].pos, "the type of what '{gn}' holds is not known here (it starts empty): write it where '{gn}' is made, as {jd(nodes[n].pos, "`{gn}: {et}[] = []`", "`let {gn}:array<{et}> = []`")}")
+            cands = fn_names_for(bt)
+            if types[bt].kind == .struct_:
+                si = int(types[bt].st)
+                loop i in [0..int(structs[si].nfields)): cands.push(int(fields[int(structs[si].fields) + i].name))
+            fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}'{suggestion(name_of(fname), surface_names(cands, nodes[n].pos), bt)}")
+    ce_finish(n, t, expected)
+
+check_index_expr = (n: int, expected: int) -> int:
+    t = 0
+    if nodes[n].sval != 0:
+        pos = nodes[n].pos
+        name = "$index_source{bc_count}"
+        bc_count += 1
+        source = int(nodes[n].a)
+        source_type = prune(check_expr(clone(source), 0))
+        source_kind = types[source_type].kind
+        stable = (source_kind == .array or source_kind == .str_ or source_kind == .fixed) and pool_update_read(last_checked) and dewy_end_arithmetic(int(nodes[n].b), int(nodes[n].sval))
+        if stable and not ide_on:
+            # A stable receiver's length can be read where `end` is written:
+            # `xs[end]` is then exactly `xs[xs.length - 1]`, with no binding.
+            # (The editor keeps the binding so that `end` hovers as a name.)
+            end_names = [int(nodes[n].sval)]
+            end_base = name_of(int(nodes[n].sval))
+            loop axis in [1..max(nkids(n), 1)): end_names.push(intern("{end_base}_{axis}"))
+            nodes[n].sval = 0
+            dewy_end_substitute(int(nodes[n].b), end_names, source, pos)
+            loop x in kids(n):
+                if x != int(nodes[n].b): dewy_end_substitute(x, end_names, source, pos)
+            return check_expr(n, expected)
+        stmts: int[]
+        end_source = clone(source)
+        if not stable:
+            stmts.push(bc_let(name, source, pos))
+            end_source = bc_ident(name, pos)
+            nodes[n].a = i32(bc_ident(name, pos))
+        loop binding in dewy_index_end_bindings(n, end_source, source_type): stmts.push(binding)
+        nodes[n].sval = 0
+        ix = nodes.len()
+        nodes.push(nodes[n])
+        stmts.push(bc_stmt(ix, pos))
+        nodes[n] = nodes[bc_block(stmts, pos)]
+        return check_expr(n, expected)
+    saved_receiver = type_receiver_at
+    type_receiver_at = int(nodes[n].a)
+    bt = prune(check_expr(int(nodes[n].a), 0))
+    type_receiver_at = saved_receiver
+    if is_dewy_set_type(bt) and dewy_at(nodes[n].pos):
+        fatal(nodes[n].pos, "a set has no positions to index (`d.keys` is a set): `[{concat_piece(last_checked, false)}...]` collects its members into an array, and `in?` tests membership")
+    nodes[n].a = i32(last_checked)
+    dewy_index_ranges(n, bt)
+    bk = types[bt].kind
+    b = int(nodes[n].b)
+    if b != 0 and nodes[b].kind == .range and has_flag(b, NF_STEP) and not is_nd(bt):
+        if bk != .array and bk != .fixed and not is_nd(bt): fatal(nodes[n].pos, "stepped slicing requires an array")
+        nodes[n].a = i32(last_checked)
+        call = dewy_array_slice(n)
+        nodes[n] = nodes[call]
+        return check_expr(n, expected)
+    if bk == .str_ and files[pos_file(nodes[n].pos)].is_dewy:
+        base = last_checked
+        add_flag(base, NF_CHECKED)
+        pos = nodes[n].pos
+        call = 0
+        if b != 0 and nodes[b].kind == .range:
+            lo = int(nodes[b].a)
+            hi = int(nodes[b].b)
+            has_stop = hi != 0
+            if lo == 0: lo = mk(.int_lit, pos)
+            if hi == 0: hi = mk(.int_lit, pos)
+            incl = mk(.bool_lit, pos)
+            nodes[incl].ival = if has_flag(b, NF_INCLUSIVE): 1 else: 0
+            stop = mk(.bool_lit, pos)
+            nodes[stop].ival = if has_stop: 1 else: 0
+            call = bc_call("__dewy_string_slice", [base, lo, hi, incl, stop], pos)
+        else:
+            if b == 0: fatal(pos, "invalid string index")
+            call = bc_call("__dewy_string_index", [base, b], pos)
+        nodes[n] = nodes[call]
+        return check_expr(n, expected)
+    if bk == .typeval and files[pos_file(nodes[n].pos)].is_dewy:
+        # Checking a qualified type replaces its field node with a resolved
+        # identifier. Use that resolved type rather than looking up its bare
+        # name again in the caller's module.
+        target = prune(telem(bt))
+        nodes[n].kind = .call
+        nodes[n].b = 0
+        if target != 0 and types[target].kind == .struct_:
+            t = struct_ctor(n, target, int(structs[int(types[target].st)].decl), kids(n), expected)
+            nodes[n].type = i32(t)
+            add_flag(n, NF_CHECKED)
+            last_checked = n
+            return t
+        return check_expr(n, expected)
+    if bk == .tuple and files[pos_file(nodes[n].pos)].is_dewy: return dewy_position_index(n, bt, expected)
+    if bk == .typeval: t = mk_typeval(expr_as_type(n))
+    else if b != 0 and nodes[b].kind != .range and is_soa(bt): return check_soa_index(n, expected)
+    else if bk == .struct_ and is_part_index(n, bt):
+        # m[i, ..], m[1..2, 0..]: a part of an n-dimensional array
+        call = bc_call("__nd_slice", [int(nodes[n].a), part_spec(n)], nodes[n].pos)
+        add_flag(int(nodes[n].a), NF_CHECKED)
+        nodes[n] = nodes[call]
+        t = check_expr(n, expected)
+        last_checked = n
+        return t
+    else if b != 0 and nodes[b].kind == .range:
+        if nodes[b].a != 0:
+            check_to(int(nodes[b].a), T_INT)
+            neg_index_check(int(nodes[b].a))
+        if nodes[b].b != 0:
+            check_to(int(nodes[b].b), T_INT)
+            neg_index_check(int(nodes[b].b))
+        nodes[b].type = i32(T_RANGE)
+        if bk != .array and bk != .fixed and bk != .str_: fatal(nodes[n].pos, "cannot slice {dt(bt)}")
+        nodes[n].aux = 1
+        t = bt
+        if bk == .fixed: t = mk_array(int(types[bt].elem))
+    else if b == 0 and nkids(n) > 0 and bk == .struct_:
+        # m[i, j]: the `[]` operator with several indexes
+        call = mk(.call, nodes[n].pos)
+        callee = mk(.ident, nodes[n].pos)
+        nodes[callee].name = i32(intern("[]"))
+        nodes[call].a = i32(callee)
+        add_flag(int(nodes[n].a), NF_CHECKED)
+        set_list(call, [int(nodes[n].a)] + kids(n))
+        if has_flag(n, NF_MUT): add_flag(call, NF_MUT)
+        nodes[n] = nodes[call]
+        t = check_expr(n, expected)
+        last_checked = n
+        return t
+    else:
+        if b == 0: fatal(nodes[n].pos, "invalid index")
+        if (bk == .array or bk == .str_) and nodes[b].kind == .int_lit: neg_index_check(b)
+        if bk == .array or bk == .fixed:
+            pick = index_array_fn(b, "__pick")
+            if len(pick) > 0:
+                # xs[mask], xs[idxs]: the elements picked, as an array
+                call = dewy_array_selection_call(pick, [int(nodes[n].a), b], bt, nodes[n].pos)
+                add_flag(int(nodes[n].a), NF_CHECKED)
+                nodes[n] = nodes[call]
+                t = check_expr(n, expected)
+                last_checked = n
+                return t
+            check_to(b, T_INT)
+            t = int(types[bt].elem)
+            ib = int(nodes[n].b)
+            if bk == .fixed and nodes[ib].kind == .int_lit and (nodes[ib].ival < 0 or nodes[ib].ival >= fixed_len(bt)): fatal(nodes[ib].pos, "index {nodes[ib].ival} is out of bounds for {dt(bt)}")
+        else if bk == .str_:
+            check_to(b, T_INT)
+            t = T_U8
+        else if bk == .ptr:
+            check_to(b, T_INT)
+            t = int(types[bt].elem)
+        else if bk == .vec:
+            check_to(b, T_INT)
+            if bt == T_MAT4: t = T_VEC4
+            else: t = vec_comp_type(bt)
+        else if bk == .struct_:
+            call = mk(.call, nodes[n].pos)
+            callee = mk(.ident, nodes[n].pos)
+            nodes[callee].name = i32(intern("[]"))
+            nodes[call].a = i32(callee)
+            add_flag(int(nodes[n].a), NF_CHECKED)
+            set_list(call, [int(nodes[n].a), b])
+            if has_flag(n, NF_MUT): add_flag(call, NF_MUT)
+            nodes[n] = nodes[call]
+            t = check_expr(n, expected)
+            last_checked = n
+            return t
+        else:
+            if tkind(bt) == .tuple: fatal(nodes[n].pos, "a tuple's parts are `t.0`, `t.1` (an index in brackets is for arrays)")
+            if tkind(bt) == .opt and dewy_at(nodes[n].pos):
+                fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}: it may be none (a member read through an optional is optional too). Check the value first, `if x isnt? none \{ ... }`, which narrows x inside, or give a fallback, `(x ?? default)[i]`")
+            if is_union(bt) and dewy_at(nodes[n].pos):
+                loop m in union_members(bt):
+                    if m != T_NONE and exception_member(m): fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}: it may be {dt(m)} (a member read through it forwards {dt(m)} too). Check the value first, `if x isnt? {dt(m)} \{ ... }`, which narrows x inside")
+            fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}")
+    ce_finish(n, t, expected)
+
 check_expr_other = (n: int, expected: int) -> int:
     t = 0
     ex = prune(expected)
@@ -8614,22 +9065,6 @@ check_expr_other = (n: int, expected: int) -> int:
         else:
             add_flag(n, NF_LITERAL)
             t = T_FLOAT
-    else if k == .str_lit and has_flag(n, NF_CHARLIKE) and ex != 0 and is_int(ex):
-        charlike_to_int(n)
-        return check_expr(n, expected)
-    else if k == .str_lit:
-        if nodes[n].aux != 0:
-            loop i in [0..nkids(n)):
-                part = kid(n, i)
-                if nodes[part].kind != .pair: continue
-                e = int(nodes[part].a)
-                # ("[0-9]{4}" for a regular expression: {4} puts the number 4 in the text)
-                if (nodes[e].kind == .int_lit or (nodes[e].kind == .tuple and nkids(e) > 0 and nodes[kid(e, 0)].kind == .int_lit)) and not pos_in_lib(nodes[e].pos) and not files[pos_file(nodes[e].pos)].is_dewy and brace_before(nodes[e].pos):
-                    warn(nodes[e].pos, "`\{...}` with a number in it puts that number in the text: for the characters themselves (a regular expression's repeat), write `\{\{4}}}}`, or a raw string `r\"[0-9]\{4}\"`")
-                check_expr(e, 0)
-                finalize_literal(e)
-                fmt_part(part, nodes[part].pos)
-        t = T_STR
     else if k == .bool_lit: t = T_BOOL
     else if k == .none_lit:
         if ex != 0 and exk == .opt: t = ex
@@ -8637,250 +9072,6 @@ check_expr_other = (n: int, expected: int) -> int:
     else if k == .null_lit:
         if ex != 0 and (exk == .ptr or exk == .cfn): t = ex
         else: t = T_NULL
-    else if k == .field:
-        if nodes[n].b != 0: reflect_name(n)
-        if reflect_active and reflect_member(n): return ntype(n)
-        a0 = int(nodes[n].a)
-        is_callee = n == callee_at
-        # (c.__peer in a program: a library's own field, which may change or go in any version)
-        if starts_with(name_of(int(nodes[n].name)), "__") and not pos_in_lib(nodes[n].pos) and not ide_on and not has_flag(n, NF_LOOPCOUNT):
-            lt = prune(check_expr(a0, 0))
-            nodes[n].a = i32(last_checked)
-            a0 = last_checked
-            add_flag(a0, NF_CHECKED)
-            if types[lt].kind == .struct_:
-                sd = int(structs[int(types[lt].st)].decl)
-                if (concurrency_builtin_type(lt, "Atomic") or concurrency_builtin_type(lt, "Task") or concurrency_builtin_type(lt, "TaskGroup")) and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "shared concurrency storage is private; use its checked operations")
-                if sd != 0 and pos_in_lib(nodes[sd].pos): warn(nodes[n].pos, "{name_of(int(nodes[n].name))} is {structs[int(types[lt].st)].name}'s own, inside the library: it may change or go in any version (if something here is missing, it is worth asking for)")
-        sl = soa_alias_of(a0)
-        if sl != 0:
-            nodes[n] = nodes[soa_alias_field(n, sl)]
-            return check_expr(n, expected)
-        if nodes[a0].kind == .index and nodes[a0].b != 0:
-            # ps[i].x on a soa array is ps.x[i]
-            abt = prune(check_expr(int(nodes[a0].a), 0))
-            nodes[a0].a = i32(last_checked)
-            if is_soa(abt):
-                f = mk(.field, nodes[n].pos)
-                nodes[f].a = nodes[a0].a
-                nodes[f].name = nodes[n].name
-                nodes[n] = Node(kind = .index, pos = nodes[n].pos, a = i32(f), b = nodes[a0].b)
-                return check_expr(n, expected)
-        saved_receiver = type_receiver_at
-        type_receiver_at = int(nodes[n].a)
-        bt = prune(check_expr(int(nodes[n].a), 0))
-        type_receiver_at = saved_receiver
-        nodes[n].a = i32(last_checked)
-        fname = int(nodes[n].name)
-        if str_sets.len() > 1 and str_set_of(bt) != 0:
-            coerce(int(nodes[n].a), T_STR)
-            bt = T_STR
-        if name_of(fname) == "add" and is_dewy_set_type(bt) and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "sets insert with push: replace `.add(value)` with `.push(value)`")
-        if synthetic_copy(bt, fname, nodes[n].pos): return check_copy(n, int(nodes[n].a), bt)
-        if (is_union(bt) or tkind(bt) == .opt) and files[pos_file(nodes[n].pos)].is_dewy:
-            return forward_member(n, int(nodes[n].a), bt, expected)
-        if ide_sentinel != 0 and fname == ide_sentinel: ide_complete_members(bt)
-        bk = types[bt].kind
-        if fname == id_dewy_len: dewy_len_check(n, true, bt, int(nodes[n].a))
-        if name_of(fname) == "length" and (bk == .array or bk == .fixed or bk == .str_ or is_map_type(bt) or is_dewy_set_type(bt)) and files[pos_file(nodes[n].pos)].is_dewy:
-            method = mk(.field, nodes[n].pos)
-            nodes[method].a = nodes[n].a
-            nodes[method].name = i32(intern("len"))
-            nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
-            return check_expr(n, expected)
-        if bk == .module:
-            m = int(types[bt].mod)
-            s = module_lookup(m, fname)
-            qualifier = int(nodes[n].a)
-            if nodes[qualifier].kind != .ident or name_of(int(nodes[qualifier].name))[0] != '$':
-                if dewy_at(nodes[n].pos): rational_one_spelling(m, fname, nodes[n].pos, "")
-            if s == 0:
-                if name_of(fname) == "path" and not dewy_at(nodes[n].pos): fatal(nodes[n].pos, "paths are plain functions: `join_path(a, b)`, `file_name(p)`, `dir_name(p)`, `extension(p)`, `file_exists(p)`")
-                fatal(nodes[n].pos, "module '{name_of(int(modules[m].name))}' has no member '{name_of(fname)}'")
-            nodes[n] = Node(kind = .ident, pos = nodes[n].pos, name = i32(fname), flags = i32(int(nodes[n].flags) & NF_MUT))
-            if is_callee: callee_at = n
-            t = check_expr_in_module(n, m, expected)
-            last_checked = n
-            return t
-        if bk == .typeval:
-            tt = prune(int(types[bt].elem))
-            if tt == ref_addr_type and (name_of(fname) == "min" or name_of(fname) == "max"):
-                nodes[n] = nodes[bc_int((if name_of(fname) == "max": ref_addr_max() else: 0), nodes[n].pos)]
-                return check_expr(n, T_INT)
-            if tt == T_MATH_INT and (name_of(fname) == "min" or name_of(fname) == "max"):
-                fatal(nodes[n].pos, "mathematical int has no min or max; int64 describes the interim storage limits")
-            if tt != 0 and is_int(tt) and (name_of(fname) == "min" or name_of(fname) == "max"):
-                if ide_on: ide_ref(nodes[n].pos, fname, IK_CONST, 0, tt, 0)
-                bits = int(types[tt].bits)
-                value = 0
-                if name_of(fname) == "min":
-                    if types[tt].sign: value = 1 << (bits - 1)
-                    if types[tt].sign and bits < 64: value = -value
-                else:
-                    if bits == 64: value = -1
-                    else: value = (1 << bits) - 1
-                    if types[tt].sign: value = int(u64(value) >> 1)
-                lit = mk(.int_lit, nodes[n].pos)
-                nodes[lit].ival = value
-                # Keep the bound's type when a constant/default is cloned and checked again.
-                nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(lit), aux = i32(int(CV.int_)), aux2 = 1, type = i32(tt))
-                if not types[tt].sign and value < 0: add_flag(lit, NF_U64)
-                check_expr(lit, tt)
-                t = tt
-            else if tt != 0 and types[tt].kind == .struct_ and not is_callee and dewy_type_method(int(structs[int(types[tt].st)].decl), fname) >= 0:
-                # `Type.method`: a static method of no arguments is called by its name
-                callee = mk(.field, nodes[n].pos)
-                nodes[callee].a = nodes[n].a
-                nodes[callee].name = i32(fname)
-                nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(callee))
-                return check_expr(n, expected)
-            else if tt != 0 and types[tt].kind == .enum_:
-                vi = find_variant(int(types[tt].st), fname)
-                if vi < 0: fatal(nodes[n].pos, "{dt(tt)} has no variant '{name_of(fname)}'{variant_hint_for(tt, name_of(fname))}")
-                if variants[int(structs[int(types[tt].st)].variants) + vi].nfields != 0: fatal(nodes[n].pos, "variant '{name_of(fname)}' needs arguments")
-                if ide_on: ide_variant_ref(nodes[n].pos, fname, tt, vi)
-                nodes[n].kind = .dotname
-                nodes[n].aux = i32(vi)
-                nodes[n].a = 0
-                t = tt
-            else:
-                # (vec3.up, Vector3.zero: written out here)
-                if tt != 0 and is_vec(tt):
-                    vn = name_of(fname)
-                    dims = vec_n(tt)
-                    lit = ""
-                    if vn == "zero": lit = "0"
-                    else if vn == "one": lit = "1"
-                    else if dims == 3:
-                        if vn == "up": lit = "0, 1, 0"
-                        else if vn == "down": lit = "0, -1, 0"
-                        else if vn == "left": lit = "-1, 0, 0"
-                        else if vn == "right": lit = "1, 0, 0"
-                        else if vn == "forward": lit = "0, 0, -1"
-                        else if vn == "back": lit = "0, 0, 1"
-                    else if dims == 2:
-                        if vn == "up": lit = "0, -1"
-                        else if vn == "down": lit = "0, 1"
-                        else if vn == "left": lit = "-1, 0"
-                        else if vn == "right": lit = "1, 0"
-                    if len(lit) > 0:
-                        why = ""
-                        if vn == "forward": why = " (forward is -z, the way a camera looks)"
-                        if dims == 2 and (vn == "up" or vn == "down"): why = " (y goes down the screen)"
-                        fatal(nodes[n].pos, "write it out: `{dt(tt)}({lit})`{why}")
-                fatal(nodes[n].pos, "type has no member '{name_of(fname)}'")
-        else if nodes[n].aux == -2:
-            if bk != .tuple: fatal(nodes[n].pos, "'.{nodes[n].ival}' needs a tuple, found {dt(bt)}")
-            if nodes[n].ival < 0 or nodes[n].ival >= int(types[bt].nargs): fatal(nodes[n].pos, "tuple index out of range")
-            t = targ(bt, nodes[n].ival)
-        else if bk == .vec:
-            t = check_swizzle(n, bt)
-            if ide_on: ide_ref(nodes[n].pos, fname, IK_FIELD, 0, t, 0)
-        else:
-            st = bt
-            if bk == .ptr: st = prune(int(types[bt].elem))
-            if types[st].kind == .struct_:
-                si = int(types[st].st)
-                check_struct_fields(si)
-                fi = -1
-                loop i in [0..int(structs[si].nfields)):
-                    if int(fields[int(structs[si].fields) + i].name) == fname: fi = i
-                if fi >= 0:
-                    nodes[n].aux = i32(fi)
-                    t = int(fields[int(structs[si].fields) + fi].type)
-                    if ide_on: ide_field_ref(nodes[n].pos, fname, int(structs[si].decl), fi, t)
-                    method = dewy_method_field(t)
-                    if method != 0 and not is_callee:
-                        text = "{receiver_text(int(nodes[n].a))}.{name_of(fname)}"
-                        if not dewy_bare_fn(n, is_callee): fatal(nodes[n].pos, "'{text}' is a method, which is not a value yet: call it, `{text}()`")
-                        loop i in [1..nkids(method)):
-                            if nodes[kid(method, i)].b == 0: bare_fn_error(n, text, true)
-                        add_flag(int(nodes[n].a), NF_CHECKED)
-                        return bare_call(n, expected)
-                    if is_fn_type(t) and dewy_bare_fn(n, is_callee):
-                        add_flag(int(nodes[n].a), NF_CHECKED)
-                        return bare_fn_value(n, t, "{receiver_text(int(nodes[n].a))}.{name_of(fname)}", expected)
-                    if path_narrows > 0 and n != no_narrow_at and bk == .struct_:
-                        al = path_alias(n)
-                        if al >= 0:
-                            nodes[n] = nodes[mk_ident_local(al, nodes[n].pos)]
-                            t = int(locals[al].type)
-            # (`pair.length` of a `[int64 string]`: its number of positions)
-            if t == 0 and bk == .tuple and (fname == id_dewy_len or name_of(fname) == "length") and files[pos_file(nodes[n].pos)].is_dewy:
-                receiver = int(nodes[n].a)
-                add_flag(receiver, NF_CHECKED)
-                count = bc_int(int(types[bt].nargs), nodes[n].pos)
-                # (a receiver that could do something still runs)
-                if nodes[receiver].kind != .ident: count = bc_block([bc_stmt(receiver, nodes[n].pos), bc_stmt(count, nodes[n].pos)], nodes[n].pos)
-                nodes[n] = nodes[count]
-                return check_expr(n, expected)
-            if t == 0:
-                if bk == .opt:
-                    et = prune(int(types[bt].elem))
-                    has = false
-                    if types[et].kind == .struct_:
-                        esi = int(types[et].st)
-                        check_struct_fields(esi)
-                        loop i in [0..int(structs[esi].nfields)):
-                            if int(fields[int(structs[esi].fields) + i].name) == fname: has = true
-                    if has:
-                        if files[pos_file(nodes[n].pos)].is_dewy:
-                            fatal(nodes[n].pos, "this {dt(bt)} may be none (nothing), which has no {name_of(fname)}: check it with `is?none` before accessing the field")
-                        fatal(nodes[n].pos, "this {dt(bt)} may be none (nothing), which has no {name_of(fname)}: `x!.{name_of(fname)}` when it cannot be none, or `if let v = x: v.{name_of(fname)}`")
-                # (transform.position: a function's name, with a field after it)
-                if tkind(bt) == .fn_:
-                    bn = int(nodes[n].a)
-                    fnn = ""
-                    if nodes[bn].kind == .ident: fnn = name_of(int(nodes[bn].name))
-                    else if nodes[bn].kind == .fnref and nodes[bn].sym > 0 and fns[int(nodes[bn].sym)].decl != 0: fnn = name_of(int(nodes[int(fns[int(nodes[bn].sym)].decl)].name))
-                    if fnn == "transform": fatal(nodes[n].pos, "there are no GameObjects or transforms: where a thing is, is a field of your struct (`pos: vec3`), drawn with `draw_mesh(mesh, translation(pos))`")
-                    if len(fnn) > 0: fatal(nodes[n].pos, "'{fnn}' is a function, which has no field '{name_of(fname)}': `{fnn}(...)` gives what it makes")
-                # (b.velocity, b.position on a physics Body: a handle, asked of its world)
-                if types[bt].kind == .struct_ and dt(bt) == "Body" and pos_in_lib(nodes[int(structs[int(types[bt].st)].decl)].pos):
-                    fatal(nodes[n].pos, "a Body is a handle into its world: ask the world, `w.pos(b)`, `w.velocity(b)`, `w.rotation(b)`, and change it there, `w.set_pos(b, p)`, `w.set_velocity(b, v)`, `w.push(b, impulse)`")
-                # (Dewy's length of a library container or a sequence, as Heap and Pool: its `len`)
-                if files[pos_file(nodes[n].pos)].is_dewy and name_of(fname) == "length" and fn_name_for(bt, intern("len")) and receiver_fits("len", bt) and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
-                    # (a member: found through the object, as methods are, whatever `len` names here)
-                    method = mk(.field, nodes[n].pos)
-                    nodes[method].a = nodes[n].a
-                    nodes[method].name = i32(intern("len"))
-                    nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
-                    return check_expr(n, expected)
-                if fn_name_for(bt, fname):
-                    if files[pos_file(nodes[n].pos)].is_dewy:
-                        # Zero-argument calls may omit their parentheses:
-                        # `xs.pop` is `xs.pop()`. A field of that name wins.
-                        if member_call_without_arguments(bt, fname):
-                            add_flag(int(nodes[n].a), NF_MUT)
-                            method = mk(.field, nodes[n].pos)
-                            nodes[method].a = nodes[n].a
-                            nodes[method].name = i32(fname)
-                            nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method), aux2 = -9)
-                            return check_expr(n, expected)
-                        fatal(nodes[n].pos, "'{name_of(fname)}' needs arguments: `{receiver_text(int(nodes[n].a))}.{name_of(fname)}(...)`")
-                    fatal(nodes[n].pos, "'{name_of(fname)}' is a function: call it, `x.{name_of(fname)}()`")
-                if is_union(bt):
-                    # (a field every member has, of one type: read from whichever it holds)
-                    if not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
-                        uf = union_field(n, bt, fname)
-                        if uf >= 0:
-                            last_checked = n
-                            return check_expr(n, expected)
-                    fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}' (it is one of its members: find out which first, with {jd(nodes[n].pos, "`match x:` and an arm for each, or `if x is ...:`", "`match x \{ ... }` and an arm for each, or `if x is? ... \{ }`")})")
-                if is_map_type(bt): fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}' (a map's entries are `m[\"{name_of(fname)}\"]`; for fields by name, make a struct)")
-                # (an element of enemies = [] read before anything checked so far pushed one)
-                loop g in open_globals:
-                    gt = prune(int(globals[g].type))
-                    if tkind(gt) == .array and prune(int(types[gt].elem)) == bt:
-                        gn = name_of(int(globals[g].name))
-                        et = pushed_type(gn)
-                        if len(et) == 0: et = "Thing"
-                        fatal(nodes[n].pos, "the type of what '{gn}' holds is not known here (it starts empty): write it where '{gn}' is made, as {jd(nodes[n].pos, "`{gn}: {et}[] = []`", "`let {gn}:array<{et}> = []`")}")
-                cands = fn_names_for(bt)
-                if types[bt].kind == .struct_:
-                    si = int(types[bt].st)
-                    loop i in [0..int(structs[si].nfields)): cands.push(int(fields[int(structs[si].fields) + i].name))
-                fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}'{suggestion(name_of(fname), surface_names(cands, nodes[n].pos), bt)}")
     else if k == .dotname:
         if ide_sentinel != 0 and int(nodes[n].name) == ide_sentinel: ide_complete_variants(ex)
         et = ex
@@ -8930,174 +9121,6 @@ check_expr_other = (n: int, expected: int) -> int:
             loop arg in kids(n): targs.push(effect_generic_argument(arg))
             t = fn_value(n, expected, targs, closure = base)
         else: t = mk_typeval(resolve_type(int(nodes[n].c)))
-    else if k == .index:
-        if nodes[n].sval != 0:
-            pos = nodes[n].pos
-            name = "$index_source{bc_count}"
-            bc_count += 1
-            source = int(nodes[n].a)
-            source_type = prune(check_expr(clone(source), 0))
-            source_kind = types[source_type].kind
-            stable = (source_kind == .array or source_kind == .str_ or source_kind == .fixed) and pool_update_read(last_checked) and dewy_end_arithmetic(int(nodes[n].b), int(nodes[n].sval))
-            if stable and not ide_on:
-                # A stable receiver's length can be read where `end` is written:
-                # `xs[end]` is then exactly `xs[xs.length - 1]`, with no binding.
-                # (The editor keeps the binding so that `end` hovers as a name.)
-                end_names = [int(nodes[n].sval)]
-                end_base = name_of(int(nodes[n].sval))
-                loop axis in [1..max(nkids(n), 1)): end_names.push(intern("{end_base}_{axis}"))
-                nodes[n].sval = 0
-                dewy_end_substitute(int(nodes[n].b), end_names, source, pos)
-                loop x in kids(n):
-                    if x != int(nodes[n].b): dewy_end_substitute(x, end_names, source, pos)
-                return check_expr(n, expected)
-            stmts: int[]
-            end_source = clone(source)
-            if not stable:
-                stmts.push(bc_let(name, source, pos))
-                end_source = bc_ident(name, pos)
-                nodes[n].a = i32(bc_ident(name, pos))
-            loop binding in dewy_index_end_bindings(n, end_source, source_type): stmts.push(binding)
-            nodes[n].sval = 0
-            ix = nodes.len()
-            nodes.push(nodes[n])
-            stmts.push(bc_stmt(ix, pos))
-            nodes[n] = nodes[bc_block(stmts, pos)]
-            return check_expr(n, expected)
-        saved_receiver = type_receiver_at
-        type_receiver_at = int(nodes[n].a)
-        bt = prune(check_expr(int(nodes[n].a), 0))
-        type_receiver_at = saved_receiver
-        if is_dewy_set_type(bt) and dewy_at(nodes[n].pos):
-            fatal(nodes[n].pos, "a set has no positions to index (`d.keys` is a set): `[{concat_piece(last_checked, false)}...]` collects its members into an array, and `in?` tests membership")
-        nodes[n].a = i32(last_checked)
-        dewy_index_ranges(n, bt)
-        bk = types[bt].kind
-        b = int(nodes[n].b)
-        if b != 0 and nodes[b].kind == .range and has_flag(b, NF_STEP) and not is_nd(bt):
-            if bk != .array and bk != .fixed and not is_nd(bt): fatal(nodes[n].pos, "stepped slicing requires an array")
-            nodes[n].a = i32(last_checked)
-            call = dewy_array_slice(n)
-            nodes[n] = nodes[call]
-            return check_expr(n, expected)
-        if bk == .str_ and files[pos_file(nodes[n].pos)].is_dewy:
-            base = last_checked
-            add_flag(base, NF_CHECKED)
-            pos = nodes[n].pos
-            call = 0
-            if b != 0 and nodes[b].kind == .range:
-                lo = int(nodes[b].a)
-                hi = int(nodes[b].b)
-                has_stop = hi != 0
-                if lo == 0: lo = mk(.int_lit, pos)
-                if hi == 0: hi = mk(.int_lit, pos)
-                incl = mk(.bool_lit, pos)
-                nodes[incl].ival = if has_flag(b, NF_INCLUSIVE): 1 else: 0
-                stop = mk(.bool_lit, pos)
-                nodes[stop].ival = if has_stop: 1 else: 0
-                call = bc_call("__dewy_string_slice", [base, lo, hi, incl, stop], pos)
-            else:
-                if b == 0: fatal(pos, "invalid string index")
-                call = bc_call("__dewy_string_index", [base, b], pos)
-            nodes[n] = nodes[call]
-            return check_expr(n, expected)
-        if bk == .typeval and files[pos_file(nodes[n].pos)].is_dewy:
-            # Checking a qualified type replaces its field node with a resolved
-            # identifier. Use that resolved type rather than looking up its bare
-            # name again in the caller's module.
-            target = prune(telem(bt))
-            nodes[n].kind = .call
-            nodes[n].b = 0
-            if target != 0 and types[target].kind == .struct_:
-                t = struct_ctor(n, target, int(structs[int(types[target].st)].decl), kids(n), expected)
-                nodes[n].type = i32(t)
-                add_flag(n, NF_CHECKED)
-                last_checked = n
-                return t
-            return check_expr(n, expected)
-        if bk == .tuple and files[pos_file(nodes[n].pos)].is_dewy: return dewy_position_index(n, bt, expected)
-        if bk == .typeval: t = mk_typeval(expr_as_type(n))
-        else if b != 0 and nodes[b].kind != .range and is_soa(bt): return check_soa_index(n, expected)
-        else if bk == .struct_ and is_part_index(n, bt):
-            # m[i, ..], m[1..2, 0..]: a part of an n-dimensional array
-            call = bc_call("__nd_slice", [int(nodes[n].a), part_spec(n)], nodes[n].pos)
-            add_flag(int(nodes[n].a), NF_CHECKED)
-            nodes[n] = nodes[call]
-            t = check_expr(n, expected)
-            last_checked = n
-            return t
-        else if b != 0 and nodes[b].kind == .range:
-            if nodes[b].a != 0:
-                check_to(int(nodes[b].a), T_INT)
-                neg_index_check(int(nodes[b].a))
-            if nodes[b].b != 0:
-                check_to(int(nodes[b].b), T_INT)
-                neg_index_check(int(nodes[b].b))
-            nodes[b].type = i32(T_RANGE)
-            if bk != .array and bk != .fixed and bk != .str_: fatal(nodes[n].pos, "cannot slice {dt(bt)}")
-            nodes[n].aux = 1
-            t = bt
-            if bk == .fixed: t = mk_array(int(types[bt].elem))
-        else if b == 0 and nkids(n) > 0 and bk == .struct_:
-            # m[i, j]: the `[]` operator with several indexes
-            call = mk(.call, nodes[n].pos)
-            callee = mk(.ident, nodes[n].pos)
-            nodes[callee].name = i32(intern("[]"))
-            nodes[call].a = i32(callee)
-            add_flag(int(nodes[n].a), NF_CHECKED)
-            set_list(call, [int(nodes[n].a)] + kids(n))
-            if has_flag(n, NF_MUT): add_flag(call, NF_MUT)
-            nodes[n] = nodes[call]
-            t = check_expr(n, expected)
-            last_checked = n
-            return t
-        else:
-            if b == 0: fatal(nodes[n].pos, "invalid index")
-            if (bk == .array or bk == .str_) and nodes[b].kind == .int_lit: neg_index_check(b)
-            if bk == .array or bk == .fixed:
-                pick = index_array_fn(b, "__pick")
-                if len(pick) > 0:
-                    # xs[mask], xs[idxs]: the elements picked, as an array
-                    call = dewy_array_selection_call(pick, [int(nodes[n].a), b], bt, nodes[n].pos)
-                    add_flag(int(nodes[n].a), NF_CHECKED)
-                    nodes[n] = nodes[call]
-                    t = check_expr(n, expected)
-                    last_checked = n
-                    return t
-                check_to(b, T_INT)
-                t = int(types[bt].elem)
-                ib = int(nodes[n].b)
-                if bk == .fixed and nodes[ib].kind == .int_lit and (nodes[ib].ival < 0 or nodes[ib].ival >= fixed_len(bt)): fatal(nodes[ib].pos, "index {nodes[ib].ival} is out of bounds for {dt(bt)}")
-            else if bk == .str_:
-                check_to(b, T_INT)
-                t = T_U8
-            else if bk == .ptr:
-                check_to(b, T_INT)
-                t = int(types[bt].elem)
-            else if bk == .vec:
-                check_to(b, T_INT)
-                if bt == T_MAT4: t = T_VEC4
-                else: t = vec_comp_type(bt)
-            else if bk == .struct_:
-                call = mk(.call, nodes[n].pos)
-                callee = mk(.ident, nodes[n].pos)
-                nodes[callee].name = i32(intern("[]"))
-                nodes[call].a = i32(callee)
-                add_flag(int(nodes[n].a), NF_CHECKED)
-                set_list(call, [int(nodes[n].a), b])
-                if has_flag(n, NF_MUT): add_flag(call, NF_MUT)
-                nodes[n] = nodes[call]
-                t = check_expr(n, expected)
-                last_checked = n
-                return t
-            else:
-                if tkind(bt) == .tuple: fatal(nodes[n].pos, "a tuple's parts are `t.0`, `t.1` (an index in brackets is for arrays)")
-                if tkind(bt) == .opt and dewy_at(nodes[n].pos):
-                    fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}: it may be none (a member read through an optional is optional too). Check the value first, `if x isnt? none \{ ... }`, which narrows x inside, or give a fallback, `(x ?? default)[i]`")
-                if is_union(bt) and dewy_at(nodes[n].pos):
-                    loop m in union_members(bt):
-                        if m != T_NONE and exception_member(m): fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}: it may be {dt(m)} (a member read through it forwards {dt(m)} too). Check the value first, `if x isnt? {dt(m)} \{ ... }`, which narrows x inside")
-                fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}")
     else if k == .unary:
         if has_flag(n, NF_BROADCAST): return check_dotted(n, expected)
         hint = 0
@@ -9428,7 +9451,6 @@ check_expr_other = (n: int, expected: int) -> int:
                 else: finalize_literal(c)
                 el.push(ntype(c))
             t = mk_tuple(el)
-    else if k == .if_: t = check_if(n, ex)
     else if k == .iflet: t = check_iflet(n, ex)
     else if k == .match_: t = check_match(n, expected)
     else if k == .cast:
