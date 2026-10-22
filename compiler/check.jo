@@ -994,7 +994,10 @@ load_module = (path: str, is_prelude: bool, from: int) -> int:
     module_by_path[key] = mi
     p_lazy = is_prelude and not ide_on
     if pl_on: pl_files.push(fi)
+    # (parsing an imported module is frontend work, whatever phase meets the import)
+    icl = ic_mod(IC_LOAD, mi)
     decls = source_declarations(fi)
+    ic_restore(icl)
     p_lazy = false
     modules[mi].decls = decls
     mi
@@ -1892,6 +1895,14 @@ no_web_check = (decl: int, use_pos: int):
         no_web_warned[use_pos] = true
         warn(use_pos, "{name_of(int(nodes[decl].name))} {name_of(int(nodes[int(nodes[at].a)].sval))}")
 
+# (a lazy body's lexing and parsing is frontend work, whoever asks for it first)
+load_body = (decl: int, f: int):
+    b = int(nodes[decl].b)
+    if b == 0 or not has_flag(b, NF_LAZY): return
+    icl = ic_fn(IC_LOAD, f)
+    ensure_body(decl)
+    ic_restore(icl)
+
 get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
     if nodes[decl].kind == .lambda: return poly_inst(decl, targs, use_pos)
     if target_wasm and nodes[decl].c != 0: no_web_check(decl, use_pos)
@@ -1942,7 +1953,7 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
         if fns[f].gdepth > 500: fatal(use_pos, "the generic function '{name_of(int(nodes[decl].name))}' expands without end: generic functions call each other with ever new types (more than 500 deep)")
     loop i in [0..nkids(decl)): fns[f].ptypes.push(subst(sig.params[i], zt))
     if sig.generic: source_force_body(decl)
-    ensure_body(decl)
+    load_body(decl, f)
     if sig.ret != 0: fns[f].ret = i32(subst(int(sig.ret), zt))
     else if nodes[decl].b != 0 and syntactic_void(int(nodes[decl].b)): fns[f].ret = i32(T_VOID)
     if refine_active and sig.generic: ref_validate_signature(fns[f].ptypes, int(fns[f].ret), int(sig.mutmask), use_pos)
@@ -2033,7 +2044,7 @@ check_c_boxes = (t0: int, pos: int):
 
 ensure_ret = (f: int, use_pos: int):
     if fns[f].ret != 0: return
-    if fns[f].decl != 0: ensure_body(int(fns[f].decl))
+    if fns[f].decl != 0: load_body(int(fns[f].decl), f)
     # (a Dewy function whose value is its last expression, `fact = (n:int64) => if n <=? 1 1
     # else n * fact(n - 1)`: its result is that of a branch that does not call it)
     if fns[f].state == 1 and fns[f].decl != 0 and dewy_at(nodes[int(fns[f].decl)].pos):
