@@ -31,6 +31,9 @@ decimal_globals: {int: int} = {}        # global -> its declaration's position
 decimal_global_inits: {int: int} = {}   # global -> its literal initializer, unchecked
 decimal_users: {int: int[]} = {}        # global -> bodies (function, or top-level code) that used it exact
 decimal_target = 0                      # the declaration position of the binding being assigned
+decimal_target_at = 0                   # ... the position of its name in the assignment
+decimal_adapted: {int: int} = {}        # declarations (positions) made float64 -> the write's position
+decimal_adapted_locals: {int: int} = {} # locals of such declarations, checked again -> the position
 decimal_target_ref = 0                  # ... its local, or -1 - its global
 decimal_frame = 0                       # the function whose body check can start over (0: none)
 decimal_again = false                   # ... and must
@@ -289,6 +292,7 @@ decimal_local = (l: int, pos: int, t: int):
     if bundled_rational_type(t) and dewy_at(pos):
         decimal_locals[l] = pos
         decimal_local_fns[l] = decimal_root()
+    else if decimal_adapted.len() > 0 and decimal_adapted.has(pos): decimal_adapted_locals[l] = pos
 
 decimal_global = (g: int, pos: int, t: int):
     if bundled_rational_type(t) and dewy_at(pos) and decimal_global_inits.has(g): decimal_globals[g] = pos
@@ -312,6 +316,7 @@ decimal_assign_begin = (s: int) -> int:
     if nodes[lhs].kind != .ident: return saved
     sy = lookup(int(nodes[lhs].name))
     if sy == 0: return saved
+    decimal_target_at = nodes[lhs].pos
     if syms[sy].kind == .local:
         l = int(syms[sy].ref)
         decimal_target = decimal_locals.get(l) ?? 0
@@ -332,6 +337,7 @@ decimal_float_write = (from: int, to: int) -> bool:
         l = decimal_target_ref
         if (decimal_local_fns.get(l) ?? 0) != decimal_frame: return false
         decimal_floats[decimal_target] = true
+        decimal_adapted_warn(decimal_target, name_of(int(locals[l].name)))
         locals[l].type = i32(T_FLOAT)
         decimal_again = true
         return true
@@ -344,6 +350,7 @@ decimal_float_write = (from: int, to: int) -> bool:
     # (a forked check worker gives up its part: the compiler checks it again itself)
     if pc_child >= 0: exit(1)
     decimal_floats[pos] = true
+    decimal_adapted_warn(pos, name_of(int(nodes[int(globals[g].decl)].name)))
     loop u in users:
         if u != decimal_frame and not decimal_nested_in_frame(u) and not decimal_stale.contains(u): decimal_stale.push(u)
     d = int(globals[g].decl)
@@ -431,3 +438,34 @@ decimal_writes = (n: int, names: {int: bool}) -> bool:
     loop i in [0..nkids2(n)):
         if decimal_writes(kid2(n, i), names): return true
     false
+
+# A later write that changes a decimal binding's inferred type to float64 warns where it
+# shows: at each exact comparison (`=?`, `not=?`) reading the binding, whose result the
+# change can flip (0.1+0.2 =? 0.3 is true exactly, false in float64). Idiomatic code states
+# the representation, so the fix-it annotates it. Only comparisons are looked at, and only
+# once a binding was made float64 (the restarted check of its body finds them).
+const DECIMAL_ADAPTED_FIX = "annotate `float64` (or another explicit representation) to state it"
+
+decimal_adapted_warn = (decl: int, name: str):
+    decimal_adapted[decl] = decimal_target_at
+
+# (the unchecked operands of an exact comparison: the names in them of bindings made float64)
+decimal_compared = (e: int):
+    if e == 0 or has_flag(e, NF_CHECKED): return
+    k = nodes[e].kind
+    if k == .ident:
+        sy = lookup(int(nodes[e].name))
+        if sy == 0: return
+        decl = 0
+        if syms[sy].kind == .local: decl = decimal_adapted_locals.get(int(syms[sy].ref)) ?? 0
+        else if syms[sy].kind == .global:
+            decl = decimal_globals.get(int(syms[sy].ref)) ?? 0
+            if not decimal_adapted.has(decl): decl = 0
+        if decl == 0: return
+        wl, _ = line_col(decimal_adapted[decl])
+        warn(nodes[e].pos, "`{name_of(int(nodes[e].name))}` is float64 because of the float written to it at line {wl}, so this exact comparison tests float64 values, not the exact decimal its literal gave (`0.1+0.2 =? 0.3` is true exactly, false in float64); {DECIMAL_ADAPTED_FIX}")
+        return
+    if k == .lambda or k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit: return
+    decimal_compared(int(nodes[e].a))
+    decimal_compared(int(nodes[e].b))
+    loop i in [0..nkids(e)): decimal_compared(kid(e, i))

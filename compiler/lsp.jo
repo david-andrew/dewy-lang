@@ -2518,7 +2518,7 @@ on_code_action = (id: int, params: int) -> int:
                     if after < len(text) and text[after] == '.': fix = "({fix})"
                     out.push(qf_json(d, "Validate it: `{fix}`", dg, p, after, fix))
             continue
-        if starts_with(msg, "this exact value grows each iteration"):
+        if starts_with(msg, "this exact value grows each iteration") or find(msg, "annotate `float64` (or another explicit representation) to state it") >= 0:
             if ends_with(docs[d].path, ".dewy"):
                 ensure_checked(d)
                 at = qf_dewy_untyped_decl(d, p)

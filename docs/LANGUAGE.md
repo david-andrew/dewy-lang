@@ -1145,7 +1145,10 @@ equals `1/2`, and `1.25e2` is `125`. A float annotation, a floating operand besi
 literal, a `float64` parameter or field, or a later float written to the
 unannotated binding the literal initializes makes it a `float64` when compiling:
 `let acc=0.0` followed by `acc+=dt` with `dt:float64` declares a `float64`,
-inside a lambda too.
+inside a lambda too. An exact comparison (`=?`, `not=?`) that reads a binding
+made `float64` this way warns, since the change can flip its result: idiomatic
+code states the representation (`let acc:float64=0.0`), which the editor's
+fix-it inserts.
 Among overloads, a decimal literal takes an exact parameter before a float one.
 An integer promotes to `rational` wherever one is
 expected: arguments, results, record fields and container elements.

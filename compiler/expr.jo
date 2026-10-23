@@ -6787,6 +6787,10 @@ check_binary = (n: int, expected: int) -> int:
     if not is_cmp and is_quantity(expected) and is_float(quantity_base(expected)): hint = quantity_base(expected)
     a = int(nodes[n].a)
     b = int(nodes[n].b)
+    # (an exact comparison reading a decimal binding a later write made float64)
+    if (op == .eq or op == .ne) and decimal_adapted.len() > 0:
+        decimal_compared(a)
+        decimal_compared(b)
     # (20°C in start + 20°C is a difference: offset temperatures tell literals from values)
     # (and a unit written by name in a product: c*°C makes a point, where a point is not scaled)
     q_lit_a = false
