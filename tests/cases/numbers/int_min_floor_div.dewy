@@ -1,0 +1,23 @@
+# Plain `int` MIN // -1 and its kin promote instead of failing
+main=():>void=>{
+    let n=args().length
+    let m:int=(-9223372036854775807) - n
+    let d:int=0 - n
+    let x=m
+    x //= d
+    printl(x)
+    let y=m
+    y %= d
+    printl(y)
+    printl((-9223372036854775808) // (-1))
+    const c:int=-9223372036854775808
+    printl(c // (-1))
+    let w:int64=-9223372036854775807 - n
+    let z:int=w
+    printl(z // (-1))
+    printl(z // d)
+    printl(int(w) // d)
+    loop i in [m..m+1) { printl(i // d) }
+    printl(-m)
+    printl(abs(m))
+}

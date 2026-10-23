@@ -2908,38 +2908,12 @@ left_operand_addr = (a: int, t: int, keep: bool) -> int:
     if keep: return kept_operand_addr(a, t)
     place_addr(gen_place(a, false), t)
 
-# Semantic integer operations, with a word representation for step 1. The
-# overflow edge will become the promotion edge when a general representation exists.
+# A failed conversion of an `int` to a narrower width. (`int` arithmetic itself
+# never fails: math_binary promotes, MIN // -1 included.)
 math_int_guard = (bad: int):
     iff(bad)
     e_call_nr0(rt("__int_overflow"), -1)
     endc()
-
-gen_math_int = (op: Tok, a: int, b: int, signed_count: bool = true) -> int:
-    if op == .plus or op == .minus or op == .star:
-        code = if op == .plus: Op.checked_add else if op == .minus: Op.checked_sub else: Op.checked_mul
-        d = vreg(VI)
-        emit(code, VI, d, a, b, 0, rt("__int_overflow"))
-        return d
-    if op == .slash:
-        math_int_guard(e_bin(.and_, VI, e_bin(.eq, VI, a, e_iconst(-9223372036854775807 - 1)), e_bin(.eq, VI, b, e_iconst(-1))))
-        return e_bin(.divs, VI, a, b)
-    if op == .percent: return sdiv_wrap(op, a, b, T_MATH_INT)
-    if op == .shl or op == .shr:
-        if signed_count: math_int_guard(e_bin(.lts, VI, b, e_iconst(0)))
-        d = vreg(VI)
-        iff(e_bin(.geu, VI, b, e_iconst(64)))
-        if op == .shl:
-            math_int_guard(e_bin(.ne, VI, a, e_iconst(0)))
-            e_mov(d, e_iconst(0))
-        else: e_mov(d, e_bin(.shrs, VI, a, e_iconst(63)))
-        els()
-        result = e_bin(int_op(op, true), VI, a, b)
-        if op == .shl: math_int_guard(e_bin(.ne, VI, e_bin(.shrs, VI, result, b), a))
-        e_mov(d, result)
-        endc()
-        return d
-    e_bin(int_op(op, true), VI, a, b)
 
 # Arrays of plain integers or bools are equal when their bytes are: the lengths, then
 # __mem_eq (expanded inline) over the elements where they are. A slice, xs[i..j) =? ys,
@@ -3103,15 +3077,8 @@ gen_binary = (e: int) -> Val:
         endc()
     if types[lt].kind == .bool_ and (op == .amp or op == .pipe or op == .caret):
         return V(e_bin(int_op(op, false), VI, va, vb), false)
-    if lt == T_MATH_INT and (op == .slash or op == .percent): return V(gen_math_int(op, va, vb), false)
     if sg and (op == .slash or op == .percent) and not (nodes[b].kind == .int_lit and nodes[b].ival != -1):
         return V(norm(sdiv_wrap(op, va, vb, lt), ntype(e)), false)
-    if lt == T_MATH_INT and not is_cmp:
-        # Reuse existing bounded-range and local-constant facts. A successful
-        # proof keeps indexed loops eligible for ordinary loop/vector lowering.
-        if (op == .plus or op == .star) and nonneg_locals.len() > 0:
-            if positive_bound(e, true) >= 0: return V(e_bin(int_op(op, true), VI, va, vb), false)
-        return V(gen_math_int(op, va, vb, types[prune(ntype(b))].sign), false)
     if (op == .shl or op == .shr) and dewy_at(nodes[e].pos): return V(norm(wide_shift(op, sg, va, vb, b), ntype(e)), false)
     r = e_bin(int_op(op, sg), VI, va, vb)
     if is_cmp: return V(r, false)
@@ -4973,7 +4940,6 @@ gen_value_unary = (e: int) -> Val:
     v = gen_expr(a).v
     if nodes[e].op == i32(int(Tok.minus)):
         if vc(t) == VC_FLT: return V(e_un(.fneg, vt_of(t), v), false)
-        if t == T_MATH_INT: return V(gen_math_int(.minus, e_iconst(0), v), false)
         return V(norm(e_un(.neg, VI, v), t), false)
     return V(norm(e_un(.not_, VI, v), t), false)
 
@@ -5782,8 +5748,7 @@ gen_assign = (s: int):
             iff(e_bin(.eq, VI, rhs, e_iconst(0)))
             e_call_nr1(rt("__div_zero"), e_daddr(loc_data(nodes[s].pos)), -1)
             endc()
-        if t == T_MATH_INT: r = gen_math_int(op, cur, rhs, types[prune(ntype(int(nodes[s].b)))].sign)
-        else if types[t].kind == .bool_: r = e_bin(int_op(op, false), VI, cur, rhs)
+        if types[t].kind == .bool_: r = e_bin(int_op(op, false), VI, cur, rhs)
         else if sg and (op == .slash or op == .percent): r = norm(sdiv_wrap(op, cur, rhs, t), t)
         else if (op == .shl or op == .shr) and dewy_at(nodes[s].pos): r = norm(wide_shift(op, sg, cur, rhs, int(nodes[s].b)), t)
         else: r = norm(e_bin(int_op(op, sg), VI, cur, rhs), t)
