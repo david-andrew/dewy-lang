@@ -1355,7 +1355,12 @@ emit_prologue = ():
 emit_epilogue = ():
     loop r in [0..16):
         if callee_off[r] != 0: mov_rm(r, RBP, callee_off[r])
-    mov_rr(RSP, RBP)
+    # Empty frames leave rsp at rbp. Keep Windows' canonical unwind form.
+    compact = frame_size == 0 and not target_windows
+    # Ignored CS prefixes keep pop/ret opcodes and every following loop/JCC
+    # at their original addresses without executing the redundant move.
+    if compact: b24(0x2E2E2E)
+    else: mov_rr(RSP, RBP)
     b(0x5D)       # pop rbp
     if dbg_on: dbg_epis.push(code.len())
     b(0xC3)       # ret
