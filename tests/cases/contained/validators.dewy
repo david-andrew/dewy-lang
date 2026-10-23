@@ -1,0 +1,29 @@
+# quick
+# root.contains(p) reads the text alone: p is root or under it, with no `..` or root after it.
+# root.confine(p) gives p as a SafePath, or PathEscape.
+let root=p"/srv/site/static"
+check=(text:string):>void=>{
+    let f=p(text)
+    let confined=root.confine(f)
+    let shown=if confined is? PathEscape "PathEscape" else "{confined}"
+    printl"{text}: contains={root.contains(f)} confine={shown}"
+}
+main=():>void=>{
+    check("/srv/site/static")
+    check("/srv/site/static/")
+    check("/srv/site/static/index.html")
+    check("/srv/site/static//css/./site.css")
+    check("/srv/site/static/../secret")
+    check("/srv/site/static/a/../b")
+    check("/srv/site/static2/x")
+    check("/srv/site")
+    check("srv/site/static/x")
+    check("/srv/site/static/.../x")
+    let rel=p"assets"
+    printl(rel.contains(p"assets/hero.png"))
+    printl(rel.contains(p"./assets/hero.png"))
+    printl(rel.contains(p"/assets/hero.png"))
+    printl(p".".contains(p"maps/a.tmx"))
+    printl(p".".contains(p"../a.tmx"))
+    printl(p".".contains(p"/etc/passwd"))
+}

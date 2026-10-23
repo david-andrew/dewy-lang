@@ -1,0 +1,27 @@
+# quick
+# What is a SafePath without a validator: hardcoded paths, other SafePaths, and components
+# proven safe (one component: integers, booleans, text written in the program).
+Format:type='png' | 'jpg'
+let base=p"/srv/cache"
+show=(f:SafePath):>void=>printl(f)
+thumbnail=(n:int64 large:bool format:Format):>SafePath=>p"{base}/thumbs/{large}/{n}.{format}"
+under=(dir:SafePath):>SafePath=>{
+    let name="index.html"
+    return p"{dir}/{name}"
+}
+guarded=(f:Path):>void=>{
+    if not base.contains(f) return
+    show(f)
+}
+main=():>void=>{
+    show(p"/etc/hosts")
+    show(base)
+    show(thumbnail(42 false 'png'))
+    show(under(p"{base}/site"))
+    let year=2026
+    show(p"{base}/{year}/report-{year}.txt")
+    let picked:SafePath=if year >? 2000 p"{base}/new" else p"{base}/old"
+    show(picked)
+    guarded(p("/srv/cache/a.txt"))
+    guarded(p("/srv/other/a.txt"))
+}

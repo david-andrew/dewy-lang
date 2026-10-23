@@ -1,0 +1,29 @@
+# quick
+# modes: native native-release
+# stdin: ../../etc/passwd\n
+# David's example: a request's name joined to a base is a plain Path; serve_file takes only a
+# SafePath, which confine makes (or_throw: PathEscape) and contains proves in its true branch.
+let root=p"/srv/site/static"
+Request:type=[name:string]
+Response:type=[body:string]
+serve_file=(f:SafePath):>Response | FileError=>{
+    return Response["served {f}"]
+}
+handle=(req:Request):>void | PathEscape | FileError=>{
+    let f=p"{root}/{req.name}"
+    if root.contains(f) {
+        let r=serve_file(f) or_throw
+        printl(r.body)
+    } else {
+        printl"refused {f}"
+    }
+    let r=serve_file(root.confine(f) or_throw) or_throw
+    printl(r.body)
+}
+main=():>void=>{
+    let fine=handle(Request["css/site.css"])
+    let line=read_line()
+    let name=if line is? string line else "index.html"
+    let bad=handle(Request[name])
+    printl"{fine is? error} {bad is? PathEscape}"
+}

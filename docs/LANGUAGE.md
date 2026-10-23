@@ -2604,6 +2604,53 @@ paths of its files and those made with `mkdir`. Processes are `SpawnError` there
 On Windows, `run` works and `run_silent`, `spawn` and `capture` are not available
 yet (`SpawnError`).
 
+### Contained paths
+
+A `SafePath` is a `Path` proven not to escape its base. It is a `Path` in every
+other way, so every method works on it and it passes wherever a `Path` is wanted.
+A path is a `SafePath` when it is built from any mix of:
+
+- hardcoded text;
+- other `SafePath`s;
+- components proven safe: one component with no `/`, not `.` or `..`, and not
+  empty. These include integers, floats, booleans, text literals of that shape,
+  and literal unions whose members all have it.
+
+A component must follow a `/`. `p"{root}{n}"` could name a sibling of `root`, so
+it is not a `SafePath`.
+
+Text from outside the program is untrusted: arguments, the environment, standard
+input, file contents, the network and a child's output. A path built from it is a
+plain `Path`. `root.confine(p)` gives `p` as a `SafePath`, or `PathEscape` (an
+`error`) when `p` leaves `root`. `root.contains(p)` is the same test as a `bool`.
+In the true branch of `if root.contains(p) {...}`, `p` is a `SafePath`, and it
+stays one for the rest of the block after `if not root.contains(p) return ...`.
+
+```dewy
+let root=p"/srv/site/static"
+serve_file=(f:SafePath):>Response | FileError=>{...}
+handle=(req:Request):>void | PathEscape | FileError=>{
+    let f=p"{root}/{req.name}"
+    serve_file(root.confine(f) or_throw) or_throw
+    if root.contains(f) { serve_file(f) or_throw }
+    let n=f.read_text   # warning: f holds untrusted input
+}
+```
+
+A parameter, `let` or result declared `SafePath` takes only such a path. Passing
+another is a compile error that names the fixes: `root.confine(f) or_throw` (the
+editor applies it) or the `contains` guard. A path that holds untrusted text and
+reaches a file operation without either gets a warning with the same fixes. The
+file operations are reading, writing, listing, `exists`, `size`, and the others
+above. A hardcoded path never warns.
+
+The test reads the text alone. Both paths are split into parts, `p` must start
+with `root`'s parts, and no part after them may be `..` or a root, even
+`root/a/../b`, since a link at `a` could lead elsewhere. A link inside `root`
+that points outside is not detected yet. `UntrustedPath` names a path that may
+hold untrusted text in a signature; it is a plain `Path`. Design:
+[docs/design/contained_paths.md](design/contained_paths.md).
+
 ## Networking
 
 `import net` gives blocking TCP sockets. Each call waits for its result and

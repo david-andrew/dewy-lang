@@ -114,7 +114,8 @@ tcp_send=(stream:TcpStream text:string):>void | NetError | Canceled=>tcp_send(st
 # The bytes that have arrived (at least one and at most `largest`), waiting for
 # some; none once the other side has closed the connection and everything it
 # sent has been received.
-tcp_receive=(stream:TcpStream largest:int64=65536):>array<uint8> | none | NetError | Canceled=>{
+tcp_receive=(stream:TcpStream largest:int64=65536):>array<uint8> | none | NetError | Canceled=>__untrusted(__tcp_receive(stream largest))
+__tcp_receive=(stream:TcpStream largest:int64):>array<uint8> | none | NetError | Canceled=>{
     let buffer:array<uint8>=fill(uint8(0) max(largest 1))
     loop true {
         let ready=__wait(stream.handle __READ) or_throw

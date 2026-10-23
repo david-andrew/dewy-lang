@@ -2504,6 +2504,20 @@ on_code_action = (id: int, params: int) -> int:
         if len(fx) > 0:
             out.push(qf_json(d, fx[0], dg, to_int(fx[1]) ?? 0, to_int(fx[2]) ?? 0, fx[3]))
             continue
+        # (a path not proven to stay inside its base: validate it where it is used)
+        k = find(msg, "validate it, `")
+        if k >= 0 and (find(msg, "is not proven to stay inside its base") >= 0 or find(msg, "holds untrusted input") >= 0):
+            e = find(msg, " or_throw`", k)
+            ci = find(msg, ".confine(", k)
+            if e > 0 and ci > 0 and ci < e:
+                arg = msg[ci + 9..e - 1)
+                fix = msg[k + 14..e + 9)
+                if len(arg) > 0 and arg != "..." and starts_with(text[p..], arg):
+                    after = p + len(arg)
+                    # (a method's receiver: `(root.confine(f) or_throw).read_text`)
+                    if after < len(text) and text[after] == '.': fix = "({fix})"
+                    out.push(qf_json(d, "Validate it: `{fix}`", dg, p, after, fix))
+            continue
         if starts_with(msg, "this exact value grows each iteration"):
             if ends_with(docs[d].path, ".dewy"):
                 ensure_checked(d)

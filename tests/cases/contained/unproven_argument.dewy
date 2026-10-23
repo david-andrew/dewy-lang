@@ -1,0 +1,7 @@
+serve_file=(f:SafePath):>void=>printl(f)
+handle=(name:string):>void=>{
+    let root=p"/srv/site/static"
+    let f=p"{root}/{name}"
+    serve_file(f)
+}
+main=():>void=>handle("index.html")

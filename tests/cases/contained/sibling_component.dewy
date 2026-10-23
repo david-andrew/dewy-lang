@@ -1,0 +1,8 @@
+# A component joined to the base's last part, not after a `/`, could name a sibling:
+# "/srv/data" and "-old" make "/srv/data-old".
+let root=p"/srv/data"
+show=(f:SafePath):>void=>printl(f)
+main=():>void=>{
+    let n=7
+    show(p"{root}{n}")
+}

@@ -5,6 +5,7 @@ David's standing [decisions](decisions.md). Design specifications and exploratio
 [precedence](precedence.md), [no runtime traps](no_traps.md),
 [semantic contracts](semantic_contracts.md),
 [safety and concurrency](safety_and_concurrency.md),
+[contained paths and untrusted input](contained_paths.md),
 [user-managed storage](user_managed_storage.md),
 [resource exhaustion](resource_exhaustion.md),
 [finite facts](finite_facts.md), [idiomatic facts](idiomatic_facts.md),

@@ -69,7 +69,8 @@ spawn = (program: str, args: str[]) -> Child | SpawnError | Canceled:
 const __CAPTURE_LIMIT = 64 << 20
 
 # Both pipes are drained as they fill, so a child writing much to either cannot block.
-capture = (program: str, args: str[]) -> Output | SpawnError | FileError | Canceled:
+capture = (program: str, args: str[]) -> Output | SpawnError | FileError | Canceled: __untrusted(__capture(program, args))
+__capture = (program: str, args: str[]) -> Output | SpawnError | FileError | Canceled:
     if __task_canceled(): return Canceled
     when TARGET == "wasm" or TARGET == "windows":
         return SpawnError()

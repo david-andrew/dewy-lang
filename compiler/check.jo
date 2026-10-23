@@ -8,6 +8,7 @@ use 'units.jo'
 use 'definite.jo'
 use 'decimals.jo'
 use 'growth.jo'
+use 'untrusted.jo'
 use 'errors.jo'
 use 'targets.jo'
 use 'icount.jo'
@@ -1344,6 +1345,7 @@ resolve_type = (tn: int) -> int:
             if ide_sentinel != 0 and nm == ide_sentinel: ide_complete_types()
             s = lookup(nm)
             jo_type_spelling(nm, s, nodes[tn].pos)
+            if nm == ut_safe_name: ut_note_type_name(nm, nodes[tn].pos)
             # `rational`: the builtin exact type (the bundled library's), unless a type shadows it.
             if name_of(nm) == "rational" and (s == 0 or syms[s].kind == .fns) and files[pos_file(nodes[tn].pos)].is_dewy:
                 if nkids(tn) == 0: return decimal_type(nodes[tn].pos)
@@ -2040,6 +2042,7 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
     if sig.generic: fns[f].body = i32(clone(int(nodes[decl].b)))
     else: fns[f].body = nodes[decl].b
     if has_flag(decl, NF_EXTERN) and fns[f].ret == 0: fns[f].ret = i32(T_VOID)
+    ut_note_fn(int(nodes[decl].name))
     # attributes
     if nodes[decl].c != 0:
         ab = int(nodes[decl].c)
@@ -2050,6 +2053,7 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
             else if an == "parallel": fns[f].parallel = true
             else if an == "deterministic": fns[f].deterministic = true
             else if an == "noinline": fns[f].noinline = true
+            else if an == "sink" or an == "guard": ut_note_attribute(an)
             else if an == "plain":
                 # (its type arguments are copied as bytes, e.g. to the GPU)
                 loop z in zt:
@@ -2082,7 +2086,7 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
             else if an != "no_web":
                 why = ""
                 if an == "inline" or an == "always_inline" or an == "forceinline": why = " (small functions are put inline automatically; @noinline keeps one out)"
-                fatal(nodes[at].pos, "unknown attribute @{an}{why}: there are @noinline, @parallel, @deterministic, @plain, @cabi, @export, @no_web(\"why\"), and for externs @lib, @symbol, @variadic")
+                fatal(nodes[at].pos, "unknown attribute @{an}{why}: there are @noinline, @parallel, @deterministic, @plain, @cabi, @export, @no_web(\"why\"), @sink(kind), @guard(Brand), and for externs @lib, @symbol, @variadic")
     if has_flag(decl, NF_EXTERN) or fns[f].cabi:
         ffi_check_signature(f, decl)
         loop t in fns[f].ptypes: check_c_boxes(t, nodes[decl].pos)
@@ -5697,6 +5701,7 @@ check_init_now = (k: int):
 
 check_program = (main_path: str):
     console_type_id = -1
+    ut_reset()
     ownership_reset()
     facts_reset()
     refine_reset()
@@ -6043,6 +6048,7 @@ check_program = (main_path: str):
         k = check_pending_functions(k)
         if runtime_ffi_demand(): k = check_pending_functions(k)
         if open_globals.len() > 0: settle_open_globals()
+    ut_run()
     if late_module_imports:
         dfs_state = fill(false, modules.len())
         order.clear()

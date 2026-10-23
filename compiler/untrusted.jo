@@ -1,0 +1,1041 @@
+# Contained paths and the untrusted-input brand (docs/design/contained_paths.md).
+#
+# Two facts about the program's values, both found after checking, on the checked tree of the
+# program's own functions (the library's are read only through their signatures):
+#
+# - SafePath, a brand on a Path: it does not escape its base. A SafePath is a Path (the library's
+#   `type SafePath = Path`); the brand is this file's fact. A path is one when it is hardcoded,
+#   built by interpolation from SafePaths, hardcoded text and proven-safe components (one
+#   component: no `/`, not `.` or `..`, not empty, as an integer's digits), made by a validator
+#   (a function whose result is written SafePath: `root.confine(p)`), or tested by a guard
+#   (`@guard(SafePath)`: `if root.contains(p) {...}`, or `if not root.contains(p) return`).
+#   Passing anything else where a SafePath is declared (a parameter, a `let`, a result) is a
+#   compile error with the fixes.
+# - Untrusted, a brand on text that came from outside: a library function's result passed through
+#   `__untrusted(x)` (lib/core/os.jo; the source APIs end in it: arguments, environment, standard
+#   input, file contents, the network, a child's output), and what is computed from it:
+#   interpolation, a library call given it, a record or collection holding it, a field or element
+#   of one, a function's result, a parameter given it. Values that cannot hold text (numbers,
+#   booleans, plain enums) never carry it, and a validator's result drops it. A path carrying it
+#   that reaches an `@sink(path)` function (the file system) without being a SafePath gets a
+#   warning. A fact is an origin and a mask of the function's parameters it holds, kept per field
+#   for records; a function's result is such a pair (its summary), so a call's result holds only
+#   the arguments its result does, and a parameter keeps what callers give it separately.
+#
+# Demand-driven: nothing runs unless the program names SafePath in its own code, or both a source
+# and a sink were instantiated. Cost: one walk of each of the program's own function bodies, plus
+# one more walk of a body each time a fact it reads grows. Each fact (a local, a field, a global,
+# a function's result, a parameter's incoming origin) only grows: its origin is set once and its
+# mask gains at most a bit per parameter, so the walks are bounded by the bodies' size times
+# (1 + the facts that reach them); in practice each body is walked once or twice. Indexed state
+# throughout: facts and readers are maps keyed by local, field, global and function instance.
+use 'check.jo'
+use 'ast.jo'
+use 'util.jo'
+use 'types.jo'
+use 'lex.jo'
+use 'ide.jo'
+use 'units.jo'
+use 'expr.jo'
+use 'refine.jo'
+
+ut_safe_used = false        # the program's own code names SafePath (resolve_type)
+ut_sources = false          # __untrusted was instantiated (get_fn_inst)
+ut_sinks = false            # ... and an @sink one
+ut_safe_name = intern("SafePath")
+ut_path_name = intern("Path")
+ut_p_name = intern("p")
+ut_marker_name = intern("__untrusted")
+
+const UT_HARD = 1           # text the program wrote (or computed from such text alone)
+const UT_COMP = 2           # one proven-safe path component
+
+const UT_SOURCE = 1         # its result is untrusted input: it ends in __untrusted(...)
+const UT_SINK = 2           # @sink(path): its first argument, and any other Path, is a path it opens
+const UT_GUARD = 4          # @guard(SafePath): true means its second argument is a SafePath
+const UT_MINTS = 8          # its result is written SafePath: a validator (or a function whose
+                            # returns are held to the brand)
+
+ut_decl_kinds: {int: int} = {}
+ut_param_safe: {int: int} = {}  # decl -> bit i: parameter i is written SafePath (computed once)
+
+# facts: (origin position + 1), 0 when trusted; by local, sized at ut_run
+ut_lo: int[]                        # local -> origin
+ut_lm: int[]                        # local -> mask
+ut_li: int[]                        # parameter local -> what callers give it
+ut_lp: int[]                        # parameter local -> its index + 1
+ut_lr: int[]                        # local -> the walk that last read it
+ut_lf: int[]                        # local -> 1 when it has facts by field
+ut_serial = 0                       # the current walk
+ut_fu: int[]                        # function instance -> 1: the program's own, 2: not, 0: not known
+ut_fk: int[]                        # function instance -> ut_decl_kind + 1, 0: not known
+ut_global: {int: int} = {}
+ut_ret: {int: int} = {}
+ut_fields: {(int, int): int} = {}   # (local, field name) -> origin
+ut_fmask: {(int, int): int} = {}
+ut_rmask: {int: int} = {}
+ut_field_names: {int: int[]} = {}   # local -> its fields in ut_fields
+# who reads each fact (key id * 4 + kind; kind 0 local, 1 global, 2 result, 3 a parameter's
+# incoming origin): lists threaded through ut_rfn/ut_rnext from ut_rhead[key]
+ut_rhead: {int: int} = {}
+ut_rfn: int[]
+ut_rnext: int[]
+ut_pairs: {int: bool} = {}          # key * 2^22 + function instance: listed
+# a caller's parameter passed on as a callee's: incoming origins follow these after the walks
+ut_ehead: int[]                     # parameter local -> its first edge, -1
+ut_eto: int[]
+ut_enext: int[]
+ut_epairs: {int: bool} = {}
+ut_types: {int: int} = {}           # pruned type -> UT_T_* bits (types made during the run)
+ut_tb: int[]                        # ... (types there when it started)
+ut_queue: int[]
+ut_queued: int[]                    # function instance -> 1 while queued
+ut_walked: int[]                    # function instance -> 1 once walked
+ut_rr: int[]                        # function instance -> the walk that last registered reading its result
+ut_cur = 0                  # the function instance being walked
+ut_first = false            # its first walk: obligations and sinks are looked at then
+ut_origin_name: {int: str} = {}  # origin position -> the source's name, for the warning
+
+# SafePath facts of the program's own locals and globals (single assignment), and text classes
+ut_ls: int[]                        # local -> UT_L_* bits
+ut_safe_globals: {int: bool} = {}
+ut_text_globals: {int: int} = {}
+const UT_L_SAFE = 1                 # holds a SafePath
+const UT_L_DECLARED = 2             # written `:SafePath`
+const UT_L_HARD = 4                 # its text: UT_HARD << 2
+const UT_L_COMP = 8                 # ... UT_COMP << 2
+ut_narrowed: int[]          # locals a guard around the code being walked proved SafePath
+
+ut_sink_calls: (int, int)[]  # (path argument, function instance it is in), first walks
+ut_linit: int[]                     # single-assignment local -> its initializer (for the fixes' text)
+
+ut_reset = ():
+    ut_safe_used = false
+    ut_sources = false
+    ut_sinks = false
+    ut_decl_kinds = {}
+    ut_param_safe = {}
+    ut_lo = []
+    ut_lm = []
+    ut_li = []
+    ut_lp = []
+    ut_lr = []
+    ut_lf = []
+    ut_serial = 0
+    ut_fu = []
+    ut_fk = []
+    ut_tb = []
+    ut_types = {}
+    ut_global = {}
+    ut_ret = {}
+    ut_fields = {}
+    ut_fmask = {}
+    ut_rmask = {}
+    ut_field_names = {}
+    ut_rhead = {}
+    ut_rfn = []
+    ut_rnext = []
+    ut_pairs = {}
+    ut_ehead = []
+    ut_eto = []
+    ut_enext = []
+    ut_epairs = {}
+    ut_queue = []
+    ut_queued = []
+    ut_walked = []
+    ut_rr = []
+    ut_origin_name = {}
+    ut_ls = []
+    ut_safe_globals = {}
+    ut_text_globals = {}
+    ut_narrowed = []
+    ut_sink_calls = []
+    ut_linit = []
+
+# get_fn_inst, for each function it instantiates (n: its name) and each attribute (an) it has
+ut_note_fn = (n: int):
+    if n == ut_marker_name: ut_sources = true
+
+ut_note_attribute = (an: str):
+    if an == "sink": ut_sinks = true
+
+# resolve_type: a type name the program's own code writes
+ut_note_type_name = (nm: int, pos: int):
+    if nm == ut_safe_name and not ut_safe_used and not pos_in_lib(pos) and dewy_at(pos): ut_safe_used = true
+
+ut_names_safe = (tn: int) -> bool:
+    if tn == 0: return false
+    k = nodes[tn].kind
+    if k == .tname: return int(nodes[tn].name) == ut_safe_name and nkids(tn) == 0
+    if k == .tunion or k == .topt:
+        if ut_names_safe(int(nodes[tn].a)) or ut_names_safe(int(nodes[tn].b)): return true
+        loop x in kids(tn):
+            if ut_names_safe(x): return true
+    false
+
+ut_decl_kind = (d: int) -> int:
+    if d == 0: return 0
+    if let k = ut_decl_kinds.get(d): return k
+    k = 0
+    if nodes[d].kind == .fn_:
+        if nodes[d].c != 0:
+            loop at in kids(int(nodes[d].c)):
+                an = name_of(int(nodes[at].name))
+                if an == "sink": k |= UT_SINK
+                else if an == "guard": k |= UT_GUARD
+        if ut_names_safe(int(nodes[d].a)): k |= UT_MINTS
+        if pos_in_lib(nodes[d].pos) and (int(nodes[d].name) == ut_marker_name or ut_ends_in_marker(int(nodes[d].b))): k |= UT_SOURCE
+        mask = 0
+        loop i in [0..min(nkids(d), 62)):
+            if ut_names_safe(int(nodes[kid(d, i)].a)): mask |= 1 << i
+        ut_param_safe[d] = mask
+    ut_decl_kinds[d] = k
+    k
+
+# a library body whose value is __untrusted(...): `args = () -> str[]: __untrusted(__os_args())`
+ut_ends_in_marker = (b0: int) -> bool:
+    b = b0
+    if b != 0 and nodes[b].kind == .block and nkids(b) == 1: b = kid(b, 0)
+    if b != 0 and (nodes[b].kind == .return_ or nodes[b].kind == .exprstmt): b = int(nodes[b].a)
+    b = ut_strip(b)
+    if b == 0 or nodes[b].kind != .call: return false
+    c = int(nodes[b].a)
+    if c != 0 and nodes[c].kind == .ident and int(nodes[c].name) == ut_marker_name: return true
+    d = ut_callee_decl(b)
+    d != 0 and int(nodes[d].name) == ut_marker_name
+
+# what the function a call calls is, by instance (cached)
+ut_callee_kind = (n: int) -> int:
+    f = int(nodes[n].sym)
+    if f <= 0 or f >= fns.len(): return 0
+    if f < ut_fk.len() and ut_fk[f] != 0: return ut_fk[f] - 1
+    k = ut_decl_kind(int(fns[f].decl))
+    if f < ut_fk.len(): ut_fk[f] = k + 1
+    k
+
+ut_callee_decl = (n: int) -> int:
+    f = int(nodes[n].sym)
+    if f <= 0 or f >= fns.len(): return 0
+    int(fns[f].decl)
+
+ut_user_fn = (f: int) -> bool:
+    if f <= 0 or f >= fns.len() or fns[f].state != 2 or fns[f].body == 0: return false
+    if f < ut_fu.len() and ut_fu[f] != 0: return ut_fu[f] == 1
+    b = int(fns[f].body)
+    d = int(fns[f].decl)
+    p = if d != 0: nodes[d].pos else: nodes[b].pos
+    yes = p > 0 and dewy_at(p) and not pos_in_lib(p)
+    if f < ut_fu.len(): ut_fu[f] = if yes: 1 else: 2
+    yes
+
+# ---------------- types ----------------
+
+const UT_T_TEXT = 1         # a value of the type can hold text (only those carry the untrusted brand)
+const UT_T_PATH = 2         # Path
+const UT_T_COMP = 4         # its text is one safe component whatever the value: integers, floats,
+                            # booleans, plain enums
+const UT_T_KNOWN = 8
+
+ut_type_bits = (t0: int) -> int:
+    t = prune(t0)
+    if t < ut_tb.len() and ut_tb[t] != 0: return ut_tb[t]
+    if let b = ut_types.get(t): return b
+    k = types[t].kind
+    b = UT_T_KNOWN
+    if k == .bool_ or k == .int_ or k == .float_: b |= UT_T_COMP
+    else if k == .void_ or k == .quantity or k == .fn_ or k == .cfn or k == .range: b |= 0
+    else if k == .enum_ and structs[int(types[t].st)].simple_enum:
+        if str_set_of(t) == 0: b |= UT_T_COMP
+    else if bundled_bigint_type(t): b |= UT_T_COMP
+    else if not bundled_rational_type(t):
+        b |= UT_T_TEXT
+        if k == .struct_:
+            d = int(structs[int(types[t].st)].decl)
+            if d != 0 and int(nodes[d].name) == ut_path_name and pos_in_lib(nodes[d].pos): b |= UT_T_PATH
+    if t < ut_tb.len(): ut_tb[t] = b
+    else: ut_types[t] = b
+    b
+
+ut_is_path = (t0: int) -> bool: t0 != 0 and ut_type_bits(t0) & UT_T_PATH != 0
+ut_text_type = (t0: int) -> bool: t0 == 0 or ut_type_bits(t0) & UT_T_TEXT != 0
+ut_comp_type = (t0: int) -> bool: t0 != 0 and ut_type_bits(t0) & UT_T_COMP != 0
+
+# a string-set (`'png' | 'jpg'`): text the program wrote (UT_HARD), each member one component
+# (UT_COMP) or not; 0 for other types
+ut_set_class = (t0: int) -> int:
+    if t0 == 0: return 0
+    id = str_set_of(t0)
+    if id == 0: return 0
+    loop m in str_sets[id]:
+        if not ut_comp_text(m): return UT_HARD
+    UT_HARD | UT_COMP
+
+ut_comp_text = (s: str) -> bool:
+    if len(s) == 0 or s == "." or s == "..": return false
+    loop i in [0..len(s)):
+        if s[i] == '/' or s[i] == '\\' or s[i] == 0: return false
+    true
+
+# ---------------- locals ----------------
+
+# the variable a name stands for: through captures and narrowings
+ut_root = (l0: int) -> int:
+    l = l0
+    loop n in [0..64):
+        fl = int(locals[l].flags)
+        if fl & LF_CAPTURE != 0 and locals[l].outer != 0: l = int(locals[l].outer)
+        else if narrowed_var(l) != 0: l = narrowed_var(l)
+        else: break
+    l
+
+ut_single = (l: int) -> bool: int(locals[l].flags) & LF_ASSIGNED == 0
+
+ut_global_single = (g: int) -> bool: not globals[g].fn_written and not globals[g].init_written
+
+# (a local's own function is its reader without an entry: the walk stamps what it read)
+ut_read = (kind: int, id: int):
+    if ut_cur == 0: return
+    if kind == 0:
+        ut_lr[id] = ut_serial
+        if ut_owner(id) == ut_cur: return
+    if kind == 2:
+        if ut_rr[id] == ut_serial: return
+        ut_rr[id] = ut_serial
+    key = id * 4 + kind
+    pair = key * 4194304 + ut_cur
+    if ut_pairs.has(pair): return
+    ut_pairs[pair] = true
+    ut_rfn.push(ut_cur)
+    ut_rnext.push(ut_rhead.get(key) ?? -1)
+    ut_rhead[key] = ut_rfn.len() - 1
+
+ut_wake = (kind: int, id: int):
+    if kind == 0:
+        # (the walk under way sees a local's later facts without starting over, unless it
+        # already read the local: a loop carrying it)
+        o = ut_owner(id)
+        if o > 0 and (o != ut_cur or ut_lr[id] == ut_serial): ut_enqueue(o)
+    i = ut_rhead.get(id * 4 + kind) ?? -1
+    loop i >= 0:
+        ut_enqueue(ut_rfn[i])
+        i = ut_rnext[i]
+
+ut_enqueue = (f: int):
+    if ut_queued[f] != 0: return
+    ut_queued[f] = 1
+    ut_queue.push(f)
+
+# Each fact is an origin (a source's position + 1, or 0) and a mask: the parameters of the
+# function the local belongs to that it holds (bit i: parameter i). A function's result is the
+# same pair, so a call's result holds the arguments its mask names: a helper given trusted text
+# at one call and untrusted text at another taints only the second (a summary per function).
+# What callers pass a parameter is its incoming origin, which a sink or a store into a global
+# reads through the mask.
+
+ut_owner = (l: int) -> int: int(locals[l].owner)
+
+# the incoming origin of the first parameter of f that mask m names, or 0
+ut_concrete = (f: int, m: int) -> int:
+    if m == 0 or f <= 0 or f >= fns.len(): return 0
+    loop i in 0.. and pl in fns[f].params:
+        if i >= 62: break
+        if m & (1 << i) != 0:
+            ut_read(3, pl)
+            if ut_li[pl] != 0: return ut_li[pl]
+    0
+
+ut_mark_local = (l0: int, origin: int, mask: int):
+    if l0 <= 0 or (origin == 0 and mask == 0): return
+    l = ut_root(l0)
+    o = origin
+    m = mask
+    if ut_owner(l) != ut_cur:
+        # (a variable of the function around this one: what this one's parameters bring it
+        # arrives along edges)
+        if m != 0: ut_edges(m, l * 4)
+        m = 0
+    changed = false
+    if o != 0 and ut_lo[l] == 0:
+        ut_lo[l] = o
+        changed = true
+    old = ut_lm[l]
+    if m & ~old != 0:
+        ut_lm[l] = old | m
+        changed = true
+    if not changed: return
+    ut_wake(0, l)
+
+# a field of a local record: x.f holds it (and x as a whole need not)
+ut_mark_field = (l0: int, field: int, origin: int, mask: int):
+    if l0 <= 0 or (origin == 0 and mask == 0): return
+    l = ut_root(l0)
+    o = origin
+    m = mask
+    if ut_owner(l) != ut_cur:
+        if o == 0: o = ut_concrete(ut_cur, m)
+        m = 0
+    key = (l, field)
+    changed = false
+    if not ut_fields.has(key) and not ut_fmask.has(key):
+        ut_lf[l] = 1
+        if let fs = ut_field_names.get(l):
+            fs.push(field)
+            ut_field_names[l] = fs
+        else: ut_field_names[l] = [field]
+    if o != 0 and (ut_fields.get(key) ?? 0) == 0:
+        ut_fields[key] = o
+        changed = true
+    old = ut_fmask.get(key) ?? 0
+    if m & ~old != 0:
+        ut_fmask[key] = old | m
+        changed = true
+    if changed: ut_wake(0, l)
+
+# a parameter given untrusted text by a caller
+ut_mark_in = (pl: int, origin: int):
+    if origin == 0 or ut_li[pl] != 0: return
+    ut_li[pl] = origin
+    ut_wake(3, pl)
+
+# what value v holds reaches local l: a record built in place, or another local, field by field
+ut_flow = (l: int, v: int):
+    x = ut_strip(v)
+    if x != 0 and nodes[x].kind == .call and nodes[x].sym == 0 and nodes[x].aux == 2 and nodes[x].a == 0:
+        t = prune(int(nodes[x].type))
+        if types[t].kind == .struct_:
+            st = int(types[t].st)
+            if int(structs[st].nfields) == nkids(x):
+                loop i in 0.. and part in kids(x):
+                    o = ut_val(part)
+                    ut_mark_field(l, int(fields[int(structs[st].fields) + i].name), o, ut_m)
+                return
+    if x != 0 and nodes[x].kind == .ident and nodes[x].aux == i32(int(SK.local)) and nodes[x].sym > 0:
+        src = ut_root(int(nodes[x].sym))
+        if ut_owner(src) == ut_cur and ut_lp[src] == 0 and ut_lo[src] == 0 and ut_lm[src] == 0:
+            ut_read(0, src)
+            if ut_lf[src] == 0: return
+            if let fs = ut_field_names.get(src):
+                loop f in fs: ut_mark_field(l, f, ut_fields.get((src, f)) ?? 0, ut_fmask.get((src, f)) ?? 0)
+            return
+    o = ut_val(v)
+    ut_mark_local(l, o, ut_m)
+
+ut_mark_global = (g: int, origin: int, mask: int):
+    o = origin
+    if mask != 0 and ut_cur > 0: ut_edges(mask, g * 4 + 1)
+    if o == 0 or ut_global.has(g): return
+    ut_global[g] = o
+    ut_wake(1, g)
+
+ut_mark_ret = (f: int, origin: int, mask: int):
+    changed = false
+    if origin != 0 and not ut_ret.has(f):
+        ut_ret[f] = origin
+        changed = true
+    old = ut_rmask.get(f) ?? 0
+    if mask & ~old != 0:
+        ut_rmask[f] = old | mask
+        changed = true
+    if changed: ut_wake(2, f)
+
+# ---------------- untrusted: where a value's text may come from outside ----------------
+
+ut_o = 0    # the value being read: its origin ...
+ut_m = 0    # ... and the current function's parameters it holds
+
+# n's value: its origin (also in ut_o), and the parameters it holds in ut_m
+# the current function's parameters in mask m reach cell `to` (id * 4 + kind: 3 another
+# function's parameter, 0 a local of an enclosing function, 1 a global)
+ut_edges = (m: int, to: int):
+    loop i in 0.. and src in fns[ut_cur].params:
+        if i >= 62: break
+        if m & (1 << i) != 0:
+            pair = src * 4294967296 + to
+            if ut_epairs.has(pair): continue
+            ut_epairs[pair] = true
+            ut_eto.push(to)
+            ut_enext.push(ut_ehead[src])
+            ut_ehead[src] = ut_eto.len() - 1
+
+# incoming origins along the edges: true when one was added
+ut_follow_edges = () -> bool:
+    work: int[]
+    loop src in [0..ut_ehead.len()):
+        if ut_ehead[src] >= 0 and ut_li[src] != 0: work.push(src)
+    added = false
+    loop work.len() > 0:
+        src = work.pop()
+        e = ut_ehead[src]
+        o = ut_li[src]
+        loop e >= 0:
+            to = ut_eto[e]
+            id = to >> 2
+            kind = to & 3
+            if kind == 3 and ut_li[id] == 0:
+                ut_mark_in(id, o)
+                added = true
+                work.push(id)
+            else if kind == 0 and ut_lo[id] == 0:
+                ut_lo[id] = o
+                ut_wake(0, id)
+                added = true
+            else if kind == 1 and not ut_global.has(id):
+                ut_global[id] = o
+                ut_wake(1, id)
+                added = true
+            e = ut_enext[e]
+    added
+
+ut_val = (n: int) -> int:
+    ut_o = 0
+    ut_m = 0
+    ut_acc(n)
+    ut_o
+
+# n's origin, or the incoming origin of a parameter it holds: is it untrusted at all
+ut_untrusted = (n: int) -> int:
+    o = ut_val(n)
+    if o != 0: return o
+    ut_concrete(ut_cur, ut_m)
+
+ut_add = (o: int, m: int):
+    if ut_o == 0: ut_o = o
+    ut_m |= m
+
+# a local's fact, as the current function sees it
+ut_add_local = (l: int, whole: bool, field: int):
+    ut_read(0, l)
+    m = 0
+    o = ut_lo[l]
+    if ut_owner(l) == ut_cur and ut_lp[l] != 0: m = 1 << (ut_lp[l] - 1)
+    m |= ut_lm[l]
+    if whole and ut_lf[l] != 0:
+        if let fs = ut_field_names.get(l):
+            loop f in fs:
+                if o == 0: o = ut_fields.get((l, f)) ?? 0
+                m |= ut_fmask.get((l, f)) ?? 0
+    else if field != 0 and ut_lf[l] != 0:
+        if o == 0: o = ut_fields.get((l, field)) ?? 0
+        m |= ut_fmask.get((l, field)) ?? 0
+    if ut_owner(l) != ut_cur:
+        if o == 0: o = ut_concrete(ut_owner(l), m)
+        m = 0
+    ut_add(o, m)
+
+# the origin (position + 1) of untrusted text n's value may hold, and the parameters it holds,
+# added to ut_o and ut_m
+ut_acc = (n: int):
+    if n == 0: return
+    t = int(nodes[n].type)
+    if t != 0 and not ut_text_type(t): return
+    k = nodes[n].kind
+    if k == .str_lit:
+        if nodes[n].aux == 0: return
+        loop i in [0..nkids(n)): ut_acc(kid(n, i))
+        return
+    if k == .pair:
+        ut_acc(int(nodes[n].a))
+        return
+    if k == .int_lit or k == .float_lit or k == .bool_lit or k == .none_lit or k == .null_lit or k == .lambda or k == .fnref or k == .unit_lit: return
+    if k == .ident:
+        if nodes[n].aux == i32(int(SK.local)) and nodes[n].sym > 0: ut_add_local(ut_root(int(nodes[n].sym)), true, 0)
+        else if nodes[n].aux == i32(int(SK.global)):
+            g = int(nodes[n].sym)
+            ut_read(1, g)
+            ut_add(ut_global.get(g) ?? 0, 0)
+        return
+    if k == .field:
+        b = int(nodes[n].a)
+        if b != 0 and nodes[b].kind == .ident and nodes[b].aux == i32(int(SK.local)) and nodes[b].sym > 0:
+            ut_add_local(ut_root(int(nodes[b].sym)), false, int(nodes[n].name))
+            return
+        ut_acc(b)
+        return
+    if k == .call:
+        d = ut_callee_decl(n)
+        if d != 0:
+            kind = ut_callee_kind(n)
+            if kind & UT_SOURCE != 0:
+                o = nodes[n].pos + 1
+                if not ut_origin_name.has(o): ut_origin_name[o] = name_of(int(nodes[d].name))
+                ut_add(o, 0)
+                return
+            if kind & UT_MINTS != 0: return
+            f = int(nodes[n].sym)
+            if ut_user_fn(f):
+                # (its result's own origin, and the arguments its result holds)
+                ut_read(2, f)
+                ut_add(ut_ret.get(f) ?? 0, 0)
+                rm = ut_rmask.get(f) ?? 0
+                if rm != 0:
+                    loop i in [0..min(nkids(n), 62)):
+                        if rm & (1 << i) != 0: ut_acc(kid(n, i))
+                return
+        # (a library function, a constructor, a conversion, a call of a function value: what its
+        # arguments hold)
+        ut_acc(int(nodes[n].a))
+        loop i in [0..nkids(n)): ut_acc(kid(n, i))
+        return
+    if k == .if_:
+        ut_acc(int(nodes[n].b))
+        ut_acc(int(nodes[n].c))
+        return
+    if k == .block:
+        ut_acc_block(n)
+        return
+    if k == .vardecl or k == .assign or k == .return_ or k == .break_ or k == .continue_ or k == .while_ or k == .for_: return
+    # (anything else: what its parts hold)
+    ut_acc(int(nodes[n].a))
+    ut_acc(int(nodes[n].b))
+    ut_acc(int(nodes[n].c))
+    loop i in [0..nkids(n)): ut_acc(kid(n, i))
+
+# a block's value: its last expression
+ut_acc_block = (b: int):
+    m = nkids(b)
+    if m == 0: return
+    last = kid(b, m - 1)
+    if nodes[last].kind == .exprstmt: ut_acc(int(nodes[last].a))
+    else if nodes[last].kind == .if_ or nodes[last].kind == .block or nodes[last].kind == .match_: ut_acc(last)
+
+# ---------------- SafePath: proven not to escape its base ----------------
+
+# (through the conversions the checker wraps a value in)
+ut_strip = (n0: int) -> int:
+    n = n0
+    loop i in [0..32):
+        if n == 0: return 0
+        k = nodes[n].kind
+        if k == .conv or k == .narrow or k == .unwrap or k == .cast: n = int(nodes[n].a)
+        else if k == .call and nodes[n].sym == 0 and nodes[n].aux == 3 and nkids(n) == 1: n = kid(n, 0)
+        else if k == .block and nodes[n].aux != 0 and nkids(n) > 0 and nodes[kid(n, nkids(n) - 1)].kind == .exprstmt: n = int(nodes[kid(n, nkids(n) - 1)].a)
+        else: return n
+    n
+
+ut_safe = (n0: int) -> bool:
+    n = ut_strip(n0)
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .call:
+        d = ut_callee_decl(n)
+        if d == 0: return false
+        if ut_decl_kind(d) & UT_MINTS != 0: return true
+        if int(nodes[d].name) == ut_p_name and pos_in_lib(nodes[d].pos) and nkids(n) == 1: return ut_safe_text(kid(n, 0))
+        return false
+    if k == .ident:
+        if nodes[n].aux == i32(int(SK.local)) and nodes[n].sym > 0:
+            l = int(nodes[n].sym)
+            r = ut_root(l)
+            if (ut_ls[l] | ut_ls[r]) & UT_L_SAFE != 0 or ut_narrowed.contains(r): return true
+            return false
+        if nodes[n].aux == i32(int(SK.global)): return ut_safe_globals.has(int(nodes[n].sym))
+        return false
+    if k == .if_: return nodes[n].c != 0 and ut_safe(int(nodes[n].b)) and ut_safe(int(nodes[n].c))
+    false
+
+# the text p(...) is given makes a SafePath: hardcoded, or an interpolation whose components
+# are each hardcoded, SafePaths with hardcoded text, or proven-safe components with hardcoded
+# text (a component never joins a dynamic part to a path's last part: `{root}{name}` would leave
+# root through a sibling)
+ut_safe_text = (n0: int) -> bool:
+    n = ut_strip(n0)
+    if n == 0: return false
+    if nodes[n].kind != .str_lit or nodes[n].aux == 0: return ut_text_class(n) & UT_HARD != 0
+    has_path = false
+    has_dyn = false
+    loop part in kids(n):
+        if nodes[part].kind == .str_lit and nodes[part].aux == 0:
+            s = name_of(int(nodes[part].sval))
+            if find_byte(s, '/') >= 0 or find_byte(s, '\\') >= 0:
+                # (a separator ends the component: what follows it starts the next)
+                if has_path and has_dyn: return false
+                has_path = false
+                has_dyn = false
+            continue
+        v = part
+        if nodes[v].kind == .pair: v = int(nodes[v].a)
+        vt = int(nodes[v].type)
+        if ut_is_path(vt):
+            if not ut_safe(v): return false
+            has_path = true
+        else if ut_comp_type(vt): has_dyn = true
+        else:
+            # (text the program wrote is trusted as a literal piece is)
+            c = ut_set_class(vt)
+            if c == 0: c = ut_text_class(v)
+            if c & UT_HARD != 0: continue
+            if c & UT_COMP != 0: has_dyn = true
+            else: return false
+    not (has_path and has_dyn)
+
+# what is known of a string's text: UT_HARD, UT_COMP, both, or neither
+ut_text_class = (n0: int) -> int:
+    n = ut_strip(n0)
+    if n == 0: return 0
+    k = nodes[n].kind
+    if k == .str_lit:
+        if nodes[n].aux == 0:
+            s = name_of(int(nodes[n].sval))
+            return UT_HARD | (if ut_comp_text(s): UT_COMP else: 0)
+        hard = true
+        comp = true
+        dyn = false
+        text = ""
+        loop part in kids(n):
+            if nodes[part].kind == .str_lit and nodes[part].aux == 0:
+                s = name_of(int(nodes[part].sval))
+                text += s
+                if find_byte(s, '/') >= 0 or find_byte(s, '\\') >= 0 or find_byte(s, 0) >= 0: comp = false
+                continue
+            v = part
+            if nodes[v].kind == .pair: v = int(nodes[v].a)
+            vt = int(nodes[v].type)
+            c = 0
+            if ut_comp_type(vt): c = UT_COMP
+            else:
+                c = ut_set_class(vt)
+                if c == 0: c = ut_text_class(v)
+            if c & UT_HARD == 0: hard = false
+            if c & UT_COMP == 0: comp = false
+            else: dyn = true
+        # (literal pieces alone must be a component themselves; a dynamic component in it is
+        # never `.` and keeps the whole from being `.`, `..` or empty)
+        if comp and not dyn and not ut_comp_text(text): comp = false
+        return (if hard: UT_HARD else: 0) | (if comp: UT_COMP else: 0)
+    if k == .ident:
+        if nodes[n].aux == i32(int(SK.local)) and nodes[n].sym > 0:
+            l = int(nodes[n].sym)
+            return ((ut_ls[l] | ut_ls[ut_root(l)]) >> 2) & 3
+        if nodes[n].aux == i32(int(SK.global)): return ut_text_globals.get(int(nodes[n].sym)) ?? 0
+        return 0
+    if k == .if_ and nodes[n].c != 0: return ut_text_class(int(nodes[n].b)) & ut_text_class(int(nodes[n].c))
+    0
+
+# ---------------- guards ----------------
+
+# the locals condition c proves SafePath when it is true
+ut_guarded = (c: int, out: mut int[]):
+    if c == 0: return
+    k = nodes[c].kind
+    if k == .and_:
+        ut_guarded(int(nodes[c].a), out)
+        ut_guarded(int(nodes[c].b), out)
+        return
+    if k == .call and nkids(c) == 2:
+        d = ut_callee_decl(c)
+        if d == 0 or ut_decl_kind(d) & UT_GUARD == 0: return
+        a = ut_strip(kid(c, 1))
+        if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and nodes[a].sym > 0:
+            l = ut_root(int(nodes[a].sym))
+            if ut_single(l): out.push(l)
+
+# `if not root.contains(p) return ...` (no else): the locals proven for the rest of the block
+ut_guard_exit = (s: int, out: mut int[]):
+    if nodes[s].kind != .if_ or nodes[s].c != 0: return
+    c = int(nodes[s].a)
+    if nodes[c].kind != .not_: return
+    if not ut_exits(int(nodes[s].b)): return
+    ut_guarded(int(nodes[c].a), out)
+
+ut_exits = (b: int) -> bool:
+    if b == 0: return false
+    k = nodes[b].kind
+    if k == .return_ or k == .break_ or k == .continue_: return true
+    if k == .block:
+        m = nkids(b)
+        return m > 0 and ut_exits(kid(b, m - 1))
+    if k == .exprstmt: return ut_exits(int(nodes[b].a))
+    if k == .call and nodes[b].type != 0 and prune(int(nodes[b].type)) == T_NEVER: return true
+    false
+
+# ---------------- the walk ----------------
+
+ut_walk_fn = (f: int):
+    ut_cur = f
+    ut_serial += 1
+    ut_first = ut_walked[f] == 0
+    ut_walked[f] = 1
+    ut_narrowed = []
+    if ut_first:
+        loop i in 0.. and pl in fns[f].params:
+            if i < 62: ut_lp[pl] = i + 1
+    d = int(fns[f].decl)
+    if ut_first and d != 0 and nodes[d].kind == .fn_:
+        ut_decl_kind(d)
+        mask = ut_param_safe.get(d) ?? 0
+        loop i in 0.. and l in fns[f].params:
+            if i < 62 and mask & (1 << i) != 0:
+                ut_ls[l] |= UT_L_SAFE | UT_L_DECLARED
+    b = int(fns[f].body)
+    if nodes[b].kind == .block:
+        ut_visit(b)
+        # (a value block: its last expression is the result)
+        m = nkids(b)
+        if nodes[b].aux != 0 and m > 0 and nodes[kid(b, m - 1)].kind == .exprstmt: ut_returned(int(nodes[kid(b, m - 1)].a))
+    else:
+        ut_visit(b)
+        ut_returned(b)
+    ut_cur = 0
+
+# a value f returns
+ut_returned = (v: int):
+    o = ut_val(v)
+    ut_mark_ret(ut_cur, o, ut_m)
+    if not ut_first or not ut_safe_used: return
+    d = int(fns[ut_cur].decl)
+    if d == 0 or nodes[d].kind != .fn_ or ut_decl_kind(d) & UT_MINTS == 0: return
+    inner = ut_strip(v)
+    if inner == 0 or not ut_is_path(int(nodes[inner].type)) or ut_safe(inner): return
+    ut_unproven(v, "{name_of(int(nodes[d].name))} returns a SafePath")
+
+ut_visit_list = (b: int):
+    mark = ut_narrowed.len()
+    loop i in [0..nkids(b)):
+        x = kid(b, i)
+        ut_visit(x)
+        if nodes[x].kind == .if_: ut_guard_exit(x, ut_narrowed)
+    ut_narrowed.truncate(mark)
+
+ut_visit = (n: int):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .lambda or k == .fn_ or k == .struct_ or k == .enum_ or k == .typealias or k == .tname or k == .fnref: return
+    if k == .block:
+        ut_visit_list(n)
+        return
+    if k == .vardecl:
+        v = int(nodes[n].b)
+        ut_visit(v)
+        id = int(nodes[n].sym)
+        if v == 0 or id <= 0: return
+        global = ut_global_decl(n, id)
+        o = ut_val(v)
+        m = ut_m
+        if global:
+            ut_mark_global(id, o, m)
+            if ut_first and ut_global_single(id):
+                if ut_is_path(int(globals[id].type)) and ut_safe(v): ut_safe_globals[id] = true
+                else if prune(int(globals[id].type)) == T_STR:
+                    c = ut_text_class(v)
+                    if c != 0: ut_text_globals[id] = c
+            return
+        if o != 0 or m != 0: ut_flow(id, v)
+        if not ut_first: return
+        if ut_names_safe(int(nodes[n].a)) and nodes[n].aux2 != 1:
+            ut_ls[id] |= UT_L_DECLARED
+            if not ut_safe(v): ut_unproven(v, "`{name_of(int(nodes[n].name))}` is declared a SafePath")
+        if ut_single(id):
+            ut_linit[id] = v
+            if ut_safe(v): ut_ls[id] |= UT_L_SAFE
+            lt = int(locals[id].type)
+            if prune(lt) == T_STR:
+                c = ut_text_class(v)
+                ut_ls[id] |= c << 2
+        return
+    if k == .assign:
+        ut_visit(int(nodes[n].a))
+        ut_visit(int(nodes[n].b))
+        target = int(nodes[n].a)
+        field = 0
+        loop target != 0 and (nodes[target].kind == .field or nodes[target].kind == .index):
+            field = if nodes[target].kind == .field: int(nodes[target].name) else: 0
+            target = int(nodes[target].a)
+        if target == 0 or nodes[target].kind != .ident: return
+        o = ut_val(int(nodes[n].b))
+        m = ut_m
+        if nodes[target].aux == i32(int(SK.local)) and nodes[target].sym > 0:
+            l = int(nodes[target].sym)
+            if o != 0 or m != 0:
+                # (`x.f = v`: that field; `x = v`: all of it; an element: all of it)
+                if field != 0: ut_mark_field(l, field, o, m)
+                else if target == int(nodes[n].a): ut_flow(l, int(nodes[n].b))
+                else: ut_mark_local(l, o, m)
+            if ut_first and target == int(nodes[n].a) and (ut_ls[l] | ut_ls[ut_root(l)]) & UT_L_DECLARED != 0 and not ut_safe(int(nodes[n].b)):
+                ut_unproven(int(nodes[n].b), "`{name_of(int(nodes[target].name))}` is declared a SafePath")
+        else if nodes[target].aux == i32(int(SK.global)):
+            ut_mark_global(int(nodes[target].sym), o, m)
+        return
+    if k == .return_:
+        ut_visit(int(nodes[n].a))
+        if nodes[n].a != 0: ut_returned(int(nodes[n].a))
+        return
+    if k == .if_:
+        ut_visit(int(nodes[n].a))
+        mark = ut_narrowed.len()
+        ut_guarded(int(nodes[n].a), ut_narrowed)
+        ut_visit(int(nodes[n].b))
+        ut_narrowed.truncate(mark)
+        ut_visit(int(nodes[n].c))
+        return
+    if k == .call:
+        ut_visit(int(nodes[n].a))
+        loop i in [0..nkids(n)): ut_visit(kid(n, i))
+        ut_call(n)
+        return
+    if (k == .for_ or k == .match_) and nodes[n].sym > 0:
+        # (the loop's variable holds the elements; the arms' bindings hold what is matched)
+        o = ut_val(int(nodes[n].a))
+        ut_mark_local(int(nodes[n].sym), o, ut_m)
+    ut_visit(int(nodes[n].a))
+    ut_visit(int(nodes[n].b))
+    ut_visit(int(nodes[n].c))
+    ut_visit(int(nodes[n].d))
+    loop i in [0..nkids(n)): ut_visit(kid(n, i))
+    if k != .match_ and k != .fn_:
+        loop i in [0..nkids2(n)): ut_visit(kid2(n, i))
+
+# (a vardecl among a module's top-level statements declares a global)
+ut_global_decl = (s: int, id: int) -> bool:
+    fns[ut_cur].kind == i32(FK_INIT) and id < globals.len() and int(globals[id].decl) == s
+
+ut_call = (n: int):
+    f = int(nodes[n].sym)
+    d = ut_callee_decl(n)
+    if d == 0: return
+    kind = ut_callee_kind(n)
+    na = nkids(n)
+    if ut_user_fn(f):
+        # (what each argument holds reaches the parameter)
+        loop i in [0..min(na, fns[f].params.len())):
+            pl = int(fns[f].params[i])
+            o = ut_val(kid(n, i))
+            m = ut_m
+            if o != 0: ut_mark_in(pl, o)
+            if m != 0: ut_edges(m, pl * 4 + 3)
+    else:
+        # (a library function given untrusted text and a function, as `xs.map(x => ...)`: the
+        # function may be given that text)
+        lambdas = false
+        loop i in [0..na):
+            if nodes[kid(n, i)].kind == .lambda: lambdas = true
+        if lambdas:
+            o = 0
+            loop i in [0..na):
+                if o == 0 and nodes[kid(n, i)].kind != .lambda: o = ut_untrusted(kid(n, i))
+            if o != 0:
+                loop i in [0..na):
+                    x = kid(n, i)
+                    if nodes[x].kind == .lambda and nodes[x].sym > 0 and int(nodes[x].sym) < fns.len():
+                        loop l in fns[int(nodes[x].sym)].params: ut_mark_in(l, o)
+    if not ut_first: return
+    if ut_safe_used:
+        mask = ut_param_safe.get(d) ?? 0
+        if mask != 0 and not pos_in_lib(nodes[n].pos):
+            loop i in [0..min(na, 62)):
+                x = kid(n, i)
+                if mask & (1 << i) != 0 and not ut_safe(x):
+                    pn = name_of(int(nodes[kid(d, i)].name))
+                    ut_unproven(x, "{name_of(int(nodes[d].name))}'s `{pn}` is a SafePath")
+    if kind & UT_SINK != 0 and ut_sources:
+        loop i in [0..na):
+            x = kid(n, i)
+            if i == 0 or ut_is_path(int(nodes[x].type)):
+                if not ut_safe(x): ut_sink_calls.push((x, ut_cur))
+
+# ---------------- diagnostics ----------------
+
+# the source text of a simple argument (a name, or a field of one), or ""
+ut_arg_text = (x0: int) -> str:
+    x = ut_strip(x0)
+    if x == 0: return ""
+    if nodes[x].kind == .ident:
+        nm = name_of(int(nodes[x].name))
+        if len(nm) > 0 and nm[0] != '$': return nm
+        return ""
+    if nodes[x].kind == .field:
+        b = ut_arg_text(int(nodes[x].a))
+        if len(b) > 0: return "{b}.{name_of(int(nodes[x].name))}"
+    ""
+
+# the base a path argument was built on (`{root}/...`: root), for the fix; "root" when unknown
+ut_base_text = (x0: int) -> str:
+    x = ut_strip(x0)
+    if x != 0 and nodes[x].kind == .ident and nodes[x].aux == i32(int(SK.local)) and nodes[x].sym > 0:
+        # (a local made by p"{root}/...": its initializer)
+        l = ut_root(int(nodes[x].sym))
+        if ut_linit[l] != 0: x = ut_strip(ut_linit[l])
+    if x != 0 and nodes[x].kind == .call and nkids(x) == 1:
+        s = ut_strip(kid(x, 0))
+        if nodes[s].kind == .str_lit and nodes[s].aux != 0 and nkids(s) > 0:
+            first = kid(s, 0)
+            if nodes[first].kind == .pair:
+                v = ut_strip(int(nodes[first].a))
+                if ut_is_path(int(nodes[v].type)):
+                    t = ut_arg_text(v)
+                    if len(t) > 0: return t
+    "root"
+
+
+# (the fixes, as the editor offers them: lsp.jo reads the first)
+ut_fixes = (x: int) -> str:
+    arg = ut_arg_text(x)
+    base = ut_base_text(x)
+    fix = if len(arg) > 0: arg else: "..."
+    "validate it, `{base}.confine({fix}) or_throw`, or test it first, `if {base}.contains({fix}) \{...}`"
+
+ut_shown = (x: int) -> str:
+    arg = ut_arg_text(x)
+    if len(arg) > 0: "`{arg}`" else: "this path"
+
+ut_unproven = (x: int, what: str):
+    fatal(nodes[x].pos, "{ut_shown(x)} is not proven to stay inside its base, but {what}: {ut_fixes(x)}")
+
+ut_warn_sinks = ():
+    seen: {int: bool} = {}
+    loop item in ut_sink_calls:
+        x = item.0
+        if seen.has(x): continue
+        seen[x] = true
+        ut_cur = item.1
+        o = ut_untrusted(x)
+        ut_cur = 0
+        if o == 0: continue
+        from = ""
+        if let nm = ut_origin_name.get(o):
+            l, c = line_col(o - 1)
+            from = " (`{nm}` on line {l})"
+        warn(nodes[x].pos, "{ut_shown(x)} holds untrusted input{from} and may escape its base: {ut_fixes(x)}")
+
+# check_program, once every function is checked
+ut_run = ():
+    taint = ut_sources and ut_sinks
+    if not ut_safe_used and not taint: return
+    n = locals.len() + 1
+    ut_lo = fill(0, n)
+    ut_lm = fill(0, n)
+    ut_li = fill(0, n)
+    ut_lp = fill(0, n)
+    ut_lr = fill(0, n)
+    ut_lf = fill(0, n)
+    ut_ls = fill(0, n)
+    ut_linit = fill(0, n)
+    ut_queued = fill(0, fns.len() + 1)
+    ut_walked = fill(0, fns.len() + 1)
+    ut_rr = fill(0, fns.len() + 1)
+    ut_ehead = fill(-1, n)
+    ut_fu = fill(0, fns.len() + 1)
+    ut_fk = fill(0, fns.len() + 1)
+    ut_tb = fill(0, types.len() + 1)
+    # (module initializers first: globals are declared there)
+    order: int[]
+    loop mi in [0..modules.len()):
+        if modules[mi].is_prelude: continue
+        f = int(modules[mi].init_fn)
+        if f > 0 and f < fns.len() and fns[f].body != 0 and dewy_at(nodes[int(fns[f].body)].pos) and not pos_in_lib(nodes[int(fns[f].body)].pos): order.push(f)
+    # (callees are mostly instantiated after their callers: the latest first, so results are
+    # known before their calls are walked)
+    f = fns.len() - 1
+    loop f >= 1:
+        if fns[f].kind != i32(FK_INIT) and ut_user_fn(f): order.push(f)
+        f -= 1
+    loop f0 in order: ut_enqueue(f0)
+    i = 0
+    loop true:
+        loop i < ut_queue.len():
+            f = ut_queue[i]
+            i += 1
+            ut_queued[f] = 0
+            ut_walk_fn(f)
+            if not taint and i >= order.len(): break
+        if not taint or not ut_follow_edges(): break
+    if taint: ut_warn_sinks()

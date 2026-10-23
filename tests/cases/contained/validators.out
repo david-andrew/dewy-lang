@@ -1,0 +1,16 @@
+/srv/site/static: contains=true confine=/srv/site/static
+/srv/site/static/: contains=true confine=/srv/site/static/
+/srv/site/static/index.html: contains=true confine=/srv/site/static/index.html
+/srv/site/static//css/./site.css: contains=true confine=/srv/site/static//css/./site.css
+/srv/site/static/../secret: contains=false confine=PathEscape
+/srv/site/static/a/../b: contains=false confine=PathEscape
+/srv/site/static2/x: contains=false confine=PathEscape
+/srv/site: contains=false confine=PathEscape
+srv/site/static/x: contains=false confine=PathEscape
+/srv/site/static/.../x: contains=true confine=/srv/site/static/.../x
+true
+true
+false
+true
+false
+false
