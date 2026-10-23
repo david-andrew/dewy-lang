@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+from tools import scratch
 from tools.filelock import lock_exclusive
 import hashlib
 import json
@@ -243,6 +244,7 @@ def test(binary: Path, arguments: list[str], quick: bool) -> int:
     # A shared compiler/library error otherwise repeats the same failed
     # build across the gate. A later --maxfail=0 requests every failure.
     command = [str(python), '-m', 'pytest', '-q', '-o', 'addopts=', '--maxfail=1',
+               f"--basetemp={scratch.activate() / 'pytest'}",
                *test_runner_options(python, arguments), *TESTS, *arguments]
     status = subprocess.call(command, cwd=ROOT, env=env)
     if status == 5 and selected:
@@ -287,7 +289,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command in ('cases', 'ladder',):
         from importlib import import_module
-        return import_module(f'tools.{args.command}').main(args.arguments, binary)
+        scratch.activate()
+        status = 1
+        try:
+            status = import_module(f'tools.{args.command}').main(args.arguments, binary)
+            return status
+        finally:
+            scratch.finish(status)
     if args.command == 'fuzz':
         from tools.compiler import dewy_fuzz
         return dewy_fuzz.main(args.arguments, binary)
@@ -301,9 +309,14 @@ def main(argv: list[str] | None = None) -> int:
     env = os.environ.copy()
     if args.command == 'test':
         slot = None if quick or gate_options(args.arguments)[0] else gate_slot()
+        # Scratch files go on the home disk, not the small /tmp; see tools/scratch.py.
+        scratch.activate()
+        status = 1
         try:
-            return test(binary, args.arguments, quick)
+            status = test(binary, args.arguments, quick)
+            return status
         finally:
+            scratch.finish(status)
             if slot is not None:
                 slot.close()
     # The compiler owns the terminal/LSP streams and receives signals directly;

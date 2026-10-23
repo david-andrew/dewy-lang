@@ -83,17 +83,27 @@ pkg_url = (src: str) -> str:
     if find(src, "://") < 0 and not starts_with(src, "git@"): return "https://" + src
     src
 
+# the user's cache directory (not temporary: /tmp may be a small memory-backed file system)
+user_cache_dir = () -> str:
+    when TARGET == "windows":
+        return os_path(env("LOCALAPPDATA") ?? temp_dir())
+    else when TARGET == "macos":
+        return (env("HOME") ?? temp_dir()) + "/Library/Caches"
+    else:
+        if let x = env("XDG_CACHE_HOME"):
+            if len(x) > 0: return x
+        return (env("HOME") ?? temp_dir()) + "/.cache"
+
 # where fetched packages are kept: the user's cache directory
 pkg_cache = () -> str:
     if let e = env("SLOPPY_PACKAGES"): return os_path(e)
-    when TARGET == "windows":
-        return os_path(env("LOCALAPPDATA") ?? temp_dir()) + "/sloppy/packages"
-    else when TARGET == "macos":
-        return (env("HOME") ?? "/tmp") + "/Library/Caches/sloppy/packages"
-    else:
-        if let x = env("XDG_CACHE_HOME"):
-            if len(x) > 0: return x + "/sloppy/packages"
-        return (env("HOME") ?? "/tmp") + "/.cache/sloppy/packages"
+    user_cache_dir() + "/sloppy/packages"
+
+# where built programs are kept between runs of dewy-core (made, with the directories above it)
+core_cache = () -> str:
+    d = user_cache_dir() + "/dewy/core-cache"
+    pkg_mkdirs(d)
+    return d
 
 # a directory and those above it, made where missing
 pkg_mkdirs = (d: str):

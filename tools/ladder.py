@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tools.cases import ROOT, clean_environment, default_workers, keyword_filter
+from tools.scratch import lock_path
 
 LADDER = ROOT / 'tests' / 'ladder'
 RUN_TIMEOUT = 30
@@ -188,7 +189,7 @@ def port_lock():
     except ImportError:
         yield
         return
-    with open(Path(tempfile.gettempdir()) / 'dewy-ladder-ports.lock', 'w') as lock:
+    with open(lock_path('ladder-ports.lock'), 'w') as lock:
         lock_exclusive(lock)
         yield
 

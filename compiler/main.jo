@@ -880,8 +880,7 @@ main = ():
         if len(near) == 0: near = " (dewy-core help lists them; a program runs with dewy-core game.dewy)"
         eprint("dewy-core: unknown command '{a[first]}'{near}")
         exit(1)
-    cache = os_path(temp_dir()) + "/dewy-core-cache"
-    mkdir(cache)
+    cache = core_cache()
     base = path
     s = rfind(base, "/")
     if s >= 0: base = base[s + 1..]

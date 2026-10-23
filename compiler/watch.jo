@@ -34,6 +34,7 @@ use 'elf.jo'
 use 'macho.jo'
 use 'repl.jo'
 use 'main.jo'
+use 'pkg.jo'
 
 const WATCH_REGION = WATCH_CODE_AT       # where new code goes in the program (x64.jo; macOS: macho.jo)
 const WATCH_REGION_SIZE = WATCH_CODE_SIZE
@@ -919,7 +920,7 @@ w_out = ""
 w_args: str[]
 
 w_ext = ""      # the main file's extension: other files with it are sources too
-w_cache = "/tmp/dewy-core-cache"
+w_cache = ""
 
 w_dirs: {str: bool} = {}
 
@@ -931,8 +932,7 @@ watch_main = (path: str, args: str[]):
         if test_mode: __test_process_group()
     when not BOOTSTRAP and TARGET != "windows" and TARGET != "wasm":
         if test_mode: __watch_tests_signals(&w_pid)
-    w_cache = os_path(temp_dir()) + "/dewy-core-cache"
-    mkdir(w_cache)
+    w_cache = core_cache()
     w_out = "{w_cache}/watch-{w_self_id()}.bin"
     when TARGET == "windows":
         w_out = "{w_cache}/watch-{w_self_id()}.exe"
