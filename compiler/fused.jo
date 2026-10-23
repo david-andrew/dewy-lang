@@ -151,7 +151,10 @@ fused_fork = (pinit_lf: int) -> bool:
     ready = fused_start(pinit_lf)
     # A checking child must never proceed to the parent's executable writer.
     if pc_child >= 0: exit(1)
-    if pc_active and not ready: pc_cancel()
+    if pc_active and not ready:
+        pc_cancel()
+        # (the workers' obligations, decided there, are decided here again)
+        pc_facts_serial()
     ready
 
 fused_start = (pinit_lf: int) -> bool:
@@ -262,6 +265,7 @@ fused_start = (pinit_lf: int) -> bool:
         fz_by_inst = {}
         fz_by_helper = {}
         fz_qrec = {}
+        lost = false
         loop w in [0..fds.len()):
             fz_rd.push(ParIn([]))
             fz_mlf.push({})
@@ -270,14 +274,23 @@ fused_start = (pinit_lf: int) -> bool:
             fz_mrc.push({})
             fz_kro.push([])
             fz_kdt.push([])
-            if fds[w] < 0: continue
+            if fds[w] < 0:
+                lost = true
+                continue
             syscall(3, fds[w])
             st = [0]
             syscall(61, pids[w], data(st), 0, 0)
-            if st[0] & 0xFFFF != 0 or got[w].len() < 16: continue
+            if st[0] & 0xFFFF != 0 or got[w].len() < 16:
+                lost = true
+                continue
             trailer = ParIn(got[w], got[w].len() - 8)
-            if pr(trailer) != 0x46555345: continue
+            if pr(trailer) != 0x46555345:
+                lost = true
+                continue
             fz_parse(w, got[w])
+        # (a partitioned check's worker that did not finish decided none of
+        # its obligations: the parent decides them, with every body checked)
+        if lost and pc_active and pc_static(): pc_facts_serial()
         fz_validate()
         fz_ready = true
         if env("DEWY_FUSED_WHY") != none:

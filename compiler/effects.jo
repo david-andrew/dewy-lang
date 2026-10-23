@@ -94,6 +94,8 @@ effects_active = false
 effect_syntax: EffectSyntax[][] = [[]]
 effect_contracts: EffectContract[] = [EffectContract()]
 effect_summaries: EffectSummary[]
+# Bodies another process checks (a partitioned check's other roots): opaque here.
+effect_unavailable: {int: bool} = {}
 effect_seen: int[]
 effect_stack: int[]
 effect_event_index: {EffectEventKey: bool} = {}
@@ -1511,7 +1513,7 @@ effect_visit = (f: int):
     # trusted: the claim its unsafe callers rely on)
     trusted = d != 0 and has_flag(d, NF_EXTERN) and effect_declared_row(f) != 0
     if effect_blocks_demanded and not trusted and concurrency_fn_blocks(f): effect_add(f, EffectEvent(EffectAtom(.block), d))
-    if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)):
+    if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)) or effect_unavailable.has(f):
         if not trusted: effect_opaque(f, d)
         effect_isolation_block(f, .unavailable, d)
     else:

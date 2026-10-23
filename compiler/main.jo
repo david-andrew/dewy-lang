@@ -6,6 +6,7 @@ use 'effects.jo'
 use 'concurrency.jo'
 use 'targets.jo'
 use 'icount.jo'
+use 'pcheck.jo'
 # The Sloppy compiler.
 #   sloppy file.jo [args]     compile and run
 #   sloppy build file.jo [-o out] [--target wasm32] [--release]
@@ -430,7 +431,9 @@ compile = (path: str, out0: str) -> str:
     ic_switch(IC_FACTS, IC_SHARED)
     # (a row excluding panics needs the program's deferred obligations named)
     if effect_panics_demanded: dir_force()
+    pc_before_facts()
     facts_finalize()
+    pc_after_facts()
     directives_after_facts()
     floats_after_facts()
     ic_switch(IC_EFFECTS, IC_SHARED)

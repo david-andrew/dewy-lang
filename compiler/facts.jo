@@ -147,6 +147,8 @@ struct FactForkEntry:
     bounds: FactBound[]
     rows: FactDifference[]
 fact_fork_nodes: {int: bool} = {}
+fact_decided: {int: bool} = {}
+fact_policy_default = false    # RequireStatic is the no-traps default, not a harness's
 fact_fork_entries: {int: FactForkEntry} = {}
 fact_validated: {int: bool} = {}
 fact_owner = 0
@@ -1028,7 +1030,7 @@ fact_summary = (f: int) -> FactSummary:
     unknown = FactSummary(FactBound(), FactBound())
     d = int(fns[f].decl)
     t = representation_type(int(fns[f].ret))
-    if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or fns[f].caps.len() != 0 or d != 0 and has_flag(d, NF_EXTERN): return unknown
+    if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or fns[f].caps.len() != 0 or d != 0 and has_flag(d, NF_EXTERN) or effect_unavailable.has(f): return unknown
     if tkind(t) != .array and not (fact_scalar(t) and is_int(t)): return unknown
     fact_summaries[f] = unknown
     saved = (fact_owner, fact_summary_owner, fact_speculating, fact_loop_steps, fact_loop_exhausted, proof_active, result_active, fact_pending_defers, fact_probe_on, fact_query)
@@ -4054,6 +4056,10 @@ facts_finalize = ():
     loop f, _ in demanded:
         if f <= 0 or f >= fns.len() or fns[f].kind == FK_LAMBDA: order.push(f)
     loop f in order:
+        # (another process's body: it decides its own; a body already
+        # decided here is not decided again)
+        if effect_unavailable.has(f) or fact_decided.has(f): continue
+        fact_decided[f] = true
         if f <= 0 or f >= isolation_limit or fns[f].state != 2: fatal(-1, "cannot prove assertion: unsettled checked body")
         icb = ic_fn(IC_FACTS, f)
         if let run = fact_probe_runs.get(f):
@@ -4112,6 +4118,8 @@ facts_reset = ():
     fact_slice_cache = {}
     fact_fork_nodes = {}
     fact_fork_entries = {}
+    fact_decided = {}
+    fact_policy_default = false
     fact_probe_runs = {}
     fact_returns_cache = {}
     fact_owner = 0

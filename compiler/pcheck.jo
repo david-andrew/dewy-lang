@@ -24,6 +24,7 @@ use 'fused.jo'
 use 'main.jo'
 use 'copies.jo'
 use 'directives.jo'
+use 'witness.jo'
 
 pc_tried = false
 pc_reordered = false
@@ -43,8 +44,12 @@ pc_collect = false
 pc_warn_pos: int[]
 pc_warn_text: str[]
 
+# (the no-traps default's obligations are decided in each process for its own
+# bodies: pc_after_facts)
+pc_static = () -> bool: fact_policy == .RequireStatic and fact_policy_default and not dir_forced and not wit_collect
+
 pc_features = () -> bool:
-    if fact_policy != .RuntimeAllowed or effects_active or effect_policy.prohibitions != 0 or refine_active or proof_active or result_active or ownership_decls.len() != 0 or loan_owners.len() != 0 or fact_requests.len() != 0 or refine_requests.len() != 0 or proof_calls.len() != 0 or poly_families.len() > 1: return false
+    if fact_policy != .RuntimeAllowed and not pc_static() or effects_active or effect_policy.prohibitions != 0 or refine_active or proof_active or result_active or ownership_decls.len() != 0 or loan_owners.len() != 0 or fact_requests.len() != 0 or refine_requests.len() != 0 or proof_calls.len() != 0 or poly_families.len() > 1: return false
     if dir_copies_any or dir_rows_any: return false
     loop f in fns:
         if f.kind == FK_LAMBDA or f.kind == FK_PARTIAL or f.parallel or f.deterministic: return false
@@ -73,6 +78,7 @@ pc_send = (fd: int, b: u8[]):
 pc_restore = (f: int):
     if not pc_missing.has(f): return
     pc_missing.remove(f)
+    effect_unavailable.remove(f)
     fns[f].state = 0
     check_fn_body(f)
 
@@ -347,6 +353,7 @@ pc_merge = (b: u8[]):
                 if pc_child < 0: warn(pos, msg)
             if fns[f].state != 2:
                 pc_missing[f] = true
+                effect_unavailable[f] = true
                 fns[f].state = 2
                 fns[f].no_indexes = no_indexes
                 fns[f].no_user_globals = true
@@ -389,6 +396,38 @@ pc_cancel = ():
                 st = [0]
                 syscall(61, pid, data(st), 0, 0)
         pc_active = false
+
+# Before facts: a process decides its obligations tentatively (its other
+# roots' bodies are opaque here). After: a worker that could not prove its
+# own exits, which its parent sees as a missing emission; the parent, failing
+# or abandoning its workers, decides the rest serially (pc_facts_serial).
+pc_before_facts = ():
+    if pc_active and pc_static(): wit_tentative = true
+
+pc_after_facts = ():
+    if not wit_tentative: return
+    wit_tentative = false
+    if not wit_tentative_failed: return
+    if pc_child >= 0: exit(1)
+    pc_cancel()
+    fact_decided = {}
+    pc_facts_serial()
+
+# Every body the workers had: checked here, then decided here (errors are
+# reported as in a serial compile), with what a serial compile would know.
+pc_facts_serial = ():
+    if not pc_static(): return
+    restored: int[]
+    loop f in [1..fns.len()):
+        if pc_missing.has(f):
+            pc_restore(f)
+            restored.push(f)
+    if restored.len() == 0 and fact_decided.len() != 0: return
+    fact_summaries = {}
+    fact_slice_cache = {}
+    effect_limit = 0
+    facts_finalize()
+    directives_after_facts()
 
 pc_finish = ():
     if not pc_active or pc_features(): return

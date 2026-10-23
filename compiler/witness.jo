@@ -25,7 +25,15 @@ struct WitSide:
 wit_collect = false
 wit_measure = false
 wit_collected = 0
+# A partitioned check's process decides its obligations with the other
+# processes' bodies opaque: a failure there is tentative, and the whole
+# program is decided again serially (pcheck.jo pc_after_facts).
+wit_tentative = false
+wit_tentative_failed = false
 wit_fail = (p: int, msg: str):
+    if wit_tentative:
+        wit_tentative_failed = true
+        return
     if not wit_collect: fatal(p, msg)
     err_notes = []
     eprint("{pos_str(p)}: error: {msg}")
