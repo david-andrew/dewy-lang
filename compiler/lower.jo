@@ -3992,8 +3992,11 @@ pr_walk = (n: int):
         pr.parent[n] = n
         pr.sites.push(n)
     else if k == .addr or ((k == .cast or k == .conv) and raw_view(n)): pr_expose(int(nodes[n].a))
-    if k == .assign: pr_target(int(nodes[n].a))
-    else if k == .addr: pr_target(int(nodes[n].a))
+    if k == .assign or k == .addr:
+        t = int(nodes[n].a)
+        if nodes[t].kind == .tuple:
+            loop i in [0..nkids(t)): pr_target(kid(t, i))
+        else: pr_target(t)
     else if k == .call:
         mm = checked_call_mutmask(n)
         loop i in [0..nkids(n)):
