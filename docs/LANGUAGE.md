@@ -881,8 +881,9 @@ and later ones only while the chain holds. A chain rises (`<?`, `<=?`) or falls
 `is?` or `in?`, is an error. A parenthesized comparison is a bool:
 `(a =? b) =? c` compares it with `c`. Boolean expressions use `and`,
 `or` and `not`; `a nand b` is `not (a and b)`, and `nor` and `xnor` negate `or`
-and `xor` the same way, at their precedence. Literal coefficients such as `2x` and `2(x+1)` multiply; use `*`
-for general multiplication. A semicolon attached to an expression, `f();`, discards its result; an unattached
+and `xor` the same way, at their precedence. A literal coefficient multiplies the name or parenthesized
+expression after it (`2x`, `2(x+1)`); an identifier followed by parentheses is a
+call. Other juxtaposition is not defined here. A semicolon attached to an expression, `f();`, discards its result; an unattached
 `;` (after a space or on its own line) is an error.
 
 `^` raises a value to a power and associates right: `2^3^2` is `2^(3^2)`.
