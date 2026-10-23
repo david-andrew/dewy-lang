@@ -635,6 +635,14 @@ min = (xs: f64[]) -> f64:
 mean = (xs: f64[]) -> f64: sum(xs) / f64(max(xs.len(), 1))
 mean = (xs: int[]) -> f64: f64(sum(xs)) / f64(max(xs.len(), 1))
 mean = (m: f64[,]) -> f64: mean(m.data)
+# (of other values that subtract and divide, such as quantities: the first moved by the mean
+# difference from it, so temperature points, which do not add, have a mean that is a point;
+# exact values give an exact mean. An empty array has none.)
+mean[T] = (xs: T[]):
+    first = xs[0]
+    total = first - first
+    loop i in [1..xs.len()): total = total + (xs[i] - first)
+    first + __dewy_divide(total, xs.len())
 
 # the middle value once sorted (the mean of the two middle ones for an even count; 0 for none)
 median = (xs: f64[]) -> f64:

@@ -32,6 +32,11 @@ const V = W/A
 const inch = 127m/5000
 const inches = inch
 # Offset scales: one degree's size and where its zero sits. A temperature written in
-# one is a point, read as a difference where one is needed (start + 20°C).
+# one is a point; written as an operand next to a point it is a difference
+# (start + 20°C). A named difference says so: 20Δ°C (one degree between two points).
 const °C = __offset_unit("°C" K 5463K/20)
 const °F = __offset_unit("°F" 5K/9 45967K/180)
+const _celsius_zero = 0°C
+const _fahrenheit_zero = 0°F
+const Δ°C = °C - _celsius_zero
+const Δ°F = °F - _fahrenheit_zero

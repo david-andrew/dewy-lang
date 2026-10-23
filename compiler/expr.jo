@@ -3717,6 +3717,9 @@ dewy_math_fold = (n: int, a: int, b: int, power: bool, modulo: bool) -> bool:
 
 dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
     literal_divisor = nodes[args[1]].kind == .int_lit
+    # (t/°C: a unit written by name)
+    q_name_a = quantity_name_syntax(args[0])
+    q_name_b = quantity_name_syntax(args[1])
     checked: int[]
     loop i in 0.. and arg in args:
         hint = 0
@@ -3733,6 +3736,8 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
         if nodes[a].kind == .float_lit and nodes[a].sval != 0 and is_lit(a): exact_decimal(a)
         if nodes[b].kind == .float_lit and nodes[b].sval != 0 and is_lit(b): exact_decimal(b)
     if is_quantity(ntype(a)) or is_quantity(ntype(b)):
+        quantity_left_literal = q_name_a
+        quantity_right_literal = q_name_b
         return quantity_arithmetic(n, name, a, b, expected)
     if name == intern("__dewy_divide"):
         ta = prune(ntype(a))
@@ -3927,7 +3932,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             if k0 == .str_ and name == id_chars: return call_by_name(n, ci(1, "graphemes"), mod_scope, args, expected, false)
             if k0 == .str_ and name != id_index_of and name != id_chars: return call_by_name(n, intern("__dewy_{name_of(name)}"), mod_scope, args, expected, false)
             if k0 == .array and name == id_index_of and args.len() == 2: return call_by_name(n, ci(2, "__dewy_index_of"), mod_scope, args, expected, false)
-    if not ufcs and mod_scope < 0 and args.len() == 2 and (name == ci(3, "__floor_div") or name == ci(4, "__floor_mod") or name == ci(5, "__dewy_power") or name == ci(6, "__dewy_divide")) and files[pos_file(nodes[n].pos)].is_dewy:
+    if not ufcs and mod_scope < 0 and args.len() == 2 and (name == ci(3, "__floor_div") or name == ci(4, "__floor_mod") or name == ci(5, "__dewy_power") or name == ci(6, "__dewy_divide")) and (files[pos_file(nodes[n].pos)].is_dewy or pos_in_lib(nodes[n].pos)):
         if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
             return dewy_arithmetic_call(n, name, args, expected)
     if not ufcs and mod_scope < 0 and args.len() == 1 and dewy_quantity_name(name) and nodes[args[0]].kind != .namedarg and files[pos_file(nodes[n].pos)].is_dewy:
@@ -6783,8 +6788,15 @@ check_binary = (n: int, expected: int) -> int:
     a = int(nodes[n].a)
     b = int(nodes[n].b)
     # (20°C in start + 20°C is a difference: offset temperatures tell literals from values)
-    q_lit_a = (op == .plus or op == .minus) and quantity_literal_syntax(a)
-    q_lit_b = (op == .plus or op == .minus) and (quantity_literal_syntax(b) or (b == quantity_update_right and b != 0))
+    # (and a unit written by name in a product: c*°C makes a point, where a point is not scaled)
+    q_lit_a = false
+    q_lit_b = false
+    if op == .plus or op == .minus:
+        q_lit_a = quantity_literal_syntax(a)
+        q_lit_b = quantity_literal_syntax(b) or (b == quantity_update_right and b != 0)
+    else if op == .star:
+        q_lit_a = quantity_name_syntax(a)
+        q_lit_b = quantity_name_syntax(b)
     # ("-" * 40 is forty dashes, as in Python: a character's code multiplied means nothing)
     if op == .star:
         if charlike(a) and not charlike(b): clear_flag(a, NF_CHARLIKE)
@@ -9197,9 +9209,29 @@ check_field_expr = (n: int, expected: int) -> int:
             fatal(nodes[n].pos, "{dt(bt)} has no field '{name_of(fname)}'{suggestion(name_of(fname), surface_names(cands, nodes[n].pos), bt)}")
     ce_finish(n, t, expected)
 
+# `mean[t1 t2]`: a function named before an array literal is called with it, as with a
+# string literal (`printl"hi"`). A function that takes nothing is called first instead
+# (f[0] indexes f()).
+dewy_bracket_call = (n: int) -> bool:
+    base = int(nodes[n].a)
+    if nodes[base].kind != .ident or nodes[n].sval != 0 or nkids(n) == 0 or not dewy_at(nodes[n].pos): return false
+    nm = int(nodes[base].name)
+    s = lookup(nm)
+    if s == 0 or syms[s].kind != .fns or bare_fns_call(nm, -1) != 0: return false
+    loop x in kids(n):
+        k = nodes[x].kind
+        if k == .range or k == .namedarg or (k == .ident and name_of(int(nodes[x].name)) == "$new"): return false
+    items = mk(.array, nodes[n].pos)
+    set_list(items, kids(n))
+    nodes[n].kind = .call
+    nodes[n].b = 0
+    set_list(n, [items])
+    true
+
 check_index_expr = (n: int, expected: int) -> int:
     if has_flag(n, NF_JUXT): juxt_member_check(n)
     t = 0
+    if dewy_bracket_call(n): return check_expr(n, expected)
     if nodes[n].sval != 0:
         pos = nodes[n].pos
         name = "$index_source{bc_count}"
@@ -9467,8 +9499,11 @@ check_expr_other = (n: int, expected: int) -> int:
         if has_flag(n, NF_BROADCAST): return check_dotted(n, expected)
         hint = 0
         if ex != 0 and (is_numeric(ex) or is_vec(ex) or bundled_bigint_type(ex)): hint = ex
+        q_lit = quantity_literal_syntax(int(nodes[n].a))
         at = prune(check_expr(int(nodes[n].a), hint))
-        if types[at].kind == .quantity: return quantity_unary(n, expected)
+        if types[at].kind == .quantity:
+            quantity_unary_literal = q_lit
+            return quantity_unary(n, expected)
         if nodes[n].op == i32(int(Tok.minus)):
             if is_struct_like(at):
                 r = op_overload(n, "-")
@@ -10968,6 +11003,8 @@ dot_template = (n: int, leaves: mut int[], tag: str) -> int:
         set_list(c, args)
         return c
     if (k == .int_lit or k == .float_lit or k == .bool_lit) and not has_flag(n, NF_CHECKED): return n
+    # (and a temperature literal: next to a point it is a difference, ts .+ 5°C)
+    if k == .binary and quantity_literal_syntax(n): return n
     leaves.push(n)
     bc_ident("__b{tag}e{leaves.len() - 1}", pos)
 

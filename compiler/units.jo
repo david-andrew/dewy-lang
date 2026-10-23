@@ -244,6 +244,12 @@ quantity_coerce = (n: int, target: int) -> int:
     source = ntype(n)
     if quantity_dimension(source) != quantity_dimension(target): quantity_mismatch(nodes[n].pos, source, target)
     if type_eq(source, target): return n
+    # (a temperature point and a difference are different values: neither holds the other)
+    if quantity_internal == 0 and ((quantity_point(target) and quantity_is_delta(source)) or (quantity_is_delta(target) and quantity_point(source))):
+        point = if quantity_point(target): target else: source
+        unit = quantity_point_unit(point)
+        if quantity_point(target): fatal(nodes[n].pos, "a temperature difference cannot stand for a point: add it to one (`ref + d`), or keep it as a difference")
+        fatal(nodes[n].pos, "a temperature point cannot stand for a difference: write a difference as one (`5Δ{unit}`), or subtract two points")
     constant = quantity_constant_scale(n)
     if constant >= 0 and (is_numeric(quantity_base(target)) or bundled_rational_type(quantity_base(target))):
         scale = quantity_scales[constant]
@@ -443,12 +449,27 @@ quantity_compound = (s: int, target: int) -> bool:
     if nodes[int(nodes[s].a)].kind != .ident: return false
     if nodes[s].op != i32(int(Tok.pluseq)) and nodes[s].op != i32(int(Tok.minuseq)): return false
     right = int(nodes[s].b)
+    literal = quantity_literal_syntax(right)
     check_expr(right, target)
     right = last_checked
-    # (t += 5°C: what is added to or taken from a temperature is a difference)
+    # (t += 5°C: what is added to or taken from a temperature point is a difference)
+    quantity_update_check(nodes[s].pos, nodes[s].op == i32(int(Tok.minuseq)), int(nodes[s].a), right, target, literal)
     if quantity_offset_tagged(target) or quantity_offset_tagged(ntype(right)): right = quantity_delta_reading(right)
     nodes[s].b = i32(quantity_number(coerce(right, target)))
     true
+
+# t += x and t -= x on a temperature: a point moves by a difference (a literal is read as
+# one); a difference moves by a difference.
+quantity_update_check = (pos: int, minus: bool, place: int, right: int, target: int, literal: bool):
+    tr = ntype(right)
+    if quantity_dimension(target) != base_dimension(4) or quantity_dimension(tr) != base_dimension(4): return
+    what = if minus: "take a point from a difference" else: "add a point to a difference"
+    if quantity_is_delta(target) and quantity_point(tr): quantity_difference_point(pos, right, tr, what)
+    if not quantity_point(target) or not quantity_point(tr) or literal: return
+    if not minus: quantity_points_added(pos, place, right, target)
+    p = quantity_operand_text(place, "t")
+    r = quantity_operand_text(right, "ref")
+    fatal(pos, "`{p} - {r}` is a difference, not a temperature point, so `{p}` cannot hold it: write `let rise = {p} - {r}`, or subtract a difference (`5Δ{quantity_point_unit(target)}`)")
 
 bundled_word_rational_type = (t0: int) -> bool:
     t = prune(t0)
@@ -647,16 +668,23 @@ quantity_become = (n: int, e: int, tag: int) -> int:
     if is_quantity(ntype(n)): return quantity_retag(n, tag)
     ntype(n)
 
-# Literal-looking operands (`20°C`, `-5°F`, `(20°C as °F)`), before they are checked.
+# Literal-looking operands (`20°C`, `-5°F`), before they are checked. A converted one,
+# `(20°C as °F)`, is a value of its own: a point.
 quantity_literal_syntax = (e: int) -> bool:
     if e == 0 or has_flag(e, NF_CHECKED): return false
     k = nodes[e].kind
     if k == .unary: return quantity_literal_syntax(int(nodes[e].a))
-    if k == .cast and nodes[e].aux2 != 1: return quantity_literal_syntax(int(nodes[e].a))
     if k == .binary and nodes[e].op == i32(int(Tok.star)):
         x = nodes[int(nodes[e].a)].kind
         return (x == .int_lit or x == .float_lit) and nodes[int(nodes[e].b)].kind == .ident
     false
+
+# A unit written by name (`°C`, `units.°C`), before it is checked: `c*°C` makes a point
+# from a number, where scaling a point is an error.
+quantity_name_syntax = (e: int) -> bool:
+    if e == 0 or has_flag(e, NF_CHECKED): return false
+    k = nodes[e].kind
+    k == .ident or (k == .field and nodes[int(nodes[e].a)].kind == .ident)
 
 quantity_update_right = 0      # the right side of a compound update being checked
 quantity_left_literal = false
@@ -702,13 +730,18 @@ quantity_binary = (n: int, a: int, b: int, expected: int) -> int:
         if not aq or not bq or quantity_dimension(ta) != quantity_dimension(tb): quantity_mismatch(pos, ta, tb)
     da = quantity_is_delta(ta)
     db = quantity_is_delta(tb)
+    pa = quantity_point(ta)
+    pb = quantity_point(tb)
     if op == .plus:
-        # One side is a point and the other is read as a difference: start + 20°C.
+        # A point and a difference; a temperature written as an operand next to a point is
+        # one (start + 20°C). Two points do not add.
         if da and db: return quantity_become(n, quantity_operation(.plus, quantity_point_reading(a), quantity_point_reading(b), pos), quantity_tag(ta))
+        if pa and pb and not a_lit and not b_lit: quantity_points_added(pos, a, b, ta)
         a_point = not da and (db or not a_lit or b_lit)
         if a_point: return quantity_become(n, quantity_operation(.plus, quantity_point_reading(a), quantity_delta_reading(b), pos), quantity_tag(ta))
         return quantity_become(n, quantity_operation(.plus, quantity_delta_reading(a), quantity_point_reading(b), pos), quantity_tag(tb))
     if op == .minus:
+        if da and pb: quantity_difference_point(pos, b, tb, "take a point from a difference")
         if db or da: return quantity_become(n, quantity_operation(.minus, quantity_point_reading(a), quantity_delta_reading(b), pos), quantity_tag(ta))
         if b_lit and not a_lit: return quantity_become(n, quantity_operation(.minus, quantity_point_reading(a), quantity_delta_reading(b), pos), quantity_tag(ta))
         # point - point = difference, shown in the first point's unit
@@ -716,25 +749,74 @@ quantity_binary = (n: int, a: int, b: int, expected: int) -> int:
         unit = if q.display != 0: q.display else: q.origin
         return quantity_become(n, quantity_operation(.minus, quantity_point_reading(a), quantity_point_reading(b), pos), intern_quantity_tag(unit, 0, true))
     if cmp:
+        if pa and db: quantity_difference_point(pos, a, ta, "compare a point with a difference")
+        if da and pb: quantity_difference_point(pos, b, tb, "compare a point with a difference")
         if da == db: return quantity_become(n, quantity_operation(op, quantity_point_reading(a), quantity_point_reading(b), pos), 0)
         return quantity_become(n, quantity_operation(op, quantity_delta_reading(a), quantity_delta_reading(b), pos), 0)
-    if op == .star or op == .slash: return quantity_offset_product(n, a, b, op, expected)
+    if op == .star or op == .slash: return quantity_offset_product(n, a, b, op, expected, a_lit, b_lit)
     quantity_retag(a, 0)
     quantity_retag(b, 0)
     quantity_binary_plain(n, a, b, expected)
 
-# Products and quotients with an offset temperature: a plain number scales it in its own
-# unit; another quantity combines with its difference reading; a temperature over a
-# temperature unit counts in that unit (t/°C is t's reading in Celsius).
-quantity_offset_product = (n: int, a: int, b: int, op: Tok, expected: int) -> int:
+# (a temperature point: written in an offset unit, or shown in one, and not a difference)
+quantity_point = (t: int) -> bool:
+    if not is_quantity(t): return false
+    q = quantity_tags[quantity_tag(t)]
+    not q.delta and (q.origin != 0 or quantity_units[q.display].onum != 0)
+
+# (the checked x is the offset unit itself, as its name was written: °C in c*°C)
+quantity_is_unit = (x: int, named: bool) -> bool:
+    if not named: return false
+    t = ntype(x)
+    q = quantity_tags[quantity_tag(t)]
+    if q.delta or q.origin == 0 or q.display != q.origin: return false
+    scale = quantity_constant_scale(x)
+    if scale < 0: return false
+    u = quantity_units[q.origin]
+    v = quantity_scales[scale]
+    # (one degree: its zero plus its size)
+    v.numerator * u.den * u.oden == (u.onum * u.den + u.num * u.oden) * v.denominator
+
+# (the text of the checked operand x for a diagnostic, or alt)
+quantity_operand_text = (x: int, alt: str) -> str:
+    if nodes[x].kind == .ident:
+        nm = name_of(int(nodes[x].name))
+        if len(nm) > 0 and nm[0] != '_' and nm[0] != '$': return nm
+    alt
+
+# (the unit a point of type t was written or shown in, for a fix-it: °C)
+quantity_point_unit = (t: int) -> str:
+    q = quantity_tags[quantity_tag(t)]
+    u = if q.origin != 0: q.origin else: q.display
+    if u == 0: return "K"
+    quantity_units[u].sym
+
+quantity_points_added = (pos: int, a: int, b: int, t: int):
+    x = quantity_operand_text(a, "t1")
+    y = quantity_operand_text(b, "t2")
+    unit = quantity_point_unit(t)
+    fatal(pos, "cannot add two temperatures: both are points on the {unit} scale, and their sum depends on where its zero sits (20{unit} + 20{unit} is not 40{unit}). For an average write `mean[{x} {y}]`; to add a difference, write it as one (`5Δ{unit}`) or subtract two points (`{x} + ({y} - ref)`)")
+
+quantity_difference_point = (pos: int, point: int, t: int, what: str):
+    unit = quantity_point_unit(t)
+    fatal(pos, "cannot {what}: one side is a temperature point (a reading on the {unit} scale) and the other a difference between two. Write a difference as one: `5Δ{unit}` (a literal added to or taken from a point is read as one, `t + 5{unit}`), or subtract two points")
+
+quantity_point_scaled = (pos: int, point: int, t: int):
+    p = quantity_operand_text(point, "t")
+    unit = quantity_point_unit(t)
+    fatal(pos, "cannot scale a temperature point: `{p}` is a reading on the {unit} scale, and scaling one depends on where the scale's zero sits (2 × 20°C is 40°C, but 2 × 68°F, the same temperature, is 136°F). Scale a difference instead (`({p} - ref)*2`); for an average write `mean[t1 t2]`; `{p}/K` is its reading in kelvins")
+
+# Products and quotients with an offset temperature: a plain number scales a difference;
+# another quantity combines with a difference's or a unit's own size (J/°C); a temperature
+# over a temperature unit counts in that unit (t/°C is t's reading in Celsius). A point
+# itself is not scaled: only a unit written by name makes one from a number (c*°C).
+quantity_offset_product = (n: int, a: int, b: int, op: Tok, expected: int, a_name: bool = false, b_name: bool = false) -> int:
     pos = nodes[n].pos
     ta = ntype(a)
     tb = ntype(b)
     aq = is_quantity(ta)
     bq = is_quantity(tb)
-    if aq and not bq: return quantity_become(n, quantity_scaled(a, b, op, true, pos), quantity_tag(ta))
-    if bq and not aq and op == .star: return quantity_become(n, quantity_scaled(b, a, op, false, pos), quantity_tag(tb))
-    if op == .slash and aq and bq and quantity_dimension(ta) == quantity_dimension(tb) and not quantity_is_delta(tb):
+    if op == .slash and aq and bq and quantity_dimension(ta) == quantity_dimension(tb) and not quantity_is_delta(tb) and (not quantity_point(tb) or quantity_is_unit(b, b_name)):
         u = quantity_units[quantity_tags[quantity_tag(tb)].origin]
         top = a
         if not quantity_is_delta(ta) and u.onum == 0: quantity_retag(a, 0)
@@ -744,25 +826,38 @@ quantity_offset_product = (n: int, a: int, b: int, op: Tok, expected: int) -> in
             top = quantity_internal_check(top)
         else: quantity_retag(a, 0)
         return quantity_become(n, quantity_operation(.slash, top, quantity_delta_reading(b), pos), 0)
+    if quantity_point(ta) and not quantity_is_unit(a, a_name): quantity_point_scaled(pos, a, ta)
+    if quantity_point(tb) and not quantity_is_unit(b, b_name): quantity_point_scaled(pos, b, tb)
+    if aq and not bq: return quantity_become(n, quantity_scaled(a, b, op, true, pos), quantity_tag(ta))
+    if bq and not aq and op == .star: return quantity_become(n, quantity_scaled(b, a, op, false, pos), quantity_tag(tb))
     return quantity_become(n, quantity_operation(op, quantity_delta_reading(a), quantity_delta_reading(b), pos), 0)
 
 quantity_arithmetic = (n: int, name: int, a: int, b: int, expected: int) -> int:
+    a_name = quantity_left_literal
+    b_name = quantity_right_literal
+    quantity_left_literal = false
+    quantity_right_literal = false
     ta = ntype(a)
     tb = ntype(b)
     if quantity_tag(ta) == 0 and quantity_tag(tb) == 0: return quantity_arithmetic_plain(n, name, a, b, expected)
     if name == intern("__dewy_divide"):
-        if quantity_offset_tagged(ta) or quantity_offset_tagged(tb): return quantity_offset_product(n, a, b, .slash, expected)
+        if quantity_offset_tagged(ta) or quantity_offset_tagged(tb): return quantity_offset_product(n, a, b, .slash, expected, a_name, b_name)
         keep = if not is_quantity(tb): quantity_tag(ta) else: 0
         quantity_retag(a, 0)
         quantity_retag(b, 0)
         t = quantity_arithmetic_plain(n, name, a, b, expected)
         if not is_quantity(t): return t
         return quantity_retag(n, keep)
+    if quantity_point(ta) and not quantity_is_unit(a, a_name): quantity_point_scaled(nodes[n].pos, a, ta)
     reading = quantity_delta_reading(a)
     quantity_retag(b, 0)
     quantity_arithmetic_plain(n, name, reading, b, expected)
 
+quantity_unary_literal = false  # the operand of the unary being checked is written as a literal
+
 quantity_unary = (n: int, expected: int) -> int:
+    literal = quantity_unary_literal
+    quantity_unary_literal = false
     a = int(nodes[n].a)
     t = ntype(a)
     tag = quantity_tag(t)
@@ -770,7 +865,8 @@ quantity_unary = (n: int, expected: int) -> int:
     q = quantity_tags[tag]
     op = nodes[n].op as Tok
     if op == .minus and not q.delta and q.origin != 0:
-        # (negating a reading: -(20°C) is -20°C)
+        # (negating a reading: -(20°C) is -20°C; a point's value is not negated)
+        if not literal and quantity_point(t): quantity_point_scaled(nodes[n].pos, a, t)
         u = quantity_units[q.origin]
         pos = nodes[n].pos
         quantity_retag(a, 0)
