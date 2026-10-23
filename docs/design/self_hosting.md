@@ -102,8 +102,17 @@ Python oracle in default and release builds. Compiler output stayed byte-identic
 (734 builds: examples and ladder, native, `--release`, `-g`, wasm32, aarch64-mac,
 x86_64-windows).
 
+`line_table.dewy` (each file's line starts and the last line found: `line_col`) is
+the first stateful leaf. A leaf owns its state type (`LineTable`) and takes it by place
+(`@t`); Jo keeps the one global (`src_lines: LineTable` in util.jo) and passes it in.
+The type has no defaults, so the zero value is the empty table and the Jo global runs no
+initializer in module order. Its word-at-a-time newline scan matches Jo's instruction
+count (`speed`: flagship panel within 0.01%).
+
 Gaps met on the way, and since closed: `loop {` ending its line now loops until it
 exits; a conversion ending a loop header converts the last source; `bytes as string ?? ""`
 converts to `string | none` and falls back; `fill(v n)` is documented; Jo takes a Dewy
-string-literal union as its enum. Still open: a leaf cannot read the compiler's state, so
-the stateful halves of `line_col` and `hash_bytes` stay in Jo.
+string-literal union as its enum. Still open: the intern table (`hash_bytes`) as a leaf
+costs +0.5–0.8% on the panel (lex+parse +2%): a new name needs a byte-range substring
+Dewy lacks (copy loop, UTF-8 check, conversion: ~600 instructions against Jo's ~250), and
+Jo retains a string passed beside a `mut` place (~20 instructions a call).
