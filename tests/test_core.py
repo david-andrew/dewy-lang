@@ -5684,19 +5684,10 @@ def test_core_integer_parse_boundaries(compiler, tmp_path, target, release):
         texts.append(token)
         texts.append(' \t' + token + '\r\n')
     def expected(text):
-        token = text.strip(' \t\r\n')
-        negative = token.startswith('-')
-        if token[:1] in ('+', '-'):
-            token = token[1:]
-        base = 16 if token[:2].lower() == '0x' else 10
-        if base == 16:
-            token = token[2:]
-        token = token.replace('_', '')
-        pattern = '[0-9a-fA-F]+' if base == 16 else '[0-9]+'
-        if not re.fullmatch(pattern, token):
+        # (strict: an optional sign, then ASCII decimal digits; nothing else)
+        if not re.fullmatch(r'[+-]?[0-9]+', text, re.ASCII):
             return None
-        value = int(token, base) * (-1 if negative else 1)
-        return value
+        return int(text)
     answers = [expected(text) for text in texts]
     literals = ' '.join(json.dumps(text, ensure_ascii=False) for text in texts)
     results = ' '.join('none' if value is None else str(value) for value in answers)

@@ -701,7 +701,8 @@ go to an `@` parameter instead. `@` of a function value is still its handle.
 A function gives back a value: `return @a` is an error.
 
 Lengths retain their current `int64` type. An `int` index uses the ordinary bounds
-checks. `to_int(text)` returns `int | none`, parsing integers of arbitrary size.
+checks. `to_int(text)` returns `int | none`, parsing integers of arbitrary size: an
+optional sign, then decimal digits (spaces, `_` and `0x` give `none`).
 `from_text<int>` and integer fields in parsed records and containers preserve
 the same arbitrary precision. Printing, interpolation and
 `string(value)` format `int` as decimal. Mathematical integers are not yet

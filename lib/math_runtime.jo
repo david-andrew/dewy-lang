@@ -118,39 +118,29 @@ __mi_parse = (s: str) -> __dewy_int?:
             return (value << 1) as __dewy_int
     __mi_parse_slow(s)
 
+# Dewy's to_int: an optional sign, then decimal digits; nothing else (no spaces, `_` or 0x).
 __mi_parse_slow = (s: str) -> __dewy_int?:
-    if let word = to_int(s): return word
-    text = trim(s)
-    p = data(text)
-    n = len(text)
-    if n == 0: return none
+    p = data(s)
+    n = len(s)
     i = 0
     negative = false
-    if p[i] == '-' or p[i] == '+':
-        negative = p[i] == '-'
-        i += 1
+    if n > 0 and (p[0] == '-' or p[0] == '+'):
+        negative = p[0] == '-'
+        i = 1
     if i >= n: return none
-    base = 10
-    if i + 1 < n and p[i] == '0' and (p[i + 1] == 'x' or p[i + 1] == 'X'):
-        base = 16
-        i += 2
+    loop k in [i..n):
+        if u64(int(p[k]) - 48) > 9: return none
+    # (up to 18 digits took __mi_parse's word path; longer: 18 digits at a time)
     value = __bi.bigint(0)
-    radix = __bi.bigint(base)
-    any = false
     loop i < n:
-        c = p[i]
-        digit = -1
-        if c >= '0' and c <= '9': digit = int(c) - 48
-        else if c >= 'a' and c <= 'f': digit = int(c) - 87
-        else if c >= 'A' and c <= 'F': digit = int(c) - 55
-        else if c == '_':
-            i += 1
-            continue
-        if digit < 0 or digit >= base: return none
-        value = __bi.__add__(__bi.__mul__(value, radix), __bi.bigint(digit))
-        any = true
-        i += 1
-    if not any: return none
+        e = min(i + 18, n)
+        chunk = 0
+        scale = 1
+        loop k in [i..e):
+            chunk = chunk * 10 + int(p[k]) - 48
+            scale *= 10
+        value = __bi.__add__(__bi.__mul__(value, __bi.bigint(scale)), __bi.bigint(chunk))
+        i = e
     if negative: value = __bi.__unary_sub__(value)
     result: __dewy_int = __mi_pack(value)
     result
