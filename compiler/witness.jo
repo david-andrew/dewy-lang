@@ -448,6 +448,27 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
     if dir_defer(n, "cannot prove {read} is in bounds: missing {which}", true): return
     wit_fail(nodes[n].pos, "cannot prove {read} is in bounds: missing {which}")
 
+# A builtin operation's precondition `a op b` (`xs.length >? 0` for pop, a
+# truncate count `>=? 0`), refuted (c = 0) or unknown: one lower bound.
+wit_operation = (n: int, s: mut FactState, op: Tok, a: WitSide, b: WitSide, c: int, refuted: str, what: str):
+    relation = wit_relation_text(op, a, b)
+    if c == 0:
+        wit_relation(s, s, op, a, b, true)
+        wit_context(0)
+        wit_help(relation)
+        if dir_defer(n, refuted, true): return
+        wit_fail(nodes[n].pos, refuted)
+        return
+    bound = fact_bound(s, a.value)
+    if bound.reason == .unsupported or bound.reason == .wrap or bound.reason == .budget or bound.reason == .callee:
+        wit_unknown(n, bound, what, 0, relation)
+        return
+    wit_relation(s, s, op, a, b, false, "lower bound")
+    wit_context(0)
+    wit_help(relation)
+    if dir_defer(n, "cannot prove {what}: missing lower bound", true): return
+    wit_fail(nodes[n].pos, "cannot prove {what}: missing lower bound")
+
 # A builtin slice `xs[lo..hi)`: 0 <=? lo <=? hi <=? xs.length, where an
 # omitted bound is 0 or the length and an inclusive end counts one more.
 wit_slice = (n: int, s: mut FactState, lo: int, hi: int, length: int, checks: int[]):

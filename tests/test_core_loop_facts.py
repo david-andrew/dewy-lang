@@ -119,7 +119,7 @@ CALLBACK = '''sum=(@xs:array<int64> step:<(@ys:array<int64>):>void>):>int64=>{
     loop i in 0.. and x in xs { step(@xs); t=t+xs[i] }
     return t
 }
-main=()=>{ let a:array<int64>=[1 2 3]; printl(sum(@a (@ys:array<int64>)=>{ys.pop()})) }
+main=()=>{ let a:array<int64>=[1 2 3]; printl(sum(@a (@ys:array<int64>)=>{if ys.length >? 0 {ys.pop()}})) }
 '''
 COMBINED_CALLBACK = '''first=(@xs:array<int64> ys:array<int64> step:<(@zs:array<int64>):>void>):>int64=>{
     if xs.length <? 1 return 0
