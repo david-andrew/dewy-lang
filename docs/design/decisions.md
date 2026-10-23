@@ -386,3 +386,16 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   escapes (openat2 RESOLVE_BENEATH or equivalent); the same untrusted brand can
   guard process spawning, SQL and HTML sinks. This is the first user of the
   untrusted-input brand in safety_and_concurrency.md, built generally.
+- Path validator name (decided 2026-10-23): `root.confine(p)` returns
+  `SafePath | PathEscape`; `root.contains(p)` is the bool guard narrowing `p` to
+  `SafePath`. The name `contain` is gone.
+- Deadlock freedom (adopted direction, 2026-10-23; full text in
+  [safety_and_concurrency.md](safety_and_concurrency.md#deadlock-freedom-adopted-direction-2026-10-23)):
+  inferred lock order with no user-written ranks; compile errors only for
+  demonstrated deadlocks, warnings for undecided cases; a multi-lock in canonical
+  order (`DuplicateLock` on a repeated handle; spelling pending); `try_lock`
+  returns a place or `Busy`; `$no_deadlocks` requires a compositional certificate
+  for every wait, under stated assumptions (fair scheduler, terminating local
+  computation, cooperating peers). Monitored `Deadlock` scopes and STM come later,
+  only when needed. Timeouts are recovery, not proofs. Juxtaposition
+  multiplication remains on hold.

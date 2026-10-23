@@ -289,3 +289,68 @@ Each stage is measured on named kernels. Core scaling needs a dedicated machine,
 6. **Expert placement and the `no blocks` hot-path proof.**
    - Kernel: a pinned tick-to-trade pipeline (feed → SPSC → strategy → SPSC → order), p50/p99.9 against C++.
 7. **wasm stackless lowering; deadlock and lock-order diagnostics.**
+
+## Deadlock freedom (adopted direction, 2026-10-23)
+
+Scheduled after the current concurrency stages (task groups, `Canceled`,
+channels). It came from a brainstorm with Astra and Sol, reviewed by David.
+
+**Default, with zero annotations.** The compiler infers lock identities,
+held-lock sets and acquisition order across the program, and derives a partial
+order internally. The analysis is demand-driven, indexed, and within the
+per-node budget. There are no user-written ranks. Hidden calls count: hashing,
+equality, formatting, copy and drop hooks, and cleanup can all acquire locks.
+
+Compile errors are reserved for demonstrated problems:
+- a lock-order cycle. The error names both paths, with a fix-it to acquire the
+  locks together;
+- self-deadlock or re-acquisition, including through callbacks or copied
+  handles;
+- holding a lock across a join or wait that needs it;
+- a `parallel` iteration waiting on a sibling, including atomic polling.
+
+Undecided cases are warnings in ordinary code.
+
+**Multi-lock.** One operation acquires any set of locks, including a dynamic
+set, in one canonical order, and releases everything on failure or
+cancellation. Holding the same handle twice is `DuplicateLock`; it never yields
+two places into one payload. The spelling is pending.
+
+**`try_lock`** returns a place or `Busy`.
+
+**`$no_deadlocks`.** In an opted-in module, every wait needs a compositional
+certificate. Waits include locks, channels, joins, event waits and cleanup.
+A certificate is one of:
+- a checked lock order;
+- structured joins with checked dependencies;
+- a certified channel protocol from the library (request/reply, pipelines with
+  feedback).
+
+Unproven waits are errors. Opaque FFI blocking needs an audited adapter.
+
+The theorem: a `$no_deadlocks` module cannot reach a state where a set of its
+tasks waits forever on one another. Its assumptions are stated explicitly:
+- the scheduler is fair;
+- local computation terminates;
+- external peers cooperate (a remote party that never replies is outside the
+  guarantee).
+
+**Later, only when real code needs it:**
+- monitored scopes that return `Deadlock`, an error value, never a forced
+  unlock or a crash;
+- software transactional memory (`atomically`).
+
+Their spellings go to David then.
+
+**Timeouts are recovery, not proofs.**
+
+**Acceptance (from Sol):**
+- the grant-versus-cancel race;
+- cancellation during cleanup;
+- callbacks taken under a lock;
+- bounded-channel cycles;
+- account transfers;
+- recursive services.
+
+Measure the false-rejection rate on the corpus and the compile cost on the
+flagship panel.
