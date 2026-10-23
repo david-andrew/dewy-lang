@@ -22,6 +22,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -244,7 +245,7 @@ def test(binary: Path, arguments: list[str], quick: bool) -> int:
     # A shared compiler/library error otherwise repeats the same failed
     # build across the gate. A later --maxfail=0 requests every failure.
     command = [str(python), '-m', 'pytest', '-q', '-o', 'addopts=', '--maxfail=1',
-               f"--basetemp={scratch.activate() / 'pytest'}",
+               f"--basetemp={tempfile.mkdtemp(prefix='pytest-', dir=scratch.activate())}",
                *test_runner_options(python, arguments), *TESTS, *arguments]
     status = subprocess.call(command, cwd=ROOT, env=env)
     if status == 5 and selected:
