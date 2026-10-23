@@ -330,3 +330,22 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
     insertion order. `min`/`max` follow IEEE 754-2019 minimum/maximum (NaN
     propagates); float sorting uses totalOrder; float dictionary keys carry a
     not-NaN obligation. `main`'s `exit_code` is constrained to 1–100.
+- Path guard (decided 2026-10-23; amends contained paths): `root.contains(p)`
+  returns `bool` and works as a guard; the solver narrows `p` to `SafePath` in
+  the true branch (`if root.contains(f) { serve_file(f) }`), as
+  `if i <? xs.length` proves an index. `root.contain(p)` stays the expression
+  form returning `SafePath | PathEscape` for `or_throw`.
+- Multi-expressions (decided 2026-10-23; restores the reference): an expression
+  may produce one value, several values for a surrounding collector, `void`, or
+  `never`. A block evaluates its expressions in source order and expresses each
+  non-`void` result; a context requiring one value rejects a block that can
+  produce an incompatible number of values. This holds in every construct
+  (blocks, function bodies, `if`/`match`/`loop` arms, loop capture, collectors),
+  so `pair=()=>{ 1 2 }; [pair()]` is `[1 2]`. Full semantics in
+  [multi_expressions.md](multi_expressions.md).
+- Refinements prefer partial operators (decided 2026-10-23): where a refinement
+  is a single comparison or test against the value, the idiomatic spelling is
+  the reference's partial operator (`b:int64<(>=? a)>`), not a lambda
+  (`b:int64<v => a <=? v>`); docs, examples, diagnostics and fix-its use it.
+- The current compiler's implementation language is Sloppy (`.jo` is its file
+  extension); docs and diagnostics name it accurately, never "Jo".
