@@ -2,10 +2,14 @@
 # Each call selects varying data; the complete loop contributes to the result.
 from p"harness.dewy" import size_argument, clock
 Row:type=[weights:array<int64> bias:int64]
-weight=(values:array<int64> at:int64):>int64=>values[at]
+weight=(values:array<int64> at:int64):>int64=>{
+    $runtime_checks
+    return values[at]
+}
 score=(row:Row at:int64):>int64=>row.weights.weight(at)+row.bias
 kernel=(rows:array<Row> count:int64):>int64=>{
     let total:int64=0
+    if rows.length <? 128 return 0
     loop i in [0..count) {total+=rows[i%128].score(i%4)}
     return total
 }

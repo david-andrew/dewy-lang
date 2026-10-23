@@ -23,6 +23,7 @@ generate=():>array<Pair>=>{
 
 kernel=(pairs:array<Pair> count:int64):>int64=>{
     let result=0
+    if pairs.length <? 128 return 0
     loop i in [0..count) {
         let index=i%128
         result+=if pairs[index].left=?pairs[index].right i else -i

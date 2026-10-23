@@ -48,6 +48,7 @@ hash_bytes = (p:ptr<uint8> n:int64):>int64 => {
 # the id of text[start..start + n), made if it is new
 intern = (@t:NameTable text:array<uint8> bytes:ptr<uint8> start:int64 n:int64):>int64 => {
     $unsafe
+    $runtime_checks
     let h=hash_bytes(bytes + start n)
     let mask=t.slots.length-1
     let at=h & mask

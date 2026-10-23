@@ -9,7 +9,9 @@ step=(a:array<float64> @out:array<float64> first:int64 n:int64 threaded:bool):>v
         } else {
             out[0]=a[first]
             out[n-1]=a[first+n-1]
-            loop j in [1..n-1) {let p=first+j out[j]=(a[p-n]+a[p+n]+a[p-1]+a[p+1])*0.25}
+            let above=first-n let below=first+n
+            $runtime_assert 0 <=? above and above+n <=? a.length and below+n <=? a.length
+            loop j in [1..n-1) {let p=first+j out[j]=(a[above+j]+a[below+j]+a[p-1]+a[p+1])*0.25}
         }
         return
     }

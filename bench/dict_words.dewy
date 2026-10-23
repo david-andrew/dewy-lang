@@ -9,6 +9,7 @@ kernel = (words:array<string> count:int64):>int64 => {
     let ids:dict<int64 int64>=[]
     let seed:int64=4242
     let hits:int64=0
+    if words.length <? VOCAB return 0
     loop i in [0..count) {
         seed=(seed*1103515245+12345)%2147483648
         let index=(seed//32768)%VOCAB

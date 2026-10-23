@@ -5,6 +5,7 @@ let left:array<int64>=[]
 let right:array<int64>=[]
 kernel=(rounds:int64):>int64=>{
     let total:int64=0
+    $runtime_checks
     let shift=rounds%2+1
     loop r in [0..rounds) {
         loop i in [0..1024) {total+=(left[i+shift]+right[i+shift]) xor r}
