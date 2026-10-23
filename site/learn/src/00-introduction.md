@@ -1,6 +1,6 @@
 # Welcome to Dewy
 
-Dewy aims for Python-like ease, C-like speed, and safety by default. The compiler is experimental; begin with small, checked programs.
+Dewy aims for Python-like ease, C-like speed, and safety by default. Begin with small programs; every example in this book is compiled and run with the current compiler.
 
 <!-- dewy-example: {"mode": "run", "stdout": "Hello, Dewy!\n"} -->
 ```dewy

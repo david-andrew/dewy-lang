@@ -1,6 +1,6 @@
 # Types and Numbers
 
-Use explicit widths when a program needs machine integer arithmetic. Type annotations follow a colon.
+`int` is the arbitrary-precision integer; explicit widths such as `int64` fix how a value is stored. Type annotations follow a colon.
 
 <!-- dewy-example: {"mode": "run", "stdout": "42 true\n"} -->
 ```dewy
