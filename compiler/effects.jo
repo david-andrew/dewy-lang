@@ -108,7 +108,7 @@ effect_for_marks: {int: int[]} = {}
 # locals grew; a query is then O(its sites).
 effect_ix_nodes = 0
 effect_ix_locals = 0
-effect_ix_heads: {int: int}[] = [{}, {}, {}]
+effect_ix_heads: int[][] = [[], [], []]
 effect_ix_next: int[][] = [[], [], []]
 # effect_plain answers by representation type, for top-level queries.
 effect_plain_cache: {int: bool} = {}
@@ -521,32 +521,27 @@ effect_index_build = ():
     if effect_ix_nodes == nodes.len() and effect_ix_locals == locals.len(): return
     effect_ix_nodes = nodes.len()
     effect_ix_locals = locals.len()
-    writes: {int: int} = {}
-    scalar: {int: int} = {}
-    uses: {int: int} = {}
-    writes_next = fill(0, nodes.len())
-    scalar_next = fill(0, nodes.len())
-    uses_next = fill(0, nodes.len())
+    # (heads indexed by key, a local or a function: keys are dense IDs, so
+    # arrays replace hashing; a key beyond them grows its array)
+    heads = [fill(0, locals.len() + 1), fill(0, locals.len() + 1), fill(0, fns.len() + 1)]
+    next = [fill(0, nodes.len()), fill(0, nodes.len()), fill(0, nodes.len())]
     q = nodes.len() - 1
     loop q >= 1:
         k = nodes[q].kind
         if k == .vardecl or k == .assign:
-            w = effect_site_key(0, q)
-            if w != 0:
-                writes_next[q] = writes.get(w) ?? 0
-                writes[w] = q
-            c = effect_site_key(1, q)
-            if c != 0:
-                scalar_next[q] = scalar.get(c) ?? 0
-                scalar[c] = q
+            effect_index_link(heads, next, 0, effect_site_key(0, q), q)
+            effect_index_link(heads, next, 1, effect_site_key(1, q), q)
         else if k == .call or k == .fnref:
-            u = effect_site_key(2, q)
-            if u != 0:
-                uses_next[q] = uses.get(u) ?? 0
-                uses[u] = q
+            effect_index_link(heads, next, 2, effect_site_key(2, q), q)
         q -= 1
-    effect_ix_heads = [writes, scalar, uses]
-    effect_ix_next = [writes_next, scalar_next, uses_next]
+    effect_ix_heads = heads
+    effect_ix_next = next
+
+effect_index_link = (heads: mut int[][], next: mut int[][], kind: int, key: int, q: int):
+    if key <= 0: return
+    if key >= heads[kind].len(): heads[kind] += fill(0, key + 1 - heads[kind].len())
+    next[kind][q] = heads[kind][key]
+    heads[kind][key] = q
 
 # Candidate nodes in ascending order; callers still test each one in full.
 # While checking is open, nodes change in place: scan them all.
@@ -566,7 +561,7 @@ effect_sites = (kind: int, key: int) -> int[]:
             if (k == .vardecl or k == .assign) and effect_site_key(kind, q) == key: out.push(q)
         return out
     effect_index_build()
-    q = effect_ix_heads[kind].get(key) ?? 0
+    q = if key < effect_ix_heads[kind].len(): effect_ix_heads[kind][key] else: 0
     loop q != 0:
         out.push(q)
         q = effect_ix_next[kind][q]

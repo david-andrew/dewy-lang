@@ -102,7 +102,9 @@ struct FactSliceEdges:
     nodes: int[]
     next: int[]
 
-# A slice's nodes in one open-address index: node -> FACT_MEMBER | FACT_VALUE | FACT_ACTIVE.
+# A slice's nodes, node -> FACT_MEMBER | FACT_VALUE | FACT_ACTIVE: a dense
+# array from node `base` when its nodes lie close together (a body's usually
+# do), else an open-address index (base -1).
 const FACT_MEMBER = 1
 const FACT_VALUE = 2
 const FACT_ACTIVE = 4
@@ -110,8 +112,13 @@ struct FactSlice:
     flags: int[]
     # (a probe also reads floor calls the facts pass's slice leaves out)
     probe_only: bool = false
+    base: int = -1
 
-fact_slice_flags = (n: int) -> int: max(0, fact_index_get(fact_slice.flags, n))
+fact_slice_flags = (n: int) -> int:
+    if fact_slice.base < 0: return max(0, fact_index_get(fact_slice.flags, n))
+    i = n - fact_slice.base
+    if i < 0 or i >= fact_slice.flags.len(): return 0
+    fact_slice.flags[i]
 
 fact_slice = FactSlice()
 fact_slice_cache: {int: FactSlice} = {}
@@ -360,19 +367,67 @@ fact_difference_touch = (s: mut FactState, v: int) -> int:
     s.index[0].difference_record[r * FACT_RECORD] += 1
     r
 
+# A state's rows are indexed only once there are FACT_ROW_SCAN of them.
+# Fewer rows (nearly every state) are scanned in order instead: the same rows
+# in the same order as the index's chains give, with no index to build when a
+# join or a loop header assembles a state, or to copy when a branch changes
+# one. A scan is O(rows), as the distance budget already charges a source.
+const FACT_ROW_SCAN = 32
+
+fact_rows_indexed = (s: FactState) -> bool: s.index[0].difference_next.len() != 0
+
+# The row a - b <= limit's position, or -1.
+fact_row_find = (s: FactState, a: int, b: int) -> int:
+    if fact_rows_indexed(s): return fact_index_get(s.index[0].difference_index, fact_pair_key(a, b))
+    i = s.differences.len() - 1
+    loop i >= 0:
+        if s.differences[i].a == a and s.differences[i].b == b: return i
+        i -= 1
+    -1
+
 # Rows touching v, or -1 when none does.
 fact_incident = (s: FactState, v: int) -> int:
+    if not fact_rows_indexed(s):
+        count = 0
+        loop row in s.differences: count += int(row.a == v) + int(row.b == v)
+        return if count == 0: -1 else: count
     r = fact_index_get(s.index[0].difference_value, v)
     if r < 0: return -1
     s.index[0].difference_record[r * FACT_RECORD]
 
 # The first row from v (direction 0: rows by b; 1: rows by a), or -1.
 fact_difference_head = (s: FactState, v: int, direction: int) -> int:
+    if not fact_rows_indexed(s): return fact_row_scan(s, v, direction, 0)
     r = fact_index_get(s.index[0].difference_value, v)
     if r < 0: return -1
     s.index[0].difference_record[r * FACT_RECORD + 1 + direction * 2]
 
+# The row after ri from the same value in the same direction, or -1.
+fact_difference_next = (s: FactState, ri: int, direction: int) -> int:
+    if fact_rows_indexed(s): return s.index[0].difference_next[ri * 2 + direction]
+    row = s.differences[ri]
+    v = row.a
+    if direction == 0: v = row.b
+    fact_row_scan(s, v, direction, ri + 1)
+
+fact_row_scan = (s: FactState, v: int, direction: int, from: int) -> int:
+    loop i in [from..s.differences.len()):
+        row = s.differences[i]
+        if direction == 0 and row.b == v or direction == 1 and row.a == v: return i
+    -1
+
 fact_add_difference = (s: mut FactState, row: FactDifference):
+    if not fact_rows_indexed(s):
+        if s.differences.len() + 1 < FACT_ROW_SCAN:
+            s.differences.push(row)
+            return
+        # (outgrown: index every row so far, then this one)
+        rows = s.differences
+        s.differences = []
+        loop r in rows: fact_index_difference(s, r)
+    fact_index_difference(s, row)
+
+fact_index_difference = (s: mut FactState, row: FactDifference):
     i = s.differences.len()
     fact_index_put(s.index[0].difference_index, fact_pair_key(row.a, row.b), i)
     ra = fact_difference_touch(s, row.a)
@@ -517,7 +572,7 @@ fact_collect = (s: mut FactState, boundary: int, result: int):
             ri = fact_difference_head(s, v, direction)
             loop ri >= 0:
                 row = s.differences[ri]
-                ri = s.index[0].difference_next[ri * 2 + direction]
+                ri = fact_difference_next(s, ri, direction)
                 work.push(if direction == 0: row.a else: row.b)
                 depth.push(0)
     total = 0
@@ -746,6 +801,7 @@ struct FactProbeRun:
     proven: {int: bool}
     refine: bool
     slice: int[]
+    slice_base: int
     callees: int[]
     footprints: FactFootprint[]
 fact_probe_runs: {int: FactProbeRun} = {}
@@ -777,7 +833,7 @@ fact_probe_note = (f: int):
 fact_probe_reusable = (f: int, run: FactProbeRun) -> bool:
     if fact_policy != .RequireStatic or proof_active or result_active or wit_collect and not wit_measure or run.refine != (refine_active or refine_requests.len() > 0): return false
     fact_slice_prepare(f)
-    if fact_slice.flags.len() != run.slice.len(): return false
+    if fact_slice.base != run.slice_base or fact_slice.flags.len() != run.slice.len(): return false
     loop i in [0..run.slice.len()):
         if fact_slice.flags[i] != run.slice[i]: return false
     loop i in [0..run.callees.len()):
@@ -835,7 +891,7 @@ fact_probe_function = (f: int, disjoint: bool = false) -> {int: bool}:
         all = true
         loop _, ok in fact_probe:
             if not ok: all = false
-        if all: fact_probe_runs[f] = FactProbeRun(fact_probe, refine, fact_slice.flags, fact_probe_callees, fact_probe_footprints)
+        if all: fact_probe_runs[f] = FactProbeRun(fact_probe, refine, fact_slice.flags, fact_slice.base, fact_probe_callees, fact_probe_footprints)
     fact_probe_callees = []
     fact_probe_footprints = []
     fact_slice = FactSlice()
@@ -1066,7 +1122,7 @@ fact_truth = (s: FactState, v: int) -> int:
 
 fact_difference = (s: mut FactState, a: int, b: int, limit: int, at: int = 0):
     if a == 0 or b == 0 or a == b: return
-    i = fact_index_get(s.index[0].difference_index, fact_pair_key(a, b))
+    i = fact_row_find(s, a, b)
     if i >= 0:
         if limit < s.differences[i].limit: s.differences[i] = FactDifference(a, b, limit, at)
         return
@@ -1078,7 +1134,7 @@ fact_difference = (s: mut FactState, a: int, b: int, limit: int, at: int = 0):
 fact_distance = (s: FactState, a: int, b: int, limit: int) -> bool:
     if a == 0 or b == 0: return false
     if a == b: return limit >= 0
-    direct = fact_index_get(s.index[0].difference_index, fact_pair_key(a, b))
+    direct = fact_row_find(s, a, b)
     if direct >= 0 and s.differences[direct].limit <= limit: return true
     # (no row leaves b: the relaxation below would find nothing)
     if fact_difference_head(s, b, 0) < 0: return false
@@ -1099,7 +1155,7 @@ fact_distance = (s: FactState, a: int, b: int, limit: int) -> bool:
             # Charge the original ordered scan's budget, including skipped rows.
             visits += ri - previous
             previous = ri
-            ri = s.index[0].difference_next[ri * 2]
+            ri = fact_difference_next(s, ri, 0)
             if visits > 256: return false
             if not fact_add_fits(distance, row.limit): continue
             value = distance + row.limit
@@ -1440,18 +1496,26 @@ fact_join = (a: FactState, b: FactState, at: int) -> FactState:
             fact_index_put(left_right, left[i], right[i]); fact_index_put(right_left, right[i], left[i])
     # Select rows from either predecessor, rename into the merge frame, and
     # require a proof from the other. Branch-local evaluations never escape.
+    # (a row its renaming leaves as it is was just offered as it is: when
+    # that offer held, the renamed one is the same call again, skipped. A
+    # renamed endpoint equal to the original renames to it on the other side
+    # too, or to nothing)
     loop row in a.differences:
-        if fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(b, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
+        kept = fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(b, row.a, row.b, row.limit)
+        if kept: fact_difference(s, row.a, row.b, row.limit, row.at)
         aa = fact_rename(row.a, left, merged, left_merge, s)
         bb = fact_rename(row.b, left, merged, left_merge, s)
+        if kept and aa == row.a and bb == row.b: continue
         ra = fact_rename(row.a, left, right, left_right, b)
         rb = fact_rename(row.b, left, right, left_right, b)
         if aa != 0 and bb != 0 and fact_distance(b, ra, rb, row.limit): fact_difference(s, aa, bb, row.limit, row.at)
     # (a tighter row on one side can replace the row the other side shares)
     loop row in b.differences:
-        if fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(a, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
+        kept = fact_slot(s, row.a) >= 0 and fact_slot(s, row.b) >= 0 and fact_distance(a, row.a, row.b, row.limit)
+        if kept: fact_difference(s, row.a, row.b, row.limit, row.at)
         aa = fact_rename(row.a, right, merged, right_merge, s)
         bb = fact_rename(row.b, right, merged, right_merge, s)
+        if kept and aa == row.a and bb == row.b: continue
         ra = fact_rename(row.a, right, left, right_left, a)
         rb = fact_rename(row.b, right, left, right_left, a)
         if aa != 0 and bb != 0 and fact_distance(a, ra, rb, row.limit): fact_difference(s, aa, bb, row.limit, row.at)
@@ -1662,7 +1726,7 @@ fact_relational = (s: FactState, v: int, upper: bool) -> int:
             row = s.differences[ri]
             visits += ri - previous
             previous = ri
-            ri = s.index[0].difference_next[ri * 2 + int(upper)]
+            ri = fact_difference_next(s, ri, int(upper))
             if visits > 256: return best
             if not fact_add_fits(distance, row.limit): continue
             other = if upper: row.b else: row.a
@@ -2061,7 +2125,7 @@ fact_loop_stable = (a: FactState, b: FactState) -> bool:
     loop row in a.differences:
         x = renamed.get(row.a) ?? row.a
         y = renamed.get(row.b) ?? row.b
-        i = fact_index_get(b.index[0].difference_index, fact_pair_key(x, y))
+        i = fact_row_find(b, x, y)
         if i < 0 or b.differences[i].limit != row.limit: return false
     true
 
@@ -2393,6 +2457,21 @@ fact_slice_children = (n: int) -> int[]:
         loop i in [0..nkids(n)): out.push(kid(n, i))
     out
 
+# n's children onto out, in fact_slice_children's order (no list per node).
+fact_slice_push_children = (out: mut int[], n: int):
+    mask = isolation_children(nodes[n].kind)
+    if mask < 0: return
+    if mask & 1 != 0: out.push(int(nodes[n].a))
+    if mask & 2 != 0: out.push(int(nodes[n].b))
+    if mask & 4 != 0: out.push(int(nodes[n].c))
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)): out.push(kid(n, i))
+
+fact_slice_member = (parents: mut FactSliceEdges, work: mut int[], c: int, n: int):
+    if c == 0: return
+    fact_slice_parent(parents, c, n)
+    work.push(c)
+
 fact_slice_edge = (edges: mut FactSliceEdges, key: int, node: int):
     edges.next.push(fact_index_get(edges.heads, key))
     fact_index_put(edges.heads, key, edges.nodes.len())
@@ -2476,11 +2555,14 @@ fact_slice_prepare = (f: int, summary: bool = false):
         if n == 0 or fact_mark_of(n) & FACT_MEMBER != 0: continue
         fact_mark_set(n, FACT_MEMBER)
         k = nodes[n].kind
-        children = fact_slice_children(n)
-        loop c in children:
-            if c == 0: continue
-            fact_slice_parent(parents, c, n)
-            work.push(c)
+        # (children visited in place, a, b, c then kids: no list per node)
+        mask = isolation_children(k)
+        if mask > 0:
+            if mask & 1 != 0: fact_slice_member(parents, work, int(nodes[n].a), n)
+            if mask & 2 != 0: fact_slice_member(parents, work, int(nodes[n].b), n)
+            if mask & 4 != 0: fact_slice_member(parents, work, int(nodes[n].c), n)
+            if mask & 16 != 0:
+                loop i in [0..nkids(n)): fact_slice_member(parents, work, kid(n, i), n)
         if k == .vardecl:
             if ownership_decls.len() != 0 and nodes[n].b != 0 and ownership_fact_type(ntype(int(nodes[n].b))): active.push(n)
             l = int(nodes[n].sym)
@@ -2556,7 +2638,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         else if k == .binary:
             if nodes[n].aux != 0: exposed_writes.push(n)
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent))): values.push(n)
-        else if k == .lambda or k == .partial or k == .fnref or k == .map_lit or k == .cast or isolation_children(k) < 0: opaque_writes.push(n)
+        else if k == .lambda or k == .partial or k == .fnref or k == .map_lit or k == .cast or mask < 0: opaque_writes.push(n)
         else if k == .str_lit and nodes[n].aux != 0: exposed_writes.push(n)
     cursor = 0
     acursor = 0
@@ -2619,20 +2701,30 @@ fact_slice_prepare = (f: int, summary: bool = false):
             dependent = false
             loop arg in kids(n):
                 if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)): dependent = true
-            if dependent:
-                loop c in fact_slice_children(n): values.push(c)
+            if dependent: fact_slice_push_children(values, n)
             else if tkind(representation_type(int(fns[int(nodes[n].sym)].ret))) == .array:
                 # (an array result's length may follow an array actual's: fact_summary)
                 loop arg in kids(n):
                     if tkind(representation_type(ntype(arg))) == .array or tkind(representation_type(ntype(arg))) == .fixed: values.push(arg)
         else if k == .intrinsic and (nodes[n].aux == i32(int(IN.push)) or nodes[n].aux == i32(int(IN.pop)) or nodes[n].aux == i32(int(IN.clear)) or nodes[n].aux == i32(int(IN.reserve)) or nodes[n].aux == i32(int(IN.insert)) or nodes[n].aux == i32(int(IN.remove))): values.push(kid(n, 0))
-        else:
-            # (pushed one by one: `+=` copies the whole worklist each time)
-            loop c in fact_slice_children(n): values.push(c)
-    flags = fact_index_sized(fact_mark_touched.len())
+        else: fact_slice_push_children(values, n)
+    lo = nodes.len()
+    hi = -1
+    count = 0
     loop n in fact_mark_touched:
-        if fact_mark_flags[n] != 0: fact_index_put(flags, n, fact_mark_flags[n])
-    fact_slice = FactSlice(flags, probe_only)
+        if fact_mark_flags[n] != 0:
+            lo = min(lo, n); hi = max(hi, n)
+            count += 1
+    if hi >= lo and hi - lo < 4 * count + 64:
+        flags = fill(0, hi - lo + 1)
+        loop n in fact_mark_touched:
+            if fact_mark_flags[n] != 0: flags[n - lo] = fact_mark_flags[n]
+        fact_slice = FactSlice(flags, probe_only, lo)
+    else:
+        flags = fact_index_sized(count)
+        loop n in fact_mark_touched:
+            if fact_mark_flags[n] != 0: fact_index_put(flags, n, fact_mark_flags[n])
+        fact_slice = FactSlice(flags, probe_only)
     fact_slice_cache[key] = fact_slice
 
 # Undemanded values still execute their effectful descendants. Ordinary calls
@@ -2659,7 +2751,13 @@ fact_slice_capture = (n: int, s: mut FactState) -> int:
                 if fact_probe_on: fact_probe_route(s, route, fact_route_values(s, route))
                 else if fact_policy == .RequireStatic or fact_query: fact_route_bounds(s, route, fact_route_values(s, route))
         return 0
-    loop c in fact_slice_children(n): fact_capture(c, s)
+    mask = isolation_children(k)
+    if mask > 0:
+        if mask & 1 != 0: fact_capture(int(nodes[n].a), s)
+        if mask & 2 != 0: fact_capture(int(nodes[n].b), s)
+        if mask & 4 != 0: fact_capture(int(nodes[n].c), s)
+        if mask & 16 != 0:
+            loop i in [0..nkids(n)): fact_capture(kid(n, i), s)
     return 0
 
 fact_bounded_index = (n: int) -> bool:
