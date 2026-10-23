@@ -1639,7 +1639,8 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     if k == .call and nodes[n].aux == 0: fact_call_effects(n, s)
     else if k == .call and nodes[n].aux == 2: s = s
     else if k == .intrinsic and fact_reads_only(nodes[n].aux as IN): s = s
-    else if k == .call or k == .intrinsic or k == .lambda or k == .partial: fact_forget(s, at, reason)
+    # (a closure's creation writes nothing: fact_capture)
+    else if k == .call or k == .intrinsic or k == .lambda and ownership_decls.len() != 0 or k == .partial: fact_forget(s, at, reason)
     mask = isolation_children(k)
     if mask < 0: fact_forget(s, at, reason, true); return
     if mask & 1 != 0: fact_changes(int(nodes[n].a), s, at, reason)
@@ -2627,7 +2628,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
             else if id == .static_assert or id == .runtime_assert or id == .assert or id == .panic or id == .unreachable or id == .lend or id == .loan_length or id == .loan_store: values.push(n)
             else if id != .len and id != .sqrt: opaque_writes.push(n)
         else if k == .index:
-            if not summary and (fact_probe_on or fact_policy == .RequireStatic):
+            if not summary and (fact_probe_on or fact_policy == .RequireStatic) and not has_flag(n, NF_INBOUNDS) and fact_bounded_index(n):
                 active.push(n)
                 values.push(int(nodes[n].b))
                 if types[representation_type(ntype(int(nodes[n].a)))].kind != .fixed: values.push(int(nodes[n].a))
@@ -2638,6 +2639,8 @@ fact_slice_prepare = (f: int, summary: bool = false):
         else if k == .binary:
             if nodes[n].aux != 0: exposed_writes.push(n)
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent))): values.push(n)
+        # (a closure writes only when called: fact_capture)
+        else if k == .lambda and ownership_decls.len() == 0: pass
         else if k == .lambda or k == .partial or k == .fnref or k == .map_lit or k == .cast or mask < 0: opaque_writes.push(n)
         else if k == .str_lit and nodes[n].aux != 0: exposed_writes.push(n)
     cursor = 0
@@ -2956,6 +2959,11 @@ fact_capture = (n: int, s: mut FactState) -> int:
             fact_forget(s, part, .call)
         return fact_new(s, FactBound(reason = .unsupported, witness = n))
     if k == .addr: return fact_capture(int(nodes[n].a), s)
+    # Creating a closure evaluates nothing (defaults are the actuals of its
+    # calls) and writes nothing: its body runs only when called, and every
+    # call that can reach it, indirect or through a callee's summary, forgets
+    # what the body may write. (Ownership may move captures: still opaque.)
+    if k == .lambda and ownership_decls.len() == 0: return 0
     if k == .lambda or k == .fnref or k == .partial:
         fact_capture(int(nodes[n].a), s)
         loop child in kids(n): fact_capture(child, s)
