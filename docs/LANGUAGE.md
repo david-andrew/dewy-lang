@@ -3528,7 +3528,7 @@ p"helpers.dewy"`.
 
 Bare names search beside the importing file, then the bundled library folders;
 a path literal `p"..."` names a file explicitly. Within each folder, a Dewy importer prefers
-`.dewy` and falls back to `.jo`; a Jo importer prefers `.jo`. The importing file
+`.dewy` and falls back to `.jo`; a Sloppy importer prefers `.jo`. The importing file
 itself is skipped, so `physics.dewy` can import the bundled `physics` library.
 Watch mode notices creation/removal of a preferred local module and reloads it.
 Use `import p"@lib/physics.jo" as physics` to select a bundled library explicitly,
@@ -3537,7 +3537,7 @@ active toolchain's library directory and also works with selected imports.
 
 Import cycles containing a Dewy (`.dewy`) module are rejected, with the import
 path through the cycle in the diagnostic. This includes cycles that pass through
-Jo implementation libraries; cycles made entirely of Jo modules remain allowed.
+Sloppy implementation libraries; cycles made entirely of Sloppy modules remain allowed.
 
 `--target` and `$target` use the design's target names. A name has only the
 fields it needs: the processor, then the system.

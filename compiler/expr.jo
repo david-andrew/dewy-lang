@@ -3428,10 +3428,10 @@ collect_in = (table: {int: int}, name: int, out: mut int[]):
             cin_set(d)
         o = int(syms[o].next)
 
-# Library operations Dewy spells differently from the Jo library underneath. For these
+# Library operations Dewy spells differently from the Sloppy library underneath. For these
 # names, the definitions in lib/std/files.jo are Dewy's (`read_bytes` gives a value or a file
-# error) and the others stay the Jo library's; a Dewy program calling a Jo spelling is told
-# Dewy's. (One spelling per operation: the Jo names are not Dewy's.)
+# error) and the others stay the Sloppy library's; a Dewy program calling a Sloppy spelling is told
+# Dewy's. (One spelling per operation: the Sloppy names are not Dewy's.)
 dewy_surface_hints: {int: str}
 dewy_surface_table = () -> {int: str}:
     if dewy_surface_hints.len() == 0:
@@ -3461,8 +3461,8 @@ dewy_surface_table = () -> {int: str}:
             dewy_surface_hints[intern(entry.0)] = entry.1
     dewy_surface_hints
 
-# (for a library declaration of the name: 1 when only Dewy sees it, 2 when only Jo does, 0 both;
-# the Jo library's are those of a path's text, `read_bytes(f: File n)` stays both's)
+# (for a library declaration of the name: 1 when only Dewy sees it, 2 when only Sloppy does, 0 both;
+# the Sloppy library's are those of a path's text, `read_bytes(f: File n)` stays both's)
 # (Dewy's cancelable spellings of these: lib/std/task_input.jo's, and files.jo's read_bytes)
 task_surface_names: {int: bool}
 dewy_surface = (name: int, decl: int) -> int:
@@ -3480,7 +3480,7 @@ dewy_surface = (name: int, decl: int) -> int:
     if t != 0 and nodes[t].kind == .tname and name_of(int(nodes[t].name)) == "str": return 2
     0
 
-# (a Jo library operation that Dewy spells another way whatever its arguments)
+# (a Sloppy library operation that Dewy spells another way whatever its arguments)
 dewy_renamed = (name: int) -> bool: name == intern("sort_by") or name == intern("sorted_by") or name == intern("eprint") or name == intern("zip") or name == intern("enumerate")
 
 # Suggested names as the source at pos spells them: Dewy's own words for the
@@ -3497,10 +3497,10 @@ surface_names = (names: int[], pos: int) -> int[]:
         out.push(if d != "": intern(d) else: nm)
     out
 
-# (does code in Dewy (dewy) or Jo see the library declaration of symbol o? see dewy_surface)
+# (does code in Dewy (dewy) or Sloppy see the library declaration of symbol o? see dewy_surface)
 surface_sees = (o: int, dewy: bool) -> bool: syms[o].surface == 0 or (syms[o].surface == 1) == dewy
 
-# (is the code being checked Dewy's? the library's own code is Jo)
+# (is the code being checked Dewy's? the library's own code is Sloppy)
 caller_dewy = () -> bool:
     m = cur_mod()
     m >= 0 and files[int(modules[m].file)].is_dewy
@@ -3508,7 +3508,7 @@ caller_dewy = () -> bool:
 # (declarations collect_in left out for the caller's language, since the last call_by_name)
 surface_hidden: int[]
 
-# A Dewy call that only a Jo spelling would take: Dewy's spelling instead.
+# A Dewy call that only a Sloppy spelling would take: Dewy's spelling instead.
 dewy_surface_check = (n: int, name: int, decls: int[], args: int[]):
     if surface_hidden.len() == 0 or not caller_dewy(): return
     hint = dewy_surface_table().get(name) ?? ""
@@ -3567,7 +3567,7 @@ collect_fns = (name: int, out: mut int[]):
     demand_name(name)
     m = cur_mod()
     collect_module(m, name, out)
-    # (in a Dewy module, the Dewy prelude's family of the name replaces the Jo prelude's)
+    # (in a Dewy module, the Dewy prelude's family of the name replaces the Sloppy prelude's)
     if m >= 0 and not modules[m].is_prelude and files[int(modules[m].file)].is_dewy and not is_private(name):
         dm = dewy_prelude_module(name)
         if dm >= 0 and syms[modules[dm].names.get(name) ?? 0].kind == .fns:
@@ -3934,8 +3934,8 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                     et = get_struct_inst(ed, [])
                     if simple_enum(et): return enum_from_int(n, et, args[0])
                 fatal(nodes[n].pos, "use {name_of(name)}.variant(...) to construct an enum")
-            # (Phase(2) in Jo, Phase a Dewy union of string literals: its member at that
-            # position, as for a Jo enum, so Jo code takes a Dewy enumeration as its own)
+            # (Phase(2) in Sloppy, Phase a Dewy union of string literals: its member at that
+            # position, as for a Sloppy enum, so Sloppy code takes a Dewy enumeration as its own)
             else if sk == .alias_ and not dewy_at(nodes[n].pos) and nkids2(int(syms[s].ref)) == 0 and args.len() == 1 and nodes[args[0]].kind != .namedarg and str_set_of(resolve_alias(int(syms[s].ref), [], nodes[n].pos)) != 0:
                 return enum_from_int(n, prune(resolve_alias(int(syms[s].ref), [], nodes[n].pos)), args[0])
             else if sk == .type_:
@@ -5112,7 +5112,7 @@ id_at = 0
 # The library's names for Dewy's members: `xs.pop(i)` removes by position,
 # `xs.insert(value i)` names the value first, `text.startswith(p)`. The
 # library's own spellings are not Dewy's.
-# (Dewy's length is `.length`: the Jo library's `len` of an array, string, dictionary or set,
+# (Dewy's length is `.length`: the Sloppy library's `len` of an array, string, dictionary or set,
 # written in a Dewy program, is told so)
 dewy_len_check = (n: int, member: bool, t0: int, object: int):
     if not dewy_at(nodes[n].pos): return
@@ -8143,7 +8143,7 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
     et = callable_base(expected)
     if expected == 0: et = 0
     # Only inferred Dewy handles prefer a concrete program declaration.
-    # Keep Jo implementation-library values and contextual overload matching
+    # Keep Sloppy implementation-library values and contextual overload matching
     # on their existing resolution path.
     if explicit_types.len() == 0 and files[pos_file(nodes[n].pos)].is_dewy and (et == 0 or (types[et].kind != .fn_ and types[et].kind != .cfn)):
         own: int[]

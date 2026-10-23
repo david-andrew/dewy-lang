@@ -100,7 +100,7 @@ replace every historical coefficient and m with that entry's counters, then appl
 measured replacement unit costs and the I/L formula. Re-rank cuts on the refreshed
 profile; ceilings never authorize regressions where current costs are lower.
 A ≥3% saving alone does not establish convergence. Scan hello's
-runtime closure first. The old 4.9 instructions/byte C index (13.3 in Jo) costs
+runtime closure first. The old 4.9 instructions/byte C index (13.3 in Sloppy) costs
 7.7–21M/build: it is **not** the near-free solution. The old root-only allowance
 failures motivate the diet, but are not failures against the newly decided metric.
 
@@ -315,7 +315,7 @@ default/release and 1/2/4-worker determinism; no per-entry instruction regressio
 beyond noise. Final acceptance includes quiet pinned/CI throughput and hello latency.
 Failed optional pilots end their idea family; decided capabilities require diagnosed
 redesign, not weaker semantics. B3 uses Dewy import-cycle leaves with seed-compatible
-Jo twins and exact/transitive `FROZEN_TWINS`, per [self_hosting](self_hosting.md).
+frozen `.jo` twins and exact/transitive `FROZEN_TWINS`, per [self_hosting](self_hosting.md).
 
 ## Audit response
 

@@ -1,4 +1,4 @@
-"""Completion offers only the names a file's language can call: Jo's file spellings are not Dewy's."""
+"""Completion offers only the names a file's language can call: Sloppy's file spellings are not Dewy's."""
 import os
 from pathlib import Path
 

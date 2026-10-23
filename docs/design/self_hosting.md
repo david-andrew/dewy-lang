@@ -9,9 +9,9 @@ empty file, deflated text, random bytes and a Unicode filename.
 ## Result
 
 **zip.dewy compiles and runs today, with no private syntax.** It needs only representation
-rewrites, and its archives are byte-identical to Jo's. Instruction counts (icount):
+rewrites, and its archives are byte-identical to Sloppy's. Instruction counts (icount):
 
-| workload | dev Dewy / Jo | release Dewy / Jo |
+| workload | dev Dewy / Sloppy | release Dewy / Sloppy |
 |---|---|---|
 | zip: 3 MB random + 2.3 MB text | 2.065 / 2.065 G | 1.927 / 1.927 G |
 | zip: 20 MB, stored path | 7.527 / 7.527 G | 6.863 / 6.862 G |
@@ -23,17 +23,17 @@ pilot, zip.jo is almost trivial: it never touches enum tags, pointer types, `ext
 gating, tuples crossing languages, or a whole-module translation. The kernel parity shows
 that the code generator is not the obstacle. The obstacles are surface and bootstrap.
 
-## Constructs zip.jo needs (Jo -> Dewy)
+## Constructs zip.jo needs (Sloppy -> Dewy)
 
-| Jo | Dewy today | Class |
+| Sloppy | Dewy today | Class |
 |---|---|---|
-| global `int[]`, ranges, `xor`/`>>`/`&`, hex | works; `int` -> explicit `int64` (Jo `int` wraps, Dewy `int` promotes) | A |
+| global `int[]`, ranges, `xor`/`>>`/`&`, hex | works; `int` -> explicit `int64` (Sloppy `int` wraps, Dewy `int` promotes) | A |
 | tuple `(str, u8[])[]`, `f.0`/`f.1` | `array<[string array<uint8>]>`, `f[0]`/`f[1]` (an array type with a type per position; round 4) | A |
 | `when not BOOTSTRAP:` | dropped: stage0 never compiles Dewy, so the gate is meaningless here | see `$target` |
 | closure capturing loop locals | works (snapshots) | A |
-| `mut u8[]` | `@b:array<uint8>` / `put16(@h v)`, also across Jo<->Dewy | A |
+| `mut u8[]` | `@b:array<uint8>` / `put16(@h v)`, also across Sloppy<->Dewy | A |
 | `len(str)`, `loop c in str` (bytes) | `s as array<uint8>` (specified view; measured zero-copy). `loop c in s as array<uint8>` converts the source | A |
-| `data(out)+n`, `mem_copy` | the literal form compiles via undocumented Jo-prelude leakage; `out.extend(src)` is documented and costs the same | A |
+| `data(out)+n`, `mem_copy` | the literal form compiles via undocumented Sloppy prelude leakage; `out.extend(src)` is documented and costs the same | A |
 | `deflate` (lib/game/image.jo) | `from p"@lib/game/image.jo" import deflate` (it also leaks in unimported) | A |
 | `write_bytes -> bool` | `write_bytes(path out) is? int64` | A |
 
@@ -49,27 +49,27 @@ that the code generator is not the obstacle. The obstacles are surface and boots
 | Payload-free `enum` (557 variants): typed `const` tags today; designed nominal families | A / b |
 | Byte-character literals (`'('`, 1194 uses): `b'('` | **a**, implemented |
 | Path import without selection: the design splats it, the implementation (and tests) qualify it as `stem.name` | **a/c**: contradicts current behaviour, so David decides |
-| Tuples crossing languages: Jo `(str, u8[])` is Dewy's `[string array<uint8>]` both ways (round 4: no separate tuple concept) | **a**, implemented |
+| Tuples crossing languages: Sloppy `(str, u8[])` is Dewy's `[string array<uint8>]` both ways (round 4: no separate tuple concept) | **a**, implemented |
 
 ## Mixed-language transition (FFI / host ABI)
 
 There is no foreign boundary. Both frontends lower into one AST, checker and IR, so a call
 across the languages is an ordinary call.
 
-- **Dewy -> Jo**: `from p"x.jo" import f`, `@lib/...`, or a bare-name module (a Dewy importer
+- **Dewy -> Sloppy**: `from p"x.jo" import f`, `@lib/...`, or a bare-name module (a Dewy importer
   falls back to `.jo`).
-- **Jo -> Dewy**: `use 'lib.dewy'` (verified: Jo calls a Dewy `put16` through `mut`).
-- **Type mapping**: `mut` <-> `@`; `T[]` <-> `array<T>`; `u8` <-> `uint8`; Jo `int` takes
+- **Sloppy -> Dewy**: `use 'lib.dewy'` (verified: Sloppy calls a Dewy `put16` through `mut`).
+- **Type mapping**: `mut` <-> `@`; `T[]` <-> `array<T>`; `u8` <-> `uint8`; Sloppy `int` takes
   `int64`; `str` <-> `string` (Dewy indexes graphemes, so pass bytes on hot paths).
 - **Enumerations**: a Dewy union of string literals (`Phase:type = 'lex' | 'parse'`) is a
-  Jo enum to Jo code: `match p: lex:`, `.lex`, `Phase.lex`, `int(p)`, `Phase(1)`, table
+  Sloppy enum to Sloppy code: `match p: lex:`, `.lex`, `Phase.lex`, `int(p)`, `Phase(1)`, table
   keys. Its members are numbered in the order its set was first written, so a twin's
   `enum Phase:` lists them in that order (`tests/test_selfhost_twins.py`).
 - **C**: `$extern` in either language.
 - **Bootstrap blocker for Dewy inside the compiler**: generation 1 (stage0 ->
   `core-bootstrap`) has no Dewy frontend (`bootstrap/frontend.jo`), and it builds generation
-  2 from `compiler/`. So `use 'zip.dewy'` in wasm.jo would break `--bootstrap` unless a Jo
-  twin is substituted for generation 2 too. That substitution is the frozen-Jo step in
+  2 from `compiler/`. So `use 'zip.dewy'` in wasm.jo would break `--bootstrap` unless a Sloppy
+  twin is substituted for generation 2 too. That substitution is the frozen-twin step in
   miniature.
 
 ## `$target` in the design, and what is now implemented
@@ -96,7 +96,7 @@ writers, formerly three) and `base64.dewy` (the web page's module and icon, and 
 macOS signature's hashes, formerly two encoders). Rules, enforced by `tests/test_selfhost_twins.py`: every
 `compiler/*.dewy` has its `FROZEN_TWINS` entry; it imports only the library, never a
 compiler module; its twin defines no name it lacks; each `.jo` module calling it
-`use`s it (Dewy names reach only their importers, unlike Jo's shared namespace). Each
+`use`s it (Dewy names reach only their importers, unlike Sloppy's shared namespace). Each
 pair has a differential test (`tests/test_selfhost_*.py`) against an independent
 Python oracle in default and release builds. Compiler output stayed byte-identical
 (734 builds: examples and ladder, native, `--release`, `-g`, wasm32, aarch64-mac,
@@ -104,15 +104,15 @@ x86_64-windows).
 
 `line_table.dewy` (each file's line starts and the last line found: `line_col`) is
 the first stateful leaf. A leaf owns its state type (`LineTable`) and takes it by place
-(`@t`); Jo keeps the one global (`src_lines: LineTable` in util.jo) and passes it in.
-The type has no defaults, so the zero value is the empty table and the Jo global runs no
-initializer in module order. Its word-at-a-time newline scan matches Jo's instruction
+(`@t`); Sloppy keeps the one global (`src_lines: LineTable` in util.jo) and passes it in.
+The type has no defaults, so the zero value is the empty table and the Sloppy global runs no
+initializer in module order. Its word-at-a-time newline scan matches Sloppy's instruction
 count (`speed`: flagship panel within 0.01%).
 
 Gaps met on the way, and since closed: `loop {` ending its line now loops until it
 exits; a conversion ending a loop header converts the last source; `bytes as string ?? ""`
-converts to `string | none` and falls back; `fill(v n)` is documented; Jo takes a Dewy
+converts to `string | none` and falls back; `fill(v n)` is documented; Sloppy takes a Dewy
 string-literal union as its enum. Still open: the intern table (`hash_bytes`) as a leaf
 costs +0.5–0.8% on the panel (lex+parse +2%): a new name needs a byte-range substring
-Dewy lacks (copy loop, UTF-8 check, conversion: ~600 instructions against Jo's ~250), and
-Jo retains a string passed beside a `mut` place (~20 instructions a call).
+Dewy lacks (copy loop, UTF-8 check, conversion: ~600 instructions against Sloppy's ~250), and
+Sloppy retains a string passed beside a `mut` place (~20 instructions a call).

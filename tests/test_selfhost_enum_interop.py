@@ -1,6 +1,6 @@
-"""A Dewy enumeration (a union of string literals) is a Jo enum to Jo code: Jo switches on
+"""A Dewy enumeration (a union of string literals) is a Sloppy enum to Sloppy code: Sloppy switches on
 it, names its members (`.lex`, `Phase.lex`), converts it to and from its position
-(`int(p)`, `Phase(3)`) and keys tables with it, exactly as with the Jo enum a frozen twin
+(`int(p)`, `Phase(3)`) and keys tables with it, exactly as with the Sloppy enum a frozen twin
 declares in its place (tests/test_selfhost_twins.py checks the twins' member order)."""
 import subprocess
 from pathlib import Path

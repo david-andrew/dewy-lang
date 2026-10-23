@@ -280,7 +280,7 @@ def test_surface_native_diagnostics(compiler, tmp_path, name):
     source, expected = NATIVE_DIAGNOSTICS[name]
     line = diagnose(compiler, tmp_path, source)
     assert expected in line
-    # No Jo spellings of types or operators in a Dewy program's diagnostics.
+    # No Sloppy spellings of types or operators in a Dewy program's diagnostics.
     message = line.split('error:', 1)[1]
     for jo in (' str ', ' str)', '==', '!=', 'u8[]', '-> ', 'if let'):
         assert jo not in message + ' ', (jo, message)

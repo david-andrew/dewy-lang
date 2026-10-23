@@ -315,7 +315,7 @@ family_annotation = (t: int) -> bool:
     false
 
 nominal_declaration = (d: int) -> bool:
-    # Jo library metadata is explicit, and ignored by the C seed.
+    # Sloppy library metadata is explicit, and ignored by the C seed.
     if nodes[d].c != 0:
         loop attr in kids(int(nodes[d].c)):
             if name_of(int(nodes[attr].name)) == "nominal":

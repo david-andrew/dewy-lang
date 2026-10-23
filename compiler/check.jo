@@ -46,7 +46,7 @@ struct Sym:
     ref: i32
     decl: i32
     next: i32
-    surface: i32 = 0   # a library function seen only from Dewy (1) or only from Jo (2): dewy_surface
+    surface: i32 = 0   # a library function seen only from Dewy (1) or only from Sloppy (2): dewy_surface
 
 struct Module:
     name: i32
@@ -553,7 +553,7 @@ rational_one_spelling = (im: int, nm: int, pos: int, how: str):
     builtin = if name_of(nm) == "Rational": "rational" else if name_of(nm) == "RationalWord": "rational<int64>" else: ""
     if builtin != "": fatal(pos, "the exact fraction type is the builtin `{builtin}`: {how}write `{builtin}`")
 
-# Dewy's name for a builtin type Jo spells w ("" when w is not one).
+# Dewy's name for a builtin type Sloppy spells w ("" when w is not one).
 dewy_type_word = (w: str) -> str:
     if w == "str": return "string"
     if w == "byte": return "uint8"
@@ -562,7 +562,7 @@ dewy_type_word = (w: str) -> str:
     if w == "u8" or w == "u16" or w == "u32" or w == "u64": return "uint" + w[1..]
     ""
 
-# Dewy source names the builtin types one way: a Jo spelling written there (and
+# Dewy source names the builtin types one way: a Sloppy spelling written there (and
 # resolved to the builtin, not a binding of the program's) is rejected. Only
 # text the source spells counts, not names the compiler builds at its positions.
 jo_type_names: bool[]           # (by name)
@@ -781,7 +781,7 @@ HABITS = ["index", "`find(s, x)` for text (-1 when it is not there), `index_of(x
     "scene", "an enum of screens (`screen = Screen.play`), with a `match screen:` in update and in draw", "Array", "`fill(0, 8)` (eight zeros), `fill(fill(0, 8), 8)` (eight rows of them), or `[a, b, c]`",
     "Object", "a map's `m.keys()` and `m.values()`, or a struct for named fields", "setInterval", "`every(1, 30.0)` in update: true once each 30 seconds (the 1 tells timers apart)", "setTimeout", "`Actions`: `later.then(2.0, (): ...)`, and `later.update(dt)` in update"]
 
-# Dewy spellings where the ones above are Jo's.
+# Dewy spellings where the ones above are Sloppy's.
 DEWY_HABITS = ["float", "`float64` (and `to_float(s)` for text)", "double", "`float64`", "number", "`float64`", "f64", "`float64`", "f32", "`float32`",
     "int", "`int64`", "Int", "`int64`", "integer", "`int64`", "long", "`int64`", "i64", "`int64`", "i32", "`int32`", "u8", "`uint8`", "u64", "`uint64`",
     "str", "`string`", "String", "`string`", "char", "`string` (a character is a one-character string)",
@@ -840,7 +840,7 @@ habit_name = (name: str) -> str:
         i += 2
     ""
 
-# (a hint written for Jo: its types, its commas between arguments, its `mut` and `->`, or a
+# (a hint written for Sloppy: its types, its commas between arguments, its `mut` and `->`, or a
 # library spelling Dewy has another for; a Dewy program is better told nothing than that)
 JO_HINT_WORDS = ["str", "f64", "f32", "i64", "i32", "i16", "i8", "u64", "u32", "u16", "u8", "mut", "struct", "enum", "elif", "len"]
 jo_shaped = (hint: str) -> bool:
@@ -1034,8 +1034,8 @@ load_module = (path: str, is_prelude: bool, from: int) -> int:
     modules[mi].decls = decls
     mi
 
-# Search from each Dewy module for a path back to itself. Traversing Jo
-# modules catches mixed cycles, while visited nodes terminate Jo-only cycles.
+# Search from each Dewy module for a path back to itself. Traversing Sloppy
+# modules catches mixed cycles, while visited nodes terminate Sloppy-only cycles.
 # Compiler self-builds contain no Dewy modules and need no graph walks.
 check_import_path = (root: int, m: int, seen: mut bool[], path: mut int[]) -> void:
     seen[m] = true

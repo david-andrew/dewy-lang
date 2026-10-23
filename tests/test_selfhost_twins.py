@@ -62,7 +62,7 @@ def jo_enums(text):
 
 @pytest.mark.core_quick
 def test_twins_number_enumerations_alike():
-    # (Jo code takes a Dewy enumeration as an enum, its members numbered as written: the
+    # (Sloppy code takes a Dewy enumeration as an enum, its members numbered as written: the
     # twin's enum lists them in the same order, so int(x) and Name(i) agree)
     for module, twin in FROZEN_TWINS.items():
         enumerations = dewy_enumerations((COMPILER / module).read_text())

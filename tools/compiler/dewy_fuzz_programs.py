@@ -1,6 +1,6 @@
 """Typed, bounded Dewy programs and an independent subset interpreter (the oracle).
 
-The generator writes the surface of docs/LANGUAGE.md, not the compiler's Jo
+The generator writes the surface of docs/LANGUAGE.md, not the compiler's Sloppy
 input. `Machine` executes the same tree in Python and supplies the expected
 output. It shares nothing with the compiler: wherever Dewy promises an
 independent value (let, assignment, arguments, captures, collection inserts)

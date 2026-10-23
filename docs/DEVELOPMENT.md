@@ -110,7 +110,7 @@ python3 -m tools.core fuzz --seed 259 --print                      # one program
 - The full gate runs a three-seed smoke check; `.github/workflows/fuzz-nightly.yml`
   fuzzes a fresh seed range for 25 minutes each night and uploads failures.
 - `python3 -m tools.compiler.fuzz` is the older differential check of generated
-  implementation-language (Jo) programs across build modes.
+  implementation-language (Sloppy) programs across build modes.
 
 ## Use the current compiler from another project
 
