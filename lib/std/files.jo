@@ -131,7 +131,10 @@ __fsys_read = (path: str) -> u8[]?:
             return bytes(s)
         return none
 
-# Write (or replace) a file; false when it cannot be, with why kept.
+# Write (or replace) a file; false when it cannot be, with why kept. The text goes to a new file
+# beside it, pushed to the disk, then renamed over it: a reader (or a crash) sees the old file
+# or the new one, never a part. A symbolic link there is not followed (nor replaced): ELOOP, a
+# FileError. A device or pipe is written as it is.
 __fsys_write = (path: str, contents: str) -> bool:
     __fsys_begin()
     when TARGET == "wasm":
@@ -139,8 +142,94 @@ __fsys_write = (path: str, contents: str) -> bool:
         if r == 1: return true
         if r >= 0: r = -5                            # (a host that does not say why)
         return __ferr(r)
+    else when TARGET == "windows":
+        a = GetFileAttributesW(data(__wide(path)))
+        if a != u32(0xFFFFFFFF):
+            if a & u32(0x400) != u32(0): return __ferr(-40)      # (a reparse point: a link)
+            if a & u32(0x10) != u32(0): return __ferr(-21)
+        h: *u8 = null
+        tmp = ""
+        loop attempt in [0..100):
+            tmp = __fsys_temp_name(path, attempt)
+            h = CreateFileW(data(__wide(tmp)), u32(0x40000000), 0, null, 1, 0x80, null)  # GENERIC_WRITE, CREATE_NEW
+            if (h as int) != -1 or int(GetLastError()) != 80: break           # (80: it exists)
+        if (h as int) == -1: return __w32_ferr()
+        off = 0
+        n = len(contents)
+        w: u32[] = [0]
+        ok = true
+        loop off < n and ok:
+            if WriteFile(h, data(contents) + off, u32(min(n - off, 1 << 30)), data(w), null) == 0: ok = __w32_ferr()
+            else: off += int(w[0])
+        if ok and FlushFileBuffers(h) == 0: ok = __w32_ferr()
+        CloseHandle(h)
+        # (MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
+        if ok and MoveFileExW(data(__wide(tmp)), data(__wide(path)), u32(9)) == 0: ok = __w32_ferr()
+        if not ok: DeleteFileW(data(__wide(tmp)))
+        return ok
     else:
-        return write_file(path, contents)
+        if is_symlink(path): return __ferr(-40)
+        mode = __fsys_mode(path)
+        kind = mode & 0xF000
+        if mode >= 0 and kind == 0x4000: return __ferr(-21)
+        if mode >= 0 and kind != 0x8000: return write_file(path, contents)
+        # (a file this program may not write is not replaced either, though its directory allows it)
+        if mode >= 0:
+            a = syscall(21, data(__zstr(path)), 2)                          # access(W_OK)
+            if a < 0: return __ferr(a)
+        fd = -17
+        tmp = ""
+        loop attempt in [0..100):
+            if fd != -17: break
+            tmp = __fsys_temp_name(path, attempt)
+            fd = syscall(2, data(__zstr(tmp)), 0x800C1, 0x1A4)           # O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC
+        if fd < 0: return __ferr(fd)
+        r = 0
+        off = 0
+        n = len(contents)
+        loop off < n:
+            w = syscall(1, fd, data(contents) + off, n - off)
+            if w == -4: continue
+            if w <= 0:
+                r = min(w, -28)
+                break
+            off += w
+        # (the old file's permissions kept)
+        if r == 0 and mode >= 0: r = min(syscall(90, data(__zstr(tmp)), mode & 0x1FF), 0)
+        if r == 0: r = min(syscall(74, fd), 0)                            # fsync
+        syscall(3, fd)
+        if r == 0: r = min(syscall(82, data(__zstr(tmp)), data(__zstr(path))), 0)   # rename
+        if r < 0:
+            syscall(87, data(__zstr(tmp)))
+            return __ferr(r)
+        return true
+
+# (a new file's name beside path: .name.<number>.tmp)
+__fsys_temp_counter = 0
+__fsys_temp_name = (path: str, attempt: int) -> str:
+    cut = len(path) - 1
+    loop cut >= 0 and path[cut] != '/' and not (TARGET == "windows" and path[cut] == '\\'): cut -= 1
+    __fsys_temp_counter += 1
+    tag = u64(time_ns()) * u64(0x9E3779B97F4A7C15) + u64(__fsys_temp_counter * 1000003 + attempt)
+    "{path[..cut + 1)}.{path[cut + 1..]}.{format(int(tag >> 16), "x")}.tmp"
+
+# (the st_mode of what is at path, links followed; -1 when nothing can be looked at)
+__fsys_mode = (path: str) -> int:
+    when TARGET == "macos":
+        st = fill(0, 18)                              # (struct stat: st_mode, a u16, at 4)
+        if __c_stat(data(__zstr(path)), data(st) as *u8) != 0: return -1
+        return int(((data(st) as *u8 + 4) as *u16)[0])
+    else:
+        # (O_PATH: opened only to name it, then fstat; st_mode, a u32, is at 24 in x86-64's
+        # struct stat and at 16 in arm64's)
+        fd = syscall(2, data(__zstr(path)), 0x200000, 0)
+        if fd < 0: return -1
+        st = fill(0, 18)
+        r = syscall(5, fd, data(st))
+        syscall(3, fd)
+        if r != 0: return -1
+        at = if ARCH == "arm64": 16 else: 24
+        return int(((data(st) as *u8 + at) as *u32)[0])
 
 # What is at a path: 0 nothing (or nothing that can be looked at), 1 a file, 2 a directory, 3
 # something else (a device, a pipe...). Links are followed.
@@ -153,26 +242,11 @@ __fsys_kind = (path: str) -> int:
         if not file_exists(path): return 0
         if is_dir(path): return 2
         return 1
-    else when TARGET == "macos":
-        st = fill(0, 18)                              # (struct stat: st_mode, a u16, at 4)
-        if __c_stat(data(__zstr(path)), data(st) as *u8) != 0: return 0
-        mode = int(((data(st) as *u8 + 4) as *u16)[0]) & 0xF000
-        if mode == 0x8000: return 1
-        if mode == 0x4000: return 2
-        return 3
     else:
-        # (O_PATH: opened only to name it, then fstat; st_mode, a u32, is at 24 in x86-64's
-        # struct stat and at 16 in arm64's)
-        fd = syscall(2, data(__zstr(path)), 0x200000, 0)
-        if fd < 0: return 0
-        st = fill(0, 18)
-        r = syscall(5, fd, data(st))
-        syscall(3, fd)
-        if r != 0: return 0
-        at = if ARCH == "arm64": 16 else: 24
-        mode = int(((data(st) as *u8 + at) as *u32)[0]) & 0xF000
-        if mode == 0x8000: return 1
-        if mode == 0x4000: return 2
+        mode = __fsys_mode(path)
+        if mode < 0: return 0
+        if mode & 0xF000 == 0x8000: return 1
+        if mode & 0xF000 == 0x4000: return 2
         return 3
 
 __fsys_read_bytes = (path: str) -> u8[] | __FileFailure:

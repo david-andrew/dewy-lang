@@ -2482,7 +2482,10 @@ outcome as a value:
 - `read_text` gives a `string`, `read_bytes` an `array<uint8>`, and `list` the
   directory's entry names;
 - `write_text(text)` and `write_bytes(bytes)` replace the file and give the byte
-  count;
+  count. The new contents go to a file beside it, reach the disk, and are renamed
+  over it, so a reader or a crash sees the old file or the new one, and its
+  permissions are kept. A symbolic link there is refused (`FileError`), not
+  followed;
 - `mkdir`, `rmdir` and `unlink` give `true`;
 - `copy_to(target)` copies the file's bytes and gives the byte count,
   `rename(target)` moves a file or directory in one step, `make_dirs` makes the

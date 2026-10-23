@@ -67,6 +67,9 @@ when TARGET == "macos":
     @symbol("rename")
     extern __c_rename = (from: int, to: int) -> i32
     @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("fsync")
+    extern __c_fsync = (fd: i32) -> i32
+    @lib("/usr/lib/libSystem.B.dylib")
     @symbol("renamex_np")
     extern __c_renamex_np = (from: int, to: int, flags: u32) -> i32
     @lib("/usr/lib/libSystem.B.dylib")
@@ -264,6 +267,7 @@ when TARGET == "macos":
             k = 0
             loop (a as *u8)[k] != 0: k += 1
             return k + 1
+        if n == 74: return __mac_r(int(__c_fsync(i32(a))))
         if n == 82: return __mac_r(int(__c_rename(a, b)))
         if n == 316: return __mac_r(int(__c_renamex_np(b, d, u32(4))))       # renameat2(NOREPLACE): RENAME_EXCL
         if n == 83: return __mac_r(int(__c_mkdir(a, i32(b))))
