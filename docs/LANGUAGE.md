@@ -3676,7 +3676,8 @@ behind a namespace instead (`model.step()`), and a bare library name such as
 name are an error naming both modules; import one under a name or select what you
 need. A module's own declaration may shadow an imported `$shadowable` one, an
 import may shadow the prelude's, and a non-`$shadowable` import outranks a
-`$shadowable` one.
+`$shadowable` one. A splat import that shadows a prelude name warns, naming both;
+selecting the name or importing the module `as` a name is quiet.
 
 A selection lists names with commas or in parentheses, each optionally renamed
 (`import (advance fresh as new)`, `import advance as step, fresh` after `from

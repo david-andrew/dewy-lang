@@ -318,6 +318,35 @@ dewy_prelude_module = (name: int) -> int:
             loop mi in [first_module..modules.len()): refine_deferred[mi] = true
     m
 
+# The file (under lib/) declaring the prelude's name, "" when the prelude has none: its
+# indexes only, so nothing is loaded or parsed (a splat import's shadowing warning)
+prelude_source = (name: int) -> str:
+    if not dp_scanned: dp_scan()
+    if let f = dp_names.get(name): return prelude_shown_path(dp_paths[f])
+    if let s = prelude.get(name):
+        if syms[s].decl != 0: return prelude_shown_path(files[pos_file(nodes[int(syms[s].decl)].pos)].path)
+    if pn_slots.len() != 0:
+        nm = names[name]
+        n = len(nm)
+        h = hash_bytes(data(nm), n)
+        mask = pn_slots.len() - 1
+        i = h & mask
+        loop true:
+            e = int(pn_slots[i])
+            if e == 0: break
+            e -= 1
+            if pn_entries[e].hash == h and pn_entries[e].len == n and __mem_eq(pn_entries[e].at, data(nm), n):
+                post = int(pn_entries[e].post)
+                if post < 0: break
+                mi = pu_mod[int(pn_posts[post].unit)]
+                return prelude_shown_path(files[int(modules[mi].file)].path)
+            i = (i + 1) & mask
+    ""
+
+prelude_shown_path = (path: str) -> str:
+    if starts_with(path, lib_dir + "/"): return "lib/" + path[len(lib_dir) + 1..]
+    path
+
 # The Dewy prelude's binding of name, or 0
 dewy_prelude_lookup = (name: int) -> int:
     m = dewy_prelude_module(name)

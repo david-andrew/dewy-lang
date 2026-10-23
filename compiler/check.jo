@@ -548,7 +548,25 @@ bind_splat = (d: int, m: int, im: int):
         if files[int(modules[im].file)].path == lib_dir + "/rational.dewy" and (name_of(name) == "Rational" or name_of(name) == "RationalWord"): continue
         if modules[m].names.get(name) != none:
             if dewy_import_clash(m, name, s, owned, d, nodes[d].pos) == 1: continue
+        else if files[int(modules[m].file)].is_dewy and not modules[m].is_prelude and not pos_in_lib(nodes[d].pos): splat_shadow_warning(d, m, im, name)
         bind_imported(m, name, syms[s].kind, owned)
+
+# A splat import that shadows a prelude name warns, naming both: selecting the name, or
+# importing the module `as` a name, says which is meant. Only the splat's names are probed
+# (the prelude's index, nothing parsed).
+splat_shadow_warning = (d: int, m: int, im: int, name: int):
+    if lib_private(name): return
+    from = prelude_source(name)
+    if from == "" and (universe.get(name) != none or intrinsic_of(name) >= 0): from = "built in"
+    if from == "": return
+    loop d2 in from_imports:
+        if d2 == d or int(nodes[d2].mod) != m or int(nodes[d2].sym) != im or nodes[d2].aux == 3: continue
+        loop i in [0..nkids(d2)):
+            if int(nodes[kid(d2, i)].name) == name: return
+    shown = name_of(int(nodes[d].sval))
+    stem = name_of(int(nodes[d].name))
+    nm = name_of(name)
+    warn(nodes[d].pos, "`{nm}` from the splat import of {shown} shadows the prelude's `{nm}` ({from}): select it, `from p\"{shown}\" import {nm}`, or import the module under a name, `import p\"{shown}\" as {stem}`")
 
 # The bundled exact fraction's types are the builtin `rational` and
 # `rational<int64>`: their library names are not a second spelling.
