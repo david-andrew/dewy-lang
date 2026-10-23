@@ -79,13 +79,13 @@ loop i in 0.. and c in text
         </div>
       </div>
 
-      <p class="caveat">Dewy is in early development. The experimental compiler is written in Jo while Dewy grows toward self-hosting, and it implements a growing part of the language design. The browser playground runs precompiled examples. <a href="/status/">See generated coverage and known failures.</a></p>
+      <p class="caveat">The compiler builds native executables and WebAssembly. It is written in Sloppy for now; Dewy will compile itself later. The browser playground runs precompiled examples, and <a href="/status/">Status</a> lists what the compiler passes today.</p>
     </section>
 
     <div class="showcase">
       <div class="showcase-intro">
         <h2>Key Features</h2>
-        <p>Capabilities at the heart of Dewy’s design. Examples marked <em>tested</em> are compiled and run with the current compiler on every site build; <em>design previews</em> show language the compiler does not support yet.</p>
+        <p>Capabilities at the heart of Dewy’s design. Every example on this page is compiled and run with the current compiler on each site build.</p>
       </div>
 
       <section class="showcase-row" aria-labelledby="units-heading">
@@ -156,23 +156,69 @@ loop i in 0.. and letter in 'Dewy' printl'{i}: {letter}'</code></pre>
         </div>
       </section>
 
+      <section class="showcase-row" aria-labelledby="numbers-heading">
+        <div class="showcase-pane code-pane">
+          <div class="pane-top"><span>numbers.dewy</span><a class="tag implemented" href="/status/#website-examples">tested ✓</a></div>
+          <pre><code class="language-dewy lined" data-example='{"mode":"run","stdout":"1267650600228229401496703205376\n1/2\ntrue\n"}'># Integers grow as needed instead of overflowing.
+big = 2^100
+printl(big)
+
+# Dividing integers gives an exact fraction.
+third = 1/3
+printl(third + 1/6)       # 1/2
+
+# Decimal literals are exact too.
+printl(0.1 + 0.2 =? 0.3)  # true</code></pre>
+        </div>
+        <div class="showcase-pane prose-pane">
+          <span class="chip">numbers</span>
+          <h2 id="numbers-heading">Exact by default</h2>
+          <p><code>int</code> is the mathematical integer: word-sized while the value fits, big when it doesn’t, and never silently wrapped. Dividing integers gives a <code>rational</code> that prints as the fraction it is, and decimal literals are exact fractions unless a float is asked for. Floats are strict IEEE 754 when you want them.</p>
+        </div>
+      </section>
+
       <section class="showcase-row" aria-labelledby="types-heading">
         <div class="showcase-pane code-pane">
-          <div class="pane-top"><span>refinements.dewy</span><a class="tag planned" href="/reference/refinements-and-effects.html">design preview</a></div>
-          <pre><code class="language-dewy lined" data-example='{"mode":"design-only"}'># Types can carry liquid refinement conditions.
-Positive = int&lt; i=&gt;i&gt;?0 &gt;
-NonEmptyArray = array&lt; length&gt;?0 &gt;
+          <div class="pane-top"><span>refinements.dewy</span><a class="tag implemented" href="/status/#website-examples">tested ✓</a></div>
+          <pre><code class="language-dewy lined" data-example='{"mode":"run","stdout":"3\n7\n42\n"}'># A type can carry a condition on its values.
+Positive:type = int64&lt;(&gt;? 0)&gt;
+NonEmpty:type = array&lt;int64 length &gt;? 0&gt;
 
-score:Positive = 42
-values:NonEmptyArray&lt;int&gt; = [3 5 8]
+first = (xs:NonEmpty):&gt;int64 =&gt; xs[0]
+span = (a:int64 b:int64&lt;(&gt;=? a)&gt;):&gt;int64 =&gt; b - a
+share = (total:int64 n:Positive):&gt;int64 =&gt; total // n
 
-# Proven facts can remove checks and guide layout.
-first = values[0]</code></pre>
+printl(first([3 5 8]))    # 3
+printl(span(3 10))        # 7
+printl(share(84 2))       # 42
+
+# first([]) and share(84 0) are compile errors.</code></pre>
         </div>
         <div class="showcase-pane prose-pane">
           <span class="chip">type system</span>
           <h2 id="types-heading">Types that carry useful facts</h2>
-          <p>Dewy’s liquid refinement design lets types state relationships such as “positive integer” or “non-empty array.” The compiler proves conditions from literals and ordinary control flow — a guard, a store, an iteration — then reuses those facts for safety, bounds-check elimination, and integer-width selection, so <code>values[0]</code> needs no runtime check. Today it checks exact array lengths such as <code>array&lt;int64 length=3&gt;</code> and narrows optional and union values; the general syntax shown here is a design preview.</p>
+          <p>Refinements let a type say “positive integer” or “non-empty array”. The compiler proves each condition from literals and ordinary control flow—a guard, a store, a loop range—and rejects a call that provably breaks one. A proven fact also removes work: <code>xs[0]</code> on a non-empty array needs no bounds check. Refinements cover integer ranges, array and string lengths, and record fields.</p>
+        </div>
+      </section>
+
+      <section class="showcase-row" aria-labelledby="safe-heading">
+        <div class="showcase-pane code-pane">
+          <div class="pane-top"><span>safety.dewy</span><a class="tag implemented" href="/status/#website-examples">tested ✓</a></div>
+          <pre><code class="language-dewy lined" data-example='{"mode":"run","stdout":"14\nnone\n4\n"}'>xs = [3 1 4 1 5]
+
+# The loop range proves every index is in bounds.
+total = 0
+loop i in [0..xs.length) total += xs[i]
+printl(total)             # 14
+
+# When an index can't be proven, ask for a value.
+printl(xs.get(9))         # none
+printl(xs.get(2))         # 4</code></pre>
+        </div>
+        <div class="showcase-pane prose-pane">
+          <span class="chip">safety</span>
+          <h2 id="safe-heading">No traps behind your back</h2>
+          <p>Indexing, division and narrowing can fail, so Dewy’s rule is that each is proven from facts the compiler can see, handled as a value (<code>xs.get(i)</code> is <code>int64 | none</code>), or checked explicitly. Where the compiler can’t yet prove one, today’s compiler still inserts a runtime check that stops the program with a report. Turning those into compile errors with fix-its is under way.</p>
         </div>
       </section>
 
@@ -224,9 +270,11 @@ printl"count is {count.value}"</code></pre>
 
       <section class="showcase-row next-row" aria-labelledby="next-heading">
         <div class="showcase-pane code-pane">
-          <pre><code class="language-dewy lined" data-example='{"mode":"check"}'># Dewy → native executables · WebAssembly
-# The compiler is written in Jo for now;
-# Dewy will compile itself later.</code></pre>
+          <pre><code>$ dewy hello.dewy                         # run a file
+$ dewy                                    # start the REPL
+$ dewy check hello.dewy                   # check without running
+$ dewy build hello.dewy --release -o hello
+$ dewy build hello.dewy --target wasm32 -o hello-web</code></pre>
         </div>
         <div class="showcase-pane prose-pane">
           <span class="chip">project</span>
@@ -244,6 +292,6 @@ printl"count is {count.value}"</code></pre>
     </div>
   </main>
 
-  <footer class="site-footer"><div class="footer-wrap"><div class="footer-brand"><a class="brand" href="/">Dewy</a><p>Python-like ease. C-like speed. Safe by default. These are our goals; measured behavior lives in coverage.</p></div><nav class="footer-links" aria-label="More"><a href="/install/">Install</a><a href="/tools/">Tools</a><a href="/archive/">Archive</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a></nav></div></footer>
+  <footer class="site-footer"><div class="footer-wrap"><div class="footer-brand"><a class="brand" href="/">Dewy</a><p>Python-like ease. C-like speed. Safe by default.</p></div><nav class="footer-links" aria-label="More"><a href="/install/">Install</a><a href="/tools/">Tools</a><a href="/archive/">Archive</a><a href="https://github.com/david-andrew/dewy-lang">GitHub</a></nav></div></footer>
 </body>
 </html>
