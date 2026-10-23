@@ -61,10 +61,19 @@ __json_value = (r: mut __JsonReader, depth: int) -> Json:
         if r.i < len(r.s) and r.s[r.i] == '}':
             r.i += 1
             return Json.object(keys, values)
+        seen: {str: bool}
         loop r.err == "":
             __json_space(r)
             if r.i >= len(r.s) or r.s[r.i] != '"': return __json_fail(r, "a field name (in quotes) was expected")
-            keys.push(__json_string(r))
+            at = r.i
+            key = __json_string(r)
+            if r.err != "": return Json.null_
+            # (a field named twice is a mistake: which one was meant is not known; a few
+            # fields are compared, more are looked up)
+            if __json_has_key(keys, seen, key):
+                r.i = at
+                return __json_fail(r, "the field \"{key}\" is there twice")
+            keys.push(key)
             __json_space(r)
             if r.i >= len(r.s) or r.s[r.i] != ':': return __json_fail(r, "':' was expected after a field name")
             r.i += 1
@@ -108,6 +117,15 @@ __json_value = (r: mut __JsonReader, depth: int) -> Json:
     if c == 'f' and __json_word(r, "false"): return Json.boolean(false)
     if c == 'n' and __json_word(r, "null"): return Json.null_
     __json_fail(r, "a value was expected")
+
+__json_has_key = (keys: str[], seen: mut {str: bool}, key: str) -> bool:
+    if keys.len() < 16:
+        loop k in keys:
+            if k == key: return true
+        return false
+    if seen.len() == 0:
+        loop k in keys: seen[k] = true
+    not seen.insert_if_absent(key, true)
 
 __json_word = (r: mut __JsonReader, w: str) -> bool:
     if r.i + len(w) > len(r.s) or not __mem_eq(data(r.s) + r.i, data(w), len(w)): return false
@@ -170,10 +188,17 @@ __json_string = (r: mut __JsonReader) -> str:
             if cp < 0:
                 __json_fail(r, "\\u needs four hex digits")
                 return ""
-            # (a surrogate pair: one character beyond the first 65536)
-            if cp >= 0xD800 and cp < 0xDC00 and __json_word(r, "\\u"):
-                lo = __json_hex4(r)
-                if lo >= 0xDC00 and lo < 0xE000: cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00)
+            # (a surrogate pair: one character beyond the first 65536; half of one alone is
+            # not a character)
+            if cp >= 0xD800 and cp < 0xE000:
+                at = r.i - 6
+                lo = -1
+                if cp < 0xDC00 and __json_word(r, "\\u"): lo = __json_hex4(r)
+                if lo < 0xDC00 or lo >= 0xE000:
+                    r.i = at
+                    __json_fail(r, "\\u{r.s[at + 2..at + 6)} is half of a surrogate pair, without its other half")
+                    return ""
+                cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00)
             __utf8_push(b, cp)
         else: b.push(e)
     str_from_bytes(b)

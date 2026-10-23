@@ -2329,7 +2329,9 @@ SLOPPY_THREADS=2 ./tools/dewy --release examples/parallel_particles.dewy
 reads it into a type and returns either that value or a `TextError` with a message,
 line and column. Record fields may arrive in any order; missing fields keep their
 declared defaults (`none` for an optional field) and unknown fields are skipped.
-A missing field without a default is a `TextError` naming it:
+A field named twice in one object, and a `\u` escape of half a surrogate pair
+without its other half, are errors here and in `parse_json`. A missing field
+without a default is a `TextError` naming it:
 
 ```dewy
 Settings:type=[player:uint64 volume:float64=0.5 fullscreen:bool=false]

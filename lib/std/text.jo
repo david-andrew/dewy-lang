@@ -91,6 +91,12 @@ struct __TextIn:
     json = false    # reading JSON (from_json): {"field": value}, [a, b] for tuples and vectors, null
     path: str[]     # the fields and elements being read (items, [2], count)
     err_path = ""   # where err is, as items[2].count
+    # (JSON: the field names of the objects being read, to find one named twice: where each
+    # name is in s, two at a time, and where each object's start in names, with its number)
+    names: int[]
+    objects: int[]
+    nobjects = 0
+    named: {str: bool}      # (an object with many fields: "number:name")
 
 __tx_space = (r: mut __TextIn):
     loop r.i < len(r.s) and (r.s[r.i] == ' ' or r.s[r.i] == '\n' or r.s[r.i] == '\t' or r.s[r.i] == '\r'): r.i += 1
@@ -208,18 +214,50 @@ __tx_open = (r: mut __TextIn):
             else if r.s[r.i] == ']': depth -= 1
             r.i += 1
     __tx_want(r, '(')
+    if r.json:
+        r.objects.push(r.names.len())
+        r.objects.push(r.nobjects)
+        r.nobjects += 1
+
+# (JSON: the field name just read, if the object being read has had it already)
+__tx_twice = (r: mut __TextIn) -> bool:
+    if r.objects.len() < 2: return false
+    start = r.objects[r.objects.len() - 2]
+    count = (r.names.len() - start) / 2
+    n = r.n1 - r.n0
+    if count < 16:
+        loop k in [0..count):
+            a = r.names[start + 2 * k]
+            b = r.names[start + 2 * k + 1]
+            if b - a == n and __mem_eq(data(r.s) + a, data(r.s) + r.n0, n): return true
+        r.names.push(r.n0)
+        r.names.push(r.n1)
+        return false
+    id = r.objects[r.objects.len() - 1]
+    if count == 16:
+        loop k in [0..count): r.named["{id}:{r.s[r.names[start + 2 * k]..r.names[start + 2 * k + 1])}"] = true
+        r.names.push(r.n0)
+        r.names.push(r.n1)
+    not r.named.insert_if_absent("{id}:{r.s[r.n0..r.n1)}", true)
 
 # the next field's name= (in r.name), or false at the closing ')'
 __tx_field = (r: mut __TextIn) -> bool:
     if len(r.err) > 0: return false
     __tx_eat(r, ',')
-    if __tx_eat(r, ')'): return false
+    if __tx_eat(r, ')'):
+        if r.json and r.objects.len() >= 2:
+            r.names.truncate(r.objects[r.objects.len() - 2])
+            r.objects.truncate(r.objects.len() - 2)
+        return false
     if r.i >= len(r.s):
         __tx_fail(r, "expected ')'")
         return false
     __tx_word_at(r, false)
     if r.n1 == r.n0:
         __tx_fail(r, "expected a field's name")
+        return false
+    if r.json and __tx_twice(r):
+        __tx_bad(r, "the field '{r.s[r.n0..r.n1)}' is there twice")
         return false
     __tx_want(r, '=')
     true
@@ -376,18 +414,21 @@ __read = (r: mut __TextIn, x: mut str):
             else if e == 'r': c = '\r'
             else if e == '0': c = 0
             else if e == 'u' and r.i + 4 <= len(r.s):
-                # (JSON's \u00e9: the character, in UTF-8)
-                cp = 0
-                loop k in [0..4):
-                    h = r.s[r.i + k]
-                    d = -1
-                    if h >= '0' and h <= '9': d = int(h) - 48
-                    else if h >= 'a' and h <= 'f': d = int(h) - 87
-                    else if h >= 'A' and h <= 'F': d = int(h) - 55
-                    if d < 0: cp = -1
-                    else if cp >= 0: cp = cp * 16 + d
+                # (JSON's \u00e9: the character, in UTF-8; a character past the first 65536
+                # as a surrogate pair, \ud83d\ude00, whose halves alone are not characters)
+                cp = __tx_hex4(r.s, r.i)
                 if cp >= 0:
+                    at = r.i - 2
                     r.i += 4
+                    if cp >= 0xD800 and cp < 0xE000:
+                        lo = -1
+                        if cp < 0xDC00 and r.i + 6 <= len(r.s) and r.s[r.i] == '\\' and r.s[r.i + 1] == 'u': lo = __tx_hex4(r.s, r.i + 2)
+                        if lo < 0xDC00 or lo >= 0xE000:
+                            r.i = at
+                            __tx_fail(r, "\\u{r.s[at + 2..at + 6)} is half of a surrogate pair, without its other half")
+                            return
+                        r.i += 6
+                        cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00)
                     loop b in bytes(chr(cp)): buf.push(b)
                     continue
                 c = e
@@ -395,6 +436,20 @@ __read = (r: mut __TextIn, x: mut str):
         buf.push(c)
     if not __tx_eat(r, '"'): __tx_fail(r, "this string has no closing quote")
     x = __buf_finish_val(buf)
+
+# (four hex digits at i: their value, or -1)
+__tx_hex4 = (s: str, i: int) -> int:
+    if i + 4 > len(s): return -1
+    cp = 0
+    loop k in [0..4):
+        h = s[i + k]
+        d = -1
+        if h >= '0' and h <= '9': d = int(h) - 48
+        else if h >= 'a' and h <= 'f': d = int(h) - 87
+        else if h >= 'A' and h <= 'F': d = int(h) - 55
+        if d < 0: return -1
+        cp = cp * 16 + d
+    cp
 
 __read[T] = (r: mut __TextIn, xs: mut T[]):
     xs.clear()
@@ -437,7 +492,13 @@ __read[K, V] = (r: mut __TextIn, m: mut Map[K, V]):
         if __tx_eat(r, '}}'): return
         k: K
         __default_init(k)
+        at = r.i
         __read(r, k)
+        if r.json and len(r.err) == 0 and m.has(k):
+            r.i = at
+            __tx_space(r)
+            __tx_fail(r, "the key {to_text(k)} is there twice")
+            return
         __tx_want(r, ':')
         v: V
         __default_init(v)
