@@ -1,7 +1,7 @@
 # Tier 3 / 81_partition_join / milestone 25
 # Acceptance: Fork owned disjoint partitions, join in source order, and prove coverage including an uneven tail.
 Partition:type=[begin:int64 stop:int64 values:array<int64>]
-split=(xs:array<int64> width:int64<i => i >? 0>):>array<Partition>=>{
+split=(xs:array<int64> width:int64<(>? 0)>):>array<Partition>=>{
     let parts:array<Partition>=[]
     let start:int64=0
     loop start <? xs.length {

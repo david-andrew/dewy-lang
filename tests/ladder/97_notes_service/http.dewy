@@ -73,7 +73,7 @@ header=(headers:array<Header> name:string):>string?=>{
 }
 
 # The index of the first LF at or after `start`, or -1.
-find_lf=(data:array<uint8> start:int64<(>=? 0)>):>int64<r => r <? data.length>=>{
+find_lf=(data:array<uint8> start:int64<(>=? 0)>):>int64<(<? data.length)>=>{
     let i=start
     loop i <? data.length {
         if data[i] =? LF return i

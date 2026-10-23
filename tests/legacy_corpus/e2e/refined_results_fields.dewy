@@ -3,7 +3,7 @@
 # is made or the field is stored, and assumed wherever it is read.
 let Ratio:type = [top:int64 bottom:int64<bottom >? 0>]
 
-let at_least_one = (n:int64):>int64<i => i >=? 1> => {
+let at_least_one = (n:int64):>int64<(>=? 1)> => {
     if n >=? 1 { return n }                       # proven by the guard
     return 1
 }

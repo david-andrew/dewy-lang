@@ -1,7 +1,7 @@
 # A singleton result fact proves the index value, not that its evaluation
 # can be erased. Every index call below must run exactly once and in order.
 Box:type=[value:int64]
-index=(@visits:int64):>int64<v=>v=?0>=>{visits+=1 return 0}
+index=(@visits:int64):>int64<(=? 0)>=>{visits+=1 return 0}
 rhs=(@visits:int64):>int64=>{
     $runtime_assert visits=?2
     return 42

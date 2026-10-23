@@ -722,13 +722,16 @@ supported in shaders; shader integer values need explicit fixed-width types.
 Scalar integer annotations can carry checked refinements:
 
 ```dewy
-positive = int64<i => i >? 0>
+positive = int64<(>? 0)>
 quotient = (n:int64 d:positive):>int64 => n//d
-identity = (n:int64):>int64<r => r =? n> => n
+identity = (n:int64):>int64<(=? n)> => n
 ```
 
-The lambda binder is local to its predicate. A parameter may use its own name
-(`d:int64<d >? 0>`); partial operators (`int64<(>? 0)>`), conjunctions,
+Where the refinement is a single comparison or test of the value, write the
+partial operator (`int64<(>? 0)>`, `int64<(>=? a)>`); keep a lambda
+(`int64<i => i >=? 0 and i <=? 4>`) for several conditions. A lambda binder is
+local to its predicate. A parameter may use its own name
+(`d:int64<d >? 0>`); conjunctions,
 one-direction comparison chains, scalar exclusion (`int64 & ~0`), and membership in literal ranges are also
 supported. Bounds may use integer literals, fixed-width `.min`/`.max`, other
 scalar value parameters of the same representation, an array or string
@@ -776,7 +779,7 @@ Fixed-width arithmetic still wraps before its result meets a refinement.
 
 Refinements also apply to record fields and array elements. Constructors,
 defaults, structural record conversions and stores check the declared contracts.
-A field may depend on a sibling, as in `[low:int64 high:int64<i => i >=? low>]`;
+A field may depend on a sibling, as in `[low:int64 high:int64<(>=? low)>]`;
 a field's (or a `let`'s) own name in its refinement is its value, `high:int64<high >=? low>`;
 a dependent write checks a private candidate before replacing the record.
 Missing initialization must satisfy the contract too. Fixed-width increments
@@ -789,7 +792,7 @@ check a private candidate before publishing it. `addr` is a nonnegative index
 below `2^48` on native targets and `2^32` on WebAssembly. Arithmetic does not
 automatically preserve this range. A returned refinement may
 project a mutable parameter's final length, for example
-`append=(@xs:array<int64> x:int64):>addr<i => i <? xs.length>=>{...}`.
+`append=(@xs:array<int64> x:int64):>addr<(<? xs.length)>=>{...}`.
 References to by-value parameters still describe their captured entry values.
 
 Mutable `@` access requires an equivalent storage contract. A dependent record
@@ -813,7 +816,7 @@ normal exit, including bare returns:
 
 ```dewy
 $proof
-ordered=(a:int64 b:int64<v => a <=? v> c:int64<v => b <=? v>):><a <=? c>=>{
+ordered=(a:int64 b:int64<(>=? a)> c:int64<(>=? b)>):><a <=? c>=>{
     $assert a <=? b
     $assert b <=? c
 }

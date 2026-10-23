@@ -4,7 +4,7 @@ BaseHandle=type of [
     read=():>int64=>token
 ]
 ExtraHandle=type of BaseHandle & [extra:int64]
-PositiveHandle=type of BaseHandle & [token:int64<v=>v>=?0>]
+PositiveHandle=type of BaseHandle & [token:int64<(>=? 0)>]
 main=():>int64=>{
     let handle=ExtraHandle[40 1]
     handle.increment()

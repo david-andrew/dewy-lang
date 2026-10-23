@@ -5,13 +5,13 @@
 # floor: the divisor's sign (`%`); trunc: the dividend's (C's); euclid: never negative
 _ModKind:type='floor'|'trunc'|'euclid'
 
-mod = ((a:int64 b:int64<d => d not=? 0> kind:_ModKind='floor'):>int64=>{
+mod = ((a:int64 b:int64<(not=? 0)> kind:_ModKind='floor'):>int64=>{
         let r=a % b
         if kind =? 'trunc' and r not=? 0 and (r <? 0) not=? (a <? 0) return r-b
         if kind =? 'euclid' and r <? 0 return r-b
         return r
     })
-    & ((a:int b:int<d => d not=? 0> kind:_ModKind='floor'):>int=>{
+    & ((a:int b:int<(not=? 0)> kind:_ModKind='floor'):>int=>{
         let r=a % b
         if kind =? 'trunc' and r not=? 0 and (r <? 0) not=? (a <? 0) return r-b
         if kind =? 'euclid' and r <? 0 return r-b

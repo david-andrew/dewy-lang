@@ -1,4 +1,4 @@
-positive=int64<i => i >? 0>
+positive=int64<(>? 0)>
 good=(x:int64):>positive=>{ if x >? 0 {return x}; return 1 }
 bad=(x:int64):>int64=>x
 main=()=>{ let f:<(x:int64):>positive>=@bad; printl(f(2)) }

@@ -31,7 +31,7 @@ digit_index=(text:string):>int64<i => i >=? 0 and i <? 10> | none=>{
     }
     return none
 }
-number=(text:string):>int64<i => i in? -10000009..10000009> | none=>{
+number=(text:string):>int64<(in? -10000009..10000009)> | none=>{
     if text.length =? 0 return none
     let sign:int64=1
     let start:int64=0
@@ -48,7 +48,7 @@ number=(text:string):>int64<i => i in? -10000009..10000009> | none=>{
         value=value*10+digit
     }
     if value <? 0 or value >? 10000009 return none
-    let result:int64<i => i in? -10000009..10000009>=if sign <? 0 -value else value
+    let result:int64<(in? -10000009..10000009)>=if sign <? 0 -value else value
     return result
 }
 binary=(@state:Machine op:string):>bool=>{

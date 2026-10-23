@@ -7,7 +7,7 @@
 
 $prototype
 
-let per_argument = (n:int64 d:int64<i => i not=? 0>):>int64 => n // d
+let per_argument = (n:int64 d:int64<(not=? 0)>):>int64 => n // d
 
 main = (argv:array<string>) => {
     printl("program: {argv[0]}")                # deferred index proof: holds (argv has the program name)

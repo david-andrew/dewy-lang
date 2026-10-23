@@ -66,7 +66,7 @@ digit_index=(text:string):>int64<i => i >=? 0 and i <? 10> | none=>{
     }
     return none
 }
-integer=(text:string):>int64<i => i in? -1000009..1000009> | none=>{
+integer=(text:string):>int64<(in? -1000009..1000009)> | none=>{
     if text.length =? 0 return none
     let start:int64=0
     let sign:int64=1
@@ -83,10 +83,10 @@ integer=(text:string):>int64<i => i in? -1000009..1000009> | none=>{
         value=value*10+d
     }
     $runtime_assert value >=? 0 and value <=? 1000009
-    let signed:int64<i => i in? -1000009..1000009>=if sign <? 0 -value else value
+    let signed:int64<(in? -1000009..1000009)>=if sign <? 0 -value else value
     return signed
 }
-json_value=(body:string):>int64<i => i in? -1000009..1000009> | none=>{
+json_value=(body:string):>int64<(in? -1000009..1000009)> | none=>{
     # Deliberate API schema: exactly one integer field, canonical whitespace.
     let prefix="\{\"value\":"
     if body.length <? prefix.length+2 return none

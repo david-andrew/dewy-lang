@@ -1,6 +1,6 @@
 # Tier 3 / 91_adventure_state / milestone 29
 # Acceptance: Command-driven adventure with inventory, locked transitions, score, win state and copied save states.
-World:type=[room:string inventory:set<string> flags:set<string> score:int64<i => i >=? 0> turns:int64<i => i >=? 0> won:bool]
+World:type=[room:string inventory:set<string> flags:set<string> score:int64<(>=? 0)> turns:int64<(>=? 0)> won:bool]
 Room:type=[name:string title:string exits:dict<string string> items:array<string>]
 rooms=():>dict<string Room>=>{
     return [

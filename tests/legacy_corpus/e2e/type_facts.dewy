@@ -25,7 +25,7 @@ let opener = "[["
 let closer = "]]"
 
 # the tokenizer's block comment: the offset past its closer, within the source
-let eat_block = (src:string):>uint64<n => n <=? src.length> | none => {
+let eat_block = (src:string):>uint64<(<=? src.length)> | none => {
     if not src.startswith(opener) return none
     let depth:int64 = 0
     let i:uint64 = 0

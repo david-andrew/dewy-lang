@@ -1,5 +1,5 @@
 # A result refinement may bound the result by a parameter's length:
-# `:>uint64<n => n <=? src.length>` (or `<?`). The function proves it at
+# `:>uint64<(<=? src.length)>` (or `<?`). The function proves it at
 # every return; a call proves what it needs from it. The promise follows
 # the value: `eat(src[i..])` gives `length <= src.length - i`, which a
 # record field, an array of records, a sort, an element read, and an unpack
@@ -54,8 +54,8 @@ let tokenize = (src:string):>array<string> => {
 }
 
 # a promise about the sequence itself, and one passed through
-let take = (src:string):>uint64<n => n <=? src.length> => if src.length >? 3 3 else src.length
-let relay = (text:string):>uint64<n => n <? text.length> | none => {
+let take = (src:string):>uint64<(<=? src.length)> => if src.length >? 3 3 else src.length
+let relay = (text:string):>uint64<(<? text.length)> | none => {
     if text.length =? 0 return none
     let n = take(text)                         # n <= text.length
     if n =? text.length return n - 1

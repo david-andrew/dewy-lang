@@ -1,7 +1,7 @@
 # A bare `Name = ...` rooted at a type name declares a type alias, as
 # `Name:type = ...` does: refined strings and integers, and intersections.
 Short = string<length <=? 3>
-Positive = int64<i => i >? 0>
+Positive = int64<(>? 0)>
 Pair:type = [a:int64 b:int64]
 Named = Pair & [name:string]
 fit = (s:Short):>int64 => s.length

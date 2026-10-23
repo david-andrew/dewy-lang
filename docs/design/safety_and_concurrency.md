@@ -32,7 +32,7 @@ Application-level Rust `unsafe` is often “skip this check” or “the borrow 
 - proven indexing, slicing, nonzero division, narrowing, `unreachable` cases the solver already knows are dead
 - nonescaping `@` helpers that mutate a caller’s local without lifetime annotations
 - two mutable places in one call that analysis proves disjoint (sibling fields, constant indices, and — when the analysis can — dynamic partitions)
-- typestate and contractual preconditions expressed as refinements (`int64 & ~0`, `array<length >? 0>`, `:>uint64<n => n <=? src.length>`)
+- typestate and contractual preconditions expressed as refinements (`int64 & ~0`, `array<length >? 0>`, `:>uint64<(<=? src.length)>`)
 
 `split_at_mut` is the middle case. Rust’s *use* is safe and its *implementation* is `unsafe`. Dewy should make more *uses* safe by treating “one place becomes two disjoint places” as a language rule or a single trusted primitive, then proving `0..i` and `i..n` disjoint as ordinary place facts.
 

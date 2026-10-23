@@ -1,5 +1,5 @@
-R:type=[low:int64=2 high:int64<i => i >=? low>=low]
-append=(@xs:array<int64> x:int64):>addr<i => i <? xs.length>=>{
+R:type=[low:int64=2 high:int64<(>=? low)>=low]
+append=(@xs:array<int64> x:int64):>addr<(<? xs.length)>=>{
     let i=xs.length
     xs.push(x)
     return i
@@ -17,7 +17,7 @@ main=()=>{
     let ys:array<int64>=[]
     let i=append(@ys 3)
     $assert i <? ys.length
-    let positive:array<int8<i => i >? 0>>=[1 2]
+    let positive:array<int8<(>? 0)>>=[1 2]
     positive[1]=3
     printl("{saved.low} {r.low} {r.high} {xs.length} {ys[i]} {positive[1]}")
 }
