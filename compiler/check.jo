@@ -3491,6 +3491,7 @@ elem_field_assign = (s: int) -> int:
         set_list(checked_index, [clone(recv), comp_ident(iname, pos)])
         storage = bc_field(recv, "items", pos)
         nodes[ix] = Node(kind = .index, pos = pos, a = i32(storage), b = i32(checked_index))
+        add_flag(ix, NF_LIB_INDEX)
         c0 = nodes.len()
         nodes.push(nodes[s])
         stmts.push(c0)

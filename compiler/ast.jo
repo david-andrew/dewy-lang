@@ -76,6 +76,7 @@ const NF_LOOPCOUNT = 33554432 # a vardecl a combined loop is rewritten with (`i 
                               # a field: a library member a loop's lowering reads (a map's keys), never warned as the library's own
 const NF_LANG_BODY = NF_LOOPCOUNT # lambda: a parallel or spawn body, whose writes their own checks govern
 const NF_MAP_PAIR = NF_LOOPCOUNT  # tuple: a dictionary comprehension's (key, value)
+const NF_LIB_INDEX = NF_LOOPCOUNT # index: a library helper's checked position (a pool's direct update): its bounds are the library's obligation
 const NF_COMPREHENSION = 67108864 # block: first declaration is the collection accumulator
 const NF_RECORD = 134217728 # anonymous structural record declaration
 const NF_INDEX_CAPTURED = 268435456 # compound custom-index update already captured its indices

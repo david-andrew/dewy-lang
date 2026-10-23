@@ -136,6 +136,18 @@ fact_loop_exhausted = false
 fact_divisors: {int: int} = {}
 fact_requests: FactRequest[]
 fact_terms: FactTerm[]
+
+# A fork's closure (the function argument of `parallel_range`/`parallel_map`,
+# which call it before they return) starts from what its creator knew of its
+# snapshot captures and of the lengths of the arrays it borrows by partition
+# (which nobody resizes during the fork): intervals and rows among them.
+struct FactForkEntry:
+    inner: int[]
+    length: bool[]
+    bounds: FactBound[]
+    rows: FactDifference[]
+fact_fork_nodes: {int: bool} = {}
+fact_fork_entries: {int: FactForkEntry} = {}
 fact_validated: {int: bool} = {}
 fact_owner = 0
 fact_query = false
@@ -673,6 +685,13 @@ fact_prelude_call = (n: int, name: str) -> bool:
     d = int(fns[f].decl)
     d != 0 and modules[int(fns[f].mod)].is_prelude and name_of(int(nodes[d].name)) == name
 
+# A direct call of the bundled library's function named name (std/thread.jo's
+# `parallel_range`, a reviewed contract).
+fact_library_call = (n: int, name: str) -> bool:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    d != 0 and pos_in_lib(nodes[d].pos) and name_of(int(nodes[d].name)) == name
+
 # The fields of record value base, by ordinal, for a dependent field contract.
 # O(fields); each sibling is projected once per record value.
 fact_field_args = (s: mut FactState, base: int) -> int[]:
@@ -921,6 +940,7 @@ fact_probe_function = (f: int, disjoint: bool = false) -> {int: bool}:
     state = FactState()
     refine = refine_active or refine_requests.len() > 0
     if refine: refine_fact_entry(f, state)
+    if fact_fork_entries.len() > 0: fact_fork_seed(f, state)
     fact_slice_prepare(f)
     fact_probe_diverged = fact_slice.probe_only
     fact_probe_callees = []
@@ -1222,6 +1242,81 @@ fact_distance = (s: FactState, a: int, b: int, limit: int) -> bool:
                 pending.push(slot)
         visits += s.differences.len() - 1 - previous
     false
+
+# The smallest d found with a - b <= d (FACT_MAX: none), by fact_distance's
+# bounded relaxation.
+fact_shortest = (s: FactState, a: int, b: int) -> int:
+    if a == 0 or b == 0: return FACT_MAX
+    if a == b: return 0
+    best = FACT_MAX
+    direct = fact_row_find(s, a, b)
+    if direct >= 0: best = s.differences[direct].limit
+    if fact_difference_head(s, b, 0) < 0: return best
+    terms = [b]
+    distances = [0]
+    pending = [0]
+    cursor = 0
+    visits = 0
+    loop cursor < pending.len() and visits < 256:
+        index = pending[cursor]
+        cursor += 1
+        source = terms[index]
+        distance = distances[index]
+        previous = -1
+        ri = fact_difference_head(s, source, 0)
+        loop ri >= 0:
+            row = s.differences[ri]
+            visits += ri - previous
+            previous = ri
+            ri = fact_difference_next(s, ri, 0)
+            if visits > 256: return best
+            if not fact_add_fits(distance, row.limit): continue
+            value = distance + row.limit
+            if row.a == a:
+                best = min(best, value)
+                continue
+            slot = -1
+            loop t in [0..terms.len()):
+                if terms[t] == row.a: slot = t; break
+            if slot < 0:
+                if terms.len() >= 32: continue
+                slot = terms.len()
+                terms.push(row.a)
+                distances.push(value)
+                pending.push(slot)
+            else if value < distances[slot]:
+                distances[slot] = value
+                pending.push(slot)
+        visits += s.differences.len() - 1 - previous
+    best
+
+# Rows for a sum of two symbolic operands, v = a + b, through terms already
+# evaluated (a guard's `first+n <=? xs.length`, a range's `n-col`): with
+# w = a + c, b - c <= d gives v - w <= d; with t = c - a, b - t <= d gives
+# v - c <= d (each mirrored). Found before v exists, so a bounded sum is no
+# possible wrap. O(terms) candidates, two bounded relaxations each.
+fact_sum_rows = (s: FactState, a: int, b: int) -> FactDifference[]:
+    rows: FactDifference[]
+    loop i in [0..s.ids.len()):
+        t = s.ids[i]
+        term = fact_terms[t]
+        if term.a == 0 or term.b == 0: continue
+        loop side in [0..2):
+            mine = if side == 0: a else: b
+            other = if side == 0: b else: a
+            if term.op == .plus and (term.a == mine or term.b == mine):
+                c = if term.a == mine: term.b else: term.a
+                up = fact_shortest(s, other, c)
+                if up != FACT_MAX: rows.push(FactDifference(0, t, up))
+                down = fact_shortest(s, c, other)
+                if down != FACT_MAX: rows.push(FactDifference(t, 0, down))
+            else if term.op == .minus and term.b == mine:
+                up = fact_shortest(s, other, t)
+                if up != FACT_MAX: rows.push(FactDifference(0, term.a, up))
+                down = fact_shortest(s, t, other)
+                if down != FACT_MAX: rows.push(FactDifference(term.a, 0, down))
+            if rows.len() >= 8: return rows
+    rows
 
 # Selected affine rows share a single symbolic root. Normalize only on query,
 # with a 32-node budget; unrelated roots and nonlinear products stay unknown.
@@ -1842,13 +1937,33 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         hi = max(max(x.lo * y.lo, x.lo * y.hi), max(x.hi * y.lo, x.hi * y.hi))
         if not sa_fits(lo, ntype(n)) or not sa_fits(hi, ntype(n)): return fact_unmodeled(s, n, .wrap)
         return fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0), FactTerm(op, a, b, n, ntype(n)))
+    # (two symbolic operands: the same sum again, or rows through terms
+    # already evaluated, which can also bound it)
+    sums: FactDifference[]
+    if op == .plus and a != 0 and b != 0 and x.lo != x.hi and y.lo != y.hi:
+        loop i in [0..s.ids.len()):
+            t = fact_terms[s.ids[i]]
+            if t.op == .plus and t.type == ntype(n) and (t.a == a and t.b == b or t.a == b and t.b == a): return s.ids[i]
+        sums = fact_sum_rows(s, a, b)
     if op == .minus:
         if y.lo == FACT_MIN: return fact_unmodeled(s, n, .wrap)
         lo = -y.hi
         y.hi = -y.lo
         y.lo = lo
-    if not fact_add_fits(x.lo, y.lo) or not fact_add_fits(x.hi, y.hi): return fact_unmodeled(s, n, .wrap)
-    lo = x.lo + y.lo; hi = x.hi + y.hi
+    lo = FACT_MIN; hi = FACT_MAX
+    low = fact_add_fits(x.lo, y.lo); high = fact_add_fits(x.hi, y.hi)
+    if low: lo = x.lo + y.lo
+    if high: hi = x.hi + y.hi
+    loop r in sums:
+        if r.a == 0:
+            c = fact_bound(s, r.b)
+            if c.hi != FACT_MAX and fact_add_fits(c.hi, r.limit) and (not high or c.hi + r.limit < hi):
+                hi = c.hi + r.limit; high = true
+        else:
+            c = fact_bound(s, r.a)
+            if c.lo != FACT_MIN and r.limit != FACT_MIN and fact_add_fits(c.lo, -r.limit) and (not low or c.lo - r.limit > lo):
+                lo = c.lo - r.limit; low = true
+    if not low or not high: return fact_unmodeled(s, n, .wrap)
     if not sa_fits(lo, ntype(n)) or not sa_fits(hi, ntype(n)): return fact_unmodeled(s, n, .wrap)
     # (`i+2` again names the value the last `i+2` made: a scanner's reads
     # `b[i] b[i+1] b[i+2]` and its guard `i+2 <? n` share rows instead of
@@ -1857,6 +1972,7 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         same = fact_offset_value(s, a, y.lo)
         if same != 0: return same
     value = fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0), FactTerm(op, a, b, n, ntype(n)))
+    loop r in sums: fact_difference(s, (if r.a == 0: value else: r.a), (if r.b == 0: value else: r.b), r.limit, n)
     if y.lo == y.hi and y.lo != FACT_MIN:
         fact_difference(s, value, a, y.lo, 0, 16)
         fact_difference(s, a, value, -y.lo, 0, 16)
@@ -1983,6 +2099,24 @@ fact_bitwise = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
     # `i & (n-1)`; constant masks and shifts are exact enough as intervals)
     if op == .amp and y.lo >= 0 and y.lo != y.hi: fact_difference(s, v, b, 0, n)
     if op == .amp and x.lo >= 0 and x.lo != x.hi and (y.lo < 0 or y.lo != y.hi): fact_difference(s, v, a, 0, n)
+    v
+
+fact_extremum_call = (n: int) -> bool:
+    nkids(n) == 2 and fact_scalar(ntype(n)) and is_int(ntype(n)) and representation_type(ntype(n)) != T_U64 and (fact_prelude_call(n, "min") or fact_prelude_call(n, "max"))
+
+# The prelude's integer `min(a b)` (or `max`): one of its operands, so its
+# interval is theirs combined, and a row below (above) each operand. O(1).
+fact_extremum = (s: mut FactState, n: int, a: int, b: int, lower: bool) -> int:
+    x = fact_bound(s, a); y = fact_bound(s, b)
+    r = if lower: FactBound(min(x.lo, y.lo), min(x.hi, y.hi)) else: FactBound(max(x.lo, y.lo), max(x.hi, y.hi))
+    r.nz = r.lo > 0 or r.hi < 0 or x.nz and y.nz
+    v = fact_new(s, r, FactTerm(.eof, a, b, n, ntype(n)))
+    if lower:
+        fact_difference(s, v, a, 0, n)
+        fact_difference(s, v, b, 0, n)
+    else:
+        fact_difference(s, a, v, 0, n)
+        fact_difference(s, b, v, 0, n)
     v
 
 # The builtin floor helper a Dewy `//` or `%` resolved to (fact_floor's kind), or 0.
@@ -2843,6 +2977,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
     work = [int(fns[f].body)]
     values: int[]
     active: int[]
+    forks: int[]
     probe_only = false
     if summary or result_active: values.push(int(fns[f].body))
     cursor = 0
@@ -2889,6 +3024,11 @@ fact_slice_prepare = (f: int, summary: bool = false):
         else if k == .break_ or k == .continue_ or k == .defer_: active.push(n)
         else if k == .call:
             if ntype(n) == T_NEVER or nodes[n].aux == 0 and library_exit_call(n): active.push(n)
+            if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (fact_library_call(n, "parallel_range") or fact_library_call(n, "parallel_map")):
+                loop arg in kids(n):
+                    if nodes[arg].kind == .lambda and nodes[arg].sym > 0:
+                        fact_fork_nodes[arg] = true
+                        forks.push(arg)
             if result_active or proof_active or fact_divisors.has(n): values.push(n)
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_string_call(n) >= 2: values.push(n)
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_array_call(n) != 0:
@@ -2946,6 +3086,18 @@ fact_slice_prepare = (f: int, summary: bool = false):
         else if k == .lambda and ownership_decls.len() == 0: pass
         else if k == .lambda or k == .partial or k == .fnref or k == .map_lit or k == .cast or mask < 0: opaque_writes.push(n)
         else if k == .str_lit and nodes[n].aux != 0: exposed_writes.push(n)
+    # (a fork closure's creation reads its captures: their definitions)
+    loop lam in forks:
+        values.push(lam)
+        loop cap in fns[int(nodes[lam].sym)].caps:
+            o = int(cap.outer)
+            if o <= 0: continue
+            edge = fact_index_get(writers.heads, fact_root_key(PlaceIdentity(.local, int(locals[o].owner), o)))
+            loop edge >= 0:
+                definition = writers.nodes[edge]
+                edge = writers.next[edge]
+                if nodes[definition].kind == .call: active.push(definition)
+                else: values.push(definition)
     cursor = 0
     acursor = 0
     any_root = false
@@ -3000,7 +3152,9 @@ fact_slice_prepare = (f: int, summary: bool = false):
         if k == .block:
             if nkids(n) > 0: values.push(kid(n, nkids(n) - 1))
         else if k == .for_ or k == .while_: values.push(int(nodes[n].a))
-        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
+        # (a fork closure's creation reads its captures, pushed above, not its body)
+        else if k == .lambda: pass
+        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
             # Ordinary summaries start from unknown formals: their return
             # facts do not depend on the actual values. Argument obligations
             # and effects remain separate roots of this slice.
@@ -3040,6 +3194,59 @@ fact_slice_prepare = (f: int, summary: bool = false):
             if fact_mark_flags[n] != 0: fact_index_put(flags, n, fact_mark_flags[n])
         fact_slice = FactSlice(flags, probe_only)
     fact_slice_cache[key] = fact_slice
+
+# At a fork closure's creation: its captures' facts, by capture. O(k^2)
+# bounded relaxations for k <= 16 captured terms.
+fact_fork_record = (lam: int, s: mut FactState):
+    f = int(nodes[lam].sym)
+    if f <= 0 or f >= fns.len(): return
+    entry = FactForkEntry()
+    values: int[]
+    loop cap in fns[f].caps:
+        o = int(cap.outer)
+        inner = int(cap.inner)
+        if o <= 0 or inner <= 0 or values.len() >= 16: continue
+        flags = int(locals[inner].flags)
+        t = representation_type(int(locals[o].type))
+        snapshot = flags & LF_VALUECAP != 0
+        array = tkind(t) == .array and (snapshot or flags & LF_PARTBORROW != 0)
+        if not array and not (snapshot and fact_scalar(t) and is_int(t) and t != T_U64): continue
+        p = PlaceIdentity(.local, int(locals[o].owner), o)
+        i = fact_binding(s, p)
+        v = 0
+        if i >= 0: v = s.bindings[i].value
+        else:
+            v = fact_new(s, fact_domain(t), FactTerm(type = t))
+            fact_bind(s, p, v)
+        if v == 0: continue
+        if array: v = fact_project(s, v, -1, false, T_INT)
+        entry.inner.push(inner)
+        entry.length.push(array)
+        values.push(v)
+    loop v in values: entry.bounds.push(fact_bound(s, v))
+    loop i in [0..values.len()):
+        loop j in [0..values.len()):
+            if i == j: continue
+            d = fact_shortest(s, values[i], values[j])
+            if d != FACT_MAX: entry.rows.push(FactDifference(i, j, d))
+    fact_fork_entries[lam] = entry
+
+fact_fork_seed = (f: int, s: mut FactState):
+    if fns[f].kind != FK_LAMBDA: return
+    entry = fact_fork_entries.get(int(fns[f].decl)) ?? FactForkEntry()
+    values: int[]
+    loop i in [0..entry.inner.len()):
+        inner = entry.inner[i]
+        p = PlaceIdentity(.local, f, inner)
+        v = fact_new(s, entry.bounds[i], FactTerm(type = T_INT))
+        values.push(v)
+        if entry.length[i]:
+            t = int(locals[inner].type)
+            array = fact_new(s, FactBound(), FactTerm(type = t))
+            if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(array, -1, false, v))
+            fact_bind(s, p, array)
+        else: fact_bind(s, p, v)
+    loop r in entry.rows: fact_difference(s, values[r.a], values[r.b], r.limit)
 
 # Undemanded values still execute their effectful descendants. Ordinary calls
 # apply the same settled write summary without requesting a numeric return
@@ -3091,6 +3298,10 @@ fact_obliged = (n: int) -> bool:
     if k == .binary and nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent))): return true
     if k == .conv and nodes[n].aux == i32(int(CV.refinement)): return true
     if k == .call and (fact_divisors.has(n) or fact_floor_call(n) != 0 or fact_string_call(n) >= 2 or fact_array_call(n) != 0): return true
+    # (a fork closure's obligations start from its creator's facts)
+    if k == .call and (fact_library_call(n, "parallel_range") or fact_library_call(n, "parallel_map")):
+        loop arg in kids(n):
+            if nodes[arg].kind == .lambda and fact_obliged(int(nodes[arg].b)): return true
     if k == .intrinsic:
         id = nodes[n].aux as IN
         if id == .static_assert or id == .runtime_assert or id == .assert or id == .lend or id == .loan_length or id == .loan_store or id == .loan_address or id == .loan_load or id == .pop or id == .remove or id == .truncate: return true
@@ -3200,10 +3411,12 @@ fact_capture = (n: int, s: mut FactState) -> int:
         if nodes[r].b != 0:
             hi = fact_capture(int(nodes[r].b), s)
             if has_flag(r, NF_INCLUSIVE): hi = fact_arithmetic(s, int(nodes[r].b), .plus, hi, fact_constant(s, 1))
-        if fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query):
+        if fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query or fact_probe_on):
             zero = fact_constant(s, 0)
             checks = [fact_compare(s, .le, zero, lo), fact_compare(s, .le, lo, hi), fact_compare(s, .le, hi, length)]
-            if checks[0] != 1 or checks[1] != 1 or checks[2] != 1: wit_slice(n, s, lo, hi, length, checks)
+            # (a probe records its answer: never a report)
+            if fact_probe_on: fact_probe_record(n, checks[0] == 1 and checks[1] == 1 and checks[2] == 1)
+            else if checks[0] != 1 or checks[1] != 1 or checks[2] != 1: wit_slice(n, s, lo, hi, length, checks)
         value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
         size = length
         if nodes[r].a != 0 or nodes[r].b != 0: size = fact_arithmetic(s, (if nodes[r].b != 0: int(nodes[r].b) else: int(nodes[r].a)), .minus, hi, lo)
@@ -3272,6 +3485,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
     # calls) and writes nothing: its body runs only when called, and every
     # call that can reach it, indirect or through a callee's summary, forgets
     # what the body may write. (Ownership may move captures: still opaque.)
+    if k == .lambda and fact_speculating == 0 and fact_fork_nodes.has(n): fact_fork_record(n, s)
     if k == .lambda and ownership_decls.len() == 0: return 0
     if k == .lambda or k == .fnref or k == .partial:
         fact_capture(int(nodes[n].a), s)
@@ -3652,6 +3866,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
         floor = fact_floor_call(n)
         if floor != 0 and representation_type(ntype(n)) == T_U64: return fact_floor_unsigned(s, n, floor, values[0], values[1])
         if floor != 0: return fact_floor(s, n, floor, values[0], values[1], true)
+        if fact_extremum_call(n): return fact_extremum(s, n, values[0], values[1], fact_prelude_call(n, "min"))
         if fact_ends_path(n): s.live = false
         result = fact_new(s, fact_domain(ntype(n), .call, n), FactTerm(type = ntype(n)))
         if nodes[n].aux == 0 and nodes[n].sym > 0:
@@ -3665,9 +3880,9 @@ fact_capture = (n: int, s: mut FactState) -> int:
             # (reviewed prelude contracts: `parallel_range(n f)` has max(0, n)
             # results, `parallel_map(xs f)` one per element)
             if nkids(n) == 2 and tkind(representation_type(ntype(n))) == .array:
-                if fact_prelude_call(n, "parallel_range") and fact_scalar(ntype(kid(n, 0))):
+                if fact_library_call(n, "parallel_range") and fact_scalar(ntype(kid(n, 0))):
                     fact_add_projection(s, FactProjection(result, -1, false, fact_clamped(s, entry[0], n)))
-                else if fact_prelude_call(n, "parallel_map") and tkind(representation_type(ntype(kid(n, 0)))) == .array:
+                else if fact_library_call(n, "parallel_map") and tkind(representation_type(ntype(kid(n, 0)))) == .array:
                     fact_add_projection(s, FactProjection(result, -1, false, fact_project(s, entry[0], -1, false, T_INT)))
             summary = fact_summary(f)
             if summary.seen:
@@ -3807,7 +4022,13 @@ facts_finalize = ():
     if fact_policy == .RequireStatic:
         loop f in [1..fns.len()):
             if fns[f].body != 0 and fns[f].state == 2 and not fn_in_lib(f): demanded[f] = true
+    # (closures after the functions that create them: a fork's entry facts)
+    order: int[]
     loop f, _ in demanded:
+        if f > 0 and f < fns.len() and fns[f].kind != FK_LAMBDA: order.push(f)
+    loop f, _ in demanded:
+        if f <= 0 or f >= fns.len() or fns[f].kind == FK_LAMBDA: order.push(f)
+    loop f in order:
         if f <= 0 or f >= isolation_limit or fns[f].state != 2: fatal(-1, "cannot prove assertion: unsettled checked body")
         icb = ic_fn(IC_FACTS, f)
         if let run = fact_probe_runs.get(f):
@@ -3828,6 +4049,7 @@ facts_finalize = ():
             ic_restore(icb)
             continue
         if refine_active or refine_requests.len() > 0: refine_fact_entry(f, state)
+        if fact_fork_entries.len() > 0: fact_fork_seed(f, state)
         fact_slice_prepare(f)
         result = fact_capture(int(fns[f].body), state)
         if result_active: result_exit(f, result, int(fns[f].body), state)
@@ -3863,6 +4085,8 @@ facts_finalize = ():
 facts_reset = ():
     fact_slice = FactSlice()
     fact_slice_cache = {}
+    fact_fork_nodes = {}
+    fact_fork_entries = {}
     fact_probe_runs = {}
     fact_returns_cache = {}
     fact_owner = 0

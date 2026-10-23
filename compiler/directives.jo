@@ -214,7 +214,9 @@ dir_defer = (n: int, what: str, deferrable: bool) -> bool:
     # (erased proofs have no runtime fallback)
     if proof_active and fact_owner > 0 and fact_owner < fns.len() and proof_decls.has(int(fns[fact_owner].decl)): return false
     p = nodes[n].pos
-    policy = dir_policy(p)
+    # (`pool[h].hp -= 1` indexes `items` at `__pool_index`'s answer: the
+    # library's invariant, which keeps its check, as the library's own do)
+    policy = if nodes[n].kind == .index and has_flag(n, NF_LIB_INDEX): DIR_IMPLICIT else: dir_policy(p)
     if policy == DIR_STATIC: return false
     err_notes = []
     dir_sites.push(DirSite(p, what, policy))
