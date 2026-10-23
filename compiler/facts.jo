@@ -1374,6 +1374,23 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
             y.lo = max(y.lo, x.lo + d)
     fact_set_bound(s, a, x)
     fact_set_bound(s, b, y)
+    if op == .lt or op == .le:
+        fact_offset_narrow(s, a, x)
+        fact_offset_narrow(s, b, y)
+
+# A compared offset `i+c` (or `i-c`) narrows i too: `i+1 <? stop` bounds i
+# below stop-1, so a counter guarded at an offset stays below a length. O(1).
+fact_offset_narrow = (s: mut FactState, v: int, b: FactBound):
+    t = fact_terms[v]
+    if t.op != .plus and t.op != .minus or t.a == 0 or t.b == 0: return
+    c = fact_bound(s, t.b)
+    if c.lo != c.hi or c.lo == FACT_MIN or c.lo == FACT_MAX: return
+    k = if t.op == .plus: c.lo else: -c.lo
+    x = fact_bound(s, t.a)
+    if x.reason == .budget and x.lo == FACT_MIN and x.hi == FACT_MAX: return
+    if b.hi != FACT_MAX and fact_add_fits(b.hi, -k): x.hi = min(x.hi, b.hi - k)
+    if b.lo != FACT_MIN and fact_add_fits(b.lo, -k): x.lo = max(x.lo, b.lo - k)
+    fact_set_bound(s, t.a, x)
 
 fact_hull = (a: FactBound, b: FactBound, at: int) -> FactBound:
     FactBound(min(a.lo, b.lo), max(a.hi, b.hi), (a.nz or a.lo > 0 or a.hi < 0) and (b.nz or b.lo > 0 or b.hi < 0), fact_hull_reason(at), at)
@@ -2088,6 +2105,8 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
                 if i == j or y.lo == FACT_MIN or not fact_add_fits(x.lo, -y.lo) or x.lo - y.lo == FACT_MIN: continue
                 if fact_entails(back, back.bindings[i].value, back.bindings[j].value, x.lo - y.lo): lockstep.push(FactDifference(i, j, x.lo - y.lo))
     carried: FactDifference[]
+    offsets: int[]
+    if changing.len() > 0 and nodes[at].kind == .while_: fact_offset_guarded(int(nodes[at].a), offsets, 0)
     if changing.len() > 0:
         loop row in back.differences:
             upper = changing.has(row.a)
@@ -2101,8 +2120,6 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
         # (only for a counter the loop's own condition tests at an offset,
         # `i+2 <? n`: elsewhere a row the body later breaks would perturb
         # widening for nothing)
-        offsets: int[]
-        if nodes[at].kind == .while_: fact_offset_guarded(int(nodes[at].a), offsets, 0)
         loop binding in back.bindings:
             if not changing.has(binding.value) or binding.place.root != .local or binding.place.declaration not in offsets: continue
             fact_loop_paths(entry, back, binding.value, true, changing, started, carried)
@@ -2118,7 +2135,13 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
             before = fact_bound(old, old.bindings[previous].value)
             domain = fact_domain(t, .loop_, at)
             bound.lo = if bound.lo < before.lo: domain.lo else: before.lo
-            bound.hi = if bound.hi > before.hi: domain.hi else: before.hi
+            # (a counter the condition tests at an offset, growing below any
+            # length, stops first at the largest length, where a guard on a
+            # length or a bound below one holds it (`loop i+1 <? stop`); past
+            # it, at the domain)
+            limit = fact_length_max()
+            offset = offsets.len() > 0 and binding.place.root == .local and binding.place.declaration in offsets
+            bound.hi = if bound.hi <= before.hi: before.hi else if offset and before.hi < limit and bound.hi <= limit and domain.hi > limit: limit else: domain.hi
         # Stable values keep their immutable identities and projection facts.
         original = fact_binding(entry, binding.place)
         if original >= 0 and entry.bindings[original].value == v:
@@ -2156,6 +2179,13 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
         v = s.bindings[h].value
         if upper and not fact_entails(entry, start, other, row.limit): continue
         if not upper and not fact_entails(entry, other, start, row.limit): continue
+        # (widening: a row the last header lacked or held tighter, as a
+        # counter's distance from its symbolic start, is dropped)
+        if widen:
+            p = fact_binding(old, back.bindings[found].place)
+            if p >= 0 and old.bindings[p].value != start:
+                r = if upper: fact_row_find(old, old.bindings[p].value, other) else: fact_row_find(old, other, old.bindings[p].value)
+                if r < 0 or old.differences[r].limit < row.limit: continue
         o = fact_bound(s, other)
         b = fact_bound(s, v)
         if upper:
@@ -3534,7 +3564,11 @@ fact_capture = (n: int, s: mut FactState) -> int:
             if ownership_decls.len() != 0: values[i] = fact_owner_value(arg, values[i], s)
         loop i in [0..nkids(n)):
             arg = kid(n, i)
-            if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)): ref_check(arg, values[i], values, s)
+            if nodes[arg].kind != .conv or nodes[arg].aux != i32(int(CV.refinement)): continue
+            # (a refined arm of this function's own result, made a union
+            # member: its formals are this function's parameters)
+            if nodes[n].aux == 3 and nkids(n) == 1 and ref_signature_has(fact_owner, zonk(int(nodes[arg].aux2))): ref_check(arg, values[i], ref_fact_current_entry(s), s)
+            else: ref_check(arg, values[i], values, s)
         if fact_speculating == 0:
             floor_probe = fact_probe_on and nkids(n) == 2 and (fact_floor_call(n) == 1 or fact_floor_call(n) == 2)
             if let obligation = fact_divisors.get(n):

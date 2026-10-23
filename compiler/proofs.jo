@@ -261,7 +261,10 @@ ref_arm_publish = (f: int, result: int, values: int[], s: mut FactState):
     loop i in [0..members.len()):
         t = prune(members[i])
         if types[t].kind != .refined or s.conditional.len() >= 32: continue
-        if selector == 0: selector = fact_project(s, result, -3, false, T_INT)
+        if selector == 0:
+            selector = fact_project(s, result, -3, false, T_INT)
+            b = fact_bound(s, selector)
+            fact_set_bound(s, selector, FactBound(max(0, b.lo), min((if k == .opt: 1 else: members.len() - 1), b.hi)))
         tag = if k == .opt: 1 else: i
         payload = fact_project(s, result, -4, false, t)
         s.conditional.push(ResultEvidence(selector, tag, int(types[t].st), values, fns[f].ptypes, payload, int(types[t].elem)))

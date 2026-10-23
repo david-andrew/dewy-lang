@@ -549,7 +549,10 @@ str_set_text_of = (n: int):
 # `return i` from `:>addr<…> | none`) moved below its wrapping conversions.
 ref_wrapped_check = (n0: int) -> int:
     n = n0
-    loop nodes[n].kind == .conv and nodes[n].aux != i32(int(CV.refinement)) and nodes[n].a != 0: n = int(nodes[n].a)
+    loop depth in [0..8):
+        if nodes[n].kind == .conv and nodes[n].aux != i32(int(CV.refinement)) and nodes[n].a != 0: n = int(nodes[n].a)
+        else if nodes[n].kind == .call and nodes[n].aux == 3 and nkids(n) == 1: n = kid(n, 0)
+        else: break
     n
 
 refine_coerce = (n: int, target: int) -> int:
