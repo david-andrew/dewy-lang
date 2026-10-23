@@ -17,6 +17,14 @@ import p"./input.udewy"
 # ---------- Track flyover camera --------------------------------------------------
 
 let flyover_camera = ():>void => {
+    if cstr_eq(TRACK_NAME_BUF "PARALLAX ENGINE\0") {
+        # Frame the machine itself: the broad hulls inflate the generic
+        # bounds, and an end-on opening view hides the interior route.
+        camera_orbit(1400 * FP_ONE 650 * FP_ONE (-200 * FP_ONE)
+                     4700 * FP_ONE 2600 * FP_ONE (10000 + frame_count * 16) % ANG_FINE_TURN)
+        cur_fov_top_q16 = 75000
+        return void
+    }
     let cx_q:Q16 = (g_track_min_x + g_track_max_x) // 2
     let cy_q:Q16 = (g_track_min_y + g_track_max_y) // 2
     let cz_q:Q16 = (g_track_min_z + g_track_max_z) // 2

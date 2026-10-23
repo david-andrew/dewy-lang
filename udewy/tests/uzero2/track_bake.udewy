@@ -385,6 +385,13 @@ let seg_mesh_cols = (sg:Ptr):>int => {
     let xs_max:int = max_i(abs_i(__load__(node_p(__load__(sg + SG_N0)) + ND_XSECT))
                            abs_i(__load__(node_p(__load__(sg + SG_N1)) + ND_XSECT)))
     let ldiv:int = clamp_i(2 + (xs_max * 14) // 1024 2 MESH_MAX_COLS)
+    # Large reactor hulls need a smaller chord error than ordinary pipes.
+    # 64 columns keep a 605 m radius within 0.75 m of the query surface and
+    # fit exactly in a 32-row / 8192-vertex render batch. Existing <=200 m
+    # half-width pipes retain the old mesh. Fixed bound, no adaptive pass.
+    let max_width:Q16 = max_i(__load__(node_p(__load__(sg + SG_N0)) + ND_WL)
+                              __load__(node_p(__load__(sg + SG_N1)) + ND_WL))
+    if (max_width >? 600 * FP_ONE) and (xs_max >=? XSECT_CLOSED_MIN) { ldiv = 64 }
     return ldiv + 1
 }
 

@@ -1,13 +1,10 @@
-# Parallax Engine: an interwoven three-lap circuit built entirely from the
-# existing track grammar. The high road and the home straight occupy the
-# same skyline at different heights; the inversion is the eastern landmark.
-#
-# Racing rhythm: climbing esses -> energy/pace fork -> pipe inversion ->
-# swelling exterior tube -> bank reversal -> low recovery straight.
-# The outer fork restores energy. The shorter inner bridge spends that
-# opportunity on a boosted entry and an exposed full roll. Both rejoin
-# before the inversion, with identical lap progress at the merge.
-# Approach the fork on the left for the spindle, right for the capacitor.
+# Parallax Engine / orbital foundry. All driving geometry uses uztrack 1.
+# The road is a machine: a rolling service gantry reaches the underside of
+# two enormous reactor hulls, then a vertical drop feeds a launch chamber.
+# On the hulls, the whole circumference is driveable. The open collar between
+# them demands a return to the marked meridian; it is not a cosmetic tube.
+# The launch has a lower, connected recharge bypass. The final alternating
+# banks narrow after the landing, so exit speed must be planned in advance.
 
 import p"./prelude.udewy"
 
@@ -16,92 +13,111 @@ uztrack 1
 name PARALLAX ENGINE
 laps 3
 space
-# GRID / CLIMB. A full straight to settle the pack before the bank changes.
-node grid pos 0 180 600 tan 0 0 -1 width 52 52 xsect 0 surf grid
-node approach pos 0 180 0 tan -0.3 0.05 -1 roll -8 width 52 52 xsect 0 surf normal
-node esses0 pos -250 210 -350 tan -0.85 0.14 -0.5 roll -22 width 56 56 xsect 0 surf normal
-node esses1 pos -650 280 -450 tan -1 0.2 0.1 roll -28 width 62 62 xsect 0 surf normal
-node esses2 pos -1000 360 -250 tan -0.45 0.2 0.9 roll -22 width 56 56 xsect 0 surf normal
-node esses3 pos -1100 420 150 tan 0 0.1 1 roll 12 width 48 48 xsect 0 surf normal
-node fork pos -950 440 550 tan 0 0 1 width 48 48 xsect 0 surf normal
-# CAPACITOR. Wide, railed outer crescent; the long green sector buys boosts
-# for the next lap. A driver with a full battery has a reason to skip it.
-node outer0 pos -950 440 1000 tan 0.7 0 0.7 roll 24 width 68 68 xsect 0 surf normal
-node outer1 pos 0 440 1400 tan 1 0 0 roll 20 width 76 76 xsect 0 surf recharge
-node outer2 pos 950 440 1000 tan 0.7 0 -0.7 roll 24 width 68 68 xsect 0 surf normal
-node merge pos 1100 440 400 tan 0 0 -1 width 60 60 xsect 0 surf normal
-# SPINDLE. The inside cut is visible from the fork: orange entry, then a
-# pink ribbon rotating once above the low return. No hidden gap or leap of
-# faith; commit to the narrow centre and let the road carry the inversion.
-node bridge0 pos -650 440 850 tan 1 0 0 width 28 28 xsect 0 surf normal
-node bridge1 pos 0 440 850 tan 1 0 0 up 0 -1 0 width 28 28 xsect 0 surf cork
-node bridge2 pos 650 440 850 tan 1 0 0 width 28 28 xsect 0 surf normal
-# IRIS. The shared road encloses gradually, then makes a drifting vertical
-# loop. Explicit up vectors keep the frame continuous through dead vertical.
-node iris0 pos 1100 440 0 tan 0 0 -1 width 90 90 xsect 180 surf normal
-node iris1 pos 1100 440 -450 tan 0 0 -1 up 0 1 0 width 125 125 xsect 360 surf loop
-node loop0 pos 1220 680 -690 tan 0 1 0 up 0 0 -1 width 125 125 xsect 360 surf loop
-node loop1 pos 1340 920 -450 tan 0 0 1 up 0 -1 0 width 125 125 xsect 360 surf loop
-node loop2 pos 1460 680 -210 tan 0 -1 0 up 0 0 1 width 125 125 xsect 360 surf loop
-node loop3 pos 1580 440 -450 tan 0 0 -1 up 0 1 0 width 125 125 xsect 360 surf loop
-node iris2 pos 1580 500 -950 tan -0.3 0.3 -1 width 90 90 xsect 180 surf normal
-node saddle pos 1300 600 -1250 tan -1 0.2 -0.25 roll -16 width 60 60 xsect 0 surf normal
-# LENS. Evert onto the tube, swell, neck down, then unfurl above the grid.
-# The varying radius changes the available lateral space without a seam.
-# Crossings are separated vertically; the upper road previews the way home.
-node lens0 pos 700 680 -1350 tan -1 0 0 width 110 110 xsect -180 lift 1 surf normal
-node lens1 pos 100 650 -1200 tan -0.8 -0.1 0.6 width 185 185 xsect -360 lift 1 surf normal
-node lens2 pos -200 600 -800 tan 0 -0.1 1 width 100 100 xsect -360 lift 1 surf cork
-node lens3 pos -150 560 -300 tan 0.4 -0.1 1 width 160 160 xsect -360 lift 1 surf normal
-node lens4 pos 100 500 100 tan 0.8 -0.2 0.6 width 160 160 xsect -360 lift 1 surf normal
-node lens5 pos 500 420 300 tan 1 -0.2 0 width 120 120 xsect -360 lift 1 surf normal
-node lens6 pos 850 340 150 tan 0 -0.2 -1 width 95 95 xsect -180 lift 1 surf normal
-# UNDERTOW. Open to a railed ribbon before the direction change. The green
-# straight gives a partial refill even to a driver who took the spindle.
-node undertow pos 700 260 -200 tan -1 -0.1 0 roll -24 width 58 58 xsect 0 surf normal
-node return0 pos 350 220 50 tan 0 -0.1 1 roll -18 width 54 54 xsect 0 surf normal
-node return1 pos 350 180 550 tan 0 0 1 width 54 54 xsect 0 surf normal
-node return2 pos 600 180 1000 tan 0 0 1 roll 18 width 60 60 xsect 0 surf normal
-node return3 pos 300 180 1300 tan -1 0 0 roll 26 width 64 64 xsect 0 surf normal
-node return4 pos 0 180 1000 tan 0 0 -1 roll 18 width 56 56 xsect 0 surf normal
-seg launch from grid to approach
-seg climb0 from approach to esses0
-seg climb1 from esses0 to esses1
-seg climb2 from esses1 to esses2
-seg climb3 from esses2 to esses3
-seg decision from esses3 to fork
-seg capacitor0 from fork to outer0
-seg capacitor1 from outer0 to outer1 surf recharge
-seg capacitor2 from outer1 to outer2 surf recharge
-seg capacitor3 from outer2 to merge
-seg iris_in0 from merge to iris0
-seg iris_in1 from iris0 to iris1
-seg inversion0 from iris1 to loop0
-seg inversion1 from loop0 to loop1
-seg inversion2 from loop1 to loop2
-seg inversion3 from loop2 to loop3
-seg iris_out from loop3 to iris2
-seg saddle from iris2 to saddle
-seg evert0 from saddle to lens0
-seg evert1 from lens0 to lens1
-seg lens0 from lens1 to lens2
-seg lens1 from lens2 to lens3
-seg lens2 from lens3 to lens4
-seg lens3 from lens4 to lens5
-seg unfurl0 from lens5 to lens6
-seg unfurl1 from lens6 to undertow
-seg reversal from undertow to return0
-seg recovery from return0 to return1 surf recharge
-seg home0 from return1 to return2
-seg home1 from return2 to return3
-seg home2 from return3 to return4
-seg home3 from return4 to grid
-# With antipodal up vectors on these straight spans, the bake chooses
-# +180 degrees for each half. Together they form one full roll.
-seg spindle_in from fork to bridge0 surf boost
-seg spindle0 from bridge0 to bridge1 rails none surf cork
-seg spindle1 from bridge1 to bridge2 rails none surf cork
-seg spindle_out from bridge2 to merge
-start launch 0.5
-route launch climb0 climb1 climb2 climb3 decision capacitor0 capacitor1 capacitor2 capacitor3 iris_in0 iris_in1 inversion0 inversion1 inversion2 inversion3 iris_out saddle evert0 evert1 lens0 lens1 lens2 lens3 unfurl0 unfurl1 reversal recovery home0 home1 home2 home3
+# DOCK: start upright; the service gantry rolls onto its wall and underside.
+node grid pos -1500 300 1300 tan 0 0 -1 width 44 44 surf grid
+node dock pos -1500 300 500 tan 0 0 -1 width 44 44 surf normal
+node wall pos -1500 450 -100 tan 0.2 0.4 -1 up 1 0 0 width 42 42 surf normal
+node crown pos -1300 700 -600 tan 0.8 0.5 -0.7 up 0 -1 0 width 38 38 surf cork
+node under pos -700 1000 -850 tan 1 0.25 -0.15 up 0 -1 0 width 38 38 surf normal
+node mouth pos 0 1100 -900 tan 1 0 0 up 0 -1 0 width 44 44 surf normal
+# FIRST VESSEL: the riding surface swells to a 1.2 km diameter hull.
+# Shrink while still closed (the engine models the radial surface velocity),
+# then open at constant radius so the collar never drops away underneath.
+node hull0 pos 400 1100 -900 tan 1 0 0 up 0 -1 0 width 160 160 xsect -360 lift 1 surf normal
+node hull1 pos 900 1100 -900 tan 1 0 0 up 0 -1 0 width 850 850 xsect -360 lift 1 surf normal
+node hull2 pos 1500 1100 -900 tan 1 0 0 up 0 -1 0 width 1900 1900 xsect -360 lift 1 surf normal
+node neck0 pos 2200 1100 -900 tan 1 0 0 up 0 -1 0 width 220 220 xsect -360 lift 1 surf ramp
+node collar pos 2450 1100 -900 tan 1 0 0 up 0 -1 0 width 110 110 xsect -180 lift 1 surf ramp
+node neck1 pos 2700 1100 -900 tan 1 0 0 up 0 -1 0 width 220 220 xsect -360 lift 1 surf normal
+# SECOND VESSEL: the broad outer bulge exchanges surface distance for recharge.
+node hull3 pos 3300 1100 -900 tan 1 0 0 up 0 -1 0 width 1300 1300 xsect -360 lift 1 surf normal
+node hull4 pos 3900 1100 -900 tan 1 0 0 up 0 -1 0 width 160 160 xsect -360 lift 1 surf normal
+node lip pos 4300 1100 -900 tan 1 0 0 up 0 -1 0 width 160 160 xsect -360 lift 1 surf normal
+# CORE NEEDLE: left at the collar enters the machine itself. A fast slender
+# spindle runs inside the second hull; its middle opens to a 120-degree arc.
+# Its own internal dive cuts off the outer end-cap and vertical wall.
+# The outer hull is broad and recharges energy before that longer descent.
+node bore0 pos 2750 1100 -720 tan 1 0 0.3 up 0 -1 0 width 220 220 xsect -360 lift 1 surf normal
+node bore1 pos 3000 1100 -680 tan 1 0 0 up 0 -1 0 width 70 70 xsect -360 lift 1 surf normal
+node needle pos 3350 1100 -720 tan 1 0 -0.15 up 0 -1 0 width 23.3333 23.3333 xsect -120 lift 1 surf boost
+node bore2 pos 3700 1100 -800 tan 1 0 -0.3 up 0 -1 0 width 70 70 xsect -360 lift 1 surf normal
+node corefall pos 4200 450 -700 tan 0 -1 0 up -1 0 0 width 70 70 xsect -360 lift 1 surf loop
+node corecatch pos 3900 -200 -600 tan -1 0 0 width 70 70 xsect -360 lift 1 surf loop
+# GUILLOTINE: stay on the closed hull while folding down the machine's
+# end. Only unfold once upright, so gravity assists the floor transition.
+node drop0 pos 4650 750 -750 tan 0 -1 0 up -1 0 0 width 160 160 xsect -360 lift 1 surf loop
+node drop1 pos 4650 150 -750 tan 0 -1 0 up -1 0 0 width 160 160 xsect -360 lift 1 surf loop
+node drop2 pos 4300 -200 -600 tan -1 0 0 up 0 1 0 width 160 160 xsect -360 lift 1 surf loop
+node runway pos 3500 -200 -600 tan -1 0 0 width 48 48 surf normal
+node fork pos 2800 -200 -600 tan -1 0 0 width 48 48 surf normal
+# MASS DRIVER: straight ahead is the launch; right is the lower recharge
+# bypass. The orange runway is long enough to establish speed before flight.
+node ramp pos 2350 -160 -600 tan -1 0.15 0 width 38 38 surf ramp
+node launch pos 2100 -120 -600 tan -1 0.16 0 width 38 38 surf ramp
+# 150 m of genuine air. The broad landing gives overspeed a longer run-out.
+node land pos 1950 -135 -600 tan -1 0 0 width 72 72 surf normal
+node landout pos 1300 -135 -600 tan -1 0 0 width 60 60 surf normal
+node merge pos 850 -135 -600 tan -1 0 0 width 52 52 surf normal
+# LOWER CIRCUIT: longer, protected, recharging. It rejoins before the slalom.
+node bypass0 pos 2450 -300 -1050 tan -0.8 -0.1 -0.6 roll 24 width 56 56 surf normal
+node bypass1 pos 1800 -350 -1200 tan -1 0 0 roll -18 width 64 64 surf recharge
+node bypass2 pos 1150 -260 -1000 tan -0.7 0.2 0.7 roll -24 width 56 56 surf normal
+# SCISSORS: the landing's speed has to be converted into lateral precision.
+# The first bank is generous; the reversal pinches to a 48 m ribbon. An
+# inside edge opens at the apex, but an outside rail still catches overshoot.
+node scoop pos 250 -40 -350 tan -0.5 0.2 1 roll -24 width 70 70 xsect 90 surf normal
+node slalom0 pos 50 100 350 tan 0 0.2 1 width 110 110 xsect 180 surf normal
+node slalom1 pos 200 220 950 tan 0.5 0.1 1 roll -35 width 72 72 xsect 90 surf normal
+node slalom2 pos 200 260 1400 tan -0.6 0 0.8 roll 40 width 40 40 surf normal
+node blade pos -120 260 1750 tan -1 0 0 roll 55 width 24 24 surf cork
+node release pos -600 280 1750 tan -1 0.05 0 roll 28 width 40 40 surf normal
+node cool pos -1050 300 1750 tan -1 0 0 width 56 56 surf normal
+node home pos -1500 300 1450 tan 0 0 -1 roll 18 width 44 44 surf normal
+seg grid from grid to dock
+seg wall from dock to wall
+seg roll from wall to crown
+seg ceiling from crown to under
+seg approach from under to mouth
+seg evert from mouth to hull0
+seg swell0 from hull0 to hull1
+seg swell1 from hull1 to hull2
+seg taper0 from hull2 to neck0
+seg open from neck0 to collar rails none
+seg close from collar to neck1 rails none
+seg swell2 from neck1 to hull3 surf recharge
+seg taper1 from hull3 to hull4
+seg unfurl from hull4 to lip
+seg fold from lip to drop0
+seg drop from drop0 to drop1
+seg catch from drop1 to drop2
+seg brake from drop2 to runway
+seg decision from runway to fork
+seg boost from fork to ramp surf boost
+seg ramp from ramp to launch rails none surf ramp
+seg landing from land to landout rails none
+seg runout from landout to merge
+seg scoop from merge to scoop
+seg bowl from scoop to slalom0
+seg bank0 from slalom0 to slalom1
+seg bank1 from slalom1 to slalom2
+seg knife from slalom2 to blade rails left
+seg release from blade to release
+seg cool from release to cool
+seg home from cool to home
+# A short 150 m service strip gives roughly one boost back at racing speed;
+# it cannot replace the two full recharge routes earlier in the lap.
+seg finish from home to grid surf recharge
+seg bypass0 from fork to bypass0
+seg bypass1 from bypass0 to bypass1 surf recharge
+seg bypass2 from bypass1 to bypass2 surf recharge
+seg bypass3 from bypass2 to merge
+seg core0 from collar to bore0
+seg core1 from bore0 to bore1 surf boost
+seg core2 from bore1 to needle rails none surf boost
+seg core3 from needle to bore2 rails none surf boost
+seg core4 from bore2 to corefall
+seg core5 from corefall to corecatch
+seg core6 from corecatch to runway
+start grid 0.4
+route grid wall roll ceiling approach evert swell0 swell1 taper0 open close swell2 taper1 unfurl fold drop catch brake decision boost ramp landing runout scoop bowl bank0 bank1 knife release cool home finish
 \0"

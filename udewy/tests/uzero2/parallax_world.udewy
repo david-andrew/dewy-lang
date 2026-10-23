@@ -1,0 +1,427 @@
+# Stage-local art for Parallax Engine: procedural materials, eclipse sky,
+# reactor machinery and surface guidance. No scenery participates in collision.
+# Work is bounded by fixed meshes; materials initialize only on first use.
+import p"./prelude.udewy"
+import p"./font5x7.udewy"
+import p"./state.udewy"
+import p"./track_model.udewy"
+import p"./track_bake.udewy"
+
+let parallax_active:bool = false
+let parallax_textures_ready:bool = false
+
+# The browser submits immediate vertices; native display lists retain the
+# complete bake. Sample a conservative surface bound every eight frames to
+# choose one detail level per segment, so adjacent rows share their columns.
+# O(samples / 8), allocation-free, and never changes collision or queries.
+let parallax_mesh_step = (sg:Ptr):>int => {
+    let nearest:Q16 = 100000 * FP_ONE
+    let i:int = 0
+    let n:int = seg_nsamp(sg)
+    loop i <? n {
+        let f:Ptr = fr_p(sg i)
+        let radius:Q16 = max_i(__load__(f + FR_WL) __load__(f + FR_WR))
+        let xs:int = abs_i(__load__(f + FR_XSECT))
+        if (xs >=? XSECT_CLOSED_MIN) and (__load__(f + FR_LIFT) =? FP_ONE) {
+            radius = ((__load__(f + FR_WL) + __load__(f + FR_WR)) * 16297) // (xs * 100)
+        }
+        # Extra margin covers the skipped samples and keeps transitions well
+        # away from the craft, even when it rides the far side of a vessel.
+        let d:Q16 = max_i(abs_i(cam_x - __load__(f + FR_PX))
+                          max_i(abs_i(cam_y - __load__(f + FR_PY)) abs_i(cam_z - __load__(f + FR_PZ)))) - radius - 80 * FP_ONE
+        nearest = min_i(nearest d)
+        if i =? n - 1 { break }
+        i = min_i(i + 8 n - 1)
+    }
+    if nearest >? 900 * FP_ONE { return 4 }
+    if nearest >? 300 * FP_ONE { return 2 }
+    return 1
+}
+const PX_TEX:Ptr = __static_alloca__(64)
+const PX_PIXELS:Ptr = __static_alloca__(4096)
+const PX_P:Vec3 = __static_alloca__(24)
+const PX_N:Vec3 = __static_alloca__(24)
+const PX_A:Vec3 = __static_alloca__(24)
+const PX_B:Vec3 = __static_alloca__(24)
+const PX_U:Vec3 = __static_alloca__(24)
+const PX_R:Vec3 = __static_alloca__(24)
+const PX_VERTS:Ptr = __static_alloca__(192)
+
+let parallax_prepare = ():>void => {
+    parallax_active = cstr_eq(TRACK_NAME_BUF "PARALLAX ENGINE\0")
+    if (parallax_active =? false) or parallax_textures_ready { return void }
+    let k:int = 0
+    loop k <? 8 {
+        let y:int = 0
+        loop y <? 32 {
+            let x:int = 0
+            loop x <? 32 {
+                let r:int = 58 let g:int = 78 let b:int = 96
+                # Long metal panels, recessed seams and small fasteners.
+                if (x <? 1) or (y <? 1) { r = 22 g = 34 b = 48 }
+                if (x =? 2) and ((y =? 3) or (y =? 28)) { r = 122 g = 153 b = 170 }
+                if k =? SURF_BOOST {
+                    r = 75 g = 34 b = 16
+                    if abs_i(y - (25 - abs_i(x - 16))) <? 3 { r = 255 g = 178 b = 48 }
+                }
+                if k =? SURF_RECHARGE {
+                    r = 12 g = 66 b = 59
+                    if (y % 8 <? 2) or (x % 16 =? 0) { r = 67 g = 240 b = 176 }
+                }
+                if k =? SURF_GRID {
+                    r = 33 g = 47 b = 63
+                    if ((x // 8 + y // 8) % 2 =? 0) { r = 178 g = 201 b = 204 }
+                }
+                if k =? SURF_LOOP { r = 57 g = 56 b = 89 if x <? 2 { r = 149 g = 123 b = 205 } }
+                if k =? SURF_CORK { r = 65 g = 48 b = 67 if y <? 2 { r = 222 g = 107 b = 110 } }
+                if k =? SURF_RAMP {
+                    r = 55 g = 45 b = 29
+                    if (x + y) % 16 <? 4 { r = 233 g = 175 b = 56 }
+                }
+                if k =? 7 {
+                    r = 20 g = 37 b = 48
+                    if (x >=? 6) and (x <=? 10) { r = 96 g = 229 b = 233 }
+                    if y % 8 =? 0 { r = r // 2 g = g // 2 b = b // 2 }
+                }
+                let p:Ptr = PX_PIXELS + (y * 32 + x) * 4
+                __store_u8__(r p) __store_u8__(g p + 1) __store_u8__(b p + 2) __store_u8__(255 p + 3)
+                x += 1
+            }
+            y += 1
+        }
+        gpu_texture_create(PX_TEX + k * 8 32 32 PX_PIXELS 1 1)
+        k += 1
+    }
+    parallax_textures_ready = true
+    return void
+}
+
+# Sky sphere. Position is camera relative; the colour horizon stays world
+# aligned, making the gantry's inversion and the hull's different sides legible.
+let px_sky_vertex = (az:Angle el:Angle):>void => {
+    let c:Q16 = cos_fp(el)
+    let h:Q16 = sin_fp(el)
+    let warm:Q16 = clamp_i(FP_ONE - abs_i(h + 12000) * 2 0 FP_ONE)
+    gpu_set_color3(1800 + fp_mul(warm 7000) 2900 + fp_mul(warm 4600) 5700 + fp_mul(warm 2700))
+    gpu_vertex3(cam_x + fp_mul(fp_mul(c cos_fp(az)) 3300 * FP_ONE)
+                cam_y + h * 3300
+                cam_z + fp_mul(fp_mul(c sin_fp(az)) 3300 * FP_ONE))
+    return void
+}
+
+# The bronze gas giant is a lit sphere, not a billboard. Bands and the
+# terminator remain stable when the player's horizon rotates.
+let px_planet_vertex = (az:Angle el:Angle):>void => {
+    let c:Q16 = cos_fp(el)
+    let nx:Q16 = fp_mul(c cos_fp(az))
+    let ny:Q16 = sin_fp(el)
+    let nz:Q16 = fp_mul(c sin_fp(az))
+    let light:Q16 = max_i(5000 (-fp_mul(nx 42000)) + fp_mul(ny 22000) + fp_mul(nz 45000))
+    let band:Q16 = 36000 + fp_mul(sin_fp(el * 11 + sin_fp(az * 2) // 4096) 9000)
+    gpu_set_color3(fp_mul(band + 18000 light) fp_mul(band light) fp_mul(band // 2 light))
+    gpu_vertex3(cam_x + nx * 1200 cam_y - 1100 * FP_ONE + ny * 1200 cam_z - 2500 * FP_ONE + nz * 1200)
+    return void
+}
+
+# A thin annular eclipse supplies a second orientation landmark, opposite
+# the planet. Its rings are drawn in a fixed world-direction plane.
+let px_eclipse_vertex = (a:Angle radius:Q16):>void => {
+    let x:Q16 = fp_mul(cos_fp(a) radius)
+    let y:Q16 = fp_mul(sin_fp(a) radius)
+    gpu_vertex3(cam_x - 2200 * FP_ONE + fp_mul(x 36864) + fp_mul(y 16384)
+                cam_y + 1000 * FP_ONE + fp_mul(y 61440)
+                cam_z - 1500 * FP_ONE - fp_mul(x 54272) + fp_mul(y 12288))
+    return void
+}
+
+let parallax_sky = ():>void => {
+    gpu_set_texture(0)
+    gpu_enable_depth_test(0) gpu_enable_depth_write(0)
+    gpu_quads_begin()
+    let e:int = -256
+    loop e <? 256 {
+        let a:int = 0
+        loop a <? 1024 {
+            px_sky_vertex(a e) px_sky_vertex(a + 32 e)
+            px_sky_vertex(a + 32 e + 32) px_sky_vertex(a e + 32)
+            a += 32
+        }
+        e += 32
+    }
+    gpu_end()
+    gpu_quads_begin()
+    e = -256
+    loop e <? 256 {
+        let a:int = 0
+        loop a <? 1024 {
+            let facing:Q16 = sin_fp(e + 8) * 1100 + fp_mul(cos_fp(e + 8) sin_fp(a + 8)) * 2500
+            if facing >? 1100 * FP_ONE {
+                px_planet_vertex(a e) px_planet_vertex(a + 16 e)
+                px_planet_vertex(a + 16 e + 16) px_planet_vertex(a e + 16)
+            }
+            a += 16
+        }
+        e += 16
+    }
+    gpu_end()
+    # Opaque warm corona, then near-black occluding disc. A fixed 64 wedges.
+    gpu_quads_begin()
+    let band:int = 0
+    loop band <? 5 {
+        let outer:Q16 = (410 - band * 12) * FP_ONE
+        let inner:Q16 = outer - 12 * FP_ONE
+        gpu_set_color3(10000 + band * 11000 5000 + band * 10500 3500 + band * 9000)
+        let a:int = 0
+        loop a <? 1024 {
+            px_eclipse_vertex(a outer) px_eclipse_vertex(a + 16 outer)
+            px_eclipse_vertex(a + 16 inner) px_eclipse_vertex(a inner)
+            a += 16
+        }
+        band += 1
+    }
+    gpu_end()
+    gpu_set_color3(1200 1700 3200)
+    gpu_tris_begin()
+    let a:int = 0
+    loop a <? 1024 {
+        px_eclipse_vertex(0 0) px_eclipse_vertex(a 350 * FP_ONE) px_eclipse_vertex(a + 16 350 * FP_ONE)
+        a += 16
+    }
+    gpu_end()
+    gpu_enable_depth_write(1) gpu_enable_depth_test(1)
+    return void
+}
+
+# Machine rings lie in the yz plane around the reactor's x axis. A box
+# cross-section keeps this intentionally architectural rather than organic.
+let px_ring_vertex = (x:Q16 y:Q16 z:Q16 r:Q16 a:Angle axial:Q16 radial:Q16):>void => {
+    gpu_vertex3(x + axial y + fp_mul(cos_fp(a) r + radial) z + fp_mul(sin_fp(a) r + radial))
+    return void
+}
+
+let px_ring = (x:Q16 y:Q16 z:Q16 r:Q16 thickness:Q16 phase:Angle):>void => {
+    gpu_quads_begin()
+    let i:int = 0
+    loop i <? 64 {
+        let a:Angle = i * 16 + phase
+        let b:Angle = a + 16
+        let shade:Q16 = 14000 + fp_mul(10000 cos_fp(a) + FP_ONE)
+        gpu_set_color3(shade shade + 5000 shade + 8500)
+        px_ring_vertex(x y z r a (-thickness) (-thickness))
+        px_ring_vertex(x y z r b (-thickness) (-thickness))
+        px_ring_vertex(x y z r b (-thickness) thickness)
+        px_ring_vertex(x y z r a (-thickness) thickness)
+        px_ring_vertex(x y z r a thickness thickness)
+        px_ring_vertex(x y z r b thickness thickness)
+        px_ring_vertex(x y z r b thickness (-thickness))
+        px_ring_vertex(x y z r a thickness (-thickness))
+        gpu_set_color3(7000 12500 17000)
+        px_ring_vertex(x y z r a (-thickness) thickness)
+        px_ring_vertex(x y z r b (-thickness) thickness)
+        px_ring_vertex(x y z r b thickness thickness)
+        px_ring_vertex(x y z r a thickness thickness)
+        gpu_set_color3(16000 47000 50000)
+        if i % 8 <? 2 { gpu_set_color3(50000 37000 13000) }
+        px_ring_vertex(x y z r a thickness (-thickness))
+        px_ring_vertex(x y z r b thickness (-thickness))
+        px_ring_vertex(x y z r b (-thickness) (-thickness))
+        px_ring_vertex(x y z r a (-thickness) (-thickness))
+        i += 1
+    }
+    gpu_end()
+    return void
+}
+
+let px_beam_vertex = (a:int):>void => {
+    let p:Ptr = PX_VERTS + a * 24
+    gpu_vertex3(__load__(p) __load__(p + 8) __load__(p + 16))
+    return void
+}
+let px_beam_face = (a:int b:int c:int d:int):>void => {
+    px_beam_vertex(a) px_beam_vertex(b) px_beam_vertex(c) px_beam_vertex(d)
+    return void
+}
+let px_beam = (ax:Q16 ay:Q16 az:Q16 bx:Q16 by:Q16 bz:Q16 half:Q16):>void => {
+    v3_set(PX_N bx - ax by - ay bz - az) v3_norm(PX_N)
+    v3_set(PX_U 0 FP_ONE 0)
+    if abs_i(v3_y(PX_N)) >? 60000 { v3_set(PX_U 0 0 FP_ONE) }
+    v3_cross(PX_R PX_N PX_U) v3_norm(PX_R)
+    v3_cross(PX_U PX_R PX_N) v3_norm(PX_U)
+    let i:int = 0
+    loop i <? 8 {
+        let x:Q16 = ax let y:Q16 = ay let z:Q16 = az
+        if i >=? 4 { x = bx y = by z = bz }
+        let r:Q16 = half let u:Q16 = half
+        if (i % 4 =? 0) or (i % 4 =? 3) { r = -half }
+        if i % 4 <? 2 { u = -half }
+        v3_set(PX_VERTS + i * 24 x + fp_mul(v3_x(PX_R) r) + fp_mul(v3_x(PX_U) u)
+                   y + fp_mul(v3_y(PX_R) r) + fp_mul(v3_y(PX_U) u)
+                   z + fp_mul(v3_z(PX_R) r) + fp_mul(v3_z(PX_U) u))
+        i += 1
+    }
+    gpu_quads_begin()
+    px_beam_face(0 1 2 3) px_beam_face(4 5 6 7)
+    px_beam_face(0 1 5 4) px_beam_face(1 2 6 5)
+    px_beam_face(2 3 7 6) px_beam_face(3 0 4 7)
+    gpu_end()
+    return void
+}
+
+let parallax_machinery = ():>void => {
+    gpu_set_texture(0)
+    # Three concentric suspension frames around the huge riding hull.
+    px_ring(1500 * FP_ONE 1100 * FP_ONE (-900 * FP_ONE) 820 * FP_ONE 32 * FP_ONE 0)
+    px_ring(1420 * FP_ONE 1100 * FP_ONE (-900 * FP_ONE) 930 * FP_ONE 16 * FP_ONE (frame_count // 2) % 1024)
+    px_ring(3300 * FP_ONE 1100 * FP_ONE (-900 * FP_ONE) 610 * FP_ONE 28 * FP_ONE (-frame_count) % 1024)
+    px_ring(2450 * FP_ONE 1100 * FP_ONE (-900 * FP_ONE) 170 * FP_ONE 18 * FP_ONE 0)
+    # Accelerator muzzle and receiving ring frame the actual flight path.
+    px_ring(2100 * FP_ONE (-105 * FP_ONE) (-600 * FP_ONE) 90 * FP_ONE 8 * FP_ONE 0)
+    px_ring(2025 * FP_ONE (-105 * FP_ONE) (-600 * FP_ONE) 95 * FP_ONE 5 * FP_ONE (frame_count * 2) % 1024)
+    px_ring(1950 * FP_ONE (-105 * FP_ONE) (-600 * FP_ONE) 110 * FP_ONE 8 * FP_ONE 0)
+    # Axial trusses stay outside the riding surface. Inversion
+    # changes which one reads as the ceiling: scenery supplies real parallax.
+    let i:int = 0
+    loop i <? 6 {
+        let a:Angle = (i * 1024) // 6
+        let y:Q16 = 1100 * FP_ONE + cos_fp(a) * 800
+        let z:Q16 = (-900 * FP_ONE) + sin_fp(a) * 800
+        gpu_set_color3(14000 21000 27000)
+        px_beam(650 * FP_ONE y z 2100 * FP_ONE y z 16 * FP_ONE)
+        gpu_set_color3(16000 36000 38000)
+        px_beam(1420 * FP_ONE 1100 * FP_ONE + cos_fp(a) * 930 (-900 * FP_ONE) + sin_fp(a) * 930
+                1500 * FP_ONE y z 22 * FP_ONE)
+        i += 1
+    }
+    # Solar comb beyond the machine, kept clear of the lower bypass.
+    i = 0
+    loop i <? 10 {
+        let x:Q16 = (-500 + i * 480) * FP_ONE
+        gpu_set_color3(13000 17000 25000)
+        px_beam(x (-400 * FP_ONE) (-2300 * FP_ONE) x 1100 * FP_ONE (-2300 * FP_ONE) 24 * FP_ONE)
+        gpu_set_color3(19000 28000 36000)
+        px_beam(x 1100 * FP_ONE (-2300 * FP_ONE) x + 350 * FP_ONE 1100 * FP_ONE (-2300 * FP_ONE) 65 * FP_ONE)
+        gpu_set_color3(35000 22000 10000)
+        px_beam(x + 60 * FP_ONE 100 * FP_ONE (-2300 * FP_ONE) x + 60 * FP_ONE 900 * FP_ONE (-2300 * FP_ONE) 80 * FP_ONE)
+        i += 1
+    }
+    return void
+}
+
+# A dashed meridian is the safe line through the collar. Edge strips show
+# the upcoming narrowing; unlike repeating materials these follow geometry.
+# At most three small strips per sixth baked row: O(visible frame count).
+let px_guide_vertex = (fp:Ptr lateral:Q16):>void => {
+    xse_setup(fp) xse_point(lateral PX_P PX_N)
+    gpu_vertex3(v3_x(PX_P) + fp_mul(v3_x(PX_N) 8192)
+                v3_y(PX_P) + fp_mul(v3_y(PX_N) 8192)
+                v3_z(PX_P) + fp_mul(v3_z(PX_N) 8192))
+    return void
+}
+let parallax_guides = ():>void => {
+    gpu_set_texture(0) gpu_enable_depth_write(0)
+    let s:int = 0
+    loop s <? seg_count() {
+        let sg:Ptr = seg_p(s)
+        if seg_visible(sg) {
+            let n:int = seg_nsamp(sg)
+            let i:int = 0
+            gpu_quads_begin()
+            loop i <? n - 2 {
+                let fa:Ptr = fr_p(sg i)
+                let fb:Ptr = fr_p(sg min_i(i + 2 n - 1))
+                gpu_set_color3(36000 54000 56000)
+                if (s >=? 6) and (s <=? 13) { gpu_set_color3(50000 43000 18000) }
+                px_guide_vertex(fa (-FP_ONE)) px_guide_vertex(fb (-FP_ONE))
+                px_guide_vertex(fb FP_ONE) px_guide_vertex(fa FP_ONE)
+                # Edge lights on ribbons only; a closed hull has no edge.
+                if abs_i(__load__(fa + FR_XSECT)) <? 900 {
+                    let wl:Q16 = __load__(fa + FR_WL) - 2 * FP_ONE
+                    let wr:Q16 = __load__(fa + FR_WR) - 2 * FP_ONE
+                    let bl:Q16 = __load__(fb + FR_WL) - 2 * FP_ONE
+                    let br:Q16 = __load__(fb + FR_WR) - 2 * FP_ONE
+                    gpu_set_color3(17000 45000 48000)
+                    px_guide_vertex(fa (-wl)) px_guide_vertex(fb (-bl))
+                    px_guide_vertex(fb (-bl) + FP_ONE) px_guide_vertex(fa (-wl) + FP_ONE)
+                    px_guide_vertex(fa wr) px_guide_vertex(fb br)
+                    px_guide_vertex(fb br - FP_ONE) px_guide_vertex(fa wr - FP_ONE)
+                }
+                i += 6
+            }
+            gpu_end()
+        }
+        s += 1
+    }
+    gpu_enable_depth_write(1)
+    return void
+}
+
+# Direction boards use the game's own bitmap font as small world-space
+# quads. They turn with the road's local up, including on inverted sections.
+# Eight fixed boards, culled with their owning segment; no per-frame strings.
+const PX_SIGN_C:Vec3 = __static_alloca__(24)
+const PX_SIGN_R:Vec3 = __static_alloca__(24)
+const PX_SIGN_U:Vec3 = __static_alloca__(24)
+const PX_SIGN_F:Vec3 = __static_alloca__(24)
+let px_sign_vertex = (x:Q16 y:Q16 depth:Q16):>void => {
+    gpu_vertex3(v3_x(PX_SIGN_C) + fp_mul(v3_x(PX_SIGN_R) x) + fp_mul(v3_x(PX_SIGN_U) y) - fp_mul(v3_x(PX_SIGN_F) depth)
+                v3_y(PX_SIGN_C) + fp_mul(v3_y(PX_SIGN_R) x) + fp_mul(v3_y(PX_SIGN_U) y) - fp_mul(v3_y(PX_SIGN_F) depth)
+                v3_z(PX_SIGN_C) + fp_mul(v3_z(PX_SIGN_R) x) + fp_mul(v3_z(PX_SIGN_U) y) - fp_mul(v3_z(PX_SIGN_F) depth))
+    return void
+}
+let px_sign_quad = (x0:Q16 y0:Q16 x1:Q16 y1:Q16 depth:Q16):>void => {
+    px_sign_vertex(x0 y0 depth) px_sign_vertex(x1 y0 depth)
+    px_sign_vertex(x1 y1 depth) px_sign_vertex(x0 y1 depth)
+    return void
+}
+let px_sign = (sid:int fraction:Q16 label:Cstr warm:bool):>void => {
+    if sid >=? seg_count() { return void }
+    let sg:Ptr = seg_p(sid)
+    if seg_visible(sg) =? false { return void }
+    let fp:Ptr = fr_p(sg fp_mul(seg_nsamp(sg) - 1 fraction))
+    xse_setup(fp) xse_point(0 PX_SIGN_C PX_SIGN_U)
+    v3_copy(PX_SIGN_F fp + FR_FX)
+    v3_cross(PX_SIGN_R PX_SIGN_F PX_SIGN_U)
+    v3_addscaled(PX_SIGN_C PX_SIGN_C PX_SIGN_U 25 * FP_ONE)
+    let n:int = cstr_len(label)
+    let pixel:Q16 = 98304
+    let half:Q16 = (n * 6 * pixel) // 2
+    gpu_set_texture(0) gpu_quads_begin()
+    gpu_set_color3(13000 41000 45000)
+    if warm { gpu_set_color3(48000 30000 8000) }
+    px_sign_quad(-half - 4 * FP_ONE (-8 * FP_ONE) half + 4 * FP_ONE 8 * FP_ONE 0)
+    gpu_set_color3(2500 5000 7500)
+    px_sign_quad(-half - 3 * FP_ONE (-7 * FP_ONE) half + 3 * FP_ONE 7 * FP_ONE FP_ONE // 4)
+    gpu_set_color3(53000 62000 62000)
+    let i:int = 0
+    loop i <? n {
+        let ch:int = __load_u8__(label + i)
+        let row:int = 0
+        loop row <? 7 {
+            let bits:int = glyph_row(ch row)
+            let col:int = 0
+            loop col <? 5 {
+                if (bits and (1 << (4 - col))) not=? 0 {
+                    let x:Q16 = -half + (i * 6 + col) * pixel
+                    let y:Q16 = (3 - row) * pixel
+                    px_sign_quad(x y x + pixel y + pixel FP_HALF)
+                }
+                col += 1
+            }
+            row += 1
+        }
+        i += 1
+    }
+    gpu_end()
+    return void
+}
+let parallax_signs = ():>void => {
+    px_sign(0 50000 "01 / INVERT\0" false)
+    px_sign(5 20000 "02 / REACTOR\0" false)
+    px_sign(8 40000 "ALIGN TO GOLD\0" true)
+    px_sign(9 40000 "CORE < > HULL\0" true)
+    px_sign(13 45000 "03 / DIVE\0" false)
+    px_sign(18 45000 "JUMP < > PIT\0" true)
+    px_sign(22 20000 "04 / SCISSORS\0" true)
+    px_sign(26 25000 "BRAKE / RIGHT\0" true)
+    return void
+}

@@ -1,5 +1,5 @@
 # Parallax Engine content regression: baked surface integrity, fork progress,
-# editor round-trip and complete three-lap runs through BOTH racing lines.
+# editor round-trip and complete three-lap runs through all FOUR route combinations.
 # Run: python3 -m udewy udewy/tests/uzero2/test_parallax.udewy
 # Also run with --target c for the independent C code generator.
 $supported_targets = ["x86_64" "c"]
@@ -24,8 +24,9 @@ let check = (label:Cstr ok:bool):>void => {
 
 const PROBE:Vec3 = __static_alloca__(24)
 const NORMAL:Vec3 = __static_alloca__(24)
-const VISITED:Ptr = __static_alloca__(1024) # 64 segment slots per driver
-const FINISH:Ptr = __static_alloca__(16)
+const VISITED:Ptr = __static_alloca__(2048) # 64 segment slots per driver
+const FINISH:Ptr = __static_alloca__(32)
+const SECTORS:Ptr = __static_alloca__(256) # first-lap entry, exit, energy for each choice
 
 let route_length = ():>Q16 => {
     let length:Q16 = 0
@@ -72,7 +73,7 @@ let check_geometry = ():>void => {
         if __load__(sg + SG_PROG1) <=? __load__(sg + SG_PROG0) { progress_ok = false }
         let node:NodeId = __load__(sg + SG_N1)
         let out:int = node_out_count(node)
-        if out <? 1 { joins_ok = false }
+        if (out <? 1) and (s not=? 20) { joins_ok = false } # launch is the one intentional gap
         let j:int = 0
         loop j <? out {
             let next:Ptr = seg_p(node_out_seg(node j))
@@ -91,70 +92,146 @@ let check_geometry = ():>void => {
     check("continuous frames at every junction\0" joins_ok)
     check("monotonic progress across fork, merge and finish\0" progress_ok)
 
-    # The fork is deliberately a tradeoff: a shorter exposed line versus
-    # more than a full recharge's worth of driving on the protected line.
-    let outer:Q16 = 0
-    let inner:Q16 = 0
-    s = 6
-    loop s <? 10 { outer += __load__(seg_p(s) + SG_LEN) s += 1 }
-    s = 32
-    loop s <? 36 { inner += __load__(seg_p(s) + SG_LEN) s += 1 }
-    check("shortcut saves at least 500 metres\0" outer - inner >? 500 * FP_ONE)
-    check("shortcut skips the capacitor\0" (__load__(seg_p(7) + SG_SURF) =? SURF_RECHARGE) and (__load__(seg_p(8) + SG_SURF) =? SURF_RECHARGE))
-    # Quarter-roll frames must face opposite sides of the bridge. This
-    # catches a reversed half roll or an accidental extra full rotation.
-    let first_half:Ptr = seg_p(33)
-    let second_half:Ptr = seg_p(34)
-    let q1:Ptr = fr_p(first_half seg_nsamp(first_half) // 2)
-    let q3:Ptr = fr_p(second_half seg_nsamp(second_half) // 2)
-    check("spindle makes one continuous full roll\0"
-          (__load__(q1 + FR_UZ) >? 64000) and (__load__(q3 + FR_UZ) <? -64000))
+    # The wide hull must be visually close to the analytical query surface;
+    # otherwise the craft appears to float metres above its coarse mesh.
+    check("large hull mesh resolves its collision surface\0" __load__(seg_p(7) + SG_MESH_COLS) =? 65)
+    check("both optional branches carry progress\0"
+          (__load__(seg_p(32) + SG_PROG0) =? __load__(seg_p(19) + SG_PROG0)) and
+          (__load__(seg_p(35) + SG_PROG1) =? __load__(seg_p(22) + SG_PROG1)) and
+          (__load__(seg_p(36) + SG_PROG0) =? __load__(seg_p(10) + SG_PROG0)) and
+          (__load__(seg_p(42) + SG_PROG1) =? __load__(seg_p(17) + SG_PROG1)))
+    let launch:Ptr = node_p(__load__(seg_p(20) + SG_N1))
+    let landing:Ptr = node_p(__load__(seg_p(21) + SG_N0))
+    check("jump is a real 150 metre gap\0" abs_i(__load__(launch + ND_PX) - __load__(landing + ND_PX)) =? 150 * FP_ONE)
+    check("needle has a genuinely open middle\0" (__load__(node_p(__load__(seg_p(38) + SG_N1)) + ND_XSECT) >? -XSECT_CLOSED_MIN) and (__load__(seg_p(38) + SG_RAILS) =? 0))
+    return void
+}
+
+# Four meridians traverse the swelling and shrinking hull with thrust only.
+# This proves that the vessel is a continuous riding surface, including its
+# far side, rather than scenery around a single supported centre line.
+let check_circumference = ():>void => {
+    let side:int = 0
+    let held:bool = true
+    loop side <? 4 {
+        init_cars(1) car_load(0)
+        let fp:Ptr = fr_p(seg_p(6) 2)
+        xse_setup(fp) xse_point((xse_wr * side) // 2 TQ_POS TQ_NRM)
+        cx = v3_x(TQ_POS) + fp_mul(v3_x(TQ_NRM) HOVER_HEIGHT)
+        cy = v3_y(TQ_POS) + fp_mul(v3_y(TQ_NRM) HOVER_HEIGHT)
+        cz = v3_z(TQ_POS) + fp_mul(v3_z(TQ_NRM) HOVER_HEIGHT)
+        fx = FP_ONE fy = 0 fz = 0
+        ux = v3_x(TQ_NRM) uy = v3_y(TQ_NRM) uz = v3_z(TQ_NRM)
+        cvx = TOP_SPEED cvy = 0 cvz = 0 update_right()
+        cur_seg = 6 cur_si = 2 lg_seg = 6 lg_si = 2
+        in_thrust = 1 in_boost = 0 in_brake = 0
+        in_steer_l = 0 in_steer_r = 0 in_strafe_l = 0 in_strafe_r = 0
+        current_car_is_player = 0
+        let f:int = 0 let air:int = 0 let resets:int = 0
+        loop (f <? 600) and (cur_seg <? 9) {
+            physics_step()
+            if was_airborne {air += 1}
+            if respawn_timer >? 0 {resets += 1}
+            f += 1
+        }
+        if (cur_seg not=? 9) or (air not=? 0) or (resets not=? 0) { held = false }
+        side += 1
+    }
+    check("all four hull meridians remain grounded through the taper\0" held)
     return void
 }
 
 let check_races = ():>void => {
-    init_cars(2)
+    init_cars(4)
+    car_load(0) car_store(1) car_store(2) car_store(3)
     current_car_is_player = 0
     let alive:bool = true
     let no_respawns:bool = true
     let f:int = 0
-    loop (f <? 12000) and ((__load__(FINISH) =? 0) or (__load__(FINISH + 8) =? 0)) {
+    let finished:int = 0
+    let airborne_frames:int = 0
+    loop (f <? 12000) and (finished <? 4) {
         let i:int = 0
-        loop i <? 2 {
+        loop i <? 4 {
             if __load__(FINISH + i * 8) =? 0 {
                 car_load(i)
-                # Identical player-speed craft, one committed to each fork.
-                # Remove random lateral wandering to test the authored road;
-                # test_game separately exercises ordinary randomized opponents.
-                ai_branch = i
+                # Independent choices at the collar and the launch chamber.
+                # Use real throttle/steering physics, with a committed lane
+                # before each fork; randomized opponents run in test_game.
+                ai_branch = i % 2
+                if (cur_seg >=? 17) and (cur_seg <=? 35) { ai_branch = i // 2 }
                 ai_aim = 0
-                # Choose a lane BEFORE the geometric fork: left to the
-                # spindle, right to the capacitor. An aim at the exact
-                # shared centre can attach to either coincident entrance.
-                if cur_seg =? 5 {
-                    if i =? 1 { ai_aim = -24 * FP_ONE } else { ai_aim = 24 * FP_ONE }
+                if cur_seg =? 9 {
+                    if i % 2 =? 1 { ai_aim = -28 * FP_ONE } else { ai_aim = 28 * FP_ONE }
+                }
+                if cur_seg =? 18 {
+                    if i // 2 =? 1 { ai_aim = -20 * FP_ONE } else { ai_aim = 24 * FP_ONE }
                 }
                 ai_aim_timer = 100000
                 top_speed_mult = FP_ONE
+                ai_boost_thresh = 60000
                 ai_compute_input(i)
                 physics_step()
+                if cur_lap =? 0 {
+                    let t:Ptr = SECTORS + i * 64
+                    if ((cur_seg =? 10) or (cur_seg =? 36)) and (__load__(t) =? 0) { __store__(f + 1 t) }
+                    if (cur_seg =? 18) and (__load__(t + 8) =? 0) { __store__(f + 1 t + 8) __store__(energy t + 16) }
+                    if ((cur_seg =? 19) or (cur_seg =? 32)) and (__load__(t + 24) =? 0) { __store__(f + 1 t + 24) }
+                    if (cur_seg =? 23) and (__load__(t + 32) =? 0) { __store__(f + 1 t + 32) __store__(energy t + 40) }
+                }
                 __store__(1 VISITED + (i * 64 + cur_seg) * 8)
                 if cur_status not=? 0 { alive = false }
                 if respawn_timer >? 0 { no_respawns = false }
-                if cur_lap >=? g_track_laps { __store__(f + 1 FINISH + i * 8) }
+                if (i >=? 2) and was_airborne and ((cur_seg =? 20) or (cur_seg =? 21)) { airborne_frames += 1 }
+                if cur_lap >=? g_track_laps { __store__(f + 1 FINISH + i * 8) finished += 1 }
                 car_store(i)
             }
             i += 1
         }
         f += 1
     }
-    check("both lines finish three laps\0" (__load__(FINISH) >? 0) and (__load__(FINISH + 8) >? 0))
-    check("both drivers survive without respawning\0" alive and no_respawns)
-    check("drivers actually traverse their chosen lines\0" (__load__(VISITED + 7 * 8) =? 1) and (__load__(VISITED + (64 + 33) * 8) =? 1))
+    check("all four combinations finish three laps\0" finished =? 4)
+    check("all four drivers survive without respawning\0" alive and no_respawns)
+    check("launch route includes sustained flight\0" airborne_frames >? 30)
+    # Match starting state and boost threshold, then compare sectors, not
+    # total laps: extra energy can repay the slower route later in the race.
+    let core_faster:bool = true
+    let jump_faster:bool = true
+    let service_pays:bool = true
+    let pair:int = 0
+    loop pair <? 2 {
+        let hull:Ptr = SECTORS + pair * 128
+        let core:Ptr = hull + 64
+        if (__load__(core + 8) - __load__(core)) + 30 >=? __load__(hull + 8) - __load__(hull) { core_faster = false }
+        if __load__(hull + 16) <=? __load__(core + 16) + FP_ONE // 8 { service_pays = false }
+        let pit:Ptr = SECTORS + pair * 64
+        let jump:Ptr = pit + 128
+        if (__load__(jump + 32) - __load__(jump + 24)) + 30 >=? __load__(pit + 32) - __load__(pit + 24) { jump_faster = false }
+        if __load__(pit + 40) <=? __load__(jump + 40) + FP_ONE // 8 { service_pays = false }
+        pair += 1
+    }
+    check("core dive earns its risk with a faster sector\0" core_faster)
+    check("jump earns its risk with a faster sector\0" jump_faster)
+    check("both service routes repay time with energy\0" service_pays)
+    let choices_ok:bool = true
+    let driver:int = 0
+    loop driver <? 4 {
+        let hull_seg:int = 11
+        if driver % 2 =? 1 { hull_seg = 38 }
+        let low_seg:int = 33
+        if driver // 2 =? 1 { low_seg = 21 }
+        if (__load__(VISITED + (driver * 64 + hull_seg) * 8) =? 0) or
+           (__load__(VISITED + (driver * 64 + low_seg) * 8) =? 0) { choices_ok = false }
+        driver += 1
+    }
+    check("each driver traverses both selected lines\0" choices_ok)
     let all_visited:bool = true
     let s:int = 0
     loop s <? seg_count() {
-        if (__load__(VISITED + s * 8) =? 0) and (__load__(VISITED + (64 + s) * 8) =? 0) { all_visited = false }
+        let visits:int = 0
+        driver = 0
+        loop driver <? 4 { visits += __load__(VISITED + (driver * 64 + s) * 8) driver += 1 }
+        if visits =? 0 { all_visited = false }
         s += 1
     }
     check("every segment is driven\0" all_visited)
@@ -170,6 +247,8 @@ let main = ():>int => {
     if ok =? false { return 1 }
     track_bake()
     check("closed three-lap space circuit\0" g_route_closed and g_is_space and (g_track_laps =? 3) and (g_has_apron =? false))
+    check("test visit buffer bounds\0" seg_count() <=? 64)
+    if seg_count() >? 64 { return 1 }
     check_geometry()
     let length:Q16 = route_length()
     let text:Cstr = bb_finalize_as_string(track_serialize())
@@ -179,6 +258,7 @@ let main = ():>int => {
     track_bake()
     check("round-trip preserves route length\0" abs_i(route_length() - length) <? FP_ONE)
     check_geometry()
+    check_circumference()
     check_races()
     print("failures: ") print_int(failures) print("\n")
     if failures >? 0 { return 1 }

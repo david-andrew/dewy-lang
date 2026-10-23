@@ -432,6 +432,9 @@ let physics_step = ():>void => {
     }
 
     craft_query()
+    # Keep continuous pre-step progress: the nearest frame can already be
+    # the finish endpoint while the craft is still short of the line.
+    let prev_frac:Q16 = surf_prog
     let gap_now:Q16 = normal_gap(cx cy cz)
     let airborne:int = 0
     if gap_now >? AIR_GAP { airborne = 1 }
@@ -708,12 +711,9 @@ let physics_step = ():>void => {
     # ---- lap progress / hints -----------------------------------------------------
     let lap_len:int = g_lap_len
     if (lap_len >? 0) and g_route_closed {
-        # Normalized circular progress step vs the pre-step hint frame; a step
-        # that carries the position across the start boundary changes the lap.
-        let psg:Ptr = seg_p(cur_seg)
-        let pfp:Ptr = fr_p(psg clamp_i(cur_si 0 seg_nsamp(psg) - 1))
-        let prev_frac:Q16 = __load__(pfp + FR_PROG)
-        if prev_frac >=? lap_len { prev_frac -= lap_len }
+        # Compare projected positions, not quantized frame hints. A nearest
+        # endpoint at lap_len used to normalize to zero too soon and cancel
+        # a legitimate forward finish crossing with a false reverse lap.
         let d:Q16 = surf_prog - prev_frac
         if d >? lap_len // 2 { d -= lap_len }
         if d <? -(lap_len // 2) { d += lap_len }

@@ -10,6 +10,7 @@ import p"./track_model.udewy"
 import p"./track_bake.udewy"
 import p"./physics.udewy"
 import p"./camera.udewy"
+import p"./parallax_world.udewy"
 
 # ---------- Texture init (2x2 checker per surface kind + ground + wall) ---------
 
@@ -73,6 +74,7 @@ let init_textures = ():>void => {
 }
 
 let kind_texid = (kind:SurfKind):>int => {
+    if parallax_active { return __load_u32__(PX_TEX + clamp_i(kind 0 6) * 8) }
     let slot:int = kind
     if (slot <? 0) or (slot >=? SURF_KIND_COUNT) { slot = SURF_NORMAL }
     return __load_u32__(CHECKER_TEXIDS + slot * 8)
@@ -368,7 +370,9 @@ let mesh_emit_vert = (sg:Ptr row:int col:int):>void => {
     let mv:Ptr = mesh_vert_p(sg row col)
     let shade:Q16 = __load__(mv + 40)
     gpu_set_color3(shade shade shade)
-    gpu_vertex3_uv(__load__(mv) __load__(mv + 8) __load__(mv + 16) __load__(mv + 24) __load__(mv + 32))
+    let tile_scale:int = 1
+    if parallax_active { tile_scale = 6 }
+    gpu_vertex3_uv(__load__(mv) __load__(mv + 8) __load__(mv + 16) __load__(mv + 24) // tile_scale __load__(mv + 32) // tile_scale)
     return void
 }
 
@@ -378,12 +382,25 @@ let draw_segment_mesh = (si:SegId):>void => {
     let cols:int = __load__(sg + SG_MESH_COLS)
     if rows <? 2 { return void }
 
+    let row_step:int = 1
+    let col_step:int = 1
+    if parallax_active and (gpu_list_supported() =? false) {
+        row_step = parallax_mesh_step(sg)
+        if cols >? 17 { col_step = row_step }
+    }
+
     let cur_kind:int = -1
     let batch_rows:int = 0
     let open:bool = false
     let i:int = 0
     loop i <? rows - 1 {
         let kind:SurfKind = __load__(fr_p(sg i) + FR_KIND)
+        let next_row:int = min_i(i + row_step rows - 1)
+        let k:int = i + 1
+        loop k <? next_row {
+            if __load__(fr_p(sg k) + FR_KIND) not=? kind { next_row = k }
+            k += 1
+        }
         if (kind not=? cur_kind) or (batch_rows >=? RENDER_CULL_NEAR_ROWS) {
             if open { gpu_end() }
             gpu_set_texture(kind_texid(kind))
@@ -393,15 +410,26 @@ let draw_segment_mesh = (si:SegId):>void => {
             batch_rows = 0
         }
         let j:int = 0
+        # Keep the original boundary ring and fan into the coarser interior.
+        # Neighbouring segments can choose different detail without cracks.
+        let edge_step:int = col_step
+        if (i =? 0) or (next_row =? rows - 1) { edge_step = 1 }
         loop j <? cols - 1 {
-            mesh_emit_vert(sg i j)
-            mesh_emit_vert(sg i + 1 j)
-            mesh_emit_vert(sg i + 1 j + 1)
-            mesh_emit_vert(sg i j + 1)
-            j += 1
+            let next_col:int = min_i(j + edge_step cols - 1)
+            let a:int = j let b:int = next_col
+            let c:int = j let d:int = next_col
+            if edge_step <? col_step {
+                if i not=? 0 { a = (j // col_step) * col_step b = (next_col // col_step) * col_step }
+                if next_row not=? rows - 1 { c = (j // col_step) * col_step d = (next_col // col_step) * col_step }
+            }
+            mesh_emit_vert(sg i a)
+            mesh_emit_vert(sg next_row c)
+            mesh_emit_vert(sg next_row d)
+            mesh_emit_vert(sg i b)
+            j = next_col
         }
         batch_rows += 1
-        i += 1
+        i = next_row
     }
     if open { gpu_end() }
     return void
@@ -438,7 +466,7 @@ let draw_segment_rails = (si:SegId):>void => {
     if n <? 2 { return void }
     if abs_i(__load__(fr_p(sg 0) + FR_XSECT)) >=? XSECT_CLOSED_MIN { return void }
 
-    gpu_set_texture(__load_u32__(CHECKER_TEXIDS + TEX_WALL * 8))
+    if parallax_active { gpu_set_texture(__load_u32__(PX_TEX + 7 * 8)) } else { gpu_set_texture(__load_u32__(CHECKER_TEXIDS + TEX_WALL * 8)) }
     gpu_set_color3(FP_ONE FP_ONE FP_ONE)
     gpu_quads_begin()
     let v_top:Q16 = (RAIL_HEIGHT << 16) // (CHECKER_TILE * 2)
@@ -801,6 +829,7 @@ let draw_all_cars = ():>void => {
 # ---------- Common world pass ----------------------------------------------------------------------
 
 let render_world_common = (sw:int sh:int):>void => {
+    parallax_prepare()
     gpu_set_viewport(sw sh)
     if g_is_space {
         gpu_clear(COL_SPACE_R COL_SPACE_G COL_SPACE_B)
@@ -809,11 +838,13 @@ let render_world_common = (sw:int sh:int):>void => {
     }
     set_perspective(sw sh)
     apply_camera()
-    if g_is_space {
-        draw_starfield()
+    if parallax_active { parallax_sky() } else {
+        if g_is_space { draw_starfield() }
     }
     gpu_enable_depth_test(1)
     draw_ground()
+    if parallax_active { parallax_machinery() }
     draw_track()
+    if parallax_active { parallax_guides() parallax_signs() }
     return void
 }

@@ -1,0 +1,68 @@
+# A nearest-frame hint may be the finish endpoint BEFORE the craft crosses.
+# Regression for false reverse laps / missed forward laps at that boundary.
+$supported_targets = ["x86_64" "c"]
+import p"./prelude.udewy"
+import p"./state.udewy"
+import p"./track_model.udewy"
+import p"./track_bake.udewy"
+import p"./track_query.udewy"
+import p"./track_format.udewy"
+import p"./physics.udewy"
+
+const LAP_TEST:Cstr = "
+uztrack 1
+name Seam
+node a pos 0 0 0 tan 0 0 -1 width 30 30
+node b pos 0 0 -400 tan 1 0 0 width 30 30
+node c pos 400 0 -400 tan 0 0 1 width 30 30
+node d pos 400 0 400 tan -1 0 0 width 30 30
+node e pos 0 0 400 tan 0 0 -1 width 30 30
+seg a from a to b
+seg b from b to c
+seg c from c to d
+seg d from d to e
+seg e from e to a
+start a 0.1
+route a b c d e
+\0"
+let failures:int = 0
+let check = (label:Cstr ok:bool):>void => {
+    if ok { print("PASS ") } else { print("FAIL ") failures += 1 }
+    host_write(STDOUT label cstr_len(label)) print("\n")
+    return void
+}
+let place_before_line = (speed:Q16):>void => {
+    init_cars(1) car_load(0)
+    cx = 0 cy = HOVER_HEIGHT cz = FP_HALF
+    cvx = 0 cvy = 0 cvz = -speed
+    fx = 0 fy = 0 fz = -FP_ONE
+    ux = 0 uy = FP_ONE uz = 0 update_right()
+    cur_seg = 4 cur_si = seg_nsamp(seg_p(4)) - 1
+    cur_lap = 0 was_airborne = 0
+    current_car_is_player = 0
+    return void
+}
+let main = ():>int => {
+    arena_init()
+    if track_parse(LAP_TEST) =? false { return 1 }
+    track_bake()
+    place_before_line(FP_ONE // 8)
+    let i:int = 0
+    loop i <? 3 { physics_step() i += 1 }
+    check("no reverse lap while still before line\0" (cur_lap =? 0) and (cz >? 0))
+    i = 0
+    loop i <? 30 { physics_step() i += 1 }
+    check("slow crossing counts exactly once\0" (cur_lap =? 1) and (cz <? 0))
+    fz = FP_ONE cvz = FP_ONE // 8 update_right()
+    i = 0
+    loop i <? 80 { physics_step() i += 1 }
+    check("reverse crossing undoes exactly one lap\0" (cur_lap =? 0) and (cz >? 0))
+    place_before_line(12 * FP_ONE)
+    physics_step()
+    check("fast crossing counts despite endpoint hint\0" cur_lap =? 1)
+    i = 0
+    loop i <? 10 { physics_step() i += 1 }
+    check("no duplicate lap after crossing\0" cur_lap =? 1)
+    if failures >? 0 { return 1 }
+    return 0
+}
