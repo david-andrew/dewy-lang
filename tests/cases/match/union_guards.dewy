@@ -1,0 +1,15 @@
+# modes: native web
+describe=(v:bool|int64|string):>string=>match v {
+    <bool> => "a flag"
+    answer:42 => "the answer"
+    small:int64<small <? 100> => "small {small}"
+    n:int64 => "large"
+    s:string => s
+}
+main=()=>{
+    printl(describe(true))
+    printl(describe(42))
+    printl(describe(7))
+    printl(describe(1000))
+    printl(describe("hi"))
+}

@@ -1,0 +1,13 @@
+# modes: native
+under=(x:int64<(<? 100)>):>int64=>x
+describe=(v:bool|int64|string):>int64=>match v {
+    small:int64<small <? 100> => under(small)
+    n:int64 => n
+    <bool> => 0
+    <string> => 1
+}
+main=()=>{
+    printl(describe(7))
+    printl(describe(700))
+    printl(describe(false))
+}

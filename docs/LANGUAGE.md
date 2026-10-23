@@ -3435,7 +3435,9 @@ binds `small` when the refinement holds, and `<-1|1>` matches either value.
 Coverage is computed on value sets, so `a:int64<a <? 0>` and `b:int64<b >=? 0>`
 cover `int64`, while over `-1|0|1` the same guards with `>? 0` report
 `this match has no arm for 0`; an arm whose values earlier arms already match is
-unreachable. String literal arms work the same way: over `'n' | 's' | 'e'`,
+unreachable. A guard also works on a union's integer member: over
+`bool|int64|string`, `small:int64<small <? 100>` matches an `int64` below 100,
+and guards cover the member once their values do. String literal arms work the same way: over `'n' | 's' | 'e'`,
 `<'n'>` and `other:'s'|'e'` cover it, and over a mixed literal union the arms
 cover a literal member once each of its values has an arm.
 

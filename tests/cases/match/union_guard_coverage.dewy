@@ -1,0 +1,11 @@
+# modes: native
+total=(v:int64|string):>string=>match v {
+    neg:int64<neg <? 0> => "neg"
+    nonneg:int64<nonneg >=? 0> => "nonneg {nonneg}"
+    s:string => s
+}
+main=()=>{
+    printl(total(-3))
+    printl(total(3))
+    printl(total("s"))
+}

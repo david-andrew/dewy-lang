@@ -1,0 +1,7 @@
+# modes: native
+part=(v:int64|string):>string=>match v {
+    neg:int64<neg <? 0> => "neg"
+    pos:int64<pos >? 0> => "pos"
+    s:string => s
+}
+main=()=>printl(part(1))
