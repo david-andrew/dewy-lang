@@ -349,3 +349,13 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   (`b:int64<v => a <=? v>`); docs, examples, diagnostics and fix-its use it.
 - The current compiler's implementation language is Sloppy (`.jo` is its file
   extension); docs and diagnostics name it accurately, never "Jo".
+- Follow-ups (decided 2026-10-23): the site tagline is "Python-like ease.
+  C-like speed. Safer than Rust.", backed by a page of concrete differences. The
+  game library's vector magnitude is `v.norm` (MATLAB/Julia/NumPy term;
+  extends to `v.norm(p=1)` and matrix norms); the free `length(v)` is removed,
+  and `.length` means element count everywhere. Type-directed juxtaposition
+  multiplication (reference operators-and-precedence.md:24-35) is on hold pending
+  David's review of its readability and safety; literal coefficients keep
+  today's behavior and the docs stay neutral. The boolean path guard stays
+  `root.contains(p)`; the value-returning validator is being renamed (too easy to
+  confuse with `contains`), name pending.
