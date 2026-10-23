@@ -401,15 +401,6 @@ when TARGET == "windows":
 
     __w32_free_pages = (p: *u8): VirtualFree(p, 0, u32(0x8000))   # MEM_RELEASE
 
-    # a command line: the arguments, quoted where they need it
-    __w32_cmdline = (argv: str[]) -> str:
-        cmd = ""
-        loop i in 0.. and a in argv:
-            if i > 0: cmd += " "
-            if len(a) > 0 and find(a, " ") < 0 and find(a, "\"") < 0: cmd += a
-            else: cmd += "\"" + replace(a, "\"", "\\\"") + "\""
-        cmd
-
     # run a program and wait for it: its exit code (-1: it could not be started)
     # run a program (looked for on the PATH by Windows when path is ""), its output collected:
     # its exit code (-1: not started) and what it wrote
@@ -546,3 +537,51 @@ when TARGET == "windows":
         code: u32[] = [0]
         GetExitCodeProcess(h, data(code))
         int(code[0])
+
+# A command line for CreateProcessW: the arguments, each read back unchanged by
+# CommandLineToArgvW (and the C runtime's argv). Outside the Windows block so every
+# platform's tests check it.
+__w32_cmdline = (argv: str[]) -> str:
+    out: u8[]
+    loop i in 0.. and a in argv:
+        if i > 0: out.push(' ')
+        if i == 0: __w32_quote_program(out, a)
+        else: __w32_quote_arg(out, a)
+    str_from_bytes(out)
+
+# (the program's name, the first argument, is read up to the next quote with backslashes as
+# they are; a Windows file name has no quote in it)
+__w32_quote_program = (out: mut u8[], a: str):
+    if len(a) > 0 and not __w32_needs_quotes(a):
+        loop c in bytes(a): out.push(c)
+        return
+    out.push('"')
+    loop c in bytes(a):
+        if c != '"': out.push(c)
+    out.push('"')
+
+__w32_needs_quotes = (a: str) -> bool:
+    loop c in bytes(a):
+        if c == ' ' or c == '\t' or c == '\n' or c == u8(11) or c == '"': return true
+    false
+
+# (an argument: quoted when it is empty or has a space, tab or quote; backslashes before a
+# quote, and before the closing quote, doubled; a quote in it escaped)
+__w32_quote_arg = (out: mut u8[], a: str):
+    if len(a) > 0 and not __w32_needs_quotes(a):
+        loop c in bytes(a): out.push(c)
+        return
+    out.push('"')
+    slashes = 0
+    loop c in bytes(a):
+        if c == '\\':
+            slashes += 1
+            continue
+        if c == '"':
+            loop _ in [0..slashes * 2 + 1): out.push('\\')
+        else:
+            loop _ in [0..slashes): out.push('\\')
+        out.push(c)
+        slashes = 0
+    loop _ in [0..slashes * 2): out.push('\\')
+    out.push('"')
