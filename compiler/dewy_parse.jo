@@ -3291,6 +3291,7 @@ dw_collect = (id: int, accumulator: int, map: bool) -> int:
     if map:
         if dw_op(id) != .arrow: return dw_fail(id, "a dictionary comprehension element without ->")
         value = mk(.tuple, pos)
+        add_flag(value, NF_MAP_PAIR)
         set_list(value, [dw_expr(dw_child(id, 1)), dw_expr(dw_child(id, 2))])
     else: value = dw_expr(id)
     receiver = mk(.ident, pos)

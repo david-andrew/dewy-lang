@@ -62,6 +62,57 @@ float_to_u64 = (v: int, ft: int) -> int:
     endc()
     d
 
+# ---------------- float dictionary keys ----------------
+#
+# A float dictionary key is never NaN: NaN equals nothing, so its entry could
+# never be found again. Each key a Dewy call hands a dictionary is an
+# obligation, proven for a non-NaN literal, a converted integer and anything
+# under `$no_nan`; otherwise the scope's policy (`dir_defer`) checks it at run
+# time or rejects it. Cost: O(1) per dictionary call while checking.
+
+float_keys: {int: bool} = {}  # key node -> lowering checks it is not NaN
+float_keys_any = false
+
+float_keys_reset = ():
+    float_keys = {}
+    float_keys_any = false
+
+map_float_key = (n: int):
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0 or not pos_in_lib(nodes[d].pos) or nkids(d) < 2 or name_of(int(nodes[kid(d, 1)].name)) != "k": return
+    mt = prune(ntype(kid(n, 0)))
+    if types[mt].kind == .ptr: mt = prune(int(types[mt].elem))
+    if not is_map_type(mt) or not is_float(prune(struct_targ(int(types[mt].st), 0))): return
+    float_key_obligation(kid(n, 1))
+
+float_key_obligation = (key: int):
+    if float_not_nan(key) or ff_mode_at(nodes[key].pos) & FF_NAN != 0: return
+    what = "cannot prove the dictionary key is not NaN"
+    if dir_defer(key, what, true):
+        float_keys[key] = true
+        float_keys_any = true
+        return
+    err_notes.push((-1, "help: NaN equals nothing, so its entry could never be found again: compute the key under `$no_nan`, or check it at run time under `$runtime_checks`"))
+    fatal(nodes[key].pos, what)
+
+# A float expression that is never NaN, by its form alone.
+float_not_nan = (n: int) -> bool:
+    k = nodes[n].kind
+    if k == .float_lit: return nodes[n].fval == nodes[n].fval
+    if k == .int_lit: return true
+    if k == .conv: return is_int(prune(ntype(int(nodes[n].a)))) or float_not_nan(int(nodes[n].a))
+    if k == .unary and nodes[n].op == i32(int(Tok.minus)): return float_not_nan(int(nodes[n].a))
+    false
+
+# Lowering: the runtime check of a float key, on its value v.
+float_key_check = (e: int, v: int, t: int):
+    if not float_keys.has(e): return
+    ty = vt_of(t)
+    if ty != VF and ty != VS: return
+    iff(e_bin(.fne, ty, v, v))
+    e_call_nr(rt("__assert_fail"), [e_daddr(str_data("dictionary key is NaN, which equals nothing: its entry could never be found")), e_daddr(loc_data(nodes[e].pos))], -1)
+    endc()
+
 # ---------------- `$no_nan` and `$no_inf` ----------------
 #
 # Inside the scope, floats are free of NaN (`$no_nan`) or infinities

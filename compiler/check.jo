@@ -36,6 +36,7 @@ use 'sibling_types.jo'
 use 'dewy_methods.jo'
 use 'directives.jo'
 use 'ffi.jo'
+use 'floats.jo'
 
 enum SK: none_, local, global, fns, struct_, enum_, const_, module, type_, builtin, alias_, reflected
 
@@ -5684,6 +5685,7 @@ check_program = (main_path: str):
     effects_reset()
     arena_reset()
     directives_reset()
+    float_keys_reset()
     if len(program_name) > 0: program_named = true
     if len(program_name) == 0:
         program_name = main_path

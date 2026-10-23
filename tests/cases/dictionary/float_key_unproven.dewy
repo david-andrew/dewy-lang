@@ -1,0 +1,7 @@
+$runtime_checks=false
+count=(xs:array<float64>):>dict<float64 int64>=>{
+    let d:dict<float64 int64>=[]
+    loop x in xs {d[x] = 1}
+    d
+}
+main=():>void=>printl(count([1.0 2.0]))

@@ -1,0 +1,14 @@
+# Literals, converted integers and keys under `$no_nan` need no check
+$runtime_checks=false
+count=(xs:array<float64>):>dict<float64 int64>=>{
+    $no_nan
+    let d:dict<float64 int64>=[0.5 -> 0]
+    loop x in xs {d[x] = 1}
+    d[float64(xs.length)] = 2
+    d
+}
+main=():>void=>{
+    let d=count([1.0 2.5])
+    printl(d)
+    printl(d.has(2.5))
+}

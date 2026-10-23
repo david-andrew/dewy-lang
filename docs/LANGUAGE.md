@@ -1792,6 +1792,10 @@ Comprehensions are eager. Nested loops and block bodies work; a final block valu
 is collected, while `break`, `continue` and assignment statements do not emit a
 value. `key -> value` creates dictionary entries; duplicate keys take the last
 value. A dictionary can also be written directly as `["a"->20 "b"->22]`.
+A float key is never NaN, which equals nothing, so its entry could never be
+found again: each float key given to a dictionary (stored, looked up, removed or
+written in a literal) is an obligation. Literals, converted integers and keys
+under `$no_nan` are proven; any other follows the obligation settings.
 
 Straight-line `[loop i in [0..n) expression]` comprehensions over an `int64`
 bound and `[loop x in values expression]` over ordinary or fixed arrays reserve

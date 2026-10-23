@@ -75,6 +75,7 @@ const NF_LAZY = 16777216      # a library function's body not parsed yet: tokens
 const NF_LOOPCOUNT = 33554432 # a vardecl a combined loop is rewritten with (`i in 0..`): never warned as unused;
                               # a field: a library member a loop's lowering reads (a map's keys), never warned as the library's own
 const NF_LANG_BODY = NF_LOOPCOUNT # lambda: a parallel or spawn body, whose writes their own checks govern
+const NF_MAP_PAIR = NF_LOOPCOUNT  # tuple: a dictionary comprehension's (key, value)
 const NF_COMPREHENSION = 67108864 # block: first declaration is the collection accumulator
 const NF_RECORD = 134217728 # anonymous structural record declaration
 const NF_INDEX_CAPTURED = 268435456 # compound custom-index update already captured its indices

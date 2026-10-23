@@ -27,6 +27,7 @@ use 'dewy_methods.jo'
 use 'ffi.jo'
 use 'isolation.jo'
 use 'sibling_types.jo'
+use 'floats.jo'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -8721,6 +8722,7 @@ check_call_expr = (n: int, expected: int) -> int:
     if nkids(n) == 2 and nodes[n].aux == 0 and nodes[n].sym > 0 and fns[int(nodes[n].sym)].parallel:
         concurrency_calls.push(n)
         parallel_prepare(n)
+    if nodes[n].aux == 0 and nodes[n].sym > 0 and nkids(n) >= 2 and dewy_at(nodes[n].pos): map_float_key(n)
     ce_finish(n, t, expected)
 
 check_str_expr = (n: int, expected: int) -> int:
@@ -9587,6 +9589,8 @@ check_expr_other = (n: int, expected: int) -> int:
                 if not type_eq(bt, prune(vt)) and not can_coerce(vb, bt, vt): fatal(nodes[vb].pos, "a map's values are all of one type, and the first is {a_type(vt)}, this {a_type(bt)}: for a record with named fields of their own types, declare {jd(nodes[vb].pos, "`struct Name:`", "`Name:type = [field:T ...]`")} with them")
                 coerce(vb, vt)
             else: check_to(vb, vt)
+        if is_float(prune(kt)) and dewy_at(nodes[n].pos):
+            loop p in kids(n): float_key_obligation(int(nodes[p].a))
         t = get_struct_inst(md, [kt, vt])
         if nkids(n) > 0: nodes[n].sym = i32(resolve_by_types(intern("[]="), [t, kt, vt], nodes[n].pos, true))
     else if k == .tuple:
@@ -9601,6 +9605,7 @@ check_expr_other = (n: int, expected: int) -> int:
                 if e != 0: coerce(c, e)
                 else: finalize_literal(c)
                 el.push(ntype(c))
+            if has_flag(n, NF_MAP_PAIR) and is_float(prune(el[0])): float_key_obligation(kid(n, 0))
             t = mk_tuple(el)
     else if k == .iflet: t = check_iflet(n, ex)
     else if k == .match_: t = check_match(n, expected)

@@ -4705,6 +4705,7 @@ never_value = (t: int) -> Val:
 gen_expr = (e: int) -> Val:
     value = gen_expr_value(e)
     if ff_checks_any: float_check(e, value.v, ntype(e))
+    if float_keys_any: float_key_check(e, value.v, ntype(e))
     if ownership_type(ntype(e)) and value.owned: return owner_value(value, ntype(e))
     value
 
