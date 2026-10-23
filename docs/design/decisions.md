@@ -359,3 +359,30 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   today's behavior and the docs stay neutral. The boolean path guard stays
   `root.contains(p)`; the value-returning validator is being renamed (too easy to
   confuse with `contains`), name pending.
+- Decimal default (decided 2026-10-23): exact rationals stay the default; no
+  decimal-float default. Principle: an expression's value never depends on
+  whether the compiler folded it, so `a=0.1 b=0.2; a+b =? 0.3` and
+  `x=1/3; x*3 =? 1` are true everywhere. Costs addressed: an exact value carried
+  around a loop through `*` or `/` (size can grow each iteration) gets a warning
+  with a fix-it to annotate `float64` or another explicit representation, never
+  an automatic switch; values print the way they were written (decimals as
+  decimals, with a repeating marker when non-terminating; written fractions as
+  fractions), with the exact display rule reported to David.
+- Contained paths and untrusted input (decided 2026-10-23; design in
+  [contained_paths.md](contained_paths.md)): `Path` stays the everyday type and
+  flows freely. `SafePath` is a `Path` with a proven brand ("does not escape its
+  base"); only trusted validators create brands, and the compiler applies it
+  automatically to paths built from hardcoded text, other `SafePath`s, or
+  components proven safe (one component, no `/`, not `.`/`..`, not empty).
+  Untrusted is a tracked fact, not a kind of value: text from external input
+  (network, stdin, file contents, environment, command line) carries an
+  untrusted brand; a path built from it is a plain `Path`, not a `SafePath`, and
+  passes through `Path` code freely (`UntrustedPath` may name it in signatures;
+  it is not an exception type). `root.contain(p)` returns
+  `SafePath | PathEscape`; functions that care take `SafePath`, and passing an
+  unvalidated path is a compile error with a `root.contain(p) or_throw` fix-it.
+  Safety net: a warning when an untrusted-derived path reaches a filesystem
+  operation without `contain`. Later: `root.open_beneath(rel)` for symlink
+  escapes (openat2 RESOLVE_BENEATH or equivalent); the same untrusted brand can
+  guard process spawning, SQL and HTML sinks. This is the first user of the
+  untrusted-input brand in safety_and_concurrency.md, built generally.
