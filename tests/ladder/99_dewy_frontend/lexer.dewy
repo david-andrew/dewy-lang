@@ -91,6 +91,7 @@ interpolation_end=(source:array<uint8> start:int64<0 <=? start and start <=? sou
 
 # Just past a quoted token, including nested strings inside interpolations.
 quote_end=(source:array<uint8> start:int64<0 <=? start and start <=? source.length> stop:int64<start <? stop and stop <=? source.length> nesting:int64=0 raw:bool=false):>int64<r => 0 <=? r and r <=? source.length>|LexError=>{
+    $runtime_checks
     if nesting >=? MAX_NESTING return lex_error(start "string interpolation is nested too deeply")
     let quote=source[start]
     let width=quote_width(source start stop)
@@ -119,6 +120,7 @@ quote_end=(source:array<uint8> start:int64<0 <=? start and start <=? source.leng
 # (`>=` is not lexed: a lone `>` closes a type argument before `=`; and
 # nested generic closers before `=>` are `>>` then `=>`, not `>>=` then `>`.)
 punctuation=(source:array<uint8> at:int64<0 <=? at and at <=? source.length> stop:int64<at <? stop and stop <=? source.length>):>Symbol?=>{
+    $runtime_checks
     let options=PUNCTUATION.get(source[at])
     if options is? none return none
     loop text in options {
@@ -160,6 +162,7 @@ symbol_end=(source:array<uint8> at:int64<0 <=? at and at <=? source.length> symb
 }
 
 lex=(source:array<uint8> begin:int64<0 <=? begin and begin <=? source.length>=0 finish:int64<(<=? source.length)>=-1):>array<Token>|LexError=>{
+    $runtime_checks
     let stop=source.length
     if finish >=? 0 stop=finish
     let out:array<Token>=[]

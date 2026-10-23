@@ -19,6 +19,7 @@ fill_slice=(@xs:array<int64> value:int64):>void=>{
     loop i in [0..xs.length) {xs[i]=value}
 }
 write_halves=(@xs:array<int64>):>void=>{
+    if xs.length <? 8 return
     let _joined=parallel_range(2 ($capture @xs i:int64):>int64=>{
         if i =? 0 {fill_slice(@xs[..4) 1)}
         else {fill_slice(@xs[4..] 2)}

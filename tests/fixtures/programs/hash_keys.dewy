@@ -9,7 +9,7 @@ let current_maps:array<dict<int64 Key>>=[]
 hash=(key:Key):>uint64=>{
     hash_calls+=1
     if armed {armed=false current.clear() current_maps.clear()}
-    return (key.value as uint64).hash()
+    return (key.value transmute uint64).hash()
 }
 
 Tagged:type=<T>[value:T label:string]

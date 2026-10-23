@@ -26,6 +26,7 @@ Poly1305:type=[
     # full block (the 2^128 marker), 0 for the padded last block, which carries
     # its marker byte in the data.
     absorb=(data:array<uint8> at:int64<0 <=? at and at <=? data.length> final_bit:uint64):>void=>{
+        $runtime_checks
         let [r0 r1 r2 r3 r4]=r
         let s1=r1*5
         let s2=r2*5

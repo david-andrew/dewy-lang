@@ -1,6 +1,6 @@
 import netplay
 
-step=(state:int64 inputs:array<int64>):>int64=>state+inputs[0]+inputs[1]
+step=(state:int64 inputs:array<int64>):>int64=>state+(inputs.get(0) ?? 0)+(inputs.get(1) ?? 0)
 
 main=(args:array<string>):>void=>{
     let inject=args.length>?1 and args[1]=?"late"

@@ -9,7 +9,7 @@ let greeting = $include_bytes(p"data/greeting.txt")
 let main = ():>void => {
     let checks:int64 = 0
     if greeting.length =? 13 { checks += 1 }               # "héllo bytes\n": é is two bytes
-    if greeting[0] =? 104 and greeting[12] =? 10 { checks += 2 }
+    if greeting.length >=? 13 and greeting[0] =? 104 and greeting[12] =? 10 { checks += 2 }
     let text = greeting as string|none
     if text is? string { if text.length =? 12 { checks += 4 } }
     if again.length =? greeting.length { checks += 8 }

@@ -163,6 +163,7 @@ escape_byte=(c:uint8):>int64=>match c {
 # The text of a quoted token, with each `{expression}` parsed by a nested
 # parser over the same source.
 string_node=(@p:Parser t:Token):>int64|ParseError=>{
+    $runtime_checks
     let source=p.source
     let raw=t.kind =? 'rawquoted'
     let opening=t.start
@@ -259,6 +260,7 @@ closer=(s:Symbol):>Symbol=>match s {
 }
 
 bracketed=(@p:Parser):>int64|ParseError=>{
+    $runtime_checks
     let opening=token(p)
     p.at+=1
     let open=opening.symbol ?? '('
