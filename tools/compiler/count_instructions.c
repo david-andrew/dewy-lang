@@ -13,8 +13,12 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 int main(int argc, char **argv) {
+    if (argc < 2) return 2;
+    int cycles = !strcmp(argv[1], "--cycles");
+    if (cycles) { argv++; argc--; }
     if (argc < 2) return 2;
     pid_t child = fork();
     if (child < 0) { perror("fork"); return 1; }
@@ -22,7 +26,7 @@ int main(int argc, char **argv) {
     int status;
     if (waitpid(child, &status, WUNTRACED) != child) return 1;
     struct perf_event_attr a = {0};
-    a.size = sizeof(a); a.type = PERF_TYPE_HARDWARE; a.config = PERF_COUNT_HW_INSTRUCTIONS;
+    a.size = sizeof(a); a.type = PERF_TYPE_HARDWARE; a.config = cycles ? PERF_COUNT_HW_CPU_CYCLES : PERF_COUNT_HW_INSTRUCTIONS;
     a.disabled = 1; a.enable_on_exec = 1; a.inherit = 1; a.pinned = 1;
     a.exclude_kernel = 1; a.exclude_hv = 1;
     a.read_format = PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING;
@@ -33,7 +37,7 @@ int main(int argc, char **argv) {
     uint64_t result[3];
     ssize_t got = read(fd, result, sizeof(result)); close(fd);
     if (got != sizeof(result) || !result[2]) { fprintf(stderr, "counter unavailable\n"); return 1; }
-    fprintf(stderr, "{\"instructions\":%llu,\"enabled_ns\":%llu,\"running_ns\":%llu}\n",
-            (unsigned long long)result[0], (unsigned long long)result[1], (unsigned long long)result[2]);
+    fprintf(stderr, "{\"%s\":%llu,\"enabled_ns\":%llu,\"running_ns\":%llu}\n",
+            cycles ? "cycles" : "instructions", (unsigned long long)result[0], (unsigned long long)result[1], (unsigned long long)result[2]);
     return !WIFEXITED(status) || WEXITSTATUS(status) != 0;
 }

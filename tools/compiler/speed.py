@@ -33,6 +33,17 @@ plus its largest worker's approximate wall time under ideal parallelism, and
 unlike wall time do not depend on the machine's load. --wall also measures
 wall-clock milliseconds, reported only: pinned to one logical CPU per physical
 core where possible, runs interleaving base and candidate, median of --runs.
+
+For layout/padding changes, also run --cycles --cpu N --runs 15. Retired
+instructions count NOPs as work; cycles expose their different execution cost.
+This hardware-only report pins each compile to the selected allowed CPU, warms
+both hosts, alternates their order, and reports medians and min/max plus load
+before/after. Use an idle physical core (including its SMT sibling), fixed CPU
+frequency policy and identical inputs; load, interrupts and frequency changes
+still affect cycles. It reports every normal panel item alongside instructions;
+cycles are not converted to reference lines/s. --limit explicitly gates cycles;
+without it the cycle report is diagnostic. It never waives a cycle regression
+via commit messages. The normal instruction gate remains a separate run.
 """
 from __future__ import annotations
 
@@ -101,18 +112,18 @@ def generate_dewy(count: int) -> str:
     return '\n'.join(parts) + '\n'
 
 
-def counter_result(stderr: str) -> int:
-    """Instructions from count_instructions' final JSON line; reject multiplexed counts."""
+def counter_result(stderr: str, metric: str = 'instructions') -> int:
+    """Selected hardware event from the final JSON line; reject multiplexed counts."""
     try:
         row = json.loads(stderr.splitlines()[-1])
     except (ValueError, IndexError) as error:
-        raise ValueError('Missing hardware instruction count') from error
-    keys = ('instructions', 'enabled_ns', 'running_ns')
+        raise ValueError(f'Missing hardware {metric} count') from error
+    keys = (metric, 'enabled_ns', 'running_ns')
     if not isinstance(row, dict) or any(type(row.get(k)) is not int or row[k] <= 0 for k in keys):
-        raise ValueError('Invalid hardware instruction count')
+        raise ValueError(f'Invalid hardware {metric} count')
     if row['enabled_ns'] != row['running_ns']:
-        raise ValueError('Multiplexed hardware instruction count')
-    return row['instructions']
+        raise ValueError(f'Multiplexed hardware {metric} count')
+    return row[metric]
 
 
 def cachegrind_result(stderr: str) -> int:
@@ -843,7 +854,18 @@ def main(argv: list[str], current: Path) -> int:
     cli.add_argument('--workers', default='1,2,4', help='--critical/--wall: emission worker counts (default 1,2,4)')
     cli.add_argument('--runs', type=int, default=7, help='--wall: runs per compiler (default 7)')
     cli.add_argument('--no-pin', action='store_true', help='--wall: do not pin to one CPU per core')
+    cli.add_argument('--cycles', action='store_true', help='report pinned interleaved hardware cycles and instructions')
+    cli.add_argument('--cpu', type=int, help='--cycles: required allowed logical CPU; keep its SMT sibling idle')
     args = cli.parse_args(argv)
+    if args.cycles:
+        if args.cpu is None or not hasattr(os, 'sched_getaffinity') or args.cpu not in os.sched_getaffinity(0):
+            cli.error('--cycles requires --cpu naming an allowed Linux CPU')
+        if args.runs < 15:
+            cli.error('--cycles requires --runs >= 15')
+        if args.wall or args.critical or args.corpus or args.no_pin or args.checkpoint or args.counter == 'valgrind':
+            cli.error('--cycles cannot combine with wall/critical/corpus/no-pin/checkpoint/valgrind')
+        from tools.compiler.speed_cycles import report
+        return report(args, current)
     if args.wall or args.critical or args.corpus:
         CACHE.mkdir(parents=True, exist_ok=True)
         with (CACHE / 'speed.lock').open('w') as lock:
