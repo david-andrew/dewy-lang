@@ -153,7 +153,9 @@ lx_indents: int[]
 lx_tab_indent = false           # (some line is indented with a tab, and some with spaces: said in errors)
 lx_space_indent = false
 # contexts: one entry per open bracket or indented block inside brackets, packed as
-# (source position << 24) | (indent stack base << 1) | (1 if it is a block)
+# (source position << 24) | (payload << 1) | (1 if it is a block)
+# payload: indent stack base for blocks, opening token index + 1 for brackets
+# (0 for an index too large to pack; partner() retains its bounded fallback).
 lx_ctx: int[]
 lx_line_indent = 0
 lx_lazy = false                 # (a library file: top-level function bodies become one .lazy token each)
@@ -927,6 +929,8 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
         else if k == .rparen or k == .rbrack or k == .rbrace:
             lx_close_block_ctx(lx_i)
             if lx_ctx.len() <= 1: lx_err(lx_i, "unmatched '{byte_str(int(c))}'")
+            opening = (lx_ctx[lx_ctx.len() - 1] >> 1) & 0x7FFFFF
+            if opening > 0: lx_slots[opening - 1].ival = lx_count
             lx_ctx.pop()
         if lx_count == lx_cap: lx_grow()
         t = lx_slots
@@ -939,7 +943,8 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
         if k == .dotop: t[tk].ival = int(c1)
         lx_i = i + n
         if k == .lparen or k == .lbrack or k == .lbrace:
-            lx_ctx.push(i << 24)
+            opening = if tk < 0x7FFFFE: tk + 1 else: 0
+            lx_ctx.push((i << 24) | (opening << 1))
         else if k == .colon and not lx_top_block():
             q = lx_i
             loop p[q] == ' ' or p[q] == '\t' or p[q] == '\r': q += 1

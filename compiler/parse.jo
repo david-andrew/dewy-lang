@@ -5,6 +5,10 @@ use 'lex.jo'
 use 'ast.jo'
 
 toks: Token[]
+# A parse unit owns its EOF-terminated stream. Borrow once on entry; recursive
+# interpolation and demanded-unit parsing restore the borrow with the owning array.
+p_toks: *Token = null
+p_ntoks = 0
 ti = 0
 p_file = 0
 p_src = ""
@@ -17,28 +21,28 @@ p_base = 0               # where p_src starts in the file (an interpolation's so
 p_lazy = false           # (parsing a library file, outside the editor)
 p_top_decl = false       # (the function being parsed is a top-level one)
 
-pk = () -> Tok: toks[ti].kind
+pk = () -> Tok: p_toks[ti].kind
 pkn = (k: int) -> Tok:
     j = ti + k
-    if j >= toks.len(): j = toks.len() - 1
-    toks[j].kind
-cur_pos = () -> int: toks[ti].pos
+    if j >= p_ntoks: j = p_ntoks - 1
+    p_toks[j].kind
+cur_pos = () -> int: p_toks[ti].pos
 advance = () -> int:
     i = ti
-    if ti < toks.len() - 1: ti += 1
+    if ti < p_ntoks - 1: ti += 1
     i
 accept = (k: Tok) -> bool:
-    if toks[ti].kind == k:
+    if p_toks[ti].kind == k:
         advance()
         return true
     false
 tok_src = (i: int) -> str:
-    s = int(toks[i].start)
-    p_src[s..s + int(toks[i].len))
+    s = int(p_toks[i].start)
+    p_src[s..s + int(p_toks[i].len))
 # position just after the previous token (where a missing ':' or ')' belongs)
 prev_end = () -> int:
     if ti == 0: return cur_pos()
-    toks[ti - 1].pos + int(toks[ti - 1].len)
+    p_toks[ti - 1].pos + int(p_toks[ti - 1].len)
 
 word_in = (w: str, words: str[]) -> bool:
     loop x in words:
@@ -69,27 +73,27 @@ spec_problem = (spec: str) -> str:
 
 tok_char = (c: u8) -> str: str_from_bytes([c])
 
-nk_is = (i: int, k: Tok) -> bool: i + 1 < toks.len() and toks[i + 1].kind == k
+nk_is = (i: int, k: Tok) -> bool: i + 1 < p_ntoks and p_toks[i + 1].kind == k
 
 # a mistake carried over from another language where parsing stopped at token i (wanting
 # `want`, or .eof for an expression): says what Sloppy writes instead, and stops
 habit = (i: int, want: Tok):
-    k = toks[i].kind
+    k = p_toks[i].kind
     p = Tok.eof
     pw = ""
     if i > 0:
-        p = toks[i - 1].kind
+        p = p_toks[i - 1].kind
         if p == .ident: pw = tok_src(i - 1)
     glued = i > 0 and not space_before(i)
     at = cur_pos()
-    if i > 0: at = toks[i - 1].pos
+    if i > 0: at = p_toks[i - 1].pos
     if word_in(pw, ["def", "fn", "func", "function", "fun"]):
         name = "add"
         if k == .ident: name = tok_src(i)
         if len(struct_body) > 0: fatal(at, "structs have no methods (and there is no `{pw}`): write the function at the top level, not inside the struct, taking what it works on first, as `{name} = (p: mut {struct_body}): p.x += 1`; `p.{name}()` calls it")
         fatal(at, "a function is written `{name} = (a: int, b: int) -> int: ...` (there is no `{pw}`)")
     if pw == "local": fatal(at, "there is no `local`: `x = 5` in a function is the function's own (`let x = 5` always makes a new one)")
-    if k == .tilde and nk_is(i, .assign): fatal(toks[i].pos, "use `!=`")
+    if k == .tilde and nk_is(i, .assign): fatal(p_toks[i].pos, "use `!=`")
     if pw == "extends": fatal(at, "there is no inheritance: a struct can hold another as a field (`body: Body`), and functions take what they work on first (`e.hurt(5)` calls `hurt(e, 5)`)")
     if pw == "signal": fatal(at, "there are no signals: call a function when it happens, or keep the functions to call in an array (`on_died: (() -> void)[]`) and call each")
     if word_in(pw, ["class", "interface", "trait", "impl"]):
@@ -111,41 +115,41 @@ habit = (i: int, want: Tok):
     if pw == "lambda": fatal(at, "a function value is written `(x): x * 2`")
     if pw == "print" and (k == .str_lit or k == .ident or k == .int_lit): fatal(at, "print is a function: `print(...)`")
     if (pw == "f" or pw == "F") and k == .str_lit and glued: fatal(at, "strings put values in by themselves: \"n is {{n}}\" (no f before the quote)")
-    if k == .kw_mut and p == .kw_let: fatal(toks[i].pos, "a `let` variable can change already: `let x = 5`")
-    if k == .assign and p == .colon and glued: fatal(toks[i - 1].pos, "`x = 5` declares x (there is no `:=`)")
-    if k == .assign and (p == .eq or p == .ne) and glued: fatal(toks[i - 1].pos, "use `{tok_src(i - 1)}` (there is no `{tok_src(i - 1)}=`: values of different types are never equal)")
-    if k == .assign and i >= 2 and toks[i - 2].kind == .kw_loop: fatal(toks[i - 2].pos, "loops are `loop i in [0..n):` (i from 0 to n - 1), or `loop condition:` (while it holds)")
-    if k == .assign and want == .colon and i >= 2 and toks[i - 2].kind == .kw_enum: fatal(toks[i].pos, "an enum is written with a colon: `enum {tok_src(i - 1)}: title, play, won`")
-    if k == .assign and want == .colon: fatal(toks[i].pos, "compare with `==` (`=` assigns)")
+    if k == .kw_mut and p == .kw_let: fatal(p_toks[i].pos, "a `let` variable can change already: `let x = 5`")
+    if k == .assign and p == .colon and glued: fatal(p_toks[i - 1].pos, "`x = 5` declares x (there is no `:=`)")
+    if k == .assign and (p == .eq or p == .ne) and glued: fatal(p_toks[i - 1].pos, "use `{tok_src(i - 1)}` (there is no `{tok_src(i - 1)}=`: values of different types are never equal)")
+    if k == .assign and i >= 2 and p_toks[i - 2].kind == .kw_loop: fatal(p_toks[i - 2].pos, "loops are `loop i in [0..n):` (i from 0 to n - 1), or `loop condition:` (while it holds)")
+    if k == .assign and want == .colon and i >= 2 and p_toks[i - 2].kind == .kw_enum: fatal(p_toks[i].pos, "an enum is written with a colon: `enum {tok_src(i - 1)}: title, play, won`")
+    if k == .assign and want == .colon: fatal(p_toks[i].pos, "compare with `==` (`=` assigns)")
     # (repeat 5:, Scratch's)
     if pw == "repeat" and (k == .int_lit or k == .ident): fatal(at, "to do something {tok_src(i)} times: `loop i in [1..{tok_src(i)}]:` and the lines below it")
-    if k == .lbrace and want != .eof: fatal(toks[i].pos, "blocks are a `:` and the indented lines after it, not braces")
-    if k == .ident and want != .eof and (tok_src(i) == "then" or tok_src(i) == "do"): fatal(toks[i].pos, "use `:` (as in `if x > 0: ...`)")
-    if k == .question and nk_is(i, .dot): fatal(toks[i].pos, "there is no `?.`: `if let v = x: v.f` uses the value when there is one, `(x ?? default).f` a default otherwise")
-    if k == .question and want != .eof: fatal(toks[i].pos, "a choice between two values is `if c: a else: b`")
-    if k == .kw_if and (want == .newline or want == .rparen or want == .comma or want == .rbrack): fatal(toks[i].pos, "a choice between two values is `if c: a else: b` (the condition first)")
-    if k == .colon and (p == .lbrack or want == .rbrack): fatal(toks[i].pos, "a slice is `xs[a..b)`, from a up to b (b left out): `xs[..2)` is the first two (`first(xs, 2)` when there may be fewer), `xs[1..]` all from 1 on")
+    if k == .lbrace and want != .eof: fatal(p_toks[i].pos, "blocks are a `:` and the indented lines after it, not braces")
+    if k == .ident and want != .eof and (tok_src(i) == "then" or tok_src(i) == "do"): fatal(p_toks[i].pos, "use `:` (as in `if x > 0: ...`)")
+    if k == .question and nk_is(i, .dot): fatal(p_toks[i].pos, "there is no `?.`: `if let v = x: v.f` uses the value when there is one, `(x ?? default).f` a default otherwise")
+    if k == .question and want != .eof: fatal(p_toks[i].pos, "a choice between two values is `if c: a else: b`")
+    if k == .kw_if and (want == .newline or want == .rparen or want == .comma or want == .rbrack): fatal(p_toks[i].pos, "a choice between two values is `if c: a else: b` (the condition first)")
+    if k == .colon and (p == .lbrack or want == .rbrack): fatal(p_toks[i].pos, "a slice is `xs[a..b)`, from a up to b (b left out): `xs[..2)` is the first two (`first(xs, 2)` when there may be fewer), `xs[1..]` all from 1 on")
     nk = Tok.eof
-    if i + 1 < toks.len(): nk = toks[i + 1].kind
-    if k == .slash and p == .slash and glued and i > 1 and space_before(i - 1) and (toks[i - 2].kind == .ident or toks[i - 2].kind == .int_lit or toks[i - 2].kind == .rparen or toks[i - 2].kind == .rbrack):
-        fatal(toks[i - 1].pos, "`/` on whole numbers already drops the fraction (7 / 2 is 3; `floor(x / y)` for floats); comments start with `#`")
-    if k == .slash and (p == .slash and glued or nk == .slash or nk == .star): fatal(toks[i].pos, "comments start with `#`")
-    if k == .bang: fatal(toks[i].pos, "use `not` (as in `if not done:`)")
-    if k == .pipe and p == .pipe and glued: fatal(toks[i - 1].pos, "use `or`")
-    if k == .amp and p == .amp and glued: fatal(toks[i - 1].pos, "use `and`")
+    if i + 1 < p_ntoks: nk = p_toks[i + 1].kind
+    if k == .slash and p == .slash and glued and i > 1 and space_before(i - 1) and (p_toks[i - 2].kind == .ident or p_toks[i - 2].kind == .int_lit or p_toks[i - 2].kind == .rparen or p_toks[i - 2].kind == .rbrack):
+        fatal(p_toks[i - 1].pos, "`/` on whole numbers already drops the fraction (7 / 2 is 3; `floor(x / y)` for floats); comments start with `#`")
+    if k == .slash and (p == .slash and glued or nk == .slash or nk == .star): fatal(p_toks[i].pos, "comments start with `#`")
+    if k == .bang: fatal(p_toks[i].pos, "use `not` (as in `if not done:`)")
+    if k == .pipe and p == .pipe and glued: fatal(p_toks[i - 1].pos, "use `or`")
+    if k == .amp and p == .amp and glued: fatal(p_toks[i - 1].pos, "use `and`")
     if (k == .plus and p == .plus or k == .minus and p == .minus) and glued:
         v = "x"
-        if i > 1 and toks[i - 2].kind == .ident: v = tok_src(i - 2)
-        fatal(toks[i - 1].pos, "use `{v} {tok_src(i)}= 1`")
-    if k == .gt and p == .assign and glued: fatal(toks[i - 1].pos, "a function value is written `(x): x * 2`")
-    if k == .starstar: fatal(toks[i].pos, "`x ^ y` is x to the power y")
-    if k == .arrow and p == .ident and nk_is(i, .ident) and glued: fatal(toks[i].pos, "a field through a pointer is `q.x` (or `q[0].x`): there is no `->`")
+        if i > 1 and p_toks[i - 2].kind == .ident: v = tok_src(i - 2)
+        fatal(p_toks[i - 1].pos, "use `{v} {tok_src(i)}= 1`")
+    if k == .gt and p == .assign and glued: fatal(p_toks[i - 1].pos, "a function value is written `(x): x * 2`")
+    if k == .starstar: fatal(p_toks[i].pos, "`x ^ y` is x to the power y")
+    if k == .arrow and p == .ident and nk_is(i, .ident) and glued: fatal(p_toks[i].pos, "a field through a pointer is `q.x` (or `q[0].x`): there is no `->`")
     if k == .semi:
         # (for (i = 0; i < n; i++): C's loop)
         j = i - 1
         loop j > 0 and not nl_before(j): j -= 1
-        if j >= 0 and toks[j].kind == .ident and (tok_src(j) == "for" or tok_src(j) == "while"): fatal(toks[j].pos, "loops are `loop i in [0..n):` (i from 0 to n - 1), or `loop condition:` (while it holds)")
-    if k == .ellipsis and want == .eof: fatal(toks[i].pos, "an array is spread with `...` after it: `[xs... 4 5]`, `f(args...)`")
+        if j >= 0 and p_toks[j].kind == .ident and (tok_src(j) == "for" or tok_src(j) == "while"): fatal(p_toks[j].pos, "loops are `loop i in [0..n):` (i from 0 to n - 1), or `loop condition:` (while it holds)")
+    if k == .ellipsis and want == .eof: fatal(p_toks[i].pos, "an array is spread with `...` after it: `[xs... 4 5]`, `f(args...)`")
     if pw == "throw" or pw == "raise": fatal(at, "there are no exceptions: a function gives back what went wrong as a value (`-> Level | LoadError`), or `panic(\"...\")` stops the program")
     if word_in(pw, ["public", "private", "protected", "static", "override", "virtual"]): fatal(at, "there is no `{pw}`: every name can be used from other files (one starting with `_` stays in its own), and a variable or field is written `speed: f64 = 5.0`")
     if word_in(pw, ["export", "pub"]): fatal(at, "every top-level name can be imported already (`from 'file.jo' import name`); a name starting with `_` stays private to its file")
@@ -167,81 +171,82 @@ habit = (i: int, want: Tok):
     if pw == "assert" and value_start: fatal(at, "assert is a function: `assert(x == 2, \"why\")`")
     if pw == "print" and value_start: fatal(at, "print is a function: `print(x)`")
     # (Scratch's blocks: set score to 0, change score by 1)
-    if (pw == "set" or pw == "change") and k == .ident and i + 1 < toks.len() and toks[i + 1].kind == .ident:
+    if (pw == "set" or pw == "change") and k == .ident and i + 1 < p_ntoks and p_toks[i + 1].kind == .ident:
         nm = tok_src(i)
         fatal(at, "a variable gets a value with `=`: `{nm} = 0`; to change it by 1: `{nm} += 1`")
-    if pw == "until" and i >= 2 and toks[i - 2].kind == .kw_loop: fatal(at, "there is no `until`: a loop repeats while something holds: `loop x <= 10:` (or `loop not (x > 10):`)")
+    if pw == "until" and i >= 2 and p_toks[i - 2].kind == .kw_loop: fatal(at, "there is no `until`: a loop repeats while something holds: `loop x <= 10:` (or `loop not (x > 10):`)")
     if want == .newline and p == .ident and value_start and not glued: fatal(at, "to call '{pw}', write `{pw}({tok_src(i)})`")
     # ("she said "hi"": the second " ended the text)
-    if p == .str_lit and k == .ident and glued and i + 1 < toks.len() and toks[i + 1].kind == .str_lit and not space_before(i + 1):
-        fatal(toks[i].pos, "the `\"` before this ends the text: to put a `\"` inside text, write `\\\"`")
-    if want == .rparen and k == .ident and tok_src(i) == "for": fatal(toks[i].pos, "an array made by a loop is `[loop x in xs: x * x]` (and `sum([loop x in xs: x * x])`; there are no generators)")
-    if want == .rparen and k == .ident and p == .ident and not glued: fatal(toks[i].pos, "two names in a row: text goes in quotes (`\"{tok_src(i - 1)} {tok_src(i)}\"`), and values are separated with `,`")
+    if p == .str_lit and k == .ident and glued and i + 1 < p_ntoks and p_toks[i + 1].kind == .str_lit and not space_before(i + 1):
+        fatal(p_toks[i].pos, "the `\"` before this ends the text: to put a `\"` inside text, write `\\\"`")
+    if want == .rparen and k == .ident and tok_src(i) == "for": fatal(p_toks[i].pos, "an array made by a loop is `[loop x in xs: x * x]` (and `sum([loop x in xs: x * x])`; there are no generators)")
+    if want == .rparen and k == .ident and p == .ident and not glued: fatal(p_toks[i].pos, "two names in a row: text goes in quotes (`\"{tok_src(i - 1)} {tok_src(i)}\"`), and values are separated with `,`")
     if want == .rparen and value_start and (p == .ident or p == .int_lit or p == .float_lit or p == .str_lit or p == .rparen or p == .rbrack):
-        fatal(toks[i].pos, "a ',' is missing before this")
+        fatal(p_toks[i].pos, "a ',' is missing before this")
 
 expect = (k: Tok, what: str) -> int:
-    if toks[ti].kind != k:
+    if p_toks[ti].kind != k:
         habit(ti, k)
         w = what
         if len(w) == 0: w = tok_name(k)
-        tk = toks[ti].kind
+        tk = p_toks[ti].kind
         if tk == .newline or tk == .indent or tk == .dedent or tk == .eof: fatal(prev_end(), "expected {w} at the end of this line")
         if tk == .ident or tk == .int_lit: fatal(cur_pos(), "expected {w}, found '{tok_src(ti)}'")
         fatal(cur_pos(), "expected {w}, found {tok_name(tk)}")
     advance()
 # identifier tokens carry their interned name in ival
 expect_ident = (what: str) -> int:
-    if toks[ti].kind != .ident and is_keyword_tok(toks[ti].kind) and toks[ti].kind != .kw_mut: keyword_name_error(ti)
+    if p_toks[ti].kind != .ident and is_keyword_tok(p_toks[ti].kind) and p_toks[ti].kind != .kw_mut: keyword_name_error(ti)
     # (let [a, b] = pair, const {kind, x} = g: JavaScript's destructuring)
-    if toks[ti].kind == .lbrack and (what == "variable name" or what == "constant name"): fatal(toks[ti].pos, "an array is unpacked without brackets: `a, b = xs` (it must have exactly that many elements); a tuple the same way")
-    if toks[ti].kind == .lbrace and (what == "variable name" or what == "constant name"): fatal(toks[ti].pos, "a struct's fields are read one by one: `kind, x = g.kind, g.x`, or used as they are, `g.kind`")
-    int(toks[expect(.ident, what)].ival)
+    if p_toks[ti].kind == .lbrack and (what == "variable name" or what == "constant name"): fatal(p_toks[ti].pos, "an array is unpacked without brackets: `a, b = xs` (it must have exactly that many elements); a tuple the same way")
+    if p_toks[ti].kind == .lbrace and (what == "variable name" or what == "constant name"): fatal(p_toks[ti].pos, "a struct's fields are read one by one: `kind, x = g.kind, g.x`, or used as they are, `g.kind`")
+    int(p_toks[expect(.ident, what)].ival)
 
 is_keyword_tok = (k: Tok) -> bool: int(k) < kw_kinds.len() and kw_kinds[int(k)]
 
 # a keyword where a name is declared (build = ..., a field `when: str`, a parameter `test: int`)
 keyword_name_error = (i: int):
-    w = tok_text(toks[i].kind)
+    w = tok_text(p_toks[i].kind)
     if len(w) > 2 and w[0] == '\'': w = w[1..len(w) - 1)
     role = ""
     if w == "build": role = " (it starts a build block)"
     else if w == "test": role = " (it starts a test)"
     else if w == "when": role = " (it chooses code by the target, `when TARGET == ...:`)"
     else if w == "use": role = " (it brings in a file's names)"
-    else if w == "match" and i > 0 and toks[i - 1].kind == .dot: role = " (for a regular expression: `s.find(r)`, a Match?, or `s.matches(r)` for all of s)"
+    else if w == "match" and i > 0 and p_toks[i - 1].kind == .dot: role = " (for a regular expression: `s.find(r)`, a Match?, or `s.matches(r)` for all of s)"
     else if w == "match" or w == "is" or w == "in" or w == "pass": role = ""
-    fatal(toks[i].pos, "'{w}' is a keyword{role}, so it cannot be a name: pick another, such as '{w}_info' or 'my_{w}'")
+    fatal(p_toks[i].pos, "'{w}' is a keyword{role}, so it cannot be a name: pick another, such as '{w}_info' or 'my_{w}'")
 # spacing comes from the gap between a token and the previous one (only asked about in a few places)
 space_before = (i: int) -> bool:
     if i == 0: return true
-    prev_end = int(toks[i - 1].start) + int(toks[i - 1].len)
-    s = int(toks[i].start)
+    prev_end = int(p_toks[i - 1].start) + int(p_toks[i - 1].len)
+    s = int(p_toks[i].start)
     # (a string token's start is after its opening quote)
-    if toks[i].kind == .str_lit: s -= 1
-    if toks[i - 1].kind == .str_lit: prev_end += 1
+    if p_toks[i].kind == .str_lit: s -= 1
+    if p_toks[i - 1].kind == .str_lit: prev_end += 1
     s > prev_end
 nl_before = (i: int) -> bool:
     if i == 0: return true
-    j = int(toks[i - 1].start) + int(toks[i - 1].len)
-    e = int(toks[i].start)
+    j = int(p_toks[i - 1].start) + int(p_toks[i - 1].len)
+    e = int(p_toks[i].start)
     loop j < e:
         if p_src[j] == '\n': return true
         j += 1
     false
-# the matching bracket of the opening bracket token at i (found when first asked, then cached)
+# The lexer records bracket partners in its existing nesting stack. Streams beyond
+# the packed token-index limit use this bounded fallback, cached on first demand.
 partner = (i: int) -> int:
-    if toks[i].ival > 0: return int(toks[i].ival)
+    if p_toks[i].ival > 0: return int(p_toks[i].ival)
     depth = 0
     j = i
-    loop j < toks.len():
-        k = toks[j].kind
+    loop j < p_ntoks:
+        k = p_toks[j].kind
         if k == .lparen or k == .lbrack or k == .lbrace: depth += 1
         else if k == .rparen or k == .rbrack or k == .rbrace:
             depth -= 1
             if depth == 0: break
         j += 1
-    toks[i].ival = j
+    p_toks[i].ival = j
     j
 
 # keywords that are also fine as names after '.', in enum variants and in match patterns
@@ -259,7 +264,7 @@ skip_newlines = ():
 parse_type_primary = () -> int:
     pos = cur_pos()
     k = pk()
-    if k == .ident and toks[ti].ival == id_cfn and pkn(1) == .lparen:
+    if k == .ident and p_toks[ti].ival == id_cfn and pkn(1) == .lparen:
         # C function pointer type: cfn(int, *u8) -> int
         advance()
         n = mk(.tfn, pos)
@@ -273,7 +278,7 @@ parse_type_primary = () -> int:
         set_list(n, ps)
         if accept(.arrow): nodes[n].a = i32(parse_type())
         return n
-    if k == .ident and toks[ti].ival == id_soa and (pkn(1) == .ident or pkn(1) == .lparen):
+    if k == .ident and p_toks[ti].ival == id_soa and (pkn(1) == .ident or pkn(1) == .lparen):
         # soa T[]: an array of structs kept as one array per field
         advance()
         t = parse_type()
@@ -310,7 +315,7 @@ parse_type_primary = () -> int:
         return n
     if k == .lparen:
         # (A, B) is a tuple type; (A, B) -> R a function type
-        fnt = toks[partner(ti) + 1].kind == .arrow
+        fnt = p_toks[partner(ti) + 1].kind == .arrow
         advance()
         elems: int[]
         loop pk() != .rparen:
@@ -324,7 +329,7 @@ parse_type_primary = () -> int:
             n = mk(.tfn, pos)
             set_list(n, elems)
             expect(.arrow, "")
-            if pk() == .ident and toks[ti].ival == id_void: advance()
+            if pk() == .ident and p_toks[ti].ival == id_void: advance()
             else: nodes[n].a = i32(parse_type())
             return n
         if elems.len() == 1: return elems[0]
@@ -351,13 +356,13 @@ parse_type_primary = () -> int:
     habit(ti, .eof)
     # (draw: at the top level: a function, written without its `= ()`)
     # (outer: loop ...: a labelled loop, as JavaScript's and Java's)
-    if k == .kw_loop and ti >= 2 and toks[ti - 1].kind == .colon and toks[ti - 2].kind == .ident:
-        fatal(toks[ti - 2].pos, "loops have no labels: to leave two loops at once, put them in a function and `return` from it, or set a flag the outer loop checks")
-    if (k == .newline or k == .indent) and ti >= 2 and toks[ti - 1].kind == .colon and toks[ti - 2].kind == .ident:
+    if k == .kw_loop and ti >= 2 and p_toks[ti - 1].kind == .colon and p_toks[ti - 2].kind == .ident:
+        fatal(p_toks[ti - 2].pos, "loops have no labels: to leave two loops at once, put them in a function and `return` from it, or set a flag the outer loop checks")
+    if (k == .newline or k == .indent) and ti >= 2 and p_toks[ti - 1].kind == .colon and p_toks[ti - 2].kind == .ident:
         fname = tok_src(ti - 2)
-        if fname == "update": fatal(toks[ti - 2].pos, "a function is written `update = (dt: f64):` and its lines below it")
-        if fname == "forever" or fname == "repeat": fatal(toks[ti - 2].pos, "`{fname}` is not a Dewy word: in a game, `update = (dt: f64):` runs every frame, as a forever loop does (and `draw = ():` draws); put the lines there. To repeat something 10 times: `loop i in [1..10]:`")
-        fatal(toks[ti - 2].pos, "a function is written `{fname} = ():` and its lines below it")
+        if fname == "update": fatal(p_toks[ti - 2].pos, "a function is written `update = (dt: f64):` and its lines below it")
+        if fname == "forever" or fname == "repeat": fatal(p_toks[ti - 2].pos, "`{fname}` is not a Dewy word: in a game, `update = (dt: f64):` runs every frame, as a forever loop does (and `draw = ():` draws); put the lines there. To repeat something 10 times: `loop i in [1..10]:`")
+        fatal(p_toks[ti - 2].pos, "a function is written `{fname} = ():` and its lines below it")
     fatal(pos, "expected a type, found {tok_name(k)}")
     0
 
@@ -371,7 +376,7 @@ parse_type_postfix = (t0: int) -> int:
             advance()
             if pk() == .int_lit:
                 nodes[a].b = i32(mk(.int_lit, cur_pos()))
-                nodes[int(nodes[a].b)].ival = toks[ti].ival
+                nodes[int(nodes[a].b)].ival = p_toks[ti].ival
                 advance()
             else:
                 nodes[a].b = i32(mk(.ident, cur_pos()))
@@ -405,7 +410,7 @@ parse_type = () -> int:
         else if word_in(w, ["Map", "Record", "Dictionary", "HashMap", "Dict"]): hint = "a map type is `\{K: V}` (`\{str: int}`)"
         else if word_in(w, ["Set", "HashSet"]): hint = "a set is a map to bool: `\{str: bool}`"
         else if word_in(w, ["Promise", "Optional", "Option", "Maybe"]): hint = "a value that may be missing is `T?`"
-        fatal(toks[ti + 1].pos, hint)
+        fatal(p_toks[ti + 1].pos, hint)
     t = parse_type_postfix(parse_type_primary())
     if pk() != .pipe: return t
     u = mk(.tunion, nodes[t].pos)
@@ -492,9 +497,9 @@ __utf8_len1 = (t: str) -> bool:
     (b >= 0xc0 and b < 0xe0 and n == 2) or (b >= 0xe0 and b < 0xf0 and n == 3) or (b >= 0xf0 and n == 4)
 
 parse_string_token = (t: int) -> int:
-    pos = toks[t].pos
+    pos = p_toks[t].pos
     s = tok_src(t)
-    flags = int(toks[t].flags)
+    flags = int(p_toks[t].flags)
     raw = flags & STRF_RAW != 0
     if flags & STRF_TRIPLE != 0: s = dedent_triple(s)
     n = mk(.str_lit, pos)
@@ -558,6 +563,8 @@ parse_string_token = (t: int) -> int:
                 fatal(pos, "'{{' in a string starts an interpolation like \"{{x}}\"; write {{{{ and }}}} for literal braces")
             # lex and parse the embedded expression; its tokens keep their places in the file
             saved_toks = toks
+            saved_p_toks = p_toks
+            saved_p_ntoks = p_ntoks
             saved_ti = ti
             saved_src = p_src
             saved_file = p_file
@@ -571,9 +578,11 @@ parse_string_token = (t: int) -> int:
             # spaces before the value are not an indented line)
             ws = len(expr_src) - len(trim_start(expr_src))
             expr_src = expr_src[ws..]
-            p_base = p_base + int(toks[t].start) + i + 1 + ws
+            p_base = p_base + int(p_toks[t].start) + i + 1 + ws
             lx_base = p_base
             toks = lex(p_file, expr_src)
+            p_toks = data(toks)
+            p_ntoks = toks.len()
             lx_base = 0
             ti = 0
             p_src = expr_src
@@ -587,6 +596,8 @@ parse_string_token = (t: int) -> int:
                 # ('{"a": 1}' is the text "a", formatted " 1")
                 fatal(pos, "`{{{trim(s[i + 1..j))}}}` in a string puts in the value of what is inside the braces; for braces in the text, write {{{{ and }}}}, or make it a raw string, r'...' (JSON: r'{{\"a\": 1}}', or to_json(value))")
             toks = saved_toks
+            p_toks = saved_p_toks
+            p_ntoks = saved_p_ntoks
             ti = saved_ti
             p_src = saved_src
             p_file = saved_file
@@ -673,19 +684,19 @@ parse_primary = () -> int:
     if p_id_async == 0:
         p_id_async = intern("async")
         p_id_await = intern("await")
-    if k == .ident and (toks[t].ival == p_id_async and toks[t + 1].kind == .lparen and partner(t + 1) > t and (toks[partner(t + 1) + 1].kind == .colon or toks[partner(t + 1) + 1].kind == .arrow) or toks[t].ival == p_id_await and toks[t + 1].kind == .ident):
+    if k == .ident and (p_toks[t].ival == p_id_async and p_toks[t + 1].kind == .lparen and partner(t + 1) > t and (p_toks[partner(t + 1) + 1].kind == .colon or p_toks[partner(t + 1) + 1].kind == .arrow) or p_toks[t].ival == p_id_await and p_toks[t + 1].kind == .ident):
         fatal(pos, "there is no async or await: something that takes time is a state changed a little in update each frame, or steps in `Actions` (`steps.then(0.3, (): drop())`, `steps.update(dt)` in update)")
     if k == .int_lit:
         advance()
         n = mk(.int_lit, pos)
-        nodes[n].ival = toks[t].ival
+        nodes[n].ival = p_toks[t].ival
         add_flag(n, NF_LITERAL)
-        if toks[t].ival < 0: add_flag(n, NF_U64)
+        if p_toks[t].ival < 0: add_flag(n, NF_U64)
         return n
     if k == .float_lit:
         advance()
         n = mk(.float_lit, pos)
-        nodes[n].fval = toks[t].fval
+        nodes[n].fval = p_toks[t].fval
         add_flag(n, NF_LITERAL)
         return n
     if k == .str_lit:
@@ -704,15 +715,15 @@ parse_primary = () -> int:
         return mk(.null_lit, pos)
     if k == .ident:
         advance()
-        if toks[t].len == 1 and p_src[int(toks[t].start)] == '_': return mk(.hole, pos)
-        if toks[t].ival == id_end and p_index.len() > 0: return index_end(pos)
+        if p_toks[t].len == 1 and p_src[int(p_toks[t].start)] == '_': return mk(.hole, pos)
+        if p_toks[t].ival == id_end and p_index.len() > 0: return index_end(pos)
         n = mk(.ident, pos)
-        nodes[n].name = i32(toks[t].ival)
+        nodes[n].name = i32(p_toks[t].ival)
         return n
     if k == .dot:
         advance()
         # (key_pressed(.1): the number keys are .n0 to .n9)
-        if pk() == .int_lit and toks[ti].ival >= 0 and toks[ti].ival <= 9: fatal(cur_pos(), "the key {toks[ti].ival} is `.n{toks[ti].ival}` (a name cannot start with a digit)")
+        if pk() == .int_lit and p_toks[ti].ival >= 0 and p_toks[ti].ival <= 9: fatal(cur_pos(), "the key {p_toks[ti].ival} is `.n{p_toks[ti].ival}` (a name cannot start with a digit)")
         n = mk(.dotname, pos)
         nodes[n].name = i32(expect_name("name after '.'"))
         return n
@@ -769,22 +780,22 @@ parse_primary = () -> int:
     if k == .ident or k == .int_lit: fatal(pos, "unexpected '{tok_src(t)}'")
     if k == .indent:
         if len(mixed_indent_note()) > 0: fatal(pos, "unexpected indentation{mixed_indent_note()}")
-        if t > 1 and toks[t - 1].kind == .newline and toks[t - 2].kind != .colon:
+        if t > 1 and p_toks[t - 1].kind == .newline and p_toks[t - 2].kind != .colon:
             # (one space too many: a slip, not a missing `:`)
-            here = line_indent(toks[t + 1].pos)
-            above = line_indent(toks[t - 2].pos)
+            here = line_indent(p_toks[t + 1].pos)
+            above = line_indent(p_toks[t - 2].pos)
             if here > above and here - above <= 2: fatal(pos, "this line is indented more than the line above ({here} spaces, the line above has {above})")
             fatal(pos, "unexpected indentation (does the line above need a `:` at its end?)")
         fatal(pos, "unexpected indentation (this line is indented deeper than the lines around it)")
     if k == .newline or k == .eof: fatal(prev_end(), "expected an expression here")
-    if k == .colon and t >= 2 and toks[t - 1].kind == .assign and toks[t - 2].kind == .ident: fatal(pos, "a function is written `{tok_src(t - 2)} = ():` (its parameters, maybe none, in brackets before the colon)")
+    if k == .colon and t >= 2 and p_toks[t - 1].kind == .assign and p_toks[t - 2].kind == .ident: fatal(pos, "a function is written `{tok_src(t - 2)} = ():` (its parameters, maybe none, in brackets before the colon)")
     if k == .star: fatal(pos, "what a pointer points at is `p[0]` (its fields: `p.x`); there is no `*` before a value")
     if k == .kw_loop: fatal(pos, "a loop cannot follow a `:` on the same line: put it on a line of its own, indented below")
     # (score > 10 and < 20: the comparison's left side left out)
     # (for (let i = 0; ...), for (const g of gems): C's and JavaScript's loops)
-    if t >= 2 and toks[t - 1].kind == .lparen and toks[t - 2].kind == .ident and tok_src(t - 2) == "for":
-        fatal(toks[t - 2].pos, "loops are `loop i in [0..8):` (i from 0 to 7) and `loop g in gems:` (each element)")
-    if (k == .lt or k == .gt or k == .le or k == .ge or k == .eq or k == .ne) and t >= 1 and (toks[t - 1].kind == .kw_and or toks[t - 1].kind == .kw_or):
+    if t >= 2 and p_toks[t - 1].kind == .lparen and p_toks[t - 2].kind == .ident and tok_src(t - 2) == "for":
+        fatal(p_toks[t - 2].pos, "loops are `loop i in [0..8):` (i from 0 to 7) and `loop g in gems:` (each element)")
+    if (k == .lt or k == .gt or k == .le or k == .ge or k == .eq or k == .ne) and t >= 1 and (p_toks[t - 1].kind == .kw_and or p_toks[t - 1].kind == .kw_or):
         fatal(pos, "after `{tok_src(t - 1)}`, write the whole comparison again: `score > 10 and score < 20`")
     # (play(s, when = 0.1): a word Sloppy keeps for itself, as an argument's or a variable's name)
     if nk_is(t, .assign) and keywords.get(tok_src(t)) != none: fatal(pos, "'{tok_src(t)}' is a word Dewy keeps for itself, so it cannot name an argument or a variable (call it something else)")
@@ -881,7 +892,7 @@ parse_bracket = () -> int:
         if k == .rbrack: break
         # ';' or a line break (without a ',' before it) ends a row of a 2-D array
         semi = k == .semi
-        if semi or (nl_before(ti) and toks[ti - 1].kind != .comma):
+        if semi or (nl_before(ti) and p_toks[ti - 1].kind != .comma):
             if semi: advance()
             else if first_break == 0: first_break = el
             w = elems.len() - row_start
@@ -920,41 +931,41 @@ line_indent = (p: int) -> int:
 
 # does the '(' at i start a function literal: (params) -> R: ... or (params): ...?
 is_fn_literal = (i: int) -> bool:
-    if toks[i].kind != .lparen: return false
+    if p_toks[i].kind != .lparen: return false
     close = partner(i)
-    if close <= i or close + 1 >= toks.len(): return false
-    after = toks[close + 1].kind
+    if close <= i or close + 1 >= p_ntoks: return false
+    after = p_toks[close + 1].kind
     if after == .arrow: return true
     # ((x) => x * 2: JavaScript's arrow)
-    if after == .assign and close + 2 < toks.len() and toks[close + 2].kind == .gt and not space_before(close + 2):
-        fatal(toks[close + 1].pos, "a function value is written `(x): x * 2` (a colon, not `=>`)")
+    if after == .assign and close + 2 < p_ntoks and p_toks[close + 2].kind == .gt and not space_before(close + 2):
+        fatal(p_toks[close + 1].pos, "a function value is written `(x): x * 2` (a colon, not `=>`)")
     # (double = (x: int) x * 2: the colon after the parameters left out)
-    if (after == .ident or after == .int_lit or after == .float_lit or after == .str_lit or after == .lparen) and not p_header and i + 2 < close and toks[i + 1].kind == .ident and toks[i + 2].kind == .colon and not nl_before(close + 1):
-        fatal(toks[close + 1].pos, "a function needs a `:` after its parameters: `(x: int): x * 2`")
+    if (after == .ident or after == .int_lit or after == .float_lit or after == .str_lit or after == .lparen) and not p_header and i + 2 < close and p_toks[i + 1].kind == .ident and p_toks[i + 2].kind == .colon and not nl_before(close + 1):
+        fatal(p_toks[close + 1].pos, "a function needs a `:` after its parameters: `(x: int): x * 2`")
     # (update = (dt: f64) {: braces for a block)
-    if after == .lbrace and not p_header and (i + 1 == close or (toks[i + 1].kind == .ident and i + 2 < close and toks[i + 2].kind == .colon)):
-        fatal(toks[close + 1].pos, "a block is a `:` and the lines below it, indented (no braces): `(dt: f64):`")
+    if after == .lbrace and not p_header and (i + 1 == close or (p_toks[i + 1].kind == .ident and i + 2 < close and p_toks[i + 2].kind == .colon)):
+        fatal(p_toks[close + 1].pos, "a block is a `:` and the lines below it, indented (no braces): `(dt: f64):`")
     # (f = (): int: a return type after a colon)
-    if after == .colon and close + 3 < toks.len() and toks[close + 2].kind == .ident and toks[close + 3].kind == .colon:
+    if after == .colon and close + 3 < p_ntoks and p_toks[close + 2].kind == .ident and p_toks[close + 3].kind == .colon:
         tn = tok_src(close + 2)
-        if word_in(tn, ["int", "f64", "f32", "str", "bool", "void", "vec2", "vec3", "vec4", "float", "string", "double"]): fatal(toks[close + 1].pos, "a function's result type is written after `->`: `() -> {tn}:`")
+        if word_in(tn, ["int", "f64", "f32", "str", "bool", "void", "vec2", "vec3", "vec4", "float", "string", "double"]): fatal(p_toks[close + 1].pos, "a function's result type is written after `->`: `() -> {tn}:`")
     if after != .colon or p_header: return false
     # the contents must look like parameters: [mut] name [: Type] [= default], ...
     j = i + 1
     if j == close: return true
     loop j < close:
-        if toks[j].kind == .kw_mut: j += 1
+        if p_toks[j].kind == .kw_mut: j += 1
         # ((test: int): a keyword as a parameter's name)
-        if toks[j].kind != .ident:
-            if is_keyword_tok(toks[j].kind) and j + 1 < close and toks[j + 1].kind == .colon: keyword_name_error(j)
+        if p_toks[j].kind != .ident:
+            if is_keyword_tok(p_toks[j].kind) and j + 1 < close and p_toks[j + 1].kind == .colon: keyword_name_error(j)
             return false
         j += 1
-        nk = toks[j].kind
+        nk = p_toks[j].kind
         if nk != .comma and nk != .colon and nk != .assign and j != close: return false
         # skip the rest of this parameter
         depth = 0
         loop j < close:
-            kk = toks[j].kind
+            kk = p_toks[j].kind
             if kk == .lparen or kk == .lbrack or kk == .lbrace: depth += 1
             else if kk == .rparen or kk == .rbrack or kk == .rbrace: depth -= 1
             else if kk == .comma and depth == 0: break
@@ -1050,7 +1061,7 @@ parse_postfix = (e0: int) -> int:
                 t = advance()
                 nodes[f].name = i32(intern(tok_src(t)))
                 nodes[f].aux = -2
-                nodes[f].ival = toks[t].ival
+                nodes[f].ival = p_toks[t].ival
             else if pk() == .float_lit:
                 # x.0.1 lexes as a float "0.1"
                 t = advance()
@@ -1059,7 +1070,7 @@ parse_postfix = (e0: int) -> int:
                 ok = d > 0 and d < len(txt) - 1
                 loop i in [0..len(txt)):
                     if i != d and (txt[i] < '0' or txt[i] > '9'): ok = false
-                if not ok: fatal(toks[t].pos, "expected a field name or a tuple index after '.', found '{txt}'")
+                if not ok: fatal(p_toks[t].pos, "expected a field name or a tuple index after '.', found '{txt}'")
                 nodes[f].name = i32(intern(txt[..d)))
                 nodes[f].aux = -2
                 nodes[f].ival = to_int(txt[..d)) ?? 0
@@ -1086,7 +1097,7 @@ is_unit_group = (i: int) -> bool:
     j = i + 1
     if j >= close: return false
     loop j < close:
-        k = toks[j].kind
+        k = p_toks[j].kind
         if k == .ident:
             if unit_scale(tok_src(j)) == 0.0: return false
         else if k != .slash and k != .star and k != .caret and k != .int_lit: return false
@@ -1111,7 +1122,7 @@ unit_group_scale = () -> f64:
             f = unit_scale(tok_src(advance()))
             if pk() == .caret:
                 advance()
-                pw = int(toks[expect(.int_lit, "an exponent")].ival)
+                pw = int(p_toks[expect(.int_lit, "an exponent")].ival)
                 g = f
                 loop _ in [1..pw): g = g * f
                 f = g
@@ -1156,7 +1167,7 @@ parse_prefix = () -> int:
     if k == .minus or k == .tilde or k == .amp:
         # (a && b, i--)
         if k == .amp: habit(ti, .eof)
-        if k == .minus and ti > 0 and toks[ti - 1].kind == .minus and not space_before(ti) and (pkn(1) == .newline or pkn(1) == .eof or pkn(1) == .semi): habit(ti, .eof)
+        if k == .minus and ti > 0 and p_toks[ti - 1].kind == .minus and not space_before(ti) and (pkn(1) == .newline or pkn(1) == .eof or pkn(1) == .semi): habit(ti, .eof)
         advance()
         operand = parse_prefix()
         ok = nodes[operand].kind
@@ -1204,13 +1215,13 @@ parse_unary = () -> int:
 
 # precedence of a dotted operator .+ .* .== ... (its ival is the operator's first character)
 dotop_prec = (i: int) -> int:
-    c = int(toks[i].ival)
+    c = int(p_toks[i].ival)
     if c == '^': return 11
     if c == '*' or c == '/' or c == '%': return 10
     if c == '+' or c == '-': return 9
     2
 
-binprec = (k: Tok) -> int:
+binprec_value = (k: Tok) -> int:
     match k:
         star, slash, percent: 10
         plus, minus: 9
@@ -1221,6 +1232,15 @@ binprec = (k: Tok) -> int:
         qq: 3
         eq, ne, lt, le, gt, ge, kw_in, kw_is: 2
         _: -1
+
+# Operator precedence is immutable and indexed by the token enum. Build only
+# when expression parsing first needs it, instead of dispatching a match per term.
+p_binprec: *i8 = null
+binprec = (k: Tok) -> int:
+    if p_binprec == null:
+        p_binprec = __alloc(int(Tok.lazy) + 1) as *i8
+        loop i in [0..int(Tok.lazy) + 1): p_binprec[i] = i8(binprec_value(i as Tok))
+    int(p_binprec[int(k)])
 
 parse_binary = (minprec: int) -> int:
     lhs = parse_unary()
@@ -1267,7 +1287,7 @@ parse_binary = (minprec: int) -> int:
             lhs = n
             continue
         rp = prec + 1
-        if k == .qq or (k == .dotop and toks[optok].ival == '^'): rp = prec      # (right-associative)
+        if k == .qq or (k == .dotop and p_toks[optok].ival == '^'): rp = prec      # (right-associative)
         rhs = parse_binary(rp)
         b = 0
         if k == .qq: b = mk(.coalesce, pos)
@@ -1275,8 +1295,8 @@ parse_binary = (minprec: int) -> int:
             b = mk(.binary, pos)
             nodes[b].op = i32(int(k))
             if k == .dotop:
-                nodes[b].aux = i32(toks[optok].ival)
-                if int(toks[optok].len) == 3: nodes[b].aux2 = 1
+                nodes[b].aux = i32(p_toks[optok].ival)
+                if int(p_toks[optok].len) == 3: nodes[b].aux2 = 1
         nodes[b].a = i32(lhs)
         nodes[b].b = i32(rhs)
         if negate:
@@ -1352,8 +1372,8 @@ parse_block = () -> int:
 # (update = (dt: f64): with nothing under it)
 __no_block = ():
     j = ti - 1
-    loop j > 0 and toks[j].kind != .colon: j -= 1
-    fatal(toks[j].pos, "nothing is under this line: what it does goes on the lines below it, indented (or `pass` to leave it empty for now)")
+    loop j > 0 and p_toks[j].kind != .colon: j -= 1
+    fatal(p_toks[j].pos, "nothing is under this line: what it does goes on the lines below it, indented (or `pass` to leave it empty for now)")
 
 # the statements of an indented block, from its indent token on, into block b
 parse_indented_block = (b: int) -> int:
@@ -1542,7 +1562,7 @@ parse_if = () -> int:
 
 parse_pattern = () -> int:
     pos = cur_pos()
-    if pk() == .ident and toks[ti].len == 1 and p_src[int(toks[ti].start)] == '_':
+    if pk() == .ident and p_toks[ti].len == 1 and p_src[int(p_toks[ti].start)] == '_':
         advance()
         return mk(.pwild, pos)
     if pk() == .dot or ((pk() == .ident or is_soft_kw(pk())) and (pkn(1) == .lparen or pkn(1) == .colon or pkn(1) == .comma)):
@@ -1627,7 +1647,7 @@ parse_fn_literal = (kind: NK, name: int, pos: int) -> int:
     lambda = kind == .lambda
     parse_params(f)
     if accept(.arrow):
-        if pk() == .ident and toks[ti].ival == id_void:
+        if pk() == .ident and p_toks[ti].ival == id_void:
             advance()
             add_flag(f, NF_VOID)
         else: nodes[f].a = i32(parse_type())
@@ -1639,8 +1659,8 @@ parse_fn_literal = (kind: NK, name: int, pos: int) -> int:
         b = mk(.block, pos)
         add_flag(b, NF_LAZY)
         add_flag(b, NF_TERMINATED)
-        nodes[b].ival = int(toks[lz].start)
-        nodes[b].aux = toks[lz].len
+        nodes[b].ival = int(p_toks[lz].start)
+        nodes[b].aux = p_toks[lz].len
         nodes[f].b = i32(b)
         add_flag(f, NF_TERMINATED)
     else if pk() == .colon:
@@ -1665,19 +1685,19 @@ parse_fn_literal = (kind: NK, name: int, pos: int) -> int:
 # a function declaration starts here: name = (...) ->/:, name[T] = (...), (+) = (...)
 fn_decl_ahead = () -> bool:
     j = ti
-    if toks[j].kind == .lparen:
+    if p_toks[j].kind == .lparen:
         # (op) = (   or   ([]) = (   or   ([]=) = (
         c = partner(j)
         if c > j + 4: return false
         j = c + 1
-        if toks[j].kind == .lbrack and not space_before(j): j = partner(j) + 1
+        if p_toks[j].kind == .lbrack and not space_before(j): j = partner(j) + 1
     else:
-        if toks[j].kind != .ident: return false
+        if p_toks[j].kind != .ident: return false
         j += 1
-        if toks[j].kind == .lbrack and not space_before(j): j = partner(j) + 1
-    if toks[j].kind != .assign or toks[j + 1].kind != .lparen: return false
+        if p_toks[j].kind == .lbrack and not space_before(j): j = partner(j) + 1
+    if p_toks[j].kind != .assign or p_toks[j + 1].kind != .lparen: return false
     c = partner(j + 1)
-    after = toks[c + 1].kind
+    after = p_toks[c + 1].kind
     after == .arrow or (after == .colon and is_fn_literal(j + 1))
 
 parse_fn_decl = (extern_: bool) -> int:
@@ -1765,7 +1785,7 @@ parse_simple_stmt = () -> int:
             names: int[]
             loop true:
                 v = mk(.ident, cur_pos())
-                if pk() == .ident and toks[ti].len == 1 and p_src[int(toks[ti].start)] == '_':
+                if pk() == .ident and p_toks[ti].len == 1 and p_src[int(p_toks[ti].start)] == '_':
                     advance()
                     nodes[v].kind = .hole
                 else: nodes[v].name = i32(expect_ident("variable name"))
@@ -1807,14 +1827,14 @@ parse_simple_stmt = () -> int:
         op = advance()
         advance()
         nodes[b].op = i32(int(Tok.dotop))
-        nodes[b].aux = i32(toks[op].ival)
+        nodes[b].aux = i32(p_toks[op].ival)
         nodes[b].a = i32(clone(e))
         nodes[b].b = i32(parse_expr())
         nodes[a].b = i32(b)
         return a
     if is_assign_op(pk()):
         a = mk(.assign, cur_pos())
-        opk = toks[advance()].kind
+        opk = p_toks[advance()].kind
         if opk == .careteq:
             # x ^= y: x = x ^ y (power)
             nodes[a].op = i32(int(Tok.assign))
@@ -1849,8 +1869,8 @@ end_stmt = (s: int):
     # parse as a call up to there)
     if pk() == .colon or pk() == .lbrace:
         j = ti
-        loop j > 0 and toks[j - 1].kind != .newline and toks[j - 1].kind != .indent and toks[j - 1].kind != .dedent: j -= 1
-        if toks[j].kind == .ident and j + 1 < toks.len(): habit(j + 1, .newline)
+        loop j > 0 and p_toks[j - 1].kind != .newline and p_toks[j - 1].kind != .indent and p_toks[j - 1].kind != .dedent: j -= 1
+        if p_toks[j].kind == .ident and j + 1 < p_ntoks: habit(j + 1, .newline)
     if s != 0 and has_flag(s, NF_TERMINATED):
         accept(.newline)
         return
@@ -1859,7 +1879,7 @@ end_stmt = (s: int):
         accept(.newline)
         return
     if pk() == .dedent or pk() == .eof: return
-    if ti > 0 and toks[ti - 1].kind == .dedent: return
+    if ti > 0 and p_toks[ti - 1].kind == .dedent: return
     expect(.newline, "end of statement")
 
 parse_top_block = () -> int:
@@ -1898,7 +1918,7 @@ parse_when = () -> int:
     if pk() == .kw_else:
         advance()
         if pk() == .kw_when or pk() == .kw_if:
-            if pk() == .kw_if: toks[ti].kind = .kw_when
+            if pk() == .kw_if: p_toks[ti].kind = .kw_when
             b = mk(.block, cur_pos())
             set_list(b, [parse_when()])
             add_flag(b, NF_TERMINATED)
@@ -1917,17 +1937,17 @@ parse_loop_head = () -> int:
     pos = cur_pos()
     expect(.kw_loop, "")
     # (loop (k, v) in pairs: Python's and Rust's brackets around the names)
-    if pk() == .lparen and toks[ti + 1].kind == .ident and toks[ti + 2].kind == .comma:
+    if pk() == .lparen and p_toks[ti + 1].kind == .ident and p_toks[ti + 2].kind == .comma:
         j = ti + 1
-        loop toks[j].kind == .ident and (toks[j + 1].kind == .comma or toks[j + 1].kind == .rparen):
-            if toks[j + 1].kind == .rparen:
-                if toks[j + 2].kind == .kw_in:
+        loop p_toks[j].kind == .ident and (p_toks[j + 1].kind == .comma or p_toks[j + 1].kind == .rparen):
+            if p_toks[j + 1].kind == .rparen:
+                if p_toks[j + 2].kind == .kw_in:
                     nm: str[]
                     k = ti + 1
                     loop k <= j:
                         nm.push(tok_src(k))
                         k += 2
-                    fatal(toks[ti].pos, "the names before `in` are written without brackets: `loop {join(nm, ", ")} in ...:`")
+                    fatal(p_toks[ti].pos, "the names before `in` are written without brackets: `loop {join(nm, ", ")} in ...:`")
                 break
             j += 2
     if pk() == .colon:
@@ -1955,8 +1975,8 @@ parse_loop_head = () -> int:
         return w
     start = ti
     j = ti
-    if toks[j].kind == .kw_mut: j += 1
-    if toks[j].kind == .ident and toks[j + 1].kind == .kw_in:
+    if p_toks[j].kind == .kw_mut: j += 1
+    if p_toks[j].kind == .ident and p_toks[j + 1].kind == .kw_in:
         f = mk(.for_, pos)
         if accept(.kw_mut): add_flag(f, NF_MUT)
         v = mk(.ident, cur_pos())
@@ -2405,14 +2425,14 @@ lx_expr_stmt = (e: int, pos: int) -> int:
 head_has_in = (i: int) -> bool:
     j = i
     depth = 0
-    loop j < toks.len():
-        k = toks[j].kind
+    loop j < p_ntoks:
+        k = p_toks[j].kind
         if k == .lparen or k == .lbrack or k == .lbrace: depth += 1
         else if k == .rparen or k == .rbrack or k == .rbrace: depth -= 1
         else if depth == 0:
             if k == .kw_in: return true
             if k == .colon or k == .newline or k == .eof: return false
-        else if k == .kw_in and depth == 1 and toks[i].kind == .lparen: return true
+        else if k == .kw_in and depth == 1 and p_toks[i].kind == .lparen: return true
         j += 1
     false
 
@@ -2459,10 +2479,10 @@ parse_head_term = () -> int:
     pos = cur_pos()
     # binder: [mut] name [, name] in iterable
     j = ti
-    if toks[j].kind == .kw_mut: j += 1
+    if p_toks[j].kind == .kw_mut: j += 1
     # (loop k, mut v in m: the same as loop mut k, v in m, the value being what can change)
-    second_mut = toks[j + 1].kind == .comma and toks[j + 2].kind == .kw_mut and toks[j + 3].kind == .ident and toks[j + 4].kind == .kw_in
-    if toks[j].kind == .ident and (toks[j + 1].kind == .kw_in or names_then_in(j) or second_mut):
+    second_mut = p_toks[j + 1].kind == .comma and p_toks[j + 2].kind == .kw_mut and p_toks[j + 3].kind == .ident and p_toks[j + 4].kind == .kw_in
+    if p_toks[j].kind == .ident and (p_toks[j + 1].kind == .kw_in or names_then_in(j) or second_mut):
         n = head_node(1, pos)
         if accept(.kw_mut): add_flag(n, NF_MUT)
         vars: int[]
@@ -2498,13 +2518,13 @@ parse_head_term = () -> int:
 # (name, name, ... in: a loop's names, two or more, before its `in`)
 names_then_in = (j0: int) -> bool:
     j = j0
-    if toks[j].kind != .ident: return false
+    if p_toks[j].kind != .ident: return false
     j += 1
     n = 1
-    loop toks[j].kind == .comma and toks[j + 1].kind == .ident:
+    loop p_toks[j].kind == .comma and p_toks[j + 1].kind == .ident:
         j += 2
         n += 1
-    n >= 2 and toks[j].kind == .kw_in
+    n >= 2 and p_toks[j].kind == .kw_in
 
 # loop a, b, c in xs: one name for each element, unpacked at the top of the body (two names are
 # the loop's own: a map's key and value, or a pair)
@@ -2529,8 +2549,8 @@ head_has_binder = (i: int) -> bool:
     c = partner(i)
     j = i + 1
     loop j < c:
-        if toks[j].kind == .ident and toks[j + 1].kind == .kw_in:
-            pk0 = toks[j - 1].kind
+        if p_toks[j].kind == .ident and p_toks[j + 1].kind == .kw_in:
+            pk0 = p_toks[j - 1].kind
             if j == i + 1 or pk0 == .kw_and or pk0 == .kw_or or pk0 == .kw_mut or pk0 == .lparen: return true
         j += 1
     false
@@ -2543,7 +2563,7 @@ parse_stmt = () -> int:
         advance()
         return 0
     # ([a, b] = xs, {x, y} = p: destructuring from JavaScript)
-    if (k == .lbrack or k == .lbrace) and partner(ti) > ti and partner(ti) + 1 < toks.len() and toks[partner(ti) + 1].kind == .assign:
+    if (k == .lbrack or k == .lbrace) and partner(ti) > ti and partner(ti) + 1 < p_ntoks and p_toks[partner(ti) + 1].kind == .assign:
         if k == .lbrack: fatal(pos, "an array is unpacked without brackets: `a, b = xs` (it must have exactly that many elements)")
         fatal(pos, "a struct's fields are read one by one: `x, y = p.x, p.y`")
     # (a keyword declared as a variable, function or field: build = ..., when: str)
@@ -2705,7 +2725,7 @@ parse_type_alias = () -> int:
 parse_module_spec = (d: int):
     if pk() == .str_lit:
         t = advance()
-        path = decode_str(tok_src(t), toks[t].pos, false)
+        path = decode_str(tok_src(t), p_toks[t].pos, false)
         nodes[d].sval = i32(intern(path))
         base = path
         sl = rfind(path, "/")
@@ -2738,7 +2758,7 @@ parse_toplevel = () -> int:
         skip_newlines()
     k = pk()
     d = 0
-    if k == .ident and toks[ti].ival == id_type and pkn(1) == .ident and (pkn(2) == .assign or pkn(2) == .lbrack): d = parse_type_alias()
+    if k == .ident and p_toks[ti].ival == id_type and pkn(1) == .ident and (pkn(2) == .assign or pkn(2) == .lbrack): d = parse_type_alias()
     else if (k == .lparen or (k == .ident and (pkn(1) == .assign or pkn(1) == .lbrack))) and fn_decl_ahead():
         p_top_decl = true
         d = parse_fn_decl(false)
@@ -2748,7 +2768,7 @@ parse_toplevel = () -> int:
         d = parse_fn_decl(true)
     else if k == .kw_struct: d = parse_struct()
     else if k == .kw_enum: d = parse_enum()
-    else if k == .ident and toks[ti].ival == id_from and (pkn(1) == .str_lit or pkn(1) == .ident):
+    else if k == .ident and p_toks[ti].ival == id_from and (pkn(1) == .str_lit or pkn(1) == .ident):
         # from physics import step, Body as B: those names (aux 2; each an ident whose aux is
         # its new name, or 0)
         advance()
@@ -2772,7 +2792,7 @@ parse_toplevel = () -> int:
         set_list(d, names)
     else if k == .kw_import or k == .kw_use:
         if pkn(1) == .lbrace: fatal(cur_pos(), "names are picked with `from 'file.jo' import f, g` (and `import 'file.jo'` gives them as file.f)")
-        is_use = toks[advance()].kind == .kw_use
+        is_use = p_toks[advance()].kind == .kw_use
         d = mk(.import_, pos)
         if is_use: nodes[d].aux = 1
         parse_module_spec(d)
@@ -2819,9 +2839,13 @@ parse_file = (file: int) -> int[]:
         id_from = intern("from")
     lx_lazy = p_lazy
     toks = lex(file, files[file].src)
+    p_toks = data(toks)
+    p_ntoks = toks.len()
     lx_lazy = false
     if stop_after == "lex":
         toks = []
+        p_toks = data(toks)
+        p_ntoks = toks.len()
         return []
     ti = 0
     p_file = file
@@ -2833,6 +2857,8 @@ parse_file = (file: int) -> int[]:
         if d != 0: decls.push(d)
         skip_newlines()
     toks = []
+    p_toks = data(toks)
+    p_ntoks = toks.len()
     decls
 
 # The top-level declarations in src[start..end) of file (a unit of compiler/scan.jo's index: it
@@ -2846,6 +2872,8 @@ parse_span = (file: int, start: int, end: int) -> int[]:
         id_soa = intern("soa")
         id_from = intern("from")
     saved_toks = toks
+    saved_p_toks = p_toks
+    saved_p_ntoks = p_ntoks
     saved_ti = ti
     saved_file = p_file
     saved_src = p_src
@@ -2859,6 +2887,8 @@ parse_span = (file: int, start: int, end: int) -> int[]:
     p_src = files[file].src
     lx_lazy = true
     toks = lex(file, p_src, start, end)
+    p_toks = data(toks)
+    p_ntoks = toks.len()
     lx_lazy = false
     ti = 0
     p_base = 0
@@ -2874,6 +2904,8 @@ parse_span = (file: int, start: int, end: int) -> int[]:
         if d != 0: decls.push(d)
         skip_newlines()
     toks = saved_toks
+    p_toks = saved_p_toks
+    p_ntoks = saved_p_ntoks
     ti = saved_ti
     p_file = saved_file
     p_src = saved_src
@@ -2890,6 +2922,8 @@ ensure_body = (d: int):
     b = int(nodes[d].b)
     if b == 0 or not has_flag(b, NF_LAZY): return
     saved_toks = toks
+    saved_p_toks = p_toks
+    saved_p_ntoks = p_ntoks
     saved_ti = ti
     saved_file = p_file
     saved_src = p_src
@@ -2908,6 +2942,8 @@ ensure_body = (d: int):
         pl_reached.push(start)
         pl_reached.push(start + int(nodes[b].aux))
     toks = lex(p_file, p_src, start, start + int(nodes[b].aux))
+    p_toks = data(toks)
+    p_ntoks = toks.len()
     ti = 0
     p_base = 0
     p_no_tuple = false
@@ -2918,6 +2954,8 @@ ensure_body = (d: int):
     body = parse_indented_block(mk(.block, cur_pos()))
     nodes[d].b = i32(body)
     toks = saved_toks
+    p_toks = saved_p_toks
+    p_ntoks = saved_p_ntoks
     ti = saved_ti
     p_file = saved_file
     p_src = saved_src
