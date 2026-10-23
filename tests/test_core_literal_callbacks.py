@@ -59,9 +59,9 @@ invoke=(callback:Callback):>int64=>callback()+callback()
 forward=(callback:Callback):>int64=>invoke(@callback)+callback()
 main=()=>{
  let n:int64=0
- let callback=()=>{n+=1 return n}
+ let callback=($capture n)=>{n+=1 return n}
  let a=forward(@callback)
- let b=forward(()=>{n+=1 return n})
+ let b=forward(($capture n)=>{n+=1 return n})
  return if a=?4 and b=?4 and callback()=?1 and n=?0 42 else 1
 }''',
     'reordered-keyword-arguments': '''Callback:type=():>int64

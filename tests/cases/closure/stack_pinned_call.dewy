@@ -1,6 +1,6 @@
 # exit: 42
 work=()=>{let before=alloc_count() let n=0 let total=0
-let add=(@value:int)=>{n+=1 value+=n}
+let add=(@value:int $capture n)=>{n+=1 value+=n}
 if alloc_count() not=?before return 1
 add(@total) add(@total)
 return if total=?3 and n=?0 and alloc_count()=?before 42 else 2}

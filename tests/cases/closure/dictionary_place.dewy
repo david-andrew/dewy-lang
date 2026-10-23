@@ -1,6 +1,6 @@
 # exit: 42
 Counter:type=():>int
-make=()=>{let n=0 return ()=>{n+=1; n}}
+make=()=>{let n=0 return ($capture n)=>{n+=1; n}}
 advance=(@next:Counter)=>next()
 run=()=>{let counters=["next"->make()]
 if counters["next"]() not=?1 or counters["next"]() not=?1 return 1

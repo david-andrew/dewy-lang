@@ -11,7 +11,7 @@ rows.swap(0 1) rows[0].values.push(99)
 if rows[0].name not=?"b" or rows[0].values not=?[22 99] return 3
 if original[1].values not=?[22] or rows[1] not=?original[0] return 4
 let count=0
-let counters:array<():>int64>=[()=>{count+=1; count} ()=>{count+=10; count}]
+let counters:array<():>int64>=[($capture count)=>{count+=1; count} ($capture count)=>{count+=10; count}]
 let callbacks=counters counters.swap(0 1)
 if counters[0]() not=?10 or counters[1]() not=?1 return 5
 if callbacks[0]() not=?1 or callbacks[1]() not=?10 return 6

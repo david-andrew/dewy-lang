@@ -1,5 +1,5 @@
 # exit: 42
-run=()=>{let count=0 let f=<T>(x:T)=>{count+=1; count}
+run=()=>{let count=0 let f=<T>(x:T $capture count)=>{count+=1; count}
 let x=f<int>(1) let a=@f<string> let b:<(x:bool):>int>=@f
 return if x=?1 and a("x")=?2 and a("y")=?3 and b(true)=?2 and f(false)=?2 42 else 1}
 main=()=>exit(run())

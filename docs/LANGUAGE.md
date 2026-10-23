@@ -454,14 +454,17 @@ References can name a field or array element: `bump(@point.x)`,
 other copies of the record or array retain their independent values. `@value`
 for a parameter without `@` is an error (`@f` of a function is its handle).
 
-Closures capture snapshots of enclosing locals. Each closure can change its own
-private captures; later changes to the enclosing locals do not change those
-snapshots. Copying a closure copies its current private state:
+Closures capture snapshots of enclosing locals; later changes to the enclosing
+locals do not change those snapshots. A closure that changes a local must
+capture it explicitly: `$capture name` makes it the closure's own private state,
+kept between calls, and `$capture @name` shares the enclosing binding. Changing
+an implicitly captured local is an error naming both fixes. Copying a closure
+copies its current private state:
 
 ```dewy
 make_counter = () => {
     let count = 0
-    return () => { count += 1; count }
+    return ($capture count) => { count += 1; count }
 }
 main = () => {
     let a = make_counter()
@@ -498,7 +501,7 @@ update(2 3) # changes the enclosing count by 5
 ```
 
 Each explicit capture names an enclosing local; capture and parameter names
-must be distinct. Other referenced locals still become private snapshots.
+must be distinct. Other referenced locals become private, read-only snapshots.
 Shared locals remain alive after the enclosing
 call returns, and copies retain that deliberate sharing. A mutable parameter
 or loop element place cannot escape through a shared capture; copy its value
@@ -1326,7 +1329,7 @@ Local closures use the same generic syntax and inference:
 ```dewy
 main=()=>{
     let count=0
-    let next=<T>(value:T)=>{count+=1; [value=value count=count]}
+    let next=<T>(value:T $capture count)=>{count+=1; [value=value count=count]}
     let other=@next
     assert(next(20).count =? 1)
     assert(next("hello").count =? 2)

@@ -550,17 +550,22 @@ class Lambda(Expr):
     params: tuple  # ((name, Ty), ...)
     result: Ty
     body: tuple
+    # ((name, shared), ...): the captures the body writes, `$capture name`
+    # (private state) or `$capture @name` (the enclosing binding)
+    captures: tuple = ()
 
     def render(self, typed=False):
-        params = ' '.join(f'{n}:{t}' for n, t in self.params)
+        params = ' '.join([f'{n}:{t}' for n, t in self.params]
+                          + [f'$capture {"@" if shared else ""}{n}' for n, shared in self.captures])
         return f'({params}):>{self.result}=>{{\n{block(self.body)}\n}}'
 
     def eval(self, m, env):
         inner = bound_names(self) | {n for n, _ in self.params}
+        shared = {n for n, sh in self.captures if sh}
         captures = {}
         for name in sorted(free_names(self) - inner):
             if env.has(name):
-                captures[name] = copy.deepcopy(env.get(name, m))
+                captures[name] = env.place(name) if name in shared else copy.deepcopy(env.get(name, m))
         return Closure(self.params, self.body, Scope(captures, None))
 
 
@@ -907,8 +912,9 @@ class Closure:
         self.params, self.body, self.scope = params, body, scope
 
     def __deepcopy__(self, memo):
-        # Copying a closure copies its private captured state.
-        return Closure(self.params, self.body, Scope(copy.deepcopy(self.scope.vars, memo), None))
+        # Copying a closure copies its private captured state; shared captures stay shared.
+        state = {k: v if isinstance(v, Place) else copy.deepcopy(v, memo) for k, v in self.scope.vars.items()}
+        return Closure(self.params, self.body, Scope(state, None))
 
 
 class Place:
@@ -1248,7 +1254,12 @@ def root(place):
     return place.name if isinstance(place, Var) else None
 
 
-def effects(node, functions):
+def shared_captures(program) -> set[str]:
+    """Names some closure shares (`$capture @name`): calling any closure may write them."""
+    return {n for x in walk(program) if isinstance(x, Lambda) for n, shared in x.captures if shared}
+
+
+def effects(node, functions, shared=frozenset()):
     """(names read, names written, produces output) for a statement or expression."""
     reads, writes, output = set(), set(), False
     printing = printing_functions(functions)
@@ -1275,6 +1286,8 @@ def effects(node, functions):
             if n.closure:
                 reads.add(n.callee)
                 writes.add(n.callee)
+                reads.update(shared)
+                writes.update(shared)
             elif n.callee in printing:
                 output = True
     writes.discard(None)
@@ -1319,6 +1332,7 @@ def scope_errors(program) -> list[str]:
         elif isinstance(e, Call) and (e.callee not in visible if e.closure else e.callee not in functions):
             errors.append(e.callee)
         if isinstance(e, Lambda):
+            errors.extend(c for c, _ in e.captures if c not in visible)
             stmts(e.body, visible | {n for n, _ in e.params})
             return
         extra = set()
@@ -1386,6 +1400,7 @@ class V:
 class Generator:
     def __init__(self, seed, features=None):
         self.r = random.Random(seed)
+        self.shared = set()  # variables a closure shares (`$capture @name`)
         self.features = tuple(features or FEATURES)
         self.serial = 0
         self.functions: list[FuncDef] = []
@@ -1979,7 +1994,8 @@ class Generator:
         name, start, count, step = (self.fresh(p) for p in ('mk', 'p', 'c', 's'))
         op = self.r.choice(('+', '*', 'xor', '-'))
         update = Bin(I, op, Var(I, count), Var(I, step))
-        lam = Lambda(FN, ((step, I),), I, (Assign(Var(I, count), update), Return(Var(I, count), True)))
+        lam = Lambda(FN, ((step, I),), I, (Assign(Var(I, count), update), Return(Var(I, count), True)),
+                     ((count, self.chance(.3)),))
         body = (Let(count, I, Var(I, start)), Return(lam))
         return FuncDef(name, ((start, I, False),), None, body)
 
@@ -2166,8 +2182,8 @@ class Generator:
         """Mutable places of type `ty` for an `@` argument: variables, fields and elements."""
         r, found = self.r, []
         for v in self.visible().values():
-            if not v.mutable or v.frozen:
-                continue
+            if not v.mutable or v.frozen or v.name in self.shared:
+                continue  # (a closure sharing v may run during the call)
             t = Var(v.ty, v.name)
             k = Lit(I, r.randrange(v.minlen)) if v.minlen else None
             nested = []
@@ -2290,8 +2306,12 @@ class Generator:
                 result = Bin(I, '+', Length(I, captured), Var(I, step))
             self.guarded -= 1
             self.scopes.pop()
-            out.append(Let(name, FN, Lambda(FN, ((step, I),), I, (*body, Return(result, implicit=r.random() < .5))),
-                           annotate=False))
+            shared = self.chance(.4)
+            if shared:
+                self.shared.add(state.name)
+            lam = Lambda(FN, ((step, I),), I, (*body, Return(result, implicit=r.random() < .5)),
+                         ((state.name, shared),))
+            out.append(Let(name, FN, lam, annotate=False))
         self.declare(name, FN)
         out.append(self.print_value(Call(I, name, (self.expr(I, 1),), closure=True)))
         out.append(Let(copy_name, FN, Var(FN, name), annotate=False))
@@ -2578,6 +2598,8 @@ def rename(node, old, new):
             return replace(n, name=new)
         if isinstance(n, Call) and n.closure and n.callee == old:
             return replace(n, callee=new)
+        if isinstance(n, Lambda) and any(c == old for c, _ in n.captures):
+            return replace(n, captures=tuple((new if c == old else c, sh) for c, sh in n.captures))
         return n
     return transform(node, fn)
 
@@ -2590,6 +2612,8 @@ def variant_copy(program: Program, r: random.Random) -> Program | None:
         return None
     i = r.choice(lets)
     s = body[i]
+    if s.name in shared_captures(program):
+        return None  # later uses renamed to the copy would miss a closure's shared writes
     position = r.randint(i + 1, len(body))
     copy_name = s.name + 'copy'
     later = tuple(rename(t, s.name, copy_name) for t in body[position:])
@@ -2600,7 +2624,8 @@ def variant_copy(program: Program, r: random.Random) -> Program | None:
 def variant_reorder(program: Program, r: random.Random) -> Program | None:
     """Swap adjacent independent statements of main (no shared names, at most one output)."""
     body = list(program.body)
-    info = [effects(s, program.functions) for s in body]
+    shared = shared_captures(program)
+    info = [effects(s, program.functions, shared) for s in body]
     swaps = 0
     for _ in range(len(body) * 2):
         i = r.randrange(len(body) - 1) if len(body) > 1 else 0

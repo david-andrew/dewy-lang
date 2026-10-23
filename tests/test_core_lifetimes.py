@@ -31,7 +31,7 @@ CASES = {
     'scalar-array': return_case('let xs=[1 {if stop return 42; 2}]'),
     'nested-arrays': return_case('let xs=[[make(0)] [make(1) ' + EXIT + ']]'),
     'closure-array': return_case('let xs=[counter() {if stop return 42; counter()}]',
-                                 'counter=()=>{let n=0 return ()=>{n+=1; n}}\n'),
+                                 'counter=()=>{let n=0 return ($capture n)=>{n+=1; n}}\n'),
     'fixed-array': return_case('let xs:array<string length=2>=[make(1) ' + EXIT + ']'),
     'record': return_case('let row=Row[make(1) ' + EXIT + ']',
                           'Row:type=[left:string right:string]\n'),

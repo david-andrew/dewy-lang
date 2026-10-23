@@ -1,7 +1,7 @@
 # exit: 42
 # quick
 work=()=>{let before=alloc_count() let n=0
-let next=()=>{n+=1; n}
+let next=($capture n)=>{n+=1; n}
 if alloc_count() not=?before return 1
 return if next()=?1 and next()=?2 and n=?0 42 else 2}
 run=()=>{work() let before=alloc_count()

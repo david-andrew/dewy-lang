@@ -1,3 +1,3 @@
 # modes: native
 Counter:type=():>int64
-main=()=>{let f:Counter=()=>0 let outer=()=>{let g=($capture @f)=>f() f=@g return f()} exit(outer())}
+main=()=>{let f:Counter=()=>0 let outer=($capture f)=>{let g=($capture @f)=>f() f=@g return f()} exit(outer())}

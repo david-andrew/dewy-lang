@@ -1,6 +1,6 @@
 # exit: 42
 Counter:type=():>int
-make=()=>{let n=0 return ()=>{n+=1; n}}
+make=()=>{let n=0 return ($capture n)=>{n+=1; n}}
 twice=(f:Counter)=>f()+f()
 forward=(f:Counter)=>{let run=@twice return run(@f)+f()}
 run_case=()=>{let f=make()

@@ -1,7 +1,7 @@
 # exit: 42
 Counter:type=():>int
 Box:type=[next:Counter]
-make=()=>{let n=0 return ()=>{n+=1; n}}
+make=()=>{let n=0 return ($capture n)=>{n+=1; n}}
 from_array=(xs:array<Counter>)=>xs[0]()+xs[0]()
 from_box=(box:Box)=>box.next()+box.next()
 run=()=>{let xs=[make()] let box=Box[make()]

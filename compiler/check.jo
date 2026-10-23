@@ -4752,7 +4752,9 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
         if s != 0 and syms[s].kind == .const_ and nm < sc_top.len() and sc_top[nm] >= int(ctxs[cx].floor) and sc_syms[sc_top[nm]] == s:
             check_expr(clone(cap), 0)
             continue
+        capture_decl = cap
         check_expr(cap, 0)
+        capture_decl = 0
         local = 0
         if nodes[cap].kind == .ident and nodes[cap].aux == i32(int(SK.local)):
             local = int(nodes[cap].sym)

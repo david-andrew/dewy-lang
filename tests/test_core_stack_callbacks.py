@@ -64,7 +64,7 @@ main=()=>{
 invoke=(callback:Callback):>int64=>callback()+callback()
 main=()=>{
  let n:int64=0
- let callback=()=>{n+=1 return n}
+ let callback=($capture n)=>{n+=1 return n}
  let a=invoke(@callback)
  let b=invoke(@callback)
  return if a=?3 and b=?3 and callback()=?1 42 else 1

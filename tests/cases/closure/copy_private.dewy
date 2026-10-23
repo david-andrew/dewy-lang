@@ -1,5 +1,5 @@
 # exit: 42
-make=()=>{let count=0 return ()=>{count+=1; count}}
+make=()=>{let count=0 return ($capture count)=>{count+=1; count}}
 run=()=>{let a=make() let b=@a
 if a() not=?1 or b() not=?1 or a() not=?2 return 1
 let c=@a

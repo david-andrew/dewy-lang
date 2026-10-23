@@ -1,5 +1,5 @@
 # exit: 42
-make=()=>{let count=0 return [f=<T>(x:T)=>{count+=1; count}]}
+make=()=>{let count=0 return [f=<T>(x:T $capture count)=>{count+=1; count}]}
 run=()=>{let a=make() let b=a let fs=[@a.f @b.f]
 return if a.f(1)=?1 and a.f("s")=?2 and b.f(true)=?1 and fs[0](1)=?1 and fs[0](false)=?2 and fs[1](1)=?1 42 else 1}
 main=()=>exit(run())

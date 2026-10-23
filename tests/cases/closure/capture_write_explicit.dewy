@@ -1,0 +1,22 @@
+# Writing a captured local needs `$capture name` (private state) or `$capture @name` (shared)
+mk=(start:int64)=>{
+    let c:int64=start
+    return (s:int64 $capture c):>int64=>{
+        c = c xor s
+        c
+    }
+}
+main=():>void=>{
+    let f=mk(2147483648)
+    let a=f(10)
+    let b=f(0)
+    printl("{a} {b}")
+    let count=0
+    let own=($capture count)=>{count+=1; count}
+    let shared=($capture @count)=>{count+=10; count}
+    let items=[1]
+    let add=(x:int64 $capture @items)=>items.push(x)
+    printl("{own()} {own()} {shared()} {count}")
+    add(2)
+    printl(items)
+}

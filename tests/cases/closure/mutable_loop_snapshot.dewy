@@ -1,5 +1,5 @@
 # exit: 42
 run=()=>{let xs=[20 22] let readers:array<():>int64>=[]
-loop @x in xs {readers.push(()=>{x+=1; x}) x+=10}
+loop @x in xs {readers.push(($capture x)=>{x+=1; x}) x+=10}
 return if readers[0]()=?21 and readers[1]()=?23 and xs=?[30 32] 42 else 1}
 main=()=>exit(run())

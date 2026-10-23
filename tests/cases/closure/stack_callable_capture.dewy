@@ -1,5 +1,5 @@
 # exit: 42
-make=()=>{let n=0 return ()=>{n+=1; n}}
+make=()=>{let n=0 return ($capture n)=>{n+=1; n}}
 work=()=>{let inner=make() let outer=()=>inner()
 return if outer()=?1 and outer()=?2 and inner()=?1 42 else 1}
 run=()=>{work() let before=alloc_count()

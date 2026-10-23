@@ -1,6 +1,6 @@
 # exit: 42
 make=()=>{let xs=[40] let result=[0]
-let advance=(@out:array<int>)=>{xs[0]+=1 out=xs return xs}
+let advance=(@out:array<int> $capture xs)=>{xs[0]+=1 out=xs return xs}
 let first=advance(@result) advance(@result)
 return [first result]}
 work=()=>{let values=make() return if values=?[[41] [42]] 42 else 1}

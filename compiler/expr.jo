@@ -992,6 +992,22 @@ place_fatal = (pos: int, message: str):
     if place_method != 0: fatal(pos, "'{name_of(place_method)}' changes its object: {message}")
     fatal(pos, message)
 
+# A Dewy closure's capture of a name its `$capture` list does not mention.
+implicit_capture = (l: int) -> bool:
+    d = int(fns[int(locals[l].owner)].decl)
+    if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy or has_flag(d, NF_LANG_BODY): return false
+    loop cap in lambda_captures(d):
+        if nodes[cap].name == locals[l].name: return false
+    true
+
+implicit_capture_write = (l: int, pos: int):
+    nm = name_of(int(locals[l].name))
+    err_notes.push((int(nodes[int(fns[int(locals[l].owner)].decl)].pos), "note: the closure is here"))
+    err_notes.push((-1, "help: `($capture {nm}) => ...` gives the closure its own copy, kept between calls; `($capture @{nm}) => ...` changes the enclosing '{nm}'"))
+    fatal(pos, "this closure changes '{nm}', which it captures implicitly: capture it explicitly")
+
+place_write_pos = 0 # the written name, when a narrowed alias is resolved to its variable
+
 check_place = (n: int, for_mut: bool):
     if is_map_get(n): map_elem_place(n)
     k = nodes[n].kind
@@ -1007,7 +1023,10 @@ check_place = (n: int, for_mut: bool):
                     # In particular, a private capture's environment must be
                     # copied when mutation goes through an optional child.
                     locals[l].flags |= i32(LF_ASSIGNED)
+                    saved = place_write_pos
+                    if saved == 0: place_write_pos = nodes[n].pos
                     check_place(alias, for_mut)
+                    place_write_pos = saved
                     return
             if f & LF_SOAELEM != 0: fatal(nodes[n].pos, "'{nm}' stands for an element of a soa array: assign it a whole value (in `loop mut`) or change its fields")
             # a closure modifying a variable it captured modifies the variable itself
@@ -1022,6 +1041,7 @@ check_place = (n: int, for_mut: bool):
                 else: break
             rf = int(locals[r].flags)
             if rf & LF_CONST != 0: place_fatal(nodes[n].pos, "cannot modify const '{nm}'; copy it with `let {nm} = {nm}`")
+            if rf & (LF_CAPTURE | LF_VALUECAP) == LF_CAPTURE | LF_VALUECAP and implicit_capture(r): implicit_capture_write(r, if place_write_pos != 0: place_write_pos else: nodes[n].pos)
             ag = alias_global(r)
             if ag >= 0 and readonly_global(ag): place_fatal(nodes[n].pos, "cannot modify const '{nm}'")
             if rf & LF_PARAM != 0 and rf & LF_MUTPARAM == 0: place_fatal(nodes[n].pos, "cannot modify parameter '{nm}' (parameters are read-only; {jd(nodes[n].pos, "mark it `mut`", "take it by place, `@{nm}`,")} or copy it with `let {nm} = {nm}`)")
@@ -8214,8 +8234,10 @@ dewy_bare_type_value = (n: int, tt: int, is_callee: bool, expected: int) -> bool
         if fields[int(structs[si].fields) + i].defval == 0: return false
     true
 
+capture_decl = 0 # a `$capture name` being checked: names a binding, never calls it
+
 dewy_bare_fn = (n: int, is_callee: bool) -> bool:
-    if is_callee or has_flag(n, NF_MUT) or n == assign_root: return false
+    if is_callee or has_flag(n, NF_MUT) or n == assign_root or n == capture_decl: return false
     if nodes[n].kind == .ident:
         # A synthesized parameter copy or temporary.
         if nodes[n].aux2 == 1 or starts_with(name_of(int(nodes[n].name)), "$"): return false

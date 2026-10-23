@@ -1,6 +1,6 @@
 # exit: 42
 Counter:type=():>int
-make=()=>{let n=0 return ()=>{n+=1; n}}
+make=()=>{let n=0 return ($capture n)=>{n+=1; n}}
 read=(f:Counter ignored:int)=>f()
 run=()=>{let f=make()
 if read(@f f()) not=?1 return 1

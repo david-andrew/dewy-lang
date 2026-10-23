@@ -1,5 +1,5 @@
 # exit: 42
-make=(start:int64)=>{let count=start return <T>(x:T)=>{count+=1; count}}
+make=(start:int64)=>{let count=start return <T>(x:T $capture count)=>{count+=1; count}}
 replace=<F>(@f:F other:F)=>{f=other; "x"}
 run=()=>{let f=make(0) let g=make(100)
 let answer=f(replace(@f @g))

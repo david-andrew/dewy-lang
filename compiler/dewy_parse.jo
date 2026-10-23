@@ -3123,6 +3123,7 @@ dw_parallel = (arm: int, collect: bool) -> int:
     dw_siblings = outer_siblings
     dw_parallel_exits(body)
     fn_ = mk(.lambda, pos)
+    add_flag(fn_, NF_LANG_BODY)
     if not collect and not mutable: add_flag(fn_, NF_VOID)
     if mutable:
         ret = mk(.return_, pos)
@@ -3544,6 +3545,7 @@ dw_spawn = (id: int) -> int:
     value = dw_expr(dw_child(id, 1))
     body = bc_block([bc_stmt(value, pos)], pos)
     fn_ = mk(.lambda, pos)
+    add_flag(fn_, NF_LANG_BODY)
     nodes[fn_].b = i32(body)
     call = bc_call("__task_spawn", [g, fn_], pos)
     nodes[call].aux2 = 17

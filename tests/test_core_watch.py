@@ -454,13 +454,13 @@ def test_core_watch_closure_asset_keeps_capture(compiler, tmp_path, generic):
     asset = tmp_path / 'label.txt'
     save(asset, 'one')
     program = '''make=()=>{let count:int64=0
-return ()=>{count+=1 return "{count}:{str_from_bytes($include_bytes(p\"label.txt\"))}"}}
+return ($capture count)=>{count+=1 return "{count}:{str_from_bytes($include_bytes(p\"label.txt\"))}"}}
 let next=make()
 update=(dt:float64):>void=>{if frame_number()%10 =? 0 printl(next()) sleep(5ms)}
 draw=():>void=>clear(BLACK)
 '''
     if generic:
-        program = program.replace('return ()=>', 'return <T>(unused:T)=>').replace('next()', 'next(0)')
+        program = program.replace('return ($capture count)=>', 'return <T>(unused:T $capture count)=>').replace('next()', 'next(0)')
     save(source, program)
     watcher = Watch(compiler, source, game=True)
     try:
@@ -520,7 +520,7 @@ def test_core_watch_generic_closure_layout_keeps_old_cleanup(compiler, tmp_path)
     """A saved concrete selection keeps copy/drop code for its old environment."""
     source = tmp_path / 'game.dewy'
     program = '''make=()=>{let count=0 let word="kept"
-return <T>(unused:T)=>{count+=1; "{word}:{count}"}}
+return <T>(unused:T $capture count)=>{count+=1; "{word}:{count}"}}
 let next=make()<int64>
 update=(dt:float64):>void=>{
 next(0)

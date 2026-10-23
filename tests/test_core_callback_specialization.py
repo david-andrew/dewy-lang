@@ -42,7 +42,7 @@ main=()=>{
 visit=(callback:Callback):>int64=>callback()+callback()
 main=()=>{
  let n:int64=0
- let callback=():>int64=>{n+=1 return n}
+ let callback=($capture n):>int64=>{n+=1 return n}
  let a=visit(@callback)
  let b=visit(@callback)
  return if a=?3 and b=?3 and callback()=?1 and n=?0 42 else 1

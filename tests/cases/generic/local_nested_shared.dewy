@@ -1,5 +1,5 @@
 # exit: 42
-make=()=>{let count=0 return <T>(x:T)=>($capture @count)=>{count+=1; count}}
+make=()=>{let count=0 return <T>(x:T $capture count)=>($capture @count)=>{count+=1; count}}
 run=()=>{let f=make() let a=f(1) let b=f("x")
 let first=a() let second=b()
 let g=@f let c=g(false)

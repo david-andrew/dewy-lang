@@ -57,7 +57,7 @@ let saved=tree tree.right=Leaf[100]
 return if evaluate(saved)=?42 and evaluate(tree)=?110 42 else 1}''',
     'callback-private-state': '''Counter:type=():>int
 Link:type=[counter:Counter next:Link?=none]
-make=()=>{let n=0 return ()=>{n+=1 return n}}
+make=()=>{let n=0 return ($capture n)=>{n+=1 return n}}
 main=()=>{
 let a=Link[make() Link[make()]] let b=a
 if a.counter() not=?1 or b.counter() not=?1 return 1
@@ -101,7 +101,7 @@ return if result=?42 and global.value=?99 42 else 1}''',
     'private-captured-tree': '''Node:type=[value:int64 next:Node?=none]
 make=()=>{
 let tree=Node[20 Node[21]]
-return ()=>{
+return ($capture tree)=>{
 if tree.next is?none return 0
 tree.next.value+=1 return tree.value+tree.next.value}}
 main=()=>{let a=make() let b=@a
@@ -293,7 +293,7 @@ main=()=>{return if f(Node[42])=?42 and calls=?0 42 else 1}''',
 
     'returning-private-capture': '''Node:type=[value:int64]
 make=()=>{let x:Node?=Node[42]
-return (clear:bool)=>{
+return (clear:bool $capture x)=>{
 if x is?none return 0
 if clear {x=none return 1}
 return x.value}}

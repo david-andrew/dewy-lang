@@ -147,7 +147,7 @@ def test_addr_target_bound(compiler, tmp_path):
 @pytest.mark.parametrize('source,success', [
     ('main=()=>{let xs:array<int64<i => i >? 0>>=[1];loop @x in xs {x=0}}', False),
     ('main=()=>{let xs:array<int64>=[1 2];let saved=xs.copy();xs[0]=8;$assert saved[0] =? 1;$assert xs.length =? 2}', True),
-    ('f=(saved:array<int64 length =? 2> ignored:int64)=>printl(saved.length)\nmain=()=>{let xs:array<int64>=[1 2];let change=()=>{xs.clear();return 0};f(xs change())}', True),
+    ('f=(saved:array<int64 length =? 2> ignored:int64)=>printl(saved.length)\nmain=()=>{let xs:array<int64>=[1 2];let change=($capture @xs)=>{xs.clear();return 0};f(xs change())}', True),
 ])
 def test_alias_and_callback_authority(compiler, tmp_path, source, success):
     result = build(compiler, tmp_path, source)

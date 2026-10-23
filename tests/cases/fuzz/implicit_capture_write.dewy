@@ -1,0 +1,16 @@
+# Seed 301345: a closure changing a local it captured implicitly lost the change
+Item:type=[id:int64 tags:array<int64> label:string]
+Bad:type=type of error & [code:int64]
+mk26=(p27:int64)=>{
+    let c28:int64=p27
+    return (s29:int64):>int64=>{
+        c28 = (c28 xor s29)
+        c28
+    }
+}
+main=():>void=>{
+    let r1:[value:int64 xs:array<int64>]=[value=(-17) xs=[(-7)]]
+    let fn24=mk26(2147483648)
+    r1.xs[(fn24(10) % r1.xs.length)] = fn24(0)
+    printl(r1)
+}
