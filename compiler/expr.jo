@@ -2,6 +2,7 @@ use 'concurrency.jo'
 use 'parallel_lower.jo'
 use 'partition.jo'
 use 'string_domains.jo'
+use 'juxtapose.jo'
 use 'decimals.jo'
 use 'ownership.jo'
 use 'units.jo'
@@ -4107,11 +4108,11 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
         hs = lookup(name)
         if hs != 0 and syms[hs].kind == .local:
             if starts_with(name_of(name), "$index_end"): fatal(nodes[n].pos, "end is the last index inside brackets; it cannot be called")
-            fatal(nodes[n].pos, "'{name_of(name)}' is a variable of type {dt(int(locals[int(syms[hs].ref)].type))} here (it hides the function or type of that name); rename the variable")
+            fatal(nodes[n].pos, "'{name_of(name)}' is a variable of type {dt(int(locals[int(syms[hs].ref)].type))} here (it hides the function or type of that name){juxt_string_call_hint(n)}; rename the variable")
         if hs != 0 and syms[hs].kind == .global:
             g = int(syms[hs].ref)
             ensure_global(g, nodes[n].pos)
-            fatal(nodes[n].pos, "'{name_of(name)}' is a variable of type {dt(int(globals[g].type))}, not a function")
+            fatal(nodes[n].pos, "'{name_of(name)}' is a variable of type {dt(int(globals[g].type))}, not a function{juxt_string_call_hint(n)}")
         # (Msg(Move(3)), Msg a union: its members are Msgs as they are)
         if hs != 0 and syms[hs].kind == .alias_ and nkids2(int(syms[hs].ref)) == 0:
             at = resolve_alias(int(syms[hs].ref), [], nodes[n].pos)
@@ -5418,6 +5419,12 @@ check_call = (n: int, expected: int) -> int:
         if types[t].kind != .struct_: fatal(nodes[callee].pos, "this type does not have a record constructor")
         return struct_ctor(n, t, int(structs[int(types[t].st)].decl), args, expected)
     if ck == .ident:
+        if has_flag(n, NF_JUXT) and juxt_head_numeric(n):
+            juxt_product(n)
+            return check_expr(n, expected)
+        if has_flag(n, NF_JUXT) and int(nodes[callee].name) == ci(5, "__dewy_power") and nkids(n) == 2 and nodes[kid(n, 0)].kind == .call and juxt_chain_numeric(kid(n, 0)):
+            juxt_power(n)
+            return check_expr(n, expected)
         if id_len == 0: id_len = intern("len")
         if args.len() == 1 and int(nodes[callee].name) == id_len:
             # len(ps) for a soa array
@@ -5439,6 +5446,10 @@ check_call = (n: int, expected: int) -> int:
         if ide_on: ide_variant_ref(nodes[callee].pos, int(nodes[callee].name), et, vi)
         return variant_ctor(n, et, vi, args)
     if ck == .field:
+        if has_flag(callee, NF_JUXT): juxt_member_check(callee)
+        if has_flag(n, NF_JUXT) and juxt_head_numeric(n):
+            juxt_product(n)
+            return check_expr(n, expected)
         recv = int(nodes[callee].a)
         saved_receiver = type_receiver_at
         type_receiver_at = recv
@@ -5521,8 +5532,18 @@ check_call = (n: int, expected: int) -> int:
             r = call_by_name(n, int(nodes[int(nodes[callee].a)].name), -1, args, expected, false)
             call_targs = saved
             return r
+    head_kind = nodes[callee].kind
+    if head_kind == .call and juxt_chain_numeric(callee):
+        juxt_product(n)
+        return check_expr(n, expected)
+    # (spelled before checking rewrites it, for the diagnostic of a call or index result)
+    head_text = if head_kind == .call or head_kind == .index: juxt_text(callee) else: ""
     callee_at = callee
     check_expr(callee, 0)
+    if juxt_value_head(n, head_kind, head_text, ntype(last_checked)):
+        nodes[n].a = i32(last_checked)
+        juxt_product(n)
+        return check_expr(n, expected)
     value_call(n, callee, args, expected)
 
 # resolve_by_types' choices (a formatting function for each value type a string puts in, say):
@@ -8757,6 +8778,7 @@ check_ident_expr = (n: int, expected: int) -> int:
         g = int(syms[s].ref)
         ensure_global(g, nodes[n].pos)
         if globals[g].is_const and is_quantity(int(globals[g].type)):
+            juxt_spaced_unit(n)
             q = quantity_scales[quantity_constant_scale(int(globals[g].init))]
             hint = expected
             if nodes[int(globals[g].decl)].a != 0: hint = int(globals[g].type)
@@ -8785,6 +8807,7 @@ check_ident_expr = (n: int, expected: int) -> int:
     else if sk == .const_:
         g = int(syms[s].ref)
         if globals[g].decl != 0: ensure_global(g, nodes[n].pos)
+        if nodes[int(globals[g].init)].kind == .unit_lit: juxt_spaced_unit(n)
         v = clone(int(globals[g].init))
         p = nodes[n].pos
         nodes[n] = nodes[v]
@@ -8869,7 +8892,9 @@ check_call_expr = (n: int, expected: int) -> int:
         nodes[n].b = i32(args[1])
         add_flag(n, NF_INBOUNDS)
         return check_expr(n, expected)
-    if nodes[n].aux2 == i32(AUX2_PARTIAL): return dewy_partial(n, expected)
+    if nodes[n].aux2 == i32(AUX2_PARTIAL):
+        if has_flag(n, NF_JUXT) and juxt_head_numeric(n): juxt_factor(n)
+        return dewy_partial(n, expected)
     t = check_call(n, expected)
     if nodes[n].aux == 0 and nodes[n].sym > 0:
         if fns[int(nodes[n].sym)].atomic_api: concurrency_atomic_call(n)
@@ -8905,6 +8930,7 @@ check_str_expr = (n: int, expected: int) -> int:
     ce_finish(n, t, expected)
 
 check_field_expr = (n: int, expected: int) -> int:
+    if has_flag(n, NF_JUXT): juxt_member_check(n)
     t = 0
     if nodes[n].b != 0: reflect_name(n)
     if reflect_active and reflect_member(n): return ntype(n)
@@ -9172,6 +9198,7 @@ check_field_expr = (n: int, expected: int) -> int:
     ce_finish(n, t, expected)
 
 check_index_expr = (n: int, expected: int) -> int:
+    if has_flag(n, NF_JUXT): juxt_member_check(n)
     t = 0
     if nodes[n].sval != 0:
         pos = nodes[n].pos

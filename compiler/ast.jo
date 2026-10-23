@@ -82,6 +82,10 @@ const NF_COMPREHENSION = 67108864 # block: first declaration is the collection a
 const NF_RECORD = 134217728 # anonymous structural record declaration
 const NF_INDEX_CAPTURED = 268435456 # compound custom-index update already captured its indices
 const NF_EXCL_FIRST = 536870912 # Dewy range excludes its first specified value
+# (Dewy, docs/design/juxtaposition.md) call: `head(...)` with a name, field route or
+# parenthesized group head, which may be a coefficient; `^` (its __dewy_power call), field or
+# index: written right after a call's parentheses; binary: a product written by juxtaposition
+const NF_JUXT = NF_EXCL_FIRST
 const NF_FLOW_RETURNS = 1073741824 # lowered loop/else block: every source path returns
 const NF_AT = 2147483648        # (Dewy) a place written with a leading `@`: `@x`, `@r.a`, `@xs[i]`
 

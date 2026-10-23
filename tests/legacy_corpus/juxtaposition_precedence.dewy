@@ -1,8 +1,9 @@
 # Call parentheses and coefficient multiplication keep their distinct
-# precedences; tight right-hand numbers resolve from the left operand type.
+# precedences (docs/design/juxtaposition.md): a callable head is a call, a
+# numeric head multiplies, and `^` binds tighter than either product.
 main=():>int64=>{
     let x:int64=3
+    let a:int64=2
     let square=(n:int64):>int64=>n*n
-    let g=(n:int64):>int64=>n+1
-    return if 2x^2=?18 and square(2)^2=?16 and (x+1)5=?20 and (square)2=?4 and g(1)2=?4 and (square)2^2=?16 and (x+1)5^2=?100 42 else 1
+    return if 2x^2=?18 and square(2)^2=?16 and (x+1)(5)=?20 and a(x)^2=?18 and 2^3x=?24 and (x+1)(x-1)^2=?16 42 else 1
 }

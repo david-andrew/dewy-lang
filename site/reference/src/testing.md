@@ -4,7 +4,7 @@
 
 ## Current project tests
 
-Use `test "adds numbers" { assert(20+22 =? 42) }` at module level and run `dewy test file.dewy`. These are current compiler test blocks. See the [project testing guide](https://github.com/david-andrew/dewy-lang/blob/master/docs/LANGUAGE.md#test-a-project). The `$test` and `$expect` forms below are the language design, with coverage reported separately.
+Mark a module-level function with `$test` on the line before it and state what it checks with `$expect`, as in `adds_numbers = () => $expect 20+22 =? 42`, then run `dewy test file.dewy`. A condition the program itself relies on is `$assert` (decided at compile time) or `$runtime_assert` (checked when it runs). See the [project testing guide](https://github.com/david-andrew/dewy-lang/blob/master/docs/LANGUAGE.md#test-a-project). The sections below describe the design, with coverage reported separately.
 
 ## Design test functions
 

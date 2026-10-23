@@ -784,6 +784,13 @@ dw_coalesce_arithmetic = (left: int, right: int):
     sym = dn_token_text(op)
     warn(dewy_syntax[right].pos, "arithmetic binds more tightly than `??`, so this fallback includes `{lit} {sym} {tail}`, not just `{lit}`: write `({name} ?? {lit}) {sym} {tail}` to use the chosen value, or `{name} ?? ({lit} {sym} {tail})` to keep this meaning")
 
+# A name, a field route or a parenthesized group: `head(...)` may be a coefficient.
+dw_juxt_head = (id: int) -> bool:
+    k = dewy_syntax[id].kind
+    if k == .identifier: return true
+    if k == .block: return dewy_syntax[id].text == "():" and dw_nchildren(id) == 1
+    k == .binary and dw_op(id) == .dot and dw_juxt_head(dw_child(id, 1))
+
 dw_integer_kind = (kind: DewyKind) -> bool:
     kind == .integer or kind == .source_integer
 
@@ -2016,6 +2023,8 @@ dw_expr = (id: int) -> int:
             n = mk(.call, pos)
             nodes[n].a = i32(callee)
             set_list(n, [a, b])
+            # (`a(x)^2` with the call unparenthesized: the power may take the group, juxtapose.jo)
+            if op == .caret and dewy_syntax[left].kind == .binary and dw_op(left) == .call: add_flag(n, NF_JUXT)
             return n
         if op == .dot:
             field = dw_target_field(id)
@@ -2031,6 +2040,7 @@ dw_expr = (id: int) -> int:
             computed = dw_field_name(right)
             if name == "" and computed == 0: return dw_fail(id, "computed member names")
             n = mk(.field, pos)
+            if dewy_syntax[left].kind == .binary and dw_op(left) == .call: add_flag(n, NF_JUXT)
             nodes[n].a = i32(dw_expr(left))
             nodes[n].b = i32(computed)
             if computed == 0:
@@ -2052,6 +2062,8 @@ dw_expr = (id: int) -> int:
                 return bc_call("__dewy_set", [dw_expr(right)], pos)
             n = mk(if bracket: NK.index else: NK.call, pos)
             if op == .broadcast_call: add_flag(n, NF_BROADCAST)
+            if op == .call and dewy_syntax[right].kind == .block and dewy_syntax[right].text == "():" and dw_juxt_head(left): add_flag(n, NF_JUXT)
+            if bracket and dewy_syntax[left].kind == .binary and dw_op(left) == .call: add_flag(n, NF_JUXT)
             nodes[n].a = i32(dw_expr(left))
             callee = int(nodes[n].a)
             if not bracket and nodes[callee].kind == .field: add_flag(int(nodes[callee].a), NF_MUT)
@@ -2120,6 +2132,7 @@ dw_expr = (id: int) -> int:
         if dw_chain_way(op) != 2 and dw_chain_link(dw_unwrap(left)): return dw_chain(id)
         n = mk(if op == .kw_and: NK.and_ else if op == .kw_or: NK.or_ else: NK.binary, pos)
         nodes[n].op = i32(int(dw_binary_token(op, id)))
+        if op == .multiply_apply: add_flag(n, NF_JUXT)
         nodes[n].a = i32(dw_expr(left))
         nodes[n].b = i32(if op == .contains: dw_membership(right) else: dw_expr(right))
         return n

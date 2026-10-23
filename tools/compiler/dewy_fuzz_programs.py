@@ -26,6 +26,7 @@ from __future__ import annotations
 import copy
 import math
 import random
+import zlib
 from dataclasses import dataclass, fields, replace
 from decimal import Decimal
 from fractions import Fraction
@@ -265,6 +266,18 @@ class Unary(Expr):
         return (not x) if self.op == 'not' else wrap(-x, self.ty)
 
 
+JUXT_NUMBERS = (I, U, F, INT)
+
+
+def juxtaposed(lnode, rnode, left, right):
+    """`2x` (a literal coefficient) or `x(e)` (a named number before a group), or ''."""
+    if isinstance(rnode, Var) and rnode.ty in JUXT_NUMBERS and left.isdigit():
+        return f'({left}{right})'
+    if isinstance(lnode, Var) and lnode.ty in JUXT_NUMBERS:
+        return f'({left}({right}))'
+    return ''
+
+
 def declared(e):
     return isinstance(e, (Var, Field, Index, Call, Length, Method, Conv, Unary, Bin))
 
@@ -286,7 +299,12 @@ class Bin(Expr):
         literals = (Lit, ArrayLit, RecLit, DictLit, SetLit) if self.op in ('=?', 'not=?') else (Lit,)
         left = render(self.left, isinstance(self.left, literals) and declared(self.right))
         right = render(self.right, isinstance(self.right, literals) and declared(self.left))
-        return f'({left} {self.op} {right})'
+        text = f'({left} {self.op} {right})'
+        # (a third of the eligible products, chosen by their text, are spelled by
+        # juxtaposition: the same product, docs/design/juxtaposition.md)
+        if self.op == '*' and zlib.crc32(text.encode()) % 3 == 0:
+            return juxtaposed(self.left, self.right, left, right) or text
+        return text
 
     def eval(self, m, env):
         op = self.op

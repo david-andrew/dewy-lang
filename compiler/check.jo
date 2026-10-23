@@ -34,6 +34,7 @@ use 'arena.jo'
 use 'ownership.jo'
 use 'reflection.jo'
 use 'string_domains.jo'
+use 'juxtapose.jo'
 use 'sibling_types.jo'
 use 'dewy_methods.jo'
 use 'directives.jo'
@@ -2516,7 +2517,9 @@ unused_value = (raw: Node, t: int):
         warn(raw.pos, "this condition's answer is not used ({jd(raw.pos, "`if ...:`", "`if ... \{ }`")} acts on it)")
         return
     if k == .bool_lit or k == .int_lit or k == .float_lit or k == .ident or k == .none_lit:
-        if tkind(prune(int(ctxs[cx].ret))) != .void_:
+        spaced = if k == .int_lit or k == .float_lit or k == .ident: juxt_space_hint(raw.pos) else: ""
+        if len(spaced) > 0: warn(raw.pos, "this value is not used{spaced}")
+        else if tkind(prune(int(ctxs[cx].ret))) != .void_:
             warn(raw.pos, "this value is not used: `return` gives it back from the function")
         else:
             warn(raw.pos, "this value is not used: it changes nothing")

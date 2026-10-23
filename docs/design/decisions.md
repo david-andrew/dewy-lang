@@ -194,12 +194,12 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   punctuation may be escaped to itself (`\}`, `\{`, `\'`, `\"`, `\\`).
 - `and=`/`or=` short-circuit: `a and= f()` means `a = a and f()`.
 - Places from handles (round 6): `lock` is a method; under the whole-route `@`
-  rule `@shared.lock` is the method handle, and `@(m.method)` takes the place a
+  rule `@shared.lock` is the method handle, and `@(m.method())` takes the place a
   method returns (grouping makes the call happen). Legal only when the method
   is declared to return a place; `@` of an ordinary temporary stays an error.
   Derived places are checked lexically (no lifetime annotations); replacing or
   releasing the handle while such a place is live is a compile error; the guard
-  releases after the place's last use (`let a=@(shared.lock)`; `a.balance+=10`;
+  releases after the place's last use (`let a=@(shared.lock())`; `a.balance+=10`;
   `saved=@a` is an error).
 - Common parent: literals of sibling types infer the most precise type:
   `[Circle[...] Square[...]]` is the positional `[Circle Square]`, accepted where

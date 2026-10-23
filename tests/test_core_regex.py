@@ -108,10 +108,10 @@ let negative=text.find(r (-10))
 if negative is?Missing return 2
 if negative.start not=?0 return 2
 if text.find(r 404) isnt?Missing return 3
-let last=text.find(regex("")403)
+let last=text.find(regex("") 403)
 if last is?Missing return 4
 if last.start not=?403 return 4
-if "".find(regex("")1) isnt?Missing return 5
+if "".find(regex("") 1) isnt?Missing return 5
 return 42}''',
         'regex-malformed': r'''main=()=>{
 let text="{"x".repeat(300)}{str_from_bytes([195 65] as array<uint8>)}{"B".repeat(3)}"

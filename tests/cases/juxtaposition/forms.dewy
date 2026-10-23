@@ -1,0 +1,20 @@
+# quick
+# Eligible heads: a named number, a field route, a parenthesized scalar, a quantity;
+# callable heads stay calls, and a local unit name shadows the unit.
+from units import m, kg
+Material:type = [k:float64 rho:int64]
+twice = (v:int64):>int64 => 2*v
+run = () => {
+    let material = Material[k=0.5 rho=3]
+    let T = 4.0
+    let n = 9
+    let pick = @twice
+    printl"{material.k(T)} {material.rho(n+1)} {n(n+1)/2} {(n)(2)}"
+    printl"{twice(n)} {pick(n)} {(twice(n))(2)} {2twice(n)}"
+    printl"{9.81m/2kg} {3(2m)}"
+    let g = 9.81m
+    printl"{2(g)}"
+    let s = 3
+    printl"{2s}"    # a local s hides the second
+}
+main = () => run()

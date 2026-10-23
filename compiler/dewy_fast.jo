@@ -1127,6 +1127,27 @@ dn_operator_habit = (text: str) -> str:
     if previous == .minus and dn_at >= 3 and dn_tokens[dn_at - 3].symbol == .minus: return " (`x -= 1` takes one away)"
     ""
 
+# The token before the cursor is a numeric literal (not a tuple member, `t.1`): what
+# follows it unspaced, a name or a group, is its coefficient's other factor.
+dn_coefficient_before = () -> bool:
+    if dn_at == 0: return false
+    k = dn_tokens[dn_at - 1].kind
+    if not (dw_integer_kind(k) or k == .source_real): return false
+    not (dn_at >= 2 and dn_tokens[dn_at - 2].symbol == .dot and not dn_tokens[dn_at - 1].space)
+
+# A call result or an indexed element written against a name or a number (`f(x)g(x)`,
+# `xs[i]y`): never a coefficient.
+dn_juxt_excluded = () -> bool:
+    if dn_at == 0: return false
+    t = dn_tokens[dn_at]
+    if not (t.kind == .identifier and t.symbol == .none or dw_integer_kind(t.kind) or t.kind == .source_real): return false
+    previous = dn_tokens[dn_at - 1].symbol
+    previous == .rparen or previous == .rbrack
+
+dn_juxt_excluded_message = () -> str:
+    if dn_tokens[dn_at - 1].symbol == .rbrack: return "an indexed element is not a coefficient: write `*` (`xs[i] * y`); whitespace separates expressions"
+    "a call or group result is not a coefficient: write `*` (`f(x) * g(x)`); whitespace separates expressions"
+
 dn_expr = (minimum: int) -> int:
     dn_depth += 1
     if dn_depth > 256: return dn_error(dn_tokens[dn_at].start, "expression is nested too deeply")
@@ -1145,11 +1166,16 @@ dn_expr = (minimum: int) -> int:
             dn_at += 1
             left = dn_op_node(.postfix, .ellipsis, pos_off(dewy_syntax[left].pos), [0, left])
             continue
-        # Literal coefficients are unambiguous: 2x and 2(x + 1). General
-        # adjacent names remain separate arguments or block elements.
-        if not token.space and minimum <= 135 and (dw_integer_kind(dewy_syntax[left].kind) or dewy_syntax[left].kind == .source_real) and (token.kind == .identifier or op == .lparen):
-            left = dn_operator(.binary, .multiply_apply, left, dn_expr(136))
-            continue
+        # A numeric literal against a name or a group is a coefficient (`2x`, `2(x+1)`,
+        # `2^3x`), binding below `^` and above `*` (docs/design/juxtaposition.md).
+        # Whitespace always separates expressions.
+        if not token.space and (token.kind == .identifier or op == .lparen or token.kind == .source_integer or token.kind == .source_real or token.kind == .integer):
+            pk = dn_tokens[dn_at - 1].kind
+            if (token.kind == .identifier or op == .lparen) and (pk == .source_integer or pk == .source_real or pk == .integer) and dn_coefficient_before():
+                if minimum > 135: break
+                left = dn_operator(.binary, .multiply_apply, left, dn_expr(136))
+                continue
+            if op != .lparen and dn_juxt_excluded(): return dn_error(token.start, dn_juxt_excluded_message())
         if op == .dot and minimum <= 170:
             dn_at += 1
             if dn_peek() == .lparen and not dn_tokens[dn_at].space:

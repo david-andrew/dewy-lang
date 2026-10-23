@@ -91,6 +91,6 @@ Tokenizer framework.
 
 ## Tokens and Ambiguity
 
-Tokenization chooses the longest valid token subject to explicit lexical rules. Parsing may preserve several structurally valid interpretations—most notably call, indexing, and multiplication juxtaposition—until types and context resolve them.
+Tokenization chooses the longest valid token subject to explicit lexical rules. Whitespace always separates expressions. At `head(...)`, the head's type decides once between a call and a juxtaposed multiplication (see [Operators and Precedence](operators-and-precedence.md#juxtaposition)); no alternative parses are kept.
 
 See [Literals](literals.md) for literal tokens and [Operators and Precedence](operators-and-precedence.md) for expression grouping.

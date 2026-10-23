@@ -1,0 +1,20 @@
+# quick
+# Every row of the precedence table in docs/design/juxtaposition.md.
+sin = (v:int64):>int64 => v + 1
+square = (v:int64):>int64 => v*v
+run = () => {
+    let a = 3
+    let x = 2
+    let y = 5
+    let m = 4
+    printl"{sin(x)^2} {(sin(x))^2}"         # (sin x)^2
+    printl"{a(x)^2} {a*(x^2)}"              # a*(x^2)
+    printl"{2sin(x)^2} {2*(sin(x)^2)}"      # 2*(sin(x)^2)
+    printl"{-a(x)^2} {-(a*x^2)}"            # -(a*x^2)
+    printl"{2^3x} {(2^3)*x}"                # (2^3)*x
+    printl"{a(x)(y)^2} {a*x*y^2}"           # a*x*y^2
+    printl"{1/2m} {1/(2*m)}"                # 1/(2m)
+    printl"{(a(x))^2} {(a*x)^2}"            # a parenthesized product is one value
+    printl"{2x} {2x^2} {3(a+x)} {(a+1)(a-1)} {(a+x)(y-x)^2} {a(a+1)//2} {2square(x)^2} {(a(-x)).abs()}"
+}
+main = () => run()

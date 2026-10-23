@@ -393,9 +393,12 @@ dc_expr = (minimum: int) -> int:
     dc_depth += 1
     if dc_depth + dn_depth > 256: return 0
     pos = mkpos(dn_file, dn_tokens[dn_at].start)
-    coefficient = dw_integer_kind(dn_tokens[dn_at].kind) or dn_tokens[dn_at].kind == .source_real
+    opening = dn_tokens[dn_at]
     left = dc_atom()
     if left == 0: return 0
+    # (a name, a field route or a parenthesized group: `head(...)` may be a coefficient)
+    juxt_head = opening.symbol == .lparen or opening.kind == .identifier and nodes[left].kind == .ident
+    last_call = 0     # (the call this loop made last: a member or index right after it is marked)
     compared = false    # (left is a comparison this loop made)
     loop true:
         token = dn_tokens[dn_at]
@@ -403,12 +406,17 @@ dc_expr = (minimum: int) -> int:
         if token.kind == .eof: break
         if token.newline and dn_power(op) == 0 and op != .kw_not: break
         if dn_angles > 0 and (op == .shr or op == .shr_assign or op == .angle_assign or (op == .gt and not token.space)): break
-        if not token.space and coefficient and minimum <= 135 and (token.kind == .identifier or op == .lparen):
-            right = dc_expr(136)
-            if right == 0: return 0
-            left = dc_binary(.multiply_apply, left, right, pos)
-            coefficient = false
-            continue
+        if not token.space and (token.kind == .identifier or op == .lparen or token.kind == .source_integer or token.kind == .source_real or token.kind == .integer):
+            pk = dn_tokens[dn_at - 1].kind
+            if (token.kind == .identifier or op == .lparen) and (pk == .source_integer or pk == .source_real or pk == .integer) and dn_coefficient_before():
+                if minimum > 135: break
+                right = dc_expr(136)
+                if right == 0: return 0
+                left = dc_binary(.multiply_apply, left, right, pos)
+                add_flag(left, NF_JUXT)
+                juxt_head = false
+                continue
+            if op != .lparen and dn_juxt_excluded(): return 0
         if op == .dot and minimum <= 170:
             dn_at += 1
             member = dn_tokens[dn_at]
@@ -417,18 +425,20 @@ dc_expr = (minimum: int) -> int:
             n = mk(.field, pos)
             nodes[n].a = i32(left)
             nodes[n].name = member.name
+            if left == last_call: add_flag(n, NF_JUXT)
             dewy_note_member(n)
             left = n
-            coefficient = false
             continue
         if not token.space and op == .lparen and minimum <= 170:
             dn_at += 1
             n = mk(.call, pos)
             nodes[n].a = i32(left)
+            if juxt_head: add_flag(n, NF_JUXT)
             if nodes[left].kind == .field: add_flag(int(nodes[left].a), NF_MUT)
             if not dc_arguments(n, .rparen): return 0
             left = n
-            coefficient = false
+            last_call = n
+            juxt_head = false
             continue
         # `xs[i]`, `Point[x y]`, `Point[x=1 y=2]`; ranges, `end`, `new` and
         # `set[...]` take the reference grammar.
@@ -437,6 +447,7 @@ dc_expr = (minimum: int) -> int:
             dn_at += 1
             n = mk(.index, pos)
             nodes[n].a = i32(left)
+            if left == last_call: add_flag(n, NF_JUXT)
             # `xs[a..b]`, `xs[a..b)`, `xs[a..]`, `xs[..b)`: one slice
             first_pos = mkpos(dn_file, dn_tokens[dn_at].start)
             first = 0
@@ -444,7 +455,7 @@ dc_expr = (minimum: int) -> int:
                 if not dc_arguments(n, .rbrack): return 0
                 if nkids(n) == 1: nodes[n].b = i32(kid(n, 0))
                 left = n
-                coefficient = false
+                juxt_head = false
                 continue
             if dn_peek() != .range:
                 dc_range_top = true
@@ -467,12 +478,12 @@ dc_expr = (minimum: int) -> int:
                 set_list(n, [range])
                 nodes[n].b = i32(range)
                 left = n
-                coefficient = false
+                juxt_head = false
                 continue
             if not dc_arguments(n, .rbrack, first): return 0
             if nkids(n) == 1: nodes[n].b = i32(kid(n, 0))
             left = n
-            coefficient = false
+            juxt_head = false
             continue
         # `f<T>(x)`: the application as a type, and its arguments again as types
         if not token.space and op == .langle and minimum <= 160:
@@ -495,14 +506,14 @@ dc_expr = (minimum: int) -> int:
             if dn_at != stop: return 0
             set_list(n, args)
             left = n
-            coefficient = false
+            juxt_head = false
             continue
         if op == .kw_or_throw and minimum <= 48:
             dn_at += 1
             n = mk(.propagate, pos)
             nodes[n].a = i32(left)
             left = n
-            coefficient = false
+            juxt_head = false
             continue
         if not token.space and (token.kind == .quoted or token.kind == .rawquoted) and minimum <= 170:
             # (`b'a'`, `b"abc"`: byte literals take the reference grammar)
@@ -515,7 +526,8 @@ dc_expr = (minimum: int) -> int:
             if nodes[left].kind == .field: add_flag(int(nodes[left].a), NF_MUT)
             set_list(n, [arg])
             left = n
-            coefficient = false
+            last_call = n
+            juxt_head = false
             continue
         if op == .kw_not and dn_at + 1 < dn_tokens.len():
             inverted = dn_token_invert(dn_tokens[dn_at + 1].symbol)
@@ -544,7 +556,7 @@ dc_expr = (minimum: int) -> int:
                 n = inverted
             left = n
             compared = false
-            coefficient = false
+            juxt_head = false
             continue
         # `a ?? b`: an arithmetic fallback (`a ?? 1 + n`) has a warning of its own
         if op == .coalesce:
@@ -556,7 +568,7 @@ dc_expr = (minimum: int) -> int:
             nodes[n].b = i32(right)
             left = n
             compared = false
-            coefficient = false
+            juxt_head = false
             continue
         if dc_binary_token(dn_token_uninvert(op)) == .eof and op != .slash and op != .floor and op != .percent and op != .caret: return 0
         # (comparison chains take the reference grammar)
@@ -566,9 +578,12 @@ dc_expr = (minimum: int) -> int:
         if token.symbol == .kw_not: dn_at += 1
         right = dc_expr(if op == .caret: power else: power + 1)
         if right == 0: return 0
+        # (`a(x)^2` with the call unparenthesized: the power may take the group, juxtapose.jo)
+        powered_call = op == .caret and left == last_call
         left = dc_binary(op, left, right, pos)
+        if powered_call: add_flag(left, NF_JUXT)
         compared = chained
-        coefficient = false
+        juxt_head = false
     # These suffixes belong to this expression, but have not migrated yet.
     token = dn_tokens[dn_at]
     if not token.space and (token.symbol == .lbrack or token.symbol == .langle or token.kind == .quoted or token.kind == .rawquoted): return 0

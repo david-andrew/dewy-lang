@@ -17,7 +17,7 @@ const Duration:type = <T of real>(T * Time)
 
 ## Unit Values
 
-Juxtaposing a number with a unit multiplies them. The second and its scales are the prelude's; every other unit is imported from the library module `units`:
+Juxtaposing a number with a unit multiplies them. A unit is always written against its number, `20m` or `9.81m/s^2`: `9.81 m` is two expressions. Unit names are ordinary bindings, so a local `m` shadows the metre. The second and its scales are the prelude's; every other unit is imported from the library module `units`:
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy

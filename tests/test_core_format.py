@@ -60,7 +60,7 @@ def test_core_format_implementation_language(compiler, tmp_path):
 
 PROGRAMS = {
     'named-values': 'main=():>void=>{let f:<(left:int64 right:int64):>int64>=(x y)=>x+y printl(f(right=22 left=20))}',
-    'partial-operators': 'apply=(f:<(value:int64):>int64> x:int64)=>f(x)\nmain=():>void=>{printl(apply((*2+2)20)) let p:<(value:int64):>bool>=(not in? [1 2]) printl(p(3))}',
+    'partial-operators': 'apply=(f:<(value:int64):>int64> x:int64)=>f(x)\nmain=():>void=>{printl(apply((*2+2) 20)) let p:<(value:int64):>bool>=(not in? [1 2]) printl(p(3))}',
     'transmute': 'main=():>void=>{let bits:uint32=1065353216 printl(bits transmute float32) printl(float64(1.0) transmute uint64)}',
     'keyword-ids': '''probe=(is:int64? isnt:int64? notin:int64)=>{
 let iffy=true and not false

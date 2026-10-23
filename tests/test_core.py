@@ -2199,8 +2199,8 @@ $runtime_assert(abs(magnitudes[1]/5e-30-1.0) <? 1e-6)
 $runtime_assert(magnitudes[2] =? 0.0 and 1.0/magnitudes[2] >? 0.0)
 $runtime_assert(abs(magnitudes[3]/5e30-1.0) <? 1e-6)
 $runtime_assert(magnitudes[4] =? INF and magnitudes[5] =? INF and is_nan(magnitudes[6]))
-let zeros=cpu(.-gpu([0.0 -0.0])).data
-$runtime_assert(1.0/zeros[0] <? 0.0 and 1.0/zeros[1] >? 0.0)
+let signed_zeros=cpu(.-gpu([0.0 -0.0])).data
+$runtime_assert(1.0/signed_zeros[0] <? 0.0 and 1.0/signed_zeros[1] >? 0.0)
 $runtime_assert(sum(h) =? 16.0 and min(h) =? 2.5 and max(h) =? 5.5)
 $runtime_assert(cpu(g .>? 2.0).data =? [0.0 0.0 1.0 1.0])
 let m=gpu(reshape<float64>([1.0 2.0 3.0 4.0 5.0 6.0] 2 3))

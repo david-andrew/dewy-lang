@@ -25,7 +25,7 @@ Most infix operations have a combined-assignment spelling such as `+=`. Combined
 
 ## Juxtaposition
 
-Adjacent expressions can form several operations:
+Adjacent expressions written without whitespace can form several operations:
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
@@ -35,7 +35,21 @@ values[index]
 values...
 ```
 
-Parsing retains the meaningful call, index, and multiplication alternatives. Semantic analysis resolves the operation from the operand types and context. General juxtaposition multiplication is still a provisional implementation area, but its place in the expression grammar is settled.
+Multiplication by juxtaposition is restricted and type-directed. The eligible forms are a numeric literal before a name, member term or parenthesized group (`2x`, `2sin(x)`, `3(a+b)`, `2x^2`); a named numeric value or field route before a parenthesized group (`a(x)`, `material.k(T)`, `n(n+1)/2`); and a parenthesized scalar before a parenthesized group (`(a+1)(a-1)`). The left side must be a statically known, non-callable numeric scalar or quantity; having `__mul__` alone does not qualify. In this multiplication the group holds exactly one value: for a number `a`, `a(x y)` is an error (write `a * (x * y)`).
+
+At `head(...)` the head is classified once, before any implicit zero-argument call: a callable is a call, an eligible number is a multiplication at coefficient precedence, and a union of callable and numeric, an unresolved category, or a value that is both requires narrowing or an explicit operator. A failed call never falls back to multiplication.
+
+| Expression | Means |
+|---|---|
+| `sin(x)^2` | `(sin x)^2` |
+| numeric `a(x)^2` | `a*(x^2)` |
+| `2sin(x)^2` | `2*(sin(x)^2)` |
+| `-a(x)^2` | `-(a*x^2)` |
+| `2^3x` | `(2^3)*x` |
+| numeric `a(x)(y)^2` | `a*x*y^2` |
+| `1/2m` | `1/(2m)` |
+
+Whitespace always separates expressions, so `a b` is never a product (write `*`). A call result (`f(x)g(x)`), an indexed element (`xs[i](j)`) and a tensor (`A(x)`) are never coefficients; write `f(x) * g(x)`, `xs[i] * j` and `A*x` (or `A[x]` to index). Partial application `@a(x)` requires a callable, and a string literal after a name (`printl"hi"`) is always a call.
 
 ## Precedence
 
