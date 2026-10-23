@@ -2014,8 +2014,9 @@ fact_divisor = (s: mut FactState, n: int, a: int, b: int, modulo: bool) -> bool:
 fact_floor = (s: mut FactState, n: int, kind: int, a: int, b: int, floor: bool) -> int:
     x = fact_bound(s, a); y = fact_bound(s, b)
     if x.lo < 1: x.lo = max(x.lo, fact_relational(s, a, false))
+    # (a shift count stays below the word; a mask is any nonnegative value)
     if kind == 3 or kind == 4:
-        if y.lo < 0 or y.hi > 62: return fact_unmodeled(s, n, .unsupported)
+        if y.lo < 0 or kind == 3 and y.hi > 62: return fact_unmodeled(s, n, .unsupported)
     else if y.lo < 1: return fact_unmodeled(s, n, .unsupported)
     if x.lo < 0 and (not floor or kind == 1 or kind == 3): return fact_unmodeled(s, n, .unsupported)
     r = FactBound()

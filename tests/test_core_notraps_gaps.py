@@ -73,6 +73,16 @@ main=():>void=>{
     exit(0)
 }
 ''',
+    # `% 128` is a mask: below 128 whatever the dividend.
+    'power_of_two_modulo': '''k=(rows:array<int64> count:int64):>int64=>{
+    let total:int64=0
+    if rows.length <? 128 return 0
+    loop i in [0..count) {total+=rows[i%128]}
+    let b:uint8=((count+1)%128) as uint8
+    return total+(b as int64)
+}
+main=():>void=>exit(k([1] 3))
+''',
     # A counter that only moves down stays at most its entry value.
     'decreasing_counter': '''reverse=(@values:array<int64>):>void=>{
     let low:int64=0
