@@ -10,7 +10,7 @@ valid=(r:Range n:int64):>bool=>{
     return r.start >=? 0 and r.finish >=? r.start and r.finish <=? n
 }
 write=(@xs:array<int64> r:Range value:int64):>void=>{
-    $runtime_assert valid(r xs.length)
+    $runtime_assert r.start >=? 0 and r.finish <=? xs.length
     loop i in [r.start..r.finish) {
         xs[i]=value
     }

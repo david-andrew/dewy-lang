@@ -1,6 +1,7 @@
-alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+alphabet:string<length =? 64>="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 Invalid:type=type of error
 encode64=(input:array<uint8>):>string=> {
+    let symbols=alphabet
     let result=""
     let i=0
     loop i <? input.length  {
@@ -13,16 +14,21 @@ encode64=(input:array<uint8>):>string=> {
         if i+2 <? input.length  {
             c=input[i+2] as int64
         }
-        result="{result}{alphabet[a//4]}"
-        result="{result}{alphabet[(a%4)*16+b//16]}"
+        let s0=a//4
+        let s1=(a%4)*16+b//16
+        let s2=(b%16)*4+c//64
+        let s3=c%64
+        $runtime_assert 0 <=? s0 <? 64 and 0 <=? s1 <? 64 and 0 <=? s2 <? 64 and 0 <=? s3 <? 64
+        result="{result}{symbols[s0]}"
+        result="{result}{symbols[s1]}"
         if i+1 <? input.length  {
-            result="{result}{alphabet[(b%16)*4+c//64]}"
+            result="{result}{symbols[s2]}"
         }
         else  {
             result="{result}="
         }
         if i+2 <? input.length  {
-            result="{result}{alphabet[c%64]}"
+            result="{result}{symbols[s3]}"
         }
         else  {
             result="{result}="
@@ -45,7 +51,9 @@ decode64=(text:string):>array<uint8>|Invalid=> {
     }
     let out:array<uint8>=[]
     let i=0
-    loop i <? text.length  {
+    # (the length is a multiple of 4)
+    loop i+3 <? text.length  {
+        $runtime_assert i >=? 0
         let a=digit(text[i])
         let b=digit(text[i+1])
         let c=digit(text[i+2])

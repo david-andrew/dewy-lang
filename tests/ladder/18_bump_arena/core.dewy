@@ -1,16 +1,16 @@
 Arena:type=[bytes:array<uint8 length=64> cursor:int64=0]
-allocate=(@a:Arena size:int64 align:int64):>int64?=>{
+allocate=(@a:Arena size:int64 align:int64<(>? 0)>):>int64?=>{
     let start=((a.cursor+align-1)//align)*align
     if size <? 0 or start+size >? a.bytes.length {return none}
     a.cursor=start+size
     return start
 }
-write_word=(@a:Arena at:int64 value:uint32):>void=>{
+write_word=(@a:Arena at:int64<0 <=? at and at+4 <=? 64> value:uint32):>void=>{
     loop i in [0..4) {
         a.bytes[at+i]=((value >> (8*i)) and 255) as uint8
     }
 }
-read_word=(a:Arena at:int64):>uint32=>{
+read_word=(a:Arena at:int64<0 <=? at and at+4 <=? 64>):>uint32=>{
     let result:uint32=0
     loop i in [0..4) {
         result=result or ((a.bytes[at+i] as uint32) << (8*i))

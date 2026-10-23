@@ -1,6 +1,6 @@
 # Length, key, value, checksum; a record commits only after its checksum.
-encode=(key:int64 value:int64):>array<uint8>=> {
-    return [4 (key as uint8) (value as uint8) ((key+value+4)%256 as uint8)]
+encode=(key:int64<0 <=? key and key <=? 255> value:int64<0 <=? value and value <=? 255>):>array<uint8>=> {
+    return [4 (key as uint8) (value as uint8) (((key+value+4) and 255) as uint8)]
 }
 recover=(bytes:array<uint8>):>dict<int64 int64>=> {
     let store:dict<int64 int64>=[]
@@ -10,7 +10,7 @@ recover=(bytes:array<uint8>):>dict<int64 int64>=> {
         if length not=? 4  {
             break
         }
-        if bytes.length-offset <? length  {
+        if offset+length >? bytes.length  {
             break
         }
         let key=bytes[offset+1] as int64
@@ -69,6 +69,7 @@ main=():>void=> {
     assert(full.get(1) =? 30)
     assert(full.get(3) =? 40)
     let corrupt=log
+    $runtime_assert corrupt.length >? 11
     corrupt[11]=0
     let recovered=recover(corrupt)
     assert(recovered.get(1) =? 10)

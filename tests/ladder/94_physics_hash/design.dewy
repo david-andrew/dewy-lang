@@ -41,7 +41,7 @@ contacts=(bodies:array<Body>):>array<int64>=>{
                 let bucket=key(cx+dx cy+dy)
                 if bucket not in? grid continue
                 loop j in grid[bucket] {
-                    if j <=? i continue
+                    if j <=? i or j >=? bodies.length continue
                     if near(body bodies[j]) {
                         pairs.push(i*1000+j)
                     }
@@ -86,6 +86,7 @@ integrate=(@body:Body):>void=>{
 resolve=(@world:World pair:int64):>void=>{
     let i=pair//1000
     let j=pair%1000
+    $runtime_assert 0 <=? i and i <? world.bodies.length and j <? world.bodies.length
     let a=world.bodies[i]
     let b=world.bodies[j]
     let dx=a.x-b.x
@@ -124,8 +125,8 @@ valid=(world:World):>bool=>{
     return true
 }
 step=(@world:World):>void=>{
-    loop i in [0..world.bodies.length) {
-        integrate(@world.bodies[i])
+    loop @body in world.bodies {
+        integrate(@body)
     }
     let pairs=contacts(world.bodies)
     $runtime_assert pairs =? brute(world.bodies)
@@ -140,8 +141,8 @@ selfcheck=():>void=>{
     let initial=energy(world)
     step(@world)
     $runtime_assert energy(world) =? initial
-    $runtime_assert saved.bodies[0].x =? 10
-    $runtime_assert world.bodies[0].x =? 9
+    $runtime_assert saved.bodies.length >? 0 and saved.bodies[0].x =? 10
+    $runtime_assert world.bodies.length >? 0 and world.bodies[0].x =? 9
     $runtime_assert contacts([]).length =? 0
     $runtime_assert brute([]).length =? 0
     let a=Body[0 16 16 1 0 5]
@@ -167,6 +168,7 @@ selfcheck=():>void=>{
 boundaries=():>void=>{
     let one=World[[Body[0 123 123 1 1 5]] 0]
     step(@one)
+    $runtime_assert one.bodies.length =? 1
     $runtime_assert one.bodies[0].x =? 122
     $runtime_assert one.bodies[0].y =? 122
     $runtime_assert one.bodies[0].vx =? -1

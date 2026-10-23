@@ -14,6 +14,7 @@ fft=(input:array<Complex> inverse:bool):>array<Complex>=> {
         }
         j=j xor bit
         if i <? j  {
+            $runtime_assert j <? data.length
             let temp=data[i]
             data[i]=data[j]
             data[j]=temp
@@ -30,10 +31,13 @@ fft=(input:array<Complex> inverse:bool):>array<Complex>=> {
         loop start <? n  {
             let factor=Complex[1.0 0.0]
             loop offset in [0..width//2)  {
-                let even=data[start+offset]
-                let odd=mul_c(data[start+offset+width//2] factor)
-                data[start+offset]=add_c(even odd)
-                data[start+offset+width//2]=sub_c(even odd)
+                let low=start+offset
+                let high=low+width//2
+                $runtime_assert 0 <=? low and low <? data.length and 0 <=? high and high <? data.length
+                let even=data[low]
+                let odd=mul_c(data[high] factor)
+                data[low]=add_c(even odd)
+                data[high]=sub_c(even odd)
                 factor=mul_c(factor root)
             }
             start+=width

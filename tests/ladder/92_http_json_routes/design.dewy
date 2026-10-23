@@ -26,7 +26,7 @@ parse_request=(wire:string):>Request?=>{
     let lines:array<string>=[]
     loop source_line in wire.split("\n") {
         if source_line.length >? 0 and source_line[source_line.length-1] =? '\r' {
-            lines.push(source_line[0..source_line.length-1))
+            lines.push(source_line[$clamp 0..source_line.length-1))
         } else {
             lines.push(source_line)
         }
@@ -50,7 +50,7 @@ parse_request=(wire:string):>Request?=>{
             break
         }
     }
-    if separator <? 0 return none
+    if separator <? 0 or separator >=? lines.length return none
     let body=""
     loop i in [separator+1..lines.length) {
         if i >? separator+1 body="{body}\n"
@@ -61,7 +61,8 @@ parse_request=(wire:string):>Request?=>{
 }
 digit_index=(text:string):>int64<i => i >=? 0 and i <? 10> | none=>{
     loop digit in [0..10) {
-        if text =? "{digit}" return digit
+        let found:int64<i => i >=? 0 and i <? 10>=digit
+        if text =? "{digit}" return found
     }
     return none
 }
@@ -81,7 +82,9 @@ integer=(text:string):>int64<i => i in? -1000009..1000009> | none=>{
         if value >? 100000 return none
         value=value*10+d
     }
-    return value*sign
+    $runtime_assert value >=? 0 and value <=? 1000009
+    let signed:int64<i => i in? -1000009..1000009>=if sign <? 0 -value else value
+    return signed
 }
 json_value=(body:string):>int64<i => i in? -1000009..1000009> | none=>{
     # Deliberate API schema: exactly one integer field, canonical whitespace.
@@ -212,16 +215,17 @@ boundaries=():>void=>{
 request_length=(buffer:string largest:int64=65536):>int64 | none=>{
     # (positions count graphemes, as 92's lengths do: "\r\n" is one)
     let blank="\r\n\r\n"
-    let head=buffer.find(blank)
-    if head is? Missing {
+    let found=buffer.find(blank)
+    if found is? Missing {
         blank="\n\n"
-        head=buffer.find(blank)
+        found=buffer.find(blank)
     }
-    if head is? Missing return if buffer.length >? largest largest else none
+    if found is? Missing return if buffer.length >? largest largest else none
+    let head:int64=found
     let declared:int64=0
     loop line in buffer[$clamp 0..head).split("\n") {
         let prefix="Content-Length: "
-        if line.startswith(prefix) declared=integer(line[$clamp prefix.length..].trim_end()) ?? 0
+        if line.startswith(prefix) and line.length >=? prefix.length declared=integer(line[prefix.length..].trim_end()) ?? 0
     }
     let total=head+blank.length+max(declared 0)
     if total >? largest return largest
@@ -253,7 +257,11 @@ answer=(@service:Service socket:net.TcpStream):>void | net.NetError | Canceled=>
                 continue
             }
         }
-        let request=if length is? int64 buffer[$clamp 0..length) else buffer
+        let request=buffer
+        if length is? int64 {
+            let size:int64=length
+            request=buffer[$clamp 0..size)
+        }
         let response=serve(@service request)
         net.tcp_send(socket "HTTP/1.1 {response.status} {reason(response.status)}\r\nContent-Length: {response.body.length}\r\nConnection: close\r\n\r\n{response.body}") or_throw
         return

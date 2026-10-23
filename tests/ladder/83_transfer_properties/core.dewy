@@ -18,6 +18,7 @@ receive=(message:Message):>int64=>{
     return checksum
 }
 replace=(@message:Message):>void=>{
+    $runtime_assert message.payload.length >? 0
     message.payload[0]=-1
     message.sender=-1
 }
@@ -30,8 +31,8 @@ main=():>void=>{
         replace(@message)
         $runtime_assert saved.sender =? sender
         $runtime_assert saved.sequence =? 16
-        $runtime_assert saved.payload[0] =? sender*100
-        $runtime_assert message.payload[0] =? -1
+        $runtime_assert saved.payload.get(0) =? sender*100
+        $runtime_assert message.payload.get(0) =? -1
         $runtime_assert message.sender =? -1
     }
     let empty=make(1 0)
@@ -40,12 +41,13 @@ main=():>void=>{
     $runtime_assert receive(one) =? 300
     let nested:array<Message>=[make(1 2) make(2 2)]
     let snapshot=nested.copy()
+    $runtime_assert nested[0].payload.length >? 0
     nested[0].payload[0]=0
-    $runtime_assert snapshot[0].payload[0] =? 100
-    $runtime_assert snapshot[1].payload[0] =? 200
+    $runtime_assert snapshot[0].payload.get(0) =? 100
+    $runtime_assert snapshot[1].payload.get(0) =? 200
     $runtime_assert receive(snapshot[0]) =? 201
     $runtime_assert receive(snapshot[1]) =? 401
-    $runtime_assert nested[0].payload[0] =? 0
+    $runtime_assert nested[0].payload.get(0) =? 0
     $runtime_assert snapshot.length =? 2
     $runtime_assert empty.payload.length =? 0
     $runtime_assert receive(make(0 0)) =? 0

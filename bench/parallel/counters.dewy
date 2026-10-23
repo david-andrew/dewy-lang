@@ -5,8 +5,8 @@ main=(args:array<string>)=>{
  let padded=args.length >? 2
  let counters=__counter_cells(padded)
  let start=clock()
- parallel i in [0..4) {
-  loop j in [0..n) {counters[i].add(1 'relaxed')}
+ parallel cell in counters {
+  loop j in [0..n) {cell.add(1 'relaxed')}
  }
  let checksum:int64=0
  loop cell in counters {checksum+=cell.load()}

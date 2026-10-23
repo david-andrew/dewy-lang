@@ -43,7 +43,7 @@ wipe=(@buffer:array<uint8>):>void=>{
 }
 
 # Little-endian word loads and stores at public offsets.
-load32=(b:array<uint8> at:int64):>uint32=>(b[at] as uint32) or ((b[at+1] as uint32) << 8) or ((b[at+2] as uint32) << 16) or ((b[at+3] as uint32) << 24)
+load32=(b:array<uint8> at:int64<0 <=? at and at+4 <=? b.length>):>uint32=>(b[at] as uint32) or ((b[at+1] as uint32) << 8) or ((b[at+2] as uint32) << 16) or ((b[at+3] as uint32) << 24)
 
 store32=(@out:array<uint8> word:uint32):>void=>{
     out.push((word and 255) as uint8)

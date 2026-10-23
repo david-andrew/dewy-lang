@@ -44,12 +44,13 @@ main=():>void=>{
     $runtime_assert sum(nested.values) =? 30
     $runtime_assert kept.length =? 16
     $runtime_assert kept[0].id =? 1
-    $runtime_assert kept[0].values[0] =? 0
+    $runtime_assert kept[0].values.get(0) =? 0
     $runtime_assert kept[15].id =? 16
-    $runtime_assert kept[15].values[15] =? 225
+    $runtime_assert kept[15].values.get(15) =? 225
     let saved=kept.copy()
+    $runtime_assert kept[0].values.length >? 0
     kept[0].values[0]=99
-    $runtime_assert saved[0].values[0] =? 0
+    $runtime_assert saved[0].values.get(0) =? 0
     $runtime_assert sum(saved[3].values) =? 14
     $runtime_assert sum(saved[7].values) =? 140
     $runtime_assert sum(saved[15].values) =? 1240

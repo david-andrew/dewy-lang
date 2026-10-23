@@ -17,6 +17,7 @@ struct RefTerm:
     value: int = 0
     unsigned: bool = false
     path: int[]
+    offset: int = 0 # a constant added to the term (`at + 4`); atoms keep it on their right side
 
 struct RefAtom:
     op: Tok
@@ -241,6 +242,7 @@ ref_term_less = (a: RefTerm, b: RefTerm) -> bool:
     if a.kind != b.kind: return a.kind < b.kind
     if a.unsigned != b.unsigned: return not a.unsigned
     if a.value != b.value: return a.value < b.value
+    if a.offset != b.offset: return a.offset < b.offset
     loop i in [0..min(a.path.len(), b.path.len())):
         if a.path[i] != b.path[i]: return a.path[i] < b.path[i]
     a.path.len() < b.path.len()
@@ -325,7 +327,27 @@ ref_term = (n: int, binder: int) -> RefTerm:
             return RefTerm(3, l)
         fatal(nodes[n].pos, "unsupported refinement term '{name_of(name)}'")
     if k == .int_lit: return RefTerm(1, nodes[n].ival, has_flag(n, NF_U64))
-    if k == .unary and nodes[n].op == i32(int(Tok.minus)):
+    # A constant offset (`at + 4`, `stop - 1`): the difference atom `x - y <= c`
+    # the facts already keep. Only a literal or constant may be added.
+    if k == .binary and (nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.minus))):
+        left = ref_term(int(nodes[n].a), binder)
+        right = ref_term(int(nodes[n].b), binder)
+        minus = nodes[n].op == i32(int(Tok.minus))
+        if left.unsigned or right.unsigned or is_int(refine_base_type) and not types[representation_type(refine_base_type)].sign:
+            fatal(nodes[n].pos, "a refinement offset needs a signed integer representation")
+        if right.kind == 1 and left.kind == 1:
+            left.value = if minus: left.value - right.value else: left.value + right.value
+            if left.value < -4294967296 or left.value > 4294967296: fatal(nodes[n].pos, "refinement offset is too large")
+            return left
+        if right.kind == 1 or left.kind == 1 and not minus:
+            term = if right.kind == 1: left else: right
+            c = if right.kind == 1: right.value else: left.value
+            if minus: c = -c
+            if term.kind == 4 or c < -4294967296 or c > 4294967296 or term.offset + c < -4294967296 or term.offset + c > 4294967296: fatal(nodes[n].pos, "unsupported refinement offset")
+            term.offset += c
+            return term
+        fatal(nodes[n].pos, "unsupported refinement term; only a constant may be added to a bound")
+
         term = ref_term(int(nodes[n].a), binder)
         if term.kind != 1 or term.unsigned: fatal(nodes[n].pos, "unsupported refinement bound")
         term.value = -term.value
@@ -354,7 +376,7 @@ ref_term = (n: int, binder: int) -> RefTerm:
                 bound = fact_domain(ty)
                 return RefTerm(1, if member == "max": bound.hi else: bound.lo)
         term = ref_term(base, binder)
-        if term.kind == 1 or term.kind == 4: fatal(nodes[n].pos, "refinement projection requires a value")
+        if term.kind == 1 or term.kind == 4 or term.offset != 0: fatal(nodes[n].pos, "refinement projection requires a value")
         term.path.push(if name_of(int(nodes[n].name)) == "length": -1 else: int(nodes[n].name))
         return term
     fatal(nodes[n].pos, "unsupported refinement term; expected a scalar binding or integer bound")
@@ -366,11 +388,22 @@ ref_add = (op0: Tok, a0: RefTerm, b0: RefTerm, out: mut RefAtom[]):
         a = b0; b = a0
         op = if op == .gt: Tok.lt else: Tok.le
     if op == .eq:
-        out.push(RefAtom(.le, a, b))
-        out.push(RefAtom(.le, b, a))
+        out.push(ref_offset_right(RefAtom(.le, a, b)))
+        out.push(ref_offset_right(RefAtom(.le, b, a)))
     else:
         if op == .ne and ref_term_less(b, a): a = b0; b = a0
-        out.push(RefAtom(op, a, b))
+        out.push(ref_offset_right(RefAtom(op, a, b)))
+
+# `a + x op b + y` is `a op b + (y - x)`: one canonical spelling per atom, and a
+# literal side folds its offset into its value.
+ref_offset_right = (atom0: RefAtom) -> RefAtom:
+    atom = atom0
+    atom.b.offset -= atom.a.offset
+    atom.a.offset = 0
+    if atom.b.kind == 1:
+        atom.b.value += atom.b.offset
+        atom.b.offset = 0
+    atom
 
 ref_atoms = (n: int, binder: int, out: mut RefAtom[], depth: int = 0):
     if depth > 32 or out.len() >= 32: fatal(nodes[n].pos, "refinement predicate budget exhausted")
@@ -562,6 +595,15 @@ ref_value = (term: RefTerm, self: int, args: int[], base: int, s: mut FactState)
         value = fact_read(s, e)
     else if term.kind != 0: fatal(-1, "unresolved generic refinement bound")
     value = ref_project(term, value, s)
+    if value != 0 and term.offset != 0:
+        # (a mathematical sum: exact rows, and an interval only where it fits)
+        b = fact_bound(s, value)
+        shifted = FactBound()
+        if b.lo != FACT_MIN and b.hi != FACT_MAX and fact_add_fits(b.lo, term.offset) and fact_add_fits(b.hi, term.offset): shifted = FactBound(b.lo + term.offset, b.hi + term.offset)
+        sum = fact_new(s, shifted, FactTerm(type = T_INT))
+        fact_difference(s, sum, value, term.offset, 0, 16)
+        fact_difference(s, value, sum, -term.offset, 0, 16)
+        return sum
     if value != 0 and term.path.len() > 0 and term.path[term.path.len() - 1] == -1 and representation_type(base) == T_U64:
         # A length bounding a uint64: its interval in the biased order.
         b = fact_bound(s, value)
@@ -685,21 +727,32 @@ ref_gen_check = (n: int, self: int, args: int[], arg_types: int[]):
         if right == "": right = "the bound"
         seen_left = if atom.a.kind == 1: "" else: left
         seen_right = if atom.b.kind == 1: "" else: right
-        first = a; second = b
+        # (`a op b + c`: the right side's observed value is the sum)
+        c = atom.b.offset
+        sum = if c != 0: e_bin(.add, VI, b, e_iconst(c)) else: b
+        first = a; second = sum
         relation = atom.op
         if atom.b.kind == 0 and atom.a.kind != 0 and (relation == .lt or relation == .le):
             text = left; left = right; right = text
             text = seen_left; seen_left = seen_right; seen_right = text
-            first = b; second = a
+            first = sum; second = a
             relation = if relation == .lt: Tok.gt else: Tok.ge
         message = "refinement failed: `{left} {wit_op(relation)} {right}`"
         if let width = ref_narrowing.get(n): message = "integer overflow: value does not fit {dt(width)}"
         op = if atom.op == .lt: Op.lts else if atom.op == .le: Op.les else: Op.ne
-        if unsigned and atom.op != .ne:
-            # Bias both operands for an exact unsigned comparison on every target.
-            a = e_bin(.xor, VI, a, e_iconst(FACT_MIN))
-            b = e_bin(.xor, VI, b, e_iconst(FACT_MIN))
-        condition = e_bin(op, VI, a, b)
+        condition = 0
+        if c != 0:
+            # Exactly, without comparing a wrapped word: a sum past int64
+            # holds (upward) or fails (downward). Offsets are signed only.
+            past = if c > 0: e_bin(.lts, VI, e_iconst(FACT_MAX - c), b) else: e_bin(.lts, VI, b, e_iconst(FACT_MIN - c))
+            compared = e_bin(op, VI, a, sum)
+            condition = if c > 0 or atom.op == .ne: e_bin(.or_, VI, past, compared) else: e_bin(.and_, VI, e_bin(.eq, VI, past, e_iconst(0)), compared)
+        else:
+            if unsigned and atom.op != .ne:
+                # Bias both operands for an exact unsigned comparison on every target.
+                a = e_bin(.xor, VI, a, e_iconst(FACT_MIN))
+                b = e_bin(.xor, VI, b, e_iconst(FACT_MIN))
+            condition = e_bin(op, VI, a, b)
         iff(e_bin(.eq, VI, condition, e_iconst(0)))
         e_call_nr(rt("__requirement_fail"), [e_daddr(str_data(message)), e_daddr(loc_data(nodes[n].pos)), e_daddr(str_data(seen_left)), first, e_daddr(str_data(seen_right)), second], -1)
         endc()

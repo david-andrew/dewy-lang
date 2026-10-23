@@ -2,7 +2,7 @@
 import netplay
 
 Pad:type=[dx:int64=0 fire:bool=false]
-World:type=[positions:array<int64>=[0 0] scores:array<int64>=[0 0] hits:int64=0]
+World:type=[positions:array<int64 length=2>=[0 0] scores:array<int64 length=2>=[0 0] hits:int64=0]
 Simulation:type=[
     left:netplay.Session<World Pad>
     right:netplay.Session<World Pad>
@@ -13,6 +13,7 @@ Simulation:type=[
 # Each invocation owns its value; writing a player detaches a shared snapshot.
 step=(world:World pads:array<Pad>):>World=>{
     let next=world
+    $runtime_assert pads.length >=? 2
     loop player in [0..2) {
         next.positions[player]+=pads[player].dx
         if pads[player].fire and abs(next.positions[player]-next.positions[1-player])<?5 {

@@ -19,6 +19,7 @@ ratio=(n:int64 d:int64):>Rat=>{
         d=-d
     }
     let divisor=gcd(n d)
+    $runtime_assert divisor >? 0
     return Rat[n//divisor d//divisor]
 }
 plus=(a:Rat b:Rat):>Rat=>ratio(a.n*b.d+b.n*a.d a.d*b.d)

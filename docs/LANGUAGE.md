@@ -721,9 +721,10 @@ one-direction comparison chains, scalar exclusion (`int64 & ~0`), and membership
 supported. Bounds may use integer literals, fixed-width `.min`/`.max`, other
 scalar value parameters of the same representation, an array or string
 parameter's length (`i:uint64<(<? b.length)>`, `n:uint64<(<=? text.length)>`), or
-stable local bindings. A string is refined by its length in graphemes
+stable local bindings, and on a signed integer each may add or subtract a
+constant (`at:int64<0 <=? at and at+4 <=? b.length>`). A string is refined by its length in graphemes
 (`nonempty = string<length >? 0>`); an ASCII literal's length is known when compiling.
-Predicates cannot contain calls or arbitrary arithmetic.
+Predicates cannot contain calls or other arithmetic.
 
 An integer literal in a type position is its singleton type, and a union of
 integer singletons is an `int64` whose value set is its invariant: `s:-1|1`,

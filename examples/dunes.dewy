@@ -98,6 +98,20 @@ let wind_id = 0
 
 ground=(x: float64 z: float64):>float64=>dune_height(x z)
 
+# each link trails the one before it, fluttering in the wind
+follow=(chain: array<vec3> anchor: vec3 count: int64 dt: float64):>array<vec3>=>{
+    loop chain.length <? count {chain.push(chain.get(chain.length - 1) ?? anchor)}
+    if chain.length =? 0 {return chain}
+    chain[0] = anchor
+    loop k in [1..chain.length) {
+        let d = chain[k] - chain[k - 1]
+        let l = length(d)
+        let dir = d / max(l 0.001)
+        let flutter = vec3(float32(sin(t * 7.0 + float64(k)) * 0.04) 0.02 float32(cos(t * 5.0 + float64(k)) * 0.04))
+        chain[k] = chain[k - 1] + normalize(dir + vec3(0.25 0.05 0.1) * float32(dt) * 10.0 + flutter) * 0.32
+    }
+    chain
+}
 update=(dt: float64)=>{
     t += dt
     intro -= dt
@@ -165,20 +179,11 @@ update=(dt: float64)=>{
     if scarf.length =? 0 {
         loop k in [0..scarf_len) {scarf.push(anchor)}
     }
-    loop scarf.length <? min(scarf_len MAX_SCARF) {scarf.push(scarf[scarf.length - 1])}
-    scarf[0] = anchor
-    loop k in [1..scarf.length) {
-        let d = scarf[k] - scarf[k - 1]
-        let l = length(d)
-        let dir = d / max(l 0.001)
-        let flutter = vec3(float32(sin(t * 7.0 + float64(k)) * 0.04) 0.02 float32(cos(t * 5.0 + float64(k)) * 0.04))
-        scarf[k] = scarf[k - 1] + normalize(dir + vec3(0.25 0.05 0.1) * float32(dt) * 10.0 + flutter) * 0.32
+    scarf = follow(scarf anchor min(scarf_len MAX_SCARF) dt)
     # glyphs
-    }
-    loop glyph_index in [0..glyphs.length) {
-        if glyphs[glyph_index].taken {continue}
-        if length(glyphs[glyph_index].pos - (pos + vec3(0 1 0))) <? 1.6 {
-            glyphs[glyph_index].taken = true
+    loop @glyph in glyphs {
+        if not glyph.taken and length(glyph.pos - (pos + vec3(0 1 0))) <? 1.6 {
+            glyph.taken = true
             collected += 1
             scarf_len += 3
             energy = 1.0
@@ -224,8 +229,9 @@ draw=()=>{
         draw_mesh(eye body * translation(vec3(float32(sx) 1.47 0.18)) rgb(1 0.95 0.8) emissive = 3.0 cast_shadow = false)
     }
     if scarf.length >? 1 {
+        let tail = scarf[scarf.length - 1]
         let pts = scarf
-        loop pts.length <? MAX_SCARF {pts.push(pts[pts.length - 1])}
+        loop pts.length <? MAX_SCARF {pts.push(tail)}
         update_mesh(@scarf_mesh ribbon_vertices(pts 0.15 t))
         let glow = float32(0.4 + 0.6 * energy)
         draw_mesh(scarf_mesh mat4() rgb(0.98 * glow 0.72 * glow 0.28 * glow) emissive = 0.9 * float64(glow) cast_shadow = false)

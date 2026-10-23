@@ -21,7 +21,8 @@ main=():>void=>{
     let quoted="name,value\n\"east, coast\",7\n"
     $runtime_assert (roundtrip(input))
     $runtime_assert (roundtrip(quoted))
-    $runtime_assert (csv_rows(quoted)[1][0] =? "east, coast")
+    let rows=csv_rows(quoted)
+    $runtime_assert (rows.length >? 1 and rows[1].length >? 0 and rows[1][0] =? "east, coast")
     $runtime_assert (summarize(input) =? 12.0)
     $runtime_assert (summarize("region,units,price\n") =? 0.0)
     let rows=csv_rows(input)

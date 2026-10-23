@@ -15,7 +15,7 @@ find=(xs:array<int64> needle:int64):>int64 | none=>{
 read_found=(xs:array<int64> needle:int64):>int64=>{
     let index=find(xs needle)
     if index is? int64 {
-        return xs[index]
+        return xs.get(index) ?? -1
     }
     return -1
 }
@@ -32,6 +32,7 @@ main=():>void=>{
     let index=append(@xs 999)
     $runtime_assert index <? xs.length
     $runtime_assert xs[index] =? 999
+    let last=xs[index]
     $runtime_assert saved.length =? 32
     $runtime_assert read_found(saved 49) =? 49
     $runtime_assert read_found(saved 999) =? -1
@@ -58,5 +59,5 @@ main=():>void=>{
     $runtime_assert read_found(saved 16) =? 16
     $runtime_assert read_found(saved 25) =? 25
     $runtime_assert read_found(saved 36) =? 36
-    printl("{signature} {xs[index]}")
+    printl("{signature} {last}")
 }

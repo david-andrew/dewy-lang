@@ -168,6 +168,7 @@ list=(store:Store filter:Filter):>Page=>{
     }
     let start=min(filter.offset selected.length)
     let stop=min(start+filter.limit selected.length)
+    $runtime_assert 0 <=? start and start <=? stop and stop <=? selected.length
     return Page[selected.length filter.offset filter.limit selected[start..stop)]
 }
 

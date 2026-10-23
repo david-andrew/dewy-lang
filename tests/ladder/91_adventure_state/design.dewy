@@ -59,6 +59,7 @@ move=(@world:World map:dict<string Room> direction:string):>string=>{
     world.room=next
     if next not in? world.flags {
         world.flags.push(next)
+        $runtime_assert world.score <=? int64.max-1
         world.score+=1
     }
     return "entered {next}"
@@ -67,6 +68,7 @@ take=(@world:World map:dict<string Room> item:string):>string=>{
     if item in? world.inventory return "already held"
     if not item_here(map[world.room] item) return "not here"
     world.inventory.push(item)
+    $runtime_assert world.score <=? int64.max-5
     world.score+=5
     return "took {item}"
 }
@@ -75,12 +77,14 @@ use=(@world:World item:string):>string=>{
     if item =? "key" and world.room =? "study" {
         if "unlocked" in? world.flags return "already unlocked"
         world.flags.push("unlocked")
+        $runtime_assert world.score <=? int64.max-10
         world.score+=10
         return "vault unlocked"
     }
     if item =? "gem" and world.room =? "gate" {
         if "coin" not in? world.inventory return "toll required"
         world.won=true
+        $runtime_assert world.score <=? int64.max-100
         world.score+=100
         return "escaped"
     }
@@ -96,6 +100,7 @@ command=(@world:World map:dict<string Room> source:string):>string=>{
     if tokens.length not=? 2 return "syntax"
     let verb=tokens[0]
     let arg=tokens[1]
+    $runtime_assert world.turns <=? int64.max-1
     world.turns+=1
     if verb =? "go" return move(@world map arg)
     if verb =? "take" return take(@world map arg)

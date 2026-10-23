@@ -79,6 +79,7 @@ handshake=(secret:Bytes32 own_public:Bytes32 peer_public:Bytes32 initiator:bool)
     let info=[bytes("dewy channel v1")... (first as array<uint8>)... (second as array<uint8>)...]
     let keys=hkdf([] shared as array<uint8> info 64)
     if keys is? error return HandshakeFailed
+    $runtime_assert keys.length =? 64
     let a:Key=keys[0..32)
     let b:Key=keys[32..64)
     return if initiator Channel[a b] else Channel[b a]

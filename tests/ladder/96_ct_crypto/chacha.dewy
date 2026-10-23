@@ -18,7 +18,7 @@ const BLOCK:int64=64
 
 rotl=(x:uint32 n:int64):>uint32 & no_effects=>(x << n) or (x >> (32-n))
 
-quarter=(@s:State a:int64 b:int64 c:int64 d:int64):>void=>{
+quarter=(@s:State a:int64<0 <=? a <? 16> b:int64<0 <=? b <? 16> c:int64<0 <=? c <? 16> d:int64<0 <=? d <? 16>):>void=>{
     s[a]+=s[b]
     s[d]=rotl(s[d] xor s[a] 16)
     s[c]+=s[d]
@@ -36,11 +36,13 @@ setup=(key:Key counter:uint32 nonce:Nonce):>State=>{
         s[i]=SIGMA[i]
     }
     let k=key as array<uint8>
+    $runtime_assert k.length =? 32
     loop i in [0..8) {
         s[4+i]=load32(k 4*i)
     }
     s[12]=counter
     let n=nonce as array<uint8>
+    $runtime_assert n.length =? 12
     loop i in [0..3) {
         s[13+i]=load32(n 4*i)
     }
@@ -94,11 +96,12 @@ xor_stream=(key:Key counter:uint32 nonce:Nonce data:array<uint8>):>array<uint8>=
     let at=0
     loop at <? data.length {
         let words=permute(state)
-        let take=min(BLOCK data.length-at)
-        loop i in [0..take) {
+        let stop=at+BLOCK
+        if stop >? data.length stop=data.length
+        loop j in [at..stop) and i in [0..BLOCK) {
             let word=words[i//4]
             let byte=((word >> (8*(i%4))) and 255) as uint8
-            out.push(data[at+i] xor byte)
+            out.push(data[j] xor byte)
         }
         state[12]+=1
         at+=BLOCK
@@ -112,11 +115,13 @@ xor_stream=(key:Key counter:uint32 nonce:Nonce data:array<uint8>):>array<uint8>=
 NonceX:type=array<uint8 length=24>
 
 hchacha20=(key:Key nonce:array<uint8>):>Key=>{
+    $runtime_assert nonce.length >=? 16
     let s:State=[]
     loop i in [0..4) {
         s[i]=SIGMA[i]
     }
     let k=key as array<uint8>
+    $runtime_assert k.length =? 32
     loop i in [0..8) {
         s[4+i]=load32(k 4*i)
     }
@@ -125,12 +130,14 @@ hchacha20=(key:Key nonce:array<uint8>):>Key=>{
     }
     let r=rounds(s)
     let out:array<uint8>=[]
-    loop i in [0 1 2 3 12 13 14 15] {
-        let w=r[i]
-        out.push((w and 255) as uint8)
-        out.push(((w >> 8) and 255) as uint8)
-        out.push(((w >> 16) and 255) as uint8)
-        out.push((w >> 24) as uint8)
+    loop row in [0..2) {
+        loop i in [0..4) {
+            let w=r[12*row+i]
+            out.push((w and 255) as uint8)
+            out.push(((w >> 8) and 255) as uint8)
+            out.push(((w >> 16) and 255) as uint8)
+            out.push((w >> 24) as uint8)
+        }
     }
     return out
 }

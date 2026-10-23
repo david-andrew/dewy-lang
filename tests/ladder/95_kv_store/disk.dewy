@@ -44,6 +44,7 @@ Disk:type=[
             # Only a prefix of the bytes reaches the disk.
             let data=bytes(text)
             let keep=data.length*armed.thousandths//1000
+            $runtime_assert 0 <=? keep and keep <=? data.length
             let prefix=data[0..keep)
             let existing=read(name)
             if existing is? (error|Canceled) return DiskError["cannot reread {name}"]

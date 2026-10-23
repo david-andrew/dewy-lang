@@ -29,7 +29,7 @@ evaluate=(orders:array<Order> customers:array<Customer> minimum:int64):>array<Ag
     loop i in [1..output.length)  {
         let item=output[i]
         let j=i
-        loop j >? 0  {
+        loop j >? 0 and j <? output.length  {
             let before=output[j-1]
             if before.revenue >? item.revenue  {
                 break
@@ -38,9 +38,9 @@ evaluate=(orders:array<Order> customers:array<Customer> minimum:int64):>array<Ag
                 break
             }
             output[j]=before
+            output[j-1]=item
             j-=1
         }
-        output[j]=item
     }
     return output
 }

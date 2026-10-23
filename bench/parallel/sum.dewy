@@ -1,7 +1,11 @@
 from p"../harness.jo" import clock, size_argument
 block_sum=(a:array<int64> block:int64):>int64=>{
     let s:int64=0
-    loop i in [block*4096..min((block+1)*4096 a.length)) {s+=a[i]}
+    if block <? 0 or block >? a.length return 0
+    let first=block*4096
+    let last=first+4096
+    if last >? a.length {last=a.length}
+    loop i in [first..last) {s+=a[i]}
     return s
 }
 main=(args:array<string>):>void=>{

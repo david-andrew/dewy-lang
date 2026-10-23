@@ -2,8 +2,10 @@
 Link:type=[key:int64 value:int64 prev:int64 next:int64]
 Cache:type=[index:dict<int64 int64> links:array<Link> free:array<int64> head:int64 tail:int64 capacity:int64]
 unlink=(@c:Cache i:int64):>void=> {
+    $runtime_assert (0 <=? i and i <? c.links.length)
     let left=c.links[i].prev
     let right=c.links[i].next
+    $runtime_assert (left <? c.links.length and right <? c.links.length)
     if left >=? 0  {
         c.links[left].next=right
     }
@@ -22,6 +24,7 @@ touch=(@c:Cache i:int64):>void=> {
         return
     }
     unlink(@c i)
+    $runtime_assert (0 <=? i and i <? c.links.length and c.tail <? c.links.length)
     c.links[i].prev=c.tail
     c.links[i].next=-1
     if c.tail >=? 0  {
@@ -34,11 +37,12 @@ touch=(@c:Cache i:int64):>void=> {
 }
 get=(@c:Cache key:int64):>int64?=> {
     let slot=c.index.get(key)
-    if slot is? none  {
+    if slot is? none or slot <? 0 or slot >=? c.links.length  {
         return none
     }
+    let value=c.links[slot].value
     touch(@c slot)
-    return c.links[slot].value
+    return value
 }
 put=(@c:Cache key:int64 value:int64):>void=> {
     if c.capacity =? 0  {
@@ -46,6 +50,7 @@ put=(@c:Cache key:int64 value:int64):>void=> {
     }
     let existing=c.index.get(key)
     if existing is? int64  {
+        $runtime_assert (0 <=? existing and existing <? c.links.length)
         c.links[existing].value=value
         touch(@c existing)
         return
@@ -53,6 +58,7 @@ put=(@c:Cache key:int64 value:int64):>void=> {
     let slot=0
     if c.index.length =? c.capacity  {
         slot=c.head
+        $runtime_assert (0 <=? slot and slot <? c.links.length)
         c.index.pop(c.links[slot].key)
         unlink(@c slot)
     }
@@ -60,6 +66,7 @@ put=(@c:Cache key:int64 value:int64):>void=> {
         slot=c.links.length
         c.links.push(Link[0 0 -1 -1])
     }
+    $runtime_assert (0 <=? slot and slot <? c.links.length and c.tail <? c.links.length)
     c.links[slot]=Link[key value c.tail -1]
     if c.tail >=? 0  {
         c.links[c.tail].next=slot
@@ -86,6 +93,7 @@ main=():>void=> {
     let keys:array<int64>=[]
     let cursor=c.head
     loop cursor >=? 0  {
+        $runtime_assert (cursor <? c.links.length)
         keys.push(c.links[cursor].key)
         cursor=c.links[cursor].next
     }

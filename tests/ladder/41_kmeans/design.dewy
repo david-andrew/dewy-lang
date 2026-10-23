@@ -1,6 +1,6 @@
 Point:type=[x:float64 y:float64]
 squared=(a:Point b:Point):>float64=>(a.x-b.x)^2+(a.y-b.y)^2
-nearest=(point:Point centers:array<Point>):>int64=> {
+nearest=(point:Point centers:array<Point length >? 0>):>int64<r => 0 <=? r and r <? centers.length>=> {
     let best=0
     let distance=squared(point centers[0])
     loop i in [1..centers.length)  {
@@ -14,6 +14,7 @@ nearest=(point:Point centers:array<Point>):>int64=> {
 }
 fit=(points:array<Point> seeds:array<Point> rounds:int64):>array<Point>=> {
     let centers=seeds
+    if centers.length =? 0 return centers
     loop round in [0..rounds)  {
         let sums=[loop c in centers Point[0.0 0.0]]
         let counts=[loop c in centers 0]

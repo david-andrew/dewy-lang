@@ -13,7 +13,9 @@ despawn=(@w:World id:int64):>bool=> {
     if index is? none  {
         return false
     }
-    let last=w.ids.length-1
+    let n=w.ids.length
+    $runtime_assert 0 <=? index and index <? n and n <=? w.x.length and n <=? w.y.length and n <=? w.vx.length and n <=? w.vy.length
+    let last=n-1
     if index not=? last  {
         let moved=w.ids[last]
         w.ids[index]=moved
@@ -32,7 +34,9 @@ despawn=(@w:World id:int64):>bool=> {
     return true
 }
 tick=(@w:World):>void=> {
-    loop i in [0..w.ids.length)  {
+    let n=w.ids.length
+    $runtime_assert n <=? w.x.length and n <=? w.y.length and n <=? w.vx.length and n <=? w.vy.length
+    loop i in [0..n)  {
         w.x[i]+=w.vx[i]
         w.y[i]+=w.vy[i]
         if w.x[i] <? 0 or w.x[i] >? 100  {
@@ -47,7 +51,9 @@ tick=(@w:World):>void=> {
 }
 checksum=(w:World):>int64=> {
     let result=0
-    loop i in [0..w.ids.length)  {
+    let n=w.ids.length
+    $runtime_assert n <=? w.x.length and n <=? w.y.length and n <=? w.vx.length and n <=? w.vy.length
+    loop i in [0..n)  {
         result+=w.ids[i]*13+w.x[i]*7+w.y[i]*3+w.vx[i]+w.vy[i]
     }
     return result
@@ -76,10 +82,13 @@ main=():>void=> {
     assert(snapshot.ids.length =? 4096)
     assert(world.ids.length =? 3242)
     assert(not despawn(@world 99999))
-    loop i in [0..world.ids.length)  {
-        assert(world.slot.get(world.ids[i]) =? i)
-        assert(world.x[i] >=? 0 and world.x[i] <=? 100)
-        assert(world.y[i] >=? 0 and world.y[i] <=? 78)
+    let w=world
+    let n=w.ids.length
+    $runtime_assert n <=? w.x.length and n <=? w.y.length
+    loop i in [0..n)  {
+        assert(w.slot.get(w.ids[i]) =? i)
+        assert(w.x[i] >=? 0 and w.x[i] <=? 100)
+        assert(w.y[i] >=? 0 and w.y[i] <=? 78)
     }
     printl("{world.ids.length} {checksum(world)} {checksum(snapshot)}")
 }

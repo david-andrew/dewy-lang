@@ -22,18 +22,17 @@ Poly1305:type=[
     pad:array<uint32 length=4>=[]
     pending:array<uint8>=[]
 
-    # Absorb whole 16-byte blocks starting at `at`. `final_bit` is 1 << 24 for a
+    # Absorb the whole 16-byte blocks from `at` on. `final_bit` is 1 << 24 for a
     # full block (the 2^128 marker), 0 for the padded last block, which carries
     # its marker byte in the data.
-    absorb=(data:array<uint8> at:int64 count:int64 final_bit:uint64):>void=>{
+    absorb=(data:array<uint8> at:int64<0 <=? at and at <=? data.length> final_bit:uint64):>void=>{
         let [r0 r1 r2 r3 r4]=r
         let s1=r1*5
         let s2=r2*5
         let s3=r3*5
         let s4=r4*5
         let [h0 h1 h2 h3 h4]=h
-        let offset=at
-        loop b in [0..count) {
+        loop offset in [at,at+BLOCK..data.length-BLOCK] {
             h0+=(load32(data offset) as uint64) and LIMB
             h1+=((load32(data offset+3) as uint64) >> 2) and LIMB
             h2+=((load32(data offset+6) as uint64) >> 4) and LIMB
@@ -66,28 +65,32 @@ Poly1305:type=[
             c=h0 >> 26
             h0=h0 and LIMB
             h1+=c
-            offset+=BLOCK
         }
         h=[h0 h1 h2 h3 h4]
     }
 
     update=(data:array<uint8>):>void=>{
         let at=0
-        if pending.length >? 0 {
-            let take=min(BLOCK-pending.length data.length)
-            pending.extend(data[0..take))
+        let held=pending.length
+        if held >? 0 {
+            $runtime_assert held <? BLOCK
+            let take=BLOCK-held
+            if take >? data.length take=data.length
+            let piece=data[0..take).copy
+            pending.extend(piece)
             at=take
             if pending.length =? BLOCK {
-                absorb(pending 0 1 0x1000000)
+                absorb(pending 0 0x1000000)
                 pending.clear()
             }
         }
-        let whole=(data.length-at)//BLOCK
-        if whole >? 0 {
-            absorb(data at whole 0x1000000)
-            at+=whole*BLOCK
+        $runtime_assert at >=? 0 and at <=? data.length
+        absorb(data at 0x1000000)
+        let tail=data.length-(data.length-at)%BLOCK
+        if tail >=? at and tail <? data.length {
+            let piece=data[tail..data.length).copy
+            pending.extend(piece)
         }
-        if at <? data.length pending.extend(data[at..data.length))
     }
 
     finish=():>Tag=>{
@@ -97,7 +100,7 @@ Poly1305:type=[
             loop last.length <? BLOCK {
                 last.push(0)
             }
-            absorb(last 0 1 0)
+            absorb(last 0 0)
         }
         let [h0 h1 h2 h3 h4]=h
 
@@ -162,6 +165,7 @@ Poly1305:type=[
 # A fresh authenticator for a one-time key: r is clamped, s is the pad.
 poly1305_init=(key:OneTimeKey):>Poly1305=>{
     let k=key as array<uint8>
+    $runtime_assert k.length =? 32
     let mac=Poly1305()
     mac.r=[
         (load32(k 0) as uint64) and 0x3ffffff

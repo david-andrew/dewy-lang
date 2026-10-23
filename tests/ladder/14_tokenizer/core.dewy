@@ -9,6 +9,7 @@ tokenize=(source:string):>array<Token>=>{
         if is_digit(c) {
             let start=i
             loop i <? source.length and is_digit(source[i]) {i+=1}
+            $runtime_assert start <=? i and i <=? source.length
             tokens.push(Token["number" source[start..i)])
             continue
         }

@@ -19,6 +19,7 @@ broadcast=(matrix:Matrix row:array<int64> column:array<int64>):>Matrix=>{
     loop r in [0..matrix.rows) {
         loop c in [0..matrix.cols) {
             let i=r*matrix.cols+c
+            $runtime_assert 0 <=? i and i <? matrix.cells.length
             matrix.cells[i]+=row[c]+column[r]
         }
     }
@@ -28,7 +29,9 @@ transpose=(matrix:Matrix):>Matrix=>{
     let cells:array<int64>=[]
     loop c in [0..matrix.cols) {
         loop r in [0..matrix.rows) {
-            cells.push(matrix.cells[r*matrix.cols+c])
+            let i=r*matrix.cols+c
+            $runtime_assert 0 <=? i and i <? matrix.cells.length
+            cells.push(matrix.cells[i])
         }
     }
     return Matrix[matrix.cols matrix.rows cells]
@@ -39,6 +42,7 @@ main=():>void=>{
     let t=transpose(b)
     let restored=transpose(t)
     $runtime_assert restored.cells =? b.cells
+    $runtime_assert a.cells.length =? 12 and b.cells.length =? 12 and t.cells.length =? 12
     $runtime_assert a.cells[0] =? 0
     $runtime_assert b.cells[0] =? 101
     $runtime_assert b.cells[11] =? 327
@@ -55,8 +59,8 @@ main=():>void=>{
     $runtime_assert transpose(make(0 4)).cols =? 0
     $runtime_assert transpose(make(3 0)).rows =? 0
     $runtime_assert transpose(make(3 0)).cols =? 3
-    $runtime_assert broadcast(make(1 1) [2] [3]).cells[0] =? 5
-    $runtime_assert transpose(make(1 1)).cells[0] =? 0
+    $runtime_assert broadcast(make(1 1) [2] [3]).cells.get(0) =? 5
+    $runtime_assert transpose(make(1 1)).cells.get(0) =? 0
     $runtime_assert a.cells.length =? 12
     printl("{total} {t.cells[11]}")
 }

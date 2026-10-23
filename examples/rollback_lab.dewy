@@ -31,10 +31,11 @@ view=(world:World x:float64 name:string tick:int64 rollbacks:int64 waiting:bool)
     loop player in [0..2) {
         let y:float64=270.0+(player as float64)*75.0
         let px=x+290.0+(world.positions[player] as float64)*8.0
+        let hits=world.scores[player]
         let color=if player=?0 rgb(0.3 0.8 0.7) else rgb(1.0 0.65 0.3)
         rect(x+20.0 y+20.0 540 2 rgb(0.2 0.25 0.32))
         circle(vec2(float32(px) float32(y)) 14 color)
-        text("Player {player+1}: {world.scores[player]} hits" vec2(float32(x+20.0) float32(y-35.0)) 18 color)
+        text("Player {player+1}: {hits} hits" vec2(float32(x+20.0) float32(y-35.0)) 18 color)
     }
     if waiting text("Waiting for remote input" vec2(float32(x+20.0) 400) 18 rgb(1.0 0.65 0.3))
 }

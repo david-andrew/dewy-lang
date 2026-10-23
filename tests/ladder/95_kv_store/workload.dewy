@@ -16,11 +16,11 @@ from p"wal.dewy" import damage_last
 
 Rng:type=[
     state:uint64
-    next=():>uint64=>{
+    next=():>uint64<r => r <? 2147483648>=>{
         state=state*6364136223846793005+1442695040888963407
         return state >> 33
     }
-    below=(n:int64):>int64=>(next() % (n as uint64)) as int64
+    below=(n:int64<(>? 0)>):>int64<r => 0 <=? r and r <? n>=>(next() as int64) % n
 ]
 
 Tally:type=[

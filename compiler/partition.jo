@@ -106,7 +106,7 @@ partition_body = (n: int, f: int, seen: mut {int: bool}) -> bool:
         return true
     if k == .intrinsic:
         id = nodes[n].aux as IN
-        if id != .assert and id != .fmin and id != .fmax and id != .sqrt: return false
+        if id != .assert and id != .runtime_assert and id != .fmin and id != .fmax and id != .sqrt: return false
     if k == .vardecl and nodes[n].aux2 == 1 and partition_parameter(int(nodes[n].sym), f) != 0: return true
     if k == .vardecl and not has_flag(n, NF_GLOBAL):
         fork = partition_fork(int(nodes[n].b))

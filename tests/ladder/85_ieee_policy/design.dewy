@@ -64,6 +64,7 @@ main=():>void=>{
     let values:array<float64>=[3.0 nan -0.0 0.0 -1.5 -nan inf -inf tiny]
     let sorted=values.sorted()
     printl"{sorted}"
+    $runtime_assert sorted.length =? values.length
     $runtime_assert (1.0/sorted[3]) <? 0.0
     $runtime_assert (1.0/sorted[4]) >? 0.0
     # Rounding: ties to even; floor, ceil and round keep the sign of zero.

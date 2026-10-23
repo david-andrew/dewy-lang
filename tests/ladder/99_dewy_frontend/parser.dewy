@@ -34,8 +34,19 @@ add=(@p:Parser node:Node):>int64=>{
     return p.nodes.length-1
 }
 
-token=(p:Parser):>Token=>p.tokens[p.at]
-peek=(p:Parser):>Symbol?=>p.tokens[p.at].symbol
+# The parser never moves past the eof token.
+token=(p:Parser):>Token=>{
+    $runtime_assert 0 <=? p.at and p.at <? p.tokens.length
+    return p.tokens[p.at]
+}
+peek=(p:Parser):>Symbol?=>token(p).symbol
+# The token `offset` places from the current one, if there is one.
+nearby=(p:Parser offset:int64):>Token?=>p.tokens.get(p.at+offset)
+# Node indexes come from `add`.
+node=(p:Parser id:int64):>Node=>{
+    $runtime_assert 0 <=? id and id <? p.nodes.length
+    return p.nodes[id]
+}
 text=(p:Parser t:Token):>string=>text_of(p.source t.start t.stop)
 
 accept=(@p:Parser symbol:Symbol):>bool=>{
@@ -66,7 +77,7 @@ range_bound=(p:Parser):>bool=>{
 }
 
 operator=(@p:Parser op:string left:int64 right:int64):>int64=>{
-    let start=p.nodes[left].start
+    let start=node(p left).start
     return add(@p Node["binary" op "" start [left right]])
 }
 
@@ -79,7 +90,7 @@ hex=(c:uint8):>int64=>{
     return -1
 }
 
-utf8=(@out:array<uint8> scalar:int64):>void=>{
+utf8=(@out:array<uint8> scalar:int64<0 <=? scalar and scalar <=? 0x10FFFF>):>void=>{
     if scalar <? 0x80 {
         out.push(uint8(scalar))
     } else if scalar <? 0x800 {
@@ -97,31 +108,31 @@ utf8=(@out:array<uint8> scalar:int64):>void=>{
     }
 }
 
-Escape:type=[scalar:int64 next:int64]
+Escape:type=[scalar:int64<0 <=? scalar and scalar <=? 0x10FFFF> next:int64<(>=? 0)>]
 
 # `\uXXXX` or `\u{X…}`: `at` is the `u`.
-unicode_escape=(p:Parser at:int64 stop:int64):>Escape|ParseError=>{
+unicode_escape=(p:Parser source:array<uint8> at:int64<(>=? 0)> stop:int64<at <? stop and stop <=? source.length>):>Escape|ParseError=>{
     let i=at+1
-    let braced=i <? stop and p.source[i] =? b'\{'
+    let braced=i <? stop and source[i] =? b'\{'
     if braced i+=1
     let first=i
     let value=0
     loop i <? stop {
-        if braced and p.source[i] =? b'\}' break
+        if braced and source[i] =? b'\}' break
         if not braced and i-first =? 4 break
-        let digit=hex(p.source[i])
+        let digit=hex(source[i])
         if digit <? 0 return fail(p i "expected hexadecimal digits in Unicode escape")
         if i-first >=? 6 return fail(p at "Unicode escape has too many digits")
         value=value*16+digit
         i+=1
     }
     if braced {
-        if i =? first or i >=? stop or p.source[i] not=? b'\}' return fail(p at "expected 1–6 hex digits and '\}' in Unicode escape")
+        if i =? first or i >=? stop or source[i] not=? b'\}' return fail(p at "expected 1–6 hex digits and '\}' in Unicode escape")
         i+=1
     } else if i-first not=? 4 {
         return fail(p at "Unicode escape needs four hex digits")
     }
-    if value >? 0x10FFFF or (0xD800 <=? value <=? 0xDFFF) {
+    if value <? 0 or value >? 0x10FFFF or (0xD800 <=? value <=? 0xDFFF) {
         return fail(p at "Unicode escape must name a scalar value, not a surrogate or out-of-range code point")
     }
     return Escape[value i]
@@ -152,28 +163,33 @@ escape_byte=(c:uint8):>int64=>match c {
 # The text of a quoted token, with each `{expression}` parsed by a nested
 # parser over the same source.
 string_node=(@p:Parser t:Token):>int64|ParseError=>{
+    let source=p.source
     let raw=t.kind =? 'rawquoted'
-    let opening=if raw t.start+1 else t.start
-    let width=quote_width(p.source opening t.stop)
+    let opening=t.start
+    if raw opening+=1
+    # (the lexer made the token: a whole quoted string inside the source)
+    let ending=t.stop
+    $runtime_assert 0 <=? opening and opening <? ending and ending <=? source.length
+    let width=quote_width(source opening ending)
     let i=opening+width
-    let stop=t.stop-width
-    if raw return add(@p Node["string" "" text_of(p.source i stop) t.start])
+    let stop=ending-width
+    if raw return add(@p Node["string" "" text_of(source i stop) t.start])
     let parts:array<int64>=[]
     let data:array<uint8>=[]
     let chunk_start=i
     let interpolated=false
     loop i <? stop {
-        let c=p.source[i]
+        let c=source[i]
         if c =? b'\\' {
             i+=1
             if i >=? stop return fail(p i "incomplete string escape")
-            let e=p.source[i]
+            let e=source[i]
             if e =? b'\n' {
                 i+=1
                 continue
             }
             if e =? b'u' or e =? b'U' {
-                let scalar=unicode_escape(p i stop) or_throw
+                let scalar=unicode_escape(p source i stop) or_throw
                 utf8(@data scalar.scalar)
                 i=scalar.next
                 continue
@@ -191,9 +207,9 @@ string_node=(@p:Parser t:Token):>int64|ParseError=>{
                 data=[]
             }
             let first=i+1
-            let close=interpolation_end(p.source first stop 0)
+            let close=interpolation_end(source first stop 0)
             if close is? LexError return fail(p close.offset close.message)
-            let inner=lex(p.source first close)
+            let inner=lex(source first close)
             if inner is? LexError return fail(p inner.offset inner.message)
             let saved_tokens=p.tokens
             let saved_at=p.at
@@ -248,7 +264,8 @@ bracketed=(@p:Parser):>int64|ParseError=>{
     let open=opening.symbol ?? '('
     if open =? '(' {
         let op=peek(p)
-        let inverted=op =? 'not' and p.at+1 <? p.tokens.length and invert(p.tokens[p.at+1].symbol ?? ',') isnt? none
+        let next=nearby(p 1)
+        let inverted=op =? 'not' and next isnt? none and invert(next.symbol ?? ',') isnt? none
         if partial_operator(op) or inverted {
             # `(* 2)`: the operator and its right operand make a function.
             let place=add(@p Node["identifier" "" "_" opening.start])
@@ -269,12 +286,14 @@ bracketed=(@p:Parser):>int64|ParseError=>{
         let s=t.symbol
         if close =? '>' and (s =? '>>' or s =? '>>=' or (s =? '>?' and not t.space)) {
             let rest=text_of(p.source t.start+1 t.stop)
-            p.tokens[p.at]=Token['op' (if rest =? ">" '>' else if rest =? ">=" '>=' else '?') t.start+1 t.stop t.space t.newline]
+            let at=p.at
+            $runtime_assert 0 <=? at and at <? p.tokens.length
+            p.tokens[at]=Token['op' (if rest =? ">" '>' else if rest =? ">=" '>=' else '?') t.start+1 t.stop t.space t.newline]
             break
         }
         if accept(@p close) break
         # `[0..n)` and `(0..n]`: a lone range may close with the other bracket.
-        if ((open =? '[' and s =? ')') or (open =? '(' and s =? ']')) and kids.length =? 1 and p.nodes[kids[0]].op =? ".." {
+        if ((open =? '[' and s =? ')') or (open =? '(' and s =? ']')) and kids.length =? 1 and node(p kids[0]).op =? ".." {
             close=s ?? close
             p.at+=1
             break
@@ -348,8 +367,10 @@ directive=(@p:Parser t:Token form:int64):>int64|ParseError=>{
 
 # Other languages' operators, where an expression stopped.
 habit=(p:Parser found:string):>string=>{
-    let previous=if p.at >=? 2 p.tokens[p.at-2].symbol else none
-    let adjacent=p.at >=? 2 and not p.tokens[p.at-1].space
+    let before=nearby(p -2)
+    let last=nearby(p -1)
+    let previous=if before isnt? none before.symbol else none
+    let adjacent=before isnt? none and last isnt? none and not last.space
     if found =? "!" return " (`not x` negates, and `x not=? y` asks whether two values differ)"
     if found =? "&" and previous =? '&' and adjacent return " (`and` joins conditions: `a and b`)"
     if found =? "|" and previous =? '|' and adjacent return " (`or` joins conditions: `a or b`)"
@@ -391,7 +412,8 @@ atom=(@p:Parser):>int64|ParseError=>{
         return add(@p Node["prefix" "type of" "" t.start [parent]])
     }
     if t.kind =? 'op' {
-        let after_colon=s =? ':' or (p.at >=? 2 and p.tokens[p.at-2].symbol =? ':')
+        let before=nearby(p -2)
+        let after_colon=s =? ':' or (before isnt? none and before.symbol =? ':')
         if after_colon and (s =? ':' or s =? ']') {
             return fail(p t.start "expected an expression, found '{word}' (a slice is a range in the brackets: `xs[1..]`, `xs[..n)`, `xs[a..b)`; `xs.reversed()` reverses; `:` gives a type)")
         }
@@ -422,16 +444,16 @@ continue_expression=(@p:Parser first:int64 minimum:int64):>int64|ParseError=>{
         if p.angles >? 0 and (op =? '>>' or op =? '>>=' or op =? '>=' or (op =? '>?' and not t.space)) break
         if op =? 'or_throw' and minimum <=? 48 {
             p.at+=1
-            left=add(@p Node["postfix" "or_throw" "" p.nodes[left].start [left]])
+            left=add(@p Node["postfix" "or_throw" "" node(p left).start [left]])
             continue
         }
         if op =? '...' and minimum <=? 170 {
             p.at+=1
-            left=add(@p Node["postfix" "..." "" p.nodes[left].start [left]])
+            left=add(@p Node["postfix" "..." "" node(p left).start [left]])
             continue
         }
         # Literal coefficients: 2x and 2(x + 1).
-        if not t.space and minimum <=? 135 and numeric(p.nodes[left].kind) and (t.kind =? 'identifier' or op =? '(') {
+        if not t.space and minimum <=? 135 and numeric(node(p left).kind) and (t.kind =? 'identifier' or op =? '(') {
             let right=expression(@p 136) or_throw
             left=operator(@p "mul" left right)
             continue
@@ -468,13 +490,14 @@ continue_expression=(@p:Parser first:int64 minimum:int64):>int64|ParseError=>{
         }
         if op =? '?' and minimum <=? 140 {
             p.at+=1
-            left=add(@p Node["postfix" "?" "" p.nodes[left].start [left]])
+            left=add(@p Node["postfix" "?" "" node(p left).start [left]])
             continue
         }
         # An inverted comparison may be written with a space after `not`.
         let spaced_not=false
-        if op =? 'not' and p.at+1 <? p.tokens.length {
-            let inverted=invert(p.tokens[p.at+1].symbol ?? ',')
+        let next=nearby(p 1)
+        if op =? 'not' and next isnt? none {
+            let inverted=invert(next.symbol ?? ',')
             if inverted isnt? none {
                 op=inverted
                 spaced_not=true
@@ -483,22 +506,24 @@ continue_expression=(@p:Parser first:int64 minimum:int64):>int64|ParseError=>{
         if op =? ',' and p.comma_stop break
         let strength=power(op)
         if strength =? 0 or strength <? minimum break
-        if (op =? '+' or op =? '-') and t.space and not p.tokens[p.at+1].space break
+        if (op =? '+' or op =? '-') and t.space and next isnt? none and not next.space break
         p.at+=1
         if spaced_not p.at+=1
         let symbol=op ?? ','
         if symbol =? '..' {
             let bound=if range_bound(p) expression(@p strength+1) or_throw else ABSENT
-            left=add(@p Node["range" ".." "" p.nodes[left].start [left bound]])
+            left=add(@p Node["range" ".." "" node(p left).start [left bound]])
             continue
         }
         let next_minimum=if right_assoc(symbol) strength else strength+1
         let right=expression(@p next_minimum) or_throw
         if symbol =? ',' {
-            if p.nodes[left].kind =? "comma" {
+            let n=node(p left)
+            if n.kind =? "comma" {
+                $runtime_assert 0 <=? left and left <? p.nodes.length
                 p.nodes[left].kids.push(right)
             } else {
-                left=add(@p Node["comma" "," "" p.nodes[left].start [left right]])
+                left=add(@p Node["comma" "," "" n.start [left right]])
             }
         } else if symbol in? ['nand' 'nor' 'xnor'] {
             # `a nand b` is `not (a and b)`, as `nor` and `xnor` are of `or` and `xor`.
@@ -537,7 +562,7 @@ statement=(@p:Parser):>int64|ParseError=>{
     }
     if peek(p) =? ';' and not token(p).space {
         p.at+=1
-        result=add(@p Node["binary" ";" "" p.nodes[result].start [result ABSENT]])
+        result=add(@p Node["binary" ";" "" node(p result).start [result ABSENT]])
     }
     return result
 }

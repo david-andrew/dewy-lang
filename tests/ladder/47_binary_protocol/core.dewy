@@ -1,8 +1,8 @@
 BadPacket:type=type of error & [offset:int64]
-Packet:type=[kind:int64 sequence:int64 payload:array<uint8>]
+Packet:type=[kind:int64<0 <=? kind and kind <=? 255> sequence:int64<0 <=? sequence and sequence <=? 65535> payload:array<uint8 length <=? 65535>]
 encode=(packet:Packet):>array<uint8>=> {
     let size=packet.payload.length
-    let bytes:array<uint8>=[68 87 (packet.kind as uint8) (packet.sequence//256 as uint8) (packet.sequence%256 as uint8) (size//256 as uint8) (size%256 as uint8)]
+    let bytes:array<uint8>=[68 87 (packet.kind as uint8) (packet.sequence//256 as uint8) (packet.sequence & 0xff as uint8) (size//256 as uint8) (size & 0xff as uint8)]
     let checksum=0
     loop byte in bytes  {
         checksum=(checksum+(byte as int64))%256

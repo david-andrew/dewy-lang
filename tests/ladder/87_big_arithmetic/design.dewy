@@ -32,6 +32,7 @@ main=():>void=>{
     let q:int=32416187567
     let modulus=p*q
     let message:int=12345678901234567890
+    $runtime_assert modulus >? 0
     let encrypted=modpow(message 65537 modulus)
     let fact=factorial(100)
     let binomial=choose(100 50)

@@ -6,6 +6,7 @@ split=(xs:array<int64> width:int64<i => i >? 0>):>array<Partition>=>{
     let start:int64=0
     loop start <? xs.length {
         let finish=min(start+width xs.length)
+        $runtime_assert 0 <=? start and start <=? finish and finish <=? xs.length
         parts.push(Partition[start finish xs[start..finish)])
         start=finish
     }
@@ -36,12 +37,13 @@ main=():>void=>{
     let completed=[parallel part in parts worker(part)]
     let output=join(completed)
     let checksum:int64=0
+    $runtime_assert output.length =? source.length
     loop i in [0..output.length) {
         $runtime_assert output[i] =? source[i]*source[i]+i
         checksum+=output[i]
     }
-    $runtime_assert source[0] =? -32
-    $runtime_assert source[64] =? 32
+    $runtime_assert source.get(0) =? -32
+    $runtime_assert source.get(64) =? 32
     $runtime_assert output.length =? 65
     $runtime_assert split([] 8).length =? 0
     $runtime_assert parts.length =? 9

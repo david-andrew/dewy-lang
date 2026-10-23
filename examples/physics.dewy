@@ -39,7 +39,7 @@ draw=():>void=>{
         let color=scene.fills.get(body.id WHITE)
         polygon(points color)
         polyline(points 2 darken(color 0.35) closed=true)
-        if scene.world.radius(body) >? 0.0 {line(scene.world.pos(body) points[0] 2 darken(color 0.35))}
+        if scene.world.radius(body) >? 0.0 and points.length >? 0 {line(scene.world.pos(body) points[0] 2 darken(color 0.35))}
     }
     if grab is? physics.Joint {
         let [anchor endpoint]=scene.world.ends(grab)

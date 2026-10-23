@@ -23,22 +23,23 @@ is_space=(c:uint8):>bool=>c =? b' ' or c =? b'\t' or c =? b'\r' or c =? b'\n'
 is_quote=(c:uint8):>bool=>c =? b'"' or c =? b'\''
 
 text_of=(source:array<uint8> start:int64 stop:int64):>string=>{
+    if start <? 0 or start >? stop or stop >? source.length return "\u{FFFD}"
     return (source[start..stop) as string | none) ?? "\u{FFFD}"
 }
 
 lex_error=(offset:int64 message:string):>LexError=>LexError[offset message]
 
-quote_width=(source:array<uint8> start:int64 stop:int64):>int64=>{
+quote_width=(source:array<uint8> start:int64<0 <=? start and start <=? source.length> stop:int64<start <? stop and stop <=? source.length>):>int64=>{
     let q=source[start]
     if start+2 <? stop and source[start+1] =? q and source[start+2] =? q return 3
     return 1
 }
 
 # The end of a nested `#{ ... }#` comment, or -1.
-block_comment_end=(source:array<uint8> start:int64 stop:int64):>int64=>{
+block_comment_end=(source:array<uint8> start:int64<0 <=? start and start <=? source.length> stop:int64<(<=? source.length)>):>int64<r => -1 <=? r and r <=? source.length>=>{
     let i=start+2
     let depth=1
-    loop i+1 <? stop {
+    loop i <? stop and i+1 <? stop {
         if source[i] =? b'#' and source[i+1] =? b'\{' {
             depth+=1
             i+=2
@@ -54,7 +55,7 @@ block_comment_end=(source:array<uint8> start:int64 stop:int64):>int64=>{
 }
 
 # The closing brace of an interpolation, skipping nested strings and comments.
-interpolation_end=(source:array<uint8> start:int64 stop:int64 nesting:int64):>int64|LexError=>{
+interpolation_end=(source:array<uint8> start:int64<0 <=? start and start <=? source.length> stop:int64<(<=? source.length)> nesting:int64):>int64<r => 0 <=? r and r <? stop>|LexError=>{
     let i=start
     let depth=1
     loop i <? stop {
@@ -69,7 +70,7 @@ interpolation_end=(source:array<uint8> start:int64 stop:int64 nesting:int64):>in
             loop i <? stop and source[i] not=? b'\n' {i+=1}
             continue
         }
-        if c =? b'r' and i+1 <? stop and is_quote(source[i+1]) and (i =? start or not ident_part(source[i-1])) {
+        if c =? b'r' and i+1 <? stop and is_quote(source[i+1]) and (i <=? start or not ident_part(source[i-1])) {
             i=quote_end(source i+1 stop nesting true) or_throw
             continue
         }
@@ -89,7 +90,7 @@ interpolation_end=(source:array<uint8> start:int64 stop:int64 nesting:int64):>in
 }
 
 # Just past a quoted token, including nested strings inside interpolations.
-quote_end=(source:array<uint8> start:int64 stop:int64 nesting:int64=0 raw:bool=false):>int64|LexError=>{
+quote_end=(source:array<uint8> start:int64<0 <=? start and start <=? source.length> stop:int64<start <? stop and stop <=? source.length> nesting:int64=0 raw:bool=false):>int64<r => 0 <=? r and r <=? source.length>|LexError=>{
     if nesting >=? MAX_NESTING return lex_error(start "string interpolation is nested too deeply")
     let quote=source[start]
     let width=quote_width(source start stop)
@@ -117,12 +118,12 @@ quote_end=(source:array<uint8> start:int64 stop:int64 nesting:int64=0 raw:bool=f
 # Maximal munch over the punctuation spellings that begin with this byte.
 # (`>=` is not lexed: a lone `>` closes a type argument before `=`; and
 # nested generic closers before `=>` are `>>` then `=>`, not `>>=` then `>`.)
-punctuation=(source:array<uint8> at:int64 stop:int64):>Symbol?=>{
+punctuation=(source:array<uint8> at:int64<0 <=? at and at <=? source.length> stop:int64<at <? stop and stop <=? source.length>):>Symbol?=>{
     let options=PUNCTUATION.get(source[at])
     if options is? none return none
     loop text in options {
         let raw=bytes(text)
-        if raw.length >? stop-at continue
+        if at+raw.length >? stop continue
         if text =? ">=" continue
         let same=true
         loop k in [0..raw.length) {
@@ -139,17 +140,28 @@ punctuation=(source:array<uint8> at:int64 stop:int64):>Symbol?=>{
 }
 
 # `and=`, `or=`, `xor=`: a word operator directly followed by `=` (not `=?`, `=>` or `==`).
-word_assign=(word:Symbol? source:array<uint8> at:int64 stop:int64):>Symbol?=>{
+word_assign=(word:Symbol? source:array<uint8> at:int64<0 <=? at and at <=? source.length> stop:int64<(<=? source.length)>):>Symbol?=>{
     if word is? none or at >=? stop or source[at] not=? b'=' return none
-    if at+1 <? stop and (source[at+1] =? b'?' or source[at+1] =? b'>' or source[at+1] =? b'=') return none
+    if at+1 <? stop {
+        let next=source[at+1]
+        if next =? b'?' or next =? b'>' or next =? b'=' return none
+    }
     if word =? 'and' return 'and='
     if word =? 'or' return 'or='
     if word =? 'xor' return 'xor='
     return none
 }
 
-lex=(source:array<uint8> begin:int64=0 finish:int64=-1):>array<Token>|LexError=>{
-    let stop=if finish <? 0 source.length else finish
+# Just past a punctuation symbol found at `at`.
+symbol_end=(source:array<uint8> at:int64<0 <=? at and at <=? source.length> symbol:Symbol):>int64<r => 0 <=? r and r <=? source.length>=>{
+    let r=at+symbol.length
+    $runtime_assert 0 <=? r and r <=? source.length
+    return r
+}
+
+lex=(source:array<uint8> begin:int64<0 <=? begin and begin <=? source.length>=0 finish:int64<(<=? source.length)>=-1):>array<Token>|LexError=>{
+    let stop=source.length
+    if finish >=? 0 stop=finish
     let out:array<Token>=[]
     let i=begin
     let spaced=false
@@ -246,7 +258,7 @@ lex=(source:array<uint8> begin:int64=0 finish:int64=-1):>array<Token>|LexError=>
         } else {
             symbol=punctuation(source start stop)
             if symbol is? none return lex_error(start "unexpected character in Dewy source")
-            i+=bytes(symbol).length
+            i=symbol_end(source start symbol)
         }
         out.push(Token[kind symbol start i spaced newline])
         spaced=false

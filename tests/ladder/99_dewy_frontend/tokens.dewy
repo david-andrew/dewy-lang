@@ -39,6 +39,7 @@ make_punctuation=():>dict<uint8 array<string>>=>{
     let table:dict<uint8 array<string>>=[]
     loop s in members(Symbol) {
         let raw=bytes(s)
+        $runtime_assert raw.length >? 0
         let first=raw[0]
         let letter=(b'a' <=? first <=? b'z') or (b'A' <=? first <=? b'Z') or first =? b'_'
         if not letter {

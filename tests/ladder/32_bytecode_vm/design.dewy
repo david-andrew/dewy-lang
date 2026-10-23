@@ -74,15 +74,16 @@ main=():>void=> {
     if result is? Fault  {
         exit(1)
     }
-    $runtime_assert (result.stack[0] =? 720)
+    $runtime_assert (result.stack.length >? 0 and result.stack[0] =? 720)
     let snapshot=result
     result.stack[0]=0
-    $runtime_assert (snapshot.stack[0] =? 720)
+    $runtime_assert (snapshot.stack.length >? 0 and snapshot.stack[0] =? 720)
     let truncated=run([1] 20)
     let underflow=run([2 0] 20)
     let runaway=run([6 0] 10)
     $runtime_assert (truncated is? Fault)
     $runtime_assert (underflow is? Fault)
     $runtime_assert (runaway is? Fault)
+    $runtime_assert (snapshot.locals.length =? 2)
     printl("{snapshot.stack[0]} {snapshot.locals[0]} {snapshot.locals[1]}")
 }

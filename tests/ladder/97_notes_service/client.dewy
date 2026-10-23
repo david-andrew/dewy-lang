@@ -26,8 +26,9 @@ quote=(text:string):>string=>{
             out.push(b)
         } else {
             out.push(0x25)
-            out.push(digits[int64(b >> 4)])
-            out.push(digits[int64(b & 15)])
+            $runtime_assert digits.length =? 16
+            out.push(digits[int64(b) >> 4])
+            out.push(digits[int64(b) & 15])
         }
     }
     return (out as string | none) ?? ""
@@ -52,6 +53,7 @@ receive_bytes=(@client:ClientConn data:array<uint8>):>array<Response>|HttpError=
         let framed=parse_response(client.pending client.limits) or_throw
         if framed is? Incomplete break
         out.push(framed.response)
+        $runtime_assert 0 <=? framed.consumed and framed.consumed <=? client.pending.length
         client.pending=client.pending[framed.consumed..]
     }
     return out

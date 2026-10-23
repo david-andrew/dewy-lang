@@ -37,12 +37,14 @@ lex=(source:string):>array<Token>|SqlError=>{
             loop i <? chars.length and (is_word_start(chars[i]) or is_digit(chars[i])) {
                 i+=1
             }
+            $runtime_assert start <=? i and i <=? chars.length
             tokens.push(Token['word' chars[start..i).join("")])
         } else if is_digit(c) {
             let start=i
             loop i <? chars.length and is_digit(chars[i]) {
                 i+=1
             }
+            $runtime_assert start <=? i and i <=? chars.length
             tokens.push(Token['number' chars[start..i).join("")])
         } else if c =? "'" {
             # A quoted string; '' inside it is one quote.
@@ -112,13 +114,13 @@ Statement:type=[
 
 Parser:type=[
     tokens:array<Token>
-    at:int64=0
+    at:int64<0 <=? at and at <? tokens.length>=0
 
     peek=():>Token=>tokens[at]
 
     advance=():>Token=>{
         let token=tokens[at]
-        if token.kind not=? 'end' at+=1
+        if token.kind not=? 'end' and at+1 <? tokens.length at+=1
         return token
     }
 
@@ -308,6 +310,7 @@ Parser:type=[
 
 parse=(source:string):>Statement|SqlError=>{
     let tokens=lex(source) or_throw
+    if tokens.length =? 0 return SqlError["empty statement"]
     let parser=Parser[tokens]
     return parser.statement()
 }
@@ -323,7 +326,7 @@ like=(text:string pattern:string):>bool=>{
     let pi:int64=0
     let star:int64=-1
     let mark:int64=0
-    loop ti <? t.length {
+    loop 0 <=? ti <? t.length {
         if pi <? p.length and (p[pi] =? 95 or (p[pi] not=? 37 and p[pi] =? t[ti])) {
             ti+=1
             pi+=1

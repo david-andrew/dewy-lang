@@ -38,7 +38,7 @@ encode_txn=(txn:Txn):>string=>{
 
 # ---------------------------------------------------------------- reading
 
-LogRecord:type=[txn:int64 tag:uint8 key:string value:string next:int64]
+LogRecord:type=[txn:int64 tag:uint8 key:string value:string next:int64<(>? 0)>]
 
 Damage:type='torn' | 'checksum' | 'malformed'
 Damaged:type=type of error & [kind:Damage]
@@ -48,16 +48,16 @@ Scan:type=[
     txns:array<Txn>=[]
     records:int64=0
     discarded:int64=0
-    valid:int64=0
+    valid:int64<(>=? 0)>=0
     damage:Damage | 'none'='none'
 ]
 
 const MAX_DIGITS:int64=18
 
 # A decimal field ending at `stop` (a space): its value and the position after it.
-Field:type=[value:int64 next:int64]
+Field:type=[value:int64 next:int64<(>? 0)>]
 
-field=(data:array<uint8> at:int64 stop:uint8):>Field|Damaged=>{
+field=(data:array<uint8> at:int64<(>=? 0)> stop:uint8):>Field|Damaged=>{
     let value:int64=0
     let i=at
     loop i <? data.length and data[i] not=? stop {
@@ -79,7 +79,7 @@ hex_digit=(c:uint8):>int64=>{
 
 # Decode the record starting at `at`.
 read_record=(data:array<uint8> at:int64):>LogRecord|Damaged=>{
-    if data.length-at <? 9 return Damaged['torn']
+    if at <? 0 or at >? data.length-9 return Damaged['torn']
     let stored:uint32=0
     loop i in [at..at+8) {
         let d=hex_digit(data[i])
@@ -89,7 +89,7 @@ read_record=(data:array<uint8> at:int64):>LogRecord|Damaged=>{
     if data[at+8] not=? 32 return Damaged['malformed']
     let body=at+9
     let txn=field(data body 32) or_throw
-    if txn.next+2 >? data.length return Damaged['torn']
+    if txn.next >? data.length-2 return Damaged['torn']
     let tag=data[txn.next]
     if data[txn.next+1] not=? 32 return Damaged['malformed']
     let key_length=field(data txn.next+2 32) or_throw
@@ -98,6 +98,7 @@ read_record=(data:array<uint8> at:int64):>LogRecord|Damaged=>{
     let value_start=key_start+key_length.value
     let stop=value_start+value_length.value
     if stop >=? data.length return Damaged['torn']
+    if value_start <? key_start or stop <? value_start return Damaged['malformed']
     if data[stop] not=? 10 return Damaged['malformed']
     if crc32_range(data body stop) not=? stored return Damaged['checksum']
     if tag not=? 80 and tag not=? 68 and tag not=? 67 return Damaged['malformed']
@@ -151,10 +152,11 @@ scan=(data:array<uint8>):>Scan=>{
 damage_last=(@data:array<uint8>):>bool=>{
     if data.length <? 2 return false
     let start=data.length-1
-    loop start >? 0 and data[start-1] not=? 10 {
+    loop start >? 0 and start <=? data.length and data[start-1] not=? 10 {
         start-=1
     }
     let middle=start+(data.length-start)//2
+    $runtime_assert 0 <=? middle and middle <? data.length
     data[middle]=data[middle] xor 4
     return true
 }

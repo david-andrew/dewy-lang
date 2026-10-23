@@ -27,7 +27,10 @@ tcp_listen=(port:int64 host:string="127.0.0.1" backlog:int32=128):>TcpListener |
     let handle=__open(address.family)
     if handle <? 0 return __failure("cannot make a socket" __last_error())
     __reuse_address(handle)
-    if __bind(handle address.bytes.ptr int32(address.bytes.length)) not=? 0 {
+    # (a socket address is a few dozen bytes)
+    $runtime_assert address.bytes.length <=? 128
+    let size=int32(address.bytes.length)
+    if __bind(handle address.bytes.ptr size) not=? 0 {
         let code=__last_error()
         __close(handle)
         return __failure("cannot listen on {host}:{port}" code)
@@ -44,6 +47,8 @@ tcp_listen=(port:int64 host:string="127.0.0.1" backlog:int32=128):>TcpListener |
         __close(handle)
         return __failure("cannot listen on {host}:{port}" code)
     }
+    # (the call writes the address through its pointer; the length stays)
+    $runtime_assert bound.length =? 28
     return TcpListener[handle (int64(bound[2]) << 8) | int64(bound[3])]
 }
 
@@ -66,7 +71,10 @@ tcp_connect=(host:string port:int64):>TcpStream | NetError | Canceled=>{
     let address=__address(host port) or_throw
     let handle=__open(address.family)
     if handle <? 0 return __failure("cannot make a socket" __last_error())
-    if __connect(handle address.bytes.ptr int32(address.bytes.length)) not=? 0 {
+    # (a socket address is a few dozen bytes)
+    $runtime_assert address.bytes.length <=? 128
+    let size=int32(address.bytes.length)
+    if __connect(handle address.bytes.ptr size) not=? 0 {
         let code=__last_error()
         if not __in_progress(code) {
             __close(handle)
@@ -111,6 +119,7 @@ tcp_receive=(stream:TcpStream largest:int64=65536):>array<uint8> | none | NetErr
     loop true {
         let ready=__wait(stream.handle __READ) or_throw
         let got=__receive(stream.handle buffer.ptr buffer.length)
+        if got >? buffer.length return __failure("cannot receive" 0)
         if got >? 0 return buffer[0..got)
         if got =? 0 return none
         let code=__last_error()
@@ -259,14 +268,15 @@ if $target.os =? "windows" {
     __fd=(handle:int64):>int32=>if handle >=? 0 and handle <=? 2147483647 int32(handle) else -1
 
     __close=(fd:int64):>void=>{__close_c(__fd(fd))}
-    __bind=(fd:int64 address:ptr<uint8> length:int32):>int32=>__bind_c(__fd(fd) address uint32(length))
+    __bind=(fd:int64 address:ptr<uint8> length:int32):>int32=>if length <? 0 -1 else __bind_c(__fd(fd) address uint32(length))
     __listen=(fd:int64 backlog:int32):>int32=>__listen_c(__fd(fd) backlog)
-    __connect=(fd:int64 address:ptr<uint8> length:int32):>int32=>__connect_c(__fd(fd) address uint32(length))
+    __connect=(fd:int64 address:ptr<uint8> length:int32):>int32=>if length <? 0 -1 else __connect_c(__fd(fd) address uint32(length))
     __name=(fd:int64 address:ptr<uint8> length:ptr<int32>):>int32=>__name_c(__fd(fd) address length)
-    __receive=(fd:int64 data:ptr<uint8> length:int64):>int64=>__recv_c(__fd(fd) data uint64(length) 0)
+    __receive=(fd:int64 data:ptr<uint8> length:int64):>int64=>if length <? 0 -1 else __recv_c(__fd(fd) data uint64(length) 0)
     __poll_one=(fd:int64 events:int32 timeout:int32):>int32=>{
         let fds:array<__PollFd>=[__PollFd[__fd(fd) wrap<int16>(events) 0]]
         if __poll(fds.ptr 1 timeout) <=? 0 return 0
+        $runtime_assert fds.length =? 1
         return int32(fds[0].revents)
     }
     __reuse_address=(fd:int64):>void=>{
@@ -277,6 +287,7 @@ if $target.os =? "windows" {
         let code:array<int32>=[0]
         let length:array<uint32>=[4]
         if __getsockopt(__fd(fd) __SOL_SOCKET __SO_ERROR code.ptr length.ptr) not=? 0 return __last_error()
+        $runtime_assert code.length =? 1
         return code[0]
     }
 
@@ -331,7 +342,7 @@ if $target.os =? "windows" {
         # Nonblocking, closed on exec. Sends never raise SIGPIPE.
         __open=(family:int32):>int64=>int64(__socket(family 1 | 0x800 | 0x80000 6))
         __accept=(fd:int64):>int64=>int64(__accept4(__fd(fd) none none 0x800 | 0x80000))
-        __send=(fd:int64 data:ptr<uint8> length:int64):>int64=>__send_c(__fd(fd) data uint64(length) 0x4000)
+        __send=(fd:int64 data:ptr<uint8> length:int64):>int64=>if length <? 0 -1 else __send_c(__fd(fd) data uint64(length) 0x4000)
         __again=(code:int32):>bool=>code =? 11 or code =? 4
         __in_progress=(code:int32):>bool=>code =? 115 or code =? 4
         __describe=(code:int32):>string=>{

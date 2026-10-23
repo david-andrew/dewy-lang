@@ -45,15 +45,21 @@ line_starts=(src:string):>array<int64>=>{
 # the line and column (from 1) of byte off of file f, whose text is src
 line_col_in=(@t:LineTable f:int64 off:int64 src:string):>[int64 int64]=>{
     if f =? t.file and off >=? t.start and off <? t.stop {return [t.line off - t.start + 1]}
+    $runtime_assert f >=? 0
+    let known:array<int64>=if f <? t.starts.length t.starts[f] else []
+    let ls=if known.length >? 0 known else line_starts(src)
     loop t.starts.length <=? f {t.starts.push([])}
-    if t.starts[f].length =? 0 {t.starts[f]=line_starts(src)}
-    let ls=t.starts[f]
+    t.starts[f]=ls
+    # (line_starts begins every table with 0)
+    $runtime_assert ls.length >? 0
     let lo:int64=0
     let hi:int64=ls.length - 1
     loop lo <? hi {
         let mid=(lo + hi + 1) // 2
+        $runtime_assert lo <? mid and mid <=? hi
         if ls[mid] <=? off {lo=mid} else {hi=mid - 1}
     }
+    $runtime_assert 0 <=? lo and lo <? ls.length
     t.file=f
     t.start=ls[lo]
     t.stop=if lo + 1 <? ls.length ls[lo + 1] else 1 << 62

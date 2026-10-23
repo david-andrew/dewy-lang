@@ -73,7 +73,7 @@ header=(headers:array<Header> name:string):>string?=>{
 }
 
 # The index of the first LF at or after `start`, or -1.
-find_lf=(data:array<uint8> start:int64):>int64=>{
+find_lf=(data:array<uint8> start:int64<(>=? 0)>):>int64<r => r <? data.length>=>{
     let i=start
     loop i <? data.length {
         if data[i] =? LF return i
@@ -83,8 +83,8 @@ find_lf=(data:array<uint8> start:int64):>int64=>{
 }
 
 # A line ends in CRLF; a bare LF is rejected rather than guessed at.
-line_text=(data:array<uint8> start:int64 lf:int64):>string|HttpError=>{
-    if lf =? start or data[lf-1] not=? CR return bad(400 "bare LF")
+line_text=(data:array<uint8> start:int64<(>=? 0)> lf:int64<(<? data.length)>):>string|HttpError=>{
+    if lf <=? start or data[lf-1] not=? CR return bad(400 "bare LF")
     let text=data[start..lf-1) as string | none
     if text is? none return bad(400 "invalid UTF-8 in head")
     return text
@@ -145,8 +145,13 @@ parse_query=(text:string):>dict<string string>|HttpError=>{
     loop pair in text.split("&") {
         if pair.length =? 0 continue
         let eq=pair.find("=")
-        let key_text=if eq is? Missing pair else pair[0..eq)
-        let value_text=if eq is? Missing "" else pair[eq+1..]
+        let key_text=pair
+        let value_text=""
+        if eq isnt? Missing {
+            if eq <? 0 or eq >=? pair.length return bad(400 "malformed query")
+            key_text=pair[0..eq)
+            value_text=pair[eq+1..]
+        }
         let key=percent_decode(key_text true) or_throw
         let value=percent_decode(value_text true) or_throw
         query[key]=value
@@ -155,22 +160,26 @@ parse_query=(text:string):>dict<string string>|HttpError=>{
 }
 
 trim_ows=(text:string):>string=>{
+    const n=text.length
     let start=0
-    let stop=text.length
+    let stop:int64<(<=? n)>=n
     loop start <? stop and (text[start] =? " " or text[start] =? "\t") {start+=1}
     loop stop >? start and (text[stop-1] =? " " or text[stop-1] =? "\t") {stop-=1}
+    if start >? stop return ""
     return text[start..stop)
 }
 
 parse_header=(line:string):>Header|HttpError=>{
     if line.startswith(" ") or line.startswith("\t") return bad(400 "folded header")
     let colon=line.find(":")
-    if colon is? Missing or colon =? 0 return bad(400 "malformed header")
+    if colon is? Missing return bad(400 "malformed header")
+    if colon <=? 0 or colon >=? line.length return bad(400 "malformed header")
     let name=line[0..colon)
+    let value=line[colon+1..]
     loop b in bytes(name) {
         if not is_token_byte(b) return bad(400 "invalid header name")
     }
-    return Header[name.lower() trim_ows(line[colon+1..])]
+    return Header[name.lower() trim_ows(value)]
 }
 
 parse_decimal=(text:string limit:int64):>int64|HttpError=>{
@@ -185,11 +194,11 @@ parse_decimal=(text:string limit:int64):>int64|HttpError=>{
 }
 
 # Head lines between the request line and the blank line.
-Head:type=[lines:array<string> stop:int64]
+Head:type=[lines:array<string> stop:int64<(>=? 0)>]
 
-read_head=(data:array<uint8> start:int64 limits:Limits):>Head|Incomplete|HttpError=>{
+read_head=(data:array<uint8> start:int64<(>=? 0)> limits:Limits):>Head|Incomplete|HttpError=>{
     let lines:array<string>=[]
-    let at=start
+    let at:int64<(>=? 0)>=start
     loop true {
         let lf=find_lf(data at)
         if lf <? 0 {
@@ -214,36 +223,47 @@ decode_text=(data:array<uint8>):>string|HttpError=>{
     return text
 }
 
+chunk_size=(digits:string):>int64|HttpError=>{
+    if digits.length =? 0 or digits.length >? 6 return bad(400 "invalid chunk size")
+    let size=0
+    loop b in bytes(digits) {
+        let v=hex_value(b)
+        if v <? 0 return bad(400 "invalid chunk size")
+        size=size*16+v
+    }
+    return size
+}
+
 # Chunked transfer coding: hex sizes, CRLF-framed data, a zero chunk, an
 # optional trailer section that is read and discarded.
-read_chunked=(data:array<uint8> start:int64 limits:Limits):>Body|Incomplete|HttpError=>{
+read_chunked=(data:array<uint8> start:int64<(>=? 0)> limits:Limits):>Body|Incomplete|HttpError=>{
     let out:array<uint8>=[]
-    let at=start
+    let at:int64<(>=? 0)>=start
     loop true {
         let lf=find_lf(data at)
         if lf <? 0 return Incomplete
         let size_line=line_text(data at lf) or_throw
-        let semi=size_line.find(";")
-        let digits=if semi is? Missing size_line else size_line[0..semi)
-        if digits.length =? 0 or digits.length >? 6 return bad(400 "invalid chunk size")
-        let size=0
-        loop b in bytes(digits) {
-            let v=hex_value(b)
-            if v <? 0 return bad(400 "invalid chunk size")
-            size=size*16+v
-        }
-        if out.length+size >? limits.body return bad(413 "body exceeds {limits.body} bytes")
         at=lf+1
+        let semi=size_line.find(";")
+        let digits=size_line
+        if semi isnt? Missing {
+            if semi <? 0 or semi >? size_line.length return bad(400 "invalid chunk size")
+            digits=size_line[0..semi)
+        }
+        let size=chunk_size(digits) or_throw
+        if out.length+size >? limits.body return bad(413 "body exceeds {limits.body} bytes")
         if size =? 0 {
             let trailer=read_head(data at limits) or_throw
             if trailer is? Incomplete return Incomplete
             let text=decode_text(out) or_throw
             return Body[text trailer.stop]
         }
-        if at+size+2 >? data.length return Incomplete
-        if data[at+size] not=? CR or data[at+size+1] not=? LF return bad(400 "chunk not terminated")
-        out.extend(data[at..at+size))
-        at+=size+2
+        let stop=at+size
+        if stop <? at return bad(400 "invalid chunk size")
+        if stop >? data.length-2 return Incomplete
+        if data[stop] not=? CR or data[stop+1] not=? LF return bad(400 "chunk not terminated")
+        out.extend(data[at..stop))
+        at=stop+2
     }
     return Incomplete
 }
@@ -289,14 +309,22 @@ frame=(data:array<uint8> limits:Limits):>Framed|Incomplete|HttpError=>{
         if chunked is? Incomplete return Incomplete
         body=chunked
     } else if length isnt? none {
-        if head.stop+length >? data.length return Incomplete
-        let text=decode_text(data[head.stop..head.stop+length)) or_throw
-        body=Body[text head.stop+length]
+        let stop=head.stop+length
+        if stop <? head.stop return bad(400 "invalid length")
+        if stop >? data.length return Incomplete
+        let text=decode_text(data[head.stop..stop)) or_throw
+        body=Body[text stop]
     }
     let question=target.find("?")
-    let raw_path=if question is? Missing target else target[0..question)
+    let raw_path=target
+    let query_text=""
+    if question isnt? Missing {
+        if question <? 0 or question >=? target.length return bad(400 "malformed target")
+        raw_path=target[0..question)
+        query_text=target[question+1..]
+    }
     let path=percent_decode(raw_path false) or_throw
-    let query=parse_query(if question is? Missing "" else target[question+1..]) or_throw
+    let query=parse_query(query_text) or_throw
     let request=Request[method target path query version headers body.text]
     return Framed[request body.stop]
 }
@@ -348,7 +376,9 @@ parse_response=(data:array<uint8> limits:Limits):>ResponseFrame|Incomplete|HttpE
         return ResponseFrame[Response[status headers ""] head.stop]
     }
     let length=parse_decimal(length_text limits.body) or_throw
-    if head.stop+length >? data.length return Incomplete
-    let text=decode_text(data[head.stop..head.stop+length)) or_throw
-    return ResponseFrame[Response[status headers text] head.stop+length]
+    let stop=head.stop+length
+    if stop <? head.stop return bad(400 "invalid length")
+    if stop >? data.length return Incomplete
+    let text=decode_text(data[head.stop..stop)) or_throw
+    return ResponseFrame[Response[status headers text] stop]
 }

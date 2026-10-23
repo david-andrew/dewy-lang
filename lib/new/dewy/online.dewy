@@ -13,7 +13,7 @@ const MATCH_SERVER=""   # Optional room service; DEWY_MATCH_SERVER overrides it.
 Pad:type=[x:int64=0 y:int64=0]
 Player:type=[pos:vec2 score:int64=0]
 Game:type=[
-    players:array<Player>=[Player[pos=vec2(400 360)] Player[pos=vec2(880 360)]]
+    players:array<Player length=2>=[Player[pos=vec2(400 360)] Player[pos=vec2(880 360)]]
     coin:vec2=vec2(640 200)
     taken:int64=0
     winner:int64=-1
@@ -24,6 +24,7 @@ Game:type=[
 tick=(state:Game pads:array<Pad>):>Game=>{
     let next=state
     if next.winner>=?0 return next
+    $runtime_assert pads.length>=?2
     loop i in [0..2) {
         let p=next.players[i].pos+vec2(float32(pads[i].x) float32(pads[i].y))*float32(SPEED)
         next.players[i].pos=vec2(clamp(p.x 20 1260) clamp(p.y 20 700))
@@ -51,8 +52,7 @@ begin=(connection:invite.Invited)=>{
     friend=connection.peer
     let player=if connection.inviter 0 else 1
     session=netplay.session(Game[] @tick players=2 me=player)
-    let peers:array<int64>=[-1 -1]
-    peers[1-player]=friend
+    let peers:array<int64>=if player=?0 [-1 friend] else [friend -1]
     session.over(peers)
     spare=0.0
     status=""
@@ -71,8 +71,9 @@ me=():>int64=>if mode=?Mode.online session.me else 0
 my_pad=():>Pad=>{
     let axis=input_axis()
     let pad=Pad[x=int64(round(float64(axis.x))) y=int64(round(float64(axis.y)))]
-    if mouse_down(Mouse.left) {
-        let d=mouse_pos()-game().players[me()].pos
+    let mine=game().players.get(me())
+    if mouse_down(Mouse.left) and mine isnt? none {
+        let d=mouse_pos()-mine.pos
         if abs(d.x)>?8.0 pad.x=int64(sign(float64(d.x)))
         if abs(d.y)>?8.0 pad.y=int64(sign(float64(d.y)))
     }
@@ -122,8 +123,9 @@ draw=()=>{
         circle(player.pos 20 colors[i])
         if i=?me() ring(player.pos 26 2 WHITE)
     }
-    text("{state.players[0].score}" vec2(40 30) 48 colors[0])
-    text_centered("{state.players[1].score}" vec2(1220 54) 48 colors[1])
+    let [left right]=colors
+    text("{state.players[0].score}" vec2(40 30) 48 left)
+    text_centered("{state.players[1].score}" vec2(1220 54) 48 right)
     if state.winner>=?0 {
         text_centered(if state.winner=?me() "You won" else "You lost" vec2(640 330) 72)
         text_centered("Leave to return to the menu" vec2(640 400) 24 gray(0.7))

@@ -19,13 +19,13 @@ base64=(b:array<uint8>):>string=>{
         out.push(table[v & 63])
         i+=3
     }
-    if n - i =? 1 {
+    if i + 1 =? n {
         let v=int64(b[i]) << 16
         out.push(table[(v >> 18) & 63])
         out.push(table[(v >> 12) & 63])
         out.push(b'=')
         out.push(b'=')
-    } else if n - i =? 2 {
+    } else if i + 2 =? n {
         let v=(int64(b[i]) << 16) | (int64(b[i + 1]) << 8)
         out.push(table[(v >> 18) & 63])
         out.push(table[(v >> 12) & 63])

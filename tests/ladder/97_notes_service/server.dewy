@@ -27,6 +27,7 @@ feed=(@service:Service @conn:Connection chunk:array<uint8>):>array<uint8>=>{
             break
         }
         let request=framed.request
+        $runtime_assert 0 <=? framed.consumed and framed.consumed <=? conn.pending.length
         conn.pending=conn.pending[framed.consumed..]
         let response=route(@service request)
         let close=not keeps_alive(request)

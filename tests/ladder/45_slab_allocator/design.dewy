@@ -19,7 +19,7 @@ valid=(p:Pool h:Handle):>bool=> {
     return p.used[h.slot] and p.generation[h.slot] =? h.generation
 }
 release=(@p:Pool h:Handle):>bool=> {
-    if not valid(p h)  {
+    if h.slot <? 0 or h.slot >=? 16 or not valid(p h)  {
         return false
     }
     p.used[h.slot]=false
@@ -27,7 +27,7 @@ release=(@p:Pool h:Handle):>bool=> {
     return true
 }
 read=(p:Pool h:Handle):>int64?=> {
-    if not valid(p h)  {
+    if h.slot <? 0 or h.slot >=? 16 or not valid(p h)  {
         return none
     }
     return p.data[h.slot]

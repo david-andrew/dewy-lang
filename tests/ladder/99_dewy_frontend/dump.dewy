@@ -44,6 +44,7 @@ token_line=(source:array<uint8> tokens:array<Token>):>string=>{
 
 sexpr=(nodes:array<Node> id:int64):>string=>{
     if id =? 0 return "_"
+    $runtime_assert 0 <? id and id <? nodes.length
     let n=nodes[id]
     let kids=[loop k in n.kids sexpr(nodes k)]
     if n.kind in? ["identifier" "source_integer" "integer" "source_real" "boolean" "metatag" "based_string"] return n.text

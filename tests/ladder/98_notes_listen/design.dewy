@@ -33,10 +33,13 @@ session=(port:int64 label:string parts:array<string>):>void | net.NetError | Can
 # server's wait in accept.
 visit=(server:TaskGroup port:int64):>void | net.NetError | Canceled=>{
     let create=r'{"title":"Socket note","tags":["net"]}'
+    $runtime_assert create.length >=? 10
+    let head=create[0..10)
+    let tail=create[10..]
     session(port "split create, then close" [
         "POST /api/notes HTTP/1.1\r\nHost: lo"
-        "cal\r\nContent-Type: application/json\r\nContent-Length: {bytes(create).length}\r\n\r\n{create[0..10)}"
-        "{create[10..]}GET /api/notes/1 HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+        "cal\r\nContent-Type: application/json\r\nContent-Length: {bytes(create).length}\r\n\r\n{head}"
+        "{tail}GET /api/notes/1 HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
     ]) or_throw
     session(port "framing error closes" ["GET /api/health HTTP/1.1\r\nHost: local\r\n\r\nGET / HTTP/9\r\n\r\n"]) or_throw
     session(port "http/1.0" ["GET /api/stats HTTP/1.0\r\n\r\n"]) or_throw

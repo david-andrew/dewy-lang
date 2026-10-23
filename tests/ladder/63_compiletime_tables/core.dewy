@@ -19,6 +19,7 @@ prime_table=():>array<bool>=> {
     loop p in [2..12)  {
         if primes[p]  {
             let multiple=p*p
+            $runtime_assert multiple >=? 0
             loop multiple <? 128  {
                 primes[multiple]=false
                 multiple+=p
@@ -34,7 +35,8 @@ valid_tables=():>bool=> {
         return false
     }
     loop i in [0..256)  {
-        if REVERSE[REVERSE[i]] not=? i  {
+        let r=REVERSE[i]
+        if r <? 0 or r >=? 256 or REVERSE[r] not=? i  {
             return false
         }
     }
@@ -53,8 +55,8 @@ main=():>void=> {
     assert(valid_tables())
     let primes:array<int64>=[]
     let checksum=0
-    loop i in [0..128)  {
-        if PRIME[i]  {
+    loop i in 0.. and prime in PRIME  {
+        if prime  {
             primes.push(i)
             checksum+=i
         }
@@ -63,15 +65,16 @@ main=():>void=> {
     assert(primes[0] =? 2)
     assert(primes[primes.length-1] =? 127)
     let reverse_sum=0
-    loop i in [0..256)  {
+    loop i in [0..REVERSE.length)  {
         reverse_sum+=REVERSE[i]
     }
     assert(reverse_sum =? 32640)
     let copied=REVERSE
+    assert(copied.length =? 256 and REVERSE.length =? 256)
     copied[1]=0
     assert(REVERSE[1] =? 128)
     let word=0
-    loop byte in [1 2 3 4]  {
+    loop byte in [1..5)  {
         word=word*256+REVERSE[byte]
     }
     assert(word =? 2151727136)

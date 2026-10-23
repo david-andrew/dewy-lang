@@ -1,19 +1,21 @@
 Entry:type=[node:int64 cost:int64 score:int64]
-heuristic=(node:int64 goal:int64 width:int64):>int64=>abs(node%width-goal%width)+abs(node//width-goal//width)
-search=(grid:array<int64> width:int64 start:int64 goal:int64):>array<int64>=> {
+heuristic=(node:int64 goal:int64 width:int64<(>? 0)>):>int64=>abs(node%width-goal%width)+abs(node//width-goal//width)
+search=(grid:array<int64> width:int64<(>? 0)> start:int64<0 <=? start and start <? grid.length> goal:int64):>array<int64>=> {
     let distance=[loop cell in grid 1000000]
     let parent=[loop cell in grid -1]
     let open:array<Entry>=[Entry[start 0 heuristic(start goal width)]]
     distance[start]=0
     loop open.length >? 0  {
         let best=0
+        let best_score=open[0].score
         loop i in [1..open.length)  {
-            if open[i].score <? open[best].score  {
+            if open[i].score <? best_score  {
                 best=i
+                best_score=open[i].score
             }
         }
-        let current=open[best]
-        open.pop(best)
+        let current=open.pop(best)
+        assert(0 <=? current.node and current.node <? distance.length)
         if current.cost not=? distance[current.node]  {
             continue
         }
@@ -21,6 +23,7 @@ search=(grid:array<int64> width:int64 start:int64 goal:int64):>array<int64>=> {
             let path:array<int64>=[]
             let node=goal
             loop node >=? 0  {
+                assert(node <? parent.length)
                 path.insert(node 0)
                 node=parent[node]
             }
@@ -67,7 +70,7 @@ main=():>void=> {
     assert(path[0] =? 0)
     assert(path[path.length-1] =? 1023)
     loop i in [1..path.length)  {
-        assert(grid[path[i]] =? 0)
+        assert(path[i] >=? 0 and path[i] <? grid.length and grid[path[i]] =? 0)
         assert(heuristic(path[i] path[i-1] width) =? 1)
     }
     let blocked=grid
@@ -77,6 +80,7 @@ main=():>void=> {
     assert(search(grid width 42 42) =? [42])
     let sum=0
     loop node in path  {
+        assert(0 <=? node and node <? grid.length)
         sum+=grid[node]
     }
     printl("{path.length-1} {path[0]} {path[path.length-1]} {sum}")

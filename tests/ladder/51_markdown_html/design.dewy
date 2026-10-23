@@ -69,7 +69,7 @@ render=(source:string):>string=> {
                 result="{result}<ul>"
                 list=true
             }
-            result="{result}<li>{inline(line[2..])}</li>"
+            result="{result}<li>{inline(line.remove_prefix("- "))}</li>"
         }
         else  {
             if list  {
@@ -82,7 +82,7 @@ render=(source:string):>string=> {
                     paragraph=""
                 }
                 if line.startswith("# ")  {
-                    result="{result}<h1>{inline(line[2..])}</h1>"
+                    result="{result}<h1>{inline(line.remove_prefix("# "))}</h1>"
                 }
             }
             else  {

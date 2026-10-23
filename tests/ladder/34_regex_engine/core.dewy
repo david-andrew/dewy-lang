@@ -1,5 +1,6 @@
 # Full-match Thompson-style state sets for literals, dot and postfix star.
 closure=(pattern:string states:array<bool>):>array<bool>=> {
+    $runtime_assert states.length =? pattern.length+1
     let result=states
     loop i in [0..pattern.length)  {
         if i+1 <? pattern.length  {
@@ -16,6 +17,7 @@ accepts=(pattern:string text:string):>bool=> {
     active=closure(pattern active)
     loop ch in text  {
         let next=[loop i in [0..pattern.length+1) false]
+        $runtime_assert active.length =? pattern.length+1
         loop i in [0..pattern.length)  {
             if active[i] and pattern[i] not=? "*"  {
                 if pattern[i] =? "." or pattern[i] =? ch  {
@@ -35,6 +37,7 @@ accepts=(pattern:string text:string):>bool=> {
         }
         active=closure(pattern next)
     }
+    $runtime_assert active.length =? pattern.length+1
     return active[pattern.length]
 }
 main=():>void=> {

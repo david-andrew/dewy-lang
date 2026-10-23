@@ -2,7 +2,7 @@
 # Run: tools/dewy examples/trajectory_fit.dewy
 # Test: tools/dewy test examples/trajectory_fit.dewy
 
-fit = (times:array<float64> heights:array<float64>):>array<float64> => {
+fit = (times:array<float64> heights:array<float64>):>array<float64 length=3> => {
     assert(times.length =? heights.length and times.length >=? 3)
     let design = zeros(times.length 3)
     loop i in [0..times.length) {
@@ -13,10 +13,12 @@ fit = (times:array<float64> heights:array<float64>):>array<float64> => {
     }
     let transposed = transpose(design)
     # Normal equations are adequate for these small, well-scaled sample times.
-    return solve(transposed*design transposed*heights)
+    let c = solve(transposed*design transposed*heights)
+    $runtime_assert c.length =? 3
+    return c
 }
 
-predict = (c:array<float64> t:float64):>float64 => c[0] + c[1]*t + c[2]*t*t
+predict = (c:array<float64 length=3> t:float64):>float64 => c[0] + c[1]*t + c[2]*t*t
 
 $test
 recover_a_quadratic_trajectory = () => {
@@ -35,6 +37,7 @@ matrix_and_flattened_copies_are_independent = () => {
     let saved = matrix
     let values = flatten(matrix)
     matrix[0 1] = 99.0
+    $runtime_assert values.length =? 4
     values[0] = -1.0
     $expect saved.data =? [1.0 2.0 3.0 4.0]
     $expect matrix[0 0] =? 1.0 and matrix[0 1] =? 99.0

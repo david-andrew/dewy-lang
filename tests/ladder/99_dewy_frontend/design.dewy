@@ -19,7 +19,7 @@ entries=(corpus:array<uint8>):>array<Entry>=>{
     loop line in text.split("\n") {
         if line.startswith("### ") {
             if started out.push(Entry[name bytes(lines.join("\n"))])
-            name=line[4..]
+            name=line.remove_prefix("### ")
             lines=[]
             started=true
         } else {
@@ -36,16 +36,20 @@ Place:type=[line:int64 column:int64 text:string]
 place=(source:array<uint8> offset:int64):>Place=>{
     let line=1
     let start=0
-    loop i in [0..min(offset source.length)) {
+    let limit=offset
+    if offset >? source.length limit=source.length
+    loop i in [0..limit) {
         if source[i] =? b'\n' {
             line+=1
             start=i+1
         }
     }
+    $runtime_assert 0 <=? start and start <=? source.length
     let stop=start
     loop stop <? source.length and source[stop] not=? b'\n' {stop+=1}
+    $runtime_assert start <=? stop and stop <=? source.length
     let column=1
-    loop i in [start..min(offset source.length)) {
+    loop i in [start..limit) {
         if source[i] & 0xc0 not=? 0x80 column+=1
     }
     let text=(source[start..stop) as string | none) ?? ""

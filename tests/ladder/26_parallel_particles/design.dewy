@@ -25,7 +25,7 @@ main=():>void=>{
     let center:float64=0.0
     loop p in threaded {center+=p.x}
     $runtime_assert (abs(center-496.0) <? 1e-9)
-    $runtime_assert (threaded[0].x >? 0.0)
-    $runtime_assert (threaded[end].x <? 31.0)
+    $runtime_assert (threaded.length >? 0 and threaded[0].x >? 0.0)
+    $runtime_assert (threaded.length >? 0 and threaded[end].x <? 31.0)
     printl("{threaded.length} {format(center ".6f")} {threaded =? serial}")
 }

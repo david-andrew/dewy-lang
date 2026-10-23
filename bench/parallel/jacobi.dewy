@@ -1,7 +1,9 @@
 from p"../harness.jo" import clock, size_argument
 step=(a:array<float64> @out:array<float64> first:int64 n:int64 threaded:bool):>void=>{
+    $runtime_assert n >=? 1
     let rows=out.length//n
     if rows <=? 1 {
+        $runtime_assert out.length =? n and 0 <=? first and first <? a.length and first+n <=? a.length
         if first =? 0 or first =? (n-1)*n {
             loop j in [0..n) {out[j]=a[first+j]}
         } else {
@@ -12,6 +14,7 @@ step=(a:array<float64> @out:array<float64> first:int64 n:int64 threaded:bool):>v
         return
     }
     let mid=(rows//2)*n
+    $runtime_assert 0 <=? mid and mid <=? out.length
     if threaded {
         let _joined=parallel_range(2 ($capture a $capture @out i:int64):>int64=>{
             if i =? 0 {step(a @out[..mid) first n true)}
@@ -20,11 +23,13 @@ step=(a:array<float64> @out:array<float64> first:int64 n:int64 threaded:bool):>v
         })
     } else {
         step(a @out[..mid) first n false)
+        $runtime_assert mid <=? out.length
         step(a @out[mid..] first+mid n false)
     }
 }
 main=(args:array<string>):>void=>{
     let n=size_argument(args 1024)
+    if n <? 1 return
     let a=[loop p in [0..n*n) (((p//n)+(p%n))%17) as float64]
     let tmp:array<float64>=[loop p in [0..n*n) 0.0]
     let threaded=args.length <=? 2

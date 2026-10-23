@@ -1,19 +1,20 @@
 from p"../harness.jo" import clock, size_argument
 merge=(@a:array<int64> @tmp:array<int64> mid:int64):>void=>{
     let n=a.length
-    assert(0 <=? mid and mid <=? n and n =? tmp.length)
+    $runtime_assert 0 <=? mid and mid <=? n and n =? tmp.length
     let i:int64=0 let j=mid let k:int64=0
-    loop i <? mid and j <? n {
+    loop i <? mid and j <? n and k <? n {
         if a[i] <=? a[j] {tmp[k]=a[i] i+=1} else {tmp[k]=a[j] j+=1}
         k+=1
     }
-    loop i <? mid {tmp[k]=a[i] i+=1 k+=1}
-    loop j <? n {tmp[k]=a[j] j+=1 k+=1}
+    loop i <? mid and k <? n {tmp[k]=a[i] i+=1 k+=1}
+    loop j <? n and k <? n {tmp[k]=a[j] j+=1 k+=1}
     loop p in [0..n) {a[p]=tmp[p]}
 }
 sort=(@a:array<int64> @tmp:array<int64> threaded:bool):>void=>{
     let n=a.length
     if n <=? 1 return
+    $runtime_assert tmp.length =? n
     let mid=n//2
     if threaded {
         let _joined=parallel_range(2 ($capture @a $capture @tmp i:int64):>int64=>{
@@ -23,6 +24,7 @@ sort=(@a:array<int64> @tmp:array<int64> threaded:bool):>void=>{
         })
     } else {
         sort(@a[..mid) @tmp[..mid) false)
+        $runtime_assert mid <=? a.length and mid <=? tmp.length
         sort(@a[mid..] @tmp[mid..] false)
     }
     merge(@a @tmp mid)
@@ -35,6 +37,6 @@ main=(args:array<string>):>void=>{
     sort(@a @tmp args.length <=? 2)
     let elapsed=clock()-start
     let checksum:int64=0
-    loop i in [0..n) {checksum=(checksum+a[i]*(i%97))%1000000007}
+    loop i in [0..a.length) {checksum=(checksum+a[i]*(i%97))%1000000007}
     printl"{checksum} {elapsed}"
 }

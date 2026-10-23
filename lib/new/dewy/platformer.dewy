@@ -107,7 +107,7 @@ collect = (@coins: array<Coin> at: vec2 dt: float64) :> int64 => {
 $test
 landing_and_jumping_keep_the_previous_player_value = () => {
     let map = make_level()
-    let at = markers("@")[0]
+    let at = markers("@").get(0) ?? vec2(T T)
     let p = spawn(at)
     loop i in [0..30) p = tick(p map at Pad[] 1.0/120.0).player
     $expect p.on_ground
@@ -123,7 +123,8 @@ coins_are_collected_once_and_saved_coins_stay_unchanged = () => {
     let before = coins
     $expect collect(@coins vec2(20 20) 0.01)=?1
     $expect collect(@coins vec2(20 20) 0.01)=?0
-    $expect coins[0].taken and not coins[1].taken and not before[0].taken
+    $expect coins.length=?2 and coins[0].taken and not coins[1].taken
+    $expect before.length=?2 and not before[0].taken
 }
 
 # Presentation and live game state.
@@ -153,7 +154,7 @@ make_scene = () :> Tilemap => {
     return map
 }
 let level = make_scene()
-let start = markers("@")[0]
+let start = markers("@").get(0) ?? vec2(T T)   # top left if the level has no @
 let player = spawn(start)
 let coins = [loop at in markers("o") Coin[pos = at]]
 let got = 0

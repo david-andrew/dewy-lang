@@ -19,14 +19,16 @@ encode_manifest=(m:Manifest):>array<uint8>=>{
 
 decode_manifest=(data:array<uint8>):>Manifest?=>{
     let text=data as string | none
-    if text is? none or not text.endswith("\n") return none
+    if text is? none or text.length =? 0 or not text.endswith("\n") return none
     let words=text[0..text.length-1).split(" ")
     if words.length not=? 4 or words[1] not=? "dewykv" return none
-    let body="dewykv {words[2]} {words[3]}"
-    if format(crc32(bytes(body)) "08x") not=? words[0] return none
+    let checksum=words[0]
+    let log=words[3]
+    let body="dewykv {words[2]} {log}"
     let generation=to_int(words[2])
+    if format(crc32(bytes(body)) "08x") not=? checksum return none
     if generation is? none or generation <? 1 return none
-    return Manifest[generation words[3]]
+    return Manifest[generation log]
 }
 
 # The newest valid manifest, or none for a fresh directory.

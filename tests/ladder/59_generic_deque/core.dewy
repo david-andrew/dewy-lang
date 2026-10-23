@@ -1,7 +1,7 @@
 Deque:type=<T>[storage:array<T> head:int64 count:int64]
 make_deque=<T>(capacity:int64 fill:T):>Deque<T>=>Deque<T>[[loop i in [0..capacity) fill] 0 0]
 push_back=<T>(@q:Deque<T> value:T):>bool=> {
-    if q.count =? q.storage.length  {
+    if q.count =? q.storage.length or q.storage.length =? 0  {
         return false
     }
     q.storage[(q.head+q.count)%q.storage.length]=value
@@ -9,7 +9,7 @@ push_back=<T>(@q:Deque<T> value:T):>bool=> {
     return true
 }
 push_front=<T>(@q:Deque<T> value:T):>bool=> {
-    if q.count =? q.storage.length  {
+    if q.count =? q.storage.length or q.storage.length =? 0  {
         return false
     }
     q.head=(q.head+q.storage.length-1)%q.storage.length
@@ -18,7 +18,7 @@ push_front=<T>(@q:Deque<T> value:T):>bool=> {
     return true
 }
 pop_front=<T>(@q:Deque<T>):>T|none=> {
-    if q.count =? 0  {
+    if q.count =? 0 or q.head <? 0 or q.head >=? q.storage.length  {
         return none
     }
     let value=q.storage[q.head]
@@ -27,14 +27,17 @@ pop_front=<T>(@q:Deque<T>):>T|none=> {
     return value
 }
 pop_back=<T>(@q:Deque<T>):>T|none=> {
-    if q.count =? 0  {
+    if q.count =? 0 or q.storage.length =? 0  {
         return none
     }
     q.count-=1
     return q.storage[(q.head+q.count)%q.storage.length]
 }
 len=<T>(q:Deque<T>):>int64=>q.count
-__index__=<T>(q:Deque<T> i:int64):>T=>q.storage[(q.head+i)%q.storage.length]
+__index__=<T>(q:Deque<T> i:int64):>T=> {
+    assert(q.storage.length >? 0)
+    return q.storage[(q.head+i)%q.storage.length]
+}
 main=():>void=> {
     let q=make_deque(16 0)
     let total=0

@@ -54,6 +54,7 @@ open=(key:Key nonce:Nonce aad:array<uint8> sealed:Sealed):>array<uint8>|Forged=>
 # last 8 become the ChaCha20 nonce.
 extended=(key:Key nonce:NonceX):>[key:Key nonce:Nonce]=>{
     let n=nonce as array<uint8>
+    $runtime_assert n.length =? 24
     let subkey=hchacha20(key n)
     let short:Nonce=[]
     loop i in [0..8) {

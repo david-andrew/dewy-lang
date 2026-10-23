@@ -47,11 +47,15 @@ restart=(@session:Session):>void|DiskError=>{
 # Run one line of the session script.
 step=(@session:Session line:string):>void|DiskError=>{
     let words=line.split(" ")
-    let command=words[0]
+    let command=words.get(0) ?? ""
     if command =? ".crash" {
         restart(@session) or_throw
     } else if command =? ".tear" {
-        let n=to_int(words[1]) ?? 500
+        let n=to_int(words.get(1) ?? "") ?? 500
+        if n <? 0 or n >=? 1000 {
+            printl("tear takes thousandths in [0..1000)")
+            return
+        }
         session.store.disk.fault=Fault['append' thousandths=n]
     } else if command =? ".damage" {
         let disk=session.store.disk
@@ -68,7 +72,7 @@ step=(@session:Session line:string):>void|DiskError=>{
             printl("compacted keys={session.store.length()} generation={session.store.manifest.generation}")
         }
     } else if command =? ".crash-compact" {
-        session.store.disk.fault=if words[1] =? "before_cleanup" Fault['before_cleanup'] else Fault['before_manifest']
+        session.store.disk.fault=if words.get(1) ?? "" =? "before_cleanup" Fault['before_cleanup'] else Fault['before_manifest']
         let done=session.store.compact()
         printl(if done is? Crashed "crashed {done.step}" else "compaction finished")
         restart(@session) or_throw

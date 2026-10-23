@@ -1,8 +1,10 @@
 from p"../harness.jo" import clock, size_argument
 # 32x32 output tiles; k is traversed in 32-element blocks.
 tile=(a:array<float64> b:array<float64> n:int64 id:int64):>array<float64>=>{
-    let tiles=(n+31)//32 let row=(id//tiles)*32 let col=(id%tiles)*32
     let out:array<float64>=[loop i in [0..1024) 0.0]
+    let tiles=(n+31)//32
+    if tiles <? 1 return out
+    let row=(id//tiles)*32 let col=(id%tiles)*32
     loop kk in [0..tiles) {loop i in [0..min(32 n-row)) {
         loop k in [kk*32..min((kk+1)*32 n)) {
             let v=a[(row+i)*n+k]

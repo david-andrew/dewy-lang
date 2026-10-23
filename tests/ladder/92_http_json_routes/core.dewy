@@ -25,7 +25,7 @@ parse_request=(wire:string):>Request?=>{
     let lines:array<string>=[]
     loop source_line in wire.split("\n") {
         if source_line.length >? 0 and source_line[source_line.length-1] =? '\r' {
-            lines.push(source_line[0..source_line.length-1))
+            lines.push(source_line[$clamp 0..source_line.length-1))
         } else {
             lines.push(source_line)
         }
@@ -49,7 +49,7 @@ parse_request=(wire:string):>Request?=>{
             break
         }
     }
-    if separator <? 0 return none
+    if separator <? 0 or separator >=? lines.length return none
     let body=""
     loop i in [separator+1..lines.length) {
         if i >? separator+1 body="{body}\n"

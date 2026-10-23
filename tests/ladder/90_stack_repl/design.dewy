@@ -24,7 +24,10 @@ words=(text:string):>array<string>=>{
 }
 digit_index=(text:string):>int64<i => i >=? 0 and i <? 10> | none=>{
     loop digit in [0..10) {
-        if text =? "{digit}" return digit
+        if text =? "{digit}" {
+            let found:int64<i => i >=? 0 and i <? 10>=digit
+            return found
+        }
     }
     return none
 }
@@ -44,7 +47,9 @@ number=(text:string):>int64<i => i in? -10000009..10000009> | none=>{
         if value >? 1000000 return none
         value=value*10+digit
     }
-    return value*sign
+    if value <? 0 or value >? 10000009 return none
+    let result:int64<i => i in? -10000009..10000009>=if sign <? 0 -value else value
+    return result
 }
 binary=(@state:Machine op:string):>bool=>{
     if state.stack.length <? 2 return false

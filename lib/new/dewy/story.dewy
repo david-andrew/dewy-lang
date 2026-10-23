@@ -134,8 +134,8 @@ draw = () :> void => {
         text_rich(reading.step.text vec2(90 530) 28 WHITE width = 1100 chars = int64(typed))
         text("Space / Enter / click to continue" vec2(90 650) 18 rgba(1 1 1 0.5))
     } else if reading.step.kind=?StoryKind.choice {
-        loop i in [0..reading.step.choices.length) {
-            if hud_button(Rect(340 220+float32(i)*80 600 64) "{i+1}. {reading.step.choices[i]}") {
+        loop i in 0.. and choice in reading.step.choices {
+            if hud_button(Rect(340 220+float32(i)*80 600 64) "{i+1}. {choice}") {
                 choose(@reading i)
                 typed = 0.0
                 break

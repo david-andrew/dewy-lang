@@ -125,6 +125,7 @@ execute=(@db:Database q:Query):>string=>{
     }
     if index is? none return "changed 0"
     if q.kind =? "UPDATE" {
+        if index <? 0 or index >=? db.rows.length return "changed 0"
         db.rows[index].score=q.value
         return "changed 1"
     }
@@ -147,7 +148,7 @@ selfcheck=():>void=>{
     $runtime_assert run(@db "BEGIN") =? "error transaction"
     $runtime_assert run(@db "UPDATE 1 9") =? "changed 1"
     $runtime_assert run(@db "ROLLBACK") =? "rollback"
-    $runtime_assert db.rows[0].score =? 5
+    $runtime_assert db.rows.length >? 0 and db.rows[0].score =? 5
     $runtime_assert run(@db "COMMIT") =? "error transaction"
     $runtime_assert run(@db "DELETE 9") =? "changed 0"
     $runtime_assert run(@db "UPDATE 9 5") =? "changed 0"

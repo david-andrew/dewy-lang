@@ -37,13 +37,12 @@ small_sigma1=(x:uint32):>uint32 & no_effects=>rotr(x 17) xor rotr(x 19) xor (x >
 choose=(e:uint32 f:uint32 g:uint32):>uint32 & no_effects=>(e and f) xor ((not e) and g)
 majority=(a:uint32 b:uint32 c:uint32):>uint32 & no_effects=>(a and b) xor (a and c) xor (b and c)
 
-load32be=(b:array<uint8> at:int64):>uint32=>((b[at] as uint32) << 24) or ((b[at+1] as uint32) << 16) or ((b[at+2] as uint32) << 8) or (b[at+3] as uint32)
-
 # Fold one 64-byte block starting at `at` into the chaining value.
-compress=(@h:Words8 data:array<uint8> at:int64):>void=>{
+compress=(@h:Words8 data:array<uint8> at:int64<0 <=? at and at+64 <=? data.length>):>void=>{
     let w:Schedule=[]
-    loop i in [0..16) {
-        w[i]=load32be(data at+4*i)
+    # Big-endian words: each byte shifts into its word from the right.
+    loop j in [at..at+BLOCK) and i in [0..BLOCK) {
+        w[i//4]=(w[i//4] << 8) or (data[j] as uint32)
     }
     loop i in [16..64) {
         w[i]=small_sigma1(w[i-2])+w[i-7]+small_sigma0(w[i-15])+w[i-16]
@@ -81,9 +80,13 @@ Sha256:type=[
         length+=data.length as uint64
         let at=0
         # Top up a partial block first.
-        if pending.length >? 0 {
-            let take=min(BLOCK-pending.length data.length)
-            pending.extend(data[0..take))
+        let held=pending.length
+        if held >? 0 {
+            $runtime_assert held <? BLOCK
+            let take=BLOCK-held
+            if take >? data.length take=data.length
+            let piece=data[0..take).copy
+            pending.extend(piece)
             at=take
             if pending.length =? BLOCK {
                 compress(@h pending 0)
@@ -91,11 +94,15 @@ Sha256:type=[
             }
         }
         # Whole blocks straight from the input, without copying them.
-        loop data.length-at >=? BLOCK {
+        $runtime_assert at >=? 0
+        loop at <=? data.length-BLOCK {
             compress(@h data at)
             at+=BLOCK
         }
-        if at <? data.length pending.extend(data[at..data.length))
+        if at <? data.length {
+            let piece=data[at..data.length).copy
+            pending.extend(piece)
+        }
     }
 
     finish=():>array<uint8>=>{
@@ -110,7 +117,7 @@ Sha256:type=[
         }
         let state=h
         let at=0
-        loop at <? tail.length {
+        loop at <=? tail.length-BLOCK {
             compress(@state tail at)
             at+=BLOCK
         }

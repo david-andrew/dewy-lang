@@ -9,14 +9,17 @@ main=():>void=>{
     let input=[loop i in [0..128) i]
     let output=parallel_map(input (n)=>work(n))
     let total=0
-    loop i in [0..input.length) {
-        assert(output[i] =? work(input[i]))
-        total+=output[i]
+    let results=output
+    loop i in [0..results.length) {
+        assert(results[i] =? work(input[i]))
+        total+=results[i]
     }
     let saved=output
     parallel_update(@output (n)=>n+1)
-    loop i in [0..output.length) {
-        assert(output[i] =? saved[i]+1)
+    let updated=output
+    $runtime_assert updated.length =? saved.length
+    loop i in [0..updated.length) {
+        assert(updated[i] =? saved[i]+1)
     }
     let nested=parallel_range(8 (i:int64)=>{
         let inner=parallel_range(4 (j:int64)=>i+j)

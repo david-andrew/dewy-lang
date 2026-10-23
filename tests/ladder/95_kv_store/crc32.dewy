@@ -13,7 +13,7 @@ table=():>array<uint32>=>{
     return t
 }
 
-const TABLE=table()
+const TABLE:array<uint32 length=256>=table()
 
 # Continue a running CRC over more bytes; start from 0.
 crc32_update=(crc:uint32 data:array<uint8>):>uint32=>{
@@ -27,7 +27,7 @@ crc32_update=(crc:uint32 data:array<uint8>):>uint32=>{
 crc32=(data:array<uint8>):>uint32=>crc32_update(0 data)
 
 # The checksum of a byte range without copying it out.
-crc32_range=(data:array<uint8> start:int64 stop:int64):>uint32=>{
+crc32_range=(data:array<uint8> start:int64<(>=? 0)> stop:int64<(<=? data.length)>):>uint32=>{
     let c:uint32=0xffffffff
     loop i in [start..stop) {
         c=TABLE[((c xor (data[i] as uint32)) and 255) as int64] xor (c >> 8)

@@ -46,7 +46,7 @@ hashes=():>void=>{
     let size=1
     loop fed <? 1000000 {
         let take=min(size 1000000-fed)
-        hasher.update(piece[0..min(take 1000)))
+        hasher.update(piece[$clamp 0..min(take 1000)))
         fed+=min(take 1000)
         size=size%997+61
     }
@@ -124,6 +124,7 @@ aead=():>void=>{
     loop at in [0 sealed.ciphertext.length-1] {
         loop bit in [0..8) {
             let forged=sealed
+            $runtime_assert at >=? 0 and at <? forged.ciphertext.length
             forged.ciphertext[at]=forged.ciphertext[at] xor ((1 << bit) as uint8)
             attempts+=1
             if open(key nonce aad forged) is? Forged rejected+=1
@@ -222,6 +223,7 @@ channels=():>void=>{
         let packet=packets[(n*29)%48]
         if n%11 =? 5 {
             let tampered=packet
+            $runtime_assert tampered.sealed.ciphertext.length >? 0
             tampered.sealed.ciphertext[0]=tampered.sealed.ciphertext[0] xor 0x20
             deliver(tampered)
         }
@@ -268,6 +270,7 @@ workload=():>void=>{
             printl("session {session}: hkdf failed")
             return
         }
+        $runtime_assert keys.length =? 44
         let key:Key=keys[0..32)
         let base:array<uint8>=keys[32..44)
         loop m in [0..24) {

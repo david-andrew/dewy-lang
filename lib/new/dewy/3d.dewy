@@ -112,7 +112,7 @@ shoot = () :> void => {
     let hit = world.raycast(origin origin+direction*1000.0)
     let blocked_at = match hit { h: physics3d.Hit => h.fraction*1000.0 <none> => 1000.0 }
     let best = shot_target(orbs origin direction run_time blocked_at)
-    if best>=?0 {
+    if best>=?0 and best<?orbs.length {
         orbs[best].pop = 0.001
         hits += 1
         play(snd_pop 0.6 pitch = 1.0+0.1*hits)

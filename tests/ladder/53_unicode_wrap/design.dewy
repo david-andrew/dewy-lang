@@ -50,7 +50,7 @@ main=():>void=> {
     $runtime_assert ("é".length =? 1)
     $runtime_assert ("👩‍💻".length =? 1)
     $runtime_assert ("🇺🇸".length =? 1)
-    $runtime_assert (lines[0] =? "café")
+    $runtime_assert (lines.length >? 0 and lines[0] =? "café")
     let long=wrap("αβγδεζηθ" 3)
     $runtime_assert (long =? ["αβγ" "δεζ" "ηθ"])
     $runtime_assert (wrap("  a   b " 3) =? ["a b"])
@@ -62,7 +62,7 @@ main=():>void=> {
     }
     let saved=lines
     lines[0]="changed"
-    $runtime_assert (saved[0] =? "café")
+    $runtime_assert (saved.length >? 0 and saved[0] =? "café")
     let flags=wrap("🇺🇸🇨🇦 🇯🇵" 2)
     $runtime_assert (flags.length =? 2)
     $runtime_assert (flags[0].length =? 2)

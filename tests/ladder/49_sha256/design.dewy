@@ -12,11 +12,13 @@ digest=(input:array<uint8>):>array<uint32>=> {
     }
     let h:array<uint32>=[1779033703 3144134277 1013904242 2773480762 1359893119 2600822924 528734635 1541459225]
     let block=0
-    loop block <? data.length  {
+    loop block <=? data.length-64  {
         let w:array<uint32>=[loop i in [0..64) 0 as uint32]
+        let chunk=data[block..block+64)
+        $runtime_assert chunk.length =? 64
         loop i in [0..16)  {
-            let at=block+4*i
-            w[i]=((data[at] as uint32) << 24) or ((data[at+1] as uint32) << 16) or ((data[at+2] as uint32) << 8) or (data[at+3] as uint32)
+            let at=4*i
+            w[i]=((chunk[at] as uint32) << 24) or ((chunk[at+1] as uint32) << 16) or ((chunk[at+2] as uint32) << 8) or (chunk[at+3] as uint32)
         }
         loop i in [16..64)  {
             let x=w[i-15]

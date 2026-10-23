@@ -138,22 +138,23 @@ robe_vertices=(time: float64 speed: float64):>array<Vertex3D>=>{
 ribbon_vertices=(pts: array<vec3> width: float32 time: float64):>array<Vertex3D>=>{
     let vs: array<Vertex3D> = []
     loop k in [0..pts.length) {
-        let prev = pts[max(k - 1 0)]
-        let next = pts[min(k + 1 pts.length - 1)]
+        let p = pts[k]
+        let prev = if k >? 0 pts[k - 1] else p
+        let next = if k + 1 <? pts.length pts[k + 1] else p
         let dir = normalize(next - prev + vec3(0 0.0001 0))
         let side = normalize(cross(dir vec3(0 1 0)) + vec3(0.0001 0 0))
         let n = normalize(cross(side dir))
         let taper = float32(1.0 - 0.6 * float64(k) / float64(max(pts.length - 1 1)))
         let glow = float32(0.65 + 0.35 * sin(float64(k) * 1.3 - time * 3.0))
         let c = vec4(glow glow glow 1)
-        vs.push(Vertex3D(pts[k] + side * (width * taper) n vec2(0 float32(k)) c))
-        vs.push(Vertex3D(pts[k] - side * (width * taper) n vec2(1 float32(k)) c))
+        vs.push(Vertex3D(p + side * (width * taper) n vec2(0 float32(k)) c))
+        vs.push(Vertex3D(p - side * (width * taper) n vec2(1 float32(k)) c))
     }
     vs
 
 # both windings: cloth is seen from both sides
 }
-ribbon_indices=(n: int64):>array<uint32>=>{
+ribbon_indices=(n: int64<0 <=? n and n <=? 65536>):>array<uint32>=>{
     let idx: array<uint32> = []
     loop k in [0..n - 1) {
         let a = uint32(k * 2)

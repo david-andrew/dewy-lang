@@ -23,6 +23,7 @@ main=():>void=>{
 
     let doubled=[loop value in values value*2]
     let selected=[loop value in doubled if value >? 40 value]
+    $runtime_assert selected.length >? 0
     printl"Filtered comprehension: {selected[0]}"
 
     let lengths=[loop word in ["café" "🙂"] word->word.length]

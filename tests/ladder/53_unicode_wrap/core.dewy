@@ -50,7 +50,7 @@ main=():>void=> {
     assert("é".length =? 1)
     assert("👩‍💻".length =? 1)
     assert("🇺🇸".length =? 1)
-    assert(lines[0] =? "café")
+    assert(lines.length >? 0 and lines[0] =? "café")
     let long=wrap("αβγδεζηθ" 3)
     assert(long =? ["αβγ" "δεζ" "ηθ"])
     assert(wrap("  a   b " 3) =? ["a b"])
@@ -62,7 +62,7 @@ main=():>void=> {
     }
     let saved=lines
     lines[0]="changed"
-    assert(saved[0] =? "café")
+    assert(saved.length >? 0 and saved[0] =? "café")
     let flags=wrap("🇺🇸🇨🇦 🇯🇵" 2)
     assert(flags.length =? 2)
     assert(flags[0].length =? 2)

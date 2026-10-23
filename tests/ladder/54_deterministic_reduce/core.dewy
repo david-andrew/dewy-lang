@@ -5,7 +5,7 @@ leaf_summary=(chunk:array<int64>):>Summary=> {
     loop x in chunk  {
         result.sum+=x
         result.count+=1
-        result.hash=result.hash*257+(x as uint64)
+        result.hash=result.hash*257+wrap<uint64>(x)
         result.power*=257
     }
     return result
@@ -16,13 +16,13 @@ reduce_tree=(input:array<int64> chunk_size:int64):>Summary=> {
     let at=0
     loop at <? input.length  {
         let chunk:array<int64>=[]
-        loop j in [0..chunk_size)  {
-            if at+j <? input.length  {
-                chunk.push(input[at+j])
-            }
+        let k=at
+        loop k <? input.length and k-at <? chunk_size  {
+            chunk.push(input[k])
+            k+=1
         }
         chunks.push(chunk)
-        at+=chunk_size
+        at=k
     }
     if chunks.length =? 0  {
         return Summary[0 0 0 1]
@@ -42,6 +42,7 @@ reduce_tree=(input:array<int64> chunk_size:int64):>Summary=> {
         }
         level=next
     }
+    $runtime_assert level.length >? 0
     return level[0]
 }
 main=():>void=> {

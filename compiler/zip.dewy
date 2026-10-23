@@ -22,6 +22,7 @@ crc32=(b:array<uint8>):>int64=>{
         }
     }
     let c:int64=0xFFFFFFFF
+    $runtime_assert crc_table.length =? 256
     loop x in b {c = crc_table[(c xor int64(x)) & 255] xor (c >> 8)}
     c xor 0xFFFFFFFF
 }
@@ -41,8 +42,11 @@ put32=(@b:array<uint8> v:int64):>void=>{
 write_zip=(path:string names:array<string> contents:array<array<uint8>>):>bool=>{
     let out:array<uint8>=[]
     let central:array<uint8>=[]
+    $runtime_assert contents.length =? names.length
     loop i in [0..names.length) {
         let data=contents[i]
+        let text=names[i]
+        let name=text as array<uint8>
         let off=out.length
         let crc=crc32(data)
         let packed=deflate(data)
@@ -51,7 +55,6 @@ write_zip=(path:string names:array<string> contents:array<array<uint8>>):>bool=>
             packed=data
             method=0
         }
-        let name=names[i] as array<uint8>
         let header=(sig:int64 at_central:bool):>array<uint8>=>{
             let h:array<uint8>=[]
             put32(@h sig)

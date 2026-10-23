@@ -21,7 +21,8 @@ main=():>void=>{
     let quoted="name,value\n\"east, coast\",7\n"
     assert(roundtrip(input))
     assert(roundtrip(quoted))
-    assert(csv_rows(quoted)[1][0] =? "east, coast")
+    let rows=csv_rows(quoted)
+    assert(rows.length >? 1 and rows[1].length >? 0 and rows[1][0] =? "east, coast")
     assert(summarize(input) =? 12.0)
     assert(summarize("region,units,price\n") =? 0.0)
     let rows=csv_rows(input)

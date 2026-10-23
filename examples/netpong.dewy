@@ -106,12 +106,14 @@ state = () :> string => "s {ball.x} {ball.y} {left_y} {right_y} {score_l} {score
 read_state = (t: string) => {
     let w = split(t " ")
     if w.length <? 8 { return }
-    ball = vec2(float32(to_float(w[1]) ?? 0.0) float32(to_float(w[2]) ?? 0.0))
+    let x = to_float(w[1]) ?? 0.0
+    let y = to_float(w[2]) ?? 0.0
     left_y = to_float(w[3]) ?? left_y
     right_y = to_float(w[4]) ?? right_y
     score_l = to_int(w[5]) ?? score_l
     score_r = to_int(w[6]) ?? score_r
     let k = to_int(w[7]) ?? int(Screen.playing)
+    ball = vec2(float32(x) float32(y))
     if k =? int(Screen.over) { screen = Screen.over }
     else if k =? int(Screen.playing) { screen = Screen.playing }
 }
@@ -155,7 +157,7 @@ network = () => {
             other = -1
         }
         else if hosting {
-            if e.text.startswith("m ") { right_move = to_float(e.text[2..]) ?? 0.0 }
+            if e.text.startswith("m ") { right_move = to_float(e.text.remove_prefix("m ")) ?? 0.0 }
         }
         else if e.text.startswith("s ") { read_state(e.text) }
     }
