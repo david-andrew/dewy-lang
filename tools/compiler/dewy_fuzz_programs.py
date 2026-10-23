@@ -1141,10 +1141,13 @@ class Machine:
             env.vars[s.name] = copy.deepcopy(self.eval(s.value, env))
         elif isinstance(s, Assign):
             place = self.place(s.target, env, store=not s.op)
+            # (`x += f()` reads x before f runs, as `x + f()` does: a closure
+            # sharing x does not change the value already read)
+            old = place.get() if s.op else None
             value = self.eval(s.value, env)
             if s.op:
                 ty = s.target.ty
-                value = Bin(ty, s.op, Lit(ty, place.get()), Lit(ty, value)).eval(self, env)
+                value = Bin(ty, s.op, Lit(ty, old), Lit(ty, value)).eval(self, env)
             place.set(value)
         elif isinstance(s, Do):
             self.eval(s.expr, env)
