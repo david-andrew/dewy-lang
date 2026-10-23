@@ -1,6 +1,6 @@
 # exit: 42
-from bigint import BigInt
-choose=((value:int64)=>1)&((value:uint64)=>2)&((value:BigInt)=>3)
-run=()=>if choose(42) =? 1 and choose(18446744073709551615) =? 2
+# (bigint is int: among overloads an integer literal takes the exact type)
+choose=((value:int64)=>1)&((value:uint64)=>2)&((value:bigint)=>3)
+run=()=>if choose(42) =? 3 and choose(18446744073709551615) =? 3
 and choose(18446744073709551616) =? 3 and choose(-9223372036854775809) =? 3 42 else 1
 main=()=>exit(run())

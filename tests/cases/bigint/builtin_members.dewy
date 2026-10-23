@@ -1,0 +1,14 @@
+# modes: native web
+main=():>void=>{
+    let numerator:bigint=-123456789012345678901234567890
+    let denominator:bigint=9876543210987654321
+    let parts=numerator.divmod(denominator)
+    printl"{parts.quotient} {parts.remainder} {parts.quotient*denominator+parts.remainder =? numerator}"
+    printl"{numerator.gcd(30)} {gcd(0 0)}"
+    printl"{numerator.to_int64()} {bigint(-9223372036854775808).to_int64()} {bigint(18446744073709551615).to_uint64()} {bigint(-1).to_uint64()}"
+    printl"{numerator.to_float64()} {numerator.to_float32()}"
+    printl"{(1/3).to_float32()} {(1/2).to_float64()}"
+    let q=((-7)/3).divmod(2/5)
+    printl"{q}"
+    printl"{to_int("12x")} {to_int("-99999999999999999999999")}"
+}

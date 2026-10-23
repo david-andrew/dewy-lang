@@ -888,7 +888,7 @@ Mathematical shifts reject negative counts. A right shift of at least 64 bits
 returns the sign continuation (zero or −1); a left shift that cannot fit fails,
 except that shifting zero by any nonnegative count remains zero.
 Literals outside the checked `int` range need an explicit fixed-width context
-that fits, or an explicit `BigInt` annotation.
+that fits, or `int` (`bigint`).
 
 For fixed-width integers, shift counts are unsigned: a negative literal count
 is an error, and a negative runtime count acts as a huge one. Shifting a
@@ -915,7 +915,7 @@ Integer powers use a nonnegative `int64` exponent. `int` powers check each
 product; fixed-width powers retain wrapping multiplication. A negative constant
 exponent gives a `rational`, `2^(-2)` is `1/4`; a negative runtime exponent panics
 with guidance to use an explicit rational or floating base. Float powers use the inherited
-floating math library. `BigInt` powers remain exact for nonnegative exponents;
+floating math library. `bigint` powers remain exact for nonnegative exponents;
 `rational` supports signed exponents. All these types define zero to the zero
 power as one.
 
@@ -947,7 +947,7 @@ The base dimensions are `Time`, `Length`, `Mass`, `Current`, `Temperature`,
 kilograms, amperes, kelvins, moles, candelas, and whole turns. Unit scales are
 exact: `3km =? 3000m`, `300ms =? 3s/10`, and `90deg =? turn/4`; `°` also
 spells degrees. Fractions use `rational`, and quantities also support machine
-integers, checked `int`, `BigInt`, `float32`, and `float64`. A floating annotation rounds an
+integers, checked `int` (`bigint`), `float32`, and `float64`. A floating annotation rounds an
 exact scale to that representation.
 
 Addition, subtraction, and comparisons require identical dimensions.
@@ -1018,33 +1018,33 @@ remains unimplemented.
 ## Exact large integers
 
 ```dewy
-from bigint import BigInt, bigint, parse_bigint
 main=():>void=>{
-    let value:BigInt=123456789012345678901234567890
+    let value:bigint=123456789012345678901234567890
     printl"{value*value}"
     printl"{bigint(2)^256}"
-    let parts=(-value).divmod(bigint(7))
+    let parts=(-value).divmod(7)
     printl"{parts.quotient} {parts.remainder}"
+    printl"{to_int("-00042") ?? 0} {to_int("12x") ?? 0}"  # -42 0
 }
 ```
 
-Oversized integer literals adopt an explicitly expected `BigInt` type. Decimal and all supported based literals work, including digit
-separators. Their digits are converted at compilation, not parsed at runtime.
-Small literals also adopt an expected `BigInt` type, for example
-`let value:BigInt=42`, typed arguments, record fields and arrays. Import `BigInt`
-when naming its type. Annotate mixed-size literal arrays as `array<BigInt>`;
-unannotated ordinary integer arrays infer `array<int>`.
+`bigint` is built in: it names `int`'s arbitrary-precision form and is the same
+type, so nothing is imported, any integer converts to it (`bigint(word)`), and
+an oversized literal fits it. Decimal and all supported based literals work,
+including digit separators; their digits are converted at compilation.
 
-`bigint` constructs from `int64`, `uint64`, `BigInt` or signed decimal text. `parse_bigint`
-returns `BigInt|none` for text that may be invalid; the constructor panics on
-invalid text. Parsing is strict: an optional leading `+`/`-` and ASCII decimal
-digits, with no whitespace or separators. Leading zeros are accepted.
+`to_int(text)` reads decimal text and returns `bigint|none`: an optional
+leading `+`/`-` and ASCII decimal digits, leading zeros accepted, no whitespace
+or separators. Invalid text gives `none`, as do more digits than `max_digits=`
+allows. There is no constructor from text: `bigint("12")` is an error that
+points at `to_int`.
 
-`BigInt` supports `+`, `-`, `*`, unary `-`, comparisons, `//` and `%`, including
-mixed signed/unsigned machine-word operands in either order. Division rounds
-down and the remainder has the divisor's sign. `.divmod(other)` computes both
-results together. Parenthesize a negative numerator as `(-value)//other`:
-Dewy's unary minus binds below multiplication and division.
+`+`, `-`, `*`, unary `-`, comparisons, `//` and `%` mix with signed and
+unsigned machine words in either order. Division rounds down and the remainder
+has the divisor's sign; the divisor must be proven nonzero.
+`.divmod(other)` gives both as `[quotient remainder]`. Parenthesize a negative
+numerator as `(-value)//other`: Dewy's unary minus binds below multiplication
+and division.
 
 `and`, `or`, `xor` and `not` operate on bits with infinite two's-complement sign
 extension, including mixed signed/unsigned machine words. Thus `not bigint(0)`
@@ -1052,19 +1052,17 @@ is `-1`. Prefix `~` is `not` binding as tightly as unary minus: `~flags & 3`
 is `(not flags) & 3`. `<<` and `>>` take a nonnegative `int64` count; right shift rounds down
 for negative values, so `bigint(-3) >> 1` is `-2`. Shifting beyond all magnitude
 bits yields `0` for nonnegative values or `-1` for negative ones. Negative shift
-counts panic. Shift compound assignments (`<<=`, `>>=`) work too, as do
+counts are errors: a constant one at compilation, a runtime one a panic. Shift compound assignments (`<<=`, `>>=`) work too, as do
 `&=`, `|=`, `and=`, `or=` and `xor=` (on integers, booleans and sets).
 `a and= f()` means `a = a and f()`, so on booleans `and=`/`or=` short-circuit:
 `f()` runs only when it can change `a`.
 
 `^` (also `.pow(nonnegative_exponent)`), `.abs()` and `.gcd(other)` operate exactly;
-`gcd(0, 0)` is zero and `0.pow(0)` is one. Division by zero and negative powers
-panic. `.to_int64()` and `.to_uint64()` return an optional word, never silently
-truncate. `.to_float32()` and `.to_float64()` round to the nearest floating
-value, with ties to even; overflow produces signed infinity. Interpolation
-formats decimal text. Values are independent copies and
-can be dictionary keys; construct them through numeric literals or `bigint`, keeping `_sign` and
-`_limbs` as internal representation details.
+`gcd(0 0)` is zero and `0.pow(0)` is one. `.to_int64()` and `.to_uint64()`
+return an optional word, never silently truncate. `.to_float32()` and
+`.to_float64()` round to the nearest floating value, with ties to even; overflow
+produces signed infinity. Interpolation formats decimal text. Values are
+independent copies and can be dictionary keys.
 
 Ordinary fixed-width arithmetic does not automatically widen on overflow.
 Convert a word variable with `bigint(word)` when exact arithmetic is needed.
@@ -1088,7 +1086,7 @@ main=():>void=>{
 ```
 
 `rational` is the exact fraction type, built in like `int`. Dividing two
-integers or `BigInt` values with `/` gives a `rational`, including mixed
+integers with `/` gives a `rational`, including mixed
 signed/unsigned words, and the full-width values are preserved. `4/2` is still
 a fraction value, formatted as `2`. Use `//` for a whole-number quotient.
 Floating operands retain floating division. Decimal literals are exact
@@ -1104,7 +1102,7 @@ expected: arguments, results, record fields and container elements.
 Constant fractions and decimal literals are reduced at compilation; a constant
 zero divisor of `/` is a compile error.
 
-`rational(numerator denominator)` accepts integers, `BigInt` values, or
+`rational(numerator denominator)` accepts integers or
 decimal integer text for its parts; the denominator defaults to one. A single
 string accepts an integer or `numerator/denominator`. `parse_rational(text)`
 (imported from `rational`) returns `rational|none` for invalid input, including
@@ -1137,8 +1135,8 @@ editor offers the fix). Sums (`total+=0.1`), whole-number factors (`n*3`),
 lone reciprocals (`1/x`) and annotated bindings (`let q:rational=...`) do not
 warn.
 
-Arithmetic `+`, `-`, `*`, `/`, comparisons, and unary minus work with fractions,
-`BigInt`, and integers in either order. `//` returns an `int` floor quotient;
+Arithmetic `+`, `-`, `*`, `/`, comparisons, and unary minus work with fractions
+and integers in either order. `//` returns an `int` floor quotient;
 `%` returns a `rational` remainder with the divisor's sign. `.divmod(other)`
 returns both. `.floor()`, `.ceil()` and `.round()` return `int`, and `int(q)`
 truncates toward zero. Exact numbers round as people do, a half away from zero:

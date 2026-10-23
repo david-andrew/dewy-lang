@@ -3,7 +3,7 @@
 # and a big integer beyond, so small fractions keep word arithmetic and no
 # operation overflows. Reduction strategies are adapted from the old
 # library/rational.dewy; representation and error handling use the compact core.
-from bigint import BigInt, bigint, parse_bigint, _ratio_float_bits
+from bigint import BigInt, _big, _parse_big, _ratio_float_bits
 
 # `_shown` is how the value prints, which never affects its value (equality and
 # hashing ignore it): bit 1 when decimal literals took part, bit 2 when a
@@ -16,7 +16,11 @@ RationalWord:type=[numerator:int64=0 denominator:int64=1 _shown:int64=0]
 
 _integer = ((value:int):>int=>value)
     & ((value:BigInt):>int=>value)
-    & ((value:string):>int=>bigint(value))
+    & ((value:string):>int=>{
+        let parsed=_parse_big(value)
+        if parsed is? none panic("invalid decimal integer")
+        return parsed
+    })
 
 # Euclid on machine words while both parts are immediate words (below 2^62:
 # a wider bound would itself be a big constant), the big-integer gcd beyond.
@@ -77,11 +81,11 @@ _from_float=(value:float64):>Rational=>{
 parse_rational=(text:string):>Rational|none=>{
     let parts=text.split("/")
     if parts.length <? 1 or parts.length >? 2 return none
-    let numerator=parse_bigint(parts[0])
+    let numerator=_parse_big(parts[0])
     if numerator is? none return none
-    let denominator=bigint(1)
+    let denominator=_big(1)
     if parts.length =? 2 {
-        let parsed=parse_bigint(parts[1])
+        let parsed=_parse_big(parts[1])
         if parsed is? none or parsed =? 0 return none
         denominator=parsed
     }
@@ -262,7 +266,7 @@ _decimal_text=(numerator:int denominator:int repeats:bool):>string=>{
     let digits=""
     if lead >? 0 {
         let scale:int=1
-        if lead <=? 18 {loop _ in [0..lead) scale=scale*10} else scale=bigint(10)^lead
+        if lead <=? 18 {loop _ in [0..lead) scale=scale*10} else scale=_big(10)^lead
         let scaled=remainder*scale
         let head="{scaled//denominator}"
         remainder=scaled%denominator

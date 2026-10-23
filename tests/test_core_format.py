@@ -69,8 +69,7 @@ let λ=notin
 printl((is ?? 0) in? [20 21]) printl(λ not in? [22])
 return (is ?? 0)+λ}
 main=():>void=>{printl(probe(20 21 22));}''',
-    'decimal-literals': '''from bigint import bigint
-main=():>void=>{
+    'decimal-literals': '''main=():>void=>{
 printl(0d4_2.0_0E+0_0) printl(2.1(10+10))
 printl(uint64(0d18_446_744_073_709_551_615)) printl(bigint(18_446_744_073_709_551_616))
 printl(-0d9_223_372_036_854_775_808)

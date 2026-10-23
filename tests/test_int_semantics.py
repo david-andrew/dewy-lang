@@ -9,9 +9,8 @@ from tests.test_core import Scripts, compiler
 
 MIN = -(1 << 63)
 MAX = (1 << 63) - 1
-SOURCE = '''from bigint import BigInt, bigint
-const WORD_MAX=uint64.max
-big_echo=(n:BigInt):>BigInt=>n
+SOURCE = '''const WORD_MAX=uint64.max
+big_echo=(n:bigint):>bigint=>n
 kind=(x:int):>string=>"int"
 kind=(x:int64):>string=>"int64"
 identity=<T>(x:T):>T=>x
@@ -50,7 +49,7 @@ main=(argv:array<string>)=>{
     if op=?"parse" {printl"{to_int(argv[2])}" return}
     if op=?"bigint-context" {printl"{big_echo(18446744073709551616)}" return}
     if op=?"bigint-word" {printl"{bigint(18446744073709551615)}" return}
-    if op=?"bigint" {let n:BigInt=18446744073709551616 printl"{n}" return}
+    if op=?"bigint" {let n:bigint=18446744073709551616 printl"{n}" return}
     if op=?"float-nan" {let f=float64(x) printl"{int(f/f)}" return}
     if op=?"compound" {let v=x v+=y printl"{v}" return}
     if op=?"fixed-div" {printl"{int64(x)//int64(y)}" return}

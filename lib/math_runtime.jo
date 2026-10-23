@@ -8,7 +8,7 @@ __mi_payload = (value: __dewy_int) -> *__bi.BigInt:
 __mi_word = (word: int) -> __dewy_int:
     if word >= -4611686018427387904 and word <= 4611686018427387903:
         return (word << 1) as __dewy_int
-    __mi_pack(__bi.bigint(word))
+    __mi_pack(__bi._big(word))
 
 __mi_pack = (value: __bi.BigInt) -> __dewy_int:
     if let word = __bi.to_int64(value):
@@ -20,12 +20,12 @@ __mi_pack = (value: __bi.BigInt) -> __dewy_int:
     ((p as int) | 1) as __dewy_int
 
 __mi_big = (value: __dewy_int) -> __bi.BigInt:
-    if (value as int) & 1 == 0: return __bi.bigint((value as int) >> 1)
+    if (value as int) & 1 == 0: return __bi._big((value as int) >> 1)
     __mi_payload(value)[0]
 
 __mi_unsigned = (value: u64) -> __dewy_int:
     if value <= u64(9223372036854775807): return __mi_word(int(value))
-    __mi_pack(__bi.bigint(value))
+    __mi_pack(__bi._big(value))
 
 __mi_slow = (a: __dewy_int, b: __dewy_int, operation: int) -> __dewy_int:
     x = __mi_big(a)
@@ -36,7 +36,7 @@ __mi_slow = (a: __dewy_int, b: __dewy_int, operation: int) -> __dewy_int:
     if operation == 3 or operation == 4:
         parts = __bi.divmod(x, y)
         if x._sign != y._sign and parts.remainder._sign != 0:
-            parts.quotient = __bi.__add__(parts.quotient, __bi.bigint(1))
+            parts.quotient = __bi.__add__(parts.quotient, __bi._big(1))
             parts.remainder = __bi.__sub__(parts.remainder, y)
         return __mi_pack(if operation == 3: parts.quotient else: parts.remainder)
     if operation == 5: return __mi_pack(__bi.__and__(x, y))
@@ -80,7 +80,7 @@ __mi_from_float = (x: f64) -> __dewy_int:
     bits = f64_bits(x)
     exponent = int((bits >> 52) & 2047) - 1023 - 52
     mantissa = (bits & 4503599627370495) | 4503599627370496
-    big = __bi.bigint(mantissa)
+    big = __bi._big(mantissa)
     if exponent >= 0: big = __bi.__lshift__(big, exponent)
     else: big = __bi.__rshift__(big, -exponent)
     if x < 0.0: big = __bi.__unary_sub__(big)

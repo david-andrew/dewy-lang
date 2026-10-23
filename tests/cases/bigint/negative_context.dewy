@@ -1,13 +1,12 @@
 # exit: 42
-from bigint import BigInt
 identity=<T>(value:T):>T=>value
-read=(value:BigInt):>BigInt=>value
+read=(value:bigint):>bigint=>value
 run=()=>{
-    let positive:BigInt=18446744073709551616
-    let negative:BigInt=-18446744073709551616
-    let values:array<BigInt>=[-18446744073709551616]
+    let positive:bigint=18446744073709551616
+    let negative:bigint=-18446744073709551616
+    let values:array<bigint>=[-18446744073709551616]
     return if negative+positive =? 0 and values[0]+positive =? 0
         and read(-18446744073709551616)+positive =? 0
-        and identity<BigInt>(-18446744073709551616)+positive =? 0 42 else 1
+        and identity<bigint>(-18446744073709551616)+positive =? 0 42 else 1
 }
 main=()=>exit(run())

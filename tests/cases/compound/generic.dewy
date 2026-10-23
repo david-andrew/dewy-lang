@@ -1,6 +1,5 @@
 # exit: 42
-from bigint import BigInt
 update=<T>(@value:T divisor:T):>void=>{value//=divisor value%=divisor value^=3}
-run=()=>{let a=-17 update(@a 3) let b:BigInt=123456789012345678901234567890 let expected=(b//3%3)^3 update(@b 3)
+run=()=>{let a=-17 update(@a 3) let b:bigint=123456789012345678901234567890 let expected=(b//3%3)^3 update(@b 3)
 return if a =? 0 and b =? expected 42 else 1}
 main=()=>exit(run())

@@ -148,10 +148,11 @@ dw_name_id = (id: int) -> i32:
 # The compact name of a Dewy identifier used as a value (printl is the library's print).
 dw_renamed: int[]               # printl, print, int and the compact names they become
 dw_value_name = (name: i32, pos: int) -> i32:
-    if dw_renamed.len() == 0: dw_renamed = [intern("printl"), intern("print"), intern("print"), intern("__dewy_print"), intern("int"), intern("__dewy_int")]
+    if dw_renamed.len() == 0: dw_renamed = [intern("printl"), intern("print"), intern("print"), intern("__dewy_print"), intern("int"), intern("__dewy_int"), intern("bigint")]
     if int(name) == dw_renamed[0]: return i32(dw_renamed[1])
     if int(name) == dw_renamed[2]: return i32(dw_renamed[3])
-    if int(name) == dw_renamed[4]: return i32(dw_renamed[5])
+    # (`bigint` names `int`'s arbitrary-precision form: the same type, so `bigint(x)` is `int(x)`)
+    if int(name) == dw_renamed[4] or int(name) == dw_renamed[6]: return i32(dw_renamed[5])
     name
 
 # Inside a method, a bare name of one of the object's fields or methods is that member
@@ -1060,7 +1061,7 @@ dw_type_name = (name: str) -> str:
     else if name == "float32": return "f32"
     else if name == "string": return "str"
     else if name == "set": return "Set"
-    else if name == "int": return "__dewy_int"
+    else if name == "int" or name == "bigint": return "__dewy_int"
     name
 
 # `-1|0|1`, `x:5`: integer singletons in a type position

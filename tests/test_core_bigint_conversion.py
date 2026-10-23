@@ -9,12 +9,11 @@ import time
 from tests.support import compiler
 
 PROGRAM = r'''
-from bigint import BigInt, bigint, parse_bigint
 main=(args:array<string>)=>{
     let mode=args[1]
     if mode =? "mul" {
-        let a=parse_bigint(args[2])
-        let b=parse_bigint(args[3])
+        let a=to_int(args[2])
+        let b=to_int(args[3])
         if a is? none or b is? none return
         printl"{a*b}"
     } else if mode =? "int" {

@@ -1,7 +1,6 @@
 # exit: 42
-from bigint import BigInt
 work=():>void=>{
-let huge:BigInt=123456789012345678901234567890
+let huge:bigint=123456789012345678901234567890
 loop n in [1..20) {
 let value=huge/(huge+n)
 if value.to_float64() <? 0.99 or value.to_float32() <? 0.99 panic("lost ratio")

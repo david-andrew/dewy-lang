@@ -430,13 +430,13 @@ def test_core_named_module_languages(compiler, tmp_path, extension, both):
 
 @pytest.mark.parametrize('extension', ['dewy', 'jo'])
 def test_core_bundled_module_path(compiler, tmp_path, extension):
-    (tmp_path / 'bigint.dewy').write_text('bigint=(value)=>0')
-    (tmp_path / 'bigint.jo').write_text('bigint = (value): 0')
+    (tmp_path / 'rational.dewy').write_text('parse_rational=(value)=>0')
+    (tmp_path / 'bigint.jo').write_text('_big = (value): 0')
     source = tmp_path / f'main.{extension}'
     if extension == 'dewy':
-        source.write_text('from p"@lib/bigint.dewy" import bigint\nmain=():>void=>exit((if bigint(42).to_int64() =? 42 42 else 1))')
+        source.write_text('from p"@lib/rational.dewy" import parse_rational\nmain=():>void=>exit((if parse_rational("42") =? 42 42 else 1))')
     else:
-        source.write_text('from "@lib/bigint.dewy" import bigint\nmain = (): if bigint(42).to_int64() == 42: 42 else: 1')
+        source.write_text('from "@lib/bigint.dewy" import _big\nmain = (): if _big(42).to_int64() == 42: 42 else: 1')
     binary = tmp_path / 'bundled'
     built = subprocess.run([compiler, 'build', source, '-o', binary],
                            capture_output=True, text=True, timeout=30, check=False)
@@ -474,9 +474,10 @@ loop line in input.split("\n") {
 }
 '''
     if notation == 'division':
-        body = body.replace('from rational import rational', 'from bigint import bigint')
-        body = body.replace('rational(fields[0] fields[1])', 'bigint(fields[0])/bigint(fields[1])')
-        body = body.replace('rational(fields[2] fields[3])', 'bigint(fields[2])/bigint(fields[3])')
+        body = body.replace('from rational import rational\n', '')
+        body = body.replace('rational(fields[0] fields[1])', 'big(fields[0])/nonzero(fields[1])')
+        body = body.replace('rational(fields[2] fields[3])', 'big(fields[2])/nonzero(fields[3])')
+        body = 'big=(text:string):>bigint=>to_int(text) ?? 0\nnonzero=(text:string):>bigint & ~0=>{\n    let n=big(text)\n    if n =? 0 return 1\n    return n\n}\n' + body
     source.write_text(body)
     expected = []
     for left, right in pairs:
@@ -557,15 +558,14 @@ def test_core_exact_float_conversions(compiler, tmp_path, target, release):
 
     expected = ['|'.join(map(str, bits(Fraction(v.numerator))+bits(v))) for v in values]
     source = tmp_path / 'conversions.dewy'
-    source.write_text('''from bigint import bigint
-from rational import rational
+    source.write_text('''from rational import rational
 main=():>void=>{
 let input=$include_bytes(p"cases.txt") as string|none
 if input is? none panic("invalid test data")
 loop line in input.split("\n") {
     let fields=line.split(" ")
-    let numerator=bigint(fields[0])
-    let value=rational(numerator bigint(fields[1]))
+    let numerator=to_int(fields[0]) ?? 0
+    let value=rational(numerator to_int(fields[1]) ?? 1)
     printl"{f64_bits(numerator.to_float64())}|{f32_bits(numerator.to_float32())}|{f64_bits(value.to_float64())}|{f32_bits(value.to_float32())}"
 }
 }
@@ -731,7 +731,7 @@ def test_core_bigint_literal_bases(compiler, tmp_path, target, release):
     # A local module cannot replace the implementation of a numeric literal.
     (tmp_path / 'bigint.dewy').write_text('BigInt:type=[wrong:bool]\n')
     source = tmp_path / 'literals.dewy'
-    source.write_text('from p"@lib/bigint.dewy" import bigint\nmain=():>void=>{\n' + '\n'.join(statements) + '\n}\n')
+    source.write_text('main=():>void=>{\n' + '\n'.join(statements) + '\n}\n')
     binary = tmp_path / 'literals'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -758,15 +758,13 @@ def test_core_bigint_literal_bases(compiler, tmp_path, target, release):
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_bigint_literal_modules(compiler, tmp_path, target, release):
     (tmp_path / 'rational.dewy').write_text('rational=()=>"wrong library"\n')
-    (tmp_path / 'constants.dewy').write_text('''from bigint import BigInt
-const amount:BigInt=123456789012345678901234567890
+    (tmp_path / 'constants.dewy').write_text('''const amount:bigint=123456789012345678901234567890
 const fraction=amount/7
 read=(value=amount)=>value+1
 fractional=(value=fraction)=>value*7
 ''')
     source = tmp_path / 'main.dewy'
-    source.write_text('''from bigint import bigint
-from constants import amount, read, fractional
+    source.write_text('''from constants import amount, read, fractional
 main=():>void=>exit(entry()) entry=()=>if amount+1 =? read() and read(bigint(18446744073709551616)) =? bigint(18446744073709551617)
 and fractional() =? amount 42 else 1
 ''')
@@ -814,13 +812,13 @@ def test_core_bigint_arithmetic(compiler, tmp_path, target, release):
         pairs.append((a * rng.choice([-1, 1]), b * rng.choice([-1, 1])))
     (tmp_path / 'cases.txt').write_text('\n'.join(f'{a} {b}' for a, b in pairs))
     source = tmp_path / 'bigint.dewy'
-    source.write_text('''from bigint import BigInt, bigint
-main=():>void=>{
+    source.write_text('''main=():>void=>{
 let input=$include_bytes(p"cases.txt") as string|none
 if input is? none panic("invalid test data")
 loop line in input.split("\n") {
     let fields=line.split(" ")
-    let a=bigint(fields[0]) let b=bigint(fields[1])
+    let a=to_int(fields[0]) ?? 0 let b=to_int(fields[1]) ?? 0
+    if b =? 0 panic("invalid test data")
     let parts=a.divmod(b)
     if a//b not=? parts.quotient or a%b not=? parts.remainder panic("division operators disagree")
     printl"{a+b}|{a-b}|{a*b}|{parts.quotient}|{parts.remainder}|{a.gcd(b)}|{a <? b}|{a =? b}"
@@ -893,8 +891,7 @@ def test_core_integer_ranges(compiler, tmp_path, target, release, form):
         add('s', start, start + step, start + rng.randrange(-50, 51), rng.choice([False, True]))
     (tmp_path / 'cases.txt').write_text('\n'.join(cases))
     source = tmp_path / 'ranges.dewy'
-    source.write_text('''from bigint import bigint
-emit=<T>(a:T b:T stop:T inclusive:bool):>void=>{
+    source.write_text('''emit=<T>(a:T b:T stop:T inclusive:bool):>void=>{
 let count:int64=0
 if inclusive {
     loop i in [a,b..stop] {if count >=? 32 panic("loop did not terminate") printl(i) count+=1}
@@ -909,11 +906,11 @@ if input is? none panic("invalid test data")
 loop line in input.split("\\n") {
     let fields=line.split("|") let inclusive=fields[4] =? "1"
     if fields[0] =? "s" {
-        let a=bigint(fields[1]).to_int64() let b=bigint(fields[2]).to_int64() let stop=bigint(fields[3]).to_int64()
+        let a=(to_int(fields[1]) ?? 0).to_int64() let b=(to_int(fields[2]) ?? 0).to_int64() let stop=(to_int(fields[3]) ?? 0).to_int64()
         if a is? none or b is? none or stop is? none panic("invalid signed bounds")
         emit<int64>(a b stop inclusive)
     } else {
-        let a=bigint(fields[1]).to_uint64() let b=bigint(fields[2]).to_uint64() let stop=bigint(fields[3]).to_uint64()
+        let a=(to_int(fields[1]) ?? 0).to_uint64() let b=(to_int(fields[2]) ?? 0).to_uint64() let stop=(to_int(fields[3]) ?? 0).to_uint64()
         if a is? none or b is? none or stop is? none panic("invalid unsigned bounds")
         emit<uint64>(a b stop inclusive)
     }
@@ -970,13 +967,12 @@ def test_core_bigint_bits(compiler, tmp_path, target, release):
         cases.append((a, b, rng.choice(counts)))
     (tmp_path / 'cases.txt').write_text('\n'.join(f'{a} {b} {count}' for a, b, count in cases))
     source = tmp_path / 'bits.dewy'
-    source.write_text('''from bigint import bigint
-main=():>void=>{
+    source.write_text('''main=():>void=>{
 let input=$include_bytes(p"cases.txt") as string|none
 if input is? none panic("invalid test data")
 loop line in input.split("\\n") {
     let fields=line.split(" ")
-    let a=bigint(fields[0]) let b=bigint(fields[1]) let count=to_int(fields[2])
+    let a=to_int(fields[0]) ?? 0 let b=to_int(fields[1]) ?? 0 let count=to_int(fields[2])
     if count is? none panic("invalid shift count")
     printl"{a and b}|{a or b}|{a xor b}|{not a}|{a << count}|{a >> count}"
 }
@@ -1604,12 +1600,11 @@ def test_core_compiler_hosts(compiler, tmp_path, host):
         assert header[:4] == b'\x7fELF' and int.from_bytes(header[18:20], 'little') == 183
         if runner := shutil.which('qemu-aarch64'):
             source = tmp_path / 'values.dewy'
-            source.write_text('''from bigint import BigInt
-main=():>void=>exit(entry()) entry=()=>{
+            source.write_text('''main=():>void=>exit(entry()) entry=()=>{
 let original=[20 21] let changed=original
 loop @item in changed {item+=1}
 assert(original =? [20 21] and changed =? [21 22])
-let huge:BigInt=18446744073709551616
+let huge:bigint=18446744073709551616
 printl"{changed[1]} {1/3+1/6} {huge+1}"
 return 0
 }''')

@@ -1,7 +1,7 @@
 # Exact integers, using ordinary owned arrays on the compact runtime.
 # Magnitude arithmetic is adapted from the pre-restart library/bigint.dewy.
 # Limbs are little-endian base 2^32, held in uint64 words for full products.
-# The representation is internal: construct through bigint / parse_bigint.
+# The representation is internal: construct through bigint / _parse_big.
 BigInt:type=[_sign:int64=0 _limbs:array<uint64>=[]]
 const _LIMB_BASE:uint64=4294967296
 const _LIMB_MASK:uint64=4294967295
@@ -552,7 +552,7 @@ _from_unsigned=(value:uint64 negative:bool=false):>BigInt=>{
     return _pack(negative if high =? 0 [low] else [low high])
 }
 
-bigint = ((value:BigInt):>BigInt=>value)
+_big = ((value:BigInt):>BigInt=>value)
        & ((value:int):>BigInt=>value as BigInt)
        & ((value:uint64):>BigInt=>_from_unsigned(value))
        & ((value:int64):>BigInt=>{
@@ -560,14 +560,9 @@ bigint = ((value:BigInt):>BigInt=>value)
             if value <? 0 magnitude=0-magnitude
             return _from_unsigned(magnitude value <? 0)
          })
-       & ((value:string):>BigInt=>{
-            let parsed=parse_bigint(value)
-            if parsed is? none panic("invalid decimal integer")
-            return parsed
-         })
 
 # Strict decimal text, with an optional leading sign. No float conversion.
-parse_bigint=(text:string):>BigInt|none=>{
+_parse_big=(text:string):>BigInt|none=>{
     let digits=bytes(text)
     if digits.length =? 0 return none
     let negative=digits[0] =? 45
@@ -613,7 +608,7 @@ divmod=(a:BigInt b:BigInt):>BigIntDivision=>{
     let quotient=_pack(negative parts.quotient)
     let remainder=_pack(a._sign <? 0 parts.remainder)
     if negative and remainder._sign not=? 0 {
-        quotient=_sub(quotient bigint(1))
+        quotient=_sub(quotient _big(1))
         remainder=_add(remainder b)
     }
     return BigIntDivision[quotient remainder]
@@ -621,7 +616,7 @@ divmod=(a:BigInt b:BigInt):>BigIntDivision=>{
 
 pow=(base:BigInt exponent:int64):>BigInt=>{
     if exponent <? 0 panic("big integer exponent must be nonnegative")
-    let result=bigint(1)
+    let result=_big(1)
     let factor=base
     loop exponent >? 0 {
         if (exponent and 1) =? 1 result=_mul(result factor)
@@ -726,46 +721,46 @@ __as__=(value:BigInt):>string=>{
 __unary_sub__=(a:BigInt):>BigInt=>_neg(a)
 
 __add__ = ((a:BigInt b:BigInt):>BigInt=>_add(a b))
-    & ((a:BigInt b:int64):>BigInt=>_add(a bigint(b)))
-    & ((a:int64 b:BigInt):>BigInt=>_add(bigint(a) b))
-    & ((a:BigInt b:uint64):>BigInt=>_add(a bigint(b)))
-    & ((a:uint64 b:BigInt):>BigInt=>_add(bigint(a) b))
+    & ((a:BigInt b:int64):>BigInt=>_add(a _big(b)))
+    & ((a:int64 b:BigInt):>BigInt=>_add(_big(a) b))
+    & ((a:BigInt b:uint64):>BigInt=>_add(a _big(b)))
+    & ((a:uint64 b:BigInt):>BigInt=>_add(_big(a) b))
 
 __sub__ = ((a:BigInt b:BigInt):>BigInt=>_sub(a b))
-    & ((a:BigInt b:int64):>BigInt=>_sub(a bigint(b)))
-    & ((a:int64 b:BigInt):>BigInt=>_sub(bigint(a) b))
-    & ((a:BigInt b:uint64):>BigInt=>_sub(a bigint(b)))
-    & ((a:uint64 b:BigInt):>BigInt=>_sub(bigint(a) b))
+    & ((a:BigInt b:int64):>BigInt=>_sub(a _big(b)))
+    & ((a:int64 b:BigInt):>BigInt=>_sub(_big(a) b))
+    & ((a:BigInt b:uint64):>BigInt=>_sub(a _big(b)))
+    & ((a:uint64 b:BigInt):>BigInt=>_sub(_big(a) b))
 
 __mul__ = ((a:BigInt b:BigInt):>BigInt=>_mul(a b))
-    & ((a:BigInt b:int64):>BigInt=>_mul(a bigint(b)))
-    & ((a:int64 b:BigInt):>BigInt=>_mul(bigint(a) b))
-    & ((a:BigInt b:uint64):>BigInt=>_mul(a bigint(b)))
-    & ((a:uint64 b:BigInt):>BigInt=>_mul(bigint(a) b))
+    & ((a:BigInt b:int64):>BigInt=>_mul(a _big(b)))
+    & ((a:int64 b:BigInt):>BigInt=>_mul(_big(a) b))
+    & ((a:BigInt b:uint64):>BigInt=>_mul(a _big(b)))
+    & ((a:uint64 b:BigInt):>BigInt=>_mul(_big(a) b))
 
 __eq__ = ((a:BigInt b:BigInt):>bool=>_compare(a b) =? 0)
-    & ((a:BigInt b:int64):>bool=>_compare(a bigint(b)) =? 0)
-    & ((a:int64 b:BigInt):>bool=>_compare(bigint(a) b) =? 0)
-    & ((a:BigInt b:uint64):>bool=>_compare(a bigint(b)) =? 0)
-    & ((a:uint64 b:BigInt):>bool=>_compare(bigint(a) b) =? 0)
+    & ((a:BigInt b:int64):>bool=>_compare(a _big(b)) =? 0)
+    & ((a:int64 b:BigInt):>bool=>_compare(_big(a) b) =? 0)
+    & ((a:BigInt b:uint64):>bool=>_compare(a _big(b)) =? 0)
+    & ((a:uint64 b:BigInt):>bool=>_compare(_big(a) b) =? 0)
 
 __lt__ = ((a:BigInt b:BigInt):>bool=>_compare(a b) <? 0)
-    & ((a:BigInt b:int64):>bool=>_compare(a bigint(b)) <? 0)
-    & ((a:int64 b:BigInt):>bool=>_compare(bigint(a) b) <? 0)
-    & ((a:BigInt b:uint64):>bool=>_compare(a bigint(b)) <? 0)
-    & ((a:uint64 b:BigInt):>bool=>_compare(bigint(a) b) <? 0)
+    & ((a:BigInt b:int64):>bool=>_compare(a _big(b)) <? 0)
+    & ((a:int64 b:BigInt):>bool=>_compare(_big(a) b) <? 0)
+    & ((a:BigInt b:uint64):>bool=>_compare(a _big(b)) <? 0)
+    & ((a:uint64 b:BigInt):>bool=>_compare(_big(a) b) <? 0)
 
 __floordiv__ = ((a:BigInt b:BigInt):>BigInt=>divmod(a b).quotient)
-    & ((a:BigInt b:int64):>BigInt=>divmod(a bigint(b)).quotient)
-    & ((a:int64 b:BigInt):>BigInt=>divmod(bigint(a) b).quotient)
-    & ((a:BigInt b:uint64):>BigInt=>divmod(a bigint(b)).quotient)
-    & ((a:uint64 b:BigInt):>BigInt=>divmod(bigint(a) b).quotient)
+    & ((a:BigInt b:int64):>BigInt=>divmod(a _big(b)).quotient)
+    & ((a:int64 b:BigInt):>BigInt=>divmod(_big(a) b).quotient)
+    & ((a:BigInt b:uint64):>BigInt=>divmod(a _big(b)).quotient)
+    & ((a:uint64 b:BigInt):>BigInt=>divmod(_big(a) b).quotient)
 
 __mod__ = ((a:BigInt b:BigInt):>BigInt=>divmod(a b).remainder)
-    & ((a:BigInt b:int64):>BigInt=>divmod(a bigint(b)).remainder)
-    & ((a:int64 b:BigInt):>BigInt=>divmod(bigint(a) b).remainder)
-    & ((a:BigInt b:uint64):>BigInt=>divmod(a bigint(b)).remainder)
-    & ((a:uint64 b:BigInt):>BigInt=>divmod(bigint(a) b).remainder)
+    & ((a:BigInt b:int64):>BigInt=>divmod(a _big(b)).remainder)
+    & ((a:int64 b:BigInt):>BigInt=>divmod(_big(a) b).remainder)
+    & ((a:BigInt b:uint64):>BigInt=>divmod(a _big(b)).remainder)
+    & ((a:uint64 b:BigInt):>BigInt=>divmod(_big(a) b).remainder)
 
 __pow__=(base:BigInt exponent:int64):>BigInt=>pow(base exponent)
 
@@ -808,7 +803,7 @@ _bitwise=(a:BigInt b:BigInt operation:int64):>BigInt=>{
     return _pack(negative result)
 }
 
-__not__=(value:BigInt):>BigInt=>_neg(_add(value bigint(1)))
+__not__=(value:BigInt):>BigInt=>_neg(_add(value _big(1)))
 __lshift__=(value:BigInt bits:int64):>BigInt=>{
     if bits <? 0 panic("big integer shift count must be nonnegative")
     if bits =? 0 return value
@@ -827,19 +822,19 @@ __rshift__=(value:BigInt bits:int64):>BigInt=>{
 }
 
 __and__ = ((a:BigInt b:BigInt):>BigInt=>_bitwise(a b 0))
-    & ((a:BigInt b:int64):>BigInt=>_bitwise(a bigint(b) 0))
-    & ((a:int64 b:BigInt):>BigInt=>_bitwise(bigint(a) b 0))
-    & ((a:BigInt b:uint64):>BigInt=>_bitwise(a bigint(b) 0))
-    & ((a:uint64 b:BigInt):>BigInt=>_bitwise(bigint(a) b 0))
+    & ((a:BigInt b:int64):>BigInt=>_bitwise(a _big(b) 0))
+    & ((a:int64 b:BigInt):>BigInt=>_bitwise(_big(a) b 0))
+    & ((a:BigInt b:uint64):>BigInt=>_bitwise(a _big(b) 0))
+    & ((a:uint64 b:BigInt):>BigInt=>_bitwise(_big(a) b 0))
 
 __or__ = ((a:BigInt b:BigInt):>BigInt=>_bitwise(a b 1))
-    & ((a:BigInt b:int64):>BigInt=>_bitwise(a bigint(b) 1))
-    & ((a:int64 b:BigInt):>BigInt=>_bitwise(bigint(a) b 1))
-    & ((a:BigInt b:uint64):>BigInt=>_bitwise(a bigint(b) 1))
-    & ((a:uint64 b:BigInt):>BigInt=>_bitwise(bigint(a) b 1))
+    & ((a:BigInt b:int64):>BigInt=>_bitwise(a _big(b) 1))
+    & ((a:int64 b:BigInt):>BigInt=>_bitwise(_big(a) b 1))
+    & ((a:BigInt b:uint64):>BigInt=>_bitwise(a _big(b) 1))
+    & ((a:uint64 b:BigInt):>BigInt=>_bitwise(_big(a) b 1))
 
 __xor__ = ((a:BigInt b:BigInt):>BigInt=>_bitwise(a b 2))
-    & ((a:BigInt b:int64):>BigInt=>_bitwise(a bigint(b) 2))
-    & ((a:int64 b:BigInt):>BigInt=>_bitwise(bigint(a) b 2))
-    & ((a:BigInt b:uint64):>BigInt=>_bitwise(a bigint(b) 2))
-    & ((a:uint64 b:BigInt):>BigInt=>_bitwise(bigint(a) b 2))
+    & ((a:BigInt b:int64):>BigInt=>_bitwise(a _big(b) 2))
+    & ((a:int64 b:BigInt):>BigInt=>_bitwise(_big(a) b 2))
+    & ((a:BigInt b:uint64):>BigInt=>_bitwise(a _big(b) 2))
+    & ((a:uint64 b:BigInt):>BigInt=>_bitwise(_big(a) b 2))

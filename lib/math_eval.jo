@@ -11,18 +11,18 @@ __mc_pack = (value: __ctbi.BigInt) -> __CTMathRep:
     __CTMathRep(0, [value])
 
 __mc_big = (value: __CTMathRep) -> __ctbi.BigInt:
-    if value.big.len() == 0: return __ctbi.bigint(value.word)
+    if value.big.len() == 0: return __ctbi._big(value.word)
     value.big[0]
 
 __mc_unsigned = (value: u64) -> __CTMathRep:
     if value <= u64(9223372036854775807): return __CTMathRep(int(value))
-    __mc_pack(__ctbi.bigint(value))
+    __mc_pack(__ctbi._big(value))
 
 __mc_ratio_int = (numerator: __ctbi.BigInt, denominator: __ctbi.BigInt) -> __CTMathRep:
     parts = __ctbi.divmod(numerator, denominator)
     quotient = parts.quotient
     if parts.remainder._sign != 0 and numerator._sign != denominator._sign:
-        quotient = __ctbi.__add__(quotient, __ctbi.bigint(1))
+        quotient = __ctbi.__add__(quotient, __ctbi._big(1))
     __mc_pack(quotient)
 
 __mc_slow = (a: __CTMathRep, b: __CTMathRep, operation: int) -> __CTMathRep:
@@ -34,7 +34,7 @@ __mc_slow = (a: __CTMathRep, b: __CTMathRep, operation: int) -> __CTMathRep:
     if operation == 3 or operation == 4:
         parts = __ctbi.divmod(x, y)
         if x._sign != y._sign and parts.remainder._sign != 0:
-            parts.quotient = __ctbi.__add__(parts.quotient, __ctbi.bigint(1))
+            parts.quotient = __ctbi.__add__(parts.quotient, __ctbi._big(1))
             parts.remainder = __ctbi.__sub__(parts.remainder, y)
         return __mc_pack(if operation == 3: parts.quotient else: parts.remainder)
     if operation == 5: return __mc_pack(__ctbi.__and__(x, y))
@@ -77,7 +77,7 @@ __mc_from_float = (x: f64) -> __CTMathRep:
     bits = f64_bits(x)
     exponent = int((bits >> 52) & 2047) - 1023 - 52
     mantissa = (bits & 4503599627370495) | 4503599627370496
-    big = __ctbi.bigint(mantissa)
+    big = __ctbi._big(mantissa)
     if exponent >= 0: big = __ctbi.__lshift__(big, exponent)
     else: big = __ctbi.__rshift__(big, -exponent)
     if x < 0.0: big = __ctbi.__unary_sub__(big)

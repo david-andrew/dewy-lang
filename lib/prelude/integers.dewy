@@ -1,0 +1,27 @@
+# Dewy's prelude: the exact integer's (`int`, `bigint`) floored division with
+# its remainder, greatest common divisor, and word and float conversions. A
+# word conversion gives `none` rather than truncating; a float rounds to
+# nearest, ties to even.
+divmod = (a:int b:int<(not=? 0)>):>[quotient:int remainder:int] => [quotient=a//b remainder=a%b]
+
+gcd = (a:int b:int):>int => {
+    let x=a.abs()
+    let y=b.abs()
+    loop y not=? 0 {
+        let r=x%y
+        x=y
+        y=r
+    }
+    return x
+}
+
+to_int64 = (value:int):>int64|none => {
+    if value >=? -9223372036854775808 and value <=? 9223372036854775807 return value as int64
+    return none
+}
+to_uint64 = (value:int):>uint64|none => {
+    if value >=? 0 and value <=? 18446744073709551615 return value as uint64
+    return none
+}
+to_float64 = (value:int):>float64 => float64(value)
+to_float32 = (value:int):>float32 => float32(value)

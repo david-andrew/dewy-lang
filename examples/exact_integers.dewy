@@ -1,4 +1,3 @@
-from bigint import BigInt, bigint
 
 main=():>void=>{
     let factorial=bigint(1)
@@ -9,8 +8,8 @@ main=():>void=>{
     loop n in [1..51) {combinations=(combinations*(100-n+1))//n}
     printl"Ways to choose 50 of 100: {combinations}"
 
-    let numerator:BigInt=-123456789012345678901234567890
-    let denominator:BigInt=9876543210987654321
+    let numerator:bigint=-123456789012345678901234567890
+    let denominator:bigint=9876543210987654321
     let parts=numerator.divmod(denominator)
     printl"Floor quotient: {parts.quotient}; remainder: {parts.remainder}"
     printl"Reconstruction: {parts.quotient*denominator+parts.remainder =? numerator}"

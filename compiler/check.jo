@@ -1267,6 +1267,9 @@ register_decls = (m: int, decls: int[]):
                     else if rel == "argparse": pym = ": a struct of the options (`verbose = false`, `out = \"a.txt\"`, `files: str[]`), then `opts = parse_args[Options](\"what it does\")`"
                     else if rel == "hashlib": pym = ": `sha256(text_or_bytes)` is there without an import (as hex digits)"
                     fatal(nodes[d].pos, "cannot find module '{rel}'{pym}")
+            # (the library behind `bigint` is the compiler's: the type is built in)
+            if path == lib_dir + "/bigint.dewy" and not starts_with(name_of(int(nodes[d].name)), "$") and files[int(modules[m].file)].is_dewy and not pos_in_lib(nodes[d].pos):
+                fatal(nodes[d].pos, "`bigint` is built in, so there is nothing to import: `let n:bigint = 2^100`, and `to_int(text)` reads decimal text (`none` when it is not a number)")
             im = load_module(path, false, nodes[d].pos)
             modules[m].imports.push((im, nodes[d].pos))
             if nodes[d].aux == 1:
