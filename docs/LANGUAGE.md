@@ -1106,6 +1106,15 @@ digits end, otherwise as a fraction: `19.99*(8/100)` is `1.5992`, `1/3+0.5` is
 `5/6`. How a value prints never changes the value: `0.5 =? 1/2`, and both are
 the same dictionary key. `rational<int64>` prints the same way.
 
+A `rational` binding without an annotation that a loop carries through `*`, `/`
+or `^` gets a warning: its parts can grow every iteration (`balance*=1.05`,
+Newton's `x=(x+2/x)/2`, `step/=2`), so a long loop slows down and prints a huge
+number. The value stays exact; annotate `float64` (or another explicit
+representation) where it is declared if an approximate result is fine (the
+editor offers the fix). Sums (`total+=0.1`), whole-number factors (`n*3`),
+lone reciprocals (`1/x`) and annotated bindings (`let q:rational=...`) do not
+warn.
+
 Arithmetic `+`, `-`, `*`, `/`, comparisons, and unary minus work with fractions,
 `BigInt`, and integers in either order. `//` returns an `int` floor quotient;
 `%` returns a `rational` remainder with the divisor's sign. `.divmod(other)`

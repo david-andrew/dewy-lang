@@ -7,6 +7,7 @@ use 'spelling.dewy'
 use 'units.jo'
 use 'definite.jo'
 use 'decimals.jo'
+use 'growth.jo'
 use 'errors.jo'
 use 'targets.jo'
 use 'icount.jo'
@@ -3690,6 +3691,7 @@ dewy_selection_update = (s: int, matrix: bool = false) -> int:
     block
 
 check_assign = (s: int) -> int:
+    growth_assign(s)
     saved = decimal_assign_begin(s)
     r = __check_assign(s)
     decimal_target = saved
@@ -4154,6 +4156,7 @@ check_vardecl = (s: int):
     # (x: T, a struct with default field values: it starts with them, as T() would)
     if nodes[s].b == 0 and t != 0: nodes[s].b = i32(struct_default(t, nodes[s].pos))
     if nodes[s].b != 0:
+        growth_decl_before(s)
         et = check_expr(int(nodes[s].b), t)
         nodes[s].b = i32(last_checked)
         if t != 0: nodes[s].b = i32(coerce(int(nodes[s].b), t))
@@ -4187,6 +4190,7 @@ check_vardecl = (s: int):
     l = new_local(int(nodes[s].name), t, nodes[s].pos)
     if sibling_pending.len() > 0: sibling_establish(l)
     if literal_init: decimal_local(l, nodes[s].pos, t)
+    growth_decl_after(s, l, t)
     if nodes[s].b != 0 and quat_nodes.has(int(nodes[s].b)): quat_locals[l] = true
     locals[l].flags = i32(LF_DECL)
     if t == T_STR and nodes[s].a == 0 and dewy_at(nodes[s].pos): string_domain_declare(l, int(nodes[s].b))

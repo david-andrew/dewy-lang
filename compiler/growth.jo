@@ -1,0 +1,269 @@
+# Exact values that grow each iteration: an unannotated `rational` binding carried around a
+# loop through `*`, `/` or `^` gets a warning (with the editor's fix-it: annotate it `float64`).
+# Never an automatic switch: the value stays exact.
+#
+# Demand-driven: an assignment inside a loop whose target is such a binding, declared outside
+# the innermost loop, is looked at before it is checked (its syntax). The new value is read as
+# a rational function of the binding x, tracking the degrees of x in its numerator and
+# denominator; values free of x are classed as integers, fractions or other. It grows when the
+# degree reaches 2 (`x*x`, Newton's `(x + 2/x)/2`), or when x is multiplied by a fraction or
+# divided by anything but ±1 (`x*1.05`, `x/2`). Integer factors (`x*3`), sums (`x + 0.1`) and
+# lone reciprocals (`1/x`, which comes back) do not grow it, nor does a polynomial with whole
+# coefficients of a binding that starts whole (`let n=2.0`, `n=n*n`: an integer's growth);
+# anything the reading cannot see through (calls, fields, floats) gives no warning. Temporaries declared in the loop from x
+# (`let next=x*1.05`, then `x=next`) carry their reading to the assignment.
+#
+# Cost: one kind test per assignment and declaration in a loop; for a candidate, one walk of
+# its expression per binding it reads (at most GROWTH_KEYS). Programs without unannotated
+# rational bindings never walk anything.
+use 'check.jo'
+use 'ast.jo'
+use 'util.jo'
+use 'types.jo'
+use 'units.jo'
+use 'decimals.jo'
+use 'expr.jo'
+use 'lex.jo'
+use 'ide.jo'
+
+const GROWTH_INT = 0        # free of x: an integer
+const GROWTH_FRAC = 1       # free of x: a fraction (a rational that need not be whole)
+const GROWTH_OTHER = 2      # free of x: unknown
+const GROWTH_FLOAT = 3      # a float takes part: the value is not exact
+const GROWTH_KEYS = 4
+
+struct Growth:
+    num: int            # degree of x in the numerator
+    den: int            # ... in the denominator
+    grows: bool         # scaled by a fraction, or divided, on the way
+    cls: int            # GROWTH_*: what the part free of x is
+    unit: bool = false  # the constant 1 or -1
+    whole: bool = false # whole whenever x is: whole numbers and x, through +, - and *
+
+struct GrowthTemp:
+    key: int            # the carried binding (a local, or -1 - a global)
+    g: Growth
+
+growth_inferred: {int: bool} = {}       # unannotated locals whose type is rational (true: a whole start)
+growth_temps: {int: GrowthTemp[]} = {}  # locals declared in a loop from carried bindings
+growth_pending_temps: GrowthTemp[]      # (check_vardecl, between its initializer and its local)
+growth_pending: (int, int)[]            # (position, declaration that may still adapt to float64)
+growth_seen: {int: bool} = {}
+
+const GROWTH_MESSAGE = "this exact value grows each iteration; annotate `float64` (or another explicit representation) if an approximate result is fine"
+
+growth_free = (cls: int) -> Growth: Growth(0, 0, false, cls, false, cls == GROWTH_INT)
+growth_dep = (g: Growth) -> bool: g.num > 0 or g.den > 0 or g.grows
+
+# the carried binding sy names (a key), or 0: an unannotated rational, declared outside the
+# innermost loop being checked
+growth_key = (sy: int) -> int:
+    if sy == 0: return 0
+    if syms[sy].kind == .local:
+        l = int(syms[sy].ref)
+        if not growth_inferred.has(l): return 0
+        if int(locals[l].owner) != int(ctxs[cx].inst) or int(locals[l].dloops) >= loop_serials.len(): return 0
+        return l
+    if syms[sy].kind == .global:
+        g = int(syms[sy].ref)
+        d = int(globals[g].decl)
+        if d == 0 or globals[g].type == 0 or nodes[d].kind != .vardecl or nodes[d].a != 0 or has_flag(d, NF_RDONLY): return 0
+        if not bundled_rational_type(int(globals[g].type)): return 0
+        return -1 - g
+    0
+
+growth_type_class = (t0: int) -> int:
+    if t0 == 0: return GROWTH_OTHER
+    t = prune(t0)
+    if is_int(t) or t == T_MATH_INT or bundled_bigint_type(t): return GROWTH_INT
+    if bundled_rational_type(t): return GROWTH_FRAC
+    if is_float(t): return GROWTH_FLOAT
+    GROWTH_OTHER
+
+# what is free of x on both sides of an operation
+growth_join = (a: int, b: int) -> int:
+    if a == GROWTH_FLOAT or b == GROWTH_FLOAT: return GROWTH_FLOAT
+    if a == GROWTH_OTHER or b == GROWTH_OTHER: return GROWTH_OTHER
+    if a == GROWTH_FRAC or b == GROWTH_FRAC: return GROWTH_FRAC
+    GROWTH_INT
+
+# n (unchecked syntax) as a rational function of the binding key
+growth_expr = (n: int, key: int) -> Growth:
+    if n == 0: return growth_free(GROWTH_OTHER)
+    k = nodes[n].kind
+    if k == .int_lit:
+        g = growth_free(GROWTH_INT)
+        g.unit = nodes[n].ival == 1 or nodes[n].ival == -1
+        return g
+    if k == .float_lit:
+        v = nodes[n].fval
+        if nodes[n].sval == 0: return growth_free(GROWTH_FLOAT)
+        if v == floor(v) and v < 9007199254740992.0 and v > -9007199254740992.0:
+            g = growth_free(GROWTH_INT)
+            g.unit = v == 1.0 or v == -1.0
+            return g
+        return growth_free(GROWTH_FRAC)
+    if k == .ident:
+        sy = lookup(int(nodes[n].name))
+        if sy == 0: return growth_free(GROWTH_OTHER)
+        if growth_key(sy) == key: return Growth(1, 0, false, GROWTH_INT, false, true)
+        if syms[sy].kind == .local:
+            l = int(syms[sy].ref)
+            if let temps = growth_temps.get(l):
+                loop t in temps:
+                    if t.key == key: return t.g
+            return growth_free(growth_type_class(int(locals[l].type)))
+        if syms[sy].kind == .global: return growth_free(growth_type_class(int(globals[int(syms[sy].ref)].type)))
+        return growth_free(GROWTH_OTHER)
+    if k == .unary and (nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.plus))) and not has_flag(n, NF_BROADCAST):
+        return growth_expr(int(nodes[n].a), key)
+    if k == .binary and not has_flag(n, NF_BROADCAST):
+        op = nodes[n].op
+        if op == i32(int(Tok.plus)) or op == i32(int(Tok.minus)): return growth_add(growth_expr(int(nodes[n].a), key), growth_expr(int(nodes[n].b), key))
+        if op == i32(int(Tok.star)): return growth_mul(growth_expr(int(nodes[n].a), key), growth_expr(int(nodes[n].b), key))
+        return growth_free(GROWTH_OTHER)
+    if k == .call and nkids(n) == 2 and not has_flag(n, NF_BROADCAST) and nodes[n].a != 0 and nodes[int(nodes[n].a)].kind == .ident:
+        name = int(nodes[int(nodes[n].a)].name)
+        if name == intern("__dewy_divide"): return growth_div(growth_expr(kid(n, 0), key), growth_expr(kid(n, 1), key))
+        if name == intern("__dewy_power"): return growth_power(growth_expr(kid(n, 0), key), kid(n, 1))
+    growth_free(GROWTH_OTHER)
+
+growth_add = (a: Growth, b: Growth) -> Growth:
+    cls = growth_join(a.cls, b.cls)
+    da = a.num > 0 or a.den > 0
+    db = b.num > 0 or b.den > 0
+    grows = a.grows or b.grows
+    whole = a.whole and b.whole
+    if not da and not db: return Growth(0, 0, grows, cls, false, whole)
+    # (p/q + c = (p + c q)/q; p1/q1 + p2/q2 = (p1 q2 + p2 q1)/(q1 q2))
+    if not db: return Growth(max(a.num, a.den), a.den, grows, cls, false, whole)
+    if not da: return Growth(max(b.num, b.den), b.den, grows, cls, false, whole)
+    Growth(max(a.num + b.den, b.num + a.den), a.den + b.den, grows, cls, false, whole)
+
+growth_mul = (a: Growth, b: Growth) -> Growth:
+    da = a.num > 0 or a.den > 0
+    db = b.num > 0 or b.den > 0
+    grows = a.grows or b.grows or (da and not db and b.cls == GROWTH_FRAC) or (db and not da and a.cls == GROWTH_FRAC)
+    g = Growth(a.num + b.num, a.den + b.den, grows, growth_join(a.cls, b.cls), false, a.whole and b.whole)
+    if not da and not db: g.unit = a.unit and b.unit
+    g
+
+growth_div = (a: Growth, b: Growth) -> Growth:
+    da = a.num > 0 or a.den > 0
+    db = b.num > 0 or b.den > 0
+    grows = a.grows or b.grows or (da and not db and (b.cls == GROWTH_FRAC or b.cls == GROWTH_INT) and not b.unit)
+    cls = growth_join(a.cls, b.cls)
+    if cls == GROWTH_INT: cls = GROWTH_FRAC
+    Growth(a.num + b.den, a.den + b.num, grows, cls)
+
+growth_power = (a: Growth, e: int) -> Growth:
+    if nodes[e].kind != .int_lit: return growth_free(if growth_dep(a): GROWTH_OTHER else: growth_join(a.cls, GROWTH_FRAC))
+    k = nodes[e].ival
+    if k < -64 or k > 64: return growth_free(GROWTH_OTHER)
+    cls = a.cls
+    if k < 0 and cls == GROWTH_INT: cls = GROWTH_FRAC
+    if k >= 0: return Growth(a.num * k, a.den * k, a.grows, cls, false, a.whole)
+    Growth(a.den * -k, a.num * -k, a.grows, cls)
+
+growth_grows = (g: Growth) -> bool: g.cls != GROWTH_FLOAT and (g.grows or g.num >= 2 or g.den >= 2)
+
+growth_on = () -> bool: cx >= 0 and ctxs[cx].loop_depth > 0 and (growth_inferred.len() > 0 or decimal_cached_type != 0)
+
+# check_assign, before the assignment s is checked
+growth_assign = (s: int):
+    if not growth_on(): return
+    lhs = int(nodes[s].a)
+    if lhs == 0 or nodes[lhs].kind != .ident or has_flag(s, NF_BROADCAST) or not dewy_at(nodes[s].pos) or pos_in_lib(nodes[s].pos): return
+    sy = lookup(int(nodes[lhs].name))
+    key = growth_key(sy)
+    if key == 0: return
+    op = nodes[s].op
+    right = int(nodes[s].b)
+    g = growth_free(GROWTH_OTHER)
+    x = Growth(1, 0, false, GROWTH_INT, false, true)
+    if op == i32(int(Tok.assign)): g = growth_expr(right, key)
+    else if nodes[s].sval == i32(intern("__dewy_divide")): g = growth_div(x, growth_expr(right, key))
+    else if nodes[s].sval == i32(intern("__dewy_power")): g = growth_power(x, right)
+    else if nodes[s].sval != 0: return
+    else if op == i32(int(Tok.stareq)): g = growth_mul(x, growth_expr(right, key))
+    else if op == i32(int(Tok.pluseq)) or op == i32(int(Tok.minuseq)): g = growth_add(x, growth_expr(right, key))
+    else: return
+    if not growth_grows(g): return
+    # (whole coefficients keep a binding that starts whole an integer: no fraction to grow)
+    if g.whole and g.den == 0 and not g.grows and key > 0 and growth_inferred.get(key) ?? false: return
+    p = nodes[lhs].pos
+    # (a binding a decimal literal made may still turn float64: wait until its body settles)
+    decl = 0
+    if key > 0: decl = decimal_locals.get(key) ?? 0
+    else: decl = decimal_globals.get(-1 - key) ?? 0
+    if decl != 0 and decimal_frame != 0:
+        growth_pending.push((p, decl))
+        return
+    growth_warn(p)
+
+growth_warn = (p: int):
+    if not ide_on:
+        if growth_seen.has(p): return
+        growth_seen[p] = true
+    warn(p, GROWTH_MESSAGE)
+
+# decimal_check_body, once the outermost body that could start over is done
+growth_flush = ():
+    if growth_pending.len() == 0: return
+    pending = growth_pending
+    growth_pending = []
+    done: {int: bool} = {}
+    loop item in pending:
+        if decimal_floats.has(item.1) or done.has(item.0): continue
+        done[item.0] = true
+        growth_warn(item.0)
+
+# check_vardecl, before the initializer of s (a single name) is checked: how it reads the
+# carried bindings it uses
+growth_start_whole = false
+
+growth_decl_before = (s: int):
+    growth_pending_temps = []
+    growth_start_whole = false
+    if nodes[s].b == 0 or nodes[s].a != 0: return
+    init = int(nodes[s].b)
+    if nodes[init].kind == .float_lit and nodes[init].sval != 0:
+        v = nodes[init].fval
+        growth_start_whole = v == floor(v)
+    else if nodes[init].kind == .int_lit: growth_start_whole = true
+    if not growth_on() or not dewy_at(nodes[s].pos): return
+    keys: int[]
+    growth_keys_in(int(nodes[s].b), keys)
+    loop key in keys:
+        g = growth_expr(int(nodes[s].b), key)
+        if growth_dep(g): growth_pending_temps.push(GrowthTemp(key, g))
+
+# ... and once its local l exists, of type t
+growth_decl_after = (s: int, l: int, t: int):
+    if growth_pending_temps.len() > 0:
+        growth_temps[l] = growth_pending_temps
+        growth_pending_temps = []
+    if nodes[s].a == 0 and tkind(t) == .struct_ and bundled_rational_type(t) and dewy_at(nodes[s].pos) and not has_flag(s, NF_RDONLY): growth_inferred[l] = growth_start_whole
+
+# the carried bindings (and temporaries made from them) that expression n reads
+growth_keys_in = (n: int, keys: mut int[]):
+    if n == 0 or keys.len() >= GROWTH_KEYS: return
+    k = nodes[n].kind
+    if k == .ident:
+        sy = lookup(int(nodes[n].name))
+        key = growth_key(sy)
+        if key != 0:
+            if not keys.contains(key): keys.push(key)
+            return
+        if sy != 0 and syms[sy].kind == .local:
+            if let temps = growth_temps.get(int(syms[sy].ref)):
+                loop t in temps:
+                    if not keys.contains(t.key) and keys.len() < GROWTH_KEYS: keys.push(t.key)
+        return
+    if k == .unary: growth_keys_in(int(nodes[n].a), keys)
+    else if k == .binary:
+        growth_keys_in(int(nodes[n].a), keys)
+        growth_keys_in(int(nodes[n].b), keys)
+    else if k == .call and nkids(n) == 2:
+        growth_keys_in(kid(n, 0), keys)
+        growth_keys_in(kid(n, 1), keys)

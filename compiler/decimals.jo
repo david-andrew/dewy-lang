@@ -22,6 +22,7 @@ use 'proofs.jo'
 use 'frontend.jo'
 use 'lazy_bodies.jo'
 use 'pcheck.jo'
+use 'growth.jo'
 
 decimal_floats: {int: bool} = {}        # declarations (positions) written a float: float64
 decimal_locals: {int: int} = {}         # local -> its declaration's position
@@ -266,6 +267,7 @@ decimal_check_body = (f: int):
     if saved_frame == 0 and not decimal_phase:
         decimal_drop(c)
         decimal_nested = []
+    if saved_frame == 0: growth_flush()
 
 # the function whose body the code being checked is in (lambdas: the enclosing one; a global's
 # initializer: its module's top-level code)

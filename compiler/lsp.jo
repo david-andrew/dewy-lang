@@ -2371,6 +2371,24 @@ qf_dewy_space = (text: str, at: int) -> int:
         else: break
     i
 
+# The end of the name declaring the variable used at off, when its declaration has no type
+# (`let x=1.5` or `x=1.5`): where `:float64` goes. -1 otherwise.
+qf_dewy_untyped_decl = (d: int, off: int) -> int:
+    text = docs[d].text
+    e = off
+    loop e < len(text) and is_ident_char(text[e]): e += 1
+    if e == off: return -1
+    name = text[off..e)
+    h = ref_at(d, off)
+    if not h.found or len(h.ref.decl) == 0: return -1
+    dp = split_pos(h.ref.decl)
+    if dp.0 < 0 or dp.0 >= h.res.paths.len() or h.res.paths[dp.0] != docs[d].path: return -1
+    at = unmap_off(h.res, docs[d].path, dp.1)
+    if at < 0 or not starts_with(text[at..], name) or (at + len(name) < len(text) and is_ident_char(text[at + len(name)])): return -1
+    i = qf_dewy_space(text, at + len(name))
+    if i >= len(text) or text[i] != '=' or (i + 1 < len(text) and text[i + 1] == '='): return -1
+    at + len(name)
+
 qf_dewy_element = (d: int, off: int, name: str) -> int:
     h = ref_at(d, off)
     if not h.found or len(h.ref.decl) == 0: return -1
@@ -2482,6 +2500,12 @@ on_code_action = (id: int, params: int) -> int:
         fx = dewy_fixit(d, p, msg)
         if len(fx) > 0:
             out.push(qf_json(d, fx[0], dg, to_int(fx[1]) ?? 0, to_int(fx[2]) ?? 0, fx[3]))
+            continue
+        if starts_with(msg, "this exact value grows each iteration"):
+            if ends_with(docs[d].path, ".dewy"):
+                ensure_checked(d)
+                at = qf_dewy_untyped_decl(d, p)
+                if at >= 0: out.push(qf_json(d, "Annotate it `float64`", dg, at, at, ":float64"))
             continue
         if starts_with(msg, "cannot modify loop variable '"):
             nm = quoted(msg, 0)
