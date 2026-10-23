@@ -131,7 +131,7 @@ execute=(@db:Database q:Query):>string=>{
     }
     if q.kind =? "DELETE" {
         if index <? 0 or index >=? db.rows.length return "changed 0"
-        db.rows.pop(index)
+        db.rows.pop(index);
         return "changed 1"
     }
     return "error query"

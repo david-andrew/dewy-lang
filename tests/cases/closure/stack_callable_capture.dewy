@@ -2,7 +2,7 @@
 make=()=>{let n=0 return ($capture n)=>{n+=1; n}}
 work=()=>{let inner=make() let outer=()=>inner()
 return if outer()=?1 and outer()=?2 and inner()=?1 42 else 1}
-run=()=>{work() let before=alloc_count()
+run=()=>{work(); let before=alloc_count()
 loop i in [0..20) {if work() not=?42 return 1}
 return if alloc_count()=?before 42 else 2}
 main=()=>exit(run())

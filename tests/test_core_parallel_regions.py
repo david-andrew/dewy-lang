@@ -134,7 +134,7 @@ main=():>void=>exit(entry()) entry=()=>{
 def test_region_hidden_callback_context(compiler, tmp_path):
     output, _ = build(compiler, tmp_path, '''
 Item:type=[value:int64]
-__eq__=(a:Item b:Item):>bool=>{random() return a.value =? b.value}
+__eq__=(a:Item b:Item):>bool=>{random(); return a.value =? b.value}
 observe=(i:int64):>bool=>[Item[i]] =? [Item[i]]
 main=():>void=>exit(entry()) entry=()=>{
  seed_random(17)

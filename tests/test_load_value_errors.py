@@ -8,11 +8,11 @@ from tests.support import compiler  # noqa: F401 (fixture)
 PROGRAM = '''Settings:type=[volume:float64=0.5 name:string="x"]
 main=()=>{
     printl(load_value("settings" Settings[]))
-    save_data("settings" "Settings(volume=")
+    save_data("settings" "Settings(volume=");
     let broken=load_value("settings" Settings[])
     if broken is? TextError printl"error: {broken.message}" else printl(broken)
     printl(load_data("settings.bad") ?? "none")
-    save_value("settings" Settings[volume=0.9])
+    save_value("settings" Settings[volume=0.9]);
     printl(load_value("settings" Settings[]))
 }
 '''

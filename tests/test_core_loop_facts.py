@@ -221,7 +221,7 @@ def lockstep_case(body):
 LOCKSTEP_NEGATIVE = {
     'offset': (lockstep_case('loop i in 1.. and x in xs and y in ys { t=t+ys[i] }'), '3:49'),
     'resize': (lockstep_case('loop i in 0.. and x in xs and y in ys { if ys.length >? 0 {ys.pop()}; t=t+ys[i] }'), '3:79'),
-    'later_resize': (lockstep_case('loop i in 0.. and x in xs and y in ys { t=t+ys[i]; ys.pop() }'), '3:49'),
+    'later_resize': (lockstep_case('loop i in 0.. and x in xs and y in ys { t=t+ys[i]; ys.pop(); }'), '3:49'),
     'rebound': (lockstep_case('loop i in 0.. and x in xs and y in ys { i=i+1; t=t+ys[i] }'), '3:56'),
     'unequal': ('f=(@xs:array<int64> @ys:array<int64>):>int64=>{\n    let t:int64=0\n    let i:int64=0\n'
                 '    let j:int64=0\n    loop j <? ys.length { t=t+ys[i]; i=i+2; j=j+1 }\n    return t\n}\n'
@@ -307,7 +307,7 @@ def guarded_case(statement):
 
 # A write in any arm or default still retires the guard.
 OPTIONAL_NEGATIVE = {
-    'arm_resize': (guarded_case('match o {n:int64=>{ xs.pop() } <none>=>{}}'), True),
+    'arm_resize': (guarded_case('match o {n:int64=>{ xs.pop(); } <none>=>{}}'), True),
     'arm_rebind': (guarded_case('match o {n:int64=>{ i=i+n } <none>=>{}}'), True),
     'arm_call': (guarded_case('let d=match o {n:int64=>n <none>=>popped(@xs)}; printl(d)'), False),
     'default_call': (guarded_case('let d=o ?? popped(@xs); printl(d)'), False),

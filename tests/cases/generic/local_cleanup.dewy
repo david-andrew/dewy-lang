@@ -1,9 +1,9 @@
 # exit: 42
 make=()=>{let count=0 let data=[1 2 3] return <T>(x:T $capture count $capture data)=>{count+=1 data.push(count); count+data.length}}
 work=()=>{let f=make() let g=@f let rows=[[@f @g] [@g @f]] let other=rows
-loop i in [0..5) {rows[0][0](i) rows[1][1]("a") other[0][0](false)}
-let selected=@f<int64> selected(1)
-make()(true)
+loop i in [0..5) {rows[0][0](i) rows[1][1]("a") other[0][0](false)};
+let selected=@f<int64> selected(1);
+make()(true);
 }
 run=()=>{let before=alloc_count() loop i in [0..20) work() return if alloc_count()=?before 42 else 1}
 main=()=>exit(run())

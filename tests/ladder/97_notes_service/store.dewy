@@ -129,7 +129,7 @@ patch=(@store:Store id:int64 change:NotePatch expected:string=""):>Note|NotFound
 remove=(@store:Store id:int64 expected:string=""):>void|NotFound|Stale=>{
     let note=get(store id) or_throw
     precondition(note expected) or_throw
-    store.notes.remove(id)
+    store.notes.remove(id);
     store.clock+=1
 }
 

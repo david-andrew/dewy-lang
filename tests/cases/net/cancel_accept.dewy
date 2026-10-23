@@ -22,7 +22,7 @@ main=():>void | net.NetError | Canceled=>{
     let started=time()
     concurrent g {
         let accepting=spawn(g) wait_for_client(server)
-        sleep(50ms)
+        sleep(50ms);
         cancel(g)
     }
     printl(accepting)
@@ -30,7 +30,7 @@ main=():>void | net.NetError | Canceled=>{
     let peer=net.tcp_accept(server) or_throw
     concurrent h {
         let receiving=spawn(h) wait_for_bytes(peer)
-        sleep(50ms)
+        sleep(50ms);
         cancel(h)
     }
     printl(receiving)

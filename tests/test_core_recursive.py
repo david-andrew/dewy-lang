@@ -93,7 +93,7 @@ let global=Node[20 Node[22]]
 replace=()=>{global=Node[99] return 0}
 sum=(node:Node?):>int64=>{
 let cur=node let result=0
-loop cur is?Node {result+=cur.value replace() cur=cur.next}
+loop cur is?Node {result+=cur.value replace(); cur=cur.next}
 return result}
 main=()=>{
 let result=sum(global)
@@ -244,13 +244,13 @@ main=()=>{return if f(A[42] false)=?42 and f(A[42] true)=?1 42 else 2}''',
 helper=()=>{loop true {break} return 0}
 f=(input:Node? change:bool):>int64=>{let x=input
 if x is?none return 0
-if change {x=none helper() return 1}
+if change {x=none helper(); return 1}
 return x.value}
 main=()=>{return if f(Node[42] false)=?42 and f(Node[42] true)=?1 42 else 2}''',
     'returning-nested-closure': '''Node:type=[value:int64]
 f=(input:Node? change:bool):>int64=>{let x=input
 if x is?none return 0
-if change {x=none let helper=()=>{loop true {break} return 0} helper() return 1}
+if change {x=none let helper=()=>{loop true {break} return 0} helper(); return 1}
 return x.value}
 main=()=>{return if f(Node[42] false)=?42 and f(Node[42] true)=?1 42 else 2}''',
     'returning-contained-break': '''Node:type=[value:int64]
@@ -622,10 +622,10 @@ prime=(b:Box)=>{if b.child is?B return 0 return b.child.value}
     for order in ('none', 'before', 'after'):
         source = prefix + 'main=():>void=>exit(entry()) entry=()=>{let x=Box[' + initial + ']\n'
         if order == 'before':
-            source += 'prime(x)\n'
+            source += 'prime(x);\n'
         source += 'x.child=' + value + '\n'
         if order == 'after':
-            source += 'prime(x)\n'
+            source += 'prime(x);\n'
         source += 'return x.child.value}\n'
         path = tmp_path / f'{kind}_{order}.dewy'
         path.write_text(source)

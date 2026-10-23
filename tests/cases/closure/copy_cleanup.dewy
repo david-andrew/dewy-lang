@@ -5,7 +5,7 @@ return ($capture n $capture values)=>{n+=1 values.push(n); n+values.length}}
 work=()=>{let a=make() let b=@a let xs=[@a @b] let ys=xs
 let record=[run=@a rows=[xs]] let other=record
 let shared=0 let c=($capture @shared)=>{shared+=1; shared} let d=@c
-loop i in [0..10) {xs[0]() ys[1]() other.run() c() d()}
+loop i in [0..10) {xs[0]() ys[1]() other.run() c() d()};
 }
 run_case=()=>{let before=alloc_count() loop i in [0..20) work()
 return if alloc_count()=?before 42 else 1}

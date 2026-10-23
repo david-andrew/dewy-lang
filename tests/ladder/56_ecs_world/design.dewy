@@ -24,13 +24,13 @@ despawn=(@w:World id:int64):>bool=> {
         w.vx[index]=w.vx[last]
         w.vy[index]=w.vy[last]
     }
-    w.ids.pop()
-    w.x.pop()
-    w.y.pop()
-    w.vx.pop()
-    w.vy.pop()
+    w.ids.pop();
+    w.x.pop();
+    w.y.pop();
+    w.vx.pop();
+    w.vy.pop();
     if index not=? last  {w.slot[moved]=index}
-    w.slot.pop(id)
+    w.slot.pop(id);
     return true
 }
 tick=(@w:World):>void=> {

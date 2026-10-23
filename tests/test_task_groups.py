@@ -76,7 +76,7 @@ def test_named_group_can_be_passed(compiler, tmp_path):
 launch=(g:TaskGroup hits:Atomic<int64>)=>{spawn(g) hits.add(1)}
 main=()=>{
  let hits=atomic(0)
- concurrent g {launch(g hits) launch(g hits)}
+ concurrent g {launch(g hits); launch(g hits);}
  assert(hits.load() =? 2)
 }
 """)
@@ -88,9 +88,9 @@ Bad:type=type of error
 fail=()=>{sleep(2ms) return Bad}
 observe=(hits:Atomic<int64>)=>{
  let first=sleep(1s)
- if first is? Canceled {hits.add(1)}
+ if first is? Canceled {hits.add(1);}
  let second=sleep(1s)
- if second is? Canceled {hits.add(1)}
+ if second is? Canceled {hits.add(1);}
 }
 main=()=>{
  let hits=atomic(0)

@@ -1,7 +1,7 @@
 # exit: 42
 run=()=>{
-let source=set[10 99 20 22] source.remove(99) source.push(10)
+let source=set[10 99 20 22] source.remove(99); source.push(10)
 let values=[source... 42 source...]
-source.remove(10) source.push(10)
+source.remove(10); source.push(10)
 return if values =? [10 20 22 42 10 20 22] and [source...] =? [20 22 10] 42 else 1}
 main=()=>exit(run())

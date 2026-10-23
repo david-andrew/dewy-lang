@@ -87,7 +87,7 @@ def test_callback_later_argument_panic(compiler, tmp_path, release, target):
 invoke=(callback:Callback n:int64):>int64=>callback()+n
 main=()=>{
  let xs:array<int64>=[42]
- invoke(()=>{printl"called" return xs[0]} {printl"argument"; xs[2]})
+ invoke(()=>{printl"called" return xs[0]} {printl"argument"; xs[2]});
  printl"after"
 }'''}
     command, failure = build_exit_batch(compiler, tmp_path, cases, release, target)

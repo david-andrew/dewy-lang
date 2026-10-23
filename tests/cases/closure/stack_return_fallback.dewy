@@ -1,10 +1,10 @@
 # exit: 42
 make=()=>{let n=0
 let next=($capture n)=>{n+=1; n}
-next() return @next}
+next(); return @next}
 work=()=>{let a=make() let b=@a
 return if a()=?2 and b()=?2 and a()=?3 42 else 1}
-run=()=>{work() let before=alloc_count()
+run=()=>{work(); let before=alloc_count()
 loop i in [0..20) {if work() not=?42 return 1}
 return if alloc_count()=?before 42 else 2}
 main=()=>exit(run())

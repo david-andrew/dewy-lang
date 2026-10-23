@@ -5,7 +5,7 @@ __index__=<T>(s:Series<T> index:int64):>T=>s.values[index]
 work=():>string=>{let source=Series<string>[["a" "b"]] source.values.push("c")
 loop text in source {if text =? "a" continue return text} else {return "empty"}
 return "end"}
-run=()=>{work() let before=alloc_count()
+run=()=>{work(); let before=alloc_count()
 loop i in [0..20) {if work() not=? "b" return 1}
 return if alloc_count() =? before 42 else 2}
 main=()=>exit(run())

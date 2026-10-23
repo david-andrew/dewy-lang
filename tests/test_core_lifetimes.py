@@ -16,7 +16,7 @@ probe=(stop:bool):>int64=>{
 ''' + statement + '''
 return 0}
 main=()=>{
-probe(false)
+probe(false);
 let before=alloc_count()
 loop i in [0..20) {
     if probe(false) not=?0 or probe(true) not=?42 return 1

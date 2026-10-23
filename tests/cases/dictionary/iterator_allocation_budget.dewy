@@ -1,7 +1,7 @@
 # exit: 42
 run=()=>{
 let values=[0->[0] 1->[99] 2->[20] 3->[22] 4->[99]]
-values.remove(1) values.remove(4)
+values.remove(1); values.remove(4);
 let before=alloc_count() let total:int64=0
 loop [key value] in values {if alloc_count() >? before+2 return 1 total+=value[0]}
 loop i in 0.. and key in values {if alloc_count() >? before+2 return 2}

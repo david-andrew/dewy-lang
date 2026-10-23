@@ -100,7 +100,7 @@ execute=(@state:Machine tokens:array<string>):>bool=>{
         }
         if token =? "drop" {
             if state.stack.length =? 0 return false
-            state.stack.pop()
+            state.stack.pop();
             continue
         }
         if token =? "let" {

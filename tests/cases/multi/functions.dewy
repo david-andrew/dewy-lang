@@ -1,0 +1,29 @@
+# quick
+pair=()=>{ 1 2 }
+printl([pair()])
+printl([0 pair() 3])
+printl([pair()... 3])
+three=(c:bool)=>if c { 1 2 3 } else { 4 }
+printl([three(true)])
+printl([three(false)])
+one=(c:bool)=>if c { 1 } else { 2 }
+let x=one(true)
+printl(x)
+squares=(n:int64)=>{ loop i in 0..n { i*i } }
+printl([squares(3)])
+evens=(n:int64)=>{ loop i in 0..n { if i % 2 =? 0 { i } } }
+printl([evens(6)])
+nested=()=>{ pair() 9 }
+printl([nested()])
+printl([loop i in 0..1 { pair() }])
+quiet=()=>{ printl("hi") 5 }
+printl(quiet())
+let [a b]=[pair()]
+printl(a+b)
+run=()=>{
+    pair();
+    let xs=[1 2 3]
+    loop xs.length >? 1 xs.pop();
+    printl(xs)
+}
+run()

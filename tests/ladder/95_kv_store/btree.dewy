@@ -177,8 +177,8 @@ BTree:type=[
         $runtime_assert id <? nodes.length
         if at >=? nodes[id].keys.length or nodes[id].keys[at] not=? key return false
         $runtime_assert id <? nodes.length and at <? nodes[id].keys.length and at <? nodes[id].values.length
-        nodes[id].keys.pop(at)
-        nodes[id].values.pop(at)
+        nodes[id].keys.pop(at);
+        nodes[id].values.pop(at);
         count-=1
         return true
     }
@@ -283,7 +283,7 @@ BTree:type=[
 from_sorted=(entries:array<Entry>):>BTree=>{
     let tree=BTree()
     loop entry in entries {
-        tree.put(entry.key entry.value)
+        tree.put(entry.key entry.value);
     }
     return tree
 }

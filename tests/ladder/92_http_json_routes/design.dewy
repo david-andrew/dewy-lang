@@ -130,7 +130,7 @@ route=(@service:Service request:Request):>Response=>{
     }
     if request.method =? "DELETE" {
         if key not in? service.values return error(404 "missing")
-        service.values.pop(key)
+        service.values.pop(key);
         service.writes+=1
         return Response[204 ""]
     }

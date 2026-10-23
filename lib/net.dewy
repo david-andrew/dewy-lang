@@ -201,11 +201,11 @@ if $target.os =? "windows" {
     __open=(family:int32):>int64=>{
         # (Winsock counts its users: every opening may start it)
         let info:array<uint8>=fill(uint8(0) 512)
-        __WSAStartup(0x0202 info.ptr)
+        __WSAStartup(0x0202 info.ptr);
         let s=__socket(family 1 6)
         if s =? -1 return -1
         let on:array<uint32>=[1]
-        __ioctlsocket(s -2147195266 on.ptr)              # FIONBIO
+        __ioctlsocket(s -2147195266 on.ptr);             # FIONBIO
         return s
     }
     __close=(s:int64):>void=>{__closesocket(s)}
@@ -214,7 +214,7 @@ if $target.os =? "windows" {
         let got=__accept_c(s none none)
         if got =? -1 return -1
         let on:array<uint32>=[1]
-        __ioctlsocket(got -2147195266 on.ptr)
+        __ioctlsocket(got -2147195266 on.ptr);
         return got
     }
     __send=(s:int64 data:ptr<uint8> length:int64):>int64=>int64(__send_c(s data int32(min(length 1 << 30)) 0))
@@ -306,14 +306,14 @@ if $target.os =? "windows" {
             let fd=__socket(family 1 6)
             if fd <? 0 return -1
             let on:array<int32>=[1]
-            __setsockopt(fd __SOL_SOCKET 0x1022 on.ptr 4)
+            __setsockopt(fd __SOL_SOCKET 0x1022 on.ptr 4);
             return int64(fd)
         }
         __accept=(fd:int64):>int64=>{
             let got=__accept_c(__fd(fd) none none)
             if got <? 0 return -1
             let on:array<int32>=[1]
-            __setsockopt(got __SOL_SOCKET 0x1022 on.ptr 4)
+            __setsockopt(got __SOL_SOCKET 0x1022 on.ptr 4);
             return int64(got)
         }
         __send=(fd:int64 data:ptr<uint8> length:int64):>int64=>__send_c(__fd(fd) data uint64(length) 0)

@@ -44,7 +44,7 @@ visit=(g:Graph node:string @state:dict<string int64> @stack:array<string> @order
     loop dep in g.deps[node] {
         visit(g dep @state @stack @order) or_throw
     }
-    stack.pop()
+    stack.pop();
     state[node]=2
     order.push(node)
 }

@@ -2948,7 +2948,13 @@ dewy_spread_source_type = (n: int) -> int:
     # original type syntax is gone; retain the checked type instead of cloning
     # them as unchecked syntax and trying to resolve them again.
     if nodes[n].type != 0 and has_flag(n, NF_CHECKED): return prune(ntype(n))
-    prune(check_expr(clone(n), 0))
+    copy = clone(n)
+    # (`[pair()...]`: a function expressing several values spreads them as an array would)
+    sink_pack_site = copy
+    t = check_expr(copy, 0)
+    sink_pack_site = 0
+    sink_pack_hit = 0
+    prune(t)
 
 dewy_classify_spread = (n: int):
     if nodes[n].kind != .array or nodes[n].b != 0 or nkids(n) == 0: return
@@ -8011,6 +8017,7 @@ check_match = (m: int, expected: int) -> int:
             # (one arm prints, another gives a number: as a function's last line, the match is
             # what it gives back)
             if result != 0 and tkind(result) == .void_ and (expected == 0 or tkind(expected) == .var): coerce_hint = " (an arm above gives no value, so this match gives none: where it ends a function, its arms are what the function gives back; `-> void` after the function's parameters says it gives back nothing)"
+            if m == sink_final: sink_arm(m, body)
             t = check_block(body, exp, true)
             if t != T_NEVER:
                 if nodes[body].aux == 0 and tkind(t) == .void_:
@@ -8838,6 +8845,7 @@ check_call_expr = (n: int, expected: int) -> int:
         concurrency_calls.push(n)
         parallel_prepare(n)
     if nodes[n].aux == 0 and nodes[n].sym > 0 and nkids(n) >= 2 and dewy_at(nodes[n].pos): map_float_key(n)
+    if nodes[n].aux == 0 and nodes[n].sym > 0 and fns[int(nodes[n].sym)].pack != 0: sink_pack_call(n)
     ce_finish(n, t, expected)
 
 check_str_expr = (n: int, expected: int) -> int:
@@ -9542,6 +9550,8 @@ check_expr_other = (n: int, expected: int) -> int:
             c = kid(n, i)
             callee = mk(.field, pos)
             nodes[callee].a = i32(mk_name(acc, pos))
+            # (`[pair()...]` of a function expressing several values: the values, spread)
+            if has_flag(c, NF_SPREAD) and nodes[c].kind == .call: sink_spread_calls[c] = true
             if has_flag(c, NF_SPREAD):
                 clear_flag(c, NF_SPREAD)
                 nodes[callee].name = i32(intern("extend"))
@@ -9642,12 +9652,22 @@ check_expr_other = (n: int, expected: int) -> int:
                     spread = true
                     h = 0
                     if elt != 0: h = mk_array(elt)
+                    sink_pack_site = c
                     st = prune(check_expr(c, h))
+                    sink_pack_site = 0
+                    sink_pack_hit = 0
                     if types[st].kind != .array: fatal(nodes[c].pos, "only arrays can be spread into an array (found {dt(st)})")
                     if elt == 0: elt = int(types[st].elem)
                     allchar = false
                     continue
+                sink_pack_site = c
                 it = check_expr(c, elt)
+                sink_pack_site = 0
+                if sink_pack_hit != 0:
+                    # (`[pair()]`: the values of a function expressing several, spread here)
+                    sink_pack_hit = 0
+                    add_flag(c, NF_SPREAD)
+                    return check_expr(n, expected)
                 if not charlike(c): allchar = false
                 if is_lit(c):
                     if nodes[c].kind == .float_lit: anyfloat = true
@@ -10026,6 +10046,7 @@ check_if = (n: int, ex: int) -> int:
     # at the other branch's type (kept unchecked here)
     then_literal = 0
     if branch_expected == 0 and nodes[n].aux2 != -8 and container_tail(b) and not container_tail(c) and literal_tree(block_tail(b)): then_literal = clone(block_tail(b))
+    if n == sink_final: sink_arm(n, b)
     t1 = check_block(b, branch_expected, true)
     if narrow_changes.len() != changes: narrow_returned(changes, jumps, b)
     scope_reset(mark)
@@ -10037,6 +10058,7 @@ check_if = (n: int, ex: int) -> int:
     if else_expected == 0 and nodes[n].aux2 != -8 and container_tail(c) and t1 != T_NEVER and not has_var(t1):
         tk = tkind(t1)
         if tk == .array or tk == .fixed or tk == .struct_ or tk == .enum_ and is_union(t1): else_expected = t1
+    if n == sink_final: sink_arm(n, c)
     t2 = check_block(c, else_expected, true)
     if narrow_changes.len() != changes: narrow_returned(changes, jumps, c)
     scope_reset(mark)

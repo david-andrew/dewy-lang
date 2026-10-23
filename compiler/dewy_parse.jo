@@ -1895,6 +1895,7 @@ dw_expr = (id: int) -> int:
                 first = dw_child(children[0], 0)
                 if dewy_syntax[first].kind == .keyword_expr and (dewy_syntax[dw_child(first, 0)].text == "loop" or dewy_syntax[dw_child(first, 0)].text == "parallel"): return dw_comprehension(children[0])
             if dw_has_rows(children): return dw_rows_literal(id, children)
+            if dw_collects(children): return dw_collector(id, children)
             is_map = children.len() > 0 and dw_op(children[0]) == .arrow
             is_record = children.len() > 0 and dw_op(children[0]) == .assign
             loop child in children:
@@ -2135,15 +2136,115 @@ dw_byte_char = (id: int) -> int:
     if files[pos_file(pos)].src[pos_off(pos)] != '\'' or len(dewy_syntax[right].text) != 1: return -1
     int(dewy_syntax[right].text[0])
 
-# `[1 2; 3 4]`: in an array literal a `;` (standalone, or attached to the element
-# before it) ends a row, and `;;` ends a 2-D block (tensors.md). The literal is
-# contiguous: every row has the same length and every block the same rows.
+# `[1 2 ; 3 4]`: in an array literal a standalone `;` ends a row, and `;;` ends a
+# 2-D block (tensors.md). An attached `;`, `f();`, discards the value instead
+# (multi_expressions.md). The literal is contiguous: every row has the same
+# length and every block the same rows.
 dw_row_break = (id: int) -> bool: dewy_syntax[id].kind == .keyword and dewy_syntax[id].text == ";"
 
 dw_has_rows = (children: int[]) -> bool:
     loop child in children:
-        if dw_row_break(child) or dw_op(child) == .statement_end: return true
+        if dw_row_break(child): return true
     false
+
+# (a value whose discarding does nothing: a literal, a name, or arithmetic of them)
+dw_pure = (id: int) -> bool:
+    let id = dw_unwrap(id)
+    k = dewy_syntax[id].kind
+    if k == .identifier or k == .integer or k == .source_integer or k == .real or k == .source_real or k == .boolean or k == .string: return true
+    if k == .block and dewy_syntax[id].text == "():" and dw_nchildren(id) == 1: return dw_pure(dw_child(id, 0))
+    op = dw_op(id)
+    if k == .prefix and (op == .minus or op == .plus): return dw_pure(dw_child(id, 1))
+    if k == .binary and (op == .plus or op == .minus or op == .star or op == .slash or op == .caret or op == .multiply_apply): return dw_pure(dw_child(id, 1)) and dw_pure(dw_child(id, 2))
+    false
+
+# `[1 2; 3 4]` written for a matrix: the attached `;` discards the 2, which does nothing.
+dw_discard_check = (item: int):
+    value = dw_child(item, 1)
+    if not dw_pure(value): return
+    fatal(dewy_syntax[item].pos, "this `;` is attached to the value before it, which discards that value and does nothing here: a row break is a standalone `;`, with a space before it, as in `[1 2 ; 3 4]`")
+
+# Whether an array literal collects multiple expressions: a block or flow among
+# its elements (`[{1 2} 3]`, `[if c 1]`), or a value discarded by an attached `;`.
+dw_collects = (children: int[]) -> bool:
+    found = false
+    loop child in children:
+        item = dw_unwrap(child)
+        op = dw_op(item)
+        if op == .assign or op == .arrow: return false
+        if op == .statement_end:
+            dw_discard_check(item)
+            found = true
+        else if dw_multi_element(item): found = true
+    found
+
+# (an element that may express a number of values other than one)
+dw_multi_element = (id: int) -> bool:
+    let id = dw_unwrap(id)
+    k = dewy_syntax[id].kind
+    if k == .block and dewy_syntax[id].text == "{{}}:":
+        children = dw_children(id)
+        return children.len() != 1 or dw_multi_element(children[0])
+    if k != .flow: return false
+    arms = dw_children(id)
+    has_else = false
+    loop arm in arms:
+        if dewy_syntax[arm].kind != .keyword_expr:
+            has_else = true
+            if dw_multi_element(arm): return true
+            continue
+        word = dewy_syntax[dw_child(arm, 0)].text
+        if word == "loop" or word == "parallel": return true
+        if word == "match":
+            body = dw_child(arm, 2)
+            branches = [body]
+            if dewy_syntax[body].kind == .block: branches = dw_children(body)
+            loop branch in branches:
+                if dw_op(branch) == .function and dw_multi_element(dw_child(branch, 2)): return true
+            has_else = true
+            continue
+        if dw_multi_element(dw_child(arm, 2)): return true
+    not has_else
+
+# `[0 {1 2} if c 3]`: the literal collects every value its elements express, in
+# order, as loop capture does (an accumulator and pushes; void values are not pushed).
+dw_collector = (id: int, children: int[]) -> int:
+    pos = dewy_syntax[id].pos
+    accumulator = intern("$dewy_collection_{nodes.len()}")
+    decl = mk(.vardecl, pos)
+    nodes[decl].name = i32(accumulator)
+    nodes[decl].b = i32(mk(.array, pos))
+    statements: int[]
+    loop child in children:
+        item = dw_unwrap(child)
+        if dw_op(item) == .statement_end:
+            statements.push(dw_stmt(item))
+            continue
+        if dewy_syntax[item].kind == .postfix and dw_op(item) == .ellipsis:
+            receiver = mk(.ident, dewy_syntax[item].pos)
+            nodes[receiver].name = i32(accumulator)
+            add_flag(receiver, NF_MUT)
+            callee = mk(.field, dewy_syntax[item].pos)
+            nodes[callee].a = i32(receiver)
+            nodes[callee].name = i32(intern("extend"))
+            call = mk(.call, dewy_syntax[item].pos)
+            nodes[call].a = i32(callee)
+            set_list(call, [dw_expr(dw_child(item, 1))])
+            statement = mk(.exprstmt, dewy_syntax[item].pos)
+            nodes[statement].a = i32(call)
+            statements.push(statement)
+            continue
+        statements.push(dw_collect(item, accumulator, false))
+    body = mk(.block, pos)
+    set_list(body, statements)
+    result = mk(.exprstmt, pos)
+    value = mk(.ident, pos)
+    nodes[value].name = i32(accumulator)
+    nodes[result].a = i32(value)
+    block = mk(.block, pos)
+    set_list(block, [decl, body, result])
+    add_flag(block, NF_COMPREHENSION)
+    block
 
 dw_rows_literal = (id: int, children: int[]) -> int:
     pos = dewy_syntax[id].pos
@@ -2151,14 +2252,14 @@ dw_rows_literal = (id: int, children: int[]) -> int:
     breaks: int[]
     loop child in children:
         if dw_row_break(child):
-            if breaks.len() == 0: fatal(dewy_syntax[child].pos, "an array literal cannot start with `;`: a `;` ends a row, as in `[1 2; 3 4]`")
+            if breaks.len() == 0: fatal(dewy_syntax[child].pos, "an array literal cannot start with `;`: a `;` ends a row, as in `[1 2 ; 3 4]`")
             breaks[breaks.len() - 1] += 1
             continue
         item = dw_unwrap(child)
         after = 0
         if dw_op(item) == .statement_end:
-            item = dw_unwrap(dw_child(item, 1))
-            after = 1
+            dw_discard_check(item)
+            fatal(dewy_syntax[item].pos, "an attached `;` discards a value, and an array with rows holds only values: a row break is a standalone `;`, with a space before it, as in `[1 2 ; 3 4]`")
         op = dw_op(item)
         if op == .assign or op == .arrow or (dewy_syntax[item].kind == .postfix and op == .ellipsis):
             fatal(dewy_syntax[item].pos, "rows separated by `;` hold plain values; records, dictionaries and spreads don't split into rows")
@@ -2330,6 +2431,13 @@ dw_stmt = (id: int, top: bool = false) -> int:
             nodes[n].op = i32(int(Tok.assign))
             nodes[n].a = i32(mk(.hole, pos))
             nodes[n].b = nodes[s].a
+            return n
+        # (`loop c xs.pop();`, `if c f();`: what the statement expresses is discarded)
+        sk = nodes[s].kind
+        if not top and (sk == .if_ or sk == .for_ or sk == .while_ or sk == .loopx or sk == .block):
+            n = mk(.block, pos)
+            set_list(n, [s])
+            add_flag(n, NF_DISCARD)
             return n
         return s
     if k == .directive and dewy_syntax[id].text == "concurrent": return dw_concurrent(id, true)
@@ -3327,6 +3435,11 @@ dw_collect = (id: int, accumulator: int, map: bool) -> int:
         add_flag(value, NF_MAP_PAIR)
         set_list(value, [dw_expr(dw_child(id, 1)), dw_expr(dw_child(id, 2))])
     else: value = dw_expr(id)
+    # (a call may express several values or none: the collector's sink pushes what it gives)
+    if not map and nodes[value].kind == .call:
+        statement = mk(.exprstmt, pos)
+        nodes[statement].a = i32(value)
+        return statement
     receiver = mk(.ident, pos)
     nodes[receiver].name = i32(accumulator)
     add_flag(receiver, NF_MUT)
@@ -3605,7 +3718,14 @@ dw_concurrent = (id: int, transparent: bool) -> int:
             token = "$task{statement}"
             nodes[statement].name = i32(intern(token))
             results.push(bc_let(original, bc_call("__task_result", [bc_ident(token, nodes[statement].pos)], nodes[statement].pos), nodes[statement].pos))
-        statements.push(statement)
+        # (`spawn f()` as a statement: its task is the group's, not a value the block expresses)
+        if nodes[statement].kind == .exprstmt and nodes[int(nodes[statement].a)].kind == .call and nodes[int(nodes[statement].a)].aux2 == 17:
+            discard = mk(.assign, nodes[statement].pos)
+            nodes[discard].op = i32(int(Tok.assign))
+            nodes[discard].a = i32(mk(.hole, nodes[statement].pos))
+            nodes[discard].b = nodes[statement].a
+            statements.push(discard)
+        else: statements.push(statement)
     statements.push(bc_let(outcome, bc_call("__task_join", [bc_ident(name, pos)], pos), pos))
     statements.push(bc_stmt(bc_call("__task_restore", [bc_ident(previous, pos)], pos), pos))
     loop result in results: statements.push(result)

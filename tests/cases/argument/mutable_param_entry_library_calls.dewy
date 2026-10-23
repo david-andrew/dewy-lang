@@ -22,7 +22,7 @@ poll=(@h:Host k:int64 word:string):>int64=>feed(@h.peers[k] word)
 main=()=>{
     let h=Host()
     h.peers[1]=S()
-    poll(@h 1 "XY")
+    poll(@h 1 "XY");
     printl(poll(@h 1 "Z"))
     printl(h.peers[1].log)
 }

@@ -29,7 +29,7 @@ def test_named_callback_effect_order(compiler, tmp_path, release, target):
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_named_callback_panic_order(compiler, tmp_path, release, target):
     cases = {'bounds': '''Callback:type=(x:int64):>int64
-visit=(callback:Callback)=>{callback(0) callback(1) printl"after"}
+visit=(callback:Callback)=>{callback(0); callback(1); printl"after"}
 main=()=>{
  let xs:array<int64>=[7]
  let callback=(x:int64):>int64=>{printl"before {x}" return xs[x]}

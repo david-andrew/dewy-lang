@@ -9,7 +9,7 @@ values.push(key)
 if fresh expected.push(key)
 } else if action =? 3 {
 if values.remove(key) not=? (key in? expected) return 2
-loop i in [0..expected.length) {if expected[i] =? key {expected.pop(i) break}}
+loop i in [0..expected.length) {if expected[i] =? key {expected.pop(i); break}}
 } else if action =? 4 {
 if expected.length >? 0 {if values.pop() not=? expected.pop() return 3}
 else {if values.pop(default=none) isnt? none return 4}

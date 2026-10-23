@@ -466,7 +466,7 @@ _mag_decimal_chunks=(limbs:array<uint64>):>array<uint64>=>{
     let tree=_convert_tree(k true)
     let out:array<uint64>=[]
     _mag_chunks_into(@out limbs k tree)
-    loop out.length >? 1 and out[out.length-1] =? 0 out.pop()
+    loop out.length >? 1 and out[out.length-1] =? 0 out.pop();
     return out
 }
 

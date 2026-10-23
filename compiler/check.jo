@@ -168,6 +168,7 @@ struct FnInst:
     cvariadic: i32      # @variadic(n): a C function with n fixed parameters, then C's `...` (0: none)
     use_pos: int        # generic instances: the call that made it (for errors inside it) ...
     made_in: i32        # ... in the body of this instance (0: none)
+    pack: int           # (Dewy) a body expressing several values: where the first extra one is (0: one value)
 
 struct FnSig:
     contract: i32
@@ -1923,6 +1924,8 @@ value_leaves = (n: int, out: mut int[]):
         if nkids(n) > 0: value_leaves(kid(n, nkids(n) - 1), out)
     else if k == .exprstmt or k == .return_: value_leaves(int(nodes[n].a), out)
     else if k == .if_:
+        # (an `if` without `else` is a statement: what its arm expresses is not the value)
+        if nodes[n].c == 0 and files[pos_file(nodes[n].pos)].is_dewy: return
         value_leaves(int(nodes[n].b), out)
         value_leaves(int(nodes[n].c), out)
     else if k == .match_:
@@ -1962,6 +1965,21 @@ syntactic_void = (body: int) -> bool:
     if k == .exprstmt: return false
     if (k == .if_ or k == .iflet) and nodes[last].c != 0: return false
     not has_value_return(body)
+
+# (Dewy: a statement that may express a value, `xs.pop()` in a loop, so that what the
+# body gives is inferred: multi_expressions.md)
+may_express = (n: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .exprstmt: return true
+    if k == .block:
+        if has_flag(n, NF_DISCARD): return false
+        loop i in [0..nkids(n)):
+            if may_express(kid(n, i)): return true
+        return false
+    if k == .if_ or k == .iflet or k == .loopx: return may_express(int(nodes[n].b)) or may_express(int(nodes[n].c))
+    if k == .for_ or k == .while_: return may_express(int(nodes[n].b))
+    false
 
 # (@no_web("why"): a function that does nothing in a browser, said where a web build's program
 # calls it)
@@ -2036,7 +2054,7 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
     if sig.generic: source_force_body(decl)
     load_body(decl, f)
     if sig.ret != 0: fns[f].ret = i32(subst(int(sig.ret), zt))
-    else if nodes[decl].b != 0 and syntactic_void(int(nodes[decl].b)): fns[f].ret = i32(T_VOID)
+    else if nodes[decl].b != 0 and syntactic_void(int(nodes[decl].b)) and not (files[pos_file(nodes[decl].pos)].is_dewy and may_express(int(nodes[decl].b))): fns[f].ret = i32(T_VOID)
     if refine_active and sig.generic: ref_validate_signature(fns[f].ptypes, int(fns[f].ret), int(sig.mutmask), use_pos)
     if sig.generic and pl_on: pl_inst_decls.push(decl)
     if sig.generic: fns[f].body = i32(clone(int(nodes[decl].b)))
@@ -2562,7 +2580,236 @@ expand_when = (out: mut int[], s: int):
     if blk == 0: return
     loop i in [0..nkids(blk)): expand_when(out, kid(blk, i))
 
+# ---------------- multiple expressions (docs/design/multi_expressions.md) ----------------
+# A Dewy block expresses each non-void value its statements give, in source order, through
+# nested statement blocks, `if`/`match` arms and loops. A sink is the context they go to.
+# Only blocks that express a value before their end pay for this.
+const SINK_NONE = 0       # dropped: module code, a body giving `void`
+const SINK_ONE = 1        # one value: the block's last expression; another is an error
+const SINK_BODY = 2       # an inferred function body: one value, or a pack of several
+const SINK_ARM = 3        # an arm of the `if`/`match` ending a BODY (or ARM): expresses into the BODY
+const SINK_COLLECTOR = 4  # loop capture, `[...]` with blocks: pushes onto its accumulator
+
+struct Sink:
+    mode: int
+    block: int
+    root: int       # (ARM: the BODY sink its values go to)
+    acc: int        # the accumulator local, 0 until one is needed
+    loops: int      # loop_serials.len() at the block
+    pending: int    # sink_pending.len() at the block
+    decl: int       # the accumulator's declaration, put first in the block when it closes
+    first: int      # position of the first value before the end
+    returns: int    # position of a `return value` in a BODY
+    finals: int[]   # BODY: the `if`/`match` nodes whose arms were ARM sinks
+
+sinks: Sink[]
+# (values a BODY expressed before it needed an accumulator: exprstmts, and whether
+# each is a last value, its own or an ARM's)
+sink_pending: int[]
+sink_pfinal: bool[]
+sink_body_mode = -1      # (set just before a function body's check_block)
+sink_arm_next = 0        # (the arm block check_if/match_ is about to check as an ARM)
+sink_final = 0           # (the expression ending the innermost BODY or ARM)
+sink_pack_site = 0       # (the expression where a pack is taken: a consumer sets it)
+sink_pack_hit = 0        # (... and a call of a pack function there sets this)
+sink_fn = -1             # (the sink of the function body being checked)
+sink_spread_calls: {int: bool}   # (calls spread into an array, `[f()...]`: they may give several values)
+
+sink_root = (i: int) -> int: if sinks[i].mode == SINK_ARM: int(sinks[i].root) else: i
+
+# A function body's sink: an inferred result may be a pack, a written one is one value,
+# and `:>void | E` (like `:>void`) gives no value, so what its body expresses is dropped.
+sink_body_kind = (body: int, infer: bool, want: bool, ret: int) -> int:
+    if not files[pos_file(nodes[body].pos)].is_dewy or not want: return SINK_NONE
+    if infer: return SINK_BODY
+    if union_has_void(prune(ret)): return SINK_NONE
+    SINK_ONE
+
+# `return value` in a body: a BODY that becomes a pack cannot also return one.
+sink_return = (pos: int):
+    if sink_fn >= 0 and sinks[sink_fn].mode == SINK_BODY and sinks[sink_fn].returns == 0: sinks[sink_fn].returns = pos
+
+# The call of a function expressing several values: only a consumer that set
+# sink_pack_site takes them; everywhere else is a place for one value.
+sink_pack_call = (n: int):
+    f = int(nodes[n].sym)
+    if sink_pack_site == n:
+        sink_pack_hit = n
+        return
+    if sink_spread_calls.has(n): return
+    d = int(fns[f].decl)
+    name = if d != 0 and nodes[d].name > 0: name_of(int(nodes[d].name)) else: "this function"
+    ln = line_col(fns[f].pack).0
+    fatal(nodes[n].pos, "'{name}' gives several values (its body expresses one before its end, at line {ln}), and only one is taken here: collect them, `[{name}(...)]`, or attach `;` to each value its body should discard, `f();`")
+
+# An accumulator for sink i's values: `$packN = []`, declared first in its block at the end.
+sink_make_acc = (i: int, elem: int, pos: int):
+    acc_name = intern("$pack{nodes.len()}")
+    d = mk(.vardecl, pos)
+    nodes[d].name = i32(acc_name)
+    nodes[d].a = i32(type_node_of(mk_array(elem), pos))
+    nodes[d].b = i32(mk(.array, pos))
+    check_stmt(d)
+    l = int(nodes[d].sym)
+    locals[l].dloops = i32(sinks[i].loops)
+    locals[l].flags = locals[l].flags | i32(LF_QUIET)
+    sinks[i].acc = l
+    sinks[i].decl = d
+
+# `value` pushed (or a pack extended) onto sink i's accumulator, in exprstmt s.
+sink_push = (i: int, s: int, pack: bool):
+    v = int(nodes[s].a)
+    pos = nodes[v].pos
+    if sinks[i].acc == 0:
+        elem = ntype(v)
+        if pack: elem = int(types[prune(elem)].elem)
+        else if is_lit(v): elem = lit_default(v)
+        sink_make_acc(i, elem, pos)
+    else if sinks[i].mode != SINK_COLLECTOR:
+        elem = int(types[prune(int(locals[int(sinks[i].acc)].type))].elem)
+        vt = ntype(v)
+        if pack: vt = int(types[prune(vt)].elem)
+        if not is_lit(v) and not can_coerce(v, vt, elem): fatal(pos, "this expresses {a_type(vt)}, and the values expressed before it are {dt(elem)}: the values one block expresses have one type; attach `;` to discard this one, as in `f();`, or convert it")
+    receiver = mk_ident_local(int(sinks[i].acc), pos)
+    add_flag(receiver, NF_MUT)
+    callee = mk(.field, pos)
+    nodes[callee].a = i32(receiver)
+    nodes[callee].name = i32(intern(if pack: "extend" else: "push"))
+    call = mk(.call, pos)
+    nodes[call].a = i32(callee)
+    set_list(call, [v])
+    check_expr(call, 0)
+    nodes[s].a = i32(last_checked)
+
+# Sink i's pending values pushed in order (it needs an accumulator after all).
+sink_flush = (i: int):
+    start = int(sinks[i].pending)
+    loop k in [start..sink_pending.len()):
+        sink_push(i, sink_pending[k], false)
+    sink_pending.truncate(start)
+    sink_pfinal.truncate(start)
+
+# Exprstmt s gives a value of type t in the innermost sink (a pack when `pack`).
+sink_express = (s: int, t: int, pack: bool, final: bool):
+    i = sinks.len() - 1
+    mode = sinks[i].mode
+    v = int(nodes[s].a)
+    if mode == SINK_ONE:
+        fatal(nodes[v].pos, "this gives a value, and here the block gives one, its last expression: attach `;` to discard this value, as in `f();`")
+    if mode == SINK_COLLECTOR:
+        if sinks[i].acc == 0: sinks[i].acc = int(nodes[kid(int(sinks[i].block), 0)].sym)
+        sink_push(i, s, pack)
+        return
+    r = sink_root(i)
+    if not final and sinks[r].first == 0:
+        sinks[r].first = nodes[v].pos
+        # (a body that also gives a value with `return`: said here, before the values meet)
+        if sinks[r].returns == 0 and has_value_return(int(sinks[r].block)): fatal(nodes[v].pos, "this expresses a value before the function's end, and the function also gives one back with `return`; a function expressing several values cannot `return` one yet: attach `;` to discard this value, as in `f();`")
+    if sinks[r].acc != 0 or pack or loop_serials.len() > sinks[r].loops:
+        if sinks[r].first == 0: sinks[r].first = nodes[v].pos
+        sink_flush(r)
+        sink_push(r, s, pack)
+        return
+    sink_pending.push(s)
+    sink_pfinal.push(final)
+
+# Arm block b of `if`/`match` e, which ends a BODY or ARM: its values go to the BODY.
+sink_arm = (e: int, b: int):
+    if sinks.len() == 0: return
+    r = sink_root(sinks.len() - 1)
+    if sinks[r].mode != SINK_BODY: return
+    if not sinks[r].finals.contains(e): sinks[r].finals.push(e)
+    sink_arm_next = b
+
+sink_open = (b: int, mode: int):
+    sinks.push(Sink(mode = mode, block = b, root = -1, acc = 0, loops = loop_serials.len(), pending = sink_pending.len()))
+    i = sinks.len() - 1
+    if mode == SINK_ARM:
+        p = sinks.len() - 2
+        sinks[i].root = i32(sink_root(p))
+
+# A value-giving `if`/`match` whose arms gave their values to a BODY that became a
+# pack: a statement now, its arms' last values pushed.
+sink_flow_stmt = (e: int):
+    add_flag(e, NF_STMT)
+    nodes[e].type = i32(T_VOID)
+    arms: int[]
+    if nodes[e].kind == .if_:
+        arms.push(int(nodes[e].b))
+        if nodes[e].c != 0: arms.push(int(nodes[e].c))
+    else:
+        loop arm in kids(e): arms.push(int(nodes[arm].b))
+    loop arm in arms:
+        nodes[arm].aux = 0
+        nodes[arm].type = i32(T_VOID)
+        sink_unwrap_last(arm)
+
+# (a block ending in an `if` made a statement: the statement itself, as check_stmt has it)
+sink_unwrap_last = (b: int):
+    n = nkids(b)
+    if n == 0: return
+    last = kid(b, n - 1)
+    if nodes[last].kind != .exprstmt: return
+    inner = int(nodes[last].a)
+    if nodes[inner].kind == .if_ and has_flag(inner, NF_STMT): set_kid(b, n - 1, inner)
+
+# The end of block b, sink i: a BODY whose values are more than its last one
+# becomes a pack, `{ $pack = [] ... $pack.push(v) ... $pack }`.
+sink_close = (b: int, result: int) -> int:
+    i = sinks.len() - 1
+    mode = sinks[i].mode
+    out = result
+    if mode == SINK_BODY:
+        start = int(sinks[i].pending)
+        single = sinks[i].acc == 0
+        loop k in [start..sink_pending.len()):
+            if not sink_pfinal[k]: single = false
+        if not single:
+            first = int(sinks[i].first)
+            if first == 0: first = nodes[b].pos
+            if sinks[i].returns != 0: fatal(first, "this expresses a value before the function's end, and the function also gives one back with `return` (line {line_col(sinks[i].returns).0}); a function expressing several values cannot `return` one yet: attach `;` to discard this value, as in `f();`")
+            d = int(fns[int(ctxs[cx].inst)].decl)
+            if d != 0 and nodes[d].kind == .fn_ and name_of(int(nodes[d].name)) == "main": fatal(first, "this expresses a value before main's end, and main gives back nothing (or the errors that reach it): attach `;` to discard it, as in `f();`")
+            sink_flush(i)
+            k = sinks[i].finals.len() - 1
+            loop k >= 0:
+                sink_flow_stmt(sinks[i].finals[k])
+                k -= 1
+            sink_unwrap_last(b)
+            pos = nodes[b].pos
+            acc = int(sinks[i].acc)
+            value = mk_ident_local(acc, pos)
+            r = mk(.exprstmt, pos)
+            nodes[r].a = i32(value)
+            add_flag(r, NF_CHECKED)
+            xs = [int(sinks[i].decl)]
+            loop k in kids(b): xs.push(k)
+            xs.push(r)
+            set_list(b, xs)
+            nodes[b].aux = 1
+            out = int(locals[acc].type)
+            fns[int(ctxs[cx].inst)].pack = first
+        sink_pending.truncate(start)
+        sink_pfinal.truncate(start)
+    sinks.pop()
+    out
+
 check_block = (b: int, expected: int, want_value: bool) -> int:
+    sink_mode = -1
+    if sink_body_mode >= 0:
+        sink_mode = sink_body_mode
+        sink_body_mode = -1
+    else if has_flag(b, NF_DISCARD) and sinks.len() > 0: sink_mode = SINK_NONE
+    else if want_value and files[pos_file(nodes[b].pos)].is_dewy:
+        if has_flag(b, NF_COMPREHENSION): sink_mode = SINK_COLLECTOR
+        else if sink_arm_next == b: sink_mode = SINK_ARM
+        else: sink_mode = SINK_ONE
+    sink_arm_next = 0
+    was_discarding = discarding
+    if sink_mode >= 0:
+        sink_open(b, sink_mode)
+        discarding = false
+    collecting = sink_mode == SINK_BODY or sink_mode == SINK_ARM
     transparent = nodes[b].aux == 5 and not want_value
     has_when = false
     loop i in [0..nkids(b)):
@@ -2590,8 +2837,21 @@ check_block = (b: int, expected: int, want_value: bool) -> int:
                 s = es
             e = int(nodes[s].a)
             if nodes[e].kind == .match_: clear_flag(e, NF_STMT)
-            result = check_expr(e, expected)
-            nodes[s].a = i32(last_checked)
+            if collecting:
+                saved_final = sink_final
+                sink_final = e
+                sink_pack_site = e
+                result = check_expr(e, expected)
+                sink_final = saved_final
+                nodes[s].a = i32(last_checked)
+                pack = sink_pack_hit != 0 and sink_pack_hit == e
+                sink_pack_hit = 0
+                sink_pack_site = 0
+                armed = sinks[sink_root(sinks.len() - 1)].finals.contains(e)
+                if not armed and tkind(result) != .void_ and result != T_NEVER: sink_express(s, result, pack, true)
+            else:
+                result = check_expr(e, expected)
+                nodes[s].a = i32(last_checked)
             if tkind(result) != .void_: nodes[b].aux = 1
             if result == T_NEVER: nodes[b].aux = 0
             add_flag(s, NF_CHECKED)
@@ -2605,6 +2865,9 @@ check_block = (b: int, expected: int, want_value: bool) -> int:
     # (an array built by pushing has a solved inference variable inside its type: the plain type
     # matches overloads exactly)
     if want_value and result != 0 and int(types[result].flags) & TF_HAS_VAR != 0: result = zonk(result)
+    if sink_mode >= 0:
+        result = sink_close(b, result)
+        discarding = was_discarding
     nodes[b].type = i32(result)
     if transparent: nodes[b].aux = 5
     else: scope_reset(mark)
@@ -4337,9 +4600,10 @@ check_stmt = (s: int):
         # (_ = f(): the value made, and dropped on purpose)
         e = int(nodes[s].b)
         nodes[s] = Node(kind = .exprstmt, pos = nodes[s].pos, a = i32(e))
+        was_discarding = discarding
         discarding = true
         check_stmt(s)
-        discarding = false
+        discarding = was_discarding
     else if k == .assign and assign_declares(s, -1):
         assign_to_decl(s)
         check_vardecl(s)
@@ -4366,11 +4630,20 @@ check_stmt = (s: int):
         if nodes[e].kind == .match_: add_flag(e, NF_STMT)
         named = nodes[e].kind == .ident or nodes[e].kind == .field
         raw = nodes[e]
+        sink_pack_site = e
+        dropped = discarding
         t = check_expr(e, 0)
+        sink_pack_site = 0
+        pack = sink_pack_hit != 0 and sink_pack_hit == e
+        sink_pack_hit = 0
         if named and (tkind(t) == .fn_ or tkind(t) == .cfn):
             nm = name_of(int(nodes[e].name))
             fatal(nodes[e].pos, "'{nm}' is a function and is not called here: `{nm}()` calls it")
         nodes[s].a = i32(last_checked)
+        # (a Dewy block expresses the value: multi_expressions.md)
+        if not dropped and sinks.len() > 0 and sinks[sinks.len() - 1].mode != SINK_NONE and t != T_NEVER and tkind(t) != .void_ and not union_has_void(t):
+            sink_express(s, t, pack, false)
+            return
         unused_result(last_checked, nodes[e].pos)
         unused_value(raw, t)
     else if k == .if_ or k == .iflet:
@@ -4409,6 +4682,7 @@ check_stmt = (s: int):
         if not ctxs[cx].infer_ret and prune(ret) == T_NEVER and files[pos_file(nodes[s].pos)].is_dewy: fatal(nodes[s].pos, "a function giving `never` does not return")
         if nodes[s].a != 0:
             returned_place(int(nodes[s].a))
+            sink_return(nodes[s].pos)
             if ctxs[cx].infer_ret and tkind(ret) == .var:
                 t = check_expr(int(nodes[s].a), 0)
                 nodes[s].a = i32(last_checked)
@@ -4562,8 +4836,13 @@ check_body_now = (f: int):
             infer_throws[f] = []
             infer_returns[f] = []
     body = int(fns[f].body)
+    saved_sink = sink_fn
     if fns[f].kind == FK_INIT:
+        sink_open(body, SINK_NONE)
+        sink_fn = sinks.len() - 1
         loop i in [0..nkids(body)): check_stmt(kid(body, i))
+        sinks.pop()
+        sink_fn = saved_sink
         fns[f].ret = i32(T_VOID)
     else:
         infer = ctxs[cx].infer_ret
@@ -4571,7 +4850,10 @@ check_body_now = (f: int):
         exp = 0
         if not infer: exp = int(ctxs[cx].ret)
         if want and nkids(body) > 0 and nodes[kid(body, nkids(body) - 1)].kind == .exprstmt: returned_place(int(nodes[kid(body, nkids(body) - 1)].a))
+        sink_body_mode = sink_body_kind(body, infer, want, int(ctxs[cx].ret))
+        sink_fn = sinks.len()
         bt = check_block(body, exp, want)
+        sink_fn = saved_sink
         r = prune(int(ctxs[cx].ret))
         n = nkids(body)
         if infer:
@@ -4817,7 +5099,11 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
     exp = 0
     if not infer: exp = int(ctxs[cx].ret)
     if want and nkids(body) > 0 and nodes[kid(body, nkids(body) - 1)].kind == .exprstmt: returned_place(int(nodes[kid(body, nkids(body) - 1)].a))
+    saved_sink = sink_fn
+    sink_body_mode = sink_body_kind(body, infer and types[prune(int(ctxs[cx].ret))].kind == .var, want, int(ctxs[cx].ret))
+    sink_fn = sinks.len()
     bt = check_block(body, exp, want)
+    sink_fn = saved_sink
     r = prune(int(ctxs[cx].ret))
     if infer:
         if types[r].kind == .var:

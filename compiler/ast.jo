@@ -25,7 +25,7 @@ enum NK:
     typealias,      # type Name[T] = a
     ptype,          # Dewy type pattern: a is the type, name is an optional value binding
     record_lit,     # Dewy [field=value ...], contextual or inferred structural record
-    matrix,         # [1 2; 3 4]: the elements row by row; ival = elements per row
+    matrix,         # [1 2 ; 3 4]: the elements row by row; ival = elements per row
     trecord,        # Dewy inline structural type [field: Type ...]
     propagate,     # postfix or_throw; checker expands to a checked return
     unit_lit,       # exact built-in unit: ival numerator, aux denominator, aux2 dimension
@@ -68,6 +68,7 @@ const NF_SOA = 131072         # array type `soa T[]`: stored as one array per fi
 const NF_RDONLY = 262144      # an element of a soa array reached through a read-only loop variable
 const NF_INBOUNDS = 524288    # an index the compiler generated knowing it is in bounds
 const NF_TYPE_EXPR = 1048576  # `T[]` written where an expression goes: a type (a type argument)
+const NF_DISCARD = NF_SQUOTE  # (Dewy) block: an attached `;` discards what its one statement expresses
 const NF_U64 = 2097152        # an integer literal above the i64 range (written so, or computed from one)
 const NF_VOID = 4194304       # a function written `-> void` (it returns nothing, whatever its body says)
 const NF_ALIASDECL = 8388608  # a vardecl whose name stands for the place b (`mut x in xs` in a combined loop)

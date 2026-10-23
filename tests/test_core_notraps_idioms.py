@@ -134,7 +134,7 @@ main=():>void=>exit(entry()) entry=():>int64=>middle([1])
     loop true {
         k+=1
         if k >=? xs.length break
-        if xs.length >? 0 {xs.pop()}
+        if xs.length >? 0 {xs.pop();}
         xs[k]+=1
     }
     return xs.length
@@ -163,7 +163,7 @@ main=():>void=>exit(entry()) entry=():>int64=>cut([1] 1)
     'slice_after_shrink': ('''cut=(xs:array<int64>):>int64=>{
     let ys=xs
     if ys.length <? 2 return 0
-    ys.pop()
+    ys.pop();
     return ys[..1].length
 }
 main=():>void=>exit(entry()) entry=():>int64=>cut([1 2])
@@ -177,7 +177,7 @@ main=():>void=>exit(entry()) entry=():>int64=>peek([1])
     'pop_after_guard': ('''peek=(xs:array<int64>):>int64=>{
     let ys=xs
     if ys.length =? 0 return 0
-    ys.pop()
+    ys.pop();
     return ys[0]
 }
 main=():>void=>exit(entry()) entry=():>int64=>peek([1])
@@ -186,7 +186,7 @@ main=():>void=>exit(entry()) entry=():>int64=>peek([1])
     let ys=xs
     let t=0
     loop i in [0..ys.length) {
-        if ys.length >? 0 {ys.pop()}
+        if ys.length >? 0 {ys.pop();}
         t+=ys[i]
     }
     return t

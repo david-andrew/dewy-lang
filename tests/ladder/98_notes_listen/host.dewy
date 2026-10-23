@@ -52,7 +52,7 @@ relay=(@host:Host @peers:dict<int64 Connection>):>bool=>{
         if event.kind =? net.NetKind.joined {
             peers[event.peer]=Connection()
         } else if event.kind =? net.NetKind.left {
-            peers.remove(event.peer)
+            peers.remove(event.peer);
         } else if event.peer in? peers {
             let reply=feed(@host.service @peers[event.peer] event.data)
             if reply.length >? 0 net.send(event.peer reply)

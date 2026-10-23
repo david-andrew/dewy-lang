@@ -4,7 +4,7 @@ let add=(@value:int $capture n)=>{n+=1 value+=n}
 if alloc_count() not=?before return 1
 add(@total) add(@total)
 return if total=?3 and n=?0 and alloc_count()=?before 42 else 2}
-run=()=>{work() let before=alloc_count()
+run=()=>{work(); let before=alloc_count()
 loop i in [0..20) {if work() not=?42 return 1}
 return if alloc_count()=?before 42 else 2}
 main=()=>exit(run())

@@ -71,10 +71,10 @@ def test_callback_specialization_semantics(compiler, tmp_path, release, target):
 def test_callback_specialization_panics(compiler, tmp_path, release, target):
     cases = {
         'assertion': '''Callback:type=(x:int64):>int64
-visit=(callback:Callback)=>{callback(1) callback(2) printl"after"}
+visit=(callback:Callback)=>{callback(1); callback(2); printl"after"}
 main=()=>visit((x:int64):>int64=>{printl"before {x}" $runtime_assert x<?2 return x})''',
         'bounds': '''Callback:type=(x:int64):>int64
-visit=(callback:Callback)=>{callback(0) callback(1) printl"after"}
+visit=(callback:Callback)=>{callback(0); callback(1); printl"after"}
 main=()=>{
  let xs:array<int64>=[7]
  visit((x:int64):>int64=>{printl"before {x}" return xs[x]})

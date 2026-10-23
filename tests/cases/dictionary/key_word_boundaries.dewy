@@ -18,7 +18,7 @@ let unsigned:array<uint64>=[0 uint64.max uint64.max-1 4294967295 4294967296]
 let wide:dict<uint64 int64>=[]
 loop i in [0..unsigned.length) wide[unsigned[i]]=i
 let prior=wide
-wide.remove(uint64.max) wide.reserve(100) wide[uint64.max]=42
+wide.remove(uint64.max); wide.reserve(100) wide[uint64.max]=42
 loop i in [0..unsigned.length) {
 if prior[unsigned[i]] not=?i return 6
 if wide[unsigned[i]] not=? (if i=?1 42 else i) return 7

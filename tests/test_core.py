@@ -2018,8 +2018,8 @@ return if empty.len() =? 1 and empty[0] =? 42 42 else 4
 }
 ''')
     else:
-        action = {'capacity': 'new_ring<int64>(0)',
-                  'negative-index': 'ring[-1]', 'past-end': 'ring[1]'}[case]
+        action = {'capacity': 'new_ring<int64>(0);',
+                  'negative-index': 'ring[-1];', 'past-end': 'ring[1];'}[case]
         source.write_text(f'from p"ring.dewy" import new_ring\n'
                           f'main=():>void=>exit(entry()) entry=()=>{{let ring=new_ring<int64>(2) ring.push(42) {action} return 0}}')
     binary = tmp_path / 'ring'
@@ -2060,14 +2060,14 @@ def test_core_pool_update_errors(compiler, tmp_path, case, target, release):
     setup = 'let pool:Pool<array<int64>>=[] let h=pool.add([20])'
     update = 'pool[h][0]=42'
     if case == 'stale':
-        setup += ' pool.remove(h) pool.add([1])'
+        setup += ' pool.remove(h); pool.add([1]);'
     elif case == 'missing':
         setup += ' h=Handle[]'
     elif case == 'storage-bounds':
         setup += ' pool.items.clear()'
     else:
         declarations = '''let pool:Pool<array<int64>>=[] let h:Handle=[]
-erase=():>int64=>{pool.remove(h) return 22}
+erase=():>int64=>{pool.remove(h); return 22}
 '''
         setup = 'h=pool.add([20])'
         update = 'pool[h][0]+=erase()'
@@ -2584,7 +2584,7 @@ def test_core_rollback_model(compiler, tmp_path, target, release):
     ('let count:int64=0\nhelper=()=>{count+=1 return count}\ntick=(state:int64 _inputs:array<int64>)=>state+helper()', '@tick', 'int64(0)', "changes the global 'count'"),
     ('input=():>int64=>if key_down(Key.space) 1 else 0\ntick=(state:int64 _inputs:array<int64>)=>state+input()', '@tick', 'int64(0)', 'reads the input'),
     ('helper=(n:int64):>int64=>if n>?0 helper(n-1) else int64(time())\ntick=(state:int64 _inputs:array<int64>)=>state+helper(1)', '@tick', 'int64(0)', 'reads the clock'),
-    ('tick=(state:Rng _inputs:array<int64>)=>{state.next_int(0 10) return state}', '@tick', 'rng(7)', None),
+    ('tick=(state:Rng _inputs:array<int64>)=>{state.next_int(0 10); return state}', '@tick', 'rng(7)', None),
     ('tick=(state:Rng _inputs:array<int64>)=>{let xs=[1 2 3] shuffle(@state @xs) return state}', '@tick', 'rng(7)', None),
     ('tick=(state:int64 _inputs:array<int64>)=>state+int64(unix_time(date(0.0 utc=true)))', '@tick', 'int64(0)', None),
     ('let random_state=rng(7)\ntick=(state:int64 _inputs:array<int64>)=>state+random_state.next_int(0 10)', '@tick', 'int64(0)', "changes the global 'random_state'"),
@@ -3391,7 +3391,7 @@ main=()=>{
 
     # The same World/Character calls used by the game, with an independent saved world.
     let w=physics3d.World[gravity=vec3(0 -GRAVITY 0)]
-    w.add_box(vec3(0 -0.5 0) vec3(40 1 40) kind=physics3d.BodyKind.fixed)
+    w.add_box(vec3(0 -0.5 0) vec3(40 1 40) kind=physics3d.BodyKind.fixed);
     let wall=w.add_box(vec3(0 2 -4) vec3(10 4 1) kind=physics3d.BodyKind.fixed)
     let body=w.add_box(vec3(5 1 0) vec3(2 2 2) density=150)
     let before=w

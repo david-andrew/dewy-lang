@@ -5,19 +5,19 @@ Item:type=[name:string n:Pos]
 main=()=>{
     let d:dict<string Pos> = ['a'->1 'b'->2 'c'->3]
     printl(d.pop('a'))
-    d.remove('b')
+    d.remove('b');
     printl(d.length d['c'])
     d['d'] = 4
     printl(d.pop('c') d.pop('d') d.length)
     let s:set<Pos> = set[1 2 3]
-    s.remove(2)
+    s.remove(2);
     printl(s.length s.contains(2) s.contains(3))
     printl(s.pop(1) s.length)
-    s.remove(3)
+    s.remove(3);
     printl(s.length)
     let items:dict<Pos Item> = [1->Item["one" 1] 2->Item["two" 2] 3->Item["three" 3]]
     printl(items.pop(1).name)
-    items.remove(2)
+    items.remove(2);
     printl(items.length items[3].name)
     items.clear()
     items[4] = Item["four" 4]

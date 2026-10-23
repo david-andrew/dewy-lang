@@ -6,10 +6,10 @@ main = () => {
     let files:Tree<string> = []
     let root = files.add("home")
     let drafts = files.add("drafts" root)
-    files.add("old.txt" drafts)
-    files.add("older.txt" drafts)
+    files.add("old.txt" drafts);
+    files.add("older.txt" drafts);
     let notes = files.add("notes" root)
-    files.add("todo.txt" notes)
+    files.add("todo.txt" notes);
     printl([loop name in files.walk() name])
     let w=files.walk
     loop name in @w {

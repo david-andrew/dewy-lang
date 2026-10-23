@@ -94,7 +94,7 @@ erase=(@node:Node key:int64):>bool=> {
     if i <? node.keys.length  {
         if node.keys[i] =? key  {
             if node.children.length =? 0  {
-                take(@node.keys i)
+                take(@node.keys i);
                 return true
             }
             assert(node.children.length =? node.keys.length+1)

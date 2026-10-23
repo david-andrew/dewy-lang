@@ -50,7 +50,7 @@ main=():>void | net.NetError | Canceled=>{
     let host=Host()
     let listener=net.tcp_listen(0) or_throw
     concurrent server {
-        spawn(server) visit(server listener.port)
+        spawn(server) visit(server listener.port);
         # (this thread serves until the client's task cancels the group)
         serve(@host listener)
     }

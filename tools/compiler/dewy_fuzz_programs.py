@@ -63,6 +63,7 @@ I, U, F, B, S = (Ty(k) for k in ('int64', 'uint64', 'float64', 'bool', 'string')
 INT = Ty('int')  # mathematical integer: Python's unbounded integers are the oracle
 Q = Ty('rational')
 VOID, RANGE, HIDDEN = Ty('void'), Ty('range'), Ty('hidden')
+MULTI = Ty('multi')  # several values for a surrounding collector (multi_expressions.md)
 FN = Ty('fn', (I,), I)  # (int64):>int64 closures with private state
 AI, AS, AF = Ty('array', (I,)), Ty('array', (S,)), Ty('array', (F,))
 AAI = Ty('array', (AI,))
@@ -441,6 +442,57 @@ class ArrayLit(Expr):
 
     def eval(self, m, env):
         return [copy.deepcopy(m.eval(x, env)) for x in self.items]
+
+
+@dataclass(frozen=True)
+class MultiBlock(Expr):
+    """`{a b c}` inside a collector: the block expresses each value."""
+    ty: Ty
+    items: tuple
+
+    def render(self, typed=False):
+        return '{' + ' '.join(render(x, typed) for x in self.items) + '}'
+
+    def eval(self, m, env):
+        return [copy.deepcopy(m.eval(x, env)) for x in self.items]
+
+
+@dataclass(frozen=True)
+class MultiIf(Expr):
+    """`if test {a b} else {c}` inside a collector: the chosen arm's values; no `else`, none."""
+    ty: Ty
+    test: Expr
+    then: tuple
+    other: tuple | None = None
+
+    def render(self, typed=False):
+        text = f'if {render(self.test)} {{' + ' '.join(render(x, typed) for x in self.then) + '}'
+        if self.other is not None:
+            text += ' else {' + ' '.join(render(x, typed) for x in self.other) + '}'
+        return text
+
+    def eval(self, m, env):
+        arm = self.then if m.eval(self.test, env) else (self.other or ())
+        return [copy.deepcopy(m.eval(x, env)) for x in arm]
+
+
+@dataclass(frozen=True)
+class MultiLit(Expr):
+    """`[a {b c} if t {d e} else {f}]`: an array literal collecting multiple expressions."""
+    ty: Ty
+    items: tuple
+
+    def render(self, typed=False):
+        return '[' + ' '.join(render(x, typed) for x in self.items) + ']'
+
+    def eval(self, m, env):
+        out = []
+        for x in self.items:
+            if isinstance(x, (MultiBlock, MultiIf)):
+                out += m.eval(x, env)
+            else:
+                out.append(copy.deepcopy(m.eval(x, env)))
+        return out
 
 
 @dataclass(frozen=True)
@@ -1463,7 +1515,7 @@ def scope_errors(program) -> list[str]:
 
 FEATURES = ('arithmetic', 'floats', 'strings', 'records', 'arrays', 'snapshots', 'places',
             'closures', 'loops', 'comprehensions', 'branches', 'optionals', 'collections',
-            'recursion', 'asserts', 'checked', 'errors', 'decimals')
+            'recursion', 'asserts', 'checked', 'errors', 'decimals', 'multi')
 
 
 @dataclass
@@ -2406,6 +2458,22 @@ class Generator:
         if self.chance(.5):
             out.append(self.loop_statement(0, acc))
         return flatten(out) + [self.print_value(Var(I, acc))]
+
+    def block_multi(self):
+        """A collector of blocks and `if` arms expressing differing numbers of values."""
+        r = self.r
+        ty, array = r.choice(((I, AI), (I, AI), (S, AS)))
+        values = lambda: tuple(self.expr(ty, 2) for _ in range(r.randint(0, 3)))
+        items = [self.expr(ty, 2)]
+        for _ in range(r.randint(1, 3)):
+            pick = r.random()
+            if pick < .3:
+                items.append(self.expr(ty, 2))
+            elif pick < .6:
+                items.append(MultiBlock(MULTI, values()))
+            else:
+                items.append(MultiIf(MULTI, self.expr(B, 1), values(), values() if self.chance(.6) else None))
+        return [self.print_value(MultiLit(array, tuple(items)))]
 
     def block_comprehensions(self):
         r = self.r

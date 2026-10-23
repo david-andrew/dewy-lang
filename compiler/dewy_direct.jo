@@ -265,6 +265,10 @@ dc_atom = () -> int:
                 nodes[entry].a = i32(value)
                 items.push(entry)
                 continue
+            # (a flow or block element may express several values or none: the reference
+            # grammar decides, building a collector when it does, dw_collector)
+            first = dn_peek()
+            if first == .kw_if or first == .kw_loop or first == .kw_match or first == .lbrace: return 0
             item = dc_expr(0)
             if item == 0: return 0
             items.push(item)
@@ -1218,7 +1222,12 @@ dc_statement = () -> int:
         n = dc_flow()
         if n == 0: return 0
         add_flag(n, NF_STMT)
-        dn_accept_semi()
+        # (`loop c xs.pop();`: what the statement expresses is discarded)
+        if dn_accept_semi():
+            discard = mk(.block, pos)
+            set_list(discard, [n])
+            add_flag(discard, NF_DISCARD)
+            return discard
         return n
     if op == .kw_return:
         dn_at += 1

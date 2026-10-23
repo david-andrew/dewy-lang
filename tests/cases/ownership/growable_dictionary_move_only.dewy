@@ -8,7 +8,7 @@ main=()=>{
         let m:dict<int64 Owner>=[0->Owner[0] 1->Owner[1]]
         loop i in [2..10) {m[i]=Owner[i]}
         m[0]=Owner[42]
-        loop i in [1..8) {m.remove(i)}
+        loop i in [1..8) {m.remove(i);}
         let total:int64=0
         loop [key value] in m {total+=value.value}
         assert(total=?59 and drops=?8)
