@@ -5,10 +5,14 @@
 # library/rational.dewy; representation and error handling use the compact core.
 from bigint import BigInt, bigint, parse_bigint, _ratio_float_bits
 
-Rational:type=[numerator:int=0 denominator:int=1]
+# `_shown` is how the value prints, which never affects its value (equality and
+# hashing ignore it): bit 1 when decimal literals took part, bit 2 when a
+# written fraction did (`1/3`, `rational(1 3)`); integers set neither.
+# Operations combine their operands' bits.
+Rational:type=[numerator:int=0 denominator:int=1 _shown:int64=0]
 # The explicit fixed-width form, `rational<int64>`: normalized int64 parts.
 # Its arithmetic is the exact result when that fits the parts, else Overflow.
-RationalWord:type=[numerator:int64=0 denominator:int64=1]
+RationalWord:type=[numerator:int64=0 denominator:int64=1 _shown:int64=0]
 
 _integer = ((value:int):>int=>value)
     & ((value:BigInt):>int=>value)
@@ -34,21 +38,26 @@ _gcd=(a:int b:int):>int=>{
     return big.gcd(other)
 }
 
-_make=(numerator:int denominator:int):>Rational=>{
+_make=(numerator:int denominator:int shown:int64=0):>Rational=>{
     if denominator =? 0 panic("rational denominator must be nonzero")
     if denominator <? 0 {numerator=-numerator denominator=-denominator}
-    if numerator =? 0 return Rational[]
-    if denominator =? 1 return Rational[numerator 1]
+    if numerator =? 0 return Rational[0 1 shown]
+    if denominator =? 1 return Rational[numerator 1 shown]
     let common=_gcd(numerator denominator)
-    if common =? 1 return Rational[numerator denominator]
-    return Rational[numerator//common denominator//common]
+    if common =? 1 return Rational[numerator denominator shown]
+    return Rational[numerator//common denominator//common shown]
 }
+# (an integer's promotion and the compiler's internal constructions: no display form)
 rational = ((numerator denominator=1):>Rational=>_make(_integer(numerator) _integer(denominator)))
     & ((text:string):>Rational=>{
         let parsed=parse_rational(text)
         if parsed is? none panic("invalid rational text")
         return parsed
     })
+# A written fraction: `a/b` of integers and the `rational(...)` constructors.
+_fraction=(numerator denominator=1):>Rational=>_make(_integer(numerator) _integer(denominator) 2)
+# A decimal literal too long for word parts.
+_decimal=(numerator denominator):>Rational=>_make(_integer(numerator) _integer(denominator) 1)
 
 # `rational(x)` of a float: a finite float is exactly sign * mantissa * 2^exponent,
 # and that value is the result, unrounded. NaN and infinity have none, and are
@@ -59,9 +68,10 @@ _from_float=(value:float64):>Rational=>{
     if exponent =? 2047 panic("rational of a NaN or infinite float")
     let mantissa=wrap<int64>(bits and 4503599627370495)
     if exponent =? 0 exponent=1 else mantissa=mantissa+4503599627370496
-    if mantissa =? 0 return Rational[]
+    if mantissa =? 0 return Rational[0 1 2]
     if (bits >> 63) =? 1 mantissa=-mantissa
-    return _mul(Rational[mantissa 1] pow(Rational[2 1] exponent-1075))
+    let exact=_mul(Rational[mantissa 1] pow(Rational[2 1] exponent-1075))
+    return Rational[exact.numerator exact.denominator 2]
 }
 
 parse_rational=(text:string):>Rational|none=>{
@@ -75,41 +85,43 @@ parse_rational=(text:string):>Rational|none=>{
         if parsed is? none or parsed =? 0 return none
         denominator=parsed
     }
-    return _make(_integer(numerator) _integer(denominator))
+    return _make(_integer(numerator) _integer(denominator) 2)
 }
 
-_neg=(value:Rational):>Rational=>Rational[-value.numerator value.denominator]
+_neg=(value:Rational):>Rational=>Rational[-value.numerator value.denominator value._shown]
 # Knuth's addition (TAOCP 4.5.1): with g = gcd(d1 d2) only a gcd against g
 # remains, and equal or unit denominators need none of the cross products.
 _add=(a:Rational b:Rational):>Rational=>{
+    let shown=a._shown or b._shown
     if a.denominator =? b.denominator {
-        if a.denominator =? 1 return Rational[a.numerator+b.numerator 1]
-        return _make(a.numerator+b.numerator a.denominator)
+        if a.denominator =? 1 return Rational[a.numerator+b.numerator 1 shown]
+        return _make(a.numerator+b.numerator a.denominator shown)
     }
-    if a.denominator =? 1 return Rational[a.numerator*b.denominator+b.numerator b.denominator]
-    if b.denominator =? 1 return Rational[a.numerator+b.numerator*a.denominator a.denominator]
+    if a.denominator =? 1 return Rational[a.numerator*b.denominator+b.numerator b.denominator shown]
+    if b.denominator =? 1 return Rational[a.numerator+b.numerator*a.denominator a.denominator shown]
     let common=_gcd(a.denominator b.denominator)
-    if common =? 1 return Rational[a.numerator*b.denominator+b.numerator*a.denominator a.denominator*b.denominator]
+    if common =? 1 return Rational[a.numerator*b.denominator+b.numerator*a.denominator a.denominator*b.denominator shown]
     let left=a.denominator//common
     let right=b.denominator//common
     let total=a.numerator*right+b.numerator*left
-    if total =? 0 return Rational[]
+    if total =? 0 return Rational[0 1 shown]
     let reduction=_gcd(total common)
-    return Rational[total//reduction left*(b.denominator//reduction)]
+    return Rational[total//reduction left*(b.denominator//reduction) shown]
 }
 _sub=(a:Rational b:Rational):>Rational=>_add(a _neg(b))
 # Cross-reduction keeps the products small and the result coprime.
 _mul=(a:Rational b:Rational):>Rational=>{
-    if a.denominator =? 1 and b.denominator =? 1 return Rational[a.numerator*b.numerator 1]
+    let shown=a._shown or b._shown
+    if a.denominator =? 1 and b.denominator =? 1 return Rational[a.numerator*b.numerator 1 shown]
     let left=_gcd(a.numerator b.denominator)
     let right=_gcd(b.numerator a.denominator)
-    if left =? 0 or right =? 0 return Rational[]
-    return Rational[(a.numerator//left)*(b.numerator//right) (a.denominator//right)*(b.denominator//left)]
+    if left =? 0 or right =? 0 return Rational[0 1 shown]
+    return Rational[(a.numerator//left)*(b.numerator//right) (a.denominator//right)*(b.denominator//left) shown]
 }
 reciprocal=(value:Rational):>Rational=>{
     if value.numerator =? 0 panic("rational division by zero")
-    if value.numerator <? 0 return Rational[-value.denominator -value.numerator]
-    return Rational[value.denominator value.numerator]
+    if value.numerator <? 0 return Rational[-value.denominator -value.numerator value._shown]
+    return Rational[value.denominator value.numerator value._shown]
 }
 _div=(a:Rational b:Rational):>Rational=>_mul(a reciprocal(b))
 _eq=(a:Rational b:Rational):>bool=>a.numerator =? b.numerator and a.denominator =? b.denominator
@@ -126,7 +138,7 @@ _truncate = ((value:Rational):>int=>if value.numerator <? 0 ceil(value) else flo
     & ((value:RationalWord):>int=>_truncate(_widen(value)))
 abs=(value:Rational):>Rational=>if value.numerator <? 0 _neg(value) else value
 
-_widen=(value:RationalWord):>Rational=>Rational[value.numerator value.denominator]
+_widen=(value:RationalWord):>Rational=>Rational[value.numerator value.denominator value._shown]
 _word_fits=(value:Rational):>bool=>{
     let n=value.numerator
     let d=value.denominator
@@ -137,27 +149,27 @@ _narrow=(value:Rational):>RationalWord|Overflow=>{
     if not _word_fits(value) return Overflow
     let n:int64=value.numerator
     let d:int64=value.denominator
-    return RationalWord[n d]
+    return RationalWord[n d value._shown]
 }
 # `rational<int64>(value)` and `rational<int64>(numerator denominator)`: the
 # explicit narrowing, Overflow when a normalized part leaves int64.
 _word_rational = ((value:Rational):>RationalWord|Overflow=>_narrow(value))
-    & ((numerator:int denominator:int):>RationalWord|Overflow=>_narrow(_make(numerator denominator)))
+    & ((numerator:int denominator:int):>RationalWord|Overflow=>_narrow(_make(numerator denominator 2)))
 # Powers stop at the first factor that leaves the parts: coprime factors never
 # shrink again, so the result could not fit either.
 _word_pow=(base:RationalWord exponent:int64):>RationalWord|Overflow=>{
     let value=_widen(base)
     let remaining=wrap<uint64>(exponent)
     if exponent <? 0 {value=reciprocal(value) remaining=0-remaining}
-    let result=Rational[1 1]
+    let result=Rational[1 1 value._shown]
     loop remaining >? 0 {
         if (remaining and 1) =? 1 {
-            result=Rational[result.numerator*value.numerator result.denominator*value.denominator]
+            result=Rational[result.numerator*value.numerator result.denominator*value.denominator value._shown]
             if not _word_fits(result) return Overflow
         }
         remaining=remaining >> 1
         if remaining >? 0 {
-            value=Rational[value.numerator*value.numerator value.denominator*value.denominator]
+            value=Rational[value.numerator*value.numerator value.denominator*value.denominator value._shown]
             if not _word_fits(value) return Overflow
         }
     }
@@ -196,12 +208,12 @@ to_float32=(value:Rational):>float32=>{
 pow=(value:Rational exponent:int64):>Rational=>{
     let remaining=wrap<uint64>(exponent)
     if exponent <? 0 {value=reciprocal(value) remaining=0-remaining}
-    let result=Rational[1 1]
+    let result=Rational[1 1 value._shown]
     # Powers of the same reduced fraction remain coprime: no repeated GCD.
     loop remaining >? 0 {
-        if (remaining and 1) =? 1 result=Rational[result.numerator*value.numerator result.denominator*value.denominator]
+        if (remaining and 1) =? 1 result=Rational[result.numerator*value.numerator result.denominator*value.denominator value._shown]
         remaining=remaining >> 1
-        if remaining >? 0 value=Rational[value.numerator*value.numerator value.denominator*value.denominator]
+        if remaining >? 0 value=Rational[value.numerator*value.numerator value.denominator*value.denominator value._shown]
     }
     return result
 }
@@ -213,14 +225,65 @@ divmod=(a:Rational b:Rational):>RationalDivision=>{
 _floordiv=(a:Rational b:Rational):>int=>floor(_div(a b))
 _mod=(a:Rational b:Rational):>Rational=>divmod(a b).remainder
 
+# Values print as they were written: an integer as one; a value from decimal
+# literals alone as a decimal, its repeating block in parentheses (`0.1/3` is
+# `0.0(3)`), or as a fraction when that block is longer than 64 digits; one
+# from decimals and written fractions together as a decimal when it ends
+# (`19.99*(8/100)` is `1.5992`), else as a fraction (`1/3+0.5` is `5/6`); any
+# other value as `numerator/denominator`.
 __as__ = ((value:Rational):>string=>{
         if value.denominator =? 1 return "{value.numerator}"
+        if (value._shown and 1) =? 1 return _decimal_text(value.numerator value.denominator value._shown =? 1)
         return "{value.numerator}/{value.denominator}"
     })
     & ((value:RationalWord):>string=>{
         if value.denominator =? 1 return "{value.numerator}"
+        if (value._shown and 1) =? 1 return _decimal_text(value.numerator value.denominator value._shown =? 1)
         return "{value.numerator}/{value.denominator}"
     })
+
+# n/d (reduced, d >? 1) in decimal. With d = 2^a 5^b m, the first max(a b) digits
+# never repeat and, when m >? 1, the next ones repeat with the period of 10
+# modulo m: the remainder comes back to where the period started. Without
+# `repeats`, a value whose digits do not end prints as a fraction.
+_decimal_text=(numerator:int denominator:int repeats:bool):>string=>{
+    let rest=denominator
+    let twos:int64=0
+    loop rest%2 =? 0 {rest=rest//2 twos+=1}
+    let fives:int64=0
+    loop rest%5 =? 0 {rest=rest//5 fives+=1}
+    let repeating=rest >? 1
+    if repeating and not repeats return "{numerator}/{denominator}"
+    let lead=if twos >? fives twos else fives
+    let sign=if numerator <? 0 "-" else ""
+    let magnitude=numerator.abs()
+    let whole=magnitude//denominator
+    let remainder=magnitude%denominator
+    let digits=""
+    if lead >? 0 {
+        let scale:int=1
+        if lead <=? 18 {loop _ in [0..lead) scale=scale*10} else scale=bigint(10)^lead
+        let scaled=remainder*scale
+        let head="{scaled//denominator}"
+        remainder=scaled%denominator
+        let zeros:array<string>=[]
+        loop _ in [head.length..lead) zeros.push("0")
+        digits="{zeros.join("")}{head}"
+    }
+    if not repeating return "{sign}{whole}.{digits}"
+    let start=remainder
+    let cycle:array<string>=[]
+    loop cycle.length <? 64 {
+        remainder=remainder*10
+        cycle.push("{remainder//denominator}")
+        remainder=remainder%denominator
+        if remainder =? start return "{sign}{whole}.{digits}({cycle.join("")})"
+    }
+    return "{numerator}/{denominator}"
+}
+
+# Equal values hash alike, however they print.
+hash=(value:Rational):>uint64=>wrap<uint64>(value.numerator.hash()*11400714819323198485) xor value.denominator.hash()
 __unary_sub__ = ((value:Rational):>Rational=>_neg(value))
     & ((value:RationalWord):>RationalWord|Overflow=>_narrow(_neg(_widen(value))))
 

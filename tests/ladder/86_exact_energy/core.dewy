@@ -31,6 +31,11 @@ show=(q:Rat):>string=>{
     if q.d =? 1 return "{q.n}"
     return "{q.n}/{q.d}"
 }
+# A decimal tariff's product prints as a decimal (fixtures: tenths).
+tenths=(q:Rat):>string=>{
+    let scaled=q.n*10//q.d
+    return "{scaled//10}.{scaled%10}"
+}
 Reading:type=[start:int64 finish:int64 watts:int64]
 energy=(r:Reading):>Rat=>{
     $runtime_assert r.finish >=? r.start
@@ -85,5 +90,5 @@ main=():>void=>{
     $runtime_assert equal(report(saved ratio(0 1)) ratio(0 1))
     $runtime_assert equal(energy(Reading[0 1800 1000]) ratio(1 2))
     $runtime_assert equal(report(saved ratio(1 1)) ratio(5 6))
-    printl("{show(e)} {show(cost)} {show(cents)} {show(growth)}")
+    printl("{show(e)} {tenths(cost)} {show(cents)} {show(growth)}")
 }

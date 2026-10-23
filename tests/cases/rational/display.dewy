@@ -1,0 +1,18 @@
+# quick
+# Exact values print as written: decimals as decimals (a repeating block in
+# parentheses), written fractions as fractions, whole numbers as integers.
+kelvin=(celsius:rational):>rational=>celsius+273.15
+main=():>void=>{
+    printl"{0.1+0.2} {0.1/3} {-0.1/3} {2.5/7} {1.5*2} {0.000} {1.25e2} {0.5^3}"
+    printl"{1/3} {4/2} {1/4} {(2/3)^(-3)} {rational(1 4)} {rational("6/8")}"
+    printl"{1/3+0.5} {19.99*(8/100)} {(1/3)*0.3} {0.25*(1/2)}"
+    printl"{kelvin(20)} {0.1*7} {1/97} {0.1/97} {0.1/7}"
+    let tenth:rational<int64>=0.1
+    let third:rational<int64>=1/3
+    printl"{tenth+tenth} {third}"
+    let values=[0.5 1/2 2]
+    printl"{values} {0.5 =? 1/2} {[0.5->"half"][1/2]}"
+    let total=0.0
+    loop _ in [0..10) total+=0.1
+    printl"{total} {total =? 1} {123456789012345678901234567890.125/1000}"
+}

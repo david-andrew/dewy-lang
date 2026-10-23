@@ -138,8 +138,10 @@ word_rational_type = (pos: int) -> int:
     word_rational_cached_type = telem(check_expr(ty, 0))
     word_rational_cached_type
 
-# Rationals folded at compilation, by node: their normalized word parts.
+# Rationals folded at compilation, by node: their normalized word parts, and how
+# they print (the library's `_shown`: 1 a decimal literal, 2 a written fraction).
 rational_constants: {int: (int, int)}
+rational_shown: {int: int}
 
 # Does the value n of type from fit rational<int64> exactly, for every value?
 word_rational_source = (n: int, from0: int) -> bool:
@@ -204,14 +206,14 @@ rational_constant_parts = (numerator: int, denominator: int) -> (int, int):
     if numerator == 0: denominator = 1
     (numerator, denominator)
 
-rational_constant = (numerator: int, denominator: int, pos: int, word: bool = false) -> int:
+rational_constant = (numerator: int, denominator: int, pos: int, word: bool = false, shown: int = 0) -> int:
     parts = rational_constant_parts(numerator, denominator)
     ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
     decimal_type(pos)
     type_name = if word: "RationalWord" else: "Rational"
     result = mk(.call, pos)
     nodes[result].a = i32(bc_field(bc_ident("$dewy_rational", pos), type_name, pos))
-    set_list(result, [bc_int(parts.0, pos), bc_int(parts.1, pos)])
+    set_list(result, [bc_int(parts.0, pos), bc_int(parts.1, pos), bc_int(shown, pos)])
     result
 
 exact_decimal = (n: int) -> int:
@@ -240,15 +242,16 @@ exact_decimal = (n: int) -> int:
         if let top = to_int(magnitude):
             if let bottom = to_int(denominator):
                 signed = if negative: -top else: top
-                nodes[n] = nodes[rational_constant(signed, bottom, pos)]
+                nodes[n] = nodes[rational_constant(signed, bottom, pos, shown = 1)]
                 t = check_expr(n, 0)
                 rational_constants[n] = rational_constant_parts(signed, bottom)
+                rational_shown[n] = 1
                 return t
     ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
     decimal_type(pos)
     numerator = decimal_part(digits, pos)
     divisor = decimal_part(denominator, pos)
-    nodes[n] = Node(kind = .call, pos = pos, a = i32(bc_field(bc_ident("$dewy_rational", pos), "rational", pos)))
+    nodes[n] = Node(kind = .call, pos = pos, a = i32(bc_field(bc_ident("$dewy_rational", pos), "_decimal", pos)))
     set_list(n, [numerator, divisor])
     check_expr(n, 0)
 
@@ -582,7 +585,7 @@ coerce = (n: int, target: int) -> int:
         pos = nodes[n].pos
         ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
         if let parts = rational_constants.get(n):
-            nodes[n] = nodes[rational_constant(parts.0, parts.1, pos, true)]
+            nodes[n] = nodes[rational_constant(parts.0, parts.1, pos, true, rational_shown.get(n) ?? 0)]
         else:
             source = nodes.len()
             nodes.push(nodes[n])
@@ -3691,14 +3694,15 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
             known_a, dividend = integer_constant(a)
             minimum = -9223372036854775807 - 1
             if known_a and known_b and dividend != minimum and divisor != minimum and (dividend >= 0 or types[ta].sign) and (divisor >= 0 or types[tb].sign):
-                nodes[n] = nodes[rational_constant(dividend, divisor, pos)]
+                nodes[n] = nodes[rational_constant(dividend, divisor, pos, shown = 2)]
                 t = check_expr(n, expected)
                 rational_constants[n] = rational_constant_parts(dividend, divisor)
+                rational_shown[n] = 2
                 return t
             # Resolve exact arithmetic only after the operand types are known;
             # ordinary floating division does not load either exact library.
             ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
-            callee = bc_field(bc_ident("$dewy_rational", pos), "rational", pos)
+            callee = bc_field(bc_ident("$dewy_rational", pos), "_fraction", pos)
             nodes[n] = Node(kind = .call, pos = pos, a = i32(callee))
             set_list(n, checked)
         else:

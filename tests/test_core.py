@@ -4110,11 +4110,11 @@ def test_core_exact_division_module_initialization(compiler, tmp_path, target, r
     (library / 'rational.dewy').write_text('''from seed import seed
 let base=seed+1
 printl"rational"
-rational=(a b):>int64=>a+b+base
-Rational:type=[numerator:int=0 denominator:int=1]
+_fraction=(a b):>int64=>a+b+base
+Rational:type=[numerator:int=0 denominator:int=1 _shown:int64=0]
 ''')
     (tmp_path / 'helper.dewy').write_text('const offset=1\n')
-    # (a runtime divisor calls the library's `rational`; a constant folds to its `Rational`)
+    # (a runtime divisor calls the library's `_fraction`; a constant folds to its `Rational`)
     bodies = {
         'body': 'two=():>int64=>2\nmain=():>void=>exit(1/two()-offset)',
         'global': 'two=():>int64=>2\nlet ratio=1/two()\nmain=():>void=>exit(ratio-offset)',

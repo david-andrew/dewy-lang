@@ -13,5 +13,5 @@ def test_decimal_repl_inputs(compiler, tmp_path):
             'let q=0.1\nq+0.2 =? 0.3\nlet z=1.5\nz+=dt\nz\n:quit\n')
     ran = run_repl(compiler, text, tmp_path, {'TMPDIR': str(tmp_path)})
     assert ran.returncode == 0, ran.stdout + ran.stderr
-    assert ran.stdout.splitlines() == ['0.5', '0.75', '0.5', 'true', '3/2'], ran.stdout + ran.stderr
+    assert ran.stdout.splitlines() == ['0.5', '0.75', '0.5', 'true', '1.5'], ran.stdout + ran.stderr
     assert ran.stderr.count('error:') == 1 and 'z+=dt' in ran.stderr, ran.stderr

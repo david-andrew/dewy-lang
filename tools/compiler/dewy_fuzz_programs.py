@@ -152,6 +152,78 @@ class Lit(Expr):
         return self.value
 
 
+class Exact(Fraction):
+    """A Dewy `rational`: its value, and how it prints (`shown`: 1 from decimal literals, 2 when
+    a written fraction took part, 0 neither). Arithmetic combines the operands' bits."""
+    __slots__ = ('shown',)
+
+    def __new__(cls, numerator=0, denominator=None, *, shown=0):
+        self = super().__new__(cls, numerator, denominator)
+        self.shown = shown
+        return self
+
+    def __reduce__(self):
+        return (_exact, (self.numerator, self.denominator, self.shown))
+
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
+
+    def _combine(self, other, result):
+        return Exact(result, shown=self.shown | getattr(other, 'shown', 0))
+
+    def __add__(self, other): return self._combine(other, Fraction.__add__(self, other))
+    def __radd__(self, other): return self._combine(other, Fraction.__radd__(self, other))
+    def __sub__(self, other): return self._combine(other, Fraction.__sub__(self, other))
+    def __rsub__(self, other): return self._combine(other, Fraction.__rsub__(self, other))
+    def __mul__(self, other): return self._combine(other, Fraction.__mul__(self, other))
+    def __rmul__(self, other): return self._combine(other, Fraction.__rmul__(self, other))
+    def __truediv__(self, other): return self._combine(other, Fraction.__truediv__(self, other))
+    def __rtruediv__(self, other): return self._combine(other, Fraction.__rtruediv__(self, other))
+    def __neg__(self): return Exact(Fraction.__neg__(self), shown=self.shown)
+
+
+def _exact(numerator, denominator, shown):
+    return Exact(numerator, denominator, shown=shown)
+
+
+def exact_text(value: Fraction) -> str:
+    """How Dewy prints a rational: whole numbers as integers; from decimal literals alone, a
+    decimal with its repeating block in parentheses (a fraction when the block is over 64
+    digits); from decimals and written fractions together, a decimal when it ends."""
+    n, d = value.numerator, value.denominator
+    shown = getattr(value, 'shown', 0)
+    if d == 1:
+        return str(n)
+    if not shown & 1:
+        return f'{n}/{d}'
+    rest, twos, fives = d, 0, 0
+    while rest % 2 == 0:
+        rest, twos = rest // 2, twos + 1
+    while rest % 5 == 0:
+        rest, fives = rest // 5, fives + 1
+    lead = max(twos, fives)
+    sign = '-' if n < 0 else ''
+    whole, remainder = divmod(abs(n), d)
+    digits = ''
+    if lead:
+        head, remainder = divmod(remainder * 10 ** lead, d)
+        digits = str(head).rjust(lead, '0')
+    if rest == 1:
+        return f'{sign}{whole}.{digits}'
+    if shown != 1:
+        return f'{n}/{d}'
+    start, cycle = remainder, ''
+    while len(cycle) < 64:
+        digit, remainder = divmod(remainder * 10, d)
+        cycle += str(digit)
+        if remainder == start:
+            return f'{sign}{whole}.{digits}({cycle})'
+    return f'{n}/{d}'
+
+
 @dataclass(frozen=True)
 class DecimalLit(Expr):
     """Keep source digits: the oracle must never round them through a float."""
@@ -162,7 +234,7 @@ class DecimalLit(Expr):
         return f'({self.text})'
 
     def eval(self, m, env):
-        return Fraction(self.text)
+        return Exact(Fraction(self.text), shown=1)
 
 
 @dataclass(frozen=True)
@@ -1036,7 +1108,7 @@ def show(value, nested=False) -> str:
     if isinstance(value, int):
         return str(value)
     if isinstance(value, Fraction):
-        return str(value)
+        return exact_text(value)
     if isinstance(value, float):
         return format_float(value)
     if isinstance(value, str):

@@ -1059,7 +1059,8 @@ main=():>void=>{
     let half=1/2
     printl"{half+1/3}"  # 5/6
     printl"{(2/3)^(-3)}"  # 27/8
-    printl"{kelvin(20)}"  # 5863/20
+    printl"{kelvin(20)}"  # 293.15
+    printl"{0.1/3} {1/3+0.5}"  # 0.0(3) 5/6
     printl"{rational("-7/3").floor()}"  # -3
 }
 ```
@@ -1069,8 +1070,8 @@ integers or `BigInt` values with `/` gives a `rational`, including mixed
 signed/unsigned words, and the full-width values are preserved. `4/2` is still
 a fraction value, formatted as `2`. Use `//` for a whole-number quotient.
 Floating operands retain floating division. Decimal literals are exact
-fractions unless their context is floating: `0.1 + 0.2 =? 0.3` is true, `1.0/2` is
-`1/2`, and `1.25e2` is `125`. A float annotation, a floating operand beside the
+fractions unless their context is floating: `0.1 + 0.2 =? 0.3` is true, `1.0/2`
+equals `1/2`, and `1.25e2` is `125`. A float annotation, a floating operand beside the
 literal, a `float64` parameter or field, or a later float written to the
 unannotated binding the literal initializes makes it a `float64` when compiling:
 `let acc=0.0` followed by `acc+=dt` with `dt:float64` declares a `float64`,
@@ -1092,8 +1093,18 @@ Values keep a positive denominator and coprime `int` parts. Zero is `0/1`.
 A part is a machine word while it fits and grows into a big integer beyond, so
 arithmetic never overflows. Division and the constructor normalize signs and
 common factors. Read `.numerator` and `.denominator` without assigning
-noncanonical parts directly. Interpolation prints an integer when the
-denominator is one, otherwise `numerator/denominator`.
+noncanonical parts directly.
+
+Values print the way they were written. A whole number prints as an integer. A
+value made from decimal literals (and integers) prints as a decimal: `0.1+0.2`
+is `0.3`, `kelvin(20)` above `293.15`. When its digits never end, the repeating
+block goes in parentheses: `0.1/3` is `0.0(3)`, `2.5/7` is `0.3(571428)`; a block
+longer than 64 digits prints as a fraction instead (`0.1/97` is `1/970`). A
+value made from written fractions (`1/3`, `rational(1 4)`) prints as
+`numerator/denominator`. Where both take part, it prints as a decimal when the
+digits end, otherwise as a fraction: `19.99*(8/100)` is `1.5992`, `1/3+0.5` is
+`5/6`. How a value prints never changes the value: `0.5 =? 1/2`, and both are
+the same dictionary key. `rational<int64>` prints the same way.
 
 Arithmetic `+`, `-`, `*`, `/`, comparisons, and unary minus work with fractions,
 `BigInt`, and integers in either order. `//` returns an `int` floor quotient;
