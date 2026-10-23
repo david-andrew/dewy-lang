@@ -1,6 +1,6 @@
 # exit: 42
 work=():>void=>{
-let a=rational("123456789012345678901234567890" "9876543210123456789")
+let a=rational("123456789012345678901234567890" "9876543210123456789") ?? 0
 loop i in [1..12) {let value=(a+i)/rational(i 3) let parts=value.divmod(rational(2 7))
 let text="{parts.remainder}" if text.length =? 0 panic("missing fraction")}
 }

@@ -430,11 +430,11 @@ def test_core_named_module_languages(compiler, tmp_path, extension, both):
 
 @pytest.mark.parametrize('extension', ['dewy', 'jo'])
 def test_core_bundled_module_path(compiler, tmp_path, extension):
-    (tmp_path / 'rational.dewy').write_text('parse_rational=(value)=>0')
+    (tmp_path / 'rational.dewy').write_text('_parse=(value)=>0')
     (tmp_path / 'bigint.jo').write_text('_big = (value): 0')
     source = tmp_path / f'main.{extension}'
     if extension == 'dewy':
-        source.write_text('from p"@lib/rational.dewy" import parse_rational\nmain=():>void=>exit((if parse_rational("42") =? 42 42 else 1))')
+        source.write_text('from p"@lib/rational.dewy" import _parse\nmain=():>void=>exit((if (_parse("42") ?? 0) =? 42 42 else 1))')
     else:
         source.write_text('from "@lib/bigint.dewy" import _big\nmain = (): if _big(42).to_int64() == 42: 42 else: 1')
     binary = tmp_path / 'bundled'
@@ -465,7 +465,7 @@ let input=$include_bytes(p"cases.txt") as string|none
 if input is? none panic("invalid test data")
 loop line in input.split("\n") {
     let fields=line.split(" ")
-    let a=rational(fields[0] fields[1]) let b=rational(fields[2] fields[3])
+    let a=rational(fields[0] fields[1]) ?? 0 let b=rational(fields[2] fields[3]) ?? 1
     let parts=a.divmod(b)
     if a//b not=? parts.quotient or a%b not=? parts.remainder panic("division operators disagree")
     if b*parts.quotient+parts.remainder not=? a panic("division reconstruction")
@@ -475,8 +475,8 @@ loop line in input.split("\n") {
 '''
     if notation == 'division':
         body = body.replace('from rational import rational\n', '')
-        body = body.replace('rational(fields[0] fields[1])', 'big(fields[0])/nonzero(fields[1])')
-        body = body.replace('rational(fields[2] fields[3])', 'big(fields[2])/nonzero(fields[3])')
+        body = body.replace('rational(fields[0] fields[1]) ?? 0', 'big(fields[0])/nonzero(fields[1])')
+        body = body.replace('rational(fields[2] fields[3]) ?? 1', 'big(fields[2])/nonzero(fields[3])')
         body = 'big=(text:string):>bigint=>to_int(text) ?? 0\nnonzero=(text:string):>bigint & ~0=>{\n    let n=big(text)\n    if n =? 0 return 1\n    return n\n}\n' + body
     source.write_text(body)
     expected = []

@@ -16,11 +16,6 @@ RationalWord:type=[numerator:int64=0 denominator:int64=1 _shown:int64=0]
 
 _integer = ((value:int):>int=>value)
     & ((value:BigInt):>int=>value)
-    & ((value:string):>int=>{
-        let parsed=_parse_big(value)
-        if parsed is? none panic("invalid decimal integer")
-        return parsed
-    })
 
 # Euclid on machine words while both parts are immediate words (below 2^62:
 # a wider bound would itself be a big constant), the big-integer gcd beyond.
@@ -53,11 +48,8 @@ _make=(numerator:int denominator:int shown:int64=0):>Rational=>{
 }
 # (an integer's promotion and the compiler's internal constructions: no display form)
 rational = ((numerator denominator=1):>Rational=>_make(_integer(numerator) _integer(denominator)))
-    & ((text:string):>Rational=>{
-        let parsed=parse_rational(text)
-        if parsed is? none panic("invalid rational text")
-        return parsed
-    })
+    & ((text:string):>Rational|none=>_parse(text))
+    & ((numerator:string denominator:string):>Rational|none=>_parse_parts(numerator denominator))
 # A written fraction: `a/b` of integers and the `rational(...)` constructors.
 _fraction=(numerator denominator=1):>Rational=>_make(_integer(numerator) _integer(denominator) 2)
 # A decimal literal too long for word parts.
@@ -78,18 +70,19 @@ _from_float=(value:float64):>Rational=>{
     return Rational[exact.numerator exact.denominator 2]
 }
 
-parse_rational=(text:string):>Rational|none=>{
+# `rational(text)` of `n` or `n/d`, and `rational(n d)` of decimal integer text:
+# none for text that is not that, or a zero denominator.
+_parse=(text:string):>Rational|none=>{
     let parts=text.split("/")
     if parts.length <? 1 or parts.length >? 2 return none
-    let numerator=_parse_big(parts[0])
-    if numerator is? none return none
-    let denominator=_big(1)
-    if parts.length =? 2 {
-        let parsed=_parse_big(parts[1])
-        if parsed is? none or parsed =? 0 return none
-        denominator=parsed
-    }
-    return _make(_integer(numerator) _integer(denominator) 2)
+    if parts.length =? 1 return _parse_parts(parts[0] "1")
+    return _parse_parts(parts[0] parts[1])
+}
+_parse_parts=(numerator:string denominator:string):>Rational|none=>{
+    let n=_parse_big(numerator)
+    let d=_parse_big(denominator)
+    if n is? none or d is? none or d =? 0 return none
+    return _make(_integer(n) _integer(d) 2)
 }
 
 _neg=(value:Rational):>Rational=>Rational[-value.numerator value.denominator value._shown]

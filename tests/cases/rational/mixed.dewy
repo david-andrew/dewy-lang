@@ -2,8 +2,8 @@
 run=()=>{
 let half=rational(1 2) let wide:uint64=18446744073709551615
 if half+2 not=? 2+half or half+bigint(2) not=? rational(5 2) return 1
-if half+wide not=? rational("36893488147419103231" "2") return 2
-if wide-half not=? rational("36893488147419103229" "2") return 3
+if half+wide not=? rational("36893488147419103231" "2") ?? 0 return 2
+if wide-half not=? rational("36893488147419103229" "2") ?? 0 return 3
 if half*wide not=? wide*half or 2/half not=? 4 or half/2 not=? rational(1 4) return 4
 if half//2 not=? 0 or 2//half not=? 4 or half%2 not=? half or 2%half not=? 0 return 5
 return if half <? 1 and 0 <? half and half >=? half and half <=? half and 1 >? half 42 else 6

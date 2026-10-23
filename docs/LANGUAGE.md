@@ -1094,7 +1094,6 @@ The inherited `big` module is a separate approximate-number library for idle gam
 ## Exact fractions
 
 ```dewy
-from rational import parse_rational
 kelvin=(celsius:rational):>rational=>celsius+273.15
 main=():>void=>{
     let half=1/2
@@ -1102,7 +1101,7 @@ main=():>void=>{
     printl"{(2/3)^(-3)}"  # 27/8
     printl"{kelvin(20)}"  # 293.15
     printl"{0.1/3} {1/3+0.5}"  # 0.0(3) 5/6
-    printl"{rational("-7/3").floor()}"  # -3
+    printl"{(rational("-7/3") ?? 0).floor()}"  # -3
 }
 ```
 
@@ -1123,12 +1122,11 @@ expected: arguments, results, record fields and container elements.
 Constant fractions and decimal literals are reduced at compilation; a constant
 zero divisor of `/` is a compile error.
 
-`rational(numerator denominator)` accepts integers or
-decimal integer text for its parts; the denominator defaults to one. A single
-string accepts an integer or `numerator/denominator`. `parse_rational(text)`
-(imported from `rational`) returns `rational|none` for invalid input, including
-a zero denominator. Decimal points and whitespace inside the string are not
-accepted.
+`rational(numerator denominator)` takes integers; the denominator defaults to
+one. From text, `rational(text)` reads an integer or `numerator/denominator`
+and `rational(numerator denominator)` two decimal integers; both return
+`rational|none`, `none` for invalid text, including a zero denominator.
+Decimal points and whitespace inside the text are not accepted.
 
 Values keep a positive denominator and coprime `int` parts. Zero is `0/1`.
 A part is a machine word while it fits and grows into a big integer beyond, so

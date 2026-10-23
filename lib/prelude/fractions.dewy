@@ -2,10 +2,12 @@
 # are lib/rational.dewy's). Every Dewy module sees it unless it declares its own.
 import p"@lib/rational.dewy" as exact
 
-# `rational(numerator denominator)` of integers, big integers or their decimal
-# text; `rational(text)` of `n` or `n/d`; `rational(f)` of a float, its exact
-# binary value.
+# `rational(numerator denominator)` of integers; of text, `rational(text)` of `n`
+# or `n/d` and `rational(numerator denominator)` of decimal integers, none when
+# the text is not that (or the denominator is zero); `rational(f)` of a float,
+# its exact binary value.
 rational = ((numerator denominator=1):>rational=>exact._fraction(numerator denominator))
-    & ((text:string):>rational=>exact.rational(text))
+    & ((text:string):>rational|none=>exact._parse(text))
+    & ((numerator:string denominator:string):>rational|none=>exact._parse_parts(numerator denominator))
     & ((value:float64):>rational=>exact._from_float(value))
     & ((value:float32):>rational=>exact._from_float(float64(value)))
