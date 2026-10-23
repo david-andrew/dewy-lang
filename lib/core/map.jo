@@ -67,6 +67,119 @@ hash = (x: bool) -> u64:
 
 hash = (x): __hash_value(x)
 
+# ---------------- dictionaries' keyed hash ----------------
+# `hash` gives the same value in every run (a game's peers compare them). A dictionary's slots
+# instead come from a hash keyed by a secret word k drawn from the operating system once per
+# process, and the key is inside the hashing state from the first input word on: an int is
+# mum(x ^ k, k ^ C); a string's state starts from k and takes 16 bytes per keyed mum, as wyhash
+# does; a record's helper (compiler/lower.jo) chains its members through the same keyed mum.
+# mum(a, b) folds the 128-bit product: low half xor high half (the high half by __mul_hi, one
+# instruction on x86-64 and arm64).
+#
+# Why chosen keys cannot collide, in a slot (the low bits) or at all: for any two inputs and a
+# uniformly random k, the multiplicands x ^ k and y ^ k are uniformly random (only their xor is
+# fixed) and the other factor is an unknown random word, so through the carries of the full
+# product every output bit depends on every input bit and on the key, and no input difference
+# gives an output difference that holds whatever k is (a multiply alone keeps a top-bit
+# difference; the folded high half does not). Two keys share their low bits with probability
+# about 2^-bits, and finding better pairs needs k: a program never shows a slot (iteration
+# follows insertion order) and k is never stored where a program reads it. Strings and records
+# never pass through the unkeyed `hash`, so collisions of FNV or of `hash` do not carry over.
+__hash_key: u64 = 0
+__hash_key_lock = 0
+
+# A program that wants the same slots every run (the compiler: its instruction counts are
+# measured) pins the key before its first dictionary entry; false if one was drawn already.
+__hash_key_pin = (k: u64) -> bool:
+    lk = &__hash_key_lock
+    loop __atomic_cas(lk, 0, 1) != 0: pass
+    pinned = __hash_key == 0
+    if pinned: __hash_key = k | 1
+    __hash_key_lock = 0
+    pinned
+
+@noinline
+__hash_key_init = () -> u64:
+    lk = &__hash_key_lock
+    loop __atomic_cas(lk, 0, 1) != 0: pass
+    k = __hash_key
+    if k == 0:
+        k = __entropy_word()
+        if k == 0: k = 0x9E3779B97F4A7C15
+        __hash_key = k
+    __hash_key_lock = 0
+    k
+
+# the 128-bit product of a and b, its high half xor its low half
+__hk_mum = (a: u64, b: u64) -> u64:
+    when __MUL_HI:
+        return (a * b) xor __mul_hi(a, b)
+    __mul_hi_soft(a, b) xor (a * b)
+
+# the high 64 bits of a 128-bit product from four 32-bit ones (WebAssembly; older compilers)
+__mul_hi_soft = (a: u64, b: u64) -> u64:
+    a0 = a & 0xFFFFFFFF
+    a1 = a >> 32
+    b0 = b & 0xFFFFFFFF
+    b1 = b >> 32
+    p00 = a0 * b0
+    p01 = a0 * b1
+    p10 = a1 * b0
+    mid = (p00 >> 32) + (p01 & 0xFFFFFFFF) + (p10 & 0xFFFFFFFF)
+    a1 * b1 + (p01 >> 32) + (p10 >> 32) + (mid >> 32)
+
+# x under key k (written out, not through __hk_mum: a leaf, which default builds inline)
+__hk_mix = (k: u64, x: u64) -> u64:
+    a = x xor k
+    b = k xor 0xE7037ED1A0B428DB
+    when __MUL_HI:
+        return (a * b) xor __mul_hi(a, b)
+    (a * b) xor __mul_hi_soft(a, b)
+
+# Only __map_add (and reserve) draw the key: a dictionary's first entry is hashed again there,
+# after the key is drawn. Until then every keyed hash uses 0 (a lookup in a dictionary with
+# nothing in it finds no entry), and no check slows the ones after.
+__hk_word = (x: u64) -> u64:
+    k = __hash_key
+    a = x xor k
+    b = k xor 0xE7037ED1A0B428DB
+    when __MUL_HI:
+        return (a * b) xor __mul_hi(a, b)
+    (a * b) xor __mul_hi_soft(a, b)
+
+# n bytes at p: sixteen at a time (the last sixteen overlapping the ones before), the state
+# starting from the key and the length
+__hk_bytes = (p: *u8, n: int) -> u64:
+    k = __hash_key
+    k1 = k xor 0xE7037ED1A0B428DB
+    h = k xor (u64(n) * 0x9E3779B97F4A7C15)
+    i = 0
+    loop n - i > 16:
+        h = __hk_mum(((p + i) as *u64)[0] xor k1, ((p + (i + 8)) as *u64)[0] xor h)
+        i += 16
+    a: u64 = 0
+    b: u64 = 0
+    if n > 8:
+        a = ((p + (n - 16 + (if n < 16: 16 - n else: 0))) as *u64)[0]
+        b = ((p + (n - 8)) as *u64)[0]
+    else if n >= 4: a = u64((p as *u32)[0]) | (u64(((p + (n - 4)) as *u32)[0]) << 32)
+    else if n > 0: a = u64(p[0]) | (u64(p[n >> 1]) << 8) | (u64(p[n - 1]) << 16)
+    h = __hk_mum(a xor k1, b xor h)
+    __hk_mum(h xor k, u64(n) xor k1)
+
+# The compiler turns this on: its keyed value hash (`__hash_value(x, true)`) mixes every member
+# under the key. (Older compilers building this library mix the key into `hash`'s result.)
+const __KEYED_HASH = false
+const __MUL_HI = false        # (the compiler has __mul_hi)
+
+__map_hash = (k: int) -> u64: __hk_word(k as u64)
+__map_hash = (k: u64) -> u64: __hk_word(k)
+__map_hash = (k: str) -> u64: __hk_bytes(data(k), len(k))
+__map_hash[K] = (k: K) -> u64:
+    when __KEYED_HASH:
+        return __hash_value(k, true)
+    __hk_word(k.hash())
+
 # xs[i] where the library knows i is in bounds (the compiler leaves out the check; the C
 # bootstrap compiler calls this)
 __at[T] = (xs: T[], i: int) -> T: xs[i]
@@ -115,10 +228,10 @@ __map_rehash[K, V] = (m: mut Map[K, V], ns: int):
         loop m.slots[i].entry != 0: i = (i + 1) & mask
         m.slots[i] = __MapSlot(__map_tag(__at(m.__keys, e), h), e + 1)
 
-# Method lookup also finds hash in the key's defining module, just as equality
-# finds its operator there. A lexical hash(k) can miss that overload in a caller.
+# A key's own `hash` (found in the key's defining module, as equality finds its operator
+# there) reaches __map_hash through the compiler's keyed value hash.
 ([]=)[K, V] = (m: mut Map[K, V], k: K, v: V):
-    h = k.hash()
+    h = __map_hash(k)
     e = __map_probe(m, k, h)
     if e >= 0:
         m.vals[e] = v
@@ -128,7 +241,7 @@ __map_rehash[K, V] = (m: mut Map[K, V], ns: int):
 # Insert only a new key, preserving an existing value and its position. Returns
 # whether an entry was added; avoids a second hash/probe after checking absence.
 insert_if_absent[K, V] = (m: mut Map[K, V], k: K, v: V) -> bool:
-    h = k.hash()
+    h = __map_hash(k)
     e = __map_probe(m, k, h)
     if e >= 0: return false
     __map_add(m, k, v, h, -2 - e)
@@ -138,7 +251,7 @@ insert_if_absent[K, V] = (m: mut Map[K, V], k: K, v: V) -> bool:
 # key is added, its value starting as V's zero value (or the default d, for a struct with
 # default field values)
 __map_entry[K, V] = (m: mut Map[K, V], k: K) -> int:
-    h = k.hash()
+    h = __map_hash(k)
     e = __map_probe(m, k, h)
     if e >= 0: return e
     z: V
@@ -146,7 +259,7 @@ __map_entry[K, V] = (m: mut Map[K, V], k: K) -> int:
     m.__keys.len() - 1
 
 __map_entry[K, V] = (m: mut Map[K, V], k: K, d: V) -> int:
-    h = k.hash()
+    h = __map_hash(k)
     e = __map_probe(m, k, h)
     if e >= 0: return e
     __map_add(m, k, d, h, -2 - e)
@@ -154,12 +267,14 @@ __map_entry[K, V] = (m: mut Map[K, V], k: K, d: V) -> int:
 
 # the entry of k, for changing m[k] in place in Dewy: a missing key fails as reading m[k] does
 __map_entry_present[K, V] = (m: mut Map[K, V], k: K) -> int:
-    e = __map_find(m, k, k.hash())
+    h = __map_hash(k)
+    e = __map_find(m, k, h)
     if e < 0: panic("the dictionary has no key {k} to change{__near_key(m, k)}: d[k] += 1 changes an entry that is there; to count, write `if k in? d \{d[k] += 1} else \{d[k] = 1}`")
     e
 
 # room for n entries without growing (when many are to come)
 reserve[K, V] = (m: mut Map[K, V], n: int):
+    if __hash_key == 0: __hash_key_init()
     m.__keys.reserve(n)
     m.vals.reserve(n)
     m.hashes.reserve(n)
@@ -168,10 +283,17 @@ reserve[K, V] = (m: mut Map[K, V], n: int):
     if ns > m.slots.len(): __map_rehash(m, ns)
 
 # a new entry (k is not in m; slot: the empty slot a probe for it ended at, or -1)
-__map_add[K, V] = (m: mut Map[K, V], k: K, v: V, h: u64, slot0: int = -1):
-    n = m.__keys.len()
-    tag = __map_tag(k, h)
+__map_add[K, V] = (m: mut Map[K, V], k: K, v: V, h0: u64, slot0: int = -1):
+    h = h0
     slot = slot0
+    n = m.__keys.len()
+    if n == 0:
+        # (the first entry: the key drawn if no dictionary has drawn it, and k hashed again, in case
+        # its hash was taken before, with 0, here or on another thread)
+        if __hash_key == 0: __hash_key_init()
+        h = __map_hash(k)
+        slot = -1
+    tag = __map_tag(k, h)
     if (n + 1) * 4 > m.slots.len() * 3 and m.ngone > 0:
         # (what is gone taken out first: there may be room then)
         __map_compact(m)
@@ -196,7 +318,8 @@ __map_add[K, V] = (m: mut Map[K, V], k: K, v: V, h: u64, slot0: int = -1):
     m.slots[i] = __MapSlot(tag, n + 1)
 
 ([])[K, V] = (m: Map[K, V], k: K) -> V:
-    e = __map_find(m, k, k.hash())
+    h = __map_hash(k)
+    e = __map_find(m, k, h)
     if e < 0: panic("the dictionary has no key {k}{__near_key(m, k)}: `get(key)` gives none for a missing key, and `has(key)` asks whether it is there")
     __at(m.vals, e)
 
@@ -242,17 +365,24 @@ __text_distance = (a: str, b: str, limit: int) -> int:
     min(prev[len(b)], limit)
 
 get[K, V] = (m: Map[K, V], k: K) -> V?:
-    e = __map_find(m, k, k.hash())
+    h = __map_hash(k)
+    e = __map_find(m, k, h)
     if e < 0: return none
     __at(m.vals, e)
 
 get[K, V] = (m: Map[K, V], k: K, default: V) -> V:
-    e = __map_find(m, k, k.hash())
+    h = __map_hash(k)
+    e = __map_find(m, k, h)
     if e < 0: return default
     __at(m.vals, e)
 
-contains[K, V] = (m: Map[K, V], k: K) -> bool: __map_find(m, k, k.hash()) >= 0
-has[K, V] = (m: Map[K, V], k: K) -> bool: __map_find(m, k, k.hash()) >= 0
+# (the hash first, apart: a call between reading m and the lookup would make m a snapshot)
+contains[K, V] = (m: Map[K, V], k: K) -> bool:
+    h = __map_hash(k)
+    __map_find(m, k, h) >= 0
+has[K, V] = (m: Map[K, V], k: K) -> bool:
+    h = __map_hash(k)
+    __map_find(m, k, h) >= 0
 len[K, V] = (m: Map[K, V]) -> int: m.__keys.len() - m.ngone
 
 # Positional access for a compacted iteration snapshot, not a key lookup.
@@ -292,7 +422,7 @@ clear[K, V] = (m: mut Map[K, V]):
 remove[K, V] = (m: mut Map[K, V], k: K) -> bool:
     ns = m.slots.len()
     if ns == 0: return false
-    h = k.hash()
+    h = __map_hash(k)
     mask = ns - 1
     i = int(h) & mask
     tag = __map_tag(k, h)

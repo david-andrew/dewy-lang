@@ -36,7 +36,7 @@ enum IN:
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
     read_fields, default_init, offset_unit, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
     static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem, lend, loan_address, loan_load, loan_store, loan_length,
-    zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration, wrap_bits, arena_result, arrdata_permute
+    zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration, wrap_bits, arena_result, arrdata_permute, mul_hi
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big, set_text, promote
@@ -77,7 +77,7 @@ intrinsics = [
     Intrinsic("assert", .assert, false), Intrinsic("print", .print, false), Intrinsic("embed", .embed, false), Intrinsic("embed_dir", .embed_dir, false),
     Intrinsic("str_from_bytes", .from_bytes, false), Intrinsic("bytes", .to_bytes, false), Intrinsic("__argv", .argv, false),
     Intrinsic("unreachable", .unreachable, false), Intrinsic("sqrt", .sqrt, false), Intrinsic("__offset_unit", .offset_unit, false), Intrinsic("__fmt_fields", .fmt_struct, false), Intrinsic("__fmt_elem_value", .fmt_elem, false), Intrinsic("__gpu_kernel", .gpu_kernel, false),
-    Intrinsic("__hash_value", .hash, false), Intrinsic("__set_len", .setlen, false), Intrinsic("__call_raw", .callc, false),
+    Intrinsic("__mul_hi", .mul_hi, false), Intrinsic("__hash_value", .hash, false), Intrinsic("__set_len", .setlen, false), Intrinsic("__call_raw", .callc, false),
     Intrinsic("shader", .shader, false), Intrinsic("__setjmp", .setjmp, false), Intrinsic("__longjmp", .longjmp, false), Intrinsic("__jump", .jump, false),
     Intrinsic("__clone_thread", .clone_thread, false), Intrinsic("__atomic_add", .atomic_add, false),
     Intrinsic("__atomic_cas", .atomic_cas, false), Intrinsic("__stack_ptr", .stack_ptr, false),
@@ -5974,6 +5974,13 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         arg_type(args, 1, 0)
         arg_type(args, 2, 0)
         return quantity_offset_unit(n, name_of(int(nodes[args[0]].sval)), args[1], args[2])
+    else if id == .mul_hi:
+        # (the high 64 bits of a 128-bit product: the dictionaries' keyed hash, lib/core/map.jo)
+        nargs_check(n, nargs, 2, 2, "__mul_hi")
+        arg_type(args, 0, T_U64)
+        arg_type(args, 1, T_U64)
+        runtime_demand("__mul_hi_soft")      # (WebAssembly has no high multiply)
+        r = T_U64
     else if id == .sqrt:
         nargs_check(n, nargs, 1, 1, "sqrt")
         t = arg_type(args, 0, 0)
@@ -6109,8 +6116,14 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             refs.push(ref)
         set_list2(n, refs)
     else if id == .hash:
-        nargs_check(n, nargs, 1, 1, "__hash_value")
+        # (a second argument, `true`: the dictionaries' keyed hash, lib/core/map.jo)
+        nargs_check(n, nargs, 1, 2, "__hash_value")
         note_value_helpers(arg_type(args, 0, 0), true)
+        if nargs == 2:
+            arg_type(args, 1, T_BOOL)
+            if nodes[args[1]].kind != .bool_lit: fatal(nodes[args[1]].pos, "__hash_value's second argument is a literal `true` (keyed)")
+            demand_name(intern("__hash_key"))
+            loop name in ["__hk_word", "__hk_mix", "__str_khash"]: runtime_demand(name)
         r = T_U64
     else if id == .shader:
         nargs_check(n, nargs, 2, 2, "shader")

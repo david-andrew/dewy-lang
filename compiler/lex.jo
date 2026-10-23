@@ -126,6 +126,11 @@ tok_text = (k: Tok) -> str:
         kw_is: "is"
         _: tok_name(k)
 
+# The compiler's dictionaries hash with a fixed key, so that its instruction counts do not vary
+# between runs (and its output order never could). This module initializes first: the key is
+# pinned before any dictionary has an entry (`speed` reports unstable counts otherwise).
+hash_key_pinned = __hash_key_pin(0x6A09E667F3BCC909)
+
 keywords: {str: Tok} = {
     "struct": Tok.kw_struct, "enum": Tok.kw_enum, "if": Tok.kw_if, "else": Tok.kw_else,
     "in": Tok.kw_in, "break": Tok.kw_break,

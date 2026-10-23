@@ -761,7 +761,7 @@ effect_simple_enum = (t0: int) -> bool:
 # or user spelling. -1 means unclassified. Bits are residual may-costs, not
 # authority to mutate the actual; place access is collected independently.
 effect_intrinsic_cost = (id: IN) -> int:
-    if id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .zeroed: return 0
+    if id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .zeroed or id == .mul_hi: return 0
     if id == .hash: return 0 # resolved value hooks are separate call edges
     if id == .static_assert: return 0 # erased
     if id == .push or id == .insert or id == .reserve or id == .resize or id == .extend or id == .fill:

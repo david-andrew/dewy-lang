@@ -97,6 +97,15 @@ __mi_hash = (a: __dewy_int) -> int:
     loop limb in value._limbs: h = (h ^ int(limb)) * 1099511628211
     h
 
+# (a dictionary's keyed hash: lib/core/map.jo)
+__mi_khash = (a: __dewy_int) -> int:
+    if (a as int) & 1 == 0: return __hk_word(((a as int) >> 1) as u64) as int
+    value = __mi_payload(a)[0]
+    k = __hash_key
+    h = __hk_mix(k, value._sign as u64)
+    loop limb in value._limbs: h = __hk_mix(k, h xor limb)
+    h as int
+
 __mi_parse = (s: str) -> __dewy_int?:
     # The same 18-digit proof as to_int, returning directly into the exact
     # result. Avoid an intermediate optional-word result on ordinary input.

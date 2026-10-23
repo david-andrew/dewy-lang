@@ -38,6 +38,7 @@ __json_write_value = (b: mut u8[], x: __dewy_int, indent: int, level: int): __mi
 hash = (x: __dewy_int) -> u64: hash(u64(__mi_hash(x)))
 __fmt_spec = (buf: mut u8[], x: __dewy_int, spec: str): __mi_format_spec(buf, x, spec)
 __map_tag = (k: __dewy_int, h: u64) -> u64: h
+__map_hash = (k: __dewy_int) -> u64: __mi_khash(k) as u64
 __read = (r: mut __TextIn, x: mut __dewy_int):
     __tx_word_at(r, true)
     if let value = __mi_parse(r.s[r.n0..r.n1)): x = value

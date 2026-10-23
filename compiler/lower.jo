@@ -3414,6 +3414,7 @@ gen_intrinsic = (e: int) -> Val:
         argv: return gen_intrinsic_argv(e, arg_start)
         setjmp, longjmp, jump, clone_thread, atomic_add, atomic_cas, stack_ptr, cpu_features, code_sync: return gen_intrinsic_setjmp(e, arg_start, arg_count)
         sqrt: return gen_intrinsic_sqrt(e, arg_start)
+        mul_hi: return gen_intrinsic_mul_hi(e, arg_start)
         hash: return gen_intrinsic_hash(e, arg_start)
         fmt_struct: return gen_fmt_struct(e)
         json_fields: return gen_json_fields(e)
@@ -4180,6 +4181,12 @@ gen_intrinsic_setjmp = (e: int, arg_start: int, arg_count: int) -> Val:
     emit(.intr, VI, d, i32(start), i32(vs.len()), 0, code)
     return V(d, false)
 
+gen_intrinsic_mul_hi = (e: int, arg_start: int) -> Val:
+    a = gen_expr(int(lists[arg_start])).v
+    b = gen_expr(int(lists[arg_start + 1])).v
+    if mulh_ok: return V(e_bin(.mulhu, VI, a, b), false)
+    return V(e_call2(rt("__mul_hi_soft"), a, b, VI), false)
+
 gen_intrinsic_sqrt = (e: int, arg_start: int) -> Val:
     arg0 = int(lists[arg_start])
     v = gen_expr(arg0).v
@@ -4189,7 +4196,8 @@ gen_intrinsic_hash = (e: int, arg_start: int) -> Val:
     arg0 = int(lists[arg_start])
     t = prune(ntype(arg0))
     pa = place_addr(gen_place(arg0, false), t)
-    return V(e_call1(lf_helper(.hash, t, 0), pa, VI), false)
+    # (`__hash_value(x, true)`: the dictionaries' keyed hash)
+    return V(e_call1(lf_helper(.hash, t, int(nkids(e) == 2)), pa, VI), false)
 
 gen_intrinsic_gpu_kernel = (e: int, arg_start: int) -> Val:
     arg0 = int(lists[arg_start])
@@ -8082,11 +8090,15 @@ eq_member = (t0: int, a: int, b: int, fail: int):
     r = e_call2(lf_helper(.eq, t, 0), a, b, VI)
     brif_to(e_bin(.eq, VI, r, e_iconst(0)), fail)
 
-helper_hash = (t: int):
+# Keyed (a dictionary's slots, lib/core/map.jo): every member word mixed under the process's
+# secret key (__hk_mix), strings by __hk_bytes, and a type's own hash's result under the key.
+hk_key = 0          # (the key's register in the keyed helper being lowered, else 0)
+
+helper_hash = (t: int, keyed: bool = false):
     ps = helper_params(1)
     if t == T_MATH_INT:
         ir.ret = VI
-        e_ret(e_call1(rt("__mi_hash"), e_load(VI, ps[0], 0, 8), VI))
+        e_ret(e_call1(rt(if keyed: "__mi_khash" else: "__mi_hash"), e_load(VI, ps[0], 0, 8), VI))
         return
     ir.ret = VI
     a = ps[0]
@@ -8095,11 +8107,20 @@ helper_hash = (t: int):
     f = value_hash_fns.get(t) ?? 0
     if f != 0:
         result = e_call1(lf_of_inst(f), a, VI)
+        if keyed: result = e_call1(rt("__hk_word"), result, VI)
         if snapshot: drop_at(a, t)
         e_ret(result)
         return
     h = vreg(VI)
-    e_mov(h, e_iconst(0xcbf29ce484222325))
+    hk_key = 0
+    if keyed:
+        # (no check that it is drawn: before a dictionary's first entry is added, __map_add
+        # draws it and hashes that key again; an empty dictionary reads no slots)
+        s = prelude.get(intern("__hash_key")) ?? 0
+        if s == 0 or syms[s].kind != .global: ice("missing runtime global __hash_key")
+        hk_key = e_load(VI, e_gaddr(global_addr_off(int(syms[s].ref))), 0, 8)
+        e_mov(h, e_iconst(0))
+    else: e_mov(h, e_iconst(0xcbf29ce484222325))
     # (what helper_eq compares, and nothing else: equal values hash alike)
     k = types[t].kind
     if k == .struct_ or k == .tuple:
@@ -8114,7 +8135,7 @@ helper_hash = (t: int):
         has = opt_has(a, inner)
         hash_mix(h, has)
         iff(has)
-        if math_optional(t): hash_mix(h, e_call1(rt("__mi_hash"), opt_value(a, inner), VI))
+        if math_optional(t): hash_mix(h, e_call1(rt(if hk_key != 0: "__mi_khash" else: "__mi_hash"), opt_value(a, inner), VI))
         else: hash_member(h, inner, a)
         endc()
     else if k == .enum_:
@@ -8151,9 +8172,17 @@ helper_hash = (t: int):
             else: hash_mix(h, hash_float(e_load(VS, a, 4 * i, 4 | M_FLOAT), VS))
     else: hash_member(h, t, a)
     if snapshot: drop_at(a, t)
+    hk_key = 0
     e_ret(h)
 
 hash_mix = (h: int, x: int):
+    if hk_key != 0:
+        # (__hk_mix(key, h xor x): the folded 128-bit product of h ^ x ^ key and key ^ C)
+        a = e_bin(.xor, VI, e_bin(.xor, VI, h, x), hk_key)
+        b = e_bin(.xor, VI, hk_key, e_iconst(0xE7037ED1A0B428DB))
+        if mulh_ok: e_mov(h, e_bin(.xor, VI, e_bin(.mul, VI, a, b), e_bin(.mulhu, VI, a, b)))
+        else: e_mov(h, e_call2(rt("__hk_mix"), hk_key, e_bin(.xor, VI, h, x), VI))
+        return
     m = e_bin(.mul, VI, e_bin(.xor, VI, h, x), e_iconst(0x100000001b3))
     e_mov(h, e_bin(.xor, VI, m, e_bin(.shru, VI, m, e_iconst(29))))
 
@@ -8168,7 +8197,8 @@ hash_member = (h: int, t0: int, a: int):
     k = types[t].kind
     c = vc(t)
     x = 0
-    if k == .str_: x = e_call1(rt("__str_hash"), e_load(VI, a, 0, ptr_size), VI)
+    hp = int(hk_key != 0)
+    if k == .str_: x = e_call1(rt(if hp != 0: "__str_khash" else: "__str_hash"), e_load(VI, a, 0, ptr_size), VI)
     else if k == .box:
         et = prune(int(types[t].elem))
         va = box_val(e_load(VI, a, 0, ptr_size), et)
@@ -8178,16 +8208,16 @@ hash_member = (h: int, t0: int, a: int):
             has = opt_has(va, inner)
             hash_mix(h, has)
             iff(has)
-            hash_mix(h, e_call1(lf_helper(.hash, prune(inner), 0), va, VI))
+            hash_mix(h, e_call1(lf_helper(.hash, prune(inner), hp), va, VI))
             endc()
             return
-        x = e_call1(lf_helper(.hash, et, 0), va, VI)
-    else if math_optional(t): x = e_call1(lf_helper(.hash, t, 0), a, VI)
-    else if t == T_MATH_INT: x = e_call1(rt("__mi_hash"), load_val(t, a, 0), VI)
+        x = e_call1(lf_helper(.hash, et, hp), va, VI)
+    else if math_optional(t): x = e_call1(lf_helper(.hash, t, hp), a, VI)
+    else if t == T_MATH_INT: x = e_call1(rt(if hp != 0: "__mi_khash" else: "__mi_hash"), load_val(t, a, 0), VI)
     else if c == VC_INT and k != .array: x = load_val(t, a, 0)
     else if c == VC_FLT: x = hash_float(load_val(t, a, 0), vt_of(t))
     else if k == .fn_ or k == .polyfn or k == .callable: x = e_load(VI, a, 0, ptr_size)
-    else if (c == VC_AGG or k == .array) and helper_hash_differs(t): x = e_call1(lf_helper(.hash, t, 0), a, VI)
+    else if (c == VC_AGG or k == .array) and helper_hash_differs(t): x = e_call1(lf_helper(.hash, t, hp), a, VI)
     else: return
     hash_mix(h, x)
 
@@ -8331,7 +8361,7 @@ lower_helper = (lf: int):
         arruniq: helper_arruniq(t)
         arrcopy: helper_owner_arrcopy(t)
         eq: helper_eq(t)
-        hash: helper_hash(t)
+        hash: helper_hash(t, h.inst != 0)
         thunk: helper_thunk(h.inst)
         partial: helper_partial(h.inst)
         envdrop: helper_envdrop(h.inst)

@@ -209,7 +209,7 @@ prelude_demand_all = ():
 # Names the compiler reads from the prelude map directly (prelude.get(intern("...")) and
 # rt_global): registered with their modules from the start (tests/test_prelude_loading.py keeps
 # this list whole)
-prelude_known = ["Map", "NDArray", "Missing", "Console", "Set", "__crash_install", "__c_threads", "__cpu_avx2", "__loop_budget", "__mt_active"]
+prelude_known = ["Map", "NDArray", "Missing", "Console", "Set", "__crash_install", "__c_threads", "__cpu_avx2", "__loop_budget", "__mt_active", "__hash_key"]
 prelude_known_names = ():
     loop nm in prelude_known: demand_prelude_name(intern(nm))
 

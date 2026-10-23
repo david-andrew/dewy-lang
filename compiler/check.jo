@@ -5720,6 +5720,9 @@ check_program = (main_path: str):
         register_module(i)
         ic_restore(icb)
         i += 1
+    # (dictionaries hash keys with the keyed value hash: lib/core/map.jo)
+    runtime_switch_on("__KEYED_HASH")
+    runtime_switch_on("__MUL_HI")
     if runtime_switches.len() > 0: runtime_switch()
     bind_from_imports()
     dewy_resolve_inherited()

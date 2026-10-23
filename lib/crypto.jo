@@ -13,37 +13,11 @@
 # session, as WebRTC's are; not for long-lived keys on shared machines.)
 
 # ---------------- random bytes ----------------
-when TARGET == "macos":
-    @lib("/usr/lib/libSystem.B.dylib")
-    @symbol("getentropy")
-    extern __cr_getentropy = (p: *u8, n: int) -> i32
-when TARGET == "windows":
-    @lib("advapi32.dll")
-    @symbol("SystemFunction036")
-    extern __cr_rtlgenrandom = (p: *u8, n: u32) -> u8
-when TARGET == "wasm":
-    extern __wasm_random = (p: *u8, n: int)
-
 # n bytes from the operating system's random source (for keys and nonces: not seeded, not repeatable)
 random_bytes = (n: int) -> u8[]:
     b = fill(u8(0), n)
     if n == 0: return b
-    when TARGET == "linux":
-        got = 0
-        loop got < n:
-            r = syscall(318, data(b) + got, n - got, 0)            # getrandom
-            if r <= 0: panic("random_bytes: the system gave no random bytes")
-            got += r
-    else when TARGET == "macos":
-        got = 0
-        loop got < n:
-            k = min(n - got, 256)
-            if int(__cr_getentropy(data(b) + got, k)) != 0: panic("random_bytes: the system gave no random bytes")
-            got += k
-    else when TARGET == "windows":
-        if int(__cr_rtlgenrandom(data(b), u32(n))) == 0: panic("random_bytes: the system gave no random bytes")
-    else:
-        __wasm_random(data(b), n)
+    if not __os_entropy(data(b), n): panic("random_bytes: the system gave no random bytes")
     b
 
 # ---------------- bytes ----------------

@@ -25,6 +25,50 @@ when TARGET == "wasm":
     # how long the page has been running without a break, in milliseconds (0: not told, as under node)
     extern __wasm_busy = () -> f64
 
+when TARGET == "macos":
+    @lib("/usr/lib/libSystem.B.dylib")
+    @symbol("getentropy")
+    extern __mac_getentropy = (p: *u8, n: int) -> i32
+when TARGET == "windows":
+    @lib("advapi32.dll")
+    @symbol("SystemFunction036")
+    extern __w32_genrandom = (p: *u8, n: u32) -> u8
+when TARGET == "wasm":
+    extern __wasm_random = (p: *u8, n: int)
+
+# n bytes at p from the operating system's random source (getrandom, getentropy, RtlGenRandom,
+# crypto.getRandomValues): false when it gives none
+__os_entropy = (p: *u8, n: int) -> bool:
+    when TARGET == "linux":
+        got = 0
+        loop got < n:
+            r = syscall(318, p + got, n - got, 0)            # getrandom
+            if r == -4: continue                             # (EINTR)
+            if r <= 0: return false
+            got += r
+        return true
+    else when TARGET == "macos":
+        got = 0
+        loop got < n:
+            k = n - got
+            if k > 256: k = 256
+            if int(__mac_getentropy(p + got, k)) != 0: return false
+            got += k
+        return true
+    else when TARGET == "windows":
+        return n == 0 or int(__w32_genrandom(p, u32(n))) != 0
+    else:
+        __wasm_random(p, n)
+        return true
+
+# A random word from the operating system (for seeds that must not be guessed). Should it give
+# none, the clock and where this stack is (different each run) stand in.
+__entropy_word = () -> u64:
+    w: u64 = 0
+    p = (&w) as *u8
+    if not __os_entropy(p, 8): w = u64(time_ns()) xor u64(p as int) * 0x9E3779B97F4A7C15
+    w
+
 # ---------------- threads (see lib/std/thread.jo) ----------------
 # Worker threads run on stacks carved out of one reserved region, so a thread's index can be
 # derived from its stack pointer: index 0 is the main thread. While a parallel job runs,
@@ -1016,6 +1060,8 @@ __str_from_bytes = (b: u8[]) -> str:
     q as str
 
 __str_hash = (s: str) -> u64: __hash_bytes(data(s), len(s))
+# (dictionaries' keyed hash of a string's bytes, lib/core/map.jo)
+__str_khash = (s: str) -> u64: __hk_bytes(data(s), len(s))
 
 __hash_bytes = (p: *u8, n: int) -> u64:
     h: u64 = 14695981039346656037
