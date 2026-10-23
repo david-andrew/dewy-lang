@@ -2941,6 +2941,60 @@ gen_math_int = (op: Tok, a: int, b: int, signed_count: bool = true) -> int:
         return d
     e_bin(int_op(op, true), VI, a, b)
 
+# Arrays of plain integers or bools are equal when their bytes are: the lengths, then
+# __mem_eq (expanded inline) over the elements where they are. A slice, xs[i..j) =? ys,
+# is a range of its source, not a new array.
+byte_eq_type = (t: int) -> bool:
+    if tkind(t) != .array: return false
+    et = prune(int(types[t].elem))
+    (types[et].kind == .int_ and et != T_MATH_INT) or types[et].kind == .bool_
+
+gen_byte_eq = (a: int, b: int, t: int, keep_left: bool) -> int:
+    # (a slice's source need be kept only if evaluating b could change it)
+    keep = keep_left
+    if is_slice(a): keep = not unchanged_by(text_source(int(nodes[a].a)), b)
+    da, na = byte_range(a, t, keep)
+    db, nb = byte_range(b, t, false)
+    r = vreg(VI)
+    e_mov(r, e_iconst(0))
+    iff(e_bin(.eq, VI, na, nb))
+    e_mov(r, e_call3(rt("__mem_eq"), da, db, e_bin(.mul, VI, na, e_iconst(owner_stride(int(types[t].elem)))), VI))
+    endc()
+    r
+
+# the string a byte view of it is (`s as array<uint8>`: the same storage), or n
+text_source = (n: int) -> int:
+    k = nodes[n].kind
+    if (k == .conv or k == .cast) and tkind(ntype(n)) == .array and tkind(ntype(int(nodes[n].a))) == .str_: return int(nodes[n].a)
+    n
+
+# where an array operand's elements start, and how many: a slice's checked range of its
+# source (kept alive while later evaluation could release it)
+byte_range = (x: int, t: int, keep: bool) -> (int, int):
+    if not is_slice(x) or tkind(ntype(int(nodes[x].a))) != .array:
+        # (a fixed array's slice is made: a new array, not a place)
+        v = if keep or is_slice(x): kept_operand_addr(x, t) else: place_addr(gen_place(x, false), t)
+        p = e_load(VI, v, 0, ptr_size)
+        return (e_addi(p, 24), arr_len(p))
+    source_node = int(nodes[x].a)
+    bt = prune(ntype(source_node))
+    r = int(nodes[x].b)
+    plain = unchanged_by(text_source(source_node), r) or (nodes[r].a == 0 or plain_read(int(nodes[r].a))) and (nodes[r].b == 0 or plain_read(int(nodes[r].b)))
+    source = gen_expr(source_node)
+    if keep or not plain:
+        source = own(source, bt)
+        borrow(source, bt)
+    p = vreg(VI)
+    e_mov(p, source.v)
+    lo, hi = gen_slice_bounds(x, p)
+    n = arr_len(p)
+    bad = e_bin(.or_, VI, e_bin(.lts, VI, lo, e_iconst(0)), e_bin(.gts, VI, hi, n))
+    bad = e_bin(.or_, VI, bad, e_bin(.gts, VI, lo, hi))
+    iff(bad)
+    e_call_nr4(rt("__panic_slice"), e_daddr(str_data("slice")), lo, hi, n, -1)
+    endc()
+    (e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, lo, e_iconst(owner_stride(int(types[bt].elem))))), e_bin(.sub, VI, hi, lo))
+
 gen_binary = (e: int) -> Val:
     a = int(nodes[e].a)
     b = int(nodes[e].b)
@@ -2958,6 +3012,10 @@ gen_binary = (e: int) -> Val:
         plain_string = aux == 2 and (op == .eq or op == .ne) and plain_read(b)
         plain_resource = aux == 1 and ownership_type(lt) and plain_read(b)
         if not plain_string and not plain_resource and place_var(a) != 0: keep_left = not unchanged_by(a, b)
+    if aux == 1 and byte_eq_type(lt):
+        r = gen_byte_eq(a, b, lt, keep_left)
+        if op == .ne: r = e_bin(.xor, VI, r, e_iconst(1))
+        return V(r, false)
     if aux == 1:
         ad = 0
         # (a slice, xs[a..b) == ys: a new array, not a place to take the address of)

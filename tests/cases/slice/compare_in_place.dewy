@@ -1,0 +1,29 @@
+# Byte ranges and integer arrays compare in place: lengths, then elements.
+starts_at=(text:string word:string at:int64):>bool=>{
+    let bytes=text as array<uint8>
+    let w=word as array<uint8>
+    if at + w.length >? bytes.length {return false}
+    bytes[at..at + w.length) =? w
+}
+main=():>void=>{
+    let a:array<uint8>=[]
+    let b:array<uint8>=[]
+    loop k in [0..70) {
+        a.push(uint8(k % 251))
+        b.push(uint8(k % 251))
+    }
+    b[40]=7
+    loop n in [0 1 2 3 4 5 7 8 9 15 16 17 31 32 33 39 40 41 64] {
+        print"{a[0..n) =? b[0..n)}{a[0..n) not=? b[0..n)} "
+    }
+    printl""
+    printl"{a[3..10) =? b[3..10)} {a[3..10) =? b[3..11)} {a[38..45) =? b[38..45)} {a[41..70) =? b[41..70)}"
+    let wide:array<int64>=[1 2 3 -4 5]
+    let wide2:array<int64>=[9 2 3 -4 5]
+    printl"{wide[1..5) =? wide2[1..5)} {wide =? wide2} {wide[0..1) =? wide2[0..1)}"
+    let flags:array<bool>=[true false true]
+    printl"{flags[0..2) =? [true false]} {flags =? [true false true]} {flags[1..3) =? [true false]}"
+    let empty:array<uint8>=[]
+    printl"{empty =? a[5..5)} {empty =? a[5..6)} {a =? a} {a =? b}"
+    printl"{starts_at("hello world" "world" 6)} {starts_at("hello world" "word" 6)} {starts_at("hi" "high" 0)}"
+}
