@@ -304,8 +304,11 @@ parameter names. A function-type annotation supplies the names at that boundary:
 `let f:<(amount:int64):>int64> = (x)=>x*2` can be called as `f(amount=21)`.
 These names do not change the runtime calling convention. The callee evaluates
 first, then explicit arguments in written order. Parameters named `_` accept
-positional arguments only. Function values require all arguments; default
-arguments remain a direct-call feature.
+positional arguments only. A handle keeps its function's defaults: after
+`f=(a:int64 b:int64=2)=>a+b` and `g=@f`, `g(1)` is `f(1)`, with the default
+evaluated at each call. A function-type annotation states only the contract, so
+a value stored under one, or chosen between two such functions, takes every
+argument.
 
 A bare function name calls the function: `seven` is `seven()` when every
 parameter of `seven` has a default, and a name whose function needs arguments

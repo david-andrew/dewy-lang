@@ -1,0 +1,8 @@
+# modes: native
+f=(a:int64 b:int64=2):>int64=>a+b
+triple=(x:int64 y:int64=3):>int64=>x*y
+main=()=>{
+    let fast=true
+    let op=if fast @f else @triple
+    printl(op(2))
+}

@@ -237,7 +237,10 @@ decl_fn_labels = (decl: int) -> int:
     loop p in kids(decl): names.push(int(nodes[p].name))
     fn_label_key(names)
 
-mk_fn = (params: int[], ret: int, mutmask: int, labels: int = 0) -> int: mk_type(TypeInfo(kind = .fn_, elem = i32(ret), mutmask = i32(mutmask), st = i32(labels)), params)
+# defaults: the function instance whose parameter defaults a call through the
+# value fills in (`g = @f` keeps f's defaults); 0 when none travel with it.
+# Kept in bits: part of the type's identity, ignored by the calling convention.
+mk_fn = (params: int[], ret: int, mutmask: int, labels: int = 0, defaults: int = 0) -> int: mk_type(TypeInfo(kind = .fn_, elem = i32(ret), mutmask = i32(mutmask), st = i32(labels), bits = i32(defaults)), params)
 mk_cfn = (params: int[], ret: int) -> int: mk_type(TypeInfo(kind = .cfn, elem = i32(ret)), params)
 mk_tuple = (elems: int[]) -> int: mk_type(TypeInfo(kind = .tuple), elems)
 var_counter = 0

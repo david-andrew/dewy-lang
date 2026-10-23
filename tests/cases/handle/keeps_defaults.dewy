@@ -1,0 +1,24 @@
+# modes: native native-release
+f=(a:int64 b:int64=2):>int64=>a+b
+k=(a:int64 b:int64=10 c:int64=a):>int64=>a+b+c
+triple=(x:int64 y:int64=3):>int64=>x*y
+apply=(h:<(a:int64 b:int64):>int64> x:int64):>int64=>h(x 1)
+main=()=>{
+    let g=@f
+    printl(g(1))
+    printl(g(1 5))
+    printl(g(b=7 a=1))
+    printl((@f(1))())
+    let m=@k
+    printl(m(1))
+    printl(m(1 c=100))
+    printl(apply(@f 4))
+    printl(apply(@g 4))
+    let fast=true
+    let op=if fast @f else @triple
+    printl(op(2 2))
+    let cb:<(a:int64 b:int64):>int64> = @f
+    printl(cb(1 1))
+    let hs=[@f @f]
+    printl(hs[0](3))
+}

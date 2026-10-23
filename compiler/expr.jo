@@ -886,8 +886,20 @@ join_types = (a: int, b: int, pos: int) -> int:
     if types[tb].kind == .opt and can_coerce(a, ta, tb):
         coerce(a, tb)
         return tb
+    # (handles of two functions with defaults: the joined value keeps neither's)
+    if types[ta].kind == .fn_ and types[tb].kind == .fn_ and types[ta].bits != types[tb].bits:
+        t = fn_without_defaults(ta)
+        coerce(a, t)
+        coerce(b, t)
+        return t
     coerce(b, ta)
     ta
+
+fn_without_defaults = (t: int) -> int:
+    if types[t].kind != .fn_ or types[t].bits == 0: return t
+    ps: int[]
+    loop i in [0..int(types[t].nargs)): ps.push(targ(t, i))
+    mk_fn(ps, int(types[t].elem), int(types[t].mutmask), int(types[t].st))
 
 # ---------------- places ----------------
 cp_inner = 0           # > 0 while checking the base of an element or field being written
@@ -2737,11 +2749,14 @@ value_call = (n: int, callee: int, args: int[], expected: int = 0) -> int:
     ft = callable_base(ft)
     if types[ft].kind != .fn_ and types[ft].kind != .cfn: fatal(nodes[n].pos, "cannot call a value of type {dt(ft)}")
     na = int(types[ft].nargs)
-    if args.len() != na: fatal(nodes[n].pos, "function value expects {na} argument(s), got {args.len()}")
+    keeps = if types[ft].kind == .fn_: int(types[ft].bits) else: 0
+    if args.len() != na and (keeps == 0 or args.len() > na): fatal(nodes[n].pos, "function value expects {na} argument(s), got {args.len()}")
     named = false
     loop a in args:
         if nodes[a].kind == .namedarg: named = true
     final = args
+    if keeps != 0 and (named or args.len() < na):
+        return value_call_defaults(n, callee, ft, keeps, args)
     if named:
         if types[ft].kind == .cfn or types[ft].st == 0: fatal(nodes[n].pos, "this callable has no parameter names; use positional arguments or give it a named function type")
         let names = fn_label_names(int(types[ft].st), na)
@@ -2761,6 +2776,47 @@ value_call = (n: int, callee: int, args: int[], expected: int = 0) -> int:
         if types[ft].kind == .cfn: fatal(nodes[n].pos, "partial application of C function pointers is not supported")
         pts: int[]
         loop i in [0..na): pts.push(targ(ft, i))
+        return finish_partial(n, pts, int(types[ft].mutmask), int(types[ft].elem))
+    nodes[n].type = i32(representation_type(int(types[ft].elem)))
+    representation_type(int(types[ft].elem))
+
+fn_has_defaults = (decl: int) -> bool:
+    if decl == 0 or not files[pos_file(nodes[decl].pos)].is_dewy: return false
+    loop p in kids(decl):
+        if nodes[p].b != 0: return true
+    false
+
+# A call through a handle that keeps its function's defaults (see mk_fn):
+# arguments bind as in a direct call of that function, and each omitted
+# parameter takes its default, evaluated for this call.
+value_call_defaults = (n: int, callee: int, ft: int, f: int, args: int[]) -> int:
+    decl = int(fns[f].decl)
+    np = nkids(decl)
+    pnames: int[]
+    hasdef: bool[]
+    loop i in [0..np):
+        pnames.push(int(nodes[kid(decl, i)].name))
+        hasdef.push(nodes[kid(decl, i)].b != 0)
+    mapped: int[]
+    message = map_args(pnames, hasdef, args, mapped, dewy_param_kinds.get(decl) ?? [])
+    if message != "": fatal(nodes[n].pos, message)
+    final: int[]
+    loop i in [0..np):
+        a = mapped[i]
+        if a == 0:
+            a = default_arg(decl, i, targ(ft, i), final, false, fns[f].targs)
+        else: finish_arg(a, targ(ft, i), int(types[ft].mutmask) & (1 << i) != 0)
+        final.push(a)
+    check_mutable_arguments(final, int(types[ft].mutmask), nodes[n].pos)
+    set_list(n, final)
+    save_call_order(n, args, final)
+    nodes[n].a = i32(callee)
+    nodes[n].sym = 0
+    nodes[n].aux = 1
+    if has_hole(args) or nodes[n].aux2 == i32(AUX2_PARTIAL):
+        nodes[n].aux2 = 0
+        pts: int[]
+        loop i in [0..np): pts.push(targ(ft, i))
         return finish_partial(n, pts, int(types[ft].mutmask), int(types[ft].elem))
     nodes[n].type = i32(representation_type(int(types[ft].elem)))
     representation_type(int(types[ft].elem))
@@ -8232,7 +8288,12 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
     if closure != 0:
         nodes[n].a = i32(closure)
         nodes[n].aux = 2
-    t = mk_fn(fns[f].ptypes, int(fns[f].ret), mm, if et != 0 and types[et].kind == .fn_: int(types[et].st) else: decl_fn_labels(d))
+    # (with no contract to fit, the handle keeps the function's defaults:
+    # `g = @f` then `g(1)` fills f's later parameters as `f(1)` would)
+    keeps = 0
+    if et == 0 and closure == 0 and fn_has_defaults(d): keeps = f
+    labels = if et != 0 and types[et].kind == .fn_: int(types[et].st) else: decl_fn_labels(d)
+    t = mk_fn(fns[f].ptypes, int(fns[f].ret), mm, labels, keeps)
     if et != 0 and types[et].kind == .cfn:
         if not fns[f].cabi: fatal(nodes[n].pos, "'{name_of(int(nodes[n].name))}' must be marked {jd(nodes[n].pos, "@cabi", "`$export`")} to be used as a C function pointer")
         t = mk_cfn(fns[f].ptypes, int(fns[f].ret))
@@ -10993,6 +11054,7 @@ callable_fits = (from0: int, to0: int) -> bool:
     to = callable_base(to0)
     if types[from].kind != .fn_ or types[to].kind != .fn_: return false
     if types[from].mutmask != types[to].mutmask or types[from].nargs != types[to].nargs: return false
+    if types[to].bits != 0 and types[from].bits != types[to].bits: return false
     loop i in [0..int(types[from].nargs)):
         if types[from].mutmask & i32(1 << i) != 0:
             if not type_eq(targ(from, i), targ(to, i)): return false
