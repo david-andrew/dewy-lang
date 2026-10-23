@@ -64,7 +64,8 @@ advance = ():
         else if w[0] == "hide" and w.len() > 1: shown.remove(w[1])
 
 # (where the player was last time: the story picks up there; at the start, the first time)
-st.load(load_value("place", st.save()))
+saved = load_value("place", st.save())
+if saved is StorySave: st.load(saved)
 advance()
 
 on_quit = (): save_value("place", st.save())

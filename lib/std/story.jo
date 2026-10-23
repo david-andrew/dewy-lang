@@ -34,8 +34,8 @@
 # `elif`, `else`, `jump label`, `call label` and `return`, `$ name = value` (and += -=), `end`.
 # Anything else is a command for the game. Variables are whole numbers (true is 1, false 0), and
 # "[name]" in a line puts one in. A Story is a value: save_value("story", st.save()) and later
-# st.load(load_value("story", st.save())) take up where it was, even after the script changed
-# in other labels.
+# st.load(saved) with saved = load_value("story", st.save()), when it is a StorySave (not a
+# TextError), take up where it was, even after the script changed in other labels.
 
 enum StoryKind: line, choice, command, end
 

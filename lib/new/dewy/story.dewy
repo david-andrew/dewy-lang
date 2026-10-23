@@ -97,7 +97,9 @@ the_two_choices_lead_to_different_replies = () => {
 
 # Presentation and live game state.
 window("Dewy / The Bell Tower" 1280 720)
-let reading = resume(load_value("place" fresh().bookmark))
+# (a saved place that does not read back starts the story over)
+let saved = load_value("place" fresh().bookmark)
+let reading = resume(if saved is? Bookmark saved else fresh().bookmark)
 let typed:float64 = 0.0
 on_quit = () => { save_value("place" reading.bookmark) }
 

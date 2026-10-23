@@ -9,7 +9,8 @@
 # still reads after its structs change.
 #
 #   save_value("settings", settings)
-#   settings = load_value("settings", Settings())     # (the default when there is none yet)
+#   settings = load_value("settings", Settings())     # (the default when there is none yet;
+#                                                     # a TextError when it does not read back)
 #
 # Numbers, bool, str, arrays (T[] and T[N]), maps, optionals, tuples, structs, enums (with
 # fields too), unions and vectors can be read; function values and pointers cannot.
@@ -47,16 +48,15 @@ from_json[T] = (text: str) -> T | TextError:
 # keep value under name (save_data) as text; false if it could not be written
 save_value[T] = (name: str, x: T) -> bool: save_data(name, to_text(x))
 
-# the value kept under name, or default if there is none or it does not read as one (said on
-# stderr then, and what was kept is copied to name + ".bad" first: the next save_value over it
-# does not lose it)
-load_value[T] = (name: str, default: T) -> T:
+# the value kept under name, default if there is none yet, or a TextError saying where what is
+# kept does not read as one (and what was kept is copied to name + ".bad" first: a save_value
+# over it does not lose it)
+load_value[T] = (name: str, default: T) -> T | TextError:
     x = default
     if let s = load_data(name):
         if let e = __from_text_into(s, x):
             save_data(name + ".bad", s)
-            eprint("load_value: what is kept under '{name}' does not read back ({e.message}, line {e.line}, column {e.column}): the default is used, and what was kept is copied to '{name}.bad'")
-            return default
+            return e
         return x
     default
 
