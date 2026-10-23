@@ -13,7 +13,7 @@ A refinement combines a base type with facts every value of that type satisfies.
 array<int64 length=3>
 ```
 
-A parameterize block may attach conditions to any type. An entry is a condition when it is a one-argument lambda about the value (`int< i => i >? 0 >`), a `?`-comparison on `length` (`array< length >? 0 >`), or a `length=N` assignment; every other entry is a type parameter. A refined array type may leave its element open and receive it on application (`NonEmptyArray<int>`). A condition — a *fact* — compares against an integer literal, a fixed-width type's `min`/`max` (`uint64.max`), or — as an upper bound on a result — the length of one of the function's parameters (`:>uint64<n => n <=? src.length>`, see [refined results](#refined-results-and-field-invariants) and [type facts](#type-facts)); `in?` a range of integer literals is its two bounds (`i => i in? 10..20`, `length in? [1..8)`); a [partial operator](operators-and-precedence.md#partial-operators) is the lambda it abbreviates (`uint64<(<? src.length)>`, `uint64<(in? 0..9)>`); and a condition may be a one-direction comparison chain — `0 <? length <=? uint64.max` is the two conditions `length >? 0` and `length <=? uint64.max`, `i => 0 <=? i <=? 100` likewise — following the [chaining rules](operators-and-precedence.md#chained-comparisons). A refined type is named like any other:
+A parameterize block may attach conditions to any type. An entry is a condition when it is a one-argument lambda about the value (`int< i => i >? 0 >`), a `?`-comparison on `length` (`array< length >? 0 >`), or a `length=N` assignment; every other entry is a type parameter. A refined array type may leave its element open and receive it on application (`NonEmptyArray<int>`). A condition — a *fact* — compares against an integer literal, a fixed-width type's `min`/`max` (`uint64.max`), or — as an upper bound on a result — the length of one of the function's parameters (`:>uint64<(<=? src.length)>`, see [refined results](#refined-results-and-field-invariants) and [type facts](#type-facts)); `in?` a range of integer literals is its two bounds (`i => i in? 10..20`, `length in? [1..8)`); a [partial operator](operators-and-precedence.md#partial-operators) is the lambda it abbreviates (`uint64<(<? src.length)>`, `uint64<(in? 0..9)>`); and a condition may be a one-direction comparison chain — `0 <? length <=? uint64.max` is the two conditions `length >? 0` and `length <=? uint64.max`, `i => 0 <=? i <=? 100` likewise — following the [chaining rules](operators-and-precedence.md#chained-comparisons). A refined type is named like any other:
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
@@ -66,7 +66,7 @@ contract below is checked against the updated array at each return:
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
-let append = <T>(@xs:array<T> value:T):>addr<i => i <? xs.length> => {
+let append = <T>(@xs:array<T> value:T):>addr<(<? xs.length)> => {
     let i = xs.length
     xs.push(value)
     return i
@@ -103,7 +103,7 @@ The general proposition language must be a deliberately bounded, decidable fragm
 
 ### Refined Parameters
 
-A parameter may carry a refinement: `(n:int64 d:int64<d not=? 0>)`, `(xs:array<int64 xs.length >? 0>)` — inside the annotation the parameter's own name is the value, so no lambda is needed (the lambda form `int64<i => i not=? 0>` remains for aliases). `int64 & ~0` spells the same exclusion structurally. An object value may be refined by an integer field: `r:Ratio<bottom >? 0>` (also `r:Ratio<r.bottom >? 0>` or `q => q.bottom >? 0`) — proven from a literal's field, from a guard on the field (`if r.bottom >? 0 { value(r) }`), and assumed for `r.bottom` inside the body. Dispatch applies on the base type; the refinement is an obligation at every call site, proven the way `$assert` is — from constants at check time, otherwise by the bounds analysis from guards (`if d not=? 0 { f(n d) }`, `$runtime_assert d >? 0`), intervals (a loop variable over `1..3`), and length facts (`xs.length >? 0`). A refuted obligation and an unprovable one are both errors (`refinement refuted`, `cannot prove refinement`), with a note on what the analysis knew. Inside the body the refinement is a fact: `n // d` is proven with `d:int64<i => i not=? 0>`, `xs[0]` with `length>?0`.
+A parameter may carry a refinement: `(n:int64 d:int64<d not=? 0>)`, `(xs:array<int64 xs.length >? 0>)` — inside the annotation the parameter's own name is the value, so no lambda is needed (the lambda form `int64<(not=? 0)>` remains for aliases). `int64 & ~0` spells the same exclusion structurally. An object value may be refined by an integer field: `r:Ratio<bottom >? 0>` (also `r:Ratio<r.bottom >? 0>` or `q => q.bottom >? 0`) — proven from a literal's field, from a guard on the field (`if r.bottom >? 0 { value(r) }`), and assumed for `r.bottom` inside the body. Dispatch applies on the base type; the refinement is an obligation at every call site, proven the way `$assert` is — from constants at check time, otherwise by the bounds analysis from guards (`if d not=? 0 { f(n d) }`, `$runtime_assert d >? 0`), intervals (a loop variable over `1..3`), and length facts (`xs.length >? 0`). A refuted obligation and an unprovable one are both errors (`refinement refuted`, `cannot prove refinement`), with a note on what the analysis knew. Inside the body the refinement is a fact: `n // d` is proven with `d:int64<(not=? 0)>`, `xs[0]` with `length>?0`.
 
 Two related spellings make invalid states unrepresentable rather than merely checked. A union of integer singletons — `sign:-1|1` as a field, `s:-1|1` as a binding or parameter, `:>-1|1` as a result — is a word whose value set is its invariant: storing into it is an obligation (`sign = -a.sign` is proven from `a.sign`'s facts) and reading it yields the facts; `s is? 1` on such a word is the comparison `s =? 1`, and `s is? -1|1` an `or` of comparisons (`|` binds above `is?`). A union that mixes literals of different kinds (`1 | 2 | "fast"`) remains a tagged union tested with `is?`. A field may also carry a length invariant, `limbs:array<uint64 length >? 0>`, proven at construction and assumed on every read (`v.limbs[0]` needs no guard). And a literal beside an object type, `0 | [sign:-1|1 limbs:…]`, is a tagged union that `x =? 0` / `x not=? 0` narrow like `is?`; `T & ~0` on such a union names it without the literal member — the nonzero object — so a parameter `d:bigint & ~0` is satisfied by a binding narrowed with `if d not=? 0 { … }`. A field may also be refined by a field of its own type — `start:Point<x >=? 0>` — proven where the enclosing value is built (from a literal, or from a guard such as `if p.x >=? 0 { [start = p …] }`) and a fact wherever `s.start.x` is read; on a `0 | [...]` type the same spelling refines the object member, so `bigint<sign =? 1>` is a positive big integer, nonzero by construction (the abstract rational's denominator is one).
 
@@ -121,14 +121,14 @@ let main = ():>void => exit(percent(1 4) + share(3 4))   # 25 + 75
 
 ### Refined Results and Field Invariants
 
-A result may be refined — `let positive = (n:int64):>int64<i => i >=? 1> => …` — in which case every `return` (and the body's value) is an obligation, and every call is a fact: `n // positive(n)` is proven, and `let g = positive(n)` carries the fact on `g`.
+A result may be refined — `let positive = (n:int64):>int64<(>=? 1)> => …` — in which case every `return` (and the body's value) is an obligation, and every call is a fact: `n // positive(n)` is proven, and `let g = positive(n)` carries the fact on `g`.
 
-A result may also be bounded by a parameter's length: `(src:string):>uint64<n => n <=? src.length>` (or `<?`) promises that the result never passes the end of `src`. The function proves it at every return from what it knows of `src` — `return i` under `i <? src.length`, `return i + 1` under the same, `return src.length`, `return n - 1` after `n =? src.length` — and a call turns it into a fact about the argument: `let n = f(text)` gives `n <=? text.length`, so `text[0..n)` proves; `let length = f(src[i..])` gives `length <=? src.length - i`, so `src[i..i+length)` proves. That last fact follows the value where it goes — into a record field, an array of records, through `.sort`, out of `matches[0]` and an unpack — until `i`, `src`, or the value is reassigned (an element that does not satisfy it drops the fact from the array). A function type may carry the promise for its implementations: with `eatfn = (src:nonempty):>uint64<n => n <=? src.length> | none`, a `type of Token & [eat = (src:nonempty):>uint64? => …]` implementing the slot `eat:eatfn` has the promise as its own contract (its returns prove it), and a `k.eat(src[i..])` through a `type<Token>` value has it as a fact. The promise is about the argument, not a name: a function whose own parameter is `src` cannot discharge `n <=? src.length` with `other(text)`, however `other` names its parameter.
+A result may also be bounded by a parameter's length: `(src:string):>uint64<(<=? src.length)>` (or `<?`) promises that the result never passes the end of `src`. The function proves it at every return from what it knows of `src` — `return i` under `i <? src.length`, `return i + 1` under the same, `return src.length`, `return n - 1` after `n =? src.length` — and a call turns it into a fact about the argument: `let n = f(text)` gives `n <=? text.length`, so `text[0..n)` proves; `let length = f(src[i..])` gives `length <=? src.length - i`, so `src[i..i+length)` proves. That last fact follows the value where it goes — into a record field, an array of records, through `.sort`, out of `matches[0]` and an unpack — until `i`, `src`, or the value is reassigned (an element that does not satisfy it drops the fact from the array). A function type may carry the promise for its implementations: with `eatfn = (src:nonempty):>uint64<(<=? src.length)> | none`, a `type of Token & [eat = (src:nonempty):>uint64? => …]` implementing the slot `eat:eatfn` has the promise as its own contract (its returns prove it), and a `k.eat(src[i..])` through a `type<Token>` value has it as a fact. The promise is about the argument, not a name: a function whose own parameter is `src` cannot discharge `n <=? src.length` with `other(text)`, however `other` names its parameter.
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 let nonempty:type = string<length >? 0>
-let eatfn:type = (src:nonempty):>uint64< n => n <=? src.length > | none
+let eatfn:type = (src:nonempty):>uint64< (<=? src.length) > | none
 let Tok:type = $abstract type of any & [eat:eatfn]
 let Spaces = type of Tok & [
     eat = (src:nonempty):>uint64? => {
@@ -208,7 +208,7 @@ let Word = type of Tok & []
 let is_word = (tok:Tok) => tok is? Word
 
 # the offset past a `[[ … ]]` block, within the source — no guard: `startswith` proves the steps
-let eat_block = (src:string):>uint64<n => n <=? src.length> | none => {
+let eat_block = (src:string):>uint64<(<=? src.length)> | none => {
     if not src.startswith("[[") return none
     let depth:int64 = 0
     let i:uint64 = 0
@@ -229,7 +229,7 @@ let main = ():>void => {
 }
 ```
 
-The facts a result may state about a parameter are type tests (`tok is? Word`, `tok isnt? Word`), bounds on its length (`prefix.length <=? src.length`, against another length or a number, in either direction), and bounds on its value — against a number (`true & <n >? 0> | false`) or another parameter (`(a:uint64 b:uint64) => a <=? b` is a predicate whose `true` arm makes `b - a` a proven `uint64` at the call). The value's own facts may likewise bound it by a parameter's length in either direction (`n >=? src.length`, `n =? src.length`) or by a parameter's value (`n => n <=? limit`). A length term may also appear on a parameter's own annotation, naming a sibling — `(src:string n:uint64<v => v <=? src.length>)` makes `src[0..n)` proven inside and `n <=? src.length` an obligation on the arguments at every call (the term names the argument passed for `src`, which must be a binding) — and on a local's, naming a binding in scope: `let n:uint64<v => v <=? src.length> = 3` is proven where it is declared and at every assignment to `n`, holds wherever `n` is read, and requires that `src` is never reassigned in that function. A function that returns nothing may still establish facts: a runtime result `:> void & <facts>` is owed at every `return` and at the end of the body, and holds for the caller after the call — the shape of a checking or fixing *procedure*. A boolean parameter promised `=? true` establishes the argument's own condition, so a library can write what `$runtime_assert` does; an `@` place argument gets the facts the call establishes about it, the only facts that survive passing it by place; a type fact narrows the argument:
+The facts a result may state about a parameter are type tests (`tok is? Word`, `tok isnt? Word`), bounds on its length (`prefix.length <=? src.length`, against another length or a number, in either direction), and bounds on its value — against a number (`true & <n >? 0> | false`) or another parameter (`(a:uint64 b:uint64) => a <=? b` is a predicate whose `true` arm makes `b - a` a proven `uint64` at the call). The value's own facts may likewise bound it by a parameter's length in either direction (`n >=? src.length`, `n =? src.length`) or by a parameter's value (`n => n <=? limit`). A length term may also appear on a parameter's own annotation, naming a sibling — `(src:string n:uint64<(<=? src.length)>)` makes `src[0..n)` proven inside and `n <=? src.length` an obligation on the arguments at every call (the term names the argument passed for `src`, which must be a binding) — and on a local's, naming a binding in scope: `let n:uint64<(<=? src.length)> = 3` is proven where it is declared and at every assignment to `n`, holds wherever `n` is read, and requires that `src` is never reassigned in that function. A function that returns nothing may still establish facts: a runtime result `:> void & <facts>` is owed at every `return` and at the end of the body, and holds for the caller after the call — the shape of a checking or fixing *procedure*. A boolean parameter promised `=? true` establishes the argument's own condition, so a library can write what `$runtime_assert` does; an `@` place argument gets the facts the call establishes about it, the only facts that survive passing it by place; a type fact narrows the argument:
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
@@ -253,7 +253,7 @@ What a caller learns follows the argument: a fact about a parameter's length bec
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 $prototype
-half = (n:int64 d:int64<i => i not=? 0>):>int64 => n // d
+half = (n:int64 d:int64<(not=? 0)>):>int64 => n // d
 main = (argv:array<string>) => {
     printl(half(10 argv.length))    # warned at compile time; checked at runtime
     return 0
@@ -463,7 +463,7 @@ procedure uses `:> void & <P>` and retains its runtime behavior.
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
 $proof
-ordered = (a:int64 b:int64<v => a <=? v> c:int64<v => b <=? v>):> <a <=? c> => {
+ordered = (a:int64 b:int64<(>=? a)> c:int64<(>=? b)>):> <a <=? c> => {
     $assert a <=? b
     $assert b <=? c
 }
