@@ -3899,23 +3899,22 @@ gen_intrinsic_resize = (e: int, arg_start: int) -> Val:
 # taken as a write. A call to a function that only reads its pointer parameter is a read.
 # The walk also tells which locals are exposed only by such reads, so a Dewy parameter's
 # binding can stay a view of the parameter. O(body) per function, once.
-struct PtrReads:
-    body: int
-    written: {int: bool}       # pointer class (union-find root) -> may be written
-    parent: {int: int}         # union-find over keys: data() node n as n, local l as -l
-    sites: int[]               # its data() nodes
-    exposed: {int: bool}       # locals with an exposure other than a read-only data()
-
-ptr_reads_cache: {int: PtrReads}
-ptr_reads_busy: {int: bool}
-pr: PtrReads
+# (one union-find for all functions: its keys, nodes and locals, are each one function's)
+pr_parent: {int: int}          # data() node n as n, local l as -l -> its class's next key
+pr_written: {int: bool}        # class root -> a pointer of the class may be written
+pr_exposed: {int: bool}        # locals exposed other than by a data() only read through
+pr_done: {int: int}            # function -> the body walked
+pr_busy: {int: bool}
+pr_sites: int[]                # the data() nodes of the function being walked
 
 pr_find = (k: int) -> int:
-    if not pr.parent.has(k):
-        pr.parent[k] = k
+    if not pr_parent.has(k):
+        pr_parent[k] = k
+        # (a local another place reaches, or a closure, may do anything with its pointer)
+        if k < 0 and int(locals[-k].flags) & (LF_CAPTURED | LF_CAPTURE | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM) != 0: pr_written[k] = true
         return k
     x = k
-    loop pr.parent[x] != x: x = pr.parent[x]
+    loop pr_parent[x] != x: x = pr_parent[x]
     x
 
 pr_union = (a: int, b: int) -> int:
@@ -3924,12 +3923,12 @@ pr_union = (a: int, b: int) -> int:
     ra = pr_find(a)
     rb = pr_find(b)
     if ra == rb: return ra
-    pr.parent[ra] = rb
-    if pr.written.has(ra): pr.written[rb] = true
+    pr_parent[ra] = rb
+    if pr_written.has(ra): pr_written[rb] = true
     rb
 
 pr_write = (k: int):
-    if k != 0: pr.written[pr_find(k)] = true
+    if k != 0: pr_written[pr_find(k)] = true
 
 # the class of the pointer e's value comes from (0: none followed)
 pr_origin = (e: int) -> int:
@@ -3951,7 +3950,7 @@ pr_root = (n0: int) -> int:
 pr_expose = (n: int):
     l = pr_root(n)
     loop l != 0:
-        pr.exposed[l] = true
+        pr_exposed[l] = true
         if int(locals[l].flags) & LF_ALIAS == 0 or locals[l].alias == 0: return
         l = pr_root(int(locals[l].alias))
 
@@ -3989,8 +3988,8 @@ pr_walk = (n: int):
     k = nodes[n].kind
     if k == .lambda or k == .fn_: return
     if k == .intrinsic and (nodes[n].aux as IN) == .arrdata and nkids(n) == 1:
-        pr.parent[n] = n
-        pr.sites.push(n)
+        pr_find(n)
+        pr_sites.push(n)
     else if k == .addr or ((k == .cast or k == .conv) and raw_view(n)): pr_expose(int(nodes[n].a))
     if k == .assign or k == .addr:
         t = int(nodes[n].a)
@@ -4002,63 +4001,51 @@ pr_walk = (n: int):
         loop i in [0..nkids(n)):
             if mm & (1 << i) != 0 or has_flag(kid(n, i), NF_MUT) or has_flag(kid(n, i), NF_AT): pr_target(kid(n, i))
     else if k == .intrinsic and nkids(n) > 0: pr_target(kid(n, 0))
-    cs = [int(nodes[n].a), int(nodes[n].b)]
+    pr_child(n, int(nodes[n].a), -1)
+    pr_child(n, int(nodes[n].b), -1)
     if k != .for_:
-        cs.push(int(nodes[n].c))
-        if k != .partial: cs.push(int(nodes[n].d))
-    loop c in cs:
-        if pr_is_ptr(c): pr_use(n, c, -1)
-        pr_walk(c)
-    named = false
-    loop i in [0..nkids(n)):
-        if nodes[kid(n, i)].kind == .namedarg: named = true
-    loop i in [0..nkids(n)):
-        c = kid(n, i)
-        if pr_is_ptr(c): pr_use(n, c, if named: -1 else: i)
-        pr_walk(c)
-    loop i in [0..nkids2(n)):
-        c = kid2(n, i)
-        if pr_is_ptr(c): pr_use(n, c, -1)
-        pr_walk(c)
+        pr_child(n, int(nodes[n].c), -1)
+        if k != .partial: pr_child(n, int(nodes[n].d), -1)
+    m = nkids(n)
+    if m > 0:
+        positional = k == .call
+        if positional:
+            loop i in [0..m):
+                if nodes[kid(n, i)].kind == .namedarg: positional = false
+        loop i in [0..m): pr_child(n, kid(n, i), if positional: i else: -1)
+    loop i in [0..nkids2(n)): pr_child(n, kid2(n, i), -1)
 
-# the pointer analysis of function f's body (cached)
-ptr_reads = (f: int) -> PtrReads:
+pr_child = (n: int, c: int, i: int):
+    if c <= 0: return
+    if nodes[c].type != 0 and tkind(ntype(c)) == .ptr: pr_use(n, c, i)
+    pr_walk(c)
+
+# walk function f's body, once
+ptr_reads = (f: int):
     body = if f > 0 and f < fns.len(): int(fns[f].body) else: 0
-    if let r = ptr_reads_cache.get(f):
-        if r.body == body: return r
-    saved = pr
-    pr = PtrReads(body, {}, {}, [], {})
-    ptr_reads_busy[f] = true
+    if (pr_done.get(f) ?? -1) == body: return
+    pr_done[f] = body
+    saved = pr_sites
+    pr_sites = []
+    pr_busy[f] = true
     pr_walk(body)
-    ptr_reads_busy.remove(f)
-    # (a local another place reaches, or a closure, may do anything with its pointer)
-    loop key in pr.parent.keys():
-        if key < 0 and int(locals[-key].flags) & (LF_CAPTURED | LF_CAPTURE | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM) != 0: pr_write(key)
-    loop site in pr.sites:
-        if pr.written.has(pr_find(site)): pr_expose(kid(site, 0))
-    result = pr
-    pr = saved
-    ptr_reads_cache[f] = result
-    result
+    pr_busy.remove(f)
+    loop site in pr_sites:
+        if pr_written.has(pr_find(site)): pr_expose(kid(site, 0))
+    pr_sites = saved
 
 # is the pointer from data() node e only read through?
 ptr_read_only = (e: int) -> bool:
-    r = ptr_reads(cur_fn)
-    r.parent.has(e) and not ptr_class_written(r, e)
-
-ptr_class_written = (r: PtrReads, k: int) -> bool:
-    x = k
-    loop r.parent.has(x) and r.parent[x] != x: x = r.parent[x]
-    r.written.has(x)
+    ptr_reads(cur_fn)
+    pr_parent.has(e) and not pr_written.has(pr_find(e))
 
 # does function f only read through its pointer parameter i (of a call with n arguments)?
 ptr_param_read = (f: int, i: int, n: int) -> bool:
     if f <= 0 or f >= fns.len() or fns[f].body == 0 or fns[f].decl == 0 or has_flag(int(fns[f].decl), NF_EXTERN) or fns[f].cabi: return false
-    if i >= fns[f].params.len() or n != fns[f].params.len() or ptr_reads_busy.has(f): return false
-    r = ptr_reads(f)
-    l = fns[f].params[i]
+    if i >= fns[f].params.len() or n != fns[f].params.len() or pr_busy.has(f): return false
+    ptr_reads(f)
     # (a Dewy parameter is read through its binding, which the walk joined to it)
-    not ptr_class_written(r, -l)
+    not pr_written.has(pr_find(-fns[f].params[i]))
 
 gen_intrinsic_arrdata = (e: int, arg_start: int) -> Val:
     arg0 = int(lists[arg_start])
@@ -5874,7 +5861,9 @@ param_view_decl = (s: int, l: int) -> bool:
     fl = int(locals[l].flags)
     if fl & (LF_ASSIGNED | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_ALIAS | LF_PARAM) != 0 or is_shared(l): return false
     # (exposed only by pointers read through, it can read the parameter's storage)
-    if fl & LF_EXPOSED != 0 and ptr_reads(cur_fn).exposed.has(l): return false
+    if fl & LF_EXPOSED != 0:
+        ptr_reads(cur_fn)
+        if pr_exposed.has(l): return false
     # Most local initializers are not the parameter binding introduced by the
     # frontend. Reject their shape before asking about layouts or closure types.
     iv = int(nodes[s].b)
