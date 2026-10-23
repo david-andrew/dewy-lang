@@ -67,6 +67,18 @@ dw_kind_name = (kind: DewyKind) -> str:
         compact_stmt: "CompactStatement"
         lazy_body: "LazyBody"
 
+# whether the source just before pos is `...` attached to it (`...rest`)
+dw_rest_attached = (pos: int) -> bool:
+    o = pos_off(pos)
+    if o < 3: return false
+    src = files[pos_file(pos)].src
+    src[o - 1] == '.' and src[o - 2] == '.' and src[o - 3] == '.'
+
+# the name part of a parameter (`rest` in `rest:array<int64>`)
+dw_param_name_node = (p: int) -> int:
+    if dewy_syntax[p].kind == .binary and dw_op(p) == .colon: return dw_child(p, 1)
+    p
+
 struct DewySyntax:
     kind: DewyKind
     text: str
@@ -1541,6 +1553,9 @@ dw_function = (id: int, name: str) -> int:
         if dewy_syntax[p].kind == .identifier and dewy_syntax[p].text == "...":
             keyword_only = true
             continue
+        # (`...rest`: a rest parameter, a reserved direction; the divider is a bare `...`)
+        if dw_rest_attached(dewy_syntax[p].pos):
+            fatal(dewy_syntax[p].pos - 3, "rest parameters (`...{dw_name(dw_param_name_node(p))}`) are not implemented yet; a bare `...` ends the positional run, so write `... {dw_name(dw_param_name_node(p))}` for a keyword-only parameter")
         kind = if keyword_only: 1 else: 0
         let p = p
         # (`value:int64 ...`: the positional run ends after this parameter)

@@ -294,7 +294,8 @@ its captured value, so `combine(next())` calls `next()` once.
 `...` after a parameter ends the positional run: in
 `offset=(value:int64 ... amount:int64)=>value+amount`, `amount` must be named,
 `offset(40 amount=2)`; a leading bare `...`, as in `(... width:int64)`, makes
-every parameter keyword-only. A parameter wrapped in `<>` is position-only: it keeps its
+every parameter keyword-only. An attached `...rest` is a rest parameter, which
+is not implemented yet and reports so. A parameter wrapped in `<>` is position-only: it keeps its
 local name, but `increment=(<value:int64>)=>value+1` rejects `increment(value=41)`.
 These kinds apply to direct calls of declared functions.
 
