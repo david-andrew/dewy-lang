@@ -42,7 +42,8 @@ __mi_slow = (a: __dewy_int, b: __dewy_int, operation: int) -> __dewy_int:
     if operation == 5: return __mi_pack(__bi.__and__(x, y))
     if operation == 6: return __mi_pack(__bi.__or__(x, y))
     if operation == 7: return __mi_pack(__bi.__xor__(x, y))
-    panic("invalid mathematical integer operation")
+    # (an invariant: the operations above are all there are)
+    unreachable()
 
 __mi_compare = (a: __dewy_int, b: __dewy_int) -> int:
     if (a as int) & 1 == 0 and (b as int) & 1 == 0:

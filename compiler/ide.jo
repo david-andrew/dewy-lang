@@ -18,6 +18,7 @@ use 'types.jo'
 use 'check.jo'
 use 'expr.jo'
 use 'lex.jo'
+use 'effects.jo'
 
 const IK_LOCAL = 1
 const IK_PARAM = 2
@@ -660,6 +661,8 @@ ide_fn_sig = (f: int) -> str:
     r = zonk(int(fns[f].ret))
     if dewy: s += ":>" + ide_type_str(r)
     else if r != 0 and tkind(r) != .void_: s += " -> " + ide_type_str(r)
+    # (the inferred `panics` effect, once the program's checks are settled)
+    if dewy and effect_panics_settled and effect_panics(f): s += " & panics"
     s
 
 # Enum.variant(fields) = value

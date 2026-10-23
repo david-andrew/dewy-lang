@@ -44,7 +44,10 @@ pop[K, V] = (m: mut Map[K, V], k: K, default: V) -> V:
     m.pop(k)
 
 # Dewy's `xs.insert(value index)` names the value first.
-__dewy_insert[T] = (xs: mut T[], value: T, index: int): xs.insert(index, value)
+# (a position past either end is the caller's to rule out: `panics` counts it)
+__dewy_insert[T] = (xs: mut T[], value: T, index: int):
+    if index < 0 or index > xs.len(): panic("insert index {index} out of bounds (length {xs.len()})")
+    xs.insert(index, value)
 
 # Dewy's xs.index_of(x): the first position holding x, or Missing
 __dewy_index_of[T] = (xs: T[], x: T) -> int | Missing:

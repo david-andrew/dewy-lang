@@ -19,6 +19,7 @@ use 'copies.jo'
 use 'directives.jo'
 use 'concurrency.jo'
 use 'arena.jo'
+use 'lower.jo'
 
 enum EffectKind: read, write, alloc, detach, costly_copy, panic, io, block, spawn, escape, opaque, remainder
 struct EffectAtom:
@@ -123,6 +124,7 @@ effect_blocks_demanded = false
 effect_bounds_proven: {int: bool} = {}
 
 effects_reset = ():
+    effect_panics_reset()
     concurrency_calls = []
     concurrency_tasks = []
     concurrency_runtime_needed = false
@@ -361,8 +363,10 @@ effect_allows = (contract: int, atom: EffectAtom) -> bool:
     if atom.kind == .remainder: return effect_rows_fit(atom.row, contract)
     row = effect_contracts[contract]
     loop exclusion in row.exclusions:
-        # Waiting is classified separately from residual implementation costs.
+        # Waiting is classified separately from residual implementation costs,
+        # and so is panicking (effect_panics, after facts: dir_panics_finalize).
         if atom.kind == .opaque and exclusion.kind == .block: continue
+        if exclusion.kind == .panic and (atom.kind == .opaque or atom.kind == .panic): continue
         if effect_overlap(exclusion, atom): return false
     if row.open: return true
     loop permission in row.atoms:
@@ -1682,6 +1686,281 @@ effects_demand_late = (f: int) -> bool:
     if effect_limit != 0:
         loop effect_seen.len() < nodes.len(): effect_seen.push(0)
     effects_demand(f)
+
+# ---------------- panics ----------------
+# `panics` (docs/design/decisions.md, 2026-10-23): a function may fail a runtime
+# check or otherwise panic. Its sources: an obligation its scope deferred to a
+# runtime check (the facts pass names the owner: effect_panic_note), an
+# explicit panic, assert, `$runtime_assert` or unreachable, and every callee,
+# transitively (a handle or closure it makes is a callee: it may be invoked).
+# The library's implicit checks are its invariants: what a caller must provide
+# is a contract (a refined parameter the caller proves) or an explicit panic,
+# which counts. Allocation failure is environmental, outside no traps, and so is
+# the runtime (lib/core/rt.jo). Demanded only when some scope is no-traps or a
+# row excludes panics: each reached body is walked once and the call graph
+# solved by Tarjan's algorithm, O(nodes of the reached bodies + call edges).
+effect_panics_demanded = false
+effect_panics_settled = false         # deferred obligations are known: answers are final
+effect_panic_nodes: {int: int} = {}   # function -> a deferred obligation's node
+effect_panic_texts: {int: str} = {}   # and what it requires
+panic_index: int[]                    # Tarjan order (0: not visited)
+panic_low: int[]
+panic_answer: int[]                   # 0 open, 1 cannot panic, 2 may panic
+panic_witness: int[]                  # a source node, or the edge's node
+panic_via: int[]                      # the callee that edge reaches (0: a source)
+panic_edge_at: int[]                  # its edges in panic_edges: [at..end)
+panic_edge_end: int[]
+panic_edges: int[]                    # pairs (callee, node)
+panic_stack: int[]
+panic_serial = 0
+panic_lib = false                     # the body being walked is the library's
+panic_name_format = 0
+panic_name_to = 0
+
+effect_panics_reset = ():
+    effect_panics_demanded = false
+    effect_panics_settled = false
+    effect_panic_nodes = {}
+    effect_panic_texts = {}
+    panic_index = []
+    panic_low = []
+    panic_answer = []
+    panic_witness = []
+    panic_via = []
+    panic_edge_at = []
+    panic_edge_end = []
+    panic_edges = []
+    panic_stack = []
+    panic_serial = 0
+
+# A deferred obligation (`$runtime_checks`, `$prototype`, or the default while
+# it is still runtime checks) at n in f's body.
+effect_panic_note = (f: int, n: int, what: str):
+    if f <= 0 or effect_panic_nodes.has(f): return
+    effect_panic_nodes[f] = n
+    effect_panic_texts[f] = what
+
+panic_grow = ():
+    m = fns.len()
+    if panic_index.len() >= m: return
+    extra = m - panic_index.len()
+    panic_index += fill(0, extra)
+    panic_low += fill(0, extra)
+    panic_answer += fill(0, extra)
+    panic_witness += fill(0, extra)
+    panic_via += fill(0, extra)
+    panic_edge_at += fill(0, extra)
+    panic_edge_end += fill(0, extra)
+
+# Panics the compiler adds that cannot run: the fallback of an exhaustive
+# match, and a counter wrapping after 2^63 steps.
+panic_synthesized = (n: int) -> bool:
+    if nkids(n) == 0 or nodes[kid(n, 0)].kind != .str_lit: return false
+    text = name_of(int(nodes[kid(n, 0)].sval))
+    text == "no match arm matched" or text == "range exhausted its integer type"
+
+# `format(x "spec")` with a literal specification the library accepts for x
+# (lib/core/fmt.jo, __format_checked) cannot fail: a bad specification is its
+# only failure. Checked here once per call, as its own grammar.
+panic_format_literal = (n: int) -> bool:
+    if nkids(n) != 2: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if panic_name_format == 0:
+        panic_name_format = intern("format")
+        panic_name_to = intern("to")
+    if d == 0 or int(nodes[d].name) != panic_name_format or files[pos_file(nodes[d].pos)].path != lib_dir + "/core/fmt.jo": return false
+    e = kid(n, 1)
+    if nodes[e].kind != .str_lit or nkids(e) != 0 or nodes[e].sval <= 0: return false
+    t = representation_type(ntype(kid(n, 0)))
+    text = t == T_STR
+    kinds = if text: "s" else if tkind(t) == .float_: "feEgG%" else if is_int(t) or t == T_MATH_INT: "dxXbofeEgG%" else: ""
+    if kinds == "": return false
+    spec = name_of(int(nodes[e].sval))
+    i = 0
+    m = len(spec)
+    if m >= 2 and (spec[1] == '<' or spec[1] == '>' or spec[1] == '^'): i = 2
+    else if m >= 1 and (spec[0] == '<' or spec[0] == '>' or spec[0] == '^'): i = 1
+    flags = i
+    if i < m and spec[i] == '+': i += 1
+    if i < m and spec[i] == '#': i += 1
+    alt = i > flags and spec[i - 1] == '#'
+    plus = i > flags and spec[flags] == '+'
+    first = i
+    loop i < m and is_digit(spec[i]): i += 1
+    zero = i > first and spec[first] == '0'
+    if i - first > 18: return false
+    group = 0
+    if i < m and (spec[i] == ',' or spec[i] == '_'):
+        group = int(spec[i])
+        i += 1
+    precision = false
+    if i < m and spec[i] == '.':
+        i += 1
+        first = i
+        loop i < m and is_digit(spec[i]): i += 1
+        if i == first or i - first > 18: return false
+        precision = true
+    kind = 0
+    if i < m:
+        if find_byte(kinds, spec[i]) < 0: return false
+        kind = int(spec[i])
+        i += 1
+    if i != m: return false
+    integer_base = kind != 0 and find_byte("xXbo", u8(kind)) >= 0
+    if alt and not integer_base or group != 0 and integer_base: return false
+    if not text and precision and kind != 0 and find_byte("dxXbo", u8(kind)) >= 0: return false
+    not text or not (precision or plus or alt or zero or group != 0)
+
+# `x.to(device)` with a literal device this build places on ('best' or 'cpu':
+# lib/std/nd.jo) cannot fail, a literal-typed binding included.
+panic_device_literal = (n: int) -> bool:
+    if nkids(n) != 2 or panic_name_to == 0: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0 or int(nodes[d].name) != panic_name_to or files[pos_file(nodes[d].pos)].path != lib_dir + "/std/nd.jo": return false
+    e = kid(n, 1)
+    loop nodes[e].kind == .conv: e = int(nodes[e].a)
+    # (a binding written once, by its declaration: its initial value)
+    if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)):
+        l = int(nodes[e].sym)
+        if int(locals[l].flags) & (LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_PARAM) != 0: return false
+        loop q in effect_write_sites(l):
+            if nodes[q].kind == .vardecl and nodes[q].sym == i32(l) and nodes[q].b != 0: e = int(nodes[q].b)
+        loop nodes[e].kind == .conv: e = int(nodes[e].a)
+    if nodes[e].kind == .str_lit and nkids(e) == 0 and nodes[e].sval > 0:
+        text = name_of(int(nodes[e].sval))
+        return text == "best" or text == "cpu"
+    id = str_set_of(ntype(e))
+    if id <= 0: return false
+    loop member in str_sets[id]:
+        if member != "best" and member != "cpu": return false
+    true
+
+panic_edge = (f: int, g: int, n: int):
+    if g <= 0 or g >= fns.len() or g == f: return
+    panic_edges.push(g)
+    panic_edges.push(n)
+
+panic_node = (f: int, n: int):
+    # (a library body's answer is settled by its first panic; its call sites are not checked)
+    if n == 0 or panic_lib and panic_witness[f] != 0: return
+    k = nodes[n].kind
+    if k == .intrinsic:
+        id = nodes[n].aux as IN
+        # (the library's `assert` and `unreachable` state its invariants; its
+        # `panic` is a failure a caller can cause. In a program, `assert` is a
+        # check the compiler made, as unpacking's: an obligation for facts)
+        explicit = id == .panic or id == .runtime_assert or id == .unreachable and not panic_lib
+        if explicit and panic_witness[f] == 0 and not panic_synthesized(n): panic_witness[f] = n
+    else if k == .call and nodes[n].aux == 0 or k == .fnref or k == .lambda or k == .pair or k == .partial and nodes[n].aux == 0:
+        # (a call whose precondition is the caller's obligation, as a string
+        # index or a divisor: proven, an error, or a check of the caller's own)
+        if nodes[n].sym > 0 and not (k == .call and (fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_floor_call(n) != 0 or fact_divisors.has(n) or panic_format_literal(n) or panic_device_literal(n))): panic_edge(f, int(nodes[n].sym), n)
+    loop g in value_helper_calls(n): panic_edge(f, g, n)
+    if k == .parallel_region:
+        panic_node(f, int(nodes[n].a))
+        return
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: panic_node(f, int(nodes[n].a))
+    if mask & 2 != 0: panic_node(f, int(nodes[n].b))
+    if mask & 4 != 0: panic_node(f, int(nodes[n].c))
+    if mask & 16 != 0:
+        loop c in kids(n): panic_node(f, c)
+
+panic_scan = (f: int):
+    panic_edge_at[f] = panic_edges.len()
+    panic_edge_end[f] = panic_edges.len()
+    d = int(fns[f].decl)
+    if let n = effect_panic_nodes.get(f): panic_witness[f] = n
+    if fns[f].state != 2 or fns[f].body == 0 or d != 0 and has_flag(d, NF_EXTERN): return
+    if d != 0 and modules[int(fns[f].mod)].is_prelude and files[pos_file(nodes[d].pos)].path == lib_dir + "/core/rt.jo": return
+    panic_lib = fn_in_lib(f)
+    panic_node(f, int(fns[f].body))
+    panic_edge_end[f] = panic_edges.len()
+
+panic_visit = (f: int):
+    panic_serial += 1
+    panic_index[f] = panic_serial
+    panic_low[f] = panic_serial
+    panic_stack.push(f)
+    panic_scan(f)
+    loop i in [0..(panic_edge_end[f] - panic_edge_at[f]) / 2):
+        e = panic_edge_at[f] + 2 * i
+        g = panic_edges[e]
+        if panic_index[g] == 0:
+            panic_visit(g)
+            if panic_answer[g] == 0: panic_low[f] = min(panic_low[f], panic_low[g])
+        else if panic_answer[g] == 0: panic_low[f] = min(panic_low[f], panic_index[g])
+        if panic_answer[g] == 2 and panic_witness[f] == 0:
+            panic_witness[f] = panic_edges[e + 1]
+            panic_via[f] = g
+    if panic_low[f] != panic_index[f]: return
+    # (a component: its members reach one another, so one may panic if any does)
+    start = panic_stack.len() - 1
+    loop panic_stack[start] != f: start -= 1
+    any = false
+    loop i in [start..panic_stack.len()):
+        if panic_witness[panic_stack[i]] != 0: any = true
+    loop i in [start..panic_stack.len()):
+        g = panic_stack[i]
+        if any and panic_witness[g] == 0:
+            loop j in [0..(panic_edge_end[g] - panic_edge_at[g]) / 2):
+                e = panic_edge_at[g] + 2 * j
+                h = panic_edges[e]
+                if panic_answer[h] == 0 and panic_index[h] >= panic_index[f] and panic_witness[g] == 0:
+                    panic_witness[g] = panic_edges[e + 1]
+                    panic_via[g] = h
+        panic_answer[g] = if any: 2 else: 1
+    loop panic_stack.len() > start: panic_stack.pop()
+
+# Whether f may panic (its witness: panic_witness/panic_via). Answers settle
+# once facts have run; a body checked later is walked on its first question.
+effect_panics = (f: int) -> bool:
+    if f <= 0 or f >= fns.len(): return false
+    panic_grow()
+    if panic_index[f] == 0: panic_visit(f)
+    panic_answer[f] == 2
+
+# A function's name as a program writes it (`xs.insert` reaches `__dewy_insert`).
+effect_shown_name = (f: int) -> str:
+    name = effect_name(f)
+    if starts_with(name, "__dewy_"): return name[7..]
+    name
+
+# Why f may panic, following its witnesses: `first -> the library: first of an
+# empty array (lib/core/array.jo:5:20)`.
+effect_panic_reason = (f: int) -> str:
+    chain = effect_shown_name(f)
+    g = f
+    seen = [f]
+    loop depth in [0..8):
+        h = panic_via[g]
+        if h == 0: break
+        if seen.contains(h):
+            chain += " (recursive)"
+            break
+        seen.push(h)
+        hd = int(fns[h].decl)
+        # (the library's own helpers are its business)
+        if hd == 0 or not pos_in_lib(nodes[hd].pos) or not starts_with(effect_name(h), "__"): chain += " -> {effect_name(h)}"
+        g = h
+    n = panic_witness[g]
+    if n == 0: return chain
+    what = ""
+    if let text = effect_panic_texts.get(g):
+        if panic_witness[g] == effect_panic_nodes[g]: what = "runtime check: {dir_text(text)}"
+    if what == "" and nodes[n].kind == .intrinsic:
+        id = nodes[n].aux as IN
+        what = if id == .runtime_assert: "`$runtime_assert`" else if id == .unreachable: "unreachable" else if id == .assert: "assert" else: "panic"
+        if nkids(n) > 0 and nodes[kid(n, 0)].kind == .str_lit and nodes[kid(n, 0)].sval > 0 and nkids(kid(n, 0)) == 0: what += " \"{name_of(int(nodes[kid(n, 0)].sval))}\""
+    if what == "": return chain
+    at = pos_str(nodes[n].pos)
+    if starts_with(at, lib_root): at = "lib" + at[len(lib_root)..]
+    "{chain}: {what} at {at}"
+
+dir_text = (what: str) -> str:
+    if starts_with(what, "cannot prove "): return what[13..]
+    what
 
 # Scoped bytes share place normalization and transitive call footprints with
 # effects. This walk is demanded only for functions containing byte operations.

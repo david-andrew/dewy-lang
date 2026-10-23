@@ -149,7 +149,10 @@ dw_dir_define = (name: str, tag: int, block: int):
             if value == 0 or bundle.row != 0: fatal(dewy_syntax[member].pos, "`$default_row` takes one effect row, as written after `&` on a function: `$default_row = no allocates`")
             entries: EffectSyntax[]
             empty = false
+            # (a bundle's row demands what it excludes only where it is applied: dir_apply_rows)
+            saved_demand = effect_panics_demanded
             dw_dir_row(value, entries, empty)
+            effect_panics_demanded = saved_demand
             effect_syntax.push(entries)
             bundle.row = effect_syntax.len() - 1
             continue

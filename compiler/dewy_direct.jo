@@ -736,13 +736,14 @@ const DC_READS = 11
 const DC_MUTATES = 12
 const DC_ALLOCATES = 13
 const DC_BLOCKS = 14
+const DC_PANICS = 15
 dc_classes: u8[]
 
 dc_word = (id: int) -> int:
     if id < dc_classes.len() and dc_classes[id] != 0: return int(dc_classes[id]) - 1
     if dc_classes.len() < names.len(): dc_classes.resize(names.len() + 256)
     name = name_of(id)
-    words = ["set", "b", "main", "_", "array", "ptr", "dict", "totaldict", "addr", "no_effects", "reads", "mutates", "allocates", "blocks"]
+    words = ["set", "b", "main", "_", "array", "ptr", "dict", "totaldict", "addr", "no_effects", "reads", "mutates", "allocates", "blocks", "panics"]
     c = 0
     loop k in [0..words.len()):
         if name == words[k]: c = k + 1
@@ -754,7 +755,7 @@ dc_type_spelled = (id: int) -> int:
     if dc_type_spelling.len() < names.len(): dc_type_spelling.resize(names.len() + 64)
     name = name_of(id)
     spelled = -1
-    if not (name in ["type", "uint", "no_effects", "allocates", "blocks", "reads", "mutates", "no"]):
+    if not (name in ["type", "uint", "no_effects", "allocates", "blocks", "panics", "reads", "mutates", "no"]):
         mapped = dw_type_name(name)
         spelled = if mapped == name: id else: intern(mapped)
     if id < dc_type_spelling.len(): dc_type_spelling[id] = i32(spelled)
@@ -1138,6 +1139,10 @@ dc_effect_row = (owner: int) -> bool:
             if not negative: return false
             entries.push(EffectSyntax(.block, [], pos, true))
             effect_blocks_demanded = true
+        else if word == DC_PANICS:
+            if not negative: return false
+            entries.push(EffectSyntax(.panic, [], pos, true))
+            effect_panics_demanded = true
         else: entries.push(EffectSyntax(.opaque, [id], pos, negative, true))
     effects_active = true
     effect_syntax.push(entries)

@@ -5,12 +5,12 @@
 # The strict lane: no hidden allocation, detach or costly copy, and no runtime
 # checks. Every obligation is proven or handled as a value, implicit costly
 # copies are errors, and a function without an effect row of its own gets
-# `no allocates` (a detach allocates).
+# `no allocates & no panics` (a detach allocates; nothing it calls may panic).
 $no_hidden_costs = {
     $explicit_copies
     $runtime_checks=false
     $prototype=false
-    $default_row = no allocates
+    $default_row = no allocates & no panics
 }
 
 # Floats that are always finite: no operation in the scope may produce a NaN

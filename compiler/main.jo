@@ -428,9 +428,13 @@ compile = (path: str, out0: str) -> str:
     arena_finalize()
     partition_finalize()
     ic_switch(IC_FACTS, IC_SHARED)
+    # (a row excluding panics needs the program's deferred obligations named)
+    if effect_panics_demanded: dir_force()
     facts_finalize()
     directives_after_facts()
     floats_after_facts()
+    ic_switch(IC_EFFECTS, IC_SHARED)
+    dir_panics_finalize()
     ic_switch(IC_OWNERSHIP, IC_SHARED)
     copies_reset()
     if ownership_decls.len() != 0:

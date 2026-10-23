@@ -1055,7 +1055,10 @@ refresh_lowered = (d: int):
         docs[d].lowered = false
         return
     r.texts = ide_texts
-    if r.diags.len() == 0 and docs[d].res.diags.len() == 0: return
+    if r.diags.len() == 0 and docs[d].res.diags.len() == 0:
+        # (nothing new to say, but hovers learn what only lowering settles: `& panics`)
+        if r.refs.len() == docs[d].res.refs.len(): docs[d].res = r
+        return
     docs[d].res = r
     publish(d)
 

@@ -1,0 +1,11 @@
+# Dewy's prelude: an array's first and last elements. Every Dewy module sees
+# `first` and `last` unless it declares its own (which replaces the whole
+# family). An empty array has neither, so the caller proves `xs.length >? 0`
+# (or asks `xs.get(0)`): the call itself cannot fail.
+first = (<T>(xs:array<T length >? 0>):>T=>xs[0])
+    # (the first n elements, all of them when there are fewer)
+    & (<T>(xs:array<T> n:int64):>array<T>=>xs[..clamp(n 0 xs.length)))
+
+last = (<T>(xs:array<T length >? 0>):>T=>xs[xs.length-1])
+    # (the last n elements, all of them when there are fewer)
+    & (<T>(xs:array<T> n:int64):>array<T>=>xs[xs.length-clamp(n 0 xs.length)..])

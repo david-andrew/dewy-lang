@@ -986,6 +986,12 @@ dw_effect_atom = (id0: int, entries: mut EffectSyntax[], empty: mut bool, negate
         entries.push(EffectSyntax(.block, [], dewy_syntax[id].pos, true))
         effect_blocks_demanded = true
         return
+    # (`panics` too: decisions.md, 2026-10-23)
+    if dw_name(id) == "panics":
+        if not negative: fatal(dewy_syntax[id].pos, "`panics` is inferred, never granted: a row can only exclude it, `& no panics`")
+        entries.push(EffectSyntax(.panic, [], dewy_syntax[id].pos, true))
+        effect_panics_demanded = true
+        return
     if dw_name(id) != "":
         entries.push(EffectSyntax(.opaque, [intern(dw_name(id))], dewy_syntax[id].pos, negative, true))
         return
@@ -1001,7 +1007,7 @@ dw_effect_atom = (id0: int, entries: mut EffectSyntax[], empty: mut bool, negate
 dw_effect_syntax = (id0: int) -> bool:
     id = dw_unwrap(id0)
     name = dw_name(id)
-    name == "no_effects" or name == "allocates" or name == "blocks" or dw_op(id) == .kw_not or dw_op(id) == .type_apply and (dw_name(dw_child(id, 1)) == "reads" or dw_name(dw_child(id, 1)) == "mutates")
+    name == "no_effects" or name == "allocates" or name == "blocks" or name == "panics" or dw_op(id) == .kw_not or dw_op(id) == .type_apply and (dw_name(dw_child(id, 1)) == "reads" or dw_name(dw_child(id, 1)) == "mutates")
 
 dw_effect_result = (id: int, entries: mut EffectSyntax[], empty: mut bool) -> int:
     # (`:>int64|Oops & no_effects`: `&` binds the row to the last alternative only)
@@ -1169,7 +1175,7 @@ dw_type = (id: int) -> int:
     pos = dewy_syntax[id].pos
     if dewy_syntax[id].kind == .metatag: return dw_metatag_fail(id)
     name = dw_name(id)
-    if name == "no_effects" or name == "allocates" or name == "blocks" or dw_op(id) == .kw_not or dw_op(id) == .type_apply and (dw_name(dw_child(id, 1)) == "reads" or dw_name(dw_child(id, 1)) == "mutates"):
+    if name == "no_effects" or name == "allocates" or name == "blocks" or name == "panics" or dw_op(id) == .kw_not or dw_op(id) == .type_apply and (dw_name(dw_child(id, 1)) == "reads" or dw_name(dw_child(id, 1)) == "mutates"):
         entries: EffectSyntax[]
         empty = false
         dw_effect_atom(id, entries, empty)

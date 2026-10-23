@@ -11,6 +11,8 @@ use 'effects.jo'
 use 'proofs.jo'
 use 'ide.jo'
 use 'check.jo'
+use 'expr.jo'
+use 'witness.jo'
 
 struct DirScope:
     start: int
@@ -45,6 +47,7 @@ dir_scopes: DirScope[]
 dir_bundles: DirBundle[]
 dir_sites: DirSite[]
 dir_proven: {int: bool}        # index node -> proven at every visit
+dir_panic_sites: DirSite[]     # calls of code that may panic, where checks are allowed
 dir_row_scopes: {int: int}     # function declaration -> the scope giving its row
 dir_obligations = false        # `check --obligations`
 dir_forced = false             # this module turned the static analysis on
@@ -68,6 +71,7 @@ directives_reset = ():
     dir_sites = []
     dir_proven = {}
     dir_row_scopes = {}
+    dir_panic_sites = []
     dir_forced = false
     dir_prior_static = false
     dir_copies_any = false
@@ -214,6 +218,9 @@ dir_defer = (n: int, what: str, deferrable: bool) -> bool:
     if policy == DIR_STATIC: return false
     err_notes = []
     dir_sites.push(DirSite(p, what, policy))
+    owner = fact_retry_owner
+    if fact_owner > 0: owner = fact_owner
+    effect_panic_note(owner, n, what)
     if policy == DIR_PROTOTYPE and dir_value(dir_name_warnings, p) != 0: warn(p, "prototype: {what}; it is checked at run time")
     if ide_on and policy == DIR_RUNTIME:
         hint = "runtime check: " + dir_obligation_text(what)
@@ -244,6 +251,7 @@ dir_policy_name = (policy: int) -> str:
 # `check --obligations`: each unproven obligation that compiles to a runtime
 # check, in source order, with the setting that made it one.
 dir_print_obligations = ():
+    dir_sites += dir_panic_sites
     order: int[]
     loop i in [0..dir_sites.len()):
         if pos_in_lib(dir_sites[i].at): continue
@@ -261,7 +269,96 @@ dir_print_obligations = ():
             j -= 1
     loop i in order:
         s = dir_sites[i]
-        print("{pos_str(s.at)}: runtime check: {dir_obligation_text(s.what)} ({dir_policy_name(s.policy)})")
+        kind = if starts_with(s.what, "may panic: "): "" else: "runtime check: "
+        print("{pos_str(s.at)}: {kind}{dir_obligation_text(s.what)} ({dir_policy_name(s.policy)})")
+
+# ---------------- panics ----------------
+# After facts settle which obligations became runtime checks: a no-traps scope
+# may not call (or hand out a handle to) code that may panic, and a row that
+# excludes panics holds. Only the program's own bodies are walked for sites;
+# effect_panics walks a callee once. O(reached nodes + call edges).
+dir_panics_demanded = () -> bool: effect_panics_demanded or fact_policy == .RequireStatic
+
+dir_panics_finalize = ():
+    dir_panic_sites = []
+    if not dir_panics_demanded(): return
+    effect_panics_settled = true
+    loop f in [1..fns.len()):
+        if fns[f].body == 0 or fns[f].state != 2 or fn_in_lib(f): continue
+        effect_panics(f)
+        loop i in [0..(panic_edge_end[f] - panic_edge_at[f]) / 2):
+            e = panic_edge_at[f] + 2 * i
+            g = panic_edges[e]
+            n = panic_edges[e + 1]
+            # (a closure written here: its own body answers for its calls)
+            if nodes[n].kind == .lambda or panic_answer[g] != 2: continue
+            p = nodes[n].pos
+            # (code the compiler made, as the test runner: no source scope)
+            if p <= 0: continue
+            policy = dir_policy(p)
+            if policy != DIR_STATIC:
+                # (listed where the program calls the library: its own panics are its sites)
+                if (dir_obligations or ide_on and policy == DIR_RUNTIME) and fn_in_lib(g) and not pos_in_lib(p):
+                    what = "may panic: {dir_panic_call(n, g)}"
+                    dir_panic_sites.push(DirSite(p, what, policy))
+                    if ide_on and policy == DIR_RUNTIME: ide_emit("I\t{ide_pos_str(p)}\t{ide_esc(what)}")
+                continue
+            # (the deepest such call: a callee of the program's own that panics only
+            # through a call its own no-traps scope forbids is reported there)
+            loop depth in [0..64):
+                h = panic_via[g]
+                w = panic_witness[g]
+                if h == 0 or fn_in_lib(g) or nodes[w].kind == .lambda or dir_policy(nodes[w].pos) != DIR_STATIC: break
+                n = w
+                g = h
+            p = nodes[n].pos
+            # (the measuring harness builds anyway: it reports the analysis's cost)
+            if wit_measure: continue
+            fatal(p, "{dir_panic_call(n, g)} may panic ({effect_panic_reason(g)}), and this scope has no runtime checks (no traps): {dir_panic_fix(p)}")
+    loop f in [1..fns.len()):
+        d = int(fns[f].decl)
+        if d == 0 or nodes[d].sval == 0 or fns[f].state != 2 or fns[f].body == 0: continue
+        contract = if fns[f].kind == FK_LAMBDA and not has_flag(d, NF_GENERIC): callable_contract(int(fns[f].fntype)) else: effect_subst(int(decl_infos[decl_info(d)].sig.contract), fns[f].targs)
+        if contract == 0 or not effect_contracts[contract].exclusions.contains(EffectAtom(.panic)): continue
+        if not effect_panics(f) or wit_measure: continue
+        n = panic_witness[f]
+        at = if n != 0 and not pos_in_lib(nodes[n].pos): nodes[n].pos else: nodes[d].pos
+        fatal(at, "effect contract violation in '{effect_name(f)}': it may panic, and its row excludes panics; {effect_panic_reason(f)}{dir_row_origin(d)}")
+    # (a callable bound that excludes panics: each reaching source)
+    loop obligation in effect_obligations:
+        bound = obligation.bound
+        if bound == 0 or not effect_contracts[bound].exclusions.contains(EffectAtom(.panic)): continue
+        dir_panic_source(obligation.source, 0)
+
+dir_panic_source = (n: int, depth: int):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .conv:
+        dir_panic_source(int(nodes[n].a), depth + 1)
+        return
+    c = callable_contract(ntype(n))
+    if c != 0 and effect_contracts[c].exclusions.contains(EffectAtom(.panic)): return
+    if (k == .fnref or k == .lambda or k == .partial and nodes[n].aux == 0) and nodes[n].sym > 0:
+        g = int(nodes[n].sym)
+        if not effect_panics(g): return
+        fatal(nodes[n].pos, "cannot prove callable effect contract: '{effect_name(g)}' may panic, and the row excludes panics; {effect_panic_reason(g)}")
+    fatal(nodes[n].pos, "cannot prove callable effect contract: this function value may panic, and the row excludes panics (declare `& no panics` where it comes from)")
+
+dir_panic_call = (n: int, g: int) -> str:
+    k = nodes[n].kind
+    if k == .fnref or k == .partial: return "a handle to `{effect_shown_name(g)}`, which may be called,"
+    name = effect_shown_name(g)
+    if name == "[]": return "indexing with `[]`"
+    "calling `{name}`"
+
+# The repairs: prove what the callee checks (a guard, a refined parameter, or
+# a value-returning form such as `xs.get(i)`), or opt in to runtime checks.
+dir_panic_fix = (p: int) -> str:
+    i = dir_find(dir_name_runtime, p)
+    if i >= 0 and dir_scopes[i].bundle != 0:
+        b = name_of(dir_scopes[i].bundle)
+        return "prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt this function out of `${b}` with `${b}=false` and add `$runtime_checks`"
+    "prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in to the check with `$runtime_checks` on a line of its own in this function or block"
 
 # `$explicit_copies`, written for the module, a function or a block.
 dir_explicit_copies = (p: int) -> bool:
@@ -280,6 +377,8 @@ dir_apply_rows = (first: int):
         nodes[f].sval = i32(dir_scopes[i].value)
         dir_row_scopes[f] = i
         effects_active = true
+        loop entry in effect_syntax[dir_scopes[i].value]:
+            if entry.kind == .panic: effect_panics_demanded = true
 
 # Where a function's row came from, for an effect diagnostic.
 dir_row_origin = (d: int) -> str:

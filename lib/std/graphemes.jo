@@ -12,7 +12,7 @@ struct __GraphemeCursor:
 __grapheme_word = (table: u8[], offset: int) -> int:
     # Current native and web targets are little-endian and support unaligned
     # loads. Check the whole word once before reading packed table records.
-    if offset < 0 or offset > table.len() - 4: panic("grapheme table word out of bounds")
+    assert(offset >= 0 and offset <= table.len() - 4, "grapheme table word out of bounds")
     int(((data(table) + offset) as *u32)[0])
 
 # Sorted nine-byte records: little-endian start, end, property.
@@ -141,7 +141,7 @@ graphemes = (s: str) -> str[]:
     loop c.offset < len(s):
         start = c.offset
         next_byte = __grapheme_next(s, c)
-        if next_byte < 0: panic("invalid UTF-8 in grapheme operation")
+        assert(next_byte >= 0, "invalid UTF-8 in grapheme operation")
         out.push(s[start..next_byte))
     out
 
@@ -218,7 +218,7 @@ __dewy_string_length = (s: str) -> int:
         c.offset = last
         count -= 1
     loop c.offset < n:
-        if __grapheme_next(s, c) < 0: panic("invalid UTF-8 in grapheme operation")
+        assert(__grapheme_next(s, c) >= 0, "invalid UTF-8 in grapheme operation")
         count += 1
     count
 
@@ -245,7 +245,7 @@ __dewy_string_index = (s: str, index: int) -> str:
     loop c.offset < len(s):
         start = c.offset
         next_byte = __grapheme_next(s, c)
-        if next_byte < 0: panic("invalid UTF-8 in grapheme operation")
+        assert(next_byte >= 0, "invalid UTF-8 in grapheme operation")
         if at == index: return s[start..next_byte)
         at += 1
     panic("string index out of bounds")
@@ -264,7 +264,7 @@ __dewy_string_slice = (s: str, lo: int, hi: int, inclusive: bool, has_stop: bool
             if start_byte < 0: panic("string slice out of bounds")
             return s[start_byte..c.offset)
         if c.offset == len(s): break
-        if __grapheme_next(s, c) < 0: panic("invalid UTF-8 in grapheme operation")
+        assert(__grapheme_next(s, c) >= 0, "invalid UTF-8 in grapheme operation")
         at += 1
     if has_stop or start_byte < 0: panic("string slice out of bounds")
     s[start_byte..]
@@ -284,5 +284,5 @@ __dewy_grapheme_done = (it: __DewyGraphemeIter) -> bool:
 __dewy_grapheme_value = (it: mut __DewyGraphemeIter) -> str:
     start = it.cursor.offset
     next_byte = __grapheme_next(it.text, it.cursor)
-    if next_byte < 0: panic("invalid UTF-8 in grapheme operation")
+    assert(next_byte >= 0, "invalid UTF-8 in grapheme operation")
     it.text[start..next_byte)

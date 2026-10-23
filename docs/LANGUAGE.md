@@ -595,6 +595,24 @@ only ever excluded: `& no blocks` rejects I/O and any operation the inventory
 cannot classify (waits, sleeps, foreign calls). In a row `no` reaches to the next
 `&`, so `& no allocates & no blocks` excludes both.
 
+`panics` is inferred the same way: a function may panic when its body keeps a
+runtime check (an unproven obligation in a `$runtime_checks`, `$prototype` or
+default scope), panics explicitly (`panic`, `$runtime_assert`), or calls or
+takes a handle to a function that may panic. A scope without runtime checks
+(`$runtime_checks=false`, and so `$no_hidden_costs`) cannot call such code: the
+error names the chain to the panic and offers both repairs, proving what the
+callee checks first or opting in with `$runtime_checks`. So a function built
+with `$runtime_checks` cannot fail inside a caller that did not opt in.
+`& no panics` forbids it outright, whatever the scope. A library function's
+precondition is the caller's obligation where the library states it: `xs.first`
+and `xs.last` take an array with `length >? 0`, and `xs.swap(i j)` and
+`xs.insert(value i)` need their positions in bounds, so a guarded call cannot
+panic. Other library failures (a missing dictionary key with `d[k]`, a bad
+format specification) still make the call panic; their value-returning forms
+(`d.get(k)`) do not. Running out of memory is not a panic. The editor's hover
+shows `& panics` on a function that may panic, and `dewy check --obligations`
+lists each library call that may panic where runtime checks are allowed.
+
 The implementation-cost inventory supports wrapping fixed-width scalar work
 (including shifts), inline scalar records and unions of them (`:>(int64 | Oops) &
 no_effects`; the parentheses are required), bare handles, capture-free lambdas,
@@ -3494,7 +3512,9 @@ an unproven one does:
 
 `dewy check --obligations file.dewy` lists every unproven obligation that
 compiles to a runtime check, one per line, with the setting responsible
-(`$runtime_checks`, `$prototype`, or `default`). The editor shows sites in
+(`$runtime_checks`, `$prototype`, or `default`), and each library call that may
+panic (``may panic: indexing with `[]` ``). Without runtime checks, calling code
+that may panic is an error too (the `panics` effect, "Functions and values"). The editor shows sites in
 `$runtime_checks` scopes as information hints.
 
 `$explicit_copies` (described with `.copy` above) is a setting like these, for
@@ -3520,9 +3540,10 @@ of its own that row (see "Functions and values").
 
 The library defines `$no_hidden_costs`, the strict lane (lib/directives.dewy):
 `$explicit_copies`, `$runtime_checks=false`, `$prototype=false` and
-`$default_row = no allocates`. Code in it has no hidden allocation (a detach
-allocates), no implicit costly copy and no runtime check, and it cannot use
-`$runtime_checks` or `$prototype`. A function that needs more opts out with
+`$default_row = no allocates & no panics`. Code in it has no hidden allocation
+(a detach allocates), no implicit costly copy, no runtime check and no call of
+code that may panic (the `panics` effect, "Functions and values"), and it
+cannot use `$runtime_checks` or `$prototype`. A function that needs more opts out with
 `$no_hidden_costs=false` in its body, or declares a row of its own. The effect
 inventory is still partial (see "Functions and values"): an operation it does
 not classify is rejected there. `$realtime` is reserved for a stronger future bundle.

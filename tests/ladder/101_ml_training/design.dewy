@@ -11,7 +11,9 @@
 # the shape in the type, dot broadcasting and `new` axes; core.dewy is the twin
 # over flat arrays and `parallel`.
 
-$runtime_checks=false
+# (tensor shape checks are not yet the caller's obligations: lib/std/nd.jo panics
+# on a bad shape, so this module opts in to runtime checks)
+$runtime_checks
 
 from p"data.dewy" import Rng, Sample, CLASSES, make_dataset, shuffled, uniform
 
