@@ -273,3 +273,60 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   conformance suite (acceptance ladder and test suite) for a stated version,
   named in the claim. Use in the name or branding of another language,
   implementation, distribution or product needs written permission.
+- Fixed-width integers (decided 2026-10-22; supersedes "`intN`/`uintN` wrap"):
+  arithmetic on `intN`/`uintN` is exact, like `int`; the width is a storage
+  property plus facts. Storing into an `intN`/`uintN` binding, field, parameter
+  or return is the proven narrowing: free when proven, a compile error with
+  fix-its (guard, overflow policy, `$runtime_checks`) when not, a runtime check
+  under `$runtime_checks`, always an error under `$no_hidden_costs`.
+  Intermediates never overflow spuriously; the compiler picks a wide enough
+  machine width (widening multiply for `int64*int64`), never a bigint. The
+  overflow policy is a keyword type parameter: `uint32<overflow='wrap'>` wraps
+  modulo 2^N (hashes, RNGs, checksums, crypto), `uint8<overflow='saturate'>`
+  clamps. Types are callable conversions: `uint8<overflow='wrap'>(x)` keeps the
+  low bits and replaces `wrap<uint8>(x)` (removed, no alias);
+  `uint8<overflow='saturate'>(x)` clamps; `transmute` stays for same-size
+  reinterpretation. `//`, `%`, negation and `abs` follow the same rule
+  (`int64.min // -1` is a narrowing obligation); plain `int` `MIN // -1`
+  promotes.
+- Safety-audit decisions (2026-10-23):
+  - `panics` effect: "may fail a runtime check" (and any other possible panic)
+    is an inferred effect visible in rows. A no-traps scope cannot call code
+    that `panics` unless it opts in with `$runtime_checks`; `& no panics`
+    forbids it outright; `$no_hidden_costs` includes `no panics`. A dependency
+    built with `$runtime_checks` cannot crash inside a caller that did not opt
+    in.
+  - Closure capture writes: writing an implicitly captured variable is a
+    compile error with two fix-its, `$capture name` (the closure's own private
+    state) or `$capture @name` (share the outer variable).
+  - A later assignment that changes a binding's initially inferred type (e.g. a
+    decimal literal adapting to float64) is a warning plus an editor squiggle,
+    not an error. For decimals the diagnostic focuses on exact equality checks
+    (`=?`, `not=?`) whose result the adaptation affects. Idiomatic code states
+    the representation; relying on implicit adaptation is unidiomatic.
+  - Offset units (amends round 5's "infer delta-ness from use"): a temperature
+    written directly as an operand next to a point is a difference
+    (`t + 20°C`). Adding two temperature values, comparing a point with a
+    difference, and scaling a point are compile errors with fix-its (for
+    averages: `mean[t1 t2]`). A named difference is marked once: `20Δ°C`. Point
+    versus difference lives in the type, so `as °F` converts each correctly (a
+    20° difference is 36°F).
+  - A splat import that shadows a prelude name warns, naming both sources; the
+    warning goes away when the name is selected explicitly or the module is
+    imported `as`. Splat imports stay.
+  - Big-int parsing limit: `to_int(s max_digits=…)`, default about 1M digits,
+    returns an error value beyond it (as Python did for CVE-2020-10735);
+    conversion in both directions is subquadratic.
+  - `secret<T>`: a zero-cost compile-time wrapper (representation is just `T`)
+    whose value cannot reach any output or formatting path (interpolation and
+    printing, error messages and payloads, runtime-check reports, `main`'s error
+    output, debugger and LSP hovers, where it shows `<redacted>`), except
+    through one explicit, visible reveal operation (spelling pending David's
+    approval). Later it can drive constant-time checks in crypto code.
+  - Runtime failures don't leak data: a missing-key panic reports only that the
+    key is missing (did-you-mean hints are compile-time only); an error reaching
+    `main` prints its type and `message` (full payloads in debug builds only).
+    Dictionaries hash with a per-process seeded keyed hash and iterate in
+    insertion order. `min`/`max` follow IEEE 754-2019 minimum/maximum (NaN
+    propagates); float sorting uses totalOrder; float dictionary keys carry a
+    not-NaN obligation. `main`'s `exit_code` is constrained to 1–100.
