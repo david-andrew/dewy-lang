@@ -120,3 +120,33 @@ def test_byte_ranges_compare_in_place(compiler, tmp_path, flags):
     code = disassembly(binary, 'same')
     if code is not None and '<same>:' in code:
         assert '__arr_slice' not in code and '__h_eq' not in code, code
+
+
+POINTER = '''
+total=(p:ptr<uint8> n:int64):>int64=>{
+    $unsafe
+    let s:int64=0
+    loop i in [0..n) {s+=int64(p[i])}
+    s
+}
+first_words=(a:array<uint8>):>int64=>{
+    $unsafe
+    let p=a.ptr
+    total(p a.length) + int64((p as ptr<uint16>)[0])
+}
+main=():>void=>{
+    let a:array<uint8>=[1 2 3 4]
+    let b=a
+    printl"{first_words(a)} {first_words(b)}"
+}
+'''
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('flags', [[], ['--release']])
+def test_pointer_only_read_through_copies_nothing(compiler, tmp_path, flags):
+    binary = build(compiler, tmp_path, POINTER, flags)
+    assert run(binary).split() == ['523', '523']
+    code = disassembly(binary, 'first_words')
+    if code is not None and '<first_words>:' in code:
+        assert 'arruniq' not in code and '__rc_inc' not in code, code
