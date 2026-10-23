@@ -469,6 +469,7 @@ fact_compact = (s: mut FactState):
         work.push(b.prior)
     loop c in s.conditional:
         work.push(c.result)
+        if c.payload != 0: work.push(c.payload)
         work += c.values
     work += refine_entry
     loop loan in fact_loans: work.push(loan.capacity)
@@ -541,6 +542,7 @@ fact_collect = (s: mut FactState, boundary: int, result: int):
         work.push(b.prior)
     loop c in s.conditional:
         work.push(c.result)
+        if c.payload != 0: work.push(c.payload)
         work += c.values
     work += refine_entry
     loop loan in fact_loans: work.push(loan.capacity)
@@ -771,7 +773,7 @@ fact_store_route = (s: mut FactState, route: FactRoute, value0: int, at: int, bo
     values = fact_route_values(s, route)
     if bounds and fact_speculating == 0 and fact_probe_on: fact_probe_route(s, route, values)
     else if bounds and fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query): fact_route_bounds(s, route, values)
-    if result_active and values.len() > 0: result_replaced(values[values.len() - 1], at, s)
+    if values.len() > 0 and s.conditional.len() > 0: result_replaced(values[values.len() - 1], at, s)
     value = value0
     i = route.selectors.len() - 1
     loop i >= 0:
@@ -1722,7 +1724,7 @@ fact_condition = (n: int, entry: FactState) -> FactPaths:
     entry_state = if fact_query: yes else: FactState(live = false)
     fact_assume(yes, v, true)
     fact_assume(no, v, false)
-    if result_active:
+    if yes.conditional.len() > 0:
         result_activate(yes)
         result_activate(no)
     FactPaths(yes, no, reason, v, entry_state)
@@ -1732,6 +1734,7 @@ fact_tag = (s: mut FactState, value: int, wanted: int, truth: bool):
     if value == 0 or not s.live: return
     tag = fact_project(s, value, -3, false, T_INT)
     fact_assume(s, fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, tag, fact_constant(s, wanted))), truth)
+    if truth and s.conditional.len() > 0: result_activate(s)
 
 # The tag one pattern establishes, or -1.
 fact_pattern_tag = (p: int, st: int) -> int:
@@ -2813,7 +2816,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 if ownership_decls.len() != 0 and ownership_fact_type(ntype(arg)): active.push(n)
                 if nodes[arg].kind == .conv and nodes[arg].aux == i32(int(CV.refinement)): values.push(n)
             callee = int(nodes[n].sym)
-            if nodes[n].aux == 0 and callee > 0 and types[prune(int(fns[callee].ret))].kind == .refined: values.push(n)
+            if nodes[n].aux == 0 and callee > 0 and ref_refined_result(int(fns[callee].ret)): values.push(n)
             if nodes[n].aux == 0 and callee > 0 and callee < effect_summaries.len() and effect_summaries[callee].done:
                 loop event in effect_summaries[int(nodes[n].sym)].events:
                     if event.atom.kind == .opaque or event.atom.kind == .escape: exposed_writes.push(n)
@@ -2911,7 +2914,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         if k == .block:
             if nkids(n) > 0: values.push(kid(n, nkids(n) - 1))
         else if k == .for_ or k == .while_: values.push(int(nodes[n].a))
-        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and types[prune(int(fns[int(nodes[n].sym)].ret))].kind != .refined:
+        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
             # Ordinary summaries start from unknown formals: their return
             # facts do not depend on the actual values. Argument obligations
             # and effects remain separate roots of this slice.
@@ -3170,11 +3173,13 @@ fact_capture = (n: int, s: mut FactState) -> int:
     if k == .str_lit and nodes[n].aux == 0 or k == .float_lit or k == .none_lit or k == .null_lit or k == .dotname: return 0
     if k == .str_lit:
         # Interpolation evaluates each part in order, then calls its formatter,
-        # which (like any opaque call) may write exposed roots.
+        # which (like any opaque call) may write exposed roots; a builtin
+        # number's, boolean's or string's writes nothing.
         loop part in kids(n):
             if nodes[part].kind != .pair: continue
             fact_capture(int(nodes[part].a), s)
-            fact_forget(s, part, .call)
+            pt = prune(ntype(int(nodes[part].a)))
+            if types[pt].kind != .int_ and types[pt].kind != .float_ and types[pt].kind != .bool_ and types[pt].kind != .str_: fact_forget(s, part, .call)
         return fact_new(s, FactBound(reason = .unsupported, witness = n))
     if k == .addr: return fact_capture(int(nodes[n].a), s)
     # Creating a closure evaluates nothing (defaults are the actuals of its
@@ -3563,6 +3568,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
             loop i in [0..values.len()):
                 if i < fns[f].params.len() and int(locals[fns[f].params[i]].flags) & LF_MUTPARAM != 0: values[i] = fact_capture(kid(n, i), s)
             ref_assume(int(fns[f].ret), result, values, s)
+            ref_arm_publish(f, result, values, s)
             if result_active: result_publish(f, result, values, s)
             # (reviewed prelude contracts: `parallel_range(n f)` has max(0, n)
             # results, `parallel_map(xs f)` one per element)
@@ -3747,7 +3753,7 @@ facts_finalize = ():
             state = FactState()
             fact_capture(request.node, state)
     loop request in refine_requests:
-        if not fact_validated.has(request.node):
+        if not fact_validated.has(request.node) and not fact_validated.has(ref_wrapped_check(request.node)):
             fact_terms = [FactTerm()]
             state = FactState()
             refine_entry = []

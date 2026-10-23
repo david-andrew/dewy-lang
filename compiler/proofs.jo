@@ -177,6 +177,8 @@ struct ResultEvidence:
     predicate: int
     values: int[]
     types: int[]
+    payload: int = 0   # a refined arm's value (its predicate's own binder)
+    base: int = 0      # and that arm's integer representation
 
 result_active = false
 result_syntax: {int: ResultClause[]} = {}
@@ -247,6 +249,36 @@ result_publish = (f: int, result: int, values: int[], s: mut FactState):
         s.conditional.push(ResultEvidence(selector, tag, ref_subst(clause.predicate, fns[f].targs), values, fns[f].ptypes))
     result_activate(s)
 
+# A call's result whose optional or union arm is refined (`addr<i => i <?
+# xs.length> | none`): the arm's predicate holds of its payload once a test
+# establishes that arm. O(arms) per such call; nothing for any other call.
+ref_arm_publish = (f: int, result: int, values: int[], s: mut FactState):
+    rt = prune(int(fns[f].ret))
+    k = types[rt].kind
+    if not ref_refined_arms(rt): return
+    members = if k == .opt: [int(types[rt].elem)] else: union_members(rt)
+    selector = 0
+    loop i in [0..members.len()):
+        t = prune(members[i])
+        if types[t].kind != .refined or s.conditional.len() >= 32: continue
+        if selector == 0: selector = fact_project(s, result, -3, false, T_INT)
+        tag = if k == .opt: 1 else: i
+        payload = fact_project(s, result, -4, false, t)
+        s.conditional.push(ResultEvidence(selector, tag, int(types[t].st), values, fns[f].ptypes, payload, int(types[t].elem)))
+
+ref_refined_arms = (t: int) -> bool:
+    if types[t].kind == .opt: return types[prune(int(types[t].elem))].kind == .refined
+    if not is_union(t): return false
+    loop m in union_members(t):
+        if types[prune(m)].kind == .refined: return true
+    false
+
+# (a call whose result is refined, or has a refined arm, publishes facts about
+# its arguments: fact_slice_prepare keeps them)
+ref_refined_result = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .refined or ref_refined_arms(t)
+
 result_activate = (s: mut FactState):
     loop evidence in s.conditional:
         wanted = fact_constant(s, evidence.tag)
@@ -255,11 +287,12 @@ result_activate = (s: mut FactState):
             if bound.nz and bound.lo == 0: bound.lo = 1
             if fact_compare(s, .eq, evidence.result, wanted) != 1 and not (bound.lo == evidence.tag and bound.hi == evidence.tag): continue
         loop atom in ref_predicates[evidence.predicate]:
-            base = T_INT
-            loop term in [atom.a, atom.b]:
-                if term.kind == 2: base = ref_projection_type(evidence.types[term.value], term.path, -1)
-            a = ref_value(atom.a, 0, evidence.values, base, s)
-            b = ref_value(atom.b, 0, evidence.values, base, s)
+            base = if evidence.base != 0: evidence.base else: T_INT
+            if evidence.base == 0:
+                loop term in [atom.a, atom.b]:
+                    if term.kind == 2: base = ref_projection_type(evidence.types[term.value], term.path, -1)
+            a = ref_value(atom.a, evidence.payload, evidence.values, base, s)
+            b = ref_value(atom.b, evidence.payload, evidence.values, base, s)
             v = fact_new(s, fact_domain(T_BOOL), FactTerm(atom.op, a, b))
             fact_assume(s, v, true)
 

@@ -545,6 +545,13 @@ str_set_text_of = (n: int):
     add_flag(c, NF_CHECKED)
     nodes[n] = nodes[c]
 
+# A requested check later wrapped in place (an optional's or union's arm,
+# `return i` from `:>addr<…> | none`) moved below its wrapping conversions.
+ref_wrapped_check = (n0: int) -> int:
+    n = n0
+    loop nodes[n].kind == .conv and nodes[n].aux != i32(int(CV.refinement)) and nodes[n].a != 0: n = int(nodes[n].a)
+    n
+
 refine_coerce = (n: int, target: int) -> int:
     t = prune(target)
     if types[t].bits == -1: return total_dict_coerce(n, t)
