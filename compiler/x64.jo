@@ -328,6 +328,18 @@ setcc = (cc: int):
     b(0xC0)        # movzx eax, al
 
 
+# A Boolean result can be produced directly in its assigned register. The
+# 32-bit zero-extension writes the complete 64-bit value, including high GPRs.
+setcc_reg = (cc: int, r: int):
+    rex(false, 0, 0, r, r >= 4)
+    b(0x0F)
+    b(0x90 + cc)
+    modrr(0, r)
+    rex(false, r, 0, r, r >= 4)
+    b(0x0F)
+    b(0xB6)
+    modrr(r, r)
+
 # ---------------- register allocation ----------------
 # vreg locations: >= 0 register (0-15 general, 16+n = xmm n); or one of:
 const LOC_SPILL = -1
@@ -1551,7 +1563,12 @@ int_bin = (opc_rr: int, ext: int, ins: Ins):
     a = int(ins.a)
     bb = int(ins.b)
     r = dreg(d, RAX)
-    if vloc[bb] == r and r != vloc[a]: r = RAX
+    if vloc[bb] == r and r != vloc[a]:
+        if opc_rr == 0x29: r = RAX
+        else:
+            temp = a
+            a = bb
+            bb = temp
     ld(r, a)
     alu_v(opc_rr, ext, r, bb)
     st(d, r)
@@ -2236,7 +2253,10 @@ x_emit_mul = (pos: int, ins: *Ins):
     bb = int(ins.b)
     if vloc[d] == LOC_NONE: return
     r = dreg(d, RAX)
-    if vloc[bb] == r and r != vloc[a]: r = RAX
+    if vloc[bb] == r and r != vloc[a]:
+        temp = a
+        a = bb
+        bb = temp
     l = vloc[bb]
     if l == LOC_CONST:
         c = vcval[bb]
@@ -2250,10 +2270,15 @@ x_emit_mul = (pos: int, ins: *Ins):
             lea(r, base, 0)
             cur_index = -1
         else:
-            ld(r, a)
-            rex(true, r, 0, r, false)
-            b(0x69)
-            modrr(r, r)
+            if vloc[a] == LOC_SPILL:
+                rex(true, r, 0, RBP, false)
+                b(0x69)
+                mem(r, RBP, vspill[a])
+            else:
+                src = reg_of(a, RAX)
+                rex(true, r, 0, src, false)
+                b(0x69)
+                modrr(r, src)
             b32(c)
     else:
         ld(r, a)
@@ -2388,8 +2413,9 @@ x_emit_eq = (pos: int, ins: *Ins):
     a = int(ins.a)
     bb = int(ins.b)
     cmp_ops(a, bb)
-    setcc(icc(op))
-    st(d, RAX)
+    r = dreg(d, RAX)
+    setcc_reg(icc(op), r)
+    st(d, r)
 
 x_emit_fadd = (pos: int, ins: *Ins):
     falu(0x58, ins[0])
@@ -2472,8 +2498,25 @@ x_emit_sext8 = (pos: int, ins: *Ins):
     op = ins.op
     d = int(ins.dst)
     a = int(ins.a)
-    ra = reg_of(a, RAX)
     r = dreg(d, RAX)
+    if vloc[a] == LOC_SPILL:
+        if op == .sext32: op_rm(0x63, true, r, RBP, vspill[a])
+        else if op == .zext32: op_rm(0x8B, false, r, RBP, vspill[a])
+        else:
+            byte = op == .sext8 or op == .zext8
+            signed = op == .sext8 or op == .sext16
+            rex(true, r, 0, RBP, false)
+            b(0x0F)
+            if byte:
+                if signed: b(0xBE)
+                else: b(0xB6)
+            else:
+                if signed: b(0xBF)
+                else: b(0xB7)
+            mem(r, RBP, vspill[a])
+        st(d, r)
+        return
+    ra = reg_of(a, RAX)
     if op == .sext32: op_rr(0x63, true, r, ra)      # movsxd r, ra32
     else if op == .zext32: op_rr(0x8B, false, r, ra) # mov r32, ra32
     else:
