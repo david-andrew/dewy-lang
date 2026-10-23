@@ -3158,7 +3158,7 @@ check_live_loop = (s: int):
     nodes[s] = nodes[desugar_loopx(lx)]
     check_stmt(s)
 
-# Indexed user containers use their existing len / [] operations. Retain the
+# Indexed user containers use their existing length / [] operations. Retain the
 # input value and length once, then reuse the ordinary counted-loop lowering.
 dewy_sequence_loop = (s: int) -> bool:
     it = int(nodes[s].a)
@@ -3184,7 +3184,7 @@ dewy_sequence_loop = (s: int) -> bool:
     body = lx_block([binding] + kids(int(nodes[s].b)), pos)
     range = mk(.range, pos)
     nodes[range].a = i32(bc_int(0, pos))
-    nodes[range].b = i32(bc_method(bc_ident(tag, pos), "len", [], pos))
+    nodes[range].b = i32(bc_method(bc_ident(tag, pos), sequence_length_name(t), [], pos))
     counted_loop = mk(.for_, pos)
     nodes[counted_loop].a = i32(range)
     nodes[counted_loop].b = i32(body)
@@ -3925,7 +3925,7 @@ dewy_selection_update = (s: int, matrix: bool = false) -> int:
         shape = bc_field(bc_ident(source, pos), "shape", pos)
         spec = bc_call("__nd_bound_part", [shape, part_spec(lhs)], pos)
     else if nodes[spec].kind == .range:
-        size = bc_method(bc_ident(source, pos), "len", [], pos)
+        size = bc_field(bc_ident(source, pos), "length", pos)
         spec = bc_call("__dewy_slice_range", [size] + dewy_slice_args(spec, pos), pos)
     reads.push(bc_let(selector, spec, pos))
     picked = mk(.index, pos)

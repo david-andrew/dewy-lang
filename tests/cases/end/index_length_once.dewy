@@ -1,7 +1,7 @@
 # exit: 42
 Series:type=[values:array<int64>]
 let lengths=0 let sources=0
-len=(s:Series)=>{lengths+=1 return s.values.length}
+length=(s:Series)=>{lengths+=1 return s.values.length}
 __index__=(s:Series i:int64)=>s.values[i]
 make=()=>{sources+=1 return Series[[20 22]]}
 run=()=>{let value=make()[end+end-1]

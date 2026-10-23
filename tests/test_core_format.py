@@ -111,7 +111,7 @@ printl(m[[..] [end,end-1..]].data)
     'generic-value': 'identity=<T>(x:T):>T=>x\nmain=():>void=>{let f=@identity<int64> printl(f(42))}',
     'generic-return-adjacency': 'pair=():>array<array<int64>>=>[[20 22]]\nmain=():>void=>{printl(pair()[0])}',
     'spread': 'main=():>void=>{let xs=[20 22] printl([0 xs... 1 (xs)...])}',
-    'sequence': 'Series:type=[count:int64]\nlen=(s:Series)=>s.count\n__index__=(s:Series i:int64)=>i\nmain=():>void=>{printl([loop x in Series[3] x])}',
+    'sequence': 'Series:type=[count:int64]\nlength=(s:Series)=>s.count\n__index__=(s:Series i:int64)=>i\nmain=():>void=>{printl([loop x in Series[3] x])}',
     'slice-update': 'main=():>void=>{let xs=[1 2 3 4] xs[1..2]=[20 22] printl(xs)}',
     'range-index': 'main=():>void=>{let xs=[10 20 30 40 50] printl(xs[0,2..]) xs[4,2..]=[1 2 3] printl(xs[(0..4]])}',
     'coalesce': 'read=():>int64?=>none\nmain=():>void=>{printl"{read()??20+22}"}',

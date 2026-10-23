@@ -1,6 +1,6 @@
 # exit: 42
 Series:type=[values:array<array<int64>>]
-len=(s:Series)=>s.values.length
+length=(s:Series)=>s.values.length
 __index__=(s:Series index:int64)=>s.values[index]
 run=()=>{let total=0 loop [a b] in Series[[[10 11] [9 12]]] total+=a+b return total}
 main=()=>exit(run())

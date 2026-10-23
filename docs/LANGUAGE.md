@@ -399,7 +399,7 @@ the whole overload family: with `max = (a:int64 b:int64 c:int64):>int64 => ...`
 in a module, a bare `max(1 2)` there is an error, since none of the prelude's
 `max` overloads join the module's. Members are found through their value, so
 `(2.5).max(1.0)` and `xs.hash()` still reach the prelude's. To extend an
-operation for your own type, use its protocol (`hash`, `len`, `__add__`, …) or a
+operation for your own type, use its protocol (`hash`, `length`, `__add__`, …) or a
 method; a function selected by `from m import f` can be shadowed only if `m`
 declared it `$shadowable`, otherwise import it under another name.
 
@@ -1709,7 +1709,7 @@ from an annotation, function parameter, or return type, as other record literals
 Inside an index or slice, `end` is the receiver's last index: `xs[end]`,
 `xs[end-2..end]` and `xs[end,end-2..0]`. Nested brackets use their own receiver.
 The receiver and its last index are evaluated once before the index expression;
-strings count grapheme clusters, and a custom container's `end` is its `len` minus one.
+strings count grapheme clusters, and a custom container's `end` is its `length` minus one.
 `xs[end]` compiles exactly as `xs[xs.length - 1]`, so whatever proves one proves
 the other. These forms also support array and custom
 container updates. Ordinary array updates capture indices before the right-hand
@@ -2873,13 +2873,13 @@ a snapshot of its input. Combined sources evaluate once in source order. An
 `and` header stops at the shortest input; an `or` header keeps going until all
 inputs finish, yielding `none` for exhausted inputs.
 
-Records with `len(container)` and `__index__(container index)` work as finite
-indexed sequences in loops and comprehensions. Length describes integer positions
-from zero through `len(container)-1`. For example:
+Records with a `length` function (`container.length`) and `__index__(container index)`
+work as finite indexed sequences in loops and comprehensions. Length describes
+integer positions from zero through `container.length-1`. For example:
 
 ```dewy
 Series:type=[first:int64 count:int64]
-len=(s:Series)=>s.count
+length=(s:Series)=>s.count
 __index__=(s:Series index:int64)=>s.first+index
 let values=[loop value in Series[40 3] value] # [40 41 42]
 ```

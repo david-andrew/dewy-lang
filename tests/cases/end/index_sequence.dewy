@@ -1,6 +1,6 @@
 # exit: 42
 Series:type=[values:array<int64>]
-len=(s:Series)=>s.values.length
+length=(s:Series)=>s.values.length
 __index__=(s:Series i:int64)=>s.values[i]
 __setindex__=(@s:Series i:int64 value:int64)=>{s.values[i]=value}
 run=()=>{let s=Series[[20 21]] s[end]+=1 return s[end]+s[end-1]}

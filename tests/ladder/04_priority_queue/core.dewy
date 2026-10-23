@@ -6,7 +6,7 @@ run_events=(events:array<Event>):>array<string>=>{
         pending.push(event event.time as float64)
     }
     let out:array<string>=[]
-    loop len(pending) >? 0 {
+    loop pending.length >? 0 {
         let event=pending.pop()
         out.push(event.name)
     }

@@ -2012,9 +2012,9 @@ ring[1]=["replacement"]
 if ring[0][0] not=? "changed" or ring[1][0] not=? "replacement" return 1
 if snapshot[0][0] not=? "5" or snapshot[1][0] not=? "6" return 2
 let empty=new_ring<int64>(1)
-if empty.len() not=? 0 return 3
+if empty.length not=? 0 return 3
 empty.push(1) empty.push(42)
-return if empty.len() =? 1 and empty[0] =? 42 42 else 4
+return if empty.length =? 1 and empty[0] =? 42 42 else 4
 }
 ''')
     else:

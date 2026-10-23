@@ -1,6 +1,6 @@
 # exit: 42
 Rows:type=[values:array<[x:int64 y:int64]>]
-len=(rows:Rows)=>rows.values.length
+length=(rows:Rows)=>rows.values.length
 __index__=(rows:Rows i:int64)=>rows.values[i]
 run=()=>{let result=0
 loop [x:int64 y:float64] in Rows[[[x=20 y=22]]] {if y is?float64 and x=?20 and y=?22.0 result=42}

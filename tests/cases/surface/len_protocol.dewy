@@ -1,0 +1,7 @@
+# A sequence's length is its `length` function; a `len` is not the protocol.
+Series:type=[first:int64 count:int64]
+len=(s:Series)=>s.count
+__index__=(s:Series index:int64)=>s.first+index
+main=()=>{
+    loop x in Series[13 3] printl(x)
+}

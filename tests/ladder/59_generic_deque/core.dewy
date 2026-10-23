@@ -33,7 +33,7 @@ pop_back=<T>(@q:Deque<T>):>T|none=> {
     q.count-=1
     return q.storage[(q.head+q.count)%q.storage.length]
 }
-len=<T>(q:Deque<T>):>int64=>q.count
+length=<T>(q:Deque<T>):>int64=>q.count
 __index__=<T>(q:Deque<T> i:int64):>T=> {
     $runtime_assert(q.storage.length >? 0)
     return q.storage[(q.head+i)%q.storage.length]
@@ -61,7 +61,7 @@ main=():>void=> {
             $runtime_assert(pop_back(@q) isnt? none)
         }
         $runtime_assert(q.count =? 0)
-        $runtime_assert(len(snapshot) =? 12)
+        $runtime_assert(snapshot.length =? 12)
     }
     let words=make_deque(3 "")
     $runtime_assert(push_back(@words "alpha"))

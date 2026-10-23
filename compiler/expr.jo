@@ -5119,6 +5119,32 @@ receiver_fits = (name: str, t0: int) -> bool:
             s = int(syms[s].next)
     false
 
+# (does a library function `len`, as Heap's and Pool's, take a t first: Dewy's `.length` reads
+# it. A `len` written in Dewy is not the protocol: that is a `length` function)
+library_len_fits = (t0: int) -> bool:
+    t = prune(t0)
+    nm = intern("len")
+    demand_name(nm)
+    tables = [modules[cur_mod()].names, prelude]
+    loop tm in method_modules(t):
+        if tm != cur_mod(): tables.push(modules[tm].names)
+    loop tbl in tables:
+        s = tbl.get(nm) ?? 0
+        loop s != 0:
+            if syms[s].kind == .fns and syms[s].decl != 0 and nkids(int(syms[s].decl)) > 0 and not files[pos_file(nodes[int(syms[s].decl)].pos)].is_dewy:
+                sig = fn_sig(int(syms[s].decl))
+                if sig.params.len() > 0:
+                    rb = fill(0, int(sig.ntp))
+                    if match_type(sig.params[0], t, rb, 0) >= 0: return true
+            s = int(syms[s].next)
+    false
+
+# The name of the length operation an indexed sequence of type t has: a `length`
+# function written in Dewy, else the library's `len`.
+sequence_length_name = (t: int) -> str:
+    if library_len_fits(t) and not (fn_name_for(t, intern("length")) and receiver_fits("length", t)): return "len"
+    "length"
+
 # Membership in fn_names_for without building a diagnostic's complete list.
 fn_name_for = (t: int, name: int) -> bool:
     if method_name_for(t, name): return true
@@ -5193,7 +5219,7 @@ dewy_len_check = (n: int, member: bool, t0: int, object: int):
     if not dewy_at(nodes[n].pos): return
     t = prune(t0)
     k = tkind(t)
-    if k != .array and k != .fixed and k != .str_ and not is_map_type(t) and not is_dewy_set_type(t): return
+    if member and k != .array and k != .fixed and k != .str_ and not is_map_type(t) and not is_dewy_set_type(t): return
     if member:
         if (dewy_len_members.get(n) ?? -1) != nodes[n].pos: return
         fatal(nodes[n].pos, "Dewy's length is `.length`: write `{receiver_text(object)}.length`")
@@ -5774,7 +5800,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             nodes[n] = nodes[bc_call(name, [args[0]], pos)]
         else if id == .dewy_iter_done:
             # (an entry list's length is its key array's, which the value reads)
-            length = if is_map_entries_type(t): bc_call("len", [bc_map_keys(args[0], pos)], pos) else if tkind(t) == .struct_: bc_method(args[0], "len", [], pos) else: bc_call("len", [args[0]], pos)
+            length = if is_map_entries_type(t): bc_call("len", [bc_map_keys(args[0], pos)], pos) else if tkind(t) == .struct_: bc_method(args[0], sequence_length_name(t), [], pos) else: bc_call("len", [args[0]], pos)
             nodes[n] = nodes[bc_bin(.ge, args[1], length, pos)]
         else if (is_map_type(t) or is_map_entries_type(t)) and id == .dewy_iter_pair:
             nodes[n] = nodes[bc_call("__map_pair_at", args, pos)]
@@ -9101,7 +9127,7 @@ check_field_expr = (n: int, expected: int) -> int:
                 nodes[n] = nodes[bc_call("__nd_length", [int(nodes[n].a)], nodes[n].pos)]
                 return check_expr(n, expected)
             # (Dewy's length of a library container or a sequence, as Heap and Pool: its `len`)
-            if files[pos_file(nodes[n].pos)].is_dewy and name_of(fname) == "length" and fn_name_for(bt, intern("len")) and receiver_fits("len", bt) and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
+            if files[pos_file(nodes[n].pos)].is_dewy and name_of(fname) == "length" and fn_name_for(bt, intern("len")) and library_len_fits(bt) and not (cur_assign != 0 and int(nodes[cur_assign].a) == n):
                 # (a member: found through the object, as methods are, whatever `len` names here)
                 method = mk(.field, nodes[n].pos)
                 nodes[method].a = nodes[n].a
@@ -10574,7 +10600,7 @@ dewy_end_substitute = (e: int, names: int[], source: int, pos: int):
         if c != int(nodes[e].b): dewy_end_substitute(c, names, source, pos)
 
 dewy_index_end = (source: int, pos: int) -> int:
-    bc_bin(.minus, bc_method(source, "len", [], pos), bc_int(1, pos), pos)
+    bc_bin(.minus, bc_field(source, "length", pos), bc_int(1, pos), pos)
 
 # `xs[new ..]`, `xs[.. new]`: NumPy's newaxis on nested arrays. Each `new`
 # wraps the selection so far in a one-element array; `..` maps over an axis,

@@ -1,6 +1,6 @@
 # exit: 42
 Series:type=<T>[values:array<T>]
-len=<T>(s:Series<T>)=>s.values.length
+length=<T>(s:Series<T>)=>s.values.length
 __index__=<T>(s:Series<T> index:int64):>T=>s.values[index]
 run=()=>{let source=Series<string>[["a" "bb" "ccc"]]
 let lengths=[loop text in source text.length]
