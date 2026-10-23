@@ -3310,7 +3310,11 @@ continues the string without that newline. Interpolations can contain nested
 strings, blocks and comments.
 
 `#` begins a line comment; `#{` and `}#` delimit a block comment, which nests and
-may span lines. Comment markers inside strings are string contents.
+may span lines. Comment markers inside strings are string contents. A
+documentation string is an ordinary call of the prelude's `doc` with a string,
+usually a `"""` block at the top of a module or a function body:
+`doc"""Tokenizer framework."""`. Nothing is kept from it yet, so the call does
+nothing.
 
 A name has one spelling however it is written: subscript digits are `_` and the
 digits (`x₁₂`, `x₁_2` and `x_12` are one name), superscript digits are `‾` and the
