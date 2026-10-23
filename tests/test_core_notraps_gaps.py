@@ -32,7 +32,7 @@ main=():>void=>exit(f([1 2 3] 1)-8)
 ''',
     # first+j against a guarded first+n: the shared operand's partner rows.
     'sum_shared_operand': '''g=(a:array<int64> first:int64 n:int64):>int64=>{
-    $runtime_assert 0 <=? first and first <? a.length and 0 <=? n and n <=? a.length and first+n <=? a.length
+    if not (0 <=? first and first <? a.length and 0 <=? n and n <=? a.length and first+n <=? a.length) return 0
     let t=0
     loop j in [0..n) {t+=a[first+j]}
     loop j in [1..n-1) {let p=first+j t+=a[p-1]+a[p+1]}
@@ -58,7 +58,7 @@ main=():>void=>exit(f([1 2 3] 3 1)-5)
 sort=(@a:array<int64> @tmp:array<int64>):>void=>{
     let n=a.length
     if n <=? 1 return
-    $runtime_assert tmp.length =? n
+    if tmp.length not=? n return
     let mid=n//2
     let _joined=parallel_range(2 ($capture @a $capture @tmp i:int64):>int64=>{
         if i =? 0 {fill(@a[..mid) @tmp[..mid) 1)}
@@ -123,7 +123,7 @@ main=():>void=>exit(f([1] 1))
 ''', 'cannot prove index is in bounds'),
     # A loose guard on the shared operand's partner proves nothing.
     'sum_loose_partner': ('''g=(a:array<int64> first:int64 n:int64):>int64=>{
-    $runtime_assert 0 <=? first and first <? a.length and 0 <=? n and n <=? a.length and first+n <=? a.length
+    if not (0 <=? first and first <? a.length and 0 <=? n and n <=? a.length and first+n <=? a.length) return 0
     let t=0
     loop j in [0..n+1) {t+=a[first+j]}
     return t
