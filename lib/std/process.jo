@@ -6,7 +6,9 @@
 #   run(program args): the status, the child sharing this program's standard streams
 #   run_silent(program args): the same, its stdout and stderr sent to /dev/null
 #   spawn(program args): the Child, started (`child.wait` gives its status)
-#   capture(program args): its Output, with stdout and stderr collected
+#   capture(program args): its Output, with stdout and stderr collected (at most
+#     __CAPTURE_LIMIT bytes each: past that, or when a pipe cannot be read, the child is ended
+#     and the result is a FileError)
 @nominal(error)
 struct SpawnError:
     pass
@@ -64,8 +66,10 @@ spawn = (program: str, args: str[]) -> Child | SpawnError | Canceled:
         if pid < 0: return SpawnError()
         return Child(pid = pid)
 
+const __CAPTURE_LIMIT = 64 << 20
+
 # Both pipes are drained as they fill, so a child writing much to either cannot block.
-capture = (program: str, args: str[]) -> Output | SpawnError | Canceled:
+capture = (program: str, args: str[]) -> Output | SpawnError | FileError | Canceled:
     if __task_canceled(): return Canceled
     when TARGET == "wasm" or TARGET == "windows":
         return SpawnError()
@@ -89,7 +93,18 @@ capture = (program: str, args: str[]) -> Output | SpawnError | Canceled:
             syscall(3, out_read)
             syscall(3, err_read)
             return SpawnError()
-        __proc_drain(out_read, err_read, out, err)
+        drained = __proc_drain(out_read, err_read, out, err, __CAPTURE_LIMIT)
+        if drained < 0:
+            # (too much output, or a pipe that cannot be read: the child is ended, not waited on
+            # for ever)
+            syscall(62, pid, 9)
+            __task_shield_enter()
+            __proc_wait(pid)
+            __task_shield_leave()
+            if __task_canceled(): return Canceled
+            __task_file_begin()
+            __ferr(drained)
+            return FileError()
         status = __proc_wait(pid)
         if status is Canceled:
             __proc_cancel_owned(pid)
@@ -126,29 +141,46 @@ __proc_wait = (pid: int) -> int | Canceled:
         return (st >> 8) & 255
 
 # Read two pipes to their ends, whichever has something first (poll; a struct pollfd per word:
-# the descriptor, POLLIN asked, what happened).
-__proc_drain = (out_fd: int, err_fd: int, out: mut u8[], err: mut u8[]):
+# the descriptor, POLLIN asked, what happened): 0, or why it stopped early: -27 (EFBIG) when
+# either has over limit bytes, or a read error (-errno).
+__proc_drain = (out_fd: int, err_fd: int, out: mut u8[], err: mut u8[], limit: int) -> int:
     fds = [0, 0]
     out_open = true
     err_open = true
-    loop out_open or err_open:
+    why = 0
+    loop (out_open or err_open) and why == 0:
         fds[0] = ((if out_open: out_fd else: -1) & 0xFFFFFFFF) | (1 << 32)
         fds[1] = ((if err_open: err_fd else: -1) & 0xFFFFFFFF) | (1 << 32)
         r = syscall(7, data(fds), 2, -1)
         if r == -4: continue
-        if r < 0: break
-        if out_open and (fds[0] >> 48) & 0xFFFF != 0: out_open = __proc_read(out_fd, out)
-        if err_open and (fds[1] >> 48) & 0xFFFF != 0: err_open = __proc_read(err_fd, err)
+        if r < 0:
+            why = r
+            break
+        if out_open and (fds[0] >> 48) & 0xFFFF != 0:
+            got = __proc_read(out_fd, out, limit)
+            if got <= 0: out_open = false
+            if got < 0: why = got
+        if err_open and (fds[1] >> 48) & 0xFFFF != 0 and why == 0:
+            got = __proc_read(err_fd, err, limit)
+            if got <= 0: err_open = false
+            if got < 0: why = got
     syscall(3, out_fd)
     syscall(3, err_fd)
+    why
 
-# (what a pipe has now, added to into: false at its end)
-__proc_read = (fd: int, into: mut u8[]) -> bool:
+# (what a pipe has now, added to into: 1 more may come, 0 at its end, < 0 a read error, or -27
+# when into would pass limit bytes)
+__proc_read = (fd: int, into: mut u8[], limit: int) -> int:
     n = into.len()
-    into.resize(n + 65536)
-    r = syscall(0, fd, data(into) + n, 65536)
+    room = min(65536, limit - n + 1)
+    into.resize(n + room)
+    r = syscall(0, fd, data(into) + n, room)
     into.resize(n + max(r, 0))
-    r > 0 or r == -4
+    if r == -4: return 1
+    if r < 0: return r
+    if into.len() > limit: return -27
+    if r > 0: return 1
+    0
 
 # Helpers owning a child reap it before cancellation escapes their scope.
 __proc_cancel_owned = (pid: int):

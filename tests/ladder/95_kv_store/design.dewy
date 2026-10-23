@@ -111,7 +111,7 @@ main=():>void=>{
     loop true {
         let line=read_line()
         if line is? none break
-        if line is? Canceled exit(1)
+        if line is? (Canceled|FileError) exit(1)
         if line.length =? 0 or line.startswith("--") continue
         printl("> {line}")
         let done=step(@session line)

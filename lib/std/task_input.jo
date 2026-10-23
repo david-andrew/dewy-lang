@@ -1,17 +1,26 @@
 # Cancelable standard input and file opening, as Dewy sees them: each returns
 # Canceled in a canceled task. Loaded only for a program that names one of them.
+# A line is at most __LINE_LIMIT bytes: a longer one is a FileError (skipped to its end, so
+# reading goes on with the next), as is input that cannot be read; none is the end alone.
+const __LINE_LIMIT = 16 << 20
 __task_stdin_lock = 0
-__task_input_line = () -> (str | Canceled)?:
+__task_input_line = () -> (str | Canceled | FileError)?:
     loop __atomic_cas(&__task_stdin_lock, 0, 1) != 0:
         if __task_canceled(): return Canceled
         __task_pause()
     defer __task_unlock(&__task_stdin_lock)
     if __task_canceled(): return Canceled
-    result = read_line()
+    line: u8[]
+    r = __stdin_line(line, __LINE_LIMIT)
     if __task_canceled(): return Canceled
-    result
+    if r == 1: return none
+    if r < 0:
+        __task_file_begin()
+        __ferr(r)
+        return FileError()
+    str_from_bytes(line)
 
-read_line = () -> (str | Canceled)?: __task_input_line()
+read_line = () -> (str | Canceled | FileError)?: __task_input_line()
 read_stdin = () -> (str | Canceled):
     loop __atomic_cas(&__task_stdin_lock, 0, 1) != 0:
         if __task_canceled(): return Canceled
@@ -57,8 +66,13 @@ open_file = (path: str) -> (File | Canceled)?:
         return Canceled
     result
 
-read_line = (f: mut File) -> (str | Canceled)?:
+read_line = (f: mut File) -> (str | Canceled | FileError)?:
     if __task_canceled(): return Canceled
-    result = read_line(f)
+    result = __file_line(f, __LINE_LIMIT)
     if __task_canceled(): return Canceled
+    if result == none and f.err != 0:
+        __task_file_begin()
+        __ferr(f.err)
+        f.err = 0
+        return FileError()
     result

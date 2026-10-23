@@ -204,7 +204,7 @@ main=():>void=>{
     loop not state.halted {
         let source=read_line()
         if source is? none break
-        if source is? Canceled exit(1)
+        if source is? (Canceled|FileError) exit(1)
         lines+=1
         let accepted=line(@state source)
         if accepted {

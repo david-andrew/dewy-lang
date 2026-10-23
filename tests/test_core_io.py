@@ -18,7 +18,7 @@ if args[1]=?"stdin" {
 if args[1]=?"after-line" {
     let line=read_line()
     if line is?none return 2
-    if line is?Canceled return 6
+    if line is?(Canceled|FileError) return 6
     let tail=read_stdin()
     if tail is?Canceled return 6
     write(line) write("|") write(tail)
@@ -36,7 +36,7 @@ if args.length>?2 {
 loop true {
     let line=f.read_line()
     if line is?none break
-    if line is?Canceled return 6
+    if line is?(Canceled|FileError) return 6
     write(line) write("\n")
 }
 let last=f.read_bytes(1)

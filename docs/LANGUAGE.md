@@ -2518,8 +2518,9 @@ are rejected in Dewy with the Dewy spelling to use instead.
 shell. The child shares the standard streams. `run_silent` sends its stdout and
 stderr to `/dev/null`. `spawn(program args)` gives a `Child` whose `wait` gives
 the status. `capture(program args)` waits and gives an `Output`: `status`,
-`stdout` and `stderr` bytes (both drained as they fill), and `stdout_text` and
-`stderr_text` (`string | none`).
+`stdout` and `stderr` bytes (both drained as they fill, at most 64 MiB each), and
+`stdout_text` and `stderr_text` (`string | none`). A child that writes more, or a
+pipe that cannot be read, ends the child and gives a `FileError`.
 
 In a web build, files live in the page's memory, and directories exist as the
 paths of its files and those made with `mkdir`. Processes are `SpawnError` there.

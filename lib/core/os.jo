@@ -133,6 +133,7 @@ __file_message = (e: int) -> str:
     if e == 26: return "it is a program that is running"
     if e == 40: return "too many links in the path"
     if e == 5: return "the disk could not be read or written"
+    if e == 27: return "it is too large"
     if e == 122: return "the disk quota is used up"
     "error {e}"
 
@@ -179,19 +180,32 @@ read_file = (path: str) -> str?:
 __stdin_buf: u8[]
 __stdin_pos = 0
 
-# a line typed in (or piped in), without its end; none when the input has ended
+# a line typed in (or piped in), without its end; none when the input has ended (or cannot be
+# read)
 read_line = () -> str?:
-    __out_flush()                   # (a prompt printed before, shown first)
     line: u8[]
+    if __stdin_line(line, 0x7FFFFFFFFFFFFFFF) != 0: return none
+    str_from_bytes(line)
+
+# The next line of standard input into line, without its end: 0 a line, 1 the end, < 0 why not:
+# a read error (-errno), or -27 (EFBIG) for a line over limit bytes, which is skipped to its end.
+__stdin_line = (line: mut u8[], limit: int) -> int:
+    __out_flush()                   # (a prompt printed before, shown first)
     got = false
+    over = false
     loop:
         if __stdin_pos >= __stdin_buf.len():
             __stdin_buf = fill(u8(0), 4096)
             r = __read_fd(0, data(__stdin_buf), __stdin_buf.len())
+            if r == -4:                                 # (EINTR: again)
+                __stdin_buf.clear()
+                __stdin_pos = 0
+                continue
             if r <= 0:
                 __stdin_buf.clear()
                 __stdin_pos = 0
-                if not got: return none
+                if r < 0: return r
+                if not got: return 1
                 break
             __stdin_buf.truncate(r)
             __stdin_pos = 0
@@ -199,9 +213,12 @@ read_line = () -> str?:
         __stdin_pos += 1
         got = true
         if c == '\n': break
-        line.push(c)
+        # (one byte more than limit kept: a \r before the line's end is not counted)
+        if line.len() > limit: over = true
+        else: line.push(c)
     if line.len() > 0 and line[line.len() - 1] == '\r': line.pop()
-    str_from_bytes(line)
+    if over or line.len() > limit: return -27
+    0
 
 # A file open for reading a piece at a time (a log too big to load whole, the start of a file
 # to hash):
@@ -213,6 +230,7 @@ struct File:
     buf: u8[]
     pos = 0
     done = false
+    err = 0         # (why reading stopped early: -errno, as Linux's; 0 at the end of the file)
 
 open_file = (path: str) -> File?:
     when TARGET == "wasm":
@@ -259,6 +277,46 @@ read_line = (f: mut File) -> str?:
         from = n - f.pos
         __file_fill(f)
 
+# The next line of the file, as read_line, or none with f.err set: -27 (EFBIG) for a line over
+# limit bytes (skipped to its end, so the next one follows), or a read error.
+__file_line = (f: mut File, limit: int) -> str?:
+    from = f.pos
+    skipping = false
+    loop true:
+        n = f.buf.len()
+        i = -1
+        if from < n: i = __memchr(data(f.buf), from, n, '\n')
+        if skipping:
+            if i >= 0 or f.done:
+                f.pos = if i >= 0: i + 1 else: n
+                if f.err == 0: f.err = -27
+                return none
+            f.pos = n
+            from = 0
+            __file_fill(f)
+            continue
+        if i >= 0 or (f.done and f.pos < n):
+            # (the last line, without its end, is not one when reading broke off)
+            if i < 0 and f.err != 0: return none
+            if i < 0: i = n
+            p = data(f.buf)
+            e = i
+            if e > f.pos and p[e - 1] == '\r': e -= 1
+            if e - f.pos > limit:
+                f.pos = min(i + 1, n)
+                f.err = -27
+                return none
+            line = __str_from(p + f.pos, e - f.pos)
+            f.pos = min(i + 1, n)
+            return line
+        if f.done: return none
+        if n - f.pos > limit:
+            skipping = true
+            f.pos = n
+            from = 0
+        else: from = n - f.pos
+        __file_fill(f)
+
 # up to n more bytes of the file (fewer at its end; none left: empty)
 read_bytes = (f: mut File, n: int) -> u8[]:
     loop f.buf.len() - f.pos < n and not f.done: __file_fill(f)
@@ -291,8 +349,11 @@ __file_fill = (f: mut File):
     when TARGET == "windows":
         r: u32[] = [0]
         if ReadFile(f.handle as *u8, data(f.buf) + old, u32(65536), data(r), null) != 0: got = int(r[0])
+        else if int(GetLastError()) != 109: f.err = -5          # (109: a pipe's other end closed)
     else when TARGET != "wasm":
         got = syscall(0, f.handle, data(f.buf) + old, 65536)
+        loop got == -4: got = syscall(0, f.handle, data(f.buf) + old, 65536)    # (EINTR: again)
+        if got < 0: f.err = got
     if got <= 0:
         got = 0
         f.done = true
