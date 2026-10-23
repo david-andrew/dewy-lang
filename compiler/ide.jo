@@ -151,7 +151,7 @@ ide_find_name = (f: int, from: int, name: int) -> int:
 ide_dewy_alt = (name: int) -> int:
     n = name_of(name)
     if n == "__dewy_int": return intern("int")
-    if n == "__mi_parse": return intern("to_int")
+    if n == "__mi_parse" or n == "__mi_parse_limited": return intern("to_int")
     if n == "str": return intern("string")
     if n == "Set": return intern("set")
     if n == "print": return intern("printl")

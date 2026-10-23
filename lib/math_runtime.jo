@@ -106,6 +106,11 @@ __mi_khash = (a: __dewy_int) -> int:
     loop limb in value._limbs: h = __hk_mix(k, h xor limb)
     h as int
 
+# Dewy's to_int(text): decimal, or hex after 0x, with an optional sign, _ between digits and
+# space around; none when it is not an integer, and when it has more than max_digits decimal
+# digits (a million unless given; zero or less: no limit), since converting those costs time that
+# grows faster than their length (CVE-2020-10735). Long text converts by divide and conquer
+# (lib/bigint.dewy).
 __mi_parse = (s: str) -> __dewy_int?:
     # The same 18-digit proof as to_int, returning directly into the exact
     # result. Avoid an intermediate optional-word result on ordinary input.
@@ -125,10 +130,16 @@ __mi_parse = (s: str) -> __dewy_int?:
             if p[0] == '-': value = -value
             # At most 18 digits fits the signed 63-bit immediate payload.
             return (value << 1) as __dewy_int
-    __mi_parse_slow(s)
+    __mi_parse_slow(s, 1000000)
+
+# to_int(text max_digits=n) (the compiler sends a call with the limit here)
+__mi_parse_limited = (s: str, max_digits: int) -> __dewy_int?: __mi_parse_slow(s, max_digits)
 
 # Dewy's to_int: an optional sign, then decimal digits; nothing else (no spaces, `_` or 0x).
-__mi_parse_slow = (s: str) -> __dewy_int?:
+# More than max_digits digits (zero or less: no limit) give none: converting them costs time
+# that grows faster than their length (CVE-2020-10735). Long text converts by divide and
+# conquer (lib/bigint.dewy).
+__mi_parse_slow = (s: str, max_digits: int) -> __dewy_int?:
     p = data(s)
     n = len(s)
     i = 0
@@ -137,20 +148,14 @@ __mi_parse_slow = (s: str) -> __dewy_int?:
         negative = p[0] == '-'
         i = 1
     if i >= n: return none
+    if max_digits > 0 and n - i > max_digits: return none
+    digits: u8[]
+    digits.reserve(n - i)
     loop k in [i..n):
-        if u64(int(p[k]) - 48) > 9: return none
-    # (up to 18 digits took __mi_parse's word path; longer: 18 digits at a time)
-    value = __bi.bigint(0)
-    loop i < n:
-        e = min(i + 18, n)
-        chunk = 0
-        scale = 1
-        loop k in [i..e):
-            chunk = chunk * 10 + int(p[k]) - 48
-            scale *= 10
-        value = __bi.__add__(__bi.__mul__(value, __bi.bigint(scale)), __bi.bigint(chunk))
-        i = e
-    if negative: value = __bi.__unary_sub__(value)
+        d = int(p[k]) - 48
+        if u64(d) > 9: return none
+        digits.push(u8(d))
+    value = __bi._from_digits(digits, negative)
     result: __dewy_int = __mi_pack(value)
     result
 
@@ -162,16 +167,21 @@ __mi_format_spec = (buf: mut u8[], x: __dewy_int, spec: str):
     start = len(buf)
     k = sp.kind
     if k == 'x' or k == 'X' or k == 'b' or k == 'o':
-        value = __bi.abs(__mi_payload(x)[0])
-        base = if k == 'b': 2 else if k == 'o': 8 else: 16
-        radix = __bi.bigint(base)
+        limbs = __mi_payload(x)[0]._limbs
+        bits = if k == 'b': 1 else if k == 'o': 3 else: 4
         digits = if k == 'X': "0123456789ABCDEF" else: "0123456789abcdef"
+        # (each digit's bits read straight from the limbs: linear in the length)
         reversed: u8[]
-        loop value._sign != 0:
-            parts = __bi.divmod(value, radix)
-            digit = __bi.to_int64(parts.remainder) ?? 0
-            reversed.push(digits[digit])
-            value = parts.quotient
+        total = limbs.len() * 32
+        pos = 0
+        loop pos < total:
+            li = pos >> 5
+            off = pos & 31
+            v = limbs[li] >> u64(off)
+            if off + bits > 32 and li + 1 < limbs.len(): v = v | (limbs[li + 1] << u64(32 - off))
+            reversed.push(digits[int(v & u64((1 << bits) - 1))])
+            pos += bits
+        loop reversed.len() > 1 and reversed[reversed.len() - 1] == '0': reversed.pop()
         if __mi_payload(x)[0]._sign < 0: __buf_byte(buf, '-')
         if sp.alt: __radix_prefix(buf, k)
         i = reversed.len()

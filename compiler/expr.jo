@@ -3973,6 +3973,8 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             if not decl_in_prelude(d): own = true
         if not own:
             parser = ci(8, "__mi_parse")
+            # (to_int(text max_digits=n): the limit as given; plain to_int keeps its one parameter)
+            if args.len() > 1: parser = intern("__mi_parse_limited")
             demand_name(parser)
             decls = []
             collect_fns(parser, decls)

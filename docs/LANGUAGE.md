@@ -709,7 +709,11 @@ A function gives back a value: `return @a` is an error.
 
 Lengths retain their current `int64` type. An `int` index uses the ordinary bounds
 checks. `to_int(text)` returns `int | none`, parsing integers of arbitrary size: an
-optional sign, then decimal digits (spaces, `_` and `0x` give `none`).
+optional sign, then decimal digits (spaces, `_` and `0x` give `none`). More
+decimal digits than `max_digits=` allows (a million unless given; zero: no
+limit) also give `none`, since converting them takes time that grows faster than
+their length (CVE-2020-10735). Decimal text converts both ways by divide and
+conquer, in about the time of a few multiplications of that size.
 `from_text<int>` and integer fields in parsed records and containers preserve
 the same arbitrary precision. Printing, interpolation and
 `string(value)` format `int` as decimal. Mathematical integers are not yet

@@ -59,20 +59,19 @@ let _mag_sub = (a:array<uint64> b:array<uint64>):>array<uint64> => {
 }
 
 
-let _mag_mul = (a:array<uint64> b:array<uint64>):>array<uint64> => {
+let _mag_mul_school = (a:array<uint64> b:array<uint64>):>array<uint64> => {
     let result:array<uint64> = []
     let n:int64 = 0
     loop n <? a.length + b.length { result.push(0)  n = n + 1 }
     let i:int64 = 0
     loop i <? a.length {
         let carry:uint64 = 0
-        let j:int64 = 0
-        loop j <? b.length {
+        let ai:uint64 = a[i]
+        loop j in [0..b.length) {
             let k:int64 = i + j
-            let t:uint64 = a[i] * b[j] + result[k] + carry
+            let t:uint64 = ai * b[j] + result[k] + carry
             result[k] = t and _LIMB_MASK
             carry = t >> 32
-            j = j + 1
         }
         # Earlier rows stop before this slot, so it is still zero.
         result[i + b.length] = carry
@@ -289,6 +288,236 @@ let _mag_gcd = (a:array<uint64> b:array<uint64>):>array<uint64> => {
     return _mag_shift_left(x common)
 }
 
+# ---------------- subquadratic multiplication and text conversion ----------------
+# Karatsuba above _KARATSUBA limbs; decimal text both ways by divide and conquer over a tree
+# of powers 10^(9*2^j) (base-10^9 chunks), with Barrett division by each power's reciprocal
+# (one Newton step from the reciprocal of its upper half). O(M(n) log n) instead of O(n^2).
+const _KARATSUBA:int64=96
+const _CONVERT_BASE:int64=600       # (limbs: below it, the schoolbook conversions)
+
+# a[lo..hi) as a magnitude
+_mag_slice=(a:array<uint64> lo:int64 hi:int64):>array<uint64>=>{
+    let result:array<uint64>=[]
+    let stop=hi
+    if stop >? a.length stop=a.length
+    let i=lo
+    loop i <? stop {
+        result.push(a[i])
+        i=i+1
+    }
+    _bigint_trim(@result)
+    return result
+}
+
+# acc += x * 2^(32 shift)
+_mag_add_into=(@acc:array<uint64> x:array<uint64> shift:int64):>void=>{
+    loop acc.length <? shift+x.length acc.push(0)
+    let carry:uint64=0
+    let i:int64=0
+    loop i <? x.length {
+        let t=acc[shift+i]+x[i]+carry
+        acc[shift+i]=t and _LIMB_MASK
+        carry=t >> 32
+        i=i+1
+    }
+    let k=shift+x.length
+    loop carry not=? 0 {
+        if k =? acc.length acc.push(0)
+        let t=acc[k]+carry
+        acc[k]=t and _LIMB_MASK
+        carry=t >> 32
+        k=k+1
+    }
+}
+
+_mag_mul=(a:array<uint64> b:array<uint64>):>array<uint64>=>{
+    if a.length <? b.length return _mag_mul(b a)
+    if b.length <? _KARATSUBA return _mag_mul_school(a b)
+    let result:array<uint64>=[]
+    if a.length >=? 2*b.length {
+        # (unbalanced: the longer cut into pieces as long as the shorter)
+        let lo:int64=0
+        loop lo <? a.length {
+            let piece=_mag_slice(a lo lo+b.length)
+            if piece.length >? 0 _mag_add_into(@result _mag_mul(piece b) lo)
+            lo=lo+b.length
+        }
+        _bigint_trim(@result)
+        return result
+    }
+    let m=a.length//2
+    let a0=_mag_slice(a 0 m)
+    let a1=_mag_slice(a m a.length)
+    let b0=_mag_slice(b 0 m)
+    let b1=_mag_slice(b m b.length)
+    let z0=_mag_mul(a0 b0)
+    let z2=_mag_mul(a1 b1)
+    let z1=_mag_sub(_mag_sub(_mag_mul(_mag_add(a0 a1) _mag_add(b0 b1)) z0) z2)
+    _mag_add_into(@result z0 0)
+    _mag_add_into(@result z1 m)
+    _mag_add_into(@result z2 2*m)
+    _bigint_trim(@result)
+    return result
+}
+
+# 2^(32 n)
+_mag_limb_power=(n:int64):>array<uint64>=>{
+    let result:array<uint64>=[]
+    loop result.length <? n result.push(0)
+    result.push(1)
+    return result
+}
+
+# floor(x / 2^(32 n))
+_mag_drop=(x:array<uint64> n:int64):>array<uint64>=>_mag_slice(x n x.length)
+
+# floor(2^(64 m) / p), m = p's length
+_mag_reciprocal=(p:array<uint64>):>array<uint64>=>{
+    let m=p.length
+    let whole=_mag_limb_power(2*m)
+    if m <=? 2*_KARATSUBA return _mag_divmod(whole p).quotient
+    # (p's upper h limbs' reciprocal, scaled, is right to about h limbs; one Newton step
+    # doubles that, past m + 3, and the rest is a few corrections)
+    let h=m//2+2
+    let x=_mag_reciprocal(_mag_slice(p m-h m))
+    let scaled:array<uint64>=[]
+    _mag_add_into(@scaled x m-h)
+    x=scaled
+    let px=_mag_mul(p x)
+    # (Newton: x + x (2^(64 m) - p x) / 2^(64 m), the product from the upper t limbs of each
+    # factor: what the rest adds is below 1)
+    let below=_mag_compare(px whole) <=? 0
+    let e=if below _mag_sub(whole px) else _mag_sub(px whole)
+    let t=m//2+4
+    let se=if e.length >? t e.length-t else 0
+    let sx=if x.length >? t x.length-t else 0
+    let step=_mag_drop(_mag_mul(_mag_drop(x sx) _mag_drop(e se)) 2*m-se-sx)
+    if below {
+        x=_mag_add(x step)
+    } else {
+        let over=_mag_add(step [1])
+        x=if _mag_compare(over x) >=? 0 [] else _mag_sub(x over)
+    }
+    px=_mag_mul(p x)
+    loop _mag_compare(px whole) >? 0 {
+        x=_mag_sub(x [1])
+        px=_mag_sub(px p)
+    }
+    let rest=_mag_sub(whole px)
+    loop _mag_compare(rest p) >=? 0 {
+        x=_mag_add(x [1])
+        rest=_mag_sub(rest p)
+    }
+    return x
+}
+
+# x divided by p (x < 2^(64 m), m = p's length), mu = _mag_reciprocal(p): Barrett, whose
+# estimate is at most two short
+_mag_divmod_by=(x:array<uint64> p:array<uint64> mu:array<uint64>):>_MagDivMod=>{
+    if _mag_compare(x p) <? 0 return [quotient=[] remainder=x]
+    let m=p.length
+    let q=_mag_drop(_mag_mul(_mag_drop(x m-1) mu) m+1)
+    let r=_mag_sub(x _mag_mul(q p))
+    loop _mag_compare(r p) >=? 0 {
+        r=_mag_sub(r p)
+        q=_mag_add(q [1])
+    }
+    return [quotient=q remainder=r]
+}
+
+_ConvertTree:type=[powers:array<array<uint64>> reciprocals:array<array<uint64>>]
+
+# 10^(9*2^j) for j below k, and the reciprocals of the long ones
+_convert_tree=(k:int64 reciprocals:bool):>_ConvertTree=>{
+    let powers:array<array<uint64>>=[[1000000000]]
+    loop powers.length <? k {
+        let last=powers[powers.length-1]
+        powers.push(_mag_mul(last last))
+    }
+    let mus:array<array<uint64>>=[]
+    loop j in [0..k) {
+        if reciprocals and powers[j].length >? _CONVERT_BASE mus.push(_mag_reciprocal(powers[j]))
+        else mus.push([])
+    }
+    return [powers=powers reciprocals=mus]
+}
+
+# x's 2^k base-10^9 chunks, least significant first (x < 10^(9*2^k)), pushed onto out
+_mag_chunks_into=(@out:array<uint64> x:array<uint64> k:int64 tree:_ConvertTree):>void=>{
+    if x.length <=? _CONVERT_BASE {
+        let chunks=_bigint_decimal_chunks(x)
+        let want:int64=1 << k
+        loop i in [0..want) out.push(if i <? chunks.length chunks[i] else 0)
+        return
+    }
+    let p=tree.powers[k-1]
+    let parts=if tree.reciprocals[k-1].length >? 0 _mag_divmod_by(x p tree.reciprocals[k-1]) else _mag_divmod(x p)
+    _mag_chunks_into(@out parts.remainder k-1 tree)
+    _mag_chunks_into(@out parts.quotient k-1 tree)
+}
+
+# a magnitude's base-10^9 chunks, least significant first, the most significant not zero
+_mag_decimal_chunks=(limbs:array<uint64>):>array<uint64>=>{
+    if limbs.length <=? _CONVERT_BASE return _bigint_decimal_chunks(limbs)
+    # (the smallest k whose 10^(9*2^k) is above the value)
+    let k:int64=0
+    let bits=limbs.length*32
+    loop (1 << k)*29 <? bits k=k+1       # (10^9 > 2^29.89: 2^k chunks hold 29*2^k bits)
+    let tree=_convert_tree(k true)
+    let out:array<uint64>=[]
+    _mag_chunks_into(@out limbs k tree)
+    loop out.length >? 1 and out[out.length-1] =? 0 out.pop()
+    return out
+}
+
+# the magnitude of base-10^9 chunks[lo..lo+2^k) (least significant first; past the end: zeros)
+_mag_from_chunks=(chunks:array<uint64> lo:int64 k:int64 tree:_ConvertTree):>array<uint64>=>{
+    if lo >=? chunks.length return []
+    let count:int64=1 << k
+    if k <=? 4 {
+        let limbs:array<uint64>=[]
+        let i=lo+count
+        if i >? chunks.length i=chunks.length
+        loop i >? lo {
+            i=i-1
+            let carry:uint64=chunks[i]
+            loop j in [0..limbs.length) {
+                let value=limbs[j]*1000000000+carry
+                limbs[j]=value and _LIMB_MASK
+                carry=value >> 32
+            }
+            if carry not=? 0 limbs.push(carry)
+        }
+        _bigint_trim(@limbs)
+        return limbs
+    }
+    let low=_mag_from_chunks(chunks lo k-1 tree)
+    let high=_mag_from_chunks(chunks lo+count//2 k-1 tree)
+    if high.length =? 0 return low
+    return _mag_add(_mag_mul(high tree.powers[k-1]) low)
+}
+
+# decimal digits (values 0 to 9, most significant first) as a magnitude
+_mag_from_digits=(digits:array<uint8>):>array<uint64>=>{
+    let chunks:array<uint64>=[]
+    let stop=digits.length
+    loop stop >? 0 {
+        let start=stop-9
+        if start <? 0 start=0
+        let chunk:uint64=0
+        loop i in [start..stop) chunk=chunk*10+digits[i]
+        chunks.push(chunk)
+        stop=start
+    }
+    let k:int64=0
+    loop (1 << k) <? chunks.length k=k+1
+    let tree=_convert_tree(k false)
+    return _mag_from_chunks(chunks 0 k tree)
+}
+
+# decimal digit values (most significant first) as a BigInt
+_from_digits=(digits:array<uint8> negative:bool):>BigInt=>_pack(negative _mag_from_digits(digits))
+
 let _bigint_decimal_chunks = (limbs:array<uint64>):>array<uint64> => {
     let chunks:array<uint64> = []          # least significant chunk first
     let current:array<uint64> = limbs      # divided in place
@@ -345,18 +574,12 @@ parse_bigint=(text:string):>BigInt|none=>{
     let start:int64=0
     if negative or digits[0] =? 43 start=1
     if start =? digits.length return none
-    let limbs:array<uint64>=[]
+    let values:array<uint8>=[]
     loop i in [start..digits.length) {
         if digits[i] <? 48 or digits[i] >? 57 return none
-        let carry:uint64=wrap<uint64>(digits[i]-48)
-        loop j in [0..limbs.length) {
-            let value=limbs[j]*10+carry
-            limbs[j]=value and _LIMB_MASK
-            carry=value >> 32
-        }
-        if carry not=? 0 limbs.push(carry)
+        values.push(digits[i]-48)
     }
-    return _pack(negative limbs)
+    return _from_digits(values negative)
 }
 
 _compare=(a:BigInt b:BigInt):>int64=>{
@@ -484,7 +707,7 @@ __as__=(value:BigInt):>string=>{
     if value._sign =? 0 return "0"
     let parts:array<string>=[]
     if value._sign <? 0 parts.push("-")
-    let chunks=_bigint_decimal_chunks(value._limbs)
+    let chunks=_mag_decimal_chunks(value._limbs)
     let i=chunks.length
     loop i >? 0 {
         i-=1
