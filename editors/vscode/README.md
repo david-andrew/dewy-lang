@@ -109,4 +109,4 @@ WebAssembly builds.
 
 ## License
 
-This extension is licensed under GPL-3.0; see LICENSE.
+This extension is licensed under the Apache License v2.0 with LLVM Exceptions; see LICENSE.

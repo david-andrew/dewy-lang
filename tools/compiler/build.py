@@ -51,6 +51,7 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False) ->
     output.mkdir(parents=True, exist_ok=False)
     for name in ('compiler', 'lib', 'stage0', 'bootstrap'):
         shutil.copytree(ROOT / name, output / name, ignore=shutil.ignore_patterns('sloppy0', '__pycache__'))
+    shutil.copy2(ROOT / 'LICENSE', output / 'LICENSE')
     sources = {str(p.relative_to(output)): identity(p) for p in sorted(output.rglob('*')) if p.is_file()}
     binary_dir = output / 'bin'
     binary_dir.mkdir()

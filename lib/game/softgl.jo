@@ -706,7 +706,7 @@ __sw_draw_mesh = (prog: int, mode: int, vbo: int, stride: int, nverts: int, ibo:
                 mine[0] = v
                 mine[1] = g / nverts + ibase
             when TARGET == "windows":
-                # (cfn calls use Windows' convention there; the shader functions are Sloppy's)
+                # (cfn calls use Windows' convention there; the shader functions are plain)
                 if vargs == 3: __call_raw(vsp, o as *u8, vb + v * stride, instb + (g / nverts) * istride, uni)
                 else: __call_raw(vsp, o as *u8, vb + v * stride, uni)
             else:

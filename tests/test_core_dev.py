@@ -40,7 +40,7 @@ def test_fuzz_no_results_cannot_pass():
 @pytest.fixture
 def checkout(tmp_path, monkeypatch):
     root = tmp_path / 'source'
-    for name in ('compiler/main.jo', 'lib/core/rt.jo', 'stage0/main.c', 'bootstrap/frontend.jo'):
+    for name in ('compiler/main.jo', 'lib/core/rt.jo', 'stage0/main.c', 'bootstrap/frontend.jo', 'LICENSE'):
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(name)

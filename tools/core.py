@@ -45,7 +45,7 @@ def build(*args, **kwargs):
 
 
 def source_paths(root: Path) -> list[Path]:
-    paths = [root / 'tools/compiler/build.py']
+    paths = [root / 'tools/compiler/build.py', root / 'LICENSE']
     for directory in ('compiler', 'lib', 'stage0', 'bootstrap'):
         paths.extend(path for path in (root / directory).rglob('*')
                      if path.is_file() and path.name != 'sloppy0' and '__pycache__' not in path.parts)

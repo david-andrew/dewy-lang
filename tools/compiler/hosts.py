@@ -33,6 +33,7 @@ def build(toolchain: Path, output: Path) -> None:
         if result.returncode:
             raise RuntimeError(f'{host} compiler build failed:\n{result.stdout}{result.stderr}')
         shutil.copytree(toolchain / 'lib', bundle / 'lib')
+        shutil.copy2(toolchain / 'LICENSE', bundle / 'LICENSE')
         provenance = {
             'host': host,
             'cross_compiler_sha256': hashlib.sha256(compiler.read_bytes()).hexdigest(),

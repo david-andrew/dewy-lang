@@ -62,3 +62,7 @@ irm https://dewy-lang.org/install.ps1 | iex                 # Windows x64 (Power
 This installs the latest development toolchain (a GitHub prerelease, version 0.0.0) into
 `~/.dewy`; `dewy update` and `dewy rollback` manage it. The VS Code extension
 (RedFoxLabs.dewy on the Marketplace and Open VSX) bundles the compiler.
+
+## License
+
+Dewy is licensed under the Apache License v2.0 with LLVM Exceptions; see [LICENSE](LICENSE). "Dewy" and its logos are trademarks; see [TRADEMARKS.md](TRADEMARKS.md).

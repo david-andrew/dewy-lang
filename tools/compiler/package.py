@@ -76,6 +76,7 @@ def package(toolchain: Path, output: Path, *, revision: str | None = None) -> Pa
     expected = {executable: compiler_hash}
     expected.update({name: sha for name, sha in manifest['sources_sha256'].items()
                      if name.startswith('lib/')})
+    expected['LICENSE'] = manifest['sources_sha256']['LICENSE']
     if 'lib/core/rt.jo' not in expected:
         raise ValueError('build manifest has no standard library')
     # Package exactly the tested payload, excluding bootstrap executables and

@@ -108,7 +108,7 @@ def fake_toolchain(directory: Path, host: str) -> Path:
     """A toolchain directory with the provenance files package.py verifies."""
     binary = 'bin/dewy-core.exe' if host == 'windows' else 'bin/dewy-core'
     files = {binary: f'compiler for {host}\n'.encode(), 'lib/core/rt.jo': b'# runtime\n',
-             'lib/std/list.jo': b'# list\n', 'LICENSE': b'license\n', 'NOTICE': b'notice\n'}
+             'lib/std/list.jo': b'# list\n', 'LICENSE': b'license\n'}
     for name, data in files.items():
         (directory / name).parent.mkdir(parents=True, exist_ok=True)
         (directory / name).write_bytes(data)

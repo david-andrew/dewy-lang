@@ -254,4 +254,22 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   cache) and making the game prelude an explicit import (it stays implicit and
   is made cheap by laziness). The library index scan must be near-free
   (memchr-class, no tokenizing what isn't reached).
-
+- License and trademarks (decided 2026-10-22): the whole project (compiler,
+  tools, standard library and runtime, docs, examples, VS Code extension) is
+  Apache-2.0 WITH LLVM-exception (SPDX `Apache-2.0 WITH LLVM-exception`; the
+  text is LLVM's LICENSE.TXT verbatim, in `LICENSE`). Why: the explicit patent
+  grant with patent retaliation; one license, not a dual license, so there is
+  no election gap; no attribution burden on compiled Dewy programs, since the
+  LLVM exception covers the runtime and library portions embedded in object
+  code; GPLv2 compatibility through the exception. No NOTICE file, so
+  redistributors' section 4(d) obligations stay minimal, and no per-file
+  headers. Toolchain packages ship the root `LICENSE` (never a NOTICE), plus
+  `lib/std/unicode/LICENSE.txt` and `lib/game/assets/OFL.txt`. Trademark policy
+  ([TRADEMARKS.md](../../TRADEMARKS.md)): "Dewy" and its logos are David
+  Samson's trademarks. Accurate references, "written in Dewy"/"for Dewy" and
+  redistributing unmodified official releases are free. Modified versions and
+  forks need a different name and logo, must not imply official status, and
+  may say "based on Dewy". "Dewy-compatible" requires passing the official
+  conformance suite (acceptance ladder and test suite) for a stated version,
+  named in the claim. Use in the name or branding of another language,
+  implementation, distribution or product needs written permission.

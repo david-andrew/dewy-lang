@@ -50,6 +50,8 @@ def test_platform_package_bundles_the_toolchain(tmp_path):
         assert z.read('extension/toolchain/bin/dewy-core') == b'compiler'
         assert z.getinfo('extension/toolchain/bin/dewy-core').external_attr >> 16 & 0o111
         assert z.read('extension/toolchain/lib/core/rt.jo') == b'runtime'
+        assert z.read('extension/toolchain/LICENSE') == b'license'
+        assert z.read('extension/LICENSE') == (vsix.ROOT / 'LICENSE').read_bytes()
         assert 'extension/package.json' in z.namelist() and 'extension/compiler.js' in z.namelist()
     assert not (vsix.EXTENSION / 'toolchain').exists()
     universal = vsix.package(tmp_path / 'dewy.vsix', vsce=[sys.executable, str(fake)])

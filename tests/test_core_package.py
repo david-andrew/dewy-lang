@@ -12,6 +12,8 @@ import pytest
 from tests.support import Scripts
 from tools.compiler.package import package
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 @pytest.fixture(scope='module')
 def toolchain():
@@ -35,6 +37,12 @@ def test_core_packaged_toolchain(toolchain, tmp_path):
     release = (moved / 'RELEASE').read_text().splitlines()
     assert release[0] == 'dewy-toolchain-release 1' and release[3] == 'revision test-revision'
     assert release[2].startswith('platform ') and 'RELEASE' in metadata['files']
+    # The root license ships; the third-party license texts under lib/ ship with it; no NOTICE.
+    assert (moved / 'LICENSE').read_bytes() == (ROOT / 'LICENSE').read_bytes()
+    assert 'LICENSE' in metadata['files'] and 'NOTICE' not in metadata['files']
+    assert not (moved / 'NOTICE').exists()
+    for name in ('lib/std/unicode/LICENSE.txt', 'lib/game/assets/OFL.txt'):
+        assert (moved / name).is_file() and name in metadata['files']
     for name, expected in metadata['files'].items():
         assert hashlib.sha256((moved / name).read_bytes()).hexdigest() == expected
     compiler = moved / 'bin' / ('dewy-core.exe' if os.name == 'nt' else 'dewy-core')
@@ -82,6 +90,7 @@ def test_core_package_rejects_changed_payload(toolchain, tmp_path, changed):
     shutil.copy2(toolchain / provenance, copy / provenance)
     for name in ('bin', 'lib'):
         shutil.copytree(toolchain / name, copy / name)
+    shutil.copy2(toolchain / 'LICENSE', copy / 'LICENSE')
     if changed == 'compiler':
         changed = 'bin/dewy-core.exe' if os.name == 'nt' else 'bin/dewy-core'
     with (copy / changed).open('ab') as stream:
