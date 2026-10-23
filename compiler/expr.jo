@@ -36,10 +36,10 @@ enum IN:
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
     read_fields, default_init, offset_unit, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
     static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem, lend, loan_address, loan_load, loan_store, loan_length,
-    zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration, wrap_bits, arena_result, arrdata_permute, mul_hi
+    zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration, arena_result, arrdata_permute, mul_hi
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
-enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big, set_text, promote
+enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big, set_text, promote, wrap_int, saturate_int
 
 struct Intrinsic:
     name: str
@@ -58,7 +58,6 @@ intrinsics = [
     Intrinsic("$runtime_assert", .runtime_assert, false),
     Intrinsic("__dewy_iter", .dewy_iter, false),
     Intrinsic("__dewy_live_length", .live_len, false),
-    Intrinsic("wrap", .wrap_bits, false),
     Intrinsic("__dewy_iter_done", .dewy_iter_done, false),
     Intrinsic("__dewy_iter_value", .dewy_iter_value, false),
     Intrinsic("__dewy_iter_pair", .dewy_iter_pair, false),
@@ -557,6 +556,10 @@ coerce = (n: int, target: int) -> int:
     from = prune(ntype(n))
     to = prune(target)
     if from == 0: ice("unchecked expression at {pos_str(nodes[n].pos)}")
+    if from != to and int_policy(to) != 0 and is_int(from):
+        if is_lit(n): finalize_literal(n)
+        wrap_conv(n, (if int_policy(to) == 1: CV.wrap_int else: CV.saturate_int), to)
+        return n
     # Settled identical scalar/aggregate types require no conversion node.
     if from == to and not is_lit(n): return n
     if from == T_NEVER:
@@ -3365,6 +3368,11 @@ conversion = (n: int, to0: int, args: int[]) -> int:
     a = args[0]
     check_expr(a, if tk == .float_ and nodes[a].kind == .float_lit: to else: 0)
     ft = prune(ntype(a))
+    if int_policy(to) != 0 and not is_int(ft): fatal(nodes[n].pos, "overflow policy conversion requires an integer")
+    if int_policy(to) != 0 and is_int(ft):
+        nodes[n] = nodes[a]
+        wrap_conv(n, (if int_policy(to) == 1: CV.wrap_int else: CV.saturate_int), to)
+        return to
     if tk == .int_ and nodes[a].kind == .float_lit and nodes[a].sval != 0: ft = exact_decimal(a)
     if tk == .int_ and (bundled_rational_type(ft) or bundled_word_rational_type(ft)):
         source = nodes.len()
@@ -3397,7 +3405,7 @@ conversion = (n: int, to0: int, args: int[]) -> int:
     fk = types[ft].kind
     cv = -1
     # (uint64(x) between fixed widths keeps the value: proven from facts, or checked
-    # when it runs; `.wrap(T)` keeps the bits)
+    # when it runs; an overflow='wrap' type keeps the bits)
     if tk == .int_ and fk == .int_ and ft != T_MATH_INT and to != T_MATH_INT and not int_widens(ft, to) and dewy_at(nodes[n].pos):
         nodes[n] = nodes[a]
         narrow_int(n, ft, to)
@@ -3426,27 +3434,6 @@ conversion = (n: int, to0: int, args: int[]) -> int:
         nodes[n] = nodes[a]
         return to
     nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(a), aux = i32(cv), type = i32(to), flags = i32(NF_CHECKED))
-    to
-
-# Conversions keep the value; raw bits have their own spellings. `wrap<uint8>(x)` (the
-# compiler's `wrap`, a builtin a program may shadow) is the integer modulo 2^8 (two's
-# complement for a signed target); `x transmute float64` reads the same bits as another
-# type of the same width.
-dewy_wrap_call = (n: int, callee: int, args: int[]) -> int:
-    pos = nodes[n].pos
-    if nkids(callee) != 1 or args.len() != 1 or nodes[args[0]].kind == .namedarg:
-        fatal(pos, "`wrap` takes one fixed-width integer type and one integer: `wrap<uint8>(x)`")
-    to = prune(effect_generic_argument(kid(callee, 0)))
-    ft = prune(check_expr(args[0], 0))
-    v = last_checked
-    if not is_int(ft) or not is_int(to) or to == T_MATH_INT:
-        fatal(pos, "`wrap<T>(x)` takes an integer modulo 2^N into a fixed-width integer type T (found {dt(ft)} to {dt(to)}); `x transmute T` reads a value's bits as another type of the same width")
-    if ft == T_MATH_INT:
-        v = bc_call("__mi_low_word", [v], pos)
-        check_expr(v, 0)
-        v = last_checked
-    nodes[n] = Node(kind = .conv, pos = pos, a = i32(v), aux = i32(int(CV.int_)), type = i32(to), flags = i32(NF_CHECKED))
-    last_checked = n
     to
 
 # (Key(n): a simple enum's variant by its number, as int(Key.a) gives it, its variants numbered
@@ -3789,6 +3776,8 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
         if power: finalize_literal(a)
         else: join_types(a, b, nodes[n].pos)
         if dewy_math_fold(n, a, b, power, modulo): return T_MATH_INT
+        # A word exponent must not select the wrapping word-base overload.
+        if power and prune(ntype(a)) == T_MATH_INT and is_int(ntype(b)): coerce(b, T_MATH_INT)
     # (`//` and `%` are integer and exact operations; floats have no floor quotient)
     if not power and (is_float(ntype(a)) or is_float(ntype(b))):
         ft = if is_float(ntype(a)): ntype(a) else: ntype(b)
@@ -3797,6 +3786,14 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
     # Only built-in arithmetic may replace a literal divisor with a shift or
     # mask. Custom protocols receive the original operand, including 1 or 2^k.
     helper = name
+    policy = int_policy(ntype(a))
+    if policy != 0:
+        if power: helper = intern("__dewy_policy_power")
+        else:
+            t = prune(ntype(a))
+            coerce(b, t)
+            nodes[n] = Node(kind = .binary, pos = nodes[n].pos, a = i32(a), b = i32(b), type = i32(t), op = i32(int(if modulo: Tok.percent else: Tok.slash)), aux2 = -1, flags = i32(NF_CHECKED))
+            return t
     divisor = nodes[b].ival
     if not power and literal_divisor and nodes[b].kind == .int_lit and divisor > 0 and not has_flag(b, NF_U64) and (divisor & (divisor - 1)) == 0:
         if modulo:
@@ -3934,6 +3931,12 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             add_flag(a0, NF_CHECKED)
             r = dewy_quantity_call(n, name, a0, expected)
             if r != 0: return r
+    if name == ci(28, "abs") and mod_scope < 0 and args.len() == 1 and dewy_at(nodes[n].pos) and not program_fn_named(name):
+        a = args[0]
+        if not has_flag(a, NF_CHECKED):
+            check_expr(a, 0)
+            add_flag(a, NF_CHECKED)
+        if int_policy(ntype(a)) != 0: return call_by_name(n, intern("__dewy_policy_abs"), -1, args, expected, false)
     ii = intrinsic_of(name)
     if ii >= 0 and intrinsics[ii].arr and args.len() > 0:
         a0 = args[0]
@@ -4103,6 +4106,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
         # (Msg(Move(3)), Msg a union: its members are Msgs as they are)
         if hs != 0 and syms[hs].kind == .alias_ and nkids2(int(syms[hs].ref)) == 0:
             at = resolve_alias(int(syms[hs].ref), [], nodes[n].pos)
+            if is_int(at): return conversion(n, at, args)
             if is_union(at):
                 ms: str[]
                 loop m in union_members(at): ms.push(dt(m))
@@ -5352,7 +5356,6 @@ check_call = (n: int, expected: int) -> int:
             if types[mt].kind == .module:
                 mod = int(types[mt].mod)
                 s = module_lookup(mod, name)
-        if s != 0 and syms[s].kind == .builtin and int(syms[s].ref) == int(IN.wrap_bits) and dewy_at(nodes[n].pos): return dewy_wrap_call(n, callee, args)
         if s != 0 and syms[s].kind == .fns:
             targs: int[]
             loop arg in kids(callee): targs.push(effect_generic_argument(arg))
@@ -5374,6 +5377,7 @@ check_call = (n: int, expected: int) -> int:
                 call_targs = saved
                 return r
         t = prune(resolve_type(int(nodes[callee].c)))
+        if is_int(t): return conversion(n, t, args)
         if types[t].kind != .struct_: fatal(nodes[callee].pos, "this type does not have a record constructor")
         return struct_ctor(n, t, int(structs[int(types[t].st)].decl), args, expected)
     if ck == .ident:
@@ -5456,7 +5460,7 @@ check_call = (n: int, expected: int) -> int:
                     check_expr(callee, 0)
                     return value_call(n, callee, args, expected)
         if (name_of(fname) == "wrap" or name_of(fname) == "bitcast") and args.len() == 1 and (is_numeric(rt) or rt == T_MATH_INT) and dewy_at(nodes[n].pos):
-            fatal(nodes[n].pos, "numbers have no `.{name_of(fname)}` member: `wrap<uint8>(x)` keeps the low bits of an integer, and `x transmute float64` reads its bits as another type of the same width")
+            fatal(nodes[n].pos, "numbers have no `.{name_of(fname)}` member: `uint8<overflow='wrap'>(x)` keeps the low bits of an integer, and `x transmute float64` reads its bits as another type of the same width")
         if files[pos_file(nodes[n].pos)].is_dewy: fname = dewy_member_name(callee, rt, fname, args)
         # uniform call syntax
         add_flag(recv, NF_CHECKED)
@@ -6029,7 +6033,6 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         arg_type(args, 0, T_STR)
         r = mk_array(T_U8)
     else if id == .argv: r = T_RAWPTR
-    else if id == .wrap_bits: fatal(nodes[n].pos, "`wrap` names its fixed-width target type: `wrap<uint8>(x)` keeps the low 8 bits of x")
     else if id == .offset_unit:
         nargs_check(n, nargs, 3, 3, "__offset_unit")
         if nodes[args[0]].kind != .str_lit: fatal(nodes[args[0]].pos, "an offset unit's symbol is a string literal")

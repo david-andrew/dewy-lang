@@ -84,7 +84,7 @@ let _mag_mul_school = (a:array<uint64> b:array<uint64>):>array<uint64> => {
 let _mag_shift_left = (limbs:array<uint64> bits:int64):>array<uint64> => {
     if limbs.length =? 0 { return [] }
     let limb_shift:int64 = bits // 32
-    let bit_shift:uint64 = wrap<uint64>(bits % 32)
+    let bit_shift:uint64 = uint64<overflow='wrap'>(bits % 32)
     let result:array<uint64> = []
     let n:int64 = 0
     loop n <? limb_shift { result.push(0)  n = n + 1 }
@@ -103,7 +103,7 @@ let _mag_shift_left = (limbs:array<uint64> bits:int64):>array<uint64> => {
 
 let _mag_shift_right = (limbs:array<uint64> bits:int64):>array<uint64> => {
     let limb_shift:int64 = bits // 32
-    let bit_shift:uint64 = wrap<uint64>(bits % 32)
+    let bit_shift:uint64 = uint64<overflow='wrap'>(bits % 32)
     let result:array<uint64> = []
     let i:int64 = limb_shift
     loop i <? limbs.length {
@@ -556,7 +556,7 @@ _big = ((value:BigInt):>BigInt=>value)
        & ((value:int):>BigInt=>value as BigInt)
        & ((value:uint64):>BigInt=>_from_unsigned(value))
        & ((value:int64):>BigInt=>{
-            let magnitude=wrap<uint64>(value)
+            let magnitude=uint64<overflow='wrap'>(value)
             if value <? 0 magnitude=0-magnitude
             return _from_unsigned(magnitude value <? 0)
          })
@@ -644,10 +644,10 @@ to_int64=(value:BigInt):>int64|none=>{
     if magnitude is? none return none
     if value._sign <? 0 {
         if magnitude >? 9223372036854775808 return none
-        return wrap<int64>(0-magnitude)
+        return int64<overflow='wrap'>(0-magnitude)
     }
     if magnitude >? 9223372036854775807 return none
-    return wrap<int64>(magnitude)
+    return int64<overflow='wrap'>(magnitude)
 }
 
 # Round the exact ratio once to an IEEE binary format. Keeping a quotient and
@@ -690,13 +690,13 @@ _ratio_float_bits=(negative:bool numerator:array<uint64> denominator:array<uint6
     let hidden:uint64=(1 as uint64) << fraction_bits
     if word =? hidden << 1 {word=word >> 1 exponent+=1}
     if exponent >? bias return sign or infinity
-    return sign or (wrap<uint64>(exponent+bias) << fraction_bits) or (word-hidden)
+    return sign or (uint64<overflow='wrap'>(exponent+bias) << fraction_bits) or (word-hidden)
 }
 
 to_float64=(value:BigInt):>float64=>
     f64_from_bits(_ratio_float_bits(value._sign <? 0 value._limbs [1] 52 11))
 to_float32=(value:BigInt):>float32=>
-    f32_from_bits(wrap<uint32>(_ratio_float_bits(value._sign <? 0 value._limbs [1] 23 8)))
+    f32_from_bits(uint32<overflow='wrap'>(_ratio_float_bits(value._sign <? 0 value._limbs [1] 23 8)))
 
 __as__=(value:BigInt):>string=>{
     if value._sign =? 0 return "0"

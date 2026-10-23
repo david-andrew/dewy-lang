@@ -1792,7 +1792,7 @@ fact_pure_binary = (n: int) -> bool:
 # Numeric conversions between floats and integers write nothing.
 fact_pure_conversion = (n: int) -> bool:
     aux = nodes[n].aux
-    aux == i32(int(CV.int2float)) or aux == i32(int(CV.float2int)) or aux == i32(int(CV.float_))
+    aux == i32(int(CV.int2float)) or aux == i32(int(CV.float2int)) or aux == i32(int(CV.float_)) or aux == i32(int(CV.wrap_int)) or aux == i32(int(CV.saturate_int))
 
 fact_reads_only = (id: IN) -> bool:
     id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .static_assert or id == .runtime_assert or id == .assert or id == .panic or id == .unreachable or fact_pure_intrinsic(id)

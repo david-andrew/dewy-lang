@@ -10,7 +10,7 @@ Integers are mostly explicit `int64`/`uint64`, which wrap; the `checked` feature
 adds unannotated arbitrary-precision `int`; fixed-width narrowing can fail (exit 101, or a
 compile-time error when provable). Conversions keep the value: `uint64(x)` stays only where
 every evaluation fits (a first oracle run decides); the rest keep the bits with
-`wrap<uint64>(x)`. `d.keys` is an insertion-ordered set, `+` never concatenates, and a
+`uint64<overflow='wrap'>(x)`. `d.keys` is an insertion-ordered set, `+` never concatenates, and a
 container iterated by value keeps its length in the loop body. Floats are `float64`.
 `@fn` handles and units are deliberately absent while they change.
 
@@ -655,7 +655,7 @@ class Interp(Expr):
 
 @dataclass(frozen=True)
 class Conv(Expr):
-    """`T(x)` keeps the value (checked: exit 101 when it does not fit); `wrap<T>(x)` keeps the bits.
+    """`T(x)` keeps the value (checked: exit 101 when it does not fit); `T<overflow='wrap'>(x)` keeps the bits.
 
     A tagged integer conversion is decided by `settle`: it stays checked only where a first
     oracle run evaluated it and every value fit.
@@ -667,7 +667,7 @@ class Conv(Expr):
 
     def render(self, typed=False):
         if self.wrap:
-            return f'wrap<{self.ty}>({render(self.x)})'
+            return f"{self.ty}<overflow='wrap'>({render(self.x)})"
         return f'{self.ty}({render(self.x)})'
 
     def eval(self, m, env):
@@ -1660,7 +1660,7 @@ class Generator:
         return self.leaf(I)
 
     def convert(self, ty, x):
-        """Between int64 and uint64: `wrap<T>(x)`, or `T(x)` where it will fit (see `fill_asserts`)."""
+        """Between int64 and uint64: `T<overflow='wrap'>(x)`, or `T(x)` where it will fit (see `fill_asserts`)."""
         if self.chance(.25):
             return Conv(ty, x, wrap=True)
         self.conversions += 1

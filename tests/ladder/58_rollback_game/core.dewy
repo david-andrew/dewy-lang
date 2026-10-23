@@ -32,9 +32,9 @@ inputs=(frame:int64):>array<int64>=>[frame%3-1 (frame*7)%3-1]
 fingerprint=(g:Game):>uint64=> {
     let hash=g.random as uint64
     loop p in g.players  {
-        hash=hash*257+wrap<uint64>(p.x+p.velocity*100+p.score*1000)
+        hash=hash*257+uint64<overflow='wrap'>(p.x+p.velocity*100+p.score*1000)
     }
-    return hash*257+wrap<uint64>(g.frame)
+    return hash*257+uint64<overflow='wrap'>(g.frame)
 }
 main=():>void=> {
     let initial=Game[[Player[20 0 0] Player[80 0 0]] 12345 0]

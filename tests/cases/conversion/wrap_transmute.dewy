@@ -1,13 +1,13 @@
 # quick
 main=()=>{
     let big:int64=-1
-    printl(wrap<uint64>(big))
-    printl(wrap<uint8>(big))
+    printl(uint64<overflow='wrap'>(big))
+    printl(uint8<overflow='wrap'>(big))
     let x:int64=300
-    printl(wrap<uint8>(x))
-    printl(wrap<int8>(x))
+    printl(uint8<overflow='wrap'>(x))
+    printl(int8<overflow='wrap'>(x))
     let n=2^70+5
-    printl(wrap<uint8>(n))
+    printl(uint8<overflow='wrap'>(n))
     printl(float64(1.0) transmute uint64)
     printl(uint64(4607182418800017408) transmute float64)
     printl(float32(-0.0) transmute uint32)

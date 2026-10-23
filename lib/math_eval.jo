@@ -88,3 +88,17 @@ __mc_count = (value: __CTMathRep) -> int:
     if value.big.len() == 0: return value.word
     if value.big[0]._sign < 0: __int_overflow()
     9223372036854775807
+
+__mc_low_word = (a: __CTMathRep) -> int:
+    if a.big.len() == 0: return a.word
+    value = a.big[0]
+    word = value._limbs[0]
+    if value._limbs.len() > 1: word = word | (value._limbs[1] << 32)
+    if value._sign < 0: word = 0 - word
+    int(word)
+
+__mc_clamp_word = (a: __CTMathRep, lo: int, hi: int, unsigned: int) -> int:
+    if __mc_compare(a, __CTMathRep(lo)) < 0: return lo
+    upper = if unsigned != 0: __mc_unsigned(u64(hi)) else: __CTMathRep(hi)
+    if __mc_compare(a, upper) > 0: return hi
+    __mc_low_word(a)

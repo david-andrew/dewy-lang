@@ -27,7 +27,7 @@ main=():>void | net.NetError | Canceled=>{
     let total=0
     let largest=0
     concurrent {
-        let sent=spawn net.tcp_send(client [loop i in [0..3000000) wrap<uint8>(i)])
+        let sent=spawn net.tcp_send(client [loop i in [0..3000000) uint8<overflow='wrap'>(i)])
         loop total <? 3000000 {
             let got=net.tcp_receive(peer 100000)
             if got is? none break

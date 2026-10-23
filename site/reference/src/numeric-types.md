@@ -131,8 +131,8 @@ remaining = (src:string):>nat64|none => {
     total:nat64 = 0
     loop i <? src.length {
         let rest:nat64 = src.length - i    # at least 1 while the guard holds
-        let sum:int64 = total + rest        # fixed-width addition wraps
-        if sum <? 0 return none             # two nonnegative inputs overflow into negatives
+        if total >? int64.max - rest return none
+        let sum:int64 = total + rest        # the guard proves the storage narrowing
         total = sum
         i += 1                              # the fact drops here, and returns with the next test
     }

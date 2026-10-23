@@ -12,9 +12,11 @@ static int64_t kernel(const uint8_t *text, int64_t length) {
         } else if (byte >= 48 && byte <= 57) {
             int64_t value = 0;
             while (i < length && text[i] >= 48 && text[i] <= 57) {
+                if (value > INT64_C(922337203685477579)) value %= 1000000007;
                 value = value * 10 + text[i] - 48;
                 i++;
             }
+            if (value >= 1000000007) value %= 1000000007;
             total = (total + value) % 1000000007;
         } else {
             int64_t word = 0;

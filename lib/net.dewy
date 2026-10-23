@@ -137,7 +137,7 @@ __SockAddrIn:type=[family:uint16 port:uint16 address:uint32 zero:uint64]
 __SockAddrIn6:type=[family:uint16 port:uint16 flow:uint32 a0:uint32 a1:uint32 a2:uint32 a3:uint32 scope:uint32]
 
 # port in network byte order
-__port_bytes=(port:int64):>uint16=>wrap<uint16>(((port & 255) << 8) | ((port >> 8) & 255))
+__port_bytes=(port:int64):>uint16=>uint16<overflow='wrap'>(((port & 255) << 8) | ((port >> 8) & 255))
 
 # A numeric IPv4 or IPv6 address (or localhost) and a port, as the C sockaddr's bytes.
 __address=(host:string port:int64):>__Address | NetError=>{
@@ -195,7 +195,7 @@ if $target.os =? "windows" {
     const __SOL_SOCKET:int32=0xffff
     const __SO_ERROR:int32=0x1007
 
-    __family_field=(family:int32 size:int64):>uint16=>wrap<uint16>(family)
+    __family_field=(family:int32 size:int64):>uint16=>uint16<overflow='wrap'>(family)
 
     __open=(family:int32):>int64=>{
         # (Winsock counts its users: every opening may start it)
@@ -228,7 +228,7 @@ if $target.os =? "windows" {
     __again=(code:int32):>bool=>code =? 10035 or code =? 10004
     __in_progress=(code:int32):>bool=>code =? 10035 or code =? 10036
     __poll_one=(s:int64 events:int32 timeout:int32):>int32=>{
-        let fds:array<__PollFd>=[__PollFd[s wrap<int16>(events) 0]]
+        let fds:array<__PollFd>=[__PollFd[s int16<overflow='wrap'>(events) 0]]
         if __WSAPoll(fds.ptr 1 timeout) <=? 0 return 0
         return int32(fds[0].revents)
     }
@@ -274,7 +274,7 @@ if $target.os =? "windows" {
     __name=(fd:int64 address:ptr<uint8> length:ptr<int32>):>int32=>__name_c(__fd(fd) address length)
     __receive=(fd:int64 data:ptr<uint8> length:int64):>int64=>if length <? 0 -1 else __recv_c(__fd(fd) data uint64(length) 0)
     __poll_one=(fd:int64 events:int32 timeout:int32):>int32=>{
-        let fds:array<__PollFd>=[__PollFd[__fd(fd) wrap<int16>(events) 0]]
+        let fds:array<__PollFd>=[__PollFd[__fd(fd) int16<overflow='wrap'>(events) 0]]
         if __poll(fds.ptr 1 timeout) <=? 0 return 0
         $runtime_assert fds.length =? 1
         return int32(fds[0].revents)
@@ -299,7 +299,7 @@ if $target.os =? "windows" {
         const __SO_REUSEADDR:int32=4
         const __SO_ERROR:int32=0x1007
         # (sockaddr starts with its length on macOS)
-        __family_field=(family:int32 size:int64):>uint16=>wrap<uint16>((family << 8) | size)
+        __family_field=(family:int32 size:int64):>uint16=>uint16<overflow='wrap'>((family << 8) | size)
         # Blocking sockets: each call waits for readiness first. No SIGPIPE on send.
         __open=(family:int32):>int64=>{
             let fd=__socket(family 1 6)
@@ -338,7 +338,7 @@ if $target.os =? "windows" {
         const __SOL_SOCKET:int32=1
         const __SO_REUSEADDR:int32=2
         const __SO_ERROR:int32=4
-        __family_field=(family:int32 size:int64):>uint16=>wrap<uint16>(family)
+        __family_field=(family:int32 size:int64):>uint16=>uint16<overflow='wrap'>(family)
         # Nonblocking, closed on exec. Sends never raise SIGPIPE.
         __open=(family:int32):>int64=>int64(__socket(family 1 | 0x800 | 0x80000 6))
         __accept=(fd:int64):>int64=>int64(__accept4(__fd(fd) none none 0x800 | 0x80000))

@@ -665,8 +665,12 @@ a narrowing between fixed widths, explicit (`uint64(x)`, `x as uint8`) or implic
 `uint64` index or slice bound, an argument or result), is a proven conversion: the facts that
 prove a refinement prove it, an unproven one is checked when it runs (`value does not fit int8`),
 and a refuted one is a compile error (`w does not fit uint64`). Keeping the bits has its own
-spelling: `wrap<uint8>(x)` is the integer modulo 2^8 (two's complement for a signed target, and
-the low bits of an `int`), so `wrap<uint64>(int64(-1))` is `18446744073709551615`;
+spelling: `uint8<overflow='wrap'>(x)` is the integer modulo 2^8 (two's complement for a signed target, and
+the low bits of an `int`), so `uint64<overflow='wrap'>(int64(-1))` is `18446744073709551615`.
+`uint8<overflow='saturate'>(x)` clamps an integer to 0 through 255 instead.
+The policies are part of the type and work through type aliases. Policy conversions
+accept integer inputs, including arbitrary-precision `int` values. The former
+builtin `wrap<T>(x)` has been removed; user-defined functions named `wrap` remain ordinary functions.
 `x transmute float64` reads the bits of an integer or float as another type of the same width. Among overloads, a narrowing is
 the last resort. A comparison between two widths (`i:uint64 <? s.length`) compares in the left
 operand's width, the right operand taking the same proven conversion. Mutable arguments and
@@ -911,8 +915,8 @@ call. Other juxtaposition is not defined here. A semicolon attached to an expres
 `^` raises a value to a power and associates right: `2^3^2` is `2^(3^2)`.
 It binds above multiplication, literal coefficients and unary minus, so `2x^2`
 is `2*(x^2)` and `-2^2` is `-(2^2)`. Use `xor` for bitwise exclusive-or.
-Integer powers use a nonnegative `int64` exponent. `int` powers check each
-product; fixed-width powers retain wrapping multiplication. A negative constant
+Integer powers use a nonnegative integer exponent. `int` powers remain exact,
+including when the exponent is `int64`; fixed-width powers retain wrapping multiplication. A negative constant
 exponent gives a `rational`, `2^(-2)` is `1/4`; a negative runtime exponent panics
 with guidance to use an explicit rational or floating base. Float powers use the inherited
 floating math library. `bigint` powers remain exact for nonnegative exponents;

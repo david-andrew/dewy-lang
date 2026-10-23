@@ -168,7 +168,7 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
 - `Send`/`Sync` are inferred structurally; `$send=false`/`$sync=false` on a type
   is a safe opt-out; claiming either for a type the compiler can't verify needs
   an unsafe boundary.
-- Conversions: `wrap<uint8>(x)` keeps the low bits; same-size reinterpretation
+- Conversions: `uint8<overflow='wrap'>(x)` keeps the low bits; same-size reinterpretation
   is the infix word `f transmute uint64` (like `as`). No `.bitcast`/`.wrap`
   method spellings.
 - Iterator control: bind the iterator and loop over its place:

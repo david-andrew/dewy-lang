@@ -1335,7 +1335,18 @@ dw_type = (id: int) -> int:
             entry = dw_grouped(child)
             op = dw_op(entry)
             condition = op == .function or op == .kw_and or op == .eq or op == .not_eq or op == .lt or op == .le or op == .gt or op == .ge or op == .contains
-            if condition:
+            if op == .assign and dw_name(dw_child(entry, 1)) == "overflow":
+                value = dw_expr(dw_child(entry, 2))
+                if nodes[value].kind != .str_lit or nodes[value].aux != 0: return dw_fail(entry, "overflow='wrap' or overflow='saturate'")
+                policy = name_of(int(nodes[value].sval))
+                if policy != "wrap" and policy != "saturate": return dw_fail(entry, "overflow='wrap' or overflow='saturate'")
+                if nodes[base].aux == -9: return dw_fail(entry, "duplicate overflow policy")
+                n = mk(.tname, pos)
+                nodes[n].aux = -9
+                nodes[n].a = i32(base)
+                nodes[n].ival = if policy == "wrap": 1 else: 2
+                base = n
+            else if condition:
                 refine_active = true
                 n = mk(.trefined, dewy_syntax[entry].pos)
                 nodes[n].a = i32(base)
@@ -1991,7 +2002,7 @@ dw_expr = (id: int) -> int:
             loop nodes[type_base].kind == .field: type_base = int(nodes[type_base].a)
             if nodes[type_base].kind == .ident: nodes[n].c = i32(dw_type(id))
             args: int[]
-            if nodes[int(nodes[n].c)].kind != .trefined:
+            if nodes[int(nodes[n].c)].kind != .trefined and nodes[int(nodes[n].c)].aux != -9:
                 loop child in dw_children(right): args.push(dw_type(child))
             set_list(n, args)
             return n

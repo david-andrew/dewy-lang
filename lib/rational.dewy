@@ -68,9 +68,9 @@ _decimal=(numerator denominator):>Rational=>_make(_integer(numerator) _integer(d
 # rejected as the integer conversion rejects them.
 _from_float=(value:float64):>Rational=>{
     let bits=f64_bits(value)
-    let exponent=wrap<int64>((bits >> 52) and 2047)
+    let exponent=int64<overflow='wrap'>((bits >> 52) and 2047)
     if exponent =? 2047 panic("rational of a NaN or infinite float")
-    let mantissa=wrap<int64>(bits and 4503599627370495)
+    let mantissa=int64<overflow='wrap'>(bits and 4503599627370495)
     if exponent =? 0 exponent=1 else mantissa=mantissa+4503599627370496
     if mantissa =? 0 return Rational[0 1 2]
     if (bits >> 63) =? 1 mantissa=-mantissa
@@ -163,7 +163,7 @@ _word_rational = ((value:Rational):>RationalWord|Overflow=>_narrow(value))
 # shrink again, so the result could not fit either.
 _word_pow=(base:RationalWord exponent:int64):>RationalWord|Overflow=>{
     let value=_widen(base)
-    let remaining=wrap<uint64>(exponent)
+    let remaining=uint64<overflow='wrap'>(exponent)
     if exponent <? 0 {value=reciprocal(value) remaining=0-remaining}
     let result=Rational[1 1 value._shown]
     loop remaining >? 0 {
@@ -206,11 +206,11 @@ to_float32=(value:Rational):>float32=>{
     }
     let top:BigInt=n
     let bottom:BigInt=d
-    return f32_from_bits(wrap<uint32>(_ratio_float_bits(top._sign <? 0 top._limbs bottom._limbs 23 8)))
+    return f32_from_bits(uint32<overflow='wrap'>(_ratio_float_bits(top._sign <? 0 top._limbs bottom._limbs 23 8)))
 }
 
 pow=(value:Rational exponent:int64):>Rational=>{
-    let remaining=wrap<uint64>(exponent)
+    let remaining=uint64<overflow='wrap'>(exponent)
     if exponent <? 0 {value=reciprocal(value) remaining=0-remaining}
     let result=Rational[1 1 value._shown]
     # Powers of the same reduced fraction remain coprime: no repeated GCD.
@@ -287,7 +287,7 @@ _decimal_text=(numerator:int denominator:int repeats:bool):>string=>{
 }
 
 # Equal values hash alike, however they print.
-hash=(value:Rational):>uint64=>wrap<uint64>(value.numerator.hash()*11400714819323198485) xor value.denominator.hash()
+hash=(value:Rational):>uint64=>uint64<overflow='wrap'>(value.numerator.hash()*11400714819323198485) xor value.denominator.hash()
 __unary_sub__ = ((value:Rational):>Rational=>_neg(value))
     & ((value:RationalWord):>RationalWord|Overflow=>_narrow(_neg(_widen(value))))
 

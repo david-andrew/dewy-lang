@@ -90,6 +90,8 @@ block=(key:Key counter:uint32 nonce:Nonce):>array<uint8>=>{
 
 # Encrypt or decrypt: XOR the data with the keystream starting at block `counter`.
 xor_stream=(key:Key counter:uint32 nonce:Nonce data:array<uint8>):>array<uint8>=>{
+    # A nonce has only 2^32 counter blocks. Refuse reuse before emitting data.
+    $runtime_assert data.length <=? (4294967296-(counter as int64))*BLOCK
     let out:array<uint8>=[]
     out.reserve(data.length)
     let state=setup(key counter nonce)
@@ -103,8 +105,11 @@ xor_stream=(key:Key counter:uint32 nonce:Nonce data:array<uint8>):>array<uint8>=
             let byte=((word >> (8*(i%4))) and 255) as uint8
             out.push(data[j] xor byte)
         }
-        state[12]+=1
-        at+=BLOCK
+        at=stop
+        if at <? data.length {
+            $runtime_assert state[12] <? uint32.max
+            state[12]+=1
+        }
     }
     return out
 }

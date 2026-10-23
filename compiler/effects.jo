@@ -1382,7 +1382,7 @@ effect_scan_node = (f: int, n: int):
     else if k == .conv and nodes[n].aux == i32(int(CV.set_text)): supported = true
 
     else if k == .conv:
-        supported = (effect_scalar(ntype(n)) and effect_word(int(nodes[n].a)) or effect_small(n) >= 0 or is_fn_type(ntype(n)) and effect_bare(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)))
+        supported = (effect_scalar(ntype(n)) and effect_word(int(nodes[n].a)) or effect_small(n) >= 0 or is_fn_type(ntype(n)) and effect_bare(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int)))
     if not supported: effect_opaque(f, n)
     # Hidden calls cannot be trusted by annotation or pathname. They remain
     # explicit dependencies for witnesses and legacy isolation even when this

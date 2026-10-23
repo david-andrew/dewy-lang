@@ -1322,6 +1322,7 @@ new_global = (name: int, decl: int, m: int) -> int:
 
 # ---------------- type resolution ----------------
 resolve_type = (tn: int) -> int:
+    if nodes[tn].kind == .tname and nodes[tn].aux == -9: return policy_int(resolve_type(int(nodes[tn].a)), int(nodes[tn].ival), nodes[tn].pos)
     if nodes[tn].kind == .tname and nodes[tn].aux == -7: return int(nodes[tn].ival)
     k = nodes[tn].kind
     if k == .trefined: return resolve_refinement(tn)

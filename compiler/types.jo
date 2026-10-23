@@ -301,6 +301,20 @@ prune = (t0: int) -> int:
     loop t != 0 and types[t].kind == .var and types[t].ref != 0: t = int(types[t].ref)
     t
 
+# Integer overflow policy is interned in st (0 exact, 1 wrap, 2 saturate).
+# It changes value semantics, not the ABI or storage layout.
+int_policy = (t: int) -> int:
+    let t = prune(t)
+    if types[t].kind != .int_ or t == T_MATH_INT: return 0
+    int(types[t].st)
+
+policy_int = (base: int, policy: int, pos: int) -> int:
+    t = prune(base)
+    if not is_int(t) or t == T_MATH_INT: fatal(pos, "overflow= requires a fixed-width integer type")
+    ti = types[t]
+    ti.st = i32(policy)
+    mk_type(ti, [])
+
 is_int = (t: int) -> bool: types[prune(t)].kind == .int_
 is_float = (t: int) -> bool: types[prune(t)].kind == .float_
 is_numeric = (t: int) -> bool:
@@ -852,8 +866,11 @@ type_str_in = (t0: int, dewy: bool) -> str:
         int_:
             if t == T_MATH_INT: return "int"
             if dewy:
-                if ti.sign: return "int{ti.bits}"
-                return "uint{ti.bits}"
+                base = if ti.sign: "int{ti.bits}" else: "uint{ti.bits}"
+                if ti.st != 0:
+                    policy = if ti.st == 1: "wrap" else: "saturate"
+                    return "{base}<overflow='{policy}'>"
+                return base
             if t == T_INT: return "int"
             if ti.sign: return "i{ti.bits}"
             "u{ti.bits}"

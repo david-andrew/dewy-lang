@@ -26,8 +26,8 @@ main=(argv:array<string>)=>{
     if op=?"pow" {printl"{x^y}" return}
     if op=?"pow-call" {printl"{pow(x y)}" return}
     if op=?"shl" {printl"{x<<y}" return}
-    if op=?"u-shr" {printl"{x>>wrap<uint64>(int64(y))}" return}
-    if op=?"u-shl" {printl"{x<<wrap<uint64>(int64(y))}" return}
+    if op=?"u-shr" {printl"{x>>uint64<overflow='wrap'>(int64(y))}" return}
+    if op=?"u-shl" {printl"{x<<uint64<overflow='wrap'>(int64(y))}" return}
     if op=?"shr" {printl"{x>>y}" return}
     if op=?"div" {printl"{x//y}" return}
     if op=?"mod" {printl"{x%y}" return}

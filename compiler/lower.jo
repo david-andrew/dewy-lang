@@ -2969,6 +2969,103 @@ byte_range = (x: int, t: int, keep: bool) -> (int, int):
     endc()
     (e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, lo, e_iconst(owner_stride(int(types[bt].elem))))), e_bin(.sub, VI, hi, lo))
 
+# High unsigned product without allocating, including targets without mulhu.
+fixed_mul_high = (a: int, b: int) -> int:
+    if mulh_ok: return e_bin(.mulhu, VI, a, b)
+    mask = e_iconst(4294967295)
+    shift = e_iconst(32)
+    al = e_bin(.and_, VI, a, mask); ah = e_bin(.shru, VI, a, shift)
+    bl = e_bin(.and_, VI, b, mask); bh = e_bin(.shru, VI, b, shift)
+    low = e_bin(.mul, VI, al, bl)
+    cross = e_bin(.add, VI, e_bin(.mul, VI, ah, bl), e_bin(.shru, VI, low, shift))
+    next = e_bin(.add, VI, e_bin(.mul, VI, al, bh), e_bin(.and_, VI, cross, mask))
+    e_bin(.add, VI, e_bin(.mul, VI, ah, bh), e_bin(.add, VI, e_bin(.shru, VI, cross, shift), e_bin(.shru, VI, next, shift)))
+
+# Saturating policy arithmetic detects word overflow before narrowing. Widening
+# multiplication uses the target's high-half instruction, or its inline 32-bit decomposition.
+saturate_binary = (op: Tok, t: int, a: int, b: int) -> int:
+    signed = types[t].sign
+    bits = int(types[t].bits)
+    hi = if bits == 64: -1 else: (1 << bits) - 1
+    lo = 0
+    if signed:
+        hi = int(u64(hi) >> 1)
+        lo = -hi - 1
+    value = e_bin(int_op(op, signed), VI, a, b)
+    bad = e_iconst(0)
+    negative = e_iconst(0)
+    if signed:
+        if op == .plus:
+            bad = e_bin(.lts, VI, e_bin(.and_, VI, e_bin(.xor, VI, a, value), e_bin(.xor, VI, b, value)), e_iconst(0))
+            negative = e_bin(.lts, VI, a, e_iconst(0))
+        else if op == .minus:
+            bad = e_bin(.lts, VI, e_bin(.and_, VI, e_bin(.xor, VI, a, b), e_bin(.xor, VI, a, value)), e_iconst(0))
+            negative = e_bin(.lts, VI, a, e_iconst(0))
+        else:
+            high = if mulh_ok: e_bin(.mulhs, VI, a, b) else: fixed_mul_high(a, b)
+            if not mulh_ok:
+                high = e_bin(.sub, VI, high, e_bin(.and_, VI, e_bin(.shrs, VI, a, e_iconst(63)), b))
+                high = e_bin(.sub, VI, high, e_bin(.and_, VI, e_bin(.shrs, VI, b, e_iconst(63)), a))
+            bad = e_bin(.ne, VI, high, e_bin(.shrs, VI, value, e_iconst(63)))
+            negative = e_bin(.lts, VI, e_bin(.xor, VI, a, b), e_iconst(0))
+    else:
+        if op == .plus: bad = e_bin(.ltu, VI, value, a)
+        else if op == .minus:
+            bad = e_bin(.ltu, VI, a, b)
+            negative = e_iconst(1)
+        else:
+            high = fixed_mul_high(a, b)
+            bad = e_bin(.ne, VI, high, e_iconst(0))
+    out = vreg(VI)
+    e_mov(out, value)
+    iff(bad)
+    iff(negative)
+    e_mov(out, e_iconst(lo))
+    els()
+    e_mov(out, e_iconst(hi))
+    endc()
+    els()
+    if signed:
+        iff(e_bin(.lts, VI, value, e_iconst(lo)))
+        e_mov(out, e_iconst(lo))
+        endc()
+    iff(e_bin((if signed: Op.gts else: Op.gtu), VI, value, e_iconst(hi)))
+    e_mov(out, e_iconst(hi))
+    endc()
+    endc()
+    out
+
+saturate_shift = (t: int, a: int, count: int) -> int:
+    signed = types[t].sign
+    bits = int(types[t].bits)
+    hi = if bits == 64: -1 else: (1 << bits) - 1
+    lo = 0
+    if signed:
+        hi = int(u64(hi) >> 1)
+        lo = -hi - 1
+    out = vreg(VI)
+    endpoint = vreg(VI)
+    e_mov(endpoint, e_iconst(hi))
+    if signed:
+        iff(e_bin(.lts, VI, a, e_iconst(0)))
+        e_mov(endpoint, e_iconst(lo))
+        endc()
+    e_mov(out, e_iconst(0))
+    iff(e_bin(.ne, VI, a, e_iconst(0)))
+    iff(e_bin(.geu, VI, count, e_iconst(64)))
+    e_mov(out, endpoint)
+    els()
+    shifted = e_bin(.shl, VI, a, count)
+    restored = e_bin((if signed: Op.shrs else: Op.shru), VI, shifted, count)
+    iff(e_bin(.ne, VI, a, restored))
+    e_mov(out, endpoint)
+    els()
+    e_mov(out, saturate_binary(.plus, t, shifted, e_iconst(0)))
+    endc()
+    endc()
+    endc()
+    out
+
 gen_binary = (e: int) -> Val:
     a = int(nodes[e].a)
     b = int(nodes[e].b)
@@ -3071,10 +3168,28 @@ gen_binary = (e: int) -> Val:
     va = freeze_scalar(gen_expr(a).v, lt)
     vb = if op == .shl or op == .shr: math_shift_count(b) else: gen_expr(b).v
     sg = (types[lt].kind == .int_ and types[lt].sign)
+    if int_policy(ntype(e)) == 2 and op == .shl: return V(saturate_shift(ntype(e), va, vb), false)
+    if int_policy(ntype(e)) == 2 and (op == .plus or op == .minus or op == .star): return V(saturate_binary(op, ntype(e), va, vb), false)
     if op == .slash or op == .percent:
         iff(e_bin(.eq, VI, vb, e_iconst(0)))
         e_call_nr1(rt("__div_zero"), e_daddr(loc_data(nodes[e].pos)), -1)
         endc()
+    if nodes[e].aux2 == -1 and (op == .slash or op == .percent):
+        if not sg: return V(e_bin(int_op(op, false), VI, va, vb), false)
+        result = vreg(VI)
+        iff(e_bin(.eq, VI, vb, e_iconst(-1)))
+        if op == .percent: e_mov(result, e_iconst(0))
+        else if int_policy(lt) == 2: e_mov(result, saturate_binary(.minus, lt, e_iconst(0), va))
+        else: e_mov(result, norm(e_un(.neg, VI, va), lt))
+        els()
+        quotient = e_bin(.divs, VI, va, vb)
+        remainder = e_bin(.rems, VI, va, vb)
+        e_mov(result, if op == .slash: quotient else: remainder)
+        iff(e_bin(.and_, VI, e_bin(.ne, VI, remainder, e_iconst(0)), e_bin(.lts, VI, e_bin(.xor, VI, remainder, vb), e_iconst(0))))
+        e_mov(result, if op == .slash: e_addi(quotient, -1) else: e_bin(.add, VI, remainder, vb))
+        endc()
+        endc()
+        return V(result, false)
     if types[lt].kind == .bool_ and (op == .amp or op == .pipe or op == .caret):
         return V(e_bin(int_op(op, false), VI, va, vb), false)
     if sg and (op == .slash or op == .percent) and not (nodes[b].kind == .int_lit and nodes[b].ival != -1):
@@ -4475,6 +4590,34 @@ gen_conv = (e: int) -> Val:
         return V(e_bin(.add, VI, table, rel), false)
     if cv == .big2math: return math_call("__mi_pack", [gen_borrowed(a).v])
     if cv == .math2big: return math_call("__mi_big", [gen_borrowed(a).v], to)
+    if cv == .wrap_int or cv == .saturate_int:
+        v = gen_borrowed(a).v
+        if cv == .wrap_int:
+            if from == T_MATH_INT: v = e_call1(rt("__mi_low_word"), v, VI)
+            return V(norm(v, to), false)
+        bits = int(types[to].bits)
+        hi = if bits == 64: -1 else: (1 << bits) - 1
+        lo = 0
+        if types[to].sign:
+            hi = int(u64(hi) >> 1)
+            lo = -hi - 1
+        if from == T_MATH_INT:
+            return V(e_call(rt("__mi_clamp_word"), [v, e_iconst(lo), e_iconst(hi), e_iconst(int(not types[to].sign))], VI), false)
+        result = vreg(VI)
+        e_mov(result, v)
+        if types[from].sign:
+            iff(e_bin(.lts, VI, v, e_iconst(lo)))
+            e_mov(result, e_iconst(lo))
+            els()
+            iff(e_bin((if types[to].sign: Op.gts else: Op.gtu), VI, v, e_iconst(hi)))
+            e_mov(result, e_iconst(hi))
+            endc()
+            endc()
+        else:
+            iff(e_bin(.gtu, VI, v, e_iconst(hi)))
+            e_mov(result, e_iconst(hi))
+            endc()
+        return V(norm(result, to), false)
     if cv == .int_:
         if from == T_MATH_INT and math_proven_word(a):
             v = math_word_expr(a)
@@ -4489,7 +4632,7 @@ gen_conv = (e: int) -> Val:
             return V(norm(v, to), false)
         v = gen_borrowed(a).v
         if to == T_MATH_INT:
-            if from == T_U64: return math_call("__mi_unsigned", [v])
+            if is_int(from) and not types[from].sign and types[from].bits == 64: return math_call("__mi_unsigned", [v])
             return math_pack_word(a, v)
         if from == T_MATH_INT:
             v = if types[to].sign: math_signed(v) else: e_call1(rt("__mi_to_unsigned"), v, VI)
@@ -4948,6 +5091,7 @@ gen_value_unary = (e: int) -> Val:
     v = gen_expr(a).v
     if nodes[e].op == i32(int(Tok.minus)):
         if vc(t) == VC_FLT: return V(e_un(.fneg, vt_of(t), v), false)
+        if int_policy(t) == 2: return V(saturate_binary(.minus, t, e_iconst(0), v), false)
         return V(norm(e_un(.neg, VI, v), t), false)
     return V(norm(e_un(.not_, VI, v), t), false)
 
@@ -5756,7 +5900,9 @@ gen_assign = (s: int):
             iff(e_bin(.eq, VI, rhs, e_iconst(0)))
             e_call_nr1(rt("__div_zero"), e_daddr(loc_data(nodes[s].pos)), -1)
             endc()
-        if types[t].kind == .bool_: r = e_bin(int_op(op, false), VI, cur, rhs)
+        if int_policy(t) == 2 and op == .shl: r = saturate_shift(t, cur, rhs)
+        else if int_policy(t) == 2 and (op == .plus or op == .minus or op == .star): r = saturate_binary(op, t, cur, rhs)
+        else if types[t].kind == .bool_: r = e_bin(int_op(op, false), VI, cur, rhs)
         else if sg and (op == .slash or op == .percent): r = norm(sdiv_wrap(op, cur, rhs, t), t)
         else if (op == .shl or op == .shr) and dewy_at(nodes[s].pos): r = norm(wide_shift(op, sg, cur, rhs, int(nodes[s].b)), t)
         else: r = norm(e_bin(int_op(op, sg), VI, cur, rhs), t)

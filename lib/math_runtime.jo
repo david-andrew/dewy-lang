@@ -214,3 +214,22 @@ __mi_count = (value: __dewy_int) -> int:
 
 __mi_word_float = (a: int, b: int, operation: int) -> f64:
     __mi_float(__mi_slow(__mi_word(a), __mi_word(b), operation))
+
+# Saturating conversion inspects at most two limbs; it never allocates a bound.
+__mi_clamp_word = (a: __dewy_int, lo: int, hi: int, unsigned: int) -> int:
+    if (a as int) & 1 == 0:
+        word = (a as int) >> 1
+        if word < lo: return lo
+        if unsigned != 0:
+            if u64(word) > u64(hi): return hi
+        else if word > hi: return hi
+        return word
+    value = __mi_payload(a)[0]
+    if value._limbs.len() > 2: return if value._sign < 0: lo else: hi
+    magnitude = value._limbs[0]
+    if value._limbs.len() > 1: magnitude |= value._limbs[1] << 32
+    if value._sign < 0:
+        if magnitude > u64(0) - u64(lo): return lo
+        return int(u64(0) - magnitude)
+    if magnitude > u64(hi): return hi
+    int(magnitude)

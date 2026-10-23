@@ -83,3 +83,17 @@ remove_prefix = (s: str, prefix: str) -> str:
 remove_suffix = (s: str, suffix: str) -> str:
     if ends_with(s, suffix): return s[..len(s) - len(suffix))
     s
+
+# Keep the overflow policy in each product rather than erasing it at a helper call.
+__dewy_policy_power[T] = (base: T, exponent: int) -> T:
+    if exponent < 0: panic("negative integer exponent: use a rational or floating base")
+    let base = base
+    let exponent = exponent
+    result: T = 1
+    loop exponent > 0:
+        if exponent & 1 == 1: result *= base
+        exponent = exponent >> 1
+        if exponent > 0: base *= base
+    result
+
+__dewy_policy_abs[T] = (value: T) -> T: if value < 0: -value else: value

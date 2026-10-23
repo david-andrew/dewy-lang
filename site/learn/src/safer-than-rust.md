@@ -33,7 +33,7 @@ The fix is more facts (a guard such as `if 0 <=? i and i <? xs.length`, or a ref
 
 Rust's `i32` overflow panics in a debug build and wraps in a release build, so the same program can behave differently by build mode. In Dewy, arithmetic on `int32`, `uint8` and the other fixed-width types is exact like `int`; the width is a storage property. Storing a result back into a narrower binding, field, parameter or return is the narrowing obligation: free when the compiler proves it fits, otherwise a compile error with fix-its. Wrapping and saturating are still available, but only when the type says so (`uint32<overflow='wrap'>` for hashes and checksums).
 
-**Status.** Decided, in progress, and not yet today's behavior. Today's compiler still wraps a fixed-width result when it is stored (an `int32` holding `2147483647` plus one stores `-2147483648`), and the explicit wrap form is currently `wrap<uint8>(x)`. The exact arithmetic, the narrowing error and the `overflow=` spelling are landing.
+**Status.** Decided, in progress, and not yet today's behavior. Today's compiler still wraps a fixed-width result when it is stored (an `int32` holding `2147483647` plus one stores `-2147483648`), and the explicit wrap form is currently `uint8<overflow='wrap'>(x)`. The exact arithmetic, the narrowing error and the `overflow=` spelling are landing.
 
 ## Data-race freedom from value semantics
 

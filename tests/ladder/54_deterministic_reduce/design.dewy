@@ -5,7 +5,7 @@ leaf_summary=(chunk:array<int64>):>Summary=> {
     loop x in chunk  {
         result.sum+=x
         result.count+=1
-        result.hash=result.hash*257+wrap<uint64>(x)
+        result.hash=result.hash*257+uint64<overflow='wrap'>(x)
         result.power*=257
     }
     return result

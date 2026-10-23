@@ -5925,15 +5925,15 @@ def test_core_fixed_index_unsigned_domain(compiler, tmp_path, release, target):
     source.write_text('''read8=(table:array<uint8 length=256> index:uint8)=>(table[index] as int64)
 read16=(table:array<uint8 length=65536> index:uint16)=>(table[index] as int64)
 read_widen=(table:array<uint8 length=256> index:uint8)=>(table[(index as int16) as int64] as int64)
-read_wrap=(table:array<uint8 length=256> index:int16)=>(table[wrap<uint8>(index)] as int64)
+read_wrap=(table:array<uint8 length=256> index:int16)=>(table[uint8<overflow='wrap'>(index)] as int64)
 main=():>void=>exit(entry()) entry=()=>{
  let small:array<uint8 length=256>=[]
  loop i in [0..256) {small[i]=i as uint8}
  let large:array<uint8 length=65536>=[]
- loop i in [int64(0)..65536) {large[i]=wrap<uint8>(i)}
+ loop i in [int64(0)..65536) {large[i]=uint8<overflow='wrap'>(i)}
  loop i in [0..256) {if read8(small i as uint8) not=? i return 1
  if read_widen(small i as uint8) not=? i return 2}
- loop i in [int64(0)..65536) {if read16(large i as uint16) not=? (wrap<uint8>(i) as int64) return 3}
+ loop i in [int64(0)..65536) {if read16(large i as uint16) not=? (uint8<overflow='wrap'>(i) as int64) return 3}
  if read_wrap(small -1) not=? 255 return 4
  return 42
 }
@@ -5963,7 +5963,7 @@ main=():>void=>exit(entry()) entry=()=>{
 @pytest.mark.parametrize('size,ty,index,value', [
     (255, 'uint8', 'index', '255'),
     (65535, 'uint16', 'index', '65535'),
-    (256, 'uint16', 'wrap<int8>(index) as int64', '255'),
+    (256, 'uint16', "int8<overflow='wrap'>(index) as int64", '255'),
     (256, 'int8', '(index as int16) as int64', '-1'),
 ])
 def test_core_fixed_index_domain_keeps_checks(compiler, tmp_path, release, size, ty, index, value):
