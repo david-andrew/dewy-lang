@@ -254,6 +254,17 @@ combine=(a b=a)=>a+b
 main=()=>printl(add(twice(20)))  # 42
 ```
 
+A block expresses each non-`void` value its expressions give, in order, through
+nested `if`/`match` arms and loops. A collector takes them all: `[{1 2} 3]` is
+`[1 2 3]`, `[if c 1]` is `[1]` or `[]`, and loop capture collects every value of
+every iteration. A place for one value (a binding, an operand, an argument, a
+result written `:>T`) takes a block's last expression, and an earlier value
+there is an error. A function without a written result may express several
+values: `pair=()=>{1 2}` makes `[pair()]` `[1 2]`, while `x=pair()` is an error.
+Module code and `:>void` (or `:>void | E`) bodies drop what they express. An attached `;`
+discards a value, `xs.pop();`. See the
+[design](design/multi_expressions.md).
+
 One bare parameter name may omit the parentheses: `x=>x+1`, as in
 `apply(x=>x*2 21)`, where the lambda ends at the next argument. The name is
 always the parameter, even when a type has that spelling; annotated parameters
@@ -909,8 +920,11 @@ and later ones only while the chain holds. A chain rises (`<?`, `<=?`) or falls
 `or` and `not`; `a nand b` is `not (a and b)`, and `nor` and `xnor` negate `or`
 and `xor` the same way, at their precedence. A literal coefficient multiplies the name or parenthesized
 expression after it (`2x`, `2(x+1)`); an identifier followed by parentheses is a
-call. Other juxtaposition is not defined here. A semicolon attached to an expression, `f();`, discards its result; an unattached
-`;` (after a space or on its own line) is an error.
+call. Other juxtaposition is not defined here. A semicolon attached to an
+expression (no space before it), `f();`, evaluates it and discards everything it
+would express; attached to a loop or `if`, `loop c xs.pop();`, it discards what
+that statement expresses. An unattached `;` (after a space or on its own line)
+separates rows of an array literal, `[1 2 ; 3 4]`, and is an error elsewhere.
 
 `^` raises a value to a power and associates right: `2^3^2` is `2^(3^2)`.
 It binds above multiplication, literal coefficients and unary minus, so `2x^2`
@@ -1848,9 +1862,9 @@ These assignments retain the array's length. Dotted updates such as
 `values[1..3) .+= 10` also work on slices, stepped ranges, index lists and masks.
 Stepped string slicing is not implemented.
 
-Comprehensions are eager. Nested loops and block bodies work; a final block value
-is collected, while `break`, `continue` and assignment statements do not emit a
-value. `key -> value` creates dictionary entries; duplicate keys take the last
+Comprehensions are eager. Nested loops and block bodies work; every value a body
+expresses is collected (`[loop i in xs {i i*10}]` collects two per element),
+while `break`, `continue`, assignments and `void` calls do not emit a value. `key -> value` creates dictionary entries; duplicate keys take the last
 value. A dictionary can also be written directly as `["a"->20 "b"->22]`.
 A float key is never NaN, which equals nothing, so its entry could never be
 found again: each float key given to a dictionary (stored, looked up, removed or
@@ -2031,10 +2045,12 @@ let product = saved*eye(2)
 assert(product.data =? saved.data)
 ```
 
-Write a matrix literal with `;` between rows, either standalone or attached to
-the element before it, and `;;` between 2-D blocks: `[1 2; 3 4]` has shape
-`[2 2]`, `[1 2; 3 4;; 5 6; 7 8]` shape `[2 2 2]` and `[1 2 3;]` shape `[1 3]`.
-Rows must have the same length. `[xs; ys]` stacks two arrays as rows.
+Write a matrix literal with a standalone `;` (a space before it) between rows and
+`;;` between 2-D blocks: `[1 2 ; 3 4]` has shape `[2 2]`,
+`[1 2 ; 3 4 ;; 5 6 ; 7 8]` shape `[2 2 2]` and `[1 2 3 ;]` shape `[1 3]`.
+Rows must have the same length. `[xs ; ys]` stacks two arrays as rows. An
+attached `;` discards the value before it instead, so `[f(); 7]` is `[7]`, and
+`[1 2; 3 4]` is an error that points to the standalone spelling.
 
 The shape belongs in the type: `array<float64 length=[m n]>` is a 2-D array,
 `array<float64 length=[n]>` a 1-D one. In a parameter, a dimension named by a
@@ -3055,7 +3071,9 @@ the fallback is skipped. Conditions and iterator exhaustion both determine
 whether the body enters. Chains can mix `if`, `loop`, `else if`, and `else loop`.
 Each loop's bindings and label belong to that arm; they are unavailable in its
 fallback. A comprehension can collect fallback elements for an empty loop.
-Loops themselves remain statements; use `return` or a comprehension for values.
+A loop expresses its body's values: a collector takes them, and a function
+without a written result that ends in one gives them, as in
+`squares=(n:int64)=>{loop i in 0..n i^2}` and `[squares(3)]`.
 
 Place `$name` before a loop to target it from nested loops:
 
