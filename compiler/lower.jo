@@ -6430,8 +6430,9 @@ fn_writes_direct = (f: int) -> FnWrites:
     if let w = fw_direct.get(f): return w
     w = FnWrites(false, [], [], [])
     if f > 0 and f < fns.len() and fns[f].body != 0: fw_scan(int(fns[f].body), w)
-    # A foreign function may call back into the program; its body is opaque.
-    if f > 0 and f < fns.len() and fns[f].decl != 0 and has_flag(int(fns[f].decl), NF_EXTERN): w.all = true
+    # A foreign function may call back into the program; its body is opaque. The core runtime's
+    # own host imports and system functions (lib/core: write, clock, files) never do.
+    if f > 0 and f < fns.len() and fns[f].decl != 0 and has_flag(int(fns[f].decl), NF_EXTERN) and not starts_with(files[pos_file(nodes[int(fns[f].decl)].pos)].path, lib_dir + "/core/"): w.all = true
     fw_direct[f] = w
     w
 

@@ -1,0 +1,17 @@
+# A call that prints (a host import on the web) cannot run a closure, so an
+# element of an array a closure changes can still be passed as `@`.
+$runtime_checks
+h10=(@t11:int64 p12:int64):>void=>{
+    printl("p {p12}")
+    t11 += p12
+}
+main=():>void=>{
+    let xs3:array<int64>=[2 4611686018427387904 (-2147483649)]
+    h10(@xs3[0] 10)
+    let fn19=(s21:int64 $capture @xs3):>int64=>{
+        xs3[0] = s21
+        return 0
+    }
+    fn19(5)
+    printl(xs3)
+}
