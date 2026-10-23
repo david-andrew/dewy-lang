@@ -57,7 +57,7 @@ use 'directives.jo'
 const DEWY_CORE_VERSION = "0.0.0-dev"
 
 usage = (status: int = 2):
-    eprint("usage: dewy-core [run] [--release] file.dewy [args...]\n       dewy-core build file.dewy [-o output] [--target x86_64-linux|aarch64-linux|aarch64-mac|x86_64-windows|wasm32] [--release] [--time] [--exit-codes]\n       dewy-core check [--obligations] file.dewy\n       dewy-core test [--watch] [--release] [--json] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core repl\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.")
+    eprint("usage: dewy-core                         (a terminal: the interactive prompt; piped input: run it as a program)\n       dewy-core [run] [--release] file.dewy [args...]\n       dewy-core [--release] [--target T] [--web] [--time]   (the program read from standard input)\n       dewy-core build file.dewy [-o output] [--target x86_64-linux|aarch64-linux|aarch64-mac|x86_64-windows|wasm32] [--release] [--time] [--exit-codes]\n       dewy-core check [--obligations] file.dewy\n       dewy-core test [--watch] [--release] [--json] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.")
     exit(status)
 
 find_lib_dir = () -> str:
@@ -701,7 +701,6 @@ main = ():
     if a.len() >= 2 and a[1] == "add":
         eprint("dewy-core: '{a[1]}' is not yet available for Dewy; see docs/DEVELOPMENT.md")
         exit(2)
-    if a.len() < 2: usage(0)
     # (the next errors after one in a function: next_error_run, ide.jo)
     if a.len() > 3 and a[1] == "--skip-fns":
         loop s in split(a[2], ","):
@@ -721,7 +720,7 @@ main = ():
     if a.len() >= 2 and (a[1] == "build" or a[1] == "check" or a[1] == "test" or a[1] == "run" or ends_with(a[1], ".jo") or ends_with(a[1], ".dewy")): more_errors = true
     lib_dir = find_lib_dir()
     lib_root = lib_dir
-    if a[1] == "--print-lib":
+    if a.len() >= 2 and a[1] == "--print-lib":
         if a.len() != 2: usage(2)
         print(lib_dir)
         return
@@ -732,9 +731,12 @@ main = ():
             if a.len() > 9: cli_release = a[9] == "1"
             watch_build_child(a[3], a[4], a[5], a[6] == "1", a[7])
             return
-    # no file: the interactive prompt
-    if a.len() < 2 or a[1] == "repl":
-        repl_main()
+    # no file: the interactive prompt at a terminal, else the program on standard input
+    if a.len() < 2:
+        if stdin_is_terminal():
+            repl_main()
+            return
+        run_stdin()
         return
     if a[1] == "build":
         if a.len() < 3: usage()
@@ -848,6 +850,10 @@ main = ():
         first += 1
     # (`dewy test` with no path tests the current directory)
     if first >= a.len() and test_mode: a.push(".")
+    # (options and no file: the program on standard input; at a terminal there is none to run)
+    if first >= a.len() and a[1] != "run" and not stdin_is_terminal():
+        run_stdin()
+        return
     if first >= a.len(): usage()
     if a[first] == "watch" or test_watch:
         if not test_watch: first += 1
@@ -873,14 +879,13 @@ main = ():
         exit(test_directory(path, words, test_json))
     if not file_exists(path) and not ends_with(path, ".jo") and not ends_with(path, ".dewy") and find(path, "/") < 0:
         near = ""
-        loop c in ["run", "build", "watch", "test", "check", "fmt", "add", "new", "lsp", "update", "help", "version", "repl"]:
+        loop c in ["run", "build", "watch", "test", "check", "fmt", "add", "new", "lsp", "update", "help", "version"]:
             lim = 2
             if len(c) <= 3: lim = 1
             if edit_distance(a[first], c, lim) <= lim and len(near) == 0: near = " (did you mean 'dewy-core {c}'?)"
         if len(near) == 0: near = " (dewy-core help lists them; a program runs with dewy-core game.dewy)"
         eprint("dewy-core: unknown command '{a[first]}'{near}")
         exit(1)
-    cache = core_cache()
     base = path
     s = rfind(base, "/")
     if s >= 0: base = base[s + 1..]
@@ -889,13 +894,52 @@ main = ():
     # (one program per path: two main.jo in two directories, run at once, are two programs)
     full = path
     if len(full) == 0 or (full[0] != '/' and find(full, ":") < 0): full = os_path(cwd()) + "/" + path
-    base = "{base}-{path_hash(full)}"
+    # (args()[0] is the program as it was named: the source file)
+    run_args = [path]
+    if test_json: run_args.push("--json")
+    loop i in [first + 1..a.len()): run_args.push(a[i])
+    build_and_exec(path, base, full, run_args)
+
+# dewy-core with no file and input that is not a terminal: the program on standard input, read
+# whole, as a file named <stdin> in the current directory (its `use`s are relative to it)
+run_stdin = ():
+    pkg_fetch = true
+    more_errors = true
+    buf: u8[]
+    loop true:
+        n = buf.len()
+        buf.resize(n + 65536)
+        r = __read_fd(0, data(buf) + n, 65536)
+        if r <= 0:
+            buf.resize(n)
+            break
+        buf.resize(n + r)
+    text = str_from_bytes(buf)
+    path = "<stdin>.dewy"
+    ide_texts[ide_norm(path)] = text
+    full = os_path(cwd()) + "/" + path
+    build_and_exec(path, "stdin", full + "\n" + text, [path])
+
+# standard input is a terminal (not a file or a pipe)
+stdin_is_terminal = () -> bool:
+    when TARGET == "windows":
+        m: u32[] = [0]
+        return GetConsoleMode(GetStdHandle(u32(0xFFFFFFF6)), data(m)) != 0
+    else:
+        t = fill(u8(0), 64)
+        return syscall(16, 0, 0x5401, data(t)) == 0
+
+# build the program at path into the run cache (named base, its key hashed into the name) and
+# run it with run_args
+build_and_exec = (path: str, base: str, key: str, run_args: str[]):
+    cache = core_cache()
+    name = "{base}-{path_hash(key)}"
     if (time_ns() / 1000) % 64 == 0: clean_cache(cache)
-    out = "{cache}/{base}.bin"
+    out = "{cache}/{name}.bin"
     # (made beside it, then put in its place: a copy of the program still running is not
     # written over; Windows cannot replace a running program, so there it is written in place)
     tmp = out
-    if not target_windows and not target_wasm and cli_target != "wasm32" and cli_target != "x86_64-windows": tmp = "{cache}/{base}.{time_ns()}.new"
+    if not target_windows and not target_wasm and cli_target != "wasm32" and cli_target != "x86_64-windows": tmp = "{cache}/{name}.{time_ns()}.new"
     built = compile(path, tmp)
     if len(built) == 0: exit(error_exit)
     if built == tmp and tmp != out and not target_wasm:
@@ -906,10 +950,6 @@ main = ():
         if open_in_browser(built): eprint("dewy-core: opened {built} in the browser")
         else: eprint("dewy-core: built {built}; open it in a browser")
         exit(0)
-    # (args()[0] is the program as it was named: the source file)
-    run_args = [path]
-    if test_json: run_args.push("--json")
-    loop i in [first + 1..a.len()): run_args.push(a[i])
     exec(built, run_args)
     eprint("dewy-core: failed to run {built}")
     exit(1)

@@ -33,7 +33,7 @@ From this directory:
   ./bin/{binary} watch my-game/main.dewy
 
 Open my-game-web.html in a browser, or run ./{native} on a {desktop} desktop.
-The compiler also accepts ordinary .dewy programs and an interactive `repl`.
+The compiler also accepts ordinary .dewy programs and an interactive prompt (`{binary}` with no file).
 Use an absolute path to bin/{binary} when working from another directory.
 
 This is the experimental compact core. Language and platform coverage:

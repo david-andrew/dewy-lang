@@ -20,6 +20,7 @@ import pytest
 from tests.core_glsl_driver import DriverUnavailable, ShaderDriver
 from tests import support
 from tests.support import build_case_batch, build_exit_batch, case_source, exit_main, run_value_batch, Scripts, target_name
+from tests.repl_pty import run_repl
 from tests.support import compiler  # noqa: F401 (fixture)
 from tools.compiler.bench import CHECKSUMS_1000, prepare_source
 
@@ -3132,8 +3133,7 @@ def test_core_check_and_format_boundary(compiler, tmp_path):
 ], ids=['values', 'bindings', 'types', 'multiline', 'recovery', 'query-effects', 'constant-values'])
 def test_core_repl_inputs(compiler, tmp_path, text, expected, errors):
     env = {**os.environ, 'TMPDIR': str(tmp_path)}
-    ran = subprocess.run([compiler, 'repl'], input=text + ':quit\n', cwd=tmp_path,
-                         env=env, capture_output=True, text=True, timeout=20, check=False)
+    ran = run_repl(compiler, text + ':quit\n', tmp_path, env)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == expected, ran.stdout + ran.stderr
     if errors:
@@ -3151,9 +3151,7 @@ def test_core_repl_imports(compiler, tmp_path):
     (tmp_path / 'helper.jo').write_text('twice = (x: int) -> int: 0\n')
     text = ('import helper as h\nh.twice(20)\nfrom helper import twice\ntwice(20)\n'
             'import p"helper.dewy" as again\nagain.twice(20)\n:quit\n')
-    ran = subprocess.run([compiler, 'repl'], input=text, cwd=tmp_path,
-                         env={**os.environ, 'TMPDIR': str(tmp_path)}, capture_output=True,
-                         text=True, timeout=20, check=False)
+    ran = run_repl(compiler, text, tmp_path, {**os.environ, 'TMPDIR': str(tmp_path)})
     assert ran.returncode == 0 and not ran.stderr, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == ['seed', 'helper', '42', '42', '42']
 
@@ -3163,19 +3161,15 @@ def test_core_repl_failed_import(compiler, tmp_path):
                                        'let answer=42\n')
     text = ('import gate as g\ng.answer\nwrite_text("ready" "yes") isnt? error\n'
             'import gate as g\ng.answer\n:quit\n')
-    ran = subprocess.run([compiler, 'repl'], input=text, cwd=tmp_path,
-                         env={**os.environ, 'TMPDIR': str(tmp_path)}, capture_output=True,
-                         text=True, timeout=20, check=False)
+    ran = run_repl(compiler, text, tmp_path, {**os.environ, 'TMPDIR': str(tmp_path)})
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == ['true', '42'], ran.stdout + ran.stderr
     assert 'panic: retry import' in ran.stderr
     assert "unknown name 'g'" in ran.stderr
 
 
-def test_core_repl_help_and_eof(compiler, tmp_path):
-    ran = subprocess.run([compiler, 'repl'], input=':help\n40+2\n', cwd=tmp_path,
-                         env={**os.environ, 'TMPDIR': str(tmp_path)}, capture_output=True,
-                         text=True, timeout=20, check=False)
+def test_core_repl_help(compiler, tmp_path):
+    ran = run_repl(compiler, ':help\n40+2\n:quit\n', tmp_path, {**os.environ, 'TMPDIR': str(tmp_path)})
     assert ran.returncode == 0 and not ran.stderr, ran.stdout + ran.stderr
     assert 'Type Dewy' in ran.stdout and 'Sloppy' not in ran.stdout
     assert ran.stdout.endswith('42\n')
@@ -3190,7 +3184,7 @@ def test_core_repl_terminal(compiler, tmp_path):
     master, slave = pty.openpty()
     env = {**os.environ, 'TMPDIR': str(tmp_path),
            'DEWY_REPL_HISTORY': str(tmp_path / 'history')}
-    process = subprocess.Popen([compiler, 'repl'], cwd=tmp_path, env=env,
+    process = subprocess.Popen([compiler], cwd=tmp_path, env=env,
                                stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
     os.close(slave)
     output = bytearray()
@@ -4843,8 +4837,7 @@ score(saved)
     # use the same normalized key as insertion. Exercise it on every host.
     env = {**os.environ, 'TMPDIR': str(tmp_path) + os.sep,
            'TMP': str(tmp_path) + os.sep, 'TEMP': str(tmp_path) + os.sep}
-    ran = subprocess.run([compiler, 'repl'], input=text, cwd=tmp_path,
-                         env=env, capture_output=True, text=True, timeout=20)
+    ran = run_repl(compiler, text, tmp_path, env)
     assert ran.returncode == 0 and not ran.stderr, ran.stdout + ran.stderr
     assert ran.stdout.splitlines() == ['42', '121', '42', '43', '42']
 

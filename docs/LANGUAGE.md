@@ -32,6 +32,11 @@ examples/tour.dewy` runs the tour with the same cached toolchain.
 The explicit `/tmp/dewy-core/bin/dewy-core` commands below also work with a
 standalone build.
 
+With no file, `dewy` starts the interactive prompt (below) when standard input is a
+terminal. When it is piped or redirected, `dewy` reads the whole program from it and
+runs it as `<stdin>.dewy` in the current directory: `echo 'printl"hi"' | dewy`,
+`dewy --release < prog.dewy`. The program has then used up its standard input.
+
 ## Test a project
 
 A test is an ordinary function marked `$test` on the line before it. `$expect
@@ -200,8 +205,8 @@ delimiters leave the file unchanged with an error.
 
 ### Interactive prompt
 
-Run `python3 -m tools.core repl`, `tools/dewy repl`, or `dewy-core repl` to try
-Dewy without creating a source file:
+Run `tools/dewy` or `dewy-core` with no file, at a terminal, to try Dewy without
+creating a source file:
 
 ```text
 >>> let score=20

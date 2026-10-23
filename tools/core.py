@@ -257,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
     cli = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     cli.add_argument('--bootstrap', action='store_true', help='force an independent build from C')
     cli.add_argument('command', choices=('path', 'test', 'cases', 'ladder', 'build', 'check', 'run', 'watch', 'new', 'lsp',
-                                        'fmt', 'repl', 'speed', 'bench', 'fuzz'))
+                                        'fmt', 'speed', 'bench', 'fuzz'))
     cli.add_argument('arguments', nargs=argparse.REMAINDER,
                      help='arguments for pytest, speed, bench or the compiler; test --quick selects the smoke suite')
     args = cli.parse_args(argv)
