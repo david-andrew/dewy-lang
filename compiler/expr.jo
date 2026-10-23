@@ -1552,7 +1552,7 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
     pk = types[p].kind
     target = p
     if pk == .param and binds[int(types[p].id)] != 0: target = prune(binds[int(types[p].id)])
-    if nodes[a].kind == .float_lit and nodes[a].sval != 0 and bundled_rational_type(target): return 0
+    if nodes[a].kind != .int_lit and bundled_rational_type(target) and decimal_literal_tree(a): return 0
     if is_float(target) and nodes[a].type != 0 and bundled_rational_type(ntype(a)): return 10
     if bundled_rational_type(target) and (nodes[a].kind == .int_lit or (nodes[a].type != 0 and is_int(ntype(a)))): return 10
     if nodes[a].type != 0 and bundled_word_rational_type(ntype(a)) and (bundled_rational_type(target) or is_float(target)): return 10
@@ -1792,11 +1792,13 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
             return -1
         if dewy_bigint_literal_target(a, p): return 3
         if pk == .float_:
+            # (a decimal literal is exact: a float parameter fits it after an exact one,
+            # `round(2.5)` takes the fraction's overload)
             if p == T_FLOAT:
                 if nodes[a].kind == .int_lit: return if lit_default(a) == T_MATH_INT: 3 else: 2
-                return 0
+                return if decimal_literal_tree(a): 1 else: 0
             if nodes[a].kind == .int_lit: return if lit_default(a) == T_MATH_INT: 4 else: 3
-            return 1
+            return if decimal_literal_tree(a): 2 else: 1
         if pk == .opt and not has_var(p) and can_coerce(a, ntype(a), p): return 2
         if pk == .vec: return -1
         return -1
@@ -2197,6 +2199,17 @@ rfc_arg_message = (d: int, fi: int, a: int, ptx: int, cd: Cand) -> str:
         last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' is called from C: give it a top-level function marked @cabi (a function value made in the program cannot be)"
     last_err
 
+# Whether parameter i of declaration d is written as a builtin integer type (refined or not),
+# read from its annotation alone
+written_int_param = (d: int, i: int) -> bool:
+    if i >= nkids(d): return false
+    tn = int(nodes[kid(d, i)].a)
+    if tn != 0 and nodes[tn].kind == .trefined: tn = int(nodes[tn].a)
+    if tn == 0 or nodes[tn].kind != .tname or nkids(tn) != 0 or nodes[tn].sval != 0: return false
+    s = universe.get(int(nodes[tn].name)) ?? 0
+    if s == 0 or syms[s].kind != .type_ or module_lookup(int(nodes[d].mod), int(nodes[tn].name)) != s: return false
+    tkind(int(syms[s].ref)) == .int_
+
 resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0, ufcs: bool = false) -> int:
     # (this call's own type arguments: a call among its arguments has none, from_text[S](f(x)))
     targs_here = call_targs
@@ -2238,7 +2251,11 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             break
     loop d in decls:
         di = decl_info(d)
-        if not decl_infos[di].sig.done: fn_sig(d)
+        if not decl_infos[di].sig.done:
+            # (its signature left unresolved where its written type rules it out: `mod` of floats
+            # beside `mod` of integers)
+            if a0t != 0 and tkind(a0t) == .float_ and written_int_param(d, a0i): continue
+            fn_sig(d)
         if a0t != 0 and not decl_infos[di].sig.generic and decl_infos[di].sig.params.len() > a0i:
             p0 = prune(decl_infos[di].sig.params[a0i])
             pk0 = tkind(p0)
@@ -3545,6 +3562,12 @@ collect_fns = (name: int, out: mut int[]):
     demand_name(name)
     m = cur_mod()
     collect_module(m, name, out)
+    # (in a Dewy module, the Dewy prelude's family of the name replaces the Jo prelude's)
+    if m >= 0 and not modules[m].is_prelude and files[int(modules[m].file)].is_dewy and not is_private(name):
+        dm = dewy_prelude_module(name)
+        if dm >= 0 and syms[modules[dm].names.get(name) ?? 0].kind == .fns:
+            if dm != m: collect_in(modules[dm].names, name, out)
+            return
     hide_private = m >= 0 and not modules[m].is_prelude
     hide_lib_only = true
     collect_in(prelude, name, out)
@@ -3793,41 +3816,6 @@ dewy_position_index = (n: int, bt: int, expected: int) -> int:
     nodes[n] = nodes[bc_block([bc_let(source, int(nodes[n].a), pos), declared, bc_stmt(read, pos)], pos)]
     check_expr(n, expected)
 
-# `mod(a b kind=...)` of integers, and `round` of a float (ties to even, or
-# `ties=...`): Dewy's numbers library (lib/numbers.dewy), unless the program
-# has its own. True when the call now names it.
-dewy_numbers_call = (n: int, name: int, args: int[], ufcs: bool) -> bool:
-    text = name_of(name)
-    if text != "mod" and text != "round": return false
-    s = lookup(name)
-    if s != 0 and not (syms[s].kind == .fns and decl_in_prelude(int(syms[s].decl))): return false
-    first = args[0]
-    if nodes[first].kind == .namedarg: return false
-    pos = nodes[n].pos
-    if not has_flag(first, NF_CHECKED):
-        check_expr(first, 0)
-        add_flag(first, NF_CHECKED)
-    t = prune(ntype(first))
-    if text == "mod":
-        if not is_int(t): return false
-        if ufcs: fatal(pos, "`mod` is a function, not a member: `mod(a b)`, or `mod(a b kind='euclid')`")
-    if text == "round":
-        # (an exact number rounds a half away from zero: `round(2.5)` is 3,
-        # a decimal literal included)
-        named = false
-        loop a in args:
-            if nodes[a].kind == .namedarg: named = true
-        if (bundled_rational_type(t) or bundled_word_rational_type(t) or is_float(t) and decimal_literal_tree(first)) and not named:
-            ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
-            nodes[n].a = i32(bc_field(bc_ident("$dewy_rational", pos), text, pos))
-            set_list(n, args)
-            return true
-        if not is_float(t) and not named: return false
-    ensure_bundled_import("numbers.dewy", "$dewy_numbers", pos)
-    nodes[n].a = i32(bc_field(bc_ident("$dewy_numbers", pos), text, pos))
-    set_list(n, args)
-    true
-
 # literal numbers with a decimal literal among them (`2.5`, `-2.5`, `1.5*3`):
 # exact until a float context makes them floats
 decimal_literal_tree = (n: int) -> bool:
@@ -3858,19 +3846,6 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             check_expr(args[0], 0)
             ide_complete_members(ntype(args[0]))
         ide_complete_names()
-    # `rational(...)`: the builtin exact type's constructor, unless a binding shadows it.
-    if not ufcs and mod_scope < 0 and name == ci(0, "rational") and lookup(name) == 0 and files[pos_file(nodes[n].pos)].is_dewy:
-        pos = nodes[n].pos
-        ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
-        fname = "rational"
-        # (of a float: its exact binary value)
-        if args.len() == 1 and nodes[args[0]].kind != .namedarg:
-            if tkind(check_expr(args[0], 0)) == .float_:
-                fname = "_from_float"
-                set_kid(n, 0, last_checked)
-        nodes[n].a = i32(bc_field(bc_ident("$dewy_rational", pos), fname, pos))
-        return check_expr(n, expected)
-    if mod_scope < 0 and args.len() >= 1 and files[pos_file(nodes[n].pos)].is_dewy and dewy_numbers_call(n, name, args, ufcs): return check_expr(n, expected)
     # (`find(text part)` and `index_of(xs x)` written as calls: Dewy's searches, giving Missing)
     if not ufcs and mod_scope < 0 and args.len() >= 1 and (name == id_find or name == id_rfind or name == id_index_of or name == id_chars) and (args.len() >= 2 or name == id_chars) and files[pos_file(nodes[n].pos)].is_dewy and nodes[args[0]].kind != .namedarg:
         s = lookup(name)
@@ -5295,8 +5270,9 @@ check_call = (n: int, expected: int) -> int:
     if ck == .typeapply:
         base = int(nodes[callee].a)
         name = int(nodes[base].name)
-        # `rational<int64>(value)`: the explicit narrowing, with Overflow in its result
-        if nodes[base].kind == .ident and name_of(name) == "rational" and lookup(name) == 0 and dewy_at(nodes[n].pos):
+        # `rational<int64>(value)`: the explicit narrowing, with Overflow in its result (the
+        # builtin type's conversion, unless a type shadows its name)
+        if nodes[base].kind == .ident and name_of(name) == "rational" and (lookup(name) == 0 or syms[lookup(name)].kind == .fns) and dewy_at(nodes[n].pos):
             if bundled_word_rational_type(resolve_type(int(nodes[callee].c))):
                 pos = nodes[n].pos
                 nodes[n].a = i32(bc_field(bc_ident("$dewy_rational", pos), "_word_rational", pos))

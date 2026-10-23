@@ -16,6 +16,7 @@ use 'parse.jo'
 use 'scan.jo'
 use 'ide.jo'
 use 'main.jo'
+use 'refine.jo'
 
 prelude_game_hint = false
 prelude_lazy = false
@@ -257,3 +258,68 @@ order_prelude_globals = (decls: mut int[]):
             decls[j] = decls[j - 1]
             j -= 1
         decls[j] = d
+
+# Dewy's prelude (lib/prelude/*.dewy): library modules every Dewy module sees, under its own
+# names and over the Jo prelude, whose family of a name a Dewy prelude declaration replaces (a
+# module's own declaration replaces it in turn). The same scan indexes the files on the first
+# name a Dewy module does not declare itself; a file is loaded (an ordinary library module, its
+# bodies parsed when reached) once one of its names is asked for. Cost: the files' bytes once, then
+# a probe per name a Dewy module looks for outside itself.
+dp_scanned = false
+dp_paths: str[]                 # file -> path
+dp_mods: int[]                  # file -> its module once loaded, or -1
+dp_loaded: int[]                # the loaded modules (Dewy modules initialize after them)
+dp_names: {int: int}            # name -> the file declaring it
+
+dp_scan = ():
+    dp_scanned = true
+    dir = lib_dir + "/prelude"
+    names_ = list_dir(dir)
+    names_.sort()
+    icb = ic_switch(IC_LOAD, IC_LIB)
+    loop n in names_:
+        if not ends_with(n, ".dewy"): continue
+        path = "{dir}/{n}"
+        src = read_source(path)
+        if src == none: continue
+        f = dp_paths.len()
+        dp_paths.push(path)
+        dp_mods.push(-1)
+        r = scan_source(src!)
+        loop x in [su_name0[r.0]..su_name0[r.1]):
+            name = intern_sub(src!, su_name_at[x], su_name_len[x])
+            if not is_private(name) and dp_names.get(name) == none: dp_names[name] = f
+    ic_restore(icb)
+
+# The Dewy prelude module declaring name (loaded on first use), or -1
+dewy_prelude_module = (name: int) -> int:
+    if not dp_scanned: dp_scan()
+    f = dp_names.get(name) ?? -1
+    if f < 0: return -1
+    m = dp_mods[f]
+    if m < 0:
+        first_module = modules.len()
+        first_import = from_imports.len()
+        active = refine_active
+        m = load_module(dp_paths[f], false, 0)
+        dp_mods[f] = m
+        dp_loaded.push(m)
+        mi = first_module
+        loop mi < modules.len():
+            register_module(mi)
+            mi += 1
+        bind_from_imports(first_import)
+        if module_ctx.len() > 0: setup_module_contexts(init_fns[0])
+        late_module_imports = true
+        # (a refinement written in its declarations turns the program-wide machinery on once
+        # one of them is resolved: refine_resume)
+        if refine_active and not active:
+            refine_active = false
+            loop mi in [first_module..modules.len()): refine_deferred[mi] = true
+    m
+
+# The Dewy prelude's binding of name, or 0
+dewy_prelude_lookup = (name: int) -> int:
+    m = dewy_prelude_module(name)
+    if m < 0: return 0
+    modules[m].names.get(name) ?? 0

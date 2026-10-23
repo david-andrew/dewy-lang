@@ -367,6 +367,9 @@ module_lookup_now = (m: int, name: int) -> int:
                 else:
                     if let s = modules[u].names.get(name):
                         if not is_private(name): return s
+            if files[int(modules[m].file)].is_dewy and not is_private(name):
+                s = dewy_prelude_lookup(name)
+                if s != 0: return s
     if let s = prelude.get(name):
         if not user or not lib_private(name): return s
     if let s = universe.get(name): return s
@@ -1517,6 +1520,7 @@ nd_of = (t: int, pos: int) -> int:
 
 # type Name[T] = ...: the type it stands for, given its type arguments
 resolve_alias = (d: int, targs: int[], use_pos: int) -> int:
+    if refine_deferred.len() > 0: refine_resume(int(nodes[d].mod))
     ntp = nkids2(d)
     nm = name_of(int(nodes[d].name))
     if targs.len() != ntp: fatal(use_pos, "type '{nm}' expects {ntp} type argument(s), got {targs.len()}")
@@ -1627,6 +1631,7 @@ check_struct_fields = (si: int):
     if structs[si].resolved: return
     structs[si].resolved = true
     d = int(structs[si].decl)
+    if refine_deferred.len() > 0 and d != 0: refine_resume(int(nodes[d].mod))
     targs: int[]
     loop i in [0..int(structs[si].ntargs)): targs.push(struct_targ(si, i))
     saved = cx
@@ -1747,9 +1752,33 @@ decl_info = (decl: int) -> int:
         nodes[decl].sym = i32(decl_infos.len() - 1)
     int(nodes[decl].sym)
 
+# Modules whose parse would have turned the program-wide refinement machinery on, held off
+# until one of their declarations is resolved (dewy_prelude_module): `mod` of floats does not
+# pay for the refined divisor of `mod` of integers.
+refine_deferred: {int: bool}
+refine_resume = (m: int):
+    if refine_active or not refine_deferred.has(m): return
+    # (a forked check worker gives up its part: the compiler checks it again itself)
+    if pc_child >= 0: exit(1)
+    refine_active = true
+
+# a refinement written in the type annotations under node n (a declaration's parameters and
+# result, say)
+written_refinement = (n: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .trefined or (k == .tmap and nodes[n].aux == 1): return true
+    if k == .block or k == .lambda: return false
+    if (k == .param or k == .fn_) and written_refinement(int(nodes[n].a)): return true
+    if k != .param and k != .fn_ and (written_refinement(int(nodes[n].a)) or written_refinement(int(nodes[n].b))): return true
+    loop i in [0..nkids(n)):
+        if written_refinement(kid(n, i)): return true
+    false
+
 fn_sig = (decl: int) -> FnSig:
     di = decl_info(decl)
     if decl_infos[di].sig.done: return decl_infos[di].sig
+    if refine_deferred.len() > 0 and not refine_active and refine_deferred.has(int(nodes[decl].mod)) and written_refinement(decl): refine_resume(int(nodes[decl].mod))
     sig = FnSig(done = true)
     sig.nexplicit = i32(nkids2(decl))
     saved = cx
@@ -5382,6 +5411,8 @@ order_modules = (m: int, out: mut int[]):
                 loop u in modules[m].uses: order_modules(u, out)
             else if let s = modules[m].names.get(int(nodes[d].name)):
                 if syms[s].kind == .module: order_modules(int(syms[s].ref), out)
+    if dp_loaded.len() > 0 and files[int(modules[m].file)].is_dewy:
+        loop dm in dp_loaded: order_modules(dm, out)
     out.push(m)
 
 # statement calling a prelude function with the given argument nodes

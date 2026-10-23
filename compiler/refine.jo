@@ -404,6 +404,9 @@ ref_atoms = (n: int, binder: int, out: mut RefAtom[], depth: int = 0):
     ref_add(op, ref_term(a, binder), ref_term(b, binder), out)
 
 resolve_refinement = (n: int) -> int:
+    # (a refinement of a module whose declarations were not asked for yet, met another way)
+    if not refine_active and refine_deferred.len() > 0:
+        loop m, _ in refine_deferred: refine_resume(m)
     base = resolve_type(int(nodes[n].a))
     binder = if nodes[n].name != 0: int(nodes[n].name) else: refine_self
     atoms: RefAtom[]

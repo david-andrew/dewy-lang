@@ -1,0 +1,49 @@
+# Dewy's prelude: rounding with an explicit rule. Every Dewy module sees `round`
+# unless it declares its own (which replaces the whole family). Exact numbers
+# round a half away from zero (`round(5/2)` and `round(2.5)` are 3); floats
+# round to nearest with ties to even (IEEE 754). `ties=` names another rule for
+# either.
+
+# Where a value exactly halfway between two integers goes: away from zero, to
+# the even one, toward zero, up (toward +infinity) or down (toward -infinity).
+_Ties:type='away'|'even'|'zero'|'up'|'down'
+
+# (finite and below 2^52 in magnitude: every larger float is already whole)
+round = ((x:float64 ties:_Ties='even'):>float64=>{
+        if not (x >? -4503599627370496.0 and x <? 4503599627370496.0) return x
+        let low=floor(x)
+        let part=x-low
+        let up=part >? 0.5
+        if part =? 0.5 {
+            up=match ties {
+                <'even'>=>floor(low*0.5)*2.0 not=? low
+                <'away'>=>x >? 0.0
+                <'zero'>=>x <? 0.0
+                <'up'>=>true
+                <'down'>=>false
+            }
+        }
+        let result=if up low+1.0 else low
+        # (a zero keeps the sign of x: round(-0.25) is -0.0)
+        if result =? 0.0 return x*0.0
+        return result
+    })
+    & ((x:float32 ties:_Ties='even'):>float32=>float32(round(float64(x) ties)))
+    & ((value:rational ties:_Ties='away'):>int=>{
+        let low=value.numerator//value.denominator
+        let twice=(value.numerator-low*value.denominator)*2
+        if twice <? value.denominator return low
+        if twice >? value.denominator return low+1
+        let up=match ties {
+            <'away'>=>value.numerator >? 0
+            <'even'>=>low%2 =? 1
+            <'zero'>=>value.numerator <? 0
+            <'up'>=>true
+            <'down'>=>false
+        }
+        return if up low+1 else low
+    })
+    & ((value:rational<int64> ties:_Ties='away'):>int=>{
+        let wide:rational=value
+        return round(wide ties)
+    })

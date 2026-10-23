@@ -1,0 +1,21 @@
+# Dewy's prelude: remainders with an explicit rule. Every Dewy module sees
+# `mod` unless it declares its own (which replaces the whole family). `%` is the
+# floored remainder; `mod(a b kind='euclid')` names another.
+
+# floor: the divisor's sign (`%`); trunc: the dividend's (C's); euclid: never negative
+_ModKind:type='floor'|'trunc'|'euclid'
+
+mod = ((a:int64 b:int64<d => d not=? 0> kind:_ModKind='floor'):>int64=>{
+        let r=a % b
+        if kind =? 'trunc' and r not=? 0 and (r <? 0) not=? (a <? 0) return r-b
+        if kind =? 'euclid' and r <? 0 return r-b
+        return r
+    })
+    & ((a:int b:int<d => d not=? 0> kind:_ModKind='floor'):>int=>{
+        let r=a % b
+        if kind =? 'trunc' and r not=? 0 and (r <? 0) not=? (a <? 0) return r-b
+        if kind =? 'euclid' and r <? 0 return r-b
+        return r
+    })
+    # (of floats: floored)
+    & ((a:float64 b:float64):>float64=>a-b*floor(a/b))

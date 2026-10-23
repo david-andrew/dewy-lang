@@ -121,16 +121,6 @@ floor = ((value:Rational):>int=>value.numerator//value.denominator)
     & ((value:RationalWord):>int=>floor(_widen(value)))
 ceil = ((value:Rational):>int=>-((-value.numerator)//value.denominator))
     & ((value:RationalWord):>int=>ceil(_widen(value)))
-# The nearest integer; a half goes away from zero, as people round
-# (`round(5/2)` is 3, `round(-5/2)` is -3). `ties=` names another rule
-# (numbers.dewy).
-round = ((value:Rational):>int=>{
-        let low=value.numerator//value.denominator
-        let twice=(value.numerator-low*value.denominator)*2
-        if twice <? value.denominator or twice =? value.denominator and value.numerator <? 0 return low
-        return low+1
-    })
-    & ((value:RationalWord):>int=>round(_widen(value)))
 # Toward zero: the integer conversion, `int(q)` and `q as int`.
 _truncate = ((value:Rational):>int=>if value.numerator <? 0 ceil(value) else floor(value))
     & ((value:RationalWord):>int=>_truncate(_widen(value)))
