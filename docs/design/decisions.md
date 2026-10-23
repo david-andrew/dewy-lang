@@ -399,3 +399,24 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   computation, cooperating peers). Monitored `Deadlock` scopes and STM come later,
   only when needed. Timeouts are recovery, not proofs. Juxtaposition
   multiplication remains on hold.
+- Juxtaposition multiplication (decided 2026-10-23; replaces the reference's
+  fully general rule; full text in [juxtaposition.md](juxtaposition.md)): a
+  restricted, type-directed rule with no whitespace between the parts. Eligible:
+  a numeric literal before a name/member term or group (`2x`, `2sin(x)`,
+  `3(a+b)`); a named numeric value or field route before a group (`a(x)`,
+  `material.k(T)`); a parenthesized scalar before a group (`(a+1)(a-1)`). The
+  left side must be a statically known, non-callable numeric scalar or quantity,
+  and the group supplies exactly one value. The head is classified once, before
+  any implicit zero-argument call; a failed call never falls back to
+  multiplication. Precedence: member/call/index > `^` > juxtaposition >
+  `* / // %` > unary `+ -` > `+ -` > comparisons. Whitespace products, call or
+  index results as coefficients, tensors, numeric `@a(x)` and string-literal
+  calls are excluded with diagnostics. No spaced units anywhere (`9.81m/s^2`;
+  `9.81 m` is two expressions).
+- Multi-lock spelling (decided 2026-10-23):
+  `let [a b]=@(lock_all(from to)) or_throw` acquires in canonical order
+  (`from == to` gives `DuplicateLock`); each lock is released after its place's
+  last use. `try_lock` is a method returning a place or `Busy`
+  (`match @(m.try_lock()) {...}`).
+- Idiom: when taking the place returned by a zero-argument method, write the
+  optional parentheses: `let a=@(acct.lock())`, not `@(acct.lock)`.
