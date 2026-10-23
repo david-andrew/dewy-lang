@@ -1,0 +1,42 @@
+# `xs[f()] = g()`: the destination's indices first, then the right side; a
+# right side that resizes the array or changes an index variable still writes
+# where the indices pointed (fuzz seed 301345).
+mk=(start:int64)=>{
+    let c:int64=start
+    return ($capture c s:int64):>int64=>{
+        c = (c xor s)
+        c
+    }
+}
+let gi:int64=0
+let gxs:array<int64>=[0 0 0]
+bump=():>int64=>{
+    gi += 1
+    gxs.push(9)
+    40
+}
+main=():>void=>{
+    let r1:[value:int64 xs:array<int64>]=[value=(-17) xs=[(-7)]]
+    let fn24=mk(2147483648)
+    r1.xs[(fn24(10) % r1.xs.length)] = fn24(0)
+    printl(r1)
+    let xs=[1 2 3]
+    let f=mk(0)
+    xs[f(1)] = f(1)
+    printl(xs)
+    let m=[[1 2] [3 4]]
+    let g=mk(0)
+    m[g(1)][g(1)] = g(1)
+    printl(m)
+    gxs[gi] = bump()
+    gxs[gi] = bump()
+    printl"{gi} {gxs}"
+    let k=0
+    let inc=($capture @k):>int64=>{
+        k += 1
+        7
+    }
+    let ys=[0 0 0]
+    ys[k+1] = inc()
+    printl"{k} {ys}"
+}

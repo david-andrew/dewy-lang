@@ -1878,7 +1878,7 @@ main=():>void=>exit(entry()) entry=()=>{
     let store=Store<array<int64>>[values=[[1] [2]]]
     let index:int64=0
     store[index][at("c" 0)]={index=1 at("r" 42)}
-    if events() not=? "grcs" or store.values[0][0] not=? 42 or store.values[1][0] not=? 2 return 3
+    if events() not=? "gcrs" or store.values[0][0] not=? 42 or store.values[1][0] not=? 2 return 3
     reset()
     let scalars=Store<int64>[values=[2 3]]
     index=0

@@ -1140,7 +1140,7 @@ gen_place = (e: int, write: bool) -> Place:
         if bk == .ptr:
             ir.raw_mem = true
             p = gen_expr(a).v
-            i = gen_expr(int(nodes[e].b)).v
+            i = gen_index(int(nodes[e].b))
             sz = tsize(int(types[bt].elem))
             return Place(true, e_bin(.add, VI, p, e_bin(.mul, VI, i, e_iconst(sz))))
         if bk == .array:
@@ -3293,6 +3293,36 @@ has_call = (n: int) -> bool:
     loop i in [0..nkids2(n)):
         if has_call(kid2(n, i)): return true
     false
+
+# can evaluating n change what an assignment's destination indices read: a call, an assignment
+# or a statement inside it, or an operation that resizes or formats through user code?
+assign_rhs_effects = (n: int) -> bool:
+    if n <= 0: return false
+    k = nodes[n].kind
+    if k == .call or (k == .pair and nodes[n].sym > 0) or k == .assign or k == .block or k == .for_ or k == .while_: return true
+    if k == .lambda: return false
+    if k == .intrinsic:
+        id = nodes[n].aux as IN
+        if id == .fmt_struct or id == .json_fields or id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .extend: return true
+    if assign_rhs_effects(int(nodes[n].a)) or assign_rhs_effects(int(nodes[n].b)): return true
+    if assign_rhs_effects(int(nodes[n].c)) or assign_rhs_effects(int(nodes[n].d)): return true
+    loop i in [0..nkids(n)):
+        if assign_rhs_effects(kid(n, i)): return true
+    loop i in [0..nkids2(n)):
+        if assign_rhs_effects(kid2(n, i)): return true
+    false
+
+# does index n read the same before and after rhs runs, with nothing of its own to run or trap:
+# literals and plain locals rhs does not write, under fixed-width + - * and bit operations (which
+# wrap)? O(nodes of n x nodes of rhs)
+index_stable = (n: int, rhs: int) -> bool:
+    k = nodes[n].kind
+    if k == .int_lit: return true
+    if k == .ident: return nodes[n].aux == i32(int(SK.local)) and mut_plain_root(n) and not may_write_root(rhs, n)
+    if k != .binary or not is_int(ntype(n)) or prune(ntype(n)) == T_MATH_INT or int_policy(ntype(n)) != 0: return false
+    op = nodes[n].op as Tok
+    if op != .plus and op != .minus and op != .star and op != .amp and op != .pipe and op != .caret and op != .kw_xor: return false
+    index_stable(int(nodes[n].a), rhs) and index_stable(int(nodes[n].b), rhs)
 
 retain_elems = (arr: int, et: int):
     # retain every element of a freshly copied array
@@ -5871,8 +5901,24 @@ gen_assign = (s: int):
             # (a held view given another part: its address)
             e_mov(int(locals[int(nodes[a].sym)].vreg), held_value_addr(int(nodes[s].b)))
             return
-        val = gen_owned(int(nodes[s].b))
+        # (Dewy's xs[f()] = g(): the destination's indices first, then the right side, which may
+        # change them or resize the array; the destination is located again with the indices kept)
+        held: int[]
+        if (nodes[a].kind == .index or nodes[a].kind == .field) and dewy_at(nodes[s].pos) and assign_rhs_effects(rhs):
+            x = a
+            steps: int[]
+            loop true:
+                xk = nodes[x].kind
+                if xk == .index and nodes[x].b != 0 and not index_stable(int(nodes[x].b), rhs): steps.insert(0, int(nodes[x].b))
+                if xk == .field or xk == .index or xk == .unwrap or xk == .narrow: x = int(nodes[x].a)
+                else: break
+            loop ib in steps:
+                if frozen.has(ib): continue
+                frozen[ib] = freeze_scalar(gen_index(ib), ntype(ib))
+                held.push(ib)
+        val = gen_owned(rhs)
         assign_to(a, t, val.v)
+        loop ib in held: frozen.remove(ib)
         return
     # compound arithmetic
     op = compound_op(int(nodes[s].op)) as Tok
