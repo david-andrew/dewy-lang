@@ -330,3 +330,12 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
     insertion order. `min`/`max` follow IEEE 754-2019 minimum/maximum (NaN
     propagates); float sorting uses totalOrder; float dictionary keys carry a
     not-NaN obligation. `main`'s `exit_code` is constrained to 1–100.
+- Decimal default (decided 2026-10-23): exact rationals stay the default; no
+  decimal-float default. Principle: an expression's value never depends on
+  whether the compiler folded it, so `a=0.1 b=0.2; a+b =? 0.3` and
+  `x=1/3; x*3 =? 1` are true everywhere. Costs addressed: an exact value carried
+  around a loop through `*` or `/` (size can grow each iteration) gets a warning
+  with a fix-it to annotate `float64` or another explicit representation, never
+  an automatic switch; values print the way they were written (decimals as
+  decimals, with a repeating marker when non-terminating; written fractions as
+  fractions), with the exact display rule reported to David.
