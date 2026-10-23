@@ -147,12 +147,46 @@ graphemes = (s: str) -> str[]:
 
 # Checked decoding retains an independent byte-string value. There is no host
 # decoder or replacement-character policy: malformed input returns none.
+# (well-formed UTF-8 is all that decides it: ASCII a word at a time, then each scalar's bytes,
+# as __grapheme_next_unicode reads them)
 __dewy_decode_utf8 = (source: u8[]) -> str?:
-    text = str_from_bytes(source)
-    cursor = __GraphemeCursor()
-    loop cursor.offset < len(text):
-        if __grapheme_next(text, cursor) < 0: return none
-    text
+    n = source.len()
+    p = data(source)
+    i = 0
+    loop i < n:
+        if i + 8 <= n and ((p + i) as *u64)[0] & 0x8080808080808080 == 0:
+            i += 8
+            # (an ASCII tail: its last eight bytes, overlapping, at once)
+            if i < n and i + 8 > n and ((p + n - 8) as *u64)[0] & 0x8080808080808080 == 0: i = n
+            continue
+        first = int(p[i])
+        if first < 0x80:
+            i += 1
+            continue
+        scalar = 0
+        count = 0
+        minimum = 0
+        if first >= 0xc2 and first <= 0xdf:
+            scalar = first & 0x1f
+            count = 2
+            minimum = 0x80
+        else if first >= 0xe0 and first <= 0xef:
+            scalar = first & 0x0f
+            count = 3
+            minimum = 0x800
+        else if first >= 0xf0 and first <= 0xf4:
+            scalar = first & 0x07
+            count = 4
+            minimum = 0x10000
+        else: return none
+        if count > n - i: return none
+        loop k in [1..count):
+            next = int(p[i + k])
+            if next < 0x80 or next > 0xbf: return none
+            scalar = (scalar << 6) + (next & 0x3f)
+        if scalar < minimum or scalar > 0x10ffff or scalar >= 0xd800 and scalar <= 0xdfff: return none
+        i += count
+    str_from_bytes(source)
 
 __dewy_string_length = (s: str) -> int:
     n = len(s)
