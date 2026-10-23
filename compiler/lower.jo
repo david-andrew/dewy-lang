@@ -3070,6 +3070,9 @@ gen_binary = (e: int) -> Val:
     if lt == T_MATH_INT:
         if is_cmp and math_proven_word(a) and math_proven_word(b):
             return V(e_bin(int_op(op, true), VI, math_word_expr(a), math_word_expr(b)), false)
+        if is_cmp:
+            r = math_sum_compare(e)
+            if r >= 0: return V(r, false)
         if not is_cmp and math_proven_word(e): return math_pack_word(e, math_word_expr(e))
         va = gen_left(a, lt, keep_left)
         if op == .shl or op == .shr: return math_shift(op, va, math_shift_count(b), types[prune(ntype(b))].sign)
@@ -7457,6 +7460,8 @@ begin_fn = (name: str, idx: int):
     math_writes.clear()
     math_decl_depth.clear()
     math_loop_sites.clear()
+    math_write_loop.clear()
+    math_loop_parent.clear()
     ctl = 0
     cond_depth = 0
     scope_locals = []

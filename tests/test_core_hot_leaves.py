@@ -150,3 +150,50 @@ def test_pointer_only_read_through_copies_nothing(compiler, tmp_path, flags):
     code = disassembly(binary, 'first_words')
     if code is not None and '<first_words>:' in code:
         assert 'arruniq' not in code and '__rc_inc' not in code, code
+
+
+TOKENS = '''
+# (a token's loop inside the text's; a bound of a fixed-width parameter)
+spaces=(text:array<uint8>):>int64=>{
+    let words:int64=0
+    let i=0
+    loop i <? text.length {
+        let start=i
+        loop i <? text.length and text[i] not=? 32 {i+=1}
+        if i - start >? 0 {words+=1}
+        i+=1
+    }
+    words
+}
+mix_bytes=(p:ptr<uint8> n:int64):>int64=>{
+    $unsafe
+    let h:int64=0
+    let i=0
+    loop i + 8 <? n {
+        h=h xor ((p + i) as ptr<int64>)[0]
+        i+=8
+    }
+    loop i <? n {
+        h=h * 31 + int64(p[i])
+        i+=1
+    }
+    h
+}
+main=():>void=>{
+    $unsafe
+    let t:array<uint8>=[97 32 32 98 99 32 100]
+    printl"{spaces(t)} {mix_bytes(t.ptr t.length)} {mix_bytes(t.ptr 0)}"
+}
+'''
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('flags', [[], ['--release']])
+def test_nested_and_typed_counters_stay_words(compiler, tmp_path, flags):
+    binary = build(compiler, tmp_path, TOKENS, flags)
+    words, mixed, empty = run(binary).split()
+    assert words == '3' and empty == '0'
+    for function in ('spaces', 'mix_bytes'):
+        code = disassembly(binary, function)
+        if code is not None and f'<{function}>:' in code:
+            assert '__mi_' not in code, code
