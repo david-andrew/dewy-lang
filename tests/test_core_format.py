@@ -66,7 +66,7 @@ PROGRAMS = {
 let iffy=true and not false
 printl(iffy) printl(is isnt? int64) printl(isnt is? none)
 let λ=notin
-printl((is ?? 0) in? [20 21]) printl(λ notin? [22])
+printl((is ?? 0) in? [20 21]) printl(λ not in? [22])
 return (is ?? 0)+λ}
 main=():>void=>{printl(probe(20 21 22));}''',
     'decimal-literals': '''from bigint import bigint

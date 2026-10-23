@@ -894,7 +894,7 @@ PUNCT = sorted(['(', ')', '[', ']', '{', '}', '<', '>', ':', '.', ',', ';', '=',
                key=len, reverse=True)
 WORDS = {'let', 'const', 'return', 'break', 'continue', 'import', 'from', 'else', 'if', 'loop', 'match', 'test',
          'not', 'as', 'transmute', 'or', 'xor', 'and', 'in', 'of', 'or_throw', 'nand', 'nor', 'xnor'}
-INVERT = {'=?': 'not=?', '<?': 'not<?', '>?': 'not>?', '<=?': 'not<=?', '>=?': 'not>=?', 'in?': 'notin?'}
+INVERT = {'=?': 'not=?', '<?': 'not<?', '>?': 'not>?', '<=?': 'not<=?', '>=?': 'not>=?', 'in?': 'not in?'}
 ASSIGN = {'+=', '-=', '*=', '/=', '//=', '%=', '^=', '<<=', '>>=', '.+=', '.-=', '.*=', './=', './/=', '.%=', '.^=',
           '&=', '|=', 'and=', 'or=', 'xor=', '='}
 POWER = {'->': 20, '<|': 24, '|>': 25, '=>': 30, ':>': 40, ':': 45, 'or_throw': 48, 'as': 50, 'transmute': 50,
@@ -904,7 +904,7 @@ POWER = {'->': 20, '<|': 24, '|>': 25, '=>': 30, ':>': 40, ':': 45, 'or_throw': 
 for _c in ['=?', '<?', '>?', '<=?', '>=?']:
     for _form in (_c, 'not' + _c, '.' + _c, '.not' + _c):
         POWER[_form] = 80
-POWER.update({'is?': 80, 'isnt?': 80, 'in?': 80, 'notin?': 80}, **{a: 10 for a in ASSIGN})
+POWER.update({'is?': 80, 'isnt?': 80, 'in?': 80, 'not in?': 80}, **{a: 10 for a in ASSIGN})
 
 
 class FrontError(Exception):
@@ -1017,7 +1017,7 @@ def tokenize(src, begin=0, stop=None):
             kind, word = 'identifier', src[start:i].decode()
             if word in ('true', 'false'):
                 kind = 'boolean'
-            if word in ('is', 'isnt', 'in', 'notin') and i < stop and src[i] == 63:
+            if word in ('is', 'isnt', 'in') and i < stop and src[i] == 63:
                 word, i, kind = word + '?', i + 1, 'op'
             if kind != 'boolean' and (word in WORDS or kind == 'op'):
                 sym = word
@@ -1192,7 +1192,7 @@ class Front:
         if open_ == '(':
             s = self.tok()['sym']
             partial = s in ('=?', 'not=?', '<?', 'not<?', '>?', 'not>?', '<=?', 'not<=?', '>=?', 'not>=?', 'is?',
-                            'isnt?', 'in?', 'notin?', '.', 'as', 'transmute', '*', '/', '//', '%', '^')
+                            'isnt?', 'in?', 'not in?', '.', 'as', 'transmute', '*', '/', '//', '%', '^')
             if partial or (s == 'not' and self.tok(1)['sym'] in INVERT):
                 body = self.rest('_', 0)
                 self.expect(')')

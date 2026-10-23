@@ -4,7 +4,7 @@ let up=[1,4..11] let down=[8,5..0) let empty=[4..2] let wrong=[1,-1..8]
 let a=[loop x in up x] let b=[loop x in down x]
 let c=[loop x in empty x] let d=[loop x in wrong x]
 return if a =? [1 4 7 10] and b =? [8 5 2] and c.length =? 0 and d.length =? 0
-and 10 in? up and 11 notin? up and 5 in? down and 0 notin? down and 4 notin? empty
-and 7 in? [1,4..11] and 8 notin? [1,4..11] 42 else 1
+and 10 in? up and 11 not in? up and 5 in? down and 0 not in? down and 4 not in? empty
+and 7 in? [1,4..11] and 8 not in? [1,4..11] 42 else 1
 }
 main=()=>exit(run())

@@ -8,7 +8,7 @@ Symbol:type =
     'not>=?' | 'not<=?' | 'not=?' | 'not>?' | 'not<?' | '>=?' | '<=?' |
     '//=' | '<<=' | '>>=' | '...' | '=>' | ':>' | '->' | '=?' | '>?' | '<?' |
     '+=' | '-=' | '*=' | '/=' | '^=' | '%=' | '??' | '//' | '<<' | '>>' | '..' | '|>' | '<|' |
-    '>=' | 'is?' | 'isnt?' | 'in?' | 'notin?' |
+    '>=' | 'is?' | 'isnt?' | 'in?' | 'not in?' |
     'let' | 'const' | 'return' | 'break' | 'continue' | 'import' | 'from' | 'else' | 'if' |
     'loop' | 'match' | 'test' | 'not' | 'as' | 'transmute' | 'or' | 'xor' | 'and' | 'in' | 'of' |
     'or_throw' | 'nand' | 'nor' | 'xnor' |
@@ -62,7 +62,7 @@ invert=(symbol:Symbol):>Symbol?=>match symbol {
     <'>?'>=>'not>?'
     <'<=?'>=>'not<=?'
     <'>=?'>=>'not>=?'
-    <'in?'>=>'notin?'
+    <'in?'>=>'not in?'
     _=>none
 }
 
@@ -70,7 +70,7 @@ assignment=(symbol:Symbol):>bool=>symbol in? ['+=' '-=' '*=' '/=' '//=' '%=' '^=
     '.+=' '.-=' '.*=' './=' './/=' '.%=' '.^=' '&=' '|=' 'and=' 'or=' 'xor=']
 
 comparison=(symbol:Symbol):>bool=>symbol in? ['=?' 'not=?' '<?' 'not<?' '>?' 'not>?' '<=?' 'not<=?'
-    '>=?' 'not>=?' 'is?' 'isnt?' 'in?' 'notin?' '.=?' '.not=?' '.<?' '.not<?' '.>?' '.not>?'
+    '>=?' 'not>=?' 'is?' 'isnt?' 'in?' 'not in?' '.=?' '.not=?' '.<?' '.not<?' '.>?' '.not>?'
     '.<=?' '.not<=?' '.>=?' '.not>=?']
 
 # Binding powers of the infix operators (dn_power in compiler/dewy_fast.jo);

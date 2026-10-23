@@ -3407,7 +3407,7 @@ value and narrows the original variable or field to the same subset. The remaini
 without introducing a binding. Subset aliases and generic type parameters work
 too. Arms run in source order, including when their subsets overlap.
 
-Membership uses `in?`; negate it with `not in?` or `notin?`:
+Membership uses `in?`; negate it with `not in?`:
 
 ```dewy
 let names=["apple" "pear"]

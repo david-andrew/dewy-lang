@@ -11,8 +11,8 @@
   tokens int:0 _<=? _id:i _<? _id:n _kw:and _kw:not _id:done _kw:or _id:x _=? _id:y
   tree (or (and (<? (<=? 0 i) n) (not done)) (=? x y))
 ### spaced not inverts a comparison
-  tokens id:a _kw:not _=? _id:b _kw:and _id:c _kw:not _in? _id:items _kw:and _id:d _notin? _id:rest
-  tree (and (and (not=? a b) (notin? c items)) (notin? d rest))
+  tokens id:a _kw:not _=? _id:b _kw:and _id:c _kw:not _in? _id:items _kw:and _id:d _kw:not _in? _id:rest
+  tree (and (and (not=? a b) (not in? c items)) (not in? d rest))
 ### word operators
   tokens id:a _kw:nand _id:b _kw:xor _id:c _kw:nor _id:d _kw:xnor _id:e
   tree (not (or (xor (not (and a b)) c) (not (xor d e))))
@@ -182,4 +182,4 @@
   parse error 1:1: `$assert` needs a condition: `$assert condition` or `$assert condition, "message"`
   | $assert
   | ^
-entries 53, tokens 459, nodes 448, errors 12
+entries 53, tokens 460, nodes 448, errors 12

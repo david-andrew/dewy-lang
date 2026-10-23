@@ -4724,7 +4724,6 @@ def test_core_lexer_bounded_spans(compiler, tmp_path, release):
         ('>>=>', 'tail', [('op', '>>', 0, 2), ('op', '=>', 2, 4)]),
         ('>>=', '>tail', [('op', '>>=', 0, 3)]),
         ('notin', '?tail', [('identifier', 'notin', 0, 5)]),
-        ('notin?', 'tail', [('op', 'notin?', 0, 6)]),
         ('isnt', '?tail', [('identifier', 'isnt', 0, 4)]),
         ('is?', 'tail', [('op', 'is?', 0, 3)]),
         ('0', 'xAF', [('source_integer', '0', 0, 1)]),
@@ -4746,7 +4745,7 @@ def test_core_lexer_bounded_spans(compiler, tmp_path, release):
         return json.dumps(text.replace('{', '{{').replace('}', '}}'), ensure_ascii=False)
 
     symbols = {'>>': 'shr', '=>': 'function', '>>=': 'shr_assign',
-               'notin?': 'not_contains', 'is?': 'is_type', '.': 'dot', 'if': 'kw_if'}
+               'is?': 'is_type', '.': 'dot', 'if': 'kw_if'}
     body = ['main = () -> int:', '    loop intern_names in [false, true]:']
     for text, suffix, expected in cases:
         raw = text.encode('utf-8')

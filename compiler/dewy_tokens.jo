@@ -167,7 +167,6 @@ dn_token_kind = (text: str) -> DewyToken:
                 "not=?": return .not_eq
                 "not>?": return .not_gt
                 "not<?": return .not_lt
-                "notin?": return .not_contains
                 "not": return .kw_not
                 "nand": return .kw_nand
                 "nor": return .kw_nor
@@ -264,7 +263,7 @@ dn_token_text = (token: DewyToken) -> str:
         is_type: "is?"
         isnt_type: "isnt?"
         contains: "in?"
-        not_contains: "notin?"
+        not_contains: "not in?"
         kw_of: "of"
         kw_or_throw: "or_throw"
         kw_let: "let"

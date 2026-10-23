@@ -205,7 +205,7 @@ lex=(source:array<uint8> begin:int64<0 <=? begin and begin <=? source.length>=0 
             kind='identifier'
             let value=text_of(source start i)
             if value =? "true" or value =? "false" kind='boolean'
-            if value in? ["is" "isnt" "in" "notin"] and i <? stop and source[i] =? b'?' {
+            if value in? ["is" "isnt" "in"] and i <? stop and source[i] =? b'?' {
                 value="{value}?"
                 i+=1
                 kind='op'

@@ -39,7 +39,6 @@ dn_false_id = 0
 dn_is_id = 0
 dn_isnt_id = 0
 dn_in_id = 0
-dn_notin_id = 0
 dn_no_id = 0
 dn_end_id = 0
 dn_type_id = 0
@@ -65,7 +64,6 @@ dn_init_words = ():
     dn_is_id = intern("is")
     dn_isnt_id = intern("isnt")
     dn_in_id = intern("in")
-    dn_notin_id = intern("notin")
     words = ["as", "and", "break", "const", "continue", "else", "from", "import", "if", "in", "let", "loop", "parallel", "concurrent", "spawn", "match", "not", "of", "or", "or_throw", "return", "test", "transmute", "xor", "nand", "nor", "xnor"]
     loop word in words: intern(word)
     dn_word_tokens = fill(DewyToken.none, names.len())
@@ -519,7 +517,6 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
                     if id == dn_is_id: query = .is_type
                     else if id == dn_isnt_id: query = .isnt_type
                     else if id == dn_in_id: query = .contains
-                    else if id == dn_notin_id: query = .not_contains
                     if query != .none:
                         symbol = query
                         kind = .op
@@ -527,7 +524,7 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
             else:
                 value = source[start..i)
                 if value == "true" or value == "false": kind = .boolean
-                if (value == "is" or value == "isnt" or value == "in" or value == "notin") and i < stop and bytes[i] == '?':
+                if (value == "is" or value == "isnt" or value == "in") and i < stop and bytes[i] == '?':
                     value += "?"
                     i += 1
                     kind = .op
