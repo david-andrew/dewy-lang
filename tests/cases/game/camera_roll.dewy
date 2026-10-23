@@ -16,5 +16,5 @@ if dot(normalize(point-origin) direction)<?0.9999 return 5
 if world_to_screen(vec3(0 0 6)) isnt? none return 6
 camera3d(eye target)
 let restored=world_to_screen(point)
-return if restored isnt? none and length(restored-normal)<?0.01 42 else 7}
+return if restored isnt? none and (restored-normal).norm<?0.01 42 else 7}
 main=()=>exit(run())

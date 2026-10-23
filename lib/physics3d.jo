@@ -492,7 +492,7 @@ __hinge_angle = (j: __J3, bs: __B3[]) -> f32:
 # the points at_a of a and at_b of b kept as far apart as they are (spring: a spring of that
 # many oscillations a second; rope: only as far at most)
 rod = (w: mut World, a: Body, b: Body, at_a: vec3, at_b: vec3, spring: f64 = 0, damping: f64 = 0.5, rope: bool = false) -> Joint:
-    __joint3(w, __J3(kind = 2, a = __id(w, a), b = __id(w, b), la = w.to_local(a, at_a), lb = w.to_local(b, at_b), length = length(at_b - at_a),
+    __joint3(w, __J3(kind = 2, a = __id(w, a), b = __id(w, b), la = w.to_local(a, at_a), lb = w.to_local(b, at_b), length = norm(at_b - at_a),
                      hz = f32(spring), damping = f32(damping), rope = rope))
 
 ends = (w: World, j: Joint) -> (vec3, vec3):
@@ -745,7 +745,7 @@ __collide_pair_ordered = (a: __B3, b: __B3, meshes: __Mesh3[]) -> __C3[]:
 __spheres = (pa: vec3, ra: f32, pb: vec3, rb: f32, feature: int) -> __C3[]:
     out: __C3[]
     d = pb - pa
-    dist = length(d)
+    dist = norm(d)
     if dist >= ra + rb: return out
     n = vec3(0, 1, 0)
     if dist > 1e-6: n = d * (1.0 / dist)
@@ -777,7 +777,7 @@ __box_sphere = (b: __B3, c: vec3, r: f32, feature: int) -> __C3[]:
         return out
     p = b.pos + __col(b.m, 0) * q.x + __col(b.m, 1) * q.y + __col(b.m, 2) * q.z
     dd = c - p
-    dist = length(dd)
+    dist = norm(dd)
     if dist >= r: return out
     n = dd * (1.0 / max(dist, 1e-6))
     out.push(__c3(p, n, dist - r, feature))
@@ -862,7 +862,7 @@ __capsule_box = (c: __B3, b: __B3) -> __C3[]:
 __box_dist = (b: __B3, p: vec3) -> f32:
     d = p - b.pos
     l = vec3(dot(__col(b.m, 0), d), dot(__col(b.m, 1), d), dot(__col(b.m, 2), d))
-    length(l - clamp(l, -b.half, b.half))
+    norm(l - clamp(l, -b.half, b.half))
 
 # ---------------- box and box ----------------
 # the axes that could separate them (faces of each, then each pair of edges): the one they are
@@ -879,7 +879,7 @@ __boxes = (a: __B3, b: __B3) -> __C3[]:
         else if k < 6: l = __col(b.m, k - 3)
         else:
             l = cross(__col(a.m, (k - 6) / 3), __col(b.m, (k - 6) % 3))
-            ll = length(l)
+            ll = norm(l)
             if ll < 1e-5: continue
             l = l * (1.0 / ll)
         ra = abs(dot(l, __col(a.m, 0))) * a.half.x + abs(dot(l, __col(a.m, 1))) * a.half.y + abs(dot(l, __col(a.m, 2))) * a.half.z
@@ -1084,7 +1084,7 @@ __sphere_tri = (c: vec3, r: f32, a: vec3, b: vec3, cc: vec3, feature: int, faces
     out: __C3[]
     q = __closest_on_tri(c, a, b, cc)
     d = q - c
-    dist = length(d)
+    dist = norm(d)
     if dist >= r: return out
     face = normalize(cross(b - a, cc - a))
     n = face * -1.0
@@ -1095,7 +1095,7 @@ __sphere_tri = (c: vec3, r: f32, a: vec3, b: vec3, cc: vec3, feature: int, faces
         if dot(n, -face) > 0.7: n = -face
     if dot(c - a, face) < -r * 0.5 and dot(n, -face) > 0.0: return out
     out.push(__c3(q, n, dist - r, feature))
-    faces.push(length(q - (c - face * dot(c - a, face))) < 1e-4)
+    faces.push(norm(q - (c - face * dot(c - a, face))) < 1e-4)
     out
 
 # a shape against the triangles near it: normals from the shape toward the triangles
@@ -1269,7 +1269,7 @@ __j3_prepare = (j: mut __J3, bs: mut __B3[], h: f32):
     j.rb = quat_rotate(bs[j.b].rot, j.lb)
     if j.kind == 2:
         d = bs[j.b].pos + j.rb - bs[j.a].pos - j.ra
-        l = length(d)
+        l = norm(d)
         j.u = vec3(0, 0, 0)
         if l > 1e-6: j.u = d * (1.0 / l)
         k0 = __kmass(bs[j.a].inv_mass, bs[j.b].inv_mass, bs[j.a].iw, bs[j.b].iw, j.ra, j.rb, j.u)
@@ -1560,7 +1560,7 @@ __ray_capsule_seg = (a: vec3, d: vec3, e0: vec3, e1: vec3, r: f32) -> (f32, vec3
             bn = n
     # (the side: the ray's closest approach to the line, on the segment)
     ax = e1 - e0
-    l = length(ax)
+    l = norm(ax)
     if l < 1e-6: return (best, bn)
     u = ax * (1.0 / l)
     ao = a - e0
@@ -1639,7 +1639,7 @@ walk = (w: mut World, c: mut Character, move: vec3, dt: f64, jump: f64 = 0):
     else: vy += w.gravity.y * h
     was_ground = c.on_ground and jump <= 0.0
     d = vec3(move.x, vy, move.z) * h
-    n = clamp(int(ceil(f64(length(d) / (c.radius * 0.5)))), 1, 32)
+    n = clamp(int(ceil(f64(norm(d) / (c.radius * 0.5)))), 1, 32)
     flat = vec3(d.x, 0, d.z) * (1.0 / f32(n))
     c.on_ground = false
     loop _ in [0..n):
@@ -1694,7 +1694,7 @@ __char_resolve = (w: mut World, c: mut Character, vy0: f32) -> f32:
                 if bd.kind == .dynamic and bd.inv_mass > 0.0:
                     # (shoved along the ground, as fast as the character comes, less as it is heavier)
                     n = vec3(ct.normal.x, 0, ct.normal.z)
-                    if length(n) > 1e-4:
+                    if norm(n) > 1e-4:
                         n = normalize(n)
                         into = dot(vec3(c.velocity.x, 0, c.velocity.z), n)
                         m = 1.0 / bd.inv_mass

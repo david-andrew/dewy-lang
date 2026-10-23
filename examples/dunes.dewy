@@ -105,7 +105,7 @@ follow=(chain: array<vec3> anchor: vec3 count: int64 dt: float64):>array<vec3>=>
     chain[0] = anchor
     loop k in [1..chain.length) {
         let d = chain[k] - chain[k - 1]
-        let l = length(d)
+        let l = d.norm
         let dir = d / max(l 0.001)
         let flutter = vec3(float32(sin(t * 7.0 + float64(k)) * 0.04) 0.02 float32(cos(t * 5.0 + float64(k)) * 0.04))
         chain[k] = chain[k - 1] + normalize(dir + vec3(0.25 0.05 0.1) * float32(dt) * 10.0 + flutter) * 0.32
@@ -115,7 +115,7 @@ follow=(chain: array<vec3> anchor: vec3 count: int64 dt: float64):>array<vec3>=>
 # Gather the glyphs within reach of the traveler.
 collect_glyphs=()=>{
     loop @glyph in glyphs {
-        if not glyph.taken and length(glyph.pos - (pos + vec3(0 1 0))) <? 1.6 {
+        if not glyph.taken and (glyph.pos - (pos + vec3(0 1 0))).norm <? 1.6 {
             glyph.taken = true
             collected += 1
             scarf_len += 3
@@ -140,7 +140,7 @@ update=(dt: float64)=>{
     let right = vec3(float32(cos(yaw)) 0 float32(-sin(yaw)))
     let wish = right * inp.x - fwd * inp.y
     let speed:float64 = 7.5
-    if length(wish) >? 0.01 {
+    if wish.norm >? 0.01 {
         wish = normalize(wish)
         heading = atan2(float64(wish.x) float64(wish.z))
     }
@@ -173,8 +173,8 @@ update=(dt: float64)=>{
         energy = min(energy + dt * 0.8 1.0)
     }
     if grounded {
-        moved += float64(length(vec3(vel.x 0 vel.z))) * dt
-        if length(pos - last_step) >? 0.75 {
+        moved += float64(vec3(vel.x 0 vel.z).norm) * dt
+        if (pos - last_step).norm >? 0.75 {
             let side = vec3(float32(cos(heading)) 0 float32(-sin(heading))) * float32(0.12 * step_side)
             steps.push(pos + side)
             step_side = -step_side
@@ -222,7 +222,7 @@ draw=()=>{
     }
     )
     # the traveler: flowing robe, hood with glowing eyes, and a luminous scarf
-    let speed = float64(length(vec3(vel.x 0 vel.z)))
+    let speed = float64(vec3(vel.x 0 vel.z).norm)
     update_mesh(@robe robe_vertices(t speed))
     let body = translation(pos) * rotation_y(heading)
     draw_mesh(robe body rgb(1 1 1) specular = 0.15)

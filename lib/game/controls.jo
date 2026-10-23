@@ -130,7 +130,7 @@ action_axis = (neg: str, pos: str, player: int = -1) -> f64: action_value(pos, p
 # a direction (y down), at most 1 long
 action_vec = (left: str, right: str, up: str, down: str, player: int = -1) -> vec2:
     v = vec2(f32(action_axis(left, right, player)), f32(action_axis(up, down, player)))
-    if length(v) > 1.0: v = normalize(v)
+    if norm(v) > 1.0: v = normalize(v)
     v
 
 # ---------------- bindings ----------------

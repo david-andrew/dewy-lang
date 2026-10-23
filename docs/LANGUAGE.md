@@ -2030,6 +2030,10 @@ scale. An empty or all-zero array has positive zero length. `norm` propagates
 any NaN; `hypot` returns infinity if either coordinate is infinite, even when
 the other is NaN. Floating `abs(-0.0)` returns positive zero.
 
+A `vec2`, `vec3` or `vec4` has its magnitude as the method `v.norm`;
+`v.norm(p=1)` is the p-norm (`p` at least 1; shaders have only the default
+`p=2`). `.length` always means element count, so a vector has none.
+
 GPU `hypot` uses the shader's `float32` arithmetic and a corresponding scaled
 implementation. Shader precision and handling of subnormal values still depend
 on the graphics driver; the CPU and WebAssembly routines use `float64`.

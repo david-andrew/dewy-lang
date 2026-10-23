@@ -186,7 +186,7 @@ no_effect = ():
 # (a circle drawn as a square: its uv where the pixel is, in radii from the center; the edge
 # smoothed over a pixel)
 __circle_color = (uv: vec2, color: vec4) -> vec4:
-    d = length(uv)
+    d = norm(uv)
     w = max(fwidth(d), 0.0001)
     vec4(color.xyz, color.w * clamp((1.0 - d) / w + 0.5, 0.0, 1.0))
 
@@ -838,7 +838,7 @@ arc = (center: vec2, radius: f64, thickness: f64, start: f64, stop: f64, c: vec4
 
 line = (a: vec2, b: vec2, thickness: f64, c: vec4):
     d = b - a
-    l = length(d)
+    l = norm(d)
     if l == 0.0: return
     # (a little wider than it is, its sides smooth over a pixel: uv.y across it, 1 at its edges)
     h = thickness / 2.0
@@ -851,7 +851,7 @@ line = (a: vec2, b: vec2, thickness: f64, c: vec4):
 # Average the two segment normals, capping the length at a sharp turn.
 __polyline_join = (before: vec2, after: vec2) -> vec2:
     m = before + after
-    if length(m) < 0.001: return before
+    if norm(m) < 0.001: return before
     m = normalize(m)
     m / max(dot(m, before), f32(0.34))
 

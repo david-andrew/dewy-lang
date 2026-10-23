@@ -20,7 +20,7 @@ random_between = (@random: Rng low: float64 high: float64) :> float64 => low+(hi
 new_gold = (@game: Game) :> void => {
     loop true {
         game.gold = vec2(random_between(@game.random 80.0 1200.0) random_between(@game.random 100.0 660.0))
-        if length(game.gold-game.player)>?260.0 break
+        if (game.gold-game.player).norm>?260.0 break
     }
 }
 fresh = (seed: int64) :> Game => {

@@ -709,7 +709,7 @@ ml_math_names: {str: str} = {
     "sin": "sin", "cos": "cos", "tan": "tan", "asin": "asin", "acos": "acos", "atan": "atan", "atan2": "atan2",
     "exp": "exp", "log": "log", "pow": "pow", "sqrt": "sqrt", "abs": "abs", "floor": "floor", "ceil": "ceil",
     "fract": "fract", "min": "min", "max": "max", "clamp": "clamp", "mix": "mix", "lerp": "mix",
-    "step": "step", "smoothstep": "smoothstep", "length": "length", "distance": "distance", "dot": "dot",
+    "step": "step", "smoothstep": "smoothstep", "norm": "length", "distance": "distance", "dot": "dot",
     "cross": "cross", "normalize": "normalize", "reflect": "reflect", "transpose": "transpose", "inverse": "sl_inverse",
     "sign": "sign", "sinf": "sin", "cosf": "cos", "exp2": "exp2", "log2": "log2", "fwidth": "fwidth", "mod": "sl_mod", "hypot": "sl_hypot",
 }
@@ -791,13 +791,14 @@ ml_with_ctx = (ctx: str, rest: str[]) -> str:
 ml_math = (nm: str, e: int) -> str:
     t = prune(ntype(e))
     pos = nodes[e].pos
+    if nm == "norm" and nkids(e) != 1: ml_err(nodes[e].pos, "the p-norm is not available in shaders: write the length, v.norm")
     n = nkids(e)
     args: str[]
     loop i in [0..n):
         a = kid(e, i)
         x = ml_expr(a)
         at = prune(ntype(a))
-        if ml_is_vector(t) and not is_vec(at) and nm != "length" and nm != "distance" and nm != "dot":
+        if ml_is_vector(t) and not is_vec(at) and nm != "norm" and nm != "distance" and nm != "dot":
             x = "{ml_type(t, pos)}({ml_as(a, x, t)})"
         else if ml_is_floaty(t) and not ml_is_floaty(at) and types[at].kind != .bool_: x = ml_as(a, x, t)
         args.push(x)

@@ -310,7 +310,7 @@ draw_chart = (c: Chart, r: Rect):
 
 # Return a bounded pattern phase, so long paths do not lose subpixel precision.
 __chart_dashes = (a: vec2, b: vec2, dash: f64, gone: f64, width: f64, col: vec4) -> f64:
-    l = f64(length(b - a))
+    l = f64(norm(b - a))
     if l <= 0.0 or not is_finite(l): return gone
     if dash <= 0.0 or not is_finite(dash):
         line(a, b, width, col)

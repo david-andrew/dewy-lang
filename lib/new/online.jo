@@ -43,7 +43,7 @@ tick = (g: Game, pads: Pad[]) -> Game:
     loop i in [0..2):
         p = g.players[i].pos + vec2(f32(pads[i].x), f32(pads[i].y)) * f32(SPEED)
         g.players[i].pos = vec2(clamp(p.x, 20, 1260), clamp(p.y, 20, 700))
-        if length(g.players[i].pos - g.coin) < 34.0:
+        if norm(g.players[i].pos - g.coin) < 34.0:
             g.players[i].score += 1
             g.taken += 1
             g.coin = vec2(f32(100 + int(hash(g.taken * 2) % 1080)), f32(100 + int(hash(g.taken * 2 + 1) % 520)))

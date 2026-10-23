@@ -21,23 +21,36 @@ dot = (a: vec3, b: vec3) -> f32: a.x * b.x + a.y * b.y + a.z * b.z
 dot = (a: vec4, b: vec4) -> f32: a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w
 cross = (a: vec3, b: vec3) -> vec3: vec3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
 cross = (a: vec2, b: vec2) -> f32: a.x * b.y - a.y * b.x
-length = (v: vec2) -> f32: sqrt(v.x * v.x + v.y * v.y)
-length = (v: vec3) -> f32: sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
-length = (v: vec4) -> f32: sqrt(dot(v, v))
+norm = (v: vec2) -> f32: sqrt(v.x * v.x + v.y * v.y)
+norm = (v: vec3) -> f32: sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
+norm = (v: vec4) -> f32: sqrt(dot(v, v))
+# the p-norm, p >= 1: the sum of |component|^p to the 1/p (p = 1 sums, p = 2 is the length, a huge p is the largest)
+__norm_p = (x: f64, y: f64, z: f64, w: f64, p: f64) -> f64:
+    a = abs(x)
+    b = abs(y)
+    c = abs(z)
+    d = abs(w)
+    if p == 1.0: return a + b + c + d
+    if p == 2.0: return sqrt(a * a + b * b + c * c + d * d)
+    if p > 1e300: return max(max(a, b), max(c, d))
+    pow(pow(a, p) + pow(b, p) + pow(c, p) + pow(d, p), 1.0 / p)
+norm = (v: vec2, p: f32) -> f32: f32(__norm_p(f64(v.x), f64(v.y), 0.0, 0.0, f64(p)))
+norm = (v: vec3, p: f32) -> f32: f32(__norm_p(f64(v.x), f64(v.y), f64(v.z), 0.0, f64(p)))
+norm = (v: vec4, p: f32) -> f32: f32(__norm_p(f64(v.x), f64(v.y), f64(v.z), f64(v.w), f64(p)))
 length_sq = (v: vec2) -> f32: v.x * v.x + v.y * v.y
 length_sq = (v: vec3) -> f32: dot(v, v)
-distance = (a: vec2, b: vec2) -> f32: length(a - b)
-distance = (a: vec3, b: vec3) -> f32: length(a - b)
+distance = (a: vec2, b: vec2) -> f32: norm(a - b)
+distance = (a: vec3, b: vec3) -> f32: norm(a - b)
 normalize = (v: vec2) -> vec2:
-    l = length(v)
+    l = norm(v)
     if l == 0.0: return v
     v / l
 normalize = (v: vec3) -> vec3:
-    l = length(v)
+    l = norm(v)
     if l == 0.0: return v
     v / l
 normalize = (v: vec4) -> vec4:
-    l = length(v)
+    l = norm(v)
     if l == 0.0: return v
     v / l
 lerp = (a: f32, b: f32, t: f32) -> f32: a + (b - a) * t
@@ -108,12 +121,12 @@ rotate = (v: vec2, a: f64) -> vec2:
 # a moved toward b by at most step (reaching it, not passing it): a steady speed, where approach eases in
 move_toward = (a: vec2, b: vec2, step: f32) -> vec2:
     d = b - a
-    l = length(d)
+    l = norm(d)
     if l <= step or l == 0.0: return b
     a + d / l * step
 move_toward = (a: vec3, b: vec3, step: f64) -> vec3:
     d = b - a
-    l = f64(length(d))
+    l = f64(norm(d))
     if l <= step or l == 0.0: return b
     a + d * f32(step / l)
 move_toward = (a: f64, b: f64, step: f64) -> f64:

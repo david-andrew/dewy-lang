@@ -47,8 +47,8 @@ __catmull[T] = (p: T[], i: int, u: f64, closed: bool) -> T:
 # how long the path is (closed: back to the start too)
 path_length[T] = (path: T[], closed: bool = false) -> f64:
     total = 0.0
-    loop i in [1..path.len()): total += f64(length(path[i] - path[i - 1]))
-    if closed and path.len() > 1: total += f64(length(path[0] - path[path.len() - 1]))
+    loop i in [1..path.len()): total += f64(norm(path[i] - path[i - 1]))
+    if closed and path.len() > 1: total += f64(norm(path[0] - path[path.len() - 1]))
     total
 
 # where p is nearest to the path: how far along it that is (from its start) and the point there
@@ -91,7 +91,7 @@ point_along[T] = (path: T[], distance: f64, closed: bool = false) -> T:
     loop i in [0..segs):
         a = path[i]
         b = path[(i + 1) % n]
-        l = f64(length(b - a))
+        l = f64(norm(b - a))
         if d <= l or i == segs - 1:
             if l <= 0.0: return a
             return a + (b - a) * f32(min(d / l, 1.0))

@@ -128,7 +128,7 @@ update = (dt: f64):
     center = vec2(box.x + box.w / 2.0, box.y + box.h / 2.0)
     loop mut c in coins:
         if c.taken: c.pop.update(dt)
-        else if length(c.pos - center) < 30.0:
+        else if norm(c.pos - center) < 30.0:
             c.taken = true
             got += 1
             play(snd_coin)

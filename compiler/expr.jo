@@ -6394,6 +6394,14 @@ check_vec_ctor = (n: int, t: int, args: int[]) -> int:
     t
 
 swizzle_chars = "xyzwrgbastpq"
+# whether every letter of a member name is a vector component letter (`xy`, `rgb`)
+swizzle_name = (name: int) -> bool:
+    s = name_of(name)
+    if len(s) < 1 or len(s) > 4: return false
+    loop i in [0..len(s)):
+        if swizzle_index(s[i]) < 0: return false
+    true
+
 swizzle_index = (c: u8) -> int:
     i = find_byte(swizzle_chars, c)
     if i < 0: return -1
@@ -8905,6 +8913,13 @@ check_field_expr = (n: int, expected: int) -> int:
         if bk != .tuple: fatal(nodes[n].pos, "'.{nodes[n].ival}' needs a tuple, found {dt(bt)}")
         if nodes[n].ival < 0 or nodes[n].ival >= int(types[bt].nargs): fatal(nodes[n].pos, "tuple index out of range")
         t = targ(bt, nodes[n].ival)
+    else if bk == .vec and files[pos_file(nodes[n].pos)].is_dewy and not swizzle_name(fname) and fn_name_for(bt, fname) and member_call_without_arguments(bt, fname):
+        # (`v.norm` is `v.norm()`: a vector's function, called with a dot as a container's are)
+        method = mk(.field, nodes[n].pos)
+        nodes[method].a = nodes[n].a
+        nodes[method].name = i32(fname)
+        nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method), aux2 = -9)
+        return check_expr(n, expected)
     else if bk == .vec:
         t = check_swizzle(n, bt)
         if ide_on: ide_ref(nodes[n].pos, fname, IK_FIELD, 0, t, 0)
@@ -9830,9 +9845,9 @@ check_swizzle = (n: int, bt: int) -> int:
     if bt == T_MAT4: fatal(nodes[n].pos, "use m[i] to access matrix columns")
     # (v.normalized, v.magnitude: Unity's properties, functions here)
     if s == "normalized": fatal(nodes[n].pos, "a vector's direction is `normalize(v)`")
-    if s == "magnitude" or s == "length" or s == "Length": fatal(nodes[n].pos, "a vector's length is `length(v)`")
+    if s == "magnitude" or s == "length" or s == "Length": fatal(nodes[n].pos, "a vector's length is `v.norm`")
     if s == "sqrMagnitude" or s == "lengthSquared": fatal(nodes[n].pos, "a vector's length squared is `length_sq(v)`")
-    if len(s) < 1 or len(s) > 4: fatal(nodes[n].pos, "invalid vector component '{s}' (a vector has x, y, z and w; `length(v)`, `normalize(v)`, `dot(a, b)` and the like are functions)")
+    if len(s) < 1 or len(s) > 4: fatal(nodes[n].pos, "invalid vector component '{s}' (a vector has x, y, z and w; `v.norm`, `normalize(v)`, `dot(a, b)` and the like are functions)")
     loop i in [0..len(s)):
         ci = swizzle_index(s[i])
         if ci < 0 or ci >= nb: fatal(nodes[n].pos, "{dt(bt)} has no component '{byte_str(int(s[i]))}'")

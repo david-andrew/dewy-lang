@@ -123,7 +123,7 @@ builtin_map: {str: str} = {
     "sin": "sin", "cos": "cos", "tan": "tan", "asin": "asin", "acos": "acos", "atan": "atan", "atan2": "atan",
     "exp": "exp", "log": "log", "pow": "pow", "sqrt": "sqrt", "abs": "abs", "floor": "floor", "ceil": "ceil",
     "fract": "fract", "mod": "mod", "min": "min", "max": "max", "clamp": "clamp", "mix": "mix", "lerp": "mix",
-    "step": "step", "smoothstep": "smoothstep", "length": "length", "distance": "distance", "dot": "dot",
+    "step": "step", "smoothstep": "smoothstep", "norm": "length", "distance": "distance", "dot": "dot",
     "cross": "cross", "normalize": "normalize", "reflect": "reflect", "transpose": "transpose", "inverse": "inverse",
     "sign": "sign", "sinf": "sin", "cosf": "cos", "sample": "texture", "sample_lod": "textureLod",
     "exp2": "exp2", "log2": "log2", "fwidth": "fwidth", "hypot": "sl_hypot",
@@ -454,6 +454,7 @@ gl_expr = (e: int) -> str:
         loop i in [0..nkids(e)): args.push(gl_expr(kid(e, i)))
         if modules[int(nodes[decl].mod)].is_prelude:
             if let g = builtin_map.get(nm):
+                if nm == "norm" and nkids(e) != 1: gl_err(nodes[e].pos, "the p-norm is not available in shaders: write the length, v.norm")
                 if nm == "hypot" and gl_first("hypot"):
                     gl_decls.push(sl_hypot_body("floatBitsToUint", "uintBitsToFloat"))
                 # (abs of the smallest integer is itself, as on the CPU: GLSL's is undefined)

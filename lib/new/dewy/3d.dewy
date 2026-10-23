@@ -86,7 +86,7 @@ start = () :> void => {
     loop i in [0..18) {
         let size = random(1.2 2.8)
         let center = vec3(random(-16.0 16.0) size/2.0 random(-16.0 16.0))
-        if length(vec2(center.x center.z)-vec2(0 8))<?3.0 continue
+        if (vec2(center.x center.z)-vec2(0 8)).norm<?3.0 continue
         crates.push(world.add_box(center vec3(size size size) density = 150))
     }
     orbs.clear()
@@ -143,7 +143,7 @@ update = (dt: float64) :> void => {
     let ahead = vec3(-sin(yaw) 0 -cos(yaw))
     let side = vec3(cos(yaw) 0 -sin(yaw))
     let move = ahead*(-axis.y)+side*axis.x
-    if length(move)>?1.0 move = normalize(move)
+    if move.norm>?1.0 move = normalize(move)
     let jump:float64 = 0.0
     if player.on_ground and (key_pressed(Key.space) or gamepad_pressed(PadButton.a)) {
         jump = JUMP

@@ -663,13 +663,13 @@ joint_angle = (w: World, j: Joint) -> f64:
 # spring > 0 a spring of that many oscillations a second (damping: 0 bounces on, 1 settles at
 # once); with rope, only as far apart at most
 rod = (w: mut World, a: Body, b: Body, at_a: vec2, at_b: vec2, spring: f64 = 0, damping: f64 = 0.5, rope: bool = false) -> Joint:
-    __joint(w, __PJoint(kind = 1, a = __id(w, a), b = __id(w, b), la = w.to_local(a, at_a), lb = w.to_local(b, at_b), length = length(at_b - at_a),
+    __joint(w, __PJoint(kind = 1, a = __id(w, a), b = __id(w, b), la = w.to_local(a, at_a), lb = w.to_local(b, at_b), length = norm(at_b - at_a),
                         hz = f32(spring), damping = f32(damping), rope = rope))
 
 # pulls the point at of b toward a target (drag_to), as a stiff spring: grabbing with the mouse
 drag = (w: mut World, b: Body, at: vec2, strength: f64 = 1000) -> Joint:
     m = f32(w.mass(b))
-    __joint(w, __PJoint(kind = 2, a = 0, b = __id(w, b), lb = w.to_local(b, at), target = at, hz = 5, damping = 0.7, max_force = f32(strength) * m * max(length(w.gravity), 100)))
+    __joint(w, __PJoint(kind = 2, a = 0, b = __id(w, b), lb = w.to_local(b, at), target = at, hz = 5, damping = 0.7, max_force = f32(strength) * m * max(norm(w.gravity), 100)))
 
 drag_to = (w: mut World, j: Joint, target: vec2):
     k = __jid(w, j)
@@ -833,7 +833,7 @@ __step = (w: mut World, h: f32):
         if bd.kind != .dynamic or not bd.alive or bd.asleep or bd.sensor or not __shaped(bd): continue
         size = bd.radius
         if size < 0.0: size = min(bd.hi.x - bd.lo.x, bd.hi.y - bd.lo.y) * 0.5
-        if length(bd.vel) * h > size * 0.5: fast.push((i, bd.pos, size))
+        if norm(bd.vel) * h > size * 0.5: fast.push((i, bd.pos, size))
     loop mut b in w.bodies:
         if b.kind == .fixed or not b.alive or b.asleep: continue
         b.pos += b.vel * h
@@ -991,7 +991,7 @@ __collide = (a: __PBody, b: __PBody) -> __PContact[]:
     out: __PContact[]
     if a.radius >= 0.0 and b.radius >= 0.0:
         d = b.pos - a.pos
-        dist = length(d)
+        dist = norm(d)
         if dist >= a.radius + b.radius: return out
         n = vec2(0, 1)
         if dist > 1e-6: n = d * (1.0 / dist)
@@ -1023,12 +1023,12 @@ __poly_circle = (p: __PBody, c: __PBody, flip: bool) -> __PContact[]:
             d = cl - v1
             if length_sq(d) > c.radius * c.radius: return out
             n = normalize(d)
-            sep = length(d) - c.radius
+            sep = norm(d) - c.radius
         else if dot(cl - v2, v1 - v2) <= 0.0:
             d = cl - v2
             if length_sq(d) > c.radius * c.radius: return out
             n = normalize(d)
-            sep = length(d) - c.radius
+            sep = norm(d) - c.radius
     nw = __rot(p.rot, n)
     pt = c.pos - nw * (c.radius + sep * 0.5)
     if flip: nw = -nw
@@ -1214,7 +1214,7 @@ __joint_prepare = (j: mut __PJoint, bs: mut __PBody[], h: f32):
     j.rb = __rot(bs[j.b].rot, j.lb)
     if j.kind == 1:
         d = bs[j.b].pos + j.rb - bs[j.a].pos - j.ra
-        l = length(d)
+        l = norm(d)
         j.u = vec2(0, 0)
         if l > 1e-4: j.u = d * (1.0 / l)
         cra = cross(j.ra, j.u)
@@ -1436,7 +1436,7 @@ __joint_position = (j: mut __PJoint, bs: mut __PBody[]):
     d = bs[j.b].pos + rb - bs[j.a].pos - ra
     p = vec2(0, 0)
     if j.kind == 1:
-        l = length(d)
+        l = norm(d)
         if l < 1e-4: return
         u = d * (1.0 / l)
         c = clamp(l - j.length, -20.0, 20.0)
@@ -1524,7 +1524,7 @@ __joint_solve = (j: mut __PJoint, bs: mut __PBody[], h: f32):
         a0 = j.acc
         j.acc += imp
         lim = j.max_force * h
-        if length(j.acc) > lim: j.acc = j.acc * (lim / length(j.acc))
+        if norm(j.acc) > lim: j.acc = j.acc * (lim / norm(j.acc))
         imp = j.acc - a0
     else: j.acc += imp
     __apply(bs, j.a, j.b, j.ra, j.rb, imp)
@@ -1706,7 +1706,7 @@ bodies_at = (w: World, p: vec2) -> Body[]:
     out
 
 __contains = (bd: __PBody, p: vec2) -> bool:
-    if bd.radius >= 0.0: return length(p - bd.pos) <= bd.radius
+    if bd.radius >= 0.0: return norm(p - bd.pos) <= bd.radius
     l = rotate(p - bd.pos, -f64(bd.angle))
     loop k in [0..bd.verts.len()):
         if dot(bd.normals[k], l - bd.verts[k]) > 0.0: return false

@@ -75,7 +75,7 @@ gamepad_axis = (i: int) -> f64:
     v
 
 __dead_zone = (v: vec2) -> vec2:
-    l = length(v)
+    l = norm(v)
     if l < 0.22: return vec2(0, 0)
     v * f32(min((f64(l) - 0.22) / 0.78, 1.0) / f64(l))
 
@@ -90,7 +90,7 @@ __pad_furthest = (axis: int) -> vec2:
     loop p in [0..MAX_GAMEPADS):
         if not __pad_on[p]: continue
         v = __dead_zone(vec2(f32(__pad_axes[p * 6 + axis]), f32(__pad_axes[p * 6 + axis + 1])))
-        if length(v) > length(best): best = v
+        if norm(v) > norm(best): best = v
     best
 
 # any device's own buttons and axes, as it numbers them (a flight stick's hat and throttle, a

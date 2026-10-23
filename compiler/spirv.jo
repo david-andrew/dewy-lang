@@ -1186,7 +1186,7 @@ sv_std_ops: {str: (int, int)} = {
     "sin": (13, 0), "cos": (14, 0), "tan": (15, 0), "asin": (16, 0), "acos": (17, 0), "atan": (18, 0), "atan2": (25, 0),
     "exp": (27, 0), "log": (28, 0), "exp2": (29, 0), "log2": (30, 0), "pow": (26, 0), "sqrt": (31, 0), "abs": (4, 5),
     "floor": (8, 0), "ceil": (9, 0), "fract": (10, 0), "min": (37, 39), "max": (40, 42), "clamp": (43, 45), "mix": (46, 0),
-    "lerp": (46, 0), "step": (48, 0), "smoothstep": (49, 0), "length": (66, 0), "distance": (67, 0), "cross": (68, 0),
+    "lerp": (46, 0), "step": (48, 0), "smoothstep": (49, 0), "norm": (66, 0), "distance": (67, 0), "cross": (68, 0),
     "normalize": (69, 0), "reflect": (71, 0), "inverse": (34, 0), "sign": (6, 7), "sinf": (13, 0), "cosf": (14, 0),
 }
 
@@ -1269,6 +1269,7 @@ sv_call = (e: int) -> int:
 sv_math = (nm: str, e: int) -> int:
     t = prune(ntype(e))
     pos = nodes[e].pos
+    if nm == "norm" and nkids(e) != 1: sv_err(nodes[e].pos, "the p-norm is not available in shaders: write the length, v.norm")
     ty = sv_type(t, pos)
     n = nkids(e)
     args: int[]
@@ -1276,7 +1277,7 @@ sv_math = (nm: str, e: int) -> int:
         a = kid(e, i)
         v = sv_expr(a)
         at = prune(ntype(a))
-        if sv_is_vector(t) and not is_vec(at) and nm != "length" and nm != "distance" and nm != "dot":
+        if sv_is_vector(t) and not is_vec(at) and nm != "norm" and nm != "distance" and nm != "dot":
             v = sv_splat(t, sv_as(a, v, t, pos), pos)
         args.push(v)
     if nm == "dot":

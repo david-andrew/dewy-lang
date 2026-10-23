@@ -65,7 +65,7 @@ start = ():
     loop i in [0..18):
         s = random(1.2, 2.8)
         c = vec3(random(-16.0, 16.0), s / 2.0, random(-16.0, 16.0))
-        if length(vec2(c.x, c.z) - vec2(0, 8)) < 3.0: continue      # (none where the player starts)
+        if norm(vec2(c.x, c.z) - vec2(0, 8)) < 3.0: continue      # (none where the player starts)
         crates.push(w.add_box(c, vec3(s, s, s), density = 150))
     orbs.clear()
     loop i in [0..ORBS):
@@ -94,7 +94,7 @@ shoot = ():
         if o.pop > 0.0: continue
         # (the ray o0 + d * t passes the orb's center closest at t)
         t = dot(orb_at(o) - o0, d)
-        if t > 0.0 and t < best_t and length(o0 + d * t - orb_at(o)) < 0.5:
+        if t > 0.0 and t < best_t and norm(o0 + d * t - orb_at(o)) < 0.5:
             best = i
             best_t = t
     if best >= 0:
@@ -125,7 +125,7 @@ update = (dt: f64):
     ahead = vec3(-sin(yaw), 0, -cos(yaw))
     side = vec3(cos(yaw), 0, -sin(yaw))
     move = ahead * -axis.y + side * axis.x
-    if length(move) > 1.0: move = normalize(move)
+    if norm(move) > 1.0: move = normalize(move)
     jump = 0.0
     if player.on_ground and (key_pressed(.space) or gamepad_pressed(.a)):
         jump = JUMP

@@ -120,7 +120,7 @@ __reach_gain = (d: f64, reach: f64) -> f64:
 play_at = (s: Sound, pos: vec2, listener: vec2, volume: f64 = 1.0, reach: f64 = 1200.0, pitch: f64 = 1.0, looping: bool = false) -> int:
     d = pos - listener
     pan = clamp(f64(d.x) / (reach * 0.5), -1.0, 1.0) * 0.8
-    play(s, volume * __reach_gain(f64(length(d)), reach), pan, pitch, looping)
+    play(s, volume * __reach_gain(f64(norm(d)), reach), pan, pitch, looping)
 
 # play a sound from a place in 3D: heard from the camera (camera3d), to its left or right, and
 # quieter further away, silent beyond reach (meters); looping: again and again, till stop(id)
@@ -142,8 +142,8 @@ __place_3d = (pos: vec3, reach: f64) -> (f64, f64):
     fwd = __cam_target - __cam_pos
     right = cross(fwd, __cam_up)
     pan = 0.0
-    if length(right) > 0.0001 and length(d) > 0.0001: pan = f64(dot(normalize(d), normalize(right))) * 0.8
-    (__reach_gain(f64(length(d)), reach), pan)
+    if norm(right) > 0.0001 and norm(d) > 0.0001: pan = f64(dot(normalize(d), normalize(right))) * 0.8
+    (__reach_gain(f64(norm(d)), reach), pan)
 # ---------------- volume ----------------
 # the volume of everything played, from 0 (silent) to 1
 master_volume = (v: f64): __master = clamp(v, 0.0, 1.0)

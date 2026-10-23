@@ -82,7 +82,7 @@ sand_fs=(i: SandOut u: SandParams):>vec4=>{
     let g = hash21(cell + vec2(floor(u.time * 0.5) 0))
     let glint = pow(max(dot(reflect(-l nr) v) 0.0) 8.0)
     if g >? 0.985 {c = c + vec3(1 0.95 0.85) * glint * (g - 0.985) * 120.0 * sh}
-    let dist = length(i.world - u.cam)
+    let dist = (i.world - u.cam).norm
     let fa = 1.0 - exp(-dist * u.fog.x * exp(-max(i.world.y 0.0) * u.fog.y))
     let haze = mix(u.fog_color u.fog_color * vec3(0.8 0.9 1.15) clamp(dist / 250.0 0.0 1.0))
     c = mix(c haze clamp(fa 0.0 1.0))

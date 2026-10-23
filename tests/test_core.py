@@ -2929,7 +2929,7 @@ main=():>void=>exit(entry()) entry=()=>{
 let cloth=robe_vertices(0.0 0.0) let indices=robe_indices()
 if cloth.length not=? 175 or indices.length not=? 864 return 1
 loop index in indices {if (index as int64) >=? cloth.length return 2}
-loop v in cloth {if not is_finite(v.pos.x as float64) or abs(length(v.normal)-1.0) >? 0.0001 return 3}
+loop v in cloth {if not is_finite(v.pos.x as float64) or abs(v.normal.norm-1.0) >? 0.0001 return 3}
 let original=cloth cloth[0].pos.x+=10.0
 if abs(cloth[0].pos.x-original[0].pos.x-10.0) >? 0.0001 return 4
 let moving=robe_vertices(1.0 4.0)
@@ -3377,9 +3377,9 @@ def test_core_3d_starter_model(compiler, tmp_path, target, release):
     body = model + r'''
 main=()=>{
     let forward=view_direction(0.0 0.0)
-    if length(forward-vec3(0 0 -1))>?0.00001 return 1
-    if length(view_direction(PI/2.0 0.0)-vec3(-1 0 0))>?0.00001 return 2
-    if abs(length(view_direction(0.7 0.4))-1.0)>?0.00001 return 3
+    if (forward-vec3(0 0 -1)).norm>?0.00001 return 1
+    if (view_direction(PI/2.0 0.0)-vec3(-1 0 0)).norm>?0.00001 return 2
+    if abs(view_direction(0.7 0.4).norm-1.0)>?0.00001 return 3
     let origin=vec3(0 0 0)
     let targets=[Orb[pos=vec3(0 0 -8)] Orb[pos=vec3(0 0 -4)] Orb[pos=vec3(0 0 4)]]
     let saved=targets
@@ -3433,7 +3433,7 @@ def test_core_arcade_starter_model(compiler, tmp_path, target, release):
 main=()=>{
     let game=fresh(42)
     let saved=game
-    if length(game.gold-game.player)<=?260.0 return 1
+    if (game.gold-game.player).norm<=?260.0 return 1
     game.rock_wait=0.0
     let replay=game
     advance(@game vec2(1 0) 1.0/60.0)
@@ -3451,7 +3451,7 @@ main=()=>{
     let before=collecting
     advance(@collecting vec2(0 0) 0.01)
     if collecting.score not=?1 or before.score not=?0 return 6
-    if length(collecting.gold-collecting.player)<=?260.0 return 7
+    if (collecting.gold-collecting.player).norm<=?260.0 return 7
 
     let moving=fresh(19)
     moving.rocks=[Rock[pos=vec2(200 200) vel=vec2(30 -20) r=20 spin=2.0]
@@ -3471,7 +3471,7 @@ main=()=>{
     late.elapsed=1000.0
     late.rock_wait=0.0
     advance(@late vec2(0 0) 0.01)
-    if late.rock_wait not=?ROCK_GAP_MIN or length(late.rocks[0].vel)>?ROCK_SPEED_MAX*1.2+0.001 return 12
+    if late.rock_wait not=?ROCK_GAP_MIN or (late.rocks[0].vel).norm>?ROCK_SPEED_MAX*1.2+0.001 return 12
     loop seed in [0..64) {
         let trial=fresh(seed)
         if trial.gold.x<?80 or trial.gold.x>=?1200 or trial.gold.y<?100 or trial.gold.y>=?660 return 13

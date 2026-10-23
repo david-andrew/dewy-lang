@@ -96,7 +96,7 @@ collect = (@coins: array<Coin> at: vec2 dt: float64) :> int64 => {
     let count = 0
     loop @coin in coins {
         if coin.taken coin.pop.update(dt)
-        else if length(coin.pos-at)<?30.0 {
+        else if (coin.pos-at).norm<?30.0 {
             coin.taken = true
             count += 1
         }

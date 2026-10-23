@@ -140,13 +140,13 @@ lit_fs = (i: LitOut, u: LitParams) -> vec4:
         if f32(k) >= u.light_count: break
         lp = u.lights[k]
         to = lp.xyz - i.world
-        dist = length(to)
+        dist = norm(to)
         if dist < lp.w:
             f = 1.0 - dist / lp.w
             ld = to * (1.0 / max(dist, 0.001))
             c = c + base.xyz * u.light_colors[k].xyz * (max(dot(n, ld), 0.0) * 0.85 + 0.15) * (f * f)
     # height-attenuated exponential fog
-    dist = length(i.world - u.cam_pos)
+    dist = norm(i.world - u.cam_pos)
     fog_amount = 1.0 - exp(-dist * u.fog_density * exp(-max(i.world.y, 0.0) * u.fog_height))
     c = mix(c, u.fog_color, clamp(fog_amount, 0.0, 1.0))
     vec4(aces(c), base.w)
@@ -434,7 +434,7 @@ __pick_lights = ():
     n = __point_lights.len()
     order: int[]
     loop i in [0..n): order.push(i)
-    if n > 8: order.sort_by((i: int) -> f32: length(__point_lights[i].xyz - __cam_pos) - __point_lights[i].w)
+    if n > 8: order.sort_by((i: int) -> f32: norm(__point_lights[i].xyz - __cam_pos) - __point_lights[i].w)
     k = 0
     loop i in order:
         if k == 8: break
@@ -459,7 +459,7 @@ __line_ready = false
 # a line from a to b, `width` thick: for seeing paths, rays, normals and boxes while making a game
 draw_line3d = (a: vec3, b: vec3, color: vec4 = vec4(1, 1, 1, 1), width: f64 = 0.03):
     d = b - a
-    l = length(d)
+    l = norm(d)
     if l <= 0.0: return
     if not __line_ready:
         __line_mesh = cube_mesh(1.0)
@@ -605,7 +605,7 @@ struct _PtOut:
     color: vec4
 _pt_vs = (v: Vertex3D, u: _PtParams) -> _PtOut: _PtOut(u.view_proj * vec4(v.pos, 1), v.uv, v.color)
 _pt_fs = (i: _PtOut, u: _PtParams) -> vec4:
-    d = length(i.uv * 2.0 - vec2(1, 1))
+    d = norm(i.uv * 2.0 - vec2(1, 1))
     a = clamp(1.0 - d, 0.0, 1.0)
     vec4(i.color.xyz, i.color.w * a * a)
 __dummy_mesh = () -> Mesh: Mesh()
@@ -789,7 +789,7 @@ __frustum = (m: mat4) -> vec4[]:
     r3 = row(3)
     out: vec4[]
     loop p in [r3 + r0, r3 - r0, r3 + r1, r3 - r1, r3 + r2, r3 - r2]:
-        l = length(p.xyz)
+        l = norm(p.xyz)
         if l > 0.0: out.push(p * (1.0 / l))
         else: out.push(p)
     out
@@ -799,7 +799,7 @@ __frustum = (m: mat4) -> vec4[]:
 __in_view = (d: Draw3D, planes: vec4[]) -> bool:
     if d.instanced or d.mesh.radius < 0.0: return true
     c = (d.model * vec4(d.mesh.center, 1)).xyz
-    s = max(length(d.model[0].xyz), max(length(d.model[1].xyz), length(d.model[2].xyz)))
+    s = max(norm(d.model[0].xyz), max(norm(d.model[1].xyz), norm(d.model[2].xyz)))
     r = d.mesh.radius * s
     loop p in planes:
         if dot(p.xyz, c) + p.w < -r: return false
@@ -1018,7 +1018,7 @@ __mesh3d = (vs: Vertex3D[], idx: u32[] = []) -> Mesh:
         hi = max(hi, v.pos)
     m.center = (lo + hi) * 0.5
     r = 0.0
-    loop v in vs: r = max(r, f64(length(v.pos - m.center)))
+    loop v in vs: r = max(r, f64(norm(v.pos - m.center)))
     m.radius = f32(r)
     m
 
@@ -1241,5 +1241,5 @@ custom_mesh = (vertices: Vertex3D[], indices: u32[] = []) -> Mesh:
 # (its corners clockwise as seen from the side its normals point to)
 __tri_backwards = (a: Vertex3D, b: Vertex3D, c: Vertex3D) -> bool:
     n = a.normal + b.normal + c.normal
-    if length(n) < 0.0001: return false
+    if norm(n) < 0.0001: return false
     dot(cross(b.pos - a.pos, c.pos - a.pos), n) < 0.0

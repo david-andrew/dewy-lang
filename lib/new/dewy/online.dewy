@@ -28,7 +28,7 @@ tick=(state:Game pads:array<Pad>):>Game=>{
     loop i in [0..2) {
         let p=next.players[i].pos+vec2(float32(pads[i].x) float32(pads[i].y))*float32(SPEED)
         next.players[i].pos=vec2(clamp(p.x 20 1260) clamp(p.y 20 700))
-        if length(next.players[i].pos-next.coin)<?34.0 {
+        if (next.players[i].pos-next.coin).norm<?34.0 {
             next.players[i].score+=1
             next.taken+=1
             next.coin=vec2(float32(100+int64(hash(next.taken*2)%1080)) float32(100+int64(hash(next.taken*2+1)%520)))

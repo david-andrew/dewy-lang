@@ -152,7 +152,7 @@ input_axis = () -> vec2:
     if key_down(.up) or key_down(.w) or gamepad_down(.up): v.y -= 1
     if key_down(.down) or key_down(.s) or gamepad_down(.down): v.y += 1
     s = left_stick()
-    if length(s) > length(v): v = s
+    if norm(s) > norm(v): v = s
     v
 
 # The screen's size in 2D drawing units: the size given to window() (the design size),

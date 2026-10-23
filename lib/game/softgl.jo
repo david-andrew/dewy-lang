@@ -921,10 +921,10 @@ __sw_draw2d = (buf: *f32, count: int, proj: mat4, tex: int):
             # a circle drawn as a square (draw2d's circle): uv in radii from its center
             cuv0 = vec2(l0 * a[2] + l1 * b[2] + l2 * cc[2], l0 * a[3] + l1 * b[3] + l2 * cc[3])
             cduv = vec2(d0 * a[2] + d1 * b[2] + d2 * cc[2], d0 * a[3] + d1 * b[3] + d2 * cc[3])
-            w = max(f64(length(cduv)), 0.0001)
+            w = max(f64(norm(cduv)), 0.0001)
             loop x in [xa..xb + 1):
                 k = f32(x - xa)
-                cov = clamp((1.0 - f64(length(cuv0 + cduv * k))) / w + 0.5, 0.0, 1.0)
+                cov = clamp((1.0 - f64(norm(cuv0 + cduv * k))) / w + 0.5, 0.0, 1.0)
                 if cov <= 0.0: continue
                 col = col0 + dcol * k
                 col.w = col.w * f32(cov)

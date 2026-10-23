@@ -143,7 +143,7 @@ path_distance = (g: mut PathGrid, from: vec2, to: vec2) -> int:
 # when it is in the same or the next cell (or cannot be reached). Off the open cells (pushed
 # into a corner, or a goal on a crate), the nearest open cell stands in.
 path_step = (g: mut PathGrid, from: vec2, to: vec2) -> vec2:
-    if f64(length(to - from)) < g.cell * 1.5: return to
+    if f64(norm(to - from)) < g.cell * 1.5: return to
     goal = nearest_open(g, path_cell(g, to))
     if not is_open(g, int(goal.x), int(goal.y)): return to
     f = __path_field(g, int(goal.x) + int(goal.y) * g.width)
