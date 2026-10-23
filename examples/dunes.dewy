@@ -1,6 +1,7 @@
 # A playable desert journey with procedural cloth and custom shaders.
 from p"dunes_model.dewy" import WORLD, dune_height, sand_color, robe_vertices, robe_indices,
     ribbon_vertices, ribbon_indices, SandParams, sand_vs, sand_fs, BeamParams, beam_vs, beam_fs
+from units import rad
 
 # ---------------- game state ----------------
 Glyph:type=[
@@ -53,15 +54,15 @@ loop c in [0..9) {
     loop k in [0..5) {
         # a broken colonnade: pillars along a line, some still carrying a lintel
         let d = float64(k) * 4.2 - 8.0
-        let x = cx + cos(ang) * d
-        let z = cz + sin(ang) * d
+        let x = cx + cos(ang*rad) * d
+        let z = cz + sin(ang*rad) * d
         let y = dune_height(x z) - random(0.5 2.5)
         let h = random(0.5 1.0)
         let tilt = rotation(normalize(vec3(float32(random(-1.0 1.0)) 0 float32(random(-1.0 1.0)))) random(0.0 0.12))
         ruins.push(instance(translation(vec3(float32(x) float32(y) float32(z))) * tilt * scaling(vec3(1 float32(h) 1)) rgb(0.66 0.45 0.36)))
         if k % 2 =? 1 and h >? 0.75 {
-            let mx = x - cos(ang) * 2.1
-            let mz = z - sin(ang) * 2.1
+            let mx = x - cos(ang*rad) * 2.1
+            let mz = z - sin(ang*rad) * 2.1
             stones.push(instance(translation(vec3(float32(mx) float32(y + 7.0 * h + 0.4) float32(mz))) * rotation_y(-ang) * scaling(vec3(5.6 0.8 1.4)) rgb(0.6 0.41 0.33)))
         }
     }
@@ -75,8 +76,8 @@ loop c in [0..9) {
 loop k in [0..12) {
     let a = float64(k) / 12.0 * TAU
     let r:float64 = 40.0 + float64(k % 3) * 35.0
-    let x = cos(a) * r
-    let z = sin(a) * r * 0.8 + 10.0
+    let x = cos(a*rad) * r
+    let z = sin(a*rad) * r * 0.8 + 10.0
     glyphs.push(Glyph(vec3(float32(x) float32(dune_height(x z) + 2.2) float32(z))))
 }
 let posts: array<vec3> = []
@@ -107,7 +108,7 @@ follow=(chain: array<vec3> anchor: vec3 count: int64 dt: float64):>array<vec3>=>
         let d = chain[k] - chain[k - 1]
         let l = d.norm
         let dir = d / max(l 0.001)
-        let flutter = vec3(float32(sin(t * 7.0 + float64(k)) * 0.04) 0.02 float32(cos(t * 5.0 + float64(k)) * 0.04))
+        let flutter = vec3(float32(sin((t * 7.0 + float64(k))*rad) * 0.04) 0.02 float32(cos((t * 5.0 + float64(k))*rad) * 0.04))
         chain[k] = chain[k - 1] + normalize(dir + vec3(0.25 0.05 0.1) * float32(dt) * 10.0 + flutter) * 0.32
     }
     chain
@@ -136,8 +137,8 @@ update=(dt: float64)=>{
     yaw += float64(right_stick().x) * 2.2 * dt
     # movement relative to the camera
     let inp = input_axis()
-    let fwd = vec3(float32(-sin(yaw)) 0 float32(-cos(yaw)))
-    let right = vec3(float32(cos(yaw)) 0 float32(-sin(yaw)))
+    let fwd = vec3(float32(-sin(yaw*rad)) 0 float32(-cos(yaw*rad)))
+    let right = vec3(float32(cos(yaw*rad)) 0 float32(-sin(yaw*rad)))
     let wish = right * inp.x - fwd * inp.y
     let speed:float64 = 7.5
     if wish.norm >? 0.01 {
@@ -175,7 +176,7 @@ update=(dt: float64)=>{
     if grounded {
         moved += float64(vec3(vel.x 0 vel.z).norm) * dt
         if (pos - last_step).norm >? 0.75 {
-            let side = vec3(float32(cos(heading)) 0 float32(-sin(heading))) * float32(0.12 * step_side)
+            let side = vec3(float32(cos(heading*rad)) 0 float32(-sin(heading*rad))) * float32(0.12 * step_side)
             steps.push(pos + side)
             step_side = -step_side
             last_step = pos
@@ -199,7 +200,7 @@ update=(dt: float64)=>{
     }
     if won {won_t += dt}
     # smooth third-person camera
-    let desired = pos + vec3(float32(sin(yaw) * 8.0) 2.4 float32(cos(yaw) * 8.0))
+    let desired = pos + vec3(float32(sin(yaw*rad) * 8.0) 2.4 float32(cos(yaw*rad) * 8.0))
     let dg = ground(float64(desired.x) float64(desired.z)) + 1.5
     if desired.y <? float32(dg) {desired.y = float32(dg)}
     cam_pos = approach(cam_pos desired 5.0 dt)
@@ -245,7 +246,7 @@ draw=()=>{
         let pts: array<vec3> = []
         loop k in [0..12) {
             let f = float64(k) * 0.28
-            let w = sin(t * 3.0 + float64(i) + float64(k) * 0.6) * 0.18 * float64(k) / 12.0
+            let w = sin((t * 3.0 + float64(i) + float64(k) * 0.6)*rad) * 0.18 * float64(k) / 12.0
             pts.push(bp + vec3(float32(f * 0.8) float32(3.2 - f * 0.25 + w) float32(f * 0.55 + w)))
         }
         update_mesh(@banner_mesh ribbon_vertices(pts 0.22 t + float64(i)))
@@ -262,13 +263,13 @@ draw=()=>{
     # glyphs: glowing orbs that bob in the wind
     loop gl_ in glyphs {
         if gl_.taken {continue}
-        let bob = vec3(0 float32(sin(t * 2.0 + float64(gl_.pos.x)) * 0.3) 0)
+        let bob = vec3(0 float32(sin((t * 2.0 + float64(gl_.pos.x))*rad) * 0.3) 0)
         draw_mesh(ring translation(gl_.pos + bob) * rotation_y(t) rgb(1 0.85 0.45) emissive = 2.5 cast_shadow = false)
     # the beacon on the mountain
     }
     let bpos = vec3(0 float32(dune_height(0.0 -150.0) + 6.0) -150)
     let k:float64 = 1.5
-    if won {k = 4.0 + 2.0 * sin(t * 2.0)}
+    if won {k = 4.0 + 2.0 * sin(t * 2.0*rad)}
     draw_mesh(beacon translation(bpos) rgb(1 0.9 0.7) emissive = k cast_shadow = false)
     # a pillar of light rises from the mountain: the goal is visible from everywhere
     let bs = float32(0.32 + 0.3 * k / 4.0)

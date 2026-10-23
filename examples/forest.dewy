@@ -1,5 +1,6 @@
 # Terrain, 600 instanced meshes, an orbit camera and post effects, in Dewy.
 from p"forest_model.dewy" import hill, ground_color, fresh_forest
+from units import rad
 
 let forest=fresh_forest()
 let terrain:Mesh
@@ -38,7 +39,7 @@ draw=():>void=>{
     draw_mesh(terrain)
     draw_mesh_instanced(trunk forest.trunks)
     draw_mesh_instanced(crown forest.crowns wind=0.05)
-    let height=(hill(0.0 0.0)+1.5+sin(time*2.0)*0.5) as float32
+    let height=(hill(0.0 0.0)+1.5+sin(time*2.0*rad)*0.5) as float32
     draw_mesh(beacon translation(vec3(0 height 0)) rgb(1 0.5 0.2) emissive=1.5)
     text("DEWY / FOREST" vec2(20 18) 30 WHITE)
     text("600 instanced meshes | terrain, shadows, fog, bloom | {fps() as int64} fps" vec2(20 58) 20 WHITE)

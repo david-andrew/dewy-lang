@@ -1,11 +1,12 @@
 # Joined paths, rounded outlines and a dense plot, using the bundled renderer.
+from units import rad
 let plot:array<vec2>=[]
 
 main=():>void=>{
     window("Dewy / Joined outlines" 1280 720)
     loop i in [0..6000) {
         let x=(i as float64)/5999.0
-        plot.push(vec2(float32(50.0+x*1180.0) float32(600.0+sin(x*PI*12.0)*42.0)))
+        plot.push(vec2(float32(50.0+x*1180.0) float32(600.0+sin(x*PI*12.0*rad)*42.0)))
     }
 }
 
@@ -20,7 +21,7 @@ draw=():>void=>{
     loop i in [0..10) {
         let angle=(i as float64)*PI/5.0-PI/2.0
         let radius=if i%2 =? 0 105.0 else 46.0
-        star.push(vec2(float32(880.0+cos(angle)*radius) float32(220.0+sin(angle)*radius)))
+        star.push(vec2(float32(880.0+cos(angle*rad)*radius) float32(220.0+sin(angle*rad)*radius)))
     }
     polyline(star 8 rgb(0.4 0.8 1.0) closed=true)
     rect_rounded_outline(60 345 360 140 30 14 rgb(0.9 0.9 0.9))

@@ -1,4 +1,5 @@
 # Numerical toolkit: integration (trapezoid, Simpson, adaptive) and root finding.
+from units import rad
 Fn:type=<(x:float64):>float64>
 
 trapezoid=(f:Fn a:float64 b:float64 n:int64):>float64=>{
@@ -62,9 +63,9 @@ show=(label:string value:float64|NoRoot):>void=>{
 main=()=>{
     let pi=3.141592653589793
     printl("integral of sin over [0, pi] = 2")
-    printl("  trapezoid n=100: {format(trapezoid(@sin 0.0 pi 100) ".8f")}")
-    printl("  simpson   n=10:  {format(simpson(@sin 0.0 pi 10) ".8f")}")
-    printl("  adaptive:        {format(adaptive(@sin 0.0 pi 1e-10) ".10f")}")
+    printl("  trapezoid n=100: {format(trapezoid((x:float64)=>sin(x*rad) 0.0 pi 100) ".8f")}")
+    printl("  simpson   n=10:  {format(simpson((x:float64)=>sin(x*rad) 0.0 pi 10) ".8f")}")
+    printl("  adaptive:        {format(adaptive((x:float64)=>sin(x*rad) 0.0 pi 1e-10) ".10f")}")
     let gauss=(x:float64)=>exp(-x*x)
     printl("integral of exp(-x^2) over [-5, 5] = sqrt(pi) = {format(sqrt(pi) ".10f")}")
     printl("  adaptive:        {format(adaptive(@gauss -5.0 5.0 1e-10) ".10f")}")
@@ -74,6 +75,6 @@ main=()=>{
     show("bisect x^3-2x-5" bisect(@cubic 2.0 3.0))
     show("newton x^3-2x-5" newton(@cubic @dcubic 2.0))
     show("bisect bad bracket" bisect(@cubic 3.0 4.0))
-    show("newton cos(x)=x" newton((x:float64)=>cos(x)-x (x:float64)=>-sin(x)-1 1.0))
+    show("newton cos(x)=x" newton((x:float64)=>cos(x*rad)-x (x:float64)=>-sin(x*rad)-1 1.0))
     show("newton x^2+1" newton((x:float64)=>x*x+1 (x:float64)=>2x 0.0))
 }

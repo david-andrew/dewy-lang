@@ -507,8 +507,8 @@ quantity_float = (a: int) -> int:
 
 # Dewy's sleep and its trigonometry take quantities (physical-quantities.md): sleep a time,
 # converted to whole nanoseconds; sin, cos and tan an angle, which counts whole turns, reduced
-# exactly before evaluation. a is the checked argument; 0 leaves the call to the library (a
-# dimensionless number to sin is radians).
+# exactly before evaluation; a plain number is an error (radians are `x*rad`). a is the
+# checked argument.
 dewy_quantity_call = (n: int, name: int, a: int, expected: int) -> int:
     fname = name_of(name)
     t = prune(ntype(a))
@@ -534,7 +534,7 @@ dewy_quantity_call = (n: int, name: int, a: int, expected: int) -> int:
             return runtime_call(n, "__task_sleep_ns", [last_checked], task_sleep_type())
         if is_float(base): return runtime_call(n, "__task_sleep_seconds", [quantity_float(number)], task_sleep_type())
         fatal(nodes[a].pos, "sleep takes a time counted in an integer, rational or float (found {dt(t)})")
-    if not is_quantity(t): return 0
+    if not is_quantity(t): fatal(nodes[a].pos, "{fname} takes an angle, not a plain number: `{fname}(x*rad)` for radians, or `{fname}(45°)`, `{fname}(t*turn)` (`from units import rad`; found {dt(t)})")
     if quantity_dimension(t) != base_dimension(7): fatal(nodes[a].pos, "{fname} takes an angle, such as `{fname}(45°)` (found {dt(t)})")
     if bundled_rational_type(base): return rational_helper_call(n, "_{fname}_turns", number, expected)
     turns = quantity_float(number)

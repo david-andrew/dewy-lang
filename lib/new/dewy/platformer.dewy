@@ -1,6 +1,7 @@
 # A platformer: slopes, one-way platforms, buffered jumps and coins.
 # Arrows/A/D or gamepad: move. Space/W/up/pad A: jump. Down: drop through platforms.
 # Run `dewy-core watch main.dewy`, edit update/draw and save to keep playing.
+from units import rad
 
 const T = 48
 const RUN:float64 = 330.0
@@ -194,7 +195,7 @@ draw = () :> void => {
     draw_tilemap(level)
     loop coin in coins {
         if not coin.taken {
-            let bob = sin(t*4.0+coin.pos.x*0.05)*4.0
+            let bob = sin((t*4.0+coin.pos.x*0.05)*rad)*4.0
             circle(coin.pos+vec2(0 bob) 12 rgb(1.0 0.82 0.25))
             circle(coin.pos+vec2(-3 bob-3) 4 rgb(1.0 0.95 0.7))
         } else if not coin.pop.done() {

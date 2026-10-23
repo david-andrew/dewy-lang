@@ -1,3 +1,4 @@
+from units import rad
 Complex:type=[re:float64 im:float64]
 add_c=(a:Complex b:Complex):>Complex=>Complex[a.re+b.re a.im+b.im]
 sub_c=(a:Complex b:Complex):>Complex=>Complex[a.re-b.re a.im-b.im]
@@ -26,7 +27,7 @@ fft=(input:array<Complex> inverse:bool):>array<Complex>=> {
         if inverse  {
             angle=-angle
         }
-        let root=Complex[cos(angle) sin(angle)]
+        let root=Complex[cos(angle*rad) sin(angle*rad)]
         let start=0
         loop start <? n  {
             let factor=Complex[1.0 0.0]

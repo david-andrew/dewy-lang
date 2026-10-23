@@ -3472,7 +3472,7 @@ main=()=>{
         if trial.gold.x<?80 or trial.gold.x>=?1200 or trial.gold.y<?100 or trial.gold.y>=?660 return 13
         let same=trial
         loop frame in [0..180) {
-            let input=vec2(sin(float64(frame)*0.1) cos(float64(frame)*0.1))
+            let input=vec2(sin(float64(frame)*0.1*rad) cos(float64(frame)*0.1*rad))
             advance(@trial input 1.0/60.0)
             advance(@same input 1.0/60.0)
         }

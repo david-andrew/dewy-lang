@@ -1,6 +1,7 @@
 # Native and web share the game source.
 # Host a native build with HOST=1; join it with JOIN=localhost.
 # DEWY_NETPONG_PORT overrides the default 47200 for local sessions.
+from units import rad
 
 import net
 import invite
@@ -42,7 +43,7 @@ let invited = false # (connected by invite codes, not by address)
 serve = (dir: float64) => {
     ball = vec2(640 360)
     let a = random(-0.5 0.5)
-    vel = vec2(float32(cos(a) * dir) float32(sin(a))) * float32(BALL_SPEED)
+    vel = vec2(float32(cos(a*rad) * dir) float32(sin(a*rad))) * float32(BALL_SPEED)
 }
 
 host = () => {

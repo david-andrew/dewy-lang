@@ -1,6 +1,7 @@
+from units import rad
 Forest:type=[trunks:array<Instance3D> crowns:array<Instance3D>]
 
-hill=(x:float64 z:float64):>float64=>2.5*sin(x*0.15)*cos(z*0.12)+0.8*sin(x*0.5+z*0.3)
+hill=(x:float64 z:float64):>float64=>2.5*sin(x*0.15*rad)*cos(z*0.12*rad)+0.8*sin((x*0.5+z*0.3)*rad)
 
 ground_color=(_x:float64 y:float64 _z:float64):>vec4=>{
     return lerp(rgb(0.35 0.55 0.25) rgb(0.75 0.7 0.5) (clamp((y+2.0)/5.0 0.0 1.0) as float32))

@@ -1,8 +1,9 @@
+from units import rad
 Dual:type=[value:float64 tangent:float64]
 add_dual=(a:Dual b:Dual):>Dual=>Dual[a.value+b.value a.tangent+b.tangent]
 mul_dual=(a:Dual b:Dual):>Dual=>Dual[a.value*b.value a.tangent*b.value+a.value*b.tangent]
 div_dual=(a:Dual b:Dual):>Dual=>Dual[a.value/b.value (a.tangent*b.value-a.value*b.tangent)/(b.value*b.value)]
-sin_dual=(a:Dual):>Dual=>Dual[sin(a.value) cos(a.value)*a.tangent]
+sin_dual=(a:Dual):>Dual=>Dual[sin(a.value*rad) cos(a.value*rad)*a.tangent]
 exp_dual=(a:Dual):>Dual=>Dual[exp(a.value) exp(a.value)*a.tangent]
 constant=(x:float64):>Dual=>Dual[x 0.0]
 f=(x:Dual):>Dual=> {
@@ -11,7 +12,7 @@ f=(x:Dual):>Dual=> {
     let denominator=add_dual(constant(1.0) square)
     return div_dual(numerator denominator)
 }
-plain=(x:float64):>float64=>(sin(x)+x*x*x)/(1.0+x*x)
+plain=(x:float64):>float64=>(sin(x*rad)+x*x*x)/(1.0+x*x)
 main=():>void=> {
     let maximum:float64=0.0
     let derivative_sum:float64=0.0

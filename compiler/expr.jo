@@ -3929,7 +3929,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
     if not ufcs and mod_scope < 0 and args.len() == 2 and (name == ci(3, "__floor_div") or name == ci(4, "__floor_mod") or name == ci(5, "__dewy_power") or name == ci(6, "__dewy_divide")) and files[pos_file(nodes[n].pos)].is_dewy:
         if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
             return dewy_arithmetic_call(n, name, args, expected)
-    if not ufcs and mod_scope < 0 and args.len() == 1 and dewy_quantity_name(name) and (name == quantity_call_names[0] or not number_literal_tree(args[0])) and nodes[args[0]].kind != .namedarg and files[pos_file(nodes[n].pos)].is_dewy:
+    if not ufcs and mod_scope < 0 and args.len() == 1 and dewy_quantity_name(name) and nodes[args[0]].kind != .namedarg and files[pos_file(nodes[n].pos)].is_dewy:
         s = lookup(name)
         if s != 0 and syms[s].kind == .fns and decl_in_prelude(int(syms[s].decl)):
             a0 = args[0]
@@ -8242,6 +8242,10 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
     if proof_active:
         loop d in decls:
             if proof_decls.has(d): fatal(nodes[n].pos, "a proof cannot be used as a value")
+    # (`@sin`: the trigonometry takes angles, so it is no function of a plain number)
+    if mod < 0 and closure == 0 and dewy_quantity_name(int(nodes[n].name)) and nodes[n].name != i32(quantity_call_names[0]) and dewy_at(nodes[n].pos) and decls.len() > 0 and decl_in_prelude(decls[0]):
+        fname = name_of(int(nodes[n].name))
+        fatal(nodes[n].pos, "{fname} takes an angle, so `@{fname}` is no function of a plain number: write `(x:float64)=>{fname}(x*rad)` for radians (`from units import rad`)")
     et = callable_base(expected)
     if expected == 0: et = 0
     # Only inferred Dewy handles prefer a concrete program declaration.

@@ -1,5 +1,6 @@
 # Collect the gold and dodge the rocks. Arrows/WASD or a gamepad move the player.
 # Escape/Start pauses; leaving the window pauses too. Menus accept mouse or keys.
+from units import rad
 
 const SPEED:float64 = 420.0
 const PLAYER_R:float64 = 16.0
@@ -138,7 +139,7 @@ update = (dt: float64) :> void => {
 draw_rock = (rock: Rock) :> void => {
     let points = [loop i in [0..7) {
             let angle = rock.angle+i/7.0*TAU
-            let bump:float64 = 0.8+0.2*sin(i*2.7+rock.r)
+            let bump:float64 = 0.8+0.2*sin((i*2.7+rock.r)*rad)
             rock.pos+from_angle(angle)*rock.r*bump
     }]
     polygon(points rgb(0.42 0.38 0.4))
@@ -149,7 +150,7 @@ draw = () :> void => {
     camera2d(vec2(640 360)+shake.offset())
     loop x in [0..33) { loop y in [0..19) circle(vec2(x*40 y*40) 1.5 rgba(1 1 1 0.06)) }
     if screen not=?Screen.title {
-        let pulse:float64 = 1.0+0.15*sin(t*6.0)
+        let pulse:float64 = 1.0+0.15*sin(t*6.0*rad)
         circle_gradient(game.gold GOLD_R*3.0*pulse rgba(1 0.8 0.2 0.35) rgba(1 0.6 0.1 0))
         circle(game.gold GOLD_R rgb(1.0 0.82 0.25))
         loop rock in game.rocks draw_rock(rock)

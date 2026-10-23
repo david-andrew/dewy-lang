@@ -1029,9 +1029,12 @@ difference it is still 20 K (`36°F`), so `start + (20°C as °F)` is `40°C`.
 A plain `float64 * Temperature` annotation holds kelvins and drops the offset
 scale. Calendar durations remain open. `sleep` takes a time, `sleep(300ms)`, and waits whole nanoseconds;
 a plain number is rejected. `sin`, `cos` and `tan` take an angle, `cos(45°)`, reduced
-exactly in whole turns; until `fixed` exists they give a `float64` rounded to
-fixed's 32 fraction bits (a plain number is still radians). The radian unit
-remains unimplemented.
+exactly in whole turns. A float angle gives a `float64`; an exact one gives a
+`float64` rounded to fixed's 32 fraction bits until `fixed` exists. A plain
+number is rejected too, and so is `@sin` as a function of one: radians are
+`x*rad` (`rad`, `radian` or `radians` from `units`, 1/2π turn as a fraction
+within 1e-31 of it, so a float angle rounds once). In shader code a quantity is
+its plain canonical number (an angle counts turns), and `sin` is the GPU's.
 
 ## Exact large integers
 

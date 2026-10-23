@@ -1,4 +1,5 @@
 # Ranged sliders, retained pointer drags and the bundled mathematical glyphs.
+from units import rad
 let gravity:float64=9.8
 let length:float64=2.0
 let release_angle:float64=40.0
@@ -29,7 +30,7 @@ update=(dt:float64):>void=>{
     if running {
         let step=dt*speed/4.0
         loop _ in [0..4) {
-            omega+=(-gravity/length*sin(angle)-damping*omega)*step
+            omega+=(-gravity/length*sin(angle*rad)-damping*omega)*step
             angle+=omega*step
         }
     }
@@ -43,7 +44,7 @@ draw=():>void=>{
     text("Ranged controls · Unicode text · native + web" vec2(40 76) 20 rgb(0.4 0.45 0.48))
     rect_rounded(810 152 440 400 18 rgb(0.90 0.92 0.92))
     let pivot=vec2(400 200)
-    let bob=pivot+vec2(float32(sin(angle)*length*105.0) float32(cos(angle)*length*105.0))
+    let bob=pivot+vec2(float32(sin(angle*rad)*length*105.0) float32(cos(angle*rad)*length*105.0))
     line(pivot pivot+vec2(0 320) 1 rgb(0.78 0.80 0.80))
     line(pivot bob 4 ink)
     circle(pivot 7 ink)
