@@ -3,9 +3,9 @@ make=(i:int64)=>["left" "right"]
 work=()=>{
 let rows=[loop i in [0..17) make(i)] let saved=rows
 rows[0].push("new")
-assert(rows[1] =? ["left" "right"] and saved[0] =? ["left" "right"])
+$runtime_assert(rows[1] =? ["left" "right"] and saved[0] =? ["left" "right"])
 let pairs=[loop i in [0..17) i->[i i+1]] let old=pairs
-pairs[0][0]=99 assert(old[0] =? [0 1])
+pairs[0][0]=99 $runtime_assert(old[0] =? [0 1])
 }
 run=()=>{work() let before=alloc_count() loop i in [0..20) work()
 return if alloc_count() =? before 42 else 1}

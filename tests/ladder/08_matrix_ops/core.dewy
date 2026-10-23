@@ -12,20 +12,20 @@ main=():>void=>{
     let a=reshape<float64>([3.0 1.0 1.0 2.0] 2 2)
     let b:array<float64>=[9.0 8.0]
     let solution=solve(a b)
-    assert(close(solution[0] 2.0))
-    assert(close(solution[1] 3.0))
-    assert(residual(a solution b) <? 1e-9)
+    $runtime_assert(close(solution[0] 2.0))
+    $runtime_assert(close(solution[1] 3.0))
+    $runtime_assert(residual(a solution b) <? 1e-9)
     let product=a*eye(2)
-    assert(product.data =? a.data)
+    $runtime_assert(product.data =? a.data)
     let inverse_a=inverse(a)
     let identity=a*inverse_a
-    assert(close(identity[0 0] 1.0))
-    assert(close(identity[1 1] 1.0))
+    $runtime_assert(close(identity[0 0] 1.0))
+    $runtime_assert(close(identity[1 1] 1.0))
     let saved=a
     a[0 0]=99.0
-    assert(saved[0 0] =? 3.0)
+    $runtime_assert(saved[0 0] =? 3.0)
     let transposed=transpose(saved)
-    assert(transposed.data =? saved.data)
-    assert(close(det(saved) 5.0))
+    $runtime_assert(transposed.data =? saved.data)
+    $runtime_assert(close(det(saved) 5.0))
     printl("{solution} {det(saved)}")
 }

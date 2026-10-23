@@ -13,7 +13,7 @@ lex=(source:string):>array<string>=>{
 evaluate=(source:string):>int64=>{
     let parser:Parser=[tokens=lex(source)]
     let result=expression(@parser)
-    assert(parser.at =? parser.tokens.length)
+    $runtime_assert(parser.at =? parser.tokens.length)
     return result
 }
 peek=(p:Parser):>string=>if p.at >=? 0 and p.at <? p.tokens.length p.tokens[p.at] else ""
@@ -22,7 +22,7 @@ factor=(@p:Parser):>int64=>{
     p.at+=1
     if token =? "(" {
         let value=expression(@p)
-        assert(peek(p) =? ")")
+        $runtime_assert(peek(p) =? ")")
         p.at+=1
         return value
     }
@@ -41,11 +41,11 @@ expression=(@p:Parser):>int64=>{
 main=():>void=>{
     let p:Parser=[tokens=["2" "+" "3" "*" "(" "4" "+" "5" ")"]]
     let value=expression(@p)
-    assert(evaluate("2+3*(4+5)") =? 29)
-    assert(evaluate("12 + 3*4") =? 24)
-    assert(value =? 29)
-    assert(p.at =? p.tokens.length)
+    $runtime_assert(evaluate("2+3*(4+5)") =? 29)
+    $runtime_assert(evaluate("12 + 3*4") =? 24)
+    $runtime_assert(value =? 29)
+    $runtime_assert(p.at =? p.tokens.length)
     let q:Parser=[tokens=["(" "2" "+" "3" ")" "*" "4"]]
-    assert(expression(@q) =? 20)
+    $runtime_assert(expression(@q) =? 20)
     printl(value)
 }

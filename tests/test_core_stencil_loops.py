@@ -22,8 +22,8 @@ main=():>void=>exit(entry()) entry=()=>{
  loop n in [2..35) {
   let a=[loop i in [0..n) (i*i) as float64]
   let b=step(a a a)
-  assert(b[0] =? a[0] and b[n-1] =? a[n-1])
-  loop j in [1..n-1) {assert(b[j] =? a[j]+0.5)}
+  $runtime_assert(b[0] =? a[0] and b[n-1] =? a[n-1])
+  loop j in [1..n-1) {$runtime_assert(b[j] =? a[j]+0.5)}
  }
  return 0
 }
@@ -51,7 +51,7 @@ main=():>void=>exit(entry()) entry=()=>{
  }
  loop j in [1..31) {
  let skipped=''' + ('j%3 =? 0' if 'continue' in control else 'j >? 9') + '''
- assert(out[j] =? (if skipped 0 else 2*j))
+ $runtime_assert(out[j] =? (if skipped 0 else 2*j))
  }
  return 0
 }

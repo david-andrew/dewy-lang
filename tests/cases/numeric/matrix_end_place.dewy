@@ -4,9 +4,9 @@ pick=()=>{calls+=1 return 0}
 run=()=>{
 let boxes=[[matrix=reshape([1 2 3 4 5 6] 2 3)]] let saved=boxes
 boxes[pick()].matrix[end end]=42
-assert(calls =? 1 and boxes[0].matrix[1 2] =? 42)
-assert(saved[0].matrix[1 2] =? 6)
+$runtime_assert(calls =? 1 and boxes[0].matrix[1 2] =? 42)
+$runtime_assert(saved[0].matrix[1 2] =? 6)
 boxes[pick()].matrix[[..] end]=[20 22]
-assert(calls =? 2 and boxes[0].matrix[[..] 2].data =? [20 22])
+$runtime_assert(calls =? 2 and boxes[0].matrix[[..] 2].data =? [20 22])
 return 42}
 main=()=>exit(run())

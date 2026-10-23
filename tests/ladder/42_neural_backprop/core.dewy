@@ -50,7 +50,7 @@ main=():>void=> {
         plus.w[i]+=1e-5
         minus.w[i]-=1e-5
         let finite=(loss(plus)-loss(minus))/2e-5
-        assert(abs(finite-grad.w[i]) <? 1e-7)
+        $runtime_assert(abs(finite-grad.w[i]) <? 1e-7)
     }
     let original=net
     loop epoch in [0..800)  {
@@ -65,8 +65,8 @@ main=():>void=> {
         net.bias-=0.1*g.bias
     }
     let finish=loss(net)
-    assert(finish <? 0.01)
-    assert(loss(original) =? start)
+    $runtime_assert(finish <? 0.01)
+    $runtime_assert(loss(original) =? start)
     let correct=0
     loop x in [float64(-1.0) 1.0]  {
         loop y in [float64(-1.0) 1.0]  {

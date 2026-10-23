@@ -4,11 +4,12 @@ Leaf=type of [value:int64
     release=():>void=>{drops+=1}
 ]
 Node:type=[next:Node?=none owner:Leaf]
-consume=(x:Leaf)=>{assert(x.value>?0)}
+consume=(x:Leaf)=>{$runtime_assert(x.value>?0)}
 main=()=>{
     {let first=Node[none Leaf[1]] let second=Node[first Leaf[2]]
      consume(second.owner)
-     assert(second.next is? Node)}
-    assert(drops=?2)
+     let linked=second.next is? Node
+     $runtime_assert(linked)}
+    $runtime_assert(drops=?2)
     printl"ok"
 }

@@ -28,9 +28,9 @@ contains_word=(trie:Trie word:string):>bool=>{
 main=():>void=>{
     let t:Trie=[edges=[] terminal=[false]]
     loop word in ["cat" "car" "café" "dog"] {insert(@t word)}
-    assert(contains_word(t "cat"))
-    assert(contains_word(t "café"))
-    assert(not contains_word(t "ca"))
-    assert(not contains_word(t "cow"))
+    $runtime_assert(contains_word(t "cat"))
+    $runtime_assert(contains_word(t "café"))
+    $runtime_assert(not contains_word(t "ca"))
+    $runtime_assert(not contains_word(t "cow"))
     printl("{t.terminal.length} {contains_word(t "car")}")
 }

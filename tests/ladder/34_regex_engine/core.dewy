@@ -56,13 +56,13 @@ main=():>void=> {
             position+=1
         }
     }
-    assert(accepts("a*" ""))
-    assert(accepts("a*b" "aaab"))
-    assert(not accepts("a*b" "aaabc"))
-    assert(accepts(".*" "café"))
-    assert(not accepts("" "a"))
-    assert(accepts("" ""))
-    assert(accepts("a*b*c*" ""))
-    assert(not accepts("a*a*a*b" "aaaaaaaaac"))
+    $runtime_assert(accepts("a*" ""))
+    $runtime_assert(accepts("a*b" "aaab"))
+    $runtime_assert(not accepts("a*b" "aaabc"))
+    $runtime_assert(accepts(".*" "café"))
+    $runtime_assert(not accepts("" "a"))
+    $runtime_assert(accepts("" ""))
+    $runtime_assert(accepts("a*b*c*" ""))
+    $runtime_assert(not accepts("a*a*a*b" "aaaaaaaaac"))
     printl("{count} {signature}")
 }

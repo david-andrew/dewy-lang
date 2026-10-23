@@ -1603,7 +1603,7 @@ def test_core_compiler_hosts(compiler, tmp_path, host):
             source.write_text('''main=():>void=>exit(entry()) entry=()=>{
 let original=[20 21] let changed=original
 loop @item in changed {item+=1}
-assert(original =? [20 21] and changed =? [21 22])
+$runtime_assert(original =? [20 21] and changed =? [21 22])
 let huge:bigint=18446744073709551616
 printl"{changed[1]} {1/3+1/6} {huge+1}"
 return 0
@@ -2188,40 +2188,40 @@ printl"{gpu_available()} {engine.__gpu_vk}"
 let original:array<float64>=[1.0 2.0 3.0 4.0] let g=gpu(original) let saved=g
 original[0]=99.0
 let h=half.(g) .* 2.0 .+ 1.0
-assert(cpu(h).data =? [2.5 3.5 4.5 5.5])
-assert(cpu(.-(half.(g) .* 2.0 .+ 1.0)).data =? [-2.5 -3.5 -4.5 -5.5])
-assert(cpu(.+g).data =? [1.0 2.0 3.0 4.0])
-assert(cpu(hypot.(gpu([3.0 5.0]) gpu([4.0 12.0]))).data =? [5.0 13.0])
+$runtime_assert(cpu(h).data =? [2.5 3.5 4.5 5.5])
+$runtime_assert(cpu(.-(half.(g) .* 2.0 .+ 1.0)).data =? [-2.5 -3.5 -4.5 -5.5])
+$runtime_assert(cpu(.+g).data =? [1.0 2.0 3.0 4.0])
+$runtime_assert(cpu(hypot.(gpu([3.0 5.0]) gpu([4.0 12.0]))).data =? [5.0 13.0])
 let magnitudes=cpu(hypot.(gpu([3e30 3e-30 0.0 -3e30 INF NAN NAN])
                          gpu([4e30 4e-30 -0.0 4e30 NAN INF 1.0]))).data
-assert(abs(magnitudes[0]/5e30-1.0) <? 1e-6)
-assert(abs(magnitudes[1]/5e-30-1.0) <? 1e-6)
-assert(magnitudes[2] =? 0.0 and 1.0/magnitudes[2] >? 0.0)
-assert(abs(magnitudes[3]/5e30-1.0) <? 1e-6)
-assert(magnitudes[4] =? INF and magnitudes[5] =? INF and is_nan(magnitudes[6]))
+$runtime_assert(abs(magnitudes[0]/5e30-1.0) <? 1e-6)
+$runtime_assert(abs(magnitudes[1]/5e-30-1.0) <? 1e-6)
+$runtime_assert(magnitudes[2] =? 0.0 and 1.0/magnitudes[2] >? 0.0)
+$runtime_assert(abs(magnitudes[3]/5e30-1.0) <? 1e-6)
+$runtime_assert(magnitudes[4] =? INF and magnitudes[5] =? INF and is_nan(magnitudes[6]))
 let zeros=cpu(.-gpu([0.0 -0.0])).data
-assert(1.0/zeros[0] <? 0.0 and 1.0/zeros[1] >? 0.0)
-assert(sum(h) =? 16.0 and min(h) =? 2.5 and max(h) =? 5.5)
-assert(cpu(g .>? 2.0).data =? [0.0 0.0 1.0 1.0])
+$runtime_assert(1.0/zeros[0] <? 0.0 and 1.0/zeros[1] >? 0.0)
+$runtime_assert(sum(h) =? 16.0 and min(h) =? 2.5 and max(h) =? 5.5)
+$runtime_assert(cpu(g .>? 2.0).data =? [0.0 0.0 1.0 1.0])
 let m=gpu(reshape<float64>([1.0 2.0 3.0 4.0 5.0 6.0] 2 3))
 let row=gpu([10.0 20.0 30.0]) let col=gpu(reshape<float64>([100.0 200.0] 2 1))
 let result=cpu(m .+ row .+ col)
-assert(result.shape =? [2 3] and result.data =? [111.0 122.0 133.0 214.0 225.0 236.0])
-assert(cpu(m ./ 2.0).data =? [0.5 1.0 1.5 2.0 2.5 3.0])
+$runtime_assert(result.shape =? [2 3] and result.data =? [111.0 122.0 133.0 214.0 225.0 236.0])
+$runtime_assert(cpu(m ./ 2.0).data =? [0.5 1.0 1.5 2.0 2.5 3.0])
 let ints=gpu([-7 0 9])
-assert(cpu(ints .* 2 .+ 1).data =? [-13 1 19])
-assert(cpu(.-ints).data =? [7 0 -9])
-assert(cpu(.+ints).data =? [-7 0 9])
-assert(sum(ints) =? 2 and min(ints) =? -7 and max(ints) =? 9)
+$runtime_assert(cpu(ints .* 2 .+ 1).data =? [-13 1 19])
+$runtime_assert(cpu(.-ints).data =? [7 0 -9])
+$runtime_assert(cpu(.+ints).data =? [-7 0 9])
+$runtime_assert(sum(ints) =? 2 and min(ints) =? -7 and max(ints) =? 9)
 let empty=gpu(zeros(0 3)) .+ row
-assert(cpu(empty).shape =? [0 3] and size(cpu(empty)) =? 0 and sum(empty) =? 0.0)
+$runtime_assert(cpu(empty).shape =? [0 3] and size(cpu(empty)) =? 0 and sum(empty) =? 0.0)
 let many=gpu(fill(float64(1.0) 4097)) .* 3.0
-assert(sum(many) =? 12291.0 and min(many) =? 3.0 and max(many) =? 3.0)
+$runtime_assert(sum(many) =? 12291.0 and min(many) =? 3.0 and max(many) =? 3.0)
 loop i in [0..24) {g .+= 0.5}
-assert(cpu(g).data =? [13.0 14.0 15.0 16.0])
-assert(cpu(saved).data =? [1.0 2.0 3.0 4.0])
+$runtime_assert(cpu(g).data =? [13.0 14.0 15.0 16.0])
+$runtime_assert(cpu(saved).data =? [1.0 2.0 3.0 4.0])
 let downloaded=cpu(saved) downloaded[0]=123.0
-assert(cpu(saved).data =? [1.0 2.0 3.0 4.0])
+$runtime_assert(cpu(saved).data =? [1.0 2.0 3.0 4.0])
 }'''
     example = Path(__file__).resolve().parents[1] / 'examples/terrain_array.dewy'
     command, error = build_case_batch(compiler, tmp_path, {'gpu': program, 'terrain': example.read_text()},
@@ -2312,18 +2312,18 @@ exercise=<T>(one:T):>void=>{
 loop count in [0..20) {
     let a=fill(one count) let b=fill(one+one count) let saved=a
     axpy(@a b one+one)
-    loop v in a {assert(v =? one+one+one+one+one)}
-    loop v in saved {assert(v =? one)}
+    loop v in a {$runtime_assert(v =? one+one+one+one+one)}
+    loop v in saved {$runtime_assert(v =? one)}
     let ascending=fill(one count)
     overlap(@ascending)
-    loop i in [0..count) {assert(ascending[i] =? ((i+1) as T))}
+    loop i in [0..count) {$runtime_assert(ascending[i] =? ((i+1) as T))}
     same(@ascending)
-    loop i in [0..count) {assert(ascending[i] =? ((2*(i+1)) as T))}
+    loop i in [0..count) {$runtime_assert(ascending[i] =? ((2*(i+1)) as T))}
 }
 }
 main=()=>{
 exercise<float64>(1.0) exercise<float32>(1.0)
-assert(ordered([1e16 1.0 -1e16 2.0]) =? 2.0)
+$runtime_assert(ordered([1e16 1.0 -1e16 2.0]) =? 2.0)
 return 42
 }'''
     command, error = build_case_batch(compiler, tmp_path, {'loops': program},
@@ -2373,24 +2373,24 @@ loop n in [0..20) {
 let a=[loop i in [0..n) (i as float64)*0.5]
 let b=[loop i in [0..n) (i as float64)*0.25]
 let expected=[loop i in [0..n) (i as float64)*1.125+1.0]
-assert(looped(a b) =? expected and fused(a b) =? expected)
-assert(valued(a b) =? expected)
+$runtime_assert(looped(a b) =? expected and fused(a b) =? expected)
+$runtime_assert(valued(a b) =? expected)
 let same=[loop i in [0..n) (i as float64)*1.25+1.0]
-assert(looped(a a) =? same and fused(a a) =? same)
-assert(valued(a a) =? same and mapped(a) =? same)
+$runtime_assert(looped(a a) =? same and fused(a a) =? same)
+$runtime_assert(valued(a a) =? same and mapped(a) =? same)
 let single_a=float32.(a) let single_b=float32.(b)
 let single_expected=float32.(expected)
-assert(looped(single_a single_b) =? single_expected and fused(single_a single_b) =? single_expected)
-assert(valued(single_a single_b) =? single_expected and mapped(single_a) =? float32.(same))
+$runtime_assert(looped(single_a single_b) =? single_expected and fused(single_a single_b) =? single_expected)
+$runtime_assert(valued(single_a single_b) =? single_expected and mapped(single_a) =? float32.(same))
 let special64=[loop i in [0..n) f64_from_bits(words64[i%8])]
 let special32=[loop i in [0..n) f32_from_bits(words32[i%8])]
 let negative64=negated(special64) let loop64=negloop(special64)
 let negative32=negated(special32) let loop32=negloop(special32)
 loop i in [0..n) {
-assert(f64_bits(negative64[i]) =? (words64[i%8] xor 0x8000000000000000))
-assert(f64_bits(loop64[i]) =? f64_bits(negative64[i]))
-assert(f32_bits(negative32[i]) =? (words32[i%8] xor 0x80000000))
-assert(f32_bits(loop32[i]) =? f32_bits(negative32[i]))
+$runtime_assert(f64_bits(negative64[i]) =? (words64[i%8] xor 0x8000000000000000))
+$runtime_assert(f64_bits(loop64[i]) =? f64_bits(negative64[i]))
+$runtime_assert(f32_bits(negative32[i]) =? (words32[i%8] xor 0x80000000))
+$runtime_assert(f32_bits(loop32[i]) =? f32_bits(negative32[i]))
 }
 }
 if argv.length >? 1 {
@@ -2439,12 +2439,12 @@ count = () -> int: calls
     program = '''from p"lookup.jo" import Lookup, count
 main=()=>{
 let x=Lookup[10]
-assert(x[[1..3] (1..3]] =? 13)
+$runtime_assert(x[[1..3] (1..3]] =? 13)
 x[[1,3..5] [4,2..0]]=37
 let other=Lookup[22]
-assert(other[end end] =? 42 and count() =? 1)
+$runtime_assert(other[end end] =? 42 and count() =? 1)
 other[end end]=0
-assert(other.value =? 42 and count() =? 2)
+$runtime_assert(other.value =? 42 and count() =? 2)
 return x.value
 }'''
     command, error = build_case_batch(compiler, tmp_path, {'custom_index': program},
@@ -2739,10 +2739,10 @@ def test_core_numeric_matrix_range_reference(compiler, tmp_path, target, release
             f'let m=reshape(values {array(shape)}) let saved=m\n'
             + '\n'.join(declarations) + '\n'
             + f'let picked=m[{selection}]\n'
-            + f'assert(picked.shape =? {array(result_shape)} and picked.data =? {array(picked)})\n'
+            + f'$runtime_assert(picked.shape =? {array(result_shape)} and picked.data =? {array(picked)})\n'
             + f'm[{selection}]={array(replacement)}\nm[{selection}] .+= 5\n'
-            + f'assert(m.data =? {array(updated)} and saved.data =? values)\nreturn 42\n}}')
-    body = [f'assert(case_{i}() =? 42)' for i in range(len(cases))] + ['exit(42)']
+            + f'$runtime_assert(m.data =? {array(updated)} and saved.data =? values)\nreturn 42\n}}')
+    body = [f'$runtime_assert(case_{i}() =? 42)' for i in range(len(cases))] + ['exit(42)']
     command, error = build_case_batch(compiler, tmp_path, cases, body, release, target)
     assert error is None, error
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
@@ -2763,15 +2763,15 @@ simulate=()=>{
 let field=fresh(8 6) let saved=field
 paint(@field 4 3 1)
 loop i in [0..8) advance(@field 0.035 0.062)
-assert(saved.a.data =? fill(1.0 as float32 48) and saved.b.data =? fill(0.0 as float32 48))
-assert(saved.steps =? 0)
-let before=field paint(@field -100 -100 2) assert(field =? before)
+$runtime_assert(saved.a.data =? fill(1.0 as float32 48) and saved.b.data =? fill(0.0 as float32 48))
+$runtime_assert(saved.steps =? 0)
+let before=field paint(@field -100 -100 2) $runtime_assert(field =? before)
 return field
 }
 main=():>void=>exit(entry()) entry=()=>{
 let result=simulate() let before=alloc_count()
-loop i in [0..20) {let trial=simulate() assert(trial.steps =? 8)}
-assert(alloc_count() =? before)
+loop i in [0..20) {let trial=simulate() $runtime_assert(trial.steps =? 8)}
+$runtime_assert(alloc_count() =? before)
 printl(to_json(result))
 return 42
 }''')
@@ -6107,26 +6107,26 @@ loop dims in [[0 3 2] [2 0 3] [3 7 5] [9 65 513] [3 64 512] [2 66 515]] {
     let b=reshape([loop i in [0..m*p) ((i%13)-6) as float64] m p)
     let saved_a=a let saved_b=b
     let c=a*b
-    assert(c.shape =? [r p])
+    $runtime_assert(c.shape =? [r p])
     loop i in [0..r) {loop j in [0..p) {
         let want:float64=0.0
         loop k in [0..m) {want+=a[i k]*b[k j]}
-        assert(c[i j] =? want)
+        $runtime_assert(c[i j] =? want)
     }}
-    assert(a.data =? saved_a.data and b.data =? saved_b.data)
+    $runtime_assert(a.data =? saved_a.data and b.data =? saved_b.data)
 }
 let ints=reshape([loop i in [0..2*65) (i%19)-9] 2 65)
 let ones=reshape([loop i in [0..65*3) 1] 65 3)
 let product=ints*ones
-loop i in [0..2) {loop j in [0..3) {assert(product[i j] =? sum(row(ints i)))}}
+loop i in [0..2) {loop j in [0..3) {$runtime_assert(product[i j] =? sum(row(ints i)))}}
 let cancellation=reshape([float64(1e16) 1.0 (-1e16) 1.0 3.0] 1 5)*reshape([float64(1.0) 1.0 1.0 1.0 1.0] 5 1)
-assert(cancellation[0 0] =? 4.0)
+$runtime_assert(cancellation[0 0] =? 4.0)
 let zero=reshape([float64(0.0) (-0.0) 0.0 0.0 0.0] 1 5)
 let nonfinite=reshape([INF NAN INF NAN INF] 5 1)
 let strict=(zero*nonfinite)[0 0]
-assert(strict not=? strict)
+$runtime_assert(strict not=? strict)
 let finite=reshape([float64(2.0) 3.0 4.0 5.0 6.0] 5 1)
-assert((zero*finite)[0 0] =? 0.0)
+$runtime_assert((zero*finite)[0 0] =? 0.0)
 exit(42)
 }
 ''')

@@ -1,8 +1,8 @@
 Packet:type=[version:uint64 kind:uint64 length:uint64]
 encode=(p:Packet):>uint64=>{
-    assert(p.version <? 16)
-    assert(p.kind <? 16)
-    assert(p.length <? 65536)
+    $runtime_assert(p.version <? 16)
+    $runtime_assert(p.kind <? 16)
+    $runtime_assert(p.length <? 65536)
     return (p.version << 20) or (p.kind << 16) or p.length
 }
 decode=(word:uint64):>Packet=>{
@@ -23,9 +23,9 @@ popcount=(word:uint64):>int64=>{
 main=():>void=>{
     let packet=Packet[2 3 1024]
     let word=encode(packet)
-    assert(decode(word) =? packet)
-    assert(popcount(18446744073709551615) =? 64)
-    assert(popcount(0) =? 0)
-    assert(popcount(word) =? 4)
+    $runtime_assert(decode(word) =? packet)
+    $runtime_assert(popcount(18446744073709551615) =? 64)
+    $runtime_assert(popcount(0) =? 0)
+    $runtime_assert(popcount(word) =? 4)
     printl("{word} {popcount(word)} {decode(word).length}")
 }

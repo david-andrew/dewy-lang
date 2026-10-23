@@ -27,8 +27,8 @@ def test_group_joins_and_exports_results(compiler, tmp_path):
 work=(n:int64)=>n*2
 main=()=>{
  concurrent {let a=spawn work(21) let b=spawn work(20)}
- assert(a is? int64 and a =? 42)
- assert(b is? int64 and b =? 40)
+ $runtime_assert(a is? int64 and a =? 42)
+ $runtime_assert(b is? int64 and b =? 40)
 }
 ''')
 
@@ -39,7 +39,7 @@ def test_deadline_cancels_sleep(compiler, tmp_path):
 slow=():>int64|Canceled=>{sleep(1s) or_throw return 42}
 main=()=>{
  let result=within(10ms @slow)
- assert(result is? Timeout)
+ $runtime_assert(result is? Timeout)
 }
 ''')
 
@@ -50,7 +50,7 @@ slow=():>int64|Canceled=>{sleep(1s) or_throw return 42}
 fast=():>int64|Canceled=>{sleep(1ms) or_throw return 7}
 main=()=>{
  let result=race(@slow @fast)
- assert(result is? int64 and result =? 7)
+ $runtime_assert(result is? int64 and result =? 7)
 }
 ''')
 
@@ -66,7 +66,7 @@ fail=():>int64|Bad=>Bad["first"]
 slow=():>int64|Canceled=>{sleep(1s) or_throw return 42}
 main=()=>{
  let joined=concurrent {spawn fail() spawn slow()}
- assert(joined is? Bad and joined.message =? "first")
+ $runtime_assert(joined is? Bad and joined.message =? "first")
 }
 ''')
 
@@ -77,7 +77,7 @@ launch=(g:TaskGroup hits:Atomic<int64>)=>{spawn(g) hits.add(1)}
 main=()=>{
  let hits=atomic(0)
  concurrent g {launch(g hits); launch(g hits);}
- assert(hits.load() =? 2)
+ $runtime_assert(hits.load() =? 2)
 }
 """)
 
@@ -95,7 +95,7 @@ observe=(hits:Atomic<int64>)=>{
 main=()=>{
  let hits=atomic(0)
  concurrent {spawn observe(hits) spawn fail()}
- assert(hits.load() =? 2)
+ $runtime_assert(hits.load() =? 2)
 }
 """)
 
@@ -107,7 +107,7 @@ def test_deadline_interrupts_blocked_file_open(compiler, tmp_path):
     run(compiler, tmp_path, f"""
 main=()=>{{
  let result=within(10ms @read_text({json.dumps(str(fifo))}))
- assert(result is? Timeout)
+ $runtime_assert(result is? Timeout)
 }}
 """)
 
@@ -130,8 +130,8 @@ from p"cleanup.jo" import work
 main=()=>{
  let flag=atomic(0)
  let result=within(10ms @work(flag))
- assert(result is? Timeout)
- assert(flag.load() =? EXPECTED)
+ $runtime_assert(result is? Timeout)
+ $runtime_assert(flag.load() =? EXPECTED)
 }
 """.replace("EXPECTED", str(expected)))
 
@@ -145,7 +145,7 @@ main=()=>{
  let before=live()
  loop i in [0..20) {concurrent {spawn work() spawn work()}}
  loop i in [0..100) {if live() =? before break sleep(1ms)}
- assert(live() =? before)
+ $runtime_assert(live() =? before)
 }
 """)
 
@@ -155,7 +155,7 @@ def test_deadline_interrupts_stdin(compiler, tmp_path, operation):
     path = tmp_path / 'stdin.dewy'
     path.write_text(f'''main=()=>{{
  let result=within(10ms @({{ {operation} }}))
- assert(result is? Timeout)
+ $runtime_assert(result is? Timeout)
 }}''')
     # Use an explicit thunk: stdin stays open without producing input or EOF.
     path.write_text(path.read_text().replace(f'@({{ {operation} }})', f'@wait_input'))
@@ -196,7 +196,7 @@ def test_deadline_interrupts_stream_io(compiler, tmp_path, operation):
         run(compiler, tmp_path, work + '''
 main=()=>{
  let result=within(10ms @work)
- assert(result is? Timeout)
+ $runtime_assert(result is? Timeout)
 }
 ''')
     finally:
@@ -208,7 +208,7 @@ def test_deadline_cancels_owned_process_wait(compiler, tmp_path, operation):
     run(compiler, tmp_path, f'''
 main=()=>{{
  let result=within(20ms @{operation}("/bin/sleep" ["10"]))
- assert(result is? Timeout)
+ $runtime_assert(result is? Timeout)
 }}
 ''')
 
@@ -219,7 +219,7 @@ slow=()=>sleep(1s)
 wait=()=>concurrent {spawn slow() spawn slow()}
 main=()=>{
  let result=within(10ms @wait)
- assert(result is? Timeout)
+ $runtime_assert(result is? Timeout)
 }
 ''')
 
@@ -228,7 +228,7 @@ def test_return_cancels_and_joins_children(compiler, tmp_path):
     run(compiler, tmp_path, '''
 work=()=>{sleep(1s) return 1}
 early=()=>{concurrent {spawn work() return 7} return 8}
-main=()=>{assert(early() =? 7)}
+main=()=>{$runtime_assert(early() =? 7)}
 ''')
 
 
@@ -247,7 +247,7 @@ def test_output_is_not_a_cancellation_point(compiler, tmp_path):
   cancel(g)
   printl("still printed")
   printl("to stderr" file=stderr)
-  assert(sleep(1ms) is? Canceled)
+  $runtime_assert(sleep(1ms) is? Canceled)
  }
 }
 ''')
@@ -265,10 +265,10 @@ work=(hits:Atomic<int64>):>void=>{hits.add(1)}
 main=()=>{
  let hits=atomic(0)
  concurrent {let a=spawn work(hits)}
- assert(a is? void)
+ $runtime_assert(a is? void)
  let result=race(@work(hits) @work(hits))
- assert(result is? void)
- assert(hits.load() >=? 2)
+ $runtime_assert(result is? void)
+ $runtime_assert(hits.load() >=? 2)
 }
 """)
 
@@ -281,6 +281,6 @@ fail=()=>{sleep(2ms) return First["original"]}
 late=()=>{sleep(1s) return Later["after cancellation"]}
 main=()=>{
  let joined=concurrent {spawn late() spawn fail()}
- assert(joined is? First and joined.message =? "original")
+ $runtime_assert(joined is? First and joined.message =? "original")
 }
 """)

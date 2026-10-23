@@ -1402,9 +1402,9 @@ main=()=>{
     let count=0
     let next=<T>(value:T $capture count)=>{count+=1; [value=value count=count]}
     let other=@next
-    assert(next(20).count =? 1)
-    assert(next("hello").count =? 2)
-    assert(other(false).count =? 1)
+    $runtime_assert(next(20).count =? 1)
+    $runtime_assert(next("hello").count =? 2)
+    $runtime_assert(other(false).count =? 1)
 }
 ```
 
@@ -2040,10 +2040,10 @@ The bundled numeric library uses ordinary value semantics. Make a matrix with
 let matrix = reshape([3.0 1.0 1.0 2.0] 2 2)
 let saved = matrix
 matrix[0 1] = 4.0
-assert(saved[0 1] =? 1.0)
+$runtime_assert(saved[0 1] =? 1.0)
 let solution = solve(saved [9.0 8.0])  # approximately [2.0 3.0]
 let product = saved*eye(2)
-assert(product.data =? saved.data)
+$runtime_assert(product.data =? saved.data)
 ```
 
 Write a matrix literal with a standalone `;` (a space before it) between rows and
@@ -2136,7 +2136,7 @@ once, before the right side, and saved copies keep their previous values:
 let positions = [1.0 2.0 3.0]
 let saved = positions
 positions .+= [0.5 1.0 1.5] .* 0.25
-assert(saved =? [1.0 2.0 3.0])
+$runtime_assert(saved =? [1.0 2.0 3.0])
 ```
 
 Updates retain the destination's type; their result must fit it. Broadcasting
@@ -2175,7 +2175,7 @@ let block = matrix[[0..2) [1..3)]     # shape [2 2], values [2 3 5 6]
 matrix[[..] 1] = [20 50]
 matrix[0 [1..3)] = 99                # fill each selected element
 matrix[[..] 1] .*= 2                 # update a column elementwise
-assert(column.data =? [2 5])
+$runtime_assert(column.data =? [2 5])
 ```
 
 A scalar index removes that axis; a range keeps it, and omitted trailing axes
@@ -2252,8 +2252,8 @@ integer inputs become `int32`, and arrays may have up to four dimensions:
 ```dewy
 let xs = gpu([1.0 2.0 3.0])
 let shifted = xs .* 2.0 .+ 1.0
-assert(cpu(shifted).data =? [3.0 5.0 7.0])
-assert(cpu(xs).data =? [1.0 2.0 3.0])
+$runtime_assert(cpu(shifted).data =? [3.0 5.0 7.0])
+$runtime_assert(cpu(xs).data =? [1.0 2.0 3.0])
 ```
 
 Adjacent dotted operations fuse into one GPU program, including calls to named
@@ -2288,8 +2288,8 @@ let squares = [parallel i in [0..1000) i*i]
 let shifted = [parallel x in squares x+1]
 let saved = shifted
 parallel @x in shifted {x*=2}
-parallel x in shifted {assert(x >=? 2)}
-assert(saved[0] =? 1 and shifted[0] =? 2)
+parallel x in shifted {$runtime_assert(x >=? 2)}
+$runtime_assert(saved[0] =? 1 and shifted[0] =? 2)
 ```
 
 An ordinary binding is read-only, as in `loop`. A mutable `@x` binding owns one
@@ -2345,7 +2345,7 @@ which is stronger than requested. For example:
 ```dewy
 let hits=atomic(0)
 parallel i in [0..1000) {hits.add(1 'relaxed')}
-assert(hits.load'acquire' =? 1000)
+$runtime_assert(hits.load'acquire' =? 1000)
 ```
 
 Private synchronized handles need explicit factory values: `atomic(...)`,

@@ -65,19 +65,19 @@ digest=(input:array<uint8>):>array<uint32>=> {
 }
 main=():>void=> {
     let abc=digest(bytes("abc"))
-    assert(abc =? [3128432319 2399260650 1094795486 1571693091 2953011619 2518121116 3021012833 4060091821])
+    $runtime_assert(abc =? [3128432319 2399260650 1094795486 1571693091 2953011619 2518121116 3021012833 4060091821])
     let empty=digest([])
-    assert(empty[0] =? 3820012610)
+    $runtime_assert(empty[0] =? 3820012610)
     let message:array<uint8>=[loop i in [0..1000) 97 as uint8]
     let multi=digest(message)
-    assert(multi.length =? 8)
+    $runtime_assert(multi.length =? 8)
     let changed=message
     changed[999]=98
-    assert(digest(changed) not=? multi)
+    $runtime_assert(digest(changed) not=? multi)
     let boundary:array<uint8>=[loop i in [0..56) 120 as uint8]
     let two=digest(boundary)
-    assert(two not=? empty)
-    assert(digest(message) =? multi)
+    $runtime_assert(two not=? empty)
+    $runtime_assert(digest(message) =? multi)
     printl(abc)
     printl(multi)
     printl(two)

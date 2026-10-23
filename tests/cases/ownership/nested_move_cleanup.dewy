@@ -18,9 +18,9 @@ main=()=>{
     {
         let first=Child[Leaf[10] Leaf[20]]
         let second=first
-        assert(second.leaf.value=?10 and second.extra.value=?20)
-        assert(leaf_drops=?1 and parent_drops=?0)
+        $runtime_assert(second.leaf.value=?10 and second.extra.value=?20)
+        $runtime_assert(leaf_drops=?1 and parent_drops=?0)
     }
-    assert(leaf_drops=?3 and parent_drops=?1)
+    $runtime_assert(leaf_drops=?3 and parent_drops=?1)
     printl"ok"
 }

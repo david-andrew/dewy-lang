@@ -12,21 +12,21 @@ main=()=>{
         let m:dict<int64 Owner>=[]
         loop i in [0..10) {m[i]=Owner[i]}
         m[0]=Owner[0]
-        assert(drops=?1 and copies=?0)
-        assert(m.remove(1))
-        assert(not m.remove(1))
-        assert(drops=?2)
+        $runtime_assert(drops=?1 and copies=?0)
+        $runtime_assert(m.remove(1))
+        $runtime_assert(not m.remove(1))
+        $runtime_assert(drops=?2)
         let total:int64=0
         loop [key value] in m {total+=value.value}
-        assert(total=?44 and copies=?0)
+        $runtime_assert(total=?44 and copies=?0)
         let n=m.copy()
-        assert(copies=?9)
+        $runtime_assert(copies=?9)
         loop i in [2..8) {m.remove(i);}
-        assert(drops=?8 and copies=?9)
+        $runtime_assert(drops=?8 and copies=?9)
         m.clear()
-        assert(drops=?11)
-        assert(n.length=?9)
+        $runtime_assert(drops=?11)
+        $runtime_assert(n.length=?9)
     }
-    assert(drops=?20 and copies=?9)
+    $runtime_assert(drops=?20 and copies=?9)
     printl"ok"
 }

@@ -6,7 +6,7 @@ Owner=type of [value:int64
 Pair:type=array<Owner length=2>
 identity=<T>(value:T):>T=>value
 main=()=>{
-    {let a:Pair=[Owner[0] Owner[1]] let b=identity(a) assert(b[1].value=?1)}
-    assert(drops=?2)
+    {let a:Pair=[Owner[0] Owner[1]] let b=identity(a) $runtime_assert(b[1].value=?1)}
+    $runtime_assert(drops=?2)
     printl"ok"
 }

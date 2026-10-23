@@ -22,11 +22,11 @@ main=():>void=>{
         input=loaded
     }
     let result=count_text(input)
-    assert(result.words >=? 0)
-    assert(count_text("").words =? 0)
-    assert(count_text("one").lines =? 1)
-    assert(count_text("café").graphemes =? 4)
-    assert(count_text("  x\t y ").words =? 2)
-    assert(count_text("no newline").lines =? 1)
+    $runtime_assert(result.words >=? 0)
+    $runtime_assert(count_text("").words =? 0)
+    $runtime_assert(count_text("one").lines =? 1)
+    $runtime_assert(count_text("café").graphemes =? 4)
+    $runtime_assert(count_text("  x\t y ").words =? 2)
+    $runtime_assert(count_text("no newline").lines =? 1)
     printl(show(result))
 }

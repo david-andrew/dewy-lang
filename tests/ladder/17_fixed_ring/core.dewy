@@ -21,10 +21,10 @@ main=():>void=>{
         let value=pop(@ring)
         if value is? int64 {out.push(value)}
     }
-    assert(out =? [4 5 6 7])
-    assert(pop(@ring) is? none)
-    assert(snapshot.count =? 4)
+    $runtime_assert(out =? [4 5 6 7])
+    $runtime_assert(pop(@ring) is? none)
+    $runtime_assert(snapshot.count =? 4)
     push(@ring 9)
-    assert(pop(@ring) =? 9)
+    $runtime_assert(pop(@ring) =? 9)
     printl(out)
 }

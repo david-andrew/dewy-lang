@@ -30,11 +30,11 @@ let saved=a
 let product=a*b
 let squares=(inner*(inner+1)*(2*inner+1)//6) as float64
 loop i in [0..rows) {loop j in [0..cols) {
-    assert(product[i j] =? (i%3+1)*(j%5+1)*squares)
+    $runtime_assert(product[i j] =? (i%3+1)*(j%5+1)*squares)
 }}
-assert(product.shape =? [rows cols] and a.data =? saved.data)
+$runtime_assert(product.shape =? [rows cols] and a.data =? saved.data)
 product[0 0]=0.0
-assert(a[0 0] =? 1.0 and b[0 0] =? 1.0)
+$runtime_assert(a[0 0] =? 1.0 and b[0 0] =? 1.0)
 }''',
     'managed-lifetimes': '''work=():>void=>{
 let values=parallel_range(257 (i:int64)=>[name="item {i}" items=[i i+1]])
@@ -45,7 +45,7 @@ main=():>void=>{
 work()
 let before=alloc_count()
 loop round in [0..12) {work()}
-assert(alloc_count() =? before)
+$runtime_assert(alloc_count() =? before)
 }''',
     'managed-values': '''main=():>void=>{
 let words=["one" "two" "three"]
@@ -54,25 +54,25 @@ let saved=values
 parallel_update(@values (p)=>{p.items[0]+=42 p.name="{p.name}!" return p})
 let sums=parallel_map(values (p)=>sum(p.items))
 loop i in [0..values.length) {
-    assert(saved[i].items =? [i i+1] and saved[i].name =? words[i%3])
-    assert(values[i].items =? [i+42 i+1] and values[i].name =? "{words[i%3]}!")
-    assert(sums[i] =? 2*i+43)
+    $runtime_assert(saved[i].items =? [i i+1] and saved[i].name =? words[i%3])
+    $runtime_assert(values[i].items =? [i+42 i+1] and values[i].name =? "{words[i%3]}!")
+    $runtime_assert(sums[i] =? 2*i+43)
 }
-assert(words =? ["one" "two" "three"])
+$runtime_assert(words =? ["one" "two" "three"])
 }''',
     'nested-and-repeated': '''square=(i:int64)=>i*i
 main=():>void=>{
 let empty:array<int64>=[]
-assert(parallel_map(empty @square) =? [])
+$runtime_assert(parallel_map(empty @square) =? [])
 parallel_update(@empty @square)
-assert(parallel_range(0 @square) =? [])
-assert(parallel_range(1 @square) =? [0])
+$runtime_assert(parallel_range(0 @square) =? [])
+$runtime_assert(parallel_range(1 @square) =? [0])
 loop round in [0..20) {
     let nested=parallel_range(37 (i:int64)=>parallel_range(7 (j:int64)=>i+j))
     loop i in [0..37) {
-        loop j in [0..7) { assert(nested[i][j] =? i+j) }
+        loop j in [0..7) { $runtime_assert(nested[i][j] =? i+j) }
     }
-    assert(parallel_range(2 @square) =? [0 1])
+    $runtime_assert(parallel_range(2 @square) =? [0 1])
 }
 }''',
 }

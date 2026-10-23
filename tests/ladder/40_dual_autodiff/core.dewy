@@ -25,8 +25,8 @@ main=():>void=> {
         if error >? maximum  {
             maximum=error
         }
-        assert(error <? 1e-7)
-        assert(abs(value.value-plain(x)) <? 1e-12)
+        $runtime_assert(error <? 1e-7)
+        $runtime_assert(abs(value.value-plain(x)) <? 1e-12)
         derivative_sum+=value.tangent
     }
     # Seed two independent directional derivatives of x*x*y+exp(y).
@@ -34,29 +34,29 @@ main=():>void=> {
     let y=Dual[3.0 0.0]
     let dx=add_dual(mul_dual(mul_dual(x x) y) exp_dual(y))
     let dy=add_dual(mul_dual(mul_dual(Dual[2.0 0.0] Dual[2.0 0.0]) Dual[3.0 1.0]) exp_dual(Dual[3.0 1.0]))
-    assert(abs(dx.tangent-12.0) <? 1e-12)
-    assert(abs(dy.tangent-(4.0+exp(3.0))) <? 1e-12)
+    $runtime_assert(abs(dx.tangent-12.0) <? 1e-12)
+    $runtime_assert(abs(dy.tangent-(4.0+exp(3.0))) <? 1e-12)
     let zero=f(Dual[0.0 1.0])
-    assert(zero.value =? 0.0)
-    assert(zero.tangent =? 1.0)
+    $runtime_assert(zero.value =? 0.0)
+    $runtime_assert(zero.tangent =? 1.0)
     let saved=dx
     x.value=99.0
-    assert(saved.tangent =? 12.0)
+    $runtime_assert(saved.tangent =? 12.0)
     let product=mul_dual(Dual[2.0 3.0] Dual[4.0 5.0])
-    assert(product.value =? 8.0)
-    assert(product.tangent =? 22.0)
+    $runtime_assert(product.value =? 8.0)
+    $runtime_assert(product.tangent =? 22.0)
     let quotient=div_dual(Dual[6.0 1.0] Dual[3.0 0.0])
-    assert(quotient.value =? 2.0)
-    assert(abs(quotient.tangent-1.0/3.0) <? 1e-12)
+    $runtime_assert(quotient.value =? 2.0)
+    $runtime_assert(abs(quotient.tangent-1.0/3.0) <? 1e-12)
     let zero_seed=f(Dual[1.0 0.0])
-    assert(zero_seed.tangent =? 0.0)
+    $runtime_assert(zero_seed.tangent =? 0.0)
     let scaled=f(Dual[1.0 3.0])
-    assert(abs(scaled.tangent-3.0*f(Dual[1.0 1.0]).tangent) <? 1e-12)
+    $runtime_assert(abs(scaled.tangent-3.0*f(Dual[1.0 1.0]).tangent) <? 1e-12)
     let sine=sin_dual(Dual[0.0 2.0])
-    assert(sine.value =? 0.0)
-    assert(sine.tangent =? 2.0)
+    $runtime_assert(sine.value =? 0.0)
+    $runtime_assert(sine.tangent =? 2.0)
     let exponential=exp_dual(Dual[0.0 4.0])
-    assert(exponential.value =? 1.0)
-    assert(exponential.tangent =? 4.0)
+    $runtime_assert(exponential.value =? 1.0)
+    $runtime_assert(exponential.tangent =? 4.0)
     printl("{format(derivative_sum ".6f")} {format(dx.tangent ".6f")} {format(dy.tangent ".6f")}")
 }

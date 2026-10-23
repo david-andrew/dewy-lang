@@ -30,37 +30,37 @@ reset=(v:Point):>Point=>Point[0 0]
 main=():>void=> {
     let settings=Settings[4 16 3]
     let point=Point[20 22]
-    assert(describe(settings) =? "workers=4;limit=16;mode=3;")
-    assert(describe(point) =? "x=20;y=22;")
+    $runtime_assert(describe(settings) =? "workers=4;limit=16;mode=3;")
+    $runtime_assert(describe(point) =? "x=20;y=22;")
     let saved=settings
     settings.workers=8
     settings.mode=1
-    assert(differences(saved settings) =? 2)
-    assert(differences(point point) =? 0)
+    $runtime_assert(differences(saved settings) =? 2)
+    $runtime_assert(differences(point point) =? 0)
     let restored=reset(settings)
-    assert(restored.workers =? 0)
-    assert(restored.limit =? 0)
-    assert(restored.mode =? 0)
-    assert(saved.workers =? 4)
+    $runtime_assert(restored.workers =? 0)
+    $runtime_assert(restored.limit =? 0)
+    $runtime_assert(restored.mode =? 0)
+    $runtime_assert(saved.workers =? 4)
     let zero=reset(point)
-    assert(zero.x =? 0)
-    assert(zero.y =? 0)
+    $runtime_assert(zero.x =? 0)
+    $runtime_assert(zero.y =? 0)
     let count=0
     let checksum=0
     loop i in [0..100)  {
         let item=Settings[i i*2 i%3]
         let clear=reset(item)
-        assert(clear.workers =? 0)
-        assert(clear.limit =? 0)
-        assert(clear.mode =? 0)
+        $runtime_assert(clear.workers =? 0)
+        $runtime_assert(clear.limit =? 0)
+        $runtime_assert(clear.mode =? 0)
         count+=differences(item clear)
         checksum+=describe(item).length
     }
     let copy=point
     copy.x=0
-    assert(differences(point copy) =? 1)
+    $runtime_assert(differences(point copy) =? 1)
     let named=Settings[workers=4 limit=16 mode=3]
-    assert(describe(named) =? describe(saved))
+    $runtime_assert(describe(named) =? describe(saved))
     printl(describe(saved))
     printl("{count} {checksum} {differences(point copy)}")
 }

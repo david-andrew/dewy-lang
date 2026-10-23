@@ -8,24 +8,24 @@ main=():>void=>{
         printl(decoded.message)
         exit(1)
     }
-    assert(decoded =? original)
+    $runtime_assert(decoded =? original)
     let reordered=load(r'{"tags":[],"score":42,"name":"Bob","extra":7}')
     if reordered is? TextError {exit(2)}
-    assert(reordered.active)
-    assert(reordered.score =? 42)
+    $runtime_assert(reordered.active)
+    $runtime_assert(reordered.score =? 42)
     let bad=load(r'{"name":}')
-    assert(bad is? TextError)
+    $runtime_assert(bad is? TextError)
     let negative=from_json<float64>("-0.0")
     if negative is? TextError {exit(3)}
-    assert((negative transmute uint64) =? 9223372036854775808)
+    $runtime_assert((negative transmute uint64) =? 9223372036854775808)
     let list=[original reordered]
     let list_text=to_json(list)
     let recovered=from_json<array<Player>>(list_text)
     if recovered is? TextError {exit(4)}
-    assert(recovered.length =? 2)
-    assert(recovered[0].score =? original.score)
+    $runtime_assert(recovered.length =? 2)
+    $runtime_assert(recovered[0].score =? original.score)
     let independent=recovered
     recovered[0].tags.push("new")
-    assert(independent[0].tags.length =? 2)
+    $runtime_assert(independent[0].tags.length =? 2)
     printl("{decoded.name} {decoded.score} {reordered.active} {independent.length}")
 }

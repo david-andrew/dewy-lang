@@ -15,10 +15,10 @@ main=()=>{
     {
         let first=Grandchild[10 20 30]
         let copied=first.copy()
-        assert(copied.value=?11 and copied.extra=?20 and copied.last=?30)
+        $runtime_assert(copied.value=?11 and copied.extra=?20 and copied.last=?30)
         let moved=first
-        assert(moved.value=?12 and moved.extra=?20 and moved.last=?30)
+        $runtime_assert(moved.value=?12 and moved.extra=?20 and moved.last=?30)
     }
-    assert(copies=?1 and moves=?1 and drops=?2)
+    $runtime_assert(copies=?1 and moves=?1 and drops=?2)
     printl"ok"
 }

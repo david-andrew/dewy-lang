@@ -49,13 +49,13 @@ main=():>void=> {
         counts[c]+=1
         loss+=squared(point result[c])
     }
-    assert(counts =? [40 40 40 0])
-    assert(result[3].x =? 999.0)
-    assert(seeds[0].x =? -1.0)
-    assert(fit([] seeds 2) =? seeds)
+    $runtime_assert(counts =? [40 40 40 0])
+    $runtime_assert(result[3].x =? 999.0)
+    $runtime_assert(seeds[0].x =? -1.0)
+    $runtime_assert(fit([] seeds 2) =? seeds)
     let again=fit(points result 2)
-    assert(again =? result)
-    assert(nearest(Point[0.0 0.0] [Point[-1.0 0.0] Point[1.0 0.0]]) =? 0)
-    assert(fit(points seeds 0) =? seeds)
+    $runtime_assert(again =? result)
+    $runtime_assert(nearest(Point[0.0 0.0] [Point[-1.0 0.0] Point[1.0 0.0]]) =? 0)
+    $runtime_assert(fit(points seeds 0) =? seeds)
     printl("{format(result[0].x ".1f")} {format(result[1].y ".1f")} {format(result[2].x ".1f")} {format(loss ".1f")}")
 }

@@ -9,11 +9,11 @@ main=()=>{
     {
         let original:dict<Key int64>=[Key[0]->20 Key[1]->22]
         let copied=original.copy()
-        assert(copied.has(Key[10]) and copied.has(Key[11]))
-        assert(not copied.has(Key[0]))
-        assert(copied[Key[10]]+copied[Key[11]]=?42)
-        assert(original[Key[0]]=?20)
+        $runtime_assert(copied.has(Key[10]) and copied.has(Key[11]))
+        $runtime_assert(not copied.has(Key[0]))
+        $runtime_assert(copied[Key[10]]+copied[Key[11]]=?42)
+        $runtime_assert(original[Key[0]]=?20)
     }
-    assert(drops=?10)
+    $runtime_assert(drops=?10)
     printl"ok"
 }

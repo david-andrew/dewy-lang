@@ -22,9 +22,9 @@ main=():>void=>exit(entry()) entry=()=>{
  let saved=a
  let mid:int64=2
  swap(@a[..mid) @a[mid..])
- assert(a =? [3 4 1 2] and saved =? [1 2 3 4])
+ $runtime_assert(a =? [3 4 1 2] and saved =? [1 2 3 4])
  swap(@a[..0) @a[0..0))
- assert(a =? [3 4 1 2])
+ $runtime_assert(a =? [3 4 1 2])
  return 0
 }
 ''')
@@ -79,7 +79,7 @@ main=():>void=>{
  let scratch:array<int64>=[loop i in [0..2049) 0 as int64]
  let saved=a
  loop round in [0..3) {walk(@a @scratch)}
- loop i in [0..2049) {assert(a[i] =? saved[i]+3 and scratch[i] =? 2*a[i])}
+ loop i in [0..2049) {$runtime_assert(a[i] =? saved[i]+3 and scratch[i] =? 2*a[i])}
 }
 '''
 
@@ -134,7 +134,7 @@ main=():>void=>{
  let src:array<int64>=[loop i in [0..1031) i as int64]
  let out=src
  copy(src @out[..] 0)
- loop i in [0..1031) {assert(src[i] =? i and out[i] =? i+1)}
+ loop i in [0..1031) {$runtime_assert(src[i] =? i and out[i] =? i+1)}
 }
 '''
 

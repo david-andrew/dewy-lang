@@ -52,7 +52,7 @@ valid_tables=():>bool=> {
     return count =? 31
 }
 main=():>void=> {
-    assert(valid_tables())
+    $runtime_assert(valid_tables())
     let primes:array<int64>=[]
     let checksum=0
     loop i in 0.. and prime in PRIME  {
@@ -61,23 +61,23 @@ main=():>void=> {
             checksum+=i
         }
     }
-    assert(primes.length =? 31)
-    assert(primes[0] =? 2)
-    assert(primes[primes.length-1] =? 127)
+    $runtime_assert(primes.length =? 31)
+    $runtime_assert(primes[0] =? 2)
+    $runtime_assert(primes[primes.length-1] =? 127)
     let reverse_sum=0
     loop i in [0..REVERSE.length)  {
         reverse_sum+=REVERSE[i]
     }
-    assert(reverse_sum =? 32640)
+    $runtime_assert(reverse_sum =? 32640)
     let copied=REVERSE
-    assert(copied.length =? 256 and REVERSE.length =? 256)
+    $runtime_assert(copied.length =? 256 and REVERSE.length =? 256)
     copied[1]=0
-    assert(REVERSE[1] =? 128)
+    $runtime_assert(REVERSE[1] =? 128)
     let word=0
     loop byte in [1..5)  {
         word=word*256+REVERSE[byte]
     }
-    assert(word =? 2151727136)
+    $runtime_assert(word =? 2151727136)
     let trial_count=0
     loop n in [2..128)  {
         let prime=true
@@ -90,6 +90,6 @@ main=():>void=> {
             trial_count+=1
         }
     }
-    assert(trial_count =? primes.length)
+    $runtime_assert(trial_count =? primes.length)
     printl("{primes.length} {checksum} {reverse_sum} {word}")
 }

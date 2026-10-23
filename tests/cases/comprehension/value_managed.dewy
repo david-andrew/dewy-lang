@@ -4,12 +4,12 @@ work=()=>{
 let source=[[20] [22]] let saved=source
 let result=[loop xs in source copy(xs)]
 source[0][0]=99 result[1].push(100)
-assert(result =? [[20] [22 100]] and saved =? [[20] [22]])
+$runtime_assert(result =? [[20] [22 100]] and saved =? [[20] [22]])
 let fixed:array<array<int> length=2>=[[20] [22]]
 let mapped=[loop xs in fixed {let local=copy(xs) copy(local)}]
-mapped[0].push(1) assert(fixed[0] =? [20] and mapped[1] =? [22])
+mapped[0].push(1) $runtime_assert(fixed[0] =? [20] and mapped[1] =? [22])
 let pairs=[loop i in 0.. and xs in source i->xs] let old=pairs
-pairs[0].push(1) assert(old[0] =? [99])
+pairs[0].push(1) $runtime_assert(old[0] =? [99])
 }
 run=()=>{work() let before=alloc_count() loop i in [0..20) work()
 return if alloc_count() =? before 42 else 1}

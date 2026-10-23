@@ -3,9 +3,9 @@ run=()=>{
 let a=zeros<int64>(2 3 4) a[1 2 3]=42
 let b=ones(2 2 2 2) b[1 0 1 0]=9.0
 let saved=b b[1 0 1 0]=7.0
-assert(a.shape =? [2 3 4] and a[1 2 3] =? 42 and sum(a) =? 42)
-assert(saved[1 0 1 0] =? 9.0 and b[0 0 0 0] =? 1.0)
+$runtime_assert(a.shape =? [2 3 4] and a[1 2 3] =? 42 and sum(a) =? 42)
+$runtime_assert(saved[1 0 1 0] =? 9.0 and b[0 0 0 0] =? 1.0)
 let t=transpose(a)
-assert(t.shape =? [4 3 2] and t[3 2 1] =? 42)
+$runtime_assert(t.shape =? [4 3 2] and t[3 2 1] =? 42)
 return 42}
 main=()=>exit(run())

@@ -48,7 +48,7 @@ main=():>void=> {
     loop frame in [0..180)  {
         predicted=advance(predicted [0 0])
     }
-    assert(fingerprint(predicted) not=? fingerprint(baseline))
+    $runtime_assert(fingerprint(predicted) not=? fingerprint(baseline))
     let replayed=0
     loop rewind in [0 1 7 31 90 179]  {
         $runtime_assert 0 <=? rewind and rewind <? snapshots.length
@@ -57,19 +57,19 @@ main=():>void=> {
             corrected=advance(corrected inputs(frame))
             replayed+=1
         }
-        assert(corrected =? baseline)
+        $runtime_assert(corrected =? baseline)
     }
     $runtime_assert snapshots.length >? 30 and snapshots[30].players.length >? 0
     let changed=snapshots[30]
     changed.players[0].x=999
-    assert(snapshots[30].players[0].x not=? 999)
-    assert(initial.frame =? 0)
-    assert(initial.random =? 12345)
+    $runtime_assert(snapshots[30].players[0].x not=? 999)
+    $runtime_assert(initial.frame =? 0)
+    $runtime_assert(initial.random =? 12345)
     let repeated=initial
     loop frame in [0..180)  {
         repeated=advance(repeated inputs(frame))
     }
-    assert(repeated =? baseline)
+    $runtime_assert(repeated =? baseline)
     let score=0
     loop player in baseline.players  {
         score+=player.score

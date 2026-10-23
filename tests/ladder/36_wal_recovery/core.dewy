@@ -59,21 +59,21 @@ main=():>void=> {
             total+=key*100+value
         }
         if cut <? 4  {
-            assert(state.length =? 0)
+            $runtime_assert(state.length =? 0)
         }
         if cut >=? 16  {
-            assert(state.get(2) is? none)
+            $runtime_assert(state.get(2) is? none)
         }
     }
     let full=recover(log)
-    assert(full.get(1) =? 30)
-    assert(full.get(3) =? 40)
+    $runtime_assert(full.get(1) =? 30)
+    $runtime_assert(full.get(3) =? 40)
     let corrupt=log
     $runtime_assert corrupt.length >? 11
     corrupt[11]=0
     let recovered=recover(corrupt)
-    assert(recovered.get(1) =? 10)
-    assert(recovered.get(2) =? 20)
+    $runtime_assert(recovered.get(1) =? 10)
+    $runtime_assert(recovered.get(2) =? 20)
     let removed=remove_file("crash.wal")
     if removed is? (error|Canceled)  {
         exit(3)

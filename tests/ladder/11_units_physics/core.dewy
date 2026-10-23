@@ -15,17 +15,17 @@ main=():>void=>{
     let gravity:float64=10.0
     let result=simulate(mass launch gravity)
     let fall=simulate(mass 0.0 gravity)
-    assert(result.height =? 20.0)
-    assert(result.energy =? 400.0)
-    assert(check_energy(mass result.height gravity result.energy))
-    assert(fall.height =? 0.0)
+    $runtime_assert(result.height =? 20.0)
+    $runtime_assert(result.energy =? 400.0)
+    $runtime_assert(check_energy(mass result.height gravity result.energy))
+    $runtime_assert(fall.height =? 0.0)
     let double_speed=simulate(mass 2.0*launch gravity)
-    assert(double_speed.height =? 4.0*result.height)
+    $runtime_assert(double_speed.height =? 4.0*result.height)
     let double_mass=simulate(2.0*mass launch gravity)
-    assert(double_mass.height =? result.height)
-    assert(double_mass.energy =? 2.0*result.energy)
+    $runtime_assert(double_mass.height =? result.height)
+    $runtime_assert(double_mass.energy =? 2.0*result.energy)
     let duration=launch/gravity
-    assert(duration =? 2.0)
+    $runtime_assert(duration =? 2.0)
     # Report integral counts like the design's exact rational arithmetic.
     printl("{int64(result.height)} {int64(result.energy)} {int64(duration)}")
 }

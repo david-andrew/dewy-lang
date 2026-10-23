@@ -4,7 +4,7 @@ __add__=(a:Tag b:string):>Tag=>Tag["{a.text}{b}"]
 work=()=>{
 let m=reshape([Tag["a"] Tag["b"] Tag["c"] Tag["d"]] 2 2) let saved=m
 m[[..] 1] .+= "!"
-assert(m.data =? [Tag["a"] Tag["b!"] Tag["c"] Tag["d!"]] and saved.data =? [Tag["a"] Tag["b"] Tag["c"] Tag["d"]])
+$runtime_assert(m.data =? [Tag["a"] Tag["b!"] Tag["c"] Tag["d!"]] and saved.data =? [Tag["a"] Tag["b"] Tag["c"] Tag["d"]])
 }
 run=()=>{work() let before=alloc_count() loop i in [0..20) work()
 return if alloc_count() =? before 42 else 1}

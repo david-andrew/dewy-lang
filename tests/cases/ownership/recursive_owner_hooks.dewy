@@ -7,10 +7,10 @@ A:type=[next:B?=none owner:Node]
 B:type=[next:A?=none]
 main=()=>{
     {let empty=B[]}
-    assert(drops=?0)
+    $runtime_assert(drops=?0)
     {let a=Node[1 none] let b=Node[2 a] let c=Node[3 b]}
-    assert(drops=?3)
+    $runtime_assert(drops=?3)
     {let a=A[B[] Node[4 none]] let b=B[a] let c=A[b Node[5 none]]}
-    assert(drops=?5)
+    $runtime_assert(drops=?5)
     printl"ok"
 }

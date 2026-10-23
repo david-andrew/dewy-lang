@@ -11,7 +11,7 @@ main=():>void=>{
     let total=0
     let results=output
     loop i in [0..results.length) {
-        assert(results[i] =? work(input[i]))
+        $runtime_assert(results[i] =? work(input[i]))
         total+=results[i]
     }
     let saved=output
@@ -19,15 +19,15 @@ main=():>void=>{
     let updated=output
     $runtime_assert updated.length =? saved.length
     loop i in [0..updated.length) {
-        assert(updated[i] =? saved[i]+1)
+        $runtime_assert(updated[i] =? saved[i]+1)
     }
     let nested=parallel_range(8 (i:int64)=>{
         let inner=parallel_range(4 (j:int64)=>i+j)
         return inner[0]+inner[3]
     })
-    assert(nested[7] =? 17)
+    $runtime_assert(nested[7] =? 17)
     let serial=0
     loop i in input {serial+=work(i)}
-    assert(serial =? total)
+    $runtime_assert(serial =? total)
     printl("{output.length} {total} {nested[7]}")
 }

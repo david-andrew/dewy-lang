@@ -45,8 +45,8 @@ main=():>void=> {
     if decoded is? BadPacket  {
         exit(1)
     }
-    assert(decoded.sequence =? 65530)
-    assert(decoded.payload =? packet.payload)
+    $runtime_assert(decoded.sequence =? 65530)
+    $runtime_assert(decoded.payload =? packet.payload)
     let rejected=0
     loop cut in [0..bytes.length)  {
         let prefix:array<uint8>=[]
@@ -60,14 +60,14 @@ main=():>void=> {
     loop i in [0..bytes.length)  {
         let bad=bytes
         bad[i]=bad[i] xor 1
-        assert(decode(bad) is? BadPacket)
+        $runtime_assert(decode(bad) is? BadPacket)
         rejected+=1
     }
     let empty=decode(encode(Packet[0 0 []]))
     if empty is? BadPacket  {
         exit(2)
     }
-    assert(empty.payload.length =? 0)
+    $runtime_assert(empty.payload.length =? 0)
     let sum=0
     loop byte in bytes  {
         sum+=byte as int64

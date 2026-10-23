@@ -146,20 +146,20 @@ tree=(a:array<int64> depth:int64):>array<int64>=>{
  if depth%2 =? 0 return parts[1]
  let left=parts[0]
  left[0]+=1
- assert(parts[1][0] =? a[0]+(depth-1)//2)
+ $runtime_assert(parts[1][0] =? a[0]+(depth-1)//2)
  return left
 }
 work=():>void=>{
  let input:array<int64>=[10 20 30]
  let output=tree(input 12)
- assert(input =? [10 20 30])
- assert(output =? [16 20 30])
+ $runtime_assert(input =? [10 20 30])
+ $runtime_assert(output =? [16 20 30])
 }
 main=():>void=>exit(entry()) entry=()=>{
  work()
  let before=alloc_count()
  loop i in [0..12) {work()}
- assert(alloc_count() =? before)
+ $runtime_assert(alloc_count() =? before)
  return 0
 }
 ''')

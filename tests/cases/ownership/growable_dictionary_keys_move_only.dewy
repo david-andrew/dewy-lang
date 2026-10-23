@@ -7,13 +7,13 @@ Owner=type of [value:int64
 main=()=>{
     {
         let m:dict<Owner Owner>=[Owner[0]->Owner[10] Owner[1]->Owner[11]]
-        assert(copies=?0 and drops=?0)
+        $runtime_assert(copies=?0 and drops=?0)
         let n=m
-        assert(copies=?0 and drops=?0)
+        $runtime_assert(copies=?0 and drops=?0)
         let total:int64=0
         loop [key value] in n {total+=key.value+value.value}
-        assert(total=?22)
+        $runtime_assert(total=?22)
     }
-    assert(drops=?4 and copies=?0)
+    $runtime_assert(drops=?4 and copies=?0)
     printl"ok"
 }

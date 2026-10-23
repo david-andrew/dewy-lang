@@ -11,13 +11,13 @@ main=()=>{
         let b=identity(a)
         let total:int64=0
         loop item in b {total+=item.value}
-        assert(total=?6 and drops=?0)
+        $runtime_assert(total=?6 and drops=?0)
         b.pop();
-        assert(drops=?1)
+        $runtime_assert(drops=?1)
         b.clear()
-        assert(drops=?4)
+        $runtime_assert(drops=?4)
         b.push(Owner[4])
     }
-    assert(drops=?5)
+    $runtime_assert(drops=?5)
     printl"ok"
 }

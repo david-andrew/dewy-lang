@@ -22,8 +22,8 @@ join_lines=(lines:array<string>):>string=>{
 main=():>void=>{
     let input="INFO boot\nERROR disk\nWARN hot\nERROR network\n"
     let results=find_lines(input "^ERROR")
-    assert(results.length =? 2)
-    assert(find_lines(input "^DEBUG").length =? 0)
-    assert(find_lines("café" "caf.").length =? 1)
+    $runtime_assert(results.length =? 2)
+    $runtime_assert(find_lines(input "^DEBUG").length =? 0)
+    $runtime_assert(find_lines("café" "caf.").length =? 1)
     printl(join_lines(results))
 }

@@ -6,10 +6,10 @@ Leaf=type of [value:int64
     $__move__
     transfer=():>Leaf=>{moves+=1 return Leaf[value+1]}
 ]
-consume=(x:Leaf?)=>{if x is? Leaf {assert(x.value=?4)}}
+consume=(x:Leaf?)=>{if x is? Leaf {$runtime_assert(x.value=?4)}}
 main=()=>{
     {let first=Leaf[1] let optional:Leaf?=first
      let next=optional consume(next)}
-    assert(drops=?1 and moves=?3)
+    $runtime_assert(drops=?1 and moves=?3)
     printl"ok"
 }

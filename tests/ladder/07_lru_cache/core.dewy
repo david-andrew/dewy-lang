@@ -25,9 +25,9 @@ main=():>void=>{
     let c:Cache=[values=[] order=[] capacity=2]
     put(@c "a" 1)
     put(@c "b" 2)
-    assert(get(@c "a") =? 1)
+    $runtime_assert(get(@c "a") =? 1)
     put(@c "c" 3)
-    assert(get(@c "b") is? none)
+    $runtime_assert(get(@c "b") is? none)
     put(@c "a" 9)
     printl("{get(@c "a")} {c.order}")
 }

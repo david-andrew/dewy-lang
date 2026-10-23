@@ -3,8 +3,8 @@ let values:array<array<int64>>=[]
 lower=()=>{values=[[100]] return 1}
 work=():>void=>{values=[[10] [20] [22] [90]] values.push([0])
 values.extend(values[lower()..3))
-assert(values =? [[100] [20] [22]]) values[1].push(42)
-assert(values =? [[100] [20 42] [22]])}
+$runtime_assert(values =? [[100] [20] [22]]) values[1].push(42)
+$runtime_assert(values =? [[100] [20 42] [22]])}
 run=()=>{work() let before=alloc_count() loop i in [0..20) work()
 return if alloc_count() =? before 42 else 1}
 main=()=>exit(run())

@@ -1,7 +1,7 @@
 import net
 exchange=(payload:string):>string | net.NetError | Canceled=>{
     let server=net.tcp_listen(0) or_throw
-    assert(server.port >? 0)
+    $runtime_assert(server.port >? 0)
     let client=net.tcp_connect("127.0.0.1" server.port) or_throw
     let peer=net.tcp_accept(server) or_throw
     net.tcp_send(client payload) or_throw
@@ -15,13 +15,13 @@ exchange=(payload:string):>string | net.NetError | Canceled=>{
 }
 main=():>void | net.NetError | Canceled=>{
     let one=exchange("hello café") or_throw
-    assert(one =? "hello café")
+    $runtime_assert(one =? "hello café")
     let two=exchange("second request") or_throw
-    assert(two =? "second request")
+    $runtime_assert(two =? "second request")
     let three=exchange("0123456789") or_throw
-    assert(three.length =? 10)
+    $runtime_assert(three.length =? 10)
     let checksum=0
     loop b in bytes(one) {checksum+=b as int64}
-    assert(checksum >? 0)
+    $runtime_assert(checksum >? 0)
     printl("{one}|{two}|{three}")
 }

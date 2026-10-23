@@ -63,12 +63,12 @@ main=():>void=>exit(entry()) entry=()=>{
  loop value in values {printl"{value}"}
  printl"{values[1]} {values[0]}"
  let escaped=make()
- assert(escaped =? [10 11])
+ $runtime_assert(escaped =? [10 11])
  let changed=[parallel i in [0..2) i]
  changed[0]=9
- assert(changed =? [9 1])
+ $runtime_assert(changed =? [9 1])
  let nested=[parallel i in [0..2) [parallel j in [0..2) i+j]]
- assert(nested =? [[0 1] [1 2]])
+ $runtime_assert(nested =? [[0 1] [1 2]])
  return 0
 }
 ''', release=release)
@@ -99,11 +99,11 @@ forward=(f:Callback):>int64=>invoke((i:int64):>int64=>f(i)+f(i+1))
 escape=(f:Callback):>Callback=>(i:int64):>int64=>f(i)+1
 main=():>void=>exit(entry()) entry=()=>{
  let value:int64=7
- assert(forward((i:int64):>int64=>value+i) =? 21)
+ $runtime_assert(forward((i:int64):>int64=>value+i) =? 21)
  let saved=escape((i:int64):>int64=>value+i)
  let noise=[loop i in [0..1000) "{i}"]
- assert(saved(5) =? 13)
- assert(noise.length =? 1000)
+ $runtime_assert(saved(5) =? 13)
+ $runtime_assert(noise.length =? 1000)
  return 0
 }
 ''', release=release)
@@ -121,8 +121,8 @@ main=():>void=>exit(entry()) entry=()=>{
  let expected=random()
  seed_random(17)
  let values=[parallel i in [0..2) draw_value(i)]
- assert(values[0] >=? 0.0 and values[1] >=? 1.0)
- assert(random() =? expected)
+ $runtime_assert(values[0] >=? 0.0 and values[1] >=? 1.0)
+ $runtime_assert(random() =? expected)
  return 0
 }
 ''')
@@ -141,8 +141,8 @@ main=():>void=>exit(entry()) entry=()=>{
  let expected=random()
  seed_random(17)
  let values=[parallel i in [0..2) observe(i)]
- assert(values[0] and values[1])
- assert(random() =? expected)
+ $runtime_assert(values[0] and values[1])
+ $runtime_assert(random() =? expected)
  return 0
 }
 ''')

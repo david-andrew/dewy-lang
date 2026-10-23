@@ -48,7 +48,7 @@ main=():>void=> {
         }
     }
     loop item in results  {
-        assert(item.id >? previous)
+        $runtime_assert(item.id >? previous)
         previous=item.id
         total+=item.value
         let job=saved.get(item.id)
@@ -57,15 +57,15 @@ main=():>void=> {
         if parsed is? Failure  {
             exit(1)
         }
-        assert(compute(parsed).value =? item.value)
+        $runtime_assert(compute(parsed).value =? item.value)
     }
-    assert(results.length+failures =? jobs.length)
-    assert(pipeline([]).length =? 0)
-    assert(pipeline([Job[0 "bad"]]).length =? 0)
+    $runtime_assert(results.length+failures =? jobs.length)
+    $runtime_assert(pipeline([]).length =? 0)
+    $runtime_assert(pipeline([Job[0 "bad"]]).length =? 0)
     jobs[1].text="999"
-    assert(saved[1].text =? "3")
+    $runtime_assert(saved[1].text =? "3")
     let again=pipeline(saved)
-    assert(again =? results)
+    $runtime_assert(again =? results)
     let ids=0
     loop item in results  {
         ids+=item.id

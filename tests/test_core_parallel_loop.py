@@ -18,25 +18,25 @@ def compiler():
 
 PROGRAM = '''main=():>void=>{
 let empty:array<int64>=[]
-assert([parallel x in empty x*x] =? [])
-assert([parallel i in [3..3) i] =? [])
-assert([parallel i in [5,3..0] i] =? [5 3 1])
-assert([parallel i in (0..4] i] =? [1 2 3 4])
+$runtime_assert([parallel x in empty x*x] =? [])
+$runtime_assert([parallel i in [3..3) i] =? [])
+$runtime_assert([parallel i in [5,3..0] i] =? [5 3 1])
+$runtime_assert([parallel i in (0..4] i] =? [1 2 3 4])
 let values=[loop i in [0..129) [name="item {i}" data=[i i+1]]]
 let original=values
 parallel @value in values {value.name="{value.name}!" value.data[0]+=10}
 parallel i in [0..129) {
-    assert(values[i].name =? "item {i}!" and original[i].name =? "item {i}")
-    assert(values[i].data[0] =? i+10 and original[i].data[0] =? i)
+    $runtime_assert(values[i].name =? "item {i}!" and original[i].name =? "item {i}")
+    $runtime_assert(values[i].data[0] =? i+10 and original[i].data[0] =? i)
 }
 loop round in [0..12) {
     let result=[parallel i in [0..37) [parallel j in [0..41) [value=i+j text="{i}:{j}"]]]
     loop i in [0..37) {loop j in [0..41) {
-        assert(result[i][j] =? [value=i+j text="{i}:{j}"])
+        $runtime_assert(result[i][j] =? [value=i+j text="{i}:{j}"])
     }}
 }
 let floats:array<float64>=[1e16 1.0 -1e16 2.0]
-loop round in [0..20) {assert(sum([parallel x in floats x]) =? sum(floats))}
+loop round in [0..20) {$runtime_assert(sum([parallel x in floats x]) =? sum(floats))}
 }'''
 
 

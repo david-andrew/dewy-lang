@@ -21,13 +21,13 @@ main=():>void=>{
     let arena:Arena=[bytes=[]]
     let first=allocate(@arena 3 1) ?? -1
     let second=allocate(@arena 4 4) ?? -1
-    assert(first =? 0 and second =? 4)
+    $runtime_assert(first =? 0 and second =? 4)
     write_word(@arena second 305419896)
-    assert(read_word(arena second) =? 305419896)
-    assert(allocate(@arena 100 8) is? none)
-    assert(arena.cursor =? 8)
+    $runtime_assert(read_word(arena second) =? 305419896)
+    $runtime_assert(allocate(@arena 100 8) is? none)
+    $runtime_assert(arena.cursor =? 8)
     let snapshot=arena
     write_word(@arena second 0)
-    assert(read_word(snapshot second) =? 305419896)
+    $runtime_assert(read_word(snapshot second) =? 305419896)
     printl("{first} {second} {read_word(snapshot second)}")
 }

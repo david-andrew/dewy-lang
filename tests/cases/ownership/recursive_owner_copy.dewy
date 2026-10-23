@@ -13,7 +13,7 @@ main=()=>{
      let third=Node[second Leaf[3]]
      let snapshot=third.copy()
      if snapshot.next is? Node {snapshot.next.owner.value=9}
-     if third.next is? Node {assert(third.next.owner.value=?2)}}
-    assert(drops=?6 and copies=?3)
+     if third.next is? Node {$runtime_assert(third.next.owner.value=?2)}}
+    $runtime_assert(drops=?6 and copies=?3)
     printl"ok"
 }

@@ -10,16 +10,16 @@ main=()=>{
     {
         let a=[Owner[1] Owner[2]]
         a.extend(a)
-        assert(a.length=?4 and copies=?2 and drops=?0)
+        $runtime_assert(a.length=?4 and copies=?2 and drops=?0)
         let b=[Owner[3]]
         a.extend(b)
-        assert(a.length=?5 and copies=?2 and drops=?0)
+        $runtime_assert(a.length=?5 and copies=?2 and drops=?0)
         let selected=a[1..3]
-        assert(selected.length=?3 and copies=?10)
+        $runtime_assert(selected.length=?3 and copies=?10)
         let total:int64=0
         loop value in selected {total+=value.value}
-        assert(total=?5)
+        $runtime_assert(total=?5)
     }
-    assert(drops=?13)
+    $runtime_assert(drops=?13)
     printl"ok"
 }

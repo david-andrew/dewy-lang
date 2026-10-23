@@ -2,10 +2,10 @@
 run=()=>{
 let a=reshape([1 2 3 4 5 6] 2 3) let b=reshape([7 8 9 10 11 12] 3 2)
 let c=a*b
-assert(c.shape =? [2 2] and c.data =? [58 64 139 154])
-assert(a*[2 3 4] =? [20 47])
+$runtime_assert(c.shape =? [2 2] and c.data =? [58 64 139 154])
+$runtime_assert(a*[2 3 4] =? [20 47])
 let t=transpose(a)
-assert(t.shape =? [3 2] and t.data =? [1 4 2 5 3 6])
-assert(row(a 1) =? [4 5 6] and col(a 1) =? [2 5])
+$runtime_assert(t.shape =? [3 2] and t.data =? [1 4 2 5 3 6])
+$runtime_assert(row(a 1) =? [4 5 6] and col(a 1) =? [2 5])
 return 42}
 main=()=>exit(run())

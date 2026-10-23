@@ -18,12 +18,12 @@ integrate=(initial:float64 h:float64 count:int64):>array<float64>=>{
 main=():>void=>{
     let history=integrate(1.0 0.01 100)
     let answer=history[end]
-    assert(abs(answer-exp(-1.0)) <? 1e-8)
-    assert(history.length =? 101)
+    $runtime_assert(abs(answer-exp(-1.0)) <? 1e-8)
+    $runtime_assert(history.length =? 101)
     loop i in [1..history.length) {
-        assert(history[i] <? history[i-1])
+        $runtime_assert(history[i] <? history[i-1])
     }
-    assert(step(0.0 0.01) =? 0.0)
-    assert(integrate(2.0 0.1 0)[0] =? 2.0)
+    $runtime_assert(step(0.0 0.01) =? 0.0)
+    $runtime_assert(integrate(2.0 0.1 0)[0] =? 2.0)
     printl(format(answer ".8f"))
 }

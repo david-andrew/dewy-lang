@@ -17,14 +17,14 @@ main=():>void=>{
     let words=["" "a" "hello" "foobar"]
     let expected:array<uint64>=[14695981039346656037 12638187200555641996 11831194018420276491 9625390261332436968]
     let actual=combine(words)
-    assert(actual =? expected)
-    assert(fnv1a("hello") not=? fnv1a("Hello"))
-    assert(fnv1a("a") =? fnv1a("a"))
+    $runtime_assert(actual =? expected)
+    $runtime_assert(fnv1a("hello") not=? fnv1a("Hello"))
+    $runtime_assert(fnv1a("a") =? fnv1a("a"))
     let seen:dict<uint64 string>=[]
     loop word in words {
         seen[fnv1a(word)]=word
     }
-    assert(seen.length =? 4)
-    assert(seen[fnv1a("hello")] =? "hello")
+    $runtime_assert(seen.length =? 4)
+    $runtime_assert(seen[fnv1a("hello")] =? "hello")
     printl(actual)
 }

@@ -8,8 +8,8 @@ Leaf=type of [value:int64
 ]
 main=()=>{
     {let value:Leaf?=Leaf[0] let copy=value.copy()}
-    assert(drops=?2 and copies=?1)
+    $runtime_assert(drops=?2 and copies=?1)
     {let value:Leaf?=none let copy=value.copy()}
-    assert(drops=?2 and copies=?1)
+    $runtime_assert(drops=?2 and copies=?1)
     printl"ok"
 }

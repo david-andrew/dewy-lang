@@ -3,7 +3,7 @@
 # Test: tools/dewy test examples/trajectory_fit.dewy
 
 fit = (times:array<float64> heights:array<float64>):>array<float64 length=3> => {
-    assert(times.length =? heights.length and times.length >=? 3)
+    $runtime_assert(times.length =? heights.length and times.length >=? 3)
     let design = zeros(times.length 3)
     loop i in [0..times.length) {
         let t = times[i]

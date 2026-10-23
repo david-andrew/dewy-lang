@@ -37,10 +37,10 @@ main=():>void=> {
     }
     commit(@ring b 20)
     # Later publication cannot bypass a stalled earlier producer.
-    assert(consume(@ring) is? none)
+    $runtime_assert(consume(@ring) is? none)
     commit(@ring a 10)
-    assert(consume(@ring) =? 10)
-    assert(consume(@ring) =? 20)
+    $runtime_assert(consume(@ring) =? 10)
+    $runtime_assert(consume(@ring) =? 20)
     let count=0
     let checksum=0
     loop batch in [0..200)  {
@@ -51,19 +51,19 @@ main=():>void=> {
             }
             commit(@ring ticket batch*4+j)
         }
-        assert(reserve(@ring) is? none)
+        $runtime_assert(reserve(@ring) is? none)
         loop j in [0..4)  {
             let item=consume(@ring)
             if item is? none  {
                 exit(4)
             }
-            assert(item =? batch*4+j)
+            $runtime_assert(item =? batch*4+j)
             checksum+=item
             count+=1
         }
-        assert(consume(@ring) is? none)
+        $runtime_assert(consume(@ring) is? none)
     }
-    assert(ring.read =? ring.write)
-    assert(ring.read =? 802)
+    $runtime_assert(ring.read =? ring.write)
+    $runtime_assert(ring.read =? 802)
     printl("{count} {checksum} {ring.read}")
 }

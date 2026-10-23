@@ -35,7 +35,7 @@ def test_no_blocks_transitive(compiler, tmp_path, body):
 @pytest.mark.core_quick
 def test_no_blocks_scalar(compiler, tmp_path):
     result = check(compiler, tmp_path,
-                   'twice=(n:int64):>int64 & no blocks=>n*2\nmain=()=>{assert(twice(21)=?42)}')
+                   'twice=(n:int64):>int64 & no blocks=>n*2\nmain=()=>{$runtime_assert(twice(21)=?42)}')
     assert result.returncode == 0, result.stderr
 
 
@@ -62,10 +62,10 @@ main=()=>{
    payload.count.add(1 'relaxed')
    sum(payload.value)+i
  }]
- assert(a.load'acquire' =? 128)
+ $runtime_assert(a.load'acquire' =? 128)
  a.store(42 'release')
- assert(a.load() =? 42)
- assert(sums.length =? 128)
+ $runtime_assert(a.load() =? 42)
+ $runtime_assert(sums.length =? 128)
 }
 ''', 'build')
     assert result.returncode == 0, result.stderr
@@ -82,10 +82,10 @@ def test_atomic_fixed_width_wrap(compiler, tmp_path, payload):
     result = check(compiler, tmp_path, f'''
 main=()=>{{
  let a=atomic<{payload}>({maximum})
- assert(a.add(1) =? {expected})
- assert(a.load() =? {expected})
- assert(a.compare_swap({expected} 5))
- assert(a.load() =? 5)
+ $runtime_assert(a.add(1) =? {expected})
+ $runtime_assert(a.load() =? {expected})
+ $runtime_assert(a.compare_swap({expected} 5))
+ $runtime_assert(a.load() =? 5)
 }}
 ''', 'build')
     assert result.returncode == 0, result.stderr
@@ -167,7 +167,7 @@ main=()=>{
  let values:array<Atomic<int64> length=2>=[atomic(1) atomic(2)]
  let empty:array<Atomic<int64>>=[]
  let padded=CachePadded<Atomic<int64>>[value=atomic(3)]
- assert(values[0].load() =? 1 and padded.value.load() =? 3)
+ $runtime_assert(values[0].load() =? 1 and padded.value.load() =? 3)
 }
 """)
     assert result.returncode == 0, result.stderr

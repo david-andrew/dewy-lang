@@ -3,8 +3,8 @@ wrap=(text:string)=>[text "!"]
 work=()=>{
 let rows=wrap.(["a" "b" "c"]) let saved=rows
 rows[0].push("changed")
-assert(saved =? [["a" "!"] ["b" "!"] ["c" "!"]])
-assert(rows[0] =? ["a" "!" "changed"])
+$runtime_assert(saved =? [["a" "!"] ["b" "!"] ["c" "!"]])
+$runtime_assert(rows[0] =? ["a" "!" "changed"])
 }
 run=()=>{work() let before=alloc_count() loop i in [0..20) work()
 return if alloc_count() =? before 42 else 1}

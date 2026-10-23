@@ -38,24 +38,24 @@ main=():>void=> {
     let transformed=map_values(source handlers["square"])
     let selected=filter_values(transformed @even)
     let sum=fold_values<int64 int64>(selected 0 @add_int)
-    assert(sum =? 1140)
+    $runtime_assert(sum =? 1140)
     let running=counter(0)
     let saved=@running
     let cumulative=map_values([1 2 3 4] @running)
-    assert(cumulative =? [1 3 6 10])
-    assert(running(1) =? 1)
-    assert(saved(2) =? 2)
+    $runtime_assert(cumulative =? [1 3 6 10])
+    $runtime_assert(running(1) =? 1)
+    $runtime_assert(saved(2) =? 2)
     let bias=7
     let shifted=map_values(source (x:int64)=>x+bias)
     bias=100
-    assert(shifted[0] =? 7)
+    $runtime_assert(shifted[0] =? 7)
     let words=map_values<int64 string>([1 2 3] (x:int64):>string=>"v{x}")
-    assert(words =? ["v1" "v2" "v3"])
-    assert(filter_values([] @even).length =? 0)
-    assert(fold_values<int64 int64>([] 9 @add_int) =? 9)
+    $runtime_assert(words =? ["v1" "v2" "v3"])
+    $runtime_assert(filter_values([] @even).length =? 0)
+    $runtime_assert(fold_values<int64 int64>([] 9 @add_int) =? 9)
     let tablecopy=handlers
     handlers["square"]=@double
-    assert(tablecopy["square"](9) =? 81)
-    assert(handlers["square"](9) =? 18)
+    $runtime_assert(tablecopy["square"](9) =? 81)
+    $runtime_assert(handlers["square"](9) =? 18)
     printl("{sum} {cumulative[3]} {shifted[19]} {words.length}")
 }

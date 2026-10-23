@@ -50,18 +50,18 @@ main=():>void=> {
     let serial=leaf_summary(input)
     loop chunk in [1 7 64 511 4097]  {
         let threaded=reduce_tree(input chunk)
-        assert(threaded.sum =? serial.sum)
-        assert(threaded.hash =? serial.hash)
-        assert(threaded.count =? 4097)
+        $runtime_assert(threaded.sum =? serial.sum)
+        $runtime_assert(threaded.hash =? serial.hash)
+        $runtime_assert(threaded.count =? 4097)
     }
     let empty=reduce_tree([] 7)
-    assert(empty.count =? 0)
+    $runtime_assert(empty.count =? 0)
     let left=leaf_summary([1 2])
     let right=leaf_summary([3 4])
-    assert(merge_summary(left right).hash not=? merge_summary(right left).hash)
+    $runtime_assert(merge_summary(left right).hash not=? merge_summary(right left).hash)
     let snapshot=input
     let a=reduce_tree(input 64)
     input[0]=999
-    assert(reduce_tree(snapshot 64).hash =? a.hash)
+    $runtime_assert(reduce_tree(snapshot 64).hash =? a.hash)
     printl("{serial.count} {serial.sum} {serial.hash}")
 }

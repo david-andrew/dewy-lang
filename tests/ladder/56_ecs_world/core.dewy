@@ -69,7 +69,7 @@ main=():>void=> {
         if frame =? 20  {
             loop id in [0..4096)  {
                 if id%3 =? 0  {
-                    assert(despawn(@world id))
+                    $runtime_assert(despawn(@world id))
                 }
             }
         }
@@ -79,16 +79,16 @@ main=():>void=> {
             }
         }
     }
-    assert(snapshot.ids.length =? 4096)
-    assert(world.ids.length =? 3242)
-    assert(not despawn(@world 99999))
+    $runtime_assert(snapshot.ids.length =? 4096)
+    $runtime_assert(world.ids.length =? 3242)
+    $runtime_assert(not despawn(@world 99999))
     let w=world
     let n=w.ids.length
     $runtime_assert n <=? w.x.length and n <=? w.y.length
     loop i in [0..n)  {
-        assert(w.slot.get(w.ids[i]) =? i)
-        assert(w.x[i] >=? 0 and w.x[i] <=? 100)
-        assert(w.y[i] >=? 0 and w.y[i] <=? 78)
+        $runtime_assert(w.slot.get(w.ids[i]) =? i)
+        $runtime_assert(w.x[i] >=? 0 and w.x[i] <=? 100)
+        $runtime_assert(w.y[i] >=? 0 and w.y[i] <=? 78)
     }
     printl("{world.ids.length} {checksum(world)} {checksum(snapshot)}")
 }

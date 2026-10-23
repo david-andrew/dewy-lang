@@ -18,6 +18,6 @@ main=(args:array<string>)=>{
   spawn(g) scan(g values n//2 n (n//4)*17 found signaled)
  }
  let finish=clock()
- assert(found.load() =? n//4)
+ $runtime_assert(found.load() =? n//4)
  printl"{found.load()} {finish-start} {finish-signaled.load()}"
 }

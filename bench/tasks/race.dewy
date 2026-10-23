@@ -8,7 +8,7 @@ main=(args:array<string>)=>{
  let start=clock()
  loop i in [0..n) {
   let result=race(@read_text(left) @read_text(right))
-  assert(result is? string and result =? "found")
+  $runtime_assert(result is? string and result =? "found")
  }
  let elapsed=clock()-start
  remove_file(left) remove_file(right)

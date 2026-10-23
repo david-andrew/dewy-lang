@@ -13,12 +13,12 @@ main=()=>{
     {
         let first=Owner[7]
         let second=first.copy()
-        assert(first.value=?second.value)
+        $runtime_assert(first.value=?second.value)
         let third=first
-        assert(third.value=?7)
+        $runtime_assert(third.value=?7)
     }
-    assert(copies=?1)
-    assert(moves=?1)
-    assert(drops=?2)
+    $runtime_assert(copies=?1)
+    $runtime_assert(moves=?1)
+    $runtime_assert(drops=?2)
     printl"ok"
 }

@@ -11,12 +11,12 @@ main=()=>{
         loop i in [1..8) {m.remove(i);}
         let total:int64=0
         loop [key value] in m {total+=value.value}
-        assert(total=?59 and drops=?8)
+        $runtime_assert(total=?59 and drops=?8)
         let popped=m.pop(0)
-        assert(popped.value=?42 and drops=?8)
+        $runtime_assert(popped.value=?42 and drops=?8)
         m.clear()
-        assert(drops=?10)
+        $runtime_assert(drops=?10)
     }
-    assert(drops=?11)
+    $runtime_assert(drops=?11)
     printl"ok"
 }

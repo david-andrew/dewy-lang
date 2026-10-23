@@ -26,7 +26,7 @@ main=():>void=>{
         serial=advance(serial 0.01 false)
         threaded=advance(threaded 0.01 true)
     }
-    assert(serial =? threaded)
-    assert(original =? make(128))
+    $runtime_assert(serial =? threaded)
+    $runtime_assert(original =? make(128))
     printl"Simulated {threaded.length} particles; serial and parallel results agree."
 }

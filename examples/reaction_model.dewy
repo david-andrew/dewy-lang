@@ -3,7 +3,7 @@
 Field:type=[a:NDArray<float32> b:NDArray<float32> steps:int64]
 
 fresh=(width:int64 height:int64):>Field=>{
-    assert(width >=? 3 and height >=? 3)
+    $runtime_assert(width >=? 3 and height >=? 3)
     return Field[reshape(fill(1.0 as float32 width*height) height width)
                  zeros<float32>(height width) 0]
 }

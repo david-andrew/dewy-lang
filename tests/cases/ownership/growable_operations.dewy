@@ -16,21 +16,21 @@ main=()=>{
         let a:array<Owner>=[]
         loop i in [0..20) {a.push(Owner[i])}
         a.reserve(100)
-        assert(drops=?0 and copies=?0 and moves=?0)
+        $runtime_assert(drops=?0 and copies=?0 and moves=?0)
         let b=a.copy()
-        assert(copies=?20)
+        $runtime_assert(copies=?20)
         let x=a.pop()
         let y=a.pop(0)
         a[0]=Owner[42]
-        assert(drops=?1)
+        $runtime_assert(drops=?1)
         a.clear()
-        assert(drops=?19)
+        $runtime_assert(drops=?19)
         let c=identity(b)
         let sum:int64=0
         loop value in c {sum+=value.value}
-        assert(sum=?190 and x.value=?19 and y.value=?0)
-        assert(copies=?20 and moves=?0)
+        $runtime_assert(sum=?190 and x.value=?19 and y.value=?0)
+        $runtime_assert(copies=?20 and moves=?0)
     }
-    assert(drops=?41)
+    $runtime_assert(drops=?41)
     printl"ok"
 }

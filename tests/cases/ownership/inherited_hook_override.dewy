@@ -15,8 +15,8 @@ Child=type of Parent & [extra:int64
     duplicate_child=():>Child=>{child_copies+=1 return Child[value extra]}
 ]
 main=()=>{
-    {let first=Child[3 4] let second=first.copy() assert(first.extra=?second.extra)}
-    assert(parent_drops=?0 and child_drops=?2)
-    assert(parent_copies=?0 and child_copies=?1)
+    {let first=Child[3 4] let second=first.copy() $runtime_assert(first.extra=?second.extra)}
+    $runtime_assert(parent_drops=?0 and child_drops=?2)
+    $runtime_assert(parent_copies=?0 and child_copies=?1)
     printl"ok"
 }

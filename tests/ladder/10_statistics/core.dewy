@@ -23,10 +23,10 @@ median=(xs:array<float64>):>float64=>{
 main=():>void=>{
     let input:array<float64>=[2.0 4.0 4.0 4.0 5.0 5.0 7.0 9.0]
     let result=statistics(input)
-    assert(result.count =? 8)
-    assert(abs(result.mean-5.0) <? 1e-10)
-    assert(abs(result.variance-32.0/7.0) <? 1e-10)
-    assert(median(input) =? 4.5)
-    assert(statistics([2.0]).variance =? 0.0)
+    $runtime_assert(result.count =? 8)
+    $runtime_assert(abs(result.mean-5.0) <? 1e-10)
+    $runtime_assert(abs(result.variance-32.0/7.0) <? 1e-10)
+    $runtime_assert(median(input) =? 4.5)
+    $runtime_assert(statistics([2.0]).variance =? 0.0)
     printl("{result.count} {result.mean} {format(result.variance ".6f")} {median(input)}")
 }

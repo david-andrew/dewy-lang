@@ -71,11 +71,11 @@ main=():>void=> {
     if result is? CsvError  {
         exit(1)
     }
-    assert(result.length =? 4)
-    assert(result[1].length >? 1 and result[1][1] =? "a,b")
-    assert(result[2].length >? 0 and result[2][0] =? "B\"ob")
-    assert(result[2].length >? 1 and result[2][1] =? "two\nlines")
-    assert(result[3].length >? 0 and result[3][0] =? "")
+    $runtime_assert(result.length =? 4)
+    $runtime_assert(result[1].length >? 1 and result[1][1] =? "a,b")
+    $runtime_assert(result[2].length >? 0 and result[2][0] =? "B\"ob")
+    $runtime_assert(result[2].length >? 1 and result[2][1] =? "two\nlines")
+    $runtime_assert(result[3].length >? 0 and result[3][0] =? "")
     let amount=0
     let cells=0
     loop i in [1..result.length)  {
@@ -85,17 +85,17 @@ main=():>void=> {
         cells+=row.length
     }
     loop bad in ["\"open" "a\"b,c" "\"ok\"bad" "a\rb"]  {
-        assert(parse_csv(bad) is? CsvError)
+        $runtime_assert(parse_csv(bad) is? CsvError)
     }
     let empty=parse_csv("")
     if empty is? CsvError  {
         exit(2)
     }
-    assert(empty.length =? 0)
+    $runtime_assert(empty.length =? 0)
     let trailing=parse_csv("a,,")
     if trailing is? CsvError  {
         exit(3)
     }
-    assert(trailing.length >? 0 and trailing[0].length =? 3)
+    $runtime_assert(trailing.length >? 0 and trailing[0].length =? 3)
     printl("{result.length} {cells} {amount}")
 }

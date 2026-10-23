@@ -25,7 +25,7 @@ main=():>void=>{
         let predicted=if probability >=? 0.5 1.0 else 0.0
         if predicted =? ys[i] {correct+=1}
     }
-    assert(correct =? 6)
-    assert(abs(model[1]) <? 1e-10)
+    $runtime_assert(correct =? 6)
+    $runtime_assert(abs(model[1]) <? 1e-10)
     printl("{correct} {format(model[0] ".4f")}")
 }

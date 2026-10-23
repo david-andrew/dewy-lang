@@ -35,7 +35,7 @@ pop_back=<T>(@q:Deque<T>):>T|none=> {
 }
 len=<T>(q:Deque<T>):>int64=>q.count
 __index__=<T>(q:Deque<T> i:int64):>T=> {
-    assert(q.storage.length >? 0)
+    $runtime_assert(q.storage.length >? 0)
     return q.storage[(q.head+i)%q.storage.length]
 }
 main=():>void=> {
@@ -44,10 +44,10 @@ main=():>void=> {
     let count=0
     loop round in [0..100)  {
         loop i in [0..8)  {
-            assert(push_back(@q round*10+i))
+            $runtime_assert(push_back(@q round*10+i))
         }
         loop i in [0..4)  {
-            assert(push_front(@q -i))
+            $runtime_assert(push_front(@q -i))
         }
         let snapshot=q
         loop value in q  {
@@ -55,24 +55,24 @@ main=():>void=> {
             count+=1
         }
         loop i in [0..6)  {
-            assert(pop_front(@q) isnt? none)
+            $runtime_assert(pop_front(@q) isnt? none)
         }
         loop i in [0..6)  {
-            assert(pop_back(@q) isnt? none)
+            $runtime_assert(pop_back(@q) isnt? none)
         }
-        assert(q.count =? 0)
-        assert(len(snapshot) =? 12)
+        $runtime_assert(q.count =? 0)
+        $runtime_assert(len(snapshot) =? 12)
     }
     let words=make_deque(3 "")
-    assert(push_back(@words "alpha"))
-    assert(push_front(@words "beta"))
+    $runtime_assert(push_back(@words "alpha"))
+    $runtime_assert(push_front(@words "beta"))
     let collected=[loop word in words word]
-    assert(collected =? ["beta" "alpha"])
-    assert(pop_back(@words) =? "alpha")
-    assert(pop_front(@words) =? "beta")
-    assert(pop_front(@words) is? none)
+    $runtime_assert(collected =? ["beta" "alpha"])
+    $runtime_assert(pop_back(@words) =? "alpha")
+    $runtime_assert(pop_front(@words) =? "beta")
+    $runtime_assert(pop_front(@words) is? none)
     let zero=make_deque(0 0)
-    assert(not push_back(@zero 1))
-    assert(pop_back(@zero) is? none)
+    $runtime_assert(not push_back(@zero 1))
+    $runtime_assert(pop_back(@zero) is? none)
     printl("{count} {total} {collected.length}")
 }

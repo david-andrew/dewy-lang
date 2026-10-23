@@ -15,24 +15,24 @@ escape=(a:array<array<int64>>):>array<int64>=>{let row=a[0] return row}
 main=():>void=>{
  let a:array<array<int64>>=[[1 2] [3 4]]
  let sliced=a[1..]
- assert(sliced =? [[3 4]])
+ $runtime_assert(sliced =? [[3 4]])
  let row=a[0]
  let out=row
  out[0]=50
- assert(row =? [1 2] and a[0] =? [1 2] and out =? [50 2])
+ $runtime_assert(row =? [1 2] and a[0] =? [1 2] and out =? [50 2])
  let saved=escape(a)
  a[0][0]=70
- assert(saved =? [1 2])
+ $runtime_assert(saved =? [1 2])
  let old=a[0]
  a=[[11 12]]
- assert(old =? [70 2])
+ $runtime_assert(old =? [70 2])
  let before=a[0]
- assert(first(before replace(@a)) =? 11)
- assert(a =? [[90 91]])
+ $runtime_assert(first(before replace(@a)) =? 11)
+ $runtime_assert(a =? [[90 91]])
  let results=[parallel i in [0..257) {let r=a[0] read(r)+i}]
- loop i in [0..257) {assert(results[i] =? 181+i)}
+ loop i in [0..257) {$runtime_assert(results[i] =? 181+i)}
  let capture=(i:int64)=>read(a[0])+i
- assert(capture(2) =? 183)
+ $runtime_assert(capture(2) =? 183)
 }
 '''
 

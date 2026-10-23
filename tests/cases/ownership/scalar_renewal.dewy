@@ -13,15 +13,15 @@ main=()=>{
     let owner=Owner[1]
     let moved=owner
     owner=Owner[2]
-    assert(consume(moved)=?1)
-    assert(drops=?1)
+    $runtime_assert(consume(moved)=?1)
+    $runtime_assert(drops=?1)
     owner=owner
-    assert(drops=?1)
-    assert(consume(owner)=?2)
-    assert(drops=?2)
+    $runtime_assert(drops=?1)
+    $runtime_assert(consume(owner)=?2)
+    $runtime_assert(drops=?2)
     conditional(true)
-    assert(drops=?4)
+    $runtime_assert(drops=?4)
     conditional(false)
-    assert(drops=?6)
+    $runtime_assert(drops=?6)
     printl"ok"
 }

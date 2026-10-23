@@ -60,19 +60,19 @@ main=():>void=> {
     let energy:float64=0.0
     let spectral:float64=0.0
     loop i in [0..64)  {
-        assert(abs(restored[i].re-input[i].re) <? 1e-9)
-        assert(abs(restored[i].im) <? 1e-9)
+        $runtime_assert(abs(restored[i].re-input[i].re) <? 1e-9)
+        $runtime_assert(abs(restored[i].im) <? 1e-9)
         energy+=input[i].re^2
         spectral+=spectrum[i].re^2+spectrum[i].im^2
     }
-    assert(abs(energy-spectral/64.0) <? 1e-7)
+    $runtime_assert(abs(energy-spectral/64.0) <? 1e-7)
     let impulse=[loop i in [0..8) Complex[0.0 0.0]]
     impulse[0].re=1.0
     let flat=fft(impulse false)
     loop item in flat  {
-        assert(abs(item.re-1.0) <? 1e-12)
+        $runtime_assert(abs(item.re-1.0) <? 1e-12)
     }
     let singleton=fft([Complex[3.0 4.0]] false)
-    assert(singleton[0].im =? 4.0)
+    $runtime_assert(singleton[0].im =? 4.0)
     printl("{format(spectrum[0].re ".3f")} {format(energy ".3f")} {format(spectrum[1].re ".3f")}")
 }

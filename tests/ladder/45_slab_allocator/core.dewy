@@ -41,20 +41,20 @@ main=():>void=> {
         }
         handles.push(h)
     }
-    assert(allocate(@pool 999) is? none)
+    $runtime_assert(allocate(@pool 999) is? none)
     let saved=pool
     let stale=handles[3]
-    assert(release(@pool stale))
-    assert(not release(@pool stale))
+    $runtime_assert(release(@pool stale))
+    $runtime_assert(not release(@pool stale))
     let fresh=allocate(@pool 777)
     if fresh is? none  {
         exit(2)
     }
-    assert(fresh.slot =? stale.slot)
-    assert(fresh.generation =? stale.generation+1)
-    assert(read(pool stale) is? none)
-    assert(read(saved stale) =? 30)
-    assert(read(pool fresh) =? 777)
+    $runtime_assert(fresh.slot =? stale.slot)
+    $runtime_assert(fresh.generation =? stale.generation+1)
+    $runtime_assert(read(pool stale) is? none)
+    $runtime_assert(read(saved stale) =? 30)
+    $runtime_assert(read(pool fresh) =? 777)
     let total=0
     loop h in handles  {
         let value=read(pool h)
@@ -62,7 +62,7 @@ main=():>void=> {
             total+=value
         }
     }
-    assert(not release(@pool Handle[-1 0]))
-    assert(not release(@pool Handle[16 0]))
+    $runtime_assert(not release(@pool Handle[-1 0]))
+    $runtime_assert(not release(@pool Handle[16 0]))
     printl("{total} {read(pool fresh)} {fresh.generation}")
 }

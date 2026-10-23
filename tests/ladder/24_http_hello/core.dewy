@@ -6,7 +6,7 @@ respond=(request:string):>string=>{
 }
 request=(path:string):>string | net.NetError | Canceled=>{
     let server=net.tcp_listen(0) or_throw
-    assert(server.port >? 0)
+    $runtime_assert(server.port >? 0)
     let client=net.tcp_connect("127.0.0.1" server.port) or_throw
     let peer=net.tcp_accept(server) or_throw
     net.tcp_send(client "GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n") or_throw
@@ -27,10 +27,10 @@ request=(path:string):>string | net.NetError | Canceled=>{
 main=():>void | net.NetError | Canceled=>{
     let found=request("/hello") or_throw
     let missing=request("/missing") or_throw
-    assert(found.startswith("HTTP/1.1 200 OK"))
-    assert("Content-Length: 6" in? found)
-    assert(found.endswith("hello\n"))
-    assert(missing.startswith("HTTP/1.1 404 Not Found"))
-    assert(missing.endswith("missing\n"))
+    $runtime_assert(found.startswith("HTTP/1.1 200 OK"))
+    $runtime_assert("Content-Length: 6" in? found)
+    $runtime_assert(found.endswith("hello\n"))
+    $runtime_assert(missing.startswith("HTTP/1.1 404 Not Found"))
+    $runtime_assert(missing.endswith("missing\n"))
     printl("200 hello 404 missing")
 }

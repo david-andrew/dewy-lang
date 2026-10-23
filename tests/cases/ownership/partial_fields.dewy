@@ -6,7 +6,7 @@ Leaf=type of [value:int64
 ]
 Pair:type=[left:Leaf right:Leaf]
 Nest:type=[pair:Pair tail:Leaf]
-consume=(x:Leaf)=>{assert(x.value>?0)}
+consume=(x:Leaf)=>{$runtime_assert(x.value>?0)}
 branch=(take:bool)=>{
     let p=Pair[Leaf[1] Leaf[10]]
     if take {consume(p.left)} else {consume(p.right)}
@@ -18,11 +18,11 @@ early=(take:bool)=>{
 }
 main=()=>{
     {let p=Pair[Leaf[1] Leaf[10]] consume(p.left) consume(p.right)}
-    assert(drops=?11)
+    $runtime_assert(drops=?11)
     branch(true) branch(false) early(true) early(false)
-    assert(drops=?55)
+    $runtime_assert(drops=?55)
     {let p=Nest[Pair[Leaf[1] Leaf[10]] Leaf[100]]
      consume(p.pair.left) consume(p.tail) consume(p.pair.right)}
-    assert(drops=?166)
+    $runtime_assert(drops=?166)
     printl"ok"
 }

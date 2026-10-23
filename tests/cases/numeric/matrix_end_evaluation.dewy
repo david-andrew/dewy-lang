@@ -5,6 +5,6 @@ source=()=>{calls+=1 return m}
 change=()=>{m=zeros<int>(4 5) return 0}
 run=()=>{
 let value=source()[change() end]
-assert(value =? 3 and calls =? 1 and m.shape =? [4 5])
+$runtime_assert(value =? 3 and calls =? 1 and m.shape =? [4 5])
 return 42}
 main=()=>exit(run())

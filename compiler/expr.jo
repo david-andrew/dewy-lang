@@ -3944,6 +3944,9 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             add_flag(a, NF_CHECKED)
         if int_policy(ntype(a)) != 0: return call_by_name(n, intern("__dewy_policy_abs"), -1, args, expected, false)
     ii = intrinsic_of(name)
+    # (`assert(cond)` is the implementation language's; Dewy's assertions are directives)
+    hidden_assert = ii >= 0 and intrinsics[ii].id == .assert and dewy_at(nodes[n].pos)
+    if hidden_assert: ii = -1
     if ii >= 0 and intrinsics[ii].arr and args.len() > 0:
         a0 = args[0]
         if not has_flag(a0, NF_CHECKED):
@@ -4026,7 +4029,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             else if sk == .fns and args.len() == 3 and name == relocate_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return relocate_call(n, args)
             else if sk == .fns and args.len() == 2 and name == release_name and (prelude.get(name) ?? 0) == s and pos_in_lib(nodes[n].pos): return release_call(n, args, expected)
             else if sk == .const_ or sk == .module: fatal(nodes[n].pos, "'{name_of(name)}' is not a function")
-            else if sk == .builtin:
+            else if sk == .builtin and not hidden_assert:
                 collect_fns(name, decls)
                 if decls.len() == 0:
                     if ide_on: ide_builtin_ref(n, name)
@@ -4118,8 +4121,10 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                 loop m in union_members(at): ms.push(dt(m))
                 un = name_of(name)
                 fatal(nodes[n].pos, "'{un}' is a union ({join(ms, " | ")}): a {ms[0]} is a {un} as it is, with nothing around it: {jd(nodes[n].pos, "`m: {un} = {ms[0]}(...)`", "`let m:{un} = {ms[0]}[...]`")}")
+        if hidden_assert: fatal(nodes[n].pos, "unknown function 'assert' (assertions are directives: `$assert condition` must be proven while compiling, `$runtime_assert condition` checks while running, and `$expect condition` states what a `$test` checks)")
         all = visible_names()
-        loop it in intrinsics: all.push(intern(it.name))
+        loop it in intrinsics:
+            if it.id != .assert or not dewy_at(nodes[n].pos): all.push(intern(it.name))
         # (physics3d.world(): the names of that module, World among them)
         if mod_scope >= 0 and not ufcs and not modules[mod_scope].is_prelude:
             all = []

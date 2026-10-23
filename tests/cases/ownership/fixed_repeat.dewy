@@ -9,10 +9,10 @@ Owner=type of [value:int64
 main=()=>{
     {
         let xs:array<Owner length=3>=fill(Owner[0] 3)
-        assert(xs[0].value=?0 and xs[1].value=?1 and xs[2].value=?1)
+        $runtime_assert(xs[0].value=?0 and xs[1].value=?1 and xs[2].value=?1)
         let single:array<Owner length=1>=fill(Owner[0] 1)
-        assert(drops=?0)
+        $runtime_assert(drops=?0)
     }
-    assert(copies=?2 and drops=?4)
+    $runtime_assert(copies=?2 and drops=?4)
     printl"ok"
 }

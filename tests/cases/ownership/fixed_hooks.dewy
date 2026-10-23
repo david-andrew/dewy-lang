@@ -16,11 +16,11 @@ main=()=>{
     {
         let a:Pair=[Owner[0] Owner[1]]
         let b=a.copy()
-        assert(a[0].value=?0 and b[0].value=?1)
+        $runtime_assert(a[0].value=?0 and b[0].value=?1)
         let c=identity(a)
-        assert(c[0].value>=?10)
+        $runtime_assert(c[0].value>=?10)
     }
-    assert(copies=?2 and drops=?4)
-    assert(moves>=?2)
+    $runtime_assert(copies=?2 and drops=?4)
+    $runtime_assert(moves>=?2)
     printl"ok"
 }

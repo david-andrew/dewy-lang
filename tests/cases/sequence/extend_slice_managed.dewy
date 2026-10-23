@@ -4,9 +4,9 @@ work=():>void=>{
 let a=[Item["first" [20]] Item["second" [22]] Item["last" [99]]]
 let saved=a let out:array<Item>=[] out.extend(a[..2))
 a.extend(a[1..]) out[0].values.push(42) a[3].name="new"
-assert(saved[0].values =? [20] and saved[1].name =? "second")
-assert(out[0].values =? [20 42] and out[1].values =? [22])
-assert(a[1].name =? "second" and a[3].values =? [22] and a.length =? 5)
+$runtime_assert(saved[0].values =? [20] and saved[1].name =? "second")
+$runtime_assert(out[0].values =? [20 42] and out[1].values =? [22])
+$runtime_assert(a[1].name =? "second" and a[3].values =? [22] and a.length =? 5)
 }
 run=()=>{work() let before=alloc_count() loop i in [0..20) work()
 return if alloc_count() =? before 42 else 1}

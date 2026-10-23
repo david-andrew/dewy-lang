@@ -57,14 +57,14 @@ main=():>void=> {
             valid+=1
         }
     }
-    assert(valid =? 6)
-    assert(invalid =? 3)
+    $runtime_assert(valid =? 6)
+    $runtime_assert(invalid =? 3)
     let saved=env
     env["x"]="bool"
     let broken=infer(nodes 2 env)
-    assert(broken is? TypeError)
-    assert(infer(nodes 2 saved) is? string)
+    $runtime_assert(broken is? TypeError)
+    $runtime_assert(infer(nodes 2 saved) is? string)
     let bad=infer(nodes 999 saved)
-    assert(bad is? TypeError)
+    $runtime_assert(bad is? TypeError)
     printl("{valid} {invalid}")
 }

@@ -5,7 +5,7 @@ work=()=>{
 let xs=[Tag["a"] Tag["b"] Tag["c"]] let saved=xs
 xs[0,2..] .+= "!"
 xs[[false true false]] .+= ["?"]
-assert(xs =? [Tag["a!"] Tag["b?"] Tag["c!"]] and saved =? [Tag["a"] Tag["b"] Tag["c"]])
+$runtime_assert(xs =? [Tag["a!"] Tag["b?"] Tag["c!"]] and saved =? [Tag["a"] Tag["b"] Tag["c"]])
 }
 run=()=>{work() let before=alloc_count() loop i in [0..20) work()
 return if alloc_count() =? before 42 else 1}

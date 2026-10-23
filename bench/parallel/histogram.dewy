@@ -6,7 +6,7 @@ main=(args:array<string>)=>{
  let start=clock()
  parallel x in values {if x >=? 0 and x <? bins.length {bins[x].add(1 'relaxed')}}
  let counts=[loop bin in bins bin.load()]
- assert(sum(counts) =? n)
+ $runtime_assert(sum(counts) =? n)
  let checksum:int64=0
  loop i in [0..counts.length) {checksum+=counts[i]*(i+1)}
  printl"{checksum} {clock()-start}"

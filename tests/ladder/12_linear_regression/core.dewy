@@ -21,11 +21,11 @@ main=():>void=>{
     let xs:array<float64>=[-2.0 -1.0 0.0 1.0 2.0]
     let ys:array<float64>=[-3.0 -1.0 1.0 3.0 5.0]
     let weights=train(xs ys 1000)
-    assert(abs(weights[0]-2.0) <? 1e-8)
-    assert(abs(weights[1]-1.0) <? 1e-8)
+    $runtime_assert(abs(weights[0]-2.0) <? 1e-8)
+    $runtime_assert(abs(weights[1]-1.0) <? 1e-8)
     loop i in [0..xs.length) {
-        assert(abs(predict(xs[i] weights[0] weights[1])-ys[i]) <? 1e-8)
+        $runtime_assert(abs(predict(xs[i] weights[0] weights[1])-ys[i]) <? 1e-8)
     }
-    assert(xs[0] =? -2.0)
+    $runtime_assert(xs[0] =? -2.0)
     printl("{format(weights[0] ".4f")} {format(weights[1] ".4f")}")
 }

@@ -20,12 +20,12 @@ main=():>void=>{
         loop p in last {next.push(advance(p last))}
         serial=next
     }
-    assert(threaded =? serial)
-    assert(initial[0].x =? 0.0)
+    $runtime_assert(threaded =? serial)
+    $runtime_assert(initial[0].x =? 0.0)
     let center:float64=0.0
     loop p in threaded {center+=p.x}
-    assert(abs(center-496.0) <? 1e-9)
-    assert(threaded.length >? 0 and threaded[0].x >? 0.0)
-    assert(threaded.length >? 0 and threaded[end].x <? 31.0)
+    $runtime_assert(abs(center-496.0) <? 1e-9)
+    $runtime_assert(threaded.length >? 0 and threaded[0].x >? 0.0)
+    $runtime_assert(threaded.length >? 0 and threaded[end].x <? 31.0)
     printl("{threaded.length} {format(center ".6f")} {threaded =? serial}")
 }

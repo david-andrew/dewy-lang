@@ -17,8 +17,8 @@ crc_update=(state:uint32 bytes:array<uint8>):>uint32=> {
 crc32=(bytes:array<uint8>):>uint32=>crc_update(4294967295 bytes) xor 4294967295
 main=():>void=> {
     let known:array<uint8>=[49 50 51 52 53 54 55 56 57]
-    assert(crc32(known) =? 3421780262)
-    assert(crc32([]) =? 0)
+    $runtime_assert(crc32(known) =? 3421780262)
+    $runtime_assert(crc32([]) =? 0)
     let bytes:array<uint8>=[]
     loop i in [0..1024)  {
         bytes.push(((i*37+11)%256) as uint8)
@@ -36,25 +36,25 @@ main=():>void=> {
         }
         let state=crc_update(4294967295 first)
         state=crc_update(state second)
-        assert((state xor 4294967295) =? complete)
+        $runtime_assert((state xor 4294967295) =? complete)
         combinations+=1
     }
     let changed=bytes
     changed[511]=changed[511] xor 128
-    assert(crc32(changed) not=? complete)
+    $runtime_assert(crc32(changed) not=? complete)
     let zeros:array<uint8>=[0 0 0 0]
     let ones:array<uint8>=[255 255 255 255]
-    assert(crc32(zeros) not=? crc32(ones))
+    $runtime_assert(crc32(zeros) not=? crc32(ones))
     let stream:uint32=4294967295
     loop byte in bytes  {
         stream=crc_update(stream [byte])
     }
-    assert((stream xor 4294967295) =? complete)
+    $runtime_assert((stream xor 4294967295) =? complete)
     let prefix=crc_update(4294967295 [0 1 2])
     let copy=prefix
     prefix=crc_update(prefix [3])
-    assert(copy not=? prefix)
+    $runtime_assert(copy not=? prefix)
     let single=crc32([255])
-    assert(single =? 4278190080)
+    $runtime_assert(single =? 4278190080)
     printl("{complete} {combinations} {single}")
 }

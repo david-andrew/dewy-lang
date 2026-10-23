@@ -104,10 +104,10 @@ render=(source:string):>string=> {
 main=():>void=> {
     let source="# Dewy & tools\n\nA **bold** line\nwith `<tag>`.\n\n- one\n- **two**\n\n<script>"
     let output=render(source)
-    assert(not output.contains("<script>"))
-    assert(render("") =? "")
-    assert(render("- a\n- b") =? "<ul><li>a</li><li>b</li></ul>")
-    assert(inline("`**x**`") =? "<code>**x**</code>")
-    assert(inline("**x") =? "<strong>x</strong>")
+    $runtime_assert(not output.contains("<script>"))
+    $runtime_assert(render("") =? "")
+    $runtime_assert(render("- a\n- b") =? "<ul><li>a</li><li>b</li></ul>")
+    $runtime_assert(inline("`**x**`") =? "<code>**x**</code>")
+    $runtime_assert(inline("**x") =? "<strong>x</strong>")
     printl(output)
 }
