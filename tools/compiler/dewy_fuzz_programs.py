@@ -917,7 +917,10 @@ class Program(Node):
     body: tuple
 
     def render(self, typed=False):
-        parts = ['Item:type=[id:int64 tags:array<int64> label:string]', 'Bad:type=type of error & [code:int64]']
+        # (generated indexes, divisions and narrowings are not written to be
+        # proven: a program opts into run-time checks, whose failures the
+        # oracle predicts as exit 101)
+        parts = ['$runtime_checks', 'Item:type=[id:int64 tags:array<int64> label:string]', 'Bad:type=type of error & [code:int64]']
         parts += [render(f) for f in self.functions]
         parts.append('main=():>void=>{\n' + block(self.body) + '\n}')
         return '\n'.join(parts) + '\n'
