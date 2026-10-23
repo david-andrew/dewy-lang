@@ -1,0 +1,25 @@
+# A string passed beside a place that can release it stays alive through the call; one
+# that place cannot reach is passed as it is.
+Table:type=[names:array<string> count:int64]
+
+replace=(@t:Table s:string):>string=>{
+    t.names=[]
+    loop k in [0..50) {t.names.push("filler {k} {k * k}")}
+    t.count+=1
+    "{s}!"
+}
+
+table:Table=[names=[] count=0]
+
+through_global=(s:string):>string=>replace(@table s)
+
+main=():>void=>{
+    let t:Table=[names=["first {1 + 1}" "second"] count=0]
+    printl(replace(@t t.names[0]))
+    table.names.push("global {3 * 3}")
+    printl(through_global(table.names[0]))
+    printl(replace(@table table.names[0]))
+    let own="local {4 + 4}"
+    printl(replace(@t own))
+    printl(t.count + table.count)
+}

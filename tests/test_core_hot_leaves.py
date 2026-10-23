@@ -73,3 +73,31 @@ def test_counters_bounded_by_a_length_stay_words(compiler, tmp_path, flags):
     code = disassembly(binary, 'count_newlines')
     if code is not None:
         assert '__mi_' not in code, code
+
+
+BESIDE = '''
+Table:type=[names:array<string> total:int64]
+add=(@t:Table s:string k:int64):>int64=>{
+    if k =? 7 {t.names.push(s)}
+    t.total+=(s as array<uint8>).length
+    t.total
+}
+table:Table=[names=[] total=0]
+wrap=(s:string k:int64):>int64=>add(@table s k)
+main=():>void=>{
+    let x:int64=0
+    loop i in [0..1000) {x+=wrap("hello" i)}
+    printl(x)
+    printl(table.names.length)
+}
+'''
+
+
+@pytest.mark.core_quick
+@pytest.mark.parametrize('flags', [[], ['--release']])
+def test_string_beside_a_place_it_cannot_reach_is_not_retained(compiler, tmp_path, flags):
+    binary = build(compiler, tmp_path, BESIDE, flags)
+    assert run(binary).split() == ['2502500', '1']
+    code = disassembly(binary, 'wrap')
+    if code is not None and '<wrap>:' in code:
+        assert '__rc_inc' not in code and not re.search(r'\binc\w*\s', code), code

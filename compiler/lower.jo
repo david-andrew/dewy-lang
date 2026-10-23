@@ -1352,6 +1352,7 @@ call_args = (args: int[], ptypes: int[], mutmask: int, out: mut int[], callee: i
         if not val.owned and (not dewy_entry or i + 1 < args.len()) and type_has_fn(pt) and not callback_arg_borrow(value_node, args, i, callee, parameter) and files[pos_file(nodes[a].pos)].is_dewy: val = own_at(a, val, pt)
         mut_snapshot = any_mut
         if copies_on and (copy_strict(a) or ownership_type(pt)): mut_snapshot = any_mut and shares_mut_root(a, args, mutmask, (if slots.len() == 0: callee else: -1))
+        else if any_mut: mut_snapshot = mut_may_reach(a, args, mutmask)
         snapshot = false
         if not val.owned and is_managed(pt) and (mut_snapshot or borrow_may_change(a, args, i, callee)):
             val = own_at(a, val, pt)
@@ -1567,6 +1568,31 @@ borrow_may_change = (a: int, args: int[], i: int, callee: int) -> bool:
     loop j in [i + 1..args.len()):
         if may_write_root(args[j], n): return true
     false
+
+# Could a `mut` argument of the call reach the storage argument a is read from (borrowed, without
+# a reference of its own), and release it? A plain local, or a read-only parameter (its caller
+# keeps the value), is reached only through its own variable (shares_mut_root); a global or a
+# `mut` parameter also through a `mut` parameter or an alias, but not through another global or
+# plain local. O(arguments).
+mut_may_reach = (a: int, args: int[], mutmask: int) -> bool:
+    ra = place_var(a)
+    if ra == 0 or shares_mut_root(a, args, mutmask): return true
+    if nodes[ra].aux == i32(int(SK.local)):
+        if mut_plain_root(ra): return false
+    else if nodes[ra].aux != i32(int(SK.global)): return true
+    loop j in 0.. and b in args:
+        if mutmask & (1 << j) == 0: continue
+        rb = place_var(b)
+        if rb == 0: return true
+        if nodes[rb].aux == i32(int(SK.global)) and nodes[ra].aux == i32(int(SK.global)): continue
+        if nodes[rb].aux != i32(int(SK.local)) or not mut_plain_root(rb): return true
+    false
+
+# a local whose storage no other variable's place reaches (no alias, view, capture or address)
+mut_plain_root = (r: int) -> bool:
+    l = int(nodes[r].sym)
+    fl = int(locals[l].flags)
+    fl & (LF_MUTPARAM | LF_SHARED | LF_BYREF | LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ELEMALIAS | LF_SOAELEM | LF_ELEMENTVIEW | LF_OWNERBORROW) == 0 and not is_shared(l) and not held_views.contains(l)
 
 # A `mut` argument that is an element of an array or map (xs[i], xs[i].f) is written through
 # its address in the array's memory, which must not move or be shared while the call runs: the
