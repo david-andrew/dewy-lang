@@ -27,6 +27,17 @@ gl_stage = ""            # "vertex" or "fragment": the stage being translated
 
 gl_err = (pos: int, msg: str): fatal(pos, "in shader code: {msg}")
 
+# A type as shaders hold it (GLSL, Metal and SPIR-V alike): a physical quantity's unit is checked
+# at compilation, so on the GPU it is its plain number, in canonical units (an angle in turns).
+sl_type = (t0: int) -> int:
+    t = prune(t0)
+    if types[t].kind == .quantity: return prune(int(types[t].elem))
+    t
+
+# Dewy's sin, cos and tan of an angle in turns x: the GPU's, of radians. (fract first, which is
+# exact, so the radians stay small.)
+sl_turns_fns: {str: str} = {"__sin_turns": "sin", "__cos_turns": "cos", "__tan_turns": "tan"}
+
 # true the first time a helper is asked for (its declarations are then made by the caller)
 gl_first = (name: str) -> bool:
     if gl_done.get(name) != none: return false
@@ -51,7 +62,7 @@ gl_wrap = (x: str, t: int, pos: int) -> str:
     "{gl_elem_type(t, pos)}({x})"
 
 gl_type = (t0: int, pos: int) -> str:
-    t = prune(t0)
+    t = sl_type(t0)
     k = types[t].kind
     if k == .float_: return "float"
     if k == .int_: return "int"
@@ -302,7 +313,7 @@ gl_stmt_if = (e: int, depth: int):
     gl_out.push("{pre}}\n")
 
 gl_zero = (t0: int, pos: int) -> str:
-    t = prune(t0)
+    t = sl_type(t0)
     k = types[t].kind
     if k == .float_: return "0.0"
     if k == .int_: return "0"
@@ -345,7 +356,7 @@ gl_binop = (op: Tok) -> str:
 
 gl_expr = (e: int) -> str:
     k = nodes[e].kind
-    t = prune(ntype(e))
+    t = sl_type(ntype(e))
     if t == T_MATH_INT: gl_err(nodes[e].pos, "checked mathematical int is not yet supported in shaders; use an explicit fixed width")
     if k == .int_lit:
         if types[t].kind == .float_: return gl_float(f64(nodes[e].ival))
@@ -396,7 +407,7 @@ gl_expr = (e: int) -> str:
     if k == .conv:
         cv = nodes[e].aux as CV
         a = gl_expr(int(nodes[e].a))
-        from_ = prune(ntype(int(nodes[e].a)))
+        from_ = sl_type(ntype(int(nodes[e].a)))
         if cv == .int2float:
             if gl_unsigned(from_): return "float(uint({a}))"
             return "float({a})"
@@ -406,7 +417,7 @@ gl_expr = (e: int) -> str:
         if cv == .int_ and types[t].kind == .int_:
             if types[from_].kind == .bool_: return "int({a})"
             return gl_narrow(a, t)
-        if cv == .float_ or cv == .none_: return a
+        if cv == .float_ or cv == .none_ or cv == .quantity_const: return a
         gl_err(nodes[e].pos, "unsupported conversion in shader")
     if k == .if_:
         b = int(nodes[e].b)
@@ -453,6 +464,7 @@ gl_expr = (e: int) -> str:
         args: str[]
         loop i in [0..nkids(e)): args.push(gl_expr(kid(e, i)))
         if modules[int(nodes[decl].mod)].is_prelude:
+            if let g = sl_turns_fns.get(nm): return "{g}(6.283185307179586 * fract({args[0]}))"
             if let g = builtin_map.get(nm):
                 if nm == "norm" and nkids(e) != 1: gl_err(nodes[e].pos, "the p-norm is not available in shaders: write the length, v.norm")
                 if nm == "hypot" and gl_first("hypot"):
@@ -575,7 +587,7 @@ sl_abs_body = (t: int, un: str) -> str:
     "{un}({join(cs, ", ")})"
 
 gl_unsigned = (t0: int) -> bool:
-    t = prune(t0)
+    t = sl_type(t0)
     types[t].kind == .int_ and not types[t].sign
 
 gl_shift_decls = ():
@@ -586,7 +598,7 @@ gl_shift_decls = ():
 
 # x (32 bits) wrapped to the range of a narrower integer type t
 gl_narrow = (x: str, t0: int) -> str:
-    t = prune(t0)
+    t = sl_type(t0)
     if types[t].kind != .int_: return x
     bits = int(types[t].bits)
     if bits >= 32: return x
@@ -596,7 +608,7 @@ gl_narrow = (x: str, t0: int) -> str:
 # float x to integer type t, as on the CPU: toward zero, saturating at t's range (32 bits at
 # most), NaN to 0
 gl_float_to_int = (x: str, t0: int) -> str:
-    t = prune(t0)
+    t = sl_type(t0)
     bits = int(types[t].bits)
     if bits > 32: bits = 32
     sg = types[t].sign
@@ -636,7 +648,7 @@ gl_gbuf_reader = (t: int, pos: int) -> str:
 
 # a value of type t at byte o + c of buffer b (laid out as the CPU lays it out)
 gl_read = (t0: int, o: str, c: int, pos: int) -> str:
-    t = prune(t0)
+    t = sl_type(t0)
     k = types[t].kind
     a = "{o} + {c}"
     w = "gb_w(b.t_, ({a}) >> 2)"
@@ -687,14 +699,14 @@ gl_struct_fields = (t: int) -> (str, int)[]:
     out
 
 gl_attrib_comps = (t: int, pos: int) -> int:
-    tt = prune(t)
+    tt = sl_type(t)
     if types[tt].kind == .float_ and int(types[tt].bits) == 32: return 1
     if types[tt].kind == .vec and tt != T_MAT4 and not types[tt].sign: return int(types[tt].bits)
     gl_err(pos, "vertex attributes must be {tsd("f32", "float32")}, vec2, vec3 or vec4 (found {dt(tt)})")
     0
 
 uniform_kind = (t0: int, pos: int) -> str:
-    t = prune(t0)
+    t = sl_type(t0)
     k = types[t].kind
     if k == .float_:
         if int(types[t].bits) == 32: return "f"
@@ -718,7 +730,7 @@ gl_udesc = (t: int, prefix: str, base: int, pos: int) -> str:
     layout(t)
     loop i in 0.. and f in gl_struct_fields(t):
         fo = base + int(fields[int(structs[si].fields) + i].offset)
-        ft = prune(f.1)
+        ft = sl_type(f.1)
         if types[ft].kind == .fixed:
             # an array: its element kind, then the count and the bytes per element
             et = int(types[ft].elem)
@@ -800,7 +812,7 @@ glsl_build = (vsf: int, fsf: int) -> (str, str, str):
     loop i in 0.. and f in ofields:
         if i == 0: continue
         q = ""
-        if types[prune(f.1)].kind == .int_ or (types[prune(f.1)].kind == .vec and types[prune(f.1)].sign): q = "flat "
+        if types[sl_type(f.1)].kind == .int_ or (types[sl_type(f.1)].kind == .vec and types[sl_type(f.1)].sign): q = "flat "
         vs += "{q}out {gl_type(f.1, vpos)} v_{f.0};\n"
     vs += join(vdecls, "")
     vin: str[]
@@ -820,7 +832,7 @@ glsl_build = (vsf: int, fsf: int) -> (str, str, str):
     loop i in 0.. and f in ofields:
         if i == 0: continue
         q = ""
-        if types[prune(f.1)].kind == .int_ or (types[prune(f.1)].kind == .vec and types[prune(f.1)].sign): q = "flat "
+        if types[sl_type(f.1)].kind == .int_ or (types[sl_type(f.1)].kind == .vec and types[sl_type(f.1)].sign): q = "flat "
         fs += "{q}in {gl_type(f.1, vpos)} v_{f.0};\n"
     fs += "out vec4 frag_color;\n"
     fs += join(fdecls, "")

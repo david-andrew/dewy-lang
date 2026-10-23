@@ -50,7 +50,7 @@ ml_head = () -> str: join([
 
 # ---------------- types ----------------
 ml_type = (t0: int, pos: int) -> str:
-    t = prune(t0)
+    t = sl_type(t0)
     k = types[t].kind
     if k == .float_: return "float"
     if k == .int_: return "int"
@@ -135,7 +135,7 @@ ml_field_offset = (si: int, name: str) -> int:
 # a value of type t stored (as the CPU lays it out) at byte offset (c + d) of base
 ml_read = (t0: int, base: str, c: int, d: str, pos: int) -> str:
     ml_mem_decls()
-    t = prune(t0)
+    t = sl_type(t0)
     k = types[t].kind
     if k == .float_:
         if int(types[t].bits) == 64: return "sl_f64({ml_word(base, c, d)}, {ml_word(base, c + 4, d)})"
@@ -383,7 +383,7 @@ ml_stmt_if = (e: int, depth: int):
     ml_out.push("{pre}}\n")
 
 ml_zero = (t0: int, pos: int) -> str:
-    t = prune(t0)
+    t = sl_type(t0)
     k = types[t].kind
     if k == .float_: return "0.0f"
     if k == .int_: return "0"
@@ -397,15 +397,15 @@ ml_zero = (t0: int, pos: int) -> str:
 
 # ---------------- expressions ----------------
 ml_is_floaty = (t0: int) -> bool:
-    t = prune(t0)
+    t = sl_type(t0)
     types[t].kind == .float_ or (types[t].kind == .vec and not types[t].sign)
 
 ml_is_vector = (t0: int) -> bool:
-    t = prune(t0)
+    t = sl_type(t0)
     types[t].kind == .vec and t != T_MAT4
 
 ml_ncomp = (t0: int) -> int:
-    t = prune(t0)
+    t = sl_type(t0)
     if types[t].kind == .vec: return int(types[t].bits)
     1
 
@@ -426,7 +426,7 @@ ml_as = (e: int, x: str, t: int) -> str:
 
 ml_expr = (e: int) -> str:
     k = nodes[e].kind
-    t = prune(ntype(e))
+    t = sl_type(ntype(e))
     if t == T_MATH_INT: ml_err(nodes[e].pos, "checked mathematical int is not yet supported in shaders; use an explicit fixed width")
     pos = nodes[e].pos
     # (the uniforms, or a part of them: read from memory)
@@ -498,7 +498,7 @@ ml_expr = (e: int) -> str:
     if k == .conv:
         cv = nodes[e].aux as CV
         a = ml_expr(int(nodes[e].a))
-        from_ = prune(ntype(int(nodes[e].a)))
+        from_ = sl_type(ntype(int(nodes[e].a)))
         if cv == .int2float:
             if gl_unsigned(from_): return "float(as_type<uint>(int({a})))"
             return "float({a})"
@@ -508,7 +508,7 @@ ml_expr = (e: int) -> str:
         if cv == .int_ and types[t].kind == .int_:
             if types[from_].kind == .bool_: return "int({a})"
             return gl_narrow(a, t)
-        if cv == .float_ or cv == .none_: return a
+        if cv == .float_ or cv == .none_ or cv == .quantity_const: return a
         ml_err(pos, "unsupported conversion in shader")
     if k == .if_:
         b = int(nodes[e].b)
@@ -532,7 +532,7 @@ ml_expr = (e: int) -> str:
 
 # a == b, a < b...: a bool (vectors: whether every component is equal, or any differs)
 ml_compare = (op: Tok, t0: int, x: str, y: str, pos: int) -> str:
-    t = prune(t0)
+    t = sl_type(t0)
     o = gl_binop(op)
     if types[t].kind == .bool_:
         if op != .eq and op != .ne: ml_err(pos, "bools can only be compared with {tsd("== and !=", "=? and not=?")}")
@@ -555,7 +555,7 @@ ml_compare = (op: Tok, t0: int, x: str, y: str, pos: int) -> str:
 # ones wrap to their range (tb: the right operand's type, where it may be a scalar beside a vector)
 ml_arith = (op: Tok, x: str, y: str, ta0: int, t0: int, tb0: int = 0) -> str:
     ta = prune(ta0)
-    t = prune(t0)
+    t = sl_type(t0)
     tb = prune(tb0)
     o = gl_binop(op)
     if ta == T_MAT4 or tb == T_MAT4:
@@ -616,7 +616,7 @@ ml_shift_decls = ():
 # float x to integer type t, as on the CPU: toward zero, saturating at t's range (32 bits at
 # most), NaN to 0
 ml_float_to_int = (x: str, t0: int) -> str:
-    t = prune(t0)
+    t = sl_type(t0)
     bits = int(types[t].bits)
     if bits > 32: bits = 32
     sg = types[t].sign
@@ -647,7 +647,7 @@ ml_intrinsic = (e: int) -> str:
     ""
 
 ml_vec_ctor = (e: int) -> str:
-    t = prune(ntype(e))
+    t = sl_type(ntype(e))
     pos = nodes[e].pos
     ty = ml_type(t, pos)
     n = nkids(e)
@@ -715,7 +715,7 @@ ml_math_names: {str: str} = {
 }
 
 ml_call = (e: int) -> str:
-    t = prune(ntype(e))
+    t = sl_type(ntype(e))
     pos = nodes[e].pos
     aux = int(nodes[e].aux)
     if aux == 2:
@@ -753,6 +753,7 @@ ml_call = (e: int) -> str:
         if nm == "texture_size":
             tx = "tx[{ml_expr(kid(e, 0))}]"
             return "int2({tx}.t.get_width(), {tx}.t.get_height())"
+        if let g = sl_turns_fns.get(nm): return "{g}(6.283185307179586f * fract({ml_expr(kid(e, 0))}))"
         if ml_math_names.get(nm) != none: return ml_math(nm, e)
         if nkids(e) > 0 and is_gpu_buffer(ntype(kid(e, 0))):
             if nm == "len": return "({ml_expr(kid(e, 0))}).n"
@@ -789,7 +790,7 @@ ml_with_ctx = (ctx: str, rest: str[]) -> str:
 # the math functions, scalars spread to vectors where the result is a vector (min(v, 0.0),
 # mix(a, b, t), step(edge, v))
 ml_math = (nm: str, e: int) -> str:
-    t = prune(ntype(e))
+    t = sl_type(ntype(e))
     pos = nodes[e].pos
     if nm == "norm" and nkids(e) != 1: ml_err(nodes[e].pos, "the p-norm is not available in shaders: write the length, v.norm")
     n = nkids(e)
@@ -888,7 +889,7 @@ ml_wref = (base: str, c: int, d: str) -> str: "{base}[({ml_off(c, d)}) >> 2]"
 # value v of type t written at byte offset (c + d) of buffer memory base, laid out as the CPU does
 ml_write = (t0: int, base: str, c: int, d: str, v: str, pre: str, pos: int):
     ml_store_decls()
-    t = prune(t0)
+    t = sl_type(t0)
     k = types[t].kind
     if k == .float_:
         if int(types[t].bits) == 64:
@@ -972,7 +973,7 @@ ml_subgroup = (e: int, nm: str) -> str:
     if nm == "subgroup_all": return "simd_all({x})"
     if nm == "subgroup_any": return "simd_any({x})"
     if nm == "subgroup_broadcast_first": return "simd_broadcast_first({x})"
-    t = prune(ntype(e))
+    t = sl_type(ntype(e))
     k = types[t].kind
     un = gl_unsigned(t)
     if nm == "subgroup_add": return gl_narrow("simd_sum({x})", t)
@@ -1009,7 +1010,7 @@ ml_source = (main: str) -> str: ml_head() + join(ml_decls, "") + join(ml_protos,
 # the parts of the vertex function's result passed between the stages (after the clip position),
 # each a scalar or vector: (how to reach it from the struct, its type)
 ml_leaves = (t0: int, path: str, out: mut (str, int)[]):
-    t = prune(t0)
+    t = sl_type(t0)
     if types[t].kind == .struct_ and not is_lib_texture(int(types[t].st)):
         si = int(types[t].st)
         check_struct_fields(si)
@@ -1034,7 +1035,7 @@ ml_varyings = (otype: int, pos: int) -> ((str, int)[], str):
         ml_leaves(int(fields[f].type), ".{name_of(int(fields[f].name))}_", leaves)
     s = "struct SlV \{\n    float4 pos [[position]];\n"
     loop i in 0.. and lf in leaves:
-        lt = prune(lf.1)
+        lt = sl_type(lf.1)
         if types[lt].kind == .bool_: ml_err(pos, "bools cannot be passed from the vertex to the fragment shader (use an int)")
         flat = ""
         if types[lt].kind == .int_ or (types[lt].kind == .vec and types[lt].sign) or (types[lt].kind == .struct_ and is_lib_texture(int(types[lt].st))): flat = ", flat"

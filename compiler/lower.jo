@@ -4386,6 +4386,9 @@ gen_intrinsic_shader = (e: int, arg_start: int) -> Val:
 flat_slots = (t0: int, base: int, mask: mut u8[]):
     t = prune(t0)
     k = types[t].kind
+    if k == .quantity:
+        flat_slots(int(types[t].elem), base, mask)
+        return
     if k == .float_ and int(types[t].bits) == 32: return
     if k == .vec and not types[t].sign: return
     if k == .struct_:

@@ -171,7 +171,7 @@ sv_fntype = (ret: int, params: int[]) -> int:
 # the SPIR-V type of a Sloppy type (ints are 32-bit and floats f32, as in GLSL; a Texture is the
 # index of its descriptor)
 sv_type = (t0: int, pos: int) -> int:
-    t = prune(t0)
+    t = sl_type(t0)
     k = types[t].kind
     if k == .float_: return sv_f32()
     if k == .int_: return sv_i32()
@@ -362,7 +362,7 @@ sv_f64 = (lo: int, hi: int) -> int:
 
 # a value of type t stored (as the CPU lays it out) at byte offset (c + d) of base
 sv_read = (t0: int, base: int, c: int, d: int, pos: int) -> int:
-    t = prune(t0)
+    t = sl_type(t0)
     k = types[t].kind
     if k == .float_:
         if int(types[t].bits) == 64: return sv_f64(sv_word(base, c, d), sv_word(base, c + 4, d))
@@ -756,15 +756,15 @@ sv_assign_op = (op: Tok) -> Tok:
 
 # ---------------- expressions ----------------
 sv_is_floaty = (t0: int) -> bool:
-    t = prune(t0)
+    t = sl_type(t0)
     types[t].kind == .float_ or (types[t].kind == .vec and not types[t].sign)
 
 sv_is_vector = (t0: int) -> bool:
-    t = prune(t0)
+    t = sl_type(t0)
     types[t].kind == .vec and t != T_MAT4
 
 sv_ncomp = (t0: int) -> int:
-    t = prune(t0)
+    t = sl_type(t0)
     if types[t].kind == .vec: return int(types[t].bits)
     1
 
@@ -859,12 +859,12 @@ sv_shift = (code: int, ty: int, a: int, b: int, rt: int) -> int:
 
 # integers are 32 bits in shaders; an unsigned one (u8 u16 u32 u64) is held in the same bits
 sv_unsigned = (t0: int) -> bool:
-    t = prune(t0)
+    t = sl_type(t0)
     types[t].kind == .int_ and not types[t].sign
 
 # v (32 bits) wrapped to the range of a narrower integer type t, as on the CPU
 sv_narrow = (v: int, t0: int) -> int:
-    t = prune(t0)
+    t = sl_type(t0)
     if types[t].kind != .int_: return v
     bits = int(types[t].bits)
     if bits >= 32: return v
@@ -875,7 +875,7 @@ sv_narrow = (v: int, t0: int) -> int:
 # float v to integer type t, as on the CPU: toward zero, saturating at t's range (32 bits at
 # most here), NaN to 0
 sv_float_to_int = (v: int, t0: int) -> int:
-    t = prune(t0)
+    t = sl_type(t0)
     bits = int(types[t].bits)
     if bits > 32: bits = 32
     sg = types[t].sign
@@ -900,7 +900,7 @@ sv_float_to_int = (v: int, t0: int) -> int:
 
 # a == b, a < b...: a bool
 sv_compare = (op: Tok, t0: int, a: int, b: int, pos: int) -> int:
-    t = prune(t0)
+    t = sl_type(t0)
     bo = sv_bool()
     if types[t].kind == .bool_:
         if op == .eq: return sv_val(164, bo, [a, b])
@@ -949,7 +949,7 @@ sv_as = (e: int, v: int, t: int, pos: int) -> int:
 
 sv_expr = (e: int) -> int:
     k = nodes[e].kind
-    t = prune(ntype(e))
+    t = sl_type(ntype(e))
     if t == T_MATH_INT: sv_err(nodes[e].pos, "checked mathematical int is not yet supported in shaders; use an explicit fixed width")
     pos = nodes[e].pos
     # (the uniforms, or a part of them: read from memory)
@@ -1035,7 +1035,7 @@ sv_expr = (e: int) -> int:
         cv = nodes[e].aux as CV
         a = int(nodes[e].a)
         v = sv_expr(a)
-        from_ = prune(ntype(a))
+        from_ = sl_type(ntype(a))
         if cv == .int2float: return sv_val(sv_pick(sv_unsigned(from_), 112, 111), sv_type(t, pos), [v])
         if cv == .float2int:
             if types[t].kind == .int_: return sv_float_to_int(v, t)
@@ -1043,7 +1043,7 @@ sv_expr = (e: int) -> int:
         if cv == .int_ and types[t].kind == .int_:
             if types[from_].kind == .bool_: return sv_val(169, sv_i32(), [v, sv_ci(1), sv_ci(0)])
             return sv_narrow(v, t)
-        if cv == .float_ or cv == .none_: return v
+        if cv == .float_ or cv == .none_ or cv == .quantity_const: return v
         sv_err(pos, "unsupported conversion in shader")
     if k == .if_: return sv_if_expr(e)
     if k == .intrinsic: return sv_intrinsic(e)
@@ -1105,7 +1105,7 @@ sv_if_expr = (e: int) -> int:
 
 sv_intrinsic = (e: int) -> int:
     id = nodes[e].aux as IN
-    t = prune(ntype(e))
+    t = sl_type(ntype(e))
     pos = nodes[e].pos
     ty = sv_type(t, pos)
     if id == .vec_ctor: return sv_vec_ctor(e)
@@ -1119,7 +1119,7 @@ sv_intrinsic = (e: int) -> int:
     0
 
 sv_vec_ctor = (e: int) -> int:
-    t = prune(ntype(e))
+    t = sl_type(ntype(e))
     pos = nodes[e].pos
     ty = sv_type(t, pos)
     n = nkids(e)
@@ -1191,7 +1191,7 @@ sv_std_ops: {str: (int, int)} = {
 }
 
 sv_call = (e: int) -> int:
-    t = prune(ntype(e))
+    t = sl_type(ntype(e))
     pos = nodes[e].pos
     aux = int(nodes[e].aux)
     if aux == 2:
@@ -1229,6 +1229,11 @@ sv_call = (e: int) -> int:
             img = sv_val(100, sv_image_type(), [sv_texture(sv_expr(kid(e, 0)))])
             if nm == "texture_size": return sv_val(103, sv_veci(2), [img, sv_ci(0)])
             return sv_val(95, sv_vecf(4), [img, sv_expr(kid(e, 1)), 2, sv_ci(0)])
+        if let g = sl_turns_fns.get(nm):
+            # (GLSL.std.450 Fract, then Sin, Cos or Tan of 2π times it)
+            f = sv_f32()
+            radians = sv_val(133, f, [sv_cf(6.283185307179586), sv_val(12, f, [sv_std, 10, sv_expr(kid(e, 0))])])
+            return sv_val(12, f, [sv_std, (sv_std_ops.get(g) ?? (0, 0)).0, radians])
         if builtin_map.get(nm) != none: return sv_math(nm, e)
         if nkids(e) > 0 and is_gpu_buffer(ntype(kid(e, 0))):
             if nm == "len": return sv_gbuf_len(sv_expr(kid(e, 0)))
@@ -1267,7 +1272,7 @@ sv_call = (e: int) -> int:
 # the prelude's math functions: GLSL.std.450 instructions (or core ones), with scalars spread to
 # vectors where the result is a vector (min(v, 0.0), mix(a, b, t), step(edge, v))
 sv_math = (nm: str, e: int) -> int:
-    t = prune(ntype(e))
+    t = sl_type(ntype(e))
     pos = nodes[e].pos
     if nm == "norm" and nkids(e) != 1: sv_err(nodes[e].pos, "the p-norm is not available in shaders: write the length, v.norm")
     ty = sv_type(t, pos)
@@ -1431,7 +1436,7 @@ sv_to_f64 = (v: int) -> (int, int):
 
 # value v of type t written at byte offset (c + d) of buffer memory base, laid out as the CPU does
 sv_write = (t0: int, base: int, c: int, d: int, v: int, pos: int):
-    t = prune(t0)
+    t = sl_type(t0)
     k = types[t].kind
     u = sv_u32()
     if k == .float_:
@@ -1535,7 +1540,7 @@ sv_subgroup = (e: int, nm: str) -> int:
     if nm == "subgroup_all" or nm == "subgroup_any":
         sv_cap(62)
         return sv_val(sv_pick(nm == "subgroup_all", 334, 335), sv_bool(), [sc, sv_expr(kid(e, 0))])
-    t = prune(ntype(e))
+    t = sl_type(ntype(e))
     ty = sv_type(t, pos)
     x = sv_expr(kid(e, 0))
     if nm == "subgroup_broadcast_first":
@@ -1625,7 +1630,7 @@ sv_module = (model: int, main: int) -> str:
 # the parts of a struct passed between the stages, each a variable at its own location: (the
 # path of field indices to it, its type)
 sv_leaves = (t0: int, path: int[], out: mut (int[], int)[]):
-    t = prune(t0)
+    t = sl_type(t0)
     if types[t].kind == .struct_ and not is_lib_texture(int(types[t].st)):
         si = int(types[t].st)
         check_struct_fields(si)
@@ -1639,13 +1644,13 @@ sv_leaves = (t0: int, path: int[], out: mut (int[], int)[]):
 
 # the locations a value of type t takes
 sv_slots = (t0: int) -> int:
-    t = prune(t0)
+    t = sl_type(t0)
     if t == T_MAT4: return 4
     if types[t].kind == .fixed: return fixed_len(t) * sv_slots(int(types[t].elem))
     1
 
 sv_is_int_leaf = (t0: int) -> bool:
-    t = prune(t0)
+    t = sl_type(t0)
     if types[t].kind == .fixed: return sv_is_int_leaf(int(types[t].elem))
     types[t].kind == .int_ or (types[t].kind == .vec and types[t].sign) or (types[t].kind == .struct_ and is_lib_texture(int(types[t].st)))
 
@@ -1669,7 +1674,7 @@ sv_varyings = (otype: int, sc: int, pos: int) -> ((int[], int)[], int[]):
 
 # the value of type t (a part of the varyings struct at path) rebuilt from the leaf values
 sv_rebuild = (t0: int, path: int[], leaves: (int[], int)[], vals: int[], pos: int) -> int:
-    t = prune(t0)
+    t = sl_type(t0)
     loop i in 0.. and lf in leaves:
         if lf.0.len() == path.len():
             same = true
