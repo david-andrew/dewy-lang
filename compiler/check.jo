@@ -219,6 +219,7 @@ target_arm64 = false          # (Linux on arm64: compiler/arm64.jo)
 target_macos = false          # (macOS on arm64: compiler/arm64.jo, compiler/macho.jo)
 main_fn = 0
 release_build = false    # (a release build: console.debug is left out)
+main_error_payloads = false     # (a debug build, -g: an error reaching main is printed whole)
 main_entry_fn = 0        # (a Dewy main giving errors: the entry that reports them and gives the exit code)
 main_exit_kinds: int[]   # (its error kinds, in exit-code order, and their codes)
 main_exit_codes: int[]
@@ -6151,6 +6152,12 @@ dewy_main_result = (decl: int, rt: int):
         if tkind(k) == .struct_ and structs[int(types[prune(k)].st)].nfields == 0:
             # (an error with nothing to say, as OutOfMemory: its name)
             nodes[message].sval = i32(intern(type_str(k)))
+        else if not main_error_payloads:
+            # (only a debug build, -g, prints the whole payload, which may hold secrets; others
+            # say the kind and its message: `error: AuthError: login failed`)
+            nodes[message].sval = i32(intern(type_str(k)))
+            if main_error_has_message(k):
+                message = bc_call("__main_error_text", [message, bc_field(bc_ident(result, pos), "message", pos)], pos)
         else:
             nodes[message].aux = 1
             part = mk(.pair, pos)
@@ -6173,6 +6180,17 @@ dewy_main_result = (decl: int, rt: int):
     stmts.push(done)
     nodes[d].b = i32(bc_block(stmts, pos))
     main_entry_fn = get_fn_inst(d, [], pos)
+
+# does error kind k have a text `message` field (said by release builds)?
+main_error_has_message = (k: int) -> bool:
+    t = prune(k)
+    if tkind(t) != .struct_: return false
+    si = int(types[t].st)
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        if name_of(int(fields[f].name)) == "message": return prune(int(fields[f].type)) == T_STR
+    false
 
 # The kinds in exit-code order: as a declared result writes them, else in the order
 # their types are declared

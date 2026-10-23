@@ -269,7 +269,8 @@ __map_entry[K, V] = (m: mut Map[K, V], k: K, d: V) -> int:
 __map_entry_present[K, V] = (m: mut Map[K, V], k: K) -> int:
     h = __map_hash(k)
     e = __map_find(m, k, h)
-    if e < 0: panic("the dictionary has no key {k} to change{__near_key(m, k)}: d[k] += 1 changes an entry that is there; to count, write `if k in? d \{d[k] += 1} else \{d[k] = 1}`")
+    # (the key is not said, nor any key that is there: either may be a secret)
+    if e < 0: panic("the dictionary has no entry for this key to change: d[k] += 1 changes an entry that is there; to count, write `if k in? d \{d[k] += 1} else \{d[k] = 1}`")
     e
 
 # room for n entries without growing (when many are to come)
@@ -320,49 +321,8 @@ __map_add[K, V] = (m: mut Map[K, V], k: K, v: V, h0: u64, slot0: int = -1):
 ([])[K, V] = (m: Map[K, V], k: K) -> V:
     h = __map_hash(k)
     e = __map_find(m, k, h)
-    if e < 0: panic("the dictionary has no key {k}{__near_key(m, k)}: `get(key)` gives none for a missing key, and `has(key)` asks whether it is there")
+    if e < 0: panic("the dictionary has no entry for this key: `get(key)` gives none for a missing key, and `has(key)` asks whether it is there")
     __at(m.vals, e)
-
-# (assets["playr.png"]: the key written nearly as one that is there)
-__near_key[K, V] = (m: Map[K, V], k: K) -> str:
-    want = "{k}"
-    best = ""
-    bd = 3
-    i = 0
-    loop i < m.__keys.len():
-        if i >= m.gone.len() or not m.gone[i]:
-            s = "{__at(m.__keys, i)}"
-            d = __text_distance(want, s, bd)
-            if d < bd:
-                bd = d
-                best = s
-        i += 1
-    if len(best) == 0: return ""
-    " (did you mean {best}?)"
-
-# how many characters differ, up to limit (more: limit)
-__text_distance = (a: str, b: str, limit: int) -> int:
-    if abs(len(a) - len(b)) >= limit: return limit
-    prev = fill(0, len(b) + 1)
-    cur = fill(0, len(b) + 1)
-    j = 0
-    loop j <= len(b):
-        prev[j] = j
-        j += 1
-    i = 1
-    loop i <= len(a):
-        cur[0] = i
-        j = 1
-        loop j <= len(b):
-            c = 1
-            if a[i - 1] == b[j - 1]: c = 0
-            cur[j] = min(min(prev[j] + 1, cur[j - 1] + 1), prev[j - 1] + c)
-            j += 1
-        t = prev
-        prev = cur
-        cur = t
-        i += 1
-    min(prev[len(b)], limit)
 
 get[K, V] = (m: Map[K, V], k: K) -> V?:
     h = __map_hash(k)

@@ -58,6 +58,9 @@ __console_write = (fd: int, s: str):
         __out_flush()
         __write_fd(2, data(s), len(s))
 
+# (a release build's text for an error that reached main: its kind and message only)
+__main_error_text = (kind: str, message: str) -> str: "{kind}: {message}"
+
 # An error that reached main: said on standard error, and main's exit code.
 __main_failed = (message: str, code: int) -> int:
     __console_line(2, "error: {message}", "31")

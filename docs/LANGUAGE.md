@@ -2441,7 +2441,10 @@ calling `main()` at the top level is an error (recursion inside `main` is fine).
 `main` returns `void` or the errors that reach it, an ordinary `void | E` type,
 declared or inferred. It gives no exit code: success exits 0, and a script that
 needs a particular code calls `exit(n)`. An error reaching `main` is printed on
-standard error (`error: ParseError[message="..."]`) and ends the program with
+standard error as its kind and its `message` text field, if it has one
+(`error: ParseError: ...`; the rest of a payload may hold secrets, so only a
+debug build, `-g`, prints it whole: `error: ParseError[message="..."]`) and ends
+the program with
 its kind's exit code: 1, 2, 3, … in the order the kinds are declared, or as a
 declared result lists them, up to 100 (101 is a failed runtime check). An error type with an `exit_code` field
 pins its own code (its default, 1 to 100). The field is an integer refined to

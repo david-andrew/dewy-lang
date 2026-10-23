@@ -1,0 +1,7 @@
+# exit: 1
+# Outside debug builds (-g) only an error's kind and its message text are printed, never the rest of its
+# payload (which may hold a secret); unit-less payloads print the kind alone.
+AuthError:type=type of error & [message:string secret:string]
+main=():>void|AuthError=>{
+    return AuthError[message="login failed" secret="hunter2"]
+}
