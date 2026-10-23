@@ -1,0 +1,62 @@
+# Source positions to lines and columns: each file's line starts, made the first time
+# one of its positions is asked about, and the line found last (positions often come
+# one after another on a line).
+#
+# A module of the compiler written in Dewy. line_table.jo is its frozen twin for the
+# compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
+# interface and give the same answers (tests/test_selfhost_line_table.py). The table is
+# the caller's (util.jo keeps one for the compiler's files) and comes in by place.
+
+# (no defaults: all zero is the empty table, so a global of it needs no initializer
+# running in module order, after another module's initializer may have used it)
+LineTable:type=[
+    starts:array<array<int64>>   # by file: the offset of each line's first byte
+    file:int64                   # the line found last: its file, its first offset,
+    start:int64                  # the offset past it (0 before any) and its number
+    stop:int64
+    line:int64
+]
+
+# where each line of src starts: 0, then the offset after each newline. Newlines are
+# found a word at a time: only a word holding one is scanned by byte; O(bytes / 8 + lines)
+line_starts=(src:string):>array<int64>=>{
+    $unsafe
+    let ls:array<int64>=[0]
+    # (the pointer of a view, not of a variable: a variable's would be its own copy)
+    let n:int64=(src as array<uint8>).length
+    let sp=(src as array<uint8>).ptr
+    let i:int64=0
+    loop i + 8 <=? n {
+        let w=((sp + i) as ptr<uint64>)[0] xor 0x0A0A0A0A0A0A0A0A
+        if (w - 0x0101010101010101) & (w xor 0xFFFFFFFFFFFFFFFF) & 0x8080808080808080 not=? 0 {
+            loop j in [i..i + 8) {
+                if sp[j] =? 10 {ls.push(j + 1)}
+            }
+        }
+        i+=8
+    }
+    loop i <? n {
+        if sp[i] =? 10 {ls.push(i + 1)}
+        i+=1
+    }
+    ls
+}
+
+# the line and column (from 1) of byte off of file f, whose text is src
+line_col_in=(@t:LineTable f:int64 off:int64 src:string):>[int64 int64]=>{
+    if f =? t.file and off >=? t.start and off <? t.stop {return [t.line off - t.start + 1]}
+    loop t.starts.length <=? f {t.starts.push([])}
+    if t.starts[f].length =? 0 {t.starts[f]=line_starts(src)}
+    let ls=t.starts[f]
+    let lo:int64=0
+    let hi:int64=ls.length - 1
+    loop lo <? hi {
+        let mid=(lo + hi + 1) // 2
+        if ls[mid] <=? off {lo=mid} else {hi=mid - 1}
+    }
+    t.file=f
+    t.start=ls[lo]
+    t.stop=if lo + 1 <? ls.length ls[lo + 1] else 1 << 62
+    t.line=lo + 1
+    [lo + 1 off - ls[lo] + 1]
+}

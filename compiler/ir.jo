@@ -179,7 +179,7 @@ ir_line = (i: int) -> int:
             off = pos_off(p)
             if f != lf:
                 line_col(p)                    # (makes the file's line starts)
-                ls = line_starts[f]
+                ls = src_lines.starts[f]
                 lf = f
                 li = 0
             if off < ls[li] or li + 4 < ls.len() and off >= ls[li + 4]: li = line_col(p).0 - 1

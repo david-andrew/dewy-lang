@@ -1,0 +1,30 @@
+# The compiler's frozen line_table.jo, with the same command line as line_table_dewy.dewy.
+use '../../../compiler/line_table.jo'
+
+main = () -> int:
+    a = args()
+    t: LineTable
+    texts: str[]
+    loop i in [1..a.len()):
+        if let s = read_file(a[i]): texts.push(s)
+        else: return 1
+    loop f in [0..texts.len()):
+        src = texts[f]
+        n = len(src)
+        line = "{f}:"
+        loop s in line_starts(src): line = line + " {s}"
+        print(line)
+        step = 97
+        if n <= 64: step = 1
+        off = 0
+        loop off <= n:
+            l, c = line_col_in(mut t, f, off, src)
+            print("{f} {off} {l} {c}")
+            off += step
+        loop off > 0:
+            off -= step
+            l, c = line_col_in(mut t, f, off, src)
+            print("{f} {off} {l} {c}")
+        l, c = line_col_in(mut t, 0, len(texts[0]) / 2, texts[0])
+        print("0 . {l} {c}")
+    0

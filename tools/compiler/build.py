@@ -24,7 +24,7 @@ ROOT = HERE.parents[1]
 # names X.dewy's frozen implementation-language twin instead. Steps 3 on
 # compile the Dewy modules, so the compiler that ships runs them.
 FROZEN_TWINS = {'zip.dewy': 'zip.jo', 'spelling.dewy': 'spelling.jo', 'leb128.dewy': 'leb128.jo',
-               'base64.dewy': 'base64.jo'}
+               'base64.dewy': 'base64.jo', 'line_table.dewy': 'line_table.jo'}
 
 
 def identity(path: Path) -> str:
