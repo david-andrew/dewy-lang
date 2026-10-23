@@ -29,12 +29,15 @@
 #                       a broad exterior-tube sky arc, a corkscrew plunge,
 #                       forked high/low racing lines, and a technical exterior
 #                       tube return into the start straight.
+#   5  PARALLAX ENGINE - interwoven circuit with a recharge/roll-bridge fork,
+#                       pipe inversion, tapering exterior tube and low return.
 # ============================================================================
 
 import p"./prelude.udewy"
+import p"./track_parallax.udewy"
 
-const TRACK_COUNT:int = 5
-const RACE_TRACK_COUNT:int = 4
+const TRACK_COUNT:int = 6
+const RACE_TRACK_COUNT:int = 5
 
 const TRACK_VELOCITY_RING:Cstr = "
 uztrack 1
@@ -449,6 +452,7 @@ let builtin_track_text = (idx:int):>Cstr => {
     if idx =? 2 { return TRACK_PLAYGROUND }
     if idx =? 3 { return TRACK_SERPENT_KNOT }
     if idx =? 4 { return TRACK_AETHER_DIVIDE }
+    if idx =? 5 { return TRACK_PARALLAX_ENGINE }
     return TRACK_VELOCITY_RING
 }
 
@@ -457,12 +461,14 @@ const TRACK_NAME_1:Cstr = "PIPE DREAM\0"
 const TRACK_NAME_2:Cstr = "PLAYGROUND\0"
 const TRACK_NAME_3:Cstr = "SERPENT KNOT\0"
 const TRACK_NAME_4:Cstr = "AETHER DIVIDE\0"
+const TRACK_NAME_5:Cstr = "PARALLAX ENGINE\0"
 
 let builtin_track_name = (idx:int):>Cstr => {
     if idx =? 1 { return TRACK_NAME_1 }
     if idx =? 2 { return TRACK_NAME_2 }
     if idx =? 3 { return TRACK_NAME_3 }
     if idx =? 4 { return TRACK_NAME_4 }
+    if idx =? 5 { return TRACK_NAME_5 }
     return TRACK_NAME_0
 }
 
@@ -475,5 +481,6 @@ let builtin_race_track_cursor = (idx:int):>int => {
     if idx =? 1 { return 1 }
     if idx =? 3 { return 2 }
     if idx =? 4 { return 3 }
+    if idx =? 5 { return 4 }
     return 0
 }

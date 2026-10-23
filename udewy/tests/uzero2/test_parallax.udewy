@@ -1,0 +1,186 @@
+# Parallax Engine content regression: baked surface integrity, fork progress,
+# editor round-trip and complete three-lap runs through BOTH racing lines.
+# Run: python3 -m udewy udewy/tests/uzero2/test_parallax.udewy
+# Also run with --target c for the independent C code generator.
+$supported_targets = ["x86_64" "c"]
+
+import p"./prelude.udewy"
+import p"./state.udewy"
+import p"./track_model.udewy"
+import p"./track_bake.udewy"
+import p"./track_query.udewy"
+import p"./track_format.udewy"
+import p"./tracks_builtin.udewy"
+import p"./physics.udewy"
+import p"./ai.udewy"
+
+let failures:int = 0
+let check = (label:Cstr ok:bool):>void => {
+    if ok { print("PASS ") } else { print("FAIL ") failures += 1 }
+    host_write(STDOUT label cstr_len(label))
+    print("\n")
+    return void
+}
+
+const PROBE:Vec3 = __static_alloca__(24)
+const NORMAL:Vec3 = __static_alloca__(24)
+const VISITED:Ptr = __static_alloca__(1024) # 64 segment slots per driver
+const FINISH:Ptr = __static_alloca__(16)
+
+let route_length = ():>Q16 => {
+    let length:Q16 = 0
+    let i:int = 0
+    loop i <? vec_len(g_route) {
+        length += __load__(seg_p(vec_get(g_route i)) + SG_LEN)
+        i += 1
+    }
+    return length
+}
+
+let check_geometry = ():>void => {
+    let frames_ok:bool = true
+    let queries_ok:bool = true
+    let progress_ok:bool = true
+    let joins_ok:bool = true
+    let s:int = 0
+    loop s <? seg_count() {
+        let sg:Ptr = seg_p(s)
+        let n:int = seg_nsamp(sg)
+        if (n <? 3) or (n >=? MAX_FRAMES_PER_SEG) { frames_ok = false }
+        let i:int = 0
+        let previous:Q16 = -1
+        loop i <? n {
+            let fp:Ptr = fr_p(sg i)
+            if abs_i(v3_mag(fp + FR_FX) - FP_ONE) >? 2000 { frames_ok = false }
+            if abs_i(v3_mag(fp + FR_UX) - FP_ONE) >? 2000 { frames_ok = false }
+            if abs_i(v3_dot(fp + FR_FX fp + FR_UX)) >? 2000 { frames_ok = false }
+            if __load__(fp + FR_CUMARC) <=? previous { frames_ok = false }
+            previous = __load__(fp + FR_CUMARC)
+            # Probe the actual surface, including lifted exterior tubes and
+            # the inverted ribbon; centreline + world-up would miss both.
+            if (i >? 2) and (i <? n - 3) and (i % 8 =? 0) {
+                xse_setup(fp)
+                xse_point(0 PROBE NORMAL)
+                v3_addscaled(PROBE PROBE NORMAL HOVER_HEIGHT)
+                track_query(v3_x(PROBE) v3_y(PROBE) v3_z(PROBE) s i)
+                if surf_seg not=? s { queries_ok = false }
+                if abs_i(normal_gap(v3_x(PROBE) v3_y(PROBE) v3_z(PROBE))) >? FP_ONE // 4 { queries_ok = false }
+                if surf_past_end { queries_ok = false }
+            }
+            i += 1
+        }
+        if __load__(sg + SG_PROG1) <=? __load__(sg + SG_PROG0) { progress_ok = false }
+        let node:NodeId = __load__(sg + SG_N1)
+        let out:int = node_out_count(node)
+        if out <? 1 { joins_ok = false }
+        let j:int = 0
+        loop j <? out {
+            let next:Ptr = seg_p(node_out_seg(node j))
+            let last:Ptr = fr_p(sg n - 1)
+            let first:Ptr = fr_p(next 0)
+            if v3_dot(last + FR_FX first + FR_FX) <? 65000 { joins_ok = false }
+            if v3_dot(last + FR_UX first + FR_UX) <? 65000 { joins_ok = false }
+            let end_progress:Q16 = __load__(sg + SG_PROG1) % g_lap_len
+            if end_progress not=? __load__(next + SG_PROG0) { progress_ok = false }
+            j += 1
+        }
+        s += 1
+    }
+    check("unit frames and uncapped sampling\0" frames_ok)
+    check("surface queries through every feature\0" queries_ok)
+    check("continuous frames at every junction\0" joins_ok)
+    check("monotonic progress across fork, merge and finish\0" progress_ok)
+
+    # The fork is deliberately a tradeoff: a shorter exposed line versus
+    # more than a full recharge's worth of driving on the protected line.
+    let outer:Q16 = 0
+    let inner:Q16 = 0
+    s = 6
+    loop s <? 10 { outer += __load__(seg_p(s) + SG_LEN) s += 1 }
+    s = 32
+    loop s <? 36 { inner += __load__(seg_p(s) + SG_LEN) s += 1 }
+    check("shortcut saves at least 500 metres\0" outer - inner >? 500 * FP_ONE)
+    check("shortcut skips the capacitor\0" (__load__(seg_p(7) + SG_SURF) =? SURF_RECHARGE) and (__load__(seg_p(8) + SG_SURF) =? SURF_RECHARGE))
+    # Quarter-roll frames must face opposite sides of the bridge. This
+    # catches a reversed half roll or an accidental extra full rotation.
+    let first_half:Ptr = seg_p(33)
+    let second_half:Ptr = seg_p(34)
+    let q1:Ptr = fr_p(first_half seg_nsamp(first_half) // 2)
+    let q3:Ptr = fr_p(second_half seg_nsamp(second_half) // 2)
+    check("spindle makes one continuous full roll\0"
+          (__load__(q1 + FR_UZ) >? 64000) and (__load__(q3 + FR_UZ) <? -64000))
+    return void
+}
+
+let check_races = ():>void => {
+    init_cars(2)
+    current_car_is_player = 0
+    let alive:bool = true
+    let no_respawns:bool = true
+    let f:int = 0
+    loop (f <? 12000) and ((__load__(FINISH) =? 0) or (__load__(FINISH + 8) =? 0)) {
+        let i:int = 0
+        loop i <? 2 {
+            if __load__(FINISH + i * 8) =? 0 {
+                car_load(i)
+                # Identical player-speed craft, one committed to each fork.
+                # Remove random lateral wandering to test the authored road;
+                # test_game separately exercises ordinary randomized opponents.
+                ai_branch = i
+                ai_aim = 0
+                # Choose a lane BEFORE the geometric fork: left to the
+                # spindle, right to the capacitor. An aim at the exact
+                # shared centre can attach to either coincident entrance.
+                if cur_seg =? 5 {
+                    if i =? 1 { ai_aim = -24 * FP_ONE } else { ai_aim = 24 * FP_ONE }
+                }
+                ai_aim_timer = 100000
+                top_speed_mult = FP_ONE
+                ai_compute_input(i)
+                physics_step()
+                __store__(1 VISITED + (i * 64 + cur_seg) * 8)
+                if cur_status not=? 0 { alive = false }
+                if respawn_timer >? 0 { no_respawns = false }
+                if cur_lap >=? g_track_laps { __store__(f + 1 FINISH + i * 8) }
+                car_store(i)
+            }
+            i += 1
+        }
+        f += 1
+    }
+    check("both lines finish three laps\0" (__load__(FINISH) >? 0) and (__load__(FINISH + 8) >? 0))
+    check("both drivers survive without respawning\0" alive and no_respawns)
+    check("drivers actually traverse their chosen lines\0" (__load__(VISITED + 7 * 8) =? 1) and (__load__(VISITED + (64 + 33) * 8) =? 1))
+    let all_visited:bool = true
+    let s:int = 0
+    loop s <? seg_count() {
+        if (__load__(VISITED + s * 8) =? 0) and (__load__(VISITED + (64 + s) * 8) =? 0) { all_visited = false }
+        s += 1
+    }
+    check("every segment is driven\0" all_visited)
+    return void
+}
+
+let main = ():>int => {
+    arena_init()
+    check("race selection maps both ways\0" (builtin_race_track_index(4) =? 5) and (builtin_race_track_cursor(5) =? 4))
+    check("menu name\0" cstr_eq(builtin_track_name(5) "PARALLAX ENGINE\0"))
+    let ok:bool = track_parse(builtin_track_text(5))
+    check("parse builtin\0" ok)
+    if ok =? false { return 1 }
+    track_bake()
+    check("closed three-lap space circuit\0" g_route_closed and g_is_space and (g_track_laps =? 3) and (g_has_apron =? false))
+    check_geometry()
+    let length:Q16 = route_length()
+    let text:Cstr = bb_finalize_as_string(track_serialize())
+    ok = track_parse(text)
+    check("editor save reload\0" ok)
+    if ok =? false { return 1 }
+    track_bake()
+    check("round-trip preserves route length\0" abs_i(route_length() - length) <? FP_ONE)
+    check_geometry()
+    check_races()
+    print("failures: ") print_int(failures) print("\n")
+    if failures >? 0 { return 1 }
+    return 0
+}
