@@ -41,7 +41,7 @@ from tools.cases import ROOT, clean_environment, default_workers, keyword_filter
 from tools.scratch import lock_path
 
 LADDER = ROOT / 'tests' / 'ladder'
-RUN_TIMEOUT = 30
+RUN_TIMEOUT = 90  # loaded machines run two full gates at once
 
 DIAGNOSTIC = re.compile(r'^(?P<path>.+?):(?P<line>\d+):(?P<column>\d+): error: (?P<message>.*)$')
 # A rejection must come from checking the program, not from a missing feature...
