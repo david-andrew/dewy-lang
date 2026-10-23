@@ -1,0 +1,10 @@
+$runtime_checks=false
+Offline:type=type of error & [exit_code:int64=69]
+set=(e:Offline code:int64):>Offline=>{
+    let e=e
+    e.exit_code = code
+    e
+}
+main=():>void|Offline=>{
+    return set(Offline[] 3)
+}

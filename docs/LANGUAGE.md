@@ -2435,7 +2435,10 @@ needs a particular code calls `exit(n)`. An error reaching `main` is printed on
 standard error (`error: ParseError[message="..."]`) and ends the program with
 its kind's exit code: 1, 2, 3, … in the order the kinds are declared, or as a
 declared result lists them, up to 100 (101 is a failed runtime check). An error type with an `exit_code` field
-pins its own code (its default, 1 to 100). `dewy build --exit-codes file.dewy`
+pins its own code (its default, 1 to 100). The field is an integer refined to
+1–100, so a value written to it, as in `Offline[exit_code=code]`, is an
+obligation like any other: proven, checked at run time under `$runtime_checks`,
+or an error. An error can never report success. `dewy build --exit-codes file.dewy`
 prints the table without building.
 
 ```dewy

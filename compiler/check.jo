@@ -1677,6 +1677,7 @@ check_struct_fields = (si: int):
                     t = lit_default(cl)
                 fields[fi].type = i32(zonk(t))
             else: fatal(nodes[f].pos, "field needs a type")
+            if nodes[f].name == i32(intern("exit_code")) and files[pos_file(nodes[d].pos)].is_dewy and exception_type != 0 and nominal_descends(int(structs[si].type), exception_type): fields[fi].type = i32(exit_code_field_type(int(fields[fi].type), f, structs[si].type))
             loop k in [0..inherited.len() + i):
                 if fields[int(structs[si].fields) + k].name == nodes[f].name:
                     if k >= inherited.len() or not struct_components.has(d): fatal(nodes[f].pos, "duplicate field '{name_of(int(nodes[f].name))}'")
@@ -6203,6 +6204,20 @@ main_kind_pos = (t: int) -> int:
     f = pos_file(nodes[d].pos)
     f * 1000000000 + pos_off(nodes[d].pos)
 
+# An error type's `exit_code` is the code main ends with: 1 to 100 (0 is success,
+# 101 a failed runtime check), so the field is refined to that range and every
+# value written to it is an obligation like any other.
+exit_code_field_type = (t: int, f: int, owner: int) -> int:
+    base = prune(t)
+    if types[base].kind == .refined: base = prune(int(types[base].elem))
+    if not is_int(base): fatal(nodes[f].pos, "{dt(owner)}'s exit_code is the exit code main ends with for it: an integer")
+    dv = int(nodes[f].b)
+    if dv != 0 and nodes[dv].kind == .int_lit and (nodes[dv].ival < 1 or nodes[dv].ival > 100): fatal(nodes[f].pos, "{dt(owner)}'s exit_code is {nodes[dv].ival}: an exit code for an error is 1 to 100 (0 is success, and 101 a failed runtime check)")
+    if not refine_active and pc_child >= 0: exit(1)
+    predicate = ref_intern([RefAtom(.le, RefTerm(1, 1), RefTerm()), RefAtom(.le, RefTerm(), RefTerm(1, 100))])
+    if not ref_spans.has(predicate): ref_spans[predicate] = nodes[f].pos
+    mk_refined(t, predicate)
+
 # an error type's own exit code: its `exit_code` field's default (0: none of its own)
 main_pinned_code = (t: int, pos: int) -> int:
     if tkind(t) != .struct_: return 0
@@ -6211,7 +6226,9 @@ main_pinned_code = (t: int, pos: int) -> int:
     loop i in [0..int(structs[si].nfields)):
         f = int(structs[si].fields) + i
         if name_of(int(fields[f].name)) != "exit_code": continue
-        if not is_int(prune(int(fields[f].type))): fatal(pos, "{dt(t)}'s exit_code is the exit code main ends with for it: an integer")
+        ft = prune(int(fields[f].type))
+        if types[ft].kind == .refined: ft = prune(int(types[ft].elem))
+        if not is_int(ft): fatal(pos, "{dt(t)}'s exit_code is the exit code main ends with for it: an integer")
         dv = int(fields[f].defval)
         if dv == 0 or nodes[dv].kind != .int_lit: fatal(pos, "{dt(t)}'s exit_code needs a constant default, the code main ends with for it: `exit_code:int64=3`")
         c = int(nodes[dv].ival)

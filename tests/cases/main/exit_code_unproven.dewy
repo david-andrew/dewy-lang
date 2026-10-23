@@ -1,0 +1,7 @@
+# exit: 101
+# An unproven exit_code is checked at run time by default: 256 would exit 0
+Offline:type=type of error & [exit_code:int64=69]
+fail=(code:int64):>Offline=>Offline[exit_code=code]
+main=():>void|Offline=>{
+    return fail(args().length + 256)
+}

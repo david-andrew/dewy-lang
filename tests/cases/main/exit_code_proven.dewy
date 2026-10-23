@@ -1,0 +1,9 @@
+# exit: 42
+Offline:type=type of error & [exit_code:int64=69]
+fail=(code:int64):>Offline=>{
+    if code <? 1 or code >? 100 return Offline[]
+    Offline[exit_code=code]
+}
+main=():>void|Offline=>{
+    return fail(42)
+}
