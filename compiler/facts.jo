@@ -3549,7 +3549,8 @@ positive_bound = (n: int, use_locals: bool) -> int:
         return positive_bound(int(nodes[n].a), use_locals)
     if k == .intrinsic and nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1:
         t = prune(ntype(kid(n, 0)))
-        if types[t].kind == .array: return 9223372036854775807 / max(1, tsize(telem(t))) - 1
+        # (no allocation outgrows the address space: 2^56 bytes on any target)
+        if types[t].kind == .array: return if tsize(telem(t)) > 0: (1 << 56) / tsize(telem(t)) else: 9223372036854775807
     modulus = positive_modulus(n)
     if modulus > 0: return modulus - 1
     if k != .binary or nodes[n].aux != 0: return -1

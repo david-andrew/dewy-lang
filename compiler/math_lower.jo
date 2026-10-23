@@ -194,10 +194,11 @@ math_word_bound = (e: int) -> bool:
     if nodes[e].kind == .conv and nodes[e].aux == i32(int(CV.int_)): return math_word_bound(int(nodes[e].a))
     false
 
+# (bounds proven to be words: a counter's loop over [i..i + 8) stays in words too)
 math_word_range = (s: int) -> bool:
     it = int(nodes[s].a)
-    if not math_word_bound(int(nodes[it].a)) or not math_word_bound(int(nodes[it].b)): return false
-    if has_flag(it, NF_STEP): return math_word_bound(int(nodes[it].c))
+    if not math_proven_word(int(nodes[it].a)) or not math_proven_word(int(nodes[it].b)): return false
+    if has_flag(it, NF_STEP): return math_proven_word(int(nodes[it].c))
     true
 
 # Unknown bounds may themselves have promoted. Keep the hidden counter exact;
@@ -473,20 +474,53 @@ math_counter_limit = (s: int, writes: (int, int)[]) -> int:
     if increased: return limit
     -1
 
+# A counter stepped up only in loops it guards: `loop i + k <? E { ... i += s }`, one
+# update in each loop, directly in it (several loops may share the counter: a word-at-a-time
+# scan, then its tail). The guard held at the update, and nothing else in the iteration
+# changes i, so after it i <= E - k - 1 + s. From a nonnegative start, i stays in
+# [0, the largest such bound]. O(writes).
 math_length_counter_limit = (s: int, writes: (int, int)[]) -> int:
-    if writes.len() != 1: return -1
     l = int(nodes[s].sym)
-    update = math_update_value(writes[0].0, l)
-    loop_ = writes[0].1
-    if update == 0 or loop_ <= 0 or nodes[loop_].kind != .while_ or nodes[update].op != i32(int(Tok.plus)): return -1
-    init = positive_bound(int(nodes[s].b), true)
-    step = positive_bound(int(nodes[update].b), true)
-    if init < 0 or step < 0: return -1
-    cond = int(nodes[loop_].a)
-    if nodes[cond].kind != .binary or nodes[cond].aux != 0 or nodes[cond].op != i32(int(Tok.lt)) or not math_local_is(int(nodes[cond].a), l): return -1
-    end = positive_bound(int(nodes[cond].b), true)
-    if end <= 0 or step > 9223372036854775807 - end: return -1
-    max(init, end + step)
+    limit = positive_bound(int(nodes[s].b), true)
+    if limit < 0: return -1
+    guarded: int[]
+    loop pair in writes:
+        update = math_update_value(pair.0, l)
+        loop_ = pair.1
+        if update == 0 or loop_ <= 0 or nodes[loop_].kind != .while_ or nodes[loop_].aux == 1 or nodes[update].op != i32(int(Tok.plus)): return -1
+        if guarded.contains(loop_): return -1
+        guarded.push(loop_)
+        step = positive_bound(int(nodes[update].b), true)
+        end = math_guard_limit(int(nodes[loop_].a), l)
+        if step < 0 or end < 0 or step > 9223372036854775807 - end: return -1
+        limit = max(limit, end + step)
+    limit
+
+# The largest value of local l for which loop condition c can hold, or -1 when c does not
+# bound l from above: `l + k <? E` or `l + k <=? E` (k a nonnegative literal, E with a
+# nonnegative bound), or a conjunction with one such side.
+math_guard_limit = (c: int, l: int) -> int:
+    if nodes[c].kind == .and_:
+        a = math_guard_limit(int(nodes[c].a), l)
+        b = math_guard_limit(int(nodes[c].b), l)
+        if a >= 0 and b >= 0: return min(a, b)
+        return max(a, b)
+    if nodes[c].kind != .binary or nodes[c].aux != 0: return -1
+    op = nodes[c].op as Tok
+    if op != .lt and op != .le: return -1
+    x = int(nodes[c].a)
+    k = 0
+    if nodes[x].kind == .binary and nodes[x].aux == 0 and nodes[x].op == i32(int(Tok.plus)):
+        y = int(nodes[x].b)
+        if nodes[y].kind != .int_lit or has_flag(y, NF_U64) or nodes[y].ival < 0: return -1
+        k = nodes[y].ival
+        x = int(nodes[x].a)
+    if not math_local_is(x, l): return -1
+    end = positive_bound(int(nodes[c].b), true)
+    if end < 0: return -1
+    end -= k
+    if op == .lt: end -= 1
+    max(end, 0)
 
 math_word_local_decl = (s: int) -> bool:
     l = int(nodes[s].sym)
