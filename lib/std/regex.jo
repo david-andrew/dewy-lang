@@ -9,7 +9,9 @@
 # \b \B, x* x+ x? x{2} x{2,} x{2,5} (and lazy x*? x+? x?? x{2,5}?), a|b, (group) (?:group),
 # \ before any of .[]{}()*+?^$|\ for itself, \n \t \r; (?i) at the start ignores case (in ASCII).
 # \w takes letters of any script ("Zürich" is one word). A pattern a user typed is checked first
-# with regex_error(pattern) (regex(pattern) stops the program when it is wrong).
+# with regex_error(pattern) (regex(pattern) stops the program when it is wrong). A pattern too
+# big to match in reasonable time is wrong too: one whose repeats written out are over 50000
+# instructions, or that nests groups or repeats over 200 deep.
 # Matching takes time in proportion to the text's length times the pattern's (it never
 # backtracks without end), and works on characters (code points), not bytes. Make a Regex once
 # and use it for every text: regex() reads and prepares the pattern each time. On a long text,
@@ -79,8 +81,9 @@ regex_error = (pattern: str) -> str?:
     p = __ReParser(pattern, chars(pattern), soft = true)
     p.nodes.push(__ReNode(0))         # (a node for what a failure gives back to point at)
     if p.cs.len() >= 4 and p.cs[0] == '(' and p.cs[1] == '?' and p.cs[2] == 'i' and p.cs[3] == ')': p.i = 4
-    __re_alt(p)
+    ast = __re_alt(p)
     if len(p.err) == 0 and p.i < p.cs.len(): __re_fail(p, "unexpected ')'")
+    if len(p.err) == 0: __re_check_size(p, ast)
     if len(p.err) == 0: return none
     p.err
 
@@ -94,6 +97,7 @@ regex = (pattern: str) -> Regex:
         p.i = 4
     ast = __re_alt(p)
     if p.i < p.cs.len(): __re_fail(p, "unexpected ')'")
+    __re_check_size(p, ast)
     r.groups = p.groups
     r.classes = p.classes
     # (where the whole match starts and ends is kept with each thread, not in its captures)
@@ -822,6 +826,7 @@ struct __ReParser:
     soft = false        # (regex_error: a failure is kept in err, not a panic)
     err = ""
     groups = 0
+    depth = 0           # (groups inside groups: reading, writing out and sizing go that deep)
     nodes: __ReNode[]
     classes: __ReClass[]
 
@@ -863,6 +868,7 @@ __re_concat = (p: mut __ReParser) -> int:
 __re_repeat = (p: mut __ReParser) -> int:
     at = p.i
     a = __re_atom(p)
+    stacked = 0
     loop p.i < p.cs.len():
         c = p.cs[p.i]
         lo = 0
@@ -888,6 +894,8 @@ __re_repeat = (p: mut __ReParser) -> int:
             if lo > 1000 or hi > 1000: __re_fail(p, "a repeat over 1000")
         else: break
         if p.nodes[a].kind == 7: __re_fail(p, "nothing to repeat")
+        stacked += 1
+        if stacked > __RE_MAX_DEPTH: __re_fail(p, "over {__RE_MAX_DEPTH} repeats of a repeat")
         greedy = true
         if p.i < p.cs.len() and p.cs[p.i] == '?':
             greedy = false
@@ -897,6 +905,33 @@ __re_repeat = (p: mut __ReParser) -> int:
     a
 
 __re_digit = (c: int) -> bool: c >= '0' and c <= '9'
+
+# The most instructions a pattern's program may have once its repeats are written out: matching
+# takes time in proportion to it (times the text's length), so (a{1000}){1000} is refused
+# rather than made into a million instructions.
+const __RE_MAX_PROGRAM = 50000
+const __RE_MAX_DEPTH = 200
+
+__re_check_size = (p: mut __ReParser, ast: int):
+    if __re_size(p, ast) > __RE_MAX_PROGRAM: __re_fail(p, "the pattern is too big: its repeats written out are over {__RE_MAX_PROGRAM} steps")
+
+# (the instructions node n becomes, up to just over the limit)
+__re_size = (p: __ReParser, n: int) -> int:
+    nd = p.nodes[n]
+    k = nd.kind
+    total = 1
+    if k == 3 or k == 4:
+        total = 0
+        loop kid in nd.kids: total = min(total + __re_size(p, kid), __RE_MAX_PROGRAM + 1)
+        if k == 4: total += 2 * (nd.kids.len() - 1)
+    else if k == 6:
+        total = __re_size(p, nd.kids[0]) + 2
+    else if k == 5:
+        sub = __re_size(p, nd.kids[0])
+        total = nd.lo * sub
+        if nd.hi < 0: total += sub + 2
+        else: total += (nd.hi - nd.lo) * (sub + 1)
+    min(total, __RE_MAX_PROGRAM + 1)
 
 __re_num = (p: mut __ReParser) -> int:
     v = 0
@@ -922,7 +957,12 @@ __re_atom = (p: mut __ReParser) -> int:
         else:
             p.groups += 1
             num = p.groups
+        p.depth += 1
+        if p.depth > __RE_MAX_DEPTH:
+            __re_fail(p, "groups nested over {__RE_MAX_DEPTH} deep")
+            return 0
         inner = __re_alt(p)
+        p.depth -= 1
         if p.i >= p.cs.len() or p.cs[p.i] != ')': __re_fail(p, "a ( without its )")
         p.i += 1
         return __re_new(p, __ReNode(6, c = num, kids = [inner]))

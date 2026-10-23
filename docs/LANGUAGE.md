@@ -3188,7 +3188,9 @@ let fields = "a, b;c".split(regex(r"[,;]\s*"))
 Patterns support character classes, alternatives, captured and `(?:...)`
 uncaptured groups, greedy/lazy repetitions, line anchors `^`/`$`, and word
 boundaries. `(?i)` at the start folds ASCII case. Use `regex_error(pattern)`
-to check user-supplied patterns before preparing them. An empty match advances
+to check user-supplied patterns before preparing them. A pattern whose repeats
+written out exceed 50,000 instructions (`(a{1000}){1000}`), or that nests groups
+or repeats over 200 deep, is refused like one that cannot be read. An empty match advances
 one code point before the next search; unmatched capture groups contain `""`.
 `replace` accepts `$0` for the match, `$1` onward for captures, `$$` for a dollar,
 or a `(Match):>string` callback. `split` returns the text between matches.
