@@ -2309,6 +2309,30 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
         loop binding in back.bindings:
             if not changing.has(binding.value) or binding.place.root != .local or binding.place.declaration not in offsets: continue
             fact_loop_paths(entry, back, binding.value, true, changing, started, carried)
+        # A counter stepped down (`high-=1`) stays at most its entry value,
+        # and below what entry bounds that value by (`high=xs.length`: high
+        # stays at most the length): candidates from entry, kept only when
+        # the backedge entails them. (A rising counter's lower bound is its
+        # interval's.) O(falling counters x their entry rows, at most 8), one
+        # bounded relaxation each.
+        loop binding in back.bindings:
+            v = binding.value
+            if not changing.has(v): continue
+            term = fact_terms[v]
+            if term.op != .plus and term.op != .minus or term.a == 0 or term.b == 0: continue
+            step = fact_bound(back, term.b)
+            if step.lo != step.hi or step.lo == 0 or step.lo == FACT_MIN or (step.lo < 0) != (term.op == .plus): continue
+            e = fact_binding(entry, binding.place)
+            if e < 0: continue
+            start = entry.bindings[e].value
+            if fact_entails(back, v, start, 0): carried.push(FactDifference(v, start, 0))
+            ri = fact_difference_head(entry, start, 1)
+            seen = 0
+            loop ri >= 0 and seen < 8:
+                row = entry.differences[ri]
+                ri = fact_difference_next(entry, ri, 1)
+                seen += 1
+                if row.a == start and row.b != start and fact_entails(back, v, row.b, row.limit): carried.push(FactDifference(v, row.b, row.limit))
     joined = fact_join(entry, back, at)
     s = FactState(live = joined.live)
     loop binding in joined.bindings:

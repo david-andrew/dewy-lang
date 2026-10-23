@@ -1,6 +1,7 @@
 """Facts behind the no-traps default: integer min/max, sums of two symbolic
 operands related through terms already evaluated, a fork closure's entry from
-its creator, and a pool's direct update as the library's own obligation."""
+its creator, one-way loop counters, and a pool's direct update as the
+library's own obligation."""
 import os
 import subprocess
 
@@ -72,6 +73,24 @@ main=():>void=>{
     exit(0)
 }
 ''',
+    # A counter that only moves down stays at most its entry value.
+    'decreasing_counter': '''reverse=(@values:array<int64>):>void=>{
+    let low:int64=0
+    let high=values.length
+    loop low+1 <? high {
+        high-=1
+        let kept=values[low]
+        values[low]=values[high]
+        values[high]=kept
+        low+=1
+    }
+}
+main=():>void=>{
+    let v:array<int64>=[1 2 3]
+    reverse(@v)
+    exit(0)
+}
+''',
     # `pool[h].field -= x` indexes the pool's items at its own checked answer.
     'pool_direct_update': '''Enemy:type=[name:string health:int64=100]
 main=():>void=>{
@@ -100,6 +119,18 @@ main=():>void=>exit(f([1] 1))
     return t
 }
 main=():>void=>exit(g([1 2] 0 1))
+''', 'cannot prove index is in bounds'),
+    # Its entry value itself is past the end.
+    'decreasing_from_length': ('''f=(xs:array<int64>):>int64=>{
+    let t=0
+    let high=xs.length
+    loop high >? 0 {
+        t+=xs[high]
+        high-=1
+    }
+    return t
+}
+main=():>void=>exit(f([1]))
 ''', 'cannot prove index is in bounds'),
     # A closure that is not a fork's runs later: its creator's facts say nothing.
     'stored_closure': ('''main=():>void=>{
