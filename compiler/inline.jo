@@ -12,6 +12,12 @@ const INLINE_MAX = 24       # callee size limit, in IR instructions
 const INLINE_LOOP_MAX = 96  # ... for a call in a loop to a leaf (a function that calls nothing)
 const INLINE_WRAPPER_MAX = 64   # ... for a leaf called once by a function at most this size
 const INLINE_LOOPY_CALLER_MAX = 400     # (a leaf with a loop: only into callers this small)
+# Extra expansion only when a constant formal controls an entry-region branch.
+const INLINE_SPECIALIZE_MAX = 128
+const INLINE_SPECIALIZE_GROWTH = 256
+const INLINE_SPECIALIZE_CALLER_MAX = 4000
+inl_const_growth = 0
+inl_const_target = false
 inl_calls = 0               # calls (that return, not on rare paths) in the function being inlined into
 
 rel_fns: IrFn[]             # lowered functions, in lowering order
@@ -52,6 +58,7 @@ fast_inline_kind = (f: IrFn) -> int:
     1 + calls
 
 fast_inline_prepare = (fs: IrFn[]):
+    inline_cache_clear()
     fast_fns = []
     fast_by_index = []
     fast_loop_only = []
@@ -122,16 +129,18 @@ fast_inline_into = ():
     o_copy_forward()
 
 rel_collect = ():
+    if rel_fns.len() == 0: inline_cache_clear()
     loop rel_by_index.len() <= ir.fn_index: rel_by_index.push(-1)
     rel_by_index[ir.fn_index] = rel_fns.len()
     rel_fns.push(ir)
 
 # 0: not inlined, 1: small (inlined anywhere), 2: a leaf inlined into loops, 3: the same with a
 # loop of its own (into callers that are not large: in a large one, what its loop keeps in
-# registers may not get them, and a call costs little next to a loop)
+# registers may not get them, and a call costs little next to a loop); 4: a bounded
+# loop-free body eligible only for constant-controlled entry specialization.
 inlinable = (f: IrFn) -> int:
     borrowed_body = partition_active and partition_inline_body(f.fn_index)
-    limit = if borrowed_body: 192 else: INLINE_LOOP_MAX
+    limit = if borrowed_body: 192 else: INLINE_SPECIALIZE_MAX
     if f.cabi or f.noinline or len(f.export_name) > 0 or f.code.len() > limit: return 0
     leaf = true
     has_loop = false
@@ -171,8 +180,9 @@ inlinable = (f: IrFn) -> int:
     # A single tiny read-only search has bounded register needs even in a large
     # caller. Keep larger/allocating loops under the existing caller-size cap.
     if leaf and has_loop and loops == 1 and tiny_read_loop: return 1
-    if leaf and has_loop: return 3
-    if leaf: return 2
+    if leaf and has_loop and (borrowed_body or size <= INLINE_LOOP_MAX): return 3
+    if leaf and not has_loop and size <= INLINE_LOOP_MAX: return 2
+    if not has_loop and f.nparams <= 8: return 4
     0
 
 defines_value = (op: Op) -> bool:
@@ -180,68 +190,150 @@ defines_value = (op: Op) -> bool:
         nop, block, loop, end, else_, br, brif, brtable, if_, ret, trap, store, copy, zero, memcpy, memset, zeroslots, assume, vop: false
         _: true
 
-# copy an argument list (vregs renamed) into the caller's args; returns its start
-remap_args = (callee: IrFn, start: int, n: int, vm: int[]) -> int:
-    s = ir.args.len()
-    loop k in [0..n): ir.args.push(i32(vm[int(callee.args[start + k])]))
-    s
-
-# rename the vregs and slots used by a callee instruction
-remap = (c0: Ins, callee: IrFn, vm: int[], sm: int[]) -> Ins:
+# Rename operands using the optimizer's shared operand classification. Maps
+# and the callee are borrowed for this call and never resized while borrowed.
+remap = (c0: Ins, callee: *IrFn, vm: *int, sm: *int) -> Ins:
     c = c0
+    op = c.op
     a = int(c.a)
     bb = int(c.b)
-    match c.op:
-        nop, block, loop, end, else_, br, trap, iconst, fconst, gaddr, daddr, faddr: pass
-        slot: c.a = i32(sm[a])
-        intr, call, syscall: c.a = i32(remap_args(callee, a, bb, vm))
-        calli, callc:
-            c.a = i32(remap_args(callee, a, bb, vm))
-            c.c = i32(vm[int(c.c)])
-        if_, brif, zero, assume: c.a = i32(vm[a])
-        brtable:
-            c.a = i32(vm[a])
+    args = data(callee.args)
+    if op == .slot: c.a = i32(sm[a])
+    else if op == .zeroslots:
+        s = ir.args.len()
+        loop k in [0..bb):
+            item = int(args[a + k])
+            if item & 1 == 1: ir.args.push(i32((vm[item >> 1] << 1) | 1))
+            else: ir.args.push(i32(sm[item >> 1] << 1))
+        c.a = i32(s)
+    else:
+        mask = o_decode[int(op)] >> 8
+        if mask & 16 != 0:
             s = ir.args.len()
-            loop k in [0..bb): ir.args.push(callee.args[int(c.c) + k])
-            c.c = i32(s)
-        ret:
-            if a >= 0: c.a = i32(vm[a])
-        store, copy:
-            c.a = i32(vm[a])
-            c.b = i32(vm[bb])
-            if c.op == .store and int(c.c) & M_INDEX != 0: c.dst = i32(vm[int(c.dst)])
-        memcpy, memset, select, vop, memeq, findb:
-            c.a = i32(vm[a])
-            c.b = i32(vm[bb])
-            c.c = i32(vm[int(c.c)])
-        zeroslots:
-            s = ir.args.len()
-            loop k in [0..bb):
-                item = int(callee.args[a + k])
-                if item & 1 == 1: ir.args.push(i32((vm[item >> 1] << 1) | 1))
-                else: ir.args.push(i32(sm[item >> 1] << 1))
+            loop k in [0..bb): ir.args.push(i32(vm[int(args[a + k])]))
             c.a = i32(s)
-        load:
-            c.a = i32(vm[a])
-            if int(c.c) & M_INDEX != 0: c.b = i32(vm[bb])
-        mov, neg, not_, fneg, fsqrt, fabs, ffloor, fceil, ftrunc, sext8, sext16, sext32, zext8, zext16, zext32, i2f, u2f, f2i, f2f, bits2f, f2bits:
-            c.a = i32(vm[a])
-        _:
-            c.a = i32(vm[a])
-            c.b = i32(vm[bb])
-    if defines_value(c.op) and c.dst >= 0 and c.op != .store: c.dst = i32(vm[int(c.dst)])
+        else:
+            if mask & 1 != 0 or (mask & 32 != 0 and a >= 0): c.a = i32(vm[a])
+            if mask & 2 != 0 or (mask & 64 != 0 and int(c.c) & M_INDEX != 0): c.b = i32(vm[bb])
+            if mask & 8 != 0 or (mask & 128 != 0 and int(c.c) & M_INDEX != 0): c.dst = i32(vm[int(c.dst)])
+        if mask & 4 != 0: c.c = i32(vm[int(c.c)])
+        if op == .brtable:
+            s = ir.args.len()
+            loop k in [0..bb): ir.args.push(args[int(c.c) + k])
+            c.c = i32(s)
+    if defines_value(op) and c.dst >= 0 and op != .store: c.dst = i32(vm[int(c.dst)])
     c
+
+inline_span = (out: mut Ins[], source: *Ins, start: int, count: int):
+    if count == 0: return
+    n = out.len()
+    out.resize(n + count)
+    mem_copy(data(out) + n, source + start, count * size_of(Ins))
+
+# Summaries are built only on demand. Holding the immutable body keeps its
+# address a valid cache key (a rewritten body gets a fresh COW allocation).
+# Branch analysis is O(body + vregs) once per demanded body, with indexed state.
+# Stop before effects/loops: a constant tested only on a slow path does not pay
+# for duplicating the hot path. This is a profitability hint, not a proof used
+# to remove code; the ordinary optimizer performs all actual constant folding.
+inline_branch_cache: int[]
+inline_branch_body: Ins[][]
+
+inline_branch_mask = (callee: IrFn) -> int:
+    index = callee.fn_index
+    loop inline_branch_cache.len() <= index:
+        inline_branch_cache.push(0)
+        inline_branch_body.push([])
+    if data(inline_branch_body[index]) == data(callee.code): return inline_branch_cache[index]
+    inline_branch_body[index] = callee.code
+    inline_branch_cache[index] = 0
+    # Keep explicit failure frames. The existing small-leaf policy is unchanged.
+    loop ins in callee.code:
+        if ins.op == .call and ins.c == 1: return 0
+        if ins.op == .checked_add or ins.op == .checked_sub or ins.op == .checked_mul: return 0
+    deps = fill(256, callee.vtypes.len())
+    d = data(deps)
+    loop v in [0..callee.vtypes.len()):
+        if int(callee.vtypes[v]) == VK: d[v] = 0
+    loop p in [0..min(8, callee.nparams)): d[p] = 1 << p
+    result = 0
+    loop ins in callee.code:
+        op = ins.op
+        if kills_memory(op) or op == .loop or op == .intr: break
+        if op == .if_ or op == .brif:
+            mask = d[int(ins.a)]
+            if mask > 0 and mask < 256 and mask & (mask - 1) == 0: result |= mask
+        else if defines_value(op) and ins.dst >= 0:
+            kind = o_simplify_kind(op)
+            mask = 256
+            if kind == 1: mask = 0
+            else if kind == 2 or kind == 3: mask = d[int(ins.a)]
+            else if kind == 4: mask = d[int(ins.a)] | d[int(ins.b)]
+            d[int(ins.dst)] = mask
+    inline_branch_cache[index] = result
+    inline_branch_body[index] = callee.code
+    result
+
+# The same body identity guards the final-IR register summary. O(body + vregs
+# + call operands) once per demanded body. Each copy still initializes a dense
+# O(vregs) map, but adds only live vregs to the caller's later analyses.
+inline_live_cache: int[][]
+inline_body_cache: Ins[][]
+inline_nv_cache: int[]
+
+inline_cache_clear = ():
+    inline_branch_cache = []
+    inline_branch_body = []
+    inline_live_cache = []
+    inline_body_cache = []
+    inline_nv_cache = []
+
+inline_live_regs = (callee: IrFn) -> int[]:
+    index = callee.fn_index
+    loop inline_live_cache.len() <= index:
+        inline_live_cache.push([])
+        inline_body_cache.push([])
+        inline_nv_cache.push(-1)
+    if data(inline_body_cache[index]) == data(callee.code) and inline_nv_cache[index] == callee.vtypes.len(): return inline_live_cache[index]
+    flags = fill(0, callee.vtypes.len())
+    used = data(flags)
+    loop p in [0..callee.nparams): used[p] = 1
+    # Only final-IR operands need caller registers; lowering leaves dead vregs.
+    loop ins in callee.code:
+        op = ins.op
+        if defines_value(op) and ins.dst >= 0 and op != .store: used[int(ins.dst)] = 1
+        mask = o_decode[int(op)] >> 8
+        if op == .zeroslots:
+            loop k in [int(ins.a)..int(ins.a) + int(ins.b)):
+                item = int(callee.args[k])
+                if item & 1 == 1: used[item >> 1] = 1
+        else if mask & 16 != 0:
+            loop k in [int(ins.a)..int(ins.a) + int(ins.b)): used[int(callee.args[k])] = 1
+        else:
+            if mask & 1 != 0 or (mask & 32 != 0 and ins.a >= 0): used[int(ins.a)] = 1
+            if mask & 2 != 0 or (mask & 64 != 0 and int(ins.c) & M_INDEX != 0): used[int(ins.b)] = 1
+            if mask & 8 != 0 or (mask & 128 != 0 and int(ins.c) & M_INDEX != 0): used[int(ins.dst)] = 1
+        if mask & 4 != 0: used[int(ins.c)] = 1
+    live: int[]
+    loop v in [0..callee.vtypes.len()):
+        if used[v] != 0: live.push(v)
+    inline_live_cache[index] = live
+    inline_body_cache[index] = callee.code
+    inline_nv_cache[index] = callee.vtypes.len()
+    live
 
 # splice callee's body in place of `call` (appending to out)
 inline_call = (call: Ins, callee: IrFn, out: mut Ins[]):
     vm = fill(0, callee.vtypes.len())
-    loop v in [0..callee.vtypes.len()):
-        if int(callee.vtypes[v]) == VK: vm[v] = k_vreg(callee.kval[v])
-        else: vm[v] = vreg(int(callee.vtypes[v]))
+    mapped = data(vm)
+    loop v in inline_live_regs(callee):
+        if int(callee.vtypes[v]) == VK: mapped[v] = k_vreg(callee.kval[v])
+        else: mapped[v] = vreg(int(callee.vtypes[v]))
     sm = fill(0, callee.slot_size.len())
-    loop s in [0..callee.slot_size.len()): sm[s] = new_slot(int(callee.slot_size[s]), int(callee.slot_align[s]))
+    slots = data(sm)
+    loop s in [0..callee.slot_size.len()): slots[s] = new_slot(int(callee.slot_size[s]), int(callee.slot_align[s]))
     loop k in [0..int(call.b)):
-        p = vm[k]
+        p = mapped[k]
         out.push(Ins(.mov, i32(vtype(p)), i32(p), ir.args[int(call.a) + k], 0, 0, 0))
     if callee.raw_mem: ir.raw_mem = true
     out.push(Ins(.block, 0, 0, 0, 0, 0, 0))
@@ -250,10 +342,10 @@ inline_call = (call: Ins, callee: IrFn, out: mut Ins[]):
         op = ci.op
         if op == .ret:
             if ci.a >= 0 and call.dst >= 0:
-                out.push(Ins(.mov, i32(vtype(int(call.dst))), call.dst, i32(vm[int(ci.a)]), 0, 0, 0))
+                out.push(Ins(.mov, i32(vtype(int(call.dst))), call.dst, i32(mapped[int(ci.a)]), 0, 0, 0))
             out.push(Ins(.br, 0, 0, 0, 0, 0, depth))
             continue
-        ni = remap(ci, callee, vm, sm)
+        ni = remap(ci, &callee, mapped, slots)
         # (the calls of a callee inlined on a rarely taken path are on it too)
         if call.c == 2 and op == .call and ni.c == 0: ni.c = 2
         # (in a backtrace the inlined code is the call's line of the function it is in now)
@@ -265,13 +357,23 @@ inline_call = (call: Ins, callee: IrFn, out: mut Ins[]):
 
 # the callee to inline for a call in a loop nest `depth` deep (-1: none)
 inline_target = (ins: Ins, depth: int, self_pos: int, snap: IrFn[], can: int[]) -> int:
+    inl_const_target = false
     j = inline_callee(ins, self_pos, snap)
     if j < 0: return -1
     if can[j] == 1 or (can[j] == 2 and depth > 0): return j
     if can[j] == 3 and depth > 0 and ir.code.len() <= INLINE_LOOPY_CALLER_MAX: return j
     # a leaf into a caller that is little more than the call (a wrapper, like a map's get around
     # its lookup): the caller becomes a leaf itself, which loops can then take in
-    if can[j] >= 2 and ir.code.len() <= INLINE_WRAPPER_MAX and inl_calls == 1: return j
+    if (can[j] == 2 or can[j] == 3) and ir.code.len() <= INLINE_WRAPPER_MAX and inl_calls == 1: return j
+    # New non-leaf expansion outside loops only: loop pressure and padding must
+    # continue to use the established leaf policy.
+    if not dbg_on and depth == 0 and (can[j] == 2 or can[j] == 4) and int(ins.b) <= 8 and ir.code.len() <= INLINE_SPECIALIZE_CALLER_MAX and inl_const_growth + snap[j].code.len() <= INLINE_SPECIALIZE_GROWTH:
+        constants = 0
+        loop k in [0..int(ins.b)):
+            if is_kv(int(ir.args[int(ins.a) + k])): constants |= 1 << k
+        if constants != 0 and inline_branch_mask(snap[j]) & constants != 0:
+            inl_const_target = true
+            return j
     -1
 
 # the function a direct call (that returns) calls, if it was collected (-1: none)
@@ -283,42 +385,45 @@ inline_callee = (ins: Ins, self_pos: int, snap: IrFn[]) -> int:
 
 # inline small callees into the current function (ir); returns true if anything changed
 inline_into = (self_pos: int, snap: IrFn[], can: int[]) -> bool:
-    # (the calls that stay: not inlined by size, not on a rarely taken path)
+    inl_const_growth = 0
     inl_calls = 0
-    loop ins in ir.code:
+    # Plan each call once, then copy unchanged spans in bulk. Planning is linear
+    # in the caller and call arguments; the plan stores only selected call sites.
+    old = ir.code
+    instructions = data(old)
+    loop pos in [0..old.len()):
+        ins = instructions + pos
         if ins.op == .calli or ins.op == .callc: inl_calls += 1
         else if ins.op == .call and ins.c == 0:
-            j = inline_callee(ins, self_pos, snap)
+            j = inline_callee(ins[0], self_pos, snap)
             if j < 0 or can[j] != 1: inl_calls += 1
-    any = false
     depth = 0
     kinds: Op[]
-    loop ins in ir.code:
-        if inline_target(ins, depth, self_pos, snap, can) >= 0:
-            any = true
-            break
-        if ins.op == .block or ins.op == .loop or ins.op == .if_:
+    positions: int[]
+    targets: int[]
+    loop pos in [0..old.len()):
+        ins = instructions + pos
+        if ins.op == .call:
+            j = inline_target(ins[0], depth, self_pos, snap, can)
+            if j >= 0:
+                positions.push(pos)
+                targets.push(j)
+                if inl_const_target: inl_const_growth += snap[j].code.len()
+        else if ins.op == .block or ins.op == .loop or ins.op == .if_:
             kinds.push(ins.op)
             if ins.op == .loop: depth += 1
         else if ins.op == .end:
             if kinds.pop() == .loop: depth -= 1
-    if not any: return false
+    if positions.len() == 0: return false
     out: Ins[]
-    out.reserve(ir.code.len() * 2)
-    old = ir.code
-    depth = 0
-    kinds.clear()
-    loop ins in old:
-        j = inline_target(ins, depth, self_pos, snap, can)
-        if j >= 0:
-            inline_call(ins, snap[j], out)
-            continue
-        out.push(ins)
-        if ins.op == .block or ins.op == .loop or ins.op == .if_:
-            kinds.push(ins.op)
-            if ins.op == .loop: depth += 1
-        else if ins.op == .end:
-            if kinds.pop() == .loop: depth -= 1
+    out.reserve(old.len() * 2)
+    start = 0
+    loop k in [0..positions.len()):
+        pos = positions[k]
+        inline_span(out, instructions, start, pos - start)
+        inline_call(instructions[pos], snap[targets[k]], out)
+        start = pos + 1
+    inline_span(out, instructions, start, old.len() - start)
     ir.code = out
     o_copy_forward()
     true
