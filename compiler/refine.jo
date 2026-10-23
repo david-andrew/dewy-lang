@@ -884,23 +884,36 @@ ref_subst = (predicate: int, args: int[], zonking: bool = false) -> int:
 
 # Wrapped element contracts and record fields retain storage authority.
 # Callable contracts inside an aggregate remain value types.
-ref_storage_contract = (t0: int, seen: int[] = []) -> bool:
+# One mutable ancestor stack per query, rather than copying it at every edge.
+# For V visited type occurrences and maximum depth D (capped at 32), the walk
+# costs O(V*D) for cycle checks and O(D) space, reusing the path storage.
+# Keep the cycle check before the depth limit, including for scalar leaves.
+ref_storage_contract = (t0: int) -> bool:
+    seen: int[]
+    ref_storage_visit(t0, seen)
+
+ref_storage_visit = (t0: int, seen: mut int[]) -> bool:
     t = prune(t0)
     if seen.contains(t): return false
     if seen.len() >= 32: return true
-    let seen = seen
-    seen.push(t)
     k = types[t].kind
     if k == .refined: return true
-    if k == .opt or k == .array or k == .fixed: return ref_storage_contract(int(types[t].elem), seen)
+    if k != .opt and k != .array and k != .fixed and k != .tuple and k != .struct_: return false
+    seen.push(t)
+    found = ref_storage_children(t, k, seen)
+    seen.pop()
+    found
+
+ref_storage_children = (t: int, k: TK, seen: mut int[]) -> bool:
+    if k == .opt or k == .array or k == .fixed: return ref_storage_visit(int(types[t].elem), seen)
     if k == .tuple:
         loop i in [0..int(types[t].nargs)):
-            if ref_storage_contract(targ(t, i), seen): return true
+            if ref_storage_visit(targ(t, i), seen): return true
     if k == .struct_:
         si = int(types[t].st)
         check_struct_fields(si)
         loop i in [0..int(structs[si].nfields)):
-            if ref_storage_contract(int(fields[int(structs[si].fields) + i].type), seen): return true
+            if ref_storage_visit(int(fields[int(structs[si].fields) + i].type), seen): return true
     false
 
 # A length (an int64 fact, never negative) may bound a uint64: its facts are
