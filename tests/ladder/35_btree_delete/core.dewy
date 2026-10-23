@@ -1,4 +1,7 @@
-take=<T>(@items:array<T> i:int64):>T=>items.pop(i)
+take=<T>(@items:array<T> i:int64):>T=>{
+    assert(0 <=? i and i <? items.length)
+    return items.pop(i)
+}
 # Minimum degree 2: at most three keys, at least one except the root.
 Node:type=[keys:array<int64> children:array<Node>]
 leaf=():>Node=>Node[[] []]

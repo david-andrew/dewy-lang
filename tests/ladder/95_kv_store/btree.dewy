@@ -176,7 +176,7 @@ BTree:type=[
         let at=lower_bound(nodes[id].keys key)
         $runtime_assert id <? nodes.length
         if at >=? nodes[id].keys.length or nodes[id].keys[at] not=? key return false
-        $runtime_assert id <? nodes.length
+        $runtime_assert id <? nodes.length and at <? nodes[id].keys.length and at <? nodes[id].values.length
         nodes[id].keys.pop(at)
         nodes[id].values.pop(at)
         count-=1

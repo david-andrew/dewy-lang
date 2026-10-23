@@ -29,7 +29,7 @@ Stream:type=[
             out.extend(block)
             counter+=1
         }
-        out.truncate(count)
+        if count >=? 0 {out.truncate(count)}
         return out
     }
 ]
@@ -137,7 +137,7 @@ aead=():>void=>{
         if open(key nonce other sealed) is? Forged rejected+=1
     }
     let truncated=sealed
-    truncated.ciphertext.pop()
+    if truncated.ciphertext.length >? 0 {truncated.ciphertext.pop()}
     attempts+=1
     if open(key nonce aad truncated) is? Forged rejected+=1
     let other_nonce=nonce

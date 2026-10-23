@@ -164,7 +164,7 @@ hkdf_extract=(salt:array<uint8> ikm:array<uint8>):>array<uint8>=>{
 HkdfTooLong:type=type of error & [requested:int64]
 
 hkdf_expand=(prk:array<uint8> info:array<uint8> length:int64):>array<uint8>|HkdfTooLong=>{
-    if length >? 255*DIGEST return HkdfTooLong[length]
+    if length <? 0 or length >? 255*DIGEST return HkdfTooLong[length]
     let okm:array<uint8>=[]
     let previous:array<uint8>=[]
     let counter=1

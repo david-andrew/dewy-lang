@@ -16,20 +16,20 @@ despawn=(@w:World id:int64):>bool=> {
     let n=w.ids.length
     $runtime_assert 0 <=? index and index <? n and n <=? w.x.length and n <=? w.y.length and n <=? w.vx.length and n <=? w.vy.length
     let last=n-1
+    let moved=w.ids[last]
     if index not=? last  {
-        let moved=w.ids[last]
         w.ids[index]=moved
         w.x[index]=w.x[last]
         w.y[index]=w.y[last]
         w.vx[index]=w.vx[last]
         w.vy[index]=w.vy[last]
-        w.slot[moved]=index
     }
     w.ids.pop()
     w.x.pop()
     w.y.pop()
     w.vx.pop()
     w.vy.pop()
+    if index not=? last  {w.slot[moved]=index}
     w.slot.pop(id)
     return true
 }

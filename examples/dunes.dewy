@@ -112,6 +112,18 @@ follow=(chain: array<vec3> anchor: vec3 count: int64 dt: float64):>array<vec3>=>
     }
     chain
 }
+# Gather the glyphs within reach of the traveler.
+collect_glyphs=()=>{
+    loop @glyph in glyphs {
+        if not glyph.taken and length(glyph.pos - (pos + vec3(0 1 0))) <? 1.6 {
+            glyph.taken = true
+            collected += 1
+            scarf_len += 3
+            energy = 1.0
+            play(chime 0.6 pitch = 0.8 + 0.06 * float64(collected))
+        }
+    }
+}
 update=(dt: float64)=>{
     t += dt
     intro -= dt
@@ -180,16 +192,7 @@ update=(dt: float64)=>{
         loop k in [0..scarf_len) {scarf.push(anchor)}
     }
     scarf = follow(scarf anchor min(scarf_len MAX_SCARF) dt)
-    # glyphs
-    loop @glyph in glyphs {
-        if not glyph.taken and length(glyph.pos - (pos + vec3(0 1 0))) <? 1.6 {
-            glyph.taken = true
-            collected += 1
-            scarf_len += 3
-            energy = 1.0
-            play(chime 0.6 pitch = 0.8 + 0.06 * float64(collected))
-        }
-    }
+    collect_glyphs()
     if collected =? glyphs.length and not won {
         won = true
         play(theme 0.8)

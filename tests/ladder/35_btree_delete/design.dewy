@@ -55,7 +55,7 @@ insert=(@root:Node key:int64):>void=> {
     insert_nonfull(@root key)
 }
 merge=(@node:Node i:int64):>void=> {
-    $runtime_assert (0 <=? i and i <? node.children.length-1)
+    $runtime_assert (0 <=? i and i <? node.children.length-1 and i <? node.keys.length)
     let left=node.children[i]
     let right=node.children[i+1]
     left.keys.push(node.keys.pop(i))
@@ -65,7 +65,7 @@ merge=(@node:Node i:int64):>void=> {
     loop child in right.children  {
         left.children.push(child)
     }
-    $runtime_assert (i <? node.children.length)
+    $runtime_assert (i+1 <? node.children.length)
     node.children[i]=left
     node.children.pop(i+1)
 }
