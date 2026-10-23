@@ -88,18 +88,17 @@ sum[T] = (xs: T[]) -> T:
     loop x in xs: s = s + x
     s
 
+# (through the two-value min and max: for floats, a NaN anywhere gives NaN)
 min[T] = (xs: T[]) -> T:
     if xs.len() == 0: panic("min of an empty array")
     m = xs[0]
-    loop x in xs:
-        if x < m: m = x
+    loop x in xs: m = min(m, x)
     m
 
 max[T] = (xs: T[]) -> T:
     if xs.len() == 0: panic("max of an empty array")
     m = xs[0]
-    loop x in xs:
-        if x > m: m = x
+    loop x in xs: m = max(m, x)
     m
 
 # the smaller and the larger of two values of a type with its own `<` (a big number, a version)
@@ -107,7 +106,8 @@ min[T] = (a: T, b: T) -> T: if b < a: b else: a
 max[T] = (a: T, b: T) -> T: if a < b: b else: a
 
 # the element with the smallest key, or the largest (the first of equal ones): the cheapest
-# item, the nearest enemy (min_by(enemies, (e): distance(e.pos, me)))
+# item, the nearest enemy (min_by(enemies, (e): distance(e.pos, me))). Keys order as sort
+# orders them (float keys by IEEE totalOrder).
 min_by[T, K] = (xs: T[], key: (T) -> K) -> T:
     if xs.len() == 0: panic("min_by of an empty array")
     m = xs[0]
@@ -115,7 +115,7 @@ min_by[T, K] = (xs: T[], key: (T) -> K) -> T:
     loop i in [1..xs.len()):
         x = xs[i]
         k = key(x)
-        if k < mk:
+        if __sort_lt(k, mk):
             m = x
             mk = k
     m
@@ -126,7 +126,7 @@ max_by[T, K] = (xs: T[], key: (T) -> K) -> T:
     loop i in [1..xs.len()):
         x = xs[i]
         k = key(x)
-        if mk < k:
+        if __sort_lt(mk, k):
             m = x
             mk = k
     m
@@ -339,6 +339,17 @@ __less[T] = (a: T, b: T) -> bool: a < b
 __sort_lt[T] = (a: T, b: T) -> bool: a < b
 __sort_lt = (a: f64, b: f64) -> bool: __total_key(a) < __total_key(b)
 __sort_lt = (a: f32, b: f32) -> bool: __total_key(a) < __total_key(b)
+# (tuples, as sort keys or sorted themselves: element by element in this same order)
+__sort_lt[A, B] = (a: (A, B), b: (A, B)) -> bool:
+    if __sort_lt(a.0, b.0): return true
+    if __sort_lt(b.0, a.0): return false
+    __sort_lt(a.1, b.1)
+__sort_lt[A, B, C] = (a: (A, B, C), b: (A, B, C)) -> bool:
+    if __sort_lt(a.0, b.0): return true
+    if __sort_lt(b.0, a.0): return false
+    if __sort_lt(a.1, b.1): return true
+    if __sort_lt(b.1, a.1): return false
+    __sort_lt(a.2, b.2)
 __total_key = (x: f64) -> int:
     k = int(x as u64)
     if k < 0: return k xor 0x7FFFFFFFFFFFFFFF
@@ -363,7 +374,7 @@ __merge_sort_lt[T] = (xs: mut T[]):
         loop i < hi:
             t = xs[i]
             j = i
-            loop j > lo and t < xs[j - 1]:
+            loop j > lo and __sort_lt(t, xs[j - 1]):
                 xs[j] = xs[j - 1]
                 j -= 1
             xs[j] = t
@@ -390,13 +401,13 @@ __merge_pass_lt[T] = (src: T[], dst: mut T[], w: int):
         j = mid
         k = lo
         # (two runs already in order: copied as they are)
-        if mid >= hi or not (src[mid] < src[mid - 1]):
+        if mid >= hi or not __sort_lt(src[mid], src[mid - 1]):
             loop k < hi:
                 dst[k] = src[k]
                 k += 1
         else:
             loop i < mid and j < hi:
-                if src[j] < src[i]:
+                if __sort_lt(src[j], src[i]):
                     dst[k] = src[j]
                     j += 1
                 else:

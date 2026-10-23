@@ -1,0 +1,16 @@
+# Float min and max are IEEE 754-2019 minimum and maximum in either argument order: a NaN
+# gives NaN, and -0.0 is below 0.0. An array's min and max see a NaN wherever it is. Sorting
+# by tuple keys with float parts uses totalOrder, as sorting floats does.
+R:type=[name:string score:float64]
+main=()=>{
+    let z:float64=0.0
+    let nan=z/z
+    printl"{max(nan 1.0)} {max(1.0 nan)} {min(nan 1.0)} {min(1.0 nan)}"
+    printl"{min(0.0 -0.0)} {min(-0.0 0.0)} {max(0.0 -0.0)} {max(-0.0 0.0)} {min(2.0 1.0)} {max(2.0 1.0)}"
+    printl"{min(float32(1.0) float32(nan))} {max(float32(-0.0) float32(0.0))}"
+    printl"{[1.0 nan 2.0].max()} {[nan 1.0].min()} {[1.0 2.0 nan].min()} {[1.0 3.0 2.0].max()}"
+    let xs:array<R>=[R["a" 3.0] R["c" 1.0] R["d" -0.0] R["e" 0.0] R["h" -1.0] R["i" 0.0] R["j" -0.0]]
+    xs.sort(key=(r):>[float64 string]=>[r.score r.name] reverse=true)
+    printl(xs.map((r)=>r.name).join(""))
+    printl(min_by(xs (r)=>r.score).name)
+}

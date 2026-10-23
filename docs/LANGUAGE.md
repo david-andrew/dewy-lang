@@ -666,9 +666,12 @@ level (only the sign and payload of a NaN may differ).
 Reductions run in a fixed order: `sum` of a float array adds pairwise halves,
 `loop` accumulations add left to right, matrix products add each element's
 products in order, and parallel work never reassociates (see "Parallel CPU
-work"). Sorting floats (`sort`, `sorted`, float `key=`) uses IEEE
-totalOrder: −NaN, −∞, the negative numbers, −0.0, 0.0, the positive numbers,
-∞, NaN. `floor`, `ceil`, `trunc` and `round` keep the sign of a zero result
+work"). Sorting floats (`sort`, `sorted`, float `key=`, tuple keys with
+float parts, `min_by`/`max_by` keys) uses IEEE totalOrder: −NaN, −∞, the
+negative numbers, −0.0, 0.0, the positive numbers, ∞, NaN. `min` and `max` of
+floats are IEEE 754-2019 minimum and maximum in either argument order: a NaN
+gives NaN, and −0.0 is below 0.0; an array's `min` and `max` give NaN when any
+element is NaN. `floor`, `ceil`, `trunc` and `round` keep the sign of a zero result
 (`ceil(-0.5)` is `-0.0`), and `sign` returns a zero or NaN unchanged.
 
 Four settings (see "Directives") change the float policy of a scope.

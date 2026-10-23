@@ -20,18 +20,32 @@ min = (a: int, b: int) -> int:
 max = (a: int, b: int) -> int:
     if a > b: return a
     b
+# Floats: IEEE 754-2019 minimum and maximum, whatever the argument order: a NaN gives NaN,
+# and -0.0 is below 0.0
 min = (a: f64, b: f64) -> f64:
     if a < b: return a
-    b
+    if b < a: return b
+    if a != a: return a
+    if b != b: return b
+    ((a as u64) | (b as u64)) as f64       # (equal: -0.0 if either is)
 max = (a: f64, b: f64) -> f64:
     if a > b: return a
-    b
+    if b > a: return b
+    if a != a: return a
+    if b != b: return b
+    ((a as u64) & (b as u64)) as f64       # (equal: 0.0 if either is)
 min = (a: f32, b: f32) -> f32:
     if a < b: return a
-    b
+    if b < a: return b
+    if a != a: return a
+    if b != b: return b
+    ((a as u32) | (b as u32)) as f32
 max = (a: f32, b: f32) -> f32:
     if a > b: return a
-    b
+    if b > a: return b
+    if a != a: return a
+    if b != b: return b
+    ((a as u32) & (b as u32)) as f32
 __not = (b: bool) -> bool: not b
 
 # (of three: max(a, b, c))
