@@ -251,7 +251,7 @@ panic or an endless loop, and a call to it ends its branch like `exit` does.
 twice=(x)=>x+x
 add=(a:int64 b:int64=2):>int64=>a+b
 combine=(a b=a)=>a+b
-main=()=>add(twice(20))
+main=()=>printl(add(twice(20)))  # 42
 ```
 
 One bare parameter name may omit the parentheses: `x=>x+1`, as in
@@ -349,7 +349,7 @@ nested patterns can combine them.
 sum=([left right]:array<int64>)=>left+right
 score=([damage armor]:[damage:int64 armor:int64])=>damage-armor
 make_adder=(bias:int64)=>(([a b]:array<int64>)=>a+b+bias)
-main=()=>sum([20 22])
+main=()=>printl(sum([20 22]))  # 42
 ```
 
 The whole parameter can have a type or default, such as `([a b]=[20 22])`.
@@ -369,7 +369,7 @@ Module-level overload groups join function literals with `&`:
 ```dewy
 measure = ((value:int64):>int64=>value)
         & ((text:string):>int64=>text.length)
-main=()=>measure(40)+measure("ab")
+main=()=>printl(measure(40)+measure("ab"))  # 42
 ```
 
 Groups can be nested, and members may have different arities, defaults or generic
@@ -1281,7 +1281,7 @@ main=()=>{
     let copy=original
     copy.values[0]=99
     let [y x]=point
-    return x+y
+    printl(x+y)  # 42
 }
 ```
 
