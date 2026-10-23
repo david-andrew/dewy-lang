@@ -698,8 +698,9 @@ check of the result (“produced an infinity under `$no_inf`”, exit 101) under
 
 `let cursor = @xs[i]` declares a local place: reads and writes of `cursor` read
 and write `xs[i]`, with `i` evaluated once at the declaration. A local place can
-name an element, a dictionary entry (`@table[k]`) or a field (`@r.a`) of a
-local variable; each access checks the index or key at run time. Deeper routes
+name a whole variable (`let p = @xs`: `p.push(4)` changes `xs`), or an element,
+a dictionary entry (`@table[k]`) or a field (`@r.a`) of a local variable; each
+access checks the index or key at run time. Deeper routes
 go to an `@` parameter instead. `@` of a function value is still its handle.
 A function gives back a value: `return @a` is an error.
 

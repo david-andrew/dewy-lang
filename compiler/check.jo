@@ -4050,14 +4050,23 @@ check_binding_input = (s: int) -> int:
         t = prune(expected)
     t
 
-# `let cursor = @xs[i]`, `let entry = @table[k]`, `let f = @r.a`: a local name
-# for the element, entry or field itself, its key or index evaluated once.
+# `let cursor = @xs[i]`, `let entry = @table[k]`, `let f = @r.a`, `let p = @xs`:
+# a local name for the element, entry, field or variable itself, its key or
+# index evaluated once.
 local_place_count = 0
 local_place_decl = (s: int) -> bool:
     init = int(nodes[s].b)
     if init == 0 or nodes[s].a != 0 or nodes[s].nlist > 0 or has_flag(s, NF_GLOBAL) or has_flag(s, NF_RDONLY): return false
     if not has_flag(init, NF_MUT) or not files[pos_file(nodes[s].pos)].is_dewy: return false
     k = nodes[init].kind
+    if k == .ident:
+        # (`let p = @xs`: a name for the variable itself; `@f` of a function is its handle)
+        probe = clone(init)
+        if is_fn_type(check_expr(probe, 0)) or nodes[probe].kind != .ident or nodes[probe].aux != i32(int(SK.local)) and nodes[probe].aux != i32(int(SK.global)): return false
+        clear_flag(init, NF_MUT)
+        add_flag(s, NF_ALIASDECL)
+        check_vardecl(s)
+        return true
     if k != .index and k != .field: return false
     base = int(nodes[init].a)
     if nodes[base].kind != .ident or k == .index and (nodes[init].b == 0 or nkids(init) != 1):

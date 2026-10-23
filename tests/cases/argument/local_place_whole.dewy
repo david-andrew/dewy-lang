@@ -1,0 +1,26 @@
+# `let p = @xs` names the variable itself, as `let c = @xs[i]` names an element
+bump=(@v:array<int64>):>void=>v.push(99)
+main=():>void=>{
+    let xs:array<int64>=[1 2 3]
+    let p=@xs
+    p[0] = 10
+    p.push(4)
+    printl(xs)
+    xs[1] = 20
+    printl(p)
+    bump(@p)
+    printl(xs)
+    p = [7]
+    printl(xs)
+    let n=5
+    let q=@n
+    q += 1
+    printl(n)
+    let r=[a=1 b=2]
+    let s=@r
+    s.a = 9
+    printl(r)
+    let copy=xs
+    copy.push(8)
+    printl(xs)
+}
