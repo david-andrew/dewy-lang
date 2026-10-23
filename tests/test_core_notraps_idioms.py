@@ -134,7 +134,7 @@ main=():>void=>exit(entry()) entry=():>int64=>middle([1])
     loop true {
         k+=1
         if k >=? xs.length break
-        xs.pop()
+        if xs.length >? 0 {xs.pop()}
         xs[k]+=1
     }
     return xs.length
@@ -186,7 +186,7 @@ main=():>void=>exit(entry()) entry=():>int64=>peek([1])
     let ys=xs
     let t=0
     loop i in [0..ys.length) {
-        ys.pop()
+        if ys.length >? 0 {ys.pop()}
         t+=ys[i]
     }
     return t

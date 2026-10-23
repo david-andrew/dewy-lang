@@ -220,7 +220,7 @@ def lockstep_case(body):
 # An offset counter, a resize, a rebinding or unequal steps break the relation.
 LOCKSTEP_NEGATIVE = {
     'offset': (lockstep_case('loop i in 1.. and x in xs and y in ys { t=t+ys[i] }'), '3:49'),
-    'resize': (lockstep_case('loop i in 0.. and x in xs and y in ys { ys.pop(); t=t+ys[i] }'), '3:59'),
+    'resize': (lockstep_case('loop i in 0.. and x in xs and y in ys { if ys.length >? 0 {ys.pop()}; t=t+ys[i] }'), '3:79'),
     'later_resize': (lockstep_case('loop i in 0.. and x in xs and y in ys { t=t+ys[i]; ys.pop() }'), '3:49'),
     'rebound': (lockstep_case('loop i in 0.. and x in xs and y in ys { i=i+1; t=t+ys[i] }'), '3:56'),
     'unequal': ('f=(@xs:array<int64> @ys:array<int64>):>int64=>{\n    let t:int64=0\n    let i:int64=0\n'
