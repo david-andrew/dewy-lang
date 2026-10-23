@@ -280,7 +280,9 @@ connect = (host: str, port: int = 0) -> int:
         if ip >= 0: p.fd = __n_connect(ip, pt)
         if p.fd < 0:
             p.state = 3
-            if ip < 0: __net_why[id] = "no machine named '{h}' was found"
+            if ip < 0:
+                __net_why[id] = "no machine named '{h}' was found"
+                if len(__n_resolve_why) > 0: __net_why[id] = "no machine named '{h}' was found ({__n_resolve_why})"
             else: __net_why[id] = "the connection could not be started"
             __net_events.push(NetEvent(.left, id, []))
         __net_peers.push(p)
@@ -707,7 +709,8 @@ udp_send = (sock: int, host: str, port: int, data: u8[]) -> bool:
     if let known = __net_hosts.get(host): ip = known
     else:
         ip = __n_resolve(host)
-        __net_hosts[host] = ip
+        # (a name not found now may be later: only addresses are kept)
+        if ip >= 0: __net_hosts[host] = ip
     if ip < 0 or data.len() == 0: return false
     __n_sendto(sock, data(data), data.len(), ip, port) == data.len()
 udp_send = (sock: int, host: str, port: int, text: str) -> bool: udp_send(sock, host, port, bytes(text))
@@ -739,7 +742,114 @@ udp_close = (sock: int):
 # __n_udp(port) -> a datagram socket bound to port, not blocking; __n_sendto(fd, p, n, ip, port)
 # and __n_recvfrom(fd, p, n, from) -> bytes (or < 0: nothing, failed);
 # __n_send / __n_recv -> bytes (recv: 0 closed), -1 not now, -2 failed; __n_close(fd);
-# __n_resolve(host) -> an IPv4 address as an int (a.b.c.d: a << 24 ...), -1 if unknown
+# __n_resolve(host) -> an IPv4 address as an int (a.b.c.d: a << 24 ...), -1 if unknown (why in
+# __n_resolve_why, when known)
+
+# ---------------- names over DNS (Linux; macOS and Windows ask the system) ----------------
+
+__n_resolve_why = ""
+
+# The IPv4 name servers resolv.conf's text lists, in order. With none listed, this machine's
+# (127.0.0.1), as the C library does; listed but none IPv4: none.
+__n_nameservers = (conf: str) -> int[]:
+    out: int[]
+    listed = false
+    loop line in conf.lines():
+        ws = split(line.replace("\t", " "), " ").filter((w: str): len(w) > 0)
+        if ws.len() >= 2 and ws[0] == "nameserver":
+            listed = true
+            a = __n_ip4(ws[1])
+            if a >= 0: out.push(a)
+    if not listed: out.push(0x7F000001)
+    out
+
+# A query (recursion desired) for host's A record with this id; empty when host is not a name
+# DNS can carry (an empty label, one over 63 bytes, over 253 in all).
+__n_dns_query = (host: str, id: int) -> u8[]:
+    q: u8[] = [u8((id >> 8) & 255), u8(id & 255), 1, 0, 0, 1, 0, 0, 0, 0, 0, 0]
+    h = host
+    if len(h) > 0 and h[len(h) - 1] == '.': h = h[..len(h) - 1)
+    if len(h) == 0 or len(h) > 253: return []
+    loop part in split(h, "."):
+        if len(part) == 0 or len(part) > 63: return []
+        q.push(u8(len(part)))
+        q.extend(bytes(part))
+    q.extend([u8(0), 0, 1, 0, 1])
+    q
+
+# The name at b[at..] (labels, or a pointer back to them), in lower case, and where it ends in b;
+# -1 for that when it is malformed.
+__n_dns_name = (b: u8[], at0: int) -> (str, int):
+    out: u8[]
+    at = at0
+    end = -1
+    hops = 0
+    loop true:
+        if at >= b.len(): return ("", -1)
+        l = int(b[at])
+        if l == 0:
+            if end < 0: end = at + 1
+            break
+        if l & 0xC0 == 0xC0:
+            if at + 1 >= b.len() or hops >= 32: return ("", -1)
+            if end < 0: end = at + 2
+            hops += 1
+            at = ((l & 0x3F) << 8) | int(b[at + 1])
+            continue
+        if l & 0xC0 != 0 or at + 1 + l > b.len(): return ("", -1)
+        if out.len() > 0: out.push('.')
+        loop k in [at + 1..at + 1 + l):
+            c = b[k]
+            if c >= 'A' and c <= 'Z': c += 32
+            out.push(c)
+        if out.len() > 255: return ("", -1)
+        at += 1 + l
+    (str_from_bytes(out), end)
+
+# What a datagram says in answer to query q: the address (>= 0); -1 when it is not a reply to q
+# (another id, question or kind of message: it is ignored, and another awaited); -2 when it is,
+# and gives no address (why in __n_resolve_why). A CNAME's chain is followed to its A record.
+__n_dns_answer = (b: u8[], q: u8[]) -> int:
+    if b.len() < 12 or b[0] != q[0] or b[1] != q[1]: return -1
+    flags = (int(b[2]) << 8) | int(b[3])
+    if flags & 0x8000 == 0 or flags & 0x7800 != 0: return -1      # (a reply, to a standard query)
+    if ((int(b[4]) << 8) | int(b[5])) != 1: return -1
+    asked = __n_dns_name(q, 12)
+    got = __n_dns_name(b, 12)
+    if got.1 < 0 or got.0 != asked.0 or got.1 + 4 > b.len(): return -1
+    loop k in [0..4):
+        if b[got.1 + k] != q[asked.1 + k]: return -1
+    if flags & 0x0200 != 0:
+        __n_resolve_why = "the name server's reply was cut short"
+        return -2
+    rcode = flags & 15
+    if rcode == 3:
+        __n_resolve_why = "the name server knows no such name"
+        return -2
+    if rcode != 0:
+        __n_resolve_why = "the name server failed (code {rcode})"
+        return -2
+    an = (int(b[6]) << 8) | int(b[7])
+    name = asked.0
+    at = got.1 + 4
+    loop _ in [0..an):
+        owner = __n_dns_name(b, at)
+        if owner.1 < 0 or owner.1 + 10 > b.len(): break
+        e = owner.1
+        t = (int(b[e]) << 8) | int(b[e + 1])
+        c = (int(b[e + 2]) << 8) | int(b[e + 3])
+        rl = (int(b[e + 8]) << 8) | int(b[e + 9])
+        at = e + 10
+        if at + rl > b.len(): break
+        if owner.0 == name and c == 1:
+            if t == 1 and rl == 4: return (int(b[at]) << 24) | (int(b[at + 1]) << 16) | (int(b[at + 2]) << 8) | int(b[at + 3])
+            if t == 5:
+                target = __n_dns_name(b, at)
+                if target.1 < 0: break
+                name = target.0
+        at += rl
+    __n_resolve_why = "the name server gives no IPv4 address for it"
+    -2
 
 # a sockaddr_in (16 bytes): family, port and address in network order (macOS: a length first)
 __n_addr = (ip: int, port: int) -> u8[]:
@@ -861,8 +971,9 @@ when TARGET == "linux":
         l = [16]
         syscall(45, fd, p, n, 0, data(from), data(l))
 
-    # a name: an address, localhost, /etc/hosts, then the name server of /etc/resolv.conf
+    # a name: an address, localhost, /etc/hosts, then the name servers of /etc/resolv.conf
     __n_resolve = (host: str) -> int:
+        __n_resolve_why = ""
         ip = __n_ip4(host)
         if ip >= 0: return ip
         if host == "localhost": return 0x7F000001
@@ -875,58 +986,56 @@ when TARGET == "linux":
                 if ws.len() >= 2 and __n_ip4(ws[0]) >= 0:
                     loop w in ws[1..):
                         if w == host: return __n_ip4(ws[0])
-        ns = 0x08080808
-        if let conf = read_file("/etc/resolv.conf"):
-            loop line in conf.lines():
-                t = trim(line)
-                if starts_with(t, "nameserver "):
-                    a = __n_ip4(trim(t[11..]))
-                    if a >= 0:
-                        ns = a
-                        break
-        __n_dns(host, ns)
+        __n_dns(host, __n_nameservers(read_file("/etc/resolv.conf") ?? ""))
 
-    # one question for an A record, over UDP (3 tries, a second each)
-    __n_dns = (host: str, ns: int) -> int:
-        q: u8[] = [0x12, 0x34, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0]
-        loop part in split(host, "."):
-            q.push(u8(len(part)))
-            q.extend(bytes(part))
-        q.extend([u8(0), 0, 1, 0, 1])
-        fd = syscall(41, 2, 2 | 0x80000, 0)                         # socket(AF_INET, SOCK_DGRAM)
-        if fd < 0: return -1
-        a = __n_addr(ns, 53)
+    # (16 random bits, from the system's random source)
+    __n_random16 = () -> int:
+        b = [0]
+        if syscall(318, data(b), 2, 0) != 2:                        # getrandom
+            b[0] = int(u64(time_ns()) * u64(0x9E3779B97F4A7C15) >> 40)
+        b[0] & 0xFFFF
+
+    # Ask the name servers for host's A record over UDP: each in turn, three rounds, up to a
+    # second each. Every query has a random id and goes from a socket of its own on a port the
+    # system picks at random, connected to the server, so only its datagrams arrive; a reply
+    # must match the question. -1 when none gives an address (why in __n_resolve_why).
+    __n_dns = (host: str, servers: int[], port: int = 53) -> int:
+        __n_resolve_why = ""
+        if __n_dns_query(host, 0).len() == 0:
+            __n_resolve_why = "it is not a name"
+            return -1
+        if servers.len() == 0:
+            __n_resolve_why = "/etc/resolv.conf lists no IPv4 name server"
+            return -1
         buf = fill(u8(0), 1500)
         loop _ in [0..3):
-            syscall(44, fd, data(q), q.len(), 0, data(a), 16)
-            pfd = [fd | (1 << 32)]
-            if syscall(7, data(pfd), 1, 1000) <= 0: continue
-            n = syscall(45, fd, data(buf), buf.len(), 0, 0, 0)
-            if n < 12: continue
-            syscall(3, fd)
-            return __n_dns_answer(buf[..n), q.len())
-        syscall(3, fd)
-        -1
-
-    # the first A record of a reply
-    __n_dns_answer = (b: u8[], qlen: int) -> int:
-        an = (int(b[6]) << 8) | int(b[7])
-        at = qlen
-        loop _ in [0..an):
-            if at >= b.len(): return -1
-            # (the name: labels, or a pointer)
-            loop at < b.len() and b[at] != 0:
-                if int(b[at]) & 0xC0 == 0xC0:
-                    at += 1
-                    break
-                at += int(b[at]) + 1
-            at += 1
-            if at + 10 > b.len(): return -1
-            t = (int(b[at]) << 8) | int(b[at + 1])
-            rl = (int(b[at + 8]) << 8) | int(b[at + 9])
-            at += 10
-            if t == 1 and rl == 4 and at + 4 <= b.len(): return (int(b[at]) << 24) | (int(b[at + 1]) << 16) | (int(b[at + 2]) << 8) | int(b[at + 3])
-            at += rl
+            loop ns in servers:
+                q = __n_dns_query(host, __n_random16())
+                fd = syscall(41, 2, 2 | 0x80000, 0)                 # socket(AF_INET, SOCK_DGRAM | CLOEXEC)
+                if fd < 0:
+                    __n_resolve_why = "no socket could be made"
+                    return -1
+                local = __n_addr(0, 0)
+                a = __n_addr(ns, port)
+                if syscall(49, fd, data(local), 16) != 0 or syscall(42, fd, data(a), 16) != 0 or syscall(44, fd, data(q), q.len(), 0, 0, 0) != q.len():
+                    syscall(3, fd)
+                    continue
+                deadline = time_ns() + 1000000000
+                loop true:
+                    left = (deadline - time_ns()) / 1000000
+                    if left <= 0: break
+                    pfd = [fd | (1 << 32)]
+                    if syscall(7, data(pfd), 1, left) <= 0: break
+                    n = syscall(45, fd, data(buf), buf.len(), 0, 0, 0)
+                    if n == -4: continue
+                    if n < 0: break                                 # (refused: no server there)
+                    r = __n_dns_answer(buf[..n), q)
+                    if r == -1: continue                            # (not the reply: another may come)
+                    syscall(3, fd)
+                    if r >= 0: return r
+                    return -1
+                syscall(3, fd)
+        __n_resolve_why = "no name server answered"
         -1
 
 when TARGET == "macos":
