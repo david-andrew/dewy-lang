@@ -795,10 +795,11 @@ next_normal = (r: mut Rng, mean: f64 = 0.0, sd: f64 = 1.0) -> f64:
     u = 1.0 - next_float(r)
     mean + sd * sqrt(-2.0 * log(u)) * cos(TAU * next_float(r))
 
-# uniform int in [lo, hi)
+# uniform int in [lo, hi) (hi above lo: an empty range has no number to give)
 next_int = (r: mut Rng, lo: int, hi: int) -> int:
-    if hi <= lo: return lo
-    lo + int(next_u64(r) % u64(hi - lo))
+    if hi <= lo: panic("next_int({lo}, {hi}): the range [{lo}..{hi}) is empty")
+    __next_int_from(r, lo, hi)
+__next_int_from = (r: mut Rng, lo: int, hi: int) -> int: lo + int(next_u64(r) % u64(hi - lo))
 
 # an element of xs (not empty), from r
 next_item[T] = (r: mut Rng, xs: T[]) -> T:
@@ -815,19 +816,17 @@ shuffle[T] = (r: mut Rng, xs: mut T[]):
         xs[j] = t
         i -= 1
 
-# The random numbers differ from run to run: random() starts from the clock, the first time
-# it is used. seed_random(n) makes them the same every run (for a level made from a seed, a
-# replay, a test); so do SLOPPY_SEED=n and, for screenshots, SLOPPY_SCREENSHOT.
+# The random numbers differ from run to run: random() starts from a seed the operating system
+# gives, the first time it is used. seed_random(n), or an Rng of its own (rng(seed)), makes them
+# the same every run (for a level made from a seed, a replay, a test). They are not for secrets:
+# keys, tokens and nonces come from crypto.random_bytes.
 __global_rng = rng(12345)
 __rng_seed = 12345
 __rng_ready = false
 
 __rng_start = ():
     __rng_ready = true
-    seed = 0
-    if let s = env("SLOPPY_SEED"): seed = to_int(s) ?? 12345
-    else if env("SLOPPY_SCREENSHOT") != none: seed = 12345
-    else: seed = time_ns()
+    seed = __entropy_word() as int
     __rng_seed = seed
     __global_rng = rng(seed)
 
@@ -866,14 +865,18 @@ random_normal = (mean: f64 = 0.0, sd: f64 = 1.0) -> f64:
     u = 1.0 - random()
     mean + sd * sqrt(-2.0 * log(u)) * cos(TAU * random())
 # a random whole number from lo up to hi, hi left out (as in [lo..hi)): random_int(0, xs.len())
-# picks a position, and a die is random_int(1, 7)
+# picks a position, and a die is random_int(1, 7). hi must be above lo (Dewy's prelude makes
+# that an obligation: lib/prelude/random.dewy).
 random_int = (lo: int, hi: int) -> int:
+    if hi <= lo: panic("random_int({lo}, {hi}): the range [{lo}..{hi}) is empty")
+    __random_int_from(lo, hi)
+__random_int_from = (lo: int, hi: int) -> int:
     when not BOOTSTRAP:
-        if __task_slot() >= 0: return next_int(__task_context().rng, lo, hi)
+        if __task_slot() >= 0: return __next_int_from(__task_context().rng, lo, hi)
     t = __tid()
-    if (t != 0 or __rng_in_job) and t * 4 < __thread_rngs.len(): return next_int(__thread_rngs[t * 4], lo, hi)
+    if (t != 0 or __rng_in_job) and t * 4 < __thread_rngs.len(): return __next_int_from(__thread_rngs[t * 4], lo, hi)
     if not __rng_ready: __rng_start()
-    next_int(__global_rng, lo, hi)
+    __next_int_from(__global_rng, lo, hi)
 # a random element of xs (which must not be empty)
 random_item[T] = (xs: T[]) -> T:
     if xs.len() == 0: panic("random_item of an empty array")

@@ -1,0 +1,7 @@
+# Under $runtime_checks=false an unproven range is a compile error; a guard proves it.
+$runtime_checks=false
+pick=(xs:array<int64>):>int64=>{
+    if xs.length >? 0 return xs[random_int(0 xs.length)]
+    return 0
+}
+main=(args:array<string>)=>printl(random_int(0 args.length-1)+pick([1]))

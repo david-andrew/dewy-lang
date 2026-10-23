@@ -3421,6 +3421,19 @@ values check the stride as well as the bounds, without constructing an array.
 Custom containers can provide a `contains(container, needle):>bool` overload;
 a callable field named `contains` is not used by membership.
 
+Random numbers: `random()` gives a float in `[0, 1)`, `random_int(lo hi)` a
+whole number in `[lo..hi)`, and `rng(seed)` a generator of its own whose
+`next_int(lo hi)`, `next_float()` and friends repeat for the same seed. The
+shared generator is seeded once per process from the operating system's random
+source; `seed_random(n)` (or an `Rng`) makes a run repeatable. An empty range has
+no number to give, so `hi >? lo` is an obligation of `random_int` and
+`next_int`: a refuted one (`random_int(10 3)`) is a compile error, and an
+unproven one follows the obligation settings. These generators are predictable
+from their state and are not for secrets: keys, tokens and nonces come from
+`crypto.random_bytes(n)` (`import crypto`), which reads the operating system's
+secure random source (getrandom, getentropy, RtlGenRandom, or
+`crypto.getRandomValues` on the web).
+
 ## Directives
 
 A setting is a metatag on a line of its own: `$name` or `$name=true` turns it

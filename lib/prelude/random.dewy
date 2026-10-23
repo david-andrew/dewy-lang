@@ -1,0 +1,11 @@
+# Dewy's prelude: random whole numbers. Every Dewy module sees `random_int` and Rng's
+# `next_int` unless it declares its own. A range [lo..hi) with nothing in it has no number to
+# give, so `hi >? lo` is an obligation like any refinement: proven where the arguments show it
+# (`random_int(1 7)`), a runtime check where they do not (under `$runtime_checks`, today's
+# default), a compile error under `$runtime_checks=false`.
+
+# a random whole number from lo up to hi, hi left out: random_int(0 xs.length) picks a position
+random_int = (lo:int64 hi:int64<(>? lo)>):>int64 => __random_int_from(lo hi)
+
+# the same from an Rng of one's own (rng(seed): the same numbers every run)
+next_int = (@r:Rng lo:int64 hi:int64<(>? lo)>):>int64 => __next_int_from(@r lo hi)

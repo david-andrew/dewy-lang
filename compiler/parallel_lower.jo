@@ -178,7 +178,7 @@ parallel_context_fn = (f: int, seen: mut {int: bool}) -> bool:
     if d == 0 or has_flag(d, NF_EXTERN): return false
     if modules[int(fns[f].mod)].is_prelude:
         name = name_of(int(nodes[d].name))
-        if name == "random" or name == "random_int" or name == "seed_random": return false
+        if name == "random" or name == "random_int" or name == "__random_int_from" or name == "seed_random": return false
         if name == "parallel_range" or name == "__dewy_parallel_collect" or name == "__dewy_parallel_each" or name == "parallel_map" or name == "parallel_update": return true
     parallel_context_free(int(fns[f].body), seen)
 
