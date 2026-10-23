@@ -1,0 +1,88 @@
+# A compiler's name table: the words of a text interned, each distinct word once,
+# by number. Words are hashed a word at a time through the text's pointer, found in
+# an open-addressing table and compared as byte ranges of the text in place.
+from p"harness.dewy" import size_argument, clock, mix
+
+NameTable:type=[
+    names:array<array<uint8>>   # by id
+    hashes:array<int64>         # by id
+    slots:array<int64>          # id + 1 by hash; 0 is empty
+]
+
+# `count` words of 1-12 lowercase letters from a vocabulary of about 5000, separated by spaces
+generate = (count:int64):>array<uint8> => {
+    let text:array<uint8>=[]
+    let seed:int64=99
+    loop i in [0..count) {
+        seed=(seed*1103515245+12345)%2147483648
+        let word=seed%5003
+        let size=word%12+1
+        let letters=word
+        loop j in [0..size) {
+            text.push((97+letters%26) as uint8)
+            letters=letters//3+j
+        }
+        text.push(32 as uint8)
+    }
+    return text
+}
+
+# p[0..n) hashed eight bytes at a time, then byte by byte
+hash_bytes = (p:ptr<uint8> n:int64):>int64 => {
+    $unsafe
+    let h:uint64=(n transmute uint64) * 0x9E3779B97F4A7C15
+    let i=0
+    loop i + 8 <? n {
+        h=(h xor ((p + i) as ptr<uint64>)[0]) * 0xBF58476D1CE4E5B9
+        h=h xor (h >> 31)
+        i+=8
+    }
+    loop i <? n {
+        h=(h xor uint64(p[i])) * 0x100000001B3
+        i+=1
+    }
+    h=h * 0xBF58476D1CE4E5B9
+    ((h xor (h >> 32)) >> 1) transmute int64
+}
+
+# the id of text[start..start + n), made if it is new
+intern = (@t:NameTable text:array<uint8> bytes:ptr<uint8> start:int64 n:int64):>int64 => {
+    $unsafe
+    let h=hash_bytes(bytes + start n)
+    let mask=t.slots.length-1
+    let at=h & mask
+    loop t.slots[at] not=? 0 {
+        let id=t.slots[at]-1
+        if t.hashes[id] =? h and t.names[id] =? text[start..start + n) {return id}
+        at=(at+1) & mask
+    }
+    let id=t.names.length
+    t.names.push(text[start..start + n))
+    t.hashes.push(h)
+    t.slots[at]=id+1
+    return id
+}
+
+kernel = (text:array<uint8>):>int64 => {
+    $unsafe
+    let bytes=text.ptr
+    let t:NameTable=[names=[] hashes=[] slots=fill(int64(0) 16384)]
+    let result:int64=7
+    let i=0
+    loop i <? text.length {
+        let start=i
+        loop i <? text.length and text[i] not=? 32 {i+=1}
+        result=mix(result intern(@t text bytes start i - start))
+        i+=1
+    }
+    return mix(result t.names.length)
+}
+
+main = (args:array<string>):>void => {
+    let count=size_argument(args 1000000)
+    let text=generate(count)
+    let started=clock()
+    let result=kernel(text)
+    let finished=clock()
+    printl"{result} {finished-started}"
+}
