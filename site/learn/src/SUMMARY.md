@@ -5,6 +5,7 @@
 ## Meet Dewy
 
 - [Dewy at a Glance](pitch.md)
+- [Safer than Rust](safer-than-rust.md)
 - [Getting Started](ch01/00-getting-started.md)
   - [Installation](ch01/01-installation.md)
   - [Your First Dewy Program](ch01/02-hello-world.md)
