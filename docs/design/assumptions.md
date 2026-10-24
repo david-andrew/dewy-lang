@@ -14,7 +14,6 @@ bundle that turns every entry off. Spellings marked *pending* await David.
 | A failure of the environment inside the library (a graphics driver refusing a call, no pipes for the test runner, standard input ending before `input_int`/`input_float` get a number: `__environment_failure`) is environmental, not `panics` | effects (`panics`) | *pending* |
 | Library code's own obligations stay runtime checks under a static user policy | facts policy | *pending* |
 | The library's raw-memory code is trusted by the arena escape check | ownership (arenas) | *pending* |
-| The library's own drop hooks (a lock guard releasing its word) cannot fail | ownership (hooks: compiler/ownership.jo) | *pending* |
 | `$runtime_assert` within one module does not make that module's own callers `panics` (a scoping assumption, not an assumed bound: `$no_assumed_bounds` does not cover it) | effects (`panics`) | `$assume_local_asserts=false` (spelling provisional; `$bulletproof` should include it) |
 | A path taken whole (from arguments, the environment, input or anywhere else) has no base to escape: the file-system operations' `$warn_if path isnt? SafePath` takes it as safe | contained paths (compiler/safe_paths.jo) | `$confine_external_paths` (spelling provisional; `$bulletproof` should include it) |
 | `$no_inf` takes values entering its scope (parameters, fields, elements, call results) as finite; `$no_nan` no longer assumes them | floats (compiler/floats.jo) | *pending* |

@@ -99,9 +99,6 @@ ownership_finalize = ():
     loop f in hooks:
         role = ownership_hooks[int(fns[f].decl)]
         name = if role == 1: "drop" else if role == 2: "copy" else: "move"
-        # (a library's own drop hook, as a lock guard's release over raw words, is trusted:
-        # docs/design/assumptions.md)
-        if role == 1 and pos_in_lib(nodes[int(fns[f].decl)].pos): continue
         if not effects_demand(f): fatal(nodes[int(fns[f].decl)].pos, "{name} hook has no proven no-failure summary")
         loop event in effect_summaries[f].events:
             k = event.atom.kind
@@ -359,20 +356,11 @@ ownership_validate_node = (n: int, f: int):
                 fatal(nodes[n].pos, "cannot replace a borrowed owner")
         else if nodes[target].kind != .index or tkind(ntype(int(nodes[target].a))) != .array:
             fatal(nodes[n].pos, "owner replacement requires a whole local or growable array element")
-    if k == .defer_ and ownership_functions.has(f) and ownership_defer_conflict(f):
+    if k == .defer_ and ownership_functions.has(f):
         fatal(nodes[n].pos, "an owner with defer requires a unified defer unwind plan; transfer is not proven safe")
     if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_type(ntype(n)) and not ownership_copyable(ntype(n)):
         fatal(nodes[n].pos, "cannot copy a move-only owner: no $__copy__ hook")
     loop c in copy_children(n): ownership_validate_node(c, f)
-
-# An owner beside a defer, other than the hidden guard of a place a method lent
-# (`let a = @(m.lock())`: compiler/place_methods.jo), which is never moved but
-# into its release at the place's last use, and otherwise dropped with its block
-# after the block's defers, as every scope exit already orders them.
-ownership_defer_conflict = (f: int) -> bool:
-    loop l in fns[f].locals:
-        if ownership_type(int(locals[l].type)) and not starts_with(name_of(int(locals[l].name)), "$guard"): return true
-    false
 
 ownership_validate = ():
     if ownership_decls.len() == 0: return

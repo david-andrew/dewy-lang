@@ -1,0 +1,18 @@
+# The compiler's targets.dewy: `targets name...` prints the four tables, then for each
+# name its processor and system and, from each host, why it cannot be compiled for.
+$runtime_checks
+from p"../../../compiler/targets.dewy" import target_names, supported_target_names, target_arches, target_oses, target_arch_of, target_os_of, target_problem
+
+main=():>void=>{
+    printl(target_names().join(" "))
+    printl(supported_target_names().join(" "))
+    printl(target_arches().join(" "))
+    printl(target_oses().join(" "))
+    let hosts=["x86_64-linux" "aarch64-linux" "aarch64-mac" "x86_64-windows"]
+    let words=args()
+    loop i in [1..words.length) {
+        let name=words[i]
+        printl"{name}|{target_arch_of(name)}|{target_os_of(name)}"
+        loop host in hosts {printl"  {host}|{target_problem(name host)}"}
+    }
+}

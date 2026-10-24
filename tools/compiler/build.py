@@ -25,7 +25,7 @@ ROOT = HERE.parents[1]
 # compile the Dewy modules, so the compiler that ships runs them.
 FROZEN_TWINS = {'zip.dewy': 'zip.jo', 'spelling.dewy': 'spelling.jo', 'leb128.dewy': 'leb128.jo',
                'base64.dewy': 'base64.jo', 'line_table.dewy': 'line_table.jo', 'sha.dewy': 'sha.jo',
-               'icns.dewy': 'icns.jo'}
+               'icns.dewy': 'icns.jo', 'targets.dewy': 'targets.jo'}
 
 
 def identity(path: Path) -> str:

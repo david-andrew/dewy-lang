@@ -1,0 +1,63 @@
+# Target names (docs/LANGUAGE.md, "Targets"). A name has only the fields it needs:
+# the processor (or `c`, `wasm32`), then the system. A processor alone asks for the
+# current machine.
+#
+# A module of the compiler written in Dewy. targets.jo is its frozen twin for the
+# compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
+# interface and give the same answers (tests/test_selfhost_targets.py). The host's
+# name and the build settings are settings.jo's.
+
+target_names=():>array<string>=>[
+    "x86_64" "riscv64" "aarch64" "c"
+    "x86_64-freestanding" "riscv64-freestanding" "aarch64-freestanding" "c-freestanding"
+    "x86_64-linux" "riscv64-linux" "aarch64-linux" "c-linux"
+    "x86_64-mac" "aarch64-mac"
+    "x86_64-windows" "riscv64-windows" "aarch64-windows" "c-windows"
+    "c-posix" "c89" "wasm32"
+]
+
+# The targets this compiler has a backend for.
+supported_target_names=():>array<string>=>["x86_64-linux" "aarch64-linux" "aarch64-mac" "x86_64-windows" "wasm32"]
+
+target_arches=():>array<string>=>["x86_64" "riscv64" "aarch64" "c" "wasm32"]
+target_oses=():>array<string>=>["linux" "mac" "windows" "freestanding" "posix" "none"]
+
+# A target name's fields: its processor (c89 is C's) and its system (none when it names
+# none), split at the first dash
+target_arch_of=(name:string):>string=>{
+    if name =? "c89" {return "c"}
+    let b=name as array<uint8>
+    loop i in [0..b.length) {
+        if b[i] =? b'-' {return name.byte_slice(0 i)}
+    }
+    name
+}
+
+target_os_of=(name:string):>string=>{
+    let b=name as array<uint8>
+    loop i in [0..b.length) {
+        if b[i] =? b'-' {return name.byte_slice(i + 1 b.length)}
+    }
+    "none"
+}
+
+# Why a requested target (a command line's or the main file's) cannot be compiled for,
+# or "" when it can. host is the full name of the machine compiling.
+target_problem=(name:string host:string):>string=>{
+    let supported=supported_target_names
+    if name in? supported {return ""}
+    let listed=supported.join(", ")
+    if name in? target_names {
+        if name =? target_arch_of(host) {return ""}
+        if "{name}-linux" in? supported {return "target '{name}' (a processor alone) means this machine, which is {host}: name the system too, as {name}-linux"}
+        return "target '{name}' is not supported yet (the supported targets are {listed})"
+    }
+    let old=""
+    if name =? "native" {old="; the current machine is the default, or its processor names it: {target_arch_of(host)}"}
+    else if name =? "linux" {old="; Linux on x86-64 is x86_64-linux"}
+    else if name =? "linux-arm64" or name =? "arm" or name =? "arm64" {old="; Linux on 64-bit ARM is aarch64-linux"}
+    else if name =? "macos" or name =? "mac" {old="; macOS on Apple's processors is aarch64-mac"}
+    else if name =? "windows" {old="; Windows on x86-64 is x86_64-windows"}
+    else if name =? "wasm" or name =? "web" {old="; WebAssembly is wasm32"}
+    "unknown target '{name}' (the supported targets are {listed}){old}"
+}

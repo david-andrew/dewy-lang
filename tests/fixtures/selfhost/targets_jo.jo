@@ -1,0 +1,14 @@
+# The compiler's frozen targets.jo, with the same command line as targets_dewy.dewy.
+use '../../../compiler/targets.jo'
+
+main = ():
+    print(join(target_names(), " "))
+    print(join(supported_target_names(), " "))
+    print(join(target_arches(), " "))
+    print(join(target_oses(), " "))
+    hosts = ["x86_64-linux", "aarch64-linux", "aarch64-mac", "x86_64-windows"]
+    words = args()
+    loop i in [1..words.len()):
+        name = words[i]
+        print("{name}|{target_arch_of(name)}|{target_os_of(name)}")
+        loop host in hosts: print("  {host}|{target_problem(name, host)}")

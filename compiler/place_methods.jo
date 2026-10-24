@@ -24,8 +24,6 @@ use 'check.jo'
 use 'expr.jo'
 use 'util.jo'
 use 'sibling_types.jo'
-use 'lex.jo'
-use 'deadlock.jo'
 
 struct PlaceMethod:
     route: int[]          # member names from the object down to the place
@@ -33,7 +31,6 @@ struct PlaceMethod:
     fails: bool = false   # may give another value first: `m` decides, `m$acquire` holds
     guards: int = 0       # locals held while the place is live (0: nothing to release)
     release: int = 0      # the name of the method dropping them, `m$release`
-    at: int = 0           # where the method gives its place (a library's route is the library's)
 
 place_methods: {int: PlaceMethod}   # method declaration -> how it lends its place
 place_written: {int: int}           # function -> its written place type (dw_function)
@@ -101,32 +98,20 @@ place_receiver = (recv: int, pos: int) -> str:
     place_count += 1
     rn = "$recv{place_count}"
     r = clone(recv)
-    # (a lock's handle is shared: its payload is reached through it, so a copy of the handle
-    # lends the same place, and a closure taking the lock does not change what it captured)
-    if place_shared_receiver(recv): clear_flag(r, NF_MUT | NF_AT)
-    else: add_flag(r, NF_MUT | NF_AT)
+    add_flag(r, NF_MUT | NF_AT)
     d = bc_let(rn, r, pos)
     check_vardecl(d)
     # (an index key is evaluated once: the declaration became that key's binding)
     place_hidden.push(d)
     rn
 
-place_shared_receiver = (recv: int) -> bool:
-    probe = clone(recv)
-    t = prune(check_expr(probe, 0))
-    if tkind(t) != .struct_: return false
-    d = int(structs[int(types[t].st)].decl)
-    d != 0 and name_of(int(nodes[d].name)) == "Mutex" and files[pos_file(nodes[d].pos)].path == lib_dir + "/prelude/locks.dewy"
-
 place_hidden: int[]   # statements the receiver's binding made, to keep in the block
 
 # The checked place `let name = $recvN.route`; its local.
-place_alias = (name: int, rn: str, info: PlaceMethod, pos: int) -> int:
+place_alias = (name: int, rn: str, route: int[], pos: int) -> int:
     e = bc_ident(rn, pos)
-    # (a library type's route, `__h.__p.value` of Mutex, is its own: checked where it is written)
-    at = if info.at > 0 and pos_in_lib(info.at): info.at else: pos
-    loop f in info.route:
-        fe = mk(.field, at)
+    loop f in route:
+        fe = mk(.field, pos)
         nodes[fe].a = i32(e)
         nodes[fe].name = i32(f)
         e = fe
@@ -152,7 +137,6 @@ place_written_check = (info: PlaceMethod, decl: int, g: int, l: int, pos: int):
 
 # `let a = @(recv.m(args))`, as a statement of sibling_block. false when s is something else.
 place_let_decl = (s: int) -> bool:
-    if lock_all_decl(s): return true
     init = int(nodes[s].b)
     if init == 0 or nodes[init].kind != .call or nodes[init].aux2 != i32(AUX2_PLACE): return false
     pos = nodes[s].pos
@@ -160,17 +144,6 @@ place_let_decl = (s: int) -> bool:
     b = sibling_block
     i = sibling_index
     if b == 0 or i >= nkids(b) or kid(b, i) != s: fatal(pos, "a returned place is taken by a statement of its own: `let a = @(acct.lock())`")
-    stmts = place_take(int(nodes[s].name), init, b, i, pos, 0)
-    block = bc_block(stmts, pos)
-    nodes[block].aux = 5
-    nodes[s] = nodes[block]
-    true
-
-# The checked statements binding name to the place `@(recv.m(args))` (init) lends, at statement i
-# of block b: the receiver's binding, the guard, and its release when the place is never used
-# after i (otherwise the release follows the statement of its last use, there in b). outer: a
-# root the receiver aliases (lock_all's), checked as the receiver's own.
-place_take = (name: int, init: int, b: int, i: int, pos: int, outer: int) -> int[]:
     parts = place_call_parts(init)
     recv = parts.0
     root = place_root_name(recv)
@@ -188,93 +161,22 @@ place_take = (name: int, init: int, b: int, i: int, pos: int, outer: int) -> int
     if not place_methods.has(decl): fatal(nodes[init].pos, "'{name_of(parts.1)}' gives a value, not a place: drop the `@(...)`")
     info = place_methods[decl]
     if info.fails: fatal(nodes[init].pos, "'{name_of(parts.1)}' may give another value instead of its place: `match @(...) \{...}` takes both")
-    # (a lock taken: the deadlock analysis runs over this function, compiler/deadlock.jo)
-    if files[pos_file(nodes[decl].pos)].path == lib_dir + "/prelude/locks.dewy": deadlock_fns[int(ctxs[cx].inst)] = true
-    l = place_alias(name, rn, info, pos)
+    name = int(nodes[s].name)
+    l = place_alias(name, rn, info.route, pos)
     place_written_check(info, decl, g, l, pos)
     stmts = hidden + [g]
     last = place_range(b, i, name, root, pos)
-    if outer != 0:
-        loop j in [i + 1..last + 1): place_scan(kid(b, j), name, outer, false, false)
     if info.guards > 0:
         release = bc_stmt(place_member_call(init, rn, name_of(info.release), pos), pos)
         set_list(int(nodes[release].a), [bc_ident(gn, pos)])
-        if last == i:
-            check_stmt(release)
-            stmts.push(release)
+        if last == i: stmts.push(release)
         else if last < nkids(b) - 1 and not stmt_terminates(kid(b, last)):
             wrap = bc_block([kid(b, last), release], pos)
             nodes[wrap].aux = 5
             set_kid(b, last, wrap)
-    stmts
-
-# `let [a b] = @(lock_all(from to)) or_throw` (decisions.md, multi-lock spelling): every lock
-# acquired at once in one canonical order (their words' addresses, lib/std/thread.jo), then each
-# place taken as `let a = @(from.__take())` takes an already held lock, released after its own
-# last use. A lock given twice is `DuplicateLock` and cancellation while waiting is `Canceled`,
-# with nothing held either way. false when s is something else.
-lock_all_decl = (s: int) -> bool:
-    init = int(nodes[s].b)
-    if init == 0: return false
-    thrown = nodes[init].kind == .propagate
-    call = if thrown: int(nodes[init].a) else: init
-    if nodes[call].kind != .call or nodes[call].aux2 != i32(AUX2_PLACE): return false
-    callee = int(nodes[call].a)
-    if nodes[callee].kind != .ident or name_of(int(nodes[callee].name)) != "lock_all": return false
-    pos = nodes[s].pos
-    if not thrown: fatal(nodes[call].pos, "lock_all may give `DuplicateLock` or `Canceled` instead of its places: `let [a b] = @(lock_all(from to)) or_throw`")
-    binds = kids(s)
-    if nodes[s].a != 0 or binds.len() == 0 or has_flag(s, NF_GLOBAL): fatal(pos, "lock_all's places are bound by name, one for each lock: `let [a b] = @(lock_all(from to)) or_throw`")
-    loop nm in binds:
-        if nodes[nm].kind != .ident and nodes[nm].kind != .hole: fatal(nodes[nm].pos, "lock_all's places are bound by name, one for each lock: `let [a b] = @(lock_all(from to)) or_throw`")
-    args = kids(call)
-    if args.len() != binds.len(): fatal(pos, "lock_all takes {args.len()} lock(s) here and the pattern names {binds.len()} place(s): one name for each lock")
-    if args.len() < 1: fatal(pos, "lock_all takes the locks to hold: `lock_all(from to)`")
-    b = sibling_block
-    i = sibling_index
-    if b == 0 or i >= nkids(b) or kid(b, i) != s: fatal(pos, "lock_all's places are taken by a statement of their own: `let [a b] = @(lock_all(from to)) or_throw`")
-    stmts: int[]
-    receivers: str[]
-    roots: int[]
-    loop a in args:
-        k = nodes[a].kind
-        if k != .ident and k != .field and k != .index: fatal(nodes[a].pos, "lock_all takes locks in variables, fields or elements: bind it first (`let m = ...`)")
-        rsym = lookup(place_root_name(a))
-        if place_root_name(a) != 0 and rsym != 0 and syms[rsym].kind == .global: fatal(nodes[a].pos, "lock_all takes locks in local variables or parameters for now: '{name_of(place_root_name(a))}' is a global, which a call could replace while its place lives")
-        roots.push(place_root_name(a))
-        receivers.push(place_receiver(a, nodes[a].pos))
-        loop h in place_hidden: stmts.push(h)
-        place_hidden = []
-    # (the words in one array; the first lock's type decides, giving DuplicateLock or Canceled)
-    words = mk(.array, pos)
-    items: int[]
-    loop rn in receivers:
-        w = bc_method(bc_ident(rn, pos), "__word", [], pos)
-        add_flag(int(nodes[w].a), NF_LOOPCOUNT)
-        items.push(w)
-    set_list(words, items)
-    status = bc_method(bc_ident(receivers[0], pos), "__lock_all", [words], pos)
-    add_flag(int(nodes[status].a), NF_LOOPCOUNT)
-    p = mk(.propagate, nodes[init].pos)
-    nodes[p].a = i32(status)
-    discard = mk(.assign, pos)
-    nodes[discard].op = i32(int(Tok.assign))
-    nodes[discard].a = i32(mk(.hole, pos))
-    nodes[discard].b = i32(p)
-    st = discard
-    check_stmt(st)
-    stmts.push(st)
-    loop j in [0..binds.len()):
-        nm = binds[j]
-        if nodes[nm].kind == .hole:
-            place_count += 1
-            nodes[nm].name = i32(intern("$unused{place_count}"))
-        take = bc_method(bc_ident(receivers[j], pos), "__take", [], nodes[args[j]].pos)
-        add_flag(int(nodes[take].a), NF_LOOPCOUNT)
-        nodes[take].aux2 = i32(AUX2_PLACE)
-        loop t in place_take(int(nodes[nm].name), take, b, i, pos, roots[j]): stmts.push(t)
     block = bc_block(stmts, pos)
     nodes[block].aux = 5
+    if last == i and info.guards > 0: check_stmt(stmts[stmts.len() - 1])
     nodes[s] = nodes[block]
     true
 
@@ -314,10 +216,7 @@ place_scan = (n: int, name: int, root: int, arg: bool, closure: bool):
     # (taking a second place by `let` from the same object is re-acquiring it; `match @(x.try_lock())`
     # decides at run time, as `Busy`)
     if root != 0 and k == .vardecl and nodes[n].b != 0 and place_lends(int(nodes[n].b), root):
-        # (two locks reached from one variable, as two elements of an array: taken together)
-        method = name_of(int(nodes[int(nodes[int(nodes[n].b)].a)].name))
-        both = if method == "lock": "; to hold two locks at once, take them together: `let [a b] = @(lock_all(x y)) or_throw`" else: ""
-        fatal(nodes[int(nodes[n].b)].pos, "'{name_of(root)}' already lends the place '{nm}' until its last use: a second place from it waits until then{both}")
+        fatal(nodes[int(nodes[n].b)].pos, "'{name_of(root)}' already lends the place '{nm}' until its last use: a second place from it waits until then")
     inner = closure or k == .lambda or k == .fn_
     place_scan(int(nodes[n].a), name, root, false, inner)
     place_scan(int(nodes[n].b), name, root, false, inner)
@@ -348,9 +247,8 @@ place_match = (m: int, expected: int) -> int:
     info = place_methods[place_call_decl]
     if not info.fails: fatal(nodes[call].pos, "'{mname}' always gives its place: take it with `let a = @(x.{mname}())`")
     route = clone(recv)
-    at = if info.at > 0 and pos_in_lib(info.at): info.at else: pos
     loop f in info.route:
-        fe = mk(.field, at)
+        fe = mk(.field, pos)
         nodes[fe].a = i32(route)
         nodes[fe].name = i32(f)
         route = fe

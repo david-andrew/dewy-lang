@@ -118,6 +118,21 @@ word doubled into a `uint64<overflow='wrap'>`, computing that once per sigma: 1.
 (release 1.407 / 1.491 G) hashing 10 MB by pages. SHA-1 is 0.949 / 1.045 G. An aarch64-mac
 build of the compiler takes 1.5% fewer instructions and writes the same bytes.
 
+`targets.dewy` (the target names: their tables, a name's processor and system, and why a
+requested target cannot be built) is the first text leaf and the first user of
+`s.byte_slice(a b)`. The rest of the old targets.jo is `settings.jo`'s: the host's name
+(read from the compiler's own executable) and the command line's and main file's
+settings, globals that Sloppy code sets. Its gaps:
+- A proven `byte_slice` still calls the library's checked `__dewy_byte_slice`, which
+  checks the bounds and both boundary bytes again before the string slice checks the
+  bounds once more: about 430 instructions a 10-byte slice against Sloppy's 355 (release
+  335 / 275).
+- The facts do not know that the byte after an ASCII byte starts a character, so after a
+  guard `b[i] =? b'-'`, `name.byte_slice(0 i)` is proven but `name.byte_slice(i + 1 n)` is
+  a run-time check. Its diagnostic prints that end as an empty `` `` ``.
+- A bare zero-argument function name calls before `.length`, `.join` and `[i]`, but not
+  before a member call with arguments: `target_names.join(", ")` is "has no member 'join'".
+
 Open gaps from these leaves, by cost:
 - A literal beside a policy-typed operand (`w + 1`, `w & 0xFF`, `w xor 0xFFFFFFFF`) goes
   through `int` and `__mi_low_word`, about 30 instructions in place of one. Plain `uint32`
@@ -135,8 +150,9 @@ Open gaps from these leaves, by cost:
 Gaps met on the way, and since closed: `bytes as string ?? ""` converts to
 `string | none` and falls back; `fill(v n)` is documented; Sloppy takes a Dewy
 string-literal union as its enum. Still open: the intern table (`hash_bytes`) as a leaf
-costs +0.5–0.8% on the panel (lex+parse +2%): a new name needs a byte-range substring
-Dewy lacks (copy loop, UTF-8 check, conversion: ~600 instructions against Sloppy's ~250), and
+costs +0.5–0.8% on the panel (lex+parse +2%): a new name needed a byte-range substring
+Dewy lacked (copy loop, UTF-8 check, conversion: ~600 instructions against Sloppy's ~250;
+`byte_slice` now, at about 1.2x Sloppy's, see `targets.dewy` above), and
 Sloppy retains a string passed beside a `mut` place (~20 instructions a call).
 
 ## Decided rules
