@@ -7313,6 +7313,25 @@ values_record = (callee: int) -> int:
     check_struct_fields(si)
     si
 
+# The written type of parameter i that every function in decls taking nargs positional
+# arguments has (none of them generic there, mutable or keyword-only), or 0
+fns_param_hint = (decls: int[], i: int, nargs: int) -> int:
+    hint = 0
+    loop d in decls:
+        np = nkids(d)
+        if np < nargs: continue
+        if (dewy_param_kinds.get(d) ?? []).len() > 0: return 0
+        takes = true
+        loop j in [nargs..np):
+            if nodes[kid(d, j)].b == 0: takes = false
+        if not takes: continue
+        sig = fn_sig(d)
+        if int(sig.mutmask) & (1 << i) != 0: return 0
+        pt = prune(sig.params[i])
+        if pt == 0 or has_var(pt) or hint != 0 and not type_eq(hint, pt): return 0
+        hint = pt
+    hint
+
 # A Dewy call some of whose arguments give several values (or spread a container): checked
 # with its arguments expanded, as `{ held...; f(values...) }`. -1: nothing to expand.
 values_call = (n: int, expected: int) -> int:
@@ -7325,11 +7344,16 @@ values_call = (n: int, expected: int) -> int:
     # checked here as an untyped argument would be anyway, its own pack noted)
     some = false
     record = values_record(callee)
+    positional = true
+    fn_decls_read = 0
+    fn_decls: int[]
     loop i in [0..nkids(n)):
         a = kid(n, i)
         if nodes[a].kind == .call and members_named(a): members_argument(a)
         k = nodes[a].kind
-        if k == .namedarg: record = 0
+        if k == .namedarg:
+            record = 0
+            positional = false
         if k == .tuple and nodes[a].aux == i32(TUPLE_VALUES) or has_flag(a, NF_SPREAD) or values_hits.has(a):
             some = true
             break
@@ -7345,6 +7369,14 @@ values_call = (n: int, expected: int) -> int:
             # a function's parameter is once its overload is chosen)
             field = 0
             if record != 0 and i < int(structs[record].nfields): field = representation_type(int(fields[int(structs[record].fields) + i].type))
+            # (a function's parameter, when every function of the name these arguments could
+            # reach has the same written type there: `f(set(['load']))` with f taking a set<Op>)
+            else if record == 0 and positional and nodes[callee].kind == .ident:
+                if fn_decls_read == 0:
+                    fn_decls_read = 1
+                    s = lookup(int(nodes[callee].name))
+                    if s != 0 and syms[s].kind == .fns: collect_named(int(nodes[callee].name), -1, fn_decls)
+                field = fns_param_hint(fn_decls, i, nkids(n))
             check_expr(a, field)
             sink_pack_site = saved
             hit = sink_pack_hit != 0 and sink_pack_hit == a

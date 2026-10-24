@@ -1,0 +1,16 @@
+# quick
+# A literal (or a generic call) whose method gives a value of its own type, as copy,
+# reversed and sorted do, takes the type expected of the result.
+Op:type = 'push' | 'pop'
+main=()=>{
+    let xs:array<Op> = ['push'].copy
+    printl(xs)
+    let ys:array<Op> = ['push' 'pop'].reversed
+    printl(ys)
+    let zs:array<Op> = ['push' 'pop'].copy()
+    printl(zs)
+    let s:set<Op> = set(['push']).copy
+    printl(s)
+    let fs:array<float64> = [3 1 2].sorted
+    printl(fs)
+}

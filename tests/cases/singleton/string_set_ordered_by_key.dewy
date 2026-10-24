@@ -1,0 +1,21 @@
+# quick
+$runtime_checks
+# An unordered string-literal union orders by a key the program chooses; integer
+# literal unions stay ordered as integers; equality and membership stay.
+Op:type = 'push' | 'pop' | 'add'
+const RANK:totaldict<Op int64> = ['push' -> 0 'pop' -> 1 'add' -> 2]
+Sign:type = -1 | 0 | 1
+main=()=>{
+    let xs:array<Op> = ['add' 'push' 'pop']
+    printl(xs.sorted(key=(p:Op) => RANK[p]))
+    printl(xs.max_by((p:Op) => RANK[p]))
+    let a:Op = 'push'
+    let b:Op = 'add'
+    printl("{a}" <? "{b}")
+    printl("{a =? b} {a in? xs}")
+    let s:Sign = 1
+    let t:Sign = -1
+    printl("{max(s t)} {min(s t)} {s >? t}")
+    let ys:array<Sign> = [1 -1 0]
+    printl(ys.sorted)
+}

@@ -1,0 +1,19 @@
+# quick
+$runtime_checks
+# A generic call written as an argument takes the parameter's type when every
+# function of the name has the same type there, as `let s:set<Op> = set(['load'])` does.
+Op:type = 'load' | 'store'
+count = (s:set<Op>) => s.length
+first = (xs:array<float64>) => xs[0]
+both = (xs:array<float64> s:set<Op>) => xs.length + s.length
+# (overloads agreeing on the parameter give it; one needing more arguments is not a candidate)
+pick = (s:set<Op>) => s.length
+pick = (s:set<Op> n:int64) => s.length + n
+main=()=>{
+    printl(count(set(['load' 'store'])))
+    printl(first(fill(1.5 2)))
+    printl(both(fill(0.25 3) set(['store'])))
+    printl(count(set[]))
+    printl(pick(set(['load'])))
+    printl(pick(set(['load']) 10))
+}

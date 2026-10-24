@@ -506,6 +506,27 @@ str_set_coerced = (n: int, to: int) -> bool:
 str_set_unnumbered = (pos: int, t: int):
     fatal(pos, "{dt(t)} has no numbers: the members of a union of string literals are unordered, as text is; compare one (`p =? '{str_sets[str_set_of(t)][0]}'`), `match` it, or keep a number for each member in a dictionary")
 
+# `a <? b`, `max(a b)`, `xs.sorted()`... on a string-literal union, in Dewy code (or in the
+# library's generic code a Dewy call made): its members are unordered, so there is no order to use
+str_set_unordered = (pos: int, ta: int, tb: int):
+    t = ta
+    if str_set_of(t) == 0: t = tb
+    set = str_sets[str_set_of(t)]
+    rank = ""
+    loop i in 0.. and value in set:
+        if i > 0 and i < 3: rank += " "
+        if i < 3: rank += "'{value}' -> {i}"
+    if set.len() > 3: rank += " ..."
+    fatal(pos, "{dt(t)} has no order: the members of a union of string literals are unordered, so `<?`, `>?`, `min`, `max` and sorting don't apply; order by a key you choose (`const RANK:totaldict<{dt(t)} int64> = [{rank}]`, then `xs.sorted(key=(p:{dt(t)}) => RANK[p])`) or by the text (`\"\{p}\"`)")
+
+# ordering at pos is the program's Dewy code's: Dewy source, or the library's code inside an
+# instance the innermost program call that made it is Dewy's
+dewy_ordering = (pos: int) -> bool:
+    if not pos_in_lib(pos): return dewy_at(pos)
+    k = err_trail.len() - 1
+    loop k >= 0 and (err_trail[k] <= 0 or pos_in_lib(err_trail[k])): k -= 1
+    k >= 0 and dewy_at(err_trail[k])
+
 # a plain string or a string set (not yet optional)
 str_text_or_set = (t: int) -> bool: prune(t) == T_STR or str_set_of(t) != 0
 
@@ -5604,6 +5625,37 @@ synthetic_copy = (t: int, name: int, pos: int) -> bool:
         if match_type(sig.params[0], t, binds, 0) >= 0: return false
     true
 
+# (`let xs:array<Op> = ['push'].copy`: a collection literal (or a call, `set(['push']).copy`)
+# whose method gives a value of its own type, as copy, sorted and reversed do, takes the type
+# expected of the result, as the literal written there would; Dewy only, and only when every function of the name
+# that could take the arguments gives its first parameter's type)
+receiver_literal_hint = (recv: int, name: int, nargs: int, expected: int, pos: int) -> int:
+    if expected == 0 or not dewy_at(pos): return 0
+    k = nodes[recv].kind
+    literal = (k == .array or k == .map_lit or dewy_set_literal(recv)) and ctx_dependent(recv)
+    if not literal and not (k == .call and nodes[recv].type == 0 and not has_flag(recv, NF_CHECKED)): return 0
+    want = prune(expected)
+    if tkind(want) == .opt: want = prune(telem(want))
+    wk = tkind(want)
+    if wk != .array and not is_map_type(want) and not is_dewy_set_type(want): return 0
+    decls: int[]
+    collect_fns(name, decls)
+    if decls.len() == 0: return if name_of(name) == "copy": want else: 0
+    some = false
+    loop d in decls:
+        np = nkids(d)
+        if np < nargs + 1: continue
+        takes = true
+        loop j in [nargs + 1..np):
+            if nodes[kid(d, j)].b == 0: takes = false
+        if not takes: continue
+        sig = fn_sig(d)
+        binds = fill(0, int(sig.ntp))
+        if match_type(sig.params[0], want, binds, 0) < 0: continue
+        if sig.ret == 0 or not type_eq(int(sig.ret), sig.params[0]): return 0
+        some = true
+    if some: want else: 0
+
 check_copy = (n: int, receiver: int, t: int) -> int:
     nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(receiver), aux = i32(int(CV.explicit_copy)), type = i32(t), flags = i32(NF_CHECKED))
     last_checked = n
@@ -5860,7 +5912,7 @@ check_call = (n: int, expected: int) -> int:
         recv = int(nodes[callee].a)
         saved_receiver = type_receiver_at
         type_receiver_at = recv
-        rt = prune(check_expr(recv, 0))
+        rt = prune(check_expr(recv, receiver_literal_hint(recv, int(nodes[callee].name), args.len(), expected, nodes[n].pos)))
         type_receiver_at = saved_receiver
         recv = last_checked
         nodes[callee].a = i32(recv)
@@ -7451,6 +7503,9 @@ check_binary = (n: int, expected: int) -> int:
             nodes[n].a = i32(coerce(a, tb))
             a = int(nodes[n].a)
             ta = tb
+    # (Dewy's, and the library's inside a call Dewy made, are errors: a set's members are unordered)
+    if is_cmp and op != .eq and op != .ne and str_sets.len() > 1 and (str_set_of(ta) != 0 or str_set_of(tb) != 0) and dewy_ordering(nodes[n].pos):
+        str_set_unordered(nodes[n].pos, ta, tb)
     # (Sloppy orders a set's members as its enum's: by position, as its frozen twin does)
     sloppy_order = ta == tb and op != .eq and op != .ne and not dewy_at(nodes[n].pos)
     if str_sets.len() > 1 and (str_set_of(ta) != 0 or str_set_of(tb) != 0) and not sloppy_order:
@@ -9862,7 +9917,7 @@ check_field_expr = (n: int, expected: int) -> int:
             return check_expr(n, expected)
     saved_receiver = type_receiver_at
     type_receiver_at = int(nodes[n].a)
-    bt = prune(check_expr(int(nodes[n].a), 0))
+    bt = prune(check_expr(int(nodes[n].a), receiver_literal_hint(int(nodes[n].a), int(nodes[n].name), 0, expected, nodes[n].pos)))
     type_receiver_at = saved_receiver
     nodes[n].a = i32(last_checked)
     fname = int(nodes[n].name)

@@ -1,0 +1,7 @@
+# A string-literal union is unordered: `<?` on its members is an error.
+Op:type = 'push' | 'pop' | 'add'
+main=()=>{
+    let a:Op = 'push'
+    let b:Op = 'add'
+    printl(a <? b)
+}
