@@ -1,0 +1,50 @@
+# quick
+# `:> @T` writes the place result; generic types, receivers in fields and elements, and
+# arguments, including `@` ones.
+let holds:int64 = 0
+Guard = type of [id:int64
+    $__drop__
+    release = ():>void => { holds -= 1 }
+]
+Mutex:type = <T>[
+    value:T
+    lock = () :> @T => {
+        holds += 1
+        let g = Guard[1]
+        return @value
+    }
+]
+Point:type = [x:int64 y:int64]
+Plot:type = [
+    origin:Mutex<Point>
+    moved = (by:int64 @steps:int64) :> @int64 => {
+        steps += by
+        @origin.value.x
+    }
+]
+bump = (@m:Mutex<int64> stop:bool):>int64 => {
+    let a = @(m.lock())
+    if stop return a
+    a += 100
+    a
+}
+main = () => {
+    let m = Mutex<int64>[1]
+    let a = @(m.lock())
+    let copied = a
+    if copied >? 0 { a *= 10 }
+    printl"{m.value} {holds}"
+    printl"{bump(@m true)} {holds}"
+    printl"{bump(@m false)} {holds}"
+    let plot = Plot[Mutex<Point>[Point[1 2]]]
+    let steps:int64 = 0
+    let x = @(plot.moved(7 @steps))
+    x += steps
+    printl"{plot.origin.value} {steps}"
+    let ms = [Mutex<int64>[1] Mutex<int64>[2]]
+    let e = @(ms[1].lock())
+    e += 40
+    let o = @(plot.origin.lock())
+    o.y = 9
+    printl"{ms[1].value} {plot.origin.value} {holds}"
+}

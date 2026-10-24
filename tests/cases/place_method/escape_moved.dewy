@@ -1,0 +1,21 @@
+Account:type = [
+    balance:int64
+    lock = () => @balance
+]
+let n:int64 = 0
+Token = type of [id:int64
+    $__drop__
+    release = ():>void => { n += 1 }
+]
+Holder:type = [
+    t:Token
+    v:int64
+    lock = () => @v
+]
+consume = (h:Holder):>void => {}
+main = () => {
+    let h = Holder[Token[1] 5]
+    let a = @(h.lock())
+    consume(h)
+    a += 1
+}

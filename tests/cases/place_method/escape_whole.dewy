@@ -1,0 +1,11 @@
+Account:type = [
+    balance:int64
+    lock = () => @balance
+]
+reset = (@x:Account) => { x = Account[0] }
+main = () => {
+    let acct = Account[10]
+    let a = @(acct.lock())
+    reset(@acct)
+    a += 1
+}

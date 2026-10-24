@@ -1,0 +1,24 @@
+# A value copied out of the place outlives it: the guard is released after the place's last use,
+# so the object can lend again while the copy is still in use.
+let held:bool = false
+Guard = type of [id:int64
+    $__drop__
+    release = ():>void => { held = false }
+]
+Account:type = [
+    balance:int64
+    lock = () => {
+        held = true
+        let g = Guard[1]
+        @balance
+    }
+]
+main = () => {
+    let acct = Account[10]
+    let a = @(acct.lock())
+    let copied = a
+    printl"copied {copied}, held {held}"
+    let b = @(acct.lock())
+    b += copied
+    printl"{acct.balance} {held} {copied}"
+}

@@ -134,3 +134,8 @@ __dewy_policy_power[T] = (base: T, exponent: int) -> T:
     result
 
 __dewy_policy_abs[T] = (value: T) -> T: if value < 0: -value else: value
+
+# The end of a returned place's guard (compiler/place_methods.jo): `@(m.lock())` keeps what the
+# method held until the place's last use, then hands it here, where it is dropped.
+__place_release[T] = (guard: T):
+    pass

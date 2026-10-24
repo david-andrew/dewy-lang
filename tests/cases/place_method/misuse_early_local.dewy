@@ -1,0 +1,17 @@
+Busy:type = type of error
+Box:type = [
+    v:int64
+    try_get = () => {
+        let limit = 3
+        if v >? limit return Busy
+        let seen = limit
+        @v
+    }
+]
+main = () => {
+    let b = Box[1]
+    match @(b.try_get()) {
+        <Busy> => printl"busy"
+        x:int64 => printl"{x}"
+    }
+}

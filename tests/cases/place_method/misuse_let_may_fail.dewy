@@ -1,0 +1,13 @@
+Busy:type = type of error
+Box:type = [
+    v:int64
+    busy:bool
+    try_get = () => {
+        if busy return Busy
+        @v
+    }
+]
+main = () => {
+    let b = Box[1 false]
+    let p = @(b.try_get())
+}

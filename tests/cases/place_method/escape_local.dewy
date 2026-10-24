@@ -1,0 +1,15 @@
+Account:type = [
+    balance:int64
+    lock = () => @balance
+]
+Box:type = [
+    v:int64
+    leak = () => {
+        let x = 5
+        return @x
+    }
+]
+main = () => {
+    let b = Box[1]
+    let p = @(b.leak())
+}

@@ -1,0 +1,12 @@
+Account:type = [
+    balance:int64
+    lock = () => @balance
+]
+take = (@acct:Account) => {
+    let a = @(acct.lock())
+    return @a
+}
+main = () => {
+    let acct = Account[10]
+    printl"{take(@acct)}"
+}

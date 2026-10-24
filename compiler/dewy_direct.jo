@@ -239,6 +239,8 @@ dc_atom = () -> int:
         return dc_flow()
     # `@x` selects a place; `@f(a)` partially evaluates f
     if op == .at:
+        # (`@(m.lock())` takes a returned place: the reference grammar sees the grouping)
+        if dn_tokens[dn_at].symbol == .lparen: return 0
         e = dc_expr(160)
         if e == 0: return 0
         if nodes[e].kind == .call: nodes[e].aux2 = i32(AUX2_PARTIAL)

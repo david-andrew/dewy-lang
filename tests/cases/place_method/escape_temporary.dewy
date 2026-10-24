@@ -1,0 +1,9 @@
+Account:type = [
+    balance:int64
+    lock = () => @balance
+]
+make = () => Account[1]
+main = () => {
+    let a = @(make().lock())
+    a += 1
+}

@@ -33,6 +33,7 @@ use 'isolation.jo'
 use 'sibling_types.jo'
 use 'floats.jo'
 use 'secrets.jo'
+use 'place_methods.jo'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -94,6 +95,7 @@ intrinsics = [
 
 last_checked = 0
 const AUX2_PARTIAL = -10       # a call node that `@` makes a partial evaluation
+const AUX2_PLACE = -11         # a call `@(m.lock())` taking the place a method returns (place_methods.jo)
 callee_at = 0                  # the callee a call is resolving: a Dewy function name there is not called by itself
 embedded_files: str[]          # actual compile-time inputs, including those used inside functions
 intrinsic_names: int[]         # interned name -> intrinsic index + 1; 0 means no intrinsic
@@ -2602,6 +2604,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         ci = int(ctxs[cx].inst)
         if ci > 0 and int(fns[ci].decl) == decl:
             fatal(nodes[n].pos, "{name_of(name)} calls itself here, which repeats without end: the game calls {name_of(name)} by itself, each frame")
+    if nodes[n].aux2 == i32(AUX2_PLACE) or nodes[n].aux2 == i32(AUX2_PLACE_TAKEN) or place_methods.has(decl): place_call_seen(n, decl)
     np = nkids(decl)
     if (name == id_rgb or name == id_rgba) and np >= 3 and decl_in_prelude(decl): rgb_check(n, cd.args)
     if name == id_hsv and np >= 3 and decl_in_prelude(decl): hsv_check(n, cd.args)
@@ -8031,6 +8034,7 @@ bare_arm_warning = (p: int, name: int):
     warn(p, "the bare name '{w}' matches every value and binds it{what}; `_` is the catch-all, `{w}:T` binds with a type")
 
 check_match = (m: int, expected: int) -> int:
+    if nodes[int(nodes[m].a)].kind == .call and nodes[int(nodes[m].a)].aux2 == i32(AUX2_PLACE): return place_match(m, expected)
     if files[pos_file(nodes[m].pos)].is_dewy and shape_match_wanted(m): return check_shaped_match(m, expected)
     is_stmt = has_flag(m, NF_STMT)
     check_expr(int(nodes[m].a), 0)

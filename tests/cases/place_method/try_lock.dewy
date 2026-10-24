@@ -1,0 +1,48 @@
+# quick
+# A method that may give another value first: `match @(m.try_lock()) {...}` takes the place in
+# the arm typed with it.
+let held:bool = false
+Guard = type of [id:int64
+    $__drop__
+    release = ():>void => {
+        held = false
+        printl"released"
+    }
+]
+Busy:type = type of error
+Account:type = [
+    balance:int64
+    lock = () :> @int64 => {
+        held = true
+        let g = Guard[1]
+        return @balance
+    }
+    try_lock = () :> @int64 | Busy => {
+        if held return Busy
+        held = true
+        let g = Guard[2]
+        return @balance
+    }
+]
+deposit = (@acct:Account amount:int64):>string => match @(acct.try_lock()) {
+    <Busy> => "busy"
+    b:int64 => {
+        b += amount
+        "deposited {amount}"
+    }
+}
+main = () => {
+    let acct = Account[10]
+    let a = @(acct.lock())
+    match @(acct.try_lock()) {
+        <Busy> => printl"busy while a lives"
+        b:int64 => printl"got {b}"
+    }
+    a += 5
+    printl(deposit(@acct 2))
+    match @(acct.try_lock()) {
+        <Busy> => printl"busy"
+        b:int64 => printl"got {b}, held {held}"
+    }
+    printl"{acct.balance} {held}"
+}

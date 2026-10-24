@@ -10,6 +10,7 @@ use 'decimals.jo'
 use 'growth.jo'
 use 'safe_paths.jo'
 use 'warn_if.jo'
+use 'place_methods.jo'
 use 'errors.jo'
 use 'targets.jo'
 use 'icount.jo'
@@ -4798,6 +4799,7 @@ check_vardecl = (s: int):
         nodes[s].kind = .block
         nodes[s].nlist = 0
         return
+    if place_let_decl(s): return
     if local_place_decl(s): return
     shape_checked_value(s)
     if nodes[s].nlist > 0:

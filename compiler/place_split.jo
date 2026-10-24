@@ -1,0 +1,147 @@
+# The definition side of place-returning methods (place_methods.jo): splitting a method that
+# lends a place, as dewy_parse.jo declares a type's methods. Apart from place_methods.jo, which
+# the checker uses, so the bootstrap's seed frontend never reads the Dewy frontend.
+use 'ast.jo'
+use 'expr.jo'
+use 'util.jo'
+use 'dewy_parse.jo'
+use 'place_methods.jo'
+
+# The `@T` of a written result `@T` or `@T | Busy`, or 0.
+place_result_syntax = (id0: int) -> int:
+    id = dw_unwrap(id0)
+    if dewy_syntax[id].kind == .prefix and dw_op(id) == .at: return dw_child(id, 1)
+    if dw_op(id) == .pipe:
+        left = place_result_syntax(dw_child(id, 1))
+        if left != 0: return left
+        return place_result_syntax(dw_child(id, 2))
+    0
+
+# The member names of `@$self.a.b`, or none when v is not a place inside the receiver.
+place_route_of = (v: int, receiver: int) -> int[]?:
+    out: int[]
+    n = v
+    loop nodes[n].kind == .field:
+        out.insert(0, int(nodes[n].name))
+        n = int(nodes[n].a)
+    if nodes[n].kind == .ident and int(nodes[n].name) == receiver and out.len() > 0: return out
+    none
+
+# A given place: a `@` route rooted at the receiver.
+place_given = (v: int, receiver: int) -> bool:
+    if v == 0 or not has_flag(v, NF_AT): return false
+    n = v
+    loop nodes[n].kind == .field or nodes[n].kind == .index: n = int(nodes[n].a)
+    nodes[n].kind == .ident and int(nodes[n].name) == receiver
+
+place_returns_in = (n: int, receiver: int, places: mut int[], values: mut int[]):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .lambda or k == .fn_: return
+    if k == .return_:
+        if place_given(int(nodes[n].a), receiver): places.push(n)
+        else: values.push(n)
+    place_returns_in(int(nodes[n].a), receiver, places, values)
+    place_returns_in(int(nodes[n].b), receiver, places, values)
+    place_returns_in(int(nodes[n].c), receiver, places, values)
+    place_returns_in(int(nodes[n].d), receiver, places, values)
+    loop child in kids(n): place_returns_in(child, receiver, places, values)
+
+# Splits a method that lends a place (see the top); the functions it adds, to declare as rows.
+place_method_split = (fn_: int, receiver: int, name: str) -> int[]:
+    written = place_written.get(fn_) ?? 0
+    body = int(nodes[fn_].b)
+    if body == 0 or nodes[body].kind != .block:
+        if written != 0: fatal(nodes[fn_].pos, "'{name}' is written to give a place (`:> @T`), and its body gives a value: give a member with `@`, as `@balance`")
+        return []
+    stmts = kids(body)
+    places: int[]
+    values: int[]
+    place_returns_in(body, receiver, places, values)
+    last = stmts.len() - 1
+    given = 0
+    if last >= 0 and nodes[stmts[last]].kind == .exprstmt and place_given(int(nodes[stmts[last]].a), receiver): given = int(nodes[stmts[last]].a)
+    if last >= 0 and places.len() == 1 and places[0] == stmts[last]: given = int(nodes[places[0]].a)
+    if given == 0 and places.len() == 0:
+        if written != 0: fatal(nodes[fn_].pos, "'{name}' is written to give a place (`:> @T`), and its body gives none: give a member with `@`, as `return @balance`")
+        return []
+    if given == 0 or places.len() > 1 or places.len() == 1 and places[0] != stmts[last]:
+        at = if places.len() > 0: nodes[places[0]].pos else: nodes[fn_].pos
+        fatal(at, "a method gives its place once, as its last statement, for now (`return @balance`); other returns give other values, such as `Busy`")
+    route = place_route_of(given, receiver)
+    if route == none: fatal(nodes[given].pos, "a method lends a field of its object for now (`@balance`, `@account.balance`), not an element or the object itself")
+    # value parameters' bindings lead the body (dw_finish_function)
+    first = 0
+    loop first < last and nodes[stmts[first]].kind == .vardecl and nodes[stmts[first]].aux2 == 1: first += 1
+    split = -1
+    loop i in [first..last):
+        found: int[]
+        others: int[]
+        place_returns_in(stmts[i], receiver, found, others)
+        if others.len() > 0: split = i
+    fails = split >= 0
+    prefix: int[]
+    suffix: int[]
+    loop i in [first..last):
+        if i <= split: prefix.push(stmts[i])
+        else: suffix.push(stmts[i])
+    if fails:
+        early: {int: bool} = {}
+        loop st in prefix:
+            if nodes[st].kind == .vardecl and nodes[st].name != 0: early[int(nodes[st].name)] = true
+        if early.len() > 0:
+            loop st in suffix + [given]:
+                used = place_names_used(st, early)
+                if used != 0: fatal(nodes[used].pos, "'{name_of(int(nodes[used].name))}' is declared before '{name}' last gives another value, and used after: declare it after that `return`, as what the method holds while lending its place")
+    # what the method holds while the place lives: its body's own locals
+    guards: int[]
+    loop st in suffix:
+        if nodes[st].kind == .vardecl and nodes[st].name != 0 and nkids(st) == 0: guards.push(int(nodes[st].name))
+    pos = nodes[given].pos
+    guard = bc_bool(true, pos)
+    if guards.len() > 0:
+        guard = mk(.record_lit, pos)
+        fields: int[]
+        loop g in guards:
+            field = mk(.namedarg, pos)
+            nodes[field].name = i32(g)
+            value = mk(.ident, pos)
+            nodes[value].name = i32(g)
+            nodes[field].a = i32(value)
+            fields.push(field)
+        set_list(guard, fields)
+    give = mk(.return_, pos)
+    nodes[give].a = i32(guard)
+    params = stmts[0..first)
+    out: int[]
+    if fails:
+        acquire = clone(fn_)
+        nodes[acquire].name = i32(intern("{name}$acquire"))
+        own: int[]
+        loop p in params: own.push(clone(p))
+        nodes[acquire].b = i32(bc_block(own + suffix + [give], pos))
+        if let kinds = dewy_param_kinds.get(fn_): dewy_param_kinds[acquire] = kinds
+        place_methods[acquire] = PlaceMethod(route, written, false, guards.len(), intern("{name}$release"))
+        out.push(acquire)
+        decided = mk(.return_, pos)
+        nodes[decided].a = i32(bc_bool(true, pos))
+        set_list(body, params + prefix + [decided])
+    else: set_list(body, params + suffix + [give])
+    if guards.len() > 0:
+        # (`m$release`, beside `m`: a method, so an imported type brings it)
+        release = mk(.fn_, pos)
+        nodes[release].name = i32(intern("{name}$release"))
+        held = mk(.ident, pos)
+        nodes[held].name = i32(intern("$Held"))
+        set_list2(release, [held])
+        add_flag(release, NF_GENERIC | NF_VOID | NF_WRITTEN_VOID)
+        param = mk(.param, pos)
+        nodes[param].name = i32(intern("$guard"))
+        ht = mk(.tname, pos)
+        nodes[ht].name = nodes[held].name
+        nodes[param].a = i32(ht)
+        dw_finish_function(release, [param], bc_block([], pos), "{name}$release")
+        out.push(release)
+    place_methods[fn_] = PlaceMethod(route, written, fails, guards.len(), intern("{name}$release"))
+    out
+

@@ -1,0 +1,309 @@
+# Place-returning methods (docs/design/decisions.md: round 6, batch 13 and the small batch).
+#
+# A method whose body gives `@member` (inferred), or that is written `lock = () :> @T => ...`,
+# lends a place inside its object. `let a = @(acct.lock())` takes it: `a` is a checked local
+# place, the same as `let a = @acct.balance`, and what the method holds while lending it is
+# released after the place's last use.
+#
+# Representation (ours): nothing outlives the caller's block, so no lifetime reaches the lowering.
+# - The method's function gives, in place of the place, its guard: a record of the locals its
+#   body declared before lending (or `true` when there are none). Its route from the object
+#   (`balance`, `vault.balance`) is kept here; the caller re-applies it to the receiver, so the
+#   place is a lexical alias of the receiver's member, every access re-evaluated from the root.
+# - A method that may give another value first (`if held return Busy`) is split at its last such
+#   return: `m` decides (`true` when it lends) and `m$acquire` makes the guard. Unions do not
+#   hold resources yet, so the guard never travels in one.
+# - The caller binds the guard to a hidden local and hands it to `__place_release` (dropping it)
+#   right after the statement holding the place's last use; an earlier exit drops it with the
+#   block. The place cannot be placed again, captured or returned, and its receiver cannot be
+#   replaced, passed whole as a place, or lend a second place while it is live: all static,
+#   lexical checks over the statements between the declaration and the last use.
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'util.jo'
+use 'sibling_types.jo'
+
+struct PlaceMethod:
+    route: int[]          # member names from the object down to the place
+    written: int = 0      # the written place type node (`:> @T`), 0 when inferred
+    fails: bool = false   # may give another value first: `m` decides, `m$acquire` holds
+    guards: int = 0       # locals held while the place is live (0: nothing to release)
+    release: int = 0      # the name of the method dropping them, `m$release`
+
+place_methods: {int: PlaceMethod}   # method declaration -> how it lends its place
+place_written: {int: int}           # function -> its written place type (dw_function)
+place_call_decl = 0                 # the place method the last taken `@(...)` call resolved to
+place_count = 0
+
+# the first ident among n's nodes named in names, or 0
+place_names_used = (n: int, names: {int: bool}) -> int:
+    if n == 0: return 0
+    if nodes[n].kind == .ident and names.has(int(nodes[n].name)): return n
+    loop child in [int(nodes[n].a), int(nodes[n].b), int(nodes[n].c), int(nodes[n].d)]:
+        found = place_names_used(child, names)
+        if found != 0: return found
+    loop child in kids(n):
+        found = place_names_used(child, names)
+        if found != 0: return found
+    0
+
+# ---------------- calls ----------------
+
+const AUX2_PLACE_TAKEN = -12      # a call `@(...)` whose place place_let/place_match take
+
+# check_call reached a call: a place method only through `@(...)`, and `@(...)` only of one.
+place_call_seen = (n: int, decl: int):
+    nm = name_of(int(nodes[decl].name))
+    if nodes[n].aux2 == i32(AUX2_PLACE): fatal(nodes[n].pos, "`@(...)` takes the place a method returns as `let name = @(x.{nm}())` or `match @(x.{nm}()) \{...}`")
+    if not place_methods.has(decl):
+        if nodes[n].aux2 == i32(AUX2_PLACE_TAKEN): fatal(nodes[n].pos, "'{nm}' gives a value, not a place: drop the `@(...)`")
+        return
+    if nodes[n].aux2 != i32(AUX2_PLACE_TAKEN): fatal(nodes[n].pos, "'{nm}' lends a place inside its object: take it with `let name = @(x.{nm}())`")
+    place_call_decl = decl
+
+# The receiver and method name of `@(recv.m(args))`.
+place_call_parts = (call: int) -> (int, int):
+    callee = int(nodes[call].a)
+    if nodes[callee].kind != .field: fatal(nodes[call].pos, "`@(...)` takes the place a method returns: `@(acct.lock())`")
+    recv = int(nodes[callee].a)
+    k = nodes[recv].kind
+    if k != .ident and k != .field and k != .index: fatal(nodes[recv].pos, "a place is lent by an object in a variable, field or element: bind it first (`let x = ...`, then `@(x.{name_of(int(nodes[callee].name))}())`)")
+    # (a global could be replaced by any call while the place lives, which no lexical check sees)
+    root = place_root_name(recv)
+    sym = if root != 0: lookup(root) else: 0
+    if sym != 0 and syms[sym].kind == .global: fatal(nodes[recv].pos, "a place is lent by an object in a local variable or parameter for now: '{name_of(root)}' is a global, which a call could replace while the place lives")
+    (recv, int(nodes[callee].name))
+
+place_root_name = (recv: int) -> int:
+    n = recv
+    loop nodes[n].kind == .field or nodes[n].kind == .index: n = int(nodes[n].a)
+    if nodes[n].kind != .ident: return 0
+    int(nodes[n].name)
+
+# `recv.m$suffix(args)`, a copy of the written call with the receiver named by `$recvN`
+place_member_call = (call: int, recv_name: str, method: str, pos: int) -> int:
+    c = clone(call)
+    nodes[c].aux2 = 0
+    callee = int(nodes[c].a)
+    nodes[callee].name = i32(intern(method))
+    r = bc_ident(recv_name, pos)
+    add_flag(r, NF_MUT)
+    nodes[callee].a = i32(r)
+    c
+
+# The hidden local place naming the receiver, checked: `let $recvN = @recv`.
+place_receiver = (recv: int, pos: int) -> str:
+    place_count += 1
+    rn = "$recv{place_count}"
+    r = clone(recv)
+    add_flag(r, NF_MUT | NF_AT)
+    d = bc_let(rn, r, pos)
+    check_vardecl(d)
+    # (an index key is evaluated once: the declaration became that key's binding)
+    place_hidden.push(d)
+    rn
+
+place_hidden: int[]   # statements the receiver's binding made, to keep in the block
+
+# The checked place `let name = $recvN.route`; its local.
+place_alias = (name: int, rn: str, route: int[], pos: int) -> int:
+    e = bc_ident(rn, pos)
+    loop f in route:
+        fe = mk(.field, pos)
+        nodes[fe].a = i32(e)
+        nodes[fe].name = i32(f)
+        e = fe
+    d = mk(.vardecl, pos)
+    nodes[d].name = i32(name)
+    nodes[d].b = i32(e)
+    add_flag(d, NF_ALIASDECL)
+    check_vardecl(d)
+    s = lookup(name)
+    l = int(syms[s].ref)
+    l
+
+place_written_check = (info: PlaceMethod, decl: int, g: int, l: int, pos: int):
+    if info.written == 0: return
+    # (a generic type's method: its parameters as the call instantiated them)
+    c = int(nodes[g].b)
+    loop c != 0 and nodes[c].kind == .conv: c = int(nodes[c].a)
+    mark = scope_mark()
+    if c != 0 and nodes[c].kind == .call and nodes[c].sym > 0 and int(nodes[c].sym) < fns.len() and int(fns[int(nodes[c].sym)].decl) == decl: push_type_params(decl, fns[int(nodes[c].sym)].targs)
+    t = resolve_type(info.written)
+    scope_reset(mark)
+    if not type_eq(prune(t), prune(int(locals[l].type))): fatal(pos, "the place is written as @{dt(t)}, and its member is {dt(int(locals[l].type))}")
+
+# `let a = @(recv.m(args))`, as a statement of sibling_block. false when s is something else.
+place_let_decl = (s: int) -> bool:
+    init = int(nodes[s].b)
+    if init == 0 or nodes[init].kind != .call or nodes[init].aux2 != i32(AUX2_PLACE): return false
+    pos = nodes[s].pos
+    if nodes[s].a != 0 or nkids(s) > 0 or has_flag(s, NF_GLOBAL) or has_flag(s, NF_RDONLY): fatal(pos, "a returned place is bound by name alone: `let a = @(acct.lock())`")
+    b = sibling_block
+    i = sibling_index
+    if b == 0 or i >= nkids(b) or kid(b, i) != s: fatal(pos, "a returned place is taken by a statement of its own: `let a = @(acct.lock())`")
+    parts = place_call_parts(init)
+    recv = parts.0
+    root = place_root_name(recv)
+    rn = place_receiver(recv, pos)
+    hidden = place_hidden
+    place_hidden = []
+    place_count += 1
+    gn = "$guard{place_count}"
+    call = place_member_call(init, rn, name_of(parts.1), nodes[init].pos)
+    nodes[call].aux2 = i32(AUX2_PLACE_TAKEN)
+    place_call_decl = 0
+    g = bc_let(gn, call, pos)
+    check_vardecl(g)
+    decl = place_call_decl
+    if not place_methods.has(decl): fatal(nodes[init].pos, "'{name_of(parts.1)}' gives a value, not a place: drop the `@(...)`")
+    info = place_methods[decl]
+    if info.fails: fatal(nodes[init].pos, "'{name_of(parts.1)}' may give another value instead of its place: `match @(...) \{...}` takes both")
+    name = int(nodes[s].name)
+    l = place_alias(name, rn, info.route, pos)
+    place_written_check(info, decl, g, l, pos)
+    stmts = hidden + [g]
+    last = place_range(b, i, name, root, pos)
+    if info.guards > 0:
+        release = bc_stmt(place_member_call(init, rn, name_of(info.release), pos), pos)
+        set_list(int(nodes[release].a), [bc_ident(gn, pos)])
+        if last == i: stmts.push(release)
+        else if last < nkids(b) - 1 and not stmt_terminates(kid(b, last)):
+            wrap = bc_block([kid(b, last), release], pos)
+            nodes[wrap].aux = 5
+            set_kid(b, last, wrap)
+    block = bc_block(stmts, pos)
+    nodes[block].aux = 5
+    if last == i and info.guards > 0: check_stmt(stmts[stmts.len() - 1])
+    nodes[s] = nodes[block]
+    true
+
+# The index of the last statement after i using the place; the checks over i+1..last.
+place_range = (b: int, i: int, name: int, root: int, pos: int) -> int:
+    last = i
+    names: {int: bool} = {}
+    names[name] = true
+    loop j in [i + 1..nkids(b)):
+        st = kid(b, j)
+        if place_names_used(st, names) != 0: last = j
+        if nodes[st].kind == .vardecl and int(nodes[st].name) == name: break
+    loop j in [i + 1..last + 1): place_scan(kid(b, j), name, root, false, false)
+    last
+
+place_lends = (c: int, root: int) -> bool:
+    nodes[c].kind == .call and nodes[c].aux2 == i32(AUX2_PLACE) and nodes[int(nodes[c].a)].kind == .field and place_route_base(int(nodes[int(nodes[c].a)].a)) == root
+
+place_route_base = (n0: int) -> int:
+    n = n0
+    loop nodes[n].kind == .field or nodes[n].kind == .index: n = int(nodes[n].a)
+    if nodes[n].kind != .ident: return 0
+    int(nodes[n].name)
+
+place_scan = (n: int, name: int, root: int, arg: bool, closure: bool):
+    if n == 0: return
+    k = nodes[n].kind
+    nm = name_of(name)
+    if k == .ident and int(nodes[n].name) == name and closure:
+        fatal(nodes[n].pos, "a function cannot keep the place '{nm}', which ends after its last use here: copy its value first (`let v = {nm}`)")
+    if has_flag(n, NF_AT) and place_route_base(n) == name and not arg:
+        fatal(nodes[n].pos, "the place '{nm}' cannot be kept: it ends after its last use (a call can still take it, `f(@{nm})`)")
+    if root != 0 and has_flag(n, NF_AT) and nodes[n].kind == .ident and int(nodes[n].name) == root:
+        fatal(nodes[n].pos, "'{name_of(root)}' lends the place '{nm}' until its last use: it cannot be passed whole as a place before then")
+    if root != 0 and k == .assign and nodes[int(nodes[n].a)].kind == .ident and int(nodes[int(nodes[n].a)].name) == root:
+        fatal(nodes[n].pos, "'{name_of(root)}' lends the place '{nm}' until its last use: it cannot be replaced before then")
+    # (taking a second place by `let` from the same object is re-acquiring it; `match @(x.try_lock())`
+    # decides at run time, as `Busy`)
+    if root != 0 and k == .vardecl and nodes[n].b != 0 and place_lends(int(nodes[n].b), root):
+        fatal(nodes[int(nodes[n].b)].pos, "'{name_of(root)}' already lends the place '{nm}' until its last use: a second place from it waits until then")
+    inner = closure or k == .lambda or k == .fn_
+    place_scan(int(nodes[n].a), name, root, false, inner)
+    place_scan(int(nodes[n].b), name, root, false, inner)
+    place_scan(int(nodes[n].c), name, root, false, inner)
+    place_scan(int(nodes[n].d), name, root, false, inner)
+    loop child in kids(n):
+        if k == .call and nodes[child].kind == .namedarg:
+            place_scan(int(nodes[child].a), name, root, true, inner)
+            continue
+        place_scan(child, name, root, k == .call, inner)
+
+# `match @(recv.m(args)) {...}` for a method that may give another value first (`Busy`):
+#     { let $recvN = @recv; let $argN = arg...; let $rN = $recvN.m($argN...)
+#       match $rN { <Busy> => ...; <bool> => { let a = @($recvN.m$acquire($argN...)); ... } } }
+# The arm typed with the place's type (`a:int64 => ...`) is the one that takes it, a place
+# binding as `let a = @(...)` (released after its last use there).
+place_match = (m: int, expected: int) -> int:
+    call = int(nodes[m].a)
+    pos = nodes[m].pos
+    parts = place_call_parts(call)
+    recv = parts.0
+    mname = name_of(parts.1)
+    probe = clone(call)
+    nodes[probe].aux2 = i32(AUX2_PLACE_TAKEN)
+    place_call_decl = 0
+    check_expr(probe, 0)
+    if not place_methods.has(place_call_decl): fatal(nodes[call].pos, "'{mname}' gives a value, not a place: drop the `@(...)`")
+    info = place_methods[place_call_decl]
+    if not info.fails: fatal(nodes[call].pos, "'{mname}' always gives its place: take it with `let a = @(x.{mname}())`")
+    route = clone(recv)
+    loop f in info.route:
+        fe = mk(.field, pos)
+        nodes[fe].a = i32(route)
+        nodes[fe].name = i32(f)
+        route = fe
+    pt = prune(check_expr(route, 0))
+    stmts: int[]
+    place_count += 1
+    rn = "$recv{place_count}"
+    r = clone(recv)
+    add_flag(r, NF_MUT | NF_AT)
+    stmts.push(bc_let(rn, r, pos))
+    args: int[]
+    loop c in kids(call):
+        v = if nodes[c].kind == .namedarg: int(nodes[c].a) else: c
+        if has_flag(v, NF_AT) or has_flag(v, NF_LITERAL):
+            args.push(c)
+            continue
+        place_count += 1
+        an = "$arg{place_count}"
+        stmts.push(bc_let(an, v, nodes[v].pos))
+        if nodes[c].kind == .namedarg:
+            nodes[c].a = i32(bc_ident(an, nodes[v].pos))
+            args.push(c)
+        else: args.push(bc_ident(an, nodes[v].pos))
+    set_list(call, args)
+    place_count += 1
+    decided = "$decided{place_count}"
+    first = place_member_call(call, rn, mname, nodes[call].pos)
+    nodes[first].aux2 = i32(AUX2_PLACE_TAKEN)
+    stmts.push(bc_let(decided, first, pos))
+    taken = 0
+    loop arm in kids(m):
+        p = kid(arm, 0)
+        if nodes[p].kind != .ptype or nodes[p].name == 0 or nodes[p].a == 0: continue
+        if not type_eq(prune(resolve_type(int(nodes[p].a))), pt): continue
+        if taken != 0: fatal(nodes[arm].pos, "the place is taken by one arm")
+        taken = arm
+        bind = mk(.vardecl, nodes[p].pos)
+        nodes[bind].name = nodes[p].name
+        acquire = place_member_call(call, rn, "{mname}$acquire", nodes[call].pos)
+        nodes[acquire].aux2 = i32(AUX2_PLACE)
+        nodes[bind].b = i32(acquire)
+        nodes[p].name = 0
+        lent = mk(.tname, nodes[p].pos)
+        nodes[lent].name = i32(intern("bool"))
+        nodes[p].a = i32(lent)
+        body = int(nodes[arm].b)
+        if nodes[body].kind == .block: set_list(body, [bind] + kids(body))
+        else: nodes[arm].b = i32(bc_block([bind, bc_stmt(body, nodes[body].pos)], nodes[body].pos))
+    if taken == 0: fatal(pos, "this match has no arm taking the place: `a:{dt(pt)} => ...`")
+    inner = mk(.match_, pos)
+    nodes[inner] = nodes[m]
+    nodes[inner].a = i32(bc_ident(decided, pos))
+    stmts.push(bc_stmt(inner, pos))
+    nodes[m] = nodes[bc_block(stmts, pos)]
+    if has_flag(inner, NF_STMT):
+        check_block(m, 0, false)
+        return T_VOID
+    check_block(m, expected, true)

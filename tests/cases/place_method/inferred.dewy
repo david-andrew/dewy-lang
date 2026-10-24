@@ -1,0 +1,37 @@
+# quick
+# A method whose body gives `@member` lends that place; what it holds is released after the
+# place's last use.
+let held:bool = false
+Guard = type of [id:int64
+    $__drop__
+    release = ():>void => {
+        held = false
+        printl"released"
+    }
+]
+Account:type = [
+    balance:int64
+    lock = () => {
+        held = true
+        let g = Guard[1]
+        return @balance
+    }
+    view = () => @balance
+]
+main = () => {
+    let acct = Account[10]
+    let a = @(acct.lock())
+    printl"held {held}"
+    a += 5
+    printl"a is {a}"
+    printl"after the last use: held {held}, balance {acct.balance}"
+    let v = @(acct.view())
+    v *= 2
+    printl"{acct.balance}"
+    loop i in [1..3] {
+        let b = @(acct.lock())
+        b += i
+        printl"iteration {i}: {held}"
+    }
+    printl"{acct.balance} {held}"
+}

@@ -797,6 +797,58 @@ access checks the index or key at run time. Deeper routes
 go to an `@` parameter instead. `@` of a function value is still its handle.
 A function gives back a value: `return @a` is an error.
 
+A method can lend a place inside its object. One whose body gives `@member` (its
+last statement, `return @balance` or just `@balance`) returns that place; the
+result can also be written, `lock = () :> @int64 => …`. The caller takes it with
+`let a = @(acct.lock())` (write the parentheses of a zero-argument method), and
+`a` is a local place like `let a = @acct.balance`. The method's own locals (a
+guard with a `$__drop__` hook, say) are kept until the place's last use and
+dropped right after the statement holding it, or with the block on an earlier
+exit:
+
+```dewy
+let held = false
+Held = type of [id:int64
+    $__drop__
+    release = ():>void => { held = false }
+]
+Busy:type = type of error
+Account:type = [
+    balance:int64
+    lock = () :> @int64 => {
+        held = true
+        let guard = Held[1]     # kept until the place's last use
+        return @balance
+    }
+    try_lock = () :> @int64 | Busy => {
+        if held return Busy
+        held = true
+        let guard = Held[2]
+        return @balance
+    }
+]
+main = () => {
+    let acct = Account[10]
+    let a = @(acct.lock())
+    a += 10                     # the last use: the guard is dropped here
+    match @(acct.try_lock()) {
+        <Busy> => printl"busy"
+        b:int64 => { b += 1 }   # the arm typed with the place takes it
+    }
+    printl"{acct.balance}"      # 21
+}
+```
+
+A method that may give another value first (`Busy`) is taken with `match`; its
+other returns come before the locals it holds. Checks are static: the place
+cannot be placed again (`let b = @a`, `saved = @a`), captured by a function or
+returned, though a call can take it (`f(@a)`). Until its last use the object
+cannot be replaced, passed whole as a place, or lend another place by `let`.
+The object is a local variable or parameter, or a field or element of one (a
+global is an error for now). For now a method lends one field route (`@balance`,
+`@vault.balance`), as its last statement; calling it without `@(...)` is an
+error. Lock types and `lock_all` are not in the library yet.
+
 Lengths retain their current `int64` type. An `int` index uses the ordinary bounds
 checks. `to_int(text)` returns `int | NotAnInteger | TooManyDigits`, parsing
 integers of arbitrary size: an optional sign, then decimal digits (spaces, `_` and

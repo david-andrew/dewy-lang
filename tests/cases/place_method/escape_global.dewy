@@ -1,0 +1,6 @@
+Account:type = [balance:int64 lock = () => @balance]
+let shared = Account[1]
+main = () => {
+    let a = @(shared.lock())
+    a += 1
+}

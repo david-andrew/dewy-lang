@@ -1,0 +1,12 @@
+Box:type = [
+    v:int64
+    w:int64
+    pick = (first:bool) => {
+        if first return @v
+        return @w
+    }
+]
+main = () => {
+    let b = Box[1 2]
+    let p = @(b.pick(true))
+}

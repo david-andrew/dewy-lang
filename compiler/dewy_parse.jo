@@ -21,6 +21,8 @@ use 'dewy_ffi.jo'
 use 'directives.jo'
 use 'targets.jo'
 use 'concurrency.jo'
+use 'place_methods.jo'
+use 'place_split.jo'
 
 # Compact tags shared by lexical tokens and syntax nodes. Names are needed
 # only for formatter/diagnostic text.
@@ -1591,6 +1593,10 @@ dw_function = (id: int, name: str) -> int:
         proof_decls[n] = predicate
         add_flag(n, NF_VOID)
         result = 0
+    # (`:> @T`: a method lending a place inside its object; its result is decided by place_method_split)
+    if result != 0 and place_result_syntax(result) != 0:
+        place_written[n] = dw_type(place_result_syntax(result))
+        result = 0
     if result != 0:
         result = dw_effect_suffix(n, result)
         if dw_name(result) == "void": add_flag(n, NF_VOID | NF_WRITTEN_VOID)
@@ -2032,8 +2038,11 @@ dw_expr = (id: int) -> int:
     if k == .prefix:
         e = dw_expr(dw_child(id, 1))
         if op == .at:
-            # `@f(args)` partially evaluates f; `@x` selects a place or a function.
-            if nodes[e].kind == .call: nodes[e].aux2 = i32(AUX2_PARTIAL)
+            # `@f(args)` partially evaluates f; `@x` selects a place or a function; `@(m.lock())`
+            # makes the call and takes the place it returns (place_methods.jo).
+            inner = dw_unwrap(dw_child(id, 1))
+            if nodes[e].kind == .call and dewy_syntax[inner].kind == .block and dewy_syntax[inner].text == "():" and dw_nchildren(inner) == 1: nodes[e].aux2 = i32(AUX2_PLACE)
+            else if nodes[e].kind == .call: nodes[e].aux2 = i32(AUX2_PARTIAL)
             else: add_flag(e, NF_MUT | NF_AT)
             return e
         if op == .dot_minus or op == .dot_plus:
@@ -2951,6 +2960,8 @@ dw_type_methods = (struct_: int, rows: int[], methods: int[]):
     loop name in row_names: members[name] = receiver
     type_params = kids2(struct_)
     decls: int[]
+    extra_names: int[]
+    extra_decls: int[]
     hook = 0
     loop row in rows:
         tag = ownership_tag(row)
@@ -2971,32 +2982,22 @@ dw_type_methods = (struct_: int, rows: int[], methods: int[]):
         dw_siblings = members
         fn_ = dw_function(dw_grouped(dw_child(item, 2)), name)
         dw_siblings = outer
-        pos = nodes[fn_].pos
-        object_type = mk(.tname, pos)
-        nodes[object_type].name = nodes[struct_].name
-        if type_params.len() > 0:
-            own = kids2(fn_)
-            params: int[]
-            arguments: int[]
-            loop tp in type_params:
-                loop mine in own:
-                    if nodes[mine].name == nodes[tp].name: fatal(nodes[mine].pos, "type parameter '{name_of(int(nodes[tp].name))}' is already {name_of(int(nodes[struct_].name))}'s")
-                param = mk(.ident, pos)
-                nodes[param].name = nodes[tp].name
-                params.push(param)
-                argument = mk(.tname, pos)
-                nodes[argument].name = nodes[tp].name
-                arguments.push(argument)
-            set_list(object_type, arguments)
-            set_list2(fn_, params + own)
-            add_flag(fn_, NF_GENERIC)
-        dw_add_receiver(fn_, receiver, object_type)
+        lent = place_method_split(fn_, receiver, name)
+        dw_method_finish(fn_, struct_, type_params, receiver)
         if hook != 0:
             ownership_declare(struct_, fn_, hook)
             hook = 0
         dw_pending_decls.push(fn_)
         decls.push(fn_)
+        loop extra in lent:
+            dw_method_finish(extra, struct_, type_params, receiver)
+            dw_pending_decls.push(extra)
+            extra_names.push(int(nodes[extra].name))
+            extra_decls.push(extra)
     if hook != 0: fatal(nodes[struct_].pos, "a lifecycle tag requires a method")
+    loop i in [0..extra_names.len()):
+        row_names.push(extra_names[i])
+        decls.push(extra_decls[i])
     first = dewy_methods.len()
     group = dewy_method_group(row_names, decls, inherited)
     dewy_decl_members[struct_] = group
@@ -3004,6 +3005,29 @@ dw_type_methods = (struct_: int, rows: int[], methods: int[]):
     types_here[int(nodes[struct_].name)] = group
     dw_type_members[file] = types_here
     if methods.len() > 0: dewy_type_members[struct_] = group
+
+# A method's function as a module function: the type's parameters first, then its receiver.
+dw_method_finish = (fn_: int, struct_: int, type_params: int[], receiver: int):
+    pos = nodes[fn_].pos
+    object_type = mk(.tname, pos)
+    nodes[object_type].name = nodes[struct_].name
+    if type_params.len() > 0:
+        own = kids2(fn_)
+        params: int[]
+        arguments: int[]
+        loop tp in type_params:
+            loop mine in own:
+                if nodes[mine].name == nodes[tp].name: fatal(nodes[mine].pos, "type parameter '{name_of(int(nodes[tp].name))}' is already {name_of(int(nodes[struct_].name))}'s")
+            param = mk(.ident, pos)
+            nodes[param].name = nodes[tp].name
+            params.push(param)
+            argument = mk(.tname, pos)
+            nodes[argument].name = nodes[tp].name
+            arguments.push(argument)
+        set_list(object_type, arguments)
+        set_list2(fn_, params + own)
+        add_flag(fn_, NF_GENERIC)
+    dw_add_receiver(fn_, receiver, object_type)
 
 dw_import = (id: int) -> int:
     pos = dewy_syntax[id].pos

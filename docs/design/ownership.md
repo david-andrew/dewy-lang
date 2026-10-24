@@ -225,7 +225,32 @@ implicitly capture a temporary allocator context for later invocation. Cleanup
 records restore any active scope state on panic. Keep allocation failure behind
 `FailurePolicy=Unsettled/Return/Terminate`; unsettled costs cannot certify no-panic
 or recovery. Current fatal OOM is an observation, not approval of the final policy.
-General returned-place support is similarly an internal disabled capability.
+Returned places are enabled for methods lending a field route of their object
+(see "Returned places" below).
+
+## Returned places
+
+Implemented 2026-10-24 (compiler/place_methods.jo), per decisions round 6,
+batch 13 and the small batch. A method whose body gives `@member`, or written
+`:> @T`, lends that place. Nothing lifetime-bearing reaches the lowering: the
+method's function returns its guard (a record of the locals declared before the
+place is given, or `true`), and its route from the receiver is recorded. The
+caller binds the guard to a hidden owner and the place as a lexical alias of
+`receiver.route`, re-evaluated from its root at each access like `let c = @xs[i]`;
+the guard is passed to a generic `m$release` right after the statement holding
+the place's last use (an earlier exit drops it with the block, through ordinary
+owner cleanup). A method that may first give another value (`Busy`) splits at
+its last such return into `m` (decides) and `m$acquire` (holds), so a union
+never carries the guard; `match @(m.try_lock())` binds the place in the arm
+typed with it.
+
+Soundness is lexical and static, over the statements from the declaration to
+the last use: the place cannot be re-placed, captured or returned (call
+arguments may take it); the receiver's root cannot be replaced, passed whole as
+a place, or lend another place by `let`; global roots are rejected, since any
+call could replace them. Moves of the root are refused by the existing
+liveness proof, which sees the alias's later reads. Not yet: element routes,
+routes through `@` parameters, several place exits, guards inside unions.
 
 ## Witnesses and compile cost
 

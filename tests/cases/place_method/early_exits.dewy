@@ -1,0 +1,34 @@
+# Exits before the last use drop the guard with the block; after it, the guard is already released.
+let drops:int64 = 0
+Guard = type of [id:int64
+    $__drop__
+    release = ():>void => {
+        drops += 1
+    }
+]
+Account:type = [
+    balance:int64
+    lock = () => {
+        let g = Guard[1]
+        @balance
+    }
+]
+f = (@acct:Account stop:int64):>int64 => {
+    loop i in [0..4) {
+        let a = @(acct.lock())
+        if i =? stop break
+        if i =? 1 continue
+        a += 1
+        printl"  i {i} drops {drops}"
+    }
+    let b = @(acct.lock())
+    if stop =? 0 return 7
+    b += 1
+    printl"  past {drops}"
+    8
+}
+main = () => {
+    let acct = Account[0]
+    printl"{f(@acct 0)} drops {drops} balance {acct.balance}"
+    printl"{f(@acct 2)} drops {drops} balance {acct.balance}"
+}
