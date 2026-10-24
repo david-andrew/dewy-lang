@@ -1,4 +1,4 @@
-# A float to an integer is checked when it runs: not free under the lane.
+# A float to an integer fails for NaN, an infinity or a value out of range: an obligation the lane rejects unproven.
 $no_hidden_costs
 toint = (a:float64):>int64 => int64(a)
 main = ():>void & no panics => {

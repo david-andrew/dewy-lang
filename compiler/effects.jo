@@ -13,6 +13,7 @@ use 'places.jo'
 use 'isolation.jo'
 use 'refine.jo'
 use 'facts.jo'
+use 'floats.jo'
 use 'ownership.jo'
 use 'ir.jo'
 use 'copies.jo'
@@ -1411,6 +1412,8 @@ effect_scan_node = (f: int, n: int):
         if nodes[n].op != i32(int(Tok.assign)):
             effect_access(f, int(nodes[n].a), false)
             if not effect_word_op(compound_op(int(nodes[n].op)) as Tok): effect_opaque(f, n)
+            # (an `int` shifted by a signed count fails for a negative one: facts.jo)
+            else if fact_shift_obliged(n) and not effect_count_literal(int(nodes[n].b)): effect_failure(f, n)
         effect_scan_node(f, int(nodes[n].b))
         return
     if k == .ident and nodes[n].aux == i32(int(SK.local)):
@@ -1435,6 +1438,8 @@ effect_scan_node = (f: int, n: int):
         return
     if k == .for_ and effect_range_loop(n):
         loop c in [int(nodes[int(nodes[n].a)].a), int(nodes[int(nodes[n].a)].b), int(nodes[int(nodes[n].a)].c), int(nodes[n].b)]: effect_scan_node(f, c)
+        # (a zero step fails unless the owner's facts show it is not: facts.jo fact_step_check)
+        if fact_stepped_loop(n) and not panic_literal_step(int(nodes[n].a)): effect_failure(f, n)
         loop g in hidden: effect_summaries[f].edges.push(EffectEdge(g, n, []))
         return
     if effect_index_read(n):
@@ -1507,6 +1512,12 @@ effect_scan_node = (f: int, n: int):
         if not supported and nodes[n].aux == 0 and prune(ntype(n)) == T_MATH_INT and effect_integer(int(nodes[n].a)) and effect_integer(int(nodes[n].b)) and (nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.star))):
             supported = true
             effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+        # (an `int` shifted may grow into a big integer, which allocates; a
+        # negative signed count fails unless the owner's facts show it is not)
+        if not supported and shift and nodes[n].aux == 0 and prune(ntype(n)) == T_MATH_INT and effect_integer(int(nodes[n].a)) and effect_integer(int(nodes[n].b)):
+            supported = true
+            effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+            if fact_shift_obliged(n) and not effect_count_literal(int(nodes[n].b)): effect_failure(f, n)
     else if k == .dotname or k == .none_lit: supported = effect_share(ntype(n))
     # (an optional's or union's tag test, payload and fallback are inline reads)
     else if k == .istype or k == .narrow or k == .coalesce: supported = effect_share(ntype(int(nodes[n].a))) and (k == .istype or effect_share(ntype(n)))
@@ -1537,6 +1548,13 @@ effect_scan_node = (f: int, n: int):
     # (an `int` wrapped or saturated to a fixed width is total: a read of its
     # low limbs, lib/math_runtime.jo __mi_low_word and __mi_clamp_word)
     else if k == .conv and (nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int))) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and effect_scalar(ntype(n)): supported = true
+    # (a float to an integer fails for NaN, an infinity or a value out of
+    # range unless the owner's float facts show it fits, floats.jo; an `int`
+    # result may need a big payload)
+    else if k == .conv and nodes[n].aux == i32(int(CV.float2int)) and effect_float(ntype(int(nodes[n].a))) and (effect_scalar(ntype(n)) or prune(ntype(n)) == T_MATH_INT):
+        supported = true
+        if prune(ntype(n)) == T_MATH_INT: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
+        effect_failure(f, n)
     # (a word to a float, or one float width to another: one instruction; a
     # float to an integer is checked, and a semantic integer's is a call)
     else if k == .conv and (nodes[n].aux == i32(int(CV.int2float)) and effect_scalar(ntype(int(nodes[n].a))) or nodes[n].aux == i32(int(CV.float_))): supported = effect_float(ntype(n))
@@ -1783,8 +1801,13 @@ effect_settle_bounds = ():
         if owners.has(site.0): continue
         owners[site.0] = true
         found = fact_probe_function(site.0)
+        floats: {int: bool} = {}
         loop other in sites:
-            if other.0 == site.0 and (found.get(other.1) ?? false):
+            if other.0 == site.0 and nodes[other.1].kind == .conv and nodes[other.1].aux == i32(int(CV.float2int)):
+                floats = ff_probe_function(site.0)
+                break
+        loop other in sites:
+            if other.0 == site.0 and ((found.get(other.1) ?? false) or (floats.get(other.1) ?? false)):
                 effect_bounds_proven[other.1] = true
                 proved = true
     if proved: effect_graph_reset()
@@ -2077,6 +2100,12 @@ panic_literal_safe = (n: int) -> bool:
         return e != 0 and nodes[e].ival != 0
     false
 
+# A range whose two first values are distinct literals: its step is not zero.
+panic_literal_step = (it: int) -> bool:
+    a = panic_literal(int(nodes[it].a))
+    b = panic_literal(int(nodes[it].c))
+    a != 0 and b != 0 and nodes[a].ival != nodes[b].ival
+
 k_call_args = (n: int) -> int: if nodes[n].kind == .call and nodes[n].aux == 0 and nodes[n].sym > 0: nkids(n) else: 0
 
 panic_edge = (f: int, g: int, n: int):
@@ -2101,7 +2130,7 @@ panic_node = (f: int, n: int):
     else if k == .call and nodes[n].aux == 0 or k == .fnref or k == .lambda or k == .pair or k == .partial and nodes[n].aux == 0:
         # (a call whose precondition is the caller's obligation, as a string
         # index or a divisor: proven, an error, or a check of the caller's own)
-        if nodes[n].sym > 0 and not (k == .call and (fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_floor_call(n) != 0 or fact_divisors.has(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or not panic_lib and panic_map_obligation(n) or panic_literal_safe(n))): panic_edge(f, int(nodes[n].sym), n)
+        if nodes[n].sym > 0 and not (k == .call and (fact_string_call(n) >= 2 or fact_array_call(n) != 0 or fact_floor_call(n) != 0 or fact_divisors.has(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or not panic_lib and (panic_map_obligation(n) or fact_range_call(n)) or panic_literal_safe(n))): panic_edge(f, int(nodes[n].sym), n)
     loop g in value_helper_calls(n): panic_edge(f, g, n)
     if k == .parallel_region:
         panic_node(f, int(nodes[n].a))

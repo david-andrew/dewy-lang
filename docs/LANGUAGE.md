@@ -671,9 +671,9 @@ and `xs.last` take an array with `length >? 0`, and `xs.swap(i j)` and
 panic. `d[k]`, `d[k] += 1` and `d.pop(k)` need the key present, proven by a
 guard (`if k in? d`) or an earlier store into `d[k]` with no other change of
 `d` between; `d.get(k)` and `d.pop(k default=v)` take a missing key as a value.
-A literal can rule a failure out: a range without a step (or with a literal
-nonzero one), a power with a literal exponent `>=? 0` and a rational with a
-literal nonzero denominator cannot panic. Other library failures (a bad format
+A stepped range's nonzero step is the caller's obligation too, as a divisor is.
+A literal can rule a failure out: a power with a literal exponent `>=? 0` and a
+rational with a literal nonzero denominator cannot panic. Other library failures (a bad format
 specification) still make the call panic. Running out of memory is not a panic. The editor's hover
 shows `& panics` on a function that may panic, and `dewy check --obligations`
 lists each library call that may panic where runtime checks are allowed.
@@ -691,7 +691,8 @@ failure. Reading a mutable parameter's elements reads that formal. Text and
 (alone, in arrays, or in records and unions of them) costs nothing. Text length,
 comparisons and prefix tests read; interpolation, `trim`, `split`, `join`,
 `replace`, case changes, `find` and `+ - *` on an `int` allocate. String indexing
-and slicing, and narrowing an `int` to a fixed width, may fail unless the
+and slicing, narrowing an `int` to a fixed width, converting a float to an
+integer, shifting an `int` by a signed count and a stepped range, may fail unless the
 function's facts prove them; a format specification may fail unless it is a
 literal one the value accepts (`{x:.2f}`). Library bodies receive the same analysis as user functions. Intrinsic
 costs use resolved compiler identities. Dynamic growth, formatting, managed
@@ -734,8 +735,10 @@ fixed width is the same proven conversion as a narrowing between fixed widths
 (below), an `int` index's being its bounds check (a known constant failure is a
 compile error). `as` and type calls use those same checks. Float-to-integer conversions (`int(f)`, `int64(f)`, `f as uint8`)
 truncate toward zero and keep the value: NaN, an infinity or a value outside the
-target's range fails a check (`the float is above the int64 range`; a constant one is a
-compile error) and never saturates;
+target's range fails and never saturates, so the value lying in range (finite, for `int`) is
+an obligation like a narrowing's, proven by comparisons that hold only for numbers
+(`if 0.0 <=? x and x <? 256.0`; `$finite_floats` makes every float finite), an error
+where unproven (a constant one always is), or a check (`the float is above the int64 range`) where the scope allows one;
 exact decimal and fraction conversions to integers also truncate toward zero,
 without rounding through a float. `int`-to-float retains the usual rounding. Conversions keep the value:
 a narrowing between fixed widths or from `int`, explicit (`uint64(x)`, `x as uint8`) or implicit
@@ -1298,7 +1301,8 @@ is `-1`. Prefix `~` is `not` binding as tightly as unary minus: `~flags & 3`
 is `(not flags) & 3`. `<<` and `>>` take a nonnegative `int64` count; right shift rounds down
 for negative values, so `bigint(-3) >> 1` is `-2`. Shifting beyond all magnitude
 bits yields `0` for nonnegative values or `-1` for negative ones. Negative shift
-counts are errors: a constant one at compilation, a runtime one a panic. Shift compound assignments (`<<=`, `>>=`) work too, as do
+counts are errors: a constant one at compilation; a signed count is proven
+`>=? 0` by facts (`if n >=? 0`), an error where unproven, or a check where the scope allows one. Shift compound assignments (`<<=`, `>>=`) work too, as do
 `&=`, `|=`, `and=`, `or=` and `xor=` (on integers, booleans and sets).
 `a and= f()` means `a = a and f()`, so on booleans `and=`/`or=` short-circuit:
 `f()` runs only when it can change `a`.
@@ -3427,7 +3431,8 @@ let odd_squares = [loop i in [1, 3..10] i*i]
 ```
 
 The step is the second value minus the first; it can ascend or descend but must
-be nonzero. `]` includes the endpoint and `)` excludes it. Starting values and
+be nonzero: distinct literals or facts that order the two values (`if step >? 0`, `if step not=? 0`)
+prove it, and an unproven one is an error, or a check where the scope allows one. `]` includes the endpoint and `)` excludes it. Starting values and
 the endpoint evaluate once in source order. Iteration uses counters without
 building an intermediate array. Bounded integer loops terminate safely at the integer type's limits, including
 an inclusive maximum endpoint. Open-ended ranges such as `[0..]` or `[1,3..]` panic if they exhaust their fixed-width

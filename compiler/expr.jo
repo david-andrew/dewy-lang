@@ -3538,6 +3538,8 @@ conversion = (n: int, to0: int, args: int[]) -> int:
             cv = int(CV.float2int)
             # (a checked conversion's failure report: demanded by its first use)
             if to != T_MATH_INT and dewy_at(nodes[n].pos): float_int_demanded = true
+            # (an obligation: floats.jo ff_int_obligation)
+            if dewy_at(nodes[n].pos) and not pos_in_lib(nodes[n].pos): ff_note_conversion()
         else if fk == .enum_ and simple_enum(ft):
             if str_set_of(ft) != 0 and dewy_at(nodes[n].pos) and not pos_in_lib(nodes[n].pos): str_set_unnumbered(nodes[n].pos, ft)
             cv = int(CV.int_)

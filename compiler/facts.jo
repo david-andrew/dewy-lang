@@ -2211,24 +2211,71 @@ fact_power_call = (n: int) -> bool:
     e = representation_type(ntype(kid(n, 1)))
     (is_int(e) or e == T_MATH_INT) and pos_in_lib(nodes[d].pos)
 
-fact_power_check = (n: int, s: mut FactState, exponent: int):
-    if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
-    zero = fact_constant(s, 0)
-    c = fact_compare(s, .ge, exponent, zero)
+fact_power_check = (n: int, s: mut FactState, exponent: int): fact_nonnegative(n, s, exponent, kid(n, 1), "the exponent")
+
+# An `int` shifted by a signed count (`x << n`, `x >>= n`): a negative count
+# fails, so n >= 0 is an obligation. A fixed width's count is unsigned: total.
+fact_shift_obliged = (n: int) -> bool:
+    k = nodes[n].kind
+    op = (if k == .assign: compound_op(int(nodes[n].op)) else: int(nodes[n].op)) as Tok
+    if nodes[n].aux != 0 or (k != .binary and k != .assign) or (op != .shl and op != .shr) or prune(ntype(int(nodes[n].a))) != T_MATH_INT: return false
+    count = prune(ntype(int(nodes[n].b)))
+    count == T_MATH_INT or is_int(count) and types[count].sign
+
+# A stepped range, `[a, b..c]` (a loop's, or the library's IntRange): its step
+# b - a must be nonzero, so b not=? a is an obligation. n: the stepped `for_`,
+# or the `__dewy_range` call with a literal `true` for `stepped`.
+fact_name_range = 0
+fact_range_call = (n: int) -> bool:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 5: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return false
+    if fact_name_range == 0: fact_name_range = intern("__dewy_range")
+    stepped = kid(n, 3)
+    int(nodes[d].name) == fact_name_range and pos_in_lib(nodes[d].pos) and nodes[stepped].kind == .bool_lit and nodes[stepped].ival != 0
+
+fact_stepped_loop = (n: int) -> bool:
+    it = int(nodes[n].a)
+    nodes[n].kind == .for_ and nodes[n].aux == 0 and nodes[it].kind == .range and has_flag(it, NF_STEP) and nodes[it].c != 0
+
+fact_step_check = (n: int, s: mut FactState, first: int, second: int, first_node: int, second_node: int):
+    if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query or fact_probe_on): return
+    c = fact_compare(s, .ne, second, first)
     if fact_probe_on:
         fact_probe_record(n, c == 1)
         return
     if c == 1: return
-    side = wit_side(exponent, kid(n, 1))
+    b = wit_side(second, second_node)
+    a = wit_side(first, first_node)
+    relation = wit_relation_text(.ne, b, a)
+    missing = wit_relation(s, s, .ne, b, a, c == 0)
+    wit_context(0)
+    if c == 0:
+        wit_help(relation)
+        if dir_defer(n, "the range step is zero", true): return
+        wit_fail(nodes[n].pos, "the range step is zero")
+        return
+    wit_unknown(n, fact_bound(s, second), "the range step is nonzero", 0, relation, missing)
+
+# value (operand's) >= 0, as `what` requires: proven, an error, or a check of its scope.
+fact_nonnegative = (n: int, s: mut FactState, value: int, operand: int, what: str):
+    if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query or fact_probe_on): return
+    zero = fact_constant(s, 0)
+    c = fact_compare(s, .ge, value, zero)
+    if fact_probe_on:
+        fact_probe_record(n, c == 1)
+        return
+    if c == 1: return
+    side = wit_side(value, operand)
     nil = WitSide(zero, 0, "0", false, true)
     missing = wit_relation(s, s, .ge, side, nil, c == 0)
     wit_context(0)
     if c == 0:
         wit_help(wit_relation_text(.ge, side, nil))
-        if dir_defer(n, "the exponent is negative", true): return
-        wit_fail(nodes[n].pos, "the exponent is negative")
+        if dir_defer(n, "{what} is negative", true): return
+        wit_fail(nodes[n].pos, "{what} is negative")
         return
-    wit_unknown(n, fact_bound(s, exponent), "the exponent is >= 0", 0, wit_relation_text(.ge, side, nil), missing)
+    wit_unknown(n, fact_bound(s, value), "{what} is >= 0", 0, wit_relation_text(.ge, side, nil), missing)
 
 # The narrowing whose obligation the check around it answers: an array index
 # (in bounds, it fits) or a refinement bounded on both sides within the width.
@@ -3352,6 +3399,7 @@ fact_stepped = (n: int, s: mut FactState):
     end = if nodes[iterator].b != 0: fact_capture(int(nodes[iterator].b), s) else: 0
     up = fact_compare(s, .lt, first, second) == 1
     down = fact_compare(s, .lt, second, first) == 1
+    if not up and not down or fact_probe_on: fact_step_check(n, s, first, second, int(nodes[iterator].a), int(nodes[iterator].c))
     fact_changes(n, s, n)
     after = s
     body = s
@@ -3517,6 +3565,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         if k == .assign:
             target = int(nodes[n].a)
             fact_slice_target(writers, target, n)
+            if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_shift_obliged(n): values.push(n)
             root = target
             loop nodes[root].kind == .field or nodes[root].kind == .index: root = int(nodes[root].a)
             p = fact_place(root)
@@ -3525,6 +3574,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         if k == .for_ or k == .iflet or k == .match_:
             l = int(nodes[n].sym)
             if l > 0: fact_slice_writer(writers, PlaceIdentity(.local, int(locals[l].owner), l), n)
+            if k == .for_ and not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_stepped_loop(n): values.push(n)
         if k == .if_ or k == .while_ or k == .for_ or k == .iflet or k == .match_ or k == .and_ or k == .or_ or k == .coalesce:
             # A while can prevent a later obligation from being reached,
             # even when none of its writes feed that obligation.
@@ -3547,6 +3597,10 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 values.push(kid(n, fact_rational_zero_test(n)))
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_power_call(n):
                 values.push(n)
+                values.push(kid(n, 1))
+            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_range_call(n):
+                values.push(n)
+                values.push(kid(n, 0))
                 values.push(kid(n, 1))
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (fact_array_call(n) != 0 or fact_map_call(n) != 0):
                 active.push(n)
@@ -3603,7 +3657,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
             else if nodes[n].aux != i32(int(CV.int_)) and nodes[n].aux != i32(int(CV.none_)) and nodes[n].aux != i32(int(CV.fixed2arr)) and not fact_pure_conversion(n): exposed_writes.push(n)
         else if k == .binary:
             if nodes[n].aux != 0 and not fact_pure_binary(n): exposed_writes.push(n)
-            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent))): values.push(n)
+            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent)) or fact_shift_obliged(n)): values.push(n)
         # (a closure writes only when called: fact_capture)
         else if k == .lambda and ownership_decls.len() == 0: pass
         else if k == .lambda or k == .partial or k == .fnref or k == .map_lit or k == .cast or mask < 0: opaque_writes.push(n)
@@ -3818,6 +3872,8 @@ fact_obliged = (n: int) -> bool:
     # (an index the compiler made in bounds, as a loop's element read, is none)
     if k == .index and not has_flag(n, NF_INBOUNDS) and fact_bounded_index(n): return true
     if k == .binary and nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent))): return true
+    if (k == .binary or k == .assign) and fact_shift_obliged(n): return true
+    if k == .for_ and fact_stepped_loop(n) or k == .call and fact_range_call(n): return true
     if k == .conv and nodes[n].aux == i32(int(CV.refinement)): return true
     if k == .conv and nodes[n].aux == i32(int(CV.int_)) and prune(ntype(int(nodes[n].a))) == T_MATH_INT and prune(ntype(n)) != T_MATH_INT: return true
     if k == .call and wi_fact_calls.len() > 0 and wi_fact_calls.has(n): return true
@@ -4093,6 +4149,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
         r = fact_capture(int(nodes[n].b), s)
         if ownership_decls.len() != 0: r = fact_owner_value(int(nodes[n].b), r, s)
         op = nodes[n].op as Tok
+        if (op == .shleq or op == .shreq) and fact_shift_obliged(n): fact_nonnegative(n, s, r, int(nodes[n].b), "the shift count")
         if nodes[a].kind == .tuple and op == .assign:
             fact_store_pattern(s, a, r, n)
             return r
@@ -4164,6 +4221,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
             return fact_new(s, fact_domain(T_BOOL), FactTerm(nodes[n].op as Tok, tag, zero))
         b = fact_capture(int(nodes[n].b), s)
         op = nodes[n].op as Tok
+        if (op == .shl or op == .shr) and fact_shift_obliged(n): fact_nonnegative(n, s, b, int(nodes[n].b), "the shift count")
         if nodes[n].aux == 0 and fact_scalar(ntype(int(nodes[n].a))) and fact_scalar(ntype(int(nodes[n].b))) and fact_comparison(op):
             truth = fact_compare(s, op, a, b)
             x = fact_bound(s, a); y = fact_bound(s, b)
@@ -4422,6 +4480,7 @@ fact_capture = (n: int, s: mut FactState) -> int:
                 if floor_probe: fact_probe_record(n, proven)
             else if floor_probe: fact_probe_divisor(n, s, values[1], kid(n, 1))
             if values.len() == 2 and fact_power_call(n): fact_power_check(n, s, values[1])
+            if values.len() == 5 and fact_range_call(n): fact_step_check(n, s, values[0], values[1], kid(n, 0), kid(n, 1))
         array = fact_array_call(n)
         if array != 0: fact_array_call_check(n, s, values, array)
         if array >= 30:

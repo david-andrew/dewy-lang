@@ -4,7 +4,9 @@
 # zero and subnormals are values, and nothing reassociates or contracts float
 # arithmetic. What this file adds:
 # - float-to-integer conversions keep the value: NaN and out-of-range values
-#   are checked (a Dewy conversion never saturates);
+#   fail (a Dewy conversion never saturates), an obligation (no traps): proven
+#   by the interval analysis below, else a compile error or a check of the
+#   scope's policy, one that makes its function panic;
 # - `$no_nan` and `$no_inf` (and the `$finite_floats` bundle): inside their
 #   scope, an operation that could create a NaN (IEEE "invalid") or an
 #   infinity (IEEE "overflow" or "division by zero") from operands that are
@@ -25,6 +27,7 @@ use 'isolation.jo'
 use 'units.jo'
 use 'facts.jo'
 use 'refine.jo'
+use 'effects.jo'
 
 # ---------------- float-to-integer conversions ----------------
 
@@ -270,6 +273,10 @@ ff_callers: {int: bool} = {}    # functions calling a function whose body is und
 ff_direct: {int: int} = {}      # declaration -> 1: its body is under `$no_nan`, 2: not
 ff_indirect: {int: bool} = {}   # declarations used as values: their parameters enter
 ff_keys: {int: int} = {}        # dictionary key or set element under `$no_nan` -> what (FK_*)
+ff_conversions: {int: bool} = {} # functions converting a float to an integer (expr.jo)
+ff_fn = 0                       # the function being walked
+ff_probing = false              # effects ask which conversions a body proves: nothing is reported
+ff_probe: {int: bool} = {}      # (while probing) conversion node -> proven
 
 floats_reset = ():
     ff_checks = {}
@@ -282,6 +289,11 @@ floats_notes_reset = ():
     ff_direct = {}
     ff_indirect = {}
     ff_keys = {}
+    ff_conversions = {}
+
+# expr.jo: a float converted to an integer in the function being checked
+ff_note_conversion = ():
+    if cx >= 0: ff_conversions[int(ctxs[cx].inst)] = true
 
 # expr.jo, a direct call of f from the function being checked: its caller is walked when f's body
 # is under `$no_nan` and takes a float
@@ -311,7 +323,8 @@ ff_mode_at = (p: int) -> int:
     m
 
 ff_top = () -> FR:
-    if ff_assume & FF_INF != 0: return FR(-FF_MAX, FF_MAX)
+    # (finite under `$no_inf`, and a NaN unless `$no_nan` holds too)
+    if ff_assume & FF_INF != 0: return FR(-FF_MAX, FF_MAX, ff_assume & FF_NAN == 0)
     FR(-INF, INF)
 
 # a value entering the scope: it may be NaN
@@ -376,6 +389,7 @@ ff_shown = (n0: int) -> str:
 
 # An obligation at n: `what` could produce NaN or infinity (the `kind`).
 ff_obligation = (n: int, kind: int, what: str, by: str = ""):
+    if ff_probing: return
     p = nodes[n].pos
     tag = if kind == FF_INF: "no_inf" else: "no_nan"
     claim = if len(by) > 0: "cannot prove {what}: {by}" else: "cannot prove {what} under `${tag}`"
@@ -495,7 +509,7 @@ ff_math = (n: int, name: str, args: FR[]) -> FR:
 # The bounds of n's value (when it is a float), visiting everything it evaluates.
 ff_eval = (n: int) -> FR:
     r = ff_eval_node(n)
-    if r.nan and ff_keys.len() > 0 and ff_keys.has(n):
+    if r.nan and ff_keys.len() > 0 and ff_keys.has(n) and not ff_probing:
         # (a dictionary key or set element under `$no_nan` that may be NaN)
         float_key_unproven(n, ff_keys[n])
         r = ff_use_done(n, r)
@@ -590,6 +604,11 @@ ff_eval_node = (n: int) -> FR:
         ff_env = before
         ff_refine(cond, false)
         z = ff_eval(int(nodes[n].c))
+        # (a branch that leaves, as a guard's `return`, joins nothing)
+        if ff_diverges(int(nodes[n].b)): return z
+        if ff_diverges(int(nodes[n].c)):
+            ff_env = after_yes
+            return y
         ff_join(after_yes)
         return ff_hull(y, z)
     if k == .while_ or k == .for_:
@@ -626,6 +645,14 @@ ff_eval_node = (n: int) -> FR:
         return ff_top()
     ff_children(n)
     ff_top()
+
+ff_diverges = (n: int) -> bool:
+    if n <= 0: return false
+    k = nodes[n].kind
+    if k == .return_ or k == .break_ or k == .continue_: return true
+    if k == .block: return nkids(n) > 0 and ff_diverges(kid(n, nkids(n) - 1))
+    if k == .exprstmt: return ff_diverges(int(nodes[n].a))
+    k == .call and ntype(n) == T_NEVER
 
 ff_children = (n: int):
     mask = isolation_children(nodes[n].kind)
@@ -743,8 +770,13 @@ ff_bound = (x0: int, op: Tok, other: FR, ordered: bool):
     if ordered and r.nan:
         r.nan = false
         ff_env[l] = r
-    if op == .lt or op == .le: r.hi = min(r.hi, other.hi)
-    else if op == .gt or op == .ge: r.lo = max(r.lo, other.lo)
+    # (`not (x >? c)` holds for NaN as well: its bounds describe the numbers)
+    if not ordered and op != .eq and op != .ne and ff_assume & FF_NAN == 0: r.nan = true
+    # (strictly below c: at most the float below it, so `x <? 256.0` truncates to a uint8)
+    if op == .lt: r.hi = min(r.hi, ff_below(other.hi))
+    else if op == .le: r.hi = min(r.hi, other.hi)
+    else if op == .gt: r.lo = max(r.lo, -ff_below(-other.lo))
+    else if op == .ge: r.lo = max(r.lo, other.lo)
     else if op == .eq:
         r.lo = max(r.lo, other.lo)
         r.hi = min(r.hi, other.hi)
@@ -756,6 +788,13 @@ ff_bound = (x0: int, op: Tok, other: FR, ordered: bool):
     else: return
     if r.lo > r.hi: return
     ff_env[l] = r
+
+# The largest float below finite x (x itself otherwise).
+ff_below = (x: f64) -> f64:
+    if x != x or x == INF or x == -INF: return x
+    if x == 0.0: return -5e-324
+    bits = int(f64_bits(x))
+    f64_from_bits(u64(if x > 0.0: bits - 1 else: bits + 1))
 
 # A conversion: float widths, integers to floats, floats to integers.
 ff_conv = (n: int) -> FR:
@@ -782,22 +821,56 @@ ff_conv = (n: int) -> FR:
         lo = if b.lo == FACT_MIN: -18446744073709551616.0 else: f64(b.lo)
         hi = if b.hi == FACT_MAX: 18446744073709551616.0 else: f64(b.hi)
         return FR(lo, hi)
-    if cv == i32(int(CV.float2int)) and to != T_MATH_INT:
+    if cv == i32(int(CV.float2int)):
         # (a proven range drops the conversion's runtime check)
-        tt = prune(to)
-        bits = int(types[tt].bits)
-        sg = types[tt].sign
-        lo = if sg: -f64(1 << (bits - 1)) else: 0.0
-        hi = if sg: f64(1 << (bits - 1)) else: f64(1 << (bits - 1)) * 2.0
-        if bits == 64 and sg: lo = -9223372036854775808.0
-        if x.lo >= lo and x.hi < hi: ff_int_proven[n] = true
+        proven = not x.nan and ff_int_fits(x, prune(to))
+        if proven and to != T_MATH_INT: ff_int_proven[n] = true
+        if ff_probing: ff_probe[n] = (ff_probe.get(n) ?? true) and proven
+        else if not proven and ff_conversions.has(ff_fn) and dewy_at(nodes[n].pos) and dir_panics_demanded(): ff_int_obligation(n, prune(to))
         return ff_top()
     ff_top()
 
-# After checking: walk the functions in `$no_nan`/`$no_inf` scopes.
+# The range a float must lie in to convert to integer type `to` (an `int`: finite).
+ff_int_range = (to: int) -> FR:
+    if to == T_MATH_INT: return FR(-FF_MAX, FF_MAX)
+    bits = 64
+    sg = true
+    if types[to].kind == .int_:
+        bits = int(types[to].bits)
+        sg = types[to].sign
+    # (2^(bits - 1) as a float: 1 << 63 is no int64)
+    half = f64(1 << (min(bits, 63) - 1))
+    if bits == 64: half = 9223372036854775808.0
+    FR((if sg: -half else: 0.0), (if sg: half else: half * 2.0))
+
+ff_int_fits = (x: FR, to: int) -> bool:
+    r = ff_int_range(to)
+    if to == T_MATH_INT: return x.lo >= r.lo and x.hi <= r.hi
+    x.lo >= r.lo and x.hi < r.hi
+
+# An unproven float-to-integer conversion (docs/design/no_traps.md): NaN, an
+# infinity or a value outside the target fails, so a range guard proves it.
+ff_int_obligation = (n: int, to: int):
+    shown = ff_shown(int(nodes[n].a))
+    what = if to == T_MATH_INT: "{shown} is finite" else: "{shown} is a number within the {dt(to)} range"
+    claim = "cannot prove {what} for the conversion to {dt(to)}"
+    if dir_defer(n, claim, true):
+        effect_panic_note(ff_fn, n, claim)
+        return
+    name = if shown[0] == '`' and shown[1] != '.': shown[1..len(shown) - 1) else: "x"
+    r = ff_int_range(to)
+    low = if to == T_MATH_INT: "-1e300" else if int(types[to].bits) == 64 and types[to].sign: "-9.2e18" else: "{int(r.lo)}.0"
+    high = if to == T_MATH_INT: "1e300" else if int(types[to].bits) == 64 and types[to].sign: "9.2e18" else if int(types[to].bits) == 64: "1.8e19" else: "{int(r.hi)}.0"
+    guard = "{low} <=? {name} and {name} <? {high}"
+    err_notes.push((-1, "help: NaN, an infinity or a value out of range fails the conversion: guard it (`if {guard}`, a comparison that holds only for numbers), or check it at run time with `$runtime_checks`"))
+    fatal(nodes[n].pos, claim)
+
+# After checking: walk the functions in `$no_nan`/`$no_inf` scopes, and those
+# converting a float to an integer where obligations are demanded.
 floats_after_facts = ():
     floats_reset()
-    if not dir_floats_any: return
+    conversions = ff_conversions.len() > 0 and dir_panics_demanded()
+    if not dir_floats_any and not conversions: return
     ff_files = {}
     ff_owners = {}
     loop s in dir_scopes:
@@ -811,25 +884,46 @@ floats_after_facts = ():
         p = nodes[body].pos
         if pos_in_lib(p): continue
         ff_assume = ff_mode_at(p)
-        if not ff_callers.has(f):
+        if not ff_callers.has(f) and not (conversions and ff_conversions.has(f)):
             if not ff_files.has(pos_file(p)): continue
             if ff_assume == 0 and not ff_owners.has(f): continue
-        ff_env = {}
-        # (its callers prove its parameters when its body is under `$no_nan` and every call is
-        # seen; otherwise they enter)
-        decl = int(fns[f].decl)
-        entering = fns[f].kind == i32(FK_LAMBDA) or ff_scope_decl(decl) != 1 or ff_indirect.has(decl)
-        loop l in fns[f].params:
-            if ff_tracked(l) and int(locals[l].type) > 0 and is_float(int(locals[l].type)): ff_env[l] = if entering: ff_enter() else: ff_top()
-        r = ff_eval(body)
-        # (the value an expression body gives: returned)
-        tail = body
-        if nodes[body].kind == .block:
-            tail = 0
-            m = nkids(body)
-            if nodes[body].aux != 0 and m > 0 and nodes[kid(body, m - 1)].kind == .exprstmt: tail = int(nodes[kid(body, m - 1)].a)
-        if tail != 0 and ff_float(tail) and int(fns[f].ret) > 0 and is_float(prune(int(fns[f].ret))): ff_use(tail, r)
+        ff_walk(f)
     ff_env = {}
+    ff_fn = 0
+
+# effects.jo: the float-to-integer conversions f's body proves, reporting nothing.
+ff_probe_function = (f: int) -> {int: bool}:
+    ff_probe = {}
+    body = int(fns[f].body)
+    if body == 0 or fns[f].state != 2 or ff_probing: return ff_probe
+    ff_probing = true
+    saved = (ff_env, ff_assume, ff_fn)
+    ff_assume = ff_mode_at(nodes[body].pos)
+    ff_walk(f)
+    ff_env = saved.0
+    ff_assume = saved.1
+    ff_fn = saved.2
+    ff_probing = false
+    ff_probe
+
+ff_walk = (f: int):
+    body = int(fns[f].body)
+    ff_fn = f
+    ff_env = {}
+    # (its callers prove its parameters when its body is under `$no_nan` and every call is
+    # seen; otherwise they enter)
+    decl = int(fns[f].decl)
+    entering = fns[f].kind == i32(FK_LAMBDA) or ff_scope_decl(decl) != 1 or ff_indirect.has(decl)
+    loop l in fns[f].params:
+        if ff_tracked(l) and int(locals[l].type) > 0 and is_float(int(locals[l].type)): ff_env[l] = if entering: ff_enter() else: ff_top()
+    r = ff_eval(body)
+    # (the value an expression body gives: returned)
+    tail = body
+    if nodes[body].kind == .block:
+        tail = 0
+        m = nkids(body)
+        if nodes[body].aux != 0 and m > 0 and nodes[kid(body, m - 1)].kind == .exprstmt: tail = int(nodes[kid(body, m - 1)].a)
+    if tail != 0 and ff_float(tail) and int(fns[f].ret) > 0 and is_float(prune(int(fns[f].ret))): ff_use(tail, r)
 
 # The innermost function whose body starts at or before p, in p's file.
 ff_owner_at = (p: int) -> int:
