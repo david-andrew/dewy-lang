@@ -64,6 +64,7 @@ dir_name_copies = 0
 dir_name_row = 0
 dir_name_no_nan = 0
 dir_name_no_inf = 0
+dir_name_local_asserts = 0
 
 directives_reset = ():
     dir_scopes = []
@@ -93,12 +94,13 @@ dir_names = ():
     dir_name_row = intern("default_row")
     dir_name_no_nan = intern("no_nan")
     dir_name_no_inf = intern("no_inf")
+    dir_name_local_asserts = intern("assume_local_asserts")
 
 # The builtin boolean settings. (`$fast_math` permits reassociation and FMA
 # contraction; the backends do neither yet, so it changes no code. `$unsafe` is
 # the unsafe boundary: compiler/ffi.jo.)
 dir_builtin = (name: str) -> bool:
-    name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies" or name == "fast_math" or name == "no_nan" or name == "no_inf" or name == "unsafe"
+    name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies" or name == "fast_math" or name == "no_nan" or name == "no_inf" or name == "unsafe" or name == "assume_local_asserts"
 
 dir_bundle_index = (name: int) -> int:
     loop i in [0..dir_bundles.len()):
@@ -294,7 +296,7 @@ dir_panics_finalize = ():
             g = panic_edges[e]
             n = panic_edges[e + 1]
             # (a closure written here: its own body answers for its calls)
-            if nodes[n].kind == .lambda or panic_answer[g] != 2: continue
+            if nodes[n].kind == .lambda or not panic_reaches(f, g): continue
             p = nodes[n].pos
             # (code the compiler made, as the test runner: no source scope)
             if p <= 0: continue
@@ -311,7 +313,7 @@ dir_panics_finalize = ():
             loop depth in [0..64):
                 h = panic_via[g]
                 w = panic_witness[g]
-                if h == 0 or fn_in_lib(g) or nodes[w].kind == .lambda or dir_policy(nodes[w].pos) != DIR_STATIC: break
+                if h == 0 or fn_in_lib(g) or nodes[w].kind == .lambda or dir_policy(nodes[w].pos) != DIR_STATIC or not panic_reaches(g, h): break
                 n = w
                 g = h
             p = nodes[n].pos
@@ -362,6 +364,14 @@ dir_panic_fix = (p: int) -> str:
         b = name_of(dir_scopes[i].bundle)
         return "prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt this function out of `${b}` with `${b}=false` and add `$runtime_checks`"
     "prove what it checks before the call (a guard, a refined parameter, or a form that returns the failure as a value), or opt in to the check with `$runtime_checks` on a line of its own in this function or block"
+
+# A `$runtime_assert` at p is its module's own handling, not `panics` for the
+# module's callers, unless the scope says `$assume_local_asserts=false`
+# (docs/design/assumptions.md).
+dir_assume_local_asserts = (p: int) -> bool:
+    if dir_scopes.len() == 0: return true
+    dir_names()
+    dir_value(dir_name_local_asserts, p) != 0
 
 # `$explicit_copies`, written for the module, a function or a block.
 dir_explicit_copies = (p: int) -> bool:

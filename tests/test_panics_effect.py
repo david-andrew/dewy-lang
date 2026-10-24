@@ -17,8 +17,10 @@ helper=(xs:array<int64> i:int64):>int64=>{
 }
 main=():>void=>printl(helper([1 2] 1))
 ''', '6:23: error: calling `helper` may panic (helper: runtime check: index is in bounds'),
-    # An explicit check is a panic too, and a handle to it may be called.
+    # An explicit check is a panic too (here not assumed the module's own
+    # handling), and a handle to it may be called.
     'handle': ('''$runtime_checks=false
+$assume_local_asserts=false
 check=(x:int64):>int64=>{
     $runtime_assert(x >? 0)
     return x
@@ -35,6 +37,7 @@ main=():>void=>printl(strict([1]))
                 '`panics` is inferred, never granted: a row can only exclude it, `& no panics`'),
     # The strict lane excludes panics; the repair names its opt-out.
     'bundle': ('''$no_hidden_costs
+$assume_local_asserts=false
 pick=(x:int64):>int64=>{
     $no_hidden_costs=false
     $runtime_checks

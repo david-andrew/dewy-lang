@@ -13,7 +13,7 @@ bundle that turns every entry off. Spellings marked *pending* await David.
 | Running out of memory and the runtime core (lib/core/rt.jo) are environmental, not `panics` | effects (`panics`) | *pending* (`$explicit_allocation_failure` covers allocation) |
 | Library code's own obligations stay runtime checks under a static user policy | facts policy | *pending* |
 | The library's raw-memory code is trusted by the arena escape check | ownership (arenas) | *pending* |
-| `$runtime_assert` within one module does not make that module's own callers `panics` | effects (`panics`) | *pending* |
+| `$runtime_assert` within one module does not make that module's own callers `panics` | effects (`panics`) | `$assume_local_asserts=false` (spelling provisional) |
 | Paths from command-line arguments or the environment do not warn at filesystem sinks | untrusted-input brand | *pending* |
 | `$no_deadlocks`: the scheduler is fair, local computation terminates, external peers cooperate | deadlock certificates | stated assumptions of the theorem |
 

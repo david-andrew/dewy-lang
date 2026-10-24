@@ -621,7 +621,11 @@ takes a handle to a function that may panic. A scope without runtime checks
 error names the chain to the panic and offers both repairs, proving what the
 callee checks first or opting in with `$runtime_checks`. So a function built
 with `$runtime_checks` cannot fail inside a caller that did not opt in.
-`& no panics` forbids it outright, whatever the scope. A library function's
+A `$runtime_assert` is its module's own explicit handling: it makes its
+function (and the module's functions that call it) panic only for callers in
+other modules. `$assume_local_asserts=false` in a module, function or block
+makes its asserts panic for every caller.
+`& no panics` forbids it outright, whatever the scope, local asserts included. A library function's
 precondition is the caller's obligation where the library states it: `xs.first`
 and `xs.last` take an array with `length >? 0`, and `xs.swap(i j)` and
 `xs.insert(value i)` need their positions in bounds, so a guarded call cannot

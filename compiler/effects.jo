@@ -1701,15 +1701,22 @@ effects_demand_late = (f: int) -> bool:
 # the runtime (lib/core/rt.jo). Demanded only when some scope is no-traps or a
 # row excludes panics: each reached body is walked once and the call graph
 # solved by Tarjan's algorithm, O(nodes of the reached bodies + call edges).
+# A `$runtime_assert` is its module's own explicit handling (decisions.md,
+# 2026-10-23): it makes its function, and callers in the same module, panic
+# only for callers in other modules (answer 3), unless its scope says
+# `$assume_local_asserts=false` (docs/design/assumptions.md). A call across
+# modules of a function that panics only so panics outright (answer 2).
 effect_panics_demanded = false
 effect_panics_settled = false         # deferred obligations are known: answers are final
 effect_panic_nodes: {int: int} = {}   # function -> a deferred obligation's node
 effect_panic_texts: {int: str} = {}   # and what it requires
 panic_index: int[]                    # Tarjan order (0: not visited)
 panic_low: int[]
-panic_answer: int[]                   # 0 open, 1 cannot panic, 2 may panic
+panic_answer: int[]                   # 0 open, 1 cannot panic, 2 may panic, 3 only for other modules
 panic_witness: int[]                  # a source node, or the edge's node
 panic_via: int[]                      # the callee that edge reaches (0: a source)
+panic_local: int[]                    # while open: a module-local source (answer 3), or its edge
+panic_local_via: int[]
 panic_edge_at: int[]                  # its edges in panic_edges: [at..end)
 panic_edge_end: int[]
 panic_edges: int[]                    # pairs (callee, node)
@@ -1729,6 +1736,8 @@ effect_panics_reset = ():
     panic_answer = []
     panic_witness = []
     panic_via = []
+    panic_local = []
+    panic_local_via = []
     panic_edge_at = []
     panic_edge_end = []
     panic_edges = []
@@ -1751,6 +1760,8 @@ panic_grow = ():
     panic_answer += fill(0, extra)
     panic_witness += fill(0, extra)
     panic_via += fill(0, extra)
+    panic_local += fill(0, extra)
+    panic_local_via += fill(0, extra)
     panic_edge_at += fill(0, extra)
     panic_edge_end += fill(0, extra)
 
@@ -1852,7 +1863,10 @@ panic_node = (f: int, n: int):
         # `panic` is a failure a caller can cause. In a program, `assert` is a
         # check the compiler made, as unpacking's: an obligation for facts)
         explicit = id == .panic or id == .runtime_assert or id == .unreachable and not panic_lib
-        if explicit and panic_witness[f] == 0 and not panic_synthesized(n): panic_witness[f] = n
+        if explicit and panic_witness[f] == 0 and not panic_synthesized(n):
+            if id == .runtime_assert and dir_assume_local_asserts(nodes[n].pos):
+                if panic_local[f] == 0: panic_local[f] = n
+            else: panic_witness[f] = n
     else if k == .call and nodes[n].aux == 0 or k == .fnref or k == .lambda or k == .pair or k == .partial and nodes[n].aux == 0:
         # (a call whose precondition is the caller's obligation, as a string
         # index or a divisor: proven, an error, or a check of the caller's own)
@@ -1893,35 +1907,56 @@ panic_visit = (f: int):
             panic_visit(g)
             if panic_answer[g] == 0: panic_low[f] = min(panic_low[f], panic_low[g])
         else if panic_answer[g] == 0: panic_low[f] = min(panic_low[f], panic_index[g])
-        if panic_answer[g] == 2 and panic_witness[f] == 0:
+        if panic_witness[f] == 0 and panic_reaches(f, g):
             panic_witness[f] = panic_edges[e + 1]
             panic_via[f] = g
+        else if panic_answer[g] == 3 and panic_local[f] == 0:
+            panic_local[f] = panic_edges[e + 1]
+            panic_local_via[f] = g
     if panic_low[f] != panic_index[f]: return
-    # (a component: its members reach one another, so one may panic if any does)
+    # (a component: its members reach one another, so one may panic if any
+    # does; a module-local panic spanning modules is no longer local)
     start = panic_stack.len() - 1
     loop panic_stack[start] != f: start -= 1
     any = false
-    loop i in [start..panic_stack.len()):
-        if panic_witness[panic_stack[i]] != 0: any = true
+    local = false
+    spans = false
     loop i in [start..panic_stack.len()):
         g = panic_stack[i]
-        if any and panic_witness[g] == 0:
+        if panic_witness[g] != 0: any = true
+        if panic_local[g] != 0: local = true
+        if fns[g].mod != fns[f].mod: spans = true
+    if local and spans: any = true
+    answer = if any: 2 else if local: 3 else: 1
+    loop i in [start..panic_stack.len()):
+        g = panic_stack[i]
+        if answer == 3 or panic_witness[g] == 0 and panic_local[g] != 0:
+            panic_witness[g] = panic_local[g]
+            panic_via[g] = panic_local_via[g]
+        if answer != 1 and panic_witness[g] == 0:
             loop j in [0..(panic_edge_end[g] - panic_edge_at[g]) / 2):
                 e = panic_edge_at[g] + 2 * j
                 h = panic_edges[e]
                 if panic_answer[h] == 0 and panic_index[h] >= panic_index[f] and panic_witness[g] == 0:
                     panic_witness[g] = panic_edges[e + 1]
                     panic_via[g] = h
-        panic_answer[g] = if any: 2 else: 1
+        panic_answer[g] = answer
     loop panic_stack.len() > start: panic_stack.pop()
 
-# Whether f may panic (its witness: panic_witness/panic_via). Answers settle
-# once facts have run; a body checked later is walked on its first question.
+# Whether f's call of g (answered) may panic in f: g may panic for every
+# caller, or only for callers outside its module and f is one.
+panic_reaches = (f: int, g: int) -> bool:
+    a = panic_answer[g]
+    a == 2 or a == 3 and fns[g].mod != fns[f].mod
+
+# Whether f may panic for some caller (its witness: panic_witness/panic_via).
+# Answers settle once facts have run; a body checked later is walked on its
+# first question.
 effect_panics = (f: int) -> bool:
     if f <= 0 or f >= fns.len(): return false
     panic_grow()
     if panic_index[f] == 0: panic_visit(f)
-    panic_answer[f] == 2
+    panic_answer[f] >= 2
 
 # A function's name as a program writes it (`xs.insert` reaches `__dewy_insert`).
 effect_shown_name = (f: int) -> str:
