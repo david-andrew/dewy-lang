@@ -178,8 +178,8 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   `'euclid'` or `'trunc'`. Not `rem`, not a method.
 - Indexed iteration is always `loop i in 0.. and x in xs`: no `enumerate`, no
   `indexed`.
-- `$build`: a compile-time record like `$target` (`$build.mode =? 'release'`,
-  `$build.debug`). Project flags (e.g. BOOTSTRAP) are ordinary consts in a build
+- `$build`: a compile-time record like `$target` (`$build.mode =? 'release'`;
+  `$build.debug` was removed 2026-10-23). Project flags (e.g. BOOTSTRAP) are ordinary consts in a build
   module the entry module overrides; no CLI `-D` flags.
 - File helpers are `Path` methods: `p.copy_to(q)`, `p.rename(q)`, `p.make_dirs`,
   `p.walk`, `p.glob"*.dewy"`, `p.size`, `p.modified`, `p.chmod(...)`; `env`
