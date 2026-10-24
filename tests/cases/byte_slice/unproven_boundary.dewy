@@ -1,0 +1,7 @@
+$runtime_checks=false
+f=(s:string i:int64):>string=>{
+    let b=s as array<uint8>
+    if i >=? 0 and i <=? b.length {return s.byte_slice(0 i)}
+    ""
+}
+main=():>void=>printl(f("héllo" 3))

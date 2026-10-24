@@ -3419,6 +3419,13 @@ that end when it has it (once), and the text unchanged otherwise.
 `text.lines` gives the lines without their breaks (a final break adds no empty
 line), `text.chars` its graphemes (as `graphemes(text)`), `text.count(part)` the
 nonoverlapping occurrences and `text.is_empty` whether it has none.
+`text.byte_slice(start stop)` gives the bytes `[start..stop)` as a string without
+reading graphemes; the offsets are UTF-8 byte offsets, as `text as array<uint8>`
+indexes them. Both ends are an obligation: `0 <=? start <=? stop <=?` the byte
+length, and each a char boundary (0, the byte length, or a byte that starts a
+UTF-8 sequence). Guards on the byte view prove it
+(`let b=text as array<uint8>; if i <? b.length and b[i] <? 0x80 {text.byte_slice(0 i)}`);
+otherwise it is checked at run time under `$runtime_checks`.
 `text.find(part)` and `text.rfind(part)` give the grapheme position of the first or
 last occurrence, as indexing counts, or `Missing`; `text.find(part start)` searches from
 grapheme `start`. `xs.index_of(x)` gives the first position of `x` in an array, or

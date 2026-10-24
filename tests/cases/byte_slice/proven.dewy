@@ -1,0 +1,24 @@
+# quick
+$runtime_checks=false
+whole=(s:string):>string=>s.byte_slice(0 (s as array<uint8>).length)
+head=(s:string i:int64):>string=>{
+    let b=s as array<uint8>
+    if i >=? 0 and i <? b.length and b[i] <? 0x80 {return s.byte_slice(0 i)}
+    ""
+}
+tail=(s:string i:int64):>string=>{
+    let b=s as array<uint8>
+    if i >=? 0 and i <? b.length and b[i] >=? 0xC0 {return s.byte_slice(i b.length)}
+    ""
+}
+twice=(s:string):>int64=>{
+    let t=s.byte_slice(0 (s as array<uint8>).length)
+    let u=t.byte_slice(0 (t as array<uint8>).length)
+    (u as array<uint8>).length
+}
+main=():>void=>{
+    printl(whole("héllo"))
+    printl(head("héllo" 3))
+    printl(tail("héllo" 1))
+    printl(twice("héllo"))
+}

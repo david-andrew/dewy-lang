@@ -90,6 +90,16 @@ remove_suffix = (s: str, suffix: str) -> str:
     if ends_with(s, suffix): return s[..len(s) - len(suffix))
     s
 
+# Dewy's `text.byte_slice(start stop)`: the text's bytes [start..stop) as a string, without
+# reading its graphemes. Both ends are char boundaries (0, the byte length, or a byte that
+# starts a UTF-8 sequence): the caller's obligation, proven or checked here.
+__dewy_byte_slice = (s: str, start: int, stop: int) -> str:
+    n = len(s)
+    if start < 0 or start > stop or stop > n: panic("byte_slice({start} {stop}) is out of bounds: the text has {n} bytes")
+    p = data(s)
+    if start < n and int(p[start]) & 0xc0 == 0x80 or stop < n and int(p[stop]) & 0xc0 == 0x80: panic("byte_slice({start} {stop}) does not start and end on char boundaries")
+    s[start..stop)
+
 # Keep the overflow policy in each product rather than erasing it at a helper call.
 __dewy_policy_power[T] = (base: T, exponent: int) -> T:
     if exponent < 0: panic("negative integer exponent: use a rational or floating base")

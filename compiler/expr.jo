@@ -4947,6 +4947,7 @@ shown_fn_name = (name: str) -> str:
     if name == "__dewy_rfind": return "rfind"
     if name == "__dewy_index_of": return "index_of"
     if name == "__dewy_insert": return "insert"
+    if name == "__dewy_byte_slice": return "byte_slice"
     if name == "__dewy_keys": return "keys"
     name
 
@@ -5256,6 +5257,7 @@ dewy_member_name = (callee: int, rt: int, fname: int, args: int[]) -> int:
         if name == "chars" and args.len() == 0: return intern("graphemes")
         if name == "find": return intern("__dewy_find")
         if name == "rfind": return intern("__dewy_rfind")
+        if name == "byte_slice" and args.len() == 2: return intern("__dewy_byte_slice")
         if name == "startswith": return intern("starts_with")
         if name == "endswith": return intern("ends_with")
         if name == "starts_with" or name == "ends_with": fatal(pos, "write `{recv}.{replace(name, "_", "")}(...)`")
