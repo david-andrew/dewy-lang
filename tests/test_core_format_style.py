@@ -25,6 +25,7 @@ CASES = [
     ('T=type of [id:int64\nwidth=()=>stop-start\ng=<T>(x:T):>T=>x\nn=3]',
      'T = type of [id:int64\n    width = () => stop-start\n    g = <T>(x:T):>T => x\n    n=3]'),
     ('x=array<int64 length=3>', 'x = array<int64 length=3>'),
+    ('m=(a)=>a\n& b\nc=(x)=>\nx', 'm = (a) => a\n    & b\nc = (x) =>\n    x'),
     ('xs.sort(key=m=>m.length reverse=true)', 'xs.sort(key=m => m.length reverse=true)'),
     ('let size=match v {n:int64=>n <none>=>0}', 'let size = match v { n:int64 => n <none> => 0 }'),
 ]

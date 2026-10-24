@@ -96,6 +96,11 @@ df_track = (tokens: DewyLexeme[], stop: int) -> bool:
             # [a..b) and (a..b] are valid Dewy range delimiters.
     true
 
+# A line continues the statement before it, one level deeper, when that statement ended in an
+# operator or an `=`/`=>`, or the line starts with `&`, `|`, `and`, `or` or `xor`.
+df_continues = (prev: DewyToken, first: DewyToken) -> bool:
+    df_assignment(prev) or prev == .amp or prev == .pipe or prev == .kw_and or prev == .kw_or or prev == .kw_xor or first == .amp or first == .pipe or first == .kw_and or first == .kw_or or first == .kw_xor
+
 # Whether the innermost open delimiter is a ( or a [ (or an angle bracket).
 df_inside = () -> bool:
     df_angles > 0 or df_stack.len() > 0 and df_stack[df_stack.len() - 1] != .lbrace
@@ -138,6 +143,7 @@ df_text = (src: str) -> str?:
         lead = 0
         loop at + lead < stop and tokens[at + lead].kind == .op and (tokens[at + lead].symbol == .rparen or tokens[at + lead].symbol == .rbrack or tokens[at + lead].symbol == .rbrace): lead += 1
         depth = max(0, df_stack.len() - lead)
+        if lead == 0 and at > 0 and at < stop and not protected and df_continues(tokens[at - 1].symbol, tokens[at].symbol): depth += 1
         first = start
         loop first < content_end and (src[first] == ' ' or src[first] == '\t'): first += 1
         last = content_end
