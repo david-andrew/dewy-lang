@@ -1,0 +1,18 @@
+# stdin: green\n
+# modes: native native-release
+# A string-literal union alias called on a value converts to it, as `as` does: a member literal
+# as it is, other text checked when it runs, a value of another set member by member.
+Color:type = 'red' | 'green'
+Wide:type = 'red' | 'green' | 'blue'
+name = (c:Color):>string => match c {
+    <'red'> => "R"
+    <'green'> => "G"
+}
+main = () => {
+    let text = read_line() ?? "red"
+    let c = Color(text)
+    let w = Wide(c)
+    let back = Color(w)
+    let same = text as Color
+    printl"{name(Color('red'))} {name(c)} {w} {back} {same} {c =? same} {'green' as Color}"
+}

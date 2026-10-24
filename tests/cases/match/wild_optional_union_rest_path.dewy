@@ -1,0 +1,37 @@
+# `_` after type arms over an optional union in a field or a global holds the members not
+# matched yet, as it does for a variable; a write in the arm forgets that.
+Oops:type = type of error & [message:string]
+Box:type = [v:int64 | bool | Oops | none]
+Outer:type = [box:Box]
+let latest:int64 | bool | Oops | none = none
+maybe = (v:int64 | bool | none):>string => "maybe {v}"
+sure = (v:int64 | bool):>string => "sure {v}"
+show = (o:Outer):>string => match o.box.v {
+    e:Oops => e.message
+    _ => maybe(o.box.v)
+}
+show_present = (b:Box):>string => match b.v {
+    <none> => "nothing"
+    <Oops> => "oops"
+    _ => sure(b.v)
+}
+show_latest = ():>string => match latest {
+    <none> => "nothing"
+    e:Oops => e.message
+    _ => sure(latest)
+}
+replace = (@b:Box):>string => match b.v {
+    <Oops> => "oops"
+    _ => {
+        b.v = Oops["replaced"]
+        "{b.v}"
+    }
+}
+main = () => {
+    let values:array<int64 | bool | Oops | none> = [7 true Oops["bad"] none]
+    loop v in values {
+        let b:Box = [v]
+        latest = v
+        printl"{show(Outer[b])} | {show_present(b)} | {show_latest()} | {replace(@b)}"
+    }
+}

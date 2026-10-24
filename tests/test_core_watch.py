@@ -13,6 +13,16 @@ from pathlib import Path
 import pytest
 
 
+def patience(seconds):
+    """The limit for a wait that ends as soon as its event arrives: it bounds only a hang.
+    A shared machine's load stretches every rebuild, so the limit grows with the load per CPU."""
+    try:
+        load = os.getloadavg()[0] / (os.cpu_count() or 1)
+    except (AttributeError, OSError):
+        load = 0.0
+    return seconds * (1 + max(load, 0.0))
+
+
 class Watch:
     def __init__(self, compiler, source, *, game=False, options=None, filters=()):
         env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
@@ -41,8 +51,8 @@ class Watch:
         finally:
             self.chunks.put(b'')
 
-    def expect(self, pattern, timeout=10):
-        end = time.monotonic() + timeout
+    def expect(self, pattern, timeout=20):
+        end = time.monotonic() + patience(timeout)
         while True:
             found = re.search(pattern, self.output[self.position:])
             if found:
@@ -64,7 +74,7 @@ class Watch:
             if self.process.poll() is None:
                 self.process.stdin.write(b'q\n')
                 self.process.stdin.flush()
-            self.process.wait(timeout=5)
+            self.process.wait(timeout=patience(5))
         except (OSError, subprocess.TimeoutExpired):
             if self.process.poll() is None:
                 if os.name == 'nt':
@@ -192,7 +202,7 @@ waiting = () => {
     child = None
     try:
         # (what a test prints is shown only when it fails: its pid file says it is waiting)
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + patience(20)
         while not (tmp_path / 'child.pid').exists() or not (tmp_path / 'child.pid').read_text():
             assert time.monotonic() < deadline, 'the test did not start'
             time.sleep(0.05)
@@ -205,8 +215,8 @@ waiting = () => {
             watcher.process.send_signal(signal.SIGINT)
         else:
             watcher.process.terminate()
-        watcher.process.wait(timeout=5)
-        deadline = time.monotonic() + 3
+        watcher.process.wait(timeout=patience(5))
+        deadline = time.monotonic() + patience(3)
         while running(child) and time.monotonic() < deadline:
             time.sleep(0.02)
         assert not running(child), 'quitting test watch left its active test running'
@@ -294,7 +304,7 @@ def test_core_watch_function_asset(compiler, tmp_path):
     try:
         watcher.expect('first asset')
         save(asset, 'second asset')
-        watcher.expect('second asset', timeout=3)
+        watcher.expect('second asset')
     finally:
         watcher.close()
 
@@ -320,7 +330,7 @@ main=():>void=>{
     try:
         # The watcher may stop the first run between its write and stdout flush.
         # Recovery to the new embedded value is the behavior under test.
-        watcher.expect('second', timeout=3)
+        watcher.expect('second')
     finally:
         watcher.close()
 
@@ -349,7 +359,7 @@ def test_core_watch_missing_input(compiler, tmp_path, kind, directory_exists, te
         watcher.expect('waiting for changes')
         directory.mkdir(parents=True, exist_ok=True)
         save(dependency, contents)
-        watcher.expect('recovered input', timeout=3)
+        watcher.expect('recovered input')
     finally:
         watcher.close()
 
@@ -363,11 +373,11 @@ def test_core_watch_named_language_fallback(compiler, tmp_path):
     try:
         watcher.expect('waiting for changes')
         save(jo, 'label = (): "implementation fallback"')
-        watcher.expect('implementation fallback', timeout=3)
+        watcher.expect('implementation fallback')
         save(dewy, 'label=()=>"preferred Dewy module"')
-        watcher.expect('preferred Dewy module', timeout=3)
+        watcher.expect('preferred Dewy module')
         dewy.unlink()
-        watcher.expect('implementation fallback', timeout=3)
+        watcher.expect('implementation fallback')
     finally:
         watcher.close()
 
@@ -427,7 +437,7 @@ draw=():>void=>clear(BLACK)
         before = int(watcher.expect(r'tick (\d+) asset=one').group(1))
         save(asset, 'two')
         watcher.expect(r'reloaded in \d+ ms:')
-        match = watcher.expect(r'tick (\d+) asset=two allocations=(\d+)', timeout=3)
+        match = watcher.expect(r'tick (\d+) asset=two allocations=(\d+)')
         after, allocations = map(int, match.groups())
         assert after > before, watcher.output
         for label in ['three', 'four']:

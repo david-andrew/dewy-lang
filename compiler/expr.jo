@@ -1014,11 +1014,20 @@ private_hint = (name: int) -> str:
 unused_file_hint = (name: int) -> str:
     m = cur_mod()
     if m < 0 or modules[m].is_prelude or is_private(name): return ""
+    # (the file that declares it, ahead of those that import it)
+    home = -1
     loop o in [0..modules.len()):
         if o == m or modules[o].is_prelude or modules[o].names.get(name) == none or modules[o].decls.len() == 0: continue
         gf = int(modules[o].file)
+        if gf < 0 or int(modules[m].file) < 0 or pos_in_lib(nodes[modules[o].decls[0]].pos): continue
+        d = int(syms[modules[o].names[name]].decl)
+        if home < 0 or (d > 0 and pos_file(nodes[d].pos) == gf):
+            home = o
+            if d > 0 and pos_file(nodes[d].pos) == gf: break
+    if home >= 0:
+        o = home
+        gf = int(modules[o].file)
         lf = int(modules[m].file)
-        if gf < 0 or lf < 0 or pos_in_lib(nodes[modules[o].decls[0]].pos): continue
         # (a module this file imports: its names are written after its name)
         loop k, sy in modules[m].names:
             if syms[sy].kind == .module and int(syms[sy].ref) == o: return " (it is {name_of(k)}'s: `{name_of(k)}.{name_of(name)}`)"
@@ -1375,7 +1384,9 @@ exact_args = (cd: Cand) -> int:
 
 # map call args to parameter slots; returns error message ("" on success)
 # kinds: per parameter, 1 keyword-only (after `...`), 2 position-only (`<v:T>`)
-map_args = (pnames: int[], has_default: bool[], args: int[], out: mut int[], kinds: int[] = []) -> str:
+# explain: false gives "?" for any error, its message left unbuilt (overload resolution tries
+# many and reports few: map_args_text builds the one reported)
+map_args = (pnames: int[], has_default: bool[], args: int[], out: mut int[], kinds: int[] = [], explain: bool = true) -> str:
     np = pnames.len()
     out.clear()
     out.resize(np)
@@ -1385,22 +1396,43 @@ map_args = (pnames: int[], has_default: bool[], args: int[], out: mut int[], kin
             k = -1
             loop j in [0..np):
                 if pnames[j] == int(nodes[a].name): k = j
-            if k >= 0 and k < kinds.len() and kinds[k] == 2: return "parameter '{name_of(pnames[k])}' is position-only: pass it without its name"
+            if k >= 0 and k < kinds.len() and kinds[k] == 2:
+                if not explain: return "?"
+                return "parameter '{name_of(pnames[k])}' is position-only: pass it without its name"
             if k < 0:
+                if not explain: return "?"
                 an = name_of(int(nodes[a].name))
                 if (an == "key" or an == "reverse") and not caller_dewy(): return "no parameter named '{an}' (by a key: `max_by(xs, (x): len(x))`, `min_by`, `sorted_by(xs, (x): x.age)`, `sort_by`; `descending = true` sorts largest first)"
                 return "no parameter named '{an}'{suggestion(an, pnames)}"
-            if out[k] != 0: return "parameter '{name_of(int(nodes[a].name))}' given twice"
+            if out[k] != 0:
+                if not explain: return "?"
+                return "parameter '{name_of(int(nodes[a].name))}' given twice"
             out[k] = int(nodes[a].a)
         else:
             loop pos < np and out[pos] != 0: pos += 1
-            if pos < np and pos < kinds.len() and kinds[pos] == 1: return "too many positional arguments: '{name_of(pnames[pos])}' takes its name (`{name_of(pnames[pos])}=...`)"
-            if pos >= np: return "too many arguments (expected {np})"
+            if pos < np and pos < kinds.len() and kinds[pos] == 1:
+                if not explain: return "?"
+                return "too many positional arguments: '{name_of(pnames[pos])}' takes its name (`{name_of(pnames[pos])}=...`)"
+            if pos >= np:
+                if not explain: return "?"
+                return "too many arguments (expected {np})"
             out[pos] = a
             pos += 1
     loop i in [0..np):
-        if out[i] == 0 and not has_default[i]: return "missing argument '{name_of(pnames[i])}'"
+        if out[i] == 0 and not has_default[i]:
+            if not explain: return "?"
+            return "missing argument '{name_of(pnames[i])}'"
     ""
+
+# why function d's parameters do not take args (map_args's message, built when it is reported)
+map_args_text = (d: int, args: int[]) -> str:
+    pnames: int[]
+    hasdef: bool[]
+    loop i in [0..nkids(d)):
+        pnames.push(int(nodes[kid(d, i)].name))
+        hasdef.push(nodes[kid(d, i)].b != 0)
+    unused: int[]
+    map_args(pnames, hasdef, args, unused, dewy_param_kinds.get(d) ?? [])
 
 # Keep parameter slots canonical for types/ABI, but evaluate explicitly supplied
 # Dewy arguments in source order, then omitted defaults in parameter order.
@@ -2361,6 +2393,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
     # (candidates that got equally far but fail there for different reasons: blaming one of
     # them is arbitrary, as len(thing) told of a GpuBuffer's)
     last_err_tie = false
+    last_err_map = 0          # (a function whose parameters do not take the arguments: last_err, unbuilt)
     # (the rejections at the furthest argument, their messages built only if no candidate
     # fits: the last one's is the error, and they tie when any two differ)
     rejected: Rejection[]
@@ -2405,9 +2438,10 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             loop i in [0..np):
                 pnames.push(int(nodes[kid(d, i)].name))
                 hasdef.push(nodes[kid(d, i)].b != 0)
-            err = map_args(pnames, hasdef, args, cd.args, kinds)
-            if len(err) > 0:
-                if last_err_arg == 0: last_err = err
+            if len(map_args(pnames, hasdef, args, cd.args, kinds, false)) > 0:
+                if last_err_arg == 0:
+                    last_err = ""
+                    last_err_map = d
                 if ufcs and not recv_fits and np > 0 and nodes[unnamed(args[0])].type != 0:
                     rb = fill(0, int(cd.sig.ntp))
                     if match_type(cd.sig.params[0], ntype(unnamed(args[0])), rb, 0) >= 0: recv_fits = true
@@ -2416,7 +2450,9 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         if targs_here.len() > 0:
             # f[T](...): the declared type parameters, given
             if nkids2(d) != targs_here.len():
-                if last_err_arg == 0: last_err = "'{name_of(name)}' takes {nkids2(d)} type argument(s), given {targs_here.len()}"
+                if last_err_arg == 0:
+                    last_err = "'{name_of(name)}' takes {nkids2(d)} type argument(s), given {targs_here.len()}"
+                    last_err_map = 0
                 recv_fits = true
                 continue
             loop i in 0.. and t in targs_here: cd.binds[i] = t
@@ -2516,6 +2552,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             else: texts.push(rfc_arg_message(r.d, r.fi, r.a, r.ptx, r.cd))
             if texts.len() > 1 and texts[texts.len() - 1] != texts[texts.len() - 2]: last_err_tie = true
         last_err = texts[texts.len() - 1]
+        last_err_map = 0
     # pick the cheapest candidate; prefer non-generic ones, then the program's own definitions
     # over the standard library's; report real ties (the library's are settled by how many
     # arguments have exactly a parameter's type, then which comes first: min(x, 5) with x: i32
@@ -2546,6 +2583,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         # (`lookup(id).scaled(2)`: an error or none receiver is the result as it is)
         if ufcs and caller_dewy() and args.len() > 0 and nodes[unnamed(args[0])].type != 0 and forwards_exceptions(ntype(unnamed(args[0]))):
             return forward_call(n, name, args, expected)
+        if last_err_map != 0: last_err = map_args_text(last_err_map, args)
         if last_err_tie:
             last_err = ""
             last_err_pos = 0
@@ -4268,15 +4306,22 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
             g = int(syms[hs].ref)
             ensure_global(g, nodes[n].pos)
             fatal(nodes[n].pos, "'{name_of(name)}' is a variable of type {dt(int(globals[g].type))}, not a function{juxt_string_call_hint(n)}")
+        # (m.Reading(n): the alias as its module has it)
+        ts = hs
+        if mod_scope >= 0 and not ufcs: ts = module_lookup(mod_scope, name)
         # (Msg(Move(3)), Msg a union: its members are Msgs as they are)
-        if hs != 0 and syms[hs].kind == .alias_ and nkids2(int(syms[hs].ref)) == 0:
-            at = resolve_alias(int(syms[hs].ref), [], nodes[n].pos)
+        if ts != 0 and syms[ts].kind == .alias_ and nkids2(int(syms[ts].ref)) == 0:
+            at = resolve_alias(int(syms[ts].ref), [], nodes[n].pos)
             if is_int(at): return conversion(n, at, args)
             # (Reading(n), Reading a refined alias: the conversion `n as Reading`, its
-            # refinement an obligation)
-            if tkind(at) == .refined and dewy_at(nodes[n].pos) and args.len() == 1 and nodes[args[0]].kind != .namedarg:
+            # refinement an obligation; Color('red'), Color a union of string literals:
+            # likewise `'red' as Color`)
+            if (tkind(at) == .refined or str_set_of(at) != 0) and dewy_at(nodes[n].pos) and args.len() == 1 and nodes[args[0]].kind != .namedarg:
                 target = mk(.tname, nodes[n].pos)
                 nodes[target].name = i32(name)
+                if ts != hs:
+                    nodes[target].aux = -7
+                    nodes[target].ival = nominal_family(at)
                 nodes[n] = Node(kind = .cast, pos = nodes[n].pos, a = i32(args[0]), b = i32(target))
                 return check_expr(n, expected)
             if is_union(at):
@@ -4292,13 +4337,16 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
         if mod_scope >= 0 and not ufcs and not modules[mod_scope].is_prelude:
             all = []
             loop k, v in modules[mod_scope].names: all.push(k)
-        # (import net, then tcp_connect(...): the module's, written with its name)
-        loop mi in [0..modules.len()):
-            if modules[mi].is_prelude or modules[mi].names.get(name) == none: continue
-            mn = name_of(int(modules[mi].name))
-            if lookup(intern(mn)) != 0: fatal(nodes[n].pos, "unknown function '{name_of(name)}' (it is {mn}'s: `{mn}.{name_of(name)}(...)`)")
-        uh = unused_file_hint(name)
-        if len(uh) > 0: fatal(nodes[n].pos, "unknown function '{name_of(name)}'{uh}")
+        # (import net, then tcp_connect(...): the module's, written with its name; not a
+        # name this file sees, nor one of the module it is written with)
+        if ts == 0:
+            loop mi in [0..modules.len()):
+                if modules[mi].is_prelude or mi == mod_scope or mi == cur_mod() or modules[mi].names.get(name) == none: continue
+                mn = name_of(int(modules[mi].name))
+                ms = lookup(intern(mn))
+                if ms != 0 and syms[ms].kind == .module and int(syms[ms].ref) == mi: fatal(nodes[n].pos, "unknown function '{name_of(name)}' (it is {mn}'s: `{mn}.{name_of(name)}(...)`)")
+            uh = unused_file_hint(name)
+            if len(uh) > 0: fatal(nodes[n].pos, "unknown function '{name_of(name)}'{uh}")
         # (Python's f-strings: f"hello {name}")
         if name_of(name) == "f" and not ufcs and args.len() == 1 and nodes[args[0]].kind == .str_lit and dewy_at(nodes[n].pos):
             fatal(nodes[n].pos, "unknown function 'f' (drop the f: every string interpolates, as in `\"hello \{name}\"`)")
@@ -8471,7 +8519,8 @@ check_match = (m: int, expected: int) -> int:
             if arm_wild:
                 arm_members.clear()
                 if types[st].kind == .opt:
-                    if finite_before & 2 != 0 and finite_before & 1 == 0: arm_members.push(telem(st))
+                    if finite_before & 1 == 0 and opt_members.len() > 0: opt_wild_narrow_path(sc, pkey, st, opt_members, finite_before & 2 != 0, nodes[arm].pos)
+                    else if finite_before & 2 != 0 and finite_before & 1 == 0: arm_members.push(telem(st))
                 else:
                     loop vi in 0.. and um in union_members(st):
                         if not seen_before[vi]: arm_members.push(um)
@@ -8998,7 +9047,7 @@ dewy_partial = (n: int, expected: int) -> int:
                 names: int[]
                 loop i in [0..nkids(c)): names.push(int(nodes[kid(c, i)].name))
                 fit: int[]
-                if len(map_args(names, fill(true, names.len()), args, fit)) > 0 or not partial_args_fit(c, fit): continue
+                if len(map_args(names, fill(true, names.len()), args, fit, [], false)) > 0 or not partial_args_fit(c, fit): continue
                 open = 0
                 loop i in [0..names.len()):
                     if fit[i] == 0 and nodes[kid(c, i)].b == 0: open += 1
@@ -10439,6 +10488,13 @@ check_expr_other = (n: int, expected: int) -> int:
             nodes[n] = nodes[a]
             last_checked = n
             return tt
+        # ('red' as Color, s as Color, Color a union of string literals: the conversion a typed
+        # store makes, a member literal as it is, another literal an error, other text checked)
+        if str_set_of(tt) != 0 and (types[ft].kind == .str_ or str_set_of(ft) != 0) and dewy_at(nodes[n].pos):
+            nodes[n] = nodes[a]
+            str_set_coerce(n, tt)
+            last_checked = n
+            return ntype(n)
         fk = types[ft].kind
         tk = types[tt].kind
         if fk == .quantity or tk == .quantity:
@@ -12157,12 +12213,43 @@ opt_wild_narrow = (l0: int, st: int, matched: int[], none_matched: bool, pos: in
 opt_rest_aliases: {int: bool} = {}
 
 opt_rest_expr = (l: int, keep: int[], pos: int) -> int:
-    u = prune(int(types[prune(int(locals[l].type))].elem))
+    e = opt_rest_of(mk_ident_local(l, pos), keep, pos)
+    opt_rest_aliases[e] = true
+    e
+
+# match x.f over an (A | B | C)?: the `_` arm after `c:C` (and `<none>`), as opt_wild_narrow for
+# a variable. The path is read again (and its tag checked) where the narrowed name is used, as
+# any narrowed path is. O(members).
+opt_wild_narrow_path = (sc: int, key: str, st: int, matched: int[], none_matched: bool, pos: int):
+    keep: int[]
+    loop m in union_members(prune(telem(st))):
+        if not matched.contains(m): keep.push(m)
+    if keep.len() == 0: return
+    inner = keep[0]
+    if keep.len() > 1: inner = mk_union(keep)
+    rest = opt_rest_of(copy_path(sc), keep, pos)
+    t = mk_opt(inner)
+    if none_matched:
+        e = mk(.unwrap, pos)
+        nodes[e].a = i32(rest)
+        nodes[e].type = i32(inner)
+        add_flag(e, NF_CHECKED)
+        rest = e
+        t = inner
+    path_narrows += 1
+    nl = new_local(path_name(key), t, pos)
+    locals[nl].flags = i32(LF_ALIAS)
+    locals[nl].alias = i32(rest)
+
+# `if x != none: some(payload as the kept members) else none`, x a checked variable or field
+# path (read where the result is used)
+opt_rest_of = (root: int, keep: int[], pos: int) -> int:
+    u = prune(int(types[prune(ntype(root))].elem))
     inner = keep[0]
     if keep.len() > 1: inner = mk_union(keep)
     t = mk_opt(inner)
     payload = mk(.unwrap, pos)
-    nodes[payload].a = i32(mk_ident_local(l, pos))
+    nodes[payload].a = i32(copy_path(root))
     nodes[payload].type = i32(u)
     add_flag(payload, NF_CHECKED)
     kept = 0
@@ -12177,12 +12264,11 @@ opt_rest_expr = (l: int, keep: int[], pos: int) -> int:
     add_flag(kept, NF_CHECKED)
     wrap_conv(kept, .opt, t)
     absent = mk(.none_lit, pos)
-    e = bc_if(bc_bin(.ne, mk_ident_local(l, pos), mk(.none_lit, pos), pos), [bc_stmt(kept, pos)], [bc_stmt(absent, pos)], pos)
+    e = bc_if(bc_bin(.ne, root, mk(.none_lit, pos), pos), [bc_stmt(kept, pos)], [bc_stmt(absent, pos)], pos)
     nodes[e].flags = i32(int(nodes[e].flags) & ~NF_STMT)
     mark = scope_mark()
     check_expr(e, t)
     scope_reset(mark)
-    opt_rest_aliases[e] = true
     e
 
 # a closure's or a frozen copy of an optional-union alias, over local l instead
