@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 LADDER = ROOT / 'tests' / 'ladder'
 TIER4_FIRST = 95        # tier 3 is programs 64-94; tier 4 programs are numbered from 95
+TIER5_FIRST = 102       # tier 5 rungs (102+) measure capability, not compile speed
 LOCAL_IMPORT = re.compile(r'\bp"(?!@)([^"]+\.dewy)"')
 
 
@@ -74,7 +75,10 @@ def ladder_programs(tier4: bool) -> list[Path]:
     found = []
     for directory in sorted(LADDER.iterdir()):
         if directory.is_dir() and directory.name[:2].isdigit() and (directory / 'core.dewy').is_file():
-            if (int(directory.name.split('_')[0]) >= TIER4_FIRST) == tier4:
+            number = int(directory.name.split('_')[0])
+            if number >= TIER5_FIRST:
+                continue
+            if (number >= TIER4_FIRST) == tier4:
                 found.append(directory / 'core.dewy')
     return found
 
@@ -83,7 +87,7 @@ def flagships() -> list[Path]:
     """The tier-4 flagship programs: each one's core.dewy where it has one (today's dialect), else its design.dewy."""
     found = []
     for directory in sorted(LADDER.iterdir(), key=lambda d: (d.name.split('_')[0].zfill(4), d.name)):
-        if directory.is_dir() and directory.name[:2].isdigit() and int(directory.name.split('_')[0]) >= TIER4_FIRST:
+        if directory.is_dir() and directory.name[:2].isdigit() and TIER4_FIRST <= int(directory.name.split('_')[0]) < TIER5_FIRST:
             for name in ('core.dewy', 'design.dewy'):
                 if (directory / name).is_file():
                     found.append(directory / name)
