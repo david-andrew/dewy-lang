@@ -17,7 +17,7 @@ garbage line without structure
 Entry:type = [stamp:int64 time:string level:string service:string message:string]
 
 parse_line = (line:string):>Entry|none => {
-    let parts = line.split(" ").filter((p)=>p.length >? 0)
+    let parts = line.split(" ").filter((p) => p.length >? 0)
     if parts.length <? 5 { return none }
     let when = parse_date("{parts[0]} {parts[1]}" utc=true)
     if when is? none { return none }

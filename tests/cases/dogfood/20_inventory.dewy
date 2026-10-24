@@ -1,28 +1,28 @@
 # Inventory: a family of item types with shared methods, matched by kind.
-Item:type=type of any & [
+Item:type = type of any & [
     name:string
     weight:float64
     value:int64
-    label=():>string=>"{name} ({format(weight ".1f")} kg, {value} gold)"
+    label = ():>string => "{name} ({format(weight ".1f")} kg, {value} gold)"
 ]
-Weapon:type=type of Item & [damage:int64 durability:int64=100]
-Armor:type=type of Item & [defense:int64]
-Potion:type=type of Item & [heal:int64 doses:int64=1]
+Weapon:type = type of Item & [damage:int64 durability:int64=100]
+Armor:type = type of Item & [defense:int64]
+Potion:type = type of Item & [heal:int64 doses:int64=1]
 
-Inventory:type=[
+Inventory:type = [
     items:array<Item>=[]
     capacity:float64=25.0
-    total_weight=():>float64=>{
-        let w:float64=0.0
-        loop it in items w+=it.weight
+    total_weight = ():>float64 => {
+        let w:float64 = 0.0
+        loop it in items w += it.weight
         return w
     }
-    add=(it:Item):>bool=>{
+    add = (it:Item):>bool => {
         if total_weight() + it.weight >? capacity return false
         items.push(it)
         return true
     }
-    remove_named=(name:string):>Item|none=>{
+    remove_named = (name:string):>Item|none => {
         loop i in [0..items.length) {
             if items[i].name =? name return items.pop(i)
         }
@@ -30,24 +30,24 @@ Inventory:type=[
     }
 ]
 
-describe=(it:Item):>string=>match it {
+describe = (it:Item):>string => match it {
     w:Weapon => "weapon {w.label()} hits for {w.damage}, {w.durability}% durable"
     a:Armor => "armor {a.label()} blocks {a.defense}"
     p:Potion => "potion {p.label()} heals {p.heal} x{p.doses}"
     _ => "item {it.label()}"
 }
 
-use_item=(@player_hp:int64 it:Item):>string=>match it {
+use_item = (@player_hp:int64 it:Item):>string => match it {
     p:Potion => {
-        player_hp=min(100 player_hp+p.heal)
+        player_hp = min(100 player_hp+p.heal)
         "drank {p.name}, hp now {player_hp}"
     }
     _ => "{it.name} cannot be used"
 }
 
-main=()=>{
-    let bag=Inventory[]
-    let loot:array<Item>=[
+main = () => {
+    let bag = Inventory[]
+    let loot:array<Item> = [
         Weapon[name="Sword" weight=3.5 value=50 damage=12]
         Armor[name="Chainmail" weight=12.0 value=120 defense=8]
         Potion[name="Red potion" weight=0.5 value=15 heal=30 doses=2]
@@ -60,18 +60,18 @@ main=()=>{
     printl("carrying {format(bag.total_weight() ".1f")} / {bag.capacity} kg")
     loop it in bag.items printl("  {describe(it)}")
 
-    let worth=0
-    loop it in bag.items worth+=it.value
+    let worth = 0
+    loop it in bag.items worth += it.value
     printl("total value {worth}")
 
-    let hp:int64=60
-    let potion=bag.remove_named("Red potion")
+    let hp:int64 = 60
+    let potion = bag.remove_named("Red potion")
     if potion isnt? none printl(use_item(@hp potion))
     printl(use_item(@hp bag.items[0]))
     printl("left: {[loop it in bag.items it.name]}")
 
-    let heaviest=bag.items.max_by((it)=>it.weight)
+    let heaviest = bag.items.max_by((it) => it.weight)
     printl("heaviest: {heaviest.name}")
-    let by_value=bag.items.sorted(key=(it)=>it.value reverse=true)
+    let by_value = bag.items.sorted(key=(it) => it.value reverse=true)
     printl("most valuable first: {[loop it in by_value it.name]}")
 }

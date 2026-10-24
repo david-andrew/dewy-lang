@@ -2,58 +2,58 @@
 # Layout: "DWY1" magic, uint16 count (LE), then per record: uint32 id (BE),
 # int32 score (LE), uint8 name length, name bytes. Trailer: uint32 crc (LE).
 
-Record:type=[id:uint32 score:int32 name:string]
+Record:type = [id:uint32 score:int32 name:string]
 
-crc_table=():>array<uint32>=>{
-    let table:array<uint32>=[]
+crc_table = ():>array<uint32> => {
+    let table:array<uint32> = []
     loop n in [0..256) {
-        let c=n as uint32
+        let c = n as uint32
         loop k in [0..8) {
-            if c & 1 =? 1 c=0xEDB88320 xor (c >> 1) else c=c >> 1
+            if c & 1 =? 1 c = 0xEDB88320 xor (c >> 1) else c = c >> 1
         }
         table.push(c)
     }
     return table
 }
 
-crc32=(data:array<uint8> table:array<uint32>):>uint32=>{
-    let crc:uint32=0xFFFFFFFF
+crc32 = (data:array<uint8> table:array<uint32>):>uint32 => {
+    let crc:uint32 = 0xFFFFFFFF
     loop b in data {
-        crc=table[((crc xor b) & 0xFF) as int64] xor (crc >> 8)
+        crc = table[((crc xor b) & 0xFF) as int64] xor (crc >> 8)
     }
     return crc xor 0xFFFFFFFF
 }
 
-put_u16_le=(@out:array<uint8> v:uint16):>void=>{
+put_u16_le = (@out:array<uint8> v:uint16):>void => {
     out.push((v & 0xFF) as uint8)
     out.push((v >> 8) as uint8)
 }
-put_u32_le=(@out:array<uint8> v:uint32):>void=>{
+put_u32_le = (@out:array<uint8> v:uint32):>void => {
     loop i in [0..4) out.push(((v >> (8*i)) & 0xFF) as uint8)
 }
-put_u32_be=(@out:array<uint8> v:uint32):>void=>{
-    loop i in [3,2..0] out.push(((v >> (8*i)) & 0xFF) as uint8)
+put_u32_be = (@out:array<uint8> v:uint32):>void => {
+    loop i in [3, 2..0] out.push(((v >> (8*i)) & 0xFF) as uint8)
 }
 
-get_u16_le=(b:array<uint8> at:int64):>uint16=>(b[at] as uint16) | ((b[at+1] as uint16) << 8)
-get_u32_le=(b:array<uint8> at:int64):>uint32=>{
-    let v:uint32=0
-    loop i in [0..4) v=v | ((b[at+i] as uint32) << (8*i))
+get_u16_le = (b:array<uint8> at:int64):>uint16 => (b[at] as uint16) | ((b[at+1] as uint16) << 8)
+get_u32_le = (b:array<uint8> at:int64):>uint32 => {
+    let v:uint32 = 0
+    loop i in [0..4) v = v | ((b[at+i] as uint32) << (8*i))
     return v
 }
-get_u32_be=(b:array<uint8> at:int64):>uint32=>{
-    let v:uint32=0
-    loop i in [0..4) v=(v << 8) | (b[at+i] as uint32)
+get_u32_be = (b:array<uint8> at:int64):>uint32 => {
+    let v:uint32 = 0
+    loop i in [0..4) v = (v << 8) | (b[at+i] as uint32)
     return v
 }
 
-encode=(records:array<Record>):>array<uint8>=>{
-    let out=bytes("DWY1")
+encode = (records:array<Record>):>array<uint8> => {
+    let out = bytes("DWY1")
     put_u16_le(@out records.length as uint16)
     loop r in records {
         put_u32_be(@out r.id)
         put_u32_le(@out r.score transmute uint32)
-        let name=bytes(r.name)
+        let name = bytes(r.name)
         out.push(name.length as uint8)
         out.extend(name)
     }
@@ -61,39 +61,39 @@ encode=(records:array<Record>):>array<uint8>=>{
     return out
 }
 
-FormatError:type=type of error & [message:string]
+FormatError:type = type of error & [message:string]
 
-decode=(data:array<uint8>):>array<Record>|FormatError=>{
+decode = (data:array<uint8>):>array<Record>|FormatError => {
     if data.length <? 10 return FormatError["file too short"]
     if data[0..4) not=? bytes("DWY1") return FormatError["bad magic"]
-    let body=data[0..data.length-4)
-    let stored=get_u32_le(data data.length-4)
-    let actual=crc32(body crc_table())
+    let body = data[0..data.length-4)
+    let stored = get_u32_le(data data.length-4)
+    let actual = crc32(body crc_table())
     if stored not=? actual return FormatError["checksum mismatch: stored {format(stored "08x")}, computed {format(actual "08x")}"]
-    let count=get_u16_le(data 4)
-    let at=6
-    let records:array<Record>=[]
+    let count = get_u16_le(data 4)
+    let at = 6
+    let records:array<Record> = []
     loop i in [0..(count as int64)) {
-        let id=get_u32_be(data at)
-        let score=get_u32_le(data at+4) transmute int32
-        let n=data[at+8] as int64
-        let name=(data[at+9..at+9+n) as string | none) ?? "?"
+        let id = get_u32_be(data at)
+        let score = get_u32_le(data at+4) transmute int32
+        let n = data[at+8] as int64
+        let name = (data[at+9..at+9+n) as string | none) ?? "?"
         records.push(Record[id score name])
-        at+=9+n
+        at += 9+n
     }
     return records
 }
 
-main=():>void=>{
-    let records=[Record[1 1500 "ada"] Record[70000 (-42) "grace"] Record[3 0 "linus"]]
-    let blob=encode(records)
+main = ():>void => {
+    let records = [Record[1 1500 "ada"] Record[70000 (-42) "grace"] Record[3 0 "linus"]]
+    let blob = encode(records)
     printl("encoded {blob.length} bytes, crc {format(get_u32_le(blob blob.length-4) "08x")}")
-    let path=p"dogfood_records.bin"
+    let path = p"dogfood_records.bin"
     if path.write_bytes(blob) is? (error|Canceled) {
         printl("cannot write {path}")
         exit(1)
     }
-    let back=path.read_bytes()
+    let back = path.read_bytes()
     if back is? (error|Canceled) {
         printl("cannot read {path}")
         exit(1)
@@ -102,7 +102,7 @@ main=():>void=>{
         rs:array<Record> => loop r in rs printl("  {r.id}: {r.name} scored {r.score}")
         e:FormatError => printl("error: {e.message}")
     }
-    back[7]=back[7] xor 0x01
+    back[7] = back[7] xor 0x01
     match decode(back) {
         _:array<Record> => printl("corruption missed!")
         e:FormatError => printl("corrupted: {e.message}")

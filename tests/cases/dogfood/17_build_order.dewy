@@ -1,29 +1,29 @@
 # Build-order planner: topological sort with cycle and missing-dependency errors.
-CycleError:type=type of error & [path:array<string>]
-MissingDependency:type=type of error & [task:string needs:string]
-PlanError:type=CycleError | MissingDependency
+CycleError:type = type of error & [path:array<string>]
+MissingDependency:type = type of error & [task:string needs:string]
+PlanError:type = CycleError | MissingDependency
 
-Graph:type=[deps:dict<string array<string>>]
+Graph:type = [deps:dict<string array<string>>]
 
-parse_graph=(text:string):>Graph=>{
-    let deps:dict<string array<string>>=[]
+parse_graph = (text:string):>Graph => {
+    let deps:dict<string array<string>>= []
     loop line in text.split("\n") {
-        let line=line.trim()
+        let line = line.trim()
         if line.length =? 0 or line.startswith("#") continue
-        let parts=line.split(":")
-        let name=parts[0].trim()
-        let needs:array<string>=[]
+        let parts = line.split(":")
+        let name = parts[0].trim()
+        let needs:array<string> = []
         if parts.length >? 1 {
             loop d in parts[1].split(" ") {
                 if d.trim().length >? 0 needs.push(d.trim())
             }
         }
-        deps[name]=needs
+        deps[name] = needs
     }
     return Graph[deps]
 }
 
-check_missing=(g:Graph):>void|MissingDependency=>{
+check_missing = (g:Graph):>void|MissingDependency => {
     loop [task needs] in g.deps {
         loop n in needs {
             if n not in? g.deps return MissingDependency[task n]
@@ -31,43 +31,43 @@ check_missing=(g:Graph):>void|MissingDependency=>{
     }
 }
 
-visit=(g:Graph node:string @state:dict<string int64> @stack:array<string> @order:array<string>):>void|CycleError=>{
-    let s=state.get(node) ?? 0
+visit = (g:Graph node:string @state:dict<string int64> @stack:array<string> @order:array<string>):>void|CycleError => {
+    let s = state.get(node) ?? 0
     if s =? 2 return
     if s =? 1 {
-        let start=stack.index_of(node)
+        let start = stack.index_of(node)
         if start is? Missing return CycleError[[node]]
         return CycleError[[stack[start..]... node]]
     }
-    state[node]=1
+    state[node] = 1
     stack.push(node)
     loop dep in g.deps[node] {
         visit(g dep @state @stack @order) or_throw
     }
     stack.pop();
-    state[node]=2
+    state[node] = 2
     order.push(node)
 }
 
-topo_sort=(g:Graph):>array<string>|PlanError=>{
+topo_sort = (g:Graph):>array<string>|PlanError => {
     check_missing(g) or_throw
-    let state:dict<string int64>=[]
-    let stack:array<string>=[]
-    let order:array<string>=[]
+    let state:dict<string int64> = []
+    let stack:array<string> = []
+    let order:array<string> = []
     loop name in g.deps.keys() {
         visit(g name @state @stack @order) or_throw
     }
     return order
 }
 
-describe=(e:PlanError):>string=>match e {
+describe = (e:PlanError):>string => match e {
     c:CycleError => "cycle: {c.path.join(" -> ")}"
     m:MissingDependency => "{m.task} needs unknown task {m.needs}"
 }
 
-plan=(title:string text:string):>void=>{
+plan = (title:string text:string):>void => {
     printl("== {title}")
-    let result=topo_sort(parse_graph(text))
+    let result = topo_sort(parse_graph(text))
     if result is? PlanError {
         printl("  error: {describe(result)}")
         return
@@ -75,7 +75,7 @@ plan=(title:string text:string):>void=>{
     loop i in 0.. and step in result printl("  {i+1}. {step}")
 }
 
-main=()=>{
+main = () => {
     plan("app" """
         # build graph
         app: lib utils

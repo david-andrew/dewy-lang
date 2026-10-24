@@ -1,5 +1,5 @@
 # exit: 42
-check=():>int64=>{
+check = ():>int64 => {
     let v = vec3(3 4 0)
     if v.norm not=? 5.0 return 1
     if vec2(3 4).norm not=? 5.0 return 2
@@ -9,4 +9,4 @@ check=():>int64=>{
     if vec4(1 -2 2 -4).norm(p=1) not=? 9.0 return 6
     return 42
 }
-main=():>void=>exit(check())
+main = ():>void => exit(check())

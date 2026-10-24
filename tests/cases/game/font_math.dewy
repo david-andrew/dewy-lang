@@ -1,12 +1,12 @@
 # exit: 42
 import p"@lib/game/draw2d.jo" as surface
-run=()=>{
-surface.__font_init()
-loop code in [0x03B8 0x03C0 0x0394 0x2212 0x221A 0x2248 0x2260 0x2264 0x2265 0x221E
-              0x2211 0x222B 0x2202 0x221D 0x22C5 0x2207 0x2208 0x2192 0x2080 0x2074 0x2713 0x2717] {
-    if surface.__glyph(surface.__default_font code) <? 0 return 1
+run = () => {
+    surface.__font_init()
+    loop code in [0x03B8 0x03C0 0x0394 0x2212 0x221A 0x2248 0x2260 0x2264 0x2265 0x221E
+        0x2211 0x222B 0x2202 0x221D 0x22C5 0x2207 0x2208 0x2192 0x2080 0x2074 0x2713 0x2717] {
+            if surface.__glyph(surface.__default_font code) <? 0 return 1
+        }
+    if text_width("θ π Δ − √ ≈ ≠ ≤ ≥ ∞ ∑ ∫ ∂ ∝ ⋅ ∇ ∈ → x₀ x⁴ ✓ ✗") <=? 0 return 2
+    return 42
 }
-if text_width("θ π Δ − √ ≈ ≠ ≤ ≥ ∞ ∑ ∫ ∂ ∝ ⋅ ∇ ∈ → x₀ x⁴ ✓ ✗") <=? 0 return 2
-return 42
-}
-main=()=>exit(run())
+main = () => exit(run())

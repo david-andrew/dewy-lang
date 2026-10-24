@@ -1,17 +1,17 @@
 # exit: 42
 import p"@lib/game/window.jo" as input
-run=()=>{
-input.__mouse_x=72.0 input.__mouse_y=48.0
-input.__mouse_dx=640.0 input.__mouse_dy=400.0
-mouse_lock(true);
-if input.__mouse_dx not=?0.0 or input.__mouse_dy not=?0.0 return 1
-input.__mouse_dx=4.0 input.__mouse_dy=-3.0
-mouse_lock(true);
-if input.__mouse_dx not=?4.0 or input.__mouse_dy not=?-3.0 return 2
-mouse_lock(false);
-if input.__mouse_dx not=?0.0 or input.__mouse_dy not=?0.0 return 3
-input.__mouse_dx=-640.0 input.__mouse_dy=-400.0
-input.__mouse_motion_reset()
-return if input.__mouse_dx=?0.0 and input.__mouse_dy=?0.0
-and input.__mouse_x=?72.0 and input.__mouse_y=?48.0 42 else 4}
-main=()=>exit(run())
+run = () => {
+    input.__mouse_x = 72.0 input.__mouse_y = 48.0
+    input.__mouse_dx = 640.0 input.__mouse_dy = 400.0
+    mouse_lock(true);
+    if input.__mouse_dx not=?0.0 or input.__mouse_dy not=?0.0 return 1
+    input.__mouse_dx = 4.0 input.__mouse_dy = -3.0
+    mouse_lock(true);
+    if input.__mouse_dx not=?4.0 or input.__mouse_dy not=?-3.0 return 2
+    mouse_lock(false);
+    if input.__mouse_dx not=?0.0 or input.__mouse_dy not=?0.0 return 3
+    input.__mouse_dx = -640.0 input.__mouse_dy = -400.0
+    input.__mouse_motion_reset()
+    return if input.__mouse_dx=?0.0 and input.__mouse_dy=?0.0
+        and input.__mouse_x=?72.0 and input.__mouse_y=?48.0 42 else 4 }
+main = () => exit(run())

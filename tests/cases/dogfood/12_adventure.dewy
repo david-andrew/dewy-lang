@@ -36,7 +36,7 @@ look = (w:World):>void => {
 }
 
 do_command = (@w:World line:string):>void => {
-    let words = line.lower().split(" ").filter((s)=>s.length >? 0)
+    let words = line.lower().split(" ").filter((s) => s.length >? 0)
     if words.length =? 0 { return }
     let verb = words[0]
     let noun = if words.length >? 1 words[1] else ""

@@ -1,80 +1,80 @@
 # Numerical toolkit: integration (trapezoid, Simpson, adaptive) and root finding.
 from units import rad
-Fn:type=<(x:float64):>float64>
+Fn:type = <(x:float64):>float64>
 
-trapezoid=(f:Fn a:float64 b:float64 n:int64):>float64=>{
-    let h=(b-a)/n
-    let total=(f(a)+f(b))/2
-    loop i in [1..n) total+=f(a+i*h)
+trapezoid = (f:Fn a:float64 b:float64 n:int64):>float64 => {
+    let h = (b-a)/n
+    let total = (f(a)+f(b))/2
+    loop i in [1..n) total += f(a+i*h)
     return total*h
 }
 
-simpson=(f:Fn a:float64 b:float64 n:int64):>float64=>{
-    let n=if n%2 =? 1 n+1 else n
-    let h=(b-a)/n
-    let total=f(a)+f(b)
+simpson = (f:Fn a:float64 b:float64 n:int64):>float64 => {
+    let n = if n%2 =? 1 n+1 else n
+    let h = (b-a)/n
+    let total = f(a)+f(b)
     loop i in [1..n) {
-        let w=if i%2 =? 1 4.0 else 2.0
-        total+=w*f(a+i*h)
+        let w = if i%2 =? 1 4.0 else 2.0
+        total += w*f(a+i*h)
     }
     return total*h/3
 }
 
-adaptive=(f:Fn a:float64 b:float64 tol:float64 depth:int64=0):>float64=>{
-    let m=(a+b)/2
-    let whole=simpson(@f a b 2)
-    let halves=simpson(@f a m 2)+simpson(@f m b 2)
+adaptive = (f:Fn a:float64 b:float64 tol:float64 depth:int64=0):>float64 => {
+    let m = (a+b)/2
+    let whole = simpson(@f a b 2)
+    let halves = simpson(@f a m 2)+simpson(@f m b 2)
     if depth >? 40 or abs(halves-whole) <? 15*tol return halves+(halves-whole)/15
     return adaptive(@f a m tol/2 depth+1)+adaptive(@f m b tol/2 depth+1)
 }
 
-NoRoot:type=type of error & [reason:string]
+NoRoot:type = type of error & [reason:string]
 
-bisect=(f:Fn lo:float64 hi:float64 tol:float64=1e-12):>float64|NoRoot=>{
-    let a=lo
-    let b=hi
+bisect = (f:Fn lo:float64 hi:float64 tol:float64=1e-12):>float64|NoRoot => {
+    let a = lo
+    let b = hi
     if f(a)*f(b) >? 0 return NoRoot["f(a) and f(b) have the same sign"]
     loop b-a >? tol {
-        let m=(a+b)/2
-        if f(a)*f(m) <=? 0 b=m else a=m
+        let m = (a+b)/2
+        if f(a)*f(m) <=? 0 b = m else a = m
     }
     return (a+b)/2
 }
 
-newton=(f:Fn df:Fn x0:float64 tol:float64=1e-12 max_iter:int64=50):>float64|NoRoot=>{
-    let x=x0
+newton = (f:Fn df:Fn x0:float64 tol:float64=1e-12 max_iter:int64=50):>float64|NoRoot => {
+    let x = x0
     loop i in [0..max_iter) {
-        let d=df(x)
+        let d = df(x)
         if abs(d) <? 1e-15 return NoRoot["zero derivative at {x}"]
-        let next=x-f(x)/d
+        let next = x-f(x)/d
         if abs(next-x) <? tol return next
-        x=next
+        x = next
     }
     return NoRoot["no convergence after {max_iter} steps"]
 }
 
-show=(label:string value:float64|NoRoot):>void=>{
+show = (label:string value:float64|NoRoot):>void => {
     match value {
         v:float64 => printl("{label}: {format(v ".10f")}")
         e:NoRoot => printl("{label}: no root ({e.reason})")
     }
 }
 
-main=()=>{
-    let pi=3.141592653589793
+main = () => {
+    let pi = 3.141592653589793
     printl("integral of sin over [0, pi] = 2")
     printl("  trapezoid n=100: {format(trapezoid((x:float64)=>sin(x*rad) 0.0 pi 100) ".8f")}")
     printl("  simpson   n=10:  {format(simpson((x:float64)=>sin(x*rad) 0.0 pi 10) ".8f")}")
     printl("  adaptive:        {format(adaptive((x:float64)=>sin(x*rad) 0.0 pi 1e-10) ".10f")}")
-    let gauss=(x:float64)=>exp(-x*x)
+    let gauss = (x:float64) => exp(-x*x)
     printl("integral of exp(-x^2) over [-5, 5] = sqrt(pi) = {format(sqrt(pi) ".10f")}")
     printl("  adaptive:        {format(adaptive(@gauss -5.0 5.0 1e-10) ".10f")}")
 
-    let cubic=(x:float64)=>x^3-2x-5
-    let dcubic=(x:float64)=>3x^2-2
+    let cubic = (x:float64) => x^3-2x-5
+    let dcubic = (x:float64) => 3x^2-2
     show("bisect x^3-2x-5" bisect(@cubic 2.0 3.0))
     show("newton x^3-2x-5" newton(@cubic @dcubic 2.0))
     show("bisect bad bracket" bisect(@cubic 3.0 4.0))
-    show("newton cos(x)=x" newton((x:float64)=>cos(x*rad)-x (x:float64)=>-sin(x*rad)-1 1.0))
-    show("newton x^2+1" newton((x:float64)=>x*x+1 (x:float64)=>2x 0.0))
+    show("newton cos(x)=x" newton((x:float64) => cos(x*rad)-x (x:float64) => -sin(x*rad)-1 1.0))
+    show("newton x^2+1" newton((x:float64) => x*x+1 (x:float64) => 2x 0.0))
 }

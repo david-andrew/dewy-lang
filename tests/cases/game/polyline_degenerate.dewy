@@ -1,25 +1,25 @@
 # exit: 42
 import p"@lib/game/draw2d.jo" as surface
-work=(buffer:array<float32>):>int64=>{
-polyline([] 10 WHITE) polyline([vec2(10 10)] 10 WHITE)
-polyline([vec2(10 10) vec2(10 10) vec2(10 10)] 10 WHITE closed=true)
-if surface.__b_count not=? 0 return 1
-polyline([vec2(10 10) vec2(100 10) vec2(100 10)] 10 WHITE closed=true)
-if surface.__b_count not=? 6 return 2
-surface.__b_count=0
-polyline([vec2(0 0) vec2(100 0) vec2(1 1)] 10 WHITE)
-let offset=vec2(buffer[9] buffer[10])-vec2(100 0)
-if not (offset.norm <=? 18) return 3
-surface.__b_count=0
-polyline([vec2(0 0) vec2(100 0) vec2(0 0)] 10 WHITE)
-loop i in [0..surface.__b_count) {
-if not (abs(buffer[i*9]) <=? 106) or not (abs(buffer[i*9+1]) <=? 6) return 4}
-return 42}
-run=()=>{let buffer:array<float32>=[] buffer.resize(18*9)
-let previous=surface.__b_buf
-surface.__b_buf=buffer.data() surface.__b_tex=surface.__white.id surface.__b_count=0
-let before=alloc_count() let result=work(buffer)
-if alloc_count() not=? before result=5
-surface.__b_buf=previous surface.__b_count=0
-return result}
-main=()=>exit(run())
+work = (buffer:array<float32>):>int64 => {
+    polyline([] 10 WHITE) polyline([vec2(10 10)] 10 WHITE)
+    polyline([vec2(10 10) vec2(10 10) vec2(10 10)] 10 WHITE closed=true)
+    if surface.__b_count not=? 0 return 1
+    polyline([vec2(10 10) vec2(100 10) vec2(100 10)] 10 WHITE closed=true)
+    if surface.__b_count not=? 6 return 2
+    surface.__b_count = 0
+    polyline([vec2(0 0) vec2(100 0) vec2(1 1)] 10 WHITE)
+    let offset = vec2(buffer[9] buffer[10])-vec2(100 0)
+    if not (offset.norm <=? 18) return 3
+    surface.__b_count = 0
+    polyline([vec2(0 0) vec2(100 0) vec2(0 0)] 10 WHITE)
+    loop i in [0..surface.__b_count) {
+        if not (abs(buffer[i*9]) <=? 106) or not (abs(buffer[i*9+1]) <=? 6) return 4 }
+    return 42 }
+run = () => { let buffer:array<float32> = [] buffer.resize(18*9)
+    let previous = surface.__b_buf
+    surface.__b_buf = buffer.data() surface.__b_tex = surface.__white.id surface.__b_count = 0
+    let before = alloc_count() let result = work(buffer)
+    if alloc_count() not=? before result = 5
+    surface.__b_buf = previous surface.__b_count = 0
+    return result }
+main = () => exit(run())

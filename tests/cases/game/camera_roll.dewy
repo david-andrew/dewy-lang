@@ -1,20 +1,20 @@
 # exit: 42
 import p"@lib/game/draw2d.jo" as surface
-run=()=>{
-surface.__target_w=1280 surface.__target_h=720
-let eye=vec3(0 0 5) let target=vec3(0 0 0) let point=vec3(1 0 0)
-camera3d(eye target)
-let center=world_to_screen(target) let normal=world_to_screen(point)
-if center is? none or normal is? none return 1
-if normal.x<=?center.x or abs(normal.y-center.y)>?0.01 return 2
-camera3d(eye target up=vec3(1 0 0))
-let rolled=world_to_screen(point)
-if rolled is? none return 3
-if abs(rolled.x-center.x)>?0.01 or rolled.y>=?center.y return 4
-let [origin direction]=screen_ray(rolled)
-if dot(normalize(point-origin) direction)<?0.9999 return 5
-if world_to_screen(vec3(0 0 6)) isnt? none return 6
-camera3d(eye target)
-let restored=world_to_screen(point)
-return if restored isnt? none and (restored-normal).norm<?0.01 42 else 7}
-main=()=>exit(run())
+run = () => {
+    surface.__target_w = 1280 surface.__target_h = 720
+    let eye = vec3(0 0 5) let target = vec3(0 0 0) let point = vec3(1 0 0)
+    camera3d(eye target)
+    let center = world_to_screen(target) let normal = world_to_screen(point)
+    if center is? none or normal is? none return 1
+    if normal.x<=?center.x or abs(normal.y-center.y)>?0.01 return 2
+    camera3d(eye target up=vec3(1 0 0))
+    let rolled = world_to_screen(point)
+    if rolled is? none return 3
+    if abs(rolled.x-center.x)>?0.01 or rolled.y>=?center.y return 4
+    let [origin direction] = screen_ray(rolled)
+    if dot(normalize(point-origin) direction)<?0.9999 return 5
+    if world_to_screen(vec3(0 0 6)) isnt? none return 6
+    camera3d(eye target)
+    let restored = world_to_screen(point)
+    return if restored isnt? none and (restored-normal).norm<?0.01 42 else 7 }
+main = () => exit(run())

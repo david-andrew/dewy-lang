@@ -1,31 +1,31 @@
 # Roman numerals, with tests.
-NUMERALS=[1000->"M" 900->"CM" 500->"D" 400->"CD" 100->"C" 90->"XC"
-          50->"L" 40->"XL" 10->"X" 9->"IX" 5->"V" 4->"IV" 1->"I"]
+NUMERALS = [1000->"M" 900->"CM" 500->"D" 400->"CD" 100->"C" 90->"XC"
+    50->"L" 40->"XL" 10->"X" 9->"IX" 5->"V" 4->"IV" 1->"I"]
 
-to_roman=(n:int64):>string=>{
-    let out=""
-    let rest=n
+to_roman = (n:int64):>string => {
+    let out = ""
+    let rest = n
     loop [value symbol] in NUMERALS {
         loop rest >=? value {
-            out="{out}{symbol}"
-            rest-=value
+            out = "{out}{symbol}"
+            rest -= value
         }
     }
     return out
 }
 
-RomanError:type=type of error & [text:string]
+RomanError:type = type of error & [text:string]
 
-VALUES=["I"->1 "V"->5 "X"->10 "L"->50 "C"->100 "D"->500 "M"->1000]
+VALUES = ["I"->1 "V"->5 "X"->10 "L"->50 "C"->100 "D"->500 "M"->1000]
 
-from_roman=(text:string):>int64|RomanError=>{
+from_roman = (text:string):>int64|RomanError => {
     if text.length =? 0 return RomanError[text]
-    let total=0
+    let total = 0
     loop i in [0..text.length) {
-        let v=VALUES.get(text[i])
+        let v = VALUES.get(text[i])
         if v is? none return RomanError[text]
-        let next=if i+1 <? text.length VALUES.get(text[i+1]) ?? 0 else 0
-        if v <? next total-=v else total+=v
+        let next = if i+1 <? text.length VALUES.get(text[i+1]) ?? 0 else 0
+        if v <? next total -= v else total += v
     }
     if to_roman(total) not=? text return RomanError[text]
     return total
@@ -45,7 +45,7 @@ converts_large = (n:int64 s:string) => $expect to_roman(n) =? s, "{n} should be 
 $test
 round_trips = () => {
     loop n in [1..500] {
-        let back=from_roman(to_roman(n))
+        let back = from_roman(to_roman(n))
         $expect back is? int64, "{n} did not parse back"
         $expect back =? n, "{n} came back as {back}"
     }
@@ -54,7 +54,7 @@ round_trips = () => {
 $test(cases=("" "IIII" "VX" "ABC"))
 rejects = (text:string) => $expect from_roman(text) is? RomanError
 
-main=()=>{
+main = () => {
     printl(to_roman(2026))
     printl(from_roman("MMXXVI"))
 }

@@ -1,27 +1,27 @@
 # wc-like CLI: args, environment, a config file; errors become exit codes.
 # Usage: wc [--config FILE] [--top N] FILE...
-UsageError:type=type of error & [message:string]
-ConfigError:type=type of error & [line:int64 message:string]
+UsageError:type = type of error & [message:string]
+ConfigError:type = type of error & [line:int64 message:string]
 
-Config:type=[min_length:int64=1 top:int64=10 ignore:set<string>=set[] verbose:bool=false]
+Config:type = [min_length:int64=1 top:int64=10 ignore:set<string>=set[] verbose:bool=false]
 
-EXIT_USAGE=2
-EXIT_CONFIG=3
-EXIT_IO=4
+EXIT_USAGE = 2
+EXIT_CONFIG = 3
+EXIT_IO = 4
 
-parse_config=(text:string):>Config|ConfigError=>{
-    let c=Config[]
+parse_config = (text:string):>Config|ConfigError => {
+    let c = Config[]
     loop i in 0.. and raw in text.split("\n") {
-        let line=raw.trim()
+        let line = raw.trim()
         if line.length =? 0 or line.startswith("#") continue
-        let eq=line.find("=")
+        let eq = line.find("=")
         if eq is? Missing return ConfigError[i+1 "expected key = value"]
-        let key=line[..eq).trim()
-        let value=line[eq+1..].trim()
+        let key = line[..eq).trim()
+        let value = line[eq+1..].trim()
         if key =? "min_length" or key =? "top" {
-            let n=to_int(value)
+            let n = to_int(value)
             if n is? none return ConfigError[i+1 "'{key}' needs a number, got '{value}'"]
-            if key =? "top" c.top=n else c.min_length=n
+            if key =? "top" c.top = n else c.min_length = n
         } else if key =? "ignore" {
             loop w in value.split(" ") if w.length >? 0 c.ignore.push(w)
         } else {
@@ -31,65 +31,65 @@ parse_config=(text:string):>Config|ConfigError=>{
     return c
 }
 
-Options:type=[config:string|none=none top:int64|none=none files:array<string>=[]]
+Options:type = [config:string|none=none top:int64|none=none files:array<string>=[]]
 
-parse_args=(argv:array<string>):>Options|UsageError=>{
-    let o=Options[]
-    let i=1
+parse_args = (argv:array<string>):>Options|UsageError => {
+    let o = Options[]
+    let i = 1
     loop i <? argv.length {
-        let a=argv[i]
+        let a = argv[i]
         if a =? "--config" or a =? "--top" {
             if i+1 >=? argv.length return UsageError["{a} needs a value"]
-            let v=argv[i+1]
-            if a =? "--config" o.config=v
+            let v = argv[i+1]
+            if a =? "--config" o.config = v
             else {
-                let n=to_int(v)
+                let n = to_int(v)
                 if n is? none return UsageError["--top needs a number, got '{v}'"]
-                o.top=n
+                o.top = n
             }
-            i+=2
+            i += 2
         } else if a.startswith("--") {
             return UsageError["unknown option {a}"]
         } else {
             o.files.push(a)
-            i+=1
+            i += 1
         }
     }
     if o.files.length =? 0 return UsageError["no input files"]
     return o
 }
 
-count_words=(text:string c:Config @counts:dict<string int64>):>void=>{
-    let cleaned=text.lower().replace(regex(r"[^a-z\s]") " ")
+count_words = (text:string c:Config @counts:dict<string int64>):>void => {
+    let cleaned = text.lower().replace(regex(r"[^a-z\s]") " ")
     loop w in cleaned.split() {
         if w.length <? c.min_length or w in? c.ignore continue
-        if w in? counts counts[w]+=1 else counts[w]=1
+        if w in? counts counts[w] += 1 else counts[w] = 1
     }
 }
 
-run=(argv:array<string>):>int64=>{
-    let opts=parse_args(argv)
+run = (argv:array<string>):>int64 => {
+    let opts = parse_args(argv)
     if opts is? UsageError {
         printl("usage error: {opts.message}")
         printl("usage: wc [--config FILE] [--top N] FILE...")
         return EXIT_USAGE
     }
-    let config_path=opts.config ?? env("WC_CONFIG") ?? "app.conf"
-    let text=read_text(config_path)
+    let config_path = opts.config ?? env("WC_CONFIG") ?? "app.conf"
+    let text = read_text(config_path)
     if text is? (error|Canceled) {
         printl("cannot read config {config_path}")
         return EXIT_IO
     }
-    let config=parse_config(text)
+    let config = parse_config(text)
     if config is? ConfigError {
         printl("{config_path}:{config.line}: {config.message}")
         return EXIT_CONFIG
     }
-    if opts.top isnt? none config.top=opts.top
-    config.verbose=(env("WC_VERBOSE") ?? "") =? "1"
-    let counts:dict<string int64>=[]
+    if opts.top isnt? none config.top = opts.top
+    config.verbose = (env("WC_VERBOSE") ?? "") =? "1"
+    let counts:dict<string int64> = []
     loop f in opts.files {
-        let body=read_text(f)
+        let body = read_text(f)
         if body is? (error|Canceled) {
             printl("cannot read {f}")
             return EXIT_IO
@@ -97,17 +97,17 @@ run=(argv:array<string>):>int64=>{
         if config.verbose printl("reading {f} ({body.length} characters)")
         count_words(body config @counts)
     }
-    let ranked=[counts.keys...].sorted(key=(w)=>counts[w] reverse=true)
+    let ranked = [counts.keys...].sorted(key=(w) => counts[w] reverse=true)
     loop w in ranked[..min(config.top ranked.length)) printl("{format(w "<8")} {counts[w]}")
     return 0
 }
 
 # The command runs with each argument list below; its files are written first.
-main=():>void=>{
+main = ():>void => {
     write_text("dogfood_wc.conf" "# word counter settings\nmin_length = 3\ntop = 4\nignore = the and of to a in\n");
     write_text("dogfood_bad.conf" "top = 2\ncolour = red\n");
     write_text("dogfood_input.txt" "The quick brown fox jumps over the lazy dog.\nThe dog sleeps; the fox runs and runs and runs.\nOf foxes and dogs, a tale.\n");
-    let runs=[
+    let runs = [
         ["wc" "--config" "dogfood_wc.conf" "dogfood_input.txt"]
         ["wc"]
         ["wc" "--top" "x" "dogfood_input.txt"]
