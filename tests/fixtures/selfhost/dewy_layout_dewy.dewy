@@ -1,0 +1,54 @@
+# The compiler's dewy_layout.dewy: `dewy_layout_dewy list` reads the list's lines, each a source
+# file and its lexemes' file, and prints each source laid out: `=== N` with the result's byte
+# length (-1: none), then the result. A lexemes' file has the block comments' offsets on its
+# first line (after a `B`), then a lexeme a line: its kind, its spelling (`-`: no token), start, stop, and
+# whether space and a line break come before it (0 or 1), separated by tabs.
+$runtime_checks
+from p"../../../compiler/dewy_tokens.dewy" import DewyToken, DewyKind, DewyLexeme, dn_token_kind
+from p"../../../compiler/dewy_layout.dewy" import dewy_layout
+
+symbol=(spelling:string):>DewyToken=>match spelling {
+    <"and="> => 'and_assign'
+    <"or="> => 'or_assign'
+    <"xor="> => 'xor_assign'
+    _ => dn_token_kind(spelling)
+}
+
+kind=(name:string):>DewyKind=>match name {
+    <"op"> => 'op'
+    <"identifier"> => 'identifier'
+    <"boolean"> => 'boolean'
+    <"eof"> => 'eof'
+    _ => 'quoted'
+}
+
+number=(s:string):>int64=>{
+    let v:int64=0
+    loop c in (s as array<uint8>) {v=v * 10 + (c as int64) - 48}
+    v
+}
+
+main=():>void=>{
+    let list=read_text(args()[1]) ?? ""
+    loop line in list.lines {
+        let files=line.split("\t")
+        let src=read_text(files[0]) ?? ""
+        let rows=(read_text(files[1]) ?? "").lines
+        let blocks:array<int64>=[]
+        loop w in rows[0].split(" ") {
+            if not w.is_empty and w not=? "B" {blocks.push(number(w))}
+        }
+        let tokens:array<DewyLexeme>=[]
+        loop r in [1..rows.length) {
+            let f=rows[r].split("\t")
+            let s:DewyToken=if f[1] =? "-" 'none' else symbol(f[1])
+            tokens.push([kind=kind(f[0]) name=0 start=number(f[2]) stop=number(f[3]) space=f[4] =? "1" newline=f[5] =? "1" symbol=s])
+        }
+        let laid=dewy_layout(src tokens blocks)
+        if laid is? none {printl"=== -1"}
+        else {
+            printl"=== {laid.length}"
+            printl(laid as string ?? "(not UTF-8)")
+        }
+    }
+}

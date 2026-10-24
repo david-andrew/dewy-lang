@@ -1,0 +1,156 @@
+# The frozen implementation-language twin of dewy_layout.dewy, for the compilers without
+# the Dewy frontend (tools/compiler/build.py). Change both, or neither.
+use 'util.jo'
+use 'dewy_tokens.dewy'
+
+struct DewyLayout:
+    stack: DewyToken[]
+    levels: int[]
+    tracked: int
+    angles: int
+
+dl_assignment = (s: DewyToken) -> bool:
+    s == .assign or s == .function or s == .returns or dn_token_assignment(s)
+
+dl_free_gap = (left: DewyToken, right: DewyToken) -> bool:
+    dl_assignment(left) or dl_assignment(right) or left == .colon or left == .comma or left == .semi or left == .lbrace or right == .colon or right == .comma or right == .rbrace
+
+dl_function_value = (tokens: DewyLexeme[], at: int) -> bool:
+    i = at + 1
+    n = tokens.len()
+    if i < n and tokens[i].symbol == .langle:
+        depth = 0
+        loop i < n:
+            if tokens[i].symbol == .langle: depth += 1
+            else if tokens[i].symbol == .rangle: depth -= 1
+            i += 1
+            if depth == 0: break
+    if i >= n: return false
+    if tokens[i].kind == .identifier: return i + 1 < n and tokens[i + 1].symbol == .function
+    if tokens[i].symbol != .lparen: return false
+    depth = 0
+    loop i < n:
+        if tokens[i].symbol == .lparen: depth += 1
+        else if tokens[i].symbol == .rparen: depth -= 1
+        i += 1
+        if depth == 0: break
+    i < n and (tokens[i].symbol == .function or tokens[i].symbol == .returns)
+
+dl_gap = (l: DewyLayout, left: DewyLexeme, right: DewyLexeme, inside: bool, function: bool) -> bool:
+    if right.symbol == .colon or right.symbol == .comma: return false
+    if left.symbol == .colon or left.symbol == .returns or right.symbol == .returns: return false
+    if left.symbol == .lbrace and right.symbol == .rbrace: return false
+    if l.angles > 0 and (right.symbol == .shr_assign or right.symbol == .angle_assign): return false
+    if left.symbol == .shr_assign or left.symbol == .angle_assign: return true
+    if left.symbol == .function or right.symbol == .function or dn_token_assignment(left.symbol) or dn_token_assignment(right.symbol): return true
+    if left.symbol == .assign or right.symbol == .assign:
+        if not inside or function or right.space: return true
+        return false
+    if dl_free_gap(left.symbol, right.symbol): return true
+    right.space
+
+dl_opener = (s: DewyToken) -> bool: s == .lparen or s == .lbrack or s == .lbrace
+dl_closer = (s: DewyToken) -> bool: s == .rparen or s == .rbrack or s == .rbrace
+
+dl_track = (l: mut DewyLayout, tokens: DewyLexeme[], stop: int, level: int) -> bool:
+    loop l.tracked < stop:
+        t = tokens[l.tracked]
+        l.tracked += 1
+        if t.kind != .op: continue
+        if t.symbol == .langle: l.angles += 1
+        else if l.angles > 0 and (t.symbol == .rangle or t.symbol == .gt and not t.space): l.angles -= 1
+        else if l.angles > 1 and t.symbol == .shr: l.angles -= 2
+        if dl_opener(t.symbol):
+            l.stack.push(t.symbol)
+            l.levels.push(level)
+            if l.stack.len() > 256: return false
+        else if dl_closer(t.symbol):
+            if l.stack.len() == 0: return false
+            opening = l.stack.pop()
+            l.levels.pop()
+            if (opening == .lbrace) != (t.symbol == .rbrace): return false
+    true
+
+dl_continues = (prev: DewyToken, first: DewyToken) -> bool:
+    dl_assignment(prev) or prev == .comma or prev == .amp or prev == .pipe or prev == .kw_and or prev == .kw_or or prev == .kw_xor or first == .amp or first == .pipe or first == .kw_and or first == .kw_or or first == .kw_xor
+
+dl_inside = (l: DewyLayout) -> bool:
+    l.angles > 0 or l.stack.len() > 0 and l.stack[l.stack.len() - 1] != .lbrace
+
+dl_assign_function = (l: DewyLayout, tokens: DewyLexeme[], i: int) -> bool:
+    if l.angles > 0 or l.stack.len() == 0 or l.stack[l.stack.len() - 1] != .lbrack: return false
+    if tokens[i].symbol == .assign: return dl_function_value(tokens, i)
+    tokens[i - 1].symbol == .assign and dl_function_value(tokens, i - 1)
+
+dl_has_hash = (b: u8[], a: int, z: int) -> bool:
+    k = a
+    loop k < z:
+        if b[k] == '#': return true
+        k += 1
+    false
+
+dl_put = (out: mut u8[], b: u8[], a: int, z: int):
+    k = a
+    loop k < z:
+        out.push(b[k])
+        k += 1
+
+dewy_layout = (src: str, tokens: DewyLexeme[], blocks: int[]) -> u8[]?:
+    l = DewyLayout([], [], 0, 0)
+    b: u8[]
+    loop c in src: b.push(c)
+    n = b.len()
+    count = tokens.len()
+    crlf = find(src, "\r\n") >= 0
+    bi = 0
+    out: u8[]
+    at = 0
+    start = 0
+    opaque_end = 0
+    loop start < n:
+        end = find_byte(src, '\n', start)
+        if end < 0: end = n
+        content_end = end
+        if content_end > start and b[content_end - 1] == '\r': content_end -= 1
+        line_crlf = if end == n: crlf else: content_end < end
+        protected = start < opaque_end
+        stop = at
+        loop stop < count and tokens[stop].kind != .eof and tokens[stop].start < content_end:
+            if tokens[stop].stop > content_end: opaque_end = tokens[stop].stop
+            stop += 1
+        loop bi + 1 < blocks.len() and blocks[bi] < content_end:
+            if blocks[bi + 1] > content_end: opaque_end = max(opaque_end, blocks[bi + 1])
+            bi += 2
+        lead = 0
+        loop at + lead < stop and tokens[at + lead].kind == .op and dl_closer(tokens[at + lead].symbol): lead += 1
+        depth = 0
+        if lead > 0 and l.stack.len() > 0: depth = l.levels[l.stack.len() - 1]
+        else if l.stack.len() > 0: depth = l.levels[l.stack.len() - 1] + 1
+        if lead == 0 and at > 0 and at < stop and not protected and dl_continues(tokens[at - 1].symbol, tokens[at].symbol): depth += 1
+        first = start
+        loop first < content_end and (b[first] == ' ' or b[first] == '\t'): first += 1
+        last = content_end
+        if not protected and opaque_end <= content_end:
+            loop last > first and (b[last - 1] == ' ' or b[last - 1] == '\t'): last -= 1
+        if protected: dl_put(out, b, start, content_end)
+        else if first < content_end:
+            loop k in [0..depth * 4): out.push(' ')
+            if at == stop: dl_put(out, b, first, last)
+            else:
+                dl_put(out, b, first, tokens[at].start)
+                loop i in [at..stop):
+                    if i > at:
+                        if not dl_track(l, tokens, i, depth): return none
+                        if dl_has_hash(b, tokens[i - 1].stop, tokens[i].start): dl_put(out, b, tokens[i - 1].stop, tokens[i].start)
+                        else if dl_gap(l, tokens[i - 1], tokens[i], dl_inside(l), dl_assign_function(l, tokens, i)): out.push(' ')
+                    t = tokens[i]
+                    dl_put(out, b, t.start, min(t.stop, content_end))
+                dl_put(out, b, min(tokens[stop - 1].stop, content_end), last)
+        if not dl_track(l, tokens, stop, depth): return none
+        l.angles = 0
+        if line_crlf: out.push('\r')
+        out.push('\n')
+        at = stop
+        start = end + 1
+    if l.stack.len() != 0: return none
+    out

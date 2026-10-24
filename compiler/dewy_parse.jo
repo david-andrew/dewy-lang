@@ -26,15 +26,6 @@ use 'concurrency.jo'
 use 'place_methods.jo'
 use 'place_split.jo'
 
-# Compact tags shared by lexical tokens and syntax nodes. Names are needed
-# only for formatter/diagnostic text.
-enum DewyKind:
-    unknown, op, identifier, boolean, metatag, based_string, integer,
-    quoted, rawquoted, eof, atom, ambiguous, binary, block, combined_assignment,
-    flat, flow, interpolated_string, inverted_comparison, keyword, keyword_expr,
-    operator, postfix, prefix, string, string_chunk, source_integer, source_real,
-    directive, compact_expr, compact_stmt, lazy_body
-
 dw_kind_name = (kind: DewyKind) -> str:
     match kind:
         unknown: "Unknown"

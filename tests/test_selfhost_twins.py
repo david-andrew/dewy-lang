@@ -30,8 +30,9 @@ def test_dewy_modules_are_leaves():
     stems = {p.stem for p in COMPILER.glob('*.jo')} | {p.stem for p in COMPILER.glob('*.dewy')}
     for module in FROZEN_TWINS:
         text = (COMPILER / module).read_text()
+        # (or another Dewy module of the compiler, itself a leaf, by its file name)
         for path in re.findall(r'^\s*(?:from|import)\s+p"([^"]+)"', text, re.M):
-            assert path.startswith('@lib/'), f'{module} imports {path}: only the library'
+            assert path.startswith('@lib/') or path in FROZEN_TWINS, f'{module} imports {path}: only the library'
         for name in re.findall(r'^\s*(?:from|import)\s+([A-Za-z_]\w*)', text, re.M):
             assert name not in stems, f'{module} imports the compiler module {name}'
 

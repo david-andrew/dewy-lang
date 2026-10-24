@@ -1,0 +1,42 @@
+# The compiler's frozen dewy_layout.jo, with the same command line as dewy_layout_dewy.dewy.
+use '../../../compiler/dewy_tokens.dewy'
+use '../../../compiler/dewy_layout.jo'
+
+layout_symbol = (spelling: str) -> DewyToken:
+    if spelling == "and=": return .and_assign
+    if spelling == "or=": return .or_assign
+    if spelling == "xor=": return .xor_assign
+    dn_token_kind(spelling)
+
+layout_kind = (name: str) -> DewyKind:
+    if name == "op": return .op
+    if name == "identifier": return .identifier
+    if name == "boolean": return .boolean
+    if name == "eof": return .eof
+    .quoted
+
+layout_number = (s: str) -> int:
+    v = 0
+    loop c in s: v = v * 10 + int(c) - 48
+    v
+
+main = ():
+    listed = read_file(args()[1]) ?? ""
+    loop line in lines(listed):
+        paths = split(line, "\t")
+        src = read_file(paths[0]) ?? ""
+        rows = lines(read_file(paths[1]) ?? "")
+        blocks: int[]
+        loop w in split(rows[0], " "):
+            if len(w) > 0 and w != "B": blocks.push(layout_number(w))
+        tokens: DewyLexeme[]
+        loop r in [1..rows.len()):
+            f = split(rows[r], "\t")
+            s = DewyToken.none
+            if f[1] != "-": s = layout_symbol(f[1])
+            tokens.push(DewyLexeme(layout_kind(f[0]), 0, layout_number(f[2]), layout_number(f[3]), f[4] == "1", f[5] == "1", s))
+        laid = dewy_layout(src, tokens, blocks)
+        if laid == none: print("=== -1")
+        else:
+            print("=== {laid!.len()}")
+            print(str_from_bytes(laid!))

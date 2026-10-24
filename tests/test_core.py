@@ -4699,18 +4699,16 @@ def lexer_span_helpers(compiler):
     # Diagnostics are stubbed; malformed-source integration tests use the compiler.
     fast = (directory / 'dewy_fast.jo').read_text(encoding='utf-8')
     util = (directory / 'util.jo').read_text(encoding='utf-8')
-    parse = (directory / 'dewy_parse.jo').read_text(encoding='utf-8')
     tokens = (directory / 'dewy_tokens.jo').read_text(encoding='utf-8')
     lex = (directory / 'lex.jo').read_text(encoding='utf-8')
     return '\n'.join([
         lex[lex.index('lx_cls:'):lex.index('is_ident_start =')],
         util[util.index('struct SrcFile:'):util.index("# a file's name")],
-        parse[parse.index('enum DewyKind:'):parse.index('dw_kind_name =')],
         tokens[tokens.index('enum DewyToken:'):],
         'mkpos = (file: int, off: int) -> int: (file << 40) | off\n'
         'fatal = (pos: int, message: str): panic(message)\n'
         'err_notes: (int, str)[]',
-        fast[fast.index('struct DewyLexeme:'):fast.index('dn_peek =')],
+        fast[fast.index('dn_tokens: DewyLexeme[]'):fast.index('dn_peek =')],
     ])
 
 

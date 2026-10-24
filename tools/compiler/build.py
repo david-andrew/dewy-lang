@@ -28,20 +28,21 @@ FROZEN_TWINS = {'zip.dewy': 'zip.jo', 'spelling.dewy': 'spelling.jo', 'leb128.de
                'icns.dewy': 'icns.jo', 'targets.dewy': 'targets.jo',
                'json_doc.dewy': 'json_doc.jo', 'manifest.dewy': 'manifest.jo',
                'literals.dewy': 'literals.jo', 'dewy_tokens.dewy': 'dewy_tokens.jo',
-               'habits.dewy': 'habits.jo'}
+               'habits.dewy': 'habits.jo', 'dewy_layout.dewy': 'dewy_layout.jo'}
 
 
 def identity(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def use_frozen_twins(compiler: Path) -> dict[Path, str]:
-    """Point compiler/'s imports of its Dewy modules at their twins; return the originals."""
+def use_frozen_twins(compiler: Path, stubbed: bool = False) -> dict[Path, str]:
+    """Point compiler/'s imports of its Dewy modules at their twins; return the originals.
+    stubbed: bootstrap/'s modules stand in for some, so a Dewy module only they use is unused."""
     originals = {}
     for module, twin in FROZEN_TWINS.items():
         line = f"use '{module}'\n"
         importers = [path for path in sorted(compiler.glob('*.jo')) if line in path.read_text()]
-        if not importers:
+        if not importers and not stubbed:
             raise RuntimeError(f'no compiler module uses {module}; update FROZEN_TWINS')
         for path in importers:
             text = path.read_text()
@@ -84,7 +85,7 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False) ->
         stage0 = output / 'stage0/sloppy0'
         seed = binary_dir / 'core-bootstrap'
         first_core = binary_dir / 'dewy-core-bootstrap'
-        originals = use_frozen_twins(output / 'compiler')
+        originals = use_frozen_twins(output / 'compiler', stubbed=True)
         try:
             run(['make', '-s', '-C', str(output / 'stage0')], 'bootstrap-c.log')
             run([stage0, output / 'compiler/main.jo', '-o', seed], 'bootstrap-core.log')

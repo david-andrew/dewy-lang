@@ -94,8 +94,8 @@ across the languages is an ordinary call.
 distance), `leb128.dewy` (the one LEB128 encoder of the wasm, DWARF and Mach-O
 writers, formerly three) and `base64.dewy` (the web page's module and icon, and the
 macOS signature's hashes, formerly two encoders). Rules, enforced by `tests/test_selfhost_twins.py`: every
-`compiler/*.dewy` has its `FROZEN_TWINS` entry; it imports only the library, never a
-compiler module; its twin defines no name it lacks; each `.jo` module calling it
+`compiler/*.dewy` has its `FROZEN_TWINS` entry; it imports only the library and the
+compiler's other Dewy modules, never a Sloppy one; its twin defines no name it lacks; each `.jo` module calling it
 `use`s it (Dewy names reach only their importers, unlike Sloppy's shared namespace). Each
 pair has a differential test (`tests/test_selfhost_*.py`) against an independent
 Python oracle in default and release builds. Compiler output stayed byte-identical
@@ -249,6 +249,29 @@ What it met:
 - Later duplicates in the tables (Scratch's `clone`, Processing's `size`, a second `index` and
   `parse_int`, Dewy's second `str`, `float` and `items`) never matched; they are gone, as
   unreachable arms would be refused.
+
+`dewy_layout.dewy` (`dewy-core fmt`'s layout of Dewy text: indentation by the brackets open and
+by continued statements, the spaces between lexemes, and the lines kept as written) is the
+first leaf that imports another (`from p"dewy_tokens.dewy" import ...`; twins' imports are
+swapped like any module's) and the first whose record the compiler's hot path builds: the lexeme
+(`DewyLexeme`) and its kinds (`DewyKind`) moved into dewy_tokens.dewy, and the lexer fills an
+array of them through a pointer. dewy_fmt.jo keeps the lexing. The state (the open delimiters,
+their lines' levels, the angle brackets) was four globals and is a record by place. It gives
+bytes, which dewy_fmt.jo takes as they are (`str_from_bytes`). It compiled as first written, but
+for `end`, which is reserved. Panel: +0.00% on every item, the self-build included; 684 builds
+identical. `fmt --check` over tests/cases takes 1.287 G against master's 1.481 G (legacy_corpus
+1.171 / 1.334 G), and 8762 files (the repository's Dewy and disturbed copies) format identically.
+The differential test lexes as dn_lex does in Python (the tokens and spellings read from
+dewy_tokens.dewy) and lays out independently. What it met:
+- A first draft built the text with `byte_slice`, which panics where Sloppy slices malformed
+  UTF-8 anywhere (see `manifest.dewy`): `fmt` stopped on a line starting `\x80abc`, which the
+  lexer takes as a name. Bytes moved as bytes need no boundaries, and cost 13% less.
+- dewy_fmt.jo is a bootstrap module, so step 1 has no user of the leaf: `use_frozen_twins`
+  skips such a module there (`stubbed`).
+- `T('member')` on a union of string literals is not a conversion, and the hint for it is
+  wrong: `let c=Color('red')`, with `Color` imported, says it is in a.dewy, "which this file
+  does not import", or that it is the importing module's own (`main.Color(...)`). A typed
+  `let c:Color='red'` works.
 
 Open gaps from these leaves, by cost:
 - A literal beside a policy-typed operand (`w + 1`, `w & 0xFF`, `w xor 0xFFFFFFFF`) goes

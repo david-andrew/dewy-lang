@@ -1,0 +1,239 @@
+# The layout of Dewy text (`dewy-core fmt`): each line indented four spaces a level, the
+# spaces between its tokens normalized, and everything else kept. Adjacency that means
+# something stays as written: calls and indexing, coefficients, generic applications,
+# optional suffixes, and `a-b` against `[a -b]`. Physical line breaks, strings, comments,
+# and a block comment over several lines stay as they are.
+#
+# A line is indented one level past the line that opened the bracket it is in, so two
+# brackets opened on one line add one level, and a line starting with a closer sits level
+# with the line that opened it. A line continues the statement before it, one level deeper,
+# when that statement ended in an operator, a comma or an `=`/`=>`, or the line starts with
+# `&`, `|`, `and`, `or` or `xor`.
+#
+# A module of the compiler written in Dewy. dewy_layout.jo is its frozen twin for the
+# compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
+# interface and give the same answers (tests/test_selfhost_dewy_layout.py). The lexemes and
+# block comments are the lexer's (dewy_fmt.jo lexes the text).
+
+from p"dewy_tokens.dewy" import DewyToken, DewyLexeme, dn_token_assignment
+
+# The delimiters open before the next lexeme to count (`tracked`), with the indentation
+# level of the line each was opened on, and the angle brackets open on this line
+DewyLayout:type=[
+    stack:array<DewyToken>
+    levels:array<int64>
+    tracked:int64
+    angles:int64
+]
+
+dl_assignment=(s:DewyToken):>bool=>s =? 'assign' or s =? 'function' or s =? 'returns' or dn_token_assignment(s)
+
+# Only these boundaries are independent of adjacency in the Dewy grammar.
+dl_free_gap=(left:DewyToken right:DewyToken):>bool=>{
+    dl_assignment(left) or dl_assignment(right) or left =? 'colon' or left =? 'comma' or left =? 'semi' or left =? 'lbrace' or right =? 'colon' or right =? 'comma' or right =? 'rbrace'
+}
+
+# Whether the `=` at tokens[at] is followed by a function literal: `x =>`, `(...) =>`,
+# `(...):>T =>` or `<T>(...) =>`.
+dl_function_value=(tokens:array<DewyLexeme> at:int64):>bool=>{
+    let i:int64=at + 1
+    let n:int64=tokens.length
+    if i <? n and tokens[i].symbol =? 'langle' {
+        let depth:int64=0
+        loop i <? n {
+            if tokens[i].symbol =? 'langle' {depth+=1}
+            else if tokens[i].symbol =? 'rangle' {depth-=1}
+            i+=1
+            if depth =? 0 {break}
+        }
+    }
+    if i >=? n {return false}
+    if tokens[i].kind =? 'identifier' {return i + 1 <? n and tokens[i + 1].symbol =? 'function'}
+    if tokens[i].symbol not=? 'lparen' {return false}
+    let depth:int64=0
+    loop i <? n {
+        if tokens[i].symbol =? 'lparen' {depth+=1}
+        else if tokens[i].symbol =? 'rparen' {depth-=1}
+        i+=1
+        if depth =? 0 {break}
+    }
+    i <? n and (tokens[i].symbol =? 'function' or tokens[i].symbol =? 'returns')
+}
+
+# Whether a space goes between two lexemes: `name = (x:int64):>int64 => body`. `=>`, `+=` and the like
+# always have one on each side; `=` has one when it binds a name (a statement), but not where
+# it names an argument, a default or a field inside parentheses or brackets (`f(scale=3)`,
+# `[x=1]`), which stays as written, unless it defines a function member of an object
+# (`width = () => stop-start`). `:` and `:>` have none. `inside`: the innermost open delimiter
+# is a ( or a [. `function`: the `=` defines a function member.
+dl_gap=(l:DewyLayout left:DewyLexeme right:DewyLexeme inside:bool function:bool):>bool=>{
+    if right.symbol =? 'colon' or right.symbol =? 'comma' {return false}
+    if left.symbol =? 'colon' or left.symbol =? 'returns' or right.symbol =? 'returns' {return false}
+    if left.symbol =? 'lbrace' and right.symbol =? 'rbrace' {return false}
+    # (`a:array<array<int64>>=[]`: the `>>=` or `>=` closes the angle brackets)
+    if l.angles >? 0 and (right.symbol =? 'shr_assign' or right.symbol =? 'angle_assign') {return false}
+    if left.symbol =? 'shr_assign' or left.symbol =? 'angle_assign' {return true}
+    if left.symbol =? 'function' or right.symbol =? 'function' or dn_token_assignment(left.symbol) or dn_token_assignment(right.symbol) {return true}
+    if left.symbol =? 'assign' or right.symbol =? 'assign' {
+        if not inside or function or right.space {return true}
+        return false
+    }
+    if dl_free_gap(left.symbol right.symbol) {return true}
+    right.space
+}
+
+dl_opener=(s:DewyToken):>bool=>s =? 'lparen' or s =? 'lbrack' or s =? 'lbrace'
+dl_closer=(s:DewyToken):>bool=>s =? 'rparen' or s =? 'rbrack' or s =? 'rbrace'
+
+# Count the delimiters of the tokens up to `stop`; false when they do not match.
+dl_track=(@l:DewyLayout tokens:array<DewyLexeme> stop:int64 level:int64):>bool=>{
+    loop l.tracked <? stop {
+        let t=tokens[l.tracked]
+        l.tracked+=1
+        if t.kind not=? 'op' {continue}
+        if t.symbol =? 'langle' {l.angles+=1}
+        else if l.angles >? 0 and (t.symbol =? 'rangle' or t.symbol =? 'gt' and not t.space) {l.angles-=1}
+        else if l.angles >? 1 and t.symbol =? 'shr' {l.angles-=2}
+        if dl_opener(t.symbol) {
+            l.stack.push(t.symbol)
+            l.levels.push(level)
+            if l.stack.length >? 256 {return false}
+        }
+        else if dl_closer(t.symbol) {
+            if l.stack.length =? 0 {return false}
+            let opening=l.stack.pop()
+            l.levels.pop();
+            # ([a..b) and (a..b] are Dewy ranges: only braces must match)
+            if (opening =? 'lbrace') not=? (t.symbol =? 'rbrace') {return false}
+        }
+    }
+    true
+}
+
+# Whether a line continues the statement before it, one level deeper.
+dl_continues=(prev:DewyToken first:DewyToken):>bool=>{
+    dl_assignment(prev) or prev =? 'comma' or prev =? 'amp' or prev =? 'pipe' or prev =? 'kw_and' or prev =? 'kw_or' or prev =? 'kw_xor' or first =? 'amp' or first =? 'pipe' or first =? 'kw_and' or first =? 'kw_or' or first =? 'kw_xor'
+}
+
+# Whether the innermost open delimiter is a ( or a [ (or an angle bracket).
+dl_inside=(l:DewyLayout):>bool=>l.angles >? 0 or l.stack.length >? 0 and l.stack.last not=? 'lbrace'
+
+# Whether the gap before tokens[i] touches an `=` that defines a member of an object: directly
+# inside [ ] with a function literal as its value (as opposed to `sort(key=x => x.size)`).
+dl_assign_function=(l:DewyLayout tokens:array<DewyLexeme> i:int64):>bool=>{
+    if l.angles >? 0 or l.stack.length =? 0 or l.stack.last not=? 'lbrack' {return false}
+    if tokens[i].symbol =? 'assign' {return dl_function_value(tokens i)}
+    tokens[i - 1].symbol =? 'assign' and dl_function_value(tokens i - 1)
+}
+
+# Whether bytes [a, z) of b hold a `#`.
+dl_has_hash=(b:array<uint8> a:int64 z:int64):>bool=>{
+    let k=a
+    loop k <? z {
+        if b[k] =? b'#' {return true}
+        k+=1
+    }
+    false
+}
+
+# bytes [a, z) of b onto out
+dl_put=(@out:array<uint8> b:array<uint8> a:int64 z:int64):>void=>{
+    let k=a
+    loop k <? z {
+        out.push(b[k])
+        k+=1
+    }
+}
+
+# The bytes of src laid out, given its lexemes (ending with the eof one) and its block comments
+# ([start, end) pairs in order): none when its delimiters do not match or nest deeper than 256.
+# (Bytes, not a string: the compiler reads source text without checking that it is UTF-8, and
+# the layout moves bytes without looking inside them.)
+dewy_layout=(src:string tokens:array<DewyLexeme> blocks:array<int64>):>array<uint8>|none=>{
+    let l:DewyLayout=[stack=[] levels=[] tracked=0 angles=0]
+    let b=src as array<uint8>
+    let n:int64=b.length
+    let count:int64=tokens.length
+    # (the last line ends with CRLF when any line does)
+    let crlf=false
+    let k:int64=1
+    loop k <? n and not crlf {
+        crlf=b[k] =? 10 and b[k - 1] =? 13
+        k+=1
+    }
+    let bi:int64=0
+    let out:array<uint8>=[]
+    let at:int64=0
+    let start:int64=0
+    let opaque_end:int64=0
+    loop start <? n {
+        let eol:int64=start
+        loop eol <? n and b[eol] not=? 10 {eol+=1}
+        let content_end:int64=eol
+        if content_end >? start and b[content_end - 1] =? 13 {content_end-=1}
+        let line_crlf=if eol =? n crlf else content_end <? eol
+        let protected=start <? opaque_end
+        let stop:int64=at
+        loop stop <? count and tokens[stop].kind not=? 'eof' and tokens[stop].start <? content_end {
+            if tokens[stop].stop >? content_end {opaque_end=tokens[stop].stop}
+            stop+=1
+        }
+        # (a block comment over several lines is kept as written, like a string)
+        loop bi + 1 <? blocks.length and blocks[bi] <? content_end {
+            if blocks[bi + 1] >? content_end and blocks[bi + 1] >? opaque_end {opaque_end=blocks[bi + 1]}
+            bi+=2
+        }
+        let lead:int64=0
+        loop at + lead <? stop and tokens[at + lead].kind =? 'op' and dl_closer(tokens[at + lead].symbol) {lead+=1}
+        let depth:int64=0
+        if lead >? 0 and l.stack.length >? 0 {depth=l.levels[l.stack.length - 1]}
+        else if l.stack.length >? 0 {depth=l.levels[l.stack.length - 1] + 1}
+        if lead =? 0 and at >? 0 and at <? stop and not protected and dl_continues(tokens[at - 1].symbol tokens[at].symbol) {depth+=1}
+        let first:int64=start
+        loop first <? content_end and (b[first] =? b' ' or b[first] =? b'\t') {first+=1}
+        let last:int64=content_end
+        if not protected and opaque_end <=? content_end {
+            loop last >? first and (b[last - 1] =? b' ' or b[last - 1] =? b'\t') {last-=1}
+        }
+        if protected {dl_put(@out b start content_end)}
+        else if first <? content_end {
+            let indent:int64=0
+            loop indent <? depth * 4 {
+                out.push(b' ')
+                indent+=1
+            }
+            if at =? stop {
+                # A comment-only line has no lexemes.
+                dl_put(@out b first last)
+            }
+            else {
+                # (a block comment before the line's code, or between its tokens, stays)
+                dl_put(@out b first tokens[at].start)
+                loop i in [at..stop) {
+                    if i >? at {
+                        if not dl_track(@l tokens i depth) {return none}
+                        let gap_start=tokens[i - 1].stop
+                        let gap_stop=tokens[i].start
+                        if dl_has_hash(b gap_start gap_stop) {dl_put(@out b gap_start gap_stop)}
+                        else if dl_gap(l tokens[i - 1] tokens[i] dl_inside(l) dl_assign_function(l tokens i)) {out.push(b' ')}
+                    }
+                    let t=tokens[i]
+                    dl_put(@out b t.start if t.stop <? content_end t.stop else content_end)
+                }
+                let cursor=if tokens[stop - 1].stop <? content_end tokens[stop - 1].stop else content_end
+                dl_put(@out b cursor last)
+            }
+        }
+        # Strings can span physical lines, including closing quotes followed by code. Their
+        # contents stay untouched, but the delimiters after them count.
+        if not dl_track(@l tokens stop depth) {return none}
+        # (a type's angle brackets end on their line, even when a `>?` or `>>` closes them)
+        l.angles=0
+        if line_crlf {out.push(13)}
+        out.push(10)
+        at=stop
+        start=eol + 1
+    }
+    if l.stack.length not=? 0 {return none}
+    out
+}

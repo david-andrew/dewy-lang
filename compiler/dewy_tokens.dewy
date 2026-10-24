@@ -26,6 +26,27 @@ DewyToken:type='none' | 'lparen' | 'rparen' | 'lbrack' | 'rbrack' | 'lbrace' | '
     'pipe_assign' | 'and_assign' | 'or_assign' | 'xor_assign' | 'kw_of' | 'kw_or_throw' | 'kw_nand' | 'kw_nor' |
     'kw_xnor' | 'kw_parallel' | 'kw_concurrent' | 'kw_spawn'
 
+# The kinds of lexemes and of the syntax nodes made of them (dewy_parse.jo names them
+# for the formatter's and diagnostics' text)
+DewyKind:type='unknown' | 'op' | 'identifier' | 'boolean' | 'metatag' | 'based_string' | 'integer' |
+    'quoted' | 'rawquoted' | 'eof' | 'atom' | 'ambiguous' | 'binary' | 'block' | 'combined_assignment' |
+    'flat' | 'flow' | 'interpolated_string' | 'inverted_comparison' | 'keyword' | 'keyword_expr' |
+    'operator' | 'postfix' | 'prefix' | 'string' | 'string_chunk' | 'source_integer' | 'source_real' |
+    'directive' | 'compact_expr' | 'compact_stmt' | 'lazy_body'
+
+# A lexeme: its kind, its interned name (identifiers, when the lexer interns them), its
+# bytes [start, stop) of the source, whether space or a line break comes before it, and
+# its token (`none` for names, numbers and strings)
+DewyLexeme:type=[
+    kind:DewyKind
+    name:int32
+    start:int64
+    stop:int64
+    space:bool
+    newline:bool
+    symbol:DewyToken='none'
+]
+
 # The token a byte spells alone
 dn_single_token=(c:uint8):>DewyToken=>match c {
     <b'('> => 'lparen'
