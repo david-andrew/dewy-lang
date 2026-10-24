@@ -2262,27 +2262,42 @@ fact_string_index = (n: int, s: mut FactState, index: int, length: int):
 # `bytes.read<uint64>(i)` needs 0 <=? i and i + 8 <=? bytes.length (4 for uint32, 2 for
 # uint16): 10 plus the width here.
 # `reshape(xs a b)` (to four dimensions) needs each dimension >= 0 and their
-# product xs.length: 20 plus the dimensions.
+# product xs.length: 20 plus the dimensions. A slice assignment `xs[a..b) = v`
+# (no step) needs 0 <=? a <=? b <=? xs.length, as a slice does, and an array v
+# of b - a elements: 30 for one value, 31 for an array.
 fact_name_swap = 0
 fact_name_insert = 0
 fact_name_reshape = 0
+fact_name_put_slice = 0
 fact_name_reads: int[]
 fact_array_call = (n: int) -> int:
-    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) < 2 or nkids(n) > 5: return 0
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) < 2 or nkids(n) > 8: return 0
     d = int(fns[int(nodes[n].sym)].decl)
     if d == 0: return 0
     if fact_name_swap == 0:
         fact_name_swap = intern("swap")
         fact_name_insert = intern("__dewy_insert")
         fact_name_reshape = intern("reshape")
+        fact_name_put_slice = intern("__dewy_put_slice")
         fact_name_reads = [intern("__dewy_read_u64"), intern("__dewy_read_u32"), intern("__dewy_read_u16")]
     name = int(nodes[d].name)
     k = 0
     if name == fact_name_reshape and nkids(n) >= 3 and nkids(n) <= 5: k = 19 + nkids(n)
+    else if name == fact_name_put_slice and nkids(n) == 8: k = fact_put_slice_kind(n)
     else if nkids(n) == 3: k = if name == fact_name_swap: 4 else if name == fact_name_insert: 5 else: 0
     else if nkids(n) == 2: k = if name == fact_name_reads[0]: 18 else if name == fact_name_reads[1]: 14 else if name == fact_name_reads[2]: 12 else: 0
-    if k == 0 or not pos_in_lib(nodes[d].pos) or tkind(representation_type(ntype(kid(n, 0)))) != .array: return 0
+    if k == 0 or not pos_in_lib(nodes[d].pos): return 0
+    rk = tkind(representation_type(ntype(kid(n, 0))))
+    if rk != .array and not (rk == .fixed and k >= 30 and k < 40): return 0
     k
+
+# (literal flags only: a stepped one keeps its check)
+fact_put_slice_kind = (n: int) -> int:
+    loop i in [4..7):
+        if nodes[kid(n, i)].kind != .bool_lit: return 0
+    if nodes[kid(n, 6)].ival != 0: return 0
+    vk = tkind(representation_type(ntype(kid(n, 7))))
+    if vk == .array or vk == .fixed: 31 else: 30
 
 # Dictionary key presence (no traps): `d[k]`, `d[k] += 1` and `d.pop(k)` need
 # k in d, an obligation of the call as an index is. `k in? d` is a projection
@@ -2361,6 +2376,12 @@ fact_array_call_check = (n: int, s: mut FactState, values: int[], kind: int):
     base = if held.len() > 0: held[held.len() - 1] else: values[0]
     length = fact_project(s, base, -1, false, T_INT)
     zero = fact_constant(s, 0)
+    if kind >= 30:
+        # (a fixed array's length is its type's)
+        t = representation_type(ntype(kid(n, 0)))
+        if tkind(t) == .fixed: length = fact_constant(s, fixed_len(t))
+        fact_put_slice_check(n, s, values, length, kind == 31)
+        return
     if kind > 20:
         fact_reshape_check(n, s, values, length)
         return
@@ -2412,6 +2433,33 @@ fact_reshape_check = (n: int, s: mut FactState, values: int[], length: int):
         relation = if receiver != "": "{receiver}.length =? {join(dims, "*")}" else: ""
         whose = if receiver != "": "`" + receiver + "`'s" else: "the"
         wit_unknown(n, fact_bound(s, product), "reshape's dimensions multiply to {whose} element count", 0, relation)
+
+# A slice assignment's bounds (fact_string_slice's) and, for an array, its length.
+fact_put_slice_check = (n: int, s: mut FactState, values: int[], length: int, many: bool):
+    inclusive = nodes[kid(n, 4)].ival != 0
+    bounded = nodes[kid(n, 5)].ival != 0
+    lo = values[1]
+    hi = length
+    if bounded:
+        hi = values[3]
+        if inclusive: hi = fact_arithmetic(s, kid(n, 3), .plus, hi, fact_constant(s, 1))
+    zero = fact_constant(s, 0)
+    checks = [fact_compare(s, .le, zero, lo), fact_compare(s, .le, lo, hi), fact_compare(s, .le, hi, length)]
+    bounds = checks[0] == 1 and checks[1] == 1 and checks[2] == 1
+    count = true
+    if bounds and many:
+        size = fact_arithmetic(s, kid(n, 3), .minus, hi, lo)
+        vt = representation_type(ntype(kid(n, 7)))
+        given = if tkind(vt) == .fixed: fact_constant(s, fixed_len(vt)) else: fact_project(s, values[7], -1, false, T_INT)
+        count = fact_compare(s, .eq, given, size) == 1
+        if not count and not fact_probe_on:
+            text = wit_text(kid(n, 7))
+            what = if text != "": "`" + text + "`" else: "array"
+            relation = if text != "": text + ".length =? the slice's length" else: ""
+            wit_unknown(n, fact_bound(s, given), "the assigned {what} has the slice's length", 0, relation)
+            return
+    if fact_probe_on: fact_probe_record(n, bounds and count)
+    else if not bounds: wit_slice_at(n, s, lo, hi, length, checks, kid(n, 0), kid(n, 1), (if bounded: kid(n, 3) else: 0), inclusive)
 
 # `text[a..b)`: 0 <=? a <=? b <=? text.length (an inclusive end counts one
 # more, an open end is the length); the slice's length is their difference.
@@ -4109,6 +4157,16 @@ fact_capture = (n: int, s: mut FactState) -> int:
             else if floor_probe: fact_probe_divisor(n, s, values[1], kid(n, 1))
         array = fact_array_call(n)
         if array != 0: fact_array_call_check(n, s, values, array)
+        if array >= 30:
+            # (a slice assignment changes elements, not the length)
+            a = kid(n, 0)
+            route = fact_route(a, s)
+            held = fact_route_values(s, route)
+            length = fact_project(s, (if held.len() > 0: held[held.len() - 1] else: values[0]), -1, false, T_INT)
+            fresh = fact_new(s, FactBound(), FactTerm(type = ntype(a)))
+            if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, length))
+            fact_store_route(s, route, fresh, n, true)
+            return fact_new(s, fact_domain(ntype(n)))
         map = if fact_policy == .RequireStatic or fact_query or fact_probe_on: fact_map_call(n) else: 0
         if map >= 2 and map <= 4: fact_map_check(n, s, values)
         if map != 0:

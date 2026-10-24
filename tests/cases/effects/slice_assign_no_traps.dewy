@@ -1,0 +1,11 @@
+$runtime_checks=false
+# (no traps: a slice assignment's bounds and length are the caller's obligation)
+main=():>void=>{
+    let xs=[1 2 3 4 5]
+    xs[1..3)=0
+    xs[0..2)=[7 8]
+    xs[3..]=[9 9]
+    printl(xs)
+    if xs.length >=? 5 { xs[2..4]=[6 6 6] }
+    printl(xs)
+}
