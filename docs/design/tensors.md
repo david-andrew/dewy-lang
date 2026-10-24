@@ -37,6 +37,9 @@ Literals lean contiguous N-d unless explicitly jagged, either by the literal's
 own shape or by the receiving type.
 
 - Rows separated by newlines build a 2-D array.
+- A `\` at the end of a line cancels that newline (decided 2026-10-23), so
+  `[2 3 5 \` + newline + `7 11]` is one row. A 2-D literal given to a 1-D type
+  is an error suggesting `\` (this replaces "a 1-D receiving type flattens rows").
 - 2-D blocks separated by blank lines build a 3-D array.
 - A standalone `;` (not attached to an expression) stands in for a newline, so
   higher dimensions fit on one line, Julia-style.

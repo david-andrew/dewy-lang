@@ -791,6 +791,8 @@ coerce = (n: int, target: int) -> int:
     if tk == .bool_ and (fk == .array or fk == .str_ or is_map_type(from)): why = if dewy: " (not true or false: `xs.length >? 0` asks if it has anything)" else: " (not true or false: `xs.len() > 0` asks if it has anything)"
     if tk == .bool_ and (fk == .int_ or fk == .float_): why = if dewy: " (a number is not true or false: `x not=? 0` asks)" else: " (a number is not true or false: `x != 0` asks)"
     if tk == .bool_ and fk == .int_ and nodes[n].kind == .int_lit: why = if dewy: " (to do something {nodes[n].ival} times: `loop i in [1..{nodes[n].ival}] \{ }`)" else: " (to do something {nodes[n].ival} times: `loop i in [1..{nodes[n].ival}]:`)"
+    # (`[1 2 ; 3 4]` where one row is wanted: a row break makes the literal 2-D)
+    if dewy and tk == .array and is_nd(from) and pos_off(nodes[n].pos) < len(files[pos_file(nodes[n].pos)].src) and files[pos_file(nodes[n].pos)].src[pos_off(nodes[n].pos)] == '[': why = " (this literal has rows, so it is 2-D: for one row, leave out the row breaks, and end a line with `\\` to continue the row on the next line)"
     fatal(nodes[n].pos, "type mismatch: expected {dt(to)}, found {dt(from)}{why}{coerce_hint}")
     n
 

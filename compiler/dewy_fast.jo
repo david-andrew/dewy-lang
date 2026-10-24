@@ -467,6 +467,14 @@ dn_lex = (file: int, begin: int, stop: int, intern_names: bool = true) -> DewyLe
                 else if classes[c] & 16 == 0: break
                 i += 1
             continue
+        # (a `\` ending a line cancels that line break: the next line continues this one)
+        if c == '\\':
+            e = i + 1
+            loop e < stop and (bytes[e] == ' ' or bytes[e] == '\t' or bytes[e] == '\r'): e += 1
+            if e < stop and bytes[e] == '\n':
+                spaced = true
+                i = e + 1
+                continue
         if c == '#' and i + 1 < stop and bytes[i + 1] == '{':
             e = dewy_block_comment_end(source, i, stop)
             if e < 0: dn_block_comment_error(i)

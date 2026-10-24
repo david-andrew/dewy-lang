@@ -969,6 +969,10 @@ would express; attached to a loop or `if`, `loop c xs.pop();`, it discards what
 that statement expresses. An unattached `;` (after a space or on its own line)
 separates rows of an array literal, `[1 2 ; 3 4]`, and is an error elsewhere.
 
+A `\` at the end of a line cancels that line break, everywhere: in code
+(`total = 1 + \` then `2` on the next line), in array literals (`[2 3 5 \` then
+`7 11]` is one row) and in strings, where it removes the newline.
+
 `^` raises a value to a power and associates right: `2^3^2` is `2^(3^2)`.
 It binds above multiplication, literal coefficients and unary minus, so `2x^2`
 is `2*(x^2)` and `-2^2` is `-(2^2)`. Use `xor` for bitwise exclusive-or.
