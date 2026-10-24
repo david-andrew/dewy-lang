@@ -10,6 +10,7 @@
 use 'check.jo'
 use 'icount.jo'
 use 'util.jo'
+use 'module_paths.dewy'
 use 'ast.jo'
 use 'frontend.jo'
 use 'parse.jo'
@@ -57,7 +58,7 @@ defer_prelude = (path: str, sub: str) -> bool:
     fi = files.len()
     files.push(SrcFile(path, d, src!))
     mi = modules.len()
-    modules.push(Module(name = i32(intern(strip_ext(path[slash + 1..]))), file = i32(fi), dir = d, is_prelude = true))
+    modules.push(Module(name = i32(intern(path_stem(path))), file = i32(fi), dir = d, is_prelude = true))
     module_by_path[module_path_key(path)] = mi
     icb = ic_switch(IC_LOAD, IC_LIB)
     r = scan_source(src!)

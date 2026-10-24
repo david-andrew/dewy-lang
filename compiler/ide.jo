@@ -13,6 +13,7 @@
 # Fields are separated by tabs; tabs, newlines and backslashes in them are escaped (\t \n \\).
 
 use 'util.jo'
+use 'module_paths.dewy'
 use 'dewy_lex.dewy'
 use 'ast.jo'
 use 'types.jo'
@@ -57,37 +58,10 @@ ide_hint_locals: int[]          # variables declared without a type
 ide_hint_fns: int[]             # functions whose return type is inferred
 ide_lines: str[]
 
-# a path without . and .. parts (and no doubled slashes, but for a UNC path's //server/share)
-ide_norm = (path: str) -> str:
-    if ide_normal(path): return path
-    parts: str[]
-    loop p in split(path, "/"):
-        if len(p) == 0 or p == ".": continue
-        if p == "..":
-            if parts.len() > 0: parts.pop()
-            continue
-        parts.push(p)
-    out = join(parts, "/")
-    if starts_with(path, "//") and not starts_with(path, "///"): out = "//" + out
-    else if starts_with(path, "/"): out = "/" + out
-    out
-
-# (whether ide_norm has nothing to change: no empty, . or .. part and no trailing slash; every
-# module's path is looked up so)
-ide_normal = (path: str) -> bool:
-    n = len(path)
-    if n == 0 or path[n - 1] == '/' or path[0] == '.': return false
-    loop i in [0..n - 1):
-        if path[i] == '/':
-            c = path[i + 1]
-            if c == '/': return false
-            if c == '.' and (i + 2 == n or path[i + 2] == '/' or path[i + 2] == '.' and (i + 3 == n or path[i + 3] == '/')): return false
-    true
-
 # a source file: as the editor has it, else from disk
 read_source = (path: str) -> str?:
     if ide_texts.len() > 0:
-        if let t = ide_texts.get(ide_norm(path)): return t
+        if let t = ide_texts.get(path_norm(path)): return t
     read_file(path)
 
 ide_esc = (s: str) -> str:
@@ -118,9 +92,9 @@ ide_indexed = (f: int) -> bool:
     if f < 0 or f >= files.len(): return false
     loop ide_files.len() <= f: ide_files.push(0)
     if ide_files[f] == 0:
-        p = ide_norm(files[f].path)
+        p = path_norm(files[f].path)
         ide_files[f] = 1
-        if p != ide_doc and (not ide_wide or starts_with(p, ide_norm(lib_dir) + "/")): ide_files[f] = 2
+        if p != ide_doc and (not ide_wide or starts_with(p, path_norm(lib_dir) + "/")): ide_files[f] = 2
     ide_files[f] == 1
 
 ide_is_name_byte = (c: u8) -> bool: is_ident_char(c)
@@ -955,7 +929,7 @@ ide_skippable = () -> int:
 
 ide_find_file = (path: str) -> int:
     loop i in 0.. and f in files:
-        if ide_norm(f.path) == path: return i
+        if path_norm(f.path) == path: return i
     -1
 
 # (cascade: the error only follows from a body left out after an earlier one, which the

@@ -12,6 +12,7 @@
 # requires of every program it runs.
 
 use 'util.jo'
+use 'module_paths.dewy'
 use 'leb128.dewy'
 use 'base64.dewy'
 use 'sha.dewy'
@@ -96,7 +97,7 @@ macho_dwarf: (str, u8[])[]         # (sloppy build: dwarf.jo's sections, for wri
 
 write_macho = (path: str, text: u8[], entry_off: int, ro: u8[], info: u8[], data_size: int, name: str, watch: bool) -> bool:
     ident = name
-    if len(ident) == 0: ident = strip_ext(path[rfind(path, "/") + 1..])
+    if len(ident) == 0: ident = path_stem(path)
     text_off, ro_off, info_off, text_size = macho_layout(text.len(), ro.len(), info.len())
     data_addr = MACHO_BASE + text_size
     data_vm = macho_page_up(max(data_size, 16))
@@ -459,7 +460,7 @@ macho_resources: u8[] = []
 # and Resources/icon.icns (the build block's icon). Returns where the program goes, "" if the
 # folders could not be made.
 macos_bundle = (app: str, name: str, icon: u8[]) -> str:
-    base = strip_ext(app[rfind(app, "/") + 1..])
+    base = path_stem(app)
     exe = base
     if len(exe) == 0: exe = "game"
     title = name

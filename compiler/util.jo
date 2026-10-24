@@ -85,25 +85,6 @@ name_known = (s: str) -> bool:
         i = (i + 1) & mask
     false
 
-# a file's name without its extension, whatever it is ("dir/game.jo" -> "dir/game"; ".x" stays)
-strip_ext = (path: str) -> str:
-    dot = rfind(path, ".")
-    if dot <= rfind(path, "/") + 1: return path
-    path[..dot)
-
-# a path as the compiler keeps it: parts separated by / (on Windows, \ becomes /, and a drive
-# letter is lower case, as editors write it)
-os_path = (p: str) -> str:
-    when TARGET == "windows":
-        q = replace(p, "\\", "/")
-        if len(q) >= 2 and q[1] == ':' and q[0] >= 'A' and q[0] <= 'Z': q = lower(q[..1)) + q[1..]
-        return q
-    else:
-        return p
-
-# a path that does not start from the current directory ("/x", or "c:/x" on Windows)
-is_abs_path = (p: str) -> bool: starts_with(p, "/") or len(p) >= 3 and p[1] == ':' and p[2] == '/'
-
 # position encoding: file index in the high bits, byte offset in the low 40 bits
 mkpos = (file: int, off: int) -> int: (file << 40) | off
 pos_file = (p: int) -> int: p >> 40

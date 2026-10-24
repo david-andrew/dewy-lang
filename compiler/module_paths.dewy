@@ -1,0 +1,233 @@
+# Paths as the compiler keeps them, and where a module's file is: a path's normal form (no
+# . or .. part), its directory and stem, a module's identity (its normal absolute path), the
+# file a `use 'x'` or `p"x"` import names, the files a named import may be (the importer's
+# directory, then the library's), the hint for a Python module's name, the language server's
+# file URIs and the run cache's name for a program. Nothing here reads the disk: the callers
+# probe the candidates.
+#
+# Paths are bytes: a file's name need not be UTF-8, so they are cut only after ASCII bytes or
+# by the library's members that pass any bytes through (split, join, replace, remove_prefix).
+#
+# A module of the compiler written in Dewy. module_paths.jo is its frozen twin for the
+# compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
+# interface and give the same answers (tests/test_selfhost_module_paths.py).
+
+from p"json_doc.dewy" import json_hex
+
+# a path that does not start from the current directory ("/x", or "c:/x" on Windows)
+is_abs_path=(p:string):>bool=>{
+    let b=p as array<uint8>
+    b.length >=? 1 and b[0] =? b'/' or b.length >=? 3 and b[1] =? b':' and b[2] =? b'/'
+}
+
+# a file's name without its extension, whatever it is ("dir/game.jo" -> "dir/game"; ".x" stays)
+strip_ext=(path:string):>string=>{
+    let b=path as array<uint8>
+    let slash:int64=b.length - 1
+    loop slash >=? 0 and b[slash] not=? b'/' {slash-=1}
+    let dot:int64=b.length - 1
+    loop dot >? slash + 1 and b[dot] not=? b'.' {dot-=1}
+    if dot <=? slash + 1 {return path}
+    path.byte_slice(0 dot)
+}
+
+# a path as the compiler keeps it: parts separated by / (on Windows, windows_path)
+os_path=(p:string):>string=>{
+    if $target.os =? 'windows' {return windows_path(p)}
+    p
+}
+
+# a Windows path as the compiler keeps it: \ becomes /, and a drive letter is lower case, as
+# editors write it
+windows_path=(p:string):>string=>{
+    let q=p.replace("\\" "/")
+    let b=q as array<uint8>
+    if b.length >=? 2 and b[1] =? b':' and b[0] >=? b'A' and b[0] <=? b'Z' {return "{lower(q.byte_slice(0 1))}{q.byte_slice(1 b.length)}"}
+    q
+}
+
+# whether path_norm has nothing to change: no empty, . or .. part and no trailing slash (every
+# module's path is looked up so)
+path_normal=(path:string):>bool=>{
+    let b=path as array<uint8>
+    let n:int64=b.length
+    if n =? 0 or b[n - 1] =? b'/' or b[0] =? b'.' {return false}
+    let i:int64=0
+    loop i <? n - 1 {
+        if b[i] =? b'/' {
+            let c=b[i + 1]
+            if c =? b'/' {return false}
+            if c =? b'.' and (i + 2 =? n or b[i + 2] =? b'/' or b[i + 2] =? b'.' and (i + 3 =? n or b[i + 3] =? b'/')) {return false}
+        }
+        i+=1
+    }
+    true
+}
+
+# a path without . and .. parts (and no doubled slashes, but for a UNC path's //server/share)
+path_norm=(path:string):>string=>{
+    if path_normal(path) {return path}
+    let parts:array<string>=[]
+    loop p in path.split("/") {
+        if p.is_empty or p =? "." {continue}
+        if p =? ".." {
+            if not parts.is_empty {parts.pop();}
+            continue
+        }
+        parts.push(p)
+    }
+    let out=parts.join("/")
+    if path.startswith("//") and not path.startswith("///") {return "//{out}"}
+    if path.startswith("/") {return "/{out}"}
+    out
+}
+
+# the directory a file is in ("." for a bare name)
+path_dir=(path:string):>string=>{
+    let b=path as array<uint8>
+    let slash:int64=b.length - 1
+    loop slash >=? 0 and b[slash] not=? b'/' {slash-=1}
+    if slash <? 0 {return "."}
+    path.byte_slice(0 slash)
+}
+
+# a file's name without its directory and extension: its module's name ("dir/game.jo" -> "game")
+path_stem=(path:string):>string=>{
+    let b=path as array<uint8>
+    let n:int64=b.length
+    let slash:int64=n - 1
+    loop slash >=? 0 and b[slash] not=? b'/' {slash-=1}
+    if slash <? 0 {return strip_ext(path)}
+    if slash + 1 <? n and b[slash + 1] >=? 0x80 {
+        # (the byte after the / may be inside a character in malformed text: split the name off)
+        let parts=path.split("/")
+        return strip_ext(parts[parts.length - 1])
+    }
+    strip_ext(path.byte_slice(slash + 1 n))
+}
+
+# a module's identity: its path, absolute (from cwd) and normal
+module_key=(path:string cwd:string):>string=>path_norm(if is_abs_path(path) path else "{os_path(cwd)}/{path}")
+
+# the file `use 'rel'` or `import p"rel"` names in a module in directory dir: from the library
+# (`@lib/...`), as it is when absolute, else from dir
+use_path=(rel:string dir:string lib_dir:string):>string=>{
+    if rel.startswith("@lib/") {return "{lib_dir}/{rel.remove_prefix("@lib/")}"}
+    if dir.is_empty or is_abs_path(rel) {return rel}
+    "{dir}/{rel}"
+}
+
+# the package a `use 'package/file.jo'` may name ("": rel has no directory)
+package_name=(rel:string):>string=>{
+    let b=rel as array<uint8>
+    let slash:int64=0
+    loop slash <? b.length and b[slash] not=? b'/' {slash+=1}
+    if slash =? 0 or slash =? b.length {return ""}
+    rel.byte_slice(0 slash)
+}
+
+# the file a `use 'package/file.jo'` names in the package's directory pd
+package_file=(rel:string pd:string):>string=>"{pd}/{rel.remove_prefix("{package_name(rel)}/")}"
+
+# the files a module stem may be, the importer's language first
+module_candidates=(stem:string dewy:bool):>array<string>=>if dewy ["{stem}.dewy" "{stem}.jo"] else ["{stem}.jo" "{stem}.dewy"]
+
+# where a named import (`import name`, `use name`) is looked for, in order: beside the
+# importer, then in the library and its std, game and core directories
+module_search_stems=(dir:string lib_dir:string rel:string):>array<string>=>[
+    "{dir}/{rel}" "{lib_dir}/{rel}" "{lib_dir}/std/{rel}" "{lib_dir}/game/{rel}" "{lib_dir}/core/{rel}"
+]
+
+# what a missing module named as in Python is here ("": not one)
+missing_module_hint=(rel:string):>string=>match rel {
+    <"re"> => ": regular expressions are there without an import, `regex(r\"\\d+\")`"
+    <"sys"> => ": `args()` is the command line, `exit(code)` ends the program"
+    <"json"> => ": `parse_json(s)` and `to_json(x)` are there without an import"
+    <"os"> => ": files are there without an import: `read_file`, `list_dir`, `walk_dir`, `glob`, `make_dirs`, `rename_file`, `join_path`"
+    <"shutil"> => ": files are there without an import: `read_file`, `list_dir`, `walk_dir`, `glob`, `make_dirs`, `rename_file`, `join_path`"
+    <"pathlib"> => ": files are there without an import: `read_file`, `list_dir`, `walk_dir`, `glob`, `make_dirs`, `rename_file`, `join_path`"
+    <"glob"> => ": files are there without an import: `read_file`, `list_dir`, `walk_dir`, `glob`, `make_dirs`, `rename_file`, `join_path`"
+    <"time"> => ": `time()`, `unix_time()`, `now()` (a Date) and `sleep(s)` are there without an import"
+    <"datetime"> => ": `time()`, `unix_time()`, `now()` (a Date) and `sleep(s)` are there without an import"
+    <"random"> => ": `random()`, `random_int(lo, hi)`, `sqrt`, `floor`, `PI` are there without an import"
+    <"math"> => ": `random()`, `random_int(lo, hi)`, `sqrt`, `floor`, `PI` are there without an import"
+    <"csv"> => ": `csv_rows(text)` is there without an import"
+    <"collections"> => ": maps start missing keys at zero (`counts[w] += 1`); `sorted_by`, `unique`, `group_by`"
+    <"subprocess"> => ": `run_program(\"ls\", [\"-l\"])` (its exit code and output)"
+    <"argparse"> => ": a struct of the options (`verbose = false`, `out = \"a.txt\"`, `files: str[]`), then `opts = parse_args[Options](\"what it does\")`"
+    <"hashlib"> => ": `sha256(text_or_bytes)` is there without an import (as hex digits)"
+    _ => ""
+}
+
+# a file URI's path as bytes (any, once %XX is decoded): file://server/share/x is the UNC path
+# //server/share/x, and file:///c%3A/x is c:/x
+uri_path_bytes=(uri:string):>array<uint8>=>{
+    let s=uri as array<uint8>
+    let n:int64=s.length
+    let out:array<uint8>=[]
+    let i:int64=0
+    if uri.startswith("file://") {
+        i=7
+        if i <? n and s[i] not=? b'/' {
+            out.push(b'/')
+            out.push(b'/')
+        }
+    }
+    loop i <? n {
+        let c=s[i]
+        if c =? b'%' and i + 2 <? n {
+            out.push((json_hex(s[i + 1]) * 16 + json_hex(s[i + 2])) as uint8)
+            i+=3
+            continue
+        }
+        out.push(c)
+        i+=1
+    }
+    if out.length >=? 3 and out[0] =? b'/' and out[2] =? b':' {
+        let drive:array<uint8>=[]
+        let k:int64=1
+        loop k <? out.length {
+            drive.push(out[k])
+            k+=1
+        }
+        return drive
+    }
+    out
+}
+
+# a path as a file URI: each byte but a letter, digit, /, -, ., _ or ~ written %XX
+path_to_uri=(path:string):>string=>{
+    let digits="0123456789ABCDEF" as array<uint8>
+    let out:array<uint8>=[]
+    loop c in ("file:" as array<uint8>) {out.push(c)}
+    if not path.startswith("//") {
+        out.push(b'/')
+        out.push(b'/')
+        if not path.startswith("/") {out.push(b'/')}
+    }
+    loop c in (path as array<uint8>) {
+        let plain=c >=? b'a' and c <=? b'z' or c >=? b'A' and c <=? b'Z' or c >=? b'0' and c <=? b'9' or c =? b'_' or c =? b'/' or c =? b'-' or c =? b'.' or c =? b'~'
+        if plain {out.push(c)}
+        else {
+            out.push(b'%')
+            out.push(digits[(c >> 4) as int64])
+            out.push(digits[(c & 15) as int64])
+        }
+    }
+    out as string ?? ""
+}
+
+# (an FNV-1a hash of a path, as 8 hexadecimal digits, the lowest first: the run cache names a
+# program's build by it)
+path_hash=(p:string):>string=>{
+    let h:int64=2166136261
+    loop c in (p as array<uint8>) {h=((h xor (c as int64)) * 16777619) & 0xFFFFFFFF}
+    let digits="0123456789abcdef" as array<uint8>
+    let out:array<uint8>=[]
+    let k:int64=0
+    loop k <? 8 {
+        out.push(digits[(h >> (k * 4)) & 15])
+        k+=1
+    }
+    out as string ?? ""
+}

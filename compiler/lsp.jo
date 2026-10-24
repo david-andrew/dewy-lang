@@ -6,6 +6,7 @@
 # definition, references, rename, signature help and inlay hints.
 
 use 'util.jo'
+use 'module_paths.dewy'
 use 'ast.jo'
 use 'types.jo'
 use 'check.jo'
@@ -330,42 +331,7 @@ root_lib = ""
 # (a program for checking library files alone: it uses nothing, and is not on disk)
 empty_main = "/.dewy-lsp-empty-main.jo"
 
-uri_to_path = (uri: str) -> str:
-    s = uri
-    if starts_with(s, "file://"):
-        s = s[7..]
-        # (file://server/share/x: the UNC path //server/share/x)
-        if len(s) > 0 and s[0] != '/': s = "//" + s
-    out: u8[]
-    i = 0
-    loop i < len(s):
-        c = s[i]
-        if c == '%' and i + 2 < len(s):
-            out.push(u8(json_hex(s[i + 1]) * 16 + json_hex(s[i + 2])))
-            i += 3
-            continue
-        out.push(c)
-        i += 1
-    p = str_from_bytes(out)
-    # (file:///c%3A/x: c:/x)
-    if len(p) >= 3 and p[0] == '/' and p[2] == ':': p = p[1..]
-    ide_norm(os_path(p))
-
-path_to_uri = (path: str) -> str:
-    hexd = "0123456789ABCDEF"
-    out: u8[]
-    loop b in "file:": out.push(b)
-    if not starts_with(path, "//"):
-        loop b in "//": out.push(b)
-        if not starts_with(path, "/"): out.push('/')
-    loop c in path:
-        if is_alnum(c) or c == '/' or c == '-' or c == '.' or c == '_' or c == '~':
-            out.push(c)
-        else:
-            out.push('%')
-            out.push(hexd[int(c) >> 4])
-            out.push(hexd[int(c) & 15])
-    str_from_bytes(out)
+uri_to_path = (uri: str) -> str: path_norm(os_path(str_from_bytes(uri_path_bytes(uri))))
 
 # the open document at a path, or -1 (by path: editors spell drive letters and colons
 # differently from path_to_uri)
@@ -631,7 +597,7 @@ take_lines = (r: mut Result, lines_: str[]):
         if f.len() >= 3:
             i = to_int(f[1]) ?? 0
             loop fmap.len() <= i: fmap.push(-1)
-            p = ide_norm(f[2])
+            p = path_norm(f[2])
             j = -1
             loop q in 0.. and pp in r.paths:
                 if pp == p: j = q
@@ -1037,14 +1003,14 @@ use_target = (d: int, off: int) -> str:
         e = find_byte(line, line[q], q + 1)
         if e < 0: return ""
         rel = line[q + 1..e)
-        if is_abs_path(rel): return ide_norm(rel)
-        return ide_norm("{dir}/{rel}")
+        if is_abs_path(rel): return path_norm(rel)
+        return path_norm("{dir}/{rel}")
     nm = trim(line[find_byte(line, ' ') + 1..])
     k = find(nm, " as ")
     if k >= 0: nm = nm[..k)
     rel = replace(nm, ".", "/")
-    loop cand in ["{dir}/{rel}.jo", "{root_lib}/{rel}.jo", "{root_lib}/std/{rel}.jo", "{root_lib}/game/{rel}.jo", "{root_lib}/core/{rel}.jo"]:
-        if file_exists(cand): return ide_norm(cand)
+    loop stem in module_search_stems(dir, root_lib, rel):
+        if file_exists(stem + ".jo"): return path_norm(stem + ".jo")
     ""
 
 struct Use:
@@ -1335,7 +1301,7 @@ import_paths = (d: int, off: int) -> str:
     dir = base
     if sl >= 0:
         if is_abs_path(typed[..sl + 1)): dir = typed[..sl + 1)
-        else: dir = ide_norm(base + "/" + typed[..sl + 1))
+        else: dir = path_norm(base + "/" + typed[..sl + 1))
     from = a + q + 2 + sl + 1
     text_ls = line_starts_of(text)
     rg = "\{\"start\":{jpos(lpos_of(text, text_ls, from))},\"end\":{jpos(lpos_of(text, text_ls, off))}\}"
@@ -2433,7 +2399,7 @@ sem_legend = (xs: str[]) -> str:
     "[{join(out, ",")}]"
 
 lsp_main = ():
-    root_lib = ide_norm(lib_dir)
+    root_lib = path_norm(lib_dir)
     ide_texts[empty_main] = ""
     a = args()
     if a.len() >= 3 and a[2] == "--child":
@@ -2441,8 +2407,8 @@ lsp_main = ():
         return
     if a.len() >= 4 and a[2] == "--dump":
         # (debugging: what a check of a file reports)
-        path = ide_norm(os_path(a[3]))
-        if not is_abs_path(path): path = ide_norm(os_path(cwd()) + "/" + path)
+        path = path_norm(os_path(a[3]))
+        if not is_abs_path(path): path = path_norm(os_path(cwd()) + "/" + path)
         main_path = path
         if starts_with(path, root_lib + "/"): main_path = empty_main
         sk: str[]

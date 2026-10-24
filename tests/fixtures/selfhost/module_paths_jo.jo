@@ -1,0 +1,36 @@
+# One driver over the compiler's module_paths.jo (the frozen twin) or, with this line naming
+# module_paths.dewy, over the leaf: `module_paths_jo file` reads the file's lines, each a path
+# as bytes (any, not only UTF-8), and prints the answers on it, a line each, after `=== path`.
+# The importer's directory is "D", the library's "L", the current one "/cwd", a package's "P".
+use '../../../compiler/module_paths.jo'
+
+yes = (x: bool) -> str:
+    if x: return "1"
+    "0"
+
+main = ():
+    text = read_file(args()[1]) ?? ""
+    loop p in split(text, "\n"):
+        print("=== {p}")
+        print(yes(is_abs_path(p)))
+        print(strip_ext(p))
+        print(os_path(p))
+        print(windows_path(p))
+        print(yes(path_normal(p)))
+        print(path_norm(p))
+        print(path_dir(p))
+        print(path_stem(p))
+        print(module_key(p, "/cwd"))
+        print(module_key(p, "cwd/./x/.."))
+        print(use_path(p, "D", "L"))
+        print(use_path(p, "", "L"))
+        named = package_name(p)
+        print(named)
+        if len(named) > 0: print(package_file(p, "P"))
+        print(join(module_candidates(p, true), "|"))
+        print(join(module_candidates(p, false), "|"))
+        print(join(module_search_stems("D", "L", p), "|"))
+        print(missing_module_hint(p))
+        print(str_from_bytes(uri_path_bytes(p)))
+        print(path_to_uri(p))
+        print(path_hash(p))

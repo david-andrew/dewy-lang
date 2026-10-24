@@ -13,6 +13,7 @@ use 'poly_closure.jo'
 # Nodes are rewritten in place (wrapping moves the old content to a fresh node).
 
 use 'util.jo'
+use 'module_paths.dewy'
 use 'lex.jo'
 use 'ast.jo'
 use 'types.jo'
@@ -6387,7 +6388,7 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
         rel = name_of(int(nodes[a].sval))
         path = rel
         if not is_abs_path(rel): path = "{files[pos_file(nodes[n].pos)].dir}/{rel}"
-        path = ide_norm(path)
+        path = path_norm(path)
         if not embedded_files.contains(path): embedded_files.push(path)
         d = read_file(path)
         if d == none:

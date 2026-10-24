@@ -12,6 +12,7 @@ use 'frontend.jo'
 # crashes, the session is as it was.
 
 use 'util.jo'
+use 'module_paths.dewy'
 use 'dewy_lex.dewy'
 use 'lex.jo'
 use 'ast.jo'
@@ -88,7 +89,7 @@ repl_start = () -> str:
         path = "{cache}/repl-{me}.exe"
     # read_source looks up virtual text by its normalized path. TMPDIR often
     # ends in a slash (including on macOS), so normalize the stored key too.
-    main_src = ide_norm("{cache}/<input>")
+    main_src = path_norm("{cache}/<input>")
     ide_texts[main_src] = src
     repl_image = true
     bss_reserve = REPL_DATA_RESERVE

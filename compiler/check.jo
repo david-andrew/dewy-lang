@@ -22,6 +22,7 @@ use 'watch.jo'
 # Semantic analysis: modules, scopes, declarations, function instances, statements.
 
 use 'util.jo'
+use 'module_paths.dewy'
 use 'pkg.jo'
 use 'lex.jo'
 use 'ast.jo'
@@ -814,9 +815,7 @@ __never_skip = (decl: int) -> bool:
 
 # ---------------- modules ----------------
 module_source = (stem: str, dewy: bool, exclude: str = "", watch_candidates: bool = false) -> str:
-    extensions = if dewy: [".dewy", ".jo"] else: [".jo", ".dewy"]
-    loop extension in extensions:
-        path = stem + extension
+    loop path in module_candidates(stem, dewy):
         if path == exclude: continue
         if file_exists(path): return path
         if watch_candidates: watch_missing_input(path)
@@ -824,8 +823,7 @@ module_source = (stem: str, dewy: bool, exclude: str = "", watch_candidates: boo
 
 # Normalize graph identity without changing source paths: library checks also
 # accept a relative lib_dir and compare it with the original source spelling.
-module_path_key = (path: str) -> str:
-    ide_norm(if is_abs_path(path): path else: "{os_path(cwd())}/{path}")
+module_path_key = (path: str) -> str: module_key(path, cwd())
 
 find_module = (path: str) -> int: module_by_path.get(module_path_key(path)) ?? -1
 
@@ -835,15 +833,10 @@ load_module = (path: str, is_prelude: bool, from: int) -> int:
     if ex >= 0: return ex
     src = read_source(path)
     if src == none: fatal(from, "cannot read '{path}'")
-    d = "."
-    slash = rfind(path, "/")
-    if slash >= 0: d = path[..slash)
+    d = path_dir(path)
     files.push(SrcFile(path, d, src!, ends_with(path, ".dewy")))
     fi = files.len() - 1
-    base = path
-    if slash >= 0: base = path[slash + 1..]
-    base = strip_ext(base)
-    m = Module(name = i32(intern(base)), file = i32(fi), dir = d, is_prelude = is_prelude)
+    m = Module(name = i32(intern(path_stem(path))), file = i32(fi), dir = d, is_prelude = is_prelude)
     modules.push(m)
     mi = modules.len() - 1
     module_by_path[key] = mi
@@ -1039,18 +1032,12 @@ register_decls = (m: int, decls: int[]):
             path = "{modules[m].dir}/{rel}.jo"
             if nodes[d].aux2 == 1:
                 # use 'file.jo': relative to the importing file
-                path = rel
-                bundled = starts_with(rel, "@lib/")
-                if bundled: path = "{lib_dir}/{rel[5..]}"
-                else:
-                    if not is_abs_path(rel): path = "{modules[m].dir}/{rel}"
-                    if len(modules[m].dir) == 0: path = rel
+                path = use_path(rel, modules[m].dir, lib_dir)
                 # ('package/file.jo': a file of a package)
-                sl = find(rel, "/")
-                if not bundled and not file_exists(path) and sl > 0:
-                    pn = rel[..sl)
+                pn = package_name(rel)
+                if not starts_with(rel, "@lib/") and not file_exists(path) and len(pn) > 0:
                     if let why = pkg_errs.get(pn): fatal(nodes[d].pos, why)
-                    if let pd = pkg_dirs.get(pn): path = "{pd}/{rel[sl + 1..]}"
+                    if let pd = pkg_dirs.get(pn): path = package_file(rel, pd)
                 if not file_exists(path):
                     watch_missing_input(path)
                     fatal(nodes[d].pos, "cannot find '{rel}' (looked for {path})")
@@ -1067,28 +1054,16 @@ register_decls = (m: int, decls: int[]):
                 # the bundled physics implementation).
                 current = files[int(modules[m].file)].path
                 dewy = files[int(modules[m].file)].is_dewy
-                path = module_source("{modules[m].dir}/{rel}", dewy, current, true)
+                stems = module_search_stems(modules[m].dir, lib_dir, rel)
+                path = module_source(stems[0], dewy, current, true)
                 # (a file beside it with a library module's name: that file, said once)
-                if len(path) > 0 and not pos_in_lib(nodes[d].pos) and len(module_source("{lib_dir}/{rel}", dewy)) > 0:
+                if len(path) > 0 and not pos_in_lib(nodes[d].pos) and len(module_source(stems[1], dewy)) > 0:
                     warn(nodes[d].pos, "this imports {path}, not the library's {rel} (a file beside this one has its name)")
-                if len(path) == 0: path = module_source("{lib_dir}/{rel}", dewy)
-                if len(path) == 0: path = module_source("{lib_dir}/std/{rel}", dewy)
-                if len(path) == 0: path = module_source("{lib_dir}/game/{rel}", dewy)
-                if len(path) == 0: path = module_source("{lib_dir}/core/{rel}", dewy)
-                if len(path) == 0:
-                    pym = ""
-                    if rel == "re": pym = ": regular expressions are there without an import, `regex(r\"\\d+\")`"
-                    else if rel == "sys": pym = ": `args()` is the command line, `exit(code)` ends the program"
-                    else if rel == "json": pym = ": `parse_json(s)` and `to_json(x)` are there without an import"
-                    else if rel == "os" or rel == "shutil" or rel == "pathlib" or rel == "glob": pym = ": files are there without an import: `read_file`, `list_dir`, `walk_dir`, `glob`, `make_dirs`, `rename_file`, `join_path`"
-                    else if rel == "time" or rel == "datetime": pym = ": `time()`, `unix_time()`, `now()` (a Date) and `sleep(s)` are there without an import"
-                    else if rel == "random" or rel == "math": pym = ": `random()`, `random_int(lo, hi)`, `sqrt`, `floor`, `PI` are there without an import"
-                    else if rel == "csv": pym = ": `csv_rows(text)` is there without an import"
-                    else if rel == "collections": pym = ": maps start missing keys at zero (`counts[w] += 1`); `sorted_by`, `unique`, `group_by`"
-                    else if rel == "subprocess": pym = ": `run_program(\"ls\", [\"-l\"])` (its exit code and output)"
-                    else if rel == "argparse": pym = ": a struct of the options (`verbose = false`, `out = \"a.txt\"`, `files: str[]`), then `opts = parse_args[Options](\"what it does\")`"
-                    else if rel == "hashlib": pym = ": `sha256(text_or_bytes)` is there without an import (as hex digits)"
-                    fatal(nodes[d].pos, "cannot find module '{rel}'{pym}")
+                searched = 1
+                loop len(path) == 0 and searched < stems.len():
+                    path = module_source(stems[searched], dewy)
+                    searched += 1
+                if len(path) == 0: fatal(nodes[d].pos, "cannot find module '{rel}'{missing_module_hint(rel)}")
             # (the library behind `bigint` is the compiler's: the type is built in)
             if path == lib_dir + "/bigint.dewy" and not starts_with(name_of(int(nodes[d].name)), "$") and files[int(modules[m].file)].is_dewy and not pos_in_lib(nodes[d].pos):
                 fatal(nodes[d].pos, "`bigint` is built in, so there is nothing to import: `let n:bigint = 2^100`, and `to_int(text)` reads decimal text (`none` when it is not a number)")
@@ -6462,7 +6437,7 @@ check_program = (main_path: str):
     if ts_dewy and file_mode_at >= 0 and not file_mode_seen: fatal(mkpos(int(modules[mainm].file), file_mode_at), "this line reads as `$build.mode = ...` but is not a statement at the top level")
     # The editor checks library documents with an empty main. Named libraries
     # are outside the prelude, so load the opened document explicitly as well.
-    if ide_on and starts_with(ide_doc, ide_norm(lib_dir) + "/") and find_module(ide_doc) < 0:
+    if ide_on and starts_with(ide_doc, path_norm(lib_dir) + "/") and find_module(ide_doc) < 0:
         load_module(ide_doc, false, -1)
     if stop_after == "lex" or stop_after == "parse": exit(0)
     modules[mainm].is_main = true

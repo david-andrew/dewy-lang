@@ -19,6 +19,7 @@ build:
     opt = release
 
 use 'util.jo'
+use 'module_paths.dewy'
 use 'lex.jo'
 use 'ast.jo'
 use 'parse.jo'
@@ -999,10 +1000,7 @@ main = ():
         if len(near) == 0: near = " (dewy-core help lists them; a program runs with dewy-core game.dewy)"
         eprint("dewy-core: unknown command '{a[first]}'{near}")
         exit(1)
-    base = path
-    s = rfind(base, "/")
-    if s >= 0: base = base[s + 1..]
-    base = strip_ext(base)
+    base = path_stem(path)
     if test_mode: base = base + ".test"
     # (one program per path: two main.jo in two directories, run at once, are two programs)
     full = path
@@ -1029,7 +1027,7 @@ run_stdin = ():
         buf.resize(n + r)
     text = str_from_bytes(buf)
     path = "<stdin>.dewy"
-    ide_texts[ide_norm(path)] = text
+    ide_texts[path_norm(path)] = text
     full = os_path(cwd()) + "/" + path
     build_and_exec(path, "stdin", full + "\n" + text, [path])
 
@@ -1160,15 +1158,6 @@ extern_lib_check = (fi: int):
     else if target_macos and find(lc, ".so") >= 0: other = "a macOS program loads .dylib libraries (/usr/lib/libSystem.B.dylib has the C library)"
     else if not target_macos and not target_windows and ends_with(lc, ".dylib"): other = "a Linux program loads .so libraries (libc.so.6 has the C library)"
     if len(other) > 0: warn(nodes[d].pos, "{jd(nodes[d].pos, "@lib(\"{cl}\")", "lib='{cl}'")} is another system's library: {other}; {jd(nodes[d].pos, "`when TARGET == \"windows\":` gives each system its own @lib", "`if $target.os =? \"windows\" \{...}` gives each system its own declaration")} (as it is, the program stops when it calls {name_of(int(nodes[d].name))})")
-
-# (an FNV-1a hash of a path, as 8 hex digits)
-path_hash = (p: str) -> str:
-    h = 2166136261
-    loop c in p: h = ((h xor int(c)) * 16777619) & 0xFFFFFFFF
-    d = "0123456789abcdef"
-    out = ""
-    loop k in [0..8): out = out + byte_str(int(d[(h >> (k * 4)) & 15]))
-    out
 
 # programs left in the run cache: those not run for a week go (and half-made ones of crashed
 # builds); past 500 MB, the oldest go until it is half that

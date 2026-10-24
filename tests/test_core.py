@@ -4706,7 +4706,7 @@ def lexer_span_helpers(compiler, out):
     return '\n'.join([
         "use 'dewy_tokens.dewy'\nuse 'dewy_lex.dewy'",
         lex[lex.index('lx_cls:'):lex.index('is_ident_start =')],
-        util[util.index('struct SrcFile:'):util.index("# a file's name")],
+        util[util.index('struct SrcFile:'):util.index('# position encoding')],
         'mkpos = (file: int, off: int) -> int: (file << 40) | off\n'
         'fatal = (pos: int, message: str): panic(message)\n'
         'err_notes: (int, str)[]',

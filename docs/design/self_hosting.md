@@ -283,6 +283,26 @@ scanners; lex.jo's copy of the block-comment scan is gone. It compiled as first 
 `end`, which is reserved. Panel: within +0.06% on every item (lex+parse +0.08%); lexing the
 repository's Dewy sources ten times takes 0.512 G against master's 0.525 G.
 
+`module_paths.dewy` (paths as the compiler keeps them: a path's normal form, directory, stem
+and extension, a Windows path's spelling; a module's identity; the file `use 'x'` or `p"x"`
+names, a package's file, the files a named import may be and the hint for a Python module's
+name; the language server's file URIs; the run cache's name hash) is the module loader's text,
+the front end's first stage. It reads no disk: the callers probe its candidates. The leaf is
+pure, so one Sloppy driver runs over the leaf or its twin, and the differential test gives both
+any bytes, malformed UTF-8 included. Fourteen modules call it (ide.jo's `ide_norm` is
+`path_norm`; util.jo's `strip_ext`, `os_path` and `is_abs_path` moved), and it imports
+`json_hex` from json_doc.dewy. It compiled as first written. Panel: every item -0.01% to
+-0.07%; 684 builds identical. 20 rounds over the repository's 14822 paths (each a module key,
+stem, directory and `use` path) take 2.545 G instructions against the twin's 2.845 G (release
+2.118 / 2.400 G). What it met:
+- A slice starting after a `/` panics where the next byte continues a character in malformed
+  text (see `manifest.dewy`); the differential test found it in `path_stem`. Splitting the path
+  instead cost hello +0.73% and lex+parse +0.70% (a module's name is its path's stem, for every
+  library file), so the name is split off only after a byte from 0x80.
+- The `$target.os =? 'windows'` arm is never checked in a Linux build, so a `+` joining text
+  there (an error in Dewy) surfaced only in a Windows build of the compiler. That arm's work is
+  `windows_path`, which the test runs on every system.
+
 The whole lexer was ported first (dn_lex's loop, keywords found by their bytes, names
 interned by the caller): lexing took +11% (+28 instructions a lexeme; synthetic-22k +0.74%,
 lex+parse +0.83%), so the loop stays in Sloppy. Its loop alone matched Sloppy's; the cost was

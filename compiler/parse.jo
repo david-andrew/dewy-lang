@@ -1,6 +1,7 @@
 # Parser: tokens -> AST (nodes in ast.jo).
 
 use 'util.jo'
+use 'module_paths.dewy'
 use 'lex.jo'
 use 'ast.jo'
 use 'literals.dewy'
@@ -2705,11 +2706,7 @@ parse_module_spec = (d: int):
         t = advance()
         path = decode_str(tok_src(t), p_toks[t].pos, false)
         nodes[d].sval = i32(intern(path))
-        base = path
-        sl = rfind(path, "/")
-        if sl >= 0: base = path[sl + 1..]
-        base = strip_ext(base)
-        nodes[d].name = i32(intern(base))
+        nodes[d].name = i32(intern(path_stem(path)))
         nodes[d].aux2 = 1
     else:
         nm = expect_ident("module name")

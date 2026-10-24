@@ -1,0 +1,131 @@
+# The frozen implementation-language twin of module_paths.dewy, for the compilers without the
+# Dewy frontend (tools/compiler/build.py). Change both, or neither.
+use 'json_doc.dewy'
+
+is_abs_path = (p: str) -> bool: starts_with(p, "/") or len(p) >= 3 and p[1] == ':' and p[2] == '/'
+
+strip_ext = (path: str) -> str:
+    dot = rfind(path, ".")
+    if dot <= rfind(path, "/") + 1: return path
+    path[..dot)
+
+os_path = (p: str) -> str:
+    when TARGET == "windows":
+        return windows_path(p)
+    else:
+        return p
+
+windows_path = (p: str) -> str:
+    q = replace(p, "\\", "/")
+    if len(q) >= 2 and q[1] == ':' and q[0] >= 'A' and q[0] <= 'Z': return lower(q[..1)) + q[1..]
+    q
+
+path_normal = (path: str) -> bool:
+    n = len(path)
+    if n == 0 or path[n - 1] == '/' or path[0] == '.': return false
+    loop i in [0..n - 1):
+        if path[i] == '/':
+            c = path[i + 1]
+            if c == '/': return false
+            if c == '.' and (i + 2 == n or path[i + 2] == '/' or path[i + 2] == '.' and (i + 3 == n or path[i + 3] == '/')): return false
+    true
+
+path_norm = (path: str) -> str:
+    if path_normal(path): return path
+    parts: str[]
+    loop p in split(path, "/"):
+        if len(p) == 0 or p == ".": continue
+        if p == "..":
+            if parts.len() > 0: parts.pop()
+            continue
+        parts.push(p)
+    out = join(parts, "/")
+    if starts_with(path, "//") and not starts_with(path, "///"): out = "//" + out
+    else if starts_with(path, "/"): out = "/" + out
+    out
+
+path_dir = (path: str) -> str:
+    slash = rfind(path, "/")
+    if slash < 0: return "."
+    path[..slash)
+
+path_stem = (path: str) -> str: strip_ext(path[rfind(path, "/") + 1..])
+
+module_key = (path: str, cwd: str) -> str:
+    if is_abs_path(path): return path_norm(path)
+    path_norm("{os_path(cwd)}/{path}")
+
+use_path = (rel: str, dir: str, lib_dir: str) -> str:
+    if starts_with(rel, "@lib/"): return "{lib_dir}/{rel[5..]}"
+    if len(dir) == 0 or is_abs_path(rel): return rel
+    "{dir}/{rel}"
+
+package_name = (rel: str) -> str:
+    slash = find(rel, "/")
+    if slash <= 0: return ""
+    rel[..slash)
+
+package_file = (rel: str, pd: str) -> str: "{pd}/{rel[len(package_name(rel)) + 1..]}"
+
+module_candidates = (stem: str, dewy: bool) -> str[]:
+    if dewy: return [stem + ".dewy", stem + ".jo"]
+    [stem + ".jo", stem + ".dewy"]
+
+module_search_stems = (dir: str, lib_dir: str, rel: str) -> str[]:
+    ["{dir}/{rel}", "{lib_dir}/{rel}", "{lib_dir}/std/{rel}", "{lib_dir}/game/{rel}", "{lib_dir}/core/{rel}"]
+
+missing_module_hint = (rel: str) -> str:
+    if rel == "re": return ": regular expressions are there without an import, `regex(r\"\\d+\")`"
+    if rel == "sys": return ": `args()` is the command line, `exit(code)` ends the program"
+    if rel == "json": return ": `parse_json(s)` and `to_json(x)` are there without an import"
+    if rel == "os" or rel == "shutil" or rel == "pathlib" or rel == "glob": return ": files are there without an import: `read_file`, `list_dir`, `walk_dir`, `glob`, `make_dirs`, `rename_file`, `join_path`"
+    if rel == "time" or rel == "datetime": return ": `time()`, `unix_time()`, `now()` (a Date) and `sleep(s)` are there without an import"
+    if rel == "random" or rel == "math": return ": `random()`, `random_int(lo, hi)`, `sqrt`, `floor`, `PI` are there without an import"
+    if rel == "csv": return ": `csv_rows(text)` is there without an import"
+    if rel == "collections": return ": maps start missing keys at zero (`counts[w] += 1`); `sorted_by`, `unique`, `group_by`"
+    if rel == "subprocess": return ": `run_program(\"ls\", [\"-l\"])` (its exit code and output)"
+    if rel == "argparse": return ": a struct of the options (`verbose = false`, `out = \"a.txt\"`, `files: str[]`), then `opts = parse_args[Options](\"what it does\")`"
+    if rel == "hashlib": return ": `sha256(text_or_bytes)` is there without an import (as hex digits)"
+    ""
+
+uri_path_bytes = (uri: str) -> u8[]:
+    s = uri
+    if starts_with(s, "file://"):
+        s = s[7..]
+        if len(s) > 0 and s[0] != '/': s = "//" + s
+    out: u8[]
+    i = 0
+    loop i < len(s):
+        c = s[i]
+        if c == '%' and i + 2 < len(s):
+            out.push(u8(json_hex(s[i + 1]) * 16 + json_hex(s[i + 2])))
+            i += 3
+            continue
+        out.push(c)
+        i += 1
+    if out.len() >= 3 and out[0] == '/' and out[2] == ':': return out[1..]
+    out
+
+path_to_uri = (path: str) -> str:
+    hexd = "0123456789ABCDEF"
+    out: u8[]
+    loop b in "file:": out.push(b)
+    if not starts_with(path, "//"):
+        loop b in "//": out.push(b)
+        if not starts_with(path, "/"): out.push('/')
+    loop c in path:
+        if is_alnum(c) or c == '/' or c == '-' or c == '.' or c == '_' or c == '~':
+            out.push(c)
+        else:
+            out.push('%')
+            out.push(hexd[int(c) >> 4])
+            out.push(hexd[int(c) & 15])
+    str_from_bytes(out)
+
+path_hash = (p: str) -> str:
+    h = 2166136261
+    loop c in p: h = ((h xor int(c)) * 16777619) & 0xFFFFFFFF
+    d = "0123456789abcdef"
+    out = ""
+    loop k in [0..8): out = out + byte_str(int(d[(h >> (k * 4)) & 15]))
+    out
