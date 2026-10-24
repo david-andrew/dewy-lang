@@ -3524,7 +3524,7 @@ compound_checked = (s: int, left: int, right: int, target: int) -> int:
     if literal: quantity_update_right = right
     result = prune(check_expr(n, 0))
     quantity_update_right = 0
-    if is_quantity(target) and quantity_point(target) and quantity_is_delta(result): fatal(nodes[s].pos, "this update leaves a difference, not a temperature point, so the point cannot hold it: subtract a difference (`5Δ{quantity_point_unit(target)}`), or keep the difference in a new binding")
+    if is_quantity(target) and quantity_point(target) and quantity_is_delta(result): fatal(nodes[s].pos, "this update leaves a difference, not a temperature point, so the point cannot hold it: subtract a difference (`5K`), or keep the difference in a new binding")
     t = prune(target)
     if decimal_target != 0 and decimal_float_write(result, t): return last_checked
     # Built-in compound arithmetic keeps the destination's fixed width,

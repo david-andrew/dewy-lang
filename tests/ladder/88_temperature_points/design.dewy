@@ -1,6 +1,6 @@
 # Tier 3 / 88_temperature_points / milestone 28
 # Acceptance: Temperature point-minus-point and point-plus-delta, exact C/F/K conversions and requested display units.
-from units import K, °C, °F, Δ°C
+from units import K, °C, °F
 main=():>void=>{
     let freezing=0°C
     let boiling=100°C
@@ -22,11 +22,11 @@ main=():>void=>{
         $runtime_assert f*°F =? p
         checksum+=p/K
     }
-    # A literal added to or taken from a point is a difference; a named one is marked.
+    # A literal added to or taken from a point is a difference.
     let start=20°C
     $runtime_assert start+20°C =? 40°C
     $runtime_assert start-20°C =? freezing
-    $runtime_assert "{20°C as °F} {start+(20Δ°C as °F)} {(start+20°C-start) as °F}" =? "68°F 40°C 36°F"
+    $runtime_assert "{20°C as °F} {start+(25°C-5°C)} {(start+20°C-start) as °F}" =? "68°F 40°C 36°F"
     let saved=freezing
     freezing=0K
     $runtime_assert saved/K =? 273.15
@@ -41,7 +41,7 @@ main=():>void=>{
     $runtime_assert saved+delta =? boiling
     let warm=start
     warm+=5°C
-    warm-=20Δ°C
+    warm-=20K
     $runtime_assert "{warm} {mean[start warm]} {start-40°C}" =? "5°C 25/2°C -20°C"
     printl("{delta/K} {checksum}")
 }

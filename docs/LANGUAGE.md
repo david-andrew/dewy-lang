@@ -1032,29 +1032,28 @@ Temperatures in `°C` and `°F` (from `units`, beside `K`) count from an offset
 zero:
 
 ```dewy
-from units import K, °C, °F, Δ°C
+from units import K, °C, °F
 let start=20°C
 let later=start+15°C       # 35°C: a literal added to a point is a difference
 let rise=later-start       # 15°C: point - point is a difference
-let step=20Δ°C             # a difference, named as one
-printl"{rise as °F} {later as °F} {step as °F} {mean[start later]} {start/°F}"  # 27°F 95°F 36°F 55/2°C 68
+printl"{rise as °F} {later as °F} {mean[start later]} {start/°F}"  # 27°F 95°F 55/2°C 68
 ```
 
 Whether a temperature is a point or a difference is part of its type. A
 temperature written in a unit is a point; subtracting two points gives a
-difference, and a difference written by itself says so with `Δ` (`20Δ°C`,
-`Δ°F`). A literal written as an operand next to a point is a difference:
+difference (`let step = 25°C - 5°C`), and plain kelvin stands for one (`20K`).
+A named difference has no dedicated spelling. A literal written as an operand next to a point is a difference:
 `start + 20°C`, `t += 5°C`, and `start - 5°C` is `15°C`. A point moves by a
 difference, and differences add, subtract and scale. Adding two points
 (`t1 + t2`), comparing a point with a difference (`rise >? 5°C`; write
-`5Δ°C`) and scaling a point (`start*2`, `-start`) are errors with fix-its; for
+`5K`) and scaling a point (`start*2`, `-start`) are errors with fix-its; for
 an average write `mean[t1 t2]`, which is a point (`mean` takes quantities too,
 exactly for exact ones, and `mean[a b]` calls it with the array, as a string
 literal after a function does). A number
 times the unit is a point (`c*°C`), and in a compound unit the unit counts one
 degree (`4J/(g*°C)`). Dividing by a temperature unit gives the reading in that
 unit (`t/°C`, `t/K`). `as` converts each as what it is: `(20°C as °F)` is
-`68°F` and `(20Δ°C as °F)` is `36°F`. A difference prints in the first point's
+`68°F` and `((25°C-5°C) as °F)` is `36°F`. A difference prints in the first point's
 unit. Plain kelvins (`300K`) have no offset and can stand for either; a plain
 `float64 * Temperature` annotation holds kelvins and drops the offset scale.
 Calendar durations remain open. `sleep` takes a time, `sleep(300ms)`, and waits whole nanoseconds;

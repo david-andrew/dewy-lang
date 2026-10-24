@@ -308,9 +308,10 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
     written directly as an operand next to a point is a difference
     (`t + 20°C`). Adding two temperature values, comparing a point with a
     difference, and scaling a point are compile errors with fix-its (for
-    averages: `mean[t1 t2]`). A named difference is marked once: `20Δ°C`. Point
-    versus difference lives in the type, so `as °F` converts each correctly (a
-    20° difference is 36°F).
+    averages: `mean[t1 t2]`). Point versus difference lives in the type, so
+    `as °F` converts each correctly (a 20° difference is 36°F). Named
+    differences have no dedicated spelling (no `Δ`): a difference is a
+    subtraction of two points (`25°C - 5°C`) or plain kelvin (`5K`).
   - A splat import that shadows a prelude name warns, naming both sources; the
     warning goes away when the name is selected explicitly or the module is
     imported `as`. Splat imports stay.

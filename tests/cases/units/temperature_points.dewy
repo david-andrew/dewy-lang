@@ -1,7 +1,7 @@
 # quick
 # Offset temperatures: a literal added to or taken from a point is a difference;
-# point - point is a difference; a named difference is marked once (20Δ°C).
-from units import K, °C, °F, Δ°C, Δ°F
+# point - point is a difference; a named difference is a subtraction of two points.
+from units import K, °C, °F
 main=()=>{
     let start=20°C
     let later=start+15°C
@@ -9,22 +9,23 @@ main=()=>{
     printl"{start} {later} {rise} {rise as °F} {start-5°C} {later as °F} {later as K}"
     # point versus difference is in the type: `as` converts each as what it is
     let converted=20°C as °F
-    let step=20Δ°C
-    printl"{converted} {step} {step as °F} {start+step} {start+(20Δ°C as °F)} {(converted-start) as °F} {9Δ°F as °C}"
+    let step=25°C-5°C
+    printl"{converted} {step} {step as °F} {start+step} {start+(step as °F)} {(converted-start) as °F} {(50°F-41°F) as °C}"
     printl"{start/°C} {start/°F} {start/K} {68°F =? start} {mean[start later]} {-5°C} {start + -5°C}"
     # a difference added to a point, scaled, and compound updates
-    printl"{rise+start} {rise*2} {rise/2} {-rise} {rise >? 5Δ°C} {rise/Δ°C}"
+    printl"{rise+start} {rise*2} {rise/2} {-rise} {rise >? (25°C-20°C)} {rise/K}"
     let t=start
     t+=10°C
     t-=rise
     t+=step
     let r=rise
-    r+=5Δ°C
+    r+=25°C-20°C
     r-=later-start
     printl"{t} {t+rise} {r}"
     # a number times the unit is a point; the unit divides out of a product
     let c=3
-    printl"{c*°C} {c*Δ°C} {(c*Δ°C)/K}"
+    let zero=0°C
+    printl"{c*°C} {c*°C-zero} {(c*°C-zero)/K}"
     # elementwise: a literal next to each point is a difference too
     let ts=[start later]
     printl"{ts .+ 5°C} {ts .- start} {mean(ts)}"

@@ -249,7 +249,7 @@ quantity_coerce = (n: int, target: int) -> int:
         point = if quantity_point(target): target else: source
         unit = quantity_point_unit(point)
         if quantity_point(target): fatal(nodes[n].pos, "a temperature difference cannot stand for a point: add it to one (`ref + d`), or keep it as a difference")
-        fatal(nodes[n].pos, "a temperature point cannot stand for a difference: write a difference as one (`5Δ{unit}`), or subtract two points")
+        fatal(nodes[n].pos, "a temperature point cannot stand for a difference: subtract two points (`let rise = 25{unit} - 5{unit}`), or use kelvin (`5K`)")
     constant = quantity_constant_scale(n)
     if constant >= 0 and (is_numeric(quantity_base(target)) or bundled_rational_type(quantity_base(target))):
         scale = quantity_scales[constant]
@@ -469,7 +469,7 @@ quantity_update_check = (pos: int, minus: bool, place: int, right: int, target: 
     if not minus: quantity_points_added(pos, place, right, target)
     p = quantity_operand_text(place, "t")
     r = quantity_operand_text(right, "ref")
-    fatal(pos, "`{p} - {r}` is a difference, not a temperature point, so `{p}` cannot hold it: write `let rise = {p} - {r}`, or subtract a difference (`5Δ{quantity_point_unit(target)}`)")
+    fatal(pos, "`{p} - {r}` is a difference, not a temperature point, so `{p}` cannot hold it: write `let rise = {p} - {r}`, or subtract a difference (`5K`)")
 
 bundled_word_rational_type = (t0: int) -> bool:
     t = prune(t0)
@@ -795,11 +795,11 @@ quantity_points_added = (pos: int, a: int, b: int, t: int):
     x = quantity_operand_text(a, "t1")
     y = quantity_operand_text(b, "t2")
     unit = quantity_point_unit(t)
-    fatal(pos, "cannot add two temperatures: both are points on the {unit} scale, and their sum depends on where its zero sits (20{unit} + 20{unit} is not 40{unit}). For an average write `mean[{x} {y}]`; to add a difference, write it as one (`5Δ{unit}`) or subtract two points (`{x} + ({y} - ref)`)")
+    fatal(pos, "cannot add two temperatures: both are points on the {unit} scale, and their sum depends on where its zero sits (20{unit} + 20{unit} is not 40{unit}). For an average write `mean[{x} {y}]`; to add a difference, subtract two points (`{x} + ({y} - ref)`) or use kelvin (`5K`)")
 
 quantity_difference_point = (pos: int, point: int, t: int, what: str):
     unit = quantity_point_unit(t)
-    fatal(pos, "cannot {what}: one side is a temperature point (a reading on the {unit} scale) and the other a difference between two. Write a difference as one: `5Δ{unit}` (a literal added to or taken from a point is read as one, `t + 5{unit}`), or subtract two points")
+    fatal(pos, "cannot {what}: one side is a temperature point (a reading on the {unit} scale) and the other a difference between two. Write the difference as a subtraction of two points (`let rise = 25{unit} - 5{unit}`) or in kelvin (`5K`); a literal added to or taken from a point is read as a difference (`t + 5{unit}`)")
 
 quantity_point_scaled = (pos: int, point: int, t: int):
     p = quantity_operand_text(point, "t")
