@@ -904,7 +904,7 @@ fn_without_defaults = (t: int) -> int:
     if types[t].kind != .fn_ or types[t].bits == 0: return t
     ps: int[]
     loop i in [0..int(types[t].nargs)): ps.push(targ(t, i))
-    mk_fn(ps, int(types[t].elem), int(types[t].mutmask), int(types[t].st))
+    mk_fn(ps, int(types[t].elem), int(types[t].mutmask), int(types[t].st), 0, types[t].sign)
 
 # ---------------- places ----------------
 cp_inner = 0           # > 0 while checking the base of an element or field being written
@@ -1488,7 +1488,7 @@ subst_partial = (pat0: int, binds: mut int[]) -> int:
         a: int[]
         loop i in [0..int(types[pat].nargs)): a.push(subst_partial(targ(pat, i), binds))
         if k == .tuple: return mk_tuple(a)
-        return mk_fn(a, subst_partial(int(types[pat].elem), binds), int(types[pat].mutmask), int(types[pat].st))
+        return mk_fn(a, subst_partial(int(types[pat].elem), binds), int(types[pat].mutmask), int(types[pat].st), 0, types[pat].sign)
     if k == .struct_ or k == .enum_:
         si = int(types[pat].st)
         a: int[]
@@ -8201,7 +8201,12 @@ check_lambda = (lam: int, expected: int) -> int:
     fns[f].ptypes = pts
     ret_hint = 0
     if et != 0: ret_hint = int(types[et].elem)
+    # (checked as `<():>(int64 int64)>`: its body gives several values of that type)
+    if et != 0 and fn_type_pack(et) and nodes[lam].a == 0: sink_lambda_pack = int(types[prune(ret_hint)].elem)
     check_lambda_body(f, lam, ret_hint)
+    # (a parallel or spawn body the compiler made keeps its values as the array it collects)
+    lang_body = has_flag(lam, NF_LANG_BODY)
+    if et != 0 and not lang_body and fn_type_pack(et) != (fns[f].pack != 0): fatal(nodes[lam].pos, if fns[f].pack != 0: "this function gives several values, and {dt(et)} gives one" else: "this function gives one value, and {dt(et)} gives several: express each one in its body, `() => \{ 1 2 }`")
     zp: int[]
     loop t in fns[f].ptypes: zp.push(zonk(t))
     fns[f].ptypes = zp
@@ -8209,7 +8214,8 @@ check_lambda = (lam: int, expected: int) -> int:
     zonk_tree(int(fns[f].body))
     loop l in fns[f].locals: locals[l].type = i32(zonk(int(locals[l].type)))
     nodes[lam].sym = i32(f)
-    t = mk_fn(zp, int(fns[f].ret), mm, if et != 0: int(types[et].st) else: decl_fn_labels(lam))
+    labels = if et != 0: int(types[et].st) else: decl_fn_labels(lam)
+    t = mk_fn(zp, int(fns[f].ret), mm, labels, 0, fns[f].pack != 0 and not lang_body)
     if nodes[lam].sval != 0:
         t = mk_callable_contract(t, effect_decl_contract(lam, zp))
     nodes[lam].type = i32(t)
@@ -8401,7 +8407,10 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
     keeps = 0
     if et == 0 and closure == 0 and fn_has_defaults(d): keeps = f
     labels = if et != 0 and types[et].kind == .fn_: int(types[et].st) else: decl_fn_labels(d)
-    t = mk_fn(fns[f].ptypes, int(fns[f].ret), mm, labels, keeps)
+    if et != 0 and types[et].kind == .fn_ and fn_type_pack(et) != (fns[f].pack != 0):
+        fname = name_of(int(nodes[n].name))
+        fatal(nodes[n].pos, if fns[f].pack != 0: "'{fname}' gives several values, and {dt(et)} gives one" else: "'{fname}' gives one value, and {dt(et)} gives several")
+    t = mk_fn(fns[f].ptypes, int(fns[f].ret), mm, labels, keeps, fns[f].pack != 0)
     if et != 0 and types[et].kind == .cfn:
         if not fns[f].cabi: fatal(nodes[n].pos, "'{name_of(int(nodes[n].name))}' must be marked {jd(nodes[n].pos, "@cabi", "`$export`")} to be used as a C function pointer")
         t = mk_cfn(fns[f].ptypes, int(fns[f].ret))
@@ -8924,6 +8933,7 @@ check_call_expr = (n: int, expected: int) -> int:
         parallel_prepare(n)
     if nodes[n].aux == 0 and nodes[n].sym > 0 and nkids(n) >= 1 and dewy_at(nodes[n].pos): map_float_key(n)
     if nodes[n].aux == 0 and nodes[n].sym > 0 and fns[int(nodes[n].sym)].pack != 0: sink_pack_call(n)
+    else if nodes[n].aux == 1 and nodes[n].kind == .call and fn_type_pack(callable_base(prune(ntype(int(nodes[n].a))))): sink_pack_call(n)
     ce_finish(n, t, expected)
 
 check_str_expr = (n: int, expected: int) -> int:
@@ -11207,6 +11217,8 @@ callable_fits = (from0: int, to0: int) -> bool:
     from = callable_base(from0)
     to = callable_base(to0)
     if types[from].kind != .fn_ or types[to].kind != .fn_: return false
+    # (one value and several are different results: `<():>array<int64>>` is not `<():>(int64 int64)>`)
+    if types[from].sign != types[to].sign: return false
     if types[from].mutmask != types[to].mutmask or types[from].nargs != types[to].nargs: return false
     if types[to].bits != 0 and types[from].bits != types[to].bits: return false
     loop i in [0..int(types[from].nargs)):

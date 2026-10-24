@@ -266,6 +266,9 @@ every iteration. A place for one value (a binding, an operand, an argument, a
 result written `:>T`) takes a block's last expression, and an earlier value
 there is an error. A function without a written result may express several
 values: `pair = () => { 1 2 }` makes `[pair()]` `[1 2]`, while `x = pair()` is an error.
+`:>(int64 int64)` writes such a result: parentheses group the values, and the
+body must express exactly that many, in its own block. `@pair` keeps it in its
+type, `<():>(int64 int64)>`, so a call through it gives several values too.
 Module code drops what it expresses. A body written `:>void` expresses nothing:
 a value there (`xs.pop()` as a statement) is an error, so attach `;` to discard
 it, `xs.pop();`, or change the result type. A result that is `void | E` expresses

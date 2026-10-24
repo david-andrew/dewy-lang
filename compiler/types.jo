@@ -240,7 +240,9 @@ decl_fn_labels = (decl: int) -> int:
 # defaults: the function instance whose parameter defaults a call through the
 # value fills in (`g = @f` keeps f's defaults); 0 when none travel with it.
 # Kept in bits: part of the type's identity, ignored by the calling convention.
-mk_fn = (params: int[], ret: int, mutmask: int, labels: int = 0, defaults: int = 0) -> int: mk_type(TypeInfo(kind = .fn_, elem = i32(ret), mutmask = i32(mutmask), st = i32(labels), bits = i32(defaults)), params)
+# (`pack`: the function gives several values, `:>(int64 int64)`, returned as an array of them)
+mk_fn = (params: int[], ret: int, mutmask: int, labels: int = 0, defaults: int = 0, pack: bool = false) -> int: mk_type(TypeInfo(kind = .fn_, elem = i32(ret), mutmask = i32(mutmask), st = i32(labels), bits = i32(defaults), sign = pack), params)
+fn_type_pack = (t: int) -> bool: types[t].kind == .fn_ and types[t].sign
 mk_cfn = (params: int[], ret: int) -> int: mk_type(TypeInfo(kind = .cfn, elem = i32(ret)), params)
 mk_tuple = (elems: int[]) -> int: mk_type(TypeInfo(kind = .tuple), elems)
 var_counter = 0
@@ -923,7 +925,9 @@ type_str_in = (t0: int, dewy: bool) -> str:
                     s += label + ":"
                 s += type_str(targ(t, i), dewy)
             s += ")"
-            if dewy: s += ":>" + type_str(int(ti.elem), dewy) + ">"
+            # (several values, `:>(int64 int64)`: their one type, and how many is not part of it)
+            if dewy and ti.kind == .fn_ and ti.sign: s += ":>(" + type_str(int(types[prune(int(ti.elem))].elem), dewy) + " ...)>"
+            else if dewy: s += ":>" + type_str(int(ti.elem), dewy) + ">"
             else if tkind(int(ti.elem)) != .void_: s += " -> " + type_str(int(ti.elem), dewy)
             else if ti.kind == .fn_: s += " -> void"
             s

@@ -137,11 +137,19 @@ target takes one value apart, and `pair()` is not one value.
 *Flagged: allowing it is a possible extension. It's reversible.*
 
 Its type: the function's result is its element type, expressed a number of times
-that may vary. Today it has no spelling, so such a function can't carry a written
-contract. Diagnostics describe it as "gives several values".
-*Provisional, needs David: a contract spelling for "several T". The recommended
-form reuses loop capture's vocabulary rather than adding a keyword. Until then,
-leave the contract off. It unblocks annotated generators. It's reversible.*
+that may vary. Diagnostics describe it as "gives several values".
+
+**A written contract for several values** (decided 2026-10-23): `:>(int64 int64)`;
+parentheses group several result values. The body must express exactly that
+many, each of the written type, as statements of its own block: a value in a
+loop or a branch, or from a call whose count is not written, has no fixed count
+and is an error, as are more or fewer values. A call of such a function behaves
+like a call of an inferred one (collected, `[pair()]`, or an error in a
+one-value place). The values share one type for now; `(int64 string)` is an
+error. A grouped result exists only as a function's result: `let x:(int64 int64)`
+is not a type.
+*Flagged: one type per group and the static count are conservative choices;
+both are reversible.*
 
 `return value` gives back that one value and ends the function. A function that
 expresses values before its end and also uses `return value` is an error for
@@ -149,11 +157,13 @@ now, because the stream semantics of `return` after earlier values need a
 decision. *Flagged: the natural extension is "earlier values, then the returned
 one". Today it's rejected, which is the conservative choice.*
 
-A function value (`@pair`) of a function expressing several values is not
-checked yet. The compiler tracks the count on direct calls only, and a call
-through such a value currently sees the collected array as one value. This is
-a known gap: the fix is to reject `@pair` until function types can say
-"several values".
+A function value (`@pair`) of a function expressing several values carries it in
+its type, written `<():>(int64 int64)>`: a call through it gives several values,
+under the same rules as a direct call. A function giving one value does not fit
+a type giving several, nor the reverse. A lambda checked against such a type
+expresses its values as an inferred body does. The count is not part of a
+function type (`<():>(int64 ...)>` in diagnostics), so a body written to give a
+fixed number of values cannot count a call through a value.
 
 ## `if` and `match` arms
 
@@ -201,7 +211,8 @@ collector's array, as loop capture always has.
   exactly as before. Single-value code pays nothing per node: the sink
   bookkeeping runs per block and per expressed value.
 - A multi-valued function returns its accumulator array. Its `FnInst.pack` marks
-  it, and only a consumer that asked for several values (array element, spread,
+  it (a written `:>(T T)` also sets `pack_n`, the count its BODY sink checks; a
+  function type marks it with its `sign` field), and only a consumer that asked for several values (array element, spread,
   statement, final value of a collecting body) accepts the call. Any other use is
   the one-value error.
 - `[1 2 ; 3 4]` row breaks are standalone `;` tokens. An attached `;` is

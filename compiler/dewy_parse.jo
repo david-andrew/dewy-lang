@@ -1280,7 +1280,9 @@ dw_type = (id: int) -> int:
         set_list(n, types_)
         set_list2(n, labels)
         result = dw_effect_suffix(n, dw_child(id, 2))
-        if dw_name(result) != "void": nodes[n].a = i32(dw_type(result))
+        if dw_name(result) != "void":
+            pack = dw_pack_type(dw_unwrap(result))
+            nodes[n].a = i32(if pack != 0: pack else: dw_type(result))
         return n
     if dw_op(id) == .dot:
         owner = dw_name(dw_child(id, 1))
@@ -3656,8 +3658,22 @@ ownership_tag = (row: int) -> int:
     0
 
 # Facts qualify a result arm; they do not change its runtime representation.
+# `:>(int64 int64)`: parentheses group several result values. A pack result is an array
+# type node marked with ival = -(the number of values); its list holds each value's type.
+dw_pack_type = (id: int) -> int:
+    if not (dewy_syntax[id].kind == .block and dewy_syntax[id].text == "():" and dw_nchildren(id) >= 2): return 0
+    members: int[]
+    loop child in dw_children(id): members.push(dw_type(child))
+    n = mk(.tarray, dewy_syntax[id].pos)
+    nodes[n].a = i32(members[0])
+    nodes[n].ival = -members.len()
+    set_list(n, members)
+    n
+
 dw_result_type = (owner: int, id0: int) -> int:
     id = dw_unwrap(id0)
+    pack = dw_pack_type(id)
+    if pack != 0: return pack
     literal = dw_literal_type(id)
     if literal != 0: return literal
     if dw_op(id) == .pipe:

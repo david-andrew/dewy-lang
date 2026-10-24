@@ -1,0 +1,25 @@
+# quick
+# `:>(int64 int64)`: parentheses group several result values. The body expresses
+# exactly that many; function values and types carry it.
+pair=():>(int64 int64)=>{1 2}
+triple=():>(int64 int64 int64)=>{
+    pair()
+    9
+}
+twice=<T>(x:T):>(T T)=>{x x}
+gather=(f:<():>(int64 int64)>)=>[f() 0]
+inferred=()=>{3 4}
+main=()=>{
+    printl([pair()])
+    printl([pair() 3])
+    printl([triple()])
+    printl([twice("a")])
+    let g=@pair
+    printl([g()])
+    printl(gather(@pair))
+    printl(gather(()=>{5 6}))
+    let local=():>(int64 int64)=>{7 8}
+    printl([local()])
+    let h=@inferred
+    printl([h()])
+}
