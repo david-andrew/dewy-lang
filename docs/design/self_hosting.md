@@ -130,8 +130,6 @@ settings, globals that Sloppy code sets. Its gaps:
 - The facts do not know that the byte after an ASCII byte starts a character, so after a
   guard `b[i] =? b'-'`, `name.byte_slice(0 i)` is proven but `name.byte_slice(i + 1 n)` is
   a run-time check. Its diagnostic prints that end as an empty `` `` ``.
-- A bare zero-argument function name calls before `.length`, `.join` and `[i]`, but not
-  before a member call with arguments: `target_names.join(", ")` is "has no member 'join'".
 
 `json_doc.dewy` (the language server's JSON: a message read into a tree of nodes, its
 values read back, text quoted and values written again) also reads `dewy-core test DIR`'s

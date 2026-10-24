@@ -1,0 +1,18 @@
+# modes: native
+# quick
+# An error in a function whose result is inferred is reported where it is; the
+# uses of its missing result at the call are not reported as errors of their own.
+add = (x:int64 y:int64):>int64 => x + y
+mk = (@n:int64) => {
+    n.foo()
+    @add
+}
+main = () => {
+    let v:int64 = 1
+    let f = mk(@v)
+    printl(f(1 2))
+    printl(mk(@v)(3 4))
+}
+later = () => {
+    let w:int64 = "text"
+}

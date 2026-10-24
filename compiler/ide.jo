@@ -39,6 +39,7 @@ ide_doc = ""                    # the edited file: indexed even when it is part 
 ide_wide = false                # index all the program's files (not just ide_doc)
 ide_sentinel = 0                # the name standing for the one being completed (0: none)
 ide_skip: {int: bool} = {}      # functions (declaration positions) whose bodies are not checked
+ide_skipped_never = false       # a body left out gave its inferred result `never` (ide_skip)
 ide_force = -1                  # a library file whose functions are all checked (being edited)
 ide_files: int[]                # per file: 0 unknown, 1 indexed, 2 not
 ide_texts: {str: str} = {}      # the editor's text of files (by path), newer than the files'
@@ -928,6 +929,16 @@ next_error_run = ():
         if a.len() > 2 and a[1] == "--skip-fns": k = 3
         loop i in [k..a.len()): argv.push(a[i])
         exec(exe_path(), argv)
+
+# (a value of type t used where `never` does not fit: when the never is the inferred result of a
+# body left out after an earlier error, the error would only follow from that one, so the
+# function using it is left out too, unreported. The language server drops it as following.)
+never_cascade = (p: int, t: int):
+    if t != T_NEVER or not ide_skipped_never: return
+    if ide_on: ide_fatal(p, "this follows from an earlier error: the value never exists")
+    if quiet_errors: stop(1)
+    if more_errors: next_error_run()
+    stop(1)
 
 # the outermost function being checked, if its body could be skipped (a function whose result
 # type is inferred then returns `never`, which fits anywhere a value is expected)

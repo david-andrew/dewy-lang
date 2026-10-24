@@ -1242,9 +1242,9 @@ def show(value, nested=False) -> str:
     if isinstance(value, list):
         return '[' + ' '.join(show(x, True) for x in value) + ']'
     if isinstance(value, Rec):
-        # Dewy's literal syntax: a minted type (only Bad) with its name, an alias's fields alone,
-        # in the type's order
-        names = list(value.fields)
+        # Dewy's literal syntax: a minted type (only Bad) with its name, an alias's fields alone;
+        # an anonymous record's fields in its canonical (name-sorted) order
+        names = list(value.fields) if value.name else sorted(value.fields)
         inner = ' '.join(f'{n}={show(value.fields[n], True)}' for n in names)
         return f'{value.name if value.name == "Bad" else ""}[{inner}]'
     if isinstance(value, dict):
@@ -2027,9 +2027,7 @@ class Generator:
         items = [(n, self.expr_array(t, d, nonempty=True) if t == AI else self.expr(t, d)) for n, t in ty.args]
         if ty.name and self.chance(.5):
             return RecLit(ty, tuple(items), positional=True)
-        # (an anonymous record prints in the order its shape was first written: keep the type's)
-        if ty.name:
-            self.r.shuffle(items)
+        self.r.shuffle(items)
         return RecLit(ty, tuple(items))
 
     def expr_dict(self, ty, depth):

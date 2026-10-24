@@ -2863,7 +2863,9 @@ value_call = (n: int, callee: int, args: int[], expected: int = 0) -> int:
         d = poly_families[int(types[ft].st)].decl
         return resolve_fn_call(n, intern("lambda"), [d], args, expected, callee)
     ft = callable_base(ft)
-    if types[ft].kind != .fn_ and types[ft].kind != .cfn: fatal(nodes[n].pos, "cannot call a value of type {dt(ft)}")
+    if types[ft].kind != .fn_ and types[ft].kind != .cfn:
+        never_cascade(nodes[n].pos, ft)
+        fatal(nodes[n].pos, "cannot call a value of type {dt(ft)}")
     na = int(types[ft].nargs)
     keeps = if types[ft].kind == .fn_: int(types[ft].bits) else: 0
     if args.len() != na and (keeps == 0 or args.len() > na): fatal(nodes[n].pos, "function value expects {na} argument(s), got {args.len()}")
@@ -2983,13 +2985,11 @@ struct_has_defaults = (si: int, depth: int) -> bool:
     has
 
 dewy_record_shapes: {str: int} = {}
-# an anonymous record shape's fields in the order first written ([y=2 x=1]: y, x), for printing:
-# the shape itself is kept by name
-dewy_record_order: {int: int[]} = {}
 
-# the order a struct's fields print in: as written for an anonymous record, else as declared
+# the order a struct's fields print in: as declared. An anonymous record's shape is shared by
+# every site writing those fields, so it prints in its one canonical (name-sorted) order: no
+# site's written order, which would make the output depend on unrelated code.
 fmt_field_order = (si: int) -> int[]:
-    if let order = dewy_record_order.get(int(structs[si].decl)): return order
     order: int[]
     loop i in [0..int(structs[si].nfields)): order.push(i)
     order
@@ -3214,11 +3214,6 @@ dewy_record_schema = (n: int, args: int[]) -> int:
         set_list(decl, members)
         set_list2(decl, params)
         dewy_record_shapes[key] = decl
-        written: int[]
-        loop field in args:
-            loop i in 0.. and other in ordered:
-                if other == field: written.push(i)
-        dewy_record_order[decl] = written
     t = get_struct_inst(decl, targs)
     check_struct_fields(int(types[t].st))
     t
@@ -4234,6 +4229,7 @@ call_by_name = (n: int, name: int, mod_scope: int, args: int[], expected: int, u
                 si = int(types[t0].st)
                 loop i in [0..int(structs[si].nfields)):
                     if int(fields[int(structs[si].fields) + i].name) == name: fatal(nodes[n].pos, "'{name_of(name)}' is a field, not a function: `x.{name_of(name)}`, without ()")
+            never_cascade(nodes[n].pos, t0)
             tsh = dt(ntype(args[0]))
             # (xs = [] with nothing in it yet: its type is not known, and its name for it means nothing)
             if has_var(prune(ntype(args[0]))):
@@ -9577,6 +9573,7 @@ check_field_expr = (n: int, expected: int) -> int:
                     et = pushed_type(gn)
                     if len(et) == 0: et = "Thing"
                     fatal(nodes[n].pos, "the type of what '{gn}' holds is not known here (it starts empty): write it where '{gn}' is made, as {jd(nodes[n].pos, "`{gn}: {et}[] = []`", "`let {gn}:array<{et}> = []`")}")
+            never_cascade(nodes[n].pos, bt)
             cands = fn_names_for(bt)
             if types[bt].kind == .struct_:
                 si = int(types[bt].st)

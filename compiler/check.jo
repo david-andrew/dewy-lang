@@ -4908,7 +4908,9 @@ check_vardecl = (s: int):
     if t == 0: fatal(nodes[s].pos, "variable needs a type or a value")
     if tk_unit != 0: t = temperature_binding(s, t, tk_unit, false)
     tk = tkind(t)
-    if tk == .void_: fatal(nodes[s].pos, "cannot assign a value with no type (void) to '{nm}'{void_rec_hint(int(nodes[s].b))}")
+    if tk == .void_:
+        never_cascade(nodes[s].pos, t)
+        fatal(nodes[s].pos, "cannot assign a value with no type (void) to '{nm}'{void_rec_hint(int(nodes[s].b))}")
     if tk == .null_: fatal(nodes[s].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(nodes[s].pos, "`{nm}: Enemy? = none`", "`let {nm}:Enemy? = none`")}")
     if tk == .typeval or tk == .module: fatal(nodes[s].pos, "'{nm}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
     l = new_local(int(nodes[s].name), t, nodes[s].pos)
@@ -5281,7 +5283,9 @@ check_body_now = (f: int):
             locals[l].flags = i32(fl)
             fns[f].params.push(l)
     if decl != 0 and (has_flag(decl, NF_EXTERN) or ide_skip.len() > 0 and ide_skip.get(nodes[decl].pos) != none):
-        if fns[f].ret == 0: fns[f].ret = i32(T_NEVER)
+        if fns[f].ret == 0:
+            fns[f].ret = i32(T_NEVER)
+            if not has_flag(decl, NF_EXTERN): ide_skipped_never = true
         fns[f].state = 2
         scope_reset(mark)
         ctxs.pop()

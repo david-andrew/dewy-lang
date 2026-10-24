@@ -1548,7 +1548,8 @@ out a required field is an error naming the field. When every field has a defaul
 bare name where a value goes constructs it, as `Origin()` would: `let p = Origin`.
 The name stays the type in `Origin[...]`, `Origin.member` and `is? Origin`.
 Without an expected type, named fields infer an anonymous record. Anonymous record types agree by field names and types, even
-when written in a different order. One converts to a shape whose integer fields
+when written in a different order, so one prints, like its JSON, with its fields in name
+order wherever it was written: `printl([y=2 x=1])` prints `[x=1 y=2]`. One converts to a shape whose integer fields
 differ only in width (`[x:int]` where `[x:int64]` is wanted), each such field the
 proven narrowing a scalar `int` gets, or are floats (`[x:float64]`), each converted
 as a scalar integer is. Their shape can also be written directly in
