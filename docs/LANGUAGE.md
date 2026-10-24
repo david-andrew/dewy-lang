@@ -1308,8 +1308,10 @@ truncates toward zero. Exact numbers round as people do, a half away from zero:
 `f:float64 = 2.5`. Both take `ties=` to choose the rule: `'away'`, `'even'`,
 `'zero'` (toward zero), `'up'` (toward +∞) or `'down'` (toward −∞), as in
 `round(f ties='away')`. `.abs()`, `.reciprocal()` and `.pow(signed_exponent)` return
-fractions. Runtime division by zero, a zero denominator and negative powers of
-zero panic. Zero to the zeroth power is one. Copies are independent, and
+fractions. A nonzero divisor of `/`, `//` and `%` is an obligation, as an
+integer division's, when the divisor is an integer or a constant (`x/n` after
+`n not=? 0`, `x/0.5`); a rational divisor computed at run time, a zero
+denominator and negative powers of zero panic. Zero to the zeroth power is one. Copies are independent, and
 normalized values can be dictionary keys.
 
 `.to_float32()` and `.to_float64()` round the exact ratio once, to nearest with

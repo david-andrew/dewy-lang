@@ -156,6 +156,18 @@ word_rational_source = (n: int, from0: int) -> bool:
     if from == T_MATH_INT: return false
     int_widens(from, T_INT)
 
+# An exact division's only failure is a zero divisor: the caller's obligation,
+# as an integer division's (facts.jo fact_divisor), where the facts can carry
+# it: an integer divisor, or a rational one constructed in place (a constant).
+rational_divisor = (n: int):
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0 or files[pos_file(nodes[d].pos)].path != lib_dir + "/rational.dewy": return
+    e = kid(n, 1)
+    loop nodes[e].kind == .conv: e = int(nodes[e].a)
+    t = prune(ntype(e))
+    if is_int(t) or t == T_MATH_INT or rational_constants.has(e): fact_divisors[n] = 1
+
 # (node n, replaced by the bundled rational module's fname applied to its old content)
 rational_wrap = (n: int, fname: str, to: int) -> int:
     source = nodes.len()
@@ -602,6 +614,13 @@ coerce = (n: int, target: int) -> int:
         check_expr(n, to)
         return n
     if tk == .struct_ and is_int(from) and bundled_rational_type(to):
+        # (an integer constant is a rational constant: `x/2` divides by a known nonzero)
+        known, value = integer_constant(n)
+        if known and (value >= 0 or types[from].sign or from == T_MATH_INT):
+            nodes[n] = nodes[rational_constant(value, 1, nodes[n].pos)]
+            check_expr(n, to)
+            rational_constants[n] = rational_constant_parts(value, 1)
+            return n
         source = nodes.len()
         nodes.push(nodes[n])
         pos = nodes[n].pos
@@ -6739,6 +6758,7 @@ op_overload = (n: int, opname: str) -> int:
     nodes[n] = Node(kind = .call, pos = nodes[n].pos)
     set_list(n, args)
     result = resolve_fn_call(n, nm, decls, args, 0)
+    if b != 0 and (opname == "/" or opname == "//" or opname == "%") and fact_policy == .RequireStatic: rational_divisor(n)
     if opname in ["==", "!=", "<", "<=", ">", ">="] and prune(result) != T_BOOL:
         fatal(nodes[n].pos, "comparison operator {opname} must return bool, found {dt(result)}")
     result
