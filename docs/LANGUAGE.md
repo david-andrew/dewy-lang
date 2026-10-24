@@ -632,8 +632,10 @@ and `xs.last` take an array with `length >? 0`, and `xs.swap(i j)` and
 panic. `d[k]`, `d[k] += 1` and `d.pop(k)` need the key present, proven by a
 guard (`if k in? d`) or an earlier store into `d[k]` with no other change of
 `d` between; `d.get(k)` and `d.pop(k default=v)` take a missing key as a value.
-Other library failures (a bad format specification) still make the call
-panic. Running out of memory is not a panic. The editor's hover
+A literal can rule a failure out: a range without a step (or with a literal
+nonzero one), a power with a literal exponent `>=? 0` and a rational with a
+literal nonzero denominator cannot panic. Other library failures (a bad format
+specification) still make the call panic. Running out of memory is not a panic. The editor's hover
 shows `& panics` on a function that may panic, and `dewy check --obligations`
 lists each library call that may panic where runtime checks are allowed.
 
