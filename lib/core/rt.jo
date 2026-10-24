@@ -8,7 +8,7 @@ when TARGET == "wasm":
     extern __wasm_exit = (code: int)
     extern __wasm_now = () -> f64
     extern __wasm_env = (name: *u8, n: int, out: *u8, cap: int) -> int
-    # files: in a web page, the page's own files (sloppy.files); under node, the real ones
+    # files: in a web page, the page's own files (dewy.files); under node, the real ones
     extern __wasm_read_file = (path: *u8, n: int, out: *u8, cap: int) -> int
     extern __wasm_write_file = (path: *u8, n: int, p: *u8, len: int) -> int
     extern __wasm_list_dir = (path: *u8, n: int, out: *u8, cap: int) -> int
@@ -712,7 +712,7 @@ __panic = (msg: str):
         __backtrace()
         # (the interactive prompt: back to it, lib/std/repl.jo)
         __repl_unwind()
-    # (under sloppy watch, a game pauses instead: lib/std/watch.jo)
+    # (under dewy watch, a game pauses instead: lib/std/watch.jo)
     when WATCH:
         __watch_panic(msg)
     __exit(101)

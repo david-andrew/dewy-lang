@@ -94,7 +94,7 @@ def build_case_batch(compiler, directory, cases, body, release, target, *, argum
         scripts = Scripts()
         scripts.feed(binary.with_suffix('.html').read_text())
         runner = directory / 'batch.cjs'
-        prefix = 'const sloppyArgs = process.argv.slice(1);\n' if arguments else ''
+        prefix = 'const dewyArgs = process.argv.slice(1);\n' if arguments else ''
         runner.write_text(prefix + '\n'.join(scripts.parts))
         command = [node, runner]
     return command, None

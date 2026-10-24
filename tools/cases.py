@@ -220,7 +220,7 @@ class Runner:
         scripts = Scripts()
         scripts.feed(output.with_suffix('.html').read_text())
         runner = output.with_suffix('.cjs')
-        runner.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        runner.write_text('const dewyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
         return [self.node, str(runner)]
 
     def execute(self, command: list[str], args=(), stdin: bytes | None = None,

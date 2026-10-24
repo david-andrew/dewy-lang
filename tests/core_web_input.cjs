@@ -20,7 +20,7 @@ const doc = new Events();
 doc.body = new Events();
 doc.body.appendChild = () => {};
 doc.createElement = () => new Events();
-doc.getElementById = (id) => id === 'sloppy-canvas' ? canvas : new Events();
+doc.getElementById = (id) => id === 'dewy-canvas' ? canvas : new Events();
 doc.pointerLockElement = null;
 const win = new Events();
 Object.assign(win, {innerWidth: 1280, innerHeight: 800, devicePixelRatio: 1});
@@ -32,11 +32,11 @@ const ex = {__mouse(kind, a, b, button) {
   if (kind === 4) { dx += a; dy += b; }
   if (kind === 5) { dx = 0; dy = 0; }
 }};
-const sloppy = {extra: []};
+const dewy = {extra: []};
 const source = fs.readFileSync(path.resolve(__dirname, '../lib/web/gfx.js'), 'utf8');
-vm.runInNewContext(source, {sloppy, document: doc, window: win, TextDecoder, TextEncoder});
+vm.runInNewContext(source, {dewy, document: doc, window: win, TextDecoder, TextEncoder});
 const memory = {buffer: new ArrayBuffer(32)};
-sloppy.extra[0].imports(() => memory, () => ex).__web_canvas_open(0, 0, 1280, 720);
+dewy.extra[0].imports(() => memory, () => ex).__web_canvas_open(0, 0, 1280, 720);
 const move = (a, b, mx = 0, my = 0) => canvas.send('mousemove', {clientX: a, clientY: b, movementX: mx, movementY: my});
 move(640, 400);
 assert.deepEqual([dx, dy], [640, 400]);

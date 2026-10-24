@@ -71,7 +71,7 @@ main=(args:array<string>):>void=>{exit(probe(args.length-1))}
         scripts = Scripts()
         scripts.feed(binary.with_suffix('.html').read_text())
         runner = tmp_path / 'checked.cjs'
-        runner.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        runner.write_text('const dewyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
         command = [node, runner]
     for arguments, expected in [([], 84), (['one'], 92), (['one', 'two'], None)]:
         ran = subprocess.run([*command, *arguments], capture_output=True, text=True, timeout=10)

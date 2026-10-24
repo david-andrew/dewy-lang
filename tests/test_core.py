@@ -2134,7 +2134,7 @@ def test_core_applications(compiler, tmp_path, name, target, release):
         scripts = Scripts()
         scripts.feed(binary.with_suffix('.html').read_text())
         runner = tmp_path / f'{name}.cjs'
-        runner.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        runner.write_text('const dewyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
         command = [node, runner, '1000']
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
@@ -2549,7 +2549,7 @@ def test_core_rollback_model(compiler, tmp_path, target, release):
         scripts = Scripts()
         scripts.feed(binary.with_suffix('.html').read_text())
         runner = tmp_path / 'rollback.cjs'
-        runner.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        runner.write_text('const dewyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
         command = [node, runner]
     for scenario in ['direct', 'delayed']:
         ran = subprocess.run([*command, scenario], capture_output=True, text=True,
@@ -2634,7 +2634,7 @@ def test_core_netplay_restart(compiler, tmp_path, target, release):
         scripts = Scripts()
         scripts.feed(binary.with_suffix('.html').read_text())
         runner = tmp_path / 'restart.cjs'
-        runner.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        runner.write_text('const dewyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
         command = [node, runner]
     for scenario in ['clean', 'late']:
         ran = subprocess.run([*command, scenario], capture_output=True, text=True,
@@ -4869,7 +4869,7 @@ main = () -> int:
         scripts = Scripts()
         scripts.feed(binary.with_suffix('.html').read_text())
         script = tmp_path / 'checked-leaf.cjs'
-        script.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        script.write_text('const dewyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
         command = [runner, script]
     good = subprocess.run(command, capture_output=True, text=True, timeout=10)
     assert good.returncode == 42, good.stdout + good.stderr
@@ -4955,7 +4955,7 @@ main = () -> int:
         scripts = Scripts()
         scripts.feed(binary.with_suffix('.html').read_text())
         script = tmp_path / 'loop-endpoints.cjs'
-        script.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        script.write_text('const dewyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
         command = [runner, script]
     for case in ('negative-start', 'wrap', 'empty'):
         ran = subprocess.run([*command, case], capture_output=True, text=True, timeout=10)
@@ -5044,7 +5044,7 @@ main = () -> int:
         scripts = Scripts()
         scripts.feed(binary.with_suffix('.html').read_text())
         script = tmp_path / 'affine-checks.cjs'
-        script.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        script.write_text('const dewyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
         command = [runner, script]
     for case in ('negative-start', 'near-max', 'sum-wrap', 'unsigned-wrap', 'row', 'invariant', 'empty'):
         ran = subprocess.run([*command, case], capture_output=True, text=True, timeout=10)
@@ -5145,7 +5145,7 @@ main = () -> int:
         scripts = Scripts()
         scripts.feed(binary.with_suffix('.html').read_text())
         script = tmp_path / 'shifted-vectors.cjs'
-        script.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        script.write_text('const dewyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
         command = [runner, script]
     good = subprocess.run(command, capture_output=True, text=True, timeout=10)
     assert good.returncode == 42, good.stdout + good.stderr
@@ -5235,7 +5235,7 @@ main = () -> int:
         scripts = Scripts()
         scripts.feed(binary.with_suffix('.html').read_text())
         script = tmp_path / 'masked-bounds.cjs'
-        script.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        script.write_text('const dewyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
         command = [runner, script]
     good = subprocess.run(command, capture_output=True, text=True, timeout=10)
     assert good.returncode == 42, good.stdout + good.stderr
@@ -5416,7 +5416,7 @@ def test_core_integer_extension_boundaries(compiler, tmp_path, release, target):
         scripts = Scripts()
         scripts.feed(binary.with_suffix('.html').read_text())
         script = tmp_path / 'integer-extensions.cjs'
-        script.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        script.write_text('const dewyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
         command = [runner, script]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10)
     assert ran.returncode == 0, ran.stdout + ran.stderr
@@ -6260,7 +6260,7 @@ main = () -> int:
         scripts = Scripts()
         scripts.feed(binary.with_suffix('.html').read_text())
         runner = tmp_path / 'nonreturning.cjs'
-        runner.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+        runner.write_text('const dewyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
         command = [node, runner]
     ran = subprocess.run(command, capture_output=True, text=True, timeout=10)
     assert ran.returncode == 42, ran.stdout + ran.stderr

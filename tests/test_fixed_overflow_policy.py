@@ -121,7 +121,7 @@ main=(args:array<string>)=>{
         parser = Scripts()
         parser.feed(binary.read_text())
         runner = tmp_path / 'runner.js'
-        runner.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(parser.parts))
+        runner.write_text('const dewyArgs = process.argv.slice(1);\n' + '\n'.join(parser.parts))
         command = [node, runner]
     for x, y in [(127, 1), (255, 2), (-128, -1), (2**63-1, 2), (-2**63, -1),
                  (2**64-1, 2), (1, 2**64-1), (-2**63, -2**63), (0, 0)]:

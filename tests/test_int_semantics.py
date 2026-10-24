@@ -102,7 +102,7 @@ def int_program(compiler, tmp_path_factory, request):
     scripts = Scripts()
     scripts.feed(binary.with_suffix('.html').read_text())
     runner = directory / 'integers.cjs'
-    runner.write_text('const sloppyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
+    runner.write_text('const dewyArgs = process.argv.slice(1);\n' + '\n'.join(scripts.parts))
     return [node, runner]
 
 
