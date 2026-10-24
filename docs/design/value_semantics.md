@@ -409,7 +409,7 @@ be supplied to an owning key while the array retains them. Borrowed key
 parameter syntax is not introduced by this implementation.
 
 Required resource views may select fields, proven dictionary entries and
-array elements (`const item=@items[i]`). Their original owner performs cleanup;
+array elements (`const item = @items[i]`). Their original owner performs cleanup;
 the view cannot supply a second owner. Live derived aliases also prevent
 consuming or invalidating that owner. Array detachment still makes sibling
 slot writes conservative when the element's physical lifetime is unproved.

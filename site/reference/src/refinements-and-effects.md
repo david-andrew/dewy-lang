@@ -150,7 +150,7 @@ let tokenize = (src:string):>array<string> => {
     let i:uint64 = 0
     loop i <? src.length {
         matches = [loop k in kinds { length = k.eat(src[i..])  if length isnt? exception [length=length k=k] }]
-        matches.sort(key=m=>m.length reverse=true)
+        matches.sort(key=m => m.length reverse=true)
         if matches.length =? 0 break
         [length k] = matches[0]
         out.push(src[i..i+length))          # proven: length <=? src.length - i
@@ -329,7 +329,7 @@ signature, for example:
 
 <!-- dewy-example: {"mode":"design-only"} -->
 ```dewy
-let forward=<E:Effect>(f:(@x:int64):>void & mutates<x> & E @y:int64):>void & mutates<y> & E=>f(@y)
+let forward = <E:Effect>(f:(@x:int64):>void & mutates<x> & E @y:int64):>void & mutates<y> & E => f(@y)
 ```
 
 Here the call translates `mutates<x>` to `mutates<y>`. A callback-local place

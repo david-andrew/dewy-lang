@@ -100,9 +100,9 @@ A library implementation would conceptually allocate a control block shaped like
 ```dewy
 # Illustrative design shape, not settled declarations.
 RcState<T> = [
-    strong: uint
-    weak: uint
-    value: T
+    strong:uint
+    weak:uint
+    value:T
 ]
 ```
 

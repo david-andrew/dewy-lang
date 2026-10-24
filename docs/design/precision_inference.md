@@ -9,8 +9,8 @@ Otherwise infer a common type of the initializer and all possible writes in the
 binding's lexical lifetime, before checking consumers. Finite string values
 join by set union; a general string source makes the join `string`. The set is
 flow-insensitive: writes in either branch or any loop iteration participate.
-Thus `let mode="fast"; mode="slow"` has `'fast'|'slow'`; an additional
-`mode="other"` adds a member rather than causing a rejected store. A match
+Thus `let mode = "fast"; mode = "slow"` has `'fast'|'slow'`; an additional
+`mode = "other"` adds a member rather than causing a rejected store. A match
 covering only fast/slow must then fail, even if it precedes that store.
 This is the scalar counterpart of later pushes settling an empty container.
 

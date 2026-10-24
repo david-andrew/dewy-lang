@@ -60,7 +60,7 @@ function: no cost at run time, and inlined.
 args = () -> str[]: __untrusted(__os_args())                       # lib/core/os.jo
 env = (name: str) -> str?: __untrusted(__os_env(name))
 read_text = (path: Path) -> ...: __untrusted(__fsys_read_text(path.path))   # lib/std/files.jo
-tcp_receive=(stream:TcpStream largest:int64=65536):>...=>__untrusted(__tcp_receive(stream largest))
+tcp_receive = (stream:TcpStream largest:int64=65536):>... => __untrusted(__tcp_receive(stream largest))
 ```
 
 The checker treats a call of a library function whose body is `__untrusted(...)`

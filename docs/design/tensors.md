@@ -12,7 +12,7 @@ There is one `array` type. Its shape lives in the type as
 checks them:
 
 ```
-matmul=(a:array<float64 length=[m n]> b:array<float64 length=[n p]>):>array<float64 length=[m p]>
+matmul = (a:array<float64 length=[m n]> b:array<float64 length=[n p]>):>array<float64 length=[m p]>
 ```
 
 There is no `.shape` member. `.length` is the single source of truth: an int for

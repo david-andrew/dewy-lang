@@ -13,11 +13,11 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   production opt-in: unproven obligations become reporting checks, listable via
   `check --obligations` and an LSP hint. `$prototype` keeps its archived
   semantics (runtime deferral with a `prototype:` warning per site).
-- Boolean metatags accept `$tag`, `$tag=true`, `$tag=false`.
+- Boolean metatags accept `$tag`, `$tag = true`, `$tag = false`.
 - Strict lane is `$no_hidden_costs`: a library-defined module bundle over
   function rows (`& no allocates`, …) plus `$explicit_copies` semantics; forbids
   hidden allocation, detach, implicit costly copies and `$runtime_checks`/
-  `$prototype`; `$no_hidden_costs=false` opts a scope out. `$realtime` is
+  `$prototype`; `$no_hidden_costs = false` opts a scope out. `$realtime` is
   reserved for a future stronger bundle (no blocks, bounded stack).
 - Compile speed: 250k lines/s single-threaded in the default build (200k
   minimum), on representative code. Parallelism is a bonus.
@@ -28,7 +28,7 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   The parallel loop is the keyword `parallel` (`parallel i in [0..10) {…}`,
   `[parallel x in xs x*x]`).
 - Concurrency spellings (provisional until seen in real programs):
-  `concurrent { let a=spawn f() … }` joins at the brace; `concurrent g {…}` with
+  `concurrent { let a = spawn f() … }` joins at the brace; `concurrent g {…}` with
   `spawn(g) expr` for longer-lived groups. `blocks` is an inferred effect,
   written only as `& no blocks`. `Canceled` (US spelling; `Cancelled` gets a
   fix-it error, not an alias). `within(2s @get(url))` (tentative) and `race(…)`
@@ -165,14 +165,14 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   Goal: the highest-safety configuration handles every resource-exhaustion case
   (heap and stack), as a future bundle on top of `$explicit_allocation_failure`.
 - Index-typed refinements: deferred until real code needs them.
-- `Send`/`Sync` are inferred structurally; `$send=false`/`$sync=false` on a type
+- `Send`/`Sync` are inferred structurally; `$send = false`/`$sync = false` on a type
   is a safe opt-out; claiming either for a type the compiler can't verify needs
   an unsafe boundary.
 - Conversions: `uint8<overflow='wrap'>(x)` keeps the low bits; same-size reinterpretation
   is the infix word `f transmute uint64` (like `as`). No `.bitcast`/`.wrap`
   method spellings.
 - Iterator control: bind the iterator and loop over its place:
-  `let w=tree.walk` then `loop node in @w { if skip?(node) w.skip_children }`;
+  `let w = tree.walk` then `loop node in @w { if skip?(node) w.skip_children }`;
   also `w.seek(i)`. A one-line binding form may come later (`as` is conversion).
 - `mod(a b)` is a free function with `kind='floor'` (default, same as `%`),
   `'euclid'` or `'trunc'`. Not `rem`, not a method.
@@ -199,8 +199,8 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   is declared to return a place; `@` of an ordinary temporary stays an error.
   Derived places are checked lexically (no lifetime annotations); replacing or
   releasing the handle while such a place is live is a compile error; the guard
-  releases after the place's last use (`let a=@(shared.lock())`; `a.balance+=10`;
-  `saved=@a` is an error).
+  releases after the place's last use (`let a = @(shared.lock())`; `a.balance += 10`;
+  `saved = @a` is an error).
 - Common parent: literals of sibling types infer the most precise type:
   `[Circle[...] Square[...]]` is the positional `[Circle Square]`, accepted where
   `array<Shape>` is expected. After writes the binding's type becomes the
@@ -209,8 +209,8 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   push) and fade when knowledge runs out (loops, a small position cap).
 - Uniform precision: an unannotated binding's type covers every value written.
   Strings are discrete literal unions (`'quiet'|'normal'|'verbose'`); ints are
-  ranges (`1..2`, which equals `1|2`); `n+=1` widens the covering set; an
-  unbounded written set (loops, `count+=1`, `mode="{mode}!"`) widens to the base
+  ranges (`1..2`, which equals `1|2`); `n += 1` widens the covering set; an
+  unbounded written set (loops, `count += 1`, `mode="{mode}!"`) widens to the base
   type. This supersedes "ints widen to the base type".
 - `main` is optional: without it a file runs top to bottom as a script; with it,
   `main` runs automatically exactly once; an explicit top-level `main()` call is
@@ -315,7 +315,7 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
     spelling (no `Δ`): a difference is a subtraction of two points
     (`25°C - 5°C`) or plain kelvin (`5K`).
   - Literal-only temperature bindings (amended 2026-10-23): a binding holding
-    only temperature literals (`let rise=20°C`) takes its kind from all of its
+    only temperature literals (`let rise = 20°C`) takes its kind from all of its
     uses, decided once per binding as in precision inference, so a use site
     never reinterprets it. A use only a difference allows (`t + rise`,
     `t -= rise`, `rise*2`, comparing with a difference) makes it a difference
@@ -354,7 +354,7 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   non-`void` result; a context requiring one value rejects a block that can
   produce an incompatible number of values. This holds in every construct
   (blocks, function bodies, `if`/`match`/`loop` arms, loop capture, collectors),
-  so `pair=()=>{ 1 2 }; [pair()]` is `[1 2]`. Full semantics in
+  so `pair = () => { 1 2 }; [pair()]` is `[1 2]`. Full semantics in
   [multi_expressions.md](multi_expressions.md).
 - Refinements prefer partial operators (decided 2026-10-23): where a refinement
   is a single comparison or test against the value, the idiomatic spelling is
@@ -374,8 +374,8 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   confuse with `contains`), name pending.
 - Decimal default (decided 2026-10-23): exact rationals stay the default; no
   decimal-float default. Principle: an expression's value never depends on
-  whether the compiler folded it, so `a=0.1 b=0.2; a+b =? 0.3` and
-  `x=1/3; x*3 =? 1` are true everywhere. Costs addressed: an exact value carried
+  whether the compiler folded it, so `a = 0.1 b = 0.2; a+b =? 0.3` and
+  `x = 1/3; x*3 =? 1` are true everywhere. Costs addressed: an exact value carried
   around a loop through `*` or `/` (size can grow each iteration) gets a warning
   with a fix-it to annotate `float64` or another explicit representation, never
   an automatic switch; values print the way they were written (decimals as
@@ -427,12 +427,12 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
   calls are excluded with diagnostics. No spaced units anywhere (`9.81m/s^2`;
   `9.81 m` is two expressions).
 - Multi-lock spelling (decided 2026-10-23):
-  `let [a b]=@(lock_all(from to)) or_throw` acquires in canonical order
+  `let [a b] = @(lock_all(from to)) or_throw` acquires in canonical order
   (`from == to` gives `DuplicateLock`); each lock is released after its place's
   last use. `try_lock` is a method returning a place or `Busy`
   (`match @(m.try_lock()) {...}`).
 - Idiom: when taking the place returned by a zero-argument method, write the
-  optional parentheses: `let a=@(acct.lock())`, not `@(acct.lock)`.
+  optional parentheses: `let a = @(acct.lock())`, not `@(acct.lock)`.
 - Bulletproof principle (David, 2026-10-23): "I want to be able to write an
   actually bulletproof program that accounts for every eventuality, with the
   compiler enforcing it." Every convenience axiom or assumption has a metatag

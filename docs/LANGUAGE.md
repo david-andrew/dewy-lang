@@ -43,7 +43,7 @@ A test is an ordinary function marked `$test` on the line before it. `$expect
 condition` (or `$expect condition, "message"`) states what it checks:
 
 ```dewy
-add = (a: int64 b: int64) => a+b
+add = (a:int64 b:int64) => a+b
 
 $test
 adds_numbers = () => $expect add(20 22) =? 42
@@ -200,6 +200,9 @@ place. Add `--check` to report needed changes without writing, or pass a directo
 to format its source files. `fmt -` reads Dewy from stdin and writes to stdout.
 Formatting uses four spaces per nesting level and preserves line breaks, comments,
 string contents and meaningful spacing such as `2x`, `f(x)` and `[1 -2 3]`.
+It writes `name = (x:int64):>int64 => body`: spaces around `=`, `=>` and `+=`,
+none around `:` or `:>`; an `=` that names an argument, default or field inside
+parentheses or brackets (`f(scale=3)`, `[x=1]`) stays as written.
 Ordinary arithmetic spacing stays as written; invalid literals and unbalanced
 delimiters leave the file unchanged with an error.
 
@@ -209,11 +212,11 @@ Run `tools/dewy` or `dewy-core` with no file, at a terminal, to try Dewy without
 creating a source file:
 
 ```text
->>> let score=20
->>> twice=(x)=>2x
+>>> let score = 20
+>>> twice = (x) => 2x
 >>> twice(score)+2
 42
->>> score=21
+>>> score = 21
 >>> twice(score)
 42
 >>> :type score
@@ -233,7 +236,7 @@ new declarations. External effects such as printed output and file writes
 remain. Imported modules initialize once, in dependency order.
 
 A decimal binding declared and written a float in the same input is a `float64`
-(`let acc=0.0; acc+=dt`). One declared in an earlier input already ran as an
+(`let acc = 0.0; acc += dt`). One declared in an earlier input already ran as an
 exact fraction, so writing it a float later is a type error; annotate it instead.
 
 Terminal history lives in `~/.dewy_history`. `DEWY_REPL_HISTORY` selects another
@@ -248,10 +251,10 @@ A function declared `:>never` never returns: every path ends in `exit(...)`, a
 panic or an endless loop, and a call to it ends its branch like `exit` does.
 
 ```dewy
-twice=(x)=>x+x
-add=(a:int64 b:int64=2):>int64=>a+b
-combine=(a b=a)=>a+b
-main=()=>printl(add(twice(20)))  # 42
+twice = (x) => x+x
+add = (a:int64 b:int64=2):>int64 => a+b
+combine = (a b=a) => a+b
+main = () => printl(add(twice(20)))  # 42
 ```
 
 A block expresses each non-`void` value its expressions give, in order, through
@@ -260,15 +263,15 @@ nested `if`/`match` arms and loops. A collector takes them all: `[{1 2} 3]` is
 every iteration. A place for one value (a binding, an operand, an argument, a
 result written `:>T`) takes a block's last expression, and an earlier value
 there is an error. A function without a written result may express several
-values: `pair=()=>{1 2}` makes `[pair()]` `[1 2]`, while `x=pair()` is an error.
+values: `pair = () => { 1 2 }` makes `[pair()]` `[1 2]`, while `x = pair()` is an error.
 Module code and `:>void` (or `:>void | E`) bodies drop what they express. An attached `;`
 discards a value, `xs.pop();`. See the
 [design](design/multi_expressions.md).
 
-One bare parameter name may omit the parentheses: `x=>x+1`, as in
-`apply(x=>x*2 21)`, where the lambda ends at the next argument. The name is
+One bare parameter name may omit the parentheses: `x => x+1`, as in
+`apply(x => x*2 21)`, where the lambda ends at the next argument. The name is
 always the parameter, even when a type has that spelling; annotated parameters
-and result types need the parenthesized form, `(x:int64):>int64=>x+1`.
+and result types need the parenthesized form, `(x:int64):>int64 => x+1`.
 
 Unannotated string bindings retain the finite domain of all their literal
 writes, including later writes, loop iterations and shared closure writes.
@@ -276,7 +279,7 @@ A conditional of literals (`if loud "loud" else "quiet"`) writes each of them.
 A match without `else` must cover that entire domain, even when it precedes
 some writes. Shadowed bindings and private closure writes have separate domains.
 A nonliteral write or writable escape conservatively widens the domain to
-`string`. An annotation fixes the type: `let mode:string="fast"` stays general.
+`string`. An annotation fixes the type: `let mode:string = "fast"` stays general.
 String operations and character iteration work normally. A conversion to a
 literal union (including a dictionary key) rejects a known domain containing
 values outside that union. `members(mode)` returns an `array<string>` containing
@@ -286,15 +289,15 @@ specialization. Value domains settle after checking, so `members(mode)` cannot
 supply compile-time record field names while the enclosing code is checked.
 
 Integers follow the same rule as ranges: an unannotated `int` binding's type
-covers every value written to it, so `let n=1` then `n=2` holds `1..2`
+covers every value written to it, so `let n = 1` then `n = 2` holds `1..2`
 (the same as `1|2`). Literal writes, conditionals of literals, shared closure
 writes and a `+=`/`-=` of a literal that runs at most once (in the declaring
 function, outside any loop the declaration is not in) each widen the set; a
 match without `else` must cover it, and a conversion to a literal union such as
-`1|2|3` is proven when the set fits. Any other write (`count+=1` in a loop,
-`n=m`, passing `@n`) leaves the set unbounded, which is plain `int`. Storage
-stays mathematical `int` either way: `let count=0; count+=1` and
-`let value=5; value=300` keep ordinary integer behavior.
+`1|2|3` is proven when the set fits. Any other write (`count += 1` in a loop,
+`n = m`, passing `@n`) leaves the set unbounded, which is plain `int`. Storage
+stays mathematical `int` either way: `let count = 0; count += 1` and
+`let value = 5; value = 300` keep ordinary integer behavior.
 
 Types can be inferred, including generic functions. `:>` writes a result type;
 use `:>void` for a function with no result. Named arguments such as `add(b=2 a=40)`
@@ -303,21 +306,21 @@ defaults in parameter order. An earlier parameter used in a default refers to
 its captured value, so `combine(next())` calls `next()` once.
 
 `...` after a parameter ends the positional run: in
-`offset=(value:int64 ... amount:int64)=>value+amount`, `amount` must be named,
+`offset = (value:int64 ... amount:int64) => value+amount`, `amount` must be named,
 `offset(40 amount=2)`; a leading bare `...`, as in `(... width:int64)`, makes
 every parameter keyword-only. An attached `...rest` is a rest parameter, which
 is not implemented yet and reports so. A parameter wrapped in `<>` is position-only: it keeps its
-local name, but `increment=(<value:int64>)=>value+1` rejects `increment(value=41)`.
+local name, but `increment = (<value:int64>) => value+1` rejects `increment(value=41)`.
 These kinds apply to direct calls of declared functions.
 
 Named arguments also work through function values, returned callbacks, record
 fields and array elements. An inferred function value retains its declared
 parameter names. A function-type annotation supplies the names at that boundary:
-`let f:<(amount:int64):>int64> = (x)=>x*2` can be called as `f(amount=21)`.
+`let f:<(amount:int64):>int64> = (x) => x*2` can be called as `f(amount=21)`.
 These names do not change the runtime calling convention. The callee evaluates
 first, then explicit arguments in written order. Parameters named `_` accept
 positional arguments only. A handle keeps its function's defaults: after
-`f=(a:int64 b:int64=2)=>a+b` and `g=@f`, `g(1)` is `f(1)`, with the default
+`f = (a:int64 b:int64=2) => a+b` and `g = @f`, `g(1)` is `f(1)`, with the default
 evaluated at each call. A function-type annotation states only the contract, so
 a value stored under one, or chosen between two such functions, takes every
 argument.
@@ -330,11 +333,11 @@ locals and parameters, and function-valued record fields (`w.on_event` calls
 it; `@w.on_event` selects it):
 
 ```dewy
-double=(x:int64):>int64=>x*2
-apply=(f:<(x:int64):>int64> x:int64):>int64=>f(x)
-main=()=>{
-    let f=@double     # the function, not a call
-    let g=@f          # copy a function value with `@` too
+double = (x:int64):>int64 => x*2
+apply = (f:<(x:int64):>int64> x:int64):>int64 => f(x)
+main = () => {
+    let f = @double     # the function, not a call
+    let g = @f          # copy a function value with `@` too
     printl(apply(@double 20)+g(1))   # 42
 }
 ```
@@ -345,7 +348,7 @@ ungrouped `@` chain partially evaluates (`@sum(1)(2)`); parentheses end the
 chain, after which an argument group calls (`(@sum(1))(2)`). A parameter left to
 its default must have a literal default for now. An overloaded or generic
 function partially evaluates too: the arguments choose the version, as in a
-call, and an annotation such as `let f:<(b:int64):>int64>=@max(x)` chooses
+call, and an annotation such as `let f:<(b:int64):>int64> = @max(x)` chooses
 among versions leaving different parameters open (without one, the version
 leaving the fewest wins) and settles type parameters the arguments leave open.
 `@text.split(" ")` saves the receiver with the arguments; built-in container
@@ -358,10 +361,10 @@ Parameters can unpack a single argument with the same patterns as `let` and
 nested patterns can combine them.
 
 ```dewy
-sum=([left right]:array<int64>)=>left+right
-score=([damage armor]:[damage:int64 armor:int64])=>damage-armor
-make_adder=(bias:int64)=>(([a b]:array<int64>)=>a+b+bias)
-main=()=>printl(sum([20 22]))  # 42
+sum = ([left right]:array<int64>) => left+right
+score = ([damage armor]:[damage:int64 armor:int64]) => damage-armor
+make_adder = (bias:int64) => (([a b]:array<int64>) => a+b+bias)
+main = () => printl(sum([20 22]))  # 42
 ```
 
 The whole parameter can have a type or default, such as `([a b]=[20 22])`.
@@ -379,9 +382,9 @@ Mutable `@` patterns are not supported; use a named parameter for those cases.
 Module-level overload groups join function literals with `&`:
 
 ```dewy
-measure = ((value:int64):>int64=>value)
-        & ((text:string):>int64=>text.length)
-main=()=>printl(measure(40)+measure("ab"))  # 42
+measure = ((value:int64):>int64 => value)
+    & ((text:string):>int64 => text.length)
+main = () => printl(measure(40)+measure("ab"))  # 42
 ```
 
 Groups can be nested, and members may have different arities, defaults or generic
@@ -417,7 +420,7 @@ visible const or module function that is not `$shadowable` is an error that
 suggests `let`.
 
 `let x:T` without a value declares a local that has none yet: every path must
-assign it before it is read, so `let x:int64` then `if c {x=1} else {x=2}` is
+assign it before it is read, so `let x:int64` then `if c { x = 1 } else { x = 2 }` is
 fine, while reading it after only one arm, after a loop that might not run, or
 from a closure made before the assignment is an error. There is no zero value to
 read: write `let xs:array<int64> = []` or `let n:int64 = 0`. Paths that return,
@@ -433,11 +436,11 @@ reassign the binding, change its fields or elements, or pass it as an `@` argume
 Make a mutable copy with `let` when needed:
 
 ```dewy
-let values=[20 22]
-const saved=values
-values[0]=99
-let editable=saved
-editable[0]=0
+let values = [20 22]
+const saved = values
+values[0] = 99
+let editable = saved
+editable[0] = 0
 printl(saved) # [20 22]
 ```
 
@@ -460,8 +463,8 @@ parameter is only read; this needs no annotation and preserves independent
 values. Use `@` in both a parameter and its call to change the caller:
 
 ```dewy
-bump=(@value:int64):>void=>{value+=1}
-main=()=>{let value:int64=41 bump(@value) printl(value)}
+bump = (@value:int64):>void => { value += 1 }
+main = () => { let value:int64 = 41 bump(@value) printl(value) }
 ```
 
 References can name a field or array element: `bump(@point.x)`,
@@ -548,7 +551,7 @@ These functions use ordinary private captures and evaluate their bodies when
 called. Function types use angle brackets, for example `<(x:int64):>int64>`;
 parenthesized function type grouping is rejected. A function's handle also fits
 a function type whose parameters it accepts and whose result accepts its result:
-`@f` with `f=(x:int64|string):>uint64?` fits `<(x:int64):>uint64?|E>` (through a
+`@f` with `f = (x:int64|string):>uint64?` fits `<(x:int64):>uint64?|E>` (through a
 wrapper; refined and `@` parameters still need an exact match). A function value
 held in a variable adapts the same way (`apply(@h)`, `let g:<(x:int64):>int64> = @wide`). An inferred `@fn` handle
 names the visible family, so a module's own function shadows the prelude's;
@@ -569,7 +572,7 @@ Function signatures can bound direct place effects with `reads<place>`,
 
 ```dewy
 read = (@x:int64):>int64 & reads<x> => x
-write = (@x:int64 value:int64):>void & mutates<x> => { x=value }
+write = (@x:int64 value:int64):>void & mutates<x> => { x = value }
 quiet = (x:int64):>int64 & no_effects => x*2
 ```
 
@@ -597,8 +600,8 @@ Row parameters have kind `Effect`, separate from value types. Aliases can mix
 type and row binders and preserve them across imports:
 
 ```dewy
-Action:type=<E:Effect>(<(x:int64):>int64 & E>)
-apply=<E:Effect>(f:Action<E> x:int64):>int64 & E=>f(x)
+Action:type = <E:Effect>(<(x:int64):>int64 & E>)
+apply = <E:Effect>(f:Action<E> x:int64):>int64 & E => f(x)
 ```
 
 `E` carries only the nonlocal remainder. Callback-place permissions remain
@@ -614,7 +617,7 @@ cannot classify (waits, sleeps, foreign calls). In a row `no` reaches to the nex
 runtime check (an unproven obligation in a `$runtime_checks`, `$prototype` or
 default scope), panics explicitly (`panic`, `$runtime_assert`), or calls or
 takes a handle to a function that may panic. A scope without runtime checks
-(`$runtime_checks=false`, and so `$no_hidden_costs`) cannot call such code: the
+(`$runtime_checks = false`, and so `$no_hidden_costs`) cannot call such code: the
 error names the chain to the panic and offers both repairs, proving what the
 callee checks first or opting in with `$runtime_checks`. So a function built
 with `$runtime_checks` cannot fail inside a caller that did not opt in.
@@ -724,17 +727,17 @@ it. Guards on locals and constant operands prove most obligations:
 
 ```dewy
 $finite_floats
-ratio=(a:float64 b:float64):>float64=>{
+ratio = (a:float64 b:float64):>float64 => {
     if 1.0 <=? b and -1e300 <? a <? 1e300 return a/b   # proven: no check
     return 0.0
 }
-average=(total:float64 n:float64):>float64=>total/n   # unproven
+average = (total:float64 n:float64):>float64 => total/n   # unproven
 ```
 
 An unproven one follows the obligation settings like any other: a runtime
 check of the result (“produced an infinity under `$no_inf`”, exit 101) under
 `$runtime_checks` and today's default, a compile error under
-`$runtime_checks=false`.
+`$runtime_checks = false`.
 
 `let cursor = @xs[i]` declares a local place: reads and writes of `cursor` read
 and write `xs[i]`, with `i` evaluated once at the declaration. A local place can
@@ -829,7 +832,7 @@ check a private candidate before publishing it. `addr` is a nonnegative index
 below `2^48` on native targets and `2^32` on WebAssembly. Arithmetic does not
 automatically preserve this range. A returned refinement may
 project a mutable parameter's final length, for example
-`append=(@xs:array<int64> x:int64):>addr<(<? xs.length)>=>{...}`.
+`append = (@xs:array<int64> x:int64):>addr<(<? xs.length)> => { ... }`.
 References to by-value parameters still describe their captured entry values.
 
 Mutable `@` access requires an equivalent storage contract. A dependent record
@@ -853,7 +856,7 @@ normal exit, including bare returns:
 
 ```dewy
 $proof
-ordered=(a:int64 b:int64<(>=? a)> c:int64<(>=? b)>):><a <=? c>=>{
+ordered = (a:int64 b:int64<(>=? a)> c:int64<(>=? b)>):><a <=? c> => {
     $assert a <=? b
     $assert b <=? c
 }
@@ -868,7 +871,7 @@ be statically proven; there is no runtime fallback. Definitions and calls erase
 after checking, while callers retain facts about the evaluated arguments.
 
 Result arms can attach facts to value parameters, for example
-`positive=(a:int64):>true & <a >? 0> | false & <a <=? 0>=>a >? 0`.
+`positive = (a:int64):>true & <a >? 0> | false & <a <=? 0> => a >? 0`.
 Nominal union arms and optional arms support the same `T & <facts>` spelling;
 `void & <facts>` publishes an unconditional postcondition. Each normal exit
 must establish its arm's propositions. This initial subset requires static
@@ -960,7 +963,7 @@ power as one.
 
 Compound updates `//=`, `%=`, `/=` and `^=` use the same operations as their
 ordinary forms. The destination keeps its type; fixed-width integer results wrap
-back to that width. `let x=7; x//=2` stores `3`, while `let x=7/1; x/=2` stores
+back to that width. `let x = 7; x //= 2` stores `3`, while `let x = 7/1; x /= 2` stores
 `7/2`. Integer `/=` cannot store a fraction in an integer variable: use `//=`
 or start with a fractional value. Arrays, record fields, dictionary entries and
 custom indexed values support these updates; indices evaluate once, before the
@@ -979,8 +982,8 @@ local `m` hides the metre.
 from units import m, km, kg, deg, turn
 Speed:type = float64 * Length / Time
 Duration:type = <T>(T * Time)
-travel=(speed:Speed elapsed:Duration<float64>):>(float64 * Length)=>speed*elapsed
-let distance=travel(20m/s 300ms)
+travel = (speed:Speed elapsed:Duration<float64>):>(float64 * Length) => speed*elapsed
+let distance = travel(20m/s 300ms)
 printl"{distance/m}"  # 6.0
 ```
 
@@ -1006,7 +1009,7 @@ A quantity prints with a unit chosen from its dimension and magnitude:
 ```dewy
 from units import m, kg, J
 printl"{1500m} {3000m} {300ms} {4500J} {20m/s} {2kg*m/s}"  # 1500 m 3 km 300 ms 4500 J 20 m/s 2 N*s
-let d:float64 * Length=1500m
+let d:float64 * Length = 1500m
 printl"{d} {d/1000}"  # 1.5 km 1.5 m
 ```
 
@@ -1033,9 +1036,9 @@ zero:
 
 ```dewy
 from units import K, °C, °F
-let start=20°C
-let later=start+15°C       # 35°C: a literal added to a point is a difference
-let rise=later-start       # 15°C: point - point is a difference
+let start = 20°C
+let later = start+15°C       # 35°C: a literal added to a point is a difference
+let rise = later-start       # 15°C: point - point is a difference
 printl"{rise as °F} {later as °F} {mean[start later]} {start/°F}"  # 27°F 95°F 55/2°C 68
 ```
 
@@ -1078,11 +1081,11 @@ its plain canonical number (an angle counts turns), and `sin` is the GPU's.
 ## Exact large integers
 
 ```dewy
-main=():>void=>{
-    let value:bigint=123456789012345678901234567890
+main = ():>void => {
+    let value:bigint = 123456789012345678901234567890
     printl"{value*value}"
     printl"{bigint(2)^256}"
-    let parts=(-value).divmod(7)
+    let parts = (-value).divmod(7)
     printl"{parts.quotient} {parts.remainder}"
     printl"{to_int("-00042") ?? 0} {to_int("12x") ?? 0}"  # -42 0
 }
@@ -1133,9 +1136,9 @@ The inherited `big` module is a separate approximate-number library for idle gam
 ## Exact fractions
 
 ```dewy
-kelvin=(celsius:rational):>rational=>celsius+273.15
-main=():>void=>{
-    let half=1/2
+kelvin = (celsius:rational):>rational => celsius+273.15
+main = ():>void => {
+    let half = 1/2
     printl"{half+1/3}"  # 5/6
     printl"{(2/3)^(-3)}"  # 27/8
     printl"{kelvin(20)}"  # 293.15
@@ -1153,10 +1156,10 @@ fractions unless their context is floating: `0.1 + 0.2 =? 0.3` is true, `1.0/2`
 equals `1/2`, and `1.25e2` is `125`. A float annotation, a floating operand beside the
 literal, a `float64` parameter or field, or a later float written to the
 unannotated binding the literal initializes makes it a `float64` when compiling:
-`let acc=0.0` followed by `acc+=dt` with `dt:float64` declares a `float64`,
+`let acc = 0.0` followed by `acc += dt` with `dt:float64` declares a `float64`,
 inside a lambda too. An exact comparison (`=?`, `not=?`) that reads a binding
 made `float64` this way warns, since the change can flip its result: idiomatic
-code states the representation (`let acc:float64=0.0`), which the editor's
+code states the representation (`let acc:float64 = 0.0`), which the editor's
 fix-it inserts.
 Among overloads, a decimal literal takes an exact parameter before a float one.
 An integer promotes to `rational` wherever one is
@@ -1188,12 +1191,12 @@ digits end, otherwise as a fraction: `19.99*(8/100)` is `1.5992`, `1/3+0.5` is
 the same dictionary key. `rational<int64>` prints the same way.
 
 A `rational` binding without an annotation that a loop carries through `*`, `/`
-or `^` gets a warning: its parts can grow every iteration (`balance*=1.05`,
-Newton's `x=(x+2/x)/2`, `step/=2`), so a long loop slows down and prints a huge
+or `^` gets a warning: its parts can grow every iteration (`balance *= 1.05`,
+Newton's `x = (x+2/x)/2`, `step /= 2`), so a long loop slows down and prints a huge
 number. The value stays exact; annotate `float64` (or another explicit
 representation) where it is declared if an approximate result is fine (the
-editor offers the fix). Sums (`total+=0.1`), whole-number factors (`n*3`),
-lone reciprocals (`1/x`) and annotated bindings (`let q:rational=...`) do not
+editor offers the fix). Sums (`total += 0.1`), whole-number factors (`n*3`),
+lone reciprocals (`1/x`) and annotated bindings (`let q:rational = ...`) do not
 warn.
 
 Arithmetic `+`, `-`, `*`, `/`, comparisons, and unary minus work with fractions
@@ -1203,7 +1206,7 @@ returns both. `.floor()`, `.ceil()` and `.round()` return `int`, and `int(q)`
 truncates toward zero. Exact numbers round as people do, a half away from zero:
 `round(5/2)` and `round(2.5)` are 3, `round(-2.5)` is −3. Floats follow IEEE
 754 instead, a half to the even neighbour: `round(f)` is `2.0` for
-`f:float64=2.5`. Both take `ties=` to choose the rule: `'away'`, `'even'`,
+`f:float64 = 2.5`. Both take `ties=` to choose the rule: `'away'`, `'even'`,
 `'zero'` (toward zero), `'up'` (toward +∞) or `'down'` (toward −∞), as in
 `round(f ties='away')`. `.abs()`, `.reciprocal()` and `.pow(signed_exponent)` return
 fractions. Runtime division by zero, a zero denominator and negative powers of
@@ -1218,12 +1221,12 @@ floating context. An explicit conversion also works, for example when passing
 an exact time step to a vector or rendering API:
 
 ```dewy
-let step=(1/60).to_float32()
-let movement=vec2(step 2.0*step)
+let step = (1/60).to_float32()
+let movement = vec2(step 2.0*step)
 ```
 
 `rational(x)` of a `float32` or `float64` is the float's exact binary value
-(`rational(f)` with `f:float64=0.1` is `3602879701896397/36028797018963968`);
+(`rational(f)` with `f:float64 = 0.1` is `3602879701896397/36028797018963968`);
 NaN and infinity panic. Floats never become fractions implicitly. Inferred
 decimal bindings hold fractions unless a float is written to them later, which
 makes them `float64` from the start; annotate `float32` explicitly.
@@ -1232,18 +1235,18 @@ makes them `float64` from the start; annotate `float32` explicitly.
 Its `+`, `-`, `*`, `/`, `^` and negation return `rational<int64> | Overflow`,
 `Overflow` when the exact result does not fit the parts; handle it with `is?`
 or `match`. Comparisons and printing work as for `rational`. A word integer or a
-constant fraction initializes it (`let third:rational<int64>=1/3`), and it
+constant fraction initializes it (`let third:rational<int64> = 1/3`), and it
 widens to `rational` or a float wherever one is expected. A runtime `rational`
 narrows explicitly: `rational<int64>(q)`, or `rational<int64>(numerator
 denominator)` like `rational(...)`, returns `rational<int64> | Overflow`.
 
 ```dewy
-main=():>void=>{
-    let total:rational<int64>=0
+main = ():>void => {
+    let total:rational<int64> = 0
     loop i in [0..30) {
-        let next=total+1/3
+        let next = total+1/3
         if next is? Overflow exit(1)
-        total=next
+        total = next
     }
     exit((if total =? 10 42 else 2))
 }
@@ -1258,10 +1261,10 @@ A scalar nominal record can declare a compiler-only `$__drop__` method with
 no explicit parameters and a `void` result:
 
 ```dewy
-let released:int64=0
-Ticket=type of [id:int64
+let released:int64 = 0
+Ticket = type of [id:int64
     $__drop__
-    release=():>void=>{released+=id}
+    release = ():>void => { released += id }
 ]
 ```
 
@@ -1334,13 +1337,13 @@ closure literals with owner captures and partial application of owners remain
 unsupported; ordinary generic functions and nongeneric closure literals work.
 
 ```dewy
-Point:type=[x:int64 y:int64=22]
-main=()=>{
-    let point:Point=[x=20]
-    let original=[values=[20 22]]
-    let copy=original
-    copy.values[0]=99
-    let [y x]=point
+Point:type = [x:int64 y:int64=22]
+main = () => {
+    let point:Point = [x=20]
+    let original = [values=[20 22]]
+    let copy = original
+    copy.values[0] = 99
+    let [y x] = point
     printl(x+y)  # 42
 }
 ```
@@ -1351,16 +1354,16 @@ fields in order, as `Point(20)` would: in an annotation, an element of
 `array<Point>`, a dictionary value or an argument. A field without a default must
 be given, except an optional one (`next:Node?`), which defaults to `none`; leaving
 out a required field is an error naming the field. When every field has a default, the type's
-bare name where a value goes constructs it, as `Origin()` would: `let p=Origin`.
+bare name where a value goes constructs it, as `Origin()` would: `let p = Origin`.
 The name stays the type in `Origin[...]`, `Origin.member` and `is? Origin`.
 Without an expected type, named fields infer an anonymous record. Anonymous record types agree by field names and types, even
 when written in a different order. Their shape can also be written directly in
 an annotation:
 
 ```dewy
-sum=(point:[x:int64 y:int64]):>int64=>point.x+point.y
-main=()=>{
-    let point=[y=22 x=20]
+sum = (point:[x:int64 y:int64]):>int64 => point.x+point.y
+main = () => {
+    let point = [y=22 x=20]
     return sum(point)
 }
 ```
@@ -1369,23 +1372,23 @@ Inline shapes work in parameters, returns, nested fields, collections, optional
 values and function types. They share type identity with inferred anonymous
 records. Named records remain distinct types; use a named declaration when fields
 need defaults. A default may use earlier fields, as in
-`Span:type=[start:int64 stop:int64=start]`: given values are evaluated first,
+`Span:type = [start:int64 stop:int64=start]`: given values are evaluated first,
 in written order, then the defaults in field order. Inline fields may also refer to a generic function's type parameters.
 
 Records can contain optional values of their own type, including through other
 records and unions. Lists and trees keep ordinary value semantics:
 
 ```dewy
-Node:type=[value:int64 next:Node?=none]
-sum=(node:Node?):>int64=>{
-    let cur=node let total=0
-    loop cur is?Node {total+=cur.value cur=cur.next}
+Node:type = [value:int64 next:Node?=none]
+sum = (node:Node?):>int64 => {
+    let cur = node let total = 0
+    loop cur is?Node { total += cur.value cur = cur.next }
     return total
 }
-main=()=>{
-    let original=Node[20 Node[22]]
-    let copy=original
-    if copy.next is?Node {copy.next.value=100}
+main = () => {
+    let original = Node[20 Node[22]]
+    let copy = original
+    if copy.next is?Node { copy.next.value = 100 }
     printl(sum(original))  # 42
     printl(sum(copy))      # 120
 }
@@ -1403,12 +1406,12 @@ representation at that boundary.
 Declare type parameters before a function's parameters or a record's fields:
 
 ```dewy
-first=<T>(items:array<T>):>T|none=>if items.length >? 0 items[0] else none
-Box:type=<T>[value:T]
-Values:type=<T>(array<T>)
-main=()=>{
-    let words:Values<string>=["hello" "world"]
-    let box=Box<string>["Dewy"]
+first = <T>(items:array<T>):>T|none => if items.length >? 0 items[0] else none
+Box:type = <T>[value:T]
+Values:type = <T>(array<T>)
+main = () => {
+    let words:Values<string> = ["hello" "world"]
+    let box = Box<string>["Dewy"]
     printl(first(words))
     printl(box.value)
 }
@@ -1424,14 +1427,14 @@ Generic constructors infer collection and record literals too: `Box([20 22])`
 holds an integer array, and `Box([x=20 y=22])` holds an anonymous record. Other
 fields can supply context for an empty collection or a callback's parameters.
 Within a function, later writes can settle an initially empty container's element
-type: `let box=Box([]); box.value.push(42)`. An empty container with no evidence
+type: `let box = Box([]); box.value.push(42)`. An empty container with no evidence
 for its element type still needs an annotation, such as `Box<array<int64>>[[]]`.
 Aliases also work as type values: a record alias can construct `Alias[42]`,
 and an integer alias exposes `.min` and `.max`. The editor completes these
 bounds and shows their integer type on hover; `end` inside brackets hovers as
 `int64`.
 
-Generic functions can also be specialized as values: `let convert=@identity<int64>`
+Generic functions can also be specialized as values: `let convert = @identity<int64>`
 stores a callable, including functions imported from Dewy or core modules.
 Passing `@identity<int64>` directly as a callback works too. If several overloads
 remain after specialization, give the value a callable type to select one.
@@ -1440,10 +1443,10 @@ Without explicit type arguments, an expected callable type can infer them.
 Local closures use the same generic syntax and inference:
 
 ```dewy
-main=()=>{
-    let count=0
-    let next=<T>(value:T $capture count)=>{count+=1; [value=value count=count]}
-    let other=@next
+main = () => {
+    let count = 0
+    let next = <T>(value:T $capture count) => { count += 1; [value=value count=count] }
+    let other = @next
     $runtime_assert(next(20).count =? 1)
     $runtime_assert(next("hello").count =? 2)
     $runtime_assert(other(false).count =? 1)
@@ -1469,20 +1472,20 @@ member of the object the method was called on; there is no `self`. A parameter
 or local of the same name hides the member.
 
 ```dewy
-Span:type=[
+Span:type = [
     start:int64
     stop:int64
-    width=()=>stop-start
-    grow=(by:int64)=>{stop+=by}
+    width = () => stop-start
+    grow = (by:int64) => { stop += by }
 ]
-counter=(start=0)=>[
+counter = (start=0) => [
     value=start
-    increment=()=>(value+=1)
+    increment = () => (value += 1)
 ]
-main=()=>{
-    let s=Span(3 7)
+main = () => {
+    let s = Span(3 7)
     s.grow(2)                       # s is 3..9
-    let c=counter(40)
+    let c = counter(40)
     c.increment                     # a zero-argument method is called on access
     printl"{s.width} {c.value}"     # 6 41
 }
@@ -1493,7 +1496,7 @@ that does, changes its object, so it is called on a variable, field or element:
 calling it on a const or a temporary value is an error. Other methods work on
 any value. A type's method that reaches no member, nor calls one that does, is
 static: it is also called on the type, as `Span.unit` for a row
-`unit=():>Span=>Span(0 1)`. Copies of an object carry its methods and stay
+`unit = ():>Span => Span(0 1)`. Copies of an object carry its methods and stay
 independent. Printing an object shows its fields, not its methods. A type's
 methods are not stored in its values and are not constructor fields; methods of
 a generic type use its type parameters, and imported types bring their methods.
@@ -1508,13 +1511,13 @@ a method of a type with minted children cannot change its object yet.
 Custom records can define arithmetic and indexing with ordinary functions:
 
 ```dewy
-Point:type=[x:int64 y:int64]
-__add__=(a:Point b:Point):>Point=>Point[a.x+b.x a.y+b.y]
+Point:type = [x:int64 y:int64]
+__add__ = (a:Point b:Point):>Point => Point[a.x+b.x a.y+b.y]
 
-Store:type=<T>[values:array<T>]
-__index__=<T>(store:Store<T> index:int64):>T=>store.values[index]
-__setindex__=<T>(@store:Store<T> index:int64 value:T):>void=>{
-    store.values[index]=value
+Store:type = <T>[values:array<T>]
+__index__ = <T>(store:Store<T> index:int64):>T => store.values[index]
+__setindex__ = <T>(@store:Store<T> index:int64 value:T):>void => {
+    store.values[index] = value
 }
 ```
 
@@ -1548,9 +1551,9 @@ machine integers use bit operations. Power uses `__pow__` and keeps bitwise
 Dictionary and set keys can define `hash` alongside their record type:
 
 ```dewy
-Key:type=[id:int64 label:string]
-__eq__=(a:Key b:Key):>bool=>a.id =? b.id
-hash=(key:Key):>uint64=>(key.id as uint64).hash()
+Key:type = [id:int64 label:string]
+__eq__ = (a:Key b:Key):>bool => a.id =? b.id
+hash = (key:Key):>uint64 => (key.id as uint64).hash()
 ```
 
 Equal keys must return the same hash; here both operations use `id` and ignore
@@ -1603,7 +1606,7 @@ expressions, such as `pool[handle].inventory[slot+1] += damage*multiplier`.
 It updates the stored item directly,
 validating the handle and retaining array bounds and copy-on-write checks.
 Snapshots remain independent. Calls, overloaded operators and custom indexers
-keep read/edit/writeback; for a function result, calculating `let damage=...`
+keep read/edit/writeback; for a function result, calculating `let damage = ...`
 before the assignment makes the simple update available. For bulk iteration,
 use `pool.items` when stable
 handle lookup is unnecessary.
@@ -1614,7 +1617,7 @@ managed fields. Arrays support indexing, `.length`, and methods such as
 `.insert(value i)` (inserts before `i`), `.clear()` and `.truncate(count)` (a
 negative count panics). `fill(value count)` makes an array of `count` copies of
 `value`: `fill(false n)`, `fill(uint8(0) 512)`, and with an annotation choosing
-the element type, `let row:array<int64>=fill(0 n)`. `xs[1..3)` is an
+the element type, `let row:array<int64> = fill(0 n)`. `xs[1..3)` is an
 exclusive-end slice; `xs[1..2]` includes index 2. A slice's bounds are proven
 like an index (or checked under `$runtime_checks`). `xs[$clamp a..b)` instead
 truncates them to the receiver, as Python's slices do: each bound is clamped
@@ -1622,7 +1625,7 @@ to `0..xs.length` and the end to at least the start, so `xs[$clamp 1..10)` of
 three elements is `xs[1..3)` and `xs[$clamp 5..9)` is empty.
 
 A member call that needs no other arguments may omit its parentheses: `xs.pop`,
-`xs.sort`, `text.trim` and `shape.area` (for `area=(s:Shape)=>...`) call the
+`xs.sort`, `text.trim` and `shape.area` (for `area = (s:Shape) => ...`) call the
 function, exactly as `xs.pop()` does. A record field of the same name wins and
 is read, not called; a function with required arguments still needs them.
 
@@ -1631,11 +1634,11 @@ Low-level code can obtain an owned growable array's element pointer with
 a field/index path, so existing value copies remain independent:
 
 ```dewy
-Buffer:type=[values:array<int64>]
-let original=Buffer[[20 22]]
-let copy=original
-let p=copy.values.data()
-p[0]=42
+Buffer:type = [values:array<int64>]
+let original = Buffer[[20 22]]
+let copy = original
+let p = copy.values.data()
+p[0] = 42
 # original.values is [20 22]; copy.values is [42 22]
 ```
 
@@ -1648,12 +1651,12 @@ make a local value copy before editing one, or use `loop @item` to edit storage.
 Use `array<T length=N>` for a known, positive compile-time length:
 
 ```dewy
-const WIDTH:int64=2
-Pair:type=<T>(array<T length=WIDTH>)
-let position:Pair<float64>=[10 20]
-let copy=position
-copy[0]=30
-let [x y]=position
+const WIDTH:int64 = 2
+Pair:type = <T>(array<T length=WIDTH>)
+let position:Pair<float64> = [10 20]
+let copy = position
+copy[0] = 30
+let [x y] = position
 ```
 
 These arrays store their elements inline, including inside records and dictionary
@@ -1666,16 +1669,16 @@ In a fixed-array context, `[]` initializes every element to its zero value;
 otherwise a literal must supply exactly the declared number of elements.
 
 `[int64 string]` is a fixed-length array with a type per position, Dewy's form
-of a tuple: `let entry:[int64 string]=[7 "seven"]`. A constant index reads that
+of a tuple: `let entry:[int64 string] = [7 "seven"]`. A constant index reads that
 position with its own type (`entry[0]` is an `int64`, `entry[1]` a `string`);
 any other index gives the union of the element types (`int64|string`) and is
 proven in bounds like an array index. `.length` is the number of positions,
-and `let [n name]=entry` unpacks it. It prints as an array, `[7 "seven"]`, and
+and `let [n name] = entry` unpacks it. It prints as an array, `[7 "seven"]`, and
 is how implementation-language tuples such as `(str, u8[])` appear in Dewy.
 
 A literal of sibling records (types minted in one family) keeps their
 positions: with `Circle` and `Square` minted from `Shape`,
-`let shapes=[Circle[r=1] Square[s=2]]` is a `[Circle Square]`, so `shapes[0].r`
+`let shapes = [Circle[r=1] Square[s=2]]` is a `[Circle Square]`, so `shapes[0].r`
 reads a `Circle`, and it is accepted where an `array<Shape>` is expected. When
 the rest of its block writes the binding (a push, an element store, `@shapes`,
 any method call on it), its type is instead the union of its elements,
@@ -1701,8 +1704,8 @@ does not change the value being selected.
 Index lists and boolean masks can themselves be growable or inline arrays;
 selection reads either directly. A bare `values[[]]` selects no elements.
 
-The same selections support updates: `pair[..]=0`, `pair[0..1]=[20 22]`,
-`values[0,2..]=42`, `values[indexes]=replacements` and `values[mask]=0`.
+The same selections support updates: `pair[..] = 0`, `pair[0..1] = [20 22]`,
+`values[0, 2..] = 42`, `values[indexes] = replacements` and `values[mask] = 0`.
 A scalar fills the selected elements; an array supplies exactly one replacement
 per selected element. Updates preserve the fixed length and independent copies,
 including nested managed values and overlapping source/destination selections.
@@ -1710,13 +1713,13 @@ They also work inside record fields, dictionaries and custom containers such as
 `Pool`. As with ordinary arrays, compound assignment to a selection needs an
 explicit loop.
 Spreading inline arrays into ordinary arrays works, and a spread literal can
-initialize a fixed array with a runtime length check: `let pair:Pair<int64>=[xs...]`.
+initialize a fixed array with a runtime length check: `let pair:Pair<int64> = [xs...]`.
 
 Array literals can spread arrays and sets: `[head... item tail...]`. Operands run
 once, from left to right, and each spread appends its current elements before
 the next operand runs. The result has independent value semantics, including
 nested arrays and record fields. Expected array types flow into the literal,
-so `let values:array<uint16>=[[]... set[]... 42]` works. Sets contribute their
+so `let values:array<uint16> = [[]... set[]... 42]` works. Sets contribute their
 members in insertion order, skipping removed members. Arrays also accept sets
 in `.extend(values)`. Spread call arguments are not supported.
 
@@ -1740,7 +1743,7 @@ element, `all(xs .>? 0)`, part of the planned elementwise operators). There is n
 `loop x in xs and y in ys {...}`, and `loop i in 0.. and x in xs {...}` counts
 alongside (`[loop x in xs and y in ys [x y]]` collects pairs).
 
-Records compose similarly: `let tuned:Settings=[defaults... speed=12]`.
+Records compose similarly: `let tuned:Settings = [defaults... speed=12]`.
 Later fields or record spreads replace earlier fields with the same name.
 Every operand still runs once in source order, including overwritten values;
 changes made by a later operand do not change an earlier captured record.
@@ -1775,7 +1778,7 @@ and `$intrinsic` metatags, under "Foreign functions".)
 
 Array literals take their element type from a function parameter, including
 nested arrays and optional array parameters. For example,
-`sum_words=(xs:array<uint64>)=>xs[0]+xs[1]` accepts `sum_words([20 22])` without
+`sum_words = (xs:array<uint64>) => xs[0]+xs[1]` accepts `sum_words([20 22])` without
 element casts. Overloads compare element conversions and prefer the usual
 integer or floating literal type when it fits. A literal outside a parameter's
 element range is rejected. An already constructed array keeps its element type;
@@ -1793,7 +1796,7 @@ unconstrained array made solely of machine-integer literals infers `uint64` if
 any literal exceeds `int64.max`; the remaining literals must fit that type.
 
 Equality and inequality also give an array literal the element type of the
-value being compared, on either side. For example, `let words:array<uint8>=[0 42]`
+value being compared, on either side. For example, `let words:array<uint8> = [0 42]`
 can be followed by `words =? [0 42]` or `[0 42] =? words`. This includes nested
 arrays, optional arrays, exact integers and record elements. Out-of-range
 literals still fail, and separately constructed arrays keep their own types.
@@ -1810,10 +1813,10 @@ name, in any order. `[a b] = [b a]` swaps existing variables. Nested patterns
 work in declarations and assignments:
 
 ```dewy
-let [[left top] [right bottom]]=[[10 20] [90 80]]
-[[left] [right]]=[[right] [left]]
-let [[x] [y]]=[[x=20 y=1] [x=2 y=22]]
-let [[team score] [_ other]]=["red"->20 "blue"->22]
+let [[left top] [right bottom]] = [[10 20] [90 80]]
+[[left] [right]] = [[right] [left]]
+let [[x] [y]] = [[x=20 y=1] [x=2 y=22]]
+let [[team score] [_ other]] = ["red"->20 "blue"->22]
 ```
 
 Each level follows its source type: arrays and tuples use positions, dictionaries
@@ -1833,8 +1836,8 @@ A declaration can annotate the whole source value, including nested and fixed
 arrays, records and dictionaries. The annotation supplies context for literals:
 
 ```dewy
-let [red green blue]:array<uint8>=[255 128 0]
-const [[left] [right]]:array<array<int64>>=[[20] [22]]
+let [red green blue]:array<uint8> = [255 128 0]
+const [[left] [right]]:array<array<int64 >>= [[20] [22]]
 ```
 
 `const` patterns evaluate their source once and make every extracted binding
@@ -1843,8 +1846,8 @@ Individual names can also have types in declarations, parameter patterns and
 loop patterns:
 
 ```dewy
-let [x:int64 y:float64]=[20 22]
-loop [key:string score:float64] in ["red"->20 "blue"->22] {printl(score)}
+let [x:int64 y:float64] = [20 22]
+loop [key:string score:float64] in ["red"->20 "blue"->22] { printl(score) }
 ```
 
 Each annotation uses ordinary assignment conversions on the extracted value;
@@ -1856,9 +1859,9 @@ unannotated patterns to assign existing variables. A nested bracket group
 itself cannot have a type; annotate its names or the whole source instead.
 
 ```dewy
-let values=[loop i in [0..10) i*i]
-let selected=[loop value in values if value >? 20 value]
-let lengths=[loop word in ["café" "🙂"] word->word.length]
+let values = [loop i in [0..10) i*i]
+let selected = [loop value in values if value >? 20 value]
+let lengths = [loop word in ["café" "🙂"] word->word.length]
 ```
 
 A direct call can borrow an exclusive-end mutable slice, such as
@@ -1881,12 +1884,12 @@ ranges are rejected.
 Arrays can select elements with a stored `IntRange` or a stepped slice:
 
 ```dewy
-let values=[10 20 30 40 50 60]
-let evens=values[0,2..]       # [10 30 50]
-let backwards=values[5,3..0] # [60 40 20]
-let positions=[1,3..5]
-values[positions]=42        # fill selected elements
-values[0,2..]=[1 2 3]       # one replacement per selected element
+let values = [10 20 30 40 50 60]
+let evens = values[0, 2..]       # [10 30 50]
+let backwards = values[5, 3..0] # [60 40 20]
+let positions = [1, 3..5]
+values[positions] = 42        # fill selected elements
+values[0, 2..] = [1 2 3]       # one replacement per selected element
 ```
 
 A missing endpoint extends to the array's end in the step's direction. `]`
@@ -1894,13 +1897,13 @@ includes a written endpoint and `)` excludes it. Empty selections return empty
 arrays; every selected index must be in bounds, and replacement arrays must have
 exactly the selected length. A scalar replacement fills each selected element.
 These operations preserve independent copies, including overlapping assignments
-such as `values[5,4..0]=values`. They allocate no intermediate array of indices;
+such as `values[5, 4..0] = values`. They allocate no intermediate array of indices;
 materializing a slice allocates the selected result. Read-only loops over a
 contiguous array slice can iterate the selected range without that allocation.
 Bounds still evaluate once, from left to right, and are checked before the body.
 When the body can modify the source, iteration keeps the ordinary slice copy.
 Contiguous slices accept the same assignments:
-`values[1..3]=[10 20 30]`, `values[1..3)=[10 20]`, or `values[..]=42`.
+`values[1..3] = [10 20 30]`, `values[1..3) = [10 20]`, or `values[..] = 42`.
 These assignments retain the array's length. Dotted updates such as
 `values[1..3) .+= 10` also work on slices, stepped ranges, index lists and masks.
 Stepped string slicing is not implemented.
@@ -1933,9 +1936,9 @@ stay unchanged. This combines the lookup and insertion, useful for graph visits,
 deduplication and registering entities:
 
 ```dewy
-let visited:dict<int64 int64>=[]
-let queue:array<int64>=[]
-if visited.insert_if_absent(7 1) {queue.push(7)}
+let visited:dict<int64 int64> = []
+let queue:array<int64> = []
+if visited.insert_if_absent(7 1) { queue.push(7) }
 ```
 
 Both arguments evaluate once, in order, even if the key already exists; the value
@@ -1974,10 +1977,10 @@ missing key returns outer `none`, while a present key can hold inner `none`.
 After checking the lookup result, bind its payload to check the stored value:
 
 ```dewy
-let settings:dict<string int64?>=["limit"->none]
-let found=settings.get("limit")
+let settings:dict<string int64?> = ["limit"->none]
+let found = settings.get("limit")
 if found isnt? none {
-    let limit=found
+    let limit = found
     if limit is? none printl("limit is present but unset")
 }
 ```
@@ -2007,14 +2010,14 @@ or dictionary keys; changing a copy leaves an already-inserted key independent.
 Sets retain distinct members in insertion order:
 
 ```dewy
-let tags=set["visible" "moving" "visible"]
+let tags = set["visible" "moving" "visible"]
 tags.push("selected")
-if "moving" in? tags {printl"moving entity"}
-let active=tags & set["visible" "selected"]
-let names=[loop tag in active tag]
-let [first second]=active
-let visited:set<int64>=set[]
-if 7 not in? visited {visited.push(7) printl"first visit"}
+if "moving" in? tags { printl"moving entity" }
+let active = tags & set["visible" "selected"]
+let names = [loop tag in active tag]
+let [first second] = active
+let visited:set<int64> = set[]
+if 7 not in? visited { visited.push(7) printl"first visit" }
 ```
 
 `set<T>` supplies the element type for an empty literal or narrower numeric
@@ -2049,15 +2052,15 @@ members each time. Arbitrary removals and internal compaction keep the cursor
 valid, and copied sets retain independent cursor and member values.
 
 `values.sorted()` returns an independent sorted array; `values.sort()` updates
-the receiver. `reverse=true` sorts largest first, and `key=` sorts by a key
+the receiver. `reverse = true` sorts largest first, and `key=` sorts by a key
 function, such as a function handle, a closure or a partial operator:
 
 ```dewy
-Player:type=[name:string score:int64]
-by_score=(p:Player)=>p.score
-let players=[Player["Ada" 20] Player["Bea" 42] Player["Cal" 42]]
-let leaderboard=players.sorted(key=@by_score reverse=true)
-players.sort(key=(p:Player)=>p.name.length)
+Player:type = [name:string score:int64]
+by_score = (p:Player) => p.score
+let players = [Player["Ada" 20] Player["Bea" 42] Player["Cal" 42]]
+let leaderboard = players.sorted(key=@by_score reverse=true)
+players.sort(key=(p:Player) => p.name.length)
 ```
 
 Both orders are stable: equal keys retain their original order, so Bea stays
@@ -2105,8 +2108,8 @@ checks its value's shape. Shapes are compared where values enter: a literal of
 the wrong shape is a compile-time error, other values are checked at run time:
 
 ```dewy
-product=(a:array<float64 length=[m n]> b:array<float64 length=[n p]>)=>a*b
-width=(rows:array<int64 length=[r 2]>):>int64=>r   # r is rows' first dimension
+product = (a:array<float64 length=[m n]> b:array<float64 length=[n p]>) => a*b
+width = (rows:array<int64 length=[r 2]>):>int64 => r   # r is rows' first dimension
 ```
 
 An n-dimensional array's `.length` is its shape, `[2 3]` for a matrix; there
@@ -2139,7 +2142,7 @@ the other is NaN. Floating `abs(-0.0)` returns positive zero.
 
 A `vec2`, `vec3` or `vec4` has its magnitude as the method `v.norm`;
 `v.norm(p=1)` is the p-norm (`p` at least 1; shaders have only the default
-`p=2`). `.length` always means element count, so a vector has none.
+`p = 2`). `.length` always means element count, so a vector has none.
 
 GPU `hypot` uses the shader's `float32` arithmetic and a corresponding scaled
 implementation. Shader precision and handling of subnormal values still depend
@@ -2233,10 +2236,10 @@ ranges, forward or backward, inclusive or exclusive endpoints, and stored
 `IntRange` values:
 
 ```dewy
-let selected_rows = [0,2..rows(matrix))
+let selected_rows = [0, 2..rows(matrix))
 let sample = matrix[selected_rows [..]]
-let flipped = matrix[[..] [end,end-1..]]
-matrix[selected_rows [0,2..end]] .+= 10
+let flipped = matrix[[..] [end, end-1..]]
+matrix[selected_rows [0, 2..end]] .+= 10
 ```
 
 An array of indexes selects those positions of an axis, in order:
@@ -2281,7 +2284,7 @@ including array comprehensions and fused dotted expressions; release builds
 apply broader optimization. Bounds and overlap guards select a scalar fallback
 when a whole loop cannot safely use SIMD; tail elements also use scalar code.
 Web builds use the same scalar
-operations. `SLOPPY_THREADS=1` restricts native execution to the
+operations. `SLOPPY_THREADS = 1` restricts native execution to the
 calling thread.
 
 `value.to(device)` places a value's arrays on a device, and computation
@@ -2310,7 +2313,7 @@ the point where CPU code needs the result.
 
 Native Linux programs try Vulkan, then offscreen GLES; browser builds use
 WebGL 2 where available. `gpu_available()` reports whether the driver path is
-active. Otherwise—including Node and `SLOPPY_SOFTWARE=1`—the same expression runs
+active. Otherwise—including Node and `SLOPPY_SOFTWARE = 1`—the same expression runs
 on the CPU. GPU functions must use shader-compatible numeric values and cannot
 capture closures or allocate managed collections. These restrictions are checked
 at compilation even if execution will use the CPU fallback. Exact rational
@@ -2332,8 +2335,8 @@ collects its results in input order:
 let squares = [parallel i in [0..1000) i*i]
 let shifted = [parallel x in squares x+1]
 let saved = shifted
-parallel @x in shifted {x*=2}
-parallel x in shifted {$runtime_assert(x >=? 2)}
+parallel @x in shifted { x *= 2 }
+parallel x in shifted { $runtime_assert(x >=? 2) }
 $runtime_assert(saved[0] =? 1 and shifted[0] =? 2)
 ```
 
@@ -2353,8 +2356,8 @@ independent value semantics. Collection preserves source order, so a subsequent
 `sum` uses the same reduction order as the sequential collection. Scheduling
 does not reassociate reductions.
 
-Native programs use a persistent worker pool. `SLOPPY_THREADS=2` limits it to
-two threads including the caller; `SLOPPY_THREADS=1` runs on the caller. Nested
+Native programs use a persistent worker pool. `SLOPPY_THREADS = 2` limits it to
+two threads including the caller; `SLOPPY_THREADS = 1` runs on the caller. Nested
 operations share the same pool, and a caller waiting at a join helps run ready
 work. Forks stay local until a heartbeat exposes work to another worker; small
 scoped joins use direct calls on the sequential path. Web builds run serially with
@@ -2370,8 +2373,8 @@ unions compose automatically; raw-storage handles and escaping places do not.
 A proven disjoint scoped partition is checked separately. Atomic handles have
 shared identity and can cross tasks.
 
-A type opts out with a row: `Counter:type=[n:int64 $send=false]` cannot be
-moved into a task (captured, bound or returned), and `$sync=false` keeps it out
+A type opts out with a row: `Counter:type = [n:int64 $send = false]` cannot be
+moved into a task (captured, bound or returned), and `$sync = false` keeps it out
 of storage that tasks share, such as a module-level binding a `parallel` body
 reads. A bare `$send` or `$sync` row claims the property. A claim the structure
 already gives needs nothing; one the compiler cannot verify (a raw `ptr<T>`
@@ -2388,8 +2391,8 @@ native backend implements every order with sequentially consistent instructions,
 which is stronger than requested. For example:
 
 ```dewy
-let hits=atomic(0)
-parallel i in [0..1000) {hits.add(1 'relaxed')}
+let hits = atomic(0)
+parallel i in [0..1000) { hits.add(1 'relaxed') }
 $runtime_assert(hits.load'acquire' =? 1000)
 ```
 
@@ -2404,10 +2407,10 @@ natural alignment. Padding a handle pads the handle, not its separate allocation
 Waiting work uses a structured task group on the Linux threads backend:
 
 ```dewy
-work=(n:int64)=>n*2
+work = (n:int64) => n*2
 concurrent {
-    let a=spawn work(21)
-    let b=spawn work(20)
+    let a = spawn work(21)
+    let b = spawn work(20)
 }
 # a and b are available here: their results, or Canceled / OutOfMemory.
 ```
@@ -2467,11 +2470,11 @@ without its other half, are errors here and in `parse_json`. A missing field
 without a default is a `TextError` naming it:
 
 ```dewy
-Settings:type=[player:uint64 volume:float64=0.5 fullscreen:bool=false]
-main=()=>{
-    let loaded=from_json<Settings>(r'{"player":18446744073709551615}')
-    if loaded is? TextError {printl(loaded.message) return 1}
-    let updated:Settings=[loaded... fullscreen=true]
+Settings:type = [player:uint64 volume:float64=0.5 fullscreen:bool=false]
+main = () => {
+    let loaded = from_json<Settings>(r'{"player":18446744073709551615}')
+    if loaded is? TextError { printl(loaded.message) return 1 }
+    let updated:Settings = [loaded... fullscreen=true]
     printl(to_json(updated 2))
     return 0
 }
@@ -2514,15 +2517,15 @@ one. A `Name` value passes where an `A` or a `B` is wanted, as those fields.
 Intersections are module-level declarations of plain (not minted) records.
 
 ```dewy
-Empty:type=type of error
-ParseError:type=type of error & [message:string]
-parse=(text:string):>int64|ParseError=>{
-    let n=to_int(text)
+Empty:type = type of error
+ParseError:type = type of error & [message:string]
+parse = (text:string):>int64|ParseError => {
+    let n = to_int(text)
     if n is? none return ParseError["invalid integer"]
     return n
 }
-twice=(text:string):>int64|ParseError=>{
-    let n=parse(text) or_throw
+twice = (text:string):>int64|ParseError => {
+    let n = parse(text) or_throw
     return n*2
 }
 ```
@@ -2552,7 +2555,7 @@ the call's result.
 
 A function without a declared result type infers the kinds it throws: each
 `return` of an error and each `or_throw` adds its kinds to the result, so
-`parse=(text:string)=>{... return ParseError[...] ... return n}` gives
+`parse = (text:string) => { ... return ParseError[...] ... return n }` gives
 `int64 | ParseError`. A declared result fixes the set instead.
 
 `main` is optional: without it a file runs top to bottom as a script. With it,
@@ -2575,14 +2578,14 @@ or an error. An error can never report success. `dewy build --exit-codes file.de
 prints the table without building.
 
 ```dewy
-UsageError:type=type of error & [message:string]
-Offline:type=type of error & [exit_code:int64=69]
-connect=(host:string):>void|Offline=>{
+UsageError:type = type of error & [message:string]
+Offline:type = type of error & [exit_code:int64=69]
+connect = (host:string):>void|Offline => {
     if host =? "nowhere" return Offline[]
     printl"connected to {host}"
 }
-main=():>void|UsageError|Offline=>{
-    let argv=args()
+main = ():>void|UsageError|Offline => {
+    let argv = args()
     if argv.length <? 2 return UsageError["usage: fetch HOST"]
     connect(argv[1]) or_throw
 }
@@ -2599,8 +2602,8 @@ text, and `path as string` is that text too, so paths are joined by
 interpolation: `p"{root}/{name}.csv"`. There is no `join` method.
 
 ```dewy
-main=():>void=>{
-    let source=p"project/src/main.dewy"
+main = ():>void => {
+    let source = p"project/src/main.dewy"
     match source.read_text {
         text:string => printl(text)
         <FileNotFound> => printl"no such file: {source}"
@@ -2691,13 +2694,13 @@ In the true branch of `if root.contains(p) {...}`, `p` is a `SafePath`, and it
 stays one for the rest of the block after `if not root.contains(p) return ...`.
 
 ```dewy
-let root=p"/srv/site/static"
-serve_file=(f:SafePath):>Response | FileError=>{...}
-handle=(req:Request):>void | PathEscape | FileError=>{
-    let f=p"{root}/{req.name}"
+let root = p"/srv/site/static"
+serve_file = (f:SafePath):>Response | FileError => { ... }
+handle = (req:Request):>void | PathEscape | FileError => {
+    let f = p"{root}/{req.name}"
     serve_file(root.confine(f) or_throw) or_throw
     if root.contains(f) { serve_file(f) or_throw }
-    let n=f.read_text   # warning: f holds untrusted input
+    let n = f.read_text   # warning: f holds untrusted input
 }
 ```
 
@@ -2725,12 +2728,12 @@ or its `within` deadline passes.
 
 ```dewy
 import net
-main=():>void | net.NetError | Canceled=>{
-    let server=net.tcp_listen(0) or_throw           # 0: a free port, on loopback
-    let client=net.tcp_connect("127.0.0.1" server.port) or_throw
-    let peer=net.tcp_accept(server) or_throw
+main = ():>void | net.NetError | Canceled => {
+    let server = net.tcp_listen(0) or_throw           # 0: a free port, on loopback
+    let client = net.tcp_connect("127.0.0.1" server.port) or_throw
+    let peer = net.tcp_accept(server) or_throw
     net.tcp_send(client "hello") or_throw
-    let got=net.tcp_receive(peer)
+    let got = net.tcp_receive(peer)
     if got is? none return                           # the client closed
     printl((got or_throw) as string | none)
     loop stream in [client peer] net.tcp_close(stream)
@@ -2767,9 +2770,9 @@ parameters also strings (passed as a zero-terminated `char *`) and function type
 keyword arguments give the C name and the library:
 
 ```dewy
-strlen=(s:ptr<uint8>):>uint64 => $extern
-getenv=(name:string):>ptr<uint8>? => $extern
-sleep_ms=(ms:uint32):>void => $extern(name='Sleep' lib='kernel32')
+strlen = (s:ptr<uint8>):>uint64 => $extern
+getenv = (name:string):>ptr<uint8>? => $extern
+sleep_ms = (ms:uint32):>void => $extern(name='Sleep' lib='kernel32')
 ```
 
 Without `lib=`, or with `lib='c'`, the function is in the C library
@@ -2792,11 +2795,11 @@ numbers, bools, pointers, and records of them. Such a record is a C struct: its
 fields in order, each at its natural alignment, so C fills one in place:
 
 ```dewy
-TimeVal:type=[seconds:int64 microseconds:int64]
-gettimeofday=(now:ptr<TimeVal> zone:ptr<uint8>?):>int32 => $extern
-main=():>void=>{
+TimeVal:type = [seconds:int64 microseconds:int64]
+gettimeofday = (now:ptr<TimeVal> zone:ptr<uint8>?):>int32 => $extern
+main = ():>void => {
     $unsafe
-    let now:array<TimeVal>=[TimeVal[0 0]]
+    let now:array<TimeVal> = [TimeVal[0 0]]
     gettimeofday(now.ptr none)
     printl(now[0].seconds)
 }
@@ -2812,8 +2815,8 @@ check what foreign code does, so the boundary marks where a person must. No
 bundle may hold `$unsafe`. A safe wrapper confines it:
 
 ```dewy
-getpid=():>int32 => $extern
-pid=():>int32 => {
+getpid = ():>int32 => $extern
+pid = ():>int32 => {
     $unsafe
     getpid()
 }
@@ -2823,7 +2826,7 @@ A foreign call is opaque to effect rows: a function declared `& no_effects`, or
 any closed row, cannot call one. It may block, so a `parallel` body cannot call
 one either; tasks can. On Linux, a program with tasks that calls C loads C's
 library on its main thread before its first task. A row written on the `$extern` declaration
-itself (`labs=(x:int64):>int64 & no_effects => $extern`) is trusted instead, as
+itself (`labs = (x:int64):>int64 & no_effects => $extern`) is trusted instead, as
 part of the unsafe claim.
 
 `$export` on the line before a module function gives it the C calling
@@ -2832,10 +2835,10 @@ names its symbol where the target exports one (WebAssembly builds export it to
 the page). `@f` passes it where a C function type is expected:
 
 ```dewy
-qsort=(base:ptr<int32> count:uint64 size:uint64 compare:<(a:ptr<int32> b:ptr<int32>):>int32>):>void => $extern
+qsort = (base:ptr<int32> count:uint64 size:uint64 compare:<(a:ptr<int32> b:ptr<int32>):>int32>):>void => $extern
 
 $export
-ascending=(a:ptr<int32> b:ptr<int32>):>int32 => {
+ascending = (a:ptr<int32> b:ptr<int32>):>int32 => {
     $unsafe
     return if a[0] <? b[0] -1 else if a[0] >? b[0] 1 else 0
 }
@@ -2846,7 +2849,7 @@ An exported function takes and returns the same kinds of values, but not yet
 exported function only through a pointer that Dewy gives it.
 
 A function whose body is `$intrinsic` states one the compiler provides
-(`sqrt=(x:float64):>float64 => $intrinsic`); any other name is an error.
+(`sqrt = (x:float64):>float64 => $intrinsic`); any other name is an error.
 
 ## Loops, text and optional values
 
@@ -2893,9 +2896,9 @@ optional dictionary lookup. Direct indexing returns the stored element itself.
 Loop bindings can unpack structured values, including nested groups:
 
 ```dewy
-let scores=["red"->[20 22] "blue"->[4 8]]
-loop [team [home away]] in scores {printl"{team}: {home+away}"}
-loop [x y z] in [[1 2 3] [4 5 6]] {printl(x+y+z)}
+let scores = ["red"->[20 22] "blue"->[4 8]]
+loop [team [home away]] in scores { printl"{team}: {home+away}" }
+loop [x y z] in [[1 2 3] [4 5 6]] { printl(x+y+z) }
 ```
 
 With two bindings, dictionaries yield keys and values. Several bindings over an array unpack
@@ -2908,7 +2911,7 @@ body never enters. Nested groups also work in indexed-sequence `and` headers;
 Dictionaries also work in counted and zipped headers:
 
 ```dewy
-loop i in 0.. and team in scores {printl"{i}: {team}"}
+loop i in 0.. and team in scores { printl"{i}: {team}" }
 loop [team [home away]] in scores and factor in [2 3] {
     printl"{team}: {(home+away)*factor}"
 }
@@ -2925,10 +2928,10 @@ work as finite indexed sequences in loops and comprehensions. Length describes
 integer positions from zero through `container.length-1`. For example:
 
 ```dewy
-Series:type=[first:int64 count:int64]
-length=(s:Series)=>s.count
-__index__=(s:Series index:int64)=>s.first+index
-let values=[loop value in Series[40 3] value] # [40 41 42]
+Series:type = [first:int64 count:int64]
+length = (s:Series) => s.count
+__index__ = (s:Series index:int64) => s.first+index
+let values = [loop value in Series[40 3] value] # [40 41 42]
 ```
 
 The source expression evaluates once and iteration retains its value; modifying
@@ -2972,7 +2975,7 @@ is the worklist idiom:
 let order:array<int64> = [start]
 loop node in @order {
     loop next in edges[node] {
-        if not seen[next] { seen[next] = true  order.push(next) }
+        if not seen[next] { seen[next] = true order.push(next) }
     }
 }
 ```
@@ -3025,9 +3028,9 @@ an `@` parameter or a global still cannot run inside that loop.
 `[0..10)` exclude the upper bound. Give the first two values for a stepped range:
 
 ```dewy
-loop x in [0,16..width) {printl(x)}
-loop y in [10,8..0] {printl(y)}
-let odd_squares=[loop i in [1,3..10] i*i]
+loop x in [0, 16..width) { printl(x) }
+loop y in [10, 8..0] { printl(y) }
+let odd_squares = [loop i in [1, 3..10] i*i]
 ```
 
 The step is the second value minus the first; it can ascend or descend but must
@@ -3048,10 +3051,10 @@ strings support contiguous grapheme slices.
 Store a bounded range to reuse it, pass it to functions or return it:
 
 ```dewy
-evens = [0,2..100)
+evens = [0, 2..100)
 sum = (r:IntRange):>int64 => {
-    let total:int64=0
-    loop value in r {total+=value}
+    let total:int64 = 0
+    loop value in r { total += value }
     return total
 }
 printl(sum(evens))
@@ -3087,8 +3090,8 @@ all its inputs end; each exhausted input supplies `none`:
 
 ```dewy
 loop left in [10 20] or right in [1 2 3] {
-    if left isnt? none {printl(left)}
-    if right isnt? none {printl(right)}
+    if left isnt? none { printl(left) }
+    if right isnt? none { printl(right) }
 }
 ```
 
@@ -3103,14 +3106,14 @@ has no type: `loop byte in text as array<uint8> { ... }` iterates
 `loop { ... }` with nothing after the block on its line runs until `break` or
 `return` leaves it, like `loop true { ... }`. A block followed on the same line
 by a body is that loop's condition instead, evaluated before each pass:
-`loop {calls+=1; calls <? 4} {total+=1}`.
+`loop { calls += 1; calls <? 4 } { total += 1 }`.
 
 An `else` after a loop runs only if its body never enters:
 
 ```dewy
-head_or=<T>(values:array<T> fallback:T):>T=>{
-    loop value in values {return value}
-    else {return fallback}
+head_or = <T>(values:array<T> fallback:T):>T => {
+    loop value in values { return value }
+    else { return fallback }
 }
 ```
 
@@ -3121,7 +3124,7 @@ Each loop's bindings and label belong to that arm; they are unavailable in its
 fallback. A comprehension can collect fallback elements for an empty loop.
 A loop expresses its body's values: a collector takes them, and a function
 without a written result that ends in one gives them, as in
-`squares=(n:int64)=>{loop i in 0..n i^2}` and `[squares(3)]`.
+`squares = (n:int64) => { loop i in 0..n i^2 }` and `[squares(3)]`.
 
 Place `$name` before a loop to target it from nested loops:
 
@@ -3129,8 +3132,8 @@ Place `$name` before a loop to target it from nested loops:
 $rows
 loop row in [0..height) {
     loop column in [0..width) {
-        if skip_row(row) {continue $rows}
-        if finished(row, column) {break $rows}
+        if skip_row(row) { continue $rows }
+        if finished(row column) { break $rows }
     }
 }
 ```
@@ -3234,9 +3237,9 @@ allocates, in it and in the functions it calls, bumps the arena's cursor.
 `scratch.reset()` gives all of it back at once:
 
 ```dewy
-let scratch=Arena[]
+let scratch = Arena[]
 loop request in requests {
-    let summary=$allocator(@scratch) build_summary(request)
+    let summary = $allocator(@scratch) build_summary(request)
     send(summary)
     scratch.reset()
 }
@@ -3279,10 +3282,10 @@ over constant ranges); anything else is reported with the reason.
 
 ```dewy
 $no_hidden_costs
-count=():>int64 | OutOfMemory=>{
-    let a=arena(4096) or_throw
-    let n=$allocator(@a) {
-        let xs:array<int64>=[1 2 3]
+count = ():>int64 | OutOfMemory => {
+    let a = arena(4096) or_throw
+    let n = $allocator(@a) {
+        let xs:array<int64> = [1 2 3]
         xs.length
     }
     n
@@ -3359,8 +3362,8 @@ it is neither `none` nor -1, so `??` does not apply; test it with `is? Missing`,
 forward it with `or_throw`, or `match` it.
 
 ```dewy
-let at="key=value".find("=")
-if at isnt? Missing {printl(at)}       # 3
+let at = "key=value".find("=")
+if at isnt? Missing { printl(at) }       # 3
 printl([3 1 4].index_of(9))            # Missing
 ```
 
@@ -3374,7 +3377,7 @@ They are not Dewy's ordinary grapheme indices; use the returned `text` directly.
 ```dewy
 let date = regex(r"(\d{4})-(\d\d)-(\d\d)")
 let found = "due 2026-10-19!".find(date)
-if found isnt? Missing {printl(found.groups[0])}
+if found isnt? Missing { printl(found.groups[0]) }
 let rewritten = "due 2026-10-19!".replace(date "$3/$2/$1")
 let fields = "a, b;c".split(regex(r"[,;]\s*"))
 ```
@@ -3464,7 +3467,7 @@ printl(format(3.14159 ".2f"))        # 3.14
 printl(format(255 "#06x"))          # 0x00ff
 printl(format(1234567 ","))         # 1,234,567
 printl(format("θ" "^5"))           # two spaces on each side
-let angle=12.25
+let angle = 12.25
 printl("θ = {format(angle ".1f")}°")
 ```
 
@@ -3494,9 +3497,9 @@ compile time, including for web builds.
 `Type?` holds a value or `none`. `is?` narrows optional and union values:
 
 ```dewy
-let lengths=["café"->4]
-let found=lengths.get("café")
-let size=match found {n:int64=>n <none>=>0}
+let lengths = ["café"->4]
+let found = lengths.get("café")
+let size = match found { n:int64 => n <none> => 0 }
 printl"Length: {size}"
 ```
 
@@ -3531,11 +3534,11 @@ A union compares with one of its members directly: `v =? 3` is true only when
 Literal arms also work directly on unions:
 
 ```dewy
-classify=(value:int64|string):>string=>match value {
-    <0>=>"zero"
-    <"quit">=>"exit"
-    n:int64=>"number {n}"
-    text:string=>text
+classify = (value:int64|string):>string => match value {
+    <0> => "zero"
+    <"quit"> => "exit"
+    n:int64 => "number {n}"
+    text:string => text
 }
 ```
 
@@ -3569,7 +3572,7 @@ expression), a guard arm such as `small:int<small <? 100>` compares the value
 itself. A guard arm's bounds are facts in its body.
 
 A type arm can group a subset of the union's members. For a value of type
-`int64|string|bool`, `part:int64|string=>...` binds an independent `int64|string`
+`int64|string|bool`, `part:int64|string => ...` binds an independent `int64|string`
 value and narrows the original variable or field to the same subset. The remaining
 `_` arm knows the value is `bool`. `<int64|string>=>...` performs the same test
 without introducing a binding. Subset aliases and generic type parameters work
@@ -3578,8 +3581,8 @@ too. Arms run in source order, including when their subsets overlap.
 Membership uses `in?`; negate it with `not in?`:
 
 ```dewy
-let names=["apple" "pear"]
-let counts=["apple"->3 "pear"->5]
+let names = ["apple" "pear"]
+let counts = ["apple"->3 "pear"->5]
 printl("pear" in? names)
 printl("apple" in? counts)
 printl("fé" in? "café")
@@ -3593,7 +3596,7 @@ needle and then the container evaluate once in source order. For a range, both
 specified endpoints evaluate once after the needle, even if the lower-bound
 comparison is false. Bounded signed-word stepped literals and stored `IntRange`
 values check the stride as well as the bounds, without constructing an array.
-Custom containers can provide a `contains(container, needle):>bool` overload;
+Custom containers can provide a `contains(container needle):>bool` overload;
 a callable field named `contains` is not used by membership.
 
 Random numbers: `random()` gives a float in `[0, 1)`, `random_int(lo hi)` a
@@ -3611,8 +3614,8 @@ secure random source (getrandom, getentropy, RtlGenRandom, or
 
 ## Directives
 
-A setting is a metatag on a line of its own: `$name` or `$name=true` turns it
-on and `$name=false` turns it off. It holds throughout the scope it is written
+A setting is a metatag on a line of its own: `$name` or `$name = true` turns it
+on and `$name = false` turns it off. It holds throughout the scope it is written
 in, wherever in that scope: the module at file level, a function in its body,
 or any other block. An inner scope may change it again. A scope sets each
 setting at most once, and the value must be a literal `true` or `false`.
@@ -3622,7 +3625,7 @@ string's counted in graphemes, as `text.length` counts), a nonzero divisor, a va
 parameter. A proven obligation has no runtime check. These settings decide what
 an unproven one does:
 
-- `$runtime_checks=false`: it is a compile error with the reason and a fix
+- `$runtime_checks = false`: it is a compile error with the reason and a fix
   (no hidden traps). This becomes the default in a later release; until then
   the default is a runtime check.
 - `$runtime_checks`: it compiles to a runtime check, with no warning. A failing
@@ -3631,7 +3634,7 @@ an unproven one does:
   `index 5 out of bounds (length 3)`, and exits with status 101. Proven checks
   still vanish.
 - `$prototype`: as `$runtime_checks`, with a `prototype: …` warning at each
-  site while compiling, for development. `$prototype_warnings=false` silences
+  site while compiling, for development. `$prototype_warnings = false` silences
   the warnings. Obligations of `$proof` functions and `$assert` are never
   deferred.
 
@@ -3653,23 +3656,23 @@ A bundle is one metatag for several settings, defined at module level:
 ```dewy
 $careful = {
     $explicit_copies
-    $runtime_checks=false
+    $runtime_checks = false
 }
 ```
 
 Writing `$careful` holds every setting in the bundle throughout that scope.
-Inside it, a setting that contradicts the bundle is an error; `$careful=false`
+Inside it, a setting that contradicts the bundle is an error; `$careful = false`
 opts a nested scope out of the whole bundle first. `$default_row = <effect row>`
 in a bundle gives each function declared in its scope without an effect row
 of its own that row (see "Functions and values").
 
 The library defines `$no_hidden_costs`, the strict lane (lib/directives.dewy):
-`$explicit_copies`, `$runtime_checks=false`, `$prototype=false` and
+`$explicit_copies`, `$runtime_checks = false`, `$prototype = false` and
 `$default_row = no allocates & no panics`. Code in it has no hidden allocation
 (a detach allocates), no implicit costly copy, no runtime check and no call of
 code that may panic (the `panics` effect, "Functions and values"), and it
 cannot use `$runtime_checks` or `$prototype`. A function that needs more opts out with
-`$no_hidden_costs=false` in its body, or declares a row of its own. The effect
+`$no_hidden_costs = false` in its body, or declares a row of its own. The effect
 inventory is still partial (see "Functions and values"): an operation it does
 not classify is rejected there. `$realtime` is reserved for a stronger future bundle.
 
@@ -3792,7 +3795,7 @@ steps, and mouse/touch dragging. Once pressed, a slider keeps its drag until
 release even outside its bounds; crossing another control does not transfer it.
 `hud_slider(rect value low high step=0.0 label="")` places the same kind of
 control directly in a HUD. A zero step gives continuous dragging, and descending
-ranges work too. `ui_style=ui_light_style()` supplies a light-background theme.
+ranges work too. `ui_style = ui_light_style()` supplies a light-background theme.
 The [pendulum example](../examples/controls.dewy) combines these
 controls with Greek letters, superscripts and mathematical symbols from the
 bundled font, including `θ`, `π`, `√`, `≈`, `≤`, `∞`, `x₀` and `m/s²`.
@@ -3804,11 +3807,11 @@ window, ready for `save_png(image path)`. Lines, points and bars accept arrays o
 A line can omit its x array to use sample indices. For example:
 
 ```dewy
-let chart=Chart[title="Measurements" equal_axes=true
+let chart = Chart[title="Measurements" equal_axes=true
     legend_at=LegendAt.bottom_left]
 chart.line([0 1 2] [0 2 0] "trial" dash=6.0)
 chart.annotate(1.0 2.0 "peak")
-let picture=chart_image(chart 800 500)
+let picture = chart_image(chart 800 500)
 save_png(picture "measurements.png")
 ```
 
