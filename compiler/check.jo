@@ -8,7 +8,8 @@ use 'units.jo'
 use 'definite.jo'
 use 'decimals.jo'
 use 'growth.jo'
-use 'untrusted.jo'
+use 'safe_paths.jo'
+use 'warn_if.jo'
 use 'errors.jo'
 use 'targets.jo'
 use 'icount.jo'
@@ -1867,6 +1868,7 @@ fn_sig = (decl: int) -> FnSig:
         seen: int[]
         if effect_qualified_type(int(sig.ret), seen): fatal(nodes[decl].pos, "extern callable effect contracts require a checked implementation")
     if nodes[decl].sval != 0: sig.contract = i32(effect_decl_contract(decl, sig.params))
+    if nodes[decl].c != 0 and nodes[decl].kind == .fn_: wi_read_decl(decl)
     scope_reset(mark)
     ctxs.pop()
     cx = saved
@@ -2097,6 +2099,7 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
             else if an == "deterministic": fns[f].deterministic = true
             else if an == "noinline": fns[f].noinline = true
             else if an == "sink" or an == "guard": ut_note_attribute(an)
+            else if an == "warn_if": pass
             else if an == "plain":
                 # (its type arguments are copied as bytes, e.g. to the GPU)
                 loop z in zt:
@@ -6403,6 +6406,7 @@ check_init_now = (k: int):
 check_program = (main_path: str):
     console_type_id = -1
     ut_reset()
+    wi_reset()
     ownership_reset()
     facts_reset()
     refine_reset()

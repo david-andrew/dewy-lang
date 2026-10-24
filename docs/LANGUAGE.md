@@ -3289,6 +3289,15 @@ compile-time call chain. Ordinary division and bounds checks remain runtime
 checks; these facts do not change their optimization.
 It never becomes a runtime check. The directive owns the comma
 after its condition, and `$assert(condition, "message")` is the same form.
+
+`$warn_if condition "message"`, on the line before a function declaration, is a
+soft precondition: a call from the program's own code gets a warning with the
+message (an editor squiggle too) unless the compiler proves the condition false
+there. It never stops a build and adds no code. The condition is a type test of
+a parameter (`x isnt? Small`, decided from the argument's checked and narrowed
+type), integer comparisons of parameters, their `.length` and constants whose
+negation is a conjunction (`i <? 0 or i >=? xs.length`, decided from the facts
+at the call, as a refined parameter is), or `p isnt? SafePath` (see "Paths").
 General compile-time execution has no mandatory step limit or termination proof.
 It cannot read runtime locals or mutable globals, mutate global state, perform
 I/O, call external functions, or access host memory. Bounded read-only views of

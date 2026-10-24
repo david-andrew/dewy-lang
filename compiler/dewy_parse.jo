@@ -561,6 +561,7 @@ dw_directive = (id: int) -> int:
         return bc_call("$lend", [owner, reservation, dw_expr(dw_child(id, 2))], pos)
     if name == "allocator": return dw_allocator(id)
     if name == "breakpoint": return bc_call("$breakpoint", [], pos)
+    if name == "warn_if": fatal(pos, "`$warn_if` goes on the line before a module-level function declaration: `$warn_if condition \"message\"`")
     if name != "assert" and name != "runtime_assert": return dw_unimplemented(id, name)
     condition = dw_child(id, 0)
     message = dw_child(id, 1)
@@ -3714,6 +3715,19 @@ dw_overload_members = (id: int, name: str, declarations: mut int[]):
     else if dw_op(id) == .function: declarations.push(dw_function(id, name))
     else: dw_fail(id, "an overload group member other than a function literal")
 
+# `$warn_if condition "message"` before a function declaration: a soft precondition
+# (compiler/warn_if.jo), kept as the declaration's `warn_if` attribute (condition, message).
+dw_warn_if_pending: int[]
+dw_warn_if_attr = (tag: int) -> int:
+    pos = dewy_syntax[tag].pos
+    condition = dw_child(tag, 0)
+    message = dw_child(tag, 1)
+    if condition == 0 or message == 0: fatal(pos, "`$warn_if` takes a condition and a message: `$warn_if condition \"message\"`")
+    if dewy_syntax[dw_unwrap(message)].kind != .string: fatal(dewy_syntax[message].pos, "a `$warn_if` message is a string literal: the compiler shows it")
+    at = dw_ffi_attr("warn_if", dw_expr(condition), pos)
+    nodes[at].b = i32(dw_expr(message))
+    at
+
 # Expand a static overload group directly into ordinary declarations. This keeps
 # overload selection, generic specialization and callable context in one checker.
 dw_top_declarations = (id: int) -> int[]:
@@ -3727,10 +3741,18 @@ dw_top_declarations = (id: int) -> int[]:
     if dw_export_tag(tag):
         dw_export_begin(tag)
         return []
+    if dewy_syntax[tag].kind == .directive and dewy_syntax[tag].text == "warn_if":
+        dw_warn_if_pending.push(dw_warn_if_attr(tag))
+        return []
     exported = dw_export_pos != 0
     pending = proof_pending
+    soft = dw_warn_if_pending
+    dw_warn_if_pending = []
     made = dw_top_declarations_inner(id)
     if exported: dw_export_attach(made)
+    if soft.len() > 0:
+        if made.len() != 1 or nodes[made[0]].kind != .fn_: fatal(nodes[soft[0]].pos, "`$warn_if` goes on the line before the function declaration whose callers it warns")
+        dw_ffi_attach(made[0], soft)
     if pending:
         if made.len() != 1 or nodes[made[0]].kind != .fn_: fatal(dewy_syntax[id].pos, "$proof requires a function declaration")
         if not proof_decls.has(made[0]): proof_decls[made[0]] = 0

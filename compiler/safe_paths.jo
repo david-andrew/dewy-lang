@@ -42,6 +42,7 @@ use 'refine.jo'
 ut_safe_used = false        # the program's own code names SafePath (resolve_type)
 ut_sources = false          # __untrusted was instantiated (get_fn_inst)
 ut_sinks = false            # ... and an @sink one
+ut_paths_used = false       # a call from the program's own code has a SafePath soft precondition
 ut_safe_name = intern("SafePath")
 ut_path_name = intern("Path")
 ut_p_name = intern("p")
@@ -113,6 +114,7 @@ ut_reset = ():
     ut_safe_used = false
     ut_sources = false
     ut_sinks = false
+    ut_paths_used = false
     ut_decl_kinds = {}
     ut_param_safe = {}
     ut_lo = []

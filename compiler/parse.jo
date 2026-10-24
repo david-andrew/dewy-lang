@@ -2753,6 +2753,8 @@ parse_toplevel = () -> int:
         nodes[at].name = i32(expect_ident("attribute name"))
         if accept(.lparen):
             nodes[at].a = i32(parse_expr())
+            # (`@warn_if(condition, "message")`: a second argument)
+            if accept(.comma): nodes[at].b = i32(parse_expr())
             expect(.rparen, "")
         attrs.push(at)
         skip_newlines()
