@@ -2,13 +2,13 @@
 # the window, input, font, renderer, frame loop, and native/web backends.
 from p"paddle_model.dewy" import fresh, advance
 
-let world=fresh()
+let world = fresh()
 
-update=(dt:float64):>void=>{
+update = (dt:float64):>void => {
     advance(@world min(dt 0.05) mouse_pos().x)
 }
 
-draw=():>void=>{
+draw = ():>void => {
     clear(rgb(0.025 0.045 0.08))
     rect(20.0 100.0 1240.0 2.0 rgb(0.15 0.25 0.35))
     rect(20.0 660.0 1240.0 2.0 rgb(0.15 0.25 0.35))

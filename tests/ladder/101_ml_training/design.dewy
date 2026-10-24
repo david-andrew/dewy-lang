@@ -166,7 +166,7 @@ main = ():>void => {
     loop c in [0..CLASSES) {
         printl("  class {c}: {[loop p in [0..CLASSES) string(counts[c p])].join(" ")}")
     }
-    let probes:array<float64 length=[4 2]> = [(-1.0) (-1.0); 1.0 (-1.0); 0.0 0.0; 0.5 0.5]
+    let probes:array<float64 length=[4 2]> = [(-1.0) (-1.0) ; 1.0 (-1.0) ; 0.0 0.0 ; 0.5 0.5]
     let y = forward(m probes.to(device)).y
     let classes = predict(y)
     loop r in 0.. and guess in classes {

@@ -4,8 +4,8 @@ from p"dunes_model.dewy" import WORLD, dune_height, sand_color, robe_vertices, r
 from units import rad
 
 # ---------------- game state ----------------
-Glyph:type=[
-    pos: vec3
+Glyph:type = [
+    pos:vec3
     taken = false
 ]
 let pos = vec3(40 float32(dune_height(40.0 150.0)) 150)
@@ -14,9 +14,9 @@ let yaw:float64 = 0.0 # camera orbit angle around the traveler (0: looking north
 let heading = PI
 let grounded = true
 let energy:float64 = 1.0
-let scarf: array<vec3> = []
+let scarf:array<vec3> = []
 let scarf_len = 6
-let glyphs: array<Glyph> = []
+let glyphs:array<Glyph> = []
 let collected = 0
 let won = false
 let won_t:float64 = 0.0
@@ -37,7 +37,7 @@ let banner_mesh = mesh(ribbon_vertices(fill(vec3(0 0 0) 12) 0.25 0.0) ribbon_ind
 let light_pillar = cylinder_mesh(3.0 420.0 32)
 let beam_sh = make_shader(shader(@beam_vs @beam_fs))
 let footprint = cylinder_mesh(0.09 0.03 10)
-let steps: array<vec3> = []
+let steps:array<vec3> = []
 let step_side:float64 = 1.0
 let last_step = vec3(0 0 0)
 let moved:float64 = 0.0
@@ -45,8 +45,8 @@ let pillar = cylinder_mesh(0.7 7.0 10)
 let block = cube_mesh(1.0)
 let ring = sphere_mesh(0.45 20 10)
 let beacon = sphere_mesh(3.0 24 12)
-let ruins: array<Instance3D> = []
-let stones: array<Instance3D> = []
+let ruins:array<Instance3D> = []
+let stones:array<Instance3D> = []
 loop c in [0..9) {
     let cx = random(-120.0 120.0)
     let cz = random(-100.0 130.0)
@@ -80,29 +80,29 @@ loop k in [0..12) {
     let z = sin(a*rad) * r * 0.8 + 10.0
     glyphs.push(Glyph(vec3(float32(x) float32(dune_height(x z) + 2.2) float32(z))))
 }
-let posts: array<vec3> = []
+let posts:array<vec3> = []
 loop k in [0..14) {
     let x = random(-110.0 110.0)
     let z = random(-90.0 140.0)
     posts.push(vec3(float32(x) float32(dune_height(x z) - 0.5) float32(z)))
 }
 let post_mesh = cylinder_mesh(0.08 3.4 8)
-let dust: array<vec3> = []
-loop k in [0..400) {dust.push(vec3(float32(random(-30.0 30.0)) float32(random(0.0 10.0)) float32(random(-30.0 30.0))))}
+let dust:array<vec3> = []
+loop k in [0..400) { dust.push(vec3(float32(random(-30.0 30.0)) float32(random(0.0 10.0)) float32(random(-30.0 30.0)))) }
 
 let wind_snd = tone(220.0 4.0 Wave.noise 0.05 1.5 1.5)
 let chime = sfx_chime()
 let step_snd = tone(140.0 0.05 Wave.noise 0.08 0.001 0.04)
 let theme = mix([melody("A3 - C4 E4 - D4 C4 - B3 - - - A3 - - - . . E4 - G4 A4 - G4 E4 - D4 - - - C4 - - -" 70.0 Wave.sine 0.18)
-              melody("A2 - - - - - - - F2 - - - - - - - C3 - - - - - - - E2 - - - - - - -" 70.0 Wave.triangle 0.15)])
+    melody("A2 - - - - - - - F2 - - - - - - - C3 - - - - - - - E2 - - - - - - -" 70.0 Wave.triangle 0.15)])
 let wind_id = 0
 
-ground=(x: float64 z: float64):>float64=>dune_height(x z)
+ground = (x:float64 z:float64):>float64 => dune_height(x z)
 
 # each link trails the one before it, fluttering in the wind
-follow=(chain: array<vec3> anchor: vec3 count: int64 dt: float64):>array<vec3>=>{
-    loop chain.length <? count {chain.push(chain.get(chain.length - 1) ?? anchor)}
-    if chain.length =? 0 {return chain}
+follow = (chain:array<vec3> anchor:vec3 count:int64 dt:float64):>array<vec3> => {
+    loop chain.length <? count { chain.push(chain.get(chain.length - 1) ?? anchor) }
+    if chain.length =? 0 { return chain }
     chain[0] = anchor
     loop k in [1..chain.length) {
         let d = chain[k] - chain[k - 1]
@@ -114,7 +114,7 @@ follow=(chain: array<vec3> anchor: vec3 count: int64 dt: float64):>array<vec3>=>
     chain
 }
 # Gather the glyphs within reach of the traveler.
-collect_glyphs=()=>{
+collect_glyphs = () => {
     loop @glyph in glyphs {
         if not glyph.taken and (glyph.pos - (pos + vec3(0 1 0))).norm <? 1.6 {
             glyph.taken = true
@@ -125,15 +125,15 @@ collect_glyphs=()=>{
         }
     }
 }
-update=(dt: float64)=>{
+update = (dt:float64) => {
     t += dt
     intro -= dt
-    if wind_id =? 0 {wind_id = play(wind_snd 0.6 looping = true)}
-    if key_pressed(Key.escape) {quit()}
+    if wind_id =? 0 { wind_id = play(wind_snd 0.6 looping = true) }
+    if key_pressed(Key.escape) { quit() }
     # camera orbit
-    if key_down(Key.q) {yaw -= 1.8 * dt}
-    if key_down(Key.e) {yaw += 1.8 * dt}
-    if mouse_down(Mouse.right) {yaw += float64(mouse_delta().x) * 0.006}
+    if key_down(Key.q) { yaw -= 1.8 * dt }
+    if key_down(Key.e) { yaw += 1.8 * dt }
+    if mouse_down(Mouse.right) { yaw += float64(mouse_delta().x) * 0.006 }
     yaw += float64(right_stick().x) * 2.2 * dt
     # movement relative to the camera
     let inp = input_axis()
@@ -167,7 +167,7 @@ update=(dt: float64)=>{
     pos += vel * float32(dt)
     gy = ground(float64(pos.x) float64(pos.z))
     if pos.y <=? float32(gy) {
-        if not grounded and vel.y <? -4.0 {play(step_snd 0.5)}
+        if not grounded and vel.y <? -4.0 { play(step_snd 0.5) }
         pos.y = float32(gy)
         vel.y = 0.0
         grounded = true
@@ -180,17 +180,17 @@ update=(dt: float64)=>{
             steps.push(pos + side)
             step_side = -step_side
             last_step = pos
-            if steps.length >? 160 {steps.pop(0)}
+            if steps.length >? 160 { steps.pop(0) }
         }
     }
-    if moved >? 3.0 {intro = min(intro 2.0)}
+    if moved >? 3.0 { intro = min(intro 2.0) }
     let lim = float32(WORLD / 2.0 - 5.0)
     pos.x = clamp(pos.x -lim lim)
     pos.z = clamp(pos.z -lim lim)
     # scarf follows the traveler
     let anchor = pos + vec3(0 1.35 0)
     if scarf.length =? 0 {
-        loop k in [0..scarf_len) {scarf.push(anchor)}
+        loop k in [0..scarf_len) { scarf.push(anchor) }
     }
     scarf = follow(scarf anchor min(scarf_len MAX_SCARF) dt)
     collect_glyphs()
@@ -198,14 +198,14 @@ update=(dt: float64)=>{
         won = true
         play(theme 0.8)
     }
-    if won {won_t += dt}
+    if won { won_t += dt }
     # smooth third-person camera
     let desired = pos + vec3(float32(sin(yaw*rad) * 8.0) 2.4 float32(cos(yaw*rad) * 8.0))
     let dg = ground(float64(desired.x) float64(desired.z)) + 1.5
-    if desired.y <? float32(dg) {desired.y = float32(dg)}
+    if desired.y <? float32(dg) { desired.y = float32(dg) }
     cam_pos = approach(cam_pos desired 5.0 dt)
 }
-draw=()=>{
+draw = () => {
     clear(BLACK)
     sun(vec3(-0.5 0.35 -0.4) vec3(1.25 0.95 0.7))
     sky(vec3(0.2 0.38 0.68) vec3(0.98 0.78 0.58) vec3(0.8 0.55 0.4))
@@ -213,7 +213,7 @@ draw=()=>{
     shadows(true 0.65 40)
     post_effects(0.55 0.78 0.3 1.05 vec3(1.03 1.0 0.96))
     camera3d(cam_pos pos + vec3(0 2.9 0) 50.0 0.1 700.0)
-    draw_custom(()=>{
+    draw_custom(() => {
         let shadow = scene_shadow_map()
         let taps:float32 = if soft_rendering() 4.0 else 9.0
         let p = SandParams(scene_view_proj() scene_shadow_vp() scene_camera() scene_sun() scene_sun_color() scene_sky_color()
@@ -235,15 +235,15 @@ draw=()=>{
     if scarf.length >? 1 {
         let tail = scarf[scarf.length - 1]
         let pts = scarf
-        loop pts.length <? MAX_SCARF {pts.push(tail)}
+        loop pts.length <? MAX_SCARF { pts.push(tail) }
         update_mesh(@scarf_mesh ribbon_vertices(pts 0.15 t))
         let glow = float32(0.4 + 0.6 * energy)
         draw_mesh(scarf_mesh mat4() rgb(0.98 * glow 0.72 * glow 0.28 * glow) emissive = 0.9 * float64(glow) cast_shadow = false)
-    # cloth banners fluttering on old posts
+        # cloth banners fluttering on old posts
     }
     loop i in 0.. and bp in posts {
         draw_mesh(post_mesh translation(bp) rgb(0.35 0.22 0.18))
-        let pts: array<vec3> = []
+        let pts:array<vec3> = []
         loop k in [0..12) {
             let f = float64(k) * 0.28
             let w = sin((t * 3.0 + float64(i) + float64(k) * 0.6)*rad) * 0.18 * float64(k) / 12.0
@@ -251,9 +251,9 @@ draw=()=>{
         }
         update_mesh(@banner_mesh ribbon_vertices(pts 0.22 t + float64(i)))
         draw_mesh(banner_mesh mat4() rgb(0.66 0.12 0.09) emissive = 0.15 cast_shadow = false)
-    # footprints
+        # footprints
     }
-    let prints: array<Instance3D> = []
+    let prints:array<Instance3D> = []
     loop sp_ in steps {
         prints.push(instance(translation(sp_ + vec3(0 float32(ground(float64(sp_.x) float64(sp_.z)) - float64(sp_.y) - 0.025) 0)) * scaling(vec3(1 1 1.5)) rgb(0.86 0.62 0.44)))
     }
@@ -262,20 +262,20 @@ draw=()=>{
     draw_mesh_instanced(block stones)
     # glyphs: glowing orbs that bob in the wind
     loop gl_ in glyphs {
-        if gl_.taken {continue}
+        if gl_.taken { continue }
         let bob = vec3(0 float32(sin((t * 2.0 + float64(gl_.pos.x))*rad) * 0.3) 0)
         draw_mesh(ring translation(gl_.pos + bob) * rotation_y(t) rgb(1 0.85 0.45) emissive = 2.5 cast_shadow = false)
-    # the beacon on the mountain
+        # the beacon on the mountain
     }
     let bpos = vec3(0 float32(dune_height(0.0 -150.0) + 6.0) -150)
     let k:float64 = 1.5
-    if won {k = 4.0 + 2.0 * sin(t * 2.0*rad)}
+    if won { k = 4.0 + 2.0 * sin(t * 2.0*rad) }
     draw_mesh(beacon translation(bpos) rgb(1 0.9 0.7) emissive = k cast_shadow = false)
     # a pillar of light rises from the mountain: the goal is visible from everywhere
     let bs = float32(0.32 + 0.3 * k / 4.0)
-    draw_custom(()=>{beam_sh.draw(light_pillar BeamParams(scene_view_proj() bpos scene_camera() bs float32(elapsed())))} additive=true)
+    draw_custom(() => { beam_sh.draw(light_pillar BeamParams(scene_view_proj() bpos scene_camera() bs float32(elapsed()))) } additive=true)
     # drifting sand
-    let motes: array<Instance3D> = []
+    let motes:array<Instance3D> = []
     loop i in 0.. and d in dust {
         let p = vec3(d.x + float32(mod(t * 3.0 + float64(i) 60.0)) - 30.0 d.y d.z) + vec3(pos.x float32(ground(float64(pos.x) float64(pos.z))) pos.z)
         motes.push(instance(translation(p) * scaling(vec3(0.05 0.05 0.05)) rgb(1 0.9 0.75)))

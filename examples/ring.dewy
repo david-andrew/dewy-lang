@@ -2,32 +2,32 @@
 # entry in constant time. Construct with new_ring<T>(capacity).
 # The head and length invariants live in these functions: indexes are checked.
 $runtime_checks
-Ring:type=<T>[capacity:int64 values:array<T> head:int64=0]
+Ring:type = <T>[capacity:int64 values:array<T> head:int64=0]
 
-new_ring=<T>(capacity:int64):>Ring<T>=>{
+new_ring = <T>(capacity:int64):>Ring<T> => {
     if capacity <=? 0 panic("ring capacity must be positive")
     return Ring<T>[capacity=capacity values=[]]
 }
 
-length=<T>(ring:Ring<T>):>int64=>ring.values.length
+length = <T>(ring:Ring<T>):>int64 => ring.values.length
 
-push=<T>(@ring:Ring<T> value:T):>void=>{
+push = <T>(@ring:Ring<T> value:T):>void => {
     if ring.values.length <? ring.capacity {
         ring.values.push(value)
     } else {
-        ring.values[ring.head]=value
-        ring.head+=1
-        if ring.head =? ring.capacity ring.head=0
+        ring.values[ring.head] = value
+        ring.head += 1
+        if ring.head =? ring.capacity ring.head = 0
     }
 }
 
-storage_index=<T>(ring:Ring<T> index:int64):>int64=>{
+storage_index = <T>(ring:Ring<T> index:int64):>int64 => {
     if index <? 0 or index >=? ring.values.length panic("ring index out of bounds")
-    let slot=ring.head+index
+    let slot = ring.head+index
     return if slot >=? ring.capacity slot-ring.capacity else slot
 }
 
-__index__=<T>(ring:Ring<T> index:int64):>T=>ring.values[storage_index(ring index)]
-__setindex__=<T>(@ring:Ring<T> index:int64 value:T):>void=>{
-    ring.values[storage_index(ring index)]=value
+__index__ = <T>(ring:Ring<T> index:int64):>T => ring.values[storage_index(ring index)]
+__setindex__ = <T>(@ring:Ring<T> index:int64 value:T):>void => {
+    ring.values[storage_index(ring index)] = value
 }

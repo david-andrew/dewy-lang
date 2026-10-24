@@ -2,47 +2,47 @@
 import physics
 from p"physics_scene.dewy" import Scene, fresh, add_box, add_ball, advance
 
-let scene=fresh()
-let grab:physics.Joint?=none
+let scene = fresh()
+let grab:physics.Joint? = none
 
-main=():>void=>{window("Dewy / Physics" 1280 720)}
+main = ():>void => { window("Dewy / Physics" 1280 720) }
 
-update=(dt:float64):>void=>{
+update = (dt:float64):>void => {
     if key_pressed(Key.escape) quit()
-    if key_pressed(Key.r) {scene=fresh() grab=none}
-    let mouse=mouse_pos()
+    if key_pressed(Key.r) { scene = fresh() grab = none }
+    let mouse = mouse_pos()
     if mouse_pressed(Mouse.left) {
         loop body in scene.world.bodies_at(mouse) {
             if scene.world.kind(body) =? physics.BodyKind.dynamic {
-                grab=scene.world.drag(body mouse)
+                grab = scene.world.drag(body mouse)
                 break
             }
         }
     }
     if grab is? physics.Joint {
         if mouse_down(Mouse.left) scene.world.drag_to(grab mouse)
-        else {scene.world.remove(grab) grab=none}
+        else { scene.world.remove(grab) grab = none }
     }
-    if mouse_pressed(Mouse.right) {add_box(@scene mouse vec2(30+20*random() 30+20*random()));}
-    if mouse_pressed(Mouse.middle) or key_pressed(Key.b) {add_ball(@scene mouse 12+14*random());}
+    if mouse_pressed(Mouse.right) { add_box(@scene mouse vec2(30+20*random() 30+20*random())); }
+    if mouse_pressed(Mouse.middle) or key_pressed(Key.b) { add_ball(@scene mouse 12+14*random()); }
     advance(@scene min(dt 0.05))
 }
 
-draw=():>void=>{
+draw = ():>void => {
     clear(rgb(0.1 0.11 0.14))
     if scene.rope is? physics.Joint {
-        let [anchor endpoint]=scene.world.ends(scene.rope)
+        let [anchor endpoint] = scene.world.ends(scene.rope)
         line(anchor endpoint 3 rgb(0.6 0.6 0.55))
     }
     loop body in scene.world.bodies() {
-        let points=scene.world.outline(body)
-        let color=scene.fills.get(body.id WHITE)
+        let points = scene.world.outline(body)
+        let color = scene.fills.get(body.id WHITE)
         polygon(points color)
         polyline(points 2 darken(color 0.35) closed=true)
-        if scene.world.radius(body) >? 0.0 and points.length >? 0 {line(scene.world.pos(body) points[0] 2 darken(color 0.35))}
+        if scene.world.radius(body) >? 0.0 and points.length >? 0 { line(scene.world.pos(body) points[0] 2 darken(color 0.35)) }
     }
     if grab is? physics.Joint {
-        let [anchor endpoint]=scene.world.ends(grab)
+        let [anchor endpoint] = scene.world.ends(grab)
         line(anchor endpoint 2 rgb(1.0 0.9 0.5))
         circle(endpoint 4 rgb(1.0 0.9 0.5))
     }

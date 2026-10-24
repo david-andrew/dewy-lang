@@ -1,35 +1,35 @@
 # A small deterministic game model, independent of drawing and input APIs.
-Point:type=[x:float64 y:float64]
-World:type=[position:Point velocity:Point paddle:float64 score:int64 misses:int64]
+Point:type = [x:float64 y:float64]
+World:type = [position:Point velocity:Point paddle:float64 score:int64 misses:int64]
 
-fresh=():>World=>World[Point[640.0 220.0] Point[180.0 240.0] 640.0 0 0]
+fresh = ():>World => World[Point[640.0 220.0] Point[180.0 240.0] 640.0 0 0]
 
-advance=(@world:World dt:float64 pointer:float64):>void=>{
-    world.paddle=min(max(pointer 80.0) 1200.0)
-    let before=world.position.y
-    world.position.x+=world.velocity.x*dt
-    world.position.y+=world.velocity.y*dt
+advance = (@world:World dt:float64 pointer:float64):>void => {
+    world.paddle = min(max(pointer 80.0) 1200.0)
+    let before = world.position.y
+    world.position.x += world.velocity.x*dt
+    world.position.y += world.velocity.y*dt
     if world.position.x <? 20.0 {
-        world.position.x=20.0
-        world.velocity.x=abs(world.velocity.x)
+        world.position.x = 20.0
+        world.velocity.x = abs(world.velocity.x)
     }
     if world.position.x >? 1260.0 {
-        world.position.x=1260.0
-        world.velocity.x=0.0-abs(world.velocity.x)
+        world.position.x = 1260.0
+        world.velocity.x = 0.0-abs(world.velocity.x)
     }
     if world.position.y <? 110.0 {
-        world.position.y=110.0
-        world.velocity.y=abs(world.velocity.y)
+        world.position.y = 110.0
+        world.velocity.y = abs(world.velocity.y)
     }
     if before <? 620.0 and world.position.y >=? 620.0 and abs(world.position.x-world.paddle) <? 92.0 {
-        world.position.y=620.0
-        world.velocity.y=0.0-abs(world.velocity.y)-8.0
-        world.velocity.x=(world.position.x-world.paddle)*4.0
-        world.score+=1
+        world.position.y = 620.0
+        world.velocity.y = 0.0-abs(world.velocity.y)-8.0
+        world.velocity.x = (world.position.x-world.paddle)*4.0
+        world.score += 1
     }
     if world.position.y >? 760.0 {
-        world.position=Point[640.0 220.0]
-        world.velocity=Point[180.0 240.0]
-        world.misses+=1
+        world.position = Point[640.0 220.0]
+        world.velocity = Point[180.0 240.0]
+        world.misses += 1
     }
 }

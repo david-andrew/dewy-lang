@@ -1,23 +1,23 @@
 # A game-position history using a generic container written entirely in Dewy.
 from p"ring.dewy" import new_ring
 
-Point:type=[x:int64 y:int64]
-__add__=(a:Point b:Point):>Point=>Point[a.x+b.x a.y+b.y]
+Point:type = [x:int64 y:int64]
+__add__ = (a:Point b:Point):>Point => Point[a.x+b.x a.y+b.y]
 
-main=():>void=>{
-    let trail=new_ring<Point>(4)
-    let position=Point[0 0]
+main = ():>void => {
+    let trail = new_ring<Point>(4)
+    let position = Point[0 0]
     loop tick in [0..6) {
-        position+=Point[2 1]
+        position += Point[2 1]
         trail.push(position)
     }
-    let rewind=trail
-    trail[trail.length-1].x+=100
+    let rewind = trail
+    trail[trail.length-1].x += 100
     printl"History length: {trail.length}"
     printl"Oldest position: {trail[0].x}, {trail[0].y}"
     printl"Newest position: {trail[3].x}, {trail[3].y}"
     printl"Rewind position: {rewind[3].x}, {rewind[3].y}"
-    let total=0
-    loop point in rewind {total+=point.x+point.y}
+    let total = 0
+    loop point in rewind { total += point.x+point.y }
     printl"Recorded total: {total}"
 }

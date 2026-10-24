@@ -2,7 +2,7 @@
 from units import rad
 const WORLD = 360.0
 
-dune_height=(x: float64 z: float64):>float64=>{
+dune_height = (x:float64 z:float64):>float64 => {
     # ridged dunes plus long swells; the beacon mountain rises far to the north
     let r = 1.0 - abs(fbm(x * 0.012 + 3.0 z * 0.018 3) * 2.0 - 1.0)
     let swell = fbm(x * 0.004 z * 0.004 2)
@@ -10,33 +10,33 @@ dune_height=(x: float64 z: float64):>float64=>{
     let d = sqrt((x - 0.0) * (x - 0.0) + (z + 150.0) * (z + 150.0))
     h + max(0.0 60.0 - d * 0.9) * 1.4
 }
-sand_color=(_x: float64 _y: float64 _z: float64):>vec4=>vec4(1 1 1 1)
+sand_color = (_x:float64 _y:float64 _z:float64):>vec4 => vec4(1 1 1 1)
 
-SandParams:type=[
-    view_proj: mat4
-    shadow_vp: mat4
-    cam: vec3
-    sun: vec3
-    sun_color: vec3
-    sky: vec3
-    fog_color: vec3
-    fog: vec2
-    time: float32
-    shadow_strength: float32
-    shadow_map: Texture
-    shadow_texel: float32 = 1.0 / 2048.0
-    shadow_taps: float32 = 9.0
+SandParams:type = [
+    view_proj:mat4
+    shadow_vp:mat4
+    cam:vec3
+    sun:vec3
+    sun_color:vec3
+    sky:vec3
+    fog_color:vec3
+    fog:vec2
+    time:float32
+    shadow_strength:float32
+    shadow_map:Texture
+    shadow_texel:float32 = 1.0 / 2048.0
+    shadow_taps:float32 = 9.0
 ]
-SandOut:type=[
-    pos: vec4
-    world: vec3
-    normal: vec3
-    shadow_pos: vec4
+SandOut:type = [
+    pos:vec4
+    world:vec3
+    normal:vec3
+    shadow_pos:vec4
 ]
-sand_vs=(v: Vertex3D u: SandParams):>SandOut=>{
+sand_vs = (v:Vertex3D u:SandParams):>SandOut => {
     SandOut(u.view_proj * vec4(v.pos 1) v.pos v.normal u.shadow_vp * vec4(v.pos 1))
 }
-sand_fs=(i: SandOut u: SandParams):>vec4=>{
+sand_fs = (i:SandOut u:SandParams):>vec4 => {
     let n = normalize(i.normal)
     # wind ripples (two scales, running across the prevailing wind) bend the normal
     let ph = i.world.x * 1.7 + i.world.z * 0.9 + sin(i.world.z * 0.35*rad) * 2.0
@@ -50,21 +50,21 @@ sand_fs=(i: SandOut u: SandParams):>vec4=>{
     let wrap = clamp((dot(nr l) + 0.35) / 1.35 0.0 1.0)
     # shadows from the sun
     let sp = i.shadow_pos.xyz / i.shadow_pos.w * 0.5 + vec3(0.5 0.5 0.5)
-    let sh: float32 = 1.0
+    let sh:float32 = 1.0
     if sp.x >? 0.0 and sp.x <? 1.0 and sp.y >? 0.0 and sp.y <? 1.0 and sp.z <? 1.0 {
         # Match the real shadow map: four samples on the CPU, nine on a GPU.
-        let lit: float32 = 0.0
+        let lit:float32 = 0.0
         if u.shadow_taps <? 5.0 {
             loop k in [int32(0)..int32(4)) {
                 let d = sample(u.shadow_map sp.xy + vec2(float32(k%2)-0.5 float32(k//2)-0.5) * u.shadow_texel).x
-                if sp.z - 0.003 <=? d {lit = lit + 1.0}
+                if sp.z - 0.003 <=? d { lit = lit + 1.0 }
             }
             lit /= 4.0
         } else {
             loop x in [int32(-1)..int32(2)) {
                 loop y in [int32(-1)..int32(2)) {
                     let d = sample(u.shadow_map sp.xy + vec2(float32(x) float32(y)) * u.shadow_texel).x
-                    if sp.z - 0.003 <=? d {lit = lit + 1.0}
+                    if sp.z - 0.003 <=? d { lit = lit + 1.0 }
                 }
             }
             lit /= 9.0
@@ -82,7 +82,7 @@ sand_fs=(i: SandOut u: SandParams):>vec4=>{
     let cell = floor(i.world.xz * 22.0)
     let g = hash21(cell + vec2(floor(u.time * 0.5) 0))
     let glint = pow(max(dot(reflect(-l nr) v) 0.0) 8.0)
-    if g >? 0.985 {c = c + vec3(1 0.95 0.85) * glint * (g - 0.985) * 120.0 * sh}
+    if g >? 0.985 { c = c + vec3(1 0.95 0.85) * glint * (g - 0.985) * 120.0 * sh }
     let dist = (i.world - u.cam).norm
     let fa = 1.0 - exp(-dist * u.fog.x * exp(-max(i.world.y 0.0) * u.fog.y))
     let haze = mix(u.fog_color u.fog_color * vec3(0.8 0.9 1.15) clamp(dist / 250.0 0.0 1.0))
@@ -94,8 +94,8 @@ sand_fs=(i: SandOut u: SandParams):>vec4=>{
 const ROBE_SEG = 24
 const ROBE_RINGS = 7
 
-robe_indices=():>array<uint32>=>{
-    let idx: array<uint32> = []
+robe_indices = ():>array<uint32> => {
+    let idx:array<uint32> = []
     loop r in [0..ROBE_RINGS - 1) {
         loop s in [0..ROBE_SEG) {
             let a = uint32(r * (ROBE_SEG + 1) + s)
@@ -110,10 +110,10 @@ robe_indices=():>array<uint32>=>{
     }
     idx
 
-# a bell-shaped robe whose hem ripples and trails behind when moving (local space, +z forward)
+    # a bell-shaped robe whose hem ripples and trails behind when moving (local space, +z forward)
 }
-robe_vertices=(time: float64 speed: float64):>array<Vertex3D>=>{
-    let vs: array<Vertex3D> = []
+robe_vertices = (time:float64 speed:float64):>array<Vertex3D> => {
+    let vs:array<Vertex3D> = []
     loop r in [0..ROBE_RINGS) {
         let f = float64(r) / float64(ROBE_RINGS - 1) # 0 at the shoulders, 1 at the hem
         let y = 1.3 - f * 1.25
@@ -128,16 +128,16 @@ robe_vertices=(time: float64 speed: float64):>array<Vertex3D>=>{
             let shade = float32(0.75 + 0.25 * (1.0 - f))
             # deep red cloth with a gold band along the hem
             let col = vec4(0.58 * shade 0.1 * shade 0.08 * shade 1)
-            if r =? ROBE_RINGS - 2 {col = vec4(0.9 0.62 0.25 1)}
+            if r =? ROBE_RINGS - 2 { col = vec4(0.9 0.62 0.25 1) }
             vs.push(Vertex3D(vec3(float32(x) float32(y + wave * f * 0.5) float32(z)) n vec2(float32(s) / float32(ROBE_SEG) float32(f)) col))
         }
     }
     vs
 
-# a ribbon through the scarf's chain of points; brightness pulses along it like woven glyphs
+    # a ribbon through the scarf's chain of points; brightness pulses along it like woven glyphs
 }
-ribbon_vertices=(pts: array<vec3> width: float32 time: float64):>array<Vertex3D>=>{
-    let vs: array<Vertex3D> = []
+ribbon_vertices = (pts:array<vec3> width:float32 time:float64):>array<Vertex3D> => {
+    let vs:array<Vertex3D> = []
     loop k in [0..pts.length) {
         let p = pts[k]
         let prev = if k >? 0 pts[k - 1] else p
@@ -153,35 +153,35 @@ ribbon_vertices=(pts: array<vec3> width: float32 time: float64):>array<Vertex3D>
     }
     vs
 
-# both windings: cloth is seen from both sides
+    # both windings: cloth is seen from both sides
 }
-ribbon_indices=(n: int64<0 <=? n and n <=? 65536>):>array<uint32>=>{
-    let idx: array<uint32> = []
+ribbon_indices = (n:int64<0 <=? n and n <=? 65536>):>array<uint32> => {
+    let idx:array<uint32> = []
     loop k in [0..n - 1) {
         let a = uint32(k * 2)
-        loop t in [a a + 1 a + 2 a + 1 a + 3 a + 2 a a + 2 a + 1 a + 1 a + 2 a + 3] {idx.push(t)}
+        loop t in [a a + 1 a + 2 a + 1 a + 3 a + 2 a a + 2 a + 1 a + 1 a + 2 a + 3] { idx.push(t) }
     }
     idx
 }
 
 # ---------------- the beacon's light: an additive beam that fades with height ----------------
-BeamParams:type=[
-    view_proj: mat4
-    base: vec3
-    cam: vec3
-    strength: float32
-    time: float32
+BeamParams:type = [
+    view_proj:mat4
+    base:vec3
+    cam:vec3
+    strength:float32
+    time:float32
 ]
-BeamOut:type=[
-    pos: vec4
-    world: vec3
-    normal: vec3
+BeamOut:type = [
+    pos:vec4
+    world:vec3
+    normal:vec3
 ]
-beam_vs=(v: Vertex3D u: BeamParams):>BeamOut=>{
+beam_vs = (v:Vertex3D u:BeamParams):>BeamOut => {
     let w = v.pos + u.base
     BeamOut(u.view_proj * vec4(w 1) w v.normal)
 }
-beam_fs=(i: BeamOut u: BeamParams):>vec4=>{
+beam_fs = (i:BeamOut u:BeamParams):>vec4 => {
     let h = i.world.y - u.base.y
     let fade = exp(-h * 0.006) * clamp(h * 0.2 0.0 1.0)
     # brighter where the beam is seen edge-on (a soft volumetric look)

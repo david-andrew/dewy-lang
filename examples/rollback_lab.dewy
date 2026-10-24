@@ -1,38 +1,38 @@
 # Both views run the whole game. Only inputs cross the simulated network.
 from p"rollback_model.dewy" import World, fresh, advance
 
-let simulation=fresh()
-let latency:float64=0.4
-let jitter:float64=0.2
-let loss:float64=0.4
-let paused=false
+let simulation = fresh()
+let latency:float64 = 0.4
+let jitter:float64 = 0.2
+let loss:float64 = 0.4
+let paused = false
 
-main=():>void=>{
+main = ():>void => {
     window("Dewy / Rollback lab" 1280 720)
-    ui_style.size=22.0
-    ui_style.spacing=44.0
-    ui_style.width=520.0
+    ui_style.size = 22.0
+    ui_style.spacing = 44.0
+    ui_style.width = 520.0
 }
 
-update=(_dt:float64):>void=>{
+update = (_dt:float64):>void => {
     if key_pressed(Key.escape) quit()
-    if key_pressed(Key.p) paused=not paused
-    if key_pressed(Key.r) simulation=fresh(latency*0.3 jitter*0.15 loss*0.25)
-    simulation.link.latency=latency*0.3
-    simulation.link.jitter=jitter*0.15
-    simulation.link.loss=loss*0.25
+    if key_pressed(Key.p) paused = not paused
+    if key_pressed(Key.r) simulation = fresh(latency*0.3 jitter*0.15 loss*0.25)
+    simulation.link.latency = latency*0.3
+    simulation.link.jitter = jitter*0.15
+    simulation.link.loss = loss*0.25
     if not paused advance(@simulation)
 }
 
-view=(world:World x:float64 name:string tick:int64 rollbacks:int64 waiting:bool):>void=>{
+view = (world:World x:float64 name:string tick:int64 rollbacks:int64 waiting:bool):>void => {
     rect(x 134 580 300 rgb(0.06 0.09 0.14))
     text(name vec2(float32(x+20.0) 153) 25 WHITE)
     text("Tick {tick} | {rollbacks} rollbacks" vec2(float32(x+20.0) 190) 20 WHITE)
     loop player in [0..2) {
-        let y:float64=270.0+(player as float64)*75.0
-        let px=x+290.0+(world.positions[player] as float64)*8.0
-        let hits=world.scores[player]
-        let color=if player=?0 rgb(0.3 0.8 0.7) else rgb(1.0 0.65 0.3)
+        let y:float64 = 270.0+(player as float64)*75.0
+        let px = x+290.0+(world.positions[player] as float64)*8.0
+        let hits = world.scores[player]
+        let color = if player=?0 rgb(0.3 0.8 0.7) else rgb(1.0 0.65 0.3)
         rect(x+20.0 y+20.0 540 2 rgb(0.2 0.25 0.32))
         circle(vec2(float32(px) float32(y)) 14 color)
         text("Player {player+1}: {hits} hits" vec2(float32(x+20.0) float32(y-35.0)) 18 color)
@@ -40,18 +40,18 @@ view=(world:World x:float64 name:string tick:int64 rollbacks:int64 waiting:bool)
     if waiting text("Waiting for remote input" vec2(float32(x+20.0) 400) 18 rgb(1.0 0.65 0.3))
 }
 
-draw=():>void=>{
+draw = ():>void => {
     clear(rgb(0.025 0.035 0.06))
     text("DEWY / ROLLBACK LAB" vec2(30 24) 30 WHITE)
     text("Two copies of one game. Late inputs rewind and replay their saved values." vec2(30 67) 21 WHITE)
     view(simulation.left.state 30.0 "Peer 1" simulation.left.tick simulation.left.rollbacks simulation.left.waiting)
     view(simulation.right.state 670.0 "Peer 2" simulation.right.tick simulation.right.rollbacks simulation.right.waiting)
     ui_begin("network" vec2(640 498))
-    latency=ui_slider("One-way latency: {(latency*300.0) as int64} ms" latency 0.05)
-    jitter=ui_slider("Additional jitter: {(jitter*150.0) as int64} ms" jitter 0.05)
-    loss=ui_slider("Packet loss: {(loss*25.0) as int64}%" loss 0.04)
+    latency = ui_slider("One-way latency: {(latency*300.0) as int64} ms" latency 0.05)
+    jitter = ui_slider("Additional jitter: {(jitter*150.0) as int64} ms" jitter 0.05)
+    loss = ui_slider("Packet loss: {(loss*25.0) as int64}%" loss 0.04)
     ui_end()
-    let status=if paused "Paused" else "Running"
-    if simulation.left.desync>=?0 or simulation.right.desync>=?0 status="State disagreement detected"
+    let status = if paused "Paused" else "Running"
+    if simulation.left.desync>=?0 or simulation.right.desync>=?0 status = "State disagreement detected"
     text("{status} | P: pause   R: reset   Escape: quit" vec2(30 672) 20 WHITE)
 }

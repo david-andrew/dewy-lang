@@ -1,35 +1,35 @@
 # Run with dewy-core tour.dewy. Arrays and records have independent value copies.
-Point:type=[x:int64 y:int64=22]
-combine=(a b=a)=>a+b
-identity=<T>(value:T):>T=>value
+Point:type = [x:int64 y:int64=22]
+combine = (a b=a) => a+b
+identity = <T>(value:T):>T => value
 
-main=():>void=>{
-    let values=[20 22]
-    let copy=values
-    copy[0]=99
-    let [left right]=values
+main = ():>void => {
+    let values = [20 22]
+    let copy = values
+    copy[0] = 99
+    let [left right] = values
     printl"Independent array: {left+right}"
-    let extended=[values... 44]
+    let extended = [values... 44]
     printl"Spread last: {extended[end]}"
 
-    let point:Point=[x=20]
-    let [y x]=point
+    let point:Point = [x=20]
+    let [y x] = point
     printl"Record fields: {x+y}"
-    let adjusted:Point=[point... x=40 y=2]
+    let adjusted:Point = [point... x=40 y=2]
     printl"Record override: {adjusted.x+adjusted.y}"
     printl"Dependent default: {combine(21)}"
-    let callback=@identity<int64>
+    let callback = @identity<int64>
     printl"Specialized callback: {callback(42)}"
 
-    let doubled=[loop value in values value*2]
-    let selected=[loop value in doubled if value >? 40 value]
+    let doubled = [loop value in values value*2]
+    let selected = [loop value in doubled if value >? 40 value]
     $runtime_assert selected.length >? 0
     printl"Filtered comprehension: {selected[0]}"
 
-    let lengths=[loop word in ["café" "🙂"] word->word.length]
+    let lengths = [loop word in ["café" "🙂"] word->word.length]
     printl"Graphemes: {lengths["café"]} {lengths["🙂"]}"
 
-    let found=lengths.get("café")
-    let size=match found {n:int64=>n <none>=>0}
+    let found = lengths.get("café")
+    let size = match found { n:int64 => n <none> => 0 }
     printl"Optional match: {size}"
 }

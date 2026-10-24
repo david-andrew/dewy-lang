@@ -1,67 +1,67 @@
 # Ranged sliders, retained pointer drags and the bundled mathematical glyphs.
 from units import rad
-let gravity:float64=9.8
-let length:float64=2.0
-let release_angle:float64=40.0
-let damping:float64=0.05
-let speed:float64=1.0
-let angle=release_angle*PI/180.0
-let omega:float64=0.0
-let running=true
+let gravity:float64 = 9.8
+let length:float64 = 2.0
+let release_angle:float64 = 40.0
+let damping:float64 = 0.05
+let speed:float64 = 1.0
+let angle = release_angle*PI/180.0
+let omega:float64 = 0.0
+let running = true
 
-reset_pendulum=():>void=>{angle=release_angle*PI/180.0 omega=0.0}
+reset_pendulum = ():>void => { angle = release_angle*PI/180.0 omega = 0.0 }
 
-main=():>void=>{
+main = ():>void => {
     window("Dewy / Pendulum controls" 1280 720)
-    ui_style=ui_light_style()
-    ui_style.size=20.0
-    ui_style.spacing=54.0
-    ui_style.width=380.0
-    hud_style.text=rgb(0.15 0.18 0.22)
-    hud_style.button=rgb(0.88 0.90 0.92)
-    hud_style.hover=rgb(0.84 0.87 0.90)
-    hud_style.accent=rgb(0.76 0.32 0.12)
+    ui_style = ui_light_style()
+    ui_style.size = 20.0
+    ui_style.spacing = 54.0
+    ui_style.width = 380.0
+    hud_style.text = rgb(0.15 0.18 0.22)
+    hud_style.button = rgb(0.88 0.90 0.92)
+    hud_style.hover = rgb(0.84 0.87 0.90)
+    hud_style.accent = rgb(0.76 0.32 0.12)
 }
 
-update=(dt:float64):>void=>{
+update = (dt:float64):>void => {
     if key_pressed(Key.escape) quit()
-    if key_pressed(Key.space) running=not running
+    if key_pressed(Key.space) running = not running
     if key_pressed(Key.r) reset_pendulum()
     if running {
-        let step=dt*speed/4.0
+        let step = dt*speed/4.0
         loop _ in [0..4) {
-            omega+=(-gravity/length*sin(angle*rad)-damping*omega)*step
-            angle+=omega*step
+            omega += (-gravity/length*sin(angle*rad)-damping*omega)*step
+            angle += omega*step
         }
     }
 }
 
-draw=():>void=>{
-    let ink=rgb(0.13 0.17 0.20)
-    let accent=rgb(0.76 0.32 0.12)
+draw = ():>void => {
+    let ink = rgb(0.13 0.17 0.20)
+    let accent = rgb(0.76 0.32 0.12)
     clear(rgb(0.96 0.96 0.94))
     text("DEWY / PENDULUM" vec2(40 30) 30 ink)
     text("Ranged controls · Unicode text · native + web" vec2(40 76) 20 rgb(0.4 0.45 0.48))
     rect_rounded(810 152 440 400 18 rgb(0.90 0.92 0.92))
-    let pivot=vec2(400 200)
-    let bob=pivot+vec2(float32(sin(angle*rad)*length*105.0) float32(cos(angle*rad)*length*105.0))
+    let pivot = vec2(400 200)
+    let bob = pivot+vec2(float32(sin(angle*rad)*length*105.0) float32(cos(angle*rad)*length*105.0))
     line(pivot pivot+vec2(0 320) 1 rgb(0.78 0.80 0.80))
     line(pivot bob 4 ink)
     circle(pivot 7 ink)
     circle(bob 25 accent)
     text("θ = {format(angle*180.0/PI ".1f")}°" pivot+vec2(24 -22) 24 ink)
     text("L = {format(length ".1f")} m" bob+vec2(38 0) 20 ink)
-    let period=TAU*sqrt(length/gravity)
+    let period = TAU*sqrt(length/gravity)
     text("T ≈ 2π√(L/g) = {format(period ".2f")} s" vec2(40 550) 25 ink)
     text("Small-angle period; drag any slider beyond its edge." vec2(40 585) 18 rgb(0.4 0.45 0.48))
     ui_begin("pendulum" vec2(1020 206))
-    gravity=ui_slider("g {format(gravity ".1f")} m/s²" gravity step=0.1 low=1.0 high=20.0)
-    length=ui_slider("L {format(length ".1f")} m" length step=0.1 low=0.5 high=3.0)
-    release_angle=ui_slider("Release θ {format(release_angle ".0f")}°" release_angle step=1.0 low=-80.0 high=80.0)
-    damping=ui_slider("Damping {format(damping ".2f")}" damping step=0.01 low=0.0 high=1.0)
-    running=ui_switch("Running" running)
+    gravity = ui_slider("g {format(gravity ".1f")} m/s²" gravity step=0.1 low=1.0 high=20.0)
+    length = ui_slider("L {format(length ".1f")} m" length step=0.1 low=0.5 high=3.0)
+    release_angle = ui_slider("Release θ {format(release_angle ".0f")}°" release_angle step=1.0 low=-80.0 high=80.0)
+    damping = ui_slider("Damping {format(damping ".2f")}" damping step=0.01 low=0.0 high=1.0)
+    running = ui_switch("Running" running)
     if ui_button("Release again") reset_pendulum()
     ui_end()
-    speed=hud_slider(Rect(40 620 710 44) speed 0.25 2.0 step=0.05 label="Speed {format(speed ".2f")}×")
+    speed = hud_slider(Rect(40 620 710 44) speed 0.25 2.0 step=0.05 label="Speed {format(speed ".2f")}×")
     text("Space: pause    R: release    Escape: quit" vec2(40 688) 18 rgb(0.4 0.45 0.48))
 }

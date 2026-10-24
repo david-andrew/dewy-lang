@@ -40,7 +40,7 @@ let via_relay = false # relay-compatible host/guest messages
 let my_address = "" # (the host: this machine's address on its network)
 let invited = false # (connected by invite codes, not by address)
 
-serve = (dir: float64) => {
+serve = (dir:float64) => {
     ball = vec2(640 360)
     let a = random(-0.5 0.5)
     vel = vec2(float32(cos(a*rad) * dir) float32(sin(a*rad))) * float32(BALL_SPEED)
@@ -80,7 +80,7 @@ friend_screens = () => {
 }
 
 # connected by invite: the inviter starts the game, the other waits for it
-friend_joined = (c: invite.Invited) => {
+friend_joined = (c:invite.Invited) => {
     other = c.peer
     hosting = c.inviter
     if hosting { start() }
@@ -102,9 +102,9 @@ start = () => {
 }
 
 # the host's view of the game, as a message: "s ball.x ball.y left right score_l score_r screen"
-state = () :> string => "s {ball.x} {ball.y} {left_y} {right_y} {score_l} {score_r} {int(screen)}"
+state = ():>string => "s {ball.x} {ball.y} {left_y} {right_y} {score_l} {score_r} {int(screen)}"
 
-read_state = (t: string) => {
+read_state = (t:string) => {
     let w = split(t " ")
     if w.length <? 8 { return }
     let x = to_float(w[1]) ?? 0.0
@@ -180,9 +180,9 @@ go_title = () => {
 }
 
 # a Back button at the top left: for a phone, with no Escape
-back_button = () :> bool => hud_button(Rect(30 24 120 44) "Back")
+back_button = ():>bool => hud_button(Rect(30 24 120 44) "Back")
 
-update = (dt: float64) => {
+update = (dt:float64) => {
     network()
     if key_pressed(Key.escape) and screen not=? Screen.title and screen not=? Screen.joining and screen not=? Screen.help and screen not=? Screen.friend {
         go_title()

@@ -1,9 +1,9 @@
 # A deterministic game and two rollback peers on a simulated network.
 import netplay
 
-Pad:type=[dx:int64=0 fire:bool=false]
-World:type=[positions:array<int64 length=2>=[0 0] scores:array<int64 length=2>=[0 0] hits:int64=0]
-Simulation:type=[
+Pad:type = [dx:int64=0 fire:bool=false]
+World:type = [positions:array<int64 length=2>=[0 0] scores:array<int64 length=2>=[0 0] hits:int64=0]
+Simulation:type = [
     left:netplay.Session<World Pad>
     right:netplay.Session<World Pad>
     link:netplay.Link
@@ -11,50 +11,50 @@ Simulation:type=[
 ]
 
 # Each invocation owns its value; writing a player detaches a shared snapshot.
-step=(world:World pads:array<Pad>):>World=>{
-    let next=world
+step = (world:World pads:array<Pad>):>World => {
+    let next = world
     $runtime_assert pads.length >=? 2
     loop player in [0..2) {
-        next.positions[player]+=pads[player].dx
+        next.positions[player] += pads[player].dx
         if pads[player].fire and abs(next.positions[player]-next.positions[1-player])<?5 {
-            next.scores[player]+=1
-            next.hits+=1
+            next.scores[player] += 1
+            next.hits += 1
         }
     }
     return next
 }
 
 # Inputs depend on simulation ticks, so waiting or replaying never changes them.
-input_for=(player:int64 tick:int64):>Pad=>Pad[
+input_for = (player:int64 tick:int64):>Pad => Pad[
     dx=(tick//12+player)%3-1
     fire=(tick+player*3)%11=?0
 ]
 
-fresh=(latency:float64=0.12 jitter:float64=0.03 loss:float64=0.1):>Simulation=>Simulation[
+fresh = (latency:float64=0.12 jitter:float64=0.03 loss:float64=0.1):>Simulation => Simulation[
     left=netplay.session(World[] @step players=2 me=0)
     right=netplay.session(World[] @step players=2 me=1)
     link=netplay.Link(latency=latency jitter=jitter loss=loss)
 ]
 
-advance=(@simulation:Simulation):>void=>{
-    let now=(simulation.frames as float64)/60.0
+advance = (@simulation:Simulation):>void => {
+    let now = (simulation.frames as float64)/60.0
     simulation.left.play(input_for(0 simulation.left.tick+simulation.left.delay))
     simulation.right.play(input_for(1 simulation.right.tick+simulation.right.delay))
-    loop [recipient data] in simulation.left.outgoing() {simulation.link.send(recipient data now)}
-    loop [recipient data] in simulation.right.outgoing() {simulation.link.send(recipient data now)}
+    loop [recipient data] in simulation.left.outgoing() { simulation.link.send(recipient data now) }
+    loop [recipient data] in simulation.right.outgoing() { simulation.link.send(recipient data now) }
     loop [recipient data] in simulation.link.deliver(now) {
         if recipient=?0 simulation.left.receive(data)
         else simulation.right.receive(data)
     }
-    simulation.frames+=1
+    simulation.frames += 1
 }
 
 # What the same game produces when every input is known immediately.
-reference=(ticks:int64):>World=>{
-    let world=World[]
+reference = (ticks:int64):>World => {
+    let world = World[]
     loop tick in [0..ticks) {
-        let pads=if tick<?2 [Pad[] Pad[]] else [input_for(0 tick) input_for(1 tick)]
-        world=step(world pads)
+        let pads = if tick<?2 [Pad[] Pad[]] else [input_for(0 tick) input_for(1 tick)]
+        world = step(world pads)
     }
     return world
 }
