@@ -1772,23 +1772,49 @@ panic_synthesized = (n: int) -> bool:
     text = name_of(int(nodes[kid(n, 0)].sval))
     text == "no match arm matched" or text == "range exhausted its integer type"
 
-# `format(x "spec")` with a literal specification the library accepts for x
-# (lib/core/fmt.jo, __format_checked) cannot fail: a bad specification is its
-# only failure. Checked here once per call, as its own grammar.
+# A string argument's possible texts where the compiler knows them: a literal, a
+# binding written once by its declaration (its initial value), or a value whose
+# type is a set of literal strings. None: unknown.
+panic_literal_texts = (e0: int) -> str[]?:
+    e = e0
+    loop nodes[e].kind == .conv: e = int(nodes[e].a)
+    if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)):
+        l = int(nodes[e].sym)
+        if int(locals[l].flags) & (LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_PARAM) != 0: return none
+        loop q in effect_write_sites(l):
+            if nodes[q].kind == .vardecl and nodes[q].sym == i32(l) and nodes[q].b != 0: e = int(nodes[q].b)
+        loop nodes[e].kind == .conv: e = int(nodes[e].a)
+    if nodes[e].kind == .str_lit and nkids(e) == 0 and nodes[e].sval > 0: return [name_of(int(nodes[e].sval))]
+    id = str_set_of(ntype(e))
+    if id <= 0: return none
+    texts: str[]
+    loop member in str_sets[id]: texts.push(member)
+    texts
+
+# `format(x spec)` with a specification the library accepts for x, a literal or
+# a known one (panic_literal_texts) (lib/core/fmt.jo and lib/math_int.jo,
+# __format_checked) cannot fail: a bad specification is its only failure.
+# Checked here once per call, as its own grammar.
 panic_format_literal = (n: int) -> bool:
     if nkids(n) != 2: return false
     d = int(fns[int(nodes[n].sym)].decl)
     if panic_name_format == 0:
         panic_name_format = intern("format")
         panic_name_to = intern("to")
-    if d == 0 or int(nodes[d].name) != panic_name_format or files[pos_file(nodes[d].pos)].path != lib_dir + "/core/fmt.jo": return false
-    e = kid(n, 1)
-    if nodes[e].kind != .str_lit or nkids(e) != 0 or nodes[e].sval <= 0: return false
+    if d == 0 or int(nodes[d].name) != panic_name_format: return false
+    path = files[pos_file(nodes[d].pos)].path
+    if path != lib_dir + "/core/fmt.jo" and path != lib_dir + "/math_int.jo": return false
     t = representation_type(ntype(kid(n, 0)))
+    if let texts = panic_literal_texts(kid(n, 1)):
+        loop spec in texts:
+            if not panic_format_spec(spec, t): return false
+        return true
+    false
+
+panic_format_spec = (spec: str, t: int) -> bool:
     text = t == T_STR
     kinds = if text: "s" else if tkind(t) == .float_: "feEgG%" else if is_int(t) or t == T_MATH_INT: "dxXbofeEgG%" else: ""
     if kinds == "": return false
-    spec = name_of(int(nodes[e].sval))
     i = 0
     m = len(spec)
     if m >= 2 and (spec[1] == '<' or spec[1] == '>' or spec[1] == '^'): i = 2
@@ -1830,23 +1856,11 @@ panic_device_literal = (n: int) -> bool:
     if nkids(n) != 2 or panic_name_to == 0: return false
     d = int(fns[int(nodes[n].sym)].decl)
     if d == 0 or int(nodes[d].name) != panic_name_to or files[pos_file(nodes[d].pos)].path != lib_dir + "/std/nd.jo": return false
-    e = kid(n, 1)
-    loop nodes[e].kind == .conv: e = int(nodes[e].a)
-    # (a binding written once, by its declaration: its initial value)
-    if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)):
-        l = int(nodes[e].sym)
-        if int(locals[l].flags) & (LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_PARAM) != 0: return false
-        loop q in effect_write_sites(l):
-            if nodes[q].kind == .vardecl and nodes[q].sym == i32(l) and nodes[q].b != 0: e = int(nodes[q].b)
-        loop nodes[e].kind == .conv: e = int(nodes[e].a)
-    if nodes[e].kind == .str_lit and nkids(e) == 0 and nodes[e].sval > 0:
-        text = name_of(int(nodes[e].sval))
-        return text == "best" or text == "cpu"
-    id = str_set_of(ntype(e))
-    if id <= 0: return false
-    loop member in str_sets[id]:
-        if member != "best" and member != "cpu": return false
-    true
+    if let texts = panic_literal_texts(kid(n, 1)):
+        loop text in texts:
+            if text != "best" and text != "cpu": return false
+        return true
+    false
 
 # A program's `d[k]` (or `d[k] += 1`, `d.pop(k)`): the key's presence is its
 # obligation (facts.jo fact_map_check), proven, an error or its own check.
