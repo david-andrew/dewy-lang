@@ -1,0 +1,9 @@
+# A negated rational where a float is expected: the operator's result converts.
+half = (v:float64):>float64 => v / 2.0
+main = () => {
+    let x = 2.5
+    let y:float64 = -x
+    let w = 5/2
+    let z:float32 = -w
+    printl"{y} {z} {half(-x)} {-w:.1f} {format(-x ".1f")}"
+}

@@ -662,6 +662,8 @@ coerce = (n: int, target: int) -> int:
         source = nodes.len()
         nodes.push(nodes[n])
         move_divisor(n, source)
+        # (checked already: an operator's call, `-x`, has no callee to check again)
+        add_flag(source, NF_CHECKED)
         name = if to == T_F32: "to_float32" else: "to_float64"
         callee = bc_field(source, name, nodes[n].pos)
         nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(callee))
