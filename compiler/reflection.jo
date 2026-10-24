@@ -38,11 +38,15 @@ reflect_members = (e: int) -> bool:
 literal_members = (t0: int, pos: int, out: mut int[], singletons: mut int[]):
     t = prune(t0)
     if is_union(t):
-        loop m in union_members(t): literal_members(m, pos, out, singletons)
+        # (a canonical order, as a union is a set: the integers rising, then the text in order)
+        loop m in union_members(t):
+            if str_set_of(m) == 0: literal_members(m, pos, out, singletons)
+        loop m in union_members(t):
+            if str_set_of(m) != 0: literal_members(m, pos, out, singletons)
         return
     set = str_set_of(t)
     if set != 0:
-        loop value in str_sets[set]:
+        loop value in str_sets[set].sorted():
             n = bc_str(value, pos)
             nodes[n].type = i32(T_STR)
             add_flag(n, NF_CHECKED)
@@ -60,24 +64,6 @@ literal_members = (t0: int, pos: int, out: mut int[], singletons: mut int[]):
             singletons.push(mk_refined(T_INT, ref_intern([RefAtom(.le, RefTerm(1, v), RefTerm()), RefAtom(.le, RefTerm(), RefTerm(1, v))])))
             out.push(n)
 
-# members as the union was written (`<'fast' | 1>`): types keep their own order
-literal_written_order = (values: mut int[], singletons: mut int[]):
-    keys: str[]
-    loop v in values:
-        keys.push(if nodes[v].kind == .int_lit: "#{nodes[v].ival}" else: "'{name_of(int(nodes[v].sval))}")
-    written = literal_orders.get(literal_order_key(keys))
-    if written == none: return
-    vs: int[]
-    ss: int[]
-    loop w in written ?? []:
-        loop i in 0.. and k in keys:
-            if k == w:
-                vs.push(values[i])
-                ss.push(singletons[i])
-    if vs.len() != values.len(): return
-    values = vs
-    singletons = ss
-
 # Scope nodes carry either a field-table index or a checked constant value.
 reflect_sequence = (e: int, binder: int) -> int[]:
     let e = reflect_source(e)
@@ -87,7 +73,6 @@ reflect_sequence = (e: int, binder: int) -> int[]:
         values: int[]
         singletons: int[]
         literal_members(expr_as_type(kid(e, 0)), nodes[e].pos, values, singletons)
-        literal_written_order(values, singletons)
         loop i in 0.. and value in values:
             scope = mk(.reflect_scope, nodes[e].pos)
             nodes[scope].name = i32(binder)

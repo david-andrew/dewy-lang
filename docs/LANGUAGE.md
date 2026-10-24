@@ -909,8 +909,8 @@ test the member and its value. A literal-typed parameter specializes an overload
 whose values hold it, ahead of a plain integer method, and the call has that
 method's result type; `(mode:'loud' ...)` and `(mode:'quiet' ...)` do the same for
 strings. `loop m in members(U)` unrolls over a literal
-union's members in the order the union was written, each typed as its own
-singleton, so `if text =? m return m` returns a `U`. Literal unions are
+union's members in one order whatever the spelling (the integers rising, then the
+strings in text order), each typed as its own singleton, so `if text =? m return m` returns a `U`. Literal unions are
 ordinary type arguments: `Box<'tokens'|'ast'>`, `array<'a'|'b'>`.
 
 A refuted obligation is a compile error. An unproven obligation becomes an

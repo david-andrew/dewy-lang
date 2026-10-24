@@ -68,7 +68,8 @@ representation_deep = (t0: int) -> int:
 str_sets: str[][] = [[]]
 str_set_types: int[] = [0]
 
-# (a set keeps its first spelling's order)
+# (a set keeps its first spelling's order: its words, which Jo code switching on a
+# Dewy enumeration shares; `members(U)` has its own, canonical order)
 str_set_type = (values: str[]) -> int:
     id = 0
     loop i in [1..str_sets.len()):
@@ -94,18 +95,6 @@ str_set_type = (values: str[]) -> int:
     structs[idx].type = i32(types.len() - 1)
     str_set_types[id] = types.len() - 1
     types.len() - 1
-
-# The written order of a literal union's members (`#1`, `'fast`), by the members
-# as a set: interned types forget it, and `members(U)` follows it. (the first
-# spelling of a set keeps its order, as `str_sets` do)
-literal_orders: {str: str[]} = {}
-
-literal_order_key = (keys: str[]) -> str: join(keys.sorted(), "\x00")
-
-literal_order_note = (written: str[]):
-    if written.len() < 2: return
-    key = literal_order_key(written)
-    if not literal_orders.has(key): literal_orders[key] = written
 
 # the string set a type is, or 0
 str_set_of = (t0: int) -> int:
@@ -223,7 +212,6 @@ refine_reset = ():
     str_sets = [[]]
     total_literals = {}
     str_set_types = [0]
-    literal_orders = {}
     ref_predicates = [[]]
     refine_active = false
     refine_fields = []
