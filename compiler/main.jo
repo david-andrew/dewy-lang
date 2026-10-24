@@ -6,6 +6,7 @@ use 'effects.jo'
 use 'concurrency.jo'
 use 'settings.jo'
 use 'targets.dewy'
+use 'json_doc.dewy'
 use 'icount.jo'
 use 'pcheck.jo'
 # The Sloppy compiler.
@@ -1078,6 +1079,7 @@ test_directory = (dir: str, words: str[], json: bool) -> int:
     aborted = false
     broken = false
     failures: str[]
+    doc = JsonDoc([])
     loop f in files:
         args = ["test"]
         if len(cli_mode) > 0: args.push("--{cli_mode}")
@@ -1088,14 +1090,15 @@ test_directory = (dir: str, words: str[], json: bool) -> int:
         ran_tests = 0
         loop line in split(ran.1, "\n"):
             if len(line) == 0: continue
-            name = json_text(line, "test")
-            if name == none:
+            root = json_parse(doc, line)
+            named = json_get(doc, root, "test")
+            if named == 0:
                 # (the file's summary: none when its tests' names do not match the words)
                 if json and ran_tests > 0: print(line[..len(line) - 1) + ",\"file\":{json_quote(f)}\}")
                 continue
             ran_tests += 1
             if json: print(line)
-            status = json_text(line, "status") ?? ""
+            status = json_str(doc, json_get(doc, root, "status"))
             if status == "pass":
                 passed += 1
                 marks += "."
@@ -1103,8 +1106,8 @@ test_directory = (dir: str, words: str[], json: bool) -> int:
                 failed += 1
                 filed += 1
                 marks += "F"
-                failures.push("{f}: {name!}")
-                failures.push(json_text(line, "output") ?? "")
+                failures.push("{f}: {json_str(doc, named)}")
+                failures.push(json_str(doc, json_get(doc, root, "output")))
         if ran.0 == 101: aborted = true
         if ran.0 == 102 or ran.0 < 0:
             broken = true
@@ -1143,30 +1146,6 @@ test_files = (dir: str, found: mut str[]):
                     if starts_with(line, "$test"):
                         found.push(p)
                         break
-
-# the string value of "key" in a line of JSON, as dewy-core test --json writes it
-json_text = (line: str, key: str) -> str?:
-    at = find(line, "\"{key}\":\"")
-    if at < 0: return none
-    i = at + len(key) + 4
-    buf: u8[]
-    loop i < len(line) and line[i] != '"':
-        c = line[i]
-        if c == '\\' and i + 1 < len(line):
-            i += 1
-            e = line[i]
-            if e == 'n': c = '\n'
-            else if e == 't': c = '\t'
-            else if e == 'r': c = '\r'
-            else if e == 'u' and i + 4 < len(line):
-                c = u8(to_int("0x" + line[i + 1..i + 5)) ?? 63)
-                i += 4
-            else: c = e
-        buf.push(c)
-        i += 1
-    str_from_bytes(buf)
-
-json_quote = (s: str) -> str: __test_jq(s)
 
 # (@lib("libc.so.6") in a Windows build: the program fails when it calls the function)
 extern_lib_check = (fi: int):

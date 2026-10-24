@@ -1,0 +1,15 @@
+# The compiler's frozen json_doc.jo, with the same command line as json_doc_dewy.dewy.
+use '../../../compiler/json_doc.jo'
+
+main = ():
+    words = args()
+    doc = JsonDoc([])
+    loop i in [1..words.len()):
+        text = words[i]
+        print(json_quote(text))
+        root = json_parse(doc, text)
+        print("= {json_raw(doc, root)}")
+        loop x in json_items(doc, root):
+            key = doc.nodes[x].key
+            print("  {json_quote(key)} {json_raw(doc, x)} {json_quote(json_str(doc, x))} {json_int(doc, x)} {json_bool(doc, x)} {json_get(doc, root, key) == x}")
+        print("  id {json_raw(doc, json_get(doc, root, "id"))} {json_raw(doc, json_path(doc, root, "params", "id"))}")

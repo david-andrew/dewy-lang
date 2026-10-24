@@ -13,221 +13,19 @@ use 'ide.jo'
 use 'fmt.jo'
 use 'lex.jo'
 use 'main.jo'
+use 'json_doc.dewy'
 
 # ---------------- JSON ----------------
-enum JK: null_, bool_, num, str_, arr, obj
-
-struct JNode:
-    kind: JK
-    s: str          # string value (or object key of this member)
-    key: str
-    n: int
-    first: i32      # arrays and objects: first element/member
-    next: i32       # the next element/member of the parent
-
-jn: JNode[] = [JNode()]
-js = ""
-jp = 0
-
-json_parse = (s: str) -> int:
-    jn = [JNode()]
-    js = s
-    jp = 0
-    v = json_value()
-    js = ""
-    v
-
-json_ws = ():
-    loop jp < len(js) and (js[jp] == ' ' or js[jp] == '\t' or js[jp] == '\n' or js[jp] == '\r'): jp += 1
-
-json_new = (k: JK) -> int:
-    jn.push(JNode(kind = k))
-    jn.len() - 1
-
-json_hex = (c: u8) -> int:
-    if c >= '0' and c <= '9': return int(c) - 48
-    if c >= 'a' and c <= 'f': return int(c) - 87
-    if c >= 'A' and c <= 'F': return int(c) - 55
-    0
-
-utf8_of = (cp: int) -> str:
-    b: u8[]
-    if cp < 0x80: b.push(u8(cp))
-    else if cp < 0x800:
-        b.push(u8(0xC0 | (cp >> 6)))
-        b.push(u8(0x80 | (cp & 63)))
-    else if cp < 0x10000:
-        b.push(u8(0xE0 | (cp >> 12)))
-        b.push(u8(0x80 | ((cp >> 6) & 63)))
-        b.push(u8(0x80 | (cp & 63)))
-    else:
-        b.push(u8(0xF0 | (cp >> 18)))
-        b.push(u8(0x80 | ((cp >> 12) & 63)))
-        b.push(u8(0x80 | ((cp >> 6) & 63)))
-        b.push(u8(0x80 | (cp & 63)))
-    str_from_bytes(b)
-
-json_string = () -> str:
-    jp += 1
-    start = jp
-    # (no escapes: one slice)
-    loop jp < len(js) and js[jp] != '"' and js[jp] != '\\': jp += 1
-    if jp < len(js) and js[jp] == '"':
-        jp += 1
-        return js[start..jp - 1)
-    out: u8[]
-    loop k in [start..jp): out.push(js[k])
-    loop jp < len(js) and js[jp] != '"':
-        c = js[jp]
-        if c == '\\' and jp + 1 < len(js):
-            jp += 1
-            e = js[jp]
-            if e == 'n': out.push('\n')
-            else if e == 't': out.push('\t')
-            else if e == 'r': out.push('\r')
-            else if e == 'b': out.push(8)
-            else if e == 'f': out.push(12)
-            else if e == 'u' and jp + 4 < len(js):
-                cp = 0
-                loop k in [1..5): cp = cp * 16 + json_hex(js[jp + k])
-                jp += 4
-                # a surrogate pair
-                if cp >= 0xD800 and cp < 0xDC00 and jp + 6 < len(js) and js[jp + 1] == '\\' and js[jp + 2] == 'u':
-                    lo = 0
-                    loop k in [3..7): lo = lo * 16 + json_hex(js[jp + k])
-                    if lo >= 0xDC00 and lo < 0xE000:
-                        cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00)
-                        jp += 6
-                loop b in utf8_of(cp): out.push(b)
-            else: out.push(e)
-        else: out.push(c)
-        jp += 1
-    jp += 1
-    str_from_bytes(out)
-
-json_value = () -> int:
-    json_ws()
-    if jp >= len(js): return 0
-    c = js[jp]
-    if c == '{{':
-        o = json_new(.obj)
-        jp += 1
-        last = 0
-        loop true:
-            json_ws()
-            if jp >= len(js) or js[jp] == '}}': break
-            if js[jp] == ',':
-                jp += 1
-                continue
-            if js[jp] != '"': break
-            k = json_string()
-            json_ws()
-            if jp < len(js) and js[jp] == ':': jp += 1
-            v = json_value()
-            if v == 0: v = json_new(.null_)
-            jn[v].key = k
-            if last == 0: jn[o].first = i32(v)
-            else: jn[last].next = i32(v)
-            last = v
-        jp += 1
-        return o
-    if c == '[':
-        a = json_new(.arr)
-        jp += 1
-        last = 0
-        loop true:
-            json_ws()
-            if jp >= len(js) or js[jp] == ']': break
-            if js[jp] == ',':
-                jp += 1
-                continue
-            v = json_value()
-            if v == 0: break
-            if last == 0: jn[a].first = i32(v)
-            else: jn[last].next = i32(v)
-            last = v
-        jp += 1
-        return a
-    if c == '"':
-        v = json_new(.str_)
-        jn[v].s = json_string()
-        return v
-    if c == 't' or c == 'f':
-        v = json_new(.bool_)
-        if c == 't':
-            jn[v].n = 1
-            jp += 4
-        else: jp += 5
-        return v
-    if c == 'n':
-        jp += 4
-        return json_new(.null_)
-    start = jp
-    loop jp < len(js) and (is_digit(js[jp]) or js[jp] == '-' or js[jp] == '+' or js[jp] == '.' or js[jp] == 'e' or js[jp] == 'E'): jp += 1
-    v = json_new(.num)
-    jn[v].s = js[start..jp)
-    t = js[start..jp)
-    d = find_byte(t, '.')
-    if d >= 0: t = t[..d)
-    jn[v].n = to_int(t) ?? 0
-    v
-
-jget = (o: int, key: str) -> int:
-    if o == 0 or jn[o].kind != .obj: return 0
-    c = int(jn[o].first)
-    loop c != 0:
-        if jn[c].key == key: return c
-        c = int(jn[c].next)
-    0
-
-jpath = (o: int, a: str, b: str) -> int: jget(jget(o, a), b)
-jstr = (v: int) -> str:
-    if v == 0 or jn[v].kind != .str_: return ""
-    jn[v].s
-jint = (v: int) -> int:
-    if v == 0: return 0
-    jn[v].n
-jbool = (v: int) -> bool: v != 0 and jn[v].kind == .bool_ and jn[v].n != 0
-jitems = (v: int) -> int[]:
-    out: int[]
-    if v == 0: return out
-    c = int(jn[v].first)
-    loop c != 0:
-        out.push(c)
-        c = int(jn[c].next)
-    out
-
-# a JSON string literal
-jq = (s: str) -> str:
-    clean = true
-    loop c in s:
-        if c < 32 or c == '"' or c == '\\':
-            clean = false
-            break
-    if clean: return "\"" + s + "\""
-    out: u8[]
-    out.push('"')
-    hexd = "0123456789abcdef"
-    loop c in s:
-        if c == '"' or c == '\\':
-            out.push('\\')
-            out.push(c)
-        else if c == '\n':
-            out.push('\\')
-            out.push('n')
-        else if c == '\t':
-            out.push('\\')
-            out.push('t')
-        else if c == '\r':
-            out.push('\\')
-            out.push('r')
-        else if c < 32:
-            loop b in "\\u00": out.push(b)
-            out.push(hexd[int(c) >> 4])
-            out.push(hexd[int(c) & 15])
-        else: out.push(c)
-    out.push('"')
-    str_from_bytes(out)
+# the message being answered (json_doc.dewy), and its values
+jdoc: JsonDoc
+jget = (o: int, key: str) -> int: json_get(jdoc, o, key)
+jpath = (o: int, a: str, b: str) -> int: json_path(jdoc, o, a, b)
+jstr = (v: int) -> str: json_str(jdoc, v)
+jint = (v: int) -> int: json_int(jdoc, v)
+jbool = (v: int) -> bool: json_bool(jdoc, v)
+jitems = (v: int) -> int[]: json_items(jdoc, v)
+# a value as JSON text again (a request's id as it was sent)
+jraw = (v: int) -> str: json_raw(jdoc, v)
 
 # ---------------- messages ----------------
 inbuf: u8[]
@@ -335,32 +133,27 @@ lsp_watch = (req: str, uri: str):
     lsp_stop = 0
     lsp_seen = 0
 
-# The active handler still refers to nodes in jn. Save its parser state while inspecting
-# queued envelopes; matching raw substrings could mistake document text for a cancellation.
+# The active handler still reads jdoc: queued envelopes are read into a document of their
+# own. (Matching raw substrings could mistake document text for a cancellation.)
 lsp_should_stop = () -> bool:
     if not lsp_watching: return false
     if lsp_stop != 0: return true
     lsp_drain()
-    saved_nodes = jn
-    saved_text = js
-    saved_pos = jp
+    q = JsonDoc([])
     loop lsp_seen < lsp_queue.len():
-        root = json_parse(lsp_queue[lsp_seen])
+        root = json_parse(q, lsp_queue[lsp_seen])
         lsp_seen += 1
-        method = jstr(jget(root, "method"))
-        params = jget(root, "params")
-        if method == "$/cancelRequest" and len(lsp_req) > 0 and jn_raw(jget(params, "id")) == lsp_req:
+        method = json_str(q, json_get(q, root, "method"))
+        params = json_get(q, root, "params")
+        if method == "$/cancelRequest" and len(lsp_req) > 0 and json_raw(q, json_get(q, params, "id")) == lsp_req:
             lsp_stop = -32800
             break
-        if (method == "textDocument/didChange" or method == "textDocument/didClose") and len(lsp_req_uri) > 0 and jstr(jpath(params, "textDocument", "uri")) == lsp_req_uri:
+        if (method == "textDocument/didChange" or method == "textDocument/didClose") and len(lsp_req_uri) > 0 and json_str(q, json_path(q, params, "textDocument", "uri")) == lsp_req_uri:
             lsp_stop = -32801
             break
         if method == "shutdown" or method == "exit":
             lsp_stop = -32800
             break
-    jn = saved_nodes
-    js = saved_text
-    jp = saved_pos
     if in_eof: lsp_stop = -32800
     lsp_stop != 0
 
@@ -371,19 +164,19 @@ lsp_next = () -> str?:
             else: return none
         lsp_drain()
         m = lsp_queue.remove(0)
-        root = json_parse(m)
+        root = json_parse(jdoc, m)
         method = jstr(jget(root, "method"))
         # Let the main loop retry dirty diagnostics after a cancelled request.
         if method == "$/cancelRequest": return m
         id = jget(root, "id")
         if id == 0 or method == "initialize" or method == "shutdown": return m
-        key = jn_raw(id)
+        key = jraw(id)
         uri = jstr(jget(jget(jget(root, "params"), "textDocument"), "uri"))
         stale = 0
         loop later in lsp_queue:
-            r = json_parse(later)
+            r = json_parse(jdoc, later)
             lm = jstr(jget(r, "method"))
-            if lm == "$/cancelRequest" and jn_raw(jget(jget(r, "params"), "id")) == key:
+            if lm == "$/cancelRequest" and jraw(jget(jget(r, "params"), "id")) == key:
                 stale = -32800
                 break
             if lm == "textDocument/didChange" and len(uri) > 0 and jstr(jget(jget(jget(r, "params"), "textDocument"), "uri")) == uri: stale = -32801
@@ -400,7 +193,7 @@ lsp_send = (body: str):
 # (requests are answered with `return lsp_reply(...)`: handlers return 0)
 lsp_reply = (id: int, result: str) -> int:
     if lsp_stop != 0: return lsp_error(id, lsp_stop, "cancelled")
-    lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":{jn_raw(id)},\"result\":{result}\}")
+    lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":{jraw(id)},\"result\":{result}\}")
     0
 
 lsp_error = (id: int, code: int, msg: str) -> int:
@@ -412,17 +205,11 @@ lsp_error = (id: int, code: int, msg: str) -> int:
         out_code = lsp_stop
         out_msg = "cancelled"
         if lsp_stop == -32801: out_msg = "the document changed"
-    lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":{jn_raw(id)},\"error\":\{\"code\":{out_code},\"message\":{jq(out_msg)}\}\}")
+    lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":{jraw(id)},\"error\":\{\"code\":{out_code},\"message\":{json_quote(out_msg)}\}\}")
     0
 
 lsp_notify = (method: str, params: str):
-    lsp_send("\{\"jsonrpc\":\"2.0\",\"method\":{jq(method)},\"params\":{params}\}")
-
-# a request id as it was sent (a number or a string)
-jn_raw = (v: int) -> str:
-    if v == 0: return "null"
-    if jn[v].kind == .str_: return jq(jn[v].s)
-    jn[v].s
+    lsp_send("\{\"jsonrpc\":\"2.0\",\"method\":{json_quote(method)},\"params\":{params}\}")
 
 lsp_log = (s: str): eprint("dewy-core lsp: {s}")
 
@@ -1077,7 +864,7 @@ publish = (d: int):
         sev = 1
         if x.warning: sev = 2
         if x.info: sev = 3
-        item = "\{\"range\":\{\"start\":{jpos(lpos_of(text, ls, a))},\"end\":{jpos(lpos_of(text, ls, b))}\},\"severity\":{sev},\"source\":\"dewy-core\",\"message\":{jq(x.msg)}\}"
+        item = "\{\"range\":\{\"start\":{jpos(lpos_of(text, ls, a))},\"end\":{jpos(lpos_of(text, ls, b))}\},\"severity\":{sev},\"source\":\"dewy-core\",\"message\":{json_quote(x.msg)}\}"
         lst = by_path.get(x.path) ?? []
         lst.push(item)
         by_path[x.path] = lst
@@ -1086,12 +873,12 @@ publish = (d: int):
     loop p, items in by_path: sent.push(uri_of(p))
     # (first clear errors published before to files that have none now)
     loop u in docs[d].diag_uris:
-        if not sent.contains(u): lsp_notify("textDocument/publishDiagnostics", "\{\"uri\":{jq(u)},\"diagnostics\":[]\}")
+        if not sent.contains(u): lsp_notify("textDocument/publishDiagnostics", "\{\"uri\":{json_quote(u)},\"diagnostics\":[]\}")
     loop p, items in by_path:
         u = uri_of(p)
         ver = ""
         if u == docs[d].uri: ver = ",\"version\":{docs[d].version}"
-        lsp_notify("textDocument/publishDiagnostics", "\{\"uri\":{jq(u)}{ver},\"diagnostics\":[{join(items, ",")}]\}")
+        lsp_notify("textDocument/publishDiagnostics", "\{\"uri\":{json_quote(u)}{ver},\"diagnostics\":[{join(items, ",")}]\}")
     docs[d].diag_uris = sent
 
 # the file number of path in result r (-1 if it is not there)
@@ -1158,7 +945,7 @@ loc_json = (r: Result, f: int, off: int, n: int) -> str:
     if o < 0: o = off
     text = text_of(path)
     ls = line_starts_of(text)
-    "\{\"uri\":{jq(uri_of(path))},\"range\":\{\"start\":{jpos(lpos_of(text, ls, o))},\"end\":{jpos(lpos_of(text, ls, o + n))}\}\}"
+    "\{\"uri\":{json_quote(uri_of(path))},\"range\":\{\"start\":{jpos(lpos_of(text, ls, o))},\"end\":{jpos(lpos_of(text, ls, o + n))}\}\}"
 
 kind_name = (k: int) -> str:
     if k == IK_LOCAL: return "variable"
@@ -1208,7 +995,7 @@ on_hover = (id: int, params: int) -> int:
     language = if ends_with(docs[d].path, ".dewy"): "dewy" else: "jo"
     md = "```{language}\n{code}\n```"
     if len(doc) > 0: md += "\n---\n" + doc
-    lsp_reply(id, "\{\"contents\":\{\"kind\":\"markdown\",\"value\":{jq(md)}\}\}")
+    lsp_reply(id, "\{\"contents\":\{\"kind\":\"markdown\",\"value\":{json_quote(md)}\}\}")
 
 on_definition = (id: int, params: int) -> int:
     d = text_params_doc(params)
@@ -1217,7 +1004,7 @@ on_definition = (id: int, params: int) -> int:
     off = req_off(d, params)
     # use 'file.jo': the file
     u = use_target(d, off)
-    if len(u) > 0: return lsp_reply(id, "\{\"uri\":{jq(path_to_uri(u))},\"range\":\{\"start\":\{\"line\":0,\"character\":0\},\"end\":\{\"line\":0,\"character\":0\}\}\}")
+    if len(u) > 0: return lsp_reply(id, "\{\"uri\":{json_quote(path_to_uri(u))},\"range\":\{\"start\":\{\"line\":0,\"character\":0\},\"end\":\{\"line\":0,\"character\":0\}\}\}")
     h = ref_at(d, off)
     if not h.found or len(h.ref.decl) == 0: return lsp_reply(id, "null")
     p = split_pos(h.ref.decl)
@@ -1422,7 +1209,7 @@ on_rename = (id: int, params: int) -> int:
             loc = loc_json(u.res, x.file, x.off, x.len)
             rg = loc[find(loc, "\"range\":") + 8..len(loc) - 1)
             lst = by_uri.get(u2) ?? []
-            lst.push("\{\"range\":{rg},\"newText\":{jq(nn)}\}")
+            lst.push("\{\"range\":{rg},\"newText\":{json_quote(nn)}\}")
             by_uri[u2] = lst
     if by_uri.len() == 0: return lsp_error(id, -32803, "nothing to rename here")
     kind = 0
@@ -1430,7 +1217,7 @@ on_rename = (id: int, params: int) -> int:
     clash = rename_clash(us, h, kind, touched, nn)
     if len(clash) > 0: return lsp_error(id, -32803, clash)
     parts: str[]
-    loop u, edits in by_uri: parts.push("{jq(u)}:[{join(edits, ",")}]")
+    loop u, edits in by_uri: parts.push("{json_quote(u)}:[{join(edits, ",")}]")
     lsp_reply(id, "\{\"changes\":\{{join(parts, ",")}\}\}")
 
 # why renaming what h is to as nn could change what names mean ("" if it cannot): nn is declared
@@ -1555,9 +1342,9 @@ import_paths = (d: int, off: int) -> str:
         if starts_with(n, ".") or n == "__dewycache__" or n == "node_modules": continue
         full = dir + "/" + n
         if is_dir(full):
-            items.push("\{\"label\":{jq(n + "/")},\"kind\":19,\"sortText\":{jq("1" + n)},\"textEdit\":\{\"range\":{rg},\"newText\":{jq(n + "/")}\},\"command\":\{\"title\":\"\",\"command\":\"editor.action.triggerSuggest\"\}\}")
+            items.push("\{\"label\":{json_quote(n + "/")},\"kind\":19,\"sortText\":{json_quote("1" + n)},\"textEdit\":\{\"range\":{rg},\"newText\":{json_quote(n + "/")}\},\"command\":\{\"title\":\"\",\"command\":\"editor.action.triggerSuggest\"\}\}")
         else if (ends_with(n, ".dewy") or ends_with(n, ".jo")) and full != docs[d].path:
-            items.push("\{\"label\":{jq(n)},\"kind\":17,\"sortText\":{jq("0" + n)},\"textEdit\":\{\"range\":{rg},\"newText\":{jq(n)}\}\}")
+            items.push("\{\"label\":{json_quote(n)},\"kind\":17,\"sortText\":{json_quote("0" + n)},\"textEdit\":\{\"range\":{rg},\"newText\":{json_quote(n)}\}\}")
     if items.len() == 0: return no_items
     "\{\"isIncomplete\":false,\"items\":[{join(items, ",")}]\}"
 
@@ -1579,7 +1366,7 @@ on_completion = (id: int, params: int) -> int:
     if a > 0 and text[a - 1] == '$' and ends_with(docs[d].path, ".dewy"):
         # (the directives this compiler implements)
         dv: str[]
-        loop w in ["assert", "runtime_assert", "expect", "fail", "test", "capture", "include_bytes"]: dv.push("\{\"label\":{jq(w)},\"kind\":14,\"detail\":\"directive\"\}")
+        loop w in ["assert", "runtime_assert", "expect", "fail", "test", "capture", "include_bytes"]: dv.push("\{\"label\":{json_quote(w)},\"kind\":14,\"detail\":\"directive\"\}")
         return lsp_reply(id, "\{\"isIncomplete\":false,\"items\":[{join(dv, ",")}]\}")
     if member and a > 1 and text[a - 2] == '.': return lsp_reply(id, no_items)     # a range: 0..
     if not member and len(prefix) > 0 and is_digit(prefix[0]): return lsp_reply(id, no_items)
@@ -1621,10 +1408,10 @@ on_completion = (id: int, params: int) -> int:
         # (the program's own names and fields first, then the library's)
         so = "1"
         if k == IK_LOCAL or k == IK_PARAM or k == IK_FIELD or k == IK_VARIANT: so = "0"
-        items.push("\{\"label\":{jq(label)},\"kind\":{comp_kind(k)},\"detail\":{jq(c[2])},\"sortText\":{jq(so + label)}\}")
+        items.push("\{\"label\":{json_quote(label)},\"kind\":{comp_kind(k)},\"detail\":{json_quote(c[2])},\"sortText\":{json_quote(so + label)}\}")
     if not member and r.comps.len() > 0 or not member and items.len() == 0:
         loop kw in comp_words(ends_with(docs[d].path, ".dewy")):
-            if seen.get(kw) == none: items.push("\{\"label\":{jq(kw)},\"kind\":14,\"sortText\":{jq("2" + kw)}\}")
+            if seen.get(kw) == none: items.push("\{\"label\":{json_quote(kw)},\"kind\":14,\"sortText\":{json_quote("2" + kw)}\}")
     lsp_reply(id, "\{\"isIncomplete\":false,\"items\":[{join(items, ",")}]\}")
 
 # Dewy arguments are separated by spaces, `f(a b+1 @c name=d)`: a word continues the argument
@@ -1808,8 +1595,8 @@ on_signature = (id: int, params: int) -> int:
         if k >= 0: active = k
     pj: str[]
     loop p in ps: pj.push("\{\"label\":{p}\}")
-    sig = "\{\"label\":{jq(label)},\"parameters\":[{join(pj, ",")}]"
-    if len(dc.doc) > 0: sig += ",\"documentation\":\{\"kind\":\"markdown\",\"value\":{jq(dc.doc)}\}"
+    sig = "\{\"label\":{json_quote(label)},\"parameters\":[{join(pj, ",")}]"
+    if len(dc.doc) > 0: sig += ",\"documentation\":\{\"kind\":\"markdown\",\"value\":{json_quote(dc.doc)}\}"
     sig += "\}"
     lsp_reply(id, "\{\"signatures\":[{sig}],\"activeSignature\":0,\"activeParameter\":{active}\}")
 
@@ -1845,7 +1632,7 @@ on_inlay = (id: int, params: int) -> int:
             if starts_with(lbl, " "):
                 lbl = trim(lbl)
                 pad = "true"
-            out.push("\{\"position\":{jpos(lpos_of(text, ls, o))},\"label\":{jq(lbl)},\"kind\":1,\"paddingLeft\":{pad}\}")
+            out.push("\{\"position\":{jpos(lpos_of(text, ls, o))},\"label\":{json_quote(lbl)},\"kind\":1,\"paddingLeft\":{pad}\}")
     lsp_reply(id, "[{join(out, ",")}]")
 
 # ---------------- semantic tokens (what each name is: the references a check found) ----------------
@@ -2060,7 +1847,7 @@ sym_json = (name: str, kind: int, line: int, col: int, endl: int, kids: str[]) -
     ec = utf16_units(sy_lines[endl], 0, len(sy_lines[endl]))
     rg = "\{\"start\":\{\"line\":{line},\"character\":0\},\"end\":\{\"line\":{endl},\"character\":{ec}\}\}"
     sel = "\{\"start\":\{\"line\":{line},\"character\":{c}\},\"end\":\{\"line\":{line},\"character\":{c + utf16_units(name, 0, len(name))}\}\}"
-    s = "\{\"name\":{jq(name)},\"kind\":{kind},\"range\":{rg},\"selectionRange\":{sel}"
+    s = "\{\"name\":{json_quote(name)},\"kind\":{kind},\"range\":{rg},\"selectionRange\":{sel}"
     if kids.len() > 0: s += ",\"children\":[{join(kids, ",")}]"
     s + "\}"
 
@@ -2242,8 +2029,8 @@ on_workspace_symbol = (id: int, params: int) -> int:
             m = ws_match(y.name, q)
             if y.kind == 24 or m == 3 or out[m].len() >= 1000: continue
             rg = "\{\"start\":\{\"line\":{y.line},\"character\":{y.c0}\},\"end\":\{\"line\":{y.line},\"character\":{y.c1}\}\}"
-            e = "\{\"name\":{jq(y.name)},\"kind\":{y.kind},\"location\":\{\"uri\":{jq(uri)},\"range\":{rg}\}"
-            if len(y.container) > 0: e += ",\"containerName\":{jq(y.container)}"
+            e = "\{\"name\":{json_quote(y.name)},\"kind\":{y.kind},\"location\":\{\"uri\":{json_quote(uri)},\"range\":{rg}\}"
+            if len(y.container) > 0: e += ",\"containerName\":{json_quote(y.container)}"
             out[m].push(e + "\}")
     all = out[0] + out[1] + out[2]
     lsp_reply(id, "[{join(all[..min(all.len(), 1000)), ",")}]")
@@ -2252,13 +2039,13 @@ on_workspace_symbol = (id: int, params: int) -> int:
 
 lens_json = (line: int, title: str, command: str, args: str) -> str:
     rg = "\{\"start\":\{\"line\":{line},\"character\":0\},\"end\":\{\"line\":{line},\"character\":0\}\}"
-    "\{\"range\":{rg},\"command\":\{\"title\":{jq(title)},\"command\":{jq(command)},\"arguments\":[{args}]\}\}"
+    "\{\"range\":{rg},\"command\":\{\"title\":{json_quote(title)},\"command\":{json_quote(command)},\"arguments\":[{args}]\}\}"
 
 on_code_lens = (id: int, params: int) -> int:
     d = text_params_doc(params)
     if d < 0 or not ends_with(docs[d].path, ".dewy"): return lsp_reply(id, "[]")
     lenses: (int, str)[]
-    u = jq(docs[d].uri)
+    u = json_quote(docs[d].uri)
     tests = 0
     # (a `$test` line: the function on the next line is a test, run by its name)
     text_lines = split(docs[d].text, "\n")
@@ -2274,7 +2061,7 @@ on_code_lens = (id: int, params: int) -> int:
         name = ident_prefix(decl)
         if len(name) == 0: continue
         if tests == 0: lenses.push((i, lens_json(i, "Run all tests", "dewy.core.test", u)))
-        lenses.push((i, lens_json(i, "Run test", "dewy.core.runTest", "{u},{jq(name)}")))
+        lenses.push((i, lens_json(i, "Run test", "dewy.core.runTest", "{u},{json_quote(name)}")))
         tests += 1
     loop y in ws_symbols_of(docs[d].path, docs[d].text):
         if y.kind == 12 and y.name == "main" and len(y.container) == 0:
@@ -2295,7 +2082,7 @@ on_formatting = (id: int, params: int) -> int:
     quiet_errors = false
     if out == text: return lsp_reply(id, "[]")
     end = jpos(lpos_of(text, line_starts_of(text), len(text)))
-    lsp_reply(id, "[\{\"range\":\{\"start\":\{\"line\":0,\"character\":0\},\"end\":{end}\},\"newText\":{jq(out)}\}]")
+    lsp_reply(id, "[\{\"range\":\{\"start\":\{\"line\":0,\"character\":0\},\"end\":{end}\},\"newText\":{json_quote(out)}\}]")
 
 # ---------------- quick fixes: edits that errors suggest ----------------
 
@@ -2304,8 +2091,8 @@ qf_json = (d: int, title: str, diag: int, a: int, b: int, new_: str) -> str:
     text = docs[d].text
     ls = line_starts_of(text)
     rg = "\{\"start\":{jpos(lpos_of(text, ls, a))},\"end\":{jpos(lpos_of(text, ls, b))}\}"
-    edit = "\{\"changes\":\{{jq(docs[d].uri)}:[\{\"range\":{rg},\"newText\":{jq(new_)}\}]\}\}"
-    "\{\"title\":{jq(title)},\"kind\":\"quickfix\",\"isPreferred\":true,\"diagnostics\":[{jraw(diag)}],\"edit\":{edit}\}"
+    edit = "\{\"changes\":\{{json_quote(docs[d].uri)}:[\{\"range\":{rg},\"newText\":{json_quote(new_)}\}]\}\}"
+    "\{\"title\":{json_quote(title)},\"kind\":\"quickfix\",\"isPreferred\":true,\"diagnostics\":[{jraw(diag)}],\"edit\":{edit}\}"
 
 is_word = (s: str) -> bool:
     loop c in s:
@@ -2334,25 +2121,6 @@ word_near = (text: str, p: int, w: str) -> int:
         if lb and rb and (best < 0 or abs(i - p) < abs(best - p)): best = i
         i = find(text, w, i + 1)
     best
-
-# a JSON value again, as text
-jraw = (v: int) -> str:
-    if v == 0: return "null"
-    k = jn[v].kind
-    if k == .str_: return jq(jn[v].s)
-    if k == .num: return jn[v].s
-    if k == .bool_:
-        if jn[v].n != 0: return "true"
-        return "false"
-    if k == .arr:
-        xs: str[]
-        loop x in jitems(v): xs.push(jraw(x))
-        return "[{join(xs, ",")}]"
-    if k == .obj:
-        parts: str[]
-        loop x in jitems(v): parts.push("{jq(jn[x].key)}:{jraw(x)}")
-        return "\{{join(parts, ",")}\}"
-    "null"
 
 # the start of the nearest line above p whose text pred accepts (-1: none)
 line_above = (text: str, p: int, pred: (str) -> bool) -> int:
@@ -2650,7 +2418,7 @@ on_close = (params: int):
         o = -1
         loop i in [0..docs.len()):
             if i != d and docs[i].open and docs[i].diag_uris.contains(u): o = i
-        if o < 0: lsp_notify("textDocument/publishDiagnostics", "\{\"uri\":{jq(u)},\"diagnostics\":[]\}")
+        if o < 0: lsp_notify("textDocument/publishDiagnostics", "\{\"uri\":{json_quote(u)},\"diagnostics\":[]\}")
         else if not owners.contains(o): owners.push(o)
     docs[d].diag_uris = []
     loop o in owners: publish(o)
@@ -2659,7 +2427,7 @@ capabilities = "\{\"textDocumentSync\":\{\"openClose\":true,\"change\":1,\"save\
 
 sem_legend = (xs: str[]) -> str:
     out: str[]
-    loop x in xs: out.push(jq(x))
+    loop x in xs: out.push(json_quote(x))
     "[{join(out, ",")}]"
 
 lsp_main = ():
@@ -2697,12 +2465,12 @@ lsp_main = ():
                 refresh_lowered(i)
         m = lsp_next()
         if m == none: exit(0)
-        root = json_parse(m!)
+        root = json_parse(jdoc, m!)
         method = jstr(jget(root, "method"))
         id = jget(root, "id")
         params = jget(root, "params")
         key = ""
-        if id != 0: key = jn_raw(id)
+        if id != 0: key = jraw(id)
         lsp_watch(key, jstr(jpath(params, "textDocument", "uri")))
         if method == "initialize":
             ws_init(params)

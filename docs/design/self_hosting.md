@@ -133,6 +133,25 @@ settings, globals that Sloppy code sets. Its gaps:
 - A bare zero-argument function name calls before `.length`, `.join` and `[i]`, but not
   before a member call with arguments: `target_names.join(", ")` is "has no member 'join'".
 
+`json_doc.dewy` (the language server's JSON: a message read into a tree of nodes, its
+values read back, text quoted and values written again) also reads `dewy-core test DIR`'s
+per-file result lines, so main.jo's second JSON decoder is gone. It is the first leaf with
+an enumeration (`JsonKind`, a union of string literals; Sloppy never names its members),
+records in an array arena changed through a place (`doc.nodes[v].key=k`), mutual
+recursion over two places (`@doc @r`), and `match` on bytes and over the enumeration
+without an `else`. It compiled as first written. Parsing a 640 KB `didChange` message 20
+times takes 1.398 G against its twin's 1.568 G (release 1.198 / 1.216 G); the language
+server is outside the flagship panel. The differential test found a hang in the old
+parser: inside a list, a byte that no value starts with (`[}`) read as an empty number
+without moving on. That is now no value, which ends the list. What it met:
+- A Dewy record whose fields have no defaults has no `T()` in Sloppy (Dewy requires every
+  field without a default); Sloppy writes `JsonDoc([])`.
+- About 60 run-time bounds checks remain (the leaf is cold). A scan position kept in a
+  record field reached by place (`r.at`) carries no facts. Refining the field
+  (`at:int64<at >=? 0>`) leaves 44, but then each `r.at+=1` gets a wrap check, and after
+  `let start=r.at` and a scan, `r.text.byte_slice(start r.at)` cannot prove
+  `start <=? r.at`. A local scan position, copied back, would prove them.
+
 Open gaps from these leaves, by cost:
 - A literal beside a policy-typed operand (`w + 1`, `w & 0xFF`, `w xor 0xFFFFFFFF`) goes
   through `int` and `__mi_low_word`, about 30 instructions in place of one. Plain `uint32`

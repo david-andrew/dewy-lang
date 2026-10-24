@@ -1,0 +1,21 @@
+# The compiler's json_doc.dewy: `json_doc text...` parses each text and prints it quoted,
+# its value written again, then each member or element: its key, value, text, integer
+# part and truth, and the root's "id" and "params"."id".
+$runtime_checks
+from p"../../../compiler/json_doc.dewy" import JsonDoc, json_parse, json_get, json_path, json_str, json_int, json_bool, json_items, json_quote, json_raw
+
+main=():>void=>{
+    let words=args()
+    let doc:JsonDoc=[nodes=[]]
+    loop i in [1..words.length) {
+        let text=words[i]
+        printl(json_quote(text))
+        let root=json_parse(@doc text)
+        printl"= {json_raw(doc root)}"
+        loop x in json_items(doc root) {
+            let key=doc.nodes[x].key
+            printl"  {json_quote(key)} {json_raw(doc x)} {json_quote(json_str(doc x))} {json_int(doc x)} {json_bool(doc x)} {json_get(doc root key) =? x}"
+        }
+        printl"  id {json_raw(doc json_get(doc root "id"))} {json_raw(doc json_path(doc root "params" "id"))}"
+    }
+}

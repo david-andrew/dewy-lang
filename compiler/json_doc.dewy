@@ -1,0 +1,344 @@
+# JSON for the language server (lsp.jo): messages read into a tree of nodes, values
+# read from it, and values written back as text. Reading is lenient: an editor's
+# message is taken as far as it makes sense, and a missing or malformed piece reads as
+# no value (0), "" or 0, never as an error.
+#
+# A module of the compiler written in Dewy. json_doc.jo is its frozen twin for the
+# compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
+# interface and give the same answers (tests/test_selfhost_json_doc.py). A document is
+# the caller's and comes in by place to be parsed; reading it takes it as a value.
+
+JsonKind:type='null_' | 'boolean' | 'number' | 'text' | 'list' | 'object'
+
+# A value: a node of its document. A list's or an object's members are linked from its
+# first through each one's next (0 ends them); an object's member has its key.
+JsonNode:type=[
+    kind:JsonKind='null_'
+    s:string=""      # a text's value, or a number as written
+    key:string=""
+    n:int64=0        # a number's integer part (0 when it has none that fits), or a boolean's 0 or 1
+    first:int64=0
+    next:int64=0
+]
+
+# (no defaults: the zero value is the empty document, so a global of it needs no
+# initializer. Node 0 stands for no value.)
+JsonDoc:type=[nodes:array<JsonNode>]
+
+# (the text, its bytes, and the next byte to read)
+JsonReader:type=[text:string b:array<uint8> at:int64]
+
+# Parse text into doc, which starts afresh: its root value (0 when there is none)
+json_parse=(@doc:JsonDoc text:string):>int64=>{
+    doc.nodes=[[]]
+    let r:JsonReader=[text=text b=text as array<uint8> at=0]
+    json_value(@doc @r)
+}
+
+json_space=(@r:JsonReader)=>{
+    loop r.at <? r.b.length and (r.b[r.at] =? b' ' or r.b[r.at] =? b'\t' or r.b[r.at] =? b'\n' or r.b[r.at] =? b'\r') {r.at+=1}
+}
+
+json_new=(@doc:JsonDoc kind:JsonKind):>int64=>{
+    doc.nodes.push([kind=kind])
+    doc.nodes.length - 1
+}
+
+json_hex=(c:uint8):>int64=>{
+    if c >=? b'0' and c <=? b'9' {return (c as int64) - 48}
+    if c >=? b'a' and c <=? b'f' {return (c as int64) - 87}
+    if c >=? b'A' and c <=? b'F' {return (c as int64) - 55}
+    0
+}
+
+# cp's UTF-8 bytes onto out (half a surrogate pair is U+FFFD)
+json_utf8=(@out:array<uint8> cp0:int64)=>{
+    let cp=if cp0 >=? 0xD800 and cp0 <? 0xE000 0xFFFD else cp0
+    if cp <? 0x80 {
+        out.push(cp as uint8)
+        return
+    }
+    if cp <? 0x800 {
+        out.push((0xC0 | (cp >> 6)) as uint8)
+        out.push((0x80 | (cp & 63)) as uint8)
+        return
+    }
+    if cp <? 0x10000 {
+        out.push((0xE0 | (cp >> 12)) as uint8)
+        out.push((0x80 | ((cp >> 6) & 63)) as uint8)
+        out.push((0x80 | (cp & 63)) as uint8)
+        return
+    }
+    out.push((0xF0 | (cp >> 18)) as uint8)
+    out.push((0x80 | ((cp >> 12) & 63)) as uint8)
+    out.push((0x80 | ((cp >> 6) & 63)) as uint8)
+    out.push((0x80 | (cp & 63)) as uint8)
+}
+
+# the text whose opening quote is at r.at; r.at moves past its closing one
+json_string=(@r:JsonReader):>string=>{
+    r.at+=1
+    let start=r.at
+    let b=r.b
+    # (no escapes: one slice)
+    loop r.at <? b.length and b[r.at] not=? b'"' and b[r.at] not=? b'\\' {r.at+=1}
+    if r.at <? b.length and b[r.at] =? b'"' {
+        r.at+=1
+        return r.text.byte_slice(start r.at - 1)
+    }
+    let out:array<uint8>=[]
+    loop k in [start..r.at) {out.push(b[k])}
+    loop r.at <? b.length and b[r.at] not=? b'"' {
+        let c=b[r.at]
+        if c =? b'\\' and r.at + 1 <? b.length {
+            r.at+=1
+            let e=b[r.at]
+            match e {
+                <b'n'> => out.push(b'\n')
+                <b't'> => out.push(b'\t')
+                <b'r'> => out.push(b'\r')
+                <b'b'> => out.push(8)
+                <b'f'> => out.push(12)
+                <b'u'> => {
+                    if r.at + 4 <? b.length {
+                        let cp:int64=0
+                        loop k in [1..5) {cp=cp * 16 + json_hex(b[r.at + k])}
+                        r.at+=4
+                        # a surrogate pair
+                        if cp >=? 0xD800 and cp <? 0xDC00 and r.at + 6 <? b.length and b[r.at + 1] =? b'\\' and b[r.at + 2] =? b'u' {
+                            let lo:int64=0
+                            loop k in [3..7) {lo=lo * 16 + json_hex(b[r.at + k])}
+                            if lo >=? 0xDC00 and lo <? 0xE000 {
+                                cp=0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00)
+                                r.at+=6
+                            }
+                        }
+                        json_utf8(@out cp)
+                    }
+                    else {out.push(e)}
+                }
+                _ => out.push(e)
+            }
+        }
+        else {out.push(c)}
+        r.at+=1
+    }
+    r.at+=1
+    out as string ?? ""
+}
+
+# a number's integer part (before any '.'): an optional sign, then digits that fit in
+# int64; 0 when it is not one
+json_integer=(text:string start:int64 stop0:int64):>int64=>{
+    let b=text as array<uint8>
+    let stop=stop0
+    loop k in [start..stop0) {
+        if b[k] =? b'.' {
+            stop=k
+            break
+        }
+    }
+    let i=start
+    if i <? stop and (b[i] =? b'-' or b[i] =? b'+') {i+=1}
+    if i >=? stop {return 0}
+    let v:int64=0
+    loop i <? stop {
+        let c=b[i]
+        if c <? b'0' or c >? b'9' {return 0}
+        let d=(c as int64) - 48
+        if v >? (9223372036854775807 - d) // 10 {return 0}
+        v=v * 10 + d
+        i+=1
+    }
+    if b[start] =? b'-' -v else v
+}
+
+# the value at r.at (after any spaces), and r.at past it: 0 when there is none
+json_value=(@doc:JsonDoc @r:JsonReader):>int64=>{
+    json_space(@r)
+    if r.at >=? r.b.length {return 0}
+    match r.b[r.at] {
+        <b'\{'> => json_members(@doc @r)
+        <b'['> => json_elements(@doc @r)
+        <b'"'> => {
+            let v=json_new(@doc 'text')
+            doc.nodes[v].s=json_string(@r)
+            v
+        }
+        <b't'> => {
+            r.at+=4
+            let v=json_new(@doc 'boolean')
+            doc.nodes[v].n=1
+            v
+        }
+        <b'f'> => {
+            r.at+=5
+            json_new(@doc 'boolean')
+        }
+        <b'n'> => {
+            r.at+=4
+            json_new(@doc 'null_')
+        }
+        _ => json_number(@doc @r)
+    }
+}
+
+# an object: its members linked in order, each with its key (a missing value is null)
+json_members=(@doc:JsonDoc @r:JsonReader):>int64=>{
+    let b=r.b
+    let o=json_new(@doc 'object')
+    r.at+=1
+    let last:int64=0
+    loop true {
+        json_space(@r)
+        if r.at >=? b.length or b[r.at] =? b'}' {break}
+        if b[r.at] =? b',' {
+            r.at+=1
+            continue
+        }
+        if b[r.at] not=? b'"' {break}
+        let k=json_string(@r)
+        json_space(@r)
+        if r.at <? b.length and b[r.at] =? b':' {r.at+=1}
+        let v0=json_value(@doc @r)
+        let v=if v0 =? 0 json_new(@doc 'null_') else v0
+        doc.nodes[v].key=k
+        if last =? 0 {doc.nodes[o].first=v} else {doc.nodes[last].next=v}
+        last=v
+    }
+    r.at+=1
+    o
+}
+
+# a list: its elements linked in order, up to the first that is no value
+json_elements=(@doc:JsonDoc @r:JsonReader):>int64=>{
+    let b=r.b
+    let a=json_new(@doc 'list')
+    r.at+=1
+    let last:int64=0
+    loop true {
+        json_space(@r)
+        if r.at >=? b.length or b[r.at] =? b']' {break}
+        if b[r.at] =? b',' {
+            r.at+=1
+            continue
+        }
+        let v=json_value(@doc @r)
+        if v =? 0 {break}
+        if last =? 0 {doc.nodes[a].first=v} else {doc.nodes[last].next=v}
+        last=v
+    }
+    r.at+=1
+    a
+}
+
+# a number as written: the bytes a number may have (none: no value, and the caller stops)
+json_number=(@doc:JsonDoc @r:JsonReader):>int64=>{
+    let b=r.b
+    let start=r.at
+    loop r.at <? b.length and (b[r.at] >=? b'0' and b[r.at] <=? b'9' or b[r.at] =? b'-' or b[r.at] =? b'+' or b[r.at] =? b'.' or b[r.at] =? b'e' or b[r.at] =? b'E') {r.at+=1}
+    if r.at =? start {return 0}
+    let v=json_new(@doc 'number')
+    doc.nodes[v].s=r.text.byte_slice(start r.at)
+    doc.nodes[v].n=json_integer(r.text start r.at)
+    v
+}
+
+# o's member named key (0: none, or o is no object)
+json_get=(doc:JsonDoc o:int64 key:string):>int64=>{
+    if o =? 0 or doc.nodes[o].kind not=? 'object' {return 0}
+    let c=doc.nodes[o].first
+    loop c not=? 0 {
+        if doc.nodes[c].key =? key {return c}
+        c=doc.nodes[c].next
+    }
+    0
+}
+
+json_path=(doc:JsonDoc o:int64 a:string b:string):>int64=>json_get(doc json_get(doc o a) b)
+
+# v's text ("" when it is no text)
+json_str=(doc:JsonDoc v:int64):>string=>{
+    if v =? 0 or doc.nodes[v].kind not=? 'text' {return ""}
+    doc.nodes[v].s
+}
+
+# v's integer part, or a boolean's 0 or 1 (0 when it is neither)
+json_int=(doc:JsonDoc v:int64):>int64=>if v =? 0 0 else doc.nodes[v].n
+
+json_bool=(doc:JsonDoc v:int64):>bool=>v not=? 0 and doc.nodes[v].kind =? 'boolean' and doc.nodes[v].n not=? 0
+
+# a list's elements or an object's members, in order
+json_items=(doc:JsonDoc v:int64):>array<int64>=>{
+    let out:array<int64>=[]
+    if v =? 0 {return out}
+    let c=doc.nodes[v].first
+    loop c not=? 0 {
+        out.push(c)
+        c=doc.nodes[c].next
+    }
+    out
+}
+
+# s as a JSON string
+json_quote=(s:string):>string=>{
+    let b=s as array<uint8>
+    let clean=true
+    loop c in b {
+        if c <? 32 or c =? b'"' or c =? b'\\' {
+            clean=false
+            break
+        }
+    }
+    if clean {return "\"{s}\""}
+    let out:array<uint8>=[b'"']
+    let digits=b"0123456789abcdef"
+    loop c in b {
+        if c =? b'"' or c =? b'\\' {
+            out.push(b'\\')
+            out.push(c)
+        }
+        else if c =? b'\n' {
+            out.push(b'\\')
+            out.push(b'n')
+        }
+        else if c =? b'\t' {
+            out.push(b'\\')
+            out.push(b't')
+        }
+        else if c =? b'\r' {
+            out.push(b'\\')
+            out.push(b'r')
+        }
+        else if c <? 32 {
+            out.extend(b"\\u00")
+            out.push(digits[(c >> 4) as int64])
+            out.push(digits[(c & 15) as int64])
+        }
+        else {out.push(c)}
+    }
+    out.push(b'"')
+    out as string ?? ""
+}
+
+# v as JSON text again (a request's id is answered as it was sent)
+json_raw=(doc:JsonDoc v:int64):>string=>{
+    if v =? 0 {return "null"}
+    let node=doc.nodes[v]
+    match node.kind {
+        <'text'> => json_quote(node.s)
+        <'number'> => node.s
+        <'boolean'> => if node.n not=? 0 "true" else "false"
+        <'list'> => {
+            let xs:array<string>=[]
+            loop x in json_items(doc v) {xs.push(json_raw(doc x))}
+            "[{xs.join(",")}]"
+        }
+        <'object'> => {
+            let parts:array<string>=[]
+            loop x in json_items(doc v) {parts.push("{json_quote(doc.nodes[x].key)}:{json_raw(doc x)}")}
+            "\{{parts.join(",")}}"
+        }
+        <'null_'> => "null"
+    }
+}

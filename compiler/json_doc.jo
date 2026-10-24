@@ -1,0 +1,295 @@
+# The frozen implementation-language twin of json_doc.dewy, for the compilers without
+# the Dewy frontend (tools/compiler/build.py). Change both, or neither.
+
+enum JsonKind:
+    null_
+    boolean
+    number
+    text
+    list
+    object
+
+# A value: a node of its document. A list's or an object's members are linked from its
+# first through each one's next (0 ends them); an object's member has its key.
+struct JsonNode:
+    kind: JsonKind
+    s: str          # a text's value, or a number as written
+    key: str
+    n: int          # a number's integer part (0 when it has none that fits), or a boolean's 0 or 1
+    first: int
+    next: int
+
+struct JsonDoc:
+    nodes: JsonNode[]
+
+# (the text, and the next byte to read)
+struct JsonReader:
+    text: str
+    at: int
+
+# Parse text into doc, which starts afresh: its root value (0 when there is none)
+json_parse = (doc: mut JsonDoc, text: str) -> int:
+    doc.nodes = [JsonNode()]
+    r = JsonReader(text, 0)
+    json_value(doc, r)
+
+json_space = (r: mut JsonReader):
+    t = r.text
+    loop r.at < len(t) and (t[r.at] == ' ' or t[r.at] == '\t' or t[r.at] == '\n' or t[r.at] == '\r'): r.at += 1
+
+json_new = (doc: mut JsonDoc, kind: JsonKind) -> int:
+    doc.nodes.push(JsonNode(kind = kind))
+    doc.nodes.len() - 1
+
+json_hex = (c: u8) -> int:
+    if c >= '0' and c <= '9': return int(c) - 48
+    if c >= 'a' and c <= 'f': return int(c) - 87
+    if c >= 'A' and c <= 'F': return int(c) - 55
+    0
+
+# cp's UTF-8 bytes onto out (half a surrogate pair is U+FFFD)
+json_utf8 = (out: mut u8[], cp0: int):
+    cp = cp0
+    if cp >= 0xD800 and cp < 0xE000: cp = 0xFFFD
+    if cp < 0x80: out.push(u8(cp))
+    else if cp < 0x800:
+        out.push(u8(0xC0 | (cp >> 6)))
+        out.push(u8(0x80 | (cp & 63)))
+    else if cp < 0x10000:
+        out.push(u8(0xE0 | (cp >> 12)))
+        out.push(u8(0x80 | ((cp >> 6) & 63)))
+        out.push(u8(0x80 | (cp & 63)))
+    else:
+        out.push(u8(0xF0 | (cp >> 18)))
+        out.push(u8(0x80 | ((cp >> 12) & 63)))
+        out.push(u8(0x80 | ((cp >> 6) & 63)))
+        out.push(u8(0x80 | (cp & 63)))
+
+# the text whose opening quote is at r.at; r.at moves past its closing one
+json_string = (r: mut JsonReader) -> str:
+    t = r.text
+    r.at += 1
+    start = r.at
+    # (no escapes: one slice)
+    loop r.at < len(t) and t[r.at] != '"' and t[r.at] != '\\': r.at += 1
+    if r.at < len(t) and t[r.at] == '"':
+        r.at += 1
+        return t[start..r.at - 1)
+    out: u8[]
+    loop k in [start..r.at): out.push(t[k])
+    loop r.at < len(t) and t[r.at] != '"':
+        c = t[r.at]
+        if c == '\\' and r.at + 1 < len(t):
+            r.at += 1
+            e = t[r.at]
+            if e == 'n': out.push('\n')
+            else if e == 't': out.push('\t')
+            else if e == 'r': out.push('\r')
+            else if e == 'b': out.push(8)
+            else if e == 'f': out.push(12)
+            else if e == 'u' and r.at + 4 < len(t):
+                cp = 0
+                loop k in [1..5): cp = cp * 16 + json_hex(t[r.at + k])
+                r.at += 4
+                # a surrogate pair
+                if cp >= 0xD800 and cp < 0xDC00 and r.at + 6 < len(t) and t[r.at + 1] == '\\' and t[r.at + 2] == 'u':
+                    lo = 0
+                    loop k in [3..7): lo = lo * 16 + json_hex(t[r.at + k])
+                    if lo >= 0xDC00 and lo < 0xE000:
+                        cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00)
+                        r.at += 6
+                json_utf8(out, cp)
+            else: out.push(e)
+        else: out.push(c)
+        r.at += 1
+    r.at += 1
+    str_from_bytes(out)
+
+# a number's integer part (before any '.'): an optional sign, then digits that fit in
+# int64; 0 when it is not one
+json_integer = (t: str, start: int, stop0: int) -> int:
+    stop = stop0
+    loop k in [start..stop0):
+        if t[k] == '.':
+            stop = k
+            break
+    i = start
+    if i < stop and (t[i] == '-' or t[i] == '+'): i += 1
+    if i >= stop: return 0
+    v = 0
+    loop i < stop:
+        c = t[i]
+        if c < '0' or c > '9': return 0
+        d = int(c) - 48
+        if v > (9223372036854775807 - d) / 10: return 0
+        v = v * 10 + d
+        i += 1
+    if t[start] == '-': return -v
+    v
+
+# the value at r.at (after any spaces), and r.at past it: 0 when there is none
+json_value = (doc: mut JsonDoc, r: mut JsonReader) -> int:
+    json_space(r)
+    t = r.text
+    if r.at >= len(t): return 0
+    c = t[r.at]
+    if c == '{{': return json_members(doc, r)
+    if c == '[': return json_elements(doc, r)
+    if c == '"':
+        v = json_new(doc, .text)
+        doc.nodes[v].s = json_string(r)
+        return v
+    if c == 't':
+        r.at += 4
+        v = json_new(doc, .boolean)
+        doc.nodes[v].n = 1
+        return v
+    if c == 'f':
+        r.at += 5
+        return json_new(doc, .boolean)
+    if c == 'n':
+        r.at += 4
+        return json_new(doc, .null_)
+    json_number(doc, r)
+
+# an object: its members linked in order, each with its key (a missing value is null)
+json_members = (doc: mut JsonDoc, r: mut JsonReader) -> int:
+    t = r.text
+    o = json_new(doc, .object)
+    r.at += 1
+    last = 0
+    loop true:
+        json_space(r)
+        if r.at >= len(t) or t[r.at] == '}}': break
+        if t[r.at] == ',':
+            r.at += 1
+            continue
+        if t[r.at] != '"': break
+        k = json_string(r)
+        json_space(r)
+        if r.at < len(t) and t[r.at] == ':': r.at += 1
+        v = json_value(doc, r)
+        if v == 0: v = json_new(doc, .null_)
+        doc.nodes[v].key = k
+        if last == 0: doc.nodes[o].first = v
+        else: doc.nodes[last].next = v
+        last = v
+    r.at += 1
+    o
+
+# a list: its elements linked in order, up to the first that is no value
+json_elements = (doc: mut JsonDoc, r: mut JsonReader) -> int:
+    t = r.text
+    a = json_new(doc, .list)
+    r.at += 1
+    last = 0
+    loop true:
+        json_space(r)
+        if r.at >= len(t) or t[r.at] == ']': break
+        if t[r.at] == ',':
+            r.at += 1
+            continue
+        v = json_value(doc, r)
+        if v == 0: break
+        if last == 0: doc.nodes[a].first = v
+        else: doc.nodes[last].next = v
+        last = v
+    r.at += 1
+    a
+
+# a number as written: the bytes a number may have (none: no value, and the caller stops)
+json_number = (doc: mut JsonDoc, r: mut JsonReader) -> int:
+    t = r.text
+    start = r.at
+    loop r.at < len(t) and (is_digit(t[r.at]) or t[r.at] == '-' or t[r.at] == '+' or t[r.at] == '.' or t[r.at] == 'e' or t[r.at] == 'E'): r.at += 1
+    if r.at == start: return 0
+    v = json_new(doc, .number)
+    doc.nodes[v].s = t[start..r.at)
+    doc.nodes[v].n = json_integer(t, start, r.at)
+    v
+
+# o's member named key (0: none, or o is no object)
+json_get = (doc: JsonDoc, o: int, key: str) -> int:
+    if o == 0 or doc.nodes[o].kind != .object: return 0
+    c = doc.nodes[o].first
+    loop c != 0:
+        if doc.nodes[c].key == key: return c
+        c = doc.nodes[c].next
+    0
+
+json_path = (doc: JsonDoc, o: int, a: str, b: str) -> int: json_get(doc, json_get(doc, o, a), b)
+
+# v's text ("" when it is no text)
+json_str = (doc: JsonDoc, v: int) -> str:
+    if v == 0 or doc.nodes[v].kind != .text: return ""
+    doc.nodes[v].s
+
+# v's integer part, or a boolean's 0 or 1 (0 when it is neither)
+json_int = (doc: JsonDoc, v: int) -> int:
+    if v == 0: return 0
+    doc.nodes[v].n
+
+json_bool = (doc: JsonDoc, v: int) -> bool: v != 0 and doc.nodes[v].kind == .boolean and doc.nodes[v].n != 0
+
+# a list's elements or an object's members, in order
+json_items = (doc: JsonDoc, v: int) -> int[]:
+    out: int[]
+    if v == 0: return out
+    c = doc.nodes[v].first
+    loop c != 0:
+        out.push(c)
+        c = doc.nodes[c].next
+    out
+
+# s as a JSON string
+json_quote = (s: str) -> str:
+    clean = true
+    loop c in s:
+        if c < 32 or c == '"' or c == '\\':
+            clean = false
+            break
+    if clean: return "\"" + s + "\""
+    out: u8[]
+    out.push('"')
+    digits = "0123456789abcdef"
+    loop c in s:
+        if c == '"' or c == '\\':
+            out.push('\\')
+            out.push(c)
+        else if c == '\n':
+            out.push('\\')
+            out.push('n')
+        else if c == '\t':
+            out.push('\\')
+            out.push('t')
+        else if c == '\r':
+            out.push('\\')
+            out.push('r')
+        else if c < 32:
+            loop d in "\\u00": out.push(d)
+            out.push(digits[int(c) >> 4])
+            out.push(digits[int(c) & 15])
+        else: out.push(c)
+    out.push('"')
+    str_from_bytes(out)
+
+# v as JSON text again (a request's id is answered as it was sent)
+json_raw = (doc: JsonDoc, v: int) -> str:
+    if v == 0: return "null"
+    node = doc.nodes[v]
+    match node.kind:
+        text: return json_quote(node.s)
+        number: return node.s
+        boolean:
+            if node.n != 0: return "true"
+            return "false"
+        list:
+            xs: str[]
+            loop x in json_items(doc, v): xs.push(json_raw(doc, x))
+            return "[{join(xs, ",")}]"
+        object:
+            parts: str[]
+            loop x in json_items(doc, v): parts.push("{json_quote(doc.nodes[x].key)}:{json_raw(doc, x)}")
+            return "\{{join(parts, ",")}\}"
+        null_: return "null"
+    "null"
