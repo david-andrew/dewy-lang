@@ -6363,13 +6363,14 @@ unpack_rest = (source: int, t: int, r: int, after: int, total: int, pos: int) ->
         first = mk(.int_lit, pos)
         nodes[first].ival = r
         last = if after > 0: unpack_minus(unpack_length(source, pos), after, pos) else: unpack_length(source, pos)
-        zero = mk(.int_lit, pos)
-        exclusive = mk(.bool_lit, pos)
-        bounded = mk(.bool_lit, pos)
-        nodes[bounded].ival = 1
-        plain = mk(.bool_lit, pos)
-        call = dewy_array_selection_call("__dewy_pick_slice", [mk_ident_local(int(nodes[source].sym), pos), first, zero, last, exclusive, bounded, plain], t, pos)
-        check_expr(call, 0)
+        # (a slice as written, `xs[r..xs.length-after)`: in bounds by the length obligation)
+        range = mk(.range, pos)
+        nodes[range].a = i32(first)
+        nodes[range].b = i32(last)
+        slice = mk(.index, pos)
+        nodes[slice].a = i32(mk_ident_local(int(nodes[source].sym), pos))
+        nodes[slice].b = i32(range)
+        check_expr(slice, 0)
         return last_checked
     parts: int[]
     ts: int[]
