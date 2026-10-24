@@ -314,7 +314,7 @@ A nonliteral write or writable escape conservatively widens the domain to
 String operations and character iteration work normally. A conversion to a
 literal union (including a dictionary key) rejects a known domain containing
 values outside that union. `members(mode)` returns an `array<string>` containing
-the distinct values in an inferred finite domain, in first checked-write order;
+the distinct values in an inferred finite domain, in text order like `members(U)`;
 later writes participate. Type-based `members(U)` retains its compile-time
 specialization. Value domains settle after checking, so `members(mode)` cannot
 supply compile-time record field names while the enclosing code is checked.

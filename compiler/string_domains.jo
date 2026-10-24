@@ -102,7 +102,7 @@ string_domain_conversion = (n: int, set: int):
     if string_domains.has(binding): string_domain_conversions.push((nodes[n].pos, binding, set))
 
 # The sequence's element storage is string, just like the inferred binding.
-# Populate its literal array once every checked write is known. Type-based
+# Populate its literal array, in text order, once every checked write is known. Type-based
 # members(U) continues to use compile-time singleton specialization.
 string_domain_members = (n: int) -> bool:
     if nkids(n) != 1: return false
@@ -147,13 +147,14 @@ string_domains_materialize = ():
         binding = request.1
         values = string_domain_values(binding)
         if values.len() == 0: fatal(nodes[n].pos, "members(value) needs a finite string domain; a nonliteral write leaves it open")
-        seen: int[]
-        items: int[]
+        # (in text order, as `members(U)`: a domain is a set, not its writes' order)
+        texts: str[]
         loop value in values:
-            if seen.contains(value): continue
-            seen.push(value)
+            if not texts.contains(name_of(value)): texts.push(name_of(value))
+        items: int[]
+        loop text in texts.sorted():
             item = mk(.str_lit, nodes[n].pos)
-            nodes[item].sval = i32(value)
+            nodes[item].sval = i32(intern(text))
             nodes[item].type = i32(T_STR)
             add_flag(item, NF_CHECKED)
             items.push(item)
