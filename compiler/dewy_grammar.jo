@@ -1,0 +1,157 @@
+# The frozen implementation-language twin of dewy_grammar.dewy, for the compilers without the
+# Dewy frontend (tools/compiler/build.py). Change both, or neither.
+use 'dewy_tokens.dewy'
+use 'dewy_lex.dewy'
+use 'literals.dewy'
+
+dn_power = (op: DewyToken) -> int:
+    match op:
+        assign, plus_assign, minus_assign, star_assign, slash_assign, power_assign, floor_assign, percent_assign, shl_assign, shr_assign, amp_assign, pipe_assign, and_assign, or_assign, xor_assign, dot_plus_assign, dot_minus_assign, dot_star_assign, dot_slash_assign, dot_power_assign, dot_floor_assign, dot_percent_assign: 10
+        arrow: 20
+        pipe_left: 24
+        pipe_right: 25
+        function: 30
+        returns: 40
+        colon: 45
+        kw_or_throw: 48
+        kw_as, kw_transmute: 50
+        kw_or, kw_nor: 60
+        kw_xor, kw_xnor: 65
+        kw_and, kw_nand: 70
+        eq, not_eq, lt, not_lt, gt, not_gt, le, not_le, ge, not_ge, is_type, isnt_type, contains, not_contains, dot_eq, dot_not_eq, dot_lt, dot_not_lt, dot_gt, dot_not_gt, dot_le, dot_not_le, dot_ge, dot_not_ge: 80
+        coalesce: 82
+        pipe: 85
+        amp: 90
+        kw_in: 95
+        range: 100
+        comma: 105
+        shl, shr: 110
+        plus, minus, dot_plus, dot_minus: 120
+        star, slash, floor, percent, dot_star, dot_slash, dot_floor, dot_percent: 130
+        caret, dot_caret: 140
+        _: 0
+
+dn_right_associative = (op: DewyToken) -> bool:
+    match op:
+        caret, dot_caret, function, coalesce, pipe_left: true
+        _: false
+
+dn_prefix_power = (op: DewyToken, effect_no: bool) -> int:
+    if effect_no: return 150
+    match op:
+        at: 160
+        tilde: 150
+        kw_of: 91
+        kw_not: 75
+        _: 125
+
+dw_chain_way = (op: DewyToken) -> int:
+    if op == .lt or op == .le: return 1
+    if op == .gt or op == .ge: return -1
+    if op == .eq: return 0
+    2
+
+dn_partial_operator = (op: DewyToken) -> bool:
+    match op:
+        eq, not_eq, lt, not_lt, gt, not_gt, le, not_le, ge, not_ge, is_type, isnt_type, contains, not_contains, dot, kw_as, kw_transmute, star, slash, floor, percent, caret: true
+        _: false
+
+dn_can_start = (tokens: mut DewyLexeme[], at: int) -> bool:
+    if tokens[at].kind == .eof: return false
+    match tokens[at].symbol:
+        rparen, rbrack, rbrace, rangle, shr, kw_else, semi, comma: false
+        _: true
+
+dn_range_bound = (tokens: mut DewyLexeme[], at: int) -> bool:
+    if not dn_can_start(tokens, at): return false
+    symbol = tokens[at].symbol
+    match symbol:
+        lbrace, kw_let, kw_const, kw_return, kw_break, kw_continue, kw_if, kw_loop, kw_parallel, kw_match: false
+        _: dn_power(symbol) == 0 or symbol == .plus or symbol == .minus
+
+dw_integer_kind = (kind: DewyKind) -> bool:
+    kind == .integer or kind == .source_integer
+
+dn_coefficient_before = (tokens: mut DewyLexeme[], at: int) -> bool:
+    if at == 0: return false
+    kind = tokens[at - 1].kind
+    if not (dw_integer_kind(kind) or kind == .source_real): return false
+    not (at >= 2 and tokens[at - 2].symbol == .dot and not tokens[at - 1].space)
+
+dn_juxt_factor_next = (tokens: mut DewyLexeme[], at: int) -> bool:
+    kind = tokens[at].kind
+    kind == .identifier and tokens[at].symbol == .none or dw_integer_kind(kind) or kind == .source_real
+
+dn_juxtaposed = (tokens: mut DewyLexeme[], at: int, after_group: bool) -> bool:
+    kind = tokens[at].kind
+    call = tokens[at].symbol == .lparen
+    if (kind == .identifier or call and tokens[at + 1].symbol != .rparen) and dn_coefficient_before(tokens, at): return true
+    not call and after_group and dn_juxt_factor_next(tokens, at)
+
+dn_juxt_excluded = (tokens: mut DewyLexeme[], at: int) -> bool:
+    if at == 0 or not dn_juxt_factor_next(tokens, at): return false
+    previous = tokens[at - 1].symbol
+    previous == .rparen or previous == .rbrack
+
+dn_juxt_excluded_message = (tokens: mut DewyLexeme[], at: int) -> str:
+    if tokens[at - 1].symbol == .rbrack: return "an indexed element is not a coefficient: write `*` (`xs[i] * y`); whitespace separates expressions"
+    "a call result is not a coefficient: write `*` (`f(x) * g(x)`); whitespace separates expressions"
+
+dn_double_closes = (tokens: mut DewyLexeme[], at0: int) -> bool:
+    at = at0 + 1
+    n = tokens.len()
+    if at >= n or tokens[at].space: return false
+    depth = 0
+    loop at < n and tokens[at].kind != .eof and not tokens[at].newline:
+        symbol = tokens[at].symbol
+        if symbol == .lparen or symbol == .lbrack or symbol == .lbrace: depth += 1
+        else if symbol == .rparen or symbol == .rbrack or symbol == .rbrace:
+            depth -= 1
+            if depth < 0: return false
+        else if symbol == .shr and depth == 0 and not tokens[at].space: return true
+        at += 1
+    false
+
+dn_directive_form = (name: str) -> int:
+    if name == "assert" or name == "runtime_assert" or name == "expect" or name == "unsafe_assume": return 1
+    if name == "lend": return 4
+    if name == "allocator": return 5
+    if name == "fail": return 2
+    if name == "breakpoint": return 3
+    if name == "unsafe": return 6
+    if name == "warn_if": return 7
+    0
+
+dw_designed_directive = (name: str) -> bool:
+    name in ["abstract", "field", "lend", "no_prelude", "proof", "unsafe_assume", "__copy__", "__drop__", "__move__"]
+
+dn_operator_habit = (tokens: mut DewyLexeme[], at: int, text: str) -> str:
+    previous = DewyToken.none
+    if at >= 2: previous = tokens[at - 2].symbol
+    adjacent = at >= 2 and not tokens[at - 1].space
+    if text == "*" and previous == .star and adjacent: return " (`^` raises to a power: `x^2`)"
+    if text == "!": return " (`not x` negates, and `x not=? y` asks whether two values differ)"
+    if text == "&" and previous == .amp and adjacent: return " (`and` joins conditions: `a and b`)"
+    if text == "|" and previous == .pipe and adjacent: return " (`or` joins conditions: `a or b`)"
+    if text == "=" and (previous == .assign or previous == .eq) and adjacent: return " (`=?` compares: `x =? y`; `=` gives a value)"
+    if text == ">" or text == "<" or text == ">=" or text == "<=": return " (comparisons end with `?`: `x >? y`, `x <=? y`)"
+    if previous == .plus and at >= 3 and tokens[at - 3].symbol == .plus: return " (`x += 1` adds one)"
+    if previous == .minus and at >= 3 and tokens[at - 3].symbol == .minus: return " (`x -= 1` takes one away)"
+    ""
+
+dn_spec_colon = (lx: mut DewyLexer, source: str, start: int, stop: int) -> int:
+    depth = 0
+    found = -1
+    i = start
+    loop i < stop:
+        c = source[i]
+        if c == '"' or c == '\'':
+            i = dn_quote_end(lx, source, i, stop, 1, false, true)
+            if i < 0: return -1
+            continue
+        if c == '(' or c == '[' or c == '{': depth += 1
+        else if c == ')' or c == ']' or c == '}': depth -= 1
+        else if c == ':' and depth == 0 and i > start and i + 1 < stop: found = i
+        i += 1
+    if found < 0 or len(literal_spec_problem(source[found + 1..stop))) > 0: return -1
+    found

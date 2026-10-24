@@ -323,6 +323,31 @@ identical. What it met:
 - A Dewy record whose fields have no defaults has no `T()` in Sloppy (see `json_doc.dewy`):
   the tree's two sentinels are written out.
 
+`dewy_grammar.dewy` (the grammar's rules over the lexemes, which both parsers follow: each
+operator's binding power and grouping, the prefix powers, which way a comparison chain runs,
+where an expression may start and a range's bound follow, when operands written together
+multiply and when they may not, the operators a parenthesized right operand makes a function
+of, the metatags with their own argument grammar, the hint for another language's operator,
+`<<` as two openers, and an interpolation's format-spec colon). The parsers' loops stay: the
+direct parser builds the checker's nodes and interns names, the reference parser the syntax
+tree, and each falls back on the other, so neither moves before the node store and the
+intern table do. Lexemes are taken by place with the position read (`@tokens at`). The
+differential test checks the binding powers against docs/LANGUAGE.md's table (each
+row's order, a prefix's operand against the rows above it, the right-grouping rows; they
+agree) and follows the other rules from juxtaposition.md and the guide, over 400 random lexeme
+runs and 3000 interpolation texts. It compiled as first written. Panel: every item within
++0.02% (lex+parse +0.03%); 684 builds identical. What it met:
+- The juxtaposition test as one call (`dn_juxtaposed`) cost synthetic-22k's parse +0.9%: most
+  unspaced `(` are calls after a name, which the inline test (a number or a group before)
+  rules out without the call, as Sloppy's inlined helpers did.
+- `op =? 'caret' or op =? 'dot_caret' or ...` costs a compare an arm where a `match` on the
+  enumeration with a `true` arm is a table load, and a three-`if` prefix power is not inlined:
+  as written first, lex+parse +0.25%; as `match`es, +0.03%.
+- `byte_slice` panics where a spec after the colon starts with a byte inside a character
+  (malformed text, see `manifest.dewy`), where Sloppy slices: such bytes read as `z`, which no
+  spec gives a meaning to either. A spec costs about 155 instructions more than the twin's
+  (`byte_slice`, and bounds checks in the scan), 15 an interpolation without one: hello +0.02%.
+
 The whole lexer was ported first (dn_lex's loop, keywords found by their bytes, names
 interned by the caller): lexing took +11% (+28 instructions a lexeme; synthetic-22k +0.74%,
 lex+parse +0.83%), so the loop stays in Sloppy. Its loop alone matched Sloppy's; the cost was

@@ -1,0 +1,241 @@
+# The Dewy grammar's rules over the lexemes, which both parsers follow (dewy_direct.jo builds
+# the checker's nodes, dewy_fast.jo the syntax tree): how tightly each operator binds and which
+# way it groups (docs/LANGUAGE.md's table), which way a comparison chain runs, where an
+# expression may start and a range's bound follow, when operands written together multiply
+# (docs/design/juxtaposition.md) and when they may not, the operators a parenthesized right
+# operand turns into a function, the metatags with their own argument grammar or not yet
+# implemented, the hint for another language's operator, whether `<<` opens two type-argument
+# blocks, and where an interpolation's format spec starts.
+#
+# A module of the compiler written in Dewy. dewy_grammar.jo is its frozen twin for the
+# compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
+# interface and give the same answers (tests/test_selfhost_dewy_grammar.py). The lexemes are
+# the parser's, passed by place with the position being read.
+
+from p"dewy_tokens.dewy" import DewyToken, DewyKind, DewyLexeme
+from p"dewy_lex.dewy" import DewyLexer, dn_quote_end
+from p"literals.dewy" import literal_spec_problem
+
+# ---- operators ----
+
+# How tightly an infix operator binds (0: no infix operator); `or_throw` is a postfix one
+dn_power=(op:DewyToken):>int64=>match op {
+    <'assign'|'plus_assign'|'minus_assign'|'star_assign'|'slash_assign'|'power_assign'|'floor_assign'|'percent_assign'|'shl_assign'|'shr_assign'|'amp_assign'|'pipe_assign'|'and_assign'|'or_assign'|'xor_assign'|'dot_plus_assign'|'dot_minus_assign'|'dot_star_assign'|'dot_slash_assign'|'dot_power_assign'|'dot_floor_assign'|'dot_percent_assign'> => 10
+    <'arrow'> => 20
+    <'pipe_left'> => 24
+    <'pipe_right'> => 25
+    <'function'> => 30
+    <'returns'> => 40
+    <'colon'> => 45
+    <'kw_or_throw'> => 48
+    <'kw_as'|'kw_transmute'> => 50
+    <'kw_or'|'kw_nor'> => 60
+    <'kw_xor'|'kw_xnor'> => 65
+    <'kw_and'|'kw_nand'> => 70
+    <'eq'|'not_eq'|'lt'|'not_lt'|'gt'|'not_gt'|'le'|'not_le'|'ge'|'not_ge'|'is_type'|'isnt_type'|'contains'|'not_contains'|'dot_eq'|'dot_not_eq'|'dot_lt'|'dot_not_lt'|'dot_gt'|'dot_not_gt'|'dot_le'|'dot_not_le'|'dot_ge'|'dot_not_ge'> => 80
+    <'coalesce'> => 82
+    <'pipe'> => 85
+    <'amp'> => 90
+    <'kw_in'> => 95
+    <'range'> => 100
+    <'comma'> => 105
+    <'shl'|'shr'> => 110
+    <'plus'|'minus'|'dot_plus'|'dot_minus'> => 120
+    <'star'|'slash'|'floor'|'percent'|'dot_star'|'dot_slash'|'dot_floor'|'dot_percent'> => 130
+    <'caret'|'dot_caret'> => 140
+    _ => 0
+}
+
+# An infix operator grouping to the right (`2^3^2` is `2^(3^2)`): its right operand takes
+# operators as tight as itself
+dn_right_associative=(op:DewyToken):>bool=>match op {
+    <'caret'|'dot_caret'|'function'|'coalesce'|'pipe_left'> => true
+    _ => false
+}
+
+# How tightly a prefix operator binds: `@` covers the whole place (`@items[i].x`), `~` and
+# effect `no` bind above `?` and `^` (`~x^2` is `(~x)^2`), `type of` below `in`, word `not`
+# below the comparisons, and `+` and `-` below multiplication (`-x^2` is `-(x^2)`)
+dn_prefix_power=(op:DewyToken effect_no:bool):>int64=>if effect_no 150 else match op {
+    <'at'> => 160
+    <'tilde'> => 150
+    <'kw_of'> => 91
+    <'kw_not'> => 75
+    _ => 125
+}
+
+# Which way a comparison chain runs: 1 rising (`<?` `<=?`), -1 falling (`>?` `>=?`), 0 either
+# (`=?`), 2 for an operator that does not chain
+dw_chain_way=(op:DewyToken):>int64=>{
+    if op =? 'lt' or op =? 'le' {return 1}
+    if op =? 'gt' or op =? 'ge' {return -1}
+    if op =? 'eq' {return 0}
+    2
+}
+
+# A right operand in parentheses supplies a unary function, `(* 2)`. Operators with prefix
+# meanings remain ordinary expressions: `(-1)` is still negation.
+dn_partial_operator=(op:DewyToken):>bool=>match op {
+    <'eq'|'not_eq'|'lt'|'not_lt'|'gt'|'not_gt'|'le'|'not_le'|'ge'|'not_ge'|'is_type'|'isnt_type'|'contains'|'not_contains'|'dot'|'kw_as'|'kw_transmute'|'star'|'slash'|'floor'|'percent'|'caret'> => true
+    _ => false
+}
+
+# ---- where expressions start ----
+
+# Whether an expression may start at tokens[at]: not at the end, a closer, `else`, `;` or `,`
+dn_can_start=(@tokens:array<DewyLexeme> at:int64):>bool=>{
+    if tokens[at].kind =? 'eof' {return false}
+    match tokens[at].symbol {
+        <'rparen'|'rbrack'|'rbrace'|'rangle'|'shr'|'kw_else'|'semi'|'comma'> => false
+        _ => true
+    }
+}
+
+# Whether a range's bound follows its `..` at tokens[at] (`0..n`, `..n`; not `0..` then a
+# block, a statement or an operator)
+dn_range_bound=(@tokens:array<DewyLexeme> at:int64):>bool=>{
+    if not dn_can_start(@tokens at) {return false}
+    let symbol=tokens[at].symbol
+    match symbol {
+        <'lbrace'|'kw_let'|'kw_const'|'kw_return'|'kw_break'|'kw_continue'|'kw_if'|'kw_loop'|'kw_parallel'|'kw_match'> => false
+        _ => dn_power(symbol) =? 0 or symbol =? 'plus' or symbol =? 'minus'
+    }
+}
+
+# ---- juxtaposition (docs/design/juxtaposition.md) ----
+
+dw_integer_kind=(kind:DewyKind):>bool=>kind =? 'integer' or kind =? 'source_integer'
+
+# The lexeme before tokens[at] is a numeric literal (not a tuple member, `t.1`): what follows
+# it unspaced, a name or a group, is its coefficient's other factor.
+dn_coefficient_before=(@tokens:array<DewyLexeme> at:int64):>bool=>{
+    if at =? 0 {return false}
+    let kind=tokens[at - 1].kind
+    if not (dw_integer_kind(kind) or kind =? 'source_real') {return false}
+    not (at >=? 2 and tokens[at - 2].symbol =? 'dot' and not tokens[at - 1].space)
+}
+
+# A name or a number starts at tokens[at]: after a group, `(5)x`, `(x)2`, it is a factor.
+dn_juxt_factor_next=(@tokens:array<DewyLexeme> at:int64):>bool=>{
+    let kind=tokens[at].kind
+    kind =? 'identifier' and tokens[at].symbol =? 'none' or dw_integer_kind(kind) or kind =? 'source_real'
+}
+
+# Whether the lexeme at tokens[at], written against the one before it (no space between),
+# multiplies what came before: a name or a group after a numeric literal (`2x`, `2(x+1)`; an
+# empty `()` after it calls), or a name or a number after a parenthesized group nothing has
+# applied to yet (`(5)x`, `(x)2`; `after_group`).
+dn_juxtaposed=(@tokens:array<DewyLexeme> at:int64 after_group:bool):>bool=>{
+    let kind=tokens[at].kind
+    let call=tokens[at].symbol =? 'lparen'
+    if (kind =? 'identifier' or call and tokens[at + 1].symbol not=? 'rparen') and dn_coefficient_before(@tokens at) {return true}
+    not call and after_group and dn_juxt_factor_next(@tokens at)
+}
+
+# A call result or an indexed element written against a name or a number (`f(x)g(x)`,
+# `xs[i]y`): never a coefficient.
+dn_juxt_excluded=(@tokens:array<DewyLexeme> at:int64):>bool=>{
+    if at =? 0 or not dn_juxt_factor_next(@tokens at) {return false}
+    let previous=tokens[at - 1].symbol
+    previous =? 'rparen' or previous =? 'rbrack'
+}
+
+dn_juxt_excluded_message=(@tokens:array<DewyLexeme> at:int64):>string=>{
+    if tokens[at - 1].symbol =? 'rbrack' {return "an indexed element is not a coefficient: write `*` (`xs[i] * y`); whitespace separates expressions"}
+    "a call result is not a coefficient: write `*` (`f(x) * g(x)`); whitespace separates expressions"
+}
+
+# ---- brackets and metatags ----
+
+# Whether the `<<` at tokens[at], right after a name, opens two type-argument blocks: its `>>`
+# closes on the same line (`array<<(x:int64):>int64>>`); otherwise (`x<<n`, `x<<(n + 1)`) it
+# shifts
+dn_double_closes=(@tokens:array<DewyLexeme> at0:int64):>bool=>{
+    let at=at0 + 1
+    let n=tokens.length
+    if at >=? n or tokens[at].space {return false}
+    let depth:int64=0
+    loop at <? n and tokens[at].kind not=? 'eof' and not tokens[at].newline {
+        let symbol=tokens[at].symbol
+        if symbol =? 'lparen' or symbol =? 'lbrack' or symbol =? 'lbrace' {depth+=1}
+        else if symbol =? 'rparen' or symbol =? 'rbrack' or symbol =? 'rbrace' {
+            depth-=1
+            if depth <? 0 {return false}
+        } else if symbol =? 'shr' and depth =? 0 and not tokens[at].space {return true}
+        at+=1
+    }
+    false
+}
+
+# Directive forms with their own argument grammar, as `if` and `return` have: 1 takes a
+# condition and an optional message (`$assert`), 2 only an optional message (`$fail`), 3
+# nothing (`$breakpoint`), 4 an owner and a body (`$lend`), 5 an arena and a body
+# (`$allocator`), 6 the next expression (`$unsafe`), 7 a condition and a message
+# (`$warn_if`). Other metatags (0) stay single tokens: labels, settings, `$capture`.
+dn_directive_form=(name:string):>int64=>{
+    if name =? "assert" or name =? "runtime_assert" or name =? "expect" or name =? "unsafe_assume" {return 1}
+    if name =? "lend" {return 4}
+    if name =? "allocator" {return 5}
+    if name =? "fail" {return 2}
+    if name =? "breakpoint" {return 3}
+    if name =? "unsafe" {return 6}
+    if name =? "warn_if" {return 7}
+    0
+}
+
+# Metatags the design defines that this compiler does not implement yet. Each is reported
+# where it is written rather than as a generic syntax error.
+dw_designed_directive=(name:string):>bool=>name in? ["abstract" "field" "lend" "no_prelude" "proof" "unsafe_assume" "__copy__" "__drop__" "__move__"]
+
+# Other languages' operators, where the expression stopped at `text`, the lexeme before
+# tokens[at] (`!x`, `a && b`, `a == b`, `x > 3`, `i++`): the hint, or ""
+dn_operator_habit=(@tokens:array<DewyLexeme> at:int64 text:string):>string=>{
+    let previous:DewyToken=if at >=? 2 tokens[at - 2].symbol else 'none'
+    let adjacent=at >=? 2 and not tokens[at - 1].space
+    if text =? "*" and previous =? 'star' and adjacent {return " (`^` raises to a power: `x^2`)"}
+    if text =? "!" {return " (`not x` negates, and `x not=? y` asks whether two values differ)"}
+    if text =? "&" and previous =? 'amp' and adjacent {return " (`and` joins conditions: `a and b`)"}
+    if text =? "|" and previous =? 'pipe' and adjacent {return " (`or` joins conditions: `a or b`)"}
+    if text =? "=" and (previous =? 'assign' or previous =? 'eq') and adjacent {return " (`=?` compares: `x =? y`; `=` gives a value)"}
+    if text =? ">" or text =? "<" or text =? ">=" or text =? "<=" {return " (comparisons end with `?`: `x >? y`, `x <=? y`)"}
+    if previous =? 'plus' and at >=? 3 and tokens[at - 3].symbol =? 'plus' {return " (`x += 1` adds one)"}
+    if previous =? 'minus' and at >=? 3 and tokens[at - 3].symbol =? 'minus' {return " (`x -= 1` takes one away)"}
+    ""
+}
+
+# ---- interpolations ----
+
+# The colon before an interpolation's format spec in source[start, stop), `{x:.2f}` and
+# `{n:>8,}`: the last one outside brackets and quotes whose remaining text is a whole spec
+# (literals.dewy literal_spec_problem); else -1. The text ends at the interpolation's closing
+# brace or the source's end.
+dn_spec_colon=(@lx:DewyLexer source:string start:int64 stop:int64):>int64=>{
+    let b=source as array<uint8>
+    let depth:int64=0
+    let found:int64=-1
+    let i=start
+    loop i <? stop {
+        let c=b[i]
+        if c =? b'"' or c =? b'\'' {
+            i=dn_quote_end(@lx source i stop 1 false true)
+            if i <? 0 {return -1}
+            continue
+        }
+        if c =? b'(' or c =? b'[' or c =? b'\{' {depth+=1}
+        else if c =? b')' or c =? b']' or c =? b'}' {depth-=1}
+        else if c =? b':' and depth =? 0 and i >? start and i + 1 <? stop {found=i}
+        i+=1
+    }
+    if found <? 0 {return -1}
+    # (malformed text: a byte inside a character just after the colon, which no slice may start
+    # at, reads as a letter no spec gives a meaning to)
+    let j=found + 1
+    loop j <? stop and b[j] >=? 0x80 and b[j] <? 0xC0 {j+=1}
+    let spec=source.byte_slice(j stop)
+    loop j >? found + 1 {
+        spec="z{spec}"
+        j-=1
+    }
+    if not literal_spec_problem(spec).is_empty {return -1}
+    found
+}

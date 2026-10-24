@@ -13,6 +13,7 @@ use 'check.jo'
 use 'decimals.jo'
 use 'dewy_tokens.dewy'
 use 'dewy_syntax.dewy'
+use 'dewy_grammar.dewy'
 use 'refine.jo'
 use 'proofs.jo'
 use 'dewy_methods.jo'
@@ -191,11 +192,6 @@ dw_fail_pos = (pos: int, what: str) -> int:
         fatal(pos, "Dewy does not yet support {what}, here inside a string interpolation: `\{...}` in a string holds an expression (write `\\\{` and `\\\}` for literal braces, or use a raw string `r\"...\"`; `format(value \".2f\")` formats a number)")
     fatal(pos, "Dewy does not yet support {what}")
     0
-
-# Metatags the design defines that this compiler does not implement yet. Each
-# is reported where it is written rather than as a generic syntax error.
-dw_designed_directive = (name: str) -> bool:
-    name in ["abstract", "field", "lend", "no_prelude", "proof", "unsafe_assume", "__copy__", "__drop__", "__move__"]
 
 # `$target`: the full name of the target being compiled for (docs/LANGUAGE.md,
 # "Targets"). A name has only the fields it needs: the processor (or `c`, `wasm32`),
@@ -699,9 +695,6 @@ dw_juxt_head = (id: int) -> bool:
     if k == .identifier: return true
     if k == .block: return dewy_syntax[id].text == "():" and dw_nchildren(id) == 1
     k == .binary and dw_op(id) == .dot and dw_juxt_head(dw_child(id, 1))
-
-dw_integer_kind = (kind: DewyKind) -> bool:
-    kind == .integer or kind == .source_integer
 
 # A whole number literal's value (none: it needs more than 64 bits)
 dw_unsigned = (text: str, id: int) -> u64?:
@@ -2217,13 +2210,7 @@ dw_byte_literal = (id: int) -> int:
 
 # Comparison chains (`0 <? x <? 10`): consecutive comparisons joined by `and`,
 # each operand evaluated once and in order, later ones only while the chain
-# holds. A chain rises (`<?` `<=?`) or falls (`>?` `>=?`); `=?` fits either.
-# 1 rising, -1 falling, 0 either, 2 not a chain link.
-dw_chain_way = (op: DewyToken) -> int:
-    if op == .lt or op == .le: return 1
-    if op == .gt or op == .ge: return -1
-    if op == .eq: return 0
-    2
+# holds (which way one runs: dewy_grammar.dewy dw_chain_way).
 
 # An unparenthesized comparison: the left side of a longer chain.
 dw_chain_link = (id: int) -> bool:

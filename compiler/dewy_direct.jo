@@ -16,6 +16,7 @@ use 'ast.jo'
 use 'lex.jo'
 use 'dewy_tokens.dewy'
 use 'dewy_syntax.dewy'
+use 'dewy_grammar.dewy'
 use 'dewy_parse.jo'
 use 'dewy_fast.jo'
 use 'par.jo'
@@ -276,7 +277,7 @@ dc_atom = () -> int:
         set_list(n, items)
         return n
     if op == .plus or op == .minus or op == .kw_not:
-        e = dc_expr(if op == .kw_not: 75 else: 125)
+        e = dc_expr(dn_prefix_power(op, false))
         if e == 0: return 0
         if op == .minus and nodes[e].kind == .int_lit and nodes[e].aux2 == 0:
             if has_flag(e, NF_U64): return 0
@@ -410,7 +411,7 @@ dc_expr = (minimum: int) -> int:
         if dn_angles > 0 and (op == .shr or op == .shr_assign or op == .angle_assign or (op == .gt and not token.space)): break
         if not token.space and (token.kind == .identifier or op == .lparen or token.kind == .source_integer or token.kind == .source_real or token.kind == .integer):
             pk = dn_tokens[dn_at - 1].kind
-            if ((token.kind == .identifier or op == .lparen and dn_tokens[dn_at + 1].symbol != .rparen) and (pk == .source_integer or pk == .source_real or pk == .integer) and dn_coefficient_before()) or (op != .lparen and left == group and dn_juxt_factor_next()):
+            if (left == group or pk == .source_integer or pk == .source_real or pk == .integer) and dn_juxtaposed(dn_tokens, dn_at, left == group):
                 if minimum > 135: break
                 right = dc_expr(136)
                 if right == 0: return 0
@@ -418,7 +419,7 @@ dc_expr = (minimum: int) -> int:
                 add_flag(left, NF_JUXT)
                 juxt_head = false
                 continue
-            if op != .lparen and dn_juxt_excluded(): return 0
+            if op != .lparen and dn_juxt_excluded(dn_tokens, dn_at): return 0
         if op == .dot and minimum <= 170:
             dn_at += 1
             member = dn_tokens[dn_at]
@@ -466,9 +467,9 @@ dc_expr = (minimum: int) -> int:
                 if first == 0: return 0
             if dn_peek() == .range:
                 dn_at += 1
-                if first == 0 and not dn_range_bound(): return 0
+                if first == 0 and not dn_range_bound(dn_tokens, dn_at): return 0
                 last = 0
-                if dn_range_bound():
+                if dn_range_bound(dn_tokens, dn_at):
                     last = dc_expr(101)
                     if last == 0: return 0
                 inclusive = dn_accept(.rbrack)
@@ -580,7 +581,7 @@ dc_expr = (minimum: int) -> int:
         if chained and compared: return 0
         dn_at += 1
         if token.symbol == .kw_not: dn_at += 1
-        right = dc_expr(if op == .caret: power else: power + 1)
+        right = dc_expr(if dn_right_associative(op): power else: power + 1)
         if right == 0: return 0
         # (`a(x)^2` with the call unparenthesized: the power may take the group, juxtapose.jo)
         powered_call = op == .caret and left == last_call
@@ -978,7 +979,7 @@ dc_iterable = () -> int:
     if bracket:
         if not dn_accept(.range): return 0
         last = 0
-        if dn_range_bound():
+        if dn_range_bound(dn_tokens, dn_at):
             last = dc_expr(101)
             if last == 0: return 0
         inclusive = dn_accept(.rbrack)
@@ -1024,7 +1025,7 @@ dc_flow = () -> int:
         condition = dc_expr(0)
         if condition == 0: return 0
         nodes[n].a = i32(condition)
-    if not dn_can_start(): return 0
+    if not dn_can_start(dn_tokens, dn_at): return 0
     body = dc_body()
     if body == 0: return 0
     nodes[n].b = i32(body)
@@ -1270,7 +1271,7 @@ dc_statement = () -> int:
     if op == .kw_return:
         dn_at += 1
         n = mk(.return_, pos)
-        if dn_can_start() and not dn_tokens[dn_at].newline:
+        if dn_can_start(dn_tokens, dn_at) and not dn_tokens[dn_at].newline:
             value = dc_expr(0)
             if value == 0: return 0
             nodes[n].a = i32(value)
