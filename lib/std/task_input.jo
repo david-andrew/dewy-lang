@@ -20,8 +20,8 @@ __task_input_line = () -> (str | Canceled | FileError)?:
         return FileError()
     str_from_bytes(line)
 
-read_line = () -> (str | Canceled | FileError)?: __untrusted(__task_input_line())
-read_stdin = () -> (str | Canceled): __untrusted(__task_read_stdin())
+read_line = () -> (str | Canceled | FileError)?: __task_input_line()
+read_stdin = () -> (str | Canceled): __task_read_stdin()
 __task_read_stdin = () -> (str | Canceled):
     loop __atomic_cas(&__task_stdin_lock, 0, 1) != 0:
         if __task_canceled(): return Canceled
@@ -32,7 +32,7 @@ __task_read_stdin = () -> (str | Canceled):
     if __task_canceled(): return Canceled
     result
 
-input = (prompt: str = "") -> (str | Canceled): __untrusted(__task_input(prompt))
+input = (prompt: str = "") -> (str | Canceled): __task_input(prompt)
 __task_input = (prompt: str) -> (str | Canceled):
     write(prompt)
     result = __task_input_line()
@@ -68,7 +68,7 @@ open_file = (path: str) -> (File | Canceled)?:
         return Canceled
     result
 
-read_line = (f: mut File) -> (str | Canceled | FileError)?: __untrusted(__task_file_line(f))
+read_line = (f: mut File) -> (str | Canceled | FileError)?: __task_file_line(f)
 __task_file_line = (f: mut File) -> (str | Canceled | FileError)?:
     if __task_canceled(): return Canceled
     result = __file_line(f, __LINE_LIMIT)

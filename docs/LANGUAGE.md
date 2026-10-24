@@ -2790,9 +2790,9 @@ A path is a `SafePath` when it is built from any mix of:
 A component must follow a `/`. `p"{root}{n}"` could name a sibling of `root`, so
 it is not a `SafePath`.
 
-Text from outside the program is untrusted: arguments, the environment, standard
-input, file contents, the network and a child's output. A path built from it is a
-plain `Path`. `root.confine(p)` gives `p` as a `SafePath`, or `PathEscape` (an
+A path that joins unproven text to a base (`p"{root}/{name}"` with `name`
+read at run time, `"{dir}/{name}"`, `dir + "/" + name`) is a plain `Path`.
+`root.confine(p)` gives `p` as a `SafePath`, or `PathEscape` (an
 `error`) when `p` leaves `root`. `root.contains(p)` is the same test as a `bool`.
 In the true branch of `if root.contains(p) {...}`, `p` is a `SafePath`, and it
 stays one for the rest of the block after `if not root.contains(p) return ...`.
@@ -2804,22 +2804,28 @@ handle = (req:Request):>void | PathEscape | FileError => {
     let f = p"{root}/{req.name}"
     serve_file(root.confine(f) or_throw) or_throw;
     if root.contains(f) { serve_file(f) or_throw; }
-    let n = f.read_text   # warning: f holds untrusted input
+    let n = f.read_text   # warning: f may escape its base
 }
 ```
 
 A parameter, `let` or result declared `SafePath` takes only such a path. Passing
 another is a compile error that names the fixes: `root.confine(f) or_throw` (the
-editor applies it) or the `contains` guard. A path that holds untrusted text and
-reaches a file operation without either gets a warning with the same fixes. The
-file operations are reading, writing, listing, `exists`, `size`, and the others
-above. A hardcoded path never warns.
+editor applies it) or the `contains` guard. A path that joins unproven text to a
+base and reaches a file operation without either gets a warning with the same
+fixes: the file operations carry the soft precondition
+`$warn_if path isnt? SafePath "may escape its base"`. They are reading, writing,
+listing, `exists`, `size`, and the others above. A hardcoded path never warns,
+and neither does a path taken whole (`p(args()[1])`, `p(env("HOME") ?? "/")`):
+it has no base to escape. A helper that joins its own parameter to a base warns
+only where a call gives it unproven text. `$confine_external_paths` (provisional
+spelling) in a module, function or block asks every path a file operation gets
+there to be proven a `SafePath`, the whole ones included;
+`$confine_external_paths=false` opts a nested scope out.
 
 The test reads the text alone. Both paths are split into parts, `p` must start
 with `root`'s parts, and no part after them may be `..` or a root, even
 `root/a/../b`, since a link at `a` could lead elsewhere. A link inside `root`
-that points outside is not detected yet. `UntrustedPath` names a path that may
-hold untrusted text in a signature; it is a plain `Path`. Design:
+that points outside is not detected yet. Design:
 [docs/design/contained_paths.md](design/contained_paths.md).
 
 ## Networking

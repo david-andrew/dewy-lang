@@ -2513,7 +2513,7 @@ on_code_action = (id: int, params: int) -> int:
             continue
         # (a path not proven to stay inside its base: validate it where it is used)
         k = find(msg, "validate it, `")
-        if k >= 0 and (find(msg, "is not proven to stay inside its base") >= 0 or find(msg, "holds untrusted input") >= 0):
+        if k >= 0 and (find(msg, "is not proven to stay inside its base") >= 0 or find(msg, "may escape its base") >= 0):
             e = find(msg, " or_throw`", k)
             ci = find(msg, ".confine(", k)
             if e > 0 and ci > 0 and ci < e:

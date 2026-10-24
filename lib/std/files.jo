@@ -99,11 +99,11 @@ with_suffix = (path: Path, new_suffix: str) -> Path: with_name(path, stem(path) 
 # ---------------- contained paths (docs/design/contained_paths.md) ----------------
 
 # A SafePath is a Path with a brand: it does not escape its base. The brand is the checker's
-# fact (compiler/untrusted.jo), not a field: a SafePath is a Path in every other way. Only
+# fact (compiler/safe_paths.jo), not a field: a SafePath is a Path in every other way. Only
 # hardcoded text, other SafePaths, proven-safe components and the validators below make one.
-# UntrustedPath names, in a signature, a path that may hold untrusted text: a plain Path.
+# The file-system operations warn (`@warn_if(path is not SafePath, ...)`) where unproven text
+# joined to a base reaches them: the traversal pattern. A path taken whole has no base to escape.
 type SafePath = Path
-type UntrustedPath = Path
 
 # root.confine(p) found p outside root
 @nominal(error)
@@ -128,8 +128,7 @@ __fsys_contained_parts = (text: str) -> str[]:
 # root.contains(p): p is root or under it, read from the text alone. p must start with root's
 # parts, and no part after them may climb out (`..`) or start over (a root); a `..` is refused
 # even when it would come back down, since a link could take it elsewhere.
-# (`if root.contains(p) {...}`: there p is a SafePath)
-@guard(SafePath)
+# (`if root.contains(p) {...}`: there p is a SafePath; the checker knows this function)
 contains = (root: Path, path: Path) -> bool:
     base = __fsys_contained_parts(root.path)
     ps = __fsys_contained_parts(path.path)
@@ -495,79 +494,82 @@ __fsys_read_at = (path: str, offset: int, count: int) -> u8[] | __FileFailure:
 
 # ---------------- functions of a path's text ----------------
 
-@sink(path)
-read_text = (path: str) -> str | __FileFailure | InvalidUtf8: __untrusted(__fsys_read_text(path))
-@sink(path)
-read_bytes = (path: str) -> u8[] | __FileFailure: __untrusted(__fsys_read_bytes(path))
-@sink(path)
+@warn_if(p(path) is not SafePath, "may escape its base")
+read_text = (path: str) -> str | __FileFailure | InvalidUtf8: __fsys_read_text(path)
+@warn_if(p(path) is not SafePath, "may escape its base")
+read_bytes = (path: str) -> u8[] | __FileFailure: __fsys_read_bytes(path)
+@warn_if(p(path) is not SafePath, "may escape its base")
 write_text = (path: str, text: str) -> int | __FileFailure: __fsys_write_text(path, text)
-@sink(path)
+@warn_if(p(path) is not SafePath, "may escape its base")
 write_bytes = (path: str, b: u8[]) -> int | __FileFailure: __fsys_write_bytes(path, b)
-@sink(path)
+@warn_if(p(path) is not SafePath, "may escape its base")
 append_file = (path: str, text: str) -> int | __FileFailure: __fsys_append(path, text)
-@sink(path)
+@warn_if(p(path) is not SafePath, "may escape its base")
 is_file = (path: str) -> bool: __fsys_kind(path) == 1
-@sink(path)
+@warn_if(p(path) is not SafePath, "may escape its base")
 is_directory = (path: str) -> bool: __fsys_kind(path) == 2
-@sink(path)
+@warn_if(p(path) is not SafePath, "may escape its base")
 list_directory = (path: str) -> str[] | __FileFailure: __fsys_list(path)
-@sink(path)
+@warn_if(p(path) is not SafePath, "may escape its base")
 make_directory = (path: str) -> bool | __FileFailure: __fsys_mkdir(path)
-@sink(path)
+@warn_if(p(path) is not SafePath, "may escape its base")
 remove_directory = (path: str) -> bool | __FileFailure: __fsys_rmdir(path)
-@sink(path)
+@warn_if(p(path) is not SafePath, "may escape its base")
 remove_file = (path: str) -> bool | __FileFailure: __fsys_unlink(path)
 
 # ---------------- a path's methods ----------------
 
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 exists = (path: Path) -> bool: file_exists(path.path)
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 is_file = (path: Path) -> bool: __fsys_kind(path.path) == 1
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 is_dir = (path: Path) -> bool: __fsys_kind(path.path) == 2
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 list = (path: Path) -> str[] | __FileFailure: __fsys_list(path.path)
-@sink(path)
-read_text = (path: Path) -> str | __FileFailure | InvalidUtf8: __untrusted(__fsys_read_text(path.path))
-@sink(path)
-read_bytes = (path: Path) -> u8[] | __FileFailure: __untrusted(__fsys_read_bytes(path.path))
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
+read_text = (path: Path) -> str | __FileFailure | InvalidUtf8: __fsys_read_text(path.path)
+@warn_if(path is not SafePath, "may escape its base")
+read_bytes = (path: Path) -> u8[] | __FileFailure: __fsys_read_bytes(path.path)
+@warn_if(path is not SafePath, "may escape its base")
 write_text = (path: Path, text: str) -> int | __FileFailure: __fsys_write_text(path.path, text)
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 write_bytes = (path: Path, b: u8[]) -> int | __FileFailure: __fsys_write_bytes(path.path, b)
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 mkdir = (path: Path) -> bool | __FileFailure: __fsys_mkdir(path.path)
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 rmdir = (path: Path) -> bool | __FileFailure: __fsys_rmdir(path.path)
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 unlink = (path: Path) -> bool | __FileFailure: __fsys_unlink(path.path)
 # (provisional: durability for logs and manifests)
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 sync = (path: Path) -> bool | __FileFailure: __fsys_sync(path.path)
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
+@warn_if(target is not SafePath, "may escape its base")
 replace = (path: Path, target: Path) -> bool | __FileFailure: __fsys_replace(path.path, target.path)
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 append_bytes = (path: Path, b: u8[]) -> int | __FileFailure: __fsys_append_bytes(path.path, b)
-@sink(path)
-read_at = (path: Path, offset: int, count: int) -> u8[] | __FileFailure: __untrusted(__fsys_read_at(path.path, offset, count))
+@warn_if(path is not SafePath, "may escape its base")
+read_at = (path: Path, offset: int, count: int) -> u8[] | __FileFailure: __fsys_read_at(path.path, offset, count)
 
 # ---------------- file helpers (Path methods) ----------------
 
 # p.copy_to(q): q gets p's bytes (made, or replaced); gives the byte count
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
+@warn_if(target is not SafePath, "may escape its base")
 copy_to = (path: Path, target: Path) -> int | __FileFailure:
     if __task_canceled(): return Canceled
     if let b = __fsys_read(path.path): return __fsys_write_bytes(target.path, b)
     __file_failure()
 
 # p.rename(q): moves p's file or directory to q in one step (a file at q is replaced)
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
+@warn_if(target is not SafePath, "may escape its base")
 rename = (path: Path, target: Path) -> bool | __FileFailure: __fsys_replace(path.path, target.path)
 
 # p.make_dirs: the directory p and the ones it is in that are missing (true when it is there
 # after; FileExists when a file is in the way)
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 make_dirs = (path: Path) -> bool | __FileFailure:
     if __task_canceled(): return Canceled
     __fsys_begin()
@@ -584,7 +586,7 @@ make_dirs = (path: Path) -> bool | __FileFailure:
 
 # p.walk: every file under the directory p, at any depth, as paths from p ("p/maps/a.tmx"),
 # sorted; links to directories are not followed
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 walk = (path: Path) -> Path[] | __FileFailure:
     if __task_canceled(): return Canceled
     __fsys_begin()
@@ -597,14 +599,14 @@ walk = (path: Path) -> Path[] | __FileFailure:
 
 # p.glob"*.dewy": the paths under p matching a pattern (`*` any part of a name, `?` one
 # character, `**` any number of directories), sorted
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 glob = (path: Path, pattern: str) -> Path[]:
     out: Path[]
     loop found in glob(join_path(path.path, pattern)): out.push(Path(path = found))
     out
 
 # p.size: the file's size in bytes
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 size = (path: Path) -> int | __FileFailure:
     if __task_canceled(): return Canceled
     __fsys_begin()
@@ -623,7 +625,7 @@ size = (path: Path) -> int | __FileFailure:
         return n
 
 # p.modified: when the file or directory was last changed
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 modified = (path: Path) -> Date | __FileFailure:
     if __task_canceled(): return Canceled
     __fsys_begin()
@@ -632,7 +634,7 @@ modified = (path: Path) -> Date | __FileFailure:
     __file_failure()
 
 # p.chmod(0o644): sets the file's permission bits (nothing to set on Windows)
-@sink(path)
+@warn_if(path is not SafePath, "may escape its base")
 chmod = (path: Path, mode: int) -> bool | __FileFailure:
     if __task_canceled(): return Canceled
     __fsys_begin()
@@ -641,7 +643,7 @@ chmod = (path: Path, mode: int) -> bool | __FileFailure:
     __file_failure()
 
 # reading from an open file in a canceled task gives Canceled
-read_bytes = (f: mut File, n: int) -> (u8[] | Canceled): __untrusted(__task_file_bytes(f, n))
+read_bytes = (f: mut File, n: int) -> (u8[] | Canceled): __task_file_bytes(f, n)
 __task_file_bytes = (f: mut File, n: int) -> (u8[] | Canceled):
     if __task_canceled(): return Canceled
     result = read_bytes(f, n)

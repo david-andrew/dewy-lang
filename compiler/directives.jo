@@ -65,6 +65,7 @@ dir_name_row = 0
 dir_name_no_nan = 0
 dir_name_no_inf = 0
 dir_name_local_asserts = 0
+dir_name_confine = 0
 
 directives_reset = ():
     dir_scopes = []
@@ -95,6 +96,7 @@ dir_names = ():
     dir_name_no_nan = intern("no_nan")
     dir_name_no_inf = intern("no_inf")
     dir_name_local_asserts = intern("assume_local_asserts")
+    dir_name_confine = intern("confine_external_paths")
 
 # Metatags the compiler gives a meaning of its own; any other `$name` in a
 # source may be a bundle (or a loop label), so the bundles are read first.
@@ -105,7 +107,7 @@ dw_dir_known = (name: str) -> bool:
 # contraction; the backends do neither yet, so it changes no code. `$unsafe` is
 # the unsafe boundary: compiler/ffi.jo.)
 dir_builtin = (name: str) -> bool:
-    name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies" or name == "fast_math" or name == "no_nan" or name == "no_inf" or name == "unsafe" or name == "assume_local_asserts"
+    name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies" or name == "fast_math" or name == "no_nan" or name == "no_inf" or name == "unsafe" or name == "assume_local_asserts" or name == "confine_external_paths"
 
 dir_bundle_index = (name: int) -> int:
     loop i in [0..dir_bundles.len()):
@@ -377,6 +379,13 @@ dir_assume_local_asserts = (p: int) -> bool:
     if dir_scopes.len() == 0: return true
     dir_names()
     dir_value(dir_name_local_asserts, p) != 0
+
+# `$confine_external_paths` (provisional spelling, docs/design/assumptions.md): a path taken
+# whole from outside must be proven inside a base too, where a file-system call gets it.
+dir_confine_paths = (p: int) -> bool:
+    if dir_scopes.len() == 0: return false
+    dir_names()
+    dir_value(dir_name_confine, p) == 1
 
 # `$explicit_copies`, written for the module, a function or a block.
 dir_explicit_copies = (p: int) -> bool:

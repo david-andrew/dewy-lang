@@ -11,12 +11,8 @@ exit = (code: int):
         __end_flush()
     __exit(code)
 
-# Text from outside the program: x itself, which Dewy's checker marks as untrusted input
-# (compiler/untrusted.jo). A source API ends in it: `args = () -> str[]: __untrusted(...)`.
-__untrusted[T] = (x: T) -> T: x
-
 # command line arguments (args()[0] is the program as it was started: `sloppy tool.jo` gives "tool.jo")
-args = () -> str[]: __untrusted(__os_args())
+args = () -> str[]: __os_args()
 __os_args = () -> str[]:
     if __test_args.len() > 0: return __test_args
     out: str[]
@@ -43,7 +39,7 @@ __cstr = (p: *u8) -> str:
 
 # an environment variable (in a web page: the page's URL parameter of that name, where `SLOPPY_X`
 # may also be written `x`, and a bare `?x` is "1")
-env = (name: str) -> str?: __untrusted(__os_env(name))
+env = (name: str) -> str?: __os_env(name)
 __os_env = (name: str) -> str?:
     when TARGET == "wasm":
         buf = fill(u8(0), 256)

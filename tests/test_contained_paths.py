@@ -1,8 +1,10 @@
-"""Untrusted input reaching the file system: a path built from text that came from outside
-(arguments, environment, standard input, file contents, the network) warns where a file
-operation gets it, unless `contains` or `confine` stood in between; hardcoded paths never warn.
-Passing an unproven path where a SafePath is declared is an error; the editor fixes both with
-`root.confine(p) or_throw`. (Runtime behavior and the errors: tests/cases/contained.)"""
+"""Path safety, scoped by construction: a path that joins unproven text to a base (the traversal
+pattern) warns where a file operation gets it, through the library's `$warn_if p isnt? SafePath`,
+unless `contains` or `confine` stood in between. A path taken whole (from arguments, the
+environment, input) has no base to escape and does not warn, except under
+`$confine_external_paths`. Passing an unproven path where a SafePath is declared is an error; the
+editor fixes both with `root.confine(p) or_throw`. (Runtime behavior and the errors:
+tests/cases/contained.)"""
 import os
 import re
 import subprocess
@@ -13,7 +15,7 @@ import pytest
 from tests.support import compiler  # noqa: F401
 from tests.test_core_editor import Client
 
-UNTRUSTED = 'holds untrusted input'
+UNTRUSTED = 'may escape its base'
 UNPROVEN = 'is not proven to stay inside its base'
 
 # David's example: the read after the checks warns, the validated uses do not.
@@ -37,7 +39,7 @@ main=():>void | PathEscape | FileError=>{
 }
 '''
 
-# Each source, through locals, fields, loops, helpers and lambdas, to a file operation.
+# Each traversal, through locals, fields, loops, helpers and lambdas, to a file operation.
 SOURCES = '''let base=p"/srv/data"
 Job:type=[name:string id:int64]
 path_for=(name:string):>Path=>p"{base}/{name}"
@@ -55,8 +57,8 @@ main=():>void=>{
 }
 '''
 
-# Nothing here warns: hardcoded paths, a helper given trusted text, untrusted text that only
-# numbers come from, a record whose other field is untrusted, validated and guarded paths.
+# Nothing here warns: hardcoded paths, a helper given hardcoded text, a number joined to a base,
+# paths taken whole from arguments and the environment, validated and guarded paths.
 QUIET = '''let base=p"/srv/data"
 Job:type=[name:string root:string]
 path_for=(name:string):>Path=>p"{base}/{name}"
@@ -75,6 +77,26 @@ main=():>void=>{
     if g is? Path { printl(g.exists) }
     let tried=path_for(argv[0])
     printl(tried.parent.name)
+    printl(p(argv[0]).exists)
+    printl(read_text(argv[0]) is? error)
+    printl(p"{argv[0]}.bak".exists)
+    printl(p(env("HOME") ?? "/").is_dir)
+}
+'''
+
+# Under `$confine_external_paths`, a path taken whole must be proven inside a base as well.
+STRICT = '''$confine_external_paths
+let root=p"/srv/data"
+main=():>void=>{
+    let f=p(args()[0])
+    printl(f.exists)
+    printl(p"/etc/hosts".exists)
+    if root.contains(f) { printl(f.exists) }
+    let g={
+        $confine_external_paths=false
+        f.exists
+    }
+    printl(g)
 }
 '''
 
@@ -99,7 +121,7 @@ def test_handler_warns_only_after_its_checks(compiler, tmp_path):  # noqa: F811
     source.write_text(HANDLER)
     found = diagnostics_of(compiler, source, UNTRUSTED)
     assert lines_of(found) == [11], found
-    assert '`f` holds untrusted input (`read_line` on line 15)' in found[0], found
+    assert '`f` may escape its base (unproven text given to `handle` on line 17)' in found[0], found
     assert 'validate it, `root.confine(f) or_throw`, or test it first, `if root.contains(f) {...}`' in found[0]
     run = subprocess.run([compiler, 'run', source], input='../../etc/passwd\n', capture_output=True,
                          text=True, timeout=60, check=False)
@@ -112,18 +134,26 @@ def test_each_source_reaches_its_sink(compiler, tmp_path):  # noqa: F811
     found = diagnostics_of(compiler, source, UNTRUSTED)
     origins = {line_of(line): line for line in found}
     assert sorted(origins) == [6, 8, 10, 12, 14], found
-    assert '`args` on line 5' in origins[6]
-    assert '`env` on line 7' in origins[8]
-    assert '`read_text` on line 9' in origins[10]
-    # (the helper's result holds its argument: the call is where the warning goes)
-    assert '`args` on line 5' in origins[12]
-    assert '`q` holds untrusted input' in origins[14]
+    assert 'built from unproven text on line 6' in origins[6]
+    assert 'built from unproven text on line 8' in origins[8]
+    assert 'built from unproven text on line 10' in origins[10]
+    # (the helper joins its parameter to a base: the call giving it unproven text built it)
+    assert 'built by `path_for` on line 12' in origins[12]
+    assert '`q` may escape its base (built from unproven text on line 13)' in origins[14]
 
 
 def test_trusted_and_validated_paths_are_quiet(compiler, tmp_path):  # noqa: F811
     source = tmp_path / 'main.dewy'
     source.write_text(QUIET)
     assert diagnostics_of(compiler, source, UNTRUSTED) == []
+
+
+def test_confine_external_paths(compiler, tmp_path):  # noqa: F811
+    source = tmp_path / 'main.dewy'
+    source.write_text(STRICT)
+    found = diagnostics_of(compiler, source, 'confine_external_paths')
+    assert lines_of(found) == [5], found
+    assert '`f` is not proven to stay inside a base' in found[0], found
 
 
 def test_editor_validates_the_path(tmp_path):

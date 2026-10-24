@@ -1,4 +1,4 @@
-# Contained paths and the untrusted-input brand (docs/design/contained_paths.md).
+# Contained paths, scoped by construction (docs/design/contained_paths.md).
 #
 # Two facts about the program's values, both found after checking, on the checked tree of the
 # program's own functions (the library's are read only through their signatures):
@@ -7,28 +7,32 @@
 #   `type SafePath = Path`); the brand is this file's fact. A path is one when it is hardcoded,
 #   built by interpolation from SafePaths, hardcoded text and proven-safe components (one
 #   component: no `/`, not `.` or `..`, not empty, as an integer's digits), made by a validator
-#   (a function whose result is written SafePath: `root.confine(p)`), or tested by a guard
-#   (`@guard(SafePath)`: `if root.contains(p) {...}`, or `if not root.contains(p) return`).
-#   Passing anything else where a SafePath is declared (a parameter, a `let`, a result) is a
-#   compile error with the fixes.
-# - Untrusted, a brand on text that came from outside: a library function's result passed through
-#   `__untrusted(x)` (lib/core/os.jo; the source APIs end in it: arguments, environment, standard
-#   input, file contents, the network, a child's output), and what is computed from it:
-#   interpolation, a library call given it, a record or collection holding it, a field or element
-#   of one, a function's result, a parameter given it. Values that cannot hold text (numbers,
-#   booleans, plain enums) never carry it, and a validator's result drops it. A path carrying it
-#   that reaches an `@sink(path)` function (the file system) without being a SafePath gets a
-#   warning. A fact is an origin and a mask of the function's parameters it holds, kept per field
-#   for records; a function's result is such a pair (its summary), so a call's result holds only
-#   the arguments its result does, and a parameter keeps what callers give it separately.
+#   (a function whose result is written SafePath: `root.confine(p)`), or tested by the guard
+#   (the path library's `contains`: `if root.contains(p) {...}`, or `if not root.contains(p)
+#   return`). Passing anything else where a SafePath is declared (a parameter, a `let`, a result)
+#   is a compile error with the fixes.
+# - Traversal, a fact on a path or its text: it joins unproven text to a base (`p"{root}/{name}"`,
+#   `"{dir}/{name}"`, `base + "/" + name`), so the text can climb out of the base. It is set where
+#   such a value is built and follows what is computed from it: a record or collection holding
+#   it, a field or element of one, a function's result, a parameter given it. A path taken whole
+#   (`p(args()[1])`) has no base and never carries it. A function whose own parameter is the
+#   unproven text (`path_for = (name:string) => p"{base}/{name}"`) builds a traversal only where a
+#   call gives it unproven text. A fact is an origin and a mask of the function's parameters: bit
+#   i (i < 31) holds what parameter i holds, bit 31 + i is set when parameter i's text is joined
+#   to a base. A function's result is such a pair (its summary); a parameter keeps what callers
+#   give it separately (a traversal, or unproven text).
 #
-# Demand-driven: nothing runs unless the program names SafePath in its own code, or both a source
-# and a sink were instantiated. Cost: one walk of each of the program's own function bodies, plus
-# one more walk of a body each time a fact it reads grows. Each fact (a local, a field, a global,
-# a function's result, a parameter's incoming origin) only grows: its origin is set once and its
-# mask gains at most a bit per parameter, so the walks are bounded by the bodies' size times
-# (1 + the facts that reach them); in practice each body is walked once or twice. Indexed state
-# throughout: facts and readers are maps keyed by local, field, global and function instance.
+# A call from the program's own code of a function with the soft precondition `$warn_if p isnt?
+# SafePath "..."` (compiler/warn_if.jo: the file-system operations) warns when the path is not a
+# SafePath and carries a traversal; under `$confine_external_paths`, when it is not a SafePath.
+#
+# Demand-driven: nothing runs unless the program names SafePath in its own code, or calls such a
+# function. Cost: one walk of each of the program's own function bodies, plus one more walk of a
+# body each time a fact it reads grows. Each fact (a local, a field, a global, a function's
+# result, a parameter's incoming facts) only grows: its origin is set once and its mask gains at
+# most a bit per parameter, so the walks are bounded by the bodies' size times (1 + the facts
+# that reach them); in practice each body is walked once or twice. Indexed state throughout:
+# facts and readers are maps keyed by local, field, global and function instance.
 use 'check.jo'
 use 'ast.jo'
 use 'util.jo'
@@ -38,24 +42,27 @@ use 'ide.jo'
 use 'units.jo'
 use 'expr.jo'
 use 'refine.jo'
+use 'directives.jo'
+use 'warn_if.jo'
 
 ut_safe_used = false        # the program's own code names SafePath (resolve_type)
-ut_sources = false          # __untrusted was instantiated (get_fn_inst)
-ut_sinks = false            # ... and an @sink one
 ut_paths_used = false       # a call from the program's own code has a SafePath soft precondition
 ut_safe_name = intern("SafePath")
 ut_path_name = intern("Path")
 ut_p_name = intern("p")
-ut_marker_name = intern("__untrusted")
+ut_contains_name = intern("contains")
 
 const UT_HARD = 1           # text the program wrote (or computed from such text alone)
 const UT_COMP = 2           # one proven-safe path component
 
-const UT_SOURCE = 1         # its result is untrusted input: it ends in __untrusted(...)
-const UT_SINK = 2           # @sink(path): its first argument, and any other Path, is a path it opens
-const UT_GUARD = 4          # @guard(SafePath): true means its second argument is a SafePath
+const UT_GUARD = 4          # the path library's `contains`: true means its second argument is a
+                            # SafePath
 const UT_MINTS = 8          # its result is written SafePath: a validator (or a function whose
                             # returns are held to the brand)
+
+const UT_PARAMS = 31        # parameters a mask follows
+const UT_PASS = 2147483647  # bits 0..30: holds what parameter i holds
+const UT_JOIN = 31          # bits 31..61: parameter i's text is joined to a base
 
 ut_decl_kinds: {int: int} = {}
 ut_param_safe: {int: int} = {}  # decl -> bit i: parameter i is written SafePath (computed once)
@@ -63,7 +70,8 @@ ut_param_safe: {int: int} = {}  # decl -> bit i: parameter i is written SafePath
 # facts: (origin position + 1), 0 when trusted; by local, sized at ut_run
 ut_lo: int[]                        # local -> origin
 ut_lm: int[]                        # local -> mask
-ut_li: int[]                        # parameter local -> what callers give it
+ut_li: int[]                        # parameter local -> a traversal callers give it
+ut_lu: int[]                        # parameter local -> unproven text callers give it
 ut_lp: int[]                        # parameter local -> its index + 1
 ut_lr: int[]                        # local -> the walk that last read it
 ut_lf: int[]                        # local -> 1 when it has facts by field
@@ -87,6 +95,11 @@ ut_ehead: int[]                     # parameter local -> its first edge, -1
 ut_eto: int[]
 ut_enext: int[]
 ut_epairs: {int: bool} = {}
+# a caller's parameter whose text a callee's parameter is given: unproven text follows these
+ut_uhead: int[]                     # parameter local -> its first edge, -1
+ut_uto: int[]
+ut_unext: int[]
+ut_upairs: {int: bool} = {}
 ut_types: {int: int} = {}           # pruned type -> UT_T_* bits (types made during the run)
 ut_tb: int[]                        # ... (types there when it started)
 ut_queue: int[]
@@ -95,7 +108,7 @@ ut_walked: int[]                    # function instance -> 1 once walked
 ut_rr: int[]                        # function instance -> the walk that last registered reading its result
 ut_cur = 0                  # the function instance being walked
 ut_first = false            # its first walk: obligations and sinks are looked at then
-ut_origin_name: {int: str} = {}  # origin position -> the source's name, for the warning
+ut_origin_what: {int: str} = {}  # origin -> how it was built, for the warning
 
 # SafePath facts of the program's own locals and globals (single assignment), and text classes
 ut_ls: int[]                        # local -> UT_L_* bits
@@ -107,19 +120,19 @@ const UT_L_HARD = 4                 # its text: UT_HARD << 2
 const UT_L_COMP = 8                 # ... UT_COMP << 2
 ut_narrowed: int[]          # locals a guard around the code being walked proved SafePath
 
-ut_sink_calls: (int, int)[]  # (path argument, function instance it is in), first walks
+ut_sink_calls: (int, int, int)[]  # (path argument, function instance it is in, the message's
+                                  # declaration), first walks
 ut_linit: int[]                     # single-assignment local -> its initializer (for the fixes' text)
 
 ut_reset = ():
     ut_safe_used = false
-    ut_sources = false
-    ut_sinks = false
     ut_paths_used = false
     ut_decl_kinds = {}
     ut_param_safe = {}
     ut_lo = []
     ut_lm = []
     ut_li = []
+    ut_lu = []
     ut_lp = []
     ut_lr = []
     ut_lf = []
@@ -142,24 +155,21 @@ ut_reset = ():
     ut_eto = []
     ut_enext = []
     ut_epairs = {}
+    ut_uhead = []
+    ut_uto = []
+    ut_unext = []
+    ut_upairs = {}
     ut_queue = []
     ut_queued = []
     ut_walked = []
     ut_rr = []
-    ut_origin_name = {}
+    ut_origin_what = {}
     ut_ls = []
     ut_safe_globals = {}
     ut_text_globals = {}
     ut_narrowed = []
     ut_sink_calls = []
     ut_linit = []
-
-# get_fn_inst, for each function it instantiates (n: its name) and each attribute (an) it has
-ut_note_fn = (n: int):
-    if n == ut_marker_name: ut_sources = true
-
-ut_note_attribute = (an: str):
-    if an == "sink": ut_sinks = true
 
 # resolve_type: a type name the program's own code writes
 ut_note_type_name = (nm: int, pos: int):
@@ -180,13 +190,8 @@ ut_decl_kind = (d: int) -> int:
     if let k = ut_decl_kinds.get(d): return k
     k = 0
     if nodes[d].kind == .fn_:
-        if nodes[d].c != 0:
-            loop at in kids(int(nodes[d].c)):
-                an = name_of(int(nodes[at].name))
-                if an == "sink": k |= UT_SINK
-                else if an == "guard": k |= UT_GUARD
+        if int(nodes[d].name) == ut_contains_name and nkids(d) == 2 and pos_in_lib(nodes[d].pos) and ut_names_path(int(nodes[kid(d, 0)].a)) and ut_names_path(int(nodes[kid(d, 1)].a)): k |= UT_GUARD
         if ut_names_safe(int(nodes[d].a)): k |= UT_MINTS
-        if pos_in_lib(nodes[d].pos) and (int(nodes[d].name) == ut_marker_name or ut_ends_in_marker(int(nodes[d].b))): k |= UT_SOURCE
         mask = 0
         loop i in [0..min(nkids(d), 62)):
             if ut_names_safe(int(nodes[kid(d, i)].a)): mask |= 1 << i
@@ -194,17 +199,7 @@ ut_decl_kind = (d: int) -> int:
     ut_decl_kinds[d] = k
     k
 
-# a library body whose value is __untrusted(...): `args = () -> str[]: __untrusted(__os_args())`
-ut_ends_in_marker = (b0: int) -> bool:
-    b = b0
-    if b != 0 and nodes[b].kind == .block and nkids(b) == 1: b = kid(b, 0)
-    if b != 0 and (nodes[b].kind == .return_ or nodes[b].kind == .exprstmt): b = int(nodes[b].a)
-    b = ut_strip(b)
-    if b == 0 or nodes[b].kind != .call: return false
-    c = int(nodes[b].a)
-    if c != 0 and nodes[c].kind == .ident and int(nodes[c].name) == ut_marker_name: return true
-    d = ut_callee_decl(b)
-    d != 0 and int(nodes[d].name) == ut_marker_name
+ut_names_path = (tn: int) -> bool: tn != 0 and nodes[tn].kind == .tname and int(nodes[tn].name) == ut_path_name and nkids(tn) == 0
 
 # what the function a call calls is, by instance (cached)
 ut_callee_kind = (n: int) -> int:
@@ -232,7 +227,7 @@ ut_user_fn = (f: int) -> bool:
 
 # ---------------- types ----------------
 
-const UT_T_TEXT = 1         # a value of the type can hold text (only those carry the untrusted brand)
+const UT_T_TEXT = 1         # a value of the type can hold text (only those can be joined to a base)
 const UT_T_PATH = 2         # Path
 const UT_T_COMP = 4         # its text is one safe component whatever the value: integers, floats,
                             # booleans, plain enums
@@ -327,23 +322,28 @@ ut_enqueue = (f: int):
     ut_queued[f] = 1
     ut_queue.push(f)
 
-# Each fact is an origin (a source's position + 1, or 0) and a mask: the parameters of the
-# function the local belongs to that it holds (bit i: parameter i). A function's result is the
-# same pair, so a call's result holds the arguments its mask names: a helper given trusted text
-# at one call and untrusted text at another taints only the second (a summary per function).
-# What callers pass a parameter is its incoming origin, which a sink or a store into a global
-# reads through the mask.
+# Each fact is an origin (where a traversal was built, + 1, or 0) and a mask over the parameters
+# of the function the local belongs to: bit i, it holds what parameter i holds; bit 31 + i,
+# parameter i's text is joined to a base in it. A function's result is the same pair, so a
+# call's result holds the arguments its mask names, and is a traversal where a joined argument
+# is unproven: a helper given hardcoded text at one call and unproven text at another warns only
+# at the second (a summary per function). What callers pass a parameter is its incoming facts,
+# which a file-system call or a store into a global reads through the mask.
 
 ut_owner = (l: int) -> int: int(locals[l].owner)
 
-# the incoming origin of the first parameter of f that mask m names, or 0
+# the incoming origin of the first parameter of f that mask m names, or 0: a traversal it is
+# given (bits 0..30), or unproven text given one joined to a base (bits 31..61)
 ut_concrete = (f: int, m: int) -> int:
     if m == 0 or f <= 0 or f >= fns.len(): return 0
     loop i in 0.. and pl in fns[f].params:
-        if i >= 62: break
+        if i >= UT_PARAMS: break
         if m & (1 << i) != 0:
             ut_read(3, pl)
             if ut_li[pl] != 0: return ut_li[pl]
+        if m & (1 << (UT_JOIN + i)) != 0:
+            ut_read(3, pl)
+            if ut_lu[pl] != 0: return ut_lu[pl]
     0
 
 ut_mark_local = (l0: int, origin: int, mask: int):
@@ -354,7 +354,8 @@ ut_mark_local = (l0: int, origin: int, mask: int):
     if ut_owner(l) != ut_cur:
         # (a variable of the function around this one: what this one's parameters bring it
         # arrives along edges)
-        if m != 0: ut_edges(m, l * 4)
+        if m & UT_PASS != 0: ut_edges(m & UT_PASS, l * 4)
+        if o == 0: o = ut_concrete(ut_cur, m & ~UT_PASS)
         m = 0
     changed = false
     if o != 0 and ut_lo[l] == 0:
@@ -393,10 +394,16 @@ ut_mark_field = (l0: int, field: int, origin: int, mask: int):
         changed = true
     if changed: ut_wake(0, l)
 
-# a parameter given untrusted text by a caller
+# a parameter given a traversal by a caller
 ut_mark_in = (pl: int, origin: int):
     if origin == 0 or ut_li[pl] != 0: return
     ut_li[pl] = origin
+    ut_wake(3, pl)
+
+# a parameter given unproven text by a caller
+ut_mark_unproven = (pl: int, origin: int):
+    if origin == 0 or ut_lu[pl] != 0: return
+    ut_lu[pl] = origin
     ut_wake(3, pl)
 
 # what value v holds reaches local l: a record built in place, or another local, field by field
@@ -424,7 +431,8 @@ ut_flow = (l: int, v: int):
 
 ut_mark_global = (g: int, origin: int, mask: int):
     o = origin
-    if mask != 0 and ut_cur > 0: ut_edges(mask, g * 4 + 1)
+    if mask & UT_PASS != 0 and ut_cur > 0: ut_edges(mask & UT_PASS, g * 4 + 1)
+    if o == 0 and ut_cur > 0: o = ut_concrete(ut_cur, mask & ~UT_PASS)
     if o == 0 or ut_global.has(g): return
     ut_global[g] = o
     ut_wake(1, g)
@@ -440,7 +448,7 @@ ut_mark_ret = (f: int, origin: int, mask: int):
         changed = true
     if changed: ut_wake(2, f)
 
-# ---------------- untrusted: where a value's text may come from outside ----------------
+# ---------------- traversal: a base joined to unproven text ----------------
 
 ut_o = 0    # the value being read: its origin ...
 ut_m = 0    # ... and the current function's parameters it holds
@@ -450,7 +458,7 @@ ut_m = 0    # ... and the current function's parameters it holds
 # function's parameter, 0 a local of an enclosing function, 1 a global)
 ut_edges = (m: int, to: int):
     loop i in 0.. and src in fns[ut_cur].params:
-        if i >= 62: break
+        if i >= UT_PARAMS: break
         if m & (1 << i) != 0:
             pair = src * 4294967296 + to
             if ut_epairs.has(pair): continue
@@ -461,10 +469,23 @@ ut_edges = (m: int, to: int):
 
 # incoming origins along the edges: true when one was added
 ut_follow_edges = () -> bool:
+    added = false
+    uwork: int[]
+    loop src in [0..ut_uhead.len()):
+        if ut_uhead[src] >= 0 and ut_lu[src] != 0: uwork.push(src)
+    loop uwork.len() > 0:
+        src = uwork.pop()
+        e = ut_uhead[src]
+        loop e >= 0:
+            to = ut_uto[e]
+            if ut_lu[to] == 0:
+                ut_mark_unproven(to, ut_lu[src])
+                added = true
+                uwork.push(to)
+            e = ut_unext[e]
     work: int[]
     loop src in [0..ut_ehead.len()):
         if ut_ehead[src] >= 0 and ut_li[src] != 0: work.push(src)
-    added = false
     loop work.len() > 0:
         src = work.pop()
         e = ut_ehead[src]
@@ -494,8 +515,8 @@ ut_val = (n: int) -> int:
     ut_acc(n)
     ut_o
 
-# n's origin, or the incoming origin of a parameter it holds: is it untrusted at all
-ut_untrusted = (n: int) -> int:
+# n's origin, or the incoming origin of a parameter it holds: is it a traversal at all
+ut_traversal = (n: int) -> int:
     o = ut_val(n)
     if o != 0: return o
     ut_concrete(ut_cur, ut_m)
@@ -524,8 +545,8 @@ ut_add_local = (l: int, whole: bool, field: int):
         m = 0
     ut_add(o, m)
 
-# the origin (position + 1) of untrusted text n's value may hold, and the parameters it holds,
-# added to ut_o and ut_m
+# the origin (position + 1) of a traversal n's value may hold, and the parameters it holds or
+# joins, added to ut_o and ut_m
 ut_acc = (n: int):
     if n == 0: return
     t = int(nodes[n].type)
@@ -534,6 +555,14 @@ ut_acc = (n: int):
     if k == .str_lit:
         if nodes[n].aux == 0: return
         loop i in [0..nkids(n)): ut_acc(kid(n, i))
+        ut_joined(kids(n), n)
+        return
+    if k == .binary and nodes[n].aux == 0 and nodes[n].op == i32(int(Tok.plus)) and prune(t) == T_STR:
+        # (`base + "/" + name`: the pieces, as an interpolation's)
+        pieces: int[]
+        ut_pieces(n, pieces)
+        loop x in pieces: ut_acc(x)
+        ut_joined(pieces, n)
         return
     if k == .pair:
         ut_acc(int(nodes[n].a))
@@ -557,26 +586,33 @@ ut_acc = (n: int):
         d = ut_callee_decl(n)
         if d != 0:
             kind = ut_callee_kind(n)
-            if kind & UT_SOURCE != 0:
-                o = nodes[n].pos + 1
-                if not ut_origin_name.has(o): ut_origin_name[o] = name_of(int(nodes[d].name))
-                ut_add(o, 0)
-                return
             if kind & UT_MINTS != 0: return
             f = int(nodes[n].sym)
             if ut_user_fn(f):
-                # (its result's own origin, and the arguments its result holds)
+                # (its result's own origin, the arguments its result holds, and the ones it joins
+                # to a base: a traversal where the argument is unproven)
                 ut_read(2, f)
                 ut_add(ut_ret.get(f) ?? 0, 0)
                 rm = ut_rmask.get(f) ?? 0
                 if rm != 0:
-                    loop i in [0..min(nkids(n), 62)):
+                    loop i in [0..min(nkids(n), UT_PARAMS)):
+                        if rm & (1 << (UT_JOIN + i)) != 0:
+                            x = kid(n, i)
+                            bits = ut_arg_bits(x)
+                            if bits < 0: ut_add(ut_origin(n, "built by `{name_of(int(nodes[d].name))}`"), 0)
+                            else: ut_add(0, bits)
                         if rm & (1 << i) != 0: ut_acc(kid(n, i))
                 return
         # (a library function, a constructor, a conversion, a call of a function value: what its
-        # arguments hold)
+        # arguments hold, and what the functions it is given return)
         ut_acc(int(nodes[n].a))
-        loop i in [0..nkids(n)): ut_acc(kid(n, i))
+        loop i in [0..nkids(n)):
+            x = kid(n, i)
+            if nodes[x].kind == .lambda and nodes[x].sym > 0 and int(nodes[x].sym) < fns.len():
+                lf = int(nodes[x].sym)
+                ut_read(2, lf)
+                ut_add(ut_ret.get(lf) ?? 0, 0)
+            else: ut_acc(x)
         return
     if k == .if_:
         ut_acc(int(nodes[n].b))
@@ -599,6 +635,121 @@ ut_acc_block = (b: int):
     last = kid(b, m - 1)
     if nodes[last].kind == .exprstmt: ut_acc(int(nodes[last].a))
     else if nodes[last].kind == .if_ or nodes[last].kind == .block or nodes[last].kind == .match_: ut_acc(last)
+
+# (the pieces of a string sum, left to right)
+ut_pieces = (n: int, out: mut int[]):
+    if nodes[n].kind == .binary and nodes[n].aux == 0 and nodes[n].op == i32(int(Tok.plus)) and prune(int(nodes[n].type)) == T_STR:
+        ut_pieces(int(nodes[n].a), out)
+        ut_pieces(int(nodes[n].b), out)
+        return
+    if nodes[n].kind == .str_lit and nodes[n].aux != 0:
+        loop x in kids(n): out.push(x)
+        return
+    out.push(n)
+
+ut_origin = (n: int, what: str) -> int:
+    o = nodes[n].pos + 1
+    if not ut_origin_what.has(o): ut_origin_what[o] = what
+    o
+
+# how origin o was built, seen from a warning at p: "built from unproven text on line 8"
+ut_origin_text = (o: int, p: int) -> str:
+    l, c = line_col(o - 1)
+    at = "line {l}"
+    if pos_file(o - 1) != pos_file(p):
+        path = files[pos_file(o - 1)].path
+        k = rfind(path, "/")
+        at = "{at} of {path[k + 1..]}"
+    "{ut_origin_what.get(o) ?? "built from unproven text"} on {at}"
+
+# The pieces of a path's text, as written (n: the interpolation or sum): a piece of unproven
+# text after a base (a separator after something, or a path) makes a traversal. Text the
+# program wrote, a proven-safe component and a SafePath are proven; a piece that is this
+# function's own parameter (or a field of one) is decided at each call instead.
+ut_joined = (pieces: int[], n: int):
+    based = false
+    seen = false
+    loop part in pieces:
+        if nodes[part].kind == .str_lit and nodes[part].aux == 0:
+            if based: continue
+            s = name_of(int(nodes[part].sval))
+            if len(s) == 0: continue
+            at = find_byte(s, '/')
+            back = find_byte(s, '\\')
+            if at < 0 or back >= 0 and back < at: at = back
+            if at < 0:
+                seen = true
+                continue
+            # (a separator after something: a base; one leading the text starts it only when
+            # more follows it, then a separator)
+            if seen or at > 0:
+                based = true
+                continue
+            loop i in [0..len(s)):
+                if s[i] == '/' or s[i] == '\\':
+                    if seen: based = true
+                else: seen = true
+            continue
+        v = part
+        if nodes[v].kind == .pair: v = int(nodes[v].a)
+        vt = int(nodes[v].type)
+        if based:
+            proven = true
+            if ut_is_path(vt): proven = ut_safe(v)
+            else if not ut_comp_type(vt):
+                c = ut_set_class(vt)
+                if c == 0: c = ut_text_class(v)
+                proven = c != 0
+            if not proven:
+                q = ut_param_of(v)
+                if q > 0: ut_add(0, 1 << (UT_JOIN + q - 1))
+                else: ut_add(ut_origin(n, "built from unproven text"), 0)
+        if ut_is_path(vt): based = true
+        seen = true
+
+# the parameter (index + 1) of the function being walked that x is, or a field of: 0 for none
+# (and for a lambda's, whose calls are not seen)
+ut_param_of = (x0: int) -> int:
+    x = ut_strip(x0)
+    loop x != 0 and nodes[x].kind == .field: x = ut_strip(int(nodes[x].a))
+    if x == 0 or nodes[x].kind != .ident or nodes[x].aux != i32(int(SK.local)) or nodes[x].sym <= 0: return 0
+    l = ut_root(int(nodes[x].sym))
+    # (a binding the body starts with for a parameter: `name = name`)
+    loop k in [0..4):
+        if ut_lp[l] != 0 or not ut_single(l) or ut_linit[l] == 0: break
+        y = ut_strip(ut_linit[l])
+        if y == 0 or nodes[y].kind != .ident or nodes[y].aux != i32(int(SK.local)) or nodes[y].sym <= 0: break
+        l = ut_root(int(nodes[y].sym))
+    if ut_owner(l) != ut_cur or ut_lp[l] == 0 or ut_lp[l] > UT_PARAMS or fns[ut_cur].kind == i32(FK_LAMBDA): return 0
+    ut_lp[l]
+
+# An argument's text: -1 when it is not proven, else the bits (31 + i) of this function's
+# parameters whose text is in it unproven (0: proven). `"{name}.tmp"`, name a parameter, is
+# unproven only where name is.
+ut_arg_bits = (x0: int) -> int:
+    x = ut_strip(x0)
+    if not ut_unproven_arg(x0): return 0
+    q = ut_param_of(x0)
+    if q > 0: return 1 << (UT_JOIN + q - 1)
+    if x == 0 or nodes[x].kind != .str_lit or nodes[x].aux == 0: return -1
+    bits = 0
+    loop part in kids(x):
+        if nodes[part].kind == .str_lit and nodes[part].aux == 0: continue
+        v = part
+        if nodes[v].kind == .pair: v = int(nodes[v].a)
+        b = ut_arg_bits(v)
+        if b < 0: return -1
+        bits |= b
+    bits
+
+# an argument whose text is not proven: not hardcoded, not one safe component, not a SafePath
+ut_unproven_arg = (x: int) -> bool:
+    t = int(nodes[x].type)
+    if ut_is_path(t): return not ut_safe(x)
+    if ut_comp_type(t): return false
+    c = ut_set_class(t)
+    if c == 0: c = ut_text_class(x)
+    c == 0
 
 # ---------------- SafePath: proven not to escape its base ----------------
 
@@ -760,7 +911,7 @@ ut_walk_fn = (f: int):
     ut_narrowed = []
     if ut_first:
         loop i in 0.. and pl in fns[f].params:
-            if i < 62: ut_lp[pl] = i + 1
+            if i < UT_PARAMS: ut_lp[pl] = i + 1
     d = int(fns[f].decl)
     if ut_first and d != 0 and nodes[d].kind == .fn_:
         ut_decl_kind(d)
@@ -894,31 +1045,35 @@ ut_call = (n: int):
     f = int(nodes[n].sym)
     d = ut_callee_decl(n)
     if d == 0: return
-    kind = ut_callee_kind(n)
+    ut_callee_kind(n)
     na = nkids(n)
     if ut_user_fn(f):
-        # (what each argument holds reaches the parameter)
-        loop i in [0..min(na, fns[f].params.len())):
+        # (what each argument holds reaches the parameter, and whether its text is proven)
+        loop i in [0..min(na, fns[f].params.len(), UT_PARAMS)):
             pl = int(fns[f].params[i])
-            o = ut_val(kid(n, i))
+            if not ut_text_type(int(locals[pl].type)): continue
+            x = kid(n, i)
+            o = ut_val(x)
             m = ut_m
             if o != 0: ut_mark_in(pl, o)
-            if m != 0: ut_edges(m, pl * 4 + 3)
-    else:
-        # (a library function given untrusted text and a function, as `xs.map(x => ...)`: the
-        # function may be given that text)
-        lambdas = false
-        loop i in [0..na):
-            if nodes[kid(n, i)].kind == .lambda: lambdas = true
-        if lambdas:
-            o = 0
-            loop i in [0..na):
-                if o == 0 and nodes[kid(n, i)].kind != .lambda: o = ut_untrusted(kid(n, i))
-            if o != 0:
-                loop i in [0..na):
-                    x = kid(n, i)
-                    if nodes[x].kind == .lambda and nodes[x].sym > 0 and int(nodes[x].sym) < fns.len():
-                        loop l in fns[int(nodes[x].sym)].params: ut_mark_in(l, o)
+            if m & UT_PASS != 0: ut_edges(m & UT_PASS, pl * 4 + 3)
+            if m & ~UT_PASS != 0: ut_mark_in(pl, ut_concrete(ut_cur, m & ~UT_PASS))
+            # (what is proven of the argument's text is known on the first walk)
+            if not ut_first: continue
+            bits = ut_arg_bits(x)
+            if bits < 0: ut_mark_unproven(pl, ut_origin(x, "unproven text given to `{name_of(int(nodes[d].name))}`"))
+            else if bits != 0:
+                # (this function's own parameters: what their callers give them follows, along edges)
+                loop j in 0.. and src in fns[ut_cur].params:
+                    if j >= UT_PARAMS: break
+                    if bits & (1 << (UT_JOIN + j)) == 0: continue
+                    pair = src * 4294967296 + pl
+                    if ut_upairs.has(pair): continue
+                    ut_upairs[pair] = true
+                    ut_uto.push(pl)
+                    ut_unext.push(ut_uhead[src])
+                    ut_uhead[src] = ut_uto.len() - 1
+                    if ut_lu[src] != 0: ut_mark_unproven(pl, ut_lu[src])
     if not ut_first: return
     if ut_safe_used:
         mask = ut_param_safe.get(d) ?? 0
@@ -928,11 +1083,13 @@ ut_call = (n: int):
                 if mask & (1 << i) != 0 and not ut_safe(x):
                     pn = name_of(int(nodes[kid(d, i)].name))
                     ut_unproven(x, "{name_of(int(nodes[d].name))}'s `{pn}` is a SafePath")
-    if kind & UT_SINK != 0 and ut_sources:
-        loop i in [0..na):
-            x = kid(n, i)
-            if i == 0 or ut_is_path(int(nodes[x].type)):
-                if not ut_safe(x): ut_sink_calls.push((x, ut_cur))
+    # (a soft precondition `x isnt? SafePath`: decided once the facts settle, unless proven here)
+    if ut_paths_used and wi_decls.has(d):
+        loop w in wi_decls[d]:
+            if w.kind != WI_PATH or w.param >= na: continue
+            x = kid(n, w.param)
+            safe = if w.wrapped: ut_safe_text(x) else: ut_safe(x)
+            if not safe: ut_sink_calls.push((x, ut_cur, d))
 
 # ---------------- diagnostics ----------------
 
@@ -989,23 +1146,25 @@ ut_warn_sinks = ():
         if seen.has(x): continue
         seen[x] = true
         ut_cur = item.1
-        o = ut_untrusted(x)
+        o = ut_traversal(x)
         ut_cur = 0
-        if o == 0: continue
-        from = ""
-        if let nm = ut_origin_name.get(o):
-            l, c = line_col(o - 1)
-            from = " (`{nm}` on line {l})"
-        warn(nodes[x].pos, "{ut_shown(x)} holds untrusted input{from} and may escape its base: {ut_fixes(x)}")
+        message = ""
+        loop w in wi_decls[item.2]:
+            if w.kind == WI_PATH: message = w.message
+        if o != 0:
+            warn(nodes[x].pos, "{ut_shown(x)} {message} ({ut_origin_text(o, nodes[x].pos)}): {ut_fixes(x)}")
+        else if dir_confine_paths(nodes[x].pos):
+            warn(nodes[x].pos, "{ut_shown(x)} is not proven to stay inside a base, which `$confine_external_paths` asks of every path a file-system operation gets: {ut_fixes(x)}, or opt this scope out with `$confine_external_paths=false`")
 
 # check_program, once every function is checked
 ut_run = ():
-    taint = ut_sources and ut_sinks
+    taint = ut_paths_used
     if not ut_safe_used and not taint: return
     n = locals.len() + 1
     ut_lo = fill(0, n)
     ut_lm = fill(0, n)
     ut_li = fill(0, n)
+    ut_lu = fill(0, n)
     ut_lp = fill(0, n)
     ut_lr = fill(0, n)
     ut_lf = fill(0, n)
@@ -1015,6 +1174,7 @@ ut_run = ():
     ut_walked = fill(0, fns.len() + 1)
     ut_rr = fill(0, fns.len() + 1)
     ut_ehead = fill(-1, n)
+    ut_uhead = fill(-1, n)
     ut_fu = fill(0, fns.len() + 1)
     ut_fk = fill(0, fns.len() + 1)
     ut_tb = fill(0, types.len() + 1)
@@ -1041,3 +1201,4 @@ ut_run = ():
             if not taint and i >= order.len(): break
         if not taint or not ut_follow_edges(): break
     if taint: ut_warn_sinks()
+    ut_sink_calls = []
