@@ -109,6 +109,29 @@ The type has no defaults, so the zero value is the empty table and the Sloppy gl
 initializer in module order. Its word-at-a-time newline scan matches Sloppy's instruction
 count (`speed`: flagship panel within 0.01%).
 
+`sha.dewy` (SHA-256 and SHA-1: the macOS signature's page hashes, its LC_UUID and the
+bundle's sealed icon) and `icns.dewy` (the bundle's icon) are the first hot leaves. Words
+are `uint32<overflow='wrap'>`; the schedule and constants are `array<... length=64>`,
+which drops their bounds checks. Like for like (rotations as two shifts and an or), the
+Dewy SHA-256 needed +51% of Sloppy's instructions. The shipped one rotates by shifting the
+word doubled into a `uint64<overflow='wrap'>`, computing that once per sigma: 1.485 / 1.527 G
+(release 1.407 / 1.491 G) hashing 10 MB by pages. SHA-1 is 0.949 / 1.045 G. An aarch64-mac
+build of the compiler takes 1.5% fewer instructions and writes the same bytes.
+
+Open gaps from these leaves, by cost:
+- A literal beside a policy-typed operand (`w + 1`, `w & 0xFF`, `w xor 0xFFFFFFFF`) goes
+  through `int` and `__mi_low_word`, about 30 instructions in place of one. Plain `uint32`
+  does not.
+- Wrap lowering zero-extends after every 32-bit operation, even shr/and/or/xor, whose
+  results already fit. It keeps a dead `and -1` after a constant shift and never forms a
+  rotate.
+- A loop counter is `int`, so `at + t * 4` with `at:int64` is checked `int` arithmetic
+  (+21%) unless it is written `let q:int64=...`.
+- A one-line helper with four checked byte loads is not inlined (+6%). Repeated pure calls
+  are not shared (+19% when each rotation doubles its own word).
+- Sloppy's style, `int64` with `& 0xFFFFFFFF` masks, costs 3x: the mask's bound does not
+  reach the exact additions through array elements.
+
 Gaps met on the way, and since closed: `loop {` ending its line now loops until it
 exits; a conversion ending a loop header converts the last source; `bytes as string ?? ""`
 converts to `string | none` and falls back; `fill(v n)` is documented; Sloppy takes a Dewy
