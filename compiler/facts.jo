@@ -1153,7 +1153,14 @@ fact_forget = (s: mut FactState, at: int, reason: FactReason, all: bool = false,
         if not all and fact_disjoint(written, p): continue
         t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
         v = fact_new(s, fact_domain(t, reason, at), FactTerm(type = t))
+        fact_holds_contract(s, t, v)
         s.bindings[i] = FactBinding(p, v, at, s.bindings[i].value)
+
+# A place declared with a refined type holds its contract whatever changed it:
+# every write to it was checked against that type. (A dependency names only
+# stable bindings: ref_term.)
+fact_holds_contract = (s: mut FactState, t: int, v: int):
+    if refine_active and v != 0: ref_assume(t, v, [], s)
 
 # A call that never returns ends its path: what it writes is never read, so
 # its callee tree is not summarized for it.
@@ -1773,6 +1780,7 @@ fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reaso
     old = if i >= 0: s.bindings[i].value else: 0
     if fact_exposed(p): fact_forget(s, at, reason, false, p)
     fresh = fact_new(s, fact_domain(ntype(e), reason, at), FactTerm(type = ntype(e)))
+    fact_holds_contract(s, refine_storage(e, ntype(e)), fresh)
     fact_bind(s, p, fresh)
     j = chain.len() - 1
     loop j >= 0 and old != 0 and fresh != 0:
@@ -2691,7 +2699,11 @@ fact_loop_header = (entry: mut FactState, back: FactState, old: FactState, at: i
         if original >= 0 and entry.bindings[original].value == v:
             if fact_slot(s, v) < 0: fact_add_value(s, v, bound)
             fact_bind(s, binding.place, v)
-        else: fact_bind(s, binding.place, fact_new(s, bound, FactTerm(type = t)))
+        else:
+            # (only the contract's interval: its rows to fresh literals would
+            # never settle the header)
+            if refine_active: bound = ref_interval(t, bound)
+            fact_bind(s, binding.place, fact_new(s, bound, FactTerm(type = t)))
     # Retain immutable entry snapshots needed by result contracts. Changing
     # storage never aliases these identities at the loop header.
     loop i in [0..entry.ids.len()):

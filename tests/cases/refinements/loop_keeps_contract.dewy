@@ -1,0 +1,21 @@
+# A local declared with a refined type keeps its contract across a loop that
+# writes it: every write is checked against the type.
+$runtime_checks=false
+Reading:type = int32<r => -100 <=? r and r <=? 100>
+need = (r:Reading):>int32 => r
+main = () => {
+    let xs:array<Reading length=4> = [Reading(1) Reading(5) Reading(-3) Reading(7)]
+    let low:Reading = xs[0]
+    loop i in [0..4) {
+        let v = xs[i]
+        if v <? low low = v
+    }
+    let high:Reading = xs[0]
+    let i:int64 = 0
+    loop i <? 4 {
+        let v = xs[i]
+        if v >? high high = v
+        i += 1
+    }
+    printl"{need(low)} {need(high)}"
+}

@@ -621,6 +621,27 @@ ref_assume = (t0: int, self: int, args: int[], s: mut FactState):
         v = fact_new(s, fact_domain(T_BOOL), FactTerm(atom.op, a, b))
         fact_assume(s, v, true)
 
+# b narrowed by the atoms of t's contract that compare the value with a
+# literal; relations to other values need a fact state (ref_assume). O(atoms).
+ref_interval = (t0: int, b0: FactBound) -> FactBound:
+    t = prune(t0)
+    b = b0
+    if types[t].kind != .refined or representation_type(t) == T_U64: return b
+    loop atom in ref_predicates[int(types[t].st)]:
+        x = atom.a
+        y = atom.b
+        if atom.op != .lt and atom.op != .le or x.unsigned or y.unsigned: continue
+        # (`value < c`: a literal side holds its offset folded in)
+        if x.kind == 0 and x.path.len() == 0 and y.kind == 1:
+            if atom.op == .le: b.hi = min(b.hi, y.value)
+            else if y.value != FACT_MIN: b.hi = min(b.hi, y.value - 1)
+        # (`c < value + k`)
+        else if x.kind == 1 and y.kind == 0 and y.path.len() == 0 and fact_add_fits(x.value, -y.offset):
+            c = x.value - y.offset
+            if atom.op == .le: b.lo = max(b.lo, c)
+            else if c != FACT_MAX: b.lo = max(b.lo, c + 1)
+    b
+
 ref_check = (n: int, self: int, args: int[], s: mut FactState):
     if fact_speculating > 0:
         ref_assume(zonk(int(nodes[n].aux2)), self, args, s)
