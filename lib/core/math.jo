@@ -803,7 +803,25 @@ next_normal = (r: mut Rng, mean: f64 = 0.0, sd: f64 = 1.0) -> f64:
 next_int = (r: mut Rng, lo: int, hi: int) -> int:
     if hi <= lo: panic("next_int({lo}, {hi}): the range [{lo}..{hi}) is empty")
     __next_int_from(r, lo, hi)
-__next_int_from = (r: mut Rng, lo: int, hi: int) -> int: lo + int(next_u64(r) % u64(hi - lo))
+# (Lemire's multiply-and-reject: the high half of a 128-bit product of a random word and the
+# span, redrawn while the low half falls in the 2^64 mod span values that would favour some
+# results, so every number is equally likely. The span and the sum are counted in u64, which
+# wraps: [int.min..int.max) does not overflow.)
+__next_int_from = (r: mut Rng, lo: int, hi: int) -> int:
+    span = u64(hi) - u64(lo)
+    x = next_u64(r)
+    low = x * span
+    if low < span:
+        reject = (u64(0) - span) % span
+        loop low < reject:
+            x = next_u64(r)
+            low = x * span
+    high = __random_mul_hi(x, span)
+    int(u64(lo) + high)
+__random_mul_hi = (a: u64, b: u64) -> u64:
+    when __MUL_HI:
+        return __mul_hi(a, b)
+    __mul_hi_soft(a, b)
 
 # an element of xs (not empty), from r
 next_item[T] = (r: mut Rng, xs: T[]) -> T:

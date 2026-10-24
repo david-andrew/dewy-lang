@@ -1,0 +1,22 @@
+# random_int over spans past half of the 64-bit range: no modulo bias (the
+# lowest third of [int64.min..2^62) drawn a third of the time, not half) and
+# no overflow at the whole range.
+main=():>void=>{
+    seed_random(11)
+    let third:int64=int64.min + 4611686018427387904
+    let low=0
+    let negative=0
+    loop i in [0..30000) {
+        if random_int(int64.min 4611686018427387904) <? third { low += 1 }
+        if random_int(int64.min int64.max) <? 0 { negative += 1 }
+    }
+    printl(low >? 9400 and low <? 10600)
+    printl(negative >? 14400 and negative <? 15600)
+    let r=rng(5)
+    let rlow=0
+    loop i in [0..30000) {
+        if r.next_int(int64.min 4611686018427387904) <? third { rlow += 1 }
+    }
+    printl(rlow >? 9400 and rlow <? 10600)
+    printl(random_int(int64.max - 1 int64.max))
+}
