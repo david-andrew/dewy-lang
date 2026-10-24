@@ -7,6 +7,7 @@ use 'effects.jo'
 use 'directives.jo'
 use 'dewy_parse.jo'
 use 'dewy_fast.jo'
+use 'dewy_direct.jo'
 use 'isolation.jo'
 
 dw_dir_ident = (c: u8) -> bool:
@@ -37,7 +38,14 @@ dw_dir_lexed = (file: int):
     suspect = dn_suspect_brace
     interpolation = dn_in_interpolation
     bigint = dw_bigint_import
+    # (and the lexer's state: lazily lexed bodies left to expand, metatags seen)
+    lazy_left = dn_lazy_left
+    metatags = dn_metatags
+    comments = dn_block_comments
     dw_dir_load()
+    dn_lazy_left = lazy_left
+    dn_metatags = metatags
+    dn_block_comments = comments
     dn_tokens = tokens
     dn_file = at_file
     dn_suspect_brace = suspect
