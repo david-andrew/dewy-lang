@@ -420,7 +420,10 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if fk == .quantity or tk == .quantity:
         if fk == .var or tk == .var: return true
         if fk == .quantity and tk == .quantity:
-            return types[from].st == types[to].st and (quantity_constant_fits(n, to) or can_coerce(0, quantity_base(from), quantity_base(to)))
+            if types[from].st != types[to].st: return false
+            # (an int quantity promotes to the exact rational one, as an int does)
+            if n != 0 and quantity_int_promotes(from, to): return true
+            return quantity_constant_fits(n, to) or can_coerce(0, quantity_base(from), quantity_base(to))
         if tk != .opt and not is_union(to): return false
     if fk == .polyfn and tk == .fn_: return poly_matches(from, to)
     if has_var(from) or has_var(to):
@@ -1907,6 +1910,8 @@ arg_cost = (a: int, pat: int, binds: mut int[]) -> int:
     if types[fp].kind == .quantity and quantity_constant_fits(a, fp):
         if type_eq(ntype(a), fp): return 0
         return 2
+    # (an int quantity for a rational one of its dimension, as an int for a rational)
+    if types[fp].kind == .quantity and nodes[a].type != 0 and quantity_int_promotes(ntype(a), fp): return 10
     if types[fp].kind == .fixed and nodes[a].kind == .array and tkind(ntype(a)) == .array and fixed_literal_ok(a, fp):
         # an array literal for a fixed-size array parameter
         et = int(types[fp].elem)

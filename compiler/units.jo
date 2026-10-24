@@ -242,6 +242,13 @@ quantity_constant_fits = (n: int, target: int) -> bool:
     if is_float(base) or bundled_rational_type(base): return true
     is_int(base) and q.denominator == 1 and int_fits(q.numerator, base)
 
+# An int quantity promotes to the exact rational quantity of its dimension and
+# temperature kind, as an int promotes to a rational.
+quantity_int_promotes = (from: int, to: int) -> bool:
+    if not is_quantity(from) or not is_quantity(to) or quantity_dimension(from) != quantity_dimension(to): return false
+    if quantity_point(from) != quantity_point(to) or quantity_is_delta(from) != quantity_is_delta(to): return false
+    is_int(quantity_base(from)) and bundled_rational_type(quantity_base(to))
+
 quantity_coerce = (n: int, target: int) -> int:
     source = ntype(n)
     if quantity_dimension(source) != quantity_dimension(target): quantity_mismatch(nodes[n].pos, source, target)

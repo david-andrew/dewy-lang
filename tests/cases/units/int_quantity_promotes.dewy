@@ -1,0 +1,12 @@
+# An int quantity promotes to a rational quantity parameter, as an int does to a rational.
+from units import m, cm, °C, °F
+border = (l:(rational * Length) w:(rational * Length)) => (l+2w)*w
+fahrenheit = (t:(rational * Temperature)) => t as °F
+main = () => {
+    let l = 3m
+    let w = 25cm
+    printl(border(l w))
+    printl(border(1.5m w))
+    let t = 20°C
+    printl(fahrenheit(t))
+}
