@@ -1,0 +1,17 @@
+# quick
+ParseError:type=type of error & [text:string]
+parse=(text:string):>int | ParseError | none=>{
+    if text =? "" return none
+    let n=to_int(text)
+    if n is? error return ParseError[text]
+    n
+}
+main=():>void=>{
+    printl(parse("12") ??<ParseError> 0)
+    printl(parse("x") ??<ParseError> 0)
+    printl(parse("") ??<ParseError> 0)
+    printl(parse("") ??<ParseError | none> 0)
+    printl(parse("x") ?? 0)
+    printl("a".find("b") ??<Missing> -1)
+    printl(to_int("123456" max_digits=2) ??<NotAnInteger> 0)
+}

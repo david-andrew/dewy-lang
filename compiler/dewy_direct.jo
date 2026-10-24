@@ -562,6 +562,8 @@ dc_expr = (minimum: int) -> int:
             continue
         # `a ?? b`: an arithmetic fallback (`a ?? 1 + n`) has a warning of its own
         if op == .coalesce:
+            # (`??<A | B>`: the reference grammar)
+            if dn_at + 1 < dn_tokens.len() and not dn_tokens[dn_at + 1].space and (dn_tokens[dn_at + 1].symbol == .langle or dn_tokens[dn_at + 1].symbol == .lt): return 0
             dn_at += 1
             right = dc_expr(power)
             if right == 0 or dc_arithmetic(right): return 0

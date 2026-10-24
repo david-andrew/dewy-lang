@@ -1261,6 +1261,13 @@ dn_expr = (minimum: int) -> int:
             if dn_range_bound(): parts.push(dn_expr(power + 1))
             left = dn_op_node(.flat, .range_apply, pos_off(dewy_syntax[left].pos), parts)
             continue
+        # `x ??<Missing | ParseError> 0`: the fallback only for the kinds listed
+        if op == .coalesce and not dn_tokens[dn_at].space and (dn_tokens[dn_at].symbol == .langle or dn_tokens[dn_at].symbol == .lt):
+            if dn_tokens[dn_at].symbol == .lt: dn_tokens[dn_at].symbol = .langle
+            kinds = dn_block()
+            fallback = dn_expr(power)
+            left = dn_op_node(.flat, .coalesce, pos_off(dewy_syntax[left].pos), [0, left, fallback, kinds])
+            continue
         value_rhs = dn_token_assignment(op) or (op == .assign and dw_name(left) != "")
         right = if value_rhs: dn_value(power + 1) else: dn_expr(if op == .function or op == .caret or op == .dot_caret or op == .coalesce or op == .pipe_left: power else: power + 1)
         if op == .kw_as or op == .kw_transmute:

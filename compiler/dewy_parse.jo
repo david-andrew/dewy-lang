@@ -1903,6 +1903,15 @@ dw_expr = (id: int) -> int:
         nodes[n].a = i32(dw_expr(dw_child(id, 1)))
         return n
     if op == .range_apply: return dw_range_value(dw_iterable(id, true, true))
+    # `x ??<A | B> fallback`: c is the listed kinds' type
+    if op == .coalesce and k == .flat:
+        listed = dw_children(dw_child(id, 3))
+        if listed.len() != 1: fatal(pos, "`??<...>` lists the kinds it covers as one type: `??<Missing | ParseError>`")
+        n = mk(.coalesce, pos)
+        nodes[n].a = i32(dw_expr(dw_child(id, 1)))
+        nodes[n].b = i32(dw_expr(dw_child(id, 2)))
+        nodes[n].c = i32(dw_type(listed[0]))
+        return n
     if dn_token_call(op) and dw_is_include(id): return dw_include(id)
     if k == .block:
         children = dw_children(id)

@@ -4966,22 +4966,46 @@ coalesce_exceptions = (t: int) -> bool:
         if m != T_NONE and exception_member(m): return true
     false
 
+# `??<A | B>` (nodes[n].c, the kinds' type) covers only those kinds (none only when listed),
+# and what it does not cover passes through as a value.
 coalesce_failures = (n: int, at: int, expected: int) -> int:
     pos = nodes[n].pos
     a = last_checked
     add_flag(a, NF_CHECKED)
     name = "$coalesce{n}"
     members = value_members(at)
+    listed: int[]
+    if nodes[n].c != 0:
+        lt = prune(resolve_type(int(nodes[n].c)))
+        listed = if is_union(lt) or tkind(lt) == .opt: value_members(lt) else: [lt]
+        loop l in listed:
+            if not exception_member(l): fatal(pos, "`??<...>` lists the failures it covers: {dt(l)} is not an exception or none")
+            held = false
+            loop m in members:
+                if m == l or m != T_NONE and l != T_NONE and nominal_descends(m, l): held = true
+            if not held: fatal(pos, "`??<...>` lists {dt(l)}, which {dt(at)} never holds")
     covered: str[]
+    passed: str[]
+    covers: bool[]
     loop m in members:
-        if exception_member(m): covered.push(if m == T_NONE: "none" else: dt(m))
-    if ide_on and not pos_in_lib(pos): ide_emit("I\t{ide_pos_str(pos)}\t{ide_esc("?? gives the fallback for " + join(covered, ", "))}")
+        c = false
+        if listed.len() == 0: c = exception_member(m)
+        else:
+            loop l in listed:
+                if m == l or m != T_NONE and l != T_NONE and nominal_descends(m, l): c = true
+        covers.push(c)
+        if c: covered.push(if m == T_NONE: "none" else: dt(m))
+        else if exception_member(m): passed.push(if m == T_NONE: "none" else: dt(m))
+    if ide_on and not pos_in_lib(pos):
+        text = "?? gives the fallback for " + join(covered, ", ")
+        if passed.len() > 0: text += "; passes on " + join(passed, ", ")
+        ide_emit("I\t{ide_pos_str(pos)}\t{ide_esc(text)}")
     fallback = int(nodes[n].b)
     # (the fallback converts to the value's type, as an optional's does; an optional
     # fallback keeps the result optional)
     values: int[]
-    loop m in members:
-        if not exception_member(m): values.push(m)
+    loop i in 0.. and m in members:
+        if not covers[i]: values.push(m)
     target = if values.len() == 1: values[0] else: mk_union(values)
     probe = clone(fallback)
     pt = prune(check_expr(probe, target))
@@ -4991,7 +5015,7 @@ coalesce_failures = (n: int, at: int, expected: int) -> int:
     used = false
     loop j >= 0:
         member = members[j]
-        failure = exception_member(member)
+        failure = covers[j]
         value = bc_ident(name, pos)
         if failure:
             typed = bc_let("{name}_fallback", (if used: clone(fallback) else: fallback), pos)
@@ -9688,7 +9712,7 @@ check_expr_other = (n: int, expected: int) -> int:
             if exk == .opt: h = ex
             else: h = mk_opt(ex)
         at = prune(check_expr(int(nodes[n].a), h))
-        if dewy_at(nodes[n].pos) and coalesce_exceptions(at): return coalesce_failures(n, at, expected)
+        if dewy_at(nodes[n].pos) and (nodes[n].c != 0 or coalesce_exceptions(at)): return coalesce_failures(n, at, expected)
         if types[at].kind != .opt:
             nodes[n].a = i32(narrow_optional_source(int(nodes[n].a)))
             at = prune(ntype(int(nodes[n].a)))
