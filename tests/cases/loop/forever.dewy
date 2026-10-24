@@ -1,15 +1,15 @@
 # quick
-# `loop { ... }` ending its line runs until it exits; a block with a body on
-# its line is the condition.
+# A loop is `loop condition body`: `loop true` runs until it exits, and a block
+# may be the condition.
 count=():>int64=>{
     let i=0
-    loop {
+    loop true {
         i+=1
         if i =? 2 {continue}
         if i >? 4 {break}
     }
     let j=0
-    loop {j+=1; if j >=? 3 {return i*10+j}}
+    loop true {j+=1; if j >=? 3 {return i*10+j}}
 }
 main=()=>{
     printl(count())

@@ -3111,10 +3111,10 @@ A conversion ending a header converts the last source, since a header itself
 has no type: `loop byte in text as array<uint8> { ... }` iterates
 `text as array<uint8>`, as does `loop i in 0.. and byte in text as array<uint8>`.
 
-`loop { ... }` with nothing after the block on its line runs until `break` or
-`return` leaves it, like `loop true { ... }`. A block followed on the same line
-by a body is that loop's condition instead, evaluated before each pass:
-`loop { calls += 1; calls <? 4 } { total += 1 }`.
+A loop has one form, `loop condition body`, wherever its line breaks fall. A
+loop that runs until `break` or `return` leaves it is `loop true { ... }`. A
+block may be the condition, evaluated before each pass:
+`loop { calls += 1; calls <? 4 } { total += 1 }`; `loop { ... }` alone has no body.
 
 An `else` after a loop runs only if its body never enters:
 

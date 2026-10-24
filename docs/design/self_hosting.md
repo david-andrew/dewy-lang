@@ -132,8 +132,7 @@ Open gaps from these leaves, by cost:
 - Sloppy's style, `int64` with `& 0xFFFFFFFF` masks, costs 3x: the mask's bound does not
   reach the exact additions through array elements.
 
-Gaps met on the way, and since closed: `loop {` ending its line now loops until it
-exits; a conversion ending a loop header converts the last source; `bytes as string ?? ""`
+Gaps met on the way, and since closed: a conversion ending a loop header converts the last source; `bytes as string ?? ""`
 converts to `string | none` and falls back; `fill(v n)` is documented; Sloppy takes a Dewy
 string-literal union as its enum. Still open: the intern table (`hash_bytes`) as a leaf
 costs +0.5–0.8% on the panel (lex+parse +2%): a new name needs a byte-range substring

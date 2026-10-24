@@ -972,17 +972,17 @@ dn_flow = () -> int:
         keyword = dn_take()
         key = dn_node(.keyword, dn_token_text(keyword.symbol), keyword.start)
         condition = if keyword.symbol == .kw_loop or keyword.symbol == .kw_parallel: dn_expr(0) else: dn_value(0)
-        # (`loop { ... }` ending its line: a block with no body after it is the
-        # body of a loop that runs until it exits; `loop {c} body` keeps the block as its condition)
-        if keyword.symbol == .kw_loop and dewy_syntax[condition].kind == .block and dewy_syntax[condition].text == "{{}}:" and dn_peek() != .kw_else and (dn_tokens[dn_at].newline or not dn_can_start()):
-            arms.push(dn_node(.keyword_expr, "", keyword.start, [key, dn_node(.boolean, "true", keyword.start), condition]))
-            break
         if not dn_can_start():
+            # (a loop has one form, `loop condition body`: `loop { ... }` alone has no body)
+            if keyword.symbol == .kw_loop and dewy_syntax[condition].kind == .block and dewy_syntax[condition].text == "{{}}:": dn_error(dn_tokens[dn_at].start, "expected a body after this loop's condition: a loop is `loop condition body`, so a loop that runs until `break` or `return` is `loop true \{ ... }`")
             next = dn_peek()
             habit = ""
             if next == .gt or next == .lt or next == .rangle or next == .ge or next == .le: habit = " (comparisons end with `?`: `x >? y`, `x <=? y`)"
             else if dw_op(condition) == .colon: habit = " (a condition takes no colon: its body goes in braces, `{dn_token_text(keyword.symbol)} x >? 3 \{ ... }`)"
             dn_error(dn_tokens[dn_at].start, "expected a body after '{dn_token_text(keyword.symbol)}'{habit}")
+        # (`loop { ... }` then a new line: the block is the condition and the next line the body)
+        if keyword.symbol == .kw_loop and dewy_syntax[condition].kind == .block and dewy_syntax[condition].text == "{{}}:" and dn_tokens[dn_at].newline:
+            warn(mkpos(dn_file, dn_tokens[dn_at].start), "this line is the body of the loop above, whose block is its condition: a loop is `loop condition body`, so a loop that runs until `break` or `return` is `loop true \{ ... }`; to keep this meaning, start the body on the condition's line")
         body = dn_expr(0)
         arms.push(dn_node(.keyword_expr, "", keyword.start, [key, condition, body]))
         if not dn_accept(.kw_else): break
