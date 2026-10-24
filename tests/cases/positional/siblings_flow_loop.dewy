@@ -1,0 +1,10 @@
+Shape:type=type of any & [name:string='shape']
+Circle:type=type of Shape & [r:int64]
+Square:type=type of Shape & [s:int64]
+main=()=>{
+    let s = Circle[r=1]
+    loop i in 0..2 {
+        printl(s.r)
+        s = Square[s=2]
+    }
+}

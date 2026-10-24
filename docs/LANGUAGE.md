@@ -1792,6 +1792,14 @@ any method call on it), its type is instead the union of its elements,
 knowledge ends at any other write, inside loops and closures, after a push in a
 branch, and past eight positions.
 
+A single binding given sibling literals, `let s = Circle[r=1]` and later in its
+block `s = Square[s=2]`, holds their union, `Circle|Square`, with a warning
+suggesting an annotation (the union, or one of them if the other write is a
+mistake). Which one it holds is followed from each write: `s.r` reads a `Circle`
+until the write and `s.s` a `Square` after it. After a branch that may write it,
+or in a loop that writes it, it is the union again (`match` or `is?` tells).
+A binding annotated with a union of sibling records is followed the same way.
+
 An ordinary `array<T>` remains growable. Assigning or passing one to a fixed-array
 value checks its exact length at runtime and copies the elements. An empty
 growable array therefore fails that check. Converting back creates a growable array.

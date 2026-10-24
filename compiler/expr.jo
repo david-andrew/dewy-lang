@@ -8997,6 +8997,10 @@ check_ident_expr = (n: int, expected: int) -> int:
         if n != assign_root:
             locals[l].flags = locals[l].flags | i32(LF_READ)
             locals[l0].flags = locals[l0].flags | i32(LF_READ)
+            # (a narrowed name read: its variable is)
+            if int(locals[l0].flags) & LF_ALIAS != 0:
+                u = narrowed_var(l0)
+                if u != 0: locals[u].flags = locals[u].flags | i32(LF_READ)
             if const_views.len() > 0: const_view_use(l0, nodes[n].pos)
         nodes[n].sym = i32(l)
         t = int(locals[l].type)

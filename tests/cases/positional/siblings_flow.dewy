@@ -1,0 +1,32 @@
+# quick
+# A binding given sibling literals holds their union; which one it holds follows its writes.
+Shape:type=type of any & [name:string='shape']
+Circle:type=type of Shape & [r:int64]
+Square:type=type of Shape & [s:int64]
+area=(sh:Circle|Square):>int64=>match sh {
+    c:Circle => c.r*3
+    q:Square => q.s*q.s
+}
+main=()=>{
+    let s = Circle[r=1]
+    printl(s.r)
+    s = Square[s=2]
+    printl(s.s)
+    printl(area(s))
+    s = Circle[r=4]
+    printl(s.r)
+    let c = true
+    if c { s = Square[s=5] }
+    printl(area(s))
+    loop i in 0..1 {
+        printl(area(s))
+        s = Circle[r=i]
+    }
+    printl(area(s))
+    let f = () => area(s)
+    printl(f())
+    let t:Circle|Square = Square[s=6]
+    printl(t.s)
+    t = Circle[r=7]
+    printl(t.r)
+}

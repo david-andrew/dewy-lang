@@ -3227,8 +3227,13 @@ check_block = (b: int, expected: int, want_value: bool) -> int:
             if result == T_NEVER: nodes[b].aux = 0
             add_flag(s, NF_CHECKED)
             continue
+        if sibling_flow.len() > 0: sibling_flow_loops(s)
         if sibling_known.len() > 0: sibling_statement(s, b)
         else: check_stmt(s)
+        if sibling_flow_l != 0:
+            sibling_flow_start(sibling_flow_l, nodes[s].pos)
+            sibling_flow_l = 0
+    if sibling_flow.len() > 0: sibling_flow_end(b)
     sibling_block = saved_block
     sibling_index = saved_index
     if want_value and nodes[b].aux == 0 and n > 0 and stmt_terminates(kid(b, n - 1)): result = T_NEVER
@@ -4369,8 +4374,10 @@ dewy_selection_update = (s: int, matrix: bool = false) -> int:
 check_assign = (s: int) -> int:
     growth_assign(s)
     saved = decimal_assign_begin(s)
+    literal = if sibling_flow.len() > 0: sibling_syntax_type(int(nodes[s].b)) else: 0
     r = __check_assign(s)
     decimal_target = saved
+    if sibling_flow.len() > 0: sibling_flow_assign(r, literal)
     r
 
 __check_assign = (s: int) -> int:
@@ -4836,12 +4843,18 @@ check_vardecl = (s: int):
     if nodes[s].b != 0:
         growth_decl_before(s)
         if t == 0 and dewy_at(nodes[s].pos): tk_unit = tk_literal_unit(int(nodes[s].b))
+        literal = if t != 0 and is_union(t) and dewy_at(nodes[s].pos): sibling_syntax_type(int(nodes[s].b)) else: 0
         et = values_init(int(nodes[s].b), t)
         nodes[s].b = i32(last_checked)
-        if t != 0: nodes[s].b = i32(coerce(int(nodes[s].b), t))
+        if t != 0:
+            # (`let s:Circle|Square = Circle[...]`: which member it holds is followed)
+            if literal != 0 or is_union(t) and tkind(et) == .struct_ and dewy_at(nodes[s].pos): sibling_annotated(s, t, if literal != 0: literal else: et)
+            nodes[s].b = i32(coerce(int(nodes[s].b), t))
         else:
             t = et
             if tkind(t) == .tuple and sibling_literals.has(int(nodes[s].b)): t = sibling_binding(s, t)
+            # (`let s = Circle[...]` that the block later gives a Square: their union, followed)
+            else if tkind(t) == .struct_ and dewy_at(nodes[s].pos): t = sibling_scalar(s, t)
             if has_flag(int(nodes[s].b), NF_LITERAL):
                 t = decimal_binding_type(nodes[s].pos, lit_default(int(nodes[s].b)))
                 literal_init = true
@@ -4869,6 +4882,7 @@ check_vardecl = (s: int):
     if tk == .typeval or tk == .module: fatal(nodes[s].pos, "'{nm}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
     l = new_local(int(nodes[s].name), t, nodes[s].pos)
     if sibling_pending.len() > 0: sibling_establish(l)
+    if sibling_flow_next != 0: sibling_flow_l = l
     if tk_unit != 0: tk_bindings[l] = s
     if literal_init: decimal_local(l, nodes[s].pos, t)
     growth_decl_after(s, l, t)

@@ -12,6 +12,7 @@ use 'types.jo'
 use 'check.jo'
 use 'expr.jo'
 use 'errors.jo'
+use 'lex.jo'
 
 SIBLING_CAP = 8
 
@@ -202,3 +203,173 @@ sibling_index_narrow = (n: int, t: int) -> int:
     nodes.push(nodes[n])
     nodes[n] = Node(kind = .narrow, pos = nodes[inner].pos, a = i32(inner), aux = i32(vi), type = i32(member), flags = i32(NF_CHECKED))
     member
+
+# ---- a binding written with sibling literals (`let s = Circle[...]`, later `s = Square[...]`) ----
+# Its covering type is the union of the literals' types, with a warning suggesting an
+# annotation, and which member it holds is followed through the flow: a Circle until the
+# write, a Square after it (a narrowing alias of the variable, as `is?` makes). A write the
+# flow cannot follow (in a loop, before it is checked) makes it the union from there. An
+# annotated union of sibling records is followed the same way, without the warning.
+# Demand: only a record-typed `let` in a block with later statements scans them, O(rest of
+# the block) once; each later statement costs a map check while a binding is followed.
+
+sibling_flow: {int: int} = {}   # variable followed -> the block it was declared in
+sibling_flow_next = 0           # (the vardecl being checked makes a variable to follow ...)
+sibling_flow_member = 0         # (... starting as this member ...)
+sibling_flow_l = 0              # (... this one, narrowed once its statement is checked)
+
+# The record type a literal written to a binding makes, from its syntax (`Square[s=2]`), or 0.
+sibling_syntax_type = (v: int) -> int:
+    if v == 0: return 0
+    k = nodes[v].kind
+    callee = 0
+    if k == .call or k == .index: callee = int(nodes[v].a)
+    if callee == 0 or nodes[callee].kind != .ident or nodes[callee].sval != 0: return 0
+    s = lookup(int(nodes[callee].name))
+    if s == 0: return 0
+    sk = syms[s].kind
+    d = int(syms[s].ref)
+    if sk == .alias_ or sk == .struct_:
+        if nkids2(d) != 0: return 0
+    else if sk != .type_: return 0
+    tn = mk(.tname, nodes[callee].pos)
+    nodes[tn].name = nodes[callee].name
+    t = prune(resolve_type(tn))
+    if tkind(t) != .struct_: return 0
+    t
+
+# The literals unchecked syntax n writes to `name` (`name = Square[...]`) into out; `escapes`
+# when it may be written where the flow cannot follow (through `@name`, inside a function).
+sibling_scalar_scan = (n: int, name: int, in_fn: bool, out: mut int[], escapes: mut bool):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .ident and int(nodes[n].name) == name and has_flag(n, NF_MUT): escapes = true
+    if k == .assign and nodes[int(nodes[n].a)].kind == .ident and int(nodes[int(nodes[n].a)].name) == name:
+        if in_fn: escapes = true
+        if nodes[n].op == i32(int(Tok.assign)):
+            t = sibling_syntax_type(int(nodes[n].b))
+            if t != 0: out.push(t)
+    inner = in_fn or k == .lambda or k == .fn_
+    sibling_scalar_scan(int(nodes[n].a), name, inner, out, escapes)
+    sibling_scalar_scan(int(nodes[n].b), name, inner, out, escapes)
+    sibling_scalar_scan(int(nodes[n].c), name, inner, out, escapes)
+    sibling_scalar_scan(int(nodes[n].d), name, inner, out, escapes)
+    loop c in kids(n): sibling_scalar_scan(c, name, inner, out, escapes)
+    if k != .lambda and k != .fn_:
+        loop c in kids2(n): sibling_scalar_scan(c, name, inner, out, escapes)
+
+# Whether t0 and t1 are records of one minted family.
+sibling_family = (t0: int, t1: int) -> bool:
+    p = nominal_parent.get(prune(t0), 0)
+    loop p != 0:
+        if sibling_descends(t1, p): return true
+        p = nominal_parent.get(p, 0)
+    false
+
+# `let s = Circle[...]` (vardecl d, value of record type t): the union of t and the sibling
+# literals the rest of its block writes to it, or t.
+sibling_scalar = (d: int, t: int) -> int:
+    if sibling_block == 0 or sibling_index >= nkids(sibling_block) or kid(sibling_block, sibling_index) != d: return t
+    if nominal_parent.get(prune(t), 0) == 0 or sibling_index + 1 >= nkids(sibling_block): return t
+    name = int(nodes[d].name)
+    written: int[]
+    escapes = false
+    loop i in [sibling_index + 1..nkids(sibling_block)): sibling_scalar_scan(kid(sibling_block, i), name, false, written, escapes)
+    members = [prune(t)]
+    loop w in written:
+        if members.contains(w) or not sibling_family(t, w): continue
+        members.push(w)
+    if members.len() < 2: return t
+    u = mk_union(members)
+    shown: str[]
+    loop m in members: shown.push(dt(m))
+    nm = name_of(name)
+    later = shown[1..]
+    warn(nodes[d].pos, "'{nm}' is given a {shown[0]} here and later a {join(later, " or a ")}, so it holds {join(shown, " | ")}, and which one is followed from each write: annotate it to say which was meant, `let {nm}:{join(shown, "|")} = ...`, or `let {nm}:{shown[0]} = ...` or `let {nm}:{shown[1]} = ...` for one of them")
+    nodes[d].b = i32(coerce(int(nodes[d].b), u))
+    if not escapes:
+        sibling_flow_next = 1
+        sibling_flow_member = prune(t)
+    u
+
+# `let s:Circle|Square = Circle[...]` (a union of sibling records, value of member type vt):
+# followed from its value's type.
+sibling_annotated = (d: int, t: int, vt: int) -> bool:
+    u = prune(t)
+    if not is_union(u) or union_index(u, prune(vt)) < 0: return false
+    ms = union_members(u)
+    if ms.len() < 2: return false
+    loop m in ms:
+        if tkind(m) != .struct_ or not sibling_family(ms[0], m): return false
+    if sibling_block == 0 or sibling_index >= nkids(sibling_block) or kid(sibling_block, sibling_index) != d: return false
+    written: int[]
+    escapes = false
+    loop i in [sibling_index + 1..nkids(sibling_block)): sibling_scalar_scan(kid(sibling_block, i), int(nodes[d].name), false, written, escapes)
+    if escapes: return false
+    sibling_flow_next = 1
+    sibling_flow_member = prune(vt)
+    true
+
+# Variable l was just declared to be followed: it holds the member it starts as.
+sibling_flow_start = (l: int, pos: int):
+    sibling_flow_next = 0
+    sibling_flow[l] = sibling_block
+    narrow_local(l, [sibling_flow_member], pos)
+
+# The variable a local name stands for (through its narrowing aliases).
+sibling_root = (l0: int) -> int:
+    l = l0
+    loop narrowed_var(l) != 0: l = narrowed_var(l)
+    l
+
+# `s = v` checked, s followed: from here it holds v's member (`literal`: the record type its
+# syntax names, `Square[...]`, taken before the check gave the literal the union's type).
+sibling_flow_assign = (s: int, literal: int):
+    if nodes[s].op != i32(int(Tok.assign)): return
+    lhs = int(nodes[s].a)
+    if nodes[lhs].kind != .ident or nodes[lhs].aux != i32(int(SK.local)): return
+    l = int(nodes[lhs].sym)
+
+    root = sibling_root(l)
+    if not sibling_flow.has(root): return
+    v = int(nodes[s].b)
+    loop nodes[v].kind == .conv: v = int(nodes[v].a)
+    rt = prune(ntype(v))
+    if is_union(rt) and literal != 0: rt = literal
+    if l != root and type_eq(prune(int(locals[l].type)), rt): return
+    if union_index(prune(int(locals[root].type)), rt) < 0: return
+    narrow_local(root, [rt], nodes[s].pos)
+
+# Statement s (of block b) about to be checked: a followed variable it writes inside a loop
+# is the union from here, since the loop's next turn sees what the last one wrote.
+sibling_flow_loops = (s: int):
+    loop l, _ in sibling_flow:
+        name = int(locals[l].name)
+        if not sibling_loop_writes(s, name, false): continue
+        sy = lookup(name)
+        if sy == 0 or syms[sy].kind != .local: continue
+        al = int(syms[sy].ref)
+        if al == l or sibling_root(al) != l: continue
+        narrow_invalidate(al)
+        push_scope_sym(name, new_sym(name, .local, l, 0))
+
+sibling_loop_writes = (n: int, name: int, in_loop: bool) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if in_loop and k == .assign and sibling_route_name(int(nodes[n].a)) == name: return true
+    inner = in_loop or k == .while_ or k == .for_ or k == .loopx or k == .lhead
+    if sibling_loop_writes(int(nodes[n].a), name, inner) or sibling_loop_writes(int(nodes[n].b), name, inner): return true
+    if sibling_loop_writes(int(nodes[n].c), name, inner) or sibling_loop_writes(int(nodes[n].d), name, inner): return true
+    loop c in kids(n):
+        if sibling_loop_writes(c, name, inner): return true
+    if k != .lambda and k != .fn_:
+        loop c in kids2(n):
+            if sibling_loop_writes(c, name, inner): return true
+    false
+
+# Block b ends: the variables declared in it are no longer followed.
+sibling_flow_end = (b: int):
+    done: int[]
+    loop l, block in sibling_flow:
+        if block == b: done.push(l)
+    loop l in done: sibling_flow.remove(l)
