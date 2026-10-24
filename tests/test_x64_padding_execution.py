@@ -43,7 +43,7 @@ vloc = data(vloc_storage)
 vcval_storage = [0, 0x1234, 0]
 vcval = data(vcval_storage)
 loop blocks in [0..9):
-    loop padding in [1..9):
+    loop padding in [1..6):
         code = []
         b(0x48); b(0x89); b(0xF8) # mov rax,rdi
         b(0x48); b(0x81); b(0xE0); b32(0x1234) # and rax,0x1234
@@ -59,10 +59,18 @@ loop blocks in [0..9):
         text = "8"
         loop byte in code: text += " {int(byte)}"
         print(text)
+# More than five CS prefixes (seven with REX) is rejected: Valgrind and some decoders refuse them.
+code = []
+b(0x48); b(0x89); b(0xF8)
+b(0x48); b(0x81); b(0xE0); b32(0x1234)
+ir.code = [Ins(.and_, 0, 0, 0, 1, 0, 0), Ins(.eq, 0, 2, 0, 2, 0, 0)]
+x_branch_pos = ir.code.len()
+ir.code.push(Ins(.brif, 0, -1, 2, 0, 0, 0))
+assert(not x_absorb_padding(6), "six prefixes absorbed")
 vcval_storage[1] = 1
 vcval = data(vcval_storage)
 loop blocks in [0..9):
-    loop padding in [1..12):
+    loop padding in [1..6):
         code = []
         b(0x48); b(0x89); b(0xF8)
         b(0x48); b(0x83); b(0xE8); b(1) # sub rax,1

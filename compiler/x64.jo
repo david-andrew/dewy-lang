@@ -1676,12 +1676,13 @@ x_far_if = (pos: int) -> bool:
         else if op == .else_ and depth == 0 and branch.op == .if_: return false
     true
 
-# A preceding register/immediate ALU can absorb ignored CS prefixes up to
-# the 15-byte encoding limit. A bounded O(8) query skips byte-free block/end
+# A preceding register/immediate ALU can absorb up to five ignored CS
+# prefixes (as assemblers' branch-prefix padding does): decoders and tools
+# such as Valgrind reject an instruction with more than seven prefixes. A bounded O(8) query skips byte-free block/end
 # markers; the latest resolved destination prevents moving an entry point.
 # Verify the complete encoding, and keep no pointer across buffer growth.
 x_absorb_padding = (padding: int) -> bool:
-    if padding > 11 or x_branch_pos < 2 or dbg_on: return false
+    if padding > 5 or x_branch_pos < 2 or dbg_on: return false
     cmp = ir.code[x_branch_pos - 1]
     if not is_icmp(cmp.op) or vloc[int(cmp.a)] < 0 or vloc[int(cmp.a)] >= XMM: return false
     bv = vloc[int(cmp.b)]
