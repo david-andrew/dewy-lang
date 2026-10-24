@@ -1,0 +1,14 @@
+# A negated rational converts to a float wherever it is read from: a parameter, a
+# field, a global, an element, a loop-carried binding
+twice = (y:float64):>float64 => y * 2.0
+P:type = [a:rational]
+from_param = (x:rational):>void => printl"{twice(-x)} {format(-x ".1f")}"
+let g = 1.5
+main = () => {
+    from_param(5/2)
+    let p = P[3/4]
+    let xs = [1/2 3/2]
+    let q = 1/3
+    loop _ in [0..2) q = q * 2
+    printl"{twice(-g)} {twice(-p.a)} {format(-xs[1] ".1f")} {format(-q ".2f")}"
+}

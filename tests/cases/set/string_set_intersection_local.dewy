@@ -1,0 +1,12 @@
+# The documented set example (docs/LANGUAGE.md, Sets) inside a function
+main = () => {
+    let tags = set["visible" "moving" "visible"]
+    tags.push("selected")
+    if "moving" in? tags { printl"moving entity" }
+    let active = tags & set["visible" "selected"]
+    let names = [loop tag in active tag]
+    let [first second] = active
+    let visited:set<int64> = set[]
+    if 7 not in? visited { visited.push(7) printl"first visit" }
+    printl"{names} {first} {second}"
+}

@@ -324,9 +324,12 @@ poly_freeze_narrowing = (l: int, frozen: mut {int: int}) -> int:
     if outer == 0: return l
     base = poly_freeze_narrowing(outer, frozen)
     if int(locals[l].flags) & LF_UNNARROWED != 0: return base
-    alias = nodes.len()
-    nodes.push(nodes[int(locals[l].alias)])
-    nodes[alias].a = i32(mk_ident_local(base, locals[l].pos))
+    alias = 0
+    if nodes[int(locals[l].alias)].kind == .if_: alias = opt_rest_rebase(int(locals[l].alias), base, int(locals[l].pos))
+    else:
+        alias = nodes.len()
+        nodes.push(nodes[int(locals[l].alias)])
+        nodes[alias].a = i32(mk_ident_local(base, locals[l].pos))
     copy = locals[l]
     copy.alias = i32(alias)
     locals.push(copy)

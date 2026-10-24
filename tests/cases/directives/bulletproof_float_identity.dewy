@@ -1,0 +1,8 @@
+# Under $bulletproof a function that only passes a float through is panic- and cost-free
+$bulletproof
+same = (x:float64):>float64 => x
+same32 = (x:float32):>float32 & no allocates & no panics => x
+main = ():>(void | OutOfMemory) & no panics => {
+    let y = same(2.5)
+    if same32(float32(0.5)) <? float32(1.0) and y >? 1.0 printl"ok"
+}

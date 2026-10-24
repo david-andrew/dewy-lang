@@ -1,0 +1,15 @@
+# An anonymous record's integer fields convert to float fields as scalar integers
+# do, where its shape is wanted (and to fixed widths, each the proven narrowing)
+total = (p:[x:float64 y:float64]):>float64 => p.x + p.y
+mixed = (p:[n:int64 f:float32]):>float32 => float32(p.n) + p.f
+main = () => {
+    let q = [x=3 y=4]
+    printl(total(q))
+    let a = 0
+    loop i in [0..5) a += i
+    printl(total([x=a y=1]))
+    let r = [n=2 f=a]
+    printl(mixed(r))
+    let s:[x:float64 y:float64] = q
+    printl(s)
+}

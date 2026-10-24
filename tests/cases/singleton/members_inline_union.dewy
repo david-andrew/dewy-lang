@@ -1,0 +1,20 @@
+# members(U) of a union written inline, bare or in angle brackets, has the same
+# canonical order as a named alias: the integers rising, then the strings in text order
+Mode:type = 'slow' | 'fast' | 'medium'
+loop m in members(Mode) print"{m} "
+printl("")
+loop m in members('slow' | 'fast' | 'medium') print"{m} "
+printl("")
+loop m in members(<'slow' | 2 | 'fast' | -1>) print"{m} "
+printl("")
+loop v in members(3|1|2) print"{v} "
+printl("")
+Dir:type = 'n' | 's'
+loop m in members(Dir | 'e') print"{m} "
+printl("")
+pick = (text:string):>('b' | 'a') | none => {
+    loop m in members('b' | 'a') if text =? m return m
+    none
+}
+printl(pick("a"))
+printl(pick("z"))

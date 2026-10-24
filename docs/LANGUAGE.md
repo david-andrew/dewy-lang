@@ -1548,7 +1548,8 @@ The name stays the type in `Origin[...]`, `Origin.member` and `is? Origin`.
 Without an expected type, named fields infer an anonymous record. Anonymous record types agree by field names and types, even
 when written in a different order. One converts to a shape whose integer fields
 differ only in width (`[x:int]` where `[x:int64]` is wanted), each such field the
-proven narrowing a scalar `int` gets. Their shape can also be written directly in
+proven narrowing a scalar `int` gets, or are floats (`[x:float64]`), each converted
+as a scalar integer is. Their shape can also be written directly in
 an annotation:
 
 ```dewy

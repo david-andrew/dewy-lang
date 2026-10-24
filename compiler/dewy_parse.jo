@@ -2216,6 +2216,8 @@ dw_expr = (id: int) -> int:
                     else if bracket and xs.len() == 1 and dw_loop_flow(child): args.push(dw_comprehension(child))
                     else if bracket and xs.len() > 1: args.push(dw_iterable(child, true, true))
                     else if not bracket and dw_spread_at(child): args.push(dw_spread_item(child))
+                    # (`members(<'a' | 1>)`: members(U) takes a type, which may be grouped as in a type position)
+                    else if not bracket and xs.len() == 1 and dw_name(left) == "members" and dewy_syntax[dw_unwrap(child)].kind == .block and dewy_syntax[dw_unwrap(child)].text == "<>:": args.push(dw_type(child))
                     else: args.push(dw_expr(child))
             if bracket:
                 dw_index_context.pop()

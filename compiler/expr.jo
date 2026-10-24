@@ -501,9 +501,10 @@ str_set_within = (a: int, b: int) -> bool:
         if not str_sets[b].contains(value): return false
     true
 
-# An anonymous record whose integer fields convert as scalars do (`[x:int]` where
-# `[x:int64]` is wanted): field by field, each `int` field the proven narrowing.
-# O(fields); other field types must agree.
+# An anonymous record whose numeric fields convert as scalars do (`[x:int]` where
+# `[x:int64]` or `[x:float64]` is wanted): field by field, each `int` field the
+# proven narrowing, an integer to a float as a scalar converts. O(fields); other
+# field types must agree.
 record_int_conversion = (from: int, to: int) -> bool:
     fs = int(types[from].st); ts = int(types[to].st)
     if structs[fs].decl != structs[ts].decl or not has_flag(int(structs[fs].decl), NF_RECORD): return false
@@ -513,6 +514,7 @@ record_int_conversion = (from: int, to: int) -> bool:
         a = prune(int(fields[int(structs[fs].fields) + i].type))
         b = prune(int(fields[int(structs[ts].fields) + i].type))
         if type_eq(a, b): continue
+        if types[a].kind == .int_ and types[b].kind == .float_: continue
         if types[a].kind != .int_ or types[b].kind != .int_: return false
         if a != T_MATH_INT and b != T_MATH_INT and not int_widens(a, b): return false
     true
@@ -11957,6 +11959,85 @@ narrow_by = (c: int, holds: bool):
         # x is A or x is B: x is an A | B
         tests: int[]
         if or_tests(c, tests): narrow_some(tests)
+    else if k == .and_ and not holds: narrow_opt_rest_by(c)
+
+# `x is? C` on x: (A | B | C)? is `x != none and x is? C` (check_istype); when it fails,
+# x is none or one of the other members: an (A | B)?. O(members).
+narrow_opt_rest_by = (c: int):
+    a = int(nodes[c].a)
+    if nodes[a].kind != .binary or nodes[a].op != i32(int(Tok.ne)) or nodes[int(nodes[a].b)].kind != .none_lit: return
+    x = int(nodes[a].a)
+    if nodes[x].kind != .ident or nodes[x].aux != i32(int(SK.local)): return
+    l = int(nodes[x].sym)
+    ut = prune(int(locals[l].type))
+    if types[ut].kind != .opt or not is_union(prune(int(types[ut].elem))): return
+    u = prune(int(types[ut].elem))
+    tests: int[]
+    if not or_tests(int(nodes[c].b), tests): return
+    excluded: int[]
+    loop t in tests:
+        # (each test reads x's payload: the alias `x != none` gave it)
+        ta = int(nodes[t].a)
+        if nodes[ta].kind != .ident or nodes[ta].aux != i32(int(SK.local)): return
+        tl = int(nodes[ta].sym)
+        if int(locals[tl].flags) & LF_ALIAS == 0 or locals[tl].alias == 0: return
+        al = int(locals[tl].alias)
+        if nodes[al].kind != .unwrap or nodes[int(nodes[al].a)].kind != .ident or int(nodes[int(nodes[al].a)].sym) != l: return
+        if not type_eq(prune(ntype(ta)), u): return
+        excluded.push(union_members(u)[int(nodes[t].aux)])
+    keep: int[]
+    loop m in union_members(u):
+        if not excluded.contains(m): keep.push(m)
+    if keep.len() == 0: return
+    pos = nodes[x].pos
+    # (x already narrowed so: narrow its variable, as narrow_local does)
+    loop int(locals[l].flags) & LF_ALIAS != 0 and opt_rest_aliases.has(int(locals[l].alias)): l = narrowed_var(l)
+    inner = keep[0]
+    if keep.len() > 1: inner = mk_union(keep)
+    nl = new_local(int(locals[l].name), mk_opt(inner), pos)
+    locals[nl].flags = i32(LF_ALIAS)
+    locals[nl].alias = i32(opt_rest_expr(l, keep, pos))
+
+# Optional-union narrowing aliases: `if x != none: some(payload as the kept members) else none`,
+# an expression of x (narrowed_var finds x in its condition)
+opt_rest_aliases: {int: bool} = {}
+
+opt_rest_expr = (l: int, keep: int[], pos: int) -> int:
+    u = prune(int(types[prune(int(locals[l].type))].elem))
+    inner = keep[0]
+    if keep.len() > 1: inner = mk_union(keep)
+    t = mk_opt(inner)
+    payload = mk(.unwrap, pos)
+    nodes[payload].a = i32(mk_ident_local(l, pos))
+    nodes[payload].type = i32(u)
+    add_flag(payload, NF_CHECKED)
+    kept = 0
+    if keep.len() == 1:
+        kept = mk(.narrow, pos)
+        nodes[kept].aux = i32(union_index(u, keep[0]))
+    else:
+        kept = mk(.conv, pos)
+        nodes[kept].aux = i32(int(CV.union_))
+    nodes[kept].a = i32(payload)
+    nodes[kept].type = i32(inner)
+    add_flag(kept, NF_CHECKED)
+    wrap_conv(kept, .opt, t)
+    absent = mk(.none_lit, pos)
+    e = bc_if(bc_bin(.ne, mk_ident_local(l, pos), mk(.none_lit, pos), pos), [bc_stmt(kept, pos)], [bc_stmt(absent, pos)], pos)
+    nodes[e].flags = i32(int(nodes[e].flags) & ~NF_STMT)
+    mark = scope_mark()
+    check_expr(e, t)
+    scope_reset(mark)
+    opt_rest_aliases[e] = true
+    e
+
+# a closure's or a frozen copy of an optional-union alias, over local l instead
+opt_rest_rebase = (al: int, l: int, pos: int) -> int:
+    t = prune(ntype(al))
+    elem = prune(int(types[t].elem))
+    keep = [elem]
+    if is_union(elem): keep = union_members(elem)
+    opt_rest_expr(l, keep, pos)
 
 narrow_var = (isn: int, holds: bool):
     a = int(nodes[isn].a)

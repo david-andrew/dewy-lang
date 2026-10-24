@@ -64,6 +64,52 @@ literal_members = (t0: int, pos: int, out: mut int[], singletons: mut int[]):
             singletons.push(mk_refined(T_INT, ref_intern([RefAtom(.le, RefTerm(1, v), RefTerm()), RefAtom(.le, RefTerm(), RefTerm(1, v))])))
             out.push(n)
 
+# The leaves of `|` written as an expression: the text of string literals, the
+# values of integer literals, and the types of the other members.
+members_leaves = (e: int, texts: mut str[], ints: mut int[], others: mut int[]):
+    k = nodes[e].kind
+    if k == .binary and nodes[e].op == i32(int(Tok.pipe)):
+        members_leaves(int(nodes[e].a), texts, ints, others)
+        members_leaves(int(nodes[e].b), texts, ints, others)
+    else if k == .str_lit and nodes[e].aux != 1:
+        if not texts.contains(name_of(int(nodes[e].sval))): texts.push(name_of(int(nodes[e].sval)))
+    else if k == .int_lit and not has_flag(e, NF_U64):
+        if not ints.contains(nodes[e].ival): ints.push(nodes[e].ival)
+    else if k == .unary and nodes[e].op == i32(int(Tok.minus)) and nodes[int(nodes[e].a)].kind == .int_lit and not has_flag(int(nodes[e].a), NF_U64):
+        if not ints.contains(-nodes[int(nodes[e].a)].ival): ints.push(-nodes[int(nodes[e].a)].ival)
+    else: others.push(members_type(e))
+
+# integer singletons as one refined int, as in a type position: lo <= v <= hi, v != each gap
+members_int_type = (values: int[], pos: int) -> int:
+    lo = values[0]
+    hi = values[0]
+    loop v in values:
+        lo = min(lo, v)
+        hi = max(hi, v)
+    if hi - lo < 0 or hi - lo - values.len() + 1 > 24: fatal(pos, "an integer singleton union with more than 24 missing values between its least and greatest members")
+    atoms = [RefAtom(.le, RefTerm(1, lo), RefTerm()), RefAtom(.le, RefTerm(), RefTerm(1, hi))]
+    loop g in [lo..hi]:
+        if not values.contains(g): atoms.push(RefAtom(.ne, RefTerm(), RefTerm(1, g)))
+    mk_refined(T_INT, ref_intern(atoms))
+
+# members(U)'s type: a name, type syntax (`members(<'a' | 1>)`), or an inline
+# union of literals parsed as an expression (`members('a' | 'b')`), which means
+# what it means in a type position
+members_type = (e: int) -> int:
+    k = nodes[e].kind
+    if k == .tname or k == .tunion or k == .trefined: return resolve_type(e)
+    if k != .binary and k != .str_lit and k != .int_lit and k != .unary: return expr_as_type(e)
+    texts: str[]
+    ints: int[]
+    others: int[]
+    members_leaves(e, texts, ints, others)
+    parts: int[]
+    if ints.len() > 0: parts.push(members_int_type(ints, nodes[e].pos))
+    if texts.len() > 0: parts.push(str_set_type(texts))
+    parts += others
+    if parts.len() == 1: return parts[0]
+    mk_union(parts)
+
 # Scope nodes carry either a field-table index or a checked constant value.
 reflect_sequence = (e: int, binder: int) -> int[]:
     let e = reflect_source(e)
@@ -72,7 +118,7 @@ reflect_sequence = (e: int, binder: int) -> int[]:
         if nkids(e) != 1: fatal(nodes[e].pos, "members(U) needs one type")
         values: int[]
         singletons: int[]
-        literal_members(expr_as_type(kid(e, 0)), nodes[e].pos, values, singletons)
+        literal_members(members_type(kid(e, 0)), nodes[e].pos, values, singletons)
         loop i in 0.. and value in values:
             scope = mk(.reflect_scope, nodes[e].pos)
             nodes[scope].name = i32(binder)

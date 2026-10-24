@@ -3944,7 +3944,9 @@ compound_checked = (s: int, left: int, right: int, target: int) -> int:
 narrowed_var = (l: int) -> int:
     if int(locals[l].flags) & LF_ALIAS == 0: return 0
     e = int(locals[l].alias)
-    if nodes[e].kind != .narrow and nodes[e].kind != .unwrap and (nodes[e].kind != .conv or nodes[e].aux != i32(int(CV.union_))): return 0
+    # (an optional union's kept members: x in its condition, `x != none`)
+    if nodes[e].kind == .if_ and opt_rest_aliases.has(e): e = int(nodes[e].a)
+    else if nodes[e].kind != .narrow and nodes[e].kind != .unwrap and (nodes[e].kind != .conv or nodes[e].aux != i32(int(CV.union_))): return 0
     a = int(nodes[e].a)
     if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return 0
     int(nodes[a].sym)
@@ -3958,11 +3960,14 @@ capture_narrowed = (l: int, pos: int) -> int:
     if narrowed_var(u) != 0: inner = capture_narrowed(u, pos)
     else: inner = capture_local(u)
     al = int(locals[l].alias)
-    e = mk(nodes[al].kind, pos)
-    nodes[e].aux = nodes[al].aux
-    nodes[e].type = nodes[al].type
-    nodes[e].a = i32(mk_ident_local(inner, pos))
-    add_flag(e, NF_CHECKED)
+    e = 0
+    if nodes[al].kind == .if_: e = opt_rest_rebase(al, inner, pos)
+    else:
+        e = mk(nodes[al].kind, pos)
+        nodes[e].aux = nodes[al].aux
+        nodes[e].type = nodes[al].type
+        nodes[e].a = i32(mk_ident_local(inner, pos))
+        add_flag(e, NF_CHECKED)
     nl = new_local(0, int(locals[l].type), pos)
     locals[nl].name = locals[l].name
     locals[nl].flags = i32(LF_ALIAS)
@@ -4026,7 +4031,7 @@ unnarrow_assign = (s: int):
     # (a member assigned to a variable narrowed to that member is stored in place; a variable
     # narrowed to several members is always assigned as a whole)
     al = int(locals[l].alias)
-    in_place = nodes[al].kind != .conv
+    in_place = nodes[al].kind != .conv and nodes[al].kind != .if_
     if in_place and not is_union(rt) and types[rt].kind != .opt and can_coerce(int(nodes[s].b), rt, int(locals[l].type)): return
     narrow_invalidate(l)
     nm = int(nodes[lhs].name)

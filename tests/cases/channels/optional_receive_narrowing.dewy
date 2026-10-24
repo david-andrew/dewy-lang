@@ -1,0 +1,22 @@
+# modes: native native-release
+# Receiving from a channel of optionals: after `is? Closed` and `is? Canceled` exits the item
+# is the optional itself, so a match covers it with none and its value.
+main = () => {
+    let c = channel<int64?>(4)
+    concurrent {
+        spawn {
+            c.send(1);
+            c.send(none);
+            c.close()
+        }
+        loop true {
+            let item = c.receive()
+            if item is? Closed break
+            if item is? Canceled break
+            match item {
+                <none> => printl"received none"
+                n:int64 => printl"received {n}"
+            }
+        }
+    }
+}
