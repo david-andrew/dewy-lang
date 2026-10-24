@@ -1976,6 +1976,46 @@ gen_constant_floor = (n: int) -> int:
     emit(.select, VI, result, adjust, corrected, value, 0)
     result
 
+# `bytes.read<uint64>(i)` (the library's __dewy_read_u64, u32 and u16): its check and an
+# unaligned load in place of the call, which a default build would not expand. The
+# receiver is kept alive only when the offset's evaluation could change it.
+gen_byte_read = (e: int) -> int:
+    if nkids(e) != 2: return -1
+    d = int(fns[int(nodes[e].sym)].decl)
+    if d == 0: return -1
+    name = name_of(int(nodes[d].name))
+    width = if name == "__dewy_read_u64": 8 else if name == "__dewy_read_u32": 4 else if name == "__dewy_read_u16": 2 else: 0
+    if width == 0 or files[pos_file(nodes[d].pos)].path != lib_dir + "/std/dewy.jo": return -1
+    a = kid(e, 0)
+    bt = prune(ntype(a))
+    source = gen_expr(a)
+    root = a
+    if nodes[a].kind == .intrinsic and (nodes[a].aux as IN) == .to_bytes and nkids(a) == 1: root = kid(a, 0)
+    if not byte_offset_plain(kid(e, 1)) and not unchanged_by(text_source(root), kid(e, 1)): source = own(source, bt)
+    borrow(source, bt)
+    p = vreg(VI)
+    e_mov(p, source.v)
+    i = gen_expr(kid(e, 1)).v
+    n = arr_len(p)
+    # (0 <=? i <=? n - width as one unsigned compare: i below the count of offsets that
+    # fit, n - width + 1, or 0 when none do)
+    fits = e_addi(n, 1 - width)
+    count = vreg(VI)
+    emit(.select, VI, count, e_bin(.lts, VI, fits, e_iconst(0)), e_iconst(0), fits, 0)
+    iff(e_bin(.geu, VI, i, count))
+    e_call_nr3(rt("__dewy_read_out"), i, n, e_iconst(width * 8), -1)
+    endc()
+    e_load(VI, e_bin(.add, VI, p, i), 24, width)
+
+# (an offset of plain reads, literals and builtin integer arithmetic: it calls nothing and
+# writes nothing, so the receiver read before it stands)
+byte_offset_plain = (n: int) -> bool:
+    if plain_read(n): return true
+    k = nodes[n].kind
+    if k == .binary and nodes[n].aux == 0 and is_int(ntype(n)): return byte_offset_plain(int(nodes[n].a)) and byte_offset_plain(int(nodes[n].b))
+    if k == .conv and nodes[n].aux == i32(int(CV.int_)): return byte_offset_plain(int(nodes[n].a))
+    false
+
 # ---------------- ticks that must agree ----------------
 # A function given to a @deterministic function (netplay.session's tick) must give the same game
 # on every machine from the same game and inputs: no random numbers but from a seed in the game,
@@ -5006,6 +5046,8 @@ gen_value_call = (e: int) -> Val:
         if remainder >= 0: return V(remainder, false)
         arithmetic = gen_constant_floor(e)
         if arithmetic >= 0: return V(arithmetic, false)
+        word = gen_byte_read(e)
+        if word >= 0: return V(word, false)
         if fns[int(nodes[e].sym)].parallel: race_check(int(nodes[e].sym), kids(e), nodes[e].pos)
         if fns[int(nodes[e].sym)].deterministic:
             # Cache ownership follows reachable serial lowering, not worker candidates.
