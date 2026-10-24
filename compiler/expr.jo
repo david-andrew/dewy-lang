@@ -5861,6 +5861,10 @@ fmt_part = (part: int, pos: int):
     else if is_quantity(t):
         nodes[part].a = i32(quantity_number(int(nodes[part].a)))
         t = quantity_base(t)
+    # (`{x:.2f}` of an exact number formats it as `format(x ".2f")` does: as a float64)
+    if nodes[part].sval >= 0 and (bundled_rational_type(t) or bundled_word_rational_type(t)) and dewy_at(pos):
+        coerce(int(nodes[part].a), T_FLOAT)
+        t = T_FLOAT
     if types[t].kind == .fixed:
         # (shown like an array: [1, 2, 3])
         t = mk_array(int(types[t].elem))

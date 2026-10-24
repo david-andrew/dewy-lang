@@ -1,0 +1,11 @@
+# `{value:spec}` formats as `format(value spec)` does; a quantity's spec formats its canonical number.
+from units import m, km
+main = () => {
+    let x = 3.14159
+    let y:float64 = 2.5
+    let n = 1234567
+    let d:dict<string int> = ["a:b"->5]
+    let s = "hi"
+    printl"[{x:.2f}] [{y:.1f}] [{n:,}] [{0.256:.1%}] [{s:^6}] [{s:*>5}] [{d["a:b"]}] [{d["a:b"]:03}]"
+    printl"[{(x):8.3f}] [{"{n:,}":>12}] [{255:#06x}] [{255:+d}] [{x*2:.3f}] [{1/8:.2f}] [{1.5km:.1f}] [{n:_}]"
+}

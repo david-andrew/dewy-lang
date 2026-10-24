@@ -1964,12 +1964,13 @@ dw_expr = (id: int) -> int:
                 nodes[part].sval = i32(intern(dewy_syntax[child].text))
                 pieces.push(part)
             else:
-                if dewy_syntax[child].kind != .block or dw_nchildren(child) != 1: return dw_fail(child, "this string interpolation")
+                if dewy_syntax[child].kind != .block or dw_nchildren(child) < 1 or dw_nchildren(child) > 2: return dw_fail(child, "this string interpolation")
                 part = mk(.pair, dewy_syntax[child].pos)
                 dw_in_interpolation += 1
                 nodes[part].a = i32(dw_expr(dw_child(child, 0)))
                 dw_in_interpolation -= 1
-                nodes[part].sval = -1
+                # (`{x:.2f}`: the format spec)
+                nodes[part].sval = if dw_nchildren(child) == 2: i32(intern(dewy_syntax[dw_child(child, 1)].text)) else: -1
                 pieces.push(part)
         set_list(n, pieces)
         return n

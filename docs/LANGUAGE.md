@@ -3841,7 +3841,8 @@ absent optional prints `none`. A function handle shows its type's spelling,
 `"{int64}"` and `int64 as string`.
 
 `format(value spec)` formats machine numbers or text, including inside an
-interpolation. The specification is an ordinary string and may be computed:
+interpolation, where `{value:spec}` is short for it: `"{angle:.1f}°"`. The
+specification is an ordinary string and may be computed:
 
 ```dewy
 printl(format(3.14159 ".2f"))        # 3.14
