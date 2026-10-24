@@ -1,0 +1,5 @@
+# A dense integer match whose result is int (arbitrary precision) gives the arm values.
+f = (x:int64):>int64 => { let n = match x {<1> => 10 <2> => 20 <3> => 30 _ => 0}; n }
+g = (x:int64) => match x {<0> => -7 <1> => 100000 <2> => 3 _ => 1}
+printl(f(1)) printl(f(2)) printl(f(3)) printl(f(9))
+printl(g(0)) printl(g(1)) printl(g(2)) printl(g(5))

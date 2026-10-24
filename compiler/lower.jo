@@ -2700,6 +2700,8 @@ match_arm_constant = (arm: int) -> (bool, int):
 
 gen_match_lookup = (m: int, st: int, rs: int, rtp: int, vals: int[], arms: int[], wild: int, lo: int, span: int) -> bool:
     if wild < 0: return false
+    # Arbitrary-precision int results aren't plain words.
+    if quantity_base(prune(rtp)) == T_MATH_INT: return false
     result_kind = types[prune(rtp)].kind
     if result_kind != .int_ and result_kind != .bool_ and result_kind != .enum_: return false
     if result_kind == .enum_ and not structs[int(types[prune(rtp)].st)].simple_enum: return false
