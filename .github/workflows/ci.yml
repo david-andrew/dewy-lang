@@ -185,7 +185,7 @@ jobs:
       - name: Exercise native project tests and diagnostics
         env:
           DEWY_CORE_COMPILER: ${{ runner.temp }}/host-check/dewy-core/bin/dewy-core${{ matrix.suffix }}
-        run: python -m pytest -q -o addopts='' tests/test_core_testing.py tests/test_windows_cmdline.py
+        run: python -m pytest -q -o addopts='' tests/test_core_testing.py tests/test_windows_cmdline.py tests/test_windows_batch.py
       - name: Exercise the editor client and native language server
         env:
           DEWY_CORE_COMPILER: ${{ runner.temp }}/host-check/dewy-core/bin/dewy-core${{ matrix.suffix }}

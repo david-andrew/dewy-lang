@@ -405,6 +405,7 @@ when TARGET == "windows":
     # run a program (looked for on the PATH by Windows when path is ""), its output collected:
     # its exit code (-1: not started) and what it wrote
     __w32_run_output = (path: str, argv: str[], show: bool, cwd: str) -> (int, str):
+        if __w32_batch_refused(if len(path) == 0: argv[0] else: path): return (-1, "")
         sa = fill(0, 3)
         sa[0] = 24
         sa[2] = 1                                       # bInheritHandle
@@ -519,7 +520,9 @@ when TARGET == "windows":
         CloseHandle(proc)
         (int(code[0]), str_from_bytes(both), str_from_bytes(out))
 
+    # (-2: a batch file, refused)
     __w32_run = (path: str, argv: str[], wait: bool) -> int:
+        if __w32_batch_refused(path): return -2
         wcmd = __wide(__w32_cmdline(argv))
         wpath = __wide(path)
         si = fill(u8(0), 104)
@@ -537,6 +540,38 @@ when TARGET == "windows":
         code: u32[] = [0]
         GetExitCodeProcess(h, data(code))
         int(code[0])
+
+# CreateProcessW runs a .bat or .cmd file through cmd.exe, which parses the whole command line
+# again by its own rules (& | < > ^ % and quotes): no quoting of the arguments keeps them from
+# being read as commands (CVE-2024-24576). A batch file is refused, with a message: running
+# cmd.exe /c explicitly makes that parsing visible. Windows ignores trailing dots and spaces
+# and an alternate data stream (x.bat::$DATA) in a file name.
+__w32_batch_program = (path: str) -> bool:
+    b = bytes(path)
+    start = 0
+    loop i in [0..b.len()):
+        if b[i] == '/' or b[i] == '\\': start = i + 1
+    # (C:x.bat: a drive's own directory)
+    if start == 0 and b.len() >= 2 and b[1] == ':': start = 2
+    stop = b.len()
+    loop i in [start..b.len()):
+        if b[i] == ':':
+            stop = i
+            break
+    loop stop > start and (b[stop - 1] == '.' or b[stop - 1] == ' '): stop -= 1
+    if stop - start < 4 or b[stop - 4] != '.': return false
+    ext: u8[]
+    loop i in [stop - 3..stop):
+        c = b[i]
+        if c >= 'A' and c <= 'Z': c = c + 32
+        ext.push(c)
+    e = str_from_bytes(ext)
+    e == "bat" or e == "cmd"
+
+__w32_batch_refused = (path: str) -> bool:
+    if not __w32_batch_program(path): return false
+    eprint("run: '{path}' is a batch file, which cmd.exe would run, reading its arguments as commands; run cmd.exe with /c and the arguments quoted for cmd instead: run(\"C:\\Windows\\System32\\cmd.exe\" [\"/c\" ...])")
+    true
 
 # A command line for CreateProcessW: the arguments, each read back unchanged by
 # CommandLineToArgvW (and the C runtime's argv). Outside the Windows block so every

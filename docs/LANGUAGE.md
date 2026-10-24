@@ -2652,7 +2652,9 @@ pipe that cannot be read, ends the child and gives a `FileError`.
 In a web build, files live in the page's memory, and directories exist as the
 paths of its files and those made with `mkdir`. Processes are `SpawnError` there.
 On Windows, `run` works and `run_silent`, `spawn` and `capture` are not available
-yet (`SpawnError`).
+yet (`SpawnError`). A `.bat` or `.cmd` program is refused with `SpawnError` and a
+message: cmd.exe would read its arguments again as commands, so run
+`cmd.exe` with `/c` explicitly, quoting the arguments for it.
 
 ### Contained paths
 

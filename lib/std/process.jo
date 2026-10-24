@@ -34,6 +34,7 @@ run = (program: str, args: str[]) -> int | SpawnError | Canceled:
     else when TARGET == "windows":
         __out_flush()
         code = __w32_run(program, [program] + args, true)
+        if code == -2: return SpawnError()
         if code < 0: return 127
         return code
     else:
