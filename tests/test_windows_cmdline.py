@@ -110,7 +110,8 @@ def test_command_lines_round_trip(compiler, tmp_path):
     assert lines[0] == '[' + ', '.join(str(b) for b in b'prog') + ']'
 
 
-ECHO = '''main=()=>{
+ECHO = '''$runtime_checks
+main=()=>{
     loop a in args()[1..] printl(a.length)
     loop a in args()[1..] printl(a)
 }
