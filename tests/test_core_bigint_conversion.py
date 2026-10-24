@@ -14,20 +14,20 @@ main=(args:array<string>)=>{
     if mode =? "mul" {
         let a=to_int(args[2])
         let b=to_int(args[3])
-        if a is? none or b is? none return
+        if a is? error or b is? error return
         printl"{a*b}"
     } else if mode =? "int" {
         let text=read_text(args[2]) or_throw
         let started=time_ns()
         let v=to_int(text max_digits=0)
-        if v is? none {printl"none" return}
+        if v is? error {printl"none" return}
         let back="{v}"
         printl"{back =? text.trim()} {(time_ns()-started)//1000000}"
     } else if mode =? "limit" {
         let digits:array<string>=[]
         loop i in [0..1000001) digits.push("7")
         let long=digits.join("")
-        printl"{to_int(long) is? none} {to_int("123456" max_digits=5) is? none} {to_int("12345" max_digits=5) ?? 0}"
+        printl"{to_int(long) is? TooManyDigits} {to_int("123456" max_digits=5) is? TooManyDigits} {to_int("12345" max_digits=5) ?? 0}"
         printl"{to_int("-12" max_digits=2) ?? 0} {(to_int(long max_digits=0) ?? 0) % 1000}"
         let one:int=1
         printl(format((one << 4001)+5 "x").length)

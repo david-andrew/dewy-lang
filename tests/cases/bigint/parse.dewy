@@ -1,6 +1,6 @@
 # exit: 42
 run=()=>{
-loop text in ["" "+" "-" " 1" "1 " "1_0" "1.0" "🙂" "１２"] {if to_int(text) isnt? none return 1}
+loop text in ["" "+" "-" " 1" "1 " "1_0" "1.0" "🙂" "１２"] {if to_int(text) isnt? NotAnInteger return 1}
 let zero=to_int("-0000") ?? 1 let positive=to_int("+00042") ?? 0 let negative=to_int("-00042") ?? 0
 return if "{zero}" =? "0" and "{positive}" =? "42" and "{negative}" =? "-42" and zero.gcd(zero) =? 0 42 else 2
 }

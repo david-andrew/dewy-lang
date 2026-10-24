@@ -28,7 +28,7 @@ parse_args = (argv:array<string>):>Options|string => {
         } else if a =? "--top" {
             if i+1 >=? argv.length { return "--top needs a value" }
             let n = to_int(argv[i+1])
-            if n is? none { return "--top expects a number, got '{argv[i+1]}'" }
+            if n is? error { return "--top expects a number, got '{argv[i+1]}'" }
             opts.top = n
             i += 2
         } else if a =? "--verbose" {
@@ -64,7 +64,7 @@ main = ():>void => {
         if row.length not=? header.length { continue }
         let units = to_int(row[3])
         let price = to_float(row[4])
-        if units is? none or price is? none {
+        if units is? error or price is? none {
             skipped += 1
             if opts.verbose { printl("skipping bad row: {row.join(",")}") }
             continue

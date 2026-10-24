@@ -16,7 +16,7 @@ words = (text:string):>array<string> => [loop w in text.split(" ") if w.length >
 
 number = (word:string line:int64):>int64|ScriptError => {
     let n = to_int(word)
-    if n is? none return ScriptError[line "expected a number, found '{word}'"]
+    if n is? error return ScriptError[line "expected a number, found '{word}'"]
     if n <? -1000000 or n >? 1000000 return ScriptError[line "{word} is out of range"]
     return int64(n)
 }

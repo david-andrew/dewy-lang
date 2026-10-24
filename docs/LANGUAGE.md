@@ -764,11 +764,12 @@ go to an `@` parameter instead. `@` of a function value is still its handle.
 A function gives back a value: `return @a` is an error.
 
 Lengths retain their current `int64` type. An `int` index uses the ordinary bounds
-checks. `to_int(text)` returns `int | none`, parsing integers of arbitrary size: an
-optional sign, then decimal digits (spaces, `_` and `0x` give `none`). More
-decimal digits than `max_digits=` allows (a million unless given; zero: no
-limit) also give `none`, since converting them takes time that grows faster than
-their length (CVE-2020-10735). Decimal text converts both ways by divide and
+checks. `to_int(text)` returns `int | NotAnInteger | TooManyDigits`, parsing
+integers of arbitrary size: an optional sign, then decimal digits (spaces, `_` and
+`0x` give `NotAnInteger`). More decimal digits than `max_digits=` allows (a
+million unless given; zero: no limit) give `TooManyDigits`, since converting them
+takes time that grows faster than their length (CVE-2020-10735). Both are errors
+(provisional names); `to_int(text) ?? 0` falls back on either. Decimal text converts both ways by divide and
 conquer, in about the time of a few multiplications of that size.
 `from_text<int>` and integer fields in parsed records and containers preserve
 the same arbitrary precision. Printing, interpolation and
@@ -1164,10 +1165,10 @@ type, so nothing is imported, any integer converts to it (`bigint(word)`), and
 an oversized literal fits it. Decimal and all supported based literals work,
 including digit separators; their digits are converted at compilation.
 
-`to_int(text)` reads decimal text and returns `bigint|none`: an optional
-leading `+`/`-` and ASCII decimal digits, leading zeros accepted, no whitespace
-or separators. Invalid text gives `none`, as do more digits than `max_digits=`
-allows. There is no constructor from text: `bigint("12")` is an error that
+`to_int(text)` reads decimal text and returns `bigint | NotAnInteger |
+TooManyDigits`: an optional leading `+`/`-` and ASCII decimal digits, leading
+zeros accepted, no whitespace or separators. Invalid text gives `NotAnInteger`,
+more digits than `max_digits=` allows `TooManyDigits`. There is no constructor from text: `bigint("12")` is an error that
 points at `to_int`.
 
 `+`, `-`, `*`, unary `-`, comparisons, `//` and `%` mix with signed and
@@ -2590,7 +2591,7 @@ Empty:type = type of error
 ParseError:type = type of error & [message:string]
 parse = (text:string):>int64|ParseError => {
     let n = to_int(text)
-    if n is? none return ParseError["invalid integer"]
+    if n is? error return ParseError["invalid integer"]
     return n
 }
 twice = (text:string):>int64|ParseError => {
@@ -2941,7 +2942,9 @@ Optional types use `T?`, including generic types such as `array<uint16>?`
 and nested `array<array<uint16>?>?`. `none` represents an absent value.
 
 Use `value ?? fallback` to unwrap an optional or provide a default. The left side
-runs once; the fallback runs only when it is `none`. Zero, `false` and empty
+runs once; the fallback runs only when it is `none` or an exception value (an
+error such as `to_int`'s `NotAnInteger`, or a search's `Missing`), and the editor
+shows which failures a `??` covers. Zero, `false` and empty
 collections are present values. Chains associate right, so
 `first ?? second ?? default` picks the first present value. A final optional
 fallback keeps the result optional. Arithmetic binds more tightly than `??`,
@@ -3430,8 +3433,8 @@ otherwise it is checked at run time under `$runtime_checks`.
 last occurrence, as indexing counts, or `Missing`; `text.find(part start)` searches from
 grapheme `start`. `xs.index_of(x)` gives the first position of `x` in an array, or
 `Missing`. `Missing` is the prelude's exception for a search that found nothing:
-it is neither `none` nor -1, so `??` does not apply; test it with `is? Missing`,
-forward it with `or_throw`, or `match` it.
+it is neither `none` nor -1. Default it with `??` (`text.find("=") ?? -1`), test
+it with `is? Missing`, forward it with `or_throw`, or `match` it.
 
 ```dewy
 let at = "key=value".find("=")

@@ -3,7 +3,7 @@
 ParseError:type=type of error & [text:string]
 parse=(text:string)=>{
     let n=to_int(text)
-    if n is? none return ParseError[text]
+    if n is? error return ParseError[text]
     return n
 }
 twice=(text:string)=>{

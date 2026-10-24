@@ -107,12 +107,11 @@ __mi_khash = (a: __dewy_int) -> int:
     loop limb in value._limbs: h = __hk_mix(k, h xor limb)
     h as int
 
-# Dewy's to_int(text): decimal, or hex after 0x, with an optional sign, _ between digits and
-# space around; none when it is not an integer, and when it has more than max_digits decimal
-# digits (a million unless given; zero or less: no limit), since converting those costs time that
-# grows faster than their length (CVE-2020-10735). Long text converts by divide and conquer
-# (lib/bigint.dewy).
-__mi_parse = (s: str) -> __dewy_int?:
+# Dewy's to_int(text): an optional sign, then decimal digits; NotAnInteger when it is not an
+# integer, and TooManyDigits when it has more than max_digits decimal digits (a million unless
+# given; zero or less: no limit), since converting those costs time that grows faster than
+# their length (CVE-2020-10735). Long text converts by divide and conquer (lib/bigint.dewy).
+__mi_parse = (s: str) -> __dewy_int | NotAnInteger | TooManyDigits:
     # The same 18-digit proof as to_int, returning directly into the exact
     # result. Avoid an intermediate optional-word result on ordinary input.
     p = data(s)
@@ -134,13 +133,13 @@ __mi_parse = (s: str) -> __dewy_int?:
     __mi_parse_slow(s, 1000000)
 
 # to_int(text max_digits=n) (the compiler sends a call with the limit here)
-__mi_parse_limited = (s: str, max_digits: int) -> __dewy_int?: __mi_parse_slow(s, max_digits)
+__mi_parse_limited = (s: str, max_digits: int) -> __dewy_int | NotAnInteger | TooManyDigits: __mi_parse_slow(s, max_digits)
 
 # Dewy's to_int: an optional sign, then decimal digits; nothing else (no spaces, `_` or 0x).
-# More than max_digits digits (zero or less: no limit) give none: converting them costs time
-# that grows faster than their length (CVE-2020-10735). Long text converts by divide and
-# conquer (lib/bigint.dewy).
-__mi_parse_slow = (s: str, max_digits: int) -> __dewy_int?:
+# More than max_digits digits (zero or less: no limit) give TooManyDigits: converting them
+# costs time that grows faster than their length (CVE-2020-10735). Anything else that is not
+# an integer gives NotAnInteger. Long text converts by divide and conquer (lib/bigint.dewy).
+__mi_parse_slow = (s: str, max_digits: int) -> __dewy_int | NotAnInteger | TooManyDigits:
     p = data(s)
     n = len(s)
     i = 0
@@ -148,13 +147,14 @@ __mi_parse_slow = (s: str, max_digits: int) -> __dewy_int?:
     if n > 0 and (p[0] == '-' or p[0] == '+'):
         negative = p[0] == '-'
         i = 1
-    if i >= n: return none
-    if max_digits > 0 and n - i > max_digits: return none
+    if i >= n: return NotAnInteger()
     digits: u8[]
-    digits.reserve(n - i)
+    digits.reserve(if max_digits > 0 and n - i > max_digits: max_digits else: n - i)
     loop k in [i..n):
         d = int(p[k]) - 48
-        if u64(d) > 9: return none
+        if u64(d) > 9: return NotAnInteger()
+        # (counted after the check that they are digits: a long non-number is NotAnInteger)
+        if max_digits > 0 and k - i >= max_digits: return TooManyDigits()
         digits.push(u8(d))
     value = __bi._from_digits(digits, negative)
     result: __dewy_int = __mi_pack(value)

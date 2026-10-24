@@ -20,7 +20,7 @@ parse_config = (text:string):>Config|ConfigError => {
         let value = line[eq+1..].trim()
         if key =? "min_length" or key =? "top" {
             let n = to_int(value)
-            if n is? none return ConfigError[i+1 "'{key}' needs a number, got '{value}'"]
+            if n is? error return ConfigError[i+1 "'{key}' needs a number, got '{value}'"]
             if key =? "top" c.top = n else c.min_length = n
         } else if key =? "ignore" {
             loop w in value.split(" ") if w.length >? 0 c.ignore.push(w)
@@ -44,7 +44,7 @@ parse_args = (argv:array<string>):>Options|UsageError => {
             if a =? "--config" o.config = v
             else {
                 let n = to_int(v)
-                if n is? none return UsageError["--top needs a number, got '{v}'"]
+                if n is? error return UsageError["--top needs a number, got '{v}'"]
                 o.top = n
             }
             i += 2

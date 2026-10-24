@@ -22,6 +22,14 @@ struct InvalidUtf8:
 @nominal(exception)
 struct Missing:
     pass
+# Why to_int(text) failed (provisional names): the text is not an integer (empty, a stray
+# character, spaces, `_` or 0x), or it has more digits than max_digits= allows.
+@nominal(error)
+struct NotAnInteger:
+    pass
+@nominal(error)
+struct TooManyDigits:
+    pass
 # A fixed-width result that does not fit its parts (rational<int64> arithmetic).
 @nominal(error)
 struct Overflow:

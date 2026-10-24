@@ -27,7 +27,7 @@ decode_manifest = (data:array<uint8>):>Manifest? => {
     let body = "dewykv {words[2]} {log}"
     let generation = to_int(words[2])
     if format(crc32(bytes(body)) "08x") not=? checksum return none
-    if generation is? none or generation <? 1 return none
+    if generation is? error or generation <? 1 return none
     return Manifest[generation log]
 }
 

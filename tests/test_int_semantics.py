@@ -128,7 +128,7 @@ def run(program, op, x, y=0):
     ('u64', MAX, 0, MAX), ('from-u64', MAX, 0, MAX),
     ('float', '-9223372036854775808', 0, MIN), ('float', '42.9', 0, 42),
     ('bounded-index', 0, 0, 5150), ('parse', '9223372036854775808', 0, '9223372036854775808'),
-    ('parse', str(MIN), 0, str(MIN)), ('parse', 'invalid', 0, 'none'),
+    ('parse', str(MIN), 0, str(MIN)), ('parse', 'invalid', 0, 'NotAnInteger'),
     ('bigint-context', 0, 0, '18446744073709551616'),
     ('bigint', 0, 0, '18446744073709551616'), ('bigint-word', 0, 0, '18446744073709551615'),
     ('fixed-narrow-pow', 2, 63, MIN), ('fixed-narrow-floor', 7, 2, 'int64'),

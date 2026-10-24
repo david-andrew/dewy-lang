@@ -22,7 +22,7 @@ main = (argv:array<string>):>void => {
     let count:int64 = 1000000
     if argv.length >? 1 {
         let parsed = to_int(argv[1])
-        if parsed is? none panic("expected an update count")
+        if parsed is? error panic("expected an update count")
         count = parsed
     }
     if count <? 0 panic("update count must be nonnegative")

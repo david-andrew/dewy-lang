@@ -4958,6 +4958,62 @@ dewy_byte_read = (n: int, callee: int, base: int, args: int[], expected: int) ->
     nodes[n] = nodes[bc_call(helper, [recv, args[0]], nodes[n].pos)]
     check_expr(n, expected)
 
+# `value ?? fallback` where value may be an exception other than none (`to_int(text) ?? 0`):
+# the fallback stands for every failure, none and each exception kind, and the value for the
+# rest. The editor shows which failures it covers.
+coalesce_exceptions = (t: int) -> bool:
+    loop m in value_members(t):
+        if m != T_NONE and exception_member(m): return true
+    false
+
+coalesce_failures = (n: int, at: int, expected: int) -> int:
+    pos = nodes[n].pos
+    a = last_checked
+    add_flag(a, NF_CHECKED)
+    name = "$coalesce{n}"
+    members = value_members(at)
+    covered: str[]
+    loop m in members:
+        if exception_member(m): covered.push(if m == T_NONE: "none" else: dt(m))
+    if ide_on and not pos_in_lib(pos): ide_emit("I\t{ide_pos_str(pos)}\t{ide_esc("?? gives the fallback for " + join(covered, ", "))}")
+    fallback = int(nodes[n].b)
+    # (the fallback converts to the value's type, as an optional's does; an optional
+    # fallback keeps the result optional)
+    values: int[]
+    loop m in members:
+        if not exception_member(m): values.push(m)
+    target = if values.len() == 1: values[0] else: mk_union(values)
+    probe = clone(fallback)
+    pt = prune(check_expr(probe, target))
+    if tkind(pt) == .opt or pt == T_NONE: target = mk_opt(target)
+    chain = 0
+    j = members.len() - 1
+    used = false
+    loop j >= 0:
+        member = members[j]
+        failure = exception_member(member)
+        value = bc_ident(name, pos)
+        if failure:
+            typed = bc_let("{name}_fallback", (if used: clone(fallback) else: fallback), pos)
+            nodes[typed].a = i32(type_node_of(target, pos))
+            value = bc_block([typed, bc_stmt(bc_ident("{name}_fallback", pos), pos)], pos)
+            used = true
+        body = bc_block([bc_stmt(value, pos)], pos)
+        if chain == 0: chain = body
+        else:
+            condition = mk(.istype, pos)
+            nodes[condition].a = i32(bc_ident(name, pos))
+            nodes[condition].b = i32(type_node_of(member, pos))
+            branch = mk(.if_, pos)
+            nodes[branch].a = i32(condition)
+            nodes[branch].b = i32(body)
+            nodes[branch].c = i32(chain)
+            if values.len() > 1: nodes[branch].aux2 = -8  # explicit union join, not numeric branch promotion
+            chain = bc_block([bc_stmt(branch, pos)], pos)
+        j -= 1
+    nodes[n] = nodes[bc_block([bc_let(name, a, pos), bc_stmt(chain, pos)], pos)]
+    check_expr(n, expected)
+
 # the member a Dewy program wrote, for a library function standing for it
 shown_fn_name = (name: str) -> str:
     if name == "__dewy_find": return "find"
@@ -9632,6 +9688,7 @@ check_expr_other = (n: int, expected: int) -> int:
             if exk == .opt: h = ex
             else: h = mk_opt(ex)
         at = prune(check_expr(int(nodes[n].a), h))
+        if dewy_at(nodes[n].pos) and coalesce_exceptions(at): return coalesce_failures(n, at, expected)
         if types[at].kind != .opt:
             nodes[n].a = i32(narrow_optional_source(int(nodes[n].a)))
             at = prune(ntype(int(nodes[n].a)))
@@ -9642,7 +9699,6 @@ check_expr_other = (n: int, expected: int) -> int:
             lf = pos_file(lp)
             if lf >= 0 and lf < files.len() and pos_off(lp) < len(files[lf].src) and files[lf].src[pos_off(lp)] == '[':
                 fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)} (indexing gives the element itself; m.get(k) gives an optional, m.get(k, default) a value)")
-            if is_union(prune(at)) and union_index(prune(at), missing_type()) >= 0: fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)}: a search's Missing is not none; `if x is? Missing \{ ... }` handles it")
             fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)}")
         inner = int(types[at].elem)
         h2 = inner

@@ -7,7 +7,7 @@ Mint an error type and include it in a return union. The caller handles that alt
 ParseError:type = type of error & [message:string]
 parse = (text:string):>int64|ParseError => {
     let value = to_int(text)
-    if value is? none { return ParseError["invalid integer"] }
+    if value is? error { return ParseError["invalid integer"] }
     return value
 }
 let result = parse("42")

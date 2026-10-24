@@ -973,7 +973,7 @@ if input is? none panic("invalid test data")
 loop line in input.split("\\n") {
     let fields=line.split(" ")
     let a=to_int(fields[0]) ?? 0 let b=to_int(fields[1]) ?? 0 let count=to_int(fields[2])
-    if count is? none panic("invalid shift count")
+    if count is? error panic("invalid shift count")
     printl"{a and b}|{a or b}|{a xor b}|{not a}|{a << count}|{a >> count}"
 }
 }
@@ -5690,7 +5690,7 @@ def test_core_integer_parse_boundaries(compiler, tmp_path, target, release):
 let texts=[{literals}]
 let expected:array<int?>=[{results}]
 loop i in [0..texts.length) {{
-    if to_int(texts[i]) not=?expected[i] {{printl"case {{i}}" return 1}}
+    if (to_int(texts[i]) ?? none) not=?expected[i] {{printl"case {{i}}" return 1}}
 }}
 return 42
 }}

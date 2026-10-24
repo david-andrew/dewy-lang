@@ -4,7 +4,7 @@ Product:type = [id:int64 value:int64]
 Failure:type = type of error & [id:int64]
 parse_job = (job:Job):>Parsed|Failure => {
     let value = to_int(job.text)
-    if value is? none {
+    if value is? error {
         return Failure[job.id]
     }
     return Parsed[job.id value]

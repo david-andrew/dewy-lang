@@ -1,7 +1,7 @@
 BadNumber:type = type of error & [text:string]
 parse_number = (text:string):>int64|BadNumber => {
     let number = to_int(text)
-    if number is? none {
+    if number is? error {
         return BadNumber[text]
     }
     return number

@@ -52,7 +52,7 @@ run_command = (argv:array<string>):>int => {
     } else if cmd in? ["done" "undo" "rm"] {
         if rest.length not=? 1 { printl("{cmd}: expected one task id") return 2 }
         let id = to_int(rest[0])
-        if id is? none { printl("{cmd}: not a number: {rest[0]}") return 2 }
+        if id is? error { printl("{cmd}: not a number: {rest[0]}") return 2 }
         let index = find(store id)
         if index is? none { printl("{cmd}: no task #{id}") return 1 }
         if cmd =? "rm" {

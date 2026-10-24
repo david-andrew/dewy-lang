@@ -5,7 +5,7 @@ kernel=(texts:array<string> count:int64):>int64=>{
     if texts.length <? 32 return -1
     loop i in [0..count) {
         let value=to_int(texts[i and 31])
-        if value is? none return -1
+        if value is? error return -1
         checksum+=(value and 65535)
     }
     return checksum

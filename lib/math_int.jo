@@ -41,7 +41,8 @@ __map_tag = (k: __dewy_int, h: u64) -> u64: h
 __map_hash = (k: __dewy_int) -> u64: __mi_khash(k) as u64
 __read = (r: mut __TextIn, x: mut __dewy_int):
     __tx_word_at(r, true)
-    if let value = __mi_parse(r.s[r.n0..r.n1)): x = value
+    value = __mi_parse(r.s[r.n0..r.n1))
+    if value is __dewy_int: x = value
     else: __tx_bad(r, "expected a whole number")
 format = (value: __dewy_int, spec: str) -> str:
     sp = __format_checked(spec, "dxXbofeEgG%", true)
