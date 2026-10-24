@@ -986,6 +986,7 @@ unused_file_hint = (name: int) -> str:
             if syms[sy].kind == .module and int(syms[sy].ref) == o: return " (it is {name_of(k)}'s: `{name_of(k)}.{name_of(name)}`)"
         shown = files[gf].path
         if starts_with(shown, files[lf].dir + "/"): shown = shown[len(files[lf].dir) + 1..]
+        if files[lf].is_dewy: return " (it is in {shown}, which this file does not import: `from p\"{shown}\" import {name_of(name)}` at its top)"
         return " (it is in {shown}, which this file does not use: `use '{shown}'` at its top)"
     ""
 
