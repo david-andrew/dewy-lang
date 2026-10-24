@@ -702,6 +702,14 @@ effect_scalar = (t0: int) -> bool:
     t = representation_type(t0)
     types[t].kind == .bool_ or types[t].kind == .int_ and t != T_MATH_INT
 
+# A fixed-width float is a word as well: copying, reading or storing one costs
+# nothing hidden, and its `+ - * /` and comparisons are single instructions
+# that never fail (a `$finite_floats` obligation is checked by floats.jo).
+effect_float = (t0: int) -> bool: types[representation_type(t0)].kind == .float_
+
+effect_float_op = (op: Tok) -> bool:
+    op == .plus or op == .minus or op == .star or op == .slash or op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
+
 # A word-sized `int` literal is a constant: a shift count such as the `3` in
 # `x >> 3` lowers to an immediate, with no promotion or check.
 effect_count_literal = (n: int) -> bool:
@@ -714,7 +722,7 @@ effect_word_op = (op: Tok) -> bool:
 # box, custom lifecycle or managed field is never certified as a free copy.
 effect_plain = (t0: int, depth: int = 0) -> bool:
     t = representation_type(t0)
-    if effect_scalar(t): return true
+    if effect_scalar(t) or effect_float(t): return true
     if depth == 0:
         k = tkind(t)
         if k == .struct_ or k == .enum_ or k == .tuple or k == .fixed or k == .opt:
@@ -1328,6 +1336,7 @@ effect_scan_node = (f: int, n: int):
     else if k == .fnref or k == .lambda: supported = effect_bare(n)
     else if k == .for_: supported = tkind(ntype(int(nodes[n].a))) == .array and effect_scalar(telem(ntype(int(nodes[n].a)))) and not has_flag(n, NF_MUT)
     else if k == .int_lit or k == .bool_lit: supported = effect_scalar(ntype(n)) or effect_count_literal(n) or effect_small(n) >= 0
+    else if k == .float_lit: supported = effect_float(ntype(n))
     else if k == .array: supported = effect_fixed_literal(n)
     else if k == .block or k == .exprstmt or k == .return_ or k == .if_ or k == .and_ or k == .or_ or k == .not_ or k == .defer_ or k == .break_ or k == .continue_: supported = true
     else if k == .tuple: supported = effect_plain(ntype(n))
@@ -1351,6 +1360,7 @@ effect_scan_node = (f: int, n: int):
             supported = true
             divisor = int(nodes[n].b)
             if nodes[divisor].kind != .int_lit or nodes[divisor].ival == 0: effect_failure(f, n)
+        if not supported and nodes[n].aux == 0 and effect_float_op(nodes[n].op as Tok) and effect_float(ntype(int(nodes[n].a))) and effect_float(ntype(int(nodes[n].b))): supported = true
         # (members of one literal union compare as words)
         if not supported and nodes[n].aux == 0 and (nodes[n].op == i32(int(Tok.eq)) or nodes[n].op == i32(int(Tok.ne))):
             supported = effect_simple_enum(ntype(int(nodes[n].a))) and effect_simple_enum(ntype(int(nodes[n].b)))
@@ -1372,6 +1382,7 @@ effect_scan_node = (f: int, n: int):
     else if k == .istype or k == .narrow or k == .coalesce: supported = effect_plain(ntype(int(nodes[n].a))) and (k == .istype or effect_plain(ntype(n)))
     else if k == .unary:
         supported = effect_scalar(ntype(n)) and (nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.tilde)))
+        supported = supported or effect_float(ntype(n)) and (nodes[n].op == i32(int(Tok.minus)) or nodes[n].op == i32(int(Tok.plus)))
     else if k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)) and ownership_scalar(ntype(n)): supported = true
     else if k == .conv and nodes[n].aux == i32(int(CV.refinement)):
         # A proven refinement check is erased; an unproven one may fail.
@@ -1380,6 +1391,9 @@ effect_scan_node = (f: int, n: int):
     # (wrapping a plain value as an optional fills the flag and payload in place)
     else if k == .conv and nodes[n].aux == i32(int(CV.opt)): supported = effect_plain(ntype(n)) and effect_plain(ntype(int(nodes[n].a)))
     else if k == .conv and nodes[n].aux == i32(int(CV.set_text)): supported = true
+    # (a word to a float, or one float width to another: one instruction; a
+    # float to an integer is checked, and a semantic integer's is a call)
+    else if k == .conv and (nodes[n].aux == i32(int(CV.int2float)) and effect_scalar(ntype(int(nodes[n].a))) or nodes[n].aux == i32(int(CV.float_))): supported = effect_float(ntype(n))
 
     else if k == .conv:
         supported = (effect_scalar(ntype(n)) and effect_word(int(nodes[n].a)) or effect_small(n) >= 0 or is_fn_type(ntype(n)) and effect_bare(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int)))

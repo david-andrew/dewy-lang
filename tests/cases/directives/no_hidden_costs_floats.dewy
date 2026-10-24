@@ -1,0 +1,12 @@
+# A fixed-width float is a word: passing, returning and its arithmetic carry no hidden cost.
+$no_hidden_costs
+id = (x:float64):>float64 => x
+mix = (a:float64 b:float64 k:int64):>float64 => {
+    let c = a*b + a/b - 1.5 + float64(k)
+    if c <? 0.0 -c else c
+}
+narrow = (a:float64):>float32 => float32(a)
+main = ():>void & no panics => {
+    $no_hidden_costs=false
+    printl"{id(1.5)} {mix(2.0 4.0 3)} {narrow(0.25)}"
+}

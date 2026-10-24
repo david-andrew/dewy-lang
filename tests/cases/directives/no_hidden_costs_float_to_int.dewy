@@ -1,0 +1,7 @@
+# A float to an integer is checked when it runs: not free under the lane.
+$no_hidden_costs
+toint = (a:float64):>int64 => int64(a)
+main = ():>void & no panics => {
+    $no_hidden_costs=false
+    printl"{toint(1.0)}"
+}
