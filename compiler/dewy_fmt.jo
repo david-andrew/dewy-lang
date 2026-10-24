@@ -18,9 +18,18 @@ df_assignment = (s: DewyToken) -> bool:
 df_free_gap = (left: DewyToken, right: DewyToken) -> bool:
     df_assignment(left) or df_assignment(right) or left == .colon or left == .comma or left == .semi or left == .lbrace or right == .colon or right == .comma or right == .semi or right == .rbrace
 
-df_gap = (left: DewyLexeme, right: DewyLexeme) -> str:
+# The layout: `name = (x:int64):>int64 => body`. `=>`, `+=` and the like always have a space on
+# each side; `=` has one when it binds a name (a statement), but not where it names an argument,
+# a default or a field inside parentheses or brackets (`f(scale=3)`, `[x=1]`), which stays as
+# written. `:` and `:>` have none. `inside`: the innermost open delimiter is a ( or a [.
+df_gap = (left: DewyLexeme, right: DewyLexeme, inside: bool) -> str:
     if right.symbol == .colon or right.symbol == .comma or right.symbol == .semi: return ""
+    if left.symbol == .colon or left.symbol == .returns or right.symbol == .returns: return ""
     if left.symbol == .lbrace and right.symbol == .rbrace: return ""
+    if left.symbol == .function or right.symbol == .function or dn_token_assignment(left.symbol) or dn_token_assignment(right.symbol): return " "
+    if left.symbol == .assign or right.symbol == .assign:
+        if not inside or right.space: return " "
+        return ""
     if df_free_gap(left.symbol, right.symbol): return " "
     if right.space: " " else: ""
 
@@ -40,12 +49,32 @@ df_tokens = (file: int, src: str) -> str[]:
         out.push(sig)
     out
 
+df_stack: DewyToken[]       # the delimiters open before df_tracked
+df_tracked = 0
+
+# Count the delimiters of the tokens up to `stop`; false when they do not match.
+df_track = (tokens: DewyLexeme[], stop: int) -> bool:
+    loop df_tracked < stop:
+        t = tokens[df_tracked]
+        df_tracked += 1
+        if t.kind != .op: continue
+        if t.symbol == .lparen or t.symbol == .lbrack or t.symbol == .lbrace:
+            df_stack.push(t.symbol)
+            if df_stack.len() > 256: return false
+        else if t.symbol == .rparen or t.symbol == .rbrack or t.symbol == .rbrace:
+            if df_stack.len() == 0: return false
+            opening = df_stack.pop()
+            if (opening == .lbrace) != (t.symbol == .rbrace): return false
+            # [a..b) and (a..b] are valid Dewy range delimiters.
+    true
+
 df_text = (src: str) -> str?:
     tokens = df_lexemes
     blocks = df_blocks
+    df_stack = []
+    df_tracked = 0
     bi = 0
     lines: str[]
-    stack: DewyToken[]
     at = 0
     start = 0
     opaque_end = 0
@@ -68,7 +97,7 @@ df_text = (src: str) -> str?:
             bi += 2
         lead = 0
         loop at + lead < stop and tokens[at + lead].kind == .op and (tokens[at + lead].symbol == .rparen or tokens[at + lead].symbol == .rbrack or tokens[at + lead].symbol == .rbrace): lead += 1
-        depth = max(0, stack.len() - lead)
+        depth = max(0, df_stack.len() - lead)
         first = start
         loop first < content_end and (src[first] == ' ' or src[first] == '\t'): first += 1
         last = content_end
@@ -88,9 +117,10 @@ df_text = (src: str) -> str?:
                 if tokens[at].start > first: parts.push(src[first..tokens[at].start))
                 loop i in [at..stop):
                     if i > at:
+                        if not df_track(tokens, i): return none
                         between = src[tokens[i - 1].stop..tokens[i].start)
                         if find_byte(between, '#') >= 0: parts.push(between)
-                        else: parts.push(df_gap(tokens[i - 1], tokens[i]))
+                        else: parts.push(df_gap(tokens[i - 1], tokens[i], df_stack.len() > 0 and df_stack[df_stack.len() - 1] != .lbrace))
                     t = tokens[i]
                     parts.push(src[t.start..min(t.stop, content_end)))
                 cursor = min(tokens[stop - 1].stop, content_end)
@@ -98,19 +128,9 @@ df_text = (src: str) -> str?:
             lines.push(join(parts, ""))
         # Strings can span physical lines, including closing quotes followed by
         # code. Their contents stay untouched, but following delimiters count.
-        loop i in [at..stop):
-            t = tokens[i]
-            if t.kind != .op: continue
-            if t.symbol == .lparen or t.symbol == .lbrack or t.symbol == .lbrace:
-                stack.push(t.symbol)
-                if stack.len() > 256: return none
-            else if t.symbol == .rparen or t.symbol == .rbrack or t.symbol == .rbrace:
-                if stack.len() == 0: return none
-                opening = stack.pop()
-                if (opening == .lbrace) != (t.symbol == .rbrace): return none
-                # [a..b) and (a..b] are valid Dewy range delimiters.
+        if not df_track(tokens, stop): return none
         lines.push(newline)
         at = stop
         start = end + 1
-    if stack.len() != 0: return none
+    if df_stack.len() != 0: return none
     join(lines, "")

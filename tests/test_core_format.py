@@ -26,7 +26,7 @@ def command(compiler, *args, **options):
 def test_core_format_layout(compiler, tmp_path):
     path = tmp_path / 'main.dewy'
     path.write_text('\tmain=()=>{\nlet x:int64=20\n if x>?0{\n return x+22   # keep 🙂\n }\nreturn 0\n}')
-    expected = 'main = () => {\n    let x: int64 = 20\n    if x>?0{\n        return x+22   # keep 🙂\n    }\n    return 0\n}\n'
+    expected = 'main = () => {\n    let x:int64 = 20\n    if x>?0{\n        return x+22   # keep 🙂\n    }\n    return 0\n}\n'
     before = path.read_bytes()
     check = command(compiler, 'fmt', '--check', path)
     assert check.returncode == 1 and str(path) in check.stdout
