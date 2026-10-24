@@ -609,10 +609,10 @@ lx_string = (raw: bool):
     start = i
     depth = 0
     loop true:
-        c = p[i]
         if i >= lx_n:
             if depth > 0: lx_err(s, "unterminated string: a `{{` in it starts an interpolation that does not end (for a brace in the text, write {{{{ or }}}})")
             lx_err(s, "this text has no closing quote: it starts here, and a `\"` ends it")
+        c = p[i]
         if depth == 0:
             if c == '\\' and not raw:
                 i += 2
@@ -626,8 +626,8 @@ lx_string = (raw: bool):
                     continue
                 # ('{', a brace alone: there is nothing for it to interpolate; "{"a" if c...}" is
                 # text inside an interpolation)
-                nc = p[i + 2]
-                if not triple and p[i + 1] == q and i == start and not is_ident_char(nc) and nc != '"' and nc != '\'':
+                # (p[i + 2] read once p[i + 1] is the quote, so not the 0 after the source)
+                if not triple and p[i + 1] == q and i == start and not is_ident_char(p[i + 2]) and p[i + 2] != '"' and p[i + 2] != '\'':
                     i += 1
                     continue
                 depth = 1
@@ -804,8 +804,9 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
             lx_string(false)
             i = lx_i
             continue
+        # (src's bytes end with a 0, at len(src): the byte after next, p[i + 2], is read only once
+        # c1 is one of an operator's, so not that 0)
         c1 = p[i + 1]
-        c2 = p[i + 2]
         k = Tok.eof
         n = 1
         match c:
@@ -825,14 +826,14 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
                 if c1 == '.':
                     k = .dotdot
                     n = 2
-                    if c2 == '.':
+                    if p[i + 2] == '.':
                         k = .ellipsis
                         n = 3
-                else if c1 == '+' or c1 == '-' or c1 == '*' or c1 == '/' or c1 == '%' or c1 == '^' or c1 == '<' or c1 == '>' or (c1 == '=' and c2 == '=') or (c1 == '!' and c2 == '='):
+                else if c1 == '+' or c1 == '-' or c1 == '*' or c1 == '/' or c1 == '%' or c1 == '^' or c1 == '<' or c1 == '>' or (c1 == '=' and p[i + 2] == '=') or (c1 == '!' and p[i + 2] == '='):
                     # dotted (broadcasting) operator: .+ .* .== .<= ...
                     k = .dotop
                     n = 2
-                    if c2 == '=' and c1 != '+' and c1 != '-' and c1 != '*' and c1 != '/' and c1 != '%' and c1 != '^': n = 3
+                    if p[i + 2] == '=' and c1 != '+' and c1 != '-' and c1 != '*' and c1 != '/' and c1 != '%' and c1 != '^': n = 3
             '-':
                 k = .minus
                 if c1 == '>':
@@ -899,7 +900,7 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
                 if c1 == '<':
                     k = .shl
                     n = 2
-                    if c2 == '=':
+                    if p[i + 2] == '=':
                         k = .shleq
                         n = 3
                 else if c1 == '=':
@@ -910,7 +911,7 @@ lex = (file: int, src: str, from: int = 0, to: int = -1) -> Token[]:
                 if c1 == '>':
                     k = .shr
                     n = 2
-                    if c2 == '=':
+                    if p[i + 2] == '=':
                         k = .shreq
                         n = 3
                 else if c1 == '=':
