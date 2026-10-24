@@ -2384,6 +2384,10 @@ check_shareable = (r: int, pos: int):
     nm = name_of(int(locals[r].name))
     # (loop mut g in gems: steps.then(0.1, (): g.scale = 0.0): the element, changed later)
     if int(locals[r].flags) & LF_ALIAS != 0: fatal(pos, "'{nm}' stands for an element only while the loop is there, and the function changing it runs later: change the element by its position, {jd(pos, "`loop i in 0.. and {nm} in xs:` and then `(): xs[i]...`", "`loop i in 0.. and {nm} in xs \{ ... }` and then `() => xs[i]...`")} in the function")
+    if files[pos_file(locals[r].pos)].is_dewy:
+        # (docs/LANGUAGE.md: a mutable parameter cannot escape through a shared capture)
+        if int(locals[r].flags) & LF_MUTPARAM != 0: fatal(pos, "'{nm}' is an `@` parameter, its caller's place: a closure cannot share it (`$capture @{nm}`), since the closure could outlive the call; copy its value into a local first: `let v = {nm}`")
+        fatal(pos, "'{nm}' cannot be shared with a closure: only a `let` local or a by-value parameter can be (copy it first: `let v = {nm}`)")
     fatal(pos, "'{nm}' is captured by a closure and modified: only variables declared with `=` can be shared like that (copy it first: `let v = {nm}`)")
 
 module_ctx: int[]

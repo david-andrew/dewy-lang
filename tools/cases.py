@@ -499,14 +499,24 @@ def tail(text: str, lines: int = 25) -> str:
     return '\n'.join((['…'] if len(rows) > lines else []) + ['    ' + row for row in shown])
 
 
+# A batch imports each case's main; a case without one (top-level code only) runs
+# alone from the start instead of failing two batch builds first.
+DEFINES_MAIN = re.compile(r'^(?:(?:let|const)\s+)?main\s*[:=]', re.MULTILINE)
+
+
+def has_main(case: Case) -> bool:
+    return DEFINES_MAIN.search(case.path.read_text()) is not None
+
+
 def plan(cases: list[Case], node: bool) -> list[tuple[str, str, list[Case]]]:
     units = []
+    alone = {c.path for c in cases if c.args or c.stdin is not None or c.kind != 'reject' and not has_main(c)}
     for mode in MODES:
         if mode.startswith('web') and not node:
             continue
         chosen = [case for case in cases if mode in case.modes]
-        batched = [c for c in chosen if c.kind == 'run' and not c.args and c.stdin is None]
-        panics = [c for c in chosen if c.kind == 'panic' and not c.args and c.stdin is None]
+        batched = [c for c in chosen if c.kind == 'run' and c.path not in alone]
+        panics = [c for c in chosen if c.kind == 'panic' and c.path not in alone]
         for start in range(0, len(batched), BATCH_SIZE):
             units.append(('value', mode, batched[start:start + BATCH_SIZE]))
         size = PANIC_BATCH_SIZE[mode.split('-')[0]]

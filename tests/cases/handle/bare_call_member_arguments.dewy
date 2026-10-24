@@ -1,0 +1,18 @@
+# A bare zero-argument function name calls before a member call with arguments,
+# as before `.length` and `[i]` (and the compiler's targets.dewy and its users).
+names=():>array<string>=>['a' 'b' 'c']
+greeting=():>string=>"hello, world"
+counts=():>dict<string int>=>['a'->1 'b'->2]
+listed=(name:string):>string=>{
+    if name in? names {return "{name} in {names.join(", ")}"}
+    "no {name}: {names.join("/")}"
+}
+main=():>void=>{
+    printl(names.join(", "))
+    printl"{names.length} {names[1]} {names.contains('c')}"
+    printl(greeting.byte_slice(0 5))
+    printl(greeting.split(", ").length)
+    printl(counts.get('b') ?? 0)
+    printl(listed("a"))
+    printl(listed("z"))
+}

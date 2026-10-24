@@ -1,0 +1,9 @@
+# modes: native
+# An `@` parameter is its caller's place: a closure cannot share it even when it
+# only runs in the function (docs/LANGUAGE.md, "a mutable parameter ... cannot
+# escape through a shared capture; copy its value into a local first").
+bump=(@n:int64)=>{
+    let add=($capture @n)=>{n+=1}
+    add()
+}
+main=()=>{let v:int64=0 bump(@v) printl(v)}

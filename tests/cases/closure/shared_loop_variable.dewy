@@ -1,0 +1,8 @@
+# modes: native
+# A loop's variable is no `let` local: a closure cannot share it.
+main=()=>{
+    loop x in [1 2 3] {
+        let g=($capture @x)=>{x+=1}
+        g()
+    }
+}
