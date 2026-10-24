@@ -1954,7 +1954,11 @@ entire source. Matrix slice reads use the same bulk append path for each row.
 
 `xs.is_empty` tests for no elements, `xs.count(value)` counts the elements equal
 to a value and `xs.count(f)` those a predicate accepts; `xs.any(f)` and
-`xs.all(f)` test a predicate. Without a predicate, `any` and `all` apply only to
+`xs.all(f)` test a predicate. `xs.map(f)` is a new array of `f`'s results and
+`xs.filter(f)` one of the elements `f` accepts (a comprehension says either,
+`[loop x in xs if f(x) x]`); `xs.reversed()` is a new array in reverse order,
+while `xs.reverse()` reverses `xs` itself. `xs.get(i)` gives the element, or
+`none` when `i` is out of bounds (negative included). Without a predicate, `any` and `all` apply only to
 an array of bools (`all(flags)`; the idiom for numbers is a comparison per
 element, `all(xs .>? 0)`, part of the planned elementwise operators). There is no
 `zip` or `enumerate`: a compound loop walks several sources in step,
@@ -3267,6 +3271,11 @@ A function whose body is `$intrinsic` states one the compiler provides
 ## Loops, text and optional values
 
 `printl(x)` writes a value and a line break; `print(x)` writes it without one.
+`read_line()` reads the next line of standard input, without its line break. It
+gives `string | Canceled | FileError | none`: `none` at the end of the input, and
+the others as a file operation's (see "Files, paths and processes"), so a loop over
+the input stops at any of them with `if line is? exception break`, after which
+`line` is the `string`.
 They are the prelude's shadowable names for `console.printl` and `console.print`.
 `print(x file=stderr)` (and `printl`) writes to another stream: `stdout` and
 `stderr` are in the prelude. The prelude `console` also has `info` (as
@@ -3780,7 +3789,9 @@ these byte-oriented transformations do not perform grapheme validation.
 `text.remove_prefix(prefix)` and `text.remove_suffix(suffix)` give the text without
 that end when it has it (once), and the text unchanged otherwise.
 `text.trim_start` and `text.trim_end` drop whitespace from one end (`trim` both),
-`text.lines` gives the lines without their breaks (a final break adds no empty
+`text.split(sep)` gives the pieces between separators (`"a,,b".split(",")` is
+`["a" "" "b"]`) and `text.split()` the words between runs of whitespace (none for
+blank text), `text.lines` gives the lines without their breaks (a final break adds no empty
 line), `text.chars` its graphemes (as `graphemes(text)`), `text.count(part)` the
 nonoverlapping occurrences and `text.is_empty` whether it has none.
 `text.byte_slice(start stop)` gives the bytes `[start..stop)` as a string without

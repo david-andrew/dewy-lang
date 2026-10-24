@@ -3472,6 +3472,14 @@ check_for = (s: int):
         nodes[s].a = i32(last_checked)
         if types[source_type].kind != .array and types[source_type].kind != .fixed:
             fatal(nodes[s].pos, "`loop @item in items` needs stored array elements; ordinary iteration yields values")
+        # (loop @acct in accounts.values: a new array, whose changes nothing would keep)
+        source = int(nodes[s].a)
+        if nodes[source].kind == .call:
+            of_map = false
+            loop a in kids(source):
+                if nodes[a].type != 0 and is_map_type(ntype(a)): of_map = true
+            if of_map: fatal(nodes[s].pos, "`loop @item in items` changes the elements where they are stored, and a dictionary's `values` is a new array: change each entry through its key, `loop key in d.keys \{ d[key]... }`")
+            fatal(nodes[s].pos, "`loop @item in items` changes the elements where they are stored, so `items` is an array held by a variable or a field, not a new array a call gives")
     soa_loop(s)
     unpack_loop(s)
     dewy_nested_loop_bindings(s)

@@ -1,0 +1,167 @@
+# A toy stack-machine assembler and VM: parse labelled assembly text,
+# validate it (unknown opcodes, bad operands, undefined labels) with line
+# numbers, print a listing, then run it.
+
+SOURCE = """
+; sum of squares 1..n, then a countdown
+        push 5
+        store n
+        push 0
+        store acc
+loop:   load n
+        jz done
+        load n
+        dup
+        mul
+        load acc
+        add
+        store acc
+        load n
+        push 1
+        sub
+        store n
+        jmp loop
+done:   load acc
+        print
+        halt
+"""
+
+BAD = """
+start:  push 1
+        pusj 2
+        push x
+        jmp nowhere
+start:  halt
+"""
+
+Op:type = 'push' | 'load' | 'store' | 'add' | 'sub' | 'mul' | 'dup' | 'jz' | 'jmp' | 'print' | 'halt'
+
+Instr:type = [op:Op arg:int64|string|none line:int64]
+
+AsmError:type = type of error & [line:int64 message:string]
+
+Program:type = [code:array<Instr> labels:dict<string int64>]
+
+needs_number = (op:Op):>bool => op =? 'push'
+needs_name = (op:Op):>bool => op in? ['load' 'store']
+needs_label = (op:Op):>bool => op in? ['jz' 'jmp']
+
+parse_line = (text:string line:int64 @labels:dict<string int64> at:int64 @errors:array<AsmError>):>Instr? => {
+    let body = text
+    let semi = body.find(";")
+    if semi isnt? Missing { body = body[..semi) }
+    body = body.trim
+    let colon = body.find(":")
+    if colon isnt? Missing {
+        let name = body[..colon).trim
+        if name in? labels {
+            errors.push(AsmError[line "duplicate label '{name}'"])
+        } else {
+            labels[name] = at
+        }
+        body = body[colon+1..].trim
+    }
+    if body.is_empty return none
+    let words = body.split()
+    let mnemonic = words[0]
+    if mnemonic not in? members(Op) {
+        errors.push(AsmError[line "unknown opcode '{mnemonic}'"])
+        return none
+    }
+    let op = mnemonic as Op
+    let has_arg = needs_number(op) or needs_name(op) or needs_label(op)
+    if has_arg and words.length not=? 2 {
+        errors.push(AsmError[line "'{op}' takes one operand"])
+        return none
+    }
+    if not has_arg and words.length not=? 1 {
+        errors.push(AsmError[line "'{op}' takes no operand"])
+        return none
+    }
+    if needs_number(op) {
+        let n = to_int(words[1])
+        if n is? error {
+            errors.push(AsmError[line "'{words[1]}' is not a number"])
+            return none
+        }
+        return Instr[op n line]
+    }
+    if has_arg return Instr[op words[1] line]
+    Instr[op none line]
+}
+
+assemble = (text:string):>Program|array<AsmError> => {
+    let code:array<Instr> = []
+    let labels:dict<string int64> = []
+    let errors:array<AsmError> = []
+    loop i in 0.. and raw in text.lines {
+        let instr = parse_line(raw i+1 @labels code.length @errors)
+        if instr isnt? none code.push(instr)
+    }
+    loop ins in code {
+        if needs_label(ins.op) {
+            let target = ins.arg
+            if target is? string and target not in? labels {
+                errors.push(AsmError[ins.line "undefined label '{target}'"])
+            }
+        }
+    }
+    if not errors.is_empty return errors.sorted(key=(e) => e.line)
+    Program[code labels]
+}
+
+listing = (p:Program) => {
+    let names:dict<int64 string> = [loop [name at] in p.labels at->name]
+    loop pc in 0.. and ins in p.code {
+        let label = if pc in? names "{names[pc]}:" else ""
+        let arg = match ins.arg {
+            n:int64 => string(n)
+            s:string => s
+            <none> => ""
+        }
+        printl("{pc:>3}  {label:<6} {ins.op:<6} {arg}".trim_end)
+    }
+}
+
+run = (p:Program):>array<int64> => {
+    let stack:array<int64> = []
+    let vars:dict<string int64> = []
+    let output:array<int64> = []
+    let pc = 0
+    let steps = 0
+    loop pc <? p.code.length and steps <? 10000 {
+        let ins = p.code[pc]
+        pc += 1
+        steps += 1
+        match ins.op {
+            <'push'> => if ins.arg is? int64 stack.push(ins.arg)
+            <'load'> => if ins.arg is? string stack.push(vars.get(ins.arg) ?? 0)
+            <'store'> => if ins.arg is? string { vars[ins.arg] = stack.pop() }
+            <'add'> => { let b = stack.pop() let a = stack.pop() stack.push(a + b) }
+            <'sub'> => { let b = stack.pop() let a = stack.pop() stack.push(a - b) }
+            <'mul'> => { let b = stack.pop() let a = stack.pop() stack.push(a * b) }
+            <'dup'> => stack.push(stack[end])
+            <'jz'> => if stack.pop() =? 0 and ins.arg is? string { pc = p.labels[ins.arg] }
+            <'jmp'> => if ins.arg is? string { pc = p.labels[ins.arg] }
+            <'print'> => output.push(stack.pop())
+            <'halt'> => break
+        }
+    }
+    printl"ran {steps} steps"
+    output
+}
+
+main = () => {
+    match assemble(SOURCE) {
+        p:Program => {
+            listing(p)
+            printl"output: {run(p)}"
+        }
+        errors:array<AsmError> => loop e in errors { printl"line {e.line}: {e.message}" }
+    }
+    printl"--- bad program"
+    match assemble(BAD) {
+        <Program> => printl"unexpectedly assembled"
+        errors:array<AsmError> => loop e in errors { printl"line {e.line}: {e.message}" }
+    }
+}

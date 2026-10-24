@@ -1,0 +1,129 @@
+# modes: native native-release
+# stdin: coin 25\ncoin 3\ncoin 100\nselect A2\ncoin 25\nselect A2\nselect B2\nrestock B2 4\ncoin 100\nselect B2\nselect B1\ncoin 10\ncancel\nfly away\n\nselect Z9\ncoin 100\ncoin 25\nselect B1\ncoin 100\nreport\nquit\ncoin 5\n
+# A vending machine as a state machine, driven by commands on standard input:
+#   coin 25 | select B2 | cancel | restock B2 3 | report | quit
+
+Product:type = [name:string price:int64 stock:int64]
+
+Idle:type = type of any
+Paying:type = type of any & [credit:int64]
+Machine:type = [
+    state:Idle|Paying = Idle
+    slots:dict<string Product>
+    bank:int64 = 0
+    sold:dict<string int64> = []
+]
+
+COINS = [5 10 25 100]
+
+Command:type = 'coin' | 'select' | 'cancel' | 'restock' | 'report' | 'quit'
+
+money = (cents:int64):>string => "${cents // 100}.{cents % 100:02}"
+
+credit_of = (m:Machine):>int64 => match m.state {
+    p:Paying => p.credit
+    _ => 0
+}
+
+change_for = (amount:int64):>array<int64> => {
+    let left = amount
+    let out:array<int64> = []
+    loop coin in COINS.sorted(reverse=true) {
+        loop left >=? coin {
+            out.push(coin)
+            left -= coin
+        }
+    }
+    out
+}
+
+insert_coin = (@m:Machine coin:int64) => {
+    if coin not in? COINS {
+        printl"  rejected {coin}c coin"
+        return
+    }
+    m.state = Paying[credit_of(m) + coin]
+    printl"  credit {money(credit_of(m))}"
+}
+
+select = (@m:Machine code:string) => {
+    if code not in? m.slots {
+        printl"  no slot {code}"
+        return
+    }
+    let item = m.slots[code]
+    let credit = credit_of(m)
+    if item.stock =? 0 {
+        printl"  {item.name} is sold out"
+    } else if credit <? item.price {
+        printl"  {item.name} costs {money(item.price)}, credit {money(credit)}"
+    } else {
+        m.slots[code].stock -= 1
+        m.bank += item.price
+        m.sold[item.name] = (m.sold.get(item.name) ?? 0) + 1
+        let change = change_for(credit - item.price)
+        printl"  vend {item.name}, change {money(credit - item.price)} {change}"
+        m.state = Idle
+    }
+}
+
+cancel = (@m:Machine) => {
+    let credit = credit_of(m)
+    if credit >? 0 printl"  returned {money(credit)} {change_for(credit)}"
+    else printl"  nothing to return"
+    m.state = Idle
+}
+
+report = (m:Machine) => {
+    printl"  bank {money(m.bank)}"
+    loop [code item] in m.slots {
+        printl"  {code} {item.name:<10} {money(item.price):>6} x{item.stock}"
+    }
+    loop [name count] in m.sold {
+        printl"  sold {count} {name}"
+    }
+}
+
+main = () => {
+    let m = Machine[slots=[
+        "A1"->Product["Water" 100 5]
+        "A2"->Product["Soda" 150 2]
+        "B1"->Product["Chips" 125 1]
+        "B2"->Product["Candy" 90 0]
+    ]]
+    let line_no = 0
+    loop true {
+        let line = read_line()
+        if line is? exception break
+        line_no += 1
+        let words = line.split()
+        if words.is_empty continue
+        printl"> {line.trim}"
+        let cmd = words[0]
+        if cmd isnt? Command {
+            printl"  line {line_no}: unknown command '{cmd}'"
+            continue
+        }
+        match cmd as Command {
+            <'coin'> => {
+                let n = to_int(words.get(1) ?? "")
+                if n is? int insert_coin(@m n) else printl"  line {line_no}: coin needs a number"
+            }
+            <'select'> => if words.length =? 2 select(@m words[1]) else printl"  line {line_no}: select needs a slot"
+            <'cancel'> => cancel(@m)
+            <'restock'> => {
+                let code = words.get(1) ?? ""
+                let n = to_int(words.get(2) ?? "") ?? 0
+                if code in? m.slots {
+                    m.slots[code].stock += n
+                    printl"  {code} now has {m.slots[code].stock}"
+                } else {
+                    printl"  line {line_no}: no slot '{code}'"
+                }
+            }
+            <'report'> => report(m)
+            <'quit'> => break
+        }
+    }
+    if credit_of(m) >? 0 cancel(@m)
+}

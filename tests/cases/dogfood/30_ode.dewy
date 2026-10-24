@@ -1,0 +1,94 @@
+# ODE toolkit: Euler vs RK4 on a damped spring (checked against the exact
+# solution), a predator-prey model, and a 1-D heat rod with array slices.
+from units import m, kg, N, rad
+
+Vec:type = array<float64>
+Deriv:type = <(t:float64 y:Vec):>Vec>
+
+euler_step = (f:Deriv t:float64 y:Vec h:float64):>Vec => y .+ f(t y) .* h
+
+rk4_step = (f:Deriv t:float64 y:Vec h:float64):>Vec => {
+    let k1 = f(t y)
+    let k2 = f(t + h/2 y .+ k1 .* (h/2))
+    let k3 = f(t + h/2 y .+ k2 .* (h/2))
+    let k4 = f(t + h y .+ k3 .* h)
+    y .+ (k1 .+ k2 .* 2.0 .+ k3 .* 2.0 .+ k4) .* (h/6)
+}
+
+integrate = (step:<(f:Deriv t:float64 y:Vec h:float64):>Vec> f:Deriv y0:Vec t_end:float64 n:int64):>Vec => {
+    let h = t_end / n
+    let y = y0
+    loop i in [0..n) {
+        y = step(@f i*h y h)
+    }
+    y
+}
+
+# --- damped spring: m x'' + c x' + k x = 0
+spring = () => {
+    let mass = 0.5kg
+    let k = 8.0N/m
+    let c = 0.4kg/s
+    # plain numbers for the integrator: SI values
+    let w0 = sqrt(k/mass) * s   # rad/s as a plain number
+    let zeta = (c/(2.0*sqrt(k*mass)))
+    let wd = w0*sqrt(1.0 - zeta^2)
+    printl"spring: w0 = {w0:.4f} rad/s, zeta = {zeta:.4f}"
+    let exact = (t:float64):>float64 => exp(-zeta*w0*t) * (cos(wd*t*rad) + zeta*w0/wd*sin(wd*t*rad))
+    let f = (t:float64 y:Vec):>Vec => [y[1] -(k/mass*s^2)*y[0] - (c/mass*s)*y[1]]
+    printl"   steps   Euler error     RK4 error"
+    loop n in [25 50 100 200] {
+        let e = integrate(@euler_step @f [1.0 0.0] 5.0 n)
+        let r = integrate(@rk4_step @f [1.0 0.0] 5.0 n)
+        let x = exact(5.0)
+        printl"{n:>8} {abs(e[0]-x):>13.3e} {abs(r[0]-x):>13.3e}"
+    }
+}
+
+# --- Lotka-Volterra predator/prey
+predator_prey = () => {
+    let f = (t:float64 y:Vec):>Vec => {
+        let [prey fox] = y
+        [1.1*prey - 0.4*prey*fox 0.1*prey*fox - 0.4*fox]
+    }
+    let y:Vec = [10.0 10.0]
+    let h = 0.05
+    let peak_prey = 0.0
+    let peak_time = 0.0
+    printl"predator-prey:"
+    loop i in [0..400) {
+        let t = i*h
+        if i % 50 =? 0 printl"  t={t:>5.1f}  prey={y[0]:>7.3f}  foxes={y[1]:>7.3f}"
+        if y[0] >? peak_prey {
+            peak_prey = y[0]
+            peak_time = t
+        }
+        y = rk4_step(@f t y h)
+    }
+    printl"  prey peaks at {peak_prey:.2f} (t={peak_time:.2f})"
+}
+
+# --- heat rod: explicit finite differences, ends held at 0 and 100
+heat = () => {
+    let n = 21
+    let alpha = 0.4
+    let u:Vec = fill(0.0 n)
+    u[end] = 100.0
+    loop step in [0..500) {
+        let lap = u[0..end-2] .- u[1..end-1] .* 2.0 .+ u[2..end]
+        u[1..end-1] .+= lap .* alpha
+    }
+    printl"heat rod after 500 steps:"
+    loop i in [0, 4..n) {
+        let bar = "#" * int64(u[i] / 5.0)
+        printl"  x={i/(n-1):.2f} {u[i]:>6.2f} {bar}"
+    }
+    let mean_temp = sum(u)/u.length
+    printl"  mean {mean_temp:.2f}, max interior step {max([loop i in [1..n) abs(u[i]-u[i-1])]):.2f}"
+}
+
+main = () => {
+    spring()
+    predator_prey()
+    heat()
+}

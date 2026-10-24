@@ -1,0 +1,143 @@
+# Grid pathfinding: BFS for reachability, A* with terrain costs, path overlay.
+# '#' wall, '.' road (cost 1), '~' swamp (cost 5), 'S' start, 'G' goal.
+
+MAP = """
+##############################
+#S.........#.................#
+#.########.#.#######.#######.#
+#.#......#.#.#.....#.#.....#.#
+#.#.####.#...#.###.#.#.###.#.#
+#.#.#..#.#####.#~#.#...#~#.#.#
+#...#..#.......#~#.#####~#...#
+#####..#########~#......~###.#
+#.......~~~~~~~~~#######~~~#~#
+#.#####.#########.......#..#~#
+#.....#...........#####...#..#
+#####################.......G#
+##############################
+""".trim
+
+Point:type = [r:int64 c:int64]
+
+Grid:type = [
+    cells:array<string>
+    rows:int64
+    cols:int64
+]
+
+parse_grid = (text:string):>Grid => {
+    let lines = text.lines
+    Grid[lines lines.length lines[0].length]
+}
+
+find = (g:Grid ch:string):>Point? => {
+    loop r in [0..g.rows) {
+        loop c in [0..g.cols) {
+            if g.cells[r][c] =? ch return Point[r c]
+        }
+    }
+    none
+}
+
+cost = (ch:string):>int64? => match ch {
+    <"#"> => none
+    <"~"> => 5
+    _ => 1
+}
+
+neighbors = (g:Grid p:Point):>array<Point> => {
+    let out:array<Point> = []
+    loop [dr dc] in [[-1 0] [1 0] [0 -1] [0 1]] {
+        let r = p.r + dr
+        let c = p.c + dc
+        if 0 <=? r <? g.rows and 0 <=? c <? g.cols and g.cells[r][c] not=? "#" {
+            out.push(Point[r c])
+        }
+    }
+    out
+}
+
+manhattan = (a:Point b:Point):>int64 => abs(a.r - b.r) + abs(a.c - b.c)
+
+bfs_distance = (g:Grid start:Point goal:Point):>int64? => {
+    let dist:dict<Point int64> = [start->0]
+    let queue = [start]
+    loop p in @queue {
+        if p =? goal return dist[p]
+        loop n in neighbors(g p) {
+            if n not in? dist {
+                dist[n] = dist[p] + 1
+                queue.push(n)
+            }
+        }
+    }
+    none
+}
+
+Route:type = [path:array<Point> cost:int64 expanded:int64]
+
+# A* when guided by the Manhattan distance (never more than the true cost, since
+# a step costs at least 1); Dijkstra when not.
+shortest = (g:Grid start:Point goal:Point guided:bool):>Route? => {
+    let estimate = (p:Point):>float64 => if guided float64(manhattan(p goal)) else 0.0
+    let open:Heap<Point> = []
+    let came_from:dict<Point Point> = []
+    let best:dict<Point int64> = [start->0]
+    open.push(start estimate(start))
+    let expanded = 0
+    loop open.length >? 0 {
+        let p = open.pop()
+        expanded += 1
+        if p =? goal {
+            let path = [p]
+            let cur = p
+            loop cur in? came_from {
+                cur = came_from[cur]
+                path.push(cur)
+            }
+            return Route[path.reversed best[p] expanded]
+        }
+        loop n in neighbors(g p) {
+            let new_cost = best[p] + (cost(g.cells[n.r][n.c]) ?? 1)
+            if n not in? best or new_cost <? best[n] {
+                best[n] = new_cost
+                came_from[n] = p
+                open.push(n float64(new_cost) + estimate(n))
+            }
+        }
+    }
+    none
+}
+
+render = (g:Grid path:array<Point>):>string => {
+    let on_path = set(path)
+    let lines = [loop r in [0..g.rows) {
+        let line = ""
+        loop c in [0..g.cols) {
+            let ch = g.cells[r][c]
+            line = if Point[r c] in? on_path and ch in? ["." "~"] "{line}*" else "{line}{ch}"
+        }
+        line
+    }]
+    lines.join("\n")
+}
+
+main = () => {
+    let g = parse_grid(MAP)
+    let start = find(g "S") ?? Point[0 0]
+    let goal = find(g "G") ?? Point[0 0]
+    printl"grid {g.rows}x{g.cols}, start {start}, goal {goal}"
+    match bfs_distance(g start goal) {
+        d:int64 => printl"BFS: {d} steps"
+        <none> => printl"BFS: unreachable"
+    }
+    let dijkstra = shortest(g start goal false)
+    let astar = shortest(g start goal true)
+    if dijkstra is? none or astar is? none {
+        printl"no path"
+        return
+    }
+    printl"Dijkstra: cost {dijkstra.cost}, expanded {dijkstra.expanded} cells"
+    printl"A*: cost {astar.cost}, {astar.path.length - 1} steps, expanded {astar.expanded} cells"
+    printl(render(g astar.path))
+}

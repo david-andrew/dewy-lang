@@ -1,0 +1,27 @@
+  0         push   5
+  1         store  n
+  2         push   0
+  3         store  acc
+  4  loop:  load   n
+  5         jz     done
+  6         load   n
+  7         dup
+  8         mul
+  9         load   acc
+ 10         add
+ 11         store  acc
+ 12         load   n
+ 13         push   1
+ 14         sub
+ 15         store  n
+ 16         jmp    loop
+ 17  done:  load   acc
+ 18         print
+ 19         halt
+ran 74 steps
+output: [55]
+--- bad program
+line 3: unknown opcode 'pusj'
+line 4: 'x' is not a number
+line 5: undefined label 'nowhere'
+line 6: duplicate label 'start'

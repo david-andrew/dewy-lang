@@ -1,0 +1,17 @@
+# quick
+# A plain string tested against a container of literal-union members: text that is no
+# member is simply not in it (no conversion failure), at run time and when its
+# domain is known while compiling.
+Op:type = 'push' | 'load' | 'jmp'
+main = () => {
+    let ops:array<Op> = ['push' 'jmp']
+    loop word in ["push" "load" "pusj" ""] {
+        printl"{word}: {word in? ops} {word in? members(Op)} {word not in? set(ops)} {word in? ['load'->1]}"
+    }
+    let known = "pusj"
+    printl(known in? members(Op))
+    let order:array<string> = []
+    let first = ($capture @order) => { order.push("needle"); "load" }
+    printl(first() in? { order.push("container"); members(Op) })
+    printl(order)
+}

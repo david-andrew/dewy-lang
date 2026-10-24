@@ -868,6 +868,14 @@ coerce = (n: int, target: int) -> int:
     if tk == .bool_ and (fk == .array or fk == .str_ or is_map_type(from)): why = if dewy: " (not true or false: `xs.length >? 0` asks if it has anything)" else: " (not true or false: `xs.len() > 0` asks if it has anything)"
     if tk == .bool_ and (fk == .int_ or fk == .float_): why = if dewy: " (a number is not true or false: `x not=? 0` asks)" else: " (a number is not true or false: `x != 0` asks)"
     if tk == .bool_ and fk == .int_ and nodes[n].kind == .int_lit: why = if dewy: " (to do something {nodes[n].ival} times: `loop i in [1..{nodes[n].ival}] \{ }`)" else: " (to do something {nodes[n].ival} times: `loop i in [1..{nodes[n].ival}]:`)"
+    # (`words.is_empty` with words from read_line(): the exceptions forwarded through members)
+    if dewy and len(why) == 0 and tk == .bool_ and is_union(from):
+        failures: str[]
+        rest = 0
+        loop m in union_members(from):
+            if exception_member(prune(m)): failures.push(dt(m))
+            else if can_coerce(0, m, to): rest += 1
+        if failures.len() > 0 and rest > 0: why = " (it may be {join(failures, " | ")}, carried along from where the value was made: handle that there, with `if x is? exception ...`, `or_throw` or `?? fallback`)"
     # (`[1 2 ; 3 4]` where one row is wanted: a row break makes the literal 2-D)
     if dewy and tk == .array and is_nd(from) and pos_off(nodes[n].pos) < len(files[pos_file(nodes[n].pos)].src) and files[pos_file(nodes[n].pos)].src[pos_off(nodes[n].pos)] == '[': why = " (this literal has rows, so it is 2-D: for one row, leave out the row breaks, and end a line with `\\` to continue the row on the next line)"
     fatal(nodes[n].pos, "type mismatch: expected {dt(to)}, found {dt(from)}{why}{coerce_hint}")
@@ -1012,6 +1020,19 @@ private_hint = (name: int) -> str:
 
 # (helper() whose file the program has, but not `use`d by this one: `use` brings in the names of
 # the file it names only, not those of the files that one uses)
+# the constants the bundled `units` module declares (read only for an unknown name's hint)
+unit_library_names = () -> str[]:
+    out: str[]
+    if len(lib_root) == 0: return out
+    text = read_file("{lib_root}/units.dewy") ?? ""
+    loop line in split(text, "\n"):
+        if not starts_with(line, "const "): continue
+        rest = line[6..]
+        stop = 0
+        loop stop < len(rest) and rest[stop] != ' ' and rest[stop] != ':' and rest[stop] != '=': stop += 1
+        if stop > 0: out.push(rest[..stop))
+    out
+
 unused_file_hint = (name: int) -> str:
     m = cur_mod()
     if m < 0 or modules[m].is_prelude or is_private(name): return ""
@@ -6739,6 +6760,10 @@ check_intrinsic = (n: int, id: IN, args: int[], expected: int) -> int:
             nodes[n].aux = i32(int(IN.fmt_struct))
             nodes[n].aux2 = 1
             return check_intrinsic(n, .fmt_struct, args, expected)
+        # (a Dewy object with its own text, `__as__` to string, as a rational in a matrix: that text)
+        if tkind(t) == .struct_ and as_conversion(prune(t), T_STR) != 0:
+            nodes[n] = nodes[bc_call("__dewy_fmt_elem", args, nodes[n].pos)]
+            return check_expr(n, expected)
         c = mk(.call, nodes[n].pos)
         callee = mk(.ident, nodes[n].pos)
         nodes[callee].name = i32(ci(25, "__fmt"))
@@ -7078,6 +7103,55 @@ no_concat_error = (n: int, a: int, b: int, text: bool):
         fatal(nodes[n].pos, "`+` is reserved for elementwise math on arrays, not yet defined: `.+` adds element by element (`xs .+ 1`), and a spread literal joins arrays, `[xs... ys...]`")
     fatal(nodes[n].pos, "`+` does not join arrays (on arrays it is reserved for elementwise math): spread them into one, `[{concat_piece(a, false)}... {concat_piece(b, false, true)}...]`; `.+` adds element by element")
 
+# the string-literal union a container's members or keys are (0 if not one)
+membership_str_set_of = (t0: int) -> int:
+    t = prune(t0)
+    k = types[t].kind
+    if k == .array or k == .fixed: return if str_set_of(int(types[t].elem)) != 0: prune(int(types[t].elem)) else: 0
+    if is_map_type(t) or is_dewy_set_type(t):
+        key = struct_targ(int(types[t].st), 0)
+        return if str_set_of(key) != 0: prune(key) else: 0
+    0
+
+# `word in? members(Op)` with a plain string: a text that is no member is simply not in the
+# container, so it is tested first, `word is? Op and ...`, rather than converted (which fails).
+# The needle and then the container are evaluated once each, in that order. 0: not this case.
+membership_str_set = (n: int) -> int:
+    needle = int(nodes[n].a)
+    container = int(nodes[n].b)
+    pos = nodes[n].pos
+    tc = prune(check_expr(container, 0))
+    container = last_checked
+    nodes[n].b = i32(container)
+    add_flag(container, NF_CHECKED)
+    u = membership_str_set_of(tc)
+    if u == 0: return 0
+    tn = prune(check_expr(needle, 0))
+    needle = last_checked
+    nodes[n].a = i32(needle)
+    add_flag(needle, NF_CHECKED)
+    if tn != T_STR: return 0
+    statements: int[]
+    held = int(nodes[capture_value(needle, T_STR, statements)].sym)
+    source = int(nodes[capture_value(container, tc, statements)].sym)
+    call = mk(.call, pos)
+    callee = mk(.field, pos)
+    nodes[callee].a = i32(mk_ident_local(source, pos))
+    nodes[callee].name = i32(intern("contains"))
+    nodes[call].a = i32(callee)
+    set_list(call, [mk_ident_local(held, pos)])
+    guarded = bc_logic(.and_, shape_is(mk_ident_local(held, pos), u, pos), call, pos)
+    if prune(check_expr(guarded, T_BOOL)) != T_BOOL: fatal(pos, "membership's contains function must return bool")
+    result = mk(.exprstmt, pos)
+    nodes[result].a = i32(last_checked)
+    statements.push(result)
+    nodes[n] = Node(kind = .block, pos = pos, type = i32(T_BOOL))
+    nodes[n].aux = 1
+    set_list(n, statements)
+    add_flag(n, NF_CHECKED)
+    last_checked = n
+    T_BOOL
+
 check_binary = (n: int, expected: int) -> int:
     op = nodes[n].op as Tok
     if op == .dotop: return check_dotted(n, expected)
@@ -7102,6 +7176,11 @@ check_binary = (n: int, expected: int) -> int:
         needle = int(nodes[n].a)
         container = int(nodes[n].b)
         dewy = files[pos_file(nodes[n].pos)].is_dewy
+        if dewy and str_sets.len() > 1 and nodes[needle].kind != .str_lit:
+            members = membership_str_set(n)
+            if members != 0: return members
+            needle = int(nodes[n].a)
+            container = int(nodes[n].b)
         call = mk(.call, nodes[n].pos)
         callee = mk(.field, nodes[n].pos)
         nodes[callee].a = nodes[n].b
@@ -7176,6 +7255,8 @@ check_binary = (n: int, expected: int) -> int:
         if not a_literal and b_literal and binary_literal_context(b, ta, op): h = if tkind(ta) == .opt: telem(ta) else: ta
         # (`m[0 [..]] =? [1 2]`: a 1-D selection against a literal of its elements)
         if (op == .eq or op == .ne) and is_nd(ta) and bk == .array: h = mk_array(nd_elem(ta))
+        # (`m * [1.0 0.0]`: a matrix times a column vector written out, in the matrix's elements)
+        if op == .star and is_nd(ta) and bk == .array and dewy_at(nodes[n].pos) and is_numeric(nd_elem(ta)): h = mk_array(nd_elem(ta))
         tb = prune(check_expr(b, h))
     if types[ta].kind == .secret or types[tb].kind == .secret: return secret_binary(n, op, a, b)
     # (two plain numbers, neither a written fraction nor a character: none of the cases below
@@ -8669,6 +8750,17 @@ check_match = (m: int, expected: int) -> int:
                 if dewy and structs[si].union_: miss += union_literal_missing(vi, struct_targ(si, vi), union_lits)
                 else: miss += ".{name_of(int(variants[int(structs[si].variants) + vi].name))}"
             fatal(nodes[m].pos, "this match has no arm for {miss} (add one, or a {jd(nodes[m].pos, "`_:`", "`_ => ...`")} arm for the rest)")
+        # (match word { <'go'> ... <'stop'> ... } on a string, even after `word is? Cmd`: a string
+        # is not narrowed to the union, so other text still needs an arm)
+        if dewy and st == T_STR and str_sets.len() > 1:
+            written: str[]
+            loop arm in kids(m):
+                loop p in kids(arm):
+                    if nodes[p].kind == .plit and nodes[int(nodes[p].a)].kind == .str_lit: written.push(name_of(int(nodes[int(nodes[p].a)].sval)))
+            if written.len() > 0:
+                spelled: str[]
+                loop w in written: spelled.push("'{w}'")
+                fatal(nodes[m].pos, "match is not exhaustive: this is a string, which may hold other text than {join(spelled, ", ")} (add a `_ => ...` arm, or match the literal union instead: `match x as U \{...}` after `x is? U` holds)")
         if dewy: fatal(nodes[m].pos, "match is not exhaustive (add a `_ => ...` arm or `else`)")
         fatal(nodes[m].pos, "match expression is not exhaustive (add a `_:` arm)")
     if result == 0: result = T_NEVER
@@ -9361,6 +9453,8 @@ check_ident_expr = (n: int, expected: int) -> int:
         if len(fx) > 0: fatal(nodes[n].pos, "{name_of(nm)}{fx} looks like a file's name: put it in quotes, `\"{name_of(nm)}{fx}\"`")
         # (as the name is written: macOS and Windows find lib/physics.jo for Physics too)
         if len(lib_root) > 0 and name_of(nm) == lower(name_of(nm)) and file_exists("{lib_root}/{name_of(nm)}.jo"): fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (a module of the library: `import {name_of(nm)}` at the top of the file)")
+        # (cos(x*rad), 9.81m/s^2 with `m` not imported: a unit of the bundled library)
+        if dewy_at(nodes[n].pos) and unit_library_names().contains(name_of(nm)): fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (a unit of the library: `from units import {name_of(nm)}` at the top of the file)")
         gl = gone_local_hint(nm, nodes[n].pos)
         if len(gl) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{gl}")
         uh = unused_file_hint(nm)
@@ -10445,6 +10539,12 @@ check_expr_other = (n: int, expected: int) -> int:
                     else: elt = if files[pos_file(nodes[n].pos)].is_dewy: T_MATH_INT else: T_INT
                 # ([1, "two", 3]: an array holds one kind of value)
                 coerce_hint = jd(nodes[n].pos, " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, make a struct or a union)", " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, use a record type or a union such as `array<int64|string>`)")
+                # ([name count], Python's tuple: a type per position says so)
+                if dewy_at(nodes[n].pos) and not spread and nkids(n) >= 2 and nkids(n) <= 4:
+                    spelled: str[]
+                    loop c in kids(n):
+                        if nodes[c].type != 0: spelled.push(dt(ntype(c)))
+                    if spelled.len() == nkids(n): coerce_hint = " (an array holds one kind of value, here {dt(elt)}; a few values of their own kinds are a tuple, a type per position: `let pair:[{join(spelled, " ")}] = ...`; for many, a record type or a union such as `array<int64|string>`)"
                 # ([Bool[true] Null]: siblings of a minted family are held as their parent)
                 if nominal_parent.get(prune(elt), 0) != 0 and dewy_at(nodes[n].pos):
                     coerce_hint = " (an array holds one kind of value, here {dt(elt)}, taken from the first element; for any member of its family, name the parent: `let values:array<{dt(nominal_parent[prune(elt)])}> = [...]`)"
@@ -10647,6 +10747,12 @@ check_expr_other = (n: int, expected: int) -> int:
         if not ok:
             why = ""
             if is_union(ft) and union_index(ft, tt) >= 0: why = if dewy_at(nodes[n].pos): " (a union is not cast: inside `if x is? {dt(tt)} \{ }` (or after `x is? {dt(tt)} and`), x is one)" else: " (a union is not cast: after `if x is {dt(tt)}:` (or in `x is {dt(tt)} and ...`), x is one)"
+            # (`(int64 | string)? as int64`: the payload's member, tested the same way)
+            fo = prune(ft)
+            if why == "" and dewy_at(nodes[n].pos) and types[fo].kind == .opt:
+                inner = int(types[fo].elem)
+                if type_eq(inner, tt) or (is_union(inner) and union_index(inner, tt) >= 0):
+                    why = " (an optional is not cast: inside `if x is? {dt(tt)} \{ }` (or after `x is? {dt(tt)} and`), x is one; `match x` takes each member, `x ?? fallback` gives a default)"
             fatal(nodes[n].pos, "cannot cast {dt(ft)} to {dt(tt)}{why}")
         t = tt
     else if k == .parallel_region:

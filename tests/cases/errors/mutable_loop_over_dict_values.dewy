@@ -1,0 +1,6 @@
+Account:type = [owner:string balance:int64 = 0]
+main = () => {
+    let accounts:dict<string Account> = ["ann"->Account["ann"]]
+    loop @acct in accounts.values { acct.balance += 1 }
+    printl(accounts)
+}
