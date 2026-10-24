@@ -33,13 +33,13 @@ const SPEED:float64 = 45.0
 
 # Save the position BEFORE the visible step, so reopening repeats the same line
 # or choice. Scene state is included; a resumed conversation keeps its portraits.
-Bookmark: type = [position: StorySave background: vec4 shown: dict<string string>]
-Reading: type = [
-    script: Story step: StoryStep = StoryStep[kind = StoryKind.end]
-    background: vec4 = rgb(0.1 0.1 0.14) shown: dict<string string> = []
-    bookmark: Bookmark = Bookmark[script.save() background shown]
+Bookmark:type = [position:StorySave background:vec4 shown:dict<string string>]
+Reading:type = [
+    script:Story step:StoryStep = StoryStep[kind = StoryKind.end]
+    background:vec4 = rgb(0.1 0.1 0.14) shown:dict<string string> = []
+    bookmark:Bookmark = Bookmark[script.save() background shown]
 ]
-advance = (@reading: Reading) :> void => {
+advance = (@reading:Reading):>void => {
     loop true {
         reading.bookmark = Bookmark[reading.script.save() reading.background reading.shown]
         reading.step = reading.script.next()
@@ -56,20 +56,20 @@ advance = (@reading: Reading) :> void => {
         } else if words[0]=?"hide" reading.shown.remove(words[1])
     }
 }
-fresh = () :> Reading => {
+fresh = ():>Reading => {
     let reading = Reading[script = story(SCRIPT)]
     if reading.script.error.length>?0 panic(reading.script.error)
     advance(@reading)
     return reading
 }
-resume = (bookmark: Bookmark) :> Reading => {
+resume = (bookmark:Bookmark):>Reading => {
     let reading = Reading[script = story(SCRIPT) background = bookmark.background shown = bookmark.shown]
     if reading.script.error.length>?0 panic(reading.script.error)
     reading.script.load(bookmark.position)
     advance(@reading)
     return reading
 }
-choose = (@reading: Reading index: int64) :> void => {
+choose = (@reading:Reading index:int64):>void => {
     if reading.step.kind not=?StoryKind.choice or index<?0 or index>=?reading.step.choices.length return
     reading.script.choose(index)
     advance(@reading)
@@ -103,7 +103,7 @@ let reading = resume(if saved is? Bookmark saved else fresh().bookmark)
 let typed:float64 = 0.0
 on_quit = () => { save_value("place" reading.bookmark) }
 
-update = (dt: float64) :> void => {
+update = (dt:float64):>void => {
     if key_pressed(Key.escape) quit()
     if reading.step.kind=?StoryKind.line {
         typed += dt*SPEED
@@ -117,7 +117,7 @@ update = (dt: float64) :> void => {
         }
     }
 }
-draw = () :> void => {
+draw = ():>void => {
     clear(reading.background)
     loop [who at] in reading.shown {
         let x:float64 = 640.0

@@ -10,27 +10,27 @@ const ROCK_SPEED_MAX:float64 = 420.0
 const ROCK_GAP:float64 = 1.0
 const ROCK_GAP_MIN:float64 = 0.25
 
-Rock: type = [pos: vec2 vel: vec2 r: float64 angle: float64 = 0.0 spin: float64 = 0.0]
-Game: type = [
-    player: vec2 = vec2(640 360) vel: vec2 = vec2(0 0) gold: vec2 = vec2(900 360)
-    rocks: array<Rock> = [] score: int64 = 0 elapsed: float64 = 0.0 rock_wait: float64 = 1.0
-    over: bool = false random: Rng = rng(1)
+Rock:type = [pos:vec2 vel:vec2 r:float64 angle:float64 = 0.0 spin:float64 = 0.0]
+Game:type = [
+    player:vec2 = vec2(640 360) vel:vec2 = vec2(0 0) gold:vec2 = vec2(900 360)
+    rocks:array<Rock> = [] score:int64 = 0 elapsed:float64 = 0.0 rock_wait:float64 = 1.0
+    over:bool = false random:Rng = rng(1)
 ]
-random_between = (@random: Rng low: float64 high: float64) :> float64 => low+(high-low)*random.next_float()
+random_between = (@random:Rng low:float64 high:float64):>float64 => low+(high-low)*random.next_float()
 
-new_gold = (@game: Game) :> void => {
+new_gold = (@game:Game):>void => {
     loop true {
         game.gold = vec2(random_between(@game.random 80.0 1200.0) random_between(@game.random 100.0 660.0))
         if (game.gold-game.player).norm>?260.0 break
     }
 }
-fresh = (seed: int64) :> Game => {
+fresh = (seed:int64):>Game => {
     let game = Game[random = rng(seed)]
     new_gold(@game)
     return game
 }
 
-spawn_rock = (@game: Game) :> void => {
+spawn_rock = (@game:Game):>void => {
     let side = game.random.next_int(0 4)
     let at = vec2(random_between(@game.random 0.0 1280.0) -60)
     if side=?1 at = vec2(random_between(@game.random 0.0 1280.0) 780)
@@ -39,11 +39,11 @@ spawn_rock = (@game: Game) :> void => {
     let aim = game.player+vec2(random_between(@game.random -200.0 200.0) random_between(@game.random -200.0 200.0))
     let speed = min(ROCK_SPEED+game.elapsed*6.0 ROCK_SPEED_MAX)*random_between(@game.random 0.8 1.2)
     game.rocks.push(Rock[pos = at vel = normalize(aim-at)*speed
-            r = random_between(@game.random 16.0 42.0) spin = random_between(@game.random -2.0 2.0)])
+        r = random_between(@game.random 16.0 42.0) spin = random_between(@game.random -2.0 2.0)])
 }
 
 # The simulation uses only the game value, input and dt, including its random state.
-advance = (@game: Game move: vec2 dt: float64) :> void => {
+advance = (@game:Game move:vec2 dt:float64):>void => {
     if game.over return
     game.elapsed += dt
     game.vel = approach(game.vel move*SPEED 12.0 dt)
@@ -61,7 +61,7 @@ advance = (@game: Game move: vec2 dt: float64) :> void => {
         rock.pos += rock.vel*dt
         rock.angle += rock.spin*dt
     }
-    game.rocks = game.rocks.filter((rock: Rock) => rock.pos.x>?-100 and rock.pos.x<?1380 and rock.pos.y>?-100 and rock.pos.y<?820)
+    game.rocks = game.rocks.filter((rock:Rock) => rock.pos.x>?-100 and rock.pos.x<?1380 and rock.pos.y>?-100 and rock.pos.y<?820)
     loop rock in game.rocks {
         if circles_overlap(game.player PLAYER_R*0.8 rock.pos rock.r*0.9) {
             game.over = true
@@ -101,13 +101,13 @@ let t:float64 = 0.0
 let snd_gold = sfx_coin()
 let snd_crash = sfx_explosion()
 
-start = () :> void => {
+start = ():>void => {
     game = fresh(random_int(1 1000000000))
     sparks = Particles[gravity = vec2(0 0) drag = 2.5]
     shake = Shake[]
     screen = Screen.playing
 }
-crash = () :> void => {
+crash = ():>void => {
     sparks.emit(game.player 60 420 rgb(1.0 0.5 0.2) life = 1.2 size = 5)
     play(snd_crash 0.8)
     shake.add(0.9)
@@ -117,7 +117,7 @@ crash = () :> void => {
     }
     screen = Screen.over
 }
-update = (dt: float64) :> void => {
+update = (dt:float64):>void => {
     t += dt
     shake.update(dt)
     sparks.update(dt)
@@ -136,16 +136,16 @@ update = (dt: float64) :> void => {
     if game.over crash()
 }
 
-draw_rock = (rock: Rock) :> void => {
+draw_rock = (rock:Rock):>void => {
     let points = [loop i in [0..7) {
-            let angle = rock.angle+i/7.0*TAU
-            let bump:float64 = 0.8+0.2*sin((i*2.7+rock.r)*rad)
-            rock.pos+from_angle(angle)*rock.r*bump
+        let angle = rock.angle+i/7.0*TAU
+        let bump:float64 = 0.8+0.2*sin((i*2.7+rock.r)*rad)
+        rock.pos+from_angle(angle)*rock.r*bump
     }]
     polygon(points rgb(0.42 0.38 0.4))
     polyline(points 3 rgb(0.62 0.58 0.6) closed = true)
 }
-draw = () :> void => {
+draw = ():>void => {
     clear(rgb(0.06 0.07 0.11))
     camera2d(vec2(640 360)+shake.offset())
     loop x in [0..33) { loop y in [0..19) circle(vec2(x*40 y*40) 1.5 rgba(1 1 1 0.06)) }

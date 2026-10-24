@@ -172,8 +172,8 @@ def test_core_netpong_winning_state(compiler, tmp_path, release):
     send_wait=0.02
 ''')
     # Fix the simulation step so the winning frame falls between send ticks.
-    source = source.replace('update = (dt: float64) =>', 'advance_game = (dt: float64) =>')
-    source += '\nupdate=(dt:float64)=>advance_game(0.001)\nif hosting {printl("ready")}\n'
+    source = source.replace('update = (dt:float64) =>', 'advance_game = (dt:float64) =>')
+    source += '\nupdate = (dt:float64) => advance_game(0.001)\nif hosting {printl("ready")}\n'
     path = tmp_path / 'netpong.dewy'
     path.write_text(source)
     binary = tmp_path / 'netpong'
@@ -341,9 +341,9 @@ def test_core_online_starter_room(compiler, room_binaries, tmp_path):
     assert made.returncode == 0, made.stdout + made.stderr
     path = project / 'race.dewy'
     source = path.read_text().replace('1280 720)', '320 200)')
-    start, end = source.index('my_pad=()'), source.index('update=(dt:float64)')
-    source = source[:start] + 'my_pad=():>Pad=>Pad[x=if me()=?0 1 else -1]\n\n' + source[end:]
-    source = source.replace('update=(dt:float64)=>{', 'advance_game=(dt:float64)=>{')
+    start, end = source.index('my_pad = ()'), source.index('update = (dt:float64)')
+    source = source[:start] + 'my_pad = ():>Pad => Pad[x=if me()=?0 1 else -1]\n\n' + source[end:]
+    source = source.replace('update = (dt:float64) => {', 'advance_game = (dt:float64) => {')
     source += '''
 import rtc
 rtc.rtc_stun_servers=[]

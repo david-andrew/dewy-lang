@@ -30,7 +30,7 @@ const LEVEL = r"
 ############################################################
 "
 
-make_level = (layout: string = LEVEL) :> Tilemap => {
+make_level = (layout:string = LEVEL):>Tilemap => {
     # Collision needs tile sizes, not a texture; drawing adds that below.
     let map = tilemap(Tileset[tile_w = T tile_h = T columns = 4]
         [tile_layer("ground" layout r"#=/\")])
@@ -41,8 +41,8 @@ make_level = (layout: string = LEVEL) :> Tilemap => {
 }
 
 # Positions of markers in the text map, in pixels.
-markers = (symbol: string) :> array<vec2> => {
-    let found: array<vec2> = []
+markers = (symbol:string):>array<vec2> => {
+    let found:array<vec2> = []
     let rows = lines(trim(LEVEL))
     loop y in [0..rows.length) {
         loop x in [0..rows[y].length) {
@@ -52,16 +52,16 @@ markers = (symbol: string) :> array<vec2> => {
     return found
 }
 
-Player: type = [
-    box: Rect vel: vec2 = vec2(0 0) on_ground: bool = false
-    coyote: float64 = 0.0 jump_wait: float64 = 0.0 facing: float64 = 1.0
+Player:type = [
+    box:Rect vel:vec2 = vec2(0 0) on_ground:bool = false
+    coyote:float64 = 0.0 jump_wait:float64 = 0.0 facing:float64 = 1.0
 ]
-Pad: type = [move: float64 = 0.0 pressed: bool = false held: bool = false drop: bool = false]
-Step: type = [player: Player jumped: bool = false impact: float64 = 0.0]
-spawn = (at: vec2) :> Player => Player[box = Rect(at.x-14.0 at.y-20.0 28 40)]
+Pad:type = [move:float64 = 0.0 pressed:bool = false held:bool = false drop:bool = false]
+Step:type = [player:Player jumped:bool = false impact:float64 = 0.0]
+spawn = (at:vec2):>Player => Player[box = Rect(at.x-14.0 at.y-20.0 28 40)]
 
 # A step takes ordinary values. Clocks, live input and sound stay outside it.
-tick = (state: Player map: Tilemap start: vec2 pad: Pad dt: float64) :> Step => {
+tick = (state:Player map:Tilemap start:vec2 pad:Pad dt:float64):>Step => {
     let next = Step[player = state]
     let p = state
     if pad.move not=?0.0 p.facing = sign(pad.move)
@@ -92,8 +92,8 @@ tick = (state: Player map: Tilemap start: vec2 pad: Pad dt: float64) :> Step => 
     return next
 }
 
-Coin: type = [pos: vec2 taken: bool = false pop: Tween<float64> = tween(0.0 1.0 0.35 @ease_out)]
-collect = (@coins: array<Coin> at: vec2 dt: float64) :> int64 => {
+Coin:type = [pos:vec2 taken:bool = false pop:Tween<float64> = tween(0.0 1.0 0.35 @ease_out)]
+collect = (@coins:array<Coin> at:vec2 dt:float64):>int64 => {
     let count = 0
     loop @coin in coins {
         if coin.taken coin.pop.update(dt)
@@ -131,7 +131,7 @@ coins_are_collected_once_and_saved_coins_stay_unchanged = () => {
 # Presentation and live game state.
 window("Dewy / Platformer" 1280 720)
 
-make_tiles = () :> Texture => {
+make_tiles = ():>Texture => {
     let img = image(4*T T)
     loop y in [0..T) {
         loop x in [0..T) {
@@ -149,7 +149,7 @@ make_tiles = () :> Texture => {
     return texture(img false)
 }
 
-make_scene = () :> Tilemap => {
+make_scene = ():>Tilemap => {
     let map = make_level()
     map.tilesets = [tileset(make_tiles() T T)]
     return map
@@ -168,7 +168,7 @@ let snd_coin = sfx_coin()
 let snd_land = sfx_hit()
 action("Jump" [Input.key(Key.space) Input.key(Key.up) Input.key(Key.w) Input.button(PadButton.a)])
 
-update = (dt: float64) :> void => {
+update = (dt:float64):>void => {
     if key_pressed(Key.escape) quit()
     t += dt
     if got<?coins.length run_time += dt
@@ -189,7 +189,7 @@ update = (dt: float64) :> void => {
     shake.update(dt)
 }
 
-draw = () :> void => {
+draw = ():>void => {
     clear(rgb(0.45 0.68 0.9))
     camera2d(cam+shake.offset())
     draw_tilemap(level)

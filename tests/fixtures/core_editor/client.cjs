@@ -170,7 +170,7 @@ async function change(text, predicate) {
         const format = () => providers.formatting.provideDocumentFormattingEdits(document, { tabSize: 4, insertSpaces: true });
         const edits = await format();
         assert.equal(edits.length, 1);
-        assert.equal(edits[0].newText, '# 🙂\nlet answer: int64 = 42\nmain = () => answer\n');
+        assert.equal(edits[0].newText, '# 🙂\nlet answer:int64 = 42\nmain = () => answer\n');
         assert.equal(edits[0].range.end.character, 15);
         const stale = format();
         document.version++;
