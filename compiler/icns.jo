@@ -1,0 +1,19 @@
+# The frozen implementation-language twin of icns.dewy, for the compilers without the
+# Dewy frontend (tools/compiler/build.py). Change both, or neither.
+
+# an .icns holding the PNG as it is, under the type for its size
+icns = (png: u8[]) -> u8[]:
+    w = (int(png[16]) << 24) | (int(png[17]) << 16) | (int(png[18]) << 8) | int(png[19])
+    ty = "ic08"                                  # 256
+    if w <= 16: ty = "icp4"
+    else if w <= 32: ty = "icp5"
+    else if w <= 64: ty = "icp6"
+    else if w <= 128: ty = "ic07"
+    else if w > 256: ty = "ic09"
+    out: u8[]
+    loop c in bytes("icns"): out.push(c)
+    loop k in [0..4): out.push(u8(((16 + png.len()) >> (24 - 8 * k)) & 255))
+    loop c in bytes(ty): out.push(c)
+    loop k in [0..4): out.push(u8(((8 + png.len()) >> (24 - 8 * k)) & 255))
+    loop c in png: out.push(c)
+    out

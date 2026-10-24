@@ -1,0 +1,22 @@
+# The compiler's sha.dewy: `sha file...` prints, for each file's bytes b, the SHA-256 of b,
+# the SHA-256 of b[n // 3..n // 3 + n // 2) and the SHA-1 of b, as decimal bytes.
+from p"../../../compiler/sha.dewy" import sha256, sha1
+
+show=(digest:array<uint8>):>void=>{
+    loop b in digest {print"{b} "}
+}
+
+main=():>void=>{
+    let arguments=args()
+    loop i in [1..arguments.length) {
+        let data=read_bytes(arguments[i])
+        if not (data is? array<uint8>) {exit(1)}
+        let n=data.length
+        show(sha256(data 0 n))
+        print"| "
+        show(sha256(data n // 3 n // 2))
+        print"| "
+        show(sha1(data))
+        printl""
+    }
+}

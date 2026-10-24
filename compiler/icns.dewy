@@ -1,0 +1,22 @@
+# An .icns (a macOS app bundle's icon: Resources/icon.icns) holding the PNG as it is,
+# under the type for its width: the file's header ("icns", its length), then one
+# element (its type, its length, the PNG). Lengths are big-endian.
+#
+# A module of the compiler written in Dewy. icns.jo is its frozen twin for the
+# compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
+# interface and write the same bytes (tests/test_selfhost_icns.py).
+
+# (the PNG's width is the first word of its IHDR chunk, at byte 16)
+icns=(png:array<uint8>):>array<uint8>=>{
+    let w=(int64(png[16]) << 24) | (int64(png[17]) << 16) | (int64(png[18]) << 8) | int64(png[19])
+    let ty=if w <=? 16 b"icp4" else if w <=? 32 b"icp5" else if w <=? 64 b"icp6" else if w <=? 128 b"ic07" else if w <=? 256 b"ic08" else b"ic09"
+    let n=png.length
+    let out:array<uint8>=[]
+    out.reserve(16 + n)
+    out.extend(b"icns")
+    loop k in [0..4) {out.push(uint8(((16 + n) >> (24 - 8 * k)) & 255))}
+    out.extend(ty)
+    loop k in [0..4) {out.push(uint8(((8 + n) >> (24 - 8 * k)) & 255))}
+    out.extend(png)
+    out
+}

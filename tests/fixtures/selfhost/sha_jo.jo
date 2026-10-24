@@ -1,0 +1,16 @@
+# The compiler's frozen sha.jo, with the same command line as sha_dewy.dewy.
+use '../../../compiler/sha.jo'
+
+show = (digest: u8[]) -> str:
+    line = ""
+    loop b in digest: line = line + "{b} "
+    line
+
+main = () -> int:
+    a = args()
+    loop i in [1..a.len()):
+        if let b = read_bytes(a[i]):
+            n = b.len()
+            print(show(sha256(b, 0, n)) + "| " + show(sha256(b, n / 3, n / 2)) + "| " + show(sha1(b)))
+        else: return 1
+    0

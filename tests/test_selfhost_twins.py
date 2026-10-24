@@ -39,7 +39,7 @@ def test_dewy_modules_are_leaves():
 @pytest.mark.core_quick
 def test_twins_define_only_the_dewy_names():
     for module, twin in FROZEN_TWINS.items():
-        dewy = top_level((COMPILER / module).read_text(), r'^(?:let\s+)?([A-Za-z_]\w*)\s*[:=]')
+        dewy = top_level((COMPILER / module).read_text(), r'^(?:let\s+|const\s+)?([A-Za-z_]\w*)\s*[:=]')
         jo = top_level((COMPILER / twin).read_text(), r'^([A-Za-z_]\w*)\s*[:=]')
         assert jo <= dewy, f'{twin} defines {sorted(jo - dewy)}, which {module} does not'
 

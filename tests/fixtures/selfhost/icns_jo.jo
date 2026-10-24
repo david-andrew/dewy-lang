@@ -1,0 +1,10 @@
+# The compiler's frozen icns.jo, with the same command line as icns_dewy.dewy.
+use '../../../compiler/icns.jo'
+
+main = () -> int:
+    a = args()
+    loop i in [1..a.len()):
+        if let b = read_bytes(a[i]):
+            if not write_bytes("{a[i]}.icns", icns(b)): return 1
+        else: return 1
+    0

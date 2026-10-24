@@ -1,0 +1,11 @@
+# The compiler's icns.dewy: `icns png...` writes each PNG's .icns beside it, as png.icns.
+from p"../../../compiler/icns.dewy" import icns
+
+main=():>void=>{
+    let arguments=args()
+    loop i in [1..arguments.length) {
+        let data=read_bytes(arguments[i])
+        if not (data is? array<uint8>) {exit(1)}
+        if not (write_bytes("{arguments[i]}.icns" icns(data)) is? int64) {exit(1)}
+    }
+}
