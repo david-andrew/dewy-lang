@@ -880,6 +880,9 @@ ide_finish = ():
             arrow = if ends_with(ide_doc, ".dewy"): ":>" else: " -> "
             lbl = arrow + ide_type_str(r)
         ide_hint_agree(hints, order, mkpos(pos_file(nodes[d].pos), i), lbl)
+    # (an argument giving several values: the parameters they fill)
+    loop h in [0..values_hint_pos.len()):
+        if ends_with(values_hint_label[h], ":") and ide_indexed(pos_file(values_hint_pos[h])): ide_hint_agree(hints, order, values_hint_pos[h], values_hint_label[h])
     loop p in order:
         if len(hints[p]) > 0: ide_emit("H\t{ide_pos_str(p)}\t{ide_esc(hints[p])}")
     ide_flush()

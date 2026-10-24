@@ -90,6 +90,13 @@ const NF_JUXT = NF_EXCL_FIRST
 const NF_FLOW_RETURNS = 1073741824 # lowered loop/else block: every source path returns
 const NF_AT = 2147483648        # (Dewy) a place written with a leading `@`: `@x`, `@r.a`, `@xs[i]`
 
+# (Dewy) a `.tuple` node with this aux is a group of several values, `(a b)`: not a
+# container (docs/design/multi_expressions.md)
+const TUPLE_VALUES = 7
+# (an `$assert` intrinsic with this aux2: an obligation the compiler made, an unpacking's or a
+# spread's length, which becomes a runtime check where the scope allows one)
+const UNPACK_OBLIGATION = 31
+
 struct Node:
     kind: NK
     op: i32

@@ -1489,7 +1489,7 @@ subst_partial = (pat0: int, binds: mut int[]) -> int:
     if k == .fn_ or k == .tuple:
         a: int[]
         loop i in [0..int(types[pat].nargs)): a.push(subst_partial(targ(pat, i), binds))
-        if k == .tuple: return mk_tuple(a)
+        if k == .tuple: return mk_tuple(a, types[pat].sign)
         return mk_fn(a, subst_partial(int(types[pat].elem), binds), int(types[pat].mutmask), int(types[pat].st), 0, types[pat].sign)
     if k == .struct_ or k == .enum_:
         si = int(types[pat].st)
@@ -2954,9 +2954,10 @@ dewy_spread_source_type = (n: int) -> int:
     if nodes[n].type != 0 and has_flag(n, NF_CHECKED): return prune(ntype(n))
     copy = clone(n)
     # (`[pair()...]`: a function expressing several values spreads them as an array would)
+    saved_site = sink_pack_site
     sink_pack_site = copy
     t = check_expr(copy, 0)
-    sink_pack_site = 0
+    sink_pack_site = saved_site
     sink_pack_hit = 0
     prune(t)
 
@@ -8802,7 +8803,11 @@ check_expr = (n: int, expected: int) -> int:
     if nodes[n].type != 0 and has_flag(n, NF_CHECKED): return ntype(n)
     # (the commonest kinds in frames of their own; the rest below)
     k = nodes[n].kind
-    if k == .ident: return if tk_reads_on: temperature_read(n, expected) else: check_ident_expr(n, expected)
+    if k == .ident:
+        it = if tk_reads_on: temperature_read(n, expected) else: check_ident_expr(n, expected)
+        # (a binding holding several values, read where they are not taken)
+        if values_any and is_values(it) and n != assign_root: sink_values_use(n, it)
+        return it
     if k == .int_lit: return check_int_expr(n, expected)
     if k == .binary: return ce_finish(n, check_binary(n, expected), expected)
     if k == .call: return check_call_expr(n, expected)
@@ -9029,6 +9034,10 @@ check_call_expr = (n: int, expected: int) -> int:
     if nodes[n].aux2 == i32(AUX2_PARTIAL):
         if has_flag(n, NF_JUXT) and juxt_head_numeric(n): juxt_factor(n)
         return dewy_partial(n, expected)
+    # (arguments giving several values, or a spread container: substitution invariance)
+    if nkids(n) > 0 and nodes[n].aux2 == 0 and dewy_at(nodes[n].pos) and not (has_flag(n, NF_JUXT) and (nodes[int(nodes[n].a)].kind == .ident or nodes[int(nodes[n].a)].kind == .field) and juxt_head_numeric(n)):
+        vt = values_call(n, expected)
+        if vt >= 0: return ce_finish(n, vt, expected)
     t = check_call(n, expected)
     if nodes[n].aux == 0 and nodes[n].sym > 0:
         if fns[int(nodes[n].sym)].atomic_api: concurrency_atomic_call(n)
@@ -9353,6 +9362,7 @@ dewy_bracket_call = (n: int) -> bool:
 
 check_index_expr = (n: int, expected: int) -> int:
     if has_flag(n, NF_JUXT): juxt_member_check(n)
+    values_index_base = int(nodes[n].a)
     t = 0
     if dewy_bracket_call(n): return check_expr(n, expected)
     if nodes[n].sval != 0:
@@ -9532,7 +9542,10 @@ check_expr_other = (n: int, expected: int) -> int:
     if expected == 0: ex = 0
     exk = TK.void_
     if ex != 0: exk = types[ex].kind
-    if nodes[n].kind == .array: dewy_classify_spread(n)
+    if nodes[n].kind == .array:
+        # (`[(1 2) 3]`: a group's values are elements, as written)
+        if values_grouped(n): set_list(n, values_flatten(kids(n)))
+        dewy_classify_spread(n)
     k = nodes[n].kind
     if k == .intrinsic and nodes[n].aux == i32(int(IN.zeroed)) and expected != 0:
         # (release_call's zero bytes: of the type the place stores)
@@ -9866,28 +9879,36 @@ check_expr_other = (n: int, expected: int) -> int:
             anyunsigned = false
             allchar = true
             spread = false
+            repack = false
             loop i in [0..nkids(n)):
                 c = kid(n, i)
                 if has_flag(c, NF_SPREAD):
                     spread = true
                     h = 0
                     if elt != 0: h = mk_array(elt)
+                    saved_site = sink_pack_site
                     sink_pack_site = c
                     st = prune(check_expr(c, h))
-                    sink_pack_site = 0
+                    sink_pack_site = saved_site
                     sink_pack_hit = 0
                     if types[st].kind != .array: fatal(nodes[c].pos, "only arrays can be spread into an array (found {dt(st)})")
                     if elt == 0: elt = int(types[st].elem)
                     allchar = false
                     continue
+                saved_site = sink_pack_site
                 sink_pack_site = c
                 it = check_expr(c, elt)
-                sink_pack_site = 0
+                sink_pack_site = saved_site
                 if sink_pack_hit != 0:
-                    # (`[pair()]`: the values of a function expressing several, spread here)
                     sink_pack_hit = 0
+                    # (`[pair]`, pair holding several values: they are elements)
+                    if is_values(it): return values_elements(n, i, last_checked, expected)
+                    # (`[pair()]`: the values of a function expressing several, spread here;
+                    # the other elements are looked at first, for more of them)
                     add_flag(c, NF_SPREAD)
-                    return check_expr(n, expected)
+                    repack = true
+                    if elt == 0 and types[prune(it)].kind == .array: elt = int(types[prune(it)].elem)
+                    continue
                 if not charlike(c): allchar = false
                 if is_lit(c):
                     if nodes[c].kind == .float_lit: anyfloat = true
@@ -9896,6 +9917,8 @@ check_expr_other = (n: int, expected: int) -> int:
                     # ([Kind.a, .b]: the first names the enum for the rest)
                     if elt == 0 and it != 0 and tkind(it) == .enum_: elt = it
                 else if elt == 0 and not charlike(c): elt = it
+            # (`[0 f()]`, f giving int64 values: the literals take their type)
+            if repack: return check_expr(n, if expected == 0 and elt != 0 and tkind(prune(elt)) != .var: mk_array(elt) else: expected)
             # (`[Circle[...] Square[...]]`: siblings keep their positions, sibling_types.jo)
             if et == 0 and not spread and dewy_at(nodes[n].pos) and sibling_parent(n) != 0: t = sibling_literal(n)
             else:
@@ -9955,6 +9978,7 @@ check_expr_other = (n: int, expected: int) -> int:
             loop p in kids(n): float_key_obligation(int(nodes[p].a))
         t = get_struct_inst(md, [kt, vt])
         if nkids(n) > 0: nodes[n].sym = i32(resolve_by_types(intern("[]="), [t, kt, vt], nodes[n].pos, true))
+    else if k == .tuple and nodes[n].aux == i32(TUPLE_VALUES): return values_group(n, ex)
     else if k == .tuple:
         if nkids(n) == 0: t = T_VOID
         else:

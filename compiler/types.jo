@@ -244,7 +244,17 @@ decl_fn_labels = (decl: int) -> int:
 mk_fn = (params: int[], ret: int, mutmask: int, labels: int = 0, defaults: int = 0, pack: bool = false) -> int: mk_type(TypeInfo(kind = .fn_, elem = i32(ret), mutmask = i32(mutmask), st = i32(labels), bits = i32(defaults), sign = pack), params)
 fn_type_pack = (t: int) -> bool: types[t].kind == .fn_ and types[t].sign
 mk_cfn = (params: int[], ret: int) -> int: mk_type(TypeInfo(kind = .cfn, elem = i32(ret)), params)
-mk_tuple = (elems: int[]) -> int: mk_type(TypeInfo(kind = .tuple), elems)
+# (`values`: several values, `(int64 int64)` in Dewy: what `pair = (1 2)` holds, not a
+# container; laid out as a tuple. docs/design/multi_expressions.md)
+mk_tuple = (elems: int[], values: bool = false) -> int: mk_type(TypeInfo(kind = .tuple, sign = values), elems)
+values_any = false   # (some value of several values was made: their checks run only then)
+mk_values = (elems: int[]) -> int:
+    values_any = true
+    mk_tuple(elems, true)
+is_values = (t0: int) -> bool:
+    if t0 == 0: return false
+    t = prune(t0)
+    types[t].kind == .tuple and types[t].sign
 var_counter = 0
 # (each binding of a type variable: a body checked with neither a new variable nor a binding
 # has no type a zonk would change)
@@ -932,12 +942,12 @@ type_str_in = (t0: int, dewy: bool) -> str:
             else if ti.kind == .fn_: s += " -> void"
             s
         tuple:
-            # (Dewy's `[int64 string]`: an array with a type per position)
-            s = if dewy: "[" else: "("
+            # (Dewy's `[int64 string]`: an array with a type per position; `(int64 int64)`: several values)
+            s = if dewy and not ti.sign: "[" else: "("
             loop i in [0..int(ti.nargs)):
                 if i > 0: s += (if dewy: " " else: ", ")
                 s += type_str(targ(t, i), dewy)
-            s + (if dewy: "]" else: ")")
+            s + (if dewy and not ti.sign: "]" else: ")")
         struct_, enum_:
             si = int(ti.st)
             if structs[si].lit_set != 0: return str_set_text(int(structs[si].lit_set))

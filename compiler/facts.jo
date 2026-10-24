@@ -3997,7 +3997,15 @@ fact_capture = (n: int, s: mut FactState) -> int:
             fact_query = true
             paths = fact_condition(kid(n, 0), s)
             fact_query = false
-            if not paths.yes.live or paths.no.live: wit_assertion(kid(n, 0), (if nkids(n) > 1: kid(n, 1) else: 0), paths, s)
+            if not paths.yes.live or paths.no.live:
+                obligation = nodes[n].aux2 == i32(UNPACK_OBLIGATION)
+                if obligation: wit_obligation = n
+                wit_assertion(kid(n, 0), (if nkids(n) > 1: kid(n, 1) else: 0), paths, s)
+                wit_obligation = 0
+                # (deferred: a runtime check now, after which the condition holds)
+                if obligation:
+                    nodes[n].aux = i32(int(IN.assert))
+                    s = paths.yes
             return 0
         if id == .runtime_assert or id == .assert:
             paths = fact_condition(kid(n, 0), s)
@@ -4300,7 +4308,9 @@ facts_finalize = ():
             fact_retry_owner = request.owner
             fact_capture(request.node, state)
     fact_retry_owner = 0
-    loop request in fact_requests: set_list(request.node, [])
+    loop request in fact_requests:
+        # (a deferred obligation stays, a runtime check)
+        if nodes[request.node].aux == i32(int(IN.static_assert)): set_list(request.node, [])
     fact_requests = []
     fact_terms = []
     if proof_active: proof_erase()

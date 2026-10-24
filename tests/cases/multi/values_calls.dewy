@@ -1,0 +1,44 @@
+# quick
+# Substitution invariance: what gives the same values works where a literal does.
+add=(a:int64 b:int64)=>a+b
+add3=(a:int64 b:int64 c:int64)=>a+b+c
+fn=()=>(1 2)
+fw=():>(int64 int64)=>{ 3 4 }
+fn2=()=>[5 6]
+show=(x:int64)=>printl("one {x}")
+show=(x:int64 y:int64)=>printl("two {x} {y}")
+one=():>int64=>7
+held=()=>{
+    let p=(5 6)
+    p
+}
+top=(30 12)
+run=()=>{
+    printl(add(1 2))
+    printl(add((10 20)))
+    printl(add(fn))
+    printl(add(fn()))
+    printl(add(fw()))
+    let pair=(7 8)
+    printl(add(pair))
+    printl(add([20 22]...))
+    printl(add(fn2...))
+    let xs:array<int64 length=2>=[40 2]
+    printl(add(xs...))
+    printl(add(top))
+    printl(add3(9 fw()))
+    show(fn())
+    show(one())
+    printl([pair])
+    printl([fn()])
+    printl([0 fw()])
+    printl([fw() 9])
+    printl([held()])
+    printl(add(held()))
+    let q=fw()
+    printl(add(q))
+    q=(1 1)
+    printl(add(q))
+    printl(pair)
+}
+run()

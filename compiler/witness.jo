@@ -396,6 +396,7 @@ wit_connective = (n: int, entry: FactState, want: bool, refuted: bool, role: str
     leaf
 
 # `$assert` and the condition it tests, evaluated from `entry`.
+wit_obligation = 0   # (the `$assert`-like obligation an unpacking or spread made: deferrable)
 wit_assertion = (cond: int, message: int, paths: FactPaths, entry: FactState):
     refuted = not paths.yes.live
     relation = ""
@@ -417,7 +418,13 @@ wit_assertion = (cond: int, message: int, paths: FactPaths, entry: FactState):
     if refuted:
         wit_context(0)
         wit_help(relation)
+        if wit_obligation != 0 and message != 0: fatal(nodes[cond].pos, "{name_of(int(nodes[message].sval))}, and the length here is known to differ")
         assertion_refuted(cond, message)
+    # (an unpacking's or a spread's length: an obligation, which a scope with runtime
+    # checks keeps as one)
+    if wit_obligation != 0 and message != 0:
+        wit_unknown(cond, reason, "that {name_of(int(nodes[message].sval))}", 0, relation, missing)
+        return
     wit_unknown(cond, reason, "assertion", 0, relation, missing)
 
 # A builtin index: refuted (some bound is false) or unknown (some is missing).

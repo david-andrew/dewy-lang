@@ -58,7 +58,7 @@ representation_deep = (t0: int) -> int:
     if k == .tuple:
         a: int[]
         loop i in [0..int(types[t].nargs)): a.push(representation_deep(targ(t, i)))
-        return mk_tuple(a)
+        return mk_tuple(a, types[t].sign)
     t
 
 # String literal sets (`'a'|'b'`): an enum whose variant i is member i, so a
