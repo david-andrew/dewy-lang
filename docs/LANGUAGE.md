@@ -2721,6 +2721,59 @@ draining it itself, and a receive from a channel nothing sends into or closes. W
 the counts or capacities are not literal, or a group's failure may cancel the wait,
 it warns instead.
 
+### Deadlock certificates
+
+`$no_deadlocks` (a setting, for a module, a function or a block) asks for more than
+the checks above: every wait in its scope needs a certificate, or it is an error
+naming the wait and what is missing. Its code cannot reach a state where some of
+its tasks wait on one another forever, given a fair scheduler, local computation
+that ends, and outside parties (a server, a file, a C library) that answer. A
+certificate is one of:
+
+- the checked lock order, for `lock` and `lock_all`. Locks nested one inside
+  another must be named by a local or a parameter holding a handle `mutex(...)`
+  made; take others together with `lock_all`. What the checks above only warn
+  about is an error here, and so is a lock-order cycle in a program without tasks.
+- a structured join: the end of `concurrent`, `within` and `race`, whose tasks'
+  waits are certified, with no lock held across it.
+- a certified protocol from the library, below, with no lock held across it.
+- an audited adapter, for a foreign function that may block: a function whose
+  body says `$audited_wait` (provisional spelling), where a person has checked
+  that the call waits only on the outside world. A foreign function declared with
+  a row excluding `blocks` (`& no_effects`) is trusted not to wait.
+
+A raw channel's `send` and `receive`, a loop polling an atomic another task sets,
+a call of a function value the compiler cannot follow, and a wait in a lifecycle
+hook have no certificate. A lock is held only across other locks: holding one
+across a join, a request or a call that waits is an error. A call into code outside
+the scope needs that code's waits certified too. A timeout is recovery, not a
+certificate: a wait inside `within` needs one like any other.
+
+The certified protocols (provisional spellings) are request/reply and a pipeline
+with feedback:
+
+```dewy
+square = (n:int64):>int64 => n * n
+main = ():>void | Closed | Canceled => {
+    let total = serve(@square (s:Service<int64 int64>):>int64 | Closed | Canceled => {
+        (s.request(3) or_throw) + (s.request(4) or_throw)     # 25
+    }) or_throw
+    let seeds:array<int64> = [6]
+    let path = pipeline(2 seeds (n:int64):>int64 => n + 1  (r:int64):>array<int64> => if r <? 9 [r] else []) or_throw
+    printl"{total} {path}"                                  # 25 [7 8 9]
+}
+```
+
+`serve(handler body)` runs `handler` on a server task and `body` here with a
+`Service<Q R>`; `s.request(q)` gives the handler's reply, `Closed` once the server
+has stopped (when `body` returns), or `Canceled`. Requests from several tasks get
+their own replies. Under `$no_deadlocks` the handler must not ask a service
+itself, since a server waiting on a service may wait on itself.
+`pipeline(window seeds work feedback)` runs `work` on a stage task over the seeds
+and every item fed back, and `feedback` here on each result, giving the items to
+feed back; it gives every result in order, or `Canceled`. At most `window` items
+are in flight, so neither side ever waits to send.
+
 ## Settings and JSON
 
 `to_json(value)` writes a typed value directly to JSON. `from_json<T>(text)`
@@ -3984,7 +4037,8 @@ that may panic is an error too (the `panics` effect, "Functions and values"). Th
 `$explicit_copies` (described with `.copy` above) is a setting like these, for
 a module, a function or a block. So are the float settings `$fast_math`,
 `$no_nan` and `$no_inf`, and the library bundle `$finite_floats` (both of the
-latter), described with the numeric types. `$unsafe`, the unsafe boundary, is
+latter), described with the numeric types, and `$no_deadlocks`, described with
+channels. `$unsafe`, the unsafe boundary, is
 different: it covers only the next expression or declaration (see "Foreign
 functions"), and no bundle may hold it.
 

@@ -160,6 +160,7 @@ dw_dir_define = (name: str, tag: int, block: int):
             bundle.row = effect_syntax.len() - 1
             continue
         if text == "unsafe": fatal(dewy_syntax[member].pos, "`$unsafe` cannot be bundled: write it where the unsafe code is, so each boundary is visible")
+        if text == "audited_wait": fatal(dewy_syntax[member].pos, "`$audited_wait` cannot be bundled: write it in each audited adapter, so each audit is visible")
         if not dir_builtin(text): fatal(dewy_syntax[member].pos, "a bundle lists builtin settings (`$runtime_checks`, `$prototype`, `$prototype_warnings`, `$explicit_copies`) and `$default_row`, not `${text}`")
         bundle.settings.push(intern(text))
         bundle.values.push(dw_dir_boolean(text, value))

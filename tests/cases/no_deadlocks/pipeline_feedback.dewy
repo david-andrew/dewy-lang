@@ -1,0 +1,11 @@
+# modes: native native-release
+# `$no_deadlocks`: a pipeline with feedback. The stage task takes a Collatz step; the feedback
+# here sends each result back until it reaches 1. At most `window` items are in flight.
+$no_deadlocks
+step = (n:int64):>int64 => if n % 2 =? 0 n // 2 else 3 * n + 1
+again = (n:int64):>array<int64> => if n =? 1 [] else [n]
+main = ():>void | Canceled => {
+    let seeds:array<int64> = [6 7]
+    let path = pipeline(2 seeds @step @again) or_throw
+    printl"{path.length} {path}"
+}

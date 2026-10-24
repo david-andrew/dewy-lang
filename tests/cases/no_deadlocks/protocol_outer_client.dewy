@@ -1,0 +1,25 @@
+# modes: native native-release
+# A client outside serve's scope (spawned into an outer group) keeps asking while a deadline
+# cancels the service: its request gives Closed, and the program ends.
+slow = (n:int64):>int64 => {
+    let x:int64 = 0
+    loop i in [0..200000) { x += i % 7 }
+    n + x % 2
+}
+client = (s:Service<int64 int64>):>int64 | Closed | Canceled => {
+    let total:int64 = 0
+    loop true { total += s.request(1) or_throw }
+    total
+}
+run = (g:TaskGroup):>int64 | Closed | Canceled => serve(@slow (s:Service<int64 int64>):>int64 | Closed | Canceled => {
+    spawn(g) client(s)
+    let total:int64 = 0
+    loop true { total += s.request(2) or_throw }
+    total
+})
+main = () => {
+    concurrent outer {
+        let r = within(30ms @run(outer))
+    }
+    printl"{r is? Timeout}"
+}

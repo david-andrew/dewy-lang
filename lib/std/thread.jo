@@ -343,6 +343,15 @@ __chan_receive_wait[T] = (c: __Chan[T]) -> int:
         __chan_park(&p.seq, p.seq, &p.lock, &p.waiting, spins)
         spins += 1
 
+# 0: a value to take (the lock held, for __chan_take); 1: none buffered. Never waits and is not a
+# cancellation point: what drains a closed channel in cleanup (lib/prelude/protocols.dewy).
+__chan_drain_wait[T] = (c: __Chan[T]) -> int:
+    p = c.__p
+    __chan_lock(&p.lock)
+    if p.count > 0: return 0
+    __chan_unlock(&p.lock)
+    1
+
 __chan_take[T] = (c: __Chan[T]) -> T:
     p = c.__p
     h = p.head

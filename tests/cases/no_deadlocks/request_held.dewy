@@ -1,0 +1,13 @@
+# modes: native
+# `$no_deadlocks`: no lock held across a request (the handler may take it).
+$no_deadlocks
+twice = (n:int64):>int64 => n * 2
+main = ():>void | Closed | Canceled => {
+    let m = mutex<int64>(0)
+    let total = serve(@twice (s:Service<int64 int64>):>int64 | Closed | Canceled => {
+        let held = @(m.lock())
+        held += s.request(1) or_throw
+        held
+    }) or_throw
+    printl"{total}"
+}

@@ -1,0 +1,25 @@
+# modes: native native-release
+# A deadline cancels a service mid-conversation: the client's request gives Canceled, the server
+# stops and closes what is left, and nothing stays waiting. The deadline is recovery; the
+# protocol is what certifies the waits.
+$no_deadlocks
+slow = (n:int64):>int64 => {
+    let x:int64 = 0
+    loop i in [0..2000000) { x += i % 7 }
+    n + x % 2
+}
+talk = ():>int64 | Closed | Canceled => serve(@slow (s:Service<int64 int64>):>int64 | Closed | Canceled => {
+    let total:int64 = 0
+    loop i in [0..100000) { total += s.request(i) or_throw }
+    total
+})
+grow = (n:int64):>int64 => slow(n) + 1
+more = (n:int64):>array<int64> => [n]
+churn = ():>array<int64> | Canceled => {
+    let seeds:array<int64> = [1]
+    pipeline(4 seeds @grow @more)
+}
+main = () => {
+    printl"{within(50ms @talk()) is? Timeout}"
+    printl"{within(50ms @churn()) is? Timeout}"
+}

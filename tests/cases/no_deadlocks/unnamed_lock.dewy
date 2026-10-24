@@ -1,0 +1,13 @@
+# modes: native
+# `$no_deadlocks`: a lock the analysis cannot name (a handle a call gives back may be one made
+# elsewhere) has no place in the checked order.
+$no_deadlocks
+pick = (a:Mutex<int64> b:Mutex<int64> first:bool):>Mutex<int64> => if first a else b
+main = () => {
+    let p = mutex<int64>(1)
+    let q = mutex<int64>(2)
+    let held = @(p.lock())
+    let chosen = pick(p q true)
+    let other = @(chosen.lock())
+    other += held
+}

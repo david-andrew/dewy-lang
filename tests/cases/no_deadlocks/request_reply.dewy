@@ -1,0 +1,26 @@
+# modes: native native-release
+# `$no_deadlocks`: request/reply through `serve`. Four client tasks ask one server at once and
+# each gets its own replies; a request after the server stopped gives Closed, not a wait.
+$no_deadlocks
+square = (n:int64):>int64 => n * n
+client = (s:Service<int64 int64> base:int64):>int64 | Closed | Canceled => {
+    let total:int64 = 0
+    loop i in [0..250) { total += s.request(base + i) or_throw }
+    total
+}
+main = ():>void | Closed | Canceled | OutOfMemory => {
+    let sums = serve(@square (s:Service<int64 int64>):>array<int64> | Closed | Canceled | OutOfMemory => {
+        concurrent {
+            let a = spawn client(s 0)
+            let b = spawn client(s 250)
+            let c = spawn client(s 500)
+            let d = spawn client(s 750)
+        }
+        [a or_throw  b or_throw  c or_throw  d or_throw]
+    }) or_throw
+    let expected:int64 = 0
+    loop i in [0..1000) { expected += i * i }
+    printl"{sums[0] + sums[1] + sums[2] + sums[3]} {expected}"
+    let kept = serve(@square (s:Service<int64 int64>):>Service<int64 int64> => s)
+    printl"{kept.request(4) is? Closed}"
+}

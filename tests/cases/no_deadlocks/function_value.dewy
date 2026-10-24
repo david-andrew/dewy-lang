@@ -1,0 +1,8 @@
+# modes: native
+# `$no_deadlocks`: a function value the compiler cannot follow may wait on anything.
+$no_deadlocks
+main = () => {
+    let handlers = [() => printl"hi"]
+    let h = handlers[0]
+    h()
+}

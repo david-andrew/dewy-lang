@@ -1,0 +1,9 @@
+# modes: native
+# `$no_deadlocks`: a handler that asks a service may wait on its own server.
+$no_deadlocks
+main = ():>void | Closed | Canceled => {
+    let outer = serve((n:int64):>int64 => n + 1  (o:Service<int64 int64>):>int64 | Closed | Canceled => {
+        serve((n:int64):>int64 => o.request(n) ?? 0  (s:Service<int64 int64>):>int64 | Closed | Canceled => s.request(1)) or_throw
+    }) or_throw
+    printl"{outer}"
+}

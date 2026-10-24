@@ -1,0 +1,13 @@
+# modes: native
+# `$no_deadlocks`: a lock is held only across other locks taken in order, never across a join
+# (even of tasks that do not take it).
+$no_deadlocks
+work = (n:int64):>int64 => n * 2
+main = () => {
+    let m = mutex<int64>(0)
+    let held = @(m.lock())
+    concurrent {
+        let a = spawn work(21)
+    }
+    held += 1
+}

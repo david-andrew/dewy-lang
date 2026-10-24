@@ -34,6 +34,7 @@ concurrency_runtime_needed = false
 concurrency_thread_module = -1
 concurrency_task_module = -1
 concurrency_task_core_module = -1
+concurrency_protocol_module = -1  # lib/prelude/protocols.dewy, once a program names it
 concurrency_ffi_start = 0
 
 # Whether the checked program calls a C function (a task program only: O(functions) once).
@@ -262,8 +263,9 @@ concurrency_finalize = ():
         fatal(nodes[concurrency_tasks[0]].pos, "the threads task backend currently requires Linux; parallel computation remains portable")
     loop n in concurrency_tasks:
         if in_lib(nodes[n].pos): continue
-        loop callback in kids(n):
-            if tkind(ntype(callback)) != .fn_: continue
+        task_arg = concurrency_protocol_task_arg(n)
+        loop i in 0.. and callback in kids(n):
+            if tkind(ntype(callback)) != .fn_ or task_arg >= -1 and i != task_arg: continue
             concurrency_callback(callback, true)
             race_arg(callback, "spawn")
             visited: {int: bool}
@@ -278,6 +280,17 @@ concurrency_finalize = ():
             else:
                 seen: {int: bool}
                 if not concurrency_transfer(ntype(a), seen): fatal(nodes[a].pos, "parallel input does not satisfy inferred Send{concurrency_why()}")
+
+# The argument of a certified protocol's call that runs on a task of its own (`serve`'s handler,
+# `pipeline`'s work; the rest run on the caller's), -1 for none, -2 when n is not a protocol's
+concurrency_protocol_task_arg = (n: int) -> int:
+    f = int(nodes[n].sym)
+    d = int(fns[f].decl)
+    if concurrency_protocol_module < 0 or d == 0 or int(nodes[d].mod) != concurrency_protocol_module: return -2
+    name = name_of(int(nodes[d].name))
+    if name == "serve": return 0
+    if name == "pipeline": return 2
+    -1
 
 concurrency_atomic_validate = (n: int):
     f = int(nodes[n].sym)

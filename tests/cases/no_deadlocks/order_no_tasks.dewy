@@ -1,0 +1,15 @@
+# modes: native
+# `$no_deadlocks` in one function: the order is the certificate, so a cycle is an error even with
+# no task running the paths at once yet (elsewhere, a warning).
+forward = (a:Mutex<int64> b:Mutex<int64>):>void => {
+    let x = @(a.lock())
+    let y = @(b.lock())
+    x += y
+}
+main = () => {
+    $no_deadlocks
+    let p = mutex<int64>(1)
+    let q = mutex<int64>(2)
+    forward(p q)
+    forward(q p)
+}

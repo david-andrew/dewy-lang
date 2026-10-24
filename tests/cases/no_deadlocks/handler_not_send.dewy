@@ -1,0 +1,8 @@
+# modes: native
+# A `serve` handler runs on a task of its own: its captures must be Send (the body's need not).
+Counter:type = [n:int64 $send = false]
+main = ():>void | Closed | Canceled => {
+    let c = Counter[3]
+    let total = serve((x:int64):>int64 => x + c.n  (s:Service<int64 int64>):>int64 | Closed | Canceled => s.request(c.n)) or_throw
+    printl"{total}"
+}

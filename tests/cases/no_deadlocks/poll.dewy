@@ -1,0 +1,11 @@
+# modes: native
+# `$no_deadlocks`: polling an atomic another task sets is an event wait no certificate covers.
+$no_deadlocks
+main = () => {
+    let ready = atomic(0)
+    concurrent {
+        spawn ready.store(1)
+        loop ready.load() =? 0 { }
+    }
+    printl"ok"
+}

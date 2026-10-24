@@ -1,0 +1,14 @@
+# modes: native
+# `$no_deadlocks`: what stage 1 cannot decide (two elements of one array, nested) is an error.
+$no_deadlocks
+touch = (m:Mutex<int64>):>void => {
+    let v = @(m.lock())
+    v += 1
+}
+main = () => {
+    let accounts = [mutex<int64>(1) mutex<int64>(2)]
+    let first = accounts[0]
+    let a = @(first.lock())
+    touch(accounts[1])
+    a += 1
+}

@@ -2084,7 +2084,7 @@ get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
     f = new_inst(FK_NORMAL, int(nodes[decl].mod), sanitize(name_of(int(nodes[decl].name))))
     fns[f].decl = i32(decl)
     fns[f].atomic_api = int(nodes[decl].mod) == concurrency_thread_module
-    fns[f].task_api = int(nodes[decl].mod) == concurrency_task_module and name_of(int(nodes[decl].name)) in ["__task_spawn", "within", "race"]
+    fns[f].task_api = int(nodes[decl].mod) == concurrency_task_module and name_of(int(nodes[decl].name)) in ["__task_spawn", "within", "race"] or int(nodes[decl].mod) == concurrency_protocol_module and name_of(int(nodes[decl].name)) in ["serve", "pipeline"]
     fns[f].use_pos = use_pos
     if cx >= 0: fns[f].made_in = ctxs[cx].inst
     zt: int[]
@@ -6158,6 +6158,7 @@ load_prelude = ():
     concurrency_thread_module = -1
     concurrency_task_module = -1
     concurrency_task_core_module = -1
+    concurrency_protocol_module = -1
     loop sub in ["core", "std", "game"]:
         names_ = list_dir("{lib_dir}/{sub}")
         names_.sort()
@@ -6626,6 +6627,10 @@ check_program = (main_path: str):
     # nothing otherwise)
     if ts_dewy and prelude_named(["mutex", "Mutex", "lock_all", "Busy", "DuplicateLock"]): dewy_prelude_module(intern("mutex"))
     if ts_dewy and prelude_named(["channel", "Channel", "Closed"]): dewy_prelude_module(intern("channel"))
+    # (the certified protocols are built on channels: theirs load first)
+    if ts_dewy and prelude_named(["serve", "Service", "pipeline"]):
+        dewy_prelude_module(intern("channel"))
+        concurrency_protocol_module = dewy_prelude_module(intern("serve"))
     prepare_nominals()
     check_build_block()
     # (native programs report crashes as they do panics: lib/std/backtrace.jo)

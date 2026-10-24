@@ -1,0 +1,11 @@
+# modes: native
+# `$no_deadlocks`: a call reaching a wait with no certificate (here in a scope opted out) is an
+# error at the call.
+$no_deadlocks
+relay = (n:int64):>int64 | Closed | Canceled => {
+    $no_deadlocks=false
+    let c = channel<int64>(1)
+    c.send(n) or_throw
+    c.receive()
+}
+main = () => printl"{relay(5)}"

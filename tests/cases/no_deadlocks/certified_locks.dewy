@@ -1,0 +1,31 @@
+# modes: native native-release
+# `$no_deadlocks`: lock waits certified by the checked order (lock_all, and one nesting order on
+# every path), structured joins of tasks whose waits are certified, and `within`'s join.
+$no_deadlocks
+transfer = (src:Mutex<int64> dst:Mutex<int64> amount:int64):>void | DuplicateLock | Canceled => {
+    let [a b] = @(lock_all(src dst)) or_throw
+    a -= amount
+    b += amount
+}
+audit = (outer:Mutex<int64> inner:Mutex<int64>):>int64 => {
+    let o = @(outer.lock())
+    let i = @(inner.lock())
+    o + i
+}
+churn = (x:Mutex<int64> y:Mutex<int64> rounds:int64):>int64 | DuplicateLock | Canceled => {
+    loop k in [0..rounds) { transfer(x y 1) or_throw }
+    rounds
+}
+main = ():>void | DuplicateLock | Canceled | OutOfMemory => {
+    let x = mutex<int64>(1000)
+    let y = mutex<int64>(1000)
+    concurrent {
+        let a = spawn churn(x y 5000)
+        let b = spawn churn(y x 5000)
+        spawn audit(x y)
+    }
+    let both = (a or_throw) + (b or_throw)
+    printl"{both} {audit(x y)}"
+    let total = within(1s @audit(x y))
+    printl"{total}"
+}

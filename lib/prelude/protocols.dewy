@@ -1,0 +1,91 @@
+# Dewy's prelude: the certified channel protocols, request/reply (`serve`) and a
+# pipeline with feedback (`pipeline`), whose waits cannot form a cycle, so
+# `$no_deadlocks` accepts them (docs/LANGUAGE.md, "Deadlock certificates").
+
+# (a request: its value and where its reply goes)
+__Request:type = <Q R>[value:Q reply:Channel<R>]
+
+Service:type = <Q R>[
+    __requests:Channel<__Request<Q R>>
+    request = (value:Q):>R | Closed | Canceled => {
+        let reply = channel<R>(1)
+        __requests.send(__Request<Q R>[value reply]) or_throw
+        reply.receive()
+    }
+]
+
+# (the server: answers until the requests close or its group is canceled, then
+# closes them and closes the replies of what is left, without waiting even when
+# canceled, so no caller waits on it)
+__serve_loop = <Q R>(requests:Channel<__Request<Q R>> handler:<(q:Q):>R>):>void => {
+    loop true {
+        let r = requests.receive()
+        if r is? Closed break
+        if r is? Canceled break
+        # (canceled: the reply is not sent, so its caller gets Closed)
+        if r.reply.send(handler(r.value)) is? Canceled {
+            r.reply.close()
+            break
+        }
+    }
+    requests.close()
+    loop true {
+        let r = requests.__drain()
+        if r is? Closed break
+        r.reply.close()
+    }
+}
+
+serve = <Q R T>(handler:<(q:Q):>R> body:<(s:Service<Q R>):>T>):>T => {
+    let requests = channel<__Request<Q R>>(8)
+    concurrent {
+        spawn __serve_loop<Q R>(requests handler)
+        let result = body(Service<Q R>[requests])
+        requests.close()
+    }
+    result
+}
+
+# (the stage: works through what it receives until the input closes)
+__pipeline_stage = <T R>(input:Channel<T> output:Channel<R> work:<(item:T):>R>):>void => {
+    loop true {
+        let item = input.receive()
+        if item is? Closed break
+        if item is? Canceled break
+        output.send(work(item));
+    }
+    output.close()
+}
+
+pipeline = <T R>(window:int64<(>? 0)> seeds:array<T> work:<(item:T):>R> feedback:<(result:R):>array<T>>):>array<R> | Canceled => {
+    let input = channel<T>(window)
+    let output = channel<R>(window)
+    let results:array<R> = []
+    let pending:array<T> = []
+    loop item in seeds { pending.push(item) }
+    let canceled = false
+    concurrent {
+        spawn __pipeline_stage<T R>(input output work)
+        let next:int64 = 0
+        let flight:int64 = 0
+        loop true {
+            loop flight <? window and next <? pending.length {
+                input.send(pending[next]);
+                next += 1
+                flight += 1
+            }
+            if flight =? 0 break
+            let r = output.receive()
+            if r is? Closed or r is? Canceled {
+                canceled = true
+                break
+            }
+            flight -= 1
+            loop item in feedback(r) { pending.push(item) }
+            results.push(r)
+        }
+        input.close()
+    }
+    if canceled return Canceled
+    results
+}

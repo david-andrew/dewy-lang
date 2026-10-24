@@ -357,7 +357,7 @@ flagship panel.
 ### Stage 1 status (2026-10-24)
 
 Built: the default analysis, the lock type and `lock_all`. Not built:
-`$no_deadlocks` certificates, monitored `Deadlock` scopes and STM.
+monitored `Deadlock` scopes and STM. (`$no_deadlocks` certificates: see below.)
 
 - **Lock type.** `Mutex<T>` (the name these docs already use), made by
   `mutex(value)` (provisional) in `lib/prelude/locks.dewy`, loaded only when a
@@ -421,7 +421,7 @@ Built: the default analysis, the lock type and `lock_all`. Not built:
 ### Channels and channel waits (2026-10-24)
 
 Built: bounded channels and their waits in the default analysis. Not built:
-`select`, split send/receive ends, and `$no_deadlocks` certificates.
+`select` and split send/receive ends. (`$no_deadlocks` certificates: see below.)
 
 - **Channel type.** `Channel<T>`, made by `channel<T>(capacity)`, with
   `capacity >? 0` an obligation (no unbounded channel). It lives in
@@ -477,6 +477,110 @@ Built: bounded channels and their waits in the default analysis. Not built:
     behavior (`producer_consumer`, `cancel_blocked`, `close`).
 - **False rejections.** None in the corpus (no existing program uses channels);
   pipelines, worker pools and request/reply loops are quiet.
+
+### `$no_deadlocks` certificates (stage 2, 2026-10-24)
+
+Built: the setting, the certificate check, two certified protocols and the audited
+adapter. Not built: monitored `Deadlock` scopes and STM (later, as decided).
+
+**The setting.** `$no_deadlocks` is a builtin boolean setting, scoped like the
+others (module, function body or block; `$no_deadlocks=false` opts a nested scope
+out). It may sit in a bundle. Nothing runs unless some scope sets it.
+
+**The theorem.** Let M be the code under `$no_deadlocks` that compiles. No run of
+the program reaches a state where a set of tasks, each stopped at a wait made by
+M's code (or reached through a call from it), waits forever on the others in the
+set. The assumptions, which are stated rather than checked:
+
+1. *The scheduler is fair*: a runnable task eventually runs, and a lock released
+   while another task waits for it is eventually taken by a waiter.
+2. *Local computation terminates*: code between two waits finishes. A handler, a
+   pipeline's `work` or a critical section that loops forever is a livelock, not a
+   deadlock, and is outside the guarantee.
+3. *External peers cooperate*: what waits only on the outside world (I/O, `sleep`,
+   a foreign call behind an audited adapter) eventually returns. A remote party
+   that never replies is outside the guarantee.
+
+Also trusted, as the library always is: the library's own waits (the protocols,
+`lock_all`, the task runtime) do what their documentation says, and the
+analysis's model of the program (the call graph, lock identities, hidden calls) is
+complete for the code it certifies.
+
+**Certificates.** Each wait in M is one of:
+
+- *A lock wait, by the checked lock order.* Stage 1's order graph has no cycle
+  (tasks or not), and its undecided cases are errors: two elements of one array
+  nested, a function value called while holding a lock, a join that may need a held
+  lock. Nested locks must be named: a local or a parameter whose handle `mutex(...)`
+  made at its declaration (a copy of one, too), or a global made so. A field, an
+  element, a reassigned variable, or a handle a call gives back may be a copy of
+  another handle, so the order cannot place it; `lock_all` takes any set safely.
+- *A structured join* (the end of `concurrent`, `within`, `race`): every spawned
+  function is in view and its waits certified, and no lock is held across it.
+- *A certified protocol from the library* (`request`, `serve`, `pipeline`, below):
+  no lock is held across it, and a `serve` handler asks no service.
+- *An audited adapter*, for a foreign call or raw system call that may block: a
+  function whose body says `$audited_wait`. An `$extern` declared with a row that
+  excludes `blocks` is trusted not to wait (the unsafe claim already made for rows).
+
+Everything else is an error naming the wait and what is missing: a raw channel's
+`send` and `receive`; a loop polling an atomic it does not set (an event wait); a
+function value the compiler cannot follow (a parameter's is counted where it is
+given; a callable type whose row says `no blocks` needs nothing); a lock held across
+any wait but another lock; a wait in a lifecycle hook (cleanup runs where a value
+ends, which the order and the joins do not see; today the drop hooks' no-failure
+proof already keeps waits out of them). A call from M into code outside the scope
+needs that code's waits certified too; its first uncertified wait is reported at
+the call. **Timeouts are recovery, not proofs**: a wait under `within` needs a
+certificate like any other.
+
+**Why it holds (proof sketch).** Rank the waits. A lock holder waits only for
+locks later in the order (no lock is held across anything else), so by induction
+from the last lock in the order every held lock is released (assumptions 1, 2).
+A join waits for tasks spawned below it; they never wait for the joiner, which holds
+no lock and serves no protocol while it joins, so by induction on the depth of
+spawning every join ends. A request waits for a server, which waits only for
+requests or the end of `serve`'s body (which closes the requests), and whose
+handler makes no request, so its waits are lock waits and joins, already ranked; a
+pipeline's receive waits for an item in flight, which its stage holds while it
+computes (assumption 2), and its sends never wait (at most `window` items are in
+flight in channels of `window`). A cycle of tasks waiting on one another would need
+an edge against the ranking.
+
+**Certified protocols** (`lib/prelude/protocols.dewy`, loaded only when a
+program names them; provisional spellings `serve`, `Service`, `request`,
+`pipeline`):
+
+- `serve(handler body)` runs `handler` on a server task and `body` on the caller
+  with a `Service<Q R>`. `s.request(q)` sends the request with a reply channel of
+  one of its own, so the server never waits to reply and callers in several tasks
+  get their own replies. When `body` returns the requests close; when the server
+  stops (closed or canceled) it closes the requests and the reply channel of each
+  request left, so a caller gets `Closed` instead of waiting. The handler's
+  captures must be `Send` (it runs on a task).
+- `pipeline(window seeds work feedback)`: a stage task runs `work` on the seeds
+  and on every item fed back; the caller runs `feedback` on each result, which
+  gives the items to feed back, and gets every result in order (or `Canceled`).
+  At most `window` items are in flight and both channels hold `window`, so no send
+  waits. One stage: a longer pipeline composes its stages into `work` for now.
+
+**Cost.** Zero without the setting: the directive tables are empty and the
+check never starts (one extra probe of the prelude's paths per program). With it:
+one walk of every function in the files that set it, and of each function they
+reach, summarized once (a strongly connected set shares its root's summary,
+Tarjan's low links): O(N + E) over the nodes and calls walked.
+
+**Not yet.** Layered services (a handler asking another service whose server
+cannot reach it) are rejected; multi-stage pipelines and `select` are not
+certified; formatting hooks are not counted (as in stage 1); a callback given by
+code outside the scope to a function under it is that code's to certify.
+
+**Acceptance** (`tests/cases/no_deadlocks/`): certified programs run
+(`certified_locks`, `request_reply`, `pipeline_feedback`, `protocol_cancel`,
+`audited_adapter`); each uncertified wait kind is an error (`raw_channel`,
+`join_held`, `request_held`, `handler_asks`, `lock_elements`, `order_no_tasks`,
+`unnamed_lock`, `foreign_block`, `poll`, `function_value`, `uncertified_callee`,
+`audited_module`).
 
 ## Decided rules
 
