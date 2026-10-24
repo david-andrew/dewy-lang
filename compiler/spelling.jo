@@ -30,3 +30,37 @@ edit_distance = (a: str, b: str, limit: int) -> int:
 fold_case = (c: u8) -> u8:
     if c >= 'A' and c <= 'Z': return c + 32
     c
+
+did_you_mean = (name: str, candidates: str[]) -> str:
+    loop c in candidates:
+        if c != name and len(c) == len(name) and lower(c) == lower(name): return " (did you mean '{c}'? names care about capital letters)"
+    caps = len(name) >= 3
+    loop ch in name:
+        if ch >= 'a' and ch <= 'z': caps = false
+    limit = 1
+    if len(name) > 4: limit = 2
+    if len(name) <= 2: limit = 0
+    best = ""
+    bs = 0
+    loop cn in candidates:
+        if caps and cn != upper(cn): continue
+        if cn == name or len(cn) == 0 or cn[0] == '_': continue
+        d = edit_distance(name, cn, limit)
+        pre = 0
+        loop pre < len(cn) and pre < len(name) and fold_case(cn[pre]) == fold_case(name[pre]): pre += 1
+        if d > limit and pre == len(cn) and pre >= 3: d = limit
+        longer = 0
+        if pre == len(name) and pre >= 3 and len(cn) > pre and cn[pre] == '_':
+            d = 0
+            longer = len(cn)
+        else if d > limit and pre == len(name) and pre >= 4 and len(cn) <= 2 * len(name):
+            d = limit
+            longer = len(cn)
+        if d > limit: continue
+        score = d * 100 - pre + longer
+        if len(best) == 0 or score < bs:
+            bs = score
+            best = cn
+    if len(best) > 0: return " (did you mean '{best}'?)"
+    if caps: return " (the colors with names are WHITE, BLACK, RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN, MAGENTA and GRAY; any other is rgb(0.5, 0.3, 0.1), each from 0 to 1)"
+    ""

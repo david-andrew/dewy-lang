@@ -40,3 +40,48 @@ edit_distance=(a:string b:string limit:int64):>int64=>{
     }
     prev.get(m) ?? limit+1
 }
+
+# A candidate name and how near it is (lower is nearer).
+Near:type=[name:string score:int64]
+
+# The closest of the candidate names, as the checker's hint (" (did you mean 'x'?)"), or "".
+# Ties go to the longest common prefix, then to the first; a short name that starts the
+# misspelling (len / lenght) counts as close.
+did_you_mean=(name:string candidates:array<string>):>string=>{
+    let x=name as array<uint8>
+    let n=x.length
+    # (Score for score: the same but for its capitals)
+    loop c in candidates {
+        if c not=? name and (c as array<uint8>).length =? n and lower(c) =? lower(name) {
+            return " (did you mean '{c}'? names care about capital letters)"
+        }
+    }
+    # (BROWN, SKYBLUE: a color's name in capitals; only names in capitals are near it)
+    let caps=n >=? 3 and not x.any((b:uint8) => b >=? b'a' and b <=? b'z')
+    # (a one- or two-letter name is close to too many: only another case of it)
+    let limit:int64=if n <=? 2 0 else if n >? 4 2 else 1
+    let near:array<Near>=[]
+    loop c in candidates {
+        let y=c as array<uint8>
+        let m=y.length
+        if caps and c not=? upper(c) or c =? name or m =? 0 or y[0] =? b'_' {continue}
+        let d=edit_distance(name c limit)
+        let pre=0
+        loop pre <? m and pre <? n and fold_case(y[pre]) =? fold_case(x[pre]) {pre+=1}
+        if d >? limit and pre =? m and pre >=? 3 {d=limit}
+        # (poly for polygon: the start of a longer name)
+        let longer=0
+        if pre =? n and pre >=? 3 and m >? pre and y[pre] =? b'_' {
+            # (save for save_data: the first word of a longer name, before all others)
+            d=0
+            longer=m
+        } else if d >? limit and pre =? n and pre >=? 4 and m <=? 2 * n {
+            d=limit
+            longer=m        # (the shortest such: polygon before polyline)
+        }
+        if d <=? limit {near.push(Near[c d * 100 - pre + longer])}
+    }
+    if not near.is_empty {return " (did you mean '{near.min_by((v:Near) => v.score).name}'?)"}
+    if caps {return " (the colors with names are WHITE, BLACK, RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN, MAGENTA and GRAY; any other is rgb(0.5, 0.3, 0.1), each from 0 to 1)"}
+    ""
+}

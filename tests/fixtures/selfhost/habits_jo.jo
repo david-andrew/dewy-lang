@@ -1,0 +1,16 @@
+# The compiler's frozen habits.jo and spelling.jo, with the same command line as habits_dewy.dewy.
+use '../../../compiler/habits.jo'
+use '../../../compiler/spelling.jo'
+
+main = ():
+    words = args()
+    spelled: str[]
+    loop w in [1..words.len()): spelled.push(words[w])
+    surface = ["read_file", "eprint", "zip"]
+    loop w in spelled:
+        h = habit(w)
+        print("{w}|{h.dewy}|{h.sloppy}|{h.dewy_map}|{h.sloppy_map}")
+        shaped: str[]
+        loop t in [h.dewy, h.sloppy, h.dewy_map, h.sloppy_map, w]: shaped.push("{sloppy_shaped(t, surface)}")
+        print(join(shaped, " "))
+        print(did_you_mean(w, spelled))

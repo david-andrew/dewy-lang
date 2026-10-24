@@ -1,0 +1,19 @@
+# The compiler's habits.dewy and spelling.dewy's did_you_mean: `habits_dewy word...` prints, for
+# each word, its four hints, whether each of them and the word itself read as written for Sloppy,
+# and the nearest of the words to it.
+$runtime_checks
+from p"../../../compiler/habits.dewy" import habit, sloppy_shaped
+from p"../../../compiler/spelling.dewy" import did_you_mean
+
+main=():>void=>{
+    let words=args()
+    let names=[loop w in [1..words.length) words[w]]
+    let surface=["read_file" "eprint" "zip"]
+    loop w in names {
+        let h=habit(w)
+        printl"{w}|{h.dewy}|{h.sloppy}|{h.dewy_map}|{h.sloppy_map}"
+        let shaped=[loop t in [h.dewy h.sloppy h.dewy_map h.sloppy_map w] "{sloppy_shaped(t surface)}"]
+        printl(shaped.join(" "))
+        printl(did_you_mean(w names))
+    }
+}

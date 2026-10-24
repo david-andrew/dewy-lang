@@ -29,7 +29,7 @@ use 'place_split.jo'
 # Compact tags shared by lexical tokens and syntax nodes. Names are needed
 # only for formatter/diagnostic text.
 enum DewyKind:
-    unknown, op, identifier, boolean, metatag, based_string, integer, real,
+    unknown, op, identifier, boolean, metatag, based_string, integer,
     quoted, rawquoted, eof, atom, ambiguous, binary, block, combined_assignment,
     flat, flow, interpolated_string, inverted_comparison, keyword, keyword_expr,
     operator, postfix, prefix, string, string_chunk, source_integer, source_real,
@@ -45,7 +45,6 @@ dw_kind_name = (kind: DewyKind) -> str:
         based_string: "BasedString"
         integer: "Integer"
         source_integer: "Integer"
-        real: "Real"
         source_real: "Real"
         quoted: "quoted"
         rawquoted: "rawquoted"
@@ -693,7 +692,7 @@ dw_expect_notes = (condition: int, pos: int, described: str = "") -> int:
 dw_literal_operand = (id: int) -> bool:
     let id = dw_unwrap(id)
     k = dewy_syntax[id].kind
-    if dw_integer_kind(k) or k == .real or k == .source_real or k == .boolean or k == .string or k == .quoted or k == .rawquoted or k == .based_string: return true
+    if dw_integer_kind(k) or k == .source_real or k == .boolean or k == .string or k == .quoted or k == .rawquoted or k == .based_string: return true
     if k == .identifier and dewy_syntax[id].text in ["none", "true", "false"]: return true
     if dewy_syntax[id].kind == .prefix and dw_op(id) == .minus: return dw_literal_operand(dw_child(id, 1))
     # ([2 5]: a literal array of literals)
@@ -820,12 +819,6 @@ dw_test_attach = (marked: int, declarations: int[]):
     if nkids(f) > 0 and not cased: fatal(pos, "the test '{name_of(int(nodes[f].name))}' takes parameters: give it cases, `$test(cases=…)`")
     if nkids(f) == 0 and cased: fatal(pos, "the test '{name_of(int(nodes[f].name))}' takes no parameters, so it cannot be given cases")
 
-# A real literal's digits after its base prefix (literals.dewy reads whole numbers)
-dw_digits = (text: str) -> str:
-    digits = text[3..]
-    if starts_with(lower(digits), text[..2)): digits = digits[2..]
-    digits
-
 # `count ?? 0 + 1` is `count ?? (0 + 1)`: arithmetic binds more tightly than
 # `??`. A literal fallback followed by arithmetic usually meant the other tree.
 dw_coalesce_arithmetic = (left: int, right: int):
@@ -840,13 +833,13 @@ dw_coalesce_arithmetic = (left: int, right: int):
         first = dw_unwrap(dw_child(first, 1))
     if op == .none: return
     k = dewy_syntax[first].kind
-    if not dw_integer_kind(k) and k != .real and k != .source_real: return
+    if not dw_integer_kind(k) and k != .source_real: return
     name = dw_operand_text(left)
     if name == "": name = "value"
     lit = dewy_syntax[first].text
     r = dw_unwrap(rest)
     rk = dewy_syntax[r].kind
-    tail = if rk == .identifier or dw_integer_kind(rk) or rk == .real or rk == .source_real: dewy_syntax[r].text else: "..."
+    tail = if rk == .identifier or dw_integer_kind(rk) or rk == .source_real: dewy_syntax[r].text else: "..."
     sym = dn_token_text(op)
     warn(dewy_syntax[right].pos, "arithmetic binds more tightly than `??`, so this fallback includes `{lit} {sym} {tail}`, not just `{lit}`: write `({name} ?? {lit}) {sym} {tail}` to use the chosen value, or `{name} ?? ({lit} {sym} {tail})` to keep this meaning")
 
@@ -1868,25 +1861,12 @@ dw_expr = (id: int) -> int:
             if nodes[n].ival < 0: add_flag(n, NF_U64)
             return n
         return dw_big_integer(text, id)
-    if k == .real or k == .source_real:
-        number = text
-        if k == .real:
-            parts = split(text, "|")
-            if parts.len() != 3 or not starts_with(parts[0], "0d:"): return dw_fail(id, "this real literal")
-            number = dw_digits(parts[0])
-            if parts[1] != "":
-                if not starts_with(parts[1], "0d:"): return dw_fail(id, "nondecimal real fractions")
-                number = number + "." + dw_digits(parts[1])
-            if parts[2] != "":
-                exponent = parts[2]
-                if exponent[1] != 'e' or not starts_with(exponent[2..], "0d:"):
-                    return dw_fail(id, "nondecimal real exponents")
-                number += "e" + exponent[..1) + dw_digits(exponent[2..])
-        value = to_float(replace(number, "_", ""))
+    if k == .source_real:
+        value = to_float(replace(text, "_", ""))
         if value == none: return dw_fail(id, "this real literal")
         n = mk(.float_lit, pos)
         nodes[n].fval = value!
-        nodes[n].sval = i32(intern(replace(number, "_", "")))
+        nodes[n].sval = i32(intern(replace(text, "_", "")))
         add_flag(n, NF_LITERAL)
         return n
     if k == .interpolated_string:
@@ -2208,7 +2188,7 @@ dw_has_rows = (children: int[]) -> bool:
 dw_pure = (id: int) -> bool:
     let id = dw_unwrap(id)
     k = dewy_syntax[id].kind
-    if k == .identifier or k == .integer or k == .source_integer or k == .real or k == .source_real or k == .boolean or k == .string: return true
+    if k == .identifier or k == .integer or k == .source_integer or k == .source_real or k == .boolean or k == .string: return true
     if k == .block and dewy_syntax[id].text == "():" and dw_nchildren(id) == 1: return dw_pure(dw_child(id, 0))
     op = dw_op(id)
     if k == .prefix and (op == .minus or op == .plus): return dw_pure(dw_child(id, 1))
@@ -2403,7 +2383,7 @@ dw_chain_link = (id: int) -> bool:
 dw_chain_plain = (id0: int) -> bool:
     id = dw_unwrap(id0)
     k = dewy_syntax[id].kind
-    if k == .identifier or k == .integer or k == .source_integer or k == .real or k == .source_real or k == .boolean: return true
+    if k == .identifier or k == .integer or k == .source_integer or k == .source_real or k == .boolean: return true
     k == .binary and dw_op(id) == .dot and dw_chain_plain(dw_child(id, 1))
 
 dw_chain_count = 0

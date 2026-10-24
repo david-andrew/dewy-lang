@@ -27,7 +27,8 @@ FROZEN_TWINS = {'zip.dewy': 'zip.jo', 'spelling.dewy': 'spelling.jo', 'leb128.de
                'base64.dewy': 'base64.jo', 'line_table.dewy': 'line_table.jo', 'sha.dewy': 'sha.jo',
                'icns.dewy': 'icns.jo', 'targets.dewy': 'targets.jo',
                'json_doc.dewy': 'json_doc.jo', 'manifest.dewy': 'manifest.jo',
-               'literals.dewy': 'literals.jo', 'dewy_tokens.dewy': 'dewy_tokens.jo'}
+               'literals.dewy': 'literals.jo', 'dewy_tokens.dewy': 'dewy_tokens.jo',
+               'habits.dewy': 'habits.jo'}
 
 
 def identity(path: Path) -> str:

@@ -230,6 +230,26 @@ function takes its twin's instructions (`dn_token_kind` +0.6%). What it met:
   stub): build.py put the compiler's dewy_fmt.jo back for step 2 without its twins, so the
   seed read the leaf. It now names the twin there, and the leaf again from step 3.
 
+`habits.dewy` (what a name from another language is here, `append` to "`push`", for Dewy and
+Sloppy programs and for a map's members, and whether a hint is written for Sloppy) and
+spelling.dewy's `did_you_mean` (the nearest candidate) take the checker's "did you mean" hints out
+of check.jo, which keeps a habit's fit to the receiver and the interned names. The first leaf
+with a set (`set[... surface...]`) and `min_by` with a key closure; the four tables are `match`es
+on string literal arms. It compiled as first written. Cold, but reached: overload resolution words
+a "no parameter named" message for each version it rejects, so flagships 97 and 98 each ask
+twelve times for `key`. A first draft read the tables into arrays of pairs on each call, 46 k
+instructions a call (97 +0.14%, check +0.22%); the matches cost what the old global arrays' scan
+did. Panel: every item -0.01% to -0.07% (the Sloppy tables were globals built at start); 684
+builds identical. 20000 lookups of a missing name, each with a nearest-name choice, take 380 M
+instructions against the twin's 608 M (release 348 / 899 M; the twin builds its arrays each call).
+What it met:
+- The old word scan for Sloppy-shaped hints began a word at any byte from 0x80 but continued
+  only over ASCII, so a hint with a non-ASCII letter never ended (no hint had one). Both twins
+  read ASCII words.
+- Later duplicates in the tables (Scratch's `clone`, Processing's `size`, a second `index` and
+  `parse_int`, Dewy's second `str`, `float` and `items`) never matched; they are gone, as
+  unreachable arms would be refused.
+
 Open gaps from these leaves, by cost:
 - A literal beside a policy-typed operand (`w + 1`, `w & 0xFF`, `w xor 0xFFFFFFFF`) goes
   through `int` and `__mi_low_word`, about 30 instructions in place of one. Plain `uint32`
