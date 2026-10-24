@@ -558,3 +558,42 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
     assertion; at a call site it warns when the compiler cannot prove the
     condition false. The sink design that uses it (and its meaning for
     command-line and environment input) is pending.
+- Substitution invariance for multi-values (decided 2026-10-23; supersedes the
+  provisional "one-value contexts take the last" and "call arguments take one
+  value each"): if a literal works somewhere, anything producing the same values
+  works there unchanged. `(a b)` is not a container but the syntax for several
+  values; `[ … ]` arrays and records are containers, and a container is one
+  value. `add(1 2)`, `fn = () => (1 2); add(fn)`, `pair = (a b); add(pair)` all
+  fill both parameters; a container must be spread (`add([1 2]...)`,
+  `add(fn2...)` when `fn2` returns `[1 2]`). Bindings can hold several values,
+  typed `(int64 int64)` like multi-value results. Several values are never cut
+  down to one: a context that needs exactly one value (operand, index, single
+  parameter) given several is a compile error naming the counts. Several values
+  are not indexable (`pair[0]` is an error suggesting `[pair][0]` or
+  `(x y) = pair`). `[…]` collects several values into a container; `xs...`
+  spreads a container into several values. Mitigation kept: an LSP inlay hint
+  showing which parameter each value fills, and a warning when a multi-valued
+  argument is followed by further positional arguments.
+- Path safety, scoped by construction (decided 2026-10-23; replaces source-trust
+  markers and the args/env exemption): warn when unproven text is interpolated
+  into a base path and the result reaches a filesystem operation without
+  `confine`/`contains`, the traversal pattern. A whole path taken as-is from
+  arguments, environment, input or anywhere else has no base to escape and does
+  not warn. Libraries express this with `$warn_if p isnt? SafePath "…"`;
+  `SafePath` is a minted type only the path library can create, so there are no
+  `$guard`/`$sink` metatags and no `__untrusted` source markers. Under
+  `$bulletproof`, an opt-in makes every external path require confinement or
+  explicit acknowledgment.
+- `$build` and `$target` (decided 2026-10-23): namespaces with members (a
+  deliberate exception for build facets). Statement position sets, expression
+  position checks, as for every metatag: `$build.mode = 'release'`,
+  `$target = 'aarch64-linux'`, `if $build.mode =? 'debug' {...}`,
+  `if $target.os =? 'windows' {...}`. Boolean members take the bare form for
+  true and `=false`. One member per fact: `$build.mode` is `'debug'` (the
+  default, what plain `dewy FILE` builds) or `'release'`; `$build.debug` is
+  removed. The file is the preferred place to set them; command-line flags
+  (`--release`/`--debug`, `--target …`) override the file, and an override that
+  contradicts a value set explicitly in the file builds with a warning naming
+  both. Only build mode and target can be overridden from the command line;
+  safety and semantic metatags (`$runtime_checks`, `$no_hidden_costs`,
+  `$bulletproof`, …) are never settable from the command line.
