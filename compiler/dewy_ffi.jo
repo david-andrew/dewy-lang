@@ -134,7 +134,7 @@ dw_export_begin = (id0: int):
 dw_export_attach = (made: int[]):
     pos = dw_export_pos
     dw_export_pos = 0
-    if made.len() != 1 or nodes[made[0]].kind != .fn_ or has_flag(made[0], NF_EXTERN): fatal(pos, "`$export` marks a module-level function with a body: put it on the line just before one")
+    if made.len() != 1 or nodes[made[0]].kind != .fn_ or has_flag(made[0], NF_EXTERN): fatal(pos, "`$export` marks a module-level function with a body: put it before one, on its line or the line above")
     n = made[0]
     if has_flag(n, NF_GENERIC): fatal(pos, "an `$export` function cannot be generic: C has one signature per symbol")
     if name_of(int(nodes[n].name)) == "main": fatal(pos, "`main` is the program's entry point, not an `$export` function")

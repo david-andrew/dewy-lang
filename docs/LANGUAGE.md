@@ -2444,8 +2444,8 @@ moved into a task (captured, bound or returned), and `$sync = false` keeps it ou
 of storage that tasks share, such as a module-level binding a `parallel` body
 reads. A bare `$send` or `$sync` row claims the property. A claim the structure
 already gives needs nothing; one the compiler cannot verify (a raw `ptr<T>`
-field, say) needs the unsafe boundary: `$unsafe` on a line of its own before the
-type, or as another of its rows.
+field, say) needs the unsafe boundary: `$unsafe` before the type's declaration, or as
+another of its rows.
 
 `atomic(0)` makes an `Atomic<int64>` shared counter. Payloads are fixed-width
 integers; `atomic<T>(value)` selects another width. `load`, `store`, `add`,
@@ -2863,8 +2863,7 @@ fields in order, each at its natural alignment, so C fills one in place:
 ```dewy
 TimeVal:type = [seconds:int64 microseconds:int64]
 gettimeofday = (now:ptr<TimeVal> zone:ptr<uint8>?):>int32 => $extern
-main = ():>void => {
-    $unsafe
+main = ():>void => $unsafe {
     let now:array<TimeVal> = [TimeVal[0 0]]
     gettimeofday(now.ptr none)
     printl(now[0].seconds)
@@ -2875,17 +2874,15 @@ A record holding a string, an array or another managed value has no C layout,
 and a pointer to one is rejected in an `$extern` signature.
 
 Calling a `$extern` function, or naming it as a value, and reading or writing
-through a `ptr<T>` need an unsafe boundary: the setting `$unsafe` on a line of
-its own in an enclosing block, function body or module. The compiler cannot
-check what foreign code does, so the boundary marks where a person must. No
-bundle may hold `$unsafe`. A safe wrapper confines it:
+through a `ptr<T>` need an unsafe boundary: `$unsafe` before the expression,
+on its line or the line above (`$unsafe strlen(msg.ptr)`); `$unsafe { ... }`
+covers several, and `$unsafe` before a declaration covers that declaration. The
+compiler cannot check what foreign code does, so the boundary marks where a
+person must. No bundle may hold `$unsafe`. A safe wrapper confines it:
 
 ```dewy
 getpid = ():>int32 => $extern
-pid = ():>int32 => {
-    $unsafe
-    getpid()
-}
+pid = ():>int32 => $unsafe getpid()
 ```
 
 A foreign call is opaque to effect rows: a function declared `& no_effects`, or
@@ -2895,8 +2892,8 @@ library on its main thread before its first task. A row written on the `$extern`
 itself (`labs = (x:int64):>int64 & no_effects => $extern`) is trusted instead, as
 part of the unsafe claim.
 
-`$export` on the line before a module function gives it the C calling
-convention, so C can call it through a function pointer; `$export(name='sym')`
+`$export` before a module function, on its line or the line above, gives it the
+C calling convention, so C can call it through a function pointer; `$export(name='sym')`
 names its symbol where the target exports one (WebAssembly builds export it to
 the page). `@f` passes it where a C function type is expected:
 
@@ -2904,9 +2901,8 @@ the page). `@f` passes it where a C function type is expected:
 qsort = (base:ptr<int32> count:uint64 size:uint64 compare:<(a:ptr<int32> b:ptr<int32>):>int32>):>void => $extern
 
 $export
-ascending = (a:ptr<int32> b:ptr<int32>):>int32 => {
-    $unsafe
-    return if a[0] <? b[0] -1 else if a[0] >? b[0] 1 else 0
+ascending = (a:ptr<int32> b:ptr<int32>):>int32 => $unsafe {
+    if a[0] <? b[0] -1 else if a[0] >? b[0] 1 else 0
 }
 ```
 
@@ -3714,8 +3710,9 @@ that may panic is an error too (the `panics` effect, "Functions and values"). Th
 `$explicit_copies` (described with `.copy` above) is a setting like these, for
 a module, a function or a block. So are the float settings `$fast_math`,
 `$no_nan` and `$no_inf`, and the library bundle `$finite_floats` (both of the
-latter), described with the numeric types. `$unsafe`, the unsafe boundary, is one too
-(see "Foreign functions"), though no bundle may hold it.
+latter), described with the numeric types. `$unsafe`, the unsafe boundary, is
+different: it covers only the next expression or declaration (see "Foreign
+functions"), and no bundle may hold it.
 
 A bundle is one metatag for several settings, defined at module level:
 

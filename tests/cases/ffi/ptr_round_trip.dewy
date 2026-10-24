@@ -6,8 +6,7 @@ free=(p:ptr<uint8>?):>void => $extern
 memset=(p:ptr<uint8> value:int32 n:uint64):>ptr<uint8> => $extern
 strlen=(s:ptr<uint8>):>uint64 => $extern
 
-main=():>void=>{
-    $unsafe
+main=():>void=>$unsafe {
     let block=malloc(32)
     if block is? none {
         printl("out of memory")

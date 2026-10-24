@@ -12,8 +12,7 @@ pid=():>int32 => {
     getpid()
 }
 
-main=():>void=>{
-    $unsafe
+main=():>void=>$unsafe {
     let word:array<uint8>=[104 105 33 0]
     printl(strlen(data(word)))
     printl(pid() >? 0)

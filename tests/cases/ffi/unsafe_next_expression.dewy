@@ -1,0 +1,13 @@
+# modes: native
+# `$unsafe` covers the next expression, on its line or the next; `$unsafe { ... }` several.
+getpid=():>int32 => $extern
+main=():>void=>{
+    let a = $unsafe getpid()
+    $unsafe printl(getpid() >? 0)
+    $unsafe
+    printl(getpid() =? a)
+    $unsafe {
+        let b = getpid()
+        printl(b =? a)
+    }
+}

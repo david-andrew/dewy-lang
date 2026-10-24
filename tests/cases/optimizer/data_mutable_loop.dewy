@@ -1,6 +1,6 @@
 # exit: 42
-$unsafe
 Box:type=[values:array<int64>]
+$unsafe
 run=()=>{let rows=[Box[[10 11]] Box[[20 21]]] let saved=rows
 loop @item in rows {let p=item.values.data() p[0]+=1}
 return if rows[0].values =? [11 11] and rows[1].values =? [21 21] and saved[0].values =? [10 11] and saved[1].values =? [20 21] 42 else 1}

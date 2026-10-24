@@ -5,33 +5,28 @@ fill=(p:ptr<uint8> n:int64 v:uint8):>void=>{
     $unsafe
     loop i in [0..n) {p[i]=v}
 }
-total=(p:ptr<uint8> n:int64):>int64=>{
-    $unsafe
+total=(p:ptr<uint8> n:int64):>int64=>$unsafe {
     let s:int64=0
     loop i in [0..n) {s+=int64(p[i])}
     s
 }
 # (a parameter's pointer, written through: the caller's array stays as it was)
-scribble=(a:array<uint8>):>int64=>{
-    $unsafe
+scribble=(a:array<uint8>):>int64=>$unsafe {
     let q=a.ptr + 1
     q[0]=99
     a[1]
 }
-via_call=(a:array<uint8>):>int64=>{
-    $unsafe
+via_call=(a:array<uint8>):>int64=>$unsafe {
     fill(a.ptr a.length 5)
     total(a.ptr a.length)
 }
-read_only=(a:array<uint8>):>int64=>{
-    $unsafe
+read_only=(a:array<uint8>):>int64=>$unsafe {
     let p=a.ptr
     let w=(p as ptr<uint16>)[0]
     total(p a.length) + int64(w) + int64((p + 2)[0])
 }
 memset=(p:ptr<uint8> c:int32 n:uint64):>ptr<uint8> => $extern
-main=():>void=>{
-    $unsafe
+main=():>void=>$unsafe {
     let a:array<uint8>=[1 2 3 4]
     let b=a
     printl"{scribble(a)} {a} {via_call(a)} {a} {read_only(a)}"

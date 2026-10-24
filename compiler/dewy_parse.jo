@@ -1618,7 +1618,7 @@ dw_function = (id: int, name: str) -> int:
     if ffi != "":
         dw_siblings = outer_siblings
         if ffi == "extern" and captures.len() == 0: return dw_extern_finish(n, ps, dw_child(id, 2), name)
-        if ffi == "export": fatal(nodes[n].pos, "`$export` goes on the line just before the function it marks")
+        if ffi == "export": fatal(nodes[n].pos, "`$export` goes before the function it marks, on its line or the line above: `$export f = (...) => ...`")
         if ffi == "intrinsic": dw_intrinsic_check(dw_child(id, 2), name, nodes[n].pos)
         fatal(nodes[n].pos, "`${ffi}` declares a module-level function")
     outer_result = dw_fn_result
@@ -1799,8 +1799,17 @@ dw_register_literal_methods = (entries: int[]):
         decls.push(if nodes[value].kind == .lambda and dewy_is_method(value): value else: 0)
     dewy_method_group(row_names, decls)
 
+# `$unsafe expression`: the unsafe boundary holds over that expression's source; its operand.
+dw_unsafe_scope = (id: int) -> int:
+    operand = dw_child(id, 0)
+    dir_set(intern("unsafe"), 1, dewy_syntax[id].pos, dw_dir_last(operand), dewy_syntax[id].pos)
+    operand
+
+dw_unsafe_directive = (id: int) -> bool: dewy_syntax[id].kind == .directive and dewy_syntax[id].text == "unsafe"
+
 dw_expr = (id: int) -> int:
     let id = dw_unwrap(id)
+    if dw_unsafe_directive(id): return dw_expr(dw_unsafe_scope(id))
     k = dewy_syntax[id].kind
     text = dewy_syntax[id].text
     pos = dewy_syntax[id].pos
@@ -2430,6 +2439,7 @@ dw_chain_from = (links: int[], operands: int[], i: int, left: int) -> int:
 
 dw_stmt = (id: int, top: bool = false) -> int:
     let id = dw_unwrap(id)
+    if dw_unsafe_directive(id): return dw_stmt(dw_unsafe_scope(id), top)
     # `(count += 1)`: a parenthesized update is the update (a function body may be one).
     grouped = dw_grouped(id)
     if grouped != id and (dn_token_assignment(dw_op(grouped)) or dw_op(grouped) == .assign): id = grouped
@@ -3371,7 +3381,14 @@ dw_label_fail = (pos: int, label: int):
     if name_of(label) == "explicit_allocation_failure": fatal(pos, "`$explicit_allocation_failure` is a module directive; put it at file scope, at the top")
     fatal(pos, "a loop label must be followed by a loop (`${name_of(label)}` is not a directive)")
 
-dw_block = (id: int, accumulator: int = 0, map: bool = false) -> int:
+dw_block = (id0: int, accumulator: int = 0, map: bool = false) -> int:
+    id = id0
+    # (`=> $unsafe { ... }`: the boundary covers the block, which stays the body itself)
+    if dw_unsafe_directive(dw_unwrap(id)):
+        inner = dw_unwrap(dw_child(dw_unwrap(id), 0))
+        if dewy_syntax[inner].kind == .block and dewy_syntax[inner].text == "{{}}:":
+            dw_unsafe_scope(dw_unwrap(id))
+            id = inner
     n = mk(.block, dewy_syntax[id].pos)
     scoped = dw_siblings.len() > 0
     outer_siblings: {int: int} = {}
@@ -3571,6 +3588,7 @@ dw_top_declarations = (id: int) -> int[]:
 
 dw_top_declarations_inner = (id: int) -> int[]:
     declaration = dw_unwrap(id)
+    if dw_unsafe_directive(declaration): return dw_top_declarations(dw_unsafe_scope(declaration))
     # (a directly built overload group: its member declarations)
     if dewy_syntax[declaration].kind == .compact_stmt and dewy_syntax[declaration].children.len() > 0: return dewy_syntax[declaration].children
     if dw_op(declaration) == .statement_end: declaration = dw_unwrap(dw_child(declaration, 1))

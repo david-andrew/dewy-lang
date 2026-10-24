@@ -14,8 +14,7 @@ descending=(a:ptr<int32> b:ptr<int32>):>int32 => {
     return if a[0] >? b[0] -1 else if a[0] <? b[0] 1 else 0
 }
 
-main=():>void=>{
-    $unsafe
+main=():>void=>$unsafe {
     let xs:array<int32>=[5 -3 9 1 0]
     qsort(data(xs) 5 4 @ascending)
     printl(xs)

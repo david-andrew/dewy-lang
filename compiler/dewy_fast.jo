@@ -1008,6 +1008,7 @@ dn_directive_form = (name: str) -> int:
     if name == "allocator": return 5
     if name == "fail": return 2
     if name == "breakpoint": return 3
+    if name == "unsafe": return 6
     0
 
 # Children: the condition, the message and the condition's source text (each
@@ -1015,6 +1016,12 @@ dn_directive_form = (name: str) -> int:
 dn_directive = (token: DewyLexeme, form: int) -> int:
     dn_at += 1
     name = dn_payload(token)
+    if form == 6:
+        # `$unsafe expression`: the boundary covers the next expression, on this line or the
+        # next (`$unsafe { ... }` several); `$unsafe=false` and a type's `$unsafe` row stay settings
+        next = dn_tokens[dn_at]
+        if not dn_can_start() or next.symbol == .assign or next.kind == .metatag: return dn_node(token.kind, name, token.start, name = token.name)
+        return dn_node(.directive, name, token.start, [dn_expr(0)])
     if form == 4:
         dn_expect(.lparen)
         owner = dn_expr(0)
@@ -1378,7 +1385,7 @@ dewy_fast_file = (file: int) -> int[]:
         dewy_syntax.truncate(2)
         if dn_at == before: dn_error(dn_tokens[dn_at].start, "expected a declaration")
     if proof_pending: dn_error(dn_tokens[dn_at].start, "$proof requires a following function declaration")
-    if dw_export_pos != 0: fatal(dw_export_pos, "`$export` marks a module-level function: put it on the line just before one")
+    if dw_export_pos != 0: fatal(dw_export_pos, "`$export` marks a module-level function: put it before one, on its line or the line above")
     if marked != 0: fatal(nodes[marked].pos, "`$test` marks a module-level function: put it on the line just before one")
     if shadowable_pos != 0: fatal(shadowable_pos, "`$shadowable` marks a module-level const: put it just before one")
     if dc_lib_lazy:

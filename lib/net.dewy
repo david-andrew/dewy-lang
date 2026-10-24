@@ -11,7 +11,6 @@
 # The game library's WebSocket messages (`net.listen`, `net.connect`,
 # `net.receive`, `net.send`, ...) come from lib/net.jo, re-exported here.
 import p"net.jo"
-$unsafe
 
 NetError:type=type of error & [message:string]
 
@@ -22,6 +21,7 @@ TcpStream:type=[handle:int64]
 
 # A server on host's port (0: any free one). host is a numeric address; the
 # default is loopback, so only this machine can connect.
+$unsafe
 tcp_listen=(port:int64 host:string="127.0.0.1" backlog:int32=128):>TcpListener | NetError=>{
     let address=__address(host port) or_throw
     let handle=__open(address.family)
@@ -53,6 +53,7 @@ tcp_listen=(port:int64 host:string="127.0.0.1" backlog:int32=128):>TcpListener |
 }
 
 # The next connection made to the server, waiting for one.
+$unsafe
 tcp_accept=(server:TcpListener):>TcpStream | NetError | Canceled=>{
     loop true {
         let ready=__wait(server.handle __READ) or_throw
@@ -67,6 +68,7 @@ tcp_accept=(server:TcpListener):>TcpStream | NetError | Canceled=>{
 }
 
 # A connection to host's port (a numeric address or localhost), waiting until it is made.
+$unsafe
 tcp_connect=(host:string port:int64):>TcpStream | NetError | Canceled=>{
     let address=__address(host port) or_throw
     let handle=__open(address.family)
@@ -96,6 +98,7 @@ tcp_connect=(host:string port:int64):>TcpStream | NetError | Canceled=>{
 }
 
 # Sends all of data, waiting while the other side is slow to take it.
+$unsafe
 tcp_send=(stream:TcpStream data:array<uint8>):>void | NetError | Canceled=>{
     let at:int64=0
     loop at <? data.length {
@@ -115,6 +118,7 @@ tcp_send=(stream:TcpStream text:string):>void | NetError | Canceled=>tcp_send(st
 # some; none once the other side has closed the connection and everything it
 # sent has been received.
 tcp_receive=(stream:TcpStream largest:int64=65536):>array<uint8> | none | NetError | Canceled=>__untrusted(__tcp_receive(stream largest))
+$unsafe
 __tcp_receive=(stream:TcpStream largest:int64):>array<uint8> | none | NetError | Canceled=>{
     let buffer:array<uint8>=fill(uint8(0) max(largest 1))
     loop true {
@@ -141,6 +145,7 @@ __SockAddrIn6:type=[family:uint16 port:uint16 flow:uint32 a0:uint32 a1:uint32 a2
 __port_bytes=(port:int64):>uint16=>uint16<overflow='wrap'>(((port & 255) << 8) | ((port >> 8) & 255))
 
 # A numeric IPv4 or IPv6 address (or localhost) and a port, as the C sockaddr's bytes.
+$unsafe
 __address=(host:string port:int64):>__Address | NetError=>{
     if port <? 0 or port >? 65535 return NetError["invalid port {port}"]
     let name=if host =? "localhost" "127.0.0.1" else host
@@ -160,6 +165,7 @@ __address=(host:string port:int64):>__Address | NetError=>{
 # Waits until the socket is ready for `events`, or its task is canceled. The
 # cancellation signal interrupts the wait; the timeout covers a signal that
 # came just before it.
+$unsafe
 __wait=(handle:int64 events:int32):>int32 | Canceled=>{
     loop true {
         if __task_canceled() return Canceled
@@ -170,6 +176,7 @@ __wait=(handle:int64 events:int32):>int32 | Canceled=>{
 
 __failure=(what:string code:int32):>NetError=>NetError["{what}: {__describe(code)}"]
 
+$unsafe
 if $target.os =? "windows" {
     __WSAStartup=(version:uint16 data:ptr<uint8>):>int32 => $extern(name='WSAStartup' lib='ws2_32')
     __socket=(domain:int32 kind:int32 protocol:int32):>int64 => $extern(name='socket' lib='ws2_32')
@@ -364,6 +371,7 @@ if $target.os =? "windows" {
 }
 
 # Small writes go out at once (no Nagle delay): requests and replies are messages.
+$unsafe
 __prepare=(handle:int64):>void=>{
     let on:array<int32>=[1]
     if $target.os =? "windows" {

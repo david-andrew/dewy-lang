@@ -19,7 +19,7 @@ ffi_unsafe_at = (pos: int) -> bool:
 
 ffi_require_unsafe = (pos: int, what: str, why: str):
     if pos <= 0 or not files[pos_file(pos)].is_dewy or ffi_unsafe_at(pos): return
-    fatal(pos, "{what} needs an unsafe boundary ({why}): write `$unsafe` on a line of its own in the enclosing block or function body")
+    fatal(pos, "{what} needs an unsafe boundary ({why}): write `$unsafe` before the expression, on its line or the line above, or `$unsafe \{ ... }` around several")
 
 # A use of a function declaration: an extern needs `$unsafe` in Dewy code.
 ffi_extern_use = (decl: int, use_pos: int):

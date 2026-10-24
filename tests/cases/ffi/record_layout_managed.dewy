@@ -1,8 +1,7 @@
 # A pointer for C points to data with C's layout: no strings or arrays inside.
 Named:type=[id:int32 name:string]
 take=(p:ptr<Named>):>void => $extern
-main=():>void=>{
-    $unsafe
+main=():>void=>$unsafe {
     let xs:array<Named>=[Named[1 "a"]]
     take(xs.ptr)
 }

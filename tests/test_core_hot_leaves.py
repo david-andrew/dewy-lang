@@ -34,8 +34,7 @@ def disassembly(binary, function):
 
 SCAN = '''
 # (unannotated counters: a word-at-a-time scan, then its tail)
-count_newlines=(src:string):>int64=>{
-    $unsafe
+count_newlines=(src:string):>int64=>$unsafe {
     let c:int64=0
     let n=(src as array<uint8>).length
     let sp=(src as array<uint8>).ptr
@@ -123,14 +122,12 @@ def test_byte_ranges_compare_in_place(compiler, tmp_path, flags):
 
 
 POINTER = '''
-total=(p:ptr<uint8> n:int64):>int64=>{
-    $unsafe
+total=(p:ptr<uint8> n:int64):>int64=>$unsafe {
     let s:int64=0
     loop i in [0..n) {s+=int64(p[i])}
     s
 }
-first_words=(a:array<uint8>):>int64=>{
-    $unsafe
+first_words=(a:array<uint8>):>int64=>$unsafe {
     let p=a.ptr
     total(p a.length) + int64((p as ptr<uint16>)[0])
 }
@@ -165,8 +162,7 @@ spaces=(text:array<uint8>):>int64=>{
     }
     words
 }
-mix_bytes=(p:ptr<uint8> n:int64):>int64=>{
-    $unsafe
+mix_bytes=(p:ptr<uint8> n:int64):>int64=>$unsafe {
     let h:int64=0
     let i=0
     loop i + 8 <? n {
@@ -179,8 +175,7 @@ mix_bytes=(p:ptr<uint8> n:int64):>int64=>{
     }
     h
 }
-main=():>void=>{
-    $unsafe
+main=():>void=>$unsafe {
     let t:array<uint8>=[97 32 32 98 99 32 100]
     printl"{spaces(t)} {mix_bytes(t.ptr t.length)} {mix_bytes(t.ptr 0)}"
 }

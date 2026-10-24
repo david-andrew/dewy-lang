@@ -6,8 +6,7 @@ Pair:type=[small:uint8 wide:uint32]
 gettimeofday=(now:ptr<TimeVal> zone:ptr<uint8>?):>int32 => $extern
 memcpy=(destination:ptr<uint8> source:ptr<uint8> count:uint64):>ptr<uint8> => $extern
 
-main=():>void=>{
-    $unsafe
+main=():>void=>$unsafe {
     let now:array<TimeVal>=[TimeVal[0 0]]
     printl(gettimeofday(now.ptr none))
     printl(now[0].seconds >? 1000000000 and now[0].microseconds <? 1000000)

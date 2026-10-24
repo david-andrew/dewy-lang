@@ -1,8 +1,7 @@
 # modes: native
 qsort=(base:ptr<int32> count:uint64 size:uint64 compare:<(a:ptr<int32> b:ptr<int32>):>int32>):>void => $extern
 same=(a:ptr<int32> b:ptr<int32>):>int32 => 0
-main=():>void=>{
-    $unsafe
+main=():>void=>$unsafe {
     let xs:array<int32>=[2 1]
     qsort(data(xs) 2 4 @same)
 }

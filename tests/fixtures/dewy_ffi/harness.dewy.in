@@ -12,8 +12,7 @@ add_one=(x:int32):>int32 => x + 1
 $export(name='dewy_weighted')
 weighted=(acc:int64 x:int64):>int64 => acc * 10 + x
 
-main=():>void=>{
-    $unsafe
+main=():>void=>$unsafe {
     printl(apply_twice(@add_one 40))
     let xs:array<int64>=[1 2 3 4]
     printl(fold(data(xs) 4 @weighted 0))

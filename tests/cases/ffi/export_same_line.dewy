@@ -1,0 +1,9 @@
+# modes: native native-release
+# A metatag applies to the next thing: `$export` may share its definition's line.
+qsort=(base:ptr<int32> count:uint64 size:uint64 compare:<(a:ptr<int32> b:ptr<int32>):>int32>):>void => $extern
+$export ascending=(a:ptr<int32> b:ptr<int32>):>int32 => $unsafe if a[0] <? b[0] -1 else if a[0] >? b[0] 1 else 0
+main=():>void=>$unsafe {
+    let xs:array<int32>=[5 -3 9 1 0]
+    qsort(data(xs) 5 4 @ascending)
+    printl(xs)
+}

@@ -19,8 +19,7 @@ LineTable:type=[
 
 # where each line of src starts: 0, then the offset after each newline. Newlines are
 # found a word at a time: only a word holding one is scanned by byte; O(bytes / 8 + lines)
-line_starts=(src:string):>array<int64>=>{
-    $unsafe
+line_starts=(src:string):>array<int64>=>$unsafe {
     let ls:array<int64>=[0]
     # (the pointer of a view, not of a variable: a variable's would be its own copy)
     let n:int64=(src as array<uint8>).length

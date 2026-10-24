@@ -28,8 +28,7 @@ generate = (count:int64):>array<uint8> => {
 }
 
 # p[0..n) hashed eight bytes at a time, then byte by byte
-hash_bytes = (p:ptr<uint8> n:int64):>int64 => {
-    $unsafe
+hash_bytes = (p:ptr<uint8> n:int64):>int64 => $unsafe {
     let h:uint64=(n transmute uint64) * 0x9E3779B97F4A7C15
     let i=0
     loop i + 8 <? n {
@@ -46,8 +45,7 @@ hash_bytes = (p:ptr<uint8> n:int64):>int64 => {
 }
 
 # the id of text[start..start + n), made if it is new
-intern = (@t:NameTable text:array<uint8> bytes:ptr<uint8> start:int64 n:int64):>int64 => {
-    $unsafe
+intern = (@t:NameTable text:array<uint8> bytes:ptr<uint8> start:int64 n:int64):>int64 => $unsafe {
     $runtime_checks
     let h=hash_bytes(bytes + start n)
     let mask=t.slots.length-1
@@ -64,8 +62,7 @@ intern = (@t:NameTable text:array<uint8> bytes:ptr<uint8> start:int64 n:int64):>
     return id
 }
 
-kernel = (text:array<uint8>):>int64 => {
-    $unsafe
+kernel = (text:array<uint8>):>int64 => $unsafe {
     let bytes=text.ptr
     let t:NameTable=[names=[] hashes=[] slots=fill(int64(0) 16384)]
     let result:int64=7

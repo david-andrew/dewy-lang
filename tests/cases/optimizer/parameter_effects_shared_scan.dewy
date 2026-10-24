@@ -1,6 +1,6 @@
 # exit: 42
-$unsafe
 bump=(@values:array<int>):>void=>{values[0]+=1}
+$unsafe
 edit=(first:array<int> raw:array<int> changed:array<int> last:array<int> take:bool):>int=>{
 if take {let p=raw.data() p[0]=40 bump(@changed)}
 return first[0]+raw[0]+changed[0]+last[0]}

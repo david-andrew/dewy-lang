@@ -1,7 +1,7 @@
 # exit: 42
-$unsafe
 Box:type=[values:array<int64>]
 bump=(@values:array<int64>):>void=>{values[0]+=1}
+$unsafe
 edit=(first:Box raw:Box changed:Box last:Box take:bool):>int64=>{
 if take {let p=raw.values.data() p[0]=40 bump(@changed.values)}
 return first.values[0]+raw.values[0]+changed.values[0]+last.values[0]}
