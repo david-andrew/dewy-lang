@@ -19,6 +19,7 @@ const QUANTITY_POWER_MAX = 32767 * 720720
 struct QuantityScale:
     numerator: int
     denominator: int
+    shown: int = 0   # how an exact value prints (rational.dewy's `_shown`: 1 decimal, 2 fraction)
 quantity_scales: QuantityScale[]
 
 is_quantity = (t: int) -> bool: types[prune(t)].kind == .quantity
@@ -159,22 +160,22 @@ quantity_gcd = (a0: int, b0: int) -> int:
     if a == 0: return 1
     a
 
-quantity_scale = (num0: int, den0: int) -> int:
+quantity_scale = (num0: int, den0: int, shown: int = 0) -> int:
     num = num0
     den = den0
     if den < 0:
         num = -num
         den = -den
     g = quantity_gcd(num, den)
-    quantity_scales.push(QuantityScale(num / g, den / g))
+    quantity_scales.push(QuantityScale(num / g, den / g, shown))
     quantity_scales.len() - 1
 
 # A marked, representation-preserving conversion retains exact constant data
 # through ordinary AST cloning. Its child is the same numeric value as a plain
 # program would use; there is no runtime unit descriptor.
-quantity_constant = (n: int, num: int, den: int, dim: int, expected: int) -> int:
+quantity_constant = (n: int, num: int, den: int, dim: int, expected: int, shown: int = 0) -> int:
     if den == 0: fatal(nodes[n].pos, "division by zero in a physical quantity constant")
-    scale = quantity_scale(num, den)
+    scale = quantity_scale(num, den, shown)
     value = quantity_scales[scale]
     pos = nodes[n].pos
     hint = if dim != 0 and not is_quantity(expected): 0 else: quantity_base(expected)
@@ -186,6 +187,10 @@ quantity_constant = (n: int, num: int, den: int, dim: int, expected: int) -> int
     else if value.denominator == 1 and not bundled_rational_type(hint):
         a = bc_int(value.numerator, pos)
         check_expr(a, if is_int(hint): hint else: 0)
+    else if value.shown != 0:
+        # (written decimals keep printing as decimals through units: 2.5kg*9.81N/kg/N is 24.525)
+        a = rational_constant(value.numerator, value.denominator, pos, false, value.shown)
+        check_expr(a, 0)
     else:
         ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
         callee = bc_field(bc_ident("$dewy_rational", pos), "rational", pos)
@@ -208,7 +213,7 @@ quantity_constant_scale = (n: int) -> int:
         if source != 0: return quantity_constant_scale(source)
     if nodes[n].kind == .int_lit and not has_flag(n, NF_U64) and nodes[n].ival != (-9223372036854775807 - 1): return quantity_scale(nodes[n].ival, 1)
     # (an exact decimal literal, 0.001 in 0.001s)
-    if let parts = rational_constants.get(n): return quantity_scale(parts.0, parts.1)
+    if let parts = rational_constants.get(n): return quantity_scale(parts.0, parts.1, rational_shown.get(n) ?? 0)
     -1
 
 quantity_number = (n: int) -> int:
@@ -263,7 +268,7 @@ quantity_coerce = (n: int, target: int) -> int:
     if constant >= 0 and (is_numeric(quantity_base(target)) or bundled_rational_type(quantity_base(target))):
         scale = quantity_scales[constant]
         if scale.denominator != 1 and is_int(quantity_base(target)): fatal(nodes[n].pos, "fractional quantity cannot convert to {dt(target)}")
-        quantity_constant(n, scale.numerator, scale.denominator, quantity_dimension(target), target)
+        quantity_constant(n, scale.numerator, scale.denominator, quantity_dimension(target), target, scale.shown)
         return n
     # Save the source before introducing an erasing conversion: that conversion
     # must not point back to n after n is replaced by the converted result.
@@ -286,7 +291,7 @@ quantity_transmute = (n: int, a: int, from: int, to: int) -> int:
     scale = quantity_constant_scale(a)
     if scale >= 0:
         q = quantity_scales[scale]
-        return quantity_constant(n, q.numerator, q.denominator, quantity_dimension(to), to)
+        return quantity_constant(n, q.numerator, q.denominator, quantity_dimension(to), to, q.shown)
     nodes[n] = nodes[a]
     wrap_conv(n, .none_, to)
     add_flag(n, NF_CHECKED)
@@ -307,6 +312,7 @@ quantity_fold = (n: int, a: int, b: int, dim: int, op: Tok, expected: int) -> bo
     if ai < 0 or bi < 0: return false
     av = quantity_scales[ai]
     bv = quantity_scales[bi]
+    shown = av.shown | bv.shown
     an = av.numerator
     ad = av.denominator
     bn = bv.numerator
@@ -324,7 +330,7 @@ quantity_fold = (n: int, a: int, b: int, dim: int, op: Tok, expected: int) -> bo
         bn /= g
         ad /= g
         if not quantity_product_fits(an, bn) or not quantity_product_fits(ad, bd): return false
-        quantity_constant(n, an * bn, ad * bd, dim, expected)
+        quantity_constant(n, an * bn, ad * bd, dim, expected, shown)
         return true
     if op == .plus or op == .minus:
         g = quantity_gcd(ad, bd)
@@ -334,7 +340,7 @@ quantity_fold = (n: int, a: int, b: int, dim: int, op: Tok, expected: int) -> bo
         if op == .minus: right = -right
         if right > 0 and left > 9223372036854775807 - right: return false
         if right < 0 and left < -9223372036854775807 - right: return false
-        quantity_constant(n, left + right, ad * (bd / g), dim, expected)
+        quantity_constant(n, left + right, ad * (bd / g), dim, expected, shown)
         return true
     false
 
@@ -401,7 +407,7 @@ quantity_arithmetic_plain = (n: int, name: int, a: int, b: int, expected: int) -
             q = quantity_scales[ai]
             if exponent < 0:
                 if q.numerator == 0: fatal(nodes[n].pos, "division by zero in a physical quantity constant")
-                q = QuantityScale(q.denominator, q.numerator)
+                q = QuantityScale(q.denominator, q.numerator, q.shown)
             num = 1
             den = 1
             fits = true
@@ -411,7 +417,7 @@ quantity_arithmetic_plain = (n: int, name: int, a: int, b: int, expected: int) -
                     break
                 num *= q.numerator
                 den *= q.denominator
-            if fits: return quantity_constant(n, num, den, dim, expected)
+            if fits: return quantity_constant(n, num, den, dim, expected, q.shown)
     else if divide:
         dim = combine_dimensions(dim, bd, -1, nodes[n].pos)
         if quantity_fold(n, a, b, dim, .slash, expected): return ntype(n)
@@ -445,7 +451,7 @@ quantity_unary_plain = (n: int, expected: int) -> int:
     if scale >= 0:
         q = quantity_scales[scale]
         numerator = if op == .minus: -q.numerator else: q.numerator
-        return quantity_constant(n, numerator, q.denominator, dim, expected)
+        return quantity_constant(n, numerator, q.denominator, dim, expected, q.shown)
     nodes[n].a = i32(quantity_number(a))
     check_expr(n, quantity_base(expected))
     quantity_result(n, dim)

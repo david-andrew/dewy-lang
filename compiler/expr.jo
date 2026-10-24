@@ -9093,7 +9093,7 @@ check_ident_expr = (n: int, expected: int) -> int:
             q = quantity_scales[quantity_constant_scale(int(globals[g].init))]
             hint = expected
             if nodes[int(globals[g].decl)].a != 0: hint = int(globals[g].type)
-            quantity_constant(n, q.numerator, q.denominator, quantity_dimension(int(globals[g].type)), hint)
+            quantity_constant(n, q.numerator, q.denominator, quantity_dimension(int(globals[g].type)), hint, q.shown)
             return quantity_retag(n, quantity_tag(int(globals[g].type)))
         if n != assign_root:
             loop global_read.len() <= g: global_read.push(false)
