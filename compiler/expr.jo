@@ -3498,11 +3498,22 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
         set_list(n, statements)
     t
 
-# A field default whose value is the zero bytes: `none` for an optional, `[]` for a fixed array
+# A field default whose value is the zero bytes, which the slot's fill already wrote: `none` for
+# an optional, `[]` for a fixed array, a machine integer's 0, 0.0 (not -0.0), false, an
+# enumeration's first member
 default_is_zero = (dv: int, ft: int) -> bool:
     k = nodes[dv].kind
     fk = tkind(ft)
     if k == .none_lit: return fk == .opt
+    if k == .int_lit and nodes[dv].ival == 0 and not has_flag(dv, NF_U64): return fk == .int_ and prune(ft) != T_MATH_INT
+    if k == .float_lit and fk == .float_: return nodes[dv].fval == 0.0 and 1.0 / nodes[dv].fval > 0.0
+    if k == .bool_lit and nodes[dv].ival == 0: return fk == .bool_
+    # (`'first'` in Dewy, `.first` in Sloppy)
+    word = if k == .str_lit and nodes[dv].nlist == 0: int(nodes[dv].sval) else: if k == .dotname: int(nodes[dv].name) else: 0
+    if word != 0 and fk == .enum_ and not is_union(ft):
+        si = int(types[prune(ft)].st)
+        check_struct_fields(si)
+        return int(structs[si].nvariants) > 0 and int(variants[int(structs[si].variants)].name) == word
     k == .array and nkids(dv) == 0 and nodes[dv].b == 0 and fk == .fixed
 
 # (P(1) for struct P: x: f64; y: f64: values given in order stop short of a field without a
