@@ -23,14 +23,18 @@ struct NDArray[T]:
 
 # ---------------- shapes ----------------
 __nd_size = (shape: int[]) -> int:
-    empty = false
     loop d in shape:
         if d < 0: panic("array dimensions must be nonnegative")
-        if d == 0: empty = true
-    if empty: return 0
+    __nd_count(shape)
+
+# The element count of nonnegative dimensions. A count past the largest int is
+# memory no system has: running out of it, as allocating it would.
+__nd_count = (shape: int[]) -> int:
+    loop d in shape:
+        if d == 0: return 0
     n = 1
     loop d in shape:
-        if n > 9223372036854775807 / d: panic("array shape is too large")
+        if n > 9223372036854775807 / d: __out_of_memory()
         n *= d
     n
 
@@ -457,6 +461,25 @@ __bcast_last = (st: int[], size: int, n: int) -> int:
 # ---------------- making arrays ----------------
 __nd_fill[T] = (value: T, shape: int[]) -> T[,]:
     NDArray(fill(value, __nd_size(shape)), shape)
+
+# Dimensions the caller proved nonnegative (Dewy's prelude, lib/prelude/nd.dewy): no failure.
+__nd_full[T] = (value: T, shape: int[]) -> T[,]: NDArray(fill(value, __nd_count(shape)), shape)
+__nd_zeros[T] = (shape: int[]) -> T[,]:
+    z: T
+    __nd_full(z, shape)
+__nd_rand = (shape: int[]) -> f64[,]: NDArray(rand(__nd_count(shape)), shape)
+__nd_randn = (shape: int[]) -> f64[,]: NDArray(randn(__nd_count(shape)), shape)
+__nd_fill1[T] = (value: T, n: int) -> T[]: fill(value, n)
+__nd_zeros1[T] = (n: int) -> T[]:
+    z: T
+    fill(z, n)
+__nd_rand1 = (n: int) -> f64[]: rand(n)
+__nd_randn0 = () -> f64: randn()
+__nd_randn1 = (n: int) -> f64[]: randn(n)
+__nd_eye = (n: int) -> f64[,]:
+    m = __nd_full(0.0, [n, n])
+    loop i in [0..n): m.data[i * n + i] = 1.0
+    m
 
 zeros = (n: int) -> f64[]: fill(0.0, n)
 zeros = (a: int, b: int) -> f64[,]: __nd_fill(0.0, [a, b])

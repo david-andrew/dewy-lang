@@ -2194,7 +2194,10 @@ remains independent of the source. An empty input raises an error.
 ## Numeric arrays and matrices
 
 The bundled numeric library uses ordinary value semantics. Make a matrix with
-`zeros(rows cols)`, `ones(rows cols)`, `eye(n)` or `reshape(values rows cols)`:
+`zeros(rows cols)`, `ones(rows cols)`, `eye(n)` or `reshape(values rows cols)`.
+Each dimension of `zeros`, `ones`, `rand`, `randn` and `eye` carries the
+obligation `>=? 0`, proven where the arguments show it (`zeros(2 3)`), and a
+shape with more elements than an `int64` counts runs out of memory:
 
 ```dewy
 let matrix = reshape([3.0 1.0 1.0 2.0] 2 2)

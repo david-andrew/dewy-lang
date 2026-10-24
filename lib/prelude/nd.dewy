@@ -1,0 +1,36 @@
+# Dewy's prelude: arrays of n dimensions made whole (lib/std/nd.jo has the rest).
+# Every Dewy module sees these unless it declares its own name (which replaces
+# the whole family). A dimension below zero has no array, so `>=? 0` is each
+# dimension's obligation, proven where the arguments show it (`zeros(2 3)`); a
+# single count below zero gives an empty array, as `fill` does.
+
+# zeros(rows cols) and up to four dimensions; zeros<int64>(rows cols) of another type
+zeros = ((n:int64):>array<float64>=>__nd_fill1(float64(0) n))
+    & ((a:int64<(>=? 0)> b:int64<(>=? 0)>):>NDArray<float64>=>__nd_full(float64(0) [a b]))
+    & ((a:int64<(>=? 0)> b:int64<(>=? 0)> c:int64<(>=? 0)>):>NDArray<float64>=>__nd_full(float64(0) [a b c]))
+    & ((a:int64<(>=? 0)> b:int64<(>=? 0)> c:int64<(>=? 0)> d:int64<(>=? 0)>):>NDArray<float64>=>__nd_full(float64(0) [a b c d]))
+    & (<T>(n:int64):>array<T>=>__nd_zeros1<T>(n))
+    & (<T>(a:int64<(>=? 0)> b:int64<(>=? 0)>):>NDArray<T>=>__nd_zeros<T>([a b]))
+    & (<T>(a:int64<(>=? 0)> b:int64<(>=? 0)> c:int64<(>=? 0)>):>NDArray<T>=>__nd_zeros<T>([a b c]))
+    & (<T>(a:int64<(>=? 0)> b:int64<(>=? 0)> c:int64<(>=? 0)> d:int64<(>=? 0)>):>NDArray<T>=>__nd_zeros<T>([a b c d]))
+
+ones = ((n:int64):>array<float64>=>__nd_fill1(float64(1) n))
+    & ((a:int64<(>=? 0)> b:int64<(>=? 0)>):>NDArray<float64>=>__nd_full(float64(1) [a b]))
+    & ((a:int64<(>=? 0)> b:int64<(>=? 0)> c:int64<(>=? 0)>):>NDArray<float64>=>__nd_full(float64(1) [a b c]))
+    & ((a:int64<(>=? 0)> b:int64<(>=? 0)> c:int64<(>=? 0)> d:int64<(>=? 0)>):>NDArray<float64>=>__nd_full(float64(1) [a b c d]))
+
+# uniformly random in [0 1)
+rand = ((n:int64):>array<float64>=>__nd_rand1(n))
+    & ((a:int64<(>=? 0)> b:int64<(>=? 0)>):>NDArray<float64>=>__nd_rand([a b]))
+    & ((a:int64<(>=? 0)> b:int64<(>=? 0)> c:int64<(>=? 0)>):>NDArray<float64>=>__nd_rand([a b c]))
+    & ((a:int64<(>=? 0)> b:int64<(>=? 0)> c:int64<(>=? 0)> d:int64<(>=? 0)>):>NDArray<float64>=>__nd_rand([a b c d]))
+
+# normally distributed (mean 0, standard deviation 1)
+randn = (():>float64=>__nd_randn0())
+    & ((n:int64):>array<float64>=>__nd_randn1(n))
+    & ((a:int64<(>=? 0)> b:int64<(>=? 0)>):>NDArray<float64>=>__nd_randn([a b]))
+    & ((a:int64<(>=? 0)> b:int64<(>=? 0)> c:int64<(>=? 0)>):>NDArray<float64>=>__nd_randn([a b c]))
+    & ((a:int64<(>=? 0)> b:int64<(>=? 0)> c:int64<(>=? 0)> d:int64<(>=? 0)>):>NDArray<float64>=>__nd_randn([a b c d]))
+
+# the identity matrix
+eye = (n:int64<(>=? 0)>):>NDArray<float64>=>__nd_eye(n)
