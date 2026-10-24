@@ -4196,6 +4196,10 @@ return count+text.length+extra}''' if nested else
     flags = ['--release'] if release else []
     built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
+    # (a length known while compiling that does not fit is a compile-time error)
+    if mismatch and built.returncode != 0:
+        assert 'unpacking requires exactly 2 elements, and the length here is known to differ' in built.stderr, built.stdout + built.stderr
+        return
     assert built.returncode == 0, built.stdout + built.stderr
     command = [binary]
     if target == 'wasm':
