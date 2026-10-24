@@ -306,12 +306,24 @@ each topic. ROADMAP.md lists them in one line each; this is the full text.
     the representation; relying on implicit adaptation is unidiomatic.
   - Offset units (amends round 5's "infer delta-ness from use"): a temperature
     written directly as an operand next to a point is a difference
-    (`t + 20°C`). Adding two temperature values, comparing a point with a
-    difference, and scaling a point are compile errors with fix-its (for
-    averages: `mean[t1 t2]`). Point versus difference lives in the type, so
-    `as °F` converts each correctly (a 20° difference is 36°F). Named
-    differences have no dedicated spelling (no `Δ`): a difference is a
-    subtraction of two points (`25°C - 5°C`) or plain kelvin (`5K`).
+    (`t + 20°C`). Computed and input values (readings, parsed or loaded
+    values, results involving points) are points; adding two, comparing a
+    point with a difference, and scaling a point are compile errors with
+    fix-its (for averages: `mean[t1 t2]`; or subtract to form a difference).
+    Point versus difference lives in the type, so `as °F` converts each
+    correctly (a 20° difference is 36°F). Named differences have no dedicated
+    spelling (no `Δ`): a difference is a subtraction of two points
+    (`25°C - 5°C`) or plain kelvin (`5K`).
+  - Literal-only temperature bindings (amended 2026-10-23): a binding holding
+    only temperature literals (`let rise=20°C`) takes its kind from all of its
+    uses, decided once per binding as in precision inference, so a use site
+    never reinterprets it. A use only a difference allows (`t + rise`,
+    `t -= rise`, `rise*2`, comparing with a difference) makes it a difference
+    when no use needs a point (`rise <? t`, `rise - t`); uses either kind
+    allows (`t - rise`) don't decide, and an undecided binding is a point.
+    Conflicting uses warn, naming both; the binding stays a point (what a
+    temperature written in a unit is, and what an undecided one is) and each
+    difference use reads it as a difference, as it would the literal.
   - A splat import that shadows a prelude name warns, naming both sources; the
     warning goes away when the name is selected explicitly or the module is
     imported `as`. Splat imports stay.

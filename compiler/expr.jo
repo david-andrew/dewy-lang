@@ -2,6 +2,7 @@ use 'concurrency.jo'
 use 'parallel_lower.jo'
 use 'partition.jo'
 use 'string_domains.jo'
+use 'temperature_kinds.jo'
 use 'juxtapose.jo'
 use 'decimals.jo'
 use 'ownership.jo'
@@ -8684,7 +8685,7 @@ check_expr = (n: int, expected: int) -> int:
     if nodes[n].type != 0 and has_flag(n, NF_CHECKED): return ntype(n)
     # (the commonest kinds in frames of their own; the rest below)
     k = nodes[n].kind
-    if k == .ident: return check_ident_expr(n, expected)
+    if k == .ident: return if tk_reads_on: temperature_read(n, expected) else: check_ident_expr(n, expected)
     if k == .int_lit: return check_int_expr(n, expected)
     if k == .binary: return ce_finish(n, check_binary(n, expected), expected)
     if k == .call: return check_call_expr(n, expected)

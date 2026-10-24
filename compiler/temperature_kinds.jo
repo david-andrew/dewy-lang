@@ -1,0 +1,479 @@
+# Literal-only temperature bindings (docs/design/decisions.md, offset units). A binding
+# whose every value is a temperature literal in one offset unit (`let rise = 20°C`) is a
+# point or a difference as its uses decide, once for the binding: a use only a difference
+# allows (`t + rise`, `t -= rise`, `rise*2`) makes it a difference; uses that disagree warn
+# and leave it a point, reading each difference use as the literal would be read there.
+# Computed and input values are points by nature and are never inferred.
+#
+# Demand-driven: it runs only when such a binding is declared, walking its lexical scope
+# once (the rest of its block; a global's whole module). A use paired with another such
+# binding asks for that binding's own uses, walked once and cached. So O(S) per binding,
+# S the scope's nodes, plus O(S) per distinct partner binding; nothing for other programs.
+use 'util.jo'
+use 'ast.jo'
+use 'lex.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'units.jo'
+use 'sibling_types.jo'
+use 'frontend.jo'
+
+const TKC_OTHER = 0   # no temperature, or plain kelvins (either kind)
+const TKC_LIT = 1     # a temperature literal
+const TKC_POINT = 2
+const TKC_DIFF = 3
+const TKC_NAMED = 4   # a literal-only binding with no kind of its own yet: a point in arithmetic
+
+struct TkDecl:
+    name: int
+    decl: int      # a declaration (or declaring assignment); 0 for a parameter or loop variable
+    block: int     # the block it is a statement of, and its index there (0: none)
+    index: int
+
+struct TkScan:
+    name: int = 0
+    unit: int = 0        # the unit name its literals are written in
+    self_decl: int = 0
+    open: bool = false   # a write that is not such a literal: a point by nature
+    mediate: bool = true # weigh uses against other literal-only bindings by their own uses
+    p_use: int = 0       # the first use only a point allows
+    d_use: int = 0       # the first use only a difference allows
+    p_direct: bool = false   # (not through another literal-only binding)
+    d_direct: bool = false
+    d_reads: int[]
+    writes: int[]
+
+tks: TkScan = TkScan()
+tk_decls: TkDecl[]
+tk_direct: {int: int} = {}       # declaration -> the kind its own uses give (TKC_*)
+tk_bindings: {int: int} = {}     # local, or -global-1 -> its declaration (literal-only bindings)
+tk_difference_reads: {int: bool} = {}   # names read as differences (a conflicting binding's)
+tk_reads_on = false
+tk_difference_writes: {int: bool} = {}  # literals written to a difference binding
+tk_offset_units: {int: bool} = {}
+tk_deciding: {int: bool} = {}    # declarations whose walk is under way
+
+# (the unit name of a temperature literal as written, before checking: 20°C, -5°F; else 0)
+tk_literal_unit = (e: int) -> int:
+    if e == 0 or has_flag(e, NF_CHECKED): return 0
+    k = nodes[e].kind
+    if k == .unary and nodes[e].op == i32(int(Tok.minus)): return tk_literal_unit(int(nodes[e].a))
+    if k != .binary or nodes[e].op != i32(int(Tok.star)): return 0
+    x = nodes[int(nodes[e].a)].kind
+    u = int(nodes[e].b)
+    if (x != .int_lit and x != .float_lit) or nodes[u].kind != .ident: return 0
+    int(nodes[u].name)
+
+# (a name for an offset temperature unit here: °C, °F)
+tk_offset_unit = (nm: int) -> bool:
+    if tk_offset_units.has(nm): return tk_offset_units[nm]
+    s = lookup(nm)
+    yes = false
+    if s != 0 and syms[s].kind == .global and tk_settled(int(syms[s].ref)):
+        t = int(globals[int(syms[s].ref)].type)
+        yes = is_quantity(t) and quantity_tags[quantity_tag(t)].origin != 0
+    tk_offset_units[nm] = yes
+    yes
+
+# (a temperature unit written by name: t/°C and t/K read t in that unit, whatever its kind)
+tk_unit_name = (e: int) -> bool:
+    if nodes[e].kind != .ident or has_flag(e, NF_CHECKED) or tk_find(int(nodes[e].name)) >= 0: return false
+    s = lookup(int(nodes[e].name))
+    if s == 0 or syms[s].kind != .global: return false
+    g = int(syms[s].ref)
+    tk_settled(g) and is_quantity(int(globals[g].type)) and quantity_dimension(int(globals[g].type)) == base_dimension(4)
+
+# (global g's type is known: checked, or a library constant checked now; a program's own
+# globals are never checked out of order here)
+tk_settled = (g: int) -> bool:
+    if globals[g].state == 0 and pos_in_lib(nodes[int(globals[g].decl)].pos): ensure_global(g, 0)
+    globals[g].state == 2
+
+tk_find = (nm: int) -> int:
+    i = tk_decls.len() - 1
+    loop i >= 0:
+        if tk_decls[i].name == nm: return i
+        i -= 1
+    -1
+
+# (x names the binding being decided)
+tk_self = (x: int) -> bool:
+    x != 0 and nodes[x].kind == .ident and not has_flag(x, NF_CHECKED) and int(nodes[x].name) == tks.name and tk_find(tks.name) < 0
+
+tk_type_class = (t0: int) -> int:
+    t = prune(t0)
+    if tkind(t) == .array: t = prune(int(types[t].elem))
+    if not is_quantity(t) or quantity_dimension(t) != base_dimension(4): return TKC_OTHER
+    if quantity_is_delta(t): return TKC_DIFF
+    if quantity_point(t): return TKC_POINT
+    TKC_OTHER
+
+# (the declaration's value, as written)
+tk_decl_value = (d: int) -> int:
+    if nodes[d].kind == .vardecl: return int(nodes[d].b)
+    if nodes[d].kind == .assign: return int(nodes[d].b)
+    0
+
+# Another literal-only binding: the kind its own uses give it, weighed only while deciding
+# with mediation (one level: its own walk leaves such pairings open).
+tk_partner = (d: int, block: int, index: int) -> int:
+    if not tks.mediate: return TKC_NAMED
+    if tk_direct.has(d): return tk_direct[d]
+    if tk_deciding.has(d) or (block == 0 and not has_flag(d, NF_GLOBAL)): return TKC_NAMED
+    saved = tks
+    saved_decls = tk_decls
+    tk_decls = []
+    tk_deciding[d] = true
+    tks = TkScan(name = int(nodes[d].name), unit = tk_literal_unit(tk_decl_value(d)), self_decl = d, mediate = false)
+    if block != 0:
+        loop i in [index + 1..nkids(block)): tk_statement(block, i)
+    else: tk_module(int(nodes[d].mod))
+    kind = tk_own_kind()
+    tk_deciding.remove(d)
+    tks = saved
+    tk_decls = saved_decls
+    tk_direct[d] = kind
+    kind
+
+# (a literal-only binding already declared with type t: a difference other uses made it is one)
+tk_decided = (d: int, t: int) -> int:
+    k = tk_partner(d, 0, 0)
+    if k == TKC_NAMED and tk_type_class(t) == TKC_DIFF: return TKC_DIFF
+    k
+
+tk_own_kind = () -> int:
+    if tks.open: return TKC_POINT
+    if tks.d_direct and not tks.p_direct: return TKC_DIFF
+    if tks.p_direct and not tks.d_direct: return TKC_POINT
+    TKC_NAMED
+
+# (whether the declaration holds a literal-only temperature binding, by its first value)
+tk_candidate = (d: int) -> bool:
+    if tk_direct.has(d) or tk_deciding.has(d): return true
+    if nodes[d].kind == .vardecl and (nodes[d].a != 0 or nodes[d].nlist > 0): return false
+    u = tk_literal_unit(tk_decl_value(d))
+    u != 0 and tk_offset_unit(u)
+
+tk_ident_class = (x: int, depth: int) -> int:
+    nm = int(nodes[x].name)
+    i = tk_find(nm)
+    if i >= 0:
+        e = tk_decls[i]
+        if e.decl == 0: return TKC_POINT
+        if tk_candidate(e.decl): return tk_partner(e.decl, e.block, e.index)
+        return tk_class(tk_decl_value(e.decl), depth + 1)
+    if nm == tks.name: return TKC_NAMED
+    s = lookup(nm)
+    if s == 0: return TKC_POINT
+    if syms[s].kind == .local:
+        l = int(syms[s].ref)
+        loop int(locals[l].flags) & LF_CAPTURE != 0 and int(locals[l].outer) != 0: l = int(locals[l].outer)
+        if tk_bindings.has(l): return tk_decided(tk_bindings[l], int(locals[l].type))
+        return tk_type_class(int(locals[l].type))
+    if syms[s].kind == .global:
+        g = int(syms[s].ref)
+        if tk_bindings.has(-g - 1): return tk_decided(tk_bindings[-g - 1], int(globals[g].type))
+        if globals[g].state == 2: return tk_type_class(int(globals[g].type))
+        d = int(globals[g].decl)
+        if d == tks.self_decl: return TKC_NAMED
+        if globals[g].is_const: return TKC_OTHER
+        if tk_candidate(d): return tk_partner(d, 0, 0)
+        return tk_class(tk_decl_value(d), depth + 1)
+    TKC_OTHER
+
+# What an operand is, from syntax: computed and input values are points by nature, a
+# difference of two points is a difference, a literal is either until its neighbour says.
+tk_class = (x: int, depth: int) -> int:
+    if x == 0 or depth > 6: return TKC_POINT
+    if has_flag(x, NF_CHECKED) and nodes[x].type != 0: return tk_type_class(ntype(x))
+    k = nodes[x].kind
+    if k == .ident: return tk_ident_class(x, depth)
+    u = tk_literal_unit(x)
+    if u != 0: return if tk_offset_unit(u): TKC_LIT else: TKC_OTHER
+    if k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit or k == .none_lit: return TKC_OTHER
+    if k == .unary:
+        if nodes[x].op != i32(int(Tok.minus)): return TKC_OTHER
+        return tk_class(int(nodes[x].a), depth + 1)
+    if k == .cast:
+        c = tk_class(int(nodes[x].a), depth + 1)
+        return if c == TKC_LIT or c == TKC_NAMED: TKC_POINT else: c
+    if k == .binary:
+        op = nodes[x].op as Tok
+        a = int(nodes[x].a)
+        b = int(nodes[x].b)
+        if op == .plus or op == .minus:
+            ca = tk_operand_class(a, depth + 1)
+            cb = tk_operand_class(b, depth + 1)
+            if ca == TKC_OTHER or cb == TKC_OTHER: return if ca == TKC_POINT or cb == TKC_POINT: TKC_POINT else: TKC_OTHER
+            if op == .plus:
+                if ca == TKC_DIFF and cb == TKC_DIFF: return TKC_DIFF
+                return TKC_POINT
+            if cb == TKC_DIFF: return if ca == TKC_DIFF: TKC_DIFF else: TKC_POINT
+            if ca == TKC_DIFF: return TKC_OTHER
+            if cb == TKC_LIT and ca == TKC_POINT: return TKC_POINT
+            return TKC_DIFF
+        if op == .star or op == .slash:
+            ka = nodes[a].kind
+            kb = nodes[b].kind
+            if (kb == .int_lit or kb == .float_lit) and tk_class(a, depth + 1) == TKC_DIFF: return TKC_DIFF
+            if op == .star and (ka == .int_lit or ka == .float_lit) and tk_class(b, depth + 1) == TKC_DIFF: return TKC_DIFF
+            return TKC_OTHER
+        return TKC_OTHER
+    if k == .call or k == .field or k == .index or k == .if_ or k == .match_ or k == .block: return TKC_POINT
+    TKC_OTHER
+
+# (an operand inside arithmetic: a named literal-only binding is a point there by default)
+tk_operand_class = (x: int, depth: int) -> int:
+    c = tk_class(x, depth)
+    if c == TKC_NAMED: return TKC_POINT
+    c
+
+# (another operand: its kind, and whether that comes through another literal-only binding)
+tk_other_mediated = false
+tk_other = (x: int) -> int:
+    tk_other_mediated = false
+    c = tk_class(x, 0)
+    if nodes[x].kind == .ident and not has_flag(x, NF_CHECKED) and (c == TKC_POINT or c == TKC_DIFF):
+        nm = int(nodes[x].name)
+        i = tk_find(nm)
+        if i >= 0: tk_other_mediated = tk_decls[i].decl != 0 and tk_candidate(tk_decls[i].decl)
+        else:
+            s = lookup(nm)
+            if s != 0 and syms[s].kind == .local:
+                l = int(syms[s].ref)
+                loop int(locals[l].flags) & LF_CAPTURE != 0 and int(locals[l].outer) != 0: l = int(locals[l].outer)
+                tk_other_mediated = tk_bindings.has(l)
+            else if s != 0 and syms[s].kind == .global:
+                g = int(syms[s].ref)
+                tk_other_mediated = tk_bindings.has(-g - 1) or (globals[g].state != 2 and not globals[g].is_const and tk_candidate(int(globals[g].decl)))
+    c
+
+tk_note = (difference: bool, site: int, name: int, mediated: bool):
+    if difference:
+        if tks.d_use == 0: tks.d_use = site
+        tks.d_reads.push(name)
+        if not mediated: tks.d_direct = true
+        return
+    if tks.p_use == 0: tks.p_use = site
+    if not mediated: tks.p_direct = true
+
+# A use of the binding, judged where it sits: n holds it as an operand.
+tk_use = (n: int):
+    k = nodes[n].kind
+    if k == .binary:
+        a = int(nodes[n].a)
+        b = int(nodes[n].b)
+        sa = tk_self(a)
+        sb = tk_self(b)
+        if not sa and not sb: return
+        op = nodes[n].op as Tok
+        if op == .dotop:
+            c = int(nodes[n].aux)
+            if c == '+': op = .plus
+            else if c == '-': op = .minus
+            else if c == '*': op = .star
+            else if c == '/': op = .slash
+            else: return
+        if sa and sb: return
+        me = if sa: a else: b
+        x = if sa: b else: a
+        # (a point is not scaled; t/°C reads either kind in °C)
+        if op == .star or (op == .slash and not (sa and tk_unit_name(b))):
+            tk_note(true, n, me, false)
+            return
+        cmp = op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
+        if op != .plus and op != .minus and not cmp: return
+        c = tk_other(x)
+        mediated = tk_other_mediated
+        if op == .plus and c == TKC_POINT: tk_note(true, n, me, mediated)
+        else if op == .minus and sb and c == TKC_DIFF: tk_note(true, n, me, mediated)
+        else if op == .minus and sa and c == TKC_POINT: tk_note(false, n, me, mediated)
+        else if cmp and c == TKC_POINT: tk_note(false, n, me, mediated)
+        else if cmp and c == TKC_DIFF: tk_note(true, n, me, mediated)
+        return
+    if k == .unary and nodes[n].op == i32(int(Tok.minus)) and tk_self(int(nodes[n].a)):
+        tk_note(true, n, int(nodes[n].a), false)
+        return
+    if k == .assign:
+        lhs = int(nodes[n].a)
+        rhs = int(nodes[n].b)
+        op = nodes[n].op as Tok
+        if tk_self(lhs):
+            if op == .assign and tk_literal_unit(rhs) == tks.unit: tks.writes.push(rhs)
+            else: tks.open = true
+            return
+        if (op == .pluseq or op == .minuseq) and tk_self(rhs):
+            if tk_class(lhs, 0) != TKC_OTHER: tk_note(true, n, rhs, false)
+
+tk_walk = (n: int):
+    if n == 0 or has_flag(n, NF_CHECKED): return
+    k = nodes[n].kind
+    if k == .ident:
+        if (has_flag(n, NF_AT) or has_flag(n, NF_MUT)) and tk_self(n): tks.open = true
+        return
+    if k == .block:
+        mark = tk_decls.len()
+        loop i in [0..nkids(n)): tk_statement(n, i)
+        tk_decls.truncate(mark)
+        return
+    if k == .lambda or k == .fn_:
+        mark = tk_decls.len()
+        loop p in kids(n):
+            if nodes[p].kind == .param:
+                tk_walk(int(nodes[p].b))
+                tk_decls.push(TkDecl(name = int(nodes[p].name), decl = 0, block = 0, index = 0))
+        tk_walk(int(nodes[n].b))
+        tk_decls.truncate(mark)
+        return
+    if k == .for_:
+        tk_walk(int(nodes[n].a))
+        mark = tk_decls.len()
+        loop v in kids(n):
+            if nodes[v].kind == .ident: tk_decls.push(TkDecl(name = int(nodes[v].name), decl = 0, block = 0, index = 0))
+            else: tk_walk(v)
+        tk_walk(int(nodes[n].b))
+        tk_walk(int(nodes[n].c))
+        tk_decls.truncate(mark)
+        return
+    if k == .vardecl:
+        tk_walk(int(nodes[n].b))
+        if nodes[n].nlist == 0: tk_decls.push(TkDecl(name = int(nodes[n].name), decl = n, block = 0, index = 0))
+        else:
+            loop v in kids(n):
+                if nodes[v].kind == .ident: tk_decls.push(TkDecl(name = int(nodes[v].name), decl = 0, block = 0, index = 0))
+        return
+    if k == .binary or k == .unary or k == .assign: tk_use(n)
+    if k == .assign and nodes[n].op == i32(int(Tok.assign)) and nodes[int(nodes[n].a)].kind == .ident and not tk_self(int(nodes[n].a)):
+        # (a name not seen yet: `x = value` declares it)
+        nm = int(nodes[int(nodes[n].a)].name)
+        tk_walk(int(nodes[n].b))
+        if tk_find(nm) < 0 and lookup(nm) == 0 and nm != tks.name: tk_decls.push(TkDecl(name = nm, decl = n, block = 0, index = 0))
+        return
+    tk_walk(int(nodes[n].a))
+    tk_walk(int(nodes[n].b))
+    tk_walk(int(nodes[n].c))
+    tk_walk(int(nodes[n].d))
+    loop c in kids(n): tk_walk(c)
+    loop c in kids2(n): tk_walk(c)
+
+# Statement i of block b (a declaration there is visible to the rest of b)
+tk_statement = (b: int, i: int):
+    s = kid(b, i)
+    if s == tks.self_decl: return
+    at = tk_decls.len()
+    tk_walk(s)
+    if tk_decls.len() == at + 1 and tk_decls[at].decl == s:
+        tk_decls[at].block = b
+        tk_decls[at].index = i
+
+# A global's scope: its module's top-level statements and functions.
+tk_module = (m: int):
+    loop d in modules[m].decls:
+        if nodes[d].kind == .fn_: source_force_body(d)
+    loop s in modules[m].inits:
+        if s != tks.self_decl: tk_walk(s)
+    loop d in modules[m].decls:
+        if d != tks.self_decl and nodes[d].kind != .vardecl and nodes[d].kind != .assign: tk_walk(d)
+
+# (text of an operand or use, for the warning)
+tk_text = (x: int) -> str:
+    k = nodes[x].kind
+    if k == .ident: return name_of(int(nodes[x].name))
+    u = tk_literal_unit(x)
+    if u != 0 and nodes[x].kind == .binary:
+        v = int(nodes[x].a)
+        number = if nodes[v].kind == .int_lit: "{nodes[v].ival}" else: "{nodes[v].fval}"
+        return "{number}{name_of(u)}"
+    "…"
+
+tk_op_text = (op: Tok) -> str:
+    if op == .plus: return "+"
+    if op == .minus: return "-"
+    if op == .star: return "*"
+    if op == .slash: return "/"
+    if op == .eq: return "=?"
+    if op == .ne: return "not=?"
+    if op == .lt: return "<?"
+    if op == .le: return "<=?"
+    if op == .gt: return ">?"
+    if op == .ge: return ">=?"
+    if op == .pluseq: return "+="
+    if op == .minuseq: return "-="
+    "?"
+
+tk_use_text = (n: int) -> str:
+    k = nodes[n].kind
+    if k == .unary: return "-{tk_text(int(nodes[n].a))}"
+    op = nodes[n].op as Tok
+    if k == .binary and op == .dotop:
+        c = int(nodes[n].aux)
+        sym = "/"
+        if c == '+': sym = "+"
+        else if c == '-': sym = "-"
+        else if c == '*': sym = "*"
+        return "{tk_text(int(nodes[n].a))} .{sym} {tk_text(int(nodes[n].b))}"
+    "{tk_text(int(nodes[n].a))} {tk_op_text(op)} {tk_text(int(nodes[n].b))}"
+
+# s declares a binding whose first value, written as a temperature literal in unit, is
+# now checked with type t. Its kind from all its uses: t (a point), or t as a difference.
+temperature_binding = (s: int, t: int, unit: int, global: bool) -> int:
+    if not quantity_point(t) or quantity_tags[quantity_tag(t)].origin == 0: return t
+    if not global and (sibling_block == 0 or sibling_index >= nkids(sibling_block) or kid(sibling_block, sibling_index) != s): return t
+    if not tk_offset_unit(unit): return t
+    saved_decls = tk_decls
+    tk_decls = []
+    tks = TkScan(name = int(nodes[s].name), unit = unit, self_decl = s)
+    tk_deciding[s] = true
+    if global: tk_module(int(nodes[s].mod))
+    else:
+        loop i in [sibling_index + 1..nkids(sibling_block)): tk_statement(sibling_block, i)
+    tk_decls = saved_decls
+    tk_deciding.remove(s)
+    tk_direct[s] = tk_own_kind()
+    if tks.open or tks.d_use == 0: return t
+    nm = name_of(tks.name)
+    if tks.p_use != 0:
+        dl, _ = line_col(nodes[tks.d_use].pos)
+        pl, _ = line_col(nodes[tks.p_use].pos)
+        warn(nodes[s].pos, "`{nm}` holds only temperature literals, so its uses decide whether it is a point or a difference, and they disagree: `{tk_use_text(tks.d_use)}` (line {dl}) needs a difference, `{tk_use_text(tks.p_use)}` (line {pl}) a point. It stays a point, and `{tk_use_text(tks.d_use)}` reads it as a difference; to say which you mean, write a difference as a subtraction of two points (`let {nm} = 25{name_of(unit)} - 5{name_of(unit)}`) or in kelvin (`5K`), or use two bindings")
+        loop r in tks.d_reads: tk_difference_reads[r] = true
+        tk_reads_on = true
+        return t
+    loop w in tks.writes: tk_difference_writes[w] = true
+    b = int(nodes[s].b)
+    d = temperature_difference(b)
+    nodes[s].b = i32(d)
+    ntype(d)
+
+# (the checked point n read as a difference, shown in its unit, in its number type)
+temperature_difference = (n: int) -> int:
+    t = ntype(n)
+    q = quantity_tags[quantity_tag(t)]
+    unit = if q.display != 0: q.display else: q.origin
+    base = quantity_base(t)
+    e = quantity_delta_reading(n)
+    if not type_eq(quantity_base(ntype(e)), base): e = coerce(e, mk_quantity(base, quantity_dimension(t)))
+    quantity_retag(e, intern_quantity_tag(unit, 0, true))
+    last_checked = e
+    e
+
+# (the checked point n made a difference in place)
+temperature_difference_at = (n: int) -> int:
+    c = nodes.len()
+    nodes.push(nodes[n])
+    d = temperature_difference(c)
+    nodes[n] = nodes[d]
+    last_checked = n
+    ntype(n)
+
+# A conflicting binding's difference use: its name, read as a difference in place.
+temperature_read = (n: int, expected: int) -> int:
+    t = check_ident_expr(n, expected)
+    if not tk_difference_reads.has(n) or not quantity_point(t): return t
+    temperature_difference_at(n)
+
+# A literal written to a binding its uses made a difference (`step = 10°C`).
+temperature_write = (written: int, value: int, rt: int, lt: int) -> int:
+    if not tk_difference_writes.has(written) or not quantity_is_delta(lt) or not quantity_point(rt): return rt
+    prune(temperature_difference_at(value))

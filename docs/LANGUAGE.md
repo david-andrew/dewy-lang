@@ -1039,11 +1039,21 @@ let rise=later-start       # 15°C: point - point is a difference
 printl"{rise as °F} {later as °F} {mean[start later]} {start/°F}"  # 27°F 95°F 55/2°C 68
 ```
 
-Whether a temperature is a point or a difference is part of its type. A
-temperature written in a unit is a point; subtracting two points gives a
-difference (`let step = 25°C - 5°C`), and plain kelvin stands for one (`20K`).
-A named difference has no dedicated spelling. A literal written as an operand next to a point is a difference:
-`start + 20°C`, `t += 5°C`, and `start - 5°C` is `15°C`. A point moves by a
+Whether a temperature is a point or a difference is part of its type.
+Computed and input values are points (a reading, a parsed or loaded value,
+`c*°C`, a sum with a point); subtracting two points gives a difference
+(`let step = 25°C - 5°C`), and plain kelvin stands for one (`20K`). A named
+difference has no dedicated spelling. A literal written as an operand next to a
+point is a difference: `start + 20°C`, `t += 5°C`, and `start - 5°C` is `15°C`.
+A binding that holds only temperature literals in one unit (`let rise = 20°C`)
+takes its kind from all of its uses, once for the binding. If some use needs a
+difference (`t + rise`, `t -= rise`, `rise*2`, `-rise`, a comparison with a
+difference) and none needs a point (`rise <? t`, `rise - t`), it is a
+difference, so `rise as °F` is `36°F`. Uses either kind allows (`t - rise`,
+printing, `as`) do not decide it, and a binding no use decides is a point.
+When its uses disagree the compiler warns, naming both: the binding stays a
+point, as a temperature written in a unit is, and each difference use reads
+it as a difference, as it would the literal. A point moves by a
 difference, and differences add, subtract and scale. Adding two points
 (`t1 + t2`), comparing a point with a difference (`rise >? 5°C`; write
 `5K`) and scaling a point (`start*2`, `-start`) are errors with fix-its; for

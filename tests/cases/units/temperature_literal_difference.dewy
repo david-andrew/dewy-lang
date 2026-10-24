@@ -1,0 +1,26 @@
+# quick
+# A binding of only temperature literals takes its kind from all of its uses: here every
+# use needs a difference, so it is one, and `as` converts it as one.
+from units import K, °C, °F, J, g
+reading=(c:int)=>c*°C
+let outside=reading(25)
+let rise=20°C
+main=()=>{
+    printl"{outside + rise} {outside - rise} {rise} {rise as °F} {rise*2} {-rise} {rise/°F}"
+    let t=reading(25)
+    let step=5°C
+    if t >? 0°C { step=10°C }
+    let u=t
+    u+=step
+    u-=step*2
+    let heat=4J/(g*°C)
+    let warmer=()=>t+step
+    printl"{u} {step as °F} {(2g)*heat*step} {warmer()} {step >? (30°C-25°C)}"
+    # a binding no use decides stays a point: point - point is a difference
+    let cold=0°C
+    printl"{t-cold} {(t-cold) as °F} {cold as °F}"
+    # two such bindings: one used as a point decides the other
+    let base=10°C
+    let lift=15°C
+    printl"{base + lift} {lift as °F} {base <? t}"
+}

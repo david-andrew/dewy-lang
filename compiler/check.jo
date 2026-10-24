@@ -36,6 +36,7 @@ use 'reflection.jo'
 use 'string_domains.jo'
 use 'juxtapose.jo'
 use 'sibling_types.jo'
+use 'temperature_kinds.jo'
 use 'dewy_methods.jo'
 use 'directives.jo'
 use 'ffi.jo'
@@ -2441,7 +2442,9 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
         if nodes[d].b == 0 and t != 0: nodes[d].b = i32(struct_default(t, nodes[d].pos))
         # (Dewy's `let g:T` with no value: given one before any read, dg_check_program)
         if nodes[d].b == 0 and dewy_at(nodes[d].pos): dg_record(g)
+        tk_unit = 0
         if nodes[d].b != 0:
+            if t == 0 and dewy_at(nodes[d].pos): tk_unit = tk_literal_unit(int(nodes[d].b))
             et = check_expr(int(nodes[d].b), t)
             nodes[d].b = i32(last_checked)
             if quat_nodes.has(int(nodes[d].b)): quat_globals[g] = true
@@ -2454,6 +2457,9 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
                     decimal_global(g, nodes[d].pos, t)
         t = zonk(t)
         if t == 0: fatal(nodes[d].pos, "global needs a type or a value")
+        if tk_unit != 0:
+            t = temperature_binding(d, t, tk_unit, true)
+            tk_bindings[-g - 1] = d
         if has_var(prune(t)):
             # (enemies = [] at the top level: its elements' type comes from a function that pushes
             # one, as a local's does; settled once everything is checked)
@@ -4196,6 +4202,7 @@ __check_assign = (s: int) -> int:
     if lt == T_MATH_INT and dewy_at(nodes[s].pos): int_domain_write(lhs, int(nodes[s].b), if op == int(Tok.assign): 0 else: op)
     if op == int(Tok.assign):
         rt = prune(check_expr(int(nodes[s].b), lt))
+        if tk_difference_writes.len() > 0: rt = temperature_write(int(nodes[s].b), last_checked, rt, lt)
         if decimal_target != 0 and decimal_float_write(rt, lt): return s
         if rt != lt and nodes[lhs].kind == .ident and (nodes[lhs].aux == i32(int(SK.local)) or nodes[lhs].aux == i32(int(SK.global))) and not can_coerce(last_checked, rt, lt): var_type_error(lhs, lt, rt, nodes[last_checked].pos)
         # (release_call's zero bytes are no value of lt: nothing reads them)
@@ -4450,8 +4457,10 @@ check_vardecl = (s: int):
     unset = no_value and t != 0 and dewy_at(nodes[s].pos) and len(nm) > 0 and nm[0] != '$' and nm[0] != '_' and not has_flag(s, NF_RDONLY)
     # (x: T, a struct with default field values: it starts with them, as T() would)
     if nodes[s].b == 0 and t != 0: nodes[s].b = i32(struct_default(t, nodes[s].pos))
+    tk_unit = 0
     if nodes[s].b != 0:
         growth_decl_before(s)
+        if t == 0 and dewy_at(nodes[s].pos): tk_unit = tk_literal_unit(int(nodes[s].b))
         et = check_expr(int(nodes[s].b), t)
         nodes[s].b = i32(last_checked)
         if t != 0: nodes[s].b = i32(coerce(int(nodes[s].b), t))
@@ -4478,12 +4487,14 @@ check_vardecl = (s: int):
                 t = pt
                 nodes[s].b = i32(coerce(v, t))
     if t == 0: fatal(nodes[s].pos, "variable needs a type or a value")
+    if tk_unit != 0: t = temperature_binding(s, t, tk_unit, false)
     tk = tkind(t)
     if tk == .void_: fatal(nodes[s].pos, "cannot assign a value with no type (void) to '{nm}'{void_rec_hint(int(nodes[s].b))}")
     if tk == .null_: fatal(nodes[s].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(nodes[s].pos, "`{nm}: Enemy? = none`", "`let {nm}:Enemy? = none`")}")
     if tk == .typeval or tk == .module: fatal(nodes[s].pos, "'{nm}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
     l = new_local(int(nodes[s].name), t, nodes[s].pos)
     if sibling_pending.len() > 0: sibling_establish(l)
+    if tk_unit != 0: tk_bindings[l] = s
     if literal_init: decimal_local(l, nodes[s].pos, t)
     growth_decl_after(s, l, t)
     if nodes[s].b != 0 and quat_nodes.has(int(nodes[s].b)): quat_locals[l] = true
