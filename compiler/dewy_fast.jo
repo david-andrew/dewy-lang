@@ -13,6 +13,7 @@ use 'dewy_direct.jo'
 use 'dewy_directives.jo'
 use 'directives.jo'
 use 'dewy_ffi.jo'
+use 'literals.dewy'
 
 struct DewyLexeme:
     kind: DewyKind
@@ -740,30 +741,8 @@ dn_range_bound = () -> bool:
     if (symbol == .lbrace or symbol == .kw_let or symbol == .kw_const or symbol == .kw_return or symbol == .kw_break or symbol == .kw_continue or symbol == .kw_if or symbol == .kw_loop or symbol == .kw_parallel or symbol == .kw_match): return false
     dn_power(symbol) == 0 or symbol == .plus or symbol == .minus
 
-# Static Unicode scalar escapes: four hex digits, or one to six in braces.
-dn_unicode_escape = (source: str, start: int, stop: int) -> (int, int):
-    i = start + 1
-    braced = i < stop and source[i] == '{'
-    if braced: i += 1
-    first = i
-    value = 0
-    loop i < stop:
-        if braced and source[i] == '}': break
-        if not braced and i - first == 4: break
-        digit = hexval(source[i])
-        if digit < 0: return (dn_error(i, "expected hexadecimal digits in Unicode escape"), i)
-        if i - first >= 6: return (dn_error(start, "Unicode escape has too many digits"), i)
-        value = value * 16 + digit
-        i += 1
-    if braced:
-        if i == first or i >= stop or source[i] != '}': return (dn_error(start, "expected 1–6 hex digits and '}' in Unicode escape"), i)
-        i += 1
-    else if i - first != 4: return (dn_error(start, "Unicode escape needs four hex digits"), i)
-    if value > 0x10FFFF or (value >= 0xD800 and value <= 0xDFFF): return (dn_error(start, "Unicode escape must name a scalar value, not a surrogate or out-of-range code point"), i)
-    (value, i)
-
 # The colon before an interpolation's format spec, `{x:.2f}` and `{n:>8,}`: the last one outside
-# brackets and quotes whose remaining text is a whole spec (parse.jo spec_problem); else -1.
+# brackets and quotes whose remaining text is a whole spec (literals.dewy literal_spec_problem); else -1.
 dn_spec_colon = (source: str, start: int, stop: int) -> int:
     depth = 0
     found = -1
@@ -778,7 +757,7 @@ dn_spec_colon = (source: str, start: int, stop: int) -> int:
         else if c == ')' or c == ']' or c == '}': depth -= 1
         else if c == ':' and depth == 0 and i > start and i + 1 < stop: found = i
         i += 1
-    if found < 0 or len(spec_problem(source[found + 1..stop))) > 0: return -1
+    if found < 0 or len(literal_spec_problem(source[found + 1..stop))) > 0: return -1
     found
 
 # String decoding is shared; the construction target selects syntax nodes for
@@ -805,28 +784,10 @@ dn_string = (token: DewyLexeme, direct: bool = false) -> int:
     loop i < stop:
         c = source[i]
         if c == '\\':
-            i += 1
-            if i >= stop: dn_error(i, "incomplete string escape")
-            c = source[i]
-            if c == 'n': bytes_.push(10)
-            else if c == 'r': bytes_.push(13)
-            else if c == 't': bytes_.push(9)
-            else if c == '0': bytes_.push(0)
-            else if c == 'a': bytes_.push(7)
-            else if c == 'b': bytes_.push(8)
-            else if c == 'v': bytes_.push(11)
-            else if c == 'f': bytes_.push(12)
-            else if c == '\n': pass
-            else if c == '\r' and i + 1 < stop and source[i + 1] == '\n': i += 1
-            else if c == 'u' or c == 'U':
-                scalar = dn_unicode_escape(source, i, stop)
-                loop byte in chr(scalar.0): bytes_.push(byte)
-                i = scalar.1
-                continue
-            # (any ASCII punctuation escapes to itself: `\}`, `\{`, `\'`, `\"`, `\\`)
-            else if c > 32 and c < 127 and not (c >= '0' and c <= '9' or c >= 'a' and c <= 'z' or c >= 'A' and c <= 'Z'): bytes_.push(c)
-            else: dn_error(i, "unknown escape `\\{str_from_bytes([c])}`: the letter escapes are \\n \\r \\t \\a \\b \\v \\f, \\0 and \\u\{...}, and any ASCII punctuation escapes to itself")
-            i += 1
+            # (literals.dewy reads the escape)
+            p = LiteralProblem("", 0, false)
+            i = literal_escape(p, bytes_, source, i, stop)
+            if len(p.message) > 0: dn_error(p.at, p.message)
             continue
         if c == '{':
             interpolated = true

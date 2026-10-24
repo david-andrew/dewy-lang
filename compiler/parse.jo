@@ -3,6 +3,7 @@
 use 'util.jo'
 use 'lex.jo'
 use 'ast.jo'
+use 'literals.dewy'
 
 toks: Token[]
 # A parse unit owns its EOF-terminated stream. Borrow once on entry; recursive
@@ -48,30 +49,6 @@ word_in = (w: str, words: str[]) -> bool:
     loop x in words:
         if x == w: return true
     false
-
-# what is wrong with a format spec ("" if nothing), read as lib/core/fmt.jo's __spec_parse reads it
-spec_problem = (spec: str) -> str:
-    i = 0
-    n = len(spec)
-    al = (c: u8) -> bool: c == '<' or c == '>' or c == '^'
-    if n >= 2 and al(spec[1]): i = 2
-    else if n >= 1 and al(spec[0]): i = 1
-    if i < n and spec[i] == '+': i += 1
-    if i < n and spec[i] == '#': i += 1
-    loop i < n and spec[i] >= '0' and spec[i] <= '9': i += 1
-    if i < n and (spec[i] == ',' or spec[i] == '_'): i += 1
-    if i < n and spec[i] == '.':
-        i += 1
-        if i >= n or spec[i] < '0' or spec[i] > '9': return "a '.' needs the number of decimals after it"
-        loop i < n and spec[i] >= '0' and spec[i] <= '9': i += 1
-    if i < n:
-        c = spec[i]
-        if not (c == 'f' or c == 'e' or c == 'E' or c == 'g' or c == 'G' or c == '%' or c == 'x' or c == 'X' or c == 'b' or c == 'o' or c == 'd' or c == 's'): return "'{tok_char(c)}' is not a format type"
-        i += 1
-    if i < n: return "'{spec[i..]}' after the format is not part of one"
-    ""
-
-tok_char = (c: u8) -> str: str_from_bytes([c])
 
 nk_is = (i: int, k: Tok) -> bool: i + 1 < p_ntoks and p_toks[i + 1].kind == k
 
@@ -609,7 +586,7 @@ parse_string_token = (t: int) -> int:
             part = mk(.pair, pos)
             nodes[part].a = i32(e)
             if colon >= 0:
-                bad = spec_problem(s[colon + 1..j))
+                bad = literal_spec_problem(s[colon + 1..j))
                 if len(bad) > 0: fatal(pos, "`{{{trim(s[i + 1..j))}}}`: {bad} (a format is [[fill]align][+][#][0][width][,][.precision][type], as {{x:>8.2f}}; types f e E g G % (numbers), d x X b o (whole numbers), s (text))")
                 nodes[part].sval = i32(intern(s[colon + 1..j)))
             else: nodes[part].sval = -1

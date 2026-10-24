@@ -21,6 +21,7 @@ use 'dewy_ffi.jo'
 use 'directives.jo'
 use 'settings.jo'
 use 'targets.dewy'
+use 'literals.dewy'
 use 'concurrency.jo'
 use 'place_methods.jo'
 use 'place_split.jo'
@@ -819,26 +820,11 @@ dw_test_attach = (marked: int, declarations: int[]):
     if nkids(f) > 0 and not cased: fatal(pos, "the test '{name_of(int(nodes[f].name))}' takes parameters: give it cases, `$test(cases=…)`")
     if nkids(f) == 0 and cased: fatal(pos, "the test '{name_of(int(nodes[f].name))}' takes no parameters, so it cannot be given cases")
 
-# The syntax parser has already recognized the digits and base. Accumulate with
-# an explicit limit so neither overflow nor a high unsigned bit changes a value.
+# A real literal's digits after its base prefix (literals.dewy reads whole numbers)
 dw_digits = (text: str) -> str:
     digits = text[3..]
     if starts_with(lower(digits), text[..2)): digits = digits[2..]
     digits
-
-dw_alphabet = (text: str, id: int) -> str:
-    alphabet = ""
-    match text[..3):
-        "0b:": alphabet = "01"
-        "0t:": alphabet = "012"
-        "0q:": alphabet = "0123"
-        "0s:": alphabet = "012345"
-        "0o:": alphabet = "01234567"
-        "0d:": alphabet = "0123456789"
-        "0z:": alphabet = "0123456789xe"
-        "0x:": alphabet = "0123456789abcdef"
-        _: dw_fail(id, "this numeric base")
-    alphabet
 
 # `count ?? 0 + 1` is `count ?? (0 + 1)`: arithmetic binds more tightly than
 # `??`. A literal fallback followed by arithmetic usually meant the other tree.
@@ -874,26 +860,18 @@ dw_juxt_head = (id: int) -> bool:
 dw_integer_kind = (kind: DewyKind) -> bool:
     kind == .integer or kind == .source_integer
 
+# A whole number literal's value (none: it needs more than 64 bits)
 dw_unsigned = (text: str, id: int) -> u64?:
-    if dewy_syntax[id].kind == .source_integer:
-        value: u64 = 0
-        loop c in text:
-            if c == '_': continue
-            digit = u64(c - '0')
-            if value > 1844674407370955161 or (value == 1844674407370955161 and digit > 5): return none
-            value = value * 10 + digit
-        return value
-    alphabet = dw_alphabet(text, id)
-    base = u64(len(alphabet))
-    value: u64 = 0
-    loop c in lower(dw_digits(text)):
-        if c == '_': continue
-        digit = find_byte(alphabet, c)
-        if digit < 0: fatal(dewy_syntax[id].pos, "invalid numeric digit")
-        if value > (0xFFFFFFFFFFFFFFFF - u64(digit)) / base:
-            return none
-        value = value * base + u64(digit)
+    p = LiteralProblem("", 0, false)
+    value = literal_unsigned(p, text)
+    dw_literal_problem(p, id)
     value
+
+# (a mistake literals.dewy found in literal id: it stops here)
+dw_literal_problem = (p: LiteralProblem, id: int):
+    if len(p.message) == 0: return
+    if p.unsupported: dw_fail(id, p.message)
+    fatal(dewy_syntax[id].pos, p.message)
 
 # Only modules that use a large literal import the exact-integer library. The
 # alias contains a character that cannot occur in a user identifier.
@@ -939,59 +917,16 @@ dw_bigint_value = (limbs: u64[], pos: int, negative: bool = false) -> int:
     result
 
 dw_big_integer = (text: str, id: int) -> int:
-    decimal = dewy_syntax[id].kind == .source_integer
-    alphabet = if decimal: "0123456789" else: dw_alphabet(text, id)
-    digits = if decimal: text else: lower(dw_digits(text))
-    base = u64(len(alphabet))
-    limbs: u64[]
-    loop c in digits:
-        if c == '_': continue
-        digit = find_byte(alphabet, c)
-        if digit < 0: fatal(dewy_syntax[id].pos, "invalid numeric digit")
-        carry = u64(digit)
-        loop i in [0..limbs.len()):
-            word = limbs[i] * base + carry
-            limbs[i] = word & 0xFFFFFFFF
-            carry = word >> 32
-        if carry != 0: limbs.push(carry)
+    p = LiteralProblem("", 0, false)
+    limbs = literal_limbs(p, text)
+    dw_literal_problem(p, id)
     dw_bigint_value(limbs, dewy_syntax[id].pos)
 
-# Power-of-two based strings pack digits most-significant-bit first. The final
-# partial byte is zero padded, as in the existing Dewy literal design.
+# A based string, `0g"QUJD"`: its digits packed into bytes (literals.dewy)
 dw_binary = (id: int) -> int:
-    text = dewy_syntax[id].text
-    prefix = text[..3)
-    alphabet = ""
-    width = 0
-    match prefix:
-        "0b:": alphabet = "01"; width = 1
-        "0q:": alphabet = "0123"; width = 2
-        "0o:": alphabet = "01234567"; width = 3
-        "0x:": alphabet = "0123456789abcdef"; width = 4
-        "0u:": alphabet = "0123456789abcdefghijklmnopqrstuv"; width = 5
-        "0g:": alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/"; width = 6
-        _: return dw_fail(id, "this based-string packing")
-    digits = text[3..]
-    if width != 6: digits = lower(digits)
-    pending = 0
-    bits = 0
-    padded = false
-    packed: u8[]
-    loop c in digits:
-        if c == '_' and width != 6: continue
-        if c == '=' and width == 6: padded = true; continue
-        if padded: fatal(dewy_syntax[id].pos, "based-string padding must be at the end")
-        digit = find_byte(alphabet, c)
-        if width == 6 and c == '-': digit = 62
-        if width == 6 and c == '_': digit = 63
-        if digit < 0: fatal(dewy_syntax[id].pos, "invalid based-string digit")
-        pending = (pending << width) | digit
-        bits += width
-        if bits >= 8:
-            bits -= 8
-            packed.push(u8(pending >> bits))
-            pending &= (1 << bits) - 1
-    if bits > 0: packed.push(u8(pending << (8 - bits)))
+    p = LiteralProblem("", 0, false)
+    packed = literal_packed(p, dewy_syntax[id].text)
+    dw_literal_problem(p, id)
     pos = dewy_syntax[id].pos
     value = mk(.str_lit, pos)
     nodes[value].sval = i32(intern(str_from_bytes(packed)))

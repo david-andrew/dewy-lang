@@ -1,0 +1,275 @@
+# The frozen implementation-language twin of literals.dewy, for the compilers without
+# the Dewy frontend (tools/compiler/build.py). Change both, or neither.
+
+# What went wrong, for the compiler: message "" when nothing did
+struct LiteralProblem:
+    message: str
+    at: int             # where in the text given
+    unsupported: bool   # message names what Dewy does not support yet
+
+literal_based = (text: str) -> bool: len(text) >= 3 and text[2] == ':'
+
+literal_lower = (c: u8) -> u8:
+    if c >= 'A' and c <= 'Z': return c + 32
+    c
+
+# c's value among the digits of alphabet (-1: none), letters in either case
+literal_digit = (alphabet: str, c: u8) -> int: find_byte(alphabet, literal_lower(c))
+
+# c's place in alphabet, as written (-1: none)
+literal_exact = (alphabet: str, c: u8) -> int: find_byte(alphabet, c)
+
+# where a based text's digits start: after its prefix, and after the prefix again
+literal_first = (text: str) -> int:
+    if len(text) >= 5 and text[3] == '0' and literal_lower(text[4]) == text[1]: return 5
+    3
+
+# the digits of a whole number's text ("" after a mistake, in p), and where they start
+literal_alphabet = (p: mut LiteralProblem, text: str) -> (str, int):
+    if not literal_based(text): return ("0123456789", 0)
+    alphabet = ""
+    match text[..3):
+        "0b:": alphabet = "01"
+        "0t:": alphabet = "012"
+        "0q:": alphabet = "0123"
+        "0s:": alphabet = "012345"
+        "0o:": alphabet = "01234567"
+        "0d:": alphabet = "0123456789"
+        "0z:": alphabet = "0123456789xe"
+        "0x:": alphabet = "0123456789abcdef"
+        _:
+            p.message = "this numeric base"
+            p.unsupported = true
+    (alphabet, literal_first(text))
+
+# A whole number's value; none when it needs more than 64 bits (0 after a mistake)
+literal_unsigned = (p: mut LiteralProblem, text: str) -> u64?:
+    digits = literal_alphabet(p, text)
+    if len(p.message) > 0: return 0
+    alphabet = digits.0
+    base = u64(len(alphabet))
+    value: u64 = 0
+    loop i in [digits.1..len(text)):
+        if text[i] == '_': continue
+        d = literal_digit(alphabet, text[i])
+        if d < 0:
+            p.message = "invalid numeric digit"
+            p.at = i
+            return 0
+        digit = u64(d)
+        if value > (0xFFFFFFFFFFFFFFFF - digit) / base: return none
+        value = value * base + digit
+    value
+
+# A whole number's base 2^32 limbs, the least significant first
+literal_limbs = (p: mut LiteralProblem, text: str) -> u64[]:
+    limbs: u64[]
+    digits = literal_alphabet(p, text)
+    if len(p.message) > 0: return limbs
+    alphabet = digits.0
+    base = u64(len(alphabet))
+    loop i in [digits.1..len(text)):
+        if text[i] == '_': continue
+        d = literal_digit(alphabet, text[i])
+        if d < 0:
+            p.message = "invalid numeric digit"
+            p.at = i
+            limbs.clear()
+            return limbs
+        carry = u64(d)
+        loop k in [0..limbs.len()):
+            word = limbs[k] * base + carry
+            limbs[k] = word & 0xFFFFFFFF
+            carry = word >> 32
+        if carry != 0: limbs.push(carry)
+    limbs
+
+# A based string's bytes: digits packed most significant bit first, the last byte padded
+# with zeros. Base 64 (`0g:`) takes `-` and `_` for 62 and 63 too, and `=` padding.
+literal_packed = (p: mut LiteralProblem, text: str) -> u8[]:
+    packed: u8[]
+    alphabet = ""
+    width = 0
+    if len(text) >= 3:
+        match text[..3):
+            "0b:": alphabet = "01"; width = 1
+            "0q:": alphabet = "0123"; width = 2
+            "0o:": alphabet = "01234567"; width = 3
+            "0x:": alphabet = "0123456789abcdef"; width = 4
+            "0u:": alphabet = "0123456789abcdefghijklmnopqrstuv"; width = 5
+            "0g:": alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/"; width = 6
+            _: width = 0
+    if width == 0:
+        p.message = "this based-string packing"
+        p.unsupported = true
+        return packed
+    pending = 0
+    bits = 0
+    padded = false
+    loop i in [3..len(text)):
+        c = text[i]
+        if width != 6 and c == '_': continue
+        if width == 6 and c == '=':
+            padded = true
+            continue
+        if padded:
+            p.message = "based-string padding must be at the end"
+            p.at = i
+            packed.clear()
+            return packed
+        digit = 0
+        if width == 6: digit = literal_exact(alphabet, c)
+        else: digit = literal_digit(alphabet, c)
+        if width == 6 and c == '-': digit = 62
+        if width == 6 and c == '_': digit = 63
+        if digit < 0:
+            p.message = "invalid based-string digit"
+            p.at = i
+            packed.clear()
+            return packed
+        pending = (pending << width) | digit
+        bits += width
+        if bits >= 8:
+            bits -= 8
+            packed.push(u8(pending >> bits))
+            pending = pending & ((1 << bits) - 1)
+    if bits > 0: packed.push(u8(pending << (8 - bits)))
+    packed
+
+literal_alphanumeric = (c: u8) -> bool: c >= '0' and c <= '9' or c >= 'a' and c <= 'z' or c >= 'A' and c <= 'Z'
+
+# The escape whose character is at s[i], as text: `\é`; a byte inside a character
+# (malformed text) by its number
+literal_shown = (s: str, i: int) -> str:
+    if s[i] >= 0x80 and s[i] < 0xC0: return "`\\` before the byte {int(s[i])}"
+    j = i + 1
+    loop j < len(s) and s[j] >= 0x80 and s[j] < 0xC0: j += 1
+    "`\\{s[i..j)}`"
+
+literal_hex = (c: u8) -> int:
+    if c >= '0' and c <= '9': return int(c) - 48
+    if c >= 'a' and c <= 'f': return int(c) - 87
+    if c >= 'A' and c <= 'F': return int(c) - 55
+    -1
+
+# scalar (one, not a surrogate) in UTF-8 onto out
+literal_utf8 = (out: mut u8[], scalar: int):
+    if scalar < 0x80:
+        out.push(u8(scalar))
+        return
+    if scalar < 0x800:
+        out.push(u8(0xC0 | (scalar >> 6)))
+        out.push(u8(0x80 | (scalar & 63)))
+        return
+    if scalar < 0x10000:
+        out.push(u8(0xE0 | (scalar >> 12)))
+        out.push(u8(0x80 | ((scalar >> 6) & 63)))
+        out.push(u8(0x80 | (scalar & 63)))
+        return
+    out.push(u8(0xF0 | (scalar >> 18)))
+    out.push(u8(0x80 | ((scalar >> 12) & 63)))
+    out.push(u8(0x80 | ((scalar >> 6) & 63)))
+    out.push(u8(0x80 | (scalar & 63)))
+
+# (a mistake at s's byte at)
+literal_fail = (p: mut LiteralProblem, message: str, at: int):
+    p.message = message
+    p.at = at
+
+# A Unicode scalar escape at s[i] (its `u`), four hexadecimal digits or one to six in
+# braces: the scalar, and where the text after it starts (-1 after a mistake, in p)
+literal_scalar = (p: mut LiteralProblem, s: str, i: int, stop: int) -> (int, int):
+    at = i + 1
+    braced = at < stop and s[at] == '{{'
+    if braced: at += 1
+    first = at
+    value = 0
+    loop at < stop:
+        if braced and s[at] == '}}': break
+        if not braced and at - first == 4: break
+        digit = literal_hex(s[at])
+        if digit < 0:
+            literal_fail(p, "expected hexadecimal digits in Unicode escape", at)
+            return (0, -1)
+        if at - first >= 6:
+            literal_fail(p, "Unicode escape has too many digits", i)
+            return (0, -1)
+        value = value * 16 + digit
+        at += 1
+    if braced:
+        if at == first or at >= stop or s[at] != '}}':
+            literal_fail(p, "expected 1–6 hex digits and '}' in Unicode escape", i)
+            return (0, -1)
+        at += 1
+    else if at - first != 4:
+        literal_fail(p, "Unicode escape needs four hex digits", i)
+        return (0, -1)
+    if value > 0x10FFFF or (value >= 0xD800 and value <= 0xDFFF):
+        literal_fail(p, "Unicode escape must name a scalar value, not a surrogate or out-of-range code point", i)
+        return (0, -1)
+    (value, at)
+
+# The escape at s[i] (its backslash) in a string ending before stop, onto out: where the
+# text after it starts (stop after a mistake, in p)
+literal_escape = (p: mut LiteralProblem, out: mut u8[], s: str, i: int, stop: int) -> int:
+    at = i + 1
+    if at >= stop:
+        literal_fail(p, "incomplete string escape", at)
+        return stop
+    c = s[at]
+    if c == 'u' or c == 'U':
+        scalar = literal_scalar(p, s, at, stop)
+        if scalar.1 < 0: return stop
+        literal_utf8(out, scalar.0)
+        return scalar.1
+    if c == 'n': out.push(10)
+    else if c == 'r': out.push(13)
+    else if c == 't': out.push(9)
+    else if c == '0': out.push(0)
+    else if c == 'a': out.push(7)
+    else if c == 'b': out.push(8)
+    else if c == 'v': out.push(11)
+    else if c == 'f': out.push(12)
+    else if c == '\n': pass
+    else if c == '\r' and at + 1 < stop and s[at + 1] == '\n': return at + 2
+    # (any ASCII punctuation escapes to itself: `\}`, `\{`, `\'`, `\"`, `\\`)
+    else if c > 32 and c < 127 and not literal_alphanumeric(c): out.push(c)
+    else:
+        literal_fail(p, "unknown escape {literal_shown(s, at)}: the letter escapes are \\n \\r \\t \\a \\b \\v \\f, \\0 and \\u\{...}, and any ASCII punctuation escapes to itself", at)
+        return stop
+    at + 1
+
+# What is wrong with a format spec, `{x:>8.2f}`, as the library's __spec_parse reads it
+# ("": nothing): [[fill]align][+][#][0][width][,][.precision][type]
+literal_spec_problem = (spec: str) -> str:
+    n = len(spec)
+    aligns = (c: u8) -> bool: c == '<' or c == '>' or c == '^'
+    i = 0
+    if n >= 2 and aligns(spec[1]): i = 2
+    else if n >= 1 and aligns(spec[0]): i = 1
+    if i < n and spec[i] == '+': i += 1
+    if i < n and spec[i] == '#': i += 1
+    loop i < n and spec[i] >= '0' and spec[i] <= '9': i += 1
+    if i < n and (spec[i] == ',' or spec[i] == '_'): i += 1
+    if i < n and spec[i] == '.':
+        i += 1
+        if i >= n or spec[i] < '0' or spec[i] > '9': return "a '.' needs the number of decimals after it"
+        loop i < n and spec[i] >= '0' and spec[i] <= '9': i += 1
+    if i < n:
+        if literal_exact("feEgG%xXbods", spec[i]) < 0: return "'{literal_char(spec, i)}' is not a format type"
+        i += 1
+    if i < n: return "'{literal_rest(spec, i)}' after the format is not part of one"
+    ""
+
+# The character at s[i]: a byte inside one (malformed text) by its number
+literal_char = (s: str, i: int) -> str:
+    if s[i] >= 0x80 and s[i] < 0xC0: return "byte {int(s[i])}"
+    j = i + 1
+    loop j < len(s) and s[j] >= 0x80 and s[j] < 0xC0: j += 1
+    s[i..j)
+
+# s from i on, from the start of a character (malformed text may have bytes before one)
+literal_rest = (s: str, i: int) -> str:
+    j = i
+    loop j < len(s) and s[j] >= 0x80 and s[j] < 0xC0: j += 1
+    s[j..]

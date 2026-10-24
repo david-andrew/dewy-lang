@@ -1,0 +1,375 @@
+# A Dewy literal's text to its value: whole numbers in any base (one that fits a word,
+# or the limbs of one that does not), based strings packed into bytes, a string's
+# escapes, and what is wrong with an interpolation's format spec. The text is the literal's payload as the lexer gives it (dewy_fast.jo
+# dn_payload): `123_456` for a decimal number, `0x:FF_FF` for one in a base, `0g:QUJD`
+# for a based string's contents.
+#
+# A module of the compiler written in Dewy. literals.jo is its frozen twin for the
+# compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
+# interface and give the same answers (tests/test_selfhost_literals.py). Inside, a
+# mistake is an error value; the functions the compiler calls report it in a problem
+# the caller passes by place (the C seed compiler, which builds the twin, has no unions).
+
+# (a mistake in a literal, at a byte offset of its text)
+LiteralError:type=type of error & [message:string at:int64]
+# (a literal this compiler does not read yet: "Dewy does not yet support {what}")
+LiteralUnsupported:type=type of error & [what:string]
+
+# What went wrong, for the compiler: message "" when nothing did
+LiteralProblem:type=[
+    message:string
+    at:int64            # where in the text given
+    unsupported:bool    # message names what Dewy does not support yet
+]
+
+# ---- whole numbers ----
+
+# (a based text: its prefix, `0x:`, then its digits)
+literal_based=(b:array<uint8>):>bool=>b.length >=? 3 and b[2] =? b':'
+
+# the digits of a base, by its prefix (`0x:`)
+literal_alphabet=(text:string):>string|LiteralUnsupported=>{
+    let b=text as array<uint8>
+    if not literal_based(b) or b[0] not=? b'0' {return LiteralUnsupported["this numeric base"]}
+    match b[1] {
+        <b'b'> => "01"
+        <b't'> => "012"
+        <b'q'> => "0123"
+        <b's'> => "012345"
+        <b'o'> => "01234567"
+        <b'd'> => "0123456789"
+        <b'z'> => "0123456789xe"
+        <b'x'> => "0123456789abcdef"
+        _ => LiteralUnsupported["this numeric base"]
+    }
+}
+
+# c's value among the digits of alphabet (-1: none), letters in either case
+literal_digit=(alphabet:array<uint8> c:uint8):>int64=>{
+    let lower=literal_lower(c)
+    loop k in [0..alphabet.length) {
+        if alphabet[k] =? lower {return k}
+    }
+    -1
+}
+
+literal_lower=(c:uint8):>uint8=>if c >=? b'A' and c <=? b'Z' c + 32 else c
+
+# where a based text's digits start: after its prefix, and after the prefix again
+# (`0x0x1F`), which the lexer takes as digits
+literal_first=(b:array<uint8>):>int64=>{
+    if b.length >=? 5 and b[3] =? b'0' and literal_lower(b[4]) =? b[1] {return 5}
+    3
+}
+
+# The digits' alphabet and where they start: decimal from 0, else by the prefix
+literal_digits=(text:string):>[string int64]|LiteralUnsupported=>{
+    let b=text as array<uint8>
+    if not literal_based(b) {return ["0123456789" 0]}
+    let alphabet=literal_alphabet(text) or_throw
+    [alphabet literal_first(b)]
+}
+
+# The value of a whole number's text; none when it needs more than 64 bits
+literal_value=(text:string):>uint64|none|LiteralError|LiteralUnsupported=>{
+    let [alphabet first]=literal_digits(text) or_throw
+    let a=alphabet as array<uint8>
+    let base:uint64=a.length
+    let b=text as array<uint8>
+    let value:uint64=0
+    loop i in [first..b.length) {
+        if b[i] =? b'_' {continue}
+        let d=literal_digit(a b[i])
+        if d <? 0 {return LiteralError["invalid numeric digit" i]}
+        let digit:uint64=d
+        if value >? (0xFFFFFFFFFFFFFFFF - digit) // base {return none}
+        value=value * base + digit
+    }
+    value
+}
+
+# The magnitude of a whole number's text: base 2^32 limbs, the least significant first
+literal_magnitude=(text:string):>array<uint64>|LiteralError|LiteralUnsupported=>{
+    let [alphabet first]=literal_digits(text) or_throw
+    let a=alphabet as array<uint8>
+    let base:uint64=a.length
+    let b=text as array<uint8>
+    let limbs:array<uint64>=[]
+    loop i in [first..b.length) {
+        if b[i] =? b'_' {continue}
+        let d=literal_digit(a b[i])
+        if d <? 0 {return LiteralError["invalid numeric digit" i]}
+        let carry:uint64=d
+        loop k in [0..limbs.length) {
+            let word=limbs[k] * base + carry
+            limbs[k]=word & 0xFFFFFFFF
+            carry=word >> 32
+        }
+        if carry not=? 0 {limbs.push(carry)}
+    }
+    limbs
+}
+
+# ---- based strings ----
+
+# Digits packed most significant bit first, the last byte padded with zeros: a based
+# string's bytes. Base 64 (`0g:`) takes `-` and `_` for 62 and 63 too, and `=` padding.
+literal_bytes=(text:string):>array<uint8>|LiteralError|LiteralUnsupported=>{
+    let [alphabet width]=literal_packing(text) or_throw
+    let a=alphabet as array<uint8>
+    let b=text as array<uint8>
+    let pending:int64=0
+    let bits:int64=0
+    let padded=false
+    let packed:array<uint8>=[]
+    loop i in [3..b.length) {
+        let c=b[i]
+        if width not=? 6 and c =? b'_' {continue}
+        if width =? 6 and c =? b'=' {
+            padded=true
+            continue
+        }
+        if padded {return LiteralError["based-string padding must be at the end" i]}
+        let digit=if width =? 6 literal_exact(a c) else literal_digit(a c)
+        if width =? 6 and c =? b'-' {digit=62}
+        if width =? 6 and c =? b'_' {digit=63}
+        if digit <? 0 {return LiteralError["invalid based-string digit" i]}
+        pending=(pending << width) | digit
+        bits+=width
+        if bits >=? 8 {
+            bits-=8
+            packed.push((pending >> bits) as uint8)
+            pending=pending & ((1 << bits) - 1)
+        }
+    }
+    if bits >? 0 {packed.push((pending << (8 - bits)) as uint8)}
+    packed
+}
+
+# A based string's digits and the bits each one gives, by its prefix
+literal_packing=(text:string):>[string int64]|LiteralUnsupported=>{
+    let b=text as array<uint8>
+    if not literal_based(b) or b[0] not=? b'0' {return LiteralUnsupported["this based-string packing"]}
+    match b[1] {
+        <b'b'> => ["01" 1]
+        <b'q'> => ["0123" 2]
+        <b'o'> => ["01234567" 3]
+        <b'x'> => ["0123456789abcdef" 4]
+        <b'u'> => ["0123456789abcdefghijklmnopqrstuv" 5]
+        <b'g'> => ["0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/" 6]
+        _ => LiteralUnsupported["this based-string packing"]
+    }
+}
+
+# c's place in alphabet, as written (-1: none)
+literal_exact=(alphabet:array<uint8> c:uint8):>int64=>{
+    loop k in [0..alphabet.length) {
+        if alphabet[k] =? c {return k}
+    }
+    -1
+}
+
+# ---- escapes ----
+
+# The escape at s[i] (its backslash) in a string ending before stop: its bytes onto out;
+# where the text after it starts
+literal_unescape=(@out:array<uint8> s:string i:int64 stop:int64):>int64|LiteralError=>{
+    let b=s as array<uint8>
+    let at=i + 1
+    if at >=? stop {return LiteralError["incomplete string escape" at]}
+    let c=b[at]
+    if c =? b'u' or c =? b'U' {
+        let [scalar after]=literal_scalar(s at stop) or_throw
+        literal_utf8(@out scalar)
+        return after
+    }
+    match c {
+        <b'n'> => out.push(10)
+        <b'r'> => out.push(13)
+        <b't'> => out.push(9)
+        <b'0'> => out.push(0)
+        <b'a'> => out.push(7)
+        <b'b'> => out.push(8)
+        <b'v'> => out.push(11)
+        <b'f'> => out.push(12)
+        <b'\n'> => {}
+        _ => {
+            if c =? b'\r' and at + 1 <? stop and b[at + 1] =? b'\n' {return at + 2}
+            # (any ASCII punctuation escapes to itself: `\}`, `\{`, `\'`, `\"`, `\\`)
+            if not (c >? 32 and c <? 127 and not literal_alphanumeric(c)) {
+                return LiteralError["unknown escape {literal_shown(s at)}: the letter escapes are \\n \\r \\t \\a \\b \\v \\f, \\0 and \\u\{...}, and any ASCII punctuation escapes to itself" at]
+            }
+            out.push(c)
+        }
+    }
+    at + 1
+}
+
+literal_alphanumeric=(c:uint8):>bool=>c >=? b'0' and c <=? b'9' or c >=? b'a' and c <=? b'z' or c >=? b'A' and c <=? b'Z'
+
+# The escape whose character is at s[i], as text: `\é`; a byte inside a character
+# (malformed text) by its number
+literal_shown=(s:string i:int64):>string=>{
+    let b=s as array<uint8>
+    if b[i] >=? 0x80 and b[i] <? 0xC0 {return "`\\` before the byte {b[i]}"}
+    let j=i + 1
+    loop j <? b.length and b[j] >=? 0x80 and b[j] <? 0xC0 {j+=1}
+    "`\\{s.byte_slice(i j)}`"
+}
+
+# A Unicode scalar escape at s[i] (its `u`), four hexadecimal digits or one to six in
+# braces: the scalar, and where the text after it starts
+literal_scalar=(s:string i:int64 stop:int64):>[int64 int64]|LiteralError=>{
+    let b=s as array<uint8>
+    let at=i + 1
+    let braced=at <? stop and b[at] =? b'\{'
+    if braced {at+=1}
+    let first=at
+    let value:int64=0
+    loop at <? stop {
+        if braced and b[at] =? b'}' {break}
+        if not braced and at - first =? 4 {break}
+        let digit=literal_hex(b[at])
+        if digit <? 0 {return LiteralError["expected hexadecimal digits in Unicode escape" at]}
+        if at - first >=? 6 {return LiteralError["Unicode escape has too many digits" i]}
+        value=value * 16 + digit
+        at+=1
+    }
+    if braced {
+        if at =? first or at >=? stop or b[at] not=? b'}' {return LiteralError["expected 1–6 hex digits and '}' in Unicode escape" i]}
+        at+=1
+    } else if at - first not=? 4 {return LiteralError["Unicode escape needs four hex digits" i]}
+    if value >? 0x10FFFF or (value >=? 0xD800 and value <=? 0xDFFF) {return LiteralError["Unicode escape must name a scalar value, not a surrogate or out-of-range code point" i]}
+    [value at]
+}
+
+literal_hex=(c:uint8):>int64=>{
+    if c >=? b'0' and c <=? b'9' {return (c as int64) - 48}
+    if c >=? b'a' and c <=? b'f' {return (c as int64) - 87}
+    if c >=? b'A' and c <=? b'F' {return (c as int64) - 55}
+    -1
+}
+
+# scalar (one, not a surrogate) in UTF-8 onto out
+literal_utf8=(@out:array<uint8> scalar:int64)=>{
+    if scalar <? 0x80 {
+        out.push(scalar as uint8)
+        return
+    }
+    if scalar <? 0x800 {
+        out.push((0xC0 | (scalar >> 6)) as uint8)
+        out.push((0x80 | (scalar & 63)) as uint8)
+        return
+    }
+    if scalar <? 0x10000 {
+        out.push((0xE0 | (scalar >> 12)) as uint8)
+        out.push((0x80 | ((scalar >> 6) & 63)) as uint8)
+        out.push((0x80 | (scalar & 63)) as uint8)
+        return
+    }
+    out.push((0xF0 | (scalar >> 18)) as uint8)
+    out.push((0x80 | ((scalar >> 12) & 63)) as uint8)
+    out.push((0x80 | ((scalar >> 6) & 63)) as uint8)
+    out.push((0x80 | (scalar & 63)) as uint8)
+}
+
+# ---- format specs ----
+
+# What is wrong with a format spec, `{x:>8.2f}`, as the library's __spec_parse reads it
+# ("": nothing): [[fill]align][+][#][0][width][,][.precision][type]
+literal_spec_problem=(spec:string):>string=>{
+    let b=spec as array<uint8>
+    let n=b.length
+    let aligns=(c:uint8):>bool => c =? b'<' or c =? b'>' or c =? b'^'
+    let i:int64=0
+    if n >=? 2 and aligns(b[1]) {i=2}
+    else if n >=? 1 and aligns(b[0]) {i=1}
+    if i <? n and b[i] =? b'+' {i+=1}
+    if i <? n and b[i] =? b'#' {i+=1}
+    loop i <? n and b[i] >=? b'0' and b[i] <=? b'9' {i+=1}
+    if i <? n and (b[i] =? b',' or b[i] =? b'_') {i+=1}
+    if i <? n and b[i] =? b'.' {
+        i+=1
+        if i >=? n or b[i] <? b'0' or b[i] >? b'9' {return "a '.' needs the number of decimals after it"}
+        loop i <? n and b[i] >=? b'0' and b[i] <=? b'9' {i+=1}
+    }
+    if i <? n {
+        if literal_exact("feEgG%xXbods" as array<uint8> b[i]) <? 0 {return "'{literal_char(spec i)}' is not a format type"}
+        i+=1
+    }
+    if i <? n {return "'{literal_rest(spec i)}' after the format is not part of one"}
+    ""
+}
+
+# The character at s[i]: a byte inside one (malformed text) by its number
+literal_char=(s:string i:int64):>string=>{
+    let b=s as array<uint8>
+    if b[i] >=? 0x80 and b[i] <? 0xC0 {return "byte {b[i]}"}
+    let j=i + 1
+    loop j <? b.length and b[j] >=? 0x80 and b[j] <? 0xC0 {j+=1}
+    s.byte_slice(i j)
+}
+
+# s from i on, from the start of a character (malformed text may have bytes before one)
+literal_rest=(s:string i:int64):>string=>{
+    let b=s as array<uint8>
+    let j=i
+    loop j <? b.length and b[j] >=? 0x80 and b[j] <? 0xC0 {j+=1}
+    s.byte_slice(j b.length)
+}
+
+# ---- for the compiler: a mistake in p ----
+
+literal_fail=(@p:LiteralProblem e:LiteralError|LiteralUnsupported)=>{
+    match e {
+        x:LiteralError => {
+            p.message=x.message
+            p.at=x.at
+        }
+        x:LiteralUnsupported => {
+            p.message=x.what
+            p.unsupported=true
+        }
+    }
+}
+
+# A whole number's value; none when it needs more than 64 bits (0 after a mistake)
+literal_unsigned=(@p:LiteralProblem text:string):>uint64|none=>{
+    match literal_value(text) {
+        e:LiteralError => {literal_fail(@p e)}
+        e:LiteralUnsupported => {literal_fail(@p e)}
+        <none> => return none
+        v:uint64 => return v
+    }
+    0
+}
+
+# A whole number's base 2^32 limbs, the least significant first
+literal_limbs=(@p:LiteralProblem text:string):>array<uint64>=>{
+    match literal_magnitude(text) {
+        e:LiteralError => {literal_fail(@p e)}
+        e:LiteralUnsupported => {literal_fail(@p e)}
+        limbs:array<uint64> => return limbs
+    }
+    []
+}
+
+# A based string's bytes
+literal_packed=(@p:LiteralProblem text:string):>array<uint8>=>{
+    match literal_bytes(text) {
+        e:LiteralError => {literal_fail(@p e)}
+        e:LiteralUnsupported => {literal_fail(@p e)}
+        packed:array<uint8> => return packed
+    }
+    []
+}
+
+# The escape at s[i] (its backslash) onto out: where the text after it starts (stop
+# after a mistake)
+literal_escape=(@p:LiteralProblem @out:array<uint8> s:string i:int64 stop:int64):>int64=>{
+    match literal_unescape(@out s i stop) {
+        e:LiteralError => {literal_fail(@p e)}
+        next:int64 => return next
+    }
+    stop
+}

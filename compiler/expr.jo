@@ -3004,7 +3004,8 @@ dewy_record_target = (expected: int) -> int:
 # The one member of an expected union a literal builds, or 0 when none or
 # several could: a record literal takes the record whose fields it names
 # (every field without a default among them), a dictionary literal the
-# dictionary, any other array literal the array.
+# dictionary, any other array literal the array (or, when the union has
+# none, the positional array type with as many positions: `[string int64]`).
 literal_union_member = (n: int, expected: int) -> int:
     u = prune(expected)
     if u == 0: return 0
@@ -3012,6 +3013,7 @@ literal_union_member = (n: int, expected: int) -> int:
     if not is_union(u): return 0
     k = nodes[n].kind
     found = 0
+    tuple = 0
     loop m0 in union_members(u):
         m = prune(m0)
         mkind = types[m].kind
@@ -3033,10 +3035,15 @@ literal_union_member = (n: int, expected: int) -> int:
                         if nodes[entry].name == f.name: given = true
                     if not given: fits = false
         else if k == .map_lit: fits = is_map_type(m)
+        else if mkind == .tuple:
+            if nkids(n) == int(types[m].nargs) and not array_has_spread(n):
+                if tuple != 0: tuple = -1
+                else: tuple = m
         else: fits = mkind == .array or mkind == .fixed or nkids(n) == 0 and is_map_type(m)
         if fits:
             if found != 0: return 0
             found = m
+    if found == 0 and tuple > 0: return tuple
     found
 
 # The object type a positional literal `[3 4]` builds, or 0: one declared in Dewy, expected
@@ -9806,10 +9813,10 @@ check_expr_other = (n: int, expected: int) -> int:
         nodes[n].type = i32(expected)
         add_flag(n, NF_CHECKED)
         return expected
-    if k == .array and exk == .opt and (tkind(int(types[ex].elem)) == .array or tkind(int(types[ex].elem)) == .fixed):
+    if k == .array and exk == .opt and (tkind(int(types[ex].elem)) == .array or tkind(int(types[ex].elem)) == .fixed or tkind(int(types[ex].elem)) == .tuple and files[pos_file(nodes[n].pos)].is_dewy):
         ex = prune(int(types[ex].elem))
         exk = types[ex].kind
-    if (k == .array or k == .map_lit or k == .record_lit) and ex != 0 and files[pos_file(nodes[n].pos)].is_dewy:
+    if (k == .array or k == .map_lit or k == .record_lit or k == .tuple and nodes[n].aux != i32(TUPLE_VALUES)) and ex != 0 and files[pos_file(nodes[n].pos)].is_dewy:
         member = literal_union_member(n, ex)
         if member != 0:
             ex = member

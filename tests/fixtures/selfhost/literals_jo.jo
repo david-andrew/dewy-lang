@@ -1,0 +1,51 @@
+# The compiler's frozen literals.jo, with the same command line as literals_dewy.dewy.
+use '../../../compiler/literals.jo'
+
+shown = (p: LiteralProblem) -> str: "! {p.message} @{p.at} {p.unsupported}"
+
+hex = (b: u8[]) -> str:
+    parts: str[]
+    loop c in b: parts.push("{c}")
+    join(parts, ",")
+
+main = ():
+    words = args()
+    loop w in [1..words.len()):
+        word = words[w]
+        kind = word[..1)
+        text = word[1..]
+        if kind == "n":
+            p = LiteralProblem("", 0, false)
+            v = literal_unsigned(p, text)
+            value = "big"
+            if len(p.message) > 0: value = shown(p)
+            else if v != none: value = "{v!}"
+            q = LiteralProblem("", 0, false)
+            limbs = literal_limbs(q, text)
+            more = ""
+            if len(q.message) > 0: more = shown(q)
+            else:
+                parts: str[]
+                loop x in limbs: parts.push("{x}")
+                more = join(parts, ",")
+            print("{value} | {more}")
+        else if kind == "s":
+            p = LiteralProblem("", 0, false)
+            packed = literal_packed(p, text)
+            if len(p.message) > 0: print(shown(p))
+            else: print(hex(packed))
+        else if kind == "f":
+            problem = literal_spec_problem(text)
+            if len(problem) == 0: problem = "ok"
+            print(problem)
+        else:
+            p = LiteralProblem("", 0, false)
+            out: u8[]
+            i = 0
+            loop i < len(text) and len(p.message) == 0:
+                if text[i] == '\\': i = literal_escape(p, out, text, i, len(text))
+                else:
+                    out.push(text[i])
+                    i += 1
+            if len(p.message) > 0: print("{shown(p)} {hex(out)}")
+            else: print(hex(out))

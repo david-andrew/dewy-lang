@@ -1,0 +1,24 @@
+# quick
+# A positional array type inside a union (an error union, an optional) takes an array
+# literal with one value per position; a union that also holds an array keeps the array.
+Bad:type=type of error & [what:string]
+split=(text:string):>[string int64]|Bad=>{
+    if text.is_empty {return Bad["empty"]}
+    [text text.length]
+}
+pair=(x:int64):>[int64 int64]|none=>{
+    if x <? 0 {return none}
+    [x x * 2]
+}
+either=(x:int64):>array<int64>|[int64 int64]=>[x x]
+twice=(text:string):>int64|Bad=>{
+    let [s n]=split(text) or_throw
+    printl(s)
+    n * 2
+}
+main=():>void|Bad=>{
+    printl(twice("abc") or_throw)
+    printl(split("") is? Bad)
+    printl"{pair(2) ?? [0 0]} {pair(-1) ?? [0 0]}"
+    printl(either(3) is? array<int64>)
+}

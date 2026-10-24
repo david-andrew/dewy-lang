@@ -1,0 +1,53 @@
+# The compiler's literals.dewy: `literals word...` prints, for each word, what the compiler
+# reads from it by its first letter: `n` a whole number's value and limbs, `s` a based
+# string's bytes, `e` a string's bytes with its escapes read, `f` what is wrong with a format
+# spec; a mistake as `! message @at`.
+$runtime_checks
+from p"../../../compiler/literals.dewy" import LiteralProblem, literal_unsigned, literal_limbs, literal_packed, literal_escape, literal_spec_problem
+
+shown=(p:LiteralProblem):>string=>"! {p.message} @{p.at} {p.unsupported}"
+
+hex=(b:array<uint8>):>string=>{
+    let parts:array<string>=[]
+    loop c in b {parts.push("{c}")}
+    parts.join(",")
+}
+
+main=():>void=>{
+    let words=args()
+    loop w in [1..words.length) {
+        let word=words[w]
+        let first=(word as array<uint8>)[0]
+        let kind=if first =? b'n' "n" else if first =? b's' "s" else if first =? b'f' "f" else "e"
+        let text=word.remove_prefix(kind)
+        if kind =? "n" {
+            let p:LiteralProblem=[message="" at=0 unsupported=false]
+            let v=literal_unsigned(@p text)
+            let value=if p.message not=? "" shown(p) else if v is? none "big" else "{v ?? 0}"
+            let q:LiteralProblem=[message="" at=0 unsupported=false]
+            let limbs=literal_limbs(@q text)
+            let more=if q.message not=? "" shown(q) else limbs.map((x:uint64):>string => "{x}").join(",")
+            printl"{value} | {more}"
+        } else if kind =? "s" {
+            let p:LiteralProblem=[message="" at=0 unsupported=false]
+            let packed=literal_packed(@p text)
+            printl(if p.message not=? "" shown(p) else hex(packed))
+        } else if kind =? "f" {
+            let problem=literal_spec_problem(text)
+            printl(if problem =? "" "ok" else problem)
+        } else {
+            let p:LiteralProblem=[message="" at=0 unsupported=false]
+            let out:array<uint8>=[]
+            let b=text as array<uint8>
+            let i:int64=0
+            loop i <? b.length and p.message =? "" {
+                if b[i] =? b'\\' {i=literal_escape(@p @out text i b.length)}
+                else {
+                    out.push(b[i])
+                    i+=1
+                }
+            }
+            printl(if p.message not=? "" "{shown(p)} {hex(out)}" else hex(out))
+        }
+    }
+}

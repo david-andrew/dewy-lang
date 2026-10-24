@@ -175,6 +175,34 @@ identical. Reading 200 specs is +35% on its twin (release +31%), the lock file +
   (40 lowercase hexadecimal digits), so a pin's 12-digit form cuts ASCII; a garbled pin is
   resolved again instead of fetched.
 
+`literals.dewy` (a Dewy literal's text to its value: a whole number in any base as a word
+or as 2^32 limbs, a based string's packed bytes, a string's escapes, and what is wrong
+with an interpolation's format spec) is the first leaf of the front end proper and the
+first with error values: `type of error` kinds with payloads, a positional result inside
+an error union (`:>[string int64]|LiteralUnsupported`, taken apart with
+`let [a b]=... or_throw`), `match` on unions with payloads, and a closure. The C seed
+compiler, which builds the twin, has no unions, so an error union cannot cross into the
+compiler yet: the functions Sloppy calls `match` their result into a `LiteralProblem` the
+caller passes by place. dewy_fast.jo's string loop calls the leaf only at a backslash, and
+dewy_direct.jo keeps its inline decimal path. Panel: self-build +0.17% (it compiles the
+leaf), every other item within 0.04%; 684 builds identical. Through one Sloppy driver over
+either module, 4000 numbers take 44.0 M instructions against the twin's 51.2 M (release
+36.5 / 40.2 M), 4000 format specs 10.7 / 11.1 M; an escape costs about 95 instructions
+more than the twin's (release 125), of which an error-union result and its `match` are
+about 37 (31) against a status record by place. What it met:
+- An array literal where a union or an optional holds a positional array type
+  (`:>[string int64]|Bad`, `[int64 int64]|none`) built an array and failed to check. It
+  now takes the positional type when the union holds no array (expr.jo
+  `literal_union_member`).
+- One arm for several bytes, `<b'u'|b'U'> => ...`, is refused: an integer singleton union
+  may miss at most 24 values between its ends, and `U` and `u` are 32 apart. The leaf
+  tests them with an `if` before the `match`.
+- A string's `length` counts characters, so a prefix check `text.length <? 3` passes
+  `"0é"`; the leaf compares bytes.
+- Malformed UTF-8 again: an unknown escape or format type was echoed as its first byte
+  alone, which made the message malformed too. Both twins now show the whole character, or
+  `byte 128` for a byte inside one.
+
 Open gaps from these leaves, by cost:
 - A literal beside a policy-typed operand (`w + 1`, `w & 0xFF`, `w xor 0xFFFFFFFF`) goes
   through `int` and `__mi_low_word`, about 30 instructions in place of one. Plain `uint32`
