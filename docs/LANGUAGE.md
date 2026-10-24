@@ -134,7 +134,7 @@ builds as well as release builds.
 `watch` and the interactive prompt retain calls so definitions can be replaced.
 `--release` adds broader inlining and further loop optimization. A program may
 choose its build mode and target in its main file (`$build.mode = 'release'`,
-`$target = 'wasm32'`; see "Targets"); `--release`, `--debug` and `--target`
+`$target = 'wasm32'`; see "Modules and games"); `--release`, `--debug` and `--target`
 override the file.
 Use `-g` without `--release` for native variable debugging; it preserves local
 variable locations instead of running the default local optimization pass.
@@ -223,7 +223,7 @@ creating a source file:
 >>> twice(score)
 42
 >>> :type score
-int64
+int
 ```
 
 Variables, functions, types and imports persist for the session. Braces, brackets,
@@ -548,10 +548,13 @@ the following binding: `$capture name` takes a private snapshot and
 is created, so neither takes an argument when called:
 
 ```dewy
-let update = (step:int64 $capture @count extra:int64) => {
-    count += step + extra
+main = () => {
+    let count = 0
+    let update = (step:int64 $capture @count extra:int64) => {
+        count += step + extra
+    }
+    update(2 3) # changes the enclosing count by 5
 }
-update(2 3) # changes the enclosing count by 5
 ```
 
 Each explicit capture names an enclosing local; capture and parameter names
@@ -675,7 +678,7 @@ specification) still make the call panic. Running out of memory is not a panic. 
 shows `& panics` on a function that may panic, and `dewy check --obligations`
 lists each library call that may panic where runtime checks are allowed.
 
-The implementation-cost inventory supports wrapping fixed-width scalar work
+The implementation-cost inventory supports fixed-width scalar work
 (including shifts), inline scalar records and unions of them (`:>(int64 | Oops) &
 no_effects`; the parentheses are required), bare handles, capture-free lambdas,
 read-only array parameter borrowing, length/capacity inspection and scalar array
@@ -702,8 +705,17 @@ containers and generic arguments. Unannotated integer literals default to `int`.
 Arithmetic is arbitrary precision: word-sized values promote to a big integer
 when their exact result exceeds the signed 64-bit range. `int` has no `.min` or `.max` members.
 
-Explicit `int8` through `int64` and `uint8` through `uint64` retain wrapping
-arithmetic. Floating types are `float32` and `float64`; text is `string`. The
+Explicit `int8` through `int64` and `uint8` through `uint64` are fixed-width.
+Today their `+`, `-` and `*` wrap to the width, while `//`, `%` and `^` are
+computed exactly and storing the result is a checked narrowing; every compound
+update (`+=`, `//=`, `^=`, ...) wraps back to the width. *Decided, not built
+yet:* arithmetic on fixed-width integers becomes exact like `int`'s; storing
+into a fixed-width binding, field, parameter or result becomes the proven
+narrowing (free when proven, an error with fix-its otherwise, a runtime check
+under `$runtime_checks`); and wrapping is chosen by the type, as in
+`uint32<overflow='wrap'>`
+([design](design/precision_inference.md#fixed-width-integers-2026-10-22)).
+Floating types are `float32` and `float64`; text is `string`. The
 implementation's short names (`i64`, `u8`, `f64`, `str`, `byte`) are rejected. Literals in an explicit
 numeric context must fit that type exactly. A call parameter supplies that context
 to `if` and `match` branch values, just as a binding annotation does. In `=?`
@@ -915,23 +927,26 @@ union's members in one order whatever the spelling (the integers rising, then th
 strings in text order), each typed as its own singleton, so `if text =? m return m` returns a `U`. Literal unions are
 ordinary type arguments: `Box<'tokens'|'ast'>`, `array<'a'|'b'>`.
 
-A refuted obligation is a compile error. An unproven obligation becomes an
-ordinary runtime check that panics on failure; a proven obligation emits no
-check. Annotated local initialization and replacement, arguments, and results
+A refuted obligation is a compile error. Today, by default, an unproven
+obligation becomes an ordinary runtime check that panics on failure; a proven
+obligation emits no check. (No traps by default is decided but not built yet: an
+unproven obligation will be a compile error unless the scope opts in with
+`$runtime_checks`; see "Directives".) Annotated local initialization and replacement, arguments, and results
 use these checks. Arguments are captured in evaluation order and checked before
 invocation. A result's references to value parameters describe their entry
 values, even when the function changes its private parameter copies. Generic
 instances retain contracts. Callable conversion requires compatible
 preconditions and guarantees; it cannot silently strengthen a result promise.
-Fixed-width arithmetic still wraps before its result meets a refinement.
+Today fixed-width `+`, `-` and `*` wrap before their result meets a refinement.
 
 Refinements also apply to record fields and array elements. Constructors,
 defaults, structural record conversions and stores check the declared contracts.
 A field may depend on a sibling, as in `[low:int64 high:int64<(>=? low)>]`;
 a field's (or a `let`'s) own name in its refinement is its value, `high:int64<high >=? low>`;
 a dependent write checks a private candidate before replacing the record.
-Missing initialization must satisfy the contract too. Fixed-width increments
-retain runtime checks when overflow cannot be ruled out. `xs.swap(i j)` keeps an
+Missing initialization must satisfy the contract too. An increment of a
+refined fixed-width field is checked against its contract when overflow cannot be
+ruled out. `xs.swap(i j)` keeps an
 element refinement without a proof per element.
 
 `array<int64 length <? 10>` is a dynamic array with a checked length contract;
@@ -1071,7 +1086,7 @@ A `\` at the end of a line cancels that line break, everywhere: in code
 It binds above multiplication, literal coefficients and unary minus, so `2x^2`
 is `2*(x^2)` and `-2^2` is `-(2^2)`. Use `xor` for bitwise exclusive-or.
 Integer powers use a nonnegative integer exponent. `int` powers remain exact,
-including when the exponent is `int64`; fixed-width powers retain wrapping multiplication. A negative constant
+including when the exponent is `int64`; a fixed-width power is exact and storing it is a checked narrowing. A negative constant
 exponent gives a `rational`, `2^(-2)` is `1/4`; a negative runtime exponent panics
 with guidance to use an explicit rational or floating base. Float powers use the inherited
 floating math library. `bigint` powers remain exact for nonnegative exponents;
@@ -1121,8 +1136,8 @@ Broadcast operators (`.+`, `.*`, `.<?`, ...) bind like their scalar forms. So
 `f(x) * 2 or_throw` is `(f(x) * 2) or_throw`.
 
 Compound updates `//=`, `%=`, `/=` and `^=` use the same operations as their
-ordinary forms. The destination keeps its type; fixed-width integer results wrap
-back to that width. `let x = 7; x //= 2` stores `3`, while `let x = 7/1; x /= 2` stores
+ordinary forms. The destination keeps its type; a fixed-width compound update wraps
+back to that width today (see the fixed-width integers above). `let x = 7; x //= 2` stores `3`, while `let x = 7/1; x /= 2` stores
 `7/2`. Integer `/=` cannot store a fraction in an integer variable: use `//=`
 or start with a fractional value. Arrays, record fields, dictionary entries and
 custom indexed values support these updates; indices evaluate once, before the
@@ -1287,8 +1302,8 @@ return an optional word, never silently truncate. `.to_float32()` and
 produces signed infinity. Interpolation formats decimal text. Values are
 independent copies and can be dictionary keys.
 
-Ordinary fixed-width arithmetic does not automatically widen on overflow.
-Convert a word variable with `bigint(word)` when exact arithmetic is needed.
+Today fixed-width `+`, `-` and `*` do not widen on overflow; they wrap. Convert a word
+variable with `bigint(word)` when exact arithmetic is needed.
 The inherited `big` module is a separate approximate-number library for idle games.
 [The exact-integer example](../examples/exact_integers.dewy) computes
 100!, a binomial coefficient and signed long division.
@@ -1523,10 +1538,10 @@ when written in a different order. Their shape can also be written directly in
 an annotation:
 
 ```dewy
-sum = (point:[x:int64 y:int64]):>int64 => point.x+point.y
+sum = (point:[x:int y:int]):>int => point.x+point.y
 main = () => {
     let point = [y=22 x=20]
-    return sum(point)
+    printl(sum(point))  # 42
 }
 ```
 
@@ -1544,13 +1559,13 @@ records and unions. Lists and trees keep ordinary value semantics:
 Node:type = [value:int64 next:Node?=none]
 sum = (node:Node?):>int64 => {
     let cur = node let total = 0
-    loop cur is?Node { total += cur.value cur = cur.next }
+    loop cur is? Node { total += cur.value cur = cur.next }
     return total
 }
 main = () => {
     let original = Node[20 Node[22]]
     let copy = original
-    if copy.next is?Node { copy.next.value = 100 }
+    if copy.next is? Node { copy.next.value = 100 }
     printl(sum(original))  # 42
     printl(sum(copy))      # 120
 }
@@ -1800,7 +1815,7 @@ Buffer:type = [values:array<int64>]
 let original = Buffer[[20 22]]
 let copy = original
 let p = copy.values.data()
-p[0] = 42
+$unsafe p[0] = 42
 # original.values is [20 22]; copy.values is [42 22]
 ```
 
@@ -2010,8 +2025,7 @@ values keep ordinary value semantics.
 A one-element loop pattern still unpacks: `loop [x] in [[20] [22]]` visits
 20 and 22, while `loop x in [[20] [22]]` visits the two arrays. Every bracket
 level is significant: `loop [[x y]] in [[[20 22]]]` unpacks a nested array.
-This corrects the earlier behavior that discarded the outer brackets of a
-one-element loop pattern. The same rule applies in comprehensions and combined
+The same rule applies in comprehensions and combined
 loop headers.
 
 A declaration can annotate the whole source value, including nested and fixed
@@ -2266,12 +2280,16 @@ remains independent of the source. An empty input raises an error.
 
 The bundled numeric library uses ordinary value semantics. Make a matrix with
 `zeros(rows cols)`, `ones(rows cols)`, `eye(n)` or `reshape(values rows cols)`.
+Decimal literals are exact fractions unless their context is floating, so
+`solve`, `inverse` and `det` (which take `float64` matrices) need float data:
+annotate it (`array<float64>`), as below.
 Each dimension of `zeros`, `ones`, `rand`, `randn` and `eye` carries the
 obligation `>=? 0`, proven where the arguments show it (`zeros(2 3)`), and a
 shape with more elements than an `int64` counts runs out of memory:
 
 ```dewy
-let matrix = reshape([3.0 1.0 1.0 2.0] 2 2)
+let values:array<float64> = [3.0 1.0 1.0 2.0]
+let matrix = reshape(values 2 2)
 let saved = matrix
 matrix[0 1] = 4.0
 $runtime_assert(saved[0 1] =? 1.0)
@@ -2786,12 +2804,11 @@ without a default is a `TextError` naming it:
 
 ```dewy
 Settings:type = [player:uint64 volume:float64=0.5 fullscreen:bool=false]
-main = () => {
+main = ():>void => {
     let loaded = from_json<Settings>(r'{"player":18446744073709551615}')
-    if loaded is? TextError { printl(loaded.message) return 1 }
+    if loaded is? TextError { printl(loaded.message) return }
     let updated:Settings = [loaded... fullscreen=true]
     printl(to_json(updated 2))
-    return 0
 }
 ```
 
@@ -2906,7 +2923,8 @@ main = ():>void|UsageError|Offline => {
 }
 ```
 
-Without arguments this prints `error: UsageError[message="usage: fetch HOST"]`
+Without arguments this prints `error: UsageError: usage: fetch HOST` (a debug
+build with `-g` prints `error: UsageError[message="usage: fetch HOST"]`)
 and exits 1; `fetch nowhere` exits 69.
 
 ## Secrets
@@ -3045,7 +3063,7 @@ A component must follow a `/`. `p"{root}{n}"` could name a sibling of `root`, so
 it is not a `SafePath`.
 
 A path that joins unproven text to a base (`p"{root}/{name}"` with `name`
-read at run time, `"{dir}/{name}"`, `dir + "/" + name`) is a plain `Path`.
+read at run time, `"{dir}/{name}"` made a path with `p(...)`) is a plain `Path`.
 `root.confine(p)` gives `p` as a `SafePath`, or `PathEscape` (an
 `error`) when `p` leaves `root`. `root.contains(p)` is the same test as a `bool`.
 In the true branch of `if root.contains(p) {...}`, `p` is a `SafePath`, and it
@@ -3163,7 +3181,7 @@ TimeVal:type = [seconds:int64 microseconds:int64]
 gettimeofday = (now:ptr<TimeVal> zone:ptr<uint8>?):>int32 => $extern
 main = ():>void => $unsafe {
     let now:array<TimeVal> = [TimeVal[0 0]]
-    gettimeofday(now.ptr none)
+    gettimeofday(now.ptr none);
     printl(now[0].seconds)
 }
 ```
@@ -3557,7 +3575,7 @@ there. It never stops a build and adds no code. The condition is a type test of
 a parameter (`x isnt? Small`, decided from the argument's checked and narrowed
 type), integer comparisons of parameters, their `.length` and constants whose
 negation is a conjunction (`i <? 0 or i >=? xs.length`, decided from the facts
-at the call, as a refined parameter is), or `p isnt? SafePath` (see "Paths").
+at the call, as a refined parameter is), or `p isnt? SafePath` (see "Contained paths").
 General compile-time execution has no mandatory step limit or termination proof.
 It cannot read runtime locals or mutable globals, mutate global state, perform
 I/O, call external functions, or access host memory. Bounded read-only views of
@@ -3678,7 +3696,7 @@ reaching `main` prints `error: OutOfMemory`. WebAssembly cannot return to the
 function, so a refusal there still ends the program.
 
 Other directives of the design (`$no_prelude`,
-`$expect`, `$unsafe_assume`, …) are reported as not implemented yet where they
+`$unsafe_assume`, …) are reported as not implemented yet where they
 appear.
 
 `value.copy` requests an independent value. It evaluates the receiver once
@@ -3749,7 +3767,9 @@ if at isnt? Missing { printl(at) }       # 3
 printl([3 1 4].index_of(9))            # Missing
 ```
 
-`regex(pattern)` prepares a reusable regular expression. `text.find(pattern)`
+`regex(pattern)` prepares a reusable regular expression (it panics on a pattern
+that cannot be read today; decided, not built yet: it returns `Regex | RegexError`,
+and a literal pattern is checked while compiling). `text.find(pattern)`
 returns `Match|Missing`; `find_all` returns nonoverlapping matches, `contains` tests
 for any match, and `matches` requires the whole string to match. A `Match` has
 `text`, `groups`, `start` and `end`. **Match offsets and the optional `find`
@@ -3888,7 +3908,7 @@ compile time, including for web builds.
 ```dewy
 let lengths = ["café"->4]
 let found = lengths.get("café")
-let size = match found { n:int64 => n <none> => 0 }
+let size = match found { n:int => n <none> => 0 }
 printl"Length: {size}"
 ```
 
@@ -3931,7 +3951,7 @@ classify = (value:int64|string):>string => match value {
 }
 ```
 
-An arm such as `text:"quit"=>text` binds the matched member's value; the original
+An arm such as `text:"quit" => text` binds the matched member's value; the original
 variable or field is also narrowed inside that arm. Literals use the same member
 type selection as assignment: with `int64|uint8`, `<42>` selects `int64`, while a
 `uint8` value needs a `uint8` arm. A literal covers only its value, so other values
@@ -3963,7 +3983,7 @@ itself. A guard arm's bounds are facts in its body.
 A type arm can group a subset of the union's members. For a value of type
 `int64|string|bool`, `part:int64|string => ...` binds an independent `int64|string`
 value and narrows the original variable or field to the same subset. The remaining
-`_` arm knows the value is `bool`. `<int64|string>=>...` performs the same test
+`_` arm knows the value is `bool`. `<int64|string> => ...` performs the same test
 without introducing a binding. Subset aliases and generic type parameters work
 too. Arms run in source order, including when their subsets overlap.
 
@@ -4009,7 +4029,7 @@ in, wherever in that scope: the module at file level, a function in its body,
 or any other block. An inner scope may change it again. A scope sets each
 setting at most once, and the value must be a literal `true` or `false`. Settings
 live in the source: the command line cannot set them (it sets only the build
-mode and the target, under "Targets").
+mode and the target, under "Modules and games").
 
 An obligation is a fact an operation needs: an index or slice in bounds (a
 string's counted in graphemes, as `text.length` counts), a nonzero divisor, a value that fits a narrower integer, an argument meeting a refined
@@ -4017,8 +4037,10 @@ parameter. A proven obligation has no runtime check. These settings decide what
 an unproven one does:
 
 - `$runtime_checks = false`: it is a compile error with the reason and a fix
-  (no hidden traps). This becomes the default in a later release; until then
-  the default is a runtime check.
+  (no hidden traps). This is the decided default (no traps by default,
+  2026-10-21) but not yet the compiler's: until the default flips, a scope
+  without a setting behaves as `$runtime_checks` does below, and this setting
+  selects the decided behavior.
 - `$runtime_checks`: it compiles to a runtime check, with no warning. A failing
   check names the requirement and the values it saw, as
   ``refinement failed: `d not=? 0` (observed: d was 0)`` or
@@ -4308,9 +4330,9 @@ simulated link with adjustable latency, jitter and loss. Its
 [model](../examples/rollback_model.dewy) shows session construction,
 `play`, outgoing packets and delivery using Dewy records and COW arrays.
 
-This remains a developing subset of Dewy. The earlier proof/effect system,
-automatic growth of machine integers on overflow and general structural conversions have not
-been recreated.
+This remains a developing subset of Dewy. Exact fixed-width arithmetic and the
+no-traps default are decided but not built yet (see "Directives"), and general
+structural conversions have not been recreated.
 
 An executable’s `main` returns `void` or the errors that reach it (see
 [Errors as values](#errors-as-values)); other result types are diagnosed.
