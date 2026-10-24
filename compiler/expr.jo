@@ -6738,6 +6738,7 @@ no_concat_error = (n: int, a: int, b: int, text: bool):
 check_binary = (n: int, expected: int) -> int:
     op = nodes[n].op as Tok
     if op == .dotop: return check_dotted(n, expected)
+    if op == .star and has_flag(n, NF_JUXT): juxt_group_product(n)
     if op == .kw_xor:
         # logical on bools (a != b), bitwise on integers
         ta = prune(check_expr(int(nodes[n].a), 0))

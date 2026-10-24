@@ -1145,19 +1145,26 @@ dn_coefficient_before = () -> bool:
 # `xs[i]y`): never a coefficient.
 dn_juxt_excluded = () -> bool:
     if dn_at == 0: return false
-    t = dn_tokens[dn_at]
-    if not (t.kind == .identifier and t.symbol == .none or dw_integer_kind(t.kind) or t.kind == .source_real): return false
+    if not dn_juxt_factor_next(): return false
     previous = dn_tokens[dn_at - 1].symbol
     previous == .rparen or previous == .rbrack
 
+# (a name or a number starts here: after a group, `(5)x`, `(x)2`, it is a factor)
+dn_juxt_factor_next = () -> bool:
+    t = dn_tokens[dn_at]
+    t.kind == .identifier and t.symbol == .none or dw_integer_kind(t.kind) or t.kind == .source_real
+
 dn_juxt_excluded_message = () -> str:
     if dn_tokens[dn_at - 1].symbol == .rbrack: return "an indexed element is not a coefficient: write `*` (`xs[i] * y`); whitespace separates expressions"
-    "a call or group result is not a coefficient: write `*` (`f(x) * g(x)`); whitespace separates expressions"
+    "a call result is not a coefficient: write `*` (`f(x) * g(x)`); whitespace separates expressions"
 
 dn_expr = (minimum: int) -> int:
     dn_depth += 1
     if dn_depth > 256: return dn_error(dn_tokens[dn_at].start, "expression is nested too deeply")
+    opening = dn_tokens[dn_at].symbol
     left = dn_atom()
+    # (a parenthesized group, while nothing has applied to it: `(5)x`, `(x)2` multiply)
+    group = if opening == .lparen and dn_tokens[dn_at - 1].symbol == .rparen: left else: -1
     loop true:
         token = dn_tokens[dn_at]
         op = token.symbol
@@ -1177,7 +1184,12 @@ dn_expr = (minimum: int) -> int:
         # Whitespace always separates expressions.
         if not token.space and (token.kind == .identifier or op == .lparen or token.kind == .source_integer or token.kind == .source_real or token.kind == .integer):
             pk = dn_tokens[dn_at - 1].kind
-            if (token.kind == .identifier or op == .lparen) and (pk == .source_integer or pk == .source_real or pk == .integer) and dn_coefficient_before():
+            # (`2()` is a call: an empty `()` after any expression calls it)
+            if (token.kind == .identifier or op == .lparen and dn_tokens[dn_at + 1].symbol != .rparen) and (pk == .source_integer or pk == .source_real or pk == .integer) and dn_coefficient_before():
+                if minimum > 135: break
+                left = dn_operator(.binary, .multiply_apply, left, dn_expr(136))
+                continue
+            if op != .lparen and left == group and dn_juxt_factor_next():
                 if minimum > 135: break
                 left = dn_operator(.binary, .multiply_apply, left, dn_expr(136))
                 continue

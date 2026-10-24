@@ -171,7 +171,8 @@ juxt_power = (p: int):
 # Call n's head was checked (type t) and is not callable: a group head multiplies; a call
 # result or an indexed element is never a coefficient.
 juxt_value_head = (n: int, head_kind: NK, head_text: str, t: int) -> bool:
-    if not juxt_numeric(t): return false
+    # (an empty `()` after any expression calls it: `(5)()` is a call, not a product)
+    if not juxt_numeric(t) or nkids(n) == 0: return false
     if has_flag(n, NF_JUXT): return true
     if head_kind != .index and head_kind != .call: return false
     head = head_text
@@ -229,3 +230,21 @@ juxt_member_check = (m: int):
     if nodes[c].kind != .call or not juxt_chain_numeric(c): return
     h = juxt_text(int(nodes[c].a))
     fatal(nodes[m].pos, "`{h}(...)` multiplies here (`{h}` is a number), so a member or index written right after its parentheses would belong to the parenthesized value, not the product: write the product with `*`, as `{h} * (...)`, or parenthesize it")
+
+# Product n was written `(group)factor`, `(5)x`, `(x)2`: the group must be a number. A
+# function there is not called by a name after it; anything else known is not multiplied.
+juxt_group_product = (n: int):
+    a = int(nodes[n].a)
+    k = nodes[a].kind
+    if k == .int_lit or k == .float_lit or has_flag(a, NF_CHECKED): return
+    t = 0
+    if k == .ident or k == .field: t = juxt_route_type(a)
+    named_fn = k == .ident and lookup(int(nodes[a].name)) != 0 and syms[lookup(int(nodes[a].name))].kind == .fns
+    if named_fn or t != 0 and juxt_callable(t): fatal(nodes[n].pos, "`({juxt_text(a)})` is a function, and a name or number after its parentheses does not call it: write `{juxt_text(a)}(x)`, or give it a delimited argument, `({juxt_text(a)})(x)`")
+    t = prune(check_expr(a, 0))
+    nodes[n].a = i32(last_checked)
+    add_flag(last_checked, NF_CHECKED)
+    tk = types[t].kind
+    if juxt_numeric(t) or tk == .var or tk == .param: return
+    if juxt_callable(t): fatal(nodes[n].pos, "this group is a function, and a name or number after its parentheses does not call it: give it a delimited argument, `(f)(x)`")
+    fatal(nodes[n].pos, "a group multiplies a name or number after it only when it is a number, and this one is {a_type(t)}: write `*`")

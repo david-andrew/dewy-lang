@@ -937,23 +937,26 @@ and `xor` the same way, at their precedence.
 Juxtaposition multiplies only in a few forms, written without whitespace: a
 numeric literal before a name, a member or a parenthesized group (`2x`,
 `2sin(x)`, `3(a+b)`, `2^3x`); a named number or field before a group (`a(x)`,
-`material.k(T)`, `n(n+1)/2`); and a parenthesized number before a group
-(`(a+1)(a-1)`). At `head(...)` the head decides, once, before anything is
-called: a function is called, and a number or quantity multiplies, with exactly
+`material.k(T)`, `n(n+1)/2`); and a parenthesized number before a group, a
+name or a number (`(a+1)(a-1)`, `(5)x`, `(x)2`). At `head(...)` the head
+decides, once, before anything is called: a function is called, and a number or quantity multiplies, with exactly
 one value in the parentheses (for a number `a`, `a(x y)` is an error: write
 `a * (x * y)`). A failed call never becomes a product, and a head that may be a
 function or a number (a union of both) must be narrowed first. A call result,
 an indexed element or an array is never a coefficient: write `f(x) * g(x)`,
-`xs[i] * j`, `A*x` (or `A[x]` to index). `@a(x)` needs a function, and a string
-after a name (`printl"hi"`) is always a call. Whitespace always separates
-expressions: `a b` is two values, never a product.
+`xs[i] * j`, `A*x` (or `A[x]` to index). `@a(x)` needs a function. An empty
+`()` after any expression calls it, and a delimited argument after a function or
+a parenthesized function calls it: `f[1 2]`, `printl"hi"`, `printl'hi'`,
+`(f)(x)`, `(f)[1 2]`, `(p)r"..."`. Whitespace always separates expressions:
+`a b` is two values, never a product.
 
 A juxtaposed product binds below `^` and above `*`, `/`, `//` and `%`, left to
 right, and unary minus applies to all of it: `2sin(x)^2` is `2*(sin(x)^2)`, for
 a number `a`, `a(x)^2` is `a*(x^2)` and `a(x)(y)^2` is `a*x*y^2`, `-a(x)^2` is
-`-(a*x^2)`, `2^3x` is `(2^3)*x`, and `1/2m` is `1/(2m)`. A member or index
-right after a product's parentheses (`a(x).abs()`, `a(x)[i]`) is rejected for
-now: write `a * x.abs()`, or parenthesize the product.
+`-(a*x^2)`, `2^3x` is `(2^3)*x`, and `1/2m` is `1/(2m)`. For a number `a`, a
+member or index right after the product's parentheses (`a(x).abs()`, `a(x)[i]`)
+is rejected: write `abs(a(x))`, or parenthesize the product. For a function `a`
+these are ordinary call chains.
 
 A semicolon attached to an
 expression (no space before it), `f();`, evaluates it and discards everything it

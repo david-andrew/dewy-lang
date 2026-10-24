@@ -1,0 +1,16 @@
+# quick
+# A parenthesized number before a name or number multiplies (`(5)x`, `(x)2`); a
+# parenthesized function before a delimited argument is a call; an empty `()` after any
+# expression calls it; a member or index after a call of a function is a call chain.
+size = (xs:array<int64>):>int64 => xs.length
+tens = (x:int64):>int64 => x*10
+width = (s:string):>int64 => s.length
+row = (x:int64):>array<int64> => [x x+1]
+maker = () => 7
+main = () => {
+    let x = 2
+    printl"{(5)x} {(x)2} {(x+1)x^2} {-(x)x^2 + 1} {(x)2.5}"
+    printl"{size[1 2 3]} {(size)[1 2]} {(tens)(5)} {(width)"abc"} {(width)r"a\b"} {width'xy'}"
+    printl'single {x}'
+    printl"{tens(-x).abs()} {row(x)[1]} {(maker)()}"
+}

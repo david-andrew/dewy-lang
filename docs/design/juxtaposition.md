@@ -13,7 +13,8 @@ The parts are written with no whitespace between them:
 - a named numeric value or field route followed by a parenthesized group:
   `a(x)`, `material.k(T)`, `n(n+1)/2`;
 - an explicitly parenthesized scalar expression followed by a parenthesized
-  group: `(a+1)(a-1)`, `(a+b)(c+d)^2`.
+  group, a name or a number: `(a+1)(a-1)`, `(a+b)(c+d)^2`, `(5)x`, `(x)2`,
+  `(a+1)x^2` (corrected 2026-10-23).
 
 The left side must be a statically known, non-callable numeric scalar or
 quantity. Having `__mul__` alone does not qualify.
@@ -35,6 +36,19 @@ call:
   both requires narrowing or an explicit operator.
 
 A failed call never falls back to multiplication.
+
+Calls (corrected 2026-10-23):
+
+- any expression immediately followed by an empty `()` is a call: `(5)()` and
+  `2()` call a number, which is an error;
+- a parenthesized callable followed by a delimited argument is a call:
+  `(f)(x)`, `(f)[1 2]`, `(p)"..."`, `(p)r"..."`, like `f[1 2]` and `printl'...'`;
+- a parenthesized callable followed by a name or number is an error ("write
+  `f(x)`"), as is a parenthesized non-number (`(s)x` for a string `s`);
+- a member or index right after a call's parentheses (`a(x).abs()`, `a(x)[i]`)
+  is rejected only when `a` is a number, where it would bind to the group, not
+  the product (idiomatic: `abs(a(x))`). With a callable `a` it is an ordinary
+  call chain.
 
 ## Precedence
 
@@ -64,7 +78,7 @@ From highest to lowest:
 |---|---|
 | `a b`, `ρ g h` (whitespace products) | "write `*`"; whitespace always separates expressions |
 | `f(x)g(x)` (a call result as coefficient) | "write `f(x) * g(x)`" |
-| `xs[i](j)` (an indexed element as coefficient) | "write `xs[i] * j`" |
+| `xs[i](j)`, `xs[i]y` (an indexed element as coefficient) | "write `xs[i] * j`"; `]x` stays a parse error |
 | `A x`, `A(x)` (tensors) | "write `A*x` (or `A[x]` to index)" |
 | numeric `@a(x)` | partial application requires a callable |
 | `printl"hi"` | string-literal calls stay call-only |
