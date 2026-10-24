@@ -95,7 +95,7 @@ __mi_hash = (a: __dewy_int) -> int:
     if (a as int) & 1 == 0: return ((a as int) >> 1)
     value = __mi_payload(a)[0]
     h = value._sign
-    loop limb in value._limbs: h = (h ^ int(limb)) * 1099511628211
+    loop limb in value._limbs: h = (h xor int(limb)) * 1099511628211
     h
 
 # (a dictionary's keyed hash: lib/core/map.jo)
