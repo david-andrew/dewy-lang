@@ -10,10 +10,10 @@ reference text.
 
 ## The rule
 
-An expression produces one value, several values for a surrounding collector,
-`void`, or `never`. A block evaluates its expressions in source order and
-**expresses each non-`void` result**. A context requiring one value rejects a
-block that can produce an incompatible number of values.
+An expression produces one value, several values, `void`, or `never`. A block
+evaluates its expressions in source order and **expresses each non-`void`
+result**. A context requiring one value rejects a block that can produce an
+incompatible number of values.
 
 The same rule holds in every construct: blocks, function bodies, `if`/`match`
 arms, loop bodies, loop capture and collectors. Values flow outward through
@@ -78,25 +78,31 @@ attached `;` is an error, since rows hold only values.
 - Loop capture `[loop ...]` collects every value of every iteration. A body that
   expresses two values per iteration contributes both:
   `[loop i in xs { i  i*10 }]`.
-- Spread `xs...` inserts an array's elements. A call expressing several values in
-  a collector needs no `...`, and `pair()...` means the same.
+- Spread `xs...` inserts an array's elements. Several values in a collector need
+  no `...` (`[pair()]`, `[pair]`, `[(1 2) 3]`), and `pair()...` means the same.
 - Map, record and set literals are unchanged. Their entries are one value each.
 
-**One-value contexts take exactly one.** These are bindings (`x = e`, `let`),
-assignments, operands, conditions, call arguments, indexes, the result of a
-function with a written return contract, and the arms of a value `if`/`match`
-outside a collecting position. A block there expresses its last expression.
-An earlier non-`void` value is an error with a fix-it to attach `;`:
+**Bindings, call arguments and unpacking take several values** (see
+"Substitution invariance" below). A binding holds them (`pair = (1 2)`), a call
+takes them as that many positional arguments (`add(pair)`), and a pattern takes
+them apart (`(a b) = pair`).
+
+**One-value contexts take exactly one.** These are operands, conditions,
+indexes, named arguments, the result of a function with a written one-value
+contract, and the arms of a value `if`/`match` outside a collecting position.
+Several values there are never cut down to one: it is a compile error naming the
+count (`'pair' holds 2 values, and only one is taken here`). A block in a
+one-value context, or as a binding's value, expresses its last expression. An
+earlier non-`void` value is an error with a fix-it to attach `;`:
 
 ```
 x = { log(1)  5 }   # error at log(1): this gives a value, and here the block
                     # gives one, its last expression: attach `;` to discard it
 ```
 
-Call argument lists are one-value contexts: the reference makes only collectors
-spread, and its rest/spread forwarding for calls is still provisional.
-*Flagged: once `...rest` forwarding lands, a call expressing several values may
-supply several positional arguments; until then it's an error.*
+*Flagged: a block expressing several values as a binding's value
+(`x = { 1 2 }`) is still the attach-`;` error; under substitution invariance it
+could hold both. Reversible.*
 
 **Statement contexts drop values.** Module-level code drops what it expresses.
 The old "value is not used" warning stays here, for values that are discarded and
@@ -129,15 +135,17 @@ How such a function is consumed (`pair = () => { 1 2 }`):
 | `[0 pair() 3]` | `[0 1 2 3]` |
 | a statement in another inferred body | its values are expressed there too |
 | `pair();` | runs it, drops both |
-| `x = pair()`, `f(pair())`, `pair() + 1` | error: only one value is taken here. The fix-it is to collect them (`[pair()]`) or to discard the extras in its body |
-| `[a b] = [pair()]` | unpacks through the collector |
+| `x = pair()` | `x` holds both, type `(int64 int64)` |
+| `f(pair())`, `f(pair)` (the bare name calls) | both values, as `f`'s first two positional arguments |
+| `[a b] = pair()`, `(a b) = pair()` | unpacks both |
+| `pair() + 1`, `pair()[0]` | error: only one value is taken here, and `pair()` gives 2 |
 
-`[a b] = pair()` (unpacking without the collector) is an error. The unpack
-target takes one value apart, and `pair()` is not one value.
-*Flagged: allowing it is a possible extension. It's reversible.*
-
-Its type: the function's result is its element type, expressed a number of times
-that may vary. Diagnostics describe it as "gives several values".
+Its type: the function's result is its element type, expressed a number of times.
+That number is *static* when the result is written (`:>(int64 int64)`) or when
+every value is a statement of the body's own block, outside loops and branches
+(`() => (1 2)`, `() => { 1 2 }`): a call then gives exactly that many. Otherwise
+(a loop, an `if` without `else`) it varies, and only a collector or an unpacking
+takes it (the unpacking's length is then an obligation, as an array's).
 
 **A written contract for several values** (decided 2026-10-23): `:>(int64 int64)`;
 parentheses group several result values. The body must express exactly that
@@ -164,6 +172,96 @@ a type giving several, nor the reverse. A lambda checked against such a type
 expresses its values as an inferred body does. The count is not part of a
 function type (`<():>(int64 ...)>` in diagnostics), so a body written to give a
 fixed number of values cannot count a call through a value.
+
+## Substitution invariance (decided 2026-10-23)
+
+If a literal works somewhere, anything producing the same values works there
+unchanged. `(a b)` is not a container: it is the syntax for several values.
+`[...]` arrays and records are containers, and a container is one value.
+
+```dewy
+add = (a b) => a + b
+add(1 2)            # two values
+fn = () => (1 2)
+add(fn)             # the bare name calls; fn gives two values, filling both parameters
+pair = (a b)
+add(pair)           # a binding holds several values, type (int64 int64)
+add([1 2]...)       # a container is spread, positionally, its length proven
+fn2 = () => [1 2]
+add(fn2...)         # a function giving a container: spread it
+```
+
+- **Several values are never cut down to one.** A place for exactly one value
+  (operand, index, condition, named argument, single parameter) given several is
+  a compile error naming the counts. `pair[0]` suggests `[pair][0]` or
+  `(x y) = pair`.
+- **`[...]` collects; `xs...` spreads a container.** In a call, a spread fills
+  positional parameters in order. Its length must fit: a fixed array's and a
+  `[T U]`'s are known; an array's must be exactly the positional parameters the
+  other arguments leave (the function must have one version), proven from facts
+  or, as any obligation, checked at run time where the scope allows one. A
+  record does not spread into named arguments (deferred).
+- **The count is static.** A call's count comes from its function's written or
+  inferred result type; one that varies cannot fill parameters (collect it). A
+  call through a function value has no static count. Overloads see the expanded
+  shape: `show(pair())` picks the two-parameter `show`.
+- **Order.** Arguments run in written order: an argument before a held one
+  (a call giving several values, a spread container) that may have an effect is
+  evaluated first, into a temporary.
+- **Mitigation for shifted arguments.** The editor shows an inlay hint naming
+  the parameters each multi-valued argument fills (`a b:`), and a warning marks
+  a multi-valued argument whose count is not written at the call (a binding or a
+  call) followed by more positional arguments.
+- Groups flatten: `((1 2) 3)` is three values, `add((1 2))` is `add(1 2)`.
+- A group's values may have different types: `(1 "a")` is `(int string)`. A
+  function's written result `:>(T T)` still has one type (below).
+
+*Flagged: a binding annotated with several values (`let p:(int64 int64) = ...`)
+is not implemented; the type is inferred. Reversible.*
+
+## Unpacking (decided 2026-10-23)
+
+`[...] =` and `(...) =` both unpack, in `let`, `const`, assignments and
+parameters, whenever the right side provides a compatible number of values:
+several values (a group, a binding holding them, a call giving them), an array,
+a fixed array, a `[T U]`, a set, a dictionary (key/value pairs in insertion
+order) or a record (by field name).
+
+```dewy
+let [a b] = pair()             # several values
+let (c d) = (10 20)
+let [x as px  y:int64 as py] = point         # `as` renames; the type goes on the source name
+let [apple  banana as [carrot durian]] = o2  # a field taken apart further
+let [first ...mid last] = xs   # `...rest` anywhere, once per level
+let [head ...] = xs            # a bare `...` drops the rest
+[a b] = [b a]                  # swap
+```
+
+- A rest takes what the other names leave: an array's slice, a fixed array's
+  elements (an array), and several values' remainder (still several values).
+  Names after it count from the end.
+- `=` inside a pattern is reserved for defaults, which are deferred. The old
+  `[local=field]` renaming is `[field as local]`, with no alias.
+- **Patterns must be proven to fit (no traps).** Several values, fixed arrays
+  and `[T U]` have static counts: a mismatch is a compile error. An array's
+  length is an obligation (`exactly n`, or `at least n` with a rest): proven
+  from facts it costs nothing; unproven it is a compile error, or a runtime
+  check where `$runtime_checks` allows one, like an index. A literal of known
+  length that does not fit is a compile error. Dictionary unpacking still checks
+  its entry count at run time.
+- Records: a rest is not decided (resources/discussion_points.md: "TBD"), so it
+  is an error. Dictionaries: `[[k1 v1] [k2 v2] ...] = m` works; a dictionary's
+  rest (`...rest` giving the remaining entries) is not implemented, nor is the
+  notes' `m.['apple' 'banana']` key selection (marked "not sure" there).
+
+**Parameter patterns.** Each parameter takes one argument and destructures it on
+entry with the same patterns: `area = ([w h]:Size) => w*h`. `((a b)) =>` declares
+one patterned parameter (taking one argument, a container); `(a b) =>` declares
+two. Pattern names are not part of the function type (`area(w=1)` is an error).
+The pattern's fit is an obligation in the body: give the parameter a fixed
+length (`array<int64 length=2>`) to prove it statically. Deferred:
+record-to-keyword spreading `f(opts...)`, place patterns `@[a b]`, pattern
+defaults.
 
 ## `if` and `match` arms
 
@@ -211,10 +309,27 @@ collector's array, as loop capture always has.
   exactly as before. Single-value code pays nothing per node: the sink
   bookkeeping runs per block and per expressed value.
 - A multi-valued function returns its accumulator array. Its `FnInst.pack` marks
-  it (a written `:>(T T)` also sets `pack_n`, the count its BODY sink checks; a
-  function type marks it with its `sign` field), and only a consumer that asked for several values (array element, spread,
-  statement, final value of a collecting body) accepts the call. Any other use is
-  the one-value error.
+  it (a written `:>(T T)` also sets `pack_n`, the count its BODY sink checks;
+  `pack_k` is the static count, written or inferred, 0 when it varies; a
+  function type marks it with its `sign` field), and only a consumer that asked
+  for several values (array element, spread, statement, final value of a
+  collecting body, binding, unpacking, call argument) accepts the call. Any other
+  use is the one-value error.
+- Several values as one thing (a group, a binding) have a tuple type marked
+  with `sign` (`mk_values`), printed `(int64 int64)`; a `[T U]` is an unmarked
+  tuple. A group is a `.tuple` node with `aux = TUPLE_VALUES`. Reading a binding
+  of such a type, or checking a group, goes through `sink_values_use`, the same
+  consumer test as a pack call. A binding of a pack call holds its array's
+  elements, read in bounds (`values_init`).
+- Call arguments are expanded before overload selection (`values_call`,
+  `values_expand`): groups and spread array literals are spliced as written;
+  other candidates are checked with no expected type first, as untyped
+  arguments always were. The work runs only for Dewy calls with a call, name,
+  group or spread argument; a call with nothing to expand is checked as before.
+- Length obligations (an unpacking's or a spread's) are runtime `assert`
+  intrinsics marked `UNPACK_OBLIGATION` and registered as fact requests: the
+  facts erase a proven one, report an unproven one under `$runtime_checks =
+  false` and keep it as a check otherwise (directives.jo).
 - `[1 2 ; 3 4]` row breaks are standalone `;` tokens. An attached `;` is
   `statement_end`, a discard. On a flow or loop statement it discards everything
   the statement expresses.

@@ -265,13 +265,29 @@ main = () => printl(add(twice(20)))  # 42
 A block expresses each non-`void` value its expressions give, in order, through
 nested `if`/`match` arms and loops. A collector takes them all: `[{1 2} 3]` is
 `[1 2 3]`, `[if c 1]` is `[1]` or `[]`, and loop capture collects every value of
-every iteration. A place for one value (a binding, an operand, an argument, a
+every iteration. A place for one value (an operand, an index, a condition, a
 result written `:>T`) takes a block's last expression, and an earlier value
 there is an error. A function without a written result may express several
-values: `pair = () => { 1 2 }` makes `[pair()]` `[1 2]`, while `x = pair()` is an error.
+values: `pair = () => { 1 2 }` or `pair = () => (1 2)` makes `[pair()]` `[1 2]`.
 `:>(int64 int64)` writes such a result: parentheses group the values, and the
 body must express exactly that many, in its own block. `@pair` keeps it in its
 type, `<():>(int64 int64)>`, so a call through it gives several values too.
+
+Several values work wherever the same values written out would (substitution
+invariance). `(1 2)` is two values, not a container; `[1 2]` is an array, one
+value. A binding holds several values (`p = (1 2)` has type `(int int)`, and
+`p = pair()` holds both), a call takes them as that many positional arguments
+(`add(p)`, `add(pair())` and `add(pair)`, where the bare name calls, are all
+`add(1 2)`), a collector takes them all (`[p]` is `[1 2]`), and a pattern takes
+them apart (`(a b) = p`). A place for one value given several is an error naming
+the count, never the last value: `p + 1` and `p[0]` (write `[p][0]`) are errors.
+`xs...` spreads a container into a call's positional parameters,
+`add([20 22]...)`: a fixed array's length is known, and an array's must be
+exactly what the parameters left take, proven or checked like an index. A call
+takes several values only when its function's count is static, written or
+inferred from a body that expresses each value once in its own block; overloads
+see the expanded arguments. A multi-valued argument followed by more positional
+arguments warns, and the editor names the parameters it fills.
 Module code drops what it expresses. A body written `:>void` expresses nothing:
 a value there (`xs.pop()` as a statement) is an error, so attach `;` to discard
 it, `xs.pop();`, or change the result type. A result that is `void | E` expresses
@@ -369,7 +385,8 @@ when an instance makes it a function.
 
 Parameters can unpack a single argument with the same patterns as `let` and
 `loop`: arrays and tuple results use positions, records use field names, and
-nested patterns can combine them.
+nested patterns can combine them. `((a b)) =>` is one patterned parameter, the
+same as `([a b]) =>`; `(a b) =>` is two parameters.
 
 ```dewy
 sum = ([left right]:array<int64>) => left+right
@@ -380,8 +397,10 @@ main = () => printl(sum([20 22]))  # 42
 
 The whole parameter can have a type or default, such as `([a b]=[20 22])`.
 Untyped patterns infer the argument type, including when used as callbacks.
-The argument evaluates once; array lengths are checked on entry and extracted
-values remain independent of the caller. `_` discards array or tuple elements;
+The argument evaluates once; extracted values remain independent of the
+caller. The pattern's length is an obligation on entry, like an index: a
+`array<int64 length=2>` parameter proves it; an `array<int64>` one is checked
+at run time, or is an error under `$runtime_checks = false`. `_` discards array or tuple elements;
 for records, leave unwanted fields out. Pattern bindings belong to the body,
 so defaults on later parameters cannot refer to them. Pass the whole argument
 positionally; other named parameters still work. Pattern names must be distinct
@@ -1793,7 +1812,9 @@ the next operand runs. The result has independent value semantics, including
 nested arrays and record fields. Expected array types flow into the literal,
 so `let values:array<uint16> = [[]... set[]... 42]` works. Sets contribute their
 members in insertion order, skipping removed members. Arrays also accept sets
-in `.extend(values)`. Spread call arguments are not supported.
+in `.extend(values)`. A spread call argument fills positional parameters
+(`add([20 22]...)`, "Functions and values"); spreading a record into named
+arguments is not supported yet.
 
 `+` never joins arrays: `[xs... ys...]` combines them, `xs.extend(ys)` appends
 in place and `xs.push(y)` adds one element. On arrays `+` is reserved for
@@ -1879,10 +1900,19 @@ and record arrays still call their value protocols even when storage is shared.
 Binary operands evaluate left to right; changing a value while evaluating
 the right operand does not change the left value already read.
 
-`let [a b] = xs` unpacks arrays or tuple results by position, with an exact array
-length check. `_` discards an element. For records, targets select fields by
-name, in any order. `[a b] = [b a]` swaps existing variables. Nested patterns
-work in declarations and assignments:
+`let [a b] = xs` unpacks arrays or tuple results by position, and `(a b) = ...`
+is the same pattern; both also take several values (`let (a b) = pair()`). The
+length must fit: several values, fixed arrays and `[T U]` are checked while
+compiling, and an array's length is an obligation (exactly the names, or at
+least them with a rest), proven from facts or checked at run time like an index.
+`_` discards an element. `...rest` takes what the other names leave, anywhere in
+the pattern and once per level, `[first ...mid last]`; a bare `...` drops it,
+`[head ...] = xs`. For records, targets select fields by name, in any order;
+`as` renames one, with any type on the field's name,
+`[x as px  y:int64 as py] = point`, and takes a field apart,
+`[banana as [carrot durian]] = box`. `=` in a pattern is reserved for defaults.
+`[a b] = [b a]` swaps existing variables. Nested patterns work in declarations
+and assignments:
 
 ```dewy
 let [[left top] [right bottom]] = [[10 20] [90 80]]
@@ -1894,7 +1924,8 @@ let [[team score] [_ other]] = ["red"->20 "blue"->22]
 Each level follows its source type: arrays and tuples use positions, dictionaries
 yield key/value pairs in insertion order, and records use field names. Dictionary
 unpacking skips removed entries and requires exactly as many live entries as
-targets. `_` can discard an entry or either member of a pair. The source evaluates
+targets (at least as many with a bare `...`; a dictionary's `...rest` is not
+supported yet), checked at run time. `_` can discard an entry or either member of a pair. The source evaluates
 once, nested lengths are checked before destinations are written, and extracted
 values keep ordinary value semantics.
 A one-element loop pattern still unpacks: `loop [x] in [[20] [22]]` visits

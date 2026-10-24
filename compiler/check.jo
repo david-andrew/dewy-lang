@@ -6158,6 +6158,7 @@ unpack_values = (e: int, t: int, bindings: int[], pos: int, statements: mut int[
             if back > 0:
                 keys = mk(.call, pos)
                 check_intrinsic(keys, .len, [bc_map_keys(source, pos)], 0)
+                add_flag(keys, NF_CHECKED)
                 index = unpack_minus(keys, back, nodes[binding].pos)
             else:
                 index = mk(.int_lit, nodes[binding].pos)
