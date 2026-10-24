@@ -1,0 +1,9 @@
+# set([...]) takes its literal's element type from the annotation, as [...] does
+Op:type = 'push' | 'load'
+Program:type = [ops:set<Op> name:string]
+let s:set<Op> = set(['push'])
+printl(s)
+let both:set<Op> = set(['push' 'load' 'push'])
+printl(both.length)
+let p = Program(set(['load']) "p")
+printl(p.ops)

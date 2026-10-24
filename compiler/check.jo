@@ -7302,6 +7302,16 @@ values_arity = (n: int) -> int:
         count += 1
     count
 
+# the record (struct index) a call's callee constructs when its fields' types are known before
+# its arguments are (not generic), or 0
+values_record = (callee: int) -> int:
+    if nodes[callee].kind != .ident: return 0
+    s = lookup(int(nodes[callee].name))
+    if s == 0 or syms[s].kind != .struct_ or nkids2(int(syms[s].ref)) != 0: return 0
+    si = int(types[prune(get_struct_inst(int(syms[s].ref), []))].st)
+    check_struct_fields(si)
+    si
+
 # A Dewy call some of whose arguments give several values (or spread a container): checked
 # with its arguments expanded, as `{ held...; f(values...) }`. -1: nothing to expand.
 values_call = (n: int, expected: int) -> int:
@@ -7313,10 +7323,12 @@ values_call = (n: int, expected: int) -> int:
     # (the common case, nothing to expand, decided without allocating: a call argument is
     # checked here as an untyped argument would be anyway, its own pack noted)
     some = false
+    record = values_record(callee)
     loop i in [0..nkids(n)):
         a = kid(n, i)
         if nodes[a].kind == .call and members_named(a): members_argument(a)
         k = nodes[a].kind
+        if k == .namedarg: record = 0
         if k == .tuple and nodes[a].aux == i32(TUPLE_VALUES) or has_flag(a, NF_SPREAD) or values_hits.has(a):
             some = true
             break
@@ -7328,7 +7340,11 @@ values_call = (n: int, expected: int) -> int:
         else if k == .call and not ctx_dependent(a) and not sink_spread_calls.has(a):
             saved = sink_pack_site
             sink_pack_site = a
-            check_expr(a, 0)
+            # (a record's positional field: its type is what the value is checked against, as
+            # a function's parameter is once its overload is chosen)
+            field = 0
+            if record != 0 and i < int(structs[record].nfields): field = representation_type(int(fields[int(structs[record].fields) + i].type))
+            check_expr(a, field)
             sink_pack_site = saved
             hit = sink_pack_hit != 0 and sink_pack_hit == a
             sink_pack_hit = 0

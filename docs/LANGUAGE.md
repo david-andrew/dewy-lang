@@ -2370,10 +2370,12 @@ indexing work too. `zeros<int64>(rows cols)` chooses integer elements instead of
 the default `float64`. Dimensions must be nonnegative and their product must
 fit the supported array size. A zero dimension produces an empty array.
 
-`reshape` checks the number of elements; `flatten`, `row` and `col` return
-independent array values. `transpose` reverses the axes. `size(matrix)` counts
-all elements; `rows` and `cols` inspect a two-dimensional shape. Use these
-constructors rather than changing `shape` independently of `data`.
+`reshape` takes one to four dimensions (`reshape(values 4)` is 1-D) or a
+shape array (`reshape(values [2 3])`) and checks the number of elements;
+`flatten`, `row` and `col` return independent array values. `transpose`
+reverses the axes. `size(matrix)` counts all elements; `rows` and `cols`
+inspect a two-dimensional shape. Use these constructors rather than changing
+`shape` independently of `data`.
 `linspace(start stop count)` is a 1-D `array<float64>` of `count` evenly
 spaced values from `start` to `stop`, both included: `linspace(0 1 5)` is
 `[0.0 0.25 0.5 0.75 1.0]`; a count of 1 gives `[start]` and 0 an empty array.

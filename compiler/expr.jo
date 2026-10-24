@@ -1411,6 +1411,25 @@ exact_args = (cd: Cand) -> int:
         if type_eq(prune(ntype(a)), prune(subst(cd.sig.params[i], cd.binds))): k += 1
     k
 
+# (`let s:set<Op> = set(['push'])`: a type parameter bound only by arguments that take their
+# type from where they go, as the text in an array literal, takes what the expected result
+# gives it, as such a literal written there would; only where the call as bound would not
+# give the expected type, so a call that fits keeps its types)
+expected_binds = (cd: mut Cand, expected: int, given: int[]):
+    held = cd.binds
+    if match_type(int(cd.sig.ret), expected, held, 0) >= 0: return
+    ret = subst_partial(int(cd.sig.ret), cd.binds)
+    if not has_var(ret) and can_coerce(0, ret, expected): return
+    eb = fill(0, int(cd.sig.ntp))
+    loop i in 0.. and t in given: eb[i] = t
+    loop i in 0.. and a in cd.args:
+        if a == 0 or is_lit(a) or ctx_dependent(a) or nodes[a].type == 0: continue
+        if match_type(cd.sig.params[i], ntype(a), eb, 0) < 0: return
+    if match_type(int(cd.sig.ret), expected, eb, 0) < 0: return
+    loop i in 0.. and b in eb:
+        if b == 0 or cd.binds[i] == 0 or has_var(b) or is_union(b) or tkind(b) == .opt: continue
+        cd.binds[i] = b
+
 # map call args to parameter slots; returns error message ("" on success)
 # kinds: per parameter, 1 keyword-only (after `...`), 2 position-only (`<v:T>`)
 # explain: false gives "?" for any error, its message left unbuilt (overload resolution tries
@@ -2766,6 +2785,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             j += 1
         if ok and cd.sig.ret != 0 and match_type(int(cd.sig.ret), int(types[prune(expected)].elem), rb, 0) < 0: ok = false
         if ok: cd.binds = rb
+    if not cd.plain and not partial and expected != 0 and cd.sig.ret != 0 and cd.sig.ntp > 0: expected_binds(cd, expected, targs_here)
     if not cd.plain:
         loop i in [0..np):
             a = cd.args[i]
@@ -5310,14 +5330,19 @@ dewy_operator_fn_text = (name: str) -> str:
     if name == "__dewy_divide": return "/"
     ""
 
-# (an exact fraction where a float is wanted, or the other way, through arrays: decimal
-# literals such as 0.0 are fractions unless a floating type is written)
+# (an exact fraction where a float is wanted, or the other way, through arrays and
+# n-dimensional ones: decimal literals such as 0.0 are fractions unless a floating type is
+# written)
 rational_float_mismatch = (from0: int, to0: int) -> bool:
     f = prune(from0)
     t = prune(to0)
-    loop tkind(f) == .array and tkind(t) == .array:
-        f = prune(int(types[f].elem))
-        t = prune(int(types[t].elem))
+    loop tkind(f) == .array and tkind(t) == .array or is_nd(f) and is_nd(t):
+        if is_nd(f):
+            f = prune(nd_elem(f))
+            t = prune(nd_elem(t))
+        else:
+            f = prune(int(types[f].elem))
+            t = prune(int(types[t].elem))
     (bundled_rational_type(f) and tkind(t) == .float_) or (tkind(f) == .float_ and bundled_rational_type(t))
 
 variant_hint = (a: int, t0: int) -> str:

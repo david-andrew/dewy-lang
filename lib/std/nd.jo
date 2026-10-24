@@ -554,10 +554,12 @@ linspace = (a: f64, b: f64, n: int) -> f64[]:
     out
 
 reshape[T] = (xs: T[], shape: int[]) -> T[,]: ndarray(xs, shape)
+reshape[T] = (xs: T[], a: int) -> T[,]: ndarray(xs, [a])
 reshape[T] = (xs: T[], a: int, b: int) -> T[,]: ndarray(xs, [a, b])
 reshape[T] = (xs: T[], a: int, b: int, c: int) -> T[,]: ndarray(xs, [a, b, c])
 reshape[T] = (xs: T[], a: int, b: int, c: int, d: int) -> T[,]: ndarray(xs, [a, b, c, d])
 reshape[T] = (m: T[,], shape: int[]) -> T[,]: ndarray(m.data, shape)
+reshape[T] = (m: T[,], a: int) -> T[,]: ndarray(m.data, [a])
 reshape[T] = (m: T[,], a: int, b: int) -> T[,]: ndarray(m.data, [a, b])
 reshape[T] = (m: T[,], a: int, b: int, c: int) -> T[,]: ndarray(m.data, [a, b, c])
 reshape[T] = (m: T[,], a: int, b: int, c: int, d: int) -> T[,]: ndarray(m.data, [a, b, c, d])

@@ -1,0 +1,8 @@
+# a decimal literal in a call given as a float64 record field is float64
+Pair:type = [m:array<float64 length=[2 2]> n:int64]
+Row:type = [values:array<float64> n:int64]
+let p = Pair(reshape([1.0 2 3 4] 2 2) 1)
+printl(p.m)
+printl(p.n)
+let r = Row(fill(1.5 2) 3)
+printl(r.values)
