@@ -1,0 +1,8 @@
+$runtime_checks=false
+Q:type=[p:[x:float64 y:float64] n:int64]
+count=(qs:array<Q>):>dict<Q int64>=>{
+    let d:dict<Q int64>=[]
+    loop q in qs {d[q] = 1}
+    d
+}
+main=():>void=>printl(count([]))

@@ -1,0 +1,26 @@
+# Literals, records built from them and elements under `$no_nan` need no check
+$runtime_checks=false
+P:type=[x:float64 y:float64]
+Q:type=[p:P n:int64]
+add=(xs:array<P>):>set<P>=>{
+    $no_nan
+    let s:set<P>=set[]
+    loop x in xs {s.push(x)}
+    s
+}
+main=():>void=>{
+    let s:set<P>=set[P[x=1.0 y=2.0]]
+    s.push(P[x=3.0 y=(-2.0)])
+    let t:set<float64>=set[]
+    t.push(0.5)
+    t.push(2.5)
+    let d:dict<Q int64>=[Q[p=P[x=1.0 y=2.0] n=2] -> 1]
+    let r:dict<[a:float64 b:int64] string>=[]
+    r[[a=1.5 b=2]] = "x"
+    printl(s)
+    printl(t)
+    printl(t.has(0.5))
+    printl(d)
+    printl(r)
+    printl(add([P[x=1.0 y=2.0]]))
+}

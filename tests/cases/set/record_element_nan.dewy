@@ -1,0 +1,10 @@
+# exit: 101
+# A record with a float field holds no NaN in a set either
+P:type=[x:float64 y:float64]
+main=():>void=>{
+    let z=float64(args().length - 1)
+    let s:set<P>=set[P[x=1.0 y=2.0]]
+    let p=P[x=z/z y=1.0]
+    s.push(p)
+    printl(s)
+}

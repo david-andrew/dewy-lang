@@ -1902,8 +1902,11 @@ while `break`, `continue`, assignments and `void` calls do not emit a value. `ke
 value. A dictionary can also be written directly as `["a"->20 "b"->22]`.
 A float key is never NaN, which equals nothing, so its entry could never be
 found again: each float key given to a dictionary (stored, looked up, removed or
-written in a literal) is an obligation. Literals, converted integers and keys
-under `$no_nan` are proven; any other follows the obligation settings.
+written in a literal) is an obligation. The same holds for set elements (pushed,
+looked up, removed, written in a set literal or given to `set(values)`), and for
+keys and elements that are records or tuples with float fields, unless the record
+defines its own `__eq__`. Literals, converted integers, records built from them
+and keys under `$no_nan` are proven; any other follows the obligation settings.
 
 Straight-line `[loop i in [0..n) expression]` comprehensions over an `int64`
 bound and `[loop x in values expression]` over ordinary or fixed arrays reserve

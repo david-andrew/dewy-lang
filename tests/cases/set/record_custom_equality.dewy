@@ -1,0 +1,10 @@
+# A record with its own equality and hash decides what NaN means for it
+$runtime_checks=false
+Key:type=[id:int64 weight:float64]
+__eq__=(a:Key b:Key):>bool=>a.id =? b.id
+hash=(key:Key):>uint64=>key.id.hash()
+add=(s:set<Key> k:Key)=>{
+    s.push(k)
+    s
+}
+main=():>void=>printl(add(set[] Key[id=1 weight=0.5]).length)

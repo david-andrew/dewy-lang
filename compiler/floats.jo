@@ -22,6 +22,7 @@ use 'ir.jo'
 use 'lower.jo'
 use 'directives.jo'
 use 'isolation.jo'
+use 'units.jo'
 
 # ---------------- float-to-integer conversions ----------------
 
@@ -62,38 +63,98 @@ float_to_u64 = (v: int, ft: int) -> int:
     endc()
     d
 
-# ---------------- float dictionary keys ----------------
+# ---------------- float dictionary keys and set elements ----------------
 #
-# A float dictionary key is never NaN: NaN equals nothing, so its entry could
-# never be found again. Each key a Dewy call hands a dictionary is an
-# obligation, proven for a non-NaN literal, a converted integer and anything
-# under `$no_nan`; otherwise the scope's policy (`dir_defer`) checks it at run
-# time or rejects it. Cost: O(1) per dictionary call while checking.
+# A dictionary key or set element is never NaN, nor a record or tuple holding
+# one in a field: NaN equals nothing, so its entry could never be found again.
+# Each key or element a Dewy call hands a dictionary or set is an obligation
+# (set(values) and set literals: each element), proven for a non-NaN literal,
+# a converted integer, a record or tuple built from such, and anything under
+# `$no_nan`; otherwise the scope's policy (`dir_defer`) checks it at run time
+# or rejects it. A record with its own `__eq__` decides its own equality.
+# Cost: O(1) per dictionary or set call while checking (O(fields) for a record
+# type, once per type).
 
-float_keys: {int: bool} = {}  # key node -> lowering checks it is not NaN
+const FK_KEY = 1      # a dictionary key
+const FK_ELEMENT = 2  # a set element
+const FK_EACH = 4     # each element of an array (set(values))
+
+float_keys: {int: int} = {}  # key node -> what lowering checks holds no NaN (FK_*)
 float_keys_any = false
+key_float_types: {int: bool} = {}
 
 float_keys_reset = ():
     float_keys = {}
     float_keys_any = false
+    key_float_types = {}
+
+# Could a key of type t be or hold a NaN: a float, or a plain record or tuple with one in a
+# field (nested ones too), whose equality is the fields' own?
+key_holds_float = (t0: int, depth: int = 0) -> bool:
+    t = quantity_base(t0)
+    if is_float(t): return true
+    k = types[t].kind
+    if depth > 8 or (k != .tuple and k != .struct_): return false
+    if let known = key_float_types.get(t): return known
+    key_float_types[t] = false
+    holds = false
+    if k == .tuple:
+        loop i in [0..int(types[t].nargs)):
+            if key_holds_float(targ(t, i), depth + 1): holds = true
+    else:
+        si = int(types[t].st)
+        plain = structs[si].nvariants == 0 and not structs[si].union_ and not structs[si].soa_ and structs[si].lit_set == 0 and structs[si].decl != 0 and not pos_in_lib(nodes[int(structs[si].decl)].pos)
+        if plain and record_value_member(t, false) == 0:
+            loop i in [0..int(structs[si].nfields)):
+                if key_holds_float(int(fields[int(structs[si].fields) + i].type), depth + 1): holds = true
+    key_float_types[t] = holds
+    holds
 
 map_float_key = (n: int):
     d = int(fns[int(nodes[n].sym)].decl)
-    if d == 0 or not pos_in_lib(nodes[d].pos) or nkids(d) < 2 or name_of(int(nodes[kid(d, 1)].name)) != "k": return
+    if d == 0 or not pos_in_lib(nodes[d].pos) or nkids(d) < 1: return
     mt = prune(ntype(kid(n, 0)))
     if types[mt].kind == .ptr: mt = prune(int(types[mt].elem))
-    if not is_map_type(mt) or not is_float(prune(struct_targ(int(types[mt].st), 0))): return
-    float_key_obligation(kid(n, 1))
+    name = name_of(int(nodes[d].name))
+    if nkids(n) == 1 and (name == "__dewy_make_set" or name == "set") and tkind(mt) == .array:
+        if not key_holds_float(int(types[mt].elem)): return
+        values = kid(n, 0)
+        if nodes[values].kind == .array and nodes[values].b == 0 and not array_has_spread(values):
+            loop x in kids(values): float_key_obligation(x, FK_ELEMENT)
+        else: float_key_obligation(values, FK_ELEMENT | FK_EACH)
+        return
+    if nkids(d) < 2 or nkids(n) < 2: return
+    param = name_of(int(nodes[kid(d, 1)].name))
+    what = 0
+    if is_map_type(mt) and param == "k": what = FK_KEY
+    else if is_dewy_set_type(mt) and param == "value": what = FK_ELEMENT
+    if what == 0 or not key_holds_float(struct_targ(int(types[mt].st), 0)): return
+    float_key_obligation(kid(n, 1), what)
 
-float_key_obligation = (key: int):
-    if float_not_nan(key) or ff_mode_at(nodes[key].pos) & FF_NAN != 0: return
-    what = "cannot prove the dictionary key is not NaN"
-    if dir_defer(key, what, true):
-        float_keys[key] = true
+float_key_obligation = (key: int, what: int = FK_KEY):
+    if what & FK_EACH == 0 and key_not_nan(key) or ff_mode_at(nodes[key].pos) & FF_NAN != 0: return
+    whole = what & FK_EACH == 0 and is_float(quantity_base(ntype(key)))
+    noun = if what & FK_KEY != 0: "dictionary key" else if what & FK_EACH != 0: "set's elements" else: "set element"
+    claim = if what & FK_EACH != 0: "hold no NaN" else if whole: "is not NaN" else: "holds no NaN"
+    message = "cannot prove the {noun} {claim}"
+    if dir_defer(key, message, true):
+        float_keys[key] = what
         float_keys_any = true
         return
-    err_notes.push((-1, "help: NaN equals nothing, so its entry could never be found again: compute the key under `$no_nan`, or check it at run time under `$runtime_checks`"))
-    fatal(nodes[key].pos, what)
+    lost = if what & FK_KEY != 0: "its entry could never be found again" else: "it could never be found in the set again"
+    err_notes.push((-1, "help: NaN equals nothing, so {lost}: compute it under `$no_nan`, or check it at run time under `$runtime_checks`"))
+    fatal(nodes[key].pos, message)
+
+# A key that is never NaN and holds none, by its form alone: a float, or a record or tuple
+# built in place from such.
+key_not_nan = (n: int) -> bool:
+    if is_float(quantity_base(ntype(n))): return float_not_nan(n)
+    k = nodes[n].kind
+    if k == .tuple or k == .call and nodes[n].aux == 2:
+        loop x in kids(n):
+            if key_holds_float(ntype(x)) and not key_not_nan(x): return false
+        return true
+    false
 
 # A float expression that is never NaN, by its form alone.
 float_not_nan = (n: int) -> bool:
@@ -104,14 +165,43 @@ float_not_nan = (n: int) -> bool:
     if k == .unary and nodes[n].op == i32(int(Tok.minus)): return float_not_nan(int(nodes[n].a))
     false
 
-# Lowering: the runtime check of a float key, on its value v.
+# Lowering: the runtime check of a key or element (or each element of an array), on its value v.
 float_key_check = (e: int, v: int, t: int):
-    if not float_keys.has(e): return
-    ty = vt_of(t)
-    if ty != VF and ty != VS: return
-    iff(e_bin(.fne, ty, v, v))
-    e_call_nr(rt("__assert_fail"), [e_daddr(str_data("dictionary key is NaN, which equals nothing: its entry could never be found")), e_daddr(loc_data(nodes[e].pos))], -1)
+    what = float_keys.get(e) ?? 0
+    if what == 0: return
+    noun = if what & FK_KEY != 0: "dictionary key" else: "set element"
+    lost = if what & FK_KEY != 0: "its entry could never be found" else: "it could never be found in the set"
+    if what & FK_EACH == 0:
+        claim = if is_float(quantity_base(t)): "is NaN" else: "holds a NaN"
+        nan_value_check(v, t, "{noun} {claim}, which equals nothing: {lost}", e)
+        return
+    et = int(types[prune(t)].elem)
+    claim = if is_float(quantity_base(et)): "is NaN" else: "holds a NaN"
+    message = "{noun} {claim}, which equals nothing: {lost}"
+    n = arr_len(v)
+    i = vreg(VI)
+    e_mov(i, e_iconst(0))
+    blk()
+    lop()
+    brif_to(e_bin(.ges, VI, i, n), ctl - 1)
+    ea = e_bin(.add, VI, e_addi(v, 24), e_bin(.mul, VI, i, e_iconst(tsize(et))))
+    nan_value_check(load_val(et, ea, 0), et, message, e)
+    e_mov(i, e_addi(i, 1))
+    br_to(ctl)
     endc()
+    endc()
+
+nan_value_check = (v: int, t0: int, message: str, e: int):
+    t = quantity_base(t0)
+    if is_float(t):
+        ty = vt_of(t)
+        iff(e_bin(.fne, ty, v, v))
+        e_call_nr(rt("__assert_fail"), [e_daddr(str_data(message)), e_daddr(loc_data(nodes[e].pos))], -1)
+        endc()
+        return
+    if vc(t) != VC_AGG or not key_holds_float(t): return
+    loop fo in field_list(t):
+        if key_holds_float(fo.0): nan_value_check(load_val(fo.0, v, fo.1), fo.0, message, e)
 
 # ---------------- `$no_nan` and `$no_inf` ----------------
 #
